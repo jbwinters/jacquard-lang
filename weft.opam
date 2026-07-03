@@ -1,0 +1,38 @@
+opam-version: "2.0"
+synopsis: "A kernel language for code written by models and read by people"
+description: """
+Weft is a research prototype for a small kernel language with a uniform
+quoted triple representation, algebraic effects, explicit capability grants,
+probabilistic programming as a library effect, and content-addressed
+definitions.
+"""
+maintainer: "The Weft Project"
+authors: "The Weft Project"
+license: "AGPL-3.0-or-later"
+homepage: "https://github.com/jbwinters/weft-lang"
+bug-reports: "https://github.com/jbwinters/weft-lang/issues"
+dev-repo: "git+https://github.com/jbwinters/weft-lang.git"
+
+depends: [
+  "ocaml" {>= "5.1"}
+  "dune" {>= "3.11"}
+  "digestif"
+  "menhir"
+  "cmdliner"
+  "alcotest" {with-test}
+  "qcheck" {with-test}
+  "qcheck-alcotest" {with-test}
+  "ocamlformat" {with-dev-setup}
+  "ocaml-lsp-server" {with-dev-setup}
+  "utop" {with-dev-setup}
+  "odoc" {with-doc}
+]
+
+build: [
+  ["dune" "build" "-p" name "-j" jobs]
+]
+
+run-test: [
+  ["dune" "runtest" "-p" name "-j" jobs]
+]
+

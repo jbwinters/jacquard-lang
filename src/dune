@@ -1,0 +1,4 @@
+(library
+ (name weft)
+ (public_name weft)
+ (libraries digestif))
