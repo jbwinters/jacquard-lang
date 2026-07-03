@@ -1,0 +1,354 @@
+\documentclass[11pt]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage[margin=1.15in]{geometry}
+\usepackage{microtype}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage[hidelinks]{hyperref}
+
+\lstdefinestyle{weft}{
+  basicstyle=\ttfamily\small,
+  columns=fullflexible,
+  keepspaces=true,
+  breaklines=true,
+  frame=single,
+  framerule=0.3pt,
+  xleftmargin=1em,
+  xrightmargin=1em,
+  aboveskip=0.9em,
+  belowskip=0.9em
+}
+\lstset{style=weft}
+
+\newcommand{\weft}{Weft}
+
+\title{\textbf{\weft: A Kernel Language for Code Written by Models\\ and Read by People}\\[0.6em]
+\large Design Whitepaper, Draft 0.1}
+\author{The \weft{} Project}
+\date{July 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent
+\weft{} is a small programming language designed for a regime in which most code is written by machine-learning models and reviewed by people. The design derives from a survey of the canonical abstract syntax trees of twenty-one languages, from which we extract recurring verdicts: expression orientation wins; null is universally regretted; patterns deserve first-class status; metaprogramming should operate on hygienic trees rather than text; and a stable, public AST creates a tooling culture. \weft{} answers with a 27-form kernel represented uniformly as a quoted triple, algebraic effects as the only control mechanism, capability security obtained by construction (no ambient handlers), probabilistic programming as a library effect whose inference algorithms are handlers, and content-addressed definitions. Surface syntax is a projection of the kernel; formatting, comments, and provenance ride in metadata that is excluded from identity. We give the kernel grammar, the reasoning behind each inclusion and exclusion, a falsifiable roadmap, and the risks we consider most likely to kill the project.
+\end{abstract}
+
+\section{Motivation: the inversion}
+\label{sec:motivation}
+
+For roughly fifty years, programming language design optimized for a human author: someone who holds a mental model of the codebase, types slowly, and reads their own code back tomorrow. Machine-written code inverts the ratios that made those optimizations sensible. Generation is now nearly free, while review, trust, and verification dominate the cost of software. A language designed after that inversion should make different trades, and this section states which ones.
+
+\paragraph{Locality is the binding constraint.}
+A model editing a function sees a bounded context window, and even models with long contexts reason best about what is close at hand. Whatever a function's signature fails to say, the model must guess, and it will guess by statistical habit rather than by reading three files away. The design consequence is blunt: a signature must carry the whole story. In \weft{} that story is a type, an effect row, and (by construction, Section~\ref{sec:effects}) the authority the function can exercise. Nothing important is permitted to hide in ambient state, global configuration, or action at a distance.
+
+\paragraph{Code arrives from authors you cannot interrogate.}
+When a person submits a patch, social context does part of the security work. When a model emits a function, there is no such context; the honest posture is to run the code before trusting its author. That is only sane if blast radius is bounded by the language itself rather than by the diligence of a reviewer. Capability security, long advocated in the object-capability literature \cite{miller2006}, has never shipped in a mainstream-feeling language. The agent era is the moment it earns its keep: freshly generated code should be physically unable to reach the network or the filesystem unless something above it explicitly grants that authority.
+
+\paragraph{The loop is the workload.}
+Agent development is a loop: generate, typecheck, test, critique, regenerate. Each iteration re-derives facts about mostly unchanged code. If a definition's identity is the hash of its canonical form, then typechecking results, test results, and analyses are cacheable by hash, and an edit invalidates exactly its dependents. Unison demonstrated this economy for human workflows \cite{unison}; agent loops multiply its value by however many iterations the loop runs. The same move fixes review: a human auditing model output should read a semantic diff of trees, in which a rename is a rename and a reformat is nothing, rather than a textual diff in which both masquerade as changes.
+
+\paragraph{The cold-start objection, answered by smallness.}
+A new language begins with zero training corpus, so models will write it badly at first. This is the strongest argument against the whole project, and the design takes it seriously rather than waving at fine-tuning. The mitigation is to make the language nearly nothing to learn: one physical shape for all code, a kernel of about two dozen forms, and a library that carries everything else. Elixir's three-element tuple and Lisp's S-expressions are long-standing evidence that radical uniformity is the representation models and macros generalize over fastest. If the kernel is small enough, a competent model can hold the entire language definition in its prompt.
+
+\section{The survey and its verdicts}
+\label{sec:survey}
+
+The design did not begin with aesthetics. It began by pulling the canonical abstract syntax trees of the TIOBE top ten (June 2026: Python, C, C++, Java, C\#, JavaScript, Visual Basic, SQL, R, and Delphi/Object Pascal), a set of functional languages chosen for design prestige (Haskell, OCaml, Scheme, Lisp/Clojure, F\#, Elm, Erlang, Elixir), and, because their lessons proved indispensable, Rust, Go, and assembly (where WebAssembly turned out to be the only ``assembly'' with a formally specified abstract syntax \cite{wasm}). For each language we cataloged the reference parser's actual node vocabulary: Python's ASDL-defined \texttt{ast} module, Clang's \texttt{Stmt}/\texttt{Expr}/\texttt{Decl} hierarchies, Roslyn's syntax trees, OCaml's \texttt{Parsetree}, GHC's \texttt{HsSyn}, F\#'s \texttt{SynExpr} family, Erlang's abstract format, Elixir's quoted form, Rust's \texttt{rustc\_ast} and \texttt{syn}, Go's \texttt{go/ast}, and so on. Three families emerged: statement/expression-separated imperative trees, expression-oriented ML-family trees with patterns as a first-class sort, and homoiconic S-expression representations where the tree is ordinary data.
+
+Table~\ref{tab:verdicts} compresses the survey into the verdicts that shaped \weft. Each row is a pattern observed across multiple unrelated languages, which is the closest thing language design has to replicated evidence.
+
+\begin{table}[ht]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}p{0.30\textwidth}Xp{0.27\textwidth}@{}}
+\toprule
+\textbf{Verdict} & \textbf{Evidence from the survey} & \textbf{\weft's response} \\
+\midrule
+Expression orientation wins & Rust, the ML family, and Ruby thrive on it; Python's crippled \texttt{lambda} and walrus retrofit, Java's switch-expression retrofit, and C\#'s expression creep all show statement orientation being paid off slowly and painfully & No statement sort exists; sequencing desugars to \texttt{Let} \\
+\addlinespace
+Null is regretted everywhere it exists & Java, C\#, JavaScript (twice, with \texttt{null} and \texttt{undefined}), Go's \texttt{nil}; the ML family simply never had the problem & No null; sums plus exhaustive \texttt{Match}; absence is a library type \\
+\addlinespace
+Patterns deserve first-class status & OCaml \texttt{Ppat\_*}, Haskell \texttt{Pat}, F\# \texttt{SynPat}, Rust \texttt{PatKind}; Java and C\# now retrofitting & A pattern sort, used in lambda parameters, bindings, matches, and handlers \\
+\addlinespace
+Metaprogramming belongs on hygienic trees & Textual macros (C) are the worst outcome; token streams (Rust) are a stability firewall with re-parsing costs; hygienic tree macros (Scheme, Racket, Elixir) are the best & Uniform quoted triple; hygiene via scope sets \cite{flatt2016} \\
+\addlinespace
+A stable public AST creates a tooling culture & Roslyn and \texttt{go/ast} produced ecosystems; \texttt{rustc\_ast}'s instability forced the community onto \texttt{syn} & The kernel grammar is a versioned public artifact from day one \\
+\addlinespace
+A formal abstract-syntax file keeps a language honest & Python's \texttt{Python.asdl}, the WebAssembly specification, Erlang's abstract format & The kernel is specified in ASDL \cite{asdl} \\
+\addlinespace
+Fidelity and abstraction conflict in the tree & Roslyn's full-fidelity trees versus Go's miserable comment attachment & Fidelity lives in metadata; hashes ignore metadata; both goals met \\
+\addlinespace
+Async retrofits color every function they touch & C\#, JavaScript, Python, and Rust each fractured their ecosystems along the sync/async seam & One mechanism, algebraic effects, for IO, failure, async, and inference \\
+\addlinespace
+Accretion kills; nothing is ever removed & C++'s dozen initialization forms; C\#'s five ways to write everything & Forms must earn their place; the kernel is deliberately hard to extend \\
+\addlinespace
+Partial failure needs a story & Erlang's supervision trees remain the best answer in the survey \cite{armstrong2003} & Runtime direction for later milestones; effects make it expressible \\
+\bottomrule
+\end{tabularx}
+\caption{Survey verdicts and their design consequences.}
+\label{tab:verdicts}
+\end{table}
+
+Two further observations from the survey shaped the architecture rather than any single feature. First, several languages maintain a deliberate split between an untyped parse tree and later typed trees (OCaml's \texttt{Parsetree} and \texttt{Typedtree}, GHC's parse/rename/typecheck progression, F\#'s untyped and typed syntax trees). \weft{} adopts the stance implied by content addressing: the kernel is the untyped tree and the unit of identity; typed elaborations are derived artifacts keyed by hash, never a second source of truth. Second, assembly's lesson is that trees run out: below a certain level the honest structure is a control-flow graph, which is why Rust lowers AST to HIR to MIR. \weft's kernel is therefore designed as the first intermediate representation of several, not as the only one.
+
+\section{Thesis and commitments}
+\label{sec:commitments}
+
+The thesis in one sentence: a small, expression-oriented, capability-secure language in which uncertainty is an effect, designed so that a function's signature carries its entire story, for a world where code is mostly written by models and reviewed by humans.
+
+Six commitments follow, each traceable to Section~\ref{sec:survey}.
+
+\begin{enumerate}
+\item \textbf{A tiny homoiconic kernel.} Every node is one quoted shape, Elixir's triple generalized: head, metadata, arguments. Surface syntax is a projection of it, and the kernel grammar is a stable public API from day one.
+\item \textbf{Expression orientation, patterns everywhere, sums with exhaustive match, no null.} The unanimous verdicts, adopted without exception clauses.
+\item \textbf{Algebraic effects as the only control mechanism.} IO, failure, async, evaluation of quoted code, and probabilistic sampling are all effect operations \cite{plotkin2009}. There is no second mechanism and therefore no function coloring.
+\item \textbf{Capabilities gate authority.} Effects say what a computation does; the provision of handlers decides whether it may. No ambient handlers exist, so generated code cannot reach the network until something above it grants the network.
+\item \textbf{Uncertainty as a tracked effect.} \texttt{sample} and \texttt{observe} are library-declared operations; inference algorithms are handlers; gradients stay inside continuous values while symbols keep control flow.
+\item \textbf{Content-addressed definitions.} A definition's identity is the hash of its canonical form, in the manner of Unison \cite{unison}, which makes agent loops cacheable and diffs semantic.
+\end{enumerate}
+
+\section{The kernel}
+\label{sec:kernel}
+
+The full kernel specification exists as a companion document; this section states its architecture and the grammar itself.
+
+\subsection{Two layers}
+
+``The AST'' is two things, cleanly separated. The first layer is the \emph{representation}: every \weft{} form is one uniform triple,
+
+\begin{lstlisting}
+(head, meta, args)
+\end{lstlisting}
+
+\noindent
+where \texttt{head} is a symbol, \texttt{meta} is an open map, and \texttt{args} is a list of triples and scalar leaves (integers, reals, text, symbols, hashes). This is what \texttt{quote} produces, what macros will see, what gets serialized, and what gets hashed. The second layer is the \emph{grammar}: an ASDL-style refinement over triples that says which heads exist and what their argument shapes must be. A triple satisfying the grammar is a kernel form; one that does not is just data. This is the relationship Lisp has always had between S-expressions and special forms, made explicit and machine-checkable.
+
+\subsection{The metadata contract}
+
+\texttt{meta} carries source spans, hygiene scope sets, retained human names for hash-resolved references, comment and whitespace trivia, documentation, and a provenance record identifying the human or model that produced the node. One law governs it all: \emph{content hashes are computed over the canonicalized tree with metadata erased}. Two forms differing only in metadata are the same definition. The consequences are worth spelling out: \weft{} gets Roslyn-grade round-tripping (trivia is preserved) and Unison-grade stable identity (trivia is invisible to hashing) from the same tree, and provenance, including cryptographic signatures over subtrees, attaches at any granularity without forking identities. The provenance key is the quiet agent-era move in the design.
+
+\subsection{The grammar}
+
+Four sorts: expressions, patterns, types, declarations. Auxiliary shapes (clauses, rows, specifications) are product structures, not forms, exactly as Python's ASDL treats \texttt{arguments}.
+
+\begin{lstlisting}
+-- Weft kernel, M0 draft 0.1
+-- Every constructor is realized as a triple (head, meta, args).
+
+module Weft
+{
+  expr = Lit(lit value)
+       | Var(name id)                        -- local, lexically bound
+       | Ref(hash target, refkind kind)      -- term, constructor, or effect op
+       | Lam(pat* params, expr body)         -- n-ary; irrefutable patterns
+       | App(expr fn, expr* args)
+       | Let(bool rec, pat binder, expr value, expr body)
+       | Match(expr scrutinee, clause+ arms) -- exhaustive, checker-enforced
+       | Tuple(expr* items)                  -- Tuple() is unit
+       | Handle(expr body, ret return, opclause* ops)
+       | Quote(expr form)                    -- yields a Code value
+       | Unquote(expr splice)                -- legal only within Quote
+       | Ann(expr subject, type ascription)
+
+  pat  = PWild | PVar(name id) | PLit(lit value)
+       | PCon(hash con, pat* args)
+       | PTuple(pat* items)
+       | PAs(name id, pat inner)
+
+  type = TRef(hash target) | TVar(name id)
+       | TApp(type head, type* args)
+       | TArrow(type* params, row effects, type result)
+       | TTuple(type* items)
+       | TForall(name* tyvars, name* rowvars, type body)
+
+  decl = DefTerm(binding+ group)             -- a recursive SCC, hashed as a unit
+       | DefType(name id, name* vars, conspec+ constructors)
+       | DefEffect(name id, name* vars, opspec+ operations)
+
+  clause   = (pat pattern, expr body)
+  ret      = (pat binder, expr body)
+  opclause = (hash op, pat* params, name resume, expr body)
+  binding  = (name id, type? annotation, expr value)
+  conspec  = (name id, field* fields)
+  field    = (name? label, type ty)
+  opspec   = (name id, type* params, type result)
+  row      = (hash* effects, name? var)
+  lit      = Int(int) | Real(real) | Text(text)
+  refkind  = Term | Con | Op
+}
+\end{lstlisting}
+
+Twelve expression forms, six pattern forms, six type forms, three declaration forms: twenty-seven in total against a stated target of roughly twenty-five. The two cheapest cuts, if the number ever matters, are \texttt{PAs} (pure ergonomics) and \texttt{TTuple} (encodable as applications of built-in tuple constructors). Our position is that both earn their place.
+
+\subsection{What is deliberately absent}
+
+The eliminations carry as much design content as the inclusions.
+
+There is no \texttt{If} and no primitive boolean: \texttt{Bool} is a library data type and conditionals desugar to \texttt{Match} over its constructors, following Haskell. There is no statement, block, or sequencing form: \texttt{e1; e2} desugars to a \texttt{Let} binding a wildcard. There is no \texttt{Perform}: effect operations are ordinary values of arrow type whose row names their effect, so invoking one is plain application of an \texttt{Op}-kind reference, exactly as in Unison's abilities. That last elimination has a consequence stated in full in Section~\ref{sec:dist}: the entire probabilistic layer costs zero kernel forms. Finally, there are no guards on match clauses, because guards weaken exhaustiveness checking, and exhaustiveness is a headline feature when the author is a model and the reviewer is a person.
+
+Two contained judgment calls are flagged for possible reversal. \texttt{Lam} and \texttt{App} are n-ary rather than curried, trading Unison's elegance for a clearer cost model, crisp arity errors, and one obvious arrow per effect row; zero-arity lambda and application double as thunk and force. And local \texttt{Let rec} is restricted to a single lambda-valued binder; mutually recursive locals lift to a top-level group, which content addressing makes cheap.
+
+\subsection{Semantic commitments the grammar assumes}
+
+Evaluation is strict and left to right; Haskell's space-leak lesson argues that predictability wins for machine-written code, and laziness on demand is a zero-arity lambda whose type honestly displays its row. Handlers are deep, and resumptions are multi-shot; Section~\ref{sec:dist} explains why multi-shot is not negotiable. Matches are exhaustive, failure is an effect with a row entry, and no ambient handlers exist.
+
+One implementation note is owed here as an honest correction of an earlier plan. OCaml~5's native effect handlers are one-shot: resuming a continuation twice raises. Since exact inference by enumeration requires resuming a captured continuation once per element of a distribution's support, the reference interpreter cannot lean on OCaml's native handlers and will instead be written in continuation-passing style, making resumptions ordinary values invocable any number of times. OCaml remains a fine host; the free lunch does not exist.
+
+\section{Effects and capabilities}
+\label{sec:effects}
+
+Every arrow type carries a row: the set of effects its body may perform, plus an optional row variable so higher-order functions can say ``I perform whatever my argument performs.'' Pure functions carry the empty row. This placement, shared with Unison and Koka \cite{leijen2017}, is the mechanism behind the design thesis: the signature carries the whole story because the row is most of the story.
+
+A handler is an interpreter for a set of operations, installed over a region with \texttt{Handle}. Each operation clause binds the operation's arguments and a named resumption, which is an ordinary function value. Because the resumption is a value, control operators that other languages build in (exceptions, generators, async schedulers, backtracking search) are libraries here, and none of them colors the functions above it. The async retrofit damage cataloged in Section~\ref{sec:survey} is the strongest argument for paying the effect system's complexity cost once, up front.
+
+Capability security then falls out of a single prohibition rather than a new feature: \emph{no ambient handlers}. An effect names what a computation does; whether it may is decided by which handlers exist above it; and the runtime installs root handlers only for the authorities the program was granted. The signature of \texttt{main} is therefore the program's authority manifest, and a reviewer can read a generated function's row knowing that nothing outside it can occur. Attenuation is handler interposition: to grant a child read-only network access, wrap it in a handler that filters the \texttt{Net} operations it forwards.
+
+The honest caveat: handlers control authority per handled region, which is coarser than per-value object capabilities, since within a region that handles \texttt{Net} any callee may perform \texttt{Net}. Interposition covers much of the gap. If practice demands finer grain, capability values threaded as ordinary arguments compose with this design without new kernel forms, and we would rather watch real usage than add machinery speculatively.
+
+\section{Uncertainty as an effect}
+\label{sec:dist}
+
+The probabilistic layer is the part of the design that began as a physics intuition, interacting fields with probabilistic output, and survived contact with the literature by landing on a known good foundation: models as computations that perform sampling effects, inference algorithms as handlers \cite{scibior2015, bingham2019}. In \weft{} it is declared, in its entirety, with no new syntax:
+
+\begin{lstlisting}
+type Distribution a = ...      -- library: Bernoulli, Categorical, Normal, ...
+
+effect Dist where
+  sample  : Distribution a -> a
+  observe : Distribution a -> a -> ()
+\end{lstlisting}
+
+One \texttt{DefType} and one \texttt{DefEffect}. A model is any expression whose row includes \texttt{Dist}; its signature announces that it denotes a distribution rather than a value. Running the same untouched model under different handlers yields different inference: an enumeration handler resumes the captured continuation once per support element and weights the results, giving exact posteriors on discrete models; a sequential Monte Carlo handler forks and reweights particles; a gradient handler, once the autodiff bridge lands, reparameterizes for variational inference. This is why multi-shot resumptions are a semantic commitment rather than an optimization preference.
+
+Composition is where the fields intuition survives most directly. Linking two models multiplies their weight functions, a product of experts, and superposition becomes a posterior at the handler. The discipline that keeps this tractable is borrowed from the failure of differentiable interpreters \cite{gaunt2016} and the success of neurosymbolic systems that put learned components in typed holes \cite{li2023, manhaeve2018}: gradients stay inside values that are actually continuous or uncertain, and symbols keep control flow. \weft's effect system enforces exactly that boundary, and types it.
+
+Two ambitions are recorded as research directions rather than promises. First, learned components as effect operations, so a neural judgment call is a typed hole with a row entry, swappable under a handler like any other authority. Second, checked abstraction between belief models: ``coarse model $M$ soundly abstracts fine model $N$'' is a verifiable relationship between distributions, and a compiler that checks such refinements would address exactly the drift agents exhibit today between their summaries of the world and the world. Nobody has made probabilistic abstract interpretation ergonomic; the effect-and-hash substrate here is a plausible place to try.
+
+\section{Content addressing}
+\label{sec:hashing}
+
+The pipeline from text to identity:
+
+\begin{lstlisting}
+surface text
+  parse       -> triple form (names, trivia, spans in meta)
+  expand      -> triple form (macro-free; hygiene resolved via scope sets)
+  resolve     -> kernel form (Var for locals, Ref(hash) for globals)
+  canonicalize-> hash input
+\end{lstlisting}
+
+Canonicalization erases metadata, replaces local names with de~Bruijn indices for alpha-invariance, hashes each strongly connected group of definitions as a unit with members in canonical order and in-group references as bound indices (Unison's cycle treatment, forced by the fact that a definition cannot contain its own hash), canonicalizes constructor and operation references to declaration hash plus ordinal, and serializes deterministically under a fixed hash function.
+
+There is no module form anywhere in the kernel. A codebase is a content-addressed map from hashes to declarations; names, namespaces, and renames are metadata operations that never touch identity. Renames become free and history-preserving, formatting never dirties a build, a semantic differ falls out of comparing trees, and the agent loop of Section~\ref{sec:motivation} caches its typechecking and test results by hash.
+
+\section{Metaprogramming}
+\label{sec:meta}
+
+\texttt{Quote} yields a value of library type \texttt{Code} whose payload is the triple form before name resolution, since macros need names and structure, with hygiene carried as scope sets in metadata \cite{flatt2016, kohlbecker1986}. \texttt{Unquote} splices. Evaluation is a library effect operation, \texttt{eval : Code ->\{Eval\} a}, which means code cannot run code unless something above it handles \texttt{Eval}: metaprogramming is capability-gated like everything else, a property with obvious value when the code being considered for evaluation was itself generated. Typing of evaluation results is a dynamic check at the boundary in M0; typed staging in the MetaOCaml tradition is an open question. A macro system proper is deliberately out of the kernel; quote, unquote, and gated eval are sufficient to build one later, and the survey's clearest metaprogramming lesson is that the substrate (uniform hygienic trees) matters more than the macro system built on it.
+
+\section{Surface language and tooling}
+\label{sec:tooling}
+
+The surface syntax is a projection of the kernel and is deliberately unspecified in this draft; it will be designed against readability by reviewers, informed by the error-message standard Elm set for the industry. Three obligations are recorded now because they are architectural rather than cosmetic. First, full fidelity: parsers retain trivia in metadata so that formatters and semantic differs round-trip exactly, achieving Roslyn's property without Go's comment-attachment regrets. Second, row inference: humans and models should rarely write effect rows and always be able to read them fully elaborated in displayed signatures. Koka's ergonomic scars show that inference for writing plus elaboration for reading is the workable division. Third, tooling ships early: for a language whose users are partly machines, the formatter, the semantic differ, and the error messages are the product, not accessories, and the M4 milestone treats them that way.
+
+\section{Roadmap}
+\label{sec:roadmap}
+
+\begin{table}[ht]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}lX@{}}
+\toprule
+\textbf{Milestone} & \textbf{Deliverable} \\
+\midrule
+M0 & Written kernel specification in ASDL (drafted; 27 forms), plus the metadata and hashing contracts \\
+M1 & Tree-walking CPS interpreter in OCaml~5 with quote, unquote, and gated eval working; dynamically typed \\
+M2 & Type-and-effect checker with full row inference; exhaustiveness; capability discipline enforced at the root \\
+M3 & \texttt{Dist} with an enumeration handler on discrete models; the same model under a second handler \\
+M4 & Formatter, semantic differ, and error messages held to the Elm standard \\
+\bottomrule
+\end{tabularx}
+\caption{Milestones. Deliberately punted: performance, self-hosting, macros beyond quote and unquote, package management, ownership (garbage collection assumed).}
+\label{tab:roadmap}
+\end{table}
+
+The prototype has a falsifiable finish line consisting of two demonstrations. First, one probabilistic model run under two handlers, producing an exact posterior by enumeration and then approximate samples, with the model unchanged between runs. Second, a hostile demonstration: a generated function that attempts network access and is stopped cold at the type level by a missing capability, with the refusal legible in its signature.
+
+\section{Risks and open questions}
+\label{sec:risks}
+
+\begin{enumerate}
+\item \textbf{Cold start.} Zero training data is the project's largest external risk. The mitigations are the tiny uniform core, a language definition small enough to travel in a prompt, and generated idiomatic corpora. If models cannot learn \weft{} quickly in practice, the thesis fails, and we would rather learn that at M1 than at M4.
+\item \textbf{Effect ergonomics.} Row systems become clerical when inference falls short. This is Koka's scar and the checker's make-or-break obligation.
+\item \textbf{Multi-shot cost.} CPS interpretation pays for resumability. Irrelevant at prototype scale; a known cliff later, with selective CPS and one-shot fast paths as the standard escape hatches.
+\item \textbf{Capability granularity.} Region-level authority may prove too coarse; the composition with capability values is designed but unexercised.
+\item \textbf{Ad-hoc polymorphism is deferred.} The survey's sharpest single regret is OCaml's lack of it. Traits, modular implicits, or an abilities-flavored mechanism will eventually touch \texttt{TForall} and \texttt{DefTerm}, and the decision is consciously postponed rather than accidentally omitted.
+\item \textbf{The curried question could reopen.} Flipping \texttt{Lam}/\texttt{App}/\texttt{TArrow} arities is contained before M2 and expensive after.
+\item \textbf{Scope creep.} More languages die of it than of any technical failure. The kernel's resistance to growth is a governance feature, and this document is part of the enforcement.
+\end{enumerate}
+
+\section{Related work}
+\label{sec:related}
+
+\weft's individual mechanisms are borrowed, deliberately, from systems that proved them. Unison contributes content addressing, cycle hashing, abilities as ordinary functions, and the nameless codebase \cite{unison}. The algebraic effects lineage runs from Plotkin and Pretnar \cite{plotkin2009} through Eff, Frank \cite{lindley2017}, Koka \cite{leijen2017}, and OCaml~5's runtime support. The homoiconic representation is Elixir's \cite{elixir} in the tradition of Lisp and Scheme, with hygiene from Kohlbecker et al.\ \cite{kohlbecker1986} as modernized by Racket's scope sets \cite{flatt2016}. Capability security follows the object-capability tradition of E and Miller's analysis \cite{miller2006}, with Pony \cite{clebsch2015} and Austral \cite{austral} as contemporary language-level attempts. The probabilistic layer stands on Church \cite{goodman2008}, Stan \cite{carpenter2017}, Gen's programmable inference \cite{cusumano2019}, Pyro's handler-structured internals \cite{bingham2019}, and the monadic and effect-based accounts of inference \cite{scibior2015}; the boundary discipline is informed by TerpreT's negative result \cite{gaunt2016} and by Scallop and DeepProbLog on the neurosymbolic side \cite{li2023, manhaeve2018}, with Dex as the typed array-programming reference \cite{paszke2021}. The specification discipline follows Zephyr ASDL \cite{asdl} and the WebAssembly specification \cite{wasm}; the tooling stance follows Roslyn and \texttt{go/ast}; the failure-handling direction follows Erlang/OTP \cite{armstrong2003}. What is original here is the combination, and the claim that the agent era is the forcing function that finally makes this particular combination worth its cost.
+
+\section{Conclusion}
+
+\weft{} bets that the constraints of machine-written, human-reviewed software select for a specific and previously unassembled set of mechanisms: a kernel small enough to prompt, signatures that exhaust the story, authority that is granted rather than ambient, uncertainty that is tracked rather than smuggled, and identity that is content rather than text. Every mechanism has an existence proof in a surveyed language; none of the surveyed languages has the combination. The kernel is drafted, the milestones are falsifiable, and the risk register is honest. The next artifact is an interpreter.
+
+\begin{thebibliography}{99}\small
+
+\bibitem{armstrong2003} J.~Armstrong. \emph{Making Reliable Distributed Systems in the Presence of Software Errors}. PhD thesis, KTH, 2003.
+
+\bibitem{asdl} D.~C.~Wang, A.~W.~Appel, J.~L.~Korn, C.~S.~Serra. The Zephyr Abstract Syntax Description Language. In \emph{USENIX DSL}, 1997.
+
+\bibitem{austral} F.~Fern\'andez. The Austral programming language: specification. \url{https://austral-lang.org}.
+
+\bibitem{bingham2019} E.~Bingham et al. Pyro: Deep universal probabilistic programming. \emph{JMLR}, 20(28), 2019.
+
+\bibitem{carpenter2017} B.~Carpenter et al. Stan: A probabilistic programming language. \emph{Journal of Statistical Software}, 76(1), 2017.
+
+\bibitem{clebsch2015} S.~Clebsch, S.~Drossopoulou, S.~Blessing, A.~McNeil. Deny capabilities for safe, fast actors. In \emph{AGERE!}, 2015.
+
+\bibitem{cusumano2019} M.~Cusumano-Towner, F.~Saad, A.~Lew, V.~Mansinghka. Gen: A general-purpose probabilistic programming system with programmable inference. In \emph{PLDI}, 2019.
+
+\bibitem{elixir} Elixir core team. \emph{Macro} and quoted expressions, Elixir documentation. \url{https://hexdocs.pm/elixir}.
+
+\bibitem{flatt2016} M.~Flatt. Binding as sets of scopes. In \emph{POPL}, 2016.
+
+\bibitem{gaunt2016} A.~Gaunt et al. TerpreT: A probabilistic programming language for program induction. arXiv:1608.04428, 2016.
+
+\bibitem{goodman2008} N.~Goodman, V.~Mansinghka, D.~Roy, K.~Bonawitz, J.~Tenenbaum. Church: A language for generative models. In \emph{UAI}, 2008.
+
+\bibitem{kohlbecker1986} E.~Kohlbecker, D.~Friedman, M.~Felleisen, B.~Duba. Hygienic macro expansion. In \emph{LFP}, 1986.
+
+\bibitem{leijen2017} D.~Leijen. Type directed compilation of row-typed algebraic effects. In \emph{POPL}, 2017.
+
+\bibitem{li2023} Z.~Li, J.~Huang, M.~Naik. Scallop: A language for neurosymbolic programming. In \emph{PLDI}, 2023.
+
+\bibitem{lindley2017} S.~Lindley, C.~McBride, C.~McLaughlin. Do be do be do. In \emph{POPL}, 2017.
+
+\bibitem{manhaeve2018} R.~Manhaeve, S.~Duman\v{c}i\'c, A.~Kimmig, T.~Demeester, L.~De~Raedt. DeepProbLog: Neural probabilistic logic programming. In \emph{NeurIPS}, 2018.
+
+\bibitem{miller2006} M.~S.~Miller. \emph{Robust Composition: Towards a Unified Approach to Access Control and Concurrency Control}. PhD thesis, Johns Hopkins University, 2006.
+
+\bibitem{paszke2021} A.~Paszke et al. Getting to the point: Index sets and parallelism-preserving autodiff for pointful array programming. In \emph{ICFP}, 2021.
+
+\bibitem{plotkin2009} G.~Plotkin, M.~Pretnar. Handlers of algebraic effects. In \emph{ESOP}, 2009.
+
+\bibitem{scibior2015} A.~\'Scibior, Z.~Ghahramani, A.~Gordon. Practical probabilistic programming with monads. In \emph{Haskell Symposium}, 2015.
+
+\bibitem{unison} P.~Chiusano, R.~Bjarnason, et al. The Unison language. \url{https://www.unison-lang.org}.
+
+\bibitem{wasm} A.~Haas et al. Bringing the web up to speed with WebAssembly. In \emph{PLDI}, 2017; and the WebAssembly specification, \url{https://webassembly.github.io/spec}.
+
+\end{thebibliography}
+
+\end{document}
