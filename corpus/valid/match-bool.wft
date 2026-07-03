@@ -1,0 +1,4 @@
+(lam ((pvar b))
+  (match (var b)
+    (clause (pcon true) (lit 0))
+    (clause (pcon false) (lit 1))))

@@ -1,0 +1,317 @@
+(** Bootstrap `.wft` reader (plan W1.2): s-expression-encoded triples.
+
+    Notation, pinned:
+    {v
+    form := ( head arg* )
+    head := lowercase symbol: [a-z][a-z0-9-]*
+    arg  := form | integer | real | "text" | symbol | 'symbol | #hexhash
+    v}
+
+    Symbols in argument position may be written bare (as the plan's own examples do) or with a
+    leading quote; both read as [Form.Sym]. Reals accept [+inf.0], [-inf.0], and [+nan.0]. Comments
+    run from [;] to end of line and are skipped (trivia capture is W5.1). Meta is never written in
+    source; the reader fills [span] from lexer positions (1-based line and byte column; end
+    exclusive).
+
+    Argument groups: the plan's examples write bare parenthesized lists in argument position —
+    [(lam ((pvar n)) ...)] for a parameter list, [()] for an absent annotation. A [( ... )] whose
+    first token is [(] or [)] reads as a group: a form with the reserved head ["group"] whose
+    elements must themselves be forms. The printer renders a ["group"] head back as bare parens, so
+    groups round-trip. ["group"] is therefore reserved and is not a kernel constructor.
+
+    All entry points return [('a, Diag.t list) result] and stop at the first error. Text is UTF-8
+    passed through byte-for-byte, no normalization (decision D3).
+
+    Numeric edge cases, deliberate: leading zeros are accepted ([007] reads as [7]); real literals
+    that overflow read as infinities ([1e400] is [+inf.0]) and underflow to [0.0]; integer literals
+    outside the native 63-bit range are rejected (E0109, decision D2).
+
+    Codes: E0101 unexpected character, E0102 unterminated text, E0103 invalid escape, E0104 invalid
+    hash literal, E0105 malformed number, E0106 unexpected end of input, E0107 bad form head, E0108
+    unexpected `)`, E0109 integer out of range, E0110 non-form group element, E0111 invalid quoted
+    symbol, E0112 invalid bare symbol, E0113 non-form at top level, E0114 more than one form where
+    one was expected. *)
+
+type state = {
+  src : string;
+  file : string;
+  mutable off : int;
+  mutable line : int;
+  mutable col : int;
+}
+
+(* Internal control flow only; never escapes this module. *)
+exception Err of Diag.t
+
+let error st ~code ?hint msg ~start_pos =
+  let span =
+    Span.make ~file:st.file ~start_pos
+      ~end_pos:{ Span.line = st.line; col = st.col; offset = st.off }
+  in
+  raise (Err (Diag.error ~span ?hint ~code msg))
+
+let pos st = { Span.line = st.line; col = st.col; offset = st.off }
+let peek st = if st.off < String.length st.src then Some st.src.[st.off] else None
+
+let advance st =
+  (match st.src.[st.off] with
+  | '\n' ->
+      st.line <- st.line + 1;
+      st.col <- 1
+  | _ -> st.col <- st.col + 1);
+  st.off <- st.off + 1
+
+let rec skip_ws st =
+  match peek st with
+  | Some (' ' | '\t' | '\r' | '\n') ->
+      advance st;
+      skip_ws st
+  | Some ';' ->
+      let rec to_eol () =
+        match peek st with
+        | Some '\n' | None -> ()
+        | Some _ ->
+            advance st;
+            to_eol ()
+      in
+      to_eol ();
+      skip_ws st
+  | _ -> ()
+
+let is_sym_start c = c >= 'a' && c <= 'z'
+let is_sym_char c = is_sym_start c || (c >= '0' && c <= '9') || c = '-'
+let is_digit c = c >= '0' && c <= '9'
+
+let is_atom_char c =
+  (* anything that is not whitespace, a delimiter, or a comment starter *)
+  match c with
+  | ' ' | '\t' | '\r' | '\n' | '(' | ')' | '"' | ';' | '\'' -> false
+  | _ -> true
+
+(* Read a maximal atom starting at the current offset. *)
+let read_atom st =
+  let start = st.off in
+  let rec go () =
+    match peek st with
+    | Some c when is_atom_char c ->
+        advance st;
+        go ()
+    | _ -> ()
+  in
+  go ();
+  String.sub st.src start (st.off - start)
+
+let valid_symbol s = String.length s > 0 && is_sym_start s.[0] && String.for_all is_sym_char s
+
+(* [+-]?digits, or a real: digits with '.' and/or exponent, or +inf.0 etc. *)
+let classify_number st ~start_pos s =
+  match s with
+  | "+inf.0" -> Some (Form.Real infinity)
+  | "-inf.0" -> Some (Form.Real neg_infinity)
+  | "+nan.0" | "-nan.0" -> Some (Form.Real nan)
+  | _ -> (
+      let body = match s.[0] with '+' | '-' -> String.sub s 1 (String.length s - 1) | _ -> s in
+      if body = "" then None
+      else
+        let is_real = String.exists (fun c -> c = '.' || c = 'e' || c = 'E') body in
+        let shape_ok =
+          (* digits [ '.' digits ] [ ('e'|'E') ['+'|'-'] digits ] *)
+          let n = String.length body in
+          let i = ref 0 in
+          let digits () =
+            let d0 = !i in
+            while !i < n && is_digit body.[!i] do
+              incr i
+            done;
+            !i > d0
+          in
+          let ok = ref (digits ()) in
+          if !ok && !i < n && body.[!i] = '.' then begin
+            incr i;
+            (* trailing digits after '.' optional: "1." reads as 1.0 *)
+            ignore (digits ())
+          end;
+          if !ok && !i < n && (body.[!i] = 'e' || body.[!i] = 'E') then begin
+            incr i;
+            if !i < n && (body.[!i] = '+' || body.[!i] = '-') then incr i;
+            ok := digits ()
+          end;
+          !ok && !i = n
+        in
+        if not shape_ok then None
+        else if is_real then
+          match float_of_string_opt s with
+          | Some r -> Some (Form.Real r)
+          | None -> error st ~code:"E0105" ~start_pos (Printf.sprintf "malformed real literal %S" s)
+        else
+          match int_of_string_opt s with
+          | Some i -> Some (Form.Int i)
+          | None ->
+              error st ~code:"E0109" ~start_pos
+                (Printf.sprintf "integer literal %s does not fit in a native int" s)
+                ~hint:"Weft integers are 63-bit native ints (decision D2)")
+
+let read_text st =
+  let start_pos = pos st in
+  advance st (* opening quote *);
+  let buf = Buffer.create 16 in
+  let rec go () =
+    match peek st with
+    | None -> error st ~code:"E0102" ~start_pos "unterminated text literal"
+    | Some '"' ->
+        advance st;
+        Buffer.contents buf
+    | Some '\\' -> (
+        let esc_start = pos st in
+        advance st;
+        match peek st with
+        | None -> error st ~code:"E0102" ~start_pos "unterminated text literal"
+        | Some 'n' ->
+            advance st;
+            Buffer.add_char buf '\n';
+            go ()
+        | Some 't' ->
+            advance st;
+            Buffer.add_char buf '\t';
+            go ()
+        | Some 'r' ->
+            advance st;
+            Buffer.add_char buf '\r';
+            go ()
+        | Some '\\' ->
+            advance st;
+            Buffer.add_char buf '\\';
+            go ()
+        | Some '"' ->
+            advance st;
+            Buffer.add_char buf '"';
+            go ()
+        | Some 'x' ->
+            advance st;
+            let hex_digit () =
+              match peek st with
+              | Some c when is_digit c || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F') ->
+                  advance st;
+                  let v =
+                    match c with
+                    | '0' .. '9' -> Char.code c - Char.code '0'
+                    | 'a' .. 'f' -> Char.code c - Char.code 'a' + 10
+                    | _ -> Char.code c - Char.code 'A' + 10
+                  in
+                  v
+              | _ ->
+                  error st ~code:"E0103" ~start_pos:esc_start
+                    "invalid \\x escape: expected two hex digits"
+            in
+            let hi = hex_digit () in
+            let lo = hex_digit () in
+            Buffer.add_char buf (Char.chr ((hi * 16) + lo));
+            go ()
+        | Some c ->
+            error st ~code:"E0103" ~start_pos:esc_start
+              (Printf.sprintf "invalid escape sequence \\%c" c)
+              ~hint:"valid escapes: \\\\ \\\" \\n \\t \\r \\xHH")
+    | Some c ->
+        advance st;
+        Buffer.add_char buf c;
+        go ()
+  in
+  go ()
+
+let rec read_form st : Form.t =
+  let start_pos = pos st in
+  advance st (* '(' *);
+  skip_ws st;
+  (* head, or a bare group when the next token is `(` or `)` *)
+  let head =
+    match peek st with
+    | Some '(' | Some ')' -> "group"
+    | Some c when is_sym_start c -> read_atom st
+    | Some c ->
+        error st ~code:"E0107" ~start_pos:(pos st)
+          (Printf.sprintf "expected a form head symbol, found %C" c)
+    | None -> error st ~code:"E0106" ~start_pos "unexpected end of input inside a form"
+  in
+  if not (valid_symbol head) then
+    error st ~code:"E0107" ~start_pos
+      (Printf.sprintf "invalid head symbol %S" head)
+      ~hint:"heads are lowercase: [a-z][a-z0-9-]*";
+  let rec args acc =
+    skip_ws st;
+    match peek st with
+    | None -> error st ~code:"E0106" ~start_pos "unclosed form: expected `)`"
+    | Some ')' ->
+        advance st;
+        List.rev acc
+    | Some _ -> args (read_arg st :: acc)
+  in
+  let args = args [] in
+  let span = Span.make ~file:st.file ~start_pos ~end_pos:(pos st) in
+  if head = "group" && not (List.for_all (function Form.F _ -> true | _ -> false) args) then
+    error st ~code:"E0110" ~start_pos "group elements must be forms"
+      ~hint:"a bare ( ... ) argument list may only contain forms";
+  Form.form ~meta:(Meta.with_span span Meta.empty) head args
+
+and read_arg st : Form.arg =
+  let start_pos = pos st in
+  match peek st with
+  | Some '(' -> Form.F (read_form st)
+  | Some '"' -> Form.Text (read_text st)
+  | Some '\'' ->
+      advance st;
+      let s = read_atom st in
+      if valid_symbol s then Form.Sym s
+      else error st ~code:"E0111" ~start_pos (Printf.sprintf "invalid quoted symbol '%s" s)
+  | Some '#' -> (
+      advance st;
+      let s = read_atom st in
+      match Hash.of_hex s with
+      | Some h -> Form.Hash h
+      | None ->
+          error st ~code:"E0104" ~start_pos
+            (Printf.sprintf "invalid hash literal #%s" s)
+            ~hint:(Printf.sprintf "a hash is %d lowercase hex characters" (2 * Hash.digest_size)))
+  | Some c when is_digit c || c = '+' || c = '-' -> (
+      let s = read_atom st in
+      match classify_number st ~start_pos s with
+      | Some a -> a
+      | None -> error st ~code:"E0105" ~start_pos (Printf.sprintf "malformed number %S" s))
+  | Some c when is_sym_start c ->
+      let s = read_atom st in
+      if valid_symbol s then Form.Sym s
+      else error st ~code:"E0112" ~start_pos (Printf.sprintf "invalid symbol %S" s)
+  | Some ')' ->
+      (* unreachable from read_form's loop; kept for safety *)
+      error st ~code:"E0108" ~start_pos "unexpected `)`"
+  | Some c -> error st ~code:"E0101" ~start_pos (Printf.sprintf "unexpected character %C" c)
+  | None -> error st ~code:"E0106" ~start_pos "unexpected end of input"
+
+(** [parse_string ~file s] reads every top-level form in [s]. Top level admits only forms, not
+    scalars. Stops at the first error. *)
+let parse_string ~file s : (Form.t list, Diag.t list) result =
+  let st = { src = s; file; off = 0; line = 1; col = 1 } in
+  let rec go acc =
+    skip_ws st;
+    match peek st with
+    | None -> List.rev acc
+    | Some '(' -> go (read_form st :: acc)
+    | Some ')' ->
+        let p = pos st in
+        advance st;
+        error st ~code:"E0108" ~start_pos:p "unexpected `)` at top level"
+    | Some _ ->
+        let p = pos st in
+        let s = read_atom st in
+        let shown = if s = "" then String.make 1 (Option.get (peek st)) else s in
+        error st ~code:"E0113" ~start_pos:p
+          (Printf.sprintf "expected a form at top level, found %S" shown)
+  in
+  match go [] with forms -> Ok forms | exception Err d -> Error [ d ]
+
+(** [parse_one ~file s] expects exactly one top-level form. *)
+let parse_one ~file s : (Form.t, Diag.t list) result =
+  match parse_string ~file s with
+  | Error ds -> Error ds
+  | Ok [ f ] -> Ok f
+  | Ok [] -> Error [ Diag.error ~code:"E0106" "expected a form, found end of input" ]
+  | Ok (_ :: _ :: _) -> Error [ Diag.error ~code:"E0114" "expected exactly one top-level form" ]

@@ -1,3 +1,6 @@
 (test
  (name test_weft)
- (libraries weft alcotest qcheck-core qcheck-alcotest))
+ (libraries weft alcotest fmt qcheck-core qcheck-alcotest)
+ (deps
+  (glob_files_rec ../corpus/*.wft)
+  (glob_files_rec ../corpus/*.expect)))

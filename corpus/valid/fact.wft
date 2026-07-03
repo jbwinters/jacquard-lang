@@ -1,0 +1,8 @@
+; fact n = match n { 0 -> 1; m -> m * fact (m - 1) }
+(defterm ((binding fact ()
+  (lam ((pvar n))
+    (match (var n)
+      (clause (plit 0) (lit 1))
+      (clause (pvar m)
+        (app (var mul) (var m)
+          (app (var fact) (app (var sub) (var m) (lit 1))))))))))

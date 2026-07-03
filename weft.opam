@@ -20,6 +20,7 @@ depends: [
   "menhir"
   "cmdliner"
   "alcotest" {with-test}
+  "fmt" {with-test}
   "qcheck" {with-test}
   "qcheck-alcotest" {with-test}
   "ocamlformat" {with-dev-setup}

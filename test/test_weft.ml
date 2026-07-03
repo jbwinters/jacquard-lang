@@ -6,4 +6,8 @@ let () =
     [
       ("version", [ Alcotest.test_case "non-empty" `Quick test_version_is_nonempty ]);
       ("diag", Test_diag.suite);
+      ("hash", Test_hash.suite);
+      ("form", Test_form.suite);
+      ("reader", Test_reader.suite);
+      ("printer", Test_printer.suite);
     ]

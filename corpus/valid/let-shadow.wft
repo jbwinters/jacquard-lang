@@ -1,0 +1,4 @@
+; inner let x shadows outer x
+(let nonrec (pvar x) (lit 1)
+  (let nonrec (pvar x) (lit 2)
+    (var x)))

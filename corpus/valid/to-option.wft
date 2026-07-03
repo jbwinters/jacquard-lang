@@ -1,0 +1,6 @@
+; toOption thunk = handle thunk() { return x -> Some x; abort k -> None }
+(defterm ((binding to-option ()
+  (lam ((pvar body))
+    (handle (app (var body))
+      (ret (pvar x) (app (var some) (var x)))
+      (opclause abort () k (var none)))))))

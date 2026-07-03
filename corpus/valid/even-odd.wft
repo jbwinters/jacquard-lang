@@ -1,0 +1,12 @@
+; mutually recursive group: even/odd via sub
+(defterm
+  ((binding even ()
+    (lam ((pvar n))
+      (match (var n)
+        (clause (plit 0) (var true))
+        (clause (pvar m) (app (var odd) (app (var sub) (var m) (lit 1)))))))
+   (binding odd ()
+    (lam ((pvar n))
+      (match (var n)
+        (clause (plit 0) (var false))
+        (clause (pvar m) (app (var even) (app (var sub) (var m) (lit 1)))))))))

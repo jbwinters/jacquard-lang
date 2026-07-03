@@ -1,0 +1,6 @@
+; safeDiv n d = match d == 0 { true -> abort; false -> n / d }
+(defterm ((binding safe-div ()
+  (lam ((pvar n) (pvar d))
+    (match (app (var eq) (var d) (lit 0))
+      (clause (pcon true)  (app (var abort)))
+      (clause (pcon false) (app (var div) (var n) (var d))))))))
