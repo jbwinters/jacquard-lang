@@ -10,4 +10,6 @@ let () =
       ("form", Test_form.suite);
       ("reader", Test_reader.suite);
       ("printer", Test_printer.suite);
+      ("kernel", Test_kernel.suite);
+      ("resolve", Test_resolve.suite);
     ]
