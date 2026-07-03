@@ -286,7 +286,27 @@ let test_to_form_of_form_identity () =
   |> List.filter (fun f -> Filename.check_suffix f ".wft")
   |> List.iter (fun f -> check_src f (read_file (Filename.concat corpus_dir f)));
   (* ...plus sources exercising forms the corpus lacks *)
-  List.iter (fun (name, oks, _) -> List.iter (fun s -> check_src ("table:" ^ name) s) oks) table
+  List.iter (fun (name, oks, _) -> List.iter (fun s -> check_src ("table:" ^ name) s) oks) table;
+  (* ...and the identity must hold on RESOLVED trees too (Ref/GroupRef/name-meta) *)
+  Sys.readdir corpus_dir |> Array.to_list
+  |> List.filter (fun f -> Filename.check_suffix f ".wft")
+  |> List.iter (fun file ->
+      match Reader.parse_string ~file (read_file (Filename.concat corpus_dir file)) with
+      | Error _ -> Alcotest.failf "%s does not parse" file
+      | Ok forms ->
+          List.iter
+            (fun f ->
+              match Result.bind (Kernel.of_form f) (Resolve.resolve Corpus_support.stub_names) with
+              | Error ds ->
+                  Alcotest.failf "%s: resolution failed: %s" file
+                    (String.concat "; " (List.map Diag.to_string ds))
+              | Ok resolved -> (
+                  match Kernel.of_form (Kernel.to_form resolved) with
+                  | Ok resolved' when resolved = resolved' -> ()
+                  | Ok _ -> Alcotest.failf "%s: resolved identity broken" file
+                  | Error _ -> Alcotest.failf "%s: resolved to_form does not re-validate" file))
+            forms)
+
 let suite =
   [
     Alcotest.test_case "27-form accept/reject table" `Quick test_table;

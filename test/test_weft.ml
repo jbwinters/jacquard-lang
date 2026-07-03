@@ -12,4 +12,7 @@ let () =
       ("printer", Test_printer.suite);
       ("kernel", Test_kernel.suite);
       ("resolve", Test_resolve.suite);
+      ("canon", Test_canon.suite);
+      ("store", Test_store.suite);
+      ("corpus", Test_corpus.suite);
     ]

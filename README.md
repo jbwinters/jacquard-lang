@@ -2,7 +2,7 @@
 
 Weft is a research prototype for a small kernel language designed for code written by models and reviewed by people. The core design combines a uniform quoted triple representation, a 27-form kernel grammar, algebraic effects, explicit capability grants, probabilistic programming as a library effect, and content-addressed definitions.
 
-The current repository is still pre-implementation. The design docs are the source of truth until W0.1 creates the first OCaml project scaffold.
+The M0-exec milestone (the executable data layer) is implemented: reader, printer, kernel validator, name resolution, canonical hashing, content-addressed store, and the conformance corpus harness. The design docs remain the source of truth for later milestones.
 
 ## Repository Layout
 
@@ -12,8 +12,12 @@ The current repository is still pre-implementation. The design docs are the sour
 - `docs/example-code.md` - target bootstrap `.wft` examples for the future corpus.
 - `.taskmaster/` - local Task Master plan generated from `docs/development-plan.md`.
 - `dune-project` and `weft.opam` - OCaml package and build metadata.
-- `src/`, `bin/`, `test/` - empty first-layer Dune directories; implementation stanzas land here later.
-- `corpus/`, `spec/`, `prelude/`, `demos/` - planned data, spec, library, and demo directories.
+- `src/` - the `weft` library: `form`/`meta`/`span` (the triple), `hash` (HASH_V0), `reader`/`printer` (bootstrap notation), `kernel` (grammar validator + typed AST), `resolve`, `canon` (canonical serialization + hashing), `store`.
+- `bin/` - the `weft` CLI (version stub until W2.7).
+- `test/` - alcotest/qcheck suites plus the corpus runner and `gen_goldens` tool.
+- `spec/` - the M0 kernel AST spec and `serialization.md` (canonical byte format).
+- `corpus/` - conformance corpus (`valid/`, `invalid/` + `.expect`, `golden/`).
+- `prelude/`, `demos/` - planned library and demo directories (M1+).
 
 ## Toolchain
 
@@ -96,7 +100,7 @@ task-master show 1
 task-master validate-dependencies
 ```
 
-The next task should be `W0.1 Repository scaffold and CI`.
+Tasks 1-9 (W0.1 through W1.7, the M0-exec milestone) are done; the next task is `W2.1 Runtime values and environments`.
 
 ## Implementation Milestones
 
@@ -108,7 +112,7 @@ The next task should be `W0.1 Repository scaffold and CI`.
 
 ## Current Status
 
-Implementation is underway on the M0-exec milestone (the data layer). The `weft` library, `weft` CLI (`weft --version`), and the alcotest/qcheck test suite exist; see Task Master for the live task queue.
+M0-exec is complete: the spec is executable. `.wft` sources parse to uniform triples, validate against the 27-form kernel grammar, resolve names to content hashes, and hash canonically (alpha- and meta-invariant, group-order-invariant); declarations round-trip through the on-disk store; and the conformance corpus pins all of it in CI, golden hashes included. The interpreter milestone (M1, tasks W2.x) is next.
 
 The tree should verify with:
 

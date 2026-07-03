@@ -11,6 +11,9 @@ let digest_size = Digestif.SHA256.digest_size
 (** [of_string s] hashes the bytes of [s] with [HASH_V0]. *)
 let of_string s = Digest_bytes Digestif.SHA256.(to_raw_string (digest_string s))
 
+(** [to_raw h] is the raw digest bytes (length [digest_size]); used by canonical serialization. *)
+let to_raw (Digest_bytes raw) = raw
+
 let to_hex (Digest_bytes raw) =
   let buf = Buffer.create (2 * String.length raw) in
   String.iter (fun c -> Buffer.add_string buf (Printf.sprintf "%02x" (Char.code c))) raw;

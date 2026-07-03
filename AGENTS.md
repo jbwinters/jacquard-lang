@@ -53,7 +53,7 @@ dune fmt
 dune build @doc
 ```
 
-The current scaffold intentionally has no OCaml modules, CLI entrypoint, or tests yet. Verify the environment and task queue with:
+The data layer (M0-exec, tasks W0.1-W1.7) is implemented in `src/` with suites in `test/`. Verify the environment and task queue with:
 
 ```bash
 eval "$(opam env)"
@@ -63,6 +63,8 @@ dune build @all
 dune runtest
 task-master next
 ```
+
+When adding valid corpus files, regenerate the golden hashes with `dune exec test/gen_goldens.exe` and commit the diff (see `corpus/README.md`).
 
 ## Working Rules
 
