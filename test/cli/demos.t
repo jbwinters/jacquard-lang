@@ -70,3 +70,23 @@ question reveals the user's need, but costs attention.
   cons(mk-pair("needs-audit", 0.35), cons(mk-pair("quick-answer", 0.65), nil))
   cons(mk-pair("audit-first", 0.35), cons(mk-pair("fast-answer", 0.65), nil))
   ("ask-user", "audit-first", 7.699999999999999, 5.699999999999999)
+
+Agent dream mode: the same policy runs under scripted worlds and a
+probabilistic world handler. The policy row honestly says it needs net; the
+demo outputs are produced by handlers around that unchanged policy.
+
+  $ sh ../../demos/agent-dream.sh
+  == policy authority ==
+  support-policy : () ->{net} text
+  == scripted worlds and probabilistic dream ==
+  "issue-refund"
+  "fallback-human"
+  cons(mk-pair("issue-refund", 0.55), cons(mk-pair("ask-more", 0.25), cons(mk-pair("fallback-human", 0.2), nil)))
+
+Ambiguity-preserving extraction: an OCR-ish date parse stays a Dist until a
+human click is represented as an observation. Downstream routing re-enumerates.
+
+  $ sh ../../demos/ambiguity-pipeline.sh
+  cons(mk-pair("Mar 4, 2025", 0.56), cons(mk-pair("Apr 3, 2025", 0.41), cons(mk-pair("Unknown", 0.03), nil)))
+  cons(mk-pair("escalate-overdue", 0.56), cons(mk-pair("schedule-followup", 0.41), cons(mk-pair("ask-human", 0.03), nil)))
+  cons(mk-pair("escalate-overdue", 0.0), cons(mk-pair("schedule-followup", 0.9999999999999999), cons(mk-pair("ask-human", 0.0), nil)))
