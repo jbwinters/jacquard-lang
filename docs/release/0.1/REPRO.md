@@ -58,6 +58,7 @@ WEFT_RELEASE_REF=<commit> scripts/release/reproduce-0.1.sh
 | transcript | command |
 |---|---|
 | M1 factorial/choose/eval | `sh demos/m1.sh` |
+| clarifying-question VOI | `sh demos/clarifying-question.sh` and `dune runtest test/cli/demos.t` |
 | hostile manifest | `sh demos/m4-hostile.sh` and `dune runtest test/cli/hostile-demo.t` |
 | M3 same model/different handler | `sh demos/m3.sh` and `dune runtest test/cli/infer.t` |
 | formatter/diff/errors/tools | `dune runtest test/cli/diff.t test/cli/tools.t test/cli/tutorial.t` |

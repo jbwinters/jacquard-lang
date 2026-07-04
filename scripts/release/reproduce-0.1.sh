@@ -42,6 +42,7 @@ capture version _build/default/bin/main.exe --version
 
 capture m1 env WEFT_PRELUDE="$ROOT/prelude" opam exec -- sh demos/m1.sh
 capture m3 env WEFT_PRELUDE="$ROOT/prelude" opam exec -- sh demos/m3.sh
+capture clarifying-question env WEFT_PRELUDE="$ROOT/prelude" opam exec -- sh demos/clarifying-question.sh
 capture hostile-manifest env WEFT_PRELUDE="$ROOT/prelude" opam exec -- sh demos/m4-hostile.sh
 
 capture cli-and-gauntlet opam exec -- dune runtest \

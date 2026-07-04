@@ -59,3 +59,14 @@ monitoring — compositions on the M3 machinery, numbers hand-derived.
   cons(mk-pair("invest", 0.8), cons(mk-pair("hold", 0.2), nil))
   cons(mk-pair(true, 0.7839999999999999), cons(mk-pair(false, 0.21600000000000008), nil))
   (true, false)
+
+The clarifying-question demo: exact value-of-information for interrupting the
+user. The agent can answer fast or audit first under uncertainty; asking one
+question reveals the user's need, but costs attention.
+
+  $ weft run ../../demos/clarifying-question.wft
+  (3.1000000000000005, 6.1, 6.1)
+  (8.7, 2.5999999999999996)
+  cons(mk-pair("needs-audit", 0.35), cons(mk-pair("quick-answer", 0.65), nil))
+  cons(mk-pair("audit-first", 0.35), cons(mk-pair("fast-answer", 0.65), nil))
+  ("ask-user", "audit-first", 7.699999999999999, 5.699999999999999)
