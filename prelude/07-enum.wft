@@ -24,13 +24,22 @@
       (app (var div-real) (lit 1.0) (app (var sum-weights) (var entries)))
       (var entries))))))
 
+; enum's private append: this file loads before the grid, so list.append is not
+; yet in the store; ring-2-internal, kept out of the public vocabulary
+(defterm ((binding enum.append ()
+  (lam ((pvar xs) (pvar ys))
+    (match (var xs)
+      (clause (pcon nil) (var ys))
+      (clause (pcon cons (pvar x) (pvar rest))
+        (app (var cons) (var x) (app (var enum.append) (var rest) (var ys)))))))))
+
 (defterm
   ((binding concat-scaled ()
     (lam ((pvar k) (pvar entries))
       (match (var entries)
         (clause (pcon nil) (var nil))
         (clause (pcon cons (pcon mk-pair (pvar x) (pvar p)) (pvar rest))
-          (app (var append)
+          (app (var enum.append)
             (app (var scale) (var p) (app (var k) (var x)))
             (app (var concat-scaled) (var k) (var rest)))))))
    (binding enum-run ()

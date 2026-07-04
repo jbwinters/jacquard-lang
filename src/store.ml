@@ -13,7 +13,8 @@
     files are byte-identical before and after (golden-tested).
 
     Failure modes: E0601 unknown hash, E0602 unknown name, E0603 corrupt object file, E0604
-    unnameable target (a defterm group's whole hash), E0605 invalid name. *)
+    unnameable target (a defterm group's whole hash), E0605 invalid name, E0607 ambiguous name
+    needing a kind. *)
 
 type role = Whole | Member of int | Constructor of int | Operation of int
 type located = { decl : Kernel.decl; decl_hash : Hash.t; role : role }
@@ -27,6 +28,11 @@ type t = {
 let objects_dir t = Filename.concat t.root "objects"
 let names_file t = Filename.concat t.root "names.wft"
 let object_path t h = Filename.concat (objects_dir t) (Hash.to_hex h ^ ".wft")
+
+(* PV.1 origin provenance sidecars: <hash>.origin beside the object. Sidecars are NOT
+   .wft, so the identity self-check at open never sees them, and renames never touch
+   them — the metadata law extended to the file system. *)
+let origin_path t h = Filename.concat (objects_dir t) (Hash.to_hex h ^ ".origin")
 let err ~code fmt = Printf.ksprintf (fun msg -> Error [ Diag.error ~code msg ]) fmt
 
 let kind_sym = function
@@ -48,10 +54,22 @@ let kind_of_sym = function
 
 (* Names must be printable symbols or names.wft could not round-trip through the reader.
    External entry points (bind_name, rename) validate before mutating; E0605. *)
-let valid_name n =
-  String.length n > 0
-  && (n.[0] >= 'a' && n.[0] <= 'z')
-  && String.for_all (fun c -> (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c = '-') n
+let valid_name = Reader.valid_library_symbol
+
+let kind_rank = function
+  | Resolve.KTerm -> 0
+  | Resolve.KCon -> 1
+  | Resolve.KOp -> 2
+  | Resolve.KType -> 3
+  | Resolve.KEffect -> 4
+
+let sort_names ns =
+  List.sort
+    (fun (a, ea) (b, eb) ->
+      match String.compare a b with
+      | 0 -> compare (kind_rank ea.Resolve.kind) (kind_rank eb.Resolve.kind)
+      | c -> c)
+    ns
 
 let render_names names =
   Printer.print_all
@@ -166,7 +184,7 @@ let entry_kind (decl : Kernel.decl) = function
 (** [put_decl t decl] canonicalizes, hashes, and stores a resolved declaration, then binds every
     name it introduces (members, type + constructors, effect + operations) in the name index,
     replacing existing bindings of the same names. Idempotent on the object file. *)
-let put_decl t (decl : Kernel.decl) : (Canon.decl_hashes, Diag.t list) result =
+let put_decl ?origin t (decl : Kernel.decl) : (Canon.decl_hashes, Diag.t list) result =
   match Canon.hash_decl decl with
   | Error ds -> Error ds
   | Ok hs ->
@@ -176,6 +194,27 @@ let put_decl t (decl : Kernel.decl) : (Canon.decl_hashes, Diag.t list) result =
         output_string oc (Printer.print_all [ Kernel.decl_to_form decl ]);
         close_out oc
       end;
+      (match origin with
+      | Some tag -> (
+          (* first writer wins, matching the object's own immutability: content that
+             already carries provenance keeps it, and a differing re-stamp is noted *)
+          let opath = origin_path t hs.Canon.decl_hash in
+          if Sys.file_exists opath then
+            begin match read_file opath with
+            | existing when String.trim existing <> tag ->
+                Printf.eprintf "note: %s already stamped [%s]; keeping it\n%!"
+                  (String.sub (Hash.to_hex hs.Canon.decl_hash) 0 8)
+                  (String.trim existing)
+            | _ -> ()
+            | exception Sys_error _ -> ()
+            end
+          else
+            try
+              let oc = open_out_bin opath in
+              output_string oc (tag ^ "\n");
+              close_out oc
+            with Sys_error m -> Printf.eprintf "origin sidecar unwritable (%s)\n%!" m)
+      | None -> ());
       let fresh = index_entries decl hs in
       t.index <- fresh @ List.filter (fun (h, _) -> not (List.mem_assoc h fresh)) t.index;
       let new_names =
@@ -186,12 +225,37 @@ let put_decl t (decl : Kernel.decl) : (Canon.decl_hashes, Diag.t list) result =
             | None -> None)
           hs.Canon.named
       in
-      t.names <-
-        List.sort
-          (fun (a, _) (b, _) -> String.compare a b)
-          (new_names @ List.filter (fun (n, _) -> not (List.mem_assoc n new_names)) t.names);
+      (* replacement is per (name, kind): a term named x does not evict a type named x *)
+      let evicted (n, (e : Resolve.entry)) =
+        List.exists
+          (fun (n', (e' : Resolve.entry)) -> n = n' && e.Resolve.kind = e'.Resolve.kind)
+          new_names
+      in
+      t.names <- sort_names (new_names @ List.filter (fun b -> not (evicted b)) t.names);
       write_names t;
       Ok hs
+
+(** [origin t h] reads the provenance sidecar of the declaration owning [h], if any. A
+    present-but-unreadable or empty sidecar is ignored with a warning, never fatal. *)
+let origin t (h : Hash.t) : string option =
+  let read_sidecar dh =
+    let path = origin_path t dh in
+    if not (Sys.file_exists path) then None
+    else
+      match read_file path with
+      | exception Sys_error m ->
+          Printf.eprintf "warning: origin sidecar unreadable (%s)\n%!" m;
+          None
+      | s -> (
+          match String.split_on_char '\n' (String.trim s) with
+          | tag :: _ when tag <> "" -> Some tag
+          | _ ->
+              Printf.eprintf "warning: origin sidecar %s is empty; ignored\n%!" path;
+              None)
+  in
+  match List.assoc_opt h t.index with
+  | Some (dh, _) -> read_sidecar dh
+  | None -> if Sys.file_exists (object_path t h) then read_sidecar h else None
 
 (** [locate t h] finds the declaration owning [h] (a decl hash or any derived hash). *)
 let locate t (h : Hash.t) : (located, Diag.t list) result =
@@ -209,15 +273,22 @@ let locate t (h : Hash.t) : (located, Diag.t list) result =
 (** [get t h] is [locate]'s declaration. *)
 let get t h = Result.map (fun l -> l.decl) (locate t h)
 
-(** [lookup_name t n] reads the name index. *)
-let lookup_name t n = List.assoc_opt n t.names
+(** Every binding of [n] (the index is (name, kind)-keyed since SL.1), in kind-rank order (term,
+    con, op, type, effect). *)
+let lookup_all t n = List.filter_map (fun (m, e) -> if m = n then Some e else None) t.names
 
-(** All name bindings, sorted by name (the whole mutable index). *)
+(** The binding of [n] with kind [k], if any. *)
+let lookup_kind t n k = List.find_opt (fun e -> e.Resolve.kind = k) (lookup_all t n)
+
+(** First binding of [n] by kind rank; prefer {!lookup_kind} when the kind is known. *)
+let lookup_name t n = match lookup_all t n with [] -> None | e :: _ -> Some e
+
+(** All name bindings, sorted by (name, kind rank) — the whole mutable index. *)
 let names t = t.names
 
 (** [names_view t] is the resolver's view of this store (the W1.4 seam). *)
 let names_view t : Resolve.names =
-  { Resolve.lookup = (fun n -> lookup_name t n); all_names = (fun () -> List.map fst t.names) }
+  { Resolve.lookup = (fun n -> lookup_all t n); all_names = (fun () -> List.map fst t.names) }
 
 (** [bind_name t name hash] binds [name] to a hash already known to the store. Fails on an
     unprintable name (E0605) and on a [defterm] group's whole hash (E0604) — groups are addressed
@@ -236,27 +307,44 @@ let bind_name t name hash : (unit, Diag.t list) result =
             | Kernel.DefTerm _, Whole ->
                 err ~code:"E0604" "cannot name a defterm group hash; name its members"
             | _ ->
+                let kind = entry_kind decl role in
                 t.names <-
-                  List.sort
-                    (fun (a, _) (b, _) -> String.compare a b)
-                    ((name, { Resolve.hash; kind = entry_kind decl role })
-                    :: List.remove_assoc name t.names);
+                  sort_names
+                    ((name, { Resolve.hash; kind })
+                    :: List.filter
+                         (fun (n, (e : Resolve.entry)) -> n <> name || e.Resolve.kind <> kind)
+                         t.names);
                 write_names t;
                 Ok ()))
 
-(** [rename t ~old_name ~new_name] rebinds a name. Touches only [names.wft]; the new name must be a
-    printable symbol (E0605). *)
-let rename t ~old_name ~new_name : (unit, Diag.t list) result =
+(** [rename t ~old_name ~new_name ?kind ()] rebinds a name. Touches only [names.wft]; the new name
+    must be a printable symbol (E0605). When [old_name] is bound to several kinds, [kind] must
+    disambiguate (E0607). *)
+let rename t ~old_name ~new_name ?kind () : (unit, Diag.t list) result =
   if not (valid_name new_name) then
-    err ~code:"E0605" "invalid name %S: names are lowercase symbols [a-z][a-z0-9-]*" new_name
+    err ~code:"E0605" "invalid name %S: names are dotted lowercase symbols" new_name
   else
-    match List.assoc_opt old_name t.names with
-    | None -> err ~code:"E0602" "unknown name `%s`" old_name
-    | Some entry ->
+    let candidates =
+      match kind with
+      | Some k -> List.filter (fun e -> e.Resolve.kind = k) (lookup_all t old_name)
+      | None -> lookup_all t old_name
+    in
+    match candidates with
+    | [] -> err ~code:"E0602" "unknown name `%s`" old_name
+    | _ :: _ :: _ ->
+        err ~code:"E0607" "`%s` is bound to several kinds (%s); pass --kind to disambiguate"
+          old_name
+          (String.concat ", " (List.map (fun e -> kind_sym e.Resolve.kind) candidates))
+    | [ entry ] ->
         t.names <-
-          List.sort
-            (fun (a, _) (b, _) -> String.compare a b)
-            ((new_name, entry) :: List.remove_assoc old_name (List.remove_assoc new_name t.names));
+          sort_names
+            ((new_name, entry)
+            :: List.filter
+                 (fun (n, (e : Resolve.entry)) ->
+                   not
+                     ((n = old_name && e.Resolve.kind = entry.Resolve.kind)
+                     || (n = new_name && e.Resolve.kind = entry.Resolve.kind)))
+                 t.names);
         write_names t;
         Ok ()
 

@@ -1,1 +1,1 @@
-(lam ((pvar xs)) (app (var map) (lam ((pvar x)) (app (var add) (var x) (lit 1))) (var xs)))
+(lam ((pvar xs)) (app (var list.map) (var xs) (lam ((pvar x)) (app (var add) (var x) (lit 1)))))

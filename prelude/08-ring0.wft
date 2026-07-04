@@ -1,0 +1,83 @@
+; Ring 0 (stdlib SL.2): Result, the dictionaries, instances, and derivations.
+; Dictionaries are ordinary single-constructor data passed explicitly; every
+; trait mechanism compiles down to this, so nothing here changes shape later.
+(deftype result ((tvar e) (tvar a))
+  (con err (field (tvar e)))
+  (con ok (field (tvar a))))
+
+(deftype eq ((tvar a))
+  (con mk-eq (field eq-fn (tarrow ((tvar a) (tvar a)) (row) (tref bool)))))
+
+(deftype ord ((tvar a))
+  (con mk-ord (field compare-fn (tarrow ((tvar a) (tvar a)) (row) (tref ordering)))))
+
+(deftype show ((tvar a))
+  (con mk-show (field show-fn (tarrow ((tvar a)) (row) (tref text)))))
+
+; hand-written field accessors (SL.2 default; spec-promised generation is a follow-up)
+(defterm ((binding eq.fn ()
+  (lam ((pvar d)) (match (var d) (clause (pcon mk-eq (pvar f)) (var f)))))))
+
+(defterm ((binding ord.fn ()
+  (lam ((pvar d)) (match (var d) (clause (pcon mk-ord (pvar f)) (var f)))))))
+
+(defterm ((binding show.fn ()
+  (lam ((pvar d)) (match (var d) (clause (pcon mk-show (pvar f)) (var f)))))))
+
+; instances
+(defterm ((binding int.eq () (app (var mk-eq) (var eq)))))
+
+(defterm ((binding int.ord () (app (var mk-ord) (var int-compare)))))
+
+(defterm ((binding bool.eq ()
+  (app (var mk-eq)
+    (lam ((pvar a) (pvar b))
+      (match (tuple (var a) (var b))
+        (clause (ptuple (pcon true) (pcon true)) (var true))
+        (clause (ptuple (pcon false) (pcon false)) (var true))
+        (clause (pwild) (var false))))))))
+
+; derivations
+(defterm ((binding ord.to-eq ()
+  (lam ((pvar d))
+    (app (var mk-eq)
+      (lam ((pvar x) (pvar y))
+        (match (app (app (var ord.fn) (var d)) (var x) (var y))
+          (clause (pcon equal) (var true))
+          (clause (pwild) (var false)))))))))
+
+(defterm ((binding ord.reverse ()
+  (lam ((pvar d))
+    (app (var mk-ord)
+      (lam ((pvar x) (pvar y))
+        (app (app (var ord.fn) (var d)) (var y) (var x))))))))
+
+; order pairs (kernel 2-tuples) by their second component
+(defterm ((binding ord.on-second ()
+  (lam ((pvar d))
+    (app (var mk-ord)
+      (lam ((ptuple (pwild) (pvar x2)) (ptuple (pwild) (pvar y2)))
+        (app (app (var ord.fn) (var d)) (var x2) (var y2))))))))
+
+(defterm ((binding eq.for-pair ()
+  (lam ((pvar da) (pvar db))
+    (app (var mk-eq)
+      (lam ((ptuple (pvar x1) (pvar x2)) (ptuple (pvar y1) (pvar y2)))
+        (match (app (app (var eq.fn) (var da)) (var x1) (var y1))
+          (clause (pcon true) (app (app (var eq.fn) (var db)) (var x2) (var y2)))
+          (clause (pcon false) (var false)))))))))
+
+(defterm
+  ((binding list-eq-with ()
+    (lam ((pvar d) (pvar xs) (pvar ys))
+      (match (tuple (var xs) (var ys))
+        (clause (ptuple (pcon nil) (pcon nil)) (var true))
+        (clause (ptuple (pcon cons (pvar x) (pvar xr)) (pcon cons (pvar y) (pvar yr)))
+          (match (app (app (var eq.fn) (var d)) (var x) (var y))
+            (clause (pcon true) (app (var list-eq-with) (var d) (var xr) (var yr)))
+            (clause (pcon false) (var false))))
+        (clause (pwild) (var false)))))
+   (binding eq.for-list ()
+    (lam ((pvar d))
+      (app (var mk-eq)
+        (lam ((pvar xs) (pvar ys)) (app (var list-eq-with) (var d) (var xs) (var ys))))))))

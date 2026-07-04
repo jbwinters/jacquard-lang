@@ -30,6 +30,7 @@ let stub_entries =
       ("console", Resolve.KEffect);
       ("net", Resolve.KEffect);
       ("map", Resolve.KTerm);
+      ("list.map", Resolve.KTerm);
       ("cons", Resolve.KCon);
       ("nil", Resolve.KCon);
       ("eval-code", Resolve.KOp);
@@ -274,7 +275,7 @@ let diag_cases : (string * string * string list option) list =
       None );
     ("ungranted-effect", "(app (var print) (lit \"hello\"))", Some []);
     ( "effectful-toplevel-body",
-      "(defterm ((binding sneaky () (app (var net-fetch) (lit \"http://evil.example\")))))",
+      "(defterm ((binding sneaky () (app (var net.get) (lit \"http://evil.example\")))))",
       None );
     ( "redundant-clause",
       "(lam ((pvar b)) (match (var b) (clause (pwild) (lit 0)) (clause (pcon true) (lit 1))))",
@@ -319,7 +320,10 @@ let diag_golden_lines ~prelude_dir : (string list, Diag.t list) result =
                                 | _ -> None)
                               names
                           in
-                          match Check.manifest_errors ctx ~granted:g r with
+                          match
+                            Check.manifest_errors ctx ~grantable:Prelude.grantable_names ~granted:g
+                              r
+                          with
                           | [] -> go rest
                           | ds -> Ok (render ds))
                       | _ -> go rest))))
@@ -333,3 +337,107 @@ let diag_golden_lines ~prelude_dir : (string list, Diag.t list) result =
         all (lines :: acc) rest
   in
   all [] diag_cases
+
+(* --- SL.9: the rings manifest, the layering audit, and the ring-0 freeze --- *)
+
+(** [parse_rings path] reads a rings manifest: `name ring` lines, `#` comments. *)
+let parse_rings path : (string * int) list =
+  let ic = open_in path in
+  let rec go acc =
+    match input_line ic with
+    | exception End_of_file ->
+        close_in ic;
+        List.rev acc
+    | line -> (
+        let line = String.trim line in
+        if line = "" || line.[0] = '#' then go acc
+        else
+          match String.split_on_char ' ' line with
+          | [ name; ring ] -> go ((name, int_of_string ring) :: acc)
+          | _ -> failwith ("bad rings.manifest line: " ^ line))
+  in
+  go []
+
+(** [ring_violations store rings] walks every named declaration's deps (Store.deps over the content
+    graph) and reports each edge whose target sits at a HIGHER ring than the source — the "rings are
+    literal" claim made executable. Also reports manifest gaps (names in the store index missing
+    from the manifest) so the file cannot silently rot. *)
+let ring_violations (store : Store.t) (rings : (string * int) list) : string list =
+  let ring_of n = List.assoc_opt n rings in
+  (* member hash -> the names bound to it (via each binding's own hash) *)
+  let names_of_hash h =
+    List.filter_map
+      (fun (n, { Resolve.hash; _ }) -> if Hash.equal hash h then Some n else None)
+      (Store.names store)
+  in
+  let violations = ref [] in
+  let missing = ref [] in
+  List.iter
+    (fun (name, { Resolve.hash; _ }) ->
+      match ring_of name with
+      | None -> if not (List.mem name !missing) then missing := name :: !missing
+      | Some own -> (
+          match Store.locate store hash with
+          | Error _ -> ()
+          | Ok { Store.decl_hash; _ } -> (
+              match Store.deps store decl_hash with
+              | Error _ -> ()
+              | Ok dep_hashes ->
+                  List.iter
+                    (fun dh ->
+                      (* one hash may carry several names (content addressing dedups
+                         identical bodies, e.g. enum.append = list.append); the
+                         definition lives at the LOWEST ring any of its names claims *)
+                      let dep =
+                        List.fold_left
+                          (fun best dep_name ->
+                            match (ring_of dep_name, best) with
+                            | Some r, Some (_, br) when r < br -> Some (dep_name, r)
+                            | Some r, None -> Some (dep_name, r)
+                            | _ -> best)
+                          None (names_of_hash dh)
+                      in
+                      match dep with
+                      | Some (dep_name, dep_ring) when dep_ring > own ->
+                          violations :=
+                            Printf.sprintf "%s (ring %d) -> %s (ring %d)" name own dep_name dep_ring
+                            :: !violations
+                      | _ -> ())
+                    dep_hashes)))
+    (Store.names store);
+  List.sort_uniq compare
+    (!violations @ List.map (fun n -> Printf.sprintf "missing from rings.manifest: %s" n) !missing)
+
+(** [freeze_lines ~prelude_dir ~manifest] renders the ring-0 freeze artifact: every ring-0 name with
+    its elaborated signature (terms), or its kind (types/constructors). Names, not hashes: the
+    freeze pins the API surface. *)
+let freeze_lines ~prelude_dir ~manifest : (string list, Diag.t list) result =
+  let ( let* ) = Result.bind in
+  let root =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "weft-freeze-%d" (Unix.getpid ()))
+  in
+  let* store = Store.open_store root in
+  let* _ = Prelude.load ~dir:prelude_dir store in
+  let* ctx = Check.make_ctx store in
+  let* sigs = Prelude.builtin_signatures store in
+  List.iter (fun (h, s) -> Hashtbl.replace ctx.Check.builtin_sigs h s) sigs;
+  let rings = parse_rings manifest in
+  let ring0 = List.filter_map (fun (n, r) -> if r = 0 then Some n else None) rings in
+  let lines =
+    List.concat_map
+      (fun name ->
+        (* one line per (name, kind): a name bound as both term and type (eq) pins BOTH *)
+        List.map
+          (fun { Resolve.hash; kind } ->
+            match kind with
+            | Resolve.KTerm ->
+                Printf.sprintf "%s : %s" name (Check.show_scheme ctx (Check.term_scheme ctx hash))
+            | Resolve.KType -> Printf.sprintf "type %s" name
+            | Resolve.KCon -> Printf.sprintf "con %s" name
+            | Resolve.KOp -> Printf.sprintf "op %s" name
+            | Resolve.KEffect -> Printf.sprintf "effect %s" name)
+          (Store.lookup_all store name))
+      (List.sort_uniq String.compare ring0)
+  in
+  Ok lines

@@ -174,10 +174,18 @@ and unify_rows (ra : row) (rb : row) : unit =
         raise (Unify_error "effect rows with the same rigid tail differ")
   | RClosed, RVar rv | RSkolem _, RVar rv ->
       (* the flexible side may not have extra effects the fixed side lacks *)
-      if only_b <> [] then raise (Unify_error "a closed effect row cannot absorb extra effects")
+      if only_b <> [] then
+        raise
+          (Unify_error
+             "a closed effect row cannot absorb extra effects; a stored definition passed as a \
+              thunk can be eta-expanded at the use site: (lam () (app (var f)))")
       else bind_rvar rv { effects = only_a; tail = ra.tail }
   | RVar rv, RClosed | RVar rv, RSkolem _ ->
-      if only_a <> [] then raise (Unify_error "a closed effect row cannot absorb extra effects")
+      if only_a <> [] then
+        raise
+          (Unify_error
+             "a closed effect row cannot absorb extra effects; a stored definition passed as a \
+              thunk can be eta-expanded at the use site: (lam () (app (var f)))")
       else bind_rvar rv { effects = only_b; tail = rb.tail }
   | RVar rva, RVar rvb -> (
       match (!rva, !rvb) with

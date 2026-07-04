@@ -10,7 +10,7 @@
     the [console] effect (its [print] op writes through [out] and resumes with unit); [install_eval]
     grants the [eval] effect (its [eval-code] op validates, resolves, and evaluates a [VCode]
     payload at the boundary — the dynamic check the spec pins for M0). [grant] maps a
-    case-insensitive effect name from the CLI to the matching installer. The [failure] effect
+    case-insensitive effect name from the CLI to the matching installer. Pure effects (abort etc.)
     deliberately has no root handler: an unhandled [abort] is supposed to die. *)
 
 let err ~code fmt = Printf.ksprintf (fun msg -> Error [ Diag.error ~code msg ]) fmt
@@ -63,10 +63,12 @@ let load ~dir store : ((string * Canon.decl_hashes list) list, Diag.t list) resu
     go [] files
 
 let lookup_hash store ~kind name : (Hash.t, Diag.t list) result =
-  match Store.lookup_name store name with
-  | Some { Resolve.hash; kind = k } when k = kind -> Ok hash
-  | Some _ -> err ~code:"E0702" "prelude name `%s` has an unexpected kind" name
-  | None -> err ~code:"E0702" "prelude name `%s` is not in the store" name
+  match Store.lookup_kind store name kind with
+  | Some { Resolve.hash; _ } -> Ok hash
+  | None -> (
+      match Store.lookup_name store name with
+      | Some _ -> err ~code:"E0702" "prelude name `%s` has an unexpected kind" name
+      | None -> err ~code:"E0702" "prelude name `%s` is not in the store" name)
 
 (** [wire_builtins ctx] registers the native implementations for the prelude's builtin marker terms.
     Call after {!load}. Integer semantics per decision D2: OCaml native 63-bit ints; add/sub/mul
@@ -124,11 +126,306 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
     | Error _ -> () (* prelude without this layer *)
     | Ok h -> Hashtbl.replace ctx.Eval.builtins h (Value.VBuiltin (name, native))
   in
+  optional "mod"
+    (int2 "mod" (fun a b ->
+         if b = 0 then Error (Runtime_err.Arithmetic "modulo by zero")
+         else Ok (Value.VInt (a mod b))));
   optional "add-real" (real2 "add-real" ( +. ));
   optional "mul-real" (real2 "mul-real" ( *. ));
   optional "div-real" (real2 "div-real" ( /. ));
+  optional "sub-real" (real2 "sub-real" ( -. ));
+  optional "lt-real" (fun args ->
+      match args with
+      | [ Value.VReal a; Value.VReal b ] -> Ok (vbool (a < b))
+      | args ->
+          Error
+            (Runtime_err.Type_error
+               (Printf.sprintf "lt-real expects two reals, got %s"
+                  (String.concat ", " (List.map Value.show args)))));
+  (* three-way comparison feeding the ord dictionary (stdlib SL.2) *)
+  (match
+     ( lookup_hash store ~kind:Resolve.KCon "less",
+       lookup_hash store ~kind:Resolve.KCon "equal",
+       lookup_hash store ~kind:Resolve.KCon "greater" )
+   with
+  | Ok less_c, Ok equal_c, Ok greater_c ->
+      let vord c =
+        if c < 0 then Value.VCon { con = less_c; name = "less"; args = [] }
+        else if c = 0 then Value.VCon { con = equal_c; name = "equal"; args = [] }
+        else Value.VCon { con = greater_c; name = "greater"; args = [] }
+      in
+      optional "int-compare" (int2 "int-compare" (fun a b -> Ok (vord (compare a b))));
+      (* bytewise = codepoint order for UTF-8, documented in stdlib.md (SL.5) *)
+      optional "text-compare" (fun args ->
+          match args with
+          | [ Value.VText a; Value.VText b ] -> Ok (vord (compare a b))
+          | args ->
+              Error
+                (Runtime_err.Type_error
+                   (Printf.sprintf "text-compare expects two texts, got %s"
+                      (String.concat ", " (List.map Value.show args)))))
+  | _ -> ());
+  (* --- SL.5 text builtins: codepoint semantics per D9, hand-rolled UTF-8 decoder.
+     Malformed sequences decode replacement-style: each offending byte is one codepoint. --- *)
+  let utf8_boundaries s =
+    (* byte offsets where codepoints start, plus the terminal offset. The second-byte range
+       checks follow the Unicode well-formedness table, so overlongs (E0 80-9F, F0 80-8F),
+       surrogates (ED A0-BF), and beyond-U+10FFFF (F4 90-BF) are malformed and count one
+       codepoint PER BYTE, same as truncated sequences. *)
+    let n = String.length s in
+    let byte j = if j < n then Char.code s.[j] else -1 in
+    let cont j = byte j land 0xC0 = 0x80 && j < n in
+    let second_ok b0 b1 =
+      match b0 with
+      | 0xE0 -> b1 >= 0xA0 && b1 <= 0xBF
+      | 0xED -> b1 >= 0x80 && b1 <= 0x9F
+      | 0xF0 -> b1 >= 0x90 && b1 <= 0xBF
+      | 0xF4 -> b1 >= 0x80 && b1 <= 0x8F
+      | _ -> b1 land 0xC0 = 0x80
+    in
+    let rec go acc i =
+      if i >= n then List.rev (n :: acc)
+      else
+        let b0 = Char.code s.[i] in
+        let width =
+          if b0 < 0x80 then 1
+          else if b0 land 0xE0 = 0xC0 && b0 >= 0xC2 && cont (i + 1) then 2
+          else if b0 land 0xF0 = 0xE0 && second_ok b0 (byte (i + 1)) && cont (i + 2) then 3
+          else if
+            b0 land 0xF8 = 0xF0
+            && b0 <= 0xF4
+            && second_ok b0 (byte (i + 1))
+            && cont (i + 2)
+            && cont (i + 3)
+          then 4
+          else 1 (* malformed byte *)
+        in
+        go (i :: acc) (i + width)
+    in
+    go [] 0
+  in
+  let type_err name args =
+    Error
+      (Runtime_err.Type_error
+         (Printf.sprintf "%s got unexpected arguments %s" name
+            (String.concat ", " (List.map Value.show args))))
+  in
+  let text1 name f args = match args with [ Value.VText s ] -> f s | args -> type_err name args in
+  let text2 name f args =
+    match args with [ Value.VText a; Value.VText b ] -> f a b | args -> type_err name args
+  in
+  optional "text.length"
+    (text1 "text.length" (fun s -> Ok (Value.VInt (List.length (utf8_boundaries s) - 1))));
+  optional "text.concat" (text2 "text.concat" (fun a b -> Ok (Value.VText (a ^ b))));
+  optional "text.slice" (fun args ->
+      match args with
+      | [ Value.VText s; Value.VInt a; Value.VInt b ] ->
+          (* codepoint-indexed [a, b), clamped to the text's bounds *)
+          let bs = Array.of_list (utf8_boundaries s) in
+          let len = Array.length bs - 1 in
+          let clamp i = max 0 (min len i) in
+          let a = clamp a and b = clamp b in
+          Ok (Value.VText (if a >= b then "" else String.sub s bs.(a) (bs.(b) - bs.(a))))
+      | args -> type_err "text.slice" args);
+  optional "text.trim"
+    (text1 "text.trim" (fun s ->
+         (* ASCII whitespace only in this draft (documented) *)
+         let ws c = c = ' ' || c = '\t' || c = '\n' || c = '\r' in
+         let n = String.length s in
+         let i = ref 0 and j = ref n in
+         while !i < n && ws s.[!i] do
+           incr i
+         done;
+         while !j > !i && ws s.[!j - 1] do
+           decr j
+         done;
+         Ok (Value.VText (String.sub s !i (!j - !i)))));
+  let substring_at s sub i =
+    String.length sub <= String.length s - i && String.sub s i (String.length sub) = sub
+  in
+  optional "text.contains?"
+    (text2 "text.contains?" (fun s sub ->
+         let rec go i =
+           i <= String.length s - String.length sub && (substring_at s sub i || go (i + 1))
+         in
+         Ok (vbool (sub = "" || go 0))));
+  optional "text.empty?" (text1 "text.empty?" (fun s -> Ok (vbool (s = ""))));
+  optional "text.from-int" (fun args ->
+      match args with
+      | [ Value.VInt i ] -> Ok (Value.VText (string_of_int i))
+      | args -> type_err "text.from-int" args);
+  (* from-real reuses the printer's spelling so from-real/to-real round-trips bit-exactly *)
+  optional "text.from-real" (fun args ->
+      match args with
+      | [ Value.VReal r ] -> Ok (Value.VText (Printer.real_repr r))
+      | args -> type_err "text.from-real" args);
+  (match
+     (lookup_hash store ~kind:Resolve.KCon "nil", lookup_hash store ~kind:Resolve.KCon "cons")
+   with
+  | Ok nil_h, Ok cons_h ->
+      let vnil = Value.VCon { con = nil_h; name = "nil"; args = [] } in
+      let vcons x xs = Value.VCon { con = cons_h; name = "cons"; args = [ x; xs ] } in
+      let vlist_of_texts ts = List.fold_right (fun t acc -> vcons (Value.VText t) acc) ts vnil in
+      let rec texts_of_vlist = function
+        | Value.VCon { name = "nil"; args = []; _ } -> Ok []
+        | Value.VCon { name = "cons"; args = [ Value.VText t; rest ]; _ } ->
+            Result.map (fun ts -> t :: ts) (texts_of_vlist rest)
+        | v ->
+            Error
+              (Runtime_err.Type_error
+                 (Printf.sprintf "text.join expects a list of texts, got %s" (Value.show v)))
+      in
+      optional "text.split"
+        (text2 "text.split" (fun s sep ->
+             if sep = "" then
+               (* singleton-codepoint texts: consistent with the deliberate absence of Char *)
+               let bs = utf8_boundaries s in
+               let rec pieces = function
+                 | a :: (b :: _ as rest) -> String.sub s a (b - a) :: pieces rest
+                 | _ -> []
+               in
+               Ok (vlist_of_texts (pieces bs))
+             else begin
+               let out = ref [] and start = ref 0 and i = ref 0 in
+               let sn = String.length s and pn = String.length sep in
+               while !i <= sn - pn do
+                 if String.sub s !i pn = sep then begin
+                   out := String.sub s !start (!i - !start) :: !out;
+                   start := !i + pn;
+                   i := !i + pn
+                 end
+                 else incr i
+               done;
+               out := String.sub s !start (sn - !start) :: !out;
+               Ok (vlist_of_texts (List.rev !out))
+             end));
+      optional "text.join" (fun args ->
+          match args with
+          | [ xs; Value.VText sep ] ->
+              Result.map (fun ts -> Value.VText (String.concat sep ts)) (texts_of_vlist xs)
+          | args -> type_err "text.join" args)
+  | _ -> ());
+  (match
+     (lookup_hash store ~kind:Resolve.KCon "some", lookup_hash store ~kind:Resolve.KCon "none")
+   with
+  | Ok some_h, Ok none_h ->
+      let vsome v = Value.VCon { con = some_h; name = "some"; args = [ v ] } in
+      let vnone = Value.VCon { con = none_h; name = "none"; args = [] } in
+      (* to-int / to-real accept exactly the reader's number spellings *)
+      optional "text.to-int"
+        (text1 "text.to-int" (fun s ->
+             match Reader.classify_literal s with
+             | Some (Form.Int i) -> Ok (vsome (Value.VInt i))
+             | _ -> Ok vnone));
+      optional "text.to-real"
+        (text1 "text.to-real" (fun s ->
+             match Reader.classify_literal s with
+             | Some (Form.Real r) -> Ok (vsome (Value.VReal r))
+             | Some (Form.Int i) -> Ok (vsome (Value.VReal (float_of_int i)))
+             | _ -> Ok vnone))
+  | _ -> ());
+  (* --- W6.6 code reflection: quote payloads built and destructured from Weft.
+     of-int/of-text wrap scalars as (lit ...) forms; form/un-form build and split
+     arbitrary heads; eq? is the metadata-law equality; diff renders the semantic
+     differ's smallest disagreeing subtrees. --- *)
+  optional "code.of-int" (fun args ->
+      match args with
+      | [ Value.VInt i ] -> Ok (Value.VCode (Form.form "lit" [ Form.Int i ]))
+      | args -> type_err "code.of-int" args);
+  optional "code.of-text" (fun args ->
+      match args with
+      | [ Value.VText t ] -> Ok (Value.VCode (Form.form "lit" [ Form.Text t ]))
+      | args -> type_err "code.of-text" args);
+  (match
+     (lookup_hash store ~kind:Resolve.KCon "some", lookup_hash store ~kind:Resolve.KCon "none")
+   with
+  | Ok some_h, Ok none_h -> (
+      let vsome v = Value.VCon { con = some_h; name = "some"; args = [ v ] } in
+      let vnone = Value.VCon { con = none_h; name = "none"; args = [] } in
+      optional "code.to-int" (fun args ->
+          match args with
+          | [ Value.VCode { Form.head = "lit"; args = [ Form.Int i ]; _ } ] ->
+              Ok (vsome (Value.VInt i))
+          | [ Value.VCode _ ] -> Ok vnone
+          | args -> type_err "code.to-int" args);
+      optional "code.to-text" (fun args ->
+          match args with
+          | [ Value.VCode { Form.head = "lit"; args = [ Form.Text t ]; _ } ] ->
+              Ok (vsome (Value.VText t))
+          | [ Value.VCode _ ] -> Ok vnone
+          | args -> type_err "code.to-text" args);
+      match
+        (lookup_hash store ~kind:Resolve.KCon "nil", lookup_hash store ~kind:Resolve.KCon "cons")
+      with
+      | Ok nil_h, Ok cons_h ->
+          let vnil = Value.VCon { con = nil_h; name = "nil"; args = [] } in
+          let vcons x xs = Value.VCon { con = cons_h; name = "cons"; args = [ x; xs ] } in
+          let rec codes_of_vlist = function
+            | Value.VCon { name = "nil"; args = []; _ } -> Ok []
+            | Value.VCon { name = "cons"; args = [ Value.VCode f; rest ]; _ } ->
+                Result.map (fun fs -> f :: fs) (codes_of_vlist rest)
+            | v ->
+                Error
+                  (Runtime_err.Type_error
+                     (Printf.sprintf "code.form expects a list of code, got %s" (Value.show v)))
+          in
+          optional "code.form" (fun args ->
+              match args with
+              | [ Value.VText head; xs ] ->
+                  if not (Reader.valid_head head) then
+                    Error
+                      (Runtime_err.Type_error
+                         (Printf.sprintf "code.form: %S is not a valid form head" head))
+                  else
+                    Result.map
+                      (fun fs -> Value.VCode (Form.form head (List.map (fun f -> Form.F f) fs)))
+                      (codes_of_vlist xs)
+              | args -> type_err "code.form" args);
+          optional "code.un-form" (fun args ->
+              match args with
+              | [ Value.VCode f ] ->
+                  let sub_forms =
+                    List.filter_map (function Form.F g -> Some g | _ -> None) f.Form.args
+                  in
+                  (* forms with scalar args (lit payloads) split only when every arg is a
+                     form; scalars stay opaque behind to-int/to-text *)
+                  if List.length sub_forms = List.length f.Form.args then
+                    Ok
+                      (vsome
+                         (Value.VTuple
+                            [
+                              Value.VText f.Form.head;
+                              List.fold_right
+                                (fun g acc -> vcons (Value.VCode g) acc)
+                                sub_forms vnil;
+                            ]))
+                  else Ok vnone
+              | args -> type_err "code.un-form" args)
+      | _ -> ())
+  | _ -> ());
+  optional "code.eq?" (fun args ->
+      match args with
+      | [ Value.VCode a; Value.VCode b ] -> Ok (vbool (Form.equal_ignoring_meta a b))
+      | args -> type_err "code.eq?" args);
+  optional "code.diff" (fun args ->
+      match args with
+      | [ Value.VCode a; Value.VCode b ] ->
+          let ds = Diff.form_divergences ~path:"log" a b in
+          Ok
+            (Value.VText
+               (if ds = [] then "identical"
+                else
+                  String.concat "; "
+                    (List.map
+                       (fun { Diff.path; a; b } -> Printf.sprintf "at %s: - %s + %s" path a b)
+                       ds)))
+      | args -> type_err "code.diff" args);
   (* pmf : (distribution a, a) -> real and support : distribution a -> list (pair a real)
      (W4.1/W4.4); native implementations over the recognized constructors *)
+  optional "debug.inspect" (fun args ->
+      match args with
+      | [ v ] -> Ok (Value.VText (Value.show v))
+      | args -> type_err "debug.inspect" args);
   optional "pmf" (fun args ->
       match args with
       | [ dv; v ] ->
@@ -139,15 +436,60 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
             (Runtime_err.Type_error
                (Printf.sprintf "pmf expects a distribution and a value, got %s"
                   (String.concat ", " (List.map Value.show args)))));
+  optional "dist.sample-lw" (fun args ->
+      match args with
+      | [ thunk; Value.VInt samples; Value.VInt seed ] -> (
+          if samples <= 0 then
+            Error (Runtime_err.Arithmetic "dist.sample-lw needs a positive sample count")
+          else
+            match
+              Infer_dist.likelihood_weighting ctx ~seed ~samples (fun () ->
+                  Eval.apply_state ctx thunk [])
+            with
+            | Error ds ->
+                (* E0901/E0902 flatten to a runtime error here; the diagnostic text (with
+                   its code) rides in the message *)
+                Error (Runtime_err.Arithmetic (String.concat "; " (List.map Diag.to_string ds)))
+            | Ok p -> (
+                match
+                  ( Store.lookup_kind store "mk-pair" Resolve.KCon,
+                    Store.lookup_kind store "cons" Resolve.KCon,
+                    Store.lookup_kind store "nil" Resolve.KCon )
+                with
+                | ( Some { Resolve.hash = ph; _ },
+                    Some { Resolve.hash = ch; _ },
+                    Some { Resolve.hash = nh; _ } ) ->
+                    Ok
+                      (List.fold_right
+                         (fun (v, pr) acc ->
+                           Value.VCon
+                             {
+                               con = ch;
+                               name = "cons";
+                               args =
+                                 [
+                                   Value.VCon
+                                     { con = ph; name = "mk-pair"; args = [ v; Value.VReal pr ] };
+                                   acc;
+                                 ];
+                             })
+                         p.Infer_dist.entries
+                         (Value.VCon { con = nh; name = "nil"; args = [] }))
+                | _ -> Error (Runtime_err.Unresolved "prelude list constructors")))
+      | args ->
+          Error
+            (Runtime_err.Type_error
+               (Printf.sprintf "dist.sample-lw expects a thunk and two ints, got %s"
+                  (String.concat ", " (List.map Value.show args)))));
   optional "support" (fun args ->
       match args with
       | [ dv ] ->
           Result.bind (Infer_dist.dist_of_value ctx dv) (fun d ->
               Result.bind (Infer_dist.support ctx d) (fun entries ->
                   match
-                    ( Store.lookup_name store "mk-pair",
-                      Store.lookup_name store "cons",
-                      Store.lookup_name store "nil" )
+                    ( Store.lookup_kind store "mk-pair" Resolve.KCon,
+                      Store.lookup_kind store "cons" Resolve.KCon,
+                      Store.lookup_kind store "nil" Resolve.KCon )
                   with
                   | ( Some { Resolve.hash = ph; _ },
                       Some { Resolve.hash = ch; _ },
@@ -177,22 +519,194 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
   Ok ()
 
 (** [install_console ctx ~out] grants the [console] effect: [print] writes its text through [out]
-    and resumes with unit. *)
-let install_console (ctx : Eval.ctx) ~(out : string -> unit) : (unit, Diag.t list) result =
-  match lookup_hash ctx.Eval.store ~kind:Resolve.KOp "print" with
-  | Error ds -> Error ds
-  | Ok print_op ->
-      Hashtbl.replace ctx.Eval.root_handlers print_op (fun args ->
+    and resumes with unit; [read-line] resumes with one line from [read_line] (stdin by default;
+    injectable for tests, EOF reads as ""). *)
+let install_console ?(read_line = fun () -> try Stdlib.read_line () with End_of_file -> "")
+    (ctx : Eval.ctx) ~(out : string -> unit) : (unit, Diag.t list) result =
+  let ( let* ) = Result.bind in
+  let* print_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "print" in
+  let* read_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "read-line" in
+  Hashtbl.replace ctx.Eval.root_handlers print_op (fun args ->
+      match args with
+      | [ Value.VText s ] ->
+          out s;
+          Ok Value.unit_v
+      | args ->
+          Error
+            (Runtime_err.Type_error
+               (Printf.sprintf "print expects one text, got %s"
+                  (String.concat ", " (List.map Value.show args)))));
+  Hashtbl.replace ctx.Eval.root_handlers read_op (fun args ->
+      match args with
+      | [] -> Ok (Value.VText (read_line ()))
+      | args ->
+          Error
+            (Runtime_err.Type_error
+               (Printf.sprintf "read-line expects no arguments, got %s"
+                  (String.concat ", " (List.map Value.show args)))));
+  Ok ()
+
+(** [install_clock ctx] grants [clock]: [now] is milliseconds since the epoch, [sleep] blocks for
+    that many milliseconds. Both primitives are injectable for tests. *)
+let install_clock ?(now = fun () -> int_of_float (Unix.gettimeofday () *. 1000.))
+    ?(sleep = fun ms -> if ms > 0 then Unix.sleepf (float_of_int ms /. 1000.)) (ctx : Eval.ctx) :
+    (unit, Diag.t list) result =
+  let ( let* ) = Result.bind in
+  let* now_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "now" in
+  let* sleep_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "sleep" in
+  Hashtbl.replace ctx.Eval.root_handlers now_op (fun args ->
+      match args with
+      | [] -> Ok (Value.VInt (now ()))
+      | _ -> Error (Runtime_err.Type_error "now expects no arguments"));
+  Hashtbl.replace ctx.Eval.root_handlers sleep_op (fun args ->
+      match args with
+      | [ Value.VInt ms ] ->
+          sleep ms;
+          Ok Value.unit_v
+      | args ->
+          Error
+            (Runtime_err.Type_error
+               (Printf.sprintf "sleep expects one int, got %s"
+                  (String.concat ", " (List.map Value.show args)))));
+  Ok ()
+
+(** [install_fs ctx] grants [fs]. SANDBOX CAVEAT, stated loudly: the grant is the ONLY boundary —
+    [--allow fs] means the whole filesystem, with the process's own privileges. Path-scoped grants
+    are future work; until then attenuate with in-language handlers (see fs.read-only in
+    prelude/14-world.wft). IO failures surface as [Runtime_err.Io]. *)
+let install_fs (ctx : Eval.ctx) : (unit, Diag.t list) result =
+  let ( let* ) = Result.bind in
+  let* read_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "read" in
+  let* write_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "write" in
+  let* lsdir_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "list-dir" in
+  let io f = try f () with Sys_error m -> Error (Runtime_err.Io m) in
+  Hashtbl.replace ctx.Eval.root_handlers read_op (fun args ->
+      match args with
+      | [ Value.VText path ] -> io (fun () -> Ok (Value.VText (read_file path)))
+      | args ->
+          Error
+            (Runtime_err.Type_error
+               (Printf.sprintf "read expects one path, got %s"
+                  (String.concat ", " (List.map Value.show args)))));
+  Hashtbl.replace ctx.Eval.root_handlers write_op (fun args ->
+      match args with
+      | [ Value.VText path; Value.VText content ] ->
+          io (fun () ->
+              let oc = open_out_bin path in
+              output_string oc content;
+              close_out oc;
+              Ok Value.unit_v)
+      | args ->
+          Error
+            (Runtime_err.Type_error
+               (Printf.sprintf "write expects a path and a text, got %s"
+                  (String.concat ", " (List.map Value.show args)))));
+  match
+    ( Store.lookup_kind ctx.Eval.store "nil" Resolve.KCon,
+      Store.lookup_kind ctx.Eval.store "cons" Resolve.KCon )
+  with
+  | Some { Resolve.hash = nil_h; _ }, Some { Resolve.hash = cons_h; _ } ->
+      Hashtbl.replace ctx.Eval.root_handlers lsdir_op (fun args ->
           match args with
-          | [ Value.VText s ] ->
-              out s;
-              Ok Value.unit_v
+          | [ Value.VText path ] ->
+              io (fun () ->
+                  let entries = Sys.readdir path |> Array.to_list |> List.sort String.compare in
+                  Ok
+                    (List.fold_right
+                       (fun e acc ->
+                         Value.VCon { con = cons_h; name = "cons"; args = [ Value.VText e; acc ] })
+                       entries
+                       (Value.VCon { con = nil_h; name = "nil"; args = [] })))
           | args ->
               Error
                 (Runtime_err.Type_error
-                   (Printf.sprintf "print expects one text, got %s"
+                   (Printf.sprintf "list-dir expects one path, got %s"
                       (String.concat ", " (List.map Value.show args)))));
       Ok ()
+  | _ -> err ~code:"E0702" "prelude list constructors missing for fs.list-dir"
+
+(** [install_infer ?cache_dir ctx] grants [infer] with the STUB completion handler (real API calls
+    are out of scope, like real sockets). With [cache_dir], completions are cached content-addressed
+    by prompt: each entry is a printed form readable by weft fmt, and every call logs "infer-cache
+    hit/miss <key>" to stderr — the second identical run is a full hit, which makes agent loops
+    deterministic and builds an eval dataset as a side effect. *)
+let install_infer ?cache_dir (ctx : Eval.ctx) : (unit, Diag.t list) result =
+  let ( let* ) = Result.bind in
+  let* complete_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "complete" in
+  let stub text model =
+    match model with
+    | Some m -> Printf.sprintf "<stub completion from %s for: %s>" m text
+    | None -> Printf.sprintf "<stub completion for: %s>" text
+  in
+  let rec mkdir_p dir =
+    if dir <> "" && dir <> "." && dir <> "/" && not (Sys.file_exists dir) then begin
+      mkdir_p (Filename.dirname dir);
+      try Sys.mkdir dir 0o755 with Sys_error _ -> ()
+    end
+  in
+  let cached text model k =
+    match cache_dir with
+    | None -> k ()
+    | Some dir -> (
+        (* length-prefixed fields: a prompt text containing the separator cannot collide
+           across the text/model split, and future prompt fields extend the same scheme
+           instead of silently aliasing old keys *)
+        let key =
+          let m = Option.value model ~default:"" in
+          Hash.to_hex
+            (Hash.of_string
+               (Printf.sprintf "%d:%s%d:%s" (String.length text) text (String.length m) m))
+        in
+        let path = Filename.concat dir (key ^ ".wft") in
+        let entry_form completion =
+          Form.form "infer-cache-entry"
+            [
+              Form.F
+                (Form.form "prompt"
+                   (Form.Text text :: (match model with Some m -> [ Form.Text m ] | None -> [])));
+              Form.F (Form.form "completion" [ Form.Text completion ]);
+            ]
+        in
+        (* a READABLE entry is a hit; absent or corrupt is a miss that recomputes and
+           (re)writes. Cache IO failures fall back to uncached — the completion still
+           happens and the CLI exit-code contract survives a bad --infer-cache. *)
+        let stored =
+          if Sys.file_exists path then
+            match Reader.parse_one ~file:path (read_file path) with
+            | Ok { Form.args = [ _; Form.F { Form.args = [ Form.Text c ]; _ } ]; _ } -> Some c
+            | _ -> None
+          else None
+        in
+        match stored with
+        | Some c ->
+            Printf.eprintf "infer-cache hit %s\n%!" (String.sub key 0 8);
+            c
+        | None ->
+            Printf.eprintf "infer-cache miss %s\n%!" (String.sub key 0 8);
+            let c = k () in
+            (try
+               mkdir_p dir;
+               let oc = open_out_bin path in
+               output_string oc (Printer.print (entry_form c) ^ "\n");
+               close_out oc
+             with Sys_error m -> Printf.eprintf "infer-cache unavailable (%s)\n%!" m);
+            c)
+  in
+  Hashtbl.replace ctx.Eval.root_handlers complete_op (fun args ->
+      match args with
+      | [ Value.VCon { name = "mk-prompt"; args = [ Value.VText text; model_v ]; _ } ] ->
+          let model =
+            match model_v with
+            | Value.VCon { name = "some"; args = [ Value.VText m ]; _ } -> Some m
+            | _ -> None
+          in
+          Ok (Value.VText (cached text model (fun () -> stub text model)))
+      | args ->
+          Error
+            (Runtime_err.Type_error
+               (Printf.sprintf "complete expects one prompt, got %s"
+                  (String.concat ", " (List.map Value.show args)))));
+  Ok ()
 
 (** [install_eval ctx] grants the [eval] effect: [eval-code] takes a [VCode] payload, validates it
     as an expression, resolves it against the store's current names, and runs it in [ctx]. Failures
@@ -226,27 +740,121 @@ let install_eval (ctx : Eval.ctx) : (unit, Diag.t list) result =
 (** [install_net ctx] grants the [net] effect with the M0 stub handler: [net-fetch] returns a canned
     response naming the URL (the hostile-demo stand-in; real IO is out of scope). *)
 let install_net (ctx : Eval.ctx) : (unit, Diag.t list) result =
-  match lookup_hash ctx.Eval.store ~kind:Resolve.KOp "net-fetch" with
-  | Error ds -> Error ds
-  | Ok fetch_op ->
-      Hashtbl.replace ctx.Eval.root_handlers fetch_op (fun args ->
-          match args with
-          | [ Value.VText url ] -> Ok (Value.VText (Printf.sprintf "<stub response for %s>" url))
-          | args ->
-              Error
-                (Runtime_err.Type_error
-                   (Printf.sprintf "net-fetch expects one text, got %s"
-                      (String.concat ", " (List.map Value.show args)))));
-      Ok ()
+  let ( let* ) = Result.bind in
+  let* fetch_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "fetch" in
+  let* resp_con = lookup_hash ctx.Eval.store ~kind:Resolve.KCon "mk-response" in
+  Hashtbl.replace ctx.Eval.root_handlers fetch_op (fun args ->
+      match args with
+      | [ Value.VCon { name = "mk-request"; args = [ Value.VText url; _body ]; _ } ] ->
+          Ok
+            (Value.VCon
+               {
+                 con = resp_con;
+                 name = "mk-response";
+                 args =
+                   [ Value.VInt 200; Value.VText (Printf.sprintf "<stub response for %s>" url) ];
+               })
+      | args ->
+          Error
+            (Runtime_err.Type_error
+               (Printf.sprintf "fetch expects one request, got %s"
+                  (String.concat ", " (List.map Value.show args)))));
+  Ok ()
 
-(** [grant ctx name ~out] installs the root handler for effect [name] (case-insensitive: "Eval" and
-    "eval" both work). Returns E0703 for effects that exist but are not grantable (e.g. [failure])
-    and unknown effect names alike. *)
-let grant (ctx : Eval.ctx) name ~out : (unit, Diag.t list) result =
+(** [install_dist ctx ~seed] grants the [dist] effect with the seeded SAMPLING handler (stdlib
+    SL.7): [sample d] draws one value ancestrally; [observe] reaching the root is a defect (decision
+    D7's default) surfaced by the CLI as E0904 — observation only means something under an inference
+    driver. *)
+let install_dist (ctx : Eval.ctx) ~seed : (unit, Diag.t list) result =
+  let ( let* ) = Result.bind in
+  let* sample_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "sample" in
+  let* observe_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "observe" in
+  let rng = Infer_dist.Rng.make seed in
+  Hashtbl.replace ctx.Eval.root_handlers sample_op (fun args ->
+      match args with
+      | [ dv ] -> Result.bind (Infer_dist.dist_of_value ctx dv) (Infer_dist.sample_dist ctx rng)
+      | args ->
+          Error
+            (Runtime_err.Type_error
+               (Printf.sprintf "sample expects one distribution, got %s"
+                  (String.concat ", " (List.map Value.show args)))));
+  Hashtbl.replace ctx.Eval.root_handlers observe_op (fun _ -> Error Runtime_err.Observe_at_root);
+  Ok ()
+
+(** [install_dry ctx ~audit] (TL.2) grants the WORLD without consequences: reads and the clock
+    forward to the real primitives (observation is safe), while fs.write, net.fetch, and
+    infer.complete are converted into audit records and answered with stubs — the program runs to
+    completion, the trail says what it WOULD have done, and nothing mutates. eval is refused
+    separately (it runs at root authority and cannot be dried). *)
+let install_dry (ctx : Eval.ctx) ~(audit : string list ref) : (unit, Diag.t list) result =
+  let ( let* ) = Result.bind in
+  let record line = audit := line :: !audit in
+  let* () = install_console ctx ~out:print_string in
+  let* () = install_clock ctx in
+  let* () = install_fs ctx in
+  let* () = install_infer ctx in
+  let* () = install_dist ctx ~seed:0 in
+  (* seed 0: dry runs are deterministic; sampling mutates nothing *)
+  (* now override the mutating/world-reaching ops with recorders *)
+  let* write_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "write" in
+  Hashtbl.replace ctx.Eval.root_handlers write_op (fun args ->
+      match args with
+      | [ Value.VText path; Value.VText content ] ->
+          record (Printf.sprintf "written %s (%d bytes)" path (String.length content));
+          Ok Value.unit_v
+      | args ->
+          Error
+            (Runtime_err.Type_error
+               (Printf.sprintf "write expects a path and a text, got %s"
+                  (String.concat ", " (List.map Value.show args)))));
+  let* fetch_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "fetch" in
+  let* resp_con = lookup_hash ctx.Eval.store ~kind:Resolve.KCon "mk-response" in
+  Hashtbl.replace ctx.Eval.root_handlers fetch_op (fun args ->
+      match args with
+      | [ Value.VCon { name = "mk-request"; args = [ Value.VText url; _ ]; _ } ] ->
+          record (Printf.sprintf "fetched %s" url);
+          Ok
+            (Value.VCon
+               {
+                 con = resp_con;
+                 name = "mk-response";
+                 args = [ Value.VInt 200; Value.VText "<dry-run response>" ];
+               })
+      | args ->
+          Error
+            (Runtime_err.Type_error
+               (Printf.sprintf "fetch expects one request, got %s"
+                  (String.concat ", " (List.map Value.show args)))));
+  let* complete_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "complete" in
+  Hashtbl.replace ctx.Eval.root_handlers complete_op (fun args ->
+      match args with
+      | [ Value.VCon { name = "mk-prompt"; args = [ Value.VText text; _ ]; _ } ] ->
+          record (Printf.sprintf "completed prompt %S" text);
+          Ok (Value.VText "<dry-run completion>")
+      | args ->
+          Error
+            (Runtime_err.Type_error
+               (Printf.sprintf "complete expects one prompt, got %s"
+                  (String.concat ", " (List.map Value.show args)))));
+  Ok ()
+
+(** The only effects [grant] can install, i.e. the valid [--allow] values; the E0814 hint consults
+    this so it never suggests granting a pure effect. *)
+let grantable_names = [ "clock"; "console"; "dist"; "eval"; "fs"; "infer"; "net" ]
+
+(** [grant ctx name ~out ~seed] installs the root handler for effect [name] (case-insensitive:
+    "Eval" and "eval" both work); [seed] feeds the dist sampling handler only. Returns E0703 for
+    effects that exist but are not grantable (e.g. [abort]) and unknown effect names alike; keep the
+    dispatch in sync with {!grantable_names}. *)
+let grant (ctx : Eval.ctx) name ~infer_cache ~out ~seed : (unit, Diag.t list) result =
   match String.lowercase_ascii name with
   | "console" -> install_console ctx ~out
   | "eval" -> install_eval ctx
   | "net" -> install_net ctx
+  | "dist" -> install_dist ctx ~seed
+  | "clock" -> install_clock ctx
+  | "fs" -> install_fs ctx
+  | "infer" -> install_infer ?cache_dir:infer_cache ctx
   | other -> err ~code:"E0703" "effect `%s` is not grantable" other
 
 (** Builtin type signatures for the checker (W3.2): the marker bodies would type as [code], so the
@@ -275,6 +883,112 @@ let builtin_signatures (store : Store.t) : ((Hash.t * Types.scheme) list, Diag.t
         ("eq", arrow2 bool_ty);
         ("lt", arrow2 bool_ty);
       ]
+  in
+  (* mod rides the optional lane like the reals: stub preludes may omit it *)
+  let* base =
+    match lookup_hash store ~kind:Resolve.KTerm "mod" with
+    | Ok h -> Ok (base @ [ (h, Types.mono (arrow2 int_ty)) ])
+    | Error _ -> Ok base
+  in
+  (* int-compare ships with ring 0; its ordering result type lives in 02-data *)
+  let* base =
+    match
+      ( lookup_hash store ~kind:Resolve.KType "ordering",
+        lookup_hash store ~kind:Resolve.KTerm "int-compare" )
+    with
+    | Ok ord_h, Ok ic_h -> Ok (base @ [ (ic_h, Types.mono (arrow2 (Types.TCon (ord_h, [])))) ])
+    | _ -> Ok base
+  in
+  (* W6.6 code reflection signatures *)
+  let* base =
+    match
+      ( lookup_hash store ~kind:Resolve.KType "code",
+        lookup_hash store ~kind:Resolve.KType "text",
+        lookup_hash store ~kind:Resolve.KType "option",
+        lookup_hash store ~kind:Resolve.KType "list",
+        lookup_hash store ~kind:Resolve.KTerm "code.form" )
+    with
+    | Ok code_h, Ok text_h, Ok opt_h, Ok list_h, Ok _ ->
+        let code = Types.TCon (code_h, []) in
+        let text = Types.TCon (text_h, []) in
+        let opt t = Types.TCon (opt_h, [ t ]) in
+        let tlist t = Types.TCon (list_h, [ t ]) in
+        let fn params result = Types.mono (Types.TArrow (params, Types.empty_row, result)) in
+        let rec go acc = function
+          | [] -> Ok (List.rev acc)
+          | (name, s) :: rest ->
+              let* h = lookup_hash store ~kind:Resolve.KTerm name in
+              go ((h, s) :: acc) rest
+        in
+        let* code_sigs =
+          go []
+            [
+              ("code.of-int", fn [ int_ty ] code);
+              ("code.to-int", fn [ code ] (opt int_ty));
+              ("code.of-text", fn [ text ] code);
+              ("code.to-text", fn [ code ] (opt text));
+              ("code.form", fn [ text; tlist code ] code);
+              ("code.un-form", fn [ code ] (opt (Types.TTuple [ text; tlist code ])));
+              ("code.eq?", fn [ code; code ] bool_ty);
+              ("code.diff", fn [ code; code ] text);
+            ]
+        in
+        Ok (base @ code_sigs)
+    | _ -> Ok base
+  in
+  (* the SL.5 text layer (all-or-nothing: 11-text.wft declares every marker) *)
+  let* base =
+    match
+      ( lookup_hash store ~kind:Resolve.KType "text",
+        lookup_hash store ~kind:Resolve.KType "real",
+        lookup_hash store ~kind:Resolve.KType "ordering",
+        lookup_hash store ~kind:Resolve.KType "option",
+        lookup_hash store ~kind:Resolve.KType "list",
+        lookup_hash store ~kind:Resolve.KTerm "text.length" )
+    with
+    | Ok text_h, Ok real_h, Ok ord_h, Ok opt_h, Ok list_h, Ok _ ->
+        let text = Types.TCon (text_h, []) in
+        let real = Types.TCon (real_h, []) in
+        let opt t = Types.TCon (opt_h, [ t ]) in
+        let tlist t = Types.TCon (list_h, [ t ]) in
+        let fn params result = Types.mono (Types.TArrow (params, Types.empty_row, result)) in
+        let rec go acc = function
+          | [] -> Ok (List.rev acc)
+          | (name, s) :: rest ->
+              let* h = lookup_hash store ~kind:Resolve.KTerm name in
+              go ((h, s) :: acc) rest
+        in
+        let* text_sigs =
+          go []
+            [
+              ("text.length", fn [ text ] int_ty);
+              ("text.concat", fn [ text; text ] text);
+              ("text.join", fn [ tlist text; text ] text);
+              ("text.split", fn [ text; text ] (tlist text));
+              ("text.slice", fn [ text; int_ty; int_ty ] text);
+              ("text.trim", fn [ text ] text);
+              ("text.contains?", fn [ text; text ] bool_ty);
+              ("text.empty?", fn [ text ] bool_ty);
+              ("text.from-int", fn [ int_ty ] text);
+              ("text.to-int", fn [ text ] (opt int_ty));
+              ("text.from-real", fn [ real ] text);
+              ("text.to-real", fn [ text ] (opt real));
+              ("text-compare", fn [ text; text ] (Types.TCon (ord_h, [])));
+            ]
+        in
+        let* base =
+          match lookup_hash store ~kind:Resolve.KTerm "debug.inspect" with
+          | Error _ -> Ok (base @ text_sigs)
+          | Ok di ->
+              let av = Types.new_tvar 1 in
+              Ok
+                (base @ text_sigs
+                @ [
+                    (di, { Types.ty = Types.TArrow ([ av ], Types.empty_row, text); gen_level = 0 });
+                  ])
+        in
+        Ok base
+    | _ -> Ok base
   in
   (* dist-layer builtins are optional (prelude may not ship them) *)
   match
@@ -305,6 +1019,29 @@ let builtin_signatures (store : Store.t) : ((Hash.t * Types.scheme) list, Diag.t
           gen_level = 0;
         }
       in
+      (* dist.sample-lw : forall a e. (() ->{dist | e} a, int, int) ->{e} list (pair a real)
+         — the thunk's row must NAME dist (the driver discharges it), everything else rides
+         the shared row variable *)
+      let sample_lw_sig =
+        match lookup_hash store ~kind:Resolve.KEffect "dist" with
+        | Error _ -> None
+        | Ok dist_eff ->
+            let av = a () in
+            let e = Types.new_rvar 1 in
+            Some
+              {
+                Types.ty =
+                  Types.TArrow
+                    ( [
+                        Types.TArrow ([], { Types.effects = [ dist_eff ]; tail = e }, av);
+                        int_ty;
+                        int_ty;
+                      ],
+                      { Types.effects = []; tail = e },
+                      Types.TCon (list_h, [ Types.TCon (pair_h, [ av; real_ty ]) ]) );
+                gen_level = 0;
+              }
+      in
       match
         ( lookup_hash store ~kind:Resolve.KTerm "add-real",
           lookup_hash store ~kind:Resolve.KTerm "mul-real",
@@ -313,6 +1050,24 @@ let builtin_signatures (store : Store.t) : ((Hash.t * Types.scheme) list, Diag.t
           lookup_hash store ~kind:Resolve.KTerm "support" )
       with
       | Ok ar, Ok mr, Ok dr, Ok pm, Ok su ->
+          let lw =
+            match (sample_lw_sig, lookup_hash store ~kind:Resolve.KTerm "dist.sample-lw") with
+            | Some s, Ok h -> [ (h, s) ]
+            | _ -> []
+          in
+          let extra_real =
+            (* sub-real / lt-real landed with W6.9's tolerance comparisons *)
+            match
+              ( lookup_hash store ~kind:Resolve.KTerm "sub-real",
+                lookup_hash store ~kind:Resolve.KTerm "lt-real" )
+            with
+            | Ok sr, Ok lr ->
+                [
+                  (sr, Types.mono rarrow2);
+                  (lr, Types.mono (Types.TArrow ([ real_ty; real_ty ], Types.empty_row, bool_ty)));
+                ]
+            | _ -> []
+          in
           Ok
             (base
             @ [
@@ -321,6 +1076,7 @@ let builtin_signatures (store : Store.t) : ((Hash.t * Types.scheme) list, Diag.t
                 (dr, Types.mono rarrow2);
                 (pm, pmf_sig);
                 (su, support_sig);
-              ])
+              ]
+            @ lw @ extra_real)
       | _ -> Ok base)
   | _ -> Ok base

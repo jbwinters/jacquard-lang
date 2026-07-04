@@ -5,15 +5,22 @@ This cram is the checked-in transcript for demos/m3.sh.
 
 Exact enumeration of the two-coins model (2/3, 1/3):
 
+  $ weft hash ../../demos/m3-two-coins.wft > model.before.hash
+  $ sed 's/[0-9a-f]\{64\}/HASH/' model.before.hash
+  0 HASH
   $ weft infer enumerate ../../demos/m3-two-coins.wft
   0.666667  true
   0.333333  false
+  $ weft hash ../../demos/m3-two-coins.wft > model.after-enum.hash
+  $ cmp model.before.hash model.after-enum.hash
 
 Likelihood weighting with a fixed seed converges and is reproducible:
 
   $ weft infer lw ../../demos/m3-two-coins.wft --seed 42 --samples 100000
   0.667898  true
   0.332102  false
+  $ weft hash ../../demos/m3-two-coins.wft > model.after-lw.hash
+  $ cmp model.before.hash model.after-lw.hash
   $ weft infer lw ../../demos/m3-two-coins.wft --seed 42 --samples 100000
   0.667898  true
   0.332102  false

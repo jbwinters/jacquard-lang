@@ -1,0 +1,15 @@
+; ring 2 pins: text builtins compose, the map surface elaborates with its captive
+; ord, and dist.sample-lw discharges dist through the row (SL.5-SL.7 review pin).
+(defterm ((binding csv-swap ()
+  (lam ((pvar s))
+    (app (var text.join) (app (var text.split) (var s) (lit ",")) (lit ";"))))))
+(defterm ((binding index-of-names ()
+  (lam ((pvar names))
+    (app (var list.fold) (var names) (app (var map.empty) (var text.ord))
+      (lam ((pvar m) (pvar n))
+        (app (var map.set) (var m) (var n) (app (var text.length) (var n)))))))))
+(defterm ((binding die-posterior ()
+  (lam ((pvar n) (pvar seed))
+    (app (var dist.sample-lw)
+      (lam () (app (var sample) (app (var uniform-int) (lit 1) (lit 6))))
+      (var n) (var seed))))))

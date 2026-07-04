@@ -1,0 +1,63 @@
+; Ambiguity-preserving extraction.
+;
+; An extractor sees "03/04/25" and keeps a posterior instead of choosing too
+; early. Downstream routing consumes the distribution. A human click is modeled
+; as an observe, so the downstream route re-enumerates instead of mutating a
+; chosen string field.
+
+(defterm ((binding extracted-date ()
+  (lam ()
+    (app (var categorical)
+      (app (var cons) (app (var mk-pair) (lit "Mar 4, 2025") (lit 0.56))
+        (app (var cons) (app (var mk-pair) (lit "Apr 3, 2025") (lit 0.41))
+          (app (var cons) (app (var mk-pair) (lit "Unknown") (lit 0.03))
+            (var nil)))))))))
+
+(defterm ((binding same-text-prob ()
+  (lam ((pvar a) (pvar b))
+    (match (app (app (var eq.fn) (var text.eq)) (var a) (var b))
+      (clause (pcon true) (lit 1.0))
+      (clause (pcon false) (lit 0.0)))))))
+
+(defterm ((binding route-for-date ()
+  (lam ((pvar date))
+    (match (app (app (var eq.fn) (var text.eq)) (var date) (lit "Unknown"))
+      (clause (pcon true) (lit "ask-human"))
+      (clause (pcon false)
+        (match (app (app (var eq.fn) (var text.eq)) (var date) (lit "Mar 4, 2025"))
+          (clause (pcon true) (lit "escalate-overdue"))
+          (clause (pcon false) (lit "schedule-followup")))))))))
+
+(defterm ((binding date-posterior ()
+  (lam ()
+    (app (var dist.tally)
+      (app (var dist.enumerate) (lam () (app (var sample) (app (var extracted-date)))))
+      (var text.eq))))))
+
+(defterm ((binding routing-posterior ()
+  (lam ()
+    (app (var dist.tally)
+      (app (var dist.enumerate)
+        (lam ()
+          (let nonrec (pvar date) (app (var sample) (app (var extracted-date)))
+            (app (var route-for-date) (var date)))))
+      (var text.eq))))))
+
+(defterm ((binding after-click-apr3 ()
+  (lam ()
+    (app (var dist.tally)
+      (app (var dist.enumerate)
+        (lam ()
+          (let nonrec (pvar date) (app (var sample) (app (var extracted-date)))
+            (let nonrec (pwild)
+              (app (var observe)
+                (app (var bernoulli) (app (var same-text-prob) (var date) (lit "Apr 3, 2025")))
+                (var true))
+              (app (var route-for-date) (var date))))))
+      (var text.eq))))))
+
+; --- demo driver ---
+
+(app (var date-posterior))
+(app (var routing-posterior))
+(app (var after-click-apr3))

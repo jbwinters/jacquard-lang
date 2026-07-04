@@ -1,0 +1,92 @@
+; Warp W6.1: the check effect, reports, test.run, and the assertion library.
+; After SL.1's kind-aware index the effect can be named `check` while the
+; assertions are check.* term names — no collision.
+(defeffect check ((tvar a))
+  (op check ((tref bool) (tref text)) (ttuple))
+  (op fail ((tref text)) (tvar a)))
+
+; plain data so the CLI can render it and Warp can assert over its own reports;
+; entries are (label, passed) in CHECK ORDER; hard is a fail's message. A report
+; with no entries and no hard failure is the zero-check case (W6.2 warns).
+(deftype report ()
+  (con mk-report
+    (field entries (tapp (tref list) (ttuple (tref text) (tref bool))))
+    (field hard (tapp (tref option) (tref text)))))
+
+; the deep handler: check conses and resumes; fail returns WITHOUT resuming,
+; so checks before the fail survive in outer frames and later ones never run
+(defterm ((binding test.run ()
+  (lam ((pvar thunk))
+    (handle (app (var thunk))
+      (ret (pwild) (app (var mk-report) (var nil) (var none)))
+      (opclause check ((pvar ok) (pvar label)) k
+        (match (app (var k) (tuple))
+          (clause (pcon mk-report (pvar entries) (pvar hard))
+            (app (var mk-report)
+              (app (var cons) (tuple (var label) (var ok)) (var entries))
+              (var hard)))))
+      (opclause fail ((pvar msg)) k
+        (app (var mk-report) (var nil) (app (var some) (var msg)))))))))
+
+; --- assertions ---
+(defterm ((binding check.true ()
+  (lam ((pvar b) (pvar label)) (app (var check) (var b) (var label))))))
+
+(defterm ((binding check.eq ()
+  (lam ((pvar actual) (pvar expected) (pvar d) (pvar s) (pvar label))
+    (match (app (app (var eq.fn) (var d)) (var actual) (var expected))
+      (clause (pcon true) (app (var check) (var true) (var label)))
+      (clause (pcon false)
+        (app (var check) (var false)
+          (app (var text.concat) (var label)
+            (app (var text.concat) (lit ": expected ")
+              (app (var text.concat) (app (app (var show.fn) (var s)) (var expected))
+                (app (var text.concat) (lit ", got ")
+                  (app (app (var show.fn) (var s)) (var actual)))))))))))))
+
+(defterm ((binding check.some ()
+  (lam ((pvar o) (pvar s) (pvar label))
+    (match (var o)
+      (clause (pcon some (pwild)) (app (var check) (var true) (var label)))
+      (clause (pcon none)
+        (app (var check) (var false)
+          (app (var text.concat) (var label) (lit ": expected some, got none")))))))))
+
+; the row exchange worth a golden: the body's abort is DISCHARGED while check
+; is ADDED — (() ->{abort | e} a) ->{check | e} ()
+(defterm ((binding check.fails ()
+  (lam ((pvar thunk) (pvar label))
+    (match (app (var abort.to-option) (var thunk))
+      (clause (pcon none) (app (var check) (var true) (var label)))
+      (clause (pcon some (pwild))
+        (app (var check) (var false)
+          (app (var text.concat) (var label) (lit ": completed without aborting")))))))))
+
+(defterm ((binding check.throws ()
+  (lam ((pvar thunk) (pvar pred) (pvar s) (pvar label))
+    (app (var throw.catch)
+      (lam ()
+        (let nonrec (pwild) (app (var thunk))
+          (app (var check) (var false)
+            (app (var text.concat) (var label) (lit ": completed without throwing")))))
+      (lam ((pvar e))
+        (app (var check) (app (var pred) (var e))
+          (app (var text.concat) (var label)
+            (app (var text.concat) (lit ": threw ") (app (app (var show.fn) (var s)) (var e)))))))))))
+
+; --- W6.2: the test types. Discovery is by CHECKED TYPE (decision D12): a term
+; whose type is `test` or `world-test` is a test; names are display only. The
+; case thunk's row is CLOSED {check}: constructing a case whose body touches
+; console fails to typecheck — hermeticity is free.
+(deftype test ()
+  (con case (field (tref text)) (field (tarrow () (row (eref check)) (ttuple))))
+  (con prop (field (tref text)) (field (tarrow () (row (eref dist) (eref check)) (ttuple))))
+  (con group (field (tref text)) (field (tapp (tref list) (tref test)))))
+
+(deftype world-test ()
+  (con wcase
+    (field (tref text))
+    (field
+      (tarrow ()
+        (row (eref check) (eref fs) (eref net) (eref clock) (eref console))
+        (ttuple)))))

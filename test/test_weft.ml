@@ -27,5 +27,18 @@ let () =
       ("diags", Test_diags.suite);
       ("diff", Test_diff.suite);
       ("infer", Test_infer.suite);
+      ("gauntlet-handlers", Test_gauntlet_handlers.suite);
+      ("gauntlet-hashing", Test_gauntlet_hashing.suite);
+      ("gauntlet-dist", Test_gauntlet_dist.suite);
       ("errors-doc", Test_errors_doc.suite);
+      ("names", Test_names.suite);
+      ("stdlib", Test_stdlib.suite);
+      ("text", Test_text.suite);
+      ("map", Test_map.suite);
+      ("dist-lib", Test_dist_lib.suite);
+      ("world", Test_world.suite);
+      ("rings", Test_rings.suite);
+      ("warp", Test_warp.suite);
+      ("props", Test_props.suite);
+      ("replay", Test_replay.suite);
     ]

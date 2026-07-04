@@ -1,0 +1,6 @@
+; Warp's hermeticity guarantee (W6.2, D12): the case field's row is closed
+; {check}, so a test body that performs console fails to TYPECHECK — no
+; sandbox needed, the constructor's type is the seal.
+(defterm ((binding sneaky-test ()
+  (app (var case) (lit "prints")
+    (lam () (let nonrec (pwild) (app (var print) (lit "leak")) (tuple)))))))

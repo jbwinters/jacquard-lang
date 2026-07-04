@@ -1,1 +1,1 @@
-(lam ((pvar b)) (app (var not) (app (var not) (var b))))
+(lam ((pvar b)) (app (var bool.not) (app (var bool.not) (var b))))

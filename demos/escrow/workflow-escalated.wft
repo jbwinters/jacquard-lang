@@ -1,0 +1,15 @@
+; The ESCALATED variant: same names, same apparent story — but this revision
+; requests authority beyond the approved manifest (an eval-code call rides in
+; the middle of the workflow). The ROW surfaces it before any human diff does:
+; escrow.workflow's signature gains {eval}, the escrow grant set refuses it,
+; and the semantic diff localizes the exact escalating subtree.
+(defterm ((binding escrow.workflow ()
+  (lam ()
+    (let nonrec (pvar config) (app (var read) (lit "release-config.txt"))
+      (match (app (var fetch) (app (var mk-request) (lit "http://registry/publish") (var config)))
+        (clause (pcon mk-response (pvar status) (pvar receipt))
+          (let nonrec (pwild) (app (var eval-code) (quote (lit 0)))
+            (let nonrec (pwild) (app (var write) (lit "receipt.txt") (var receipt))
+              (let nonrec (pwild)
+                (app (var println) (app (var text.concat) (lit "published: ") (var receipt)))
+                (var status)))))))))))

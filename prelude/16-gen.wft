@@ -1,0 +1,118 @@
+; Warp generators and probabilistic assertions (W6.4, W6.9). Generators are
+; ordinary Dist programs: every random choice is a sample the property drivers
+; can log (sampling mode) or enumerate (exhaustive mode).
+(defterm ((binding gen.pair ()
+  (lam ((pvar ga) (pvar gb)) (tuple (app (var ga)) (app (var gb)))))))
+
+(defterm ((binding gen.option ()
+  (lam ((pvar g))
+    (match (app (var sample) (app (var bernoulli) (lit 0.5)))
+      (clause (pcon true) (app (var some) (app (var g))))
+      (clause (pcon false) (var none)))))))
+
+(defterm ((binding gen.result ()
+  (lam ((pvar ge) (pvar ga))
+    (match (app (var sample) (app (var bernoulli) (lit 0.5)))
+      (clause (pcon true) (app (var ok) (app (var ga))))
+      (clause (pcon false) (app (var err) (app (var ge)))))))))
+
+; the length is ONE uniform-int choice, so deleting it from a choice log
+; resamples a shorter list — list shrinking falls out of log shrinking
+(defterm
+  ((binding gen.list-n ()
+    (lam ((pvar g) (pvar n))
+      (match (app (var lt) (lit 0) (var n))
+        (clause (pcon false) (var nil))
+        (clause (pcon true)
+          (app (var cons) (app (var g))
+            (app (var gen.list-n) (var g) (app (var sub) (var n) (lit 1))))))))
+   (binding gen.list ()
+    (lam ((pvar g) (pvar max-len))
+      (app (var gen.list-n) (var g)
+        (app (var sample) (app (var uniform-int) (lit 0) (var max-len))))))))
+
+; a property is a plain function: sample, then run the body — the row composes
+(defterm ((binding prop.for ()
+  (lam ((pvar g) (pvar body)) (app (var body) (app (var g)))))))
+
+; --- W6.9: probabilistic assertions ---
+(defterm ((binding real.abs ()
+  (lam ((pvar x))
+    (match (app (var lt-real) (var x) (lit 0.0))
+      (clause (pcon true) (app (var sub-real) (lit 0.0) (var x)))
+      (clause (pcon false) (var x)))))))
+
+(defterm ((binding real.close? ()
+  (lam ((pvar a) (pvar b) (pvar tol))
+    (match (app (var lt-real) (var tol) (app (var real.abs) (app (var sub-real) (var a) (var b))))
+      (clause (pcon true) (var false))
+      (clause (pcon false) (var true)))))))
+
+; probability of x in a tallied table, zero when absent (union-with-zero-fill)
+(defterm ((binding dist.mass-of ()
+  (lam ((pvar table) (pvar x) (pvar d))
+    (app (var list.fold) (var table) (lit 0.0)
+      (lam ((pvar acc) (pvar e))
+        (match (var e)
+          (clause (pcon mk-pair (pvar y) (pvar p))
+            (match (app (app (var eq.fn) (var d)) (var x) (var y))
+              (clause (pcon true) (app (var add-real) (var acc) (var p)))
+              (clause (pcon false) (var acc)))))))))))
+
+; every first-component of a weighted table, deduped under d, keeping order
+(defterm ((binding dist.support-of ()
+  (lam ((pvar table) (pvar d))
+    (app (var list.fold) (var table) (var nil)
+      (lam ((pvar acc) (pvar e))
+        (match (var e)
+          (clause (pcon mk-pair (pvar x) (pwild))
+            (match (app (var list.contains?) (var acc) (var x) (var d))
+              (clause (pcon true) (var acc))
+              (clause (pcon false) (app (var list.append) (var acc) (app (var cons) (var x) (var nil)))))))))))))
+
+; one check per outcome in the UNION of supports: a missing outcome compares
+; against zero mass, which is what "same distribution" means
+(defterm ((binding dist.check-tables ()
+  (lam ((pvar actual) (pvar expected) (pvar d) (pvar s) (pvar tol) (pvar label))
+    (app (var list.each)
+      (app (var dist.support-of) (app (var list.append) (var actual) (var expected)) (var d))
+      (lam ((pvar x))
+        (let nonrec (pvar pa) (app (var dist.mass-of) (var actual) (var x) (var d))
+          (let nonrec (pvar pe) (app (var dist.mass-of) (var expected) (var x) (var d))
+            (app (var check)
+              (app (var real.close?) (var pa) (var pe) (var tol))
+              (app (var text.concat) (var label)
+                (app (var text.concat) (lit ": P(")
+                  (app (var text.concat) (app (app (var show.fn) (var s)) (var x))
+                    (app (var text.concat) (lit ") = ")
+                      (app (var text.concat) (app (var text.from-real) (var pa))
+                        (app (var text.concat) (lit ", expected ")
+                          (app (var text.from-real) (var pe)))))))))))))))))
+
+; enumerate the model, tally with the supplied Eq, compare against the table
+(defterm ((binding check.posterior ()
+  (lam ((pvar model) (pvar expected) (pvar d) (pvar s) (pvar tol))
+    (app (var dist.check-tables)
+      (app (var dist.tally) (app (var dist.enumerate) (var model)) (var d))
+      (var expected) (var d) (var s) (var tol) (lit "posterior"))))))
+
+; two models agree pointwise over the union of their supports
+(defterm ((binding check.same-dist ()
+  (lam ((pvar model-a) (pvar model-b) (pvar d) (pvar s) (pvar tol))
+    (app (var dist.check-tables)
+      (app (var dist.tally) (app (var dist.enumerate) (var model-a)) (var d))
+      (app (var dist.tally) (app (var dist.enumerate) (var model-b)) (var d))
+      (var d) (var s) (var tol) (lit "same-dist"))))))
+
+; sampled variants for models too large to enumerate: seeded, deterministic,
+; cacheable — and the label NAMES the seed and count so review sees the caveat
+; (a seed-pinned tolerance can overfit its seed)
+(defterm ((binding check.posterior-sampled ()
+  (lam ((pvar model) (pvar expected) (pvar d) (pvar s) (pvar tol) (pvar n) (pvar seed))
+    (app (var dist.check-tables)
+      (app (var dist.tally) (app (var dist.sample-lw) (var model) (var n) (var seed)) (var d))
+      (var expected) (var d) (var s) (var tol)
+      (app (var text.concat) (lit "posterior[samples=")
+        (app (var text.concat) (app (var text.from-int) (var n))
+          (app (var text.concat) (lit ",seed=")
+            (app (var text.concat) (app (var text.from-int) (var seed)) (lit "]"))))))))))

@@ -1,6 +1,6 @@
 ; the hostile demo core (W3.6): a generated-looking function that reaches for
 ; the network; every caller carries net in its row
 (defterm ((binding fetch-title ()
-  (lam ((pvar url)) (app (var net-fetch) (var url))))))
+  (lam ((pvar url)) (app (var net.get) (var url))))))
 (defterm ((binding summarize ()
   (lam ((pvar url)) (app (var fetch-title) (var url))))))

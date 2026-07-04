@@ -13,7 +13,7 @@ resume-wrong-type | resume-wrong-type.wft:1:89-110: error[E0801]: argument: expe
   hint: the expected side comes from the surrounding context; make both sides agree
 ann-mismatch | ann-mismatch.wft:1:1-26: error[E0804]: annotation mismatch: expected text, got int (type mismatch)
   hint: the annotation is the contract: change the body or the annotation
-ann-pure-but-prints | ann-pure-but-prints.wft:1:1-70: error[E0804]: annotation mismatch: expected () ->{} (), got () ->{console | e} () (a closed effect row cannot absorb extra effects)
+ann-pure-but-prints | ann-pure-but-prints.wft:1:1-70: error[E0804]: annotation mismatch: expected () ->{} (), got () ->{console | e} () (a closed effect row cannot absorb extra effects; a stored definition passed as a thunk can be eta-expanded at the use site: (lam () (app (var f))))
   hint: the annotation is the contract: change the body or the annotation
 ann-rigid-escape | ann-rigid-escape.wft:1:1-90: error[E0804]: annotation mismatch: expected (a) ->{} a, got (a) ->{} int (type mismatch)
   hint: the annotation is the contract: change the body or the annotation
@@ -32,6 +32,6 @@ nonexhaustive-nested | nonexhaustive-nested.wft:1:24-31: error[E0813]: this matc
   hint: add a clause matching the witness, or a (pwild) default
 ungranted-effect | error[E0814]: this program requires the `console` effect, which is not granted (performed via `print`)
   hint: grant it with --allow console, or handle the effect in the program
-effectful-toplevel-body | effectful-toplevel-body.wft:1:11-80: error[E0815]: top-level definition `sneaky` performs the `net` effect while being defined
+effectful-toplevel-body | effectful-toplevel-body.wft:1:11-78: error[E0815]: top-level definition `sneaky` performs the `net` effect while being defined
   hint: wrap the body in a lambda and perform the effect when called
 redundant-clause | redundant-clause.wft:1:57-85: warning[W0801]: this clause is redundant: earlier clauses match everything it does

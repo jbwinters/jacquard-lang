@@ -17,7 +17,11 @@ type divergence = { path : string; a : string; b : string }
 type entry =
   | Identical
   | Renamed of string  (** the old name *)
-  | Changed of { divergences : divergence list; dependents : string list }
+  | Changed of {
+      divergences : divergence list;
+      dependents : string list;
+      origin : string option;  (** the NEW side's provenance tag, when stamped (PV.1) *)
+    }
   | Added
   | Removed
 
@@ -43,9 +47,11 @@ let rec form_divergences ~path (fa : Form.t) (fb : Form.t) : divergence list =
                else [ { path; a = Printer.scalar_to_string a; b = Printer.scalar_to_string b } ])
          (List.combine fa.Form.args fb.Form.args))
 
-(* All (name, hash) bindings of a store, plus a way to fetch a decl's printed form. *)
-let store_names (s : Store.t) : (string * Hash.t) list =
-  List.map (fun (n, { Resolve.hash; _ }) -> (n, hash)) (Store.names s)
+(* All ((name, kind), hash) bindings of a store, plus a way to fetch a decl's printed form.
+   Keys carry the kind: a name bound to several kinds (an effect and its op, say) must be
+   compared binding-by-binding, not against whichever hash ranks first. *)
+let store_names (s : Store.t) : ((string * Resolve.nkind) * Hash.t) list =
+  List.map (fun (n, { Resolve.hash; kind }) -> ((n, kind), hash)) (Store.names s)
 
 let decl_form store (h : Hash.t) : Form.t option =
   match Store.locate store h with
@@ -58,24 +64,28 @@ let dependents_names store (h : Hash.t) : string list =
   | Ok decl_hashes ->
       (* report the names bound to any hash owned by a dependent declaration *)
       List.filter_map
-        (fun (n, bh) ->
+        (fun ((n, _), bh) ->
           match Store.locate store bh with
           | Ok { Store.decl_hash; _ } when List.exists (Hash.equal decl_hash) decl_hashes -> Some n
           | _ -> None)
         (store_names store)
       |> List.sort_uniq String.compare
 
-(** [diff ~old_side ~new_side] classifies every name across two stores. *)
+(** [diff ~old_side ~new_side] classifies every (name, kind) binding across two stores; the report
+    keys stay plain names. *)
 let diff ~(old_side : Store.t) ~(new_side : Store.t) : report =
   let a = store_names old_side and b = store_names new_side in
-  let hash_of_name side n = List.assoc_opt n side in
-  let names_of_hash side h =
-    List.filter_map (fun (n, h') -> if Hash.equal h h' then Some n else None) side
+  let hash_of_key side key = List.assoc_opt key side in
+  (* rename detection stays within a kind: store renames never change a binding's kind *)
+  let keys_of_hash side kind h =
+    List.filter_map
+      (fun ((n, k), h') -> if k = kind && Hash.equal h h' then Some (n, k) else None)
+      side
   in
   let new_entries =
     List.filter_map
-      (fun (n, hb) ->
-        match hash_of_name a n with
+      (fun (((n, kind) as key), hb) ->
+        match hash_of_key a key with
         | Some ha when Hash.equal ha hb -> Some (n, Identical)
         | Some ha ->
             let divergences =
@@ -83,21 +93,31 @@ let diff ~(old_side : Store.t) ~(new_side : Store.t) : report =
               | Some fa, Some fb -> form_divergences ~path:n fa fb
               | _ -> []
             in
-            Some (n, Changed { divergences; dependents = dependents_names old_side ha })
+            Some
+              ( n,
+                Changed
+                  {
+                    divergences;
+                    dependents = dependents_names old_side ha;
+                    origin = Store.origin new_side hb;
+                  } )
         | None -> (
             (* same content under a different old name? that's a rename *)
-            match names_of_hash a hb with
-            | old_name :: _ when hash_of_name b old_name = None -> Some (n, Renamed old_name)
+            match keys_of_hash a kind hb with
+            | old_key :: _ when hash_of_key b old_key = None -> Some (n, Renamed (fst old_key))
             | _ -> Some (n, Added)))
       b
   in
   let removed =
     List.filter_map
-      (fun (n, ha) ->
-        if hash_of_name b n <> None then None
+      (fun (((n, kind) as key), ha) ->
+        if hash_of_key b key <> None then None
         else if
           (* accounted as a rename above? *)
-          List.exists (fun (n', hb) -> Hash.equal ha hb && hash_of_name a n' = None) b
+          List.exists
+            (fun (((_, k) as key'), hb) ->
+              k = kind && Hash.equal ha hb && hash_of_key a key' = None)
+            b
         then None
         else Some (n, Removed))
       a
@@ -115,8 +135,9 @@ let render (r : report) : string option =
         | Renamed old_name -> [ Printf.sprintf "renamed  %s -> %s" old_name n ]
         | Added -> [ Printf.sprintf "added    %s" n ]
         | Removed -> [ Printf.sprintf "removed  %s" n ]
-        | Changed { divergences; dependents } ->
-            Printf.sprintf "changed  %s" n
+        | Changed { divergences; dependents; origin } ->
+            Printf.sprintf "changed  %s%s" n
+              (match origin with Some tag -> " [" ^ tag ^ "]" | None -> "")
             :: (List.map
                   (fun { path; a; b } -> Printf.sprintf "  at %s:\n    - %s\n    + %s" path a b)
                   divergences

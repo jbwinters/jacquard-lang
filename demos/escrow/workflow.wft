@@ -1,0 +1,11 @@
+; A generated-looking deployment workflow (the escrow demo's subject).
+; Its row is its manifest: {fs, net, console} — and NOT eval.
+(defterm ((binding escrow.workflow ()
+  (lam ()
+    (let nonrec (pvar config) (app (var read) (lit "release-config.txt"))
+      (match (app (var fetch) (app (var mk-request) (lit "http://registry/publish") (var config)))
+        (clause (pcon mk-response (pvar status) (pvar receipt))
+          (let nonrec (pwild) (app (var write) (lit "receipt.txt") (var receipt))
+            (let nonrec (pwild)
+              (app (var println) (app (var text.concat) (lit "published: ") (var receipt)))
+              (var status))))))))))

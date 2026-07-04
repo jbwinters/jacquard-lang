@@ -69,7 +69,7 @@ Delete a clause and `weft check` rejects the match with the missing witness (E08
 
 ## 6. Effects and handlers
 
-`corpus/sigs/09-hostile.wft` — failure is an effect, handled to `option`:
+`corpus/sigs/09-hostile.wft` — aborting is an effect, handled to `option`:
 
 ```lisp
 (defterm ((binding safe-div ()
@@ -79,8 +79,8 @@ Delete a clause and `weft check` rejects the match with the missing witness (E08
       (clause (pcon false) (app (var div) (var n) (var d))))))))
 ```
 
-`weft check --print-sigs` shows `safe-div : (int, int) ->{failure} int` — the signature
-announces the failure — and `to-option : forall a e. (() ->{failure | e} a) ->{e} option a`
+`weft check --print-sigs` shows `safe-div : (int, int) ->{abort} int` — the signature
+announces the possible abort — and `to-option : forall a e. (() ->{abort | e} a) ->{e} option a`
 shows row polymorphism removing it.
 
 ## 7. Multi-shot handlers
@@ -147,3 +147,28 @@ renamed  color -> colour
 
 `weft hash FILE` prints the canonical HASH_V0 hashes; formatting and comments never change
 them (the metadata law). These commands are pinned in `test/cli/tutorial.t`.
+
+## 11. Interposition: attenuating authority with a handler
+
+Capability security in Weft is not a special mechanism — it is the effect system used
+deliberately. `--allow fs` grants the whole filesystem (the grant is the sandbox boundary
+in this draft), but any code can narrow what it passes on by wrapping a handler.
+`fs.read-only` from the prelude forwards `read` and `list-dir` to the real world and turns
+`write` into a thrown error:
+
+```lisp
+(app (var fs.read-only)
+  (lam ()
+    (let nonrec (pvar c) (app (var read) (lit "note.txt"))
+      (let nonrec (pwild) (app (var write) (lit "note.txt") (lit "clobbered"))
+        (var c)))))
+```
+
+Under `weft run --allow fs`, the read succeeds and the write becomes
+`"fs.read-only refused write: note.txt"` (catch it with `throw.catch`). The handler
+re-performs the reads, so `fs` honestly stays in the row: attenuated code still needs the
+grant, it just cannot write through this handler. Pinned in `test/cli/world.t`.
+
+One asymmetry, documented until the owner decision lands: `eval`'d code runs at root
+authority and bypasses interposed handlers, so `fs.read-only` does **not** confine
+`eval-code` payloads.

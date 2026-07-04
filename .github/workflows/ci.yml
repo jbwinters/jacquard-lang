@@ -2,32 +2,59 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - "release/**"
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  OCAML_COMPILER: 5.1.1
+  WEFT_PRELUDE: ${{ github.workspace }}/prelude
 
 jobs:
-  build:
-    name: Build and test
+  development-gate:
+    name: Development gate
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.0
+        with:
+          fetch-depth: 0
 
       - name: Set up OCaml
-        uses: ocaml/setup-ocaml@v3
+        uses: ocaml/setup-ocaml@v3.6.1
         with:
-          ocaml-compiler: 5.1.1
+          ocaml-compiler: ${{ env.OCAML_COMPILER }}
 
       - name: Install dependencies
-        run: opam install . --deps-only --with-test --with-doc --with-dev-setup -y
+        run: opam install --deps-only . --with-test --with-doc --with-dev-setup -y
 
       - name: Build
         run: opam exec -- dune build @all
 
-      - name: Test
+      - name: Full test suite
         run: opam exec -- dune runtest
 
       - name: Check formatting
-        run: opam exec -- dune build @fmt
+        run: |
+          opam exec -- dune fmt
+          git diff --exit-code
 
+      - name: Version smoke
+        run: _build/default/bin/main.exe --version
+
+      - name: Release evidence files exist
+        run: |
+          test -x scripts/release/reproduce-0.1.sh
+          test -f docs/release/0.1/EVIDENCE.md
+          test -f docs/release/0.1/CLAIMS.md
+          test -f docs/release/0.1/REPRO.md

@@ -1,0 +1,8 @@
+# Executable-escrow approval record (release 0.1 demo).
+# Approval is an EXACT content hash: the reviewer approved these bytes'
+# semantics, and nothing else. Comments, formatting, and provenance stamps
+# do not move this hash (the metadata law); any semantic edit does.
+approved-by: human:josh
+workflow: escrow.workflow
+member-hash: a550668489d194f48e864ce22155e2c872cf374395c9d47e1ed5f897f5a08a2f
+decl-hash: 1847f1a1f15b11796bc935486bde5cff11cc921f9ea9dadd3d111512cb3de355

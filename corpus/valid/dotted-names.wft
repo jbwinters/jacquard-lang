@@ -1,0 +1,2 @@
+; SL.1: dotted subject-first names and predicate/bang marks are ordinary symbols
+(defterm ((binding demo.identity () (lam ((pvar x)) (var x)))))

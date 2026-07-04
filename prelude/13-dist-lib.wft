@@ -1,0 +1,46 @@
+; Dist as a library citizen (stdlib SL.7): enumeration wrapped under its public
+; name, tallying with an explicit Eq, and the dictionary-honest pmf. The native
+; pmf/support stay as the internal drivers' tools.
+; NOTE: if every branch is impossible (total mass 0), the normalized weights are
+; +nan.0 — the in-language enumerate has no error channel; `weft infer enumerate`
+; reports E0901 for the same model. Recorded in the stdlib errata (SL.9).
+(defterm ((binding dist.enumerate ()
+  (lam ((pvar model)) (app (var normalize) (app (var enum-run) (var model)))))))
+
+; merge weighted entries whose values are equal under d, first-seen order kept
+(defterm
+  ((binding dist.tally-insert ()
+    (lam ((pvar d) (pvar acc) (pvar x) (pvar p))
+      (match (var acc)
+        (clause (pcon nil) (app (var cons) (app (var mk-pair) (var x) (var p)) (var nil)))
+        (clause (pcon cons (pcon mk-pair (pvar y) (pvar q)) (pvar rest))
+          (match (app (app (var eq.fn) (var d)) (var x) (var y))
+            (clause (pcon true)
+              (app (var cons) (app (var mk-pair) (var y) (app (var add-real) (var p) (var q)))
+                (var rest)))
+            (clause (pcon false)
+              (app (var cons) (app (var mk-pair) (var y) (var q))
+                (app (var dist.tally-insert) (var d) (var rest) (var x) (var p)))))))))
+   (binding dist.tally ()
+    (lam ((pvar entries) (pvar d))
+      (app (var list.fold) (var entries) (var nil)
+        (lam ((pvar acc) (pvar e))
+          (match (var e)
+            (clause (pcon mk-pair (pvar x) (pvar p))
+              (app (var dist.tally-insert) (var d) (var acc) (var x) (var p))))))))))
+
+; the dictionary-honest pmf: mass of x under d's support, equality supplied explicitly
+(defterm ((binding dist.pmf ()
+  (lam ((pvar dv) (pvar x) (pvar d))
+    (app (var list.fold) (app (var support) (var dv)) (lit 0.0)
+      (lam ((pvar acc) (pvar e))
+        (match (var e)
+          (clause (pcon mk-pair (pvar y) (pvar p))
+            (match (app (app (var eq.fn) (var d)) (var x) (var y))
+              (clause (pcon true) (app (var add-real) (var acc) (var p)))
+              (clause (pcon false) (var acc)))))))))))
+
+; seeded, count-bounded likelihood weighting as a native builtin: the splitmix64
+; driver cannot be written in Weft without an RNG effect the design declines to
+; add (randomness IS Dist). Returns the normalized empirical posterior.
+(defterm ((binding dist.sample-lw () (quote (builtin-marker dist.sample-lw)))))

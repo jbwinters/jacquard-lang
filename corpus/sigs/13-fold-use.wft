@@ -1,1 +1,1 @@
-(lam ((pvar xs)) (app (var fold) (var add) (lit 0) (var xs)))
+(lam ((pvar xs)) (app (var list.fold) (var xs) (lit 0) (var add)))

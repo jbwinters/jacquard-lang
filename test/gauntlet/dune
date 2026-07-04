@@ -1,0 +1,5 @@
+(cram
+ (deps
+  %{bin:weft}
+  (source_tree ../../prelude)
+  (source_tree ../../demos)))

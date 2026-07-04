@@ -116,6 +116,21 @@ let is_sym_start c = c >= 'a' && c <= 'z'
 let is_sym_char c = is_sym_start c || (c >= '0' && c <= '9') || c = '-'
 let is_digit c = c >= '0' && c <= '9'
 
+(* Library-name grammar (SL.1): one or more dot-separated segments, each
+   [a-z][a-z0-9-]*, with at most one trailing ? or ! on the final segment.
+   Kernel form HEADS deliberately keep the old single-segment grammar. *)
+let valid_library_symbol s =
+  let n = String.length s in
+  if n = 0 then false
+  else
+    let body_end = match s.[n - 1] with '?' | '!' -> n - 1 | _ -> n in
+    if body_end = 0 then false
+    else
+      let segments = String.split_on_char '.' (String.sub s 0 body_end) in
+      List.for_all
+        (fun seg -> String.length seg > 0 && is_sym_start seg.[0] && String.for_all is_sym_char seg)
+        segments
+
 let is_atom_char c =
   (* anything that is not whitespace, a delimiter, or a comment starter *)
   match c with
@@ -135,17 +150,23 @@ let read_atom st =
   go ();
   String.sub st.src start (st.off - start)
 
-let valid_symbol s = String.length s > 0 && is_sym_start s.[0] && String.for_all is_sym_char s
+let valid_symbol = valid_library_symbol
+let valid_head s = String.length s > 0 && is_sym_start s.[0] && String.for_all is_sym_char s
 
-(* [+-]?digits, or a real: digits with '.' and/or exponent, or +inf.0 etc. *)
-let classify_number st ~start_pos s =
+(* [+-]?digits, or a real: digits with '.' and/or exponent, or +inf.0 etc. The pure core is
+   shared with the text builtins (SL.5) so text.to-int/to-real accept exactly the reader's
+   literal grammar rather than growing a second parser. *)
+type literal_class = LInt of int | LReal of float | LNotNumber | LBadReal | LIntOverflow
+
+let classify_literal_class s : literal_class =
   match s with
-  | "+inf.0" -> Some (Form.Real infinity)
-  | "-inf.0" -> Some (Form.Real neg_infinity)
-  | "+nan.0" | "-nan.0" -> Some (Form.Real nan)
+  | "+inf.0" -> LReal infinity
+  | "-inf.0" -> LReal neg_infinity
+  | "+nan.0" | "-nan.0" -> LReal nan
+  | "" -> LNotNumber
   | _ -> (
       let body = match s.[0] with '+' | '-' -> String.sub s 1 (String.length s - 1) | _ -> s in
-      if body = "" then None
+      if body = "" then LNotNumber
       else
         let is_real = String.exists (fun c -> c = '.' || c = 'e' || c = 'E') body in
         let shape_ok =
@@ -172,18 +193,29 @@ let classify_number st ~start_pos s =
           end;
           !ok && !i = n
         in
-        if not shape_ok then None
-        else if is_real then
-          match float_of_string_opt s with
-          | Some r -> Some (Form.Real r)
-          | None -> error st ~code:"E0105" ~start_pos (Printf.sprintf "malformed real literal %S" s)
-        else
-          match int_of_string_opt s with
-          | Some i -> Some (Form.Int i)
-          | None ->
-              error st ~code:"E0109" ~start_pos
-                (Printf.sprintf "integer literal %s does not fit in a native int" s)
-                ~hint:"Weft integers are 63-bit native ints (decision D2)")
+        if not shape_ok then LNotNumber
+        else if is_real then match float_of_string_opt s with Some r -> LReal r | None -> LBadReal
+        else match int_of_string_opt s with Some i -> LInt i | None -> LIntOverflow)
+
+(** [classify_literal s] classifies [s] exactly as the reader classifies an unquoted numeric atom:
+    [Some (Form.Int _ | Form.Real _)] for the reader's number spellings, [None] for everything else
+    (bad shape, malformed real, int overflow). *)
+let classify_literal s =
+  match classify_literal_class s with
+  | LInt i -> Some (Form.Int i)
+  | LReal r -> Some (Form.Real r)
+  | LNotNumber | LBadReal | LIntOverflow -> None
+
+let classify_number st ~start_pos s =
+  match classify_literal_class s with
+  | LInt i -> Some (Form.Int i)
+  | LReal r -> Some (Form.Real r)
+  | LNotNumber -> None
+  | LBadReal -> error st ~code:"E0105" ~start_pos (Printf.sprintf "malformed real literal %S" s)
+  | LIntOverflow ->
+      error st ~code:"E0109" ~start_pos
+        (Printf.sprintf "integer literal %s does not fit in a native int" s)
+        ~hint:"Weft integers are 63-bit native ints (decision D2)"
 
 let read_text st =
   let start_pos = pos st in
@@ -269,7 +301,7 @@ let rec read_form st : Form.t =
           (Printf.sprintf "expected a form head symbol, found %C" c)
     | None -> error st ~code:"E0106" ~start_pos "unexpected end of input inside a form"
   in
-  if not (valid_symbol head) then
+  if not (valid_head head) then
     error st ~code:"E0107" ~start_pos
       (Printf.sprintf "invalid head symbol %S" head)
       ~hint:"heads are lowercase: [a-z][a-z0-9-]*";

@@ -1,0 +1,40 @@
+; The stdlib worked example (SL.9, stdlib.md section 10): word frequency over
+; one line of input, top 3 by count. Display-syntax features desugared per
+; spec: pair projection is a match; the braces sequence is let-with-pwild.
+(defterm ((binding count-words ()
+  (lam ((pvar s))
+    (app (var list.fold) (app (var text.split) (app (var text.trim) (var s)) (lit " "))
+      (app (var map.empty) (var text.ord))
+      (lam ((pvar m) (pvar w))
+        (match (app (var text.empty?) (var w))
+          (clause (pcon true) (var m))
+          (clause (pcon false)
+            (app (var map.update) (var m) (var w)
+              (lam ((pvar cur))
+                (app (var some)
+                  (app (var add) (lit 1)
+                    (app (var option.with-default) (var cur) (lit 0))))))))))))))
+
+(defterm ((binding top ()
+  (lam ((pvar m) (pvar n))
+    (app (var list.take)
+      (app (var list.sort)
+        (app (var map.fold) (var m) (var nil)
+          (lam ((pvar acc) (pvar w) (pvar c))
+            (app (var cons) (tuple (var w) (var c)) (var acc))))
+        (app (var ord.reverse) (app (var ord.on-second) (var int.ord))))
+      (var n))))))
+
+(defterm ((binding show-entry ()
+  (lam ((ptuple (pvar w) (pvar c)))
+    (app (var println)
+      (app (var text.concat) (var w)
+        (app (var text.concat) (lit ": ") (app (var text.from-int) (var c)))))))))
+
+(defterm ((binding main ()
+  (lam ()
+    (app (var list.each)
+      (app (var top) (app (var count-words) (app (var console.ask) (lit "text?"))) (lit 3))
+      (var show-entry))))))
+
+(app (var main))

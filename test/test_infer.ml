@@ -11,7 +11,7 @@ let two_coins_src =
   "(let nonrec (pvar c1) (app (var sample) (app (var bernoulli) (lit 0.5)))\n\
   \  (let nonrec (pvar c2) (app (var sample) (app (var bernoulli) (lit 0.5)))\n\
   \    (let nonrec (pwild)\n\
-  \      (app (var observe) (app (var bernoulli) (lit 1.0)) (app (var or) (var c1) (var c2)))\n\
+  \      (app (var observe) (app (var bernoulli) (lit 1.0)) (app (var bool.or) (var c1) (var c2)))\n\
   \      (var c1))))"
 
 let sprinkler_src =
@@ -22,7 +22,7 @@ let sprinkler_src =
      P(!rain | wet) = 0.32/0.52 = 8/13. *)
   "(let nonrec (pvar rain) (app (var sample) (app (var bernoulli) (lit 0.2)))\n\
   \  (let nonrec (pvar sprinkler) (app (var sample) (app (var bernoulli) (lit 0.4)))\n\
-  \    (let nonrec (pvar wet) (app (var or) (var rain) (var sprinkler))\n\
+  \    (let nonrec (pvar wet) (app (var bool.or) (var rain) (var sprinkler))\n\
   \      (let nonrec (pwild) (app (var observe) (app (var bernoulli) (lit 1.0)) (var wet))\n\
   \        (var rain)))))"
 
