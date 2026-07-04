@@ -242,3 +242,20 @@ prop 2
 group 2
 world-test 3
 wcase 3
+# --- 16-gen (W6.4/W6.9): generators over dist; assertions render through text
+gen.pair 2
+gen.option 2
+gen.result 2
+gen.list-n 2
+gen.list 2
+prop.for 2
+real.abs 2
+real.close? 2
+dist.mass-of 2
+dist.support-of 2
+dist.check-tables 2
+check.posterior 2
+check.same-dist 2
+check.posterior-sampled 2
+sub-real 0
+lt-real 0

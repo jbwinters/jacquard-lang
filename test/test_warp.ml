@@ -129,7 +129,12 @@ let test_cache_entry_roundtrip () =
   (* one multi-outcome entry (the group shape) round-trips verdicts, displays, coverage *)
   let key = "warp-v1|case|deadbeef" in
   let coverage = [ Hash.of_string "x"; Hash.of_string "y" ] in
-  let outcomes = List.mapi (fun i v -> (Printf.sprintf "g/case-%d" i, v, coverage)) cases in
+  let outcomes =
+    List.mapi
+      (fun i v ->
+        (Printf.sprintf "g/case-%d" i, v, (if i = 0 then Some "prop: 5 cases" else None), coverage))
+      cases
+  in
   let printed = Printer.print (Warp.entry_form ~key ~outcomes) in
   match Reader.parse_one ~file:"entry.wft" printed with
   | Error ds -> Eval_support.fail_diags "reparse" ds
@@ -139,9 +144,10 @@ let test_cache_entry_roundtrip () =
           Alcotest.(check string) "key" key k;
           Alcotest.(check int) "outcome count" (List.length outcomes) (List.length back);
           List.iter2
-            (fun (d, v, c) (d', v', c') ->
+            (fun (d, v, n, c) (d', v', n', c') ->
               Alcotest.(check string) "display" d d';
               Alcotest.(check bool) "verdict" true (v = v');
+              Alcotest.(check bool) "note" true (n = n');
               Alcotest.(check int) "coverage size" (List.length c) (List.length c'))
             outcomes back
       | None -> Alcotest.failf "entry did not round-trip:\n%s" printed)

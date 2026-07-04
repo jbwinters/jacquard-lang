@@ -370,7 +370,7 @@ let fmt_cmd file write =
 
 (* --- test (Warp W6.2/W6.3/W6.8) --- *)
 
-let test_cmd files allows prelude cache_dir no_cache coverage seed =
+let test_cmd files allows prelude cache_dir no_cache coverage seed samples exhaustive budget =
   match open_ctx ~prelude ~store_dir:None with
   | Error ds -> print_diags ds
   | Ok (store, ctx) -> (
@@ -380,6 +380,9 @@ let test_cmd files allows prelude cache_dir no_cache coverage seed =
         | None ->
             Random.self_init ();
             Random.bits ()
+      in
+      let prop_mode =
+        if exhaustive then Warp.Exhaustive { budget } else Warp.Sampling { seed; samples }
       in
       let rec grant_all = function
         | [] -> Ok ()
@@ -481,7 +484,8 @@ let test_cmd files allows prelude cache_dir no_cache coverage seed =
                                 | [] -> Ok ()
                                 | d :: rest -> (
                                     match
-                                      Warp.run_discovered ctx cctx ~test_run ~cache_dir ~granted d
+                                      Warp.run_discovered ctx cctx ~test_run ~prop_mode ~cache_dir
+                                        ~granted d
                                     with
                                     | Error e -> Error e
                                     | Ok outcomes ->
@@ -736,6 +740,25 @@ let coverage_arg =
   Arg.(
     value & flag & info [ "coverage" ] ~doc:"Report definitions never executed by any test (W6.8).")
 
+let samples_arg =
+  Arg.(
+    value & opt int 100
+    & info [ "samples" ] ~docv:"N" ~doc:"Cases per sampled property (W6.4; default 100).")
+
+let exhaustive_arg =
+  Arg.(
+    value & flag
+    & info [ "exhaustive" ]
+        ~doc:"Verify properties by exhaustive enumeration instead of sampling (W6.5).")
+
+let budget_arg =
+  Arg.(
+    value & opt int 10000
+    & info [ "budget" ] ~docv:"N"
+        ~doc:
+          "Exploration budget for exhaustive verification (default 10000); exceeding it is a clean \
+           refusal, never a partial pass.")
+
 let test_t =
   Cmd.v
     (Cmd.info "test"
@@ -744,7 +767,7 @@ let test_t =
           test.run, the world lane behind --allow grants.")
     Term.(
       const test_cmd $ test_files_arg $ allows_arg $ prelude_arg $ cache_dir_arg $ no_cache_arg
-      $ coverage_arg $ seed_arg)
+      $ coverage_arg $ seed_arg $ samples_arg $ exhaustive_arg $ budget_arg)
 
 let main =
   Cmd.group

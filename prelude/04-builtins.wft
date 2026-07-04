@@ -26,3 +26,7 @@
 ; convention-banned from library code (the SL.9 layering audit asserts no
 ; prelude definition references it).
 (defterm ((binding debug.inspect () (quote (builtin-marker debug.inspect)))))
+
+(defterm ((binding sub-real () (quote (builtin-marker sub-real)))))
+
+(defterm ((binding lt-real () (quote (builtin-marker lt-real)))))

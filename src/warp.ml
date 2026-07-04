@@ -30,6 +30,10 @@ type outcome = {
 
 type discovered = Hermetic of string * Hash.t | World of string * Hash.t
 
+(** how the prop lane runs: seeded sampling with shrinking (W6.4) or exhaustive enumeration under a
+    branch budget (W6.5) *)
+type prop_mode = Sampling of { seed : int; samples : int } | Exhaustive of { budget : int }
+
 (* --- discovery (W6.2) --- *)
 
 let discover (store : Store.t) (cctx : Check.ctx) : discovered list =
@@ -130,6 +134,297 @@ let world_required (cctx : Check.ctx) (store : Store.t) : Hash.t list =
           | _ -> [])
       | _ -> [])
 
+(* --- property lanes (W6.4 sampling + choice-log shrinking, W6.5 exhaustive) --- *)
+
+(* One logged random choice: the distribution at the site plus the OUTCOME INDEX in
+   shrink order — smaller index = simpler. Bernoulli maps 0=false/1=true (so "toward
+   false" is index-lowering, like uniform-int toward lo and categorical toward earlier
+   entries); uniform-int index i is lo+i; categorical indexes its entry list. *)
+type choice = { c_dist : Infer_dist.dist_v; c_index : int }
+
+let choice_arity (d : Infer_dist.dist_v) : int =
+  match d with
+  | Infer_dist.Bernoulli _ -> 2
+  | Infer_dist.UniformInt (lo, hi) -> hi - lo + 1
+  | Infer_dist.Categorical entries -> List.length entries
+
+let choice_value ctx (d : Infer_dist.dist_v) (i : int) : (Value.t, Runtime_err.t) result =
+  match d with
+  | Infer_dist.UniformInt (lo, _) -> Ok (Value.VInt (lo + i))
+  | Infer_dist.Categorical entries -> Ok (fst (List.nth entries i))
+  | Infer_dist.Bernoulli _ -> (
+      match
+        ( Store.lookup_kind ctx.Eval.store "true" Resolve.KCon,
+          Store.lookup_kind ctx.Eval.store "false" Resolve.KCon )
+      with
+      | Some { Resolve.hash = t; _ }, Some { Resolve.hash = f; _ } ->
+          if i = 0 then Ok (Value.VCon { con = f; name = "false"; args = [] })
+          else Ok (Value.VCon { con = t; name = "true"; args = [] })
+      | _ -> Error (Runtime_err.Unresolved "prelude bool constructors"))
+
+let fresh_index rng (d : Infer_dist.dist_v) : int =
+  match d with
+  | Infer_dist.Bernoulli p -> if Infer_dist.Rng.float rng < p then 1 else 0
+  | Infer_dist.UniformInt (lo, hi) ->
+      int_of_float (Infer_dist.Rng.float rng *. float_of_int (hi - lo + 1))
+  | Infer_dist.Categorical entries ->
+      let total = List.fold_left (fun acc (_, p) -> acc +. p) 0.0 entries in
+      let u = Infer_dist.Rng.float rng *. if total > 0.0 then total else 1.0 in
+      let rec go i acc = function
+        | [] -> max 0 (List.length entries - 1)
+        | (_, p) :: rest -> if u < acc +. p then i else go (i + 1) (acc +. p) rest
+      in
+      go 0 0.0 entries
+
+type prop_run = { pr_verdict : verdict; pr_log : choice list }
+
+(* Drive one property execution. check/fail are handled NATIVELY in this lane so the
+   choice log and the report interleave correctly (nesting test.run would swallow the
+   check ops before the driver sees them — decided, documented). [forced] replays a
+   log positionally; running past its end samples fresh; a forced index that does not
+   fit the site's distribution is DIVERGENCE (`Error \`Diverged`), which the shrinker
+   skips and the generator-validity theorem test asserts never happens. *)
+let drive_prop ctx ~rng ~(forced : int list) (thunk : Value.t) :
+    (prop_run, [ `Diverged | `Runtime of string ]) result =
+  let saved = ctx.Eval.capture_ops in
+  ctx.Eval.capture_ops <- true;
+  Fun.protect
+    ~finally:(fun () -> ctx.Eval.capture_ops <- saved)
+    (fun () ->
+      let log = ref [] in
+      let entries = ref [] in
+      let rec go state forced =
+        match Eval.run_state_capturing ctx state with
+        | Error e -> Error (`Runtime (Runtime_err.to_string e))
+        | Ok (Eval.CValue _) ->
+            let es = List.rev !entries in
+            let soft = List.filter_map (fun (l, ok) -> if ok then None else Some l) es in
+            let v =
+              if soft <> [] then Fail { soft; hard = None }
+              else if es = [] then NoChecks
+              else Pass (List.length es)
+            in
+            Ok { pr_verdict = v; pr_log = List.rev !log }
+        | Ok (Eval.COp { name = "sample"; args = [ dv ]; kont; _ }) -> (
+            match Infer_dist.dist_of_value ctx dv with
+            | Error e -> Error (`Runtime (Runtime_err.to_string e))
+            | Ok d -> (
+                let arity = choice_arity d in
+                let pick, rest =
+                  match forced with
+                  | i :: rest -> ((if i < arity then Some i else None), rest)
+                  | [] -> (Some (fresh_index rng d), [])
+                in
+                match pick with
+                | None -> Error `Diverged
+                | Some i -> (
+                    match choice_value ctx d i with
+                    | Error e -> Error (`Runtime (Runtime_err.to_string e))
+                    | Ok v ->
+                        log := { c_dist = d; c_index = i } :: !log;
+                        go (Eval.resume_state kont v) rest)))
+        | Ok (Eval.COp { name = "observe"; args = [ _; _ ]; kont; _ }) ->
+            (* sampling lane: conditioning is ignored (weights are an enumeration
+               concept); the exhaustive lane scales branches properly *)
+            go (Eval.resume_state kont Value.unit_v) forced
+        | Ok
+            (Eval.COp
+               {
+                 name = "check";
+                 args = [ Value.VCon { name = ok; _ }; Value.VText label ];
+                 kont;
+                 _;
+               }) ->
+            entries := (label, ok = "true") :: !entries;
+            go (Eval.resume_state kont Value.unit_v) forced
+        | Ok (Eval.COp { name = "fail"; args = [ Value.VText msg ]; _ }) ->
+            let es = List.rev !entries in
+            let soft = List.filter_map (fun (l, ok) -> if ok then None else Some l) es in
+            Ok { pr_verdict = Fail { soft; hard = Some msg }; pr_log = List.rev !log }
+        | Ok (Eval.COp { name; _ }) -> Error (`Runtime ("prop performed unhandled op " ^ name))
+      in
+      go (Eval.apply_state ctx thunk []) forced)
+
+let is_fail = function Fail _ -> true | _ -> false
+
+(* simpler = shorter log, then lexicographically lower indices *)
+let simpler (a : choice list) (b : choice list) : bool =
+  let la = List.length a and lb = List.length b in
+  if la <> lb then la < lb
+  else
+    let rec lex = function
+      | [], [] -> false
+      | x :: xs, y :: ys -> if x.c_index <> y.c_index then x.c_index < y.c_index else lex (xs, ys)
+      | _ -> false
+    in
+    lex (a, b)
+
+(* Candidate edits in fixed priority: contiguous-span deletion (longest spans first —
+   the list-length choice disappearing IS list shrinking), then one-step index
+   lowering. Every candidate replays through the generator itself. *)
+let shrink_candidates (log : choice list) : int list list =
+  let idx = List.map (fun c -> c.c_index) log in
+  let n = List.length idx in
+  let deletions =
+    List.concat_map
+      (fun len ->
+        List.filter_map
+          (fun start ->
+            if start + len <= n then
+              Some (List.filteri (fun i _ -> i < start || i >= start + len) idx)
+            else None)
+          (List.init n Fun.id))
+      (List.init n (fun i -> n - i))
+  in
+  let lowerings =
+    List.filter_map
+      (fun pos ->
+        if (List.nth log pos).c_index > 0 then
+          Some (List.mapi (fun i x -> if i = pos then x - 1 else x) idx)
+        else None)
+      (List.init n Fun.id)
+  in
+  deletions @ lowerings
+
+(** [shrink ctx ~rng thunk failing] greedily minimizes a failing run's choice log; returns the
+    minimal failing run plus the count of diverged candidates (the generator-validity theorem: zero
+    across the battery). *)
+let shrink ctx ~rng (thunk : Value.t) (failing : prop_run) : prop_run * int =
+  let diverged = ref 0 in
+  let rec loop current =
+    let try_candidate best cand =
+      match best with
+      | Some _ -> best
+      | None -> (
+          match drive_prop ctx ~rng ~forced:cand thunk with
+          | Error `Diverged ->
+              incr diverged;
+              None
+          | Error (`Runtime _) -> None
+          | Ok run ->
+              if is_fail run.pr_verdict && simpler run.pr_log current.pr_log then Some run else None
+          )
+    in
+    match List.fold_left try_candidate None (shrink_candidates current.pr_log) with
+    | Some better -> loop better
+    | None -> current
+  in
+  (loop failing, !diverged)
+
+(** [run_prop_sampling ctx ~seed ~samples thunk] — N iterations, fresh split per case, first failure
+    shrunk greedily. *)
+let run_prop_sampling ctx ~seed ~samples (thunk : Value.t) : (verdict * string, string) result =
+  let master = Infer_dist.Rng.make seed in
+  let rec cases i =
+    if i >= samples then Ok (Pass samples, Printf.sprintf "prop: %d cases, seed %d" samples seed)
+    else
+      let rng = Infer_dist.Rng.split master in
+      match drive_prop ctx ~rng ~forced:[] thunk with
+      | Error `Diverged -> Error "unforced run cannot diverge"
+      | Error (`Runtime e) -> Error e
+      | Ok run ->
+          if is_fail run.pr_verdict then begin
+            let minimal, _ = shrink ctx ~rng thunk run in
+            Ok
+              ( minimal.pr_verdict,
+                Printf.sprintf
+                  "prop: falsified on case %d of %d, seed %d; shrunk to %d choice%s [%s]" (i + 1)
+                  samples seed (List.length minimal.pr_log)
+                  (if List.length minimal.pr_log = 1 then "" else "s")
+                  (String.concat ";" (List.map (fun c -> string_of_int c.c_index) minimal.pr_log))
+              )
+          end
+          else cases (i + 1)
+  in
+  cases 0
+
+(** [run_prop_exhaustive ctx ~budget thunk] — the M3 thesis as a product feature: the multi-shot
+    machinery explores every support element at every sample site. Verified branches are weight>0
+    completions; zero-weight branches prune without counting. Blowing the budget is a clean refusal
+    (E0905), never a partial pass. *)
+let run_prop_exhaustive ctx ~budget (thunk : Value.t) : (verdict * string, Diag.t) result =
+  let saved = ctx.Eval.capture_ops in
+  ctx.Eval.capture_ops <- true;
+  Fun.protect
+    ~finally:(fun () -> ctx.Eval.capture_ops <- saved)
+    (fun () ->
+      let verified = ref 0 in
+      let branches = ref 0 in
+      let last_site = ref "the property body" in
+      let failure = ref None in
+      let exception Budget of string in
+      let rec explore state weight entries =
+        if !failure <> None then Ok ()
+        else if weight = 0.0 then Ok () (* pruned: not verified *)
+        else (
+          incr branches;
+          if !branches > budget then
+            raise
+              (Budget
+                 (Printf.sprintf "%d explorations (cap %d), last at %s" !branches budget !last_site));
+          match Eval.run_state_capturing ctx state with
+          | Error e -> Error (Runtime_err.to_string e)
+          | Ok (Eval.CValue _) ->
+              incr verified;
+              let es = List.rev entries in
+              let soft = List.filter_map (fun (l, ok) -> if ok then None else Some l) es in
+              if soft <> [] then failure := Some (Fail { soft; hard = None });
+              Ok ()
+          | Ok (Eval.COp { name = "sample"; args = [ dv ]; kont; _ }) -> (
+              match
+                Result.bind (Infer_dist.dist_of_value ctx dv) (fun d -> Infer_dist.support ctx d)
+              with
+              | Error e -> Error (Runtime_err.to_string e)
+              | Ok support ->
+                  last_site := Printf.sprintf "a %d-way sample site" (List.length support);
+                  let rec go = function
+                    | [] -> Ok ()
+                    | (v, p) :: rest -> (
+                        match explore (Eval.resume_state kont v) (weight *. p) entries with
+                        | Error e -> Error e
+                        | Ok () -> go rest)
+                  in
+                  go support)
+          | Ok (Eval.COp { name = "observe"; args = [ dv; v ]; kont; _ }) -> (
+              match
+                Result.bind (Infer_dist.dist_of_value ctx dv) (fun d -> Infer_dist.pmf ctx d v)
+              with
+              | Error e -> Error (Runtime_err.to_string e)
+              | Ok p -> explore (Eval.resume_state kont Value.unit_v) (weight *. p) entries)
+          | Ok
+              (Eval.COp
+                 {
+                   name = "check";
+                   args = [ Value.VCon { name = ok; _ }; Value.VText label ];
+                   kont;
+                   _;
+                 }) ->
+              explore (Eval.resume_state kont Value.unit_v) weight ((label, ok = "true") :: entries)
+          | Ok (Eval.COp { name = "fail"; args = [ Value.VText msg ]; _ }) ->
+              let es = List.rev entries in
+              let soft = List.filter_map (fun (l, ok) -> if ok then None else Some l) es in
+              failure := Some (Fail { soft; hard = Some msg });
+              Ok ()
+          | Ok (Eval.COp { name; _ }) -> Error ("prop performed unhandled op " ^ name))
+      in
+      match explore (Eval.apply_state ctx thunk []) 1.0 [] with
+      | exception Budget site ->
+          Error
+            (Diag.error ~code:"E0905"
+               (Printf.sprintf
+                  "exhaustive verification exceeded its budget: %s; raise --budget or shrink the \
+                   generators"
+                  site))
+      | Error e -> Error (Diag.error ~code:"E0902" e)
+      | Ok () -> (
+          match !failure with
+          | Some v -> Ok (v, "prop: falsified exhaustively")
+          | None ->
+              Ok
+                ( Pass !verified,
+                  Printf.sprintf "verified exhaustively (%d case%s)" !verified
+                    (if !verified = 1 then "" else "s") )))
+
 (* --- the cache (W6.3) --- *)
 
 let cache_key_string = function
@@ -140,8 +435,6 @@ let cache_key_string = function
 let prop_key_string ~member ~mode ~samples ~seed =
   Printf.sprintf "%s|prop|%s|mode=%s|samples=%d|seed=%d" version (Hash.to_hex member) mode samples
     seed
-
-let _ = prop_key_string (* W6.4 consumes this; referenced so the format is honest now *)
 
 let verdict_form (verdict : verdict) : Form.t =
   match verdict with
@@ -155,18 +448,22 @@ let verdict_form (verdict : verdict) : Form.t =
 (* one entry per DISCOVERED test: a group's entry (keyed by the group hash, which
    Merkle-covers every member) holds one outcome per member, display included, so a
    cached hit renders exactly what the cold run rendered *)
-let entry_form ~key ~(outcomes : (string * verdict * Hash.t list) list) : Form.t =
+let entry_form ~key ~(outcomes : (string * verdict * string option * Hash.t list) list) : Form.t =
   Form.form "test-cache-entry"
     (Form.F (Form.form "key" [ Form.Text key ])
     :: List.map
-         (fun (display, verdict, coverage) ->
+         (fun (display, verdict, note, coverage) ->
            Form.F
              (Form.form "outcome"
-                [
-                  Form.F (Form.form "display" [ Form.Text display ]);
-                  Form.F (Form.form "verdict" [ Form.F (verdict_form verdict) ]);
-                  Form.F (Form.form "coverage" (List.map (fun h -> Form.Hash h) coverage));
-                ]))
+                ([
+                   Form.F (Form.form "display" [ Form.Text display ]);
+                   Form.F (Form.form "verdict" [ Form.F (verdict_form verdict) ]);
+                   Form.F (Form.form "coverage" (List.map (fun h -> Form.Hash h) coverage));
+                 ]
+                @
+                match note with
+                | Some n -> [ Form.F (Form.form "note" [ Form.Text n ]) ]
+                | None -> [])))
          outcomes)
 
 let verdict_of_form (v : Form.t) : verdict option =
@@ -183,7 +480,8 @@ let verdict_of_form (v : Form.t) : verdict option =
       Some (Fail { soft; hard })
   | _ -> None
 
-let entry_of_form (f : Form.t) : (string * (string * verdict * Hash.t list) list) option =
+let entry_of_form (f : Form.t) :
+    (string * (string * verdict * string option * Hash.t list) list) option =
   match f with
   | {
    Form.head = "test-cache-entry";
@@ -195,17 +493,22 @@ let entry_of_form (f : Form.t) : (string * (string * verdict * Hash.t list) list
             {
               Form.head = "outcome";
               args =
-                [
-                  Form.F { Form.head = "display"; args = [ Form.Text display ]; _ };
-                  Form.F { Form.head = "verdict"; args = [ Form.F v ]; _ };
-                  Form.F { Form.head = "coverage"; args = cov; _ };
-                ];
+                Form.F { Form.head = "display"; args = [ Form.Text display ]; _ }
+                :: Form.F { Form.head = "verdict"; args = [ Form.F v ]; _ }
+                :: Form.F { Form.head = "coverage"; args = cov; _ }
+                :: note_rest;
               _;
             } ->
+            let note =
+              match note_rest with
+              | [ Form.F { Form.head = "note"; args = [ Form.Text n ]; _ } ] -> Some n
+              | _ -> None
+            in
             Option.map
               (fun verdict ->
                 ( display,
                   verdict,
+                  note,
                   List.filter_map (function Form.Hash h -> Some h | _ -> None) cov ))
               (verdict_of_form v)
         | _ -> None
@@ -220,7 +523,7 @@ let read_file path =
   close_in ic;
   s
 
-let cache_lookup ~cache_dir key : (string * verdict * Hash.t list) list option =
+let cache_lookup ~cache_dir key : (string * verdict * string option * Hash.t list) list option =
   match cache_dir with
   | None -> None
   | Some dir -> (
@@ -258,8 +561,34 @@ type totals = {
   mutable ran : int;
 }
 
+(* does a test value contain a prop anywhere? (drives cache-key choice) *)
+let rec value_has_prop (v : Value.t) : bool =
+  match v with
+  | Value.VCon { name = "prop"; _ } -> true
+  | Value.VCon { name = "group"; args = [ _; tests ]; _ } ->
+      let rec walk = function
+        | Value.VCon { name = "cons"; args = [ t; rest ]; _ } -> value_has_prop t || walk rest
+        | _ -> false
+      in
+      walk tests
+  | _ -> false
+
+(* per-test coverage collection around a driver call (same swap as run_thunk) *)
+let with_coverage ctx f =
+  let outer = ctx.Eval.coverage in
+  let mine_tbl = Hashtbl.create 64 in
+  ctx.Eval.coverage <- mine_tbl;
+  let result =
+    Fun.protect
+      ~finally:(fun () ->
+        Hashtbl.iter (fun h () -> Hashtbl.replace outer h ()) mine_tbl;
+        ctx.Eval.coverage <- outer)
+      f
+  in
+  (result, Hashtbl.fold (fun h () acc -> h :: acc) mine_tbl [])
+
 (* walk one discovered test VALUE, recursing into groups *)
-let rec run_value ctx ~test_run ~display (v : Value.t) : (outcome list, string) result =
+let rec run_value ctx ~test_run ~prop_mode ~display (v : Value.t) : (outcome list, string) result =
   match v with
   | Value.VCon { name = "case"; args = [ Value.VText label; thunk ]; _ } -> (
       let display = display ^ "/" ^ label in
@@ -267,22 +596,42 @@ let rec run_value ctx ~test_run ~display (v : Value.t) : (outcome list, string) 
       | Ok (verdict, coverage) ->
           Ok [ { display; verdict = Some verdict; note = None; coverage; cached = false } ]
       | Error e -> Error (Printf.sprintf "%s: %s" display e))
-  | Value.VCon { name = "prop"; args = [ Value.VText label; _ ]; _ } ->
-      Ok
-        [
-          {
-            display = display ^ "/" ^ label;
-            verdict = None;
-            note = Some "prop: driver pending (W6.4)";
-            coverage = [];
-            cached = false;
-          };
-        ]
+  | Value.VCon { name = "prop"; args = [ Value.VText label; thunk ]; _ } -> (
+      let display = display ^ "/" ^ label in
+      match prop_mode with
+      | Sampling { seed; samples } -> (
+          let result, coverage =
+            with_coverage ctx (fun () -> run_prop_sampling ctx ~seed ~samples thunk)
+          in
+          match result with
+          | Ok (verdict, note) ->
+              Ok [ { display; verdict = Some verdict; note = Some note; coverage; cached = false } ]
+          | Error e -> Error (Printf.sprintf "%s: %s" display e))
+      | Exhaustive { budget } -> (
+          let result, coverage =
+            with_coverage ctx (fun () -> run_prop_exhaustive ctx ~budget thunk)
+          in
+          match result with
+          | Ok (verdict, note) ->
+              Ok [ { display; verdict = Some verdict; note = Some note; coverage; cached = false } ]
+          | Error d ->
+              (* budget refusal: a clean catalogued diagnostic that FAILS the test —
+                 partial exhaustiveness must never pose as a proof *)
+              Ok
+                [
+                  {
+                    display;
+                    verdict = Some (Fail { soft = []; hard = Some (Diag.to_string d) });
+                    note = Some "prop: exhaustive refusal";
+                    coverage;
+                    cached = false;
+                  };
+                ]))
   | Value.VCon { name = "group"; args = [ Value.VText label; tests ]; _ } ->
       let rec walk acc = function
         | Value.VCon { name = "nil"; _ } -> Ok (List.concat (List.rev acc))
         | Value.VCon { name = "cons"; args = [ t; rest ]; _ } -> (
-            match run_value ctx ~test_run ~display:(display ^ "/" ^ label) t with
+            match run_value ctx ~test_run ~prop_mode ~display:(display ^ "/" ^ label) t with
             | Ok os -> walk (os :: acc) rest
             | Error e -> Error e)
         | v -> Error (Printf.sprintf "malformed group: %s" (Value.show v))
@@ -300,31 +649,42 @@ let rec run_value ctx ~test_run ~display (v : Value.t) : (outcome list, string) 
 (** [run_discovered ctx ~test_run ~cache_dir ~granted d] executes one discovered test. Hermetic
     Cases consult the cache by member hash; groups cache as a unit under the group's member hash
     (its hash covers the members). World tests check grant coverage. *)
-let run_discovered ctx (cctx : Check.ctx) ~test_run ~cache_dir ~(granted : Hash.t list)
+let run_discovered ctx (cctx : Check.ctx) ~test_run ~prop_mode ~cache_dir ~(granted : Hash.t list)
     (d : discovered) : (outcome list, string) result =
   match d with
   | Hermetic (name, h) -> (
-      let key = cache_key_string d in
-      match cache_lookup ~cache_dir key with
-      | Some stored ->
-          Ok
-            (List.map
-               (fun (display, verdict, coverage) ->
-                 { display; verdict = Some verdict; note = None; coverage; cached = true })
-               stored)
-      | None -> (
-          match value_of ctx h with
-          | Error e -> Error (Printf.sprintf "%s: %s" name (Runtime_err.to_string e))
-          | Ok v -> (
-              match run_value ctx ~test_run ~display:name v with
+      match value_of ctx h with
+      | Error e -> Error (Printf.sprintf "%s: %s" name (Runtime_err.to_string e))
+      | Ok v -> (
+          (* a term whose value contains a prop keys by (hash, mode, samples, seed) —
+             the run parameters are part of what the entry means; pure-case terms key
+             by member hash alone *)
+          let key =
+            if value_has_prop v then
+              match prop_mode with
+              | Sampling { seed; samples } ->
+                  prop_key_string ~member:h ~mode:"sample" ~samples ~seed
+              | Exhaustive _ -> prop_key_string ~member:h ~mode:"exhaustive" ~samples:0 ~seed:0
+            else cache_key_string d
+          in
+          match cache_lookup ~cache_dir key with
+          | Some stored ->
+              Ok
+                (List.map
+                   (fun (display, verdict, note, coverage) ->
+                     { display; verdict = Some verdict; note; coverage; cached = true })
+                   stored)
+          | None -> (
+              match run_value ctx ~test_run ~prop_mode ~display:name v with
               | Error e -> Error e
               | Ok outcomes ->
-                  (* every EXECUTED outcome caches, display included, keyed by this
-                     test's member hash (a group hash Merkle-covers its members); props
-                     inside (verdict = None) block the entry — they have no result yet *)
+                  (* every EXECUTED outcome caches, display and note included, keyed by
+                     this test's member hash (a group hash Merkle-covers its members) *)
                   if List.for_all (fun o -> o.verdict <> None) outcomes && outcomes <> [] then
                     cache_store ~cache_dir key
-                      (List.map (fun o -> (o.display, Option.get o.verdict, o.coverage)) outcomes);
+                      (List.map
+                         (fun o -> (o.display, Option.get o.verdict, o.note, o.coverage))
+                         outcomes);
                   Ok outcomes)))
   | World (name, h) ->
       let required = world_required cctx ctx.Eval.store in
@@ -352,19 +712,28 @@ let run_discovered ctx (cctx : Check.ctx) ~test_run ~cache_dir ~(granted : Hash.
       else
         Result.bind
           (Result.map_error Runtime_err.to_string (value_of ctx h))
-          (fun v -> run_value ctx ~test_run ~display:name v)
+          (fun v -> run_value ctx ~test_run ~prop_mode ~display:name v)
 
 (* --- rendering --- *)
 
 let render_outcome (t : totals) (o : outcome) : string list =
   match (o.verdict, o.note) with
-  | Some (Pass n), _ ->
+  | Some (Pass n), note ->
       t.passed <- t.passed + 1;
       if o.cached then t.hits <- t.hits + 1 else t.ran <- t.ran + 1;
+      let proof =
+        match note with
+        | Some n -> String.length n >= 8 && String.sub n 0 8 = "verified"
+        | None -> false
+      in
+      let detail =
+        match note with
+        | Some n -> n
+        | None -> Printf.sprintf "%d check%s" n (if n = 1 then "" else "s")
+      in
       [
-        Printf.sprintf "PASS %s (%d check%s)%s" o.display n
-          (if n = 1 then "" else "s")
-          (if o.cached then " [cached]" else "");
+        Printf.sprintf "PASS %s (%s)%s" o.display detail
+          (if o.cached then if proof then " [cached proof]" else " [cached]" else "");
       ]
   | Some NoChecks, _ ->
       t.passed <- t.passed + 1;
@@ -372,10 +741,12 @@ let render_outcome (t : totals) (o : outcome) : string list =
       [
         Printf.sprintf "WARN %s: made no checks%s" o.display (if o.cached then " [cached]" else "");
       ]
-  | Some (Fail { soft; hard }), _ -> (
+  | Some (Fail { soft; hard }), note -> (
       t.failed <- t.failed + 1;
       if o.cached then t.hits <- t.hits + 1 else t.ran <- t.ran + 1;
-      Printf.sprintf "FAIL %s%s" o.display (if o.cached then " [cached]" else "")
+      Printf.sprintf "FAIL %s%s%s" o.display
+        (match note with Some n -> " (" ^ n ^ ")" | None -> "")
+        (if o.cached then " [cached]" else "")
       :: List.map (fun l -> "  - " ^ l) soft
       @ match hard with Some h -> [ "  ! " ^ h ] | None -> [])
   | None, Some note when String.length note >= 7 && String.sub note 0 7 = "refused" ->

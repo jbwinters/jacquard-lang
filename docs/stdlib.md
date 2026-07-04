@@ -297,6 +297,15 @@ Granting `Dist` at the root installs the entropy-seeded sampling handler; an
 `observe` reaching the root is an error, since conditioning requires an inference
 handler and the root has nothing to condition.
 
+One more consumer leans on `Dist`'s constructors: Warp's shrinker (W6.4) orders
+each distribution's outcomes by SIMPLICITY, and shrinking lowers outcome indices.
+The ordering per constructor, pinned here because generators inherit it:
+`UniformInt` counts up from `lo` (index 0 = `lo`); `Categorical` uses entry order
+(index 0 = the first entry, so put the simplest outcome first in generator
+tables); `Bernoulli` places `false` at index 0 — "toward false" is the shrink
+direction. Deleting a choice from the log replays the generator without it, which
+is how one `UniformInt` length choice makes whole-list shrinking fall out.
+
 ## 7. Ring 3: the world
 
 World effects are declared like any other; what distinguishes them is that only the

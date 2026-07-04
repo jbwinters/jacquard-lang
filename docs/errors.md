@@ -113,6 +113,7 @@ in `src/` and `bin/` appears in this catalog.
 | E0902 | runtime failure inside inference | a model dividing by zero |
 | E0903 | model file has no expression | a decls-only file passed to `weft infer` |
 | E0904 | observe at the sampling root | `observe` under `weft run --allow dist` (D7 default: defect) |
+| E0905 | exhaustive verification budget exceeded | a property over `uniform-int(1, 1000000)` under `weft test --exhaustive` |
 
 ## Warp (E10xx)
 

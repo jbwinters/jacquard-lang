@@ -13,7 +13,7 @@ resume-wrong-type | resume-wrong-type.wft:1:89-110: error[E0801]: argument: expe
   hint: the expected side comes from the surrounding context; make both sides agree
 ann-mismatch | ann-mismatch.wft:1:1-26: error[E0804]: annotation mismatch: expected text, got int (type mismatch)
   hint: the annotation is the contract: change the body or the annotation
-ann-pure-but-prints | ann-pure-but-prints.wft:1:1-70: error[E0804]: annotation mismatch: expected () ->{} (), got () ->{console | e} () (a closed effect row cannot absorb extra effects)
+ann-pure-but-prints | ann-pure-but-prints.wft:1:1-70: error[E0804]: annotation mismatch: expected () ->{} (), got () ->{console | e} () (a closed effect row cannot absorb extra effects; a stored definition passed as a thunk can be eta-expanded at the use site: (lam () (app (var f))))
   hint: the annotation is the contract: change the body or the annotation
 ann-rigid-escape | ann-rigid-escape.wft:1:1-90: error[E0804]: annotation mismatch: expected (a) ->{} a, got (a) ->{} int (type mismatch)
   hint: the annotation is the contract: change the body or the annotation

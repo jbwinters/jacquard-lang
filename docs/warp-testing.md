@@ -139,11 +139,20 @@ failure, the shrinker edits the log toward canonical simplicity (delete spans,
 move `UniformInt` choices toward the low bound, prefer earlier `Categorical`
 entries, prefer `False`) and replays the generator with logged choices forced,
 sampling fresh only past the log's end. Every candidate the shrinker produces is
-by construction a value the generator could emit, so invariants encoded in the
+a value the generator could emit — candidates that break positional alignment
+across sample sites are detected as divergence during replay and skipped, never
+misreported — so invariants encoded in the
 generator survive shrinking and per-type shrinker functions do not exist anywhere
 in the framework. Honest limit: shrink quality depends on each distribution
 declaring which outcomes count as simpler, and that ordering is part of ring 2's
 contract per constructor.
+
+One asymmetry between the two prop handlers, stated so nobody trips on it: the
+SAMPLING driver ignores `observe` (it resumes with unit and drops the weight);
+only the EXHAUSTIVE driver scales and prunes branches by observation weight. A
+`Prop` that conditions its generator therefore only means what it says under
+`--exhaustive`; under sampling the condition is silently inert. Rejection-style
+resampling for the sampling lane is future work.
 
 ## 5. Fault simulation
 
@@ -245,8 +254,14 @@ fetch-retries = WCase("retry survives any two faults", fn () ->
 
 sampler-ok : Test
 sampler-ok = Case("optimized model matches reference", fn () ->
-  check.same-dist(two-coins, two-coins-fast, bool.eq, bool.show, 1e-9))
+  check.same-dist(fn () -> two-coins(), fn () -> two-coins-fast(),
+                  bool.eq, bool.show, 1e-9))
 ```
+
+(The eta-expansions around the named models are load-bearing: a top-level
+definition's row is CLOSED at `{Dist}`, and the assertion's thunk parameter
+needs an open row — the fresh lambdas get one. See the stdlib errata on
+closed rows.)
 
 `weft test` runs the first and third definitions hermetically with caching,
 `--exhaustive` upgrades the `Prop` to a 256-case proof, and the `WorldTest` runs in

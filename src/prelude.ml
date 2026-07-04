@@ -129,6 +129,15 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
   optional "add-real" (real2 "add-real" ( +. ));
   optional "mul-real" (real2 "mul-real" ( *. ));
   optional "div-real" (real2 "div-real" ( /. ));
+  optional "sub-real" (real2 "sub-real" ( -. ));
+  optional "lt-real" (fun args ->
+      match args with
+      | [ Value.VReal a; Value.VReal b ] -> Ok (vbool (a < b))
+      | args ->
+          Error
+            (Runtime_err.Type_error
+               (Printf.sprintf "lt-real expects two reals, got %s"
+                  (String.concat ", " (List.map Value.show args)))));
   (* three-way comparison feeding the ord dictionary (stdlib SL.2) *)
   (match
      ( lookup_hash store ~kind:Resolve.KCon "less",
@@ -846,6 +855,19 @@ let builtin_signatures (store : Store.t) : ((Hash.t * Types.scheme) list, Diag.t
             | Some s, Ok h -> [ (h, s) ]
             | _ -> []
           in
+          let extra_real =
+            (* sub-real / lt-real landed with W6.9's tolerance comparisons *)
+            match
+              ( lookup_hash store ~kind:Resolve.KTerm "sub-real",
+                lookup_hash store ~kind:Resolve.KTerm "lt-real" )
+            with
+            | Ok sr, Ok lr ->
+                [
+                  (sr, Types.mono rarrow2);
+                  (lr, Types.mono (Types.TArrow ([ real_ty; real_ty ], Types.empty_row, bool_ty)));
+                ]
+            | _ -> []
+          in
           Ok
             (base
             @ [
@@ -855,6 +877,6 @@ let builtin_signatures (store : Store.t) : ((Hash.t * Types.scheme) list, Diag.t
                 (pm, pmf_sig);
                 (su, support_sig);
               ]
-            @ lw)
+            @ lw @ extra_real)
       | _ -> Ok base)
   | _ -> Ok base

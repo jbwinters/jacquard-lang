@@ -51,6 +51,7 @@ list.sort : forall a. (list a, ord a) ->{} list a
 list.take : forall a. (list a, int) ->{} list a
 list.zip : forall a b. (list a, list b) ->{} list (a, b)
 lt : (int, int) ->{} bool
+lt-real : (real, real) ->{} bool
 con mk-eq
 con mk-ord
 con mk-report
@@ -91,6 +92,7 @@ type show
 show.fn : forall a. (show a) ->{} (a) ->{} text
 con some
 sub : (int, int) ->{} int
+sub-real : (real, real) ->{} real
 type text
 con text-opaque
 con true

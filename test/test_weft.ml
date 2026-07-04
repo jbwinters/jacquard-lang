@@ -39,4 +39,5 @@ let () =
       ("world", Test_world.suite);
       ("rings", Test_rings.suite);
       ("warp", Test_warp.suite);
+      ("props", Test_props.suite);
     ]
