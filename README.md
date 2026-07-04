@@ -131,8 +131,22 @@ The tree should verify with:
 
 ```bash
 eval "$(opam env)"
-dune build @all
-dune runtest
-dune fmt
+opam exec -- dune build @all
+opam exec -- dune runtest
+opam exec -- dune fmt
+git diff --exit-code
 task-master next
 ```
+
+## CI/CD
+
+GitHub Actions has two lanes:
+
+- `CI / Development gate` for PRs, `main`, and `release/**`: build, full tests,
+  clean formatting, version smoke, and release-doc presence.
+- `Release Evidence / Reproduce 0.1 evidence` for `release/**`, `weft-core-*`
+  tags, and manual dispatch: runs `scripts/release/reproduce-0.1.sh` and uploads
+  release transcripts as an artifact.
+
+See `docs/ci-cd.md` for required branch protection and the release-candidate
+process.

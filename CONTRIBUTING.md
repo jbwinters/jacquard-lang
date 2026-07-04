@@ -43,13 +43,23 @@ development plan (`docs/development-plan.md`) is the execution queue; the spec
 
 ## PR checklist (mirrors the global definition of done)
 
-- [ ] `dune build @all` and `dune runtest` pass locally and in CI.
+- [ ] `opam exec -- dune build @all` and `opam exec -- dune runtest` pass locally
+      and in CI.
 - [ ] New behavior has tests in the same PR; bug fixes add a regression test
       first.
 - [ ] Public functions in touched modules have doc comments stating contract
       and failure modes.
-- [ ] No compiler warnings; `dune fmt` clean.
+- [ ] No compiler warnings; `opam exec -- dune fmt` is clean and
+      `git diff --exit-code` is empty afterward.
 - [ ] The conformance corpus still passes; it grows if the task added
       observable behavior.
 - [ ] No out-of-scope features (see the guardrails in
       `docs/development-plan.md`).
+
+## GitHub gates
+
+See `docs/ci-cd.md` for the branch protection and release evidence process.
+Ordinary PRs must satisfy `CI / Development gate`. Release-candidate branches
+and `weft-core-*` tags must also satisfy `Release Evidence / Reproduce 0.1
+evidence`, which runs the reproducibility script and uploads the transcript
+artifact.

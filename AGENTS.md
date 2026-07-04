@@ -45,12 +45,13 @@ Core commands for the current scaffold:
 
 ```bash
 eval "$(opam env)"
-dune build
-dune build @all
-dune test
-dune runtest
-dune fmt
-dune build @doc
+opam exec -- dune build
+opam exec -- dune build @all
+opam exec -- dune test
+opam exec -- dune runtest
+opam exec -- dune fmt
+git diff --exit-code
+opam exec -- dune build @doc
 ```
 
 The data layer (M0-exec, tasks W0.1-W1.7) is implemented in `src/` with suites in `test/`. Verify the environment and task queue with:
@@ -59,8 +60,8 @@ The data layer (M0-exec, tasks W0.1-W1.7) is implemented in `src/` with suites i
 eval "$(opam env)"
 ocaml -version
 dune --version
-dune build @all
-dune runtest
+opam exec -- dune build @all
+opam exec -- dune runtest
 task-master next
 ```
 
@@ -84,6 +85,19 @@ When adding valid corpus files, regenerate the golden hashes with `dune exec tes
 - `_opam/` is a local switch and must stay ignored.
 - `.taskmaster/` is currently ignored in this repo. Task Master data is available locally but will not be committed unless the ignore policy changes.
 - Do not rewrite unrelated dirty worktree changes.
+
+## CI/CD Expectations
+
+GitHub Actions mirrors the local definition of done:
+
+- `CI / Development gate` runs build, full tests, clean formatting, version
+  smoke, and release-doc presence on PRs, `main`, and `release/**`.
+- `Release Evidence / Reproduce 0.1 evidence` runs
+  `scripts/release/reproduce-0.1.sh` on `release/**`, `weft-core-*` tags, and
+  manual dispatch, then uploads the evidence transcripts.
+
+Release-facing changes should keep `scripts/release/reproduce-0.1.sh` green and
+should not add features outside the release hardening scope.
 
 ## Decisions To Preserve
 

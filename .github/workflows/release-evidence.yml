@@ -1,0 +1,62 @@
+name: Release Evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag, or commit to reproduce"
+        required: false
+        default: "release/0.1-evidence"
+      base:
+        description: "Candidate base commit that must be an ancestor"
+        required: false
+        default: "3609a67"
+  push:
+    branches:
+      - "release/**"
+    tags:
+      - "weft-core-*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-evidence-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  OCAML_COMPILER: 5.1.1
+  WEFT_PRELUDE: ${{ github.workspace }}/prelude
+
+jobs:
+  reproduce:
+    name: Reproduce 0.1 evidence
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@v7.0.0
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.ref || github.ref }}
+
+      - name: Set up OCaml
+        uses: ocaml/setup-ocaml@v3.6.1
+        with:
+          ocaml-compiler: ${{ env.OCAML_COMPILER }}
+
+      - name: Reproduce release evidence
+        run: |
+          WEFT_RELEASE_REF=HEAD \
+          WEFT_RELEASE_BASE="${{ github.event.inputs.base || '3609a67' }}" \
+          scripts/release/reproduce-0.1.sh
+
+      - name: Upload evidence transcripts
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: weft-release-0.1-evidence-${{ github.run_number }}
+          if-no-files-found: error
+          path: |
+            docs/release/0.1/
+            logs/release/0.1/
