@@ -1,4 +1,4 @@
 (executable
  (name main)
  (public_name weft)
- (libraries weft cmdliner))
+ (libraries weft cmdliner unix))

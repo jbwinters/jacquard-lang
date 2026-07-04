@@ -12,12 +12,13 @@ The M0-exec milestone (the executable data layer) is implemented: reader, printe
 - `docs/example-code.md` - target bootstrap `.wft` examples for the future corpus.
 - `.taskmaster/` - local Task Master plan generated from `docs/development-plan.md`.
 - `dune-project` and `weft.opam` - OCaml package and build metadata.
-- `src/` - the `weft` library: `form`/`meta`/`span` (the triple), `hash` (HASH_V0), `reader`/`printer` (bootstrap notation), `kernel` (grammar validator + typed AST), `resolve`, `canon` (canonical serialization + hashing), `store`.
-- `bin/` - the `weft` CLI (version stub until W2.7).
-- `test/` - alcotest/qcheck suites plus the corpus runner and `gen_goldens` tool.
+- `src/` - the `weft` library: `form`/`meta`/`span` (the triple), `hash` (HASH_V0), `reader`/`printer` (bootstrap notation), `kernel` (grammar validator + typed AST), `resolve`, `canon` (canonical serialization + hashing), `store`, and the M1 interpreter: `value`/`eval` (CPS machine with multi-shot handlers), `runtime_err`, `prelude` (loader + grants).
+- `bin/` - the `weft` CLI: `run` (with `--allow` capability grants), `check`, `hash`, `store add|name|rename`.
+- `test/` - alcotest/qcheck suites, the corpus runner, cram CLI tests, and the golden generators.
 - `spec/` - the M0 kernel AST spec and `serialization.md` (canonical byte format).
-- `corpus/` - conformance corpus (`valid/`, `invalid/` + `.expect`, `golden/`).
-- `prelude/`, `demos/` - planned library and demo directories (M1+).
+- `corpus/` - conformance corpus (`valid/`, `invalid/` + `.expect`, `golden/` including prelude hashes).
+- `prelude/` - the Weft prelude (`.wft` sources: types, effects, builtins, library functions).
+- `demos/` - `m1.sh` and its programs (factorial, multi-shot choose, gated eval).
 
 ## Toolchain
 
@@ -100,7 +101,7 @@ task-master show 1
 task-master validate-dependencies
 ```
 
-Tasks 1-9 (W0.1 through W1.7, the M0-exec milestone) are done; the next task is `W2.1 Runtime values and environments`.
+Tasks 1-16 (W0.1 through W2.7, the M0-exec and M1 milestones) are done; the next task is `W3.1 Types, rows, and unifier`.
 
 ## Implementation Milestones
 
@@ -112,7 +113,7 @@ Tasks 1-9 (W0.1 through W1.7, the M0-exec milestone) are done; the next task is 
 
 ## Current Status
 
-M0-exec is complete: the spec is executable. `.wft` sources parse to uniform triples, validate against the 27-form kernel grammar, resolve names to content hashes, and hash canonically (alpha- and meta-invariant, group-order-invariant); declarations round-trip through the on-disk store; and the conformance corpus pins all of it in CI, golden hashes included. The interpreter milestone (M1, tasks W2.x) is next.
+M0-exec and M1 are complete. On top of the executable data layer (parse, validate, resolve, canonical hashing, content-addressed store, conformance corpus), the CPS interpreter runs `.wft` programs with deep, multi-shot algebraic effect handlers; quote/unquote produce and splice `Code` values; `eval` is a capability-gated library effect; the prelude ships Bool/Option/List/Ordering, arithmetic builtins, and map/fold written in Weft; and the `weft` CLI runs, checks, and hashes programs with `--allow` grants installing the only root handlers (exit code 3 is the capability refusal). Try `sh demos/m1.sh`. The type-and-effect checker milestone (M2, tasks W3.x) is next.
 
 The tree should verify with:
 

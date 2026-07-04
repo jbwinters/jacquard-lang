@@ -29,6 +29,10 @@ let stub_entries =
       ("option", Resolve.KType);
       ("console", Resolve.KEffect);
       ("net", Resolve.KEffect);
+      ("map", Resolve.KTerm);
+      ("cons", Resolve.KCon);
+      ("nil", Resolve.KCon);
+      ("eval-code", Resolve.KOp);
     ]
 
 let stub_names = Resolve.of_alist stub_entries

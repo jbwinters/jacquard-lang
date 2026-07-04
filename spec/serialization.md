@@ -54,8 +54,10 @@ pats), 0x24 ptuple (+ varint n + pats), 0x25 pas (+ inner; binder name erased).
 
 Types: 0x30 tref (+ hash), 0x31 tvar (+ bound/free subtag), 0x32 tapp (+ head + varint n +
 args), 0x33 tarrow (+ varint n + params + row + result), 0x34 ttuple, 0x35 tforall (+ varint
-tyvarc + varint rowvarc + body). Rows: 0x36 + varint n + effect hashes **sorted bytewise**
-(effect sets are unordered) + 0x00 closed / 0x01 + var.
+tyvarc + varint rowvarc + body), 0x37 self-reference (a `tref` naming the enclosing
+`deftype`/`defeffect` itself — a recursive declaration cannot contain its own hash, so the
+self-reference is positional, like `groupref` for terms). Rows: 0x36 + varint n + effect
+hashes **sorted bytewise** (effect sets are unordered) + 0x00 closed / 0x01 + var.
 
 Quoted payloads (raw triples, meta erased): 0x50 form (+ head text + varint argc + args),
 where scalar args tag 0x52 int64, 0x53 real, 0x54 text, 0x55 sym, 0x56 hash — except an

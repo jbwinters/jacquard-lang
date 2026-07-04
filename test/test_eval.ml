@@ -156,11 +156,8 @@ let test_arity_and_type_errors () =
   | Runtime_err.Type_error _ -> ()
   | e -> Alcotest.failf "expected Type_error, got %s" (Runtime_err.to_string e));
   match Eval_support.eval_err h "(app (var div) (lit 1) (lit 0))" with
-  | Runtime_err.Type_error msg ->
-      Alcotest.(check bool)
-        "div by zero mentioned" true
-        (String.length msg > 0 && msg = "division by zero")
-  | e -> Alcotest.failf "expected Type_error, got %s" (Runtime_err.to_string e)
+  | Runtime_err.Arithmetic msg -> Alcotest.(check string) "div by zero" "division by zero" msg
+  | e -> Alcotest.failf "expected Arithmetic, got %s" (Runtime_err.to_string e)
 
 let test_unresolved_var_at_runtime () =
   let h = Eval_support.make () in

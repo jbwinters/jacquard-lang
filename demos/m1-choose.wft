@@ -1,0 +1,11 @@
+; M1 demo 2: the multi-shot Choose program. The handler resumes the same
+; continuation twice; both branch results come back.
+(defeffect choice ((tvar a)) (op choose () (tref bool)))
+
+(handle
+  (match (app (var choose))
+    (clause (pcon true) (lit 1))
+    (clause (pcon false) (lit 2)))
+  (ret (pvar x) (var x))
+  (opclause choose () k
+    (tuple (app (var k) (var true)) (app (var k) (var false)))))

@@ -408,7 +408,8 @@ let run_expr ctx (e : Kernel.expr) : (Value.t, Runtime_err.t) result =
   in
   match loop (SEval (empty_scope, e, [])) with v -> Ok v | exception Rt e -> Error e
 
-(** [call ctx fn args] applies an already-evaluated function value; used by native handlers (e.g.
-    the gated [eval]) that need to re-enter the machine. *)
+(** [call ctx fn args] applies an already-evaluated function value in a fresh continuation. Unused
+    by M1 (the gated eval runs whole expressions via {!run_expr}); it exists for M3's native
+    inference handlers, which must invoke resumption values from OCaml. *)
 let call ctx (fn : Value.t) (args : Value.t list) : (Value.t, Runtime_err.t) result =
   match run_state ctx (apply ctx fn args []) with v -> Ok v | exception Rt e -> Error e

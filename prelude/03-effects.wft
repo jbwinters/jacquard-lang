@@ -1,0 +1,7 @@
+; Library effects (plan W2.6). Granting an effect at the root is the CLI's
+; --allow flag; nothing is ambient.
+(defeffect eval ((tvar a)) (op eval-code ((tref code)) (tvar a)))
+
+(defeffect failure ((tvar a)) (op abort () (tvar a)))
+
+(defeffect console () (op print ((tref text)) (ttuple)))

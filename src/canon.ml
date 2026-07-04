@@ -103,9 +103,12 @@ type env = {
   group : group_ctx;
   tyvars : string list;
   rowvars : string list;
+  tyself : string option;
+      (* the enclosing type/effect declaration's own name: a [TRef (Named self)] serializes
+         as the self tag 0x37 (a recursive declaration cannot contain its own hash) *)
 }
 
-let empty_env = { locals = []; group = No_group; tyvars = []; rowvars = [] }
+let empty_env = { locals = []; group = No_group; tyvars = []; rowvars = []; tyself = None }
 let push vars env = { env with locals = List.rev vars @ env.locals }
 
 let local_index env ~meta x =
@@ -229,6 +232,7 @@ and ser_pat buf env (p : Kernel.pat) =
 and ser_ty buf env (t : Kernel.ty) =
   let meta = t.Kernel.meta in
   match t.Kernel.it with
+  | Kernel.TRef (Kernel.Named n) when env.tyself = Some n -> tag buf 0x37 (* self-reference *)
   | Kernel.TRef r ->
       tag buf 0x30;
       hash_bytes buf (the_hash ~meta ~what:"type" r)
@@ -496,7 +500,7 @@ let hash_decl (d : Kernel.decl) : (decl_hashes, Diag.t list) result =
         tag buf 0x41;
         text buf tname;
         varint buf (List.length tvars);
-        let env = { empty_env with tyvars = List.rev tvars } in
+        let env = { empty_env with tyvars = List.rev tvars; tyself = Some tname } in
         varint buf (List.length cons);
         List.iter
           (fun { Kernel.con_name; fields; _ } ->
@@ -527,7 +531,7 @@ let hash_decl (d : Kernel.decl) : (decl_hashes, Diag.t list) result =
         tag buf 0x42;
         text buf ename;
         varint buf (List.length evars);
-        let env = { empty_env with tyvars = List.rev evars } in
+        let env = { empty_env with tyvars = List.rev evars; tyself = Some ename } in
         varint buf (List.length ops);
         List.iter
           (fun { Kernel.op_name; op_params; op_result; _ } ->

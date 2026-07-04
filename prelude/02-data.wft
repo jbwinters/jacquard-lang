@@ -1,0 +1,11 @@
+; Core data types (plan W2.6). Bool is a library type: `if` is surface sugar
+; for match over its constructors (spec section 8).
+(deftype bool () (con false) (con true))
+
+(deftype option ((tvar a)) (con none) (con some (field (tvar a))))
+
+(deftype list ((tvar a))
+  (con nil)
+  (con cons (field head (tvar a)) (field tail (tapp (tref list) (tvar a)))))
+
+(deftype ordering () (con less) (con equal) (con greater))

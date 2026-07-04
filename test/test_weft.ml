@@ -18,4 +18,6 @@ let () =
       ("eval", Test_eval.suite);
       ("patmatch", Test_patmatch.suite);
       ("handlers", Test_handlers.suite);
+      ("quote", Test_quote.suite);
+      ("prelude", Test_prelude.suite);
     ]

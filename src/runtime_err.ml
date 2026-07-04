@@ -9,6 +9,7 @@ type t =
       (** an operation reached the root with no handler and no grant — the capability story at
           runtime (spec §5.1 rule 7) *)
   | Arity of string  (** wrong number of arguments in an uncurried application *)
+  | Arithmetic of string  (** builtin arithmetic failure, e.g. division by zero *)
   | Type_error of string  (** applying a non-function, spliced non-code, and similar *)
   | Unresolved of string  (** an unresolved name or dangling hash reached evaluation *)
   | Eval_error of string  (** the gated [eval] op rejected its payload at the boundary *)
@@ -19,6 +20,7 @@ let to_string = function
       Printf.sprintf "unhandled effect %s: operation `%s` reached the root without a handler"
         effect_ op
   | Arity msg -> "arity mismatch: " ^ msg
+  | Arithmetic msg -> "arithmetic error: " ^ msg
   | Type_error msg -> "type error: " ^ msg
   | Unresolved msg -> "unresolved reference: " ^ msg
   | Eval_error msg -> "eval rejected its argument: " ^ msg

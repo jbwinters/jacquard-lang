@@ -1,0 +1,10 @@
+; Primitive marker types: int, real, and text values are built into the
+; interpreter; these nominal declarations exist so signatures can name them.
+; Code is the type of quoted triples (spec section 5.1).
+(deftype int () (con int-opaque))
+
+(deftype real () (con real-opaque))
+
+(deftype text () (con text-opaque))
+
+(deftype code () (con code-opaque))

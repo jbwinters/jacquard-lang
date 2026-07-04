@@ -8,12 +8,18 @@
  (modules gen_goldens)
  (libraries weft corpus_support))
 
+(executable
+ (name gen_prelude_goldens)
+ (modules gen_prelude_goldens)
+ (libraries weft unix))
+
 (test
  (name test_weft)
  (modules
-  (:standard \ corpus_support gen_goldens))
+  (:standard \ corpus_support gen_goldens gen_prelude_goldens))
  (libraries weft corpus_support alcotest fmt qcheck-core qcheck-alcotest unix)
  (deps
   (glob_files_rec ../corpus/*.wft)
   (glob_files_rec ../corpus/*.expect)
-  (glob_files_rec ../corpus/*.golden)))
+  (glob_files_rec ../corpus/*.golden)
+  (glob_files_rec ../prelude/*.wft)))

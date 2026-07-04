@@ -88,7 +88,7 @@ let make () : harness =
   arith (int2 "mul" (fun a b -> Ok (Value.VInt (a * b))));
   arith
     (int2 "div" (fun a b ->
-         if b = 0 then Error (Runtime_err.Type_error "division by zero")
+         if b = 0 then Error (Runtime_err.Arithmetic "division by zero")
          else Ok (Value.VInt (a / b))));
   arith (int2 "eq" (fun a b -> Ok (vbool (a = b))));
   arith (int2 "lt" (fun a b -> Ok (vbool (a < b))));
@@ -130,6 +130,30 @@ let make () : harness =
     trace;
     bumps;
   }
+
+(** A context over the REAL prelude (plan W2.6): fresh store, prelude loaded from [../prelude],
+    native builtins wired. *)
+let make_prelude_ctx () : Store.t * Eval.ctx =
+  let store =
+    match Store.open_store (fresh_dir ()) with Ok s -> s | Error ds -> fail_diags "open_store" ds
+  in
+  (match Prelude.load ~dir:"../prelude" store with
+  | Ok _ -> ()
+  | Error ds -> fail_diags "prelude load" ds);
+  let ctx = Eval.make_ctx store in
+  (match Prelude.wire_builtins ctx with Ok () -> () | Error ds -> fail_diags "wire_builtins" ds);
+  (store, ctx)
+
+let eval_with ctx store src : (Value.t, Runtime_err.t) result =
+  match Reader.parse_one ~file:"p.wft" src with
+  | Error ds -> fail_diags "parse" ds
+  | Ok f -> (
+      match Kernel.expr_of_form f with
+      | Error ds -> fail_diags "validate" ds
+      | Ok e -> (
+          match Resolve.resolve_expr (Store.names_view store) e with
+          | Error ds -> fail_diags "resolve" ds
+          | Ok e -> Eval.run_expr ctx e))
 
 let parse_expr h src : Kernel.expr =
   match Reader.parse_one ~file:"e.wft" src with

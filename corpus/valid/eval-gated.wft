@@ -1,0 +1,2 @@
+; the first capability demo (plan W2.5): runs only under --allow eval
+(app (var eval-code) (quote (app (var add) (lit 40) (lit 2))))

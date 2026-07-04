@@ -1,0 +1,14 @@
+; Builtin markers: each declares a term whose native implementation the
+; interpreter registers under the member hash (the quoted body is inert data
+; that gives every builtin a distinct, stable identity).
+(defterm ((binding add () (quote (builtin-marker add)))))
+
+(defterm ((binding sub () (quote (builtin-marker sub)))))
+
+(defterm ((binding mul () (quote (builtin-marker mul)))))
+
+(defterm ((binding div () (quote (builtin-marker div)))))
+
+(defterm ((binding eq () (quote (builtin-marker eq)))))
+
+(defterm ((binding lt () (quote (builtin-marker lt)))))
