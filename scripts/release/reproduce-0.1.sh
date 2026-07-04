@@ -1,0 +1,64 @@
+#!/usr/bin/env sh
+set -eu
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+cd "$ROOT"
+
+REF=${WEFT_RELEASE_REF:-release/0.1-evidence}
+BASE=${WEFT_RELEASE_BASE:-3609a67}
+OUT=${WEFT_RELEASE_OUT:-logs/release/0.1}
+TRANSCRIPTS="$OUT/transcripts"
+
+mkdir -p "$TRANSCRIPTS"
+
+capture() {
+  name=$1
+  shift
+  file="$TRANSCRIPTS/$name.txt"
+  echo "== $name =="
+  if "$@" >"$file" 2>&1; then
+    cat "$file"
+  else
+    cat "$file"
+    echo "command failed while writing $file" >&2
+    exit 1
+  fi
+}
+
+echo "== release ref =="
+git checkout "$REF"
+git merge-base --is-ancestor "$BASE" HEAD
+git rev-parse --short HEAD | tee "$OUT/commit.txt"
+
+capture deps opam install --deps-only . --with-test --with-dev-setup --with-doc -y
+
+capture build opam exec -- dune build @all
+
+capture runtest opam exec -- dune runtest
+
+capture fmt opam exec -- dune fmt
+
+capture version _build/default/bin/main.exe --version
+
+capture m1 env WEFT_PRELUDE="$ROOT/prelude" opam exec -- sh demos/m1.sh
+capture m3 env WEFT_PRELUDE="$ROOT/prelude" opam exec -- sh demos/m3.sh
+capture hostile-manifest env WEFT_PRELUDE="$ROOT/prelude" opam exec -- sh demos/m4-hostile.sh
+
+capture cli-and-gauntlet opam exec -- dune runtest \
+  test/cli/demos.t \
+  test/cli/diff.t \
+  test/cli/dist.t \
+  test/cli/escrow.t \
+  test/cli/hostile-demo.t \
+  test/cli/infer.t \
+  test/cli/tools.t \
+  test/cli/tutorial.t \
+  test/cli/warp.t \
+  test/cli/world.t \
+  test/gauntlet
+
+capture gauntlet-build opam exec -- dune build test/test_weft.exe
+capture gauntlet-alcotest sh -c \
+  'cd _build/default/test && ./test_weft.exe test '"'"'gauntlet-.*'"'"' --compact --color=never'
+
+echo "release reproduction complete: $OUT"
