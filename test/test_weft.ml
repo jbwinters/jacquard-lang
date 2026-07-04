@@ -15,4 +15,7 @@ let () =
       ("canon", Test_canon.suite);
       ("store", Test_store.suite);
       ("corpus", Test_corpus.suite);
+      ("eval", Test_eval.suite);
+      ("patmatch", Test_patmatch.suite);
+      ("handlers", Test_handlers.suite);
     ]
