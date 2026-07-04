@@ -111,16 +111,16 @@ let test_console_gated () =
 
 let test_grant_mapping () =
   let _store, ctx = Eval_support.make_prelude_ctx () in
-  (match Prelude.grant ctx "Console" ~out:ignore with
+  (match Prelude.grant ctx "Console" ~out:ignore ~seed:0 with
   | Ok () -> ()
   | Error _ -> Alcotest.fail "grant is case-insensitive");
-  (match Prelude.grant ctx "EVAL" ~out:ignore with
+  (match Prelude.grant ctx "EVAL" ~out:ignore ~seed:0 with
   | Ok () -> ()
   | Error _ -> Alcotest.fail "grant EVAL");
-  (match Prelude.grant ctx "net" ~out:ignore with
+  (match Prelude.grant ctx "net" ~out:ignore ~seed:0 with
   | Ok () -> ()
   | Error _ -> Alcotest.fail "net has a stub grant");
-  match Prelude.grant ctx "filesystem" ~out:ignore with
+  match Prelude.grant ctx "filesystem" ~out:ignore ~seed:0 with
   | Error [ d ] -> Alcotest.(check string) "ungrantable" "E0703" d.Diag.code
   | _ -> Alcotest.fail "unknown effect must not be grantable"
 

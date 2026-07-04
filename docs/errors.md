@@ -112,6 +112,7 @@ in `src/` and `bin/` appears in this catalog.
 | E0901 | empty posterior (impossible observations) | `observe (bernoulli 0.0) true` |
 | E0902 | runtime failure inside inference | a model dividing by zero |
 | E0903 | model file has no expression | a decls-only file passed to `weft infer` |
+| E0904 | observe at the sampling root | `observe` under `weft run --allow dist` (D7 default: defect) |
 
 ## Appendix: the W5.3 audit (ten message rewrites)
 

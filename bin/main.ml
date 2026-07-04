@@ -101,14 +101,22 @@ let make_checker store =
       | Error _ -> ());
       Ok cctx
 
-let run_cmd file allows prelude store_dir =
+let run_cmd file allows prelude store_dir seed =
   match open_ctx ~prelude ~store_dir with
   | Error ds -> print_diags ds
   | Ok (store, ctx) -> (
+      let seed =
+        (* OS-entropy seeded unless pinned; --seed makes sampling runs reproducible (SL.7) *)
+        match seed with
+        | Some s -> s
+        | None ->
+            Random.self_init ();
+            Random.bits ()
+      in
       let rec grant_all = function
         | [] -> Ok ()
         | a :: rest -> (
-            match Prelude.grant ctx a ~out:print_string with
+            match Prelude.grant ctx a ~out:print_string ~seed with
             | Ok () -> grant_all rest
             | Error ds -> Error ds)
       in
@@ -151,6 +159,10 @@ let run_cmd file allows prelude store_dir =
                   | Runtime_err.Unhandled _ as e ->
                       prerr_endline (Runtime_err.to_string e);
                       exit_unhandled
+                  | Runtime_err.Observe_at_root as e ->
+                      prerr_endline
+                        (Diag.to_string (Diag.error ~code:"E0904" (Runtime_err.to_string e)));
+                      exit_runtime
                   | e ->
                       prerr_endline (Runtime_err.to_string e);
                       exit_runtime)
@@ -443,10 +455,17 @@ let allows_arg =
     & info [ "allow" ] ~docv:"EFFECT"
         ~doc:"Grant an effect at the root (repeatable), e.g. --allow console --allow eval.")
 
+let seed_arg =
+  Arg.(
+    value
+    & opt (some int) None
+    & info [ "seed" ] ~docv:"SEED"
+        ~doc:"Seed for the dist sampling handler (default: OS entropy); use for reproducible runs.")
+
 let run_t =
   Cmd.v
     (Cmd.info "run" ~doc:"Run a .wft file: declarations load, expressions evaluate and print.")
-    Term.(const run_cmd $ file_arg $ allows_arg $ prelude_arg $ store_dir_opt_arg)
+    Term.(const run_cmd $ file_arg $ allows_arg $ prelude_arg $ store_dir_opt_arg $ seed_arg)
 
 let print_sigs_arg =
   Arg.(

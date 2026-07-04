@@ -33,4 +33,7 @@ let () =
       ("errors-doc", Test_errors_doc.suite);
       ("names", Test_names.suite);
       ("stdlib", Test_stdlib.suite);
+      ("text", Test_text.suite);
+      ("map", Test_map.suite);
+      ("dist-lib", Test_dist_lib.suite);
     ]

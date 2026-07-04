@@ -30,7 +30,10 @@ let err ~code fmt = Printf.ksprintf (fun msg -> Error [ Diag.error ~code msg ]) 
 
 (* --- distribution values --- *)
 
-type dist_v = Bernoulli of float | Categorical of (Value.t * float) list
+type dist_v =
+  | Bernoulli of float
+  | Categorical of (Value.t * float) list
+  | UniformInt of int * int (* lo..hi inclusive (SL.7) *)
 
 (* Recognize a runtime distribution value built from the prelude constructors. *)
 let dist_of_value (ctx : Eval.ctx) (v : Value.t) : (dist_v, Runtime_err.t) result =
@@ -56,6 +59,10 @@ let dist_of_value (ctx : Eval.ctx) (v : Value.t) : (dist_v, Runtime_err.t) resul
                  (Printf.sprintf "categorical expects a list of pairs, got %s" (Value.show v)))
       in
       Result.map (fun es -> Categorical es) (entries_of entries)
+  | VCon { name = "uniform-int"; args = [ VInt lo; VInt hi ]; _ } ->
+      if hi < lo then
+        Error (Runtime_err.Arithmetic (Printf.sprintf "uniform-int range %d..%d is empty" lo hi))
+      else Ok (UniformInt (lo, hi))
   | v ->
       Error
         (Runtime_err.Type_error (Printf.sprintf "%s is not a distribution value" (Value.show v)))
@@ -76,15 +83,32 @@ let support ctx (d : dist_v) : ((Value.t * float) list, Runtime_err.t) result =
             ]
       | _ -> Error (Runtime_err.Unresolved "prelude bool constructors"))
   | Categorical entries -> Ok entries
+  | UniformInt (lo, hi) ->
+      (* enumeration support is the whole range; budget-capped so a huge range is a clean
+         error instead of an out-of-memory list *)
+      let n = hi - lo + 1 in
+      if n > 10_000 then
+        Error
+          (Runtime_err.Arithmetic
+             (Printf.sprintf "uniform-int %d..%d has %d outcomes; enumeration caps at 10000" lo hi n))
+      else
+        let p = 1.0 /. float_of_int n in
+        Ok (List.init n (fun i -> (Value.VInt (lo + i), p)))
 
-(** [pmf d v]: probability mass of [v] under [d]; 0.0 off-support. *)
+(** [pmf d v]: probability mass of [v] under [d]; 0.0 off-support. UniformInt is computed directly
+    so its pmf works on ranges the enumeration cap refuses. *)
 let pmf ctx (d : dist_v) (v : Value.t) : (float, Runtime_err.t) result =
-  Result.map
-    (fun entries ->
-      List.fold_left
-        (fun acc (x, w) -> if Value.show x = Value.show v then acc +. w else acc)
-        0.0 entries)
-    (support ctx d)
+  match d with
+  | UniformInt (lo, hi) ->
+      let n = float_of_int (hi - lo + 1) in
+      Ok (match v with Value.VInt x when x >= lo && x <= hi -> 1.0 /. n | _ -> 0.0)
+  | _ ->
+      Result.map
+        (fun entries ->
+          List.fold_left
+            (fun acc (x, w) -> if Value.show x = Value.show v then acc +. w else acc)
+            0.0 entries)
+        (support ctx d)
 
 (* value equality via stable rendering: fine for the discrete literals/constructors the
    support can contain *)
@@ -209,6 +233,15 @@ let draw rng entries =
   in
   go 0.0 entries
 
+(** [sample_dist ctx rng d] draws one value from [d] — directly for UniformInt (huge ranges must not
+    materialize a support list), by inverse CDF over the support otherwise. *)
+let sample_dist ctx rng (d : dist_v) : (Value.t, Runtime_err.t) result =
+  match d with
+  | UniformInt (lo, hi) ->
+      let n = hi - lo + 1 in
+      Ok (Value.VInt (lo + int_of_float (Rng.float rng *. float_of_int n)))
+  | _ -> Result.map (draw rng) (support ctx d)
+
 (** [likelihood_weighting ctx ~seed ~samples model] runs K weighted executions of a model state
     THUNK (a function producing the state, so each run restarts evaluation). *)
 let likelihood_weighting (ctx : Eval.ctx) ~seed ~samples (model : unit -> Eval.state) :
@@ -222,14 +255,17 @@ let likelihood_weighting (ctx : Eval.ctx) ~seed ~samples (model : unit -> Eval.s
         runs := { value = v; weight } :: !runs;
         Ok ()
     | Ok (Op { name = "sample"; args = [ dv ]; resume = VResume kont }) -> (
-        match Result.bind (dist_of_value ctx dv) (support ctx) with
+        match Result.bind (dist_of_value ctx dv) (sample_dist ctx rng) with
         | Error e -> Error e
-        | Ok entries -> one_run rng (Eval.resume_state kont (draw rng entries)) weight)
+        | Ok x -> one_run rng (Eval.resume_state kont x) weight)
     | Ok (Op { name = "observe"; args = [ dv; v ]; resume = VResume kont }) -> (
         match Result.bind (dist_of_value ctx dv) (fun d -> pmf ctx d v) with
         | Error e -> Error e
         | Ok p -> one_run rng (Eval.resume_state kont Value.unit_v) (weight *. p))
-    | Ok (Op { name; _ }) -> Error (Runtime_err.Unhandled { effect_ = "dist"; op = name })
+    | Ok (Op { name; _ }) ->
+        (* a non-dist op reached the root during a weighted run (unreachable via the CLI,
+           which manifest-checks first; the raw harness can get here) *)
+        Error (Runtime_err.Unhandled { effect_ = "(not handled during inference)"; op = name })
   in
   let rec k_runs i =
     if i >= samples then Ok ()

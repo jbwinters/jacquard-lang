@@ -26,3 +26,6 @@
 22-hostile-net.wft:summarize : (text) ->{net} text
 23-ring1.wft:tally : forall a b. (list b) ->{} ((), list a)
 23-ring1.wft:label-with-index : forall a. (list a) ->{} (list (int, a), int)
+24-ring2.wft:csv-swap : (text) ->{} text
+24-ring2.wft:index-of-names : (list text) ->{} map.t text int
+24-ring2.wft:die-posterior : forall a. (int, int) ->{} list (pair a real)

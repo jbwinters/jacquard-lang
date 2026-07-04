@@ -10,12 +10,18 @@ type t =
           runtime (spec §5.1 rule 7) *)
   | Arity of string  (** wrong number of arguments in an uncurried application *)
   | Arithmetic of string  (** builtin arithmetic failure, e.g. division by zero *)
+  | Observe_at_root
+      (** [observe] reached the root sampling handler (D7 default: a defect; observation needs an
+          inference driver) *)
   | Type_error of string  (** applying a non-function, spliced non-code, and similar *)
   | Unresolved of string  (** an unresolved name or dangling hash reached evaluation *)
   | Eval_error of string  (** the gated [eval] op rejected its payload at the boundary *)
 
 let to_string = function
   | Match_failure scrutinee -> Printf.sprintf "no clause matched the value %s" scrutinee
+  | Observe_at_root ->
+      "observe reached the sampling root handler; observation requires an inference driver (use \
+       weft infer)"
   | Unhandled { effect_; op } ->
       Printf.sprintf "unhandled effect %s: operation `%s` reached the root without a handler"
         effect_ op

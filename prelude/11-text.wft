@@ -1,0 +1,55 @@
+; Ring 2 Text (stdlib SL.5, decision D9): codepoint semantics, no Char type.
+; Native builtins first (markers), then the dictionary instances they unlock.
+(defterm ((binding text.length () (quote (builtin-marker text.length)))))
+
+(defterm ((binding text.concat () (quote (builtin-marker text.concat)))))
+
+(defterm ((binding text.join () (quote (builtin-marker text.join)))))
+
+(defterm ((binding text.split () (quote (builtin-marker text.split)))))
+
+(defterm ((binding text.slice () (quote (builtin-marker text.slice)))))
+
+(defterm ((binding text.trim () (quote (builtin-marker text.trim)))))
+
+(defterm ((binding text.contains? () (quote (builtin-marker text.contains?)))))
+
+(defterm ((binding text.empty? () (quote (builtin-marker text.empty?)))))
+
+(defterm ((binding text.from-int () (quote (builtin-marker text.from-int)))))
+
+(defterm ((binding text.to-int () (quote (builtin-marker text.to-int)))))
+
+(defterm ((binding text.from-real () (quote (builtin-marker text.from-real)))))
+
+(defterm ((binding text.to-real () (quote (builtin-marker text.to-real)))))
+
+(defterm ((binding text-compare () (quote (builtin-marker text-compare)))))
+
+; dictionary instances deferred from SL.2 until text existed
+(defterm ((binding text.ord () (app (var mk-ord) (var text-compare)))))
+
+(defterm ((binding text.eq () (app (var ord.to-eq) (var text.ord)))))
+
+(defterm ((binding int.show () (app (var mk-show) (var text.from-int)))))
+
+(defterm ((binding bool.show ()
+  (app (var mk-show)
+    (lam ((pvar b))
+      (match (var b)
+        (clause (pcon true) (lit "true"))
+        (clause (pcon false) (lit "false"))))))))
+
+(defterm ((binding text.show ()
+  (app (var mk-show) (lam ((pvar s)) (var s))))))
+
+; show a list by showing each element: [1, 2, 3]
+(defterm ((binding show.for-list ()
+  (lam ((pvar d))
+    (app (var mk-show)
+      (lam ((pvar xs))
+        (app (var text.concat)
+          (lit "[")
+          (app (var text.concat)
+            (app (var text.join) (app (var list.map) (var xs) (app (var show.fn) (var d))) (lit ", "))
+            (lit "]")))))))))

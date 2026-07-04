@@ -153,15 +153,20 @@ let read_atom st =
 let valid_symbol = valid_library_symbol
 let valid_head s = String.length s > 0 && is_sym_start s.[0] && String.for_all is_sym_char s
 
-(* [+-]?digits, or a real: digits with '.' and/or exponent, or +inf.0 etc. *)
-let classify_number st ~start_pos s =
+(* [+-]?digits, or a real: digits with '.' and/or exponent, or +inf.0 etc. The pure core is
+   shared with the text builtins (SL.5) so text.to-int/to-real accept exactly the reader's
+   literal grammar rather than growing a second parser. *)
+type literal_class = LInt of int | LReal of float | LNotNumber | LBadReal | LIntOverflow
+
+let classify_literal_class s : literal_class =
   match s with
-  | "+inf.0" -> Some (Form.Real infinity)
-  | "-inf.0" -> Some (Form.Real neg_infinity)
-  | "+nan.0" | "-nan.0" -> Some (Form.Real nan)
+  | "+inf.0" -> LReal infinity
+  | "-inf.0" -> LReal neg_infinity
+  | "+nan.0" | "-nan.0" -> LReal nan
+  | "" -> LNotNumber
   | _ -> (
       let body = match s.[0] with '+' | '-' -> String.sub s 1 (String.length s - 1) | _ -> s in
-      if body = "" then None
+      if body = "" then LNotNumber
       else
         let is_real = String.exists (fun c -> c = '.' || c = 'e' || c = 'E') body in
         let shape_ok =
@@ -188,18 +193,29 @@ let classify_number st ~start_pos s =
           end;
           !ok && !i = n
         in
-        if not shape_ok then None
-        else if is_real then
-          match float_of_string_opt s with
-          | Some r -> Some (Form.Real r)
-          | None -> error st ~code:"E0105" ~start_pos (Printf.sprintf "malformed real literal %S" s)
-        else
-          match int_of_string_opt s with
-          | Some i -> Some (Form.Int i)
-          | None ->
-              error st ~code:"E0109" ~start_pos
-                (Printf.sprintf "integer literal %s does not fit in a native int" s)
-                ~hint:"Weft integers are 63-bit native ints (decision D2)")
+        if not shape_ok then LNotNumber
+        else if is_real then match float_of_string_opt s with Some r -> LReal r | None -> LBadReal
+        else match int_of_string_opt s with Some i -> LInt i | None -> LIntOverflow)
+
+(** [classify_literal s] classifies [s] exactly as the reader classifies an unquoted numeric atom:
+    [Some (Form.Int _ | Form.Real _)] for the reader's number spellings, [None] for everything else
+    (bad shape, malformed real, int overflow). *)
+let classify_literal s =
+  match classify_literal_class s with
+  | LInt i -> Some (Form.Int i)
+  | LReal r -> Some (Form.Real r)
+  | LNotNumber | LBadReal | LIntOverflow -> None
+
+let classify_number st ~start_pos s =
+  match classify_literal_class s with
+  | LInt i -> Some (Form.Int i)
+  | LReal r -> Some (Form.Real r)
+  | LNotNumber -> None
+  | LBadReal -> error st ~code:"E0105" ~start_pos (Printf.sprintf "malformed real literal %S" s)
+  | LIntOverflow ->
+      error st ~code:"E0109" ~start_pos
+        (Printf.sprintf "integer literal %s does not fit in a native int" s)
+        ~hint:"Weft integers are 63-bit native ints (decision D2)"
 
 let read_text st =
   let start_pos = pos st in
