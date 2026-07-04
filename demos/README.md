@@ -12,6 +12,7 @@ uncertainty, and identity stay visible to tools.
 - `clarifying-question.sh`: value-of-information for asking the user.
 - `agent-dream.sh`: one agent policy under scripted and probabilistic world handlers.
 - `ambiguity-pipeline.sh`: posterior-carrying extraction; user selection is an observe.
+- `showcase-warp-tests.sh`: Warp tests for the VOI, dream-mode, and ambiguity demos.
 - `word-count.wft`: console-only stdlib smoke demo.
 - `cookbook.wft`: compact probabilistic cookbook examples.
 - `escrow/`: product-shaped generated workflow with manifest, dry-run, Warp, replay,

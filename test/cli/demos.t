@@ -90,3 +90,14 @@ human click is represented as an observation. Downstream routing re-enumerates.
   cons(mk-pair("Mar 4, 2025", 0.56), cons(mk-pair("Apr 3, 2025", 0.41), cons(mk-pair("Unknown", 0.03), nil)))
   cons(mk-pair("escalate-overdue", 0.56), cons(mk-pair("schedule-followup", 0.41), cons(mk-pair("ask-human", 0.03), nil)))
   cons(mk-pair("escalate-overdue", 0.0), cons(mk-pair("schedule-followup", 0.9999999999999999), cons(mk-pair("ask-human", 0.0), nil)))
+
+The same demos also have Warp tests. The runner reuses each demo's definitions,
+strips the top-level output driver, appends `showcase-warp-tests.wft`, and runs
+the result through `weft test`.
+
+  $ sh ../../demos/showcase-warp-tests.sh
+  PASS demo-ambiguity-click/date posterior survives until user observe (3 checks)
+  PASS demo-dream-policy-dist/dream handler matches explicit world distribution (3 checks)
+  PASS demo-dream-scripted/scripted worlds run the same policy (2 checks)
+  PASS demo-voi-policy/clarifying question asks only when worth it (3 checks)
+  4 passed, 0 failed, 0 skipped, 0 refused

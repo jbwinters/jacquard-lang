@@ -56,6 +56,8 @@
               (app (var route-for-date) (var date))))))
       (var text.eq))))))
 
+; --- demo driver ---
+
 (app (var date-posterior))
 (app (var routing-posterior))
 (app (var after-click-apr3))
