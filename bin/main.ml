@@ -368,6 +368,152 @@ let fmt_cmd file write =
 
 (* --- diff --- *)
 
+(* --- test (Warp W6.2/W6.3/W6.8) --- *)
+
+let test_cmd files allows prelude cache_dir no_cache coverage seed =
+  match open_ctx ~prelude ~store_dir:None with
+  | Error ds -> print_diags ds
+  | Ok (store, ctx) -> (
+      let seed =
+        match seed with
+        | Some s -> s
+        | None ->
+            Random.self_init ();
+            Random.bits ()
+      in
+      let rec grant_all = function
+        | [] -> Ok ()
+        | a :: rest -> (
+            match Prelude.grant ctx a ~infer_cache:None ~out:print_string ~seed with
+            | Ok () -> grant_all rest
+            | Error ds -> Error ds)
+      in
+      match grant_all allows with
+      | Error ds -> print_diags ds
+      | Ok () -> (
+          (* test files are declarations only: a top-level expression is a mistake *)
+          let loaded = ref [] in
+          let load_file file =
+            match Reader.parse_string ~file (read_file file) with
+            | Error ds -> Error ds
+            | Ok forms ->
+                let rec go = function
+                  | [] -> Ok ()
+                  | f :: rest -> (
+                      match Kernel.of_form f with
+                      | Error ds -> Error ds
+                      | Ok (Kernel.Expr _) ->
+                          Error
+                            [
+                              Diag.error ~code:"E1001"
+                                (Printf.sprintf
+                                   "%s: test files hold declarations only; found a top-level \
+                                    expression"
+                                   file);
+                            ]
+                      | Ok (Kernel.Decl d) -> (
+                          match Resolve.resolve_decl (Store.names_view store) d with
+                          | Error ds -> Error ds
+                          | Ok d -> (
+                              match Store.put_decl store d with
+                              | Error ds -> Error ds
+                              | Ok _ ->
+                                  loaded := d :: !loaded;
+                                  go rest)))
+                in
+                go forms
+          in
+          let rec load_all = function
+            | [] -> Ok ()
+            | f :: rest -> ( match load_file f with Ok () -> load_all rest | e -> e)
+          in
+          match load_all files with
+          | Error ds -> print_diags ds
+          | Ok () -> (
+              match make_checker store with
+              | Error ds -> print_diags ds
+              | Ok cctx -> (
+                  (* an ill-typed test must FAIL the run, not silently vanish from
+                     discovery (review finding: false green) *)
+                  let rec check_loaded = function
+                    | [] -> Ok ()
+                    | d :: rest -> (
+                        match Check.check_top cctx (Kernel.Decl d) with
+                        | Error ds -> Error ds
+                        | Ok { Check.warnings; _ } ->
+                            List.iter (fun w -> prerr_endline (Diag.to_string w)) warnings;
+                            check_loaded rest)
+                  in
+                  match check_loaded (List.rev !loaded) with
+                  | Error ds -> print_diags ds
+                  | Ok () -> (
+                      match Store.lookup_kind store "test.run" Resolve.KTerm with
+                      | None -> print_diags [ Diag.error ~code:"E0702" "prelude has no test.run" ]
+                      | Some { Resolve.hash = tr; _ } -> (
+                          match Warp.value_of ctx tr with
+                          | Error e ->
+                              prerr_endline (Runtime_err.to_string e);
+                              exit_runtime
+                          | Ok test_run -> (
+                              let discovered = Warp.discover store cctx in
+                              let test_hashes =
+                                List.map
+                                  (function Warp.Hermetic (_, h) | Warp.World (_, h) -> h)
+                                  discovered
+                              in
+                              let granted = granted_hashes store allows in
+                              let cache_dir =
+                                if no_cache then None
+                                else Some (Option.value cache_dir ~default:"test-cache")
+                              in
+                              let totals =
+                                {
+                                  Warp.passed = 0;
+                                  failed = 0;
+                                  skipped = 0;
+                                  refused = 0;
+                                  hits = 0;
+                                  ran = 0;
+                                }
+                              in
+                              let union = Hashtbl.create 64 in
+                              let rec go = function
+                                | [] -> Ok ()
+                                | d :: rest -> (
+                                    match
+                                      Warp.run_discovered ctx cctx ~test_run ~cache_dir ~granted d
+                                    with
+                                    | Error e -> Error e
+                                    | Ok outcomes ->
+                                        List.iter
+                                          (fun (o : Warp.outcome) ->
+                                            List.iter
+                                              (fun h -> Hashtbl.replace union h ())
+                                              o.Warp.coverage;
+                                            List.iter print_endline (Warp.render_outcome totals o))
+                                          outcomes;
+                                        go rest)
+                              in
+                              match go discovered with
+                              | Error e ->
+                                  prerr_endline ("test runner error: " ^ e);
+                                  exit_runtime
+                              | Ok () ->
+                                  Printf.printf "%d passed, %d failed, %d skipped, %d refused\n"
+                                    totals.Warp.passed totals.Warp.failed totals.Warp.skipped
+                                    totals.Warp.refused;
+                                  if cache_dir <> None then
+                                    Printf.printf "cache: %d hit, %d ran\n" totals.Warp.hits
+                                      totals.Warp.ran;
+                                  (if coverage then
+                                     let rings =
+                                       Warp.parse_rings
+                                         (Filename.concat (prelude_dir_of prelude) "rings.manifest")
+                                     in
+                                     List.iter print_endline
+                                       (Warp.coverage_report store ~rings ~tests:test_hashes union));
+                                  if totals.Warp.failed > 0 then exit_diags else ok)))))))
+
 let diff_cmd store_a store_b =
   match List.find_opt (fun d -> not (Sys.file_exists d)) [ store_a; store_b ] with
   | Some missing ->
@@ -575,9 +721,34 @@ let store_t =
     (Cmd.info "store" ~doc:"Operate on a persistent content-addressed store.")
     [ add; name; rename ]
 
+let test_files_arg = Arg.(value & pos_all file [] & info [] ~docv:"FILES")
+
+let cache_dir_arg =
+  Arg.(
+    value
+    & opt (some string) None
+    & info [ "cache-dir" ] ~docv:"DIR" ~doc:"Hermetic result cache directory (default: test-cache).")
+
+let no_cache_arg =
+  Arg.(value & flag & info [ "no-cache" ] ~doc:"Bypass the hermetic result cache entirely.")
+
+let coverage_arg =
+  Arg.(
+    value & flag & info [ "coverage" ] ~doc:"Report definitions never executed by any test (W6.8).")
+
+let test_t =
+  Cmd.v
+    (Cmd.info "test"
+       ~doc:
+         "Discover tests by checked type (decision D12) and run them: the hermetic lane under \
+          test.run, the world lane behind --allow grants.")
+    Term.(
+      const test_cmd $ test_files_arg $ allows_arg $ prelude_arg $ cache_dir_arg $ no_cache_arg
+      $ coverage_arg $ seed_arg)
+
 let main =
   Cmd.group
     (Cmd.info "weft" ~version:Version.version ~doc:"The Weft language toolchain")
-    [ run_t; check_t; hash_t; fmt_t; diff_t; infer_t; store_t ]
+    [ run_t; check_t; hash_t; fmt_t; diff_t; infer_t; store_t; test_t ]
 
 let () = exit (Cmd.eval' main)

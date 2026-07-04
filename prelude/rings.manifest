@@ -224,3 +224,21 @@ fs.read-lines 3
 fs.read-only 3
 infer.scripted 3
 net.get 3
+# --- 15-warp (Warp W6.1/W6.2): check+report ride the pure rings; assertions
+# that render through text sit at ring 2; world-test names the world
+check 1
+fail 1
+report 0
+mk-report 0
+test.run 1
+check.true 1
+check.eq 2
+check.some 2
+check.fails 2
+check.throws 2
+test 2
+case 2
+prop 2
+group 2
+world-test 3
+wcase 3

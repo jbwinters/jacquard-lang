@@ -34,6 +34,10 @@ type ctx = {
       (** when set (by {!run_state_capturing}), an op that reaches the root with no handler and no
           grant is CAPTURED — returned with its continuation — instead of dying [Unhandled]; this is
           how native inference drivers (M3) receive resumptions *)
+  mutable coverage : (Hash.t, unit) Hashtbl.t;
+      (** semantic coverage (W6.8): every store TERM loaded through {!eval_ref} this run — populated
+          on the memo-hit path too, so a second test exercising a term still counts it. The test
+          runner swaps in a fresh table per test to get per-test sets. *)
 }
 
 (** [make_ctx store] builds a fresh evaluation context over [store]: empty builtin, memo, and
@@ -45,6 +49,7 @@ let make_ctx store =
     memo = Hashtbl.create 64;
     root_handlers = Hashtbl.create 8;
     capture_ops = false;
+    coverage = Hashtbl.create 64;
   }
 
 (* Internal control flow only; never escapes this module. *)
@@ -288,6 +293,7 @@ let rec eval_ref ctx (h : Hash.t) (kind : Kernel.refkind) (k : kont) : state =
   | Kernel.Con -> SApply (con_value ctx h, k)
   | Kernel.Op -> SApply (op_value ctx h, k)
   | Kernel.Term -> (
+      Hashtbl.replace ctx.coverage h ();
       match Hashtbl.find_opt ctx.builtins h with
       | Some v -> SApply (v, k)
       | None -> (

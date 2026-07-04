@@ -1,0 +1,11 @@
+; Warp signatures (W6.1): the row bookkeeping is the framework. check.fails
+; DISCHARGES the body's abort while ADDING check; a helper with an open row
+; still constructs a closed-row case (open coercion instantiates e empty).
+(defterm ((binding fails-on-empty ()
+  (lam ((pvar xs))
+    (app (var check.fails) (lam () (app (var list.head!) (var xs))) (lit "head! of empty"))))))
+(defterm ((binding helper-with-open-row ()
+  (lam () (app (var check.true) (var true) (lit "open row helper"))))))
+(defterm ((binding sealed-case ()
+  (app (var case) (lit "helper seals") (var helper-with-open-row)))))
+(defterm ((binding fails-alias () (var check.fails))))

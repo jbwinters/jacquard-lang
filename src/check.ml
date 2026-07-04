@@ -212,6 +212,18 @@ let rec con_scheme ctx ?meta (h : Hash.t) : scheme =
   | Ok _ -> err ?meta ~code:"E0805" "hash %s is not a constructor" (Hash.to_hex h)
   | Error ds -> err ?meta ~code:"E0805" "%s" (String.concat "; " (List.map Diag.to_string ds))
 
+(* Does a declaration type mention [name] as a (tref name)? Drives the self-in-argument
+   case below without disturbing free-variable freshening elsewhere. *)
+and ty_mentions name (t : Kernel.ty) : bool =
+  match t.Kernel.it with
+  | Kernel.TRef (Kernel.Named n) -> n = name
+  | Kernel.TRef (Kernel.Hashed _) | Kernel.TVar _ -> false
+  | Kernel.TApp (head, args) -> ty_mentions name head || List.exists (ty_mentions name) args
+  | Kernel.TArrow (params, _, result) ->
+      List.exists (ty_mentions name) params || ty_mentions name result
+  | Kernel.TTuple items -> List.exists (ty_mentions name) items
+  | Kernel.TForall (_, _, body) -> ty_mentions name body
+
 (* Declaration-context conversion: like conv_ty but self-references map to [self]. Unbound
    type variables are an error here (E0811), not implicit quantification. *)
 and conv_decl_ty ctx cenv ?(unbound_code = "E0811") ~self (t : Kernel.ty) : ty =
@@ -235,6 +247,16 @@ and conv_decl_ty ctx cenv ?(unbound_code = "E0811") ~self (t : Kernel.ty) : ty =
           List.iter2 (unify_or ctx ~meta ~what:"recursive type argument") params args;
           TCon (h, params)
       | _ -> self_ty)
+  | Kernel.TApp ({ Kernel.it = Kernel.TRef (Kernel.Hashed h); _ }, args)
+    when List.exists (ty_mentions self_name) args ->
+      (* a non-self head whose ARGUMENTS contain the self-reference —
+         (tapp (tref list) (tref test)) inside test's own declaration (W6.2). Guarded so
+         self-free applications keep conv_ty's implicit freshening of free op vars. *)
+      let arity = type_arity ctx ~meta h in
+      if arity <> List.length args then
+        err ~meta ~code:"E0810" "type %s expects %d argument(s), got %d" (name_of ctx h) arity
+          (List.length args);
+      TCon (h, List.map (conv_decl_ty ctx cenv ~unbound_code ~self) args)
   | Kernel.TArrow (params, row, result) ->
       TArrow
         ( List.map (conv_decl_ty ctx cenv ~unbound_code ~self) params,

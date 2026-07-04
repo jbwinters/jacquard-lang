@@ -53,6 +53,7 @@ list.zip : forall a b. (list a, list b) ->{} list (a, b)
 lt : (int, int) ->{} bool
 con mk-eq
 con mk-ord
+con mk-report
 con mk-show
 mul : (int, int) ->{} int
 mul-real : (real, real) ->{} real
@@ -77,6 +78,7 @@ ord.to-eq : forall a. (ord a) ->{} eq a
 type ordering
 type real
 con real-opaque
+type report
 type result
 result.each : forall a b c e. (result a b, (b) ->{e} c) ->{e} ()
 result.fold : forall a b c e. (result b c, a, (a, c) ->{e} a) ->{e} a

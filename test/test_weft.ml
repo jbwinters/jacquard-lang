@@ -38,4 +38,5 @@ let () =
       ("dist-lib", Test_dist_lib.suite);
       ("world", Test_world.suite);
       ("rings", Test_rings.suite);
+      ("warp", Test_warp.suite);
     ]

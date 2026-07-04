@@ -29,3 +29,7 @@
 24-ring2.wft:csv-swap : (text) ->{} text
 24-ring2.wft:index-of-names : (list text) ->{} map.t text int
 24-ring2.wft:die-posterior : forall a. (int, int) ->{} list (pair a real)
+25-warp.wft:fails-on-empty : forall a. (list a) ->{check} ()
+25-warp.wft:helper-with-open-row : () ->{check} ()
+25-warp.wft:sealed-case : test
+25-warp.wft:fails-alias : forall a e. (() ->{abort, check | e} a, text) ->{check | e} ()

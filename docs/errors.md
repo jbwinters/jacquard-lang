@@ -114,6 +114,12 @@ in `src/` and `bin/` appears in this catalog.
 | E0903 | model file has no expression | a decls-only file passed to `weft infer` |
 | E0904 | observe at the sampling root | `observe` under `weft run --allow dist` (D7 default: defect) |
 
+## Warp (E10xx)
+
+| code | meaning | example |
+|------|---------|---------|
+| E1001 | expression at top level of a test file | `weft test file.wft` where the file ends with `(app (var main))` |
+
 ## Appendix: the W5.3 audit (ten message rewrites)
 
 Before/after wording improvements applied during the audit:
