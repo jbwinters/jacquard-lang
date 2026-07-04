@@ -1,0 +1,1 @@
+(app (var add) (lit 1) (lit "x"))

@@ -166,3 +166,29 @@ let grant (ctx : Eval.ctx) name ~out : (unit, Diag.t list) result =
   | "console" -> install_console ctx ~out
   | "eval" -> install_eval ctx
   | other -> err ~code:"E0703" "effect `%s` is not grantable" other
+
+(** Builtin type signatures for the checker (W3.2): the marker bodies would type as [code], so the
+    checker consults these instead, mirroring how {!wire_builtins} overrides evaluation. Arrows are
+    pure (closed empty rows); the checker's open coercion supplies call-site slack. *)
+let builtin_signatures (store : Store.t) : ((Hash.t * Types.scheme) list, Diag.t list) result =
+  let ( let* ) = Result.bind in
+  let* int_h = lookup_hash store ~kind:Resolve.KType "int" in
+  let* bool_h = lookup_hash store ~kind:Resolve.KType "bool" in
+  let int_ty = Types.TCon (int_h, []) in
+  let bool_ty = Types.TCon (bool_h, []) in
+  let arrow2 result = Types.TArrow ([ int_ty; int_ty ], Types.empty_row, result) in
+  let rec go acc = function
+    | [] -> Ok (List.rev acc)
+    | (name, ty) :: rest ->
+        let* h = lookup_hash store ~kind:Resolve.KTerm name in
+        go ((h, Types.mono ty) :: acc) rest
+  in
+  go []
+    [
+      ("add", arrow2 int_ty);
+      ("sub", arrow2 int_ty);
+      ("mul", arrow2 int_ty);
+      ("div", arrow2 int_ty);
+      ("eq", arrow2 bool_ty);
+      ("lt", arrow2 bool_ty);
+    ]

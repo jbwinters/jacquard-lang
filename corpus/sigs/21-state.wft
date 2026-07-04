@@ -1,0 +1,10 @@
+; the W2.4 state handler, as a typed function of the initial state
+(defeffect state ((tvar s)) (op get () (tvar s)) (op put ((tvar s)) (ttuple)))
+(defterm ((binding run-state ()
+  (lam ((pvar body) (pvar init))
+    (app
+      (handle (app (var body))
+        (ret (pvar x) (lam ((pvar st)) (tuple (var x) (var st))))
+        (opclause get () k (lam ((pvar st)) (app (app (var k) (var st)) (var st))))
+        (opclause put ((pvar ns)) k (lam ((pvar st)) (app (app (var k) (tuple)) (var ns)))))
+      (var init))))))

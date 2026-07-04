@@ -20,4 +20,7 @@ let () =
       ("handlers", Test_handlers.suite);
       ("quote", Test_quote.suite);
       ("prelude", Test_prelude.suite);
+      ("types", Test_types.suite);
+      ("check", Test_check.suite);
+      ("exhaust", Test_exhaust.suite);
     ]

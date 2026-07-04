@@ -1,0 +1,1 @@
+(lam () (app (var print) (lit "hello")))

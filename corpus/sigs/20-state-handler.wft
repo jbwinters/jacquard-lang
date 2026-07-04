@@ -1,0 +1,5 @@
+; a pure value computed through handled effects: the row comes out empty
+(defterm ((binding handled ()
+  (handle (app (var abort))
+    (ret (pvar x) (app (var some) (var x)))
+    (opclause abort () k (var none))))))

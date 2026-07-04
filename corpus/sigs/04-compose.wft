@@ -1,0 +1,2 @@
+(lam ((pvar f) (pvar g))
+  (lam ((pvar x)) (app (var f) (app (var g) (var x)))))

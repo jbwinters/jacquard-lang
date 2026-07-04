@@ -1,0 +1,4 @@
+(lam ((pvar o))
+  (match (var o)
+    (clause (pcon some (pvar x)) (var x))
+    (clause (pcon none) (lit 0))))

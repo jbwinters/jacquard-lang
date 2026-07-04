@@ -1,0 +1,1 @@
+(quote (app (var add) (lit 1) (lit 2)))

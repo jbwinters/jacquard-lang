@@ -1,0 +1,1 @@
+(deftype bad2 () (con mk (field (tvar zz))))

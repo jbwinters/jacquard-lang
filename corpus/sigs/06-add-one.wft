@@ -1,0 +1,1 @@
+(defterm ((binding add-one () (lam ((pvar x)) (app (var add) (var x) (lit 1))))))

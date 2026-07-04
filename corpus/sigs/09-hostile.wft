@@ -1,0 +1,15 @@
+; the example-code trio: failure as an effect handled to option
+(defterm ((binding safe-div ()
+  (lam ((pvar n) (pvar d))
+    (match (app (var eq) (var d) (lit 0))
+      (clause (pcon true)  (app (var abort)))
+      (clause (pcon false) (app (var div) (var n) (var d))))))))
+(defterm ((binding to-option ()
+  (lam ((pvar body))
+    (handle (app (var body))
+      (ret (pvar x) (app (var some) (var x)))
+      (opclause abort () k (var none)))))))
+(defterm ((binding main ()
+  (tuple
+    (app (var to-option) (lam () (app (var safe-div) (lit 10) (lit 2))))
+    (app (var to-option) (lam () (app (var safe-div) (lit 1)  (lit 0))))))))

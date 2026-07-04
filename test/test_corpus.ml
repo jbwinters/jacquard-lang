@@ -34,16 +34,35 @@ let test_invalid_corpus () =
       if not (Sys.file_exists expect_path) then Alcotest.failf "%s has no .expect sidecar" file;
       match Corpus_support.parse_expect (Corpus_support.read_file expect_path) with
       | None -> Alcotest.failf "%s: malformed .expect sidecar" file
-      | Some (expected_stage, expected_code) -> (
-          match Corpus_support.staged_pipeline ~file (Corpus_support.read_file path) with
-          | Ok _ ->
-              Alcotest.failf "%s: expected failure at %s, but the pipeline passed" file
-                (Corpus_support.stage_name expected_stage)
+      | Some ("check", expected_code) -> (
+          (* check-stage cases run against a real prelude store (W3.3) *)
+          match
+            Corpus_support.check_pipeline ~prelude_dir:"../prelude" ~file
+              (Corpus_support.read_file path)
+          with
+          | Ok () -> Alcotest.failf "%s: expected a check failure, but it passed" file
           | Error (stage, diags) ->
               Alcotest.(check string)
                 (Printf.sprintf "%s fails at the right stage" file)
-                (Corpus_support.stage_name expected_stage)
-                (Corpus_support.stage_name stage);
+                "check"
+                (Corpus_support.stage_ext_name stage);
+              Alcotest.(check bool)
+                (Printf.sprintf "%s reports %s (got: %s)" file expected_code
+                   (String.concat ", " (List.map (fun d -> d.Diag.code) diags)))
+                true
+                (List.exists (fun d -> d.Diag.code = expected_code) diags))
+      | Some (expected_stage_name, expected_code) -> (
+          (match Corpus_support.stage_of_name expected_stage_name with
+          | Some _ -> ()
+          | None -> Alcotest.failf "%s: unknown stage %s" file expected_stage_name);
+          match Corpus_support.staged_pipeline ~file (Corpus_support.read_file path) with
+          | Ok _ ->
+              Alcotest.failf "%s: expected failure at %s, but the pipeline passed" file
+                expected_stage_name
+          | Error (stage, diags) ->
+              Alcotest.(check string)
+                (Printf.sprintf "%s fails at the right stage" file)
+                expected_stage_name (Corpus_support.stage_name stage);
               Alcotest.(check bool)
                 (Printf.sprintf "%s reports %s (got: %s)" file expected_code
                    (String.concat ", " (List.map (fun d -> d.Diag.code) diags)))

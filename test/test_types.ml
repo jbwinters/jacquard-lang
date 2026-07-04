@@ -1,0 +1,205 @@
+open Weft
+open Weft.Types
+
+(* W3.1: the unifier, with the row cases the plan names, plus the qcheck symmetry
+   property. Effect labels here are arbitrary distinct hashes. *)
+
+let ha = Hash.of_string "effect-a"
+let hb = Hash.of_string "effect-b"
+let hc = Hash.of_string "effect-c"
+let t_int = TCon (Hash.of_string "ty-int", [])
+let t_text = TCon (Hash.of_string "ty-text", [])
+let unifies f = match f () with () -> true | exception Unify_error _ -> false
+
+let test_type_cases () =
+  let cases =
+    [
+      ("int ~ int", (fun () -> unify t_int t_int), true);
+      ("int ~ text", (fun () -> unify t_int t_text), false);
+      ("var ~ int", (fun () -> unify (new_tvar 0) t_int), true);
+      ( "var binds and sticks",
+        (fun () ->
+          let v = new_tvar 0 in
+          unify v t_int;
+          unify v t_int),
+        true );
+      ( "var binds and conflicts",
+        (fun () ->
+          let v = new_tvar 0 in
+          unify v t_int;
+          unify v t_text),
+        false );
+      ( "occurs check",
+        (fun () ->
+          let v = new_tvar 0 in
+          unify v (TArrow ([ v ], empty_row, t_int))),
+        false );
+      ( "arrow arity",
+        (fun () ->
+          unify (TArrow ([ t_int ], empty_row, t_int)) (TArrow ([ t_int; t_int ], empty_row, t_int))),
+        false );
+      ("tuple lengths", (fun () -> unify (TTuple [ t_int ]) (TTuple [ t_int; t_int ])), false);
+      ( "con args unify",
+        (fun () ->
+          let v = new_tvar 0 in
+          unify (TCon (ha, [ v ])) (TCon (ha, [ t_int ]));
+          unify v t_int),
+        true );
+      ("con head mismatch", (fun () -> unify (TCon (ha, [])) (TCon (hb, []))), false);
+      ( "skolem reflexive",
+        (fun () ->
+          let s = TSkolem (fresh_id (), "a") in
+          unify s s),
+        true );
+      ( "skolems distinct",
+        (fun () -> unify (TSkolem (fresh_id (), "a")) (TSkolem (fresh_id (), "b"))),
+        false );
+      ("skolem vs concrete", (fun () -> unify (TSkolem (fresh_id (), "a")) t_int), false);
+      ("var ~ skolem ok", (fun () -> unify (new_tvar 0) (TSkolem (fresh_id (), "a"))), true);
+    ]
+  in
+  List.iter (fun (name, f, expected) -> Alcotest.(check bool) name expected (unifies f)) cases
+
+let arrow_with_row row = TArrow ([ t_int ], row, t_int)
+
+let test_row_cases () =
+  let cases =
+    [
+      ( "closed ~ closed equal",
+        (fun () -> unify_rows (closed_row [ ha; hb ]) (closed_row [ hb; ha ])),
+        true );
+      ( "closed ~ closed differ",
+        (fun () -> unify_rows (closed_row [ ha ]) (closed_row [ ha; hb ])),
+        false );
+      ( "open absorbs closed remainder",
+        (fun () -> unify_rows (open_row 0 [ ha ]) (closed_row [ ha; hb ])),
+        true );
+      ( "closed cannot absorb",
+        (fun () -> unify_rows (closed_row [ ha ]) (open_row 0 [ ha; hb ])),
+        false );
+      ( "open ~ open fresh tail",
+        (fun () ->
+          let ra = open_row 0 [ ha ] and rb = open_row 0 [ hb ] in
+          unify_rows ra rb;
+          (* both sides now include both labels *)
+          let ra = repr_row ra and rb = repr_row rb in
+          if not (List.exists (Hash.equal hb) ra.effects && List.exists (Hash.equal ha) rb.effects)
+          then raise (Unify_error "labels did not propagate")),
+        true );
+      ( "same tail same sets",
+        (fun () ->
+          let tail = new_rvar 0 in
+          unify_rows { effects = [ ha ]; tail } { effects = [ ha ]; tail }),
+        true );
+      ( "same tail different sets occurs",
+        (fun () ->
+          let tail = new_rvar 0 in
+          unify_rows { effects = [ ha ]; tail } { effects = [ hb ]; tail }),
+        false );
+      ( "row via arrows",
+        (fun () -> unify (arrow_with_row (open_row 0 [])) (arrow_with_row (closed_row [ hc ]))),
+        true );
+      ( "row skolem reflexive",
+        (fun () ->
+          let sk = RSkolem (fresh_id (), "e") in
+          unify_rows { effects = [ ha ]; tail = sk } { effects = [ ha ]; tail = sk }),
+        true );
+      ( "row skolem vs closed",
+        (fun () -> unify_rows { effects = []; tail = RSkolem (fresh_id (), "e") } (closed_row [])),
+        false );
+      ( "open var absorbs skolem side",
+        (fun () ->
+          let sk = RSkolem (fresh_id (), "e") in
+          unify_rows { effects = [ ha ]; tail = sk } { effects = []; tail = new_rvar 0 }),
+        true );
+    ]
+  in
+  List.iter (fun (name, f, expected) -> Alcotest.(check bool) name expected (unifies f)) cases
+
+(* transitivity through variables: a ~ b, b ~ int, then a is int *)
+let test_chains () =
+  let a = new_tvar 0 and b = new_tvar 0 in
+  unify a b;
+  unify b t_int;
+  Alcotest.(check bool) "chained" true (unifies (fun () -> unify a t_int));
+  Alcotest.(check bool) "chained conflict" false (unifies (fun () -> unify a t_text))
+
+(* --- qcheck: unify(a,b) succeeds iff unify(b,a) does, with agreeing solutions --- *)
+
+(* A pure structure with shared variable slots; materialized fresh per direction. *)
+type tpl =
+  | PInt
+  | PText
+  | PVar of int
+  | PTuple of tpl list
+  | PArrow of tpl list * int option * bool * tpl (* row var slot, has-label-a?, result *)
+
+let gen_tpl : tpl QCheck.Gen.t =
+  let open QCheck.Gen in
+  sized
+  @@ fix (fun self n ->
+      let base = oneof [ return PInt; return PText; map (fun i -> PVar (i mod 3)) nat_small ] in
+      if n = 0 then base
+      else
+        oneof
+          [
+            base;
+            map (fun ts -> PTuple ts) (list_size (int_range 0 2) (self (n / 3)));
+            map2
+              (fun (t1, rv) t2 ->
+                PArrow ([ t1 ], (if rv mod 3 = 0 then None else Some (rv mod 2)), rv mod 2 = 0, t2))
+              (pair (self (n / 3)) nat_small)
+              (self (n / 3));
+          ])
+
+let materialize (t : tpl) =
+  let tvars = Hashtbl.create 4 and rvars = Hashtbl.create 4 in
+  let tv i =
+    match Hashtbl.find_opt tvars i with
+    | Some v -> v
+    | None ->
+        let v = new_tvar 1 in
+        Hashtbl.add tvars i v;
+        v
+  in
+  let rv i =
+    match Hashtbl.find_opt rvars i with
+    | Some v -> v
+    | None ->
+        let v = new_rvar 1 in
+        Hashtbl.add rvars i v;
+        v
+  in
+  let rec go = function
+    | PInt -> t_int
+    | PText -> t_text
+    | PVar i -> tv i
+    | PTuple ts -> TTuple (List.map go ts)
+    | PArrow (ps, rvi, la, r) ->
+        let tail = match rvi with None -> RClosed | Some i -> rv i in
+        TArrow (List.map go ps, { effects = (if la then [ ha ] else []); tail }, go r)
+  in
+  go t
+
+let prop_unify_symmetric =
+  QCheck.Test.make ~count:500 ~name:"unify symmetry: unify(a,b) iff unify(b,a), same solution"
+    QCheck.(make Gen.(pair gen_tpl gen_tpl))
+    (fun (ta, tb) ->
+      let run flip =
+        let a = materialize ta and b = materialize tb in
+        match if flip then unify b a else unify a b with
+        | () -> Some (Types.show (TTuple [ a; b ]))
+        | exception Unify_error _ -> None
+      in
+      match (run false, run true) with
+      | None, None -> true
+      | Some s1, Some s2 -> s1 = s2 (* zonked rendering agrees up to var naming *)
+      | _ -> false)
+
+let suite =
+  [
+    Alcotest.test_case "type unification cases" `Quick test_type_cases;
+    Alcotest.test_case "row unification cases" `Quick test_row_cases;
+    Alcotest.test_case "chained unification" `Quick test_chains;
+    QCheck_alcotest.to_alcotest prop_unify_symmetric;
+  ]

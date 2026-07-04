@@ -88,9 +88,9 @@ let staged_pipeline ~file src : (Canon.decl_hashes list, stage * Diag.t list) re
 let pipeline ~file src : (Canon.decl_hashes list, Diag.t list) result =
   Result.map_error snd (staged_pipeline ~file src)
 
-(** Parse a corpus [.expect] sidecar: line 1 [stage: <parse|validate|resolve|hash>], line 2
-    [code: E0xxx]. *)
-let parse_expect src : (stage * string) option =
+(** Parse a corpus [.expect] sidecar: line 1 [stage: <parse|validate|resolve|hash|check>], line 2
+    [code: E0xxx]. Returns the raw stage name; runners map it. *)
+let parse_expect src : (string * string) option =
   let strip s = String.trim s in
   match String.split_on_char '\n' src |> List.map strip |> List.filter (fun l -> l <> "") with
   | [ stage_line; code_line ]
@@ -100,7 +100,7 @@ let parse_expect src : (stage * string) option =
          && String.sub code_line 0 5 = "code:" ->
       let stage = strip (String.sub stage_line 6 (String.length stage_line - 6)) in
       let code = strip (String.sub code_line 5 (String.length code_line - 5)) in
-      Option.map (fun s -> (s, code)) (stage_of_name stage)
+      Some (stage, code)
   | _ -> None
 
 (** Golden lines for one file: [file:idx <hex>] for each top form, plus [file:idx:name <hex>] for
@@ -126,3 +126,100 @@ let corpus_golden_lines ~valid_dir =
             (Printf.sprintf "%s failed the pipeline: %s" file
                (String.concat "; " (List.map Diag.to_string ds))))
     (wft_files valid_dir)
+
+(** Elaborated-signature lines for every file in a sigs corpus (plan W3.2 goldens): each line is
+    [file:name : scheme]. Files check against a fresh prelude store. *)
+let sig_lines ~prelude_dir ~sigs_dir : (string list, Diag.t list) result =
+  let root =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "weft-sigs-%d-%d" (Unix.getpid ()) (Hashtbl.hash sigs_dir land 0xFFFF))
+  in
+  let ( let* ) = Result.bind in
+  let* store = Store.open_store root in
+  let* _ = Prelude.load ~dir:prelude_dir store in
+  let* ctx = Check.make_ctx store in
+  let* sigs = Prelude.builtin_signatures store in
+  List.iter (fun (h, s) -> Hashtbl.replace ctx.Check.builtin_sigs h s) sigs;
+  let check_file file =
+    let path = Filename.concat sigs_dir file in
+    let* forms = Reader.parse_string ~file (read_file path) in
+    let rec go acc = function
+      | [] -> Ok (List.rev acc)
+      | f :: rest ->
+          let* top = Kernel.of_form f in
+          let* resolved = Resolve.resolve (Store.names_view store) top in
+          let* { Check.names; _ } = Check.check_top ctx resolved in
+          let lines =
+            List.map
+              (fun (n, s) -> Printf.sprintf "%s:%s : %s" file n (Check.show_scheme ctx s))
+              names
+          in
+          let* () =
+            match resolved with
+            | Kernel.Decl d -> Result.map (fun _ -> ()) (Store.put_decl store d)
+            | Kernel.Expr _ -> Ok ()
+          in
+          go (List.rev_append lines acc) rest
+    in
+    go [] forms
+  in
+  let rec all acc = function
+    | [] -> Ok (List.concat (List.rev acc))
+    | file :: rest ->
+        let* lines = check_file file in
+        all (lines :: acc) rest
+  in
+  all [] (wft_files sigs_dir)
+
+(** Extended pipeline for check-stage invalid corpus cases (W3.3): parse, validate, resolve against
+    a REAL prelude store (stub hashes cannot be type-checked), then typecheck. *)
+type stage_ext = SParse | SValidate | SResolve | SCheck | SOther
+
+let stage_ext_name = function
+  | SParse -> "parse"
+  | SValidate -> "validate"
+  | SResolve -> "resolve"
+  | SCheck -> "check"
+  | SOther -> "other"
+
+let check_pipeline ~prelude_dir ~file src : (unit, stage_ext * Diag.t list) result =
+  let root =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "weft-checkstage-%d-%d" (Unix.getpid ()) (Hashtbl.hash file land 0xFFFF))
+  in
+  let fail st ds = Error (st, ds) in
+  match Store.open_store root with
+  | Error ds -> fail SOther ds
+  | Ok store -> (
+      match Prelude.load ~dir:prelude_dir store with
+      | Error ds -> fail SOther ds
+      | Ok _ -> (
+          match Check.make_ctx store with
+          | Error ds -> fail SOther ds
+          | Ok ctx -> (
+              (match Prelude.builtin_signatures store with
+              | Ok sigs -> List.iter (fun (h, s) -> Hashtbl.replace ctx.Check.builtin_sigs h s) sigs
+              | Error _ -> ());
+              match Reader.parse_string ~file src with
+              | Error ds -> fail SParse ds
+              | Ok forms ->
+                  let rec go = function
+                    | [] -> Ok ()
+                    | f :: rest -> (
+                        match Kernel.of_form f with
+                        | Error ds -> fail SValidate ds
+                        | Ok top -> (
+                            match Resolve.resolve (Store.names_view store) top with
+                            | Error ds -> fail SResolve ds
+                            | Ok resolved -> (
+                                match Check.check_top ctx resolved with
+                                | Error ds -> fail SCheck ds
+                                | Ok _ -> (
+                                    match resolved with
+                                    | Kernel.Decl d -> (
+                                        match Store.put_decl store d with
+                                        | Ok _ -> go rest
+                                        | Error ds -> fail SOther ds)
+                                    | Kernel.Expr _ -> go rest))))
+                  in
+                  go forms)))

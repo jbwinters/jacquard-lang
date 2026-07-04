@@ -1,0 +1,1 @@
+(defeffect bade () (op o () (tvar zz)))

@@ -1,0 +1,1 @@
+(lam ((ptuple (pvar a) (pvar b))) (tuple (var b) (var a)))

@@ -1,0 +1,1 @@
+(deftype bad ((tvar a)) (con mk (field (tapp (tref option) (tvar a) (tvar a)))))

@@ -121,15 +121,55 @@ let run_cmd file allows prelude store_dir =
 
 (* --- check --- *)
 
-let check_cmd file prelude =
+let check_cmd file prelude print_sigs =
   match open_ctx ~prelude ~store_dir:None with
   | Error ds -> print_diags ds
   | Ok (store, _ctx) -> (
-      match process_forms store ~file (read_file file) ~on_expr:(fun _ -> Ok ()) with
-      | Ok () ->
-          print_endline "ok";
-          ok
-      | Error ds -> print_diags ds)
+      match Check.make_ctx store with
+      | Error ds -> print_diags ds
+      | Ok cctx -> (
+          (match Prelude.builtin_signatures store with
+          | Ok sigs -> List.iter (fun (h, s) -> Hashtbl.replace cctx.Check.builtin_sigs h s) sigs
+          | Error _ -> () (* prelude without builtins: marker bodies type as code *));
+          let failed = ref None in
+          let on_top top =
+            match Check.check_top cctx top with
+            | Error ds ->
+                failed := Some ds;
+                Error ds
+            | Ok { Check.names; _ } ->
+                if print_sigs then
+                  List.iter
+                    (fun (n, s) -> Printf.printf "%s : %s\n" n (Check.show_scheme cctx s))
+                    names;
+                Ok ()
+          in
+          (* process: decls also go into the store so later forms resolve *)
+          match Reader.parse_string ~file (read_file file) with
+          | Error ds -> print_diags ds
+          | Ok forms ->
+              let rec go = function
+                | [] ->
+                    if not print_sigs then print_endline "ok";
+                    ok
+                | f :: rest -> (
+                    match Kernel.of_form f with
+                    | Error ds -> print_diags ds
+                    | Ok top -> (
+                        match Resolve.resolve (Store.names_view store) top with
+                        | Error ds -> print_diags ds
+                        | Ok resolved -> (
+                            match on_top resolved with
+                            | Error ds -> print_diags ds
+                            | Ok () -> (
+                                match resolved with
+                                | Kernel.Decl d -> (
+                                    match Store.put_decl store d with
+                                    | Ok _ -> go rest
+                                    | Error ds -> print_diags ds)
+                                | Kernel.Expr _ -> go rest))))
+              in
+              go forms))
 
 (* --- hash --- *)
 
@@ -221,10 +261,16 @@ let run_t =
     (Cmd.info "run" ~doc:"Run a .wft file: declarations load, expressions evaluate and print.")
     Term.(const run_cmd $ file_arg $ allows_arg $ prelude_arg $ store_dir_opt_arg)
 
+let print_sigs_arg =
+  Arg.(
+    value & flag
+    & info [ "print-sigs" ] ~doc:"Print the elaborated signature of every top-level form.")
+
 let check_t =
   Cmd.v
-    (Cmd.info "check" ~doc:"Parse, validate, and resolve a .wft file (grammar + names).")
-    Term.(const check_cmd $ file_arg $ prelude_arg)
+    (Cmd.info "check"
+       ~doc:"Parse, validate, resolve, and typecheck a .wft file (grammar + names + types).")
+    Term.(const check_cmd $ file_arg $ prelude_arg $ print_sigs_arg)
 
 let hash_t =
   Cmd.v

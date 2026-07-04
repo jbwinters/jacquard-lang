@@ -1,0 +1,24 @@
+01-identity.wft:_ : forall a. (a) ->{} a
+02-const.wft:_ : forall a b. (a, b) ->{} a
+03-apply-twice.wft:_ : forall a e. ((a) ->{e} a, a) ->{e} a
+04-compose.wft:_ : forall a b c e. ((c) ->{e} a, (b) ->{e} c) ->{} (b) ->{e} a
+05-thunk.wft:_ : () ->{} int
+06-add-one.wft:add-one : (int) ->{} int
+07-fact.wft:fact : (int) ->{} int
+08-even-odd.wft:even : (int) ->{} bool
+08-even-odd.wft:odd : (int) ->{} bool
+09-hostile.wft:safe-div : (int, int) ->{failure} int
+09-hostile.wft:to-option : forall a e. (() ->{failure | e} a) ->{e} option a
+09-hostile.wft:main : (option int, option int)
+10-print-fn.wft:_ : () ->{console} ()
+11-eval-fn.wft:_ : forall a. (code) ->{eval} a
+12-map-use.wft:_ : (list int) ->{} list int
+13-fold-use.wft:_ : (list int) ->{} int
+14-option-cons.wft:_ : forall a. (option a, option int)
+15-pair-swap.wft:_ : forall a b. ((b, a)) ->{} (a, b)
+16-not-use.wft:_ : (bool) ->{} bool
+17-match-option.wft:_ : (option int) ->{} int
+18-quote.wft:_ : code
+19-ann.wft:_ : (int) ->{} int
+20-state-handler.wft:handled : forall a. option a
+21-state.wft:run-state : forall a b e. (() ->{state | e} a, b) ->{e} (a, b)
