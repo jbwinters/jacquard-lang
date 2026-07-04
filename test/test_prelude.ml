@@ -117,7 +117,10 @@ let test_grant_mapping () =
   (match Prelude.grant ctx "EVAL" ~out:ignore with
   | Ok () -> ()
   | Error _ -> Alcotest.fail "grant EVAL");
-  match Prelude.grant ctx "net" ~out:ignore with
+  (match Prelude.grant ctx "net" ~out:ignore with
+  | Ok () -> ()
+  | Error _ -> Alcotest.fail "net has a stub grant");
+  match Prelude.grant ctx "filesystem" ~out:ignore with
   | Error [ d ] -> Alcotest.(check string) "ungrantable" "E0703" d.Diag.code
   | _ -> Alcotest.fail "unknown effect must not be grantable"
 

@@ -12,7 +12,7 @@ $WEFT run "$here/m1-fact.wft"
 echo "== multi-shot choose =="
 $WEFT run "$here/m1-choose.wft"
 
-echo "== gated eval, WITHOUT the grant (expected: unhandled effect, exit 3) =="
+echo "== gated eval, WITHOUT the grant (expected: E0814 capability refusal, exit 3) =="
 $WEFT run "$here/m1-gated.wft"
 echo "exit code: $?"
 

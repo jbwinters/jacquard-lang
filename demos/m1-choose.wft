@@ -1,11 +1,21 @@
 ; M1 demo 2: the multi-shot Choose program. The handler resumes the same
-; continuation twice; both branch results come back.
+; continuation twice and collects both branch results into a list: the
+; return clause wraps each branch value ([x]), and the op clause appends
+; the two branch lists (this is what makes the collector well-typed:
+; every clause produces the handler's answer type, list int).
 (defeffect choice ((tvar a)) (op choose () (tref bool)))
+
+(defterm ((binding append ()
+  (lam ((pvar xs) (pvar ys))
+    (match (var xs)
+      (clause (pcon nil) (var ys))
+      (clause (pcon cons (pvar x) (pvar rest))
+        (app (var cons) (var x) (app (var append) (var rest) (var ys)))))))))
 
 (handle
   (match (app (var choose))
     (clause (pcon true) (lit 1))
     (clause (pcon false) (lit 2)))
-  (ret (pvar x) (var x))
+  (ret (pvar x) (app (var cons) (var x) (var nil)))
   (opclause choose () k
-    (tuple (app (var k) (var true)) (app (var k) (var false)))))
+    (app (var append) (app (var k) (var true)) (app (var k) (var false)))))

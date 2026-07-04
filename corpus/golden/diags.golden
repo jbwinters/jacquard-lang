@@ -1,0 +1,35 @@
+type-mismatch | type-mismatch.wft:1:1-34: error[E0801]: argument: expected int, got text (type mismatch)
+  hint: the expected side comes from the surrounding context; make both sides agree
+branch-mismatch | branch-mismatch.wft:1:48-79: error[E0801]: match clause result: expected int, got text (type mismatch)
+  hint: the expected side comes from the surrounding context; make both sides agree
+not-a-function | not-a-function.wft:1:1-22: error[E0802]: int is not a function
+  hint: only functions, constructors, effect operations, and resumptions apply
+app-arity | app-arity.wft:1:1-47: error[E0803]: this function expects 1 argument(s), got 2
+  hint: Weft calls are uncurried: pass exactly the declared arguments
+op-clause-arity | op-clause-arity.wft:1:60-120: error[E0803]: op clause for print expects 1 parameter(s), got 2
+resume-arity | resume-arity.wft:1:71-100: error[E0803]: this function expects 1 argument(s), got 2
+  hint: Weft calls are uncurried: pass exactly the declared arguments
+resume-wrong-type | resume-wrong-type.wft:1:89-110: error[E0801]: argument: expected (), got int (type mismatch)
+  hint: the expected side comes from the surrounding context; make both sides agree
+ann-mismatch | ann-mismatch.wft:1:1-26: error[E0804]: annotation mismatch: expected text, got int (type mismatch)
+  hint: the annotation is the contract: change the body or the annotation
+ann-pure-but-prints | ann-pure-but-prints.wft:1:1-70: error[E0804]: annotation mismatch: expected () ->{} (), got () ->{console | e} () (a closed effect row cannot absorb extra effects)
+  hint: the annotation is the contract: change the body or the annotation
+ann-rigid-escape | ann-rigid-escape.wft:1:1-90: error[E0804]: annotation mismatch: expected (a) ->{} a, got (a) ->{} int (type mismatch)
+  hint: the annotation is the contract: change the body or the annotation
+group-annotation-lies | group-annotation-lies.wft:1:11-92: error[E0804]: binding liar does not match its annotation: expected (int) ->{} text, got (int) ->{} int (type mismatch)
+groupref-outside | groupref-outside.wft:1:1-13: error[E0805]: groupref 5 outside its group
+pcon-pattern-arity | pcon-pattern-arity.wft:1:41-52: error[E0806]: constructor some expects 1 argument(s) in this pattern, got 0
+  hint: constructor patterns bind every declared field
+deftype-arity | deftype-arity.wft:1:41-79: error[E0810]: type option expects 1 argument(s), got 2
+unbound-tyvar | unbound-tyvar.wft:1:33-42: error[E0811]: unbound type variable `zz` in declaration
+  hint: declare it in the parameter list of the enclosing declaration
+op-unbound-var | op-unbound-var.wft:1:29-38: error[E0812]: unbound type variable `zz` in declaration
+  hint: declare it in the parameter list of the enclosing declaration
+nonexhaustive-bool | nonexhaustive-bool.wft:1:24-31: error[E0813]: this match is not exhaustive: it misses false
+nonexhaustive-nested | nonexhaustive-nested.wft:1:24-31: error[E0813]: this match is not exhaustive: it misses some(some(false))
+ungranted-effect | error[E0814]: this program requires the `console` effect, which is not granted (performed via `print`)
+  hint: grant it with --allow console, or handle the effect in the program
+effectful-toplevel-body | effectful-toplevel-body.wft:1:11-80: error[E0815]: top-level definition `sneaky` performs the `net` effect while being defined
+  hint: wrap the body in a lambda and perform the effect when called
+redundant-clause | redundant-clause.wft:1:57-85: warning[W0801]: this clause is redundant: earlier clauses match everything it does

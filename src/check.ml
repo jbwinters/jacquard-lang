@@ -45,6 +45,9 @@ type ctx = {
   mutable sites : match_site list;
       (** match sites recorded for the exhaustiveness pass (W3.5), which runs after inference so
           scrutinee types are fully solved *)
+  mutable origins : (Hash.t * string) list;
+      (** effect hash -> a callee that introduced it (the manifest diagnostic's call-chain endpoint,
+          W3.6) *)
 }
 
 and match_site = { scrutinee_ty : Types.ty; arms : Kernel.clause list; site_meta : Meta.t }
@@ -57,9 +60,9 @@ let empty_env = { vars = SMap.empty; group = [||] }
 (* Internal control flow only; never escapes this module. *)
 exception Err of Diag.t
 
-let err ?meta ~code fmt =
+let err ?meta ?hint ~code fmt =
   Printf.ksprintf
-    (fun msg -> raise (Err (Diag.error ?span:(Option.bind meta Meta.span) ~code msg)))
+    (fun msg -> raise (Err (Diag.error ?span:(Option.bind meta Meta.span) ?hint ~code msg)))
     fmt
 
 let name_of ctx h =
@@ -80,11 +83,15 @@ let name_of ctx h =
 let show_ty ctx t = Types.show ~name_of:(name_of ctx) t
 let show_scheme ctx s = Types.show_scheme ~name_of:(name_of ctx) s
 
-let unify_or ctx ?meta ~what expected actual =
+let unify_or ctx ?meta ?hint ~what expected actual =
   try Types.unify expected actual
   with Unify_error detail ->
-    err ?meta ~code:"E0801" "%s: expected %s, got %s (%s)" what (show_ty ctx expected)
-      (show_ty ctx actual) detail
+    err ?meta
+      ~hint:
+        (Option.value hint
+           ~default:"the expected side comes from the surrounding context; make both sides agree")
+      ~code:"E0801" "%s: expected %s, got %s (%s)" what (show_ty ctx expected) (show_ty ctx actual)
+      detail
 
 (* Open coercion: a closed callee row gains a fresh tail before meeting the ambient row,
    so exact rows mean "at most these effects" at call sites. *)
@@ -215,7 +222,9 @@ and conv_decl_ty ctx cenv ?(unbound_code = "E0811") ~self (t : Kernel.ty) : ty =
   | Kernel.TVar a -> (
       match List.assoc_opt a cenv.tvs with
       | Some v -> v
-      | None -> err ~meta ~code:unbound_code "unbound type variable `%s` in declaration" a)
+      | None ->
+          err ~meta ~hint:"declare it in the parameter list of the enclosing declaration"
+            ~code:unbound_code "unbound type variable `%s` in declaration" a)
   | Kernel.TApp ({ Kernel.it = Kernel.TRef (Kernel.Named n); _ }, args) when n = self_name -> (
       (* recursive application must match the declared parameters *)
       let args = List.map (conv_decl_ty ctx cenv ~unbound_code ~self) args in
@@ -316,8 +325,9 @@ let rec infer_pat ctx (p : Kernel.pat) : ty * (string * ty) list =
       match (repr con_ty, ps) with
       | TArrow (fields, _, result), ps ->
           if List.length fields <> List.length ps then
-            err ~meta ~code:"E0806" "constructor %s expects %d argument(s) in this pattern, got %d"
-              (name_of ctx h) (List.length fields) (List.length ps);
+            err ~meta ~hint:"constructor patterns bind every declared field" ~code:"E0806"
+              "constructor %s expects %d argument(s) in this pattern, got %d" (name_of ctx h)
+              (List.length fields) (List.length ps);
           let bindings =
             concat_map2
               (fun field p ->
@@ -397,9 +407,24 @@ and infer ctx env ~(ambient : row) (e : Kernel.expr) : ty =
       match repr fn_ty with
       | TArrow (params, frow, result) ->
           if List.length params <> List.length args then
-            err ~meta ~code:"E0803" "this function expects %d argument(s), got %d"
-              (List.length params) (List.length args);
+            err ~meta ~hint:"Weft calls are uncurried: pass exactly the declared arguments"
+              ~code:"E0803" "this function expects %d argument(s), got %d" (List.length params)
+              (List.length args);
           List.iter2 (fun p a -> unify_or ctx ~meta ~what:"argument" p a) params arg_tys;
+          (* record who introduced each effect, for the manifest diagnostic (W3.6) *)
+          (let callee =
+             match fn.Kernel.it with
+             | Kernel.Ref _ | Kernel.GroupRef _ -> Meta.name fn.Kernel.meta
+             | _ -> None
+           in
+           match callee with
+           | Some name ->
+               List.iter
+                 (fun h ->
+                   if not (List.mem_assoc h ctx.origins) then
+                     ctx.origins <- (h, name) :: ctx.origins)
+                 (repr_row frow).effects
+           | None -> ());
           (try Types.unify_rows (opened ctx frow) ambient
            with Unify_error detail ->
              err ~meta ~code:"E0801" "effect row mismatch at this application (%s)" detail);
@@ -408,7 +433,9 @@ and infer ctx env ~(ambient : row) (e : Kernel.expr) : ty =
           let result = new_tvar ctx.level in
           unify_or ctx ~meta ~what:"function position" fn_ty (TArrow (arg_tys, ambient, result));
           result
-      | t -> err ~meta ~code:"E0802" "%s is not a function" (show_ty ctx t))
+      | t ->
+          err ~meta ~hint:"only functions, constructors, effect operations, and resumptions apply"
+            ~code:"E0802" "%s is not a function" (show_ty ctx t))
   | Kernel.Let { isrec = false; binder; value; body } -> (
       match binder.Kernel.it with
       | Kernel.PVar x when is_syntactic_value value ->
@@ -534,8 +561,9 @@ and infer ctx env ~(ambient : row) (e : Kernel.expr) : ty =
       let actual = infer ctx env ~ambient subject in
       (try Types.unify expected actual
        with Unify_error detail ->
-         err ~meta ~code:"E0804" "annotation mismatch: expected %s, got %s (%s)"
-           (show_ty ctx expected) (show_ty ctx actual) detail);
+         err ~meta ~hint:"the annotation is the contract: change the body or the annotation"
+           ~code:"E0804" "annotation mismatch: expected %s, got %s (%s)" (show_ty ctx expected)
+           (show_ty ctx actual) detail);
       expected
 
 (* ------------------------------------------------------------------ *)
@@ -616,6 +644,16 @@ and check_group ctx (decl : Kernel.decl) : unit =
             (fun i (b : Kernel.binding) ->
               let ambient = { effects = []; tail = new_rvar ctx.level } in
               let vty = infer ctx env ~ambient b.Kernel.value in
+              (* the binding BODY itself must be effect-free (its value's effects live on
+                 arrows): a non-lambda effectful body would otherwise type as pure and give
+                 `check --manifest` a false pass (review finding) *)
+              (match (repr_row ambient).effects with
+              | [] -> ()
+              | h :: _ ->
+                  err ~meta:b.Kernel.bmeta ~code:"E0815"
+                    ~hint:"wrap the body in a lambda and perform the effect when called"
+                    "top-level definition `%s` performs the `%s` effect while being defined"
+                    b.Kernel.bname (name_of ctx h));
               match b.Kernel.annot with
               | Some ann -> (
                   (* the body must check against the RIGID annotation *)
@@ -970,6 +1008,7 @@ let make_ctx (store : Store.t) : (ctx, Diag.t list) result =
           level = 0;
           checking = [];
           sites = [];
+          origins = [];
         }
   | Error ds, _, _, _ | _, Error ds, _, _ | _, _, Error ds, _ | _, _, _, Error ds -> Error ds
 
@@ -1037,3 +1076,49 @@ let check_top ctx (top : Kernel.top) : (top_sig, Diag.t list) result =
 let show_row ctx (r : row) : string =
   let r = repr_row r in
   String.concat ", " (List.map (name_of ctx) (List.sort Hash.compare r.effects))
+
+(* ------------------------------------------------------------------ *)
+(* Capability manifest (W3.6)                                          *)
+(* ------------------------------------------------------------------ *)
+
+(** [manifest_errors ctx ~granted row] checks a top-level expression's inferred row against the
+    granted effect set: every fixed effect must be granted. The diagnostic names the effect and,
+    when known, the call-chain endpoint that introduced it (E0814). *)
+let manifest_errors ctx ~(granted : Hash.t list) (row : row) : Diag.t list =
+  let row = repr_row row in
+  List.filter_map
+    (fun h ->
+      if List.exists (Hash.equal h) granted then None
+      else
+        let via =
+          match List.assoc_opt h ctx.origins with
+          | Some name -> Printf.sprintf " (performed via `%s`)" name
+          | None -> ""
+        in
+        Some
+          (Diag.error ~code:"E0814"
+             ~hint:
+               (Printf.sprintf "grant it with --allow %s, or handle the effect in the program"
+                  (name_of ctx h))
+             (Printf.sprintf "this program requires the `%s` effect, which is not granted%s"
+                (name_of ctx h) via)))
+    row.effects
+
+(** Registry of every diagnostic code the checker can emit (W3.7's coverage check keys on this list;
+    codes are never reused or renumbered). *)
+let checker_codes : (string * string) list =
+  [
+    ("E0801", "type mismatch (expected vs actual, fully elaborated)");
+    ("E0802", "application of a non-function");
+    ("E0803", "arity mismatch (application, op clause, or resumption)");
+    ("E0804", "annotation mismatch (the annotation is the contract)");
+    ("E0805", "reference kind mismatch or unknown hash");
+    ("E0806", "constructor pattern arity mismatch");
+    ("E0810", "type constructor arity (kind) error");
+    ("E0811", "unbound type or row variable");
+    ("E0812", "unbound variable in an effect operation signature");
+    ("E0813", "non-exhaustive match (with a missing-pattern witness)");
+    ("E0814", "ungranted effect in the program manifest");
+    ("E0815", "effectful top-level definition body (effects belong on arrows)");
+    ("W0801", "redundant match clause");
+  ]

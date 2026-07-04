@@ -83,6 +83,24 @@ let process_forms store ~file src ~on_expr =
 
 (* --- run --- *)
 
+(* effect hashes for the granted names, for the manifest check (W3.6) *)
+let granted_hashes store allows =
+  List.filter_map
+    (fun name ->
+      match Store.lookup_name store (String.lowercase_ascii name) with
+      | Some { Resolve.hash; kind = Resolve.KEffect } -> Some hash
+      | _ -> None)
+    allows
+
+let make_checker store =
+  match Check.make_ctx store with
+  | Error ds -> Error ds
+  | Ok cctx ->
+      (match Prelude.builtin_signatures store with
+      | Ok sigs -> List.iter (fun (h, s) -> Hashtbl.replace cctx.Check.builtin_sigs h s) sigs
+      | Error _ -> ());
+      Ok cctx
+
 let run_cmd file allows prelude store_dir =
   match open_ctx ~prelude ~store_dir with
   | Error ds -> print_diags ds
@@ -97,31 +115,54 @@ let run_cmd file allows prelude store_dir =
       match grant_all allows with
       | Error ds -> print_diags ds
       | Ok () -> (
-          let runtime_failure = ref None in
-          let on_expr e =
-            match Eval.run_expr ctx e with
-            | Ok v ->
-                print_endline (Value.show v);
-                Ok ()
-            | Error err ->
-                runtime_failure := Some err;
-                Error []
-          in
-          match process_forms store ~file (read_file file) ~on_expr with
-          | Ok () -> ok
-          | Error _ when !runtime_failure <> None -> (
-              match Option.get !runtime_failure with
-              | Runtime_err.Unhandled _ as e ->
-                  prerr_endline (Runtime_err.to_string e);
+          match make_checker store with
+          | Error ds -> print_diags ds
+          | Ok cctx -> (
+              let granted = granted_hashes store allows in
+              let refused = ref false in
+              let runtime_failure = ref None in
+              let on_expr e =
+                (* W3.6: the program's inferred row is its authority manifest; refuse to
+                   start anything that needs an ungranted effect *)
+                match Check.check_top cctx (Kernel.Expr e) with
+                | Error ds -> Error ds
+                | Ok { Check.row; warnings; _ } -> (
+                    List.iter (fun w -> prerr_endline (Diag.to_string w)) warnings;
+                    match
+                      Check.manifest_errors cctx ~granted
+                        (Option.value row ~default:Types.empty_row)
+                    with
+                    | _ :: _ as ds ->
+                        refused := true;
+                        Error ds
+                    | [] -> (
+                        match Eval.run_expr ctx e with
+                        | Ok v ->
+                            print_endline (Value.show v);
+                            Ok ()
+                        | Error err ->
+                            runtime_failure := Some err;
+                            Error []))
+              in
+              match process_forms store ~file (read_file file) ~on_expr with
+              | Ok () -> ok
+              | Error _ when !runtime_failure <> None -> (
+                  match Option.get !runtime_failure with
+                  | Runtime_err.Unhandled _ as e ->
+                      prerr_endline (Runtime_err.to_string e);
+                      exit_unhandled
+                  | e ->
+                      prerr_endline (Runtime_err.to_string e);
+                      exit_runtime)
+              | Error ds when !refused ->
+                  (* the capability refusal keeps its own exit code, now at the type level *)
+                  List.iter (fun d -> prerr_endline (Diag.to_string d)) ds;
                   exit_unhandled
-              | e ->
-                  prerr_endline (Runtime_err.to_string e);
-                  exit_runtime)
-          | Error ds -> print_diags ds))
+              | Error ds -> print_diags ds)))
 
 (* --- check --- *)
 
-let check_cmd file prelude print_sigs =
+let check_cmd file prelude print_sigs manifest =
   match open_ctx ~prelude ~store_dir:None with
   | Error ds -> print_diags ds
   | Ok (store, _ctx) -> (
@@ -131,18 +172,27 @@ let check_cmd file prelude print_sigs =
           (match Prelude.builtin_signatures store with
           | Ok sigs -> List.iter (fun (h, s) -> Hashtbl.replace cctx.Check.builtin_sigs h s) sigs
           | Error _ -> () (* prelude without builtins: marker bodies type as code *));
-          let failed = ref None in
+          let granted =
+            match manifest with
+            | None -> None
+            | Some names ->
+                Some (granted_hashes store (List.map String.trim (String.split_on_char ',' names)))
+          in
           let on_top top =
             match Check.check_top cctx top with
-            | Error ds ->
-                failed := Some ds;
-                Error ds
-            | Ok { Check.names; _ } ->
+            | Error ds -> Error ds
+            | Ok { Check.names; warnings; row } -> (
+                List.iter (fun w -> prerr_endline (Diag.to_string w)) warnings;
                 if print_sigs then
                   List.iter
                     (fun (n, s) -> Printf.printf "%s : %s\n" n (Check.show_scheme cctx s))
                     names;
-                Ok ()
+                match (granted, row) with
+                | Some g, Some r -> (
+                    match Check.manifest_errors cctx ~granted:g r with
+                    | [] -> Ok ()
+                    | ds -> Error ds)
+                | _ -> Ok ())
           in
           (* process: decls also go into the store so later forms resolve *)
           match Reader.parse_string ~file (read_file file) with
@@ -203,6 +253,35 @@ let hash_cmd file prelude =
                             go (idx + 1) rest)))
           in
           go 0 forms)
+
+(* --- fmt --- *)
+
+let fmt_cmd file write =
+  match Reader.parse_string ~file (read_file file) with
+  | Error ds -> print_diags ds
+  | Ok forms ->
+      let out = Printer.format_all forms in
+      if write then begin
+        let oc = open_out_bin file in
+        output_string oc out;
+        close_out oc
+      end
+      else print_string out;
+      ok
+
+(* --- diff --- *)
+
+let diff_cmd store_a store_b =
+  match (Store.open_store store_a, Store.open_store store_b) with
+  | Error ds, _ | _, Error ds -> print_diags ds
+  | Ok old_side, Ok new_side -> (
+      match Diff.render (Diff.diff ~old_side ~new_side) with
+      | None ->
+          print_endline "no semantic changes";
+          ok
+      | Some report ->
+          print_endline report;
+          ok)
 
 (* --- store subcommands (persistent, no implicit prelude) --- *)
 
@@ -266,16 +345,41 @@ let print_sigs_arg =
     value & flag
     & info [ "print-sigs" ] ~doc:"Print the elaborated signature of every top-level form.")
 
+let manifest_arg =
+  Arg.(
+    value
+    & opt (some string) None
+    & info [ "manifest" ] ~docv:"EFFECTS"
+        ~doc:"Typecheck against a granted effect set (comma-separated), without running.")
+
 let check_t =
   Cmd.v
     (Cmd.info "check"
        ~doc:"Parse, validate, resolve, and typecheck a .wft file (grammar + names + types).")
-    Term.(const check_cmd $ file_arg $ prelude_arg $ print_sigs_arg)
+    Term.(const check_cmd $ file_arg $ prelude_arg $ print_sigs_arg $ manifest_arg)
 
 let hash_t =
   Cmd.v
     (Cmd.info "hash" ~doc:"Print the canonical HASH_V0 hashes of each top-level form.")
     Term.(const hash_cmd $ file_arg $ prelude_arg)
+
+let write_arg = Arg.(value & flag & info [ "write"; "w" ] ~doc:"Rewrite the file in place.")
+
+let fmt_t =
+  Cmd.v
+    (Cmd.info "fmt" ~doc:"Format a .wft file canonically, preserving comments.")
+    Term.(const fmt_cmd $ file_arg $ write_arg)
+
+let diff_t =
+  Cmd.v
+    (Cmd.info "diff"
+       ~doc:
+         "Semantically compare two stores: renames are renames, reformatting is nothing, real \
+          edits localize to the smallest changed subtrees.")
+    Term.(
+      const diff_cmd
+      $ Arg.(required & pos 0 (some string) None & info [] ~docv:"STORE_A")
+      $ Arg.(required & pos 1 (some string) None & info [] ~docv:"STORE_B"))
 
 let store_pos_dir = Arg.(required & pos 0 (some string) None & info [] ~docv:"STORE")
 
@@ -310,6 +414,6 @@ let store_t =
 let main =
   Cmd.group
     (Cmd.info "weft" ~version:Version.version ~doc:"The Weft language toolchain")
-    [ run_t; check_t; hash_t; store_t ]
+    [ run_t; check_t; hash_t; fmt_t; diff_t; store_t ]
 
 let () = exit (Cmd.eval' main)

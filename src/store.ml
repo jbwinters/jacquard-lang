@@ -212,6 +212,9 @@ let get t h = Result.map (fun l -> l.decl) (locate t h)
 (** [lookup_name t n] reads the name index. *)
 let lookup_name t n = List.assoc_opt n t.names
 
+(** All name bindings, sorted by name (the whole mutable index). *)
+let names t = t.names
+
 (** [names_view t] is the resolver's view of this store (the W1.4 seam). *)
 let names_view t : Resolve.names =
   { Resolve.lookup = (fun n -> lookup_name t n); all_names = (fun () -> List.map fst t.names) }

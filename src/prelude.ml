@@ -158,6 +158,22 @@ let install_eval (ctx : Eval.ctx) : (unit, Diag.t list) result =
                       (String.concat ", " (List.map Value.show args)))));
       Ok ()
 
+(** [install_net ctx] grants the [net] effect with the M0 stub handler: [net-fetch] returns a canned
+    response naming the URL (the hostile-demo stand-in; real IO is out of scope). *)
+let install_net (ctx : Eval.ctx) : (unit, Diag.t list) result =
+  match lookup_hash ctx.Eval.store ~kind:Resolve.KOp "net-fetch" with
+  | Error ds -> Error ds
+  | Ok fetch_op ->
+      Hashtbl.replace ctx.Eval.root_handlers fetch_op (fun args ->
+          match args with
+          | [ Value.VText url ] -> Ok (Value.VText (Printf.sprintf "<stub response for %s>" url))
+          | args ->
+              Error
+                (Runtime_err.Type_error
+                   (Printf.sprintf "net-fetch expects one text, got %s"
+                      (String.concat ", " (List.map Value.show args)))));
+      Ok ()
+
 (** [grant ctx name ~out] installs the root handler for effect [name] (case-insensitive: "Eval" and
     "eval" both work). Returns E0703 for effects that exist but are not grantable (e.g. [failure])
     and unknown effect names alike. *)
@@ -165,6 +181,7 @@ let grant (ctx : Eval.ctx) name ~out : (unit, Diag.t list) result =
   match String.lowercase_ascii name with
   | "console" -> install_console ctx ~out
   | "eval" -> install_eval ctx
+  | "net" -> install_net ctx
   | other -> err ~code:"E0703" "effect `%s` is not grantable" other
 
 (** Builtin type signatures for the checker (W3.2): the marker bodies would type as [code], so the

@@ -22,3 +22,5 @@
 19-ann.wft:_ : (int) ->{} int
 20-state-handler.wft:handled : forall a. option a
 21-state.wft:run-state : forall a b e. (() ->{state | e} a, b) ->{e} (a, b)
+22-hostile-net.wft:fetch-title : (text) ->{net} text
+22-hostile-net.wft:summarize : (text) ->{net} text

@@ -5,9 +5,10 @@ The M1 demo programs stay green (milestone gate; demos/m1.sh runs these).
   $ weft run ../../demos/m1-fact.wft
   120
   $ weft run ../../demos/m1-choose.wft
-  (1, 2)
+  cons(1, cons(2, nil))
   $ weft run ../../demos/m1-gated.wft
-  unhandled effect eval: operation `eval-code` reached the root without a handler
+  error[E0814]: this program requires the `eval` effect, which is not granted (performed via `eval-code`)
+    hint: grant it with --allow eval, or handle the effect in the program
   [3]
   $ weft run ../../demos/m1-gated.wft --allow eval
   42

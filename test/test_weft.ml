@@ -23,4 +23,7 @@ let () =
       ("types", Test_types.suite);
       ("check", Test_check.suite);
       ("exhaust", Test_exhaust.suite);
+      ("fmt", Test_fmt.suite);
+      ("diags", Test_diags.suite);
+      ("diff", Test_diff.suite);
     ]

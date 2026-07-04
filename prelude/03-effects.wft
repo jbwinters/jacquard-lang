@@ -5,3 +5,5 @@
 (defeffect failure ((tvar a)) (op abort () (tvar a)))
 
 (defeffect console () (op print ((tref text)) (ttuple)))
+
+(defeffect net () (op net-fetch ((tref text)) (tref text)))

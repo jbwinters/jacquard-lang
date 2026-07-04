@@ -223,3 +223,113 @@ let check_pipeline ~prelude_dir ~file src : (unit, stage_ext * Diag.t list) resu
                                     | Kernel.Expr _ -> go rest))))
                   in
                   go forms)))
+
+(** The W3.7 golden diagnostic battery: 20 sources covering every checker code (the coverage test
+    keys on {!Check.checker_codes}); each renders exactly one diagnostic. [granted] triggers the
+    W3.6 manifest check with that effect-name set. *)
+let diag_cases : (string * string * string list option) list =
+  [
+    ("type-mismatch", "(app (var add) (lit 1) (lit \"x\"))", None);
+    ( "branch-mismatch",
+      "(match (var true) (clause (pcon true) (lit 1)) (clause (pcon false) (lit \"s\")))",
+      None );
+    ("not-a-function", "(app (lit 3) (lit 1))", None);
+    ("app-arity", "(app (lam ((pvar x)) (var x)) (lit 1) (lit 2))", None);
+    ( "op-clause-arity",
+      "(handle (app (var print) (lit \"x\")) (ret (pvar x) (var x)) (opclause print ((pvar a) \
+       (pvar b)) k (app (var k) (tuple))))",
+      None );
+    ( "resume-arity",
+      "(handle (app (var abort)) (ret (pvar x) (var x)) (opclause abort () k (app (var k) (lit 1) \
+       (lit 2))))",
+      None );
+    ( "resume-wrong-type",
+      "(handle (app (var print) (lit \"x\")) (ret (pvar x) (var x)) (opclause print ((pvar t)) k \
+       (app (var k) (lit 1))))",
+      None );
+    ("ann-mismatch", "(ann (lit 1) (tref text))", None);
+    ( "ann-pure-but-prints",
+      "(ann (lam () (app (var print) (lit \"x\"))) (tarrow () (row) (ttuple)))",
+      None );
+    ( "ann-rigid-escape",
+      "(ann (lam ((pvar x)) (lit 1)) (tforall ((tvar a)) () (tarrow ((tvar a)) (row) (tvar a))))",
+      None );
+    ( "group-annotation-lies",
+      "(defterm ((binding liar ((tarrow ((tref int)) (row) (tref text))) (lam ((pvar n)) (var \
+       n)))))",
+      None );
+    ("groupref-outside", "(groupref 5)", None);
+    ( "pcon-pattern-arity",
+      "(match (app (var some) (lit 1)) (clause (pcon some) (lit 0)) (clause (pwild) (lit 1)))",
+      None );
+    ( "deftype-arity",
+      "(deftype badd ((tvar a)) (con mk (field (tapp (tref option) (tvar a) (tvar a)))))",
+      None );
+    ("unbound-tyvar", "(deftype badt () (con mk (field (tvar zz))))", None);
+    ("op-unbound-var", "(defeffect bade () (op o () (tvar zz)))", None);
+    ("nonexhaustive-bool", "(lam ((pvar b)) (match (var b) (clause (pcon true) (lit 1))))", None);
+    ( "nonexhaustive-nested",
+      "(lam ((pvar o)) (match (var o) (clause (pcon none) (lit 0)) (clause (pcon some (pcon none)) \
+       (lit 1)) (clause (pcon some (pcon some (pcon true))) (lit 2))))",
+      None );
+    ("ungranted-effect", "(app (var print) (lit \"hello\"))", Some []);
+    ( "effectful-toplevel-body",
+      "(defterm ((binding sneaky () (app (var net-fetch) (lit \"http://evil.example\")))))",
+      None );
+    ( "redundant-clause",
+      "(lam ((pvar b)) (match (var b) (clause (pwild) (lit 0)) (clause (pcon true) (lit 1))))",
+      None );
+  ]
+
+(** Render the golden diagnostic lines: [name | rendered-diagnostic]. *)
+let diag_golden_lines ~prelude_dir : (string list, Diag.t list) result =
+  let root =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "weft-diags-%d" (Unix.getpid ()))
+  in
+  let ( let* ) = Result.bind in
+  let* store = Store.open_store root in
+  let* _ = Prelude.load ~dir:prelude_dir store in
+  let* ctx = Check.make_ctx store in
+  let* sigs = Prelude.builtin_signatures store in
+  List.iter (fun (h, s) -> Hashtbl.replace ctx.Check.builtin_sigs h s) sigs;
+  let run_case (name, src, granted) =
+    let render ds = List.map (fun d -> name ^ " | " ^ Diag.to_string d) ds in
+    let* forms = Reader.parse_string ~file:(name ^ ".wft") src in
+    let rec go = function
+      | [] -> Ok []
+      | f :: rest -> (
+          match Kernel.of_form f with
+          | Error ds -> Ok (render ds)
+          | Ok top -> (
+              match Resolve.resolve (Store.names_view store) top with
+              | Error ds -> Ok (render ds)
+              | Ok resolved -> (
+                  match Check.check_top ctx resolved with
+                  | Error ds -> Ok (render ds)
+                  | Ok { Check.warnings = _ :: _ as ws; _ } -> Ok (render ws)
+                  | Ok { Check.row; _ } -> (
+                      match (granted, row) with
+                      | Some names, Some r -> (
+                          let g =
+                            List.filter_map
+                              (fun n ->
+                                match Store.lookup_name store n with
+                                | Some { Resolve.hash; kind = Resolve.KEffect } -> Some hash
+                                | _ -> None)
+                              names
+                          in
+                          match Check.manifest_errors ctx ~granted:g r with
+                          | [] -> go rest
+                          | ds -> Ok (render ds))
+                      | _ -> go rest))))
+    in
+    go forms
+  in
+  let rec all acc = function
+    | [] -> Ok (List.concat (List.rev acc))
+    | c :: rest ->
+        let* lines = run_case c in
+        all (lines :: acc) rest
+  in
+  all [] diag_cases

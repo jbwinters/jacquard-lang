@@ -38,6 +38,7 @@ type state = {
   mutable off : int;
   mutable line : int;
   mutable col : int;
+  mutable pending_comments : string list; (* reverse order; drained by the next form *)
 }
 
 (* Internal control flow only; never escapes this module. *)
@@ -67,6 +68,7 @@ let rec skip_ws st =
       advance st;
       skip_ws st
   | Some ';' ->
+      let start = st.off in
       let rec to_eol () =
         match peek st with
         | Some '\n' | None -> ()
@@ -75,8 +77,40 @@ let rec skip_ws st =
             to_eol ()
       in
       to_eol ();
+      (* full-fidelity: comments ride in trivia meta (Roslyn lesson, spec §3); they are
+         captured here and attached to the NEXT form read *)
+      st.pending_comments <- String.sub st.src start (st.off - start) :: st.pending_comments;
       skip_ws st
   | _ -> ()
+
+(* Same-line trailing comment after a form: `(lit 1) ; note` attaches to that form. *)
+let capture_trailing st =
+  let rec skip_spaces () =
+    match peek st with
+    | Some (' ' | '\t') ->
+        advance st;
+        skip_spaces ()
+    | _ -> ()
+  in
+  let save_off = st.off and save_line = st.line and save_col = st.col in
+  skip_spaces ();
+  match peek st with
+  | Some ';' ->
+      let start = st.off in
+      let rec to_eol () =
+        match peek st with
+        | Some '\n' | None -> ()
+        | Some _ ->
+            advance st;
+            to_eol ()
+      in
+      to_eol ();
+      Some (String.sub st.src start (st.off - start))
+  | _ ->
+      st.off <- save_off;
+      st.line <- save_line;
+      st.col <- save_col;
+      None
 
 let is_sym_start c = c >= 'a' && c <= 'z'
 let is_sym_char c = is_sym_start c || (c >= '0' && c <= '9') || c = '-'
@@ -219,6 +253,9 @@ let read_text st =
   go ()
 
 let rec read_form st : Form.t =
+  (* leading comments captured since the previous form belong to this one *)
+  let leading = List.rev st.pending_comments in
+  st.pending_comments <- [];
   let start_pos = pos st in
   advance st (* '(' *);
   skip_ws st;
@@ -243,14 +280,42 @@ let rec read_form st : Form.t =
     | Some ')' ->
         advance st;
         List.rev acc
-    | Some _ -> args (read_arg st :: acc)
+    | Some _ -> (
+        match read_arg st with
+        | Form.F sub -> (
+            (* a same-line comment after a nested form is its trailing trivia *)
+            match capture_trailing st with
+            | Some c ->
+                args
+                  (Form.F
+                     {
+                       sub with
+                       Form.meta = Meta.add Meta.key_trivia_trailing (Meta.Text c) sub.Form.meta;
+                     }
+                  :: acc)
+            | None -> args (Form.F sub :: acc))
+        | a -> args (a :: acc))
   in
   let args = args [] in
+  (* comments between the last argument and `)` stay inside this form *)
+  let inner_trailing = List.rev st.pending_comments in
+  st.pending_comments <- [];
   let span = Span.make ~file:st.file ~start_pos ~end_pos:(pos st) in
   if head = "group" && not (List.for_all (function Form.F _ -> true | _ -> false) args) then
     error st ~code:"E0110" ~start_pos "group elements must be forms"
       ~hint:"a bare ( ... ) argument list may only contain forms";
-  Form.form ~meta:(Meta.with_span span Meta.empty) head args
+  let meta = Meta.with_span span Meta.empty in
+  let meta =
+    match leading with
+    | [] -> meta
+    | cs -> Meta.add Meta.key_trivia (Meta.List (List.map (fun c -> Meta.Text c) cs)) meta
+  in
+  let meta =
+    match inner_trailing with
+    | [] -> meta
+    | cs -> Meta.add Meta.key_trivia_inner (Meta.List (List.map (fun c -> Meta.Text c) cs)) meta
+  in
+  Form.form ~meta head args
 
 and read_arg st : Form.arg =
   let start_pos = pos st in
@@ -289,12 +354,35 @@ and read_arg st : Form.arg =
 (** [parse_string ~file s] reads every top-level form in [s]. Top level admits only forms, not
     scalars. Stops at the first error. *)
 let parse_string ~file s : (Form.t list, Diag.t list) result =
-  let st = { src = s; file; off = 0; line = 1; col = 1 } in
+  let st = { src = s; file; off = 0; line = 1; col = 1; pending_comments = [] } in
   let rec go acc =
     skip_ws st;
     match peek st with
-    | None -> List.rev acc
-    | Some '(' -> go (read_form st :: acc)
+    | None -> (
+        (* comments after the last form attach to it as end-of-file trivia so the
+           formatter can keep them (review finding: they were silently dropped) *)
+        match (List.rev st.pending_comments, acc) with
+        | [], _ | _, [] -> List.rev acc
+        | cs, last :: earlier ->
+            st.pending_comments <- [];
+            List.rev
+              ({
+                 last with
+                 Form.meta =
+                   Meta.add Meta.key_trivia_eof
+                     (Meta.List (List.map (fun c -> Meta.Text c) cs))
+                     last.Form.meta;
+               }
+              :: earlier))
+    | Some '(' ->
+        let f = read_form st in
+        let f =
+          match capture_trailing st with
+          | Some c ->
+              { f with Form.meta = Meta.add Meta.key_trivia_trailing (Meta.Text c) f.Form.meta }
+          | None -> f
+        in
+        go (f :: acc)
     | Some ')' ->
         let p = pos st in
         advance st;

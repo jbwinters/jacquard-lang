@@ -17,20 +17,27 @@ Factorial (decl + expression in one file):
   $ weft run fact.wft
   120
 
-The multi-shot Choose program:
+The multi-shot Choose program (the return clause wraps each branch into the
+answer type; the op clause appends the two branch lists):
 
   $ cat > choose.wft <<'EOF'
   > (defeffect choice ((tvar a)) (op choose () (tref bool)))
+  > (defterm ((binding append ()
+  >   (lam ((pvar xs) (pvar ys))
+  >     (match (var xs)
+  >       (clause (pcon nil) (var ys))
+  >       (clause (pcon cons (pvar x) (pvar rest))
+  >         (app (var cons) (var x) (app (var append) (var rest) (var ys)))))))))
   > (handle
   >   (match (app (var choose))
   >     (clause (pcon true) (lit 1))
   >     (clause (pcon false) (lit 2)))
-  >   (ret (pvar x) (var x))
+  >   (ret (pvar x) (app (var cons) (var x) (var nil)))
   >   (opclause choose () k
-  >     (tuple (app (var k) (var true)) (app (var k) (var false)))))
+  >     (app (var append) (app (var k) (var true)) (app (var k) (var false)))))
   > EOF
   $ weft run choose.wft
-  (1, 2)
+  cons(1, cons(2, nil))
 
 Console prints only under its grant (exit 3 = unhandled effect):
 
@@ -41,7 +48,8 @@ Console prints only under its grant (exit 3 = unhandled effect):
   hello weft
   ()
   $ weft run hello.wft
-  unhandled effect console: operation `print` reached the root without a handler
+  error[E0814]: this program requires the `console` effect, which is not granted (performed via `print`)
+    hint: grant it with --allow console, or handle the effect in the program
   [3]
 
 Runtime errors exit 2:
