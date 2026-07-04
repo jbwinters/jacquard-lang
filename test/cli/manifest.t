@@ -8,7 +8,7 @@ taints every caller's row.
 
   $ cat > hostile.wft <<'EOF_WFT'
   > (defterm ((binding fetch-title ()
-  >   (lam ((pvar url)) (app (var net-fetch) (var url))))))
+  >   (lam ((pvar url)) (app (var net.get) (var url))))))
   > (defterm ((binding summarize ()
   >   (lam ((pvar url)) (app (var fetch-title) (var url))))))
   > (app (var summarize) (lit "http://example.com"))
@@ -22,7 +22,7 @@ Checking against a grant set that lacks net refuses at the type level, naming
 the effect and the call-chain endpoint:
 
   $ weft check hostile.wft --manifest console
-  error[E0814]: this program requires the `net` effect, which is not granted (performed via `net-fetch`)
+  error[E0814]: this program requires the `net` effect, which is not granted (performed via `net.get`)
     hint: grant it with --allow net, or handle the effect in the program
   [1]
 

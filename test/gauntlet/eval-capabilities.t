@@ -6,10 +6,10 @@ Eval can create code that performs net, but granting eval alone does not install
 the net root handler.
 
   $ cat > eval-net.wft <<'EOF_WFT'
-  > (app (var eval-code) (quote (app (var net-fetch) (lit "https://example.com"))))
+  > (app (var eval-code) (quote (app (var net.get) (lit "https://example.com"))))
   > EOF_WFT
   $ weft run eval-net.wft --allow eval
-  unhandled effect net: operation `net-fetch` reached the root without a handler
+  unhandled effect net: operation `fetch` reached the root without a handler
   [3]
   $ weft run eval-net.wft --allow eval --allow net
   "<stub response for https://example.com>"

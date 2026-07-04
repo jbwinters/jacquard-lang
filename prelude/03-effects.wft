@@ -11,6 +11,33 @@
 
 (defeffect emit ((tvar w)) (op emit ((tvar w)) (ttuple)))
 
-(defeffect console () (op print ((tref text)) (ttuple)))
+(defeffect console ()
+  (op print ((tref text)) (ttuple))
+  (op read-line () (tref text)))
 
-(defeffect net () (op net-fetch ((tref text)) (tref text)))
+; ring 3 world effects (stdlib SL.8). The grant IS the sandbox boundary in this
+; draft: --allow fs means the WHOLE filesystem (path-scoped grants are future
+; work); clock is real time; net stays a stub returning canned responses.
+(defeffect clock ()
+  (op now () (tref int))
+  (op sleep ((tref int)) (ttuple)))
+
+(deftype request ()
+  (con mk-request (field url (tref text)) (field body (tref text))))
+
+(deftype response ()
+  (con mk-response (field status (tref int)) (field body (tref text))))
+
+(defeffect net () (op fetch ((tref request)) (tref response)))
+
+(defeffect fs ()
+  (op read ((tref text)) (tref text))
+  (op write ((tref text) (tref text)) (ttuple))
+  (op list-dir ((tref text)) (tapp (tref list) (tref text))))
+
+; the Infer effect (stdlib SL.10): model completions as a library effect. The
+; prompt record starts minimal so fields can grow without renaming the effect.
+(deftype prompt ()
+  (con mk-prompt (field text (tref text)) (field model (tapp (tref option) (tref text)))))
+
+(defeffect infer () (op complete ((tref prompt)) (tref text)))

@@ -101,7 +101,7 @@ let make_checker store =
       | Error _ -> ());
       Ok cctx
 
-let run_cmd file allows prelude store_dir seed =
+let run_cmd file allows prelude store_dir seed infer_cache =
   match open_ctx ~prelude ~store_dir with
   | Error ds -> print_diags ds
   | Ok (store, ctx) -> (
@@ -116,7 +116,7 @@ let run_cmd file allows prelude store_dir seed =
       let rec grant_all = function
         | [] -> Ok ()
         | a :: rest -> (
-            match Prelude.grant ctx a ~out:print_string ~seed with
+            match Prelude.grant ctx a ~infer_cache ~out:print_string ~seed with
             | Ok () -> grant_all rest
             | Error ds -> Error ds)
       in
@@ -462,10 +462,21 @@ let seed_arg =
     & info [ "seed" ] ~docv:"SEED"
         ~doc:"Seed for the dist sampling handler (default: OS entropy); use for reproducible runs.")
 
+let infer_cache_arg =
+  Arg.(
+    value
+    & opt (some string) None
+    & info [ "infer-cache" ] ~docv:"DIR"
+        ~doc:
+          "Cache directory for infer completions (content-addressed by prompt); the second \
+           identical run is a full hit.")
+
 let run_t =
   Cmd.v
     (Cmd.info "run" ~doc:"Run a .wft file: declarations load, expressions evaluate and print.")
-    Term.(const run_cmd $ file_arg $ allows_arg $ prelude_arg $ store_dir_opt_arg $ seed_arg)
+    Term.(
+      const run_cmd $ file_arg $ allows_arg $ prelude_arg $ store_dir_opt_arg $ seed_arg
+      $ infer_cache_arg)
 
 let print_sigs_arg =
   Arg.(

@@ -36,4 +36,6 @@ let () =
       ("text", Test_text.suite);
       ("map", Test_map.suite);
       ("dist-lib", Test_dist_lib.suite);
+      ("world", Test_world.suite);
+      ("rings", Test_rings.suite);
     ]

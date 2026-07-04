@@ -416,3 +416,40 @@ corpus, folded into each ring's landing task.
 
 Ring 0 freezes (names and signatures, not hashes) at the M2 gate, after the checker
 has elaborated every signature in this document and proven the notation honest.
+
+## 12. Implementation errata (SL.9)
+
+Collected divergences between this document and the shipped implementation, so the doc
+and the code agree in writing. None of these change the design's shape; each is either a
+documented approximation or a deliberate narrowing.
+
+**Row erasure generalizes handler payload types.** Effect rows are name-sets: effect
+ARGUMENTS are erased, so a payload type does not flow from a perform site to its handler.
+This makes the shipped ring-1 handlers looser than their ideal signatures — e.g.
+`state.run : forall a b e. (() ->{state | e} a, b) ->{e} (a, b)` ties the state type only
+to the initial value, so `state.run(fn () -> { put("hi"); get() }, 0)` elaborates as
+`(a, int)` but returns `("hi", "hi")` at runtime. The same holds for `throw.to-result`'s
+error type and `emit.collect`'s element type, and it is the long-standing shape of
+`eval : (code) -> a`. The future fix direction is parameterized effect instances; until
+then the approximation is documented at the checker's `op_scheme`.
+
+**`dist.enumerate` has no error channel.** When every branch is impossible (total mass 0),
+the in-language enumerate returns `+nan.0` weights — Weft code cannot signal E0901. The
+OCaml driver (`weft infer enumerate`) reports E0901 for the same model.
+
+**`Map k v` displays as `map.t k v`.** Elaborated signatures print the store name of the
+wrapper type; the doc's display-syntax `Map k v` is the same type.
+
+**`--allow fs` is the whole filesystem.** The grant is the only boundary in this draft —
+no path confinement. Attenuate with in-language handlers (`fs.read-only`); path-scoped
+grants are future work.
+
+**`eval` bypasses interposed handlers.** Eval'd code runs at root authority with a fresh
+continuation, so wrapping handlers (including `fs.read-only`) do not attenuate `eval-code`
+payloads; only root grants apply. Owner decision pending (M1 note).
+
+**Smaller narrowings.** `text.trim` strips ASCII whitespace only. `uniform-int`
+enumeration support caps at 10000 outcomes (pmf and sampling work on any range).
+`emit.pipe` forces its callback to return unit (the doc's signature, enforced).
+Top-level definitions get closed rows, so passing one where an open row is needed takes an
+eta-expansion at the use site (`(lam () (app (var agent)))`) — see `infer.scripted`'s cram.

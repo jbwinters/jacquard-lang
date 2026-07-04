@@ -1,0 +1,94 @@
+add : (int, int) ->{} int
+add-real : (real, real) ->{} real
+type bool
+bool.and : (bool, bool) ->{} bool
+bool.and-then : forall e. (bool, () ->{e} bool) ->{e} bool
+bool.eq : eq bool
+bool.not : (bool) ->{} bool
+bool.or : (bool, bool) ->{} bool
+bool.or-else : forall e. (bool, () ->{e} bool) ->{e} bool
+type code
+con code-opaque
+con cons
+div : (int, int) ->{} int
+div-real : (real, real) ->{} real
+eq : (int, int) ->{} bool
+type eq
+eq.fn : forall a. (eq a) ->{} (a, a) ->{} bool
+eq.for-list : forall a. (eq a) ->{} eq (list a)
+eq.for-pair : forall a b. (eq a, eq b) ->{} eq (a, b)
+con equal
+con err
+con false
+con greater
+type int
+int-compare : (int, int) ->{} ordering
+con int-opaque
+int.eq : eq int
+int.ord : ord int
+con less
+type list
+list-eq-with : forall a. (eq a, list a, list a) ->{} bool
+list.append : forall a. (list a, list a) ->{} list a
+list.concat : forall a. (list (list a)) ->{} list a
+list.contains? : forall a. (list a, a, eq a) ->{} bool
+list.drop : forall a. (list a, int) ->{} list a
+list.each : forall a b e. (list a, (a) ->{e} b) ->{e} ()
+list.empty? : forall a. (list a) ->{} bool
+list.filter : forall a e. (list a, (a) ->{e} bool) ->{e} list a
+list.find : forall a e. (list a, (a) ->{e} bool) ->{e} option a
+list.fold : forall a b e. (list b, a, (a, b) ->{e} a) ->{e} a
+list.head : forall a. (list a) ->{} option a
+list.last : forall a. (list a) ->{} option a
+list.length : forall a. (list a) ->{} int
+list.map : forall a b e. (list b, (b) ->{e} a) ->{e} list a
+list.merge-with : forall a. (list a, list a, ord a) ->{} list a
+list.nth : forall a. (list a, int) ->{} option a
+list.range : (int, int) ->{} list int
+list.rev-onto : forall a. (list a, list a) ->{} list a
+list.reverse : forall a. (list a) ->{} list a
+list.sort : forall a. (list a, ord a) ->{} list a
+list.take : forall a. (list a, int) ->{} list a
+list.zip : forall a b. (list a, list b) ->{} list (a, b)
+lt : (int, int) ->{} bool
+con mk-eq
+con mk-ord
+con mk-show
+mul : (int, int) ->{} int
+mul-real : (real, real) ->{} real
+con nil
+con none
+con ok
+type option
+option.each : forall a b e. (option a, (a) ->{e} b) ->{e} ()
+option.filter : forall a e. (option a, (a) ->{e} bool) ->{e} option a
+option.fold : forall a b e. (option b, a, (a, b) ->{e} a) ->{e} a
+option.map : forall a b e. (option b, (b) ->{e} a) ->{e} option a
+option.none? : forall a. (option a) ->{} bool
+option.of-result : forall a b. (result b a) ->{} option a
+option.some? : forall a. (option a) ->{} bool
+option.then : forall a b e. (option b, (b) ->{e} option a) ->{e} option a
+option.with-default : forall a. (option a, a) ->{} a
+type ord
+ord.fn : forall a. (ord a) ->{} (a, a) ->{} ordering
+ord.on-second : forall a b. (ord b) ->{} ord (a, b)
+ord.reverse : forall a. (ord a) ->{} ord a
+ord.to-eq : forall a. (ord a) ->{} eq a
+type ordering
+type real
+con real-opaque
+type result
+result.each : forall a b c e. (result a b, (b) ->{e} c) ->{e} ()
+result.fold : forall a b c e. (result b c, a, (a, c) ->{e} a) ->{e} a
+result.map : forall a b c e. (result a c, (c) ->{e} b) ->{e} result a b
+result.map-error : forall a b c e. (result c b, (c) ->{e} a) ->{e} result a b
+result.of-option : forall a b. (option b, a) ->{} result a b
+result.then : forall a b c e. (result a c, (c) ->{e} result a b) ->{e} result a b
+result.with-default : forall a b. (result b a, a) ->{} a
+type show
+show.fn : forall a. (show a) ->{} (a) ->{} text
+con some
+sub : (int, int) ->{} int
+type text
+con text-opaque
+con true

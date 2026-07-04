@@ -10,6 +10,7 @@ type t =
           runtime (spec §5.1 rule 7) *)
   | Arity of string  (** wrong number of arguments in an uncurried application *)
   | Arithmetic of string  (** builtin arithmetic failure, e.g. division by zero *)
+  | Io of string  (** world-effect IO failure (fs read/write, clock) surfaced by a root handler *)
   | Observe_at_root
       (** [observe] reached the root sampling handler (D7 default: a defect; observation needs an
           inference driver) *)
@@ -19,6 +20,7 @@ type t =
 
 let to_string = function
   | Match_failure scrutinee -> Printf.sprintf "no clause matched the value %s" scrutinee
+  | Io msg -> Printf.sprintf "io error: %s" msg
   | Observe_at_root ->
       "observe reached the sampling root handler; observation requires an inference driver (use \
        weft infer)"

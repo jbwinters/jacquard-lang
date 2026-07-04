@@ -313,6 +313,10 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
   | _ -> ());
   (* pmf : (distribution a, a) -> real and support : distribution a -> list (pair a real)
      (W4.1/W4.4); native implementations over the recognized constructors *)
+  optional "debug.inspect" (fun args ->
+      match args with
+      | [ v ] -> Ok (Value.VText (Value.show v))
+      | args -> type_err "debug.inspect" args);
   optional "pmf" (fun args ->
       match args with
       | [ dv; v ] ->
@@ -406,22 +410,194 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
   Ok ()
 
 (** [install_console ctx ~out] grants the [console] effect: [print] writes its text through [out]
-    and resumes with unit. *)
-let install_console (ctx : Eval.ctx) ~(out : string -> unit) : (unit, Diag.t list) result =
-  match lookup_hash ctx.Eval.store ~kind:Resolve.KOp "print" with
-  | Error ds -> Error ds
-  | Ok print_op ->
-      Hashtbl.replace ctx.Eval.root_handlers print_op (fun args ->
+    and resumes with unit; [read-line] resumes with one line from [read_line] (stdin by default;
+    injectable for tests, EOF reads as ""). *)
+let install_console ?(read_line = fun () -> try Stdlib.read_line () with End_of_file -> "")
+    (ctx : Eval.ctx) ~(out : string -> unit) : (unit, Diag.t list) result =
+  let ( let* ) = Result.bind in
+  let* print_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "print" in
+  let* read_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "read-line" in
+  Hashtbl.replace ctx.Eval.root_handlers print_op (fun args ->
+      match args with
+      | [ Value.VText s ] ->
+          out s;
+          Ok Value.unit_v
+      | args ->
+          Error
+            (Runtime_err.Type_error
+               (Printf.sprintf "print expects one text, got %s"
+                  (String.concat ", " (List.map Value.show args)))));
+  Hashtbl.replace ctx.Eval.root_handlers read_op (fun args ->
+      match args with
+      | [] -> Ok (Value.VText (read_line ()))
+      | args ->
+          Error
+            (Runtime_err.Type_error
+               (Printf.sprintf "read-line expects no arguments, got %s"
+                  (String.concat ", " (List.map Value.show args)))));
+  Ok ()
+
+(** [install_clock ctx] grants [clock]: [now] is milliseconds since the epoch, [sleep] blocks for
+    that many milliseconds. Both primitives are injectable for tests. *)
+let install_clock ?(now = fun () -> int_of_float (Unix.gettimeofday () *. 1000.))
+    ?(sleep = fun ms -> if ms > 0 then Unix.sleepf (float_of_int ms /. 1000.)) (ctx : Eval.ctx) :
+    (unit, Diag.t list) result =
+  let ( let* ) = Result.bind in
+  let* now_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "now" in
+  let* sleep_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "sleep" in
+  Hashtbl.replace ctx.Eval.root_handlers now_op (fun args ->
+      match args with
+      | [] -> Ok (Value.VInt (now ()))
+      | _ -> Error (Runtime_err.Type_error "now expects no arguments"));
+  Hashtbl.replace ctx.Eval.root_handlers sleep_op (fun args ->
+      match args with
+      | [ Value.VInt ms ] ->
+          sleep ms;
+          Ok Value.unit_v
+      | args ->
+          Error
+            (Runtime_err.Type_error
+               (Printf.sprintf "sleep expects one int, got %s"
+                  (String.concat ", " (List.map Value.show args)))));
+  Ok ()
+
+(** [install_fs ctx] grants [fs]. SANDBOX CAVEAT, stated loudly: the grant is the ONLY boundary —
+    [--allow fs] means the whole filesystem, with the process's own privileges. Path-scoped grants
+    are future work; until then attenuate with in-language handlers (see fs.read-only in
+    prelude/14-world.wft). IO failures surface as [Runtime_err.Io]. *)
+let install_fs (ctx : Eval.ctx) : (unit, Diag.t list) result =
+  let ( let* ) = Result.bind in
+  let* read_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "read" in
+  let* write_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "write" in
+  let* lsdir_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "list-dir" in
+  let io f = try f () with Sys_error m -> Error (Runtime_err.Io m) in
+  Hashtbl.replace ctx.Eval.root_handlers read_op (fun args ->
+      match args with
+      | [ Value.VText path ] -> io (fun () -> Ok (Value.VText (read_file path)))
+      | args ->
+          Error
+            (Runtime_err.Type_error
+               (Printf.sprintf "read expects one path, got %s"
+                  (String.concat ", " (List.map Value.show args)))));
+  Hashtbl.replace ctx.Eval.root_handlers write_op (fun args ->
+      match args with
+      | [ Value.VText path; Value.VText content ] ->
+          io (fun () ->
+              let oc = open_out_bin path in
+              output_string oc content;
+              close_out oc;
+              Ok Value.unit_v)
+      | args ->
+          Error
+            (Runtime_err.Type_error
+               (Printf.sprintf "write expects a path and a text, got %s"
+                  (String.concat ", " (List.map Value.show args)))));
+  match
+    ( Store.lookup_kind ctx.Eval.store "nil" Resolve.KCon,
+      Store.lookup_kind ctx.Eval.store "cons" Resolve.KCon )
+  with
+  | Some { Resolve.hash = nil_h; _ }, Some { Resolve.hash = cons_h; _ } ->
+      Hashtbl.replace ctx.Eval.root_handlers lsdir_op (fun args ->
           match args with
-          | [ Value.VText s ] ->
-              out s;
-              Ok Value.unit_v
+          | [ Value.VText path ] ->
+              io (fun () ->
+                  let entries = Sys.readdir path |> Array.to_list |> List.sort String.compare in
+                  Ok
+                    (List.fold_right
+                       (fun e acc ->
+                         Value.VCon { con = cons_h; name = "cons"; args = [ Value.VText e; acc ] })
+                       entries
+                       (Value.VCon { con = nil_h; name = "nil"; args = [] })))
           | args ->
               Error
                 (Runtime_err.Type_error
-                   (Printf.sprintf "print expects one text, got %s"
+                   (Printf.sprintf "list-dir expects one path, got %s"
                       (String.concat ", " (List.map Value.show args)))));
       Ok ()
+  | _ -> err ~code:"E0702" "prelude list constructors missing for fs.list-dir"
+
+(** [install_infer ?cache_dir ctx] grants [infer] with the STUB completion handler (real API calls
+    are out of scope, like real sockets). With [cache_dir], completions are cached content-addressed
+    by prompt: each entry is a printed form readable by weft fmt, and every call logs "infer-cache
+    hit/miss <key>" to stderr — the second identical run is a full hit, which makes agent loops
+    deterministic and builds an eval dataset as a side effect. *)
+let install_infer ?cache_dir (ctx : Eval.ctx) : (unit, Diag.t list) result =
+  let ( let* ) = Result.bind in
+  let* complete_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "complete" in
+  let stub text model =
+    match model with
+    | Some m -> Printf.sprintf "<stub completion from %s for: %s>" m text
+    | None -> Printf.sprintf "<stub completion for: %s>" text
+  in
+  let rec mkdir_p dir =
+    if dir <> "" && dir <> "." && dir <> "/" && not (Sys.file_exists dir) then begin
+      mkdir_p (Filename.dirname dir);
+      try Sys.mkdir dir 0o755 with Sys_error _ -> ()
+    end
+  in
+  let cached text model k =
+    match cache_dir with
+    | None -> k ()
+    | Some dir -> (
+        (* length-prefixed fields: a prompt text containing the separator cannot collide
+           across the text/model split, and future prompt fields extend the same scheme
+           instead of silently aliasing old keys *)
+        let key =
+          let m = Option.value model ~default:"" in
+          Hash.to_hex
+            (Hash.of_string
+               (Printf.sprintf "%d:%s%d:%s" (String.length text) text (String.length m) m))
+        in
+        let path = Filename.concat dir (key ^ ".wft") in
+        let entry_form completion =
+          Form.form "infer-cache-entry"
+            [
+              Form.F
+                (Form.form "prompt"
+                   (Form.Text text :: (match model with Some m -> [ Form.Text m ] | None -> [])));
+              Form.F (Form.form "completion" [ Form.Text completion ]);
+            ]
+        in
+        (* a READABLE entry is a hit; absent or corrupt is a miss that recomputes and
+           (re)writes. Cache IO failures fall back to uncached — the completion still
+           happens and the CLI exit-code contract survives a bad --infer-cache. *)
+        let stored =
+          if Sys.file_exists path then
+            match Reader.parse_one ~file:path (read_file path) with
+            | Ok { Form.args = [ _; Form.F { Form.args = [ Form.Text c ]; _ } ]; _ } -> Some c
+            | _ -> None
+          else None
+        in
+        match stored with
+        | Some c ->
+            Printf.eprintf "infer-cache hit %s\n%!" (String.sub key 0 8);
+            c
+        | None ->
+            Printf.eprintf "infer-cache miss %s\n%!" (String.sub key 0 8);
+            let c = k () in
+            (try
+               mkdir_p dir;
+               let oc = open_out_bin path in
+               output_string oc (Printer.print (entry_form c) ^ "\n");
+               close_out oc
+             with Sys_error m -> Printf.eprintf "infer-cache unavailable (%s)\n%!" m);
+            c)
+  in
+  Hashtbl.replace ctx.Eval.root_handlers complete_op (fun args ->
+      match args with
+      | [ Value.VCon { name = "mk-prompt"; args = [ Value.VText text; model_v ]; _ } ] ->
+          let model =
+            match model_v with
+            | Value.VCon { name = "some"; args = [ Value.VText m ]; _ } -> Some m
+            | _ -> None
+          in
+          Ok (Value.VText (cached text model (fun () -> stub text model)))
+      | args ->
+          Error
+            (Runtime_err.Type_error
+               (Printf.sprintf "complete expects one prompt, got %s"
+                  (String.concat ", " (List.map Value.show args)))));
+  Ok ()
 
 (** [install_eval ctx] grants the [eval] effect: [eval-code] takes a [VCode] payload, validates it
     as an expression, resolves it against the store's current names, and runs it in [ctx]. Failures
@@ -455,18 +631,26 @@ let install_eval (ctx : Eval.ctx) : (unit, Diag.t list) result =
 (** [install_net ctx] grants the [net] effect with the M0 stub handler: [net-fetch] returns a canned
     response naming the URL (the hostile-demo stand-in; real IO is out of scope). *)
 let install_net (ctx : Eval.ctx) : (unit, Diag.t list) result =
-  match lookup_hash ctx.Eval.store ~kind:Resolve.KOp "net-fetch" with
-  | Error ds -> Error ds
-  | Ok fetch_op ->
-      Hashtbl.replace ctx.Eval.root_handlers fetch_op (fun args ->
-          match args with
-          | [ Value.VText url ] -> Ok (Value.VText (Printf.sprintf "<stub response for %s>" url))
-          | args ->
-              Error
-                (Runtime_err.Type_error
-                   (Printf.sprintf "net-fetch expects one text, got %s"
-                      (String.concat ", " (List.map Value.show args)))));
-      Ok ()
+  let ( let* ) = Result.bind in
+  let* fetch_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "fetch" in
+  let* resp_con = lookup_hash ctx.Eval.store ~kind:Resolve.KCon "mk-response" in
+  Hashtbl.replace ctx.Eval.root_handlers fetch_op (fun args ->
+      match args with
+      | [ Value.VCon { name = "mk-request"; args = [ Value.VText url; _body ]; _ } ] ->
+          Ok
+            (Value.VCon
+               {
+                 con = resp_con;
+                 name = "mk-response";
+                 args =
+                   [ Value.VInt 200; Value.VText (Printf.sprintf "<stub response for %s>" url) ];
+               })
+      | args ->
+          Error
+            (Runtime_err.Type_error
+               (Printf.sprintf "fetch expects one request, got %s"
+                  (String.concat ", " (List.map Value.show args)))));
+  Ok ()
 
 (** [install_dist ctx ~seed] grants the [dist] effect with the seeded SAMPLING handler (stdlib
     SL.7): [sample d] draws one value ancestrally; [observe] reaching the root is a defect (decision
@@ -490,18 +674,21 @@ let install_dist (ctx : Eval.ctx) ~seed : (unit, Diag.t list) result =
 
 (** The only effects [grant] can install, i.e. the valid [--allow] values; the E0814 hint consults
     this so it never suggests granting a pure effect. *)
-let grantable_names = [ "console"; "dist"; "eval"; "net" ]
+let grantable_names = [ "clock"; "console"; "dist"; "eval"; "fs"; "infer"; "net" ]
 
 (** [grant ctx name ~out ~seed] installs the root handler for effect [name] (case-insensitive:
     "Eval" and "eval" both work); [seed] feeds the dist sampling handler only. Returns E0703 for
     effects that exist but are not grantable (e.g. [abort]) and unknown effect names alike; keep the
     dispatch in sync with {!grantable_names}. *)
-let grant (ctx : Eval.ctx) name ~out ~seed : (unit, Diag.t list) result =
+let grant (ctx : Eval.ctx) name ~infer_cache ~out ~seed : (unit, Diag.t list) result =
   match String.lowercase_ascii name with
   | "console" -> install_console ctx ~out
   | "eval" -> install_eval ctx
   | "net" -> install_net ctx
   | "dist" -> install_dist ctx ~seed
+  | "clock" -> install_clock ctx
+  | "fs" -> install_fs ctx
+  | "infer" -> install_infer ?cache_dir:infer_cache ctx
   | other -> err ~code:"E0703" "effect `%s` is not grantable" other
 
 (** Builtin type signatures for the checker (W3.2): the marker bodies would type as [code], so the
@@ -580,7 +767,18 @@ let builtin_signatures (store : Store.t) : ((Hash.t * Types.scheme) list, Diag.t
               ("text-compare", fn [ text; text ] (Types.TCon (ord_h, [])));
             ]
         in
-        Ok (base @ text_sigs)
+        let* base =
+          match lookup_hash store ~kind:Resolve.KTerm "debug.inspect" with
+          | Error _ -> Ok (base @ text_sigs)
+          | Ok di ->
+              let av = Types.new_tvar 1 in
+              Ok
+                (base @ text_sigs
+                @ [
+                    (di, { Types.ty = Types.TArrow ([ av ], Types.empty_row, text); gen_level = 0 });
+                  ])
+        in
+        Ok base
     | _ -> Ok base
   in
   (* dist-layer builtins are optional (prelude may not ship them) *)

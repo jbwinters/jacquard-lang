@@ -1,0 +1,49 @@
+; World conveniences and the interposition tutorial (stdlib SL.8), plus the
+; infer fixtures (SL.10). Everything here is ordinary Weft over the ring 3
+; effect declarations: attenuating authority is just wrapping a handler.
+(defterm ((binding println ()
+  (lam ((pvar s)) (app (var print) (app (var text.concat) (var s) (lit "\n")))))))
+
+(defterm ((binding console.ask ()
+  (lam ((pvar question))
+    (let nonrec (pwild) (app (var println) (var question)) (app (var read-line)))))))
+
+(defterm ((binding fs.read-lines ()
+  (lam ((pvar path)) (app (var text.split) (app (var read) (var path)) (lit "\n"))))))
+
+; THE interposition tutorial (docs/tutorial.md example 11): forward reads,
+; turn writes into throw. The handler re-performs read/list-dir, so fs stays
+; in the row — honestly: attenuated code still needs the fs grant, it just
+; cannot write through this handler. NOTE the eval asymmetry: eval'd code runs
+; at root authority and BYPASSES interposed handlers (M1 note, owner decision
+; pending), so fs.read-only does not confine eval-code payloads.
+(defterm ((binding fs.read-only ()
+  (lam ((pvar thunk))
+    (handle (app (var thunk))
+      (ret (pvar x) (var x))
+      (opclause read ((pvar p)) k (app (var k) (app (var read) (var p))))
+      (opclause list-dir ((pvar p)) k (app (var k) (app (var list-dir) (var p))))
+      (opclause write ((pvar p) (pwild)) k
+        (app (var throw)
+          (app (var text.concat) (lit "fs.read-only refused write: ") (var p)))))))))
+
+; infer.scripted (Warp fixture, SL.10): canned completions from a list,
+; threaded function-of-state style; exhaustion throws.
+(defterm ((binding infer.scripted ()
+  (lam ((pvar thunk) (pvar script))
+    (app
+      (handle (app (var thunk))
+        (ret (pvar x) (lam ((pwild)) (var x)))
+        (opclause complete ((pwild)) k
+          (lam ((pvar remaining))
+            (match (var remaining)
+              (clause (pcon cons (pvar c) (pvar more)) (app (app (var k) (var c)) (var more)))
+              (clause (pcon nil)
+                (app (var throw) (lit "infer.scripted: out of canned completions")))))))
+      (var script))))))
+
+; the one-line client for the stub net: build the request record, return the body
+(defterm ((binding net.get ()
+  (lam ((pvar url))
+    (match (app (var fetch) (app (var mk-request) (var url) (lit "")))
+      (clause (pcon mk-response (pwild) (pvar body)) (var body)))))))

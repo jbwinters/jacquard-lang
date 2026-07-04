@@ -20,3 +20,9 @@
 (defterm ((binding div-real () (quote (builtin-marker div-real)))))
 
 (defterm ((binding int-compare () (quote (builtin-marker int-compare)))))
+
+; debug.inspect (decision D8): the one reflection escape hatch, rendering any
+; value the way the CLI does. Breaks parametricity by design; a debugging tool,
+; convention-banned from library code (the SL.9 layering audit asserts no
+; prelude definition references it).
+(defterm ((binding debug.inspect () (quote (builtin-marker debug.inspect)))))

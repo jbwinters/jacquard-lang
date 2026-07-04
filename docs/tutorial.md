@@ -147,3 +147,28 @@ renamed  color -> colour
 
 `weft hash FILE` prints the canonical HASH_V0 hashes; formatting and comments never change
 them (the metadata law). These commands are pinned in `test/cli/tutorial.t`.
+
+## 11. Interposition: attenuating authority with a handler
+
+Capability security in Weft is not a special mechanism — it is the effect system used
+deliberately. `--allow fs` grants the whole filesystem (the grant is the sandbox boundary
+in this draft), but any code can narrow what it passes on by wrapping a handler.
+`fs.read-only` from the prelude forwards `read` and `list-dir` to the real world and turns
+`write` into a thrown error:
+
+```lisp
+(app (var fs.read-only)
+  (lam ()
+    (let nonrec (pvar c) (app (var read) (lit "note.txt"))
+      (let nonrec (pwild) (app (var write) (lit "note.txt") (lit "clobbered"))
+        (var c)))))
+```
+
+Under `weft run --allow fs`, the read succeeds and the write becomes
+`"fs.read-only refused write: note.txt"` (catch it with `throw.catch`). The handler
+re-performs the reads, so `fs` honestly stays in the row: attenuated code still needs the
+grant, it just cannot write through this handler. Pinned in `test/cli/world.t`.
+
+One asymmetry, documented until the owner decision lands: `eval`'d code runs at root
+authority and bypasses interposed handlers, so `fs.read-only` does **not** confine
+`eval-code` payloads.

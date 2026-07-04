@@ -32,6 +32,6 @@ nonexhaustive-nested | nonexhaustive-nested.wft:1:24-31: error[E0813]: this matc
   hint: add a clause matching the witness, or a (pwild) default
 ungranted-effect | error[E0814]: this program requires the `console` effect, which is not granted (performed via `print`)
   hint: grant it with --allow console, or handle the effect in the program
-effectful-toplevel-body | effectful-toplevel-body.wft:1:11-80: error[E0815]: top-level definition `sneaky` performs the `net` effect while being defined
+effectful-toplevel-body | effectful-toplevel-body.wft:1:11-78: error[E0815]: top-level definition `sneaky` performs the `net` effect while being defined
   hint: wrap the body in a lambda and perform the effect when called
 redundant-clause | redundant-clause.wft:1:57-85: warning[W0801]: this clause is redundant: earlier clauses match everything it does

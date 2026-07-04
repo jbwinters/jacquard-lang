@@ -16,7 +16,7 @@ An unknown name is a diagnostic with a near-miss suggestion:
   > EOF
   $ weft check typo.wft
   typo.wft:1:6-14: error[E0301]: unknown name `ad`
-    hint: did you mean one of: add, and, eq?
+    hint: did you mean one of: add, eq, fs?
   [1]
 
 Grammar violations are caught before resolution:

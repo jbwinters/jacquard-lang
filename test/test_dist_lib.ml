@@ -163,7 +163,7 @@ let test_sampling_bounds_and_determinism () =
 (* the sampling grant end to end: sample resumes with a drawn value; observe is a defect *)
 let test_root_sampling_handler () =
   let store2, ctx2 = Eval_support.make_prelude_ctx () in
-  (match Prelude.grant ctx2 "dist" ~out:ignore ~seed:42 with
+  (match Prelude.grant ctx2 "dist" ~out:ignore ~seed:42 ~infer_cache:None with
   | Ok () -> ()
   | Error ds -> Eval_support.fail_diags "grant dist" ds);
   (match

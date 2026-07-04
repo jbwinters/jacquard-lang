@@ -23,10 +23,15 @@
  (modules gen_diag_goldens)
  (libraries weft corpus_support))
 
+(executable
+ (name gen_freeze_goldens)
+ (modules gen_freeze_goldens)
+ (libraries weft corpus_support))
+
 (test
  (name test_weft)
  (modules
-  (:standard \ corpus_support gen_goldens gen_prelude_goldens gen_sig_goldens gen_diag_goldens))
+  (:standard \ corpus_support gen_goldens gen_prelude_goldens gen_sig_goldens gen_diag_goldens gen_freeze_goldens))
  (libraries weft corpus_support alcotest fmt qcheck-core qcheck-alcotest unix str)
  (deps
   (glob_files_rec ../corpus/*.wft)

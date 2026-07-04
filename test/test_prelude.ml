@@ -54,9 +54,9 @@ let test_builtins_work () =
   Alcotest.(check string) "lt false" "false" (eval_ok "(app (var lt) (lit 3) (lit 2))")
 
 let test_bool_functions () =
-  Alcotest.(check string) "not" "false" (eval_ok "(app (var not) (var true))");
-  Alcotest.(check string) "and" "false" (eval_ok "(app (var and) (var true) (var false))");
-  Alcotest.(check string) "or" "true" (eval_ok "(app (var or) (var false) (var true))")
+  Alcotest.(check string) "not" "false" (eval_ok "(app (var bool.not) (var true))");
+  Alcotest.(check string) "and" "false" (eval_ok "(app (var bool.and) (var true) (var false))");
+  Alcotest.(check string) "or" "true" (eval_ok "(app (var bool.or) (var false) (var true))")
 
 (* the plan's map (add 1) [1,2,3] program, straight from the corpus *)
 let test_map_program_from_corpus () =
@@ -78,14 +78,14 @@ let test_fold () =
   Alcotest.(check string)
     "fold add over [1,2,3]" "6"
     (eval_ok
-       "(app (var fold) (var add) (lit 0) (app (var cons) (lit 1) (app (var cons) (lit 2) (app \
-        (var cons) (lit 3) (var nil)))))");
+       "(app (var list.fold) (app (var cons) (lit 1) (app (var cons) (lit 2) (app (var cons) (lit \
+        3) (var nil)))) (lit 0) (var add))");
   (* non-commutative op pins the LEFT fold direction: ((0-1)-2)-3 = -6 *)
   Alcotest.(check string)
     "fold sub over [1,2,3] is a left fold" "-6"
     (eval_ok
-       "(app (var fold) (var sub) (lit 0) (app (var cons) (lit 1) (app (var cons) (lit 2) (app \
-        (var cons) (lit 3) (var nil)))))")
+       "(app (var list.fold) (app (var cons) (lit 1) (app (var cons) (lit 2) (app (var cons) (lit \
+        3) (var nil)))) (lit 0) (var sub))")
 
 (* a program using console prints only under the grant *)
 let test_console_gated () =
@@ -111,16 +111,16 @@ let test_console_gated () =
 
 let test_grant_mapping () =
   let _store, ctx = Eval_support.make_prelude_ctx () in
-  (match Prelude.grant ctx "Console" ~out:ignore ~seed:0 with
+  (match Prelude.grant ctx "Console" ~out:ignore ~seed:0 ~infer_cache:None with
   | Ok () -> ()
   | Error _ -> Alcotest.fail "grant is case-insensitive");
-  (match Prelude.grant ctx "EVAL" ~out:ignore ~seed:0 with
+  (match Prelude.grant ctx "EVAL" ~out:ignore ~seed:0 ~infer_cache:None with
   | Ok () -> ()
   | Error _ -> Alcotest.fail "grant EVAL");
-  (match Prelude.grant ctx "net" ~out:ignore ~seed:0 with
+  (match Prelude.grant ctx "net" ~out:ignore ~seed:0 ~infer_cache:None with
   | Ok () -> ()
   | Error _ -> Alcotest.fail "net has a stub grant");
-  match Prelude.grant ctx "filesystem" ~out:ignore ~seed:0 with
+  match Prelude.grant ctx "filesystem" ~out:ignore ~seed:0 ~infer_cache:None with
   | Error [ d ] -> Alcotest.(check string) "ungrantable" "E0703" d.Diag.code
   | _ -> Alcotest.fail "unknown effect must not be grantable"
 
