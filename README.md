@@ -1,80 +1,40 @@
 # Weft
 
-Weft is a research prototype for a small kernel language designed for code written by models and reviewed by people. The core design combines a uniform quoted triple representation, a 27-form kernel grammar, algebraic effects, explicit capability grants, probabilistic programming as a library effect, and content-addressed definitions.
+Weft is a research prototype for running, reviewing, simulating, and trusting
+programs written by models and reviewed by people.
 
-All five milestones (M0-exec through M4) are implemented: the executable data layer, the CPS interpreter with multi-shot handlers, the type-and-effect checker with the capability manifest, probabilistic inference as handlers, and the tooling (formatter, semantic differ, error catalog, demos).
+The core idea is simple: effects, uncertainty, and identity should be visible to
+tools instead of hidden in runtime behavior, mocks, logs, prompts, or naming
+conventions. A Weft program can run under real handlers, dry-run handlers,
+replay handlers, simulated handlers, probabilistic handlers, and test handlers
+without changing the policy code.
 
-## Repository Layout
+Core ingredients:
 
-- `docs/whitepaper.tex` - project thesis, design motivation, roadmap, risks, and related work.
-- `docs/ast.md` - M0 kernel AST draft and metadata/hash contract.
-- `docs/development-plan.md` - implementation plan from W0.1 through W5.5.
-- `docs/example-code.md` - target bootstrap `.wft` examples for the future corpus.
-- `.taskmaster/` - local Task Master plan generated from `docs/development-plan.md`.
-- `dune-project` and `weft.opam` - OCaml package and build metadata.
-- `src/` - the `weft` library: `form`/`meta`/`span` (the triple), `hash` (HASH_V0), `reader`/`printer` (bootstrap notation + trivia-preserving formatter), `kernel` (grammar validator + typed AST), `resolve`, `canon` (canonical serialization + hashing), `store`, `value`/`eval` (CPS machine with multi-shot handlers), `prelude` (loader + grants), `types`/`check` (rows, inference, exhaustiveness, manifest), `diff` (semantic differ), `infer_dist` (enumeration + likelihood weighting).
-- `bin/` - the `weft` CLI: `run` (with `--allow` capability grants), `check` (`--print-sigs`, `--manifest`), `hash`, `fmt`, `diff`, `infer enumerate|lw`, `store add|name|rename`.
-- `test/` - alcotest/qcheck suites, the corpus runner, cram CLI tests, and the golden generators.
-- `spec/` - the M0 kernel AST spec and `serialization.md` (canonical byte format).
-- `corpus/` - conformance corpus (`valid/`, `invalid/` + `.expect`, `golden/` including prelude hashes).
-- `prelude/` - the Weft prelude (`.wft` sources: types, effects, builtins, library functions).
-- `demos/` - `m1.sh` (factorial, multi-shot choose, gated eval), `m3.sh` (Demo 1: inference as handlers), `m4-hostile.sh` (Demo 2: the hostile function).
-- `docs/tutorial.md` - ten runnable examples; `docs/errors.md` - every diagnostic code.
+- a uniform quoted triple representation and 27-form kernel grammar
+- algebraic effects with deep multi-shot handlers
+- explicit capability grants; no ambient root handlers
+- type-and-effect rows where `main` is the authority manifest
+- discrete probabilistic programming as ordinary effects and handlers
+- content-addressed definitions with metadata-erased identity
+- tooling for formatting, semantic diff, Warp tests, replay, demos, and release
+  evidence
 
-## Toolchain
+The implementation is complete through the original M0-exec through M4 plan:
+the executable data layer, CPS interpreter, checker, capability manifest,
+`Dist` inference handlers, formatter, semantic differ, error catalog, demos, and
+release-candidate evidence pack are all present.
 
-This repo uses asdf for `opam`, and opam for the OCaml compiler and OCaml packages.
+## Quick Start
 
-Pinned asdf tool:
-
-```bash
-asdf current opam
-```
-
-Repo-local OCaml switch:
+These commands assume a fresh clone and `asdf` available for installing `opam`.
+If you already have `opam` 2.5.x, start at the local switch step. If `opam`
+is already initialized on your machine, skip `opam init`.
 
 ```bash
-eval "$(opam env)"
-opam switch show
-ocaml -version
-dune --version
-```
+git clone https://github.com/jbwinters/weft-lang.git
+cd weft-lang
 
-Expected versions after setup:
-
-- `opam` 2.5.1, via asdf
-- OCaml 5.1.1, via the repo-local opam switch in `_opam/`
-- `dune` 3.24.0
-- `ocamlformat` 0.29.0
-
-Core OCaml packages installed in the local switch:
-
-- `alcotest`
-- `cmdliner`
-- `digestif`
-- `dune`
-- `menhir`
-- `ocamlformat`
-- `qcheck`
-
-Developer-only tools installed in the same switch:
-
-- `ocaml-lsp-server` for editor integration
-- `utop` for an OCaml REPL
-- `odoc` for generated API documentation
-
-## Setup From This Checkout
-
-If the local switch already exists:
-
-```bash
-cd /home/josh/dev/friendmachine/research/weft-lang
-eval "$(opam env)"
-```
-
-If recreating the environment from scratch:
-
-```bash
 asdf plugin add opam https://github.com/asdf-community/asdf-opam.git
 asdf install opam 2.5.1
 asdf set opam 2.5.1
@@ -84,50 +44,175 @@ opam init -y --no-setup --bare
 opam switch create . ocaml-base-compiler.5.1.1 -y
 eval "$(opam env)"
 
-opam install -y dune alcotest qcheck digestif ocamlformat menhir cmdliner ocaml-lsp-server utop odoc
+opam install --deps-only . --with-test --with-dev-setup --with-doc -y
+opam exec -- dune build @all
+opam exec -- dune runtest
+opam exec -- dune fmt
+git diff --exit-code
 ```
 
-`_opam/` is intentionally ignored because it is a large local build artifact.
+The final `git diff --exit-code` is part of the development contract: formatting
+must leave the worktree clean unless you intentionally commit the formatting
+diff.
 
-## Task Plan
+Expected versions after setup:
 
-Task Master has been populated from `docs/development-plan.md`.
+- `opam` 2.5.1 from `.tool-versions`
+- OCaml 5.1.1 from the repo-local `_opam/` switch
+- `dune`, `ocamlformat`, `alcotest`, `qcheck`, `digestif`, `menhir`,
+  `cmdliner`, `odoc`, `utop`, and `ocaml-lsp-server` from `weft.opam`
 
-Useful commands:
+In a new shell inside an existing checkout, run:
 
 ```bash
-task-master list --format compact
-task-master next
-task-master show 1
-task-master validate-dependencies
+eval "$(opam env)"
 ```
 
-All 33 tasks (W0.1 through W5.5) are done.
+`_opam/` is intentionally ignored. It is a local build artifact, not source.
 
-## Implementation Milestones
+## Running Weft
 
-- M0-exec: executable spec with parser, validator, resolver, hashing, store, and conformance corpus.
-- M1: CPS interpreter with multi-shot resumptions, quote/unquote, gated eval, prelude, and CLI.
-- M2: type and effect checker with row inference, exhaustiveness, diagnostics, and root capability manifest.
-- M3: discrete `Dist` effect with enumeration and likelihood-weighting handlers.
-- M4: formatter, semantic differ, error audit, docs, and final demos.
+During development, use the built binary through Dune:
 
-## The Two Demos
+```bash
+opam exec -- dune exec weft -- --help
+opam exec -- dune exec weft -- --version
+```
 
-- **Demo 1 (M3): inference as handlers.** `sh demos/m3.sh` runs the two-coins model under
-  exact enumeration and likelihood weighting; the model file is byte-identical between the
-  two runs — only the handler changes.
-- **Demo 2 (M4): the hostile function.** `sh demos/m4-hostile.sh` shows a generated-looking
-  function that reaches for the network: `weft check` refuses it at the type level with its
-  full signature; the granted run succeeds against the stub handler.
+Many direct CLI commands need the prelude. From the repository root:
 
-`docs/tutorial.md` walks ten runnable examples from literals to content addressing.
+```bash
+export WEFT_PRELUDE=$PWD/prelude
+opam exec -- dune exec weft -- run demos/m1-fact.wft
+```
 
-## Current Status
+The main commands are:
 
-The plan is complete through M4. Programs parse to uniform triples, validate against the 27-form kernel, resolve to content hashes, and hash canonically; the CPS interpreter runs them with deep multi-shot handlers and capability grants as the only root authority; the checker infers types and effect rows (a signature carries the whole story, and `weft run` refuses ungranted effects at the type level); `weft infer` runs exact enumeration and likelihood weighting as handlers over unchanged models; and the tooling closes the loop with a trivia-preserving formatter, a semantic differ over stores, a complete error catalog, and the two whitepaper demos green in CI.
+```bash
+weft run FILE.wft [--allow fs] [--allow net] [--dry-run]
+weft check FILE.wft [--print-sigs] [--manifest fs,net,console]
+weft hash FILE.wft
+weft fmt FILE.wft
+weft diff STORE_A STORE_B
+weft infer enumerate MODEL.wft
+weft infer lw MODEL.wft --seed 42 --samples 100000
+weft replay TRACE.wft PROGRAM.wft [--fork '1=(response 500 "down")']
+weft test TESTS.wft [--exhaustive] [--cache-dir CACHE]
+```
 
-The tree should verify with:
+## Demos
+
+Start with these from the repo root:
+
+```bash
+export WEFT_PRELUDE=$PWD/prelude
+opam exec -- sh demos/m1.sh
+opam exec -- sh demos/m3.sh
+opam exec -- sh demos/clarifying-question.sh
+opam exec -- sh demos/agent-dream.sh
+opam exec -- sh demos/ambiguity-pipeline.sh
+opam exec -- sh demos/showcase-warp-tests.sh
+opam exec -- sh demos/m4-hostile.sh
+```
+
+What they show:
+
+- `m1.sh`: factorial, multi-shot choice, and gated eval.
+- `m3.sh`: one model under exact enumeration and likelihood weighting; same
+  model hash, different inference handler.
+- `clarifying-question.sh`: value-of-information for asking the user.
+- `agent-dream.sh`: one policy under scripted and probabilistic world handlers.
+- `ambiguity-pipeline.sh`: posterior-carrying extraction; user selection is an
+  `observe`.
+- `showcase-warp-tests.sh`: Warp checks for the VOI, dream-mode, and ambiguity
+  demos.
+- `m4-hostile.sh`: generated-looking code that reaches for `net`; signatures and
+  manifests expose the authority.
+- `demos/escrow/`: product-shaped generated workflow with manifest, dry-run,
+  Warp tests, fault exploration, replay, semantic diff, and approval by hash.
+
+All public demo outputs are pinned by cram tests, especially
+`test/cli/demos.t`, `test/cli/hostile-demo.t`, and `test/cli/escrow.t`.
+
+## Release Evidence
+
+The release-candidate evidence pack lives in `docs/release/0.1/`.
+
+To reproduce the release evidence from this checkout:
+
+```bash
+WEFT_RELEASE_REF=HEAD WEFT_RELEASE_BASE=3609a67 scripts/release/reproduce-0.1.sh
+```
+
+The script installs dependencies, builds, runs the full test suite, checks
+formatting, runs public demos, runs gauntlet tests, records `weft --version`,
+and writes transcripts under `logs/release/0.1/`.
+
+Key release docs:
+
+- `docs/release/0.1/EVIDENCE.md`: what was built and what passed
+- `docs/release/0.1/CLAIMS.md`: semantic claims mapped to tests and caveats
+- `docs/release/0.1/REPRO.md`: fresh-clone reproduction steps
+- `docs/release/0.1/FREEZE.md`: frozen version/hash/store/CLI surfaces
+- `docs/release/0.1/GAUNTLET.md`: adversarial tests present and omitted
+- `docs/release/0.1/LIMITS.md`: explicit non-goals and caveats
+- `docs/release/0.1/DECISION.md`: release-candidate decision memo
+
+## Repository Map
+
+- `.github/`: CI, release evidence workflow, and PR template.
+- `AGENTS.md`: operating notes for future coding agents.
+- `bin/`: `weft` CLI entry point.
+- `corpus/`: conformance corpus and golden outputs.
+- `demos/`: runnable examples and product-shaped demos.
+- `docs/`: design docs, tutorial, CI/CD, Warp, stdlib, errors, release evidence.
+- `prelude/`: Weft standard library and effect declarations.
+- `scripts/release/`: reproducible release evidence script.
+- `spec/`: kernel AST and canonical serialization specs.
+- `src/`: OCaml implementation.
+- `test/`: Alcotest/QCheck suites plus cram CLI transcripts.
+- `weft.opam`, `dune-project`: package and build metadata.
+
+## Implementation Map
+
+- `src/form.ml`, `src/meta.ml`, `src/span.ml`: uniform triple and metadata.
+- `src/reader.ml`, `src/printer.ml`: bootstrap `.wft` notation and formatter.
+- `src/kernel.ml`: validator and typed kernel AST.
+- `src/resolve.ml`: names to content-addressed references.
+- `src/canon.ml`, `src/hash.ml`: HASH_V0 canonical serialization and hashing.
+- `src/store.ml`: object store and mutable name index.
+- `src/value.ml`, `src/eval.ml`: CPS evaluator and multi-shot handlers.
+- `src/types.ml`, `src/check.ml`: type/effect inference, rows, manifests,
+  exhaustiveness.
+- `src/prelude.ml`: prelude loader, builtin wiring, and root grants.
+- `src/infer_dist.ml`: exact enumeration and likelihood weighting.
+- `src/diff.ml`: semantic diff over stores.
+- `src/warp.ml`: Warp test discovery, running, cache, and properties.
+
+## Documentation Map
+
+Read these in order if you are new:
+
+1. `docs/README.md`: documentation index and suggested reading paths.
+2. `docs/tutorial.md`: runnable user-facing examples.
+3. `demos/README.md`: demo catalog and what each demo proves.
+4. `docs/ci-cd.md`: GitHub checks and release evidence process.
+5. `docs/release/0.1/EVIDENCE.md`: release-candidate evidence overview.
+
+Deeper design references:
+
+- `docs/whitepaper.tex`: thesis, motivation, roadmap, and risks.
+- `docs/ast.md`: kernel AST and metadata/hash contract.
+- `spec/weft-kernel-ast-m0.md`: kernel source-of-truth spec.
+- `spec/serialization.md`: canonical byte format.
+- `docs/stdlib.md`: prelude and ringed standard library.
+- `docs/warp-testing.md`: Warp testing model.
+- `docs/errors.md`: diagnostic catalog.
+- `docs/development-plan.md`: original implementation plan.
+
+## Development Workflow
+
+Before opening a PR:
 
 ```bash
 eval "$(opam env)"
@@ -135,18 +220,50 @@ opam exec -- dune build @all
 opam exec -- dune runtest
 opam exec -- dune fmt
 git diff --exit-code
-task-master next
+```
+
+When adding valid corpus files, regenerate golden hashes:
+
+```bash
+opam exec -- dune exec test/gen_goldens.exe
+```
+
+When touching release-facing demos, claims, CI, or semantics, also run:
+
+```bash
+WEFT_RELEASE_REF=HEAD WEFT_RELEASE_BASE=3609a67 scripts/release/reproduce-0.1.sh
 ```
 
 ## CI/CD
 
 GitHub Actions has two lanes:
 
-- `CI / Development gate` for PRs, `main`, and `release/**`: build, full tests,
-  clean formatting, version smoke, and release-doc presence.
-- `Release Evidence / Reproduce 0.1 evidence` for `release/**`, `weft-core-*`
-  tags, and manual dispatch: runs `scripts/release/reproduce-0.1.sh` and uploads
-  release transcripts as an artifact.
+- `CI / Development gate`: build, full tests, clean formatting, version smoke,
+  and release-doc presence on PRs, `main`, and `release/**`.
+- `Release Evidence / Reproduce 0.1 evidence`: release branches, `weft-core-*`
+  tags, and manual dispatch; runs `scripts/release/reproduce-0.1.sh` and uploads
+  transcripts.
 
-See `docs/ci-cd.md` for required branch protection and the release-candidate
-process.
+See `docs/ci-cd.md` for branch protection recommendations.
+
+## Current Limits
+
+Weft core 0.1 is a research prototype, not a production compiler. It does not
+claim surface syntax beyond bootstrap `.wft`, a VM or optimizer, continuous
+distributions, gradients, typed staging, package management, self-hosting, or a
+formal proof of row soundness. See `docs/release/0.1/LIMITS.md` for the
+no-hype list.
+
+## Troubleshooting
+
+- `opam: command not found`: install `opam` with asdf using `.tool-versions`, or
+  install a compatible `opam` manually.
+- Dune cannot find packages: run `eval "$(opam env)"` in this shell, then
+  reinstall deps with `opam install --deps-only . --with-test --with-dev-setup
+  --with-doc -y`.
+- `weft` cannot find names from the prelude: set `WEFT_PRELUDE=$PWD/prelude` or
+  run through Dune from the repo root.
+- Formatting changed files: run `opam exec -- dune fmt`, inspect the diff, and
+  commit the formatting changes if they are intended.
+- Release reproduction writes files under `logs/`: that directory is ignored and
+  contains generated transcripts only.

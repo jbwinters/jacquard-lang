@@ -1,13 +1,17 @@
 # Agent Notes
 
-This repository is a pre-implementation OCaml language prototype. Read the docs before editing code:
+This repository is an implemented OCaml research prototype in release-hardening
+mode. Treat it as a semantic artifact with evidence, not as a greenfield
+language project. Before editing code, read:
 
-1. `docs/development-plan.md`
-2. `docs/ast.md`
-3. `docs/example-code.md`
-4. `docs/whitepaper.tex`
+1. `README.md`
+2. `docs/README.md`
+3. `docs/development-plan.md`
+4. `docs/ast.md`
+5. `docs/release/0.1/EVIDENCE.md`
 
-The development plan is already loaded into Task Master. Use it as the execution queue.
+The original development plan has been completed. Use Task Master only for
+local historical context unless the user explicitly asks for it.
 
 ```bash
 task-master next
@@ -54,7 +58,7 @@ git diff --exit-code
 opam exec -- dune build @doc
 ```
 
-The data layer (M0-exec, tasks W0.1-W1.7) is implemented in `src/` with suites in `test/`. Verify the environment and task queue with:
+The implementation is in `src/` with suites in `test/`. Verify the environment with:
 
 ```bash
 eval "$(opam env)"
@@ -62,14 +66,18 @@ ocaml -version
 dune --version
 opam exec -- dune build @all
 opam exec -- dune runtest
-task-master next
 ```
 
-When adding valid corpus files, regenerate the golden hashes with `dune exec test/gen_goldens.exe` and commit the diff (see `corpus/README.md`).
+When adding valid corpus files, regenerate the golden hashes with
+`opam exec -- dune exec test/gen_goldens.exe` and commit the diff (see
+`corpus/README.md`).
 
 ## Working Rules
 
-- Follow `docs/development-plan.md` in phase order unless a task explicitly says it is parallel-safe.
+- Preserve the release-hardening posture unless the user explicitly asks for
+  feature work.
+- Start from existing tests and docs. Weft behavior is pinned by cram
+  transcripts, Alcotest/QCheck suites, corpus goldens, demos, and release docs.
 - Keep behavior tied to the 27 kernel forms in `docs/ast.md`; do not add surface syntax beyond the bootstrap `.wft` notation in W1.2.
 - Do not add out-of-scope features from the plan guardrails: performance work, macros beyond quote/unquote/gated eval, records, typed staging, continuous distributions, package management, self-hosting, or ownership/borrowing.
 - Use `dune`, `alcotest`, and `qcheck` for build and tests.
@@ -79,6 +87,25 @@ When adding valid corpus files, regenerate the golden hashes with `dune exec tes
 - Use `ocamlformat` for formatting once the project has a formatter config.
 - Public functions in touched modules should have doc comments describing contracts and failure modes.
 - Library code should return `('a, Diag.t list) result`; exceptions are only for internal invariant failures and should be prefixed `Bug_`.
+
+## Where To Look
+
+- Fresh-clone setup and common commands: `README.md`.
+- Documentation map: `docs/README.md`.
+- Runtime examples: `docs/tutorial.md`.
+- Demo catalog: `demos/README.md`.
+- CI and release process: `docs/ci-cd.md`.
+- Release evidence: `docs/release/0.1/`.
+- Kernel and hashing rules: `docs/ast.md`, `spec/serialization.md`,
+  `src/canon.ml`.
+- Effects and capabilities: `prelude/03-effects.wft`, `src/check.ml`,
+  `src/prelude.ml`.
+- Handlers and evaluation: `src/eval.ml`, `test/test_handlers.ml`,
+  `test/test_gauntlet_handlers.ml`.
+- Dist and inference: `prelude/06-dist.wft`, `prelude/13-dist-lib.wft`,
+  `src/infer_dist.ml`, `test/test_infer.ml`.
+- Warp: `prelude/15-warp.wft`, `prelude/16-gen.wft`, `src/warp.ml`,
+  `test/cli/warp.t`, `test/cli/props.t`.
 
 ## Git Hygiene
 

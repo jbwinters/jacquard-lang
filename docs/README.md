@@ -1,0 +1,72 @@
+# Documentation Index
+
+This index is for both human contributors and coding agents. It points to the
+source of truth for each kind of question so readers do not have to infer the
+project shape from file names alone.
+
+## First Read
+
+- `../README.md`: fresh-clone setup, common commands, demos, CI, and repo map.
+- `../AGENTS.md`: operating rules for future agents.
+- `tutorial.md`: runnable examples from literals through hashing and tooling.
+- `../demos/README.md`: demo catalog and what each demo proves.
+- `ci-cd.md`: GitHub gates, branch protection, and release evidence workflow.
+
+## Core Design
+
+- `whitepaper.tex`: thesis, motivation, roadmap, risks, and related work.
+- `ast.md`: kernel AST draft and metadata/hash contract.
+- `../spec/weft-kernel-ast-m0.md`: kernel AST source-of-truth spec.
+- `../spec/serialization.md`: canonical byte serialization and hashing.
+- `development-plan.md`: original task plan and milestone discipline.
+
+## User-Facing Runtime
+
+- `tutorial.md`: worked CLI examples.
+- `stdlib.md`: prelude, rings, library effects, and standard handlers.
+- `warp-testing.md`: Warp test model, rows, handlers, cache, properties, and
+  world lanes.
+- `errors.md`: diagnostic code catalog.
+
+## Release 0.1 Evidence
+
+Read these together when judging whether the release candidate is credible:
+
+- `release/0.1/EVIDENCE.md`: built artifact, test inventory, commands, summary.
+- `release/0.1/CLAIMS.md`: claims mapped to proving tests/demos and caveats.
+- `release/0.1/REPRO.md`: fresh-clone reproduction.
+- `release/0.1/FREEZE.md`: frozen version/hash/store/trace/CLI/error surfaces.
+- `release/0.1/GAUNTLET.md`: adversarial tests present and omitted.
+- `release/0.1/LIMITS.md`: non-goals and known caveats.
+- `release/0.1/DECISION.md`: RC decision memo.
+
+## Maintenance Notes
+
+- `native-compilation.md`: native compilation notes and boundaries.
+- `perf-vm-decision.md`: why VM/performance work is not in 0.1.
+- `example-code.md`: early target examples retained as design context.
+
+## Suggested Paths
+
+For a new human contributor:
+
+1. `../README.md`
+2. `tutorial.md`
+3. `../demos/README.md`
+4. `ci-cd.md`
+5. `CONTRIBUTING.md` from the repository root
+
+For a future coding agent:
+
+1. `../AGENTS.md`
+2. `../README.md`
+3. `development-plan.md`
+4. `ast.md`
+5. relevant test files under `../test/`
+
+For a release reviewer:
+
+1. `release/0.1/EVIDENCE.md`
+2. `release/0.1/CLAIMS.md`
+3. `release/0.1/REPRO.md`
+4. from the repository root, run `scripts/release/reproduce-0.1.sh`
