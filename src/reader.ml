@@ -116,6 +116,21 @@ let is_sym_start c = c >= 'a' && c <= 'z'
 let is_sym_char c = is_sym_start c || (c >= '0' && c <= '9') || c = '-'
 let is_digit c = c >= '0' && c <= '9'
 
+(* Library-name grammar (SL.1): one or more dot-separated segments, each
+   [a-z][a-z0-9-]*, with at most one trailing ? or ! on the final segment.
+   Kernel form HEADS deliberately keep the old single-segment grammar. *)
+let valid_library_symbol s =
+  let n = String.length s in
+  if n = 0 then false
+  else
+    let body_end = match s.[n - 1] with '?' | '!' -> n - 1 | _ -> n in
+    if body_end = 0 then false
+    else
+      let segments = String.split_on_char '.' (String.sub s 0 body_end) in
+      List.for_all
+        (fun seg -> String.length seg > 0 && is_sym_start seg.[0] && String.for_all is_sym_char seg)
+        segments
+
 let is_atom_char c =
   (* anything that is not whitespace, a delimiter, or a comment starter *)
   match c with
@@ -135,7 +150,8 @@ let read_atom st =
   go ();
   String.sub st.src start (st.off - start)
 
-let valid_symbol s = String.length s > 0 && is_sym_start s.[0] && String.for_all is_sym_char s
+let valid_symbol = valid_library_symbol
+let valid_head s = String.length s > 0 && is_sym_start s.[0] && String.for_all is_sym_char s
 
 (* [+-]?digits, or a real: digits with '.' and/or exponent, or +inf.0 etc. *)
 let classify_number st ~start_pos s =
@@ -269,7 +285,7 @@ let rec read_form st : Form.t =
           (Printf.sprintf "expected a form head symbol, found %C" c)
     | None -> error st ~code:"E0106" ~start_pos "unexpected end of input inside a form"
   in
-  if not (valid_symbol head) then
+  if not (valid_head head) then
     error st ~code:"E0107" ~start_pos
       (Printf.sprintf "invalid head symbol %S" head)
       ~hint:"heads are lowercase: [a-z][a-z0-9-]*";

@@ -10,7 +10,7 @@
     the [console] effect (its [print] op writes through [out] and resumes with unit); [install_eval]
     grants the [eval] effect (its [eval-code] op validates, resolves, and evaluates a [VCode]
     payload at the boundary — the dynamic check the spec pins for M0). [grant] maps a
-    case-insensitive effect name from the CLI to the matching installer. The [failure] effect
+    case-insensitive effect name from the CLI to the matching installer. Pure effects (abort etc.)
     deliberately has no root handler: an unhandled [abort] is supposed to die. *)
 
 let err ~code fmt = Printf.ksprintf (fun msg -> Error [ Diag.error ~code msg ]) fmt
@@ -63,10 +63,12 @@ let load ~dir store : ((string * Canon.decl_hashes list) list, Diag.t list) resu
     go [] files
 
 let lookup_hash store ~kind name : (Hash.t, Diag.t list) result =
-  match Store.lookup_name store name with
-  | Some { Resolve.hash; kind = k } when k = kind -> Ok hash
-  | Some _ -> err ~code:"E0702" "prelude name `%s` has an unexpected kind" name
-  | None -> err ~code:"E0702" "prelude name `%s` is not in the store" name
+  match Store.lookup_kind store name kind with
+  | Some { Resolve.hash; _ } -> Ok hash
+  | None -> (
+      match Store.lookup_name store name with
+      | Some _ -> err ~code:"E0702" "prelude name `%s` has an unexpected kind" name
+      | None -> err ~code:"E0702" "prelude name `%s` is not in the store" name)
 
 (** [wire_builtins ctx] registers the native implementations for the prelude's builtin marker terms.
     Call after {!load}. Integer semantics per decision D2: OCaml native 63-bit ints; add/sub/mul
@@ -127,6 +129,21 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
   optional "add-real" (real2 "add-real" ( +. ));
   optional "mul-real" (real2 "mul-real" ( *. ));
   optional "div-real" (real2 "div-real" ( /. ));
+  (* three-way comparison feeding the ord dictionary (stdlib SL.2) *)
+  (match
+     ( lookup_hash store ~kind:Resolve.KCon "less",
+       lookup_hash store ~kind:Resolve.KCon "equal",
+       lookup_hash store ~kind:Resolve.KCon "greater" )
+   with
+  | Ok less_c, Ok equal_c, Ok greater_c ->
+      let vord con name = Value.VCon { con; name; args = [] } in
+      optional "int-compare"
+        (int2 "int-compare" (fun a b ->
+             Ok
+               (if a < b then vord less_c "less"
+                else if a = b then vord equal_c "equal"
+                else vord greater_c "greater")))
+  | _ -> ());
   (* pmf : (distribution a, a) -> real and support : distribution a -> list (pair a real)
      (W4.1/W4.4); native implementations over the recognized constructors *)
   optional "pmf" (fun args ->
@@ -145,9 +162,9 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
           Result.bind (Infer_dist.dist_of_value ctx dv) (fun d ->
               Result.bind (Infer_dist.support ctx d) (fun entries ->
                   match
-                    ( Store.lookup_name store "mk-pair",
-                      Store.lookup_name store "cons",
-                      Store.lookup_name store "nil" )
+                    ( Store.lookup_kind store "mk-pair" Resolve.KCon,
+                      Store.lookup_kind store "cons" Resolve.KCon,
+                      Store.lookup_kind store "nil" Resolve.KCon )
                   with
                   | ( Some { Resolve.hash = ph; _ },
                       Some { Resolve.hash = ch; _ },
@@ -239,9 +256,13 @@ let install_net (ctx : Eval.ctx) : (unit, Diag.t list) result =
                       (String.concat ", " (List.map Value.show args)))));
       Ok ()
 
+(** The only effects [grant] can install, i.e. the valid [--allow] values; the E0814 hint consults
+    this so it never suggests granting a pure effect. *)
+let grantable_names = [ "console"; "eval"; "net" ]
+
 (** [grant ctx name ~out] installs the root handler for effect [name] (case-insensitive: "Eval" and
-    "eval" both work). Returns E0703 for effects that exist but are not grantable (e.g. [failure])
-    and unknown effect names alike. *)
+    "eval" both work). Returns E0703 for effects that exist but are not grantable (e.g. [abort]) and
+    unknown effect names alike; keep the dispatch in sync with {!grantable_names}. *)
 let grant (ctx : Eval.ctx) name ~out : (unit, Diag.t list) result =
   match String.lowercase_ascii name with
   | "console" -> install_console ctx ~out
@@ -275,6 +296,15 @@ let builtin_signatures (store : Store.t) : ((Hash.t * Types.scheme) list, Diag.t
         ("eq", arrow2 bool_ty);
         ("lt", arrow2 bool_ty);
       ]
+  in
+  (* int-compare ships with ring 0; its ordering result type lives in 02-data *)
+  let* base =
+    match
+      ( lookup_hash store ~kind:Resolve.KType "ordering",
+        lookup_hash store ~kind:Resolve.KTerm "int-compare" )
+    with
+    | Ok ord_h, Ok ic_h -> Ok (base @ [ (ic_h, Types.mono (arrow2 (Types.TCon (ord_h, [])))) ])
+    | _ -> Ok base
   in
   (* dist-layer builtins are optional (prelude may not ship them) *)
   match

@@ -87,8 +87,8 @@ let process_forms store ~file src ~on_expr =
 let granted_hashes store allows =
   List.filter_map
     (fun name ->
-      match Store.lookup_name store (String.lowercase_ascii name) with
-      | Some { Resolve.hash; kind = Resolve.KEffect } -> Some hash
+      match Store.lookup_kind store (String.lowercase_ascii name) Resolve.KEffect with
+      | Some { Resolve.hash; _ } -> Some hash
       | _ -> None)
     allows
 
@@ -129,7 +129,7 @@ let run_cmd file allows prelude store_dir =
                 | Ok { Check.row; warnings; _ } -> (
                     List.iter (fun w -> prerr_endline (Diag.to_string w)) warnings;
                     match
-                      Check.manifest_errors cctx ~granted
+                      Check.manifest_errors cctx ~grantable:Prelude.grantable_names ~granted
                         (Option.value row ~default:Types.empty_row)
                     with
                     | _ :: _ as ds ->
@@ -189,7 +189,9 @@ let check_cmd file prelude print_sigs manifest =
                     names;
                 match (granted, row) with
                 | Some g, Some r -> (
-                    match Check.manifest_errors cctx ~granted:g r with
+                    match
+                      Check.manifest_errors cctx ~grantable:Prelude.grantable_names ~granted:g r
+                    with
                     | [] -> Ok ()
                     | ds -> Error ds)
                 | _ -> Ok ())
@@ -206,9 +208,10 @@ let check_cmd file prelude print_sigs manifest =
                     match Kernel.of_form f with
                     | Error ds -> print_diags ds
                     | Ok top -> (
-                        match Resolve.resolve (Store.names_view store) top with
+                        match Resolve.resolve_w (Store.names_view store) top with
                         | Error ds -> print_diags ds
-                        | Ok resolved -> (
+                        | Ok (resolved, warns) -> (
+                            List.iter (fun w -> prerr_endline (Diag.to_string w)) warns;
                             match on_top resolved with
                             | Error ds -> print_diags ds
                             | Ok () -> (
@@ -291,11 +294,14 @@ let infer_check store model =
       | Error ds -> Error ds
       | Ok { Check.row; _ } -> (
           let granted =
-            match Store.lookup_name store "dist" with
-            | Some { Resolve.hash; kind = Resolve.KEffect } -> [ hash ]
-            | _ -> []
+            match Store.lookup_kind store "dist" Resolve.KEffect with
+            | Some { Resolve.hash; _ } -> [ hash ]
+            | None -> []
           in
-          match Check.manifest_errors cctx ~granted (Option.value row ~default:Types.empty_row) with
+          match
+            Check.manifest_errors cctx ~grantable:Prelude.grantable_names ~granted
+              (Option.value row ~default:Types.empty_row)
+          with
           | [] -> Ok ()
           | ds -> Error ds))
 
@@ -389,9 +395,28 @@ let store_name_cmd store_dir name hex =
       | Some h -> (
           match Store.bind_name store name h with Ok () -> ok | Error ds -> print_diags ds))
 
-let store_rename_cmd store_dir old_name new_name =
+let kind_of_flag = function
+  | None -> Ok None
+  | Some "term" -> Ok (Some Resolve.KTerm)
+  | Some "con" -> Ok (Some Resolve.KCon)
+  | Some "op" -> Ok (Some Resolve.KOp)
+  | Some "type" -> Ok (Some Resolve.KType)
+  | Some "effect" -> Ok (Some Resolve.KEffect)
+  | Some other -> Error other
+
+let store_rename_cmd store_dir old_name new_name kind =
   with_store store_dir (fun store ->
-      match Store.rename store ~old_name ~new_name with Ok () -> ok | Error ds -> print_diags ds)
+      match kind_of_flag kind with
+      | Error other ->
+          print_diags
+            [
+              Diag.error ~code:"E0608"
+                (Printf.sprintf "unknown kind %S (expected term, con, op, type, or effect)" other);
+            ]
+      | Ok kind -> (
+          match Store.rename store ~old_name ~new_name ?kind () with
+          | Ok () -> ok
+          | Error ds -> print_diags ds))
 
 (* --- cmdliner wiring --- *)
 
@@ -509,7 +534,12 @@ let store_t =
       Term.(
         const store_rename_cmd $ store_pos_dir
         $ Arg.(required & pos 1 (some string) None & info [] ~docv:"OLD")
-        $ Arg.(required & pos 2 (some string) None & info [] ~docv:"NEW"))
+        $ Arg.(required & pos 2 (some string) None & info [] ~docv:"NEW")
+        $ Arg.(
+            value
+            & opt (some string) None
+            & info [ "kind" ] ~docv:"KIND"
+                ~doc:"Disambiguate when OLD is bound to several kinds (term|con|op|type|effect)."))
   in
   Cmd.group
     (Cmd.info "store" ~doc:"Operate on a persistent content-addressed store.")

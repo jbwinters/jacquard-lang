@@ -1,0 +1,77 @@
+; Ring 1 (stdlib SL.4): canonical handlers for the pure control effects, plus the
+; partial getters that connect data seams to effects. Every handler takes a thunk;
+; the effect stays in the row until a handler discharges it.
+(defterm ((binding abort.to-option ()
+  (lam ((pvar thunk))
+    (handle (app (var thunk))
+      (ret (pvar x) (app (var some) (var x)))
+      (opclause abort () k (var none)))))))
+
+(defterm ((binding abort.or ()
+  (lam ((pvar thunk) (pvar dflt))
+    (handle (app (var thunk))
+      (ret (pvar x) (var x))
+      (opclause abort () k (var dflt)))))))
+
+(defterm ((binding throw.to-result ()
+  (lam ((pvar thunk))
+    (handle (app (var thunk))
+      (ret (pvar x) (app (var ok) (var x)))
+      (opclause throw ((pvar e)) k (app (var err) (var e))))))))
+
+(defterm ((binding throw.catch ()
+  (lam ((pvar thunk) (pvar on-err))
+    (handle (app (var thunk))
+      (ret (pvar x) (var x))
+      (opclause throw ((pvar e)) k (app (var on-err) (var e))))))))
+
+; state via the function-of-state encoding; run returns (value, final-state)
+(defterm ((binding state.run ()
+  (lam ((pvar thunk) (pvar init))
+    (app
+      (handle (app (var thunk))
+        (ret (pvar x) (lam ((pvar s)) (tuple (var x) (var s))))
+        (opclause get () k (lam ((pvar s)) (app (app (var k) (var s)) (var s))))
+        (opclause put ((pvar ns)) k (lam ((pvar s)) (app (app (var k) (tuple)) (var ns)))))
+      (var init))))))
+
+(defterm ((binding state.eval ()
+  (lam ((pvar thunk) (pvar init))
+    (match (app (var state.run) (var thunk) (var init))
+      (clause (ptuple (pvar a) (pwild)) (var a)))))))
+
+; collect keeps chronological order: the outermost emit conses first
+(defterm ((binding emit.collect ()
+  (lam ((pvar thunk))
+    (handle (app (var thunk))
+      (ret (pvar x) (tuple (var x) (var nil)))
+      (opclause emit ((pvar w)) k
+        (match (app (var k) (tuple))
+          (clause (ptuple (pvar a) (pvar ws))
+            (tuple (var a) (app (var cons) (var w) (var ws)))))))))))
+
+(defterm ((binding emit.pipe ()
+  (lam ((pvar thunk) (pvar f))
+    (handle (app (var thunk))
+      (ret (pvar x) (var x))
+      (opclause emit ((pvar w)) k
+        (let nonrec (ptuple) (app (var f) (var w)) (app (var k) (tuple)))))))))
+
+; partial getters: the ! names their abort/throw honestly in the row
+(defterm ((binding option.get! ()
+  (lam ((pvar o))
+    (match (var o)
+      (clause (pcon some (pvar x)) (var x))
+      (clause (pcon none) (app (var abort))))))))
+
+(defterm ((binding result.get! ()
+  (lam ((pvar r))
+    (match (var r)
+      (clause (pcon ok (pvar a)) (var a))
+      (clause (pcon err (pvar e)) (app (var throw) (var e))))))))
+
+(defterm ((binding list.head! ()
+  (lam ((pvar xs))
+    (match (var xs)
+      (clause (pcon cons (pvar x) (pwild)) (var x))
+      (clause (pcon nil) (app (var abort))))))))

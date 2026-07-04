@@ -7,8 +7,8 @@
 07-fact.wft:fact : (int) ->{} int
 08-even-odd.wft:even : (int) ->{} bool
 08-even-odd.wft:odd : (int) ->{} bool
-09-hostile.wft:safe-div : (int, int) ->{failure} int
-09-hostile.wft:to-option : forall a e. (() ->{failure | e} a) ->{e} option a
+09-hostile.wft:safe-div : (int, int) ->{abort} int
+09-hostile.wft:to-option : forall a e. (() ->{abort | e} a) ->{e} option a
 09-hostile.wft:main : (option int, option int)
 10-print-fn.wft:_ : () ->{console} ()
 11-eval-fn.wft:_ : forall a. (code) ->{eval} a
@@ -24,3 +24,5 @@
 21-state.wft:run-state : forall a b e. (() ->{state | e} a, b) ->{e} (a, b)
 22-hostile-net.wft:fetch-title : (text) ->{net} text
 22-hostile-net.wft:summarize : (text) ->{net} text
+23-ring1.wft:tally : forall a b. (list b) ->{} ((), list a)
+23-ring1.wft:label-with-index : forall a. (list a) ->{} (list (int, a), int)

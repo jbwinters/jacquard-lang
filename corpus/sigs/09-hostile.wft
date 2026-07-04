@@ -1,4 +1,4 @@
-; the example-code trio: failure as an effect handled to option
+; the example-code trio: aborting as an effect handled to option
 (defterm ((binding safe-div ()
   (lam ((pvar n) (pvar d))
     (match (app (var eq) (var d) (lit 0))

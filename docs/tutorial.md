@@ -69,7 +69,7 @@ Delete a clause and `weft check` rejects the match with the missing witness (E08
 
 ## 6. Effects and handlers
 
-`corpus/sigs/09-hostile.wft` — failure is an effect, handled to `option`:
+`corpus/sigs/09-hostile.wft` — aborting is an effect, handled to `option`:
 
 ```lisp
 (defterm ((binding safe-div ()
@@ -79,8 +79,8 @@ Delete a clause and `weft check` rejects the match with the missing witness (E08
       (clause (pcon false) (app (var div) (var n) (var d))))))))
 ```
 
-`weft check --print-sigs` shows `safe-div : (int, int) ->{failure} int` — the signature
-announces the failure — and `to-option : forall a e. (() ->{failure | e} a) ->{e} option a`
+`weft check --print-sigs` shows `safe-div : (int, int) ->{abort} int` — the signature
+announces the possible abort — and `to-option : forall a e. (() ->{abort | e} a) ->{e} option a`
 shows row polymorphism removing it.
 
 ## 7. Multi-shot handlers

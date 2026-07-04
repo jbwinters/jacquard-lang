@@ -64,7 +64,10 @@ let dist_of_value (ctx : Eval.ctx) (v : Value.t) : (dist_v, Runtime_err.t) resul
 let support ctx (d : dist_v) : ((Value.t * float) list, Runtime_err.t) result =
   match d with
   | Bernoulli p -> (
-      match (Store.lookup_name ctx.Eval.store "true", Store.lookup_name ctx.Eval.store "false") with
+      match
+        ( Store.lookup_kind ctx.Eval.store "true" Resolve.KCon,
+          Store.lookup_kind ctx.Eval.store "false" Resolve.KCon )
+      with
       | Some { Resolve.hash = t; _ }, Some { Resolve.hash = f; _ } ->
           Ok
             [

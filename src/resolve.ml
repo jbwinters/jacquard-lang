@@ -23,14 +23,20 @@ type nkind = KTerm | KCon | KOp | KType | KEffect
 
 type entry = { hash : Hash.t; kind : nkind }
 
-type names = { lookup : string -> entry option; all_names : unit -> string list }
-(** The resolver's view of a store: total name lookup plus enumeration for suggestions. *)
+type names = { lookup : string -> entry list; all_names : unit -> string list }
+(** The resolver's view of a store. [lookup] returns EVERY binding of a name — the index is (name,
+    kind)-keyed (SL.1), so an effect and its operation may share a bare name; kind- directed
+    positions pick their kind, and value positions use term > con > op precedence. *)
 
-let empty_names = { lookup = (fun _ -> None); all_names = (fun () -> []) }
+let empty_names = { lookup = (fun _ -> []); all_names = (fun () -> []) }
 
-(** [of_alist entries] builds a stub index; the W1.6 store exposes the real one. *)
+(** [of_alist entries] builds a stub index (duplicate names with distinct kinds allowed); the W1.6
+    store exposes the real one. *)
 let of_alist alist =
-  { lookup = (fun n -> List.assoc_opt n alist); all_names = (fun () -> List.map fst alist) }
+  {
+    lookup = (fun n -> List.filter_map (fun (m, e) -> if m = n then Some e else None) alist);
+    all_names = (fun () -> List.map fst alist);
+  }
 
 let kind_to_string = function
   | KTerm -> "a term"
@@ -82,20 +88,24 @@ let kind_mismatch st ~meta name ~expected ~got =
     (Diag.error ?span:(Meta.span meta) ~code:"E0302"
        (Printf.sprintf "`%s` is %s, but this position needs %s" name (kind_to_string got) expected))
 
-(* Resolve a non-term reference position (pcon/opclause/tref/eref). *)
+(* Resolve a non-term reference position (pcon/opclause/tref/eref): kind-directed, so among
+   all bindings of the name the one with the expected kind wins. *)
 let resolve_gref st ~meta ~locals ~expected_kind ~expected_desc ~what (g : Kernel.gref) :
     Kernel.gref =
   match g with
   | Kernel.Hashed _ -> g
   | Kernel.Named n -> (
-      match st.names.lookup n with
-      | Some { hash; kind } when kind = expected_kind -> Kernel.Hashed hash
-      | Some { kind; _ } ->
-          kind_mismatch st ~meta n ~expected:expected_desc ~got:kind;
-          g
-      | None ->
-          unknown st ~meta ~locals ~what n;
-          g)
+      let entries = st.names.lookup n in
+      match List.find_opt (fun e -> e.kind = expected_kind) entries with
+      | Some { hash; _ } -> Kernel.Hashed hash
+      | None -> (
+          match entries with
+          | { kind; _ } :: _ ->
+              kind_mismatch st ~meta n ~expected:expected_desc ~got:kind;
+              g
+          | [] ->
+              unknown st ~meta ~locals ~what n;
+              g))
 
 (* Variables bound by a pattern, in binding order; duplicates within one binder group are
    diagnosed (E0304). [seen] is shared across sibling patterns of one binding construct
@@ -193,23 +203,48 @@ let rec resolve_expr_in st ~group ~locals (e : Kernel.expr) : Kernel.expr =
         match List.assoc_opt x group with
         | Some i -> { Kernel.it = Kernel.GroupRef i; meta = Meta.with_name x e.Kernel.meta }
         | None -> (
-            match st.names.lookup x with
-            | Some { hash; kind = KTerm } ->
-                {
-                  Kernel.it = Kernel.Ref (hash, Kernel.Term);
-                  meta = Meta.with_name x e.Kernel.meta;
-                }
-            | Some { hash; kind = KCon } ->
-                { Kernel.it = Kernel.Ref (hash, Kernel.Con); meta = Meta.with_name x e.Kernel.meta }
-            | Some { hash; kind = KOp } ->
-                { Kernel.it = Kernel.Ref (hash, Kernel.Op); meta = Meta.with_name x e.Kernel.meta }
-            | Some { kind; _ } ->
-                kind_mismatch st ~meta:e.Kernel.meta x ~expected:"a value" ~got:kind;
-                e
-            | None ->
-                (* sibling group members count as near-miss candidates too *)
-                unknown st ~meta:e.Kernel.meta ~locals:(List.map fst group @ locals) ~what:"name" x;
-                e))
+            let entries = st.names.lookup x in
+            let value_entries =
+              List.filter (fun en -> en.kind = KTerm || en.kind = KCon || en.kind = KOp) entries
+            in
+            (* value-position precedence over the kind-aware index: term > con > op; a bare
+               var shadowed across value kinds gets a W0301 warning naming the loser *)
+            let pick k = List.find_opt (fun en -> en.kind = k) value_entries in
+            let chosen =
+              match pick KTerm with
+              | Some e -> Some (e, Kernel.Term)
+              | None -> (
+                  match pick KCon with
+                  | Some e -> Some (e, Kernel.Con)
+                  | None -> ( match pick KOp with Some e -> Some (e, Kernel.Op) | None -> None))
+            in
+            match chosen with
+            | Some ({ hash; kind }, refkind) ->
+                (* warn on distinct KINDS only: duplicate same-kind bindings are not shadowing *)
+                let losers =
+                  List.sort_uniq compare
+                    (List.filter_map
+                       (fun en -> if en.kind = kind then None else Some (kind_to_string en.kind))
+                       value_entries)
+                in
+                if losers <> [] then
+                  report st
+                    (Diag.warning ?span:(Meta.span e.Kernel.meta) ~code:"W0301"
+                       (Printf.sprintf
+                          "`%s` is bound as %s and also as %s; the %s wins in value position" x
+                          (kind_to_string kind) (String.concat " and " losers) (kind_to_string kind)));
+                { Kernel.it = Kernel.Ref (hash, refkind); meta = Meta.with_name x e.Kernel.meta }
+            | None -> (
+                match entries with
+                | { kind; _ } :: _ ->
+                    kind_mismatch st ~meta:e.Kernel.meta x ~expected:"a value" ~got:kind;
+                    e
+                | [] ->
+                    (* sibling group members count as near-miss candidates too *)
+                    unknown st ~meta:e.Kernel.meta
+                      ~locals:(List.map fst group @ locals)
+                      ~what:"name" x;
+                    e)))
   | Kernel.Lam (params, body) ->
       let _, bound = pats_vars st params in
       mk
@@ -373,22 +408,36 @@ let resolve_decl_in st (d : Kernel.decl) : Kernel.decl =
   in
   { d with Kernel.it }
 
+(* Warnings (W-coded) never fail resolution; errors do. *)
 let run st f x =
   let v = f st x in
-  match List.rev st.diags with [] -> Ok v | ds -> Error ds
+  let errors, warnings =
+    List.partition (fun d -> d.Diag.severity = Diag.Error) (List.rev st.diags)
+  in
+  match errors with [] -> Ok (v, warnings) | ds -> Error ds
 
 let fresh names = { names; diags = [] }
 
-(** [resolve_expr names e] resolves a bare expression (no enclosing group). *)
-let resolve_expr names (e : Kernel.expr) =
+(** [resolve_expr_w names e] resolves a bare expression, returning W-coded warnings (e.g. W0301
+    cross-kind shadowing) alongside the result. *)
+let resolve_expr_w names (e : Kernel.expr) =
   run (fresh names) (fun st -> resolve_expr_in st ~group:[] ~locals:[]) e
 
-(** [resolve_decl names d] resolves a declaration; [defterm] members see each other as [GroupRef]
-    markers. *)
-let resolve_decl names (d : Kernel.decl) = run (fresh names) resolve_decl_in d
+(** [resolve_decl_w names d] resolves a declaration with warnings; [defterm] members see each other
+    as [GroupRef] markers. *)
+let resolve_decl_w names (d : Kernel.decl) = run (fresh names) resolve_decl_in d
 
-(** [resolve names top] resolves either. *)
-let resolve names (t : Kernel.top) =
+(** [resolve_w names top] resolves either, with warnings. *)
+let resolve_w names (t : Kernel.top) =
   match t with
-  | Kernel.Decl d -> Result.map (fun d -> Kernel.Decl d) (resolve_decl names d)
-  | Kernel.Expr e -> Result.map (fun e -> Kernel.Expr e) (resolve_expr names e)
+  | Kernel.Decl d -> Result.map (fun (d, ws) -> (Kernel.Decl d, ws)) (resolve_decl_w names d)
+  | Kernel.Expr e -> Result.map (fun (e, ws) -> (Kernel.Expr e, ws)) (resolve_expr_w names e)
+
+(** [resolve_expr names e]: {!resolve_expr_w} with warnings dropped. *)
+let resolve_expr names e = Result.map fst (resolve_expr_w names e)
+
+(** [resolve_decl names d]: {!resolve_decl_w} with warnings dropped. *)
+let resolve_decl names d = Result.map fst (resolve_decl_w names d)
+
+(** [resolve names top]: {!resolve_w} with warnings dropped. *)
+let resolve names t = Result.map fst (resolve_w names t)

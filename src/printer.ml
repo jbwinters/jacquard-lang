@@ -14,11 +14,9 @@ exception Bug_unprintable of string
     reparse to a different form. *)
 
 let check_symbol ~what s =
-  let ok =
-    String.length s > 0
-    && (s.[0] >= 'a' && s.[0] <= 'z')
-    && String.for_all (fun c -> (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c = '-') s
-  in
+  (* symbols use the library grammar (SL.1: dotted segments, optional trailing marks);
+     heads stay single-segment (checked with valid_head) *)
+  let ok = if what = "head" then Reader.valid_head s else Reader.valid_symbol s in
   if not ok then raise (Bug_unprintable (Printf.sprintf "%s %S is not printable" what s))
 
 let escape_text s =

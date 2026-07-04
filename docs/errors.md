@@ -49,6 +49,12 @@ in `src/` and `bin/` appears in this catalog.
 | E0303 | duplicate binding name in a defterm group | two bindings named `f` |
 | E0304 | variable bound more than once in one binder group | `(lam ((pvar x) (pvar x)) ...)` |
 
+### Resolution warnings (W03xx)
+
+| code | meaning | example |
+|------|---------|---------|
+| W0301 | a bare variable is bound across several value kinds; precedence picked one | `(var abort)` when `abort` is both a term and an op — term > con > op |
+
 ## Canonicalization and hashing (E05xx)
 
 | code | meaning | example |
@@ -69,6 +75,8 @@ in `src/` and `bin/` appears in this catalog.
 | E0604 | unnameable target | naming a defterm group's whole hash |
 | E0605 | invalid name | `weft store rename s x "Bad Name"` |
 | E0606 | store directory does not exist | `weft diff a /nowhere` |
+| E0607 | name bound to several kinds; needs --kind | renaming `abort` when it is both an effect and an op |
+| E0608 | unknown --kind value | `weft store rename --kind bogus` |
 
 ## Prelude and grants (E07xx)
 

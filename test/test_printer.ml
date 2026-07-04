@@ -67,7 +67,10 @@ let test_roundtrip_corpus () =
 
 let gen_printable_form : Form.t QCheck.Gen.t =
   let open QCheck.Gen in
-  let ident = oneof_list [ "x"; "y"; "add"; "safe-div"; "m2"; "n" ] in
+  (* includes the SL.1 library grammar: dotted segments and trailing ?/! marks *)
+  let ident =
+    oneof_list [ "x"; "y"; "add"; "safe-div"; "m2"; "n"; "list.map"; "empty?"; "head!"; "a.b-c.d?" ]
+  in
   let head = oneof_list [ "app"; "lam"; "lit"; "var"; "tuple"; "match"; "clause" ] in
   let real = oneof [ float; oneof_list [ nan; infinity; neg_infinity; 0.1; -0.0; 1e300 ] ] in
   sized

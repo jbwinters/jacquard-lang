@@ -12,5 +12,9 @@ The committed transcript for demos/m4-hostile.sh (W5.5).
   [1]
   $ weft check ../../demos/m4-hostile.wft --manifest net,console
   ok
+  $ weft run ../../demos/m4-hostile.wft --allow console
+  error[E0814]: this program requires the `net` effect, which is not granted (performed via `summarize`)
+    hint: grant it with --allow net, or handle the effect in the program
+  [3]
   $ weft run ../../demos/m4-hostile.wft --allow net
   "<stub response for http://example.com>"

@@ -1,0 +1,15 @@
+; ring 1 handlers keep effect rows honest end to end: the body uses state/emit,
+; the handler discharges them, and only the caller's row variable remains.
+(defterm ((binding tally ()
+  (lam ((pvar xs))
+    (app (var emit.collect) (lam () (app (var list.each) (var xs) (var emit))))))))
+(defterm ((binding label-with-index ()
+  (lam ((pvar xs))
+    (app (var state.run)
+      (lam ()
+        (app (var list.map) (var xs)
+          (lam ((pvar x))
+            (let nonrec (pvar i) (app (var get))
+              (let nonrec (pwild) (app (var put) (app (var add) (var i) (lit 1)))
+                (tuple (var i) (var x)))))))
+      (lit 0))))))

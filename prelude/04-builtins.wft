@@ -18,3 +18,5 @@
 (defterm ((binding mul-real () (quote (builtin-marker mul-real)))))
 
 (defterm ((binding div-real () (quote (builtin-marker div-real)))))
+
+(defterm ((binding int-compare () (quote (builtin-marker int-compare)))))

@@ -28,7 +28,7 @@ let base_srcs = [ builtin_stub "mul"; builtin_stub "sub" ]
 let test_rename_only () =
   let a = mk_store (base_srcs @ [ fact_src () ]) in
   let b = mk_store (base_srcs @ [ fact_src () ]) in
-  (match Store.rename b ~old_name:"fact" ~new_name:"factorial" with
+  (match Store.rename b ~old_name:"fact" ~new_name:"factorial" () with
   | Ok () -> ()
   | Error ds -> Eval_support.fail_diags "rename" ds);
   let report = Diff.diff ~old_side:a ~new_side:b in
@@ -108,8 +108,25 @@ let test_added_removed () =
   Alcotest.(check bool) "sub added" true (List.assoc_opt "sub" report = Some Diff.Added);
   Alcotest.(check bool) "mul removed" true (List.assoc_opt "mul" report = Some Diff.Removed)
 
+(* SL.1 regression: a name bound to two kinds (effect + op) in identical stores must not
+   be misreported as changed — each binding compares against its own kind's hash. *)
+let test_multi_kind_name_identical () =
+  let srcs =
+    [ "(deftype any-t () (con any-v))"; "(defeffect signal () (op signal () (tref any-t)))" ]
+  in
+  let a = mk_store srcs and b = mk_store srcs in
+  let report = Diff.diff ~old_side:a ~new_side:b in
+  List.iter
+    (fun (n, e) ->
+      match e with
+      | Diff.Identical -> ()
+      | _ -> Alcotest.failf "identical stores must diff clean, but %s was not Identical" n)
+    report;
+  Alcotest.(check bool) "render is quiet" true (Diff.render report = None)
+
 let suite =
   [
+    Alcotest.test_case "multi-kind name diffs clean" `Quick test_multi_kind_name_identical;
     Alcotest.test_case "rename only" `Quick test_rename_only;
     Alcotest.test_case "reformat is no semantic change" `Quick test_reformat_is_no_semantic_change;
     Alcotest.test_case "literal edit localizes" `Quick test_literal_edit_localizes;

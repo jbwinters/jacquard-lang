@@ -319,7 +319,10 @@ let diag_golden_lines ~prelude_dir : (string list, Diag.t list) result =
                                 | _ -> None)
                               names
                           in
-                          match Check.manifest_errors ctx ~granted:g r with
+                          match
+                            Check.manifest_errors ctx ~grantable:Prelude.grantable_names ~granted:g
+                              r
+                          with
                           | [] -> go rest
                           | ds -> Ok (render ds))
                       | _ -> go rest))))

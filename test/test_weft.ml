@@ -27,5 +27,10 @@ let () =
       ("diags", Test_diags.suite);
       ("diff", Test_diff.suite);
       ("infer", Test_infer.suite);
+      ("gauntlet-handlers", Test_gauntlet_handlers.suite);
+      ("gauntlet-hashing", Test_gauntlet_hashing.suite);
+      ("gauntlet-dist", Test_gauntlet_dist.suite);
       ("errors-doc", Test_errors_doc.suite);
+      ("names", Test_names.suite);
+      ("stdlib", Test_stdlib.suite);
     ]

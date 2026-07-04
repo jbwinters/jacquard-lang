@@ -75,7 +75,7 @@ let test_names_registered_and_resolvable () =
            false)) (clause (pcon false) (var true)))))))"));
   (* the store's names view now resolves both the type's constructors and the new term *)
   match (Store.names_view t).Resolve.lookup "not-x" with
-  | Some { Resolve.kind = Resolve.KTerm; _ } -> ()
+  | [ { Resolve.kind = Resolve.KTerm; _ } ] -> ()
   | _ -> Alcotest.fail "not-x should be a term name in the store index"
 
 (* --- rename touches only names.wft --- *)
@@ -90,7 +90,7 @@ let test_rename_only_names_file () =
     Filename.concat (Filename.concat root "objects") (Hash.to_hex hs.Canon.decl_hash ^ ".wft")
   in
   let before = read_file obj in
-  (match Store.rename t ~old_name:"bool" ~new_name:"boolean" with
+  (match Store.rename t ~old_name:"bool" ~new_name:"boolean" () with
   | Ok () -> ()
   | Error _ -> Alcotest.fail "rename failed");
   let after = read_file obj in
@@ -106,7 +106,7 @@ let test_rename_only_names_file () =
 
 let test_rename_unknown () =
   let t = open_ok (fresh_root ()) in
-  match Store.rename t ~old_name:"ghost" ~new_name:"g2" with
+  match Store.rename t ~old_name:"ghost" ~new_name:"g2" () with
   | Error [ d ] -> Alcotest.(check string) "code" "E0602" d.Diag.code
   | _ -> Alcotest.fail "renaming an unknown name must fail"
 
@@ -120,7 +120,7 @@ let test_invalid_names_rejected_safely () =
   in
   List.iter
     (fun bad ->
-      match Store.rename t ~old_name:"bool" ~new_name:bad with
+      match Store.rename t ~old_name:"bool" ~new_name:bad () with
       | Error [ d ] -> Alcotest.(check string) (bad ^ " rejected") "E0605" d.Diag.code
       | _ -> Alcotest.failf "rename to %S must fail with E0605" bad)
     [ "Bad"; "a b"; ""; "9x" ];

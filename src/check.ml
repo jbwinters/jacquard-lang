@@ -282,7 +282,7 @@ let rec is_syntactic_value (e : Kernel.expr) : bool =
 
 (* Close generalizable row tails that occur exactly once in the type: an unconstrained
    single-use row var carries no sharing information, and closing it gives honest displays
-   like (a) ->{} a and safe-div : (int, int) ->{failure} int. *)
+   like (a) ->{} a and safe-div : (int, int) ->{abort} int. *)
 let close_lonely_rows ~gen_level (t : ty) : unit =
   let counts : (int, int * rvar ref) Hashtbl.t = Hashtbl.create 8 in
   let rec walk t =
@@ -992,9 +992,9 @@ and useful_row ctx (tys : ty list) (matrix : Kernel.pat list list) (q : Kernel.p
 (** Build a checker context over a prelude-loaded store; resolves the primitive type hashes. *)
 let make_ctx (store : Store.t) : (ctx, Diag.t list) result =
   let lookup name =
-    match Store.lookup_name store name with
-    | Some { Resolve.hash; kind = Resolve.KType } -> Ok hash
-    | _ -> Error [ Diag.error ~code:"E0805" (Printf.sprintf "primitive type `%s` missing" name) ]
+    match Store.lookup_kind store name Resolve.KType with
+    | Some { Resolve.hash; _ } -> Ok hash
+    | None -> Error [ Diag.error ~code:"E0805" (Printf.sprintf "primitive type `%s` missing" name) ]
   in
   match (lookup "int", lookup "real", lookup "text", lookup "code") with
   | Ok p_int, Ok p_real, Ok p_text, Ok p_code ->
@@ -1086,7 +1086,7 @@ let show_row ctx (r : row) : string =
 (** [manifest_errors ctx ~granted row] checks a top-level expression's inferred row against the
     granted effect set: every fixed effect must be granted. The diagnostic names the effect and,
     when known, the call-chain endpoint that introduced it (E0814). *)
-let manifest_errors ctx ~(granted : Hash.t list) (row : row) : Diag.t list =
+let manifest_errors ctx ?(grantable = []) ~(granted : Hash.t list) (row : row) : Diag.t list =
   let row = repr_row row in
   List.filter_map
     (fun h ->
@@ -1097,13 +1097,19 @@ let manifest_errors ctx ~(granted : Hash.t list) (row : row) : Diag.t list =
           | Some name -> Printf.sprintf " (performed via `%s`)" name
           | None -> ""
         in
+        let name = name_of ctx h in
+        (* pure effects (abort, state, ...) are never grantable; don't send the user to a
+           --allow flag that will bounce with E0703. Callers pass Prelude.grantable_names;
+           an empty list keeps the generic hint. *)
+        let hint =
+          if grantable = [] || List.mem name grantable then
+            Printf.sprintf "grant it with --allow %s, or handle the effect in the program" name
+          else "handle the effect in the program (this effect is pure and cannot be granted)"
+        in
         Some
-          (Diag.error ~code:"E0814"
-             ~hint:
-               (Printf.sprintf "grant it with --allow %s, or handle the effect in the program"
-                  (name_of ctx h))
-             (Printf.sprintf "this program requires the `%s` effect, which is not granted%s"
-                (name_of ctx h) via)))
+          (Diag.error ~code:"E0814" ~hint
+             (Printf.sprintf "this program requires the `%s` effect, which is not granted%s" name
+                via)))
     row.effects
 
 (** Registry of every diagnostic code the checker can emit (W3.7's coverage check keys on this list;

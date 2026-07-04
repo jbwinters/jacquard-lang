@@ -34,9 +34,28 @@ handler:
   $ weft run hostile.wft --allow net
   "<stub response for http://example.com>"
 
-Running without the grant is the capability refusal (exit 3):
+Running without the net grant is the capability refusal (exit 3), even when
+some other runtime handler is granted:
 
+  $ weft run hostile.wft --allow console
+  error[E0814]: this program requires the `net` effect, which is not granted (performed via `summarize`)
+    hint: grant it with --allow net, or handle the effect in the program
+  [3]
   $ weft run hostile.wft
   error[E0814]: this program requires the `net` effect, which is not granted (performed via `summarize`)
     hint: grant it with --allow net, or handle the effect in the program
   [3]
+
+Pure effects are never grantable, so the hint must not suggest a --allow flag
+that would only bounce with E0703:
+
+  $ cat > pure.wft <<'WEFT'
+  > (app (var option.get!) (var none))
+  > WEFT
+  $ weft run pure.wft
+  error[E0814]: this program requires the `abort` effect, which is not granted (performed via `option.get!`)
+    hint: handle the effect in the program (this effect is pure and cannot be granted)
+  [3]
+  $ weft run pure.wft --allow abort
+  error[E0703]: effect `abort` is not grantable
+  [1]
