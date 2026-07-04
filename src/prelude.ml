@@ -109,7 +109,72 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
         Hashtbl.replace ctx.Eval.builtins h (Value.VBuiltin (name, native));
         go rest
   in
-  go natives
+  let* () = go natives in
+  let real2 name f args =
+    match args with
+    | [ Value.VReal a; Value.VReal b ] -> Ok (Value.VReal (f a b))
+    | args ->
+        Error
+          (Runtime_err.Type_error
+             (Printf.sprintf "%s expects two reals, got %s" name
+                (String.concat ", " (List.map Value.show args))))
+  in
+  let optional name native =
+    match lookup_hash store ~kind:Resolve.KTerm name with
+    | Error _ -> () (* prelude without this layer *)
+    | Ok h -> Hashtbl.replace ctx.Eval.builtins h (Value.VBuiltin (name, native))
+  in
+  optional "add-real" (real2 "add-real" ( +. ));
+  optional "mul-real" (real2 "mul-real" ( *. ));
+  optional "div-real" (real2 "div-real" ( /. ));
+  (* pmf : (distribution a, a) -> real and support : distribution a -> list (pair a real)
+     (W4.1/W4.4); native implementations over the recognized constructors *)
+  optional "pmf" (fun args ->
+      match args with
+      | [ dv; v ] ->
+          Result.bind (Infer_dist.dist_of_value ctx dv) (fun d ->
+              Result.map (fun p -> Value.VReal p) (Infer_dist.pmf ctx d v))
+      | args ->
+          Error
+            (Runtime_err.Type_error
+               (Printf.sprintf "pmf expects a distribution and a value, got %s"
+                  (String.concat ", " (List.map Value.show args)))));
+  optional "support" (fun args ->
+      match args with
+      | [ dv ] ->
+          Result.bind (Infer_dist.dist_of_value ctx dv) (fun d ->
+              Result.bind (Infer_dist.support ctx d) (fun entries ->
+                  match
+                    ( Store.lookup_name store "mk-pair",
+                      Store.lookup_name store "cons",
+                      Store.lookup_name store "nil" )
+                  with
+                  | ( Some { Resolve.hash = ph; _ },
+                      Some { Resolve.hash = ch; _ },
+                      Some { Resolve.hash = nh; _ } ) ->
+                      Ok
+                        (List.fold_right
+                           (fun (x, p) acc ->
+                             Value.VCon
+                               {
+                                 con = ch;
+                                 name = "cons";
+                                 args =
+                                   [
+                                     Value.VCon
+                                       { con = ph; name = "mk-pair"; args = [ x; Value.VReal p ] };
+                                     acc;
+                                   ];
+                               })
+                           entries
+                           (Value.VCon { con = nh; name = "nil"; args = [] }))
+                  | _ -> Error (Runtime_err.Unresolved "prelude list/pair constructors")))
+      | args ->
+          Error
+            (Runtime_err.Type_error
+               (Printf.sprintf "support expects a distribution, got %s"
+                  (String.concat ", " (List.map Value.show args)))));
+  Ok ()
 
 (** [install_console ctx ~out] grants the [console] effect: [print] writes its text through [out]
     and resumes with unit. *)
@@ -200,12 +265,62 @@ let builtin_signatures (store : Store.t) : ((Hash.t * Types.scheme) list, Diag.t
         let* h = lookup_hash store ~kind:Resolve.KTerm name in
         go ((h, Types.mono ty) :: acc) rest
   in
-  go []
-    [
-      ("add", arrow2 int_ty);
-      ("sub", arrow2 int_ty);
-      ("mul", arrow2 int_ty);
-      ("div", arrow2 int_ty);
-      ("eq", arrow2 bool_ty);
-      ("lt", arrow2 bool_ty);
-    ]
+  let* base =
+    go []
+      [
+        ("add", arrow2 int_ty);
+        ("sub", arrow2 int_ty);
+        ("mul", arrow2 int_ty);
+        ("div", arrow2 int_ty);
+        ("eq", arrow2 bool_ty);
+        ("lt", arrow2 bool_ty);
+      ]
+  in
+  (* dist-layer builtins are optional (prelude may not ship them) *)
+  match
+    ( lookup_hash store ~kind:Resolve.KType "real",
+      lookup_hash store ~kind:Resolve.KType "distribution",
+      lookup_hash store ~kind:Resolve.KType "list",
+      lookup_hash store ~kind:Resolve.KType "pair" )
+  with
+  | Ok real_h, Ok dist_h, Ok list_h, Ok pair_h -> (
+      let real_ty = Types.TCon (real_h, []) in
+      let rarrow2 = Types.TArrow ([ real_ty; real_ty ], Types.empty_row, real_ty) in
+      let a () = Types.new_tvar 1 in
+      let pmf_sig =
+        let av = a () in
+        {
+          Types.ty = Types.TArrow ([ Types.TCon (dist_h, [ av ]); av ], Types.empty_row, real_ty);
+          gen_level = 0;
+        }
+      in
+      let support_sig =
+        let av = a () in
+        {
+          Types.ty =
+            Types.TArrow
+              ( [ Types.TCon (dist_h, [ av ]) ],
+                Types.empty_row,
+                Types.TCon (list_h, [ Types.TCon (pair_h, [ av; real_ty ]) ]) );
+          gen_level = 0;
+        }
+      in
+      match
+        ( lookup_hash store ~kind:Resolve.KTerm "add-real",
+          lookup_hash store ~kind:Resolve.KTerm "mul-real",
+          lookup_hash store ~kind:Resolve.KTerm "div-real",
+          lookup_hash store ~kind:Resolve.KTerm "pmf",
+          lookup_hash store ~kind:Resolve.KTerm "support" )
+      with
+      | Ok ar, Ok mr, Ok dr, Ok pm, Ok su ->
+          Ok
+            (base
+            @ [
+                (ar, Types.mono rarrow2);
+                (mr, Types.mono rarrow2);
+                (dr, Types.mono rarrow2);
+                (pm, pmf_sig);
+                (su, support_sig);
+              ])
+      | _ -> Ok base)
+  | _ -> Ok base

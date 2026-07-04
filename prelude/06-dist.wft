@@ -1,0 +1,18 @@
+; The probabilistic layer (plan W4.1, whitepaper section 6): one data type and
+; one effect, zero kernel forms. A model is any expression whose row includes
+; dist; an inference algorithm is a handler.
+(deftype pair ((tvar a) (tvar b)) (con mk-pair (field fst (tvar a)) (field snd (tvar b))))
+
+(deftype distribution ((tvar a))
+  (con bernoulli (field (tref real)))
+  (con categorical (field (tapp (tref list) (tapp (tref pair) (tvar a) (tref real))))))
+
+(defeffect dist ()
+  (op sample ((tapp (tref distribution) (tvar a))) (tvar a))
+  (op observe ((tapp (tref distribution) (tvar a)) (tvar a)) (ttuple)))
+
+; pmf : distribution a -> a -> real, a builtin (native implementation)
+(defterm ((binding pmf () (quote (builtin-marker pmf)))))
+
+; support : distribution a -> list (pair a real), a builtin (native implementation)
+(defterm ((binding support () (quote (builtin-marker support)))))

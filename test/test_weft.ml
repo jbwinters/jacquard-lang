@@ -26,4 +26,6 @@ let () =
       ("fmt", Test_fmt.suite);
       ("diags", Test_diags.suite);
       ("diff", Test_diff.suite);
+      ("infer", Test_infer.suite);
+      ("errors-doc", Test_errors_doc.suite);
     ]

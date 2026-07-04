@@ -1,0 +1,43 @@
+; The enumeration handler IN WEFT (plan W4.4, stretch): handlers are libraries.
+; enum-run drives a model thunk to a weighted list of results; the sample clause
+; resumes the SAME continuation once per support element (multi-shot), scaling
+; each branch; observe scales the single continuation by the observed mass.
+(defterm ((binding scale ()
+  (lam ((pvar w) (pvar entries))
+    (match (var entries)
+      (clause (pcon nil) (var nil))
+      (clause (pcon cons (pcon mk-pair (pvar x) (pvar p)) (pvar rest))
+        (app (var cons)
+          (app (var mk-pair) (var x) (app (var mul-real) (var w) (var p)))
+          (app (var scale) (var w) (var rest)))))))))
+
+(defterm ((binding sum-weights ()
+  (lam ((pvar entries))
+    (match (var entries)
+      (clause (pcon nil) (lit 0.0))
+      (clause (pcon cons (pcon mk-pair (pwild) (pvar p)) (pvar rest))
+        (app (var add-real) (var p) (app (var sum-weights) (var rest)))))))))
+
+(defterm ((binding normalize ()
+  (lam ((pvar entries))
+    (app (var scale)
+      (app (var div-real) (lit 1.0) (app (var sum-weights) (var entries)))
+      (var entries))))))
+
+(defterm
+  ((binding concat-scaled ()
+    (lam ((pvar k) (pvar entries))
+      (match (var entries)
+        (clause (pcon nil) (var nil))
+        (clause (pcon cons (pcon mk-pair (pvar x) (pvar p)) (pvar rest))
+          (app (var append)
+            (app (var scale) (var p) (app (var k) (var x)))
+            (app (var concat-scaled) (var k) (var rest)))))))
+   (binding enum-run ()
+    (lam ((pvar model))
+      (handle (app (var model))
+        (ret (pvar x) (app (var cons) (app (var mk-pair) (var x) (lit 1.0)) (var nil)))
+        (opclause sample ((pvar d)) k
+          (app (var concat-scaled) (var k) (app (var support) (var d))))
+        (opclause observe ((pvar d) (pvar v)) k
+          (app (var scale) (app (var pmf) (var d) (var v)) (app (var k) (tuple)))))))))

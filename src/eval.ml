@@ -30,6 +30,10 @@ type ctx = {
   root_handlers : (Hash.t, Value.t list -> (Value.t, Runtime_err.t) result) Hashtbl.t;
       (** op hash -> granted native handler; shallow (the op resumes exactly once with the native
           result), installed only by explicit grants *)
+  mutable capture_ops : bool;
+      (** when set (by {!run_state_capturing}), an op that reaches the root with no handler and no
+          grant is CAPTURED — returned with its continuation — instead of dying [Unhandled]; this is
+          how native inference drivers (M3) receive resumptions *)
 }
 
 (** [make_ctx store] builds a fresh evaluation context over [store]: empty builtin, memo, and
@@ -40,10 +44,21 @@ let make_ctx store =
     builtins = Hashtbl.create 64;
     memo = Hashtbl.create 64;
     root_handlers = Hashtbl.create 8;
+    capture_ops = false;
   }
 
 (* Internal control flow only; never escapes this module. *)
 exception Rt of Runtime_err.t
+
+(* Internal: carries a root-reaching op to the capturing runner. *)
+exception
+  Op_captured of {
+    op : Hash.t;
+    name : string;
+    effect_ : string;
+    args : Value.t list;
+    kont : Value.frame list;
+  }
 
 (* Internal invariant violation: the store's role index disagrees with the declaration it
    points at. Never raised on well-formed stores. *)
@@ -228,7 +243,10 @@ let perform ctx (op : Hash.t) ~name ~effect_ (args : Value.t list) (k : kont) : 
     | [] -> (
         match Hashtbl.find_opt ctx.root_handlers op with
         | Some native -> ( match native args with Ok v -> SApply (v, k) | Error e -> rt e)
-        | None -> rt (Runtime_err.Unhandled { effect_; op = name }))
+        | None ->
+            if ctx.capture_ops then
+              raise (Op_captured { op; name; effect_; args; kont = List.rev inner_rev })
+            else rt (Runtime_err.Unhandled { effect_; op = name }))
   in
   split [] k
 
@@ -284,7 +302,17 @@ let rec eval_ref ctx (h : Hash.t) (kind : Kernel.refkind) (k : kont) : state =
               } ->
                   let binding = nth_or_bug "member" bindings i in
                   let scope = { env = Env.empty; group = group_hashes decl } in
-                  let v = run_state ctx (SEval (scope, binding.Kernel.value, [])) in
+                  (* capture is disabled inside the isolated sub-run: an op escaping a
+                     top-level body must die loudly (Unhandled) rather than be captured
+                     with a truncated continuation (review finding; E0815 makes this
+                     unreachable for checked programs, this is the belt to its braces) *)
+                  let saved_capture = ctx.capture_ops in
+                  ctx.capture_ops <- false;
+                  let v =
+                    Fun.protect
+                      ~finally:(fun () -> ctx.capture_ops <- saved_capture)
+                      (fun () -> run_state ctx (SEval (scope, binding.Kernel.value, [])))
+                  in
                   Hashtbl.replace ctx.memo h v;
                   SApply (v, k)
               | _ -> rt_type "hash %s is not a term" (Hash.to_hex h))))
@@ -407,6 +435,36 @@ let run_expr ctx (e : Kernel.expr) : (Value.t, Runtime_err.t) result =
     | None -> ( match state with SApply (v, []) -> v | _ -> assert false)
   in
   match loop (SEval (empty_scope, e, [])) with v -> Ok v | exception Rt e -> Error e
+
+type capture =
+  | CValue of Value.t
+  | COp of { op : Hash.t; name : string; args : Value.t list; kont : Value.frame list }
+      (** an unhandled, ungranted op reached the root; [kont] is the entire remaining continuation
+          as immutable data — resume it as many times as the algorithm needs *)
+
+(** [run_state_capturing ctx state] drives [state] to completion, but instead of dying on an
+    unhandled op it returns the op with its continuation ({!COp}). Used by native inference drivers
+    (M3); nested [run_state] sub-runs (store-term isolation) still die [Unhandled], which the
+    checker's E0815 makes unreachable for checked programs. *)
+let run_state_capturing ctx (state : state) : (capture, Runtime_err.t) result =
+  let saved = ctx.capture_ops in
+  ctx.capture_ops <- true;
+  Fun.protect
+    ~finally:(fun () -> ctx.capture_ops <- saved)
+    (fun () ->
+      match run_state ctx state with
+      | v -> Ok (CValue v)
+      | exception Op_captured { op; name; args; kont; _ } -> Ok (COp { op; name; args; kont })
+      | exception Rt e -> Error e)
+
+(** [resume_state kont v] is the state that delivers [v] to a captured continuation. *)
+let resume_state (kont : Value.frame list) (v : Value.t) : state = SApply (v, kont)
+
+(** [apply_state ctx fn args] is the state that applies [fn] (used to start a model thunk). *)
+let apply_state ctx (fn : Value.t) (args : Value.t list) : state = apply ctx fn args []
+
+(** [expr_state e] is the state that evaluates a resolved expression from scratch. *)
+let expr_state (e : Kernel.expr) : state = SEval (empty_scope, e, [])
 
 (** [call ctx fn args] applies an already-evaluated function value in a fresh continuation. Unused
     by M1 (the gated eval runs whole expressions via {!run_expr}); it exists for M3's native

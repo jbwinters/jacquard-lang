@@ -2,7 +2,7 @@
 
 Weft is a research prototype for a small kernel language designed for code written by models and reviewed by people. The core design combines a uniform quoted triple representation, a 27-form kernel grammar, algebraic effects, explicit capability grants, probabilistic programming as a library effect, and content-addressed definitions.
 
-The M0-exec milestone (the executable data layer) is implemented: reader, printer, kernel validator, name resolution, canonical hashing, content-addressed store, and the conformance corpus harness. The design docs remain the source of truth for later milestones.
+All five milestones (M0-exec through M4) are implemented: the executable data layer, the CPS interpreter with multi-shot handlers, the type-and-effect checker with the capability manifest, probabilistic inference as handlers, and the tooling (formatter, semantic differ, error catalog, demos).
 
 ## Repository Layout
 
@@ -12,13 +12,14 @@ The M0-exec milestone (the executable data layer) is implemented: reader, printe
 - `docs/example-code.md` - target bootstrap `.wft` examples for the future corpus.
 - `.taskmaster/` - local Task Master plan generated from `docs/development-plan.md`.
 - `dune-project` and `weft.opam` - OCaml package and build metadata.
-- `src/` - the `weft` library: `form`/`meta`/`span` (the triple), `hash` (HASH_V0), `reader`/`printer` (bootstrap notation), `kernel` (grammar validator + typed AST), `resolve`, `canon` (canonical serialization + hashing), `store`, and the M1 interpreter: `value`/`eval` (CPS machine with multi-shot handlers), `runtime_err`, `prelude` (loader + grants).
-- `bin/` - the `weft` CLI: `run` (with `--allow` capability grants), `check`, `hash`, `store add|name|rename`.
+- `src/` - the `weft` library: `form`/`meta`/`span` (the triple), `hash` (HASH_V0), `reader`/`printer` (bootstrap notation + trivia-preserving formatter), `kernel` (grammar validator + typed AST), `resolve`, `canon` (canonical serialization + hashing), `store`, `value`/`eval` (CPS machine with multi-shot handlers), `prelude` (loader + grants), `types`/`check` (rows, inference, exhaustiveness, manifest), `diff` (semantic differ), `infer_dist` (enumeration + likelihood weighting).
+- `bin/` - the `weft` CLI: `run` (with `--allow` capability grants), `check` (`--print-sigs`, `--manifest`), `hash`, `fmt`, `diff`, `infer enumerate|lw`, `store add|name|rename`.
 - `test/` - alcotest/qcheck suites, the corpus runner, cram CLI tests, and the golden generators.
 - `spec/` - the M0 kernel AST spec and `serialization.md` (canonical byte format).
 - `corpus/` - conformance corpus (`valid/`, `invalid/` + `.expect`, `golden/` including prelude hashes).
 - `prelude/` - the Weft prelude (`.wft` sources: types, effects, builtins, library functions).
-- `demos/` - `m1.sh` and its programs (factorial, multi-shot choose, gated eval).
+- `demos/` - `m1.sh` (factorial, multi-shot choose, gated eval), `m3.sh` (Demo 1: inference as handlers), `m4-hostile.sh` (Demo 2: the hostile function).
+- `docs/tutorial.md` - ten runnable examples; `docs/errors.md` - every diagnostic code.
 
 ## Toolchain
 
@@ -101,7 +102,7 @@ task-master show 1
 task-master validate-dependencies
 ```
 
-Tasks 1-16 (W0.1 through W2.7, the M0-exec and M1 milestones) are done; the next task is `W3.1 Types, rows, and unifier`.
+All 33 tasks (W0.1 through W5.5) are done.
 
 ## Implementation Milestones
 
@@ -111,9 +112,20 @@ Tasks 1-16 (W0.1 through W2.7, the M0-exec and M1 milestones) are done; the next
 - M3: discrete `Dist` effect with enumeration and likelihood-weighting handlers.
 - M4: formatter, semantic differ, error audit, docs, and final demos.
 
+## The Two Demos
+
+- **Demo 1 (M3): inference as handlers.** `sh demos/m3.sh` runs the two-coins model under
+  exact enumeration and likelihood weighting; the model file is byte-identical between the
+  two runs — only the handler changes.
+- **Demo 2 (M4): the hostile function.** `sh demos/m4-hostile.sh` shows a generated-looking
+  function that reaches for the network: `weft check` refuses it at the type level with its
+  full signature; the granted run succeeds against the stub handler.
+
+`docs/tutorial.md` walks ten runnable examples from literals to content addressing.
+
 ## Current Status
 
-M0-exec and M1 are complete. On top of the executable data layer (parse, validate, resolve, canonical hashing, content-addressed store, conformance corpus), the CPS interpreter runs `.wft` programs with deep, multi-shot algebraic effect handlers; quote/unquote produce and splice `Code` values; `eval` is a capability-gated library effect; the prelude ships Bool/Option/List/Ordering, arithmetic builtins, and map/fold written in Weft; and the `weft` CLI runs, checks, and hashes programs with `--allow` grants installing the only root handlers (exit code 3 is the capability refusal). Try `sh demos/m1.sh`. The type-and-effect checker milestone (M2, tasks W3.x) is next.
+The plan is complete through M4. Programs parse to uniform triples, validate against the 27-form kernel, resolve to content hashes, and hash canonically; the CPS interpreter runs them with deep multi-shot handlers and capability grants as the only root authority; the checker infers types and effect rows (a signature carries the whole story, and `weft run` refuses ungranted effects at the type level); `weft infer` runs exact enumeration and likelihood weighting as handlers over unchanged models; and the tooling closes the loop with a trivia-preserving formatter, a semantic differ over stores, a complete error catalog, and the two whitepaper demos green in CI.
 
 The tree should verify with:
 

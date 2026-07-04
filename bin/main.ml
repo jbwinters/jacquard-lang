@@ -254,6 +254,85 @@ let hash_cmd file prelude =
           in
           go 0 forms)
 
+(* --- infer (M3) --- *)
+
+(* Shared: load the file, put decls, return the resolved final expression (the model). *)
+let load_model store ~file =
+  match Reader.parse_string ~file (read_file file) with
+  | Error ds -> Error ds
+  | Ok forms ->
+      let rec go last = function
+        | [] -> (
+            match last with
+            | Some e -> Ok e
+            | None -> Error [ Diag.error ~code:"E0903" "the model file has no expression" ])
+        | f :: rest -> (
+            match Kernel.of_form f with
+            | Error ds -> Error ds
+            | Ok (Kernel.Decl d) -> (
+                match Resolve.resolve_decl (Store.names_view store) d with
+                | Error ds -> Error ds
+                | Ok d -> (
+                    match Store.put_decl store d with Error ds -> Error ds | Ok _ -> go last rest))
+            | Ok (Kernel.Expr e) -> (
+                match Resolve.resolve_expr (Store.names_view store) e with
+                | Error ds -> Error ds
+                | Ok e -> go (Some e) rest))
+      in
+      go None forms
+
+let infer_check store model =
+  (* the model must typecheck; its row may include dist (granted by this command) but
+     nothing else ungranted *)
+  match make_checker store with
+  | Error ds -> Error ds
+  | Ok cctx -> (
+      match Check.check_top cctx (Kernel.Expr model) with
+      | Error ds -> Error ds
+      | Ok { Check.row; _ } -> (
+          let granted =
+            match Store.lookup_name store "dist" with
+            | Some { Resolve.hash; kind = Resolve.KEffect } -> [ hash ]
+            | _ -> []
+          in
+          match Check.manifest_errors cctx ~granted (Option.value row ~default:Types.empty_row) with
+          | [] -> Ok ()
+          | ds -> Error ds))
+
+let infer_enumerate_cmd file prelude =
+  match open_ctx ~prelude ~store_dir:None with
+  | Error ds -> print_diags ds
+  | Ok (store, ctx) -> (
+      match load_model store ~file with
+      | Error ds -> print_diags ds
+      | Ok model -> (
+          match infer_check store model with
+          | Error ds -> print_diags ds
+          | Ok () -> (
+              match Infer_dist.enumerate ctx (Eval.expr_state model) with
+              | Error ds -> print_diags ds
+              | Ok posterior ->
+                  print_endline (Infer_dist.show_posterior posterior);
+                  ok)))
+
+let infer_lw_cmd file prelude seed samples =
+  match open_ctx ~prelude ~store_dir:None with
+  | Error ds -> print_diags ds
+  | Ok (store, ctx) -> (
+      match load_model store ~file with
+      | Error ds -> print_diags ds
+      | Ok model -> (
+          match infer_check store model with
+          | Error ds -> print_diags ds
+          | Ok () -> (
+              match
+                Infer_dist.likelihood_weighting ctx ~seed ~samples (fun () -> Eval.expr_state model)
+              with
+              | Error ds -> print_diags ds
+              | Ok posterior ->
+                  print_endline (Infer_dist.show_posterior posterior);
+                  ok)))
+
 (* --- fmt --- *)
 
 let fmt_cmd file write =
@@ -370,6 +449,27 @@ let fmt_t =
     (Cmd.info "fmt" ~doc:"Format a .wft file canonically, preserving comments.")
     Term.(const fmt_cmd $ file_arg $ write_arg)
 
+let infer_t =
+  let enumerate =
+    Cmd.v
+      (Cmd.info "enumerate" ~doc:"Exact posterior by multi-shot enumeration.")
+      Term.(const infer_enumerate_cmd $ file_arg $ prelude_arg)
+  in
+  let lw =
+    Cmd.v
+      (Cmd.info "lw" ~doc:"Approximate posterior by likelihood weighting.")
+      Term.(
+        const infer_lw_cmd $ file_arg $ prelude_arg
+        $ Arg.(
+            required
+            & opt (some int) None
+            & info [ "seed" ] ~docv:"N" ~doc:"PRNG seed (required, D4).")
+        $ Arg.(value & opt int 10000 & info [ "samples" ] ~docv:"K" ~doc:"Number of runs."))
+  in
+  Cmd.group
+    (Cmd.info "infer" ~doc:"Probabilistic inference: handlers over an unchanged model.")
+    [ enumerate; lw ]
+
 let diff_t =
   Cmd.v
     (Cmd.info "diff"
@@ -414,6 +514,6 @@ let store_t =
 let main =
   Cmd.group
     (Cmd.info "weft" ~version:Version.version ~doc:"The Weft language toolchain")
-    [ run_t; check_t; hash_t; fmt_t; diff_t; store_t ]
+    [ run_t; check_t; hash_t; fmt_t; diff_t; infer_t; store_t ]
 
 let () = exit (Cmd.eval' main)

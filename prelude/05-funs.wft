@@ -31,3 +31,10 @@
       (clause (pcon nil) (var acc))
       (clause (pcon cons (pvar x) (pvar rest))
         (app (var fold) (var f) (app (var f) (var acc) (var x)) (var rest))))))))
+
+(defterm ((binding append ()
+  (lam ((pvar xs) (pvar ys))
+    (match (var xs)
+      (clause (pcon nil) (var ys))
+      (clause (pcon cons (pvar x) (pvar rest))
+        (app (var cons) (var x) (app (var append) (var rest) (var ys)))))))))

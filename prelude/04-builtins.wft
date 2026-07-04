@@ -12,3 +12,9 @@
 (defterm ((binding eq () (quote (builtin-marker eq)))))
 
 (defterm ((binding lt () (quote (builtin-marker lt)))))
+
+(defterm ((binding add-real () (quote (builtin-marker add-real)))))
+
+(defterm ((binding mul-real () (quote (builtin-marker mul-real)))))
+
+(defterm ((binding div-real () (quote (builtin-marker div-real)))))
