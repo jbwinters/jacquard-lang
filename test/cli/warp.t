@@ -115,3 +115,38 @@ A test file with a top-level expression is a mistake, named:
   $ weft test oops.wft
   error[E1001]: oops.wft: test files hold declarations only; found a top-level expression
   [1]
+
+W6.6's load-bearing move: a fixture is a store object referenced by hash, so
+EDITING THE FIXTURE re-keys every referencing test — cache invalidation with
+zero new machinery.
+
+  $ cat > fixture-suite.wft <<'WEFT'
+  > (defterm ((binding my-fixture ()
+  >   (quote (log (op (lit "fetch") (request (lit "http://a") (lit "")) (response (lit 200) (lit "pinned"))))))))
+  > (defterm ((binding replay-case ()
+  >   (app (var case) (lit "replays the fixture")
+  >     (lam ()
+  >       (let nonrec (pvar body)
+  >         (app (var throw.catch)
+  >           (lam () (app (var test.replay) (var my-fixture)
+  >             (lam () (match (app (var fetch) (app (var mk-request) (lit "http://a") (lit "")))
+  >               (clause (pcon mk-response (pwild) (pvar b)) (var b))))))
+  >           (lam ((pvar e)) (var e)))
+  >         (app (var check.eq) (var body) (lit "pinned") (var text.eq) (var text.show) (lit "served"))))))))
+  > WEFT
+  $ weft test fixture-suite.wft --seed 7 --cache-dir fcache | tail -1
+  cache: 0 hit, 1 ran
+  $ weft test fixture-suite.wft --seed 7 --cache-dir fcache | tail -1
+  cache: 1 hit, 0 ran
+
+Edit ONE response text in the fixture: the test re-keys and reruns (and now
+fails honestly, since the body pins the old text).
+
+  $ sed 's/pinned/EDITED/' fixture-suite.wft > fixture-suite2.wft
+  $ sed -i 's/(var body) (lit "EDITED")/(var body) (lit "pinned")/' fixture-suite2.wft
+  $ weft test fixture-suite2.wft --seed 7 --cache-dir fcache
+  FAIL replay-case/replays the fixture
+    - served: expected pinned, got EDITED
+  0 passed, 1 failed, 0 skipped, 0 refused
+  cache: 0 hit, 1 ran
+  [1]

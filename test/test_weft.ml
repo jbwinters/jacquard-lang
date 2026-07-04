@@ -40,4 +40,5 @@ let () =
       ("rings", Test_rings.suite);
       ("warp", Test_warp.suite);
       ("props", Test_props.suite);
+      ("replay", Test_replay.suite);
     ]

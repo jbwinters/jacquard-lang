@@ -126,6 +126,10 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
     | Error _ -> () (* prelude without this layer *)
     | Ok h -> Hashtbl.replace ctx.Eval.builtins h (Value.VBuiltin (name, native))
   in
+  optional "mod"
+    (int2 "mod" (fun a b ->
+         if b = 0 then Error (Runtime_err.Arithmetic "modulo by zero")
+         else Ok (Value.VInt (a mod b))));
   optional "add-real" (real2 "add-real" ( +. ));
   optional "mul-real" (real2 "mul-real" ( *. ));
   optional "div-real" (real2 "div-real" ( /. ));
@@ -320,6 +324,102 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
              | Some (Form.Int i) -> Ok (vsome (Value.VReal (float_of_int i)))
              | _ -> Ok vnone))
   | _ -> ());
+  (* --- W6.6 code reflection: quote payloads built and destructured from Weft.
+     of-int/of-text wrap scalars as (lit ...) forms; form/un-form build and split
+     arbitrary heads; eq? is the metadata-law equality; diff renders the semantic
+     differ's smallest disagreeing subtrees. --- *)
+  optional "code.of-int" (fun args ->
+      match args with
+      | [ Value.VInt i ] -> Ok (Value.VCode (Form.form "lit" [ Form.Int i ]))
+      | args -> type_err "code.of-int" args);
+  optional "code.of-text" (fun args ->
+      match args with
+      | [ Value.VText t ] -> Ok (Value.VCode (Form.form "lit" [ Form.Text t ]))
+      | args -> type_err "code.of-text" args);
+  (match
+     (lookup_hash store ~kind:Resolve.KCon "some", lookup_hash store ~kind:Resolve.KCon "none")
+   with
+  | Ok some_h, Ok none_h -> (
+      let vsome v = Value.VCon { con = some_h; name = "some"; args = [ v ] } in
+      let vnone = Value.VCon { con = none_h; name = "none"; args = [] } in
+      optional "code.to-int" (fun args ->
+          match args with
+          | [ Value.VCode { Form.head = "lit"; args = [ Form.Int i ]; _ } ] ->
+              Ok (vsome (Value.VInt i))
+          | [ Value.VCode _ ] -> Ok vnone
+          | args -> type_err "code.to-int" args);
+      optional "code.to-text" (fun args ->
+          match args with
+          | [ Value.VCode { Form.head = "lit"; args = [ Form.Text t ]; _ } ] ->
+              Ok (vsome (Value.VText t))
+          | [ Value.VCode _ ] -> Ok vnone
+          | args -> type_err "code.to-text" args);
+      match
+        (lookup_hash store ~kind:Resolve.KCon "nil", lookup_hash store ~kind:Resolve.KCon "cons")
+      with
+      | Ok nil_h, Ok cons_h ->
+          let vnil = Value.VCon { con = nil_h; name = "nil"; args = [] } in
+          let vcons x xs = Value.VCon { con = cons_h; name = "cons"; args = [ x; xs ] } in
+          let rec codes_of_vlist = function
+            | Value.VCon { name = "nil"; args = []; _ } -> Ok []
+            | Value.VCon { name = "cons"; args = [ Value.VCode f; rest ]; _ } ->
+                Result.map (fun fs -> f :: fs) (codes_of_vlist rest)
+            | v ->
+                Error
+                  (Runtime_err.Type_error
+                     (Printf.sprintf "code.form expects a list of code, got %s" (Value.show v)))
+          in
+          optional "code.form" (fun args ->
+              match args with
+              | [ Value.VText head; xs ] ->
+                  if not (Reader.valid_head head) then
+                    Error
+                      (Runtime_err.Type_error
+                         (Printf.sprintf "code.form: %S is not a valid form head" head))
+                  else
+                    Result.map
+                      (fun fs -> Value.VCode (Form.form head (List.map (fun f -> Form.F f) fs)))
+                      (codes_of_vlist xs)
+              | args -> type_err "code.form" args);
+          optional "code.un-form" (fun args ->
+              match args with
+              | [ Value.VCode f ] ->
+                  let sub_forms =
+                    List.filter_map (function Form.F g -> Some g | _ -> None) f.Form.args
+                  in
+                  (* forms with scalar args (lit payloads) split only when every arg is a
+                     form; scalars stay opaque behind to-int/to-text *)
+                  if List.length sub_forms = List.length f.Form.args then
+                    Ok
+                      (vsome
+                         (Value.VTuple
+                            [
+                              Value.VText f.Form.head;
+                              List.fold_right
+                                (fun g acc -> vcons (Value.VCode g) acc)
+                                sub_forms vnil;
+                            ]))
+                  else Ok vnone
+              | args -> type_err "code.un-form" args)
+      | _ -> ())
+  | _ -> ());
+  optional "code.eq?" (fun args ->
+      match args with
+      | [ Value.VCode a; Value.VCode b ] -> Ok (vbool (Form.equal_ignoring_meta a b))
+      | args -> type_err "code.eq?" args);
+  optional "code.diff" (fun args ->
+      match args with
+      | [ Value.VCode a; Value.VCode b ] ->
+          let ds = Diff.form_divergences ~path:"log" a b in
+          Ok
+            (Value.VText
+               (if ds = [] then "identical"
+                else
+                  String.concat "; "
+                    (List.map
+                       (fun { Diff.path; a; b } -> Printf.sprintf "at %s: - %s + %s" path a b)
+                       ds)))
+      | args -> type_err "code.diff" args);
   (* pmf : (distribution a, a) -> real and support : distribution a -> list (pair a real)
      (W4.1/W4.4); native implementations over the recognized constructors *)
   optional "debug.inspect" (fun args ->
@@ -727,6 +827,12 @@ let builtin_signatures (store : Store.t) : ((Hash.t * Types.scheme) list, Diag.t
         ("lt", arrow2 bool_ty);
       ]
   in
+  (* mod rides the optional lane like the reals: stub preludes may omit it *)
+  let* base =
+    match lookup_hash store ~kind:Resolve.KTerm "mod" with
+    | Ok h -> Ok (base @ [ (h, Types.mono (arrow2 int_ty)) ])
+    | Error _ -> Ok base
+  in
   (* int-compare ships with ring 0; its ordering result type lives in 02-data *)
   let* base =
     match
@@ -734,6 +840,43 @@ let builtin_signatures (store : Store.t) : ((Hash.t * Types.scheme) list, Diag.t
         lookup_hash store ~kind:Resolve.KTerm "int-compare" )
     with
     | Ok ord_h, Ok ic_h -> Ok (base @ [ (ic_h, Types.mono (arrow2 (Types.TCon (ord_h, [])))) ])
+    | _ -> Ok base
+  in
+  (* W6.6 code reflection signatures *)
+  let* base =
+    match
+      ( lookup_hash store ~kind:Resolve.KType "code",
+        lookup_hash store ~kind:Resolve.KType "text",
+        lookup_hash store ~kind:Resolve.KType "option",
+        lookup_hash store ~kind:Resolve.KType "list",
+        lookup_hash store ~kind:Resolve.KTerm "code.form" )
+    with
+    | Ok code_h, Ok text_h, Ok opt_h, Ok list_h, Ok _ ->
+        let code = Types.TCon (code_h, []) in
+        let text = Types.TCon (text_h, []) in
+        let opt t = Types.TCon (opt_h, [ t ]) in
+        let tlist t = Types.TCon (list_h, [ t ]) in
+        let fn params result = Types.mono (Types.TArrow (params, Types.empty_row, result)) in
+        let rec go acc = function
+          | [] -> Ok (List.rev acc)
+          | (name, s) :: rest ->
+              let* h = lookup_hash store ~kind:Resolve.KTerm name in
+              go ((h, s) :: acc) rest
+        in
+        let* code_sigs =
+          go []
+            [
+              ("code.of-int", fn [ int_ty ] code);
+              ("code.to-int", fn [ code ] (opt int_ty));
+              ("code.of-text", fn [ text ] code);
+              ("code.to-text", fn [ code ] (opt text));
+              ("code.form", fn [ text; tlist code ] code);
+              ("code.un-form", fn [ code ] (opt (Types.TTuple [ text; tlist code ])));
+              ("code.eq?", fn [ code; code ] bool_ty);
+              ("code.diff", fn [ code; code ] text);
+            ]
+        in
+        Ok (base @ code_sigs)
     | _ -> Ok base
   in
   (* the SL.5 text layer (all-or-nothing: 11-text.wft declares every marker) *)

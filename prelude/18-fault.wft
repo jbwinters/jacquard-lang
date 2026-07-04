@@ -1,0 +1,99 @@
+; The fault effect and its handlers (W6.7): fault injection is a library.
+; flaky names its site so reports can say WHERE the world failed.
+(defeffect fault () (op flaky ((tref text)) (tref bool)))
+
+; the explicit happy path (an unhandled flaky in a hermetic Test already fails
+; to typecheck: the row would show it)
+(defterm ((binding fault.none ()
+  (lam ((pvar thunk))
+    (handle (app (var thunk))
+      (ret (pvar x) (var x))
+      (opclause flaky ((pwild)) k (app (var k) (var false))))))))
+
+; Seeded chaos: a linear congruential stream in pure Weft ints (deviation from
+; the doc's splitmix64, which needs 64-bit ops the language does not expose;
+; deterministic and replayable all the same). p is approximately a percentage
+; 0..100 (the Bernoulli test reads the LCG's HIGH bits — low bits of an LCG are
+; the notoriously correlated ones). Every check label gets "seed=N " prepended,
+; so a failing chaos report NAMES the seed that reproduces it.
+(defterm ((binding fault.random ()
+  (lam ((pvar thunk) (pvar p) (pvar seed))
+    (app
+      (handle (app (var thunk))
+        (ret (pvar x) (lam ((pwild)) (var x)))
+        (opclause flaky ((pwild)) k
+          (lam ((pvar s))
+            (let nonrec (pvar next)
+              (app (var mod) (app (var add) (app (var mul) (var s) (lit 1103515245)) (lit 12345))
+                (lit 2147483648))
+              (app (app (var k) (app (var lt) (app (var mod) (app (var div) (var next) (lit 65536)) (lit 100)) (var p)))
+                (var next)))))
+        (opclause check ((pvar ok) (pvar label)) k
+          (lam ((pvar s))
+            (let nonrec (pwild)
+              (app (var check) (var ok)
+                (app (var text.concat) (lit "seed=")
+                  (app (var text.concat) (app (var text.from-int) (var seed))
+                    (app (var text.concat) (lit " ") (var label)))))
+              (app (app (var k) (tuple)) (var s))))))
+      (app (var mod) (var seed) (lit 2147483648)))))))
+
+; THE multi-shot one: the M1 Choose demo grown up. Explores every 2^n fault
+; assignment of an n-site body; each explored execution re-performs its checks
+; with the fault path prepended to the label, so one report carries every path.
+; The fuel argument reuses the exhaustive budget story: halving fuel per branch
+; means a body with more than log2(fuel) sites throws the refusal rather than
+; silently exploding — never a partial pass posing as coverage.
+(defterm ((binding fault.all ()
+  (lam ((pvar thunk) (pvar fuel))
+    (app
+      (handle (app (var thunk))
+        (ret (pvar x) (lam ((pwild) (pwild)) (app (var cons) (var x) (var nil))))
+        (opclause flaky ((pvar site)) k
+          (lam ((pvar path) (pvar remaining))
+            (match (app (var lt) (var remaining) (lit 2))
+              (clause (pcon true)
+                (app (var throw)
+                  (app (var text.concat)
+                    (lit "fault.all: exploration budget exceeded (E0905 story) at site ")
+                    (var site))))
+              (clause (pcon false)
+                (let nonrec (pvar half) (app (var div) (var remaining) (lit 2))
+                  (app (var list.append)
+                    (app
+                      (app (var k) (var false))
+                      (app (var text.concat) (var path)
+                        (app (var text.concat) (var site) (lit "=ok ")))
+                      (var half))
+                    (app
+                      (app (var k) (var true))
+                      (app (var text.concat) (var path)
+                        (app (var text.concat) (var site) (lit "=FAULT ")))
+                      (var half))))))))
+        (opclause check ((pvar ok) (pvar label)) k
+          (lam ((pvar path) (pvar remaining))
+            (let nonrec (pwild)
+              (app (var check) (var ok) (app (var text.concat) (var path) (var label)))
+              (app (app (var k) (tuple)) (var path) (var remaining))))))
+      (lit "") (var fuel))))))
+
+; Call-site fault consultation: a deep handler's clause runs at the HANDLER frame,
+; so a throw injected there unwinds PAST any catch around the perform site — retry
+; loops need the failure delivered where they perform. net.try-fetch consults flaky
+; at the call site and returns a result, which is exactly where a retry can see it.
+(defterm ((binding net.try-fetch ()
+  (lam ((pvar req))
+    (match (app (var flaky) (lit "net.fetch"))
+      (clause (pcon true) (app (var err) (lit "net: connection refused (injected)")))
+      (clause (pcon false) (app (var ok) (app (var fetch) (var req)))))))))
+
+; retry-up-to-n over a flaky fetch: the W6.7 acceptance example's subject
+(defterm ((binding net.with-retries ()
+  (lam ((pvar req) (pvar tries))
+    (match (app (var lt) (var tries) (lit 1))
+      (clause (pcon true) (app (var throw) (lit "net.with-retries: out of retries")))
+      (clause (pcon false)
+        (match (app (var net.try-fetch) (var req))
+          (clause (pcon ok (pvar resp)) (var resp))
+          (clause (pcon err (pwild))
+            (app (var net.with-retries) (var req) (app (var sub) (var tries) (lit 1)))))))))))

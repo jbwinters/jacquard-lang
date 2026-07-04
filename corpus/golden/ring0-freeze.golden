@@ -9,6 +9,14 @@ bool.or : (bool, bool) ->{} bool
 bool.or-else : forall e. (bool, () ->{e} bool) ->{e} bool
 type code
 con code-opaque
+code.diff : (code, code) ->{} text
+code.eq? : (code, code) ->{} bool
+code.form : (text, list code) ->{} code
+code.of-int : (int) ->{} code
+code.of-text : (text) ->{} code
+code.to-int : (code) ->{} option int
+code.to-text : (code) ->{} option text
+code.un-form : (code) ->{} option (text, list code)
 con cons
 div : (int, int) ->{} int
 div-real : (real, real) ->{} real
@@ -56,6 +64,7 @@ con mk-eq
 con mk-ord
 con mk-report
 con mk-show
+mod : (int, int) ->{} int
 mul : (int, int) ->{} int
 mul-real : (real, real) ->{} real
 con nil

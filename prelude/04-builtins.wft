@@ -27,6 +27,26 @@
 ; prelude definition references it).
 (defterm ((binding debug.inspect () (quote (builtin-marker debug.inspect)))))
 
+(defterm ((binding mod () (quote (builtin-marker mod)))))
+
 (defterm ((binding sub-real () (quote (builtin-marker sub-real)))))
 
 (defterm ((binding lt-real () (quote (builtin-marker lt-real)))))
+
+; code reflection (W6.6): build and destructure quote payloads from Weft.
+; The codec layer is these six natives plus ordinary pattern matching.
+(defterm ((binding code.of-int () (quote (builtin-marker code.of-int)))))
+
+(defterm ((binding code.to-int () (quote (builtin-marker code.to-int)))))
+
+(defterm ((binding code.of-text () (quote (builtin-marker code.of-text)))))
+
+(defterm ((binding code.to-text () (quote (builtin-marker code.to-text)))))
+
+(defterm ((binding code.form () (quote (builtin-marker code.form)))))
+
+(defterm ((binding code.un-form () (quote (builtin-marker code.un-form)))))
+
+(defterm ((binding code.eq? () (quote (builtin-marker code.eq?)))))
+
+(defterm ((binding code.diff () (quote (builtin-marker code.diff)))))

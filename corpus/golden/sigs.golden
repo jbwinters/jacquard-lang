@@ -33,3 +33,6 @@
 25-warp.wft:helper-with-open-row : () ->{check} ()
 25-warp.wft:sealed-case : test
 25-warp.wft:fails-alias : forall a e. (() ->{abort, check | e} a, text) ->{check | e} ()
+26-replay.wft:hermetified : (code) ->{throw} text
+26-replay.wft:chaos-explored : (int) ->{throw, check} list ()
+26-replay.wft:hermetified-multi : (code) ->{throw} text
