@@ -239,9 +239,49 @@ let test_unknown_hash () =
   | Error [ d ] -> Alcotest.(check string) "code" "E0601" d.Diag.code
   | _ -> Alcotest.fail "unknown hash must fail"
 
+(* PV.1: origin sidecars — stamped, carried through reopen, never hash-relevant,
+   corrupt = ignored-with-warning *)
+let test_origin_roundtrip () =
+  let root = fresh_root () in
+  let t = open_ok root in
+  let d = decl_of ~names:Resolve.empty_names "(deftype bool () (con false) (con true))" in
+  let hs =
+    match Store.put_decl ~origin:"agent:weft-demo-5" t d with
+    | Ok hs -> hs
+    | Error ds -> Alcotest.failf "put: %s" (String.concat "; " (List.map Diag.to_string ds))
+  in
+  Alcotest.(check (option string))
+    "read back" (Some "agent:weft-demo-5")
+    (Store.origin t hs.Canon.decl_hash);
+  Alcotest.(check (option string))
+    "derived hash resolves to the owner's origin" (Some "agent:weft-demo-5")
+    (Store.origin t (List.assoc "true" hs.Canon.named));
+  (* survives reopen; the identity self-check ignores sidecars *)
+  let t2 = open_ok root in
+  Alcotest.(check (option string))
+    "persisted" (Some "agent:weft-demo-5")
+    (Store.origin t2 hs.Canon.decl_hash);
+  (* unstamped is a clean absence *)
+  let d2 = decl_of ~names:(Store.names_view t2) "(defterm ((binding quiet () (lit 1))))" in
+  let hs2 = put_ok t2 d2 in
+  Alcotest.(check (option string))
+    "absence is not an error" None
+    (Store.origin t2 hs2.Canon.decl_hash);
+  (* corrupt sidecar: ignored, store still opens *)
+  let oc =
+    open_out_bin
+      (Filename.concat (Filename.concat root "objects")
+         (Hash.to_hex hs.Canon.decl_hash ^ ".origin"))
+  in
+  output_string oc "";
+  close_out oc;
+  let t3 = open_ok root in
+  Alcotest.(check (option string)) "empty sidecar ignored" None (Store.origin t3 hs.Canon.decl_hash)
+
 let suite =
   [
     Alcotest.test_case "put/get round trip preserves hash" `Quick test_put_get_roundtrip;
+    Alcotest.test_case "origin sidecar roundtrip" `Quick test_origin_roundtrip;
     Alcotest.test_case "get by derived hash" `Quick test_get_by_derived_hash;
     Alcotest.test_case "names registered and resolvable" `Quick test_names_registered_and_resolvable;
     Alcotest.test_case "rename touches only names.wft" `Quick test_rename_only_names_file;

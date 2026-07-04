@@ -120,6 +120,7 @@ in `src/` and `bin/` appears in this catalog.
 | code | meaning | example |
 |------|---------|---------|
 | E1001 | expression at top level of a test file | `weft test file.wft` where the file ends with `(app (var main))` |
+| E1002 | eval under --dry-run | a program whose row includes `eval` run with `--dry-run` |
 
 ## Appendix: the W5.3 audit (ten message rewrites)
 

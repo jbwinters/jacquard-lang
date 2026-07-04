@@ -28,6 +28,11 @@ type t = {
 let objects_dir t = Filename.concat t.root "objects"
 let names_file t = Filename.concat t.root "names.wft"
 let object_path t h = Filename.concat (objects_dir t) (Hash.to_hex h ^ ".wft")
+
+(* PV.1 origin provenance sidecars: <hash>.origin beside the object. Sidecars are NOT
+   .wft, so the identity self-check at open never sees them, and renames never touch
+   them — the metadata law extended to the file system. *)
+let origin_path t h = Filename.concat (objects_dir t) (Hash.to_hex h ^ ".origin")
 let err ~code fmt = Printf.ksprintf (fun msg -> Error [ Diag.error ~code msg ]) fmt
 
 let kind_sym = function
@@ -179,7 +184,7 @@ let entry_kind (decl : Kernel.decl) = function
 (** [put_decl t decl] canonicalizes, hashes, and stores a resolved declaration, then binds every
     name it introduces (members, type + constructors, effect + operations) in the name index,
     replacing existing bindings of the same names. Idempotent on the object file. *)
-let put_decl t (decl : Kernel.decl) : (Canon.decl_hashes, Diag.t list) result =
+let put_decl ?origin t (decl : Kernel.decl) : (Canon.decl_hashes, Diag.t list) result =
   match Canon.hash_decl decl with
   | Error ds -> Error ds
   | Ok hs ->
@@ -189,6 +194,27 @@ let put_decl t (decl : Kernel.decl) : (Canon.decl_hashes, Diag.t list) result =
         output_string oc (Printer.print_all [ Kernel.decl_to_form decl ]);
         close_out oc
       end;
+      (match origin with
+      | Some tag -> (
+          (* first writer wins, matching the object's own immutability: content that
+             already carries provenance keeps it, and a differing re-stamp is noted *)
+          let opath = origin_path t hs.Canon.decl_hash in
+          if Sys.file_exists opath then
+            begin match read_file opath with
+            | existing when String.trim existing <> tag ->
+                Printf.eprintf "note: %s already stamped [%s]; keeping it\n%!"
+                  (String.sub (Hash.to_hex hs.Canon.decl_hash) 0 8)
+                  (String.trim existing)
+            | _ -> ()
+            | exception Sys_error _ -> ()
+            end
+          else
+            try
+              let oc = open_out_bin opath in
+              output_string oc (tag ^ "\n");
+              close_out oc
+            with Sys_error m -> Printf.eprintf "origin sidecar unwritable (%s)\n%!" m)
+      | None -> ());
       let fresh = index_entries decl hs in
       t.index <- fresh @ List.filter (fun (h, _) -> not (List.mem_assoc h fresh)) t.index;
       let new_names =
@@ -208,6 +234,28 @@ let put_decl t (decl : Kernel.decl) : (Canon.decl_hashes, Diag.t list) result =
       t.names <- sort_names (new_names @ List.filter (fun b -> not (evicted b)) t.names);
       write_names t;
       Ok hs
+
+(** [origin t h] reads the provenance sidecar of the declaration owning [h], if any. A
+    present-but-unreadable or empty sidecar is ignored with a warning, never fatal. *)
+let origin t (h : Hash.t) : string option =
+  let read_sidecar dh =
+    let path = origin_path t dh in
+    if not (Sys.file_exists path) then None
+    else
+      match read_file path with
+      | exception Sys_error m ->
+          Printf.eprintf "warning: origin sidecar unreadable (%s)\n%!" m;
+          None
+      | s -> (
+          match String.split_on_char '\n' (String.trim s) with
+          | tag :: _ when tag <> "" -> Some tag
+          | _ ->
+              Printf.eprintf "warning: origin sidecar %s is empty; ignored\n%!" path;
+              None)
+  in
+  match List.assoc_opt h t.index with
+  | Some (dh, _) -> read_sidecar dh
+  | None -> if Sys.file_exists (object_path t h) then read_sidecar h else None
 
 (** [locate t h] finds the declaration owning [h] (a decl hash or any derived hash). *)
 let locate t (h : Hash.t) : (located, Diag.t list) result =

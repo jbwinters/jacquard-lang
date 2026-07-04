@@ -17,7 +17,11 @@ type divergence = { path : string; a : string; b : string }
 type entry =
   | Identical
   | Renamed of string  (** the old name *)
-  | Changed of { divergences : divergence list; dependents : string list }
+  | Changed of {
+      divergences : divergence list;
+      dependents : string list;
+      origin : string option;  (** the NEW side's provenance tag, when stamped (PV.1) *)
+    }
   | Added
   | Removed
 
@@ -89,7 +93,14 @@ let diff ~(old_side : Store.t) ~(new_side : Store.t) : report =
               | Some fa, Some fb -> form_divergences ~path:n fa fb
               | _ -> []
             in
-            Some (n, Changed { divergences; dependents = dependents_names old_side ha })
+            Some
+              ( n,
+                Changed
+                  {
+                    divergences;
+                    dependents = dependents_names old_side ha;
+                    origin = Store.origin new_side hb;
+                  } )
         | None -> (
             (* same content under a different old name? that's a rename *)
             match keys_of_hash a kind hb with
@@ -124,8 +135,9 @@ let render (r : report) : string option =
         | Renamed old_name -> [ Printf.sprintf "renamed  %s -> %s" old_name n ]
         | Added -> [ Printf.sprintf "added    %s" n ]
         | Removed -> [ Printf.sprintf "removed  %s" n ]
-        | Changed { divergences; dependents } ->
-            Printf.sprintf "changed  %s" n
+        | Changed { divergences; dependents; origin } ->
+            Printf.sprintf "changed  %s%s" n
+              (match origin with Some tag -> " [" ^ tag ^ "]" | None -> "")
             :: (List.map
                   (fun { path; a; b } -> Printf.sprintf "  at %s:\n    - %s\n    + %s" path a b)
                   divergences

@@ -781,6 +781,63 @@ let install_dist (ctx : Eval.ctx) ~seed : (unit, Diag.t list) result =
   Hashtbl.replace ctx.Eval.root_handlers observe_op (fun _ -> Error Runtime_err.Observe_at_root);
   Ok ()
 
+(** [install_dry ctx ~audit] (TL.2) grants the WORLD without consequences: reads and the clock
+    forward to the real primitives (observation is safe), while fs.write, net.fetch, and
+    infer.complete are converted into audit records and answered with stubs — the program runs to
+    completion, the trail says what it WOULD have done, and nothing mutates. eval is refused
+    separately (it runs at root authority and cannot be dried). *)
+let install_dry (ctx : Eval.ctx) ~(audit : string list ref) : (unit, Diag.t list) result =
+  let ( let* ) = Result.bind in
+  let record line = audit := line :: !audit in
+  let* () = install_console ctx ~out:print_string in
+  let* () = install_clock ctx in
+  let* () = install_fs ctx in
+  let* () = install_infer ctx in
+  let* () = install_dist ctx ~seed:0 in
+  (* seed 0: dry runs are deterministic; sampling mutates nothing *)
+  (* now override the mutating/world-reaching ops with recorders *)
+  let* write_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "write" in
+  Hashtbl.replace ctx.Eval.root_handlers write_op (fun args ->
+      match args with
+      | [ Value.VText path; Value.VText content ] ->
+          record (Printf.sprintf "written %s (%d bytes)" path (String.length content));
+          Ok Value.unit_v
+      | args ->
+          Error
+            (Runtime_err.Type_error
+               (Printf.sprintf "write expects a path and a text, got %s"
+                  (String.concat ", " (List.map Value.show args)))));
+  let* fetch_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "fetch" in
+  let* resp_con = lookup_hash ctx.Eval.store ~kind:Resolve.KCon "mk-response" in
+  Hashtbl.replace ctx.Eval.root_handlers fetch_op (fun args ->
+      match args with
+      | [ Value.VCon { name = "mk-request"; args = [ Value.VText url; _ ]; _ } ] ->
+          record (Printf.sprintf "fetched %s" url);
+          Ok
+            (Value.VCon
+               {
+                 con = resp_con;
+                 name = "mk-response";
+                 args = [ Value.VInt 200; Value.VText "<dry-run response>" ];
+               })
+      | args ->
+          Error
+            (Runtime_err.Type_error
+               (Printf.sprintf "fetch expects one request, got %s"
+                  (String.concat ", " (List.map Value.show args)))));
+  let* complete_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "complete" in
+  Hashtbl.replace ctx.Eval.root_handlers complete_op (fun args ->
+      match args with
+      | [ Value.VCon { name = "mk-prompt"; args = [ Value.VText text; _ ]; _ } ] ->
+          record (Printf.sprintf "completed prompt %S" text);
+          Ok (Value.VText "<dry-run completion>")
+      | args ->
+          Error
+            (Runtime_err.Type_error
+               (Printf.sprintf "complete expects one prompt, got %s"
+                  (String.concat ", " (List.map Value.show args)))));
+  Ok ()
+
 (** The only effects [grant] can install, i.e. the valid [--allow] values; the E0814 hint consults
     this so it never suggests granting a pure effect. *)
 let grantable_names = [ "clock"; "console"; "dist"; "eval"; "fs"; "infer"; "net" ]

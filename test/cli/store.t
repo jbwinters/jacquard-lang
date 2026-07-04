@@ -52,3 +52,26 @@ A defterm group's whole hash is not nameable (name its members):
   $ weft store add mystore expr.wft
   error[E0704]: store add expects declarations only
   [1]
+
+Origin provenance (PV.1): stamped at add, displayed by diff, absent cleanly.
+
+  $ printf '(defterm ((binding fav () (lit 7))))\n' > fav.wft
+  $ printf '(defterm ((binding fav () (lit 8))))\n' > fav2.wft
+  $ weft store add prov-a fav.wft
+  ok
+  $ weft store add prov-b fav2.wft --origin agent:weft-demo-5
+  ok
+  $ weft diff prov-a prov-b | head -1
+  changed  fav [agent:weft-demo-5]
+  $ weft diff prov-b prov-a | head -1
+  changed  fav
+
+The sidecar never breaks the identity self-check (the reopen-with-sidecar unit
+test covers rename survival; here the contents differ across the stores, so
+the diff shows add+remove):
+
+  $ ls prov-b/objects/*.origin | wc -l
+  1
+  $ weft store rename prov-b fav favourite
+  $ weft diff prov-a prov-b | head -1
+  added    favourite
