@@ -351,16 +351,20 @@ let fmt_cmd file write =
 (* --- diff --- *)
 
 let diff_cmd store_a store_b =
-  match (Store.open_store store_a, Store.open_store store_b) with
-  | Error ds, _ | _, Error ds -> print_diags ds
-  | Ok old_side, Ok new_side -> (
-      match Diff.render (Diff.diff ~old_side ~new_side) with
-      | None ->
-          print_endline "no semantic changes";
-          ok
-      | Some report ->
-          print_endline report;
-          ok)
+  match List.find_opt (fun d -> not (Sys.file_exists d)) [ store_a; store_b ] with
+  | Some missing ->
+      print_diags [ Diag.error ~code:"E0606" (Printf.sprintf "store %s does not exist" missing) ]
+  | None -> (
+      match (Store.open_store store_a, Store.open_store store_b) with
+      | Error ds, _ | _, Error ds -> print_diags ds
+      | Ok old_side, Ok new_side -> (
+          match Diff.render (Diff.diff ~old_side ~new_side) with
+          | None ->
+              print_endline "no semantic changes";
+              ok
+          | Some report ->
+              print_endline report;
+              ok))
 
 (* --- store subcommands (persistent, no implicit prelude) --- *)
 

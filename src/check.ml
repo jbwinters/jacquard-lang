@@ -830,9 +830,11 @@ let rec check_matches ctx : Diag.t list =
       let matrix = List.map (fun (c : Kernel.clause) -> [ c.Kernel.cpat ]) arms in
       (match useful ctx [ scrutinee_ty ] matrix with
       | Some [ w ] ->
-          err ~meta:site_meta ~code:"E0813" "this match is not exhaustive: it misses %s"
-            (show_witness w)
-      | Some _ -> err ~meta:site_meta ~code:"E0813" "this match is not exhaustive"
+          err ~meta:site_meta ~hint:"add a clause matching the witness, or a (pwild) default"
+            ~code:"E0813" "this match is not exhaustive: it misses %s" (show_witness w)
+      | Some _ ->
+          err ~meta:site_meta ~hint:"add a (pwild) default clause" ~code:"E0813"
+            "this match is not exhaustive"
       | None -> ());
       (* redundancy: clause i is useless if rows 0..i-1 already cover its pattern *)
       List.iteri

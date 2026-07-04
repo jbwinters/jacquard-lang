@@ -12,9 +12,10 @@ let ml_files dir =
   |> List.filter (fun f -> Filename.check_suffix f ".ml")
   |> List.map (Filename.concat dir)
 
-(* every string literal that looks like a diagnostic code passed to ~code: *)
+(* every string literal that looks like a diagnostic code passed to ~code: (or bound as an
+   optional-parameter default, `?(x_code = "...")`) *)
 let emitted_codes () =
-  let re = Str.regexp {|code:"\([EW][0-9][0-9][0-9][0-9]\)"|} in
+  let re = Str.regexp {|code[: ]*=? *"\([EW][0-9][0-9][0-9][0-9]\)"|} in
   let codes = Hashtbl.create 64 in
   List.iter
     (fun path ->
@@ -28,8 +29,6 @@ let emitted_codes () =
       in
       scan 0)
     (ml_files "../src" @ ml_files "../bin");
-  (* codes built via ~unbound_code defaults and variables *)
-  Hashtbl.replace codes "E0812" ();
   List.sort compare (Hashtbl.fold (fun c () acc -> c :: acc) codes [])
 
 let test_all_codes_cataloged () =

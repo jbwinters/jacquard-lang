@@ -68,6 +68,7 @@ in `src/` and `bin/` appears in this catalog.
 | E0603 | corrupt store file | hand-edited `names.wft` or object file |
 | E0604 | unnameable target | naming a defterm group's whole hash |
 | E0605 | invalid name | `weft store rename s x "Bad Name"` |
+| E0606 | store directory does not exist | `weft diff a /nowhere` |
 
 ## Prelude and grants (E07xx)
 

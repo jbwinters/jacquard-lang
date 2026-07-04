@@ -131,14 +131,19 @@ The model file is identical under both algorithms — only the handler changes.
 
 ## 10. Content addressing
 
-`corpus/valid/even-odd.wft` is a mutually recursive group hashed as a unit. Store it, then
-rename freely:
+A store is a content-addressed map from hashes to declarations; names are metadata. Store a
+self-contained declaration, rename it (object files untouched), and diff semantically:
 
 ```
-$ weft store add mystore corpus/valid/even-odd.wft
-$ weft store rename mystore even is-even       # objects untouched
-$ weft diff mystore otherstore                 # renames are renames, reformatting is nothing
+$ printf '(deftype color () (con red) (con green))\n' > color.wft
+$ weft store add lib-v1 color.wft
+ok
+$ weft store add lib-v2 color.wft
+ok
+$ weft store rename lib-v2 color colour
+$ weft diff lib-v1 lib-v2
+renamed  color -> colour
 ```
 
 `weft hash FILE` prints the canonical HASH_V0 hashes; formatting and comments never change
-them (the metadata law).
+them (the metadata law). These commands are pinned in `test/cli/tutorial.t`.
