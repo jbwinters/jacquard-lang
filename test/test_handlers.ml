@@ -49,6 +49,28 @@ let test_multishot_thrice () =
           "(handle (app (var mul) (lit 2) (app (var choose))) (ret (pvar x) (var x)) (opclause \
            choose () k (tuple (app (var k) (lit 1)) (app (var k) (lit 2)) (app (var k) (lit 3)))))"))
 
+(* The nasty multi-shot/deep interaction in one test:
+   - choose's handler resumes the same continuation twice;
+   - each resumed branch performs tick after the choice point;
+   - the captured continuation must include the handler frame, so tick is caught by the SAME
+     deep handler inside each branch;
+   - tick returns an incrementing token, making branch values distinct and proving exact count. *)
+let test_multishot_deep_inner_effect_exact_count () =
+  let h = make () in
+  let v =
+    Eval_support.eval_ok h
+      "(handle (let nonrec (pvar branch) (app (var choose)) (let nonrec (pvar ticked) (app (var \
+       tick)) (match (var branch) (clause (pcon true) (app (var add) (lit 100) (var ticked))) \
+       (clause (pcon false) (app (var add) (lit 200) (var ticked)))))) (ret (pvar x) (var x)) \
+       (opclause choose () k (tuple (app (var k) (var true)) (app (var k) (var false)))) (opclause \
+       tick () k (let nonrec (pvar n) (app (var bump)) (app (var k) (var n)))))"
+  in
+  Alcotest.(check string) "distinct branch values" "(101, 202)" (Value.show v);
+  (match v with
+  | Value.VTuple [ Value.VInt 101; Value.VInt 202 ] -> ()
+  | _ -> Alcotest.failf "expected exactly two branch results, got %s" (Value.show v));
+  Alcotest.(check int) "inner effect handled exactly once per branch" 2 !(h.bumps)
+
 (* State effect: get/put handler threads state through a function-of-state encoding; a
    program using both returns the expected pair. *)
 let state_handler body =
@@ -234,6 +256,8 @@ let suite =
   [
     Alcotest.test_case "MULTI-SHOT smoke test (Choose)" `Quick test_multishot_choose;
     Alcotest.test_case "multi-shot thrice" `Quick test_multishot_thrice;
+    Alcotest.test_case "multi-shot resumes catch inner effects exactly" `Quick
+      test_multishot_deep_inner_effect_exact_count;
     Alcotest.test_case "state effect threads state" `Quick test_state_effect;
     Alcotest.test_case "abort short-circuits" `Quick test_abort_short_circuits;
     Alcotest.test_case "deep: second perform same handler" `Quick test_deep_second_perform;
