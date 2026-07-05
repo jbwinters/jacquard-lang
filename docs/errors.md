@@ -1,4 +1,4 @@
-# Weft diagnostic codes
+# Jacquard diagnostic codes
 
 Every diagnostic the toolchain can emit, with an example that triggers it. Codes are
 stable: never reused, never renumbered. A test enforces that every code emitted anywhere
@@ -69,14 +69,14 @@ in `src/` and `bin/` appears in this catalog.
 
 | code | meaning | example |
 |------|---------|---------|
-| E0601 | unknown hash | `weft store name s x 000...0` |
+| E0601 | unknown hash | `jacquard store name s x 000...0` |
 | E0602 | unknown name | renaming a name that is not bound |
 | E0603 | corrupt store file | hand-edited `names.wft` or object file |
 | E0604 | unnameable target | naming a defterm group's whole hash |
-| E0605 | invalid name | `weft store rename s x "Bad Name"` |
-| E0606 | store directory does not exist | `weft diff a /nowhere` |
+| E0605 | invalid name | `jacquard store rename s x "Bad Name"` |
+| E0606 | store directory does not exist | `jacquard diff a /nowhere` |
 | E0607 | name bound to several kinds; needs --kind | renaming `abort` when it is both an effect and an op |
-| E0608 | unknown --kind value | `weft store rename --kind bogus` |
+| E0608 | unknown --kind value | `jacquard store rename --kind bogus` |
 
 ## Prelude and grants (E07xx)
 
@@ -85,7 +85,7 @@ in `src/` and `bin/` appears in this catalog.
 | E0701 | prelude directory missing | `--prelude /nowhere` |
 | E0702 | prelude name missing or wrong kind | truncated prelude |
 | E0703 | effect not grantable | `--allow filesystem` |
-| E0704 | store add expects declarations only | an expression in `weft store add` |
+| E0704 | store add expects declarations only | an expression in `jacquard store add` |
 
 ## Type and effect checker (E08xx, W08xx)
 
@@ -111,15 +111,15 @@ in `src/` and `bin/` appears in this catalog.
 |------|---------|---------|
 | E0901 | empty posterior (impossible observations) | `observe (bernoulli 0.0) true` |
 | E0902 | runtime failure inside inference | a model dividing by zero |
-| E0903 | model file has no expression | a decls-only file passed to `weft infer` |
-| E0904 | observe at the sampling root | `observe` under `weft run --allow dist` (D7 default: defect) |
-| E0905 | exhaustive verification budget exceeded | a property over `uniform-int(1, 1000000)` under `weft test --exhaustive` |
+| E0903 | model file has no expression | a decls-only file passed to `jacquard infer` |
+| E0904 | observe at the sampling root | `observe` under `jacquard run --allow dist` (D7 default: defect) |
+| E0905 | exhaustive verification budget exceeded | a property over `uniform-int(1, 1000000)` under `jacquard test --exhaustive` |
 
 ## Warp (E10xx)
 
 | code | meaning | example |
 |------|---------|---------|
-| E1001 | expression at top level of a test file | `weft test file.wft` where the file ends with `(app (var main))` |
+| E1001 | expression at top level of a test file | `jacquard test file.wft` where the file ends with `(app (var main))` |
 | E1002 | eval under --dry-run | a program whose row includes `eval` run with `--dry-run` |
 
 ## Appendix: the W5.3 audit (ten message rewrites)

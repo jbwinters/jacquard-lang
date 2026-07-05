@@ -17,7 +17,7 @@ concurrency:
 
 env:
   OCAML_COMPILER: 5.1.1
-  WEFT_PRELUDE: ${{ github.workspace }}/prelude
+  JACQUARD_PRELUDE: ${{ github.workspace }}/prelude
 
 jobs:
   development-gate:

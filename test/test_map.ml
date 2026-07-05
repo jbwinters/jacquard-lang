@@ -1,6 +1,6 @@
-open Weft
+open Jacquard
 
-(* SL.6: Map/Set — the largest pure-Weft program, tested against an association-list
+(* SL.6: Map/Set — the largest pure-Jacquard program, tested against an association-list
    model, plus AVL balance and CPS stack-safety pins. *)
 
 let store, ctx = Eval_support.make_prelude_ctx ()
@@ -12,7 +12,7 @@ let eval_ok src =
 
 let show src = Value.show (eval_ok src)
 
-(* build a Weft map expression from a list of operations *)
+(* build a Jacquard map expression from a list of operations *)
 type op = Set of int * int | Delete of int
 
 let map_expr ops =

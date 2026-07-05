@@ -8,7 +8,7 @@ open in the tracker as a monitored condition, not a commitment.
 
 Build the VM when interpretation speed changes developer behavior. Empirically:
 
-- `dune runtest`'s Weft-eval-bound tests exceed ~2 minutes, or
+- `dune runtest`'s Jacquard-eval-bound tests exceed ~2 minutes, or
 - the stdlib property batteries become the suite's bottleneck, or
 - a demo the README leans on is visibly sluggish.
 
@@ -19,7 +19,7 @@ Build the VM when interpretation speed changes developer behavior. Empirically:
   the full prelude) is roughly half; the rest is checker, cram process spawns,
   and store IO.
 - The heaviest single tests: the 500-sequence map model battery and the 10k-insert
-  stack-safety pin, each ~2-3 seconds — n-log-n Weft over a tree-walker, entirely
+  stack-safety pin, each ~2-3 seconds — n-log-n Jacquard over a tree-walker, entirely
   acceptable.
 - The word-count demo over piped input is interactive-instant. The M3 posterior
   demos enumerate in milliseconds (branch counts in the tens).

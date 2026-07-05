@@ -1,4 +1,4 @@
-open Weft
+open Jacquard
 
 (* W5.1: trivia-preserving formatter — roundtrip with identical trivia, idempotency, and
    comment survival. *)

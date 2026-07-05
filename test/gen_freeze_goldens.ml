@@ -2,7 +2,7 @@
    every ring-0 name with its elaborated signature.
    Run from the repo root: dune exec test/gen_freeze_goldens.exe *)
 
-open Weft
+open Jacquard
 
 let () =
   match Corpus_support.freeze_lines ~prelude_dir:"prelude" ~manifest:"prelude/rings.manifest" with

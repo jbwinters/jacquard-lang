@@ -1,17 +1,17 @@
 opam-version: "2.0"
 synopsis: "A kernel language for code written by models and read by people"
 description: """
-Weft is a research prototype for a small kernel language with a uniform
+Jacquard is a research prototype for a small kernel language with a uniform
 quoted triple representation, algebraic effects, explicit capability grants,
 probabilistic programming as a library effect, and content-addressed
 definitions.
 """
-maintainer: "The Weft Project"
-authors: "The Weft Project"
+maintainer: "The Jacquard Project"
+authors: "The Jacquard Project"
 license: "AGPL-3.0-or-later"
-homepage: "https://github.com/jbwinters/weft-lang"
-bug-reports: "https://github.com/jbwinters/weft-lang/issues"
-dev-repo: "git+https://github.com/jbwinters/weft-lang.git"
+homepage: "https://github.com/jbwinters/jacquard-lang"
+bug-reports: "https://github.com/jbwinters/jacquard-lang/issues"
+dev-repo: "git+https://github.com/jbwinters/jacquard-lang.git"
 
 depends: [
   "ocaml" {>= "5.1"}

@@ -1,4 +1,4 @@
-open Weft
+open Jacquard
 
 (* W2.3: match_pat over every pattern form, match and no-match (table-driven), plus one
    deep nesting test. Patterns are built directly as resolved kernel ASTs. *)

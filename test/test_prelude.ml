@@ -1,4 +1,4 @@
-open Weft
+open Jacquard
 
 (* W2.6: the real prelude — loads clean, hashes pinned, library functions work, and the
    console effect prints only under a grant. *)
@@ -89,7 +89,7 @@ let test_fold () =
 
 (* a program using console prints only under the grant *)
 let test_console_gated () =
-  let program = "(let nonrec (pwild) (app (var print) (lit \"hi weft\")) (lit 0))" in
+  let program = "(let nonrec (pwild) (app (var print) (lit \"hi jacquard\")) (lit 0))" in
   (* with the grant: output captured, program completes *)
   let store, ctx = Eval_support.make_prelude_ctx () in
   let buf = Buffer.create 16 in
@@ -99,7 +99,7 @@ let test_console_gated () =
   (match Eval_support.eval_with ctx store program with
   | Ok v -> Alcotest.(check string) "completed" "0" (Value.show v)
   | Error e -> Alcotest.failf "granted run failed: %s" (Runtime_err.to_string e));
-  Alcotest.(check string) "printed" "hi weft" (Buffer.contents buf);
+  Alcotest.(check string) "printed" "hi jacquard" (Buffer.contents buf);
   (* without: Unhandled naming console.print *)
   let store2, ctx2 = Eval_support.make_prelude_ctx () in
   match Eval_support.eval_with ctx2 store2 program with
@@ -124,7 +124,7 @@ let test_grant_mapping () =
   | Error [ d ] -> Alcotest.(check string) "ungrantable" "E0703" d.Diag.code
   | _ -> Alcotest.fail "unknown effect must not be grantable"
 
-(* a handler written in Weft can still intercept a granted effect (interposition) *)
+(* a handler written in Jacquard can still intercept a granted effect (interposition) *)
 let test_handler_overrides_grant () =
   let store, ctx = Eval_support.make_prelude_ctx () in
   let buf = Buffer.create 16 in

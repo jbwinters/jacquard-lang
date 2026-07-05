@@ -1,4 +1,4 @@
-open Weft
+open Jacquard
 
 (* W4.1-W4.4: the Dist layer — pmf, exact enumeration, likelihood weighting, and the
    in-language enumeration handler (stretch). *)
@@ -208,11 +208,11 @@ let test_model_unchanged_between_algorithms () =
   Alcotest.(check string)
     "the model does not change between algorithms; only the handler does" h_enum h_lw
 
-(* --- W4.4 (stretch): the enumeration handler written in Weft itself --- *)
+(* --- W4.4 (stretch): the enumeration handler written in Jacquard itself --- *)
 
 let test_in_language_enumeration () =
   let store, ctx = Eval_support.make_prelude_ctx () in
-  (* enum-run over a thunk of the two-coins model, normalized in Weft *)
+  (* enum-run over a thunk of the two-coins model, normalized in Jacquard *)
   let src =
     Printf.sprintf "(app (var normalize) (app (var enum-run) (lam () %s)))"
       (String.concat " " (String.split_on_char '\n' two_coins_src))

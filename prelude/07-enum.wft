@@ -1,4 +1,4 @@
-; The enumeration handler IN WEFT (plan W4.4, stretch): handlers are libraries.
+; The enumeration handler IN JACQUARD (plan W4.4, stretch): handlers are libraries.
 ; enum-run drives a model thunk to a weighted list of results; the sample clause
 ; resumes the SAME continuation once per support element (multi-shot), scaling
 ; each branch; observe scales the single continuation by the observed mass.

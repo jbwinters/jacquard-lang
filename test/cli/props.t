@@ -1,8 +1,8 @@
 Warp property lanes (W6.4 sampling + shrinking, W6.5 exhaustive, W6.9).
 
-  $ export WEFT_PRELUDE=$PWD/../../prelude
+  $ export JACQUARD_PRELUDE=$PWD/../../prelude
 
-  $ cat > props.wft <<'WEFT'
+  $ cat > props.wft <<'JACQUARD'
   > (defterm ((binding rev-broken ()
   >   (app (var prop) (lit "rev is identity (mutated)")
   >     (lam ()
@@ -20,14 +20,14 @@ Warp property lanes (W6.4 sampling + shrinking, W6.5 exhaustive, W6.9).
   >     (lam ()
   >       (let nonrec (pvar x) (app (var sample) (app (var uniform-int) (lit 0) (lit 999)))
   >         (app (var check.true) (app (var bool.not) (app (var eq) (var x) (lit 777))) (lit "not 777"))))))))
-  > WEFT
+  > JACQUARD
 
 Sampling mode falsifies and SHRINKS: the choice log minimizes greedily (delete
 spans, lower indices), and every candidate replays through the generator itself.
 The minimal case here is the shortest list where take 3 diverges — length 4,
 all-zero elements — found from a length-8 generator.
 
-  $ weft test props.wft --seed 42 --samples 50 --no-cache
+  $ jacquard test props.wft --seed 42 --samples 50 --no-cache
   PASS needle/avoids 777 (prop: 50 cases, seed 42)
   FAIL rev-broken/rev is identity (mutated) (prop: falsified on case 1 of 50, seed 42; shrunk to 5 choices [4;0;0;0;0])
     - rev roundtrip: expected [0, 0, 0], got [0, 0, 0, 0]
@@ -38,13 +38,13 @@ The doc's whole argument in one run: needle PASSES sampling (seed-lucky above)
 but exhaustive mode explores every support element and finds 777 — same Prop
 bytes, different handler.
 
-  $ weft test props.wft --exhaustive --no-cache | grep needle
+  $ jacquard test props.wft --exhaustive --no-cache | grep needle
   FAIL needle/avoids 777 (prop: falsified exhaustively)
 
 Exceeding the branch budget is a clean catalogued refusal, never a partial
 pass posing as a proof:
 
-  $ cat > small.wft <<'WEFT'
+  $ cat > small.wft <<'JACQUARD'
   > (defterm ((binding coin-ok ()
   >   (app (var prop) (lit "boolean coin")
   >     (lam ()
@@ -55,8 +55,8 @@ pass posing as a proof:
   >     (lam ()
   >       (let nonrec (pvar x) (app (var sample) (app (var uniform-int) (lit 0) (lit 999)))
   >         (app (var check.true) (var true) (lit "t"))))))))
-  > WEFT
-  $ weft test small.wft --exhaustive --budget 100 --no-cache
+  > JACQUARD
+  $ jacquard test small.wft --exhaustive --budget 100 --no-cache
   PASS coin-ok/boolean coin (verified exhaustively (2 cases))
   FAIL needle-too/needs branches (prop: exhaustive refusal)
     ! error[E0905]: exhaustive verification exceeded its budget: 101 explorations (cap 100), last at a 1000-way sample site; raise --budget or shrink the generators
@@ -66,16 +66,16 @@ pass posing as a proof:
 An exhaustive PASS is a proof for that content hash: the cache entry renders
 distinctly and skips re-proving.
 
-  $ weft test small.wft --exhaustive --cache-dir pc | grep coin-ok
+  $ jacquard test small.wft --exhaustive --cache-dir pc | grep coin-ok
   PASS coin-ok/boolean coin (verified exhaustively (2 cases))
-  $ weft test small.wft --exhaustive --cache-dir pc | grep coin-ok
+  $ jacquard test small.wft --exhaustive --cache-dir pc | grep coin-ok
   PASS coin-ok/boolean coin (verified exhaustively (2 cases)) [cached proof]
 
 W6.9: two formulations of the same model agree pointwise at 1e-9 — the
 refactoring test for inference. A deliberately different model fails with the
 per-outcome diff rendered through Show.
 
-  $ cat > dists.wft <<'WEFT'
+  $ cat > dists.wft <<'JACQUARD'
   > (defterm ((binding sampler-ok ()
   >   (app (var case) (lit "optimized model matches reference")
   >     (lam ()
@@ -99,8 +99,8 @@ per-outcome diff rendered through Show.
   >         (app (var cons) (app (var mk-pair) (var true) (lit 0.5))
   >           (app (var cons) (app (var mk-pair) (var false) (lit 0.5)) (var nil)))
   >         (var bool.eq) (var bool.show) (lit 0.01)))))))
-  > WEFT
-  $ weft test dists.wft --no-cache --seed 1
+  > JACQUARD
+  $ jacquard test dists.wft --no-cache --seed 1
   FAIL drifted/drifted model caught
     - posterior: P(true) = 0.7, expected 0.5
     - posterior: P(false) = 0.30000000000000004, expected 0.5

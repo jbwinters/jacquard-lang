@@ -1,9 +1,9 @@
 Warp (W6.2/W6.3/W6.8): type-directed discovery, two lanes, the hermetic result
 cache, and semantic coverage.
 
-  $ export WEFT_PRELUDE=$PWD/../../prelude
+  $ export JACQUARD_PRELUDE=$PWD/../../prelude
 
-  $ cat > suite.wft <<'WEFT'
+  $ cat > suite.wft <<'JACQUARD'
   > (defterm ((binding shout ()
   >   (lam ((pvar s)) (app (var text.concat) (var s) (lit "!"))))))
   > (defterm ((binding shout-appends ()
@@ -28,13 +28,13 @@ cache, and semantic coverage.
   > (defterm ((binding test-looking-name () (lit 42))))
   > (defterm ((binding lazy-one ()
   >   (app (var case) (lit "does nothing") (lam () (tuple))))))
-  > WEFT
+  > JACQUARD
 
 Discovery is by checked type only (D12): the int named test-looking-name is not
 a test; the group recurses; the prop reports skipped until W6.4; the world test
 refuses without grants. Zero-check warning and failure detail render inline.
 
-  $ weft test suite.wft --seed 7 --cache-dir wcache
+  $ jacquard test suite.wft --seed 7 --cache-dir wcache
   PASS a-group/grouped/inner (1 check)
   PASS freq-prop/sampled (prop: 100 cases, seed 7)
   WARN lazy-one/does nothing: made no checks
@@ -46,7 +46,7 @@ refuses without grants. Zero-check warning and failure detail render inline.
 
 The world lane runs under its grants (and is never cached):
 
-  $ weft test suite.wft --seed 7 --cache-dir wcache --allow fs --allow clock --allow console --allow net | grep needs-world
+  $ jacquard test suite.wft --seed 7 --cache-dir wcache --allow fs --allow clock --allow console --allow net | grep needs-world
   PASS needs-world/touches fs (1 check)
   $ ls wcache | wc -l
   5
@@ -54,10 +54,10 @@ The world lane runs under its grants (and is never cached):
 DOC-MANDATED CACHE TEST 1 — a reformat/comment edit reruns ZERO tests: the
 metadata law keeps hashes identical, so the second run is a full hit.
 
-  $ cat >> suite.wft <<'WEFT'
+  $ cat >> suite.wft <<'JACQUARD'
   > ; a trailing comment: meta only, no hash changes anywhere
-  > WEFT
-  $ weft test suite.wft --seed 7 --cache-dir wcache | tail -2
+  > JACQUARD
+  $ jacquard test suite.wft --seed 7 --cache-dir wcache | tail -2
   5 passed, 0 failed, 0 skipped, 1 refused
   cache: 5 hit, 0 ran
 
@@ -66,7 +66,7 @@ transitively-dependent tests: shout's body changes, so shout-appends (and only
 shout-appends) re-keys and reruns — and now fails, honestly.
 
   $ sed 's/(lit "!")/(lit "?")/' suite.wft > suite2.wft
-  $ weft test suite2.wft --seed 7 --cache-dir wcache
+  $ jacquard test suite2.wft --seed 7 --cache-dir wcache
   PASS a-group/grouped/inner (1 check) [cached]
   PASS freq-prop/sampled (prop: 100 cases, seed 7) [cached]
   WARN lazy-one/does nothing: made no checks [cached]
@@ -82,26 +82,26 @@ DOC-MANDATED CACHE TEST 3 — the cache is copy-portable because keys are
 content: a copied directory in a fresh tree yields a full-hit run.
 
   $ mkdir fresh-tree && cp -r wcache fresh-tree/moved-cache && cp suite.wft fresh-tree/
-  $ cd fresh-tree && weft test suite.wft --seed 7 --cache-dir moved-cache | tail -1 && cd ..
+  $ cd fresh-tree && jacquard test suite.wft --seed 7 --cache-dir moved-cache | tail -1 && cd ..
   cache: 5 hit, 0 ran
 
 --no-cache bypasses; a corrupted entry is ignored and rerun, not fatal:
 
-  $ weft test suite.wft --seed 7 --no-cache | tail -1
+  $ jacquard test suite.wft --seed 7 --no-cache | tail -1
   5 passed, 0 failed, 0 skipped, 1 refused
   $ for f in wcache/*.wft; do echo garbage > $f; done
-  $ weft test suite.wft --seed 7 --cache-dir wcache | tail -1
+  $ jacquard test suite.wft --seed 7 --cache-dir wcache | tail -1
   cache: 0 hit, 5 ran
 
 Coverage (W6.8): the complement of what tests executed, definition-level, from
 the hash discipline alone — and a fully-cached run reports the same complement
 because entries record their coverage sets.
 
-  $ weft test suite.wft --seed 7 --cache-dir wcache --coverage | grep -E "coverage:|test-looking" | sed 's/[0-9][0-9]*/N/g'
+  $ jacquard test suite.wft --seed 7 --cache-dir wcache --coverage | grep -E "coverage:|test-looking" | sed 's/[0-9][0-9]*/N/g'
   coverage: N of N definitions executed
     uncovered test-looking-name
-  $ weft test suite.wft --seed 7 --no-cache --coverage > cold.txt
-  $ weft test suite.wft --seed 7 --cache-dir wcache --coverage > warm.txt
+  $ jacquard test suite.wft --seed 7 --no-cache --coverage > cold.txt
+  $ jacquard test suite.wft --seed 7 --cache-dir wcache --coverage > warm.txt
   $ grep -c "cache: 4 hit" warm.txt
   0
   [1]
@@ -112,7 +112,7 @@ because entries record their coverage sets.
 A test file with a top-level expression is a mistake, named:
 
   $ echo '(app (var add) (lit 1) (lit 2))' > oops.wft
-  $ weft test oops.wft
+  $ jacquard test oops.wft
   error[E1001]: oops.wft: test files hold declarations only; found a top-level expression
   [1]
 
@@ -120,7 +120,7 @@ W6.6's load-bearing move: a fixture is a store object referenced by hash, so
 EDITING THE FIXTURE re-keys every referencing test — cache invalidation with
 zero new machinery.
 
-  $ cat > fixture-suite.wft <<'WEFT'
+  $ cat > fixture-suite.wft <<'JACQUARD'
   > (defterm ((binding my-fixture ()
   >   (quote (log (op (lit "fetch") (request (lit "http://a") (lit "")) (response (lit 200) (lit "pinned"))))))))
   > (defterm ((binding replay-case ()
@@ -133,10 +133,10 @@ zero new machinery.
   >               (clause (pcon mk-response (pwild) (pvar b)) (var b))))))
   >           (lam ((pvar e)) (var e)))
   >         (app (var check.eq) (var body) (lit "pinned") (var text.eq) (var text.show) (lit "served"))))))))
-  > WEFT
-  $ weft test fixture-suite.wft --seed 7 --cache-dir fcache | tail -1
+  > JACQUARD
+  $ jacquard test fixture-suite.wft --seed 7 --cache-dir fcache | tail -1
   cache: 0 hit, 1 ran
-  $ weft test fixture-suite.wft --seed 7 --cache-dir fcache | tail -1
+  $ jacquard test fixture-suite.wft --seed 7 --cache-dir fcache | tail -1
   cache: 1 hit, 0 ran
 
 Edit ONE response text in the fixture: the test re-keys and reruns (and now
@@ -144,7 +144,7 @@ fails honestly, since the body pins the old text).
 
   $ sed 's/pinned/EDITED/' fixture-suite.wft > fixture-suite2.wft
   $ sed -i 's/(var body) (lit "EDITED")/(var body) (lit "pinned")/' fixture-suite2.wft
-  $ weft test fixture-suite2.wft --seed 7 --cache-dir fcache
+  $ jacquard test fixture-suite2.wft --seed 7 --cache-dir fcache
   FAIL replay-case/replays the fixture
     - served: expected pinned, got EDITED
   0 passed, 1 failed, 0 skipped, 0 refused

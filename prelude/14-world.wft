@@ -1,5 +1,5 @@
 ; World conveniences and the interposition tutorial (stdlib SL.8), plus the
-; infer fixtures (SL.10). Everything here is ordinary Weft over the ring 3
+; infer fixtures (SL.10). Everything here is ordinary Jacquard over the ring 3
 ; effect declarations: attenuating authority is just wrapping a handler.
 (defterm ((binding println ()
   (lam ((pvar s)) (app (var print) (app (var text.concat) (var s) (lit "\n")))))))

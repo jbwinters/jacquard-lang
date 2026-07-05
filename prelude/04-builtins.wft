@@ -33,7 +33,7 @@
 
 (defterm ((binding lt-real () (quote (builtin-marker lt-real)))))
 
-; code reflection (W6.6): build and destructure quote payloads from Weft.
+; code reflection (W6.6): build and destructure quote payloads from Jacquard.
 ; The codec layer is these six natives plus ordinary pattern matching.
 (defterm ((binding code.of-int () (quote (builtin-marker code.of-int)))))
 

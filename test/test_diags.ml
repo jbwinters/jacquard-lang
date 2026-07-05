@@ -1,4 +1,4 @@
-open Weft
+open Jacquard
 
 (* W3.7: 20 golden rendered diagnostics; every checker code appears in at least one. *)
 

@@ -1,4 +1,4 @@
-open Weft
+open Jacquard
 
 (* W5.2: the semantic differ. *)
 

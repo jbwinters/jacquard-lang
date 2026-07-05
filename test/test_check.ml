@@ -1,4 +1,4 @@
-open Weft
+open Jacquard
 
 (* W3.2: expression inference — golden signatures over corpus/sigs, plus the specific
    done-when cases (identity, console row, value restriction, annotation mismatch). *)

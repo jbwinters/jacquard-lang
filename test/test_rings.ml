@@ -1,4 +1,4 @@
-open Weft
+open Jacquard
 
 (* SL.9: the layering audit ("rings are literal", made executable) and the ring-0
    freeze. Pure store-graph traversal over Store.deps — no new machinery. *)

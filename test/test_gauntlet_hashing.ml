@@ -1,4 +1,4 @@
-open Weft
+open Jacquard
 
 let expr_hash src =
   match Reader.parse_one ~file:"gauntlet-hash.wft" src with

@@ -1,4 +1,4 @@
 (executable
  (name main)
- (public_name weft)
- (libraries weft str cmdliner unix))
+ (public_name jacquard)
+ (libraries jacquard str cmdliner unix))

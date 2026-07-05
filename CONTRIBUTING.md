@@ -1,8 +1,8 @@
-# Contributing to Weft
+# Contributing to Jacquard
 
-This document pins the engineering conventions for the Weft prototype. The
+This document pins the engineering conventions for the Jacquard prototype. The
 development plan (`docs/development-plan.md`) is the execution queue; the spec
-(`spec/weft-kernel-ast-m0.md`) is the source of truth for language behavior.
+(`spec/jacquard-kernel-ast-m0.md`) is the source of truth for language behavior.
 
 ## Module naming
 
@@ -16,7 +16,7 @@ development plan (`docs/development-plan.md`) is the execution queue; the spec
 - Library code returns `('a, Diag.t list) result`. No exceptions across public
   API boundaries.
 - Exceptions are only for internal invariant violations that indicate a bug in
-  Weft itself, and their constructors are prefixed `Bug_`.
+  Jacquard itself, and their constructors are prefixed `Bug_`.
 - Every diagnostic has a stable code (`E0001`-style for errors, `W0001`-style
   for warnings). Codes are never reused or renumbered once released.
 - Public functions in touched modules carry doc comments stating the contract
@@ -25,7 +25,7 @@ development plan (`docs/development-plan.md`) is the execution queue; the spec
 ## Test naming
 
 - Test files live in `test/` and are named `test_<module>.ml` after the module
-  under test; the runner is `test/test_weft.ml`.
+  under test; the runner is `test/test_jacquard.ml`.
 - Alcotest suite names match the module (`"form"`, `"reader"`); test case
   names say what is asserted, e.g. `"equal_ignoring_meta ignores span"`.
 - QCheck property tests are prefixed `prop_` and state the property, e.g.
@@ -60,6 +60,6 @@ development plan (`docs/development-plan.md`) is the execution queue; the spec
 
 See `docs/ci-cd.md` for the branch protection and release evidence process.
 Ordinary PRs must satisfy `CI / Development gate`. Release-candidate branches
-and `weft-core-*` tags must also satisfy `Release Evidence / Reproduce 0.1
+and `jacquard-core-*` tags must also satisfy `Release Evidence / Reproduce 0.1
 evidence`, which runs the reproducibility script and uploads the transcript
 artifact.

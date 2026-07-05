@@ -1,6 +1,6 @@
 # CI/CD
 
-Weft's CI is intentionally a release discipline, not just a build bot. The
+Jacquard's CI is intentionally a release discipline, not just a build bot. The
 project rule is that nothing merges unless the definition-of-done evidence is
 machine-checkable.
 
@@ -36,7 +36,7 @@ Workflow: `.github/workflows/release-evidence.yml`
 Runs on:
 
 - pushes to `release/**`
-- tags named `weft-core-*`
+- tags named `jacquard-core-*` (and `weft-core-*`, the pre-rename tag family)
 - manual dispatch with a chosen branch, tag, or commit
 
 Required check before tagging release candidates:
@@ -46,8 +46,8 @@ Required check before tagging release candidates:
 The workflow runs:
 
 ```sh
-WEFT_RELEASE_REF=HEAD \
-WEFT_RELEASE_BASE=aec2c63 \
+JACQUARD_RELEASE_REF=HEAD \
+JACQUARD_RELEASE_BASE=aec2c63 \
 scripts/release/reproduce-0.1.sh
 ```
 
@@ -70,7 +70,7 @@ For `release/**`:
 - require `Release Evidence / Reproduce 0.1 evidence`
 - restrict changes to correctness, reproducibility, documentation, and demos
 
-For `weft-core-*` tags:
+For `jacquard-core-*` tags:
 
 - create tags only after the release evidence workflow is green for the exact
   commit being tagged
@@ -91,5 +91,5 @@ git diff --exit-code
 Before asking for a release-candidate review:
 
 ```sh
-WEFT_RELEASE_REF=release/0.1-evidence scripts/release/reproduce-0.1.sh
+JACQUARD_RELEASE_REF=release/0.1-evidence scripts/release/reproduce-0.1.sh
 ```

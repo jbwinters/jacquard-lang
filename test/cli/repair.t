@@ -7,7 +7,7 @@ and an overfitting patch at 0.25; one regression test proves the intended
 patch at probability 1. The Warp suite covers the pure machinery: the
 posterior itself needs eval, which Warp's closed {check} row cannot grant.
 
-  $ export WEFT_PRELUDE=../../prelude
+  $ export JACQUARD_PRELUDE=../../prelude
 
   $ sh ../../demos/repair.sh
   == the rows announce the authority: mutation is pure, running candidates is eval ==
@@ -56,5 +56,5 @@ support points:
 
   $ awk '/^; --- demo driver ---$/ { exit } { print }' ../../demos/repair.wft > repair-defs.wft
   $ cat repair-defs.wft ../../demos/repair-warp-tests.wft > repair-suite.wft
-  $ weft test repair-suite.wft --exhaustive --no-cache | grep repair-prior-support
+  $ jacquard test repair-suite.wft --exhaustive --no-cache | grep repair-prior-support
   PASS repair-prior-support/sampled patches stay one edit away (verified exhaustively (9 cases))

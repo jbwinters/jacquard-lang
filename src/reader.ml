@@ -215,7 +215,7 @@ let classify_number st ~start_pos s =
   | LIntOverflow ->
       error st ~code:"E0109" ~start_pos
         (Printf.sprintf "integer literal %s does not fit in a native int" s)
-        ~hint:"Weft integers are 63-bit native ints (decision D2)"
+        ~hint:"Jacquard integers are 63-bit native ints (decision D2)"
 
 let read_text st =
   let start_pos = pos st in

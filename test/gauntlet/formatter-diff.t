@@ -1,22 +1,22 @@
 Formatter/diff gauntlet: formatting is idempotent, preserves content identity,
 and produces no semantic diff.
 
-  $ export WEFT_PRELUDE=../../prelude
+  $ export JACQUARD_PRELUDE=../../prelude
 
   $ cat > ugly.wft <<'EOF_WFT'
   > (defterm ((binding id () (lam ((pvar x)) (var x)))))
   > EOF_WFT
-  $ weft fmt ugly.wft > once.wft
-  $ weft fmt once.wft > twice.wft
+  $ jacquard fmt ugly.wft > once.wft
+  $ jacquard fmt once.wft > twice.wft
   $ cmp once.wft twice.wft
 
-  $ weft hash ugly.wft > before.hash
-  $ weft hash once.wft > after.hash
+  $ jacquard hash ugly.wft > before.hash
+  $ jacquard hash once.wft > after.hash
   $ cmp before.hash after.hash
 
-  $ weft store add ugly ugly.wft
+  $ jacquard store add ugly ugly.wft
   ok
-  $ weft store add pretty once.wft
+  $ jacquard store add pretty once.wft
   ok
-  $ weft diff ugly pretty
+  $ jacquard diff ugly pretty
   no semantic changes

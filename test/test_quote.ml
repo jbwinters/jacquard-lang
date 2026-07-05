@@ -1,4 +1,4 @@
-open Weft
+open Jacquard
 
 (* W2.5: quote, unquote, Code values, hygiene marks, and the gated eval effect. *)
 

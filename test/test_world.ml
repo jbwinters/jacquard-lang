@@ -1,4 +1,4 @@
-open Weft
+open Jacquard
 
 (* SL.8/SL.10: world-effect root handlers with injected primitives, the read-only
    interposition handler, debug.inspect, and the infer fixtures. *)
@@ -42,7 +42,7 @@ let test_console_read_line_injected () =
     (show h "(tuple (app (var read-line)) (app (var read-line)))")
 
 let with_tmpdir f =
-  let dir = Filename.temp_file "weft-fs" "" in
+  let dir = Filename.temp_file "jacquard-fs" "" in
   Sys.remove dir;
   Sys.mkdir dir 0o755;
   Fun.protect
@@ -82,7 +82,9 @@ let test_fs_roundtrip_and_readonly () =
         (show h
            (Printf.sprintf "(app (var fs.read-only) (lam () (app (var read) (lit \"%s\"))))" path));
       (* IO failure is a clean runtime error, not a crash *)
-      match Eval_support.eval_with ctx (fst h) "(app (var read) (lit \"/nonexistent-weft\"))" with
+      match
+        Eval_support.eval_with ctx (fst h) "(app (var read) (lit \"/nonexistent-jacquard\"))"
+      with
       | Error (Runtime_err.Io _) -> ()
       | r ->
           Alcotest.failf "missing file must be Io, got %s"

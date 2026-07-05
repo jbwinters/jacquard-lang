@@ -3,11 +3,11 @@
 # Run from the repo root:
 #   sh demos/agent-dream.sh
 set -u
-WEFT="${WEFT:-dune exec weft --}"
+JACQUARD="${JACQUARD:-dune exec jacquard --}"
 here="$(dirname "$0")"
 
 echo "== policy authority =="
-$WEFT check "$here/agent-dream.wft" --print-sigs | grep '^support-policy'
+$JACQUARD check "$here/agent-dream.wft" --print-sigs | grep '^support-policy'
 
 echo "== scripted worlds and probabilistic dream =="
-$WEFT run "$here/agent-dream.wft"
+$JACQUARD run "$here/agent-dream.wft"

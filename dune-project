@@ -1,6 +1,6 @@
 (lang dune 3.11)
 
-(name weft)
+(name jacquard)
 
 (implicit_transitive_deps false)
 

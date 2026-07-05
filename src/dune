@@ -1,4 +1,4 @@
 (library
- (name weft)
- (public_name weft)
+ (name jacquard)
+ (public_name jacquard)
  (libraries digestif unix))

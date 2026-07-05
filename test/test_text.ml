@@ -1,4 +1,4 @@
-open Weft
+open Jacquard
 
 (* SL.5: text builtins — codepoint semantics (D9), reader-grammar conversions. *)
 

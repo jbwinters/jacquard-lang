@@ -1,38 +1,38 @@
 (library
  (name corpus_support)
  (modules corpus_support)
- (libraries weft unix))
+ (libraries jacquard unix))
 
 (executable
  (name gen_goldens)
  (modules gen_goldens)
- (libraries weft corpus_support))
+ (libraries jacquard corpus_support))
 
 (executable
  (name gen_prelude_goldens)
  (modules gen_prelude_goldens)
- (libraries weft unix))
+ (libraries jacquard unix))
 
 (executable
  (name gen_sig_goldens)
  (modules gen_sig_goldens)
- (libraries weft corpus_support))
+ (libraries jacquard corpus_support))
 
 (executable
  (name gen_diag_goldens)
  (modules gen_diag_goldens)
- (libraries weft corpus_support))
+ (libraries jacquard corpus_support))
 
 (executable
  (name gen_freeze_goldens)
  (modules gen_freeze_goldens)
- (libraries weft corpus_support))
+ (libraries jacquard corpus_support))
 
 (test
- (name test_weft)
+ (name test_jacquard)
  (modules
   (:standard \ corpus_support gen_goldens gen_prelude_goldens gen_sig_goldens gen_diag_goldens gen_freeze_goldens))
- (libraries weft corpus_support alcotest fmt qcheck-core qcheck-alcotest unix str)
+ (libraries jacquard corpus_support alcotest fmt qcheck-core qcheck-alcotest unix str)
  (deps
   (glob_files_rec ../corpus/*.wft)
   (glob_files_rec ../corpus/*.expect)

@@ -1,4 +1,4 @@
-open Weft
+open Jacquard
 
 let hex = Hash.to_hex (Hash.of_string "seed")
 

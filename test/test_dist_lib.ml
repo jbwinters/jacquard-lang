@@ -1,4 +1,4 @@
-open Weft
+open Jacquard
 
 (* SL.7: uniform-int, the dictionary-honest dist.pmf, enumerate/tally, and the
    sampling root handler. *)

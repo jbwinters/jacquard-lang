@@ -19,7 +19,7 @@ project shape from file names alone.
 
 - `whitepaper.tex`: thesis, motivation, roadmap, risks, and related work.
 - `ast.md`: kernel AST draft and metadata/hash contract.
-- `../spec/weft-kernel-ast-m0.md`: kernel AST source-of-truth spec.
+- `../spec/jacquard-kernel-ast-m0.md`: kernel AST source-of-truth spec.
 - `../spec/serialization.md`: canonical byte serialization and hashing.
 - `development-plan.md`: original task plan and milestone discipline.
 

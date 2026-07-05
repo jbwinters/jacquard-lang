@@ -1,4 +1,4 @@
-open Weft
+open Jacquard
 
 (* SL.2–SL.4: ring 0 dictionaries, the vocabulary grid, and ring 1 handlers,
    tested behaviorally against OCaml reference implementations via qcheck.
@@ -13,7 +13,7 @@ let eval_ok src =
 
 let show src = Value.show (eval_ok src)
 
-(* Weft source builders *)
+(* Jacquard source builders *)
 let wlist xs =
   List.fold_right (fun x acc -> Printf.sprintf "(app (var cons) %s %s)" x acc) xs "(var nil)"
 

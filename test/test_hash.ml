@@ -1,4 +1,4 @@
-open Weft
+open Jacquard
 
 (* Known SHA-256 vectors pin HASH_V0 to its intended algorithm. *)
 let test_known_vectors () =

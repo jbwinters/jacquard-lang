@@ -2,7 +2,7 @@
     environment (until W2.6's real prelude replaces it), file IO, and the full
     parse-validate-resolve-hash pipeline. *)
 
-open Weft
+open Jacquard
 
 (* Deterministic fake globals: hash of "stub:<name>". Regenerate the golden hashes when the
    real prelude replaces this environment. *)
@@ -133,7 +133,7 @@ let corpus_golden_lines ~valid_dir =
 let sig_lines ~prelude_dir ~sigs_dir : (string list, Diag.t list) result =
   let root =
     Filename.concat (Filename.get_temp_dir_name ())
-      (Printf.sprintf "weft-sigs-%d-%d" (Unix.getpid ()) (Hashtbl.hash sigs_dir land 0xFFFF))
+      (Printf.sprintf "jacquard-sigs-%d-%d" (Unix.getpid ()) (Hashtbl.hash sigs_dir land 0xFFFF))
   in
   let ( let* ) = Result.bind in
   let* store = Store.open_store root in
@@ -186,7 +186,7 @@ let stage_ext_name = function
 let check_pipeline ~prelude_dir ~file src : (unit, stage_ext * Diag.t list) result =
   let root =
     Filename.concat (Filename.get_temp_dir_name ())
-      (Printf.sprintf "weft-checkstage-%d-%d" (Unix.getpid ()) (Hashtbl.hash file land 0xFFFF))
+      (Printf.sprintf "jacquard-checkstage-%d-%d" (Unix.getpid ()) (Hashtbl.hash file land 0xFFFF))
   in
   let fail st ds = Error (st, ds) in
   match Store.open_store root with
@@ -286,7 +286,7 @@ let diag_cases : (string * string * string list option) list =
 let diag_golden_lines ~prelude_dir : (string list, Diag.t list) result =
   let root =
     Filename.concat (Filename.get_temp_dir_name ())
-      (Printf.sprintf "weft-diags-%d" (Unix.getpid ()))
+      (Printf.sprintf "jacquard-diags-%d" (Unix.getpid ()))
   in
   let ( let* ) = Result.bind in
   let* store = Store.open_store root in
@@ -415,7 +415,7 @@ let freeze_lines ~prelude_dir ~manifest : (string list, Diag.t list) result =
   let ( let* ) = Result.bind in
   let root =
     Filename.concat (Filename.get_temp_dir_name ())
-      (Printf.sprintf "weft-freeze-%d" (Unix.getpid ()))
+      (Printf.sprintf "jacquard-freeze-%d" (Unix.getpid ()))
   in
   let* store = Store.open_store root in
   let* _ = Prelude.load ~dir:prelude_dir store in

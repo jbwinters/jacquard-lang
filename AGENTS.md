@@ -76,7 +76,7 @@ When adding valid corpus files, regenerate the golden hashes with
 
 - Preserve the release-hardening posture unless the user explicitly asks for
   feature work.
-- Start from existing tests and docs. Weft behavior is pinned by cram
+- Start from existing tests and docs. Jacquard behavior is pinned by cram
   transcripts, Alcotest/QCheck suites, corpus goldens, demos, and release docs.
 - Keep behavior tied to the 27 kernel forms in `docs/ast.md`; do not add surface syntax beyond the bootstrap `.wft` notation in W1.2.
 - Do not add out-of-scope features from the plan guardrails: performance work, macros beyond quote/unquote/gated eval, records, typed staging, continuous distributions, package management, self-hosting, or ownership/borrowing.
@@ -120,7 +120,7 @@ GitHub Actions mirrors the local definition of done:
 - `CI / Development gate` runs build, full tests, clean formatting, version
   smoke, and release-doc presence on PRs, `main`, and `release/**`.
 - `Release Evidence / Reproduce 0.1 evidence` runs
-  `scripts/release/reproduce-0.1.sh` on `release/**`, `weft-core-*` tags, and
+  `scripts/release/reproduce-0.1.sh` on `release/**`, `jacquard-core-*` tags, and
   manual dispatch, then uploads the evidence transcripts.
 
 Release-facing changes should keep `scripts/release/reproduce-0.1.sh` green and

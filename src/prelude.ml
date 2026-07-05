@@ -324,7 +324,7 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
              | Some (Form.Int i) -> Ok (vsome (Value.VReal (float_of_int i)))
              | _ -> Ok vnone))
   | _ -> ());
-  (* --- W6.6 code reflection: quote payloads built and destructured from Weft.
+  (* --- W6.6 code reflection: quote payloads built and destructured from Jacquard.
      of-int/of-text wrap scalars as (lit ...) forms; form/un-form build and split
      arbitrary heads; eq? is the metadata-law equality; diff renders the semantic
      differ's smallest disagreeing subtrees. --- *)
@@ -627,9 +627,9 @@ let install_fs (ctx : Eval.ctx) : (unit, Diag.t list) result =
 
 (** [install_infer ?cache_dir ctx] grants [infer] with the STUB completion handler (real API calls
     are out of scope, like real sockets). With [cache_dir], completions are cached content-addressed
-    by prompt: each entry is a printed form readable by weft fmt, and every call logs "infer-cache
-    hit/miss <key>" to stderr — the second identical run is a full hit, which makes agent loops
-    deterministic and builds an eval dataset as a side effect. *)
+    by prompt: each entry is a printed form readable by jacquard fmt, and every call logs
+    "infer-cache hit/miss <key>" to stderr — the second identical run is a full hit, which makes
+    agent loops deterministic and builds an eval dataset as a side effect. *)
 let install_infer ?cache_dir (ctx : Eval.ctx) : (unit, Diag.t list) result =
   let ( let* ) = Result.bind in
   let* complete_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "complete" in

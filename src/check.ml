@@ -429,7 +429,7 @@ and infer ctx env ~(ambient : row) (e : Kernel.expr) : ty =
       match repr fn_ty with
       | TArrow (params, frow, result) ->
           if List.length params <> List.length args then
-            err ~meta ~hint:"Weft calls are uncurried: pass exactly the declared arguments"
+            err ~meta ~hint:"Jacquard calls are uncurried: pass exactly the declared arguments"
               ~code:"E0803" "this function expects %d argument(s), got %d" (List.length params)
               (List.length args);
           List.iter2 (fun p a -> unify_or ctx ~meta ~what:"argument" p a) params arg_tys;

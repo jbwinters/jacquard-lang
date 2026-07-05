@@ -1,6 +1,6 @@
-weft run: declarations load, expressions evaluate and print (W2.7).
+jacquard run: declarations load, expressions evaluate and print (W2.7).
 
-  $ export WEFT_PRELUDE=../../prelude
+  $ export JACQUARD_PRELUDE=../../prelude
 
 Factorial (decl + expression in one file):
 
@@ -14,7 +14,7 @@ Factorial (decl + expression in one file):
   >           (app (var fact) (app (var sub) (var m) (lit 1))))))))))
   > (app (var fact) (lit 5))
   > EOF
-  $ weft run fact.wft
+  $ jacquard run fact.wft
   120
 
 The multi-shot Choose program (the return clause wraps each branch into the
@@ -36,18 +36,18 @@ answer type; the op clause appends the two branch lists):
   >   (opclause choose () k
   >     (app (var append) (app (var k) (var true)) (app (var k) (var false)))))
   > EOF
-  $ weft run choose.wft
+  $ jacquard run choose.wft
   cons(1, cons(2, nil))
 
 Console prints only under its grant (exit 3 = unhandled effect):
 
   $ cat > hello.wft <<'EOF'
-  > (app (var print) (lit "hello weft\n"))
+  > (app (var print) (lit "hello jacquard\n"))
   > EOF
-  $ weft run hello.wft --allow console
-  hello weft
+  $ jacquard run hello.wft --allow console
+  hello jacquard
   ()
-  $ weft run hello.wft
+  $ jacquard run hello.wft
   error[E0814]: this program requires the `console` effect, which is not granted (performed via `print`)
     hint: grant it with --allow console, or handle the effect in the program
   [3]
@@ -57,7 +57,7 @@ Runtime errors exit 2:
   $ cat > crash.wft <<'EOF'
   > (app (var div) (lit 1) (lit 0))
   > EOF
-  $ weft run crash.wft
+  $ jacquard run crash.wft
   arithmetic error: division by zero
   [2]
 
@@ -66,6 +66,6 @@ Diagnostics exit 1:
   $ cat > broken.wft <<'EOF'
   > (lit 1
   > EOF
-  $ weft run broken.wft
+  $ jacquard run broken.wft
   broken.wft:1:1-2:1: error[E0106]: unclosed form: expected `)`
   [1]

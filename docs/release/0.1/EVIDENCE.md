@@ -2,6 +2,11 @@
 
 Status: release-candidate evidence pack for `release/0.1-evidence`.
 
+> Note (2026-07-05): the language was renamed Weft -> Jacquard after this
+> release. This pack, the `release/0.1-evidence` branch, and the
+> `weft-core-0.1.0` tag keep the old name as history; new releases use
+> `jacquard-core-*`.
+
 Candidate base: `aec2c63`  
 Evidence branch predecessor: `7d7733f`  
 Version surface: `weft --version` prints `0.1.0`

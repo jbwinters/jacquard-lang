@@ -3,9 +3,9 @@
 #   sh demos/showcase-warp-tests.sh
 set -eu
 
-WEFT="${WEFT:-dune exec weft --}"
+JACQUARD="${JACQUARD:-dune exec jacquard --}"
 here="$(dirname "$0")"
-tmp="$(mktemp "${TMPDIR:-/tmp}/weft-demo-tests.XXXXXX.wft")"
+tmp="$(mktemp "${TMPDIR:-/tmp}/jacquard-demo-tests.XXXXXX.wft")"
 trap 'rm -f "$tmp"' EXIT
 
 strip_driver() {
@@ -18,4 +18,4 @@ strip_driver "$here/agent-dream.wft"
 strip_driver "$here/ambiguity-pipeline.wft"
 cat "$here/showcase-warp-tests.wft" >> "$tmp"
 
-$WEFT test "$tmp" --seed 7 --no-cache
+$JACQUARD test "$tmp" --seed 7 --no-cache

@@ -23,7 +23,7 @@ let to_string = function
   | Io msg -> Printf.sprintf "io error: %s" msg
   | Observe_at_root ->
       "observe reached the sampling root handler; observation requires an inference driver (use \
-       weft infer)"
+       jacquard infer)"
   | Unhandled { effect_; op } ->
       Printf.sprintf "unhandled effect %s: operation `%s` reached the root without a handler"
         effect_ op

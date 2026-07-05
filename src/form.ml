@@ -1,6 +1,6 @@
-(** The uniform triple representation (spec §2): every Weft form is [(head, meta, args)]. Scalars
-    appear only as leaves inside [args]; everything else is a triple. This is the single physical
-    shape of all Weft code. *)
+(** The uniform triple representation (spec §2): every Jacquard form is [(head, meta, args)].
+    Scalars appear only as leaves inside [args]; everything else is a triple. This is the single
+    physical shape of all Jacquard code. *)
 
 type arg = F of t | Int of int | Real of float | Text of string | Sym of string | Hash of Hash.t
 and t = { head : string; meta : Meta.t; args : arg list }

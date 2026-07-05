@@ -1,6 +1,6 @@
-# Weft
+# Jacquard
 
-Weft is a research prototype for running, reviewing, simulating, and trusting
+Jacquard is a research prototype for running, reviewing, simulating, and trusting
 programs written by models and reviewed by people.
 
 Concretely, it is a small programming language: Lisp-style syntax, an
@@ -11,7 +11,7 @@ is the honest list of what it does not do.
 
 ## For Humans
 
-Most languages tell you what a program computes. Weft also tells you what a
+Most languages tell you what a program computes. Jacquard also tells you what a
 program is allowed to do, how certain it is, and whether two pieces of code
 mean the same thing. Tools can check all three, because they live in the
 language instead of in comments, logs, or your memory of the codebase.
@@ -31,11 +31,11 @@ Things you can do here that most languages cannot offer:
   handler, and the code never changes. This replaces mocking frameworks, and
   it makes "what would my agent do if the API went down?" an ordinary test.
 - Ask for exact odds. Probability is part of the language. A program can
-  sample weighted choices and record evidence, and Weft will list every
+  sample weighted choices and record evidence, and Jacquard will list every
   possible outcome with its exact chance. The repair demo below uses this to
   treat a failing test as evidence: it computes which patches to a buggy
   program remain possible, and how likely each one is.
-- Rename and reformat for free. Weft identifies code by a hash of its meaning,
+- Rename and reformat for free. Jacquard identifies code by a hash of its meaning,
   not its text. Comments and formatting never break a build or a cache, and
   pure tests rerun only when the meaning of something they depend on changed.
 
@@ -102,7 +102,7 @@ handler resuming one continuation twice (`demos/m1-choose.wft`):
 ```
 
 ```
-$ weft run demos/m1-choose.wft
+$ jacquard run demos/m1-choose.wft
 cons(1, cons(2, nil))
 ```
 
@@ -116,11 +116,11 @@ step still runs (it counts eight candidate patches) and then the demo refuses
 until you grant the rest:
 
 ```
-$ weft run demos/repair.wft
+$ jacquard run demos/repair.wft
 8
 error[E0814]: this program requires the `eval` effect, which is not granted (performed via `posterior-over-patches`)
   hint: grant it with --allow eval, or handle the effect in the program
-$ weft run demos/repair.wft --allow eval
+$ jacquard run demos/repair.wft --allow eval
 ```
 
 Under the grant, one failing test leaves two surviving patches: the intended
@@ -135,8 +135,8 @@ If you already have `opam` 2.5.x, start at the local switch step. If `opam`
 is already initialized on your machine, skip `opam init`.
 
 ```bash
-git clone https://github.com/jbwinters/weft-lang.git
-cd weft-lang
+git clone https://github.com/jbwinters/jacquard-lang.git
+cd jacquard-lang
 
 asdf plugin add opam https://github.com/asdf-community/asdf-opam.git
 asdf install opam 2.5.1
@@ -166,7 +166,7 @@ Expected versions after setup:
 - `opam` 2.5.1 from `.tool-versions`
 - OCaml 5.1.1 from the repo-local `_opam/` switch
 - `dune`, `ocamlformat`, `alcotest`, `qcheck`, `digestif`, `menhir`,
-  `cmdliner`, `odoc`, `utop`, and `ocaml-lsp-server` from `weft.opam`
+  `cmdliner`, `odoc`, `utop`, and `ocaml-lsp-server` from `jacquard.opam`
 
 In a new shell inside an existing checkout, run:
 
@@ -176,34 +176,34 @@ eval "$(opam env)"
 
 `_opam/` is intentionally ignored. It is a local build artifact, not source.
 
-## Running Weft
+## Running Jacquard
 
 During development, use the built binary through Dune:
 
 ```bash
-opam exec -- dune exec weft -- --help
-opam exec -- dune exec weft -- --version
+opam exec -- dune exec jacquard -- --help
+opam exec -- dune exec jacquard -- --version
 ```
 
 Many direct CLI commands need the prelude. From the repository root:
 
 ```bash
-export WEFT_PRELUDE=$PWD/prelude
-opam exec -- dune exec weft -- run demos/m1-fact.wft
+export JACQUARD_PRELUDE=$PWD/prelude
+opam exec -- dune exec jacquard -- run demos/m1-fact.wft
 ```
 
 The main commands are:
 
 ```bash
-weft run FILE.wft [--allow fs] [--allow net] [--dry-run]
-weft check FILE.wft [--print-sigs] [--manifest fs,net,console]
-weft hash FILE.wft
-weft fmt FILE.wft
-weft diff STORE_A STORE_B
-weft infer enumerate MODEL.wft
-weft infer lw MODEL.wft --seed 42 --samples 100000
-weft replay TRACE.wft PROGRAM.wft [--fork '1=(response 500 "down")']
-weft test TESTS.wft [--exhaustive] [--cache-dir CACHE]
+jacquard run FILE.wft [--allow fs] [--allow net] [--dry-run]
+jacquard check FILE.wft [--print-sigs] [--manifest fs,net,console]
+jacquard hash FILE.wft
+jacquard fmt FILE.wft
+jacquard diff STORE_A STORE_B
+jacquard infer enumerate MODEL.wft
+jacquard infer lw MODEL.wft --seed 42 --samples 100000
+jacquard replay TRACE.wft PROGRAM.wft [--fork '1=(response 500 "down")']
+jacquard test TESTS.wft [--exhaustive] [--cache-dir CACHE]
 ```
 
 ## Demos
@@ -211,7 +211,7 @@ weft test TESTS.wft [--exhaustive] [--cache-dir CACHE]
 Start with these from the repo root:
 
 ```bash
-export WEFT_PRELUDE=$PWD/prelude
+export JACQUARD_PRELUDE=$PWD/prelude
 opam exec -- sh demos/m1.sh
 opam exec -- sh demos/m3.sh
 opam exec -- sh demos/clarifying-question.sh
@@ -254,11 +254,11 @@ The release-candidate evidence pack lives in `docs/release/0.1/`.
 To reproduce the release evidence from this checkout:
 
 ```bash
-WEFT_RELEASE_REF=HEAD WEFT_RELEASE_BASE=aec2c63 scripts/release/reproduce-0.1.sh
+JACQUARD_RELEASE_REF=HEAD JACQUARD_RELEASE_BASE=aec2c63 scripts/release/reproduce-0.1.sh
 ```
 
 The script installs dependencies, builds, runs the full test suite, checks
-formatting, runs public demos, runs gauntlet tests, records `weft --version`,
+formatting, runs public demos, runs gauntlet tests, records `jacquard --version`,
 and writes transcripts under `logs/release/0.1/`.
 
 Key release docs:
@@ -275,16 +275,16 @@ Key release docs:
 
 - `.github/`: CI, release evidence workflow, and PR template.
 - `AGENTS.md`: operating notes for future coding agents.
-- `bin/`: `weft` CLI entry point.
+- `bin/`: `jacquard` CLI entry point.
 - `corpus/`: conformance corpus and golden outputs.
 - `demos/`: runnable examples and product-shaped demos.
 - `docs/`: design docs, tutorial, CI/CD, Warp, stdlib, errors, release evidence.
-- `prelude/`: Weft standard library and effect declarations.
+- `prelude/`: Jacquard standard library and effect declarations.
 - `scripts/release/`: reproducible release evidence script.
 - `spec/`: kernel AST and canonical serialization specs.
 - `src/`: OCaml implementation.
 - `test/`: Alcotest/QCheck suites plus cram CLI transcripts.
-- `weft.opam`, `dune-project`: package and build metadata.
+- `jacquard.opam`, `dune-project`: package and build metadata.
 
 ## Implementation Map
 
@@ -316,7 +316,7 @@ Deeper design references:
 
 - `docs/whitepaper.tex`: thesis, motivation, roadmap, and risks.
 - `docs/ast.md`: kernel AST and metadata/hash contract.
-- `spec/weft-kernel-ast-m0.md`: kernel source-of-truth spec.
+- `spec/jacquard-kernel-ast-m0.md`: kernel source-of-truth spec.
 - `spec/serialization.md`: canonical byte format.
 - `docs/stdlib.md`: prelude and ringed standard library.
 - `docs/warp-testing.md`: Warp testing model.
@@ -344,7 +344,7 @@ opam exec -- dune exec test/gen_goldens.exe
 When touching release-facing demos, claims, CI, or semantics, also run:
 
 ```bash
-WEFT_RELEASE_REF=HEAD WEFT_RELEASE_BASE=aec2c63 scripts/release/reproduce-0.1.sh
+JACQUARD_RELEASE_REF=HEAD JACQUARD_RELEASE_BASE=aec2c63 scripts/release/reproduce-0.1.sh
 ```
 
 ## CI/CD
@@ -353,7 +353,7 @@ GitHub Actions has two lanes:
 
 - `CI / Development gate`: build, full tests, clean formatting, version smoke,
   and release-doc presence on PRs, `main`, and `release/**`.
-- `Release Evidence / Reproduce 0.1 evidence`: release branches, `weft-core-*`
+- `Release Evidence / Reproduce 0.1 evidence`: release branches, `jacquard-core-*`
   tags, and manual dispatch; runs `scripts/release/reproduce-0.1.sh` and uploads
   transcripts.
 
@@ -361,7 +361,7 @@ See `docs/ci-cd.md` for branch protection recommendations.
 
 ## Current Limits
 
-Weft core 0.1 is a research prototype, not a production compiler. It does not
+Jacquard core 0.1 is a research prototype, not a production compiler. It does not
 claim surface syntax beyond bootstrap `.wft`, a VM or optimizer, continuous
 distributions, gradients, typed staging, package management, self-hosting, or a
 formal proof of row soundness. See `docs/release/0.1/LIMITS.md` for the
@@ -374,7 +374,7 @@ no-hype list.
 - Dune cannot find packages: run `eval "$(opam env)"` in this shell, then
   reinstall deps with `opam install --deps-only . --with-test --with-dev-setup
   --with-doc -y`.
-- `weft` cannot find names from the prelude: set `WEFT_PRELUDE=$PWD/prelude` or
+- `jacquard` cannot find names from the prelude: set `JACQUARD_PRELUDE=$PWD/prelude` or
   run through Dune from the repo root.
 - Formatting changed files: run `opam exec -- dune fmt`, inspect the diff, and
   commit the formatting changes if they are intended.

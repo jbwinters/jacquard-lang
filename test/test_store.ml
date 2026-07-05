@@ -1,4 +1,4 @@
-open Weft
+open Jacquard
 
 let fresh_root =
   let n = ref 0 in
@@ -6,7 +6,7 @@ let fresh_root =
     incr n;
     let dir =
       Filename.concat (Filename.get_temp_dir_name ())
-        (Printf.sprintf "weft-store-test-%d-%d" (Unix.getpid ()) !n)
+        (Printf.sprintf "jacquard-store-test-%d-%d" (Unix.getpid ()) !n)
     in
     dir
 
@@ -246,20 +246,20 @@ let test_origin_roundtrip () =
   let t = open_ok root in
   let d = decl_of ~names:Resolve.empty_names "(deftype bool () (con false) (con true))" in
   let hs =
-    match Store.put_decl ~origin:"agent:weft-demo-5" t d with
+    match Store.put_decl ~origin:"agent:jacquard-demo-5" t d with
     | Ok hs -> hs
     | Error ds -> Alcotest.failf "put: %s" (String.concat "; " (List.map Diag.to_string ds))
   in
   Alcotest.(check (option string))
-    "read back" (Some "agent:weft-demo-5")
+    "read back" (Some "agent:jacquard-demo-5")
     (Store.origin t hs.Canon.decl_hash);
   Alcotest.(check (option string))
-    "derived hash resolves to the owner's origin" (Some "agent:weft-demo-5")
+    "derived hash resolves to the owner's origin" (Some "agent:jacquard-demo-5")
     (Store.origin t (List.assoc "true" hs.Canon.named));
   (* survives reopen; the identity self-check ignores sidecars *)
   let t2 = open_ok root in
   Alcotest.(check (option string))
-    "persisted" (Some "agent:weft-demo-5")
+    "persisted" (Some "agent:jacquard-demo-5")
     (Store.origin t2 hs.Canon.decl_hash);
   (* unstamped is a clean absence *)
   let d2 = decl_of ~names:(Store.names_view t2) "(defterm ((binding quiet () (lit 1))))" in

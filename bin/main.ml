@@ -1,14 +1,14 @@
-(* The weft CLI (plan W2.7).
+(* The jacquard CLI (plan W2.7).
 
    Exit codes, pinned by cram tests: 0 ok, 1 diagnostics (parse/validate/resolve/store), 2
    runtime error, 3 unhandled effect (the capability refusal). CLI usage errors (unknown
    subcommand, missing argument) keep cmdliner's conventional 124.
 
-   `weft run` and `weft check` operate on an ephemeral store seeded with the prelude
-   (directory from --prelude, else $WEFT_PRELUDE, else ./prelude); `weft store ...`
+   `jacquard run` and `jacquard check` operate on an ephemeral store seeded with the prelude
+   (directory from --prelude, else $JACQUARD_PRELUDE, else ./prelude); `jacquard store ...`
    subcommands operate on a persistent store directory with no implicit prelude. *)
 
-open Weft
+open Jacquard
 
 let ok = 0
 let exit_diags = 1
@@ -36,7 +36,7 @@ let rec rm_rf path =
 let fresh_tmp_dir () =
   let dir =
     Filename.concat (Filename.get_temp_dir_name ())
-      (Printf.sprintf "weft-run-%d-%d" (Unix.getpid ())
+      (Printf.sprintf "jacquard-run-%d-%d" (Unix.getpid ())
          (int_of_float (Unix.gettimeofday () *. 1000.) mod 100000))
   in
   at_exit (fun () -> try rm_rf dir with Sys_error _ -> ());
@@ -44,7 +44,7 @@ let fresh_tmp_dir () =
 
 let prelude_dir_of = function
   | Some d -> d
-  | None -> ( match Sys.getenv_opt "WEFT_PRELUDE" with Some d -> d | None -> "prelude")
+  | None -> ( match Sys.getenv_opt "JACQUARD_PRELUDE" with Some d -> d | None -> "prelude")
 
 (* Open a store (persistent dir or fresh temp) and seed the prelude into it. *)
 let open_ctx ~prelude ~store_dir =
@@ -1071,7 +1071,7 @@ let prelude_arg =
     value
     & opt (some dir) None
     & info [ "prelude" ] ~docv:"DIR"
-        ~doc:"Prelude directory (default: \\$WEFT_PRELUDE or ./prelude).")
+        ~doc:"Prelude directory (default: \\$JACQUARD_PRELUDE or ./prelude).")
 
 let store_dir_opt_arg =
   Arg.(
@@ -1300,7 +1300,7 @@ let test_t =
 
 let main =
   Cmd.group
-    (Cmd.info "weft" ~version:Version.version ~doc:"The Weft language toolchain")
+    (Cmd.info "jacquard" ~version:Version.version ~doc:"The Jacquard language toolchain")
     [ run_t; check_t; hash_t; fmt_t; diff_t; infer_t; store_t; test_t; replay_t; dist_diff_t ]
 
 let () = exit (Cmd.eval' main)

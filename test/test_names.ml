@@ -1,4 +1,4 @@
-open Weft
+open Jacquard
 
 (* SL.1: the library-name grammar (dotted segments, ?/! suffixes) and the kind-aware
    (name, kind) index with value-position precedence. *)

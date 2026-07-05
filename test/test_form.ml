@@ -1,4 +1,4 @@
-open Weft
+open Jacquard
 
 let span1 =
   Span.make ~file:"t.wft"

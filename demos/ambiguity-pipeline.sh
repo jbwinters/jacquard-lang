@@ -3,7 +3,7 @@
 # Run from the repo root:
 #   sh demos/ambiguity-pipeline.sh
 set -u
-WEFT="${WEFT:-dune exec weft --}"
+JACQUARD="${JACQUARD:-dune exec jacquard --}"
 here="$(dirname "$0")"
 
-$WEFT run "$here/ambiguity-pipeline.wft"
+$JACQUARD run "$here/ambiguity-pipeline.wft"

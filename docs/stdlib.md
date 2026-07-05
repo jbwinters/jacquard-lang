@@ -1,4 +1,4 @@
-# The Weft Standard Library — Design, Draft 0.1
+# The Jacquard Standard Library — Design, Draft 0.1
 
 Companion to the kernel spec, the whitepaper, and the dev plan. This document
 supersedes the prelude sketch in dev plan task W2.6; a reconciliation table sits at
@@ -13,7 +13,7 @@ notation; source remains bootstrap s-expressions until a surface language exists
 
 ## 1. What beauty means here
 
-A standard library is the vocabulary a language actually speaks, and for Weft the
+A standard library is the vocabulary a language actually speaks, and for Jacquard the
 audience is split: models write most calls, people review them, often seeing one
 function at a time through a bounded window. Beauty under that constraint is
 predictability. A reader who knows one corner of the library should be able to guess
@@ -81,7 +81,7 @@ kernel tuples. There is no `Char` in this draft (§9, D9).
 
 ### Dictionaries: ad-hoc polymorphism, honestly deferred
 
-Weft has no traits yet (kernel spec §10.3), and the library refuses to fake them
+Jacquard has no traits yet (kernel spec §10.3), and the library refuses to fake them
 with builtin structural equality, which OCaml regrets, or compiler-magic
 `comparable`, which Elm regrets. Instead, capabilities like equality are ordinary
 values: single-constructor data with labeled fields, passed explicitly.
@@ -167,7 +167,7 @@ collect.
 
 ### Bool, strictly
 
-Weft is strict, so `bool.and : (Bool, Bool) ->{} Bool` evaluates both arguments.
+Jacquard is strict, so `bool.and : (Bool, Bool) ->{} Bool` evaluates both arguments.
 The short-circuit forms take thunks and say so in their types:
 
 ```
@@ -406,7 +406,7 @@ main = fn () ->
 
 (Display syntax for readability; the corpus versions are bootstrap s-expressions.)
 The signatures tell the review story by themselves: two pure functions and one
-`Console` function, so `weft run --allow Console` and nothing else. `count-words`
+`Console` function, so `jacquard run --allow Console` and nothing else. `count-words`
 uses the grid three times (`fold`, `update`, `map`) with the exact schemas from §3,
 `top` passes dictionaries where ordering is needed and composes them with `ord.
 reverse` and `ord.on-second`, and no effect appears anywhere it was not announced.
@@ -443,8 +443,8 @@ error type and `emit.collect`'s element type, and it is the long-standing shape 
 then the approximation is documented at the checker's `op_scheme`.
 
 **`dist.enumerate` has no error channel.** When every branch is impossible (total mass 0),
-the in-language enumerate returns `+nan.0` weights — Weft code cannot signal E0901. The
-OCaml driver (`weft infer enumerate`) reports E0901 for the same model.
+the in-language enumerate returns `+nan.0` weights — Jacquard code cannot signal E0901. The
+OCaml driver (`jacquard infer enumerate`) reports E0901 for the same model.
 
 **`Map k v` displays as `map.t k v`.** Elaborated signatures print the store name of the
 wrapper type; the doc's display-syntax `Map k v` is the same type.

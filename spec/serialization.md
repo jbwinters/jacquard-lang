@@ -1,6 +1,6 @@
-# Weft canonical serialization, format V0
+# Jacquard canonical serialization, format V0
 
-Companion to `weft-kernel-ast-m0.md` §6 and `src/canon.ml` (plan W1.5). This byte format
+Companion to `jacquard-kernel-ast-m0.md` §6 and `src/canon.ml` (plan W1.5). This byte format
 exists only as a hash input; it is never parsed back. Any change to it changes every hash and
 must bump the format name.
 

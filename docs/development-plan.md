@@ -1,6 +1,6 @@
-# Weft Development Plan — M0 through M4
+# Jacquard Development Plan — M0 through M4
 
-Version 0.1, July 2026. Companion to `weft-kernel-ast-m0.md` (the spec) and the whitepaper.
+Version 0.1, July 2026. Companion to `jacquard-kernel-ast-m0.md` (the spec) and the whitepaper.
 Audience: a junior engineer implementing, plus the owner making the flagged decisions.
 
 Sizes: S is a day or less, M is 2 to 4 days, L is 1 to 2 weeks. Estimates assume one
@@ -54,14 +54,14 @@ necessary, stop and write a one-page decision doc instead.
 
 ### W0.1 Repository scaffold and CI (S)
 
-Create the repo: `dune-project`, `src/` (library `weft`), `bin/` (CLI `weft`), `test/`
+Create the repo: `dune-project`, `src/` (library `jacquard`), `bin/` (CLI `jacquard`), `test/`
 (alcotest), `corpus/`, `spec/` (copy in the M0 spec doc). Add `qcheck` and `digestif`
 as deps. GitHub Actions workflow: build + test on push, OCaml 5.1+.
 
 Done when:
 - [ ] Fresh clone: `opam install --deps-only . && dune build && dune test` succeeds.
 - [ ] CI is green on main with one trivial passing test.
-- [ ] `bin/main.ml` prints version string via `weft --version`.
+- [ ] `bin/main.ml` prints version string via `jacquard --version`.
 
 ### W0.2 Engineering conventions doc (S)
 
@@ -325,14 +325,14 @@ ships an eval handler as a builtin that the CLI installs only under a flag.
 Done when:
 - [ ] Quote of quote nests correctly (structure test on the resulting `VCode`).
 - [ ] Splicing a computed form into a quoted `app` produces the expected triple.
-- [ ] `eval` on quoted factorial applied to 5 yields 120 under `weft run --allow Eval`.
+- [ ] `eval` on quoted factorial applied to 5 yields 120 under `jacquard run --allow Eval`.
 - [ ] The same program without `--allow Eval` fails with the Unhandled error from W2.4. This pair of tests is the first capability demo and gets a named spot in the corpus.
 
 ### W2.6 Prelude v1 (M) — needs D2
 
 `prelude/` as `.wft` files loaded into a fresh store: `Bool`, `Option`, `List`,
 `Ordering` as `deftype`; comparison and arithmetic as `VBuiltin` terms registered under
-hashes; `not`, `and`, `or`, `map`, `fold` written in Weft (matches, no `if`, per spec).
+hashes; `not`, `and`, `or`, `map`, `fold` written in Jacquard (matches, no `if`, per spec).
 Effects declared: `Eval`, `Abort`, `Console` (print op) for demos.
 
 Done when:
@@ -342,8 +342,8 @@ Done when:
 
 ### W2.7 CLI (S)
 
-`weft run FILE [--allow EFFECT]...`, `weft check FILE` (grammar + resolution),
-`weft hash FILE`, `weft store add|name|rename`.
+`jacquard run FILE [--allow EFFECT]...`, `jacquard check FILE` (grammar + resolution),
+`jacquard hash FILE`, `jacquard store add|name|rename`.
 
 Done when:
 - [ ] Each command has a happy-path and a failure-path test driving the binary (expect-style).
@@ -379,7 +379,7 @@ unifies the callee's row with the ambient row; `Lam` starts a fresh ambient row 
 lands on its arrow.
 
 Done when:
-- [ ] Golden elaborated signatures for 20 corpus programs (`weft check --print-sigs`).
+- [ ] Golden elaborated signatures for 20 corpus programs (`jacquard check --print-sigs`).
 - [ ] Identity gets `forall a. (a) ->{} a`; a Console-printing function's row shows Console; composition of pure and effectful propagates the row.
 - [ ] Value restriction test: `let r = ref-like non-value` does not generalize (encode with a builtin), while `let f = lam...` does.
 - [ ] Ann mismatch produces expected/actual diagnostic with both types printed fully elaborated.
@@ -422,8 +422,8 @@ Done when:
 
 ### W3.6 Root capability manifest (S)
 
-`weft run` computes `main`'s inferred row and refuses to start unless every effect is
-covered by `--allow` grants (which install the builtin root handlers). `weft check
+`jacquard run` computes `main`'s inferred row and refuses to start unless every effect is
+covered by `--allow` grants (which install the builtin root handlers). `jacquard check
 --manifest net,console` typechecks against a granted set without running.
 
 Done when:
@@ -462,7 +462,7 @@ Done when:
 
 ### W4.2 Enumeration handler, builtin (M)
 
-Builtin handler installed by `weft infer enumerate FILE`: on `sample d`, resume once
+Builtin handler installed by `jacquard infer enumerate FILE`: on `sample d`, resume once
 per support element, weighting each branch by `pmf d x` (multi-shot doing its job); on
 `observe d v`, multiply the branch weight by `pmf d v` and resume with unit; collect
 (value, weight) leaves; normalize; print the posterior table sorted by probability.
@@ -476,7 +476,7 @@ Done when:
 
 ### W4.3 Likelihood-weighting handler (M) — needs D4
 
-`weft infer lw --seed N --samples K FILE`: sample ancestrally on `sample` (single
+`jacquard infer lw --seed N --samples K FILE`: sample ancestrally on `sample` (single
 resume, drawn via seeded RNG), multiply weight on `observe`, run K independent
 executions, report normalized empirical posterior.
 
@@ -485,9 +485,9 @@ Done when:
 - [ ] Same seed twice gives byte-identical output; different seeds differ.
 - [ ] The model files are byte-identical between W4.2 and W4.3 runs; the test asserts the hashes match. The model does not change, only the handler: this is the M3 thesis and the test says so in its name.
 
-### W4.4 Stretch: enumeration handler in Weft itself (M, parallel-safe after W4.2)
+### W4.4 Stretch: enumeration handler in Jacquard itself (M, parallel-safe after W4.2)
 
-Port W4.2's handler to prelude Weft using `Handle`, list ops, and real arithmetic
+Port W4.2's handler to prelude Jacquard using `Handle`, list ops, and real arithmetic
 builtins. Proves handlers-as-libraries.
 
 Done when:
@@ -508,7 +508,7 @@ Milestone gate M3 = Demo 1 (the whitepaper's first falsifiable finish line).
 
 ### W5.1 Formatter (M)
 
-`weft fmt`: canonical printer with trivia preservation, reading comment/whitespace
+`jacquard fmt`: canonical printer with trivia preservation, reading comment/whitespace
 trivia from meta (extend the W1.2 reader to capture comments `; ...` into trivia).
 
 Done when:
@@ -518,7 +518,7 @@ Done when:
 
 ### W5.2 Semantic differ (M)
 
-`weft diff STORE_A STORE_B` (or two files): classify each named definition as
+`jacquard diff STORE_A STORE_B` (or two files): classify each named definition as
 identical (same hash), renamed (same hash, different name), meta-only, or changed;
 for changed, descend the two trees to the smallest disagreeing subtrees and print
 them with paths.
@@ -541,7 +541,7 @@ Done when:
 
 ### W5.4 Docs, examples, CLI polish (M)
 
-`docs/tutorial.md` with ten runnable examples (each a corpus file), `weft --help`
+`docs/tutorial.md` with ten runnable examples (each a corpus file), `jacquard --help`
 per-command help, and a top-level `README` describing the two demos.
 
 Done when:
@@ -550,7 +550,7 @@ Done when:
 
 ### W5.5 Demo 2 assembly (S)
 
-`demos/m4-hostile.sh`: the generated-looking function that attempts Net; `weft check`
+`demos/m4-hostile.sh`: the generated-looking function that attempts Net; `jacquard check`
 refusal with the signature printed; the granted run succeeding against the stub
 handler; transcript committed.
 

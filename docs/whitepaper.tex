@@ -11,7 +11,7 @@
 \usepackage{xcolor}
 \usepackage[hidelinks]{hyperref}
 
-\lstdefinestyle{weft}{
+\lstdefinestyle{jacquard}{
   basicstyle=\ttfamily\small,
   columns=fullflexible,
   keepspaces=true,
@@ -23,13 +23,13 @@
   aboveskip=0.9em,
   belowskip=0.9em
 }
-\lstset{style=weft}
+\lstset{style=jacquard}
 
-\newcommand{\weft}{Weft}
+\newcommand{\jacquard}{Jacquard}
 
-\title{\textbf{\weft: A Kernel Language for Code Written by Models\\ and Read by People}\\[0.6em]
+\title{\textbf{\jacquard: A Kernel Language for Code Written by Models\\ and Read by People}\\[0.6em]
 \large Design Whitepaper, Draft 0.1}
-\author{The \weft{} Project}
+\author{The \jacquard{} Project}
 \date{July 2026}
 
 \begin{document}
@@ -37,7 +37,7 @@
 
 \begin{abstract}
 \noindent
-\weft{} is a small programming language designed for a regime in which most code is written by machine-learning models and reviewed by people. The design derives from a survey of the canonical abstract syntax trees of twenty-one languages, from which we extract recurring verdicts: expression orientation wins; null is universally regretted; patterns deserve first-class status; metaprogramming should operate on hygienic trees rather than text; and a stable, public AST creates a tooling culture. \weft{} answers with a 27-form kernel represented uniformly as a quoted triple, algebraic effects as the only control mechanism, capability security obtained by construction (no ambient handlers), probabilistic programming as a library effect whose inference algorithms are handlers, and content-addressed definitions. Surface syntax is a projection of the kernel; formatting, comments, and provenance ride in metadata that is excluded from identity. We give the kernel grammar, the reasoning behind each inclusion and exclusion, a falsifiable roadmap, and the risks we consider most likely to kill the project.
+\jacquard{} is a small programming language designed for a regime in which most code is written by machine-learning models and reviewed by people. The design derives from a survey of the canonical abstract syntax trees of twenty-one languages, from which we extract recurring verdicts: expression orientation wins; null is universally regretted; patterns deserve first-class status; metaprogramming should operate on hygienic trees rather than text; and a stable, public AST creates a tooling culture. \jacquard{} answers with a 27-form kernel represented uniformly as a quoted triple, algebraic effects as the only control mechanism, capability security obtained by construction (no ambient handlers), probabilistic programming as a library effect whose inference algorithms are handlers, and content-addressed definitions. Surface syntax is a projection of the kernel; formatting, comments, and provenance ride in metadata that is excluded from identity. We give the kernel grammar, the reasoning behind each inclusion and exclusion, a falsifiable roadmap, and the risks we consider most likely to kill the project.
 \end{abstract}
 
 \section{Motivation: the inversion}
@@ -46,7 +46,7 @@
 For roughly fifty years, programming language design optimized for a human author: someone who holds a mental model of the codebase, types slowly, and reads their own code back tomorrow. Machine-written code inverts the ratios that made those optimizations sensible. Generation is now nearly free, while review, trust, and verification dominate the cost of software. A language designed after that inversion should make different trades, and this section states which ones.
 
 \paragraph{Locality is the binding constraint.}
-A model editing a function sees a bounded context window, and even models with long contexts reason best about what is close at hand. Whatever a function's signature fails to say, the model must guess, and it will guess by statistical habit rather than by reading three files away. The design consequence is blunt: a signature must carry the whole story. In \weft{} that story is a type, an effect row, and (by construction, Section~\ref{sec:effects}) the authority the function can exercise. Nothing important is permitted to hide in ambient state, global configuration, or action at a distance.
+A model editing a function sees a bounded context window, and even models with long contexts reason best about what is close at hand. Whatever a function's signature fails to say, the model must guess, and it will guess by statistical habit rather than by reading three files away. The design consequence is blunt: a signature must carry the whole story. In \jacquard{} that story is a type, an effect row, and (by construction, Section~\ref{sec:effects}) the authority the function can exercise. Nothing important is permitted to hide in ambient state, global configuration, or action at a distance.
 
 \paragraph{Code arrives from authors you cannot interrogate.}
 When a person submits a patch, social context does part of the security work. When a model emits a function, there is no such context; the honest posture is to run the code before trusting its author. That is only sane if blast radius is bounded by the language itself rather than by the diligence of a reviewer. Capability security, long advocated in the object-capability literature \cite{miller2006}, has never shipped in a mainstream-feeling language. The agent era is the moment it earns its keep: freshly generated code should be physically unable to reach the network or the filesystem unless something above it explicitly grants that authority.
@@ -62,14 +62,14 @@ A new language begins with zero training corpus, so models will write it badly a
 
 The design did not begin with aesthetics. It began by pulling the canonical abstract syntax trees of the TIOBE top ten (June 2026: Python, C, C++, Java, C\#, JavaScript, Visual Basic, SQL, R, and Delphi/Object Pascal), a set of functional languages chosen for design prestige (Haskell, OCaml, Scheme, Lisp/Clojure, F\#, Elm, Erlang, Elixir), and, because their lessons proved indispensable, Rust, Go, and assembly (where WebAssembly turned out to be the only ``assembly'' with a formally specified abstract syntax \cite{wasm}). For each language we cataloged the reference parser's actual node vocabulary: Python's ASDL-defined \texttt{ast} module, Clang's \texttt{Stmt}/\texttt{Expr}/\texttt{Decl} hierarchies, Roslyn's syntax trees, OCaml's \texttt{Parsetree}, GHC's \texttt{HsSyn}, F\#'s \texttt{SynExpr} family, Erlang's abstract format, Elixir's quoted form, Rust's \texttt{rustc\_ast} and \texttt{syn}, Go's \texttt{go/ast}, and so on. Three families emerged: statement/expression-separated imperative trees, expression-oriented ML-family trees with patterns as a first-class sort, and homoiconic S-expression representations where the tree is ordinary data.
 
-Table~\ref{tab:verdicts} compresses the survey into the verdicts that shaped \weft. Each row is a pattern observed across multiple unrelated languages, which is the closest thing language design has to replicated evidence.
+Table~\ref{tab:verdicts} compresses the survey into the verdicts that shaped \jacquard. Each row is a pattern observed across multiple unrelated languages, which is the closest thing language design has to replicated evidence.
 
 \begin{table}[ht]
 \centering
 \small
 \begin{tabularx}{\textwidth}{@{}p{0.30\textwidth}Xp{0.27\textwidth}@{}}
 \toprule
-\textbf{Verdict} & \textbf{Evidence from the survey} & \textbf{\weft's response} \\
+\textbf{Verdict} & \textbf{Evidence from the survey} & \textbf{\jacquard's response} \\
 \midrule
 Expression orientation wins & Rust, the ML family, and Ruby thrive on it; Python's crippled \texttt{lambda} and walrus retrofit, Java's switch-expression retrofit, and C\#'s expression creep all show statement orientation being paid off slowly and painfully & No statement sort exists; sequencing desugars to \texttt{Let} \\
 \addlinespace
@@ -96,7 +96,7 @@ Partial failure needs a story & Erlang's supervision trees remain the best answe
 \label{tab:verdicts}
 \end{table}
 
-Two further observations from the survey shaped the architecture rather than any single feature. First, several languages maintain a deliberate split between an untyped parse tree and later typed trees (OCaml's \texttt{Parsetree} and \texttt{Typedtree}, GHC's parse/rename/typecheck progression, F\#'s untyped and typed syntax trees). \weft{} adopts the stance implied by content addressing: the kernel is the untyped tree and the unit of identity; typed elaborations are derived artifacts keyed by hash, never a second source of truth. Second, assembly's lesson is that trees run out: below a certain level the honest structure is a control-flow graph, which is why Rust lowers AST to HIR to MIR. \weft's kernel is therefore designed as the first intermediate representation of several, not as the only one.
+Two further observations from the survey shaped the architecture rather than any single feature. First, several languages maintain a deliberate split between an untyped parse tree and later typed trees (OCaml's \texttt{Parsetree} and \texttt{Typedtree}, GHC's parse/rename/typecheck progression, F\#'s untyped and typed syntax trees). \jacquard{} adopts the stance implied by content addressing: the kernel is the untyped tree and the unit of identity; typed elaborations are derived artifacts keyed by hash, never a second source of truth. Second, assembly's lesson is that trees run out: below a certain level the honest structure is a control-flow graph, which is why Rust lowers AST to HIR to MIR. \jacquard's kernel is therefore designed as the first intermediate representation of several, not as the only one.
 
 \section{Thesis and commitments}
 \label{sec:commitments}
@@ -121,7 +121,7 @@ The full kernel specification exists as a companion document; this section state
 
 \subsection{Two layers}
 
-``The AST'' is two things, cleanly separated. The first layer is the \emph{representation}: every \weft{} form is one uniform triple,
+``The AST'' is two things, cleanly separated. The first layer is the \emph{representation}: every \jacquard{} form is one uniform triple,
 
 \begin{lstlisting}
 (head, meta, args)
@@ -132,17 +132,17 @@ where \texttt{head} is a symbol, \texttt{meta} is an open map, and \texttt{args}
 
 \subsection{The metadata contract}
 
-\texttt{meta} carries source spans, hygiene scope sets, retained human names for hash-resolved references, comment and whitespace trivia, documentation, and a provenance record identifying the human or model that produced the node. One law governs it all: \emph{content hashes are computed over the canonicalized tree with metadata erased}. Two forms differing only in metadata are the same definition. The consequences are worth spelling out: \weft{} gets Roslyn-grade round-tripping (trivia is preserved) and Unison-grade stable identity (trivia is invisible to hashing) from the same tree, and provenance, including cryptographic signatures over subtrees, attaches at any granularity without forking identities. The provenance key is the quiet agent-era move in the design.
+\texttt{meta} carries source spans, hygiene scope sets, retained human names for hash-resolved references, comment and whitespace trivia, documentation, and a provenance record identifying the human or model that produced the node. One law governs it all: \emph{content hashes are computed over the canonicalized tree with metadata erased}. Two forms differing only in metadata are the same definition. The consequences are worth spelling out: \jacquard{} gets Roslyn-grade round-tripping (trivia is preserved) and Unison-grade stable identity (trivia is invisible to hashing) from the same tree, and provenance, including cryptographic signatures over subtrees, attaches at any granularity without forking identities. The provenance key is the quiet agent-era move in the design.
 
 \subsection{The grammar}
 
 Four sorts: expressions, patterns, types, declarations. Auxiliary shapes (clauses, rows, specifications) are product structures, not forms, exactly as Python's ASDL treats \texttt{arguments}.
 
 \begin{lstlisting}
--- Weft kernel, M0 draft 0.1
+-- Jacquard kernel, M0 draft 0.1
 -- Every constructor is realized as a triple (head, meta, args).
 
-module Weft
+module Jacquard
 {
   expr = Lit(lit value)
        | Var(name id)                        -- local, lexically bound
@@ -215,7 +215,7 @@ The honest caveat: handlers control authority per handled region, which is coars
 \section{Uncertainty as an effect}
 \label{sec:dist}
 
-The probabilistic layer is the part of the design that began as a physics intuition, interacting fields with probabilistic output, and survived contact with the literature by landing on a known good foundation: models as computations that perform sampling effects, inference algorithms as handlers \cite{scibior2015, bingham2019}. In \weft{} it is declared, in its entirety, with no new syntax:
+The probabilistic layer is the part of the design that began as a physics intuition, interacting fields with probabilistic output, and survived contact with the literature by landing on a known good foundation: models as computations that perform sampling effects, inference algorithms as handlers \cite{scibior2015, bingham2019}. In \jacquard{} it is declared, in its entirety, with no new syntax:
 
 \begin{lstlisting}
 type Distribution a = ...      -- library: Bernoulli, Categorical, Normal, ...
@@ -227,7 +227,7 @@ effect Dist where
 
 One \texttt{DefType} and one \texttt{DefEffect}. A model is any expression whose row includes \texttt{Dist}; its signature announces that it denotes a distribution rather than a value. Running the same untouched model under different handlers yields different inference: an enumeration handler resumes the captured continuation once per support element and weights the results, giving exact posteriors on discrete models; a sequential Monte Carlo handler forks and reweights particles; a gradient handler, once the autodiff bridge lands, reparameterizes for variational inference. This is why multi-shot resumptions are a semantic commitment rather than an optimization preference.
 
-Composition is where the fields intuition survives most directly. Linking two models multiplies their weight functions, a product of experts, and superposition becomes a posterior at the handler. The discipline that keeps this tractable is borrowed from the failure of differentiable interpreters \cite{gaunt2016} and the success of neurosymbolic systems that put learned components in typed holes \cite{li2023, manhaeve2018}: gradients stay inside values that are actually continuous or uncertain, and symbols keep control flow. \weft's effect system enforces exactly that boundary, and types it.
+Composition is where the fields intuition survives most directly. Linking two models multiplies their weight functions, a product of experts, and superposition becomes a posterior at the handler. The discipline that keeps this tractable is borrowed from the failure of differentiable interpreters \cite{gaunt2016} and the success of neurosymbolic systems that put learned components in typed holes \cite{li2023, manhaeve2018}: gradients stay inside values that are actually continuous or uncertain, and symbols keep control flow. \jacquard's effect system enforces exactly that boundary, and types it.
 
 Two ambitions are recorded as research directions rather than promises. First, learned components as effect operations, so a neural judgment call is a typed hole with a row entry, swappable under a handler like any other authority. Second, checked abstraction between belief models: ``coarse model $M$ soundly abstracts fine model $N$'' is a verifiable relationship between distributions, and a compiler that checks such refinements would address exactly the drift agents exhibit today between their summaries of the world and the world. Nobody has made probabilistic abstract interpretation ergonomic; the effect-and-hash substrate here is a plausible place to try.
 
@@ -285,7 +285,7 @@ The prototype has a falsifiable finish line consisting of two demonstrations. Fi
 \label{sec:risks}
 
 \begin{enumerate}
-\item \textbf{Cold start.} Zero training data is the project's largest external risk. The mitigations are the tiny uniform core, a language definition small enough to travel in a prompt, and generated idiomatic corpora. If models cannot learn \weft{} quickly in practice, the thesis fails, and we would rather learn that at M1 than at M4.
+\item \textbf{Cold start.} Zero training data is the project's largest external risk. The mitigations are the tiny uniform core, a language definition small enough to travel in a prompt, and generated idiomatic corpora. If models cannot learn \jacquard{} quickly in practice, the thesis fails, and we would rather learn that at M1 than at M4.
 \item \textbf{Effect ergonomics.} Row systems become clerical when inference falls short. This is Koka's scar and the checker's make-or-break obligation.
 \item \textbf{Multi-shot cost.} CPS interpretation pays for resumability. Irrelevant at prototype scale; a known cliff later, with selective CPS and one-shot fast paths as the standard escape hatches.
 \item \textbf{Capability granularity.} Region-level authority may prove too coarse; the composition with capability values is designed but unexercised.
@@ -297,11 +297,11 @@ The prototype has a falsifiable finish line consisting of two demonstrations. Fi
 \section{Related work}
 \label{sec:related}
 
-\weft's individual mechanisms are borrowed, deliberately, from systems that proved them. Unison contributes content addressing, cycle hashing, abilities as ordinary functions, and the nameless codebase \cite{unison}. The algebraic effects lineage runs from Plotkin and Pretnar \cite{plotkin2009} through Eff, Frank \cite{lindley2017}, Koka \cite{leijen2017}, and OCaml~5's runtime support. The homoiconic representation is Elixir's \cite{elixir} in the tradition of Lisp and Scheme, with hygiene from Kohlbecker et al.\ \cite{kohlbecker1986} as modernized by Racket's scope sets \cite{flatt2016}. Capability security follows the object-capability tradition of E and Miller's analysis \cite{miller2006}, with Pony \cite{clebsch2015} and Austral \cite{austral} as contemporary language-level attempts. The probabilistic layer stands on Church \cite{goodman2008}, Stan \cite{carpenter2017}, Gen's programmable inference \cite{cusumano2019}, Pyro's handler-structured internals \cite{bingham2019}, and the monadic and effect-based accounts of inference \cite{scibior2015}; the boundary discipline is informed by TerpreT's negative result \cite{gaunt2016} and by Scallop and DeepProbLog on the neurosymbolic side \cite{li2023, manhaeve2018}, with Dex as the typed array-programming reference \cite{paszke2021}. The specification discipline follows Zephyr ASDL \cite{asdl} and the WebAssembly specification \cite{wasm}; the tooling stance follows Roslyn and \texttt{go/ast}; the failure-handling direction follows Erlang/OTP \cite{armstrong2003}. What is original here is the combination, and the claim that the agent era is the forcing function that finally makes this particular combination worth its cost.
+\jacquard's individual mechanisms are borrowed, deliberately, from systems that proved them. Unison contributes content addressing, cycle hashing, abilities as ordinary functions, and the nameless codebase \cite{unison}. The algebraic effects lineage runs from Plotkin and Pretnar \cite{plotkin2009} through Eff, Frank \cite{lindley2017}, Koka \cite{leijen2017}, and OCaml~5's runtime support. The homoiconic representation is Elixir's \cite{elixir} in the tradition of Lisp and Scheme, with hygiene from Kohlbecker et al.\ \cite{kohlbecker1986} as modernized by Racket's scope sets \cite{flatt2016}. Capability security follows the object-capability tradition of E and Miller's analysis \cite{miller2006}, with Pony \cite{clebsch2015} and Austral \cite{austral} as contemporary language-level attempts. The probabilistic layer stands on Church \cite{goodman2008}, Stan \cite{carpenter2017}, Gen's programmable inference \cite{cusumano2019}, Pyro's handler-structured internals \cite{bingham2019}, and the monadic and effect-based accounts of inference \cite{scibior2015}; the boundary discipline is informed by TerpreT's negative result \cite{gaunt2016} and by Scallop and DeepProbLog on the neurosymbolic side \cite{li2023, manhaeve2018}, with Dex as the typed array-programming reference \cite{paszke2021}. The specification discipline follows Zephyr ASDL \cite{asdl} and the WebAssembly specification \cite{wasm}; the tooling stance follows Roslyn and \texttt{go/ast}; the failure-handling direction follows Erlang/OTP \cite{armstrong2003}. What is original here is the combination, and the claim that the agent era is the forcing function that finally makes this particular combination worth its cost.
 
 \section{Conclusion}
 
-\weft{} bets that the constraints of machine-written, human-reviewed software select for a specific and previously unassembled set of mechanisms: a kernel small enough to prompt, signatures that exhaust the story, authority that is granted rather than ambient, uncertainty that is tracked rather than smuggled, and identity that is content rather than text. Every mechanism has an existence proof in a surveyed language; none of the surveyed languages has the combination. The kernel is drafted, the milestones are falsifiable, and the risk register is honest. The next artifact is an interpreter.
+\jacquard{} bets that the constraints of machine-written, human-reviewed software select for a specific and previously unassembled set of mechanisms: a kernel small enough to prompt, signatures that exhaust the story, authority that is granted rather than ambient, uncertainty that is tracked rather than smuggled, and identity that is content rather than text. Every mechanism has an existence proof in a surveyed language; none of the surveyed languages has the combination. The kernel is drafted, the milestones are falsifiable, and the risk register is honest. The next artifact is an interpreter.
 
 \begin{thebibliography}{99}\small
 

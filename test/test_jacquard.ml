@@ -1,8 +1,8 @@
 let test_version_is_nonempty () =
-  Alcotest.(check bool) "version is non-empty" true (String.length Weft.Version.version > 0)
+  Alcotest.(check bool) "version is non-empty" true (String.length Jacquard.Version.version > 0)
 
 let () =
-  Alcotest.run "weft"
+  Alcotest.run "jacquard"
     [
       ("version", [ Alcotest.test_case "non-empty" `Quick test_version_is_nonempty ]);
       ("diag", Test_diag.suite);

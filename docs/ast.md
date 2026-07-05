@@ -1,4 +1,4 @@
-# Weft Kernel AST — M0, Draft 0.1
+# Jacquard Kernel AST — M0, Draft 0.1
 
 Status: proposal for review. Everything here is arguable; the count accounting and open
 questions at the end mark where I expect the argument.
@@ -10,7 +10,7 @@ questions at the end mark where I expect the argument.
 The single most important decision in this document is that "the AST" is two things, cleanly
 separated:
 
-**Layer 1: the representation.** Every Weft form is one uniform shape, a triple:
+**Layer 1: the representation.** Every Jacquard form is one uniform shape, a triple:
 
 ```
 (head, meta, args)
@@ -87,11 +87,11 @@ products (clause shapes, rows, specs) are structures, not forms, exactly as Pyth
 treats `arguments` and `keyword`.
 
 ```asdl
--- Weft kernel, M0 draft 0.1
+-- Jacquard kernel, M0 draft 0.1
 -- Every constructor below is realized as a triple (head, meta, args)
 -- with head = the constructor name, lowercased.
 
-module Weft
+module Jacquard
 {
   expr = Lit(lit value)
        | Var(name id)                        -- local, lexically bound

@@ -1,8 +1,8 @@
-# Weft tutorial: ten runnable examples
+# Jacquard tutorial: ten runnable examples
 
 Every example here is a file checked into the repository and exercised by CI (the
 conformance corpus, the signature corpus, or the demo transcripts). Commands assume the
-repo root; `weft` is `dune exec weft --`.
+repo root; `jacquard` is `dune exec jacquard --`.
 
 ## 1. A literal
 
@@ -12,7 +12,7 @@ repo root; `weft` is `dune exec weft --`.
 (lit 1)
 ```
 
-Run it: `weft run corpus/valid/lit-int.wft` prints `1`.
+Run it: `jacquard run corpus/valid/lit-int.wft` prints `1`.
 
 ## 2. Application
 
@@ -22,7 +22,7 @@ Run it: `weft run corpus/valid/lit-int.wft` prints `1`.
 (app (var add) (lit 1) (lit 2))
 ```
 
-Calls are uncurried (decision D5): `add` takes exactly two arguments. `weft run` prints `3`.
+Calls are uncurried (decision D5): `add` takes exactly two arguments. `jacquard run` prints `3`.
 
 ## 3. Functions
 
@@ -32,7 +32,7 @@ Calls are uncurried (decision D5): `add` takes exactly two arguments. `weft run`
 (lam ((pvar x)) (var x))
 ```
 
-`weft check corpus/sigs/01-identity.wft --print-sigs` prints the elaborated signature —
+`jacquard check corpus/sigs/01-identity.wft --print-sigs` prints the elaborated signature —
 `forall a. (a) ->{} a`. The empty row `{}` is the whole story: this function can do
 nothing but compute.
 
@@ -51,7 +51,7 @@ nothing but compute.
 ```
 
 Self-reference resolves to a group-local marker, so the definition's hash is stable under
-renaming. `demos/m1-fact.wft` adds `(app (var fact) (lit 5))`; `weft run` prints `120`.
+renaming. `demos/m1-fact.wft` adds `(app (var fact) (lit 5))`; `jacquard run` prints `120`.
 
 ## 5. Pattern matching, no if
 
@@ -65,7 +65,7 @@ does not have:
     (clause (pcon false) (lit 1))))
 ```
 
-Delete a clause and `weft check` rejects the match with the missing witness (E0813).
+Delete a clause and `jacquard check` rejects the match with the missing witness (E0813).
 
 ## 6. Effects and handlers
 
@@ -79,7 +79,7 @@ Delete a clause and `weft check` rejects the match with the missing witness (E08
       (clause (pcon false) (app (var div) (var n) (var d))))))))
 ```
 
-`weft check --print-sigs` shows `safe-div : (int, int) ->{abort} int` — the signature
+`jacquard check --print-sigs` shows `safe-div : (int, int) ->{abort} int` — the signature
 announces the possible abort — and `to-option : forall a e. (() ->{abort | e} a) ->{e} option a`
 shows row polymorphism removing it.
 
@@ -98,20 +98,20 @@ branches:
     (app (var append) (app (var k) (var true)) (app (var k) (var false)))))
 ```
 
-`weft run demos/m1-choose.wft` prints `cons(1, cons(2, nil))`.
+`jacquard run demos/m1-choose.wft` prints `cons(1, cons(2, nil))`.
 
 ## 8. Capability grants
 
 `demos/m1-gated.wft` — `eval` is a library effect; nothing runs code without the grant:
 
 ```
-$ weft run demos/m1-gated.wft            # E0814 refusal, exit 3
-$ weft run demos/m1-gated.wft --allow eval
+$ jacquard run demos/m1-gated.wft            # E0814 refusal, exit 3
+$ jacquard run demos/m1-gated.wft --allow eval
 42
 ```
 
 The same gate covers `console` and `net`. A program's inferred row is its authority
-manifest; `weft check FILE --manifest net,console` audits it without running.
+manifest; `jacquard check FILE --manifest net,console` audits it without running.
 
 ## 9. Probabilistic programming
 
@@ -119,10 +119,10 @@ manifest; `weft check FILE --manifest net,console` audits it without running.
 algorithms are handlers:
 
 ```
-$ weft infer enumerate demos/m3-two-coins.wft
+$ jacquard infer enumerate demos/m3-two-coins.wft
 0.666667  true
 0.333333  false
-$ weft infer lw demos/m3-two-coins.wft --seed 42 --samples 100000
+$ jacquard infer lw demos/m3-two-coins.wft --seed 42 --samples 100000
 0.667898  true
 0.332102  false
 ```
@@ -136,21 +136,21 @@ self-contained declaration, rename it (object files untouched), and diff semanti
 
 ```
 $ printf '(deftype color () (con red) (con green))\n' > color.wft
-$ weft store add lib-v1 color.wft
+$ jacquard store add lib-v1 color.wft
 ok
-$ weft store add lib-v2 color.wft
+$ jacquard store add lib-v2 color.wft
 ok
-$ weft store rename lib-v2 color colour
-$ weft diff lib-v1 lib-v2
+$ jacquard store rename lib-v2 color colour
+$ jacquard diff lib-v1 lib-v2
 renamed  color -> colour
 ```
 
-`weft hash FILE` prints the canonical HASH_V0 hashes; formatting and comments never change
+`jacquard hash FILE` prints the canonical HASH_V0 hashes; formatting and comments never change
 them (the metadata law). These commands are pinned in `test/cli/tutorial.t`.
 
 ## 11. Interposition: attenuating authority with a handler
 
-Capability security in Weft is not a special mechanism — it is the effect system used
+Capability security in Jacquard is not a special mechanism — it is the effect system used
 deliberately. `--allow fs` grants the whole filesystem (the grant is the sandbox boundary
 in this draft), but any code can narrow what it passes on by wrapping a handler.
 `fs.read-only` from the prelude forwards `read` and `list-dir` to the real world and turns
@@ -164,7 +164,7 @@ in this draft), but any code can narrow what it passes on by wrapping a handler.
         (var c)))))
 ```
 
-Under `weft run --allow fs`, the read succeeds and the write becomes
+Under `jacquard run --allow fs`, the read succeeds and the write becomes
 `"fs.read-only refused write: note.txt"` (catch it with `throw.catch`). The handler
 re-performs the reads, so `fs` honestly stays in the row: attenuated code still needs the
 grant, it just cannot write through this handler. Pinned in `test/cli/world.t`.

@@ -1,6 +1,6 @@
 # Demos
 
-This directory favors demos that show Weft as a substrate for model-written
+This directory favors demos that show Jacquard as a substrate for model-written
 programs: the same code can run under different handlers, while authority,
 uncertainty, and identity stay visible to tools.
 

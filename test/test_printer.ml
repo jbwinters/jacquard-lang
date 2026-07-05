@@ -1,4 +1,4 @@
-open Weft
+open Jacquard
 
 let form = Alcotest.testable Form.pp Form.equal_ignoring_meta
 

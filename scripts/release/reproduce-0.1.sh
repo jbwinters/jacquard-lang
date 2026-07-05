@@ -4,9 +4,14 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 cd "$ROOT"
 
-REF=${WEFT_RELEASE_REF:-release/0.1-evidence}
-BASE=${WEFT_RELEASE_BASE:-aec2c63}
-OUT=${WEFT_RELEASE_OUT:-logs/release/0.1}
+# The language was renamed Weft -> Jacquard after 0.1. This script reproduces
+# the FROZEN 0.1 evidence: it checks out the pre-rename lineage, so everything
+# below the checkout (WEFT_PRELUDE, demos/*.sh, test/test_weft.exe) deliberately
+# uses the old names. Inputs accept both spellings; new callers should pass
+# JACQUARD_RELEASE_*.
+REF=${JACQUARD_RELEASE_REF:-${WEFT_RELEASE_REF:-release/0.1-evidence}}
+BASE=${JACQUARD_RELEASE_BASE:-${WEFT_RELEASE_BASE:-aec2c63}}
+OUT=${JACQUARD_RELEASE_OUT:-${WEFT_RELEASE_OUT:-logs/release/0.1}}
 TRANSCRIPTS="$OUT/transcripts"
 
 mkdir -p "$TRANSCRIPTS"

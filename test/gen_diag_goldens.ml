@@ -1,6 +1,6 @@
 (* Regenerates corpus/golden/diags.golden. Run: dune exec test/gen_diag_goldens.exe *)
 
-open Weft
+open Jacquard
 
 let () =
   match Corpus_support.diag_golden_lines ~prelude_dir:"prelude" with

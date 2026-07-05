@@ -10,7 +10,7 @@
       (ret (pvar x) (var x))
       (opclause flaky ((pwild)) k (app (var k) (var false))))))))
 
-; Seeded chaos: a linear congruential stream in pure Weft ints (deviation from
+; Seeded chaos: a linear congruential stream in pure Jacquard ints (deviation from
 ; the doc's splitmix64, which needs 64-bit ops the language does not expose;
 ; deterministic and replayable all the same). p is approximately a percentage
 ; 0..100 (the Bernoulli test reads the LCG's HIGH bits — low bits of an LCG are

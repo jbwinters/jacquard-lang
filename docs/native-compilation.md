@@ -1,4 +1,4 @@
-# PF.2: native compilation for Weft — a design document
+# PF.2: native compilation for Jacquard — a design document
 
 Status: design only; no compiler code exists or is scheduled. This document
 records the four-pillar route from the current CPS tree-walker to native
@@ -7,7 +7,7 @@ bounds the claim. The plan's culture: big directions start as decision docs.
 
 ## Why this is plausible at all
 
-Weft's semantics were chosen for analyzability: strict evaluation, immutable
+Jacquard's semantics were chosen for analyzability: strict evaluation, immutable
 data, a 27-form kernel, effects visible in rows, and content-addressed
 definitions. Each pillar below converts one of those choices into performance.
 
@@ -29,7 +29,7 @@ The effect row is a static cost model. Compile each arrow by its row:
   their cost is the branch count anyway — the clone is a constant factor on
   work that is exponential by design.
 
-Weft-specific detail: the checker's row model (set-semantics heads, closed/var
+Jacquard-specific detail: the checker's row model (set-semantics heads, closed/var
 tails, open coercion at App) already computes the tier at every call site. The
 tier assignment is exactly `repr_row`'s answer at generalization time; no new
 analysis is needed, only a place to persist it (the store object's meta is the
@@ -38,7 +38,7 @@ natural slot, and the metadata law keeps it out of the hash).
 ## Pillar 2: Perceus reference counting
 
 Precise RC with in-place reuse (Reinking, Xie, de Moura, Leijen, PLDI 2021).
-The Weft-specific gift: strict + immutable means pure data CANNOT form cycles —
+The Jacquard-specific gift: strict + immutable means pure data CANNOT form cycles —
 a value only references values that existed before it. So RC is sound without a
 cycle collector, EXCEPT for one documented seam: `let rec` closures (and the
 mutual recursion inside defterm groups) form the only back-edges in the heap.
@@ -46,7 +46,7 @@ Treatment: closures created by `let rec` get a one-bit "cyclic" tag and are
 collected by scope exit rather than pure RC — the same carve-out Koka makes.
 In-place reuse pays off precisely where the stdlib works: `map.set` rebalancing
 a freshly-uniquely-owned spine reuses every node it rebuilt, turning the AVL
-update into imperative-speed pointer surgery without changing one line of Weft.
+update into imperative-speed pointer surgery without changing one line of Jacquard.
 
 ## Pillar 3: monomorphization by content hash
 

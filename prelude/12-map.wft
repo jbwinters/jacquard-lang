@@ -1,4 +1,4 @@
-; Ring 2 Map and Set (stdlib SL.6): AVL trees written entirely in Weft.
+; Ring 2 Map and Set (stdlib SL.6): AVL trees written entirely in Jacquard.
 ; The ord dictionary is captive: supplied once at map.empty, threaded internally,
 ; so two orderings can never mix inside one map. Nodes carry height AND size so
 ; balance is O(1) and map.size is O(1). The node type is ring-2-internal.

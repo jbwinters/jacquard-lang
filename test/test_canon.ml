@@ -1,4 +1,4 @@
-open Weft
+open Jacquard
 
 let valid_dir = "../corpus/valid"
 let golden_file = "../corpus/golden/hashes.golden"

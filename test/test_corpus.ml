@@ -4,7 +4,7 @@
     stub prelude names, hash) and land exactly on the golden hashes. Every file in [corpus/invalid]
     must fail at the stage its [.expect] sidecar names, with the expected diagnostic code. *)
 
-open Weft
+open Jacquard
 
 let valid_dir = "../corpus/valid"
 let invalid_dir = "../corpus/invalid"

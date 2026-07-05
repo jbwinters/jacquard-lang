@@ -1,7 +1,7 @@
-# Warp — The Weft Testing Framework, Design Draft 0.1
+# Warp — The Jacquard Testing Framework, Design Draft 0.1
 
 Companion to the stdlib design; assumes its rings, conventions, and notation. "Warp"
-is the working title only (the warp is the fixed set of threads the weft weaves
+is the working title only (the warp is the fixed set of threads the jacquard weaves
 through, which is what a test suite is to a program). The library names themselves
 live under `test.*` and `check.*`, because the stdlib's first principle says
 predictable names beat clever ones, and that principle applies to its own tooling.
@@ -34,7 +34,7 @@ type Test      = Case  (Text, () ->{Check} ())
 type WorldTest = WCase (Text, () ->{Check, Fs, Net, Clock, Console} ())
 ```
 
-Discovery is type-directed: `weft test` scans the name index for definitions whose
+Discovery is type-directed: `jacquard test` scans the name index for definitions whose
 checked type is `Test` or `WorldTest`. The interesting part is the rows in the
 constructor fields. `Case` holds a thunk with the closed row `{Check}`, so the
 checker rejects any test body that touches the clock, the filesystem, randomness, or
@@ -120,8 +120,8 @@ The flagship behavior falls straight out of the M3 thesis. The same `Prop`, byte
 for byte, runs under two handlers:
 
 ```
-weft test                      -- sampling handler: N random cases, seeded
-weft test --exhaustive         -- enumeration handler: every case, budget-bounded
+jacquard test                      -- sampling handler: N random cases, seeded
+jacquard test --exhaustive         -- enumeration handler: every case, budget-bounded
 ```
 
 Under sampling it is QuickCheck. Under enumeration, for generators with small
@@ -192,7 +192,7 @@ memo key (Prop)      = (hash, mode, samples, seed)
 WorldTest            = never cached
 ```
 
-`weft test` consults the result store before running anything, and the
+`jacquard test` consults the result store before running anything, and the
 consequences are blunt. A reformat or comment edit reruns zero tests. A rename
 reruns zero tests. Editing `list.map` reruns exactly the tests that transitively
 depend on `list.map`, identified by no mechanism at all beyond hashes changing.
@@ -202,7 +202,7 @@ takes to scan the index, and the cache is shareable across machines because keys
 are content, so one developer's local run warms the team's CI.
 
 Coverage gets the same semantic treatment: the interpreter records which
-definition hashes were evaluated under test, and `weft test --coverage` reports
+definition hashes were evaluated under test, and `jacquard test --coverage` reports
 the store's reachable-but-never-executed definitions. That answers "what code has
 no test touching it" at the definition level with zero instrumentation of source
 text; line-level coverage via spans can layer on later.
@@ -263,7 +263,7 @@ definition's row is CLOSED at `{Dist}`, and the assertion's thunk parameter
 needs an open row — the fresh lambdas get one. See the stdlib errata on
 closed rows.)
 
-`weft test` runs the first and third definitions hermetically with caching,
+`jacquard test` runs the first and third definitions hermetically with caching,
 `--exhaustive` upgrades the `Prop` to a 256-case proof, and the `WorldTest` runs in
 its own lane under whatever grants CI gives it. The signatures did the sorting.
 
@@ -279,12 +279,12 @@ per-type shrinkers (§4). No separate small-check tool (§4).
 New owner decisions, continuing the table: D12, discovery by checked type as
 designed here versus a meta marker (default: by type). D13, the `Codec` story
 ships with ring 3 world effects only, user effects bring their own (default: yes).
-D14, the name (default: plain `weft test`; "Warp" stays a document title).
+D14, the name (default: plain `jacquard test`; "Warp" stays a document title).
 
 Implementation slots in as Phase 6, after M3, since properties need `Dist` and
 discovery needs the checker. Sized per the dev plan's scheme, inheriting its
 global DoD: W6.1 `Check`, runner, assertions (M; report golden tests, zero-check
-warning test). W6.2 test types, type-directed discovery, `weft test` (M; discovery
+warning test). W6.2 test types, type-directed discovery, `jacquard test` (M; discovery
 finds typed defs only, WorldTest lane gated by grants). W6.3 result cache (M; the
 reformat-reruns-zero and edited-dep-reruns-dependents tests, cross-machine cache
 hit test). W6.4 sampling runner with choice-log shrinking (L; a seeded failing

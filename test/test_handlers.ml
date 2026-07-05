@@ -1,4 +1,4 @@
-open Weft
+open Jacquard
 
 (* W2.4: deep handlers and multi-shot resumptions — the plan's riskiest task. The multi-shot
    smoke test is deliberately first: it is the reason the interpreter is CPS. *)

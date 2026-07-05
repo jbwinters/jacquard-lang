@@ -1,11 +1,11 @@
 ---
-name: weft
-description: Read, write, run, and test Weft programs — the content-addressed, effect-typed research language implemented in this repo. Use when writing or reviewing .wft files, adding demos or Warp tests, running the weft CLI, debugging effect rows / capability manifests / handlers / Dist models, or touching the OCaml implementation in src/.
+name: jacquard
+description: Read, write, run, and test Jacquard programs — the content-addressed, effect-typed research language implemented in this repo. Use when writing or reviewing .wft files, adding demos or Warp tests, running the jacquard CLI, debugging effect rows / capability manifests / handlers / Dist models, or touching the OCaml implementation in src/.
 ---
 
-# Weft: the language, fast
+# Jacquard: the language, fast
 
-Weft is a research language for programs written by models and reviewed by
+Jacquard is a research language for programs written by models and reviewed by
 people. Its one design move: **effects, uncertainty, and identity are visible
 to tools** instead of hidden in runtime behavior, mocks, logs, or naming
 conventions. Concretely:
@@ -22,8 +22,8 @@ conventions. Concretely:
   (comments, formatting, spans, provenance) erased. Renames and reformats are
   free; the test cache, semantic differ, and store all key on hashes.
 
-The implementation is OCaml (`src/`), the language ships as a CLI (`weft`),
-and the standard library ("prelude") is written in Weft itself (`prelude/`).
+The implementation is OCaml (`src/`), the language ships as a CLI (`jacquard`),
+and the standard library ("prelude") is written in Jacquard itself (`prelude/`).
 
 ## Environment and CLI
 
@@ -31,29 +31,29 @@ Every shell needs the opam env; direct CLI runs need the prelude:
 
 ```bash
 eval "$(opam env)"
-export WEFT_PRELUDE=$PWD/prelude
+export JACQUARD_PRELUDE=$PWD/prelude
 opam exec -- dune build @all      # build
 opam exec -- dune runtest         # full suite (~25s; alcotest + qcheck + cram)
 opam exec -- dune fmt             # then: git diff --exit-code (the dev gate)
 ```
 
-`weft` during development is `dune exec weft --`. The surface:
+`jacquard` during development is `dune exec jacquard --`. The surface:
 
 ```bash
-weft run FILE.wft [--allow fs|net|console|clock|eval|dist|infer]... [--dry-run]
-weft check FILE.wft [--print-sigs] [--manifest fs,net,console]
-weft test FILES... [--seed N] [--samples N] [--exhaustive] [--budget N]
+jacquard run FILE.wft [--allow fs|net|console|clock|eval|dist|infer]... [--dry-run]
+jacquard check FILE.wft [--print-sigs] [--manifest fs,net,console]
+jacquard test FILES... [--seed N] [--samples N] [--exhaustive] [--budget N]
                    [--cache-dir DIR | --no-cache] [--allow EFFECT]... [--coverage]
-weft infer enumerate MODEL.wft            # exact posterior (multi-shot enumeration)
-weft infer lw MODEL.wft --seed 42 --samples 100000   # likelihood weighting
-weft hash FILE.wft                        # canonical HASH_V0 hashes
-weft fmt FILE.wft [--write]               # canonical formatting, comments kept
-weft store add|rename ... ; weft diff STORE_A STORE_B   # semantic diff
-weft dist-diff MODEL_A MODEL_B            # posterior divergence between models
-weft replay LOG PROGRAM [--to N] [--fork 'N=(response 503 "down")']
+jacquard infer enumerate MODEL.wft            # exact posterior (multi-shot enumeration)
+jacquard infer lw MODEL.wft --seed 42 --samples 100000   # likelihood weighting
+jacquard hash FILE.wft                        # canonical HASH_V0 hashes
+jacquard fmt FILE.wft [--write]               # canonical formatting, comments kept
+jacquard store add|rename ... ; jacquard diff STORE_A STORE_B   # semantic diff
+jacquard dist-diff MODEL_A MODEL_B            # posterior divergence between models
+jacquard replay LOG PROGRAM [--to N] [--fork 'N=(response 503 "down")']
 ```
 
-`weft run` loads declarations, then evaluates and prints each top-level
+`jacquard run` loads declarations, then evaluates and prints each top-level
 expression in order. Exit codes for `run`: ungranted-effect refusal (E0814)
 = 3, runtime failure = 2, ordinary type errors = 1; `check` refusals = 1.
 
@@ -135,8 +135,8 @@ destructures them; `(pcon mk-pair (pvar x) (pvar p))` destructures constructors.
   (`forall e. (() ->{abort | e} a) ->{e} option a`) passes the rest through.
 - Performing an op is plain application: `(app (var fetch) req)`. There is no
   `perform` keyword.
-- `weft run` refuses ungranted effects (E0814) *before running the effectful
-  expression*; `weft check --manifest fs,console` audits without running.
+- `jacquard run` refuses ungranted effects (E0814) *before running the effectful
+  expression*; `jacquard check --manifest fs,console` audits without running.
 - Attenuation is handler interposition: `fs.read-only` forwards `read`,
   throws on `write`. The wrapped code's row honestly keeps `fs`.
 - **Known caveats** (documented, do not "fix" casually):
@@ -166,7 +166,7 @@ One type, one effect, zero kernel forms (`prelude/06-dist.wft`):
 - A model is any `() ->{dist} a` thunk. Inference = handler choice:
   in-language, `dist.enumerate` (exact, normalized, unmerged) or
   `dist.sample-lw` (seeded likelihood weighting); at the CLI,
-  `weft infer enumerate` / `weft infer lw` (these merge equal outcomes).
+  `jacquard infer enumerate` / `jacquard infer lw` (these merge equal outcomes).
   Same model hash, different handler — that's `demos/m3.sh`.
 - Merge equal outcomes explicitly: `dist.tally table (app (var mk-eq) (var code.eq?))`
   — tallying asks for its `Eq` honestly.
@@ -175,7 +175,7 @@ One type, one effect, zero kernel forms (`prelude/06-dist.wft`):
   `demos/repair.wft`).
 - `categorical` weights are **relative**; enumeration normalizes at the end.
 - Gotchas: all-branches-impossible yields `+nan.0` weights in-language (the
-  CLI's `weft infer enumerate` reports E0901 instead); `observe` reaching the
+  CLI's `jacquard infer enumerate` reports E0901 instead); `observe` reaching the
   root is an error (E0904); `uniform-int` enumeration caps at 10000 outcomes.
 
 ## Code as data, identity, stores
@@ -186,11 +186,11 @@ One type, one effect, zero kernel forms (`prelude/06-dist.wft`):
   `var`, `lit`, `pvar` — return `none`), `code.of-int/to-int`,
   `code.of-text/to-text`, `code.eq?` (metadata-erased structural equality),
   `code.diff` (smallest disagreeing subtrees, as text). A full single-edit
-  AST mutation walker in pure Weft is in `demos/repair.wft`.
+  AST mutation walker in pure Jacquard is in `demos/repair.wft`.
 - Running constructed code is the **eval capability**:
   `(app (var eval-code) c)` needs `--allow eval`; it validates, resolves
   against the store, and runs — at root authority (caveat above).
-- `weft hash` prints canonical hashes; `weft store add/rename` + `weft diff`
+- `jacquard hash` prints canonical hashes; `jacquard store add/rename` + `jacquard diff`
   show renames as renames and reformatting as nothing. Fixtures, caches, and
   approval workflows (see `demos/escrow/APPROVAL`) all pin hashes.
 
@@ -239,7 +239,7 @@ Read `docs/warp-testing.md`; the API is `prelude/15-warp.wft` + `16-gen.wft`.
     Note: `eval` has no in-language discharger, so eval-dependent behavior is
     pinned in cram transcripts instead (see `test/cli/repair.t`).
   - `(app (var prop) (lit "name") (lam () ...))` — row `{dist, check}`; the
-    generator IS a distribution. `weft test` samples (seeded); `--exhaustive`
+    generator IS a distribution. `jacquard test` samples (seeded); `--exhaustive`
     proves it over the whole support, budget-bounded. Caveat: the sampling
     driver ignores `observe`; only `--exhaustive` conditions.
   - `group` nests; `wcase` is the world lane (`{check, fs, net, clock,
@@ -264,7 +264,7 @@ Read `docs/warp-testing.md`; the API is `prelude/15-warp.wft` + `16-gen.wft`.
   diffs should be additive), signatures in `corpus/sigs/`.
 - Dev gate before any PR: `dune build @all && dune runtest && dune fmt` then
   `git diff --exit-code`. Release-facing changes also run
-  `WEFT_RELEASE_REF=HEAD WEFT_RELEASE_BASE=aec2c63 scripts/release/reproduce-0.1.sh`.
+  `JACQUARD_RELEASE_REF=HEAD JACQUARD_RELEASE_BASE=aec2c63 scripts/release/reproduce-0.1.sh`.
 - OCaml side: library code returns `('a, Diag.t list) result`; exceptions
   only for internal invariants, prefixed `Bug_`; public functions get doc
   comments; diagnostics get stable `E####` codes cataloged in
@@ -281,21 +281,21 @@ Read `docs/warp-testing.md`; the API is `prelude/15-warp.wft` + `16-gen.wft`.
   (W0301 warns).
 - Expected-value strings in OCaml tests are `Value.show` renderings
   (`"cons(1, nil)"`, `"true"`), NOT source syntax (`"(var true)"`).
-- `weft run` can't read process substitution (`<(...)`) — Illegal seek. Use
+- `jacquard run` can't read process substitution (`<(...)`) — Illegal seek. Use
   temp files.
 - `plit` matches int AND text literals (`(clause (plit "operator") ...)` works).
 - Ints are native 63-bit and wrap (D2); division truncates toward zero;
   reals are OCaml floats; text is UTF-8 counted in codepoints (not graphemes).
 - 8+ structurally identical members in one defterm group can't be canonically
   ordered (E0505).
-- In cram tests (`test/cli/*.t`), export `WEFT_PRELUDE=../../prelude` and
+- In cram tests (`test/cli/*.t`), export `JACQUARD_PRELUDE=../../prelude` and
   remember the sandbox only sees dirs listed in `test/cli/dune` cram deps.
-- `weft test` files must not contain top-level expressions (E1001);
+- `jacquard test` files must not contain top-level expressions (E1001);
   `--dry-run` refuses programs whose row includes `eval` (E1002).
 
 ## Where to look
 
-- Kernel/AST/hashing: `docs/ast.md`, `spec/weft-kernel-ast-m0.md`,
+- Kernel/AST/hashing: `docs/ast.md`, `spec/jacquard-kernel-ast-m0.md`,
   `spec/serialization.md`, `src/kernel.ml`, `src/canon.ml`.
 - Runnable intro: `docs/tutorial.md` (10 examples, all pinned in cram).
 - Stdlib design + errata: `docs/stdlib.md` (§12 errata is required reading).

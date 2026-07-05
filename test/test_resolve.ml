@@ -1,4 +1,4 @@
-open Weft
+open Jacquard
 
 (* Hand-built in-memory store stub (the W1.4 seam); the real store lands in W1.6. *)
 let h name = Hash.of_string ("stub:" ^ name)

@@ -1,4 +1,4 @@
-open Weft
+open Jacquard
 
 (* W3.5: exhaustiveness (error, with witness) and redundancy (warning). *)
 

@@ -4,18 +4,18 @@
 # refuses without the grant and the granted run succeeds against the stub.
 # Run from the repo root: sh demos/m4-hostile.sh
 set -u
-WEFT="${WEFT:-dune exec weft --}"
+JACQUARD="${JACQUARD:-dune exec jacquard --}"
 here="$(dirname "$0")"
 
 echo "== the signatures announce the authority =="
-$WEFT check "$here/m4-hostile.wft" --print-sigs
+$JACQUARD check "$here/m4-hostile.wft" --print-sigs
 
 echo "== check WITHOUT the net grant (expected: E0814 refusal, exit 1) =="
-$WEFT check "$here/m4-hostile.wft" --manifest console
+$JACQUARD check "$here/m4-hostile.wft" --manifest console
 echo "exit code: $?"
 
 echo "== check WITH the grant =="
-$WEFT check "$here/m4-hostile.wft" --manifest net,console
+$JACQUARD check "$here/m4-hostile.wft" --manifest net,console
 
 echo "== the granted run, against the stub net handler =="
-$WEFT run "$here/m4-hostile.wft" --allow net
+$JACQUARD run "$here/m4-hostile.wft" --allow net

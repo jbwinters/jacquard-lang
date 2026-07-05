@@ -1,6 +1,6 @@
 (cram
  (deps
-  %{bin:weft}
+  %{bin:jacquard}
   (source_tree ../../prelude)
   (source_tree ../../demos)
   (source_tree ../../corpus)))

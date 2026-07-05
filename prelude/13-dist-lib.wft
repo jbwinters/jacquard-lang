@@ -2,7 +2,7 @@
 ; name, tallying with an explicit Eq, and the dictionary-honest pmf. The native
 ; pmf/support stay as the internal drivers' tools.
 ; NOTE: if every branch is impossible (total mass 0), the normalized weights are
-; +nan.0 — the in-language enumerate has no error channel; `weft infer enumerate`
+; +nan.0 — the in-language enumerate has no error channel; `jacquard infer enumerate`
 ; reports E0901 for the same model. Recorded in the stdlib errata (SL.9).
 (defterm ((binding dist.enumerate ()
   (lam ((pvar model)) (app (var normalize) (app (var enum-run) (var model)))))))
@@ -41,6 +41,6 @@
               (clause (pcon false) (var acc)))))))))))
 
 ; seeded, count-bounded likelihood weighting as a native builtin: the splitmix64
-; driver cannot be written in Weft without an RNG effect the design declines to
+; driver cannot be written in Jacquard without an RNG effect the design declines to
 ; add (randomness IS Dist). Returns the normalized empirical posterior.
 (defterm ((binding dist.sample-lw () (quote (builtin-marker dist.sample-lw)))))

@@ -1,4 +1,4 @@
-open Weft
+open Jacquard
 
 let close a b = Float.abs (a -. b) < 1e-9
 

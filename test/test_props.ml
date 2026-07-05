@@ -1,4 +1,4 @@
-open Weft
+open Jacquard
 
 (* W6.4 (sampling + choice-log shrinking), W6.5 (exhaustive), W6.9 (probabilistic
    assertions): the drivers against hand-enumerated ground truth. *)

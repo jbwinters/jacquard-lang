@@ -1,7 +1,7 @@
 (* Regenerates corpus/golden/sigs.golden from corpus/sigs/.
    Run from the repo root: dune exec test/gen_sig_goldens.exe *)
 
-open Weft
+open Jacquard
 
 let () =
   match Corpus_support.sig_lines ~prelude_dir:"prelude" ~sigs_dir:"corpus/sigs" with

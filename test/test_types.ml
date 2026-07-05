@@ -1,5 +1,5 @@
-open Weft
-open Weft.Types
+open Jacquard
+open Jacquard.Types
 
 (* W3.1: the unifier, with the row cases the plan names, plus the qcheck symmetry
    property. Effect labels here are arbitrary distinct hashes. *)

@@ -3,7 +3,7 @@
 # utility beats the interruption cost. Run from the repo root:
 #   sh demos/clarifying-question.sh
 set -u
-WEFT="${WEFT:-dune exec weft --}"
+JACQUARD="${JACQUARD:-dune exec jacquard --}"
 here="$(dirname "$0")"
 
-$WEFT run "$here/clarifying-question.wft"
+$JACQUARD run "$here/clarifying-question.wft"

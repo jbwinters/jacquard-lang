@@ -1,4 +1,4 @@
-open Weft
+open Jacquard
 
 (* --- W2.1: value constructors and stable show output (golden) --- *)
 

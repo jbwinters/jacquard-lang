@@ -1,4 +1,4 @@
-open Weft
+open Jacquard
 
 (* W6.1-W6.3, W6.8: report semantics, both directions of the failure assertions,
    cache entry round-trips, and the coverage memo trap. *)
@@ -92,7 +92,7 @@ let test_check_eq_renders_both_sides () =
           "(app (var check.eq) (app (var add) (lit 2) (lit 2)) (lit 5) (var int.eq) (var int.show) \
            (lit \"sum\"))"))
 
-(* the whole suite above ran with ZERO grants: pure Weft over rings 0-1, asserted *)
+(* the whole suite above ran with ZERO grants: pure Jacquard over rings 0-1, asserted *)
 let test_manifest_pure () =
   match Reader.parse_one ~file:"m.wft" (run "(app (var check.true) (var true) (lit \"t\"))") with
   | Error ds -> Eval_support.fail_diags "parse" ds

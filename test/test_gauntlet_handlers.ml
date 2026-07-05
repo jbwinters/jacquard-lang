@@ -1,4 +1,4 @@
-open Weft
+open Jacquard
 
 let test_resumed_same_op_gives_four_leaves () =
   let h = Test_handlers.make () in

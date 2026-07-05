@@ -2,7 +2,7 @@ The executable escrow (release 0.1's narrative demo): a generated workflow's
 authority, behavior, and identity are machine-checked before anything runs.
 Every beat uses shipped machinery only. See demos/escrow/README.md.
 
-  $ export WEFT_PRELUDE=$PWD/../../prelude
+  $ export JACQUARD_PRELUDE=$PWD/../../prelude
   $ cp -R ../../demos/escrow/* .
   $ printf 'cfg' > release-config.txt
   $ cat workflow.wft main.wft > approved-run.wft
@@ -10,12 +10,12 @@ Every beat uses shipped machinery only. See demos/escrow/README.md.
 The row is the authority manifest: fs covers read/write, net covers fetch, and
 console covers println. Eval is absent.
 
-  $ weft check workflow.wft --print-sigs
+  $ jacquard check workflow.wft --print-sigs
   escrow.workflow : () ->{fs, console, net} int
-  $ weft check approved-run.wft --print-sigs
+  $ jacquard check approved-run.wft --print-sigs
   escrow.workflow : () ->{fs, console, net} int
   _ : int
-  $ weft run approved-run.wft
+  $ jacquard run approved-run.wft
   error[E0814]: this program requires the `fs` effect, which is not granted (performed via `escrow.workflow`)
     hint: grant it with --allow fs, or handle the effect in the program
   error[E0814]: this program requires the `console` effect, which is not granted (performed via `escrow.workflow`)
@@ -26,7 +26,7 @@ console covers println. Eval is absent.
 
 Dry-run forwards reads but audits writes/fetches; no receipt file is created.
 
-  $ weft run approved-run.wft --dry-run
+  $ jacquard run approved-run.wft --dry-run
   published: <dry-run response>
   200
   dry-run dispositions: console=forwarded clock=forwarded fs.read=forwarded fs.write=audited net.fetch=audited+simulated infer.complete=audited+simulated dist=simulated(seed 0) eval=refused
@@ -38,7 +38,7 @@ Dry-run forwards reads but audits writes/fetches; no receipt file is created.
 
 The granted run performs the write against the stub net handler.
 
-  $ weft run approved-run.wft --allow fs --allow net --allow console
+  $ jacquard run approved-run.wft --allow fs --allow net --allow console
   published: <stub response for http://registry/publish>
   200
   $ cat receipt.txt
@@ -47,21 +47,21 @@ The granted run performs the write against the stub net handler.
 Warp tests: hermetic tests run without grants, exhaustive mode proves the small
 property, and the world lane only runs with world grants.
 
-  $ weft test tests.wft --seed 7 --cache-dir escrow-cache
+  $ jacquard test tests.wft --seed 7 --cache-dir escrow-cache
   PASS fault-space-exhaustive/fault.all explores every single and double fault (1 check)
   PASS receipt-well-formed/receipt body round-trips the scripted world (1 check)
   PASS status-classifier-total/every status classifies (prop: 100 cases, seed 7)
   REFUSED world-smoke: requires --allow fs,clock,console,net
   3 passed, 0 failed, 0 skipped, 1 refused
   cache: 0 hit, 3 ran
-  $ weft test tests.wft --seed 7 --cache-dir escrow-cache --exhaustive
+  $ jacquard test tests.wft --seed 7 --cache-dir escrow-cache --exhaustive
   PASS fault-space-exhaustive/fault.all explores every single and double fault (1 check) [cached]
   PASS receipt-well-formed/receipt body round-trips the scripted world (1 check) [cached]
   PASS status-classifier-total/every status classifies (verified exhaustively (400 cases))
   REFUSED world-smoke: requires --allow fs,clock,console,net
   3 passed, 0 failed, 0 skipped, 1 refused
   cache: 2 hit, 1 ran
-  $ weft test tests.wft --seed 7 --cache-dir escrow-cache --allow fs --allow clock --allow console --allow net
+  $ jacquard test tests.wft --seed 7 --cache-dir escrow-cache --allow fs --allow clock --allow console --allow net
   PASS fault-space-exhaustive/fault.all explores every single and double fault (1 check) [cached]
   PASS receipt-well-formed/receipt body round-trips the scripted world (1 check) [cached]
   PASS status-classifier-total/every status classifies (prop: 100 cases, seed 7) [cached]
@@ -71,7 +71,7 @@ property, and the world lane only runs with world grants.
 
 Record/replay captures the scripted fetch; strict replay can render drift.
 
-  $ cat > mklog.wft <<'WEFT'
+  $ cat > mklog.wft <<'JACQUARD'
   > (app (var throw.catch)
   >   (lam ()
   >     (match
@@ -83,16 +83,16 @@ Record/replay captures the scripted fetch; strict replay can render drift.
   >         (app (var cons) (app (var mk-response) (lit 200) (lit "R-77")) (var nil)))
   >       (clause (ptuple (pvar result) (pvar log)) (var log))))
   >   (lam ((pwild)) (quote (log))))
-  > WEFT
-  $ weft run mklog.wft | sed -e 's/^(quote //' -e 's/)$//' > trace.wft
-  $ cat > replay-prog.wft <<'WEFT'
+  > JACQUARD
+  $ jacquard run mklog.wft | sed -e 's/^(quote //' -e 's/)$//' > trace.wft
+  $ cat > replay-prog.wft <<'JACQUARD'
   > (match (app (var fetch) (app (var mk-request) (lit "http://registry/publish") (lit "cfg")))
   >   (clause (pcon mk-response (pwild) (pvar receipt)) (var receipt)))
-  > WEFT
-  $ weft replay trace.wft replay-prog.wft
+  > JACQUARD
+  $ jacquard replay trace.wft replay-prog.wft
   "R-77"
   $ sed 's,http://registry/publish,http://evil/publish,' replay-prog.wft > replay-drift.wft
-  $ weft replay trace.wft replay-drift.wft --compare
+  $ jacquard replay trace.wft replay-drift.wft --compare
   "R-77"
   divergence report (original log vs fork):
     at op1/request[0]/lit[0]: - "http://registry/publish" + "http://evil/publish"
@@ -102,33 +102,33 @@ Comments and provenance sidecars do not change identity.
   $ cp workflow.wft workflow-comment.wft
   $ chmod u+w workflow-comment.wft
   $ printf '\n; provenance note: reviewer saw this exact generated workflow\n' >> workflow-comment.wft
-  $ weft hash workflow.wft > workflow.hash
-  $ weft hash workflow-comment.wft > workflow-comment.hash
+  $ jacquard hash workflow.wft > workflow.hash
+  $ jacquard hash workflow-comment.wft > workflow-comment.hash
   $ cmp workflow.hash workflow-comment.hash
   $ mkdir approved commented
-  $ for f in "$WEFT_PRELUDE"/*.wft; do weft store add approved "$f" >/dev/null; weft store add commented "$f" >/dev/null; done
-  $ weft store add approved workflow.wft
+  $ for f in "$JACQUARD_PRELUDE"/*.wft; do jacquard store add approved "$f" >/dev/null; jacquard store add commented "$f" >/dev/null; done
+  $ jacquard store add approved workflow.wft
   ok
-  $ weft store add commented workflow-comment.wft --origin human:reviewer
+  $ jacquard store add commented workflow-comment.wft --origin human:reviewer
   ok
-  $ weft diff approved commented
+  $ jacquard diff approved commented
   no semantic changes
 
 A malicious variant adds eval. The signature exposes it, the escrow grant set
 refuses it, and semantic diff localizes the escalation.
 
   $ cat workflow-escalated.wft main.wft > escalated-run.wft
-  $ weft check workflow-escalated.wft --print-sigs
+  $ jacquard check workflow-escalated.wft --print-sigs
   escrow.workflow : () ->{fs, eval, console, net} int
-  $ weft check escalated-run.wft --manifest fs,net,console
+  $ jacquard check escalated-run.wft --manifest fs,net,console
   error[E0814]: this program requires the `eval` effect, which is not granted (performed via `eval-code`)
     hint: grant it with --allow eval, or handle the effect in the program
   [1]
   $ mkdir escalated
-  $ for f in "$WEFT_PRELUDE"/*.wft; do weft store add escalated "$f" >/dev/null; done
-  $ weft store add escalated workflow-escalated.wft
+  $ for f in "$JACQUARD_PRELUDE"/*.wft; do jacquard store add escalated "$f" >/dev/null; done
+  $ jacquard store add escalated workflow-escalated.wft
   ok
-  $ weft diff approved escalated | grep -E 'changed|receipt.txt'
+  $ jacquard diff approved escalated | grep -E 'changed|receipt.txt'
   changed  escrow.workflow
       - (app (ref #8eb73e2dbdff11b3c3b01622390d04de2fb7eed9b63f1310ee6bd7fdcd7ea876 op) (lit "receipt.txt") (var receipt))
       + (app (ref #8eb73e2dbdff11b3c3b01622390d04de2fb7eed9b63f1310ee6bd7fdcd7ea876 op) (lit "receipt.txt") (var receipt))
@@ -140,5 +140,5 @@ Approval is by exact member hash; a semantic edit invalidates it.
   $ awk '/0:escrow.workflow/ {print "workflow-hash:", $2}' workflow.hash
   workflow-hash: a550668489d194f48e864ce22155e2c872cf374395c9d47e1ed5f897f5a08a2f
   $ sed 's/(lit "receipt.txt")/(lit "receipt-v2.txt")/' workflow.wft > workflow-changed.wft
-  $ weft hash workflow-changed.wft | awk '/0:escrow.workflow/ {print "changed-hash:", $2}'
+  $ jacquard hash workflow-changed.wft | awk '/0:escrow.workflow/ {print "changed-hash:", $2}'
   changed-hash: ca69f6e26e5425303d077230ecdb8f9221555cf8a3917f89fee741f091b810db

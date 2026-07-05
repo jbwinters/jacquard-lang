@@ -1,4 +1,4 @@
-open Weft
+open Jacquard
 
 (* W6.6 codecs/record/replay/scripted worlds, W6.7 fault injection. *)
 

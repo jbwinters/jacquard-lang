@@ -23,7 +23,7 @@ These are in the bootstrap s-expression notation from the dev plan (W1.2), becau
     (app (var to-option) (lam () (app (var safe-div) (lit 1)  (lit 0))))))))
 ```
 
-Running it gives `(Some 5, None)`. What `weft check --print-sigs` should print is the actual point:
+Running it gives `(Some 5, None)`. What `jacquard check --print-sigs` should print is the actual point:
 
 ```
 safe-div  : (Int, Int) ->{Abort} Int
@@ -36,7 +36,7 @@ The first line announces the failure. The second shows row polymorphism earning 
 **2. Two coins, the M3 flagship model.** Condition-via-observe using the Bernoulli(1.0) trick, which works directly with the pmf semantics pinned in task W4.2.
 
 ```lisp
-; run: weft infer enumerate two-coins.wft
+; run: jacquard infer enumerate two-coins.wft
 (defterm ((binding condition ()
   (lam ((pvar b))
     (app (var observe) (app (var bernoulli) (lit 1.0)) (var b))))))
@@ -61,6 +61,6 @@ Signature: `model : () ->{Dist} Bool`, which is the whole thesis in one line, si
     (quote (app (var add) (lit 1) (unquote (quote (lit 41)))))))))
 ```
 
-Under `weft run --allow Eval` this splices, evaluates, and prints 42. Without the grant it never runs at all: main's row contains Eval, so the W3.6 manifest check refuses at the type level and names the effect. Code running code is an authority like any other.
+Under `jacquard run --allow Eval` this splices, evaluates, and prints 42. Without the grant it never runs at all: main's row contains Eval, so the W3.6 manifest check refuses at the type level and names the effect. Code running code is an authority like any other.
 
 Two small notation calls I made that W1.2 didn't pin, worth folding back into that task so the examples and the reader agree: `let` defaults to non-recursive when the flag is omitted, and op or constructor names appear as bare symbols pre-resolution (`abort`, `pcon true`) with the resolver assigning the ref kind. Both are one-line reader decisions, and these three files would make decent first residents of the corpus.

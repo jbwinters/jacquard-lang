@@ -1,7 +1,7 @@
 (* Regenerates corpus/golden/prelude-hashes.golden from prelude/.
    Run from the repo root: dune exec test/gen_prelude_goldens.exe *)
 
-open Weft
+open Jacquard
 
 let () =
   let dir = if Array.length Sys.argv > 1 then Sys.argv.(1) else "prelude" in
@@ -10,7 +10,7 @@ let () =
   in
   let root =
     Filename.concat (Filename.get_temp_dir_name ())
-      (Printf.sprintf "weft-prelude-gen-%d" (Unix.getpid ()))
+      (Printf.sprintf "jacquard-prelude-gen-%d" (Unix.getpid ()))
   in
   let store =
     match Store.open_store root with

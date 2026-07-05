@@ -3,7 +3,7 @@
     declarations — plus parse/resolve/eval helpers. W2.6 turns this pattern into the real prelude.
 *)
 
-open Weft
+open Jacquard
 
 type harness = {
   store : Store.t;
@@ -22,7 +22,7 @@ let fresh_dir =
   fun () ->
     incr n;
     Filename.concat (Filename.get_temp_dir_name ())
-      (Printf.sprintf "weft-eval-test-%d-%d" (Unix.getpid ()) !n)
+      (Printf.sprintf "jacquard-eval-test-%d-%d" (Unix.getpid ()) !n)
 
 let fail_diags what ds =
   Alcotest.failf "%s: %s" what (String.concat "; " (List.map Diag.to_string ds))

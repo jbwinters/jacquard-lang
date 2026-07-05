@@ -1,4 +1,4 @@
-open Weft
+open Jacquard
 
 let form = Alcotest.testable Form.pp Form.equal_ignoring_meta
 
@@ -136,7 +136,7 @@ let golden_errors =
       "(lit 123456789012345678901234567890)\n",
       "err.wft:1:6-36: error[E0109]: integer literal 123456789012345678901234567890 does not fit \
        in a native int\n\
-      \  hint: Weft integers are 63-bit native ints (decision D2)" );
+      \  hint: Jacquard integers are 63-bit native ints (decision D2)" );
     ( "bad escape",
       "(lit \"a\\qb\")\n",
       "err.wft:1:8-9: error[E0103]: invalid escape sequence \\q\n\
