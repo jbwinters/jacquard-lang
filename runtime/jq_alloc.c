@@ -56,7 +56,7 @@ static jq_block *alloc_text_block(uint64_t len) {
 
 jq_value jq_tuple(uint16_t n, const jq_value *items) {
   jq_block *b = jq_alloc_block(JQ_TUPLE, 0, n);
-  memcpy(b->payload, items, (size_t)n * 8);
+  if (n) memcpy(b->payload, items, (size_t)n * 8);
   return jq_of_block(b);
 }
 
@@ -64,7 +64,7 @@ jq_value jq_con(const jq_con_info *info, const jq_value *fields) {
   arity_guard((uint64_t)info->arity + 1, "constructor arity");
   jq_block *b = jq_alloc_block(JQ_CON, 0, (uint16_t)(info->arity + 1));
   b->payload[0] = (uint64_t)info;
-  memcpy(&b->payload[1], fields, (size_t)info->arity * 8);
+  if (info->arity) memcpy(&b->payload[1], fields, (size_t)info->arity * 8);
   return jq_of_block(b);
 }
 
@@ -78,7 +78,7 @@ jq_value jq_real(double d) {
 jq_value jq_text(const uint8_t *bytes, uint64_t len) {
   jq_block *b = alloc_text_block(len);
   b->payload[0] = len;
-  memcpy(&b->payload[1], bytes, len);
+  if (len) memcpy(&b->payload[1], bytes, len);
   return jq_of_block(b);
 }
 
@@ -98,6 +98,6 @@ jq_value jq_closure(void *code, uint16_t arity, uint16_t env_n,
   b->payload[1] =
       (uint64_t)arity |
       ((uint64_t)(self_slot == UINT16_MAX ? 0 : (uint32_t)self_slot + 1) << 16);
-  memcpy(&b->payload[2], env, (size_t)env_n * 8);
+  if (env_n) memcpy(&b->payload[2], env, (size_t)env_n * 8);
   return jq_of_block(b);
 }

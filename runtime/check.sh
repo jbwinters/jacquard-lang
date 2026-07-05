@@ -38,4 +38,19 @@ expect_fatal div0 "arithmetic error: division by zero"
 expect_fatal mod0 "arithmetic error: modulo by zero"
 expect_fatal arity-overflow "jacquard runtime: constructor arity exceeds the 65535 limit"
 
+# 4. parity kit (task 66): the C ports must reproduce the OCaml goldens
+#    byte-for-byte. Goldens regenerate via `dune exec test/gen_native_parity.exe`.
+GOLD=${GOLD:-"$here/../corpus/golden/native"}
+$CC -std=c11 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all \
+    -Wall -Wextra -Werror -o "$OUT/test_parity" \
+    "$here/jq_alloc.c" "$here/jq_rc.c" "$here/jq_text.c" "$here/jq_error.c" \
+    "$here/jq_show.c" "$here/jq_utf8.c" "$here/jq_rng.c" \
+    "$here/test/test_parity.c"
+for mode in show rng utf8; do
+  "$OUT/test_parity" "$mode" > "$OUT/$mode.out"
+  diff -u "$GOLD/$mode.golden" "$OUT/$mode.out" || {
+    echo "FAIL: $mode parity diverged"; exit 1; }
+  echo "ok parity $mode"
+done
+
 echo "runtime check: PASS"

@@ -106,6 +106,15 @@ void jq_runtime_error(const char *msg) __attribute__((noreturn));
 jq_value jq_int_div_checked(jq_value a, jq_value b);
 jq_value jq_int_mod_checked(jq_value a, jq_value b);
 
+/* --- parity kit (task 66; jq_show.c, jq_utf8.c, jq_rng.c) --- */
+
+char *jq_show(jq_value v); /* Value.show rendering; caller frees */
+uint64_t jq_utf8_width(const uint8_t *s, uint64_t n, uint64_t i);
+uint64_t jq_utf8_count(const uint8_t *s, uint64_t n); /* text.length (D9) */
+int64_t jq_rng_next(int64_t *state);                  /* Infer_dist.Rng */
+double jq_rng_float(int64_t *state);
+int64_t jq_rng_split(int64_t *state);
+
 /* --- blocks --- */
 
 static inline jq_block *jq_block_of(jq_value v) { return (jq_block *)v; }

@@ -70,6 +70,45 @@ let lookup_hash store ~kind name : (Hash.t, Diag.t list) result =
       | Some _ -> err ~code:"E0702" "prelude name `%s` has an unexpected kind" name
       | None -> err ~code:"E0702" "prelude name `%s` is not in the store" name)
 
+(** Byte offsets where codepoints start, plus the terminal offset (SL.5, D9 semantics: the
+    hand-rolled UTF-8 decoder the text builtins share). The second-byte range checks follow the
+    Unicode well-formedness table, so overlongs (E0 80-9F, F0 80-8F), surrogates (ED A0-BF), and
+    beyond-U+10FFFF (F4 90-BF) are malformed and count one codepoint PER BYTE, same as truncated
+    sequences. Module-level so the native parity kit goldens generate from the same decoder
+    (docs/native-plan.md, task 66). *)
+let utf8_boundaries s =
+  let n = String.length s in
+  let byte j = if j < n then Char.code s.[j] else -1 in
+  let cont j = byte j land 0xC0 = 0x80 && j < n in
+  let second_ok b0 b1 =
+    match b0 with
+    | 0xE0 -> b1 >= 0xA0 && b1 <= 0xBF
+    | 0xED -> b1 >= 0x80 && b1 <= 0x9F
+    | 0xF0 -> b1 >= 0x90 && b1 <= 0xBF
+    | 0xF4 -> b1 >= 0x80 && b1 <= 0x8F
+    | _ -> b1 land 0xC0 = 0x80
+  in
+  let rec go acc i =
+    if i >= n then List.rev (n :: acc)
+    else
+      let b0 = Char.code s.[i] in
+      let width =
+        if b0 < 0x80 then 1
+        else if b0 land 0xE0 = 0xC0 && b0 >= 0xC2 && cont (i + 1) then 2
+        else if b0 land 0xF0 = 0xE0 && second_ok b0 (byte (i + 1)) && cont (i + 2) then 3
+        else if
+          b0 land 0xF8 = 0xF0
+          && b0 <= 0xF4
+          && second_ok b0 (byte (i + 1))
+          && cont (i + 2)
+          && cont (i + 3)
+        then 4
+        else 1 (* malformed byte *)
+      in
+      go (i :: acc) (i + width)
+  in
+  go [] 0
+
 (** [wire_builtins ctx] registers the native implementations for the prelude's builtin marker terms.
     Call after {!load}. Integer semantics per decision D2: OCaml native 63-bit ints; add/sub/mul
     wrap on overflow (mod 2^63); div truncates toward zero and fails with [Arithmetic] on zero. *)
@@ -165,45 +204,7 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
                    (Printf.sprintf "text-compare expects two texts, got %s"
                       (String.concat ", " (List.map Value.show args)))))
   | _ -> ());
-  (* --- SL.5 text builtins: codepoint semantics per D9, hand-rolled UTF-8 decoder.
-     Malformed sequences decode replacement-style: each offending byte is one codepoint. --- *)
-  let utf8_boundaries s =
-    (* byte offsets where codepoints start, plus the terminal offset. The second-byte range
-       checks follow the Unicode well-formedness table, so overlongs (E0 80-9F, F0 80-8F),
-       surrogates (ED A0-BF), and beyond-U+10FFFF (F4 90-BF) are malformed and count one
-       codepoint PER BYTE, same as truncated sequences. *)
-    let n = String.length s in
-    let byte j = if j < n then Char.code s.[j] else -1 in
-    let cont j = byte j land 0xC0 = 0x80 && j < n in
-    let second_ok b0 b1 =
-      match b0 with
-      | 0xE0 -> b1 >= 0xA0 && b1 <= 0xBF
-      | 0xED -> b1 >= 0x80 && b1 <= 0x9F
-      | 0xF0 -> b1 >= 0x90 && b1 <= 0xBF
-      | 0xF4 -> b1 >= 0x80 && b1 <= 0x8F
-      | _ -> b1 land 0xC0 = 0x80
-    in
-    let rec go acc i =
-      if i >= n then List.rev (n :: acc)
-      else
-        let b0 = Char.code s.[i] in
-        let width =
-          if b0 < 0x80 then 1
-          else if b0 land 0xE0 = 0xC0 && b0 >= 0xC2 && cont (i + 1) then 2
-          else if b0 land 0xF0 = 0xE0 && second_ok b0 (byte (i + 1)) && cont (i + 2) then 3
-          else if
-            b0 land 0xF8 = 0xF0
-            && b0 <= 0xF4
-            && second_ok b0 (byte (i + 1))
-            && cont (i + 2)
-            && cont (i + 3)
-          then 4
-          else 1 (* malformed byte *)
-        in
-        go (i :: acc) (i + width)
-    in
-    go [] 0
-  in
+  (* SL.5 text builtins below use codepoint semantics per D9 via {!utf8_boundaries}. *)
   let type_err name args =
     Error
       (Runtime_err.Type_error
