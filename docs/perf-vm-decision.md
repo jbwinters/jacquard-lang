@@ -48,6 +48,19 @@ tree). Acceptance bar if built: the full suite green under the VM with outputs
 bit-identical to the tree-walker — including cram transcripts, LW seeds, and
 posterior tables — plus a benchmark table in this doc.
 
+## Update (2026-07-05): the ladder changed — VM rung skipped
+
+Owner decision: when performance work starts, it takes the PF.2 phased route
+(tier tagging, then the evidence-passing fast path inside the existing
+tree-walker, then Perceus, then a native backend) rather than passing through
+this document's bytecode VM. The reasoning: the evidence-passing phase costs
+about the same as the VM, lands in a similar band for the code that dominates,
+and validates the pillar the native route rests on, whereas the VM's dispatch
+constant derisks nothing downstream and would leave a second engine to
+maintain or discard. The "scope if triggered" section above is retained as
+history, not as a plan. The trigger conditions still govern WHEN any of this
+starts; the PF.2 phases are tracked as tasks 60-63.
+
 ## What we deliberately did NOT do meanwhile
 
 No micro-optimization of the tree-walker (memo tables and the builtin
