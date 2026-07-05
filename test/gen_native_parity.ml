@@ -61,6 +61,7 @@ let show_corpus () =
     VText "line\nbreak\ttab\rcr";
     VText "ctrl \x01 and del \x7f";
     VText "utf-8: h\xc3\xa9llo \xe2\x86\x92 \xf0\x9f\x8e\x89";
+    VText "nul\x00mid" (* embedded NUL: the renderer is length-based, not C-string *);
     (* tuples *)
     VTuple [];
     VTuple [ VInt 1 ];
@@ -95,7 +96,7 @@ let rng_lines () =
       for _ = 1 to 100 do
         add (Printer.real_repr (Infer_dist.Rng.float r))
       done)
-    [ 0; 1; 42; 0x3FFFFFFF ];
+    [ 0; 1; 42; 0x3FFFFFFF; -1; min_int; max_int ];
   add "split-chain 42";
   let r = Infer_dist.Rng.make 42 in
   for _ = 1 to 10 do

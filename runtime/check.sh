@@ -47,7 +47,7 @@ $CC -std=c11 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all \
     "$here/jq_show.c" "$here/jq_utf8.c" "$here/jq_rng.c" \
     "$here/test/test_parity.c"
 for mode in show rng utf8; do
-  "$OUT/test_parity" "$mode" > "$OUT/$mode.out"
+  ASAN_OPTIONS=detect_leaks=1 "$OUT/test_parity" "$mode" > "$OUT/$mode.out"
   diff -u "$GOLD/$mode.golden" "$OUT/$mode.out" || {
     echo "FAIL: $mode parity diverged"; exit 1; }
   echo "ok parity $mode"

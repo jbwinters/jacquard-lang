@@ -68,6 +68,10 @@ static void mode_show(void) {
     show_line(t);
     jq_drop(t);
   }
+  /* embedded NUL: explicit length — the renderer is length-based */
+  jq_value nul = jq_text((const uint8_t *)"nul\0mid", 7);
+  show_line(nul);
+  jq_drop(nul);
   /* tuples */
   show_line(JQ_UNIT);
   jq_value t1 = jq_tuple(1, (jq_value[]){ jq_int(1) });
@@ -127,7 +131,8 @@ static void mode_show(void) {
 }
 
 static void mode_rng(void) {
-  int64_t seeds[] = { 0, 1, 42, 0x3FFFFFFF };
+  int64_t seeds[] = { 0, 1, 42, 0x3FFFFFFF, -1, -4611686018427387904LL,
+                      4611686018427387903LL };
   for (size_t i = 0; i < sizeof seeds / sizeof *seeds; i++) {
     printf("seed %lld\n", (long long)seeds[i]);
     int64_t st = seeds[i];

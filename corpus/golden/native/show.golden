@@ -26,6 +26,7 @@
 "line\nbreak\ttab\rcr"
 "ctrl \x01 and del \x7f"
 "utf-8: héllo → 🎉"
+"nul\x00mid"
 ()
 (1)
 (1, "two", 3.0)
