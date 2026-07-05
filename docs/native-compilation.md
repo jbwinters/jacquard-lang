@@ -103,7 +103,9 @@ priced by semantics, not implementation.
    same acceptance bar as PF.1's VM.
 
 Each phase is independently shippable and independently abandonable; none
-changes the language.
+changes the language. The sketch is retained as history; the dated sections
+below supersede items 2-4 (phase 2 measured and declined, phase 3 folded
+into phase 4, backend decided as C emission).
 
 ## Phase 1 results (2026-07-05)
 
@@ -190,3 +192,37 @@ experiment bind that design — fast-path fallback requires demotion of the
 bailing closure, and direct host-stack execution requires a depth budget
 because deep non-tail recursion plus allocation is quadratic under a
 stack-scanning minor GC.
+
+## Phase 3 decision (2026-07-05): Perceus folded into the native phase
+
+Perceus over the interpreter's OCaml `Value` heap is declined without an
+experiment; the case follows from the runtime's structure. RC on top of a
+tracing host GC double-pays: OCaml reclaims every value regardless, so
+headers and dup/drop insertion are purely additive overhead. The pillar's
+actual win is in-place reuse, and reuse requires trusting a count of one —
+but frames-as-data means a captured resumption shares its environments
+across resumes, so every value reachable from a captured continuation must
+be dup'd conservatively at capture time. That forfeits reuse in exactly the
+handler-dense code this tree exists to run, and phase 2's measurement
+already established that engine-level constant work inside the interpreter
+does not ship wins of this cost. Perceus needs a runtime that owns its heap
+and its continuation representation, so Pillar 2 executes as part of the
+native backend, and two rules recorded here are design inputs to that
+runtime — the let-rec cyclic carve-out (Pillar 2 above) and dup-on-capture
+for anything a resumption can reach.
+
+## Phase 4 status (2026-07-05): gated; backend decided — C emission
+
+The backend choice the phased sketch left open ("LLVM or Cranelift") is
+taken: emit C, one compilation unit per declaration, keyed by content hash.
+Koka ships this design's exact pillar stack — evidence passing plus Perceus —
+through C emission, so the reference implementations translate directly;
+emitting C gets the system compiler's optimizer without a libLLVM build
+dependency, and nothing here needs the JIT-oriented codegen that is
+Cranelift's niche; and one C unit per declaration keeps the store-keyed
+object cache toolchain-plain. The known C risk is guaranteed tail calls — mitigation
+order: clang/GCC `musttail` where available, self-tail-call loopification,
+trampoline fallback. The phase stays gated on the standing trigger
+conditions in docs/perf-vm-decision.md, which are not close (the suite runs
+in ~50 seconds against the 2-minute trigger). Tracked as task 63, deferred
+until a trigger fires.
