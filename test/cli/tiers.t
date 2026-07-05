@@ -71,3 +71,13 @@ A file that does not resolve is an error, not a partial table:
   $ jacquard tiers bad.jqd
   bad.jqd:1:33-46: error[E0301]: unknown name `nowhere`
   [1]
+
+So is a file that resolves but does not typecheck, with source positions:
+
+  $ cat > bad-type.jqd <<'EOF_JQD'
+  > (defterm ((binding bad () (app (lit 1) (lit 2)))))
+  > EOF_JQD
+  $ jacquard tiers bad-type.jqd
+  bad-type.jqd:1:27-48: error[E0802]: int is not a function
+    hint: only functions, constructors, effect operations, and resumptions apply
+  [1]

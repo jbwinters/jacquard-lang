@@ -1312,99 +1312,141 @@ let tiers_cmd files prelude =
           (match Prelude.builtin_signatures store with
           | Ok sigs -> List.iter (fun (h, s) -> Hashtbl.replace cctx.Check.builtin_sigs h s) sigs
           | Error _ -> ());
-          let on_expr e =
-            match Check.check_top cctx (Kernel.Expr e) with Error ds -> Error ds | Ok _ -> Ok ()
+          (* decls are checked at load, so type errors carry source positions and fail the
+             command outright — an error is an error, never a partial table *)
+          let rec load_forms = function
+            | [] -> Ok ()
+            | top :: rest -> (
+                match top with
+                | Kernel.Decl d -> (
+                    match Resolve.resolve_decl (Store.names_view store) d with
+                    | Error ds -> Error ds
+                    | Ok d -> (
+                        match Store.put_decl store d with
+                        | Error ds -> Error ds
+                        | Ok _ -> (
+                            match Check.check_top cctx (Kernel.Decl d) with
+                            | Error ds -> Error ds
+                            | Ok _ -> load_forms rest)))
+                | Kernel.Expr e -> (
+                    match Resolve.resolve_expr (Store.names_view store) e with
+                    | Error ds -> Error ds
+                    | Ok e -> (
+                        match Check.check_top cctx (Kernel.Expr e) with
+                        | Error ds -> Error ds
+                        | Ok _ -> load_forms rest)))
+          in
+          let load_file f =
+            match Reader.parse_string ~file:f (read_file f) with
+            | Error ds -> Error ds
+            | Ok forms -> (
+                match
+                  List.fold_left
+                    (fun acc form ->
+                      Result.bind acc (fun tops ->
+                          Result.map (fun t -> t :: tops) (Kernel.of_form form)))
+                    (Ok []) forms
+                with
+                | Error ds -> Error ds
+                | Ok rev_tops -> load_forms (List.rev rev_tops))
           in
           let rec load = function
             | [] -> Ok ()
-            | f :: rest -> (
-                match process_forms store ~file:f (read_file f) ~on_expr with
-                | Error ds -> Error ds
-                | Ok () -> load rest)
+            | f :: rest -> ( match load_file f with Error ds -> Error ds | Ok () -> load rest)
           in
           match load files with
           | Error ds -> print_diags ds
-          | Ok () ->
+          | Ok () -> (
               (* sweep every named term (prelude + the files' declarations) *)
               let named_terms =
                 List.filter (fun (_, e) -> e.Resolve.kind = Resolve.KTerm) store.Store.names
               in
-              let schemes =
-                List.filter_map
-                  (fun (n, (e : Resolve.entry)) ->
-                    match Check.force_term cctx e.Resolve.hash with
-                    | Ok s -> Some (n, e.Resolve.hash, s)
-                    | Error ds ->
-                        List.iter (fun d -> prerr_endline (Diag.to_string d)) ds;
-                        None)
-                  named_terms
+              let sweep =
+                List.fold_left
+                  (fun acc (n, (e : Resolve.entry)) ->
+                    Result.bind acc (fun schemes ->
+                        match Check.force_term cctx e.Resolve.hash with
+                        | Ok s -> Ok ((n, e.Resolve.hash, s) :: schemes)
+                        | Error ds -> Error ds))
+                  (Ok []) named_terms
               in
-              List.iter
-                (fun (_, h, (s : Types.scheme)) ->
-                  Store.stamp_tier store h (Tier.classify_ty s.Types.ty))
-                schemes;
-              let pct n total = if total = 0 then 0 else 100 * n / total in
-              let line ?(indent = "") label n total =
-                Printf.printf "%s%-18s %5d %3d%%\n" indent label n (pct n total)
-              in
-              (* declarations by signature row *)
-              let decl_tiers = List.map (fun (_, _, s) -> Tier.classify_ty s.Types.ty) schemes in
-              let count p l = List.length (List.filter p l) in
-              let dt = List.length decl_tiers in
-              Printf.printf "== declarations: %d named terms ==\n" dt;
-              line "pure" (count (( = ) Tier.Pure) decl_tiers) dt;
-              line "row-poly" (count (( = ) Tier.RowPoly) decl_tiers) dt;
-              line "effectful"
-                (count (function Tier.Effectful _ -> true | _ -> false) decl_tiers)
-                dt;
-              line "data" (count (( = ) Tier.Data) decl_tiers) dt;
-              (* call sites by callee row, solved *)
-              let apps = List.map (fun (r, k) -> (Tier.classify_row r, k)) cctx.Check.tier_apps in
-              let at = List.length apps in
-              Printf.printf "\n== call sites: %d applications ==\n" at;
-              line "constructor" (count (fun (_, k) -> k = Tier.KCon) apps) at;
-              line "op-perform" (count (fun (_, k) -> k = Tier.KOp) apps) at;
-              let fn_apps = List.filter (fun (_, k) -> k = Tier.KFn) apps in
-              line "fn pure" (count (fun (t, _) -> t = Tier.Pure) fn_apps) at;
-              line "fn row-poly" (count (fun (t, _) -> t = Tier.RowPoly) fn_apps) at;
-              line "fn effectful"
-                (count (fun (t, _) -> match t with Tier.Effectful _ -> true | _ -> false) fn_apps)
-                at;
-              let by_effect : (Hash.t, int) Hashtbl.t = Hashtbl.create 16 in
-              List.iter
-                (fun (t, _) ->
-                  match t with
-                  | Tier.Effectful { effects; _ } ->
-                      List.iter
-                        (fun h ->
-                          Hashtbl.replace by_effect h
-                            (1 + Option.value ~default:0 (Hashtbl.find_opt by_effect h)))
-                        effects
-                  | _ -> ())
-                fn_apps;
-              Hashtbl.fold (fun h n acc -> (Check.name_of cctx h, n) :: acc) by_effect []
-              |> List.sort compare
-              |> List.iter (fun (name, n) -> Printf.printf "  %-16s %5d\n" name n);
-              (* handler op clauses by resume discipline *)
-              let ops = cctx.Check.tier_ops in
-              let ot = List.length ops in
-              Printf.printf "\n== handler op clauses: %d ==\n" ot;
-              List.iter
-                (fun d -> line (Tier.discipline_to_string d) (count (fun (_, d') -> d' = d) ops) ot)
-                [ Tier.TailResumptive; Tier.Aborting; Tier.OneShot; Tier.MultiShot ];
-              let by_op = Hashtbl.create 16 in
-              List.iter
-                (fun (h, d) ->
-                  let key = (Check.name_of cctx h, d) in
-                  Hashtbl.replace by_op key
-                    (1 + Option.value ~default:0 (Hashtbl.find_opt by_op key)))
-                ops;
-              Hashtbl.fold (fun (name, d) n acc -> (name, d, n) :: acc) by_op []
-              |> List.sort compare
-              |> List.iter (fun (name, d, n) ->
-                  Printf.printf "  %-16s %-16s %3d\n" name (Tier.discipline_to_string d) n);
-              Printf.printf "\nstamped %d tier sidecars\n" (List.length schemes);
-              0))
+              match sweep with
+              | Error ds -> print_diags ds
+              | Ok rev_schemes ->
+                  let schemes = List.rev rev_schemes in
+                  List.iter
+                    (fun (_, h, (s : Types.scheme)) ->
+                      Store.stamp_tier store h (Tier.classify_ty s.Types.ty))
+                    schemes;
+                  let pct n total = if total = 0 then 0 else 100 * n / total in
+                  let line ?(indent = "") label n total =
+                    Printf.printf "%s%-18s %5d %3d%%\n" indent label n (pct n total)
+                  in
+                  (* declarations by signature row *)
+                  let decl_tiers =
+                    List.map (fun (_, _, s) -> Tier.classify_ty s.Types.ty) schemes
+                  in
+                  let count p l = List.length (List.filter p l) in
+                  let dt = List.length decl_tiers in
+                  Printf.printf "== declarations: %d named terms ==\n" dt;
+                  line "pure" (count (( = ) Tier.Pure) decl_tiers) dt;
+                  line "row-poly" (count (( = ) Tier.RowPoly) decl_tiers) dt;
+                  line "effectful"
+                    (count (function Tier.Effectful _ -> true | _ -> false) decl_tiers)
+                    dt;
+                  line "data" (count (( = ) Tier.Data) decl_tiers) dt;
+                  (* call sites by callee row, solved *)
+                  let apps =
+                    List.map (fun (r, k) -> (Tier.classify_row r, k)) cctx.Check.tier_apps
+                  in
+                  let at = List.length apps in
+                  Printf.printf "\n== call sites: %d applications ==\n" at;
+                  line "constructor" (count (fun (_, k) -> k = Tier.KCon) apps) at;
+                  line "op-perform" (count (fun (_, k) -> k = Tier.KOp) apps) at;
+                  let fn_apps = List.filter (fun (_, k) -> k = Tier.KFn) apps in
+                  line "fn pure" (count (fun (t, _) -> t = Tier.Pure) fn_apps) at;
+                  line "fn row-poly" (count (fun (t, _) -> t = Tier.RowPoly) fn_apps) at;
+                  line "fn effectful"
+                    (count
+                       (fun (t, _) -> match t with Tier.Effectful _ -> true | _ -> false)
+                       fn_apps)
+                    at;
+                  let by_effect : (Hash.t, int) Hashtbl.t = Hashtbl.create 16 in
+                  List.iter
+                    (fun (t, _) ->
+                      match t with
+                      | Tier.Effectful { effects; _ } ->
+                          List.iter
+                            (fun h ->
+                              Hashtbl.replace by_effect h
+                                (1 + Option.value ~default:0 (Hashtbl.find_opt by_effect h)))
+                            effects
+                      | _ -> ())
+                    fn_apps;
+                  Hashtbl.fold (fun h n acc -> (Check.name_of cctx h, n) :: acc) by_effect []
+                  |> List.sort compare
+                  |> List.iter (fun (name, n) -> Printf.printf "  %-16s %5d\n" name n);
+                  (* handler op clauses by resume discipline *)
+                  let ops = cctx.Check.tier_ops in
+                  let ot = List.length ops in
+                  Printf.printf "\n== handler op clauses: %d ==\n" ot;
+                  List.iter
+                    (fun d ->
+                      line (Tier.discipline_to_string d) (count (fun (_, d') -> d' = d) ops) ot)
+                    [ Tier.TailResumptive; Tier.Aborting; Tier.OneShot; Tier.MultiShot ];
+                  let by_op = Hashtbl.create 16 in
+                  List.iter
+                    (fun (h, d) ->
+                      let key = (Check.name_of cctx h, d) in
+                      Hashtbl.replace by_op key
+                        (1 + Option.value ~default:0 (Hashtbl.find_opt by_op key)))
+                    ops;
+                  Hashtbl.fold (fun (name, d) n acc -> (name, d, n) :: acc) by_op []
+                  |> List.sort compare
+                  |> List.iter (fun (name, d, n) ->
+                      Printf.printf "  %-16s %-16s %3d\n" name (Tier.discipline_to_string d) n);
+                  Printf.printf "\nstamped %d tier sidecars\n" (List.length schemes);
+                  0)))
 
 let tiers_t =
   Cmd.v

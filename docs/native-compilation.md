@@ -122,18 +122,18 @@ row-poly              41  13%
 effectful             58  19%
 data                  35  11%
 
-== call sites: 1070 applications ==
-constructor          213  19%
-op-perform            97   9%
-fn pure              526  49%
-fn row-poly           67   6%
-fn effectful         167  15%
+== call sites: 1107 applications ==
+constructor          216  19%
+op-perform           103   9%
+fn pure              544  49%
+fn row-poly           69   6%
+fn effectful         175  15%
 
-== handler op clauses: 35 ==
-tail-resumptive        7  20%
-aborting               7  20%
+== handler op clauses: 37 ==
+tail-resumptive        8  21%
+aborting               8  21%
 one-shot               3   8%
-multi-shot            18  51%
+multi-shot            18  48%
 ```
 
 Reproduce with:
@@ -151,10 +151,11 @@ What the numbers say about the design's assumptions:
   monomorphization even starts, and most of the 6% row-polymorphic sites
   close to empty once specialized. Pillar 1's tier-0 case is the common case.
 - **The effectful remainder is exception-shaped.** The per-effect breakdown of
-  the 167 effectful calls is dominated by `check` (69, Warp's test effect) and
-  `throw`/`abort` (66 combined), whose in-language handlers classify as
-  aborting — continuation dropped, no capture. Genuinely capturing effects are
-  a small tail.
+  the 175 effectful calls is dominated by `check` (69) and `throw`/`abort`
+  (67 combined). The `throw` and `abort` handlers classify as aborting —
+  continuation dropped, no capture — and `check` is Warp's test-reporting
+  effect, discharged in the test harness rather than on program hot paths.
+  Genuinely capturing effects are a small tail.
 - **Syntactic tail-resumptive dominance does NOT hold for the in-language
   handler library, and the reasons are instructive.** First, handlers such as
   `state.run` are written in state-passing style — `resume` escapes into a
