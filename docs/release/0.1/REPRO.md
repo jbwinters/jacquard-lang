@@ -9,7 +9,7 @@ repo also has `.tool-versions` for asdf users (`opam 2.5.1`).
 git clone <repo-url> weft-lang
 cd weft-lang
 git checkout release/0.1-evidence
-git merge-base --is-ancestor 3609a67 HEAD
+git merge-base --is-ancestor aec2c63 HEAD
 
 opam switch create . ocaml-base-compiler.5.1.1 -y
 eval "$(opam env)"
@@ -37,7 +37,7 @@ scripts/release/reproduce-0.1.sh
 
 The script:
 
-- verifies that `3609a67` is an ancestor of the checked-out release ref
+- verifies that `aec2c63` is an ancestor of the checked-out release ref
 - installs opam dependencies
 - builds and tests the package
 - runs `dune fmt`

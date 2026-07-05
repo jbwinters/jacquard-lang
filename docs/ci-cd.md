@@ -47,7 +47,7 @@ The workflow runs:
 
 ```sh
 WEFT_RELEASE_REF=HEAD \
-WEFT_RELEASE_BASE=3609a67 \
+WEFT_RELEASE_BASE=aec2c63 \
 scripts/release/reproduce-0.1.sh
 ```
 

@@ -2,7 +2,7 @@
 
 Status: release-candidate evidence pack for `release/0.1-evidence`.
 
-Candidate base: `3609a67`  
+Candidate base: `aec2c63`  
 Evidence branch predecessor: `7d7733f`  
 Version surface: `weft --version` prints `0.1.0`
 
@@ -116,7 +116,7 @@ Fresh-clone instructions are in [REPRO.md](REPRO.md). The minimal shape is:
 
 ```sh
 git checkout release/0.1-evidence
-git merge-base --is-ancestor 3609a67 HEAD
+git merge-base --is-ancestor aec2c63 HEAD
 opam install --deps-only . --with-test --with-dev-setup --with-doc -y
 opam exec -- dune build @all
 opam exec -- dune runtest

@@ -2,7 +2,7 @@
 
 Status: RC
 
-Commit: `3609a67` base, `release/0.1-evidence` successor branch  
+Commit: `aec2c63` base, `release/0.1-evidence` successor branch  
 Version: `0.1.0`  
 Test count: `308` Alcotest/QCheck cases  
 Cram count: `21` transcript files

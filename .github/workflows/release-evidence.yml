@@ -10,7 +10,7 @@ on:
       base:
         description: "Candidate base commit that must be an ancestor"
         required: false
-        default: "3609a67"
+        default: "aec2c63"
   push:
     branches:
       - "release/**"
@@ -48,7 +48,7 @@ jobs:
       - name: Reproduce release evidence
         run: |
           WEFT_RELEASE_REF=HEAD \
-          WEFT_RELEASE_BASE="${{ github.event.inputs.base || '3609a67' }}" \
+          WEFT_RELEASE_BASE="${{ github.event.inputs.base || 'aec2c63' }}" \
           scripts/release/reproduce-0.1.sh
 
       - name: Upload evidence transcripts
