@@ -124,8 +124,8 @@
                 (app (var eq) (app (var f) (var input)) (var expected))))))))))))
 
 ; Repair is ordinary inference: sample a patch from the prior, observe that it
-; passes the spec. A failing test is not a trigger for a rewrite — it is
-; evidence, and it prunes hypotheses to mass zero.
+; passes the spec. A failing test is evidence; it prunes every hypothesis that
+; contradicts it to mass zero.
 (defterm ((binding repair ()
   (lam ((pvar original) (pvar spec))
     (let nonrec (pvar patch) (app (var sample) (app (var patch-prior) (var original)))

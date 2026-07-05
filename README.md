@@ -3,27 +3,130 @@
 Weft is a research prototype for running, reviewing, simulating, and trusting
 programs written by models and reviewed by people.
 
-The core idea is simple: effects, uncertainty, and identity should be visible to
-tools instead of hidden in runtime behavior, mocks, logs, prompts, or naming
-conventions. A Weft program can run under real handlers, dry-run handlers,
-replay handlers, simulated handlers, probabilistic handlers, and test handlers
-without changing the policy code.
+Concretely, it is a small programming language: Lisp-style syntax, an
+interpreter and type checker written in OCaml, a command-line tool, a standard
+library, and a test framework called Warp. Version 0.1 works end to end but is
+a research prototype, not a production language; `docs/release/0.1/LIMITS.md`
+is the honest list of what it does not do.
 
-Core ingredients:
+## For Humans
 
-- a uniform quoted triple representation and 27-form kernel grammar
-- algebraic effects with deep multi-shot handlers
-- explicit capability grants; no ambient root handlers
-- type-and-effect rows where `main` is the authority manifest
-- discrete probabilistic programming as ordinary effects and handlers
-- content-addressed definitions with metadata-erased identity
-- tooling for formatting, semantic diff, Warp tests, replay, demos, and release
-  evidence
+Most languages tell you what a program computes. Weft also tells you what a
+program is allowed to do, how certain it is, and whether two pieces of code
+mean the same thing. Tools can check all three, because they live in the
+language instead of in comments, logs, or your memory of the codebase.
 
-The implementation is complete through the original M0-exec through M4 plan:
-the executable data layer, CPS interpreter, checker, capability manifest,
-`Dist` inference handlers, formatter, semantic differ, error catalog, demos, and
-release-candidate evidence pack are all present.
+Things you can do here that most languages cannot offer:
+
+- Read one line and know a function's full reach. A signature like
+  `(text) ->{net} text` says this function touches the network. The program
+  will not run until you grant each power it asks for with `--allow`, so
+  generated code cannot quietly open a connection or write a file. If you do
+  not grant `net`, no code in the program can reach the network, including
+  code the program builds and runs at runtime.
+- Run one program against many worlds. The same code can run against the real
+  network, a scripted fake, a recording of last week's traffic, or a
+  probability model of how servers usually behave. A handler is the piece
+  that answers a program's requests to the outside world; you swap the
+  handler, and the code never changes. This replaces mocking frameworks, and
+  it makes "what would my agent do if the API went down?" an ordinary test.
+- Ask for exact odds. Probability is part of the language. A program can
+  sample weighted choices and record evidence, and Weft will list every
+  possible outcome with its exact chance. The repair demo below uses this to
+  treat a failing test as evidence: it computes which patches to a buggy
+  program remain possible, and how likely each one is.
+- Rename and reformat for free. Weft identifies code by a hash of its meaning,
+  not its text. Comments and formatting never break a build or a cache, and
+  pure tests rerun only when the meaning of something they depend on changed.
+
+The bet behind all of this: when most code is written by machines, the humans
+reviewing it need the language itself to answer "what can this touch, and how
+sure are we" without reading every line.
+
+## For Agents
+
+Read `docs/SKILL.md` first. It compresses the kernel, the CLI, the prelude,
+Warp testing, and the known gotchas into one file, and it loads as a project
+skill from `docs/SKILL.md`. Operating rules are in `AGENTS.md`. What
+will save you time:
+
+- Behavior is pinned by evidence: cram transcripts under `test/cli/`, corpus
+  goldens, demo scripts, and `docs/release/0.1/CLAIMS.md`. If a pin fails,
+  treat it as information about your change, and never weaken a pin to make a
+  diff pass.
+- The kernel is 27 forms (`docs/ast.md`); bootstrap s-expressions are the only
+  syntax. Do not add surface syntax or out-of-scope features (`AGENTS.md`
+  lists them).
+- The development gate is `dune build @all && dune runtest && dune fmt`
+  followed by a clean `git diff --exit-code`.
+
+## Core Ingredients
+
+For readers who speak programming languages:
+
+- One uniform representation: every form is a `(head, meta, args)` triple, and
+  the kernel grammar has 27 forms. Quoted code is ordinary data.
+- Algebraic effects with deep, multi-shot handlers. A handler can resume a
+  computation zero, one, or many times, which is what makes exhaustive search
+  and exact inference ordinary library code.
+- Explicit capability grants. The runtime installs handlers for the outside
+  world only for effects you pass with `--allow`; there is no ambient
+  authority.
+- Type-and-effect rows. Every arrow carries the set of effects the function
+  may perform, so a program's inferred row is its authority manifest.
+- Discrete probabilistic programming as a library: `sample` and `observe` are
+  effect operations, and each inference algorithm is a handler.
+- Content-addressed definitions. Identity is a hash computed with all metadata
+  erased, so a rename or reformat changes nothing downstream.
+- Tooling that leans on the above: formatter, semantic differ, Warp tests with
+  a semantic cache, record/replay, and a reproducible release evidence pack.
+
+The prototype is complete against its original development plan: parser,
+checker, CPS interpreter with multi-shot handlers, capability manifests, exact
+and sampled inference, formatter, semantic differ, error catalog, demos, and
+the release evidence pack all exist and are covered by tests.
+
+## What It Looks Like
+
+The bootstrap syntax is s-expressions over a uniform triple. Here is one
+handler resuming one continuation twice (`demos/m1-choose.wft`):
+
+```lisp
+(handle
+  (match (app (var choose))
+    (clause (pcon true) (lit 1))
+    (clause (pcon false) (lit 2)))
+  (ret (pvar x) (app (var cons) (var x) (var nil)))
+  (opclause choose () k
+    (app (var append) (app (var k) (var true)) (app (var k) (var false)))))
+```
+
+```
+$ weft run demos/m1-choose.wft
+cons(1, cons(2, nil))
+```
+
+The handler ran the rest of the program once with `true` and once with
+`false`, then collected both results. That ability to resume more than once is
+why exact Bayesian inference is a library handler here rather than a runtime
+feature. The repair demo builds on it: mutate a buggy program's quoted AST
+into candidate patches, treat a failing test as an observation, and read off
+the updated probabilities. Running candidate code is an authority, so the pure
+step still runs (it counts eight candidate patches) and then the demo refuses
+until you grant the rest:
+
+```
+$ weft run demos/repair.wft
+8
+error[E0814]: this program requires the `eval` effect, which is not granted (performed via `posterior-over-patches`)
+  hint: grant it with --allow eval, or handle the effect in the program
+$ weft run demos/repair.wft --allow eval
+```
+
+Under the grant, one failing test leaves two surviving patches: the intended
+fix at 0.75 and a patch that games the suite at 0.25. Adding one regression
+test prunes the impostor, and the surviving fix prints as a one-line semantic
+diff: `- sub + add`. See `sh demos/repair.sh` for the full transcript.
 
 ## Quick Start
 
@@ -50,6 +153,9 @@ opam exec -- dune runtest
 opam exec -- dune fmt
 git diff --exit-code
 ```
+
+The switch step compiles OCaml 5.1.1 from source, so expect the first setup to
+take around ten minutes.
 
 The final `git diff --exit-code` is part of the development contract: formatting
 must leave the worktree clean unless you intentionally commit the formatting
@@ -121,23 +227,25 @@ What they show:
 - `m1.sh`: factorial, multi-shot choice, and gated eval.
 - `m3.sh`: one model under exact enumeration and likelihood weighting; same
   model hash, different inference handler.
-- `clarifying-question.sh`: value-of-information for asking the user.
+- `clarifying-question.sh`: an agent computes whether asking the user a
+  question is worth the interruption (value of information).
 - `agent-dream.sh`: one policy under scripted and probabilistic world handlers.
-- `ambiguity-pipeline.sh`: posterior-carrying extraction; user selection is an
-  `observe`.
-- `showcase-warp-tests.sh`: Warp checks for the VOI, dream-mode, and ambiguity
-  demos.
+- `ambiguity-pipeline.sh`: an extraction pipeline that keeps its uncertainty;
+  the user's click becomes an `observe`.
+- `showcase-warp-tests.sh`: Warp checks for the clarifying-question,
+  dream-mode, and ambiguity demos.
 - `repair.sh`: program repair as Bayesian inference; a bug report is an
-  observation over computed single-edit patches, and the MAP patch is a
-  one-line semantic diff.
+  observation over computed single-edit patches, and the most likely patch
+  prints as a one-line semantic diff.
 - `m4-hostile.sh`: generated-looking code that reaches for `net`; signatures and
   manifests expose the authority.
 - `demos/escrow/`: product-shaped generated workflow with manifest, dry-run,
   Warp tests, fault exploration, replay, semantic diff, and approval by hash.
 
-All public demo outputs are pinned by cram tests, especially
-`test/cli/demos.t`, `test/cli/hostile-demo.t`, `test/cli/escrow.t`,
-`test/cli/showcase.t`, and `test/cli/repair.t`.
+All public demo outputs are pinned by cram tests (recorded command-line
+transcripts that fail on any drift), especially `test/cli/demos.t`,
+`test/cli/hostile-demo.t`, `test/cli/escrow.t`, `test/cli/showcase.t`, and
+`test/cli/repair.t`.
 
 ## Release Evidence
 
