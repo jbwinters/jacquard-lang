@@ -1,0 +1,16 @@
+; The native runtime (docs/native-plan.md, task 65): a C library the compiled
+; binaries link (task 67 consumes libjqrt.a), plus its C test suite — ASAN and
+; a bounded-stack deep-drop proof — wired into `dune runtest`.
+
+(rule
+ (targets libjqrt.a)
+ (deps jq_value.h jq_alloc.c jq_rc.c jq_text.c jq_error.c build_lib.sh)
+ (action
+  (run sh build_lib.sh)))
+
+(rule
+ (alias runtest)
+ (deps jq_value.h jq_alloc.c jq_rc.c jq_text.c jq_error.c check.sh
+       (glob_files test/*.c))
+ (action
+  (run sh check.sh)))

@@ -1,0 +1,211 @@
+/* The native runtime's value representation (docs/native-plan.md, task 65).
+ *
+ * A jq_value is a tagged 64-bit word: LSB 1 is a 63-bit integer (matching the
+ * interpreter's OCaml ints, so wrap semantics agree by construction); LSB 0 is
+ * a pointer to an 8-byte-aligned heap block. Blocks carry an 8-byte header
+ * {rc, tag, flags, n} and n payload words (TEXT keeps its byte length in
+ * payload word 0; HASH is a fixed 32 bytes).
+ *
+ * Memory is Perceus reference counting (Reinking, Xie, de Moura, Leijen,
+ * PLDI 2021): jq_dup / jq_drop / jq_drop_reuse. rc == JQ_RC_STATIC marks
+ * blocks compiled into the binary; they are immortal and dup/drop skip them.
+ *
+ * The cycle rule: in dynamically allocated data the only heap back-edge the
+ * language can construct is a let-rec closure's reference to itself
+ * (validation pins let rec to one PVar bound to a Lam; defterm groups exist
+ * only at top level and compile to immortal statics). That self-slot is
+ * NON-OWNING as a compile-time discipline: closure construction stores it
+ * without a dup, and the free walk skips it (JQ_FLAG_SELF_SLOT plus the slot
+ * index in the closure header). jq_dup/jq_drop themselves have no self-slot
+ * case — a jq_value does not know where it was loaded from.
+ */
+
+#ifndef JQ_VALUE_H
+#define JQ_VALUE_H
+
+/* 64-bit platforms only: the tag scheme, block sizing, and text length
+   arithmetic all assume 8-byte words and a 64-bit size_t. */
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+_Static_assert(sizeof(void *) == 8, "the jacquard runtime is 64-bit only");
+
+typedef uint64_t jq_value;
+
+/* --- tags --- */
+
+enum jq_tag {
+  JQ_TUPLE = 1,
+  JQ_CON = 2,
+  JQ_TEXT = 3,
+  JQ_REAL = 4,
+  JQ_CLOSURE = 5,
+  JQ_CODE = 6,    /* reserved: task 73 */
+  JQ_RESUME = 7,  /* reserved: task 71 */
+  JQ_HASH = 8,
+  JQ_CONSTRUCTOR = 9, /* first-class unapplied constructor; static-only */
+  JQ_OP = 10,         /* first-class effect operation; static-only */
+  JQ_BUILTIN = 11,    /* first-class primitive; static-only */
+};
+
+#define JQ_RC_STATIC UINT32_MAX
+/* closure: env slot self_slot is non-owning. Invariant: the flag is set iff
+   the header's slot bits are nonzero (jq_closure maintains it; hand-rolled
+   blocks must too, or the free walk skips nothing). */
+#define JQ_FLAG_SELF_SLOT 1u
+
+typedef struct jq_block {
+  uint32_t rc;
+  uint8_t tag;
+  uint8_t flags;
+  uint16_t n; /* payload word count (TEXT: see jq_text_len) */
+  uint64_t payload[];
+} jq_block;
+
+/* --- integers (63-bit, OCaml wrap semantics by construction) --- */
+
+static inline bool jq_is_int(jq_value v) { return (v & 1) != 0; }
+static inline bool jq_is_ptr(jq_value v) { return (v & 1) == 0; }
+
+static inline jq_value jq_int(int64_t n) {
+  return ((uint64_t)n << 1) | 1; /* top bit discarded: 63-bit wrap */
+}
+static inline int64_t jq_int_val(jq_value v) { return (int64_t)v >> 1; }
+
+/* Arithmetic on untagged values then re-tag: the shift-out of the tag bit is
+   exactly the 63-bit wrap the interpreter gets from OCaml ints (add/sub/mul
+   compute in uint64 because signed overflow is UB in C). Division is
+   C99 truncation with dividend-sign remainder, which matches OCaml's / and
+   mod; the one edge, min_int / -1, wraps to min_int through re-tagging and
+   never touches INT64_MIN / -1 (63-bit min is -2^62, and 2^62 fits int64),
+   so no UB guard is needed — the parity test pins it. jq_int_div/mod are
+   undefined on a zero divisor, like C; emitted code calls the _checked
+   variants, which reproduce the interpreter's exact errors (exit 2). */
+static inline jq_value jq_int_add(jq_value a, jq_value b) {
+  /* unsigned arithmetic: int64 overflow is UB in C, and OCaml wraps */
+  return jq_int((int64_t)((uint64_t)jq_int_val(a) + (uint64_t)jq_int_val(b)));
+}
+static inline jq_value jq_int_sub(jq_value a, jq_value b) {
+  return jq_int((int64_t)((uint64_t)jq_int_val(a) - (uint64_t)jq_int_val(b)));
+}
+static inline jq_value jq_int_mul(jq_value a, jq_value b) {
+  return jq_int((int64_t)((uint64_t)jq_int_val(a) * (uint64_t)jq_int_val(b)));
+}
+static inline jq_value jq_int_div(jq_value a, jq_value b) {
+  return jq_int(jq_int_val(a) / jq_int_val(b));
+}
+static inline jq_value jq_int_mod(jq_value a, jq_value b) {
+  return jq_int(jq_int_val(a) % jq_int_val(b));
+}
+
+/* Fatal runtime error: message to stderr, exit 2 — the interpreter's
+   runtime-failure contract (jq_error.c). */
+void jq_runtime_error(const char *msg) __attribute__((noreturn));
+jq_value jq_int_div_checked(jq_value a, jq_value b);
+jq_value jq_int_mod_checked(jq_value a, jq_value b);
+
+/* --- blocks --- */
+
+static inline jq_block *jq_block_of(jq_value v) { return (jq_block *)v; }
+static inline jq_value jq_of_block(jq_block *b) { return (jq_value)b; }
+static inline bool jq_is_static(jq_block *b) { return b->rc == JQ_RC_STATIC; }
+
+/* the canonical unit value (): a static empty tuple, never allocated */
+extern jq_block jq_unit_block;
+#define JQ_UNIT (jq_of_block(&jq_unit_block))
+
+/* --- static callable info (per-declaration constants, task 67 emits them) --- */
+
+typedef struct jq_con_info {
+  uint32_t type_id;
+  uint32_t ordinal;
+  uint32_t arity;
+  const char *name; /* feeds <constructor f/2>, con rendering, arity errors */
+} jq_con_info;
+
+typedef struct jq_op_info {
+  const uint8_t *op_hash; /* 32 bytes */
+  const char *effect_name;
+  const char *op_name; /* feeds <op effect.op> and perform dispatch (task 70) */
+} jq_op_info;
+
+typedef struct jq_builtin_info {
+  uint32_t ordinal;
+  uint32_t arity;
+  const char *name; /* feeds <builtin n> and the intrinsics table */
+} jq_builtin_info;
+
+/* --- constructors (jq_alloc.c) --- */
+
+jq_block *jq_alloc_block(uint8_t tag, uint8_t flags, uint16_t n);
+jq_value jq_tuple(uint16_t n, const jq_value *items);       /* items owned */
+jq_value jq_con(const jq_con_info *info, const jq_value *fields); /* owned */
+jq_value jq_real(double d);
+jq_value jq_text(const uint8_t *bytes, uint64_t len); /* bytes copied */
+jq_value jq_hash(const uint8_t bytes[32]);
+/* env values owned; self_slot < env_n marks a non-owning slot (stored without
+   dup by the caller per the cycle rule), self_slot == UINT16_MAX for none */
+jq_value jq_closure(void *code, uint16_t arity, uint16_t env_n,
+                    const jq_value *env, uint16_t self_slot);
+
+/* --- accessors --- */
+
+/* TUPLE only: CON and CLOSURE keep info/code words in n's count */
+static inline uint16_t jq_tuple_arity(jq_value v) { return jq_block_of(v)->n; }
+static inline jq_value *jq_fields(jq_value v) {
+  return (jq_value *)jq_block_of(v)->payload;
+}
+static inline const jq_con_info *jq_con_info_of(jq_value v) {
+  return (const jq_con_info *)jq_block_of(v)->payload[0];
+}
+static inline jq_value *jq_con_fields(jq_value v) {
+  return (jq_value *)&jq_block_of(v)->payload[1];
+}
+static inline uint16_t jq_con_arity(jq_value v) {
+  return (uint16_t)(jq_block_of(v)->n - 1);
+}
+static inline double jq_real_val(jq_value v) {
+  union { uint64_t u; double d; } c = { .u = jq_block_of(v)->payload[0] };
+  return c.d;
+}
+static inline uint64_t jq_text_len(jq_value v) {
+  return jq_block_of(v)->payload[0];
+}
+static inline const uint8_t *jq_text_bytes(jq_value v) {
+  return (const uint8_t *)&jq_block_of(v)->payload[1];
+}
+static inline const uint8_t *jq_hash_bytes(jq_value v) {
+  return (const uint8_t *)&jq_block_of(v)->payload[0];
+}
+
+/* closure payload: [0] code ptr, [1] arity | (self_slot+1) << 16, [2..] env */
+static inline void *jq_closure_code(jq_value v) {
+  return (void *)jq_block_of(v)->payload[0];
+}
+static inline uint16_t jq_closure_arity(jq_value v) {
+  return (uint16_t)(jq_block_of(v)->payload[1] & 0xffff);
+}
+/* returns env index of the non-owning self slot, or -1 */
+static inline int32_t jq_closure_self_slot(jq_value v) {
+  return (int32_t)((jq_block_of(v)->payload[1] >> 16) & 0xffffffff) - 1;
+}
+static inline jq_value *jq_closure_env(jq_value v) {
+  return (jq_value *)&jq_block_of(v)->payload[2];
+}
+static inline uint16_t jq_closure_env_n(jq_value v) {
+  return (uint16_t)(jq_block_of(v)->n - 2);
+}
+
+/* --- reference counting (jq_rc.c) --- */
+
+void jq_dup(jq_value v);
+void jq_drop(jq_value v);
+/* rc == 1: return the shell for same-shape reuse — its rc STAYS 1, its
+   fields are NOT dropped, and the caller now owns both (reuse the shell as
+   the new value, or drop each field and free it). Otherwise decrement and
+   return NULL. */
+jq_block *jq_drop_reuse(jq_value v);
+
+#endif /* JQ_VALUE_H */

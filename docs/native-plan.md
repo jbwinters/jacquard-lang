@@ -65,8 +65,12 @@ compiler is judged against).
 - LSB 0: a pointer to an 8-byte-aligned heap block.
 
 Block layout: an 8-byte header `{ uint32 rc; uint8 tag; uint8 flags;
-uint16 n }` followed by `n` payload words (TEXT and HASH use `n` as byte
-length). Tags: `TUPLE`, `CON` (payload word 0 holds the constructor ordinal
+uint16 n }` followed by `n` payload words. `n` is always a WORD count and
+is a representation invariant (arity limits are 65535, enforced by clean
+aborts, never silent truncation); TEXT keeps its byte length in payload
+word 0 (with `n` capped at 0 for texts past 65535 words — the free walk
+never reads TEXT's `n`), and HASH is a fixed 32 bytes. The runtime is
+64-bit only, statically asserted. Tags: `TUPLE`, `CON` (payload word 0 holds the constructor ordinal
 and type id; remaining words are fields), `TEXT` (immutable UTF-8 bytes),
 `REAL` (boxed double), `CLOSURE` (word 0 code pointer, word 1 arity and
 self-slot index, remaining words captured environment), `CODE` (a boxed form
