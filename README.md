@@ -112,6 +112,7 @@ opam exec -- sh demos/clarifying-question.sh
 opam exec -- sh demos/agent-dream.sh
 opam exec -- sh demos/ambiguity-pipeline.sh
 opam exec -- sh demos/showcase-warp-tests.sh
+opam exec -- sh demos/repair.sh
 opam exec -- sh demos/m4-hostile.sh
 ```
 
@@ -126,13 +127,17 @@ What they show:
   `observe`.
 - `showcase-warp-tests.sh`: Warp checks for the VOI, dream-mode, and ambiguity
   demos.
+- `repair.sh`: program repair as Bayesian inference; a bug report is an
+  observation over computed single-edit patches, and the MAP patch is a
+  one-line semantic diff.
 - `m4-hostile.sh`: generated-looking code that reaches for `net`; signatures and
   manifests expose the authority.
 - `demos/escrow/`: product-shaped generated workflow with manifest, dry-run,
   Warp tests, fault exploration, replay, semantic diff, and approval by hash.
 
 All public demo outputs are pinned by cram tests, especially
-`test/cli/demos.t`, `test/cli/hostile-demo.t`, and `test/cli/escrow.t`.
+`test/cli/demos.t`, `test/cli/hostile-demo.t`, `test/cli/escrow.t`,
+`test/cli/showcase.t`, and `test/cli/repair.t`.
 
 ## Release Evidence
 

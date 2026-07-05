@@ -1,0 +1,192 @@
+; PROGRAM REPAIR AS BAYESIAN INFERENCE.
+;
+; The sequel to synthesis.wft. There the candidate programs were canned; here
+; they are COMPUTED from the shipped program by walking its quoted AST —
+; code.un-form to descend, code.form to splice a mutant back in. A bug report
+; is an observation; the posterior over single-edit patches is the diagnosis;
+; the MAP patch rendered by code.diff is the artifact a human reviews. The
+; mutation machinery is pure (the rows say so); only RUNNING a candidate is
+; authority, so this demo refuses without --allow eval.
+
+; The shipped program: triangle numbers, n*(n+1)/2 — except the model wrote
+; sub where it meant add.
+(defterm ((binding buggy-sum-to ()
+  (quote (lam ((pvar n))
+    (app (var div)
+      (app (var mul) (var n) (app (var sub) (var n) (lit 1)))
+      (lit 2)))))))
+
+; The repair a human would write, for tests and mass checks to point at. The
+; demo never feeds it in; the posterior has to find it.
+(defterm ((binding intended-fix ()
+  (quote (lam ((pvar n))
+    (app (var div)
+      (app (var mul) (var n) (app (var add) (var n) (lit 1)))
+      (lit 2)))))))
+
+; The edit grammar. Operator leaves swap within this set; the set is data, so
+; widening the hypothesis space is consing on another quoted leaf.
+(defterm ((binding op-swaps ()
+  (app (var cons) (quote (var add))
+    (app (var cons) (quote (var sub))
+      (app (var cons) (quote (var mul)) (var nil)))))))
+
+(defterm ((binding op-mutants ()
+  (lam ((pvar leaf))
+    (match (app (var list.contains?) (var op-swaps) (var leaf) (app (var mk-eq) (var code.eq?)))
+      (clause (pcon false) (var nil))
+      (clause (pcon true)
+        (app (var list.filter) (var op-swaps)
+          (lam ((pvar op)) (app (var bool.not) (app (var code.eq?) (var op) (var leaf)))))))))))
+
+(defterm ((binding lit-mutants ()
+  (lam ((pvar leaf))
+    (match (app (var code.to-int) (var leaf))
+      (clause (pcon none) (var nil))
+      (clause (pcon some (pvar k))
+        (app (var cons) (app (var code.of-int) (app (var sub) (var k) (lit 1)))
+          (app (var cons) (app (var code.of-int) (app (var add) (var k) (lit 1)))
+            (var nil)))))))))
+
+(defterm ((binding leaf-edits ()
+  (lam ((pvar leaf))
+    (app (var list.append)
+      (app (var list.map) (app (var op-mutants) (var leaf))
+        (lam ((pvar m)) (tuple (var m) (lit "operator"))))
+      (app (var list.map) (app (var lit-mutants) (var leaf))
+        (lam ((pvar m)) (tuple (var m) (lit "literal")))))))))
+
+(defterm ((binding set-nth ()
+  (lam ((pvar xs) (pvar i) (pvar x))
+    (match (var xs)
+      (clause (pcon nil) (var nil))
+      (clause (pcon cons (pvar y) (pvar rest))
+        (match (app (var eq) (var i) (lit 0))
+          (clause (pcon true) (app (var cons) (var x) (var rest)))
+          (clause (pcon false)
+            (app (var cons) (var y)
+              (app (var set-nth) (var rest) (app (var sub) (var i) (lit 1)) (var x)))))))))))
+
+; Every single-edit mutant of a quoted program, tagged with its edit kind:
+; the edits at this node, plus each child's mutants spliced back in place.
+(defterm ((binding code-mutants ()
+  (lam ((pvar c))
+    (app (var list.append)
+      (app (var leaf-edits) (var c))
+      (match (app (var code.un-form) (var c))
+        (clause (pcon none) (var nil))
+        (clause (pcon some (ptuple (pvar head) (pvar children)))
+          (app (var list.concat)
+            (app (var list.map)
+              (app (var list.zip) (var children)
+                (app (var list.range) (lit 0) (app (var list.length) (var children))))
+              (lam ((pvar slot))
+                (match (var slot)
+                  (clause (ptuple (pvar child) (pvar i))
+                    (app (var list.map) (app (var code-mutants) (var child))
+                      (lam ((pvar edited))
+                        (match (var edited)
+                          (clause (ptuple (pvar m) (pvar kind))
+                            (tuple
+                              (app (var code.form) (var head)
+                                (app (var set-nth) (var children) (var i) (var m)))
+                              (var kind))))))))))))))))))
+
+; The prior over patches, centered on the shipped program: keep it at weight 4,
+; each operator swap at 3, each literal nudge at 1 — models flub operators more
+; often than constants. Weights are relative; enumeration normalizes.
+(defterm ((binding patch-weight ()
+  (lam ((pvar kind))
+    (match (var kind)
+      (clause (plit "operator") (lit 3.0))
+      (clause (pwild) (lit 1.0)))))))
+
+(defterm ((binding patch-prior ()
+  (lam ((pvar original))
+    (app (var categorical)
+      (app (var cons) (app (var mk-pair) (var original) (lit 4.0))
+        (app (var list.map) (app (var code-mutants) (var original))
+          (lam ((pvar edited))
+            (match (var edited)
+              (clause (ptuple (pvar m) (pvar kind))
+                (app (var mk-pair) (var m) (app (var patch-weight) (var kind)))))))))))))
+
+; A spec is a list of (input, expected) pairs; running a candidate against it
+; is the eval CAPABILITY.
+(defterm ((binding passes? ()
+  (lam ((pvar code) (pvar spec))
+    (let nonrec (pvar f) (app (var eval-code) (var code))
+      (app (var list.fold) (var spec) (var true)
+        (lam ((pvar acc) (pvar example))
+          (match (var example)
+            (clause (ptuple (pvar input) (pvar expected))
+              (app (var bool.and) (var acc)
+                (app (var eq) (app (var f) (var input)) (var expected))))))))))))
+
+; Repair is ordinary inference: sample a patch from the prior, observe that it
+; passes the spec. A failing test is not a trigger for a rewrite — it is
+; evidence, and it prunes hypotheses to mass zero.
+(defterm ((binding repair ()
+  (lam ((pvar original) (pvar spec))
+    (let nonrec (pvar patch) (app (var sample) (app (var patch-prior) (var original)))
+      (let nonrec (pwild)
+        (app (var observe)
+          (app (var bernoulli)
+            (match (app (var passes?) (var patch) (var spec))
+              (clause (pcon true) (lit 1.0))
+              (clause (pcon false) (lit 0.0))))
+          (var true))
+        (var patch)))))))
+
+; The posterior over patches, merged by the metadata law's code equality.
+(defterm ((binding posterior-over-patches ()
+  (lam ((pvar original) (pvar spec))
+    (app (var dist.tally)
+      (app (var dist.enumerate) (lam () (app (var repair) (var original) (var spec))))
+      (app (var mk-eq) (var code.eq?)))))))
+
+(defterm ((binding surviving-patches ()
+  (lam ((pvar table))
+    (app (var list.filter) (var table)
+      (lam ((pvar entry))
+        (match (var entry)
+          (clause (pcon mk-pair (pwild) (pvar p)) (app (var lt-real) (lit 0.0) (var p))))))))))
+
+; The maximum-a-posteriori patch; ties keep the earlier (first-tallied) entry,
+; and an all-pruned table falls back to the original.
+(defterm ((binding map-patch ()
+  (lam ((pvar original) (pvar table))
+    (match
+      (app (var list.fold) (var table) (app (var mk-pair) (var original) (lit 0.0))
+        (lam ((pvar best) (pvar entry))
+          (match (tuple (var best) (var entry))
+            (clause (ptuple (pcon mk-pair (pwild) (pvar bp)) (pcon mk-pair (pwild) (pvar ep)))
+              (match (app (var lt-real) (var bp) (var ep))
+                (clause (pcon true) (var entry))
+                (clause (pcon false) (var best)))))))
+      (clause (pcon mk-pair (pvar code) (pwild)) (var code)))))))
+
+; The bug report: sum-to 3 must be 6; the shipped program says 3. Two patches
+; survive it — the intended fix at 0.75, and an overfitting patch (keep the
+; wrong sub, divide by 1 instead) at 0.25. The posterior is honest about both.
+(defterm ((binding bug-report ()
+  (app (var cons) (tuple (lit 3) (lit 6)) (var nil)))))
+
+; One regression test, sum-to 1 = 1, kills the overfitter: the posterior is a
+; proof that exactly one single-edit patch satisfies the evidence.
+(defterm ((binding regression-spec ()
+  (app (var cons) (tuple (lit 1) (lit 1)) (var bug-report)))))
+
+; --- demo driver ---
+; (code.diff's "log/..." prefix below is the differ's root label — it also
+; serves replay logs; the payload after it is the single divergence.)
+
+(app (var list.length) (app (var code-mutants) (var buggy-sum-to)))
+(app (var surviving-patches) (app (var posterior-over-patches) (var buggy-sum-to) (var bug-report)))
+(app (var code.diff) (var buggy-sum-to)
+  (app (var map-patch) (var buggy-sum-to)
+    (app (var posterior-over-patches) (var buggy-sum-to) (var bug-report))))
+(app (var surviving-patches) (app (var posterior-over-patches) (var buggy-sum-to) (var regression-spec)))
+(app (var code.diff) (var buggy-sum-to)
+  (app (var map-patch) (var buggy-sum-to)
+    (app (var posterior-over-patches) (var buggy-sum-to) (var regression-spec))))

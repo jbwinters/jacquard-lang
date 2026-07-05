@@ -13,6 +13,12 @@ uncertainty, and identity stay visible to tools.
 - `agent-dream.sh`: one agent policy under scripted and probabilistic world handlers.
 - `ambiguity-pipeline.sh`: posterior-carrying extraction; user selection is an observe.
 - `showcase-warp-tests.sh`: Warp tests for the VOI, dream-mode, and ambiguity demos.
+- `synthesis.wft`: program synthesis as Bayesian inference; a test suite is an
+  observation and the posterior over programs sharpens as tests are added.
+- `repair.sh`: program repair as Bayesian inference; single-edit patches are
+  computed from the buggy program's quoted AST, a bug report is an observation,
+  and the MAP patch renders as a one-line `code.diff`. Warp tests cover the
+  pure mutation machinery and the patch prior.
 - `word-count.wft`: console-only stdlib smoke demo.
 - `cookbook.wft`: compact probabilistic cookbook examples.
 - `escrow/`: product-shaped generated workflow with manifest, dry-run, Warp, replay,
@@ -26,3 +32,5 @@ uncertainty, and identity stay visible to tools.
 - Semantic CI/cache/diff: `test/cli/warp.t`.
 - Probabilistic refactoring tests: `test/cli/props.t`.
 - Same model, different inference handler: `demos/m3.sh` and `test/cli/infer.t`.
+- Synthesis and repair as inference: `demos/synthesis.wft` with `test/cli/showcase.t`,
+  and `demos/repair.sh` with `test/cli/repair.t`.
