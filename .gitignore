@@ -42,3 +42,6 @@ _build/
 # Native runtime local artifacts
 runtime/*.o
 runtime/libjqrt.a
+
+# native build cache (jacquard build)
+.jacquard-native/

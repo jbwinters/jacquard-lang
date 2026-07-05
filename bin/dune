@@ -1,4 +1,4 @@
 (executable
  (name main)
  (public_name jacquard)
- (libraries jacquard str cmdliner unix))
+ (libraries jacquard jacquard_native str cmdliner unix))

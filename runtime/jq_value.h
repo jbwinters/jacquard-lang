@@ -140,16 +140,90 @@ typedef struct jq_op_info {
   const char *op_name; /* feeds <op effect.op> and perform dispatch (task 70) */
 } jq_op_info;
 
+struct jq_rt;
+
 typedef struct jq_builtin_info {
   uint32_t ordinal;
   uint32_t arity;
   const char *name; /* feeds <builtin n> and the intrinsics table */
+  jq_value (*fn)(struct jq_rt *, const jq_value *); /* consumes its arguments */
 } jq_builtin_info;
+
+/* Per-run context. Compiled main wires the constructor values intrinsics
+ * return (booleans; orderings arrive with the compare intrinsics). Effects
+ * state lands here in task 70. */
+typedef struct jq_rt {
+  jq_value v_true;
+  jq_value v_false;
+  jq_value v_less;
+  jq_value v_equal;
+  jq_value v_greater;
+  uint16_t apply_n; /* argument count for the next jq_apply (set by the caller
+                       immediately before the call: musttail forces jq_apply
+                       onto the uniform signature, so n travels here) */
+} jq_rt;
+
+/* The uniform compiled-function signature: clang's musttail requires caller
+ * and callee prototypes to match, so every compiled function takes (rt, clo,
+ * a0..a7) with JQ_UNIT padding; arity is capped at 8 by the build driver.
+ * Members ignore clo; lifted lambdas read their environment from it. All
+ * value arguments (clo included) are owned by the callee. */
+#define JQ_MAX_ARITY 8
+#define JQ_PARAMS                                                              \
+  jq_rt *rt, jq_value clo, jq_value a0, jq_value a1, jq_value a2,              \
+      jq_value a3, jq_value a4, jq_value a5, jq_value a6, jq_value a7
+typedef jq_value (*jq_fn)(JQ_PARAMS);
+
+#if defined(__clang__)
+#define JQ_MUSTTAIL __attribute__((musttail))
+#else
+#define JQ_MUSTTAIL
+#endif
+
+/* --- compiled-program support (task 67; jq_apply.c, jq_intrinsics.c) --- */
+
+/* Generic application: dispatches on the callee tag (closure, builtin,
+ * constructor saturation, op/resume later) with the interpreter's exact
+ * error texts. Uniform jq_fn signature (musttail-compatible from compiled
+ * tail calls and INTO closure code): the callee travels in the clo slot and
+ * the live argument count in rt->apply_n, set by the caller immediately
+ * before the call. Consumes the callee and the live arguments. */
+jq_value jq_apply(JQ_PARAMS);
+
+/* runs the program body on a large-stack thread (jq_main.c) */
+int jq_run_main(jq_rt *rt, void (*body)(jq_rt *));
+
+/* "no clause matched the value %s", exit 2 (Runtime_err.Match_failure) */
+void jq_match_fail(jq_rt *rt, jq_value scrutinee) __attribute__((noreturn));
+
+/* interpreter lit_matches for reals: nan matches nan, -0.0 matches +0.0 */
+static inline bool jq_real_lit_match(double a, double b) {
+  return (a != a && b != b) || a == b || (a == 0.0 && b == 0.0);
+}
+
+/* intrinsics (each consumes its arguments; names mangle . and - to _) */
+jq_value jq_i_add(jq_rt *rt, const jq_value *a);
+jq_value jq_i_sub(jq_rt *rt, const jq_value *a);
+jq_value jq_i_mul(jq_rt *rt, const jq_value *a);
+jq_value jq_i_div(jq_rt *rt, const jq_value *a);
+jq_value jq_i_mod(jq_rt *rt, const jq_value *a);
+jq_value jq_i_eq(jq_rt *rt, const jq_value *a);
+jq_value jq_i_lt(jq_rt *rt, const jq_value *a);
+jq_value jq_i_add_real(jq_rt *rt, const jq_value *a);
+jq_value jq_i_sub_real(jq_rt *rt, const jq_value *a);
+jq_value jq_i_mul_real(jq_rt *rt, const jq_value *a);
+jq_value jq_i_div_real(jq_rt *rt, const jq_value *a);
+jq_value jq_i_lt_real(jq_rt *rt, const jq_value *a);
+jq_value jq_i_text_length(jq_rt *rt, const jq_value *a);
+jq_value jq_i_text_concat(jq_rt *rt, const jq_value *a);
+jq_value jq_i_int_compare(jq_rt *rt, const jq_value *a);
+jq_value jq_i_text_compare(jq_rt *rt, const jq_value *a);
+
 
 /* --- constructors (jq_alloc.c) --- */
 
 jq_block *jq_alloc_block(uint8_t tag, uint8_t flags, uint16_t n);
-jq_value jq_tuple(uint16_t n, const jq_value *items);       /* items owned */
+jq_value jq_tuple(uint32_t n, const jq_value *items); /* items owned; n guarded <= 65535 */
 jq_value jq_con(const jq_con_info *info, const jq_value *fields); /* owned */
 jq_value jq_real(double d);
 jq_value jq_text(const uint8_t *bytes, uint64_t len); /* bytes copied */

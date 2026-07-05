@@ -54,8 +54,9 @@ static jq_block *alloc_text_block(uint64_t len) {
   return b;
 }
 
-jq_value jq_tuple(uint16_t n, const jq_value *items) {
-  jq_block *b = jq_alloc_block(JQ_TUPLE, 0, n);
+jq_value jq_tuple(uint32_t n, const jq_value *items) {
+  arity_guard(n, "tuple arity");
+  jq_block *b = jq_alloc_block(JQ_TUPLE, 0, (uint16_t)n);
   if (n) memcpy(b->payload, items, (size_t)n * 8);
   return jq_of_block(b);
 }

@@ -116,7 +116,7 @@ static void mode_show(void) {
   jq_value clo = jq_closure((void *)0xC0DE, 0, 0, NULL, UINT16_MAX);
   show_line(clo);
   jq_drop(clo);
-  static const jq_builtin_info add_info = { 0, 2, "add" };
+  static const jq_builtin_info add_info = { 0, 2, "add", NULL };
   STATIC_BLOCK(add_builtin, JQ_BUILTIN, 1, (uint64_t)&add_info);
   show_line((jq_value)&add_builtin);
   /* zero-payload static: hand-rolled (a zero-length array cannot init) */

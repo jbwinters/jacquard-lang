@@ -1450,6 +1450,89 @@ let tiers_cmd files prelude =
                   Printf.printf "\nstamped %d tier sidecars\n" (List.length schemes);
                   0)))
 
+(* --- build (native compilation, docs/native-plan.md task 67) --- *)
+
+let build_cmd file out prelude =
+  match open_ctx ~prelude ~store_dir:None with
+  | Error ds -> print_diags ds
+  | Ok (store, _ctx) -> (
+      match make_checker store with
+      | Error ds -> print_diags ds
+      | Ok cctx -> (
+          let tops = ref [] in
+          let rec load_forms = function
+            | [] -> Ok ()
+            | top :: rest -> (
+                match top with
+                | Kernel.Decl d -> (
+                    match Resolve.resolve_decl (Store.names_view store) d with
+                    | Error ds -> Error ds
+                    | Ok d -> (
+                        match Store.put_decl store d with
+                        | Error ds -> Error ds
+                        | Ok _ -> (
+                            match Check.check_top cctx (Kernel.Decl d) with
+                            | Error ds -> Error ds
+                            | Ok _ -> load_forms rest)))
+                | Kernel.Expr e -> (
+                    match Resolve.resolve_expr (Store.names_view store) e with
+                    | Error ds -> Error ds
+                    | Ok e -> (
+                        match Check.check_top cctx (Kernel.Expr e) with
+                        | Error ds -> Error ds
+                        | Ok { Check.warnings; _ } ->
+                            tops := (e, List.map Diag.to_string warnings) :: !tops;
+                            load_forms rest)))
+          in
+          match Reader.parse_string ~file (read_file file) with
+          | Error ds -> print_diags ds
+          | Ok forms -> (
+              match
+                List.fold_left
+                  (fun acc form ->
+                    Result.bind acc (fun tops ->
+                        Result.map (fun t -> t :: tops) (Kernel.of_form form)))
+                  (Ok []) forms
+              with
+              | Error ds -> print_diags ds
+              | Ok rev_tops -> (
+                  match load_forms (List.rev rev_tops) with
+                  | Error ds -> print_diags ds
+                  | Ok () -> (
+                      match
+                        Jacquard_native.Build.build ~store ~tops:(List.rev !tops)
+                          ~prelude_dir:(prelude_dir_of prelude) ~out
+                      with
+                      | Ok n ->
+                          Printf.printf "native: compiled %d unit(s)\n" n;
+                          ok
+                      | Error (`Refused rs) ->
+                          List.iter
+                            (fun (r : Jacquard_native.Compile.refusal) ->
+                              Printf.eprintf
+                                "error[E1101]: not yet compilable (native v1 compiles pure \
+                                 programs without handlers): %s %s\n"
+                                r.Jacquard_native.Compile.where r.Jacquard_native.Compile.what)
+                            rs;
+                          exit_diags
+                      | Error (`Toolchain m) ->
+                          Printf.eprintf "error[E1103]: %s\n" m;
+                          exit_diags)))))
+
+let out_arg =
+  Arg.(
+    required
+    & opt (some string) None
+    & info [ "o"; "output" ] ~docv:"OUT" ~doc:"Output executable path.")
+
+let build_t =
+  Cmd.v
+    (Cmd.info "build"
+       ~doc:
+         "Compile a .jqd file and its reachable declarations to a standalone native executable \
+          (task 67: the pure fragment; effects land with later rungs).")
+    Term.(const build_cmd $ file_arg $ out_arg $ prelude_arg)
+
 let tiers_t =
   Cmd.v
     (Cmd.info "tiers"
@@ -1473,6 +1556,7 @@ let main =
       replay_t;
       dist_diff_t;
       tiers_t;
+      build_t;
     ]
 
 let () = exit (Cmd.eval' main)

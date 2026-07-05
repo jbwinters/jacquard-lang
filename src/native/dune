@@ -1,0 +1,3 @@
+(library
+ (name jacquard_native)
+ (libraries jacquard unix))

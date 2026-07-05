@@ -3,4 +3,6 @@
   %{bin:jacquard}
   (source_tree ../../prelude)
   (source_tree ../../demos)
-  (source_tree ../../corpus)))
+  (source_tree ../../corpus)
+  (source_tree ../../runtime)
+  (source_tree ../../bench)))

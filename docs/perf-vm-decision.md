@@ -112,6 +112,22 @@ tiers drove a working direct path whose outputs stayed byte-identical across
 the differential runs, and the seam it entered at (closure application, keyed
 by member hash) is where a native backend enters too.
 
+## Update (2026-07-05): PF.3 first slice measured — the compiler pays
+
+Task 67's vertical slice (pure fragment, naive reference counting, no
+optimization passes) against the same workloads, same machine:
+
+| workload                              | interpreter | native (task 67) |
+| ------------------------------------- | ----------- | ---------------- |
+| fib 27                                | 0.32s       | 0.010s           |
+| bench/pure.jqd (fib + fold + sort)    | 3.0s        | 0.051s           |
+
+Byte-identical output on every program in the differential set
+(test/cli/native.t), ASAN and leak-detection clean. The interpreter rungs
+were declined because engine constants were not the win; changing the
+representation is — roughly 30-60x before Perceus (task 68) or
+monomorphization (task 69) land.
+
 ## What we deliberately did NOT do meanwhile
 
 No micro-optimization of the tree-walker (memo tables and the builtin

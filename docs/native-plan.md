@@ -224,9 +224,10 @@ the `jacquard build` subcommand, `test/cli/native.t`, intrinsics inventory
    comparison, text ops, real ops, pair ops, code structural ops deferred to
    task 73 — listed as refused for now). Every intrinsic gets a one-line
    parity case in the differential corpus.
-6. **Quote.** Quoted forms with no live splices compile to static CODE
-   blocks (forms serialized as static data). Quotes with splices are
-   deferred to task 73 — refused for now.
+6. **Quote.** ALL quotes are refused until task 73 (originally only
+   spliced ones were): a pure program can print a code value, printing
+   needs the form representation and inline printer, and both are 73's.
+   Refusing the construct outright keeps 67's eligibility honest.
 7. **Driver.** `jacquard build FILE.jqd -o OUT [--allow eff]...`:
    load prelude + file, typecheck (reuse Check). **Eligibility is SYNTACTIC
    over the reachable declaration DAG, not row-based**: a fully-discharged
@@ -252,6 +253,12 @@ the `jacquard build` subcommand, `test/cli/native.t`, intrinsics inventory
    run_cmd), then evaluate and print via jq_show, with the interpreter's
    exit-code contract (0 ok / 2 runtime error with the same stderr
    rendering).
+   **Recorded parity boundary — warnings from DECLARATION bodies:** the
+   interpreter surfaces those lazily with spans pointing into its ephemeral
+   store's object files (a random tmp path), so byte-parity on that class
+   is unattainable in either direction. Only top-level-expression warnings
+   replay; the task-74 harness excludes decl-warning programs via the
+   eligibility manifest with this rationale.
 8. **Perceus placeholder.** Until task 68 lands, emit naive `jq_dup` on
    every use and `jq_drop` at scope end — correct but slow. Mark the
    insertion points in the IR so task 68 replaces one pass, not the emitter.

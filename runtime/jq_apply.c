@@ -1,0 +1,71 @@
+/* Generic application (task 67): the unknown-callee path. Dispatch and error
+ * texts mirror the interpreter's apply (src/eval.ml); Runtime_err renderings
+ * come through jq_error.c's contract (stderr + exit 2). Every input is owned:
+ * the callee consumes fn and the n arguments. */
+
+#include "jq_value.h"
+
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+static void fail(const char *fmt, ...) __attribute__((noreturn, format(printf, 1, 2)));
+static void fail(const char *fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  vfprintf(stderr, fmt, ap);
+  va_end(ap);
+  fputc('\n', stderr);
+  exit(2);
+}
+
+jq_value jq_apply(JQ_PARAMS) {
+  jq_value fn = clo;
+  uint16_t n = rt->apply_n;
+  if (jq_is_int(fn)) {
+    char *s = jq_show(fn);
+    fail("type error: %s is not applicable", s);
+  }
+  jq_block *b = jq_block_of(fn);
+  switch (b->tag) {
+  case JQ_CLOSURE: {
+    uint16_t arity = jq_closure_arity(fn);
+    if (arity != n)
+      fail("arity mismatch: closure of %u parameter(s) applied to %u argument(s)",
+           arity, n);
+    jq_fn code = (jq_fn)jq_closure_code(fn);
+    JQ_MUSTTAIL return code(rt, fn, a0, a1, a2, a3, a4, a5, a6, a7);
+  }
+  case JQ_BUILTIN: {
+    const jq_builtin_info *info = (const jq_builtin_info *)b->payload[0];
+    jq_value args[JQ_MAX_ARITY] = { a0, a1, a2, a3, a4, a5, a6, a7 };
+    /* builtins validate their own arguments (interpreter type_err parity);
+       fn is static, its drop is a no-op */
+    jq_drop(fn);
+    return info->fn(rt, args);
+  }
+  case JQ_CONSTRUCTOR: {
+    const jq_con_info *info = (const jq_con_info *)b->payload[0];
+    if (info->arity != n)
+      fail("arity mismatch: constructor %s expects %u argument(s), got %u",
+           info->name, info->arity, n);
+    jq_value args[JQ_MAX_ARITY] = { a0, a1, a2, a3, a4, a5, a6, a7 };
+    jq_drop(fn);
+    return jq_con(info, args);
+  }
+  case JQ_OP:
+    fail("jacquard runtime: op perform reached a pure binary (task 70)");
+  case JQ_RESUME:
+    fail("jacquard runtime: resumption reached a pure binary (task 71)");
+  default: {
+    char *s = jq_show(fn);
+    fail("type error: %s is not applicable", s);
+  }
+  }
+}
+
+void jq_match_fail(jq_rt *rt, jq_value scrutinee) {
+  (void)rt;
+  char *s = jq_show(scrutinee);
+  fail("no clause matched the value %s", s);
+}
