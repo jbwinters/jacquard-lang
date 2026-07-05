@@ -1,6 +1,8 @@
 # PF.2: native compilation for Jacquard — a design document
 
-Status: design only; no compiler code exists or is scheduled. This document
+Status: ACTIVE — owner decision 2026-07-05: build it. The execution plan,
+specified to task level with definitions of done, is docs/native-plan.md
+(task-master 65-76); this document remains the design record. This document
 records the four-pillar route from the current CPS tree-walker to native
 performance while its reasoning is fresh, states which programs stay slow, and
 bounds the claim. The plan's culture: big directions start as decision docs.
@@ -211,7 +213,7 @@ native backend, and two rules recorded here are design inputs to that
 runtime — the let-rec cyclic carve-out (Pillar 2 above) and dup-on-capture
 for anything a resumption can reach.
 
-## Phase 4 status (2026-07-05): gated; backend decided — C emission
+## Phase 4 status (2026-07-05, superseded same day): backend decided — C emission
 
 The backend choice the phased sketch left open ("LLVM or Cranelift") is
 taken: emit C, one compilation unit per declaration, keyed by content hash.
@@ -222,7 +224,9 @@ dependency, and nothing here needs the JIT-oriented codegen that is
 Cranelift's niche; and one C unit per declaration keeps the store-keyed
 object cache toolchain-plain. The known C risk is guaranteed tail calls — mitigation
 order: clang/GCC `musttail` where available, self-tail-call loopification,
-trampoline fallback. The phase stays gated on the standing trigger
-conditions in docs/perf-vm-decision.md, which are not close (the suite runs
-in ~50 seconds against the 2-minute trigger). Tracked as task 63, deferred
-until a trigger fires.
+trampoline fallback. This section originally left the phase gated on the
+standing trigger conditions in docs/perf-vm-decision.md; the owner overrode
+the gate the same day — those triggers measure whether interpretation speed
+hurts development, and the goal is a fast language, which is a different
+question. The build is scheduled: docs/native-plan.md, tasks 65-76
+(task 63 is superseded).
