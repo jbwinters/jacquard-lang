@@ -1,6 +1,6 @@
 # Weft Core 0.1 Freeze Surface
 
-Candidate base: `3609a67`  
+Candidate base: `aec2c63`  
 Evidence branch predecessor: `7d7733f`  
 CLI version: `0.1.0`
 

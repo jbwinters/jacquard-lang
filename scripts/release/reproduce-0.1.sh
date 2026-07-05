@@ -5,7 +5,7 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 cd "$ROOT"
 
 REF=${WEFT_RELEASE_REF:-release/0.1-evidence}
-BASE=${WEFT_RELEASE_BASE:-3609a67}
+BASE=${WEFT_RELEASE_BASE:-aec2c63}
 OUT=${WEFT_RELEASE_OUT:-logs/release/0.1}
 TRANSCRIPTS="$OUT/transcripts"
 

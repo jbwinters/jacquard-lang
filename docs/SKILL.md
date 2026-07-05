@@ -264,7 +264,7 @@ Read `docs/warp-testing.md`; the API is `prelude/15-warp.wft` + `16-gen.wft`.
   diffs should be additive), signatures in `corpus/sigs/`.
 - Dev gate before any PR: `dune build @all && dune runtest && dune fmt` then
   `git diff --exit-code`. Release-facing changes also run
-  `WEFT_RELEASE_REF=HEAD WEFT_RELEASE_BASE=3609a67 scripts/release/reproduce-0.1.sh`.
+  `WEFT_RELEASE_REF=HEAD WEFT_RELEASE_BASE=aec2c63 scripts/release/reproduce-0.1.sh`.
 - OCaml side: library code returns `('a, Diag.t list) result`; exceptions
   only for internal invariants, prefixed `Bug_`; public functions get doc
   comments; diagnostics get stable `E####` codes cataloged in
