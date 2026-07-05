@@ -408,7 +408,7 @@ let check_ctx =
   c
 
 let sig_of src =
-  match Reader.parse_one ~file:"sig.wft" src with
+  match Reader.parse_one ~file:"sig.jqd" src with
   | Error ds -> Eval_support.fail_diags "parse" ds
   | Ok f -> (
       match Kernel.expr_of_form f with

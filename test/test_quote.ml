@@ -6,7 +6,7 @@ let code_payload = function
   | Value.VCode f -> f
   | v -> Alcotest.failf "expected code, got %s" (Value.show v)
 
-let parse_form src = Result.get_ok (Reader.parse_one ~file:"q.wft" src)
+let parse_form src = Result.get_ok (Reader.parse_one ~file:"q.jqd" src)
 
 let check_payload what expected v =
   Alcotest.(check bool) what true (Form.equal_ignoring_meta (parse_form expected) (code_payload v))
@@ -83,13 +83,13 @@ let test_scope_marks_travel () =
 (* --- the gated eval effect (first capability demo) --- *)
 
 let put_fact store =
-  let src = Corpus_support.read_file "../corpus/valid/fact.wft" in
-  match Reader.parse_string ~file:"fact.wft" src with
+  let src = Corpus_support.read_file "../corpus/valid/fact.jqd" in
+  match Reader.parse_string ~file:"fact.jqd" src with
   | Ok [ f ] ->
       let d = Result.get_ok (Kernel.decl_of_form f) in
       let d = Result.get_ok (Resolve.resolve_decl (Store.names_view store) d) in
       ignore (Result.get_ok (Store.put_decl store d))
-  | _ -> Alcotest.fail "fact.wft should hold one decl"
+  | _ -> Alcotest.fail "fact.jqd should hold one decl"
 
 let test_eval_gated_pair () =
   (* WITH the grant: eval-code on quoted factorial applied to 5 yields 120 *)
@@ -139,11 +139,11 @@ let test_eval_boundary_rejects_garbage () =
 (* the corpus carries the gated program (its named spot per the plan) *)
 let test_gated_corpus_program () =
   let store, ctx = Eval_support.make_prelude_ctx () in
-  let src = Corpus_support.read_file "../corpus/valid/eval-gated.wft" in
+  let src = Corpus_support.read_file "../corpus/valid/eval-gated.jqd" in
   (match Prelude.install_eval ctx with
   | Ok () -> ()
   | Error ds -> Eval_support.fail_diags "install_eval" ds);
-  match Reader.parse_string ~file:"eval-gated.wft" src with
+  match Reader.parse_string ~file:"eval-gated.jqd" src with
   | Ok [ f ] -> (
       let e = Result.get_ok (Kernel.expr_of_form f) in
       match Resolve.resolve_expr (Store.names_view store) e with
@@ -152,7 +152,7 @@ let test_gated_corpus_program () =
           | Ok v -> Alcotest.(check string) "42" "42" (Value.show v)
           | Error e -> Alcotest.failf "run failed: %s" (Runtime_err.to_string e))
       | Error ds -> Eval_support.fail_diags "resolve" ds)
-  | _ -> Alcotest.fail "eval-gated.wft should hold one expression"
+  | _ -> Alcotest.fail "eval-gated.jqd should hold one expression"
 
 let suite =
   [

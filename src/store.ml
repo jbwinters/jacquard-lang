@@ -1,15 +1,15 @@
 (** Content-addressed store (plan W1.6).
 
     On-disk layout under a root directory:
-    - [objects/<decl-hash-hex>.wft] — the canonical printed form of one resolved declaration,
+    - [objects/<decl-hash-hex>.jqd] — the canonical printed form of one resolved declaration,
       written once and never modified (immutable; a re-put of an alpha-equivalent declaration keeps
       the first bytes).
-    - [names.wft] — the name-to-hash index, the only mutable file. Each entry is a
+    - [names.jqd] — the name-to-hash index, the only mutable file. Each entry is a
       [(named <name> <kind> #<hash>)] form, kinds [term|con|op|type|effect], kept sorted.
 
     Derived hashes (defterm members, constructors, operations) have no object files of their own; an
     in-memory index from every known hash to its owning declaration is rebuilt by scanning
-    [objects/] at {!open_store} and extended by {!put_decl}. Renames touch only [names.wft] — object
+    [objects/] at {!open_store} and extended by {!put_decl}. Renames touch only [names.jqd] — object
     files are byte-identical before and after (golden-tested).
 
     Failure modes: E0601 unknown hash, E0602 unknown name, E0603 corrupt object file, E0604
@@ -26,11 +26,11 @@ type t = {
 }
 
 let objects_dir t = Filename.concat t.root "objects"
-let names_file t = Filename.concat t.root "names.wft"
-let object_path t h = Filename.concat (objects_dir t) (Hash.to_hex h ^ ".wft")
+let names_file t = Filename.concat t.root "names.jqd"
+let object_path t h = Filename.concat (objects_dir t) (Hash.to_hex h ^ ".jqd")
 
 (* PV.1 origin provenance sidecars: <hash>.origin beside the object. Sidecars are NOT
-   .wft, so the identity self-check at open never sees them, and renames never touch
+   .jqd, so the identity self-check at open never sees them, and renames never touch
    them — the metadata law extended to the file system. *)
 let origin_path t h = Filename.concat (objects_dir t) (Hash.to_hex h ^ ".origin")
 let err ~code fmt = Printf.ksprintf (fun msg -> Error [ Diag.error ~code msg ]) fmt
@@ -50,9 +50,9 @@ let kind_of_sym = function
   | "effect" -> Some Resolve.KEffect
   | _ -> None
 
-(* --- names.wft --- *)
+(* --- names.jqd --- *)
 
-(* Names must be printable symbols or names.wft could not round-trip through the reader.
+(* Names must be printable symbols or names.jqd could not round-trip through the reader.
    External entry points (bind_name, rename) validate before mutating; E0605. *)
 let valid_name = Reader.valid_library_symbol
 
@@ -94,8 +94,8 @@ let parse_names ~file src =
         | { Form.head = "named"; args = [ Form.Sym n; Form.Sym k; Form.Hash h ]; _ } :: rest -> (
             match kind_of_sym k with
             | Some kind -> go ((n, { Resolve.hash = h; kind }) :: acc) rest
-            | None -> err ~code:"E0603" "corrupt names.wft: unknown kind `%s`" k)
-        | f :: _ -> err ~code:"E0603" "corrupt names.wft: unexpected `%s` form" f.Form.head
+            | None -> err ~code:"E0603" "corrupt names.jqd: unknown kind `%s`" k)
+        | f :: _ -> err ~code:"E0603" "corrupt names.jqd: unexpected `%s` form" f.Form.head
       in
       go [] forms
 
@@ -163,7 +163,7 @@ let open_store root : (t, Diag.t list) result =
         scan []
           (Sys.readdir (objects_dir t)
           |> Array.to_list
-          |> List.filter (fun f -> Filename.check_suffix f ".wft")
+          |> List.filter (fun f -> Filename.check_suffix f ".jqd")
           |> List.sort String.compare)
       with
       | Error ds -> Error ds
@@ -317,7 +317,7 @@ let bind_name t name hash : (unit, Diag.t list) result =
                 write_names t;
                 Ok ()))
 
-(** [rename t ~old_name ~new_name ?kind ()] rebinds a name. Touches only [names.wft]; the new name
+(** [rename t ~old_name ~new_name ?kind ()] rebinds a name. Touches only [names.jqd]; the new name
     must be a printable symbol (E0605). When [old_name] is bound to several kinds, [kind] must
     disambiguate (E0607). *)
 let rename t ~old_name ~new_name ?kind () : (unit, Diag.t list) result =

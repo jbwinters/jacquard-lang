@@ -3,7 +3,7 @@
 ; capability, which Warp's closed {check} row deliberately cannot grant — the
 ; end-to-end posterior is pinned by the demo driver instead (test/cli/repair.t).
 ;
-; This file expects the definitions from repair.wft, stripped of its driver.
+; This file expects the definitions from repair.jqd, stripped of its driver.
 
 ; The overfitting patch the weak posterior discovers: keep the wrong sub,
 ; divide by 1 instead.

@@ -6,4 +6,4 @@ set -u
 JACQUARD="${JACQUARD:-dune exec jacquard --}"
 here="$(dirname "$0")"
 
-$JACQUARD run "$here/ambiguity-pipeline.wft"
+$JACQUARD run "$here/ambiguity-pipeline.jqd"

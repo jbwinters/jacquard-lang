@@ -425,7 +425,7 @@ let posterior_cache_lookup ~cache_dir key : (Value.t * float) list option =
   match cache_dir with
   | None -> None
   | Some dir -> (
-      let path = Filename.concat dir (Hash.to_hex (Hash.of_string key) ^ ".wft") in
+      let path = Filename.concat dir (Hash.to_hex (Hash.of_string key) ^ ".jqd") in
       match read_file path with
       | exception Sys_error _ -> None
       | src -> (
@@ -448,7 +448,7 @@ let posterior_cache_store ~cache_dir key (entries : (Form.t * float) list) : uni
   | Some dir -> (
       try
         if not (Sys.file_exists dir) then Sys.mkdir dir 0o755;
-        let path = Filename.concat dir (Hash.to_hex (Hash.of_string key) ^ ".wft") in
+        let path = Filename.concat dir (Hash.to_hex (Hash.of_string key) ^ ".jqd") in
         let oc = open_out_bin path in
         output_string oc
           (Printer.print
@@ -1120,7 +1120,7 @@ let infer_cache_arg =
 
 let run_t =
   Cmd.v
-    (Cmd.info "run" ~doc:"Run a .wft file: declarations load, expressions evaluate and print.")
+    (Cmd.info "run" ~doc:"Run a .jqd file: declarations load, expressions evaluate and print.")
     Term.(
       const run_cmd $ file_arg $ allows_arg $ prelude_arg $ store_dir_opt_arg $ seed_arg
       $ infer_cache_arg $ origin_arg $ dry_run_arg)
@@ -1140,7 +1140,7 @@ let manifest_arg =
 let check_t =
   Cmd.v
     (Cmd.info "check"
-       ~doc:"Parse, validate, resolve, and typecheck a .wft file (grammar + names + types).")
+       ~doc:"Parse, validate, resolve, and typecheck a .jqd file (grammar + names + types).")
     Term.(const check_cmd $ file_arg $ prelude_arg $ print_sigs_arg $ manifest_arg $ origin_arg)
 
 let hash_t =
@@ -1152,7 +1152,7 @@ let write_arg = Arg.(value & flag & info [ "write"; "w" ] ~doc:"Rewrite the file
 
 let fmt_t =
   Cmd.v
-    (Cmd.info "fmt" ~doc:"Format a .wft file canonically, preserving comments.")
+    (Cmd.info "fmt" ~doc:"Format a .jqd file canonically, preserving comments.")
     Term.(const fmt_cmd $ file_arg $ write_arg)
 
 let infer_t =

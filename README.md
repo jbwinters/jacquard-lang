@@ -89,7 +89,7 @@ the release evidence pack all exist and are covered by tests.
 ## What It Looks Like
 
 The bootstrap syntax is s-expressions over a uniform triple. Here is one
-handler resuming one continuation twice (`demos/m1-choose.wft`):
+handler resuming one continuation twice (`demos/m1-choose.jqd`):
 
 ```lisp
 (handle
@@ -102,7 +102,7 @@ handler resuming one continuation twice (`demos/m1-choose.wft`):
 ```
 
 ```
-$ jacquard run demos/m1-choose.wft
+$ jacquard run demos/m1-choose.jqd
 cons(1, cons(2, nil))
 ```
 
@@ -116,11 +116,11 @@ step still runs (it counts eight candidate patches) and then the demo refuses
 until you grant the rest:
 
 ```
-$ jacquard run demos/repair.wft
+$ jacquard run demos/repair.jqd
 8
 error[E0814]: this program requires the `eval` effect, which is not granted (performed via `posterior-over-patches`)
   hint: grant it with --allow eval, or handle the effect in the program
-$ jacquard run demos/repair.wft --allow eval
+$ jacquard run demos/repair.jqd --allow eval
 ```
 
 Under the grant, one failing test leaves two surviving patches: the intended
@@ -189,21 +189,21 @@ Many direct CLI commands need the prelude. From the repository root:
 
 ```bash
 export JACQUARD_PRELUDE=$PWD/prelude
-opam exec -- dune exec jacquard -- run demos/m1-fact.wft
+opam exec -- dune exec jacquard -- run demos/m1-fact.jqd
 ```
 
 The main commands are:
 
 ```bash
-jacquard run FILE.wft [--allow fs] [--allow net] [--dry-run]
-jacquard check FILE.wft [--print-sigs] [--manifest fs,net,console]
-jacquard hash FILE.wft
-jacquard fmt FILE.wft
+jacquard run FILE.jqd [--allow fs] [--allow net] [--dry-run]
+jacquard check FILE.jqd [--print-sigs] [--manifest fs,net,console]
+jacquard hash FILE.jqd
+jacquard fmt FILE.jqd
 jacquard diff STORE_A STORE_B
-jacquard infer enumerate MODEL.wft
-jacquard infer lw MODEL.wft --seed 42 --samples 100000
-jacquard replay TRACE.wft PROGRAM.wft [--fork '1=(response 500 "down")']
-jacquard test TESTS.wft [--exhaustive] [--cache-dir CACHE]
+jacquard infer enumerate MODEL.jqd
+jacquard infer lw MODEL.jqd --seed 42 --samples 100000
+jacquard replay TRACE.jqd PROGRAM.jqd [--fork '1=(response 500 "down")']
+jacquard test TESTS.jqd [--exhaustive] [--cache-dir CACHE]
 ```
 
 ## Demos
@@ -289,7 +289,7 @@ Key release docs:
 ## Implementation Map
 
 - `src/form.ml`, `src/meta.ml`, `src/span.ml`: uniform triple and metadata.
-- `src/reader.ml`, `src/printer.ml`: bootstrap `.wft` notation and formatter.
+- `src/reader.ml`, `src/printer.ml`: bootstrap `.jqd` notation and formatter.
 - `src/kernel.ml`: validator and typed kernel AST.
 - `src/resolve.ml`: names to content-addressed references.
 - `src/canon.ml`, `src/hash.ml`: HASH_V0 canonical serialization and hashing.
@@ -362,7 +362,7 @@ See `docs/ci-cd.md` for branch protection recommendations.
 ## Current Limits
 
 Jacquard core 0.1 is a research prototype, not a production compiler. It does not
-claim surface syntax beyond bootstrap `.wft`, a VM or optimizer, continuous
+claim surface syntax beyond bootstrap `.jqd`, a VM or optimizer, continuous
 distributions, gradients, typed staging, package management, self-hosting, or a
 formal proof of row soundness. See `docs/release/0.1/LIMITS.md` for the
 no-hype list.

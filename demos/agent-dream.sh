@@ -7,7 +7,7 @@ JACQUARD="${JACQUARD:-dune exec jacquard --}"
 here="$(dirname "$0")"
 
 echo "== policy authority =="
-$JACQUARD check "$here/agent-dream.wft" --print-sigs | grep '^support-policy'
+$JACQUARD check "$here/agent-dream.jqd" --print-sigs | grep '^support-policy'
 
 echo "== scripted worlds and probabilistic dream =="
-$JACQUARD run "$here/agent-dream.wft"
+$JACQUARD run "$here/agent-dream.jqd"

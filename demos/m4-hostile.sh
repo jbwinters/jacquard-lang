@@ -8,14 +8,14 @@ JACQUARD="${JACQUARD:-dune exec jacquard --}"
 here="$(dirname "$0")"
 
 echo "== the signatures announce the authority =="
-$JACQUARD check "$here/m4-hostile.wft" --print-sigs
+$JACQUARD check "$here/m4-hostile.jqd" --print-sigs
 
 echo "== check WITHOUT the net grant (expected: E0814 refusal, exit 1) =="
-$JACQUARD check "$here/m4-hostile.wft" --manifest console
+$JACQUARD check "$here/m4-hostile.jqd" --manifest console
 echo "exit code: $?"
 
 echo "== check WITH the grant =="
-$JACQUARD check "$here/m4-hostile.wft" --manifest net,console
+$JACQUARD check "$here/m4-hostile.jqd" --manifest net,console
 
 echo "== the granted run, against the stub net handler =="
-$JACQUARD run "$here/m4-hostile.wft" --allow net
+$JACQUARD run "$here/m4-hostile.jqd" --allow net

@@ -1,13 +1,13 @@
 # Conformance corpus
 
-The corpus is the spec's teeth: every `.wft` here runs through the full
+The corpus is the spec's teeth: every `.jqd` here runs through the full
 parse -> validate -> resolve -> hash pipeline on every `dune test`.
 
 ## Adding a case (under five lines)
 
-1. Valid: drop `foo.wft` in `valid/`, then run `dune exec test/gen_goldens.exe`
+1. Valid: drop `foo.jqd` in `valid/`, then run `dune exec test/gen_goldens.exe`
    from the repo root and commit the updated `golden/hashes.golden`.
-2. Invalid: drop `foo.wft` in `invalid/` plus a `foo.expect` sidecar naming the
+2. Invalid: drop `foo.jqd` in `invalid/` plus a `foo.expect` sidecar naming the
    failing stage and diagnostic code:
    `stage: parse|validate|resolve|hash` (first line), `code: E0106` (second line).
 

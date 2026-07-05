@@ -34,9 +34,9 @@ development plan (`docs/development-plan.md`) is the execution queue; the spec
 
 ## Corpus layout
 
-- `corpus/valid/` — `.wft` files that must parse, validate, resolve, and hash
+- `corpus/valid/` — `.jqd` files that must parse, validate, resolve, and hash
   to their golden values.
-- `corpus/invalid/` — `.wft` files that must fail, each with a sidecar
+- `corpus/invalid/` — `.jqd` files that must fail, each with a sidecar
   `.expect` file naming the failing stage and expected diagnostic code.
 - `corpus/golden/` — pinned outputs (hashes, printed forms, signatures).
 - Every task that adds observable behavior grows the corpus in the same PR.

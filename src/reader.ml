@@ -1,4 +1,4 @@
-(** Bootstrap `.wft` reader (plan W1.2): s-expression-encoded triples.
+(** Bootstrap `.jqd` reader (plan W1.2): s-expression-encoded triples.
 
     Notation, pinned:
     {v

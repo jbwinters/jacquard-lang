@@ -15,7 +15,7 @@ let list entries =
 let categorical entries = Printf.sprintf "(app (var categorical) %s)" (list entries)
 
 let model_state (store, _ctx) src =
-  match Reader.parse_one ~file:"gauntlet-model.wft" src with
+  match Reader.parse_one ~file:"gauntlet-model.jqd" src with
   | Error ds -> Eval_support.fail_diags "parse" ds
   | Ok f -> (
       match Kernel.expr_of_form f with

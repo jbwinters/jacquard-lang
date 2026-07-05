@@ -153,7 +153,7 @@ let corpus_tops () =
   List.concat_map
     (fun file ->
       resolved_tops ~what:file (Corpus_support.read_file (Filename.concat valid_dir file)))
-    (Corpus_support.wft_files valid_dir)
+    (Corpus_support.jqd_files valid_dir)
 
 let prop_alpha_renaming =
   QCheck.Test.make ~count:50 ~name:"alpha-renaming locals never changes a hash"
@@ -195,7 +195,7 @@ let test_meta_mutation_never_changes_hash () =
                 (Printf.sprintf "%s: meta perturbation preserved hash" file)
                 true (Hash.equal a b))
             original perturbed)
-    (Corpus_support.wft_files valid_dir)
+    (Corpus_support.jqd_files valid_dir)
 
 (* --- group order: permuting members never changes the group hash --- *)
 
@@ -366,7 +366,7 @@ let test_derived_hashes_distinct () =
 (* the internal groupref marker only hashes inside a defterm group, in range *)
 let test_groupref_gated () =
   let top s =
-    match Kernel.of_form (Result.get_ok (Reader.parse_one ~file:"g.wft" s)) with
+    match Kernel.of_form (Result.get_ok (Reader.parse_one ~file:"g.jqd" s)) with
     | Ok t -> t
     | Error _ -> Alcotest.fail "validation failed"
   in
@@ -382,7 +382,7 @@ let test_groupref_gated () =
 
 let test_unresolved_rejected () =
   let top s =
-    match Kernel.of_form (Result.get_ok (Reader.parse_one ~file:"u.wft" s)) with
+    match Kernel.of_form (Result.get_ok (Reader.parse_one ~file:"u.jqd" s)) with
     | Ok t -> t
     | Error _ -> Alcotest.fail "validation failed"
   in

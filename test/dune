@@ -34,10 +34,10 @@
   (:standard \ corpus_support gen_goldens gen_prelude_goldens gen_sig_goldens gen_diag_goldens gen_freeze_goldens))
  (libraries jacquard corpus_support alcotest fmt qcheck-core qcheck-alcotest unix str)
  (deps
-  (glob_files_rec ../corpus/*.wft)
+  (glob_files_rec ../corpus/*.jqd)
   (glob_files_rec ../corpus/*.expect)
   (glob_files_rec ../corpus/*.golden)
-  (glob_files_rec ../prelude/*.wft)
+  (glob_files_rec ../prelude/*.jqd)
   (glob_files ../src/*.ml)
   (glob_files ../bin/*.ml)
   ../docs/errors.md))

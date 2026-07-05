@@ -1,4 +1,4 @@
-(** Canonical printer for bootstrap `.wft` notation (plan W1.2).
+(** Canonical printer for bootstrap `.jqd` notation (plan W1.2).
 
     Formatting is deterministic: a form whose arguments are all scalars prints on one line; a form
     with any form/group argument puts every argument on its own line, indented two spaces, printed
@@ -88,7 +88,7 @@ let print (f : Form.t) =
     let lines = List.map (fun a -> "  " ^ inline_arg a) f.Form.args in
     open_line ^ "\n" ^ String.concat "\n" lines ^ ")"
 
-(** [print_all forms] renders a whole `.wft` file: forms separated by a blank line, trailing
+(** [print_all forms] renders a whole `.jqd` file: forms separated by a blank line, trailing
     newline. *)
 let print_all (forms : Form.t list) = String.concat "\n\n" (List.map print forms) ^ "\n"
 
@@ -112,7 +112,7 @@ let rec has_trivia_deep (f : Form.t) =
   || trivia_lines f.Form.meta Meta.key_trivia_eof <> []
   || List.exists (function Form.F g -> has_trivia_deep g | _ -> false) f.Form.args
 
-(** [format_all forms] renders a whole `.wft` file with comments preserved (leading lines before
+(** [format_all forms] renders a whole `.jqd` file with comments preserved (leading lines before
     their form, same-line trailing after it, inner-trailing before the closing paren). Layout
     follows the canonical printer, except that any subtree carrying trivia is expanded line-per-form
     so its comments have a line to live on. Idempotent (golden- and property-tested); the canonical

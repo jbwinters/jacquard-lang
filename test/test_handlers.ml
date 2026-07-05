@@ -114,7 +114,7 @@ let test_abort_short_circuits () =
           let d = Result.get_ok (Resolve.resolve_decl h.Eval_support.names d) in
           ignore (Result.get_ok (Store.put_decl h.Eval_support.store d))
       | _ -> Alcotest.failf "%s should hold one decl" file)
-    [ "safe-div.wft"; "to-option.wft" ];
+    [ "safe-div.jqd"; "to-option.jqd" ];
   Alcotest.(check string)
     "safe-div 10 2" "some(5)"
     (Value.show

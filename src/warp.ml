@@ -61,7 +61,7 @@ let discover (store : Store.t) (cctx : Check.ctx) : discovered list =
 let value_of ctx (h : Hash.t) : (Value.t, Runtime_err.t) result =
   Eval.run_expr ctx { Kernel.it = Kernel.Ref (h, Kernel.Term); meta = Meta.empty }
 
-(* decompose a runtime report; the shape is pinned by prelude/15-warp.wft *)
+(* decompose a runtime report; the shape is pinned by prelude/15-warp.jqd *)
 let verdict_of_report (v : Value.t) : (verdict, string) result =
   let rec entries acc = function
     | Value.VCon { name = "nil"; _ } -> Ok (List.rev acc)
@@ -527,7 +527,7 @@ let cache_lookup ~cache_dir key : (string * verdict * string option * Hash.t lis
   match cache_dir with
   | None -> None
   | Some dir -> (
-      let path = Filename.concat dir (Hash.to_hex (Hash.of_string key) ^ ".wft") in
+      let path = Filename.concat dir (Hash.to_hex (Hash.of_string key) ^ ".jqd") in
       match read_file path with
       | exception Sys_error _ -> None (* absent or unreadable: rerun *)
       | src -> (
@@ -544,7 +544,7 @@ let cache_store ~cache_dir key outcomes : unit =
   | Some dir -> (
       try
         if not (Sys.file_exists dir) then Sys.mkdir dir 0o755;
-        let path = Filename.concat dir (Hash.to_hex (Hash.of_string key) ^ ".wft") in
+        let path = Filename.concat dir (Hash.to_hex (Hash.of_string key) ^ ".jqd") in
         let oc = open_out_bin path in
         output_string oc (Printer.print (entry_form ~key ~outcomes) ^ "\n");
         close_out oc

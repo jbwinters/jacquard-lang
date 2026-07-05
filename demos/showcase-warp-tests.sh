@@ -5,7 +5,7 @@ set -eu
 
 JACQUARD="${JACQUARD:-dune exec jacquard --}"
 here="$(dirname "$0")"
-tmp="$(mktemp "${TMPDIR:-/tmp}/jacquard-demo-tests.XXXXXX.wft")"
+tmp="$(mktemp "${TMPDIR:-/tmp}/jacquard-demo-tests.XXXXXX.jqd")"
 trap 'rm -f "$tmp"' EXIT
 
 strip_driver() {
@@ -13,9 +13,9 @@ strip_driver() {
   printf '\n' >> "$tmp"
 }
 
-strip_driver "$here/clarifying-question.wft"
-strip_driver "$here/agent-dream.wft"
-strip_driver "$here/ambiguity-pipeline.wft"
-cat "$here/showcase-warp-tests.wft" >> "$tmp"
+strip_driver "$here/clarifying-question.jqd"
+strip_driver "$here/agent-dream.jqd"
+strip_driver "$here/ambiguity-pipeline.jqd"
+cat "$here/showcase-warp-tests.jqd" >> "$tmp"
 
 $JACQUARD test "$tmp" --seed 7 --no-cache

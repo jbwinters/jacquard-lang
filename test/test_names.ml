@@ -29,19 +29,19 @@ let test_grammar_rejects () =
     ]
 
 let test_reader_parses_new_symbols () =
-  (match Reader.parse_one ~file:"n.wft" "(app (var list.map) (var xs.tail!))" with
+  (match Reader.parse_one ~file:"n.jqd" "(app (var list.map) (var xs.tail!))" with
   | Ok { Form.args = [ Form.F { Form.args = [ Form.Sym "list.map" ]; _ }; _ ]; _ } -> ()
   | _ -> Alcotest.fail "dotted symbols should parse as single atoms");
   (* heads keep the strict grammar *)
-  match Reader.parse_one ~file:"n.wft" "(list.map (lit 1))" with
+  match Reader.parse_one ~file:"n.jqd" "(list.map (lit 1))" with
   | Error [ d ] -> Alcotest.(check string) "dotted head rejected" "E0107" d.Diag.code
   | _ -> Alcotest.fail "a dotted head must be rejected"
 
 let test_printer_roundtrip_new_symbols () =
   let src = "(app (var list.map) (var pred?) (var force!))" in
-  let f = Result.get_ok (Reader.parse_one ~file:"n.wft" src) in
+  let f = Result.get_ok (Reader.parse_one ~file:"n.jqd" src) in
   let printed = Printer.print f in
-  let f' = Result.get_ok (Reader.parse_one ~file:"n2.wft" printed) in
+  let f' = Result.get_ok (Reader.parse_one ~file:"n2.jqd" printed) in
   Alcotest.(check bool) "roundtrip" true (Form.equal_ignoring_meta f f')
 
 (* --- kind-aware index --- *)
@@ -66,7 +66,7 @@ let test_effect_and_op_share_a_name () =
   Alcotest.(check bool)
     "effect present" true
     (Store.lookup_kind store "signal" Resolve.KEffect <> None);
-  (* names.wft round-trips duplicates through reopen *)
+  (* names.jqd round-trips duplicates through reopen *)
   let store2 =
     match Store.open_store store.Store.root with
     | Ok s -> s
@@ -81,7 +81,7 @@ let test_kind_directed_resolution () =
   (* an eref position picks the EFFECT binding; a var picks the OP (value precedence) *)
   let e =
     match
-      Reader.parse_one ~file:"k.wft"
+      Reader.parse_one ~file:"k.jqd"
         "(ann (var any-v) (tarrow () (row (eref signal)) (tref any-t)))"
     with
     | Ok f -> Result.get_ok (Kernel.expr_of_form f)
@@ -91,7 +91,7 @@ let test_kind_directed_resolution () =
   | Ok _ -> ()
   | Error ds -> Eval_support.fail_diags "eref position resolves the effect" ds);
   let v =
-    match Reader.parse_one ~file:"k.wft" "(app (var signal))" with
+    match Reader.parse_one ~file:"k.jqd" "(app (var signal))" with
     | Ok f -> Result.get_ok (Kernel.expr_of_form f)
     | Error _ -> Alcotest.fail "parse"
   in
@@ -106,7 +106,7 @@ let test_value_precedence_and_warning () =
   put store "(deftype wrap () (con boxed (field (tref wrap))))";
   put store "(defterm ((binding boxed () (lit 1))))";
   let e =
-    match Reader.parse_one ~file:"w.wft" "(var boxed)" with
+    match Reader.parse_one ~file:"w.jqd" "(var boxed)" with
     | Ok f -> Result.get_ok (Kernel.expr_of_form f)
     | Error _ -> Alcotest.fail "parse"
   in

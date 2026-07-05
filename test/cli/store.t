@@ -1,26 +1,26 @@
 jacquard store: persistent store operations (W2.7). No implicit prelude here.
 
-  $ cat > color.wft <<'EOF'
+  $ cat > color.jqd <<'EOF'
   > (deftype color () (con red) (con green))
   > EOF
-  $ jacquard store add mystore color.wft
+  $ jacquard store add mystore color.jqd
   ok
   $ ls mystore/objects | wc -l | tr -d ' '
   1
 
 Bind an extra name to an existing hash:
 
-  $ H=$(grep -o '#[0-9a-f]*' mystore/names.wft | head -n 1 | tr -d '#')
+  $ H=$(grep -o '#[0-9a-f]*' mystore/names.jqd | head -n 1 | tr -d '#')
   $ jacquard store name mystore crimson $H
-  $ grep -c crimson mystore/names.wft
+  $ grep -c crimson mystore/names.jqd
   1
 
-Rename touches only names.wft:
+Rename touches only names.jqd:
 
-  $ cp mystore/objects/* before.wft
+  $ cp mystore/objects/* before.jqd
   $ jacquard store rename mystore color colour
-  $ cmp before.wft mystore/objects/*
-  $ grep -c colour mystore/names.wft
+  $ cmp before.jqd mystore/objects/*
+  $ grep -c colour mystore/names.jqd
   1
 
 Failure paths:
@@ -37,29 +37,29 @@ Failure paths:
 
 A defterm group's whole hash is not nameable (name its members):
 
-  $ cat > grp.wft <<'EOF'
+  $ cat > grp.jqd <<'EOF'
   > (defterm ((binding solo () (lit 1))))
   > EOF
-  $ jacquard store add mystore grp.wft
+  $ jacquard store add mystore grp.jqd
   ok
-  $ G=$(ls mystore/objects | grep -v "$(grep -o '#[0-9a-f]*' mystore/names.wft | head -n 1 | tr -d '#')" | head -n 1 | sed 's/\.wft//')
+  $ G=$(ls mystore/objects | grep -v "$(grep -o '#[0-9a-f]*' mystore/names.jqd | head -n 1 | tr -d '#')" | head -n 1 | sed 's/\.jqd//')
   $ jacquard store name mystore the-group $G
   error[E0604]: cannot name a defterm group hash; name its members
   [1]
-  $ cat > expr.wft <<'EOF'
+  $ cat > expr.jqd <<'EOF'
   > (lit 1)
   > EOF
-  $ jacquard store add mystore expr.wft
+  $ jacquard store add mystore expr.jqd
   error[E0704]: store add expects declarations only
   [1]
 
 Origin provenance (PV.1): stamped at add, displayed by diff, absent cleanly.
 
-  $ printf '(defterm ((binding fav () (lit 7))))\n' > fav.wft
-  $ printf '(defterm ((binding fav () (lit 8))))\n' > fav2.wft
-  $ jacquard store add prov-a fav.wft
+  $ printf '(defterm ((binding fav () (lit 7))))\n' > fav.jqd
+  $ printf '(defterm ((binding fav () (lit 8))))\n' > fav2.jqd
+  $ jacquard store add prov-a fav.jqd
   ok
-  $ jacquard store add prov-b fav2.wft --origin agent:jacquard-demo-5
+  $ jacquard store add prov-b fav2.jqd --origin agent:jacquard-demo-5
   ok
   $ jacquard diff prov-a prov-b | head -1
   changed  fav [agent:jacquard-demo-5]

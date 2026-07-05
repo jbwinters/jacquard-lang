@@ -1,6 +1,6 @@
 ; Codecs, record/replay, and scripted worlds (W6.6, decision D13: codecs ship
 ; for ring 3 world effects only). The homoiconic wire format is the point: a
-; fixture is readable .wft, diffable by the semantic differ, printable by the
+; fixture is readable .jqd, diffable by the semantic differ, printable by the
 ; formatter — all for free. Encoding builds quote payloads via code.form;
 ; decoding is match over code.un-form / code.to-*.
 (deftype codec ((tvar a))

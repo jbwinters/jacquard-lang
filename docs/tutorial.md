@@ -6,17 +6,17 @@ repo root; `jacquard` is `dune exec jacquard --`.
 
 ## 1. A literal
 
-`corpus/valid/lit-int.wft` — the whole language is `(head arg ...)` triples:
+`corpus/valid/lit-int.jqd` — the whole language is `(head arg ...)` triples:
 
 ```lisp
 (lit 1)
 ```
 
-Run it: `jacquard run corpus/valid/lit-int.wft` prints `1`.
+Run it: `jacquard run corpus/valid/lit-int.jqd` prints `1`.
 
 ## 2. Application
 
-`corpus/valid/app-add.wft`:
+`corpus/valid/app-add.jqd`:
 
 ```lisp
 (app (var add) (lit 1) (lit 2))
@@ -26,19 +26,19 @@ Calls are uncurried (decision D5): `add` takes exactly two arguments. `jacquard 
 
 ## 3. Functions
 
-`corpus/sigs/01-identity.wft`:
+`corpus/sigs/01-identity.jqd`:
 
 ```lisp
 (lam ((pvar x)) (var x))
 ```
 
-`jacquard check corpus/sigs/01-identity.wft --print-sigs` prints the elaborated signature —
+`jacquard check corpus/sigs/01-identity.jqd --print-sigs` prints the elaborated signature —
 `forall a. (a) ->{} a`. The empty row `{}` is the whole story: this function can do
 nothing but compute.
 
 ## 4. Recursion via defterm
 
-`corpus/valid/fact.wft` — factorial as a content-addressed declaration:
+`corpus/valid/fact.jqd` — factorial as a content-addressed declaration:
 
 ```lisp
 (defterm ((binding fact ()
@@ -51,11 +51,11 @@ nothing but compute.
 ```
 
 Self-reference resolves to a group-local marker, so the definition's hash is stable under
-renaming. `demos/m1-fact.wft` adds `(app (var fact) (lit 5))`; `jacquard run` prints `120`.
+renaming. `demos/m1-fact.jqd` adds `(app (var fact) (lit 5))`; `jacquard run` prints `120`.
 
 ## 5. Pattern matching, no if
 
-`corpus/valid/match-bool.wft` — `bool` is a library type and `if` is just sugar the kernel
+`corpus/valid/match-bool.jqd` — `bool` is a library type and `if` is just sugar the kernel
 does not have:
 
 ```lisp
@@ -69,7 +69,7 @@ Delete a clause and `jacquard check` rejects the match with the missing witness 
 
 ## 6. Effects and handlers
 
-`corpus/sigs/09-hostile.wft` — aborting is an effect, handled to `option`:
+`corpus/sigs/09-hostile.jqd` — aborting is an effect, handled to `option`:
 
 ```lisp
 (defterm ((binding safe-div ()
@@ -85,7 +85,7 @@ shows row polymorphism removing it.
 
 ## 7. Multi-shot handlers
 
-`demos/m1-choose.wft` — one `choose` op, resumed twice by its handler, collecting both
+`demos/m1-choose.jqd` — one `choose` op, resumed twice by its handler, collecting both
 branches:
 
 ```lisp
@@ -98,15 +98,15 @@ branches:
     (app (var append) (app (var k) (var true)) (app (var k) (var false)))))
 ```
 
-`jacquard run demos/m1-choose.wft` prints `cons(1, cons(2, nil))`.
+`jacquard run demos/m1-choose.jqd` prints `cons(1, cons(2, nil))`.
 
 ## 8. Capability grants
 
-`demos/m1-gated.wft` — `eval` is a library effect; nothing runs code without the grant:
+`demos/m1-gated.jqd` — `eval` is a library effect; nothing runs code without the grant:
 
 ```
-$ jacquard run demos/m1-gated.wft            # E0814 refusal, exit 3
-$ jacquard run demos/m1-gated.wft --allow eval
+$ jacquard run demos/m1-gated.jqd            # E0814 refusal, exit 3
+$ jacquard run demos/m1-gated.jqd --allow eval
 42
 ```
 
@@ -115,14 +115,14 @@ manifest; `jacquard check FILE --manifest net,console` audits it without running
 
 ## 9. Probabilistic programming
 
-`demos/m3-two-coins.wft` — sample/observe are ordinary ops of the `dist` effect; inference
+`demos/m3-two-coins.jqd` — sample/observe are ordinary ops of the `dist` effect; inference
 algorithms are handlers:
 
 ```
-$ jacquard infer enumerate demos/m3-two-coins.wft
+$ jacquard infer enumerate demos/m3-two-coins.jqd
 0.666667  true
 0.333333  false
-$ jacquard infer lw demos/m3-two-coins.wft --seed 42 --samples 100000
+$ jacquard infer lw demos/m3-two-coins.jqd --seed 42 --samples 100000
 0.667898  true
 0.332102  false
 ```
@@ -135,10 +135,10 @@ A store is a content-addressed map from hashes to declarations; names are metada
 self-contained declaration, rename it (object files untouched), and diff semantically:
 
 ```
-$ printf '(deftype color () (con red) (con green))\n' > color.wft
-$ jacquard store add lib-v1 color.wft
+$ printf '(deftype color () (con red) (con green))\n' > color.jqd
+$ jacquard store add lib-v1 color.jqd
 ok
-$ jacquard store add lib-v2 color.wft
+$ jacquard store add lib-v2 color.jqd
 ok
 $ jacquard store rename lib-v2 color colour
 $ jacquard diff lib-v1 lib-v2

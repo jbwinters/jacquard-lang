@@ -6,4 +6,4 @@ set -u
 JACQUARD="${JACQUARD:-dune exec jacquard --}"
 here="$(dirname "$0")"
 
-$JACQUARD run "$here/clarifying-question.wft"
+$JACQUARD run "$here/clarifying-question.jqd"

@@ -1,7 +1,7 @@
 ; Warp tests for the product-shaped demos.
 ;
-; This file expects the demo definitions from clarifying-question.wft,
-; agent-dream.wft, and ambiguity-pipeline.wft to be loaded before it. The shell
+; This file expects the demo definitions from clarifying-question.jqd,
+; agent-dream.jqd, and ambiguity-pipeline.jqd to be loaded before it. The shell
 ; runner strips each demo at `; --- demo driver ---` so the tests reuse the demo
 ; definitions without executing their top-level output expressions.
 

@@ -1,6 +1,6 @@
 ---
 name: jacquard
-description: Read, write, run, and test Jacquard programs — the content-addressed, effect-typed research language implemented in this repo. Use when writing or reviewing .wft files, adding demos or Warp tests, running the jacquard CLI, debugging effect rows / capability manifests / handlers / Dist models, or touching the OCaml implementation in src/.
+description: Read, write, run, and test Jacquard programs — the content-addressed, effect-typed research language implemented in this repo. Use when writing or reviewing .jqd files, adding demos or Warp tests, running the jacquard CLI, debugging effect rows / capability manifests / handlers / Dist models, or touching the OCaml implementation in src/.
 ---
 
 # Jacquard: the language, fast
@@ -40,14 +40,14 @@ opam exec -- dune fmt             # then: git diff --exit-code (the dev gate)
 `jacquard` during development is `dune exec jacquard --`. The surface:
 
 ```bash
-jacquard run FILE.wft [--allow fs|net|console|clock|eval|dist|infer]... [--dry-run]
-jacquard check FILE.wft [--print-sigs] [--manifest fs,net,console]
+jacquard run FILE.jqd [--allow fs|net|console|clock|eval|dist|infer]... [--dry-run]
+jacquard check FILE.jqd [--print-sigs] [--manifest fs,net,console]
 jacquard test FILES... [--seed N] [--samples N] [--exhaustive] [--budget N]
                    [--cache-dir DIR | --no-cache] [--allow EFFECT]... [--coverage]
-jacquard infer enumerate MODEL.wft            # exact posterior (multi-shot enumeration)
-jacquard infer lw MODEL.wft --seed 42 --samples 100000   # likelihood weighting
-jacquard hash FILE.wft                        # canonical HASH_V0 hashes
-jacquard fmt FILE.wft [--write]               # canonical formatting, comments kept
+jacquard infer enumerate MODEL.jqd            # exact posterior (multi-shot enumeration)
+jacquard infer lw MODEL.jqd --seed 42 --samples 100000   # likelihood weighting
+jacquard hash FILE.jqd                        # canonical HASH_V0 hashes
+jacquard fmt FILE.jqd [--write]               # canonical formatting, comments kept
 jacquard store add|rename ... ; jacquard diff STORE_A STORE_B   # semantic diff
 jacquard dist-diff MODEL_A MODEL_B            # posterior divergence between models
 jacquard replay LOG PROGRAM [--to N] [--fork 'N=(response 503 "down")']
@@ -59,7 +59,7 @@ expression in order. Exit codes for `run`: ungranted-effect refusal (E0814)
 
 ## Physical syntax: one shape
 
-Every form is a triple `(head, meta, args)`. Bootstrap `.wft` notation is
+Every form is a triple `(head, meta, args)`. Bootstrap `.jqd` notation is
 s-expressions: heads are lowercase `[a-z][a-z0-9-]*`; args are forms or
 scalars (int, real, text, symbol, hash); `;` starts a comment; a parenthesized
 list with no head symbol (e.g. a `lam` parameter list) parses as a `group`
@@ -124,7 +124,7 @@ Everything below is real, runnable style (compare `demos/` and `prelude/`).
 ```
 
 Multi-shot is load-bearing: the enumeration handler resumes once per element
-of a distribution's support (see `demos/m1-choose.wft` for the two-line
+of a distribution's support (see `demos/m1-choose.jqd` for the two-line
 version). Tuples: `(tuple)` is unit; `(tuple a b)` pairs. Pattern `(ptuple ...)`
 destructures them; `(pcon mk-pair (pvar x) (pvar p))` destructures constructors.
 
@@ -151,7 +151,7 @@ destructures them; `(pcon mk-pair (pvar x) (pvar p))` destructures constructors.
 
 ## Dist: probability as an effect
 
-One type, one effect, zero kernel forms (`prelude/06-dist.wft`):
+One type, one effect, zero kernel forms (`prelude/06-dist.jqd`):
 
 ```lisp
 (deftype distribution ((tvar a))
@@ -171,8 +171,8 @@ One type, one effect, zero kernel forms (`prelude/06-dist.wft`):
 - Merge equal outcomes explicitly: `dist.tally table (app (var mk-eq) (var code.eq?))`
   — tallying asks for its `Eq` honestly.
 - Conditioning idiom: `observe (bernoulli w) true` where `w` is 1.0/0.0 —
-  impossible branches prune to mass zero (see `demos/synthesis.wft`,
-  `demos/repair.wft`).
+  impossible branches prune to mass zero (see `demos/synthesis.jqd`,
+  `demos/repair.jqd`).
 - `categorical` weights are **relative**; enumeration normalizes at the end.
 - Gotchas: all-branches-impossible yields `+nan.0` weights in-language (the
   CLI's `jacquard infer enumerate` reports E0901 instead); `observe` reaching the
@@ -186,7 +186,7 @@ One type, one effect, zero kernel forms (`prelude/06-dist.wft`):
   `var`, `lit`, `pvar` — return `none`), `code.of-int/to-int`,
   `code.of-text/to-text`, `code.eq?` (metadata-erased structural equality),
   `code.diff` (smallest disagreeing subtrees, as text). A full single-edit
-  AST mutation walker in pure Jacquard is in `demos/repair.wft`.
+  AST mutation walker in pure Jacquard is in `demos/repair.jqd`.
 - Running constructed code is the **eval capability**:
   `(app (var eval-code) c)` needs `--allow eval`; it validates, resolves
   against the store, and runs — at root authority (caveat above).
@@ -196,7 +196,7 @@ One type, one effect, zero kernel forms (`prelude/06-dist.wft`):
 
 ## The prelude (stdlib), in rings
 
-`prelude/*.wft` load in filename order; `prelude/rings.manifest` maps every
+`prelude/*.jqd` load in filename order; `prelude/rings.manifest` maps every
 name to its ring. Ring rule: a ring references only itself and below.
 
 - **Ring 0 axioms**: `bool option result list ordering`, dictionaries
@@ -224,7 +224,7 @@ code.
 
 ## Warp: the testing story
 
-Read `docs/warp-testing.md`; the API is `prelude/15-warp.wft` + `16-gen.wft`.
+Read `docs/warp-testing.md`; the API is `prelude/15-warp.jqd` + `16-gen.jqd`.
 
 - One effect: `check` (`check : (bool, text) -> ()` soft, `fail` hard).
   Assertions: `check.true`, `check.eq actual expected EQ SHOW label`,

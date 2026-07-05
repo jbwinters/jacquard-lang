@@ -4,17 +4,17 @@ The tutorial's command lines stay truthful (W5.4: every example runs in CI).
 
 Examples 1 and 2 (literals and application):
 
-  $ jacquard run ../../corpus/valid/lit-int.wft
+  $ jacquard run ../../corpus/valid/lit-int.jqd
   1
-  $ jacquard run ../../corpus/valid/app-add.wft
+  $ jacquard run ../../corpus/valid/app-add.jqd
   3
 
 Example 10 (content addressing):
 
-  $ printf '(deftype color () (con red) (con green))\n' > color.wft
-  $ jacquard store add lib-v1 color.wft
+  $ printf '(deftype color () (con red) (con green))\n' > color.jqd
+  $ jacquard store add lib-v1 color.jqd
   ok
-  $ jacquard store add lib-v2 color.wft
+  $ jacquard store add lib-v2 color.jqd
   ok
   $ jacquard store rename lib-v2 color colour
   $ jacquard diff lib-v1 lib-v2

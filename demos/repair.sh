@@ -6,21 +6,21 @@
 set -u
 JACQUARD="${JACQUARD:-dune exec jacquard --}"
 here="$(dirname "$0")"
-tmp="$(mktemp "${TMPDIR:-/tmp}/jacquard-repair-tests.XXXXXX.wft")"
+tmp="$(mktemp "${TMPDIR:-/tmp}/jacquard-repair-tests.XXXXXX.jqd")"
 trap 'rm -f "$tmp"' EXIT
 
 echo "== the rows announce the authority: mutation is pure, running candidates is eval =="
-$JACQUARD check "$here/repair.wft" --print-sigs
+$JACQUARD check "$here/repair.jqd" --print-sigs
 
 echo "== without the grant the pure prefix runs; the first posterior refuses =="
-$JACQUARD run "$here/repair.wft" 2>&1
+$JACQUARD run "$here/repair.jqd" 2>&1
 echo "exit code: $?"
 
 echo "== the granted run: mutant count, posteriors, and the MAP patch =="
-$JACQUARD run "$here/repair.wft" --allow eval
+$JACQUARD run "$here/repair.jqd" --allow eval
 
 echo "== Warp tests over the pure machinery =="
-awk '/^; --- demo driver ---$/ { exit } { print }' "$here/repair.wft" > "$tmp"
+awk '/^; --- demo driver ---$/ { exit } { print }' "$here/repair.jqd" > "$tmp"
 printf '\n' >> "$tmp"
-cat "$here/repair-warp-tests.wft" >> "$tmp"
+cat "$here/repair-warp-tests.jqd" >> "$tmp"
 $JACQUARD test "$tmp" --seed 7 --no-cache

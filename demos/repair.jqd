@@ -1,6 +1,6 @@
 ; PROGRAM REPAIR AS BAYESIAN INFERENCE.
 ;
-; The sequel to synthesis.wft. There the candidate programs were canned; here
+; The sequel to synthesis.jqd. There the candidate programs were canned; here
 ; they are COMPUTED from the shipped program by walking its quoted AST —
 ; code.un-form to descend, code.form to splice a mutant back in. A bug report
 ; is an observation; the posterior over single-edit patches is the diagnosis;

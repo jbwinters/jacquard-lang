@@ -3,7 +3,7 @@ open Jacquard
 let form = Alcotest.testable Form.pp Form.equal_ignoring_meta
 
 let parse_ok ~what s =
-  match Reader.parse_string ~file:"t.wft" s with
+  match Reader.parse_string ~file:"t.jqd" s with
   | Ok fs -> fs
   | Error ds ->
       Alcotest.failf "%s: parse failed: %s" what (String.concat "; " (List.map Diag.to_string ds))
@@ -34,7 +34,7 @@ let test_real_reprs () =
 
 let roundtrip ~what (f : Form.t) =
   let printed = Printer.print f in
-  match Reader.parse_one ~file:"rt.wft" printed with
+  match Reader.parse_one ~file:"rt.jqd" printed with
   | Error ds ->
       Alcotest.failf "%s: printed form does not reparse:\n%s\n%s" what printed
         (String.concat "; " (List.map Diag.to_string ds))
@@ -49,7 +49,7 @@ let corpus_dir = "../corpus/valid"
 let test_roundtrip_corpus () =
   let files =
     Sys.readdir corpus_dir |> Array.to_list
-    |> List.filter (fun f -> Filename.check_suffix f ".wft")
+    |> List.filter (fun f -> Filename.check_suffix f ".jqd")
     |> List.sort String.compare
   in
   Alcotest.(check bool) "corpus has >= 10 valid files" true (List.length files >= 10);
@@ -100,7 +100,7 @@ let gen_printable_form : Form.t QCheck.Gen.t =
 let prop_roundtrip_print_parse =
   QCheck.Test.make ~count:1000 ~name:"prop_roundtrip_print_parse"
     (QCheck.make gen_printable_form ~print:Printer.print) (fun f ->
-      match Reader.parse_one ~file:"rt.wft" (Printer.print f) with
+      match Reader.parse_one ~file:"rt.jqd" (Printer.print f) with
       | Ok f' -> Form.equal_ignoring_meta f f'
       | Error _ -> false)
 

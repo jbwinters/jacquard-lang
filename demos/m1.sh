@@ -7,14 +7,14 @@ JACQUARD="${JACQUARD:-dune exec jacquard --}"
 here="$(dirname "$0")"
 
 echo "== factorial =="
-$JACQUARD run "$here/m1-fact.wft"
+$JACQUARD run "$here/m1-fact.jqd"
 
 echo "== multi-shot choose =="
-$JACQUARD run "$here/m1-choose.wft"
+$JACQUARD run "$here/m1-choose.jqd"
 
 echo "== gated eval, WITHOUT the grant (expected: E0814 capability refusal, exit 3) =="
-$JACQUARD run "$here/m1-gated.wft"
+$JACQUARD run "$here/m1-gated.jqd"
 echo "exit code: $?"
 
 echo "== gated eval, WITH --allow eval =="
-$JACQUARD run "$here/m1-gated.wft" --allow eval
+$JACQUARD run "$here/m1-gated.jqd" --allow eval

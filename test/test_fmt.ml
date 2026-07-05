@@ -38,7 +38,7 @@ let test_roundtrip_preserves_trivia () =
             (Printf.sprintf "%s: trivia identical" file)
             (trivia_fp a) (trivia_fp b))
         forms forms')
-    (Corpus_support.wft_files valid_dir)
+    (Corpus_support.jqd_files valid_dir)
 
 let test_idempotent () =
   List.iter
@@ -47,7 +47,7 @@ let test_idempotent () =
       let once = Printer.format_all (parse_ok ~what:file src) in
       let twice = Printer.format_all (parse_ok ~what:file once) in
       Alcotest.(check string) (file ^ ": formatting is idempotent") once twice)
-    (Corpus_support.wft_files valid_dir)
+    (Corpus_support.jqd_files valid_dir)
 
 let test_comments_survive_golden () =
   let src =

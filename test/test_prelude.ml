@@ -61,8 +61,8 @@ let test_bool_functions () =
 (* the plan's map (add 1) [1,2,3] program, straight from the corpus *)
 let test_map_program_from_corpus () =
   let store, ctx = Eval_support.make_prelude_ctx () in
-  let src = Corpus_support.read_file "../corpus/valid/prelude-map.wft" in
-  match Reader.parse_string ~file:"prelude-map.wft" src with
+  let src = Corpus_support.read_file "../corpus/valid/prelude-map.jqd" in
+  match Reader.parse_string ~file:"prelude-map.jqd" src with
   | Ok [ f ] -> (
       let e = Result.get_ok (Kernel.expr_of_form f) in
       match Resolve.resolve_expr (Store.names_view store) e with
@@ -72,7 +72,7 @@ let test_map_program_from_corpus () =
           | Ok v ->
               Alcotest.(check string) "mapped list" "cons(2, cons(3, cons(4, nil)))" (Value.show v)
           | Error e -> Alcotest.failf "run failed: %s" (Runtime_err.to_string e)))
-  | _ -> Alcotest.fail "prelude-map.wft should hold one expression"
+  | _ -> Alcotest.fail "prelude-map.jqd should hold one expression"
 
 let test_fold () =
   Alcotest.(check string)

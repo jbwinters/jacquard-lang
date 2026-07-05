@@ -54,7 +54,7 @@ posterior itself needs eval, which Warp's closed {check} row cannot grant.
 The prop lane also proves its property exhaustively over the prior's nine
 support points:
 
-  $ awk '/^; --- demo driver ---$/ { exit } { print }' ../../demos/repair.wft > repair-defs.wft
-  $ cat repair-defs.wft ../../demos/repair-warp-tests.wft > repair-suite.wft
-  $ jacquard test repair-suite.wft --exhaustive --no-cache | grep repair-prior-support
+  $ awk '/^; --- demo driver ---$/ { exit } { print }' ../../demos/repair.jqd > repair-defs.jqd
+  $ cat repair-defs.jqd ../../demos/repair-warp-tests.jqd > repair-suite.jqd
+  $ jacquard test repair-suite.jqd --exhaustive --no-cache | grep repair-prior-support
   PASS repair-prior-support/sampled patches stay one edit away (verified exhaustively (9 cases))

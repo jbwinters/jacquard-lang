@@ -76,8 +76,8 @@ let test_let_rec_knot () =
 
 let test_factorial_from_corpus () =
   let h = Eval_support.make () in
-  let src = Corpus_support.read_file "../corpus/valid/fact.wft" in
-  (match Reader.parse_string ~file:"fact.wft" src with
+  let src = Corpus_support.read_file "../corpus/valid/fact.jqd" in
+  (match Reader.parse_string ~file:"fact.jqd" src with
   | Ok [ f ] -> (
       match Kernel.decl_of_form f with
       | Ok d -> (
@@ -85,7 +85,7 @@ let test_factorial_from_corpus () =
           | Ok d -> ignore (Result.get_ok (Store.put_decl h.Eval_support.store d))
           | Error _ -> Alcotest.fail "fact resolve failed")
       | Error _ -> Alcotest.fail "fact validate failed")
-  | _ -> Alcotest.fail "fact.wft should hold one decl");
+  | _ -> Alcotest.fail "fact.jqd should hold one decl");
   Alcotest.(check string)
     "fact 5" "120"
     (Value.show (Eval_support.eval_ok h "(app (var fact) (lit 5))"));
@@ -163,7 +163,7 @@ let test_unresolved_var_at_runtime () =
   let h = Eval_support.make () in
   (* skip resolution deliberately: a free Var reaching the machine is a runtime error *)
   let e =
-    match Kernel.expr_of_form (Result.get_ok (Reader.parse_one ~file:"u.wft" "(var ghost)")) with
+    match Kernel.expr_of_form (Result.get_ok (Reader.parse_one ~file:"u.jqd" "(var ghost)")) with
     | Ok e -> e
     | Error _ -> Alcotest.fail "validate failed"
   in

@@ -71,7 +71,7 @@ in `src/` and `bin/` appears in this catalog.
 |------|---------|---------|
 | E0601 | unknown hash | `jacquard store name s x 000...0` |
 | E0602 | unknown name | renaming a name that is not bound |
-| E0603 | corrupt store file | hand-edited `names.wft` or object file |
+| E0603 | corrupt store file | hand-edited `names.jqd` or object file |
 | E0604 | unnameable target | naming a defterm group's whole hash |
 | E0605 | invalid name | `jacquard store rename s x "Bad Name"` |
 | E0606 | store directory does not exist | `jacquard diff a /nowhere` |
@@ -119,7 +119,7 @@ in `src/` and `bin/` appears in this catalog.
 
 | code | meaning | example |
 |------|---------|---------|
-| E1001 | expression at top level of a test file | `jacquard test file.wft` where the file ends with `(app (var main))` |
+| E1001 | expression at top level of a test file | `jacquard test file.jqd` where the file ends with `(app (var main))` |
 | E1002 | eval under --dry-run | a program whose row includes `eval` run with `--dry-run` |
 
 ## Appendix: the W5.3 audit (ten message rewrites)
@@ -136,7 +136,7 @@ Before/after wording improvements applied during the audit:
    the operation, and the CLI exit code is distinct (3).
 5. E0814 before: nothing (new) → names the effect, the call-chain endpoint, and the exact
    `--allow` flag to add.
-6. E0605 before: crash (`Bug_unprintable` escaping, truncating names.wft) → after: a clean
+6. E0605 before: crash (`Bug_unprintable` escaping, truncating names.jqd) → after: a clean
    diagnostic stating the name grammar.
 7. E0109 before: "invalid int" → after: names the 63-bit native range and decision D2 in
    the hint.

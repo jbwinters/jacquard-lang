@@ -105,7 +105,7 @@ Done when:
 ### W1.2 Bootstrap notation: reader and printer (M) — needs D3
 
 There is no surface language yet; programs are written directly as s-expression-encoded
-triples, extension `.wft`. Pin the notation exactly:
+triples, extension `.jqd`. Pin the notation exactly:
 
 ```
 form      := ( head arg* )
@@ -137,7 +137,7 @@ Done when:
 - [ ] Reader produces `Form.t` with correct spans; positions verified in tests.
 - [ ] Parse errors report line:col and the offending token; 5 golden error tests.
 - [ ] Round trip: `print (parse s)` reparses to a form equal ignoring meta; property test over corpus.
-- [ ] Corpus gains ≥ 10 valid and ≥ 5 invalid `.wft` files.
+- [ ] Corpus gains ≥ 10 valid and ≥ 5 invalid `.jqd` files.
 
 ### W1.3 Kernel grammar validator and typed AST (M)
 
@@ -208,14 +208,14 @@ Done when:
 
 ### W1.6 Content-addressed store (M)
 
-On-disk layout: `store/objects/<hash>.wft` (canonical printed form) plus
-`store/names.wft` (name-to-hash index, the only mutable file). API: `put_decl`,
+On-disk layout: `store/objects/<hash>.jqd` (canonical printed form) plus
+`store/names.jqd` (name-to-hash index, the only mutable file). API: `put_decl`,
 `get`, `name`, `rename`, `deps` (hashes referenced by a decl), `dependents` (reverse
 index, may be computed).
 
 Done when:
 - [ ] Put/get round trip preserves hash identity.
-- [ ] `rename` changes only `names.wft`; object files byte-identical before and after (test asserts this).
+- [ ] `rename` changes only `names.jqd`; object files byte-identical before and after (test asserts this).
 - [ ] `deps` correct on a 3-decl chain; `dependents` inverse of `deps` (property test on random DAGs).
 
 ### W1.7 Conformance corpus and harness (S, then ongoing)
@@ -330,7 +330,7 @@ Done when:
 
 ### W2.6 Prelude v1 (M) — needs D2
 
-`prelude/` as `.wft` files loaded into a fresh store: `Bool`, `Option`, `List`,
+`prelude/` as `.jqd` files loaded into a fresh store: `Bool`, `Option`, `List`,
 `Ordering` as `deftype`; comparison and arithmetic as `VBuiltin` terms registered under
 hashes; `not`, `and`, `or`, `map`, `fold` written in Jacquard (matches, no `if`, per spec).
 Effects declared: `Eval`, `Abort`, `Console` (print op) for demos.

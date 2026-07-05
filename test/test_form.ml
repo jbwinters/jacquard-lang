@@ -1,7 +1,7 @@
 open Jacquard
 
 let span1 =
-  Span.make ~file:"t.wft"
+  Span.make ~file:"t.jqd"
     ~start_pos:{ Span.line = 1; col = 1; offset = 0 }
     ~end_pos:{ Span.line = 1; col = 8; offset = 7 }
 

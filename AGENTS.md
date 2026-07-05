@@ -78,7 +78,7 @@ When adding valid corpus files, regenerate the golden hashes with
   feature work.
 - Start from existing tests and docs. Jacquard behavior is pinned by cram
   transcripts, Alcotest/QCheck suites, corpus goldens, demos, and release docs.
-- Keep behavior tied to the 27 kernel forms in `docs/ast.md`; do not add surface syntax beyond the bootstrap `.wft` notation in W1.2.
+- Keep behavior tied to the 27 kernel forms in `docs/ast.md`; do not add surface syntax beyond the bootstrap `.jqd` notation in W1.2.
 - Do not add out-of-scope features from the plan guardrails: performance work, macros beyond quote/unquote/gated eval, records, typed staging, continuous distributions, package management, self-hosting, or ownership/borrowing.
 - Use `dune`, `alcotest`, and `qcheck` for build and tests.
 - Use `digestif` for the initial hash implementation unless the owner changes D1.
@@ -98,13 +98,13 @@ When adding valid corpus files, regenerate the golden hashes with
 - Release evidence: `docs/release/0.1/`.
 - Kernel and hashing rules: `docs/ast.md`, `spec/serialization.md`,
   `src/canon.ml`.
-- Effects and capabilities: `prelude/03-effects.wft`, `src/check.ml`,
+- Effects and capabilities: `prelude/03-effects.jqd`, `src/check.ml`,
   `src/prelude.ml`.
 - Handlers and evaluation: `src/eval.ml`, `test/test_handlers.ml`,
   `test/test_gauntlet_handlers.ml`.
-- Dist and inference: `prelude/06-dist.wft`, `prelude/13-dist-lib.wft`,
+- Dist and inference: `prelude/06-dist.jqd`, `prelude/13-dist-lib.jqd`,
   `src/infer_dist.ml`, `test/test_infer.ml`.
-- Warp: `prelude/15-warp.wft`, `prelude/16-gen.wft`, `src/warp.ml`,
+- Warp: `prelude/15-warp.jqd`, `prelude/16-gen.jqd`, `src/warp.ml`,
   `test/cli/warp.t`, `test/cli/props.t`.
 
 ## Git Hygiene

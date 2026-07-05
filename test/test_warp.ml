@@ -94,7 +94,7 @@ let test_check_eq_renders_both_sides () =
 
 (* the whole suite above ran with ZERO grants: pure Jacquard over rings 0-1, asserted *)
 let test_manifest_pure () =
-  match Reader.parse_one ~file:"m.wft" (run "(app (var check.true) (var true) (lit \"t\"))") with
+  match Reader.parse_one ~file:"m.jqd" (run "(app (var check.true) (var true) (lit \"t\"))") with
   | Error ds -> Eval_support.fail_diags "parse" ds
   | Ok f -> (
       match Result.bind (Kernel.expr_of_form f) (Resolve.resolve_expr (Store.names_view store)) with
@@ -136,7 +136,7 @@ let test_cache_entry_roundtrip () =
       cases
   in
   let printed = Printer.print (Warp.entry_form ~key ~outcomes) in
-  match Reader.parse_one ~file:"entry.wft" printed with
+  match Reader.parse_one ~file:"entry.jqd" printed with
   | Error ds -> Eval_support.fail_diags "reparse" ds
   | Ok f -> (
       match Warp.entry_of_form f with

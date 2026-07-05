@@ -26,7 +26,7 @@ let stub =
        ])
 
 let parse_top s =
-  match Reader.parse_one ~file:"r.wft" s with
+  match Reader.parse_one ~file:"r.jqd" s with
   | Error ds -> Alcotest.failf "parse failed: %s" (String.concat "; " (List.map Diag.to_string ds))
   | Ok f -> (
       match Kernel.of_form f with

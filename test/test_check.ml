@@ -17,7 +17,7 @@ let make_cctx () =
           (store, ctx))
 
 let check_src (store, ctx) src : (Check.top_sig, Diag.t list) result =
-  match Reader.parse_string ~file:"c.wft" src with
+  match Reader.parse_string ~file:"c.jqd" src with
   | Error ds -> Error ds
   | Ok forms ->
       let rec go last = function
@@ -67,7 +67,7 @@ let test_golden_sigs () =
       in
       Alcotest.(check bool)
         "sigs corpus has >= 20 files" true
-        (List.length (Corpus_support.wft_files "../corpus/sigs") >= 20);
+        (List.length (Corpus_support.jqd_files "../corpus/sigs") >= 20);
       Alcotest.(check (list string))
         "elaborated signatures match corpus/golden/sigs.golden (regenerate with `dune exec \
          test/gen_sig_goldens.exe`)"

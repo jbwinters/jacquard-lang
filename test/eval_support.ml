@@ -28,7 +28,7 @@ let fail_diags what ds =
   Alcotest.failf "%s: %s" what (String.concat "; " (List.map Diag.to_string ds))
 
 let put_src store names src =
-  match Reader.parse_one ~file:"h.wft" src with
+  match Reader.parse_one ~file:"h.jqd" src with
   | Error ds -> fail_diags "parse" ds
   | Ok f -> (
       match Kernel.decl_of_form f with
@@ -145,7 +145,7 @@ let make_prelude_ctx () : Store.t * Eval.ctx =
   (store, ctx)
 
 let eval_with ctx store src : (Value.t, Runtime_err.t) result =
-  match Reader.parse_one ~file:"p.wft" src with
+  match Reader.parse_one ~file:"p.jqd" src with
   | Error ds -> fail_diags "parse" ds
   | Ok f -> (
       match Kernel.expr_of_form f with
@@ -156,7 +156,7 @@ let eval_with ctx store src : (Value.t, Runtime_err.t) result =
           | Ok e -> Eval.run_expr ctx e))
 
 let parse_expr h src : Kernel.expr =
-  match Reader.parse_one ~file:"e.wft" src with
+  match Reader.parse_one ~file:"e.jqd" src with
   | Error ds -> fail_diags "parse" ds
   | Ok f -> (
       match Kernel.expr_of_form f with

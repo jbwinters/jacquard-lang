@@ -17,7 +17,7 @@ let open_ok root =
       Alcotest.failf "open_store failed: %s" (String.concat "; " (List.map Diag.to_string ds))
 
 let decl_of ~names src =
-  match Reader.parse_one ~file:"s.wft" src with
+  match Reader.parse_one ~file:"s.jqd" src with
   | Error _ -> Alcotest.fail "parse failed"
   | Ok f -> (
       match Kernel.decl_of_form f with
@@ -78,7 +78,7 @@ let test_names_registered_and_resolvable () =
   | [ { Resolve.kind = Resolve.KTerm; _ } ] -> ()
   | _ -> Alcotest.fail "not-x should be a term name in the store index"
 
-(* --- rename touches only names.wft --- *)
+(* --- rename touches only names.jqd --- *)
 
 let test_rename_only_names_file () =
   let root = fresh_root () in
@@ -87,7 +87,7 @@ let test_rename_only_names_file () =
     put_ok t (decl_of ~names:Resolve.empty_names "(deftype bool () (con false) (con true))")
   in
   let obj =
-    Filename.concat (Filename.concat root "objects") (Hash.to_hex hs.Canon.decl_hash ^ ".wft")
+    Filename.concat (Filename.concat root "objects") (Hash.to_hex hs.Canon.decl_hash ^ ".jqd")
   in
   let before = read_file obj in
   (match Store.rename t ~old_name:"bool" ~new_name:"boolean" () with
@@ -100,7 +100,7 @@ let test_rename_only_names_file () =
   | Some { Resolve.hash; _ } ->
       Alcotest.(check bool) "same hash" true (Hash.equal hash hs.Canon.decl_hash)
   | None -> Alcotest.fail "new name missing");
-  (* the rename survives a reopen (it is persisted in names.wft) *)
+  (* the rename survives a reopen (it is persisted in names.jqd) *)
   let t2 = open_ok root in
   Alcotest.(check bool) "persisted" true (Store.lookup_name t2 "boolean" <> None)
 
@@ -110,7 +110,7 @@ let test_rename_unknown () =
   | Error [ d ] -> Alcotest.(check string) "code" "E0602" d.Diag.code
   | _ -> Alcotest.fail "renaming an unknown name must fail"
 
-(* An invalid new name must be a clean diagnostic and must not damage names.wft
+(* An invalid new name must be a clean diagnostic and must not damage names.jqd
    (review finding: it used to truncate the index). *)
 let test_invalid_names_rejected_safely () =
   let root = fresh_root () in
@@ -127,7 +127,7 @@ let test_invalid_names_rejected_safely () =
   (* the index survived: still resolvable in memory and on disk *)
   Alcotest.(check bool) "binding intact" true (Store.lookup_name t "bool" <> None);
   let t2 = open_ok root in
-  Alcotest.(check bool) "names.wft intact" true (Store.lookup_name t2 "bool" <> None);
+  Alcotest.(check bool) "names.jqd intact" true (Store.lookup_name t2 "bool" <> None);
   match Store.bind_name t "Nope" hs.Canon.decl_hash with
   | Error [ d ] -> Alcotest.(check string) "bind invalid name" "E0605" d.Diag.code
   | _ -> Alcotest.fail "bind_name with invalid name must fail"
@@ -284,7 +284,7 @@ let suite =
     Alcotest.test_case "origin sidecar roundtrip" `Quick test_origin_roundtrip;
     Alcotest.test_case "get by derived hash" `Quick test_get_by_derived_hash;
     Alcotest.test_case "names registered and resolvable" `Quick test_names_registered_and_resolvable;
-    Alcotest.test_case "rename touches only names.wft" `Quick test_rename_only_names_file;
+    Alcotest.test_case "rename touches only names.jqd" `Quick test_rename_only_names_file;
     Alcotest.test_case "rename unknown name" `Quick test_rename_unknown;
     Alcotest.test_case "invalid names rejected safely" `Quick test_invalid_names_rejected_safely;
     Alcotest.test_case "defterm group hash not nameable" `Quick test_defterm_group_hash_not_nameable;

@@ -1,9 +1,9 @@
 (** Prelude v1 (plan W2.6): the library the kernel keeps out of the language.
 
-    [load] reads every `.wft` file in a prelude directory (sorted by file name), runs each
+    [load] reads every `.jqd` file in a prelude directory (sorted by file name), runs each
     declaration through validate-resolve-put against the store's evolving name index, and returns
     the per-file hashes (golden-pinned by tests). [wire_builtins] registers the native
-    implementations of the builtin marker terms (see prelude/04-builtins.wft) under their store
+    implementations of the builtin marker terms (see prelude/04-builtins.jqd) under their store
     hashes; comparison builtins return the prelude's own [bool] constructors.
 
     Root handlers are the capability grants (spec §7: no ambient handlers): [install_console] grants
@@ -30,7 +30,7 @@ let load ~dir store : ((string * Canon.decl_hashes list) list, Diag.t list) resu
   else
     let files =
       Sys.readdir dir |> Array.to_list
-      |> List.filter (fun f -> Filename.check_suffix f ".wft")
+      |> List.filter (fun f -> Filename.check_suffix f ".jqd")
       |> List.sort String.compare
     in
     let load_file file =
@@ -573,7 +573,7 @@ let install_clock ?(now = fun () -> int_of_float (Unix.gettimeofday () *. 1000.)
 (** [install_fs ctx] grants [fs]. SANDBOX CAVEAT, stated loudly: the grant is the ONLY boundary —
     [--allow fs] means the whole filesystem, with the process's own privileges. Path-scoped grants
     are future work; until then attenuate with in-language handlers (see fs.read-only in
-    prelude/14-world.wft). IO failures surface as [Runtime_err.Io]. *)
+    prelude/14-world.jqd). IO failures surface as [Runtime_err.Io]. *)
 let install_fs (ctx : Eval.ctx) : (unit, Diag.t list) result =
   let ( let* ) = Result.bind in
   let* read_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "read" in
@@ -657,7 +657,7 @@ let install_infer ?cache_dir (ctx : Eval.ctx) : (unit, Diag.t list) result =
             (Hash.of_string
                (Printf.sprintf "%d:%s%d:%s" (String.length text) text (String.length m) m))
         in
-        let path = Filename.concat dir (key ^ ".wft") in
+        let path = Filename.concat dir (key ^ ".jqd") in
         let entry_form completion =
           Form.form "infer-cache-entry"
             [
@@ -936,7 +936,7 @@ let builtin_signatures (store : Store.t) : ((Hash.t * Types.scheme) list, Diag.t
         Ok (base @ code_sigs)
     | _ -> Ok base
   in
-  (* the SL.5 text layer (all-or-nothing: 11-text.wft declares every marker) *)
+  (* the SL.5 text layer (all-or-nothing: 11-text.jqd declares every marker) *)
   let* base =
     match
       ( lookup_hash store ~kind:Resolve.KType "text",

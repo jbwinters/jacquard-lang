@@ -44,9 +44,9 @@ let read_file path =
   close_in ic;
   s
 
-let wft_files dir =
+let jqd_files dir =
   Sys.readdir dir |> Array.to_list
-  |> List.filter (fun f -> Filename.check_suffix f ".wft")
+  |> List.filter (fun f -> Filename.check_suffix f ".jqd")
   |> List.sort String.compare
 
 (** Pipeline stages, in order; invalid corpus cases name the stage they must die at. *)
@@ -126,7 +126,7 @@ let corpus_golden_lines ~valid_dir =
           failwith
             (Printf.sprintf "%s failed the pipeline: %s" file
                (String.concat "; " (List.map Diag.to_string ds))))
-    (wft_files valid_dir)
+    (jqd_files valid_dir)
 
 (** Elaborated-signature lines for every file in a sigs corpus (plan W3.2 goldens): each line is
     [file:name : scheme]. Files check against a fresh prelude store. *)
@@ -170,7 +170,7 @@ let sig_lines ~prelude_dir ~sigs_dir : (string list, Diag.t list) result =
         let* lines = check_file file in
         all (lines :: acc) rest
   in
-  all [] (wft_files sigs_dir)
+  all [] (jqd_files sigs_dir)
 
 (** Extended pipeline for check-stage invalid corpus cases (W3.3): parse, validate, resolve against
     a REAL prelude store (stub hashes cannot be type-checked), then typecheck. *)
@@ -296,7 +296,7 @@ let diag_golden_lines ~prelude_dir : (string list, Diag.t list) result =
   List.iter (fun (h, s) -> Hashtbl.replace ctx.Check.builtin_sigs h s) sigs;
   let run_case (name, src, granted) =
     let render ds = List.map (fun d -> name ^ " | " ^ Diag.to_string d) ds in
-    let* forms = Reader.parse_string ~file:(name ^ ".wft") src in
+    let* forms = Reader.parse_string ~file:(name ^ ".jqd") src in
     let rec go = function
       | [] -> Ok []
       | f :: rest -> (

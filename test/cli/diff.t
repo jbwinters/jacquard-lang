@@ -1,12 +1,12 @@
 jacquard diff: semantic comparison of two stores (W5.2).
 
-  $ cat > lib.wft <<'EOF_WFT'
+  $ cat > lib.jqd <<'EOF_JQD'
   > (deftype color () (con red) (con green))
   > (defterm ((binding pick () (lam ((pvar b)) (match (var b) (clause (pcon red) (lit 1)) (clause (pcon green) (lit 2)))))))
-  > EOF_WFT
-  $ jacquard store add a lib.wft
+  > EOF_JQD
+  $ jacquard store add a lib.jqd
   ok
-  $ jacquard store add b lib.wft
+  $ jacquard store add b lib.jqd
   ok
 
 A rename is exactly a rename:
@@ -17,11 +17,11 @@ A rename is exactly a rename:
 
 A literal edit localizes to the changed leaf and lists dependents:
 
-  $ cat > lib2.wft <<'EOF_WFT'
+  $ cat > lib2.jqd <<'EOF_JQD'
   > (deftype color () (con red) (con green))
   > (defterm ((binding pick () (lam ((pvar b)) (match (var b) (clause (pcon red) (lit 9)) (clause (pcon green) (lit 2)))))))
-  > EOF_WFT
-  $ jacquard store add c lib2.wft
+  > EOF_JQD
+  $ jacquard store add c lib2.jqd
   ok
   $ jacquard diff a c | grep -E 'changed|lit'
   changed  pick

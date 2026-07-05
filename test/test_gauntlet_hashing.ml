@@ -1,7 +1,7 @@
 open Jacquard
 
 let expr_hash src =
-  match Reader.parse_one ~file:"gauntlet-hash.wft" src with
+  match Reader.parse_one ~file:"gauntlet-hash.jqd" src with
   | Error ds -> Eval_support.fail_diags "parse" ds
   | Ok f -> (
       match Kernel.expr_of_form f with

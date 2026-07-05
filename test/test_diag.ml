@@ -1,7 +1,7 @@
 open Jacquard
 
 let span =
-  Span.make ~file:"demo.wft"
+  Span.make ~file:"demo.jqd"
     ~start_pos:{ Span.line = 4; col = 1; offset = 30 }
     ~end_pos:{ Span.line = 4; col = 9; offset = 38 }
 
@@ -15,15 +15,15 @@ let test_error_fields () =
 let test_rendering () =
   let d = Diag.error ~span ~hint:"grant it" ~code:"E0002" "unhandled effect" in
   Alcotest.(check string)
-    "rendered" "demo.wft:4:1-9: error[E0002]: unhandled effect\n  hint: grant it" (Diag.to_string d)
+    "rendered" "demo.jqd:4:1-9: error[E0002]: unhandled effect\n  hint: grant it" (Diag.to_string d)
 
 let test_span_multiline () =
   let s =
-    Span.make ~file:"a.wft"
+    Span.make ~file:"a.jqd"
       ~start_pos:{ Span.line = 1; col = 2; offset = 1 }
       ~end_pos:{ Span.line = 3; col = 4; offset = 20 }
   in
-  Alcotest.(check string) "multiline span" "a.wft:1:2-3:4" (Span.to_string s)
+  Alcotest.(check string) "multiline span" "a.jqd:1:2-3:4" (Span.to_string s)
 
 let suite =
   [

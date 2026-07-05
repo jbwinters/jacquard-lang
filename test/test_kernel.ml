@@ -3,7 +3,7 @@ open Jacquard
 let hex = Hash.to_hex (Hash.of_string "seed")
 
 let parse s =
-  match Reader.parse_one ~file:"k.wft" s with
+  match Reader.parse_one ~file:"k.jqd" s with
   | Ok f -> f
   | Error ds ->
       Alcotest.failf "test source %S does not parse: %s" s
@@ -283,13 +283,13 @@ let test_to_form_of_form_identity () =
   in
   (* every valid corpus file... *)
   Sys.readdir corpus_dir |> Array.to_list
-  |> List.filter (fun f -> Filename.check_suffix f ".wft")
+  |> List.filter (fun f -> Filename.check_suffix f ".jqd")
   |> List.iter (fun f -> check_src f (read_file (Filename.concat corpus_dir f)));
   (* ...plus sources exercising forms the corpus lacks *)
   List.iter (fun (name, oks, _) -> List.iter (fun s -> check_src ("table:" ^ name) s) oks) table;
   (* ...and the identity must hold on RESOLVED trees too (Ref/GroupRef/name-meta) *)
   Sys.readdir corpus_dir |> Array.to_list
-  |> List.filter (fun f -> Filename.check_suffix f ".wft")
+  |> List.filter (fun f -> Filename.check_suffix f ".jqd")
   |> List.iter (fun file ->
       match Reader.parse_string ~file (read_file (Filename.concat corpus_dir file)) with
       | Error _ -> Alcotest.failf "%s does not parse" file

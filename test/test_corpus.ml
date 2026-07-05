@@ -11,7 +11,7 @@ let invalid_dir = "../corpus/invalid"
 let golden_file = "../corpus/golden/hashes.golden"
 
 let test_valid_corpus () =
-  let files = Corpus_support.wft_files valid_dir in
+  let files = Corpus_support.jqd_files valid_dir in
   Alcotest.(check bool) "corpus has >= 10 valid files" true (List.length files >= 10);
   let expected =
     Corpus_support.read_file golden_file
@@ -25,7 +25,7 @@ let test_valid_corpus () =
     expected actual
 
 let test_invalid_corpus () =
-  let files = Corpus_support.wft_files invalid_dir in
+  let files = Corpus_support.jqd_files invalid_dir in
   Alcotest.(check bool) "corpus has >= 5 invalid files" true (List.length files >= 5);
   List.iter
     (fun file ->

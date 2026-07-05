@@ -34,7 +34,7 @@ let impossible_src =
 
 let model_state (store, ctx) src =
   ignore ctx;
-  match Reader.parse_one ~file:"model.wft" src with
+  match Reader.parse_one ~file:"model.jqd" src with
   | Error ds -> Eval_support.fail_diags "parse" ds
   | Ok f -> (
       match Kernel.expr_of_form f with
@@ -180,7 +180,7 @@ let test_model_unchanged_between_algorithms () =
   let h = Eval_support.make_prelude_ctx () in
   let _, ctx = h in
   let hash_of src =
-    match Reader.parse_one ~file:"m.wft" src with
+    match Reader.parse_one ~file:"m.jqd" src with
     | Ok f -> (
         let store, _ = h in
         match Kernel.expr_of_form f with
@@ -260,7 +260,7 @@ let test_effectful_toplevel_blocked_in_infer () =
       | Ok sigs -> List.iter (fun (h, s) -> Hashtbl.replace cctx.Check.builtin_sigs h s) sigs
       | Error _ -> ());
       ignore ctx;
-      match Reader.parse_one ~file:"leak.wft" "(var leaked)" with
+      match Reader.parse_one ~file:"leak.jqd" "(var leaked)" with
       | Error ds -> Eval_support.fail_diags "parse" ds
       | Ok f -> (
           match Kernel.expr_of_form f with

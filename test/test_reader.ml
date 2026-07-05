@@ -3,14 +3,14 @@ open Jacquard
 let form = Alcotest.testable Form.pp Form.equal_ignoring_meta
 
 let parse_ok s =
-  match Reader.parse_one ~file:"t.wft" s with
+  match Reader.parse_one ~file:"t.jqd" s with
   | Ok f -> f
   | Error ds ->
       Alcotest.failf "expected parse of %S to succeed: %s" s
         (String.concat "; " (List.map Diag.to_string ds))
 
 let parse_err s =
-  match Reader.parse_string ~file:"err.wft" s with
+  match Reader.parse_string ~file:"err.jqd" s with
   | Ok _ -> Alcotest.failf "expected parse of %S to fail" s
   | Error [ d ] -> d
   | Error ds -> Alcotest.failf "expected exactly one diagnostic, got %d" (List.length ds)
@@ -24,7 +24,7 @@ let check_span what expected f =
 
 let test_spans_flat () =
   let f = parse_ok "(lit 1)" in
-  check_span "root" "t.wft:1:1-8" f;
+  check_span "root" "t.jqd:1:1-8" f;
   match Form.span f with
   | Some s ->
       Alcotest.(check int) "start offset" 0 s.Span.start_pos.Span.offset;
@@ -33,20 +33,20 @@ let test_spans_flat () =
 
 let test_spans_nested () =
   let f = parse_ok "(app (var add) (lit 1))" in
-  check_span "root" "t.wft:1:1-24" f;
+  check_span "root" "t.jqd:1:1-24" f;
   match f.Form.args with
   | [ Form.F v; Form.F l ] ->
-      check_span "(var add)" "t.wft:1:6-15" v;
-      check_span "(lit 1)" "t.wft:1:16-23" l
+      check_span "(var add)" "t.jqd:1:6-15" v;
+      check_span "(lit 1)" "t.jqd:1:16-23" l
   | _ -> Alcotest.fail "expected two form args"
 
 let test_spans_multiline () =
   let f = parse_ok "(app\n  (var add)\n  (lit 1))" in
-  check_span "root" "t.wft:1:1-3:11" f;
+  check_span "root" "t.jqd:1:1-3:11" f;
   match f.Form.args with
   | [ Form.F v; Form.F l ] ->
-      check_span "(var add)" "t.wft:2:3-12" v;
-      check_span "(lit 1)" "t.wft:3:3-10" l
+      check_span "(var add)" "t.jqd:2:3-12" v;
+      check_span "(lit 1)" "t.jqd:3:3-10" l
   | _ -> Alcotest.fail "expected two form args"
 
 (* --- scalars and atoms --- *)
@@ -90,7 +90,7 @@ let test_hash_literal () =
 
 let test_comments_skipped () =
   let fs =
-    match Reader.parse_string ~file:"t.wft" "; hi\n(lit 1) ; bye\n(lit 2)\n" with
+    match Reader.parse_string ~file:"t.jqd" "; hi\n(lit 1) ; bye\n(lit 2)\n" with
     | Ok fs -> fs
     | Error _ -> Alcotest.fail "comments should be skipped"
   in
@@ -112,10 +112,10 @@ let test_groups () =
   Alcotest.(check string) "scalar group element rejected" "E0110" d.Diag.code
 
 let test_parse_one_arity () =
-  (match Reader.parse_one ~file:"t.wft" "" with
+  (match Reader.parse_one ~file:"t.jqd" "" with
   | Error [ d ] -> Alcotest.(check string) "empty input" "E0106" d.Diag.code
   | _ -> Alcotest.fail "empty input should fail");
-  match Reader.parse_one ~file:"t.wft" "(lit 1) (lit 2)" with
+  match Reader.parse_one ~file:"t.jqd" "(lit 1) (lit 2)" with
   | Error [ d ] -> Alcotest.(check string) "two forms" "E0114" d.Diag.code
   | _ -> Alcotest.fail "two forms should fail parse_one"
 
@@ -123,30 +123,30 @@ let test_parse_one_arity () =
 
 let golden_errors =
   [
-    ("unclosed", "(lit 1\n", "err.wft:1:1-2:1: error[E0106]: unclosed form: expected `)`");
-    ("bad token", "(lit @)\n", "err.wft:1:6-6: error[E0101]: unexpected character '@'");
-    ("unterminated text", "(lit \"abc\n", "err.wft:1:6-2:1: error[E0102]: unterminated text literal");
+    ("unclosed", "(lit 1\n", "err.jqd:1:1-2:1: error[E0106]: unclosed form: expected `)`");
+    ("bad token", "(lit @)\n", "err.jqd:1:6-6: error[E0101]: unexpected character '@'");
+    ("unterminated text", "(lit \"abc\n", "err.jqd:1:6-2:1: error[E0102]: unterminated text literal");
     ( "bad hash",
       "(ref #deadbeef term)\n",
-      "err.wft:1:6-15: error[E0104]: invalid hash literal #deadbeef\n\
+      "err.jqd:1:6-15: error[E0104]: invalid hash literal #deadbeef\n\
       \  hint: a hash is 64 lowercase hex characters" );
-    ("stray rparen", ")\n", "err.wft:1:1-2: error[E0108]: unexpected `)` at top level");
-    ("bad head", "(42 x)\n", "err.wft:1:2-2: error[E0107]: expected a form head symbol, found '4'");
+    ("stray rparen", ")\n", "err.jqd:1:1-2: error[E0108]: unexpected `)` at top level");
+    ("bad head", "(42 x)\n", "err.jqd:1:2-2: error[E0107]: expected a form head symbol, found '4'");
     ( "big int",
       "(lit 123456789012345678901234567890)\n",
-      "err.wft:1:6-36: error[E0109]: integer literal 123456789012345678901234567890 does not fit \
+      "err.jqd:1:6-36: error[E0109]: integer literal 123456789012345678901234567890 does not fit \
        in a native int\n\
       \  hint: Jacquard integers are 63-bit native ints (decision D2)" );
     ( "bad escape",
       "(lit \"a\\qb\")\n",
-      "err.wft:1:8-9: error[E0103]: invalid escape sequence \\q\n\
+      "err.jqd:1:8-9: error[E0103]: invalid escape sequence \\q\n\
       \  hint: valid escapes: \\\\ \\\" \\n \\t \\r \\xHH" );
-    ("bad number", "(lit 1.2.3)\n", "err.wft:1:6-11: error[E0105]: malformed number \"1.2.3\"");
-    ("bad quoted symbol", "(var 'Foo)\n", "err.wft:1:6-10: error[E0111]: invalid quoted symbol 'Foo");
-    ("bad bare symbol", "(var a@b)\n", "err.wft:1:6-9: error[E0112]: invalid symbol \"a@b\"");
+    ("bad number", "(lit 1.2.3)\n", "err.jqd:1:6-11: error[E0105]: malformed number \"1.2.3\"");
+    ("bad quoted symbol", "(var 'Foo)\n", "err.jqd:1:6-10: error[E0111]: invalid quoted symbol 'Foo");
+    ("bad bare symbol", "(var a@b)\n", "err.jqd:1:6-9: error[E0112]: invalid symbol \"a@b\"");
     ( "top-level scalar",
       "42\n",
-      "err.wft:1:1-3: error[E0113]: expected a form at top level, found \"42\"" );
+      "err.jqd:1:1-3: error[E0113]: expected a form at top level, found \"42\"" );
   ]
 
 let test_golden_errors () =

@@ -99,7 +99,7 @@ let test_enumerate_tally_vs_native () =
   let in_language = entries_of tallied in
   (* the OCaml driver's merged posterior over the same model expression *)
   let state =
-    match Reader.parse_one ~file:"m.wft" (Printf.sprintf "(app %s)" model) with
+    match Reader.parse_one ~file:"m.jqd" (Printf.sprintf "(app %s)" model) with
     | Error ds -> Eval_support.fail_diags "parse" ds
     | Ok f -> (
         match
@@ -186,7 +186,7 @@ let test_lw_uniform_int () =
   (* LW over a uniform-int model stays in bounds and roughly uniform *)
   let state () =
     match
-      Reader.parse_one ~file:"lw.wft" "(app (var sample) (app (var uniform-int) (lit 1) (lit 3)))"
+      Reader.parse_one ~file:"lw.jqd" "(app (var sample) (app (var uniform-int) (lit 1) (lit 3)))"
     with
     | Error ds -> Eval_support.fail_diags "parse" ds
     | Ok f -> (
