@@ -1,5 +1,7 @@
 .taskmaster
-.agent
+# local project skill state stays ignored; the committed project skill does not
+.agent/*
+!.agent/skills/
 .codex
 .omp
 .pi
