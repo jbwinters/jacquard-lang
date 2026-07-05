@@ -8,6 +8,9 @@ project shape from file names alone.
 
 - `../README.md`: fresh-clone setup, common commands, demos, CI, and repo map.
 - `../AGENTS.md`: operating rules for future agents.
+- `SKILL.md`: the whole language in one file for coding agents — kernel forms,
+  rows and capabilities, Dist, code-as-data, Warp, CLI, style, and gotchas.
+  (Also discoverable as a project skill via `docs/SKILL.md`.)
 - `tutorial.md`: runnable examples from literals through hashing and tooling.
 - `../demos/README.md`: demo catalog and what each demo proves.
 - `ci-cd.md`: GitHub gates, branch protection, and release evidence workflow.
@@ -59,8 +62,8 @@ For a new human contributor:
 For a future coding agent:
 
 1. `../AGENTS.md`
-2. `../README.md`
-3. `development-plan.md`
+2. `SKILL.md`
+3. `../README.md`
 4. `ast.md`
 5. relevant test files under `../test/`
 
