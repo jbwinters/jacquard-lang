@@ -48,6 +48,12 @@ type ctx = {
   mutable origins : (Hash.t * string) list;
       (** effect hash -> a callee that introduced it (the manifest diagnostic's call-chain endpoint,
           W3.6) *)
+  mutable tier_apps : (Types.row * Tier.app_kind) list;
+      (** every application's callee row (PF.2 phase 1 statistics). Rows are recorded by reference
+          and classified after solving, like [sites]; unlike [sites] this accumulates for the
+          context's whole lifetime, so one ctx measures a whole program. *)
+  mutable tier_ops : (Hash.t * Tier.discipline) list;
+      (** op hash -> one handler clause's syntactic resume discipline (PF.2 phase 1) *)
 }
 
 and match_site = { scrutinee_ty : Types.ty; arms : Kernel.clause list; site_meta : Meta.t }
@@ -432,6 +438,13 @@ and infer ctx env ~(ambient : row) (e : Kernel.expr) : ty =
             err ~meta ~hint:"Jacquard calls are uncurried: pass exactly the declared arguments"
               ~code:"E0803" "this function expects %d argument(s), got %d" (List.length params)
               (List.length args);
+          (let kind =
+             match fn.Kernel.it with
+             | Kernel.Ref (_, Kernel.Con) -> Tier.KCon
+             | Kernel.Ref (_, Kernel.Op) -> Tier.KOp
+             | _ -> Tier.KFn
+           in
+           ctx.tier_apps <- (frow, kind) :: ctx.tier_apps);
           List.iter2 (fun p a -> unify_or ctx ~meta ~what:"argument" p a) params arg_tys;
           (* record who introduced each effect, for the manifest diagnostic (W3.6) *)
           (let callee =
@@ -454,6 +467,8 @@ and infer ctx env ~(ambient : row) (e : Kernel.expr) : ty =
       | TVar _ ->
           let result = new_tvar ctx.level in
           unify_or ctx ~meta ~what:"function position" fn_ty (TArrow (arg_tys, ambient, result));
+          (* unknown callee: the call runs with ambient effects; record what ambient resolves to *)
+          ctx.tier_apps <- (ambient, Tier.KFn) :: ctx.tier_apps;
           result
       | t ->
           err ~meta ~hint:"only functions, constructors, effect operations, and resumptions apply"
@@ -551,6 +566,8 @@ and infer ctx env ~(ambient : row) (e : Kernel.expr) : ty =
           (* resume : (op result) ->{outer ambient} answer *)
           let resume_ty = TArrow ([ op_result ], ambient, answer) in
           let env' = bind_all ((oc.Kernel.resume, resume_ty) :: bindings) env in
+          ctx.tier_ops <-
+            (oh, Tier.discipline ~resume:oc.Kernel.resume oc.Kernel.obody) :: ctx.tier_ops;
           let cty = infer ctx env' ~ambient oc.Kernel.obody in
           unify_or ctx ~meta:oc.Kernel.ometa ~what:"op clause result" answer cty)
         ops;
@@ -1033,6 +1050,8 @@ let make_ctx (store : Store.t) : (ctx, Diag.t list) result =
           checking = [];
           sites = [];
           origins = [];
+          tier_apps = [];
+          tier_ops = [];
         }
   | Error ds, _, _, _ | _, Error ds, _, _ | _, _, Error ds, _ | _, _, _, Error ds -> Error ds
 
@@ -1095,6 +1114,11 @@ let check_top ctx (top : Kernel.top) : (top_sig, Diag.t list) result =
   with
   | s -> Ok s
   | exception Err d -> Error [ d ]
+
+(** [force_term ctx h] computes [h]'s scheme, checking its declaration on demand — the whole-store
+    sweep the tier statistics need (PF.2 phase 1). *)
+let force_term ctx (h : Hash.t) : (scheme, Diag.t list) result =
+  match term_scheme ctx h with s -> Ok s | exception Err d -> Error [ d ]
 
 (** Render an effect row for manifests and signatures. *)
 let show_row ctx (r : row) : string =

@@ -50,6 +50,7 @@ jacquard hash FILE.jqd                        # canonical HASH_V0 hashes
 jacquard fmt FILE.jqd [--write]               # canonical formatting, comments kept
 jacquard store add|rename ... ; jacquard diff STORE_A STORE_B   # semantic diff
 jacquard dist-diff MODEL_A MODEL_B            # posterior divergence between models
+jacquard tiers [FILES...]                     # effect-row tier statistics (PF.2 phase 1)
 jacquard replay LOG PROGRAM [--to N] [--fork 'N=(response 503 "down")']
 ```
 

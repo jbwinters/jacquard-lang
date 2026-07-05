@@ -104,3 +104,72 @@ priced by semantics, not implementation.
 
 Each phase is independently shippable and independently abandonable; none
 changes the language.
+
+## Phase 1 results (2026-07-05)
+
+Phase 1 landed as the `jacquard tiers` command plus tier sidecars in the store
+(derived data beside each object, keyed by member hash, excluded from identity
+like all metadata; objects stay write-once). The checker records every
+application's callee row and every handler clause's syntactic resume
+discipline; `test/cli/tiers.t` pins the prelude table so drift is visible.
+
+Sweep over the prelude, all demos (escrow included), and the valid/sigs corpus:
+
+```
+== declarations: 295 named terms ==
+pure                 161  54%
+row-poly              41  13%
+effectful             58  19%
+data                  35  11%
+
+== call sites: 1070 applications ==
+constructor          213  19%
+op-perform            97   9%
+fn pure              526  49%
+fn row-poly           67   6%
+fn effectful         167  15%
+
+== handler op clauses: 35 ==
+tail-resumptive        7  20%
+aborting               7  20%
+one-shot               3   8%
+multi-shot            18  51%
+```
+
+Reproduce with:
+
+```sh
+jacquard tiers demos/*.jqd demos/escrow/workflow.jqd \
+  demos/escrow/workflow-escalated.jqd demos/escrow/tests.jqd \
+  demos/escrow/main.jqd corpus/valid/*.jqd corpus/sigs/*.jqd
+```
+
+What the numbers say about the design's assumptions:
+
+- **Call-site pure dominance holds.** 68% of applications (constructors plus
+  calls through arrows with closed empty rows) are host-stack eligible before
+  monomorphization even starts, and most of the 6% row-polymorphic sites
+  close to empty once specialized. Pillar 1's tier-0 case is the common case.
+- **The effectful remainder is exception-shaped.** The per-effect breakdown of
+  the 167 effectful calls is dominated by `check` (69, Warp's test effect) and
+  `throw`/`abort` (66 combined), whose in-language handlers classify as
+  aborting — continuation dropped, no capture. Genuinely capturing effects are
+  a small tail.
+- **Syntactic tail-resumptive dominance does NOT hold for the in-language
+  handler library, and the reasons are instructive.** First, handlers such as
+  `state.run` are written in state-passing style — `resume` escapes into a
+  state-threading lambda, so the classifier (correctly) reports the
+  continuation as escaping even though each state thread resumes once. Koka
+  recovers exactly this case with parameterized handlers; phase 2 should
+  include them if the state family is to ride the evidence-passing fast path.
+  Second, much of the prelude's handler surface IS the simulation library
+  (`fault.all`, scripted world handlers, enumeration), which is multi-shot by
+  design and priced by branch count — those clauses sit in the priced tier no
+  matter how they are written. Root grants, the handlers real programs
+  discharge most effects with, are native and tail-resumptive by construction;
+  they do not appear in the clause table at all.
+
+The dominant-case assumption survives phase 1 in the form that matters (call
+sites), with one design consequence recorded for phase 2: add parameterized
+handlers to the evidence-passing plan, or accept that the state family stays
+on the slow path.

@@ -257,6 +257,28 @@ let origin t (h : Hash.t) : string option =
   | Some (dh, _) -> read_sidecar dh
   | None -> if Sys.file_exists (object_path t h) then read_sidecar h else None
 
+(* --- tier sidecars (PF.2 phase 1) --- *)
+
+let tier_path t h = Filename.concat (objects_dir t) (Hash.to_hex h ^ ".tier")
+
+(** [stamp_tier t h tier] persists [h]'s arrow tier beside the objects. Tier is derived data —
+    recomputable from the object by the checker, keyed by member hash (group members tier
+    independently), and excluded from identity like all metadata; objects stay write-once. Last
+    writer wins: a hash's tier is a function of its content, so any two honest writers agree. *)
+let stamp_tier t (h : Hash.t) (tier : Tier.arrow_tier) : unit =
+  try
+    let oc = open_out_bin (tier_path t h) in
+    output_string oc (Tier.to_string tier ^ "\n");
+    close_out oc
+  with Sys_error m -> Printf.eprintf "tier sidecar unwritable (%s)\n%!" m
+
+(** [tier t h] reads back a stamped tier, [None] if absent or unparseable. *)
+let tier t (h : Hash.t) : Tier.arrow_tier option =
+  let path = tier_path t h in
+  if not (Sys.file_exists path) then None
+  else
+    match read_file path with exception Sys_error _ -> None | s -> Tier.of_string (String.trim s)
+
 (** [locate t h] finds the declaration owning [h] (a decl hash or any derived hash). *)
 let locate t (h : Hash.t) : (located, Diag.t list) result =
   match List.find_opt (fun (h', _) -> Hash.equal h h') t.index with
