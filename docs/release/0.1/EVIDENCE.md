@@ -1,17 +1,12 @@
-# Weft Core 0.1 Evidence
+# Jacquard Core 0.1 Evidence
 
 Status: release-candidate evidence pack for `release/0.1-evidence`.
 
-> Note (2026-07-05): the language was renamed Weft -> Jacquard after this
-> release. This pack, the `release/0.1-evidence` branch, and the
-> `weft-core-0.1.0` tag keep the old name as history; new releases use
-> `jacquard-core-*`.
-
 Candidate base: `aec2c63`  
 Evidence branch predecessor: `7d7733f`  
-Version surface: `weft --version` prints `0.1.0`
+Version surface: `jacquard --version` prints `0.1.0`
 
-This pack describes Weft core as implemented on the release branch: the kernel
+This pack describes Jacquard core as implemented on the release branch: the kernel
 triple reader/validator/resolver, HASH_V0 canonical identity, the content store,
 the CPS evaluator with deep multi-shot handlers, row inference and capability
 manifests, Dist inference handlers, the ringed standard library, Warp tests,
@@ -22,12 +17,12 @@ the executable-escrow demo.
 
 The build is the OCaml package in this repository:
 
-- package metadata: `weft.opam`
-- binary: `weft`
+- package metadata: `jacquard.opam`
+- binary: `jacquard`
 - library: `src/`
-- prelude: `prelude/*.wft`
+- prelude: `prelude/*.jqd`
 - CLI tests: `test/cli/*.t` and `test/gauntlet/*.t`
-- unit/property tests: `test/test_weft.exe`
+- unit/property tests: `test/test_jacquard.exe`
 
 The branch is intentionally not a feature branch. Changes after the candidate
 base are limited to release hardening, escrow demo completion, and evidence
@@ -38,9 +33,9 @@ documentation.
 Exact counts collected with:
 
 ```sh
-opam exec -- dune build test/test_weft.exe
+opam exec -- dune build test/test_jacquard.exe
 cd _build/default/test
-./test_weft.exe list --color=never 2>/dev/null | wc -l
+./test_jacquard.exe list --color=never 2>/dev/null | wc -l
 find ../../../test -name '*.t' | wc -l
 ```
 
@@ -63,7 +58,7 @@ opam exec -- dune fmt
 _build/default/bin/main.exe --version
 opam exec -- dune runtest test/cli/escrow.t
 opam exec -- dune runtest test/gauntlet
-cd _build/default/test && ./test_weft.exe test 'gauntlet-.*' --compact --color=never
+cd _build/default/test && ./test_jacquard.exe test 'gauntlet-.*' --compact --color=never
 ```
 
 The reproduction script [reproduce-0.1.sh](../../../scripts/release/reproduce-0.1.sh)
@@ -87,7 +82,7 @@ The claim matrix is [CLAIMS.md](CLAIMS.md). The short version:
 
 ## Claims Not Made
 
-Weft core 0.1 does not claim:
+Jacquard core 0.1 does not claim:
 
 - production compiler maturity
 - a stable surface syntax beyond bootstrap S-expressions

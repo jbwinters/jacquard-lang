@@ -1,4 +1,4 @@
-# Weft Core 0.1 Claim Matrix
+# Jacquard Core 0.1 Claim Matrix
 
 This matrix is deliberately falsifiable: every major claim names the test,
 cram, or demo that currently proves it, plus caveats where the proof is partial.

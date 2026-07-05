@@ -4,14 +4,9 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 cd "$ROOT"
 
-# The language was renamed Weft -> Jacquard after 0.1. This script reproduces
-# the FROZEN 0.1 evidence: it checks out the pre-rename lineage, so everything
-# below the checkout (WEFT_PRELUDE, demos/*.sh, test/test_weft.exe) deliberately
-# uses the old names. Inputs accept both spellings; new callers should pass
-# JACQUARD_RELEASE_*.
-REF=${JACQUARD_RELEASE_REF:-${WEFT_RELEASE_REF:-release/0.1-evidence}}
-BASE=${JACQUARD_RELEASE_BASE:-${WEFT_RELEASE_BASE:-aec2c63}}
-OUT=${JACQUARD_RELEASE_OUT:-${WEFT_RELEASE_OUT:-logs/release/0.1}}
+REF=${JACQUARD_RELEASE_REF:-release/0.1-evidence}
+BASE=${JACQUARD_RELEASE_BASE:-aec2c63}
+OUT=${JACQUARD_RELEASE_OUT:-logs/release/0.1}
 TRANSCRIPTS="$OUT/transcripts"
 
 mkdir -p "$TRANSCRIPTS"
@@ -45,13 +40,13 @@ capture fmt opam exec -- dune fmt
 
 capture version _build/default/bin/main.exe --version
 
-capture m1 env WEFT_PRELUDE="$ROOT/prelude" opam exec -- sh demos/m1.sh
-capture m3 env WEFT_PRELUDE="$ROOT/prelude" opam exec -- sh demos/m3.sh
-capture clarifying-question env WEFT_PRELUDE="$ROOT/prelude" opam exec -- sh demos/clarifying-question.sh
-capture agent-dream env WEFT_PRELUDE="$ROOT/prelude" opam exec -- sh demos/agent-dream.sh
-capture ambiguity-pipeline env WEFT_PRELUDE="$ROOT/prelude" opam exec -- sh demos/ambiguity-pipeline.sh
-capture demo-warp-tests env WEFT_PRELUDE="$ROOT/prelude" opam exec -- sh demos/showcase-warp-tests.sh
-capture hostile-manifest env WEFT_PRELUDE="$ROOT/prelude" opam exec -- sh demos/m4-hostile.sh
+capture m1 env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/m1.sh
+capture m3 env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/m3.sh
+capture clarifying-question env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/clarifying-question.sh
+capture agent-dream env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/agent-dream.sh
+capture ambiguity-pipeline env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/ambiguity-pipeline.sh
+capture demo-warp-tests env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/showcase-warp-tests.sh
+capture hostile-manifest env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/m4-hostile.sh
 
 capture cli-and-gauntlet opam exec -- dune runtest \
   test/cli/demos.t \
@@ -66,8 +61,8 @@ capture cli-and-gauntlet opam exec -- dune runtest \
   test/cli/world.t \
   test/gauntlet
 
-capture gauntlet-build opam exec -- dune build test/test_weft.exe
+capture gauntlet-build opam exec -- dune build test/test_jacquard.exe
 capture gauntlet-alcotest sh -c \
-  'cd _build/default/test && ./test_weft.exe test '"'"'gauntlet-.*'"'"' --compact --color=never'
+  'cd _build/default/test && ./test_jacquard.exe test '"'"'gauntlet-.*'"'"' --compact --color=never'
 
 echo "release reproduction complete: $OUT"

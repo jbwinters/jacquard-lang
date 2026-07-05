@@ -9,6 +9,7 @@
 
 # Logs
 logs
+dist/
 *.log
 npm-debug.log*
 yarn-debug.log*
@@ -37,3 +38,7 @@ node_modules/
 _opam/
 _build/
 *.install
+
+# Native runtime local artifacts
+runtime/*.o
+runtime/libjqrt.a

@@ -15,9 +15,6 @@ on:
     branches:
       - "release/**"
     tags:
-      # weft-core-* is the pre-rename tag family (history); new tags use
-      # jacquard-core-*.
-      - "weft-core-*"
       - "jacquard-core-*"
 
 permissions:
@@ -27,13 +24,8 @@ concurrency:
   group: release-evidence-${{ github.ref }}
   cancel-in-progress: false
 
-# This workflow reproduces the frozen 0.1 evidence pack, whose tree predates
-# the Weft -> Jacquard rename; the WEFT_* names below feed that old tree and
-# are deliberate. Env vars are passed in both spellings so old-tag checkouts
-# of the reproduce script keep working.
 env:
   OCAML_COMPILER: 5.1.1
-  WEFT_PRELUDE: ${{ github.workspace }}/prelude
   JACQUARD_PRELUDE: ${{ github.workspace }}/prelude
 
 jobs:
@@ -55,8 +47,6 @@ jobs:
 
       - name: Reproduce release evidence
         run: |
-          WEFT_RELEASE_REF=HEAD \
-          WEFT_RELEASE_BASE="${{ github.event.inputs.base || 'aec2c63' }}" \
           JACQUARD_RELEASE_REF=HEAD \
           JACQUARD_RELEASE_BASE="${{ github.event.inputs.base || 'aec2c63' }}" \
           scripts/release/reproduce-0.1.sh
@@ -65,7 +55,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: weft-release-0.1-evidence-${{ github.run_number }}
+          name: jacquard-release-0.1-evidence-${{ github.run_number }}
           if-no-files-found: error
           path: |
             docs/release/0.1/

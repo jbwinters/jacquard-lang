@@ -22,7 +22,7 @@ None known in the release branch after the escrow transcript and syntax fixes.
 
 ## Recommended Tag
 
-`weft-core-0.1-rc1`
+`jacquard-core-0.1-rc1`
 
 ## Recommended Next Milestone
 
@@ -31,7 +31,7 @@ reproduction script before tagging.
 
 ## Decision
 
-Ready to tag as `weft-core-0.1-rc1`.
+Ready to tag as `jacquard-core-0.1-rc1`.
 
 Verified in this hardening pass with:
 

@@ -128,7 +128,41 @@ fix at 0.75 and a patch that games the suite at 0.25. Adding one regression
 test prunes the impostor, and the surviving fix prints as a one-line semantic
 diff: `- sub + add`. See `sh demos/repair.sh` for the full transcript.
 
-## Quick Start
+## Install A Release Binary
+
+Most users do not need OCaml or opam. Install the latest release binary with:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jbwinters/jacquard-lang/main/scripts/install.sh | sh
+```
+
+The installer detects your OS and CPU, downloads the matching release archive,
+and installs under `~/.local` by default. Make sure `~/.local/bin` is on `PATH`,
+then run:
+
+```bash
+jacquard --version
+jac --version
+```
+
+`jac` is the short alias for `jacquard`. Both commands set `JACQUARD_PRELUDE`
+from the installed package, so ordinary runs do not need an environment variable:
+
+```bash
+jac run ~/.local/share/jacquard/demos/m1-fact.jqd
+```
+
+To install somewhere else:
+
+```bash
+JACQUARD_INSTALL_PREFIX=/usr/local sh scripts/install.sh
+```
+
+Release archives are also attached to `jacquard-core-*` GitHub releases. Each
+archive contains `bin/jacquard`, `bin/jac`, `libexec/jacquard/jacquard`,
+`share/jacquard/prelude`, and `share/jacquard/demos`.
+
+## Development Quick Start
 
 These commands assume a fresh clone and `asdf` available for installing `opam`.
 If you already have `opam` 2.5.x, start at the local switch step. If `opam`
@@ -196,6 +230,7 @@ The main commands are:
 
 ```bash
 jacquard run FILE.jqd [--allow fs] [--allow net] [--dry-run]
+jac run FILE.jqd [--allow fs] [--allow net] [--dry-run]
 jacquard check FILE.jqd [--print-sigs] [--manifest fs,net,console]
 jacquard hash FILE.jqd
 jacquard fmt FILE.jqd
@@ -356,6 +391,8 @@ GitHub Actions has two lanes:
 - `Release Evidence / Reproduce 0.1 evidence`: release branches, `jacquard-core-*`
   tags, and manual dispatch; runs `scripts/release/reproduce-0.1.sh` and uploads
   transcripts.
+- `Release Binaries`: `jacquard-core-*` tags and manual dispatch; builds
+  Linux/macOS tarballs with `jacquard`, `jac`, and the packaged prelude.
 
 See `docs/ci-cd.md` for branch protection recommendations.
 

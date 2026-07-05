@@ -1,4 +1,4 @@
-# Reproducing Weft Core 0.1
+# Reproducing Jacquard Core 0.1
 
 This document assumes a fresh clone on a machine with `opam` available. The
 repo also has `.tool-versions` for asdf users (`opam 2.5.1`).
@@ -6,8 +6,8 @@ repo also has `.tool-versions` for asdf users (`opam 2.5.1`).
 ## Fresh Clone
 
 ```sh
-git clone <repo-url> weft-lang
-cd weft-lang
+git clone <repo-url> jacquard-lang
+cd jacquard-lang
 git checkout release/0.1-evidence
 git merge-base --is-ancestor aec2c63 HEAD
 
@@ -41,16 +41,16 @@ The script:
 - installs opam dependencies
 - builds and tests the package
 - runs `dune fmt`
-- records `weft --version`
+- records `jacquard --version`
 - runs public demo transcripts
 - runs the gauntlet and escrow transcript
 - writes generated transcripts to `logs/release/0.1/`
 
-The script defaults to `WEFT_RELEASE_REF=release/0.1-evidence`. Override it for
+The script defaults to `JACQUARD_RELEASE_REF=release/0.1-evidence`. Override it for
 a final immutable commit:
 
 ```sh
-WEFT_RELEASE_REF=<commit> scripts/release/reproduce-0.1.sh
+JACQUARD_RELEASE_REF=<commit> scripts/release/reproduce-0.1.sh
 ```
 
 ## Public Demo Coverage

@@ -1,4 +1,4 @@
-# Weft Core 0.1 Freeze Surface
+# Jacquard Core 0.1 Freeze Surface
 
 Candidate base: `aec2c63`  
 Evidence branch predecessor: `7d7733f`  
@@ -19,8 +19,8 @@ candidate. Changes to these surfaces after RC require an explicit freeze update.
 
 ## Store
 
-- object format: `store/objects/<decl-hash>.wft`
-- mutable name index: `store/names.wft`
+- object format: `store/objects/<decl-hash>.jqd`
+- mutable name index: `store/names.jqd`
 - provenance sidecar: `store/objects/<decl-hash>.origin`
 - object files are immutable once written
 - derived member/constructor/op hashes do not have separate object files
@@ -28,7 +28,7 @@ candidate. Changes to these surfaces after RC require an explicit freeze update.
 
 ## Prelude and Ring-0
 
-- prelude load order: sorted `prelude/*.wft`
+- prelude load order: sorted `prelude/*.jqd`
 - ring manifest: `prelude/rings.manifest`
 - ring-0 signature freeze: `corpus/golden/ring0-freeze.golden`
 - ring audit: `test/test_rings.ml`
@@ -43,7 +43,7 @@ opam exec -- dune exec test/gen_freeze_goldens.exe
 
 ## Effects and Operations
 
-Effect declarations in `prelude/03-effects.wft`:
+Effect declarations in `prelude/03-effects.jqd`:
 
 - `eval`: `eval-code`
 - `abort`: `abort`
@@ -58,9 +58,9 @@ Effect declarations in `prelude/03-effects.wft`:
 
 Additional library effects:
 
-- `dist`: `sample`, `observe` in `prelude/06-dist.wft`
-- `check`: `check`, `fail` in `prelude/15-warp.wft`
-- `fault`: `flaky` in `prelude/18-fault.wft`
+- `dist`: `sample`, `observe` in `prelude/06-dist.jqd`
+- `check`: `check`, `fail` in `prelude/15-warp.jqd`
+- `fault`: `flaky` in `prelude/18-fault.jqd`
 
 Grantable root authorities in 0.1:
 
@@ -121,7 +121,7 @@ CLI exit codes pinned in `bin/main.ml` and cram tests:
 
 ## Trace and Replay
 
-- record/replay library: `prelude/17-codec.wft`
+- record/replay library: `prelude/17-codec.jqd`
 - canonical world seam in 0.1: `net.record` / `test.replay`
 - log payload: quoted `Code` form containing ordered operation entries
 - strict replay: positional, fails on wrong op/request/result drift
@@ -147,6 +147,6 @@ CLI exit codes pinned in `bin/main.ml` and cram tests:
 ## Counterfactual Fork Specs
 
 - grammar: `N=FORM`, where `N` is an operation index and `FORM` is a parseable
-  Weft form
+  Jacquard form
 - malformed specs fail closed with `E0104`
 - proof transcript: `test/cli/tools.t`

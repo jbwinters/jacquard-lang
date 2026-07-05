@@ -36,7 +36,7 @@ Workflow: `.github/workflows/release-evidence.yml`
 Runs on:
 
 - pushes to `release/**`
-- tags named `jacquard-core-*` (and `weft-core-*`, the pre-rename tag family)
+- tags named `jacquard-core-*`
 - manual dispatch with a chosen branch, tag, or commit
 
 Required check before tagging release candidates:
@@ -54,6 +54,44 @@ scripts/release/reproduce-0.1.sh
 It uploads the release docs and generated transcripts from `logs/release/0.1/`
 as a GitHub Actions artifact. That artifact is the reproducible evidence pack
 for review.
+
+## Release Binaries
+
+Workflow: `.github/workflows/release-binaries.yml`
+
+Runs on:
+
+- tags named `jacquard-core-*`
+- manual dispatch with a chosen branch, tag, or commit
+
+The workflow builds release archives for:
+
+- `linux-x86_64`
+- `macos-x86_64`
+- `macos-arm64`
+
+Each archive contains:
+
+- `bin/jacquard`: wrapper that sets `JACQUARD_PRELUDE`
+- `bin/jac`: symlink alias to `jacquard`
+- `libexec/jacquard/jacquard`: native executable
+- `share/jacquard/prelude`: standard library
+- `share/jacquard/demos`: runnable examples
+- `LICENSE` and package notes
+
+On tag pushes, the workflow creates or updates the GitHub Release and attaches
+the tarballs plus SHA-256 checksum files. Manual runs upload the same files as
+workflow artifacts without creating a release.
+
+Local equivalent:
+
+```sh
+eval "$(opam env)"
+scripts/release/package-binary.sh
+```
+
+The public installer is `scripts/install.sh`; it downloads the right archive
+from the latest release by default and installs into `~/.local`.
 
 ## Recommended Branch Protection
 
@@ -75,6 +113,7 @@ For `jacquard-core-*` tags:
 - create tags only after the release evidence workflow is green for the exact
   commit being tagged
 - preserve the uploaded evidence artifact with the tag/release notes
+- require the release-binaries workflow to complete before announcing the tag
 
 ## Local Equivalents
 

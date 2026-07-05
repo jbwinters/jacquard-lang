@@ -2,7 +2,7 @@
 
 ## Not A Production Compiler
 
-Weft core 0.1 is a research prototype. It has a real parser, checker, evaluator,
+Jacquard core 0.1 is a research prototype. It has a real parser, checker, evaluator,
 store, CLI, and tests, but it is not a production compiler or runtime.
 
 ## No Surface Syntax Yet
@@ -32,7 +32,7 @@ management are out of scope.
 
 ## No Self-Hosting
 
-Weft is implemented in OCaml. Self-hosting is not a 0.1 claim.
+Jacquard is implemented in OCaml. Self-hosting is not a 0.1 claim.
 
 ## No Formal Proof Of Row Soundness
 
