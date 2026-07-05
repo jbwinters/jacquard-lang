@@ -174,3 +174,19 @@ The dominant-case assumption survives phase 1 in the form that matters (call
 sites), with one design consequence recorded for phase 2: add parameterized
 handlers to the evidence-passing plan, or accept that the state family stays
 on the slow path.
+
+## Phase 2 result (2026-07-05): measured and declined
+
+The tier-0 direct path was built as an experiment and measured; the
+measurement said decline, so the code was removed. docs/perf-vm-decision.md
+has the numbers and the full record. The headline: the CPS machine already
+visits AST nodes at ~16ns on pure recursion, so
+eliminating frames and dispatch bought nothing — the interpreter's floor is
+its representations (persistent-map environments, boxed values), which only
+the later phases change. Consequences for this document: the interpreter-level
+rungs are exhausted, remaining performance work is representation change
+(pillars 2-4 together, on a native runtime), and two mechanics from the
+experiment bind that design — fast-path fallback requires demotion of the
+bailing closure, and direct host-stack execution requires a depth budget
+because deep non-tail recursion plus allocation is quadratic under a
+stack-scanning minor GC.

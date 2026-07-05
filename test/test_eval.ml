@@ -138,6 +138,28 @@ let test_ref_memoization () =
     (Value.show (Eval_support.eval_ok h "(tuple (var cell) (var cell))"));
   Alcotest.(check int) "bump ran once" 1 !(h.Eval_support.bumps)
 
+let test_coverage_gate () =
+  (* PF.2 phase 2: coverage tracking is on by default and skippable; the run path
+     turns it off because it never reads the table and the write costs per term
+     reference are measurable *)
+  let h = Eval_support.make () in
+  ignore
+    (Eval_support.put_src h.Eval_support.store h.Eval_support.names
+       "(defterm ((binding forty-two () (lit 42))))");
+  ignore (Eval_support.eval_ok h "(var forty-two)");
+  Alcotest.(check bool)
+    "tracked by default" false
+    (Hashtbl.length h.Eval_support.ctx.Eval.coverage = 0);
+  let h2 = Eval_support.make () in
+  h2.Eval_support.ctx.Eval.track_coverage <- false;
+  ignore
+    (Eval_support.put_src h2.Eval_support.store h2.Eval_support.names
+       "(defterm ((binding forty-two () (lit 42))))");
+  ignore (Eval_support.eval_ok h2 "(var forty-two)");
+  Alcotest.(check int)
+    "untracked when gated off" 0
+    (Hashtbl.length h2.Eval_support.ctx.Eval.coverage)
+
 let test_match_failure_shows_scrutinee () =
   let h = Eval_support.make () in
   match Eval_support.eval_err h "(match (lit 5) (clause (plit 0) (lit 1)))" with
@@ -188,6 +210,7 @@ let suite =
     Alcotest.test_case "even/odd mutual group" `Quick test_even_odd_mutual_group;
     Alcotest.test_case "left-to-right strict order" `Quick test_left_to_right_order;
     Alcotest.test_case "store term memoization" `Quick test_ref_memoization;
+    Alcotest.test_case "coverage tracking is gated" `Quick test_coverage_gate;
     Alcotest.test_case "match failure prints scrutinee" `Quick test_match_failure_shows_scrutinee;
     Alcotest.test_case "arity and type errors" `Quick test_arity_and_type_errors;
     Alcotest.test_case "unresolved var at runtime" `Quick test_unresolved_var_at_runtime;

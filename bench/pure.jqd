@@ -1,0 +1,22 @@
+; Pure-tier benchmark (PF.2 phase 2): arithmetic recursion, list traffic,
+; and a dictionary-heavy sort over ring-0/ring-2 code, no effects anywhere.
+; Backs the benchmark table in docs/perf-vm-decision.md:
+;   time jacquard run bench/pure.jqd
+(defterm ((binding fib ((tarrow ((tref int)) (row) (tref int)))
+  (lam ((pvar n))
+    (match (app (var lt) (var n) (lit 2))
+      (clause (pcon true) (var n))
+      (clause (pcon false)
+        (app (var add)
+          (app (groupref 0) (app (var sub) (var n) (lit 1)))
+          (app (groupref 0) (app (var sub) (var n) (lit 2))))))))))
+
+(app (var fib) (lit 27))
+
+(defterm ((binding sum-fold ()
+  (lam ((pvar xs))
+    (app (var list.fold) (var xs) (lit 0) (lam ((pvar acc) (pvar x)) (app (var add) (var acc) (var x))))))))
+
+(app (var sum-fold) (app (var list.range) (lit 0) (lit 200000)))
+
+(app (var list.length) (app (var list.sort) (app (var list.reverse) (app (var list.range) (lit 0) (lit 1500))) (var int.ord)))

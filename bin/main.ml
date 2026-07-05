@@ -107,6 +107,8 @@ let run_cmd file allows prelude store_dir seed infer_cache origin dry_run =
   match open_ctx ~prelude ~store_dir with
   | Error ds -> print_diags ds
   | Ok (store, ctx) -> (
+      (* run never reads coverage; skip the per-reference bookkeeping (PF.2 phase 2) *)
+      ctx.Eval.track_coverage <- false;
       let seed =
         (* OS-entropy seeded unless pinned; --seed makes sampling runs reproducible (SL.7) *)
         match seed with
