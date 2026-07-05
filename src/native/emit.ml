@@ -302,26 +302,36 @@ type exit_kind =
   | EReturn  (** function body: dup result, drop lives, return *)
   | EAssign of string * string  (** top-level: assign to a var and goto the label *)
 
-(* [emit_expr st buf lives exit e]: [lives] is every owned local in scope, innermost last. *)
-let rec emit_expr st buf (lives : string list) (exit : exit_kind) (e : expr) : unit =
-  let exit_drops () = if not st.precise then List.iter (fun l -> line buf "jq_drop(%s);" l) lives in
+(* [emit_expr st buf lives exit e]: [lives] is every owned local in scope, innermost last;
+   [tokens] are live reuse shells — every exit frees the leftovers (branch-safe). *)
+let rec emit_expr ?(tokens = []) st buf (lives : string list) (exit : exit_kind) (e : expr) : unit =
+  let exit_drops () =
+    if not st.precise then List.iter (fun l -> line buf "jq_drop(%s);" l) lives;
+    List.iter (fun t -> line buf "if (%s) free(%s);" t t) tokens
+  in
   match e with
+  | LetReuse (tok, x, _, body) ->
+      line buf "jq_block *%s = jq_reuse_take(%s);" tok x;
+      emit_expr ~tokens:(tok :: tokens) st buf lives exit body
   | Drop (xs, body) ->
       List.iter (fun x -> line buf "jq_drop(%s);" x) xs;
-      emit_expr st buf lives exit body
+      emit_expr ~tokens st buf lives exit body
   | Ret a -> (
+      (* materialize BEFORE the drops: the use expression may read through a local the
+         drops free (naive mode returning an env slot re-read clo after jq_drop(clo)) *)
       let v = use st buf a in
+      line buf "jq_value _ret = %s;" v;
       match exit with
       | EReturn ->
           exit_drops ();
-          line buf "return %s;" v
+          line buf "return _ret;"
       | EAssign (var, label) ->
           exit_drops ();
-          line buf "%s = %s;" var v;
+          line buf "%s = _ret;" var;
           line buf "goto %s;" label)
   | Let (x, b, body) ->
       emit_bound st buf lives x b;
-      emit_expr st buf (x :: lives) exit body
+      emit_expr ~tokens st buf (x :: lives) exit body
   | Match (a, clauses) ->
       let subject = atom_c st a in
       let rec arms = function
@@ -332,7 +342,7 @@ let rec emit_expr st buf (lives : string list) (exit : exit_kind) (e : expr) : u
             line buf "if (%s) {" cond;
             buf.indent <- buf.indent + 1;
             let binds = pat_bind st buf subject p in
-            emit_expr st buf (List.rev_append binds lives) exit body;
+            emit_expr ~tokens st buf (List.rev_append binds lives) exit body;
             buf.indent <- buf.indent - 1;
             line buf "} else {";
             buf.indent <- buf.indent + 1;
@@ -353,6 +363,7 @@ let rec emit_expr st buf (lives : string list) (exit : exit_kind) (e : expr) : u
       in
       if not st.precise then List.iter (fun l -> line buf "jq_drop(%s);" l) lives;
       List.iter (fun l -> line buf "jq_drop(%s);" l) post;
+      List.iter (fun t -> line buf "if (%s) free(%s);" t t) tokens;
       List.iteri (fun i t -> line buf "a%d = %s;" i t) temps;
       match exit with
       | EReturn -> line buf "goto entry;"
@@ -362,7 +373,7 @@ let rec emit_expr st buf (lives : string list) (exit : exit_kind) (e : expr) : u
   | TailKnown (h, args, post) ->
       let fname = fn_name (h, 0) in
       declare st ("fn:" ^ fname) (fun () -> line st.decls "extern jq_value %s(JQ_PARAMS);" fname);
-      emit_tail_call st buf lives exit ~post
+      emit_tail_call st buf lives exit ~post ~tokens
         (fun padded -> Printf.sprintf "%s(rt, JQ_UNIT, %s)" fname padded)
         args
   | TailUnknown (f, args, post) ->
@@ -370,11 +381,12 @@ let rec emit_expr st buf (lives : string list) (exit : exit_kind) (e : expr) : u
       let t = "_f" in
       line buf "jq_value %s = %s;" t fv;
       line buf "rt->apply_n = %d;" (List.length args);
-      emit_tail_call st buf (t :: lives) exit ~consumes:[ t ] ~post
+      emit_tail_call st buf (t :: lives) exit ~consumes:[ t ] ~post ~tokens
         (fun padded -> Printf.sprintf "jq_apply(rt, %s, %s)" t padded)
         args
 
-and emit_tail_call st buf lives exit ?(consumes = []) ?(post = []) mk (args : atom list) : unit =
+and emit_tail_call st buf lives exit ?(consumes = []) ?(post = []) ?(tokens = []) mk
+    (args : atom list) : unit =
   if List.length args > max_arity then failwith "arity cap not enforced upstream";
   let temps =
     List.mapi
@@ -390,6 +402,7 @@ and emit_tail_call st buf lives exit ?(consumes = []) ?(post = []) mk (args : at
   if not st.precise then
     List.iter (fun l -> if not (List.mem l consumes) then line buf "jq_drop(%s);" l) lives;
   List.iter (fun l -> line buf "jq_drop(%s);" l) post;
+  List.iter (fun t -> line buf "if (%s) free(%s);" t t) tokens;
   let padded =
     temps @ List.init (max_arity - List.length temps) (fun _ -> "JQ_UNIT") |> String.concat ", "
   in
@@ -428,6 +441,12 @@ and emit_bound st buf lives (x : string) (b : bound) : unit =
       else
         line buf "jq_value %s = jq_con(&%s, (jq_value[]){ %s });" x (ci_name h)
           (String.concat ", " vs)
+  | BAllocConReuse (h, args, tok) ->
+      declare_con_info st h;
+      let vs = List.map (fun a -> use st buf a) args in
+      line buf "jq_value %s = jq_con_reuse(%s, &%s, (jq_value[]){ %s });" x tok (ci_name h)
+        (String.concat ", " vs);
+      line buf "%s = NULL;" tok
   | BAllocTuple args ->
       let vs = List.map (fun a -> use st buf a) args in
       if vs = [] then line buf "jq_value %s = JQ_UNIT;" x

@@ -1,0 +1,13 @@
+; AVL map battery (task 68): 10k inserts over 1000 keys — the in-place reuse
+; showcase and the leak-harness fixture that exposed the wildcard-param and
+; branch-liveness bugs. Prints the steady-state map size.
+(defterm ((binding fill ()
+  (lam ((pvar n) (pvar m))
+    (match (app (var eq) (var n) (lit 0))
+      (clause (pcon true) (var m))
+      (clause (pcon false)
+        (app (groupref 0) (app (var sub) (var n) (lit 1))
+          (app (var map.set) (var m) (app (var mod) (var n) (lit 1000)) (var n)))))))))
+(app (var map.size) (app (var fill) (lit 10000) (app (var map.empty) (var int.ord))))
+(app (var map.size) (app (var fill) (lit 10000) (app (var map.empty) (var int.ord))))
+(app (var map.size) (app (var fill) (lit 10000) (app (var map.empty) (var int.ord))))

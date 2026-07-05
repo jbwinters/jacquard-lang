@@ -30,12 +30,13 @@ let bound_atoms = function
   | BAtom a -> [ a ]
   | BCallKnown (_, args) | BIntrinsic (_, args) | BAllocTuple args -> args
   | BCallUnknown (f, args) -> f :: args
-  | BAllocCon (_, args) -> args
+  | BAllocCon (_, args) | BAllocConReuse (_, args, _) -> args
   | BAllocClosure { captured; _ } -> captured
 
 let rec free (e : expr) : SSet.t =
   match e with
   | Ret a -> atoms_free [ a ]
+  | LetReuse (_, x, _, body) -> SSet.add x (free body)
   | Drop (xs, body) -> List.fold_left (fun acc x -> SSet.add x acc) (free body) xs
   | Let (x, b, body) -> SSet.union (atoms_free (bound_atoms b)) (SSet.remove x (free body))
   | Match (a, clauses) ->
@@ -87,6 +88,9 @@ let annotate_bound (movable : SSet.t) (b : bound) : bound * SSet.t =
   | BAllocCon (h, args) ->
       let args, moved = annotate_atoms movable args in
       (BAllocCon (h, args), moved)
+  | BAllocConReuse (h, args, tok) ->
+      let args, moved = annotate_atoms movable args in
+      (BAllocConReuse (h, args, tok), moved)
   | BAllocTuple args ->
       let args, moved = annotate_atoms movable args in
       (BAllocTuple args, moved)
@@ -117,6 +121,14 @@ let rec prune_pat (used : SSet.t) (p : npat) : npat =
 
 let add_drop xs body = if xs = [] then body else Drop (xs, body)
 
+(* reuse tokens need globally unique C names: the same scrutinee var can be re-matched in
+   nested Matches, and a name collision C-shadows the outer token so its shell leaks *)
+let tok_counter = ref 0
+
+let fresh_tok x =
+  incr tok_counter;
+  Printf.sprintf "_tok_%s_%d" x !tok_counter
+
 (* At a tail, every owned local must be consumed: moved vars transfer into the call; the rest
    drop. Anything the arguments read THROUGH (clo, via AEnv) must drop AFTER the argument
    temps are materialized — the emitter runs post-drops between the dups and the call. *)
@@ -131,7 +143,7 @@ let split_tail_drops (owned : SSet.t) (moved : SSet.t) (atoms : atom list) :
    every path. *)
 let rec walk (owned : SSet.t) (e : expr) : expr =
   match e with
-  | Drop _ -> e (* never pre-existing *)
+  | Drop _ | LetReuse _ -> e (* never pre-existing *)
   | Ret a -> (
       match a with
       | AVar x when SSet.mem x owned ->
@@ -171,21 +183,37 @@ let rec walk (owned : SSet.t) (e : expr) : expr =
               | Some x -> SSet.mem x owned && not (SSet.mem x fv)
               | None -> false
             in
+            (* EVERY owned var flows into every clause: a var live in another arm but
+               dead on this one must still be consumed here — the walk drops it at its
+               frontier. Intersecting with this clause's fv leaked exactly those. *)
             let owned' =
               SSet.union used_binds
                 (match atom_var a with
-                | Some x when scrutinee_dead -> SSet.inter (SSet.remove x owned) fv
-                | _ -> SSet.inter owned (SSet.union fv (atoms_free [ a ])))
-            in
-            let owned' =
-              (* anything owned but free in NO clause path must still be consumed here *)
-              SSet.union owned' (SSet.diff owned (SSet.union fv (atoms_free [ a ])))
+                | Some x when scrutinee_dead -> SSet.remove x owned
+                | _ -> owned)
             in
             let body' = walk owned' body in
-            let head_drops =
-              match atom_var a with Some x when scrutinee_dead -> [ x ] | _ -> []
-            in
-            (p', add_drop head_drops body'))
+            match (p', a) with
+            | NPCon (_, ps), AVar x when scrutinee_dead ->
+                (* the dying unique CON's shell feeds same-arity allocations here *)
+                let arity = List.length ps in
+                let tok = fresh_tok x in
+                let rec reuse (e : expr) : expr =
+                  match e with
+                  | Let (y, BAllocCon (h, args), rest) when List.length args = arity ->
+                      Let (y, BAllocConReuse (h, args, tok), reuse rest)
+                  | Let (y, b, rest) -> Let (y, b, reuse rest)
+                  | Drop (xs, rest) -> Drop (xs, reuse rest)
+                  | LetReuse (t, s, n, rest) -> LetReuse (t, s, n, reuse rest)
+                  | Match (s, cls) -> Match (s, List.map (fun (q, e) -> (q, reuse e)) cls)
+                  | Ret _ | TailSelf _ | TailKnown _ | TailUnknown _ -> e
+                in
+                (p', LetReuse (tok, x, arity, reuse body'))
+            | _ ->
+                let head_drops =
+                  match atom_var a with Some x when scrutinee_dead -> [ x ] | _ -> []
+                in
+                (p', add_drop head_drops body'))
           clauses
       in
       Match (a, clauses')
@@ -212,7 +240,10 @@ let fn (f : fn) : fn =
       (fun i p ->
         match p with
         | NPVar x -> [ x ] (* the argument local is renamed into the binder *)
-        | NPWild -> [] (* argument dropped by the emitter's prologue? no: never bound... *)
+        | NPWild ->
+            [ Printf.sprintf "a%d" i ]
+            (* a wildcard param still ARRIVES owned; nothing binds it, so the walk must
+               drop it at its frontier (map.set's ignore-old-value lambda leaked here) *)
         | _ -> Printf.sprintf "a%d" i :: SSet.elements (npat_binds p))
       f.params
     |> List.concat

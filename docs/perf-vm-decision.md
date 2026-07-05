@@ -122,6 +122,13 @@ optimization passes) against the same workloads, same machine:
 | fib 27                                | 0.32s       | 0.010s           |
 | bench/pure.jqd (fib + fold + sort)    | 3.0s        | 0.051s           |
 
+Task 68 (Perceus, precise ownership + in-place reuse) against the naive
+skeleton discipline, same machine: bench/pure.jqd 45ms naive -> 30ms
+precise; the AVL map battery (bench/avl.jqd, 10k map.set inserts) runs
+byte-identical to the interpreter's 2.2s in ~10ms, at 1.49MB steady-state
+RSS precise vs 1.93MB naive — the reuse tokens turn the rebuild of each
+map spine into in-place pointer surgery, as pillar 2 predicted.
+
 Byte-identical output on every program in the differential set
 (test/cli/native.t), ASAN and leak-detection clean. The interpreter rungs
 were declined because engine constants were not the win; changing the

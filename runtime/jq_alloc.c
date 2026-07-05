@@ -102,3 +102,15 @@ jq_value jq_closure(void *code, uint16_t arity, uint16_t env_n,
   if (env_n) memcpy(&b->payload[2], env, (size_t)env_n * 8);
   return jq_of_block(b);
 }
+
+jq_value jq_con_reuse(jq_block *shell, const jq_con_info *info,
+                      const jq_value *fields) {
+  if (!shell) return jq_con(info, fields);
+  /* same word count guaranteed by the pass (same arity) */
+  shell->tag = JQ_CON;
+  shell->flags = 0;
+  shell->rc = 1;
+  shell->payload[0] = (uint64_t)info;
+  if (info->arity) memcpy(&shell->payload[1], fields, (size_t)info->arity * 8);
+  return jq_of_block(shell);
+}

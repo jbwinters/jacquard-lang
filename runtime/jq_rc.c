@@ -94,3 +94,11 @@ jq_block *jq_drop_reuse(jq_value v) {
   b->rc--;
   return NULL;
 }
+
+jq_block *jq_reuse_take(jq_value v) {
+  jq_block *b = jq_drop_reuse(v);
+  if (!b) return NULL;
+  /* release the old fields; the shell's words become dead storage */
+  for (uint16_t i = 1; i < b->n; i++) jq_drop(b->payload[i]);
+  return b;
+}

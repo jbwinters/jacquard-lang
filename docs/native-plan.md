@@ -294,8 +294,8 @@ deconstructed a unique CON and allocates a same-arity CON uses
   harness runs every native.t program and fails on any leak).
 - RSS plateau: the AVL insert battery (a native port of the 10k-insert
   program) shows steady-state memory across 3 consecutive in-process runs.
-- Outputs still byte-identical; naive-mode flag (`--no-perceus`) retained
-  for differential debugging.
+- Outputs still byte-identical; naive-mode lever (`JACQUARD_PERCEUS=off`)
+  retained for differential debugging.
 - Benchmark delta recorded: map.set battery before/after reuse.
 
 ## Task 69 — Monomorphization by content hash

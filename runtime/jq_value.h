@@ -291,4 +291,13 @@ void jq_drop(jq_value v);
    return NULL. */
 jq_block *jq_drop_reuse(jq_value v);
 
+/* Perceus reuse (task 68): [jq_reuse_take] is jq_drop_reuse for a dying CON
+   scrutinee — on a unique shell it releases the old fields and returns the
+   shell; otherwise it decrements and returns NULL. [jq_con_reuse] fills a
+   taken shell (or allocates when NULL). A taken-but-unused shell is plain
+   free()d at scope exit. */
+jq_block *jq_reuse_take(jq_value v);
+jq_value jq_con_reuse(jq_block *shell, const jq_con_info *info,
+                      const jq_value *fields);
+
 #endif /* JQ_VALUE_H */

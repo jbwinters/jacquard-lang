@@ -35,6 +35,10 @@ type npat =
 
 type expr =
   | Ret of atom
+  | LetReuse of string * string * int * expr
+      (** Perceus reuse (task 68): take the dying CON scrutinee's shell (token, scrutinee var,
+          constructor arity, body). Matching-arity BAllocConReuse sites in the body consume the
+          token; the emitter frees a leftover shell at every exit. Lowering never produces it. *)
   | Drop of string list * expr
       (** Perceus (task 68): these owned locals die here. Lowering never produces it. *)
   | Let of string * bound * expr
@@ -53,6 +57,7 @@ and bound =
   | BCallKnown of Hash.t * atom list
   | BCallUnknown of atom * atom list
   | BAllocCon of Hash.t * atom list  (** exact arity, checked at lowering *)
+  | BAllocConReuse of Hash.t * atom list * string  (** Perceus: fill the token's shell if live *)
   | BAllocTuple of atom list
   | BAllocClosure of closure_alloc
   | BIntrinsic of string * atom list
@@ -402,7 +407,7 @@ and contains_tail_self (e : expr) : bool =
   match e with
   | TailSelf _ -> true
   | Ret _ | TailKnown _ | TailUnknown _ -> false
-  | Drop (_, body) -> contains_tail_self body
+  | Drop (_, body) | LetReuse (_, _, _, body) -> contains_tail_self body
   | Let (_, _, body) -> contains_tail_self body
   | Match (_, clauses) -> List.exists (fun (_, b) -> contains_tail_self b) clauses
 
