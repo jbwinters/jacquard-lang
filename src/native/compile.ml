@@ -15,6 +15,9 @@ open Jacquard
 
 type atom =
   | AVar of string  (** a unique local (parameter, let, or pattern binding) *)
+  | AMove of atom
+      (** Perceus (task 68): this use is the variable's last — transfer ownership, no dup. Lowering
+          never produces it; the ownership pass rewrites final uses. *)
   | AEnv of int  (** a closure-environment slot of the current function *)
   | AInt of int
   | AReal of float
@@ -32,13 +35,18 @@ type npat =
 
 type expr =
   | Ret of atom
+  | Drop of string list * expr
+      (** Perceus (task 68): these owned locals die here. Lowering never produces it. *)
   | Let of string * bound * expr
   | Match of atom * (npat * expr) list
       (** sequential first-match tests over the scrutinee atom; exhaustion reproduces the
           interpreter's Match_failure (scrutinee rendered by jq_show) *)
-  | TailSelf of atom list  (** loopified self recursion: rebind params, goto entry *)
-  | TailKnown of Hash.t * atom list  (** musttail to a member function of known arity *)
-  | TailUnknown of atom * atom list  (** musttail through the generic apply *)
+  | TailSelf of atom list * string list
+      (** loopified self recursion: rebind params, goto entry. The string list is Perceus's
+          post-drops — owned locals read THROUGH during argument materialization (clo, via AEnv)
+          that must drop after the reads, not before (lowering leaves it empty). *)
+  | TailKnown of Hash.t * atom list * string list
+  | TailUnknown of atom * atom list * string list
 
 and bound =
   | BAtom of atom
@@ -394,6 +402,7 @@ and contains_tail_self (e : expr) : bool =
   match e with
   | TailSelf _ -> true
   | Ret _ | TailKnown _ | TailUnknown _ -> false
+  | Drop (_, body) -> contains_tail_self body
   | Let (_, _, body) -> contains_tail_self body
   | Match (_, clauses) -> List.exists (fun (_, b) -> contains_tail_self b) clauses
 
@@ -413,15 +422,15 @@ and lower_app ctx env ~tail (f : Kernel.expr) (args : Kernel.expr list) (k : ato
           else with_args (fun atoms -> bind_call (BIntrinsic (name, atoms)))
       | HKnown (h, arity) when List.length args = arity ->
           if tail then
-            if ctx.self = Some h then with_args (fun atoms -> TailSelf atoms)
-            else with_args (fun atoms -> TailKnown (h, atoms))
+            if ctx.self = Some h then with_args (fun atoms -> TailSelf (atoms, []))
+            else with_args (fun atoms -> TailKnown (h, atoms, []))
           else with_args (fun atoms -> bind_call (BCallKnown (h, atoms)))
       | HKnown (h, _) | HValue (AGlobal h) ->
           let a = member_value_atom ctx h in
-          if tail then with_args (fun atoms -> TailUnknown (a, atoms))
+          if tail then with_args (fun atoms -> TailUnknown (a, atoms, []))
           else with_args (fun atoms -> bind_call (BCallUnknown (a, atoms)))
       | HValue a ->
-          if tail then with_args (fun atoms -> TailUnknown (a, atoms))
+          if tail then with_args (fun atoms -> TailUnknown (a, atoms, []))
           else with_args (fun atoms -> bind_call (BCallUnknown (a, atoms))))
   | Kernel.Ref (h, Kernel.Con) ->
       note_con ctx h;
@@ -443,7 +452,7 @@ and lower_app ctx env ~tail (f : Kernel.expr) (args : Kernel.expr list) (k : ato
       | Error _ -> refuse ctx "group member does not resolve (corrupt store)")
   | _ ->
       lower ctx env f (fun fa ->
-          if tail then with_args (fun atoms -> TailUnknown (fa, atoms))
+          if tail then with_args (fun atoms -> TailUnknown (fa, atoms, []))
           else with_args (fun atoms -> bind_call (BCallUnknown (fa, atoms))))
 
 (* ------------------------------------------------------------------ *)

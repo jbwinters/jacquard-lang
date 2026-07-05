@@ -96,6 +96,9 @@ let c_double (r : float) =
 
 type unit_state = {
   prog : program;
+  precise : bool;
+      (** Perceus ran (task 68): moves and Drop nodes own every count; the emitter adds no
+          exit-point drops of its own. False = the naive skeleton discipline. *)
   ub : buf;  (** unit body: functions *)
   decls : buf;  (** extern declarations and unit-local statics, emitted first *)
   mutable declared : SSet.t;  (** dedup for externs/statics *)
@@ -201,8 +204,9 @@ let real_static st (r : float) =
 (* ------------------------------------------------------------------ *)
 
 (* The C expression for an atom (no ownership transfer). *)
-let atom_c st (a : atom) : string =
+let rec atom_c st (a : atom) : string =
   match a with
+  | AMove inner -> atom_c st inner
   | AVar x -> x
   | AEnv i -> Printf.sprintf "jq_closure_env(clo)[%d]" i
   | AInt i -> Printf.sprintf "jq_int(%dLL)" i
@@ -215,6 +219,7 @@ let atom_c st (a : atom) : string =
 let use st buf (a : atom) : string =
   match a with
   | AInt _ -> atom_c st a
+  | AMove inner -> atom_c st inner (* ownership transfers: Perceus proved the last use *)
   | _ ->
       let e = atom_c st a in
       line buf "jq_dup(%s);" e;
@@ -299,15 +304,19 @@ type exit_kind =
 
 (* [emit_expr st buf lives exit e]: [lives] is every owned local in scope, innermost last. *)
 let rec emit_expr st buf (lives : string list) (exit : exit_kind) (e : expr) : unit =
+  let exit_drops () = if not st.precise then List.iter (fun l -> line buf "jq_drop(%s);" l) lives in
   match e with
+  | Drop (xs, body) ->
+      List.iter (fun x -> line buf "jq_drop(%s);" x) xs;
+      emit_expr st buf lives exit body
   | Ret a -> (
       let v = use st buf a in
       match exit with
       | EReturn ->
-          List.iter (fun l -> line buf "jq_drop(%s);" l) lives;
+          exit_drops ();
           line buf "return %s;" v
       | EAssign (var, label) ->
-          List.iter (fun l -> line buf "jq_drop(%s);" l) lives;
+          exit_drops ();
           line buf "%s = %s;" var v;
           line buf "goto %s;" label)
   | Let (x, b, body) ->
@@ -332,7 +341,7 @@ let rec emit_expr st buf (lives : string list) (exit : exit_kind) (e : expr) : u
             line buf "}"
       in
       arms clauses
-  | TailSelf args -> (
+  | TailSelf (args, post) -> (
       let temps =
         List.mapi
           (fun i a ->
@@ -342,29 +351,30 @@ let rec emit_expr st buf (lives : string list) (exit : exit_kind) (e : expr) : u
             t)
           args
       in
-      List.iter (fun l -> line buf "jq_drop(%s);" l) lives;
+      if not st.precise then List.iter (fun l -> line buf "jq_drop(%s);" l) lives;
+      List.iter (fun l -> line buf "jq_drop(%s);" l) post;
       List.iteri (fun i t -> line buf "a%d = %s;" i t) temps;
       match exit with
       | EReturn -> line buf "goto entry;"
       | EAssign _ ->
           (* top-level expressions have no self *)
           line buf "goto entry;")
-  | TailKnown (h, args) ->
+  | TailKnown (h, args, post) ->
       let fname = fn_name (h, 0) in
       declare st ("fn:" ^ fname) (fun () -> line st.decls "extern jq_value %s(JQ_PARAMS);" fname);
-      emit_tail_call st buf lives exit
+      emit_tail_call st buf lives exit ~post
         (fun padded -> Printf.sprintf "%s(rt, JQ_UNIT, %s)" fname padded)
         args
-  | TailUnknown (f, args) ->
+  | TailUnknown (f, args, post) ->
       let fv = use st buf f in
       let t = "_f" in
       line buf "jq_value %s = %s;" t fv;
       line buf "rt->apply_n = %d;" (List.length args);
-      emit_tail_call st buf (t :: lives) exit ~consumes:[ t ]
+      emit_tail_call st buf (t :: lives) exit ~consumes:[ t ] ~post
         (fun padded -> Printf.sprintf "jq_apply(rt, %s, %s)" t padded)
         args
 
-and emit_tail_call st buf lives exit ?(consumes = []) mk (args : atom list) : unit =
+and emit_tail_call st buf lives exit ?(consumes = []) ?(post = []) mk (args : atom list) : unit =
   if List.length args > max_arity then failwith "arity cap not enforced upstream";
   let temps =
     List.mapi
@@ -375,9 +385,11 @@ and emit_tail_call st buf lives exit ?(consumes = []) mk (args : atom list) : un
         t)
       args
   in
-  (* the callee consumes temps (and [consumes]); everything else live drops here, BEFORE the
-     musttail — the caller's frame is about to be reused *)
-  List.iter (fun l -> if not (List.mem l consumes) then line buf "jq_drop(%s);" l) lives;
+  (* the callee consumes temps (and [consumes]); in naive mode everything else live drops
+     here, BEFORE the musttail. Precise mode: the pass placed a Drop node ahead already. *)
+  if not st.precise then
+    List.iter (fun l -> if not (List.mem l consumes) then line buf "jq_drop(%s);" l) lives;
+  List.iter (fun l -> line buf "jq_drop(%s);" l) post;
   let padded =
     temps @ List.init (max_arity - List.length temps) (fun _ -> "JQ_UNIT") |> String.concat ", "
   in
@@ -487,9 +499,10 @@ let emit_fn st (f : fn) : unit =
 (* Unit and main-source generation                                     *)
 (* ------------------------------------------------------------------ *)
 
-let new_state prog =
+let new_state ?(precise = false) prog =
   {
     prog;
+    precise;
     ub = { b = Buffer.create 4096; indent = 0 };
     decls = { b = Buffer.create 1024; indent = 0 };
     declared = SSet.empty;
@@ -506,8 +519,9 @@ let assemble st ~banner =
 
 (** One C unit per store declaration: the functions of every member in it (const bodies live in the
     main unit's init functions; their lifted lambdas still live here). *)
-let unit_source (prog : program) ~(decl_hex : string) (members : compiled_member list) : string =
-  let st = new_state prog in
+let unit_source (prog : program) ~precise ~(decl_hex : string) (members : compiled_member list) :
+    string =
+  let st = new_state ~precise prog in
   List.iter
     (fun (m : compiled_member) ->
       line st.ub "";
@@ -522,9 +536,9 @@ let unit_source (prog : program) ~(decl_hex : string) (members : compiled_member
 
 (** The main unit: constructor infos, builtin infos, init-once cells, and the per-expression driver
     with the interpreter's output and exit-code contract. *)
-let main_source (prog : program) ~(v_true : Hash.t) ~(v_false : Hash.t)
+let main_source (prog : program) ~precise ~(v_true : Hash.t) ~(v_false : Hash.t)
     ~(orderings : (Hash.t * Hash.t * Hash.t) option) ~(intrinsics : (string * int) list) : string =
-  let st = new_state prog in
+  let st = new_state ~precise prog in
   (* constructor infos: the shared identities every unit externs *)
   let cons = Hashtbl.fold (fun _ cr acc -> cr :: acc) prog.cons [] in
   let cons = List.sort (fun a b -> compare (hex12 a.chash) (hex12 b.chash)) cons in

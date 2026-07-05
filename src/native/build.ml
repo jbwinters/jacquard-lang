@@ -331,6 +331,30 @@ let build ~(store : Store.t) ~(tops : (Kernel.expr * string list) list) ~prelude
     (int, [ `Refused of Compile.refusal list | `Toolchain of string ]) result =
   let d = discover store in
   let { prog; refusals } = compile_program store d tops in
+  (* Perceus (task 68): precise ownership unless the differential lever turns it off *)
+  let precise = Sys.getenv_opt "JACQUARD_PERCEUS" <> Some "off" in
+  let prog =
+    if not precise then prog
+    else
+      {
+        prog with
+        Emit.members =
+          List.map
+            (fun (cm : Compile.compiled_member) ->
+              {
+                cm with
+                Compile.main_fn = Option.map Perceus.fn cm.Compile.main_fn;
+                const_body = Option.map (Perceus.walk Perceus.SSet.empty) cm.Compile.const_body;
+                lifted = List.map Perceus.fn cm.Compile.lifted;
+              })
+            prog.Emit.members;
+        tops =
+          List.map
+            (fun (body, lifted, warnings) ->
+              (Perceus.walk Perceus.SSet.empty body, List.map Perceus.fn lifted, warnings))
+            prog.Emit.tops;
+      }
+  in
   if refusals <> [] then Error (`Refused refusals)
   else
     match require_clang () with
@@ -375,15 +399,16 @@ let build ~(store : Store.t) ~(tops : (Kernel.expr * string list) list) ~prelude
             Hashtbl.fold
               (fun decl_hash cms acc ->
                 let hex = Emit.hex12 decl_hash in
-                ("unit_" ^ hex, Emit.unit_source prog ~decl_hex:hex cms) :: acc)
+                ("unit_" ^ hex, Emit.unit_source prog ~precise ~decl_hex:hex cms) :: acc)
               by_decl []
             |> List.sort compare
           in
-          let main_c = Emit.main_source prog ~v_true ~v_false ~orderings ~intrinsics in
+          let main_c = Emit.main_source prog ~precise ~v_true ~v_false ~orderings ~intrinsics in
           let cflags =
             match Sys.getenv_opt "JACQUARD_NATIVE_CFLAGS" with Some f -> f | None -> ""
           in
           let cache_tag =
+            let emitter_version = if precise then emitter_version else emitter_version ^ "-naive" in
             if cflags = "" then emitter_version
             else emitter_version ^ "-" ^ String.sub (Hash.to_hex (Hash.of_string cflags)) 0 8
           in
