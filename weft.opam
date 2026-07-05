@@ -18,7 +18,7 @@ depends: [
   "dune" {>= "3.11"}
   "digestif"
   "menhir"
-  "cmdliner"
+  "cmdliner" {>= "2.1.0" & < "2.2"}
   "alcotest" {with-test}
   "fmt" {with-test}
   "qcheck" {with-test}
