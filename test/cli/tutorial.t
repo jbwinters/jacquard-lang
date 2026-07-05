@@ -5,13 +5,9 @@ The tutorial's command lines stay truthful (W5.4: every example runs in CI).
 Examples 1 and 2 (literals and application):
 
   $ weft run ../../corpus/valid/lit-int.wft
-  Usage: weft run [--help] [OPTION]… FILE
-  weft: FILE argument: no '../../corpus/valid/lit-int.wft' file or directory
-  [124]
+  1
   $ weft run ../../corpus/valid/app-add.wft
-  Usage: weft run [--help] [OPTION]… FILE
-  weft: FILE argument: no '../../corpus/valid/app-add.wft' file or directory
-  [124]
+  3
 
 Example 10 (content addressing):
 

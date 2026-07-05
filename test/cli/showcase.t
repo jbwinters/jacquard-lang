@@ -5,6 +5,9 @@ candidates is the eval CAPABILITY — synthesis refuses without the grant), and
 read the posterior over programs. One weak test leaves two survivors at the
 renormalized prior; one more test proves the correct program at probability 1.
 
+  $ export WEFT_PRELUDE=../../prelude
+  $ D=../../demos
+
   $ cat $D/synthesis.wft > syn.wft
   $ cat >> syn.wft <<'WEFT'
   > (app (var posterior-over-programs) (app (var weak-spec)))
