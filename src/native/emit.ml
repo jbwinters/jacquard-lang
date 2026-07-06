@@ -723,11 +723,18 @@ let main_source (prog : program) ~precise ~(v_true : Hash.t) ~(v_false : Hash.t)
          interpreter's interleaving (earlier output has already flushed when a later
          expression is refused) *)
       List.iter (fun w -> line st.ub "fputs(%s, stderr);" (c_string (w ^ "\n"))) warnings;
-      List.iter
-        (fun (eff, msg) ->
-          line st.ub "if (!g_eff_%s) { fputs(%s, stderr); exit(3); }" (mangle eff)
-            (c_string (msg ^ "\n")))
-        (List.nth manifests i);
+      (* every missing grant reports before the single exit — the interpreter
+         prints manifest_errors' whole batch, not just the first *)
+      (match List.nth manifests i with
+      | [] -> ()
+      | entries ->
+          line st.ub "bool _refused = false;";
+          List.iter
+            (fun (eff, msg) ->
+              line st.ub "if (!g_eff_%s) { fputs(%s, stderr); _refused = true; }" (mangle eff)
+                (c_string (msg ^ "\n")))
+            entries;
+          line st.ub "if (_refused) exit(3);");
       line st.ub "jq_value _v = JQ_UNIT;";
       emit_expr st st.ub [] (EAssign ("_v", Printf.sprintf "done_top_%d" i)) body;
       line st.ub "done_top_%d:;" i;
@@ -749,8 +756,11 @@ let main_source (prog : program) ~precise ~(v_true : Hash.t) ~(v_false : Hash.t)
   line st.ub "jq_rt rt0 = { 0 };";
   line st.ub "for (int i = 1; i < argc; i++) {";
   st.ub.indent <- st.ub.indent + 1;
-  line st.ub "if (strcmp(argv[i], \"--allow\") != 0 || i + 1 >= argc) continue;";
-  line st.ub "const char *nm = argv[++i];";
+  (* cmdliner accepts both the space and equals spellings; match it *)
+  line st.ub "const char *nm = NULL;";
+  line st.ub "if (strncmp(argv[i], \"--allow=\", 8) == 0) nm = argv[i] + 8;";
+  line st.ub "else if (strcmp(argv[i], \"--allow\") == 0 && i + 1 < argc) nm = argv[++i];";
+  line st.ub "if (!nm) continue;";
   line st.ub "char low[64]; size_t li = 0;";
   line st.ub
     "for (; nm[li] && li < 63; li++) low[li] = nm[li] >= 'A' && nm[li] <= 'Z' ? nm[li] + 32 : \
@@ -761,7 +771,7 @@ let main_source (prog : program) ~precise ~(v_true : Hash.t) ~(v_false : Hash.t)
     (fun (eff, natives) ->
       line st.ub "if (strcmp(low, %s) == 0) {" (c_string eff);
       st.ub.indent <- st.ub.indent + 1;
-      line st.ub "g_eff_%s = true;" eff;
+      line st.ub "g_eff_%s = true;" (mangle eff);
       Hashtbl.iter
         (fun _ o ->
           if o.oeffect = eff then

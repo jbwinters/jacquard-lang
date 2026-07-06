@@ -169,6 +169,30 @@ refused, byte-identical both ways:
   $ diff i.out n.out && echo identical
   identical
 
+An expression needing TWO ungranted effects reports both before the one
+exit, like the interpreter's manifest_errors batch; and the equals
+spelling of --allow works like cmdliner's:
+
+  $ cat > two-eff.jqd <<'EOF_JQD'
+  > (let nonrec (pwild) (app (var println) (lit "x")) (app (var now)))
+  > EOF_JQD
+  $ jacquard build two-eff.jqd -o two-eff > /dev/null
+  $ jacquard run two-eff.jqd > i.out 2>&1; echo "exit $?"
+  exit 3
+  $ ./two-eff > n.out 2>&1; echo "exit $?"
+  exit 3
+  $ cat n.out
+  error[E0814]: this program requires the `clock` effect, which is not granted (performed via `now`)
+    hint: grant it with --allow clock, or handle the effect in the program
+  error[E0814]: this program requires the `console` effect, which is not granted (performed via `println`)
+    hint: grant it with --allow console, or handle the effect in the program
+  $ diff i.out n.out && echo identical
+  identical
+  $ jacquard run hello.jqd --allow=console > i.out 2>&1
+  $ ./hello --allow=console > n.out 2>&1
+  $ diff i.out n.out && echo identical
+  identical
+
 A clock handler discharging `now` in-language: deterministic, no grant
 needed (the row is empty), byte-identical:
 
