@@ -34,3 +34,6 @@ assertion. Counts become printed values via in-language collectors
 | (throw battery, task-71 DoD) | g20-throw-either.jqd | aborting throw clause on both legs |
 | (one-shot discipline, task-71 DoD) | g21-conditional-resume.jqd | clause resumes on one path, aborts on the other |
 | (enum posterior on m3, task-71 DoD) | g22-enum-m3.jqd | prelude/07-enum multi-shot enumeration, normalized two-coins posterior |
+| test_fault_random_deterministic (task-72 DoD) | g23-fault-random.jqd | fault.random's seeded LCG chaos stream, seed in the report |
+| test_dst_byte_identical (task-72 DoD) | g24-dst.jqd | clock.fixed + net.scripted + fault.all DST, run-twice stable |
+| (chain-order regression, task 72) | g25-chain-order.jqd | capture crossing a state-passer inside a multi-shot resume |

@@ -1,0 +1,18 @@
+; task 72: fault.random's seeded chaos stream (an in-language LCG handler,
+; prelude/18-fault.jqd) is deterministic and native-identical — twin of
+; test_replay.ml test_fault_random_deterministic, with the seed printed
+; through the report
+(app (var test.run)
+  (lam ()
+    (app (var fault.random)
+      (lam ()
+        (let nonrec (pvar a) (app (var flaky) (lit "x"))
+          (let nonrec (pvar b) (app (var flaky) (lit "y"))
+            (app (var check.true) (var true)
+              (app (var text.concat) (lit "path ")
+                (match (tuple (var a) (var b))
+                  (clause (ptuple (pcon true) (pcon true)) (lit "tt"))
+                  (clause (ptuple (pcon true) (pcon false)) (lit "tf"))
+                  (clause (ptuple (pcon false) (pcon true)) (lit "ft"))
+                  (clause (ptuple (pcon false) (pcon false)) (lit "ff"))))))))
+      (lit 50) (lit 42))))

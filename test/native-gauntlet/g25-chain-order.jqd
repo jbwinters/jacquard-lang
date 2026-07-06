@@ -1,0 +1,29 @@
+; task 72 regression: a capture crossing a state-passing handler INSIDE a
+; multi-shot resumed extent, collected outside — the minimized reproducer of
+; the DST divergence (an un-entered chain frame re-pushed at the wrong depth
+; handed the resume argument to the transformer instead of the body).
+(defeffect e-flip ((tvar a)) (op flip () (tref bool)))
+(defeffect e-ask ((tvar a)) (op ask () (tref int)))
+
+(app (var emit.collect)
+  (lam ()
+    (handle
+      (app
+        (handle
+          (match (app (var flip))
+            (clause (pcon true)
+              (let nonrec (pvar x) (app (var ask))
+                (let nonrec (pwild) (app (var emit) (var x)) (lit 1))))
+            (clause (pcon false)
+              (let nonrec (pwild) (app (var emit) (lit 200)) (lit 2))))
+          (ret (pvar x) (lam ((pwild)) (var x)))
+          (opclause ask () k
+            (lam ((pvar remaining))
+              (match (var remaining)
+                (clause (pcon cons (pvar r) (pvar more))
+                  (app (app (var k) (var r)) (var more)))
+                (clause (pcon nil) (lit -1))))))
+        (app (var cons) (lit 7) (var nil)))
+      (ret (pvar x) (app (var cons) (var x) (var nil)))
+      (opclause flip () k
+        (app (var list.append) (app (var k) (var true)) (app (var k) (var false)))))))

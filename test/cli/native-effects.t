@@ -40,6 +40,9 @@ assertion, exit codes included.
   identical: g20-throw-either (exit 0)
   identical: g21-conditional-resume (exit 0)
   identical: g22-enum-m3 (exit 0)
+  identical: g23-fault-random (exit 0)
+  identical: g24-dst (exit 0)
+  identical: g25-chain-order (exit 0)
 
 The flagship outputs, pinned so a both-engines regression cannot slip through
 the diff-only loop above:
@@ -53,6 +56,18 @@ the diff-only loop above:
   $ jacquard build ../../test/native-gauntlet/g22-enum-m3.jqd -o enum-m3 > /dev/null
   $ ./enum-m3
   cons(mk-pair(true, 0.3333333333333333), cons(mk-pair(true, 0.3333333333333333), cons(mk-pair(false, 0.3333333333333333), cons(mk-pair(false, 0.0), nil))))
+
+The DST battery is bit-deterministic natively: run twice, byte-identical
+(the task-72 DoD; both runs also byte-match the interpreter through the
+loop above):
+
+  $ jacquard build ../../test/native-gauntlet/g24-dst.jqd -o dst > /dev/null
+  $ ./dst > dst1.out 2>&1
+  $ ./dst > dst2.out 2>&1
+  $ diff dst1.out dst2.out && echo stable
+  stable
+  $ cat dst1.out
+  mk-report(cons(("net.fetch=ok body99", true), cons(("net.fetch=FAULT net: connection refused (injected)", true), nil)), none)
 
 demos/m1.sh's three legs (task-71 DoD): fact and choose native-identical, the
 gated-eval leg a pinned refusal.

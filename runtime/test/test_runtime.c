@@ -668,6 +668,146 @@ static void test_deep_handler_recovers_inner_performs(void) {
   free(rt.ks);
 }
 
+/* chain-order regression (task 72's DST divergence): when a resumed chain
+ * suspends again for an OUTER handler, an un-entered middle frame must sit
+ * BELOW the inner extent's new frames in the outer slice — the re-entry
+ * order is value-distinguishable here (inner scales, outer doubles). */
+
+/* inner machine: pa = perform(OP_A); pb = perform(OP_B); pa*1000 + pb */
+static jq_value m5_in_reenter(jq_rt *rt, jq_block *f, jq_value v) {
+  uint64_t ix = jq_frame_ix(f);
+  if (ix == 1) {
+    free(f);
+    jq_value pa = v;
+    jq_block *f2 = NULL;
+    if (rt->cap_depth) {
+      f2 = jq_frame_alloc(m5_in_reenter, 2, 0, 1);
+      jq_frame_slots(f2)[0] = pa;
+      jq_ks_push(rt, f2);
+    }
+    jq_value r = jq_perform(rt, OP_B, 0, NULL);
+    if (r == JQ_SUSPEND) return JQ_SUSPEND;
+    if (f2) {
+      jq_ks_pop(rt);
+      free(f2);
+    }
+    return jq_int_add(jq_int_mul(pa, jq_int(1000)), r);
+  }
+  jq_value pa = jq_frame_slots(f)[0];
+  free(f);
+  return jq_int_add(jq_int_mul(pa, jq_int(1000)), v);
+}
+static jq_value m5_in_entry(JQ_PARAMS) {
+  (void)a0; (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
+  (void)a7;
+  jq_drop(clo);
+  jq_block *f = NULL;
+  if (rt->cap_depth) {
+    f = jq_frame_alloc(m5_in_reenter, 1, 0, 0);
+    jq_ks_push(rt, f);
+  }
+  jq_value r = jq_perform(rt, OP_A, 0, NULL);
+  if (r == JQ_SUSPEND) return JQ_SUSPEND;
+  if (f) {
+    jq_ks_pop(rt);
+    free(f);
+  }
+  return m5_in_reenter(rt, jq_frame_alloc(m5_in_reenter, 1, 0, 0), r);
+}
+
+/* outer machine: v = call inner (suspendable); v * 2 */
+static jq_value m5_out_reenter(jq_rt *rt, jq_block *f, jq_value v) {
+  (void)rt;
+  free(f);
+  return jq_int_mul(v, jq_int(2));
+}
+static jq_value m5_out_entry(JQ_PARAMS) {
+  (void)a0; (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
+  (void)a7;
+  jq_drop(clo);
+  jq_block *f = NULL;
+  if (rt->cap_depth) {
+    f = jq_frame_alloc(m5_out_reenter, 1, 0, 0);
+    jq_ks_push(rt, f);
+  }
+  rt->apply_n = 0;
+  jq_value r = jq_apply(rt, clo0(m5_in_entry), JQ_UNIT, JQ_UNIT, JQ_UNIT,
+                        JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT);
+  if (r == JQ_SUSPEND) return JQ_SUSPEND;
+  if (f) {
+    jq_ks_pop(rt);
+    free(f);
+  }
+  return jq_int_mul(r, jq_int(2));
+}
+
+/* the outer-B thunk: r = handle2(A: escape) over m5_out; apply r(7) */
+static jq_value m5_thunk_reenter(jq_rt *rt, jq_block *f, jq_value v) {
+  uint64_t ix = jq_frame_ix(f);
+  if (ix == 1) {
+    free(f);
+    /* v = the escaped resumption; apply it to 7 (suspendable) */
+    jq_block *f2 = NULL;
+    if (rt->cap_depth) {
+      f2 = jq_frame_alloc(m5_thunk_reenter, 2, 0, 0);
+      jq_ks_push(rt, f2);
+    }
+    rt->apply_n = 1;
+    jq_value r = jq_apply(rt, v, jq_int(7), JQ_UNIT, JQ_UNIT, JQ_UNIT,
+                          JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT);
+    if (r == JQ_SUSPEND) return JQ_SUSPEND;
+    if (f2) {
+      jq_ks_pop(rt);
+      free(f2);
+    }
+    return r;
+  }
+  free(f);
+  return v; /* ix 2: the applied resumption's value is the thunk's value */
+}
+static jq_value m5_thunk_entry(JQ_PARAMS) {
+  (void)a0; (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
+  (void)a7;
+  jq_drop(clo);
+  jq_block *f = NULL;
+  if (rt->cap_depth) {
+    f = jq_frame_alloc(m5_thunk_reenter, 1, 0, 0);
+    jq_ks_push(rt, f);
+  }
+  jq_handler_entry inner = { OP_A, clo1(cl_escape), JQ_CLAUSE_CAPTURING, NULL };
+  jq_value r = jq_handle2(rt, 1, &inner, clo0(m5_out_entry), clo1(rc_id));
+  if (r == JQ_SUSPEND) return JQ_SUSPEND;
+  if (f) {
+    jq_ks_pop(rt);
+    free(f);
+  }
+  return m5_thunk_reenter(rt, jq_frame_alloc(m5_thunk_reenter, 1, 0, 0), r);
+}
+
+static jq_value cl_resume5(JQ_PARAMS) {
+  (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
+  jq_drop(clo);
+  rt->apply_n = 1;
+  return jq_apply(rt, a0, jq_int(5), JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT,
+                  JQ_UNIT, JQ_UNIT, JQ_UNIT);
+}
+
+static void test_chain_order_across_nested_capture(void) {
+  /* escaped A-resumption applied inside a B-handle; the resumed extent
+     performs B, so the un-entered outer frame joins B's slice below the
+     inner frame. Correct order: inner gets 5 (7*1000+5=7005), outer
+     doubles (14010), A's ret passes it through. Inverted order gave the
+     outer frame the 5. */
+  jq_rt rt = { 0 };
+  jq_handler_entry outer = { OP_B, clo1(cl_resume5), JQ_CLAUSE_CAPTURING, NULL };
+  jq_value out = jq_handle2(&rt, 1, &outer, clo0(m5_thunk_entry), clo1(rc_id));
+  CHECK(jq_int_val(out) == 14010, "un-entered frame keeps its chain depth");
+  CHECK(rt.ks_len == 0 && rt.hs_len == 0 && rt.cap_depth == 0,
+        "stacks balanced after nested re-capture");
+  free(rt.hs);
+  free(rt.ks);
+}
+
 static int fake_grant_calls = 0;
 static jq_value fake_grant(jq_rt *rt, const jq_value *args) {
   (void)rt;
@@ -750,6 +890,7 @@ int main(int argc, char **argv) {
   test_escaped_resume_ret_per_resumption();
   test_clause_perform_escapes_outward();
   test_deep_handler_recovers_inner_performs();
+  test_chain_order_across_nested_capture();
   if (failures) {
     printf("%d FAILED\n", failures);
     return 1;

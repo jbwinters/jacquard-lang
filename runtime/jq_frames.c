@@ -171,13 +171,18 @@ static jq_value run_from(jq_rt *rt, jq_block **frames, uint32_t i, uint32_t n, j
     jq_value v = (i + 1 == n) ? arg : run_from(rt, frames, i + 1, n, arg);
     return jq_dispatch(rt, f, v);
   }
-  jq_value v = (i + 1 == n) ? arg : run_from(rt, frames, i + 1, n, arg);
-  if (v == JQ_SUSPEND) {
-    /* the inner extent suspended for a handler outside this frame: the
-       un-entered frame joins the outer capture's slice as-is */
-    jq_ks_push(rt, f);
-    return JQ_SUSPEND;
-  }
+  if (i + 1 == n) return jq_frame_code(f)(rt, f, arg);
+  /* an un-entered frame joins the stack BEFORE its inner extent runs, so a
+     capture passing through finds it at its true depth — BELOW the frames
+     the inner extent pushes. (Pushing it lazily at suspension time put it
+     ABOVE them, inverting the chain: the DST battery's transformer then
+     received the resume argument meant for the innermost frame.) */
+  jq_ks_push(rt, f);
+  jq_value v = run_from(rt, frames, i + 1, n, arg);
+  if (v == JQ_SUSPEND) return JQ_SUSPEND; /* f stays for the outer slice */
+  if (rt->ks_len == 0 || rt->ks[rt->ks_len - 1] != f)
+    jq_runtime_error("jacquard runtime: resume drive unbalanced the frame stack (internal)");
+  jq_ks_pop(rt);
   return jq_frame_code(f)(rt, f, v);
 }
 
