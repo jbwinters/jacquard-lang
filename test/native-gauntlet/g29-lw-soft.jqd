@@ -1,0 +1,12 @@
+; task 72, sign-off find: a SOFT likelihood (observe mass strictly between 0
+; and 1) makes the posterior's float sums order-sensitive — the interpreter
+; folds its cons-prepended run list, so the additions run in reverse
+; chronological order, and the native driver must sum the same way or the
+; full-precision rendering drifts by one ULP.
+(app (var dist.sample-lw)
+  (lam ()
+    (let nonrec (pvar c) (app (var sample) (app (var bernoulli) (lit 0.5)))
+      (let nonrec (pwild)
+        (app (var observe) (app (var bernoulli) (lit 0.7)) (var c))
+        (var c))))
+  (lit 500) (lit 42))

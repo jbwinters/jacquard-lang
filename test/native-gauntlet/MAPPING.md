@@ -40,3 +40,4 @@ assertion. Counts become printed values via in-language collectors
 | test_sample_lw_builtin (test_dist_lib.ml, task-72 DoD) | g26-lw-m3.jqd | dist.sample-lw's exact seeded stream on the m3 model |
 | (LW isolation, task-72 review round 1) | g27-lw-under-handler.jqd | outer handler survives the driver's search floor |
 | (nested drivers, task-72 review round 1) | g28-lw-nested.jqd | inner LW's floor/interception save-restore composes |
+| (summation order, task-72 sign-off find) | g29-lw-soft.jqd | soft-likelihood posterior sums in the interpreter's reverse run order |

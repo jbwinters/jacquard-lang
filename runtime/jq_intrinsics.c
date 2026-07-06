@@ -562,19 +562,24 @@ jq_value jq_i_dist_sample_lw(jq_rt *rt, const jq_value *a) {
     runs[i].weight = st.weight;
     runs[i].key = jq_show(v);
   }
+  /* the interpreter cons-prepends runs and folds the resulting list, so its
+     float additions run in REVERSE chronological order — sum the same way
+     (addition is not associative; a forward sum diverged by one ULP on
+     soft-likelihood weights, sign-off find) */
   double total = 0.0;
-  for (int64_t i = 0; i < samples; i++) total += runs[i].weight;
+  for (int64_t i = samples - 1; i >= 0; i--) total += runs[i].weight;
   if (total <= 0.0) {
     fputs("arithmetic error: error[E0901]: the posterior is empty: every run is "
           "impossible under the observations\n",
           stderr);
     exit(2);
   }
-  /* merge on the rendering key (first occurrence keeps its value) */
+  /* merge on the rendering key, accumulating per key in the same reverse
+     order */
   lw_run *entries = malloc((size_t)samples * sizeof(lw_run));
   if (!entries) jq_runtime_error("jacquard runtime: out of memory");
   int64_t n_entries = 0;
-  for (int64_t i = 0; i < samples; i++) {
+  for (int64_t i = samples - 1; i >= 0; i--) {
     int64_t j = 0;
     while (j < n_entries && strcmp(entries[j].key, runs[i].key) != 0) j++;
     if (j == n_entries) {

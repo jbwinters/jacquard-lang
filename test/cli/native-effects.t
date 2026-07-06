@@ -46,6 +46,7 @@ assertion, exit codes included.
   identical: g26-lw-m3 (exit 0)
   identical: g27-lw-under-handler (exit 0)
   identical: g28-lw-nested (exit 0)
+  identical: g29-lw-soft (exit 0)
 
 The flagship outputs, pinned so a both-engines regression cannot slip through
 the diff-only loop above:
@@ -91,7 +92,10 @@ gated-eval leg a pinned refusal.
 
 Dist parity (task 72). The likelihood-weighting driver reproduces the
 interpreter's seeded stream exactly — one split per run, one draw per
-sample, merge/normalize/sort on the rendering key. The M3 model at seed 42:
+sample — and its merge/normalize/sort down to float addition ORDER (the
+interpreter folds a cons-prepended run list, so sums run in reverse
+chronological order; g29 pins the soft-likelihood case where a forward
+sum drifts by one ULP). The M3 model at seed 42:
 
   $ jacquard build ../../test/native-gauntlet/g26-lw-m3.jqd -o lw-m3 > /dev/null
   $ ./lw-m3
