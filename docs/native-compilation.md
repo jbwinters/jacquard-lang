@@ -154,7 +154,7 @@ designed. The remaining gap to hand C in the empty-row core:
   is the boolean living as a static CON matched through pointer, tag,
   and con-info compares where hand C uses a CPU flag, plus tagged-int
   arithmetic.
-- **sort, 4.0x** (was 11x pre-LTO, 7.9x pre-pool, 4.7x pre-task-85) —
+- **sort, 3.8x** (was 11x pre-LTO, 7.9x pre-pool, 4.7x pre-task-85) —
   allocation is size-classed freelists (task 80), and the header-inlined
   RC fast paths took the field-read dup/drop traffic from out-of-line
   calls to inlined branches (task 85: 118 to 97 ms). Intrinsic borrowing (task 81) was
