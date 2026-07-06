@@ -30,8 +30,9 @@ let bound_atoms = function
   | BAtom a -> [ a ]
   | BCallKnown (_, args) | BIntrinsic (_, args) | BAllocTuple args -> args
   | BCallUnknown (f, args) -> f :: args
-  | BAllocCon (_, args) | BAllocConReuse (_, args, _) -> args
+  | BAllocCon (_, args) | BAllocConReuse (_, args, _) | BPerform (_, args) -> args
   | BAllocClosure { captured; _ } -> captured
+  | BHandle (entries, thunk) -> thunk :: List.map snd entries
 
 let rec free (e : expr) : SSet.t =
   match e with
@@ -94,6 +95,21 @@ let annotate_bound (movable : SSet.t) (b : bound) : bound * SSet.t =
   | BAllocTuple args ->
       let args, moved = annotate_atoms movable args in
       (BAllocTuple args, moved)
+  | BPerform (h, args) ->
+      let args, moved = annotate_atoms movable args in
+      (BPerform (h, args), moved)
+  | BHandle (entries, thunk) ->
+      (* entries and the thunk are all consumed by the runtime (push owns the clauses, the
+         call owns the thunk); annotate together, entries first like the emitter *)
+      let atoms, moved = annotate_atoms movable (List.map snd entries @ [ thunk ]) in
+      let rec split acc es ats =
+        match (es, ats) with
+        | [], [ t ] -> (List.rev acc, t)
+        | (o, _) :: es', a :: ats' -> split ((o, a) :: acc) es' ats'
+        | _ -> assert false
+      in
+      let entries', thunk' = split [] entries atoms in
+      (BHandle (entries', thunk'), moved)
   | BAllocClosure c ->
       (* the self slot's entry is never moved or dup'd (stored as the closure itself) *)
       let movable' =

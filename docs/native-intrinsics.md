@@ -19,10 +19,13 @@ error texts exactly; the differential harness is the check.
 | text.concat | 2 | yes | |
 | text-compare | 2 | yes | bytewise + length tiebreak |
 | text.slice | 3 | not yet | needs boundary walk; next slice batch |
-| text.trim, text.split, text.join | 1/2/2 | not yet | |
-| text.contains?, text.empty? | 2/1 | not yet | |
+| text.trim, text.split | 1/2 | yes | task 70 (word-count reaches them); ASCII trim, empty pieces kept |
+| text.join | 2 | not yet | |
+| text.contains? | 2 | not yet | |
+| text.empty? | 1 | yes | task 70 |
+| text.from-int | 1 | yes | task 70; plain text result |
 | code.eq (marker) | 2 | task 73 | metadata-erased equality |
-| text.to-int, text.from-int, text.to-real, text.from-real | 1 | not yet | option results |
+| text.to-int, text.to-real, text.from-real | 1 | not yet | option results |
 | code.form, code.un-form, code.of-int, code.to-int | - | task 73 | form representation |
 | code.to-text, code.diff | - | task 73 | needs the ported printer |
 | code.of-text | - | refused for good | it is the reader |

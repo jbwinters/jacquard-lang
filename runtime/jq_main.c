@@ -39,5 +39,11 @@ int jq_run_main(jq_rt *rt, void (*body)(jq_rt *)) {
     return 2;
   }
   pthread_join(tid, NULL);
+  /* the handler stack's backing array outlives every balanced push/pop;
+     release it here so effectful programs are leak-clean under the task-68
+     gate (entries are gone: pops dropped their clauses) */
+  free(rt->hs);
+  rt->hs = NULL;
+  rt->hs_len = rt->hs_cap = 0;
   return 0;
 }

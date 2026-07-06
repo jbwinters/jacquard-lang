@@ -237,9 +237,10 @@ the `jacquard build` subcommand, `test/cli/native.t`, intrinsics inventory
    expression; refuse with new diagnostic E1101 (exit 1) on any `Handle`
    node, any `Ref` of kind Op, any live-spliced quote, or any
    not-yet-implemented intrinsic — naming the construct, the declaration it
-   sits in, and the rung ("native v1 compiles pure programs without
-   handlers; `to-option` contains one"). Over-refusal is fine in v1; the
-   set shrinks as tasks 70-73 land. Emit reachable declarations into
+   sits in, and the rung (the parenthetical tracks the frontier: since
+   task 70 it reads "native v1 compiles pure programs and tail-resumptive
+   handlers"). Over-refusal is fine in v1; the set shrinks as tasks 70-73
+   land. Emit reachable declarations into
    `.jacquard-native/<emitter-version>/`, one unit per declaration hash,
    compile only changed units, link `libjqrt.a`.
    **Per-expression semantics in the generated main** (this is what
@@ -328,28 +329,48 @@ JACQUARD_SPEC=off lever preserves it wholesale for differential runs.
 root-grant implementations (console, clock, fs, net), build-time eligibility
 widened to grant-only and tail-resumptive programs.
 
-**Direction.**
+**Direction.** (As built; the deltas from the original sketch are noted.)
 1. **Handler stack, honestly dynamic in v1.** A per-run stack of
-   `{effect_id, handler_ptr, kind}`; `handle` pushes, scope exit pops.
-   Perform searches top-down for the nearest matching entry — this is
-   exactly the interpreter's nearest-handler semantics. Static
-   evidence-vector indexing is an optimization to add inside this task only
-   if the dynamic search shows up in benchmarks; do not start with it.
-2. **Effect ids** are dense ordinals assigned at link time over the
-   program's reachable effects.
+   `{op ordinal, clause closure}` entries — one per OP CLAUSE, not per
+   handler, which makes nearest-cover search a single field compare;
+   `handle` pushes its clauses, scope exit pops them (structured, balanced
+   by the compiled construct). Perform searches top-down for the nearest
+   cover — exactly the interpreter's nearest-handler semantics. The parity
+   subtlety the interpreter forced: a clause BODY runs against the
+   continuation OUTSIDE its handler (src/eval.ml runs obody with the outer
+   frames), so jq_perform hides the stack slice [match .. top] for the
+   duration of the clause call and restores it after — a handle pushed
+   inside the clause lands at the truncation point. Static evidence-vector
+   indexing remains an optimization to add only if the dynamic search shows
+   up in benchmarks.
+2. **Op ids** are dense ordinals assigned at link time over the program's
+   reachable operations (finer than the sketched per-effect ids, and what
+   the grant table and metadata table index by).
 3. **Clause discipline is decided at compile time** using the existing
    classifier (src/tier.ml `discipline`): a TailResumptive clause compiles
    to a plain function the perform site calls directly — its `resume(x)` is
-   the return path; no continuation exists. Root grants are runtime C
-   functions with the same shape (print → fwrite, clock → clock_gettime,
-   fs → stdio, net → refused in v1 binaries unless granted AND implemented —
-   match the interpreter's grant surface in Prelude.grant). Aborting,
-   OneShot, and MultiShot clauses make the program ineligible until task 71.
+   the return path; no continuation exists. The handle body compiles as a
+   0-arity thunk so the push/pop stays structured around one call. Root
+   grants are runtime C functions with the same shape, ported byte-for-byte
+   from Prelude.grant: console (print → fwrite, read-line with EOF as ""),
+   clock (now → ms since epoch, sleep → nanosleep), fs (read/write/list-dir
+   via stdio + dirent, io failures rendered as Runtime_err.Io over
+   Sys_error's "<path>: <strerror>"). net stays refused in v1 binaries —
+   granting it is E1103 up front, never a silent no-op. Aborting, OneShot,
+   and MultiShot clauses make the program ineligible until task 71.
 4. **Manifest per expression.** Task 67's per-expression records carry each
    top-level expression's row; `--allow` flags are parsed at runtime; a
    missing grant reproduces E0814's exact message and exit 3 at that
    expression's turn — earlier expressions' output has already printed,
-   exactly as `jacquard run` interleaves checking with evaluation.
+   exactly as `jacquard run` interleaves checking with evaluation. Two
+   parity traps, both found by byte-comparison and both load-bearing:
+   the manifests must be harvested from a SECOND run-alike checker context
+   (the loader's eager decl checking seeds Check's origin map in a
+   different order than run_cmd's lazy checking, and E0814's "performed
+   via ..." origin must match byte-for-byte), and the generated main must
+   fflush(stdout) after each expression's value print (the interpreter's
+   print_endline flushes; without it a later expression's stderr overtakes
+   earlier stdout in a merged capture).
 5. Pure code containing `handle` expressions: the region under the handle is
    compiled in effectful style even though the enclosing function is pure —
    lowering decides per region, not per function. (Phase 2's experiment

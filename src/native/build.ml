@@ -27,6 +27,10 @@ let intrinsics : (string * int) list =
     ("text.concat", 2);
     ("int-compare", 2);
     ("text-compare", 2);
+    ("text.trim", 1);
+    ("text.split", 2);
+    ("text.empty?", 1);
+    ("text.from-int", 1);
   ]
 
 (* ------------------------------------------------------------------ *)
@@ -85,8 +89,9 @@ let discover (store : Store.t) : discovery =
 
 type outcome = { prog : Emit.program; refusals : Compile.refusal list }
 
-let compile_program (store : Store.t) (d : discovery) (tops_src : (Kernel.expr * string list) list)
-    : outcome =
+let compile_program (store : Store.t) (d : discovery)
+    (tops_src : (Kernel.expr * string list * (string * string) list) list) :
+    outcome * (string * string) list list =
   let itbl = Hashtbl.create 16 in
   List.iter (fun (n, a) -> Hashtbl.replace itbl n a) intrinsics;
   let refusals = ref [] in
@@ -102,19 +107,20 @@ let compile_program (store : Store.t) (d : discovery) (tops_src : (Kernel.expr *
   (* arity cap: enforced during lowering via the same refusal channel *)
   let tops =
     List.mapi
-      (fun i (e, warnings) ->
+      (fun i (e, warnings, _) ->
         match
           Compile.lower_top ~store ~intrinsics:itbl ~builtin_names:d.builtin_names
             ~member_arity:d.member_arity ~index:i e
         with
-        | body, lifted, deps, cons ->
+        | body, lifted, deps, cons, ops ->
             List.iter enqueue deps;
-            (body, lifted, warnings, cons)
+            (body, lifted, warnings, cons, ops)
         | exception Compile.Refused r ->
             refusals := r :: !refusals;
-            (Compile.Ret (Compile.AInt 0), [], warnings, []))
+            (Compile.Ret (Compile.AInt 0), [], warnings, [], []))
       tops_src
   in
+  let manifests = List.map (fun (_, _, m) -> m) tops_src in
   while not (Queue.is_empty queue) do
     let h = Queue.pop queue in
     match Hashtbl.find_opt d.member_binding h with
@@ -143,7 +149,7 @@ let compile_program (store : Store.t) (d : discovery) (tops_src : (Kernel.expr *
         d.builtin_names;
       let tops' =
         Spec.run ~members ~member_arity:d.member_arity ~builtin_names:implemented ~intrinsics:itbl
-          ~tops:(List.map (fun (b, l, w, _) -> (b, l, w)) tops)
+          ~tops:(List.map (fun (b, l, w, _, _) -> (b, l, w)) tops)
       in
       if Sys.getenv_opt "JACQUARD_SPEC_DEBUG" <> None then
         Printf.eprintf "spec: %d clones\n%!"
@@ -151,7 +157,7 @@ let compile_program (store : Store.t) (d : discovery) (tops_src : (Kernel.expr *
              (fun _ (cm : Compile.compiled_member) acc ->
                if Filename.check_suffix cm.Compile.mname "@spec" then acc + 1 else acc)
              members 0);
-      List.map2 (fun (b, l, w) (_, _, _, cs) -> (b, l, w, cs)) tops' tops
+      List.map2 (fun (b, l, w) (_, _, _, cs, ops) -> (b, l, w, cs, ops)) tops' tops
     end
   in
   (* constructor table: dense type ids per owning declaration *)
@@ -191,7 +197,7 @@ let compile_program (store : Store.t) (d : discovery) (tops_src : (Kernel.expr *
   Hashtbl.iter
     (fun _ (cm : Compile.compiled_member) -> List.iter note_con cm.Compile.cons_used)
     members;
-  List.iter (fun (_, _, _, cs) -> List.iter note_con cs) tops;
+  List.iter (fun (_, _, _, cs, _) -> List.iter note_con cs) tops;
   (* true/false always exist: intrinsics return them *)
   (match Store.lookup_kind store "true" Resolve.KCon with
   | Some e -> note_con e.Resolve.hash
@@ -204,7 +210,7 @@ let compile_program (store : Store.t) (d : discovery) (tops_src : (Kernel.expr *
       match Store.lookup_kind store n Resolve.KCon with
       | Some e -> note_con e.Resolve.hash
       | None -> ())
-    [ "less"; "equal"; "greater" ];
+    [ "less"; "equal"; "greater"; "nil"; "cons" ];
   (* init order: const members topologically by their const-member deps *)
   let member_list = Hashtbl.fold (fun _ cm acc -> cm :: acc) members [] in
   let member_list =
@@ -227,6 +233,33 @@ let compile_program (store : Store.t) (d : discovery) (tops_src : (Kernel.expr *
     end
   in
   List.iter (fun (cm : Compile.compiled_member) -> visit cm.Compile.member) member_list;
+  (* effect operations: dense link-time ordinals, sorted by hash for determinism *)
+  let ops : (Hash.t, Emit.opref) Hashtbl.t = Hashtbl.create 8 in
+  let all_ops = Hashtbl.create 8 in
+  List.iter
+    (fun (cm : Compile.compiled_member) ->
+      List.iter (fun h -> Hashtbl.replace all_ops h ()) cm.Compile.ops_used)
+    member_list;
+  List.iter (fun (_, _, _, _, os) -> List.iter (fun h -> Hashtbl.replace all_ops h ()) os) tops;
+  let op_list =
+    Hashtbl.fold (fun h () acc -> h :: acc) all_ops []
+    |> List.sort (fun a b -> compare (Hash.to_hex a) (Hash.to_hex b))
+  in
+  List.iteri
+    (fun i h ->
+      match Store.locate store h with
+      | Ok
+          {
+            Store.decl = { Kernel.it = Kernel.DefEffect { ename; ops = specs; _ }; _ };
+            role = Store.Operation oi;
+            _;
+          } ->
+          let oname =
+            match List.nth_opt specs oi with Some { Kernel.op_name; _ } -> op_name | None -> "?"
+          in
+          Hashtbl.replace ops h { Emit.ohash = h; oeffect = ename; oname; oord = i }
+      | _ -> ())
+    op_list;
   let prog =
     {
       Emit.members = member_list;
@@ -236,11 +269,12 @@ let compile_program (store : Store.t) (d : discovery) (tops_src : (Kernel.expr *
          Hashtbl.iter (fun h n -> if Hashtbl.mem itbl n then Hashtbl.replace t h n) d.builtin_names;
          t);
       cons;
-      tops = List.map (fun (b, l, w, _) -> (b, l, w)) tops;
+      ops;
+      tops = List.map (fun (b, l, w, _, _) -> (b, l, w)) tops;
       init_order = List.rev !order;
     }
   in
-  { prog; refusals = List.rev !refusals }
+  ({ prog; refusals = List.rev !refusals }, manifests)
 
 (* ------------------------------------------------------------------ *)
 (* Toolchain                                                           *)
@@ -349,10 +383,10 @@ let runtime_dir_of ~prelude_dir =
 
 (** [build ~store ~tops ~prelude_dir ~out] compiles the checked top-level expressions and every
     reachable declaration to a standalone binary at [out]. *)
-let build ~(store : Store.t) ~(tops : (Kernel.expr * string list) list) ~prelude_dir ~out :
-    (int, [ `Refused of Compile.refusal list | `Toolchain of string ]) result =
+let build ~(store : Store.t) ~(tops : (Kernel.expr * string list * (string * string) list) list)
+    ~prelude_dir ~out : (int, [ `Refused of Compile.refusal list | `Toolchain of string ]) result =
   let d = discover store in
-  let { prog; refusals } = compile_program store d tops in
+  let { prog; refusals }, manifests = compile_program store d tops in
   (* Perceus (task 68): precise ownership unless the differential lever turns it off *)
   let precise = Sys.getenv_opt "JACQUARD_PERCEUS" <> Some "off" in
   let prog =
@@ -413,6 +447,14 @@ let build ~(store : Store.t) ~(tops : (Kernel.expr * string list) list) ~prelude
             | Some l, Some e, Some g -> Some (l.Resolve.hash, e.Resolve.hash, g.Resolve.hash)
             | _ -> None
           in
+          let listcons =
+            match
+              ( Store.lookup_kind store "nil" Resolve.KCon,
+                Store.lookup_kind store "cons" Resolve.KCon )
+            with
+            | Some n, Some c -> Some (n.Resolve.hash, c.Resolve.hash)
+            | _ -> None
+          in
           (* one unit per declaration: group members by owning decl *)
           let by_decl : (Hash.t, Compile.compiled_member list) Hashtbl.t = Hashtbl.create 32 in
           List.iter
@@ -434,7 +476,10 @@ let build ~(store : Store.t) ~(tops : (Kernel.expr * string list) list) ~prelude
               by_decl []
             |> List.sort compare
           in
-          let main_c = Emit.main_source prog ~precise ~v_true ~v_false ~orderings ~intrinsics in
+          let main_c =
+            Emit.main_source prog ~precise ~v_true ~v_false ~orderings ~listcons ~intrinsics
+              ~manifests
+          in
           let cflags =
             match Sys.getenv_opt "JACQUARD_NATIVE_CFLAGS" with Some f -> f | None -> ""
           in

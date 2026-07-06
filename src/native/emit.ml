@@ -32,6 +32,14 @@ let fn_name (h, ordinal) =
 let cell_name h = "g_" ^ hex12 h
 let init_name h = "init_" ^ hex12 h
 let ci_name h = "jq_ci_" ^ hex12 h
+let oi_name h = "jq_oi_" ^ hex12 h
+
+(* C-safe identifier fragment for builtin and effect names ('?' marks predicates) *)
+let mangle s =
+  String.concat ""
+    (List.map
+       (fun c -> match c with '.' | '-' -> "_" | '?' -> "_q" | c -> String.make 1 c)
+       (List.init (String.length s) (String.get s)))
 
 (* ------------------------------------------------------------------ *)
 (* Emission buffer                                                     *)
@@ -53,11 +61,19 @@ let line buf fmt =
 
 type conref = { chash : Hash.t; cname : string; carity : int; ctype_id : int; cordinal : int }
 
+type opref = {
+  ohash : Hash.t;
+  oeffect : string;
+  oname : string;
+  oord : int;  (** dense link-time ordinal: the perform/grant index *)
+}
+
 type program = {
   members : compiled_member list;  (** every reachable member, lowered *)
   member_arity : (Hash.t, int) Hashtbl.t;
   builtin_names : (Hash.t, string) Hashtbl.t;  (** implemented intrinsics only, by member *)
   cons : (Hash.t, conref) Hashtbl.t;  (** every constructor the program touches *)
+  ops : (Hash.t, opref) Hashtbl.t;  (** every effect operation the program touches *)
   tops : (expr * fn list * string list) list;
       (** per top-level expression: body, lifted lambdas, checker warnings to replay *)
   init_order : Hash.t list;  (** const members in dependency order *)
@@ -142,6 +158,20 @@ let con_value_static st (h : Hash.t) =
           ~payload:[ Printf.sprintf "(uint64_t)&%s" (ci_name h) ]);
   Printf.sprintf "((jq_value)&%s)" name
 
+let declare_op_info st (h : Hash.t) =
+  declare st ("oi:" ^ hex12 h) (fun () -> line st.decls "extern const jq_op_info %s;" (oi_name h))
+
+(* A first-class effect operation: a static OP block over the shared info. *)
+let op_value_static st (h : Hash.t) =
+  declare_op_info st h;
+  let name = "ov_" ^ hex12 h in
+  declare st
+    ("ov:" ^ hex12 h)
+    (fun () ->
+      emit_static_block st name ~tag:"JQ_OP" ~flags:0 ~n:1 ~payload_words:1
+        ~payload:[ Printf.sprintf "(uint64_t)&%s" (oi_name h) ]);
+  Printf.sprintf "((jq_value)&%s)" name
+
 (* A member used as a value: function members get a unit-local static closure over their
    uniform-signature function; intrinsic builtins a static BUILTIN block; const members the
    extern init-once cell. *)
@@ -151,15 +181,10 @@ let global_value st (h : Hash.t) =
       let key = "bv:" ^ hex12 h in
       let name = "bv_" ^ hex12 h in
       declare st ("bi:" ^ bname) (fun () ->
-          line st.decls "extern const jq_builtin_info jq_bi_%s;"
-            (String.map (function '.' -> '_' | '-' -> '_' | c -> c) bname));
+          line st.decls "extern const jq_builtin_info jq_bi_%s;" (mangle bname));
       declare st key (fun () ->
           emit_static_block st name ~tag:"JQ_BUILTIN" ~flags:0 ~n:1 ~payload_words:1
-            ~payload:
-              [
-                Printf.sprintf "(uint64_t)&jq_bi_%s"
-                  (String.map (function '.' -> '_' | '-' -> '_' | c -> c) bname);
-              ]);
+            ~payload:[ Printf.sprintf "(uint64_t)&jq_bi_%s" (mangle bname) ]);
       Printf.sprintf "((jq_value)&%s)" name
   | None -> (
       match Hashtbl.find_opt st.prog.member_arity h with
@@ -214,6 +239,8 @@ let rec atom_c st (a : atom) : string =
   | AText s -> text_static st s
   | AGlobal h -> global_value st h
   | ACon h -> con_value_static st h
+  | AOp h -> op_value_static st h
+  | AResume () -> failwith "internal: a resume marker reached the emitter"
 
 (* A use: the receiver takes ownership, so dup (no-op for ints and statics). *)
 let use st buf (a : atom) : string =
@@ -472,9 +499,34 @@ and emit_bound st buf lives (x : string) (b : bound) : unit =
       match self_slot with Some i -> line buf "jq_closure_env(%s)[%d] = %s;" x i x | None -> ())
   | BIntrinsic (name, args) ->
       let vs = List.map (fun a -> use st buf a) args in
-      let cname = String.map (function '.' -> '_' | '-' -> '_' | c -> c) name in
+      let cname = mangle name in
       if vs = [] then line buf "jq_value %s = jq_i_%s(rt, NULL);" x cname
       else line buf "jq_value %s = jq_i_%s(rt, (jq_value[]){ %s });" x cname (String.concat ", " vs)
+  | BPerform (h, args) ->
+      let oref = Hashtbl.find st.prog.ops h in
+      let vs = List.map (fun a -> use st buf a) args in
+      if vs = [] then line buf "jq_value %s = jq_perform(rt, %d, 0, NULL);" x oref.oord
+      else
+        line buf "jq_value %s = jq_perform(rt, %d, %d, (jq_value[]){ %s });" x oref.oord
+          (List.length vs) (String.concat ", " vs)
+  | BHandle (entries, thunk) ->
+      (* push owns the clause refs; the apply consumes the thunk; pop releases the clauses *)
+      let evs =
+        List.map
+          (fun (oh, a) ->
+            let oref = Hashtbl.find st.prog.ops oh in
+            Printf.sprintf "{ %d, %s }" oref.oord (use st buf a))
+          entries
+      in
+      line buf "jq_handler_entry _he_%s[] = { %s };" x (String.concat ", " evs);
+      line buf "jq_handle_push(rt, %d, _he_%s);" (List.length entries) x;
+      let tv = use st buf thunk in
+      line buf "rt->apply_n = 0;";
+      line buf
+        "jq_value %s = jq_apply(rt, %s, JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT, \
+         JQ_UNIT, JQ_UNIT);"
+        x tv;
+      line buf "jq_handle_pop(rt, %d);" (List.length entries)
 
 (* ------------------------------------------------------------------ *)
 (* Functions                                                           *)
@@ -531,7 +583,8 @@ let new_state ?(precise = false) prog =
 let assemble st ~banner =
   let out = Buffer.create (Buffer.length st.decls.b + Buffer.length st.ub.b + 256) in
   Buffer.add_string out banner;
-  Buffer.add_string out "#include \"jq_value.h\"\n\n#include <stdio.h>\n#include <stdlib.h>\n\n";
+  Buffer.add_string out
+    "#include \"jq_value.h\"\n\n#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n\n";
   Buffer.add_buffer out st.decls.b;
   Buffer.add_buffer out st.ub.b;
   Buffer.contents out
@@ -556,7 +609,8 @@ let unit_source (prog : program) ~precise ~(decl_hex : string) (members : compil
 (** The main unit: constructor infos, builtin infos, init-once cells, and the per-expression driver
     with the interpreter's output and exit-code contract. *)
 let main_source (prog : program) ~precise ~(v_true : Hash.t) ~(v_false : Hash.t)
-    ~(orderings : (Hash.t * Hash.t * Hash.t) option) ~(intrinsics : (string * int) list) : string =
+    ~(orderings : (Hash.t * Hash.t * Hash.t) option) ~(listcons : (Hash.t * Hash.t) option)
+    ~(intrinsics : (string * int) list) ~(manifests : (string * string) list list) : string =
   let st = new_state ~precise prog in
   (* constructor infos: the shared identities every unit externs *)
   let cons = Hashtbl.fold (fun _ cr acc -> cr :: acc) prog.cons [] in
@@ -567,10 +621,45 @@ let main_source (prog : program) ~precise ~(v_true : Hash.t) ~(v_false : Hash.t)
         cr.cordinal cr.carity (c_string cr.cname))
     cons;
   List.iter (fun cr -> st.declared <- SSet.add ("ci:" ^ hex12 cr.chash) st.declared) cons;
+  (* effect op infos, the ordinal-indexed metadata table, and the grant slots *)
+  let oplist =
+    Hashtbl.fold (fun _ o acc -> o :: acc) prog.ops []
+    |> List.sort (fun a b -> compare a.oord b.oord)
+  in
+  List.iter
+    (fun o ->
+      line st.decls "const jq_op_info %s = { NULL, %s, %s, %d };" (oi_name o.ohash)
+        (c_string o.oeffect) (c_string o.oname) o.oord;
+      st.declared <- SSet.add ("oi:" ^ hex12 o.ohash) st.declared)
+    oplist;
+  let n_ops = List.length oplist in
+  line st.decls "static const jq_op_info *jq_op_meta[%d] = { %s };" (max 1 n_ops)
+    (if oplist = [] then "NULL"
+     else String.concat ", " (List.map (fun o -> "&" ^ oi_name o.ohash) oplist));
+  line st.decls "static jq_value (*jq_grant_tbl[%d])(jq_rt *, const jq_value *);" (max 1 n_ops);
+  (* the grant natives ported so far (jq_grants.c); --allow parsing in the
+     generated main installs these by op name *)
+  let implemented =
+    [
+      ("console", [ ("print", "jq_g_print"); ("read-line", "jq_g_read_line") ]);
+      ("clock", [ ("now", "jq_g_now"); ("sleep", "jq_g_sleep") ]);
+      ( "fs",
+        [ ("read", "jq_g_fs_read"); ("write", "jq_g_fs_write"); ("list-dir", "jq_g_fs_list_dir") ]
+      );
+    ]
+  in
+  (* one granted flag per effect a manifest checks, plus the implemented
+     grant set (--allow parsing always sets those). An effect discharged
+     in-language never reaches a manifest, and its unused flag would be a
+     clang warning in the generated unit. *)
+  let effects =
+    List.sort_uniq compare (List.map fst implemented @ List.concat_map (List.map fst) manifests)
+  in
+  List.iter (fun e -> line st.decls "static bool g_eff_%s;" (mangle e)) effects;
   (* builtin infos for the implemented intrinsics *)
   List.iter
     (fun (name, arity) ->
-      let c = String.map (function '.' -> '_' | '-' -> '_' | ch -> ch) name in
+      let c = mangle name in
       line st.decls "const jq_builtin_info jq_bi_%s = { 0, %d, %s, jq_i_%s };" c arity
         (c_string name) c;
       st.declared <- SSet.add ("bi:" ^ name) st.declared)
@@ -607,6 +696,9 @@ let main_source (prog : program) ~precise ~(v_true : Hash.t) ~(v_false : Hash.t)
   line st.ub "";
   line st.ub "static void jq_program(jq_rt *rt) {";
   st.ub.indent <- st.ub.indent + 1;
+  line st.ub "rt->op_meta = jq_op_meta;";
+  line st.ub "rt->grants = jq_grant_tbl;";
+  line st.ub "rt->n_ops = %d;" (Hashtbl.length prog.ops);
   line st.ub "rt->v_true = %s;" (con_value_static st v_true);
   line st.ub "rt->v_false = %s;" (con_value_static st v_false);
   (match orderings with
@@ -615,18 +707,36 @@ let main_source (prog : program) ~precise ~(v_true : Hash.t) ~(v_false : Hash.t)
       line st.ub "rt->v_equal = %s;" (con_value_static st e);
       line st.ub "rt->v_greater = %s;" (con_value_static st g)
   | None -> ());
+  (match listcons with
+  | Some (nil_h, cons_h) ->
+      declare_con_info st cons_h;
+      line st.ub "rt->v_nil = %s;" (con_value_static st nil_h);
+      line st.ub "rt->ci_cons = &%s;" (ci_name cons_h)
+  | None -> ());
   List.iter (fun h -> line st.ub "%s(rt);" (init_name h)) prog.init_order;
   List.iteri
     (fun i (body, _, warnings) ->
       line st.ub "{";
       st.ub.indent <- st.ub.indent + 1;
-      (* per-expression: replay build-time warnings, then evaluate and print — the
-         interpreter interleaves checking with evaluation, so warnings surface here *)
+      (* per-expression: replay build-time warnings, then check THIS expression's
+         manifest against the runtime grants, then evaluate and print — matching the
+         interpreter's interleaving (earlier output has already flushed when a later
+         expression is refused) *)
       List.iter (fun w -> line st.ub "fputs(%s, stderr);" (c_string (w ^ "\n"))) warnings;
+      List.iter
+        (fun (eff, msg) ->
+          line st.ub "if (!g_eff_%s) { fputs(%s, stderr); exit(3); }" (mangle eff)
+            (c_string (msg ^ "\n")))
+        (List.nth manifests i);
       line st.ub "jq_value _v = JQ_UNIT;";
       emit_expr st st.ub [] (EAssign ("_v", Printf.sprintf "done_top_%d" i)) body;
       line st.ub "done_top_%d:;" i;
-      line st.ub "{ char *s = jq_show(_v); puts(s); free(s); }";
+      (* the flush is parity: the interpreter's per-expression print is OCaml's
+         print_endline, which flushes stdout — without it a later expression's
+         stderr (warning or refusal) would overtake THIS value in a merged
+         capture. Effect output inside evaluation stays buffered on both
+         engines (print_string / fwrite), so this is the only flush point. *)
+      line st.ub "{ char *s = jq_show(_v); puts(s); free(s); fflush(stdout); }";
       line st.ub "jq_drop(_v);";
       st.ub.indent <- st.ub.indent - 1;
       line st.ub "}")
@@ -634,9 +744,41 @@ let main_source (prog : program) ~precise ~(v_true : Hash.t) ~(v_false : Hash.t)
   st.ub.indent <- st.ub.indent - 1;
   line st.ub "}";
   line st.ub "";
-  line st.ub "int main(void) {";
+  line st.ub "int main(int argc, char **argv) {";
   st.ub.indent <- st.ub.indent + 1;
   line st.ub "jq_rt rt0 = { 0 };";
+  line st.ub "for (int i = 1; i < argc; i++) {";
+  st.ub.indent <- st.ub.indent + 1;
+  line st.ub "if (strcmp(argv[i], \"--allow\") != 0 || i + 1 >= argc) continue;";
+  line st.ub "const char *nm = argv[++i];";
+  line st.ub "char low[64]; size_t li = 0;";
+  line st.ub
+    "for (; nm[li] && li < 63; li++) low[li] = nm[li] >= 'A' && nm[li] <= 'Z' ? nm[li] + 32 : \
+     nm[li];";
+  line st.ub "low[li] = 0;";
+  (* implemented grants: install natives for the ops this program actually reaches *)
+  List.iter
+    (fun (eff, natives) ->
+      line st.ub "if (strcmp(low, %s) == 0) {" (c_string eff);
+      st.ub.indent <- st.ub.indent + 1;
+      line st.ub "g_eff_%s = true;" eff;
+      Hashtbl.iter
+        (fun _ o ->
+          if o.oeffect = eff then
+            match List.assoc_opt o.oname natives with
+            | Some native -> line st.ub "jq_grant_tbl[%d] = %s;" o.oord native
+            | None -> ())
+        prog.ops;
+      line st.ub "continue;";
+      st.ub.indent <- st.ub.indent - 1;
+      line st.ub "}")
+    implemented;
+  line st.ub
+    "fprintf(stderr, \"error[E1103]: native binaries implement only the console, clock, and fs \
+     grants so far (task 70); cannot grant `%%s`\\n\", nm);";
+  line st.ub "return 1;";
+  st.ub.indent <- st.ub.indent - 1;
+  line st.ub "}";
   line st.ub "return jq_run_main(&rt0, jq_program);";
   st.ub.indent <- st.ub.indent - 1;
   line st.ub "}";

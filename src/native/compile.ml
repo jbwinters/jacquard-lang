@@ -24,6 +24,11 @@ type atom =
   | AText of string
   | AGlobal of Hash.t  (** a member used as a value: static closure/builtin or init-once cell *)
   | ACon of Hash.t  (** a constructor used as a value: static CON (arity 0) or CONSTRUCTOR *)
+  | AOp of Hash.t  (** an effect operation as a value: static OP block; applying performs *)
+  | AResume of unit
+      (** lowering-internal marker for a tail-resumptive clause's resume binding: its only legal
+          occurrence is applied in tail position, which lowers to the clause's return. Reaching the
+          emitter is an internal error. *)
 
 type npat =
   | NPWild
@@ -61,6 +66,10 @@ and bound =
   | BAllocTuple of atom list
   | BAllocClosure of closure_alloc
   | BIntrinsic of string * atom list
+  | BPerform of Hash.t * atom list  (** effect op perform: nearest handler, else grant table *)
+  | BHandle of (Hash.t * atom) list * atom
+      (** run the body thunk (0-arity closure) with the (op, clause closure) entries pushed; the
+          value is the thunk's return, delivered to the ret clause by the enclosing Match *)
 
 and closure_alloc = {
   code : Hash.t * int;
@@ -88,6 +97,7 @@ type compiled_member = {
   lifted : fn list;
   deps : Hash.t list;
   cons_used : Hash.t list;
+  ops_used : Hash.t list;
 }
 
 type refusal = { where : string; what : string }
@@ -129,7 +139,18 @@ let rec free_vars (e : Kernel.expr) : SSet.t =
           SSet.union acc (SSet.diff (free_vars cbody) (pat_binds cpat)))
         (free_vars scrutinee) clauses
   | Kernel.Tuple items -> List.fold_left (fun a e -> SSet.union a (free_vars e)) SSet.empty items
-  | Kernel.Handle _ -> SSet.empty (* refused before free variables matter *)
+  | Kernel.Handle { body; ret = { rbinder; rbody; _ }; ops } ->
+      let ret_fv = SSet.diff (free_vars rbody) (pat_binds rbinder) in
+      List.fold_left
+        (fun acc (oc : Kernel.opclause) ->
+          let bound =
+            List.fold_left
+              (fun a p -> SSet.union a (pat_binds p))
+              (SSet.singleton oc.Kernel.resume) oc.Kernel.params
+          in
+          SSet.union acc (SSet.diff (free_vars oc.Kernel.obody) bound))
+        (SSet.union (free_vars body) ret_fv)
+        ops
   | Kernel.Unquote inner -> free_vars inner
   | Kernel.Ann (subject, _) -> free_vars subject
 
@@ -153,6 +174,7 @@ type ctx = {
   mutable lifted : fn list;
   mutable deps : Hash.t list;
   mutable cons_used : Hash.t list;
+  mutable ops_used : Hash.t list;  (** for link-time ordinal assignment and op metadata *)
 }
 
 let refuse ctx what = raise (Refused { where = ctx.where; what })
@@ -163,6 +185,7 @@ let fresh ctx prefix =
 
 let note_dep ctx h = if not (List.mem h ctx.deps) then ctx.deps <- h :: ctx.deps
 let note_con ctx h = if not (List.mem h ctx.cons_used) then ctx.cons_used <- h :: ctx.cons_used
+let note_op ctx h = if not (List.mem h ctx.ops_used) then ctx.ops_used <- h :: ctx.ops_used
 
 let con_arity ctx (h : Hash.t) : int =
   match Store.locate ctx.store h with
@@ -172,6 +195,26 @@ let con_arity ctx (h : Hash.t) : int =
       | Some { Kernel.fields; _ } -> List.length fields
       | None -> refuse ctx "constructor ordinal out of range (corrupt store)")
   | _ -> refuse ctx "constructor reference does not resolve (corrupt store)"
+
+(* The op's owning effect declaration (for eval refusal and error metadata). *)
+let op_effect ctx (h : Hash.t) : string * string =
+  match Store.locate ctx.store h with
+  | Ok
+      {
+        Store.decl = { Kernel.it = Kernel.DefEffect { ename; ops; _ }; _ };
+        role = Store.Operation i;
+        _;
+      } -> (
+      match List.nth_opt ops i with
+      | Some { Kernel.op_name; _ } -> (ename, op_name)
+      | None -> refuse ctx "operation ordinal out of range (corrupt store)")
+  | _ -> refuse ctx "operation reference does not resolve (corrupt store)"
+
+(* eval runs at root authority through the interpreter; a standalone binary has no
+   interpreter tier, so the whole effect stays refused (E1102 per the plan) *)
+let refuse_eval_op ctx (h : Hash.t) : unit =
+  let ename, _ = op_effect ctx h in
+  if ename = "eval" then refuse ctx "uses eval, which requires the interpreter tier"
 
 (* env: source name -> atom for the current function *)
 type env = atom SMap.t
@@ -273,7 +316,10 @@ and lower_general ctx env ~tail (e : Kernel.expr) (k : atom -> expr) : expr =
   | Kernel.Ref (h, Kernel.Con) ->
       note_con ctx h;
       k (ACon h)
-  | Kernel.Ref (_, Kernel.Op) -> refuse ctx "references an effect operation"
+  | Kernel.Ref (h, Kernel.Op) ->
+      refuse_eval_op ctx h;
+      note_op ctx h;
+      k (AOp h)
   | Kernel.GroupRef i -> (
       match Store.locate ctx.store ctx.member with
       | Ok { Store.decl; _ } -> (
@@ -331,7 +377,51 @@ and lower_general ctx env ~tail (e : Kernel.expr) (k : atom -> expr) : expr =
       lower_list ctx env items (fun atoms ->
           let t = fresh ctx "t" in
           Let (t, BAllocTuple atoms, k (AVar t)))
-  | Kernel.Handle _ -> refuse ctx "contains a handler (effects land with tasks 70-71)"
+  | Kernel.Handle { body; ret = { rbinder; rbody; _ }; ops } ->
+      (* only tail-resumptive clauses compile at this rung: the clause's return is the
+         resume, so no continuation is ever materialized (docs/native-plan.md task 70;
+         the general disciplines land with task 71) *)
+      List.iter
+        (fun (oc : Kernel.opclause) ->
+          match Tier.discipline ~resume:oc.Kernel.resume oc.Kernel.obody with
+          | Tier.TailResumptive -> ()
+          | d ->
+              refuse ctx
+                (Printf.sprintf
+                   "contains a %s handler clause (only tail-resumptive compiles until task 71)"
+                   (Tier.discipline_to_string d)))
+        ops;
+      let entries_rev =
+        List.fold_left
+          (fun acc (oc : Kernel.opclause) ->
+            let oh =
+              match oc.Kernel.op with
+              | Kernel.Hashed h -> h
+              | Kernel.Named n -> refuse ctx (Printf.sprintf "unresolved op clause `%s`" n)
+            in
+            refuse_eval_op ctx oh;
+            note_op ctx oh;
+            (oh, oc) :: acc)
+          [] ops
+      in
+      (* each clause lowers as a lambda over the op parameters with resume marked; the
+         body thunk is a 0-arity lambda — both capture the handle site's scope *)
+      let rec alloc_clauses acc = function
+        | [] ->
+            let thunk_expr = { e with Kernel.it = Kernel.Lam ([], body) } in
+            lower ctx env thunk_expr (fun thunk ->
+                let hv = fresh ctx "hv" in
+                let rp, renv = rename_pat ctx env rbinder in
+                let ret' =
+                  if tail then lower_tail ctx renv rbody
+                  else lower_general ctx renv ~tail:false rbody k
+                in
+                Let (hv, BHandle (List.rev acc, thunk), Match (AVar hv, [ (rp, ret') ])))
+        | (oh, (oc : Kernel.opclause)) :: rest ->
+            lower_clause ctx env oc (fun clause_atom ->
+                alloc_clauses ((oh, clause_atom) :: acc) rest)
+      in
+      alloc_clauses [] (List.rev entries_rev)
   | Kernel.Quote _ -> refuse ctx "contains a quote (code values land with task 73)"
   | Kernel.Unquote _ -> refuse ctx "unquote outside quote reached lowering"
   | Kernel.Ann (subject, _) -> lower_general ctx env ~tail subject k
@@ -340,6 +430,61 @@ and lower_list ctx env (es : Kernel.expr list) (k : atom list -> expr) : expr =
   match es with
   | [] -> k []
   | e :: rest -> lower ctx env e (fun a -> lower_list ctx env rest (fun atoms -> k (a :: atoms)))
+
+and lower_clause ctx env (oc : Kernel.opclause) (k : atom -> expr) : expr =
+  (* identical to lower_lambda over the op parameters, with the resume name bound to the
+     lowering marker inside the clause body *)
+  let params = oc.Kernel.params in
+  let body = oc.Kernel.obody in
+  if List.length params > 8 then
+    refuse ctx "defines an op clause of more than 8 parameters (native v1 arity cap)";
+  let bound = List.fold_left (fun a p -> SSet.union a (pat_binds p)) SSet.empty params in
+  let fv = SSet.elements (SSet.diff (SSet.remove oc.Kernel.resume (free_vars body)) bound) in
+  ctx.lift_ordinal <- ctx.lift_ordinal + 1;
+  let ordinal = ctx.lift_ordinal in
+  let inner_env =
+    List.fold_left (fun (i, m) x -> (i + 1, SMap.add x (AEnv i) m)) (0, SMap.empty) fv |> snd
+  in
+  let inner_env = SMap.add oc.Kernel.resume (AResume ()) inner_env in
+  let nparams, inner_env =
+    List.fold_left
+      (fun (acc, env) p ->
+        let np, env' = rename_pat ctx env p in
+        (np :: acc, env'))
+      ([], inner_env) params
+  in
+  let saved_self = ctx.self in
+  ctx.self <- None;
+  let fbody =
+    Fun.protect
+      ~finally:(fun () -> ctx.self <- saved_self)
+      (fun () -> lower_tail ctx inner_env body)
+  in
+  let f =
+    {
+      fname = (ctx.member, ordinal);
+      params = List.rev nparams;
+      n_params = List.length params;
+      n_env = List.length fv;
+      body = fbody;
+      self_entry = contains_tail_self fbody;
+    }
+  in
+  ctx.lifted <- f :: ctx.lifted;
+  let captured =
+    List.map
+      (fun x ->
+        match SMap.find_opt x env with
+        | Some a -> a
+        | None -> refuse ctx (Printf.sprintf "free variable `%s` not in scope" x))
+      fv
+  in
+  let c = fresh ctx "clo" in
+  Let
+    ( c,
+      BAllocClosure
+        { code = (ctx.member, ordinal); captured; self_slot = None; arity = List.length params },
+      k (AVar c) )
 
 and lower_lambda ctx env ~recname params body (k : atom -> expr) : expr =
   if List.length params > 8 then
@@ -443,7 +588,10 @@ and lower_app ctx env ~tail (f : Kernel.expr) (args : Kernel.expr list) (k : ato
       if List.length args <> arity then
         refuse ctx "constructor applied with the wrong arity (unreachable for checked code)"
       else with_args (fun atoms -> bind_call (BAllocCon (h, atoms)))
-  | Kernel.Ref (_, Kernel.Op) -> refuse ctx "performs an effect operation"
+  | Kernel.Ref (h, Kernel.Op) ->
+      refuse_eval_op ctx h;
+      note_op ctx h;
+      with_args (fun atoms -> bind_call (BPerform (h, atoms)))
   | Kernel.GroupRef i -> (
       match Store.locate ctx.store ctx.member with
       | Ok { Store.decl; _ } -> (
@@ -455,6 +603,17 @@ and lower_app ctx env ~tail (f : Kernel.expr) (args : Kernel.expr list) (k : ato
               | None -> refuse ctx "groupref outside its group")
           | Error _ -> refuse ctx "group hashing failed (corrupt store)")
       | Error _ -> refuse ctx "group member does not resolve (corrupt store)")
+  | Kernel.Var x when SMap.find_opt x env = Some (AResume ()) -> (
+      if
+        (* a tail-resumptive clause's resume: the clause's return IS the resumption, so in
+         tail position the argument is simply the result. The discipline classifier
+         guarantees tail-only single use; anything else here is an internal error. *)
+        not tail
+      then refuse ctx "internal: tail-resumptive clause used resume off tail (classifier bug)"
+      else
+        match args with
+        | [ arg ] -> lower ctx env arg (fun a -> Ret a)
+        | _ -> refuse ctx "a resumption takes exactly one argument")
   | _ ->
       lower ctx env f (fun fa ->
           if tail then with_args (fun atoms -> TailUnknown (fa, atoms, []))
@@ -478,6 +637,7 @@ let make_ctx ~store ~intrinsics ~builtin_names ~member_arity ~where ~self ~membe
     lifted = [];
     deps = [];
     cons_used = [];
+    ops_used = [];
   }
 
 (** Lower one member binding. The member's own Lam becomes function ordinal 1 renumbered as the MAIN
@@ -524,6 +684,7 @@ let lower_member ~store ~intrinsics ~builtin_names ~member_arity ~name (member :
         lifted = List.rev ctx.lifted;
         deps = ctx.deps;
         cons_used = ctx.cons_used;
+        ops_used = ctx.ops_used;
       }
   | _ ->
       let ctx = { ctx with self = None } in
@@ -536,12 +697,13 @@ let lower_member ~store ~intrinsics ~builtin_names ~member_arity ~name (member :
         lifted = List.rev ctx.lifted;
         deps = ctx.deps;
         cons_used = ctx.cons_used;
+        ops_used = ctx.ops_used;
       }
 
 (** Lower a top-level expression (evaluated and printed by the generated main). Lambdas inside it
     lift against a synthetic per-expression identity. *)
 let lower_top ~store ~intrinsics ~builtin_names ~member_arity ~index (e : Kernel.expr) :
-    expr * fn list * Hash.t list * Hash.t list =
+    expr * fn list * Hash.t list * Hash.t list * Hash.t list =
   let ctx =
     make_ctx ~store ~intrinsics ~builtin_names ~member_arity
       ~where:(Printf.sprintf "top-level expression %d" index)
@@ -549,4 +711,4 @@ let lower_top ~store ~intrinsics ~builtin_names ~member_arity ~index (e : Kernel
       ~member:(Hash.of_string (Printf.sprintf "native-top-%d" index))
   in
   let body = lower_tail ctx SMap.empty e in
-  (body, List.rev ctx.lifted, ctx.deps, ctx.cons_used)
+  (body, List.rev ctx.lifted, ctx.deps, ctx.cons_used, ctx.ops_used)

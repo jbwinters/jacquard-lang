@@ -110,7 +110,7 @@ static void mode_show(void) {
   show_line((jq_value)&pair_ctor);
   /* placeholders */
   static const uint8_t op_hash[32] = { 0 };
-  static const jq_op_info print_info = { op_hash, "console", "print" };
+  static const jq_op_info print_info = { op_hash, "console", "print", 0 };
   STATIC_BLOCK(print_op, JQ_OP, 1, (uint64_t)&print_info);
   show_line((jq_value)&print_op);
   jq_value clo = jq_closure((void *)0xC0DE, 0, 0, NULL, UINT16_MAX);

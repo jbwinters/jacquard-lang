@@ -53,8 +53,13 @@ jq_value jq_apply(JQ_PARAMS) {
     jq_drop(fn);
     return jq_con(info, args);
   }
-  case JQ_OP:
-    fail("jacquard runtime: op perform reached a pure binary (task 70)");
+  case JQ_OP: {
+    /* applying a first-class op performs it (spec: no Perform form) */
+    const jq_op_info *info = (const jq_op_info *)b->payload[0];
+    jq_value args[JQ_MAX_ARITY] = { a0, a1, a2, a3, a4, a5, a6, a7 };
+    jq_drop(fn); /* static, no-op */
+    return jq_perform(rt, info->ordinal, n, args);
+  }
   case JQ_RESUME:
     fail("jacquard runtime: resumption reached a pure binary (task 71)");
   default: {

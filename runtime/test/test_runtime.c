@@ -199,6 +199,180 @@ static void test_blocks(void) {
   jq_drop(hv);
 }
 
+/* --- effects: the handler stack and perform (task 70) --- */
+
+/* Clause code functions use the uniform compiled signature: the callee owns
+ * clo and the live arguments; the padding slots are JQ_UNIT (static). */
+
+/* 0-arity clause returning env[0] */
+static jq_value hc_env0(JQ_PARAMS) {
+  (void)rt; (void)a0; (void)a1; (void)a2; (void)a3; (void)a4; (void)a5;
+  (void)a6; (void)a7;
+  jq_value r = jq_closure_env(clo)[0];
+  jq_dup(r); /* before the clo drop: the env owns its copy until then */
+  jq_drop(clo);
+  return r;
+}
+
+/* 1-arity clause echoing its argument */
+static jq_value hc_echo(JQ_PARAMS) {
+  (void)rt; (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
+  (void)a7;
+  jq_drop(clo);
+  return a0;
+}
+
+/* 0-arity clause re-performing op env[0], plus 1: outer-continuation
+ * semantics say it must reach the handler BELOW its own, never itself */
+static jq_value hc_reperform(JQ_PARAMS) {
+  (void)a0; (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
+  (void)a7;
+  uint32_t op = (uint32_t)jq_int_val(jq_closure_env(clo)[0]);
+  jq_drop(clo);
+  jq_value inner = jq_perform(rt, op, 0, NULL);
+  return jq_int_add(inner, jq_int(1));
+}
+
+/* 0-arity clause that pushes a handler for op env[0] (clause value 500) at
+ * the truncation point, performs it, pops it, returns the result plus 1 —
+ * the structured handle-inside-a-clause shape */
+static jq_value hc_nested_push(JQ_PARAMS) {
+  (void)a0; (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
+  (void)a7;
+  uint32_t op = (uint32_t)jq_int_val(jq_closure_env(clo)[0]);
+  jq_drop(clo);
+  jq_handler_entry e = { op, jq_closure((void *)hc_env0, 0, 1,
+                                        (jq_value[]){ jq_int(500) },
+                                        UINT16_MAX) };
+  jq_handle_push(rt, 1, &e);
+  jq_value r = jq_perform(rt, op, 0, NULL);
+  jq_handle_pop(rt, 1);
+  return jq_int_add(r, jq_int(1));
+}
+
+static jq_handler_entry entry_const(uint32_t op, int64_t v) {
+  return (jq_handler_entry){ op, jq_closure((void *)hc_env0, 0, 1,
+                                            (jq_value[]){ jq_int(v) },
+                                            UINT16_MAX) };
+}
+
+static void test_handler_push_pop(void) {
+  /* push takes ownership of the clause closures, pop releases them; the
+     captured tuple's free is ASAN's proof */
+  jq_rt rt = { 0 };
+  jq_value captured = jq_tuple(1, (jq_value[]){ jq_int(9) });
+  jq_handler_entry e[2] = {
+    entry_const(1, 10),
+    { 2, jq_closure((void *)hc_env0, 0, 1, (jq_value[]){ captured },
+                    UINT16_MAX) },
+  };
+  jq_handle_push(&rt, 2, e);
+  CHECK(rt.hs_len == 2, "push installs the entries");
+  jq_handle_pop(&rt, 2);
+  CHECK(rt.hs_len == 0, "pop empties the stack");
+  free(rt.hs);
+  printf("ok handler push/pop releases clauses\n");
+}
+
+static void test_perform_nearest(void) {
+  jq_rt rt = { 0 };
+  jq_handler_entry outer = entry_const(1, 10);
+  jq_handle_push(&rt, 1, &outer);
+  jq_handler_entry inner = entry_const(1, 20);
+  jq_handle_push(&rt, 1, &inner);
+  jq_value r = jq_perform(&rt, 1, 0, NULL);
+  CHECK(jq_int_val(r) == 20, "nearest cover wins");
+  jq_handle_pop(&rt, 1);
+  r = jq_perform(&rt, 1, 0, NULL);
+  CHECK(jq_int_val(r) == 10, "pop uncovers the outer handler");
+  jq_handle_pop(&rt, 1);
+  free(rt.hs);
+}
+
+static void test_perform_args_ownership(void) {
+  /* the clause owns the live arguments (echo returns ours back); perform
+     dups the stack entry's clause per call, so a second perform works */
+  jq_rt rt = { 0 };
+  jq_handler_entry e = { 4, jq_closure((void *)hc_echo, 1, 0, NULL,
+                                       UINT16_MAX) };
+  jq_handle_push(&rt, 1, &e);
+  jq_value arg = jq_tuple(1, (jq_value[]){ jq_int(7) });
+  jq_value r = jq_perform(&rt, 4, 1, (jq_value[]){ arg });
+  CHECK(r == arg, "clause received the owned argument");
+  jq_drop(r);
+  jq_value arg2 = jq_tuple(1, (jq_value[]){ jq_int(8) });
+  r = jq_perform(&rt, 4, 1, (jq_value[]){ arg2 });
+  CHECK(r == arg2, "second perform through the same entry");
+  jq_drop(r);
+  jq_handle_pop(&rt, 1);
+  free(rt.hs);
+}
+
+static void test_perform_outer_continuation(void) {
+  /* a clause body runs against the continuation OUTSIDE its handler: its
+     re-perform reaches the handler below, and the hidden slice is restored
+     after the clause returns — pinned by performing twice */
+  jq_rt rt = { 0 };
+  jq_handler_entry below = entry_const(1, 100);
+  jq_handle_push(&rt, 1, &below);
+  jq_handler_entry above = { 1, jq_closure((void *)hc_reperform, 0, 1,
+                                           (jq_value[]){ jq_int(1) },
+                                           UINT16_MAX) };
+  jq_handle_push(&rt, 1, &above);
+  jq_value r = jq_perform(&rt, 1, 0, NULL);
+  CHECK(jq_int_val(r) == 101, "clause re-perform reaches the outer handler");
+  CHECK(rt.hs_len == 2, "hidden slice restored after the clause");
+  r = jq_perform(&rt, 1, 0, NULL);
+  CHECK(jq_int_val(r) == 101, "stack intact for a second perform");
+  jq_handle_pop(&rt, 2);
+  free(rt.hs);
+}
+
+static void test_clause_pushes_handler(void) {
+  /* a handle inside a clause lands at the truncation point and pops before
+     the clause returns */
+  jq_rt rt = { 0 };
+  jq_handler_entry e = { 1, jq_closure((void *)hc_nested_push, 0, 1,
+                                       (jq_value[]){ jq_int(2) },
+                                       UINT16_MAX) };
+  jq_handle_push(&rt, 1, &e);
+  jq_value r = jq_perform(&rt, 1, 0, NULL);
+  CHECK(jq_int_val(r) == 501, "clause-local handle covers its perform");
+  CHECK(rt.hs_len == 1, "clause-local handle popped before return");
+  jq_handle_pop(&rt, 1);
+  free(rt.hs);
+}
+
+static int fake_grant_calls = 0;
+static jq_value fake_grant(jq_rt *rt, const jq_value *args) {
+  (void)rt;
+  (void)args;
+  fake_grant_calls++;
+  return jq_int(777);
+}
+
+static void test_grant_fallback(void) {
+  /* an uncovered op falls to the grant table by ordinal; a handler for a
+     DIFFERENT op does not intercept, a handler covering the op shadows */
+  jq_rt rt = { 0 };
+  jq_value (*grants[4])(jq_rt *, const jq_value *) = { 0 };
+  grants[3] = fake_grant;
+  rt.grants = grants;
+  rt.n_ops = 4;
+  jq_handler_entry other = entry_const(1, 10);
+  jq_handle_push(&rt, 1, &other);
+  jq_value r = jq_perform(&rt, 3, 0, NULL);
+  CHECK(jq_int_val(r) == 777 && fake_grant_calls == 1,
+        "uncovered op falls to its grant");
+  jq_handler_entry cover = entry_const(3, 30);
+  jq_handle_push(&rt, 1, &cover);
+  r = jq_perform(&rt, 3, 0, NULL);
+  CHECK(jq_int_val(r) == 30 && fake_grant_calls == 1,
+        "a covering handler shadows the grant");
+  jq_handle_pop(&rt, 2);
+  free(rt.hs);
+}
+
 int main(int argc, char **argv) {
   /* fatal-path modes: check.sh asserts the message and exit code 2 */
   if (argc > 1 && strcmp(argv[1], "div0") == 0) {
@@ -215,6 +389,16 @@ int main(int argc, char **argv) {
     jq_con(&huge, fields);
     return 0;
   }
+  if (argc > 1 && strcmp(argv[1], "unhandled-op") == 0) {
+    /* no handler, no grant: the interpreter's exact rendering, exit 3 */
+    static const jq_op_info print_info = { NULL, "console", "print", 0 };
+    static const jq_op_info *meta[1] = { &print_info };
+    jq_rt rt = { 0 };
+    rt.op_meta = meta;
+    rt.n_ops = 1;
+    jq_perform(&rt, 0, 0, NULL);
+    return 0; /* unreachable */
+  }
   long deep_n = argc > 1 ? atol(argv[1]) : 1000000;
   test_int_tagging();
   test_int_edges();
@@ -229,6 +413,12 @@ int main(int argc, char **argv) {
   test_unit();
   test_statics();
   test_blocks();
+  test_handler_push_pop();
+  test_perform_nearest();
+  test_perform_args_ownership();
+  test_perform_outer_continuation();
+  test_clause_pushes_handler();
+  test_grant_fallback();
   if (failures) {
     printf("%d FAILED\n", failures);
     return 1;

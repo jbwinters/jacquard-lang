@@ -25,18 +25,20 @@ $CC -std=c11 -O2 -Wall -Wextra -Werror -o "$OUT/test_plain" $SRC
   "$OUT/test_plain" 10000000
 )
 
-# 3. fatal paths: interpreter-pinned messages, exit 2 (goldens 2026-07-05)
+# 3. fatal paths: interpreter-pinned messages and exit codes (goldens
+#    2026-07-05; runtime errors exit 2, unhandled effects exit 3)
 expect_fatal() {
-  mode=$1; want=$2
+  mode=$1; want_code=$2; want=$3
   msg=$("$OUT/test_asan" "$mode" 2>&1) && { echo "FAIL: $mode exited 0"; exit 1; }
   code=$?
-  [ "$code" = 2 ] || { echo "FAIL: $mode exit $code, want 2"; exit 1; }
+  [ "$code" = "$want_code" ] || { echo "FAIL: $mode exit $code, want $want_code"; exit 1; }
   [ "$msg" = "$want" ] || { echo "FAIL: $mode said '$msg', want '$want'"; exit 1; }
   echo "ok fatal $mode"
 }
-expect_fatal div0 "arithmetic error: division by zero"
-expect_fatal mod0 "arithmetic error: modulo by zero"
-expect_fatal arity-overflow "jacquard runtime: constructor arity exceeds the 65535 limit"
+expect_fatal div0 2 "arithmetic error: division by zero"
+expect_fatal mod0 2 "arithmetic error: modulo by zero"
+expect_fatal arity-overflow 2 "jacquard runtime: constructor arity exceeds the 65535 limit"
+expect_fatal unhandled-op 3 'unhandled effect console: operation `print` reached the root without a handler'
 
 # 4. parity kit (task 66): the C ports must reproduce the OCaml goldens
 #    byte-for-byte. Goldens regenerate via `dune exec test/gen_native_parity.exe`.

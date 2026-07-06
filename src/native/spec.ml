@@ -65,6 +65,9 @@ let sub_bound env (b : bound) : bound =
   | BAllocTuple args -> BAllocTuple (s args)
   | BAllocClosure c -> BAllocClosure { c with captured = s c.captured }
   | BIntrinsic (n, args) -> BIntrinsic (n, s args)
+  | BPerform (h, args) -> BPerform (h, s args)
+  | BHandle (entries, thunk) ->
+      BHandle (List.map (fun (o, a) -> (o, sub_atom env a)) entries, sub_atom env thunk)
 
 (* bind pattern variables against a statically-known construction; None = no match or not
    decidable (literals under cons are left to runtime — dictionaries never carry them) *)
@@ -190,6 +193,7 @@ and specialize (st : st) (h : Hash.t) (args : atom list) :
                   lifted = [];
                   deps = [ h ];
                   cons_used = [];
+                  ops_used = [];
                 }
               in
               Hashtbl.replace st.members sh placeholder;

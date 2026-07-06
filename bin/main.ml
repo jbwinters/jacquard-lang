@@ -1480,8 +1480,8 @@ let build_cmd file out prelude =
                     | Ok e -> (
                         match Check.check_top cctx (Kernel.Expr e) with
                         | Error ds -> Error ds
-                        | Ok { Check.warnings; _ } ->
-                            tops := (e, List.map Diag.to_string warnings) :: !tops;
+                        | Ok _ ->
+                            tops := e :: !tops;
                             load_forms rest)))
           in
           match Reader.parse_string ~file (read_file file) with
@@ -1499,25 +1499,61 @@ let build_cmd file out prelude =
                   match load_forms (List.rev rev_tops) with
                   | Error ds -> print_diags ds
                   | Ok () -> (
-                      match
-                        Jacquard_native.Build.build ~store ~tops:(List.rev !tops)
-                          ~prelude_dir:(prelude_dir_of prelude) ~out
-                      with
-                      | Ok n ->
-                          Printf.printf "native: compiled %d unit(s)\n" n;
-                          ok
-                      | Error (`Refused rs) ->
-                          List.iter
-                            (fun (r : Jacquard_native.Compile.refusal) ->
-                              Printf.eprintf
-                                "error[E1101]: not yet compilable (native v1 compiles pure \
-                                 programs without handlers): %s %s\n"
-                                r.Jacquard_native.Compile.where r.Jacquard_native.Compile.what)
-                            rs;
+                      (* warnings and manifests are harvested from a SECOND, run-alike
+                         checker context that checks only the top expressions: the loader's
+                         eager decl checking seeds Check's origin map in a different order
+                         than run_cmd's lazy checking, and the E0814 origins
+                         (`performed via ...`) must match run byte-for-byte *)
+                      let baked =
+                        match make_checker store with
+                        | Error _ -> None
+                        | Ok cctx2 ->
+                            List.fold_left
+                              (fun acc e ->
+                                Option.bind acc (fun acc ->
+                                    match Check.check_top cctx2 (Kernel.Expr e) with
+                                    | Error _ -> None
+                                    | Ok { Check.warnings; row; _ } ->
+                                        let r =
+                                          Types.repr_row (Option.value row ~default:Types.empty_row)
+                                        in
+                                        let msgs =
+                                          Check.manifest_errors cctx2
+                                            ~grantable:Prelude.grantable_names ~granted:[] r
+                                        in
+                                        let manifest =
+                                          List.map2
+                                            (fun h d -> (Check.name_of cctx2 h, Diag.to_string d))
+                                            r.Types.effects msgs
+                                        in
+                                        Some ((e, List.map Diag.to_string warnings, manifest) :: acc)))
+                              (Some []) (List.rev !tops)
+                      in
+                      match baked with
+                      | None ->
+                          prerr_endline
+                            "error[E1103]: internal: the manifest pass diverged from the load pass";
                           exit_diags
-                      | Error (`Toolchain m) ->
-                          Printf.eprintf "error[E1103]: %s\n" m;
-                          exit_diags)))))
+                      | Some rev_baked -> (
+                          match
+                            Jacquard_native.Build.build ~store ~tops:(List.rev rev_baked)
+                              ~prelude_dir:(prelude_dir_of prelude) ~out
+                          with
+                          | Ok n ->
+                              Printf.printf "native: compiled %d unit(s)\n" n;
+                              ok
+                          | Error (`Refused rs) ->
+                              List.iter
+                                (fun (r : Jacquard_native.Compile.refusal) ->
+                                  Printf.eprintf
+                                    "error[E1101]: not yet compilable (native v1 compiles pure \
+                                     programs and tail-resumptive handlers): %s %s\n"
+                                    r.Jacquard_native.Compile.where r.Jacquard_native.Compile.what)
+                                rs;
+                              exit_diags
+                          | Error (`Toolchain m) ->
+                              Printf.eprintf "error[E1103]: %s\n" m;
+                              exit_diags))))))
 
 let out_arg =
   Arg.(
@@ -1530,7 +1566,8 @@ let build_t =
     (Cmd.info "build"
        ~doc:
          "Compile a .jqd file and its reachable declarations to a standalone native executable \
-          (task 67: the pure fragment; effects land with later rungs).")
+          (tasks 67-70: the pure fragment plus tail-resumptive handlers and root grants; capturing \
+          continuations land with task 71).")
     Term.(const build_cmd $ file_arg $ out_arg $ prelude_arg)
 
 let tiers_t =

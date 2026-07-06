@@ -1,6 +1,6 @@
-Native compilation (docs/native-plan.md, task 67): pure programs compile to
-standalone binaries whose output is byte-identical to the interpreter. v1
-requires clang (musttail).
+Native compilation (docs/native-plan.md, tasks 67-70): pure programs and
+tail-resumptive handlers compile to standalone binaries whose output is
+byte-identical to the interpreter. v1 requires clang (musttail).
 
   $ export JACQUARD_PRELUDE=../../prelude
   $ export JACQUARD_RUNTIME=../../runtime
@@ -62,22 +62,179 @@ other unit (second build recompiles nothing).
   100
 
 Ineligible REACHABLE constructs are errors naming the construct and its
-home, never silent miscompiles — a handler, an effect operation, a quote.
-(Unreachable declarations are fine: eligibility walks the dependency DAG
-from the top-level expressions, not the whole file.)
+home, never silent miscompiles — a non-tail-resumptive handler clause,
+eval, a quote. (Unreachable declarations are fine: eligibility walks the
+dependency DAG from the top-level expressions, not the whole file.)
 
-  $ cat > handler.jqd <<'EOF_JQD'
+Since task 70 a handler whose clauses are all tail-resumptive compiles
+(a ret-only handle trivially so); what stays refused until task 71 is any
+clause that needs a materialized continuation — this one resumes twice:
+
+  $ cat > handler-ret.jqd <<'EOF_JQD'
   > (handle (lit 1) (ret (pvar x) (var x)))
   > EOF_JQD
-  $ jacquard build handler.jqd -o nope
-  error[E1101]: not yet compilable (native v1 compiles pure programs without handlers): top-level expression 0 contains a handler (effects land with tasks 70-71)
+  $ jacquard build handler-ret.jqd -o ret-only > /dev/null
+  $ ./ret-only
+  1
+  $ cat > multishot.jqd <<'EOF_JQD'
+  > (handle (app (var get))
+  >   (ret (pvar x) (var x))
+  >   (opclause get () k
+  >     (let nonrec (pvar a) (app (var k) (lit 1))
+  >       (app (var k) (lit 2)))))
+  > EOF_JQD
+  $ jacquard run multishot.jqd
+  2
+  $ jacquard build multishot.jqd -o nope
+  error[E1101]: not yet compilable (native v1 compiles pure programs and tail-resumptive handlers): top-level expression 0 contains a multi-shot handler clause (only tail-resumptive compiles until task 71)
   [1]
   $ jacquard build ../../corpus/valid/eval-gated.jqd -o nope
-  error[E1101]: not yet compilable (native v1 compiles pure programs without handlers): top-level expression 0 performs an effect operation
+  error[E1101]: not yet compilable (native v1 compiles pure programs and tail-resumptive handlers): top-level expression 0 uses eval, which requires the interpreter tier
   [1]
   $ cat > quoted.jqd <<'EOF_JQD'
   > (quote (lit 1))
   > EOF_JQD
   $ jacquard build quoted.jqd -o nope
-  error[E1101]: not yet compilable (native v1 compiles pure programs without handlers): top-level expression 0 contains a quote (code values land with task 73)
+  error[E1101]: not yet compilable (native v1 compiles pure programs and tail-resumptive handlers): top-level expression 0 contains a quote (code values land with task 73)
+  [1]
+
+Effects (task 70): a perform dispatches to the nearest handler; a handler
+discharging its effect in-language needs no grant:
+
+  $ cat > get42.jqd <<'EOF_JQD'
+  > (handle (app (var add) (app (var get)) (lit 1))
+  >   (ret (pvar x) (var x))
+  >   (opclause get () k (app (var k) (lit 41))))
+  > EOF_JQD
+  $ jacquard run get42.jqd > i.out 2>&1
+  $ jacquard build get42.jqd -o get42 > /dev/null
+  $ ./get42 > n.out 2>&1
+  $ diff i.out n.out && echo identical
+  identical
+
+Root grants are the --allow natives, parsed by the generated main. Console
+hello, both legs: granted, and refused with E0814's exact rendering at
+exit 3:
+
+  $ cat > hello.jqd <<'EOF_JQD'
+  > (app (var println) (lit "hello, native"))
+  > EOF_JQD
+  $ jacquard build hello.jqd -o hello > /dev/null
+  $ jacquard run hello.jqd --allow console > i.out 2>&1
+  $ ./hello --allow console > n.out 2>&1
+  $ cat n.out
+  hello, native
+  ()
+  $ diff i.out n.out && echo identical
+  identical
+  $ jacquard run hello.jqd > i.out 2>&1; echo "exit $?"
+  exit 3
+  $ ./hello > n.out 2>&1; echo "exit $?"
+  exit 3
+  $ diff i.out n.out && echo identical
+  identical
+
+A later expression's refusal happens at ITS turn: the first expression's
+value has already printed and flushed on both engines, so it precedes the
+error even in a merged capture:
+
+  $ cat > interleave.jqd <<'EOF_JQD'
+  > (lit 1)
+  > (app (var println) (lit "reached?"))
+  > EOF_JQD
+  $ jacquard build interleave.jqd -o interleave > /dev/null
+  $ jacquard run interleave.jqd > i.out 2>&1; echo "exit $?"
+  exit 3
+  $ ./interleave > n.out 2>&1; echo "exit $?"
+  exit 3
+  $ cat n.out
+  1
+  error[E0814]: this program requires the `console` effect, which is not granted (performed via `println`)
+    hint: grant it with --allow console, or handle the effect in the program
+  $ diff i.out n.out && echo identical
+  identical
+
+demos/word-count.jqd — the task-70 definition of done — granted and
+refused, byte-identical both ways:
+
+  $ echo "the quick brown fox the lazy dog the fox" | jacquard run ../../demos/word-count.jqd --allow console > i.out 2>&1
+  $ jacquard build ../../demos/word-count.jqd -o wc-prog > /dev/null
+  $ echo "the quick brown fox the lazy dog the fox" | ./wc-prog --allow console > n.out 2>&1
+  $ diff i.out n.out && echo identical
+  identical
+  $ jacquard run ../../demos/word-count.jqd > i.out 2>&1; echo "exit $?"
+  exit 3
+  $ ./wc-prog > n.out 2>&1; echo "exit $?"
+  exit 3
+  $ diff i.out n.out && echo identical
+  identical
+
+A clock handler discharging `now` in-language: deterministic, no grant
+needed (the row is empty), byte-identical:
+
+  $ cat > clock-fixed.jqd <<'EOF_JQD'
+  > (handle (app (var sub) (app (var now)) (app (var now)))
+  >   (ret (pvar x) (var x))
+  >   (opclause now () k (app (var k) (lit 1000))))
+  > EOF_JQD
+  $ jacquard run clock-fixed.jqd > i.out 2>&1
+  $ jacquard build clock-fixed.jqd -o clock-fixed > /dev/null
+  $ ./clock-fixed > n.out 2>&1
+  $ cat n.out
+  0
+  $ diff i.out n.out && echo identical
+  identical
+
+The clock grant natives (sleep 0 is the deterministic one):
+
+  $ cat > sleep0.jqd <<'EOF_JQD'
+  > (app (var sleep) (lit 0))
+  > EOF_JQD
+  $ jacquard build sleep0.jqd -o sleep0 > /dev/null
+  $ jacquard run sleep0.jqd --allow clock > i.out 2>&1
+  $ ./sleep0 --allow clock > n.out 2>&1
+  $ diff i.out n.out && echo identical
+  identical
+  $ ./sleep0 > n.out 2>&1; echo "exit $?"
+  exit 3
+
+The fs grant natives: a write/read round trip and a sorted list-dir under
+a scratch dir, granted and refused, plus the io-error rendering (exit 2)
+for a missing file:
+
+  $ cat > fsdemo.jqd <<'EOF_JQD'
+  > (let nonrec (pwild) (app (var write) (lit "fsdir/a.txt") (lit "alpha"))
+  >   (let nonrec (pwild) (app (var write) (lit "fsdir/b.txt") (lit "beta"))
+  >     (tuple (app (var read) (lit "fsdir/a.txt")) (app (var list-dir) (lit "fsdir")))))
+  > EOF_JQD
+  $ jacquard build fsdemo.jqd -o fsdemo > /dev/null
+  $ mkdir fsdir && jacquard run fsdemo.jqd --allow fs > i.out 2>&1
+  $ rm -r fsdir && mkdir fsdir && ./fsdemo --allow fs > n.out 2>&1
+  $ cat n.out
+  ("alpha", cons("a.txt", cons("b.txt", nil)))
+  $ diff i.out n.out && echo identical
+  identical
+  $ jacquard run fsdemo.jqd > i.out 2>&1; echo "exit $?"
+  exit 3
+  $ ./fsdemo > n.out 2>&1; echo "exit $?"
+  exit 3
+  $ diff i.out n.out && echo identical
+  identical
+  $ cat > fsmiss.jqd <<'EOF_JQD'
+  > (app (var read) (lit "no-such-file.txt"))
+  > EOF_JQD
+  $ jacquard build fsmiss.jqd -o fsmiss > /dev/null
+  $ jacquard run fsmiss.jqd --allow fs > i.out 2>&1; echo "exit $?"
+  exit 2
+  $ ./fsmiss --allow fs > n.out 2>&1; echo "exit $?"
+  exit 2
+  $ cat n.out
+  io error: no-such-file.txt: No such file or directory
+  $ diff i.out n.out && echo identical
+  identical
+
+An unimplemented grant is an up-front error, not a silent no-op:
+
+  $ ./fsmiss --allow net
+  error[E1103]: native binaries implement only the console, clock, and fs grants so far (task 70); cannot grant `net`
   [1]

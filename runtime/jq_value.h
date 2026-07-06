@@ -135,9 +135,10 @@ typedef struct jq_con_info {
 } jq_con_info;
 
 typedef struct jq_op_info {
-  const uint8_t *op_hash; /* 32 bytes */
+  const uint8_t *op_hash; /* 32 bytes; may be NULL in compiled programs */
   const char *effect_name;
   const char *op_name; /* feeds <op effect.op> and perform dispatch (task 70) */
+  uint32_t ordinal;    /* the link-time perform/grant index */
 } jq_op_info;
 
 struct jq_rt;
@@ -164,6 +165,8 @@ typedef struct jq_rt {
   jq_value v_less;
   jq_value v_equal;
   jq_value v_greater;
+  jq_value v_nil;                /* list-building intrinsics (text.split) */
+  const jq_con_info *ci_cons;
   uint16_t apply_n; /* argument count for the next jq_apply (set by the caller
                        immediately before the call: musttail forces jq_apply
                        onto the uniform signature, so n travels here) */
@@ -227,6 +230,9 @@ jq_value jq_g_print(jq_rt *rt, const jq_value *args);
 jq_value jq_g_read_line(jq_rt *rt, const jq_value *args);
 jq_value jq_g_now(jq_rt *rt, const jq_value *args);
 jq_value jq_g_sleep(jq_rt *rt, const jq_value *args);
+jq_value jq_g_fs_read(jq_rt *rt, const jq_value *args);
+jq_value jq_g_fs_write(jq_rt *rt, const jq_value *args);
+jq_value jq_g_fs_list_dir(jq_rt *rt, const jq_value *args);
 
 /* "no clause matched the value %s", exit 2 (Runtime_err.Match_failure) */
 void jq_match_fail(jq_rt *rt, jq_value scrutinee) __attribute__((noreturn));
@@ -253,6 +259,10 @@ jq_value jq_i_text_length(jq_rt *rt, const jq_value *a);
 jq_value jq_i_text_concat(jq_rt *rt, const jq_value *a);
 jq_value jq_i_int_compare(jq_rt *rt, const jq_value *a);
 jq_value jq_i_text_compare(jq_rt *rt, const jq_value *a);
+jq_value jq_i_text_trim(jq_rt *rt, const jq_value *a);
+jq_value jq_i_text_split(jq_rt *rt, const jq_value *a);
+jq_value jq_i_text_empty_q(jq_rt *rt, const jq_value *a);
+jq_value jq_i_text_from_int(jq_rt *rt, const jq_value *a);
 
 
 /* --- constructors (jq_alloc.c) --- */
