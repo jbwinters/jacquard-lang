@@ -31,5 +31,6 @@ error texts exactly; the differential harness is the check.
 | code.of-text | - | refused for good | it is the reader |
 | eval-code | - | refused for good | interpreter tier only |
 | debug.inspect | 1 | not yet | |
-| pmf, support, dist.sample-lw | - | task 72 | dist drivers |
+| pmf, support | 2/1 | yes | task 71 (the enum handler reaches them); name-recognized dist cons, show-based pmf equality, interpreter's exact error texts |
+| dist.sample-lw | - | task 72 | the seeded LW driver |
 | add-real family duplicates none | | | |

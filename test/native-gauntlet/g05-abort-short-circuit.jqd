@@ -1,0 +1,6 @@
+; twin of test_handlers.ml test_abort_short_circuits: the clause returns
+; without resuming; the pending (add 1 _) is abandoned -> none
+(handle
+  (app (var some) (app (var add) (lit 1) (app (var abort))))
+  (ret (pvar x) (var x))
+  (opclause abort () k (var none)))

@@ -1,0 +1,10 @@
+; twin of test_handlers.ml test_multishot_thrice: the same resumption applied
+; three times; each branch doubles its input -> cons(2, cons(4, cons(6, nil)))
+(defeffect pick3 ((tvar a)) (op pick () (tref int)))
+
+(handle
+  (app (var mul) (lit 2) (app (var pick)))
+  (ret (pvar x) (app (var cons) (var x) (var nil)))
+  (opclause pick () k
+    (app (var list.append) (app (var k) (lit 1))
+      (app (var list.append) (app (var k) (lit 2)) (app (var k) (lit 3))))))

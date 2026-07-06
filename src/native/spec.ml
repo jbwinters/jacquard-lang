@@ -66,8 +66,11 @@ let sub_bound env (b : bound) : bound =
   | BAllocClosure c -> BAllocClosure { c with captured = s c.captured }
   | BIntrinsic (n, args) -> BIntrinsic (n, s args)
   | BPerform (h, args) -> BPerform (h, s args)
-  | BHandle (entries, thunk) ->
-      BHandle (List.map (fun (o, a) -> (o, sub_atom env a)) entries, sub_atom env thunk)
+  | BHandle (entries, thunk, retc) ->
+      BHandle
+        ( List.map (fun (o, c, a) -> (o, c, sub_atom env a)) entries,
+          sub_atom env thunk,
+          sub_atom env retc )
 
 (* bind pattern variables against a statically-known construction; None = no match or not
    decidable (literals under cons are left to runtime — dictionaries never carry them) *)

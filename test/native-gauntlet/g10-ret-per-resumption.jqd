@@ -1,0 +1,12 @@
+; twin of test_handlers.ml test_return_clause_runs_per_resumption: the ret
+; clause doubles and wraps EACH resumed branch — cons(2, cons(4, nil)) proves
+; ret ran once per resumption, not once on the collected result
+(defeffect choice ((tvar a)) (op choose () (tref bool)))
+
+(handle
+  (match (app (var choose))
+    (clause (pcon true) (lit 1))
+    (clause (pcon false) (lit 2)))
+  (ret (pvar x) (app (var cons) (app (var mul) (lit 2) (var x)) (var nil)))
+  (opclause choose () k
+    (app (var list.append) (app (var k) (var true)) (app (var k) (var false)))))

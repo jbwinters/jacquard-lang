@@ -31,6 +31,8 @@ let intrinsics : (string * int) list =
     ("text.split", 2);
     ("text.empty?", 1);
     ("text.from-int", 1);
+    ("support", 1);
+    ("pmf", 2);
   ]
 
 (* ------------------------------------------------------------------ *)
@@ -210,7 +212,7 @@ let compile_program (store : Store.t) (d : discovery)
       match Store.lookup_kind store n Resolve.KCon with
       | Some e -> note_con e.Resolve.hash
       | None -> ())
-    [ "less"; "equal"; "greater"; "nil"; "cons" ];
+    [ "less"; "equal"; "greater"; "nil"; "cons"; "mk-pair" ];
   (* init order: const members topologically by their const-member deps *)
   let member_list = Hashtbl.fold (fun _ cm acc -> cm :: acc) members [] in
   let member_list =
@@ -260,6 +262,66 @@ let compile_program (store : Store.t) (d : discovery)
           Hashtbl.replace ops h { Emit.ohash = h; oeffect = ename; oname; oord = i }
       | _ -> ())
     op_list;
+  (* frame-style classification (task 71): a fn may suspend when its body performs,
+     handles, applies an unknown callee, or calls a member that may — the fixed point
+     over known-call edges. Top-level expression bodies and const initializers stay
+     direct: any capturing handler they involve lives INSIDE the expression, so a
+     capture always resolves within it and never unwinds past its C activation. *)
+  let expr_facts (e : Compile.expr) : bool * Hash.t list =
+    let direct = ref false in
+    let calls = ref [] in
+    let bound = function
+      | Compile.BPerform _ | Compile.BHandle _ | Compile.BCallUnknown _ -> direct := true
+      | Compile.BCallKnown (h, _) -> calls := h :: !calls
+      | _ -> ()
+    in
+    let rec go = function
+      | Compile.Ret _ | Compile.TailSelf _ -> ()
+      | Compile.LetReuse (_, _, _, body) | Compile.Drop (_, body) -> go body
+      | Compile.Let (_, b, body) ->
+          bound b;
+          go body
+      | Compile.Match (_, cls) -> List.iter (fun (_, b) -> go b) cls
+      | Compile.TailKnown (h, _, _) -> calls := h :: !calls
+      | Compile.TailUnknown _ -> direct := true
+    in
+    go e;
+    (!direct, !calls)
+  in
+  let framed_fns : (Hash.t * int, unit) Hashtbl.t = Hashtbl.create 64 in
+  let framed_members : (Hash.t, unit) Hashtbl.t = Hashtbl.create 64 in
+  let fn_facts =
+    List.concat_map
+      (fun (cm : Compile.compiled_member) ->
+        let of_fn ~entry (f : Compile.fn) =
+          let direct, calls = expr_facts f.Compile.body in
+          (f.Compile.fname, (if entry then Some cm.Compile.member else None), direct, calls)
+        in
+        (match cm.Compile.main_fn with Some f -> [ of_fn ~entry:true f ] | None -> [])
+        @ List.map (of_fn ~entry:false) cm.Compile.lifted)
+      member_list
+    @ List.concat_map
+        (fun (_, lifted, _, _, _) ->
+          List.map
+            (fun (f : Compile.fn) ->
+              let direct, calls = expr_facts f.Compile.body in
+              (f.Compile.fname, None, direct, calls))
+            lifted)
+        tops
+  in
+  let changed = ref true in
+  while !changed do
+    changed := false;
+    List.iter
+      (fun (fname, member_opt, direct, calls) ->
+        if not (Hashtbl.mem framed_fns fname) then
+          if direct || List.exists (Hashtbl.mem framed_members) calls then begin
+            Hashtbl.replace framed_fns fname ();
+            (match member_opt with Some m -> Hashtbl.replace framed_members m () | None -> ());
+            changed := true
+          end)
+      fn_facts
+  done;
   let prog =
     {
       Emit.members = member_list;
@@ -272,6 +334,8 @@ let compile_program (store : Store.t) (d : discovery)
       ops;
       tops = List.map (fun (b, l, w, _, _) -> (b, l, w)) tops;
       init_order = List.rev !order;
+      framed_fns;
+      framed_members;
     }
   in
   ({ prog; refusals = List.rev !refusals }, manifests)
@@ -387,8 +451,13 @@ let build ~(store : Store.t) ~(tops : (Kernel.expr * string list * (string * str
     ~prelude_dir ~out : (int, [ `Refused of Compile.refusal list | `Toolchain of string ]) result =
   let d = discover store in
   let { prog; refusals }, manifests = compile_program store d tops in
-  (* Perceus (task 68): precise ownership unless the differential lever turns it off *)
+  (* Perceus (task 68): precise ownership unless the differential lever turns it off.
+     Frame-style fns (task 71) stay on the naive discipline: a suspension abandons its
+     locals to the frame, which the move/Drop bookkeeping does not model — the emitter
+     handles their counts uniformly (dup on use, drop at exits). *)
   let precise = Sys.getenv_opt "JACQUARD_PERCEUS" <> Some "off" in
+  let skip (f : Compile.fn) = Hashtbl.mem prog.Emit.framed_fns f.Compile.fname in
+  let pfn (f : Compile.fn) = if skip f then f else Perceus.fn f in
   let prog =
     if not precise then prog
     else
@@ -399,21 +468,21 @@ let build ~(store : Store.t) ~(tops : (Kernel.expr * string list * (string * str
             (fun (cm : Compile.compiled_member) ->
               {
                 cm with
-                Compile.main_fn = Option.map Perceus.fn cm.Compile.main_fn;
+                Compile.main_fn = Option.map pfn cm.Compile.main_fn;
                 const_body =
                   Option.map
                     (fun b ->
                       Perceus.reset_tokens ();
                       Perceus.walk Perceus.SSet.empty b)
                     cm.Compile.const_body;
-                lifted = List.map Perceus.fn cm.Compile.lifted;
+                lifted = List.map pfn cm.Compile.lifted;
               })
             prog.Emit.members;
         tops =
           List.map
             (fun (body, lifted, warnings) ->
               Perceus.reset_tokens ();
-              (Perceus.walk Perceus.SSet.empty body, List.map Perceus.fn lifted, warnings))
+              (Perceus.walk Perceus.SSet.empty body, List.map pfn lifted, warnings))
             prog.Emit.tops;
       }
   in
@@ -455,6 +524,11 @@ let build ~(store : Store.t) ~(tops : (Kernel.expr * string list * (string * str
             | Some n, Some c -> Some (n.Resolve.hash, c.Resolve.hash)
             | _ -> None
           in
+          let pair =
+            match Store.lookup_kind store "mk-pair" Resolve.KCon with
+            | Some p -> Some p.Resolve.hash
+            | None -> None
+          in
           (* one unit per declaration: group members by owning decl *)
           let by_decl : (Hash.t, Compile.compiled_member list) Hashtbl.t = Hashtbl.create 32 in
           List.iter
@@ -477,7 +551,7 @@ let build ~(store : Store.t) ~(tops : (Kernel.expr * string list * (string * str
             |> List.sort compare
           in
           let main_c =
-            Emit.main_source prog ~precise ~v_true ~v_false ~orderings ~listcons ~intrinsics
+            Emit.main_source prog ~precise ~v_true ~v_false ~orderings ~listcons ~pair ~intrinsics
               ~manifests
           in
           let cflags =

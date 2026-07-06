@@ -1,0 +1,9 @@
+; twin of test_gauntlet_handlers.ml test_resumed_same_op_gives_four_leaves:
+; two sequential choose points, each resumed twice -> all four leaves in order
+(defeffect choice ((tvar a)) (op choose () (tref bool)))
+
+(handle
+  (tuple (app (var choose)) (app (var choose)))
+  (ret (pvar x) (app (var cons) (var x) (var nil)))
+  (opclause choose () k
+    (app (var list.append) (app (var k) (var true)) (app (var k) (var false)))))

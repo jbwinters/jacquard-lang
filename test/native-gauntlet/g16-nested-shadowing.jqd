@@ -1,0 +1,13 @@
+; twin of test_gauntlet_handlers.ml test_nested_same_op_handler_shadows_outer:
+; the inner handler shadows only its region -> (1, 2, 1)
+(defeffect beeper ((tvar a)) (op beep () (tref int)))
+
+(handle
+  (tuple
+    (app (var beep))
+    (handle (app (var beep))
+      (ret (pvar x) (var x))
+      (opclause beep () k (app (var k) (lit 2))))
+    (app (var beep)))
+  (ret (pvar x) (var x))
+  (opclause beep () k (app (var k) (lit 1))))

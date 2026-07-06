@@ -1,6 +1,7 @@
-Native compilation (docs/native-plan.md, tasks 67-70): pure programs and
-tail-resumptive handlers compile to standalone binaries whose output is
-byte-identical to the interpreter. v1 requires clang (musttail).
+Native compilation (docs/native-plan.md, tasks 67-71): the effect-full
+language — pure programs, tail-resumptive handlers, and capturing/multi-shot
+handlers — compiles to standalone binaries whose output is byte-identical to
+the interpreter. v1 requires clang (musttail).
 
   $ export JACQUARD_PRELUDE=../../prelude
   $ export JACQUARD_RUNTIME=../../runtime
@@ -62,13 +63,11 @@ other unit (second build recompiles nothing).
   100
 
 Ineligible REACHABLE constructs are errors naming the construct and its
-home, never silent miscompiles — a non-tail-resumptive handler clause,
-eval, a quote. (Unreachable declarations are fine: eligibility walks the
-dependency DAG from the top-level expressions, not the whole file.)
-
-Since task 70 a handler whose clauses are all tail-resumptive compiles
-(a ret-only handle trivially so); what stays refused until task 71 is any
-clause that needs a materialized continuation — this one resumes twice:
+home, never silent miscompiles — since task 71 that means eval and quotes
+(every handler discipline compiles; test/cli/native-effects.t runs the
+capturing/multi-shot gauntlet). (Unreachable declarations are fine:
+eligibility walks the dependency DAG from the top-level expressions, not
+the whole file.)
 
   $ cat > handler-ret.jqd <<'EOF_JQD'
   > (handle (lit 1) (ret (pvar x) (var x)))
@@ -85,17 +84,17 @@ clause that needs a materialized continuation — this one resumes twice:
   > EOF_JQD
   $ jacquard run multishot.jqd
   2
-  $ jacquard build multishot.jqd -o nope
-  error[E1101]: not yet compilable (native v1 compiles pure programs and tail-resumptive handlers): top-level expression 0 contains a multi-shot handler clause (only tail-resumptive compiles until task 71)
-  [1]
+  $ jacquard build multishot.jqd -o multishot > /dev/null
+  $ ./multishot
+  2
   $ jacquard build ../../corpus/valid/eval-gated.jqd -o nope
-  error[E1101]: not yet compilable (native v1 compiles pure programs and tail-resumptive handlers): top-level expression 0 uses eval, which requires the interpreter tier
+  error[E1101]: not yet compilable (native v1 compiles programs without code values): top-level expression 0 uses eval, which requires the interpreter tier
   [1]
   $ cat > quoted.jqd <<'EOF_JQD'
   > (quote (lit 1))
   > EOF_JQD
   $ jacquard build quoted.jqd -o nope
-  error[E1101]: not yet compilable (native v1 compiles pure programs and tail-resumptive handlers): top-level expression 0 contains a quote (code values land with task 73)
+  error[E1101]: not yet compilable (native v1 compiles programs without code values): top-level expression 0 contains a quote (code values land with task 73)
   [1]
 
 Effects (task 70): a perform dispatches to the nearest handler; a handler

@@ -7,6 +7,7 @@
 
 #include "jq_value.h"
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -253,4 +254,151 @@ jq_value jq_i_text_from_int(jq_rt *rt, const jq_value *a) {
   char buf[32];
   int n = snprintf(buf, sizeof buf, "%lld", (long long)jq_int_val(a[0]));
   return jq_text((const uint8_t *)buf, (uint64_t)n);
+}
+
+/* --- dist intrinsics (task 71: the enum handler's builtins) ---
+ *
+ * Distribution values are prelude constructor data, recognized BY NAME like
+ * the interpreter's Infer_dist.dist_of_value: bernoulli(real),
+ * categorical(list of mk-pair(x, real)), uniform-int(lo, hi). Errors render
+ * as the interpreter's Runtime_err (arithmetic/type), exit 2. */
+
+static bool is_con_named(jq_value v, const char *name) {
+  return jq_is_ptr(v) && jq_block_of(v)->tag == JQ_CON &&
+         strcmp(jq_con_info_of(v)->name, name) == 0;
+}
+
+static void arith_err(const char *fmt, ...) __attribute__((noreturn, format(printf, 1, 2)));
+static void arith_err(const char *fmt, ...) {
+  va_list ap;
+  fputs("arithmetic error: ", stderr);
+  va_start(ap, fmt);
+  vfprintf(stderr, fmt, ap);
+  va_end(ap);
+  fputc('\n', stderr);
+  exit(2);
+}
+
+static jq_value pair2(jq_rt *rt, jq_value x, jq_value p) {
+  return jq_con(rt->ci_pair, (jq_value[]){ x, p });
+}
+
+/* validate a categorical's entries list; interpreter's entries_of */
+static void check_entries(jq_value entries) {
+  jq_value v = entries;
+  while (true) {
+    if (is_con_named(v, "nil")) return;
+    if (is_con_named(v, "cons")) {
+      jq_value head = jq_con_fields(v)[0];
+      if (is_con_named(head, "mk-pair") &&
+          jq_is_ptr(jq_con_fields(head)[1]) &&
+          jq_block_of(jq_con_fields(head)[1])->tag == JQ_REAL) {
+        v = jq_con_fields(v)[1];
+        continue;
+      }
+    }
+    char *s = jq_show(v);
+    fprintf(stderr, "type error: categorical expects a list of pairs, got %s\n", s);
+    exit(2);
+  }
+}
+
+/* interpreter's dist_of_value validation, without building the OCaml view */
+static void check_dist(jq_value d) {
+  if (is_con_named(d, "bernoulli") && jq_is_ptr(jq_con_fields(d)[0]) &&
+      jq_block_of(jq_con_fields(d)[0])->tag == JQ_REAL) {
+    double p = jq_real_val(jq_con_fields(d)[0]);
+    if (p < 0.0 || p > 1.0 || p != p)
+      arith_err("bernoulli parameter %g is not in [0, 1]", p);
+    return;
+  }
+  if (is_con_named(d, "categorical")) {
+    check_entries(jq_con_fields(d)[0]);
+    return;
+  }
+  if (is_con_named(d, "uniform-int") && jq_is_int(jq_con_fields(d)[0]) &&
+      jq_is_int(jq_con_fields(d)[1])) {
+    int64_t lo = jq_int_val(jq_con_fields(d)[0]);
+    int64_t hi = jq_int_val(jq_con_fields(d)[1]);
+    if (hi < lo)
+      arith_err("uniform-int range %lld..%lld is empty", (long long)lo, (long long)hi);
+    return;
+  }
+  char *s = jq_show(d);
+  fprintf(stderr, "type error: %s is not a distribution value\n", s);
+  exit(2);
+}
+
+/* the support list, owned; the caller validated the dist. uniform-int is
+ * budget-capped exactly like the interpreter. */
+static jq_value support_of(jq_rt *rt, jq_value d) {
+  if (is_con_named(d, "bernoulli")) {
+    double p = jq_real_val(jq_con_fields(d)[0]);
+    jq_value tail = jq_con(rt->ci_cons, (jq_value[]){ pair2(rt, rt->v_false, jq_real(1.0 - p)),
+                                                      rt->v_nil });
+    return jq_con(rt->ci_cons, (jq_value[]){ pair2(rt, rt->v_true, jq_real(p)), tail });
+  }
+  if (is_con_named(d, "categorical")) {
+    jq_value entries = jq_con_fields(d)[0];
+    jq_dup(entries);
+    return entries;
+  }
+  /* uniform-int */
+  int64_t lo = jq_int_val(jq_con_fields(d)[0]);
+  int64_t hi = jq_int_val(jq_con_fields(d)[1]);
+  int64_t n = hi - lo + 1;
+  if (n > 10000)
+    arith_err("uniform-int %lld..%lld has %lld outcomes; enumeration caps at 10000",
+              (long long)lo, (long long)hi, (long long)n);
+  double p = 1.0 / (double)n;
+  jq_value list = rt->v_nil;
+  for (int64_t i = n - 1; i >= 0; i--)
+    list = jq_con(rt->ci_cons, (jq_value[]){ pair2(rt, jq_int(lo + i), jq_real(p)), list });
+  return list;
+}
+
+jq_value jq_i_support(jq_rt *rt, const jq_value *a) {
+  if (!jq_is_ptr(a[0]) || jq_block_of(a[0])->tag != JQ_CON) {
+    char *s = jq_show(a[0]);
+    fprintf(stderr, "type error: %s is not a distribution value\n", s);
+    exit(2);
+  }
+  check_dist(a[0]);
+  jq_value r = support_of(rt, a[0]);
+  jq_drop(a[0]);
+  return r;
+}
+
+/* pmf: mass of v under d; 0.0 off-support. Value equality is show-based,
+ * exactly the interpreter's rendering comparison. */
+jq_value jq_i_pmf(jq_rt *rt, const jq_value *a) {
+  jq_value d = a[0], v = a[1];
+  if (!jq_is_ptr(d) || jq_block_of(d)->tag != JQ_CON) {
+    char *s = jq_show(d);
+    fprintf(stderr, "type error: %s is not a distribution value\n", s);
+    exit(2);
+  }
+  check_dist(d);
+  double mass;
+  if (is_con_named(d, "uniform-int")) {
+    int64_t lo = jq_int_val(jq_con_fields(d)[0]);
+    int64_t hi = jq_int_val(jq_con_fields(d)[1]);
+    double n = (double)(hi - lo + 1);
+    mass = (jq_is_int(v) && jq_int_val(v) >= lo && jq_int_val(v) <= hi) ? 1.0 / n : 0.0;
+  } else {
+    jq_value entries = support_of(rt, d);
+    char *vs = jq_show(v);
+    mass = 0.0;
+    for (jq_value it = entries; is_con_named(it, "cons"); it = jq_con_fields(it)[1]) {
+      jq_value head = jq_con_fields(it)[0];
+      char *xs = jq_show(jq_con_fields(head)[0]);
+      if (strcmp(xs, vs) == 0) mass += jq_real_val(jq_con_fields(head)[1]);
+      free(xs);
+    }
+    free(vs);
+    jq_drop(entries);
+  }
+  jq_drop(d);
+  jq_drop(v);
+  return jq_real(mass);
 }

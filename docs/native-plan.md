@@ -238,9 +238,8 @@ the `jacquard build` subcommand, `test/cli/native.t`, intrinsics inventory
    node, any `Ref` of kind Op, any live-spliced quote, or any
    not-yet-implemented intrinsic — naming the construct, the declaration it
    sits in, and the rung (the parenthetical tracks the frontier: since
-   task 70 it reads "native v1 compiles pure programs and tail-resumptive
-   handlers"). Over-refusal is fine in v1; the set shrinks as tasks 70-73
-   land. Emit reachable declarations into
+   task 71 it reads "native v1 compiles programs without code values").
+   Over-refusal is fine in v1; the set shrinks as tasks 70-73 land. Emit reachable declarations into
    `.jacquard-native/<emitter-version>/`, one unit per declaration hash,
    compile only changed units, link `libjqrt.a`.
    **Per-expression semantics in the generated main** (this is what
@@ -430,6 +429,34 @@ capture, resume, and copy-on-resume in the runtime.
    exact-count case prints the counter; byte-comparison then IS the
    exact-count assertion). Keep the mapping table (OCaml test -> .jqd
    program) in the test directory so coverage is auditable.
+
+**As built (task 71 delta log).** The mechanism is return-unwinding, not
+setjmp: jq_perform matching a CAPTURING clause records the pending capture
+and returns a JQ_SUSPEND sentinel; every frame-style activation between
+the perform and the covering handle saves its live locals into a heap
+JQ_FRAME (slots are borrowed mirrors of the C locals until the suspension
+abandons them — ownership transfers without touching a count) and
+propagates the sentinel; the jq_handle2 dispatch slices rt->ks (the frame
+stack, the runtime image of the interpreter's kont) into a JQ_RESUME and
+runs the clause against the outer continuation. Resume clones the chain
+(copy-on-resume, dup per slot) and re-runs it with proper C nesting, so
+handler-entry bookkeeping stays structured and the handler frame re-runs
+the ret clause per resumption. Which fns are frame-style is a syntactic
+fixed point over the NIR after monomorphization: perform/handle/unknown
+apply directly, known calls to framed members transitively — tops and
+const initializers stay direct because a capture always resolves inside
+its own expression. Frame-style fns run the NAIVE RC discipline (the
+move/Drop bookkeeping does not model abandonment), which costs the AVL
+battery its reuse (~10ms -> ~30ms, still ~70x over the interpreter);
+recorded for task 75's measurement rather than optimized here. Tail calls
+never save frames — the sentinel passes through their returns. Capturing
+clauses lower as plain lambdas with the resumption appended as the last
+parameter; a fn framed only through tail calls emits no resume machinery.
+The escaped-resumption gauntlet case needs a recursive step type to be
+typeable at the surface (the answer type recurs in the resumption's
+codomain); the decl-body isolation case has no twin — E0815 refuses
+effectful decl bodies before either engine runs. support/pmf came forward
+from task 72 (the enum handler reaches them).
 
 **Definition of done.**
 - Every handler-gauntlet semantic case, rewritten as a standalone .jqd

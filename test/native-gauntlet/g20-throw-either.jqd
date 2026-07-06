@@ -1,0 +1,8 @@
+; throw battery: an aborting throw clause carries its payload out -> (none, some(7))
+(tuple
+  (handle (app (var some) (app (var throw) (lit 3)))
+    (ret (pvar x) (var x))
+    (opclause throw ((pvar e)) k (var none)))
+  (handle (app (var some) (lit 7))
+    (ret (pvar x) (var x))
+    (opclause throw ((pvar e)) k (var none))))

@@ -1,0 +1,11 @@
+; twin of test_handlers.ml test_clause_body_perform_escapes_outward: the inner
+; clause body performs its own op; that perform runs against the continuation
+; OUTSIDE the inner handler and reaches the outer one -> 99
+(defeffect beeper ((tvar a)) (op beep () (tref int)))
+
+(handle
+  (handle (app (var beep))
+    (ret (pvar x) (var x))
+    (opclause beep () k (app (var k) (app (var beep)))))
+  (ret (pvar x) (var x))
+  (opclause beep () k (app (var k) (lit 99))))

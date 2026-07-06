@@ -1,0 +1,20 @@
+; twin of test_gauntlet_handlers.ml test_escaped_resumption_is_multishot_and_immutable:
+; the clause returns the resumption itself. Typing the escape needs a recursive
+; step type (the answer type appears in the resumption's codomain): done wraps a
+; completion, more wraps the escaped resumption. Applying it twice outside the
+; handler's textual scope re-runs the body remainder and ret per application ->
+; (done(2), done(3))
+(defeffect pick3 ((tvar a)) (op pick () (tref int)))
+
+(deftype step ()
+  (con done (field v (tref int)))
+  (con more (field f (tarrow ((tref int)) (row) (tref step)))))
+
+(let nonrec (pvar r)
+  (handle (app (var add) (lit 1) (app (var pick)))
+    (ret (pvar x) (app (var done) (var x)))
+    (opclause pick () k (app (var more) (var k))))
+  (match (var r)
+    (clause (pcon more (pvar k))
+      (tuple (app (var k) (lit 1)) (app (var k) (lit 2))))
+    (clause (pcon done (pwild)) (tuple (var r) (var r)))))

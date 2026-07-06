@@ -1,0 +1,5 @@
+; twin of test_handlers.ml test_return_clause_transforms: plain completion
+; flows through the return clause -> some(5)
+(handle (lit 5)
+  (ret (pvar x) (app (var some) (var x)))
+  (opclause abort () k (var none)))

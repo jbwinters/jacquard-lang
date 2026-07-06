@@ -1,0 +1,14 @@
+; twin of test_handlers.ml test_deep_second_perform: the body performs tick
+; twice sequentially; the SAME deep handler covers both (emit counts) ->
+; ((), cons(1, cons(1, nil)))
+(defeffect ticker ()  (op tick () (ttuple)))
+
+(app (var emit.collect)
+  (lam ()
+    (handle
+      (let nonrec (pwild) (app (var tick))
+        (app (var tick)))
+      (ret (pvar x) (var x))
+      (opclause tick () k
+        (let nonrec (pwild) (app (var emit) (lit 1))
+          (app (var k) (tuple)))))))

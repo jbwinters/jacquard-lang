@@ -1,0 +1,12 @@
+; twin of test_gauntlet_handlers.ml test_abort_skips_pending_argument_evaluation:
+; abort in the FIRST argument short-circuits before the second argument's emit
+; runs -> (999, nil) — an empty emit list proves the pending argument never
+; evaluated (strict left-to-right order)
+(app (var emit.collect)
+  (lam ()
+    (handle
+      (app (var add)
+        (app (var abort))
+        (let nonrec (pwild) (app (var emit) (lit 1)) (lit 5)))
+      (ret (pvar x) (var x))
+      (opclause abort () k (lit 999)))))

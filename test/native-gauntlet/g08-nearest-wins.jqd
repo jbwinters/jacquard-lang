@@ -1,0 +1,10 @@
+; twin of test_handlers.ml test_nearest_handler_wins: two nested handlers for
+; the same op; the inner one answers -> 1
+(defeffect beeper ((tvar a)) (op beep () (tref int)))
+
+(handle
+  (handle (app (var beep))
+    (ret (pvar x) (var x))
+    (opclause beep () k (app (var k) (lit 1))))
+  (ret (pvar x) (var x))
+  (opclause beep () k (app (var k) (lit 2))))

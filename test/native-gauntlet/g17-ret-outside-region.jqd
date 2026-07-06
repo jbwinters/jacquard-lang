@@ -1,0 +1,8 @@
+; twin of test_gauntlet_handlers.ml test_return_clause_is_outside_handled_region:
+; the ret body performs the handler's own op; ret runs OUTSIDE the handled
+; region -> unhandled choice.choose, exit 3
+(defeffect choice ((tvar a)) (op choose () (tref bool)))
+
+(handle (lit 1)
+  (ret (pvar x) (app (var choose)))
+  (opclause choose () k (app (var k) (var true))))

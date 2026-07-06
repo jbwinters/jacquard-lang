@@ -1,0 +1,7 @@
+; twin of test_handlers.ml test_unhandled_past_other_handler: a non-matching
+; handler does not swallow the miss -> unhandled abort, exit 3
+(defeffect ticker () (op tick () (ttuple)))
+
+(handle (app (var abort))
+  (ret (pvar x) (var x))
+  (opclause tick () k (app (var k) (tuple))))

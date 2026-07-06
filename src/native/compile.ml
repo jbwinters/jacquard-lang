@@ -67,9 +67,11 @@ and bound =
   | BAllocClosure of closure_alloc
   | BIntrinsic of string * atom list
   | BPerform of Hash.t * atom list  (** effect op perform: nearest handler, else grant table *)
-  | BHandle of (Hash.t * atom) list * atom
-      (** run the body thunk (0-arity closure) with the (op, clause closure) entries pushed; the
-          value is the thunk's return, delivered to the ret clause by the enclosing Match *)
+  | BHandle of (Hash.t * bool * atom) list * atom * atom
+      (** jq_handle2: (op, capturing?, clause closure) entries, the 0-arity body thunk, and the
+          1-parameter ret-clause closure. A tail-resumptive clause closure takes the op params (its
+          return is the resume); a capturing clause takes them PLUS the resumption appended as its
+          last parameter (task 71). The handle expression's value is the driver's return. *)
 
 and closure_alloc = {
   code : Hash.t * int;
@@ -378,19 +380,11 @@ and lower_general ctx env ~tail (e : Kernel.expr) (k : atom -> expr) : expr =
           let t = fresh ctx "t" in
           Let (t, BAllocTuple atoms, k (AVar t)))
   | Kernel.Handle { body; ret = { rbinder; rbody; _ }; ops } ->
-      (* only tail-resumptive clauses compile at this rung: the clause's return is the
-         resume, so no continuation is ever materialized (docs/native-plan.md task 70;
-         the general disciplines land with task 71) *)
-      List.iter
-        (fun (oc : Kernel.opclause) ->
-          match Tier.discipline ~resume:oc.Kernel.resume oc.Kernel.obody with
-          | Tier.TailResumptive -> ()
-          | d ->
-              refuse ctx
-                (Printf.sprintf
-                   "contains a %s handler clause (only tail-resumptive compiles until task 71)"
-                   (Tier.discipline_to_string d)))
-        ops;
+      (* every discipline compiles since task 71: a tail-resumptive clause is a plain
+         lambda whose return is the resume (task 70's protocol at the perform site);
+         anything else — aborting, one-shot, multi-shot — is a capturing clause, an
+         ordinary lambda taking the resumption appended as its last parameter. The
+         handle runs through the jq_handle2 driver with a materialized ret closure. *)
       let entries_rev =
         List.fold_left
           (fun acc (oc : Kernel.opclause) ->
@@ -401,25 +395,35 @@ and lower_general ctx env ~tail (e : Kernel.expr) (k : atom -> expr) : expr =
             in
             refuse_eval_op ctx oh;
             note_op ctx oh;
-            (oh, oc) :: acc)
+            let capturing =
+              match Tier.discipline ~resume:oc.Kernel.resume oc.Kernel.obody with
+              | Tier.TailResumptive -> false
+              | _ -> true
+            in
+            (oh, capturing, oc) :: acc)
           [] ops
       in
-      (* each clause lowers as a lambda over the op parameters with resume marked; the
-         body thunk is a 0-arity lambda — both capture the handle site's scope *)
       let rec alloc_clauses acc = function
         | [] ->
             let thunk_expr = { e with Kernel.it = Kernel.Lam ([], body) } in
+            let ret_expr = { e with Kernel.it = Kernel.Lam ([ rbinder ], rbody) } in
             lower ctx env thunk_expr (fun thunk ->
-                let hv = fresh ctx "hv" in
-                let rp, renv = rename_pat ctx env rbinder in
-                let ret' =
-                  if tail then lower_tail ctx renv rbody
-                  else lower_general ctx renv ~tail:false rbody k
-                in
-                Let (hv, BHandle (List.rev acc, thunk), Match (AVar hv, [ (rp, ret') ])))
-        | (oh, (oc : Kernel.opclause)) :: rest ->
-            lower_clause ctx env oc (fun clause_atom ->
-                alloc_clauses ((oh, clause_atom) :: acc) rest)
+                lower ctx env ret_expr (fun retc ->
+                    let hv = fresh ctx "hv" in
+                    Let (hv, BHandle (List.rev acc, thunk, retc), k (AVar hv))))
+        | (oh, capturing, (oc : Kernel.opclause)) :: rest ->
+            if capturing then
+              (* the resumption is a first-class value: the clause is a plain lambda
+                 over params @ [resume] — no marker, no rewrite *)
+              let rpat = { rbinder with Kernel.it = Kernel.PVar oc.Kernel.resume } in
+              let clause_expr =
+                { e with Kernel.it = Kernel.Lam (oc.Kernel.params @ [ rpat ], oc.Kernel.obody) }
+              in
+              lower ctx env clause_expr (fun clause_atom ->
+                  alloc_clauses ((oh, true, clause_atom) :: acc) rest)
+            else
+              lower_clause ctx env oc (fun clause_atom ->
+                  alloc_clauses ((oh, false, clause_atom) :: acc) rest)
       in
       alloc_clauses [] (List.rev entries_rev)
   | Kernel.Quote _ -> refuse ctx "contains a quote (code values land with task 73)"

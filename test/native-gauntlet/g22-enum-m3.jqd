@@ -1,0 +1,13 @@
+; the task-71 DoD flagship: the in-language enumeration handler
+; (prelude/07-enum.jqd, a genuinely multi-shot clause — one resume per
+; support element) over the M3 two-coins model, normalized. Exact posterior:
+; P(true) = 2/3, P(false) = 1/3.
+(app (var normalize)
+  (app (var enum-run)
+    (lam ()
+      (let nonrec (pvar c1) (app (var sample) (app (var bernoulli) (lit 0.5)))
+        (let nonrec (pvar c2) (app (var sample) (app (var bernoulli) (lit 0.5)))
+          (let nonrec (pwild)
+            (app (var observe) (app (var bernoulli) (lit 1.0))
+              (app (var bool.or) (var c1) (var c2)))
+            (var c1)))))))

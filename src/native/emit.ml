@@ -77,6 +77,11 @@ type program = {
   tops : (expr * fn list * string list) list;
       (** per top-level expression: body, lifted lambdas, checker warnings to replay *)
   init_order : Hash.t list;  (** const members in dependency order *)
+  framed_fns : (Hash.t * int, unit) Hashtbl.t;
+      (** fns that compile frame-style (task 71): they may suspend, so they carry the resume-point
+          machine — build.ml's classification fixed-point fills this *)
+  framed_members : (Hash.t, unit) Hashtbl.t;
+      (** members whose entry fn is framed: a known call to one is a suspendable site *)
 }
 
 (* C string literal for arbitrary bytes *)
@@ -112,14 +117,28 @@ let c_double (r : float) =
 
 type unit_state = {
   prog : program;
-  precise : bool;
+  mutable precise : bool;
       (** Perceus ran (task 68): moves and Drop nodes own every count; the emitter adds no
           exit-point drops of its own. False = the naive skeleton discipline. *)
   ub : buf;  (** unit body: functions *)
   decls : buf;  (** extern declarations and unit-local statics, emitted first *)
   mutable declared : SSet.t;  (** dedup for externs/statics *)
   mutable statics : int;  (** unit-local static counter (texts, reals, values) *)
+  mutable fr : fr_state option;
+      (** Some while emitting a frame-style function body (task 71): NIR locals hoist to the
+          function top (so the re-entry switch can restore them before jumping), and each
+          suspendable site records a resume point *)
 }
+
+and fr_state = {
+  re_name : string;  (** the jq_frame_fn wrapper's C name *)
+  mutable rps : (int * string * string list) list;
+      (** resume points: (index, result local, saved locals — the lives at the site, restored in
+          order at re-entry) *)
+  mutable next_rp : int;
+  mutable hoisted : string list;  (** locals to declare at the top, reverse order *)
+}
+(** per-function frame-machine bookkeeping *)
 
 let declare st key emit =
   if not (SSet.mem key st.declared) then begin
@@ -252,6 +271,16 @@ let use st buf (a : atom) : string =
       line buf "jq_dup(%s);" e;
       e
 
+(* An NIR-named local's declaration site: frame-style functions hoist the declaration
+   to the function top so the re-entry switch can assign it before jumping; the site
+   then emits a plain assignment. *)
+let decl_prefix st (x : string) : string =
+  match st.fr with
+  | Some fr ->
+      fr.hoisted <- x :: fr.hoisted;
+      ""
+  | None -> "jq_value "
+
 (* ------------------------------------------------------------------ *)
 (* Patterns                                                            *)
 (* ------------------------------------------------------------------ *)
@@ -305,11 +334,11 @@ let rec pat_bind st buf (subject : string) (p : npat) : string list =
   match p with
   | NPWild | NPLit _ -> []
   | NPVar x ->
-      line buf "jq_value %s = %s;" x subject;
+      line buf "%s%s = %s;" (decl_prefix st x) x subject;
       line buf "jq_dup(%s);" x;
       [ x ]
   | NPAs (x, inner) ->
-      line buf "jq_value %s = %s;" x subject;
+      line buf "%s%s = %s;" (decl_prefix st x) x subject;
       line buf "jq_dup(%s);" x;
       x :: pat_bind st buf subject inner
   | NPCon (_, ps) ->
@@ -439,46 +468,73 @@ and emit_tail_call st buf lives exit ?(consumes = []) ?(post = []) ?(tokens = []
       line buf "%s = %s;" var (mk padded);
       line buf "goto %s;" label
 
+(* task 71: a suspendable site in a frame-style function — when a capture is possible
+   (rt->cap_depth > 0), save the live locals into this activation's frame and link it
+   before the call; a JQ_SUSPEND result propagates immediately (the frame stays for
+   the capture slice); a normal return unlinks and frees the frame. The recorded
+   resume point re-enters right after the site with the call's result substituted. *)
+and emit_suspendable st buf (lives : string list) (x : string) (emit_call : unit -> unit) : unit =
+  match st.fr with
+  | None -> emit_call ()
+  | Some fr ->
+      fr.next_rp <- fr.next_rp + 1;
+      let ix = fr.next_rp in
+      fr.rps <- (ix, x, lives) :: fr.rps;
+      line buf "if (rt->cap_depth) {";
+      buf.indent <- buf.indent + 1;
+      line buf "_fr = jq_frame_alloc(%s, %d, 0, %d);" fr.re_name ix (List.length lives);
+      List.iteri (fun i l -> line buf "jq_frame_slots(_fr)[%d] = %s;" i l) lives;
+      line buf "jq_ks_push(rt, _fr);";
+      buf.indent <- buf.indent - 1;
+      line buf "} else _fr = NULL;";
+      emit_call ();
+      line buf "if (%s == JQ_SUSPEND) return JQ_SUSPEND;" x;
+      line buf "if (_fr) { jq_ks_pop(rt); free(_fr); }";
+      line buf "rp_%d:;" ix
+
 and emit_bound st buf lives (x : string) (b : bound) : unit =
-  ignore lives;
   match b with
   | BAtom a ->
       let v = use st buf a in
-      line buf "jq_value %s = %s;" x v
+      line buf "%s%s = %s;" (decl_prefix st x) x v
   | BCallKnown (h, args) ->
       let fname = fn_name (h, 0) in
       declare st ("fn:" ^ fname) (fun () -> line st.decls "extern jq_value %s(JQ_PARAMS);" fname);
-      let vs = List.map (fun a -> use st buf a) args in
-      let padded =
-        vs @ List.init (max_arity - List.length vs) (fun _ -> "JQ_UNIT") |> String.concat ", "
+      let call () =
+        let vs = List.map (fun a -> use st buf a) args in
+        let padded =
+          vs @ List.init (max_arity - List.length vs) (fun _ -> "JQ_UNIT") |> String.concat ", "
+        in
+        line buf "%s%s = %s(rt, JQ_UNIT, %s);" (decl_prefix st x) x fname padded
       in
-      line buf "jq_value %s = %s(rt, JQ_UNIT, %s);" x fname padded
+      if Hashtbl.mem st.prog.framed_members h then emit_suspendable st buf lives x call else call ()
   | BCallUnknown (f, args) ->
-      let fv = use st buf f in
-      let vs = List.map (fun a -> use st buf a) args in
-      let padded =
-        vs @ List.init (max_arity - List.length vs) (fun _ -> "JQ_UNIT") |> String.concat ", "
-      in
-      line buf "rt->apply_n = %d;" (List.length args);
-      line buf "jq_value %s = jq_apply(rt, %s, %s);" x fv padded
+      emit_suspendable st buf lives x (fun () ->
+          let fv = use st buf f in
+          let vs = List.map (fun a -> use st buf a) args in
+          let padded =
+            vs @ List.init (max_arity - List.length vs) (fun _ -> "JQ_UNIT") |> String.concat ", "
+          in
+          line buf "rt->apply_n = %d;" (List.length args);
+          line buf "%s%s = jq_apply(rt, %s, %s);" (decl_prefix st x) x fv padded)
   | BAllocCon (h, args) ->
       declare_con_info st h;
       let vs = List.map (fun a -> use st buf a) args in
-      if vs = [] then line buf "jq_value %s = jq_con(&%s, NULL);" x (ci_name h)
+      if vs = [] then line buf "%s%s = jq_con(&%s, NULL);" (decl_prefix st x) x (ci_name h)
       else
-        line buf "jq_value %s = jq_con(&%s, (jq_value[]){ %s });" x (ci_name h)
+        line buf "%s%s = jq_con(&%s, (jq_value[]){ %s });" (decl_prefix st x) x (ci_name h)
           (String.concat ", " vs)
   | BAllocConReuse (h, args, tok) ->
       declare_con_info st h;
       let vs = List.map (fun a -> use st buf a) args in
-      line buf "jq_value %s = jq_con_reuse(%s, &%s, (jq_value[]){ %s });" x tok (ci_name h)
-        (String.concat ", " vs);
+      line buf "%s%s = jq_con_reuse(%s, &%s, (jq_value[]){ %s });" (decl_prefix st x) x tok
+        (ci_name h) (String.concat ", " vs);
       line buf "%s = NULL;" tok
   | BAllocTuple args ->
       let vs = List.map (fun a -> use st buf a) args in
-      if vs = [] then line buf "jq_value %s = JQ_UNIT;" x
+      if vs = [] then line buf "%s%s = JQ_UNIT;" (decl_prefix st x) x
       else
-        line buf "jq_value %s = jq_tuple(%d, (jq_value[]){ %s });" x (List.length vs)
+        line buf "%s%s = jq_tuple(%d, (jq_value[]){ %s });" (decl_prefix st x) x (List.length vs)
           (String.concat ", " vs)
   | BAllocClosure { code; captured; self_slot; arity } -> (
       let fname = fn_name code in
@@ -493,57 +549,50 @@ and emit_bound st buf lives (x : string) (b : bound) : unit =
       let env =
         if vs = [] then "NULL" else Printf.sprintf "(jq_value[]){ %s }" (String.concat ", " vs)
       in
-      line buf "jq_value %s = jq_closure((void *)&%s, %d, %d, %s, %s);" x fname arity
+      line buf "%s%s = jq_closure((void *)&%s, %d, %d, %s, %s);" (decl_prefix st x) x fname arity
         (List.length captured) env
         (match self_slot with Some i -> string_of_int i | None -> "UINT16_MAX");
       match self_slot with Some i -> line buf "jq_closure_env(%s)[%d] = %s;" x i x | None -> ())
   | BIntrinsic (name, args) ->
       let vs = List.map (fun a -> use st buf a) args in
       let cname = mangle name in
-      if vs = [] then line buf "jq_value %s = jq_i_%s(rt, NULL);" x cname
-      else line buf "jq_value %s = jq_i_%s(rt, (jq_value[]){ %s });" x cname (String.concat ", " vs)
+      if vs = [] then line buf "%s%s = jq_i_%s(rt, NULL);" (decl_prefix st x) x cname
+      else
+        line buf "%s%s = jq_i_%s(rt, (jq_value[]){ %s });" (decl_prefix st x) x cname
+          (String.concat ", " vs)
   | BPerform (h, args) ->
       let oref = Hashtbl.find st.prog.ops h in
-      let vs = List.map (fun a -> use st buf a) args in
-      if vs = [] then line buf "jq_value %s = jq_perform(rt, %d, 0, NULL);" x oref.oord
-      else
-        line buf "jq_value %s = jq_perform(rt, %d, %d, (jq_value[]){ %s });" x oref.oord
-          (List.length vs) (String.concat ", " vs)
-  | BHandle (entries, thunk) ->
-      (* push owns the clause refs; the apply consumes the thunk; pop releases the clauses *)
-      let evs =
-        List.map
-          (fun (oh, a) ->
-            let oref = Hashtbl.find st.prog.ops oh in
-            Printf.sprintf "{ %d, %s }" oref.oord (use st buf a))
-          entries
-      in
-      line buf "jq_handler_entry _he_%s[] = { %s };" x (String.concat ", " evs);
-      line buf "jq_handle_push(rt, %d, _he_%s);" (List.length entries) x;
-      let tv = use st buf thunk in
-      line buf "rt->apply_n = 0;";
-      line buf
-        "jq_value %s = jq_apply(rt, %s, JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT, \
-         JQ_UNIT, JQ_UNIT);"
-        x tv;
-      line buf "jq_handle_pop(rt, %d);" (List.length entries)
+      emit_suspendable st buf lives x (fun () ->
+          let vs = List.map (fun a -> use st buf a) args in
+          if vs = [] then
+            line buf "%s%s = jq_perform(rt, %d, 0, NULL);" (decl_prefix st x) x oref.oord
+          else
+            line buf "%s%s = jq_perform(rt, %d, %d, (jq_value[]){ %s });" (decl_prefix st x) x
+              oref.oord (List.length vs) (String.concat ", " vs))
+  | BHandle (entries, thunk, retc) ->
+      (* jq_handle2 owns the entry clauses, the thunk, and the ret closure; it pushes its
+         handler frame + entries, runs the thunk, and dispatches captures (task 71) *)
+      emit_suspendable st buf lives x (fun () ->
+          let evs =
+            List.map
+              (fun (oh, capturing, a) ->
+                let oref = Hashtbl.find st.prog.ops oh in
+                Printf.sprintf "{ .op_ord = %d, .clause = %s, .kind = %s }" oref.oord (use st buf a)
+                  (if capturing then "JQ_CLAUSE_CAPTURING" else "JQ_CLAUSE_TAIL"))
+              entries
+          in
+          line buf "jq_handler_entry _he_%s[] = { %s };" x (String.concat ", " evs);
+          let tv = use st buf thunk in
+          let rv = use st buf retc in
+          line buf "%s%s = jq_handle2(rt, %d, _he_%s, %s, %s);" (decl_prefix st x) x
+            (List.length entries) x tv rv)
 
 (* ------------------------------------------------------------------ *)
 (* Functions                                                           *)
 (* ------------------------------------------------------------------ *)
 
-let emit_fn st (f : fn) : unit =
-  let buf = st.ub in
-  line buf "";
-  line buf "jq_value %s(JQ_PARAMS) {" (fn_name f.fname);
-  buf.indent <- buf.indent + 1;
-  line buf "(void)rt; (void)clo;";
-  (* silence unused padding args *)
-  for i = f.n_params to max_arity - 1 do
-    line buf "(void)a%d;" i
-  done;
-  if f.self_entry then line buf "entry:;";
-  (* prologue: bind parameter patterns; failure reproduces the interpreter's Match_failure *)
+(* prologue: bind parameter patterns; failure reproduces the interpreter's Match_failure *)
+let emit_prologue st buf (f : fn) : string list =
   let lives = ref [ "clo" ] in
   List.iteri
     (fun i p ->
@@ -552,7 +601,7 @@ let emit_fn st (f : fn) : unit =
       match p with
       | NPVar x ->
           (* the param IS the local: transfer ownership, no dup *)
-          line buf "jq_value %s = %s;" x subject;
+          line buf "%s%s = %s;" (decl_prefix st x) x subject;
           lives := x :: List.filter (fun l -> l <> subject) !lives
       | NPWild -> ()
       | _ ->
@@ -562,9 +611,96 @@ let emit_fn st (f : fn) : unit =
           let binds = pat_bind st buf subject p in
           lives := List.rev_append binds !lives)
     f.params;
-  emit_expr st buf !lives EReturn f.body;
-  buf.indent <- buf.indent - 1;
-  line buf "}"
+  !lives
+
+let emit_fn st (f : fn) : unit =
+  let buf = st.ub in
+  if not (Hashtbl.mem st.prog.framed_fns f.fname) then begin
+    line buf "";
+    line buf "jq_value %s(JQ_PARAMS) {" (fn_name f.fname);
+    buf.indent <- buf.indent + 1;
+    line buf "(void)rt; (void)clo;";
+    (* silence unused padding args *)
+    for i = f.n_params to max_arity - 1 do
+      line buf "(void)a%d;" i
+    done;
+    if f.self_entry then line buf "entry:;";
+    let lives = emit_prologue st buf f in
+    emit_expr st buf lives EReturn f.body;
+    buf.indent <- buf.indent - 1;
+    line buf "}"
+  end
+  else begin
+    (* frame-style machine (task 71): NIR locals hoist to the top so the re-entry
+       switch can restore them and jump to the recorded resume point; the wrapper
+       hands the frame over through rt. Naive RC discipline throughout — a
+       suspension abandons the in-scope locals to the frame. *)
+    let saved_precise = st.precise in
+    st.precise <- false;
+    let re_name = fn_name f.fname ^ "_re" in
+    let fr = { re_name; rps = []; next_rp = 0; hoisted = [] } in
+    st.fr <- Some fr;
+    let body_buf = { b = Buffer.create 2048; indent = 1 } in
+    if f.self_entry then line body_buf "entry:;";
+    let lives = emit_prologue st body_buf f in
+    emit_expr st body_buf lives EReturn f.body;
+    st.fr <- None;
+    st.precise <- saved_precise;
+    line buf "";
+    (* a fn framed only through TAIL calls has no resume points: the sentinel just
+       passes through its return, so no wrapper or switch is needed *)
+    if fr.rps <> [] then
+      line buf "static jq_value %s(jq_rt *rt, jq_block *_f, jq_value _v);" re_name;
+    line buf "jq_value %s(JQ_PARAMS) {" (fn_name f.fname);
+    buf.indent <- buf.indent + 1;
+    line buf "(void)rt; (void)clo;";
+    for i = f.n_params to max_arity - 1 do
+      line buf "(void)a%d;" i
+    done;
+    line buf "jq_block *_fr = NULL; (void)_fr;";
+    (match List.sort_uniq compare fr.hoisted with
+    | [] -> ()
+    | hs -> line buf "jq_value %s;" (String.concat ", " hs));
+    if fr.rps <> [] then begin
+      line buf "if (rt->re_frame) {";
+      buf.indent <- buf.indent + 1;
+      line buf "jq_block *_f0 = rt->re_frame;";
+      line buf "rt->re_frame = NULL;";
+      line buf "jq_value _in = rt->re_val;";
+      line buf "switch ((int)jq_frame_ix(_f0)) {";
+      List.iter
+        (fun (ix, res, saved) ->
+          line buf "case %d:" ix;
+          buf.indent <- buf.indent + 1;
+          List.iteri (fun i l -> line buf "%s = jq_frame_slots(_f0)[%d];" l i) saved;
+          line buf "free(_f0);";
+          line buf "%s = _in;" res;
+          line buf "goto rp_%d;" ix;
+          buf.indent <- buf.indent - 1)
+        (List.rev fr.rps);
+      line buf "default:;";
+      line buf "}";
+      line buf "fputs(\"jacquard runtime: unknown resume point (internal)\\n\", stderr);";
+      line buf "exit(2);";
+      buf.indent <- buf.indent - 1;
+      line buf "}"
+    end;
+    Buffer.add_buffer buf.b body_buf.b;
+    buf.indent <- buf.indent - 1;
+    line buf "}";
+    if fr.rps <> [] then begin
+      line buf "static jq_value %s(jq_rt *rt, jq_block *_f, jq_value _v) {" re_name;
+      buf.indent <- buf.indent + 1;
+      line buf "rt->re_frame = _f;";
+      line buf "rt->re_val = _v;";
+      line buf
+        "return %s(rt, JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT, \
+         JQ_UNIT);"
+        (fn_name f.fname);
+      buf.indent <- buf.indent - 1;
+      line buf "}"
+    end
+  end
 
 (* ------------------------------------------------------------------ *)
 (* Unit and main-source generation                                     *)
@@ -578,6 +714,7 @@ let new_state ?(precise = false) prog =
     decls = { b = Buffer.create 1024; indent = 0 };
     declared = SSet.empty;
     statics = 0;
+    fr = None;
   }
 
 let assemble st ~banner =
@@ -610,7 +747,8 @@ let unit_source (prog : program) ~precise ~(decl_hex : string) (members : compil
     with the interpreter's output and exit-code contract. *)
 let main_source (prog : program) ~precise ~(v_true : Hash.t) ~(v_false : Hash.t)
     ~(orderings : (Hash.t * Hash.t * Hash.t) option) ~(listcons : (Hash.t * Hash.t) option)
-    ~(intrinsics : (string * int) list) ~(manifests : (string * string) list list) : string =
+    ~(pair : Hash.t option) ~(intrinsics : (string * int) list)
+    ~(manifests : (string * string) list list) : string =
   let st = new_state ~precise prog in
   (* constructor infos: the shared identities every unit externs *)
   let cons = Hashtbl.fold (fun _ cr acc -> cr :: acc) prog.cons [] in
@@ -713,6 +851,11 @@ let main_source (prog : program) ~precise ~(v_true : Hash.t) ~(v_false : Hash.t)
       line st.ub "rt->v_nil = %s;" (con_value_static st nil_h);
       line st.ub "rt->ci_cons = &%s;" (ci_name cons_h)
   | None -> ());
+  (match pair with
+  | Some pair_h ->
+      declare_con_info st pair_h;
+      line st.ub "rt->ci_pair = &%s;" (ci_name pair_h)
+  | None -> ());
   List.iter (fun h -> line st.ub "%s(rt);" (init_name h)) prog.init_order;
   List.iteri
     (fun i (body, _, warnings) ->
@@ -738,6 +881,11 @@ let main_source (prog : program) ~precise ~(v_true : Hash.t) ~(v_false : Hash.t)
       line st.ub "jq_value _v = JQ_UNIT;";
       emit_expr st st.ub [] (EAssign ("_v", Printf.sprintf "done_top_%d" i)) body;
       line st.ub "done_top_%d:;" i;
+      (* a capture always resolves inside its expression (any capturing handler is
+         within it); a sentinel here is an internal bug, never a semantic outcome *)
+      line st.ub
+        "if (_v == JQ_SUSPEND) { fputs(\"jacquard runtime: a capture escaped its expression \
+         (internal)\\n\", stderr); exit(2); }";
       (* the flush is parity: the interpreter's per-expression print is OCaml's
          print_endline, which flushes stdout — without it a later expression's
          stderr (warning or refusal) would overtake THIS value in a merged

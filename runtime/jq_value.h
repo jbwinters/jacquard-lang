@@ -188,6 +188,7 @@ typedef struct jq_rt {
   jq_value v_greater;
   jq_value v_nil;                /* list-building intrinsics (text.split) */
   const jq_con_info *ci_cons;
+  const jq_con_info *ci_pair;    /* mk-pair, for the dist intrinsics (task 71) */
   uint16_t apply_n; /* argument count for the next jq_apply (set by the caller
                        immediately before the call: musttail forces jq_apply
                        onto the uniform signature, so n travels here) */
@@ -215,6 +216,12 @@ typedef struct jq_rt {
   uint32_t cap_depth; /* installed CAPTURING entries; 0 = no suspension can
                          happen, frame saves may be skipped */
   jq_pending pending;
+  /* re-entry hand-off: a frame's code wrapper stashes the frame and the
+     incoming value here and calls the machine through its uniform entry;
+     the machine's prologue takes them, restores its locals, and jumps to
+     the recorded resume point */
+  jq_block *re_frame;
+  jq_value re_val;
 } jq_rt;
 
 /* The uniform compiled-function signature: clang's musttail requires caller
@@ -343,6 +350,8 @@ jq_value jq_i_text_trim(jq_rt *rt, const jq_value *a);
 jq_value jq_i_text_split(jq_rt *rt, const jq_value *a);
 jq_value jq_i_text_empty_q(jq_rt *rt, const jq_value *a);
 jq_value jq_i_text_from_int(jq_rt *rt, const jq_value *a);
+jq_value jq_i_support(jq_rt *rt, const jq_value *a);
+jq_value jq_i_pmf(jq_rt *rt, const jq_value *a);
 
 
 /* --- constructors (jq_alloc.c) --- */

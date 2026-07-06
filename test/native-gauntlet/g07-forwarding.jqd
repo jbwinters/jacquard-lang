@@ -1,0 +1,11 @@
+; twin of test_handlers.ml test_forwarding: the inner handler covers tick only;
+; a beep performed inside forwards past it to the outer handler -> 9
+(defeffect ticker () (op tick () (ttuple)))
+(defeffect beeper ((tvar a)) (op beep () (tref int)))
+
+(handle
+  (handle (app (var beep))
+    (ret (pvar x) (var x))
+    (opclause tick () k (app (var k) (tuple))))
+  (ret (pvar x) (var x))
+  (opclause beep () k (app (var k) (lit 9))))

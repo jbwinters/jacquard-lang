@@ -1,0 +1,9 @@
+; twin of test_handlers.ml test_state_effect: state.run's function-of-state
+; encoding threads get/put -> ((42, 42), (7, 41))
+(tuple
+  (app (var state.run)
+    (lam ()
+      (let nonrec (pwild) (app (var put) (app (var add) (app (var get)) (lit 1)))
+        (app (var get))))
+    (lit 41))
+  (app (var state.run) (lam () (lit 7)) (lit 41)))

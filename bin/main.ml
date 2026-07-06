@@ -1546,8 +1546,8 @@ let build_cmd file out prelude =
                               List.iter
                                 (fun (r : Jacquard_native.Compile.refusal) ->
                                   Printf.eprintf
-                                    "error[E1101]: not yet compilable (native v1 compiles pure \
-                                     programs and tail-resumptive handlers): %s %s\n"
+                                    "error[E1101]: not yet compilable (native v1 compiles programs \
+                                     without code values): %s %s\n"
                                     r.Jacquard_native.Compile.where r.Jacquard_native.Compile.what)
                                 rs;
                               exit_diags
@@ -1566,8 +1566,8 @@ let build_t =
     (Cmd.info "build"
        ~doc:
          "Compile a .jqd file and its reachable declarations to a standalone native executable \
-          (tasks 67-70: the pure fragment plus tail-resumptive handlers and root grants; capturing \
-          continuations land with task 71).")
+          (tasks 67-71: the effect-full language, capturing and multi-shot handlers included; code \
+          values land with task 73).")
     Term.(const build_cmd $ file_arg $ out_arg $ prelude_arg)
 
 let tiers_t =

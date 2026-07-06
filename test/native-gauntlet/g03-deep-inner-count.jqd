@@ -1,0 +1,17 @@
+; twin of test_handlers.ml test_multishot_deep_inner_effect_exact_count: resume
+; twice; each branch emits AFTER the choice, so the deep handler covers the
+; resumed extents and the emit count is exact ->
+; ((cons(101, cons(202, nil)), cons(1, cons(1, nil))))
+(defeffect choice ((tvar a)) (op choose () (tref bool)))
+
+(app (var emit.collect)
+  (lam ()
+    (handle
+      (match (app (var choose))
+        (clause (pcon true)
+          (let nonrec (pwild) (app (var emit) (lit 1)) (lit 101)))
+        (clause (pcon false)
+          (let nonrec (pwild) (app (var emit) (lit 1)) (lit 202))))
+      (ret (pvar x) (app (var cons) (var x) (var nil)))
+      (opclause choose () k
+        (app (var list.append) (app (var k) (var true)) (app (var k) (var false)))))))

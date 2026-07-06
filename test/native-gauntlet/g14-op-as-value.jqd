@@ -1,0 +1,8 @@
+; twin of test_handlers.ml test_op_as_value: an op is a first-class value,
+; passed as an argument and applied inside a lambda -> 3
+(defeffect beeper ((tvar a)) (op beep () (tref int)))
+
+(handle
+  (app (lam ((pvar f)) (app (var f))) (var beep))
+  (ret (pvar x) (var x))
+  (opclause beep () k (app (var k) (lit 3))))
