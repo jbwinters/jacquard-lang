@@ -57,7 +57,10 @@ static jq_block *pool_alloc(uint16_t n) {
     return b;
   }
   size_t sz = sizeof(jq_block) + (size_t)n * 8;
-  if ((size_t)(jq_slab_end - jq_slab_cur) < sz) {
+  /* the null check keeps the cold-start comparison off NULL-NULL pointer
+     subtraction (pedantic UB the ASAN gate cannot see: the pool compiles
+     out under ASAN, and -fsanitize=pointer-subtract needs ASAN) */
+  if (!jq_slab_cur || (size_t)(jq_slab_end - jq_slab_cur) < sz) {
     void **slab = malloc(JQ_SLAB_BYTES);
     if (!slab) oom();
     slab[0] = jq_slabs; /* word 0 links the slab chain */

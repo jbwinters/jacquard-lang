@@ -153,9 +153,10 @@ designed. The remaining gap to hand C in the empty-row core:
 - Known regression recorded in the plan's task-71 log: frame-style
   classification puts dictionary-driven members on the naive RC
   discipline, costing the AVL battery its reuse (~10 ms before task 71,
-  24 ms with LTO — still 260x the interpreter). Follow-ups: spec over
-  lambda literals de-frames the common higher-order sites (task 86),
-  then Perceus over frame machines covers the rest (task 82).
+  22 ms in the current table — still ~290x the interpreter). Follow-ups:
+  spec over lambda literals de-frames the common higher-order sites
+  (task 86, done), then Perceus over frame machines covers the rest
+  (task 82).
 
 ## Phased sketch (sizes are order-of-magnitude)
 
