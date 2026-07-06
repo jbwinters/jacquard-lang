@@ -147,9 +147,12 @@ designed. The remaining gap to hand C in the empty-row core:
 - **sort, 4.7x** (was 11x pre-LTO, 7.9x pre-pool) — allocation is now
   size-classed freelists (task 80: 189 to 118 ms, where the jemalloc
   preload experiment had bounded a general-purpose swap at ~9%); what
-  remains is RC traffic on every field read and the comparator's
-  argument dup/drop pairs, plus the uniform convention. Follow-ups:
-  intrinsic borrowing (task 81) and arity-exact signatures (task 79).
+  remains is RC traffic on field reads and the uniform convention.
+  Intrinsic borrowing (task 81) was built, measured, and DECLINED: the
+  owned convention is type-aware (each intrinsic drops only its boxed
+  args, so Perceus moves make last-uses free), and the flip regressed
+  fib/sort/pure while winning only on naive-framed code — which task 82
+  de-frames instead. Remaining lever: arity-exact signatures (task 79).
 - Known regression recorded in the plan's task-71 log: frame-style
   classification puts dictionary-driven members on the naive RC
   discipline, costing the AVL battery its reuse (~10 ms before task 71,
