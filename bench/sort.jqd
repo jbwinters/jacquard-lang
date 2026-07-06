@@ -1,0 +1,7 @@
+; the near-C claim's second witness (task 75): merge sort of a 200k reversed
+; range at int.ord (the dictionary erases by monomorphization) — time against
+; bench/ref/sort.c, which runs the same algorithm over malloc'd list nodes
+(app (var list.length)
+  (app (var list.sort)
+    (app (var list.reverse) (app (var list.range) (lit 0) (lit 200000)))
+    (var int.ord)))

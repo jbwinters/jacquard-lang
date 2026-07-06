@@ -23,15 +23,15 @@ trap 'rm -rf "$work"' EXIT
 files=${*:-"$(find corpus/valid corpus/sigs demos bench -name '*.jqd' 2>/dev/null | sort)"}
 # a shrinking walk must be LOUD: bump the floor when files are added, and a
 # deletion/renaming that drops coverage fails here instead of passing vacuously
-FLOOR=${FLOOR:-62}
+FLOOR=${FLOOR:-66}
 
 pass=0
 refused=0
 fail=0
 for f in $files; do
   if timeout 120 $BIN build "$f" -o "$work/prog" > "$work/build.out" 2> "$work/build.err"; then
-    timeout 60 $BIN run "$f" < /dev/null > "$work/i.out" 2> "$work/i.err"; ie=$?
-    timeout 60 "$work/prog" < /dev/null > "$work/n.out" 2> "$work/n.err"; ne=$?
+    timeout 180 $BIN run "$f" < /dev/null > "$work/i.out" 2> "$work/i.err"; ie=$?
+    timeout 180 "$work/prog" < /dev/null > "$work/n.out" 2> "$work/n.err"; ne=$?
     ok=1
     [ "$ie" = "$ne" ] || { echo "DIVERGED (exit): $f interpreter=$ie native=$ne"; ok=0; }
     cmp -s "$work/i.out" "$work/n.out" || { echo "DIVERGED (stdout): $f"; diff "$work/i.out" "$work/n.out" | head -6; ok=0; }

@@ -91,6 +91,48 @@ core of a typical program. It is NOT claimed for handler-dense control flow,
 which targets the OCaml/Koka band, nor for multi-shot exploration, which is
 priced by semantics, not implementation.
 
+## Measured (task 75, 2026-07-06)
+
+AMD Ryzen 9 7950X3D, Ubuntu clang 18.1.3, everything -O2, median of 5,
+per-engine startup subtracted. Reproduce with `sh scripts/native-bench.sh`
+(the C references live in bench/ref/ and practice the same heap discipline
+as the programs they shadow — a list merge sort over malloc'd nodes, not a
+flat-array qsort).
+
+| program | interpreter | native | hand C | native vs C |
+| --- | --- | --- | --- | --- |
+| fib (fib 30) | 674 ms | 19 ms | 3 ms | 6.3x |
+| sort (200k, int.ord) | 66446 ms | 279 ms | 25 ms | 11x |
+| pure (mixed battery) | 3352 ms | 37 ms | — | — |
+| avl (10k map.set) | 6431 ms | 33 ms | — | — |
+| state-loop (1M get/put) | 24189 ms | 250 ms | — | — |
+| enum (2^14 branches) | 10609 ms | 40 ms | — | — |
+
+**The near-C claim does not stand at task 75's gate (within 3x of hand C)
+and is withdrawn until the follow-ups land.** What the measurements support:
+the native tier is 35-265x the interpreter across every band, the
+handler-tier state loop runs a million get/put pairs in 250 ms (the
+OCaml/Koka band the boundary paragraph promises), and multi-shot
+enumeration prices per branch as designed. The gap to hand C in the
+empty-row core:
+
+- **fib, 6.3x** — every known call travels the uniform 10-slot signature
+  (rt, clo, eight argument registers with JQ_UNIT padding) that musttail
+  demands of unknown calls; fib's two-way recursion cannot loopify, so it
+  pays the convention on every node. Follow-up: arity-exact signatures for
+  known calls (task 79).
+- **sort, 11x** — allocation dominates: one malloc per cons through
+  jq_alloc_block plus RC traffic on every field read, against a C
+  reference paying malloc only. Reuse tokens help in-place rebuilds
+  (map.set) but the merge allocates fresh cells. Follow-ups: pool
+  allocation for cons-sized blocks and intrinsic borrowing so read-only
+  intrinsic arguments skip the dup/drop pair (tasks 80, 81).
+- Known regression recorded in the plan's task-71 log: frame-style
+  classification puts dictionary-driven members on the naive RC
+  discipline, costing the AVL battery its reuse (~10 ms before task 71,
+  33 ms here — still 195x the interpreter). Follow-up: Perceus over
+  frame machines (task 82).
+
 ## Phased sketch (sizes are order-of-magnitude)
 
 1. **Tier tagging** (~1 week): persist row tiers in store meta; assert the

@@ -1,0 +1,12 @@
+; handler-tier benchmark (task 75): a tail-resumptive state loop — one
+; million get/put pairs through state.run's function-of-state encoding.
+; The claim boundary puts this in the OCaml/Koka band, not near-C.
+(defterm ((binding spin ()
+  (lam ((pvar n))
+    (match (app (var lt) (var n) (lit 1))
+      (clause (pcon true) (app (var get)))
+      (clause (pcon false)
+        (let nonrec (pwild) (app (var put) (app (var add) (app (var get)) (lit 1)))
+          (app (groupref 0) (app (var sub) (var n) (lit 1))))))))))
+
+(app (var state.run) (lam () (app (var spin) (lit 1000000))) (lit 0))

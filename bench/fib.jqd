@@ -1,0 +1,12 @@
+; the near-C claim's first witness (task 75): naive fib over 63-bit ints,
+; monomorphized empty-row recursion — time against bench/ref/fib.c
+(defterm ((binding fib ((tarrow ((tref int)) (row) (tref int)))
+  (lam ((pvar n))
+    (match (app (var lt) (var n) (lit 2))
+      (clause (pcon true) (var n))
+      (clause (pcon false)
+        (app (var add)
+          (app (groupref 0) (app (var sub) (var n) (lit 1)))
+          (app (groupref 0) (app (var sub) (var n) (lit 2))))))))))
+
+(app (var fib) (lit 30))

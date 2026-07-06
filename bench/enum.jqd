@@ -1,0 +1,16 @@
+; multi-shot benchmark (task 75): exact enumeration over 14 coin flips —
+; 2^14 resumed branches through the prelude's enum handler. Priced by
+; semantics (the clone per branch IS the branch count), per the claim
+; boundary.
+(defterm ((binding flips ()
+  (lam ((pvar n))
+    (match (app (var lt) (var n) (lit 1))
+      (clause (pcon true) (lit 0))
+      (clause (pcon false)
+        (match (app (var sample) (app (var bernoulli) (lit 0.5)))
+          (clause (pcon true)
+            (app (var add) (lit 1) (app (groupref 0) (app (var sub) (var n) (lit 1)))))
+          (clause (pcon false)
+            (app (groupref 0) (app (var sub) (var n) (lit 1)))))))))))
+
+(app (var list.length) (app (var enum-run) (lam () (app (var flips) (lit 14)))))
