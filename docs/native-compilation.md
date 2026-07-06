@@ -134,9 +134,9 @@ task 86's lambda spec), avl 33 / 24 / 22 / 14 ms, state-loop 250 / 203 /
 
 **The near-C claim stays withdrawn at task 75's gate (BOTH fib and sort
 within 3x of hand C): fib passes at 2.5x, sort does not at 4.0x.**
-What the measurements support: the native tier is 87-560x the
+What the measurements support: the native tier is 135-730x the
 interpreter (the table's own endpoints: fib and sort), the handler-tier state loop runs a
-million get/put pairs in 190 ms (the OCaml/Koka band the boundary
+million get/put pairs in 172 ms (the OCaml/Koka band the boundary
 paragraph promises), and multi-shot enumeration prices per branch as
 designed. The remaining gap to hand C in the empty-row core:
 
@@ -146,15 +146,17 @@ designed. The remaining gap to hand C in the empty-row core:
   (rt, n) convention (verified by disassembly). What that disassembly
   showed still standing — one out-of-line jq_drop(clo) call per node
   that LTO left unfolded — became task 85's target: with the dup/drop
-  fast paths static inline in the header, the drop of the statically
-  immortal unit folds away and fib went 8 to 5 ms. The remaining 2.5x
+  fast paths static inline in the header, that call becomes an inlined
+  load-compare-skip (the compiler cannot prove the global's rc is
+  invariant, so the no-op executes but the call overhead and ABI spills
+  are gone) and fib went 8 to 5 ms. The remaining 2.5x
   is the boolean living as a static CON matched through pointer, tag,
   and con-info compares where hand C uses a CPU flag, plus tagged-int
   arithmetic.
 - **sort, 4.0x** (was 11x pre-LTO, 7.9x pre-pool, 4.7x pre-task-85) —
   allocation is size-classed freelists (task 80), and the header-inlined
-  RC fast paths took the field-read dup/drop traffic from calls to folded
-  branches (task 85: 118 to 97 ms). Intrinsic borrowing (task 81) was
+  RC fast paths took the field-read dup/drop traffic from out-of-line
+  calls to inlined branches (task 85: 118 to 97 ms). Intrinsic borrowing (task 81) was
   implemented, measured as a regression, and declined: the owned
   convention is type-aware (each intrinsic drops only its boxed args,
   so Perceus moves make last-uses free), and the flip cost fib/sort/pure
