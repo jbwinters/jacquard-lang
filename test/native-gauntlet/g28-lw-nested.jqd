@@ -1,0 +1,13 @@
+; task 72, review round 1: nested dist.sample-lw — the inner driver's floor
+; and interception state save/restore, so the outer driver's stream and
+; handlers come back intact (each driver owns its own master rng).
+(app (var dist.sample-lw)
+  (lam ()
+    (let nonrec (pvar inner)
+      (app (var dist.sample-lw)
+        (lam () (app (var sample) (app (var uniform-int) (lit 1) (lit 3))))
+        (lit 10) (lit 7))
+      (match (app (var sample) (app (var bernoulli) (lit 0.5)))
+        (clause (pcon true) (app (var list.length) (var inner)))
+        (clause (pcon false) (lit 0)))))
+  (lit 50) (lit 42))

@@ -1,0 +1,14 @@
+; task 72, review round 1: dist.sample-lw under an OUTER in-language handler —
+; the driver isolates each run behind a search floor, so the outer handler's
+; entries survive untouched and stay reachable AFTER the driver returns. The
+; model's own ops go to the driver; xop performed afterwards goes outward.
+(defeffect e-x ((tvar a)) (op xop () (tref int)))
+
+(handle
+  (let nonrec (pvar p)
+    (app (var dist.sample-lw)
+      (lam () (app (var sample) (app (var bernoulli) (lit 0.5))))
+      (lit 100) (lit 42))
+    (tuple (app (var list.length) (var p)) (app (var xop))))
+  (ret (pvar x) (var x))
+  (opclause xop () k (app (var k) (lit 44))))

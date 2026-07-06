@@ -44,6 +44,8 @@ assertion, exit codes included.
   identical: g24-dst (exit 0)
   identical: g25-chain-order (exit 0)
   identical: g26-lw-m3 (exit 0)
+  identical: g27-lw-under-handler (exit 0)
+  identical: g28-lw-nested (exit 0)
 
 The flagship outputs, pinned so a both-engines regression cannot slip through
 the diff-only loop above:

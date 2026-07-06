@@ -195,11 +195,17 @@ jq_value jq_g_dist_sample(jq_rt *rt, const jq_value *args) {
 }
 
 jq_value jq_g_dist_observe(jq_rt *rt, const jq_value *args) {
-  (void)rt;
   (void)args;
-  fputs("error[E0904]: observe reached the sampling root handler; observation requires "
-        "an inference driver (use jacquard infer)\n",
-        stderr);
+  /* run_cmd renders Observe_at_root as E0904; inside a weighted run the LW
+     driver flattens it to an E0902 diagnostic first (both exit 2) */
+  if (rt->lw)
+    fputs("arithmetic error: error[E0902]: observe reached the sampling root handler; "
+          "observation requires an inference driver (use jacquard infer)\n",
+          stderr);
+  else
+    fputs("error[E0904]: observe reached the sampling root handler; observation requires "
+          "an inference driver (use jacquard infer)\n",
+          stderr);
   exit(2);
 }
 

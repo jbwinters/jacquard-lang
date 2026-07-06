@@ -41,8 +41,10 @@ void jq_handle_pop(jq_rt *rt, uint32_t n) {
 }
 
 jq_value jq_perform(jq_rt *rt, uint32_t op_ord, uint16_t n, const jq_value *args) {
-  /* nearest in-language handler wins */
-  for (uint32_t i = rt->hs_len; i > 0; i--) {
+  /* nearest in-language handler wins; the search floor hides outer
+     handlers from an inference run (task 72) without touching their
+     entries */
+  for (uint32_t i = rt->hs_len; i > rt->hs_floor; i--) {
     if (rt->hs[i - 1].op_ord != op_ord) continue;
     uint32_t at = i - 1;
     if (rt->hs[at].kind == JQ_CLAUSE_CAPTURING) {
@@ -82,6 +84,11 @@ jq_value jq_perform(jq_rt *rt, uint32_t op_ord, uint16_t n, const jq_value *args
   /* root grants (the --allow natives) */
   if (op_ord < rt->n_ops && rt->grants && rt->grants[op_ord])
     return rt->grants[op_ord](rt, args);
+  /* the inference driver's interception, AFTER grants — the interpreter's
+     run_until_op captures ops only once they reach the true root */
+  if (rt->lw && op_ord == rt->ord_sample && n == 1) return jq_lw_sample(rt, args[0]);
+  if (rt->lw && op_ord == rt->ord_observe && n == 2)
+    return jq_lw_observe(rt, args[0], args[1]);
   /* the capability story at runtime: unhandled dies, exit 3. During a
      weighted run the interpreter names the pseudo-effect instead (task 72:
      Infer_dist's run_until_op intercepts root-reaching ops). */

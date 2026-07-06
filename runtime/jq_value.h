@@ -231,6 +231,15 @@ typedef struct jq_rt {
   uint32_t ord_observe;
   int64_t dist_rng;
   const char *unhandled_effect_override;
+  /* LW isolation (task 72): perform's handler search stops above hs_floor
+     (the interpreter runs each weighted model as a fresh state machine, so
+     outer in-language handlers are invisible to it — entries below the
+     floor stay untouched); lw points at the driver's per-run state, giving
+     sample/observe their ROOT interception — after grants, exactly the
+     interpreter's ladder (in-language above the floor, then grants, then
+     the inference driver, then unhandled). */
+  uint32_t hs_floor;
+  void *lw;
 } jq_rt;
 
 /* The uniform compiled-function signature: clang's musttail requires caller
@@ -366,6 +375,9 @@ jq_value jq_i_text_from_int(jq_rt *rt, const jq_value *a);
 jq_value jq_i_support(jq_rt *rt, const jq_value *a);
 jq_value jq_i_pmf(jq_rt *rt, const jq_value *a);
 jq_value jq_i_dist_sample_lw(jq_rt *rt, const jq_value *a);
+/* the LW driver's root interception (jq_perform's ladder, jq_intrinsics.c) */
+jq_value jq_lw_sample(jq_rt *rt, jq_value dv);
+jq_value jq_lw_observe(jq_rt *rt, jq_value dv, jq_value v);
 
 
 /* --- constructors (jq_alloc.c) --- */

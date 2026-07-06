@@ -474,40 +474,32 @@ typedef struct lw_state {
   double weight;
 } lw_state;
 
-static lw_state *lw_of(jq_value clo) {
-  return (lw_state *)jq_int_val(jq_closure_env(clo)[0]);
-}
-
-static jq_value lw_sample_clause(JQ_PARAMS) {
-  (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
-  lw_state *st = lw_of(clo);
-  jq_value d = a0;
-  if (!jq_is_ptr(d) || jq_block_of(d)->tag != JQ_CON) {
-    char *s = jq_show(d);
+/* jq_perform's root interception during a weighted run (after grants —
+   the interpreter's run_until_op captures ops only at the true root) */
+jq_value jq_lw_sample(jq_rt *rt, jq_value dv) {
+  lw_state *st = (lw_state *)rt->lw;
+  if (!jq_is_ptr(dv) || jq_block_of(dv)->tag != JQ_CON) {
+    char *s = jq_show(dv);
     fprintf(stderr, "type error: %s is not a distribution value\n", s);
     exit(2);
   }
-  check_dist(d);
-  jq_value x = draw_dist(rt, &st->rng, d);
-  jq_drop(d);
-  jq_drop(clo);
-  return x; /* tail-resumptive: the return IS the resume */
+  check_dist(dv);
+  jq_value x = draw_dist(rt, &st->rng, dv);
+  jq_drop(dv);
+  return x; /* the resume: sample is ancestral, one value per op */
 }
 
-static jq_value lw_observe_clause(JQ_PARAMS) {
-  (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
-  lw_state *st = lw_of(clo);
-  jq_value d = a0, v = a1;
-  if (!jq_is_ptr(d) || jq_block_of(d)->tag != JQ_CON) {
-    char *s = jq_show(d);
+jq_value jq_lw_observe(jq_rt *rt, jq_value dv, jq_value v) {
+  lw_state *st = (lw_state *)rt->lw;
+  if (!jq_is_ptr(dv) || jq_block_of(dv)->tag != JQ_CON) {
+    char *s = jq_show(dv);
     fprintf(stderr, "type error: %s is not a distribution value\n", s);
     exit(2);
   }
-  check_dist(d);
-  st->weight *= pmf_mass(rt, d, v);
-  jq_drop(d);
+  check_dist(dv);
+  st->weight *= pmf_mass(rt, dv, v);
+  jq_drop(dv);
   jq_drop(v);
-  jq_drop(clo);
   return JQ_UNIT;
 }
 
@@ -519,8 +511,12 @@ typedef struct lw_run {
 
 static int lw_entry_cmp(const void *pa, const void *pb) {
   const lw_run *a = pa, *b = pb;
-  /* probability descending, then rendering ascending (OCaml compare) */
-  if (a->weight != b->weight) return a->weight > b->weight ? -1 : 1;
+  /* probability descending, then rendering ascending (OCaml compare);
+     spelled as two strict comparisons so an exotic weight (NaN cannot
+     arise from normalized finite masses, but qsort demands a total order)
+     falls through to the string key instead of breaking the ordering */
+  if (a->weight > b->weight) return -1;
+  if (a->weight < b->weight) return 1;
   return strcmp(a->key, b->key);
 }
 
@@ -539,38 +535,28 @@ jq_value jq_i_dist_sample_lw(jq_rt *rt, const jq_value *a) {
   if (samples <= 0)
     jq_runtime_error("arithmetic error: dist.sample-lw needs a positive sample count");
   lw_state st = { 0, 1.0 };
-  jq_value scl = jq_closure((void *)lw_sample_clause, 1, 1,
-                            (jq_value[]){ jq_int((int64_t)&st) }, UINT16_MAX);
-  jq_value ocl = jq_closure((void *)lw_observe_clause, 2, 1,
-                            (jq_value[]){ jq_int((int64_t)&st) }, UINT16_MAX);
   lw_run *runs = malloc((size_t)samples * sizeof(lw_run));
   if (!runs) jq_runtime_error("jacquard runtime: out of memory");
-  /* the model runs against an empty in-language handler stack, like the
-     interpreter's fresh state machine; grants and the pseudo-effect
-     rendering still apply */
-  uint32_t saved_hs = rt->hs_len;
-  uint32_t saved_cap = rt->cap_depth;
+  /* each run is the interpreter's fresh state machine: outer in-language
+     handlers are hidden behind the search floor (their entries untouched),
+     grants still apply, sample/observe intercept at the root through
+     rt->lw, and anything else root-reaching renders with the pseudo-effect.
+     Saving the previous floor/lw makes nested drivers compose. */
+  uint32_t saved_floor = rt->hs_floor;
+  void *saved_lw = rt->lw;
   const char *saved_override = rt->unhandled_effect_override;
   for (int64_t i = 0; i < samples; i++) {
     st.rng = jq_rng_split(&master);
     st.weight = 1.0;
-    rt->hs_len = 0;
-    rt->cap_depth = 0;
+    rt->hs_floor = rt->hs_len;
+    rt->lw = &st;
     rt->unhandled_effect_override = "(not handled during inference)";
-    jq_dup(scl);
-    jq_dup(ocl);
-    jq_handler_entry es[2] = {
-      { .op_ord = rt->ord_sample, .clause = scl, .kind = JQ_CLAUSE_TAIL },
-      { .op_ord = rt->ord_observe, .clause = ocl, .kind = JQ_CLAUSE_TAIL },
-    };
-    jq_handle_push(rt, 2, es);
     jq_dup(thunk);
     rt->apply_n = 0;
     jq_value v = jq_apply(rt, thunk, JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT,
                           JQ_UNIT, JQ_UNIT, JQ_UNIT);
-    jq_handle_pop(rt, 2);
-    rt->hs_len = saved_hs;
-    rt->cap_depth = saved_cap;
+    rt->hs_floor = saved_floor;
+    rt->lw = saved_lw;
     rt->unhandled_effect_override = saved_override;
     runs[i].value = v;
     runs[i].weight = st.weight;
@@ -611,8 +597,6 @@ jq_value jq_i_dist_sample_lw(jq_rt *rt, const jq_value *a) {
   }
   free(entries);
   free(runs);
-  jq_drop(scl);
-  jq_drop(ocl);
   jq_drop(thunk);
   return list;
 }
