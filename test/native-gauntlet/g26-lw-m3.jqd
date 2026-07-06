@@ -1,0 +1,14 @@
+; task 72: the M3 two-coins model through the likelihood-weighting driver —
+; the native dist.sample-lw intrinsic must reproduce the interpreter's seeded
+; stream exactly (one split per run, one draw per sample) and its
+; merge/normalize/sort. The %.6f table of `jacquard infer` is CLI tooling;
+; the program-reachable posterior is this weighted list.
+(app (var dist.sample-lw)
+  (lam ()
+    (let nonrec (pvar c1) (app (var sample) (app (var bernoulli) (lit 0.5)))
+      (let nonrec (pvar c2) (app (var sample) (app (var bernoulli) (lit 0.5)))
+        (let nonrec (pwild)
+          (app (var observe) (app (var bernoulli) (lit 1.0))
+            (app (var bool.or) (var c1) (var c2)))
+          (var c1)))))
+  (lit 10000) (lit 42))

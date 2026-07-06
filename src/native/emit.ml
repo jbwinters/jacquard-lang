@@ -721,7 +721,11 @@ let assemble st ~banner =
   let out = Buffer.create (Buffer.length st.decls.b + Buffer.length st.ub.b + 256) in
   Buffer.add_string out banner;
   Buffer.add_string out
-    "#include \"jq_value.h\"\n\n#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n\n";
+    "#include \"jq_value.h\"\n\n\
+     #include <stdio.h>\n\
+     #include <stdlib.h>\n\
+     #include <string.h>\n\
+     #include <time.h>\n\n";
   Buffer.add_buffer out st.decls.b;
   Buffer.add_buffer out st.ub.b;
   Buffer.contents out
@@ -784,6 +788,8 @@ let main_source (prog : program) ~precise ~(v_true : Hash.t) ~(v_false : Hash.t)
       ( "fs",
         [ ("read", "jq_g_fs_read"); ("write", "jq_g_fs_write"); ("list-dir", "jq_g_fs_list_dir") ]
       );
+      ("dist", [ ("sample", "jq_g_dist_sample"); ("observe", "jq_g_dist_observe") ]);
+      ("infer", [ ("complete", "jq_g_infer_complete") ]);
     ]
   in
   (* one granted flag per effect a manifest checks, plus the implemented
@@ -856,6 +862,17 @@ let main_source (prog : program) ~precise ~(v_true : Hash.t) ~(v_false : Hash.t)
       declare_con_info st pair_h;
       line st.ub "rt->ci_pair = &%s;" (ci_name pair_h)
   | None -> ());
+  (* dist ordinals (task 72): the LW driver and the root sampler dispatch by
+     these; UINT32_MAX when the program reaches neither op *)
+  let dist_ord name =
+    Hashtbl.fold
+      (fun _ o acc -> if o.oeffect = "dist" && o.oname = name then Some o.oord else acc)
+      prog.ops None
+  in
+  line st.ub "rt->ord_sample = %s;"
+    (match dist_ord "sample" with Some i -> string_of_int i | None -> "UINT32_MAX");
+  line st.ub "rt->ord_observe = %s;"
+    (match dist_ord "observe" with Some i -> string_of_int i | None -> "UINT32_MAX");
   List.iter (fun h -> line st.ub "%s(rt);" (init_name h)) prog.init_order;
   List.iteri
     (fun i (body, _, warnings) ->
@@ -902,9 +919,26 @@ let main_source (prog : program) ~precise ~(v_true : Hash.t) ~(v_false : Hash.t)
   line st.ub "int main(int argc, char **argv) {";
   st.ub.indent <- st.ub.indent + 1;
   line st.ub "jq_rt rt0 = { 0 };";
+  (* the sampling grant's stream: OS-entropy seeded unless --seed pins it,
+     like run_cmd (a pinned seed is the reproducibility contract; entropy
+     quality is irrelevant, unseeded runs are random either way) *)
+  line st.ub "rt0.dist_rng = (int64_t)time(NULL) * 1000003 ^ (int64_t)clock();";
   line st.ub "for (int i = 1; i < argc; i++) {";
   st.ub.indent <- st.ub.indent + 1;
   (* cmdliner accepts both the space and equals spellings; match it *)
+  line st.ub "const char *sd = NULL;";
+  line st.ub "if (strncmp(argv[i], \"--seed=\", 7) == 0) sd = argv[i] + 7;";
+  line st.ub "else if (strcmp(argv[i], \"--seed\") == 0 && i + 1 < argc) sd = argv[++i];";
+  line st.ub "if (sd) { rt0.dist_rng = strtoll(sd, NULL, 10); continue; }";
+  (* the completion cache's entry format needs the reader; loud, not silent *)
+  line st.ub "if (strncmp(argv[i], \"--infer-cache\", 13) == 0) {";
+  st.ub.indent <- st.ub.indent + 1;
+  line st.ub
+    "fputs(\"error[E1103]: native binaries do not cache completions yet (the cache entry format \
+     needs task 73's reader); rerun without --infer-cache\\n\", stderr);";
+  line st.ub "return 1;";
+  st.ub.indent <- st.ub.indent - 1;
+  line st.ub "}";
   line st.ub "const char *nm = NULL;";
   line st.ub "if (strncmp(argv[i], \"--allow=\", 8) == 0) nm = argv[i] + 8;";
   line st.ub "else if (strcmp(argv[i], \"--allow\") == 0 && i + 1 < argc) nm = argv[++i];";
@@ -932,8 +966,8 @@ let main_source (prog : program) ~precise ~(v_true : Hash.t) ~(v_false : Hash.t)
       line st.ub "}")
     implemented;
   line st.ub
-    "fprintf(stderr, \"error[E1103]: native binaries implement only the console, clock, and fs \
-     grants so far (task 70); cannot grant `%%s`\\n\", nm);";
+    "fprintf(stderr, \"error[E1103]: native binaries implement only the console, clock, fs, dist, \
+     and infer grants so far (task 72); cannot grant `%%s`\\n\", nm);";
   line st.ub "return 1;";
   st.ub.indent <- st.ub.indent - 1;
   line st.ub "}";

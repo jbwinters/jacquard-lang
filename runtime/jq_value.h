@@ -222,6 +222,15 @@ typedef struct jq_rt {
      the recorded resume point */
   jq_block *re_frame;
   jq_value re_val;
+  /* dist (task 72): the sample/observe ordinals (UINT32_MAX when the
+     program reaches neither), the root sampler's RNG state (--seed), and
+     the LW driver's unhandled-rendering override (the interpreter names
+     the pseudo-effect "(not handled during inference)" for ops that reach
+     the root during a weighted run) */
+  uint32_t ord_sample;
+  uint32_t ord_observe;
+  int64_t dist_rng;
+  const char *unhandled_effect_override;
 } jq_rt;
 
 /* The uniform compiled-function signature: clang's musttail requires caller
@@ -320,6 +329,10 @@ jq_value jq_g_sleep(jq_rt *rt, const jq_value *args);
 jq_value jq_g_fs_read(jq_rt *rt, const jq_value *args);
 jq_value jq_g_fs_write(jq_rt *rt, const jq_value *args);
 jq_value jq_g_fs_list_dir(jq_rt *rt, const jq_value *args);
+jq_value jq_g_dist_sample(jq_rt *rt, const jq_value *args);
+jq_value jq_g_dist_observe(jq_rt *rt, const jq_value *args);
+jq_value jq_g_dist_draw(jq_rt *rt, jq_value d); /* validated draw core */
+jq_value jq_g_infer_complete(jq_rt *rt, const jq_value *args);
 
 /* "no clause matched the value %s", exit 2 (Runtime_err.Match_failure) */
 void jq_match_fail(jq_rt *rt, jq_value scrutinee) __attribute__((noreturn));
@@ -352,6 +365,7 @@ jq_value jq_i_text_empty_q(jq_rt *rt, const jq_value *a);
 jq_value jq_i_text_from_int(jq_rt *rt, const jq_value *a);
 jq_value jq_i_support(jq_rt *rt, const jq_value *a);
 jq_value jq_i_pmf(jq_rt *rt, const jq_value *a);
+jq_value jq_i_dist_sample_lw(jq_rt *rt, const jq_value *a);
 
 
 /* --- constructors (jq_alloc.c) --- */

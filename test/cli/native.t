@@ -259,5 +259,5 @@ for a missing file:
 An unimplemented grant is an up-front error, not a silent no-op:
 
   $ ./fsmiss --allow net
-  error[E1103]: native binaries implement only the console, clock, and fs grants so far (task 70); cannot grant `net`
+  error[E1103]: native binaries implement only the console, clock, fs, dist, and infer grants so far (task 72); cannot grant `net`
   [1]

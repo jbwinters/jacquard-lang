@@ -37,3 +37,4 @@ assertion. Counts become printed values via in-language collectors
 | test_fault_random_deterministic (task-72 DoD) | g23-fault-random.jqd | fault.random's seeded LCG chaos stream, seed in the report |
 | test_dst_byte_identical (task-72 DoD) | g24-dst.jqd | clock.fixed + net.scripted + fault.all DST, run-twice stable |
 | (chain-order regression, task 72) | g25-chain-order.jqd | capture crossing a state-passer inside a multi-shot resume |
+| test_sample_lw_builtin (test_dist_lib.ml, task-72 DoD) | g26-lw-m3.jqd | dist.sample-lw's exact seeded stream on the m3 model |

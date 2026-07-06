@@ -33,6 +33,7 @@ let intrinsics : (string * int) list =
     ("text.from-int", 1);
     ("support", 1);
     ("pmf", 2);
+    ("dist.sample-lw", 3);
   ]
 
 (* ------------------------------------------------------------------ *)
@@ -570,7 +571,8 @@ let build ~(store : Store.t) ~(tops : (Kernel.expr * string list * (string * str
             let emitter_version =
               emitter_version ^ "-h"
               ^ String.sub
-                  (Hash.to_hex (Hash.of_string (read_file (Filename.concat runtime_dir "jq_value.h"))))
+                  (Hash.to_hex
+                     (Hash.of_string (read_file (Filename.concat runtime_dir "jq_value.h"))))
                   0 8
             in
             if cflags = "" then emitter_version

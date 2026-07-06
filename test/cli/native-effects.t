@@ -43,6 +43,7 @@ assertion, exit codes included.
   identical: g23-fault-random (exit 0)
   identical: g24-dst (exit 0)
   identical: g25-chain-order (exit 0)
+  identical: g26-lw-m3 (exit 0)
 
 The flagship outputs, pinned so a both-engines regression cannot slip through
 the diff-only loop above:
@@ -84,6 +85,73 @@ gated-eval leg a pinned refusal.
   identical
   $ jacquard build ../../demos/m1-gated.jqd -o nope
   error[E1101]: not yet compilable (native v1 compiles programs without code values): top-level expression 0 uses eval, which requires the interpreter tier
+  [1]
+
+Dist parity (task 72). The likelihood-weighting driver reproduces the
+interpreter's seeded stream exactly — one split per run, one draw per
+sample, merge/normalize/sort on the rendering key. The M3 model at seed 42:
+
+  $ jacquard build ../../test/native-gauntlet/g26-lw-m3.jqd -o lw-m3 > /dev/null
+  $ ./lw-m3
+  cons(mk-pair(true, 0.6683497209673133), cons(mk-pair(false, 0.3316502790326867), nil))
+
+The `%.6f` posterior table of `jacquard infer` is CLI tooling with no
+program-reachable rendering; the buildable m3 target is this weighted
+list (docs/native-plan.md records the boundary). The LW error legs:
+
+  $ cat > lw-zero.jqd <<'EOF_JQD'
+  > (app (var dist.sample-lw) (lam () (app (var sample) (app (var bernoulli) (lit 0.5)))) (lit 0) (lit 11))
+  > EOF_JQD
+  $ jacquard build lw-zero.jqd -o lw-zero > /dev/null
+  $ ./lw-zero
+  arithmetic error: dist.sample-lw needs a positive sample count
+  [2]
+  $ cat > lw-empty.jqd <<'EOF_JQD'
+  > (app (var dist.sample-lw) (lam () (let nonrec (pwild) (app (var observe) (app (var bernoulli) (lit 1.0)) (var false)) (lit 1))) (lit 5) (lit 42))
+  > EOF_JQD
+  $ jacquard build lw-empty.jqd -o lw-empty > /dev/null
+  $ ./lw-empty
+  arithmetic error: error[E0901]: the posterior is empty: every run is impossible under the observations
+  [2]
+
+The root sampling grant: --allow dist with --seed draws the interpreter's
+exact stream; observe at the root is the interpreter's E0904 defect:
+
+  $ cat > die.jqd <<'EOF_JQD'
+  > (app (var sample) (app (var uniform-int) (lit 1) (lit 6)))
+  > EOF_JQD
+  $ jacquard build die.jqd -o die > /dev/null
+  $ jacquard run die.jqd --allow dist --seed 42
+  5
+  $ ./die --allow dist --seed 42
+  5
+  $ ./die --allow dist --seed=7
+  3
+  $ cat > obs.jqd <<'EOF_JQD'
+  > (app (var observe) (app (var bernoulli) (lit 1.0)) (var true))
+  > EOF_JQD
+  $ jacquard build obs.jqd -o obs > /dev/null
+  $ ./obs --allow dist
+  error[E0904]: observe reached the sampling root handler; observation requires an inference driver (use jacquard infer)
+  [2]
+
+The infer stub grant, both prompt shapes; the completion cache stays
+interpreter-only until task 73's reader port, loudly:
+
+  $ cat > haiku.jqd <<'EOF_JQD'
+  > (app (var complete) (app (var mk-prompt) (lit "write a haiku") (var none)))
+  > EOF_JQD
+  $ jacquard build haiku.jqd -o haiku > /dev/null
+  $ ./haiku --allow infer
+  "<stub completion for: write a haiku>"
+  $ ./haiku --allow infer --infer-cache cache-dir
+  error[E1103]: native binaries do not cache completions yet (the cache entry format needs task 73's reader); rerun without --infer-cache
+  [1]
+
+--dry-run is an interpreter run; build rejects it up front:
+
+  $ jacquard build die.jqd -o nope --dry-run
+  error[E1103]: jacquard build does not support --dry-run; the consent sheet is an interpreter run (use jacquard run --dry-run)
   [1]
 
 An effectful top-level definition is refused by the checker before either

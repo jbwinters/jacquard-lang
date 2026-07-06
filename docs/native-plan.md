@@ -495,6 +495,31 @@ rendering, do not reinvent it); the replay strict/loose cases and the
 run-twice-byte-identical DST case native-identical; fault.random
 seed-deterministic natively with the same streams.
 
+**As built (task 72 delta log).** Three boundaries the DoD wording did not
+anticipate, found during the port and recorded rather than papered over:
+(a) the `%.6f` posterior table is `jacquard infer` CLI tooling —
+`show_posterior`'s only callers are the two infer subcommands, no builtin
+reaches it, so it is unreachable from any compilable program; the
+buildable m3 parity target is the builtin output (the weighted
+`list (pair a real)` through `dist.enumerate`/`dist.sample-lw`, rendered
+by the already-ported real_repr), pinned as gauntlet twins g22/g26.
+(b) The replay strict/loose cases are built on the `code.*` builtins
+(codec.encode reaches code.form and friends), which are task 73's form
+representation and printer — those twins land with 73. DST and
+fault.random need neither and are pinned (g23/g24). (c) The infer stub
+grant is ported (both prompt shapes, byte-exact); the content-addressed
+completion cache needs to READ its readable entry format back (a reader
+port, task 73's territory), so native binaries reject `--infer-cache`
+with an up-front E1103 instead of silently not caching. Also as built:
+`dist.sample-lw` isolates each run against an empty in-language handler
+stack (the interpreter drives a fresh state machine per model run) and
+renders root-reaching ops with the "(not handled during inference)"
+pseudo-effect; the root sampler seeds from `--seed` (both spellings) or
+OS entropy, exactly one jq_rng_float per draw with no split; and the DST
+battery exposed a real chain-depth bug in run_from (un-entered frames
+were re-pushed above their inner extent's frames on suspension —
+fixed, unit-tested, and pinned as g25).
+
 ## Task 73 — Quote, splices, and structural code ops
 
 **Deliverables:** runtime form representation, splice substitution,

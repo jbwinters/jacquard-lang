@@ -402,3 +402,226 @@ jq_value jq_i_pmf(jq_rt *rt, const jq_value *a) {
   jq_drop(v);
   return jq_real(mass);
 }
+
+/* --- dist.sample-lw (task 72): the likelihood-weighting driver ---
+ *
+ * Ported from Infer_dist.likelihood_weighting: a splitmix64 master seeded
+ * by the argument; per run, one jq_rng_split child; per sample, one
+ * jq_rng_float draw (inverse CDF over the unnormalized support; uniform-int
+ * draws directly); observe multiplies the run's weight by the pmf and
+ * resumes unit. Runs are merged on jq_show keys, normalized by the grand
+ * total, and sorted (probability descending, rendering ascending). The
+ * model runs against an EMPTY handler stack (the interpreter drives a
+ * fresh state machine), so outer in-language handlers never see its ops;
+ * grants still apply, and a root-reaching op renders with the
+ * "(not handled during inference)" pseudo-effect. */
+
+static double pmf_mass(jq_rt *rt, jq_value d, jq_value v) {
+  if (is_con_named(d, "uniform-int")) {
+    int64_t lo = jq_int_val(jq_con_fields(d)[0]);
+    int64_t hi = jq_int_val(jq_con_fields(d)[1]);
+    double n = (double)(hi - lo + 1);
+    return (jq_is_int(v) && jq_int_val(v) >= lo && jq_int_val(v) <= hi) ? 1.0 / n : 0.0;
+  }
+  jq_value entries = support_of(rt, d);
+  char *vs = jq_show(v);
+  double mass = 0.0;
+  for (jq_value it = entries; is_con_named(it, "cons"); it = jq_con_fields(it)[1]) {
+    jq_value head = jq_con_fields(it)[0];
+    char *xs = jq_show(jq_con_fields(head)[0]);
+    if (strcmp(xs, vs) == 0) mass += jq_real_val(jq_con_fields(head)[1]);
+    free(xs);
+  }
+  free(vs);
+  jq_drop(entries);
+  return mass;
+}
+
+/* one draw from a validated dist: exactly one jq_rng_float */
+static jq_value draw_dist(jq_rt *rt, int64_t *rng, jq_value d) {
+  if (is_con_named(d, "uniform-int")) {
+    int64_t lo = jq_int_val(jq_con_fields(d)[0]);
+    int64_t hi = jq_int_val(jq_con_fields(d)[1]);
+    int64_t n = hi - lo + 1;
+    return jq_int(lo + (int64_t)(jq_rng_float(rng) * (double)n));
+  }
+  jq_value entries = support_of(rt, d);
+  double total = 0.0;
+  for (jq_value it = entries; is_con_named(it, "cons"); it = jq_con_fields(it)[1])
+    total += jq_real_val(jq_con_fields(jq_con_fields(it)[0])[1]);
+  double u = jq_rng_float(rng) * (total > 0.0 ? total : 1.0);
+  jq_value picked = 0;
+  double acc = 0.0;
+  for (jq_value it = entries; is_con_named(it, "cons"); it = jq_con_fields(it)[1]) {
+    jq_value head = jq_con_fields(it)[0];
+    double p = jq_real_val(jq_con_fields(head)[1]);
+    if (u < acc + p) {
+      picked = jq_con_fields(head)[0];
+      break;
+    }
+    acc += p;
+    /* interpreter fallback: past the end, the LAST entry's value */
+    if (!is_con_named(jq_con_fields(it)[1], "cons")) picked = jq_con_fields(head)[0];
+  }
+  if (picked == 0) picked = JQ_UNIT; /* empty support: Value.unit_v */
+  jq_dup(picked);
+  jq_drop(entries);
+  return picked;
+}
+
+typedef struct lw_state {
+  int64_t rng;
+  double weight;
+} lw_state;
+
+static lw_state *lw_of(jq_value clo) {
+  return (lw_state *)jq_int_val(jq_closure_env(clo)[0]);
+}
+
+static jq_value lw_sample_clause(JQ_PARAMS) {
+  (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
+  lw_state *st = lw_of(clo);
+  jq_value d = a0;
+  if (!jq_is_ptr(d) || jq_block_of(d)->tag != JQ_CON) {
+    char *s = jq_show(d);
+    fprintf(stderr, "type error: %s is not a distribution value\n", s);
+    exit(2);
+  }
+  check_dist(d);
+  jq_value x = draw_dist(rt, &st->rng, d);
+  jq_drop(d);
+  jq_drop(clo);
+  return x; /* tail-resumptive: the return IS the resume */
+}
+
+static jq_value lw_observe_clause(JQ_PARAMS) {
+  (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
+  lw_state *st = lw_of(clo);
+  jq_value d = a0, v = a1;
+  if (!jq_is_ptr(d) || jq_block_of(d)->tag != JQ_CON) {
+    char *s = jq_show(d);
+    fprintf(stderr, "type error: %s is not a distribution value\n", s);
+    exit(2);
+  }
+  check_dist(d);
+  st->weight *= pmf_mass(rt, d, v);
+  jq_drop(d);
+  jq_drop(v);
+  jq_drop(clo);
+  return JQ_UNIT;
+}
+
+typedef struct lw_run {
+  jq_value value;
+  double weight;
+  char *key; /* jq_show rendering, the merge key */
+} lw_run;
+
+static int lw_entry_cmp(const void *pa, const void *pb) {
+  const lw_run *a = pa, *b = pb;
+  /* probability descending, then rendering ascending (OCaml compare) */
+  if (a->weight != b->weight) return a->weight > b->weight ? -1 : 1;
+  return strcmp(a->key, b->key);
+}
+
+jq_value jq_i_dist_sample_lw(jq_rt *rt, const jq_value *a) {
+  jq_value thunk = a[0];
+  if (!jq_is_int(a[1]) || !jq_is_int(a[2])) {
+    char *s0 = jq_show(a[0]);
+    char *s1 = jq_show(a[1]);
+    char *s2 = jq_show(a[2]);
+    fprintf(stderr, "type error: dist.sample-lw expects a thunk and two ints, got %s, %s, %s\n",
+            s0, s1, s2);
+    exit(2);
+  }
+  int64_t samples = jq_int_val(a[1]);
+  int64_t master = jq_int_val(a[2]);
+  if (samples <= 0)
+    jq_runtime_error("arithmetic error: dist.sample-lw needs a positive sample count");
+  lw_state st = { 0, 1.0 };
+  jq_value scl = jq_closure((void *)lw_sample_clause, 1, 1,
+                            (jq_value[]){ jq_int((int64_t)&st) }, UINT16_MAX);
+  jq_value ocl = jq_closure((void *)lw_observe_clause, 2, 1,
+                            (jq_value[]){ jq_int((int64_t)&st) }, UINT16_MAX);
+  lw_run *runs = malloc((size_t)samples * sizeof(lw_run));
+  if (!runs) jq_runtime_error("jacquard runtime: out of memory");
+  /* the model runs against an empty in-language handler stack, like the
+     interpreter's fresh state machine; grants and the pseudo-effect
+     rendering still apply */
+  uint32_t saved_hs = rt->hs_len;
+  uint32_t saved_cap = rt->cap_depth;
+  const char *saved_override = rt->unhandled_effect_override;
+  for (int64_t i = 0; i < samples; i++) {
+    st.rng = jq_rng_split(&master);
+    st.weight = 1.0;
+    rt->hs_len = 0;
+    rt->cap_depth = 0;
+    rt->unhandled_effect_override = "(not handled during inference)";
+    jq_dup(scl);
+    jq_dup(ocl);
+    jq_handler_entry es[2] = {
+      { .op_ord = rt->ord_sample, .clause = scl, .kind = JQ_CLAUSE_TAIL },
+      { .op_ord = rt->ord_observe, .clause = ocl, .kind = JQ_CLAUSE_TAIL },
+    };
+    jq_handle_push(rt, 2, es);
+    jq_dup(thunk);
+    rt->apply_n = 0;
+    jq_value v = jq_apply(rt, thunk, JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT,
+                          JQ_UNIT, JQ_UNIT, JQ_UNIT);
+    jq_handle_pop(rt, 2);
+    rt->hs_len = saved_hs;
+    rt->cap_depth = saved_cap;
+    rt->unhandled_effect_override = saved_override;
+    runs[i].value = v;
+    runs[i].weight = st.weight;
+    runs[i].key = jq_show(v);
+  }
+  double total = 0.0;
+  for (int64_t i = 0; i < samples; i++) total += runs[i].weight;
+  if (total <= 0.0) {
+    fputs("arithmetic error: error[E0901]: the posterior is empty: every run is "
+          "impossible under the observations\n",
+          stderr);
+    exit(2);
+  }
+  /* merge on the rendering key (first occurrence keeps its value) */
+  lw_run *entries = malloc((size_t)samples * sizeof(lw_run));
+  if (!entries) jq_runtime_error("jacquard runtime: out of memory");
+  int64_t n_entries = 0;
+  for (int64_t i = 0; i < samples; i++) {
+    int64_t j = 0;
+    while (j < n_entries && strcmp(entries[j].key, runs[i].key) != 0) j++;
+    if (j == n_entries) {
+      entries[n_entries] = runs[i];
+      n_entries++;
+    } else {
+      entries[j].weight += runs[i].weight;
+      jq_drop(runs[i].value);
+      free(runs[i].key);
+    }
+  }
+  for (int64_t i = 0; i < n_entries; i++) entries[i].weight /= total;
+  qsort(entries, (size_t)n_entries, sizeof(lw_run), lw_entry_cmp);
+  jq_value list = rt->v_nil;
+  for (int64_t i = n_entries - 1; i >= 0; i--) {
+    jq_value pr = jq_con(rt->ci_pair,
+                         (jq_value[]){ entries[i].value, jq_real(entries[i].weight) });
+    list = jq_con(rt->ci_cons, (jq_value[]){ pr, list });
+    free(entries[i].key);
+  }
+  free(entries);
+  free(runs);
+  jq_drop(scl);
+  jq_drop(ocl);
+  jq_drop(thunk);
+  return list;
+}
+
+/* the root sampler's draw (jq_g_dist_sample's core): validates, then one
+ * draw from rt->dist_rng — the grant's single seeded stream */
+jq_value jq_g_dist_draw(jq_rt *rt, jq_value d) {
+  check_dist(d);
+  jq_value x = draw_dist(rt, &rt->dist_rng, d);
+  jq_drop(d);
+  return x;
+}

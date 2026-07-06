@@ -177,3 +177,79 @@ jq_value jq_g_fs_list_dir(jq_rt *rt, const jq_value *args) {
   jq_drop(args[0]);
   return list;
 }
+
+/* dist (task 72): the seeded sampling grant. sample draws one value
+ * ancestrally from the --seed'd stream (one jq_rng_float per draw, no
+ * split — Prelude.install_dist's single Rng); observe reaching the root
+ * is a defect, the interpreter's E0904 at exit 2. The draw itself lives
+ * in jq_intrinsics.c (jq_g_dist_draw) beside the dist recognizers. */
+
+jq_value jq_g_dist_sample(jq_rt *rt, const jq_value *args) {
+  extern jq_value jq_g_dist_draw(jq_rt *, jq_value); /* jq_intrinsics.c */
+  if (!jq_is_ptr(args[0]) || jq_block_of(args[0])->tag != JQ_CON) {
+    char *s = jq_show(args[0]);
+    fprintf(stderr, "type error: %s is not a distribution value\n", s);
+    exit(2);
+  }
+  return jq_g_dist_draw(rt, args[0]);
+}
+
+jq_value jq_g_dist_observe(jq_rt *rt, const jq_value *args) {
+  (void)rt;
+  (void)args;
+  fputs("error[E0904]: observe reached the sampling root handler; observation requires "
+        "an inference driver (use jacquard infer)\n",
+        stderr);
+  exit(2);
+}
+
+/* infer (task 72): the stub completion grant, ported from install_infer.
+ * complete takes a mk-prompt(text, option model) and resumes with the
+ * pinned stub string. The content-addressed cache (--infer-cache) stays
+ * interpreter-only until task 73 lands the reader/printer port that the
+ * entry format needs; generated main rejects the flag up front. */
+jq_value jq_g_infer_complete(jq_rt *rt, const jq_value *args) {
+  (void)rt;
+  jq_value p = args[0];
+  if (!jq_is_ptr(p) || jq_block_of(p)->tag != JQ_CON || jq_con_arity(p) != 2 ||
+      !jq_is_ptr(jq_con_fields(p)[0]) || jq_block_of(jq_con_fields(p)[0])->tag != JQ_TEXT)
+    type_err1("complete expects a prompt, got ", 1, args, 1);
+  jq_value text = jq_con_fields(p)[0];
+  jq_value model_opt = jq_con_fields(p)[1];
+  const char *fmt_pre = "<stub completion for: ";
+  size_t out_cap = jq_text_len(text) + 64;
+  char *model = NULL;
+  uint64_t model_len = 0;
+  if (jq_is_ptr(model_opt) && jq_block_of(model_opt)->tag == JQ_CON &&
+      strcmp(jq_con_info_of(model_opt)->name, "some") == 0 &&
+      jq_is_ptr(jq_con_fields(model_opt)[0]) &&
+      jq_block_of(jq_con_fields(model_opt)[0])->tag == JQ_TEXT) {
+    jq_value m = jq_con_fields(model_opt)[0];
+    model = (char *)jq_text_bytes(m);
+    model_len = jq_text_len(m);
+    out_cap += model_len;
+  }
+  char *buf = malloc(out_cap);
+  if (!buf) jq_runtime_error("jacquard runtime: out of memory");
+  size_t n;
+  if (model)
+    n = (size_t)snprintf(NULL, 0, "<stub completion from %.*s for: %.*s>", (int)model_len,
+                         model, (int)jq_text_len(text), (const char *)jq_text_bytes(text));
+  else
+    n = (size_t)snprintf(NULL, 0, "%s%.*s>", fmt_pre, (int)jq_text_len(text),
+                         (const char *)jq_text_bytes(text));
+  if (n + 1 > out_cap) {
+    buf = realloc(buf, n + 1);
+    if (!buf) jq_runtime_error("jacquard runtime: out of memory");
+  }
+  if (model)
+    snprintf(buf, n + 1, "<stub completion from %.*s for: %.*s>", (int)model_len, model,
+             (int)jq_text_len(text), (const char *)jq_text_bytes(text));
+  else
+    snprintf(buf, n + 1, "%s%.*s>", fmt_pre, (int)jq_text_len(text),
+             (const char *)jq_text_bytes(text));
+  jq_value r = jq_text((const uint8_t *)buf, (uint64_t)n);
+  free(buf);
+  jq_drop(args[0]);
+  return r;
+}

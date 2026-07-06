@@ -32,5 +32,5 @@ error texts exactly; the differential harness is the check.
 | eval-code | - | refused for good | interpreter tier only |
 | debug.inspect | 1 | not yet | |
 | pmf, support | 2/1 | yes | task 71 (the enum handler reaches them); name-recognized dist cons, show-based pmf equality, interpreter's exact error texts |
-| dist.sample-lw | - | task 72 | the seeded LW driver |
+| dist.sample-lw | 3 | yes | task 72; exact seeded stream (split per run, one draw per sample), merge/normalize/sort on the rendering key, E0901 on an empty posterior |
 | add-real family duplicates none | | | |

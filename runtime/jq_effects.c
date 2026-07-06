@@ -82,10 +82,14 @@ jq_value jq_perform(jq_rt *rt, uint32_t op_ord, uint16_t n, const jq_value *args
   /* root grants (the --allow natives) */
   if (op_ord < rt->n_ops && rt->grants && rt->grants[op_ord])
     return rt->grants[op_ord](rt, args);
-  /* the capability story at runtime: unhandled dies, exit 3 */
+  /* the capability story at runtime: unhandled dies, exit 3. During a
+     weighted run the interpreter names the pseudo-effect instead (task 72:
+     Infer_dist's run_until_op intercepts root-reaching ops). */
   const jq_op_info *info = op_ord < rt->n_ops ? rt->op_meta[op_ord] : NULL;
   fprintf(stderr,
           "unhandled effect %s: operation `%s` reached the root without a handler\n",
-          info ? info->effect_name : "?", info ? info->op_name : "?");
+          rt->unhandled_effect_override ? rt->unhandled_effect_override
+                                        : (info ? info->effect_name : "?"),
+          info ? info->op_name : "?");
   exit(3);
 }
