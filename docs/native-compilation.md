@@ -118,50 +118,48 @@ verified neither reference constant-folds under -O2.
 
 | program | interpreter | native | hand C | native vs C |
 | --- | --- | --- | --- | --- |
-| fib (fib 30) | 696 ms | 8 ms | 3 ms | 2.7x |
-| sort (200k, int.ord) | 66048 ms | 118 ms | 25 ms | 4.7x |
-| pure (mixed battery) | 3292 ms | 13 ms | — | — |
-| avl (10k map.set) | 6401 ms | 22 ms | — | — |
-| state-loop (1M get/put) | 24117 ms | 190 ms | — | — |
-| enum (2^14 branches) | 10653 ms | 25 ms | — | — |
+| fib (fib 30) | 673 ms | 5 ms | 2 ms | 2.5x |
+| sort (200k, int.ord) | 70798 ms | 97 ms | 24 ms | 4.0x |
+| pure (mixed battery) | 3230 ms | 11 ms | — | — |
+| avl (10k map.set) | 6223 ms | 14 ms | — | — |
+| state-loop (1M get/put) | 24041 ms | 172 ms | — | — |
+| enum (2^14 branches) | 10806 ms | 15 ms | — | — |
 
 The progression, for the record — task 75 as first measured, then with
--flto default (task 84), then with the small-block pool (task 80): fib
-19 / 8 / 8 ms, sort 279 / 189 / 118 ms, pure 37 / 29-22 / 13 ms (the 22
-includes task 86's lambda spec), avl 33 / 24 / 22 ms, state-loop 250 /
-203 / 190 ms, enum 40 / 35 / 25 ms.
+-flto default (task 84), the small-block pool (task 80), and the
+header-inlined RC fast paths (task 85): fib 19 / 8 / 8 / 5 ms, sort
+279 / 189 / 118 / 97 ms, pure 37 / 29-22 / 13 / 11 ms (the 22 includes
+task 86's lambda spec), avl 33 / 24 / 22 / 14 ms, state-loop 250 / 203 /
+190 / 172 ms, enum 40 / 35 / 25 / 15 ms.
 
 **The near-C claim stays withdrawn at task 75's gate (BOTH fib and sort
-within 3x of hand C): fib passes at 2.7x, sort does not at 4.7x.**
+within 3x of hand C): fib passes at 2.5x, sort does not at 4.0x.**
 What the measurements support: the native tier is 87-560x the
 interpreter (the table's own endpoints: fib and sort), the handler-tier state loop runs a
 million get/put pairs in 190 ms (the OCaml/Koka band the boundary
 paragraph promises), and multi-shot enumeration prices per branch as
 designed. The remaining gap to hand C in the empty-row core:
 
-- **fib, 2.7x** (was 6.3x pre-LTO) — arity-exact signatures for known
-  calls (task 79) were implemented, measured as a no-op, and declined:
-  fib carried the exact signature in the emitted C and did not move
-  (9-10 ms vs 8-9 ms uniform, and 20 ms either way without LTO).
-  Disassembly of the LTO binary shows why: interprocedural
+- **fib, 2.5x** — arity-exact signatures for known calls (task 79) were
+  implemented, measured as a no-op, and declined: LTO's interprocedural
   dead-argument elimination had already rewritten fib to a two-register
-  (rt, n) convention with zero padding stores on the hot path. What
-  stands per node instead: one out-of-line jq_drop(clo) call that LTO
-  left unfolded even though clo is always the static unit (task 85's
-  header inlining targets exactly this), and the boolean living as a
-  static CON matched through pointer, tag, and con-info compares where
-  hand C uses a CPU flag. Int dups are no-ops and reuse_take on the
-  static bool returns NULL, so RC traffic is not the cost here.
-- **sort, 4.7x** (was 11x pre-LTO, 7.9x pre-pool) — allocation is now
-  size-classed freelists (task 80: 189 to 118 ms, where the jemalloc
-  preload experiment had bounded a general-purpose swap at ~9%); what
-  remains is RC traffic on field reads. Intrinsic borrowing (task 81)
-  was implemented, measured as a regression, and declined: the owned
+  (rt, n) convention (verified by disassembly). What that disassembly
+  showed still standing — one out-of-line jq_drop(clo) call per node
+  that LTO left unfolded — became task 85's target: with the dup/drop
+  fast paths static inline in the header, the drop of the statically
+  immortal unit folds away and fib went 8 to 5 ms. The remaining 2.5x
+  is the boolean living as a static CON matched through pointer, tag,
+  and con-info compares where hand C uses a CPU flag, plus tagged-int
+  arithmetic.
+- **sort, 4.0x** (was 11x pre-LTO, 7.9x pre-pool, 4.7x pre-task-85) —
+  allocation is size-classed freelists (task 80), and the header-inlined
+  RC fast paths took the field-read dup/drop traffic from calls to folded
+  branches (task 85: 118 to 97 ms). Intrinsic borrowing (task 81) was
+  implemented, measured as a regression, and declined: the owned
   convention is type-aware (each intrinsic drops only its boxed args,
   so Perceus moves make last-uses free), and the flip cost fib/sort/pure
   while winning only on naive-framed code — which task 82 de-frames
-  instead. The levers still open here are header-inlined RC fast paths
-  (task 85) and Perceus over frames (task 82).
+  instead. The lever still open here is Perceus over frames (task 82).
 - Known regression recorded in the plan's task-71 log: frame-style
   classification puts dictionary-driven members on the naive RC
   discipline, costing the AVL battery its reuse (~10 ms before task 71,

@@ -458,8 +458,26 @@ static inline uint16_t jq_closure_env_n(jq_value v) {
 
 /* --- reference counting (jq_rc.c) --- */
 
-void jq_dup(jq_value v);
-void jq_drop(jq_value v);
+/* the free walk (out of line): fields released with an explicit worklist,
+   never C recursion; the block shells route through jq_block_free */
+void jq_free_walk(jq_block *b);
+
+/* dup/drop fast paths live here (task 85) so every unit can fold them
+   without LTO — and so a drop of a statically-known immortal (the unit
+   block at every known call's clo slot) folds to nothing: task 79's
+   decline review found that exact call surviving per fib node. */
+static inline void jq_dup(jq_value v) {
+  if (jq_is_int(v)) return;
+  jq_block *b = jq_block_of(v);
+  if (b->rc != JQ_RC_STATIC) b->rc++;
+}
+
+static inline void jq_drop(jq_value v) {
+  if (jq_is_int(v)) return;
+  jq_block *b = jq_block_of(v);
+  if (b->rc == JQ_RC_STATIC) return;
+  if (--b->rc == 0) jq_free_walk(b);
+}
 /* rc == 1: return the shell for same-shape reuse — its rc STAYS 1, its
    fields are NOT dropped, and the caller now owns both (reuse the shell as
    the new value, or drop each field and free it). Otherwise decrement and

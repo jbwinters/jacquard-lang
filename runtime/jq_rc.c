@@ -1,19 +1,16 @@
-/* Perceus reference counting (task 65): dup, drop, and the reuse token.
+/* Perceus reference counting (task 65): the free walk and the reuse
+ * tokens. The dup/drop fast paths are static inline in jq_value.h since
+ * task 85; this file owns the slow path.
  *
- * jq_drop frees with an explicit heap worklist, never C recursion — a
- * 10M-element list drop must run in bounded C stack. The walk skips a
- * closure's non-owning self slot (the cycle rule; see jq_value.h). */
+ * jq_free_walk releases with an explicit heap worklist, never C
+ * recursion — a 10M-element list drop must run in bounded C stack. The
+ * walk skips a closure's non-owning self slot (the cycle rule; see
+ * jq_value.h). */
 
 #include "jq_value.h"
 
 #include <stdio.h>
 #include <stdlib.h>
-
-void jq_dup(jq_value v) {
-  if (jq_is_int(v)) return;
-  jq_block *b = jq_block_of(v);
-  if (b->rc != JQ_RC_STATIC) b->rc++;
-}
 
 /* Owned child fields of a block, by tag: TEXT/REAL/HASH have none; the
  * static-only tags (CONSTRUCTOR/OP/BUILTIN) never reach the free walk. */
@@ -44,7 +41,7 @@ static void drop_child(worklist *w, jq_value v) {
   if (--b->rc == 0) wl_push(w, b);
 }
 
-static void free_walk(jq_block *root) {
+void jq_free_walk(jq_block *root) {
   worklist w = { 0 };
   wl_push(&w, root);
   while (w.len > 0) {
@@ -85,13 +82,6 @@ static void free_walk(jq_block *root) {
     jq_block_free(b);
   }
   free(w.items);
-}
-
-void jq_drop(jq_value v) {
-  if (jq_is_int(v)) return;
-  jq_block *b = jq_block_of(v);
-  if (b->rc == JQ_RC_STATIC) return;
-  if (--b->rc == 0) free_walk(b);
 }
 
 jq_block *jq_drop_reuse(jq_value v) {
