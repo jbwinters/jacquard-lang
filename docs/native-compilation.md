@@ -140,22 +140,28 @@ paragraph promises), and multi-shot enumeration prices per branch as
 designed. The remaining gap to hand C in the empty-row core:
 
 - **fib, 2.7x** (was 6.3x pre-LTO) — arity-exact signatures for known
-  calls (task 79) were built, measured, and DECLINED: fib carried the
-  exact signature in the emitted C and moved not at all (9-10 ms vs
-  8-9 ms uniform, and 20 ms either way without LTO), because LTO's
-  interprocedural dead-argument elimination already collapses the
-  uniform convention's padding. The real residue is Perceus/boxing
-  bookkeeping — the dups and the reuse-token churn on the boolean CON
-  match per node — which no signature change touches.
+  calls (task 79) were implemented, measured as a no-op, and declined:
+  fib carried the exact signature in the emitted C and did not move
+  (9-10 ms vs 8-9 ms uniform, and 20 ms either way without LTO).
+  Disassembly of the LTO binary shows why: interprocedural
+  dead-argument elimination had already rewritten fib to a two-register
+  (rt, n) convention with zero padding stores on the hot path. What
+  stands per node instead: one out-of-line jq_drop(clo) call that LTO
+  left unfolded even though clo is always the static unit (task 85's
+  header inlining targets exactly this), and the boolean living as a
+  static CON matched through pointer, tag, and con-info compares where
+  hand C uses a CPU flag. Int dups are no-ops and reuse_take on the
+  static bool returns NULL, so RC traffic is not the cost here.
 - **sort, 4.7x** (was 11x pre-LTO, 7.9x pre-pool) — allocation is now
   size-classed freelists (task 80: 189 to 118 ms, where the jemalloc
   preload experiment had bounded a general-purpose swap at ~9%); what
-  remains is RC traffic on field reads and the uniform convention.
-  Intrinsic borrowing (task 81) was built, measured, and DECLINED: the
-  owned convention is type-aware (each intrinsic drops only its boxed
-  args, so Perceus moves make last-uses free), and the flip regressed
-  fib/sort/pure while winning only on naive-framed code — which task 82
-  de-frames instead. Remaining lever: arity-exact signatures (task 79).
+  remains is RC traffic on field reads. Intrinsic borrowing (task 81)
+  was implemented, measured as a regression, and declined: the owned
+  convention is type-aware (each intrinsic drops only its boxed args,
+  so Perceus moves make last-uses free), and the flip cost fib/sort/pure
+  while winning only on naive-framed code — which task 82 de-frames
+  instead. The levers still open here are header-inlined RC fast paths
+  (task 85) and Perceus over frames (task 82).
 - Known regression recorded in the plan's task-71 log: frame-style
   classification puts dictionary-driven members on the naive RC
   discipline, costing the AVL battery its reuse (~10 ms before task 71,
