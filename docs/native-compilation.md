@@ -95,7 +95,10 @@ priced by semantics, not implementation.
 
 AMD Ryzen 9 7950X3D, Ubuntu clang 18.1.3, everything -O2 -flto (the
 default since task 84 — cross-unit inlining of the RC and intrinsic fast
-paths was measured at 24-55% and is byte-identical), median of 5,
+paths cuts 12-58% per program against the same table pre-LTO and is
+byte-identical; cold builds are time-neutral, while warm no-op relinks
+roughly double, ~225 ms to ~410 ms on the AVL battery, because LTO
+codegen reruns at every link), median of 5,
 per-engine startup subtracted (the C column is raw: its ~1 ms process
 launch is not subtracted, so the ratios read conservatively). Reproduce
 with `sh scripts/native-bench.sh`. The C references live in bench/ref/
@@ -117,8 +120,8 @@ verified neither reference constant-folds under -O2.
 
 **The near-C claim stays withdrawn at task 75's gate (BOTH fib and sort
 within 3x of hand C): fib now passes at 2.7x, sort does not at 7.9x.**
-What the measurements support: the native tier is 90-300x the
-interpreter across every band, the handler-tier state loop runs a
+What the measurements support: the native tier is 90-353x the
+interpreter (the table's own endpoints: fib and sort), the handler-tier state loop runs a
 million get/put pairs in 203 ms (the OCaml/Koka band the boundary
 paragraph promises), and multi-shot enumeration prices per branch as
 designed. The remaining gap to hand C in the empty-row core:

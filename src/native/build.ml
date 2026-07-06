@@ -9,7 +9,7 @@ open Jacquard
 let emitter_version = "v1"
 
 (* the default toolchain flags (task 84): -flto lets jq_dup/jq_drop and the
-   intrinsics inline across units and libjqrt — measured 24-55% on the bench
+   intrinsics inline across units and libjqrt — measured 12-58% per program on the bench
    suite, byte-identical output, cold-build neutral. JACQUARD_NATIVE_CFLAGS
    appends afterwards, so an override (-fno-lto, sanitizers) wins. Both
    strings fold into the cache tag: changing them moves the directory. *)
