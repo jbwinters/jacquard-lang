@@ -54,12 +54,15 @@ type expr =
       (** loopified self recursion: rebind params, goto entry. The string list is Perceus's
           post-drops — owned locals read THROUGH during argument materialization (clo, via AEnv)
           that must drop after the reads, not before (lowering leaves it empty). *)
-  | TailKnown of Hash.t * atom list * string list
+  | TailKnown of (Hash.t * int) * atom list * string list
+      (** callee by fn identity (member hash, lift ordinal): ordinal 0 is the member's own lambda;
+          nonzero ordinals name lifted lambdas, reachable since task 86's lambda-literal
+          specialization *)
   | TailUnknown of atom * atom list * string list
 
 and bound =
   | BAtom of atom
-  | BCallKnown of Hash.t * atom list
+  | BCallKnown of (Hash.t * int) * atom list
   | BCallUnknown of atom * atom list
   | BAllocCon of Hash.t * atom list  (** exact arity, checked at lowering *)
   | BAllocConReuse of Hash.t * atom list * string  (** Perceus: fill the token's shell if live *)
@@ -577,8 +580,8 @@ and lower_app ctx env ~tail (f : Kernel.expr) (args : Kernel.expr list) (k : ato
       | HKnown (h, arity) when List.length args = arity ->
           if tail then
             if ctx.self = Some h then with_args (fun atoms -> TailSelf (atoms, []))
-            else with_args (fun atoms -> TailKnown (h, atoms, []))
-          else with_args (fun atoms -> bind_call (BCallKnown (h, atoms)))
+            else with_args (fun atoms -> TailKnown ((h, 0), atoms, []))
+          else with_args (fun atoms -> bind_call (BCallKnown ((h, 0), atoms)))
       | HKnown (h, _) | HValue (AGlobal h) ->
           let a = member_value_atom ctx h in
           if tail then with_args (fun atoms -> TailUnknown (a, atoms, []))

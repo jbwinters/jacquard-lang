@@ -277,12 +277,12 @@ let compile_program (store : Store.t) (d : discovery)
      over known-call edges. Top-level expression bodies and const initializers stay
      direct: any capturing handler they involve lives INSIDE the expression, so a
      capture always resolves within it and never unwinds past its C activation. *)
-  let expr_facts (e : Compile.expr) : bool * Hash.t list =
+  let expr_facts (e : Compile.expr) : bool * (Hash.t * int) list =
     let direct = ref false in
     let calls = ref [] in
     let bound = function
       | Compile.BPerform _ | Compile.BHandle _ | Compile.BCallUnknown _ -> direct := true
-      | Compile.BCallKnown (h, _) -> calls := h :: !calls
+      | Compile.BCallKnown (code, _) -> calls := code :: !calls
       | _ -> ()
     in
     let rec go = function
@@ -292,7 +292,7 @@ let compile_program (store : Store.t) (d : discovery)
           bound b;
           go body
       | Compile.Match (_, cls) -> List.iter (fun (_, b) -> go b) cls
-      | Compile.TailKnown (h, _, _) -> calls := h :: !calls
+      | Compile.TailKnown (code, _, _) -> calls := code :: !calls
       | Compile.TailUnknown _ -> direct := true
     in
     go e;
@@ -325,7 +325,7 @@ let compile_program (store : Store.t) (d : discovery)
     List.iter
       (fun (fname, member_opt, direct, calls) ->
         if not (Hashtbl.mem framed_fns fname) then
-          if direct || List.exists (Hashtbl.mem framed_members) calls then begin
+          if direct || List.exists (Hashtbl.mem framed_fns) calls then begin
             Hashtbl.replace framed_fns fname ();
             (match member_opt with Some m -> Hashtbl.replace framed_members m () | None -> ());
             changed := true

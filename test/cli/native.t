@@ -30,7 +30,7 @@ The benchmark file (recursion, list traffic, a dictionary sort) too:
 
   $ jacquard run ../../bench/pure.jqd > i.out 2>&1
   $ jacquard build ../../bench/pure.jqd -o bench-prog
-  native: compiled 15 unit(s)
+  native: compiled 16 unit(s)
   $ ./bench-prog > n.out 2>&1
   $ diff i.out n.out && echo identical
   identical
@@ -61,6 +61,32 @@ other unit (second build recompiles nothing).
   $ JACQUARD_SPEC=off jacquard build sortprog.jqd -o sortprog-ns > /dev/null
   $ ./sortprog-ns
   100
+
+Since task 86 the spec key also covers capture-free lambda literals: a
+fold at a known lambda erases the apply AND leaves the frame tier — the
+clone calls the lambda's code directly, so no generic apply and no
+resume machinery remain in its unit, and Perceus owns its counts again.
+
+  $ cat > foldprog.jqd <<'EOF_JQD'
+  > (app (var list.fold) (app (var list.range) (lit 0) (lit 100)) (lit 0) (lam ((pvar a) (pvar x)) (app (var add) (var a) (var x))))
+  > EOF_JQD
+  $ jacquard build foldprog.jqd -o foldprog > /dev/null
+  $ ./foldprog
+  4950
+  $ grep -l 'fold@spec' .jacquard-native/v1-h*/unit_*.c | wc -l | tr -d ' '
+  2
+  $ cat $(grep -l 'fold@spec' .jacquard-native/v1-h*/unit_*.c) | grep -c 'jq_apply'
+  0
+  [1]
+  $ cat $(grep -l 'fold@spec' .jacquard-native/v1-h*/unit_*.c) | grep -c '_re('
+  0
+  [1]
+
+(Two clones: bench/pure.jqd's earlier build in this test specializes its
+own sum-fold lambda; both are apply-free and frame-free.)
+  $ JACQUARD_SPEC=off jacquard build foldprog.jqd -o foldprog-ns > /dev/null
+  $ ./foldprog-ns
+  4950
 
 Ineligible REACHABLE constructs are errors naming the construct and its
 home, never silent miscompiles — since task 71 that means eval and quotes

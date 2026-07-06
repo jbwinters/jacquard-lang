@@ -61,7 +61,15 @@ dictionary hashes) tuple. The specialization cache key format:
 Content addressing makes this cache correct across builds and machines for
 free — the same Merkle argument as Warp's test cache. `list.sort` specialized
 at `int.ord` compiles the comparator to an inlined machine-int compare; the
-dictionary record never exists at runtime.
+comparator dispatch never exists at runtime (the dictionary record itself is
+built once at startup and threads through as an ignored argument). Since
+task 86 the key also covers capture-free lambda LITERALS, identified by
+their lifted code (the host member's hash covers the body): `list.fold` at
+a known lambda calls its code directly, which removes the generic apply and
+— because the clone no longer has an unknown callee — moves it off the
+frame tier and back under precise Perceus. Measured on the fold-sum bench:
+28 ms to 25 ms, and the mixed pure battery 29 ms to 22 ms; the remaining
+cost is allocation (task 80). Capturing lambdas stay generic in v1.
 
 ## Pillar 4: the store as a whole-program compiler's dream
 

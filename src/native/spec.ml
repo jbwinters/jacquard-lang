@@ -31,17 +31,28 @@ type st = {
 (* ------------------------------------------------------------------ *)
 
 (* an argument participates in the key when it is a member global (its content hash IS its
-   identity); everything else is dynamic *)
-let arg_key = function AGlobal g -> Some g | _ -> None
+   identity) or a capture-free lambda literal (task 86: identified by its lifted code — the
+   host member's hash covers the body content; top-level hosts key by index, which only
+   affects cross-build cache sharing, never correctness). Everything else is dynamic. *)
+type lam_info = { code : Hash.t * int; lam_arity : int }
 
-let spec_hash (h : Hash.t) (args : atom list) : Hash.t option =
-  let keys = List.map arg_key args in
+let arg_key (lams : lam_info SMap.t) = function
+  | AGlobal g -> Some ("g:" ^ Hash.to_hex g)
+  | AVar x -> (
+      match SMap.find_opt x lams with
+      | Some { code = ch, co; lam_arity } ->
+          Some (Printf.sprintf "lam:%s:%d:%d" (Hash.to_hex ch) co lam_arity)
+      | None -> None)
+  | _ -> None
+
+let spec_hash (lams : lam_info SMap.t) (h : Hash.t) (args : atom list) : Hash.t option =
+  let keys = List.map (arg_key lams) args in
   if List.for_all Option.is_none keys then None
   else
     Some
       (Hash.of_string
          (Printf.sprintf "spec:%s:%s" (Hash.to_hex h)
-            (String.concat "," (List.map (function Some g -> Hash.to_hex g | None -> "_") keys))))
+            (String.concat "," (List.map (function Some k -> k | None -> "_") keys))))
 
 (* ------------------------------------------------------------------ *)
 (* Folding                                                             *)
@@ -58,7 +69,7 @@ let sub_bound env (b : bound) : bound =
   let s = List.map (sub_atom env) in
   match b with
   | BAtom a -> BAtom (sub_atom env a)
-  | BCallKnown (h, args) -> BCallKnown (h, s args)
+  | BCallKnown (code, args) -> BCallKnown (code, s args)
   | BCallUnknown (f, args) -> BCallUnknown (sub_atom env f, s args)
   | BAllocCon (h, args) -> BAllocCon (h, s args)
   | BAllocConReuse (h, args, t) -> BAllocConReuse (h, s args, t)
@@ -91,35 +102,45 @@ let rec static_bind (st : st) (env : atom SMap.t) (p : npat) (a : atom) : atom S
       | _ -> None)
   | NPTuple _ | NPLit _ -> None
 
-let rec fold_expr (st : st) (env : atom SMap.t) (e : expr) : expr =
+let rec fold_expr (st : st) (env : atom SMap.t) (lams : lam_info SMap.t) (e : expr) : expr =
   match e with
   | Ret a -> Ret (sub_atom env a)
-  | Drop (xs, body) -> Drop (xs, fold_expr st env body)
-  | LetReuse (t, x, n, body) -> LetReuse (t, x, n, fold_expr st env body)
+  | Drop (xs, body) -> Drop (xs, fold_expr st env lams body)
+  | LetReuse (t, x, n, body) -> LetReuse (t, x, n, fold_expr st env lams body)
   | Let (x, b, body) -> (
       let b = sub_bound env b in
       match b with
       | BAtom (AGlobal _ as a) | BAtom (ACon _ as a) | BAtom (AInt _ as a) ->
           (* copy-propagate statics through the binding *)
-          fold_expr st (SMap.add x a env) body
+          fold_expr st (SMap.add x a env) lams body
+      | BAllocClosure { code; captured = []; self_slot = None; arity } ->
+          (* a capture-free lambda literal: its code IS its identity (task 86) *)
+          Let (x, b, fold_expr st env (SMap.add x { code; lam_arity = arity } lams) body)
+      | BCallUnknown (AVar f, args) when SMap.mem f lams ->
+          (* the callee is a known lambda literal: call its code directly (the closure
+             argument itself still flows for ownership; the direct call ignores clo) *)
+          let { code; lam_arity } = SMap.find f lams in
+          if lam_arity = List.length args then
+            Let (x, BCallKnown (code, args), fold_expr st env lams body)
+          else Let (x, b, fold_expr st env lams body)
       | BCallUnknown (AGlobal g, args) -> (
           (* the callee became known: re-classify like the lowerer would have, asserting
              the same arity invariant the lowerer refuses on (the checker makes a mismatch
              unreachable; the guard keeps this pass honest on its own) *)
           match Hashtbl.find_opt st.builtin_names g with
           | Some name when Hashtbl.find_opt st.intrinsics name = Some (List.length args) ->
-              Let (x, BIntrinsic (name, args), fold_expr st env body)
+              Let (x, BIntrinsic (name, args), fold_expr st env lams body)
           | _ -> (
               match Hashtbl.find_opt st.member_arity g with
               | Some arity when arity = List.length args ->
-                  fold_expr st env (Let (x, BCallKnown (g, args), body))
-              | _ -> Let (x, b, fold_expr st env body)))
-      | BCallKnown (h, args) -> (
-          match specialize st h args with
-          | Some (_, `Inline atom) -> fold_expr st (SMap.add x atom env) body
-          | Some (spec, `Call) -> Let (x, BCallKnown (spec, args), fold_expr st env body)
-          | None -> Let (x, b, fold_expr st env body))
-      | _ -> Let (x, b, fold_expr st env body))
+                  fold_expr st env lams (Let (x, BCallKnown ((g, 0), args), body))
+              | _ -> Let (x, b, fold_expr st env lams body)))
+      | BCallKnown ((h, 0), args) -> (
+          match specialize st lams h args with
+          | Some (_, `Inline atom) -> fold_expr st (SMap.add x atom env) lams body
+          | Some (spec, `Call) -> Let (x, BCallKnown ((spec, 0), args), fold_expr st env lams body)
+          | None -> Let (x, b, fold_expr st env lams body))
+      | _ -> Let (x, b, fold_expr st env lams body))
   | Match (a, clauses) -> (
       let a = sub_atom env a in
       (* fold a match on a statically-known construction: first clause that binds wins *)
@@ -127,7 +148,7 @@ let rec fold_expr (st : st) (env : atom SMap.t) (e : expr) : expr =
         | [] -> None
         | (p, body) :: rest -> (
             match static_bind st env p a with
-            | Some env' -> Some (fold_expr st env' body)
+            | Some env' -> Some (fold_expr st env' lams body)
             | None -> (
                 (* only safe to skip this clause if it PROVABLY cannot match; for a known
                    con, a different-con pattern cannot match *)
@@ -140,18 +161,23 @@ let rec fold_expr (st : st) (env : atom SMap.t) (e : expr) : expr =
       in
       match try_static clauses with
       | Some folded -> folded
-      | None -> Match (a, List.map (fun (p, body) -> (p, fold_expr st env body)) clauses))
+      | None -> Match (a, List.map (fun (p, body) -> (p, fold_expr st env lams body)) clauses))
   | TailSelf (args, post) -> TailSelf (List.map (sub_atom env) args, post)
-  | TailKnown (h, args, post) -> (
+  | TailKnown ((h, 0), args, post) -> (
       let args = List.map (sub_atom env) args in
-      match specialize st h args with
-      | Some (spec, `Call) -> TailKnown (spec, args, post)
+      match specialize st lams h args with
+      | Some (spec, `Call) -> TailKnown ((spec, 0), args, post)
       | Some (_, `Inline atom) -> Ret atom (* tail position: the value IS the result *)
-      | None -> TailKnown (h, args, post))
+      | None -> TailKnown ((h, 0), args, post))
+  | TailKnown (code, args, post) -> TailKnown (code, List.map (sub_atom env) args, post)
   | TailUnknown (f, args, post) -> (
       let f = sub_atom env f in
       let args = List.map (sub_atom env) args in
       match f with
+      | AVar v when SMap.mem v lams ->
+          let { code; lam_arity } = SMap.find v lams in
+          if lam_arity = List.length args then TailKnown (code, args, post)
+          else TailUnknown (f, args, post)
       | AGlobal g -> (
           match Hashtbl.find_opt st.builtin_names g with
           | Some name when Hashtbl.find_opt st.intrinsics name = Some (List.length args) ->
@@ -160,16 +186,16 @@ let rec fold_expr (st : st) (env : atom SMap.t) (e : expr) : expr =
           | _ -> (
               match Hashtbl.find_opt st.member_arity g with
               | Some arity when arity = List.length args ->
-                  fold_expr st env (TailKnown (g, args, post))
+                  fold_expr st env lams (TailKnown ((g, 0), args, post))
               | _ -> TailUnknown (f, args, post)))
       | _ -> TailUnknown (f, args, post))
 
-(* [specialize st h args]: when some args are member globals and [h] is a lowered function
-   member, ensure the spec clone exists and say how to use it. `Inline means the clone folded
-   to a bare atom. Returns None when there is nothing to gain. *)
-and specialize (st : st) (h : Hash.t) (args : atom list) :
+(* [specialize st lams h args]: when some args are member globals or known lambda literals
+   and [h] is a lowered function member, ensure the spec clone exists and say how to use it.
+   `Inline means the clone folded to a bare atom. None when there is nothing to gain. *)
+and specialize (st : st) (lams : lam_info SMap.t) (h : Hash.t) (args : atom list) :
     (Hash.t * [ `Call | `Inline of atom ]) option =
-  match spec_hash h args with
+  match spec_hash lams h args with
   | None -> None
   | Some sh -> (
       (match Hashtbl.find_opt st.members sh with
@@ -177,15 +203,24 @@ and specialize (st : st) (h : Hash.t) (args : atom list) :
       | None -> (
           match Hashtbl.find_opt st.members h with
           | Some { main_fn = Some f; mname; _ } ->
-              (* clone: bind NPVar params at known-arg positions, fold the body. Register the
-                 clone BEFORE folding so recursive dictionary passing terminates. *)
-              let env =
+              (* clone: bind NPVar params at known-arg positions (globals into the atom
+                 env, lambda literals into the clone's lambda env), fold the body.
+                 Register the clone BEFORE folding so recursive dictionary passing
+                 terminates. *)
+              let env, clone_lams =
                 List.fold_left2
-                  (fun env p a ->
-                    match (p, arg_key a) with
-                    | NPVar x, Some g -> SMap.add x (AGlobal g) env
-                    | _ -> env)
-                  SMap.empty f.params args
+                  (fun (env, cl) p a ->
+                    match p with
+                    | NPVar x -> (
+                        match a with
+                        | AGlobal g -> (SMap.add x (AGlobal g) env, cl)
+                        | AVar v -> (
+                            match SMap.find_opt v lams with
+                            | Some info -> (env, SMap.add x info cl)
+                            | None -> (env, cl))
+                        | _ -> (env, cl))
+                    | _ -> (env, cl))
+                  (SMap.empty, SMap.empty) f.params args
               in
               let placeholder =
                 {
@@ -201,7 +236,7 @@ and specialize (st : st) (h : Hash.t) (args : atom list) :
               in
               Hashtbl.replace st.members sh placeholder;
               Hashtbl.replace st.member_arity sh f.n_params;
-              let body = fold_expr st env f.body in
+              let body = fold_expr st env clone_lams f.body in
               (* the recursion above may have rewritten self-calls to this very key *)
               Hashtbl.replace st.members sh
                 {
@@ -269,9 +304,10 @@ let run ~(members : (Hash.t, compiled_member) Hashtbl.t) ~(member_arity : (Hash.
       match Hashtbl.find_opt members k with
       | Some ({ main_fn = Some f; _ } as cm) ->
           Hashtbl.replace members k
-            { cm with main_fn = Some { f with body = fold_expr st SMap.empty f.body } }
+            { cm with main_fn = Some { f with body = fold_expr st SMap.empty SMap.empty f.body } }
       | Some ({ const_body = Some b; _ } as cm) ->
-          Hashtbl.replace members k { cm with const_body = Some (fold_expr st SMap.empty b) }
+          Hashtbl.replace members k
+            { cm with const_body = Some (fold_expr st SMap.empty SMap.empty b) }
       | _ -> ())
     keys;
-  List.map (fun (body, lifted, w) -> (fold_expr st SMap.empty body, lifted, w)) tops
+  List.map (fun (body, lifted, w) -> (fold_expr st SMap.empty SMap.empty body, lifted, w)) tops

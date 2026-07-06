@@ -426,8 +426,8 @@ let rec emit_expr ?(tokens = []) st buf (lives : string list) (exit : exit_kind)
       | EAssign _ ->
           (* top-level expressions have no self *)
           line buf "goto entry;")
-  | TailKnown (h, args, post) ->
-      let fname = fn_name (h, 0) in
+  | TailKnown (code, args, post) ->
+      let fname = fn_name code in
       declare st ("fn:" ^ fname) (fun () -> line st.decls "extern jq_value %s(JQ_PARAMS);" fname);
       emit_tail_call st buf lives exit ~post ~tokens
         (fun padded -> Printf.sprintf "%s(rt, JQ_UNIT, %s)" fname padded)
@@ -497,8 +497,8 @@ and emit_bound st buf lives (x : string) (b : bound) : unit =
   | BAtom a ->
       let v = use st buf a in
       line buf "%s%s = %s;" (decl_prefix st x) x v
-  | BCallKnown (h, args) ->
-      let fname = fn_name (h, 0) in
+  | BCallKnown (code, args) ->
+      let fname = fn_name code in
       declare st ("fn:" ^ fname) (fun () -> line st.decls "extern jq_value %s(JQ_PARAMS);" fname);
       let call () =
         let vs = List.map (fun a -> use st buf a) args in
@@ -507,7 +507,7 @@ and emit_bound st buf lives (x : string) (b : bound) : unit =
         in
         line buf "%s%s = %s(rt, JQ_UNIT, %s);" (decl_prefix st x) x fname padded
       in
-      if Hashtbl.mem st.prog.framed_members h then emit_suspendable st buf lives x call else call ()
+      if Hashtbl.mem st.prog.framed_fns code then emit_suspendable st buf lives x call else call ()
   | BCallUnknown (f, args) ->
       emit_suspendable st buf lives x (fun () ->
           let fv = use st buf f in
