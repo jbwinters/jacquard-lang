@@ -146,6 +146,11 @@ let add_drop xs body = if xs = [] then body else Drop (xs, body)
    programs — the cross-program spec cache depends on it (review find, task 69). *)
 let tok_counter = ref 0
 
+(* reuse tokens are raw detached shells; a frame suspension between the take
+   and its refill would leak or double-release the shell, so framed bodies
+   run the precise walk with reuse OFF (task 82) *)
+let reuse_enabled = ref true
+
 let fresh_tok x =
   incr tok_counter;
   Printf.sprintf "_tok_%s_%d" x !tok_counter
@@ -215,7 +220,7 @@ let rec walk (owned : SSet.t) (e : expr) : expr =
             in
             let body' = walk owned' body in
             match (p', a) with
-            | NPCon (_, ps), AVar x when scrutinee_dead ->
+            | NPCon (_, ps), AVar x when scrutinee_dead && !reuse_enabled ->
                 (* the dying unique CON's shell feeds same-arity allocations here *)
                 let arity = List.length ps in
                 let tok = fresh_tok x in
@@ -257,8 +262,9 @@ let rec walk (owned : SSet.t) (e : expr) : expr =
    itself stays owned. The pass mirrors exactly that. *)
 let reset_tokens () = tok_counter := 0
 
-let fn (f : fn) : fn =
+let fn ?(reuse = true) (f : fn) : fn =
   reset_tokens ();
+  reuse_enabled := reuse;
   let param_owned =
     List.mapi
       (fun i p ->
@@ -273,4 +279,6 @@ let fn (f : fn) : fn =
     |> List.concat
   in
   let owned = SSet.add "clo" (SSet.of_list param_owned) in
-  { f with body = walk owned f.body }
+  let body = walk owned f.body in
+  reuse_enabled := true;
+  { f with body }

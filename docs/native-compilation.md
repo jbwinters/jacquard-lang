@@ -118,25 +118,26 @@ verified neither reference constant-folds under -O2.
 
 | program | interpreter | native | hand C | native vs C |
 | --- | --- | --- | --- | --- |
-| fib (fib 30) | 673 ms | 5 ms | 2 ms | 2.5x |
-| sort (200k, int.ord) | 70798 ms | 97 ms | 24 ms | 4.0x |
-| pure (mixed battery) | 3230 ms | 11 ms | — | — |
-| avl (10k map.set) | 6223 ms | 14 ms | — | — |
-| state-loop (1M get/put) | 24041 ms | 172 ms | — | — |
-| enum (2^14 branches) | 10806 ms | 15 ms | — | — |
+| fib (fib 30) | 689 ms | 5 ms | 3 ms | 2.5x |
+| sort (200k, int.ord) | 64864 ms | 92 ms | 27 ms | 3.8x |
+| pure (mixed battery) | 3199 ms | 11 ms | — | — |
+| avl (10k map.set) | 6224 ms | 13 ms | — | — |
+| state-loop (1M get/put) | 23904 ms | 147 ms | — | — |
+| enum (2^14 branches) | 10530 ms | 15 ms | — | — |
 
 The progression, for the record — task 75 as first measured, then with
--flto default (task 84), the small-block pool (task 80), and the
-header-inlined RC fast paths (task 85): fib 19 / 8 / 8 / 5 ms, sort
-279 / 189 / 118 / 97 ms, pure 37 / 29-22 / 13 / 11 ms (the 22 includes
-task 86's lambda spec), avl 33 / 24 / 22 / 14 ms, state-loop 250 / 203 /
-190 / 172 ms, enum 40 / 35 / 25 / 15 ms.
+-flto default (task 84), the small-block pool (task 80), the
+header-inlined RC fast paths (task 85), and Perceus over frame machines
+(task 82): fib 19 / 8 / 8 / 5 / 5 ms, sort 279 / 189 / 118 / 97 / 92 ms,
+pure 37 / 29-22 / 13 / 11 / 11 ms (the 22 includes task 86's lambda
+spec), avl 33 / 24 / 22 / 14 / 13 ms, state-loop 250 / 203 / 190 / 172 /
+147 ms, enum 40 / 35 / 25 / 15 / 15 ms.
 
 **The near-C claim stays withdrawn at task 75's gate (BOTH fib and sort
-within 3x of hand C): fib passes at 2.5x, sort does not at 4.0x.**
-What the measurements support: the native tier is 135-730x the
+within 3x of hand C): fib passes at 2.5x, sort does not at 3.8x.**
+What the measurements support: the native tier is 138-705x the
 interpreter (the table's own endpoints: fib and sort), the handler-tier state loop runs a
-million get/put pairs in 172 ms (the OCaml/Koka band the boundary
+million get/put pairs in 147 ms (the OCaml/Koka band the boundary
 paragraph promises), and multi-shot enumeration prices per branch as
 designed. The remaining gap to hand C in the empty-row core:
 
@@ -161,14 +162,19 @@ designed. The remaining gap to hand C in the empty-row core:
   convention is type-aware (each intrinsic drops only its boxed args,
   so Perceus moves make last-uses free), and the flip cost fib/sort/pure
   while winning only on naive-framed code — which task 82 de-frames
-  instead. The lever still open here is Perceus over frames (task 82).
-- Known regression recorded in the plan's task-71 log: frame-style
-  classification puts dictionary-driven members on the naive RC
-  discipline, costing the AVL battery its reuse (~10 ms before task 71,
-  22 ms in the current table — still ~290x the interpreter). Follow-ups:
-  spec over lambda literals de-frames the common higher-order sites
-  (task 86, done), then Perceus over frame machines covers the rest
-  (task 82).
+  instead — and did, in task 82: framed bodies now run the precise walk
+  (reuse tokens stay off there; a detached shell held across a
+  suspension has no owner in the frame), the frame save-set is the
+  Perceus-accurate owned-live set (moves and drops leave it), and the
+  handler-tier state loop dropped 172 to 147 ms with sort at 92 and avl
+  at 13.
+- The task-71 regression (frame-style classification cost dictionary-
+  driven members their precise RC: the AVL battery ran ~10 ms before
+  task 71, 33 ms after) is closed: spec de-framed the common sites
+  (tasks 69/86) and the frame tier itself runs the precise walk since
+  task 82. avl sits at 13 ms in the current table — reuse tokens remain
+  off inside framed bodies, the one discipline the frame tier still
+  trades away.
 
 ## Phased sketch (sizes are order-of-magnitude)
 

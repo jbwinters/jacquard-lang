@@ -261,6 +261,20 @@ let rec atom_c st (a : atom) : string =
   | AOp h -> op_value_static st h
   | AResume () -> failwith "internal: a resume marker reached the emitter"
 
+(* vars a bound consumes by move: they leave the owned-live set at this
+   binding, so a frame save at or after it must not capture them (task 82) *)
+let moved_vars (b : bound) : string list =
+  let atoms =
+    match b with
+    | BAtom a -> [ a ]
+    | BCallKnown (_, args) | BIntrinsic (_, args) | BAllocTuple args -> args
+    | BCallUnknown (f, args) -> f :: args
+    | BAllocCon (_, args) | BAllocConReuse (_, args, _) | BPerform (_, args) -> args
+    | BAllocClosure { captured; _ } -> captured
+    | BHandle (entries, thunk, retc) -> thunk :: retc :: List.map (fun (_, _, a) -> a) entries
+  in
+  List.filter_map (function AMove (AVar x) -> Some x | _ -> None) atoms
+
 (* A use: the receiver takes ownership, so dup (no-op for ints and statics). *)
 let use st buf (a : atom) : string =
   match a with
@@ -371,7 +385,7 @@ let rec emit_expr ?(tokens = []) st buf (lives : string list) (exit : exit_kind)
       emit_expr ~tokens:(tok :: tokens) st buf lives exit body
   | Drop (xs, body) ->
       List.iter (fun x -> line buf "jq_drop(%s);" x) xs;
-      emit_expr ~tokens st buf lives exit body
+      emit_expr ~tokens st buf (List.filter (fun l -> not (List.mem l xs)) lives) exit body
   | Ret a -> (
       (* materialize BEFORE the drops: the use expression may read through a local the
          drops free (naive mode returning an env slot re-read clo after jq_drop(clo)) *)
@@ -386,8 +400,10 @@ let rec emit_expr ?(tokens = []) st buf (lives : string list) (exit : exit_kind)
           line buf "%s = _ret;" var;
           line buf "goto %s;" label)
   | Let (x, b, body) ->
-      emit_bound st buf lives x b;
-      emit_expr ~tokens st buf (x :: lives) exit body
+      let moved = moved_vars b in
+      let lives_at_site = List.filter (fun l -> not (List.mem l moved)) lives in
+      emit_bound st buf lives_at_site x b;
+      emit_expr ~tokens st buf (x :: lives_at_site) exit body
   | Match (a, clauses) ->
       let subject = atom_c st a in
       let rec arms = function
@@ -635,8 +651,6 @@ let emit_fn st (f : fn) : unit =
        switch can restore them and jump to the recorded resume point; the wrapper
        hands the frame over through rt. Naive RC discipline throughout — a
        suspension abandons the in-scope locals to the frame. *)
-    let saved_precise = st.precise in
-    st.precise <- false;
     let re_name = fn_name f.fname ^ "_re" in
     let fr = { re_name; rps = []; next_rp = 0; hoisted = [] } in
     st.fr <- Some fr;
@@ -645,7 +659,6 @@ let emit_fn st (f : fn) : unit =
     let lives = emit_prologue st body_buf f in
     emit_expr st body_buf lives EReturn f.body;
     st.fr <- None;
-    st.precise <- saved_precise;
     line buf "";
     (* a fn framed only through TAIL calls has no resume points: the sentinel just
        passes through its return, so no wrapper or switch is needed *)

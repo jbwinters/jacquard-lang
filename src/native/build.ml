@@ -473,8 +473,10 @@ let build ~(store : Store.t) ~(tops : (Kernel.expr * string list * (string * str
      locals to the frame, which the move/Drop bookkeeping does not model — the emitter
      handles their counts uniformly (dup on use, drop at exits). *)
   let precise = Sys.getenv_opt "JACQUARD_PERCEUS" <> Some "off" in
-  let skip (f : Compile.fn) = Hashtbl.mem prog.Emit.framed_fns f.Compile.fname in
-  let pfn (f : Compile.fn) = if skip f then f else Perceus.fn f in
+  (* framed fns get the precise walk too (task 82), with reuse tokens off:
+     a detached shell held across a suspension has no owner in the frame *)
+  let framed (f : Compile.fn) = Hashtbl.mem prog.Emit.framed_fns f.Compile.fname in
+  let pfn (f : Compile.fn) = Perceus.fn ~reuse:(not (framed f)) f in
   let prog =
     if not precise then prog
     else
