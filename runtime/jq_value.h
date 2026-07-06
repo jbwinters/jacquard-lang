@@ -462,10 +462,11 @@ static inline uint16_t jq_closure_env_n(jq_value v) {
    never C recursion; the block shells route through jq_block_free */
 void jq_free_walk(jq_block *b);
 
-/* dup/drop fast paths live here (task 85) so every unit can fold them
-   without LTO — and so a drop of a statically-known immortal (the unit
-   block at every known call's clo slot) folds to nothing: task 79's
-   decline review found that exact call surviving per fib node. */
+/* dup/drop fast paths live here (task 85) so every unit inlines them
+   without LTO. A drop of a statically-known immortal (the unit block at
+   every known call's clo slot) becomes an inlined load-compare-skip —
+   the no-op executes, but the out-of-line call task 79's decline review
+   found surviving per fib node is gone, with its ABI spills. */
 static inline void jq_dup(jq_value v) {
   if (jq_is_int(v)) return;
   jq_block *b = jq_block_of(v);
