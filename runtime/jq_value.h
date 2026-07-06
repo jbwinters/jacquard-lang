@@ -56,6 +56,10 @@ enum jq_tag {
    the header's slot bits are nonzero (jq_closure maintains it; hand-rolled
    blocks must too, or the free walk skips nothing). */
 #define JQ_FLAG_SELF_SLOT 1u
+/* the block came from the small-block pool (task 80) and must go back
+   through jq_block_free, never libc free. Shell-reuse paths must preserve
+   this bit. */
+#define JQ_FLAG_POOLED 2u
 
 typedef struct jq_block {
   uint32_t rc;
@@ -390,6 +394,10 @@ jq_value jq_lw_observe(jq_rt *rt, jq_value dv, jq_value v);
 /* --- constructors (jq_alloc.c) --- */
 
 jq_block *jq_alloc_block(uint8_t tag, uint8_t flags, uint16_t n);
+/* release a block shell: pooled blocks return to their freelist, everything
+   else to libc. EVERY block release must come through here (the free walk,
+   reuse-token leftovers, consumed frames). */
+void jq_block_free(jq_block *b);
 jq_value jq_tuple(uint32_t n, const jq_value *items); /* items owned; n guarded <= 65535 */
 jq_value jq_con(const jq_con_info *info, const jq_value *fields); /* owned */
 jq_value jq_real(double d);

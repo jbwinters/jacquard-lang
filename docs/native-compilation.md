@@ -118,21 +118,24 @@ verified neither reference constant-folds under -O2.
 
 | program | interpreter | native | hand C | native vs C |
 | --- | --- | --- | --- | --- |
-| fib (fib 30) | 721 ms | 8 ms | 3 ms | 2.7x |
-| sort (200k, int.ord) | 66664 ms | 189 ms | 24 ms | 7.9x |
-| pure (mixed battery) | 3246 ms | 29 ms | — | — |
-| avl (10k map.set) | 6284 ms | 24 ms | — | — |
-| state-loop (1M get/put) | 24964 ms | 203 ms | — | — |
-| enum (2^14 branches) | 10581 ms | 35 ms | — | — |
+| fib (fib 30) | 696 ms | 8 ms | 3 ms | 2.7x |
+| sort (200k, int.ord) | 66048 ms | 118 ms | 25 ms | 4.7x |
+| pure (mixed battery) | 3292 ms | 13 ms | — | — |
+| avl (10k map.set) | 6401 ms | 22 ms | — | — |
+| state-loop (1M get/put) | 24117 ms | 190 ms | — | — |
+| enum (2^14 branches) | 10653 ms | 25 ms | — | — |
 
-(Task 75's original pre-LTO measurements, for the record: fib 19 ms /
-6.3x, sort 279 ms / 11x, pure 37, avl 33, state-loop 250, enum 40.)
+The progression, for the record — task 75 as first measured, then with
+-flto default (task 84), then with the small-block pool (task 80): fib
+19 / 8 / 8 ms, sort 279 / 189 / 118 ms, pure 37 / 29-22 / 13 ms (the 22
+includes task 86's lambda spec), avl 33 / 24 / 22 ms, state-loop 250 /
+203 / 190 ms, enum 40 / 35 / 25 ms.
 
 **The near-C claim stays withdrawn at task 75's gate (BOTH fib and sort
-within 3x of hand C): fib now passes at 2.7x, sort does not at 7.9x.**
-What the measurements support: the native tier is 90-353x the
+within 3x of hand C): fib passes at 2.7x, sort does not at 4.7x.**
+What the measurements support: the native tier is 87-560x the
 interpreter (the table's own endpoints: fib and sort), the handler-tier state loop runs a
-million get/put pairs in 203 ms (the OCaml/Koka band the boundary
+million get/put pairs in 190 ms (the OCaml/Koka band the boundary
 paragraph promises), and multi-shot enumeration prices per branch as
 designed. The remaining gap to hand C in the empty-row core:
 
@@ -141,14 +144,12 @@ designed. The remaining gap to hand C in the empty-row core:
   that musttail demands of unknown calls; fib's two-way recursion cannot
   loopify, so it pays the convention on every node. Follow-up:
   arity-exact signatures for known calls (task 79).
-- **sort, 7.9x** (was 11x) — allocation dominates: one malloc per cons
-  through jq_alloc_block plus RC traffic on every field read, against a
-  C reference paying malloc only (a jemalloc preload was measured at a
-  further ~9%, bounding what an allocator swap alone buys). Reuse tokens
-  help in-place rebuilds (map.set) but the merge allocates fresh cells.
-  Follow-ups: pool allocation for cons-sized blocks and intrinsic
-  borrowing so read-only intrinsic arguments skip the dup/drop pair
-  (tasks 80, 81).
+- **sort, 4.7x** (was 11x pre-LTO, 7.9x pre-pool) — allocation is now
+  size-classed freelists (task 80: 189 to 118 ms, where the jemalloc
+  preload experiment had bounded a general-purpose swap at ~9%); what
+  remains is RC traffic on every field read and the comparator's
+  argument dup/drop pairs, plus the uniform convention. Follow-ups:
+  intrinsic borrowing (task 81) and arity-exact signatures (task 79).
 - Known regression recorded in the plan's task-71 log: frame-style
   classification puts dictionary-driven members on the naive RC
   discipline, costing the AVL battery its reuse (~10 ms before task 71,

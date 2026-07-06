@@ -364,7 +364,7 @@ static void test_clause_pushes_handler(void) {
 /* body machine: x = perform(OP_A); x + 1 */
 static jq_value m1_reenter(jq_rt *rt, jq_block *f, jq_value v) {
   (void)rt;
-  free(f);
+  jq_block_free(f);
   return jq_int_add(v, jq_int(1));
 }
 static jq_value m1_entry(JQ_PARAMS) {
@@ -380,7 +380,7 @@ static jq_value m1_entry(JQ_PARAMS) {
   if (r == JQ_SUSPEND) return JQ_SUSPEND;
   if (f) {
     jq_ks_pop(rt);
-    free(f);
+    jq_block_free(f);
   }
   return jq_int_add(r, jq_int(1));
 }
@@ -490,7 +490,7 @@ static void test_multishot_two_resumes(void) {
 static jq_value m2_reenter(jq_rt *rt, jq_block *f, jq_value v) {
   (void)rt;
   jq_value t = jq_frame_slots(f)[0]; /* take ownership back */
-  free(f);
+  jq_block_free(f);
   jq_value x0 = jq_fields(t)[0];
   jq_value r = jq_int_add(x0, v);
   jq_drop(t);
@@ -511,7 +511,7 @@ static jq_value m2_entry(JQ_PARAMS) {
   if (r == JQ_SUSPEND) return JQ_SUSPEND;
   if (f) {
     jq_ks_pop(rt);
-    free(f);
+    jq_block_free(f);
   }
   jq_value x0 = jq_fields(t)[0];
   jq_value out = jq_int_add(x0, r);
@@ -578,7 +578,7 @@ static void test_clause_perform_escapes_outward(void) {
 /* the outer body: v = handle2(inner) ; v + 1 — with suspend protocol */
 static jq_value m3_reenter(jq_rt *rt, jq_block *f, jq_value v) {
   (void)rt;
-  free(f);
+  jq_block_free(f);
   return jq_int_add(v, jq_int(1));
 }
 static jq_value m3_entry(JQ_PARAMS) {
@@ -598,7 +598,7 @@ static jq_value m3_entry(JQ_PARAMS) {
   if (r == JQ_SUSPEND) return JQ_SUSPEND;
   if (f) {
     jq_ks_pop(rt);
-    free(f);
+    jq_block_free(f);
   }
   return jq_int_add(r, jq_int(1));
 }
@@ -609,7 +609,7 @@ static jq_value m3_entry(JQ_PARAMS) {
 static jq_value m4_reenter(jq_rt *rt, jq_block *f, jq_value v) {
   uint64_t ix = jq_frame_ix(f);
   if (ix == 1) {
-    free(f);
+    jq_block_free(f);
     jq_value x = v;
     jq_block *f2 = NULL;
     if (rt->cap_depth) {
@@ -621,13 +621,13 @@ static jq_value m4_reenter(jq_rt *rt, jq_block *f, jq_value v) {
     if (r == JQ_SUSPEND) return JQ_SUSPEND;
     if (f2) {
       jq_ks_pop(rt);
-      free(f2);
+      jq_block_free(f2);
     }
     return jq_int_add(x, r);
   }
   /* ix 2: x lives in the slot */
   jq_value x = jq_frame_slots(f)[0];
-  free(f);
+  jq_block_free(f);
   return jq_int_add(x, v);
 }
 static jq_value m4_entry(JQ_PARAMS) {
@@ -643,7 +643,7 @@ static jq_value m4_entry(JQ_PARAMS) {
   if (r == JQ_SUSPEND) return JQ_SUSPEND;
   if (f) {
     jq_ks_pop(rt);
-    free(f);
+    jq_block_free(f);
   }
   /* never reached uncaptured in this test */
   return m4_reenter(rt, jq_frame_alloc(m4_reenter, 1, 0, 0), r);
@@ -677,7 +677,7 @@ static void test_deep_handler_recovers_inner_performs(void) {
 static jq_value m5_in_reenter(jq_rt *rt, jq_block *f, jq_value v) {
   uint64_t ix = jq_frame_ix(f);
   if (ix == 1) {
-    free(f);
+    jq_block_free(f);
     jq_value pa = v;
     jq_block *f2 = NULL;
     if (rt->cap_depth) {
@@ -689,12 +689,12 @@ static jq_value m5_in_reenter(jq_rt *rt, jq_block *f, jq_value v) {
     if (r == JQ_SUSPEND) return JQ_SUSPEND;
     if (f2) {
       jq_ks_pop(rt);
-      free(f2);
+      jq_block_free(f2);
     }
     return jq_int_add(jq_int_mul(pa, jq_int(1000)), r);
   }
   jq_value pa = jq_frame_slots(f)[0];
-  free(f);
+  jq_block_free(f);
   return jq_int_add(jq_int_mul(pa, jq_int(1000)), v);
 }
 static jq_value m5_in_entry(JQ_PARAMS) {
@@ -710,7 +710,7 @@ static jq_value m5_in_entry(JQ_PARAMS) {
   if (r == JQ_SUSPEND) return JQ_SUSPEND;
   if (f) {
     jq_ks_pop(rt);
-    free(f);
+    jq_block_free(f);
   }
   return m5_in_reenter(rt, jq_frame_alloc(m5_in_reenter, 1, 0, 0), r);
 }
@@ -718,7 +718,7 @@ static jq_value m5_in_entry(JQ_PARAMS) {
 /* outer machine: v = call inner (suspendable); v * 2 */
 static jq_value m5_out_reenter(jq_rt *rt, jq_block *f, jq_value v) {
   (void)rt;
-  free(f);
+  jq_block_free(f);
   return jq_int_mul(v, jq_int(2));
 }
 static jq_value m5_out_entry(JQ_PARAMS) {
@@ -736,7 +736,7 @@ static jq_value m5_out_entry(JQ_PARAMS) {
   if (r == JQ_SUSPEND) return JQ_SUSPEND;
   if (f) {
     jq_ks_pop(rt);
-    free(f);
+    jq_block_free(f);
   }
   return jq_int_mul(r, jq_int(2));
 }
@@ -745,7 +745,7 @@ static jq_value m5_out_entry(JQ_PARAMS) {
 static jq_value m5_thunk_reenter(jq_rt *rt, jq_block *f, jq_value v) {
   uint64_t ix = jq_frame_ix(f);
   if (ix == 1) {
-    free(f);
+    jq_block_free(f);
     /* v = the escaped resumption; apply it to 7 (suspendable) */
     jq_block *f2 = NULL;
     if (rt->cap_depth) {
@@ -758,11 +758,11 @@ static jq_value m5_thunk_reenter(jq_rt *rt, jq_block *f, jq_value v) {
     if (r == JQ_SUSPEND) return JQ_SUSPEND;
     if (f2) {
       jq_ks_pop(rt);
-      free(f2);
+      jq_block_free(f2);
     }
     return r;
   }
-  free(f);
+  jq_block_free(f);
   return v; /* ix 2: the applied resumption's value is the thunk's value */
 }
 static jq_value m5_thunk_entry(JQ_PARAMS) {
@@ -779,7 +779,7 @@ static jq_value m5_thunk_entry(JQ_PARAMS) {
   if (r == JQ_SUSPEND) return JQ_SUSPEND;
   if (f) {
     jq_ks_pop(rt);
-    free(f);
+    jq_block_free(f);
   }
   return m5_thunk_reenter(rt, jq_frame_alloc(m5_thunk_reenter, 1, 0, 0), r);
 }

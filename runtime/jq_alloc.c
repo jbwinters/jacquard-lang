@@ -1,5 +1,12 @@
-/* Block allocation (task 65). Plain malloc/free in v1 — profile before
- * building anything cleverer (docs/native-plan.md, task 75). */
+/* Block allocation (task 65; the small-block pool is task 80). Blocks of
+ * 1-4 payload words — cons cells, small tuples, closures, reals — come
+ * from per-size freelists carved out of grow-only slabs: the profile
+ * showed the collections core spending its life in malloc/free (3.7M
+ * jq_con per 200k sort), and a jemalloc preload only bought ~9%. Bigger
+ * blocks stay on libc malloc. The pool is compiled OUT under ASAN so the
+ * sanitizer gates keep their use-after-free power; slabs hang off a
+ * global list, so LeakSanitizer sees pool memory as reachable, and the
+ * program thread is the only allocator (jq_run_main runs one thread). */
 
 #include "jq_value.h"
 
@@ -24,7 +31,58 @@ static void arity_guard(uint64_t needed, const char *what) {
 
 jq_block jq_unit_block = { JQ_RC_STATIC, JQ_TUPLE, 0, 0, {} };
 
+#if defined(__SANITIZE_ADDRESS__)
+#define JQ_POOL_OFF 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define JQ_POOL_OFF 1
+#endif
+#endif
+
+#ifndef JQ_POOL_OFF
+
+#define JQ_POOL_MAX_WORDS 4
+#define JQ_SLAB_BYTES 65536
+
+/* freelists by payload word count; a dead block's payload[0] is the link */
+static jq_block *jq_freelist[JQ_POOL_MAX_WORDS + 1];
+static uint8_t *jq_slab_cur;
+static uint8_t *jq_slab_end;
+static void **jq_slabs; /* chain head: keeps every slab reachable for LSan */
+
+static jq_block *pool_alloc(uint16_t n) {
+  jq_block *b = jq_freelist[n];
+  if (b) {
+    jq_freelist[n] = (jq_block *)b->payload[0];
+    return b;
+  }
+  size_t sz = sizeof(jq_block) + (size_t)n * 8;
+  if ((size_t)(jq_slab_end - jq_slab_cur) < sz) {
+    void **slab = malloc(JQ_SLAB_BYTES);
+    if (!slab) oom();
+    slab[0] = jq_slabs; /* word 0 links the slab chain */
+    jq_slabs = slab;
+    jq_slab_cur = (uint8_t *)slab + sizeof(void *);
+    jq_slab_end = (uint8_t *)slab + JQ_SLAB_BYTES;
+  }
+  b = (jq_block *)jq_slab_cur;
+  jq_slab_cur += sz;
+  return b;
+}
+
+#endif /* !JQ_POOL_OFF */
+
 jq_block *jq_alloc_block(uint8_t tag, uint8_t flags, uint16_t n) {
+#ifndef JQ_POOL_OFF
+  if (n >= 1 && n <= JQ_POOL_MAX_WORDS) {
+    jq_block *b = pool_alloc(n);
+    b->rc = 1;
+    b->tag = tag;
+    b->flags = flags | JQ_FLAG_POOLED;
+    b->n = n;
+    return b;
+  }
+#endif
   jq_block *b = malloc(sizeof(jq_block) + (size_t)n * 8);
   if (!b) oom();
   b->rc = 1;
@@ -32,6 +90,17 @@ jq_block *jq_alloc_block(uint8_t tag, uint8_t flags, uint16_t n) {
   b->flags = flags;
   b->n = n;
   return b;
+}
+
+void jq_block_free(jq_block *b) {
+#ifndef JQ_POOL_OFF
+  if (b->flags & JQ_FLAG_POOLED) {
+    b->payload[0] = (uint64_t)jq_freelist[b->n];
+    jq_freelist[b->n] = b;
+    return;
+  }
+#endif
+  free(b);
 }
 
 /* TEXT needs byte-granular payload after the length word. */
@@ -106,9 +175,10 @@ jq_value jq_closure(void *code, uint16_t arity, uint16_t env_n,
 jq_value jq_con_reuse(jq_block *shell, const jq_con_info *info,
                       const jq_value *fields) {
   if (!shell) return jq_con(info, fields);
-  /* same word count guaranteed by the pass (same arity) */
+  /* same word count guaranteed by the pass (same arity); the pool bit must
+     survive the reuse or the shell would later reach libc free (task 80) */
   shell->tag = JQ_CON;
-  shell->flags = 0;
+  shell->flags = shell->flags & JQ_FLAG_POOLED;
   shell->rc = 1;
   shell->payload[0] = (uint64_t)info;
   if (info->arity) memcpy(&shell->payload[1], fields, (size_t)info->arity * 8);

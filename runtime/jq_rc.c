@@ -82,7 +82,7 @@ static void free_walk(jq_block *root) {
       fprintf(stderr, "jacquard runtime: free walk hit tag %d\n", b->tag);
       exit(2);
     }
-    free(b);
+    jq_block_free(b);
   }
   free(w.items);
 }

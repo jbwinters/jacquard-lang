@@ -363,7 +363,7 @@ type exit_kind =
 let rec emit_expr ?(tokens = []) st buf (lives : string list) (exit : exit_kind) (e : expr) : unit =
   let exit_drops () =
     if not st.precise then List.iter (fun l -> line buf "jq_drop(%s);" l) lives;
-    List.iter (fun t -> line buf "if (%s) free(%s);" t t) tokens
+    List.iter (fun t -> line buf "if (%s) jq_block_free(%s);" t t) tokens
   in
   match e with
   | LetReuse (tok, x, _, body) ->
@@ -419,7 +419,7 @@ let rec emit_expr ?(tokens = []) st buf (lives : string list) (exit : exit_kind)
       in
       if not st.precise then List.iter (fun l -> line buf "jq_drop(%s);" l) lives;
       List.iter (fun l -> line buf "jq_drop(%s);" l) post;
-      List.iter (fun t -> line buf "if (%s) free(%s);" t t) tokens;
+      List.iter (fun t -> line buf "if (%s) jq_block_free(%s);" t t) tokens;
       List.iteri (fun i t -> line buf "a%d = %s;" i t) temps;
       match exit with
       | EReturn -> line buf "goto entry;"
@@ -458,7 +458,7 @@ and emit_tail_call st buf lives exit ?(consumes = []) ?(post = []) ?(tokens = []
   if not st.precise then
     List.iter (fun l -> if not (List.mem l consumes) then line buf "jq_drop(%s);" l) lives;
   List.iter (fun l -> line buf "jq_drop(%s);" l) post;
-  List.iter (fun t -> line buf "if (%s) free(%s);" t t) tokens;
+  List.iter (fun t -> line buf "if (%s) jq_block_free(%s);" t t) tokens;
   let padded =
     temps @ List.init (max_arity - List.length temps) (fun _ -> "JQ_UNIT") |> String.concat ", "
   in
@@ -489,7 +489,7 @@ and emit_suspendable st buf (lives : string list) (x : string) (emit_call : unit
       line buf "} else _fr = NULL;";
       emit_call ();
       line buf "if (%s == JQ_SUSPEND) return JQ_SUSPEND;" x;
-      line buf "if (_fr) { jq_ks_pop(rt); free(_fr); }";
+      line buf "if (_fr) { jq_ks_pop(rt); jq_block_free(_fr); }";
       line buf "rp_%d:;" ix
 
 and emit_bound st buf lives (x : string) (b : bound) : unit =
@@ -673,7 +673,7 @@ let emit_fn st (f : fn) : unit =
           line buf "case %d:" ix;
           buf.indent <- buf.indent + 1;
           List.iteri (fun i l -> line buf "%s = jq_frame_slots(_f0)[%d];" l i) saved;
-          line buf "free(_f0);";
+          line buf "jq_block_free(_f0);";
           line buf "%s = _in;" res;
           line buf "goto rp_%d;" ix;
           buf.indent <- buf.indent - 1)
