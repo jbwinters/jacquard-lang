@@ -4,13 +4,13 @@
 
 (rule
  (targets libjqrt.a)
- (deps jq_value.h jq_alloc.c jq_rc.c jq_text.c jq_error.c jq_show.c jq_utf8.c jq_rng.c jq_apply.c jq_intrinsics.c jq_effects.c jq_grants.c build_lib.sh)
+ (deps jq_value.h jq_alloc.c jq_rc.c jq_text.c jq_error.c jq_show.c jq_utf8.c jq_rng.c jq_apply.c jq_intrinsics.c jq_effects.c jq_frames.c jq_grants.c build_lib.sh)
  (action
   (run sh build_lib.sh)))
 
 (rule
  (alias runtest)
- (deps jq_value.h jq_alloc.c jq_rc.c jq_text.c jq_error.c jq_show.c jq_utf8.c jq_rng.c jq_apply.c jq_intrinsics.c jq_effects.c jq_grants.c check.sh
+ (deps jq_value.h jq_alloc.c jq_rc.c jq_text.c jq_error.c jq_show.c jq_utf8.c jq_rng.c jq_apply.c jq_intrinsics.c jq_effects.c jq_frames.c jq_grants.c check.sh
        (glob_files test/*.c)
        (glob_files ../corpus/golden/native/*.golden))
  (action

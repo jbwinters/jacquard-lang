@@ -241,9 +241,10 @@ static jq_value hc_nested_push(JQ_PARAMS) {
   (void)a7;
   uint32_t op = (uint32_t)jq_int_val(jq_closure_env(clo)[0]);
   jq_drop(clo);
-  jq_handler_entry e = { op, jq_closure((void *)hc_env0, 0, 1,
-                                        (jq_value[]){ jq_int(500) },
-                                        UINT16_MAX) };
+  jq_handler_entry e = { .op_ord = op,
+                         .clause = jq_closure((void *)hc_env0, 0, 1,
+                                              (jq_value[]){ jq_int(500) },
+                                              UINT16_MAX) };
   jq_handle_push(rt, 1, &e);
   jq_value r = jq_perform(rt, op, 0, NULL);
   jq_handle_pop(rt, 1);
@@ -251,9 +252,10 @@ static jq_value hc_nested_push(JQ_PARAMS) {
 }
 
 static jq_handler_entry entry_const(uint32_t op, int64_t v) {
-  return (jq_handler_entry){ op, jq_closure((void *)hc_env0, 0, 1,
-                                            (jq_value[]){ jq_int(v) },
-                                            UINT16_MAX) };
+  return (jq_handler_entry){ .op_ord = op,
+                             .clause = jq_closure((void *)hc_env0, 0, 1,
+                                                  (jq_value[]){ jq_int(v) },
+                                                  UINT16_MAX) };
 }
 
 static void test_handler_push_pop(void) {
@@ -263,8 +265,9 @@ static void test_handler_push_pop(void) {
   jq_value captured = jq_tuple(1, (jq_value[]){ jq_int(9) });
   jq_handler_entry e[2] = {
     entry_const(1, 10),
-    { 2, jq_closure((void *)hc_env0, 0, 1, (jq_value[]){ captured },
-                    UINT16_MAX) },
+    { .op_ord = 2,
+      .clause = jq_closure((void *)hc_env0, 0, 1, (jq_value[]){ captured },
+                           UINT16_MAX) },
   };
   jq_handle_push(&rt, 2, e);
   CHECK(rt.hs_len == 2, "push installs the entries");
@@ -293,8 +296,9 @@ static void test_perform_args_ownership(void) {
   /* the clause owns the live arguments (echo returns ours back); perform
      dups the stack entry's clause per call, so a second perform works */
   jq_rt rt = { 0 };
-  jq_handler_entry e = { 4, jq_closure((void *)hc_echo, 1, 0, NULL,
-                                       UINT16_MAX) };
+  jq_handler_entry e = { .op_ord = 4,
+                         .clause = jq_closure((void *)hc_echo, 1, 0, NULL,
+                                              UINT16_MAX) };
   jq_handle_push(&rt, 1, &e);
   jq_value arg = jq_tuple(1, (jq_value[]){ jq_int(7) });
   jq_value r = jq_perform(&rt, 4, 1, (jq_value[]){ arg });
@@ -315,9 +319,10 @@ static void test_perform_outer_continuation(void) {
   jq_rt rt = { 0 };
   jq_handler_entry below = entry_const(1, 100);
   jq_handle_push(&rt, 1, &below);
-  jq_handler_entry above = { 1, jq_closure((void *)hc_reperform, 0, 1,
-                                           (jq_value[]){ jq_int(1) },
-                                           UINT16_MAX) };
+  jq_handler_entry above = { .op_ord = 1,
+                             .clause = jq_closure((void *)hc_reperform, 0, 1,
+                                                  (jq_value[]){ jq_int(1) },
+                                                  UINT16_MAX) };
   jq_handle_push(&rt, 1, &above);
   jq_value r = jq_perform(&rt, 1, 0, NULL);
   CHECK(jq_int_val(r) == 101, "clause re-perform reaches the outer handler");
@@ -332,15 +337,335 @@ static void test_clause_pushes_handler(void) {
   /* a handle inside a clause lands at the truncation point and pops before
      the clause returns */
   jq_rt rt = { 0 };
-  jq_handler_entry e = { 1, jq_closure((void *)hc_nested_push, 0, 1,
-                                       (jq_value[]){ jq_int(2) },
-                                       UINT16_MAX) };
+  jq_handler_entry e = { .op_ord = 1,
+                         .clause = jq_closure((void *)hc_nested_push, 0, 1,
+                                              (jq_value[]){ jq_int(2) },
+                                              UINT16_MAX) };
   jq_handle_push(&rt, 1, &e);
   jq_value r = jq_perform(&rt, 1, 0, NULL);
   CHECK(jq_int_val(r) == 501, "clause-local handle covers its perform");
   CHECK(rt.hs_len == 1, "clause-local handle popped before return");
   jq_handle_pop(&rt, 1);
   free(rt.hs);
+}
+
+/* --- effects II: capture, resume, copy-on-resume (task 71) ---
+ *
+ * These machines are hand-written models of the compiler's frame-style
+ * output. Protocol under test (jq_frames.c): save a frame before a
+ * suspendable call when rt->cap_depth > 0; on JQ_SUSPEND leave it on
+ * rt->ks and propagate; a normal return pops and free()s it (slots are
+ * borrowed until the suspension abandons them); re-entry takes the slots
+ * back and free()s the frame. */
+
+#define OP_A 40
+#define OP_B 41
+
+/* body machine: x = perform(OP_A); x + 1 */
+static jq_value m1_reenter(jq_rt *rt, jq_block *f, jq_value v) {
+  (void)rt;
+  free(f);
+  return jq_int_add(v, jq_int(1));
+}
+static jq_value m1_entry(JQ_PARAMS) {
+  (void)a0; (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
+  (void)a7;
+  jq_drop(clo);
+  jq_block *f = NULL;
+  if (rt->cap_depth) {
+    f = jq_frame_alloc(m1_reenter, 1, 0, 0);
+    jq_ks_push(rt, f);
+  }
+  jq_value r = jq_perform(rt, OP_A, 0, NULL);
+  if (r == JQ_SUSPEND) return JQ_SUSPEND;
+  if (f) {
+    jq_ks_pop(rt);
+    free(f);
+  }
+  return jq_int_add(r, jq_int(1));
+}
+
+/* clause: resume once with 41 */
+static jq_value cl_resume41(JQ_PARAMS) {
+  (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
+  jq_drop(clo);
+  rt->apply_n = 1;
+  return jq_apply(rt, a0, jq_int(41), JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT,
+                  JQ_UNIT, JQ_UNIT, JQ_UNIT);
+}
+
+/* clause: resume twice (1 then 2), tuple the branch values */
+static jq_value cl_twice(JQ_PARAMS) {
+  (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
+  jq_drop(clo);
+  jq_dup(a0);
+  rt->apply_n = 1;
+  jq_value r1 = jq_apply(rt, a0, jq_int(1), JQ_UNIT, JQ_UNIT, JQ_UNIT,
+                         JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT);
+  rt->apply_n = 1;
+  jq_value r2 = jq_apply(rt, a0, jq_int(2), JQ_UNIT, JQ_UNIT, JQ_UNIT,
+                         JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT);
+  return jq_tuple(2, (jq_value[]){ r1, r2 });
+}
+
+/* clause: never resume — drop the resumption, return 999 */
+static jq_value cl_abort999(JQ_PARAMS) {
+  (void)rt; (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
+  (void)a7;
+  jq_drop(clo);
+  jq_drop(a0);
+  return jq_int(999);
+}
+
+/* clause: escape — return the resumption itself */
+static jq_value cl_escape(JQ_PARAMS) {
+  (void)rt; (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
+  (void)a7;
+  jq_drop(clo);
+  return a0;
+}
+
+/* clause for OP_A that performs OP_B (must escape OUTWARD, past this very
+   handler even though it also covers OP_B) and returns the result */
+static jq_value cl_perform_b(JQ_PARAMS) {
+  (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
+  jq_drop(clo);
+  jq_drop(a0); /* never resumes */
+  return jq_perform(rt, OP_B, 0, NULL);
+}
+
+/* ret clauses */
+static jq_value rc_id(JQ_PARAMS) {
+  (void)rt; (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
+  (void)a7;
+  jq_drop(clo);
+  return a0;
+}
+static jq_value rc_double(JQ_PARAMS) {
+  (void)rt; (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
+  (void)a7;
+  jq_drop(clo);
+  return jq_int_mul(a0, jq_int(2));
+}
+static jq_value rc_add1000(JQ_PARAMS) {
+  (void)rt; (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
+  (void)a7;
+  jq_drop(clo);
+  return jq_int_add(a0, jq_int(1000));
+}
+
+static jq_value clo0(jq_fn code) { return jq_closure((void *)code, 0, 0, NULL, UINT16_MAX); }
+static jq_value clo1(jq_fn code) { return jq_closure((void *)code, 1, 0, NULL, UINT16_MAX); }
+
+static void test_capture_single_resume(void) {
+  jq_rt rt = { 0 };
+  jq_handler_entry e = { OP_A, clo1(cl_resume41), JQ_CLAUSE_CAPTURING, NULL };
+  jq_value out = jq_handle2(&rt, 1, &e, clo0(m1_entry), clo1(rc_id));
+  CHECK(jq_int_val(out) == 42, "capture + resume once yields 42");
+  CHECK(rt.ks_len == 0 && rt.hs_len == 0 && rt.cap_depth == 0,
+        "stacks balanced after handle2");
+  free(rt.hs);
+  free(rt.ks);
+}
+
+static void test_multishot_two_resumes(void) {
+  /* body adds 1; the clause resumes with 1 then 2: (2, 3). Copy-on-resume
+     makes the second resume independent of the first. */
+  jq_rt rt = { 0 };
+  jq_handler_entry e = { OP_A, clo1(cl_twice), JQ_CLAUSE_CAPTURING, NULL };
+  jq_value out = jq_handle2(&rt, 1, &e, clo0(m1_entry), clo1(rc_id));
+  CHECK(jq_is_ptr(out) && jq_block_of(out)->tag == JQ_TUPLE, "multi-shot returns the tuple");
+  CHECK(jq_int_val(jq_fields(out)[0]) == 2 && jq_int_val(jq_fields(out)[1]) == 3,
+        "multi-shot branches are independent (2, 3)");
+  jq_drop(out);
+  CHECK(rt.ks_len == 0 && rt.hs_len == 0 && rt.cap_depth == 0,
+        "stacks balanced after multi-shot");
+  free(rt.hs);
+  free(rt.ks);
+}
+
+/* body machine with a live heap local across the perform: t = (7);
+   x = perform(OP_A); t.0 + x — the abort test proves the captured chain
+   frees t (ASAN's leak net is the assertion) */
+static jq_value m2_reenter(jq_rt *rt, jq_block *f, jq_value v) {
+  (void)rt;
+  jq_value t = jq_frame_slots(f)[0]; /* take ownership back */
+  free(f);
+  jq_value x0 = jq_fields(t)[0];
+  jq_value r = jq_int_add(x0, v);
+  jq_drop(t);
+  return r;
+}
+static jq_value m2_entry(JQ_PARAMS) {
+  (void)a0; (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
+  (void)a7;
+  jq_drop(clo);
+  jq_value t = jq_tuple(1, (jq_value[]){ jq_int(7) });
+  jq_block *f = NULL;
+  if (rt->cap_depth) {
+    f = jq_frame_alloc(m2_reenter, 1, 0, 1);
+    jq_frame_slots(f)[0] = t; /* borrowed mirror until a suspension */
+    jq_ks_push(rt, f);
+  }
+  jq_value r = jq_perform(rt, OP_A, 0, NULL);
+  if (r == JQ_SUSPEND) return JQ_SUSPEND;
+  if (f) {
+    jq_ks_pop(rt);
+    free(f);
+  }
+  jq_value x0 = jq_fields(t)[0];
+  jq_value out = jq_int_add(x0, r);
+  jq_drop(t);
+  return out;
+}
+
+static void test_abort_drops_chain(void) {
+  /* the clause never resumes: dropping the resumption must free the
+     captured frame AND its heap local; ret must NOT run (would add 1000) */
+  jq_rt rt = { 0 };
+  jq_handler_entry e = { OP_A, clo1(cl_abort999), JQ_CLAUSE_CAPTURING, NULL };
+  jq_value out = jq_handle2(&rt, 1, &e, clo0(m2_entry), clo1(rc_add1000));
+  CHECK(jq_int_val(out) == 999, "abort value bypasses the ret clause");
+  CHECK(rt.ks_len == 0 && rt.hs_len == 0 && rt.cap_depth == 0,
+        "stacks balanced after abort");
+  free(rt.hs);
+  free(rt.ks);
+}
+
+static void test_escaped_resume_ret_per_resumption(void) {
+  /* the clause returns the resumption; applying it twice outside the
+     handler's textual scope runs body-remainder AND ret per application */
+  jq_rt rt = { 0 };
+  jq_handler_entry e = { OP_A, clo1(cl_escape), JQ_CLAUSE_CAPTURING, NULL };
+  jq_value res = jq_handle2(&rt, 1, &e, clo0(m1_entry), clo1(rc_double));
+  CHECK(jq_is_ptr(res) && jq_block_of(res)->tag == JQ_RESUME,
+        "escaped resumption is the handle's value");
+  jq_dup(res);
+  rt.apply_n = 1;
+  jq_value r1 = jq_apply(&rt, res, jq_int(10), JQ_UNIT, JQ_UNIT, JQ_UNIT,
+                         JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT);
+  CHECK(jq_int_val(r1) == 22, "first outside resume: (10+1)*2");
+  rt.apply_n = 1;
+  jq_value r2 = jq_apply(&rt, res, jq_int(20), JQ_UNIT, JQ_UNIT, JQ_UNIT,
+                         JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT);
+  CHECK(jq_int_val(r2) == 42, "second outside resume: (20+1)*2");
+  CHECK(rt.ks_len == 0 && rt.hs_len == 0 && rt.cap_depth == 0,
+        "stacks balanced after escaped resumes");
+  free(rt.hs);
+  free(rt.ks);
+}
+
+static jq_value m3_entry(JQ_PARAMS);
+
+static void test_clause_perform_escapes_outward(void) {
+  /* inner handler covers OP_A and OP_B; its OP_A clause performs OP_B,
+     which must reach the OUTER handler (the clause runs against the outer
+     continuation), not the inner one — the inner OP_B clause would return
+     999 and the inner ret would add 1000, so 42 proves both were skipped */
+  jq_rt rt = { 0 };
+  jq_handler_entry outer = { OP_B, clo1(cl_resume41), JQ_CLAUSE_CAPTURING, NULL };
+  jq_value out = jq_handle2(&rt, 1, &outer, clo0(m3_entry), clo1(rc_id));
+  /* inner OP_A clause performs OP_B; outer clause resumes it with 41; the
+     inner clause returns that 41 as the inner handle's value; inner ret
+     does not run (abort path); m3 adds 1 => 42 */
+  CHECK(jq_int_val(out) == 42, "clause-body perform escaped outward");
+  CHECK(rt.ks_len == 0 && rt.hs_len == 0 && rt.cap_depth == 0,
+        "stacks balanced after outward escape");
+  free(rt.hs);
+  free(rt.ks);
+}
+
+/* the outer body: v = handle2(inner) ; v + 1 — with suspend protocol */
+static jq_value m3_reenter(jq_rt *rt, jq_block *f, jq_value v) {
+  (void)rt;
+  free(f);
+  return jq_int_add(v, jq_int(1));
+}
+static jq_value m3_entry(JQ_PARAMS) {
+  (void)a0; (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
+  (void)a7;
+  jq_drop(clo);
+  jq_block *f = NULL;
+  if (rt->cap_depth) {
+    f = jq_frame_alloc(m3_reenter, 1, 0, 0);
+    jq_ks_push(rt, f);
+  }
+  jq_handler_entry inner[2] = {
+    { OP_A, clo1(cl_perform_b), JQ_CLAUSE_CAPTURING, NULL },
+    { OP_B, clo1(cl_abort999), JQ_CLAUSE_CAPTURING, NULL },
+  };
+  jq_value r = jq_handle2(rt, 2, inner, clo0(m1_entry), clo1(rc_add1000));
+  if (r == JQ_SUSPEND) return JQ_SUSPEND;
+  if (f) {
+    jq_ks_pop(rt);
+    free(f);
+  }
+  return jq_int_add(r, jq_int(1));
+}
+
+/* deep handler: body performs OP_A twice (x = perform; y = perform; x+y);
+   the clause resumes each with 10; the second perform must be re-covered
+   by the resumed chain's handler frame (deep semantics) => 20 */
+static jq_value m4_reenter(jq_rt *rt, jq_block *f, jq_value v) {
+  uint64_t ix = jq_frame_ix(f);
+  if (ix == 1) {
+    free(f);
+    jq_value x = v;
+    jq_block *f2 = NULL;
+    if (rt->cap_depth) {
+      f2 = jq_frame_alloc(m4_reenter, 2, 0, 1);
+      jq_frame_slots(f2)[0] = x;
+      jq_ks_push(rt, f2);
+    }
+    jq_value r = jq_perform(rt, OP_A, 0, NULL);
+    if (r == JQ_SUSPEND) return JQ_SUSPEND;
+    if (f2) {
+      jq_ks_pop(rt);
+      free(f2);
+    }
+    return jq_int_add(x, r);
+  }
+  /* ix 2: x lives in the slot */
+  jq_value x = jq_frame_slots(f)[0];
+  free(f);
+  return jq_int_add(x, v);
+}
+static jq_value m4_entry(JQ_PARAMS) {
+  (void)a0; (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
+  (void)a7;
+  jq_drop(clo);
+  jq_block *f = NULL;
+  if (rt->cap_depth) {
+    f = jq_frame_alloc(m4_reenter, 1, 0, 0);
+    jq_ks_push(rt, f);
+  }
+  jq_value r = jq_perform(rt, OP_A, 0, NULL);
+  if (r == JQ_SUSPEND) return JQ_SUSPEND;
+  if (f) {
+    jq_ks_pop(rt);
+    free(f);
+  }
+  /* never reached uncaptured in this test */
+  return m4_reenter(rt, jq_frame_alloc(m4_reenter, 1, 0, 0), r);
+}
+
+static jq_value cl_resume10(JQ_PARAMS) {
+  (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
+  jq_drop(clo);
+  rt->apply_n = 1;
+  return jq_apply(rt, a0, jq_int(10), JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT,
+                  JQ_UNIT, JQ_UNIT, JQ_UNIT);
+}
+
+static void test_deep_handler_recovers_inner_performs(void) {
+  jq_rt rt = { 0 };
+  jq_handler_entry e = { OP_A, clo1(cl_resume10), JQ_CLAUSE_CAPTURING, NULL };
+  jq_value out = jq_handle2(&rt, 1, &e, clo0(m4_entry), clo1(rc_id));
+  CHECK(jq_int_val(out) == 20, "deep handler covers the resumed extent");
+  CHECK(rt.ks_len == 0 && rt.hs_len == 0 && rt.cap_depth == 0,
+        "stacks balanced after deep re-cover");
+  free(rt.hs);
+  free(rt.ks);
 }
 
 static int fake_grant_calls = 0;
@@ -419,6 +744,12 @@ int main(int argc, char **argv) {
   test_perform_outer_continuation();
   test_clause_pushes_handler();
   test_grant_fallback();
+  test_capture_single_resume();
+  test_multishot_two_resumes();
+  test_abort_drops_chain();
+  test_escaped_resume_ret_per_resumption();
+  test_clause_perform_escapes_outward();
+  test_deep_handler_recovers_inner_performs();
   if (failures) {
     printf("%d FAILED\n", failures);
     return 1;

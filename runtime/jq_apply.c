@@ -60,8 +60,13 @@ jq_value jq_apply(JQ_PARAMS) {
     jq_drop(fn); /* static, no-op */
     return jq_perform(rt, info->ordinal, n, args);
   }
-  case JQ_RESUME:
-    fail("jacquard runtime: resumption reached a pure binary (task 71)");
+  case JQ_RESUME: {
+    /* interpreter: rt_arity "a resumption takes exactly one argument" */
+    if (n != 1) fail("arity mismatch: a resumption takes exactly one argument, got %u", n);
+    jq_value r = jq_resume(rt, fn, a0);
+    jq_drop(fn); /* the captured original is reusable: multi-shot */
+    return r;
+  }
   default: {
     char *s = jq_show(fn);
     fail("type error: %s is not applicable", s);

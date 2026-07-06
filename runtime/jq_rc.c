@@ -68,9 +68,17 @@ static void free_walk(jq_block *root) {
     case JQ_REAL:
     case JQ_HASH:
       break;
+    case JQ_FRAME:
+      /* payload: [0] code, [1] ix, [2] aux (raw); [3..] owned slots */
+      for (uint16_t i = 3; i < b->n; i++) drop_child(&w, b->payload[i]);
+      break;
+    case JQ_RESUME:
+      /* payload: [0] frame count (raw); [1..] owned captured frames */
+      for (uint16_t i = 1; i < b->n; i++) drop_child(&w, (jq_value)b->payload[i]);
+      break;
     default:
-      /* CODE/RESUME arrive with tasks 73/71 and extend this walk;
-         static-only tags cannot be freed */
+      /* CODE arrives with task 73 and extends this walk; static-only tags
+         cannot be freed */
       fprintf(stderr, "jacquard runtime: free walk hit tag %d\n", b->tag);
       exit(2);
     }

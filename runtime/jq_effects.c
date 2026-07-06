@@ -28,10 +28,15 @@ void jq_handle_push(jq_rt *rt, uint32_t n, const jq_handler_entry *entries) {
   grow(rt, n);
   memcpy(&rt->hs[rt->hs_len], entries, n * sizeof(jq_handler_entry));
   rt->hs_len += n;
+  for (uint32_t i = 0; i < n; i++)
+    if (entries[i].kind == JQ_CLAUSE_CAPTURING) rt->cap_depth++;
 }
 
 void jq_handle_pop(jq_rt *rt, uint32_t n) {
-  for (uint32_t i = 0; i < n; i++) jq_drop(rt->hs[rt->hs_len - 1 - i].clause);
+  for (uint32_t i = 0; i < n; i++) {
+    if (rt->hs[rt->hs_len - 1 - i].kind == JQ_CLAUSE_CAPTURING) rt->cap_depth--;
+    jq_drop(rt->hs[rt->hs_len - 1 - i].clause);
+  }
   rt->hs_len -= n;
 }
 
@@ -40,6 +45,16 @@ jq_value jq_perform(jq_rt *rt, uint32_t op_ord, uint16_t n, const jq_value *args
   for (uint32_t i = rt->hs_len; i > 0; i--) {
     if (rt->hs[i - 1].op_ord != op_ord) continue;
     uint32_t at = i - 1;
+    if (rt->hs[at].kind == JQ_CLAUSE_CAPTURING) {
+      /* task 71: record the pending capture and unwind — the covering
+         jq_handle2 dispatch slices the frame stack and runs the clause */
+      rt->pending.clause = rt->hs[at].clause;
+      jq_dup(rt->pending.clause);
+      for (uint16_t k = 0; k < n; k++) rt->pending.args[k] = args[k];
+      rt->pending.n_args = n;
+      rt->pending.mark = rt->hs[at].hf;
+      return JQ_SUSPEND;
+    }
     jq_value clause = rt->hs[at].clause;
     jq_dup(clause); /* the call consumes clo; the stack entry keeps its ref */
     /* hide [at .. top] for the clause body (outer-continuation semantics) */
@@ -48,6 +63,8 @@ jq_value jq_perform(jq_rt *rt, uint32_t op_ord, uint16_t n, const jq_value *args
     if (!save) jq_runtime_error("jacquard runtime: out of memory");
     memcpy(save, &rt->hs[at], hidden * sizeof(jq_handler_entry));
     rt->hs_len = at;
+    /* hidden CAPTURING entries stay conceptually installed for cap_depth:
+       the hide is an hs-search device, not an uninstall */
     jq_fn code = (jq_fn)jq_closure_code(clause);
     jq_value a[JQ_MAX_ARITY] = { 0 };
     for (uint16_t k = 0; k < n; k++) a[k] = args[k];
@@ -57,6 +74,9 @@ jq_value jq_perform(jq_rt *rt, uint32_t op_ord, uint16_t n, const jq_value *args
     memcpy(&rt->hs[rt->hs_len], save, hidden * sizeof(jq_handler_entry));
     rt->hs_len += hidden;
     free(save);
+    /* JQ_SUSPEND passes through unchanged: the hidden slice is restored
+       (the C stack below still unwinds through the handle sites that own
+       those entries), the sentinel keeps propagating */
     return r;
   }
   /* root grants (the --allow natives) */

@@ -42,12 +42,13 @@ enum jq_tag {
   JQ_TEXT = 3,
   JQ_REAL = 4,
   JQ_CLOSURE = 5,
-  JQ_CODE = 6,    /* reserved: task 73 */
-  JQ_RESUME = 7,  /* reserved: task 71 */
+  JQ_CODE = 6,   /* reserved: task 73 */
+  JQ_RESUME = 7, /* a captured continuation (task 71): owned frame chain */
   JQ_HASH = 8,
   JQ_CONSTRUCTOR = 9, /* first-class unapplied constructor; static-only */
   JQ_OP = 10,         /* first-class effect operation; static-only */
   JQ_BUILTIN = 11,    /* first-class primitive; static-only */
+  JQ_FRAME = 12,      /* a suspended activation (task 71): code, ix, slots */
 };
 
 #define JQ_RC_STATIC UINT32_MAX
@@ -153,11 +154,31 @@ typedef struct jq_builtin_info {
 /* Per-run context. Compiled main wires the constructor values intrinsics
  * return (booleans; orderings arrive with the compare intrinsics). Effects
  * state lands here in task 70. */
-/* one installed in-language handler clause: op ordinal -> clause closure */
+/* one installed in-language handler clause: op ordinal -> clause closure.
+   kind selects the perform protocol (task 71): a TAIL clause is called
+   directly at the perform site (its return IS the resume, task 70); a
+   CAPTURING clause suspends — jq_perform records the pending capture and
+   returns JQ_SUSPEND, and the covering jq_handle2 dispatch (marked by [hf],
+   its handler frame) slices the frame stack into a resumption and runs the
+   clause against the outer continuation. Zero-initialized entries are TAIL
+   with no mark, which is exactly task 70's shape. */
+enum jq_clause_kind { JQ_CLAUSE_TAIL = 0, JQ_CLAUSE_CAPTURING = 1 };
+
 typedef struct jq_handler_entry {
   uint32_t op_ord;
   jq_value clause;
+  uint8_t kind;      /* enum jq_clause_kind */
+  jq_block *hf;      /* CAPTURING only: the owning handler frame on rt->ks */
 } jq_handler_entry;
+
+/* pending capture (task 71): set by jq_perform when a CAPTURING clause
+   matches, consumed by the covering dispatch when JQ_SUSPEND reaches it */
+typedef struct jq_pending {
+  jq_value clause; /* dup of the matched entry's clause */
+  jq_value args[8];
+  uint16_t n_args;
+  jq_block *mark; /* the matched entry's handler frame */
+} jq_pending;
 
 typedef struct jq_rt {
   jq_value v_true;
@@ -182,6 +203,18 @@ typedef struct jq_rt {
   jq_value (**grants)(struct jq_rt *, const jq_value *); /* by op ordinal */
   const jq_op_info **op_meta; /* by op ordinal, for error rendering */
   uint32_t n_ops;
+  /* the frame stack (task 71): suspended-activation blocks, innermost on
+     top — the runtime image of the interpreter's kont. Frame-style code
+     pushes its frame before a suspendable call and pops it on a normal
+     return; on JQ_SUSPEND the frame stays for the capture slice. Handler
+     frames (jq_handle2) sit in the same stack so a slice [hf .. top] is
+     exactly the interpreter's [frames since the handler] + FHandle. */
+  jq_block **ks;
+  uint32_t ks_len;
+  uint32_t ks_cap;
+  uint32_t cap_depth; /* installed CAPTURING entries; 0 = no suspension can
+                         happen, frame saves may be skipped */
+  jq_pending pending;
 } jq_rt;
 
 /* The uniform compiled-function signature: clang's musttail requires caller
@@ -221,8 +254,55 @@ int jq_run_main(jq_rt *rt, void (*body)(jq_rt *));
 void jq_handle_push(jq_rt *rt, uint32_t n, const jq_handler_entry *entries);
 void jq_handle_pop(jq_rt *rt, uint32_t n);
 /* performs op [op_ord] with [n] owned args; returns the clause's value
-   (tail-resumptive: the clause's return IS the resume) */
+   (tail-resumptive: the clause's return IS the resume), or JQ_SUSPEND when
+   a CAPTURING clause matched (rt->pending set; unwind to its dispatch) */
 jq_value jq_perform(jq_rt *rt, uint32_t op_ord, uint16_t n, const jq_value *args);
+
+/* --- capturing continuations (task 71; jq_frames.c) --- */
+
+/* The suspension sentinel: returned instead of a value when a capture is
+   unwinding the C stack. Compared by identity only; static, so stray
+   dup/drop is a no-op. Frame-style code must check every suspendable
+   call's result and propagate. */
+extern jq_block jq_suspend_block;
+#define JQ_SUSPEND (jq_of_block(&jq_suspend_block))
+
+/* frame re-entry code: called with the (owned) frame and the value the
+   suspended call site is resumed with; returns the activation's value */
+typedef jq_value (*jq_frame_fn)(jq_rt *, jq_block *, jq_value);
+
+/* frame payload: [0] code, [1] resume index, [2] aux, [3..] owned slots
+   (ownership: borrowed mirrors of the C locals while on rt->ks; they
+   become owned when the activation abandons them by returning JQ_SUSPEND,
+   and every captured frame owns its slots) */
+static inline jq_frame_fn jq_frame_code(jq_block *f) {
+  return (jq_frame_fn)f->payload[0];
+}
+static inline uint64_t jq_frame_ix(jq_block *f) { return f->payload[1]; }
+static inline uint64_t jq_frame_aux(jq_block *f) { return f->payload[2]; }
+static inline jq_value *jq_frame_slots(jq_block *f) {
+  return (jq_value *)&f->payload[3];
+}
+static inline uint16_t jq_frame_n_slots(jq_block *f) {
+  return (uint16_t)(f->n - 3);
+}
+
+jq_block *jq_frame_alloc(jq_frame_fn code, uint64_t ix, uint64_t aux, uint16_t n_slots);
+void jq_ks_push(jq_rt *rt, jq_block *f);
+static inline void jq_ks_pop(jq_rt *rt) { rt->ks_len--; }
+
+/* the capturing-handle driver: pushes its handler frame + entries (entry
+   clauses arrive owned; kind/hf fields are filled here), runs the thunk,
+   dispatches captures. A TAIL-kind entry keeps the task-70 direct-call
+   protocol at the perform site. Returns the handle's value or propagates
+   JQ_SUSPEND. */
+jq_value jq_handle2(jq_rt *rt, uint32_t n, const jq_handler_entry *entries, jq_value thunk,
+                    jq_value ret_clause);
+
+/* applies a resumption (jq_apply's JQ_RESUME case): clones the captured
+   chain (copy-on-resume) and drives it with [v]; the interpreter's
+   "frames @ k" at the application site */
+jq_value jq_resume(jq_rt *rt, jq_value resume, jq_value v);
 
 /* grant natives (jq_grants.c), installed into rt->grants by generated main
    according to the binary's --allow flags */
