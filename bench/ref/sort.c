@@ -45,7 +45,8 @@ static node *msort(node *xs) {
 
 int main(void) {
   node *xs = NULL;
-  for (int64_t i = 0; i <= 200000; i++) xs = cons(i, xs); /* reversed range */
+  /* list.range is half-open: exactly 200000 nodes, like the .jqd program */
+  for (int64_t i = 0; i < 200000; i++) xs = cons(i, xs);
   xs = msort(xs);
   int64_t len = 0;
   for (node *p = xs; p; p = p->next) len++;

@@ -94,10 +94,12 @@ priced by semantics, not implementation.
 ## Measured (task 75, 2026-07-06)
 
 AMD Ryzen 9 7950X3D, Ubuntu clang 18.1.3, everything -O2, median of 5,
-per-engine startup subtracted. Reproduce with `sh scripts/native-bench.sh`
-(the C references live in bench/ref/ and practice the same heap discipline
-as the programs they shadow — a list merge sort over malloc'd nodes, not a
-flat-array qsort).
+per-engine startup subtracted (the C column is raw: its ~1 ms process
+launch is not subtracted, so the ratios read conservatively). Reproduce
+with `sh scripts/native-bench.sh`. The C references live in bench/ref/
+and practice the same heap discipline as the programs they shadow — a
+list merge sort over malloc'd nodes, not a flat-array qsort; review
+verified neither reference constant-folds under -O2.
 
 | program | interpreter | native | hand C | native vs C |
 | --- | --- | --- | --- | --- |

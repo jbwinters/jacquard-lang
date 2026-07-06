@@ -3,7 +3,9 @@
 # columns per program: interpreter, native, hand-written C reference where
 # one exists. Method: median of 5 wall-clock runs, the engine's own startup
 # subtracted (a `(lit 0)` program's median for each engine), clang -O2
-# everywhere. Reproduce the docs/native-compilation.md table with:
+# everywhere. The C column is raw — its ~1 ms process launch is NOT
+# subtracted, which makes the reported native-vs-C ratios conservative.
+# Reproduce the docs/native-compilation.md table with:
 #   sh scripts/native-bench.sh
 set -eu
 export JACQUARD_PRELUDE=${JACQUARD_PRELUDE:-$PWD/prelude}
