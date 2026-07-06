@@ -20,3 +20,4 @@ demos/agent-dream.jqd|builtin `text.contains?` is not yet implemented natively
 # (the interpreter refuses them identically at check time):
 demos/repair-warp-tests.jqd|error[E0301]: unknown name
 demos/showcase-warp-tests.jqd|error[E0301]: unknown name
+demos/escrow/main.jqd|error[E0301]: unknown name `escrow.workflow`

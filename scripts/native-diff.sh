@@ -20,15 +20,18 @@ MANIFEST=${MANIFEST:-test/native-eligibility.txt}
 work=$(mktemp -d "${TMPDIR:-/tmp}/jq-diff-XXXXXX")
 trap 'rm -rf "$work"' EXIT
 
-files=${*:-"$(ls corpus/valid/*.jqd corpus/sigs/*.jqd demos/*.jqd bench/*.jqd 2>/dev/null)"}
+files=${*:-"$(find corpus/valid corpus/sigs demos bench -name '*.jqd' 2>/dev/null | sort)"}
+# a shrinking walk must be LOUD: bump the floor when files are added, and a
+# deletion/renaming that drops coverage fails here instead of passing vacuously
+FLOOR=${FLOOR:-62}
 
 pass=0
 refused=0
 fail=0
 for f in $files; do
-  if $BIN build "$f" -o "$work/prog" > "$work/build.out" 2> "$work/build.err"; then
-    $BIN run "$f" < /dev/null > "$work/i.out" 2> "$work/i.err"; ie=$?
-    "$work/prog" < /dev/null > "$work/n.out" 2> "$work/n.err"; ne=$?
+  if timeout 120 $BIN build "$f" -o "$work/prog" > "$work/build.out" 2> "$work/build.err"; then
+    timeout 60 $BIN run "$f" < /dev/null > "$work/i.out" 2> "$work/i.err"; ie=$?
+    timeout 60 "$work/prog" < /dev/null > "$work/n.out" 2> "$work/n.err"; ne=$?
     ok=1
     [ "$ie" = "$ne" ] || { echo "DIVERGED (exit): $f interpreter=$ie native=$ne"; ok=0; }
     cmp -s "$work/i.out" "$work/n.out" || { echo "DIVERGED (stdout): $f"; diff "$work/i.out" "$work/n.out" | head -6; ok=0; }
@@ -36,7 +39,8 @@ for f in $files; do
     if [ $ok = 1 ]; then pass=$((pass+1)); else fail=$((fail+1)); fi
   else
     # the refusal must be manifested with a stderr line that matches
-    want=$(grep -F "$f|" "$MANIFEST" 2>/dev/null | head -1 | cut -d'|' -f2-)
+    # (exact first-field match: a path must not select another's entry)
+    want=$(awk -F'|' -v f="$f" '$1 == f { print substr($0, length(f) + 2); exit }' "$MANIFEST" 2>/dev/null)
     if [ -z "$want" ]; then
       echo "UNMANIFESTED REFUSAL: $f"
       head -2 "$work/build.err"
@@ -53,4 +57,8 @@ for f in $files; do
 done
 echo "native-diff: $pass identical, $refused manifested refusals, $fail failures"
 [ $fail = 0 ] || exit 1
+if [ $# = 0 ] && [ $((pass + refused)) -lt "$FLOOR" ]; then
+  echo "native-diff: the walk covered $((pass + refused)) files, below the floor of $FLOOR"
+  exit 1
+fi
 echo "native-diff: PASS"
