@@ -51,9 +51,9 @@ other unit (second build recompiles nothing).
   $ jacquard build sortprog.jqd -o sortprog > /dev/null
   $ ./sortprog
   100
-  $ grep -l 'jq_i_int_compare' .jacquard-native/v1/unit_*.c | wc -l | tr -d ' '
+  $ grep -l 'jq_i_int_compare' .jacquard-native/v1-h*/unit_*.c | wc -l | tr -d ' '
   1
-  $ grep -c 'jq_apply' $(grep -l 'jq_i_int_compare' .jacquard-native/v1/unit_*.c)
+  $ grep -c 'jq_apply' $(grep -l 'jq_i_int_compare' .jacquard-native/v1-h*/unit_*.c)
   0
   [1]
   $ jacquard build sortprog.jqd -o sortprog2

@@ -430,8 +430,9 @@ capture, resume, and copy-on-resume in the runtime.
    exact-count assertion). Keep the mapping table (OCaml test -> .jqd
    program) in the test directory so coverage is auditable.
 
-**As built (task 71 delta log).** The mechanism is return-unwinding, not
-setjmp: jq_perform matching a CAPTURING clause records the pending capture
+**As built (task 71 delta log).** The mechanism is return-unwinding
+(setjmp was rejected: it skips cleanups mid-stack and fights the ASAN
+gate): jq_perform matching a CAPTURING clause records the pending capture
 and returns a JQ_SUSPEND sentinel; every frame-style activation between
 the perform and the covering handle saves its live locals into a heap
 JQ_FRAME (slots are borrowed mirrors of the C locals until the suspension

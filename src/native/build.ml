@@ -563,6 +563,16 @@ let build ~(store : Store.t) ~(tops : (Kernel.expr * string list * (string * str
               if Sys.getenv_opt "JACQUARD_SPEC" = Some "off" then emitter_version ^ "-nospec"
               else emitter_version
             in
+            (* the runtime header defines jq_rt's layout, which every cached .o bakes in:
+               a header change must move the WHOLE cache directory, or byte-identical
+               units keep stale field offsets and the link mixes layouts (task 71 review
+               found the mixed binary reading apply_n at the old offset) *)
+            let emitter_version =
+              emitter_version ^ "-h"
+              ^ String.sub
+                  (Hash.to_hex (Hash.of_string (read_file (Filename.concat runtime_dir "jq_value.h"))))
+                  0 8
+            in
             if cflags = "" then emitter_version
             else emitter_version ^ "-" ^ String.sub (Hash.to_hex (Hash.of_string cflags)) 0 8
           in
