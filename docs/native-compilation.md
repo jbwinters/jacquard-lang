@@ -118,8 +118,8 @@ verified neither reference constant-folds under -O2.
 
 | program | interpreter | native | hand C | native vs C |
 | --- | --- | --- | --- | --- |
-| fib (fib 30) | 689 ms | 5 ms | 3 ms | 2.5x |
-| sort (200k, int.ord) | 64864 ms | 92 ms | 27 ms | 3.8x |
+| fib (fib 30) | 689 ms | 5 ms | 3 ms | 1.7x |
+| sort (200k, int.ord) | 64864 ms | 92 ms | 27 ms | 3.4x |
 | pure (mixed battery) | 3199 ms | 11 ms | — | — |
 | avl (10k map.set) | 6224 ms | 13 ms | — | — |
 | state-loop (1M get/put) | 23904 ms | 147 ms | — | — |
@@ -134,14 +134,17 @@ spec), avl 33 / 24 / 22 / 14 / 13 ms, state-loop 250 / 203 / 190 / 172 /
 147 ms, enum 40 / 35 / 25 / 15 / 15 ms.
 
 **The near-C claim stays withdrawn at task 75's gate (BOTH fib and sort
-within 3x of hand C): fib passes at 2.5x, sort does not at 3.8x.**
+within 3x of hand C): fib passes at 1.7x, sort does not at 3.4x.** The
+hand-C cells carry real jitter on this shared box (fib 2-3 ms, sort
+24-31 ms across sessions), so the ratios move with them; every reading
+this arc has taken still lands sort above the gate.
 What the measurements support: the native tier is 138-705x the
 interpreter (the table's own endpoints: fib and sort), the handler-tier state loop runs a
 million get/put pairs in 147 ms (the OCaml/Koka band the boundary
 paragraph promises), and multi-shot enumeration prices per branch as
 designed. The remaining gap to hand C in the empty-row core:
 
-- **fib, 2.5x** — arity-exact signatures for known calls (task 79) were
+- **fib, 1.7x** — arity-exact signatures for known calls (task 79) were
   implemented, measured as a no-op, and declined: LTO's interprocedural
   dead-argument elimination had already rewritten fib to a two-register
   (rt, n) convention (verified by disassembly). What that disassembly
@@ -150,11 +153,11 @@ designed. The remaining gap to hand C in the empty-row core:
   fast paths static inline in the header, that call becomes an inlined
   load-compare-skip (the compiler cannot prove the global's rc is
   invariant, so the no-op executes but the call overhead and ABI spills
-  are gone) and fib went 8 to 5 ms. The remaining 2.5x
+  are gone) and fib went 8 to 5 ms. The remaining gap
   is the boolean living as a static CON matched through pointer, tag,
   and con-info compares where hand C uses a CPU flag, plus tagged-int
   arithmetic.
-- **sort, 3.8x** (was 11x pre-LTO, 7.9x pre-pool, 4.7x pre-task-85) —
+- **sort, 3.4x** (was 11x pre-LTO, 7.9x pre-pool, 4.7x pre-task-85) —
   allocation is size-classed freelists (task 80), and the header-inlined
   RC fast paths took the field-read dup/drop traffic from out-of-line
   calls to inlined branches (task 85: 118 to 97 ms). Intrinsic borrowing (task 81) was
