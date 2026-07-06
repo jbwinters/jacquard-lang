@@ -32,6 +32,30 @@
 #include <string.h>
 
 jq_block jq_suspend_block = { JQ_RC_STATIC, JQ_FRAME, 0, 0, {} };
+jq_block jq_tailcall_block = { JQ_RC_STATIC, JQ_FRAME, 0, 0, {} };
+
+/* the trampoline (task 83). Stash returns the sentinel; drive loops the
+   chain flat. Under musttail toolchains JQ_HOP is identity and compiled
+   code never stashes, but the runtime always drives its own call results —
+   the loop body never runs there, one compare per call. */
+jq_value jq_tc_stash(jq_rt *rt, jq_fn f, jq_value clo, const jq_value *args) {
+  rt->tc_fn = (void *)f;
+  rt->tc_clo = clo;
+  for (int i = 0; i < 8; i++) rt->tc_args[i] = args[i];
+  return JQ_TAILCALL;
+}
+
+jq_value jq_tc_drive(jq_rt *rt, jq_value v) {
+  while (v == JQ_TAILCALL) {
+    jq_fn f = (jq_fn)rt->tc_fn;
+    jq_value c = rt->tc_clo;
+    jq_value a0 = rt->tc_args[0], a1 = rt->tc_args[1], a2 = rt->tc_args[2],
+             a3 = rt->tc_args[3], a4 = rt->tc_args[4], a5 = rt->tc_args[5],
+             a6 = rt->tc_args[6], a7 = rt->tc_args[7];
+    v = f(rt, c, a0, a1, a2, a3, a4, a5, a6, a7);
+  }
+  return v;
+}
 
 /* HF frames mark handle sites in the chain; never re-entered through code
    (run_from and jq_dispatch special-case them by this marker) */
@@ -69,7 +93,7 @@ static jq_value call_n(jq_rt *rt, jq_value fn, uint16_t n, const jq_value *args)
   for (uint16_t i = 0; i < n; i++) a[i] = args[i];
   for (uint16_t i = n; i < JQ_MAX_ARITY; i++) a[i] = JQ_UNIT;
   rt->apply_n = n;
-  return jq_apply(rt, fn, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7]);
+  return jq_tc_drive(rt, jq_apply(rt, fn, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7]));
 }
 
 /* HF slot layout: [0] ret clause; then per entry [1+2i] jq_int(ord<<1|kind),
@@ -171,7 +195,7 @@ static jq_value run_from(jq_rt *rt, jq_block **frames, uint32_t i, uint32_t n, j
     jq_value v = (i + 1 == n) ? arg : run_from(rt, frames, i + 1, n, arg);
     return jq_dispatch(rt, f, v);
   }
-  if (i + 1 == n) return jq_frame_code(f)(rt, f, arg);
+  if (i + 1 == n) return jq_tc_drive(rt, jq_frame_code(f)(rt, f, arg));
   /* an un-entered frame joins the stack BEFORE its inner extent runs, so a
      capture passing through finds it at its true depth — BELOW the frames
      the inner extent pushes. (Pushing it lazily at suspension time put it
@@ -183,7 +207,7 @@ static jq_value run_from(jq_rt *rt, jq_block **frames, uint32_t i, uint32_t n, j
   if (rt->ks_len == 0 || rt->ks[rt->ks_len - 1] != f)
     jq_runtime_error("jacquard runtime: resume drive unbalanced the frame stack (internal)");
   jq_ks_pop(rt);
-  return jq_frame_code(f)(rt, f, v);
+  return jq_tc_drive(rt, jq_frame_code(f)(rt, f, v));
 }
 
 static jq_block *clone_frame(jq_block *f) {

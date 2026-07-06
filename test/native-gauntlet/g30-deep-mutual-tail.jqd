@@ -1,0 +1,15 @@
+; task 83: a 12M-deep mutual tail chain runs in O(1) stack on every
+; toolchain — musttail on clang/gcc15+, the trampoline below them
+; (plain calls on gcc 13 used to SIGSEGV near 10M)
+(defterm
+  ((binding even ()
+    (lam ((pvar n))
+      (match (var n)
+        (clause (plit 0) (var true))
+        (clause (pvar m) (app (var odd) (app (var sub) (var m) (lit 1)))))))
+   (binding odd ()
+    (lam ((pvar n))
+      (match (var n)
+        (clause (plit 0) (var false))
+        (clause (pvar m) (app (var even) (app (var sub) (var m) (lit 1)))))))))
+(app (var even) (lit 12000000))

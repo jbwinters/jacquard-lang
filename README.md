@@ -260,9 +260,9 @@ echo "some words some" | ./word-count --allow console
 
 Requirements and knobs:
 
-- A C toolchain: clang (any recent) or gcc. Guaranteed tail calls need
-  clang or gcc 15+; older gcc runs the same programs with tail depth
-  bounded by the program stack.
+- A C toolchain: clang (any recent) or gcc. Tail calls are O(1) stack on
+  every toolchain: musttail on clang and gcc 15+, a trampoline below
+  them (the emitted C is identical either way).
 - The binary parses `--allow EFFECT` (console, clock, fs, dist, infer so
   far), `--seed N` for the sampling grant, and refuses `--infer-cache`
   and `--dry-run` (interpreter tooling) with pointed errors.

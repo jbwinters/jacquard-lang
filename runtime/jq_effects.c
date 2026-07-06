@@ -71,7 +71,8 @@ jq_value jq_perform(jq_rt *rt, uint32_t op_ord, uint16_t n, const jq_value *args
     jq_value a[JQ_MAX_ARITY] = { 0 };
     for (uint16_t k = 0; k < n; k++) a[k] = args[k];
     for (uint16_t k = n; k < JQ_MAX_ARITY; k++) a[k] = JQ_UNIT;
-    jq_value r = code(rt, clause, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7]);
+    jq_value r =
+        jq_tc_drive(rt, code(rt, clause, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7]));
     grow(rt, hidden);
     memcpy(&rt->hs[rt->hs_len], save, hidden * sizeof(jq_handler_entry));
     rt->hs_len += hidden;

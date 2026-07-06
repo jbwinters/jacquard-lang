@@ -196,6 +196,13 @@ typedef struct jq_rt {
   uint16_t apply_n; /* argument count for the next jq_apply (set by the caller
                        immediately before the call: musttail forces jq_apply
                        onto the uniform signature, so n travels here) */
+  /* trampoline stash (task 83, live only when JQ_HAVE_MUSTTAIL is 0): the
+     pending tail call between a JQ_TAILCALL return and its drive. Nothing
+     runs in between except returns, so one cell suffices; apply_n rides
+     alongside for a stashed jq_apply. */
+  void *tc_fn; /* jq_fn; void* keeps the struct free of the typedef order */
+  jq_value tc_clo;
+  jq_value tc_args[8];
   /* effects (task 70): the handler stack, the grant table, and op metadata.
      Perform searches the stack top-down for the nearest cover; a clause body
      runs against the OUTER continuation, so the entries above (and including)
@@ -259,15 +266,18 @@ typedef jq_value (*jq_fn)(JQ_PARAMS);
 
 /* Guaranteed tail calls (task 76): clang has the musttail statement
  * attribute everywhere we support; GCC grew the same spelling in 15. On
- * older GCC the attribute is absent, so non-self tail chains consume stack
- * frames like ordinary calls — bounded by the same 1 GiB program stack
- * (JACQUARD_STACK_MB) that already bounds non-tail recursion, a recorded
- * portability boundary. Self recursion loopifies at compile time on every
- * toolchain and never needs this. */
+ * older toolchains the trampoline (task 83) takes over: a tail site
+ * stashes {fn, clo, args} in rt and returns the JQ_TAILCALL sentinel,
+ * and every non-tail call site hops the chain in a driver loop, so tail
+ * depth is O(1) stack on every toolchain. The emitted C is identical in
+ * both worlds — JQ_TAIL_RETURN and JQ_HOP select per toolchain here.
+ * Self recursion loopifies at compile time everywhere and needs neither. */
 #if defined(__clang__) || (defined(__GNUC__) && __GNUC__ >= 15)
 #define JQ_MUSTTAIL __attribute__((musttail))
+#define JQ_HAVE_MUSTTAIL 1
 #else
 #define JQ_MUSTTAIL
+#define JQ_HAVE_MUSTTAIL 0
 #endif
 
 /* --- compiled-program support (task 67; jq_apply.c, jq_intrinsics.c) --- */
@@ -302,6 +312,24 @@ jq_value jq_perform(jq_rt *rt, uint32_t op_ord, uint16_t n, const jq_value *args
    call's result and propagate. */
 extern jq_block jq_suspend_block;
 #define JQ_SUSPEND (jq_of_block(&jq_suspend_block))
+
+/* the trampoline sentinel (task 83): "the return value is a stashed tail
+   call — drive it". Never observable as a program value. */
+extern jq_block jq_tailcall_block;
+#define JQ_TAILCALL (jq_of_block(&jq_tailcall_block))
+
+/* stash a tail call and return the sentinel; drive a stashed chain until a
+   real value (or JQ_SUSPEND) comes back. jq_frames.c owns both. */
+jq_value jq_tc_stash(jq_rt *rt, jq_fn f, jq_value clo, const jq_value *args);
+jq_value jq_tc_drive(jq_rt *rt, jq_value v);
+
+#if JQ_HAVE_MUSTTAIL
+#define JQ_TAIL_RETURN(f, rt, c, ...)                                            JQ_MUSTTAIL return f(rt, c, __VA_ARGS__)
+#define JQ_HOP(rt, v) (v)
+#else
+#define JQ_TAIL_RETURN(f, rt, c, ...)                                            return jq_tc_stash(rt, (jq_fn)(f), c, (const jq_value[]){ __VA_ARGS__ })
+#define JQ_HOP(rt, v) jq_tc_drive(rt, v)
+#endif
 
 /* frame re-entry code: called with the (owned) frame and the value the
    suspended call site is resumed with; returns the activation's value */

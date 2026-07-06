@@ -558,8 +558,9 @@ jq_value jq_i_dist_sample_lw(jq_rt *rt, const jq_value *a) {
     rt->unhandled_effect_override = "(not handled during inference)";
     jq_dup(thunk);
     rt->apply_n = 0;
-    jq_value v = jq_apply(rt, thunk, JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT,
-                          JQ_UNIT, JQ_UNIT, JQ_UNIT);
+    jq_value v = jq_tc_drive(
+        rt, jq_apply(rt, thunk, JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT,
+                     JQ_UNIT, JQ_UNIT));
     rt->hs_floor = saved_floor;
     rt->lw = saved_lw;
     rt->unhandled_effect_override = saved_override;

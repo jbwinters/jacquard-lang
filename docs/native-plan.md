@@ -637,6 +637,27 @@ bounds non-tail recursion — the harness and the runtime gate are green
 under gcc 13 with that boundary, and the true trampoline fallback is filed
 as task 83 rather than built speculatively (loopification already
 covers every self tail, and no corpus program tail-chains past the stack).
+[Superseded: task 83 later built the trampoline — see its as-built below —
+so the stack-bounded boundary is gone and tails are O(1) on every
+toolchain.]
+
+**As built (task 83 delta log, follow-up).** The trampoline landed as two
+macros keeping the emitted C identical across toolchains: JQ_TAIL_RETURN
+musttails where the toolchain can and otherwise stashes {fn, clo, args}
+in rt and returns the JQ_TAILCALL sentinel; JQ_HOP is identity under
+musttail and otherwise drives the stashed chain in a loop
+(jq_tc_stash/jq_tc_drive, jq_frames.c). Every non-tail call site hops:
+emitted BCallKnown/BCallUnknown results and top-level assign-tails, plus
+the runtime's own fn-pointer boundaries (call_n, run_from's re-entries,
+the effects clause call, the LW thunk apply) — the runtime drives
+unconditionally, one dead compare per call under musttail. The proof is
+g30-deep-mutual-tail: a 12M-deep even/odd chain (past the old ~10M
+SIGSEGV point) runs byte-identical on gcc 13 — including on an 8 MiB
+stack, and under gcc ASAN — and on clang; the runtime C tests now drive
+their direct jq_apply results like every other C caller, which the gcc
+ASAN leg enforces (an undriven sentinel leaks its stash and the battery
+catches it). clang codegen and benchmarks are unchanged (the hop is
+identity); gcc runs the driver loop and stays green across the harness.
 The error-surface audit over src/runtime_err.ml's constructors, with where
 each is pinned:
 

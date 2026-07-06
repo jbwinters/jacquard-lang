@@ -34,7 +34,7 @@ jq_value jq_apply(JQ_PARAMS) {
       fail("arity mismatch: closure of %u parameter(s) applied to %u argument(s)",
            arity, n);
     jq_fn code = (jq_fn)jq_closure_code(fn);
-    JQ_MUSTTAIL return code(rt, fn, a0, a1, a2, a3, a4, a5, a6, a7);
+    JQ_TAIL_RETURN(code, rt, fn, a0, a1, a2, a3, a4, a5, a6, a7);
   }
   case JQ_BUILTIN: {
     const jq_builtin_info *info = (const jq_builtin_info *)b->payload[0];

@@ -44,3 +44,4 @@ assertion. Counts become printed values via in-language collectors
 | (error surface via row erasure, task 76) | e02-erasure-type-error.jqd | smuggled int reaches text.length's type error |
 | (error surface via row erasure, task 76) | e03-erasure-arity.jqd | smuggled 1-ary closure reaches the arity rendering |
 | (error surface via row erasure, task 76) | e04-erasure-match-failure.jqd | smuggled 5 reaches Match_failure past E0813 |
+| (trampoline, task 83) | g30-deep-mutual-tail.jqd | 12M-deep mutual tail chain in O(1) stack on every toolchain |

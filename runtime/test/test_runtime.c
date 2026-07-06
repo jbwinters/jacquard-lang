@@ -390,8 +390,8 @@ static jq_value cl_resume41(JQ_PARAMS) {
   (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
   jq_drop(clo);
   rt->apply_n = 1;
-  return jq_apply(rt, a0, jq_int(41), JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT,
-                  JQ_UNIT, JQ_UNIT, JQ_UNIT);
+  return jq_tc_drive(rt, jq_apply(rt, a0, jq_int(41), JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT,
+                  JQ_UNIT, JQ_UNIT, JQ_UNIT));
 }
 
 /* clause: resume twice (1 then 2), tuple the branch values */
@@ -400,11 +400,11 @@ static jq_value cl_twice(JQ_PARAMS) {
   jq_drop(clo);
   jq_dup(a0);
   rt->apply_n = 1;
-  jq_value r1 = jq_apply(rt, a0, jq_int(1), JQ_UNIT, JQ_UNIT, JQ_UNIT,
-                         JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT);
+  jq_value r1 = jq_tc_drive(rt, jq_apply(rt, a0, jq_int(1), JQ_UNIT, JQ_UNIT, JQ_UNIT,
+                         JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT));
   rt->apply_n = 1;
-  jq_value r2 = jq_apply(rt, a0, jq_int(2), JQ_UNIT, JQ_UNIT, JQ_UNIT,
-                         JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT);
+  jq_value r2 = jq_tc_drive(rt, jq_apply(rt, a0, jq_int(2), JQ_UNIT, JQ_UNIT, JQ_UNIT,
+                         JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT));
   return jq_tuple(2, (jq_value[]){ r1, r2 });
 }
 
@@ -542,12 +542,12 @@ static void test_escaped_resume_ret_per_resumption(void) {
         "escaped resumption is the handle's value");
   jq_dup(res);
   rt.apply_n = 1;
-  jq_value r1 = jq_apply(&rt, res, jq_int(10), JQ_UNIT, JQ_UNIT, JQ_UNIT,
-                         JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT);
+  jq_value r1 = jq_tc_drive(&rt, jq_apply(&rt, res, jq_int(10), JQ_UNIT, JQ_UNIT, JQ_UNIT,
+                         JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT));
   CHECK(jq_int_val(r1) == 22, "first outside resume: (10+1)*2");
   rt.apply_n = 1;
-  jq_value r2 = jq_apply(&rt, res, jq_int(20), JQ_UNIT, JQ_UNIT, JQ_UNIT,
-                         JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT);
+  jq_value r2 = jq_tc_drive(&rt, jq_apply(&rt, res, jq_int(20), JQ_UNIT, JQ_UNIT, JQ_UNIT,
+                         JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT));
   CHECK(jq_int_val(r2) == 42, "second outside resume: (20+1)*2");
   CHECK(rt.ks_len == 0 && rt.hs_len == 0 && rt.cap_depth == 0,
         "stacks balanced after escaped resumes");
@@ -653,8 +653,8 @@ static jq_value cl_resume10(JQ_PARAMS) {
   (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
   jq_drop(clo);
   rt->apply_n = 1;
-  return jq_apply(rt, a0, jq_int(10), JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT,
-                  JQ_UNIT, JQ_UNIT, JQ_UNIT);
+  return jq_tc_drive(rt, jq_apply(rt, a0, jq_int(10), JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT,
+                  JQ_UNIT, JQ_UNIT, JQ_UNIT));
 }
 
 static void test_deep_handler_recovers_inner_performs(void) {
@@ -731,8 +731,8 @@ static jq_value m5_out_entry(JQ_PARAMS) {
     jq_ks_push(rt, f);
   }
   rt->apply_n = 0;
-  jq_value r = jq_apply(rt, clo0(m5_in_entry), JQ_UNIT, JQ_UNIT, JQ_UNIT,
-                        JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT);
+  jq_value r = jq_tc_drive(rt, jq_apply(rt, clo0(m5_in_entry), JQ_UNIT, JQ_UNIT, JQ_UNIT,
+                        JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT));
   if (r == JQ_SUSPEND) return JQ_SUSPEND;
   if (f) {
     jq_ks_pop(rt);
@@ -753,8 +753,8 @@ static jq_value m5_thunk_reenter(jq_rt *rt, jq_block *f, jq_value v) {
       jq_ks_push(rt, f2);
     }
     rt->apply_n = 1;
-    jq_value r = jq_apply(rt, v, jq_int(7), JQ_UNIT, JQ_UNIT, JQ_UNIT,
-                          JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT);
+    jq_value r = jq_tc_drive(rt, jq_apply(rt, v, jq_int(7), JQ_UNIT, JQ_UNIT, JQ_UNIT,
+                          JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT));
     if (r == JQ_SUSPEND) return JQ_SUSPEND;
     if (f2) {
       jq_ks_pop(rt);
@@ -788,8 +788,8 @@ static jq_value cl_resume5(JQ_PARAMS) {
   (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
   jq_drop(clo);
   rt->apply_n = 1;
-  return jq_apply(rt, a0, jq_int(5), JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT,
-                  JQ_UNIT, JQ_UNIT, JQ_UNIT);
+  return jq_tc_drive(rt, jq_apply(rt, a0, jq_int(5), JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT,
+                  JQ_UNIT, JQ_UNIT, JQ_UNIT));
 }
 
 static void test_chain_order_across_nested_capture(void) {

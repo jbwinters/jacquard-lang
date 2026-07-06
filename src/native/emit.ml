@@ -445,20 +445,17 @@ let rec emit_expr ?(tokens = []) st buf (lives : string list) (exit : exit_kind)
   | TailKnown (code, args, post) ->
       let fname = fn_name code in
       declare st ("fn:" ^ fname) (fun () -> line st.decls "extern jq_value %s(JQ_PARAMS);" fname);
-      emit_tail_call st buf lives exit ~post ~tokens
-        (fun padded -> Printf.sprintf "%s(rt, JQ_UNIT, %s)" fname padded)
-        args
+      emit_tail_call st buf lives exit ~post ~tokens ~target:(fname, "JQ_UNIT") args
   | TailUnknown (f, args, post) ->
       let fv = use st buf f in
       let t = "_f" in
       line buf "jq_value %s = %s;" t fv;
       line buf "rt->apply_n = %d;" (List.length args);
-      emit_tail_call st buf (t :: lives) exit ~consumes:[ t ] ~post ~tokens
-        (fun padded -> Printf.sprintf "jq_apply(rt, %s, %s)" t padded)
+      emit_tail_call st buf (t :: lives) exit ~consumes:[ t ] ~post ~tokens ~target:("jq_apply", t)
         args
 
-and emit_tail_call st buf lives exit ?(consumes = []) ?(post = []) ?(tokens = []) mk
-    (args : atom list) : unit =
+and emit_tail_call st buf lives exit ?(consumes = []) ?(post = []) ?(tokens = [])
+    ~(target : string * string) (args : atom list) : unit =
   if List.length args > max_arity then failwith "arity cap not enforced upstream";
   let temps =
     List.mapi
@@ -478,10 +475,15 @@ and emit_tail_call st buf lives exit ?(consumes = []) ?(post = []) ?(tokens = []
   let padded =
     temps @ List.init (max_arity - List.length temps) (fun _ -> "JQ_UNIT") |> String.concat ", "
   in
+  let f, c = target in
   match exit with
-  | EReturn -> line buf "JQ_MUSTTAIL return %s;" (mk padded)
+  | EReturn ->
+      (* JQ_TAIL_RETURN musttails where the toolchain can and stashes for the
+         trampoline where it cannot (task 83); the emitted C is identical *)
+      line buf "JQ_TAIL_RETURN(%s, rt, %s, %s);" f c padded
   | EAssign (var, label) ->
-      line buf "%s = %s;" var (mk padded);
+      line buf "%s = %s(rt, %s, %s);" var f c padded;
+      line buf "%s = JQ_HOP(rt, %s);" var var;
       line buf "goto %s;" label
 
 (* task 71: a suspendable site in a frame-style function — when a capture is possible
@@ -521,7 +523,8 @@ and emit_bound st buf lives (x : string) (b : bound) : unit =
         let padded =
           vs @ List.init (max_arity - List.length vs) (fun _ -> "JQ_UNIT") |> String.concat ", "
         in
-        line buf "%s%s = %s(rt, JQ_UNIT, %s);" (decl_prefix st x) x fname padded
+        line buf "%s%s = %s(rt, JQ_UNIT, %s);" (decl_prefix st x) x fname padded;
+        line buf "%s = JQ_HOP(rt, %s);" x x
       in
       if Hashtbl.mem st.prog.framed_fns code then emit_suspendable st buf lives x call else call ()
   | BCallUnknown (f, args) ->
@@ -532,7 +535,8 @@ and emit_bound st buf lives (x : string) (b : bound) : unit =
             vs @ List.init (max_arity - List.length vs) (fun _ -> "JQ_UNIT") |> String.concat ", "
           in
           line buf "rt->apply_n = %d;" (List.length args);
-          line buf "%s%s = jq_apply(rt, %s, %s);" (decl_prefix st x) x fv padded)
+          line buf "%s%s = jq_apply(rt, %s, %s);" (decl_prefix st x) x fv padded;
+          line buf "%s = JQ_HOP(rt, %s);" x x)
   | BAllocCon (h, args) ->
       declare_con_info st h;
       let vs = List.map (fun a -> use st buf a) args in

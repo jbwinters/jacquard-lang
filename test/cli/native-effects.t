@@ -50,6 +50,7 @@ assertion, exit codes included.
   identical: g27-lw-under-handler (exit 0)
   identical: g28-lw-nested (exit 0)
   identical: g29-lw-soft (exit 0)
+  identical: g30-deep-mutual-tail (exit 0)
 
 The flagship outputs, pinned so a both-engines regression cannot slip through
 the diff-only loop above:

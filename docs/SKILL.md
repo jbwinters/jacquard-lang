@@ -55,8 +55,9 @@ jacquard replay LOG PROGRAM [--to N] [--fork 'N=(response 503 "down")']
 jacquard build FILE.jqd -o PROG               # AOT-compile to a native binary
 ```
 
-`jacquard build` needs a C toolchain (clang, or gcc — 15+ for guaranteed
-tail calls) and `JACQUARD_RUNTIME` pointing at `runtime/` (defaults to the
+`jacquard build` needs a C toolchain (clang or gcc; tail calls are O(1)
+stack on both — musttail where the toolchain has it, a trampoline below
+gcc 15) and `JACQUARD_RUNTIME` pointing at `runtime/` (defaults to the
 prelude's sibling). The binary is byte-identical to `jacquard run` — the
 differential harness (`scripts/native-diff.sh`) and CI enforce it — and
 parses its own `--allow`/`--seed` flags. Code values (`quote`/`eval`) stay
