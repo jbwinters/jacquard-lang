@@ -29,7 +29,7 @@ The benchmark file (recursion, list traffic, a dictionary sort) too:
 
   $ jacquard run ../../bench/pure.jqd > i.out 2>&1
   $ jacquard build ../../bench/pure.jqd -o bench-prog
-  native: compiled 12 unit(s)
+  native: compiled 15 unit(s)
   $ ./bench-prog > n.out 2>&1
   $ diff i.out n.out && echo identical
   identical
@@ -38,6 +38,28 @@ The unit cache is content-addressed: an unchanged program recompiles nothing.
 
   $ jacquard build ../../bench/pure.jqd -o bench-prog2
   native: compiled 0 unit(s)
+
+Monomorphization (task 69): a sort at int.ord erases its dictionary — the
+specialized unit calls the comparator intrinsic directly and contains no
+generic apply at all — and the spec cache is content-addressed like every
+other unit (second build recompiles nothing).
+
+  $ cat > sortprog.jqd <<'EOF_JQD'
+  > (app (var list.length) (app (var list.sort) (app (var list.reverse) (app (var list.range) (lit 0) (lit 100))) (var int.ord)))
+  > EOF_JQD
+  $ jacquard build sortprog.jqd -o sortprog > /dev/null
+  $ ./sortprog
+  100
+  $ grep -l 'jq_i_int_compare' .jacquard-native/v1/unit_*.c | wc -l | tr -d ' '
+  1
+  $ grep -c 'jq_apply' $(grep -l 'jq_i_int_compare' .jacquard-native/v1/unit_*.c)
+  0
+  [1]
+  $ jacquard build sortprog.jqd -o sortprog2
+  native: compiled 0 unit(s)
+  $ JACQUARD_SPEC=off jacquard build sortprog.jqd -o sortprog-ns > /dev/null
+  $ ./sortprog-ns
+  100
 
 Ineligible REACHABLE constructs are errors naming the construct and its
 home, never silent miscompiles — a handler, an effect operation, a quote.

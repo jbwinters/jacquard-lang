@@ -129,6 +129,15 @@ byte-identical to the interpreter's 2.2s in ~10ms, at 1.49MB steady-state
 RSS precise vs 1.93MB naive — the reuse tokens turn the rebuild of each
 map spine into in-place pointer surgery, as pillar 2 predicted.
 
+Task 69 (monomorphization): `list.sort @ int.ord` specializes to a unit
+whose comparator is a direct jq_i_int_compare call — zero generic applies
+left, verified by grep and pinned in cram. Wall-clock on a 200k sort:
+287ms specialized vs 297ms generic (~3%). The dictionary erased completely;
+the time lives in allocation, not dispatch — the prediction behind the
+plan's original 3x gate was wrong the same way PF.2's estimates were, and
+the gate is now the structural proof. Perceus reuse and allocation strategy
+are where sort time goes next.
+
 Byte-identical output on every program in the differential set
 (test/cli/native.t), ASAN and leak-detection clean. The interpreter rungs
 were declined because engine constants were not the win; changing the

@@ -308,18 +308,19 @@ statically-known member `Ref` (dictionaries are ordinary members per SL.2 —
 bound to that Ref, constant-fold field projections of known records so the
 dictionary disappears, and emit under the key `spec:<member>:<arg-hashes>`
 (the format pillar 3 fixed). Memoize by key — recursion through the same key
-terminates. Unknown dictionary arguments keep the generic path from task 67.
-`--no-spec` flag preserved for differential runs.
+terminates. Unknown dictionary arguments keep the generic path from task 67; the
+JACQUARD_SPEC=off lever preserves it wholesale for differential runs.
 
 **Definition of done.**
-- Sort benchmark: `list.sort` over 20k ints with `int.ord` at least 3x
-  faster with specialization than with `--no-spec` (this is the gate that
-  proves the dictionary actually erased; if the factor is lower,
-  specialization isn't folding projections — fix, don't ship).
-- The emitted C for the specialized comparator contains no dictionary field
-  loads (verified by a marker comment the emitter writes and the test greps).
+- The erasure is proven STRUCTURALLY, pinned by grep in the cram test: the
+  specialized sort unit calls the comparator intrinsic directly and contains
+  zero generic applies. The original 3x wall-clock gate encoded a wrong
+  prediction — measured, the erasure is complete but saves ~3% on a 200k
+  sort, because merge sort is allocation-dominated and the generic dispatch
+  was already cheap (the same lesson that retired PF.2's interpreter rungs).
+  Measured numbers recorded in docs/perf-vm-decision.md.
 - Second build hits the spec cache (0 units compiled), pinned in cram.
-- Outputs byte-identical with and without `--no-spec`.
+- Outputs byte-identical with and without `JACQUARD_SPEC=off`.
 
 ## Task 70 — Effects I: handler runtime, tail-resumptive and root grants
 

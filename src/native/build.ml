@@ -132,6 +132,28 @@ let compile_program (store : Store.t) (d : discovery) (tops_src : (Kernel.expr *
             List.iter enqueue cm.Compile.deps
         | exception Compile.Refused r -> refusals := r :: !refusals)
   done;
+  (* monomorphization (task 69): call sites with statically-known arguments redirect to
+     folded clones; runs before the con table so the table sees the final bodies *)
+  let tops =
+    if !refusals <> [] || Sys.getenv_opt "JACQUARD_SPEC" = Some "off" then tops
+    else begin
+      let implemented = Hashtbl.create 16 in
+      Hashtbl.iter
+        (fun h n -> if Hashtbl.mem itbl n then Hashtbl.replace implemented h n)
+        d.builtin_names;
+      let tops' =
+        Spec.run ~members ~member_arity:d.member_arity ~builtin_names:implemented ~intrinsics:itbl
+          ~tops:(List.map (fun (b, l, w, _) -> (b, l, w)) tops)
+      in
+      if Sys.getenv_opt "JACQUARD_SPEC_DEBUG" <> None then
+        Printf.eprintf "spec: %d clones\n%!"
+          (Hashtbl.fold
+             (fun _ (cm : Compile.compiled_member) acc ->
+               if Filename.check_suffix cm.Compile.mname "@spec" then acc + 1 else acc)
+             members 0);
+      List.map2 (fun (b, l, w) (_, _, _, cs) -> (b, l, w, cs)) tops' tops
+    end
+  in
   (* constructor table: dense type ids per owning declaration *)
   let cons : (Hash.t, Emit.conref) Hashtbl.t = Hashtbl.create 32 in
   let type_ids : (Hash.t, int) Hashtbl.t = Hashtbl.create 8 in
@@ -344,13 +366,19 @@ let build ~(store : Store.t) ~(tops : (Kernel.expr * string list) list) ~prelude
               {
                 cm with
                 Compile.main_fn = Option.map Perceus.fn cm.Compile.main_fn;
-                const_body = Option.map (Perceus.walk Perceus.SSet.empty) cm.Compile.const_body;
+                const_body =
+                  Option.map
+                    (fun b ->
+                      Perceus.reset_tokens ();
+                      Perceus.walk Perceus.SSet.empty b)
+                    cm.Compile.const_body;
                 lifted = List.map Perceus.fn cm.Compile.lifted;
               })
             prog.Emit.members;
         tops =
           List.map
             (fun (body, lifted, warnings) ->
+              Perceus.reset_tokens ();
               (Perceus.walk Perceus.SSet.empty body, List.map Perceus.fn lifted, warnings))
             prog.Emit.tops;
       }
@@ -393,7 +421,10 @@ let build ~(store : Store.t) ~(tops : (Kernel.expr * string list) list) ~prelude
               | Some (_, _, decl_hash) ->
                   Hashtbl.replace by_decl decl_hash
                     (cm :: (try Hashtbl.find by_decl decl_hash with Not_found -> []))
-              | None -> ())
+              | None ->
+                  (* a specialization: its content-hash key IS its unit, so the spec cache
+                     persists across builds like any declaration (pillar 3) *)
+                  Hashtbl.replace by_decl cm.Compile.member [ cm ])
             prog.Emit.members;
           let units =
             Hashtbl.fold
@@ -409,6 +440,10 @@ let build ~(store : Store.t) ~(tops : (Kernel.expr * string list) list) ~prelude
           in
           let cache_tag =
             let emitter_version = if precise then emitter_version else emitter_version ^ "-naive" in
+            let emitter_version =
+              if Sys.getenv_opt "JACQUARD_SPEC" = Some "off" then emitter_version ^ "-nospec"
+              else emitter_version
+            in
             if cflags = "" then emitter_version
             else emitter_version ^ "-" ^ String.sub (Hash.to_hex (Hash.of_string cflags)) 0 8
           in

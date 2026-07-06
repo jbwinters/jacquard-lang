@@ -121,8 +121,10 @@ let rec prune_pat (used : SSet.t) (p : npat) : npat =
 
 let add_drop xs body = if xs = [] then body else Drop (xs, body)
 
-(* reuse tokens need globally unique C names: the same scrutinee var can be re-matched in
-   nested Matches, and a name collision C-shadows the outer token so its shell leaks *)
+(* Reuse tokens need unique C names WITHIN a function: the same scrutinee var can be
+   re-matched in nested Matches, and a name collision C-shadows the outer token so its
+   shell leaks. The counter resets per function so emitted units are byte-stable across
+   programs — the cross-program spec cache depends on it (review find, task 69). *)
 let tok_counter = ref 0
 
 let fresh_tok x =
@@ -234,7 +236,10 @@ let rec walk (owned : SSet.t) (e : expr) : expr =
    transfer into their pattern locals in the prologue; the emitter models that as: NPVar
    params alias the argument local (no dup), other patterns dup their binds and the argument
    itself stays owned. The pass mirrors exactly that. *)
+let reset_tokens () = tok_counter := 0
+
 let fn (f : fn) : fn =
+  reset_tokens ();
   let param_owned =
     List.mapi
       (fun i p ->
