@@ -1,0 +1,22 @@
+# The native eligibility manifest (docs/native-plan.md, task 74).
+# Every file the differential harness (scripts/native-diff.sh) finds
+# UNBUILDABLE must appear here as  path|expected-error-substring  — an
+# unmanifested refusal or a drifted error line fails the harness, so the
+# eligible set can only shrink loudly. Comments start with #.
+#
+# eval stays on the interpreter tier (E1102 policy, plan task 73):
+corpus/valid/eval-gated.jqd|uses eval, which requires the interpreter tier
+corpus/sigs/11-eval-fn.jqd|uses eval, which requires the interpreter tier
+demos/m1-gated.jqd|uses eval, which requires the interpreter tier
+#
+# code values land with task 73:
+corpus/sigs/18-quote.jqd|contains a quote (code values land with task 73)
+demos/repair.jqd|builtin `code.diff` is not yet implemented natively
+#
+# intrinsics not yet ported (docs/native-intrinsics.md tracks the set):
+demos/agent-dream.jqd|builtin `text.contains?` is not yet implemented natively
+#
+# companion files: decl-dependent on their sibling demo, not standalone
+# (the interpreter refuses them identically at check time):
+demos/repair-warp-tests.jqd|error[E0301]: unknown name
+demos/showcase-warp-tests.jqd|error[E0301]: unknown name

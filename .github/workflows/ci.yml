@@ -58,3 +58,37 @@ jobs:
           test -f docs/release/0.1/EVIDENCE.md
           test -f docs/release/0.1/CLAIMS.md
           test -f docs/release/0.1/REPRO.md
+
+  native-parity:
+    name: Native parity
+    runs-on: ubuntu-latest
+    env:
+      CC: clang
+      JACQUARD_RUNTIME: ${{ github.workspace }}/runtime
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.0
+
+      - name: Set up OCaml
+        uses: ocaml/setup-ocaml@v3.6.1
+        with:
+          ocaml-compiler: ${{ env.OCAML_COMPILER }}
+
+      - name: Install dependencies
+        run: opam install --deps-only . --with-test -y
+
+      - name: Build
+        run: opam exec -- dune build @all
+
+      - name: Runtime memory gate (ASAN/UBSAN)
+        run: CC=clang runtime/check.sh
+
+      - name: Differential harness (both engines, byte-compared)
+        run: opam exec -- sh scripts/native-diff.sh
+
+      - name: Leak battery (gauntlet under ASAN)
+        run: opam exec -- sh scripts/native-leak-check.sh
+
+      - name: Fuzz lane (1000 seeded cases)
+        run: opam exec -- dune build @native-fuzz

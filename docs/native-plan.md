@@ -564,6 +564,22 @@ set; a deliberately-broken emitter change demonstrably reddens CI (do it on
 a branch, link the run in the PR); fuzz lane finds no divergence over 10k
 local cases before merge.
 
+**As built (task 74 delta log).** The harness walks 58 files: 50 build and
+byte-match (stdout, stderr, and exit compared separately, no grants, no
+stdin — deterministic on both engines), 8 refuse per the manifest (three
+eval programs, two task-73 code-value programs, one unported intrinsic,
+and two companion files whose sibling-decl dependence the checker refuses
+identically on both engines). The fuzz generator is purpose-built and
+typed by construction (the qcheck form generators emit untyped forms, so
+the plan's reuse pointer ends at their shrink discipline): seeded kernel
+programs over wrapping arithmetic with live zero-divisor error legs,
+let/match/lambda/tuple shapes, list.range traffic, and a recursive
+countdown that exercises loopification. `dune build @native-fuzz` runs
+1000 cases; the executable takes a count and base seed for the bigger
+sweeps. The "Native parity" CI job runs the runtime ASAN gate, the
+harness, the gauntlet leak battery, and the fuzz lane on every push;
+the red-CI demonstration run is linked below once the branch demo lands.
+
 ## Task 75 — Benchmarks and the near-C claim, measured
 
 **Deliverables:** `bench/` suite growth (fib, sort, AVL battery, list
