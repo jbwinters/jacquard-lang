@@ -152,6 +152,12 @@ typedef struct jq_builtin_info {
 /* Per-run context. Compiled main wires the constructor values intrinsics
  * return (booleans; orderings arrive with the compare intrinsics). Effects
  * state lands here in task 70. */
+/* one installed in-language handler clause: op ordinal -> clause closure */
+typedef struct jq_handler_entry {
+  uint32_t op_ord;
+  jq_value clause;
+} jq_handler_entry;
+
 typedef struct jq_rt {
   jq_value v_true;
   jq_value v_false;
@@ -161,6 +167,18 @@ typedef struct jq_rt {
   uint16_t apply_n; /* argument count for the next jq_apply (set by the caller
                        immediately before the call: musttail forces jq_apply
                        onto the uniform signature, so n travels here) */
+  /* effects (task 70): the handler stack, the grant table, and op metadata.
+     Perform searches the stack top-down for the nearest cover; a clause body
+     runs against the OUTER continuation, so the entries above (and including)
+     the match are hidden for the call (see jq_perform). Root grants are the
+     --allow natives; ungranted, uncovered ops die per the interpreter's
+     contract (unhandled = exit 3). */
+  jq_handler_entry *hs;
+  uint32_t hs_len;
+  uint32_t hs_cap;
+  jq_value (**grants)(struct jq_rt *, const jq_value *); /* by op ordinal */
+  const jq_op_info **op_meta; /* by op ordinal, for error rendering */
+  uint32_t n_ops;
 } jq_rt;
 
 /* The uniform compiled-function signature: clang's musttail requires caller
@@ -192,6 +210,23 @@ jq_value jq_apply(JQ_PARAMS);
 
 /* runs the program body on a large-stack thread (jq_main.c) */
 int jq_run_main(jq_rt *rt, void (*body)(jq_rt *));
+
+/* --- effects (task 70; jq_effects.c) --- */
+
+/* push/pop are balanced by the compiled handle construct; push takes
+   ownership of the clause closures, pop releases them */
+void jq_handle_push(jq_rt *rt, uint32_t n, const jq_handler_entry *entries);
+void jq_handle_pop(jq_rt *rt, uint32_t n);
+/* performs op [op_ord] with [n] owned args; returns the clause's value
+   (tail-resumptive: the clause's return IS the resume) */
+jq_value jq_perform(jq_rt *rt, uint32_t op_ord, uint16_t n, const jq_value *args);
+
+/* grant natives (jq_grants.c), installed into rt->grants by generated main
+   according to the binary's --allow flags */
+jq_value jq_g_print(jq_rt *rt, const jq_value *args);
+jq_value jq_g_read_line(jq_rt *rt, const jq_value *args);
+jq_value jq_g_now(jq_rt *rt, const jq_value *args);
+jq_value jq_g_sleep(jq_rt *rt, const jq_value *args);
 
 /* "no clause matched the value %s", exit 2 (Runtime_err.Match_failure) */
 void jq_match_fail(jq_rt *rt, jq_value scrutinee) __attribute__((noreturn));
