@@ -583,6 +583,16 @@ let build ~(store : Store.t) ~(tops : (Kernel.expr * string list * (string * str
                      (Hash.of_string (read_file (Filename.concat runtime_dir "jq_value.h"))))
                   0 8
             in
+            (* the toolchain too (task 76 sign-off find): .o files are
+               compiler-specific, and compile_c skips existing objects, so a
+               clang cache must never serve a gcc link *)
+            let emitter_version =
+              let ic = Unix.open_process_in (quote cc ^ " --version 2>/dev/null") in
+              let banner = try input_line ic with End_of_file -> "" in
+              ignore (Unix.close_process_in ic);
+              emitter_version ^ "-t"
+              ^ String.sub (Hash.to_hex (Hash.of_string (cc ^ "|" ^ banner))) 0 8
+            in
             if cflags = "" then emitter_version
             else emitter_version ^ "-" ^ String.sub (Hash.to_hex (Hash.of_string cflags)) 0 8
           in
