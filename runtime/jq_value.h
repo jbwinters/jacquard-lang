@@ -324,10 +324,12 @@ jq_value jq_tc_stash(jq_rt *rt, jq_fn f, jq_value clo, const jq_value *args);
 jq_value jq_tc_drive(jq_rt *rt, jq_value v);
 
 #if JQ_HAVE_MUSTTAIL
-#define JQ_TAIL_RETURN(f, rt, c, ...)                                            JQ_MUSTTAIL return f(rt, c, __VA_ARGS__)
+#define JQ_TAIL_RETURN(f, rt, c, ...)                                          \
+  JQ_MUSTTAIL return f(rt, c, __VA_ARGS__)
 #define JQ_HOP(rt, v) (v)
 #else
-#define JQ_TAIL_RETURN(f, rt, c, ...)                                            return jq_tc_stash(rt, (jq_fn)(f), c, (const jq_value[]){ __VA_ARGS__ })
+#define JQ_TAIL_RETURN(f, rt, c, ...)                                          \
+  return jq_tc_stash(rt, (jq_fn)(f), c, (const jq_value[]){ __VA_ARGS__ })
 #define JQ_HOP(rt, v) jq_tc_drive(rt, v)
 #endif
 

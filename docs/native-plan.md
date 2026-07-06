@@ -652,12 +652,13 @@ the runtime's own fn-pointer boundaries (call_n, run_from's re-entries,
 the effects clause call, the LW thunk apply) — the runtime drives
 unconditionally, one dead compare per call under musttail. The proof is
 g30-deep-mutual-tail: a 12M-deep even/odd chain (past the old ~10M
-SIGSEGV point) runs byte-identical on gcc 13 — including on an 8 MiB
-stack, and under gcc ASAN — and on clang; the runtime C tests now drive
+SIGSEGV point) runs byte-identical on both toolchains, holds on an
+8 MiB stack, and is clean under gcc ASAN; the runtime C tests now drive
 their direct jq_apply results like every other C caller, which the gcc
-ASAN leg enforces (an undriven sentinel leaks its stash and the battery
-catches it). clang codegen and benchmarks are unchanged (the hop is
-identity); gcc runs the driver loop and stays green across the harness.
+ASAN leg enforces: an undriven sentinel strands the owned value whose
+only reference sits in the stash, and the battery reports the leak.
+clang codegen and benchmarks are unchanged (the hop is identity); gcc
+runs the driver loop and stays green across the harness.
 The error-surface audit over src/runtime_err.ml's constructors, with where
 each is pinned:
 
