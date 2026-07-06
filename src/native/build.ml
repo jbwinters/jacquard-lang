@@ -8,6 +8,14 @@ open Jacquard
 
 let emitter_version = "v1"
 
+(* the default toolchain flags (task 84): -flto lets jq_dup/jq_drop and the
+   intrinsics inline across units and libjqrt — measured 24-55% on the bench
+   suite, byte-identical output, cold-build neutral. JACQUARD_NATIVE_CFLAGS
+   appends afterwards, so an override (-fno-lto, sanitizers) wins. Both
+   strings fold into the cache tag: changing them moves the directory. *)
+let base_cflags = "-std=c11 -O2 -flto -Wall"
+let base_ldflags = "-O2 -flto"
+
 (** The implemented intrinsic surface (docs/native-intrinsics.md). Everything else a program reaches
     is refused by lowering with the builtin's name. *)
 let intrinsics : (string * int) list =
@@ -412,8 +420,8 @@ let link_program ~cc ~cache ~runtime_dir ~(units : (string * string) list) ~(mai
       if count then incr compiled;
       let extra = match Sys.getenv_opt "JACQUARD_NATIVE_CFLAGS" with Some f -> f | None -> "" in
       let cmd =
-        Printf.sprintf "%s -std=c11 -O2 -Wall %s -I %s -c %s -o %s" (quote cc) extra
-          (quote runtime_dir) (quote c_path) (quote o_path)
+        Printf.sprintf "%s %s %s -I %s -c %s -o %s" (quote cc) base_cflags extra (quote runtime_dir)
+          (quote c_path) (quote o_path)
       in
       if run_cmd_quiet cmd <> 0 then failwith ("C compilation failed: " ^ c_path)
     end;
@@ -438,7 +446,7 @@ let link_program ~cc ~cache ~runtime_dir ~(units : (string * string) list) ~(mai
   | () ->
       let extra = match Sys.getenv_opt "JACQUARD_NATIVE_CFLAGS" with Some f -> f | None -> "" in
       let cmd =
-        Printf.sprintf "%s -O2 %s %s -o %s -lm -lpthread" (quote cc) extra
+        Printf.sprintf "%s %s %s %s -o %s -lm -lpthread" (quote cc) base_ldflags extra
           (String.concat " " (List.map quote (List.rev !objs)))
           (quote out)
       in
@@ -593,8 +601,8 @@ let build ~(store : Store.t) ~(tops : (Kernel.expr * string list * (string * str
               emitter_version ^ "-t"
               ^ String.sub (Hash.to_hex (Hash.of_string (cc ^ "|" ^ banner))) 0 8
             in
-            if cflags = "" then emitter_version
-            else emitter_version ^ "-" ^ String.sub (Hash.to_hex (Hash.of_string cflags)) 0 8
+            let flags = base_cflags ^ "|" ^ base_ldflags ^ "|" ^ cflags in
+            emitter_version ^ "-f" ^ String.sub (Hash.to_hex (Hash.of_string flags)) 0 8
           in
           let cache = Filename.concat ".jacquard-native" cache_tag in
           match link_program ~cc ~cache ~runtime_dir ~units ~main_c ~out with

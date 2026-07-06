@@ -2,7 +2,7 @@
 # The benchmark table's producer (docs/native-plan.md, task 75). Three
 # columns per program: interpreter, native, hand-written C reference where
 # one exists. Method: median of 5 wall-clock runs, the engine's own startup
-# subtracted (a `(lit 0)` program's median for each engine), clang -O2
+# subtracted (a `(lit 0)` program's median for each engine), clang -O2 -flto (the default)
 # everywhere. The C column is raw — its ~1 ms process launch is NOT
 # subtracted, which makes the reported native-vs-C ratios conservative.
 # Reproduce the docs/native-compilation.md table with:
