@@ -139,11 +139,14 @@ million get/put pairs in 190 ms (the OCaml/Koka band the boundary
 paragraph promises), and multi-shot enumeration prices per branch as
 designed. The remaining gap to hand C in the empty-row core:
 
-- **fib, 2.7x** (was 6.3x pre-LTO) — the residue is the uniform 10-slot
-  signature (rt, clo, eight argument registers with JQ_UNIT padding)
-  that musttail demands of unknown calls; fib's two-way recursion cannot
-  loopify, so it pays the convention on every node. Follow-up:
-  arity-exact signatures for known calls (task 79).
+- **fib, 2.7x** (was 6.3x pre-LTO) — arity-exact signatures for known
+  calls (task 79) were built, measured, and DECLINED: fib carried the
+  exact signature in the emitted C and moved not at all (9-10 ms vs
+  8-9 ms uniform, and 20 ms either way without LTO), because LTO's
+  interprocedural dead-argument elimination already collapses the
+  uniform convention's padding. The real residue is Perceus/boxing
+  bookkeeping — the dups and the reuse-token churn on the boolean CON
+  match per node — which no signature change touches.
 - **sort, 4.7x** (was 11x pre-LTO, 7.9x pre-pool) — allocation is now
   size-classed freelists (task 80: 189 to 118 ms, where the jemalloc
   preload experiment had bounded a general-purpose swap at ~9%); what
