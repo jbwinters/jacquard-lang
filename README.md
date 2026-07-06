@@ -396,6 +396,19 @@ GitHub Actions has two lanes:
 
 See `docs/ci-cd.md` for branch protection recommendations.
 
+## License
+
+Jacquard is licensed under the GNU Affero General Public License, version 3 or
+later. See [LICENSE](LICENSE).
+
+Commercial licenses are available for organizations that need proprietary
+derivative, hosted-service, redistribution, or expanded trademark terms. See
+[COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md).
+
+The Jacquard name and project identity are governed by
+[TRADEMARKS.md](TRADEMARKS.md). The code license does not grant trademark
+rights.
+
 ## Current Limits
 
 Jacquard core 0.1 is a research prototype, not a production compiler. It does not

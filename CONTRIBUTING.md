@@ -63,3 +63,18 @@ Ordinary PRs must satisfy `CI / Development gate`. Release-candidate branches
 and `jacquard-core-*` tags must also satisfy `Release Evidence / Reproduce 0.1
 evidence`, which runs the reproducibility script and uploads the transcript
 artifact.
+
+## Contributor licensing
+
+By submitting a contribution, you certify that you have the right to submit it
+and that you license it to the Jacquard project under the GNU Affero General
+Public License, version 3 or later.
+
+You also grant Josh Winters and the Jacquard project a perpetual, worldwide,
+non-exclusive, royalty-free license to use, reproduce, modify, distribute,
+sublicense, and relicense your contribution, including as part of commercial
+Jacquard licenses. This keeps the public AGPL project and commercial dual
+licensing path aligned.
+
+If you cannot grant these rights for a contribution, say so before submitting
+it.

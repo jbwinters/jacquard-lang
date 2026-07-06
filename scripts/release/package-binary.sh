@@ -41,6 +41,8 @@ cp "$BIN" "$pkg/libexec/jacquard/jacquard"
 cp -R prelude "$pkg/share/jacquard/prelude"
 cp -R demos "$pkg/share/jacquard/demos"
 cp LICENSE "$pkg/LICENSE"
+cp TRADEMARKS.md "$pkg/TRADEMARKS.md"
+cp COMMERCIAL-LICENSE.md "$pkg/COMMERCIAL-LICENSE.md"
 
 cat >"$pkg/bin/jacquard" <<'SH'
 #!/usr/bin/env sh
@@ -67,6 +69,9 @@ This archive contains the Jacquard CLI and standard prelude.
 - \`libexec/jacquard/jacquard\`: native executable
 - \`share/jacquard/prelude\`: standard library
 - \`share/jacquard/demos\`: runnable examples
+- \`LICENSE\`: AGPL-3.0-or-later public license
+- \`TRADEMARKS.md\`: Jacquard name and mark policy
+- \`COMMERCIAL-LICENSE.md\`: commercial licensing path
 
 ## Manual Install
 
