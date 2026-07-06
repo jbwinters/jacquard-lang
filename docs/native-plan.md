@@ -564,12 +564,12 @@ set; a deliberately-broken emitter change demonstrably reddens CI (do it on
 a branch, link the run in the PR); fuzz lane finds no divergence over 10k
 local cases before merge.
 
-**As built (task 74 delta log).** The harness walks 58 files: 50 build and
+**As built (task 74 delta log).** The harness walks 62 files: 53 build and
 byte-match (stdout, stderr, and exit compared separately, no grants, no
-stdin — deterministic on both engines), 8 refuse per the manifest (three
+stdin — deterministic on both engines), 9 refuse per the manifest (three
 eval programs, two task-73 code-value programs, one unported intrinsic,
-and two companion files whose sibling-decl dependence the checker refuses
-identically on both engines). The fuzz generator is purpose-built and
+and three companion files whose sibling-decl dependence the checker
+refuses identically on both engines). The fuzz generator is purpose-built and
 typed by construction (the qcheck form generators emit untyped forms, so
 the plan's reuse pointer ends at their shrink discipline): seeded kernel
 programs over wrapping arithmetic with live zero-divisor error legs,
