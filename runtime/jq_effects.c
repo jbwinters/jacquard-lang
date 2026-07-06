@@ -90,13 +90,20 @@ jq_value jq_perform(jq_rt *rt, uint32_t op_ord, uint16_t n, const jq_value *args
   if (rt->lw && op_ord == rt->ord_observe && n == 2)
     return jq_lw_observe(rt, args[0], args[1]);
   /* the capability story at runtime: unhandled dies, exit 3. During a
-     weighted run the interpreter names the pseudo-effect instead (task 72:
-     Infer_dist's run_until_op intercepts root-reaching ops). */
+     weighted run the interpreter instead names the pseudo-effect and
+     flattens the failure through the LW driver's diagnostics (E0902,
+     exit 2) — task 72's run_until_op contract. */
   const jq_op_info *info = op_ord < rt->n_ops ? rt->op_meta[op_ord] : NULL;
+  if (rt->lw) {
+    fprintf(stderr,
+            "arithmetic error: error[E0902]: unhandled effect %s: operation `%s` reached "
+            "the root without a handler\n",
+            rt->unhandled_effect_override ? rt->unhandled_effect_override : "?",
+            info ? info->op_name : "?");
+    exit(2);
+  }
   fprintf(stderr,
           "unhandled effect %s: operation `%s` reached the root without a handler\n",
-          rt->unhandled_effect_override ? rt->unhandled_effect_override
-                                        : (info ? info->effect_name : "?"),
-          info ? info->op_name : "?");
+          info ? info->effect_name : "?", info ? info->op_name : "?");
   exit(3);
 }

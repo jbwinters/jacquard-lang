@@ -116,6 +116,22 @@ list (docs/native-plan.md records the boundary). The LW error legs:
   arithmetic error: error[E0901]: the posterior is empty: every run is impossible under the observations
   [2]
 
+A model op that only an OUTER handler could cover is hidden by the run's
+isolation on both engines, and the failure flattens through the driver's
+diagnostics (E0902, exit 2) with the pseudo-effect named:
+
+  $ cat > lw-outer-op.jqd <<'EOF_JQD'
+  > (defeffect e-x ((tvar a)) (op xop () (tref int)))
+  > (handle
+  >   (app (var dist.sample-lw) (lam () (app (var xop))) (lit 3) (lit 42))
+  >   (ret (pvar x) (var x))
+  >   (opclause xop () k (app (var k) (lit 1))))
+  > EOF_JQD
+  $ jacquard build lw-outer-op.jqd -o lw-outer-op > /dev/null
+  $ ./lw-outer-op
+  arithmetic error: error[E0902]: unhandled effect (not handled during inference): operation `xop` reached the root without a handler
+  [2]
+
 The root sampling grant: --allow dist with --seed draws the interpreter's
 exact stream; observe at the root is the interpreter's E0904 defect:
 
