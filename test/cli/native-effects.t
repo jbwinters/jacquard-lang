@@ -8,7 +8,7 @@ assertion, exit codes included.
   $ export JACQUARD_RUNTIME=../../runtime
   $ export CC=clang
 
-  $ for f in ../../test/native-gauntlet/g*.jqd; do
+  $ for f in ../../test/native-gauntlet/[eg]*.jqd; do
   >   n=$(basename $f .jqd)
   >   jacquard run $f > i.out 2>&1; ie=$?
   >   jacquard build $f -o prog > /dev/null 2>&1 || { echo "REFUSED: $n"; continue; }
@@ -18,6 +18,9 @@ assertion, exit codes included.
   >   else echo "DIVERGED: $n interpreter=$ie native=$ne"; diff i.out n.out
   >   fi
   > done
+  identical: e02-erasure-type-error (exit 2)
+  identical: e03-erasure-arity (exit 2)
+  identical: e04-erasure-match-failure (exit 2)
   identical: g01-choose-tuple (exit 0)
   identical: g02-thrice (exit 0)
   identical: g03-deep-inner-count (exit 0)
@@ -156,6 +159,23 @@ exact stream; observe at the root is the interpreter's E0904 defect:
   $ ./obs --allow dist
   error[E0904]: observe reached the sampling root handler; observation requires an inference driver (use jacquard infer)
   [2]
+
+Row erasure can also smuggle a wrongly-typed value into a GRANT (the op
+payload type does not flow to the handler): the grant's defensive type
+error is live parity surface too:
+
+  $ cat > erasure-grant.jqd <<'EOF_JQD'
+  > (handle (app (var println) (app (var get)))
+  >   (ret (pvar x) (var x))
+  >   (opclause get () k (app (var k) (lit 5))))
+  > EOF_JQD
+  $ jacquard build erasure-grant.jqd -o erasure-grant > /dev/null
+  $ jacquard run erasure-grant.jqd --allow console > i.out 2>&1; echo "exit $?"
+  exit 2
+  $ ./erasure-grant --allow console > n.out 2>&1; echo "exit $?"
+  exit 2
+  $ diff i.out n.out && echo identical
+  identical
 
 The infer stub grant, both prompt shapes; the completion cache stays
 interpreter-only until task 73's reader port, loudly:

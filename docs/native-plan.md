@@ -646,9 +646,9 @@ each is pinned:
 | Io | fs grant failures ("io error: path: strerror") | native.t fsmiss |
 | Unhandled | ungranted grantable ops are E0814 at the manifest first; the runtime rendering fires for hidden-handler inference runs and is unit-pinned | check.sh unhandled-op; native-effects.t lw-outer-op |
 | Observe_at_root | --allow dist observe (E0904; E0902-flattened inside LW) | native-effects.t |
-| Match_failure | surface-unreachable: the checker refuses inexhaustive matches (E0813); the defensive rendering stays pinned | check.sh match-fail |
-| Arity | surface-unreachable from checked programs (closure and resumption arities are typed); renderings stay interpreter-exact in code | jq_apply.c/jq_frames.c source parity |
-| Type_error | surface-unreachable (intrinsic/grant argument shapes are typed); defensive renderings ported verbatim | jq_intrinsics.c/jq_grants.c source parity |
+| Match_failure | REACHABLE via row erasure (an op payload type does not flow to its handler, docs/stdlib.md — a handler can resume with a value the site's exhaustive match never expected); also unit-pinned defensively | gauntlet e04; check.sh match-fail |
+| Arity | REACHABLE via row erasure (a smuggled closure of the wrong arity) — review round 1 corrected the first draft's "typed away" claim | gauntlet e03 |
+| Type_error | REACHABLE via row erasure, both intrinsic and grant legs; the probe caught a live wording divergence in text.concat (the interpreter's text2 wrapper uses the generic rendering), fixed and pinned | gauntlet e02; native-effects.t erasure-grant |
 | Unresolved | check-time E0301 on both engines | native-eligibility.txt companions |
 | Eval_error | interpreter-only: eval never compiles (E1101) | native.t, native-effects.t |
 

@@ -355,19 +355,22 @@ let require_toolchain () : (string, string) result =
      at non-self tail sites, bounded by the program stack like non-tail
      recursion — jq_value.h documents the boundary. *)
   let cc = match Sys.getenv_opt "CC" with Some c -> c | None -> "cc" in
-  let ic = Unix.open_process_in (quote cc ^ " --version 2>/dev/null") in
-  let first = try input_line ic with End_of_file -> "" in
-  ignore (Unix.close_process_in ic);
-  let contains s sub =
-    let n = String.length sub in
-    let rec go i = i + n <= String.length s && (String.sub s i n = sub || go (i + 1)) in
-    go 0
+  (* identify by the preprocessor's own macros, not the version banner:
+     Ubuntu's `cc` says "cc (Ubuntu ...)" without naming gcc (review find) *)
+  let ic =
+    Unix.open_process_in
+      (quote cc ^ " -dM -E - < /dev/null 2>/dev/null | grep -c -E '__clang__|__GNUC__'")
   in
-  if contains first "clang" || contains first "gcc" || contains first "GCC" then Ok cc
+  let hits = try input_line ic with End_of_file -> "0" in
+  ignore (Unix.close_process_in ic);
+  if hits <> "0" then Ok cc
   else
     Error
       (Printf.sprintf "jacquard build requires clang or gcc; CC resolves to `%s` (%s)" cc
-         (if first = "" then "not found" else first))
+         (let ic = Unix.open_process_in (quote cc ^ " --version 2>/dev/null") in
+          let first = try input_line ic with End_of_file -> "" in
+          ignore (Unix.close_process_in ic);
+          if first = "" then "not found" else first))
 
 let read_file path =
   let ic = open_in_bin path in

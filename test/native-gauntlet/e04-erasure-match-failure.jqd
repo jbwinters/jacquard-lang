@@ -1,0 +1,9 @@
+; error-surface audit (task 76, review find): an exhaustive bool match
+; passes E0813, but row erasure delivers a 5 — the interpreter's
+; Match_failure rendering at exit 2 is live parity surface
+(handle
+  (match (app (var get))
+    (clause (pcon true) (lit 1))
+    (clause (pcon false) (lit 2)))
+  (ret (pvar x) (var x))
+  (opclause get () k (app (var k) (lit 5))))

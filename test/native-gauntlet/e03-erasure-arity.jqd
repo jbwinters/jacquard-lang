@@ -1,0 +1,6 @@
+; error-surface audit (task 76, review find): row erasure smuggles a 1-ary
+; closure to a 2-argument call site — the interpreter's arity rendering at
+; exit 2 is live parity surface
+(handle (app (app (var get)) (lit 1) (lit 2))
+  (ret (pvar x) (var x))
+  (opclause get () k (app (var k) (lam ((pvar a)) (var a)))))

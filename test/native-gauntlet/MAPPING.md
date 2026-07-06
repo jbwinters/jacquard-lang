@@ -41,3 +41,6 @@ assertion. Counts become printed values via in-language collectors
 | (LW isolation, task-72 review round 1) | g27-lw-under-handler.jqd | outer handler survives the driver's search floor |
 | (nested drivers, task-72 review round 1) | g28-lw-nested.jqd | inner LW's floor/interception save-restore composes |
 | (summation order, task-72 sign-off find) | g29-lw-soft.jqd | soft-likelihood posterior sums in the interpreter's reverse run order |
+| (error surface via row erasure, task 76) | e02-erasure-type-error.jqd | smuggled int reaches text.length's type error |
+| (error surface via row erasure, task 76) | e03-erasure-arity.jqd | smuggled 1-ary closure reaches the arity rendering |
+| (error surface via row erasure, task 76) | e04-erasure-match-failure.jqd | smuggled 5 reaches Match_failure past E0813 |

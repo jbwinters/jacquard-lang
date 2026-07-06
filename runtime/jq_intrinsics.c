@@ -118,9 +118,14 @@ jq_value jq_i_text_length(jq_rt *rt, const jq_value *a) {
   return r;
 }
 
+static void type_err_args(const char *name, const jq_value *a, uint16_t n)
+    __attribute__((noreturn));
+
 jq_value jq_i_text_concat(jq_rt *rt, const jq_value *a) {
   (void)rt;
-  if (!is_text(a[0]) || !is_text(a[1])) type_err2("text.concat", "texts", a[0], a[1]);
+  /* the interpreter's text2 wrapper uses the generic rendering, not the
+     "expects two texts" form (review find via the row-erasure probes) */
+  if (!is_text(a[0]) || !is_text(a[1])) type_err_args("text.concat", a, 2);
   uint64_t la = jq_text_len(a[0]), lb = jq_text_len(a[1]);
   uint8_t *tmp = malloc(la + lb ? la + lb : 1);
   if (!tmp) jq_runtime_error("jacquard runtime: out of memory");

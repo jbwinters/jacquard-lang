@@ -1,0 +1,7 @@
+; error-surface audit (task 76, review find): effect ARGUMENT types are
+; erased (docs/stdlib.md), so a handler can resume with a value the perform
+; site did not expect — this checks, compiles, and must die with the
+; interpreter's intrinsic type error at exit 2
+(handle (app (var text.length) (app (var get)))
+  (ret (pvar x) (var x))
+  (opclause get () k (app (var k) (lit 5))))
