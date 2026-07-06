@@ -253,7 +253,14 @@ typedef struct jq_rt {
       jq_value a3, jq_value a4, jq_value a5, jq_value a6, jq_value a7
 typedef jq_value (*jq_fn)(JQ_PARAMS);
 
-#if defined(__clang__)
+/* Guaranteed tail calls (task 76): clang has the musttail statement
+ * attribute everywhere we support; GCC grew the same spelling in 15. On
+ * older GCC the attribute is absent, so non-self tail chains consume stack
+ * frames like ordinary calls — bounded by the same 1 GiB program stack
+ * (JACQUARD_STACK_MB) that already bounds non-tail recursion, a recorded
+ * portability boundary. Self recursion loopifies at compile time on every
+ * toolchain and never needs this. */
+#if defined(__clang__) || (defined(__GNUC__) && __GNUC__ >= 15)
 #define JQ_MUSTTAIL __attribute__((musttail))
 #else
 #define JQ_MUSTTAIL

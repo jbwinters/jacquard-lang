@@ -1,7 +1,8 @@
 (** The `jacquard build` driver (docs/native-plan.md, task 67): reachability over the store DAG,
     lowering, per-declaration C units cached by content, and the system-toolchain compile+link.
-    clang is required in v1 (musttail); the cache directory carries the emitter version, so bumping
-    [emitter_version] invalidates every unit. *)
+    clang or gcc (task 76; musttail needs clang or gcc 15+, older gcc rides the program stack at
+    non-self tails); the cache directory carries the emitter version, so bumping [emitter_version]
+    invalidates every unit. *)
 
 open Jacquard
 
@@ -348,7 +349,11 @@ let compile_program (store : Store.t) (d : discovery)
 let run_cmd_quiet (cmd : string) : int = Sys.command cmd
 let quote = Filename.quote
 
-let require_clang () : (string, string) result =
+let require_toolchain () : (string, string) result =
+  (* task 76: clang or gcc. Guaranteed tail calls come from musttail (clang
+     anywhere, gcc from 15); older gcc compiles the same C with plain calls
+     at non-self tail sites, bounded by the program stack like non-tail
+     recursion — jq_value.h documents the boundary. *)
   let cc = match Sys.getenv_opt "CC" with Some c -> c | None -> "cc" in
   let ic = Unix.open_process_in (quote cc ^ " --version 2>/dev/null") in
   let first = try input_line ic with End_of_file -> "" in
@@ -358,10 +363,10 @@ let require_clang () : (string, string) result =
     let rec go i = i + n <= String.length s && (String.sub s i n = sub || go (i + 1)) in
     go 0
   in
-  if contains first "clang" then Ok cc
+  if contains first "clang" || contains first "gcc" || contains first "GCC" then Ok cc
   else
     Error
-      (Printf.sprintf "jacquard build requires clang in v1 (musttail); CC resolves to `%s` (%s)" cc
+      (Printf.sprintf "jacquard build requires clang or gcc; CC resolves to `%s` (%s)" cc
          (if first = "" then "not found" else first))
 
 let read_file path =
@@ -489,7 +494,7 @@ let build ~(store : Store.t) ~(tops : (Kernel.expr * string list * (string * str
   in
   if refusals <> [] then Error (`Refused refusals)
   else
-    match require_clang () with
+    match require_toolchain () with
     | Error m -> Error (`Toolchain m)
     | Ok cc -> (
         let runtime_dir = runtime_dir_of ~prelude_dir in

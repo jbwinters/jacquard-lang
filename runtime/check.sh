@@ -39,6 +39,7 @@ expect_fatal div0 2 "arithmetic error: division by zero"
 expect_fatal mod0 2 "arithmetic error: modulo by zero"
 expect_fatal arity-overflow 2 "jacquard runtime: constructor arity exceeds the 65535 limit"
 expect_fatal unhandled-op 3 'unhandled effect console: operation `print` reached the root without a handler'
+expect_fatal match-fail 2 "no clause matched the value 5"
 
 # 4. parity kit (task 66): the C ports must reproduce the OCaml goldens
 #    byte-for-byte. Goldens regenerate via `dune exec test/gen_native_parity.exe`.

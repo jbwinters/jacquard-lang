@@ -239,7 +239,39 @@ jacquard infer enumerate MODEL.jqd
 jacquard infer lw MODEL.jqd --seed 42 --samples 100000
 jacquard replay TRACE.jqd PROGRAM.jqd [--fork '1=(response 500 "down")']
 jacquard test TESTS.jqd [--exhaustive] [--cache-dir CACHE]
+jacquard build FILE.jqd -o PROG
 ```
+
+## Native compilation
+
+`jacquard build` compiles a program and its reachable declarations to a
+standalone binary whose output is byte-identical to `jacquard run` —
+stdout, stderr, and exit codes, pinned by a differential harness in CI
+(`scripts/native-diff.sh`). The full effect language compiles, including
+capturing and multi-shot handlers; code values (`quote`, `eval`) stay on
+the interpreter tier for now.
+
+```bash
+export JACQUARD_PRELUDE=$PWD/prelude
+export JACQUARD_RUNTIME=$PWD/runtime
+jacquard build demos/word-count.jqd -o word-count
+echo "some words some" | ./word-count --allow console
+```
+
+Requirements and knobs:
+
+- A C toolchain: clang (any recent) or gcc. Guaranteed tail calls need
+  clang or gcc 15+; older gcc runs the same programs with tail depth
+  bounded by the program stack.
+- The binary parses `--allow EFFECT` (console, clock, fs, dist, infer so
+  far), `--seed N` for the sampling grant, and refuses `--infer-cache`
+  and `--dry-run` (interpreter tooling) with pointed errors.
+- `JACQUARD_STACK_MB` sizes the program stack (default 1024): deep
+  non-tail recursion is real C recursion in this backend.
+- Compiled units cache under `.jacquard-native/`, keyed by content, so
+  an unchanged program relinks without recompiling.
+- Measured performance and its honest boundaries live in
+  `docs/native-compilation.md` (reproduce with `scripts/native-bench.sh`).
 
 ## Demos
 

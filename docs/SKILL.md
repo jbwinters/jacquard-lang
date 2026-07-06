@@ -52,7 +52,16 @@ jacquard store add|rename ... ; jacquard diff STORE_A STORE_B   # semantic diff
 jacquard dist-diff MODEL_A MODEL_B            # posterior divergence between models
 jacquard tiers [FILES...]                     # effect-row tier statistics (PF.2 phase 1)
 jacquard replay LOG PROGRAM [--to N] [--fork 'N=(response 503 "down")']
+jacquard build FILE.jqd -o PROG               # AOT-compile to a native binary
 ```
+
+`jacquard build` needs a C toolchain (clang, or gcc — 15+ for guaranteed
+tail calls) and `JACQUARD_RUNTIME` pointing at `runtime/` (defaults to the
+prelude's sibling). The binary is byte-identical to `jacquard run` — the
+differential harness (`scripts/native-diff.sh`) and CI enforce it — and
+parses its own `--allow`/`--seed` flags. Code values (`quote`/`eval`) stay
+interpreter-only (E1101); `--dry-run` and `--infer-cache` are interpreter
+tooling and refused with pointed errors.
 
 `jacquard run` loads declarations, then evaluates and prints each top-level
 expression in order. Exit codes for `run`: ungranted-effect refusal (E0814)

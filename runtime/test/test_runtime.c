@@ -854,6 +854,13 @@ int main(int argc, char **argv) {
     jq_con(&huge, fields);
     return 0;
   }
+  if (argc > 1 && strcmp(argv[1], "match-fail") == 0) {
+    /* surface-unreachable (the checker refuses inexhaustive matches with
+       E0813) but the defensive rendering must stay interpreter-exact */
+    jq_rt rt = { 0 };
+    jq_match_fail(&rt, jq_int(5));
+    return 0; /* unreachable */
+  }
   if (argc > 1 && strcmp(argv[1], "unhandled-op") == 0) {
     /* no handler, no grant: the interpreter's exact rendering, exit 3 */
     static const jq_op_info print_info = { NULL, "console", "print", 0 };

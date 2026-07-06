@@ -629,6 +629,35 @@ adds. Stack/frame limits configurable via env var. Docs: README
 gcc on linux x86_64; error-corpus parity pinned in cram; docs updated; the
 standard review and sign-off pass, as for every task above.
 
+**As built (task 76 delta log).** gcc is accepted alongside clang: musttail
+comes from clang (any) or gcc 15+; older gcc compiles the identical C with
+plain calls at non-self tail sites, so tail chains consume stack frames
+bounded by the same 1 GiB program stack (JACQUARD_STACK_MB) that already
+bounds non-tail recursion — the harness and the runtime gate are green
+under gcc 13 with that boundary, and the true trampoline fallback is filed
+as task 83 rather than built speculatively (loopification already
+covers every self tail, and no corpus program tail-chains past the stack).
+The error-surface audit over src/runtime_err.ml's constructors, with where
+each is pinned:
+
+| constructor | native reachability | pin |
+| --- | --- | --- |
+| Arithmetic | div/mod by zero; LW sample-count and E0901 | check.sh fatal modes; native-effects.t |
+| Io | fs grant failures ("io error: path: strerror") | native.t fsmiss |
+| Unhandled | ungranted grantable ops are E0814 at the manifest first; the runtime rendering fires for hidden-handler inference runs and is unit-pinned | check.sh unhandled-op; native-effects.t lw-outer-op |
+| Observe_at_root | --allow dist observe (E0904; E0902-flattened inside LW) | native-effects.t |
+| Match_failure | surface-unreachable: the checker refuses inexhaustive matches (E0813); the defensive rendering stays pinned | check.sh match-fail |
+| Arity | surface-unreachable from checked programs (closure and resumption arities are typed); renderings stay interpreter-exact in code | jq_apply.c/jq_frames.c source parity |
+| Type_error | surface-unreachable (intrinsic/grant argument shapes are typed); defensive renderings ported verbatim | jq_intrinsics.c/jq_grants.c source parity |
+| Unresolved | check-time E0301 on both engines | native-eligibility.txt companions |
+| Eval_error | interpreter-only: eval never compiles (E1101) | native.t, native-effects.t |
+
+Real-formatting parity re-verified per toolchain: runtime/check.sh's task-66
+parity kit (show/rng/utf8 goldens, the %g/strtod round-trip) runs under both
+compilers in CI's toolchain matrix. macOS/arm64 stays unexercised — no
+hardware in this environment; the header's detection is arch-independent
+and the boundary is recorded here rather than claimed tested.
+
 ---
 
 ## Order and parallelism

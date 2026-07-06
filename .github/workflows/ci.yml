@@ -60,10 +60,14 @@ jobs:
           test -f docs/release/0.1/REPRO.md
 
   native-parity:
-    name: Native parity
+    name: Native parity (${{ matrix.cc }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cc: [clang, gcc]
     env:
-      CC: clang
+      CC: ${{ matrix.cc }}
       JACQUARD_RUNTIME: ${{ github.workspace }}/runtime
 
     steps:
@@ -82,7 +86,7 @@ jobs:
         run: opam exec -- dune build @all
 
       - name: Runtime memory gate (ASAN/UBSAN)
-        run: CC=clang runtime/check.sh
+        run: runtime/check.sh
 
       - name: Differential harness (both engines, byte-compared)
         run: opam exec -- sh scripts/native-diff.sh
