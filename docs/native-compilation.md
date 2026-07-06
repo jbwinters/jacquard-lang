@@ -64,7 +64,9 @@ at `int.ord` compiles the comparator to an inlined machine-int compare; the
 comparator dispatch never exists at runtime (the dictionary record itself is
 built once at startup and threads through as an ignored argument). Since
 task 86 the key also covers capture-free lambda LITERALS, identified by
-their lifted code (the host member's hash covers the body): `list.fold` at
+their lifted code (the host member's hash covers the body; top-level hosts
+key by expression index, which bounds cross-build cache sharing, not
+correctness): `list.fold` at
 a known lambda calls its code directly, which removes the generic apply and
 — because the clone no longer has an unknown callee — moves it off the
 frame tier and back under precise Perceus. Measured on the fold-sum bench:
