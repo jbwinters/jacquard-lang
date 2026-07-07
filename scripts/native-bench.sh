@@ -59,6 +59,6 @@ row sum sum.c
 row text text.c
 row pure
 row avl
-row state-loop
+row state-loop state-loop.c
 row enum
-row mutate
+row mutate mutate.c
