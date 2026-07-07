@@ -1,0 +1,5 @@
+; fold-sum: 1M-element list built by range, folded with a lambda literal —
+; the higher-order path (task 86 specializes the fold; task 80 owns the
+; cons traffic). Answer: 499999500000.
+(app (var list.fold) (app (var list.range) (lit 0) (lit 1000000)) (lit 0)
+  (lam ((pvar a) (pvar x)) (app (var add) (var a) (var x))))

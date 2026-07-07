@@ -23,7 +23,7 @@ trap 'rm -rf "$work"' EXIT
 files=${*:-"$(find corpus/valid corpus/sigs demos bench -name '*.jqd' 2>/dev/null | sort)"}
 # a shrinking walk must be LOUD: bump the floor when files are added, and a
 # deletion/renaming that drops coverage fails here instead of passing vacuously
-FLOOR=${FLOOR:-66}
+FLOOR=${FLOOR:-69}
 
 pass=0
 refused=0

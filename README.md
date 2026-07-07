@@ -272,8 +272,10 @@ Requirements and knobs:
   non-tail recursion is real C recursion in this backend.
 - Compiled units cache under `.jacquard-native/`, keyed by content, so
   an unchanged program relinks without recompiling.
-- Measured performance and its honest boundaries live in
-  `docs/native-compilation.md` (reproduce with `scripts/native-bench.sh`).
+- Measured performance lives in `docs/benchmarks.md` — nine scenarios
+  with interpreter, native (both toolchains), Python, and hand-C
+  columns — with the claim boundaries in `docs/native-compilation.md`
+  (reproduce with `scripts/native-bench.sh`).
 
 ## Demos
 

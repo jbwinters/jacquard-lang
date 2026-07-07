@@ -103,6 +103,11 @@ priced by semantics, not implementation.
 
 ## Measured (task 75, 2026-07-06)
 
+The living, extended table — cross-language and cross-toolchain
+columns, the new fold/text/code-value scenarios, and the reproduction
+recipe — is docs/benchmarks.md; this section keeps the claim decision
+and the arc's history.
+
 AMD Ryzen 9 7950X3D, Ubuntu clang 18.1.3, everything -O2 -flto (the
 default since task 84 — cross-unit inlining of the RC and intrinsic fast
 paths cuts 12-58% per program against the same table pre-LTO and is

@@ -1,0 +1,9 @@
+; text traffic: build a comma-joined text of 10k ints by folded concat
+; (quadratic copies — the TEXT allocation path), split it back, count.
+(app (var list.length)
+  (app (var text.split)
+    (app (var list.fold) (app (var list.range) (lit 0) (lit 10000)) (lit "")
+      (lam ((pvar acc) (pvar i))
+        (app (var text.concat) (var acc)
+          (app (var text.concat) (lit ",") (app (var text.from-int) (var i))))))
+    (lit ",")))

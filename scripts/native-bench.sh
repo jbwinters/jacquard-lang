@@ -55,7 +55,10 @@ row() {
 
 row fib fib.c
 row sort sort.c
+row sum sum.c
+row text text.c
 row pure
 row avl
 row state-loop
 row enum
+row mutate

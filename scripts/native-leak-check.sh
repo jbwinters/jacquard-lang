@@ -15,7 +15,7 @@ BIN=${JACQUARD:-"dune exec jacquard --"}
 out=$(mktemp -u "${TMPDIR:-/tmp}/jq-leak-XXXXXX")
 log=$(mktemp "${TMPDIR:-/tmp}/jq-leak-log-XXXXXX")
 trap 'rm -f "$out" "$log"' EXIT
-progs=${*:-"bench/pure.jqd bench/avl.jqd corpus/valid/prelude-map.jqd corpus/valid/even-odd.jqd corpus/valid/fact.jqd corpus/valid/lit-int.jqd corpus/valid/app-add.jqd corpus/valid/lit-real.jqd corpus/valid/lit-text.jqd corpus/valid/tuple-unit.jqd corpus/valid/let-shadow.jqd corpus/valid/match-bool.jqd corpus/valid/to-option.jqd corpus/valid/safe-div.jqd demos/m1-fact.jqd demos/m1-choose.jqd $(ls test/native-gauntlet/g*.jqd 2>/dev/null | tr '\n' ' ')"}
+progs=${*:-"bench/pure.jqd bench/avl.jqd bench/mutate.jqd corpus/valid/prelude-map.jqd corpus/valid/even-odd.jqd corpus/valid/fact.jqd corpus/valid/lit-int.jqd corpus/valid/app-add.jqd corpus/valid/lit-real.jqd corpus/valid/lit-text.jqd corpus/valid/tuple-unit.jqd corpus/valid/let-shadow.jqd corpus/valid/match-bool.jqd corpus/valid/to-option.jqd corpus/valid/safe-div.jqd demos/m1-fact.jqd demos/m1-choose.jqd $(ls test/native-gauntlet/g*.jqd 2>/dev/null | tr '\n' ' ')"}
 for f in $progs; do
   $BIN build "$f" -o "$out" > /dev/null
   status=0
