@@ -544,8 +544,8 @@ code values byte-identical (this exercises the ported printer).
 
 **As built (task 73 delta log).** A CODE block is one form node: an owned
 TEXT head plus (kind, datum) pairs, every datum an ordinary jq_value, so
-the free walk and copy-on-resume needed one new case each and no special
-RC discipline. Quotes lower structurally: the static payload parts become
+the free walk needed one new case and no special RC discipline
+(copy-on-resume already dups slots generically). Quotes lower structurally: the static payload parts become
 immortal nested-static trees (deduped per unit by a serialization key),
 live splices lower left-to-right as ordinary expressions — the
 interpreter's FQuote order — and plug into compile-time holes, which IS
@@ -564,8 +564,17 @@ learned that splice expressions read the enclosing scope — a lambda
 capturing only through a splice miscompiled without it. Task-73 testing
 also surfaced a latent task-69 unsoundness (spec clones baking
 recursion-rebound arguments; fixed and pinned as g34, its own commit).
-code.of-text stays refused (the reader); --infer-cache stays refused
-(the cache entry format needs the reader too).
+code.of-text stays refused through the generic unported-builtin message
+(it is the reader, and will stay so); --infer-cache stays refused (the
+cache entry format needs the reader too). One recorded representation
+boundary, the same class as the 65535-word block limit: a runtime-built
+form caps at 32767 arguments (the uint16 word count), aborting cleanly
+where the interpreter's unbounded lists carry on — data-dependent, so a
+runtime abort rather than a build refusal. The review round also fixed
+a latent interpreter defect this port surfaced: code.diff on a mixed
+form/scalar position raised an uncaught exception in the interpreter
+(scalar_to_string on a form); the differ now renders each side by its
+own shape, and both engines agree.
 
 ## Task 74 — The differential harness as CI law
 

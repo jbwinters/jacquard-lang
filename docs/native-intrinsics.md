@@ -26,7 +26,7 @@ error texts exactly; the differential harness is the check.
 | text.from-int | 1 | yes | task 70; plain text result |
 | code.eq? | 2 | yes | task 73; metadata-erased equality, OCaml real compare (nan = nan) |
 | text.to-int, text.to-real, text.from-real | 1 | not yet | option results |
-| code.form, code.un-form, code.of-int, code.to-int | 2/1/1/1 | yes | task 73; head grammar validated, un-form splits all-form args only |
+| code.form, code.un-form, code.of-int, code.to-int | 2/1/1/1 | yes | task 73; head grammar validated, un-form splits all-form args only; runtime-built forms cap at 32767 args (uint16 representation, clean abort) |
 | code.to-text, code.diff | 1/2 | yes | task 73; diff renders smallest disagreeing subtrees over the ported inline printer |
 | code.of-text | - | refused for good | it is the reader |
 | eval-code | - | refused for good | interpreter tier only |

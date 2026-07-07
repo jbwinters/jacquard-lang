@@ -44,7 +44,14 @@ let rec form_divergences ~path (fa : Form.t) (fb : Form.t) : divergence list =
            | Form.F ga, Form.F gb -> form_divergences ~path ga gb
            | a, b ->
                if Form.equal_arg a b then []
-               else [ { path; a = Printer.scalar_to_string a; b = Printer.scalar_to_string b } ])
+               else
+                 (* a mixed form/scalar position renders each side by its own
+                    shape; scalar_to_string on a form raised (task 73 review) *)
+                 let render = function
+                   | Form.F g -> Printer.inline_form g
+                   | scalar -> Printer.scalar_to_string scalar
+                 in
+                 [ { path; a = render a; b = render b } ])
          (List.combine fa.Form.args fb.Form.args))
 
 (* All ((name, kind), hash) bindings of a store, plus a way to fetch a decl's printed form.

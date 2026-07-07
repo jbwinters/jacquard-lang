@@ -426,32 +426,49 @@ static bool code_head_ok(const uint8_t *s, uint64_t n) {
   return true;
 }
 
-/* OCaml %S: quoted, with the compiler's string escapes (the interpreter
-   renders the invalid head through Printf %S) */
-static void add_ocaml_escaped(char *out, size_t cap, const uint8_t *s, uint64_t n) {
+/* OCaml %S: quoted, with String.escaped's exact classes — backslash and
+   quote escaped, \n \t \r \b named, decimal \DDD for other bytes
+   outside 0x20..0x7e. Heads are arbitrary runtime texts, so the buffer
+   grows (a fixed one truncated long heads; task 73 review). Caller
+   frees. */
+static char *ocaml_escaped(const uint8_t *s, uint64_t n) {
+  size_t cap = (size_t)n * 4 + 3;
+  char *out = malloc(cap);
+  if (!out) jq_runtime_error("jacquard runtime: out of memory");
   size_t w = 0;
-  if (w < cap - 1) out[w++] = '"';
-  for (uint64_t i = 0; i < n && w + 8 < cap; i++) {
+  out[w++] = '"';
+  for (uint64_t i = 0; i < n; i++) {
     uint8_t c = s[i];
-    if (c == '"' || c == '\\') {
+    switch (c) {
+    case '"':
+    case '\\':
       out[w++] = '\\';
       out[w++] = (char)c;
-    } else if (c == '\n') {
+      break;
+    case '\n':
       out[w++] = '\\';
       out[w++] = 'n';
-    } else if (c == '\t') {
+      break;
+    case '\t':
       out[w++] = '\\';
       out[w++] = 't';
-    } else if (c == '\r') {
+      break;
+    case '\r':
       out[w++] = '\\';
       out[w++] = 'r';
-    } else if (c < 0x20 || c >= 0x7f) {
-      w += (size_t)snprintf(out + w, cap - w, "\\%03u", c);
-    } else
-      out[w++] = (char)c;
+      break;
+    case '\b':
+      out[w++] = '\\';
+      out[w++] = 'b';
+      break;
+    default:
+      if (c < 0x20 || c >= 0x7f) w += (size_t)snprintf(out + w, 5, "\\%03u", c);
+      else out[w++] = (char)c;
+    }
   }
-  if (w < cap - 1) out[w++] = '"';
+  out[w++] = '"';
   out[w] = 0;
+  return out;
 }
 
 jq_value jq_i_code_form(jq_rt *rt, const jq_value *a) {
@@ -460,8 +477,7 @@ jq_value jq_i_code_form(jq_rt *rt, const jq_value *a) {
   const uint8_t *hs = jq_text_bytes(a[0]);
   uint64_t hn = jq_text_len(a[0]);
   if (!code_head_ok(hs, hn)) {
-    char esc[256];
-    add_ocaml_escaped(esc, sizeof esc, hs, hn);
+    char *esc = ocaml_escaped(hs, hn);
     fprintf(stderr, "type error: code.form: %s is not a valid form head\n", esc);
     exit(2);
   }
@@ -491,7 +507,8 @@ jq_value jq_i_code_form(jq_rt *rt, const jq_value *a) {
     fprintf(stderr, "type error: code.form expects a list of code, got %s\n", shown);
     exit(2);
   }
-  if (count > (UINT16_MAX - 1) / 2) jq_runtime_error("jacquard runtime: form arity overflow");
+  if (count > (UINT16_MAX - 1) / 2)
+    jq_runtime_error("jacquard runtime: form arity exceeds the 32767 limit");
   jq_value node = jq_code_node(a[0], (uint16_t)count);
   it = a[1];
   for (uint64_t i = 0; i < count; i++) {
