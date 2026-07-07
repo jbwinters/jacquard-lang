@@ -143,6 +143,8 @@ python3 bench/ref/fib.py              # Python twins: fib, sort, sum,
 ```
 
 Each Python cell is median-of-5 minus the `python3 -c pass` baseline.
+The optimization levers these residues point at — with the measured
+evidence each stands on — live in docs/perf-roadmap.md.
 Every bench/*.jqd file also runs inside the differential harness
 (scripts/native-diff.sh), so the two engines' outputs are byte-checked
 on every CI push — the numbers here are only ever about speed, never

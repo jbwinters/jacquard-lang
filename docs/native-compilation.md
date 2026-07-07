@@ -175,7 +175,9 @@ designed. The remaining gap to hand C in the empty-row core:
   suspension has no owner in the frame), the frame save-set is the
   Perceus-accurate owned-live set (moves and drops leave it), and the
   handler-tier state loop dropped 172 to 147 ms with sort at 92 and avl
-  at 13.
+  at 13. What remains open for this row — borrow inference, not another
+  convention flip — is in docs/perf-roadmap.md with the rest of the
+  backlog levers.
 - The task-71 regression (frame-style classification cost dictionary-
   driven members their precise RC: the AVL battery ran ~10 ms before
   task 71, 33 ms after) is closed: spec de-framed the common sites
