@@ -248,8 +248,10 @@ jacquard build FILE.jqd -o PROG
 standalone binary whose output is byte-identical to `jacquard run` —
 stdout, stderr, and exit codes, pinned by a differential harness in CI
 (`scripts/native-diff.sh`). The full effect language compiles, including
-capturing and multi-shot handlers; code values (`quote`, `eval`) stay on
-the interpreter tier for now.
+capturing and multi-shot handlers, and code values compile since task
+73 — quotes, splices, and the structural code ops. `eval` alone stays
+on the interpreter tier (E1102 policy: dynamically loaded code runs
+where the authority model lives).
 
 ```bash
 export JACQUARD_PRELUDE=$PWD/prelude

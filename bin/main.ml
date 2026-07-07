@@ -1557,10 +1557,26 @@ let build_cmd file out prelude dry_run =
                             | Error (`Refused rs) ->
                                 List.iter
                                   (fun (r : Jacquard_native.Compile.refusal) ->
-                                    Printf.eprintf
-                                      "error[E1101]: not yet compilable (native v1 compiles \
-                                       programs without code values): %s %s\n"
-                                      r.Jacquard_native.Compile.where r.Jacquard_native.Compile.what)
+                                    (* eval is policy (E1102): dynamically loaded code runs at
+                                       the interpreter tier; everything else is E1101, a
+                                       not-yet-compiled surface *)
+                                    let what = r.Jacquard_native.Compile.what in
+                                    let sub = "requires the interpreter tier" in
+                                    let is_eval =
+                                      let n = String.length sub in
+                                      let rec go i =
+                                        i + n <= String.length what
+                                        && (String.sub what i n = sub || go (i + 1))
+                                      in
+                                      go 0
+                                    in
+                                    if is_eval then
+                                      Printf.eprintf "error[E1102]: %s %s\n"
+                                        r.Jacquard_native.Compile.where what
+                                    else
+                                      Printf.eprintf
+                                        "error[E1101]: not yet compilable in native v1: %s %s\n"
+                                        r.Jacquard_native.Compile.where what)
                                   rs;
                                 exit_diags
                             | Error (`Toolchain m) ->

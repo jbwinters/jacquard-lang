@@ -11,7 +11,7 @@ CC=${CC:-cc}
 trap 'rm -rf "$OUT"' EXIT
 mkdir -p "$OUT"
 
-SRC="$here/jq_alloc.c $here/jq_rc.c $here/jq_text.c $here/jq_error.c $here/jq_show.c $here/jq_utf8.c $here/jq_rng.c $here/jq_apply.c $here/jq_intrinsics.c $here/jq_effects.c $here/jq_frames.c $here/jq_grants.c $here/test/test_runtime.c"
+SRC="$here/jq_alloc.c $here/jq_rc.c $here/jq_text.c $here/jq_error.c $here/jq_show.c $here/jq_utf8.c $here/jq_rng.c $here/jq_apply.c $here/jq_code.c $here/jq_intrinsics.c $here/jq_effects.c $here/jq_frames.c $here/jq_grants.c $here/test/test_runtime.c"
 
 # 1. address+UB sanitized, 1M-node deep case (sanitizers make 10M slow)
 $CC -std=c11 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all \

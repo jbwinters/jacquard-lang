@@ -42,7 +42,7 @@ enum jq_tag {
   JQ_TEXT = 3,
   JQ_REAL = 4,
   JQ_CLOSURE = 5,
-  JQ_CODE = 6,   /* reserved: task 73 */
+  JQ_CODE = 6,   /* a quoted form (task 73): head + tagged leaf/subform args */
   JQ_RESUME = 7, /* a captured continuation (task 71): owned frame chain */
   JQ_HASH = 8,
   JQ_CONSTRUCTOR = 9, /* first-class unapplied constructor; static-only */
@@ -193,6 +193,8 @@ typedef struct jq_rt {
   jq_value v_nil;                /* list-building intrinsics (text.split) */
   const jq_con_info *ci_cons;
   const jq_con_info *ci_pair;    /* mk-pair, for the dist intrinsics (task 71) */
+  const jq_con_info *ci_some;    /* option some, for the code intrinsics (task 73) */
+  jq_value v_none;               /* option none, static (task 73) */
   uint16_t apply_n; /* argument count for the next jq_apply (set by the caller
                        immediately before the call: musttail forces jq_apply
                        onto the uniform signature, so n travels here) */
@@ -310,6 +312,64 @@ jq_value jq_perform(jq_rt *rt, uint32_t op_ord, uint16_t n, const jq_value *args
    unwinding the C stack. Compared by identity only; static, so stray
    dup/drop is a no-op. Frame-style code must check every suspendable
    call's result and propagate. */
+/* --- code values (task 73; jq_code.c, printing in jq_show.c) ---
+
+   A CODE block is one form node: n = 1 + 2*argc words.
+     payload[0]        the head, an owned TEXT value
+     payload[1 + 2i]   arg i's kind (raw word, jq_code_kind_t)
+     payload[2 + 2i]   arg i's datum, an owned jq_value:
+                       FORM -> CODE, INT -> tagged int, REAL -> REAL block,
+                       TEXT/SYM -> TEXT, HASH -> HASH block
+   Scope marks are interpreter metadata: inline printing never shows meta
+   and code.eq? ignores it, so the native tier carries none (the plan's
+   task-73 direction). */
+typedef enum {
+  JQ_CA_FORM = 0,
+  JQ_CA_INT = 1,
+  JQ_CA_REAL = 2,
+  JQ_CA_TEXT = 3,
+  JQ_CA_SYM = 4,
+  JQ_CA_HASH = 5,
+} jq_code_kind_t;
+
+static inline uint16_t jq_code_argc(jq_value v) {
+  return (uint16_t)((jq_block_of(v)->n - 1) / 2);
+}
+static inline jq_value jq_code_head(jq_value v) {
+  return (jq_value)jq_block_of(v)->payload[0];
+}
+static inline uint64_t jq_code_kind(jq_value v, uint16_t i) {
+  return jq_block_of(v)->payload[1 + 2 * (uint32_t)i];
+}
+static inline jq_value jq_code_datum(jq_value v, uint16_t i) {
+  return (jq_value)jq_block_of(v)->payload[2 + 2 * (uint32_t)i];
+}
+static inline bool jq_is_code(jq_value v) {
+  return jq_is_ptr(v) && jq_block_of(v)->tag == JQ_CODE;
+}
+
+/* allocate a node with the head and argc slots unset; fill each arg with
+   jq_code_set (datum ownership transfers in) */
+jq_value jq_code_node(jq_value head_text, uint16_t argc);
+static inline void jq_code_set(jq_value code, uint16_t i, uint64_t kind, jq_value datum) {
+  jq_block_of(code)->payload[1 + 2 * (uint32_t)i] = kind;
+  jq_block_of(code)->payload[2 + 2 * (uint32_t)i] = (uint64_t)datum;
+}
+
+/* Form.equal_ignoring_meta: heads and args structurally, reals with
+   OCaml compare semantics (nan = nan, -0. = 0.) */
+bool jq_code_eq(jq_value a, jq_value b);
+
+/* Printer.inline_form as a malloc'd C string (jq_show.c owns the port) */
+char *jq_code_inline(jq_value v);
+/* Printer.scalar_to_string for one arg (malloc'd) */
+char *jq_code_scalar(uint64_t kind, jq_value datum);
+/* code.diff's rendering: "identical" or "; "-joined divergences (malloc'd) */
+char *jq_code_diff_render(jq_value a, jq_value b);
+
+/* the splice guard: unquote results must be code (eval.ml's rt_type) */
+jq_value jq_code_splice_guard(jq_rt *rt, jq_value v);
+
 extern jq_block jq_suspend_block;
 #define JQ_SUSPEND (jq_of_block(&jq_suspend_block))
 
@@ -416,6 +476,13 @@ jq_value jq_i_text_from_int(jq_rt *rt, const jq_value *a);
 jq_value jq_i_support(jq_rt *rt, const jq_value *a);
 jq_value jq_i_pmf(jq_rt *rt, const jq_value *a);
 jq_value jq_i_dist_sample_lw(jq_rt *rt, const jq_value *a);
+jq_value jq_i_code_of_int(jq_rt *rt, const jq_value *a);
+jq_value jq_i_code_to_int(jq_rt *rt, const jq_value *a);
+jq_value jq_i_code_to_text(jq_rt *rt, const jq_value *a);
+jq_value jq_i_code_form(jq_rt *rt, const jq_value *a);
+jq_value jq_i_code_un_form(jq_rt *rt, const jq_value *a);
+jq_value jq_i_code_eq_q(jq_rt *rt, const jq_value *a);
+jq_value jq_i_code_diff(jq_rt *rt, const jq_value *a);
 /* the LW driver's root interception (jq_perform's ladder, jq_intrinsics.c) */
 jq_value jq_lw_sample(jq_rt *rt, jq_value dv);
 jq_value jq_lw_observe(jq_rt *rt, jq_value dv, jq_value v);

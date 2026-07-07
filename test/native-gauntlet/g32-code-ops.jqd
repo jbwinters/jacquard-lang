@@ -1,0 +1,17 @@
+; task 73: the structural code ops, round-tripped — of-int/to-int/to-text
+; unwraps, form/un-form rebuilds, eq? both ways, diff identical and divergent
+(app (var code.to-int) (app (var code.of-int) (lit 41)))
+(app (var code.to-int) (quote (var x)))
+(app (var code.to-text) (quote (lit "hi")))
+(app (var code.to-text) (quote (lit 3)))
+(app (var code.un-form) (quote (app (var f) (var g))))
+(app (var code.un-form) (quote (lit 9)))
+(match (app (var code.un-form) (quote (app (var f) (var g))))
+  (clause (pcon some (ptuple (pvar h) (pvar kids)))
+    (app (var code.form) (var h) (var kids)))
+  (clause (pcon none) (quote (lit 0))))
+(app (var code.eq?) (quote (app (var f) (lit 1))) (quote (app (var f) (lit 1))))
+(app (var code.eq?) (quote (lit 1.5)) (quote (lit 1.5)))
+(app (var code.eq?) (quote (lit 1)) (quote (lit 2)))
+(app (var code.diff) (quote (app (var f) (lit 1))) (app (var code.form) (lit "app") (app (var cons) (quote (var f)) (app (var cons) (quote (lit 1)) (var nil)))))
+(app (var code.diff) (quote (lam ((pvar x)) (app (var f) (var x) (lit 2)))) (quote (lam ((pvar x)) (app (var g) (var x) (lit 3)))))

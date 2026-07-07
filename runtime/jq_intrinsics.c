@@ -362,6 +362,189 @@ static jq_value support_of(jq_rt *rt, jq_value d) {
   return list;
 }
 
+/* --- code intrinsics (task 73): structural ops over quoted forms ---- */
+
+static jq_value vsome(jq_rt *rt, jq_value v) { return jq_con(rt->ci_some, (jq_value[]){ v }); }
+
+/* the one static text the code intrinsics need: "lit" (of-int builds
+   (lit n) nodes). TEXT layout: n=2 words (length word + one data word). */
+static struct {
+  uint32_t rc;
+  uint8_t tag;
+  uint8_t flags;
+  uint16_t n;
+  uint64_t len;
+  char bytes[8];
+} jq_lit_text = { JQ_RC_STATIC, JQ_TEXT, 0, 2, 3, "lit" };
+#define JQ_LIT_TEXT ((jq_value)&jq_lit_text)
+
+jq_value jq_i_code_of_int(jq_rt *rt, const jq_value *a) {
+  (void)rt;
+  if (!jq_is_int(a[0])) type_err_args("code.of-int", a, 1);
+  jq_value node = jq_code_node(JQ_LIT_TEXT, 1);
+  jq_code_set(node, 0, JQ_CA_INT, a[0]);
+  return node;
+}
+
+jq_value jq_i_code_to_int(jq_rt *rt, const jq_value *a) {
+  if (!jq_is_code(a[0])) type_err_args("code.to-int", a, 1);
+  jq_value f = a[0];
+  jq_value head = jq_code_head(f);
+  jq_value r;
+  if (jq_text_len(head) == 3 && memcmp(jq_text_bytes(head), "lit", 3) == 0 &&
+      jq_code_argc(f) == 1 && jq_code_kind(f, 0) == JQ_CA_INT)
+    r = vsome(rt, jq_code_datum(f, 0));
+  else
+    r = rt->v_none;
+  jq_drop(a[0]);
+  return r;
+}
+
+jq_value jq_i_code_to_text(jq_rt *rt, const jq_value *a) {
+  if (!jq_is_code(a[0])) type_err_args("code.to-text", a, 1);
+  jq_value f = a[0];
+  jq_value head = jq_code_head(f);
+  jq_value r;
+  if (jq_text_len(head) == 3 && memcmp(jq_text_bytes(head), "lit", 3) == 0 &&
+      jq_code_argc(f) == 1 && jq_code_kind(f, 0) == JQ_CA_TEXT) {
+    jq_value t = jq_code_datum(f, 0);
+    jq_dup(t);
+    r = vsome(rt, t);
+  } else
+    r = rt->v_none;
+  jq_drop(a[0]);
+  return r;
+}
+
+/* Reader.valid_head, over text bytes */
+static bool code_head_ok(const uint8_t *s, uint64_t n) {
+  if (n == 0 || s[0] < 'a' || s[0] > 'z') return false;
+  for (uint64_t i = 0; i < n; i++) {
+    uint8_t c = s[i];
+    if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-')) return false;
+  }
+  return true;
+}
+
+/* OCaml %S: quoted, with the compiler's string escapes (the interpreter
+   renders the invalid head through Printf %S) */
+static void add_ocaml_escaped(char *out, size_t cap, const uint8_t *s, uint64_t n) {
+  size_t w = 0;
+  if (w < cap - 1) out[w++] = '"';
+  for (uint64_t i = 0; i < n && w + 8 < cap; i++) {
+    uint8_t c = s[i];
+    if (c == '"' || c == '\\') {
+      out[w++] = '\\';
+      out[w++] = (char)c;
+    } else if (c == '\n') {
+      out[w++] = '\\';
+      out[w++] = 'n';
+    } else if (c == '\t') {
+      out[w++] = '\\';
+      out[w++] = 't';
+    } else if (c == '\r') {
+      out[w++] = '\\';
+      out[w++] = 'r';
+    } else if (c < 0x20 || c >= 0x7f) {
+      w += (size_t)snprintf(out + w, cap - w, "\\%03u", c);
+    } else
+      out[w++] = (char)c;
+  }
+  if (w < cap - 1) out[w++] = '"';
+  out[w] = 0;
+}
+
+jq_value jq_i_code_form(jq_rt *rt, const jq_value *a) {
+  (void)rt;
+  if (!is_text(a[0])) type_err_args("code.form", a, 2);
+  const uint8_t *hs = jq_text_bytes(a[0]);
+  uint64_t hn = jq_text_len(a[0]);
+  if (!code_head_ok(hs, hn)) {
+    char esc[256];
+    add_ocaml_escaped(esc, sizeof esc, hs, hn);
+    fprintf(stderr, "type error: code.form: %s is not a valid form head\n", esc);
+    exit(2);
+  }
+  /* walk the cons list twice: count, then fill (the interpreter errors on
+     the first non-conforming node with its show) */
+  uint64_t count = 0;
+  jq_value it = a[1];
+  bool bad = false;
+  for (;;) {
+    if (is_con_named(it, "cons") && jq_con_arity(it) == 2) {
+      jq_value hd = jq_con_fields(it)[0];
+      if (!jq_is_code(hd)) {
+        bad = true;
+        break;
+      }
+      count++;
+      it = jq_con_fields(it)[1];
+    } else if (is_con_named(it, "nil") && jq_con_arity(it) == 0)
+      break;
+    else {
+      bad = true;
+      break;
+    }
+  }
+  if (bad) {
+    char *shown = jq_show(it);
+    fprintf(stderr, "type error: code.form expects a list of code, got %s\n", shown);
+    exit(2);
+  }
+  if (count > (UINT16_MAX - 1) / 2) jq_runtime_error("jacquard runtime: form arity overflow");
+  jq_value node = jq_code_node(a[0], (uint16_t)count);
+  it = a[1];
+  for (uint64_t i = 0; i < count; i++) {
+    jq_value hd = jq_con_fields(it)[0];
+    jq_dup(hd);
+    jq_code_set(node, (uint16_t)i, JQ_CA_FORM, hd);
+    it = jq_con_fields(it)[1];
+  }
+  jq_drop(a[1]); /* the head text's ownership moved into the node */
+  return node;
+}
+
+jq_value jq_i_code_un_form(jq_rt *rt, const jq_value *a) {
+  if (!jq_is_code(a[0])) type_err_args("code.un-form", a, 1);
+  jq_value f = a[0];
+  uint16_t n = jq_code_argc(f);
+  for (uint16_t i = 0; i < n; i++)
+    if (jq_code_kind(f, i) != JQ_CA_FORM) {
+      jq_drop(a[0]);
+      return rt->v_none;
+    }
+  jq_value list = rt->v_nil;
+  for (uint16_t i = n; i > 0; i--) {
+    jq_value sub = jq_code_datum(f, i - 1);
+    jq_dup(sub);
+    list = jq_con(rt->ci_cons, (jq_value[]){ sub, list });
+  }
+  jq_value head = jq_code_head(f);
+  jq_dup(head);
+  jq_value r = vsome(rt, jq_tuple(2, (jq_value[]){ head, list }));
+  jq_drop(a[0]);
+  return r;
+}
+
+jq_value jq_i_code_eq_q(jq_rt *rt, const jq_value *a) {
+  if (!jq_is_code(a[0]) || !jq_is_code(a[1])) type_err_args("code.eq?", a, 2);
+  bool r = jq_code_eq(a[0], a[1]);
+  jq_drop(a[0]);
+  jq_drop(a[1]);
+  return vbool(rt, r);
+}
+
+jq_value jq_i_code_diff(jq_rt *rt, const jq_value *a) {
+  (void)rt;
+  if (!jq_is_code(a[0]) || !jq_is_code(a[1])) type_err_args("code.diff", a, 2);
+  char *txt = jq_code_diff_render(a[0], a[1]);
+  jq_value r = jq_text((const uint8_t *)txt, strlen(txt));
+  free(txt);
+  jq_drop(a[0]);
+  jq_drop(a[1]);
+  return r;
+}
+
 jq_value jq_i_support(jq_rt *rt, const jq_value *a) {
   if (!jq_is_ptr(a[0]) || jq_block_of(a[0])->tag != JQ_CON) {
     char *s = jq_show(a[0]);

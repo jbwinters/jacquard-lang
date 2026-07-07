@@ -98,6 +98,115 @@ static void add_escaped_text(jq_buf *b, const uint8_t *s, uint64_t n) {
   buf_adds(b, "\"");
 }
 
+/* --- the canonical inline printer (task 73; src/printer.ml) --------- */
+
+/* Reader.valid_head: [a-z][a-z0-9-]* */
+static bool head_ok(const uint8_t *s, uint64_t n) {
+  if (n == 0 || s[0] < 'a' || s[0] > 'z') return false;
+  for (uint64_t i = 0; i < n; i++) {
+    uint8_t c = s[i];
+    if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-')) return false;
+  }
+  return true;
+}
+
+/* Reader.valid_library_symbol: dot-separated [a-z][a-z0-9-]* segments,
+   at most one trailing ? or ! */
+static bool symbol_ok(const uint8_t *s, uint64_t n) {
+  if (n == 0) return false;
+  uint64_t body = (s[n - 1] == '?' || s[n - 1] == '!') ? n - 1 : n;
+  if (body == 0) return false;
+  uint64_t seg = 0;
+  for (uint64_t i = 0; i <= body; i++) {
+    if (i == body || s[i] == '.') {
+      if (seg == i) return false; /* empty segment */
+      if (!(s[seg] >= 'a' && s[seg] <= 'z')) return false;
+      seg = i + 1;
+    } else {
+      uint8_t c = s[i];
+      if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-')) return false;
+    }
+  }
+  return true;
+}
+
+/* Printer.Bug_unprintable parity: the interpreter raises out of Value.show;
+   unreachable from checked programs (quote payloads parsed, code.form heads
+   validated), so the native rendering of the crash is a plain fatal. */
+static void unprintable(const char *what, const uint8_t *s, uint64_t n) {
+  fprintf(stderr, "jacquard runtime: %s %.*s is not printable\n", what, (int)n,
+          (const char *)s);
+  exit(2);
+}
+
+static void scalar_into(jq_buf *b, uint64_t kind, jq_value datum) {
+  switch ((jq_code_kind_t)kind) {
+  case JQ_CA_INT:
+    buf_addf(b, "%lld", (long long)jq_int_val(datum));
+    break;
+  case JQ_CA_REAL:
+    add_real_repr(b, jq_real_val(datum));
+    break;
+  case JQ_CA_TEXT:
+    add_escaped_text(b, jq_text_bytes(datum), jq_text_len(datum));
+    break;
+  case JQ_CA_SYM: {
+    const uint8_t *s = jq_text_bytes(datum);
+    uint64_t n = jq_text_len(datum);
+    if (!symbol_ok(s, n)) unprintable("symbol", s, n);
+    buf_add(b, (const char *)s, n);
+    break;
+  }
+  case JQ_CA_HASH: {
+    buf_adds(b, "#");
+    const uint8_t *h = jq_hash_bytes(datum);
+    for (int i = 0; i < 32; i++) buf_addf(b, "%02x", h[i]);
+    break;
+  }
+  case JQ_CA_FORM:
+    jq_runtime_error("jacquard runtime: scalar rendering hit a form (internal)");
+  }
+}
+
+static void inline_form_into(jq_buf *b, jq_value code) {
+  jq_value head = jq_code_head(code);
+  const uint8_t *hs = jq_text_bytes(head);
+  uint64_t hn = jq_text_len(head);
+  uint16_t argc = jq_code_argc(code);
+  bool group = hn == 5 && memcmp(hs, "group", 5) == 0;
+  buf_adds(b, "(");
+  if (group) {
+    /* a group whose first element is a scalar reparses as a headed form */
+    if (argc > 0 && jq_code_kind(code, 0) != JQ_CA_FORM)
+      unprintable("group with a leading scalar element", hs, hn);
+  } else {
+    if (!head_ok(hs, hn)) unprintable("head", hs, hn);
+    buf_add(b, (const char *)hs, hn);
+  }
+  for (uint16_t i = 0; i < argc; i++) {
+    if (i || !group) buf_adds(b, " ");
+    if (jq_code_kind(code, i) == JQ_CA_FORM) inline_form_into(b, jq_code_datum(code, i));
+    else scalar_into(b, jq_code_kind(code, i), jq_code_datum(code, i));
+  }
+  buf_adds(b, ")");
+}
+
+char *jq_code_inline(jq_value v) {
+  jq_buf b = { 0 };
+  buf_grow(&b, 16);
+  b.data[0] = 0;
+  inline_form_into(&b, v);
+  return b.data;
+}
+
+char *jq_code_scalar(uint64_t kind, jq_value datum) {
+  jq_buf b = { 0 };
+  buf_grow(&b, 16);
+  b.data[0] = 0;
+  scalar_into(&b, kind, datum);
+  return b.data;
+}
+
 static void show_into(jq_buf *b, jq_value v) {
   if (jq_is_int(v)) {
     buf_addf(b, "%lld", (long long)jq_int_val(v));
@@ -152,6 +261,12 @@ static void show_into(jq_buf *b, jq_value v) {
   }
   case JQ_RESUME:
     buf_adds(b, "<resume>");
+    break;
+  case JQ_CODE:
+    /* Value.show: "(quote " ^ Printer.inline_form payload ^ ")" */
+    buf_adds(b, "(quote ");
+    inline_form_into(b, v);
+    buf_adds(b, ")");
     break;
   default:
     jq_runtime_error("jacquard runtime: show hit an unrenderable tag");

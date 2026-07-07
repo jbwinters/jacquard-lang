@@ -65,6 +65,12 @@ void jq_free_walk(jq_block *root) {
     case JQ_REAL:
     case JQ_HASH:
       break;
+    case JQ_CODE:
+      /* payload: [0] head TEXT; then (kind, datum) pairs — kinds are raw,
+         datums owned (ints drop as no-ops) */
+      drop_child(&w, (jq_value)b->payload[0]);
+      for (uint16_t i = 2; i < b->n; i += 2) drop_child(&w, (jq_value)b->payload[i]);
+      break;
     case JQ_FRAME:
       /* payload: [0] code, [1] ix, [2] aux (raw); [3..] owned slots */
       for (uint16_t i = 3; i < b->n; i++) drop_child(&w, b->payload[i]);

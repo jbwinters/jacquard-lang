@@ -243,6 +243,69 @@ let real_static st (r : float) =
       line st.decls "  %s = { UINT32_MAX, JQ_REAL, 0, 1, %s };" name (c_double r));
   Printf.sprintf "((jq_value)&%s)" name
 
+(* static code trees (task 73): one immortal block per distinct subtree,
+   deduped by a serialization key. Children emit before parents so the
+   forward references resolve. *)
+let hash_static st (h : Hash.t) =
+  let hex = Hash.to_hex h in
+  let name = "hs_" ^ String.sub hex 0 12 in
+  declare st ("hs:" ^ name) (fun () ->
+      let (Hash.Digest_bytes bytes) = h in
+      let words =
+        List.init 32 (fun i -> Printf.sprintf "0x%02x" (Char.code (String.get bytes i)))
+      in
+      line st.decls
+        "static const struct { uint32_t rc; uint8_t tag; uint8_t flags; uint16_t n; \
+         uint8_t          bytes[32]; }";
+      line st.decls "  %s = { UINT32_MAX, JQ_HASH, 0, 4, { %s } };" name (String.concat ", " words));
+  Printf.sprintf "((jq_value)&%s)" name
+
+let int_word (i : int) : string =
+  Printf.sprintf "%LuULL" (Int64.logor (Int64.shift_left (Int64.of_int i) 1) 1L)
+
+let rec code_ser (t : code_tmpl) : string =
+  Printf.sprintf "F%d:%s(%s)" (String.length t.chead) t.chead
+    (String.concat ","
+       (List.map
+          (function
+            | CForm sub -> code_ser sub
+            | CInt i -> Printf.sprintf "I%d" i
+            | CReal r -> Printf.sprintf "R%Lx" (Int64.bits_of_float r)
+            | CText x -> Printf.sprintf "T%d:%s" (String.length x) x
+            | CSym x -> Printf.sprintf "S%d:%s" (String.length x) x
+            | CHash h -> "H" ^ Hash.to_hex h
+            | CSplice _ -> failwith "internal: splice in a static code tree")
+          t.cargs))
+
+let rec code_static st (t : code_tmpl) : string =
+  let head = text_static st t.chead in
+  let args =
+    List.map
+      (function
+        | CForm sub -> ("JQ_CA_FORM", code_static st sub)
+        | CInt i -> ("JQ_CA_INT", int_word i)
+        | CReal r -> ("JQ_CA_REAL", real_static st r)
+        | CText x -> ("JQ_CA_TEXT", text_static st x)
+        | CSym x -> ("JQ_CA_SYM", text_static st x)
+        | CHash h -> ("JQ_CA_HASH", hash_static st h)
+        | CSplice _ -> failwith "internal: splice in a static code tree")
+      t.cargs
+  in
+  let name = "cq_" ^ String.sub (Hash.to_hex (Hash.of_string (code_ser t))) 0 12 in
+  declare st ("cq:" ^ name) (fun () ->
+      let payload =
+        Printf.sprintf "(uint64_t)%s" head
+        :: List.concat_map (fun (k, v) -> [ k; Printf.sprintf "(uint64_t)%s" v ]) args
+      in
+      emit_static_block st name ~tag:"JQ_CODE" ~flags:0
+        ~n:(1 + (2 * List.length args))
+        ~payload_words:(1 + (2 * List.length args))
+        ~payload);
+  Printf.sprintf "((jq_value)&%s)" name
+
+let rec code_has_splice (a : code_arg) : bool =
+  match a with CSplice _ -> true | CForm t -> List.exists code_has_splice t.cargs | _ -> false
+
 (* ------------------------------------------------------------------ *)
 (* Atoms                                                               *)
 (* ------------------------------------------------------------------ *)
@@ -267,7 +330,7 @@ let moved_vars (b : bound) : string list =
   let atoms =
     match b with
     | BAtom a -> [ a ]
-    | BCallKnown (_, args) | BIntrinsic (_, args) | BAllocTuple args -> args
+    | BCallKnown (_, args) | BIntrinsic (_, args) | BAllocTuple args | BAllocCode (_, args) -> args
     | BCallUnknown (f, args) -> f :: args
     | BAllocCon (_, args) | BAllocConReuse (_, args, _) | BPerform (_, args) -> args
     | BAllocClosure { captured; _ } -> captured
@@ -580,6 +643,69 @@ and emit_bound st buf lives (x : string) (b : bound) : unit =
       else
         line buf "%s%s = jq_i_%s(rt, (jq_value[]){ %s });" (decl_prefix st x) x cname
           (String.concat ", " vs)
+  | BAllocCode (root, args) ->
+      if not (code_has_splice root) then begin
+        (* the whole payload is static: bind the immortal tree, no RC *)
+        let t = match root with CForm t -> t | _ -> failwith "internal: splice-free root" in
+        line buf "%s%s = %s;" (decl_prefix st x) x (code_static st t)
+      end
+      else begin
+        (* splice results are guarded (must be code) then consumed into their
+           holes; splice-free subtrees stay immortal statics. Temps never
+           live across a resume point (nothing here suspends). *)
+        let svals = List.map (fun a -> use st buf a) args in
+        let guarded =
+          List.mapi
+            (fun i v ->
+              let g = Printf.sprintf "_q%s_%d" x i in
+              line buf "jq_value %s = jq_code_splice_guard(rt, %s);" g v;
+              g)
+            svals
+        in
+        let ctr = ref 0 in
+        let rec build (a : code_arg) : string =
+          match a with
+          | CSplice i -> List.nth guarded i
+          | _ when not (code_has_splice a) -> (
+              match a with
+              | CForm t -> code_static st t
+              | CInt i -> Printf.sprintf "jq_int(%dLL)" i
+              | CReal r -> real_static st r
+              | CText t -> text_static st t
+              | CSym t -> text_static st t
+              | CHash h -> hash_static st h
+              | CSplice _ -> assert false)
+          | CForm t ->
+              (* a spine node containing splices: build children first *)
+              let parts =
+                List.map
+                  (fun arg ->
+                    let kind =
+                      match arg with
+                      | CForm _ -> "JQ_CA_FORM"
+                      | CInt _ -> "JQ_CA_INT"
+                      | CReal _ -> "JQ_CA_REAL"
+                      | CText _ -> "JQ_CA_TEXT"
+                      | CSym _ -> "JQ_CA_SYM"
+                      | CHash _ -> "JQ_CA_HASH"
+                      | CSplice _ -> "JQ_CA_FORM"
+                    in
+                    (kind, build arg))
+                  t.cargs
+              in
+              let n = Printf.sprintf "_qn%s_%d" x !ctr in
+              incr ctr;
+              line buf "jq_value %s = jq_code_node(%s, %d);" n (text_static st t.chead)
+                (List.length parts);
+              List.iteri
+                (fun i (kind, v) -> line buf "jq_code_set(%s, %d, %s, %s);" n i kind v)
+                parts;
+              n
+          | CInt _ | CReal _ | CText _ | CSym _ | CHash _ -> assert false
+        in
+        let result = build root in
+        line buf "%s%s = %s;" (decl_prefix st x) x result
+      end
   | BPerform (h, args) ->
       let oref = Hashtbl.find st.prog.ops h in
       emit_suspendable st buf lives x (fun () ->
@@ -767,9 +893,9 @@ let unit_source (prog : program) ~precise ~(decl_hex : string) (members : compil
 (** The main unit: constructor infos, builtin infos, init-once cells, and the per-expression driver
     with the interpreter's output and exit-code contract. *)
 let main_source (prog : program) ~precise ~(v_true : Hash.t) ~(v_false : Hash.t)
-    ~(orderings : (Hash.t * Hash.t * Hash.t) option) ~(listcons : (Hash.t * Hash.t) option)
-    ~(pair : Hash.t option) ~(intrinsics : (string * int) list)
-    ~(manifests : (string * string) list list) : string =
+    ~(option_cons : (Hash.t * Hash.t) option) ~(orderings : (Hash.t * Hash.t * Hash.t) option)
+    ~(listcons : (Hash.t * Hash.t) option) ~(pair : Hash.t option)
+    ~(intrinsics : (string * int) list) ~(manifests : (string * string) list list) : string =
   let st = new_state ~precise prog in
   (* constructor infos: the shared identities every unit externs *)
   let cons = Hashtbl.fold (fun _ cr acc -> cr :: acc) prog.cons [] in
@@ -878,6 +1004,12 @@ let main_source (prog : program) ~precise ~(v_true : Hash.t) ~(v_false : Hash.t)
   | Some pair_h ->
       declare_con_info st pair_h;
       line st.ub "rt->ci_pair = &%s;" (ci_name pair_h)
+  | None -> ());
+  (match option_cons with
+  | Some (some_h, none_h) ->
+      declare_con_info st some_h;
+      line st.ub "rt->ci_some = &%s;" (ci_name some_h);
+      line st.ub "rt->v_none = %s;" (con_value_static st none_h)
   | None -> ());
   (* dist ordinals (task 72): the LW driver and the root sampler dispatch by
      these; UINT32_MAX when the program reaches neither op *)

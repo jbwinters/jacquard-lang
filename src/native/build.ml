@@ -43,6 +43,13 @@ let intrinsics : (string * int) list =
     ("support", 1);
     ("pmf", 2);
     ("dist.sample-lw", 3);
+    ("code.of-int", 1);
+    ("code.to-int", 1);
+    ("code.to-text", 1);
+    ("code.form", 2);
+    ("code.un-form", 1);
+    ("code.eq?", 2);
+    ("code.diff", 2);
   ]
 
 (* ------------------------------------------------------------------ *)
@@ -222,7 +229,7 @@ let compile_program (store : Store.t) (d : discovery)
       match Store.lookup_kind store n Resolve.KCon with
       | Some e -> note_con e.Resolve.hash
       | None -> ())
-    [ "less"; "equal"; "greater"; "nil"; "cons"; "mk-pair" ];
+    [ "less"; "equal"; "greater"; "nil"; "cons"; "mk-pair"; "some"; "none" ];
   (* init order: const members topologically by their const-member deps *)
   let member_list = Hashtbl.fold (fun _ cm acc -> cm :: acc) members [] in
   let member_list =
@@ -548,6 +555,14 @@ let build ~(store : Store.t) ~(tops : (Kernel.expr * string list * (string * str
             | Some p -> Some p.Resolve.hash
             | None -> None
           in
+          let option_cons =
+            match
+              ( Store.lookup_kind store "some" Resolve.KCon,
+                Store.lookup_kind store "none" Resolve.KCon )
+            with
+            | Some so, Some no -> Some (so.Resolve.hash, no.Resolve.hash)
+            | _ -> None
+          in
           (* one unit per declaration: group members by owning decl *)
           let by_decl : (Hash.t, Compile.compiled_member list) Hashtbl.t = Hashtbl.create 32 in
           List.iter
@@ -570,8 +585,8 @@ let build ~(store : Store.t) ~(tops : (Kernel.expr * string list * (string * str
             |> List.sort compare
           in
           let main_c =
-            Emit.main_source prog ~precise ~v_true ~v_false ~orderings ~listcons ~pair ~intrinsics
-              ~manifests
+            Emit.main_source prog ~precise ~v_true ~v_false ~orderings ~listcons ~pair ~option_cons
+              ~intrinsics ~manifests
           in
           let cflags =
             match Sys.getenv_opt "JACQUARD_NATIVE_CFLAGS" with Some f -> f | None -> ""

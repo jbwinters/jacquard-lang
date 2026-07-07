@@ -1,0 +1,3 @@
+; task 73 error leg: code.form validates heads with the reader's grammar;
+; both engines refuse "Bad" with the same type error at exit 2
+(app (var code.form) (lit "Bad") (var nil))

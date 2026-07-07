@@ -9,9 +9,9 @@ corpus/valid/eval-gated.jqd|uses eval, which requires the interpreter tier
 corpus/sigs/11-eval-fn.jqd|uses eval, which requires the interpreter tier
 demos/m1-gated.jqd|uses eval, which requires the interpreter tier
 #
-# code values land with task 73:
-corpus/sigs/18-quote.jqd|contains a quote (code values land with task 73)
-demos/repair.jqd|builtin `code.diff` is not yet implemented natively
+# repair's eval-driver acts keep the whole demo on the interpreter; its
+# pure mutation machinery runs natively as gauntlet twin g31 (task 73):
+demos/repair.jqd|uses eval, which requires the interpreter tier
 #
 # intrinsics not yet ported (docs/native-intrinsics.md tracks the set):
 demos/agent-dream.jqd|builtin `text.contains?` is not yet implemented natively

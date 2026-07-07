@@ -1,0 +1,5 @@
+; task 73: a splice that performs — the quote build sits under a handler
+; and the spliced code value plugs into its hole
+(handle (quote (app (var f) (unquote (app (var get)))))
+  (ret (pvar x) (var x))
+  (opclause get () k (app (var k) (quote (lit 7)))))

@@ -542,6 +542,31 @@ mutation machinery (mutant generation, prior, rendering — everything except
 the eval-driver acts) native-identical; refusals pinned; `Value.show` of
 code values byte-identical (this exercises the ported printer).
 
+**As built (task 73 delta log).** A CODE block is one form node: an owned
+TEXT head plus (kind, datum) pairs, every datum an ordinary jq_value, so
+the free walk and copy-on-resume needed one new case each and no special
+RC discipline. Quotes lower structurally: the static payload parts become
+immortal nested-static trees (deduped per unit by a serialization key),
+live splices lower left-to-right as ordinary expressions — the
+interpreter's FQuote order — and plug into compile-time holes, which IS
+substitute_splices constant-folded; a splice that performs works because
+the splice Lets are ordinary suspendable sites (gauntlet g33). The
+runtime splice guard stays for row erasure (e06). Scope marks have no
+native counterpart, per the direction: meta never prints and code.eq?
+ignores it. The inline printer, scalar rendering, and real_repr live
+beside Value.show in jq_show.c; code.diff ports form_divergences with
+the prelude's "at path: - a + b" rendering, and code.form re-renders
+invalid heads through OCaml's %S escapes. eval renders as E1102 policy
+now, quote's old E1101 refusal is a working pin, and the eligible set
+grew to 58 (18-quote builds; repair.jqd manifests on its eval acts while
+its pure machinery runs as twin g31, extracted verbatim). free_vars
+learned that splice expressions read the enclosing scope — a lambda
+capturing only through a splice miscompiled without it. Task-73 testing
+also surfaced a latent task-69 unsoundness (spec clones baking
+recursion-rebound arguments; fixed and pinned as g34, its own commit).
+code.of-text stays refused (the reader); --infer-cache stays refused
+(the cache entry format needs the reader too).
+
 ## Task 74 — The differential harness as CI law
 
 **Deliverables:** `scripts/native-diff.sh`, a "Native parity" CI job,

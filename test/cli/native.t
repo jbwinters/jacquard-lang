@@ -89,11 +89,11 @@ own sum-fold lambda; both are apply-free and frame-free.)
   4950
 
 Ineligible REACHABLE constructs are errors naming the construct and its
-home, never silent miscompiles — since task 71 that means eval and quotes
-(every handler discipline compiles; test/cli/native-effects.t runs the
-capturing/multi-shot gauntlet). (Unreachable declarations are fine:
-eligibility walks the dependency DAG from the top-level expressions, not
-the whole file.)
+home, never silent miscompiles — since task 73 that means eval alone
+(E1102 policy: dynamically loaded code runs at the interpreter tier;
+quotes and the structural code ops compile). (Unreachable declarations
+are fine: eligibility walks the dependency DAG from the top-level
+expressions, not the whole file.)
 
   $ cat > handler-ret.jqd <<'EOF_JQD'
   > (handle (lit 1) (ret (pvar x) (var x)))
@@ -114,14 +114,22 @@ the whole file.)
   $ ./multishot
   2
   $ jacquard build ../../corpus/valid/eval-gated.jqd -o nope
-  error[E1101]: not yet compilable (native v1 compiles programs without code values): top-level expression 0 uses eval, which requires the interpreter tier
+  error[E1102]: top-level expression 0 uses eval, which requires the interpreter tier
   [1]
+
+Quotes compile since task 73 — Value.show of a code value is the ported
+inline printer, byte-for-byte:
+
   $ cat > quoted.jqd <<'EOF_JQD'
   > (quote (lit 1))
   > EOF_JQD
-  $ jacquard build quoted.jqd -o nope
-  error[E1101]: not yet compilable (native v1 compiles programs without code values): top-level expression 0 contains a quote (code values land with task 73)
-  [1]
+  $ jacquard run quoted.jqd > i.out 2>&1
+  $ jacquard build quoted.jqd -o quoted > /dev/null
+  $ ./quoted > n.out 2>&1
+  $ cat n.out
+  (quote (lit 1))
+  $ diff i.out n.out && echo identical
+  identical
 
 Effects (task 70): a perform dispatches to the nearest handler; a handler
 discharging its effect in-language needs no grant:

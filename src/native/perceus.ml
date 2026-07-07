@@ -28,7 +28,7 @@ let atoms_free (atoms : atom list) : SSet.t =
 
 let bound_atoms = function
   | BAtom a -> [ a ]
-  | BCallKnown (_, args) | BIntrinsic (_, args) | BAllocTuple args -> args
+  | BCallKnown (_, args) | BIntrinsic (_, args) | BAllocTuple args | BAllocCode (_, args) -> args
   | BCallUnknown (f, args) -> f :: args
   | BAllocCon (_, args) | BAllocConReuse (_, args, _) | BPerform (_, args) -> args
   | BAllocClosure { captured; _ } -> captured
@@ -86,6 +86,9 @@ let annotate_bound (movable : SSet.t) (b : bound) : bound * SSet.t =
   | BIntrinsic (n, args) ->
       let args, moved = annotate_atoms movable args in
       (BIntrinsic (n, args), moved)
+  | BAllocCode (t, args) ->
+      let args, moved = annotate_atoms movable args in
+      (BAllocCode (t, args), moved)
   | BAllocCon (h, args) ->
       let args, moved = annotate_atoms movable args in
       (BAllocCon (h, args), moved)

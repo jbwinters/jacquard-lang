@@ -1,0 +1,6 @@
+; task 73 error leg via row erasure: the op payload type does not flow to
+; the handler, so a splice can receive a non-code value at runtime — both
+; engines refuse with the same type error at exit 2
+(handle (quote (app (var f) (unquote (app (var get)))))
+  (ret (pvar x) (var x))
+  (opclause get () k (app (var k) (lit 5))))

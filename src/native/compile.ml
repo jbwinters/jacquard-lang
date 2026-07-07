@@ -13,6 +13,18 @@ open Jacquard
 (* NIR                                                                 *)
 (* ------------------------------------------------------------------ *)
 
+(* a quote payload with live splices as holes (task 73) *)
+type code_tmpl = { chead : string; cargs : code_arg list }
+
+and code_arg =
+  | CForm of code_tmpl
+  | CInt of int
+  | CReal of float
+  | CText of string
+  | CSym of string
+  | CHash of Hash.t
+  | CSplice of int
+
 type atom =
   | AVar of string  (** a unique local (parameter, let, or pattern binding) *)
   | AMove of atom
@@ -70,6 +82,10 @@ and bound =
   | BAllocClosure of closure_alloc
   | BIntrinsic of string * atom list
   | BPerform of Hash.t * atom list  (** effect op perform: nearest handler, else grant table *)
+  | BAllocCode of code_arg * atom list
+      (** a quote (task 73): the payload template with splice holes, and the splice-result atoms in
+          traversal order. CSplice i consumes atom i; an all-static template becomes one immortal
+          tree. The root is CForm, or CSplice when the whole payload is one live unquote. *)
   | BHandle of (Hash.t * bool * atom) list * atom * atom
       (** jq_handle2: (op, capturing?, clause closure) entries, the 0-arity body thunk, and the
           1-parameter ret-clause closure. A tail-resumptive clause closure takes the op params (its
@@ -124,9 +140,36 @@ let rec pat_binds (p : Kernel.pat) : SSet.t =
   | Kernel.PCon (_, ps) | Kernel.PTuple ps ->
       List.fold_left (fun acc p -> SSet.union acc (pat_binds p)) SSet.empty ps
 
+(* live splice expressions of a quote payload, depth-first left-to-right
+   (eval.ml's live_splices; nested quotes raise the level, unquotes lower it).
+   [on_err] reports a payload the interpreter would only fault on at run
+   time; the checker validates splices ahead, so this is defensive. *)
+let quote_splices ~(on_err : string -> Kernel.expr list) (payload : Form.t) : Kernel.expr list =
+  let rec go ~level (f : Form.t) : Kernel.expr list =
+    if f.Form.head = "unquote" && level = 0 then
+      match f.Form.args with
+      | [ Form.F splice ] -> (
+          match Kernel.expr_of_form splice with
+          | Ok e -> [ e ]
+          | Error _ -> on_err "quote splice does not convert to an expression")
+      | _ -> on_err "malformed unquote in quote payload"
+    else
+      let level =
+        match f.Form.head with "quote" -> level + 1 | "unquote" -> level - 1 | _ -> level
+      in
+      List.concat_map (function Form.F g -> go ~level g | _ -> []) f.Form.args
+  in
+  go ~level:0 payload
+
 let rec free_vars (e : Kernel.expr) : SSet.t =
   match e.Kernel.it with
-  | Kernel.Lit _ | Kernel.Ref _ | Kernel.GroupRef _ | Kernel.Quote _ -> SSet.empty
+  | Kernel.Lit _ | Kernel.Ref _ | Kernel.GroupRef _ -> SSet.empty
+  | Kernel.Quote payload ->
+      (* splice expressions read the enclosing scope (task 73) *)
+      List.fold_left
+        (fun acc e -> SSet.union acc (free_vars e))
+        SSet.empty
+        (quote_splices ~on_err:(fun _ -> []) payload)
   | Kernel.Var x -> SSet.singleton x
   | Kernel.Lam (params, body) ->
       let bound = List.fold_left (fun a p -> SSet.union a (pat_binds p)) SSet.empty params in
@@ -429,7 +472,42 @@ and lower_general ctx env ~tail (e : Kernel.expr) (k : atom -> expr) : expr =
                   alloc_clauses ((oh, false, clause_atom) :: acc) rest)
       in
       alloc_clauses [] (List.rev entries_rev)
-  | Kernel.Quote _ -> refuse ctx "contains a quote (code values land with task 73)"
+  | Kernel.Quote payload ->
+      (* task 73: static payload parts become an immortal code tree; live
+         splices evaluate left-to-right (the interpreter's FQuote order) and
+         plug into their holes; substitution happens structurally here at
+         compile time — the same result as eval.ml's substitute_splices *)
+      let es = quote_splices ~on_err:(fun m -> refuse ctx m) payload in
+      let counter = ref 0 in
+      let rec tmpl ~level (f : Form.t) : code_arg =
+        if f.Form.head = "unquote" && level = 0 then begin
+          let i = !counter in
+          incr counter;
+          CSplice i
+        end
+        else
+          let level =
+            match f.Form.head with "quote" -> level + 1 | "unquote" -> level - 1 | _ -> level
+          in
+          CForm
+            {
+              chead = f.Form.head;
+              cargs =
+                List.map
+                  (function
+                    | Form.F g -> tmpl ~level g
+                    | Form.Int i -> CInt i
+                    | Form.Real r -> CReal r
+                    | Form.Text t -> CText t
+                    | Form.Sym sym -> CSym sym
+                    | Form.Hash h -> CHash h)
+                  f.Form.args;
+            }
+      in
+      let root = tmpl ~level:0 payload in
+      lower_list ctx env es (fun atoms ->
+          let q = fresh ctx "q" in
+          Let (q, BAllocCode (root, atoms), k (AVar q)))
   | Kernel.Unquote _ -> refuse ctx "unquote outside quote reached lowering"
   | Kernel.Ann (subject, _) -> lower_general ctx env ~tail subject k
 

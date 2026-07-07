@@ -60,9 +60,10 @@ stack on both — musttail where the toolchain has it, a trampoline below
 gcc 15) and `JACQUARD_RUNTIME` pointing at `runtime/` (defaults to the
 prelude's sibling). The binary is byte-identical to `jacquard run` — the
 differential harness (`scripts/native-diff.sh`) and CI enforce it — and
-parses its own `--allow`/`--seed` flags. Code values (`quote`/`eval`) stay
-interpreter-only (E1101); `--dry-run` and `--infer-cache` are interpreter
-tooling and refused with pointed errors.
+parses its own `--allow`/`--seed` flags. Quotes, splices, and the
+structural code ops compile (task 73); `eval` stays interpreter-only
+(E1102), and `--dry-run` and `--infer-cache` are interpreter tooling,
+refused with pointed errors.
 
 `jacquard run` loads declarations, then evaluates and prints each top-level
 expression in order. Exit codes for `run`: ungranted-effect refusal (E0814)
