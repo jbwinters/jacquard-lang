@@ -57,9 +57,11 @@ values — so their twins are TASK-EQUIVALENT: the same job done with
 each language's native mechanism (get/put as noinline accessor calls
 in C and method calls in Python; the mutant algorithm over tagged
 structs and native tuples), which prices the abstraction rather than
-the implementation. pure and avl are aggregate batteries and enum's
-mechanism is the thing being priced (a C loop over 2^14 bitstrings
-measures a different semantics entirely); those stay engines-only.
+the implementation. pure is an aggregate battery, avl would need a
+persistent AVL written out in each language to compare anything real,
+and enum's mechanism is the thing being priced (a C loop over 2^14
+bitstrings measures a different semantics entirely); those three stay
+engines-only.
 
 ## The table
 
@@ -71,9 +73,13 @@ measures a different semantics entirely); those stay engines-only.
 | text | 182 ms | 10 ms | 10 ms | 10 ms | 5 ms | 2.0x |
 | pure | 3303 ms | 12 ms | — | — | — | — |
 | avl | 6442 ms | 14 ms | — | — | — | — |
-| state-loop | 24181 ms | 159 ms | 211 ms | 76 ms | 3 ms | 53x |
+| state-loop | 24181 ms | 159 ms | 211 ms | 76 ms | 3 ms | 53x† |
 | enum | 10698 ms | 14 ms | 22 ms | — | — | — |
-| mutate | 2558 ms | 4 ms | 5 ms | 9 ms | 2 ms | 2.0x |
+| mutate | 2558 ms | 4 ms | 5 ms | 9 ms | 2 ms | 2.0x† |
+
+† task-equivalent ratio: the C twin uses its native mechanism (accessor
+calls, arena-allocated structs), not the same discipline — it prices
+the abstraction, not the implementation.
 
 Readings, program by program:
 
