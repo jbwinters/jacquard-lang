@@ -14,7 +14,8 @@ count as done.
 
 From the benchmark report (docs/benchmarks.md, same session):
 
-- **sort, 92-96 ms vs 24-25 ms hand C (3.4-3.8x)** — the one scenario
+- **sort, 92-96 ms vs 24-27 ms hand C (3.4-4.0x across sessions)** —
+  the one scenario
   outside the withdrawn near-C claim's 3x gate. The residue is RC
   traffic on field reads: every `jq_con_fields` access in the merge
   dups a value the callee immediately consumes.
@@ -39,16 +40,20 @@ parent and emit no RC for it, instead of dup-then-consume. This is NOT
 the declined task-81 flip — that experiment moved drops from callee to
 caller uniformly and lost, because the owned convention is type-aware
 and moves already make last-uses free. Borrow inference is the version
-the literature actually ships (Perceus §2.4, Koka's borrow annotations):
-a static analysis that marks parameters and field reads observation-only.
-The target is the merge loop's per-field dup/drop pairs. Reopening bar
-from the task-81 record applies: a suite-wide Pareto win or it doesn't
+the literature actually ships — the borrowing discipline Koka layers
+over Perceus (the Perceus paper's §2 machinery, dup/drop/reuse, is what
+tasks 68/80/85 already built; borrowing is the layer above it): a
+static analysis that marks parameters and field reads observation-only.
+The target is the merge loop's per-field dup/drop pairs. The bar comes
+from the task-81 decline record in task-master, adopted here as policy
+for every lever on this list: a suite-wide Pareto win or it does not
 land.
 
 ### 2. A C FFI (a different axis, probably the biggest practical win)
 
-The benchmark report's calibration caveat is the argument: idiomatic
-Python escapes to C (numpy, dict, sorted) and effectively becomes C.
+The benchmark report's calibration note (docs/benchmarks.md, end of
+the readings) is the argument: idiomatic Python escapes to C (numpy,
+dict, sorted) and effectively becomes C.
 Jacquard has no escape hatch, so every hot kernel must out-compile
 CPython's C internals instead of joining them. A foreign-function story
 changes the economics of every future "make X fast" request from
@@ -102,8 +107,8 @@ half-day experiment.
   convention is type-aware. Superseded by lever 1, which is inference,
   not a convention flip.
 - **Interpreter speed rungs**: docs/perf-vm-decision.md declined them;
-  the native tier is the answer to interpreter speed, at 90-760x across
-  the suite.
+  the native tier is the answer to interpreter speed, at 18x (text,
+  where every engine lives in memcpy) to ~760x (enum) across the suite.
 
 ## Adjacent, not perf
 

@@ -121,6 +121,16 @@ Readings, program by program:
   ~1.6x, text identical. Correctness is toolchain-independent (the
   differential harness runs both); performance is a clang-first story.
 
+One calibration note on the Python columns. The twins compare against
+interpreted Python code doing the same work, because that is what "the
+same logic written in Python" costs. Idiomatic Python often escapes to
+C instead — `sorted()` on a flat list, `sum()`, dicts, numpy — and
+against those paths Python effectively becomes C and would win most of
+these rows. The claim this table supports is that your logic runs
+faster than the same logic in Python, not faster than the Python
+ecosystem's C hot paths; the FFI lever in docs/perf-roadmap.md is
+about acquiring that same escape hatch.
+
 ## Progression (the perf arc, for the record)
 
 Milestones by bench, in ms (task 75 first measurement → LTO default
