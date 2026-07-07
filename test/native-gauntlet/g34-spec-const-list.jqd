@@ -1,0 +1,13 @@
+; task 73 testing found this latent task-69 unsoundness: a spec clone baked
+; a const member global into a parameter that the fn's self-recursion
+; REBINDS, so every iteration re-read the initial list — an infinite loop.
+; Variant parameters now stay dynamic; this walker over a const list is the
+; code-value-free regression.
+(defterm ((binding needles ()
+  (app (var cons) (lit 3)
+    (app (var cons) (lit 5)
+      (app (var cons) (lit 7) (var nil)))))))
+
+(app (var list.contains?) (var needles) (lit 5) (var int.eq))
+
+(app (var list.contains?) (var needles) (lit 6) (var int.eq))

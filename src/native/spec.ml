@@ -76,6 +76,7 @@ let sub_bound env (b : bound) : bound =
   | BAllocTuple args -> BAllocTuple (s args)
   | BAllocClosure c -> BAllocClosure { c with captured = s c.captured }
   | BIntrinsic (n, args) -> BIntrinsic (n, s args)
+  | BAllocCode (t, args) -> BAllocCode (t, s args)
   | BPerform (h, args) -> BPerform (h, s args)
   | BHandle (entries, thunk, retc) ->
       BHandle
@@ -206,12 +207,42 @@ and specialize (st : st) (lams : lam_info SMap.t) (h : Hash.t) (args : atom list
               (* clone: bind NPVar params at known-arg positions (globals into the atom
                  env, lambda literals into the clone's lambda env), fold the body.
                  Register the clone BEFORE folding so recursive dictionary passing
-                 terminates. *)
+                 terminates.
+
+                 SOUNDNESS (task 73 find, latent since 69): substitution bakes the
+                 argument into the body, so it is only valid for params the fn's
+                 self-recursion passes through UNCHANGED. A TailSelf that rebinds
+                 param i (list walkers rebind their list) makes position i variant:
+                 the clone must keep it dynamic, or every iteration re-reads the
+                 baked initial value — list.find over a const member list looped
+                 forever on exactly this. Dictionaries and comparators are
+                 loop-invariant and keep their folding. *)
+              let variant = Array.make (List.length f.params) false in
+              let param_name i =
+                match List.nth_opt f.params i with Some (NPVar x) -> Some x | _ -> None
+              in
+              let rec mark (e : expr) : unit =
+                match e with
+                | TailSelf (targs, _) ->
+                    List.iteri
+                      (fun i a ->
+                        let invariant =
+                          match (param_name i, a) with Some x, AVar y -> x = y | _ -> false
+                        in
+                        if (not invariant) && i < Array.length variant then variant.(i) <- true)
+                      targs
+                | Let (_, _, body) | Drop (_, body) | LetReuse (_, _, _, body) -> mark body
+                | Match (_, cls) -> List.iter (fun (_, body) -> mark body) cls
+                | Ret _ | TailKnown _ | TailUnknown _ -> ()
+              in
+              mark f.body;
               let env, clone_lams =
+                let i = ref (-1) in
                 List.fold_left2
                   (fun (env, cl) p a ->
+                    incr i;
                     match p with
-                    | NPVar x -> (
+                    | NPVar x when not variant.(!i) -> (
                         match a with
                         | AGlobal g -> (SMap.add x (AGlobal g) env, cl)
                         | AVar v -> (

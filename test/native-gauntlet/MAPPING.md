@@ -45,3 +45,9 @@ assertion. Counts become printed values via in-language collectors
 | (error surface via row erasure, task 76) | e03-erasure-arity.jqd | smuggled 1-ary closure reaches the arity rendering |
 | (error surface via row erasure, task 76) | e04-erasure-match-failure.jqd | smuggled 5 reaches Match_failure past E0813 |
 | (trampoline, task 83) | g30-deep-mutual-tail.jqd | 12M-deep mutual tail chain in O(1) stack on every toolchain |
+| (code values, task 73 DoD) | g31-repair-pure.jqd | demos/repair.jqd's pure mutation machinery, verbatim minus the eval acts |
+| (code values, task 73) | g32-code-ops.jqd | of-int/to-int/to-text, form/un-form rebuild, eq?, diff both ways |
+| (code values, task 73) | g33-quote-effectful-splice.jqd | a splice that performs under a handler |
+| (code values, task 73) | e05-code-form-bad-head.jqd | code.form rejects an invalid head with the interpreter's %S rendering |
+| (code values, task 73) | e06-erasure-splice-not-code.jqd | a smuggled non-code splice hits the runtime guard |
+| (spec soundness, task 73 find) | g34-spec-const-list.jqd | a self-recursive walker over a const member list must not bake its argument |
