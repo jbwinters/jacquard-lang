@@ -14,7 +14,7 @@
 
 jq_value jq_code_node(jq_value head_text, uint16_t argc) {
   if ((uint32_t)1 + 2 * (uint32_t)argc > UINT16_MAX) {
-    fputs("jacquard runtime: form arity exceeds the representation\n", stderr);
+    fputs("jacquard runtime: form arity exceeds the 32767 limit\n", stderr);
     exit(2);
   }
   jq_block *b = jq_alloc_block(JQ_CODE, 0, (uint16_t)(1 + 2 * argc));
