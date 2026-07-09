@@ -70,8 +70,8 @@ let test_entry_point_contract () =
 let test_printer_contract () =
   let top = Kernel.Expr { Kernel.it = Kernel.Lit (Kernel.LInt 1); meta = Meta.empty } in
   match Surface_print.print_top top with
-  | Error [ { Diag.code = "E1201"; _ } ] -> ()
-  | _ -> Alcotest.fail "surface printer scaffold must fail explicitly until SS.2"
+  | Ok "1" -> ()
+  | _ -> Alcotest.fail "surface printer module must stay wired through its public contract"
 
 let suite =
   [

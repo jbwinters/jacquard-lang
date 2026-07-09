@@ -43,4 +43,5 @@ let () =
       ("props", Test_props.suite);
       ("replay", Test_replay.suite);
       ("surface-scaffold", Test_surface_scaffold.suite);
+      ("surface-print", Test_surface_print.suite);
     ]
