@@ -57,10 +57,14 @@ let rec pp_pat lookup fmt (pat : Kernel.pat) =
   | Kernel.PTuple items -> (
       match items with
       | [] -> Format.pp_print_string fmt "()"
-      | [ item ] -> Format.fprintf fmt "(@[<hov>%a,@])" (pp_pat lookup) item
+      | [ item ] -> Format.fprintf fmt "(@[<hov>%a@])" (pp_pat lookup) item
       | _ -> Format.fprintf fmt "(@[<hov>%a@])" (pp_sep "," (pp_pat lookup)) items)
-  | Kernel.PAs (name, inner) ->
-      Format.fprintf fmt "@[<hov>%a as %a@]" (pp_pat lookup) inner (pp_named Surface_name.Term) name
+  | Kernel.PAs (name, inner) -> (
+      match inner.it with
+      | Kernel.PAs _ -> raise Bug_unsupported_surface_form
+      | _ ->
+          Format.fprintf fmt "@[<hov>%a as %a@]" (pp_pat lookup) inner (pp_named Surface_name.Term)
+            name)
 
 and pp_row lookup fmt (row : Kernel.row) =
   Format.fprintf fmt "->{@[<hov>";
@@ -107,7 +111,93 @@ and pp_ty_atom lookup fmt ty =
       Format.fprintf fmt "(%a)" (pp_ty lookup) ty
   | _ -> pp_ty lookup fmt ty
 
-and pp_expr lookup fmt (expr : Kernel.expr) =
+let quote_marker_base payload =
+  let rec symbols acc (form : Form.t) =
+    List.fold_left
+      (fun acc -> function
+        | Form.Sym name -> name :: acc | Form.F child -> symbols acc child | _ -> acc)
+      acc form.args
+  in
+  let names = symbols [] payload in
+  let rec choose base =
+    if List.exists (String.starts_with ~prefix:base) names then choose (base ^ "x") else base
+  in
+  choose "surface-unquote-hole"
+
+let restore_quote_splices splices expr =
+  let rec restore (expr : Kernel.expr) =
+    let it =
+      match expr.it with
+      | Kernel.Var marker -> (
+          match List.assoc_opt marker splices with
+          | Some splice -> Kernel.Unquote splice
+          | None -> expr.it)
+      | Kernel.Lam (params, body) -> Kernel.Lam (params, restore body)
+      | Kernel.App (fn, args) -> Kernel.App (restore fn, List.map restore args)
+      | Kernel.Let { isrec; binder; value; body } ->
+          Kernel.Let { isrec; binder; value = restore value; body = restore body }
+      | Kernel.Match (subject, clauses) ->
+          Kernel.Match
+            ( restore subject,
+              List.map
+                (fun clause -> { clause with Kernel.cbody = restore clause.Kernel.cbody })
+                clauses )
+      | Kernel.Tuple items -> Kernel.Tuple (List.map restore items)
+      | Kernel.Handle { body; ret; ops } ->
+          Kernel.Handle
+            {
+              body = restore body;
+              ret = { ret with Kernel.rbody = restore ret.Kernel.rbody };
+              ops = List.map (fun op -> { op with Kernel.obody = restore op.Kernel.obody }) ops;
+            }
+      | Kernel.Unquote splice -> Kernel.Unquote (restore splice)
+      | Kernel.Ann (subject, ty) -> Kernel.Ann (restore subject, ty)
+      | (Kernel.Lit _ | Kernel.Ref _ | Kernel.GroupRef _ | Kernel.Quote _) as unchanged -> unchanged
+    in
+    { expr with Kernel.it }
+  in
+  restore expr
+
+(** [surface_quote_expr payload] recognizes a quoted kernel expression while preserving live
+    [unquote] nodes. Nested quotes are parsed independently when printed. Arbitrary quoted triples
+    return [None] and use the documented raw escape. *)
+let surface_quote_expr payload =
+  let base = quote_marker_base payload in
+  let next = ref 0 in
+  let splices = ref [] in
+  let valid = ref true in
+  let rec mask (form : Form.t) =
+    if String.equal form.head "unquote" then (
+      match form.args with
+      | [ Form.F splice_form ] -> (
+          match Kernel.expr_of_form splice_form with
+          | Error _ ->
+              valid := false;
+              form
+          | Ok splice ->
+              let marker = base ^ string_of_int !next in
+              incr next;
+              splices := (marker, splice) :: !splices;
+              Form.form ~meta:form.meta "var" [ Form.Sym marker ])
+      | _ ->
+          valid := false;
+          form)
+    else if String.equal form.head "quote" then form
+    else
+      {
+        form with
+        Form.args =
+          List.map (function Form.F child -> Form.F (mask child) | scalar -> scalar) form.args;
+      }
+  in
+  let masked = mask payload in
+  if not !valid then None
+  else
+    match Kernel.expr_of_form masked with
+    | Error _ -> None
+    | Ok expr -> Some (restore_quote_splices !splices expr)
+
+let rec pp_expr lookup fmt (expr : Kernel.expr) =
   match expr.it with
   | Kernel.Lit lit -> pp_lit fmt lit
   | Kernel.Var name -> pp_named Surface_name.Term fmt name
@@ -134,14 +224,18 @@ and pp_expr lookup fmt (expr : Kernel.expr) =
       | _ -> Format.fprintf fmt "(@[<hov>%a@])" (pp_sep "," (pp_expr lookup)) items)
   | Kernel.Ann (subject, ty) ->
       Format.fprintf fmt "@[<hov 2>(%a :@ %a)@]" (pp_expr lookup) subject (pp_ty lookup) ty
-  | Kernel.Match _ | Kernel.Handle _ | Kernel.Quote _ | Kernel.Unquote _ ->
-      raise Bug_unsupported_surface_form
+  | Kernel.Match (subject, clauses) -> pp_match lookup fmt subject clauses
+  | Kernel.Handle { body; ret; ops } -> pp_handle lookup fmt body ret ops
+  | Kernel.Quote payload -> pp_quote lookup fmt payload
+  | Kernel.Unquote splice -> Format.fprintf fmt "unquote(%a)" (pp_expr lookup) splice
 
 and pp_expr_atom lookup fmt expr =
   match expr.Kernel.it with
-  | Kernel.Lit _ | Kernel.Var _ | Kernel.Ref _ | Kernel.GroupRef _ | Kernel.App _ ->
+  | Kernel.Lit _ | Kernel.Var _ | Kernel.Ref _ | Kernel.GroupRef _ | Kernel.App _ | Kernel.Match _
+  | Kernel.Tuple _ | Kernel.Let _ | Kernel.Handle _ | Kernel.Quote _ | Kernel.Unquote _
+  | Kernel.Ann _ ->
       pp_expr lookup fmt expr
-  | _ -> Format.fprintf fmt "(%a)" (pp_expr lookup) expr
+  | Kernel.Lam _ -> Format.fprintf fmt "(%a)" (pp_expr lookup) expr
 
 and pp_block lookup fmt expr =
   let rec collect acc current =
@@ -162,6 +256,188 @@ and pp_block lookup fmt expr =
   if lets <> [] then Format.fprintf fmt "@,";
   Format.fprintf fmt "%a@]@,}" (pp_expr lookup) result
 
+and pp_match lookup fmt subject clauses =
+  let pp_clause fmt (clause : Kernel.clause) =
+    match clause.cbody.it with
+    | Kernel.Let _ ->
+        Format.fprintf fmt "@[<v 2>| %a -> {@,%a@]@,}" (pp_pat lookup) clause.cpat
+          (pp_sequence_contents lookup) clause.cbody
+    | _ ->
+        Format.fprintf fmt "@[<hov 2>| %a ->@ %a@]" (pp_pat lookup) clause.cpat (pp_expr lookup)
+          clause.cbody
+  in
+  Format.fprintf fmt "@[<v 2>match %a {@,%a@]@,}" (pp_expr lookup) subject (pp_sep "" pp_clause)
+    clauses
+
+and pp_arm_body lookup fmt body =
+  match body.Kernel.it with
+  | Kernel.Let _ -> pp_block lookup fmt body
+  | _ -> pp_expr lookup fmt body
+
+and pp_sequence_contents lookup fmt expr =
+  let rec collect acc current =
+    match current.Kernel.it with
+    | Kernel.Let { isrec; binder; value; body } -> collect ((isrec, binder, value) :: acc) body
+    | _ -> (List.rev acc, current)
+  in
+  let lets, result = collect [] expr in
+  let pp_item fmt (isrec, binder, value) =
+    match (isrec, binder.Kernel.it) with
+    | false, Kernel.PWild -> pp_expr lookup fmt value
+    | _ ->
+        Format.fprintf fmt "@[<hov 2>let%s %a =@ %a@]"
+          (if isrec then " rec" else "")
+          (pp_pat lookup) binder (pp_expr lookup) value
+  in
+  pp_sep "" pp_item fmt lets;
+  if lets <> [] then Format.fprintf fmt "@,";
+  pp_expr lookup fmt result
+
+and pp_handle lookup fmt body ret ops =
+  let pp_resume fmt name =
+    if String.equal name "_" then Format.pp_print_string fmt "_"
+    else pp_named Surface_name.Term fmt name
+  in
+  let pp_ret fmt (clause : Kernel.ret) =
+    Format.fprintf fmt "@[<hov 2>| return %a ->@ %a@]" (pp_pat lookup) clause.rbinder
+      (pp_arm_body lookup) clause.rbody
+  in
+  let pp_op fmt (clause : Kernel.opclause) =
+    Format.fprintf fmt "@[<hov 2>| %a(%a) resume %a ->@ %a@]"
+      (pp_gref lookup Surface_name.Op clause.ometa)
+      clause.op
+      (pp_sep "," (pp_pat lookup))
+      clause.params pp_resume clause.resume (pp_arm_body lookup) clause.obody
+  in
+  Format.fprintf fmt "@[<v 2>handle";
+  (if is_atomic body then Format.fprintf fmt " %a {" (pp_expr lookup) body
+   else
+     match body.Kernel.it with
+     | Kernel.Let _ -> Format.fprintf fmt " {@,%a@;<0 -2>} {" (pp_sequence_contents lookup) body
+     | _ -> Format.fprintf fmt " {@,%a@;<0 -2>} {" (pp_expr lookup) body);
+  Format.fprintf fmt "@,%a" pp_ret ret;
+  List.iter (fun clause -> Format.fprintf fmt "@,%a" pp_op clause) ops;
+  Format.fprintf fmt "@]@,}"
+
+and is_atomic expr =
+  match expr.Kernel.it with
+  | Kernel.Lit _ | Kernel.Var _ | Kernel.Ref _ -> true
+  | Kernel.App (fn, _) -> is_atomic_call_head fn
+  | _ -> false
+
+and is_atomic_call_head expr =
+  match expr.Kernel.it with
+  | Kernel.Var _ | Kernel.Ref _ -> true
+  | Kernel.App (fn, _) -> is_atomic_call_head fn
+  | _ -> false
+
+and pp_quote lookup fmt payload =
+  match surface_quote_expr payload with
+  | Some expr -> Format.fprintf fmt "@[<hov 2>quote {@ %a@ }@]" (pp_expr lookup) expr
+  | None -> Format.fprintf fmt "quote { jqd { %s } }" (Printer.inline_form payload)
+
+let rec group_refs_expr acc (expr : Kernel.expr) =
+  match expr.it with
+  | Kernel.GroupRef index -> index :: acc
+  | Kernel.Lam (_, body) | Kernel.Unquote body | Kernel.Ann (body, _) -> group_refs_expr acc body
+  | Kernel.App (fn, args) -> List.fold_left group_refs_expr (group_refs_expr acc fn) args
+  | Kernel.Let { value; body; _ } -> group_refs_expr (group_refs_expr acc value) body
+  | Kernel.Match (subject, clauses) ->
+      List.fold_left
+        (fun acc clause -> group_refs_expr acc clause.Kernel.cbody)
+        (group_refs_expr acc subject) clauses
+  | Kernel.Tuple items -> List.fold_left group_refs_expr acc items
+  | Kernel.Handle { body; ret; ops } ->
+      List.fold_left
+        (fun acc op -> group_refs_expr acc op.Kernel.obody)
+        (group_refs_expr (group_refs_expr acc body) ret.Kernel.rbody)
+        ops
+  | Kernel.Lit _ | Kernel.Var _ | Kernel.Ref _ | Kernel.Quote _ -> acc
+
+let printable_term_group bindings =
+  let count = List.length bindings in
+  if count <= 1 then true
+  else
+    let edges =
+      Array.of_list
+        (List.map
+           (fun binding ->
+             group_refs_expr [] binding.Kernel.value
+             |> List.filter (fun index -> index >= 0 && index < count)
+             |> List.sort_uniq Int.compare)
+           bindings)
+    in
+    let reaches start =
+      let seen = Array.make count false in
+      let rec visit index =
+        if not seen.(index) then begin
+          seen.(index) <- true;
+          List.iter visit edges.(index)
+        end
+      in
+      visit start;
+      seen
+    in
+    Array.for_all (fun seen -> Array.for_all Fun.id seen) (Array.init count reaches)
+
+let pp_binding lookup fmt (binding : Kernel.binding) =
+  let pp_definition fmt () =
+    match binding.value.it with
+    | Kernel.Lam (params, body) ->
+        Format.fprintf fmt "@[<hov 2>%a(%a) =@ %a@]" (pp_named Surface_name.Term) binding.bname
+          (pp_sep "," (pp_pat lookup))
+          params (pp_expr lookup) body
+    | _ ->
+        Format.fprintf fmt "@[<hov 2>%a =@ %a@]" (pp_named Surface_name.Term) binding.bname
+          (pp_expr lookup) binding.value
+  in
+  match binding.annot with
+  | None -> pp_definition fmt ()
+  | Some ty ->
+      Format.fprintf fmt "@[<v>%a : %a@,%a@]" (pp_named Surface_name.Term) binding.bname
+        (pp_ty lookup) ty pp_definition ()
+
+let pp_constructor lookup fmt (constructor : Kernel.conspec) =
+  pp_named Surface_name.Con fmt constructor.con_name;
+  if constructor.fields <> [] then
+    if List.exists (fun field -> Option.is_some field.Kernel.label) constructor.fields then
+      let pp_field fmt (field : Kernel.field) =
+        match field.label with
+        | None -> pp_ty lookup fmt field.fty
+        | Some label ->
+            Format.fprintf fmt "%a: %a" (pp_named Surface_name.Term) label (pp_ty lookup) field.fty
+      in
+      Format.fprintf fmt "(@[<hov>%a@])" (pp_sep "," pp_field) constructor.fields
+    else
+      List.iter
+        (fun field -> Format.fprintf fmt "@ %a" (pp_ty_atom lookup) field.Kernel.fty)
+        constructor.fields
+
+let pp_operation lookup fmt (operation : Kernel.opspec) =
+  Format.fprintf fmt "@[<hov 2>%a :@ (%a) ->@ %a@]" (pp_named Surface_name.Op) operation.op_name
+    (pp_sep "," (pp_ty lookup))
+    operation.op_params (pp_ty lookup) operation.op_result
+
+let pp_decl lookup fmt (decl : Kernel.decl) =
+  match decl.it with
+  | Kernel.DefTerm bindings ->
+      if not (printable_term_group bindings) then raise Bug_unsupported_surface_form;
+      Format.fprintf fmt "@[<v>%a@]" (pp_sep "" (pp_binding lookup)) bindings
+  | Kernel.DefType { tname; tvars; cons } ->
+      Format.fprintf fmt "@[<hov 2>type %a" (pp_named Surface_name.Type) tname;
+      List.iter (fun name -> Format.fprintf fmt "@ %a" (pp_named Surface_name.Tvar) name) tvars;
+      Format.fprintf fmt "@ =@ @[<hv>";
+      List.iteri
+        (fun index constructor ->
+          if index > 0 then Format.fprintf fmt "@ ";
+          Format.fprintf fmt "| %a" (pp_constructor lookup) constructor)
+        cons;
+      Format.fprintf fmt "@]@]"
+  | Kernel.DefEffect { ename; evars; ops } ->
+      Format.fprintf fmt "@[<v 2>effect %a" (pp_named Surface_name.Effect) ename;
+      List.iter (fun name -> Format.fprintf fmt " %a" (pp_named Surface_name.Tvar) name) evars;
+      Format.fprintf fmt " where {@,%a@]@,}" (pp_sep "" (pp_operation lookup)) ops
+
 let raw_top top =
   let form = Kernel.to_form top in
   "jqd { " ^ Printer.inline_form form ^ " }"
@@ -174,16 +450,33 @@ let render ~width pp value =
   Format.pp_print_flush fmt ();
   Buffer.contents buffer
 
+let is_surface_generated_decl (decl : Kernel.decl) =
+  Option.is_some (Meta.surface_generated decl.meta)
+  ||
+  match decl.it with
+  | Kernel.DefTerm bindings ->
+      bindings <> []
+      && List.for_all
+           (fun binding -> Option.is_some (Meta.surface_generated binding.Kernel.bmeta))
+           bindings
+  | Kernel.DefType _ | Kernel.DefEffect _ -> false
+
 (** [print_top ?lookup ?width top] renders one validated kernel top-level item without a trailing
-    newline. [lookup] supplies display names for hash references whose metadata lacks one. *)
+    newline. [lookup] supplies display names for hash references whose metadata lacks one. A
+    [surface-generated] declaration renders as the empty string because its owning surface
+    declaration regenerates it. *)
 let print_top ?(lookup : lookup option) ?(width = default_width) (top : Kernel.top) :
     (string, Diag.t list) result =
   match top with
-  | Kernel.Expr expr -> (
-      match render ~width (pp_expr lookup) expr with
+  | Kernel.Decl decl when is_surface_generated_decl decl -> Ok ""
+  | _ -> (
+      match
+        match top with
+        | Kernel.Expr expr -> render ~width (pp_expr lookup) expr
+        | Kernel.Decl decl -> render ~width (pp_decl lookup) decl
+      with
       | text -> Ok text
       | exception Bug_unsupported_surface_form -> Ok (raw_top top))
-  | Kernel.Decl _ -> Ok (raw_top top)
 
 (** [print_file] renders a complete canonical surface file with one trailing newline. *)
 let print_file ?(lookup : lookup option) ?(width = default_width) (tops : Kernel.top list) :
@@ -194,6 +487,7 @@ let print_file ?(lookup : lookup option) ?(width = default_width) (tops : Kernel
         Ok (if String.equal body "" then "" else body ^ "\n")
     | top :: rest -> (
         match print_top ?lookup ~width top with
+        | Ok "" -> loop acc rest
         | Ok text -> loop (text :: acc) rest
         | Error ds -> Error ds)
   in
