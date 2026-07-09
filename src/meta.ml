@@ -34,6 +34,9 @@ let key_trivia_inner = "trivia-inner"
 let key_trivia_eof = "trivia-eof"
 let key_origin = "origin"
 let key_doc = "doc"
+let key_surface_form = "surface-form"
+let key_surface_generated = "surface-generated"
+let key_surface_hole = "surface-hole"
 
 (** [span t] reads the reserved [span] key; [None] if absent or not a span. *)
 let span t = match find key_span t with Some (Span s) -> Some s | _ -> None
@@ -45,6 +48,27 @@ let with_span s t = add key_span (Span s) t
 let name t = match find key_name t with Some (Sym n | Text n) -> Some n | _ -> None
 
 let with_name n t = add key_name (Sym n) t
+
+(** [surface_form t] is the surface construct that produced a desugared kernel node. It is
+    presentation/provenance metadata and therefore excluded from canonical identity with all other
+    metadata. *)
+let surface_form t =
+  match find key_surface_form t with Some (Sym n | Text n) -> Some n | _ -> None
+
+let with_surface_form n t = add key_surface_form (Sym n) t
+
+(** [surface_generated t] names the generated surface artifact represented by a kernel node, such as
+    ["accessor"]. *)
+let surface_generated t =
+  match find key_surface_generated t with Some (Sym n | Text n) -> Some n | _ -> None
+
+let with_surface_generated n t = add key_surface_generated (Sym n) t
+
+(** [surface_hole t] reads the stable textual recovery-hole identifier attached by the parser. *)
+let surface_hole t =
+  match find key_surface_hole t with Some (Sym n | Text n) -> Some n | _ -> None
+
+let with_surface_hole n t = add key_surface_hole (Text n) t
 
 let rec equal_value a b =
   match (a, b) with

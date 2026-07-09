@@ -122,6 +122,14 @@ in `src/` and `bin/` appears in this catalog.
 | E1001 | expression at top level of a test file | `jacquard test file.jqd` where the file ends with `(app (var main))` |
 | E1002 | eval under --dry-run | a program whose row includes `eval` run with `--dry-run` |
 
+## Surface syntax (E12xx)
+
+| code | meaning | example |
+|------|---------|---------|
+| E1200 | surface parser/printer slice is not implemented at this scaffold boundary | using a nonempty `.jac` file before SS.5 |
+| E1201 | canonical surface printer is not implemented at this scaffold boundary | calling the SS.1 printer placeholder |
+| E1202 | recovered surface tree still contains holes | checking malformed `.jac` after parser recovery |
+
 ## Appendix: the W5.3 audit (ten message rewrites)
 
 Before/after wording improvements applied during the audit:

@@ -42,4 +42,5 @@ let () =
       ("warp", Test_warp.suite);
       ("props", Test_props.suite);
       ("replay", Test_replay.suite);
+      ("surface-scaffold", Test_surface_scaffold.suite);
     ]
