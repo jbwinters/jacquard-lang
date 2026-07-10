@@ -510,6 +510,18 @@ let expr_of_form (f : Form.t) : (expr, Diag.t list) result =
 let decl_of_form (f : Form.t) : (decl, Diag.t list) result =
   match decl_of f with d -> Ok d | exception Err d -> Error [ d ]
 
+(** [pat_of_form f] validates [f] as a kernel pattern. *)
+let pat_of_form (f : Form.t) : (pat, Diag.t list) result =
+  match pat_of f with p -> Ok p | exception Err d -> Error [ d ]
+
+(** [ty_of_form f] validates [f] as a kernel type. *)
+let ty_of_form (f : Form.t) : (ty, Diag.t list) result =
+  match ty_of f with ty -> Ok ty | exception Err d -> Error [ d ]
+
+(** [row_of_form f] validates [f] as a kernel effect row. *)
+let row_of_form (f : Form.t) : (row, Diag.t list) result =
+  match row_of f with row -> Ok row | exception Err d -> Error [ d ]
+
 (** [of_form f] validates [f] as a declaration when its head is one, otherwise as an expression. *)
 let of_form (f : Form.t) : (top, Diag.t list) result =
   if List.mem f.Form.head decl_heads then Result.map (fun d -> Decl d) (decl_of_form f)

@@ -129,6 +129,7 @@ in `src/` and `bin/` appears in this catalog.
 | E1200 | surface parser/printer slice is not implemented at this scaffold boundary | using a nonempty `.jac` file before SS.5 |
 | E1201 | canonical surface printer is not implemented at this scaffold boundary | calling the SS.1 printer placeholder |
 | E1202 | recovered surface tree still contains holes | checking malformed `.jac` after parser recovery |
+| E1203 | kernel subtree has no self-contained surface fragment | rendering an ambiguous raw `group` in a semantic diff |
 
 ## Appendix: the W5.3 audit (ten message rewrites)
 

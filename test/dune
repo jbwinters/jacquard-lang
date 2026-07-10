@@ -67,4 +67,5 @@
   (glob_files_rec ../prelude/*.jqd)
   (glob_files ../src/*.ml)
   (glob_files ../bin/*.ml)
-  ../docs/errors.md))
+  ../docs/errors.md
+  ../docs/surface-syntax.md))

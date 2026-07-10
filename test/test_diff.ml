@@ -83,6 +83,73 @@ let test_literal_edit_localizes () =
       Alcotest.failf "expected one divergence, got %d" (List.length divergences)
   | _ -> Alcotest.fail "fact should be Changed"
 
+let test_literal_edit_surface_rendering () =
+  let a = mk_store (base_srcs @ [ fact_src ~base:1 () ]) in
+  let b = mk_store (base_srcs @ [ fact_src ~base:2 () ]) in
+  let report = Diff.diff_with_syntax ~syntax:Diff.Surface ~old_side:a ~new_side:b in
+  match List.assoc_opt "fact" report with
+  | Some (Diff.Changed { divergences = [ d ]; _ }) ->
+      Alcotest.(check string) "old surface leaf" "1" d.Diff.a;
+      Alcotest.(check string) "new surface leaf" "2" d.Diff.b
+  | Some (Diff.Changed { divergences; _ }) ->
+      Alcotest.failf "expected one surface divergence, got %d" (List.length divergences)
+  | _ -> Alcotest.fail "fact should be Changed in surface mode"
+
+let test_bootstrap_rendering_remains_default () =
+  let a = Form.form "lit" [ Form.Int 1 ] in
+  let b = Form.form "tuple" [ Form.F (Form.form "lit" [ Form.Int 1 ]) ] in
+  match Diff.form_divergences ~path:"root" a b with
+  | [ { Diff.a; b; _ } ] ->
+      Alcotest.(check string) "old bootstrap node" "(lit 1)" a;
+      Alcotest.(check string) "new bootstrap node" "(tuple (lit 1))" b
+  | _ -> Alcotest.fail "expected one whole-node bootstrap divergence"
+
+let test_surface_mode_renders_kernel_nodes () =
+  let a = Form.form "lit" [ Form.Int 1 ] in
+  let b = Form.form "tuple" [ Form.F (Form.form "lit" [ Form.Int 1 ]) ] in
+  match Diff.form_divergences ~syntax:Diff.Surface ~path:"root" a b with
+  | [ { Diff.a; b; _ } ] ->
+      Alcotest.(check string) "old surface node" "1" a;
+      Alcotest.(check string) "new surface node" "(1,)" b
+  | _ -> Alcotest.fail "expected one whole-node surface divergence"
+
+let test_store_diff_surface_nodes () =
+  let a = mk_store [ "(defterm ((binding changed () (lit 1))))" ] in
+  let b = mk_store [ "(defterm ((binding changed () (tuple (lit 1)))))" ] in
+  let report = Diff.diff_with_syntax ~syntax:Diff.Surface ~old_side:a ~new_side:b in
+  match List.assoc_opt "changed" report with
+  | Some (Diff.Changed { divergences = [ d ]; _ }) ->
+      Alcotest.(check string) "old store subtree" "1" d.Diff.a;
+      Alcotest.(check string) "new store subtree" "(1,)" d.Diff.b
+  | _ -> Alcotest.fail "expected one surface-rendered store divergence"
+
+let test_surface_fragment_rendering () =
+  let form source =
+    match Reader.parse_one ~file:"diff-fragment.jqd" source with
+    | Ok form -> form
+    | Error ds -> Eval_support.fail_diags "diff fragment read" ds
+  in
+  let cases =
+    [
+      ("(pcon some (pvar x))", "Some(x)");
+      ("(tapp (tref list) (tref int))", "List Int");
+      ("(row (eref net) e)", "->{Net | e}");
+      ("(clause (pvar x) (tuple (var x)))", "| x -> (x,)");
+      ("(ret (pvar x) (var x))", "| return x -> x");
+      ("(opclause abort () k (app (var k) (lit 0)))", "| abort() resume k -> k(0)");
+      ("(binding id () (lam ((pvar x)) (var x)))", "id(x) = x");
+      ("(con some (field (tvar a)))", "Some a");
+      ("(field value (tref int))", "value: Int");
+      ("(op choose () (tref bool))", "choose : () -> Bool");
+      ("(eref net)", "Net");
+      ("(rvar e)", "e");
+    ]
+  in
+  List.iter
+    (fun (source, expected) ->
+      Alcotest.(check string) source expected (Diff.render_form Diff.Surface (form source)))
+    cases
+
 let test_helper_edit_lists_dependents () =
   let helper base =
     Printf.sprintf
@@ -130,6 +197,13 @@ let suite =
     Alcotest.test_case "rename only" `Quick test_rename_only;
     Alcotest.test_case "reformat is no semantic change" `Quick test_reformat_is_no_semantic_change;
     Alcotest.test_case "literal edit localizes" `Quick test_literal_edit_localizes;
+    Alcotest.test_case "literal edit renders as surface" `Quick test_literal_edit_surface_rendering;
+    Alcotest.test_case "bootstrap rendering stays default" `Quick
+      test_bootstrap_rendering_remains_default;
+    Alcotest.test_case "surface mode renders kernel nodes" `Quick
+      test_surface_mode_renders_kernel_nodes;
+    Alcotest.test_case "store diff renders surface nodes" `Quick test_store_diff_surface_nodes;
+    Alcotest.test_case "surface fragment rendering" `Quick test_surface_fragment_rendering;
     Alcotest.test_case "helper edit lists dependents" `Quick test_helper_edit_lists_dependents;
     Alcotest.test_case "added and removed" `Quick test_added_removed;
   ]

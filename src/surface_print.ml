@@ -397,21 +397,23 @@ let pp_binding lookup fmt (binding : Kernel.binding) =
       Format.fprintf fmt "@[<v>%a : %a@,%a@]" (pp_named Surface_name.Term) binding.bname
         (pp_ty lookup) ty pp_definition ()
 
+let pp_field lookup fmt (field : Kernel.field) =
+  match field.label with
+  | None -> pp_ty lookup fmt field.fty
+  | Some label ->
+      Format.fprintf fmt "%a: %a" (pp_named Surface_name.Term) label (pp_ty lookup) field.fty
+
 let pp_constructor lookup fmt (constructor : Kernel.conspec) =
+  Format.fprintf fmt "@[<hov>";
   pp_named Surface_name.Con fmt constructor.con_name;
   if constructor.fields <> [] then
     if List.exists (fun field -> Option.is_some field.Kernel.label) constructor.fields then
-      let pp_field fmt (field : Kernel.field) =
-        match field.label with
-        | None -> pp_ty lookup fmt field.fty
-        | Some label ->
-            Format.fprintf fmt "%a: %a" (pp_named Surface_name.Term) label (pp_ty lookup) field.fty
-      in
-      Format.fprintf fmt "(@[<hov>%a@])" (pp_sep "," pp_field) constructor.fields
+      Format.fprintf fmt "(@[<hov>%a@])" (pp_sep "," (pp_field lookup)) constructor.fields
     else
       List.iter
         (fun field -> Format.fprintf fmt "@ %a" (pp_ty_atom lookup) field.Kernel.fty)
-        constructor.fields
+        constructor.fields;
+  Format.fprintf fmt "@]"
 
 let pp_operation lookup fmt (operation : Kernel.opspec) =
   Format.fprintf fmt "@[<hov 2>%a :@ (%a) ->@ %a@]" (pp_named Surface_name.Op) operation.op_name
@@ -449,6 +451,132 @@ let render ~width pp value =
   pp fmt value;
   Format.pp_print_flush fmt ();
   Buffer.contents buffer
+
+let pp_clause_fragment lookup fmt (clause : Kernel.clause) =
+  match clause.cbody.it with
+  | Kernel.Let _ ->
+      Format.fprintf fmt "@[<v 2>| %a -> {@,%a@]@,}" (pp_pat lookup) clause.cpat
+        (pp_sequence_contents lookup) clause.cbody
+  | _ ->
+      Format.fprintf fmt "@[<hov 2>| %a ->@ %a@]" (pp_pat lookup) clause.cpat (pp_expr lookup)
+        clause.cbody
+
+let pp_ret_fragment lookup fmt (clause : Kernel.ret) =
+  Format.fprintf fmt "@[<hov 2>| return %a ->@ %a@]" (pp_pat lookup) clause.rbinder
+    (pp_arm_body lookup) clause.rbody
+
+let pp_op_fragment lookup fmt (clause : Kernel.opclause) =
+  let pp_resume fmt name =
+    if String.equal name "_" then Format.pp_print_string fmt "_"
+    else pp_named Surface_name.Term fmt name
+  in
+  Format.fprintf fmt "@[<hov 2>| %a(%a) resume %a ->@ %a@]"
+    (pp_gref lookup Surface_name.Op clause.ometa)
+    clause.op
+    (pp_sep "," (pp_pat lookup))
+    clause.params pp_resume clause.resume (pp_arm_body lookup) clause.obody
+
+let fragment_error form =
+  Error
+    [
+      Diag.error ~code:"E1203"
+        (Printf.sprintf "`%s` is not a self-contained surface fragment" form.Form.head);
+    ]
+
+(** [print_fragment] renders a kernel form even when it is an interior pattern, type, row, or
+    auxiliary product. It is intended for semantic diff and diagnostics; context-ambiguous [group]
+    forms return E1203 rather than guessing. *)
+let print_fragment ?(lookup : lookup option) ?(width = default_width) (form : Form.t) :
+    (string, Diag.t list) result =
+  let rendered pp value = Ok (render ~width pp value) in
+  let dummy_lit = Form.form "lit" [ Form.Int 0 ] in
+  let dummy_pat = Form.form "pwild" [] in
+  let dummy_ret = Form.form "ret" [ Form.F dummy_pat; Form.F dummy_lit ] in
+  match Kernel.of_form form with
+  | Ok (Kernel.Expr expr) -> rendered (pp_expr lookup) expr
+  | Ok (Kernel.Decl decl) -> rendered (pp_decl lookup) decl
+  | Error _ -> (
+      match Kernel.pat_of_form form with
+      | Ok pat -> rendered (pp_pat lookup) pat
+      | Error _ -> (
+          match Kernel.ty_of_form form with
+          | Ok ty -> rendered (pp_ty lookup) ty
+          | Error _ -> (
+              match Kernel.row_of_form form with
+              | Ok row -> rendered (pp_row lookup) row
+              | Error _ -> (
+                  match form.head with
+                  | "clause" -> (
+                      let wrapper = Form.form "match" [ Form.F dummy_lit; Form.F form ] in
+                      match Kernel.expr_of_form wrapper with
+                      | Ok { Kernel.it = Kernel.Match (_, [ clause ]); _ } ->
+                          rendered (pp_clause_fragment lookup) clause
+                      | _ -> fragment_error form)
+                  | "ret" -> (
+                      let wrapper = Form.form "handle" [ Form.F dummy_lit; Form.F form ] in
+                      match Kernel.expr_of_form wrapper with
+                      | Ok { Kernel.it = Kernel.Handle { ret; _ }; _ } ->
+                          rendered (pp_ret_fragment lookup) ret
+                      | _ -> fragment_error form)
+                  | "opclause" -> (
+                      let wrapper =
+                        Form.form "handle" [ Form.F dummy_lit; Form.F dummy_ret; Form.F form ]
+                      in
+                      match Kernel.expr_of_form wrapper with
+                      | Ok { Kernel.it = Kernel.Handle { ops = [ op ]; _ }; _ } ->
+                          rendered (pp_op_fragment lookup) op
+                      | _ -> fragment_error form)
+                  | "binding" -> (
+                      let group = Form.form "group" [ Form.F form ] in
+                      let wrapper = Form.form "defterm" [ Form.F group ] in
+                      match Kernel.decl_of_form wrapper with
+                      | Ok { Kernel.it = Kernel.DefTerm [ binding ]; _ } ->
+                          rendered (pp_binding lookup) binding
+                      | _ -> fragment_error form)
+                  | "con" -> (
+                      let vars = Form.form "group" [] in
+                      let wrapper =
+                        Form.form "deftype" [ Form.Sym "fragment"; Form.F vars; Form.F form ]
+                      in
+                      match Kernel.decl_of_form wrapper with
+                      | Ok { Kernel.it = Kernel.DefType { cons = [ constructor ]; _ }; _ } ->
+                          rendered (pp_constructor lookup) constructor
+                      | _ -> fragment_error form)
+                  | "field" -> (
+                      let vars = Form.form "group" [] in
+                      let constructor = Form.form "con" [ Form.Sym "fragment"; Form.F form ] in
+                      let wrapper =
+                        Form.form "deftype" [ Form.Sym "fragment"; Form.F vars; Form.F constructor ]
+                      in
+                      match Kernel.decl_of_form wrapper with
+                      | Ok
+                          {
+                            Kernel.it =
+                              Kernel.DefType { cons = [ { Kernel.fields = [ field ]; _ } ]; _ };
+                            _;
+                          } ->
+                          rendered (pp_field lookup) field
+                      | _ -> fragment_error form)
+                  | "op" -> (
+                      let vars = Form.form "group" [] in
+                      let wrapper =
+                        Form.form "defeffect" [ Form.Sym "fragment"; Form.F vars; Form.F form ]
+                      in
+                      match Kernel.decl_of_form wrapper with
+                      | Ok { Kernel.it = Kernel.DefEffect { ops = [ operation ]; _ }; _ } ->
+                          rendered (pp_operation lookup) operation
+                      | _ -> fragment_error form)
+                  | "eref" -> (
+                      let wrapper = Form.form "row" [ Form.F form ] in
+                      match Kernel.row_of_form wrapper with
+                      | Ok ({ effects = [ effect_ref ]; wmeta; _ } : Kernel.row) ->
+                          rendered (pp_gref lookup Surface_name.Effect wmeta) effect_ref
+                      | _ -> fragment_error form)
+                  | "rvar" -> (
+                      match form.args with
+                      | [ Form.Sym name ] -> rendered (pp_named Surface_name.Rvar) name
+                      | _ -> fragment_error form)
+                  | _ -> fragment_error form))))
 
 let is_surface_generated_decl (decl : Kernel.decl) =
   Option.is_some (Meta.surface_generated decl.meta)
