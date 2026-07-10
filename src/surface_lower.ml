@@ -37,6 +37,10 @@ let generated_single_meta ~form meta =
       error ~meta ~code:"E1234"
         (Printf.sprintf "cannot lower generated `%s` node without a source span" form)
 
+let generated_constructor_meta ~form meta =
+  let* meta = generated_single_meta ~form meta in
+  Ok (meta |> Meta.with_surface_generated form |> Meta.with_surface_ref_kind "con")
+
 (** [lower_pat pat] lowers any complete surface pattern without resolving constructor names. *)
 let rec lower_pat (pat : Surface_ast.pat) : (Kernel.pat, Diag.t list) result =
   let node it = Kernel.{ it; meta = pat.meta } in
@@ -175,6 +179,78 @@ and lower_expr_node ?(quote_depth = 0) (expr : Surface_ast.expr) : (Kernel.expr,
       | _ ->
           let* clauses = map_results lower_clause clauses in
           Ok (node (Kernel.Match (subject, clauses))))
+  | Surface_ast.If (condition, yes, no) ->
+      let* condition = lower_expr_node ~quote_depth condition in
+      let* yes = lower_expr_node ~quote_depth yes in
+      let* no = lower_expr_node ~quote_depth no in
+      let* true_meta = generated_single_meta ~form:"if-true" condition.meta in
+      let* false_meta = generated_single_meta ~form:"if-false" condition.meta in
+      let* true_clause_meta = generated_single_meta ~form:"if-then" yes.meta in
+      let* false_clause_meta = generated_single_meta ~form:"if-else" no.meta in
+      let true_pat = Kernel.{ it = PCon (Named "true", []); meta = true_meta } in
+      let false_pat = Kernel.{ it = PCon (Named "false", []); meta = false_meta } in
+      let clauses =
+        [
+          Kernel.{ cpat = true_pat; cbody = yes; cmeta = true_clause_meta };
+          Kernel.{ cpat = false_pat; cbody = no; cmeta = false_clause_meta };
+        ]
+      in
+      Ok Kernel.{ it = Match (condition, clauses); meta = Meta.with_surface_form "if" expr.meta }
+  | Surface_ast.List items -> (
+      let* items = map_results (lower_expr_node ~quote_depth) items in
+      let internal_meta ~form meta =
+        let* meta = generated_single_meta ~form meta in
+        Ok (Meta.without_surface_container "list" meta)
+      in
+      let* nil_meta = internal_meta ~form:"list-nil" expr.meta in
+      let nil_meta =
+        nil_meta |> Meta.with_surface_generated "list-nil" |> Meta.with_surface_ref_kind "con"
+      in
+      let nil = Kernel.{ it = Var "nil"; meta = nil_meta } in
+      let rec build index = function
+        | [] -> Ok nil
+        | item :: rest ->
+            let* tail = build (index + 1) rest in
+            let* fn_meta =
+              generated_constructor_meta ~form:"list-cons-constructor" item.Kernel.meta
+            in
+            let fn_meta = Meta.without_surface_container "list" fn_meta in
+            let fn = Kernel.{ it = Var "cons"; meta = fn_meta } in
+            let* generated_meta = generated_meta ~form:"list-tail" item.Kernel.meta expr.meta in
+            let generated_meta = Meta.without_surface_container "list" generated_meta in
+            let meta =
+              if index = 0 then Meta.with_surface_form "list" expr.meta else generated_meta
+            in
+            Ok Kernel.{ it = App (fn, [ item; tail ]); meta }
+      in
+      match items with
+      | [] ->
+          Ok
+            {
+              nil with
+              Kernel.meta =
+                expr.meta |> Meta.with_surface_form "list"
+                |> Meta.with_surface_generated "list"
+                |> Meta.with_surface_ref_kind "con";
+            }
+      | _ -> build 0 items)
+  | Surface_ast.Pipe (left, right) ->
+      let* left = lower_expr_node ~quote_depth left in
+      let* fn, args, right_meta =
+        match right.Surface_ast.it with
+        | Surface_ast.Call (fn, args) ->
+            let* fn = lower_expr_node ~quote_depth fn in
+            let* args = map_results (lower_expr_node ~quote_depth) args in
+            Ok (fn, args, Meta.with_surface_form "pipe-call" right.meta)
+        | _ ->
+            let* right = lower_expr_node ~quote_depth right in
+            Ok ({ right with Kernel.meta = Meta.without_trivia right.meta }, [], right.meta)
+      in
+      let meta = Meta.with_surface_container "pipe-rhs" right_meta expr.meta in
+      let meta =
+        match Meta.span expr.meta with Some span -> Meta.with_span span meta | None -> meta
+      in
+      Ok Kernel.{ it = App (fn, left :: args); meta = Meta.with_surface_form "pipe" meta }
   | Surface_ast.Handle (body, ret, ops) ->
       let lower_op (op : Surface_ast.op_clause) =
         let* params = map_results lower_pat op.oparams in
@@ -207,9 +283,6 @@ and lower_expr_node ?(quote_depth = 0) (expr : Surface_ast.expr) : (Kernel.expr,
         Ok (node (Kernel.Unquote splice))
   | Surface_ast.Hole _ ->
       error ~meta:expr.meta ~code:"E1202" "cannot lower a recovered surface expression hole"
-  | Surface_ast.List _ | Surface_ast.If _ | Surface_ast.Pipe _ ->
-      error ~meta:expr.meta ~code:"E1230"
-        "this surface form is not part of the implemented local-lowering slice"
 
 and lower_block ~quote_depth block_meta = function
   | [] -> error ~meta:block_meta ~code:"E1231" "an expression block cannot be empty"

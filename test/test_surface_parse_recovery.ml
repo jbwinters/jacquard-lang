@@ -14,12 +14,12 @@ let metadata_golden id meta =
   Printf.sprintf "%d|%s|%s|%s" id span surface_form surface_hole
 
 let test_recovery_golden () =
-  let recovered = recover "(\n)\n|\n{\n[\n}\n" in
+  let recovered = recover "(\n)\n|\n{\nthen\n}\n" in
   Alcotest.(check (list string))
     "all parser diagnostics"
     [
       "recover.jac:3:1-2: error[E1220]: stray `|` at top level";
-      "recover.jac:5:1-2: error[E1220]: expected an expression, found [";
+      "recover.jac:5:1-5: error[E1220]: expected an expression, found keyword(then)";
     ]
     (rendered_diagnostics recovered);
   match recovered.items with
@@ -34,7 +34,7 @@ let test_recovery_golden () =
   ] ->
       Alcotest.(check (list string))
         "hole metadata"
-        [ "0|recover.jac:3:1-2|recovery-hole|0"; "1|recover.jac:5:1-2|recovery-hole|1" ]
+        [ "0|recover.jac:3:1-2|recovery-hole|0"; "1|recover.jac:5:1-5|recovery-hole|1" ]
         [ metadata_golden first first_meta; metadata_golden second second_meta ];
       Alcotest.(check (option string))
         "block span" (Some "recover.jac:4:1-6:2")
@@ -42,7 +42,7 @@ let test_recovery_golden () =
   | _ -> Alcotest.fail "recovery golden produced an unexpected partial tree"
 
 let test_each_synchronization_boundary () =
-  let cases = [ ("newline", "[\nafter\n"); ("semicolon", "[;after\n") ] in
+  let cases = [ ("newline", "then\nafter\n"); ("semicolon", "then;after\n") ] in
   List.iter
     (fun (label, source) ->
       let recovered = recover source in
@@ -53,12 +53,12 @@ let test_each_synchronization_boundary () =
           ()
       | _ -> Alcotest.failf "%s: synchronization lost the later item" label)
     cases;
-  let closing = recover "{ [ }" in
+  let closing = recover "{ then }" in
   Alcotest.(check (list string)) "closing brace diagnostics" [ "E1220" ] (diagnostic_codes closing);
   (match closing.items with
   | [ { it = TopExpr { it = Block [ Expr { it = Hole 0; _ } ]; _ }; _ } ] -> ()
   | _ -> Alcotest.fail "closing-brace synchronization lost the containing block");
-  let bar = recover "[\n|\nafter\n" in
+  let bar = recover "then\n|\nafter\n" in
   Alcotest.(check (list string)) "bar diagnostics" [ "E1220"; "E1220" ] (diagnostic_codes bar);
   match bar.items with
   | [
@@ -156,7 +156,7 @@ let test_mixed_lexical_recovery_inside_block () =
   ] ->
       ()
   | _ -> Alcotest.fail "block lexical recovery lost its valid final expression");
-  let later_damage = recover "{ @\n[\n3 }" in
+  let later_damage = recover "{ @\nthen\n3 }" in
   Alcotest.(check (list string))
     "block lexical and parser diagnostics" [ "E1210"; "E1220" ] (diagnostic_codes later_damage);
   match later_damage.items with
@@ -224,6 +224,143 @@ let test_nested_unmatched_braces () =
       ()
   | _ -> Alcotest.fail "nested unmatched blocks did not recover recursively"
 
+let test_unterminated_list_recovery_holes () =
+  let recovered = recover "[1\nafter = 7\n" in
+  Alcotest.(check (list string))
+    "top-level diagnostics"
+    [ "recover.jac:2:1-6: error[E1220]: expected `,` or `]` before the next top-level item" ]
+    (rendered_diagnostics recovered);
+  (match recovered.items with
+  | [
+   {
+     it =
+       TopExpr
+         { it = List [ { it = Lit (LInt 1); _ }; { it = Hole hole_id; meta = hole_meta } ]; _ };
+     _;
+   };
+   { it = Definition { name = "after"; value = { it = Lit (LInt 7); _ }; _ }; _ };
+  ] ->
+      Alcotest.(check string)
+        "top-level list hole" "0|recover.jac:1:3-2:1|recovery-hole|0"
+        (metadata_golden hole_id hole_meta);
+      Alcotest.(check bool)
+        "top-level tree has holes" true
+        (List.exists Surface_ast.has_holes_top recovered.items)
+  | _ -> Alcotest.fail "unterminated list lost its item, hole, or following definition");
+  let without_diagnostics = { recovered with Surface_ast.diagnostics = [] } in
+  match Surface_parse.strict_file without_diagnostics with
+  | Error [ { Diag.code = "E1202"; _ } ] -> ()
+  | Error diagnostics ->
+      Alcotest.failf "strict_file returned unexpected diagnostics:\n%s"
+        (String.concat "\n" (List.map Diag.to_string diagnostics))
+  | Ok _ -> Alcotest.fail "strict_file accepted a recovered list hole"
+
+let test_list_holes_at_container_boundaries () =
+  let call = recover "f([1)\n" in
+  Alcotest.(check (list string))
+    "call diagnostics"
+    [ "recover.jac:1:5-6: error[E1220]: expected `,` or `]`, found )" ]
+    (rendered_diagnostics call);
+  (match call.items with
+  | [
+   {
+     it =
+       TopExpr
+         {
+           it =
+             Call
+               ( { it = Name "f"; _ },
+                 [ { it = List [ { it = Lit (LInt 1); _ }; { it = Hole id; meta } ]; _ } ] );
+           _;
+         };
+     _;
+   };
+  ] ->
+      Alcotest.(check string)
+        "call-boundary hole" "0|recover.jac:1:5-6|recovery-hole|0" (metadata_golden id meta)
+  | _ -> Alcotest.fail "malformed list consumed its call boundary");
+  let block = recover "{ [1 }\n" in
+  Alcotest.(check (list string))
+    "block diagnostics"
+    [ "recover.jac:1:6-7: error[E1220]: expected `,` or `]`, found }" ]
+    (rendered_diagnostics block);
+  (match block.items with
+  | [
+   {
+     it =
+       TopExpr
+         {
+           it = Block [ Expr { it = List [ { it = Lit (LInt 1); _ }; { it = Hole id; meta } ]; _ } ];
+           _;
+         };
+     _;
+   };
+  ] ->
+      Alcotest.(check string)
+        "block-boundary hole" "0|recover.jac:1:6-7|recovery-hole|0" (metadata_golden id meta)
+  | _ -> Alcotest.fail "malformed list consumed its block boundary");
+  let arm = recover "match x { | Bad -> [1 | Later -> 9 }\n" in
+  Alcotest.(check (list string))
+    "arm diagnostics"
+    [ "recover.jac:1:23-24: error[E1220]: expected `,` or `]`, found |" ]
+    (rendered_diagnostics arm);
+  (match arm.items with
+  | [
+   {
+     it =
+       TopExpr
+         {
+           it =
+             Match
+               ( _,
+                 [
+                   {
+                     cbody = { it = List [ { it = Lit (LInt 1); _ }; { it = Hole id; meta } ]; _ };
+                     _;
+                   };
+                   {
+                     cpattern = { it = PCon (Named "later", []); _ };
+                     cbody = { it = Lit (LInt 9); _ };
+                     _;
+                   };
+                 ] );
+           _;
+         };
+     _;
+   };
+  ] ->
+      Alcotest.(check string)
+        "arm-boundary hole" "0|recover.jac:1:23-24|recovery-hole|0" (metadata_golden id meta)
+  | _ -> Alcotest.fail "malformed list consumed the following match arm");
+  let closing_arm = recover "match x { | Bad -> [1 }\n" in
+  Alcotest.(check (list string))
+    "closing-arm diagnostics"
+    [ "recover.jac:1:23-24: error[E1220]: expected `,` or `]`, found }" ]
+    (rendered_diagnostics closing_arm);
+  match closing_arm.items with
+  | [
+   {
+     it =
+       TopExpr
+         {
+           it =
+             Match
+               ( _,
+                 [
+                   {
+                     cbody = { it = List [ { it = Lit (LInt 1); _ }; { it = Hole id; meta } ]; _ };
+                     _;
+                   };
+                 ] );
+           _;
+         };
+     _;
+   };
+  ] ->
+      Alcotest.(check string)
+        "closing-arm hole" "0|recover.jac:1:23-24|recovery-hole|0" (metadata_golden id meta)
+  | _ -> Alcotest.fail "malformed list consumed its match closing brace"
+
 let suite =
   [
     Alcotest.test_case "diagnostic and hole golden" `Quick test_recovery_golden;
@@ -239,4 +376,8 @@ let suite =
     Alcotest.test_case "string recovery preserves surroundings" `Quick
       test_string_recovery_preserves_surroundings;
     Alcotest.test_case "nested unmatched braces" `Quick test_nested_unmatched_braces;
+    Alcotest.test_case "unterminated list recovery holes" `Quick
+      test_unterminated_list_recovery_holes;
+    Alcotest.test_case "list holes at container boundaries" `Quick
+      test_list_holes_at_container_boundaries;
   ]

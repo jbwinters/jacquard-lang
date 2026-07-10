@@ -15,12 +15,14 @@ val lower_ty : Surface_ast.ty -> (Kernel.ty, Diag.t list) result
     diagnostics. *)
 
 val lower_expr : Surface_ast.expr -> (Kernel.expr, Diag.t list) result
-(** Lower an expression in the implemented surface slice. Blocks become local [Let] chains, with
-    bare non-final expressions bound to [PWild], while [let rec] shorthand becomes a variable-bound
+(** Lower an expression using only local rewrites to existing kernel forms. [if] becomes a two-arm
+    named-constructor [Match], lists become named [cons]/[nil] applications, and pipes insert their
+    left operand as the first argument of a call. Blocks become local [Let] chains, with bare
+    non-final expressions bound to [PWild], while [let rec] shorthand becomes a variable-bound
     [Lam]. Handlers preserve named/hashed operation intent and quote bodies become pre-resolution
     kernel forms with depth-aware unquote splices. Unquote outside quote is E0204. Lambda parameters
     and nonrecursive let binders retain E0205/E0206 irrefutability checks. Recovery holes, malformed
-    local bindings, and later-slice forms are diagnostics. *)
+    local bindings, and spanless generated nodes are diagnostics. *)
 
 val free_names : Kernel.expr -> String_set.t
 (** Return unresolved term names read by an expression, excluding pattern/let/lambda binders and

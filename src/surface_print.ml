@@ -329,57 +329,184 @@ let rec pp_expr context lookup fmt (expr : Kernel.expr) =
     | _ -> pp_singleton_block context lookup block_meta fmt expr
   else begin
     (match expr.it with Kernel.Let _ -> () | _ -> pp_leading context expr.meta fmt);
-    (match expr.it with
-    | Kernel.Lit lit -> pp_lit fmt lit
-    | Kernel.Var name -> pp_value_name (surface_value_kind expr.meta) fmt name
-    | Kernel.Ref (hash, refkind) ->
-        let kind = kind_of_refkind refkind in
-        Format.pp_print_string fmt (name_for_value_hash lookup expr.meta kind hash)
-    | Kernel.GroupRef index -> (
-        match Meta.name expr.meta with
-        | Some name -> pp_named Surface_name.Term fmt name
-        | None -> Format.fprintf fmt "#group[%d]" index)
-    | Kernel.Lam (params, body) ->
-        let params_meta = Meta.surface_container "params" expr.meta in
-        Format.fprintf fmt "@[<hov 2>fn ";
-        pp_leading context params_meta fmt;
-        Format.fprintf fmt "(%a" (pp_sep "," (pp_pat context lookup)) params;
-        pp_inner context params_meta fmt;
-        Format.fprintf fmt ")";
-        pp_trailing context params_meta fmt;
-        Format.fprintf fmt " ->@ %a@]" (pp_expr context lookup) body
-    | Kernel.App (fn, args) ->
-        Format.fprintf fmt "@[<hov 2>%a(@,%a" (pp_expr_atom context lookup) fn
-          (pp_sep "," (pp_expr context lookup))
-          args;
-        pp_inner context expr.meta fmt;
-        Format.fprintf fmt ")@]"
-    | Kernel.Let _ -> pp_block context lookup fmt expr
-    | Kernel.Tuple items -> (
-        match items with
-        | [] -> Format.pp_print_string fmt "()"
-        | [ item ] ->
-            Format.fprintf fmt "(@[<hov>%a," (pp_expr context lookup) item;
-            pp_inner context expr.meta fmt;
-            Format.fprintf fmt "@])"
-        | _ ->
-            Format.fprintf fmt "(@[<hov>%a" (pp_sep "," (pp_expr context lookup)) items;
-            pp_inner context expr.meta fmt;
-            Format.fprintf fmt "@])")
-    | Kernel.Ann (subject, ty) ->
-        Format.fprintf fmt "@[<hov 2>(%a :@ %a" (pp_expr context lookup) subject
-          (pp_ty context lookup) ty;
-        pp_inner context expr.meta fmt;
-        Format.fprintf fmt ")@]"
-    | Kernel.Match (subject, clauses) -> pp_match context lookup expr.meta fmt subject clauses
-    | Kernel.Handle { body; ret; ops } -> pp_handle context lookup expr.meta fmt body ret ops
-    | Kernel.Quote payload -> pp_quote context lookup expr.meta fmt payload
-    | Kernel.Unquote splice ->
-        Format.fprintf fmt "unquote(%a" (pp_expr context lookup) splice;
-        pp_inner context expr.meta fmt;
-        Format.pp_print_char fmt ')');
+    (match (Meta.surface_form expr.meta, expr.it) with
+    | Some "if", Kernel.Match (condition, clauses) -> (
+        match if_branches clauses with
+        | Some (yes, no) -> pp_if context lookup fmt condition yes no
+        | None -> pp_match context lookup expr.meta fmt condition clauses)
+    | Some "list", (Kernel.Var _ | Kernel.Ref _) -> pp_list context lookup expr.meta fmt []
+    | Some _, (Kernel.Var _ | Kernel.Ref _) when Meta.surface_generated expr.meta = Some "list" ->
+        pp_list context lookup expr.meta fmt []
+    | Some "list", Kernel.App _ -> (
+        match list_items expr with
+        | Some items -> pp_list context lookup expr.meta fmt items
+        | None -> pp_kernel_expr context lookup fmt expr)
+    | Some "pipe", Kernel.App (fn, left :: args) ->
+        pp_pipe context lookup expr.meta fmt left fn args
+    | Some _, _ | None, _ -> pp_kernel_expr context lookup fmt expr);
     match expr.it with Kernel.Let _ -> () | _ -> pp_trailing context expr.meta fmt
   end
+
+and pp_kernel_expr context lookup fmt (expr : Kernel.expr) =
+  match expr.it with
+  | Kernel.Lit lit -> pp_lit fmt lit
+  | Kernel.Var name -> pp_value_name (surface_value_kind expr.meta) fmt name
+  | Kernel.Ref (hash, refkind) ->
+      let kind = kind_of_refkind refkind in
+      Format.pp_print_string fmt (name_for_value_hash lookup expr.meta kind hash)
+  | Kernel.GroupRef index -> (
+      match Meta.name expr.meta with
+      | Some name -> pp_named Surface_name.Term fmt name
+      | None -> Format.fprintf fmt "#group[%d]" index)
+  | Kernel.Lam (params, body) ->
+      let params_meta = Meta.surface_container "params" expr.meta in
+      Format.fprintf fmt "@[<hov 2>fn ";
+      pp_leading context params_meta fmt;
+      Format.fprintf fmt "(%a" (pp_sep "," (pp_pat context lookup)) params;
+      pp_inner context params_meta fmt;
+      Format.fprintf fmt ")";
+      pp_trailing context params_meta fmt;
+      Format.fprintf fmt " ->@ %a@]" (pp_expr context lookup) body
+  | Kernel.App (fn, args) ->
+      Format.fprintf fmt "@[<hov 2>%a(@,%a" (pp_expr_atom context lookup) fn
+        (pp_sep "," (pp_expr context lookup))
+        args;
+      pp_inner context expr.meta fmt;
+      Format.fprintf fmt ")@]"
+  | Kernel.Let _ -> pp_block context lookup fmt expr
+  | Kernel.Tuple items -> (
+      match items with
+      | [] -> Format.pp_print_string fmt "()"
+      | [ item ] ->
+          Format.fprintf fmt "(@[<hov>%a," (pp_expr context lookup) item;
+          pp_inner context expr.meta fmt;
+          Format.fprintf fmt "@])"
+      | _ ->
+          Format.fprintf fmt "(@[<hov>%a" (pp_sep "," (pp_expr context lookup)) items;
+          pp_inner context expr.meta fmt;
+          Format.fprintf fmt "@])")
+  | Kernel.Ann (subject, ty) ->
+      Format.fprintf fmt "@[<hov 2>(%a :@ %a" (pp_expr context lookup) subject
+        (pp_ty context lookup) ty;
+      pp_inner context expr.meta fmt;
+      Format.fprintf fmt ")@]"
+  | Kernel.Match (subject, clauses) -> pp_match context lookup expr.meta fmt subject clauses
+  | Kernel.Handle { body; ret; ops } -> pp_handle context lookup expr.meta fmt body ret ops
+  | Kernel.Quote payload -> pp_quote context lookup expr.meta fmt payload
+  | Kernel.Unquote splice ->
+      Format.fprintf fmt "unquote(%a" (pp_expr context lookup) splice;
+      pp_inner context expr.meta fmt;
+      Format.pp_print_char fmt ')'
+
+and if_branches = function
+  | [
+      { Kernel.cpat = { it = Kernel.PCon (_, []); meta = true_meta }; cbody = yes; _ };
+      { Kernel.cpat = { it = Kernel.PCon (_, []); meta = false_meta }; cbody = no; _ };
+    ]
+    when Meta.surface_form true_meta = Some "if-true"
+         && Meta.surface_form false_meta = Some "if-false" ->
+      Some (yes, no)
+  | _ -> None
+
+and expression_has_trailing_comments (expression : Kernel.expr) =
+  let has meta = Meta.comment_texts Meta.key_trivia_trailing meta <> [] in
+  has expression.meta
+  || List.exists
+       (fun kind -> has (Meta.surface_container kind expression.meta))
+       [ "list"; "paren"; "block" ]
+
+and pp_following_keyword context fmt expression keyword =
+  if context.trivia && expression_has_trailing_comments expression then begin
+    Format.pp_force_newline fmt ();
+    Format.pp_print_string fmt keyword
+  end
+  else Format.fprintf fmt "@ %s" keyword
+
+and pp_if context lookup fmt condition yes no =
+  let rec pp_else fmt expression =
+    match (Meta.surface_form expression.Kernel.meta, expression.it) with
+    | Some "if", Kernel.Match (condition, clauses) -> (
+        match if_branches clauses with
+        | Some (yes, no) ->
+            Format.pp_print_string fmt "else ";
+            pp_leading context expression.meta fmt;
+            Format.fprintf fmt "@[<hov 2>if %a" (pp_expr context lookup) condition;
+            pp_following_keyword context fmt condition "then";
+            Format.fprintf fmt "@ %a@]" (pp_expr context lookup) yes;
+            if context.trivia && expression_has_trailing_comments yes then
+              Format.pp_force_newline fmt ();
+            Format.fprintf fmt "@ %a" pp_else no;
+            pp_trailing context expression.meta fmt
+        | None -> Format.fprintf fmt "else %a" (pp_expr context lookup) expression)
+    | _ -> Format.fprintf fmt "else %a" (pp_expr context lookup) expression
+  in
+  Format.fprintf fmt "@[<hov 0>@[<hov 2>if %a" (pp_expr context lookup) condition;
+  pp_following_keyword context fmt condition "then";
+  Format.fprintf fmt "@ %a@]" (pp_expr context lookup) yes;
+  if context.trivia && expression_has_trailing_comments yes then Format.pp_force_newline fmt ();
+  Format.fprintf fmt "@ %a@]" pp_else no
+
+and list_items expr =
+  let rec collect acc current =
+    match current.Kernel.it with
+    | Kernel.App (fn, [ item; tail ])
+      when (Meta.surface_form fn.meta = Some "list-cons-constructor"
+           || Meta.surface_generated fn.meta = Some "list-cons-constructor")
+           && (Meta.surface_form current.meta = Some "list"
+              || Meta.surface_form current.meta = Some "list-tail") ->
+        collect (item :: acc) tail
+    | (Kernel.Var _ | Kernel.Ref _)
+      when Meta.surface_form current.meta = Some "list-nil"
+           || Meta.surface_generated current.meta = Some "list-nil" ->
+        Some (List.rev acc)
+    | _ -> None
+  in
+  collect [] expr
+
+and pp_list context lookup meta fmt items =
+  let container_meta = Meta.surface_container "list" meta in
+  pp_leading context container_meta fmt;
+  Format.fprintf fmt "[@[<hov>%a" (pp_sep "," (pp_expr context lookup)) items;
+  pp_inner context meta fmt;
+  pp_inner context container_meta fmt;
+  Format.fprintf fmt "@]]";
+  pp_trailing context container_meta fmt
+
+and pp_pipe context lookup meta fmt left fn args =
+  let rhs_meta = Meta.surface_container "pipe-rhs" meta in
+  let explicit_call = Meta.surface_form rhs_meta = Some "pipe-call" in
+  let pp_operator fmt () =
+    if context.trivia && expression_has_trailing_comments left then Format.pp_force_newline fmt ();
+    Format.pp_print_string fmt "|> ";
+    pp_leading context rhs_meta fmt
+  in
+  match args with
+  | [] when not explicit_call ->
+      Format.fprintf fmt "@[<hov 2>%a@ %a%a" (pp_pipe_left context lookup) left pp_operator ()
+        (pp_pipe_value context lookup) fn;
+      pp_inner context rhs_meta fmt;
+      pp_trailing context rhs_meta fmt;
+      pp_inner context meta fmt;
+      Format.fprintf fmt "@]"
+  | _ ->
+      Format.fprintf fmt "@[<hov 2>%a@ %a%a(@,%a" (pp_pipe_left context lookup) left pp_operator ()
+        (pp_expr_atom context lookup) fn
+        (pp_sep "," (pp_expr context lookup))
+        args;
+      pp_inner context rhs_meta fmt;
+      pp_inner context meta fmt;
+      Format.fprintf fmt ")";
+      pp_trailing context rhs_meta fmt;
+      Format.fprintf fmt "@]"
+
+and pp_pipe_left context lookup fmt expr = pp_expr_atom context lookup fmt expr
+
+and pp_pipe_value context lookup fmt expr =
+  let block_meta = Meta.surface_container "block" expr.Kernel.meta in
+  let paren_meta = Meta.surface_container "paren" expr.meta in
+  if not (Meta.is_empty paren_meta) then pp_grouped context lookup paren_meta fmt expr
+  else if not (Meta.is_empty block_meta) then pp_singleton_block context lookup block_meta fmt expr
+  else pp_expr_atom context lookup fmt expr
 
 and pp_grouped context lookup paren_meta fmt expr =
   pp_leading context paren_meta fmt;
@@ -398,12 +525,20 @@ and pp_singleton_block context lookup block_meta fmt expr =
   pp_trailing context block_meta fmt
 
 and pp_expr_atom context lookup fmt expr =
-  match expr.Kernel.it with
-  | Kernel.Lit _ | Kernel.Var _ | Kernel.Ref _ | Kernel.GroupRef _ | Kernel.App _ | Kernel.Match _
-  | Kernel.Tuple _ | Kernel.Let _ | Kernel.Handle _ | Kernel.Quote _ | Kernel.Unquote _
-  | Kernel.Ann _ ->
-      pp_expr context lookup fmt expr
-  | Kernel.Lam _ -> Format.fprintf fmt "(%a)" (pp_expr context lookup) expr
+  let paren_meta = Meta.surface_container "paren" expr.Kernel.meta in
+  if not (Meta.is_empty paren_meta) then pp_grouped context lookup paren_meta fmt expr
+  else if
+    match (Meta.surface_form expr.meta, expr.it) with
+    | Some "if", Kernel.Match (_, clauses) -> Option.is_some (if_branches clauses)
+    | _ -> false
+  then Format.fprintf fmt "(%a)" (pp_expr context lookup) expr
+  else
+    match expr.Kernel.it with
+    | Kernel.Lit _ | Kernel.Var _ | Kernel.Ref _ | Kernel.GroupRef _ | Kernel.App _ | Kernel.Match _
+    | Kernel.Tuple _ | Kernel.Let _ | Kernel.Handle _ | Kernel.Quote _ | Kernel.Unquote _
+    | Kernel.Ann _ ->
+        pp_expr context lookup fmt expr
+    | Kernel.Lam _ -> Format.fprintf fmt "(%a)" (pp_expr context lookup) expr
 
 and pp_sequence_item context lookup fmt (meta, isrec, binder, value) =
   pp_leading context meta fmt;

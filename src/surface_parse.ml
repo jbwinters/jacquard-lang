@@ -12,6 +12,7 @@ type state = {
   tokens : Surface_lex.located array;
   mutable index : int;
   mutable limit : int option;
+  mutable recovery_depth : int;
   mutable diagnostics : Diag.t list;
   mutable next_hole : int;
 }
@@ -42,11 +43,20 @@ let hole_meta state span =
   state.next_hole <- id + 1;
   (id, recovery_meta id span)
 
+let diagnostic_token state token =
+  match (state.limit, token.Surface_lex.token) with
+  | Some limit, Surface_lex.Eof when state.index >= limit -> state.tokens.(limit)
+  | (Some _ | None), _ -> token
+
 let report_code state token code message =
+  let token = diagnostic_token state token in
   state.diagnostics <- Diag.error ~span:token.Surface_lex.span ~code message :: state.diagnostics
 
 let report state token message = report_code state token "E1220" message
-let token_description token = Surface_lex.show_token token.Surface_lex.token
+
+let token_description state token =
+  Surface_lex.show_token (diagnostic_token state token).Surface_lex.token
+
 let advance_recording_invalid state = advance state
 
 let expr_hole state token =
@@ -115,6 +125,17 @@ let synchronize_paren state =
   while
     match (current state).Surface_lex.token with
     | Surface_lex.RParen | Surface_lex.RBrace | Surface_lex.Bar | Surface_lex.Eof -> false
+    | _ -> true
+  do
+    ignore (advance_recording_invalid state)
+  done
+
+let synchronize_bracket state =
+  while
+    match (current state).Surface_lex.token with
+    | Surface_lex.RParen | Surface_lex.RBracket | Surface_lex.RBrace | Surface_lex.Bar
+    | Surface_lex.Eof ->
+        false
     | _ -> true
   do
     ignore (advance_recording_invalid state)
@@ -213,7 +234,7 @@ let expect state expected description =
   if token.Surface_lex.token = expected then Some (advance state)
   else begin
     report state token
-      (Printf.sprintf "expected %s, found %s" description (token_description token));
+      (Printf.sprintf "expected %s, found %s" description (token_description state token));
     None
   end
 
@@ -222,6 +243,10 @@ let with_limit state limit f =
   state.limit <- Some limit;
   Fun.protect ~finally:(fun () -> state.limit <- previous) f
 
+let within_recovery_container state f =
+  state.recovery_depth <- state.recovery_depth + 1;
+  Fun.protect ~finally:(fun () -> state.recovery_depth <- state.recovery_depth - 1) f
+
 let token_at state index =
   if index < Array.length state.tokens then state.tokens.(index)
   else state.tokens.(Array.length state.tokens - 1)
@@ -229,6 +254,12 @@ let token_at state index =
 let rec index_after_comments state index =
   match (token_at state index).Surface_lex.token with
   | Surface_lex.Comment _ | Surface_lex.DocComment _ -> index_after_comments state (index + 1)
+  | _ -> index
+
+let rec index_after_continuation state index =
+  match (token_at state index).Surface_lex.token with
+  | Surface_lex.Comment _ | Surface_lex.DocComment _ | Surface_lex.Newline ->
+      index_after_continuation state (index + 1)
   | _ -> index
 
 let rec index_after_layout state index =
@@ -271,6 +302,19 @@ let top_item_ahead state index =
           match (token_at state next).Surface_lex.token with
           | Surface_lex.Colon | Surface_lex.Equal -> true
           | _ -> equation_definition_ahead_at state index))
+
+let top_boundary_after_continuation state =
+  if state.recovery_depth > 0 || Option.is_some state.limit then None
+  else
+    let layout = state.index in
+    let next = index_after_continuation state layout in
+    if next > layout && top_item_ahead state next then Some (token_at state next) else None
+
+let is_expression_boundary = function
+  | Surface_lex.RParen | Surface_lex.RBracket | Surface_lex.RBrace | Surface_lex.Bar
+  | Surface_lex.Eof ->
+      true
+  | _ -> false
 
 type arm_boundary_kind = Arm_delimiter | Arm_layout of Surface_lex.located | Arm_end
 type arm_boundary = { boundary_index : int; boundary_kind : arm_boundary_kind }
@@ -329,8 +373,19 @@ let starts_type_atom = function
 let rec parse_expr state ~allow_newlines = parse_pipe state ~allow_newlines
 
 and parse_pipe state ~allow_newlines =
-  (* SS.13 adds the [|>] loop here; keeping this layer now fixes precedence below it. *)
-  parse_call state ~allow_newlines
+  let left = parse_call state ~allow_newlines in
+  let rec loop left =
+    let pipe_index = index_after_continuation state state.index in
+    match (token_at state pipe_index).Surface_lex.token with
+    | Surface_lex.Pipe ->
+        state.index <- pipe_index;
+        ignore (advance state);
+        skip_continuation state;
+        let right = parse_call state ~allow_newlines in
+        loop Surface_ast.{ it = Pipe (left, right); meta = merged_meta left.meta right.meta }
+    | _ -> left
+  in
+  loop left
 
 and parse_call state ~allow_newlines =
   let fn : Surface_ast.expr = parse_primary state ~allow_newlines in
@@ -339,7 +394,7 @@ and parse_call state ~allow_newlines =
     match (current state).Surface_lex.token with
     | Surface_lex.LParen ->
         let opening = advance state in
-        let args, closing = parse_expr_list state in
+        let args, closing = within_recovery_container state (fun () -> parse_expr_list state) in
         let meta = meta_with_span (span_between opening closing) in
         let meta = merged_meta fn.Surface_ast.meta meta in
         postfix Surface_ast.{ it = Call (fn, args); meta }
@@ -368,7 +423,7 @@ and parse_expr_list state =
         | _ ->
             let token = current state in
             report state token
-              (Printf.sprintf "expected `,` or `)`, found %s" (token_description token));
+              (Printf.sprintf "expected `,` or `)`, found %s" (token_description state token));
             synchronize_paren state;
             let closing =
               match (current state).Surface_lex.token with
@@ -415,21 +470,163 @@ and parse_primary state ~allow_newlines =
   | Surface_lex.GroupRef index ->
       ignore (advance state);
       Surface_ast.{ it = GroupRef index; meta }
-  | Surface_lex.LParen -> parse_paren_expr state (advance state)
-  | Surface_lex.LBrace -> parse_block state (advance state)
+  | Surface_lex.LParen ->
+      let opening = advance state in
+      within_recovery_container state (fun () -> parse_paren_expr state opening)
+  | Surface_lex.LBracket -> parse_list_expr state (advance state)
+  | Surface_lex.LBrace ->
+      let opening = advance state in
+      within_recovery_container state (fun () -> parse_block state opening)
   | Surface_lex.Keyword "fn" -> parse_fn state ~allow_newlines (advance state)
   | Surface_lex.Keyword "match" -> parse_match state ~allow_newlines (advance state)
+  | Surface_lex.Keyword "if" -> parse_if state ~allow_newlines (advance state)
   | Surface_lex.Keyword "handle" -> parse_handle state ~allow_newlines (advance state)
-  | Surface_lex.Keyword "quote" -> parse_quote state (advance state)
-  | Surface_lex.Keyword "unquote" -> parse_unquote state (advance state)
+  | Surface_lex.Keyword "quote" ->
+      let keyword = advance state in
+      within_recovery_container state (fun () -> parse_quote state keyword)
+  | Surface_lex.Keyword "unquote" ->
+      let keyword = advance state in
+      within_recovery_container state (fun () -> parse_unquote state keyword)
   | Surface_lex.Invalid _ ->
       ignore (advance state);
       expr_hole state token
   | _ ->
       report state token
-        (Printf.sprintf "expected an expression, found %s" (token_description token));
+        (Printf.sprintf "expected an expression, found %s" (token_description state token));
       if token.Surface_lex.token <> Surface_lex.Eof then ignore (advance state);
       expr_hole state token
+
+and parse_list_expr state opening =
+  let items, closing =
+    match top_boundary_after_continuation state with
+    | Some next_top ->
+        report state next_top "expected `]` before the next top-level item";
+        ([ expr_hole state (current state) ], current state)
+    | None -> (
+        skip_list_space state;
+        match (current state).Surface_lex.token with
+        | Surface_lex.RBracket -> ([], advance state)
+        | _ ->
+            let rec loop acc =
+              let expression =
+                within_recovery_container state (fun () -> parse_expr state ~allow_newlines:true)
+              in
+              match top_boundary_after_continuation state with
+              | Some next_top ->
+                  report state next_top "expected `,` or `]` before the next top-level item";
+                  (List.rev (expr_hole state (current state) :: expression :: acc), current state)
+              | None -> (
+                  skip_list_space state;
+                  match (current state).Surface_lex.token with
+                  | Surface_lex.Comma ->
+                      ignore (advance state);
+                      skip_list_space state;
+                      if (current state).Surface_lex.token = Surface_lex.RBracket then begin
+                        report state (current state) "list literals do not permit a trailing comma";
+                        let hole = expr_hole state (current state) in
+                        (List.rev (hole :: expression :: acc), advance state)
+                      end
+                      else loop (expression :: acc)
+                  | Surface_lex.RBracket -> (List.rev (expression :: acc), advance state)
+                  | _ ->
+                      let token = current state in
+                      report state token
+                        (Printf.sprintf "expected `,` or `]`, found %s"
+                           (token_description state token));
+                      let hole = expr_hole state token in
+                      synchronize_bracket state;
+                      let closing =
+                        match (current state).Surface_lex.token with
+                        | Surface_lex.RBracket -> advance state
+                        | _ -> current state
+                      in
+                      (List.rev (hole :: expression :: acc), closing))
+            in
+            loop [])
+  in
+  let meta = meta_with_span (span_between opening closing) in
+  Surface_ast.{ it = List items; meta = Meta.with_surface_container "list" meta meta }
+
+and parse_if state ~allow_newlines keyword =
+  let condition = parse_expr state ~allow_newlines in
+  match top_boundary_after_continuation state with
+  | Some next_top ->
+      report state next_top "expected `then` after the condition before the next top-level item";
+      let yes = expr_hole state (current state) in
+      let no = expr_hole state (current state) in
+      Surface_ast.{ it = If (condition, yes, no); meta = meta_from_token_to_meta keyword no.meta }
+  | None ->
+      skip_continuation state;
+      let then_token = expect state (Surface_lex.Keyword "then") "`then` after the condition" in
+      if Option.is_none then_token && is_expression_boundary (current state).Surface_lex.token then
+        let yes = expr_hole state (current state) in
+        let no = expr_hole state (current state) in
+        Surface_ast.{ it = If (condition, yes, no); meta = meta_from_token_to_meta keyword no.meta }
+      else begin
+        let branch_boundary =
+          match then_token with Some _ -> top_boundary_after_continuation state | None -> None
+        in
+        match branch_boundary with
+        | Some next_top ->
+            report state next_top
+              "expected an expression after `then` before the next top-level item";
+            let yes = expr_hole state (current state) in
+            let no = expr_hole state (current state) in
+            Surface_ast.
+              { it = If (condition, yes, no); meta = meta_from_token_to_meta keyword no.meta }
+        | None -> (
+            Option.iter (fun _ -> skip_continuation state) then_token;
+            let yes = parse_expr state ~allow_newlines in
+            match top_boundary_after_continuation state with
+            | Some next_top ->
+                report state next_top
+                  "expected `else` after the then branch before the next top-level item";
+                let no = expr_hole state (current state) in
+                Surface_ast.
+                  { it = If (condition, yes, no); meta = meta_from_token_to_meta keyword no.meta }
+            | None -> (
+                skip_continuation state;
+                let else_token =
+                  expect state (Surface_lex.Keyword "else") "`else` after the then branch"
+                in
+                if
+                  Option.is_none else_token
+                  && is_expression_boundary (current state).Surface_lex.token
+                then
+                  let no = expr_hole state (current state) in
+                  Surface_ast.
+                    { it = If (condition, yes, no); meta = meta_from_token_to_meta keyword no.meta }
+                else
+                  let branch_boundary =
+                    match else_token with
+                    | Some _ -> top_boundary_after_continuation state
+                    | None -> None
+                  in
+                  match branch_boundary with
+                  | Some next_top ->
+                      report state next_top
+                        "expected an expression after `else` before the next top-level item";
+                      let no = expr_hole state (current state) in
+                      Surface_ast.
+                        {
+                          it = If (condition, yes, no);
+                          meta = meta_from_token_to_meta keyword no.meta;
+                        }
+                  | None ->
+                      Option.iter (fun _ -> skip_continuation state) else_token;
+                      let no =
+                        if is_expression_boundary (current state).Surface_lex.token then begin
+                          report state (current state) "expected an expression after `else`";
+                          expr_hole state (current state)
+                        end
+                        else parse_expr state ~allow_newlines
+                      in
+                      Surface_ast.
+                        {
+                          it = If (condition, yes, no);
+                          meta = meta_from_token_to_meta keyword no.meta;
+                        }))
+      end
 
 and parse_paren_expr state opening =
   skip_list_space state;
@@ -476,7 +673,7 @@ and parse_paren_expr state opening =
               | _ ->
                   let token = current state in
                   report state token
-                    (Printf.sprintf "expected `,` or `)`, found %s" (token_description token));
+                    (Printf.sprintf "expected `,` or `)`, found %s" (token_description state token));
                   synchronize_paren state;
                   let closing =
                     if (current state).Surface_lex.token = Surface_lex.RParen then advance state
@@ -494,7 +691,7 @@ and parse_paren_expr state opening =
       | _ ->
           let token = current state in
           report state token
-            (Printf.sprintf "expected `:`, `,`, or `)`, found %s" (token_description token));
+            (Printf.sprintf "expected `:`, `,`, or `)`, found %s" (token_description state token));
           synchronize_paren state;
           let closing =
             if (current state).Surface_lex.token = Surface_lex.RParen then advance state
@@ -556,7 +753,7 @@ and parse_pattern_list state _opening =
         | _ ->
             let token = current state in
             report state token
-              (Printf.sprintf "expected `,` or `)`, found %s" (token_description token));
+              (Printf.sprintf "expected `,` or `)`, found %s" (token_description state token));
             synchronize_paren state;
             let closing =
               if (current state).Surface_lex.token = Surface_lex.RParen then advance state
@@ -586,7 +783,7 @@ and parse_pattern state ~allow_newlines =
         | _ ->
             report state binder_token
               (Printf.sprintf "expected a lowercase or `term`-escaped binder after `as`, found %s"
-                 (token_description binder_token));
+                 (token_description state binder_token));
             (match binder_token.Surface_lex.token with
             | Surface_lex.Bar | Surface_lex.RBrace | Surface_lex.RParen | Surface_lex.Arrow
             | Surface_lex.Eof ->
@@ -650,7 +847,8 @@ and parse_pattern_atom state ~allow_newlines:_ =
       ignore (advance state);
       pat_hole state token
   | _ ->
-      report state token (Printf.sprintf "expected a pattern, found %s" (token_description token));
+      report state token
+        (Printf.sprintf "expected a pattern, found %s" (token_description state token));
       (match token.Surface_lex.token with
       | Surface_lex.Bar | Surface_lex.RBrace | Surface_lex.RParen | Surface_lex.Arrow
       | Surface_lex.Eof ->
@@ -869,7 +1067,7 @@ and parse_operation_clause state start =
     | _ ->
         report_code state operation_token "E1226"
           (Printf.sprintf "expected an operation name after `|`, found %s"
-             (token_description operation_token));
+             (token_description state operation_token));
         (match operation_token.Surface_lex.token with
         | Surface_lex.Bar | Surface_lex.RBrace | Surface_lex.Eof -> ()
         | _ -> ignore (advance_recording_invalid state));
@@ -899,7 +1097,8 @@ and parse_operation_clause state start =
         name
     | _ ->
         report_code state resume_token "E1226"
-          (Printf.sprintf "expected a resume binder, found %s" (token_description resume_token));
+          (Printf.sprintf "expected a resume binder, found %s"
+             (token_description state resume_token));
         (match resume_token.Surface_lex.token with
         | Surface_lex.Arrow | Surface_lex.Bar | Surface_lex.RBrace | Surface_lex.Eof -> ()
         | _ -> ignore (advance_recording_invalid state));
@@ -931,7 +1130,7 @@ and parse_handler_clause state start =
   | _ -> (
       report_code state token "E1226"
         (Printf.sprintf "expected `return` or an operation clause, found %s"
-           (token_description token));
+           (token_description state token));
       let boundary = next_arm_boundary state in
       state.index <- boundary.boundary_index;
       (`Malformed, match boundary.boundary_kind with Arm_layout top -> Some top | _ -> None))
@@ -1202,7 +1401,8 @@ and parse_type_atom state ~allow_newlines =
       { ty = Surface_ast.{ it = TyHash hash; meta }; arrow_params = None }
   | Surface_lex.LParen -> parse_paren_type state ~allow_newlines (advance state)
   | _ ->
-      report state token (Printf.sprintf "expected a type, found %s" (token_description token));
+      report state token
+        (Printf.sprintf "expected a type, found %s" (token_description state token));
       if token.Surface_lex.token <> Surface_lex.Eof then ignore (advance_recording_invalid state);
       let id, meta = hole_meta state token.span in
       { ty = Surface_ast.{ it = TyHole id; meta }; arrow_params = None }
@@ -1252,7 +1452,7 @@ and parse_paren_type state ~allow_newlines:_ opening =
             | _ ->
                 let token = current state in
                 report state token
-                  (Printf.sprintf "expected `,` or `)`, found %s" (token_description token));
+                  (Printf.sprintf "expected `,` or `)`, found %s" (token_description state token));
                 synchronize_paren state;
                 let closing =
                   if (current state).Surface_lex.token = Surface_lex.RParen then advance state
@@ -1270,7 +1470,7 @@ and parse_paren_type state ~allow_newlines:_ opening =
     | _ ->
         let token = current state in
         report state token
-          (Printf.sprintf "expected `,` or `)`, found %s" (token_description token));
+          (Printf.sprintf "expected `,` or `)`, found %s" (token_description state token));
         let id, meta = hole_meta state token.span in
         { ty = Surface_ast.{ it = TyHole id; meta }; arrow_params = None }
 
@@ -1311,7 +1511,7 @@ and parse_arrow state ~allow_newlines params left_meta =
     | _ ->
         report state token
           (Printf.sprintf "expected an effect name, row tail, or `}`, found %s"
-             (token_description token));
+             (token_description state token));
         if token.token <> Surface_lex.Eof then ignore (advance_recording_invalid state);
         finished := true
   done;
@@ -1499,7 +1699,7 @@ let parse_decl_name state description project =
       (name, token)
   | None ->
       report_code state token "E1225"
-        (Printf.sprintf "expected %s, found %s" description (token_description token));
+        (Printf.sprintf "expected %s, found %s" description (token_description state token));
       if token.Surface_lex.token <> Surface_lex.Eof then ignore (advance_recording_invalid state);
       ("__surface_hole", token)
 
@@ -1577,7 +1777,7 @@ let parse_constructor_fields state constructor opening =
                     report_code state (current state) "E1225"
                       (Printf.sprintf "expected `,` or `)` in constructor `%s`, found %s"
                          constructor
-                         (token_description (current state)));
+                         (token_description state (current state)));
                     synchronize_paren state)))
   done;
   if not !has_label then
@@ -1688,7 +1888,7 @@ let parse_operation_types state =
           | _ ->
               report_code state (current state) "E1225"
                 (Printf.sprintf "expected `,` or `)` in operation parameters, found %s"
-                   (token_description (current state)));
+                   (token_description state (current state)));
               synchronize_paren state;
               let closing =
                 if (current state).Surface_lex.token = Surface_lex.RParen then advance state
@@ -1776,7 +1976,7 @@ let parse_effect_decl state keyword =
         | _ ->
             report_code state token "E1225"
               (Printf.sprintf "expected an operation signature or `}`, found %s"
-                 (token_description token));
+                 (token_description state token));
             if token.Surface_lex.token <> Surface_lex.Eof then begin
               synchronize_item state;
               ignore (consume_separators state)
@@ -1916,7 +2116,7 @@ module Trivia_ownership = struct
       | Ann (subject, annotation) -> expr (depth + 1) subject @ ty (depth + 1) annotation
     in
     container "block" node.meta @ container "params" node.meta @ container "paren" node.meta
-    @ slot Expr node.meta @ children
+    @ container "list" node.meta @ slot Expr node.meta @ children
 
   and block_item depth = function
     | Surface_ast.Expr expression -> expr depth expression
@@ -2217,6 +2417,7 @@ module Trivia_ownership = struct
     meta |> apply additions role
     |> apply_container additions "params"
     |> apply_container additions "block" |> apply_container additions "paren"
+    |> apply_container additions "list"
 
   let rec map_expr additions (expression : Surface_ast.expr) =
     let it =
@@ -2366,6 +2567,7 @@ let parse_tokens ~source tokens =
       tokens = Array.of_list tokens;
       index = 0;
       limit = None;
+      recovery_depth = 0;
       diagnostics = [];
       next_hole = 0;
     }
@@ -2410,7 +2612,7 @@ let parse_tokens ~source tokens =
         let token = current state in
         report state token
           (Printf.sprintf "top-level items require a newline or `;`, found %s"
-             (token_description token));
+             (token_description state token));
         synchronize_item state;
         ignore (consume_separators state)
       end
