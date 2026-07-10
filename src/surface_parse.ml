@@ -150,6 +150,9 @@ let meta_from_token_to_meta token meta =
   | Some span -> meta_with_span (Span.merge token.Surface_lex.span span)
   | None -> meta_with_span token.span
 
+let with_container_span kind first last meta =
+  Meta.with_surface_container kind (meta_with_span (span_between first last)) meta
+
 let shift_raw_pos base (position : Span.pos) =
   {
     Span.line = base.Span.line + position.line - 1;
@@ -486,7 +489,8 @@ and parse_paren_expr state opening =
               { it = Tuple (first :: rest); meta = meta_with_span (span_between opening closing) }
       | Surface_lex.RParen ->
           let closing = advance state in
-          { first with Surface_ast.meta = meta_with_span (span_between opening closing) }
+          let meta = meta_with_span (span_between opening closing) in
+          { first with Surface_ast.meta = Meta.with_surface_container "paren" meta meta }
       | _ ->
           let token = current state in
           report state token
@@ -500,10 +504,12 @@ and parse_paren_expr state opening =
           { hole with Surface_ast.meta = meta_with_span (span_between opening closing) })
 
 and parse_fn state ~allow_newlines keyword =
-  let params =
+  let params, params_meta =
     match expect state Surface_lex.LParen "`(` after `fn`" with
-    | Some opening -> fst (parse_pattern_list state opening)
-    | None -> []
+    | Some opening ->
+        let params, closing = parse_pattern_list state opening in
+        (params, Some (meta_with_span (span_between opening closing)))
+    | None -> ([], None)
   in
   let arrow = expect state Surface_lex.Arrow "`->` after function parameters" in
   Option.iter (fun _ -> skip_continuation state) arrow;
@@ -512,6 +518,11 @@ and parse_fn state ~allow_newlines keyword =
     match Meta.span body.Surface_ast.meta with
     | Some body_span -> meta_with_span (Span.merge keyword.Surface_lex.span body_span)
     | None -> meta_with_span keyword.span
+  in
+  let meta =
+    match params_meta with
+    | Some params_meta -> Meta.with_surface_container "params" params_meta meta
+    | None -> meta
   in
   Surface_ast.{ it = Fn (params, body); meta }
 
@@ -864,10 +875,12 @@ and parse_operation_clause state start =
         | _ -> ignore (advance_recording_invalid state));
         Surface_ast.Named "__surface_hole"
   in
-  let params =
+  let params, params_meta =
     match expect state Surface_lex.LParen "`(` after the operation name" with
-    | Some opening -> fst (parse_pattern_list state opening)
-    | None -> []
+    | Some opening ->
+        let params, closing = parse_pattern_list state opening in
+        (params, Some (meta_with_span (span_between opening closing)))
+    | None -> ([], None)
   in
   skip_comments state;
   ignore (expect state (Surface_lex.Keyword "resume") "`resume` after operation parameters");
@@ -895,6 +908,11 @@ and parse_operation_clause state start =
   skip_comments state;
   let obody, next_top = parse_handler_clause_body state start in
   let ometa = meta_from_token_to_meta start obody.meta |> Meta.with_surface_ref_kind "op" in
+  let ometa =
+    match params_meta with
+    | Some params_meta -> Meta.with_surface_container "params" params_meta ometa
+    | None -> ometa
+  in
   (Surface_ast.{ operation; oparams = params; oresume; obody; ometa }, next_top)
 
 and parse_handler_clause state start =
@@ -1073,8 +1091,8 @@ and parse_block state opening =
         items := Surface_ast.Expr expression :: !items;
         finish_block_item state items closing finished
   done;
-  Surface_ast.
-    { it = Block (List.rev !items); meta = meta_with_span (span_between opening !closing) }
+  let meta = meta_with_span (span_between opening !closing) in
+  Surface_ast.{ it = Block (List.rev !items); meta = Meta.with_surface_container "block" meta meta }
 
 and finish_block_item state items closing finished =
   skip_comments state;
@@ -1100,22 +1118,29 @@ and parse_let_item state keyword =
     | _ -> false
   in
   let binder = parse_pattern state ~allow_newlines:false in
-  let params =
+  let params, params_meta =
     if recursive then
       match expect state Surface_lex.LParen "a parenthesized parameter list after `let rec`" with
-      | Some opening -> fst (parse_pattern_list state opening)
-      | None -> []
+      | Some opening ->
+          let params, closing = parse_pattern_list state opening in
+          (params, Some (meta_with_span (span_between opening closing)))
+      | None -> ([], None)
     else begin
       if (current state).Surface_lex.token = Surface_lex.LParen then
         report state (current state) "local function shorthand requires `let rec`";
-      []
+      ([], None)
     end
   in
   ignore (expect state Surface_lex.Equal "`=` in the local binding");
   skip_continuation state;
   let value = parse_expr state ~allow_newlines:false in
-  let _ = keyword in
-  Surface_ast.Let { recursive; binder; params; value }
+  let meta = meta_from_token_to_meta keyword value.meta in
+  let meta =
+    match params_meta with
+    | Some params_meta -> Meta.with_surface_container "params" params_meta meta
+    | None -> meta
+  in
+  Surface_ast.Let { recursive; binder; params; value; meta }
 
 and parse_type state ~allow_newlines =
   if allow_newlines then skip_list_space state else skip_comments state;
@@ -1290,6 +1315,11 @@ and parse_arrow state ~allow_newlines params left_meta =
   if allow_newlines then skip_list_space state else skip_continuation state;
   let result = parse_type state ~allow_newlines in
   let meta = merged_meta left_meta result.Surface_ast.meta in
+  let meta =
+    match Meta.span left_meta with
+    | Some span -> Meta.with_surface_container "params" (Meta.with_span span Meta.empty) meta
+    | None -> meta
+  in
   Surface_ast.
     { it = TyArrow (params, { effects = List.rev !effects; tail = !tail; row_meta }, result); meta }
 
@@ -1419,21 +1449,25 @@ let parse_signature state name_token name =
 
 let parse_definition state name_token name equation =
   ignore (advance state);
-  let params =
+  let params, params_meta =
     if equation then
       match expect state Surface_lex.LParen "`(` after the definition name" with
-      | Some opening -> fst (parse_pattern_list state opening)
-      | None -> []
-    else []
+      | Some opening ->
+          let params, closing = parse_pattern_list state opening in
+          (params, Some (meta_with_span (span_between opening closing)))
+      | None -> ([], None)
+    else ([], None)
   in
   ignore (expect state Surface_lex.Equal "`=` in the definition");
   skip_continuation state;
   let value = parse_expr state ~allow_newlines:false in
-  Surface_ast.
-    {
-      it = Definition { name; equation; params; value };
-      meta = meta_from_token_to_meta name_token value.meta;
-    }
+  let meta = meta_from_token_to_meta name_token value.meta in
+  let meta =
+    match params_meta with
+    | Some params_meta -> Meta.with_surface_container "params" params_meta meta
+    | None -> meta
+  in
+  Surface_ast.{ it = Definition { name; equation; params; value }; meta }
 
 let parse_type_vars state stop =
   let vars = ref [] in
@@ -1555,12 +1589,9 @@ let parse_constructor state =
   | Surface_lex.LParen ->
       let opening = advance state in
       let fields, closing = parse_constructor_fields state name opening in
-      Surface_ast.
-        {
-          name;
-          fields;
-          meta = meta_with_span (Span.merge name_token.Surface_lex.span closing.span);
-        }
+      let meta = meta_with_span (Span.merge name_token.Surface_lex.span closing.span) in
+      let meta = with_container_span "params" opening closing meta in
+      Surface_ast.{ name; fields; meta }
   | _ ->
       let fields = ref [] in
       while starts_type_atom (current state).Surface_lex.token do
@@ -1625,12 +1656,12 @@ let parse_type_decl state keyword =
 
 let parse_operation_types state =
   match expect state Surface_lex.LParen "`(` before operation parameter types" with
-  | None -> []
-  | Some _ ->
+  | None -> ([], None)
+  | Some opening ->
       skip_list_space state;
       if (current state).Surface_lex.token = Surface_lex.RParen then begin
-        ignore (advance state);
-        []
+        let closing = advance state in
+        ([], Some (meta_with_span (span_between opening closing)))
       end
       else
         let rec loop acc =
@@ -1643,22 +1674,26 @@ let parse_operation_types state =
               if (current state).Surface_lex.token = Surface_lex.RParen then begin
                 report_code state (current state) "E1225"
                   "operation parameter lists do not permit a trailing comma";
-                ignore (advance state);
-                List.rev (ty :: acc)
+                let closing = advance state in
+                (List.rev (ty :: acc), closing)
               end
               else loop (ty :: acc)
           | Surface_lex.RParen ->
-              ignore (advance state);
-              List.rev (ty :: acc)
+              let closing = advance state in
+              (List.rev (ty :: acc), closing)
           | _ ->
               report_code state (current state) "E1225"
                 (Printf.sprintf "expected `,` or `)` in operation parameters, found %s"
                    (token_description (current state)));
               synchronize_paren state;
-              if (current state).Surface_lex.token = Surface_lex.RParen then ignore (advance state);
-              List.rev (ty :: acc)
+              let closing =
+                if (current state).Surface_lex.token = Surface_lex.RParen then advance state
+                else current state
+              in
+              (List.rev (ty :: acc), closing)
         in
-        loop []
+        let params, closing = loop [] in
+        (params, Some (meta_with_span (span_between opening closing)))
 
 let parse_operation state =
   let name_token = current state in
@@ -1666,11 +1701,17 @@ let parse_operation state =
   ignore (advance state);
   ignore (expect state Surface_lex.Colon "`:` in the operation signature");
   skip_continuation state;
-  let params = parse_operation_types state in
+  let params, params_meta = parse_operation_types state in
   ignore (expect state Surface_lex.Arrow "`->` in the operation signature");
   skip_continuation state;
   let result = parse_type state ~allow_newlines:false in
-  Surface_ast.{ name; params; result; meta = meta_from_token_to_meta name_token result.meta }
+  let meta = meta_from_token_to_meta name_token result.meta in
+  let meta =
+    match params_meta with
+    | Some params_meta -> Meta.with_surface_container "params" params_meta meta
+    | None -> meta
+  in
+  Surface_ast.{ name; params; result; meta }
 
 let operation_ahead state index =
   match op_name (token_at state index).Surface_lex.token with
@@ -1804,6 +1845,516 @@ let parse_top state =
 
 let signature_interruption state token message = report_code state token "E1224" message
 
+module Trivia_ownership = struct
+  type role =
+    | Decl
+    | Damage
+    | Expr
+    | Pat
+    | Ty
+    | Clause
+    | Ret
+    | Op_clause
+    | Row
+    | Field
+    | Constructor
+    | Operation
+    | Item
+    | Container of string
+
+  type key = role * int * int
+
+  type addition = {
+    mutable leading : Meta.trivia_atom list;
+    mutable trailing : Meta.trivia_atom list;
+    mutable inner : Meta.trivia_atom list;
+    mutable eof : Meta.trivia_atom list;
+    mutable docs : Meta.trivia_atom list;
+  }
+
+  type slot = { key : key; role : role; span : Span.t }
+
+  module Key = struct
+    type t = key
+
+    let compare = Stdlib.compare
+  end
+
+  module Key_map = Map.Make (Key)
+
+  let empty_addition () = { leading = []; trailing = []; inner = []; eof = []; docs = [] }
+  let key role span = (role, span.Span.start_pos.offset, span.end_pos.offset)
+
+  let slot role meta =
+    match Meta.span meta with None -> [] | Some span -> [ { key = key role span; role; span } ]
+
+  let container kind meta = slot (Container kind) (Meta.surface_container kind meta)
+
+  let rec expr depth (node : Surface_ast.expr) =
+    let children =
+      match node.it with
+      | Lit _ | Name _ | HashRef _ | GroupRef _ | Hole _ -> []
+      | Call (fn, args) -> expr (depth + 1) fn @ List.concat_map (expr (depth + 1)) args
+      | Fn (params, body) -> List.concat_map (pat (depth + 1)) params @ expr (depth + 1) body
+      | Tuple items | List items -> List.concat_map (expr (depth + 1)) items
+      | Block items -> List.concat_map (block_item (depth + 1)) items
+      | Match (subject, clauses) ->
+          expr (depth + 1) subject @ List.concat_map (clause (depth + 1)) clauses
+      | If (cond, yes, no) -> expr (depth + 1) cond @ expr (depth + 1) yes @ expr (depth + 1) no
+      | Pipe (left, right) -> expr (depth + 1) left @ expr (depth + 1) right
+      | Handle (body, ret, ops) ->
+          expr (depth + 1) body
+          @ ret_clause (depth + 1) ret
+          @ List.concat_map (op_clause (depth + 1)) ops
+      | Quote (Surface body) -> expr (depth + 1) body
+      | Quote (Raw _) -> []
+      | Unquote body -> expr (depth + 1) body
+      | Ann (subject, annotation) -> expr (depth + 1) subject @ ty (depth + 1) annotation
+    in
+    container "block" node.meta @ container "params" node.meta @ container "paren" node.meta
+    @ slot Expr node.meta @ children
+
+  and block_item depth = function
+    | Surface_ast.Expr expression -> expr depth expression
+    | Let { binder; params; value; meta; _ } ->
+        container "params" meta @ slot Item meta
+        @ pat (depth + 1) binder
+        @ List.concat_map (pat (depth + 1)) params
+        @ expr (depth + 1) value
+
+  and clause depth (clause : Surface_ast.clause) =
+    slot Clause clause.cmeta @ pat (depth + 1) clause.cpattern @ expr (depth + 1) clause.cbody
+
+  and ret_clause depth (clause : Surface_ast.ret_clause) =
+    slot Ret clause.rmeta @ pat (depth + 1) clause.rbinder @ expr (depth + 1) clause.rbody
+
+  and op_clause depth (clause : Surface_ast.op_clause) =
+    container "params" clause.ometa @ slot Op_clause clause.ometa
+    @ List.concat_map (pat (depth + 1)) clause.oparams
+    @ expr (depth + 1) clause.obody
+
+  and pat depth (node : Surface_ast.pat) =
+    let children =
+      match node.it with
+      | PWild | PBind _ | PLit _ | PHole _ -> []
+      | PCon (_, args) | PTuple args -> List.concat_map (pat (depth + 1)) args
+      | PAs (inner, _) -> pat (depth + 1) inner
+    in
+    slot Pat node.meta @ children
+
+  and ty depth (node : Surface_ast.ty) =
+    let children =
+      match node.it with
+      | TyName _ | TyVar _ | TyHash _ | TyHole _ -> []
+      | TyApp (head, args) -> ty (depth + 1) head @ List.concat_map (ty (depth + 1)) args
+      | TyArrow (params, row, result) ->
+          List.concat_map (ty (depth + 1)) params @ slot Row row.row_meta @ ty (depth + 1) result
+      | TyTuple items -> List.concat_map (ty (depth + 1)) items
+      | TyForall (_, _, body) -> ty (depth + 1) body
+    in
+    container "params" node.meta @ slot Ty node.meta @ children
+
+  let field depth (field : Surface_ast.field) = slot Field field.meta @ ty (depth + 1) field.ty
+
+  let constructor depth (constructor : Surface_ast.constructor) =
+    container "params" constructor.meta
+    @ slot Constructor constructor.meta
+    @ List.concat_map (field (depth + 1)) constructor.fields
+
+  let operation depth (operation : Surface_ast.operation) =
+    container "params" operation.meta @ slot Operation operation.meta
+    @ List.concat_map (ty (depth + 1)) operation.params
+    @ ty (depth + 1) operation.result
+
+  let top (node : Surface_ast.top) =
+    match node.it with
+    | TopExpr expression -> expr 0 expression
+    | Signature (_, annotation) -> slot Decl node.meta @ ty 1 annotation
+    | Definition { params; value; _ } ->
+        container "params" node.meta @ slot Decl node.meta
+        @ List.concat_map (pat 1) params
+        @ expr 1 value
+    | TypeDecl { constructors; _ } ->
+        slot Decl node.meta @ List.concat_map (constructor 1) constructors
+    | EffectDecl { operations; _ } -> slot Decl node.meta @ List.concat_map (operation 1) operations
+    | RawTop _ | TopHole _ -> slot Damage node.meta
+
+  let role_rank = function
+    | Container _ -> 3
+    | Decl | Damage | Item | Clause | Ret | Op_clause | Constructor | Operation | Field -> 2
+    | Expr | Pat | Ty | Row -> 1
+
+  let length slot = slot.span.Span.end_pos.offset - slot.span.start_pos.offset
+  let starts slot token = slot.span.Span.start_pos.offset = token.Surface_lex.span.start_pos.offset
+  let ends slot token = slot.span.Span.end_pos.offset = token.Surface_lex.span.end_pos.offset
+
+  let choose_largest slots =
+    List.fold_left
+      (fun best candidate ->
+        match best with
+        | None -> Some candidate
+        | Some current ->
+            if
+              length candidate > length current
+              || length candidate = length current
+                 && role_rank candidate.role > role_rank current.role
+            then Some candidate
+            else best)
+      None slots
+
+  let choose_smallest slots =
+    List.fold_left
+      (fun best candidate ->
+        match best with
+        | None -> Some candidate
+        | Some current ->
+            if
+              length candidate < length current
+              || length candidate = length current
+                 && role_rank candidate.role > role_rank current.role
+            then Some candidate
+            else best)
+      None slots
+
+  let significant = function
+    | Surface_lex.Comment _ | DocComment _ | Newline | Semi | Eof -> false
+    | _ -> true
+
+  type source_atom = { atom : Meta.trivia_atom; start_line : int; end_line : int }
+
+  let source_atoms source tokens start_offset end_offset =
+    let comments =
+      List.filter
+        (fun (token : Surface_lex.located) ->
+          token.Surface_lex.span.start_pos.offset >= start_offset
+          && token.span.end_pos.offset <= end_offset
+          && match token.token with Comment _ | DocComment _ -> true | _ -> false)
+        tokens
+    in
+    let layout start finish line =
+      if finish <= start then []
+      else
+        [
+          {
+            atom = Meta.Layout (String.sub source start (finish - start));
+            start_line = line;
+            end_line = line;
+          };
+        ]
+    in
+    let rec build cursor line acc = function
+      | [] -> List.rev_append acc (layout cursor end_offset line)
+      | (token : Surface_lex.located) :: rest ->
+          let before = layout cursor token.span.start_pos.offset line in
+          let text =
+            String.sub source token.span.start_pos.offset
+              (token.span.end_pos.offset - token.span.start_pos.offset)
+          in
+          let atom =
+            match token.token with
+            | DocComment _ -> Meta.Doc text
+            | Comment _ -> Meta.Comment text
+            | _ -> assert false
+          in
+          let item =
+            { atom; start_line = token.span.start_pos.line; end_line = token.span.end_pos.line }
+          in
+          build token.span.end_pos.offset token.span.end_pos.line
+            (item :: List.rev_append before acc)
+            rest
+    in
+    build start_offset
+      (match comments with first :: _ -> first.span.start_pos.line | [] -> 1)
+      [] comments
+
+  let atoms items = List.map (fun item -> item.atom) items
+
+  let update additions slot field values =
+    let addition =
+      Option.value ~default:(empty_addition ()) (Key_map.find_opt slot.key !additions)
+    in
+    field addition values;
+    additions := Key_map.add slot.key addition !additions
+
+  let append_leading addition values = addition.leading <- addition.leading @ values
+  let append_trailing addition values = addition.trailing <- addition.trailing @ values
+  let append_inner addition values = addition.inner <- addition.inner @ values
+  let append_eof addition values = addition.eof <- addition.eof @ values
+  let append_docs addition values = addition.docs <- addition.docs @ values
+  let is_closing = function Surface_lex.RParen | RBrace | RBracket -> true | _ -> false
+  let is_declaration slot = slot.role = Decl
+
+  let doc_suffix_before line items =
+    let rec collect expected docs = function
+      | [] -> docs
+      | { atom = Meta.Layout _; _ } :: rest -> collect expected docs rest
+      | { atom = Meta.Doc _ as doc; start_line; end_line } :: rest when end_line = expected - 1 ->
+          collect start_line (doc :: docs) rest
+      | _ -> docs
+    in
+    collect line [] (List.rev items)
+
+  let attach ~source ~tokens items =
+    let slots = List.concat_map top items in
+    let additions = ref Key_map.empty in
+    let boundary_tokens =
+      List.filter
+        (fun token -> significant token.Surface_lex.token || token.token = Surface_lex.Eof)
+        tokens
+    in
+    let file_meta = ref Meta.empty in
+    let rec gaps previous = function
+      | [] -> ()
+      | next :: rest ->
+          let start_offset =
+            match previous with None -> 0 | Some token -> token.Surface_lex.span.end_pos.offset
+          in
+          let end_offset = next.Surface_lex.span.start_pos.offset in
+          let gap = source_atoms source tokens start_offset end_offset in
+          let possible_trailing, possible_remaining =
+            match previous with
+            | Some previous ->
+                let rec split prefix = function
+                  | ({ atom = Meta.Comment _ | Doc _; start_line; _ } as comment) :: tail
+                    when start_line = previous.Surface_lex.span.end_pos.line ->
+                      (List.rev (comment :: prefix), tail)
+                  | item :: tail -> split (item :: prefix) tail
+                  | [] -> ([], gap)
+                in
+                split [] gap
+            | None -> ([], gap)
+          in
+          let trailing_target =
+            match (previous, possible_trailing) with
+            | Some previous, _ :: _ ->
+                choose_largest (List.filter (fun slot -> ends slot previous) slots)
+            | _ -> None
+          in
+          let remaining =
+            match trailing_target with
+            | Some slot ->
+                update additions slot append_trailing (atoms possible_trailing);
+                possible_remaining
+            | None -> gap
+          in
+          if remaining <> [] then
+            begin if next.token = Surface_lex.Eof then
+              match List.rev items with
+              | last :: _ ->
+                  choose_largest
+                    (List.filter
+                       (fun slot -> match slot.role with Container _ -> false | _ -> true)
+                       (top last))
+                  |> Option.iter (fun slot -> update additions slot append_eof (atoms remaining))
+              | [] -> file_meta := Meta.with_trivia Meta.key_trivia_eof (atoms remaining) !file_meta
+            else
+              let exact = List.filter (fun slot -> starts slot next) slots in
+              let exact =
+                match (exact, next.token, rest) with
+                | [], Surface_lex.Bar, after_bar :: _ ->
+                    List.filter (fun slot -> starts slot after_bar) slots
+                | _ -> exact
+              in
+              let target =
+                if is_closing next.token then
+                  choose_smallest (List.filter (fun slot -> ends slot next) slots)
+                else
+                  match choose_largest exact with
+                  | Some _ as target -> target
+                  | None ->
+                      choose_smallest
+                        (List.filter
+                           (fun slot ->
+                             slot.span.start_pos.offset <= start_offset
+                             && slot.span.end_pos.offset >= end_offset)
+                           slots)
+              in
+              Option.iter
+                (fun slot ->
+                  if is_closing next.token then update additions slot append_inner (atoms remaining)
+                  else
+                    let docs =
+                      if is_declaration slot then
+                        doc_suffix_before next.Surface_lex.span.start_pos.line remaining
+                      else []
+                    in
+                    if docs <> [] then begin
+                      update additions slot append_docs docs;
+                      update additions slot append_leading (atoms remaining)
+                    end
+                    else update additions slot append_leading (atoms remaining))
+                target
+            end;
+          gaps (if next.token = Surface_lex.Eof then previous else Some next) rest
+    in
+    gaps None boundary_tokens;
+    (!additions, !file_meta)
+
+  let apply additions role meta =
+    match Meta.span meta with
+    | None -> meta
+    | Some span -> (
+        match Key_map.find_opt (key role span) additions with
+        | None -> meta
+        | Some addition ->
+            meta
+            |> Meta.append_trivia Meta.key_trivia addition.leading
+            |> Meta.append_trivia Meta.key_trivia_trailing addition.trailing
+            |> Meta.append_trivia Meta.key_trivia_inner addition.inner
+            |> Meta.append_trivia Meta.key_trivia_eof addition.eof
+            |> Meta.append_docs addition.docs)
+
+  let apply_container additions kind meta =
+    let container_meta = Meta.surface_container kind meta in
+    if Meta.is_empty container_meta then meta
+    else Meta.with_surface_container kind (apply additions (Container kind) container_meta) meta
+
+  let apply_owner additions role meta =
+    meta |> apply additions role
+    |> apply_container additions "params"
+    |> apply_container additions "block" |> apply_container additions "paren"
+
+  let rec map_expr additions (expression : Surface_ast.expr) =
+    let it =
+      match expression.it with
+      | (Lit _ | Name _ | HashRef _ | GroupRef _ | Hole _) as leaf -> leaf
+      | Call (fn, args) -> Call (map_expr additions fn, List.map (map_expr additions) args)
+      | Fn (params, body) -> Fn (List.map (map_pat additions) params, map_expr additions body)
+      | Tuple items -> Tuple (List.map (map_expr additions) items)
+      | List items -> List (List.map (map_expr additions) items)
+      | Block items -> Block (List.map (map_block_item additions) items)
+      | Match (subject, clauses) ->
+          Match (map_expr additions subject, List.map (map_clause additions) clauses)
+      | If (cond, yes, no) ->
+          If (map_expr additions cond, map_expr additions yes, map_expr additions no)
+      | Pipe (left, right) -> Pipe (map_expr additions left, map_expr additions right)
+      | Handle (body, ret, ops) ->
+          Handle (map_expr additions body, map_ret additions ret, List.map (map_op additions) ops)
+      | Quote (Surface body) -> Quote (Surface (map_expr additions body))
+      | Quote (Raw form) -> Quote (Raw form)
+      | Unquote body -> Unquote (map_expr additions body)
+      | Ann (subject, annotation) -> Ann (map_expr additions subject, map_ty additions annotation)
+    in
+    Surface_ast.{ it; meta = apply_owner additions Expr expression.meta }
+
+  and map_block_item additions = function
+    | Surface_ast.Expr expression -> Surface_ast.Expr (map_expr additions expression)
+    | Let item ->
+        Let
+          {
+            item with
+            binder = map_pat additions item.binder;
+            params = List.map (map_pat additions) item.params;
+            value = map_expr additions item.value;
+            meta = apply_owner additions Item item.meta;
+          }
+
+  and map_clause additions (clause : Surface_ast.clause) =
+    Surface_ast.
+      {
+        cpattern = map_pat additions clause.cpattern;
+        cbody = map_expr additions clause.cbody;
+        cmeta = apply additions Clause clause.cmeta;
+      }
+
+  and map_ret additions (clause : Surface_ast.ret_clause) =
+    Surface_ast.
+      {
+        rbinder = map_pat additions clause.rbinder;
+        rbody = map_expr additions clause.rbody;
+        rmeta = apply additions Ret clause.rmeta;
+      }
+
+  and map_op additions clause =
+    {
+      clause with
+      oparams = List.map (map_pat additions) clause.oparams;
+      obody = map_expr additions clause.obody;
+      ometa = apply_owner additions Op_clause clause.ometa;
+    }
+
+  and map_pat additions (pattern : Surface_ast.pat) =
+    let it =
+      match pattern.it with
+      | (PWild | PBind _ | PLit _ | PHole _) as leaf -> leaf
+      | PCon (constructor, args) -> PCon (constructor, List.map (map_pat additions) args)
+      | PTuple args -> PTuple (List.map (map_pat additions) args)
+      | PAs (inner, name) -> PAs (map_pat additions inner, name)
+    in
+    Surface_ast.{ it; meta = apply additions Pat pattern.meta }
+
+  and map_ty additions (annotation : Surface_ast.ty) =
+    let it =
+      match annotation.it with
+      | (TyName _ | TyVar _ | TyHash _ | TyHole _) as leaf -> leaf
+      | TyApp (head, args) -> TyApp (map_ty additions head, List.map (map_ty additions) args)
+      | TyArrow (params, row, result) ->
+          TyArrow
+            ( List.map (map_ty additions) params,
+              { row with row_meta = apply additions Row row.row_meta },
+              map_ty additions result )
+      | TyTuple items -> TyTuple (List.map (map_ty additions) items)
+      | TyForall (tvars, rvars, body) -> TyForall (tvars, rvars, map_ty additions body)
+    in
+    Surface_ast.{ it; meta = apply_owner additions Ty annotation.meta }
+
+  let map_field additions (field : Surface_ast.field) =
+    Surface_ast.
+      { field with ty = map_ty additions field.ty; meta = apply additions Field field.meta }
+
+  let map_constructor additions (constructor : Surface_ast.constructor) =
+    {
+      constructor with
+      Surface_ast.fields = List.map (map_field additions) constructor.fields;
+      meta = apply_owner additions Constructor constructor.meta;
+    }
+
+  let map_operation additions (operation : Surface_ast.operation) =
+    {
+      operation with
+      Surface_ast.params = List.map (map_ty additions) operation.params;
+      result = map_ty additions operation.result;
+      meta = apply_owner additions Operation operation.meta;
+    }
+
+  let map_top additions (top_node : Surface_ast.top) =
+    let open Surface_ast in
+    let it, meta =
+      match top_node.it with
+      | TopExpr expression -> (TopExpr (map_expr additions expression), top_node.meta)
+      | Signature (name, annotation) ->
+          (Signature (name, map_ty additions annotation), apply additions Decl top_node.meta)
+      | Definition definition ->
+          ( Definition
+              {
+                definition with
+                params = List.map (map_pat additions) definition.params;
+                value = map_expr additions definition.value;
+              },
+            apply_owner additions Decl top_node.meta )
+      | TypeDecl declaration ->
+          ( TypeDecl
+              {
+                declaration with
+                constructors = List.map (map_constructor additions) declaration.constructors;
+              },
+            apply additions Decl top_node.meta )
+      | EffectDecl declaration ->
+          ( EffectDecl
+              {
+                declaration with
+                operations = List.map (map_operation additions) declaration.operations;
+              },
+            apply additions Decl top_node.meta )
+      | (RawTop _ | TopHole _) as it -> (it, apply additions Damage top_node.meta)
+    in
+    { it; meta }
+
+  let run ~source ~tokens items =
+    let additions, file_meta = attach ~source ~tokens items in
+    (List.map (map_top additions) items, file_meta)
+end
+
 let parse_tokens ~source tokens =
   let state =
     {
@@ -1866,7 +2417,8 @@ let parse_tokens ~source tokens =
       signature_interruption state (current state)
         (Printf.sprintf "signature for `%s` has no following definition" name)
   | None -> ());
-  Surface_ast.{ items = List.rev !items; diagnostics = List.rev state.diagnostics }
+  let items, meta = Trivia_ownership.run ~source ~tokens (List.rev !items) in
+  Surface_ast.{ items; diagnostics = List.rev state.diagnostics; meta; source }
 
 (** [recover_string] returns a partial tree and source-ordered diagnostics. Lexical damage becomes
     an in-order hole, allowing valid surrounding items and later parser errors to survive. *)
@@ -1898,7 +2450,17 @@ let strict (recovered : Surface_ast.recovered) : (Surface_ast.top list, Diag.t l
       ]
   else Ok recovered.items
 
+(** [strict_file recovered] is [strict] with the file-level trivia anchor retained. *)
+let strict_file (recovered : Surface_ast.recovered) : (Surface_ast.file, Diag.t list) result =
+  match strict recovered with
+  | Ok tops -> Ok Surface_ast.{ tops; meta = recovered.meta }
+  | Error diagnostics -> Error diagnostics
+
 (** [parse_string ~file src] strictly parses a complete surface file. It returns every top-level
     item in document order, or source-ordered, span-bearing diagnostics after recovery. *)
 let parse_string ~file src : (Surface_ast.top list, Diag.t list) result =
   strict (recover_string ~file src)
+
+(** [parse_file ~file src] strictly parses [src] while retaining comment-only and EOF metadata. *)
+let parse_file ~file src : (Surface_ast.file, Diag.t list) result =
+  strict_file (recover_string ~file src)

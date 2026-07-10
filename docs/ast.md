@@ -80,6 +80,36 @@ Reserved keys (all optional):
 The `origin` key is the quiet agent-specific move: provenance and even signatures attach to
 any subtree without perturbing what the code *is*.
 
+### Trivia encoding and ownership
+
+Surface trivia uses an ordered `List` of atom maps under the reserved keys `trivia`,
+`trivia-trailing`, `trivia-inner`, and `trivia-eof`. Each atom has exactly two fields:
+
+```
+{kind: layout|comment|doc, text: exact-source-bytes}
+```
+
+`layout` includes spaces, tabs, CR/LF bytes, blank lines, and surface semicolon separators.
+`comment` and `doc` include the `--` or `--|` introducer and all bytes through, but not including,
+the following LF. `doc` metadata uses the same ordered atom representation under `doc`.
+`Meta.trivia`, `Meta.docs`, `Meta.with_trivia`, and the append/merge helpers are the decoding and
+mutation boundary. They also accept the bootstrap formatter's legacy `Text` and `List [Text ...]`
+comment representation, so consumers must not match these values ad hoc.
+
+The metadata retains those source bytes exactly; the canonical printer is not required to replay
+layout bytes. Trivia-aware formatting preserves comments, documentation, ordering, and ownership,
+but may normalize spaces, tabs, line endings, blank lines, and semicolon separators to canonical
+layout. Canonical printing and canonical hashing remain insensitive to every trivia channel.
+
+Ownership is deterministic within the smallest enclosing container. Inter-item trivia leads the
+next sibling; a comment after a completed node on the same line trails that node; trivia before a
+closing delimiter is `trivia-inner`; and bytes after the last top are `trivia-eof`. A recovered
+file supplies a file-level metadata anchor when there is no top (including comment-only files).
+Invalid tokens and recovery holes remain boundaries, so ownership never crosses lexical damage,
+an arm/clause boundary, or a top-level synchronization point. Consecutive own-line `--|` comments
+also appear under `doc` only when their next owner is a signature, definition, type, or effect
+declaration. Same-line and orphan doc comments remain ordinary trivia.
+
 ## 4. The kernel grammar
 
 ASDL-ish; liberties noted inline. Four sorts: `expr`, `pat`, `type`, `decl`. Auxiliary

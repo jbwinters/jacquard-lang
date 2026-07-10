@@ -172,6 +172,14 @@ newline remains available as a separator. `hex-digit`, `UTF-8-scalar`,
 ordinary meanings. Strings use exactly the escapes accepted by the bootstrap
 reader.
 
+The lexer does not expose whitespace tokens. After parsing, byte gaps between its existing
+significant, comment, newline, separator, invalid, and EOF spans are partitioned into the structured
+metadata atoms specified in `ast.md` §3. This keeps parser lookahead unchanged while retaining exact
+spaces, tabs, CRLF/LF, blank lines, semicolons, and comment bytes. Leading trivia belongs to the next
+sibling in its container; a same-line comment after a completed node belongs to that node; closing
+delimiter trivia belongs to the container; and final bytes belong to the last top or the file anchor.
+Recovery tokens and holes are hard ownership boundaries.
+
 The escaped and hash productions are printer fallbacks. They preserve legal
 kernel names that are keywords or do not round-trip through D34, and resolved
 references whose display metadata is unavailable. Canonical source uses
@@ -296,9 +304,11 @@ Each is a CI property, not a goal.
   (like trivia, hash-excluded), so an error inside an `if` is reported in
   terms of `if`, never the underlying `match`. The printer likewise re-emits
   the form the author wrote when provenance says so.
-- **L6, trivia round-trips.** Comments and layout survive parse and print,
-  carried in metadata, exactly as the M4 formatter already guarantees for
-  bootstrap files.
+- **L6, trivia round-trips.** Parse retains comment and layout bytes exactly in
+  metadata. Trivia-aware formatting preserves comments, documentation, order,
+  and ownership while canonicalizing layout; it need not reproduce tabs, CRLF,
+  blank-line counts, semicolons, or spacing byte-for-byte. Canonical printing
+  remains metadata-insensitive.
 - **L7, one grammar page.** The grammar stays small enough to print on a
   page and hand-parse by recursive descent. This is a law rather than an
   aspiration because grammar growth is the failure mode of every syntax
@@ -676,6 +686,12 @@ recorded in the language-level backlog and are out of this document's scope
 entirely.
 
 ## 7. Diagnostics and tooling mechanics
+
+A recovery result retains the complete original source string for its lifetime,
+an intentional O(source-size) memory cost. When errors or holes make the tree
+non-strict, recovery printing replays those bytes exactly instead of formatting
+the valid islands, so comments cannot migrate across damage or synchronization
+boundaries.
 
 The parser emits hole forms at recovery sites; the checker treats holes as
 "any type, any row" so one syntax error does not cascade into fifty type

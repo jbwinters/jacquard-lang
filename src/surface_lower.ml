@@ -23,7 +23,7 @@ let generated_meta ~form start_meta end_meta =
   match (Meta.span start_meta, Meta.span end_meta) with
   | Some start_span, Some end_span ->
       Ok
-        (start_meta
+        (start_meta |> Meta.without_trivia
         |> Meta.with_span (Span.merge start_span end_span)
         |> Meta.with_surface_form form)
   | _ ->
@@ -32,7 +32,7 @@ let generated_meta ~form start_meta end_meta =
 
 let generated_single_meta ~form meta =
   match Meta.span meta with
-  | Some _ -> Ok (Meta.with_surface_form form meta)
+  | Some _ -> Ok (meta |> Meta.without_trivia |> Meta.with_surface_form form)
   | None ->
       error ~meta ~code:"E1234"
         (Printf.sprintf "cannot lower generated `%s` node without a source span" form)
@@ -154,7 +154,15 @@ and lower_expr_node ?(quote_depth = 0) (expr : Surface_ast.expr) : (Kernel.expr,
       let* subject = lower_expr_node ~quote_depth subject in
       let* ty = lower_ty ty in
       Ok (node (Kernel.Ann (subject, ty)))
-  | Surface_ast.Block items -> lower_block ~quote_depth expr.meta items
+  | Surface_ast.Block items ->
+      let* lowered = lower_block ~quote_depth expr.meta items in
+      let meta = Meta.merge_trivia expr.meta lowered.Kernel.meta in
+      let meta =
+        match Meta.span lowered.Kernel.meta with
+        | Some span -> Meta.with_span span meta
+        | None -> meta
+      in
+      Ok { lowered with Kernel.meta }
   | Surface_ast.Match (subject, clauses) -> (
       let lower_clause (clause : Surface_ast.clause) =
         let* cpat = lower_pat clause.cpattern in
@@ -225,9 +233,9 @@ and lower_block ~quote_depth block_meta = function
       let binder = Kernel.{ it = PWild; meta = binder_meta } in
       let* meta = generated_meta ~form:"block-sequence" value.meta body.meta in
       Ok Kernel.{ it = Let { isrec = false; binder; value; body }; meta }
-  | Surface_ast.Let { recursive; binder; params; value } :: rest ->
+  | Surface_ast.Let { recursive; binder; params; value; meta = item_meta } :: rest ->
       let* body = lower_block ~quote_depth block_meta rest in
-      if recursive then lower_recursive_let ~quote_depth binder params value body
+      if recursive then lower_recursive_let ~quote_depth ~item_meta binder params value body
       else if params <> [] then
         error ~meta:binder.meta ~code:"E1233"
           "non-recursive local bindings cannot use function shorthand"
@@ -238,17 +246,26 @@ and lower_block ~quote_depth block_meta = function
         in
         let* value = lower_expr_node ~quote_depth value in
         let* meta = generated_meta ~form:"let" binder.meta body.meta in
+        let span = Meta.span meta in
+        let meta = Meta.merge_trivia item_meta meta in
+        let meta = match span with Some span -> Meta.with_span span meta | None -> meta in
         Ok Kernel.{ it = Let { isrec = false; binder; value; body }; meta }
 
-and lower_recursive_let ~quote_depth (binder : Surface_ast.pat) params value body =
+and lower_recursive_let ~quote_depth ~item_meta (binder : Surface_ast.pat) params value body =
   match binder.it with
   | Surface_ast.PBind name ->
       let* params = lower_lambda_params params in
       let* value = lower_expr_node ~quote_depth value in
       let* lambda_meta = generated_meta ~form:"let-rec-fn" binder.meta value.meta in
+      let lambda_meta =
+        Meta.with_surface_container "params" (Meta.surface_container "params" item_meta) lambda_meta
+      in
       let lambda = Kernel.{ it = Lam (params, value); meta = lambda_meta } in
       let kernel_binder = Kernel.{ it = PVar name; meta = binder.meta } in
       let* meta = generated_meta ~form:"let-rec" binder.meta body.Kernel.meta in
+      let span = Meta.span meta in
+      let meta = Meta.merge_trivia item_meta meta in
+      let meta = match span with Some span -> Meta.with_span span meta | None -> meta in
       Ok Kernel.{ it = Let { isrec = true; binder = kernel_binder; value = lambda; body }; meta }
   | _ ->
       error ~meta:binder.meta ~code:"E1233"
@@ -266,11 +283,12 @@ module String_set = Set.Make (String)
 exception Bug_scc_schedule of string
 
 let merge_meta left right =
+  let merged = Meta.merge_trivia left right in
   match (Meta.span left, Meta.span right) with
-  | Some left_span, Some right_span -> Meta.with_span (Span.merge left_span right_span) left
-  | Some _, None -> left
-  | None, Some span -> Meta.with_span span left
-  | None, None -> left
+  | Some left_span, Some right_span -> Meta.with_span (Span.merge left_span right_span) merged
+  | Some _, None -> merged
+  | None, Some span -> Meta.with_span span merged
+  | None, None -> merged
 
 let lower_definition ?annotation (top : Surface_ast.top) =
   match top.it with
@@ -288,12 +306,25 @@ let lower_definition ?annotation (top : Surface_ast.top) =
             Kernel.
               {
                 it = Lam (params, value);
-                meta = Meta.with_surface_form "equation-definition" top.meta;
+                meta =
+                  top.meta |> Meta.without_trivia
+                  |> Meta.without_surface_container "params"
+                  |> Meta.with_surface_form "equation-definition";
               }
         else Ok value
       in
       let bmeta =
-        match annotation with Some (meta, _) -> merge_meta meta top.meta | None -> top.meta
+        match annotation with
+        | Some (signature_meta, _) ->
+            let definition_meta =
+              match (Meta.span signature_meta, Meta.span top.meta) with
+              | Some signature_span, Some definition_span ->
+                  Meta.with_span (Span.merge signature_span definition_span) top.meta
+              | Some span, None -> Meta.with_span span top.meta
+              | None, _ -> top.meta
+            in
+            Meta.with_signature signature_meta definition_meta
+        | None -> top.meta
       in
       Ok Kernel.{ bname = name; annot; value; bmeta }
   | _ -> error ~meta:top.meta ~code:"E1235" "expected a surface term definition"
@@ -526,8 +557,10 @@ let lower_definition_run definitions =
                | [] -> Meta.empty
                | first :: rest ->
                    List.fold_left
-                     (fun meta binding -> merge_meta meta binding.Kernel.bmeta)
-                     first.Kernel.bmeta rest
+                     (fun meta binding ->
+                       merge_meta meta (Meta.without_trivia binding.Kernel.bmeta))
+                     (Meta.without_trivia first.Kernel.bmeta)
+                     rest
              in
              Kernel.Decl Kernel.{ it = DefTerm members; meta })
            order)
@@ -556,7 +589,21 @@ let lower_nonterm_top (top : Surface_ast.top) =
       let* ops = map_results lower_operation operations in
       Ok
         (Kernel.Decl Kernel.{ it = DefEffect { ename = name; evars = vars; ops }; meta = top.meta })
-  | Surface_ast.RawTop form -> Kernel.of_form form
+  | Surface_ast.RawTop form ->
+      let* lowered = Kernel.of_form form in
+      let merge_raw_meta kernel_meta =
+        let merged = Meta.merge_trivia top.meta (Meta.without_trivia kernel_meta) in
+        let merged =
+          match Meta.span top.meta with Some span -> Meta.with_span span merged | None -> merged
+        in
+        merged
+        |> Meta.with_surface_container "bootstrap" kernel_meta
+        |> Meta.with_surface_form "raw-top"
+      in
+      Ok
+        (match lowered with
+        | Kernel.Expr expr -> Kernel.Expr { expr with Kernel.meta = merge_raw_meta expr.meta }
+        | Kernel.Decl decl -> Kernel.Decl { decl with Kernel.meta = merge_raw_meta decl.meta })
   | Surface_ast.TopHole _ ->
       error ~meta:top.meta ~code:"E1202" "cannot lower a recovered surface top-level hole"
   | Surface_ast.Signature _ | Surface_ast.Definition _ ->
@@ -607,3 +654,10 @@ let lower_tops tops =
         loop (top :: acc) [] rest
   in
   loop [] [] tops
+
+type file = { tops : Kernel.top list; meta : Meta.t }
+
+(** [lower_file file] lowers all tops while retaining the hash-excluded file trivia anchor. *)
+let lower_file (file : Surface_ast.file) =
+  let* tops = lower_tops file.tops in
+  Ok { tops; meta = file.meta }

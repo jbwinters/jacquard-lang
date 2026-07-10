@@ -32,7 +32,7 @@ and expr_node =
   | Hole of int
 
 and block_item =
-  | Let of { recursive : bool; binder : pat; params : pat list; value : expr }
+  | Let of { recursive : bool; binder : pat; params : pat list; value : expr; meta : Meta.t }
   | Expr of expr
 
 and clause = { cpattern : pat; cbody : expr; cmeta : Meta.t }
@@ -87,7 +87,13 @@ and top_node =
   | RawTop of Form.t
   | TopHole of int
 
-type recovered = { items : top list; diagnostics : Diag.t list }
+type file = { tops : top list; meta : Meta.t }
+(** A strict file retains the file-level trivia anchor without retaining the full source string. *)
+
+type recovered = { items : top list; diagnostics : Diag.t list; meta : Meta.t; source : string }
+(** A recovery result retains the complete original bytes, with an intentional O(source-size) memory
+    cost, for lossless damaged-source replay. [meta] is the file-level trivia anchor used when no
+    top-level node can own leading or EOF trivia. *)
 
 let node ?(meta = Meta.empty) it = { it; meta }
 

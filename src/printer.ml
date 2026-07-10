@@ -96,19 +96,13 @@ let print_all (forms : Form.t list) = String.concat "\n\n" (List.map print forms
 (* Trivia-aware formatting (plan W5.1)                                 *)
 (* ------------------------------------------------------------------ *)
 
-let trivia_lines meta key =
-  match Meta.find key meta with
-  | Some (Meta.List items) -> List.filter_map (function Meta.Text c -> Some c | _ -> None) items
-  | Some (Meta.Text c) -> [ c ]
-  | _ -> []
-
-let trailing_comment meta =
-  match Meta.find Meta.key_trivia_trailing meta with Some (Meta.Text c) -> Some c | _ -> None
+let trivia_lines meta key = Meta.comment_texts key meta
+let trailing_comments meta = Meta.comment_texts Meta.key_trivia_trailing meta
 
 let rec has_trivia_deep (f : Form.t) =
   trivia_lines f.Form.meta Meta.key_trivia <> []
   || trivia_lines f.Form.meta Meta.key_trivia_inner <> []
-  || trailing_comment f.Form.meta <> None
+  || trailing_comments f.Form.meta <> []
   || trivia_lines f.Form.meta Meta.key_trivia_eof <> []
   || List.exists (function Form.F g -> has_trivia_deep g | _ -> false) f.Form.args
 
@@ -138,11 +132,9 @@ let format_all (forms : Form.t list) : string =
         (fun a ->
           Buffer.add_char buf '\n';
           match a with
-          | Form.F g -> (
+          | Form.F g ->
               block (indent + 2) g;
-              match trailing_comment g.Form.meta with
-              | Some c -> Buffer.add_string buf (" " ^ c)
-              | None -> ())
+              List.iter (fun c -> Buffer.add_string buf (" " ^ c)) (trailing_comments g.Form.meta)
           | scalar -> Buffer.add_string buf (String.make (indent + 2) ' ' ^ scalar_to_string scalar))
         f.Form.args;
       (match inner with
@@ -161,9 +153,7 @@ let format_all (forms : Form.t list) : string =
     (fun i f ->
       if i > 0 then Buffer.add_string buf "\n";
       block 0 f;
-      (match trailing_comment f.Form.meta with
-      | Some c -> Buffer.add_string buf (" " ^ c)
-      | None -> ());
+      List.iter (fun c -> Buffer.add_string buf (" " ^ c)) (trailing_comments f.Form.meta);
       Buffer.add_char buf '\n';
       List.iter
         (fun c -> Buffer.add_string buf (c ^ "\n"))

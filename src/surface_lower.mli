@@ -34,3 +34,8 @@ val lower_tops : Surface_ast.top list -> (Kernel.top list, Diag.t list) result
 (** Lower a strictly parsed file, attaching signatures and partitioning uninterrupted definition
     runs into exact dependency-first SCCs. Duplicate names fail with E0303 before graph
     construction; malformed signature context and recovery holes are diagnostics. *)
+
+type file = { tops : Kernel.top list; meta : Meta.t }
+
+val lower_file : Surface_ast.file -> (file, Diag.t list) result
+(** Lower a strict file and retain its file-level trivia anchor. *)

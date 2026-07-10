@@ -54,7 +54,9 @@ let test_surface_metadata () =
 let test_holes_stop_at_strict_boundary () =
   let hole = Surface_ast.node (Surface_ast.Hole 1) in
   let top = Surface_ast.node (Surface_ast.TopExpr hole) in
-  let recovered = Surface_ast.{ items = [ top ]; diagnostics = [] } in
+  let recovered =
+    Surface_ast.{ items = [ top ]; diagnostics = []; meta = Meta.empty; source = "" }
+  in
   Alcotest.(check bool) "hole detected" true (Surface_ast.has_holes_top top);
   match Surface_parse.strict recovered with
   | Error [ { Diag.code = "E1202"; _ } ] -> ()
