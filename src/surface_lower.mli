@@ -7,15 +7,17 @@ exception Bug_scc_schedule of string
     Valid surface input cannot trigger this exception. *)
 
 val lower_pat : Surface_ast.pat -> (Kernel.pat, Diag.t list) result
-(** Lower an irrefutable SS.7 pattern. Refutable patterns and recovery holes are diagnostics. *)
+(** Lower any complete surface pattern without resolving named constructors. Recovery holes are
+    diagnostics; contextual irrefutability restrictions are enforced by expression lowering. *)
 
 val lower_ty : Surface_ast.ty -> (Kernel.ty, Diag.t list) result
 (** Lower a surface type without resolving named type or effect references. Type holes are
     diagnostics. *)
 
 val lower_expr : Surface_ast.expr -> (Kernel.expr, Diag.t list) result
-(** Lower an expression in the implemented surface slice. Recovery holes, malformed local bindings,
-    and later-slice forms are diagnostics. *)
+(** Lower an expression in the implemented surface slice. Match clauses accept every kernel pattern
+    form; lambda parameters and nonrecursive let binders retain E0205/E0206 irrefutability checks.
+    Recovery holes, malformed local bindings, and later-slice forms are diagnostics. *)
 
 val free_names : Kernel.expr -> String_set.t
 (** Return unresolved term names read by an expression, excluding pattern/let/lambda binders and

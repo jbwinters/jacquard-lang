@@ -61,8 +61,18 @@ let test_functions_and_patterns () =
   check_equivalent "zero argument function" "fn () -> ()" "(lam () (tuple))";
   List.iter
     (fun source ->
-      Alcotest.(check bool) (source ^ " is rejected") true (List.mem "E1222" (error_codes source)))
-    [ "fn (1) -> 2"; "fn (Some(x)) -> 2"; "fn (x as whole) -> 2"; "{ let 1 = 2; 3 }" ]
+      Alcotest.(check bool)
+        (source ^ " is rejected during lowering")
+        true
+        (List.exists (fun diagnostic -> diagnostic.Diag.code = "E0205") (lower_error source)))
+    [ "fn (1) -> 2"; "fn (Some(x)) -> 2" ];
+  Alcotest.(check bool)
+    "refutable let is rejected during lowering" true
+    (List.exists
+       (fun diagnostic -> diagnostic.Diag.code = "E0206")
+       (lower_error "{ let 1 = 2; 3 }"));
+  check_equivalent "irrefutable as parameter" "fn (x as whole) -> whole"
+    "(lam ((pas whole (pvar x))) (var whole))"
 
 let test_parentheses_and_tuples () =
   check_equivalent "grouping" "(1)" "(lit 1)";
@@ -300,7 +310,7 @@ let suite =
   [
     Alcotest.test_case "atoms" `Quick test_atoms;
     Alcotest.test_case "postfix calls" `Quick test_calls;
-    Alcotest.test_case "functions and SS.7 patterns" `Quick test_functions_and_patterns;
+    Alcotest.test_case "functions and patterns" `Quick test_functions_and_patterns;
     Alcotest.test_case "grouping and tuples" `Quick test_parentheses_and_tuples;
     Alcotest.test_case "annotations and complete types" `Quick test_annotations_and_complete_types;
     Alcotest.test_case "forall row-variable requirement" `Quick test_forall_row_var_requirement;

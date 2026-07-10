@@ -37,24 +37,41 @@ let generated_single_meta ~form meta =
       error ~meta ~code:"E1234"
         (Printf.sprintf "cannot lower generated `%s` node without a source span" form)
 
-(** [lower_pat pat] lowers the irrefutable SS.7 pattern subset used by lambdas and bindings. It
-    rejects refutable patterns and recovery holes with span-bearing diagnostics. *)
+(** [lower_pat pat] lowers any complete surface pattern without resolving constructor names. *)
 let rec lower_pat (pat : Surface_ast.pat) : (Kernel.pat, Diag.t list) result =
   let node it = Kernel.{ it; meta = pat.meta } in
   match pat.it with
   | Surface_ast.PWild -> Ok (node Kernel.PWild)
   | Surface_ast.PBind name -> Ok (node (Kernel.PVar name))
+  | Surface_ast.PLit literal -> Ok (node (Kernel.PLit literal))
+  | Surface_ast.PCon (constructor, args) ->
+      let* args = map_results lower_pat args in
+      Ok (node (Kernel.PCon (kernel_gref constructor, args)))
   | Surface_ast.PTuple items ->
       let* items = map_results lower_pat items in
       Ok (node (Kernel.PTuple items))
-  | Surface_ast.PLit _ | Surface_ast.PCon _ | Surface_ast.PAs _ ->
-      error ~meta:pat.meta ~code:"E1230"
-        "SS.7 lowering accepts only irrefutable wildcard, binder, and tuple patterns"
+  | Surface_ast.PAs (inner, name) ->
+      let* inner = lower_pat inner in
+      Ok (node (Kernel.PAs (name, inner)))
   | Surface_ast.PHole _ ->
       error ~meta:pat.meta ~code:"E1202" "cannot lower a recovered surface pattern hole"
 
+let ensure_irrefutable ~code ~message (pat : Kernel.pat) =
+  if Kernel.is_irrefutable pat then Ok pat else error ~meta:pat.meta ~code message
+
+let lower_irrefutable_pat ~code ~message pat =
+  let* pat = lower_pat pat in
+  ensure_irrefutable ~code ~message pat
+
+let lower_lambda_params params =
+  map_results
+    (lower_irrefutable_pat ~code:"E0205"
+       ~message:
+         "`lam` parameters must be irrefutable patterns (pwild, pvar, or ptuple/pas of those)")
+    params
+
 (** [lower_ty ty] lowers a complete surface type without resolving named type/effect references. *)
-and lower_ty (ty : Surface_ast.ty) : (Kernel.ty, Diag.t list) result =
+let rec lower_ty (ty : Surface_ast.ty) : (Kernel.ty, Diag.t list) result =
   let node it = Kernel.{ it; meta = ty.meta } in
   match ty.it with
   | Surface_ast.TyName name -> Ok (node (Kernel.TRef (Kernel.Named name)))
@@ -97,7 +114,7 @@ and lower_expr_node (expr : Surface_ast.expr) : (Kernel.expr, Diag.t list) resul
       let* args = map_results lower_expr_node args in
       Ok (node (Kernel.App (fn, args)))
   | Surface_ast.Fn (params, body) ->
-      let* params = map_results lower_pat params in
+      let* params = lower_lambda_params params in
       let* body = lower_expr_node body in
       Ok Kernel.{ it = Lam (params, body); meta = Meta.with_surface_form "fn" expr.meta }
   | Surface_ast.Tuple items ->
@@ -108,11 +125,24 @@ and lower_expr_node (expr : Surface_ast.expr) : (Kernel.expr, Diag.t list) resul
       let* ty = lower_ty ty in
       Ok (node (Kernel.Ann (subject, ty)))
   | Surface_ast.Block items -> lower_block expr.meta items
+  | Surface_ast.Match (subject, clauses) -> (
+      let lower_clause (clause : Surface_ast.clause) =
+        let* cpat = lower_pat clause.cpattern in
+        let* cbody = lower_expr_node clause.cbody in
+        Ok Kernel.{ cpat; cbody; cmeta = clause.cmeta }
+      in
+      let* subject = lower_expr_node subject in
+      match clauses with
+      | [] -> error ~meta:expr.meta ~code:"E0209" "`match` requires at least one clause"
+      | _ ->
+          let* clauses = map_results lower_clause clauses in
+          Ok (node (Kernel.Match (subject, clauses))))
   | Surface_ast.Hole _ ->
       error ~meta:expr.meta ~code:"E1202" "cannot lower a recovered surface expression hole"
-  | Surface_ast.List _ | Surface_ast.Match _ | Surface_ast.If _ | Surface_ast.Pipe _
-  | Surface_ast.Handle _ | Surface_ast.Quote _ | Surface_ast.Unquote _ ->
-      error ~meta:expr.meta ~code:"E1230" "this surface form is not part of SS.7 lowering"
+  | Surface_ast.List _ | Surface_ast.If _ | Surface_ast.Pipe _ | Surface_ast.Handle _
+  | Surface_ast.Quote _ | Surface_ast.Unquote _ ->
+      error ~meta:expr.meta ~code:"E1230"
+        "this surface form is not part of the implemented local-lowering slice"
 
 and lower_block block_meta = function
   | [] -> error ~meta:block_meta ~code:"E1231" "an expression block cannot be empty"
@@ -143,7 +173,10 @@ and lower_block block_meta = function
         error ~meta:binder.meta ~code:"E1233"
           "non-recursive local bindings cannot use function shorthand"
       else
-        let* binder = lower_pat binder in
+        let* binder =
+          lower_irrefutable_pat ~code:"E0206" ~message:"`let` binders must be irrefutable patterns"
+            binder
+        in
         let* value = lower_expr_node value in
         let* meta = generated_meta ~form:"let" binder.meta body.meta in
         Ok Kernel.{ it = Let { isrec = false; binder; value; body }; meta }
@@ -151,7 +184,7 @@ and lower_block block_meta = function
 and lower_recursive_let (binder : Surface_ast.pat) params value body =
   match binder.it with
   | Surface_ast.PBind name ->
-      let* params = map_results lower_pat params in
+      let* params = lower_lambda_params params in
       let* value = lower_expr_node value in
       let* lambda_meta = generated_meta ~form:"let-rec-fn" binder.meta value.meta in
       let lambda = Kernel.{ it = Lam (params, value); meta = lambda_meta } in
@@ -162,7 +195,7 @@ and lower_recursive_let (binder : Surface_ast.pat) params value body =
       error ~meta:binder.meta ~code:"E1233"
         "`let rec` requires a lowercase name followed by a parameter list"
 
-(** [lower_expr expr] locally lowers an SS.7 expression to existing kernel forms without resolving
+(** [lower_expr expr] locally lowers an SS.9 expression to existing kernel forms without resolving
     store names. It returns span-bearing diagnostics for recovery holes, unsupported later-slice
     forms, malformed recursive bindings, empty blocks, final local lets, or missing spans needed by
     generated sequence nodes. *)
@@ -190,7 +223,7 @@ let lower_definition ?annotation (top : Surface_ast.top) =
       let* value = lower_expr_node value in
       let* value =
         if equation then
-          let* params = map_results lower_pat params in
+          let* params = lower_lambda_params params in
           Ok
             Kernel.
               {

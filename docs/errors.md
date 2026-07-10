@@ -141,7 +141,7 @@ in `src/` and `bin/` appears in this catalog.
 | E1218 | invalid raw UTF-8 scalar in a surface string | a raw `0xff` byte between quotes |
 | E1220 | unexpected token in the recovering surface parser | stray `|` at top level |
 | E1221 | missing closing brace during surface recovery | a block truncated before `}` |
-| E1222 | refutable or later-slice pattern in an SS.7 binding position | `fn (Some) -> 1` |
+| E1222 | reserved pre-SS.9 binding-pattern parser gate; refutable binders now use E0205/E0206 during lowering | `fn (Some) -> 1` |
 | E1223 | missing block-item separator | `{ 1 2 }` instead of `{ 1; 2 }` |
 | E1224 | a term signature is not followed by the same definition | `x : T; x = value` |
 | E1225 | malformed type/effect declaration structure | `type Option a = Some(a)` |

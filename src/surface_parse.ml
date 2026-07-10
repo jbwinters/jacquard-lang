@@ -121,30 +121,11 @@ let synchronize_item state =
 let synchronize_paren state =
   while
     match (current state).Surface_lex.token with
-    | Surface_lex.RParen | Surface_lex.RBrace | Surface_lex.Eof -> false
+    | Surface_lex.RParen | Surface_lex.RBrace | Surface_lex.Bar | Surface_lex.Eof -> false
     | _ -> true
   do
     ignore (advance_recording_invalid state)
   done
-
-let discard_parenthesized state =
-  if (current state).Surface_lex.token = Surface_lex.LParen then begin
-    let depth = ref 0 in
-    let finished = ref false in
-    while not !finished do
-      let token = current state in
-      match token.Surface_lex.token with
-      | Surface_lex.LParen ->
-          incr depth;
-          ignore (advance state)
-      | Surface_lex.RParen ->
-          decr depth;
-          ignore (advance state);
-          if !depth = 0 then finished := true
-      | Surface_lex.Eof | Surface_lex.RBrace -> finished := true
-      | _ -> ignore (advance_recording_invalid state)
-    done
-  end
 
 let projected_name name =
   match kernel_name_of_pascal name with Some kernel -> kernel | None -> name
@@ -171,6 +152,11 @@ let span_from_meta left right =
 let merged_meta left right =
   match span_from_meta left right with Some span -> meta_with_span span | None -> left
 
+let meta_from_token_to_meta token meta =
+  match Meta.span meta with
+  | Some span -> meta_with_span (Span.merge token.Surface_lex.span span)
+  | None -> meta_with_span token.span
+
 let expect state expected description =
   let token = current state in
   if token.Surface_lex.token = expected then Some (advance state)
@@ -179,6 +165,96 @@ let expect state expected description =
       (Printf.sprintf "expected %s, found %s" description (token_description token));
     None
   end
+
+let with_limit state limit f =
+  let previous = state.limit in
+  state.limit <- Some limit;
+  Fun.protect ~finally:(fun () -> state.limit <- previous) f
+
+let token_at state index =
+  if index < Array.length state.tokens then state.tokens.(index)
+  else state.tokens.(Array.length state.tokens - 1)
+
+let rec index_after_comments state index =
+  match (token_at state index).Surface_lex.token with
+  | Surface_lex.Comment _ | Surface_lex.DocComment _ -> index_after_comments state (index + 1)
+  | _ -> index
+
+let rec index_after_layout state index =
+  match (token_at state index).Surface_lex.token with
+  | Surface_lex.Comment _ | Surface_lex.DocComment _ | Surface_lex.Newline | Surface_lex.Semi ->
+      index_after_layout state (index + 1)
+  | _ -> index
+
+let term_name = function
+  | Surface_lex.Ident name when Surface_name.valid_lower_name name -> Some name
+  | Surface_lex.Escaped (Surface_name.Term, name) -> Some name
+  | _ -> None
+
+let equation_definition_ahead_at state start =
+  match (token_at state (start + 1)).Surface_lex.token with
+  | Surface_lex.LParen ->
+      let rec find_closing index depth =
+        match (token_at state index).Surface_lex.token with
+        | Surface_lex.LParen -> find_closing (index + 1) (depth + 1)
+        | Surface_lex.RParen ->
+            if depth = 1 then
+              let next = index_after_comments state (index + 1) in
+              (token_at state next).Surface_lex.token = Surface_lex.Equal
+            else find_closing (index + 1) (depth - 1)
+        | (Surface_lex.Eof | Surface_lex.Newline) when depth = 0 -> false
+        | Surface_lex.Eof -> false
+        | _ -> find_closing (index + 1) depth
+      in
+      find_closing (start + 1) 0
+  | _ -> false
+
+let top_item_ahead state index =
+  match (token_at state index).Surface_lex.token with
+  | Surface_lex.Keyword ("type" | "effect") -> true
+  | token -> (
+      match term_name token with
+      | None -> false
+      | Some _ -> (
+          let next = index_after_comments state (index + 1) in
+          match (token_at state next).Surface_lex.token with
+          | Surface_lex.Colon | Surface_lex.Equal -> true
+          | _ -> equation_definition_ahead_at state index))
+
+type arm_boundary_kind = Arm_delimiter | Arm_layout of Surface_lex.located | Arm_end
+type arm_boundary = { boundary_index : int; boundary_kind : arm_boundary_kind }
+
+let next_arm_boundary state =
+  let upper = Option.value ~default:(Array.length state.tokens) state.limit in
+  let fallback nested kind index =
+    match nested with
+    | Some boundary_index -> { boundary_index; boundary_kind = Arm_delimiter }
+    | None -> { boundary_index = index; boundary_kind = kind }
+  in
+  let rec find index parens braces brackets nested =
+    if index >= upper then fallback nested Arm_end upper
+    else
+      match state.tokens.(index).Surface_lex.token with
+      | Surface_lex.Bar when parens = 0 && braces = 0 && brackets = 0 ->
+          { boundary_index = index; boundary_kind = Arm_delimiter }
+      | Surface_lex.Bar -> find (index + 1) parens braces brackets (Some index)
+      | Surface_lex.RBrace when parens = 0 && braces = 0 && brackets = 0 ->
+          { boundary_index = index; boundary_kind = Arm_delimiter }
+      | Surface_lex.Eof -> fallback nested Arm_end index
+      | (Surface_lex.Newline | Surface_lex.Semi) when parens = 0 && braces = 0 && brackets = 0 ->
+          let next = index_after_layout state index in
+          if next < upper && top_item_ahead state next then
+            fallback nested (Arm_layout (token_at state next)) index
+          else find (index + 1) parens braces brackets nested
+      | Surface_lex.LParen -> find (index + 1) (parens + 1) braces brackets nested
+      | Surface_lex.RParen -> find (index + 1) (max 0 (parens - 1)) braces brackets nested
+      | Surface_lex.LBrace -> find (index + 1) parens (braces + 1) brackets nested
+      | Surface_lex.RBrace -> find (index + 1) parens (max 0 (braces - 1)) brackets nested
+      | Surface_lex.LBracket -> find (index + 1) parens braces (brackets + 1) nested
+      | Surface_lex.RBracket -> find (index + 1) parens braces (max 0 (brackets - 1)) nested
+      | _ -> find (index + 1) parens braces brackets nested
+  in
+  find state.index 0 0 0 None
 
 let starts_type_atom = function
   | Surface_lex.Ident _ | Surface_lex.LParen -> true
@@ -278,6 +354,7 @@ and parse_primary state ~allow_newlines =
   | Surface_lex.LParen -> parse_paren_expr state (advance state)
   | Surface_lex.LBrace -> parse_block state (advance state)
   | Surface_lex.Keyword "fn" -> parse_fn state ~allow_newlines (advance state)
+  | Surface_lex.Keyword "match" -> parse_match state ~allow_newlines (advance state)
   | Surface_lex.Invalid diagnostic ->
       record_diagnostic state diagnostic;
       ignore (advance state);
@@ -384,32 +461,23 @@ and parse_pattern_list state _opening =
   | _ ->
       let rec loop acc =
         let pattern = parse_pattern state ~allow_newlines:true in
-        let pattern =
-          match (current state).Surface_lex.token with
-          | Surface_lex.Keyword "as" ->
-              let token = advance state in
-              report_code state token "E1222" "`as` patterns arrive in SS.9, not SS.7";
-              (match (current state).Surface_lex.token with
-              | Surface_lex.Ident name when Surface_name.valid_lower_name name ->
-                  ignore (advance state)
-              | Surface_lex.Escaped (Surface_name.Term, _) -> ignore (advance state)
-              | _ -> ());
-              pat_hole state token
-          | _ -> pattern
-        in
         skip_list_space state;
         match (current state).Surface_lex.token with
         | Surface_lex.Comma ->
             ignore (advance state);
             skip_list_space state;
             if (current state).Surface_lex.token = Surface_lex.RParen then begin
-              report state (current state) "parameter lists do not permit a trailing comma";
+              report state (current state) "pattern lists do not permit a trailing comma";
               let closing = advance state in
               (List.rev (pattern :: acc), closing)
             end
             else loop (pattern :: acc)
         | Surface_lex.RParen ->
             let closing = advance state in
+            (List.rev (pattern :: acc), closing)
+        | Surface_lex.Bar | Surface_lex.RBrace | Surface_lex.Eof ->
+            let closing = current state in
+            report state closing "expected `)` to close the pattern list";
             (List.rev (pattern :: acc), closing)
         | _ ->
             let token = current state in
@@ -426,6 +494,54 @@ and parse_pattern_list state _opening =
 
 and parse_pattern state ~allow_newlines =
   if allow_newlines then skip_list_space state else skip_comments state;
+  let atom = parse_pattern_atom state ~allow_newlines in
+  if allow_newlines then skip_list_space state else skip_comments state;
+  match (current state).Surface_lex.token with
+  | Surface_lex.Keyword "as" ->
+      ignore (advance state);
+      if allow_newlines then skip_list_space state else skip_comments state;
+      let binder_token = current state in
+      let binder =
+        match binder_token.Surface_lex.token with
+        | Surface_lex.Ident name when Surface_name.valid_lower_name name ->
+            ignore (advance state);
+            Some name
+        | Surface_lex.Escaped (Surface_name.Term, name) ->
+            ignore (advance state);
+            Some name
+        | _ ->
+            report state binder_token
+              (Printf.sprintf "expected a lowercase or `term`-escaped binder after `as`, found %s"
+                 (token_description binder_token));
+            (match binder_token.Surface_lex.token with
+            | Surface_lex.Bar | Surface_lex.RBrace | Surface_lex.RParen | Surface_lex.Arrow
+            | Surface_lex.Eof ->
+                ()
+            | _ -> ignore (advance_recording_invalid state));
+            None
+      in
+      let pattern =
+        match binder with
+        | Some name ->
+            Surface_ast.
+              { it = PAs (atom, name); meta = meta_from_token_to_meta binder_token atom.meta }
+        | None -> pat_hole state binder_token
+      in
+      if allow_newlines then skip_list_space state else skip_comments state;
+      if (current state).Surface_lex.token = Surface_lex.Keyword "as" then begin
+        let chained = advance state in
+        report state chained
+          "an `as` pattern permits one binder; nest another pattern instead of chaining `as`";
+        if allow_newlines then skip_list_space state else skip_comments state;
+        match (current state).Surface_lex.token with
+        | Surface_lex.Ident name when Surface_name.valid_lower_name name -> ignore (advance state)
+        | Surface_lex.Escaped (Surface_name.Term, _) -> ignore (advance state)
+        | _ -> ()
+      end;
+      pattern
+  | _ -> atom
+
+and parse_pattern_atom state ~allow_newlines:_ =
   let token = current state in
   let meta = meta_with_span token.Surface_lex.span in
   match token.Surface_lex.token with
@@ -438,23 +554,145 @@ and parse_pattern state ~allow_newlines =
   | Surface_lex.Escaped (Surface_name.Term, name) ->
       ignore (advance state);
       Surface_ast.{ it = PBind name; meta }
+  | Surface_lex.Literal literal ->
+      ignore (advance state);
+      Surface_ast.{ it = PLit literal; meta }
+  | Surface_lex.Ident name -> (
+      match kernel_name_of_pascal name with
+      | Some name -> parse_constructor_pattern state token meta (Surface_ast.Named name)
+      | None ->
+          report state token "expected a lowercase binder or PascalCase constructor pattern";
+          ignore (advance state);
+          pat_hole state token)
+  | Surface_lex.Escaped (Surface_name.Con, name) ->
+      parse_constructor_pattern state token meta (Surface_ast.Named name)
+  | Surface_lex.HashRef (hash, Surface_name.Con) ->
+      parse_constructor_pattern state token meta (Surface_ast.Hashed hash)
   | Surface_lex.LParen ->
       let opening = advance state in
       let items, closing = parse_pattern_list state opening in
       Surface_ast.{ it = PTuple items; meta = meta_with_span (span_between opening closing) }
-  | Surface_lex.Literal _ | Surface_lex.Ident _
-  | Surface_lex.Escaped ((Surface_name.Con | Surface_name.Op), _)
-  | Surface_lex.HashRef (_, Surface_name.Con) ->
-      report_code state token "E1222"
-        "SS.7 binding positions accept only `_`, lowercase binders, and tuple patterns";
+  | Surface_lex.Invalid diagnostic ->
+      record_diagnostic state diagnostic;
       ignore (advance state);
-      discard_parenthesized state;
       pat_hole state token
   | _ ->
-      report_code state token "E1222"
-        (Printf.sprintf "expected an irrefutable SS.7 pattern, found %s" (token_description token));
-      if token.Surface_lex.token <> Surface_lex.Eof then ignore (advance_recording_invalid state);
+      report state token (Printf.sprintf "expected a pattern, found %s" (token_description token));
+      (match token.Surface_lex.token with
+      | Surface_lex.Bar | Surface_lex.RBrace | Surface_lex.RParen | Surface_lex.Arrow
+      | Surface_lex.Eof ->
+          ()
+      | _ -> ignore (advance_recording_invalid state));
       pat_hole state token
+
+and parse_constructor_pattern state name_token name_meta constructor =
+  ignore (advance state);
+  match (current state).Surface_lex.token with
+  | Surface_lex.LParen ->
+      let opening = advance state in
+      let args, closing = parse_pattern_list state opening in
+      let meta = meta_with_span (Span.merge name_token.Surface_lex.span closing.span) in
+      Surface_ast.{ it = PCon (constructor, args); meta }
+  | _ -> Surface_ast.{ it = PCon (constructor, []); meta = name_meta }
+
+and parse_match state ~allow_newlines keyword =
+  let subject = parse_expr state ~allow_newlines in
+  skip_comments state;
+  match expect state Surface_lex.LBrace "`{` before the match arms" with
+  | None ->
+      Surface_ast.{ it = Match (subject, []); meta = meta_from_token_to_meta keyword subject.meta }
+  | Some opening ->
+      ignore (consume_separators state);
+      let clauses = ref [] in
+      let closing = ref opening in
+      let finished = ref false in
+      let parse_arm start =
+        let clause, next_top = parse_match_arm state start in
+        clauses := clause :: !clauses;
+        match next_top with
+        | None -> ignore (consume_separators state)
+        | Some next_top ->
+            report_code state next_top "E1221" "expected `}` before the next top-level item";
+            closing := current state;
+            finished := true
+      in
+      while not !finished do
+        let token = current state in
+        match token.Surface_lex.token with
+        | Surface_lex.RBrace ->
+            if !clauses = [] then report state token "a `match` requires at least one arm";
+            closing := advance state;
+            finished := true
+        | Surface_lex.Eof ->
+            report_code state token "E1221" "expected `}` before end of match";
+            closing := token;
+            finished := true
+        | Surface_lex.Bar ->
+            let bar = advance state in
+            parse_arm bar
+        | _ ->
+            report state token "match arms must begin with `|`";
+            parse_arm token
+      done;
+      Surface_ast.
+        {
+          it = Match (subject, List.rev !clauses);
+          meta = meta_with_span (span_between keyword !closing);
+        }
+
+and parse_match_arm state start =
+  let pattern_token = current state in
+  let pattern =
+    match pattern_token.Surface_lex.token with
+    | Surface_lex.Arrow | Surface_lex.Bar | Surface_lex.RBrace | Surface_lex.Eof ->
+        report state pattern_token "expected a pattern after `|`";
+        pat_hole state pattern_token
+    | _ -> parse_pattern state ~allow_newlines:false
+  in
+  skip_comments state;
+  match expect state Surface_lex.Arrow "`->` after the match pattern" with
+  | None -> (
+      let boundary = next_arm_boundary state in
+      let body_token = current state in
+      state.index <- boundary.boundary_index;
+      let body = expr_hole state body_token in
+      ( Surface_ast.
+          { cpattern = pattern; cbody = body; cmeta = meta_from_token_to_meta start body.meta },
+        match boundary.boundary_kind with Arm_layout top -> Some top | _ -> None ))
+  | Some _ ->
+      skip_continuation state;
+      let body_token = current state in
+      let body, next_top =
+        match body_token.Surface_lex.token with
+        | Surface_lex.Bar | Surface_lex.RBrace | Surface_lex.Eof ->
+            report state body_token "expected an expression after `->`";
+            (expr_hole state body_token, None)
+        | _ ->
+            let boundary = next_arm_boundary state in
+            let body =
+              with_limit state boundary.boundary_index (fun () ->
+                  parse_expr state ~allow_newlines:false)
+            in
+            (match boundary.boundary_kind with
+            | Arm_layout _ -> ()
+            | Arm_delimiter | Arm_end -> ignore (consume_separators state));
+            if state.index < boundary.boundary_index then
+              begin match (current state).Surface_lex.token with
+              | Surface_lex.Bar | Surface_lex.RBrace -> ()
+              | _ ->
+                  report state (current state) "expected `|` or `}` after the match arm body";
+                  state.index <- boundary.boundary_index
+              end;
+            let next_top =
+              match boundary.boundary_kind with
+              | Arm_layout top when state.index >= boundary.boundary_index -> Some top
+              | Arm_layout _ | Arm_delimiter | Arm_end -> None
+            in
+            (body, next_top)
+      in
+      ( Surface_ast.
+          { cpattern = pattern; cbody = body; cmeta = meta_from_token_to_meta start body.meta },
+        next_top )
 
 and parse_block state opening =
   let items = ref [] in
@@ -781,31 +1019,6 @@ and parse_forall state ~allow_newlines keyword =
   in
   Surface_ast.{ it = TyForall (List.rev !tyvars, List.rev !rowvars, body); meta }
 
-let token_at state index =
-  if index < Array.length state.tokens then state.tokens.(index)
-  else state.tokens.(Array.length state.tokens - 1)
-
-let rec index_after_comments state index =
-  match (token_at state index).Surface_lex.token with
-  | Surface_lex.Comment _ | Surface_lex.DocComment _ -> index_after_comments state (index + 1)
-  | _ -> index
-
-let rec index_after_layout state index =
-  match (token_at state index).Surface_lex.token with
-  | Surface_lex.Comment _ | Surface_lex.DocComment _ | Surface_lex.Newline | Surface_lex.Semi ->
-      index_after_layout state (index + 1)
-  | _ -> index
-
-let with_limit state limit f =
-  let previous = state.limit in
-  state.limit <- Some limit;
-  Fun.protect ~finally:(fun () -> state.limit <- previous) f
-
-let term_name = function
-  | Surface_lex.Ident name when Surface_name.valid_lower_name name -> Some name
-  | Surface_lex.Escaped (Surface_name.Term, name) -> Some name
-  | _ -> None
-
 let op_name = function
   | Surface_lex.Ident name when Surface_name.valid_lower_name name -> Some name
   | Surface_lex.Escaped (Surface_name.Op, name) -> Some name
@@ -819,38 +1032,7 @@ let projected_decl_name kind = function
 let type_decl_name token = projected_decl_name Surface_name.Type token
 let con_decl_name token = projected_decl_name Surface_name.Con token
 let effect_decl_name token = projected_decl_name Surface_name.Effect token
-
-let equation_definition_ahead_at state start =
-  match (token_at state (start + 1)).Surface_lex.token with
-  | Surface_lex.LParen ->
-      let rec find_closing index depth =
-        match (token_at state index).Surface_lex.token with
-        | Surface_lex.LParen -> find_closing (index + 1) (depth + 1)
-        | Surface_lex.RParen ->
-            if depth = 1 then
-              let next = index_after_comments state (index + 1) in
-              (token_at state next).Surface_lex.token = Surface_lex.Equal
-            else find_closing (index + 1) (depth - 1)
-        | (Surface_lex.Eof | Surface_lex.Newline) when depth = 0 -> false
-        | Surface_lex.Eof -> false
-        | _ -> find_closing (index + 1) depth
-      in
-      find_closing (start + 1) 0
-  | _ -> false
-
 let equation_definition_ahead state = equation_definition_ahead_at state state.index
-
-let top_item_ahead state index =
-  match (token_at state index).Surface_lex.token with
-  | Surface_lex.Keyword ("type" | "effect") -> true
-  | token -> (
-      match term_name token with
-      | None -> false
-      | Some _ -> (
-          let next = index_after_comments state (index + 1) in
-          match (token_at state next).Surface_lex.token with
-          | Surface_lex.Colon | Surface_lex.Equal -> true
-          | _ -> equation_definition_ahead_at state index))
 
 let skip_continuation_before_top state =
   let layout = state.index in
@@ -877,11 +1059,6 @@ let layout_boundary_before_top state start =
     | _ -> find (index + 1) depth
   in
   find start 0
-
-let meta_from_token_to_meta token meta =
-  match Meta.span meta with
-  | Some span -> meta_with_span (Span.merge token.Surface_lex.span span)
-  | None -> meta_with_span token.span
 
 let parse_signature state name_token name =
   ignore (advance state);
