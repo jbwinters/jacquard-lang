@@ -13,6 +13,11 @@ let token_names source =
   |> List.map (fun token -> Surface_lex.show_token token.Surface_lex.token)
 
 let shown source = lex source |> without_eof |> List.map Surface_lex.show
+let recover_lex source = Surface_lex.lex_recover ~file:"tokens.jac" source
+
+let recovered_token_names source =
+  (recover_lex source).Surface_lex.tokens |> without_eof
+  |> List.map (fun token -> Surface_lex.show_token token.Surface_lex.token)
 
 let test_identifier_golden () =
   Alcotest.(check (list string))
@@ -207,6 +212,73 @@ let test_invalid_raw_utf8 () =
       Alcotest.(check string) "invalid byte span" "utf8.jac:1:2-3" (Span.to_string span)
   | _ -> Alcotest.fail "invalid raw UTF-8 byte was accepted"
 
+let test_recovering_lexer_preserves_surrounding_tokens () =
+  let source = "before\n@\n}\nafter\n" in
+  let recovered = recover_lex source in
+  Alcotest.(check (list string))
+    "tokens around lexical damage"
+    [
+      "ident(before)";
+      "newline";
+      "invalid(E1210)";
+      "newline";
+      "}";
+      "newline";
+      "ident(after)";
+      "newline";
+    ]
+    (recovered_token_names source);
+  Alcotest.(check (list string))
+    "recovery diagnostics"
+    [ "tokens.jac:2:1-2: error[E1210]: unexpected surface character `@`" ]
+    (List.map Diag.to_string recovered.diagnostics);
+  match Surface_lex.lex ~file:"tokens.jac" source with
+  | Error [ { Diag.code = "E1210"; span = Some span; _ } ] ->
+      Alcotest.(check string) "strict span unchanged" "tokens.jac:2:1-2" (Span.to_string span)
+  | _ -> Alcotest.fail "strict lexer no longer stops at its first lexical error"
+
+let test_recovering_lexer_resynchronizes_strings () =
+  let truncated = recover_lex "before\n\"truncated\nafter\n" in
+  Alcotest.(check (list string))
+    "truncated string tokens"
+    [ "ident(before)"; "newline"; "invalid(E1213)"; "newline"; "ident(after)"; "newline" ]
+    (truncated.tokens |> without_eof
+    |> List.map (fun token -> Surface_lex.show_token token.Surface_lex.token));
+  Alcotest.(check (list string))
+    "bounded truncated string diagnostic"
+    [ "tokens.jac:2:1-11: error[E1213]: unterminated string literal" ]
+    (List.map Diag.to_string truncated.diagnostics);
+  let malformed = recover_lex "before\n\"bad\\q\"\nafter\n" in
+  Alcotest.(check (list string))
+    "malformed escape tokens"
+    [ "ident(before)"; "newline"; "invalid(E1214)"; "newline"; "ident(after)"; "newline" ]
+    (malformed.tokens |> without_eof
+    |> List.map (fun token -> Surface_lex.show_token token.Surface_lex.token));
+  Alcotest.(check (list string))
+    "malformed escape diagnostic"
+    [ "tokens.jac:2:5-6: error[E1214]: invalid string escape `\\q`" ]
+    (List.map Diag.to_string malformed.diagnostics);
+  let multiline = recover_lex "before\n\"line one\nbad\\q\"\nafter\n" in
+  Alcotest.(check (list string))
+    "multiline malformed string does not rewind before damage"
+    [ "ident(before)"; "newline"; "invalid(E1214)"; "newline"; "ident(after)"; "newline" ]
+    (multiline.tokens |> without_eof
+    |> List.map (fun token -> Surface_lex.show_token token.Surface_lex.token));
+  Alcotest.(check (list string))
+    "multiline malformed escape diagnostic"
+    [ "tokens.jac:3:4-5: error[E1214]: invalid string escape `\\q`" ]
+    (List.map Diag.to_string multiline.diagnostics);
+  let escaped_newline = recover_lex "\"bad\\\nafter\n" in
+  Alcotest.(check (list string))
+    "invalid escaped newline remains a synchronization token"
+    [ "invalid(E1214)"; "newline"; "ident(after)"; "newline" ]
+    (escaped_newline.tokens |> without_eof
+    |> List.map (fun token -> Surface_lex.show_token token.Surface_lex.token));
+  Alcotest.(check (list string))
+    "escaped newline diagnostic"
+    [ "tokens.jac:1:5-6: error[E1214]: invalid string escape `\\\n`" ]
+    (List.map Diag.to_string escaped_newline.diagnostics)
+
 let suite =
   [
     Alcotest.test_case "identifier golden" `Quick test_identifier_golden;
@@ -221,4 +293,8 @@ let suite =
     Alcotest.test_case "strict group indices" `Quick test_strict_group_indices;
     Alcotest.test_case "malformed token diagnostics" `Quick test_malformed_tokens;
     Alcotest.test_case "invalid raw UTF-8" `Quick test_invalid_raw_utf8;
+    Alcotest.test_case "recover surrounding tokens" `Quick
+      test_recovering_lexer_preserves_surrounding_tokens;
+    Alcotest.test_case "recover malformed strings" `Quick
+      test_recovering_lexer_resynchronizes_strings;
   ]

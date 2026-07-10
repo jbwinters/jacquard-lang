@@ -46,4 +46,5 @@ let () =
       ("surface-print", Test_surface_print.suite);
       ("surface-laws", Test_surface_laws.suite);
       ("surface-lex", Test_surface_lex.suite);
+      ("surface-parse-recovery", Test_surface_parse_recovery.suite);
     ]

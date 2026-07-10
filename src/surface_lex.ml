@@ -28,9 +28,11 @@ type token =
   | Dot
   | Semi
   | Newline
+  | Invalid of Diag.t
   | Eof
 
 type located = { token : token; span : Span.t }
+type recovery = { tokens : located list; diagnostics : Diag.t list }
 
 let keywords =
   [
@@ -85,6 +87,13 @@ let advance state =
   end
   else state.col <- state.col + 1;
   char
+
+let rec skip_space state =
+  match peek state with
+  | Some (' ' | '\t' | '\r') ->
+      ignore (advance state);
+      skip_space state
+  | _ -> ()
 
 let located state start_pos token = { token; span = span state start_pos }
 let is_digit char = char >= '0' && char <= '9'
@@ -323,14 +332,7 @@ let one state constructor =
   located state start_pos constructor
 
 let next state =
-  let rec skip_space () =
-    match peek state with
-    | Some (' ' | '\t' | '\r') ->
-        ignore (advance state);
-        skip_space ()
-    | _ -> ()
-  in
-  skip_space ();
+  skip_space state;
   match peek state with
   | None -> located state (pos state) Eof
   | Some '\n' -> one state Newline
@@ -379,6 +381,73 @@ let lex ~file src : (located list, Diag.t list) result =
   in
   match loop [] with tokens -> tokens | exception Bug_lex_error diagnostic -> Error [ diagnostic ]
 
+let restore state (position : Span.pos) =
+  state.off <- position.offset;
+  state.line <- position.line;
+  state.col <- position.col
+
+let resynchronize_string state start_pos ~after_offset =
+  restore state start_pos;
+  (match peek state with Some '"' -> ignore (advance state) | _ -> ());
+  let rec seek_closing_quote () =
+    match peek state with
+    | None -> ()
+    | Some '\n' when state.off >= after_offset -> ()
+    | Some '"' when state.off >= after_offset -> ignore (advance state)
+    | Some '\\' -> (
+        ignore (advance state);
+        match peek state with
+        | None -> ()
+        | Some '\n' when state.off >= after_offset -> ()
+        | Some _ ->
+            ignore (advance state);
+            seek_closing_quote ())
+    | Some _ ->
+        ignore (advance state);
+        seek_closing_quote ()
+  in
+  seek_closing_quote ()
+
+let recover_after_error state start_pos start_char diagnostic =
+  match start_char with
+  | Some '"' ->
+      let after_offset =
+        if diagnostic.Diag.code = "E1213" then start_pos.Span.offset
+        else
+          match diagnostic.span with
+          | Some error_span -> error_span.Span.end_pos.offset
+          | None -> state.off
+      in
+      resynchronize_string state start_pos ~after_offset;
+      if diagnostic.Diag.code = "E1213" then { diagnostic with span = Some (span state start_pos) }
+      else diagnostic
+  | _ ->
+      (if state.off = start_pos.Span.offset then
+         match peek state with Some _ -> ignore (advance state) | None -> ());
+      diagnostic
+
+(** [lex_recover ~file source] tokenizes through lexical damage and appends [Eof]. Every malformed
+    lexical unit becomes one in-order [Invalid] token carrying its diagnostic. String recovery stops
+    at a closing quote or newline. This function is total for arbitrary byte strings; use {!lex} at
+    strict build/check boundaries. *)
+let lex_recover ~file src : recovery =
+  let state = { src; file; off = 0; line = 1; col = 1 } in
+  let rec loop tokens diagnostics =
+    skip_space state;
+    let start_pos = pos state in
+    let start_char = peek state in
+    match next state with
+    | { token = Eof; _ } as eof ->
+        { tokens = List.rev (eof :: tokens); diagnostics = List.rev diagnostics }
+    | token -> loop (token :: tokens) diagnostics
+    | exception Bug_lex_error diagnostic ->
+        let diagnostic = recover_after_error state start_pos start_char diagnostic in
+        let invalid_span = Option.value diagnostic.Diag.span ~default:(span state start_pos) in
+        let invalid = { token = Invalid diagnostic; span = invalid_span } in
+        loop (invalid :: tokens) (diagnostic :: diagnostics)
+  in
+  loop [] []
+
 let kind_name = Surface_name.kind_tag
 
 (** Stable token rendering used by lexer goldens and parser diagnostics. *)
@@ -408,6 +477,7 @@ let show_token = function
   | Dot -> "."
   | Semi -> ";"
   | Newline -> "newline"
+  | Invalid diagnostic -> "invalid(" ^ diagnostic.Diag.code ^ ")"
   | Eof -> "eof"
 
 let show located = Printf.sprintf "%s %s" (Span.to_string located.span) (show_token located.token)

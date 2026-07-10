@@ -126,7 +126,7 @@ in `src/` and `bin/` appears in this catalog.
 
 | code | meaning | example |
 |------|---------|---------|
-| E1200 | surface parser/printer slice is not implemented at this scaffold boundary | using a nonempty `.jac` file before SS.5 |
+| E1200 | retired surface-parser scaffold diagnostic; reserved and no longer emitted | an older build rejecting every nonempty `.jac` file |
 | E1201 | canonical surface printer is not implemented at this scaffold boundary | calling the SS.1 printer placeholder |
 | E1202 | recovered surface tree still contains holes | checking malformed `.jac` after parser recovery |
 | E1203 | kernel subtree has no self-contained surface fragment | rendering an ambiguous raw `group` in a semantic diff |
@@ -139,6 +139,18 @@ in `src/` and `bin/` appears in this catalog.
 | E1216 | malformed kind-tagged hash reference | `#abc:term` |
 | E1217 | malformed internal group reference | `#group[x]` |
 | E1218 | invalid raw UTF-8 scalar in a surface string | a raw `0xff` byte between quotes |
+| E1220 | unexpected token in the recovering surface parser | stray `|` at top level |
+| E1221 | missing closing brace during surface recovery | a block truncated before `}` |
+
+The recovering `.jac` lexer emits an in-order invalid-token marker and continues;
+the strict lexer remains fail-fast. Malformed strings resynchronize at a closing
+quote or newline, so an unterminated line does not discard valid later items. The
+parser synchronizes at `}`, `|`, `;`, and newline so a malformed expression does
+not hide later syntax errors. Each damage site leaves an explicit surface hole
+with its source span, a stable `surface-hole` ID, and `surface-form =
+recovery-hole` provenance. `Surface_parse.strict` rejects both error diagnostics
+and any remaining hole before lowering, checking, execution, or canonical
+hashing.
 
 ## Appendix: the W5.3 audit (ten message rewrites)
 
