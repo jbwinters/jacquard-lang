@@ -1,8 +1,8 @@
-(** Form metadata: an open string-keyed map carrying fidelity and provenance.
+(** Form metadata: an open string-keyed map carrying fidelity, provenance, and surface hints.
 
     Metadata is excluded from content hashes by the metadata law (spec §3): two forms differing only
     in meta are the same definition. Reserved keys (all optional): [span], [scopes], [name],
-    [trivia], [origin], [doc]. *)
+    [trivia], [origin], [doc], and the [surface-*] parser/printer keys below. *)
 
 module StringMap = Map.Make (String)
 
@@ -37,6 +37,7 @@ let key_doc = "doc"
 let key_surface_form = "surface-form"
 let key_surface_generated = "surface-generated"
 let key_surface_hole = "surface-hole"
+let key_surface_ref_kind = "surface-ref-kind"
 
 (** [span t] reads the reserved [span] key; [None] if absent or not a span. *)
 let span t = match find key_span t with Some (Span s) -> Some s | _ -> None
@@ -69,6 +70,16 @@ let surface_hole t =
   match find key_surface_hole t with Some (Sym n | Text n) -> Some n | _ -> None
 
 let with_surface_hole n t = add key_surface_hole (Text n) t
+
+(** [surface_ref_kind t] is the explicit value-reference intent carried from surface syntax to name
+    resolution: ["term"], ["con"], or ["op"]. It is a hash-excluded elaboration hint, not a kernel
+    form or part of reference identity. *)
+let surface_ref_kind t =
+  match find key_surface_ref_kind t with Some (Sym n | Text n) -> Some n | _ -> None
+
+(** [with_surface_ref_kind kind t] records an explicit surface value-reference kind. Callers use
+    ["term"], ["con"], or ["op"]; unknown values are ignored by resolution. *)
+let with_surface_ref_kind kind t = add key_surface_ref_kind (Sym kind) t
 
 let rec equal_value a b =
   match (a, b) with

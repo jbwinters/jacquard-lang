@@ -44,11 +44,12 @@ let test_surface_metadata () =
   let meta =
     Meta.empty |> Meta.with_surface_form "if"
     |> Meta.with_surface_generated "accessor"
-    |> Meta.with_surface_hole "7"
+    |> Meta.with_surface_hole "7" |> Meta.with_surface_ref_kind "con"
   in
   Alcotest.(check (option string)) "surface form" (Some "if") (Meta.surface_form meta);
   Alcotest.(check (option string)) "generated shape" (Some "accessor") (Meta.surface_generated meta);
-  Alcotest.(check (option string)) "hole shape" (Some "7") (Meta.surface_hole meta)
+  Alcotest.(check (option string)) "hole shape" (Some "7") (Meta.surface_hole meta);
+  Alcotest.(check (option string)) "reference kind" (Some "con") (Meta.surface_ref_kind meta)
 
 let test_holes_stop_at_strict_boundary () =
   let hole = Surface_ast.node (Surface_ast.Hole 1) in

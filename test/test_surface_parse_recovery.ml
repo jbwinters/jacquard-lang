@@ -18,71 +18,64 @@ let test_recovery_golden () =
   Alcotest.(check (list string))
     "all parser diagnostics"
     [
-      "recover.jac:1:1-2: error[E1220]: expected a top-level item, found (";
-      "recover.jac:2:1-2: error[E1220]: expected a top-level item, found )";
       "recover.jac:3:1-2: error[E1220]: stray `|` at top level";
       "recover.jac:5:1-2: error[E1220]: expected an expression, found [";
     ]
     (rendered_diagnostics recovered);
   match recovered.items with
   | [
+   { it = TopExpr { it = Tuple []; _ }; _ };
    { it = TopHole first; meta = first_meta };
-   { it = TopHole second; meta = second_meta };
-   { it = TopHole third; meta = third_meta };
    {
      it =
-       TopExpr { it = Block [ Expr { it = Hole fourth; meta = fourth_meta } ]; meta = block_meta };
+       TopExpr { it = Block [ Expr { it = Hole second; meta = second_meta } ]; meta = block_meta };
      _;
    };
   ] ->
       Alcotest.(check (list string))
         "hole metadata"
-        [
-          "0|recover.jac:1:1-2|recovery-hole|0";
-          "1|recover.jac:2:1-2|recovery-hole|1";
-          "2|recover.jac:3:1-2|recovery-hole|2";
-          "3|recover.jac:5:1-2|recovery-hole|3";
-        ]
-        [
-          metadata_golden first first_meta;
-          metadata_golden second second_meta;
-          metadata_golden third third_meta;
-          metadata_golden fourth fourth_meta;
-        ];
+        [ "0|recover.jac:3:1-2|recovery-hole|0"; "1|recover.jac:5:1-2|recovery-hole|1" ]
+        [ metadata_golden first first_meta; metadata_golden second second_meta ];
       Alcotest.(check (option string))
         "block span" (Some "recover.jac:4:1-6:2")
         (Option.map Span.to_string (Meta.span block_meta))
   | _ -> Alcotest.fail "recovery golden produced an unexpected partial tree"
 
 let test_each_synchronization_boundary () =
-  let cases =
-    [
-      ("newline", "(\n)", "expected a top-level item, found )");
-      ("semicolon", "(;)", "expected a top-level item, found )");
-      ("closing brace", "(}", "unmatched `}` at top level");
-      ("bar", "(|", "stray `|` at top level");
-    ]
-  in
+  let cases = [ ("newline", "[\nafter\n"); ("semicolon", "[;after\n") ] in
   List.iter
-    (fun (label, source, later_message) ->
+    (fun (label, source) ->
       let recovered = recover source in
       Alcotest.(check (list string))
-        (label ^ " diagnostics") [ "E1220"; "E1220" ] (diagnostic_codes recovered);
-      (match recovered.diagnostics with
-      | [ _; later ] -> Alcotest.(check string) (label ^ " later error") later_message later.message
-      | _ -> Alcotest.failf "%s: expected two diagnostics" label);
+        (label ^ " diagnostics") [ "E1220" ] (diagnostic_codes recovered);
       match recovered.items with
-      | [ { it = TopHole 0; _ }; { it = TopHole 1; _ } ] -> ()
-      | _ -> Alcotest.failf "%s: synchronization did not preserve both damage sites" label)
-    cases
+      | [ { it = TopExpr { it = Hole 0; _ }; _ }; { it = TopExpr { it = Name "after"; _ }; _ } ] ->
+          ()
+      | _ -> Alcotest.failf "%s: synchronization lost the later item" label)
+    cases;
+  let closing = recover "{ [ }" in
+  Alcotest.(check (list string)) "closing brace diagnostics" [ "E1220" ] (diagnostic_codes closing);
+  (match closing.items with
+  | [ { it = TopExpr { it = Block [ Expr { it = Hole 0; _ } ]; _ }; _ } ] -> ()
+  | _ -> Alcotest.fail "closing-brace synchronization lost the containing block");
+  let bar = recover "[\n|\nafter\n" in
+  Alcotest.(check (list string)) "bar diagnostics" [ "E1220"; "E1220" ] (diagnostic_codes bar);
+  match bar.items with
+  | [
+   { it = TopExpr { it = Hole 0; _ }; _ };
+   { it = TopHole 1; _ };
+   { it = TopExpr { it = Name "after"; _ }; _ };
+  ] ->
+      ()
+  | _ -> Alcotest.fail "bar synchronization lost a surrounding item"
 
 let test_later_items_and_errors_survive () =
-  let recovered = recover "(\n42\n)\nafter\n" in
+  let recovered = recover "f(,)\n42\n}\nafter\n" in
   Alcotest.(check (list string))
     "both errors survive" [ "E1220"; "E1220" ] (diagnostic_codes recovered);
   match recovered.items with
   | [
-   { it = TopHole 0; _ };
+   { it = TopExpr { it = Call ({ it = Name "f"; _ }, [ { it = Hole 0; _ } ]); _ }; _ };
    { it = TopExpr { it = Lit (LInt 42); _ }; _ };
    { it = TopHole 1; _ };
    { it = TopExpr { it = Name "after"; _ }; _ };
@@ -154,6 +147,35 @@ let test_mixed_lexical_and_parser_recovery () =
         (List.map (fun diagnostic -> diagnostic.Diag.code) diagnostics)
   | Ok _ -> Alcotest.fail "strict parsing accepted a mixed-damage partial tree"
 
+let test_mixed_lexical_recovery_inside_block () =
+  let recovered = recover "{ @\n3 }" in
+  Alcotest.(check (list string)) "block lexical diagnostic" [ "E1210" ] (diagnostic_codes recovered);
+  (match recovered.items with
+  | [
+   { it = TopExpr { it = Block [ Expr { it = Hole 0; _ }; Expr { it = Lit (LInt 3); _ } ]; _ }; _ };
+  ] ->
+      ()
+  | _ -> Alcotest.fail "block lexical recovery lost its valid final expression");
+  let later_damage = recover "{ @\n[\n3 }" in
+  Alcotest.(check (list string))
+    "block lexical and parser diagnostics" [ "E1210"; "E1220" ] (diagnostic_codes later_damage);
+  match later_damage.items with
+  | [
+   {
+     it =
+       TopExpr
+         {
+           it =
+             Block
+               [ Expr { it = Hole 0; _ }; Expr { it = Hole 1; _ }; Expr { it = Lit (LInt 3); _ } ];
+           _;
+         };
+     _;
+   };
+  ] ->
+      ()
+  | _ -> Alcotest.fail "mixed block recovery lost in-order holes or the final expression"
+
 let test_string_recovery_preserves_surroundings () =
   let truncated = recover "before\n\"truncated\nafter\n" in
   Alcotest.(check (list string)) "truncated code" [ "E1213" ] (diagnostic_codes truncated);
@@ -212,6 +234,8 @@ let suite =
     Alcotest.test_case "lexical hole metadata" `Quick test_lexical_hole_metadata;
     Alcotest.test_case "mixed lexical and parser recovery" `Quick
       test_mixed_lexical_and_parser_recovery;
+    Alcotest.test_case "mixed lexical recovery inside block" `Quick
+      test_mixed_lexical_recovery_inside_block;
     Alcotest.test_case "string recovery preserves surroundings" `Quick
       test_string_recovery_preserves_surroundings;
     Alcotest.test_case "nested unmatched braces" `Quick test_nested_unmatched_braces;

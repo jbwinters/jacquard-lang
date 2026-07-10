@@ -141,6 +141,13 @@ in `src/` and `bin/` appears in this catalog.
 | E1218 | invalid raw UTF-8 scalar in a surface string | a raw `0xff` byte between quotes |
 | E1220 | unexpected token in the recovering surface parser | stray `|` at top level |
 | E1221 | missing closing brace during surface recovery | a block truncated before `}` |
+| E1222 | refutable or later-slice pattern in an SS.7 binding position | `fn (Some) -> 1` |
+| E1223 | missing block-item separator | `{ 1 2 }` instead of `{ 1; 2 }` |
+| E1230 | surface node is outside the SS.7 local-lowering slice | lowering a list before SS.12 |
+| E1231 | empty expression block | `{}` |
+| E1232 | local `let` is the final block item | `{ let x = 1 }` |
+| E1233 | malformed local recursive/function binding | `let rec (f, g)(x) = x` |
+| E1234 | generated lowering node lacks a real source span | lowering a hand-built spanless block AST |
 
 The recovering `.jac` lexer emits an in-order invalid-token marker and continues;
 the strict lexer remains fail-fast. Malformed strings resynchronize at a closing

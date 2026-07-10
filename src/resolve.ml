@@ -6,6 +6,10 @@
     Within a [defterm] group, members see each other; a member reference resolves to the group-local
     marker [GroupRef i] (source order), not a hash (spec §6).
 
+    Surface parsing may attach hash-excluded [surface-ref-kind] metadata to an unresolved [Var].
+    Resolution consumes [term]/[con]/[op] hints before ordinary value-position precedence. This
+    preserves escaped-name and Pascal constructor intent without adding a kernel form.
+
     [Named] references in patterns ([pcon]), op clauses, types ([tref]) and rows ([eref]) resolve
     against the same index and must have the matching kind. [Quote] payloads are data and are left
     unresolved, except that every [(unquote e)] splice inside them is resolved (splices evaluate).
@@ -44,6 +48,13 @@ let kind_to_string = function
   | KOp -> "an effect operation"
   | KType -> "a type"
   | KEffect -> "an effect"
+
+let hinted_value_kind meta =
+  match Meta.surface_ref_kind meta with
+  | Some "term" -> Some (KTerm, Kernel.Term)
+  | Some "con" -> Some (KCon, Kernel.Con)
+  | Some "op" -> Some (KOp, Kernel.Op)
+  | Some _ | None -> None
 
 (* Damerau-free Levenshtein, capped: we only care whether d <= 2. *)
 let edit_distance a b =
@@ -198,9 +209,16 @@ let rec resolve_expr_in st ~group ~locals (e : Kernel.expr) : Kernel.expr =
   match e.Kernel.it with
   | Kernel.Lit _ | Kernel.Ref _ | Kernel.GroupRef _ -> e
   | Kernel.Var x -> (
-      if List.mem x locals then e
+      let hint = hinted_value_kind e.Kernel.meta in
+      let lexical =
+        match hint with
+        | Some (KCon, _) | Some (KOp, _) -> false
+        | Some (KTerm, _) | None -> true
+        | Some ((KType | KEffect), _) -> false
+      in
+      if lexical && List.mem x locals then e
       else
-        match List.assoc_opt x group with
+        match if lexical then List.assoc_opt x group else None with
         | Some i -> { Kernel.it = Kernel.GroupRef i; meta = Meta.with_name x e.Kernel.meta }
         | None -> (
             let entries = st.names.lookup x in
@@ -211,12 +229,16 @@ let rec resolve_expr_in st ~group ~locals (e : Kernel.expr) : Kernel.expr =
                var shadowed across value kinds gets a W0301 warning naming the loser *)
             let pick k = List.find_opt (fun en -> en.kind = k) value_entries in
             let chosen =
-              match pick KTerm with
-              | Some e -> Some (e, Kernel.Term)
+              match hint with
+              | Some (kind, refkind) -> Option.map (fun entry -> (entry, refkind)) (pick kind)
               | None -> (
-                  match pick KCon with
-                  | Some e -> Some (e, Kernel.Con)
-                  | None -> ( match pick KOp with Some e -> Some (e, Kernel.Op) | None -> None))
+                  match pick KTerm with
+                  | Some e -> Some (e, Kernel.Term)
+                  | None -> (
+                      match pick KCon with
+                      | Some e -> Some (e, Kernel.Con)
+                      | None -> (
+                          match pick KOp with Some e -> Some (e, Kernel.Op) | None -> None)))
             in
             match chosen with
             | Some ({ hash; kind }, refkind) ->
@@ -227,7 +249,7 @@ let rec resolve_expr_in st ~group ~locals (e : Kernel.expr) : Kernel.expr =
                        (fun en -> if en.kind = kind then None else Some (kind_to_string en.kind))
                        value_entries)
                 in
-                if losers <> [] then
+                if hint = None && losers <> [] then
                   report st
                     (Diag.warning ?span:(Meta.span e.Kernel.meta) ~code:"W0301"
                        (Printf.sprintf
@@ -237,7 +259,12 @@ let rec resolve_expr_in st ~group ~locals (e : Kernel.expr) : Kernel.expr =
             | None -> (
                 match entries with
                 | { kind; _ } :: _ ->
-                    kind_mismatch st ~meta:e.Kernel.meta x ~expected:"a value" ~got:kind;
+                    let expected =
+                      match hint with
+                      | Some (expected, _) -> kind_to_string expected
+                      | None -> "a value"
+                    in
+                    kind_mismatch st ~meta:e.Kernel.meta x ~expected ~got:kind;
                     e
                 | [] ->
                     (* sibling group members count as near-miss candidates too *)

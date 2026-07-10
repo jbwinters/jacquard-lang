@@ -70,6 +70,41 @@ let test_con_and_op_refs () =
       ()
   | _ -> Alcotest.fail "constructor and op names should resolve with their kinds"
 
+let test_surface_value_kind_hint () =
+  let term_hash = h "same-term" in
+  let con_hash = h "same-con" in
+  let op_hash = h "same-op" in
+  let names =
+    Resolve.of_alist
+      [
+        ("same", { Resolve.hash = term_hash; kind = Resolve.KTerm });
+        ("same", { Resolve.hash = con_hash; kind = Resolve.KCon });
+        ("same", { Resolve.hash = op_hash; kind = Resolve.KOp });
+      ]
+  in
+  let resolve ?kind () =
+    let meta =
+      match kind with Some kind -> Meta.with_surface_ref_kind kind Meta.empty | None -> Meta.empty
+    in
+    let expression = Kernel.{ it = Var "same"; meta } in
+    match Resolve.resolve_expr names expression with
+    | Ok expression -> expression
+    | Error diagnostics ->
+        Alcotest.failf "hinted resolution failed: %s"
+          (String.concat "; " (List.map Diag.to_string diagnostics))
+  in
+  let check label expected_hash expected_kind expression =
+    match expression.Kernel.it with
+    | Kernel.Ref (actual_hash, actual_kind) ->
+        Alcotest.(check bool) (label ^ " hash") true (Hash.equal expected_hash actual_hash);
+        Alcotest.(check bool) (label ^ " kind") true (expected_kind = actual_kind)
+    | _ -> Alcotest.failf "%s did not resolve to a reference" label
+  in
+  check "ordinary precedence" term_hash Kernel.Term (resolve ());
+  check "term hint" term_hash Kernel.Term (resolve ~kind:"term" ());
+  check "constructor hint" con_hash Kernel.Con (resolve ~kind:"con" ());
+  check "operation hint" op_hash Kernel.Op (resolve ~kind:"op" ())
+
 (* --- shadowing --- *)
 
 let test_inner_let_shadows_outer () =
@@ -297,6 +332,7 @@ let suite =
   [
     Alcotest.test_case "free name becomes term ref with name meta" `Quick test_free_name_becomes_ref;
     Alcotest.test_case "constructor and op kinds" `Quick test_con_and_op_refs;
+    Alcotest.test_case "surface value kind hint" `Quick test_surface_value_kind_hint;
     Alcotest.test_case "inner let shadows outer" `Quick test_inner_let_shadows_outer;
     Alcotest.test_case "lam param shadows global" `Quick test_lam_param_shadows_global;
     Alcotest.test_case "pattern binds in clause body only" `Quick
