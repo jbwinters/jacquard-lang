@@ -35,6 +35,11 @@ HASH_V0, store objects, evaluator semantics, native semantics, or permanent
 support for bootstrap `.jqd` files. D38 and D39 are standard-library follow-ups;
 they are tracked separately and do not expand the grammar.
 
+There is one explicit compatibility reservation in the generic pre-resolution form layer:
+`(surface-ref-v0 con name)` and `(surface-ref-v0 op name)`. Surface lowering uses these forms to
+retain constructor/operation intent in quoted data. They are accepted reserved `Form.t` aliases,
+not typed AST constructors, so the kernel count remains 27 and the canonical V0 format is unchanged.
+
 The implementation gates are:
 
 ```sh
@@ -621,6 +626,15 @@ make-call(f) = quote { unquote(f)(41) }
 captured as the pre-resolution triple per the kernel spec. `unquote(e)`
 splices. Both stay visually heavy on purpose, and `eval` remains a gated
 effect elsewhere; the syntax adds no evaluation power.
+
+At every non-live quote depth, a constructor such as `Some` is captured as
+`(surface-ref-v0 con some)` and an explicitly operation-kind name such as `` `op:abort` `` is
+captured as `(surface-ref-v0 op abort)`. This structure, rather than hash-excluded metadata,
+preserves namespace intent. A live `unquote` payload remains an ordinary expression and resolves
+in its surrounding lexical environment. Raw `quote { jqd { ... } }` input may contain the same
+markers, but `surface-ref-v0` is a reserved head: malformed arity, argument sorts, or kinds are
+validation errors even when nested as quote data. The normative grammar and diagnostics are in
+`spec/jacquard-kernel-ast-m0.md` §4.1; byte-level compatibility is in `spec/serialization.md`.
 
 ### Annotation
 

@@ -279,6 +279,128 @@ let test_recovering_lexer_resynchronizes_strings () =
     [ "tokens.jac:1:5-6: error[E1214]: invalid string escape `\\\n`" ]
     (List.map Diag.to_string escaped_newline.diagnostics)
 
+let test_raw_bootstrap_candidates () =
+  Alcotest.(check (list string))
+    "raw candidates are lexical and grammar-neutral"
+    [
+      "keyword(jqd)";
+      "raw-candidate";
+      "newline";
+      "keyword(quote)";
+      "{";
+      "newline";
+      "comment( leading quote trivia)";
+      "newline";
+      "keyword(jqd)";
+      "raw-candidate";
+      "newline";
+      "}";
+      "newline";
+      "ident(f)";
+      "(";
+      "keyword(jqd)";
+      "raw-candidate";
+      ")";
+    ]
+    (token_names
+       "jqd { (lit 1) }\nquote {\n-- leading quote trivia\njqd   { (lit 2) }\n}\nf(jqd { (lit 3) })");
+  let balanced = recover_lex "jqd { (mystery \"}\" ; } in a comment\n (nested (lit 1))) }" in
+  Alcotest.(check (list string))
+    "strings, comments, and parentheses do not close the candidate"
+    [ "keyword(jqd)"; "raw-candidate" ]
+    (balanced.tokens |> without_eof
+    |> List.map (fun token -> Surface_lex.show_token token.Surface_lex.token));
+  Alcotest.(check int) "balanced candidate has no diagnostics" 0 (List.length balanced.diagnostics);
+  let malformed = recover_lex "f(jqd { (lit @) (lit 2) })\nafter = 7\n" in
+  Alcotest.(check int)
+    "bootstrap bytes are inert in the lexer" 0
+    (List.length malformed.diagnostics);
+  Alcotest.(check (list string))
+    "illegal call position still captures one opaque candidate"
+    [
+      "ident(f)";
+      "(";
+      "keyword(jqd)";
+      "raw-candidate";
+      ")";
+      "newline";
+      "ident(after)";
+      "=";
+      "int(7)";
+      "newline";
+    ]
+    (malformed.tokens |> without_eof
+    |> List.map (fun token -> Surface_lex.show_token token.Surface_lex.token));
+  let unclosed = recover_lex "jqd { (lit 1)" in
+  Alcotest.(check (list string))
+    "unclosed candidate reaches EOF without a lexer diagnostic"
+    [ "keyword(jqd)"; "raw-candidate(unclosed)" ]
+    (unclosed.tokens |> without_eof
+    |> List.map (fun token -> Surface_lex.show_token token.Surface_lex.token));
+  Alcotest.(check int) "unclosed candidate is lexically inert" 0 (List.length unclosed.diagnostics);
+  let fallback = recover_lex "jqd { (lit 1 }\nafter = 7\n" in
+  (match fallback.tokens with
+  | _jqd :: { Surface_lex.token = RawCandidate candidate; span } :: _ ->
+      Alcotest.(check string) "fallback candidate source" " (lit 1 " candidate.source;
+      Alcotest.(check string)
+        "fallback candidate content span" "tokens.jac:1:6-14"
+        (Span.to_string candidate.content_span);
+      Alcotest.(check string)
+        "fallback candidate token span" "tokens.jac:1:5-15" (Span.to_string span);
+      Alcotest.(check bool) "fallback candidate is closed" true candidate.closed
+  | _ -> Alcotest.fail "fallback candidate was not emitted");
+  Alcotest.(check (list string))
+    "fallback rewinds subsequent surface source"
+    [ "keyword(jqd)"; "raw-candidate"; "newline"; "ident(after)"; "="; "int(7)"; "newline" ]
+    (fallback.tokens |> without_eof
+    |> List.map (fun token -> Surface_lex.show_token token.Surface_lex.token));
+  let precedence = recover_lex {|jqd { (mystery (lit "}") }; jqd { (lit 8) }; after = 7|} in
+  (match precedence.tokens with
+  | _jqd :: { Surface_lex.token = RawCandidate candidate; span } :: _ ->
+      Alcotest.(check string)
+        "balanced string does not mask structural fallback" {| (mystery (lit "}") |}
+        candidate.source;
+      Alcotest.(check string)
+        "precedence candidate content span" "tokens.jac:1:6-26"
+        (Span.to_string candidate.content_span);
+      Alcotest.(check string)
+        "precedence candidate token span" "tokens.jac:1:5-27" (Span.to_string span);
+      Alcotest.(check bool) "precedence candidate is closed" true candidate.closed
+  | _ -> Alcotest.fail "precedence candidate was not emitted");
+  Alcotest.(check (list string))
+    "structural fallback restores the later raw top and definition"
+    [
+      "keyword(jqd)";
+      "raw-candidate";
+      ";";
+      "keyword(jqd)";
+      "raw-candidate";
+      ";";
+      "ident(after)";
+      "=";
+      "int(7)";
+    ]
+    (precedence.tokens |> without_eof
+    |> List.map (fun token -> Surface_lex.show_token token.Surface_lex.token));
+  let structural_over_string = recover_lex {|jqd { (mystery } (lit "unterminated }|} in
+  match structural_over_string.tokens with
+  | _jqd :: { Surface_lex.token = RawCandidate candidate; span } :: _ ->
+      Alcotest.(check string)
+        "structural fallback outranks an open-string fallback" " (mystery " candidate.source;
+      Alcotest.(check string)
+        "structural precedence content span" "tokens.jac:1:6-16"
+        (Span.to_string candidate.content_span);
+      Alcotest.(check string)
+        "structural precedence token span" "tokens.jac:1:5-17" (Span.to_string span);
+      Alcotest.(check bool) "structural precedence candidate is closed" true candidate.closed
+  | _ -> Alcotest.fail "structural precedence candidate was not emitted"
+
+let test_forall_dot_boundary () =
+  Alcotest.(check (list string))
+    "quantifier dot is not part of a dotted name"
+    [ "keyword(forall)"; "ident(a)"; "|"; "ident(e)"; "."; "ident(T)" ]
+    (token_names "forall a | e. T")
+
 let suite =
   [
     Alcotest.test_case "identifier golden" `Quick test_identifier_golden;
@@ -297,4 +419,6 @@ let suite =
       test_recovering_lexer_preserves_surrounding_tokens;
     Alcotest.test_case "recover malformed strings" `Quick
       test_recovering_lexer_resynchronizes_strings;
+    Alcotest.test_case "raw bootstrap candidates" `Quick test_raw_bootstrap_candidates;
+    Alcotest.test_case "forall dot boundary" `Quick test_forall_dot_boundary;
   ]

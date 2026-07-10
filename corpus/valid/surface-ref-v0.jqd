@@ -1,0 +1,6 @@
+(defterm
+  ((binding surface-ref-compat ()
+    (tuple
+      (surface-ref-v0 con true)
+      (surface-ref-v0 op abort)
+      (quote (tuple (surface-ref-v0 con true) (surface-ref-v0 op abort)))))))

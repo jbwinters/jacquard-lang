@@ -46,15 +46,8 @@ let report_code state token code message =
   state.diagnostics <- Diag.error ~span:token.Surface_lex.span ~code message :: state.diagnostics
 
 let report state token message = report_code state token "E1220" message
-let record_diagnostic state diagnostic = state.diagnostics <- diagnostic :: state.diagnostics
 let token_description token = Surface_lex.show_token token.Surface_lex.token
-
-let advance_recording_invalid state =
-  let token = current state in
-  (match token.Surface_lex.token with
-  | Surface_lex.Invalid diagnostic -> record_diagnostic state diagnostic
-  | _ -> ());
-  advance state
+let advance_recording_invalid state = advance state
 
 let expr_hole state token =
   let id, meta = hole_meta state token.Surface_lex.span in
@@ -157,6 +150,61 @@ let meta_from_token_to_meta token meta =
   | Some span -> meta_with_span (Span.merge token.Surface_lex.span span)
   | None -> meta_with_span token.span
 
+let shift_raw_pos base (position : Span.pos) =
+  {
+    Span.line = base.Span.line + position.line - 1;
+    col = (if position.line = 1 then base.col + position.col - 1 else position.col);
+    offset = base.offset + position.offset;
+  }
+
+let shift_raw_span content_span span =
+  Span.make ~file:content_span.Span.file
+    ~start_pos:(shift_raw_pos content_span.start_pos span.Span.start_pos)
+    ~end_pos:(shift_raw_pos content_span.start_pos span.end_pos)
+
+let shift_raw_diagnostic raw content_span (diagnostic : Diag.t) =
+  let span =
+    match diagnostic.span with
+    | Some span -> Some (shift_raw_span content_span span)
+    | None -> Some raw.Surface_lex.span
+  in
+  { diagnostic with Diag.span }
+
+let rec shift_raw_form content_span (form : Form.t) =
+  let meta =
+    match Meta.span form.meta with
+    | Some span -> Meta.with_span (shift_raw_span content_span span) form.meta
+    | None -> form.meta
+  in
+  let args =
+    List.map
+      (function Form.F child -> Form.F (shift_raw_form content_span child) | scalar -> scalar)
+      form.args
+  in
+  { form with Form.meta; args }
+
+let parse_raw_candidate state raw (candidate : Surface_lex.raw_candidate) =
+  let () =
+    if not candidate.closed then
+      let position = candidate.content_span.Span.end_pos in
+      let span =
+        Span.make ~file:candidate.content_span.file ~start_pos:position ~end_pos:position
+      in
+      state.diagnostics <-
+        Diag.error ~span ~code:"E1221" "expected `}` before end of raw `jqd` form"
+        :: state.diagnostics
+  in
+  match Reader.parse_one ~file:candidate.content_span.Span.file candidate.source with
+  | Ok form when candidate.closed -> Some (shift_raw_form candidate.content_span form)
+  | Ok _ -> None
+  | Error diagnostics ->
+      List.iter
+        (fun diagnostic ->
+          state.diagnostics <-
+            shift_raw_diagnostic raw candidate.content_span diagnostic :: state.diagnostics)
+        diagnostics;
+      None
+
 let expect state expected description =
   let token = current state in
   if token.Surface_lex.token = expected then Some (advance state)
@@ -211,7 +259,7 @@ let equation_definition_ahead_at state start =
 
 let top_item_ahead state index =
   match (token_at state index).Surface_lex.token with
-  | Surface_lex.Keyword ("type" | "effect") -> true
+  | Surface_lex.Keyword ("type" | "effect" | "jqd") -> true
   | token -> (
       match term_name token with
       | None -> false
@@ -255,6 +303,19 @@ let next_arm_boundary state =
       | _ -> find (index + 1) parens braces brackets nested
   in
   find state.index 0 0 0 None
+
+let quote_boundary_after_layout state =
+  let layout = state.index in
+  let next = index_after_layout state layout in
+  if next = layout then None
+  else
+    match state.limit with
+    | Some limit when next >= limit ->
+        let boundary = if limit > layout then limit else next in
+        Some (token_at state boundary)
+    | Some _ -> None
+    | None when top_item_ahead state next -> Some (token_at state next)
+    | None -> None
 
 let starts_type_atom = function
   | Surface_lex.Ident _ | Surface_lex.LParen -> true
@@ -355,8 +416,10 @@ and parse_primary state ~allow_newlines =
   | Surface_lex.LBrace -> parse_block state (advance state)
   | Surface_lex.Keyword "fn" -> parse_fn state ~allow_newlines (advance state)
   | Surface_lex.Keyword "match" -> parse_match state ~allow_newlines (advance state)
-  | Surface_lex.Invalid diagnostic ->
-      record_diagnostic state diagnostic;
+  | Surface_lex.Keyword "handle" -> parse_handle state ~allow_newlines (advance state)
+  | Surface_lex.Keyword "quote" -> parse_quote state (advance state)
+  | Surface_lex.Keyword "unquote" -> parse_unquote state (advance state)
+  | Surface_lex.Invalid _ ->
       ignore (advance state);
       expr_hole state token
   | _ ->
@@ -572,8 +635,7 @@ and parse_pattern_atom state ~allow_newlines:_ =
       let opening = advance state in
       let items, closing = parse_pattern_list state opening in
       Surface_ast.{ it = PTuple items; meta = meta_with_span (span_between opening closing) }
-  | Surface_lex.Invalid diagnostic ->
-      record_diagnostic state diagnostic;
+  | Surface_lex.Invalid _ ->
       ignore (advance state);
       pat_hole state token
   | _ ->
@@ -694,6 +756,295 @@ and parse_match_arm state start =
           { cpattern = pattern; cbody = body; cmeta = meta_from_token_to_meta start body.meta },
         next_top )
 
+and atomic_handle_start = function
+  | Surface_lex.Literal _ | Surface_lex.Ident _ | Surface_lex.GroupRef _ -> true
+  | Surface_lex.Escaped ((Surface_name.Term | Surface_name.Con | Surface_name.Op), _) -> true
+  | Surface_lex.HashRef (_, (Surface_name.Term | Surface_name.Con | Surface_name.Op)) -> true
+  | _ -> false
+
+and atomic_handle_body (expr : Surface_ast.expr) =
+  match expr.it with
+  | Surface_ast.Lit _ | Surface_ast.Name _ | Surface_ast.HashRef _ -> true
+  | Surface_ast.Call (head, _) -> atomic_handle_call_head head
+  | _ -> false
+
+and atomic_handle_call_head (expr : Surface_ast.expr) =
+  match expr.it with
+  | Surface_ast.Name _ | Surface_ast.HashRef _ -> true
+  | Surface_ast.Call (head, _) -> atomic_handle_call_head head
+  | _ -> false
+
+and missing_return_clause state token =
+  report_code state token "E0212" "`handle` needs exactly one `return` clause";
+  let rbinder = pat_hole state token in
+  let rbody = expr_hole state token in
+  Surface_ast.{ rbinder; rbody; rmeta = meta_with_span token.Surface_lex.span }
+
+and parse_handler_body state ~allow_newlines =
+  let start = current state in
+  match start.Surface_lex.token with
+  | Surface_lex.LBrace -> parse_block state (advance state)
+  | _ ->
+      let body = parse_expr state ~allow_newlines in
+      if (not (atomic_handle_start start.token)) || not (atomic_handle_body body) then
+        report_code state start "E1226"
+          "non-atomic `handle` bodies require an explicit `{ body }` block";
+      body
+
+and parse_handler_clause_body state _start =
+  match expect state Surface_lex.Arrow "`->` before the handler clause body" with
+  | None -> (
+      let boundary = next_arm_boundary state in
+      let body_token = current state in
+      state.index <- boundary.boundary_index;
+      let body = expr_hole state body_token in
+      (body, match boundary.boundary_kind with Arm_layout top -> Some top | _ -> None))
+  | Some _ -> (
+      skip_continuation state;
+      let body_token = current state in
+      match body_token.Surface_lex.token with
+      | Surface_lex.Bar | Surface_lex.RBrace | Surface_lex.Eof ->
+          report state body_token "expected an expression after `->`";
+          (expr_hole state body_token, None)
+      | _ ->
+          let boundary = next_arm_boundary state in
+          let body =
+            with_limit state boundary.boundary_index (fun () ->
+                parse_expr state ~allow_newlines:false)
+          in
+          (match boundary.boundary_kind with
+          | Arm_layout _ -> ()
+          | Arm_delimiter | Arm_end -> ignore (consume_separators state));
+          if state.index < boundary.boundary_index then
+            begin match (current state).Surface_lex.token with
+            | Surface_lex.Bar | Surface_lex.RBrace -> ()
+            | _ ->
+                report state (current state) "expected `|` or `}` after the handler clause body";
+                state.index <- boundary.boundary_index
+            end;
+          let next_top =
+            match boundary.boundary_kind with
+            | Arm_layout top when state.index >= boundary.boundary_index -> Some top
+            | Arm_layout _ | Arm_delimiter | Arm_end -> None
+          in
+          (body, next_top))
+
+and parse_return_clause state start =
+  let pattern_token = current state in
+  let rbinder =
+    match pattern_token.Surface_lex.token with
+    | Surface_lex.Arrow | Surface_lex.Bar | Surface_lex.RBrace | Surface_lex.Eof ->
+        report state pattern_token "expected a pattern after `return`";
+        pat_hole state pattern_token
+    | _ -> parse_pattern state ~allow_newlines:false
+  in
+  skip_comments state;
+  let rbody, next_top = parse_handler_clause_body state start in
+  (Surface_ast.{ rbinder; rbody; rmeta = meta_from_token_to_meta start rbody.meta }, next_top)
+
+and parse_operation_clause state start =
+  let operation_token = current state in
+  let operation =
+    match operation_token.Surface_lex.token with
+    | Surface_lex.Ident name when Surface_name.valid_lower_name name ->
+        ignore (advance state);
+        Surface_ast.Named name
+    | Surface_lex.Escaped (Surface_name.Op, name) ->
+        ignore (advance state);
+        Surface_ast.Named name
+    | Surface_lex.HashRef (hash, Surface_name.Op) ->
+        ignore (advance state);
+        Surface_ast.Hashed hash
+    | _ ->
+        report_code state operation_token "E1226"
+          (Printf.sprintf "expected an operation name after `|`, found %s"
+             (token_description operation_token));
+        (match operation_token.Surface_lex.token with
+        | Surface_lex.Bar | Surface_lex.RBrace | Surface_lex.Eof -> ()
+        | _ -> ignore (advance_recording_invalid state));
+        Surface_ast.Named "__surface_hole"
+  in
+  let params =
+    match expect state Surface_lex.LParen "`(` after the operation name" with
+    | Some opening -> fst (parse_pattern_list state opening)
+    | None -> []
+  in
+  skip_comments state;
+  ignore (expect state (Surface_lex.Keyword "resume") "`resume` after operation parameters");
+  skip_comments state;
+  let resume_token = current state in
+  let oresume =
+    match resume_token.Surface_lex.token with
+    | Surface_lex.Ident "_" ->
+        ignore (advance state);
+        "_"
+    | Surface_lex.Ident name when Surface_name.valid_lower_name name ->
+        ignore (advance state);
+        name
+    | Surface_lex.Escaped (Surface_name.Term, name) ->
+        ignore (advance state);
+        name
+    | _ ->
+        report_code state resume_token "E1226"
+          (Printf.sprintf "expected a resume binder, found %s" (token_description resume_token));
+        (match resume_token.Surface_lex.token with
+        | Surface_lex.Arrow | Surface_lex.Bar | Surface_lex.RBrace | Surface_lex.Eof -> ()
+        | _ -> ignore (advance_recording_invalid state));
+        "__surface_hole"
+  in
+  skip_comments state;
+  let obody, next_top = parse_handler_clause_body state start in
+  let ometa = meta_from_token_to_meta start obody.meta |> Meta.with_surface_ref_kind "op" in
+  (Surface_ast.{ operation; oparams = params; oresume; obody; ometa }, next_top)
+
+and parse_handler_clause state start =
+  let token = current state in
+  match token.Surface_lex.token with
+  | Surface_lex.Keyword "return" ->
+      ignore (advance state);
+      let clause, next_top = parse_return_clause state start in
+      (`Return clause, next_top)
+  | Surface_lex.Ident name when Surface_name.valid_lower_name name ->
+      let clause, next_top = parse_operation_clause state start in
+      (`Operation clause, next_top)
+  | Surface_lex.Escaped (Surface_name.Op, _) | Surface_lex.HashRef (_, Surface_name.Op) ->
+      let clause, next_top = parse_operation_clause state start in
+      (`Operation clause, next_top)
+  | _ -> (
+      report_code state token "E1226"
+        (Printf.sprintf "expected `return` or an operation clause, found %s"
+           (token_description token));
+      let boundary = next_arm_boundary state in
+      state.index <- boundary.boundary_index;
+      (`Malformed, match boundary.boundary_kind with Arm_layout top -> Some top | _ -> None))
+
+and parse_handle state ~allow_newlines keyword =
+  let body = parse_handler_body state ~allow_newlines in
+  skip_comments state;
+  let opening = expect state Surface_lex.LBrace "`{` before the handler clauses" in
+  let returns = ref None in
+  let ops = ref [] in
+  let closing = ref keyword in
+  let finished = ref false in
+  let reported_order = ref false in
+  (match opening with Some token -> closing := token | None -> finished := true);
+  if not !finished then ignore (consume_separators state);
+  while not !finished do
+    let token = current state in
+    match token.Surface_lex.token with
+    | Surface_lex.RBrace ->
+        closing := advance state;
+        finished := true
+    | Surface_lex.Eof ->
+        report_code state token "E1221" "expected `}` before end of handler";
+        closing := token;
+        finished := true
+    | Surface_lex.Bar -> (
+        let bar = advance state in
+        let clause, next_top = parse_handler_clause state bar in
+        (match clause with
+        | `Return clause -> (
+            match !returns with
+            | None -> returns := Some clause
+            | Some _ -> report_code state bar "E0212" "`handle` has more than one `return` clause")
+        | `Operation clause ->
+            if Option.is_none !returns && not !reported_order then begin
+              report_code state bar "E1226" "the `return` clause must be the first handler clause";
+              reported_order := true
+            end;
+            ops := clause :: !ops
+        | `Malformed -> ());
+        match next_top with
+        | None -> ignore (consume_separators state)
+        | Some next_top ->
+            report_code state next_top "E1221" "expected `}` before the next top-level item";
+            closing := current state;
+            finished := true)
+    | _ -> (
+        report_code state token "E1226" "handler clauses must begin with `|`";
+        let clause, next_top = parse_handler_clause state token in
+        (match clause with
+        | `Return clause -> if Option.is_none !returns then returns := Some clause
+        | `Operation clause -> ops := clause :: !ops
+        | `Malformed -> ());
+        match next_top with
+        | None -> ignore (consume_separators state)
+        | Some next_top ->
+            report_code state next_top "E1221" "expected `}` before the next top-level item";
+            closing := current state;
+            finished := true)
+  done;
+  let ret =
+    match !returns with Some clause -> clause | None -> missing_return_clause state !closing
+  in
+  Surface_ast.
+    {
+      it = Handle (body, ret, List.rev !ops);
+      meta = meta_with_span (span_between keyword !closing);
+    }
+
+and parse_quote state keyword =
+  match expect state Surface_lex.LBrace "`{` after `quote`" with
+  | None ->
+      let body = expr_hole state (current state) in
+      Surface_ast.{ it = Quote (Surface body); meta = meta_from_token_to_meta keyword body.meta }
+  | Some _opening ->
+      ignore (consume_separators state);
+      let body, raw_unclosed =
+        match (current state).Surface_lex.token with
+        | Surface_lex.Keyword "jqd" -> (
+            ignore (advance state);
+            skip_comments state;
+            let raw = current state in
+            match raw.Surface_lex.token with
+            | Surface_lex.RawCandidate candidate ->
+                ignore (advance state);
+                let body =
+                  match parse_raw_candidate state raw candidate with
+                  | Some form -> Surface_ast.Raw form
+                  | None -> Surface_ast.Surface (expr_hole state raw)
+                in
+                (body, not candidate.closed)
+            | _ ->
+                report_code state raw "E1226" "expected a raw `{ bootstrap-form }` after `jqd`";
+                (Surface_ast.Surface (expr_hole state raw), false))
+        | _ -> (Surface_ast.Surface (parse_expr state ~allow_newlines:false), false)
+      in
+      let closing =
+        if raw_unclosed then current state
+        else
+          match quote_boundary_after_layout state with
+          | Some boundary ->
+              report_code state boundary "E1221"
+                "expected `}` after the quoted expression before the enclosing boundary";
+              current state
+          | None -> (
+              ignore (consume_separators state);
+              match expect state Surface_lex.RBrace "`}` after the quoted expression" with
+              | Some token -> token
+              | None -> current state)
+      in
+      Surface_ast.{ it = Quote body; meta = meta_with_span (span_between keyword closing) }
+
+and parse_unquote state keyword =
+  match expect state Surface_lex.LParen "`(` after `unquote`" with
+  | None ->
+      let body = expr_hole state (current state) in
+      Surface_ast.{ it = Unquote body; meta = meta_from_token_to_meta keyword body.meta }
+  | Some _ ->
+      skip_list_space state;
+      let body = parse_expr state ~allow_newlines:true in
+      skip_list_space state;
+      let closing =
+        match expect state Surface_lex.RParen "`)` after the unquote splice" with
+        | Some token -> token
+        | None ->
+            synchronize_paren state;
+            if (current state).Surface_lex.token = Surface_lex.RParen then advance state
+            else current state
+      in
+      Surface_ast.{ it = Unquote body; meta = meta_with_span (span_between keyword closing) }
+
 and parse_block state opening =
   let items = ref [] in
   let closing = ref opening in
@@ -710,8 +1061,7 @@ and parse_block state opening =
         items := Surface_ast.Expr (expr_hole state token) :: !items;
         closing := token;
         finished := true
-    | Surface_lex.Invalid diagnostic ->
-        record_diagnostic state diagnostic;
+    | Surface_lex.Invalid _ ->
         items := Surface_ast.Expr (expr_hole state token) :: !items;
         ignore (advance state);
         finish_block_item state items closing finished
@@ -1405,11 +1755,29 @@ let parse_effect_decl state keyword =
       meta = meta_with_span (Span.merge keyword.Surface_lex.span end_span);
     }
 
+let parse_raw_top state keyword =
+  skip_comments state;
+  let raw = current state in
+  match raw.Surface_lex.token with
+  | Surface_lex.RawCandidate candidate ->
+      ignore (advance state);
+      begin match parse_raw_candidate state raw candidate with
+      | Some form ->
+          Surface_ast.
+            {
+              it = RawTop form;
+              meta = meta_with_span (Span.merge keyword.Surface_lex.span raw.span);
+            }
+      | None -> top_hole state raw
+      end
+  | _ ->
+      report_code state raw "E1226" "expected a raw `{ bootstrap-form }` after top-level `jqd`";
+      top_hole state raw
+
 let parse_top state =
   let token = current state in
   match token.Surface_lex.token with
-  | Surface_lex.Invalid diagnostic ->
-      record_diagnostic state diagnostic;
+  | Surface_lex.Invalid _ ->
       ignore (advance state);
       top_hole state token
   | Surface_lex.RBrace ->
@@ -1422,6 +1790,7 @@ let parse_top state =
       top_hole state token
   | Surface_lex.Keyword "type" -> parse_type_decl state (advance state)
   | Surface_lex.Keyword "effect" -> parse_effect_decl state (advance state)
+  | Surface_lex.Keyword "jqd" -> parse_raw_top state (advance state)
   | surface_token -> (
       match term_name surface_token with
       | Some name when (token_at state (state.index + 1)).Surface_lex.token = Surface_lex.Colon ->
@@ -1503,7 +1872,16 @@ let parse_tokens ~source tokens =
     an in-order hole, allowing valid surrounding items and later parser errors to survive. *)
 let recover_string ~file src : Surface_ast.recovered =
   let recovered = Surface_lex.lex_recover ~file src in
-  parse_tokens ~source:src recovered.tokens
+  let parsed = parse_tokens ~source:src recovered.tokens in
+  let diagnostic_offset diagnostic =
+    match diagnostic.Diag.span with Some span -> span.Span.start_pos.offset | None -> max_int
+  in
+  let diagnostics =
+    List.stable_sort
+      (fun left right -> Int.compare (diagnostic_offset left) (diagnostic_offset right))
+      (recovered.diagnostics @ parsed.diagnostics)
+  in
+  { parsed with Surface_ast.diagnostics }
 
 (** [strict recovered] rejects parser errors and any partial tree containing a recovery hole. This
     is the boundary that prevents holes from reaching lowering, canonicalization, or execution. *)

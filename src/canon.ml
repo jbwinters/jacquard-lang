@@ -289,15 +289,26 @@ and ser_row buf env ({ Kernel.effects; rvar; wmeta } : Kernel.row) =
 (* Quoted payloads are data: serialize the raw triple (meta erased), except that LIVE
    (level-0) unquote splices serialize as expressions under the ambient environment, so
    locals captured by a splice stay alpha-invariant. Nested quotes raise the quasiquote
-   level; their unquotes serialize as plain data forms. *)
+   level; their unquotes serialize as plain data forms. Reserved surface-reference markers
+   remain data but must satisfy the Kernel marker contract at every depth. *)
 and ser_quoted buf env ?(level = 0) (f : Form.t) =
+  if String.equal f.Form.head Kernel.surface_ref_head then
+    begin match Kernel.expr_of_form f with
+    | Ok _ -> ()
+    | Error (diagnostic :: _) -> raise (Err diagnostic)
+    | Error [] ->
+        err ~meta:f.Form.meta ~code:"E0201" "kernel marker validation failed without a diagnostic"
+    end;
   if f.Form.head = "unquote" && level = 0 then begin
     tag buf 0x51;
     match f.Form.args with
     | [ Form.F splice ] -> (
         match Kernel.expr_of_form splice with
         | Ok e -> ser_expr buf env e
-        | Error ds -> raise (Err (List.hd ds)))
+        | Error (diagnostic :: _) -> raise (Err diagnostic)
+        | Error [] ->
+            err ~meta:splice.Form.meta ~code:"E0504"
+              "kernel splice validation failed without a diagnostic")
     | _ -> err ~meta:f.Form.meta ~code:"E0504" "malformed unquote reached hashing"
   end
   else begin

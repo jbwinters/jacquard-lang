@@ -15,9 +15,11 @@ val lower_ty : Surface_ast.ty -> (Kernel.ty, Diag.t list) result
     diagnostics. *)
 
 val lower_expr : Surface_ast.expr -> (Kernel.expr, Diag.t list) result
-(** Lower an expression in the implemented surface slice. Match clauses accept every kernel pattern
-    form; lambda parameters and nonrecursive let binders retain E0205/E0206 irrefutability checks.
-    Recovery holes, malformed local bindings, and later-slice forms are diagnostics. *)
+(** Lower an expression in the implemented surface slice. Handlers preserve named/hashed operation
+    intent and quote bodies become pre-resolution kernel forms with depth-aware unquote splices.
+    Unquote outside quote is E0204. Match clauses accept every kernel pattern form; lambda
+    parameters and nonrecursive let binders retain E0205/E0206 irrefutability checks. Recovery
+    holes, malformed local bindings, and later-slice forms are diagnostics. *)
 
 val free_names : Kernel.expr -> String_set.t
 (** Return unresolved term names read by an expression, excluding pattern/let/lambda binders and

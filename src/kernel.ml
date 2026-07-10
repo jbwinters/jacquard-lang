@@ -21,10 +21,13 @@
 
     References that are names before resolution and hashes after ([gref]) accept either a symbol or
     a [#hash] argument. [Quote] payloads stay raw [Form.t] data (spec §5.1: quoted code is the
-    triple before name resolution); the validator only checks that every LIVE [(unquote e)] splices
-    a valid expression. Liveness follows conventional quasiquote nesting: a nested [quote] raises
-    the level, an [unquote] lowers it, and only level-0 unquotes are live — an unquote under a
-    nested quote is data belonging to the inner quote. Resolution and hashing apply the same rule.
+    triple before name resolution). The versioned [(surface-ref-v0 con|op name)] source/quote
+    encoding preserves non-term value-reference intent in that raw data. It decodes to [Var] plus a
+    resolver hint and is not a 28th kernel form. The validator checks that encoding everywhere and
+    that every LIVE [(unquote e)] splices a valid expression. Liveness follows conventional
+    quasiquote nesting: a nested [quote] raises the level, an [unquote] lowers it, and only level-0
+    unquotes are live — an unquote under a nested quote is data belonging to the inner quote.
+    Resolution and hashing apply the same rule.
 
     Structural rules enforced here, each with its own code: [Unquote] only under [Quote] (E0204);
     [Lam] params (E0205) and [Let] binders (E0206) irrefutable; [Let rec] binder a variable (E0207)
@@ -164,6 +167,19 @@ let is_irrefutable (p : pat) =
   in
   go p
 
+let surface_ref_head = "surface-ref-v0"
+
+let decode_surface_ref (f : Form.t) =
+  expect_arity f 2;
+  let kind = the_sym ~what:"the surface reference kind" f (List.nth f.Form.args 0) in
+  let name = the_sym ~what:"the surface reference name" f (List.nth f.Form.args 1) in
+  match kind with
+  | "con" | "op" -> (kind, name)
+  | kind ->
+      err ~meta:f.Form.meta ~code:"E0210"
+        "invalid `%s` kind `%s`: expected con or op (term references use `var`)" surface_ref_head
+        kind
+
 let rec expr_of (f : Form.t) : expr =
   let node it = { it; meta = f.Form.meta } in
   match f.Form.head with
@@ -173,6 +189,12 @@ let rec expr_of (f : Form.t) : expr =
   | "var" ->
       expect_arity f 1;
       node (Var (the_sym ~what:"the variable name" f (List.nth f.Form.args 0)))
+  | head when String.equal head surface_ref_head ->
+      let kind, name = decode_surface_ref f in
+      let meta =
+        f.Form.meta |> Meta.with_surface_ref_kind kind |> Meta.with_surface_form surface_ref_head
+      in
+      { it = Var name; meta }
   | "ref" -> (
       expect_arity f 2;
       let h =
@@ -272,8 +294,10 @@ let rec expr_of (f : Form.t) : expr =
 (* Inside a quote payload only LIVE (level-0) unquotes splice; a nested quote raises the
    quasiquote level and an unquote lowers it, so an unquote under a nested quote is data
    belonging to the inner quote (conventional quasiquote nesting). Live splices must be valid
-   expressions; everything else is uninterpreted data. *)
+   expressions; reserved surface-reference markers are validated at every depth, and all other
+   forms are uninterpreted data. *)
 and check_quote_payload ?(level = 0) (f : Form.t) =
+  if String.equal f.Form.head surface_ref_head then ignore (decode_surface_ref f);
   if f.Form.head = "unquote" && level = 0 then begin
     expect_arity f 1;
     ignore (expr_of (the_form ~what:"the spliced expression" f (List.nth f.Form.args 0)))
@@ -541,7 +565,11 @@ let rec expr_to_form (e : expr) : Form.t =
   let meta = e.meta in
   match e.it with
   | Lit l -> form ~meta "lit" [ lit_arg l ]
-  | Var x -> form ~meta "var" [ Form.Sym x ]
+  | Var x -> (
+      match (Meta.surface_form meta, Meta.surface_ref_kind meta) with
+      | Some encoding, Some (("con" | "op") as kind) when String.equal encoding surface_ref_head ->
+          form ~meta surface_ref_head [ Form.Sym kind; Form.Sym x ]
+      | _ -> form ~meta "var" [ Form.Sym x ])
   | Ref (h, k) -> form ~meta "ref" [ Form.Hash h; Form.Sym (refkind_sym k) ]
   | Lam (params, body) ->
       form ~meta "lam" [ group (List.map pat_to_form params); Form.F (expr_to_form body) ]

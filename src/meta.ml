@@ -71,9 +71,10 @@ let surface_hole t =
 
 let with_surface_hole n t = add key_surface_hole (Text n) t
 
-(** [surface_ref_kind t] is the explicit value-reference intent carried from surface syntax to name
-    resolution: ["term"], ["con"], or ["op"]. It is a hash-excluded elaboration hint, not a kernel
-    form or part of reference identity. *)
+(** [surface_ref_kind t] is the explicit value-reference intent carried from surface syntax or a
+    decoded structural quote marker to name resolution: ["term"], ["con"], or ["op"]. It is a
+    hash-excluded elaboration hint, not a kernel form or part of reference identity; quoted
+    constructor/operation identity is carried by the marker structure itself. *)
 let surface_ref_kind t =
   match find key_surface_ref_kind t with Some (Sym n | Text n) -> Some n | _ -> None
 

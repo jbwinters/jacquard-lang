@@ -393,6 +393,65 @@ let test_unresolved_rejected () =
   | Error [ d ] -> Alcotest.(check string) "named con" "E0501" d.Diag.code
   | _ -> Alcotest.fail "unresolved constructor must be rejected"
 
+let test_quoted_surface_marker_validation () =
+  let marker args = Form.form Kernel.surface_ref_head args in
+  let positions =
+    [
+      ("top", Fun.id);
+      ("nested quote", fun child -> Form.form "quote" [ Form.F child ]);
+      ( "nested data",
+        fun child -> Form.form "arbitrary-data" [ Form.Text "before"; Form.F child; Form.Int 7 ] );
+    ]
+  in
+  let malformed =
+    [
+      ("arity", marker [ Form.Sym "con" ], "E0202");
+      ("scalar sort", marker [ Form.Sym "con"; Form.Int 1 ], "E0203");
+      ("kind", marker [ Form.Sym "invalid"; Form.Sym "same" ], "E0210");
+    ]
+  in
+  List.iter
+    (fun (position, wrap) ->
+      List.iter
+        (fun (shape, malformed_marker, expected_code) ->
+          let expression = Kernel.{ it = Quote (wrap malformed_marker); meta = Meta.empty } in
+          match Canon.hash_expr expression with
+          | Error [ diagnostic ] ->
+              Alcotest.(check string) (position ^ " " ^ shape) expected_code diagnostic.Diag.code
+          | Error diagnostics ->
+              Alcotest.failf "%s %s: unexpected diagnostics: %s" position shape
+                (String.concat "; " (List.map Diag.to_string diagnostics))
+          | Ok hash -> Alcotest.failf "%s %s marker hashed as %s" position shape (Hash.to_hex hash))
+        malformed)
+    positions;
+  let valid_marker = marker [ Form.Sym "con"; Form.Sym "same" ] in
+  let valid = Kernel.{ it = Quote valid_marker; meta = Meta.empty } in
+  let valid_with_meta =
+    Kernel.
+      {
+        it =
+          Quote
+            {
+              valid_marker with
+              Form.meta = Meta.add "marker-meta" (Meta.Text "ignored") valid_marker.meta;
+            };
+        meta = Meta.add "quote-meta" (Meta.Text "ignored") Meta.empty;
+      }
+  in
+  let hash label expression =
+    match Canon.hash_expr expression with
+    | Ok hash -> hash
+    | Error diagnostics ->
+        Alcotest.failf "%s: valid direct marker failed hashing: %s" label
+          (String.concat "; " (List.map Diag.to_string diagnostics))
+  in
+  let expected = "ae397588bc9e37aff17b540c5b50fd609326d22701ed9016eb30f0658ca36c4c" in
+  let actual = hash "valid" valid in
+  Alcotest.(check string) "valid marker hash remains pinned" expected (Hash.to_hex actual);
+  Alcotest.(check bool)
+    "valid marker metadata remains inert" true
+    (Hash.equal actual (hash "valid with metadata" valid_with_meta))
+
 let suite =
   [
     Alcotest.test_case "golden corpus hashes" `Quick test_golden_corpus_hashes;
@@ -409,4 +468,6 @@ let suite =
     Alcotest.test_case "derived hashes distinct" `Quick test_derived_hashes_distinct;
     Alcotest.test_case "groupref gated at hashing" `Quick test_groupref_gated;
     Alcotest.test_case "unresolved trees rejected" `Quick test_unresolved_rejected;
+    Alcotest.test_case "quoted surface marker validation" `Quick
+      test_quoted_surface_marker_validation;
   ]

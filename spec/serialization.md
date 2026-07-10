@@ -64,6 +64,26 @@ where scalar args tag 0x52 int64, 0x53 real, 0x54 text, 0x55 sym, 0x56 hash — 
 `(unquote e)` form, which serializes as 0x51 + the splice as an *expression* under the
 ambient de Bruijn environment (splices evaluate, so their locals must stay alpha-invariant).
 
+### Reserved surface-reference markers
+
+The pre-resolution/quote compatibility marker from the kernel spec has no canonical tag of its
+own. `(surface-ref-v0 con name)` and `(surface-ref-v0 op name)` inside quoted data serialize as
+ordinary quoted `Form.t` values under `0x50`: the head is the text `surface-ref-v0`, and the kind
+and name are ordinary `0x55` symbol arguments. Consequently `con` and `op` are structurally and
+bytewise distinct quoted data even after all metadata is erased.
+
+The `surface-ref-v0` head is reserved, so malformed occurrences are rejected by kernel validation
+before resolution or hashing. Canonicalization defensively applies the same validation at every
+quote depth if a programmatically constructed typed tree bypasses the normal validator. Invalid
+arity is `E0202`, non-symbol arguments are `E0203`, and a kind other than `con` or `op` is `E0210`;
+no hash is produced for any of those cases.
+
+This reservation does **not** change the V0 byte format or `HASH_V0`: it assigns meaning and
+validation to an ordinary `0x50` form encoding that the format already supports. No tag was added,
+the format/version remains V0, and every previously valid tree serializes to exactly its previous
+bytes. Existing hashes therefore do not drift; newly accepted valid markers simply occupy bytes
+that were already representable as quoted forms.
+
 Declarations: 0x40 defterm (+ varint n + members in canonical order; member = 0x43 +
 annotation option (0x00/0x01+type) + value), 0x41 deftype (+ name + varint tyvarc + varint
 conc + conspecs; conspec = 0x44 + name + varint fieldc + fields; field = 0x45 + label option

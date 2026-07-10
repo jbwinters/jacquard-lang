@@ -35,12 +35,34 @@ let name_for_hash lookup meta kind hash =
       | Some name -> render_name kind name
       | None -> hash_name kind hash)
 
+let name_for_value_hash lookup meta kind hash =
+  match kind with
+  | Surface_name.Op -> (
+      match Meta.name meta with
+      | Some name -> Surface_name.escape Surface_name.Op name
+      | None -> (
+          match Option.bind lookup (fun find -> find kind hash) with
+          | Some name -> Surface_name.escape Surface_name.Op name
+          | None -> hash_name kind hash))
+  | _ -> name_for_hash lookup meta kind hash
+
 let pp_lit fmt = function
   | Kernel.LInt i -> Format.pp_print_string fmt (string_of_int i)
   | Kernel.LReal r -> Format.pp_print_string fmt (Printer.real_repr r)
   | Kernel.LText s -> Format.fprintf fmt "\"%s\"" (Printer.escape_text s)
 
 let pp_named kind fmt name = Format.pp_print_string fmt (render_name kind name)
+
+let pp_value_name kind fmt name =
+  match kind with
+  | Surface_name.Op -> Format.pp_print_string fmt (Surface_name.escape Surface_name.Op name)
+  | _ -> pp_named kind fmt name
+
+let surface_value_kind meta =
+  match Meta.surface_ref_kind meta with
+  | Some "con" -> Surface_name.Con
+  | Some "op" -> Surface_name.Op
+  | Some "term" | Some _ | None -> Surface_name.Term
 
 let pp_gref lookup kind meta fmt = function
   | Kernel.Named name -> pp_named kind fmt name
@@ -200,10 +222,10 @@ let surface_quote_expr payload =
 let rec pp_expr lookup fmt (expr : Kernel.expr) =
   match expr.it with
   | Kernel.Lit lit -> pp_lit fmt lit
-  | Kernel.Var name -> pp_named Surface_name.Term fmt name
+  | Kernel.Var name -> pp_value_name (surface_value_kind expr.meta) fmt name
   | Kernel.Ref (hash, refkind) ->
       let kind = kind_of_refkind refkind in
-      Format.pp_print_string fmt (name_for_hash lookup expr.meta kind hash)
+      Format.pp_print_string fmt (name_for_value_hash lookup expr.meta kind hash)
   | Kernel.GroupRef index -> (
       match Meta.name expr.meta with
       | Some name -> pp_named Surface_name.Term fmt name
@@ -444,6 +466,58 @@ let raw_top top =
   let form = Kernel.to_form top in
   "jqd { " ^ Printer.inline_form form ^ " }"
 
+let is_decoded_surface_ref meta =
+  match (Meta.surface_form meta, Meta.surface_ref_kind meta) with
+  | Some form, Some ("con" | "op") -> String.equal form Kernel.surface_ref_head
+  | _ -> false
+
+(* A decoded marker in executable syntax cannot be printed as an escaped surface name: reparsing
+   that spelling creates ordinary surface provenance and [expr_to_form] then emits [(var name)].
+   Quote payload data is otherwise opaque here because quote lowering structurally re-encodes
+   constructor and operation references. Live unquotes are executable boundaries, so they are
+   decoded and inspected using the same quasiquote-level rule as resolution and hashing. *)
+let rec has_decoded_surface_ref_expr (expr : Kernel.expr) =
+  match expr.it with
+  | Kernel.Var _ -> is_decoded_surface_ref expr.meta
+  | Kernel.Lam (_, body) | Kernel.Unquote body | Kernel.Ann (body, _) ->
+      has_decoded_surface_ref_expr body
+  | Kernel.App (fn, args) ->
+      has_decoded_surface_ref_expr fn || List.exists has_decoded_surface_ref_expr args
+  | Kernel.Let { value; body; _ } ->
+      has_decoded_surface_ref_expr value || has_decoded_surface_ref_expr body
+  | Kernel.Match (subject, clauses) ->
+      has_decoded_surface_ref_expr subject
+      || List.exists (fun clause -> has_decoded_surface_ref_expr clause.Kernel.cbody) clauses
+  | Kernel.Tuple items -> List.exists has_decoded_surface_ref_expr items
+  | Kernel.Handle { body; ret; ops } ->
+      has_decoded_surface_ref_expr body
+      || has_decoded_surface_ref_expr ret.Kernel.rbody
+      || List.exists (fun op -> has_decoded_surface_ref_expr op.Kernel.obody) ops
+  | Kernel.Quote payload -> has_decoded_surface_ref_quote_payload payload
+  | Kernel.Lit _ | Kernel.Ref _ | Kernel.GroupRef _ -> false
+
+and has_decoded_surface_ref_quote_payload ?(level = 0) (form : Form.t) =
+  if String.equal form.Form.head "unquote" && level = 0 then
+    match form.Form.args with
+    | [ Form.F splice ] -> (
+        match Kernel.expr_of_form splice with
+        | Ok expr -> has_decoded_surface_ref_expr expr
+        | Error _ -> false)
+    | _ -> false
+  else
+    let level =
+      match form.Form.head with "quote" -> level + 1 | "unquote" -> level - 1 | _ -> level
+    in
+    List.exists
+      (function Form.F child -> has_decoded_surface_ref_quote_payload ~level child | _ -> false)
+      form.Form.args
+
+let has_decoded_surface_ref_top = function
+  | Kernel.Expr expr -> has_decoded_surface_ref_expr expr
+  | Kernel.Decl { Kernel.it = DefTerm bindings; _ } ->
+      List.exists (fun binding -> has_decoded_surface_ref_expr binding.Kernel.value) bindings
+  | Kernel.Decl { Kernel.it = DefType _ | DefEffect _; _ } -> false
+
 let render ~width pp value =
   let buffer = Buffer.create 128 in
   let fmt = Format.formatter_of_buffer buffer in
@@ -597,6 +671,7 @@ let print_top ?(lookup : lookup option) ?(width = default_width) (top : Kernel.t
     (string, Diag.t list) result =
   match top with
   | Kernel.Decl decl when is_surface_generated_decl decl -> Ok ""
+  | _ when has_decoded_surface_ref_top top -> Ok (raw_top top)
   | _ -> (
       match
         match top with

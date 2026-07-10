@@ -50,4 +50,5 @@ let () =
       ("surface-patterns", Test_surface_patterns.suite);
       ("surface-parse-recovery", Test_surface_parse_recovery.suite);
       ("surface-decls", Test_surface_decls.suite);
+      ("surface-handlers-quote", Test_surface_handlers_quote.suite);
     ]

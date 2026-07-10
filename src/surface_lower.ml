@@ -70,6 +70,35 @@ let lower_lambda_params params =
          "`lam` parameters must be irrefutable patterns (pwild, pvar, or ptuple/pas of those)")
     params
 
+let validate_quote_payload meta payload =
+  let wrapper = Form.form ~meta "quote" [ Form.F payload ] in
+  match Kernel.expr_of_form wrapper with
+  | Ok { Kernel.it = Kernel.Quote _; _ } -> Ok ()
+  | Ok _ -> error ~meta ~code:"E1230" "internal quote validation produced a non-quote expression"
+  | Error diagnostics -> Error diagnostics
+
+(* Constructor and operation intent is semantic quoted data, not metadata. A level-0 unquote is an
+   expression boundary and is resolved before hashing, so its payload must retain ordinary
+   expression encoding. *)
+let rec encode_quote_refs ?(level = 0) (form : Form.t) =
+  if String.equal form.Form.head "unquote" && level = 0 then form
+  else
+    match (form.Form.head, form.Form.args, Meta.surface_ref_kind form.Form.meta) with
+    | "var", [ Form.Sym name ], Some (("con" | "op") as kind) ->
+        { form with Form.head = Kernel.surface_ref_head; args = [ Form.Sym kind; Form.Sym name ] }
+    | _ ->
+        let level =
+          match form.Form.head with "quote" -> level + 1 | "unquote" -> level - 1 | _ -> level
+        in
+        {
+          form with
+          Form.args =
+            List.map
+              (function
+                | Form.F child -> Form.F (encode_quote_refs ~level child) | scalar -> scalar)
+              form.Form.args;
+        }
+
 (** [lower_ty ty] lowers a complete surface type without resolving named type/effect references. *)
 let rec lower_ty (ty : Surface_ast.ty) : (Kernel.ty, Diag.t list) result =
   let node it = Kernel.{ it; meta = ty.meta } in
@@ -102,7 +131,8 @@ let rec lower_ty (ty : Surface_ast.ty) : (Kernel.ty, Diag.t list) result =
   | Surface_ast.TyHole _ ->
       error ~meta:ty.meta ~code:"E1202" "cannot lower a recovered surface type hole"
 
-and lower_expr_node (expr : Surface_ast.expr) : (Kernel.expr, Diag.t list) result =
+and lower_expr_node ?(quote_depth = 0) (expr : Surface_ast.expr) : (Kernel.expr, Diag.t list) result
+    =
   let node it = Kernel.{ it; meta = expr.meta } in
   match expr.it with
   | Surface_ast.Lit literal -> Ok (node (Kernel.Lit literal))
@@ -110,43 +140,72 @@ and lower_expr_node (expr : Surface_ast.expr) : (Kernel.expr, Diag.t list) resul
   | Surface_ast.HashRef (hash, kind) -> Ok (node (Kernel.Ref (hash, kind)))
   | Surface_ast.GroupRef index -> Ok (node (Kernel.GroupRef index))
   | Surface_ast.Call (fn, args) ->
-      let* fn = lower_expr_node fn in
-      let* args = map_results lower_expr_node args in
+      let* fn = lower_expr_node ~quote_depth fn in
+      let* args = map_results (lower_expr_node ~quote_depth) args in
       Ok (node (Kernel.App (fn, args)))
   | Surface_ast.Fn (params, body) ->
       let* params = lower_lambda_params params in
-      let* body = lower_expr_node body in
+      let* body = lower_expr_node ~quote_depth body in
       Ok Kernel.{ it = Lam (params, body); meta = Meta.with_surface_form "fn" expr.meta }
   | Surface_ast.Tuple items ->
-      let* items = map_results lower_expr_node items in
+      let* items = map_results (lower_expr_node ~quote_depth) items in
       Ok (node (Kernel.Tuple items))
   | Surface_ast.Ann (subject, ty) ->
-      let* subject = lower_expr_node subject in
+      let* subject = lower_expr_node ~quote_depth subject in
       let* ty = lower_ty ty in
       Ok (node (Kernel.Ann (subject, ty)))
-  | Surface_ast.Block items -> lower_block expr.meta items
+  | Surface_ast.Block items -> lower_block ~quote_depth expr.meta items
   | Surface_ast.Match (subject, clauses) -> (
       let lower_clause (clause : Surface_ast.clause) =
         let* cpat = lower_pat clause.cpattern in
-        let* cbody = lower_expr_node clause.cbody in
+        let* cbody = lower_expr_node ~quote_depth clause.cbody in
         Ok Kernel.{ cpat; cbody; cmeta = clause.cmeta }
       in
-      let* subject = lower_expr_node subject in
+      let* subject = lower_expr_node ~quote_depth subject in
       match clauses with
       | [] -> error ~meta:expr.meta ~code:"E0209" "`match` requires at least one clause"
       | _ ->
           let* clauses = map_results lower_clause clauses in
           Ok (node (Kernel.Match (subject, clauses))))
+  | Surface_ast.Handle (body, ret, ops) ->
+      let lower_op (op : Surface_ast.op_clause) =
+        let* params = map_results lower_pat op.oparams in
+        let* obody = lower_expr_node ~quote_depth op.obody in
+        Ok
+          Kernel.
+            { op = kernel_gref op.operation; params; resume = op.oresume; obody; ometa = op.ometa }
+      in
+      let* body = lower_expr_node ~quote_depth body in
+      let* rbinder = lower_pat ret.rbinder in
+      let* rbody = lower_expr_node ~quote_depth ret.rbody in
+      let* ops = map_results lower_op ops in
+      let ret = Kernel.{ rbinder; rbody; rmeta = ret.rmeta } in
+      Ok (node (Kernel.Handle { body; ret; ops }))
+  | Surface_ast.Quote quote_body ->
+      let* payload =
+        match quote_body with
+        | Surface_ast.Raw payload -> Ok payload
+        | Surface_ast.Surface body ->
+            let* body = lower_expr_node ~quote_depth:(quote_depth + 1) body in
+            Ok (encode_quote_refs (Kernel.expr_to_form body))
+      in
+      let* () = if quote_depth = 0 then validate_quote_payload expr.meta payload else Ok () in
+      Ok (node (Kernel.Quote payload))
+  | Surface_ast.Unquote splice ->
+      if quote_depth = 0 then
+        error ~meta:expr.meta ~code:"E0204" "`unquote` is only legal under `quote`"
+      else
+        let* splice = lower_expr_node ~quote_depth:(quote_depth - 1) splice in
+        Ok (node (Kernel.Unquote splice))
   | Surface_ast.Hole _ ->
       error ~meta:expr.meta ~code:"E1202" "cannot lower a recovered surface expression hole"
-  | Surface_ast.List _ | Surface_ast.If _ | Surface_ast.Pipe _ | Surface_ast.Handle _
-  | Surface_ast.Quote _ | Surface_ast.Unquote _ ->
+  | Surface_ast.List _ | Surface_ast.If _ | Surface_ast.Pipe _ ->
       error ~meta:expr.meta ~code:"E1230"
         "this surface form is not part of the implemented local-lowering slice"
 
-and lower_block block_meta = function
+and lower_block ~quote_depth block_meta = function
   | [] -> error ~meta:block_meta ~code:"E1231" "an expression block cannot be empty"
-  | [ Surface_ast.Expr expression ] -> lower_expr_node expression
+  | [ Surface_ast.Expr expression ] -> lower_expr_node ~quote_depth expression
   | [ Surface_ast.Let { binder; value; _ } ] ->
       let span =
         match (Meta.span binder.Surface_ast.meta, Meta.span value.Surface_ast.meta) with
@@ -160,15 +219,15 @@ and lower_block block_meta = function
             "a block must end in an expression; a final local `let` has no value";
         ]
   | Surface_ast.Expr value :: rest ->
-      let* value = lower_expr_node value in
-      let* body = lower_block block_meta rest in
+      let* value = lower_expr_node ~quote_depth value in
+      let* body = lower_block ~quote_depth block_meta rest in
       let* binder_meta = generated_single_meta ~form:"block-sequence-wildcard" value.meta in
       let binder = Kernel.{ it = PWild; meta = binder_meta } in
       let* meta = generated_meta ~form:"block-sequence" value.meta body.meta in
       Ok Kernel.{ it = Let { isrec = false; binder; value; body }; meta }
   | Surface_ast.Let { recursive; binder; params; value } :: rest ->
-      let* body = lower_block block_meta rest in
-      if recursive then lower_recursive_let binder params value body
+      let* body = lower_block ~quote_depth block_meta rest in
+      if recursive then lower_recursive_let ~quote_depth binder params value body
       else if params <> [] then
         error ~meta:binder.meta ~code:"E1233"
           "non-recursive local bindings cannot use function shorthand"
@@ -177,15 +236,15 @@ and lower_block block_meta = function
           lower_irrefutable_pat ~code:"E0206" ~message:"`let` binders must be irrefutable patterns"
             binder
         in
-        let* value = lower_expr_node value in
+        let* value = lower_expr_node ~quote_depth value in
         let* meta = generated_meta ~form:"let" binder.meta body.meta in
         Ok Kernel.{ it = Let { isrec = false; binder; value; body }; meta }
 
-and lower_recursive_let (binder : Surface_ast.pat) params value body =
+and lower_recursive_let ~quote_depth (binder : Surface_ast.pat) params value body =
   match binder.it with
   | Surface_ast.PBind name ->
       let* params = lower_lambda_params params in
-      let* value = lower_expr_node value in
+      let* value = lower_expr_node ~quote_depth value in
       let* lambda_meta = generated_meta ~form:"let-rec-fn" binder.meta value.meta in
       let lambda = Kernel.{ it = Lam (params, value); meta = lambda_meta } in
       let kernel_binder = Kernel.{ it = PVar name; meta = binder.meta } in
@@ -195,11 +254,12 @@ and lower_recursive_let (binder : Surface_ast.pat) params value body =
       error ~meta:binder.meta ~code:"E1233"
         "`let rec` requires a lowercase name followed by a parameter list"
 
-(** [lower_expr expr] locally lowers an SS.9 expression to existing kernel forms without resolving
-    store names. It returns span-bearing diagnostics for recovery holes, unsupported later-slice
-    forms, malformed recursive bindings, empty blocks, final local lets, or missing spans needed by
-    generated sequence nodes. *)
-let lower_expr = lower_expr_node
+(** [lower_expr expr] locally lowers an SS.10 expression to existing kernel forms without resolving
+    store names. Handler operation intent and staged quote payloads are preserved; a top-level
+    unquote fails with E0204. It also returns span-bearing diagnostics for recovery holes,
+    unsupported later-slice forms, malformed recursive bindings, empty blocks, final local lets, or
+    missing spans needed by generated sequence nodes. *)
+let lower_expr expr = lower_expr_node expr
 
 module String_set = Set.Make (String)
 

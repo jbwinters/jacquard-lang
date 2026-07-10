@@ -1,8 +1,12 @@
 (** Span-preserving lexer for canonical and recoverable `.jac` source.
 
-    The lexer is intentionally context-free. Dotted names stay one [Ident], [_] is an identifier
-    token in both pattern and resume positions, and newlines remain tokens so the parser can apply
-    D27 without indentation semantics. *)
+    Dotted names stay one [Ident], [_] is an identifier token in both pattern and resume positions,
+    and newlines remain tokens so the parser can apply D27 without indentation semantics. After
+    lexical [jqd], a following braced byte region is captured as an inert [RawCandidate]. The parser
+    decides whether that candidate occurs in a legal inversion production and only then invokes the
+    bootstrap reader. *)
+
+type raw_candidate = { source : string; content_span : Span.t; closed : bool }
 
 type token =
   | Ident of string
@@ -28,6 +32,7 @@ type token =
   | Dot
   | Semi
   | Newline
+  | RawCandidate of raw_candidate
   | Invalid of Diag.t
   | Eof
 
@@ -62,6 +67,8 @@ type state = {
   mutable off : int;
   mutable line : int;
   mutable col : int;
+  mutable forall_pending : bool;
+  mutable raw_pending : bool;
 }
 
 exception Bug_lex_error of Diag.t
@@ -87,6 +94,11 @@ let advance state =
   end
   else state.col <- state.col + 1;
   char
+
+let restore state (position : Span.pos) =
+  state.off <- position.offset;
+  state.line <- position.line;
+  state.col <- position.col
 
 let rec skip_space state =
   match peek state with
@@ -320,6 +332,20 @@ let read_number state =
 let read_name state =
   let start_pos = pos state in
   let spelling = read_atom state in
+  let spelling =
+    let length = String.length spelling in
+    (* Dotted names normally consume [.]. In [forall], split the terminating dot here so merged
+       lexer diagnostics do not retain a stale E1211 for the parser's valid [e.] boundary. *)
+    if state.forall_pending && length > 1 && spelling.[length - 1] = '.' then
+      let name = String.sub spelling 0 (length - 1) in
+      if Surface_name.valid_lower_name name then begin
+        state.off <- state.off - 1;
+        state.col <- state.col - 1;
+        name
+      end
+      else spelling
+    else spelling
+  in
   if spelling = "_" then located state start_pos (Ident spelling)
   else if List.mem spelling keywords then located state start_pos (Keyword spelling)
   else if Surface_name.valid_lower_name spelling || Option.is_some (Surface_name.of_pascal spelling)
@@ -331,8 +357,83 @@ let one state constructor =
   ignore (advance state);
   located state start_pos constructor
 
-let next state =
-  skip_space state;
+let read_raw_candidate state =
+  let start_pos = pos state in
+  ignore (advance state);
+  let content_start = pos state in
+  let content_offset = state.off in
+  let parens = ref 0 in
+  let in_string = ref false in
+  let escaped = ref false in
+  let in_comment = ref false in
+  (* Structural recovery outranks a brace from an unterminated string. A string fallback is local
+     to that string so balanced string contents cannot affect recovery at EOF. *)
+  let structural_fallback = ref None in
+  let string_fallback = ref None in
+  let closed = ref false in
+  let finished = ref false in
+  let content_end = ref content_start in
+  while not !finished do
+    match peek state with
+    | None ->
+        (match (!structural_fallback, if !in_string then !string_fallback else None) with
+        | Some (fallback_end, resume_at), _ ->
+            content_end := fallback_end;
+            restore state resume_at;
+            closed := true
+        | None, Some (fallback_end, resume_at) ->
+            content_end := fallback_end;
+            restore state resume_at;
+            closed := true
+        | None, None -> content_end := pos state);
+        finished := true
+    | Some char when !in_comment ->
+        ignore (advance state);
+        if char = '\n' then in_comment := false
+    | Some char when !in_string ->
+        let fallback_end =
+          if char = '}' && Option.is_none !string_fallback then Some (pos state) else None
+        in
+        ignore (advance state);
+        (match fallback_end with
+        | Some fallback_end -> string_fallback := Some (fallback_end, pos state)
+        | None -> ());
+        if !escaped then escaped := false
+        else if char = '\\' then escaped := true
+        else if char = '"' then begin
+          in_string := false;
+          string_fallback := None
+        end
+    | Some '"' ->
+        in_string := true;
+        string_fallback := None;
+        ignore (advance state)
+    | Some ';' ->
+        in_comment := true;
+        ignore (advance state)
+    | Some '(' ->
+        incr parens;
+        ignore (advance state)
+    | Some ')' ->
+        parens := max 0 (!parens - 1);
+        ignore (advance state)
+    | Some '}' ->
+        let close_start = pos state in
+        ignore (advance state);
+        if !parens = 0 then begin
+          content_end := close_start;
+          closed := true;
+          finished := true
+        end
+        else if Option.is_none !structural_fallback then
+          structural_fallback := Some (close_start, pos state)
+    | Some _ -> ignore (advance state)
+  done;
+  let source = String.sub state.src content_offset (!content_end.Span.offset - content_offset) in
+  let content_span = Span.make ~file:state.file ~start_pos:content_start ~end_pos:!content_end in
+  { token = RawCandidate { source; content_span; closed = !closed }; span = span state start_pos }
+
+let next_regular state =
   match peek state with
   | None -> located state (pos state) Eof
   | Some '\n' -> one state Newline
@@ -371,20 +472,45 @@ let next state =
       ignore (advance state);
       fail state start_pos "E1210" (Printf.sprintf "unexpected surface character `%c`" char)
 
+let update_context state ({ token; _ } as located) =
+  state.raw_pending <-
+    (match token with
+    | Keyword "jqd" -> true
+    | (Comment _ | DocComment _) when state.raw_pending -> true
+    | _ -> false);
+  state.forall_pending <-
+    (match token with
+    | Keyword "forall" -> true
+    | Ident _
+    | Escaped ((Surface_name.Tvar | Surface_name.Rvar), _)
+    | Bar | Comment _ | DocComment _ | Newline
+      when state.forall_pending ->
+        true
+    | _ -> false);
+  located
+
+let next state =
+  skip_space state;
+  if state.raw_pending then
+    begin match peek state with
+    | Some '{' -> update_context state (read_raw_candidate state)
+    | Some '-' when peek_at state 1 = Some '-' -> update_context state (next_regular state)
+    | _ -> update_context state (next_regular state)
+    end
+  else update_context state (next_regular state)
+
+let initial_state ~file src =
+  { src; file; off = 0; line = 1; col = 1; forall_pending = false; raw_pending = false }
+
 (** [lex ~file source] tokenizes a complete source string and appends one [Eof] token. It stops at
     the first malformed token and returns a span-bearing diagnostic. *)
 let lex ~file src : (located list, Diag.t list) result =
-  let state = { src; file; off = 0; line = 1; col = 1 } in
+  let state = initial_state ~file src in
   let rec loop acc =
     let token = next state in
     match token.token with Eof -> Ok (List.rev (token :: acc)) | _ -> loop (token :: acc)
   in
   match loop [] with tokens -> tokens | exception Bug_lex_error diagnostic -> Error [ diagnostic ]
-
-let restore state (position : Span.pos) =
-  state.off <- position.offset;
-  state.line <- position.line;
-  state.col <- position.col
 
 let resynchronize_string state start_pos ~after_offset =
   restore state start_pos;
@@ -431,7 +557,7 @@ let recover_after_error state start_pos start_char diagnostic =
     at a closing quote or newline. This function is total for arbitrary byte strings; use {!lex} at
     strict build/check boundaries. *)
 let lex_recover ~file src : recovery =
-  let state = { src; file; off = 0; line = 1; col = 1 } in
+  let state = initial_state ~file src in
   let rec loop tokens diagnostics =
     skip_space state;
     let start_pos = pos state in
@@ -444,6 +570,7 @@ let lex_recover ~file src : recovery =
         let diagnostic = recover_after_error state start_pos start_char diagnostic in
         let invalid_span = Option.value diagnostic.Diag.span ~default:(span state start_pos) in
         let invalid = { token = Invalid diagnostic; span = invalid_span } in
+        ignore (update_context state invalid);
         loop (invalid :: tokens) (diagnostic :: diagnostics)
   in
   loop [] []
@@ -477,6 +604,7 @@ let show_token = function
   | Dot -> "."
   | Semi -> ";"
   | Newline -> "newline"
+  | RawCandidate { closed; _ } -> if closed then "raw-candidate" else "raw-candidate(unclosed)"
   | Invalid diagnostic -> "invalid(" ^ diagnostic.Diag.code ^ ")"
   | Eof -> "eof"
 

@@ -186,6 +186,14 @@ Decisions within what remains:
   capability-gated like everything else: code can't run code unless something above it
   handles `Eval`. Typing of eval results is a dynamic check at the boundary in M0; typed
   staging (MetaOCaml-style `Code a`) is an open question (§10).
+  The source/quote encoding reserves `(surface-ref-v0 con name)` and
+  `(surface-ref-v0 op name)` to preserve non-term namespace intent in pre-resolution data.
+  `(var name)` remains the legacy unqualified/term-oriented spelling, including its existing
+  value-kind fallback for old `.jqd` files. The versioned encoding is a `Form.t` alias decoded
+  at expression boundaries to `Var` plus a resolver hint, not a 28th typed kernel form. In
+  quoted data it remains structural. Its kind, arity, and argument sorts are validated at every
+  quote depth, and metadata remains wholly excluded from identity. The exact compatibility
+  grammar and diagnostics are normative in `spec/jacquard-kernel-ast-m0.md` §4.1.
 - **`Ann`** exists so bidirectional checking has an anchor and so a model can state intent
   inline. Signatures carrying the whole story is the design thesis; `Ann` is its local form.
 

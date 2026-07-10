@@ -141,6 +141,40 @@ module Jacquard
 **Count: 12 expr + 6 pat + 6 type + 3 decl = 27 forms.** The stated target was roughly 25.
 Section 10 names the two cheapest cuts if we want the number exactly.
 
+### 4.1 Reserved pre-resolution value references
+
+The generic form layer reserves one versioned encoding for value-namespace intent that cannot be
+expressed structurally by the legacy pre-resolution `var` form:
+
+```ebnf
+surface-ref-v0 ::= "(" "surface-ref-v0" surface-ref-kind name ")"
+surface-ref-kind ::= "con" | "op"
+name ::= symbol
+```
+
+`surface-ref-v0` is accepted wherever a pre-resolution expression form is validated and at every
+depth of a `quote` payload. Because its head is reserved, a quoted form with this head is not
+arbitrary opaque data: validation requires exactly two arguments (`E0202`), requires both to be
+symbols (`E0203`), and requires the first symbol to be `con` or `op` (`E0210`). These checks apply
+inside nested quotes and below non-live unquotes as well as at the executable expression boundary.
+
+At an expression boundary, decoding `(surface-ref-v0 kind name)` produces the existing typed
+`Var name` node plus a pre-resolution resolver hint requiring the named constructor or operation.
+Resolution then produces the corresponding `Ref` or reports the ordinary unknown-name/kind
+diagnostic. Inside a `Quote`, the marker remains the original raw `Form.t` data until that data is
+later interpreted as an expression; quote resolution does not replace it with a hash reference.
+
+`(var name)` remains the legacy unqualified/term-oriented pre-resolution spelling and retains its
+existing value-kind fallback for old `.jqd` files. The marker exists so surface lowering and quoted
+data can preserve explicit constructor and operation intent even when namespaces contain the same
+name. There is deliberately no `term` marker: malformed `term` and unknown kinds are rejected with
+`E0210`.
+
+This is a compatibility reservation in the generic source/quote representation, not an ASDL
+constructor. The typed grammar above still contains exactly 27 forms: `surface-ref-v0` decodes to
+`Var` and is **not a 28th form**. Its resolver metadata is erased from canonical identity; inside
+quoted data, the marker's ordinary form structure carries the namespace distinction.
+
 ## 5. Commentary, sort by sort
 
 ### 5.1 Expressions
@@ -260,8 +294,7 @@ Canonicalization rules:
    each member's individual hash is the group hash plus its index. (Unison's cycle
    treatment.)
 4. Constructor and operation references canonicalize to (declaration hash, ordinal).
-5. Serialize the canonical tree deterministically; hash with a fixed function
-   (BLAKE3 is the working assumption; a named constant in the spec, not a commitment).
+5. Serialize the canonical tree deterministically; hash with `HASH_V0` (SHA-256, decision D1).
 
 Consequences worth saying out loud: renames are free and history-preserving; formatting
 and comments never dirty a build; a semantic differ falls out of comparing trees rather
