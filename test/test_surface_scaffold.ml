@@ -65,9 +65,17 @@ let test_entry_point_contract () =
   | Ok [] -> ()
   | _ -> Alcotest.fail "empty surface source should parse as an empty file");
   match Surface_parse.parse_string ~file:"future.jac" "x = 1" with
-  | Error [ { Diag.code = "E1220"; span = Some span; _ } ] ->
-      Alcotest.(check string) "damage span" "future.jac:1:3-4" (Span.to_string span)
-  | _ -> Alcotest.fail "the recovering parser must reject an unfinished definition"
+  | Ok
+      [
+        {
+          Surface_ast.it =
+            Surface_ast.Definition
+              { name = "x"; equation = false; params = []; value = { it = Lit (LInt 1); _ } };
+          _;
+        };
+      ] ->
+      ()
+  | _ -> Alcotest.fail "the SS.8 entry point must parse a complete value definition"
 
 let test_printer_contract () =
   let top = Kernel.Expr { Kernel.it = Kernel.Lit (Kernel.LInt 1); meta = Meta.empty } in

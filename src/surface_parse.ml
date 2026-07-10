@@ -11,13 +11,19 @@ type state = {
   source : string;
   tokens : Surface_lex.located array;
   mutable index : int;
+  mutable limit : int option;
   mutable diagnostics : Diag.t list;
   mutable next_hole : int;
 }
 
 type parsed_type_atom = { ty : Surface_ast.ty; arrow_params : Surface_ast.ty list option }
+type separators = { consumed : bool; semicolon : Surface_lex.located option }
 
-let current state = state.tokens.(state.index)
+let current state =
+  let token = state.tokens.(state.index) in
+  match state.limit with
+  | Some limit when state.index >= limit -> { token with Surface_lex.token = Surface_lex.Eof }
+  | Some _ | None -> token
 
 let advance state =
   let token = current state in
@@ -58,6 +64,10 @@ let pat_hole state token =
   let id, meta = hole_meta state token.Surface_lex.span in
   Surface_ast.{ it = PHole id; meta }
 
+let ty_hole state token =
+  let id, meta = hole_meta state token.Surface_lex.span in
+  Surface_ast.{ it = TyHole id; meta }
+
 let top_hole state token =
   let id, meta = hole_meta state token.Surface_lex.span in
   Surface_ast.{ it = TopHole id; meta }
@@ -78,8 +88,9 @@ let rec skip_list_space state =
 
 let skip_continuation = skip_list_space
 
-let consume_separators state =
+let consume_separators_info state =
   let consumed = ref false in
+  let semicolon = ref None in
   skip_comments state;
   while
     match (current state).Surface_lex.token with
@@ -87,10 +98,14 @@ let consume_separators state =
     | _ -> false
   do
     consumed := true;
-    ignore (advance state);
+    let token = advance state in
+    if token.Surface_lex.token = Surface_lex.Semi && Option.is_none !semicolon then
+      semicolon := Some token;
     skip_comments state
   done;
-  !consumed
+  { consumed = !consumed; semicolon = !semicolon }
+
+let consume_separators state = (consume_separators_info state).consumed
 
 let is_item_sync = function
   | Surface_lex.Newline | Surface_lex.Semi | Surface_lex.RBrace | Surface_lex.Bar
@@ -766,6 +781,453 @@ and parse_forall state ~allow_newlines keyword =
   in
   Surface_ast.{ it = TyForall (List.rev !tyvars, List.rev !rowvars, body); meta }
 
+let token_at state index =
+  if index < Array.length state.tokens then state.tokens.(index)
+  else state.tokens.(Array.length state.tokens - 1)
+
+let rec index_after_comments state index =
+  match (token_at state index).Surface_lex.token with
+  | Surface_lex.Comment _ | Surface_lex.DocComment _ -> index_after_comments state (index + 1)
+  | _ -> index
+
+let rec index_after_layout state index =
+  match (token_at state index).Surface_lex.token with
+  | Surface_lex.Comment _ | Surface_lex.DocComment _ | Surface_lex.Newline | Surface_lex.Semi ->
+      index_after_layout state (index + 1)
+  | _ -> index
+
+let with_limit state limit f =
+  let previous = state.limit in
+  state.limit <- Some limit;
+  Fun.protect ~finally:(fun () -> state.limit <- previous) f
+
+let term_name = function
+  | Surface_lex.Ident name when Surface_name.valid_lower_name name -> Some name
+  | Surface_lex.Escaped (Surface_name.Term, name) -> Some name
+  | _ -> None
+
+let op_name = function
+  | Surface_lex.Ident name when Surface_name.valid_lower_name name -> Some name
+  | Surface_lex.Escaped (Surface_name.Op, name) -> Some name
+  | _ -> None
+
+let projected_decl_name kind = function
+  | Surface_lex.Ident name -> kernel_name_of_pascal name
+  | Surface_lex.Escaped (actual, name) when actual = kind -> Some name
+  | _ -> None
+
+let type_decl_name token = projected_decl_name Surface_name.Type token
+let con_decl_name token = projected_decl_name Surface_name.Con token
+let effect_decl_name token = projected_decl_name Surface_name.Effect token
+
+let equation_definition_ahead_at state start =
+  match (token_at state (start + 1)).Surface_lex.token with
+  | Surface_lex.LParen ->
+      let rec find_closing index depth =
+        match (token_at state index).Surface_lex.token with
+        | Surface_lex.LParen -> find_closing (index + 1) (depth + 1)
+        | Surface_lex.RParen ->
+            if depth = 1 then
+              let next = index_after_comments state (index + 1) in
+              (token_at state next).Surface_lex.token = Surface_lex.Equal
+            else find_closing (index + 1) (depth - 1)
+        | (Surface_lex.Eof | Surface_lex.Newline) when depth = 0 -> false
+        | Surface_lex.Eof -> false
+        | _ -> find_closing (index + 1) depth
+      in
+      find_closing (start + 1) 0
+  | _ -> false
+
+let equation_definition_ahead state = equation_definition_ahead_at state state.index
+
+let top_item_ahead state index =
+  match (token_at state index).Surface_lex.token with
+  | Surface_lex.Keyword ("type" | "effect") -> true
+  | token -> (
+      match term_name token with
+      | None -> false
+      | Some _ -> (
+          let next = index_after_comments state (index + 1) in
+          match (token_at state next).Surface_lex.token with
+          | Surface_lex.Colon | Surface_lex.Equal -> true
+          | _ -> equation_definition_ahead_at state index))
+
+let skip_continuation_before_top state =
+  let layout = state.index in
+  skip_continuation state;
+  if state.index > layout && top_item_ahead state state.index then begin
+    let top = current state in
+    state.index <- layout;
+    Some top
+  end
+  else None
+
+let layout_boundary_before_top state start =
+  let rec find index depth =
+    match (token_at state index).Surface_lex.token with
+    | Surface_lex.Eof -> None
+    | Surface_lex.LParen -> find (index + 1) (depth + 1)
+    | Surface_lex.RParen when depth > 0 -> find (index + 1) (depth - 1)
+    | Surface_lex.RParen -> None
+    | Surface_lex.Comma when depth = 0 -> None
+    | Surface_lex.Comment _ | Surface_lex.DocComment _ | Surface_lex.Newline | Surface_lex.Semi ->
+        let next = index_after_layout state index in
+        if next > index && top_item_ahead state next then Some (index, token_at state next)
+        else find (index + 1) depth
+    | _ -> find (index + 1) depth
+  in
+  find start 0
+
+let meta_from_token_to_meta token meta =
+  match Meta.span meta with
+  | Some span -> meta_with_span (Span.merge token.Surface_lex.span span)
+  | None -> meta_with_span token.span
+
+let parse_signature state name_token name =
+  ignore (advance state);
+  ignore (expect state Surface_lex.Colon "`:` in the signature");
+  skip_continuation state;
+  let ty = parse_type state ~allow_newlines:false in
+  Surface_ast.{ it = Signature (name, ty); meta = meta_from_token_to_meta name_token ty.meta }
+
+let parse_definition state name_token name equation =
+  ignore (advance state);
+  let params =
+    if equation then
+      match expect state Surface_lex.LParen "`(` after the definition name" with
+      | Some opening -> fst (parse_pattern_list state opening)
+      | None -> []
+    else []
+  in
+  ignore (expect state Surface_lex.Equal "`=` in the definition");
+  skip_continuation state;
+  let value = parse_expr state ~allow_newlines:false in
+  Surface_ast.
+    {
+      it = Definition { name; equation; params; value };
+      meta = meta_from_token_to_meta name_token value.meta;
+    }
+
+let parse_type_vars state stop =
+  let vars = ref [] in
+  let finished = ref false in
+  while not !finished do
+    let token = current state in
+    if stop token.Surface_lex.token then finished := true
+    else
+      match token.Surface_lex.token with
+      | Surface_lex.Ident name when Surface_name.valid_lower_name name ->
+          vars := name :: !vars;
+          ignore (advance state)
+      | Surface_lex.Escaped (Surface_name.Tvar, name) ->
+          vars := name :: !vars;
+          ignore (advance state)
+      | _ -> finished := true
+  done;
+  List.rev !vars
+
+let parse_decl_name state description project =
+  let token = current state in
+  match project token.Surface_lex.token with
+  | Some name ->
+      ignore (advance state);
+      (name, token)
+  | None ->
+      report_code state token "E1225"
+        (Printf.sprintf "expected %s, found %s" description (token_description token));
+      if token.Surface_lex.token <> Surface_lex.Eof then ignore (advance_recording_invalid state);
+      ("__surface_hole", token)
+
+let field_label_ahead state =
+  match term_name (current state).Surface_lex.token with
+  | None -> None
+  | Some name ->
+      let next = token_at state (state.index + 1) in
+      if next.Surface_lex.token = Surface_lex.Colon then Some name else None
+
+let parse_constructor_fields state constructor opening =
+  let fields = ref [] in
+  let has_label = ref false in
+  let closing = ref opening in
+  skip_list_space state;
+  let finished = ref false in
+  while not !finished do
+    match (current state).Surface_lex.token with
+    | Surface_lex.RParen ->
+        closing := advance state;
+        finished := true
+    | Surface_lex.Eof | Surface_lex.RBrace ->
+        report_code state (current state) "E1225" "expected `)` to close the constructor field list";
+        finished := true
+    | _ -> (
+        let start = current state in
+        let label = field_label_ahead state in
+        let missing_type =
+          match label with
+          | None -> None
+          | Some _ ->
+              has_label := true;
+              ignore (advance state);
+              ignore (advance state);
+              skip_continuation_before_top state
+        in
+        match missing_type with
+        | Some next_top ->
+            report_code state next_top "E1225"
+              (Printf.sprintf
+                 "expected a field type in constructor `%s` before the next top-level item"
+                 constructor);
+            let ty = ty_hole state next_top in
+            fields :=
+              Surface_ast.{ label; ty; meta = meta_from_token_to_meta start ty.meta } :: !fields;
+            finished := true
+        | None -> (
+            let boundary = layout_boundary_before_top state state.index in
+            let ty =
+              match boundary with
+              | Some (limit, _) ->
+                  with_limit state limit (fun () -> parse_type state ~allow_newlines:true)
+              | None -> parse_type state ~allow_newlines:true
+            in
+            let meta = meta_from_token_to_meta start ty.Surface_ast.meta in
+            fields := Surface_ast.{ label; ty; meta } :: !fields;
+            match boundary with
+            | Some (limit, next_top) when state.index = limit ->
+                report_code state next_top "E1225"
+                  (Printf.sprintf
+                     "expected `)` to close constructor `%s` before the next top-level item"
+                     constructor);
+                finished := true
+            | Some _ | None -> (
+                skip_list_space state;
+                match (current state).Surface_lex.token with
+                | Surface_lex.Comma ->
+                    ignore (advance state);
+                    skip_list_space state;
+                    if (current state).Surface_lex.token = Surface_lex.RParen then
+                      report_code state (current state) "E1225"
+                        "constructor field lists do not permit a trailing comma"
+                | Surface_lex.RParen -> ()
+                | _ ->
+                    report_code state (current state) "E1225"
+                      (Printf.sprintf "expected `,` or `)` in constructor `%s`, found %s"
+                         constructor
+                         (token_description (current state)));
+                    synchronize_paren state)))
+  done;
+  if not !has_label then
+    report_code state opening "E1225"
+      (Printf.sprintf
+         "constructor `%s` uses positional fields without parentheses; write `%s T`, not `%s(T)`"
+         constructor constructor constructor);
+  (List.rev !fields, !closing)
+
+let parse_constructor state =
+  let name, name_token = parse_decl_name state "a constructor name" con_decl_name in
+  match (current state).Surface_lex.token with
+  | Surface_lex.LParen ->
+      let opening = advance state in
+      let fields, closing = parse_constructor_fields state name opening in
+      Surface_ast.
+        {
+          name;
+          fields;
+          meta = meta_with_span (Span.merge name_token.Surface_lex.span closing.span);
+        }
+  | _ ->
+      let fields = ref [] in
+      while starts_type_atom (current state).Surface_lex.token do
+        let parsed = parse_type_atom state ~allow_newlines:false in
+        fields := Surface_ast.{ label = None; ty = parsed.ty; meta = parsed.ty.meta } :: !fields;
+        skip_comments state
+      done;
+      let fields = List.rev !fields in
+      let meta =
+        match List.rev fields with
+        | field :: _ -> meta_from_token_to_meta name_token field.Surface_ast.meta
+        | [] -> meta_with_span name_token.span
+      in
+      Surface_ast.{ name; fields; meta }
+
+let next_bar state =
+  let index = index_after_layout state state.index in
+  if (token_at state index).Surface_lex.token = Surface_lex.Bar then Some index else None
+
+let parse_type_decl state keyword =
+  let name, _ = parse_decl_name state "a type name" type_decl_name in
+  let vars = parse_type_vars state (fun token -> token = Surface_lex.Equal) in
+  ignore (expect state Surface_lex.Equal "`=` in the type declaration");
+  let interrupted = ref false in
+  (match skip_continuation_before_top state with
+  | Some next_top ->
+      report_code state next_top "E1225" "a type declaration requires a constructor";
+      interrupted := true
+  | None ->
+      if (current state).Surface_lex.token = Surface_lex.Bar then begin
+        ignore (advance state);
+        match skip_continuation_before_top state with
+        | Some next_top ->
+            report_code state next_top "E1225" "a type declaration requires a constructor after `|`";
+            interrupted := true
+        | None -> ()
+      end);
+  let constructors = ref [] in
+  let finished = ref !interrupted in
+  while not !finished do
+    match con_decl_name (current state).Surface_lex.token with
+    | None ->
+        if !constructors = [] then
+          report_code state (current state) "E1225" "a type declaration requires a constructor";
+        finished := true
+    | Some _ -> (
+        constructors := parse_constructor state :: !constructors;
+        match next_bar state with
+        | Some index ->
+            state.index <- index;
+            ignore (advance state);
+            skip_continuation state
+        | None -> finished := true)
+  done;
+  let constructors = List.rev !constructors in
+  let meta =
+    match List.rev constructors with
+    | constructor :: _ -> meta_from_token_to_meta keyword constructor.Surface_ast.meta
+    | [] -> meta_with_span keyword.Surface_lex.span
+  in
+  Surface_ast.{ it = TypeDecl { name; vars; constructors }; meta }
+
+let parse_operation_types state =
+  match expect state Surface_lex.LParen "`(` before operation parameter types" with
+  | None -> []
+  | Some _ ->
+      skip_list_space state;
+      if (current state).Surface_lex.token = Surface_lex.RParen then begin
+        ignore (advance state);
+        []
+      end
+      else
+        let rec loop acc =
+          let ty = parse_type state ~allow_newlines:true in
+          skip_list_space state;
+          match (current state).Surface_lex.token with
+          | Surface_lex.Comma ->
+              ignore (advance state);
+              skip_list_space state;
+              if (current state).Surface_lex.token = Surface_lex.RParen then begin
+                report_code state (current state) "E1225"
+                  "operation parameter lists do not permit a trailing comma";
+                ignore (advance state);
+                List.rev (ty :: acc)
+              end
+              else loop (ty :: acc)
+          | Surface_lex.RParen ->
+              ignore (advance state);
+              List.rev (ty :: acc)
+          | _ ->
+              report_code state (current state) "E1225"
+                (Printf.sprintf "expected `,` or `)` in operation parameters, found %s"
+                   (token_description (current state)));
+              synchronize_paren state;
+              if (current state).Surface_lex.token = Surface_lex.RParen then ignore (advance state);
+              List.rev (ty :: acc)
+        in
+        loop []
+
+let parse_operation state =
+  let name_token = current state in
+  let name = Option.value ~default:"__surface_hole" (op_name name_token.Surface_lex.token) in
+  ignore (advance state);
+  ignore (expect state Surface_lex.Colon "`:` in the operation signature");
+  skip_continuation state;
+  let params = parse_operation_types state in
+  ignore (expect state Surface_lex.Arrow "`->` in the operation signature");
+  skip_continuation state;
+  let result = parse_type state ~allow_newlines:false in
+  Surface_ast.{ name; params; result; meta = meta_from_token_to_meta name_token result.meta }
+
+let operation_ahead state index =
+  match op_name (token_at state index).Surface_lex.token with
+  | None -> false
+  | Some _ ->
+      let next = index_after_comments state (index + 1) in
+      (token_at state next).Surface_lex.token = Surface_lex.Colon
+
+let parse_effect_decl state keyword =
+  let name, _ = parse_decl_name state "an effect name" effect_decl_name in
+  let vars = parse_type_vars state (fun token -> token = Surface_lex.Keyword "where") in
+  ignore (expect state (Surface_lex.Keyword "where") "`where` in the effect declaration");
+  let opening = expect state Surface_lex.LBrace "`{` immediately after `where`" in
+  let operations = ref [] in
+  let closing = ref None in
+  let interrupted = ref false in
+  (match opening with
+  | None -> ()
+  | Some _ ->
+      let layout = state.index in
+      let next = index_after_layout state layout in
+      if next > layout && top_item_ahead state next && not (operation_ahead state next) then begin
+        report_code state (token_at state next) "E1221"
+          "expected `}` before the next top-level item";
+        interrupted := true
+      end
+      else ignore (consume_separators state);
+      let finished = ref false in
+      if !interrupted then finished := true;
+      while not !finished do
+        let token = current state in
+        match token.Surface_lex.token with
+        | Surface_lex.RBrace ->
+            closing := Some (advance state);
+            finished := true
+        | Surface_lex.Eof ->
+            report_code state token "E1221" "expected `}` before end of effect declaration";
+            finished := true
+        | _ when operation_ahead state state.index -> (
+            operations := parse_operation state :: !operations;
+            skip_comments state;
+            match (current state).Surface_lex.token with
+            | Surface_lex.RBrace -> ()
+            | Surface_lex.Newline | Surface_lex.Semi ->
+                let next = index_after_layout state state.index in
+                if top_item_ahead state next && not (operation_ahead state next) then begin
+                  report_code state (token_at state next) "E1221"
+                    "expected `}` before the next top-level item";
+                  finished := true
+                end
+                else ignore (consume_separators state)
+            | Surface_lex.Eof -> ()
+            | _ ->
+                report_code state (current state) "E1225"
+                  "effect operations require a newline or `;` separator";
+                synchronize_item state;
+                ignore (consume_separators state))
+        | _ ->
+            report_code state token "E1225"
+              (Printf.sprintf "expected an operation signature or `}`, found %s"
+                 (token_description token));
+            if token.Surface_lex.token <> Surface_lex.Eof then begin
+              synchronize_item state;
+              ignore (consume_separators state)
+            end
+      done);
+  if Option.is_some opening && (not !interrupted) && !operations = [] then
+    report_code state keyword "E1225" "an effect declaration requires an operation signature";
+  let operations = List.rev !operations in
+  let end_span =
+    match !closing with
+    | Some token -> token.Surface_lex.span
+    | None -> (
+        match List.rev operations with
+        | operation :: _ ->
+            Option.value ~default:keyword.span (Meta.span operation.Surface_ast.meta)
+        | [] -> keyword.span)
+  in
+  Surface_ast.
+    {
+      it = EffectDecl { name; vars; operations };
+      meta = meta_with_span (Span.merge keyword.Surface_lex.span end_span);
+    }
+
 let parse_top state =
   let token = current state in
   match token.Surface_lex.token with
@@ -781,21 +1243,69 @@ let parse_top state =
       report state token "stray `|` at top level";
       ignore (advance state);
       top_hole state token
-  | _ ->
-      let expression = parse_expr state ~allow_newlines:false in
-      Surface_ast.{ it = TopExpr expression; meta = expression.meta }
+  | Surface_lex.Keyword "type" -> parse_type_decl state (advance state)
+  | Surface_lex.Keyword "effect" -> parse_effect_decl state (advance state)
+  | surface_token -> (
+      match term_name surface_token with
+      | Some name when (token_at state (state.index + 1)).Surface_lex.token = Surface_lex.Colon ->
+          parse_signature state token name
+      | Some name when (token_at state (state.index + 1)).Surface_lex.token = Surface_lex.Equal ->
+          parse_definition state token name false
+      | Some name when equation_definition_ahead state -> parse_definition state token name true
+      | _ ->
+          let expression = parse_expr state ~allow_newlines:false in
+          Surface_ast.{ it = TopExpr expression; meta = expression.meta })
+
+let signature_interruption state token message = report_code state token "E1224" message
 
 let parse_tokens ~source tokens =
   let state =
-    { source; tokens = Array.of_list tokens; index = 0; diagnostics = []; next_hole = 0 }
+    {
+      source;
+      tokens = Array.of_list tokens;
+      index = 0;
+      limit = None;
+      diagnostics = [];
+      next_hole = 0;
+    }
   in
   let items = ref [] in
+  let pending_signature = ref None in
   ignore (consume_separators state);
   while (current state).Surface_lex.token <> Surface_lex.Eof do
-    items := parse_top state :: !items;
+    let start = current state in
+    let item = parse_top state in
+    (match (!pending_signature, item.Surface_ast.it) with
+    | Some (expected, _), Surface_ast.Definition { name; _ } when String.equal expected name ->
+        pending_signature := None
+    | Some (expected, _), Surface_ast.Signature (name, _) ->
+        signature_interruption state start
+          (Printf.sprintf
+             "signature for `%s` must be followed by its definition; found a second signature for \
+              `%s`"
+             expected name);
+        pending_signature := Some (name, item)
+    | Some (expected, _), Surface_ast.Definition { name; _ } ->
+        signature_interruption state start
+          (Printf.sprintf "signature for `%s` cannot attach to definition `%s`" expected name);
+        pending_signature := None
+    | Some (expected, _), _ ->
+        signature_interruption state start
+          (Printf.sprintf "signature for `%s` must be followed by its definition" expected);
+        pending_signature := None
+    | None, Surface_ast.Signature (name, _) -> pending_signature := Some (name, item)
+    | None, _ -> ());
+    items := item :: !items;
     skip_comments state;
-    if (current state).Surface_lex.token <> Surface_lex.Eof then
-      if not (consume_separators state) then begin
+    if (current state).Surface_lex.token <> Surface_lex.Eof then begin
+      let separators = consume_separators_info state in
+      (match (!pending_signature, separators.semicolon) with
+      | Some (name, _), Some semicolon ->
+          signature_interruption state semicolon
+            (Printf.sprintf "signature for `%s` cannot be separated from its definition by `;`" name);
+          pending_signature := None
+      | _ -> ());
+      if not separators.consumed then begin
         let token = current state in
         report state token
           (Printf.sprintf "top-level items require a newline or `;`, found %s"
@@ -803,7 +1313,13 @@ let parse_tokens ~source tokens =
         synchronize_item state;
         ignore (consume_separators state)
       end
+    end
   done;
+  (match !pending_signature with
+  | Some (name, _) ->
+      signature_interruption state (current state)
+        (Printf.sprintf "signature for `%s` has no following definition" name)
+  | None -> ());
   Surface_ast.{ items = List.rev !items; diagnostics = List.rev state.diagnostics }
 
 (** [recover_string] returns a partial tree and source-ordered diagnostics. Lexical damage becomes

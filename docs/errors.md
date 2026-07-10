@@ -46,7 +46,7 @@ in `src/` and `bin/` appears in this catalog.
 |------|---------|---------|
 | E0301 | unknown name (with near-miss suggestions) | `(var ad)` when `add` exists |
 | E0302 | name kind mismatch | `(ann (lit 1) (tref add))` — a term used as a type |
-| E0303 | duplicate binding name in a defterm group | two bindings named `f` |
+| E0303 | duplicate binding name in a defterm group or surface definition run | two bindings named `f` |
 | E0304 | variable bound more than once in one binder group | `(lam ((pvar x) (pvar x)) ...)` |
 
 ### Resolution warnings (W03xx)
@@ -143,11 +143,14 @@ in `src/` and `bin/` appears in this catalog.
 | E1221 | missing closing brace during surface recovery | a block truncated before `}` |
 | E1222 | refutable or later-slice pattern in an SS.7 binding position | `fn (Some) -> 1` |
 | E1223 | missing block-item separator | `{ 1 2 }` instead of `{ 1; 2 }` |
+| E1224 | a term signature is not followed by the same definition | `x : T; x = value` |
+| E1225 | malformed type/effect declaration structure | `type Option a = Some(a)` |
 | E1230 | surface node is outside the SS.7 local-lowering slice | lowering a list before SS.12 |
 | E1231 | empty expression block | `{}` |
 | E1232 | local `let` is the final block item | `{ let x = 1 }` |
 | E1233 | malformed local recursive/function binding | `let rec (f, g)(x) = x` |
 | E1234 | generated lowering node lacks a real source span | lowering a hand-built spanless block AST |
+| E1235 | a signature or definition was lowered without its required file context | calling `lower_top` on a signature |
 
 The recovering `.jac` lexer emits an in-order invalid-token marker and continues;
 the strict lexer remains fail-fast. Malformed strings resynchronize at a closing

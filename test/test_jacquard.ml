@@ -48,4 +48,5 @@ let () =
       ("surface-lex", Test_surface_lex.suite);
       ("surface-parse", Test_surface_parse.suite);
       ("surface-parse-recovery", Test_surface_parse_recovery.suite);
+      ("surface-decls", Test_surface_decls.suite);
     ]

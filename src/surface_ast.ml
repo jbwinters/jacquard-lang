@@ -80,7 +80,7 @@ type top = top_node node
 
 and top_node =
   | Signature of name * ty
-  | Definition of { name : name; params : pat list; value : expr }
+  | Definition of { name : name; equation : bool; params : pat list; value : expr }
   | TypeDecl of { name : name; vars : name list; constructors : constructor list }
   | EffectDecl of { name : name; vars : name list; operations : operation list }
   | TopExpr of expr
