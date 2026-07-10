@@ -1119,12 +1119,16 @@ and parse_let_item state keyword =
   in
   let binder = parse_pattern state ~allow_newlines:false in
   let params, params_meta =
-    if recursive then
-      match expect state Surface_lex.LParen "a parenthesized parameter list after `let rec`" with
-      | Some opening ->
+    if recursive then (
+      match (current state).Surface_lex.token with
+      | Surface_lex.LParen ->
+          let opening = advance state in
           let params, closing = parse_pattern_list state opening in
           (params, Some (meta_with_span (span_between opening closing)))
-      | None -> ([], None)
+      | _ ->
+          report_code state (current state) "E1233"
+            "`let rec` requires a lowercase name followed by a parameter list";
+          ([], None))
     else begin
       if (current state).Surface_lex.token = Surface_lex.LParen then
         report state (current state) "local function shorthand requires `let rec`";

@@ -405,6 +405,29 @@ and pp_expr_atom context lookup fmt expr =
       pp_expr context lookup fmt expr
   | Kernel.Lam _ -> Format.fprintf fmt "(%a)" (pp_expr context lookup) expr
 
+and pp_sequence_item context lookup fmt (meta, isrec, binder, value) =
+  pp_leading context meta fmt;
+  match (isrec, binder.Kernel.it, value.Kernel.it) with
+  | false, Kernel.PWild, _
+    when not (Option.equal String.equal (Meta.surface_form meta) (Some "let")) ->
+      pp_expr context lookup fmt value;
+      pp_trailing context meta fmt
+  | true, Kernel.PVar name, Kernel.Lam (params, body) ->
+      let params_meta = Meta.surface_container "params" value.meta in
+      Format.fprintf fmt "@[<hov 2>let rec %a" (pp_named Surface_name.Term) name;
+      pp_leading context params_meta fmt;
+      Format.fprintf fmt "(%a" (pp_sep "," (pp_pat context lookup)) params;
+      pp_inner context params_meta fmt;
+      Format.fprintf fmt ")";
+      pp_trailing context params_meta fmt;
+      Format.fprintf fmt " =@ %a@]" (pp_expr context lookup) body;
+      pp_trailing context meta fmt
+  | _ ->
+      Format.fprintf fmt "@[<hov 2>let%s %a =@ %a@]"
+        (if isrec then " rec" else "")
+        (pp_pat context lookup) binder (pp_expr context lookup) value;
+      pp_trailing context meta fmt
+
 and pp_block context lookup fmt expr =
   let rec collect acc current =
     match current.Kernel.it with
@@ -415,20 +438,8 @@ and pp_block context lookup fmt expr =
   let lets, result = collect [] expr in
   let container_meta = Meta.surface_container "block" expr.Kernel.meta in
   let container_meta = if Meta.is_empty container_meta then expr.Kernel.meta else container_meta in
-  let pp_item fmt (meta, isrec, binder, value) =
-    pp_leading context meta fmt;
-    match (isrec, binder.Kernel.it) with
-    | false, Kernel.PWild ->
-        pp_expr context lookup fmt value;
-        pp_trailing context meta fmt
-    | _ ->
-        Format.fprintf fmt "@[<hov 2>let%s %a =@ %a@]"
-          (if isrec then " rec" else "")
-          (pp_pat context lookup) binder (pp_expr context lookup) value;
-        pp_trailing context meta fmt
-  in
   pp_leading context container_meta fmt;
-  Format.fprintf fmt "@[<v 2>{@,%a" (pp_sep "" pp_item) lets;
+  Format.fprintf fmt "@[<v 2>{@,%a" (pp_sep "" (pp_sequence_item context lookup)) lets;
   if lets <> [] then Format.fprintf fmt "@,";
   Format.fprintf fmt "%a" (pp_expr context lookup) result;
   pp_inner context container_meta fmt;
@@ -467,19 +478,7 @@ and pp_sequence_contents context lookup fmt expr =
     | _ -> (List.rev acc, current)
   in
   let lets, result = collect [] expr in
-  let pp_item fmt (meta, isrec, binder, value) =
-    pp_leading context meta fmt;
-    match (isrec, binder.Kernel.it) with
-    | false, Kernel.PWild ->
-        pp_expr context lookup fmt value;
-        pp_trailing context meta fmt
-    | _ ->
-        Format.fprintf fmt "@[<hov 2>let%s %a =@ %a@]"
-          (if isrec then " rec" else "")
-          (pp_pat context lookup) binder (pp_expr context lookup) value;
-        pp_trailing context meta fmt
-  in
-  pp_sep "" pp_item fmt lets;
+  pp_sep "" (pp_sequence_item context lookup) fmt lets;
   if lets <> [] then Format.fprintf fmt "@,";
   pp_expr context lookup fmt result
 
@@ -590,7 +589,8 @@ let pp_binding context lookup fmt (binding : Kernel.binding) =
   let pp_definition fmt () =
     pp_leading context binding.bmeta fmt;
     match binding.value.it with
-    | Kernel.Lam (params, body) ->
+    | Kernel.Lam (params, body)
+      when not (Option.equal String.equal (Meta.surface_form binding.value.meta) (Some "fn")) ->
         let params_meta = Meta.surface_container "params" binding.bmeta in
         let params_meta =
           if Meta.is_empty params_meta then Meta.surface_container "params" binding.value.meta

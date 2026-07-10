@@ -161,7 +161,7 @@ let test_block_lowering_errors () =
   | diagnostics -> fail_diags "empty block diagnostic" diagnostics);
   (match lower_error "{ let x = 1 }" with
   | [ { Diag.code = "E1232"; span = Some span; _ } ] ->
-      Alcotest.(check string) "final let span" "surface.jac:1:7-12" (Span.to_string span)
+      Alcotest.(check string) "final let span" "surface.jac:1:3-12" (Span.to_string span)
   | diagnostics -> fail_diags "final let diagnostic" diagnostics);
   match lower_error "{ let rec (f, g)(x) = x; f }" with
   | [ { Diag.code = "E1233"; span = Some _; _ } ] -> ()
@@ -192,7 +192,7 @@ let test_generated_spans_and_provenance () =
         "generated lambda span" (Some "span.jac:2:11-19")
         (Option.map Span.to_string (Meta.span lambda_meta));
       Alcotest.(check (option string))
-        "recursive let span" (Some "span.jac:2:11-3:7")
+        "recursive let span" (Some "span.jac:2:3-3:7")
         (Option.map Span.to_string (Meta.span recursive.meta))
   | _ -> Alcotest.fail "expected recursive let with generated lambda"
 

@@ -214,9 +214,9 @@ and lower_expr_node ?(quote_depth = 0) (expr : Surface_ast.expr) : (Kernel.expr,
 and lower_block ~quote_depth block_meta = function
   | [] -> error ~meta:block_meta ~code:"E1231" "an expression block cannot be empty"
   | [ Surface_ast.Expr expression ] -> lower_expr_node ~quote_depth expression
-  | [ Surface_ast.Let { binder; value; _ } ] ->
+  | [ Surface_ast.Let { value; meta = item_meta; _ } ] ->
       let span =
-        match (Meta.span binder.Surface_ast.meta, Meta.span value.Surface_ast.meta) with
+        match (Meta.span item_meta, Meta.span value.Surface_ast.meta) with
         | Some left, Some right -> Some (Span.merge left right)
         | Some span, None | None, Some span -> Some span
         | None, None -> Meta.span block_meta
@@ -245,7 +245,7 @@ and lower_block ~quote_depth block_meta = function
             binder
         in
         let* value = lower_expr_node ~quote_depth value in
-        let* meta = generated_meta ~form:"let" binder.meta body.meta in
+        let* meta = generated_meta ~form:"let" item_meta body.meta in
         let span = Meta.span meta in
         let meta = Meta.merge_trivia item_meta meta in
         let meta = match span with Some span -> Meta.with_span span meta | None -> meta in
@@ -262,7 +262,7 @@ and lower_recursive_let ~quote_depth ~item_meta (binder : Surface_ast.pat) param
       in
       let lambda = Kernel.{ it = Lam (params, value); meta = lambda_meta } in
       let kernel_binder = Kernel.{ it = PVar name; meta = binder.meta } in
-      let* meta = generated_meta ~form:"let-rec" binder.meta body.Kernel.meta in
+      let* meta = generated_meta ~form:"let-rec" item_meta body.Kernel.meta in
       let span = Meta.span meta in
       let meta = Meta.merge_trivia item_meta meta in
       let meta = match span with Some span -> Meta.with_span span meta | None -> meta in
@@ -271,7 +271,7 @@ and lower_recursive_let ~quote_depth ~item_meta (binder : Surface_ast.pat) param
       error ~meta:binder.meta ~code:"E1233"
         "`let rec` requires a lowercase name followed by a parameter list"
 
-(** [lower_expr expr] locally lowers an SS.10 expression to existing kernel forms without resolving
+(** [lower_expr expr] locally lowers a surface expression to existing kernel forms without resolving
     store names. Handler operation intent and staged quote payloads are preserved; a top-level
     unquote fails with E0204. It also returns span-bearing diagnostics for recovery holes,
     unsupported later-slice forms, malformed recursive bindings, empty blocks, final local lets, or
@@ -562,7 +562,8 @@ let lower_definition_run definitions =
                      (Meta.without_trivia first.Kernel.bmeta)
                      rest
              in
-             Kernel.Decl Kernel.{ it = DefTerm members; meta })
+             Kernel.Decl
+               Kernel.{ it = DefTerm members; meta = Meta.with_surface_form "definition-scc" meta })
            order)
 
 let lower_nonterm_top (top : Surface_ast.top) =
