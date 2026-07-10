@@ -130,6 +130,15 @@ in `src/` and `bin/` appears in this catalog.
 | E1201 | canonical surface printer is not implemented at this scaffold boundary | calling the SS.1 printer placeholder |
 | E1202 | recovered surface tree still contains holes | checking malformed `.jac` after parser recovery |
 | E1203 | kernel subtree has no self-contained surface fragment | rendering an ambiguous raw `group` in a semantic diff |
+| E1210 | unexpected surface character | `@` outside a string |
+| E1211 | malformed surface identifier | `bad--name` without a kind escape |
+| E1212 | malformed or overflowing numeric literal | `1..2` |
+| E1213 | unterminated surface string | `"missing close` |
+| E1214 | invalid surface string escape | `"\\q"` |
+| E1215 | malformed kind-tagged escaped name | `` `wat:name` `` |
+| E1216 | malformed kind-tagged hash reference | `#abc:term` |
+| E1217 | malformed internal group reference | `#group[x]` |
+| E1218 | invalid raw UTF-8 scalar in a surface string | a raw `0xff` byte between quotes |
 
 ## Appendix: the W5.3 audit (ten message rewrites)
 

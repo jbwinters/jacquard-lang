@@ -45,4 +45,5 @@ let () =
       ("surface-scaffold", Test_surface_scaffold.suite);
       ("surface-print", Test_surface_print.suite);
       ("surface-laws", Test_surface_laws.suite);
+      ("surface-lex", Test_surface_lex.suite);
     ]
