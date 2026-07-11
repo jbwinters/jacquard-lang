@@ -355,7 +355,7 @@ The release-candidate evidence pack lives in `docs/release/0.1/`.
 To reproduce the release evidence from this checkout:
 
 ```bash
-JACQUARD_RELEASE_REF=HEAD JACQUARD_RELEASE_BASE=aec2c63 scripts/release/reproduce-0.1.sh
+JACQUARD_RELEASE_REF=HEAD JACQUARD_RELEASE_BASE=738dc8e scripts/release/reproduce-0.1.sh
 ```
 
 The script installs dependencies, builds, runs the full test suite, checks
@@ -446,7 +446,7 @@ opam exec -- dune exec test/gen_goldens.exe
 When touching release-facing demos, claims, CI, or semantics, also run:
 
 ```bash
-JACQUARD_RELEASE_REF=HEAD JACQUARD_RELEASE_BASE=aec2c63 scripts/release/reproduce-0.1.sh
+JACQUARD_RELEASE_REF=HEAD JACQUARD_RELEASE_BASE=738dc8e scripts/release/reproduce-0.1.sh
 ```
 
 ## CI/CD

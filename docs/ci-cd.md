@@ -47,7 +47,7 @@ The workflow runs:
 
 ```sh
 JACQUARD_RELEASE_REF=HEAD \
-JACQUARD_RELEASE_BASE=aec2c63 \
+JACQUARD_RELEASE_BASE=738dc8e \
 scripts/release/reproduce-0.1.sh
 ```
 

@@ -2,7 +2,7 @@
 
 Status: release-candidate evidence for `jacquard-core-0.1-rc1`.
 
-Required lineage base: `aec2c63`
+Required lineage base: `738dc8e`
 Exact candidate commit: recorded by `scripts/release/reproduce-0.1.sh` in
 `.scratch/release/0.1/commit.txt`
 Version surface: `jacquard --version` prints `0.1.0`
@@ -129,12 +129,12 @@ Fresh-clone instructions are in [REPRO.md](REPRO.md). The minimal shape is:
 
 ```sh
 git checkout jacquard-core-0.1-rc1
-git merge-base --is-ancestor aec2c63 HEAD
+git merge-base --is-ancestor 738dc8e HEAD
 opam install --deps-only . --with-test --with-dev-setup --with-doc -y
 opam exec -- dune build @all
 opam exec -- dune runtest
 opam exec -- dune fmt
 _build/default/bin/main.exe --version
-JACQUARD_RELEASE_REF=HEAD JACQUARD_RELEASE_BASE=aec2c63 \
+JACQUARD_RELEASE_REF=HEAD JACQUARD_RELEASE_BASE=738dc8e \
   scripts/release/reproduce-0.1.sh
 ```

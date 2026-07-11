@@ -282,7 +282,7 @@ Read `docs/warp-testing.md`; the API is `prelude/15-warp.jqd` + `16-gen.jqd`.
   diffs should be additive), signatures in `corpus/sigs/`.
 - Dev gate before any PR: `dune build @all && dune runtest && dune fmt` then
   `git diff --exit-code`. Release-facing changes also run
-  `JACQUARD_RELEASE_REF=HEAD JACQUARD_RELEASE_BASE=aec2c63 scripts/release/reproduce-0.1.sh`.
+  `JACQUARD_RELEASE_REF=HEAD JACQUARD_RELEASE_BASE=738dc8e scripts/release/reproduce-0.1.sh`.
 - OCaml side: library code returns `('a, Diag.t list) result`; exceptions
   only for internal invariants, prefixed `Bug_`; public functions get doc
   comments; diagnostics get stable `E####` codes cataloged in

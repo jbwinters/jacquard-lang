@@ -10,7 +10,7 @@ on:
       base:
         description: "Candidate base commit that must be an ancestor"
         required: false
-        default: "aec2c63"
+        default: "738dc8e"
   push:
     branches:
       - "release/**"
@@ -52,7 +52,7 @@ jobs:
       - name: Reproduce release evidence
         run: |
           JACQUARD_RELEASE_REF=HEAD \
-          JACQUARD_RELEASE_BASE="${{ github.event.inputs.base || 'aec2c63' }}" \
+          JACQUARD_RELEASE_BASE="${{ github.event.inputs.base || '738dc8e' }}" \
           scripts/release/reproduce-0.1.sh
 
       - name: Upload evidence transcripts

@@ -1,6 +1,6 @@
 # Jacquard Core 0.1 Freeze Surface
 
-Candidate base: `aec2c63`  
+Candidate base: `738dc8e`  
 Evidence branch predecessor: `7d7733f`  
 CLI version: `0.1.0`
 

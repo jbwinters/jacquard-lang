@@ -9,7 +9,7 @@ repo also has `.tool-versions` for asdf users (`opam 2.5.1`).
 git clone https://github.com/jbwinters/jacquard-lang.git
 cd jacquard-lang
 git checkout jacquard-core-0.1-rc1
-git merge-base --is-ancestor aec2c63 HEAD
+git merge-base --is-ancestor 738dc8e HEAD
 
 opam switch create . ocaml-base-compiler.5.1.1 -y
 eval "$(opam env)"
@@ -37,7 +37,7 @@ scripts/release/reproduce-0.1.sh
 
 The script:
 
-- verifies that `aec2c63` is an ancestor of the checked-out release ref
+- verifies that `738dc8e` is an ancestor of the checked-out release ref
 - installs opam dependencies
 - builds and tests the package
 - runs the sanitized runtime, native differential, leak, and seeded fuzz gates
