@@ -50,6 +50,9 @@ jobs:
       - name: Full test suite
         run: opam exec -- dune runtest
 
+      - name: Release installer smoke
+        run: scripts/release/smoke-installer.sh linux-x86_64
+
       - name: Check formatting
         run: |
           opam exec -- dune fmt
@@ -64,6 +67,8 @@ jobs:
           test -f docs/release/0.1/EVIDENCE.md
           test -f docs/release/0.1/CLAIMS.md
           test -f docs/release/0.1/REPRO.md
+          test -f docs/release/0.1/RELEASE-NOTES.md
+          test -x scripts/release/smoke-installer.sh
 
   native-parity:
     name: Native parity (${{ matrix.cc }})

@@ -84,7 +84,9 @@ When adding valid corpus files, regenerate the golden hashes with
   feature work.
 - Start from existing tests and docs. Jacquard behavior is pinned by cram
   transcripts, Alcotest/QCheck suites, corpus goldens, demos, and release docs.
-- Keep behavior tied to the 27 kernel forms in `docs/ast.md`; do not add surface syntax beyond the bootstrap `.jqd` notation in W1.2.
+- Keep behavior tied to the 27 kernel forms in `docs/ast.md`. Public `.jac`
+  syntax must remain a projection onto those forms, and bootstrap `.jqd`
+  remains the permanent kernel/debug carrier.
 - Do not add out-of-scope features from the plan guardrails: performance work, macros beyond quote/unquote/gated eval, records, typed staging, continuous distributions, package management, self-hosting, or ownership/borrowing.
 - Use `dune`, `alcotest`, and `qcheck` for build and tests.
 - Use `digestif` for the initial hash implementation unless the owner changes D1.

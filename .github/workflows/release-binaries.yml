@@ -32,9 +32,9 @@ jobs:
         include:
           - os: ubuntu-latest
             target: linux-x86_64
-          - os: macos-13
+          - os: macos-15-intel
             target: macos-x86_64
-          - os: macos-14
+          - os: macos-15
             target: macos-arm64
 
     steps:
@@ -61,6 +61,7 @@ jobs:
       - name: Smoke packaged commands
         shell: bash
         run: |
+          (cd dist && shasum -a 256 -c "jacquard-${{ matrix.target }}.tar.gz.sha256")
           smoke="$GITHUB_WORKSPACE/.scratch/jacquard-smoke"
           rm -rf "$smoke"
           mkdir -p "$smoke"
@@ -68,6 +69,7 @@ jobs:
           root=$(find "$smoke" -mindepth 1 -maxdepth 1 -type d -name 'jacquard-*' | head -1)
           "$root/bin/jacquard" --version
           "$root/bin/jac" --version
+          test "$("$root/bin/jac" run "$root/share/jacquard/demos/m1-fact.jac")" = "120"
 
       - name: Upload package artifact
         uses: actions/upload-artifact@v7.0.1
@@ -85,6 +87,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout release notes
+        uses: actions/checkout@v7.0.0
+        with:
+          fetch-depth: 0
+
       - name: Prepare temporary storage
         run: mkdir -p "$TMPDIR"
 
@@ -103,7 +110,13 @@ jobs:
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" dist/* --clobber
           else
+            prerelease=
+            case "$TAG" in
+              *-rc*) prerelease=--prerelease ;;
+            esac
             gh release create "$TAG" dist/* \
+              --verify-tag \
               --title "$TAG" \
-              --notes "Jacquard release binaries. Each archive includes bin/jacquard, bin/jac, and the standard prelude."
+              --notes-file docs/release/0.1/RELEASE-NOTES.md \
+              $prerelease
           fi

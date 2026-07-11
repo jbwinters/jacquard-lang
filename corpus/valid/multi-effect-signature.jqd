@@ -1,3 +1,5 @@
+(deftype fleet () (con mk-fleet))
+
 (defterm
   ((binding simulate
     ((tarrow

@@ -2,7 +2,8 @@
 
 Status: RC
 
-Commit: successor merge base `d8b2147a3ad9`; inventory refreshed on the evolving successor
+Candidate tag: `jacquard-core-0.1-rc1` (the tag resolves the exact reviewed commit)
+Required lineage base: `aec2c63`
 Version: `0.1.0`  
 Test count: `554` Alcotest/QCheck cases
 Cram count: `30` transcript files
@@ -28,8 +29,8 @@ None known in the release branch after the escrow transcript and syntax fixes.
 
 ## Recommended Next Milestone
 
-External rejection review: have a reviewer try to disprove the claim matrix and
-reproduction script before tagging.
+Collect external feedback without widening the 0.1 feature surface; correctness,
+portability, documentation, and evidence fixes remain in scope.
 
 ## Decision
 
@@ -44,7 +45,7 @@ opam exec -- dune fmt
 scripts/release/reproduce-0.1.sh
 ```
 
-The reproduction script passed from this release branch checkout and writes its
-generated evidence under `.scratch/release/0.1/` by default. The next step
-before final tagging is an external rejection review against
+The reproduction script records the exact checked-out commit in
+`.scratch/release/0.1/commit.txt` and writes its generated evidence under
+`.scratch/release/0.1/` by default. The claim matrix is
 [CLAIMS.md](CLAIMS.md).

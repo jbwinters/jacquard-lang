@@ -44,6 +44,7 @@ Read these together when judging whether the release candidate is credible:
 - `release/0.1/GAUNTLET.md`: adversarial tests present and omitted.
 - `release/0.1/LIMITS.md`: non-goals and known caveats.
 - `release/0.1/DECISION.md`: RC decision memo.
+- `release/0.1/RELEASE-NOTES.md`: public release contents and binary install.
 
 ## Post-0.1 Surface Syntax Evidence
 

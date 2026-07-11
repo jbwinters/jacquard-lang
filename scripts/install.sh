@@ -2,7 +2,7 @@
 set -eu
 
 REPO=${JACQUARD_INSTALL_REPO:-jbwinters/jacquard-lang}
-VERSION=${JACQUARD_INSTALL_VERSION:-latest}
+VERSION=${JACQUARD_INSTALL_VERSION:-jacquard-core-0.1-rc1}
 PREFIX=${JACQUARD_INSTALL_PREFIX:-$HOME/.local}
 
 # The installer also runs without a checkout, so its fallback is the user's
@@ -41,17 +41,31 @@ download() {
 TARGET=${JACQUARD_INSTALL_TARGET:-$(detect_target)}
 ASSET="jacquard-$TARGET.tar.gz"
 
-if [ "$VERSION" = "latest" ]; then
+if [ -n "${JACQUARD_INSTALL_URL:-}" ]; then
+  URL=$JACQUARD_INSTALL_URL
+elif [ "$VERSION" = "latest" ]; then
   URL="https://github.com/$REPO/releases/latest/download/$ASSET"
 else
   URL="https://github.com/$REPO/releases/download/$VERSION/$ASSET"
 fi
+CHECKSUM_URL="$URL.sha256"
 
 tmp=$(mktemp -d "$TMPDIR/jacquard-install.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 
 echo "Downloading $URL"
 download "$URL" "$tmp/$ASSET"
+echo "Downloading $CHECKSUM_URL"
+download "$CHECKSUM_URL" "$tmp/$ASSET.sha256"
+
+if command -v sha256sum >/dev/null 2>&1; then
+  (cd "$tmp" && sha256sum -c "$ASSET.sha256")
+elif command -v shasum >/dev/null 2>&1; then
+  (cd "$tmp" && shasum -a 256 -c "$ASSET.sha256")
+else
+  echo "install requires sha256sum or shasum to verify the release archive" >&2
+  exit 1
+fi
 
 tar -xzf "$tmp/$ASSET" -C "$tmp"
 root=$(find "$tmp" -mindepth 1 -maxdepth 1 -type d -name 'jacquard-*' | head -1)

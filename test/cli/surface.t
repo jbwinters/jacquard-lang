@@ -1,6 +1,5 @@
 SS.16: `.jac` is a first-class CLI carrier while `.jqd` keeps its bootstrap contract.
 
-  $ export TMPDIR=/home/josh/dev/friendmachine/research/weft-lang/.scratch/tmp
   $ export JACQUARD_PRELUDE=../../prelude
 
 All five source commands run through the built/package `jac` alias and extension detection. The

@@ -6,7 +6,7 @@ on:
       ref:
         description: "Branch, tag, or commit to reproduce"
         required: false
-        default: "release/0.1-evidence"
+        default: "main"
       base:
         description: "Candidate base commit that must be an ancestor"
         required: false

@@ -1,5 +1,8 @@
 # Jacquard
 
+[![CI](https://github.com/jbwinters/jacquard-lang/actions/workflows/ci.yml/badge.svg)](https://github.com/jbwinters/jacquard-lang/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/jbwinters/jacquard-lang?include_prereleases&sort=semver)](https://github.com/jbwinters/jacquard-lang/releases)
+
 Jacquard is a research prototype for running, reviewing, simulating, and trusting
 programs written by models and reviewed by people.
 
@@ -8,6 +11,16 @@ interpreter and type checker written in OCaml, a command-line tool, a standard
 library, and a test framework called Warp. Version 0.1 works end to end but is
 a research prototype, not a production language; `docs/release/0.1/LIMITS.md`
 is the honest list of what it does not do.
+
+Install the 0.1 release candidate without OCaml or opam:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jbwinters/jacquard-lang/jacquard-core-0.1-rc1/scripts/install.sh | sh
+~/.local/bin/jac run ~/.local/share/jacquard/demos/m1-fact.jac
+```
+
+The expected output is `120`. Linux x86-64, macOS Intel, and macOS Apple
+Silicon binaries are published; development from source is documented below.
 
 ## For Humans
 
@@ -138,15 +151,15 @@ diff: `- sub + add`. See `sh demos/repair.sh` for the full transcript.
 
 ## Install A Release Binary
 
-Most users do not need OCaml or opam. Install the latest release binary with:
+Most users do not need OCaml or opam. Install the reviewed 0.1 RC binary with:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jbwinters/jacquard-lang/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/jbwinters/jacquard-lang/jacquard-core-0.1-rc1/scripts/install.sh | sh
 ```
 
-The installer detects your OS and CPU, downloads the matching release archive,
-and installs under `~/.local` by default. Make sure `~/.local/bin` is on `PATH`,
-then run:
+The installer detects your OS and CPU, downloads the matching archive and
+SHA-256 checksum, refuses a checksum mismatch, and installs under `~/.local`
+by default. Make sure `~/.local/bin` is on `PATH`, then run:
 
 ```bash
 jacquard --version
@@ -166,7 +179,11 @@ To install somewhere else:
 JACQUARD_INSTALL_PREFIX=/usr/local sh scripts/install.sh
 ```
 
-Release archives are also attached to `jacquard-core-*` GitHub releases. Each
+Set `JACQUARD_INSTALL_VERSION` to install a different release tag. Supported
+binary targets are `linux-x86_64`, `macos-x86_64`, and `macos-arm64`; other
+platforms currently require the development setup.
+
+Release archives are attached to `jacquard-core-*` GitHub releases. Each
 archive contains `bin/jacquard`, `bin/jac`, `libexec/jacquard/jacquard`,
 `share/jacquard/prelude`, and `share/jacquard/demos`.
 
@@ -354,6 +371,7 @@ Key release docs:
 - `docs/release/0.1/GAUNTLET.md`: adversarial tests present and omitted
 - `docs/release/0.1/LIMITS.md`: explicit non-goals and caveats
 - `docs/release/0.1/DECISION.md`: release-candidate decision memo
+- `docs/release/0.1/RELEASE-NOTES.md`: public RC contents and install command
 
 ## Repository Map
 

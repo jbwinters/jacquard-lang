@@ -22,6 +22,10 @@ TARGET=${1:-$(detect_target)}
 VERSION=${JACQUARD_VERSION:-$(_build/default/bin/main.exe --version 2>/dev/null || echo dev)}
 DIST=${JACQUARD_DIST_DIR:-dist}
 ARCHIVE="jacquard-${TARGET}.tar.gz"
+case "$DIST" in
+  /*) DIST_DIR=$DIST ;;
+  *) DIST_DIR=$ROOT/$DIST ;;
+esac
 
 opam exec -- dune build @install
 VERSION=$(_build/default/bin/main.exe --version)
@@ -31,8 +35,8 @@ if [ ! -x "$BIN" ]; then
   BIN="_build/default/bin/main.exe"
 fi
 
-mkdir -p "$DIST"
-rm -f "$DIST/$ARCHIVE" "$DIST/$ARCHIVE.sha256"
+mkdir -p "$DIST_DIR"
+rm -f "$DIST_DIR/$ARCHIVE" "$DIST_DIR/$ARCHIVE.sha256"
 
 tmp=$(mktemp -d "$TMPDIR/jacquard-package.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
@@ -86,8 +90,8 @@ jac run "\$HOME/.local/share/jacquard/demos/m1-fact.jac"
 \`\`\`
 EOF
 
-(cd "$tmp" && tar -czf "$ROOT/$DIST/$ARCHIVE" "jacquard-$VERSION-$TARGET")
-(cd "$DIST" && shasum -a 256 "$ARCHIVE" >"$ARCHIVE.sha256")
+(cd "$tmp" && tar -czf "$DIST_DIR/$ARCHIVE" "jacquard-$VERSION-$TARGET")
+(cd "$DIST_DIR" && shasum -a 256 "$ARCHIVE" >"$ARCHIVE.sha256")
 
-printf '%s\n' "$DIST/$ARCHIVE"
-printf '%s\n' "$DIST/$ARCHIVE.sha256"
+printf '%s\n' "$DIST_DIR/$ARCHIVE"
+printf '%s\n' "$DIST_DIR/$ARCHIVE.sha256"

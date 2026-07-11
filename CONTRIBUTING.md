@@ -1,8 +1,9 @@
 # Contributing to Jacquard
 
 This document pins the engineering conventions for the Jacquard prototype. The
-development plan (`docs/development-plan.md`) is the execution queue; the spec
-(`spec/jacquard-kernel-ast-m0.md`) is the source of truth for language behavior.
+completed development plan (`docs/development-plan.md`) records the original
+milestones; release docs and current issues define active work. The spec
+(`spec/jacquard-kernel-ast-m0.md`) is the source of truth for kernel behavior.
 
 ## Module naming
 
@@ -44,6 +45,8 @@ development plan (`docs/development-plan.md`) is the execution queue; the spec
 
 ## PR checklist (mirrors the global definition of done)
 
+- [ ] `TMPDIR=$PWD/.scratch/tmp` is set so builds and tests stay on the
+      checkout filesystem.
 - [ ] `opam exec -- dune build @all` and `opam exec -- dune runtest` pass locally
       and in CI.
 - [ ] New behavior has tests in the same PR; bug fixes add a regression test
@@ -56,6 +59,8 @@ development plan (`docs/development-plan.md`) is the execution queue; the spec
       observable behavior.
 - [ ] No out-of-scope features (see the guardrails in
       `docs/development-plan.md`).
+- [ ] Native/runtime or release-facing changes pass the relevant scripts in
+      `docs/ci-cd.md`, including the installer smoke when packaging changes.
 
 ## GitHub gates
 

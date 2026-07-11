@@ -1,9 +1,10 @@
 # Jacquard Core 0.1 Evidence
 
-Status: evolving release evidence pack, refreshed for the post-0.1 successor.
+Status: release-candidate evidence for `jacquard-core-0.1-rc1`.
 
-Successor merge base with `release/0.1-evidence`: `d8b2147a3ad9`
-Inventory snapshot: `3e867b9` plus the SS.20 working-tree successor
+Required lineage base: `aec2c63`
+Exact candidate commit: recorded by `scripts/release/reproduce-0.1.sh` in
+`.scratch/release/0.1/commit.txt`
 Version surface: `jacquard --version` prints `0.1.0`
 
 This pack describes Jacquard core as implemented in the current successor checkout:
@@ -24,9 +25,8 @@ The build is the OCaml package in this repository:
 - CLI tests: `test/cli/*.t` and `test/gauntlet/*.t`
 - unit/property tests: `test/test_jacquard.exe`
 
-The original 0.1 candidate is the lineage base, not a claim that this evolving
-successor still has the candidate's feature surface. The inventory and limits
-below describe the current checkout and must be refreshed as that surface evolves.
+The inventory and limits below describe the tagged candidate. Later development
+must publish separate evidence rather than silently reusing this pack.
 
 ## Test Inventory
 
@@ -58,6 +58,10 @@ Release verification commands:
 eval "$(opam env)"
 opam exec -- dune build @all
 opam exec -- dune runtest
+runtime/check.sh
+CC=clang opam exec -- sh scripts/native-diff.sh
+CC=clang opam exec -- sh scripts/native-leak-check.sh
+CC=clang opam exec -- dune build @native-fuzz
 opam exec -- dune fmt
 _build/default/bin/main.exe --version
 opam exec -- dune runtest test/cli/escrow.t
@@ -124,13 +128,13 @@ See [LIMITS.md](LIMITS.md).
 Fresh-clone instructions are in [REPRO.md](REPRO.md). The minimal shape is:
 
 ```sh
-git checkout <successor-commit>
-git merge-base --is-ancestor d8b2147a3ad9 HEAD
+git checkout jacquard-core-0.1-rc1
+git merge-base --is-ancestor aec2c63 HEAD
 opam install --deps-only . --with-test --with-dev-setup --with-doc -y
 opam exec -- dune build @all
 opam exec -- dune runtest
 opam exec -- dune fmt
 _build/default/bin/main.exe --version
-JACQUARD_RELEASE_REF=HEAD JACQUARD_RELEASE_BASE=d8b2147a3ad9 \
+JACQUARD_RELEASE_REF=HEAD JACQUARD_RELEASE_BASE=aec2c63 \
   scripts/release/reproduce-0.1.sh
 ```

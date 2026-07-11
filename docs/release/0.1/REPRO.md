@@ -6,9 +6,9 @@ repo also has `.tool-versions` for asdf users (`opam 2.5.1`).
 ## Fresh Clone
 
 ```sh
-git clone <repo-url> jacquard-lang
+git clone https://github.com/jbwinters/jacquard-lang.git
 cd jacquard-lang
-git checkout release/0.1-evidence
+git checkout jacquard-core-0.1-rc1
 git merge-base --is-ancestor aec2c63 HEAD
 
 opam switch create . ocaml-base-compiler.5.1.1 -y
@@ -40,14 +40,16 @@ The script:
 - verifies that `aec2c63` is an ancestor of the checked-out release ref
 - installs opam dependencies
 - builds and tests the package
+- runs the sanitized runtime, native differential, leak, and seeded fuzz gates
 - runs `dune fmt`
 - records `jacquard --version`
+- packages and installs the Linux binary through the checksum-verifying public installer path
 - runs public demo transcripts
 - runs the gauntlet and escrow transcript
 - writes generated evidence to `.scratch/release/0.1/`
 
-The script defaults to `JACQUARD_RELEASE_REF=release/0.1-evidence`. Override it for
-a final immutable commit:
+The script defaults to the currently checked-out `HEAD`. Override it to verify
+another local branch, tag, or immutable commit:
 
 ```sh
 JACQUARD_RELEASE_REF=<commit> scripts/release/reproduce-0.1.sh

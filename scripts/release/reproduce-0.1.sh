@@ -7,7 +7,7 @@ cd "$ROOT"
 export TMPDIR
 mkdir -p "$TMPDIR"
 
-REF=${JACQUARD_RELEASE_REF:-release/0.1-evidence}
+REF=${JACQUARD_RELEASE_REF:-HEAD}
 BASE=${JACQUARD_RELEASE_BASE:-aec2c63}
 OUT=${JACQUARD_RELEASE_OUT:-$ROOT/.scratch/release/0.1}
 TRANSCRIPTS="$OUT/transcripts"
@@ -39,9 +39,16 @@ capture build opam exec -- dune build @all
 
 capture runtest opam exec -- dune runtest
 
+capture runtime-memory runtime/check.sh
+capture native-diff env CC=clang opam exec -- sh scripts/native-diff.sh
+capture native-leak env CC=clang opam exec -- sh scripts/native-leak-check.sh
+capture native-fuzz env CC=clang opam exec -- dune build @native-fuzz
+
 capture fmt opam exec -- dune fmt
 
 capture version _build/default/bin/main.exe --version
+
+capture installer-smoke scripts/release/smoke-installer.sh linux-x86_64
 
 capture m1 env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/m1.sh
 capture m3 env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/m3.sh
