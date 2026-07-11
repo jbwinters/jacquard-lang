@@ -54,9 +54,9 @@ will save you time:
   goldens, demo scripts, and `docs/release/0.1/CLAIMS.md`. If a pin fails,
   treat it as information about your change, and never weaken a pin to make a
   diff pass.
-- The kernel is 27 forms (`docs/ast.md`); bootstrap s-expressions are the only
-  syntax. Do not add surface syntax or out-of-scope features (`AGENTS.md`
-  lists them).
+- The kernel is 27 forms (`docs/ast.md`); `.jac` is a projection onto those
+  forms, and bootstrap `.jqd` remains permanently supported. Do not extend the
+  frozen surface grammar or add out-of-scope features (`AGENTS.md` lists them).
 - The development gate is `dune build @all && dune runtest && dune fmt`
   followed by a clean `git diff --exit-code`.
 
@@ -88,22 +88,29 @@ the release evidence pack all exist and are covered by tests.
 
 ## What It Looks Like
 
-The bootstrap syntax is s-expressions over a uniform triple. Here is one
-handler resuming one continuation twice (`demos/m1-choose.jqd`):
+Here is one handler resuming one continuation twice. The block is copied
+byte-for-byte to `test/docs-doctest/fixtures/readme-multishot.jac` and run by
+the documentation test lane:
 
-```lisp
-(handle
-  (match (app (var choose))
-    (clause (pcon true) (lit 1))
-    (clause (pcon false) (lit 2)))
-  (ret (pvar x) (app (var cons) (var x) (var nil)))
-  (opclause choose () k
-    (app (var append) (app (var k) (var true)) (app (var k) (var false)))))
+```jacquard doctest=readme-multishot mode=run fixture=readme-multishot.jac stdout=readme-multishot.stdout stderr=empty exit=0
+effect Choice where {
+  choose : () -> Bool
+}
+
+handle {
+  match choose() {
+    | True -> 1
+    | False -> 2
+  }
+} {
+  | return x -> x
+  | choose() resume continue -> add(continue(True), continue(False))
+}
 ```
 
-```
-$ jacquard run demos/m1-choose.jqd
-cons(1, cons(2, nil))
+```console
+$ jacquard run test/docs-doctest/fixtures/readme-multishot.jac
+3
 ```
 
 The handler ran the rest of the program once with `true` and once with
@@ -115,7 +122,7 @@ the updated probabilities. Running candidate code is an authority, so the pure
 step still runs (it counts eight candidate patches) and then the demo refuses
 until you grant the rest:
 
-```
+```console
 $ jacquard run demos/repair.jqd
 8
 error[E0814]: this program requires the `eval` effect, which is not granted (performed via `posterior-over-patches`)
@@ -448,11 +455,12 @@ rights.
 
 ## Current Limits
 
-Jacquard core 0.1 is a research prototype, not a production compiler. It does not
-claim surface syntax beyond bootstrap `.jqd`, a VM or optimizer, continuous
-distributions, gradients, typed staging, package management, self-hosting, or a
-formal proof of row soundness. See `docs/release/0.1/LIMITS.md` for the
-no-hype list.
+Jacquard core is a research prototype, not a production compiler. The `.jac`
+surface is the frozen v0 projection and does not change the 27-form kernel or
+permanent `.jqd` support. The project does not claim a VM or optimizer,
+continuous distributions, gradients, typed staging, package management,
+self-hosting, or a formal proof of row soundness. See
+`docs/release/0.1/LIMITS.md` for the no-hype list for the 0.1 release baseline.
 
 ## Troubleshooting
 

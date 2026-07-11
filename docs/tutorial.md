@@ -1,82 +1,88 @@
-# Jacquard tutorial: ten runnable examples
+# Jacquard tutorial: runnable examples
 
-Every example here is a file checked into the repository and exercised by CI (the
-conformance corpus, the signature corpus, or the demo transcripts). Commands assume the
-repo root; `jacquard` is `dune exec jacquard --`.
+Every Jacquard source fence here is extracted to the named fixture under
+`test/docs-doctest/fixtures/`, compared byte-for-byte, and checked or run by
+`dune runtest`. Commands assume the repo root; `jacquard` is
+`dune exec jacquard --`.
 
 ## 1. A literal
 
-`corpus/valid/lit-int.jqd` — the whole language is `(head arg ...)` triples:
+`test/docs-doctest/fixtures/tutorial-literal.jac`:
 
-```lisp
-(lit 1)
+```jacquard doctest=tutorial-literal mode=run fixture=tutorial-literal.jac stdout=tutorial-literal.stdout stderr=empty exit=0
+1
 ```
 
-Run it: `jacquard run corpus/valid/lit-int.jqd` prints `1`.
+Run it: `jacquard run test/docs-doctest/fixtures/tutorial-literal.jac` prints `1`.
 
 ## 2. Application
 
-`corpus/valid/app-add.jqd`:
+`test/docs-doctest/fixtures/tutorial-application.jac`:
 
-```lisp
-(app (var add) (lit 1) (lit 2))
+```jacquard doctest=tutorial-application mode=run fixture=tutorial-application.jac stdout=tutorial-application.stdout stderr=empty exit=0
+add(1, 2)
 ```
 
 Calls are uncurried (decision D5): `add` takes exactly two arguments. `jacquard run` prints `3`.
 
 ## 3. Functions
 
-`corpus/sigs/01-identity.jqd`:
+`test/docs-doctest/fixtures/tutorial-identity.jac`:
 
-```lisp
-(lam ((pvar x)) (var x))
+```jacquard doctest=tutorial-identity mode=check fixture=tutorial-identity.jac stdout=tutorial-identity.stdout stderr=empty exit=0
+fn (x) -> x
 ```
 
-`jacquard check corpus/sigs/01-identity.jqd --print-sigs` prints the elaborated signature —
+`jacquard check test/docs-doctest/fixtures/tutorial-identity.jac --print-sigs`
+prints the elaborated signature —
 `forall a. (a) ->{} a`. The empty row `{}` is the whole story: this function can do
 nothing but compute.
 
-## 4. Recursion via defterm
+## 4. Recursion
 
-`corpus/valid/fact.jqd` — factorial as a content-addressed declaration:
+`test/docs-doctest/fixtures/tutorial-factorial.jac` — factorial as a
+content-addressed declaration followed by a top-level expression:
 
-```lisp
-(defterm ((binding fact ()
-  (lam ((pvar n))
-    (match (var n)
-      (clause (plit 0) (lit 1))
-      (clause (pvar m)
-        (app (var mul) (var m)
-          (app (var fact) (app (var sub) (var m) (lit 1))))))))))
+```jacquard doctest=tutorial-factorial mode=run fixture=tutorial-factorial.jac stdout=tutorial-factorial.stdout stderr=empty exit=0
+fact(n) = match n {
+  | 0 -> 1
+  | m -> mul(m, fact(sub(m, 1)))
+}
+
+fact(5)
 ```
 
 Self-reference resolves to a group-local marker, so the definition's hash is stable under
-renaming. `demos/m1-fact.jqd` adds `(app (var fact) (lit 5))`; `jacquard run` prints `120`.
+renaming. `jacquard run test/docs-doctest/fixtures/tutorial-factorial.jac`
+prints `120`.
 
 ## 5. Pattern matching, no if
 
-`corpus/valid/match-bool.jqd` — `bool` is a library type and `if` is just sugar the kernel
+`test/docs-doctest/fixtures/tutorial-bool-match.jac` — `Bool` is a library type and `if` is just sugar the kernel
 does not have:
 
-```lisp
-(lam ((pvar b))
-  (match (var b)
-    (clause (pcon true) (lit 0))
-    (clause (pcon false) (lit 1))))
+```jacquard doctest=tutorial-bool-match mode=check fixture=tutorial-bool-match.jac stdout=tutorial-bool-match.stdout stderr=empty exit=0
+fn (b) -> match b {
+  | True -> 0
+  | False -> 1
+}
 ```
 
 Delete a clause and `jacquard check` rejects the match with the missing witness (E0813).
+The negative companion pins that stable diagnostic and its nonzero exit status:
+
+```jacquard doctest=tutorial-nonexhaustive mode=check fixture=tutorial-nonexhaustive.jac stdout=empty stderr=tutorial-nonexhaustive.stderr exit=1
+fn (b) -> match b {
+  | True -> 0
+}
+```
 
 ## 6. Effects and handlers
 
-`corpus/sigs/09-hostile.jqd` — aborting is an effect, handled to `option`:
+`test/docs-doctest/fixtures/tutorial-safe-div.jac` — aborting is an effect:
 
-```lisp
-(defterm ((binding safe-div ()
-  (lam ((pvar n) (pvar d))
-    (match (app (var eq) (var d) (lit 0))
-      (clause (pcon true)  (app (var abort)))
-      (clause (pcon false) (app (var div) (var n) (var d))))))))
+```jacquard doctest=tutorial-safe-div mode=check fixture=tutorial-safe-div.jac stdout=tutorial-safe-div.stdout stderr=empty exit=0
+safe-div(n, d) = if eq(d, 0) then abort() else div(n, d)
 ```
 
 `jacquard check --print-sigs` shows `safe-div : (Int, Int) ->{Abort} Int` — the signature
@@ -85,26 +91,16 @@ shows row polymorphism removing it.
 
 ## 7. Multi-shot handlers
 
-`demos/m1-choose.jqd` — one `choose` op, resumed twice by its handler, collecting both
-branches:
+The README fixture uses one `choose` operation and resumes its continuation for
+both branches:
 
-```lisp
-(handle
-  (match (app (var choose))
-    (clause (pcon true) (lit 1))
-    (clause (pcon false) (lit 2)))
-  (ret (pvar x) (app (var cons) (var x) (var nil)))
-  (opclause choose () k
-    (app (var append) (app (var k) (var true)) (app (var k) (var false)))))
-```
-
-`jacquard run demos/m1-choose.jqd` prints `cons(1, cons(2, nil))`.
+`jacquard run test/docs-doctest/fixtures/readme-multishot.jac` prints `3`.
 
 ## 8. Capability grants
 
 `demos/m1-gated.jqd` — `eval` is a library effect; nothing runs code without the grant:
 
-```
+```console
 $ jacquard run demos/m1-gated.jqd            # E0814 refusal, exit 3
 $ jacquard run demos/m1-gated.jqd --allow eval
 42
@@ -118,7 +114,7 @@ manifest; `jacquard check FILE --manifest net,console` audits it without running
 `demos/m3-two-coins.jqd` — sample/observe are ordinary ops of the `dist` effect; inference
 algorithms are handlers:
 
-```
+```console
 $ jacquard infer enumerate demos/m3-two-coins.jqd
 0.666667  true
 0.333333  false
@@ -134,7 +130,7 @@ The model file is identical under both algorithms — only the handler changes.
 A store is a content-addressed map from hashes to declarations; names are metadata. Store a
 self-contained declaration, rename it (object files untouched), and diff semantically:
 
-```
+```console
 $ printf '(deftype color () (con red) (con green))\n' > color.jqd
 $ jacquard store add lib-v1 color.jqd
 ok
@@ -156,18 +152,20 @@ in this draft), but any code can narrow what it passes on by wrapping a handler.
 `fs.read-only` from the prelude forwards `read` and `list-dir` to the real world and turns
 `write` into a thrown error:
 
-```lisp
-(app (var fs.read-only)
-  (lam ()
-    (let nonrec (pvar c) (app (var read) (lit "note.txt"))
-      (let nonrec (pwild) (app (var write) (lit "note.txt") (lit "clobbered"))
-        (var c)))))
+```jacquard doctest=tutorial-read-only mode=check fixture=tutorial-read-only.jac stdout=tutorial-read-only.stdout stderr=empty exit=0
+read-note() = fs.read-only(fn () -> {
+  let contents = read("note.txt")
+  write("note.txt", "clobbered")
+  contents
+})
 ```
 
 Under `jacquard run --allow fs`, the read succeeds and the write becomes
 `"fs.read-only refused write: note.txt"` (catch it with `throw.catch`). The handler
-re-performs the reads, so `fs` honestly stays in the row: attenuated code still needs the
-grant, it just cannot write through this handler. Pinned in `test/cli/world.t`.
+re-performs the reads, so `Fs` visibly stays in
+`read-note : () ->{Fs, Throw} Text`; `Throw` records the refused write. Attenuated
+code still needs the grant, but it cannot write through this handler. The signature
+is pinned by this doctest and the runtime behavior by `test/cli/world.t`.
 
 One asymmetry, documented until the owner decision lands: `eval`'d code runs at root
 authority and bypasses interposed handlers, so `fs.read-only` does **not** confine

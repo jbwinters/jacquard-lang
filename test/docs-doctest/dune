@@ -1,0 +1,27 @@
+(executable
+ (name docs_doctest)
+ (modules docs_doctest)
+ (libraries unix))
+
+(rule
+ (alias runtest)
+ (deps
+  docs_doctest.exe
+  %{bin:jacquard}
+  (source_tree fixtures)
+  (source_tree ../../prelude)
+  ../../README.md
+  ../../docs/tutorial.md
+  ../../docs/stdlib.md
+  ../../docs/warp-testing.md
+  ../../demos/README.md)
+ (action
+  (setenv TMPDIR .
+   (progn
+    (run ./docs_doctest.exe --self-test %{bin:jacquard} ../../prelude)
+    (run ./docs_doctest.exe %{bin:jacquard} ../../prelude fixtures
+     ../../README.md
+     ../../docs/tutorial.md
+     ../../docs/stdlib.md
+     ../../docs/warp-testing.md
+     ../../demos/README.md)))))

@@ -48,6 +48,8 @@ Read these together when judging whether the release candidate is credible:
 - `native-compilation.md`: native compilation notes and boundaries.
 - `perf-vm-decision.md`: why VM/performance work is not in 0.1.
 - `example-code.md`: early target examples retained as design context.
+- `../test/docs-doctest/README.md`: how executable documentation fences map
+  to `.jac` fixtures and run under Dune.
 
 ## Suggested Paths
 

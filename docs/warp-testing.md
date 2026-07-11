@@ -13,25 +13,33 @@ because injecting a fake world is what a handler is. Merkle hashing replaces tes
 selection, because a pure test's hash changes exactly when its transitive
 dependencies do. Everything below is elaboration of those three sentences.
 
+Unless a fence is labeled `jacquard doctest=...`, blocks in this design document
+are signature catalogs, command sketches, cache-key notation, or explicitly
+described pseudocode rather than complete source files. Executable fences are
+kept byte-identical with fixtures by the docs-doctest lane.
+
 ---
 
 ## 1. Core: one effect, two test types
 
-```
-effect Check where
-  check : (Bool, Text) -> ()      -- soft: record and continue
-  fail  : (Text) -> a             -- hard: never resumes (the abort idiom)
+```jacquard doctest=warp-check-effect mode=check fixture=warp-check-effect.jac stdout=warp-check-effect.stdout stderr=empty exit=0
+effect Check a where {
+  check : (Bool, Text) -> ()
+  fail : (Text) -> a
+}
 ```
 
 A test is an ordinary definition of an ordinary type. There is no annotation, no
 naming convention, no registration call:
 
-```
-type Test      = Case  (Text, () ->{Check} ())
-               | Prop  (Text, () ->{Dist, Check} ())
-               | Group (Text, List Test)
+```jacquard doctest=warp-test-types mode=check fixture=warp-test-types.jac stdout=warp-test-types.stdout stderr=empty exit=0
+type Test =
+  | Case Text (() ->{Check} ())
+  | Prop Text (() ->{Dist, Check} ())
+  | Group Text (List Test)
 
-type WorldTest = WCase (Text, () ->{Check, Fs, Net, Clock, Console} ())
+type WorldTest =
+  | WCase Text (() ->{Check, Fs, Net, Clock, Console} ())
 ```
 
 Discovery is type-directed: `jacquard test` scans the name index for definitions whose
@@ -50,9 +58,10 @@ lane, where the row admits an unreliable world.
 ## 2. Assertions
 
 Dictionary-passing pays off here, since messages come from `Show` and comparison
-from `Eq`, explicitly:
+from `Eq`, explicitly. This is an interface catalog: the function bodies live
+in the prelude and standalone signatures are not complete surface source.
 
-```
+```text
 check.true : (Bool, Text) ->{Check} ()
 check.eq : forall a. (a, a, Eq a, Show a, Text) ->{Check} ()
 check.some : forall a b. (Option a, b, Text) ->{Check} ()
@@ -86,9 +95,11 @@ from integration to unit coverage, and the types verify each step of it.
 ### Record and replay
 
 Fixtures beyond hand-written scripts come from recording. Serialization uses the
-language's own homoiconic form as the wire format:
+language's own homoiconic form as the wire format. The record-shaped `Codec`
+is deliberately pseudocode because records are unsupported, and the two test
+entries are signatures without bodies.
 
-```
+```text
 type Codec a = MkCodec { encode : (a) ->{} Code, decode : (Code) ->{} Option a }
 
 test.record : (() ->{E | e} a, codecs) ->{E | e} (a, Log)     -- per world effect E
@@ -107,9 +118,10 @@ should tolerate reordering.
 ## 4. Properties: generators are distributions
 
 A generator is a `Dist` computation, so the property system is a reuse of ring 2
-rather than a subsystem:
+rather than a subsystem. These are signature sketches with omitted bodies and
+an ellipsis standing for additional combinators, so they are not executable.
 
-```
+```text
 prop.for : (Distribution a, (a) ->{Check | e} ()) ->{Dist, Check | e} ()
 
 gen.list : (Distribution a, Int) ->{Dist} List a
@@ -117,9 +129,10 @@ gen.option, gen.result, gen.pair, ...            -- combinators over Distributio
 ```
 
 The flagship behavior falls straight out of the M3 thesis. The same `Prop`, byte
-for byte, runs under two handlers:
+for byte, runs under two handlers. This fence is a shell command sketch, not
+Jacquard source.
 
-```
+```console
 jacquard test                      -- sampling handler: N random cases, seeded
 jacquard test --exhaustive         -- enumeration handler: every case, budget-bounded
 ```
@@ -158,15 +171,18 @@ resampling for the sampling lane is future work.
 
 One small effect turns the fixture handlers into a simulation rig:
 
-```
-effect Fault where  flaky : (Text) -> Bool     -- "may this site fail now?"
+```jacquard doctest=warp-fault-effect mode=check fixture=warp-fault-effect.jac stdout=warp-fault-effect.stdout stderr=empty exit=0
+effect Fault where {
+  flaky : (Text) -> Bool
+}
 ```
 
 The scripted world handlers consult `flaky` before each operation and simulate the
 failure (timeout, refused connection, missing file) when told to. Three handlers
-interpret it:
+interpret it. This list names handlers and arguments but omits complete calls
+and surrounding test bodies, so it is intentionally elliptical pseudocode.
 
-```
+```text
 fault.none                       -- happy path
 fault.random(p, seed)            -- chaos with a replayable seed
 fault.all                        -- multi-shot: explore BOTH answers at every site
@@ -184,9 +200,10 @@ library parts, with the exponential budget capped by the same mechanism as
 ## 6. The cache, and what CI stops doing
 
 Hashing is Merkle-transitive: a definition's hash covers the hashes it references,
-recursively. So for a hermetic `Test`, one key says everything:
+recursively. So for a hermetic `Test`, one key says everything. The equations
+below define cache keys mathematically and are not Jacquard expressions.
 
-```
+```text
 memo key (Test)      = the test's own hash
 memo key (Prop)      = (hash, mode, samples, seed)
 WorldTest            = never cached
@@ -210,9 +227,10 @@ text; line-level coverage via spans can layer on later.
 ## 7. Testing probabilistic code
 
 Inference code is code, and it finally gets real tests. For discrete models,
-enumeration makes assertions exact, so no statistics are involved:
+enumeration makes assertions exact, so no statistics are involved. These are
+interface signatures without term bodies, not complete executable source.
 
-```
+```text
 check.posterior : (() ->{Dist} a, List (a, Real), Eq a, Show a, Real) ->{Check} ()
 check.same-dist : (() ->{Dist} a, () ->{Dist} a, Eq a, Show a, Real) ->{Check} ()
 ```
@@ -228,9 +246,23 @@ tolerances with large N where it does not.
 
 ## 8. What a test file looks like
 
-Display syntax as in the stdlib doc; corpus versions are bootstrap s-expressions.
+A minimal hermetic case uses the currently shipped constructor and assertion
+names and is checked by `dune runtest`:
 
+```jacquard doctest=warp-hermetic-case mode=check fixture=warp-hermetic-case.jac stdout=warp-hermetic-case.stdout stderr=empty exit=0
+docs-test : Test
+docs-test = Case("documentation example", fn () ->
+  check.true(True, "surface doctest"))
 ```
+
+The larger block below is deliberately pseudocode, not an implemented source
+file. It abbreviates required assertion labels and uses placeholders such as
+`fixture-log`, `request`, and model definitions that only make sense in a full
+application fixture. Those omissions would produce arity and `E0301` unknown-name
+diagnostics, so the block is excluded rather than weakening it into a misleading
+doctest.
+
+```text
 suite : Test
 suite = Group("list basics", [
   Case("reverse twice is identity (example)", fn () ->

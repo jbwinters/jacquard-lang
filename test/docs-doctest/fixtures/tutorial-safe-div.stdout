@@ -1,0 +1,1 @@
+safe-div : (Int, Int) ->{Abort} Int
