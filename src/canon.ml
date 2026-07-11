@@ -368,10 +368,12 @@ let op_hash decl_hash ordinal =
 
 (** [hash_expr e] hashes a resolved bare expression. *)
 let hash_expr (e : Kernel.expr) : (Hash.t, Diag.t list) result =
-  let buf = Buffer.create 256 in
-  match ser_expr buf empty_env e with
-  | () -> Ok (domain_hash "E" (Buffer.contents buf))
-  | exception Err d -> Error [ d ]
+  if Recovery_marker.expr e then Error [ Recovery_marker.diagnostic "canonicalization" ]
+  else
+    let buf = Buffer.create 256 in
+    match ser_expr buf empty_env e with
+    | () -> Ok (domain_hash "E" (Buffer.contents buf))
+    | exception Err d -> Error [ d ]
 
 (* Canonical member order and group serialization for a defterm group (module doc).
 
@@ -483,6 +485,7 @@ type decl_hashes = { decl_hash : Hash.t; named : (string * Hash.t) list }
     type/effect name plus each constructor/operation's derived hash. *)
 let hash_decl (d : Kernel.decl) : (decl_hashes, Diag.t list) result =
   try
+    if Recovery_marker.decl d then raise (Err (Recovery_marker.diagnostic "canonicalization"));
     match d.Kernel.it with
     | Kernel.DefTerm bindings ->
         let order, group_bytes = canonicalize_group bindings in

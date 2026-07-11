@@ -97,6 +97,7 @@ in `src/` and `bin/` appears in this catalog.
 | E0804 | annotation mismatch | `(ann (lit 1) (tref text))` |
 | E0805 | reference kind mismatch or unknown hash | `(groupref 5)` outside a group |
 | E0806 | constructor pattern arity | `(pcon some)` with no argument |
+| E0807 | bare surface term reference where a compatible thunk is expected | `condition = True; bool.and-then(True, condition)` instead of wrapping `condition` in `fn () -> condition` |
 | E0810 | type constructor arity (kind) error | `(tapp (tref option) a b)` |
 | E0811 | unbound type or row variable | `(tvar zz)` in a declaration |
 | E0812 | unbound variable in an effect op signature | `(op o () (tvar zz))` |
@@ -153,6 +154,13 @@ in `src/` and `bin/` appears in this catalog.
 | E1234 | generated lowering node lacks a real source span | lowering a hand-built spanless block AST |
 | E1235 | a signature or definition was lowered without its required file context | calling `lower_top` on a signature |
 
+### Surface warnings (W12xx)
+
+| code | meaning | example |
+|------|---------|---------|
+| W1201 | lowercase binding pattern shadows an in-scope constructor differing only in case | `match Up { | up -> ... }` |
+| W1202 | positional constructor pattern has more than four fields | `Snapshot(_, _, _, _, _)` |
+
 The recovering `.jac` lexer emits an in-order invalid-token marker and continues;
 the strict lexer remains fail-fast. Malformed strings resynchronize at a closing
 quote or newline, so an unterminated line does not discard valid later items. The
@@ -160,8 +168,15 @@ parser synchronizes at `}`, `|`, `;`, and newline so a malformed expression does
 not hide later syntax errors. Each damage site leaves an explicit surface hole
 with its source span, a stable `surface-hole` ID, and `surface-form =
 recovery-hole` provenance. `Surface_parse.strict` rejects both error diagnostics
-and any remaining hole before lowering, checking, execution, or canonical
-hashing.
+and any remaining hole before lowering. Semantic boundaries also recursively reject
+marked trees before strict checking, execution, storage, or canonical hashing,
+including markers nested in patterns, types, handlers, and quote payloads.
+`Surface_check.analyze` is the separate editor/recovery API: it checks marked hole
+sentinels as fresh types with no effects in a fresh isolated checker context and
+returns only diagnostics and inferred signatures. Successfully checked term islands
+are available to later islands through analysis-local names and schemes without
+installing declarations in the store. Type and effect declarations are checked in
+isolation; references to them from later islands require strict installation first.
 
 ## Appendix: the W5.3 audit (ten message rewrites)
 

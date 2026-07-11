@@ -38,6 +38,7 @@ let key_surface_form = "surface-form"
 let key_surface_generated = "surface-generated"
 let key_surface_hole = "surface-hole"
 let key_surface_ref_kind = "surface-ref-kind"
+let key_surface_reference = "surface-reference"
 let key_surface_signature = "surface-signature"
 
 (** [surface_container_key kind] is the reserved key for one named delimiter container. *)
@@ -208,6 +209,15 @@ let surface_ref_kind t =
 (** [with_surface_ref_kind kind t] records an explicit surface value-reference kind. Callers use
     ["term"], ["con"], or ["op"]; unknown values are ignored by resolution. *)
 let with_surface_ref_kind kind t = add key_surface_ref_kind (Sym kind) t
+
+(** [is_surface_reference t] is true only for a bare reference authored in `.jac`. Recovery and
+    diagnostics use this hash-excluded marker to distinguish source references from bootstrap
+    [(var ...)] nodes without changing resolution or identity. *)
+let is_surface_reference t =
+  match find key_surface_reference t with Some (Sym "true" | Text "true") -> true | _ -> false
+
+(** [with_surface_reference t] marks an authored `.jac` reference. *)
+let with_surface_reference t = add key_surface_reference (Sym "true") t
 
 let rec equal_value a b =
   match (a, b) with

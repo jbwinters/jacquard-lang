@@ -113,7 +113,7 @@ let utf8_boundaries s =
     Call after {!load}. Integer semantics per decision D2: OCaml native 63-bit ints; add/sub/mul
     wrap on overflow (mod 2^63); div truncates toward zero and fails with [Arithmetic] on zero. *)
 let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
-  let store = ctx.Eval.store in
+  let store = Eval.store ctx in
   let ( let* ) = Result.bind in
   let* true_con = lookup_hash store ~kind:Resolve.KCon "true" in
   let* false_con = lookup_hash store ~kind:Resolve.KCon "false" in
@@ -147,7 +147,7 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
     | [] -> Ok ()
     | (name, native) :: rest ->
         let* h = lookup_hash store ~kind:Resolve.KTerm name in
-        Hashtbl.replace ctx.Eval.builtins h (Value.VBuiltin (name, native));
+        Eval.register_builtin ctx h (Value.VTrustedBuiltin (Trusted_builtin.make name native));
         go rest
   in
   let* () = go natives in
@@ -163,7 +163,7 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
   let optional name native =
     match lookup_hash store ~kind:Resolve.KTerm name with
     | Error _ -> () (* prelude without this layer *)
-    | Ok h -> Hashtbl.replace ctx.Eval.builtins h (Value.VBuiltin (name, native))
+    | Ok h -> Eval.register_builtin ctx h (Value.VTrustedBuiltin (Trusted_builtin.make name native))
   in
   optional "mod"
     (int2 "mod" (fun a b ->
@@ -525,9 +525,9 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
 let install_console ?(read_line = fun () -> try Stdlib.read_line () with End_of_file -> "")
     (ctx : Eval.ctx) ~(out : string -> unit) : (unit, Diag.t list) result =
   let ( let* ) = Result.bind in
-  let* print_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "print" in
-  let* read_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "read-line" in
-  Hashtbl.replace ctx.Eval.root_handlers print_op (fun args ->
+  let* print_op = lookup_hash (Eval.store ctx) ~kind:Resolve.KOp "print" in
+  let* read_op = lookup_hash (Eval.store ctx) ~kind:Resolve.KOp "read-line" in
+  Eval.register_root_handler ctx print_op (fun args ->
       match args with
       | [ Value.VText s ] ->
           out s;
@@ -537,7 +537,7 @@ let install_console ?(read_line = fun () -> try Stdlib.read_line () with End_of_
             (Runtime_err.Type_error
                (Printf.sprintf "print expects one text, got %s"
                   (String.concat ", " (List.map Value.show args)))));
-  Hashtbl.replace ctx.Eval.root_handlers read_op (fun args ->
+  Eval.register_root_handler ctx read_op (fun args ->
       match args with
       | [] -> Ok (Value.VText (read_line ()))
       | args ->
@@ -553,13 +553,13 @@ let install_clock ?(now = fun () -> int_of_float (Unix.gettimeofday () *. 1000.)
     ?(sleep = fun ms -> if ms > 0 then Unix.sleepf (float_of_int ms /. 1000.)) (ctx : Eval.ctx) :
     (unit, Diag.t list) result =
   let ( let* ) = Result.bind in
-  let* now_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "now" in
-  let* sleep_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "sleep" in
-  Hashtbl.replace ctx.Eval.root_handlers now_op (fun args ->
+  let* now_op = lookup_hash (Eval.store ctx) ~kind:Resolve.KOp "now" in
+  let* sleep_op = lookup_hash (Eval.store ctx) ~kind:Resolve.KOp "sleep" in
+  Eval.register_root_handler ctx now_op (fun args ->
       match args with
       | [] -> Ok (Value.VInt (now ()))
       | _ -> Error (Runtime_err.Type_error "now expects no arguments"));
-  Hashtbl.replace ctx.Eval.root_handlers sleep_op (fun args ->
+  Eval.register_root_handler ctx sleep_op (fun args ->
       match args with
       | [ Value.VInt ms ] ->
           sleep ms;
@@ -577,11 +577,11 @@ let install_clock ?(now = fun () -> int_of_float (Unix.gettimeofday () *. 1000.)
     prelude/14-world.jqd). IO failures surface as [Runtime_err.Io]. *)
 let install_fs (ctx : Eval.ctx) : (unit, Diag.t list) result =
   let ( let* ) = Result.bind in
-  let* read_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "read" in
-  let* write_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "write" in
-  let* lsdir_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "list-dir" in
+  let* read_op = lookup_hash (Eval.store ctx) ~kind:Resolve.KOp "read" in
+  let* write_op = lookup_hash (Eval.store ctx) ~kind:Resolve.KOp "write" in
+  let* lsdir_op = lookup_hash (Eval.store ctx) ~kind:Resolve.KOp "list-dir" in
   let io f = try f () with Sys_error m -> Error (Runtime_err.Io m) in
-  Hashtbl.replace ctx.Eval.root_handlers read_op (fun args ->
+  Eval.register_root_handler ctx read_op (fun args ->
       match args with
       | [ Value.VText path ] -> io (fun () -> Ok (Value.VText (read_file path)))
       | args ->
@@ -589,7 +589,7 @@ let install_fs (ctx : Eval.ctx) : (unit, Diag.t list) result =
             (Runtime_err.Type_error
                (Printf.sprintf "read expects one path, got %s"
                   (String.concat ", " (List.map Value.show args)))));
-  Hashtbl.replace ctx.Eval.root_handlers write_op (fun args ->
+  Eval.register_root_handler ctx write_op (fun args ->
       match args with
       | [ Value.VText path; Value.VText content ] ->
           io (fun () ->
@@ -603,11 +603,11 @@ let install_fs (ctx : Eval.ctx) : (unit, Diag.t list) result =
                (Printf.sprintf "write expects a path and a text, got %s"
                   (String.concat ", " (List.map Value.show args)))));
   match
-    ( Store.lookup_kind ctx.Eval.store "nil" Resolve.KCon,
-      Store.lookup_kind ctx.Eval.store "cons" Resolve.KCon )
+    ( Store.lookup_kind (Eval.store ctx) "nil" Resolve.KCon,
+      Store.lookup_kind (Eval.store ctx) "cons" Resolve.KCon )
   with
   | Some { Resolve.hash = nil_h; _ }, Some { Resolve.hash = cons_h; _ } ->
-      Hashtbl.replace ctx.Eval.root_handlers lsdir_op (fun args ->
+      Eval.register_root_handler ctx lsdir_op (fun args ->
           match args with
           | [ Value.VText path ] ->
               io (fun () ->
@@ -633,7 +633,7 @@ let install_fs (ctx : Eval.ctx) : (unit, Diag.t list) result =
     agent loops deterministic and builds an eval dataset as a side effect. *)
 let install_infer ?cache_dir (ctx : Eval.ctx) : (unit, Diag.t list) result =
   let ( let* ) = Result.bind in
-  let* complete_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "complete" in
+  let* complete_op = lookup_hash (Eval.store ctx) ~kind:Resolve.KOp "complete" in
   let stub text model =
     match model with
     | Some m -> Printf.sprintf "<stub completion from %s for: %s>" m text
@@ -693,7 +693,7 @@ let install_infer ?cache_dir (ctx : Eval.ctx) : (unit, Diag.t list) result =
              with Sys_error m -> Printf.eprintf "infer-cache unavailable (%s)\n%!" m);
             c)
   in
-  Hashtbl.replace ctx.Eval.root_handlers complete_op (fun args ->
+  Eval.register_root_handler ctx complete_op (fun args ->
       match args with
       | [ Value.VCon { name = "mk-prompt"; args = [ Value.VText text; model_v ]; _ } ] ->
           let model =
@@ -718,17 +718,17 @@ let install_infer ?cache_dir (ctx : Eval.ctx) : (unit, Diag.t list) result =
     payload's effects; only root grants apply. The hard gate (ungranted effects die) still holds.
     Revisit before the M2/M4 attenuation demos rely on wrapping handlers around eval. *)
 let install_eval (ctx : Eval.ctx) : (unit, Diag.t list) result =
-  match lookup_hash ctx.Eval.store ~kind:Resolve.KOp "eval-code" with
+  match lookup_hash (Eval.store ctx) ~kind:Resolve.KOp "eval-code" with
   | Error ds -> Error ds
   | Ok eval_op ->
-      Hashtbl.replace ctx.Eval.root_handlers eval_op (fun args ->
+      Eval.register_root_handler ctx eval_op (fun args ->
           match args with
           | [ Value.VCode payload ] -> (
               let diags_msg ds = String.concat "; " (List.map Diag.to_string ds) in
               match Kernel.expr_of_form payload with
               | Error ds -> Error (Runtime_err.Eval_error (diags_msg ds))
               | Ok e -> (
-                  match Resolve.resolve_expr (Store.names_view ctx.Eval.store) e with
+                  match Resolve.resolve_expr (Store.names_view (Eval.store ctx)) e with
                   | Error ds -> Error (Runtime_err.Eval_error (diags_msg ds))
                   | Ok e -> Eval.run_expr ctx e))
           | args ->
@@ -742,9 +742,9 @@ let install_eval (ctx : Eval.ctx) : (unit, Diag.t list) result =
     response naming the URL (the hostile-demo stand-in; real IO is out of scope). *)
 let install_net (ctx : Eval.ctx) : (unit, Diag.t list) result =
   let ( let* ) = Result.bind in
-  let* fetch_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "fetch" in
-  let* resp_con = lookup_hash ctx.Eval.store ~kind:Resolve.KCon "mk-response" in
-  Hashtbl.replace ctx.Eval.root_handlers fetch_op (fun args ->
+  let* fetch_op = lookup_hash (Eval.store ctx) ~kind:Resolve.KOp "fetch" in
+  let* resp_con = lookup_hash (Eval.store ctx) ~kind:Resolve.KCon "mk-response" in
+  Eval.register_root_handler ctx fetch_op (fun args ->
       match args with
       | [ Value.VCon { name = "mk-request"; args = [ Value.VText url; _body ]; _ } ] ->
           Ok
@@ -768,10 +768,10 @@ let install_net (ctx : Eval.ctx) : (unit, Diag.t list) result =
     driver. *)
 let install_dist (ctx : Eval.ctx) ~seed : (unit, Diag.t list) result =
   let ( let* ) = Result.bind in
-  let* sample_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "sample" in
-  let* observe_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "observe" in
+  let* sample_op = lookup_hash (Eval.store ctx) ~kind:Resolve.KOp "sample" in
+  let* observe_op = lookup_hash (Eval.store ctx) ~kind:Resolve.KOp "observe" in
   let rng = Infer_dist.Rng.make seed in
-  Hashtbl.replace ctx.Eval.root_handlers sample_op (fun args ->
+  Eval.register_root_handler ctx sample_op (fun args ->
       match args with
       | [ dv ] -> Result.bind (Infer_dist.dist_of_value ctx dv) (Infer_dist.sample_dist ctx rng)
       | args ->
@@ -779,7 +779,7 @@ let install_dist (ctx : Eval.ctx) ~seed : (unit, Diag.t list) result =
             (Runtime_err.Type_error
                (Printf.sprintf "sample expects one distribution, got %s"
                   (String.concat ", " (List.map Value.show args)))));
-  Hashtbl.replace ctx.Eval.root_handlers observe_op (fun _ -> Error Runtime_err.Observe_at_root);
+  Eval.register_root_handler ctx observe_op (fun _ -> Error Runtime_err.Observe_at_root);
   Ok ()
 
 (** [install_dry ctx ~audit] (TL.2) grants the WORLD without consequences: reads and the clock
@@ -797,8 +797,8 @@ let install_dry (ctx : Eval.ctx) ~(audit : string list ref) : (unit, Diag.t list
   let* () = install_dist ctx ~seed:0 in
   (* seed 0: dry runs are deterministic; sampling mutates nothing *)
   (* now override the mutating/world-reaching ops with recorders *)
-  let* write_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "write" in
-  Hashtbl.replace ctx.Eval.root_handlers write_op (fun args ->
+  let* write_op = lookup_hash (Eval.store ctx) ~kind:Resolve.KOp "write" in
+  Eval.register_root_handler ctx write_op (fun args ->
       match args with
       | [ Value.VText path; Value.VText content ] ->
           record (Printf.sprintf "written %s (%d bytes)" path (String.length content));
@@ -808,9 +808,9 @@ let install_dry (ctx : Eval.ctx) ~(audit : string list ref) : (unit, Diag.t list
             (Runtime_err.Type_error
                (Printf.sprintf "write expects a path and a text, got %s"
                   (String.concat ", " (List.map Value.show args)))));
-  let* fetch_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "fetch" in
-  let* resp_con = lookup_hash ctx.Eval.store ~kind:Resolve.KCon "mk-response" in
-  Hashtbl.replace ctx.Eval.root_handlers fetch_op (fun args ->
+  let* fetch_op = lookup_hash (Eval.store ctx) ~kind:Resolve.KOp "fetch" in
+  let* resp_con = lookup_hash (Eval.store ctx) ~kind:Resolve.KCon "mk-response" in
+  Eval.register_root_handler ctx fetch_op (fun args ->
       match args with
       | [ Value.VCon { name = "mk-request"; args = [ Value.VText url; _ ]; _ } ] ->
           record (Printf.sprintf "fetched %s" url);
@@ -826,8 +826,8 @@ let install_dry (ctx : Eval.ctx) ~(audit : string list ref) : (unit, Diag.t list
             (Runtime_err.Type_error
                (Printf.sprintf "fetch expects one request, got %s"
                   (String.concat ", " (List.map Value.show args)))));
-  let* complete_op = lookup_hash ctx.Eval.store ~kind:Resolve.KOp "complete" in
-  Hashtbl.replace ctx.Eval.root_handlers complete_op (fun args ->
+  let* complete_op = lookup_hash (Eval.store ctx) ~kind:Resolve.KOp "complete" in
+  Eval.register_root_handler ctx complete_op (fun args ->
       match args with
       | [ Value.VCon { name = "mk-prompt"; args = [ Value.VText text; _ ]; _ } ] ->
           record (Printf.sprintf "completed prompt %S" text);

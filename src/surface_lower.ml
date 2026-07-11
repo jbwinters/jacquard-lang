@@ -118,6 +118,13 @@ let rec lower_ty (ty : Surface_ast.ty) : (Kernel.ty, Diag.t list) result =
       let* items = map_results lower_ty items in
       Ok (node (Kernel.TTuple items))
   | Surface_ast.TyArrow (params, row, result) ->
+      let* () =
+        match row.row_hole with
+        | None -> Ok ()
+        | Some _ ->
+            error ~meta:row.row_meta ~code:"E1202"
+              "cannot lower a recovered surface effect-row hole"
+      in
       let* params = map_results lower_ty params in
       let* result = lower_ty result in
       let row =
@@ -146,7 +153,7 @@ and lower_expr_node ?(quote_depth = 0) (expr : Surface_ast.expr) : (Kernel.expr,
   | Surface_ast.Call (fn, args) ->
       let* fn = lower_expr_node ~quote_depth fn in
       let* args = map_results (lower_expr_node ~quote_depth) args in
-      Ok (node (Kernel.App (fn, args)))
+      Ok Kernel.{ it = App (fn, args); meta = Meta.with_surface_form "call" expr.meta }
   | Surface_ast.Fn (params, body) ->
       let* params = lower_lambda_params params in
       let* body = lower_expr_node ~quote_depth body in
@@ -399,6 +406,7 @@ let lower_definition ?annotation (top : Surface_ast.top) =
             Meta.with_signature signature_meta definition_meta
         | None -> top.meta
       in
+      let bmeta = if equation then Meta.with_surface_form "equation-definition" bmeta else bmeta in
       Ok Kernel.{ bname = name; annot; value; bmeta }
   | _ -> error ~meta:top.meta ~code:"E1235" "expected a surface term definition"
 

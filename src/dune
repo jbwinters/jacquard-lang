@@ -1,4 +1,5 @@
 (library
  (name jacquard)
  (public_name jacquard)
+ (private_modules Trusted_builtin Recovery_marker)
  (libraries digestif unix))

@@ -1,0 +1,3 @@
+(cram
+ (deps
+  ../../src/jacquard.cma))

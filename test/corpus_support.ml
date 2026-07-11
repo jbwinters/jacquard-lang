@@ -140,7 +140,7 @@ let sig_lines ~prelude_dir ~sigs_dir : (string list, Diag.t list) result =
   let* _ = Prelude.load ~dir:prelude_dir store in
   let* ctx = Check.make_ctx store in
   let* sigs = Prelude.builtin_signatures store in
-  List.iter (fun (h, s) -> Hashtbl.replace ctx.Check.builtin_sigs h s) sigs;
+  Check.register_builtin_signatures ctx sigs;
   let check_file file =
     let path = Filename.concat sigs_dir file in
     let* forms = Reader.parse_string ~file (read_file path) in
@@ -199,7 +199,7 @@ let check_pipeline ~prelude_dir ~file src : (unit, stage_ext * Diag.t list) resu
           | Error ds -> fail SOther ds
           | Ok ctx -> (
               (match Prelude.builtin_signatures store with
-              | Ok sigs -> List.iter (fun (h, s) -> Hashtbl.replace ctx.Check.builtin_sigs h s) sigs
+              | Ok sigs -> Check.register_builtin_signatures ctx sigs
               | Error _ -> ());
               match Reader.parse_string ~file src with
               | Error ds -> fail SParse ds
@@ -282,6 +282,9 @@ let diag_cases : (string * string * string list option) list =
       None );
   ]
 
+let diag_surface_cases = [ ("eta-positive", "condition = True\nbool.and-then(True, condition)\n") ]
+let diag_strict_recovery_cases = [ ("strict-recovery", "fixture-hole") ]
+
 (** Render the golden diagnostic lines: [name | rendered-diagnostic]. *)
 let diag_golden_lines ~prelude_dir : (string list, Diag.t list) result =
   let root =
@@ -293,7 +296,7 @@ let diag_golden_lines ~prelude_dir : (string list, Diag.t list) result =
   let* _ = Prelude.load ~dir:prelude_dir store in
   let* ctx = Check.make_ctx store in
   let* sigs = Prelude.builtin_signatures store in
-  List.iter (fun (h, s) -> Hashtbl.replace ctx.Check.builtin_sigs h s) sigs;
+  Check.register_builtin_signatures ctx sigs;
   let run_case (name, src, granted) =
     let render ds = List.map (fun d -> name ^ " | " ^ Diag.to_string d) ds in
     let* forms = Reader.parse_string ~file:(name ^ ".jqd") src in
@@ -330,13 +333,48 @@ let diag_golden_lines ~prelude_dir : (string list, Diag.t list) result =
     in
     go forms
   in
+  let run_surface_case (name, src) =
+    let render ds = List.map (fun d -> name ^ " | " ^ Diag.to_string d) ds in
+    let* tops = Surface_parse.strict (Surface_parse.recover_string ~file:(name ^ ".jac") src) in
+    let* lowered = Surface_lower.lower_tops tops in
+    let rec go = function
+      | [] -> Ok []
+      | top :: rest -> (
+          let* resolved = Resolve.resolve (Store.names_view store) top in
+          match Check.check_top ctx resolved with
+          | Error ds -> Ok (render ds)
+          | Ok _ -> (
+              match resolved with
+              | Kernel.Decl declaration ->
+                  let* _ = Store.put_decl store declaration in
+                  go rest
+              | Kernel.Expr _ -> go rest))
+    in
+    go lowered
+  in
+  let run_strict_recovery_case (name, hole) =
+    let meta = Meta.with_surface_hole hole Meta.empty in
+    let expression = Kernel.{ it = Lit (LInt 0); meta } in
+    match Check.check_top ctx (Kernel.Expr expression) with
+    | Error ds -> Ok (List.map (fun d -> name ^ " | " ^ Diag.to_string d) ds)
+    | Ok _ -> Ok []
+  in
   let rec all acc = function
     | [] -> Ok (List.concat (List.rev acc))
     | c :: rest ->
         let* lines = run_case c in
         all (lines :: acc) rest
   in
-  all [] diag_cases
+  let* bootstrap = all [] diag_cases in
+  let rec collect run acc = function
+    | [] -> Ok (List.concat (List.rev acc))
+    | case :: rest ->
+        let* lines = run case in
+        collect run (lines :: acc) rest
+  in
+  let* surface = collect run_surface_case [] diag_surface_cases in
+  let* strict_recovery = collect run_strict_recovery_case [] diag_strict_recovery_cases in
+  Ok (bootstrap @ surface @ strict_recovery)
 
 (* --- SL.9: the rings manifest, the layering audit, and the ring-0 freeze --- *)
 
@@ -421,7 +459,7 @@ let freeze_lines ~prelude_dir ~manifest : (string list, Diag.t list) result =
   let* _ = Prelude.load ~dir:prelude_dir store in
   let* ctx = Check.make_ctx store in
   let* sigs = Prelude.builtin_signatures store in
-  List.iter (fun (h, s) -> Hashtbl.replace ctx.Check.builtin_sigs h s) sigs;
+  Check.register_builtin_signatures ctx sigs;
   let rings = parse_rings manifest in
   let ring0 = List.filter_map (fun (n, r) -> if r = 0 then Some n else None) rings in
   let lines =

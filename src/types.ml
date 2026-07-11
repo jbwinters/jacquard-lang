@@ -37,12 +37,8 @@ exception Unify_error of string
 (* Construction                                                        *)
 (* ------------------------------------------------------------------ *)
 
-let counter = ref 0
-
-let fresh_id () =
-  incr counter;
-  !counter
-
+let counter = Atomic.make 0
+let fresh_id () = Atomic.fetch_and_add counter 1 + 1
 let new_tvar level = TVar (ref (Unbound { id = fresh_id (); level }))
 let new_rvar level : rtail = RVar (ref (RUnbound { id = fresh_id (); level }))
 let closed_row effects = { effects = List.sort_uniq Hash.compare effects; tail = RClosed }
@@ -260,6 +256,60 @@ let instantiate ~level (s : scheme) : ty =
     | _ -> r
   in
   go s.ty
+
+(** [clone_schemes schemes] deep-copies schemes and their mutable unification state while preserving
+    sharing between them. Reading the source schemes does not path-compress or otherwise mutate
+    them. *)
+let clone_schemes (schemes : scheme list) : scheme list =
+  let tmap : (int, ty) Hashtbl.t = Hashtbl.create 32 in
+  let rmap : (int, rtail) Hashtbl.t = Hashtbl.create 32 in
+  let rec go = function
+    | TCon (hash, args) -> TCon (hash, List.map go args)
+    | TTuple items -> TTuple (List.map go items)
+    | TArrow (params, row, result) -> TArrow (List.map go params, go_row row, go result)
+    | TSkolem (id, name) -> TSkolem (id, name)
+    | TVar reference -> (
+        match !reference with
+        | Link target -> go target
+        | Unbound { id; level } -> (
+            match Hashtbl.find_opt tmap id with
+            | Some copy -> copy
+            | None ->
+                let copy = new_tvar level in
+                Hashtbl.add tmap id copy;
+                copy))
+  and go_row row =
+    let rec flatten effects = function
+      | RClosed -> { effects = List.sort_uniq Hash.compare effects; tail = RClosed }
+      | RSkolem (id, name) ->
+          { effects = List.sort_uniq Hash.compare effects; tail = RSkolem (id, name) }
+      | RVar reference -> (
+          match !reference with
+          | RLink inner -> flatten (effects @ inner.effects) inner.tail
+          | RUnbound { id; level } ->
+              let tail =
+                match Hashtbl.find_opt rmap id with
+                | Some copy -> copy
+                | None ->
+                    let copy = new_rvar level in
+                    Hashtbl.add rmap id copy;
+                    copy
+              in
+              { effects = List.sort_uniq Hash.compare effects; tail })
+    in
+    flatten row.effects row.tail
+  in
+  List.map (fun scheme -> { scheme with ty = go scheme.ty }) schemes
+
+(** [unifiable left right] tests compatibility on private copies, leaving both inputs unchanged. *)
+let unifiable left right =
+  match clone_schemes [ mono left; mono right ] with
+  | [ left; right ] -> (
+      try
+        unify left.ty right.ty;
+        true
+      with Unify_error _ -> false)
+  | _ -> assert false
 
 (** Quantified variable ids of a scheme, for display ([forall a e. ...]). *)
 let quantified (s : scheme) : int list * int list =

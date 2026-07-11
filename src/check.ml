@@ -26,8 +26,8 @@
 
     Diagnostics (first error wins, codes E08xx): E0801 type mismatch, E0802 not a function, E0803
     application arity, E0804 annotation mismatch, E0805 unknown hash/metadata, E0806 constructor
-    pattern arity, E0810 type-constructor arity in an annotation, E0811 unbound type/row variable in
-    a declaration or annotation. *)
+    pattern arity, E0807 surface eta-expansion guidance, E0810 type-constructor arity in an
+    annotation, E0811 unbound type/row variable in a declaration or annotation. *)
 
 open Types
 module SMap = Map.Make (String)
@@ -57,6 +57,20 @@ type ctx = {
 }
 
 and match_site = { scrutinee_ty : Types.ty; arms : Kernel.clause list; site_meta : Meta.t }
+
+(** [store ctx] returns the declaration store used by the checker. *)
+let store ctx = ctx.store
+
+(** [register_builtin_signatures ctx signatures] installs trusted native-term schemes. Existing
+    entries at the same hashes are replaced. *)
+let register_builtin_signatures ctx signatures =
+  List.iter (fun (hash, scheme) -> Hashtbl.replace ctx.builtin_sigs hash scheme) signatures
+
+(** [tier_applications ctx] returns the application classifications recorded by strict checks. *)
+let tier_applications ctx = ctx.tier_apps
+
+(** [tier_operations ctx] returns the operation disciplines recorded by strict checks. *)
+let tier_operations ctx = ctx.tier_ops
 
 type env = { vars : scheme SMap.t; group : (string * ty) array }
 (** [group]: during a defterm group check, member index -> (name, mono or annotated type). *)
@@ -100,6 +114,16 @@ let show_scheme ctx s =
     ~name_of:(surface_name_of ctx Surface_name.Type)
     ~effect_name_of:(surface_name_of ctx Surface_name.Effect)
     s
+
+let surface_form_is meta forms =
+  match Meta.surface_form meta with Some form -> List.mem form forms | None -> false
+
+let eta_expansion_candidate ctx expected actual =
+  match (repr expected, repr actual) with
+  | TArrow ([], _, _), TArrow _ -> false
+  | TArrow ([], _, _), actual ->
+      Types.unifiable expected (TArrow ([], open_row ctx.level [], actual))
+  | _ -> false
 
 let unify_or ctx ?meta ?hint ~what expected actual =
   try Types.unify expected actual
@@ -161,6 +185,7 @@ let conv_fresh_rv ctx cenv name =
 let rec conv_ty ctx cenv (t : Kernel.ty) : ty =
   let meta = t.Kernel.meta in
   match t.Kernel.it with
+  | _ when Option.is_some (Meta.surface_hole meta) -> new_tvar ctx.level
   | Kernel.TRef (Kernel.Hashed h) ->
       let arity = type_arity ctx ~meta h in
       if arity <> 0 then
@@ -352,6 +377,7 @@ let concat_map2 f xs ys = List.concat (List.map2 f xs ys)
 let rec infer_pat ctx (p : Kernel.pat) : ty * (string * ty) list =
   let meta = p.Kernel.meta in
   match p.Kernel.it with
+  | _ when Option.is_some (Meta.surface_hole meta) -> (new_tvar ctx.level, [])
   | Kernel.PWild -> (new_tvar ctx.level, [])
   | Kernel.PVar x ->
       let t = new_tvar ctx.level in
@@ -421,6 +447,7 @@ let rec term_scheme ctx ?meta (h : Hash.t) : scheme =
 and infer ctx env ~(ambient : row) (e : Kernel.expr) : ty =
   let meta = e.Kernel.meta in
   match e.Kernel.it with
+  | _ when Option.is_some (Meta.surface_hole meta) -> new_tvar ctx.level
   | Kernel.Lit (Kernel.LInt _) -> prim ctx.p_int
   | Kernel.Lit (Kernel.LReal _) -> prim ctx.p_real
   | Kernel.Lit (Kernel.LText _) -> prim ctx.p_text
@@ -457,7 +484,37 @@ and infer ctx env ~(ambient : row) (e : Kernel.expr) : ty =
              | _ -> Tier.KFn
            in
            ctx.tier_apps <- (frow, kind) :: ctx.tier_apps);
-          List.iter2 (fun p a -> unify_or ctx ~meta ~what:"argument" p a) params arg_tys;
+          List.iteri
+            (fun index ((arg : Kernel.expr), (expected, actual)) ->
+              let what =
+                if surface_form_is meta [ "list"; "list-tail" ] then "list elements"
+                else if surface_form_is meta [ "pipe" ] && index = 0 then "pipe input"
+                else "argument"
+              in
+              let diagnostic_meta =
+                if surface_form_is meta [ "call"; "list"; "list-tail"; "pipe" ] then arg.meta
+                else meta
+              in
+              let eta =
+                Meta.is_surface_reference arg.meta
+                && (match arg.it with Kernel.Ref (_, Kernel.Term) -> true | _ -> false)
+                && eta_expansion_candidate ctx expected actual
+              in
+              try Types.unify expected actual
+              with Unify_error detail ->
+                if eta then
+                  err ~meta:arg.meta ~code:"E0807"
+                    ~hint:"wrap the reference in `fn () -> ...` so the computation is delayed"
+                    "this position expects a thunk, but `%s` is a bare reference; wrap it in `fn \
+                     () -> ...`"
+                    (Option.value ~default:"this value" (Meta.name arg.meta))
+                else
+                  err ~meta:diagnostic_meta
+                    ~hint:
+                      "the expected side comes from the surrounding context; make both sides agree"
+                    ~code:"E0801" "%s: expected %s, got %s (%s)" what (show_ty ctx expected)
+                    (show_ty ctx actual) detail)
+            (List.combine args (List.combine params arg_tys));
           (* record who introduced each effect, for the manifest diagnostic (W3.6) *)
           (let callee =
              match fn.Kernel.it with
@@ -483,8 +540,13 @@ and infer ctx env ~(ambient : row) (e : Kernel.expr) : ty =
           ctx.tier_apps <- (ambient, Tier.KFn) :: ctx.tier_apps;
           result
       | t ->
-          err ~meta ~hint:"only functions, constructors, effect operations, and resumptions apply"
-            ~code:"E0802" "%s is not a function" (show_ty ctx t))
+          if surface_form_is meta [ "pipe" ] then
+            let rhs_meta = Meta.surface_container "pipe-rhs" meta in
+            err ~meta:rhs_meta ~hint:"the right-hand side of `|>` must be callable" ~code:"E0802"
+              "the `|>` right-hand side has type %s, which is not a function" (show_ty ctx t)
+          else
+            err ~meta ~hint:"only functions, constructors, effect operations, and resumptions apply"
+              ~code:"E0802" "%s is not a function" (show_ty ctx t))
   | Kernel.Let { isrec = false; binder; value; body } -> (
       match binder.Kernel.it with
       | Kernel.PVar x when is_syntactic_value value ->
@@ -519,12 +581,20 @@ and infer ctx env ~(ambient : row) (e : Kernel.expr) : ty =
   | Kernel.Match (scrutinee, clauses) ->
       let sty = infer ctx env ~ambient scrutinee in
       let result = new_tvar ctx.level in
-      List.iter
-        (fun { Kernel.cpat; cbody; cmeta } ->
+      let surface_if = surface_form_is meta [ "if" ] in
+      List.iteri
+        (fun index { Kernel.cpat; cbody; cmeta } ->
           let pty, bindings = infer_pat ctx cpat in
-          unify_or ctx ~meta:cmeta ~what:"match pattern" sty pty;
+          unify_or ctx
+            ~meta:(if surface_if then scrutinee.meta else cmeta)
+            ~what:(if surface_if then "if condition" else "match pattern")
+            sty pty;
           let bty = infer ctx (bind_all bindings env) ~ambient cbody in
-          unify_or ctx ~meta:cmeta ~what:"match clause result" result bty)
+          let what =
+            if surface_if then if index = 0 then "if `then` branch" else "if `else` branch"
+            else "match clause result"
+          in
+          unify_or ctx ~meta:(if surface_if then cbody.meta else cmeta) ~what result bty)
         clauses;
       ctx.sites <-
         { scrutinee_ty = sty; arms = clauses; site_meta = scrutinee.Kernel.meta } :: ctx.sites;
@@ -662,13 +732,16 @@ and check_type_decl ctx (d : Kernel.decl) : unit =
 (* Check a defterm group mutually: annotated members are visible at their annotation
    (flexible conversion) and their bodies are checked against the rigid version; unannotated
    members are mono during the pass and generalized after. Fills [ctx.term_sigs]. *)
-and check_group ctx (decl : Kernel.decl) : unit =
+and check_group ?recovery_group ctx (decl : Kernel.decl) : unit =
   match decl.Kernel.it with
   | Kernel.DefTerm bindings ->
       let hashes =
-        match Canon.hash_decl decl with
-        | Ok { Canon.decl_hash; named } -> (decl_hash, List.map snd named)
-        | Error ds -> err ~code:"E0805" "%s" (String.concat "; " (List.map Diag.to_string ds))
+        match recovery_group with
+        | Some hashes -> hashes
+        | None -> (
+            match Canon.hash_decl decl with
+            | Ok { Canon.decl_hash; named } -> (decl_hash, List.map snd named)
+            | Error ds -> err ~code:"E0805" "%s" (String.concat "; " (List.map Diag.to_string ds)))
       in
       let decl_hash, member_hashes = hashes in
       ctx.checking <- decl_hash :: ctx.checking;
@@ -712,10 +785,23 @@ and check_group ctx (decl : Kernel.decl) : unit =
                   let rigid = conv_ty ctx cenv ann in
                   try Types.unify rigid vty
                   with Unify_error detail ->
-                    err ~meta:b.Kernel.bmeta ~code:"E0804"
-                      "binding %s does not match its annotation: expected %s, got %s (%s)"
-                      b.Kernel.bname (show_ty ctx rigid) (show_ty ctx vty) detail)
-              | None -> unify_or ctx ~meta:b.Kernel.bmeta ~what:"group member" (snd group.(i)) vty)
+                    if surface_form_is b.Kernel.bmeta [ "equation-definition" ] then
+                      err ~meta:b.Kernel.value.meta ~code:"E0804"
+                        "equation definition `%s` does not match its signature: expected %s, got \
+                         %s (%s)"
+                        b.Kernel.bname (show_ty ctx rigid) (show_ty ctx vty) detail
+                    else
+                      err ~meta:b.Kernel.bmeta ~code:"E0804"
+                        "binding %s does not match its annotation: expected %s, got %s (%s)"
+                        b.Kernel.bname (show_ty ctx rigid) (show_ty ctx vty) detail)
+              | None ->
+                  unify_or ctx ~meta:b.Kernel.bmeta
+                    ~what:
+                      (if surface_form_is b.Kernel.bmeta [ "equation-definition" ] then
+                         "equation definition"
+                       else "group member")
+                    (snd group.(i))
+                    vty)
             bindings;
           ctx.level <- ctx.level - 1;
           List.iteri
@@ -732,6 +818,7 @@ and check_group ctx (decl : Kernel.decl) : unit =
 
 (** A missing-pattern witness, rendered for the non-exhaustiveness diagnostic. *)
 type witness = WWild | WLit of Kernel.lit | WCon of string * witness list | WTuple of witness list
+[@@warning "-37"]
 
 let rec show_witness = function
   | WWild -> "_"
@@ -1073,10 +1160,15 @@ type top_sig = {
   warnings : Diag.t list;  (** redundant-clause warnings (W0801) from this form *)
 }
 
-(** Check one top-level form. Expressions infer under a fresh open ambient row — the row is the
-    program's authority manifest (W3.6). Declarations kind-check and, for defterm groups, type-check
-    mutually. *)
-let check_top ctx (top : Kernel.top) : (top_sig, Diag.t list) result =
+let recovery_hashes identity bindings =
+  List.mapi
+    (fun index binding ->
+      Hash.of_string
+        (Printf.sprintf "surface-recovery-member:%s:%d:%s" identity index binding.Kernel.bname))
+    bindings
+
+let check_top_with ?recovery_identity ~recovery ctx (top : Kernel.top) :
+    (top_sig, Diag.t list) result =
   ctx.sites <- [];
   match
     let partial =
@@ -1101,11 +1193,25 @@ let check_top ctx (top : Kernel.top) : (top_sig, Diag.t list) result =
           check_type_decl ctx d;
           match d.Kernel.it with
           | Kernel.DefTerm bindings ->
-              check_group ctx d;
+              let member_hashes =
+                if recovery then recovery_hashes (Option.get recovery_identity) bindings else []
+              in
+              let recovery_group =
+                Option.map
+                  (fun identity ->
+                    (Hash.of_string ("surface-recovery-group:" ^ identity), member_hashes))
+                  recovery_identity
+              in
+              check_group ?recovery_group ctx d;
               let named =
-                match Canon.hash_decl d with
-                | Ok { Canon.named; _ } -> named
-                | Error ds -> raise (Err (List.hd ds))
+                if recovery then
+                  List.map2
+                    (fun binding hash -> (binding.Kernel.bname, hash))
+                    bindings member_hashes
+                else
+                  match Canon.hash_decl d with
+                  | Ok { Canon.named; _ } -> named
+                  | Error ds -> raise (Err (List.hd ds))
               in
               {
                 names =
@@ -1121,11 +1227,82 @@ let check_top ctx (top : Kernel.top) : (top_sig, Diag.t list) result =
           | _ -> { names = []; row = None; warnings = [] })
     in
     (* exhaustiveness runs after inference so scrutinee types are solved (W3.5) *)
-    let warnings = check_matches ctx in
+    let warnings =
+      if recovery && Recovery_marker.top top then (
+        ctx.sites <- [];
+        [])
+      else check_matches ctx
+    in
     { partial with warnings }
   with
   | s -> Ok s
   | exception Err d -> Error [ d ]
+
+(** [check_top ctx top] is the strict semantic checker. It rejects analysis sentinels (E1202), and
+    declarations may be canonically hashed as part of scheme caching. Recovered surface trees must
+    use {!Surface_check.analyze}; they are never valid compile/run input. *)
+let check_top ctx top =
+  if Recovery_marker.top top then Error [ Recovery_marker.diagnostic "the strict type checker" ]
+  else check_top_with ~recovery:false ctx top
+
+module Recovery = struct
+  let clone_table_pairs builtin_sigs term_sigs =
+    let builtins =
+      Hashtbl.fold (fun hash scheme entries -> (hash, scheme) :: entries) builtin_sigs []
+    in
+    let terms = Hashtbl.fold (fun hash scheme entries -> (hash, scheme) :: entries) term_sigs [] in
+    let schemes = Types.clone_schemes (List.map snd (builtins @ terms)) in
+    let builtin_count = List.length builtins in
+    let rec split count left = function
+      | rest when count = 0 -> (List.rev left, rest)
+      | item :: rest -> split (count - 1) (item :: left) rest
+      | [] -> (List.rev left, [])
+    in
+    let cloned_builtins, cloned_terms = split builtin_count [] schemes in
+    let copy entries clones =
+      let table = Hashtbl.create (max 16 (List.length entries * 2)) in
+      List.iter2 (fun (hash, _) scheme -> Hashtbl.add table hash scheme) entries clones;
+      table
+    in
+    (copy builtins cloned_builtins, copy terms cloned_terms)
+
+  (** [isolated_ctx base] copies store configuration and registered schemes into fresh mutable
+      checker state. Neither checking nor type unification can mutate [base] or its cached schemes.
+  *)
+  let isolated_ctx base =
+    let builtin_sigs, term_sigs = clone_table_pairs base.builtin_sigs base.term_sigs in
+    {
+      store = base.store;
+      p_int = base.p_int;
+      p_real = base.p_real;
+      p_text = base.p_text;
+      p_code = base.p_code;
+      builtin_sigs;
+      term_sigs;
+      level = 0;
+      checking = [];
+      sites = [];
+      origins = [];
+      tier_apps = [];
+      tier_ops = [];
+    }
+
+  (** Recovery checking is an internal service for [Surface_check]. [identity] need only be unique
+      within one isolated context; it is never persisted or returned. *)
+  let check_top ~identity ctx top =
+    check_top_with ~recovery:true ~recovery_identity:identity ctx top
+end
+
+type recovery_session = Recovery_session of ctx
+
+(** [start_recovery base] creates an isolated checker session for editor recovery. Mutable checker
+    state and all type schemes are cloned, so recovery unification cannot affect [base]. *)
+let start_recovery base = Recovery_session (Recovery.isolated_ctx base)
+
+(** [check_recovery_top ~identity session top] checks one recovery-marked analysis island inside an
+    isolated session. Results may feed later islands in the same session, but no recovered term is
+    installed in a store or admitted to the strict checker. *)
+let check_recovery_top ~identity (Recovery_session ctx) top = Recovery.check_top ~identity ctx top
 
 (** [force_term ctx h] computes [h]'s scheme, checking its declaration on demand — the whole-store
     sweep the tier statistics need (PF.2 phase 1). *)
@@ -1180,6 +1357,7 @@ let checker_codes : (string * string) list =
     ("E0804", "annotation mismatch (the annotation is the contract)");
     ("E0805", "reference kind mismatch or unknown hash");
     ("E0806", "constructor pattern arity mismatch");
+    ("E0807", "bare surface term reference where a compatible thunk is expected");
     ("E0810", "type constructor arity (kind) error");
     ("E0811", "unbound type or row variable");
     ("E0812", "unbound variable in an effect operation signature");
@@ -1187,4 +1365,5 @@ let checker_codes : (string * string) list =
     ("E0814", "ungranted effect in the program manifest");
     ("E0815", "effectful top-level definition body (effects belong on arrows)");
     ("W0801", "redundant match clause");
+    ("E1202", "recovery marker rejected by the strict checker");
   ]

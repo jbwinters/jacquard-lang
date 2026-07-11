@@ -104,8 +104,7 @@ let test_manifest_pure () =
           | Error ds -> Eval_support.fail_diags "ctx" ds
           | Ok cctx -> (
               (match Prelude.builtin_signatures store with
-              | Ok sigs ->
-                  List.iter (fun (h, s) -> Hashtbl.replace cctx.Check.builtin_sigs h s) sigs
+              | Ok sigs -> Check.register_builtin_signatures cctx sigs
               | Error ds -> Eval_support.fail_diags "sigs" ds);
               match Check.check_top cctx (Kernel.Expr e) with
               | Error ds -> Eval_support.fail_diags "check" ds

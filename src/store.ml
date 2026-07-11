@@ -185,7 +185,11 @@ let entry_kind (decl : Kernel.decl) = function
     name it introduces (members, type + constructors, effect + operations) in the name index,
     replacing existing bindings of the same names. Idempotent on the object file. *)
 let put_decl ?origin t (decl : Kernel.decl) : (Canon.decl_hashes, Diag.t list) result =
-  match Canon.hash_decl decl with
+  let hashes =
+    if Recovery_marker.decl decl then Error [ Recovery_marker.diagnostic "store insertion" ]
+    else Canon.hash_decl decl
+  in
+  match hashes with
   | Error ds -> Error ds
   | Ok hs ->
       let path = object_path t hs.Canon.decl_hash in

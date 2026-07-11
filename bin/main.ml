@@ -99,7 +99,7 @@ let make_checker store =
   | Error ds -> Error ds
   | Ok cctx ->
       (match Prelude.builtin_signatures store with
-      | Ok sigs -> List.iter (fun (h, s) -> Hashtbl.replace cctx.Check.builtin_sigs h s) sigs
+      | Ok sigs -> Check.register_builtin_signatures cctx sigs
       | Error _ -> ());
       Ok cctx
 
@@ -108,7 +108,7 @@ let run_cmd file allows prelude store_dir seed infer_cache origin dry_run =
   | Error ds -> print_diags ds
   | Ok (store, ctx) -> (
       (* run never reads coverage; skip the per-reference bookkeeping (PF.2 phase 2) *)
-      ctx.Eval.track_coverage <- false;
+      Eval.set_coverage_tracking ctx false;
       let seed =
         (* OS-entropy seeded unless pinned; --seed makes sampling runs reproducible (SL.7) *)
         match seed with
@@ -222,7 +222,7 @@ let check_cmd file prelude print_sigs manifest origin =
       | Error ds -> print_diags ds
       | Ok cctx -> (
           (match Prelude.builtin_signatures store with
-          | Ok sigs -> List.iter (fun (h, s) -> Hashtbl.replace cctx.Check.builtin_sigs h s) sigs
+          | Ok sigs -> Check.register_builtin_signatures cctx sigs
           | Error _ -> () (* prelude without builtins: marker bodies type as code *));
           let granted =
             match manifest with
@@ -747,7 +747,7 @@ let replay_cmd log_file program forks to_n compare prelude =
                  Store.lookup_kind store "mk-response" Resolve.KCon )
              with
             | Some { Resolve.hash = fetch_op; _ }, Some { Resolve.hash = resp_con; _ } ->
-                Hashtbl.replace ctx.Eval.root_handlers fetch_op (fun args ->
+                Eval.register_root_handler ctx fetch_op (fun args ->
                     match args with
                     | [
                      Value.VCon
@@ -1312,7 +1312,7 @@ let tiers_cmd files prelude =
       | Error ds -> print_diags ds
       | Ok cctx -> (
           (match Prelude.builtin_signatures store with
-          | Ok sigs -> List.iter (fun (h, s) -> Hashtbl.replace cctx.Check.builtin_sigs h s) sigs
+          | Ok sigs -> Check.register_builtin_signatures cctx sigs
           | Error _ -> ());
           (* decls are checked at load, so type errors carry source positions and fail the
              command outright — an error is an error, never a partial table *)
@@ -1399,7 +1399,7 @@ let tiers_cmd files prelude =
                   line "data" (count (( = ) Tier.Data) decl_tiers) dt;
                   (* call sites by callee row, solved *)
                   let apps =
-                    List.map (fun (r, k) -> (Tier.classify_row r, k)) cctx.Check.tier_apps
+                    List.map (fun (r, k) -> (Tier.classify_row r, k)) (Check.tier_applications cctx)
                   in
                   let at = List.length apps in
                   Printf.printf "\n== call sites: %d applications ==\n" at;
@@ -1429,7 +1429,7 @@ let tiers_cmd files prelude =
                   |> List.sort compare
                   |> List.iter (fun (name, n) -> Printf.printf "  %-16s %5d\n" name n);
                   (* handler op clauses by resume discipline *)
-                  let ops = cctx.Check.tier_ops in
+                  let ops = Check.tier_operations cctx in
                   let ot = List.length ops in
                   Printf.printf "\n== handler op clauses: %d ==\n" ot;
                   List.iter

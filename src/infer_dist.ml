@@ -72,8 +72,8 @@ let support ctx (d : dist_v) : ((Value.t * float) list, Runtime_err.t) result =
   match d with
   | Bernoulli p -> (
       match
-        ( Store.lookup_kind ctx.Eval.store "true" Resolve.KCon,
-          Store.lookup_kind ctx.Eval.store "false" Resolve.KCon )
+        ( Store.lookup_kind (Eval.store ctx) "true" Resolve.KCon,
+          Store.lookup_kind (Eval.store ctx) "false" Resolve.KCon )
       with
       | Some { Resolve.hash = t; _ }, Some { Resolve.hash = f; _ } ->
           Ok
@@ -118,10 +118,21 @@ let pmf ctx (d : dist_v) (v : Value.t) : (float, Runtime_err.t) result =
 (* Run a state to either a terminal value or the first root-reaching dist op. *)
 type outcome = Done of Value.t | Op of { name : string; args : Value.t list; resume : Value.t }
 
+type validated_outcome =
+  | Validated_done of Value.t
+  | Validated_op of { name : string; args : Value.t list; resume : Eval.validated_kont }
+
 let run_until_op (ctx : Eval.ctx) (state : Eval.state) : (outcome, Runtime_err.t) result =
   match Eval.run_state_capturing ctx state with
   | Ok (Eval.CValue v) -> Ok (Done v)
   | Ok (Eval.COp { name; args; kont; _ }) -> Ok (Op { name; args; resume = VResume kont })
+  | Error e -> Error e
+
+let run_until_op_validated (ctx : Eval.ctx) (state : Eval.validated_state) :
+    (validated_outcome, Runtime_err.t) result =
+  match Eval.run_validated_state_capturing ctx state with
+  | Ok (Eval.VCValue value) -> Ok (Validated_done value)
+  | Ok (Eval.VCOp { name; args; kont; _ }) -> Ok (Validated_op { name; args; resume = kont })
   | Error e -> Error e
 
 (* --- enumeration (W4.2) --- *)
@@ -242,58 +253,70 @@ let sample_dist ctx rng (d : dist_v) : (Value.t, Runtime_err.t) result =
       Ok (Value.VInt (lo + int_of_float (Rng.float rng *. float_of_int n)))
   | _ -> Result.map (draw rng) (support ctx d)
 
-(** [likelihood_weighting ctx ~seed ~samples model] runs K weighted executions of a model state
-    THUNK (a function producing the state, so each run restarts evaluation). *)
+(** [likelihood_weighting ctx ~seed ~samples model] obtains one immutable initial state from
+    [model], validates it, then reuses it for K independent weighted executions. The factory is
+    evaluated exactly once; recovery-marked initial states fail before the first execution. *)
 let likelihood_weighting (ctx : Eval.ctx) ~seed ~samples (model : unit -> Eval.state) :
     (posterior, Diag.t list) result =
   let master = Rng.make seed in
   let runs : weighted list ref = ref [] in
-  let rec one_run rng (state : Eval.state) (weight : float) : (unit, Runtime_err.t) result =
-    match run_until_op ctx state with
+  let rec one_run rng (state : Eval.validated_state) (weight : float) : (unit, Runtime_err.t) result
+      =
+    match run_until_op_validated ctx state with
     | Error e -> Error e
-    | Ok (Done v) ->
+    | Ok (Validated_done v) ->
         runs := { value = v; weight } :: !runs;
         Ok ()
-    | Ok (Op { name = "sample"; args = [ dv ]; resume = VResume kont }) -> (
+    | Ok (Validated_op { name = "sample"; args = [ dv ]; resume }) -> (
         match Result.bind (dist_of_value ctx dv) (sample_dist ctx rng) with
         | Error e -> Error e
-        | Ok x -> one_run rng (Eval.resume_state kont x) weight)
-    | Ok (Op { name = "observe"; args = [ dv; v ]; resume = VResume kont }) -> (
+        | Ok x ->
+            Result.bind (Eval.resume_validated_state ctx resume x) (fun state ->
+                one_run rng state weight))
+    | Ok (Validated_op { name = "observe"; args = [ dv; v ]; resume }) -> (
         match Result.bind (dist_of_value ctx dv) (fun d -> pmf ctx d v) with
         | Error e -> Error e
-        | Ok p -> one_run rng (Eval.resume_state kont Value.unit_v) (weight *. p))
-    | Ok (Op { name; _ }) ->
+        | Ok p ->
+            Result.bind (Eval.resume_validated_state ctx resume Value.unit_v) (fun state ->
+                one_run rng state (weight *. p)))
+    | Ok (Validated_op { name; _ }) ->
         (* a non-dist op reached the root during a weighted run (unreachable via the CLI,
            which manifest-checks first; the raw harness can get here) *)
         Error (Runtime_err.Unhandled { effect_ = "(not handled during inference)"; op = name })
   in
-  let rec k_runs i =
+  let initial = model () in
+  let rec k_runs initial i =
     if i >= samples then Ok ()
     else
       let rng = Rng.split master in
-      match one_run rng (model ()) 1.0 with Error e -> Error e | Ok () -> k_runs (i + 1)
+      let state = Eval.fresh_validated_state ctx initial in
+      match one_run rng state 1.0 with Error e -> Error e | Ok () -> k_runs initial (i + 1)
   in
-  match k_runs 0 with
+  match Eval.validate_state_once ctx initial with
   | Error e -> Error [ Diag.error ~code:"E0902" (Runtime_err.to_string e) ]
-  | Ok () ->
-      let total = List.fold_left (fun acc { weight; _ } -> acc +. weight) 0.0 !runs in
-      if total <= 0.0 then
-        err ~code:"E0901" "the posterior is empty: every run is impossible under the observations"
-      else
-        let tbl : (string, Value.t * float ref) Hashtbl.t = Hashtbl.create 16 in
-        List.iter
-          (fun { value; weight } ->
-            let key = Value.show value in
-            match Hashtbl.find_opt tbl key with
-            | Some (_, w) -> w := !w +. weight
-            | None -> Hashtbl.add tbl key (value, ref weight))
-          !runs;
-        let entries =
-          Hashtbl.fold (fun _ (v, w) acc -> (v, !w /. total) :: acc) tbl []
-          |> List.sort (fun (va, pa) (vb, pb) ->
-              match compare pb pa with 0 -> compare (Value.show va) (Value.show vb) | c -> c)
-        in
-        Ok { entries }
+  | Ok initial -> (
+      match k_runs initial 0 with
+      | Error e -> Error [ Diag.error ~code:"E0902" (Runtime_err.to_string e) ]
+      | Ok () ->
+          let total = List.fold_left (fun acc { weight; _ } -> acc +. weight) 0.0 !runs in
+          if total <= 0.0 then
+            err ~code:"E0901"
+              "the posterior is empty: every run is impossible under the observations"
+          else
+            let tbl : (string, Value.t * float ref) Hashtbl.t = Hashtbl.create 16 in
+            List.iter
+              (fun { value; weight } ->
+                let key = Value.show value in
+                match Hashtbl.find_opt tbl key with
+                | Some (_, w) -> w := !w +. weight
+                | None -> Hashtbl.add tbl key (value, ref weight))
+              !runs;
+            let entries =
+              Hashtbl.fold (fun _ (v, w) acc -> (v, !w /. total) :: acc) tbl []
+              |> List.sort (fun (va, pa) (vb, pb) ->
+                  match compare pb pa with 0 -> compare (Value.show va) (Value.show vb) | c -> c)
+            in
+            Ok { entries })
 
 (** Render a posterior table, one row per value, probabilities to 6 places. *)
 let show_posterior (p : posterior) : string =

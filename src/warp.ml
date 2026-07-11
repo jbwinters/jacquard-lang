@@ -97,17 +97,7 @@ let verdict_of_report (v : Value.t) : (verdict, string) result =
    tests record the constant itself but not what it touched. Safe direction only — a
    warm complement can over-report "uncovered", never falsely claim covered. *)
 let run_thunk ctx ~test_run (thunk : Value.t) : (verdict * Hash.t list, string) result =
-  let outer = ctx.Eval.coverage in
-  let mine_tbl = Hashtbl.create 64 in
-  ctx.Eval.coverage <- mine_tbl;
-  let result =
-    Fun.protect
-      ~finally:(fun () ->
-        Hashtbl.iter (fun h () -> Hashtbl.replace outer h ()) mine_tbl;
-        ctx.Eval.coverage <- outer)
-      (fun () -> Eval.call ctx test_run [ thunk ])
-  in
-  let mine = Hashtbl.fold (fun h () acc -> h :: acc) mine_tbl [] in
+  let result, mine = Eval.with_fresh_coverage ctx (fun () -> Eval.call ctx test_run [ thunk ]) in
   match result with
   | Ok report -> Result.map (fun v -> (v, mine)) (verdict_of_report report)
   | Error e ->
@@ -154,8 +144,8 @@ let choice_value ctx (d : Infer_dist.dist_v) (i : int) : (Value.t, Runtime_err.t
   | Infer_dist.Categorical entries -> Ok (fst (List.nth entries i))
   | Infer_dist.Bernoulli _ -> (
       match
-        ( Store.lookup_kind ctx.Eval.store "true" Resolve.KCon,
-          Store.lookup_kind ctx.Eval.store "false" Resolve.KCon )
+        ( Store.lookup_kind (Eval.store ctx) "true" Resolve.KCon,
+          Store.lookup_kind (Eval.store ctx) "false" Resolve.KCon )
       with
       | Some { Resolve.hash = t; _ }, Some { Resolve.hash = f; _ } ->
           if i = 0 then Ok (Value.VCon { con = f; name = "false"; args = [] })
@@ -186,64 +176,55 @@ type prop_run = { pr_verdict : verdict; pr_log : choice list }
    skips and the generator-validity theorem test asserts never happens. *)
 let drive_prop ctx ~rng ~(forced : int list) (thunk : Value.t) :
     (prop_run, [ `Diverged | `Runtime of string ]) result =
-  let saved = ctx.Eval.capture_ops in
-  ctx.Eval.capture_ops <- true;
-  Fun.protect
-    ~finally:(fun () -> ctx.Eval.capture_ops <- saved)
-    (fun () ->
-      let log = ref [] in
-      let entries = ref [] in
-      let rec go state forced =
-        match Eval.run_state_capturing ctx state with
+  let log = ref [] in
+  let entries = ref [] in
+  let rec go state forced =
+    match Eval.run_state_capturing ctx state with
+    | Error e -> Error (`Runtime (Runtime_err.to_string e))
+    | Ok (Eval.CValue _) ->
+        let es = List.rev !entries in
+        let soft = List.filter_map (fun (l, ok) -> if ok then None else Some l) es in
+        let v =
+          if soft <> [] then Fail { soft; hard = None }
+          else if es = [] then NoChecks
+          else Pass (List.length es)
+        in
+        Ok { pr_verdict = v; pr_log = List.rev !log }
+    | Ok (Eval.COp { name = "sample"; args = [ dv ]; kont; _ }) -> (
+        match Infer_dist.dist_of_value ctx dv with
         | Error e -> Error (`Runtime (Runtime_err.to_string e))
-        | Ok (Eval.CValue _) ->
-            let es = List.rev !entries in
-            let soft = List.filter_map (fun (l, ok) -> if ok then None else Some l) es in
-            let v =
-              if soft <> [] then Fail { soft; hard = None }
-              else if es = [] then NoChecks
-              else Pass (List.length es)
+        | Ok d -> (
+            let arity = choice_arity d in
+            let pick, rest =
+              match forced with
+              | i :: rest -> ((if i < arity then Some i else None), rest)
+              | [] -> (Some (fresh_index rng d), [])
             in
-            Ok { pr_verdict = v; pr_log = List.rev !log }
-        | Ok (Eval.COp { name = "sample"; args = [ dv ]; kont; _ }) -> (
-            match Infer_dist.dist_of_value ctx dv with
-            | Error e -> Error (`Runtime (Runtime_err.to_string e))
-            | Ok d -> (
-                let arity = choice_arity d in
-                let pick, rest =
-                  match forced with
-                  | i :: rest -> ((if i < arity then Some i else None), rest)
-                  | [] -> (Some (fresh_index rng d), [])
-                in
-                match pick with
-                | None -> Error `Diverged
-                | Some i -> (
-                    match choice_value ctx d i with
-                    | Error e -> Error (`Runtime (Runtime_err.to_string e))
-                    | Ok v ->
-                        log := { c_dist = d; c_index = i } :: !log;
-                        go (Eval.resume_state kont v) rest)))
-        | Ok (Eval.COp { name = "observe"; args = [ _; _ ]; kont; _ }) ->
-            (* sampling lane: conditioning is ignored (weights are an enumeration
+            match pick with
+            | None -> Error `Diverged
+            | Some i -> (
+                match choice_value ctx d i with
+                | Error e -> Error (`Runtime (Runtime_err.to_string e))
+                | Ok v ->
+                    log := { c_dist = d; c_index = i } :: !log;
+                    go (Eval.resume_state kont v) rest)))
+    | Ok (Eval.COp { name = "observe"; args = [ _; _ ]; kont; _ }) ->
+        (* sampling lane: conditioning is ignored (weights are an enumeration
                concept); the exhaustive lane scales branches properly *)
-            go (Eval.resume_state kont Value.unit_v) forced
-        | Ok
-            (Eval.COp
-               {
-                 name = "check";
-                 args = [ Value.VCon { name = ok; _ }; Value.VText label ];
-                 kont;
-                 _;
-               }) ->
-            entries := (label, ok = "true") :: !entries;
-            go (Eval.resume_state kont Value.unit_v) forced
-        | Ok (Eval.COp { name = "fail"; args = [ Value.VText msg ]; _ }) ->
-            let es = List.rev !entries in
-            let soft = List.filter_map (fun (l, ok) -> if ok then None else Some l) es in
-            Ok { pr_verdict = Fail { soft; hard = Some msg }; pr_log = List.rev !log }
-        | Ok (Eval.COp { name; _ }) -> Error (`Runtime ("prop performed unhandled op " ^ name))
-      in
-      go (Eval.apply_state ctx thunk []) forced)
+        go (Eval.resume_state kont Value.unit_v) forced
+    | Ok
+        (Eval.COp
+           { name = "check"; args = [ Value.VCon { name = ok; _ }; Value.VText label ]; kont; _ })
+      ->
+        entries := (label, ok = "true") :: !entries;
+        go (Eval.resume_state kont Value.unit_v) forced
+    | Ok (Eval.COp { name = "fail"; args = [ Value.VText msg ]; _ }) ->
+        let es = List.rev !entries in
+        let soft = List.filter_map (fun (l, ok) -> if ok then None else Some l) es in
+        Ok { pr_verdict = Fail { soft; hard = Some msg }; pr_log = List.rev !log }
+    | Ok (Eval.COp { name; _ }) -> Error (`Runtime ("prop performed unhandled op " ^ name))
+  in
+  go (Eval.apply_state ctx thunk []) forced
 
 let is_fail = function Fail _ -> true | _ -> false
 
@@ -343,87 +324,76 @@ let run_prop_sampling ctx ~seed ~samples (thunk : Value.t) : (verdict * string, 
     completions; zero-weight branches prune without counting. Blowing the budget is a clean refusal
     (E0905), never a partial pass. *)
 let run_prop_exhaustive ctx ~budget (thunk : Value.t) : (verdict * string, Diag.t) result =
-  let saved = ctx.Eval.capture_ops in
-  ctx.Eval.capture_ops <- true;
-  Fun.protect
-    ~finally:(fun () -> ctx.Eval.capture_ops <- saved)
-    (fun () ->
-      let verified = ref 0 in
-      let branches = ref 0 in
-      let last_site = ref "the property body" in
-      let failure = ref None in
-      let exception Budget of string in
-      let rec explore state weight entries =
-        if !failure <> None then Ok ()
-        else if weight = 0.0 then Ok () (* pruned: not verified *)
-        else (
-          incr branches;
-          if !branches > budget then
-            raise
-              (Budget
-                 (Printf.sprintf "%d explorations (cap %d), last at %s" !branches budget !last_site));
-          match Eval.run_state_capturing ctx state with
+  let verified = ref 0 in
+  let branches = ref 0 in
+  let last_site = ref "the property body" in
+  let failure = ref None in
+  let exception Budget of string in
+  let rec explore state weight entries =
+    if !failure <> None then Ok ()
+    else if weight = 0.0 then Ok () (* pruned: not verified *)
+    else (
+      incr branches;
+      if !branches > budget then
+        raise
+          (Budget
+             (Printf.sprintf "%d explorations (cap %d), last at %s" !branches budget !last_site));
+      match Eval.run_state_capturing ctx state with
+      | Error e -> Error (Runtime_err.to_string e)
+      | Ok (Eval.CValue _) ->
+          incr verified;
+          let es = List.rev entries in
+          let soft = List.filter_map (fun (l, ok) -> if ok then None else Some l) es in
+          if soft <> [] then failure := Some (Fail { soft; hard = None });
+          Ok ()
+      | Ok (Eval.COp { name = "sample"; args = [ dv ]; kont; _ }) -> (
+          match
+            Result.bind (Infer_dist.dist_of_value ctx dv) (fun d -> Infer_dist.support ctx d)
+          with
           | Error e -> Error (Runtime_err.to_string e)
-          | Ok (Eval.CValue _) ->
-              incr verified;
-              let es = List.rev entries in
-              let soft = List.filter_map (fun (l, ok) -> if ok then None else Some l) es in
-              if soft <> [] then failure := Some (Fail { soft; hard = None });
-              Ok ()
-          | Ok (Eval.COp { name = "sample"; args = [ dv ]; kont; _ }) -> (
-              match
-                Result.bind (Infer_dist.dist_of_value ctx dv) (fun d -> Infer_dist.support ctx d)
-              with
-              | Error e -> Error (Runtime_err.to_string e)
-              | Ok support ->
-                  last_site := Printf.sprintf "a %d-way sample site" (List.length support);
-                  let rec go = function
-                    | [] -> Ok ()
-                    | (v, p) :: rest -> (
-                        match explore (Eval.resume_state kont v) (weight *. p) entries with
-                        | Error e -> Error e
-                        | Ok () -> go rest)
-                  in
-                  go support)
-          | Ok (Eval.COp { name = "observe"; args = [ dv; v ]; kont; _ }) -> (
-              match
-                Result.bind (Infer_dist.dist_of_value ctx dv) (fun d -> Infer_dist.pmf ctx d v)
-              with
-              | Error e -> Error (Runtime_err.to_string e)
-              | Ok p -> explore (Eval.resume_state kont Value.unit_v) (weight *. p) entries)
-          | Ok
-              (Eval.COp
-                 {
-                   name = "check";
-                   args = [ Value.VCon { name = ok; _ }; Value.VText label ];
-                   kont;
-                   _;
-                 }) ->
-              explore (Eval.resume_state kont Value.unit_v) weight ((label, ok = "true") :: entries)
-          | Ok (Eval.COp { name = "fail"; args = [ Value.VText msg ]; _ }) ->
-              let es = List.rev entries in
-              let soft = List.filter_map (fun (l, ok) -> if ok then None else Some l) es in
-              failure := Some (Fail { soft; hard = Some msg });
-              Ok ()
-          | Ok (Eval.COp { name; _ }) -> Error ("prop performed unhandled op " ^ name))
-      in
-      match explore (Eval.apply_state ctx thunk []) 1.0 [] with
-      | exception Budget site ->
-          Error
-            (Diag.error ~code:"E0905"
-               (Printf.sprintf
-                  "exhaustive verification exceeded its budget: %s; raise --budget or shrink the \
-                   generators"
-                  site))
-      | Error e -> Error (Diag.error ~code:"E0902" e)
-      | Ok () -> (
-          match !failure with
-          | Some v -> Ok (v, "prop: falsified exhaustively")
-          | None ->
-              Ok
-                ( Pass !verified,
-                  Printf.sprintf "verified exhaustively (%d case%s)" !verified
-                    (if !verified = 1 then "" else "s") )))
+          | Ok support ->
+              last_site := Printf.sprintf "a %d-way sample site" (List.length support);
+              let rec go = function
+                | [] -> Ok ()
+                | (v, p) :: rest -> (
+                    match explore (Eval.resume_state kont v) (weight *. p) entries with
+                    | Error e -> Error e
+                    | Ok () -> go rest)
+              in
+              go support)
+      | Ok (Eval.COp { name = "observe"; args = [ dv; v ]; kont; _ }) -> (
+          match Result.bind (Infer_dist.dist_of_value ctx dv) (fun d -> Infer_dist.pmf ctx d v) with
+          | Error e -> Error (Runtime_err.to_string e)
+          | Ok p -> explore (Eval.resume_state kont Value.unit_v) (weight *. p) entries)
+      | Ok
+          (Eval.COp
+             { name = "check"; args = [ Value.VCon { name = ok; _ }; Value.VText label ]; kont; _ })
+        ->
+          explore (Eval.resume_state kont Value.unit_v) weight ((label, ok = "true") :: entries)
+      | Ok (Eval.COp { name = "fail"; args = [ Value.VText msg ]; _ }) ->
+          let es = List.rev entries in
+          let soft = List.filter_map (fun (l, ok) -> if ok then None else Some l) es in
+          failure := Some (Fail { soft; hard = Some msg });
+          Ok ()
+      | Ok (Eval.COp { name; _ }) -> Error ("prop performed unhandled op " ^ name))
+  in
+  match explore (Eval.apply_state ctx thunk []) 1.0 [] with
+  | exception Budget site ->
+      Error
+        (Diag.error ~code:"E0905"
+           (Printf.sprintf
+              "exhaustive verification exceeded its budget: %s; raise --budget or shrink the \
+               generators"
+              site))
+  | Error e -> Error (Diag.error ~code:"E0902" e)
+  | Ok () -> (
+      match !failure with
+      | Some v -> Ok (v, "prop: falsified exhaustively")
+      | None ->
+          Ok
+            ( Pass !verified,
+              Printf.sprintf "verified exhaustively (%d case%s)" !verified
+                (if !verified = 1 then "" else "s") ))
 
 (* --- the cache (W6.3) --- *)
 
@@ -574,18 +544,7 @@ let rec value_has_prop (v : Value.t) : bool =
   | _ -> false
 
 (* per-test coverage collection around a driver call (same swap as run_thunk) *)
-let with_coverage ctx f =
-  let outer = ctx.Eval.coverage in
-  let mine_tbl = Hashtbl.create 64 in
-  ctx.Eval.coverage <- mine_tbl;
-  let result =
-    Fun.protect
-      ~finally:(fun () ->
-        Hashtbl.iter (fun h () -> Hashtbl.replace outer h ()) mine_tbl;
-        ctx.Eval.coverage <- outer)
-      f
-  in
-  (result, Hashtbl.fold (fun h () acc -> h :: acc) mine_tbl [])
+let with_coverage ctx f = Eval.with_fresh_coverage ctx f
 
 (* walk one discovered test VALUE, recursing into groups *)
 let rec run_value ctx ~test_run ~prop_mode ~display (v : Value.t) : (outcome list, string) result =
@@ -687,7 +646,7 @@ let run_discovered ctx (cctx : Check.ctx) ~test_run ~prop_mode ~cache_dir ~(gran
                          outcomes);
                   Ok outcomes)))
   | World (name, h) ->
-      let required = world_required cctx ctx.Eval.store in
+      let required = world_required cctx (Eval.store ctx) in
       let missing = List.filter (fun r -> not (List.exists (Hash.equal r) granted)) required in
       if missing <> [] then
         let names =
@@ -696,7 +655,7 @@ let run_discovered ctx (cctx : Check.ctx) ~test_run ~prop_mode ~cache_dir ~(gran
               List.find_map
                 (fun (n, { Resolve.hash; kind }) ->
                   if kind = Resolve.KEffect && Hash.equal hash mh then Some n else None)
-                (Store.names ctx.Eval.store))
+                (Store.names (Eval.store ctx)))
             missing
         in
         Ok

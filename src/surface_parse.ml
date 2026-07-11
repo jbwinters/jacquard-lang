@@ -452,11 +452,16 @@ and parse_primary state ~allow_newlines =
       let meta =
         match projected with Some _ -> Meta.with_surface_ref_kind "con" meta | None -> meta
       in
+      let meta = Meta.with_surface_reference meta in
       Surface_ast.{ it = Name (Option.value ~default:name projected); meta }
   | Surface_lex.Escaped (((Surface_name.Term | Surface_name.Con | Surface_name.Op) as kind), name)
     ->
       ignore (advance state);
-      let meta = Meta.with_surface_ref_kind (Surface_name.kind_tag kind) meta in
+      let meta =
+        meta
+        |> Meta.with_surface_ref_kind (Surface_name.kind_tag kind)
+        |> Meta.with_surface_reference
+      in
       Surface_ast.{ it = Name name; meta }
   | Surface_lex.HashRef (hash, Surface_name.Term) ->
       ignore (advance state);
@@ -824,7 +829,7 @@ and parse_pattern_atom state ~allow_newlines:_ =
       Surface_ast.{ it = PBind name; meta }
   | Surface_lex.Escaped (Surface_name.Term, name) ->
       ignore (advance state);
-      Surface_ast.{ it = PBind name; meta }
+      Surface_ast.{ it = PBind name; meta = Meta.with_surface_ref_kind "term" meta }
   | Surface_lex.Literal literal ->
       ignore (advance state);
       Surface_ast.{ it = PLit literal; meta }
@@ -1475,6 +1480,7 @@ and parse_paren_type state ~allow_newlines:_ opening =
         { ty = Surface_ast.{ it = TyHole id; meta }; arrow_params = None }
 
 and parse_arrow state ~allow_newlines params left_meta =
+  let diagnostics_before_row = List.length state.diagnostics in
   let arrow = advance state in
   let opening = expect state Surface_lex.LBrace "`{` immediately after `->`" in
   let effects = ref [] in
@@ -1563,6 +1569,13 @@ and parse_arrow state ~allow_newlines params left_meta =
       done)
     opening;
   let row_meta = Meta.with_span (span_between arrow !closing) !row_owners in
+  let row_hole, row_meta =
+    if List.length state.diagnostics = diagnostics_before_row then (None, row_meta)
+    else
+      let id = state.next_hole in
+      state.next_hole <- id + 1;
+      (Some id, Meta.with_surface_hole (string_of_int id) row_meta)
+  in
   let result =
     if !stopped_before_top then ty_hole state (current state)
     else begin
@@ -1577,7 +1590,11 @@ and parse_arrow state ~allow_newlines params left_meta =
     | None -> meta
   in
   Surface_ast.
-    { it = TyArrow (params, { effects = List.rev !effects; tail = !tail; row_meta }, result); meta }
+    {
+      it =
+        TyArrow (params, { effects = List.rev !effects; tail = !tail; row_hole; row_meta }, result);
+      meta;
+    }
 
 and parse_row_separator state ~effect_index row_owners =
   match top_boundary_after_continuation state with

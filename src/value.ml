@@ -2,7 +2,7 @@
 
     Frames are data, not host closures: W2.4 slices the continuation to build multi-shot
     resumptions, so everything a suspended computation needs must be inspectable and reusable. The
-    only host functions live inside [VBuiltin].
+    only host functions live inside [VBuiltin] and the sealed [VTrustedBuiltin] payload.
 
     Environments are persistent string maps to mutable cells; only [let rec] ever mutates a cell (to
     tie the recursive knot, plan W2.2). A closure captures its whole {!scope} — environment plus the
@@ -26,6 +26,10 @@ type t =
           form — invoking an op is plain [App]) *)
   | VClosure of { scope : scope; params : Kernel.pat list; body : Kernel.expr }
   | VBuiltin of string * (t list -> (t, Runtime_err.t) result)
+      (** an unreviewed host callback; application guards the complete invocation graph *)
+  | VTrustedBuiltin of t Trusted_builtin.t
+      (** a reviewed internal prelude callback. Its payload type belongs to a Dune-private module,
+          so external library clients cannot attach callbacks to this constructor. *)
   | VCode of Form.t  (** a quoted triple; payload is pre-resolution data (spec §5.1) *)
   | VResume of frame list
       (** a resumption: the sliced continuation as immutable data — invoking it twice just reuses
@@ -73,6 +77,7 @@ let rec show = function
   | VOp { effect_; name; _ } -> Printf.sprintf "<op %s.%s>" effect_ name
   | VClosure _ -> "<closure>"
   | VBuiltin (name, _) -> Printf.sprintf "<builtin %s>" name
+  | VTrustedBuiltin builtin -> Printf.sprintf "<builtin %s>" (Trusted_builtin.name builtin)
   | VCode payload -> "(quote " ^ Printer.inline_form payload ^ ")"
   | VResume _ -> "<resume>"
 

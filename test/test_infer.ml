@@ -174,6 +174,170 @@ let test_lw_determinism () =
   Alcotest.(check string) "same seed, identical output" (run 123) (run 123);
   Alcotest.(check bool) "different seeds differ" true (run 123 <> run 124)
 
+let test_lw_validates_one_reusable_initial_state () =
+  let harness = Eval_support.make () in
+  let ctx = harness.Eval_support.ctx in
+  let factory_calls = ref 0 in
+  let clean_model () =
+    incr factory_calls;
+    Eval.expr_state Kernel.{ it = Lit (LInt 3); meta = Meta.empty }
+  in
+  (match Infer_dist.likelihood_weighting ctx ~seed:9 ~samples:5 clean_model with
+  | Ok _ -> ()
+  | Error diagnostics -> Eval_support.fail_diags "clean reusable model" diagnostics);
+  Alcotest.(check int) "clean model factory called once" 1 !factory_calls;
+  let action_calls = ref 0 in
+  let action =
+    Value.VBuiltin
+      ( "marked-model-action",
+        fun _ ->
+          incr action_calls;
+          Ok (Value.VInt 0) )
+  in
+  let scope =
+    Value.{ empty_scope with env = Env.add "marked-model-action" (ref action) empty_scope.env }
+  in
+  let marker = Meta.empty |> Meta.with_surface_hole "lw-initial-model" in
+  let marked_factory_calls = ref 0 in
+  let marked_model () =
+    incr marked_factory_calls;
+    Eval.SEval
+      ( scope,
+        Kernel.
+          { it = App ({ it = Var "marked-model-action"; meta = Meta.empty }, []); meta = marker },
+        [] )
+  in
+  (match Infer_dist.likelihood_weighting ctx ~seed:9 ~samples:5 marked_model with
+  | Error [ diagnostic ] ->
+      Alcotest.(check string) "marked initial diagnostic" "E0902" diagnostic.Diag.code;
+      Alcotest.(check bool)
+        "marked initial preserves E1202" true
+        (String.starts_with ~prefix:"type error: E1202:" diagnostic.message)
+  | Error diagnostics -> Eval_support.fail_diags "marked reusable model" diagnostics
+  | Ok _ -> Alcotest.fail "marked initial model was accepted");
+  Alcotest.(check int) "marked model factory called once" 1 !marked_factory_calls;
+  Alcotest.(check int) "marked model rejected before action" 0 !action_calls
+
+let test_lw_rejects_zero_argument_continuation_mutation () =
+  let harness = Eval_support.make () in
+  let ctx = harness.Eval_support.ctx in
+  let marker = Meta.empty |> Meta.with_surface_hole "lw-native-continuation-mutation" in
+  let marked = Value.VCode Form.{ head = "lit"; meta = marker; args = [ Int 0 ] } in
+  let continuation_cell = ref (Value.VInt 7) in
+  let continuation_scope =
+    Value.{ empty_scope with env = Env.add "guarded-cell" continuation_cell empty_scope.env }
+  in
+  let following_calls = ref 0 in
+  let following =
+    Value.VBuiltin
+      ( "lw-following-action",
+        fun _ ->
+          incr following_calls;
+          Ok (Value.VInt 0) )
+  in
+  let following_scope =
+    Value.{ empty_scope with env = Env.add "following" (ref following) empty_scope.env }
+  in
+  let mutator =
+    Value.VBuiltin
+      ( "lw-mutate-continuation",
+        fun _ ->
+          continuation_cell := marked;
+          Ok Value.unit_v )
+  in
+  let continuation =
+    [
+      Value.FLet
+        {
+          binder = Kernel.{ it = PWild; meta = Meta.empty };
+          body = Kernel.{ it = Var "guarded-cell"; meta = Meta.empty };
+          scope = continuation_scope;
+        };
+      Value.FLet
+        {
+          binder = Kernel.{ it = PWild; meta = Meta.empty };
+          body =
+            Kernel.{ it = App ({ it = Var "following"; meta = Meta.empty }, []); meta = Meta.empty };
+          scope = following_scope;
+        };
+    ]
+  in
+  let factory_calls = ref 0 in
+  let model () =
+    incr factory_calls;
+    Eval.SApply (mutator, Value.FAppFn { args = []; scope = Value.empty_scope } :: continuation)
+  in
+  (match Infer_dist.likelihood_weighting ctx ~seed:17 ~samples:5 model with
+  | Error [ diagnostic ] ->
+      Alcotest.(check string) "LW mutation diagnostic" "E0902" diagnostic.Diag.code;
+      Alcotest.(check bool)
+        "LW mutation preserves E1202" true
+        (String.starts_with ~prefix:"type error: E1202:" diagnostic.message)
+  | Error diagnostics -> Eval_support.fail_diags "LW continuation mutation" diagnostics
+  | Ok _ -> Alcotest.fail "LW accepted a continuation mutation containing a recovery marker");
+  Alcotest.(check int) "LW model factory called once" 1 !factory_calls;
+  Alcotest.(check int) "LW following action count" 0 !following_calls
+
+let test_lw_samples_restore_mutable_runtime_graph () =
+  let harness = Eval_support.make () in
+  let ctx = harness.Eval_support.ctx in
+  let cell = ref Value.unit_v in
+  let scope =
+    Value.
+      {
+        empty_scope with
+        env = empty_scope.env |> Env.add "sample-cell" cell |> Env.add "sample-alias" cell;
+      }
+  in
+  let closure =
+    Value.VClosure
+      { scope; params = []; body = Kernel.{ it = Var "sample-cell"; meta = Meta.empty } }
+  in
+  cell := closure;
+  let sample_calls = ref 0 in
+  let mutator =
+    Value.VBuiltin
+      ( "check-and-mutate-sample-cycle",
+        function
+        | [ Value.VClosure { scope; _ } ] -> (
+            match
+              ( Value.Env.find_opt "sample-cell" scope.env,
+                Value.Env.find_opt "sample-alias" scope.env )
+            with
+            | Some primary, Some alias
+              when primary == alias && !primary == closure && !alias == closure ->
+                incr sample_calls;
+                primary := Value.VInt !sample_calls;
+                Ok (Value.VInt 1)
+            | Some primary, Some alias ->
+                Error
+                  (Runtime_err.Type_error
+                     (Printf.sprintf "broken restored graph: alias=%b cycle=%b" (primary == alias)
+                        (!primary == closure && !alias == closure)))
+            | None, _ | _, None -> Error (Runtime_err.Unresolved "sample-cell/sample-alias"))
+        | args ->
+            Error
+              (Runtime_err.Arity
+                 (Printf.sprintf "check-and-mutate-sample-cycle expects one closure, got %d"
+                    (List.length args))) )
+  in
+  let factory_calls = ref 0 in
+  let model () =
+    incr factory_calls;
+    Eval.SApply
+      ( closure,
+        [ Value.FAppArgs { fn = mutator; done_rev = []; pending = []; scope = Value.empty_scope } ]
+      )
+  in
+  match Infer_dist.likelihood_weighting ctx ~seed:23 ~samples:5 model with
+  | Error diagnostics -> Eval_support.fail_diags "independent LW samples" diagnostics
+  | Ok posterior ->
+      Alcotest.(check int) "model factory called exactly once" 1 !factory_calls;
+      Alcotest.(check int) "all likelihood samples ran" 5 !sample_calls;
+      Alcotest.(check string)
+        "every sample starts from the validated cyclic alias graph" "1.000000  1"
+        (Infer_dist.show_posterior posterior)
+
 (* the M3 thesis: the model FILE is byte-identical between the two algorithms — here the
    same source string and the same parsed hash drive both *)
 let test_model_unchanged_between_algorithms () =
@@ -257,7 +421,7 @@ let test_effectful_toplevel_blocked_in_infer () =
   | Error ds -> Eval_support.fail_diags "make_ctx" ds
   | Ok cctx -> (
       (match Prelude.builtin_signatures store with
-      | Ok sigs -> List.iter (fun (h, s) -> Hashtbl.replace cctx.Check.builtin_sigs h s) sigs
+      | Ok sigs -> Check.register_builtin_signatures cctx sigs
       | Error _ -> ());
       ignore ctx;
       match Reader.parse_one ~file:"leak.jqd" "(var leaked)" with
@@ -284,6 +448,12 @@ let suite =
     Alcotest.test_case "lw two coins within 0.01" `Slow test_lw_two_coins;
     Alcotest.test_case "lw sprinkler within 0.01" `Slow test_lw_sprinkler;
     Alcotest.test_case "lw seed determinism" `Quick test_lw_determinism;
+    Alcotest.test_case "lw validates one reusable initial state" `Quick
+      test_lw_validates_one_reusable_initial_state;
+    Alcotest.test_case "lw rejects zero-argument continuation mutation" `Quick
+      test_lw_rejects_zero_argument_continuation_mutation;
+    Alcotest.test_case "lw samples restore mutable runtime graph" `Quick
+      test_lw_samples_restore_mutable_runtime_graph;
     Alcotest.test_case "model unchanged between algorithms" `Quick
       test_model_unchanged_between_algorithms;
     Alcotest.test_case "in-language enumeration handler (W4.4)" `Quick test_in_language_enumeration;

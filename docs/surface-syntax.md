@@ -693,9 +693,13 @@ non-strict, recovery printing replays those bytes exactly instead of formatting
 the valid islands, so comments cannot migrate across damage or synchronization
 boundaries.
 
-The parser emits hole forms at recovery sites; the checker treats holes as
-"any type, any row" so one syntax error does not cascade into fifty type
-errors. Sugar provenance (L5) is a reserved metadata key recording the
+The parser emits hole forms at recovery sites. In recovery/editor analysis only,
+the checker assigns each hole a fresh type and no effect contribution so one
+syntax error does not cascade into fifty type errors. A malformed effect row is
+recorded as a row hole and projects to a fresh open row, so it behaves as any row
+rather than retaining partially parsed effect constraints. Strict semantic
+boundaries reject holes before checking, execution, storage, or hashing. Sugar provenance
+(L5) is a reserved metadata key recording the
 surface form; the canonicalizer ignores it like all metadata. The semantic
 differ gains a surface renderer, so review diffs read as `.jac` while
 comparing trees. The formatter and the printer are the same program, which

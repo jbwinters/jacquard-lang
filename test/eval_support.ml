@@ -48,7 +48,7 @@ let declare_builtin store ctx name native =
       (Printf.sprintf "(defterm ((binding %s () (quote (builtin-marker %s)))))" name name)
   in
   let h = List.assoc name hs.Canon.named in
-  Hashtbl.replace ctx.Eval.builtins h (Value.VBuiltin (name, native));
+  Eval.register_builtin ctx h (Value.VBuiltin (name, native));
   h
 
 let int2 name f =

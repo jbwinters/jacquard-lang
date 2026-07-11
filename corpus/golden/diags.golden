@@ -35,3 +35,6 @@ ungranted-effect | error[E0814]: this program requires the `console` effect, whi
 effectful-toplevel-body | effectful-toplevel-body.jqd:1:11-78: error[E0815]: top-level definition `sneaky` performs the `net` effect while being defined
   hint: wrap the body in a lambda and perform the effect when called
 redundant-clause | redundant-clause.jqd:1:57-85: warning[W0801]: this clause is redundant: earlier clauses match everything it does
+eta-positive | eta-positive.jac:2:21-30: error[E0807]: this position expects a thunk, but `condition` is a bare reference; wrap it in `fn () -> ...`
+  hint: wrap the reference in `fn () -> ...` so the computation is delayed
+strict-recovery | error[E1202]: recovery holes are not valid input to the strict type checker

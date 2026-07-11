@@ -403,7 +403,7 @@ let check_ctx =
     match Check.make_ctx store with Ok c -> c | Error ds -> Eval_support.fail_diags "ctx" ds
   in
   (match Prelude.builtin_signatures store with
-  | Ok sigs -> List.iter (fun (h, s) -> Hashtbl.replace c.Check.builtin_sigs h s) sigs
+  | Ok sigs -> Check.register_builtin_signatures c sigs
   | Error ds -> Eval_support.fail_diags "builtin sigs" ds);
   c
 

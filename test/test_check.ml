@@ -13,7 +13,7 @@ let make_cctx () =
       match Prelude.builtin_signatures store with
       | Error ds -> Eval_support.fail_diags "builtin sigs" ds
       | Ok sigs ->
-          List.iter (fun (h, s) -> Hashtbl.replace ctx.Check.builtin_sigs h s) sigs;
+          Check.register_builtin_signatures ctx sigs;
           (store, ctx))
 
 let check_src (store, ctx) src : (Check.top_sig, Diag.t list) result =

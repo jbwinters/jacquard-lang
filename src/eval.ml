@@ -21,12 +21,104 @@
 
 open Value
 
+module Physical_key = struct
+  type t = Obj.t
+
+  let equal = ( == )
+  let hash value = Hashtbl.hash_param 1 1 value
+end
+
+module Physical_seen = Hashtbl.Make (Physical_key)
+
+module Runtime_value_key = struct
+  type t = Value.t
+
+  let equal = ( == )
+
+  (* Cache keys must not depend on addresses: the major GC may move blocks. A bounded breadth-first
+     fingerprint keeps lookup constant-time while incorporating payload near the roots of persistent
+     lists and maps, where a one-node generic hash sees only the common constructor shape. *)
+  let hash root =
+    let mix accumulator value =
+      let accumulator = accumulator lxor value in
+      accumulator * 65599 land max_int
+    in
+    let scalar accumulator value = mix accumulator (Hashtbl.hash value) in
+    let finish value =
+      let value = value lxor (value lsr 16) * 0x45d9f3b in
+      let value = value lxor (value lsr 16) * 0x45d9f3b in
+      value lxor (value lsr 16) land max_int
+    in
+    let rec prepend_bounded budget items pending =
+      if budget = 0 then pending
+      else
+        match items with
+        | [] -> pending
+        | item :: rest -> item :: prepend_bounded (budget - 1) rest pending
+    in
+    let rec loop budget accumulator pending =
+      match (budget, pending) with
+      | 0, _ | _, [] -> finish accumulator
+      | budget, value :: rest -> (
+          let budget = budget - 1 in
+          match value with
+          | VInt value -> loop budget (scalar (mix accumulator 1) value) rest
+          | VReal value -> loop budget (scalar (mix accumulator 2) value) rest
+          | VText value -> loop budget (scalar (mix accumulator 3) value) rest
+          | VTuple items -> loop budget (mix accumulator 4) (prepend_bounded budget items rest)
+          | VCon { con; name; args } ->
+              let accumulator = scalar (scalar (mix accumulator 5) con) name in
+              loop budget accumulator (prepend_bounded budget args rest)
+          | VConstructor { con; name; arity } ->
+              loop budget (scalar (scalar (scalar (mix accumulator 6) con) name) arity) rest
+          | VOp { op; name; effect_ } ->
+              loop budget (scalar (scalar (scalar (mix accumulator 7) op) name) effect_) rest
+          | VClosure _ -> loop budget (mix accumulator 8) rest
+          | VBuiltin (name, _) -> loop budget (scalar (mix accumulator 9) name) rest
+          | VTrustedBuiltin builtin ->
+              loop budget (scalar (mix accumulator 9) (Trusted_builtin.name builtin)) rest
+          | VCode payload ->
+              let form_arg_fingerprint = function
+                | Form.F form -> scalar 1 form.Form.head
+                | Form.Int value -> scalar 2 value
+                | Form.Real value -> scalar 3 value
+                | Form.Text value -> scalar 4 value
+                | Form.Sym value -> scalar 5 value
+                | Form.Hash value -> scalar 6 value
+              in
+              let accumulator = scalar (mix accumulator 10) payload.Form.head in
+              let accumulator =
+                match payload.Form.args with
+                | [] -> mix accumulator 0
+                | first :: _ -> mix accumulator (form_arg_fingerprint first)
+              in
+              loop budget accumulator rest
+          | VResume _ -> loop budget (mix accumulator 11) rest)
+    in
+    loop 4 0 [ root ]
+end
+
+module Runtime_value_seen = Hashtbl.Make (Runtime_value_key)
+module Physical_cache = Ephemeron.K1.Make (Runtime_value_key)
+
+type mutable_snapshot = { snapshot_root : Value.t; snapshot_cells : (Value.t ref * Value.t) list }
+type native_snapshot_entry = { snapshot : mutable_snapshot; mutable last_used : int }
+type native_snapshot_lru = { entries : native_snapshot_entry option array; mutable clock : int }
+
 type ctx = {
   store : Store.t;
   builtins : (Hash.t, Value.t) Hashtbl.t;
       (** term hash -> native value; consulted before the store so prelude markers get their native
           implementations (W2.6) *)
   memo : (Hash.t, Value.t) Hashtbl.t;  (** evaluated top-level terms, by member hash *)
+  evaluator_clean_memo : (Hash.t, Value.t) Hashtbl.t;
+      (** evaluator-owned memo entries that passed the complete recovery guard. A hit is trusted
+          only when [memo] still contains this exact physical value; entries inserted or replaced
+          through the public memo table therefore remain untrusted. *)
+  evaluator_mutable_snapshots : (Hash.t, mutable_snapshot) Hashtbl.t;
+      (** exact memo root plus the reachable mutable cells and their validated contents *)
+  native_mutable_snapshots : native_snapshot_lru;
+      (** bounded physical-root LRU for mutable-capable native arguments *)
   root_handlers : (Hash.t, Value.t list -> (Value.t, Runtime_err.t) result) Hashtbl.t;
       (** op hash -> granted native handler; shallow (the op resumes exactly once with the native
           result), installed only by explicit grants *)
@@ -42,6 +134,13 @@ type ctx = {
       (** semantic coverage (W6.8): every store TERM loaded through {!eval_ref} this run — populated
           on the memo-hit path too, so a second test exercising a term still counts it. The test
           runner swaps in a fresh table per test to get per-test sets. *)
+  recovery_immutable_clean : unit Physical_cache.t;
+      (** weak cache of immutable value containers already proven marker-free; closures and
+          resumptions are never entered here because their environments can contain mutable cells *)
+  recovery_static_clean : unit Physical_cache.t;
+      (** weak cache recording that a closure's params/body or a resumption's frame AST has passed
+          recovery validation. Mutable scopes and frame-held runtime values are never trusted by
+          this cache. *)
 }
 
 (** [make_ctx store] builds a fresh evaluation context over [store]: empty builtin, memo, and
@@ -51,11 +150,43 @@ let make_ctx store =
     store;
     builtins = Hashtbl.create 64;
     memo = Hashtbl.create 64;
+    evaluator_clean_memo = Hashtbl.create 64;
+    evaluator_mutable_snapshots = Hashtbl.create 64;
+    native_mutable_snapshots = { entries = Array.make 64 None; clock = 0 };
     root_handlers = Hashtbl.create 8;
     capture_ops = false;
     track_coverage = true;
     coverage = Hashtbl.create 64;
+    recovery_immutable_clean = Physical_cache.create 128;
+    recovery_static_clean = Physical_cache.create 128;
   }
+
+(** [store ctx] returns the immutable store handle used for name and declaration lookup. *)
+let store ctx = ctx.store
+
+(** [register_root_handler ctx op handler] installs one explicitly granted root handler. Arguments,
+    continuation state, callback mutation, and callback results are guarded at dispatch time. *)
+let register_root_handler ctx op handler = Hashtbl.replace ctx.root_handlers op handler
+
+(** [set_coverage_tracking ctx enabled] controls semantic term-reference collection. Disabling it
+    avoids bookkeeping when callers will not inspect coverage. *)
+let set_coverage_tracking ctx enabled = ctx.track_coverage <- enabled
+
+(** [with_fresh_coverage ctx f] runs [f] with a fresh per-call coverage set, merges that set into
+    the enclosing set even when [f] raises, restores the enclosing set, and returns the covered
+    hashes. *)
+let with_fresh_coverage ctx f =
+  let outer = ctx.coverage in
+  let mine = Hashtbl.create 64 in
+  ctx.coverage <- mine;
+  let result =
+    Fun.protect
+      ~finally:(fun () ->
+        Hashtbl.iter (fun hash () -> Hashtbl.replace outer hash ()) mine;
+        ctx.coverage <- outer)
+      f
+  in
+  (result, Hashtbl.fold (fun hash () hashes -> hash :: hashes) mine [])
 
 (* Internal control flow only; never escapes this module. *)
 exception Rt of Runtime_err.t
@@ -225,12 +356,311 @@ let stamp_scope_mark (payload : Form.t) : Form.t =
 
 type state = SEval of scope * Kernel.expr * kont | SApply of Value.t * kont
 
+(* Runtime environments can be cyclic through [let rec]. The scan returns whether a value contains
+   mutable runtime edges, so only closure/resumption-free data containers enter the immutable cache.
+   [static_trusted] skips AST/form portions already checked at a trusted boundary, but environment
+   cells always restart complete validation because host code can replace their contents. *)
+let scan_recovery_state ctx ~static_trusted (state : state) =
+  let seen = Physical_seen.create 64 in
+  let seen_values = Runtime_value_seen.create 64 in
+  let first_visit value =
+    let value = Obj.repr value in
+    if Obj.is_int value || Physical_seen.mem seen value then false
+    else (
+      Physical_seen.add seen value ();
+      true)
+  in
+  let marked () = rt_type "E1202: recovery holes are not valid input to evaluation" in
+  let rec value ~static_trusted runtime_value =
+    if Runtime_value_seen.mem seen_values runtime_value then true
+    else
+      let () = Runtime_value_seen.add seen_values runtime_value () in
+      match runtime_value with
+      | VInt _ | VReal _ | VText _ | VConstructor _ | VOp _ | VBuiltin _ | VTrustedBuiltin _ ->
+          false
+      | VCode payload ->
+          if (not static_trusted) && Recovery_marker.form payload then marked ();
+          false
+      | (VTuple items | VCon { args = items; _ }) as container ->
+          if Physical_cache.mem ctx.recovery_immutable_clean container then false
+          else
+            let mutable_edges =
+              List.fold_left (fun found item -> value ~static_trusted item || found) false items
+            in
+            if not mutable_edges then
+              Physical_cache.replace ctx.recovery_immutable_clean container ();
+            mutable_edges
+      | VClosure { scope = closure_scope; params; body } ->
+          if
+            (not static_trusted) && not (Physical_cache.mem ctx.recovery_static_clean runtime_value)
+          then (
+            if List.exists Recovery_marker.pat params || Recovery_marker.expr body then marked ();
+            Physical_cache.replace ctx.recovery_static_clean runtime_value ());
+          scope closure_scope;
+          true
+      | VResume frames ->
+          let check_static =
+            (not static_trusted) && not (Physical_cache.mem ctx.recovery_static_clean runtime_value)
+          in
+          kont ~check_static frames;
+          if check_static then Physical_cache.replace ctx.recovery_static_clean runtime_value ();
+          true
+  and scope scope_value =
+    if first_visit scope_value then
+      Value.Env.iter (fun _ cell -> ignore (value ~static_trusted:false !cell)) scope_value.env
+  and frame ~check_static frame_value =
+    match frame_value with
+    | FAppFn { args; scope = frame_scope } ->
+        if check_static && List.exists Recovery_marker.expr args then marked ();
+        scope frame_scope
+    | FAppArgs { fn; done_rev; pending; scope = frame_scope } ->
+        if check_static && List.exists Recovery_marker.expr pending then marked ();
+        ignore (value ~static_trusted fn);
+        List.iter (fun item -> ignore (value ~static_trusted item)) done_rev;
+        scope frame_scope
+    | FLet { binder; body; scope = frame_scope } ->
+        if check_static && (Recovery_marker.pat binder || Recovery_marker.expr body) then marked ();
+        scope frame_scope
+    | FMatch { scrutinee_meta; clauses; scope = frame_scope } ->
+        if
+          check_static
+          && (Recovery_marker.marked_meta scrutinee_meta
+             || List.exists
+                  (fun clause ->
+                    Recovery_marker.marked_meta clause.Kernel.cmeta
+                    || Recovery_marker.pat clause.cpat || Recovery_marker.expr clause.cbody)
+                  clauses)
+        then marked ();
+        scope frame_scope
+    | FTuple { done_rev; pending; scope = frame_scope } ->
+        if check_static && List.exists Recovery_marker.expr pending then marked ();
+        List.iter (fun item -> ignore (value ~static_trusted item)) done_rev;
+        scope frame_scope
+    | FQuote { payload; done_rev; pending; scope = frame_scope } ->
+        if check_static && (Recovery_marker.form payload || List.exists Recovery_marker.expr pending)
+        then marked ();
+        List.iter (fun item -> ignore (value ~static_trusted item)) done_rev;
+        scope frame_scope
+    | FHandle handler ->
+        let binder, body = handler.hret in
+        if
+          check_static
+          && (Recovery_marker.pat binder || Recovery_marker.expr body
+             || List.exists
+                  (fun (_, operation) ->
+                    Recovery_marker.marked_meta operation.Kernel.ometa
+                    || List.exists Recovery_marker.pat operation.params
+                    || Recovery_marker.expr operation.obody)
+                  handler.hops)
+        then marked ();
+        scope handler.hscope
+  and kont ~check_static frames = List.iter (frame ~check_static) frames in
+  match state with
+  | SEval (state_scope, expression, frames) ->
+      if (not static_trusted) && Recovery_marker.expr expression then marked ();
+      scope state_scope;
+      kont ~check_static:(not static_trusted) frames
+  | SApply (result, frames) ->
+      ignore (value ~static_trusted result);
+      kont ~check_static:(not static_trusted) frames
+
+let reject_recovery_state ctx state = scan_recovery_state ctx ~static_trusted:false state
+
+(** [register_builtin ctx hash value] installs a native term implementation after rejecting any
+    recovery-marked runtime graph. Custom callbacks remain guarded before and after every call. *)
+let register_builtin ctx hash value =
+  reject_recovery_state ctx (SApply (value, []));
+  Hashtbl.replace ctx.builtins hash value
+
+let rec needs_mutable_recheck ctx value =
+  match value with
+  | VInt _ | VReal _ | VText _ | VConstructor _ | VOp _ | VBuiltin _ | VTrustedBuiltin _ -> false
+  | VCode payload ->
+      if Recovery_marker.form payload then
+        rt_type "E1202: recovery holes are not valid input to evaluation";
+      false
+  | VClosure { scope; params; body } ->
+      if Value.Env.is_empty scope.env then (
+        if not (Physical_cache.mem ctx.recovery_static_clean value) then (
+          if List.exists Recovery_marker.pat params || Recovery_marker.expr body then
+            rt_type "E1202: recovery holes are not valid input to evaluation";
+          Physical_cache.replace ctx.recovery_static_clean value ());
+        false)
+      else true
+  | VResume [] -> false
+  | VResume (_ :: _) -> true
+  | (VTuple items | VCon { args = items; _ }) as container ->
+      if Physical_cache.mem ctx.recovery_immutable_clean container then false
+      else
+        let mutable_edges = List.exists (needs_mutable_recheck ctx) items in
+        if not mutable_edges then Physical_cache.replace ctx.recovery_immutable_clean container ();
+        mutable_edges
+
+let snapshot_mutable_cells root =
+  let seen_values = Runtime_value_seen.create 16 in
+  let seen_scopes = Physical_seen.create 16 in
+  let seen_cells = Physical_seen.create 16 in
+  let cells = ref [] in
+  let first_visit seen value =
+    let key = Obj.repr value in
+    if Obj.is_int key || Physical_seen.mem seen key then false
+    else (
+      Physical_seen.add seen key ();
+      true)
+  in
+  let rec value runtime_value =
+    if not (Runtime_value_seen.mem seen_values runtime_value) then (
+      Runtime_value_seen.add seen_values runtime_value ();
+      match runtime_value with
+      | VInt _ | VReal _ | VText _ | VConstructor _ | VOp _ | VBuiltin _ | VTrustedBuiltin _
+      | VCode _ ->
+          ()
+      | VTuple items | VCon { args = items; _ } -> List.iter value items
+      | VClosure { scope = closure_scope; _ } -> scope closure_scope
+      | VResume frames -> List.iter frame frames)
+  and scope scope_value =
+    if first_visit seen_scopes scope_value then
+      Value.Env.iter
+        (fun _ cell ->
+          if first_visit seen_cells cell then (
+            let current = !cell in
+            cells := (cell, current) :: !cells;
+            value current))
+        scope_value.env
+  and frame = function
+    | FAppFn { scope = frame_scope; _ }
+    | FLet { scope = frame_scope; _ }
+    | FMatch { scope = frame_scope; _ } ->
+        scope frame_scope
+    | FAppArgs { fn; done_rev; scope = frame_scope; _ } ->
+        value fn;
+        List.iter value done_rev;
+        scope frame_scope
+    | FTuple { done_rev; scope = frame_scope; _ } | FQuote { done_rev; scope = frame_scope; _ } ->
+        List.iter value done_rev;
+        scope frame_scope
+    | FHandle handler -> scope handler.hscope
+  in
+  value root;
+  !cells
+
+let make_mutable_snapshot ctx root =
+  {
+    snapshot_root = root;
+    snapshot_cells = (if needs_mutable_recheck ctx root then snapshot_mutable_cells root else []);
+  }
+
+let rec snapshot_unchanged = function
+  | [] -> true
+  | (cell, captured) :: rest -> !cell == captured && snapshot_unchanged rest
+
+let atomic_value = function
+  | VInt _ | VReal _ | VText _ | VConstructor _ | VOp _ | VBuiltin _ | VTrustedBuiltin _ -> true
+  | VTuple [] | VCon { args = []; _ } -> true
+  | VTuple (_ :: _) | VCon { args = _ :: _; _ } | VClosure _ | VCode _ | VResume _ -> false
+
+let reject_recovery_result_value ctx root =
+  let rec validate value =
+    match value with
+    | VInt _ | VReal _ | VText _ | VConstructor _ | VOp _ | VBuiltin _ | VTrustedBuiltin _ -> true
+    | VCode payload ->
+        if Recovery_marker.form payload then
+          rt_type "E1202: recovery holes are not valid input to evaluation";
+        true
+    | VClosure _ | VResume _ ->
+        reject_recovery_state ctx (SApply (value, []));
+        false
+    | (VTuple items | VCon { args = items; _ }) as container ->
+        if Physical_cache.mem ctx.recovery_immutable_clean container then true
+        else
+          let immutable = List.for_all validate items in
+          if immutable then Physical_cache.replace ctx.recovery_immutable_clean container ();
+          immutable
+  in
+  ignore (validate root)
+
+(* Continuations reaching these boundaries are already validated. Scan newly introduced values with
+   a fresh traversal so memo and native results cannot inherit stale trust. Environment cells belong
+   to the guarded machine state; internal transitions only initialize the fresh [let rec] cell before
+   its closure can escape. *)
+let checked_result_state ctx value kont =
+  if not (atomic_value value) then reject_recovery_result_value ctx value;
+  SApply (value, kont)
+
+let find_native_snapshot lru root =
+  lru.clock <- lru.clock + 1;
+  let rec find index =
+    if index = Array.length lru.entries then -1
+    else
+      match lru.entries.(index) with
+      | Some entry when entry.snapshot.snapshot_root == root ->
+          entry.last_used <- lru.clock;
+          index
+      | Some _ | None -> find (index + 1)
+  in
+  find 0
+
+let replace_native_snapshot ctx root index =
+  let lru = ctx.native_mutable_snapshots in
+  let index =
+    if index >= 0 then index
+    else
+      let rec oldest current best_index best_age =
+        if current = Array.length lru.entries then best_index
+        else
+          match lru.entries.(current) with
+          | None -> current
+          | Some entry ->
+              if entry.last_used < best_age then oldest (current + 1) current entry.last_used
+              else oldest (current + 1) best_index best_age
+      in
+      oldest 0 0 max_int
+  in
+  lru.entries.(index) <-
+    Some
+      {
+        snapshot = { snapshot_root = root; snapshot_cells = snapshot_mutable_cells root };
+        last_used = lru.clock;
+      }
+
+let prepare_native_argument ctx root =
+  if needs_mutable_recheck ctx root then
+    let index = find_native_snapshot ctx.native_mutable_snapshots root in
+    if index < 0 then replace_native_snapshot ctx root index
+    else
+      let entry = Option.get ctx.native_mutable_snapshots.entries.(index) in
+      if not (snapshot_unchanged entry.snapshot.snapshot_cells) then (
+        reject_recovery_state ctx (SApply (root, []));
+        replace_native_snapshot ctx root index)
+
+let check_native_argument ctx root =
+  if needs_mutable_recheck ctx root then
+    let index = find_native_snapshot ctx.native_mutable_snapshots root in
+    if index < 0 then (
+      reject_recovery_state ctx (SApply (root, []));
+      replace_native_snapshot ctx root index)
+    else
+      let entry = Option.get ctx.native_mutable_snapshots.entries.(index) in
+      if not (snapshot_unchanged entry.snapshot.snapshot_cells) then (
+        reject_recovery_state ctx (SApply (root, []));
+        replace_native_snapshot ctx root index)
+
+let invoke_untrusted_native ctx fn native args kont =
+  let invocation_roots = [ fn; VTuple args; VResume kont ] in
+  List.iter (prepare_native_argument ctx) invocation_roots;
+  let result = native args in
+  List.iter (check_native_argument ctx) invocation_roots;
+  match result with Ok value -> checked_result_state ctx value kont | Error error -> rt error
+
+let invoke_trusted_native ctx native args kont =
+  match native args with Ok value -> checked_result_state ctx value kont | Error error -> rt error
+
 let handler_covers (h : handler) op = List.exists (fun (o, _) -> Hash.equal o op) h.hops
 
 (** Perform an operation: walk the continuation outward for the nearest matching handler (deep
     semantics; the captured resumption is inner frames + that handler frame); fall back to root
     handlers (grants); otherwise raise [Unhandled]. *)
-let perform ctx (op : Hash.t) ~name ~effect_ (args : Value.t list) (k : kont) : state =
+let perform_unchecked ctx (op : Hash.t) ~name ~effect_ (args : Value.t list) (k : kont) : state =
   let rec split inner_rev = function
     | FHandle h :: outer when handler_covers h op ->
         let captured = List.rev (FHandle h :: inner_rev) in
@@ -252,7 +682,7 @@ let perform ctx (op : Hash.t) ~name ~effect_ (args : Value.t list) (k : kont) : 
     | f :: outer -> split (f :: inner_rev) outer
     | [] -> (
         match Hashtbl.find_opt ctx.root_handlers op with
-        | Some native -> ( match native args with Ok v -> SApply (v, k) | Error e -> rt e)
+        | Some native -> invoke_untrusted_native ctx (VOp { op; name; effect_ }) native args k
         | None ->
             if ctx.capture_ops then
               raise (Op_captured { op; name; effect_; args; kont = List.rev inner_rev })
@@ -262,7 +692,7 @@ let perform ctx (op : Hash.t) ~name ~effect_ (args : Value.t list) (k : kont) : 
 
 (** Apply a function-position value to fully evaluated arguments (uncurried, decision D5): closures,
     builtins, constructors, ops (perform), and resumptions. *)
-let apply ctx (fn : Value.t) (args : Value.t list) (k : kont) : state =
+let apply_unchecked ctx (fn : Value.t) (args : Value.t list) (k : kont) : state =
   match fn with
   | VClosure { scope; params; body } ->
       if List.length params <> List.length args then
@@ -275,17 +705,25 @@ let apply ctx (fn : Value.t) (args : Value.t list) (k : kont) : state =
           | None -> rt (Runtime_err.Match_failure (Value.show (VTuple args)))
         in
         SEval ({ scope with env }, body, k)
-  | VBuiltin (_, native) -> ( match native args with Ok v -> SApply (v, k) | Error e -> rt e)
+  | VBuiltin (_, native) as fn -> invoke_untrusted_native ctx fn native args k
+  | VTrustedBuiltin builtin -> invoke_trusted_native ctx (Trusted_builtin.invoke builtin) args k
   | VConstructor { con; name; arity } ->
       if List.length args <> arity then
         rt_arity "constructor %s expects %d argument(s), got %d" name arity (List.length args)
       else SApply (VCon { con; name; args }, k)
-  | VOp { op; name; effect_ } -> perform ctx op ~name ~effect_ args k
+  | VOp { op; name; effect_ } -> perform_unchecked ctx op ~name ~effect_ args k
   | VResume frames -> (
       match args with
       | [ v ] -> SApply (v, frames @ k)
       | _ -> rt_arity "a resumption takes exactly one argument, got %d" (List.length args))
   | v -> rt_type "%s is not applicable" (Value.show v)
+
+(** [apply ctx fn args k] validates all reachable runtime payloads before invoking native code or
+    performing an operation. Machine transitions use [apply_unchecked] after their initial state has
+    passed the same guard. *)
+let apply ctx fn args k =
+  reject_recovery_state ctx (SApply (VTuple (fn :: args), k));
+  apply_unchecked ctx fn args k
 
 (** Resolve a store reference to a runtime value: builtins and memoized terms short-circuit; other
     terms load from the store and evaluate in an ISOLATED sub-run. Isolation is a soundness
@@ -300,10 +738,23 @@ let rec eval_ref ctx (h : Hash.t) (kind : Kernel.refkind) (k : kont) : state =
   | Kernel.Term -> (
       if ctx.track_coverage then Hashtbl.replace ctx.coverage h ();
       match Hashtbl.find_opt ctx.builtins h with
-      | Some v -> SApply (v, k)
+      | Some v -> checked_result_state ctx v k
       | None -> (
           match Hashtbl.find_opt ctx.memo h with
-          | Some v -> SApply (v, k)
+          | Some v -> (
+              match Hashtbl.find_opt ctx.evaluator_clean_memo h with
+              | Some clean when clean == v -> (
+                  match Hashtbl.find_opt ctx.evaluator_mutable_snapshots h with
+                  | Some snapshot
+                    when snapshot.snapshot_root == v && snapshot_unchanged snapshot.snapshot_cells
+                    ->
+                      SApply (v, k)
+                  | Some _ | None ->
+                      let next = checked_result_state ctx v k in
+                      Hashtbl.replace ctx.evaluator_mutable_snapshots h
+                        (make_mutable_snapshot ctx v);
+                      next)
+              | Some _ | None -> checked_result_state ctx v k)
           | None -> (
               match locate ctx h with
               | {
@@ -317,20 +768,29 @@ let rec eval_ref ctx (h : Hash.t) (kind : Kernel.refkind) (k : kont) : state =
                      top-level body must die loudly (Unhandled) rather than be captured
                      with a truncated continuation (review finding; E0815 makes this
                      unreachable for checked programs, this is the belt to its braces) *)
+                  let initial = SEval (scope, binding.Kernel.value, []) in
+                  reject_recovery_state ctx initial;
                   let saved_capture = ctx.capture_ops in
                   ctx.capture_ops <- false;
                   let v =
                     Fun.protect
                       ~finally:(fun () -> ctx.capture_ops <- saved_capture)
-                      (fun () -> run_state ctx (SEval (scope, binding.Kernel.value, [])))
+                      (fun () -> run_state_unchecked ctx initial)
                   in
+                  let next = checked_result_state ctx v k in
+                  (* The isolated run has completed all closure construction and [let rec] knot
+                     tying, and [checked_result_state] has traversed the finished graph. Evaluator
+                     transitions never mutate a memoized graph after this point. Record ownership
+                     only after publishing the exact guarded value to the public memo table. *)
                   Hashtbl.replace ctx.memo h v;
-                  SApply (v, k)
+                  Hashtbl.replace ctx.evaluator_clean_memo h v;
+                  Hashtbl.replace ctx.evaluator_mutable_snapshots h (make_mutable_snapshot ctx v);
+                  next
               | _ -> rt_type "hash %s is not a term" (Hash.to_hex h))))
 
 (** One small step of the machine; [None] means the state is terminal ([SApply] with an empty
     continuation). Raises internal [Rt] on runtime errors ([run_expr] catches). *)
-and step ctx (state : state) : state option =
+and step_unchecked ctx (state : state) : state option =
   match state with
   | SEval (scope, e, k) -> (
       match e.Kernel.it with
@@ -394,11 +854,11 @@ and step ctx (state : state) : state option =
       None (* terminal; run handles it *)
   | SApply (v, frame :: k) -> (
       match frame with
-      | FAppFn { args = []; scope = _ } -> Some (apply ctx v [] k)
+      | FAppFn { args = []; scope = _ } -> Some (apply_unchecked ctx v [] k)
       | FAppFn { args = a0 :: rest; scope } ->
           Some (SEval (scope, a0, FAppArgs { fn = v; done_rev = []; pending = rest; scope } :: k))
       | FAppArgs { fn; done_rev; pending = []; scope = _ } ->
-          Some (apply ctx fn (List.rev (v :: done_rev)) k)
+          Some (apply_unchecked ctx fn (List.rev (v :: done_rev)) k)
       | FAppArgs { fn; done_rev; pending = e :: rest; scope } ->
           Some
             (SEval (scope, e, FAppArgs { fn; done_rev = v :: done_rev; pending = rest; scope } :: k))
@@ -432,20 +892,23 @@ and step ctx (state : state) : state option =
           | Some env -> Some (SEval ({ hscope with env }, rbody, k))
           | None -> rt (Runtime_err.Match_failure (Value.show v))))
 
-(** Drive a state to its terminal value (tail-recursive trampoline). *)
-and run_state ctx state =
-  match step ctx state with
-  | Some next -> run_state ctx next
+(** Drive a validated state to its terminal value (tail-recursive trampoline). Internal transitions
+    only rearrange validated payloads or tie a fresh recursive cell; native and untrusted memo
+    boundaries validate fresh values before constructing their result states. *)
+and run_state_unchecked ctx state =
+  match step_unchecked ctx state with
+  | Some next -> run_state_unchecked ctx next
   | None -> ( match state with SApply (v, []) -> v | _ -> assert false)
+
+(** [run_state ctx state] validates the complete runtime graph before driving it. Runtime blocks are
+    visited by physical identity so recursive closure environments terminate safely. *)
+let run_state ctx state =
+  reject_recovery_state ctx state;
+  run_state_unchecked ctx state
 
 (** [run_expr ctx e] evaluates a resolved expression to a value. *)
 let run_expr ctx (e : Kernel.expr) : (Value.t, Runtime_err.t) result =
-  let rec loop state =
-    match step ctx state with
-    | Some next -> loop next
-    | None -> ( match state with SApply (v, []) -> v | _ -> assert false)
-  in
-  match loop (SEval (empty_scope, e, [])) with v -> Ok v | exception Rt e -> Error e
+  match run_state ctx (SEval (empty_scope, e, [])) with v -> Ok v | exception Rt e -> Error e
 
 type capture =
   | CValue of Value.t
@@ -453,20 +916,77 @@ type capture =
       (** an unhandled, ungranted op reached the root; [kont] is the entire remaining continuation
           as immutable data — resume it as many times as the algorithm needs *)
 
-(** [run_state_capturing ctx state] drives [state] to completion, but instead of dying on an
-    unhandled op it returns the op with its continuation ({!COp}). Used by native inference drivers
-    (M3); nested [run_state] sub-runs (store-term isolation) still die [Unhandled], which the
-    checker's E0815 makes unreachable for checked programs. *)
-let run_state_capturing ctx (state : state) : (capture, Runtime_err.t) result =
+(** [validate_state ctx state] checks a complete state for recovery markers without executing it. *)
+let validate_state ctx state =
+  match reject_recovery_state ctx state with () -> Ok () | exception Rt error -> Error error
+
+type validated_state = Validated_state of state * (Value.t ref * Value.t) list option
+type validated_kont = Validated_kont of Value.frame list
+
+type validated_capture =
+  | VCValue of Value.t
+  | VCOp of { op : Hash.t; name : string; args : Value.t list; kont : validated_kont }
+
+(** [validate_state_once ctx state] validates a complete externally supplied state and seals it for
+    repeated capture runs. The abstract result cannot be forged by library clients. *)
+let validate_state_once ctx state =
+  match validate_state ctx state with
+  | Ok () ->
+      let root =
+        match state with
+        | SEval (scope, expression, kont) ->
+            VTuple [ VClosure { scope; params = []; body = expression }; VResume kont ]
+        | SApply (value, kont) -> VTuple [ value; VResume kont ]
+      in
+      Ok (Validated_state (state, Some (snapshot_mutable_cells root)))
+  | Error error -> Error error
+
+(** Restore an initial validated state before one semantically independent execution. Immutable
+    syntax and values remain shared; mutable cells in the state and evaluator-owned memo graph are
+    reset to their validated snapshots. *)
+let fresh_validated_state ctx (Validated_state (state, initial_cells)) =
+  let restore cells = List.iter (fun (cell, value) -> cell := value) cells in
+  Option.iter restore initial_cells;
+  Hashtbl.iter (fun _ snapshot -> restore snapshot.snapshot_cells) ctx.evaluator_mutable_snapshots;
+  Validated_state (state, None)
+
+(** [run_state_capturing_trusted ctx state] captures like {!run_state_capturing} without scanning
+    [state] first. The caller must have validated the immutable initial state and must only supply
+    states derived from evaluator transitions; memo and native result guards remain active. *)
+let run_state_capturing_trusted ctx (state : state) : (capture, Runtime_err.t) result =
   let saved = ctx.capture_ops in
   ctx.capture_ops <- true;
   Fun.protect
     ~finally:(fun () -> ctx.capture_ops <- saved)
     (fun () ->
-      match run_state ctx state with
+      match run_state_unchecked ctx state with
       | v -> Ok (CValue v)
       | exception Op_captured { op; name; args; kont; _ } -> Ok (COp { op; name; args; kont })
       | exception Rt e -> Error e)
+
+(** [run_validated_state_capturing ctx state] captures a previously validated state without
+    rescanning its immutable syntax. Native and memo result guards remain active. *)
+let run_validated_state_capturing ctx (Validated_state (state, _)) =
+  match run_state_capturing_trusted ctx state with
+  | Ok (CValue value) -> Ok (VCValue value)
+  | Ok (COp { op; name; args; kont }) -> Ok (VCOp { op; name; args; kont = Validated_kont kont })
+  | Error error -> Error error
+
+(** [resume_validated_state ctx kont value] seals a state derived from a captured continuation. Only
+    the newly introduced value needs validation because [kont] came from a validated run. *)
+let resume_validated_state ctx (Validated_kont kont) value =
+  match checked_result_state ctx value kont with
+  | state -> Ok (Validated_state (state, None))
+  | exception Rt error -> Error error
+
+(** [run_state_capturing ctx state] drives [state] to completion, but instead of dying on an
+    unhandled op it returns the op with its continuation ({!COp}). Used by native inference drivers
+    (M3); nested [run_state] sub-runs (store-term isolation) still die [Unhandled], which the
+    checker's E0815 makes unreachable for checked programs. *)
+let run_state_capturing ctx (state : state) : (capture, Runtime_err.t) result =
+  match validate_state ctx state with
+  | Error error -> Error error
+  | Ok () -> run_state_capturing_trusted ctx state
 
 (** [resume_state kont v] is the state that delivers [v] to a captured continuation. *)
 let resume_state (kont : Value.frame list) (v : Value.t) : state = SApply (v, kont)

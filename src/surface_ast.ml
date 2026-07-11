@@ -70,7 +70,7 @@ and ty_node =
   | TyForall of name list * name list * ty
   | TyHole of int
 
-and row = { effects : gref list; tail : name option; row_meta : Meta.t }
+and row = { effects : gref list; tail : name option; row_hole : int option; row_meta : Meta.t }
 
 type field = { label : name option; ty : ty; meta : Meta.t }
 type constructor = { name : name; fields : field list; meta : Meta.t }
@@ -155,7 +155,8 @@ and has_holes_ty ty =
   match ty.it with
   | TyName _ | TyVar _ | TyHash _ -> false
   | TyApp (head, args) -> has_holes_ty head || List.exists has_holes_ty args
-  | TyArrow (params, _, result) -> List.exists has_holes_ty params || has_holes_ty result
+  | TyArrow (params, row, result) ->
+      Option.is_some row.row_hole || List.exists has_holes_ty params || has_holes_ty result
   | TyTuple items -> List.exists has_holes_ty items
   | TyForall (_, _, body) -> has_holes_ty body
   | TyHole _ -> true

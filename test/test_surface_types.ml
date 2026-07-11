@@ -70,10 +70,7 @@ let make_check_ctx () =
     | Ok ctx ->
         (match Prelude.builtin_signatures store with
         | Error diagnostics -> fail_diags "builtin signatures" diagnostics
-        | Ok signatures ->
-            List.iter
-              (fun (hash, scheme) -> Hashtbl.replace ctx.Check.builtin_sigs hash scheme)
-              signatures);
+        | Ok signatures -> Check.register_builtin_signatures ctx signatures);
         ctx
   in
   (store, ctx)
