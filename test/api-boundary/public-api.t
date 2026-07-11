@@ -1,3 +1,8 @@
+Compiler diagnostics are part of the assertions below. Disable environment-provided color so the
+checks behave identically under local opam switches and GitHub Actions.
+
+  $ export OCAML_COLOR=never
+
 External clients can construct arbitrary guarded builtins.
 
   $ JACQUARD_API="../../src/.jacquard.objs/public_cmi"
