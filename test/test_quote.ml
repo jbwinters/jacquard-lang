@@ -8,6 +8,15 @@ let code_payload = function
 
 let parse_form src = Result.get_ok (Reader.parse_one ~file:"q.jqd" src)
 
+let lower_surface src =
+  match Surface_parse.parse_string ~file:"surface-quote.jac" src with
+  | Ok [ { Surface_ast.it = TopExpr expression; _ } ] -> (
+      match Surface_lower.lower_expr expression with
+      | Ok expression -> expression
+      | Error diagnostics -> Eval_support.fail_diags "surface lower" diagnostics)
+  | Ok tops -> Alcotest.failf "expected one surface expression, got %d tops" (List.length tops)
+  | Error diagnostics -> Eval_support.fail_diags "surface parse" diagnostics
+
 let check_payload what expected v =
   Alcotest.(check bool) what true (Form.equal_ignoring_meta (parse_form expected) (code_payload v))
 
@@ -16,6 +25,76 @@ let test_quote_basic () =
   check_payload "payload is the raw triple" "(lit 1)" (Eval_support.eval_ok h "(quote (lit 1))");
   check_payload "names stay unresolved data" "(app (var add) (lit 1))"
     (Eval_support.eval_ok h "(quote (app (var add) (lit 1)))")
+
+let test_surface_quote_capture_and_provenance () =
+  let expression = lower_surface "quote { f(Some, `op:abort`) }" in
+  let payload =
+    match expression.Kernel.it with
+    | Kernel.Quote payload -> payload
+    | _ -> Alcotest.fail "surface quote did not lower to Quote"
+  in
+  Alcotest.(check bool)
+    "pre-resolution names and kinds stay structural" true
+    (Form.equal_ignoring_meta
+       (parse_form "(app (var f) (surface-ref-v0 con some) (surface-ref-v0 op abort))")
+       payload);
+  Alcotest.(check (option string))
+    "payload span" (Some "surface-quote.jac:1:9-28")
+    (Option.map Span.to_string (Meta.span payload.Form.meta));
+  Alcotest.(check (option string))
+    "call provenance" (Some "call")
+    (Meta.surface_form payload.Form.meta);
+  match payload.Form.args with
+  | [ Form.F fn; Form.F constructor; Form.F operation ] ->
+      Alcotest.(check (option string))
+        "function span" (Some "surface-quote.jac:1:9-10")
+        (Option.map Span.to_string (Meta.span fn.Form.meta));
+      Alcotest.(check (option string))
+        "constructor span" (Some "surface-quote.jac:1:11-15")
+        (Option.map Span.to_string (Meta.span constructor.Form.meta));
+      Alcotest.(check (option string))
+        "operation span" (Some "surface-quote.jac:1:17-27")
+        (Option.map Span.to_string (Meta.span operation.Form.meta))
+  | _ -> Alcotest.fail "surface quote payload lost its application structure"
+
+let test_surface_unquote_staging_depth () =
+  (match Surface_parse.parse_string ~file:"surface-quote.jac" "unquote(x)" with
+  | Ok [ { Surface_ast.it = TopExpr expression; _ } ] -> (
+      match Surface_lower.lower_expr expression with
+      | Error [ { Diag.code = "E0204"; span = Some _; _ } ] -> ()
+      | Error diagnostics -> Eval_support.fail_diags "top-level unquote" diagnostics
+      | Ok _ -> Alcotest.fail "top-level surface unquote reached the kernel")
+  | Ok _ -> Alcotest.fail "top-level unquote did not parse as one expression"
+  | Error diagnostics -> Eval_support.fail_diags "top-level unquote parse" diagnostics);
+  let a_hash = Hash.of_string "surface-live-a" in
+  let b_hash = Hash.of_string "surface-nested-b" in
+  let names =
+    Resolve.of_alist
+      [
+        ("a", { Resolve.hash = a_hash; kind = Resolve.KTerm });
+        ("b", { Resolve.hash = b_hash; kind = Resolve.KTerm });
+      ]
+  in
+  let resolved =
+    match
+      Resolve.resolve_expr names (lower_surface "quote { (unquote(a), quote { unquote(b) }) }")
+    with
+    | Ok expression -> expression
+    | Error diagnostics -> Eval_support.fail_diags "nested surface quote resolve" diagnostics
+  in
+  let actual =
+    match resolved.Kernel.it with
+    | Kernel.Quote payload -> payload
+    | _ -> Alcotest.fail "nested surface quote did not lower to Quote"
+  in
+  let expected =
+    parse_form
+      (Printf.sprintf "(tuple (unquote (ref #%s term)) (quote (unquote (var b))))"
+         (Hash.to_hex a_hash))
+  in
+  Alcotest.(check bool)
+    "only the splice live at the outer depth resolves" true
+    (Form.equal_ignoring_meta expected actual)
 
 (* Quote of quote nests correctly: the outer evaluation leaves the inner quote as data. *)
 let test_quote_of_quote_nests () =
@@ -56,7 +135,8 @@ let test_splice_non_code_fails () =
   let h = Eval_support.make () in
   match Eval_support.eval_err h "(quote (app (unquote (lit 3)) (lit 1)))" with
   | Runtime_err.Type_error msg ->
-      Alcotest.(check bool) "mentions splice" true (contains ~needle:"splice" msg)
+      Alcotest.(check string)
+        "stable splice diagnostic" "unquote splice evaluated to 3, not code" msg
   | e -> Alcotest.failf "expected Type_error, got %s" (Runtime_err.to_string e)
 
 (* Hygiene scope marks (stubbed): each quote evaluation stamps a fresh mark under the
@@ -136,6 +216,30 @@ let test_eval_boundary_rejects_garbage () =
   | Ok v -> Alcotest.failf "non-code should fail, got %s" (Value.show v)
   | Error e -> Alcotest.failf "expected Eval_error, got %s" (Runtime_err.to_string e)
 
+let test_eval_boundary_rejects_resolved_ref_confusion () =
+  let store, ctx = Eval_support.make_prelude_ctx () in
+  (match Prelude.install_eval ctx with
+  | Ok () -> ()
+  | Error ds -> Eval_support.fail_diags "install_eval" ds);
+  let add_hash =
+    match Store.lookup_kind store "add" Resolve.KTerm with
+    | Some { Resolve.hash; _ } -> hash
+    | None -> Alcotest.fail "prelude add term is missing"
+  in
+  let source =
+    Printf.sprintf "(app (var eval-code) (quote (ref #%s con)))" (Hash.to_hex add_hash)
+  in
+  match Eval_support.eval_with ctx store source with
+  | Error (Runtime_err.Eval_error message) ->
+      Alcotest.(check bool)
+        "checker code survives eval boundary" true
+        (contains ~needle:"E0805" message);
+      Alcotest.(check bool)
+        "wrong kind is named" true
+        (contains ~needle:"is not a constructor" message)
+  | Ok value -> Alcotest.failf "kind-confused ref evaluated to %s" (Value.show value)
+  | Error error -> Alcotest.failf "expected Eval_error, got %s" (Runtime_err.to_string error)
+
 (* the corpus carries the gated program (its named spot per the plan) *)
 let test_gated_corpus_program () =
   let store, ctx = Eval_support.make_prelude_ctx () in
@@ -157,11 +261,16 @@ let test_gated_corpus_program () =
 let suite =
   [
     Alcotest.test_case "quote yields raw triples" `Quick test_quote_basic;
+    Alcotest.test_case "surface quote capture and provenance" `Quick
+      test_surface_quote_capture_and_provenance;
+    Alcotest.test_case "surface unquote staging depth" `Quick test_surface_unquote_staging_depth;
     Alcotest.test_case "quote of quote nests" `Quick test_quote_of_quote_nests;
     Alcotest.test_case "splicing computed forms" `Quick test_splice_computed_form;
     Alcotest.test_case "splice of non-code fails" `Quick test_splice_non_code_fails;
     Alcotest.test_case "scope marks travel" `Quick test_scope_marks_travel;
     Alcotest.test_case "eval gated pair (capability demo)" `Quick test_eval_gated_pair;
     Alcotest.test_case "eval boundary rejects garbage" `Quick test_eval_boundary_rejects_garbage;
+    Alcotest.test_case "eval boundary rejects resolved-ref confusion" `Quick
+      test_eval_boundary_rejects_resolved_ref_confusion;
     Alcotest.test_case "gated corpus program" `Quick test_gated_corpus_program;
   ]

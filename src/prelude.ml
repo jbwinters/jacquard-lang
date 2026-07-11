@@ -709,9 +709,13 @@ let install_infer ?cache_dir (ctx : Eval.ctx) : (unit, Diag.t list) result =
                   (String.concat ", " (List.map Value.show args)))));
   Ok ()
 
-(** [install_eval ctx] grants the [eval] effect: [eval-code] takes a [VCode] payload, validates it
-    as an expression, resolves it against the store's current names, and runs it in [ctx]. Failures
-    at that boundary are [Eval_error] (the M0 dynamic check).
+(* [builtin_signatures] is defined after the grant installers. Module initialization replaces this
+   hook before any client can call [install_eval]. *)
+let eval_builtin_signatures = ref (fun (_ : Store.t) -> Ok [])
+
+(** [install_eval ctx] grants the [eval] effect: [eval-code] takes a [VCode] payload, validates,
+    resolves, and typechecks it against the store's current names before running it in [ctx].
+    Failures at that boundary are [Eval_error] (the M0 dynamic check).
 
     Authority note (review finding, owner decision pending): eval'd code runs at ROOT authority with
     a fresh continuation — handlers interposed around the [eval-code] call site do NOT attenuate the
@@ -730,7 +734,16 @@ let install_eval (ctx : Eval.ctx) : (unit, Diag.t list) result =
               | Ok e -> (
                   match Resolve.resolve_expr (Store.names_view (Eval.store ctx)) e with
                   | Error ds -> Error (Runtime_err.Eval_error (diags_msg ds))
-                  | Ok e -> Eval.run_expr ctx e))
+                  | Ok e -> (
+                      match Check.make_ctx (Eval.store ctx) with
+                      | Error ds -> Error (Runtime_err.Eval_error (diags_msg ds))
+                      | Ok cctx -> (
+                          (match !eval_builtin_signatures (Eval.store ctx) with
+                          | Ok signatures -> Check.register_builtin_signatures cctx signatures
+                          | Error _ -> ());
+                          match Check.check_top cctx (Kernel.Expr e) with
+                          | Error ds -> Error (Runtime_err.Eval_error (diags_msg ds))
+                          | Ok _ -> Eval.run_expr ctx e))))
           | args ->
               Error
                 (Runtime_err.Eval_error
@@ -1081,3 +1094,5 @@ let builtin_signatures (store : Store.t) : ((Hash.t * Types.scheme) list, Diag.t
             @ lw @ extra_real)
       | _ -> Ok base)
   | _ -> Ok base
+
+let () = eval_builtin_signatures := builtin_signatures
