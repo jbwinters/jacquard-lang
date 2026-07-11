@@ -3,7 +3,7 @@
 # Run from the repo root:
 #   sh demos/ambiguity-pipeline.sh
 set -u
-JACQUARD="${JACQUARD:-dune exec jacquard --}"
+JACQUARD="${JACQUARD:-dune exec jac --}"
 here="$(dirname "$0")"
 
-$JACQUARD run "$here/ambiguity-pipeline.jqd"
+$JACQUARD run "$here/ambiguity-pipeline.jac"

@@ -5,15 +5,19 @@
 Jacquard core 0.1 is a research prototype. It has a real parser, checker, evaluator,
 store, CLI, and tests, but it is not a production compiler or runtime.
 
-## No Surface Syntax Yet
+## Surface Syntax Is Not Frozen
 
-The supported syntax is the bootstrap S-expression kernel notation. A human
-surface syntax is deliberately out of scope for 0.1.
+The `.jac` authoring syntax is implemented as a tested projection onto the
+kernel, while bootstrap `.jqd` remains the internal/debug format of record.
+The evidence does not claim that the surface grammar is frozen or that it has
+independent semantics.
 
-## No Optimizer Or VM Yet
+## Native Compiler Is Not A Production Runtime
 
-The evaluator is a CPS tree-walker. `docs/perf-vm-decision.md` records why the
-performance/VM trigger was declined for 0.1.
+The CPS tree-walker remains available, and the native compiler has interpreter
+parity coverage for pure code and a broad tested effect subset. It is not a VM
+or production runtime: unsupported grants and slow paths are documented in
+`docs/native-compilation.md` and pinned by the native cram suites.
 
 ## No Continuous Distributions Or Gradients
 
@@ -67,5 +71,6 @@ edge reviewers should know.
 
 ## Performance Status
 
-PF.1 did not trigger a VM/native backend. The next performance step is
-measurement and a tiering plan, not speculative backend work.
+The native backend has measured benchmark evidence in `docs/benchmarks.md`.
+Those measurements are scoped to their named programs and environment; they do
+not establish general production performance or erase the documented slow set.

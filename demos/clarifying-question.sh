@@ -3,7 +3,7 @@
 # utility beats the interruption cost. Run from the repo root:
 #   sh demos/clarifying-question.sh
 set -u
-JACQUARD="${JACQUARD:-dune exec jacquard --}"
+JACQUARD="${JACQUARD:-dune exec jac --}"
 here="$(dirname "$0")"
 
-$JACQUARD run "$here/clarifying-question.jqd"
+$JACQUARD run "$here/clarifying-question.jac"

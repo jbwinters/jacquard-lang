@@ -748,6 +748,12 @@ nested destructure like `Some((head, children))`. These already read as the
 payoff case for the design; SS.17 and SS.19 pin them so they cannot regress
 silently.
 
+SS.20 applies the same projection to the public demo set: repair, synthesis,
+agent dream mode, ambiguity preservation, clarifying-question VOI, two-coins
+inference, word count, and the M1 programs have paired `.jac`/`.jqd` carriers.
+Public commands use `jac` with `.jac`; demo crams compare complete hash output
+across each pair and continue to execute selected `.jqd` kernel routes.
+
 ## 9. Phasing
 
 - **S0 (SS.0-SS.4, tasks 87-91), printer and spec, M.** Freeze the

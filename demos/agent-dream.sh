@@ -3,11 +3,11 @@
 # Run from the repo root:
 #   sh demos/agent-dream.sh
 set -u
-JACQUARD="${JACQUARD:-dune exec jacquard --}"
+JACQUARD="${JACQUARD:-dune exec jac --}"
 here="$(dirname "$0")"
 
 echo "== policy authority =="
-$JACQUARD check "$here/agent-dream.jqd" --print-sigs | grep '^support-policy'
+$JACQUARD check "$here/agent-dream.jac" --print-sigs | grep '^support-policy'
 
 echo "== scripted worlds and probabilistic dream =="
-$JACQUARD run "$here/agent-dream.jqd"
+$JACQUARD run "$here/agent-dream.jac"

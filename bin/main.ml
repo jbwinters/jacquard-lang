@@ -361,17 +361,18 @@ let hash_cmd file prelude syntax =
 (* --- infer (M3) --- *)
 
 (* Shared: load the file, put decls, return the resolved final expression (the model). *)
-let load_model store ~file =
-  match Reader.parse_string ~file (read_file file) with
+let load_model store ~syntax ~file =
+  match parse_tops ~syntax ~names:(Store.names_view store) ~file (read_file file) with
   | Error ds -> Error ds
-  | Ok forms ->
+  | Ok (forms, warnings) ->
+      print_warnings warnings;
       let rec go last = function
         | [] -> (
             match last with
             | Some e -> Ok e
             | None -> Error [ Diag.error ~code:"E0903" "the model file has no expression" ])
-        | f :: rest -> (
-            match Kernel.of_form f with
+        | parsed :: rest -> (
+            match validate_parsed_top parsed with
             | Error ds -> Error ds
             | Ok (Kernel.Decl d) -> (
                 match Resolve.resolve_decl (Store.names_view store) d with
@@ -406,11 +407,11 @@ let infer_check store model =
           | [] -> Ok ()
           | ds -> Error ds))
 
-let infer_enumerate_cmd file prelude =
+let infer_enumerate_cmd file prelude syntax =
   match open_ctx ~prelude ~store_dir:None with
   | Error ds -> print_diags ds
   | Ok (store, ctx) -> (
-      match load_model store ~file with
+      match load_model store ~syntax ~file with
       | Error ds -> print_diags ds
       | Ok model -> (
           match infer_check store model with
@@ -422,11 +423,11 @@ let infer_enumerate_cmd file prelude =
                   print_endline (Infer_dist.show_posterior posterior);
                   ok)))
 
-let infer_lw_cmd file prelude seed samples =
+let infer_lw_cmd file prelude seed samples syntax =
   match open_ctx ~prelude ~store_dir:None with
   | Error ds -> print_diags ds
   | Ok (store, ctx) -> (
-      match load_model store ~file with
+      match load_model store ~syntax ~file with
       | Error ds -> print_diags ds
       | Ok model -> (
           match infer_check store model with
@@ -1326,7 +1327,7 @@ let infer_t =
   let enumerate =
     Cmd.v
       (Cmd.info "enumerate" ~doc:"Exact posterior by multi-shot enumeration.")
-      Term.(const infer_enumerate_cmd $ file_arg $ prelude_arg)
+      Term.(const infer_enumerate_cmd $ file_arg $ prelude_arg $ syntax_arg)
   in
   let lw =
     Cmd.v
@@ -1337,7 +1338,8 @@ let infer_t =
             required
             & opt (some int) None
             & info [ "seed" ] ~docv:"N" ~doc:"PRNG seed (required, D4).")
-        $ Arg.(value & opt int 10000 & info [ "samples" ] ~docv:"K" ~doc:"Number of runs."))
+        $ Arg.(value & opt int 10000 & info [ "samples" ] ~docv:"K" ~doc:"Number of runs.")
+        $ syntax_arg)
   in
   Cmd.group
     (Cmd.info "infer" ~doc:"Probabilistic inference: handlers over an unchanged model.")

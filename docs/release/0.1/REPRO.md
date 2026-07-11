@@ -57,13 +57,15 @@ JACQUARD_RELEASE_REF=<commit> scripts/release/reproduce-0.1.sh
 
 | transcript | command |
 |---|---|
-| M1 factorial/choose/eval | `sh demos/m1.sh` |
+| M1 factorial/choose/eval | public `.jac` via `sh demos/m1.sh`; paired `.jqd` parity in `dune runtest test/cli/demos.t` |
 | clarifying-question VOI | `sh demos/clarifying-question.sh` and `dune runtest test/cli/demos.t` |
 | agent dream mode | `sh demos/agent-dream.sh` and `dune runtest test/cli/demos.t` |
 | ambiguity-preserving extraction | `sh demos/ambiguity-pipeline.sh` and `dune runtest test/cli/demos.t` |
 | Warp-backed demo checks | `sh demos/showcase-warp-tests.sh` and `dune runtest test/cli/demos.t` |
 | hostile manifest | `sh demos/m4-hostile.sh` and `dune runtest test/cli/hostile-demo.t` |
 | M3 same model/different handler | `sh demos/m3.sh` and `dune runtest test/cli/infer.t` |
+| Bayesian program repair | public `.jac` plus bootstrap Warp fixture via `sh demos/repair.sh` and `dune runtest test/cli/repair.t` |
+| Surface/bootstrap carrier parity | `dune runtest test/cli/demos.t test/cli/infer.t test/cli/surface.t` |
 | formatter/diff/errors/tools | `dune runtest test/cli/diff.t test/cli/tools.t test/cli/tutorial.t` |
 | stdlib smoke | `dune runtest test/cli/demos.t test/cli/world.t` |
 | Warp smoke | `dune runtest test/cli/warp.t test/cli/props.t` |

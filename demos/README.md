@@ -1,38 +1,79 @@
 # Demos
 
-This directory favors demos that show Jacquard as a substrate for model-written
-programs: the same code can run under different handlers, while authority,
-uncertainty, and identity stay visible to tools.
+Public examples use Jacquard's `.jac` surface syntax and the `jac` command.
+From a repository checkout, build once and point the CLI at the normal prelude:
 
-## Direct Demos
+```bash
+eval "$(opam env)"
+export JACQUARD_PRELUDE=$PWD/prelude
+opam exec -- dune build @all
+opam exec -- dune exec jac -- run demos/repair.jac --allow eval
+```
 
-- `surface-fact.jac`: pure recursive surface program run directly by `jac run`.
-- `surface-expression.jac`: a bare top-level surface expression, with no declaration wrapper.
-- `m1.sh`: factorial, multi-shot choice, and gated eval.
-- `m3.sh`: one probabilistic model under exact enumeration and likelihood weighting.
-- `m4-hostile.sh`: generated-looking code that reaches for `net`; the row exposes it.
-- `clarifying-question.sh`: value-of-information for asking the user.
-- `agent-dream.sh`: one agent policy under scripted and probabilistic world handlers.
-- `ambiguity-pipeline.sh`: posterior-carrying extraction; user selection is an observe.
-- `showcase-warp-tests.sh`: Warp tests for the VOI, dream-mode, and ambiguity demos.
-- `synthesis.jqd`: program synthesis as Bayesian inference; a test suite is an
-  observation and the posterior over programs sharpens as tests are added.
-- `repair.sh`: program repair as Bayesian inference; single-edit patches are
-  computed from the buggy program's quoted AST, a bug report is an observation,
-  and the MAP patch renders as a one-line `code.diff`. Warp tests cover the
-  pure mutation machinery and the patch prior.
-- `word-count.jqd`: console-only stdlib smoke demo.
-- `cookbook.jqd`: compact probabilistic cookbook examples.
-- `escrow/`: product-shaped generated workflow with manifest, dry-run, Warp, replay,
-  fault exploration, semantic diff, and approval-by-hash.
+An installed release sets prelude discovery in its wrapper, so the same demo is
+simply `jac run ~/.local/share/jacquard/demos/repair.jac --allow eval` under the install
+prefix.
 
-## Existing Coverage For The Bigger Thesis
+## Surface Programs
 
-- Safe generated-code runner: `demos/escrow/` and `test/cli/hostile-demo.t`.
-- Counterfactual replay/debugging: `test/cli/tools.t`.
-- Deterministic fault simulation: `demos/escrow/tests.jqd` and `test/cli/escrow.t`.
-- Semantic CI/cache/diff: `test/cli/warp.t`.
-- Probabilistic refactoring tests: `test/cli/props.t`.
-- Same model, different inference handler: `demos/m3.sh` and `test/cli/infer.t`.
-- Synthesis and repair as inference: `demos/synthesis.jqd` with `test/cli/showcase.t`,
-  and `demos/repair.sh` with `test/cli/repair.t`.
+- `repair.jac`: computed single-edit program repair as Bayesian inference. A
+  failing test is evidence and the MAP patch is a one-line semantic diff.
+- `synthesis.jac`: candidate programs as data, with tests conditioning the
+  posterior over implementations.
+- `agent-dream.jac`: one network policy under scripted and probabilistic world
+  handlers.
+- `ambiguity-pipeline.jac`: uncertain extraction stays a posterior until a
+  user's selection becomes an observation.
+- `clarifying-question.jac`: exact value-of-information for interrupting a user.
+- `m3-two-coins.jac`: one model under exact enumeration and seeded likelihood
+  weighting.
+- `word-count.jac`: console capability and standard-library collection smoke.
+- `m1-choose.jac`: a multi-shot handler resumes both branches.
+- `m1-gated.jac`: executing quoted code requires an explicit `eval` grant.
+- `m1-fact.jac`: recursive factorial; `surface-fact.jac` is the earlier SS.16
+  carrier of the same quick-start program.
+- `surface-expression.jac`: a bare top-level expression with no declaration.
+
+The shell entry points `m1.sh`, `m3.sh`, `clarifying-question.sh`,
+`agent-dream.sh`, `ambiguity-pipeline.sh`, and `repair.sh` run these surface
+programs through the built `jac` alias. `repair.sh` then runs its retained
+bootstrap Warp fixture as a second, explicitly internal route.
+
+## Tooling Evidence
+
+- `showcase-warp-tests.sh`: Warp checks over the VOI, dream-mode, and ambiguity
+  definitions. The assembled test file remains a bootstrap fixture.
+- `m4-hostile.sh`: authority-manifest transcript over a generated-looking
+  bootstrap fixture that reaches for `net`.
+- `escrow/`: product-shaped kernel/tooling evidence for manifest checks,
+  dry-run, Warp, replay, fault exploration, semantic diff, and approval by hash.
+- `cookbook.jqd`: compact probabilistic library fixture used by the demo cram.
+
+Committed transcripts live in `test/cli/demos.t`, `infer.t`, `repair.t`,
+`showcase.t`, `hostile-demo.t`, and `escrow.t`. They exercise the public `.jac`
+programs through `jac`, retained `.jqd` routes, and semantic hash parity for
+paired files.
+
+## Bootstrap Inventory
+
+Bootstrap s-expressions are fully supported. They are the internal/debug
+carrier, quote-literal notation, and kernel format of record; they are not
+removed by the surface migration and are not declared deprecated.
+
+Paired format-of-record files, each retained beside its public surface twin:
+
+- `m1-fact.jqd`, `m1-choose.jqd`, `m1-gated.jqd`, `m3-two-coins.jqd`
+- `clarifying-question.jqd`, `agent-dream.jqd`, `ambiguity-pipeline.jqd`
+- `synthesis.jqd`, `repair.jqd`, `word-count.jqd`
+
+Bootstrap-only test, tooling, and release fixtures:
+
+- `cookbook.jqd`, `m4-hostile.jqd`
+- `repair-warp-tests.jqd`, `showcase-warp-tests.jqd`
+- `escrow/workflow.jqd`, `escrow/workflow-escalated.jqd`
+- `escrow/main.jqd`, `escrow/tests.jqd`
+
+The broader bootstrap corpus under `corpus/`, prelude under `prelude/`, native
+gauntlet, and release fixtures also remain unchanged as kernel evidence. The
+SS.17 corpus twin harness and these demo crams prove that paired `.jac` and
+`.jqd` carriers lower to the same semantic identities.

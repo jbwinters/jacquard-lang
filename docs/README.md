@@ -13,6 +13,8 @@ project shape from file names alone.
   (Also discoverable as a project skill via `docs/SKILL.md`.)
 - `tutorial.md`: runnable examples from literals through hashing and tooling.
 - `../demos/README.md`: demo catalog and what each demo proves.
+- `surface-syntax.md`: public `.jac` authoring syntax and its projection onto
+  the retained `.jqd` kernel/debug carrier.
 - `ci-cd.md`: GitHub gates, branch protection, and release evidence workflow.
 
 ## Core Design

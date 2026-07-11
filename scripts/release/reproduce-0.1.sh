@@ -46,6 +46,7 @@ capture clarifying-question env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh
 capture agent-dream env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/agent-dream.sh
 capture ambiguity-pipeline env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/ambiguity-pipeline.sh
 capture demo-warp-tests env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/showcase-warp-tests.sh
+capture repair env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/repair.sh
 capture hostile-manifest env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/m4-hostile.sh
 
 capture cli-and-gauntlet opam exec -- dune runtest \
@@ -55,6 +56,9 @@ capture cli-and-gauntlet opam exec -- dune runtest \
   test/cli/escrow.t \
   test/cli/hostile-demo.t \
   test/cli/infer.t \
+  test/cli/repair.t \
+  test/cli/showcase.t \
+  test/cli/surface.t \
   test/cli/tools.t \
   test/cli/tutorial.t \
   test/cli/warp.t \

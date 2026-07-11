@@ -4,7 +4,7 @@
 # refuses without the grant and the granted run succeeds against the stub.
 # Run from the repo root: sh demos/m4-hostile.sh
 set -u
-JACQUARD="${JACQUARD:-dune exec jacquard --}"
+JACQUARD="${JACQUARD:-dune exec jac --}"
 here="$(dirname "$0")"
 
 echo "== the signatures announce the authority =="

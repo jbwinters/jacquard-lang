@@ -25,6 +25,29 @@ let write_file path contents =
   let channel = open_out_bin path in
   Fun.protect ~finally:(fun () -> close_out channel) (fun () -> output_string channel contents)
 
+let contains text needle =
+  let rec loop index =
+    index + String.length needle <= String.length text
+    && (String.sub text index (String.length needle) = needle || loop (index + 1))
+  in
+  needle = "" || loop 0
+
+let audit_tutorial_commands doc =
+  let contents = read_file doc in
+  let setup =
+    "Development-checkout commands assume the repo root and use\n`dune exec jacquard --`."
+  in
+  if not (contains contents setup) then
+    failf "%s: development command setup must define `dune exec jacquard --`" doc;
+  contents |> String.split_on_char '\n'
+  |> List.filter (fun line -> not (String.starts_with ~prefix:"```jacquard" line))
+  |> List.iter (fun line ->
+      List.iter
+        (fun command ->
+          if contains line command then
+            failf "%s: public command %S bypasses the development-checkout Dune command" doc command)
+        [ "$ jac "; "$ jacquard "; "`jac "; "`jacquard " ])
+
 let valid_name name =
   name <> "" && String.for_all (function 'a' .. 'z' | '0' .. '9' | '-' -> true | _ -> false) name
 
@@ -209,6 +232,9 @@ let run_fixture ~jacquard ~prelude ~fixture_dir example =
       example.name example.expected_exit actual_exit
 
 let audit ~execute ~jacquard ~prelude ~fixture_dir docs =
+  List.iter
+    (fun doc -> if Filename.basename doc = "tutorial.md" then audit_tutorial_commands doc)
+    docs;
   let examples = List.concat_map extract docs in
   let seen_names = Hashtbl.create (List.length examples) in
   let seen_fixtures = Hashtbl.create (List.length examples) in
@@ -324,6 +350,19 @@ let run_self_tests ~jacquard ~prelude =
         (parse_info ~doc:"self.md" ~line:1
            "```jacquard doctest=x mode=run fixture=x.jac stdout=empty stderr=empty exit=0 \
             surprise=x"));
+  with_test_dir "commands" (fun root _ ->
+      let doc = Filename.concat root "tutorial.md" in
+      write_file doc
+        "Development-checkout commands assume the repo root and use\n`dune exec jacquard --`.\n";
+      audit_tutorial_commands doc;
+      write_file doc
+        "Development-checkout commands assume the repo root and use\n\
+         `dune exec jacquard --`.\n\
+         Run `$ jac run example.jac`.\n";
+      expect_failure "bare jac command" "bypasses" (fun () -> audit_tutorial_commands doc);
+      write_file doc "Use `dune exec jacquard -- run example.jac`.\n";
+      expect_failure "missing checkout setup" "command setup" (fun () ->
+          audit_tutorial_commands doc));
   with_test_dir "audit" (fun root fixtures ->
       let doc = Filename.concat root "doc.md" in
       write_file (Filename.concat fixtures "case.jac") "1\n";

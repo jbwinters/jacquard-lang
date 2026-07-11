@@ -9,7 +9,7 @@ posterior itself needs eval, which Warp's closed {check} row cannot grant.
 
   $ export JACQUARD_PRELUDE=../../prelude
 
-  $ sh ../../demos/repair.sh
+  $ JACQUARD=jac sh ../../demos/repair.sh
   == the rows announce the authority: mutation is pure, running candidates is eval ==
   buggy-sum-to : Code
   intended-fix : Code
@@ -56,5 +56,5 @@ support points:
 
   $ awk '/^; --- demo driver ---$/ { exit } { print }' ../../demos/repair.jqd > repair-defs.jqd
   $ cat repair-defs.jqd ../../demos/repair-warp-tests.jqd > repair-suite.jqd
-  $ jacquard test repair-suite.jqd --exhaustive --no-cache | grep repair-prior-support
+  $ jac test repair-suite.jqd --exhaustive --no-cache | grep repair-prior-support
   PASS repair-prior-support/sampled patches stay one edit away (verified exhaustively (9 cases))

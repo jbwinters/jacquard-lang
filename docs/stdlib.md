@@ -520,7 +520,7 @@ claimed as implemented source. It uses tuple projections such as `pair.0`, which
 the v0 surface grammar does not implement; replacing those projections with tuple
 destructuring would be required before promotion to a doctest.
 The signatures tell the review story by themselves: two pure functions and one
-`Console` function, so `jacquard run --allow Console` and nothing else. `count-words`
+`Console` function, so `jac run demos/word-count.jac --allow console` and nothing else. `count-words`
 uses the grid three times (`fold`, `update`, `map`) with the exact schemas from §3,
 `top` passes dictionaries where ordering is needed and composes them with `ord.
 reverse` and `ord.on-second`, and no effect appears anywhere it was not announced.

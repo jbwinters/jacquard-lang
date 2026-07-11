@@ -3,7 +3,7 @@
 Jacquard is a research prototype for running, reviewing, simulating, and trusting
 programs written by models and reviewed by people.
 
-Concretely, it is a small programming language: Lisp-style syntax, an
+Concretely, it is a small programming language with a compact `.jac` surface syntax, an
 interpreter and type checker written in OCaml, a command-line tool, a standard
 library, and a test framework called Warp. Version 0.1 works end to end but is
 a research prototype, not a production language; `docs/release/0.1/LIMITS.md`
@@ -109,7 +109,7 @@ handle {
 ```
 
 ```console
-$ jacquard run test/docs-doctest/fixtures/readme-multishot.jac
+$ jac run test/docs-doctest/fixtures/readme-multishot.jac
 3
 ```
 
@@ -123,11 +123,11 @@ step still runs (it counts eight candidate patches) and then the demo refuses
 until you grant the rest:
 
 ```console
-$ jacquard run demos/repair.jqd
+$ jac run demos/repair.jac
 8
 error[E0814]: this program requires the `eval` effect, which is not granted (performed via `posterior-over-patches`)
   hint: grant it with --allow eval, or handle the effect in the program
-$ jacquard run demos/repair.jqd --allow eval
+$ jac run demos/repair.jac --allow eval
 ```
 
 Under the grant, one failing test leaves two surviving patches: the intended
@@ -156,7 +156,7 @@ jac --version
 from the installed package, so ordinary runs do not need an environment variable:
 
 ```bash
-jac run ~/.local/share/jacquard/demos/m1-fact.jqd
+jac run ~/.local/share/jacquard/demos/m1-fact.jac
 ```
 
 To install somewhere else:
@@ -222,33 +222,37 @@ eval "$(opam env)"
 During development, use the built binary through Dune:
 
 ```bash
-opam exec -- dune exec jacquard -- --help
-opam exec -- dune exec jacquard -- --version
+opam exec -- dune exec jac -- --help
+opam exec -- dune exec jac -- --version
 ```
 
 Many direct CLI commands need the prelude. From the repository root:
 
 ```bash
 export JACQUARD_PRELUDE=$PWD/prelude
-opam exec -- dune exec jacquard -- run demos/m1-fact.jqd
+opam exec -- dune exec jac -- run demos/m1-fact.jac
 ```
 
 The main commands are:
 
 ```bash
-jacquard run FILE.jqd [--allow fs] [--allow net] [--dry-run]
-jac run FILE.jqd [--allow fs] [--allow net] [--dry-run]
-jacquard check FILE.jqd [--print-sigs] [--manifest fs,net,console]
-jacquard hash FILE.jqd
-jacquard fmt FILE.jqd
-jacquard diff FILE_A FILE_B
-jacquard diff STORE_A STORE_B
-jacquard infer enumerate MODEL.jqd
-jacquard infer lw MODEL.jqd --seed 42 --samples 100000
-jacquard replay TRACE.jqd PROGRAM.jqd [--fork '1=(response 500 "down")']
-jacquard test TESTS.jqd [--exhaustive] [--cache-dir CACHE]
-jacquard build FILE.jqd -o PROG
+jac run FILE.jac [--allow fs] [--allow net] [--dry-run]
+jac check FILE.jac [--print-sigs] [--manifest fs,net,console]
+jac hash FILE.jac
+jac fmt FILE.jac
+jac diff FILE_A.jac FILE_B.jac
+jac diff STORE_A STORE_B
+jac infer enumerate MODEL.jac
+jac infer lw MODEL.jac --seed 42 --samples 100000
+jac replay TRACE.jqd PROGRAM.jqd [--fork '1=(response 500 "down")']
+jac test TESTS.jqd [--exhaustive] [--cache-dir CACHE]
+jac build FILE.jqd -o PROG
 ```
+
+`.jac` is the user-facing surface carrier. Bootstrap `.jqd` remains fully
+supported as the internal/debug syntax, quote notation, test-fixture carrier,
+and kernel format of record; native build, replay, and current Warp test files
+continue to use it.
 
 ## Native compilation
 
@@ -264,7 +268,7 @@ where the authority model lives).
 ```bash
 export JACQUARD_PRELUDE=$PWD/prelude
 export JACQUARD_RUNTIME=$PWD/runtime
-jacquard build demos/word-count.jqd -o word-count
+jac build demos/word-count.jqd -o word-count
 echo "some words some" | ./word-count --allow console
 ```
 

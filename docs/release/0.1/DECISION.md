@@ -2,10 +2,10 @@
 
 Status: RC
 
-Commit: `aec2c63` base, `release/0.1-evidence` successor branch  
+Commit: successor merge base `d8b2147a3ad9`; inventory refreshed on the evolving successor
 Version: `0.1.0`  
-Test count: `308` Alcotest/QCheck cases  
-Cram count: `21` transcript files
+Test count: `518` Alcotest/QCheck cases
+Cram count: `29` transcript files
 
 ## Known Blockers
 
@@ -15,8 +15,10 @@ None known in the release branch after the escrow transcript and syntax fixes.
 
 - Direct resolved refs inside eval payloads are allowed under matching grants.
 - World grants are coarse whole-effect grants.
-- No surface syntax, VM, optimizer, package manager, typed staging, gradients,
-  macro expansion, self-hosting, or formal soundness proof.
+- The implemented `.jac` projection and native compiler are research-prototype
+  surfaces, not frozen syntax or a production VM/runtime. There is no package
+  manager, typed staging, gradients, macro expansion, self-hosting, or formal
+  soundness proof.
 - Warp cache has comment/reformat and semantic dependency edit proofs; top-level
   rename cache behavior is not separately pinned.
 

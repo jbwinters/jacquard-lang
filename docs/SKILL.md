@@ -1,6 +1,6 @@
 ---
 name: jacquard
-description: Read, write, run, and test Jacquard programs — the content-addressed, effect-typed research language implemented in this repo. Use when writing or reviewing .jqd files, adding demos or Warp tests, running the jacquard CLI, debugging effect rows / capability manifests / handlers / Dist models, or touching the OCaml implementation in src/.
+description: Read, write, run, and test Jacquard programs - the content-addressed, effect-typed research language implemented in this repo. Use when writing or reviewing public .jac programs or bootstrap .jqd fixtures, adding demos or Warp tests, running the jac CLI, debugging effect rows / capability manifests / handlers / Dist models, or touching the OCaml implementation in src/.
 ---
 
 # Jacquard: the language, fast
@@ -37,22 +37,23 @@ opam exec -- dune runtest         # full suite (~25s; alcotest + qcheck + cram)
 opam exec -- dune fmt             # then: git diff --exit-code (the dev gate)
 ```
 
-`jacquard` during development is `dune exec jacquard --`. The surface:
+`jac` during development is `dune exec jac --`. Public programs use `.jac`;
+bootstrap `.jqd` remains the internal/debug and kernel format of record:
 
 ```bash
-jacquard run FILE.jqd [--allow fs|net|console|clock|eval|dist|infer]... [--dry-run]
-jacquard check FILE.jqd [--print-sigs] [--manifest fs,net,console]
-jacquard test FILES... [--seed N] [--samples N] [--exhaustive] [--budget N]
+jac run FILE.jac [--allow fs|net|console|clock|eval|dist|infer]... [--dry-run]
+jac check FILE.jac [--print-sigs] [--manifest fs,net,console]
+jac test FILES... [--seed N] [--samples N] [--exhaustive] [--budget N]
                    [--cache-dir DIR | --no-cache] [--allow EFFECT]... [--coverage]
-jacquard infer enumerate MODEL.jqd            # exact posterior (multi-shot enumeration)
-jacquard infer lw MODEL.jqd --seed 42 --samples 100000   # likelihood weighting
-jacquard hash FILE.jqd                        # canonical HASH_V0 hashes
-jacquard fmt FILE.jqd [--write]               # canonical formatting, comments kept
-jacquard store add|rename ... ; jacquard diff STORE_A STORE_B   # semantic diff
-jacquard dist-diff MODEL_A MODEL_B            # posterior divergence between models
-jacquard tiers [FILES...]                     # effect-row tier statistics (PF.2 phase 1)
-jacquard replay LOG PROGRAM [--to N] [--fork 'N=(response 503 "down")']
-jacquard build FILE.jqd -o PROG               # AOT-compile to a native binary
+jac infer enumerate MODEL.jac                 # exact posterior (multi-shot enumeration)
+jac infer lw MODEL.jac --seed 42 --samples 100000   # likelihood weighting
+jac hash FILE.jac                             # canonical HASH_V0 hashes
+jac fmt FILE.jac [--write]                    # canonical formatting, comments kept
+jac store add|rename ... ; jac diff STORE_A STORE_B   # semantic diff
+jac dist-diff MODEL_A MODEL_B                 # posterior divergence between models
+jac tiers [FILES...]                          # effect-row tier statistics (PF.2 phase 1)
+jac replay LOG PROGRAM [--to N] [--fork 'N=(response 503 "down")']
+jac build FILE.jqd -o PROG                    # AOT-compile the kernel carrier
 ```
 
 `jacquard build` needs a C toolchain (clang or gcc; tail calls are O(1)
@@ -69,7 +70,11 @@ refused with pointed errors.
 expression in order. Exit codes for `run`: ungranted-effect refusal (E0814)
 = 3, runtime failure = 2, ordinary type errors = 1; `check` refusals = 1.
 
-## Physical syntax: one shape
+## Physical syntax: two carriers, one kernel
+
+Surface `.jac` is the public authoring syntax documented in
+`docs/surface-syntax.md`. It lowers locally to the same 27 kernel forms and has
+the same hashes as its paired `.jqd` format-of-record file.
 
 Every form is a triple `(head, meta, args)`. Bootstrap `.jqd` notation is
 s-expressions: heads are lowercase `[a-z][a-z0-9-]*`; args are forms or
@@ -136,7 +141,7 @@ Everything below is real, runnable style (compare `demos/` and `prelude/`).
 ```
 
 Multi-shot is load-bearing: the enumeration handler resumes once per element
-of a distribution's support (see `demos/m1-choose.jqd` for the two-line
+of a distribution's support (see `demos/m1-choose.jac` for the public
 version). Tuples: `(tuple)` is unit; `(tuple a b)` pairs. Pattern `(ptuple ...)`
 destructures them; `(pcon mk-pair (pvar x) (pvar p))` destructures constructors.
 
@@ -183,8 +188,8 @@ One type, one effect, zero kernel forms (`prelude/06-dist.jqd`):
 - Merge equal outcomes explicitly: `dist.tally table (app (var mk-eq) (var code.eq?))`
   — tallying asks for its `Eq` honestly.
 - Conditioning idiom: `observe (bernoulli w) true` where `w` is 1.0/0.0 —
-  impossible branches prune to mass zero (see `demos/synthesis.jqd`,
-  `demos/repair.jqd`).
+  impossible branches prune to mass zero (see `demos/synthesis.jac`,
+  `demos/repair.jac`).
 - `categorical` weights are **relative**; enumeration normalizes at the end.
 - Gotchas: all-branches-impossible yields `+nan.0` weights in-language (the
   CLI's `jacquard infer enumerate` reports E0901 instead); `observe` reaching the
@@ -198,7 +203,7 @@ One type, one effect, zero kernel forms (`prelude/06-dist.jqd`):
   `var`, `lit`, `pvar` — return `none`), `code.of-int/to-int`,
   `code.of-text/to-text`, `code.eq?` (metadata-erased structural equality),
   `code.diff` (smallest disagreeing subtrees, as text). A full single-edit
-  AST mutation walker in pure Jacquard is in `demos/repair.jqd`.
+  AST mutation walker in pure Jacquard is in `demos/repair.jac`.
 - Running constructed code is the **eval capability**:
   `(app (var eval-code) c)` needs `--allow eval`; it validates, resolves
   against the store, and runs — at root authority (caveat above).

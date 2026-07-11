@@ -1,4 +1,8 @@
-These are in the bootstrap s-expression notation from the dev plan (W1.2), because per the plan's own guardrails that's the only syntax that exists until M4 ships. The `;` comment lines sketch an informal surface rendering for readability, illustrative only. Nothing compiles today, so "expect to compile" means: conformant with the kernel spec, and exactly the kind of files that belong in `corpus/valid/` as targets for the junior engineer.
+These are historical pre-implementation sketches in bootstrap s-expression
+notation from the dev plan (W1.2). They are retained as kernel design context,
+not as the current quick start. For executable surface programs use
+`tutorial.md` and the `.jac` catalog in `../demos/README.md`; bootstrap `.jqd`
+remains the internal/debug and format-of-record carrier.
 
 **1. Safe division, failure as an effect handled to Option.** Exercises match-instead-of-if, exhaustiveness, Handle with a return clause, and a clause that never resumes.
 
@@ -36,7 +40,7 @@ The first line announces the failure. The second shows row polymorphism earning 
 **2. Two coins, the M3 flagship model.** Condition-via-observe using the Bernoulli(1.0) trick, which works directly with the pmf semantics pinned in task W4.2.
 
 ```lisp
-; run: jacquard infer enumerate two-coins.jqd
+; historical bootstrap counterpart of: jac infer enumerate demos/m3-two-coins.jac
 (defterm ((binding condition ()
   (lam ((pvar b))
     (app (var observe) (app (var bernoulli) (lit 1.0)) (var b))))))

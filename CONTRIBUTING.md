@@ -34,8 +34,9 @@ development plan (`docs/development-plan.md`) is the execution queue; the spec
 
 ## Corpus layout
 
-- `corpus/valid/` — `.jqd` files that must parse, validate, resolve, and hash
-  to their golden values.
+- `corpus/valid/` — `.jqd` kernel files and their SS.17 `.jac` twins. Every
+  valid bootstrap program must parse, validate, resolve, and hash to its
+  golden value, and each surface twin must have identical semantic identity.
 - `corpus/invalid/` — `.jqd` files that must fail, each with a sidecar
   `.expect` file naming the failing stage and expected diagnostic code.
 - `corpus/golden/` — pinned outputs (hashes, printed forms, signatures).

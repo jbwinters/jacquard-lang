@@ -3,7 +3,7 @@
 #   sh demos/showcase-warp-tests.sh
 set -eu
 
-JACQUARD="${JACQUARD:-dune exec jacquard --}"
+JACQUARD="${JACQUARD:-dune exec jac --}"
 here="$(dirname "$0")"
 tmp="$(mktemp "${TMPDIR:-/tmp}/jacquard-demo-tests.XXXXXX.jqd")"
 trap 'rm -f "$tmp"' EXIT

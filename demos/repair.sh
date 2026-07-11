@@ -4,22 +4,24 @@
 # reviewable one-line divergence. Run from the repo root:
 #   sh demos/repair.sh
 set -u
-JACQUARD="${JACQUARD:-dune exec jacquard --}"
+JACQUARD="${JACQUARD:-dune exec jac --}"
 here="$(dirname "$0")"
 tmp="$(mktemp "${TMPDIR:-/tmp}/jacquard-repair-tests.XXXXXX.jqd")"
 trap 'rm -f "$tmp"' EXIT
 
 echo "== the rows announce the authority: mutation is pure, running candidates is eval =="
-$JACQUARD check "$here/repair.jqd" --print-sigs
+$JACQUARD check "$here/repair.jac" --print-sigs
 
 echo "== without the grant the pure prefix runs; the first posterior refuses =="
-$JACQUARD run "$here/repair.jqd" 2>&1
+$JACQUARD run "$here/repair.jac" 2>&1
 echo "exit code: $?"
 
 echo "== the granted run: mutant count, posteriors, and the MAP patch =="
-$JACQUARD run "$here/repair.jqd" --allow eval
+$JACQUARD run "$here/repair.jac" --allow eval
 
 echo "== Warp tests over the pure machinery =="
+# Warp's test-file route remains a bootstrap-format fixture and proves that
+# the kernel carrier stays runnable alongside the public surface program.
 awk '/^; --- demo driver ---$/ { exit } { print }' "$here/repair.jqd" > "$tmp"
 printf '\n' >> "$tmp"
 cat "$here/repair-warp-tests.jqd" >> "$tmp"

@@ -1,17 +1,17 @@
 # Jacquard Core 0.1 Evidence
 
-Status: release-candidate evidence pack for `release/0.1-evidence`.
+Status: evolving release evidence pack, refreshed for the post-0.1 successor.
 
-Candidate base: `aec2c63`  
-Evidence branch predecessor: `7d7733f`  
+Successor merge base with `release/0.1-evidence`: `d8b2147a3ad9`
+Inventory snapshot: `3e867b9` plus the SS.20 working-tree successor
 Version surface: `jacquard --version` prints `0.1.0`
 
-This pack describes Jacquard core as implemented on the release branch: the kernel
-triple reader/validator/resolver, HASH_V0 canonical identity, the content store,
-the CPS evaluator with deep multi-shot handlers, row inference and capability
-manifests, Dist inference handlers, the ringed standard library, Warp tests,
-record/replay, fault injection, dry-run, dist-diff, formatter, semantic diff, and
-the executable-escrow demo.
+This pack describes Jacquard core as implemented in the current successor checkout:
+the kernel triple reader/validator/resolver, `.jac` surface projection, HASH_V0
+canonical identity, the content store, CPS evaluator and native compiler, deep
+multi-shot handlers, row inference and capability manifests, Dist inference
+handlers, the ringed standard library, Warp tests, record/replay, fault injection,
+dry-run, dist-diff, formatter, semantic diff, and the executable-escrow demo.
 
 ## Built Artifact
 
@@ -24,9 +24,9 @@ The build is the OCaml package in this repository:
 - CLI tests: `test/cli/*.t` and `test/gauntlet/*.t`
 - unit/property tests: `test/test_jacquard.exe`
 
-The branch is intentionally not a feature branch. Changes after the candidate
-base are limited to release hardening, escrow demo completion, and evidence
-documentation.
+The original 0.1 candidate is the lineage base, not a claim that this evolving
+successor still has the candidate's feature surface. The inventory and limits
+below describe the current checkout and must be refreshed as that surface evolves.
 
 ## Test Inventory
 
@@ -41,8 +41,8 @@ find ../../../test -name '*.t' | wc -l
 
 Current inventory:
 
-- Alcotest/QCheck cases: `308`
-- Cram transcript files: `21`
+- Alcotest/QCheck cases: `518`
+- Cram transcript files: `29`
 - Gauntlet cram files: `4`
 - Escrow transcript: `test/cli/escrow.t`
 
@@ -63,6 +63,9 @@ cd _build/default/test && ./test_jacquard.exe test 'gauntlet-.*' --compact --col
 
 The reproduction script [reproduce-0.1.sh](../../../scripts/release/reproduce-0.1.sh)
 runs the same checks and writes demo transcripts under `logs/release/0.1/`.
+Public demo transcripts run `.jac` programs through the `jac` alias; the demo
+and inference crams also execute retained `.jqd` carriers and compare paired
+semantic hashes. Bootstrap remains the internal/debug kernel format of record.
 
 ## Claim Proofs
 
@@ -85,8 +88,9 @@ The claim matrix is [CLAIMS.md](CLAIMS.md). The short version:
 Jacquard core 0.1 does not claim:
 
 - production compiler maturity
-- a stable surface syntax beyond bootstrap S-expressions
-- a VM, optimizer, or native backend
+- that the implemented `.jac` surface syntax is frozen or a second semantics
+- a production optimizer, VM, or native runtime; the tested native compiler has
+  documented unsupported grants and slow paths
 - continuous distributions, gradients, or differentiable inference
 - typed staging or macro expansion
 - package management or self-hosting
@@ -115,12 +119,13 @@ See [LIMITS.md](LIMITS.md).
 Fresh-clone instructions are in [REPRO.md](REPRO.md). The minimal shape is:
 
 ```sh
-git checkout release/0.1-evidence
-git merge-base --is-ancestor aec2c63 HEAD
+git checkout <successor-commit>
+git merge-base --is-ancestor d8b2147a3ad9 HEAD
 opam install --deps-only . --with-test --with-dev-setup --with-doc -y
 opam exec -- dune build @all
 opam exec -- dune runtest
 opam exec -- dune fmt
 _build/default/bin/main.exe --version
-scripts/release/reproduce-0.1.sh
+JACQUARD_RELEASE_REF=HEAD JACQUARD_RELEASE_BASE=d8b2147a3ad9 \
+  scripts/release/reproduce-0.1.sh
 ```
