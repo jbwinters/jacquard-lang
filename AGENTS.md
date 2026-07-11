@@ -28,7 +28,13 @@ Run this before OCaml commands in a fresh shell:
 
 ```bash
 eval "$(opam env)"
+mkdir -p "$PWD/.scratch/tmp"
+export TMPDIR="$PWD/.scratch/tmp"
 ```
+
+Keep temporary clones, worktrees, release reproductions, and generated test
+stores under `.scratch/` in this repository. The root filesystem is small: do
+not create Jacquard workspaces or build artifacts under `/tmp`.
 
 Expected local toolchain:
 
@@ -110,6 +116,7 @@ When adding valid corpus files, regenerate the golden hashes with
 ## Git Hygiene
 
 - `_opam/` is a local switch and must stay ignored.
+- `.scratch/` is repo-local disposable workspace state and must stay ignored.
 - `.taskmaster/` is currently ignored in this repo. Task Master data is available locally but will not be committed unless the ignore policy changes.
 - Do not rewrite unrelated dirty worktree changes.
 

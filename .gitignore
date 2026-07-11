@@ -37,6 +37,7 @@ node_modules/
 # Local OCaml switch
 _opam/
 _build/
+.scratch/
 *.install
 
 # Native runtime local artifacts
