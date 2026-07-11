@@ -68,4 +68,8 @@
   (glob_files ../src/*.ml)
   (glob_files ../bin/*.ml)
   ../docs/errors.md
-  ../docs/surface-syntax.md))
+  ../docs/stdlib.md
+  ../docs/surface-syntax.md
+  ../docs/tutorial.md
+  ../docs/warp-testing.md
+  cli/escrow.t))

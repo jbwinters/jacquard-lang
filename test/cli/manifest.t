@@ -14,9 +14,9 @@ taints every caller's row.
   > (app (var summarize) (lit "http://example.com"))
   > EOF_JQD
   $ jacquard check hostile.jqd --print-sigs
-  fetch-title : (text) ->{net} text
-  summarize : (text) ->{net} text
-  _ : text
+  fetch-title : (Text) ->{Net} Text
+  summarize : (Text) ->{Net} Text
+  _ : Text
 
 Checking against a grant set that lacks net refuses at the type level, naming
 the effect and the call-chain endpoint:

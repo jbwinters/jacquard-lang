@@ -77,7 +77,7 @@ demo outputs are produced by handlers around that unchanged policy.
 
   $ sh ../../demos/agent-dream.sh
   == policy authority ==
-  support-policy : () ->{net} text
+  support-policy : () ->{Net} Text
   == scripted worlds and probabilistic dream ==
   "issue-refund"
   "fallback-human"

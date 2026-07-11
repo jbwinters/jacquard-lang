@@ -53,16 +53,16 @@ Dictionary-passing pays off here, since messages come from `Show` and comparison
 from `Eq`, explicitly:
 
 ```
-check.true   : (Bool, Text) ->{Check} ()
-check.eq     : (a, a, Eq a, Show a) ->{Check} ()
-check.some   : (Option a, Show a) ->{Check} ()
-check.fails  : (() ->{Abort | e} a) ->{Check | e} ()    -- asserts the body aborts
-check.throws : (() ->{Throw err | e} a, (err) ->{} Bool, Show err) ->{Check | e} ()
+check.true : (Bool, Text) ->{Check} ()
+check.eq : forall a. (a, a, Eq a, Show a, Text) ->{Check} ()
+check.some : forall a b. (Option a, b, Text) ->{Check} ()
+check.fails : forall a | e. (() ->{Abort, Check | e} a, Text) ->{Check | e} ()
+check.throws : forall a b | e. (() ->{Throw, Check | e} a, (b) ->{Check | e} Bool, Show b, Text) ->{Check | e} ()
 ```
 
 `check.fails` deserves a note: testing a failure path means handling the failure,
 so the assertion is itself a handler around the body, about five lines of ring 1.
-The runner (`test.run : (() ->{Check | e} ()) ->{e} Report`) is a `Check` handler
+The runner (`test.run : forall a | e. (() ->{Check | e} a) ->{| e} Report`) is a `Check` handler
 that collects soft failures and catches `fail`; a `Case` whose report contains zero
 checks draws a warning, so a test cannot silently assert nothing.
 
@@ -92,7 +92,7 @@ language's own homoiconic form as the wire format:
 type Codec a = MkCodec { encode : (a) ->{} Code, decode : (Code) ->{} Option a }
 
 test.record : (() ->{E | e} a, codecs) ->{E | e} (a, Log)     -- per world effect E
-test.replay : (Log, () ->{E | e} a) ->{e} a
+test.replay : (Log, () ->{E | e} a) ->{| e} a
 ```
 
 A `Log` is a list of (operation, arguments, result) triples as `Code`, stored

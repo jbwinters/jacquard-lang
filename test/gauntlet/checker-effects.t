@@ -12,8 +12,8 @@ ambient row must include net.
   > (app (var call-twice) (lam ((pvar x)) (app (var net.get) (lit "https://x"))))
   > EOF_JQD
   $ jacquard check ho-net.jqd --print-sigs
-  call-twice : forall a e. ((int) ->{e} a) ->{e} (a, a)
-  _ : (text, text)
+  call-twice : forall a | e. ((Int) ->{| e} a) ->{| e} (a, a)
+  _ : (Text, Text)
   $ jacquard check ho-net.jqd --manifest console
   error[E0814]: this program requires the `net` effect, which is not granted (performed via `net.get`)
     hint: grant it with --allow net, or handle the effect in the program
@@ -39,7 +39,7 @@ A handler for console removes console, but the net effect remains in the manifes
   >   (opclause print ((pvar msg)) k (app (var k) (tuple))))
   > EOF_JQD
   $ jacquard check handle-net.jqd --print-sigs
-  _ : ((), text)
+  _ : ((), Text)
   $ jacquard check handle-net.jqd --manifest console
   error[E0814]: this program requires the `net` effect, which is not granted (performed via `net.get`)
     hint: grant it with --allow net, or handle the effect in the program

@@ -3,9 +3,9 @@ The committed transcript for demos/m4-hostile.sh (W5.5).
   $ export JACQUARD_PRELUDE=../../prelude
 
   $ jacquard check ../../demos/m4-hostile.jqd --print-sigs
-  fetch-title : (text) ->{net} text
-  summarize : (text) ->{net} text
-  _ : text
+  fetch-title : (Text) ->{Net} Text
+  summarize : (Text) ->{Net} Text
+  _ : Text
   $ jacquard check ../../demos/m4-hostile.jqd --manifest console
   error[E0814]: this program requires the `net` effect, which is not granted (performed via `net.get`)
     hint: grant it with --allow net, or handle the effect in the program

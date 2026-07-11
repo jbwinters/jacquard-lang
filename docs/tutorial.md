@@ -79,8 +79,8 @@ Delete a clause and `jacquard check` rejects the match with the missing witness 
       (clause (pcon false) (app (var div) (var n) (var d))))))))
 ```
 
-`jacquard check --print-sigs` shows `safe-div : (int, int) ->{abort} int` — the signature
-announces the possible abort — and `to-option : forall a e. (() ->{abort | e} a) ->{e} option a`
+`jacquard check --print-sigs` shows `safe-div : (Int, Int) ->{Abort} Int` — the signature
+announces the possible abort — and `to-option : forall a | e. (() ->{Abort | e} a) ->{| e} Option a`
 shows row polymorphism removing it.
 
 ## 7. Multi-shot handlers

@@ -294,10 +294,13 @@ let quantified (s : scheme) : int list * int list =
 (* Display                                                             *)
 (* ------------------------------------------------------------------ *)
 
-(** Render a type for signatures and diagnostics. [name_of] maps a type/effect hash to its display
-    name (store lookup); quantified/unbound type vars print as [a b c ...], row vars as
-    [e e1 e2 ...], skolems by their source names. *)
-let show ?(name_of = fun h -> String.sub (Hash.to_hex h) 0 8) (t : ty) : string =
+(** Render a type for signatures and diagnostics. [name_of] maps a type hash to its display name;
+    [effect_name_of] can provide a distinct effect namespace projection and defaults to [name_of].
+    Quantified/unbound type vars print as [a b c ...], row vars as [e e1 e2 ...], and skolems by
+    their source names. *)
+let show ?(name_of = fun h -> String.sub (Hash.to_hex h) 0 8) ?effect_name_of ?(surface = false)
+    (t : ty) : string =
+  let effect_name_of = Option.value ~default:name_of effect_name_of in
   let tnames : (int, string) Hashtbl.t = Hashtbl.create 8 in
   let rnames : (int, string) Hashtbl.t = Hashtbl.create 8 in
   let tname id =
@@ -323,13 +326,16 @@ let show ?(name_of = fun h -> String.sub (Hash.to_hex h) 0 8) (t : ty) : string 
   in
   let show_row (r : row) =
     let r = repr_row r in
-    let effs = List.map name_of (List.sort Hash.compare r.effects) in
+    let effs = List.map effect_name_of (List.sort Hash.compare r.effects) in
     match r.tail with
     | RClosed -> String.concat ", " effs
     | RVar { contents = RUnbound { id; _ } } ->
-        if effs = [] then rname id else String.concat ", " effs ^ " | " ^ rname id
+        if effs = [] then (if surface then "| " else "") ^ rname id
+        else String.concat ", " effs ^ " | " ^ rname id
     | RVar { contents = RLink _ } -> assert false
-    | RSkolem (_, n) -> if effs = [] then n else String.concat ", " effs ^ " | " ^ n
+    | RSkolem (_, n) ->
+        if effs = [] then (if surface then "| " else "") ^ n
+        else String.concat ", " effs ^ " | " ^ n
   in
   let rec go ~paren t =
     match repr t with
@@ -352,15 +358,21 @@ let show ?(name_of = fun h -> String.sub (Hash.to_hex h) 0 8) (t : ty) : string 
   in
   go ~paren:false t
 
-(** Render a scheme: [forall a e. TYPE] when anything is quantified. Variable naming is shared with
+(** Render a scheme when anything is quantified. With [surface], row variables occupy the explicit
+    [|] namespace required by surface syntax: [forall a | e. TYPE]. Variable naming is shared with
     the body rendering, so quantifier names line up. *)
-let show_scheme ?name_of (s : scheme) : string =
+let show_scheme ?name_of ?effect_name_of ?(surface = false) (s : scheme) : string =
   let tids, rids = quantified s in
-  let body = show ?name_of s.ty in
+  let body = show ?name_of ?effect_name_of ~surface s.ty in
   (* naming in [show] assigns letters in first-appearance order, which matches [quantified]'s
      traversal; reconstruct the quantifier prefix from counts *)
   if tids = [] && rids = [] then body
   else
     let tnames = List.mapi (fun i _ -> String.make 1 (Char.chr (Char.code 'a' + i))) tids in
     let rnames = List.mapi (fun i _ -> if i = 0 then "e" else Printf.sprintf "e%d" i) rids in
-    "forall " ^ String.concat " " (tnames @ rnames) ^ ". " ^ body
+    let quantified =
+      if (not surface) || rnames = [] then String.concat " " (tnames @ rnames)
+      else if tnames = [] then "| " ^ String.concat " " rnames
+      else String.concat " " tnames ^ " | " ^ String.concat " " rnames
+    in
+    "forall " ^ quantified ^ ". " ^ body

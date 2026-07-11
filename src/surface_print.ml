@@ -46,6 +46,17 @@ let pp_trailing context meta fmt =
       (fun comment -> Format.fprintf fmt " %s" comment)
       (Meta.comment_texts Meta.key_trivia_trailing meta)
 
+let pp_line_trailing context meta fmt =
+  if context.trivia then
+    List.iter
+      (fun comment ->
+        Format.fprintf fmt " %s" comment;
+        Format.pp_print_break fmt 1000 0)
+      (Meta.comment_texts Meta.key_trivia_trailing meta)
+
+let has_line_trailing context meta =
+  context.trivia && Meta.comment_texts Meta.key_trivia_trailing meta <> []
+
 let pp_inner context meta fmt =
   if context.trivia then begin
     List.iter
@@ -58,6 +69,15 @@ let pp_inner context meta fmt =
 
 let pp_eof context meta fmt =
   if context.trivia then pp_comments fmt (Meta.comment_texts Meta.key_trivia_eof meta)
+
+let pp_owned_token context meta token fmt =
+  pp_leading context meta fmt;
+  pp_inner context meta fmt;
+  Format.pp_print_string fmt token;
+  pp_line_trailing context meta fmt
+
+let owned kind meta = Meta.surface_container kind meta
+let indexed kind index meta = Meta.surface_indexed_container kind index meta
 
 let rec has_comments (form : Form.t) =
   List.exists
@@ -169,16 +189,50 @@ let rec pp_pat context lookup fmt (pat : Kernel.pat) =
   pp_trailing context pat.meta fmt
 
 and pp_row context lookup fmt (row : Kernel.row) =
-  Format.fprintf fmt "->{@[<hov>";
+  let opening = owned "row-open" row.wmeta in
+  let closing = owned "row-close" row.wmeta in
+  Format.pp_print_string fmt "->";
+  pp_owned_token context opening "{" fmt;
+  Format.fprintf fmt "@[<hv -1>";
+  if not (has_line_trailing context opening) then Format.fprintf fmt "@;<0 0>";
   pp_leading context row.wmeta fmt;
-  pp_sep "," (pp_gref lookup Surface_name.Effect Meta.empty) fmt row.effects;
+  List.iteri
+    (fun index effect_ref ->
+      if index > 0 then begin
+        let comma = indexed "row-comma" (index - 1) row.wmeta in
+        pp_owned_token context comma "," fmt;
+        if not (has_line_trailing context comma) then Format.fprintf fmt "@ "
+      end;
+      let effect_meta = indexed "row-effect" index row.wmeta in
+      pp_leading context effect_meta fmt;
+      pp_gref lookup Surface_name.Effect effect_meta fmt effect_ref;
+      pp_line_trailing context effect_meta fmt)
+    row.effects;
   (match row.rvar with
   | None -> ()
   | Some tail ->
-      if row.effects = [] then Format.pp_print_string fmt "| " else Format.fprintf fmt "@ |@ ";
-      pp_named Surface_name.Rvar fmt tail);
+      let preceding =
+        if row.effects = [] then opening
+        else indexed "row-effect" (List.length row.effects - 1) row.wmeta
+      in
+      if row.effects <> [] && not (has_line_trailing context preceding) then Format.fprintf fmt "@ ";
+      let bar_meta = owned "row-bar" row.wmeta in
+      pp_owned_token context bar_meta "|" fmt;
+      if not (has_line_trailing context bar_meta) then Format.pp_print_char fmt ' ';
+      let tail_meta = owned "row-tail" row.wmeta in
+      pp_leading context tail_meta fmt;
+      pp_named Surface_name.Rvar fmt tail;
+      pp_line_trailing context tail_meta fmt);
   pp_inner context row.wmeta fmt;
-  Format.fprintf fmt "@]}";
+  let preceding =
+    match row.rvar with
+    | Some _ -> owned "row-tail" row.wmeta
+    | None when row.effects <> [] -> indexed "row-effect" (List.length row.effects - 1) row.wmeta
+    | None -> opening
+  in
+  if not (has_line_trailing context preceding) then Format.fprintf fmt "@;<0 -2>";
+  Format.fprintf fmt "@]";
+  pp_owned_token context closing "}" fmt;
   pp_trailing context row.wmeta fmt
 
 and pp_ty context lookup fmt (ty : Kernel.ty) =
@@ -198,7 +252,9 @@ and pp_ty context lookup fmt (ty : Kernel.ty) =
       pp_inner context params_meta fmt;
       Format.fprintf fmt ")";
       pp_trailing context params_meta fmt;
-      Format.fprintf fmt " %a@ %a@]" (pp_row context lookup) row (pp_ty context lookup) result
+      Format.fprintf fmt " %a" (pp_row context lookup) row;
+      if not (has_line_trailing context (owned "row-close" row.wmeta)) then Format.fprintf fmt "@ ";
+      Format.fprintf fmt "%a@]" (pp_ty context lookup) result
   | Kernel.TTuple items -> (
       match items with
       | [] ->
@@ -214,16 +270,39 @@ and pp_ty context lookup fmt (ty : Kernel.ty) =
           pp_inner context ty.meta fmt;
           Format.fprintf fmt "@])")
   | Kernel.TForall (tvars, rvars, body) ->
-      Format.fprintf fmt "@[<hov 2>forall";
+      let forall_meta = Meta.surface_container "forall" ty.meta in
+      pp_leading context forall_meta fmt;
+      Format.fprintf fmt "@[<hov 2>";
+      pp_owned_token context (owned "forall-keyword" forall_meta) "forall" fmt;
       if tvars = [] && rvars = [] then Format.fprintf fmt "@ "
       else begin
-        List.iter (fun name -> Format.fprintf fmt "@ %a" (pp_named Surface_name.Tvar) name) tvars;
+        List.iteri
+          (fun index name ->
+            Format.pp_print_char fmt ' ';
+            let meta = indexed "forall-tvar" index forall_meta in
+            pp_leading context meta fmt;
+            pp_named Surface_name.Tvar fmt name;
+            pp_line_trailing context meta fmt)
+          tvars;
         if rvars <> [] then begin
-          Format.fprintf fmt "@ |";
-          List.iter (fun name -> Format.fprintf fmt "@ %a" (pp_named Surface_name.Rvar) name) rvars
+          Format.pp_print_char fmt ' ';
+          pp_owned_token context (owned "forall-bar" forall_meta) "|" fmt;
+          List.iteri
+            (fun index name ->
+              Format.pp_print_char fmt ' ';
+              let meta = indexed "forall-rvar" index forall_meta in
+              pp_leading context meta fmt;
+              pp_named Surface_name.Rvar fmt name;
+              pp_line_trailing context meta fmt)
+            rvars
         end
       end;
-      Format.fprintf fmt ".@ %a@]" (pp_ty context lookup) body);
+      pp_inner context forall_meta fmt;
+      let dot_meta = owned "forall-dot" forall_meta in
+      pp_owned_token context dot_meta "." fmt;
+      pp_trailing context forall_meta fmt;
+      if not (has_line_trailing context dot_meta) then Format.fprintf fmt "@ ";
+      Format.fprintf fmt "%a@]" (pp_ty context lookup) body);
   pp_trailing context ty.meta fmt
 
 and pp_ty_atom context lookup fmt ty =

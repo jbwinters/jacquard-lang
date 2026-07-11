@@ -87,7 +87,19 @@ let name_of ctx h =
   | Error _ -> String.sub (Hash.to_hex h) 0 8
 
 let show_ty ctx t = Types.show ~name_of:(name_of ctx) t
-let show_scheme ctx s = Types.show_scheme ~name_of:(name_of ctx) s
+
+let surface_name_of ctx kind hash =
+  match Store.locate ctx.store hash with
+  | Ok _ -> Surface_name.render kind (name_of ctx hash)
+  | Error _ -> Printf.sprintf "#%s:%s" (Hash.to_hex hash) (Surface_name.kind_tag kind)
+
+(** [show_scheme] renders inferred checker signatures as parseable surface type/effect notation.
+    Unknown hashes remain explicit kind-tagged references rather than losing identity. *)
+let show_scheme ctx s =
+  Types.show_scheme ~surface:true
+    ~name_of:(surface_name_of ctx Surface_name.Type)
+    ~effect_name_of:(surface_name_of ctx Surface_name.Effect)
+    s
 
 let unify_or ctx ?meta ?hint ~what expected actual =
   try Types.unify expected actual

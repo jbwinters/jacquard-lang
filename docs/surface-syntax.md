@@ -703,7 +703,7 @@ is what printer-first means operationally.
 
 Two diagnostics belong to this slice specifically. First, a bare reference
 passed where a thunk type is expected (`fn () -> naive-checkout()` is the
-correct form; a bare `naive-checkout` where a `() ->{e} T` is wanted is not,
+correct form; a bare `naive-checkout` where a `() ->{| e} T` is wanted is not,
 since top-level definitions close their rows) should say so in surface
 terms ("wrap in `fn () ->`") rather than surfacing the underlying
 row-inference error; the wrapper is common enough in translated code that it

@@ -1,38 +1,38 @@
 01-identity.jqd:_ : forall a. (a) ->{} a
 02-const.jqd:_ : forall a b. (a, b) ->{} a
-03-apply-twice.jqd:_ : forall a e. ((a) ->{e} a, a) ->{e} a
-04-compose.jqd:_ : forall a b c e. ((c) ->{e} a, (b) ->{e} c) ->{} (b) ->{e} a
-05-thunk.jqd:_ : () ->{} int
-06-add-one.jqd:add-one : (int) ->{} int
-07-fact.jqd:fact : (int) ->{} int
-08-even-odd.jqd:even : (int) ->{} bool
-08-even-odd.jqd:odd : (int) ->{} bool
-09-hostile.jqd:safe-div : (int, int) ->{abort} int
-09-hostile.jqd:to-option : forall a e. (() ->{abort | e} a) ->{e} option a
-09-hostile.jqd:main : (option int, option int)
-10-print-fn.jqd:_ : () ->{console} ()
-11-eval-fn.jqd:_ : forall a. (code) ->{eval} a
-12-map-use.jqd:_ : (list int) ->{} list int
-13-fold-use.jqd:_ : (list int) ->{} int
-14-option-cons.jqd:_ : forall a. (option a, option int)
+03-apply-twice.jqd:_ : forall a | e. ((a) ->{| e} a, a) ->{| e} a
+04-compose.jqd:_ : forall a b c | e. ((c) ->{| e} a, (b) ->{| e} c) ->{} (b) ->{| e} a
+05-thunk.jqd:_ : () ->{} Int
+06-add-one.jqd:add-one : (Int) ->{} Int
+07-fact.jqd:fact : (Int) ->{} Int
+08-even-odd.jqd:even : (Int) ->{} Bool
+08-even-odd.jqd:odd : (Int) ->{} Bool
+09-hostile.jqd:safe-div : (Int, Int) ->{Abort} Int
+09-hostile.jqd:to-option : forall a | e. (() ->{Abort | e} a) ->{| e} Option a
+09-hostile.jqd:main : (Option Int, Option Int)
+10-print-fn.jqd:_ : () ->{Console} ()
+11-eval-fn.jqd:_ : forall a. (Code) ->{Eval} a
+12-map-use.jqd:_ : (List Int) ->{} List Int
+13-fold-use.jqd:_ : (List Int) ->{} Int
+14-option-cons.jqd:_ : forall a. (Option a, Option Int)
 15-pair-swap.jqd:_ : forall a b. ((b, a)) ->{} (a, b)
-16-not-use.jqd:_ : (bool) ->{} bool
-17-match-option.jqd:_ : (option int) ->{} int
-18-quote.jqd:_ : code
-19-ann.jqd:_ : (int) ->{} int
-20-state-handler.jqd:handled : forall a. option a
-21-state.jqd:run-state : forall a b e. (() ->{state | e} a, b) ->{e} (a, b)
-22-hostile-net.jqd:fetch-title : (text) ->{net} text
-22-hostile-net.jqd:summarize : (text) ->{net} text
-23-ring1.jqd:tally : forall a b. (list b) ->{} ((), list a)
-23-ring1.jqd:label-with-index : forall a. (list a) ->{} (list (int, a), int)
-24-ring2.jqd:csv-swap : (text) ->{} text
-24-ring2.jqd:index-of-names : (list text) ->{} map.t text int
-24-ring2.jqd:die-posterior : forall a. (int, int) ->{} list (pair a real)
-25-warp.jqd:fails-on-empty : forall a. (list a) ->{check} ()
-25-warp.jqd:helper-with-open-row : () ->{check} ()
-25-warp.jqd:sealed-case : test
-25-warp.jqd:fails-alias : forall a e. (() ->{abort, check | e} a, text) ->{check | e} ()
-26-replay.jqd:hermetified : (code) ->{throw} text
-26-replay.jqd:chaos-explored : (int) ->{throw, check} list ()
-26-replay.jqd:hermetified-multi : (code) ->{throw} text
+16-not-use.jqd:_ : (Bool) ->{} Bool
+17-match-option.jqd:_ : (Option Int) ->{} Int
+18-quote.jqd:_ : Code
+19-ann.jqd:_ : (Int) ->{} Int
+20-state-handler.jqd:handled : forall a. Option a
+21-state.jqd:run-state : forall a b | e. (() ->{State | e} a, b) ->{| e} (a, b)
+22-hostile-net.jqd:fetch-title : (Text) ->{Net} Text
+22-hostile-net.jqd:summarize : (Text) ->{Net} Text
+23-ring1.jqd:tally : forall a b. (List b) ->{} ((), List a)
+23-ring1.jqd:label-with-index : forall a. (List a) ->{} (List (Int, a), Int)
+24-ring2.jqd:csv-swap : (Text) ->{} Text
+24-ring2.jqd:index-of-names : (List Text) ->{} `type:map.t` Text Int
+24-ring2.jqd:die-posterior : forall a. (Int, Int) ->{} List (Pair a Real)
+25-warp.jqd:fails-on-empty : forall a. (List a) ->{Check} ()
+25-warp.jqd:helper-with-open-row : () ->{Check} ()
+25-warp.jqd:sealed-case : Test
+25-warp.jqd:fails-alias : forall a | e. (() ->{Abort, Check | e} a, Text) ->{Check | e} ()
+26-replay.jqd:hermetified : (Code) ->{Throw} Text
+26-replay.jqd:chaos-explored : (Int) ->{Throw, Check} List ()
+26-replay.jqd:hermetified-multi : (Code) ->{Throw} Text

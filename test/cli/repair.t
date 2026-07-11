@@ -11,28 +11,28 @@ posterior itself needs eval, which Warp's closed {check} row cannot grant.
 
   $ sh ../../demos/repair.sh
   == the rows announce the authority: mutation is pure, running candidates is eval ==
-  buggy-sum-to : code
-  intended-fix : code
-  op-swaps : list code
-  op-mutants : (code) ->{} list code
-  lit-mutants : (code) ->{} list code
-  leaf-edits : (code) ->{} list (code, text)
-  set-nth : forall a. (list a, int, a) ->{} list a
-  code-mutants : (code) ->{} list (code, text)
-  patch-weight : (text) ->{} real
-  patch-prior : (code) ->{} distribution code
-  passes? : forall a. (code, list (a, int)) ->{eval} bool
-  repair : forall a. (code, list (a, int)) ->{dist, eval} code
-  posterior-over-patches : forall a. (code, list (a, int)) ->{eval} list (pair code real)
-  surviving-patches : forall a. (list (pair a real)) ->{} list (pair a real)
-  map-patch : forall a. (a, list (pair a real)) ->{} a
-  bug-report : list (int, int)
-  regression-spec : list (int, int)
-  _ : int
-  _ : list (pair code real)
-  _ : text
-  _ : list (pair code real)
-  _ : text
+  buggy-sum-to : Code
+  intended-fix : Code
+  op-swaps : List Code
+  op-mutants : (Code) ->{} List Code
+  lit-mutants : (Code) ->{} List Code
+  leaf-edits : (Code) ->{} List (Code, Text)
+  set-nth : forall a. (List a, Int, a) ->{} List a
+  code-mutants : (Code) ->{} List (Code, Text)
+  patch-weight : (Text) ->{} Real
+  patch-prior : (Code) ->{} Distribution Code
+  passes? : forall a. (Code, List (a, Int)) ->{Eval} Bool
+  repair : forall a. (Code, List (a, Int)) ->{Dist, Eval} Code
+  posterior-over-patches : forall a. (Code, List (a, Int)) ->{Eval} List (Pair Code Real)
+  surviving-patches : forall a. (List (Pair a Real)) ->{} List (Pair a Real)
+  map-patch : forall a. (a, List (Pair a Real)) ->{} a
+  bug-report : List (Int, Int)
+  regression-spec : List (Int, Int)
+  _ : Int
+  _ : List (Pair Code Real)
+  _ : Text
+  _ : List (Pair Code Real)
+  _ : Text
   == without the grant the pure prefix runs; the first posterior refuses ==
   8
   error[E0814]: this program requires the `eval` effect, which is not granted (performed via `posterior-over-patches`)

@@ -1477,47 +1477,99 @@ and parse_paren_type state ~allow_newlines:_ opening =
 and parse_arrow state ~allow_newlines params left_meta =
   let arrow = advance state in
   let opening = expect state Surface_lex.LBrace "`{` immediately after `->`" in
-  Option.iter (fun _ -> skip_continuation state) opening;
   let effects = ref [] in
   let tail = ref None in
+  let row_owners = ref Meta.empty in
+  let own kind token =
+    row_owners :=
+      Meta.with_surface_container kind (meta_with_span token.Surface_lex.span) !row_owners
+  in
+  let own_indexed kind index token =
+    row_owners :=
+      Meta.with_surface_indexed_container kind index
+        (meta_with_span token.Surface_lex.span)
+        !row_owners
+  in
   let finished = ref false in
+  let stopped_before_top = ref false in
   let closing = ref arrow in
-  while not !finished do
-    let token = current state in
-    match token.Surface_lex.token with
-    | Surface_lex.RBrace ->
-        closing := advance state;
-        finished := true
-    | Surface_lex.Bar ->
-        if Option.is_some !tail then report state token "an effect row can contain only one tail";
-        ignore (advance state);
-        skip_continuation state;
-        tail := parse_row_var state;
-        skip_list_space state;
-        if (current state).Surface_lex.token <> Surface_lex.RBrace then
-          report state (current state) "the effect-row tail must be the final row item"
-    | Surface_lex.Ident name when Option.is_some (kernel_name_of_pascal name) ->
-        effects := Surface_ast.Named (projected_name name) :: !effects;
-        ignore (advance state);
-        parse_row_separator state
-    | Surface_lex.Escaped (Surface_name.Effect, name) ->
-        effects := Surface_ast.Named name :: !effects;
-        ignore (advance state);
-        parse_row_separator state
-    | Surface_lex.HashRef (hash, Surface_name.Effect) ->
-        effects := Surface_ast.Hashed hash :: !effects;
-        ignore (advance state);
-        parse_row_separator state
-    | _ ->
-        report state token
-          (Printf.sprintf "expected an effect name, row tail, or `}`, found %s"
-             (token_description state token));
-        if token.token <> Surface_lex.Eof then ignore (advance_recording_invalid state);
-        finished := true
-  done;
-  let row_meta = meta_with_span (span_between arrow !closing) in
-  if allow_newlines then skip_list_space state else skip_continuation state;
-  let result = parse_type state ~allow_newlines in
+  Option.iter
+    (fun opening ->
+      own "row-open" opening;
+      (match top_boundary_after_continuation state with
+      | Some next_top ->
+          report state next_top "expected `}` before the next top-level item";
+          stopped_before_top := true;
+          finished := true
+      | None -> skip_continuation state);
+      while not !finished do
+        let token = current state in
+        match token.Surface_lex.token with
+        | Surface_lex.RBrace ->
+            let token = advance state in
+            own "row-close" token;
+            closing := token;
+            finished := true
+        | Surface_lex.Eof ->
+            report state token "expected `}` to close the effect row";
+            finished := true
+        | Surface_lex.Bar ->
+            let duplicate = Option.is_some !tail in
+            if duplicate then report state token "an effect row can contain only one tail";
+            own "row-bar" (advance state);
+            skip_continuation state;
+            let parsed_tail = parse_row_var state in
+            if not duplicate then tail := Option.map fst parsed_tail;
+            Option.iter (fun (_, token) -> own "row-tail" token) parsed_tail;
+            skip_list_space state;
+            if (current state).Surface_lex.token <> Surface_lex.RBrace then
+              report state (current state) "the effect-row tail must be the final row item"
+        | Surface_lex.Ident name when Option.is_some (kernel_name_of_pascal name) ->
+            if Option.is_some !tail then
+              report state token "the effect-row tail must be the final row item";
+            let index = List.length !effects in
+            effects := Surface_ast.Named (projected_name name) :: !effects;
+            own_indexed "row-effect" index (advance state);
+            if not (parse_row_separator state ~effect_index:index row_owners) then begin
+              stopped_before_top := true;
+              finished := true
+            end
+        | Surface_lex.Escaped (Surface_name.Effect, name) ->
+            if Option.is_some !tail then
+              report state token "the effect-row tail must be the final row item";
+            let index = List.length !effects in
+            effects := Surface_ast.Named name :: !effects;
+            own_indexed "row-effect" index (advance state);
+            if not (parse_row_separator state ~effect_index:index row_owners) then begin
+              stopped_before_top := true;
+              finished := true
+            end
+        | Surface_lex.HashRef (hash, Surface_name.Effect) ->
+            if Option.is_some !tail then
+              report state token "the effect-row tail must be the final row item";
+            let index = List.length !effects in
+            effects := Surface_ast.Hashed hash :: !effects;
+            own_indexed "row-effect" index (advance state);
+            if not (parse_row_separator state ~effect_index:index row_owners) then begin
+              stopped_before_top := true;
+              finished := true
+            end
+        | _ ->
+            report state token
+              (Printf.sprintf "expected an effect name, row tail, or `}`, found %s"
+                 (token_description state token));
+            if token.token <> Surface_lex.Eof then ignore (advance_recording_invalid state);
+            finished := true
+      done)
+    opening;
+  let row_meta = Meta.with_span (span_between arrow !closing) !row_owners in
+  let result =
+    if !stopped_before_top then ty_hole state (current state)
+    else begin
+      if allow_newlines then skip_list_space state else skip_continuation state;
+      parse_type state ~allow_newlines
+    end
+  in
   let meta = merged_meta left_meta result.Surface_ast.meta in
   let meta =
     match Meta.span left_meta with
@@ -1527,28 +1579,42 @@ and parse_arrow state ~allow_newlines params left_meta =
   Surface_ast.
     { it = TyArrow (params, { effects = List.rev !effects; tail = !tail; row_meta }, result); meta }
 
-and parse_row_separator state =
-  skip_list_space state;
-  match (current state).Surface_lex.token with
-  | Surface_lex.Comma -> (
-      ignore (advance state);
-      skip_continuation state;
-      match (current state).Surface_lex.token with
-      | Surface_lex.RBrace | Surface_lex.Bar ->
-          report state (current state) "effect rows do not permit a trailing comma"
-      | _ -> ())
-  | Surface_lex.Bar | Surface_lex.RBrace -> ()
-  | _ -> report state (current state) "expected `,`, `|`, or `}` in the effect row"
+and parse_row_separator state ~effect_index row_owners =
+  match top_boundary_after_continuation state with
+  | Some next_top ->
+      report state next_top "expected `}` before the next top-level item";
+      false
+  | None ->
+      skip_comments state;
+      (match (current state).Surface_lex.token with
+      | Surface_lex.Comma -> (
+          let comma = advance state in
+          row_owners :=
+            Meta.with_surface_indexed_container "row-comma" effect_index
+              (meta_with_span comma.Surface_lex.span)
+              !row_owners;
+          skip_continuation state;
+          match (current state).Surface_lex.token with
+          | Surface_lex.RBrace | Surface_lex.Bar ->
+              report state (current state) "effect rows do not permit a trailing comma"
+          | _ -> ())
+      | Surface_lex.Bar | Surface_lex.RBrace -> ()
+      | Surface_lex.Newline -> (
+          skip_continuation state;
+          match (current state).Surface_lex.token with
+          | Surface_lex.Bar | Surface_lex.RBrace -> ()
+          | Surface_lex.Comma ->
+              report state (current state)
+                "a row comma must immediately follow the preceding effect"
+          | _ -> report state (current state) "expected `|` or `}` after the effect row")
+      | _ -> report state (current state) "expected `,`, `|`, or `}` in the effect row");
+      true
 
 and parse_row_var state =
   let token = current state in
   match token.Surface_lex.token with
-  | Surface_lex.Ident name when Surface_name.valid_lower_name name ->
-      ignore (advance state);
-      Some name
-  | Surface_lex.Escaped (Surface_name.Rvar, name) ->
-      ignore (advance state);
-      Some name
+  | Surface_lex.Ident name when Surface_name.valid_lower_name name -> Some (name, advance state)
+  | Surface_lex.Escaped (Surface_name.Rvar, name) -> Some (name, advance state)
   | _ ->
       report state token "expected a lowercase row variable after `|`";
       None
@@ -1558,31 +1624,62 @@ and parse_forall state ~allow_newlines keyword =
   let rowvars = ref [] in
   let in_rows = ref false in
   let finished = ref false in
+  let dot = ref keyword in
+  let forall_owners = ref Meta.empty in
+  let own kind token =
+    forall_owners :=
+      Meta.with_surface_container kind (meta_with_span token.Surface_lex.span) !forall_owners
+  in
+  let own_indexed kind index token =
+    forall_owners :=
+      Meta.with_surface_indexed_container kind index
+        (meta_with_span token.Surface_lex.span)
+        !forall_owners
+  in
+  own "forall-keyword" keyword;
   while not !finished do
-    if allow_newlines then skip_list_space state else skip_comments state;
+    skip_comments state;
     let token = current state in
     match token.Surface_lex.token with
     | Surface_lex.Dot ->
         if !in_rows && !rowvars = [] then
           report state token "expected at least one row variable after `|` in `forall`";
-        ignore (advance state);
+        let token = advance state in
+        own "forall-dot" token;
+        dot := token;
         finished := true
     | Surface_lex.Bar when not !in_rows ->
         in_rows := true;
-        ignore (advance state)
+        own "forall-bar" (advance state)
     | Surface_lex.Ident name when Surface_name.valid_lower_name name ->
-        if !in_rows then rowvars := name :: !rowvars else tyvars := name :: !tyvars;
+        if !in_rows then begin
+          own_indexed "forall-rvar" (List.length !rowvars) token;
+          rowvars := name :: !rowvars
+        end
+        else begin
+          own_indexed "forall-tvar" (List.length !tyvars) token;
+          tyvars := name :: !tyvars
+        end;
         ignore (advance state)
     | Surface_lex.Escaped (Surface_name.Tvar, name) when not !in_rows ->
+        own_indexed "forall-tvar" (List.length !tyvars) token;
         tyvars := name :: !tyvars;
         ignore (advance state)
     | Surface_lex.Escaped (Surface_name.Rvar, name) when !in_rows ->
+        own_indexed "forall-rvar" (List.length !rowvars) token;
         rowvars := name :: !rowvars;
         ignore (advance state)
     | Surface_lex.Invalid { Diag.code = "E1211"; _ } -> (
         match forall_name_before_dot state token with
         | Some name ->
-            if !in_rows then rowvars := name :: !rowvars else tyvars := name :: !tyvars;
+            if !in_rows then begin
+              own_indexed "forall-rvar" (List.length !rowvars) token;
+              rowvars := name :: !rowvars
+            end
+            else begin
+              own_indexed "forall-tvar" (List.length !tyvars) token;
+              tyvars := name :: !tyvars
+            end;
             ignore (advance state);
             finished := true
         | None ->
@@ -1601,6 +1698,8 @@ and parse_forall state ~allow_newlines keyword =
     | Some span -> meta_with_span (Span.merge keyword.Surface_lex.span span)
     | None -> meta_with_span keyword.span
   in
+  let forall_meta = Meta.with_span (span_between keyword !dot) !forall_owners in
+  let meta = Meta.with_surface_container "forall" forall_meta meta in
   Surface_ast.{ it = TyForall (List.rev !tyvars, List.rev !rowvars, body); meta }
 
 let op_name = function
@@ -2093,6 +2192,25 @@ module Trivia_ownership = struct
     match Meta.span meta with None -> [] | Some span -> [ { key = key role span; role; span } ]
 
   let container kind meta = slot (Container kind) (Meta.surface_container kind meta)
+  let containers kinds meta = List.concat_map (fun kind -> container kind meta) kinds
+
+  let indexed_containers kind count meta =
+    List.init count (fun index ->
+        slot
+          (Container (Printf.sprintf "%s/%d" kind index))
+          (Meta.surface_indexed_container kind index meta))
+    |> List.concat
+
+  let forall_slots tvars rvars meta =
+    let meta = Meta.surface_container "forall" meta in
+    containers [ "forall-keyword"; "forall-bar"; "forall-dot" ] meta
+    @ indexed_containers "forall-tvar" (List.length tvars) meta
+    @ indexed_containers "forall-rvar" (List.length rvars) meta
+
+  let row_slots (row : Surface_ast.row) =
+    containers [ "row-open"; "row-bar"; "row-tail"; "row-close" ] row.row_meta
+    @ indexed_containers "row-effect" (List.length row.effects) row.row_meta
+    @ indexed_containers "row-comma" (max 0 (List.length row.effects - 1)) row.row_meta
 
   let rec expr depth (node : Surface_ast.expr) =
     let children =
@@ -2152,11 +2270,13 @@ module Trivia_ownership = struct
       | TyName _ | TyVar _ | TyHash _ | TyHole _ -> []
       | TyApp (head, args) -> ty (depth + 1) head @ List.concat_map (ty (depth + 1)) args
       | TyArrow (params, row, result) ->
-          List.concat_map (ty (depth + 1)) params @ slot Row row.row_meta @ ty (depth + 1) result
+          List.concat_map (ty (depth + 1)) params
+          @ slot Row row.row_meta @ row_slots row
+          @ ty (depth + 1) result
       | TyTuple items -> List.concat_map (ty (depth + 1)) items
-      | TyForall (_, _, body) -> ty (depth + 1) body
+      | TyForall (tvars, rvars, body) -> forall_slots tvars rvars node.meta @ ty (depth + 1) body
     in
-    container "params" node.meta @ slot Ty node.meta @ children
+    container "params" node.meta @ container "forall" node.meta @ slot Ty node.meta @ children
 
   let field depth (field : Surface_ast.field) = slot Field field.meta @ ty (depth + 1) field.ty
 
@@ -2288,6 +2408,12 @@ module Trivia_ownership = struct
   let is_closing = function Surface_lex.RParen | RBrace | RBracket -> true | _ -> false
   let is_declaration slot = slot.role = Decl
 
+  let is_structured_owner slot =
+    match slot.role with
+    | Container kind ->
+        String.starts_with ~prefix:"row-" kind || String.starts_with ~prefix:"forall-" kind
+    | _ -> false
+
   let doc_suffix_before line items =
     let rec collect expected docs = function
       | [] -> docs
@@ -2331,7 +2457,9 @@ module Trivia_ownership = struct
           let trailing_target =
             match (previous, possible_trailing) with
             | Some previous, _ :: _ ->
-                choose_largest (List.filter (fun slot -> ends slot previous) slots)
+                let candidates = List.filter (fun slot -> ends slot previous) slots in
+                let structured = List.filter is_structured_owner candidates in
+                if structured = [] then choose_largest candidates else choose_smallest structured
             | _ -> None
           in
           let remaining =
@@ -2413,11 +2541,37 @@ module Trivia_ownership = struct
     if Meta.is_empty container_meta then meta
     else Meta.with_surface_container kind (apply additions (Container kind) container_meta) meta
 
+  let apply_containers additions kinds meta =
+    List.fold_left (fun meta kind -> apply_container additions kind meta) meta kinds
+
+  let apply_indexed_containers additions kind count meta =
+    List.fold_left
+      (fun meta index ->
+        let key = Printf.sprintf "%s/%d" kind index in
+        apply_container additions key meta)
+      meta (List.init count Fun.id)
+
+  let apply_forall_owners additions tvars rvars meta =
+    let forall_meta =
+      Meta.surface_container "forall" meta
+      |> apply_containers additions [ "forall-keyword"; "forall-bar"; "forall-dot" ]
+      |> apply_indexed_containers additions "forall-tvar" (List.length tvars)
+      |> apply_indexed_containers additions "forall-rvar" (List.length rvars)
+    in
+    Meta.with_surface_container "forall" forall_meta meta
+
+  let apply_row_owners additions effect_count meta =
+    meta
+    |> apply_containers additions [ "row-open"; "row-bar"; "row-tail"; "row-close" ]
+    |> apply_indexed_containers additions "row-effect" effect_count
+    |> apply_indexed_containers additions "row-comma" (max 0 (effect_count - 1))
+
   let apply_owner additions role meta =
     meta |> apply additions role
     |> apply_container additions "params"
     |> apply_container additions "block" |> apply_container additions "paren"
     |> apply_container additions "list"
+    |> apply_container additions "forall"
 
   let rec map_expr additions (expression : Surface_ast.expr) =
     let it =
@@ -2496,12 +2650,23 @@ module Trivia_ownership = struct
       | TyArrow (params, row, result) ->
           TyArrow
             ( List.map (map_ty additions) params,
-              { row with row_meta = apply additions Row row.row_meta },
+              {
+                row with
+                row_meta =
+                  row.row_meta |> apply additions Row
+                  |> apply_row_owners additions (List.length row.effects);
+              },
               map_ty additions result )
       | TyTuple items -> TyTuple (List.map (map_ty additions) items)
       | TyForall (tvars, rvars, body) -> TyForall (tvars, rvars, map_ty additions body)
     in
-    Surface_ast.{ it; meta = apply_owner additions Ty annotation.meta }
+    let meta = apply_owner additions Ty annotation.meta in
+    let meta =
+      match annotation.it with
+      | TyForall (tvars, rvars, _) -> apply_forall_owners additions tvars rvars meta
+      | _ -> meta
+    in
+    Surface_ast.{ it; meta }
 
   let map_field additions (field : Surface_ast.field) =
     Surface_ast.

@@ -11,10 +11,10 @@ The row is the authority manifest: fs covers read/write, net covers fetch, and
 console covers println. Eval is absent.
 
   $ jacquard check workflow.jqd --print-sigs
-  escrow.workflow : () ->{fs, console, net} int
+  escrow.workflow : () ->{Fs, Console, Net} Int
   $ jacquard check approved-run.jqd --print-sigs
-  escrow.workflow : () ->{fs, console, net} int
-  _ : int
+  escrow.workflow : () ->{Fs, Console, Net} Int
+  _ : Int
   $ jacquard run approved-run.jqd
   error[E0814]: this program requires the `fs` effect, which is not granted (performed via `escrow.workflow`)
     hint: grant it with --allow fs, or handle the effect in the program
@@ -119,7 +119,7 @@ refuses it, and semantic diff localizes the escalation.
 
   $ cat workflow-escalated.jqd main.jqd > escalated-run.jqd
   $ jacquard check workflow-escalated.jqd --print-sigs
-  escrow.workflow : () ->{fs, eval, console, net} int
+  escrow.workflow : () ->{Fs, Eval, Console, Net} Int
   $ jacquard check escalated-run.jqd --manifest fs,net,console
   error[E0814]: this program requires the `eval` effect, which is not granted (performed via `eval-code`)
     hint: grant it with --allow eval, or handle the effect in the program

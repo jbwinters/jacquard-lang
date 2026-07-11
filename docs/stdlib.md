@@ -6,8 +6,11 @@ the end.
 
 Signature notation used throughout (display form, per the checker's elaborated
 output): `name : (args) ->{row} result`. An empty row `->{}` means pure. An open row
-`->{Abort | e}` means Abort plus whatever `e` turns out to be. This is documentation
-notation; source remains bootstrap s-expressions until a surface language exists.
+`->{Abort | e}` means Abort plus whatever `e` turns out to be. Tail-only rows now use the
+canonical `->{| e}` surface spelling; bootstrap s-expressions remain supported as the kernel
+format. Rows are name-sets: an effect declaration may have type parameters, but a row contains
+only the effect name. Those type parameters are erased from the row, so payload types remain
+independent type variables in the surrounding arguments, result, and `forall` binders.
 
 ---
 
@@ -121,10 +124,10 @@ absent. Models should treat rows of this grid as templates.
 Uniform schemas, with `List` as the exemplar:
 
 ```
-list.map    : (List a, (a) ->{e} b) ->{e} List b
-list.filter : (List a, (a) ->{e} Bool) ->{e} List a
-list.fold   : (List a, b, (b, a) ->{e} b) ->{e} b
-list.each   : (List a, (a) ->{e} ()) ->{e} ()
+list.map    : (List a, (a) ->{| e} b) ->{| e} List b
+list.filter : (List a, (a) ->{| e} Bool) ->{| e} List a
+list.fold   : (List a, b, (b, a) ->{| e} b) ->{| e} b
+list.each   : (List a, (a) ->{| e} ()) ->{| e} ()
 ```
 
 Note every one of these accepts an effectful function and threads its row through
@@ -140,22 +143,22 @@ list.concat   : (List (List a)) ->{} List a     list.range    : (Int, Int) ->{} 
 list.zip      : (List a, List b) ->{} List (a, b)
 list.sort     : (List a, Ord a) ->{} List a      -- stable
 list.contains?: (List a, a, Eq a) ->{} Bool
-list.find     : (List a, (a) ->{e} Bool) ->{e} Option a
+list.find     : (List a, (a) ->{| e} Bool) ->{| e} Option a
 ```
 
 ### Option and Result
 
 ```
-option.map          : (Option a, (a) ->{e} b) ->{e} Option b
-option.then         : (Option a, (a) ->{e} Option b) ->{e} Option b
+option.map          : (Option a, (a) ->{| e} b) ->{| e} Option b
+option.then         : (Option a, (a) ->{| e} Option b) ->{| e} Option b
 option.with-default : (Option a, a) ->{} a
 option.get!         : (Option a) ->{Abort} a
 
-result.map        : (Result e a, (a) ->{f} b) ->{f} Result e b
-result.map-error  : (Result e a, (e) ->{f} d) ->{f} Result d a
-result.then       : (Result e a, (a) ->{f} Result e b) ->{f} Result e b
+result.map        : (Result e a, (a) ->{| f} b) ->{| f} Result e b
+result.map-error  : (Result e a, (e) ->{| f} d) ->{| f} Result d a
+result.then       : (Result e a, (a) ->{| f} Result e b) ->{| f} Result e b
 result.with-default : (Result e a, a) ->{} a
-result.get!       : (Result e a) ->{Throw e} a
+result.get!       : (Result e a) ->{Throw} a
 result.of-option  : (Option a, e) ->{} Result e a
 option.of-result  : (Result e a) ->{} Option a
 ```
@@ -171,8 +174,8 @@ Jacquard is strict, so `bool.and : (Bool, Bool) ->{} Bool` evaluates both argume
 The short-circuit forms take thunks and say so in their types:
 
 ```
-bool.and-then : (Bool, () ->{e} Bool) ->{e} Bool
-bool.or-else  : (Bool, () ->{e} Bool) ->{e} Bool
+bool.and-then : (Bool, () ->{| e} Bool) ->{| e} Bool
+bool.or-else  : (Bool, () ->{| e} Bool) ->{| e} Bool
 ```
 
 A future surface `&&` desugars to `match`, costing nothing. Until then the library
@@ -195,14 +198,14 @@ effect Emit w where  emit : (w) -> ()
 Canonical handlers:
 
 ```
-abort.to-option : (() ->{Abort | e} a) ->{e} Option a
-abort.or        : (() ->{Abort | e} a, a) ->{e} a
-throw.to-result : (() ->{Throw err | e} a) ->{e} Result err a
-throw.catch     : (() ->{Throw err | e} a, (err) ->{e} a) ->{e} a
-state.run       : (() ->{State s | e} a, s) ->{e} (a, s)
-state.eval      : (() ->{State s | e} a, s) ->{e} a
-emit.collect    : (() ->{Emit w | e} a) ->{e} (a, List w)
-emit.pipe       : (() ->{Emit w | e} a, (w) ->{e} ()) ->{e} a
+abort.to-option : forall a | e. (() ->{Abort | e} a) ->{| e} Option a
+abort.or        : forall a | e. (() ->{Abort | e} a, a) ->{| e} a
+throw.to-result : forall a b | e. (() ->{Throw | e} b) ->{| e} Result a b
+throw.catch     : forall a b | e. (() ->{Throw | e} a, (b) ->{| e} a) ->{| e} a
+state.run       : forall a b | e. (() ->{State | e} a, b) ->{| e} (a, b)
+state.eval      : forall a b | e. (() ->{State | e} a, b) ->{| e} a
+emit.collect    : forall a b | e. (() ->{Emit | e} a) ->{| e} (a, List b)
+emit.pipe       : forall a b | e. (() ->{Emit | e} a, (b) ->{| e} ()) ->{| e} a
 ```
 
 Every signature reads the same way: take a computation whose row includes the
@@ -217,7 +220,7 @@ and the handlers above are the entire border between them:
 | | to control | to data |
 |---|---|---|
 | absence | `option.get! : (Option a) ->{Abort} a` | `abort.to-option` |
-| error | `result.get! : (Result e a) ->{Throw e} a` | `throw.to-result` |
+| error | `result.get! : (Result e a) ->{Throw} a` | `throw.to-result` |
 
 The border is lawful, and the laws are corpus property tests, deliberately phrased
 as round trips:
@@ -264,8 +267,8 @@ afterwards.
 map.empty : (Ord k) ->{} Map k v
 map.set   : (Map k v, k, v) ->{} Map k v
 map.get   : (Map k v, k) ->{} Option v
-map.update: (Map k v, k, (Option v) ->{e} Option v) ->{e} Map k v
-map.fold  : (Map k v, b, (b, k, v) ->{e} b) ->{e} b
+map.update: (Map k v, k, (Option v) ->{| e} Option v) ->{| e} Map k v
+map.fold  : (Map k v, b, (b, k, v) ->{| e} b) ->{| e} b
 map.size  : (Map k v) ->{} Int
 set.empty : (Ord a) ->{} Set a                   -- insert, member?, fold, size
 ```
@@ -284,9 +287,9 @@ effect Dist where  sample  : (Distribution a) -> a
                    observe : (Distribution a, a) -> ()
 
 dist.pmf        : (Distribution a, a, Eq a) ->{} Real
-dist.enumerate  : (() ->{Dist | e} a) ->{e} List (a, Real)     -- normalized, unmerged
+dist.enumerate  : (() ->{Dist | e} a) ->{| e} List (a, Real)     -- normalized, unmerged
 dist.tally      : (List (a, Real), Eq a) ->{} List (a, Real)   -- merge equal outcomes
-dist.sample-lw  : (() ->{Dist | e} a, Int, Int) ->{e} List (a, Real)  -- seed, count
+dist.sample-lw  : (() ->{Dist | e} a, Int, Int) ->{| e} List (a, Real)  -- seed, count
 ```
 
 Enumeration returns an unmerged weighted list so that it needs no equality; merging
@@ -435,11 +438,11 @@ documented approximation or a deliberate narrowing.
 **Row erasure generalizes handler payload types.** Effect rows are name-sets: effect
 ARGUMENTS are erased, so a payload type does not flow from a perform site to its handler.
 This makes the shipped ring-1 handlers looser than their ideal signatures — e.g.
-`state.run : forall a b e. (() ->{state | e} a, b) ->{e} (a, b)` ties the state type only
+`state.run : forall a b | e. (() ->{State | e} a, b) ->{| e} (a, b)` ties the state type only
 to the initial value, so `state.run(fn () -> { put("hi"); get() }, 0)` elaborates as
-`(a, int)` but returns `("hi", "hi")` at runtime. The same holds for `throw.to-result`'s
+`(a, Int)` but returns `("hi", "hi")` at runtime. The same holds for `throw.to-result`'s
 error type and `emit.collect`'s element type, and it is the long-standing shape of
-`eval : (code) -> a`. The future fix direction is parameterized effect instances; until
+`eval : (Code) -> a`. The future fix direction is parameterized effect instances; until
 then the approximation is documented at the checker's `op_scheme`.
 
 **`dist.enumerate` has no error channel.** When every branch is impossible (total mass 0),

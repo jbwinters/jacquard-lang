@@ -82,11 +82,11 @@ let test_identity () =
 let test_console_row_shows () =
   let h = make_cctx () in
   Alcotest.(check string)
-    "console function row" "() ->{console} ()"
+    "console function row" "() ->{Console} ()"
     (sig_of h "(lam () (app (var print) (lit \"x\")))");
   (* composition of pure and effectful propagates the row *)
   Alcotest.(check string)
-    "propagates through composition" "() ->{console} int"
+    "propagates through composition" "() ->{Console} Int"
     (sig_of h
        "(lam () (let nonrec (pvar u) (app (var print) (lit \"x\")) (app (var add) (lit 1) (lit \
         2))))")
@@ -153,7 +153,7 @@ let test_handler_removes_effect () =
   let h = make_cctx () in
   (* fully handled: the row comes out empty; the value is pure *)
   Alcotest.(check string)
-    "handled program is pure" "option int"
+    "handled program is pure" "Option Int"
     (sig_of h
        "(handle (app (var div) (lit 1) (lit 0)) (ret (pvar x) (app (var some) (var x))) (opclause \
         abort () k (var none)))")
@@ -219,7 +219,7 @@ let test_group_annotations () =
   | Ok { Check.names; _ } ->
       Alcotest.(check (list string))
         "both members typed"
-        [ "even2 : (int) ->{} bool"; "odd2 : (int) ->{} bool" ]
+        [ "even2 : (Int) ->{} Bool"; "odd2 : (Int) ->{} Bool" ]
         (List.map (fun (n, s) -> n ^ " : " ^ Check.show_scheme (snd h) s) names)
   | Error ds -> Eval_support.fail_diags "even/odd annotated" ds);
   (* a lying annotation is rejected *)

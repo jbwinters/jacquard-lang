@@ -63,6 +63,16 @@ let with_surface_container kind container t =
   let key = surface_container_key kind in
   if is_empty container then remove key t else add key (value_of_meta container) t
 
+(** [surface_indexed_container kind index t] returns one member of an ordered metadata container.
+    Indexed containers give punctuation and scalar list members stable trivia owners without
+    changing the semantic AST. *)
+let surface_indexed_container kind index t = surface_container (Printf.sprintf "%s/%d" kind index) t
+
+(** [with_surface_indexed_container kind index container t] replaces one ordered metadata member.
+    The caller's semantic list supplies the index domain, so no count is stored in metadata. *)
+let with_surface_indexed_container kind index container t =
+  with_surface_container (Printf.sprintf "%s/%d" kind index) container t
+
 (** [without_surface_container kind t] removes only the named delimiter-container provenance. *)
 let without_surface_container kind t = remove (surface_container_key kind) t
 

@@ -148,7 +148,7 @@ RESULT TYPES differ refuse before any probability is compared:
   support lost:   2
   $ printf '(match (app (var sample) (app (var bernoulli) (lit 0.5))) (clause (pcon true) (lit "yes")) (clause (pcon false) (lit "no")))\n' > texty.jqd
   $ jacquard dist-diff coins-a.jqd texty.jqd 2>&1 | head -1
-  error[E0801]: dist-diff: model result types differ (coins-a.jqd : int, texty.jqd : text); probabilities over different types are not comparable
+  error[E0801]: dist-diff: model result types differ (coins-a.jqd : Int, texty.jqd : Text); probabilities over different types are not comparable
 
 Enumerations cache by content hash: the second identical diff is a full hit,
 and a sweep value equal to the reference REUSES its cache entry (content
@@ -169,7 +169,7 @@ review story: "this change adds net, authored by agent X" — read first).
 
   $ printf '(defterm ((binding summarizer () (lam ((pvar u)) (app (var net.get) (var u))))))\n' > authored.jqd
   $ jacquard check authored.jqd --print-sigs --origin agent:jacquard-demo-5
-  summarizer : (text) ->{net} text [agent:jacquard-demo-5]
+  summarizer : (Text) ->{Net} Text [agent:jacquard-demo-5]
 
 TL.3: malformed --fork specs refuse instead of silently running the baseline.
 

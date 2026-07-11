@@ -95,8 +95,8 @@ let test_annotations_and_complete_types () =
   check_equivalent "forall/application/tuple/arrow/row/hash" surface jqd;
   check_equivalent "empty forall and empty row" "(x : forall . () ->{} Unit)"
     "(ann (var x) (tforall () () (tarrow () (row) (tref unit))))";
-  check_equivalent "multiline forall continuation"
-    "(x : forall a\n | e.\n(a) ->{\n  Console\n| e\n}\na)"
+  check_equivalent "punctuation-authorized multiline continuation"
+    "(x : forall a | e.\n(a) ->{\n  Console\n| e\n}\na)"
     "(ann (var x) (tforall ((tvar a)) ((rvar e)) (tarrow ((tvar a)) (row (eref console) e) (tvar \
      a))))";
   check_equivalent "grouped type" "(x : (List a))" "(ann (var x) (tapp (tref list) (tvar a)))";

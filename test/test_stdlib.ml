@@ -429,14 +429,14 @@ let test_ring1_rows () =
     go 0
   in
   let g = sig_of "(var option.get!)" in
-  Alcotest.(check bool) ("option.get! row names abort: " ^ g) true (has "{abort" g);
+  Alcotest.(check bool) ("option.get! row names abort: " ^ g) true (has "{Abort" g);
   let r = sig_of "(var result.get!)" in
-  Alcotest.(check bool) ("result.get! row names throw: " ^ r) true (has "{throw" r);
+  Alcotest.(check bool) ("result.get! row names throw: " ^ r) true (has "{Throw" r);
   (* the handler removes it: to-option over a get! thunk is effect-free *)
   let h =
     sig_of "(lam ((pvar o)) (app (var abort.to-option) (lam () (app (var option.get!) (var o)))))"
   in
-  Alcotest.(check bool) ("handled row is clean: " ^ h) false (has "abort" h)
+  Alcotest.(check bool) ("handled row is clean: " ^ h) false (has "Abort" h)
 
 let suite =
   [

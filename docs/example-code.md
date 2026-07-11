@@ -27,7 +27,7 @@ Running it gives `(Some 5, None)`. What `jacquard check --print-sigs` should pri
 
 ```
 safe-div  : (Int, Int) ->{Abort} Int
-to-option : forall a e. (() ->{Abort | e} a) ->{e} Option a
+to-option : forall a | e. (() ->{Abort | e} a) ->{| e} Option a
 main      : (Option Int, Option Int)
 ```
 

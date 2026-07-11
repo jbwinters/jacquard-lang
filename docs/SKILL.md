@@ -10,14 +10,14 @@ people. Its one design move: **effects, uncertainty, and identity are visible
 to tools** instead of hidden in runtime behavior, mocks, logs, or naming
 conventions. Concretely:
 
-- A function's signature carries its full story: `(int, int) ->{abort} int`
+- A function's signature carries its full story: `(Int, Int) ->{Abort} Int`
   announces the failure path in the **effect row** on the arrow.
 - A program's inferred row is its **authority manifest** (checked per
   top-level expression — `main` is a naming convention, not a mechanism); the
   runtime installs root handlers only for effects granted with `--allow`. No
   ambient authority.
 - Randomness and conditioning are ordinary effect ops (`sample`, `observe`);
-  an inference algorithm is just a handler. Models are code with `{dist}` rows.
+  an inference algorithm is just a handler. Models are code with `{Dist}` rows.
 - Definitions are **content-addressed**: hashes are computed with all metadata
   (comments, formatting, spans, provenance) erased. Renames and reformats are
   free; the test cache, semantic differ, and store all key on hashes.
@@ -142,9 +142,9 @@ destructures them; `(pcon mk-pair (pvar x) (pvar p))` destructures constructors.
 
 ## Effects, rows, capabilities
 
-- Rows live on arrows: `passes? : (code, list (a, int)) ->{eval} bool`.
+- Rows live on arrows: `passes? : (Code, List (a, Int)) ->{Eval} Bool`.
   Handling an effect **subtracts** it from the row; row polymorphism
-  (`forall e. (() ->{abort | e} a) ->{e} option a`) passes the rest through.
+  (`forall a | e. (() ->{Abort | e} a) ->{| e} Option a`) passes the rest through.
 - Performing an op is plain application: `(app (var fetch) req)`. There is no
   `perform` keyword.
 - `jacquard run` refuses ungranted effects (E0814) *before running the effectful
@@ -153,7 +153,7 @@ destructures them; `(pcon mk-pair (pvar x) (pvar p))` destructures constructors.
   throws on `write`. The wrapped code's row honestly keeps `fs`.
 - **Known caveats** (documented, do not "fix" casually):
   - Rows are *name-sets*: effect payload types are erased, so
-    `eval : (code) -> a` and `state.run`'s state type are looser than ideal.
+    `eval : (Code) -> a` and `state.run`'s state type are looser than ideal.
   - `eval`'d code runs at **root authority** — interposed handlers do not
     attenuate `eval-code` payloads; only root grants apply.
   - Top-level defterm bodies must be pure values (E0815); top-level rows are
@@ -175,7 +175,7 @@ One type, one effect, zero kernel forms (`prelude/06-dist.jqd`):
   (op observe ((tapp (tref distribution) (tvar a)) (tvar a)) (ttuple)))
 ```
 
-- A model is any `() ->{dist} a` thunk. Inference = handler choice:
+- A model is any `() ->{Dist} a` thunk. Inference = handler choice:
   in-language, `dist.enumerate` (exact, normalized, unmerged) or
   `dist.sample-lw` (seeded likelihood weighting); at the CLI,
   `jacquard infer enumerate` / `jacquard infer lw` (these merge equal outcomes).
