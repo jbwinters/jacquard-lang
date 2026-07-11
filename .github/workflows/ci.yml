@@ -18,6 +18,7 @@ concurrency:
 env:
   OCAML_COMPILER: 5.1.1
   JACQUARD_PRELUDE: ${{ github.workspace }}/prelude
+  TMPDIR: ${{ github.workspace }}/.scratch/tmp
 
 jobs:
   development-gate:
@@ -29,6 +30,11 @@ jobs:
         uses: actions/checkout@v7.0.0
         with:
           fetch-depth: 0
+
+      - name: Prepare temporary storage
+        run: |
+          mkdir -p "$TMPDIR"
+          scripts/check-temp-policy.sh
 
       - name: Set up OCaml
         uses: ocaml/setup-ocaml@v3.6.1
@@ -73,6 +79,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.0
+
+      - name: Prepare temporary storage
+        run: mkdir -p "$TMPDIR"
 
       - name: Set up OCaml
         uses: ocaml/setup-ocaml@v3.6.1

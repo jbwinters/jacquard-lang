@@ -1,12 +1,15 @@
 #!/bin/sh
 # Runtime test gate (task 65 DoD): the sanitized build proves memory
 # correctness; the plain build proves the deep drop runs in bounded C stack.
-# Run from anywhere; artifacts go to a scratch dir ($OUT overrides; the
-# default is a self-cleaning mktemp dir).
+# Run from anywhere; artifacts go under the checkout's .scratch directory
+# ($OUT overrides; the default is a self-cleaning mktemp dir).
 set -eu
 
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-OUT=${OUT:-$(mktemp -d "${TMPDIR:-/tmp}/jqrt-check-XXXXXX")}
+: "${TMPDIR:=$here/../.scratch/tmp}"
+export TMPDIR
+mkdir -p "$TMPDIR"
+OUT=${OUT:-$(mktemp -d "$TMPDIR/jqrt-check-XXXXXX")}
 CC=${CC:-cc}
 trap 'rm -rf "$OUT"' EXIT
 mkdir -p "$OUT"

@@ -41,10 +41,14 @@ find ../../../test -name '*.t' | wc -l
 
 Current inventory:
 
-- Alcotest/QCheck cases: `518`
-- Cram transcript files: `29`
+- Alcotest/QCheck cases: `554`
+- Cram transcript files: `30`
 - Gauntlet cram files: `4`
 - Escrow transcript: `test/cli/escrow.t`
+
+`test/test_surface_laws.ml` validates the two evolving counts above against the
+compiled Alcotest list and the recursive `test/**/*.t` inventory, and requires
+this evidence file and `DECISION.md` to agree.
 
 ## Commands
 
@@ -62,7 +66,8 @@ cd _build/default/test && ./test_jacquard.exe test 'gauntlet-.*' --compact --col
 ```
 
 The reproduction script [reproduce-0.1.sh](../../../scripts/release/reproduce-0.1.sh)
-runs the same checks and writes demo transcripts under `logs/release/0.1/`.
+runs the same checks and writes generated evidence under
+`.scratch/release/0.1/` by default.
 Public demo transcripts run `.jac` programs through the `jac` alias; the demo
 and inference crams also execute retained `.jqd` carriers and compare paired
 semantic hashes. Bootstrap remains the internal/debug kernel format of record.

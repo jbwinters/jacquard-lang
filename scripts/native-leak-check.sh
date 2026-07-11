@@ -7,13 +7,17 @@
 # ungranted effects) still leak-check: LeakSanitizer runs at exit.
 # Run from the repo root with clang available.
 set -eu
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+: "${TMPDIR:=$ROOT/.scratch/tmp}"
+export TMPDIR
+mkdir -p "$TMPDIR"
 export JACQUARD_PRELUDE=${JACQUARD_PRELUDE:-$PWD/prelude}
 export JACQUARD_RUNTIME=${JACQUARD_RUNTIME:-$PWD/runtime}
 export CC=${CC:-clang}
 export JACQUARD_NATIVE_CFLAGS="-fsanitize=address -O1 -g"
 BIN=${JACQUARD:-"dune exec jacquard --"}
-out=$(mktemp -u "${TMPDIR:-/tmp}/jq-leak-XXXXXX")
-log=$(mktemp "${TMPDIR:-/tmp}/jq-leak-log-XXXXXX")
+out=$(mktemp -u "$TMPDIR/jq-leak-XXXXXX")
+log=$(mktemp "$TMPDIR/jq-leak-log-XXXXXX")
 trap 'rm -f "$out" "$log"' EXIT
 progs=${*:-"bench/pure.jqd bench/avl.jqd bench/mutate.jqd corpus/valid/prelude-map.jqd corpus/valid/even-odd.jqd corpus/valid/fact.jqd corpus/valid/lit-int.jqd corpus/valid/app-add.jqd corpus/valid/lit-real.jqd corpus/valid/lit-text.jqd corpus/valid/tuple-unit.jqd corpus/valid/let-shadow.jqd corpus/valid/match-bool.jqd corpus/valid/to-option.jqd corpus/valid/safe-div.jqd demos/m1-fact.jqd demos/m1-choose.jqd $(ls test/native-gauntlet/g*.jqd 2>/dev/null | tr '\n' ' ')"}
 for f in $progs; do

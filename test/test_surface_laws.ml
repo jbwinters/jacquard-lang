@@ -244,6 +244,52 @@ let compiled_test_count =
      | Unix.WEXITED 0 -> total
      | _ -> Alcotest.fail "compiled Alcotest inventory command failed")
 
+let rec count_files_with_suffix path suffix =
+  Sys.readdir path |> Array.to_list
+  |> List.fold_left
+       (fun count entry ->
+         let child = Filename.concat path entry in
+         match (Unix.stat child).st_kind with
+         | Unix.S_DIR -> count + count_files_with_suffix child suffix
+         | Unix.S_REG when Filename.check_suffix entry suffix -> count + 1
+         | _ -> count)
+       0
+
+let claimed_inventory_count ~path ~prefix source =
+  match
+    source |> String.split_on_char '\n'
+    |> List.find_opt (fun line -> String.starts_with ~prefix line)
+  with
+  | None -> Error (Printf.sprintf "%s is missing `%s`" path prefix)
+  | Some line -> (
+      match code_tokens line with
+      | [ count ] -> (
+          match int_of_string_opt count with
+          | Some count -> Ok count
+          | None -> Error (Printf.sprintf "%s has a non-integer `%s` count" path prefix))
+      | _ -> Error (Printf.sprintf "%s must state exactly one `%s` count" path prefix))
+
+let evolving_inventory_errors () =
+  let actual_tests = Lazy.force compiled_test_count in
+  let actual_crams = count_files_with_suffix (source_path "test") ".t" in
+  [
+    ( "docs/release/0.1/EVIDENCE.md",
+      [ ("- Alcotest/QCheck cases:", actual_tests); ("- Cram transcript files:", actual_crams) ] );
+    ( "docs/release/0.1/DECISION.md",
+      [ ("Test count:", actual_tests); ("Cram count:", actual_crams) ] );
+  ]
+  |> List.concat_map (fun (path, claims) ->
+      let source = read_source path in
+      claims
+      |> List.filter_map (fun (prefix, actual) ->
+          match claimed_inventory_count ~path ~prefix source with
+          | Ok claimed when claimed = actual -> None
+          | Ok claimed ->
+              Some
+                (Printf.sprintf "%s `%s` is stale (claimed %d, actual %d)" path prefix claimed
+                   actual)
+          | Error message -> Some message))
+
 let doctest_names () =
   [ "README.md"; "docs/tutorial.md"; "docs/stdlib.md"; "docs/warp-testing.md"; "demos/README.md" ]
   |> List.concat_map (fun path ->
@@ -331,6 +377,7 @@ let manifest_errors () =
   in
   let overlay =
     [
+      "README.md";
       "corpus/golden/hashes.golden";
       "corpus/golden/prelude-hashes.golden";
       "corpus/golden/ring0-freeze.golden";
@@ -344,10 +391,15 @@ let manifest_errors () =
       "demos/repair.jqd";
       "docs/README.md";
       "docs/SKILL.md";
+      "docs/ci-cd.md";
       "docs/native-intrinsics.md";
+      "docs/release/0.1/DECISION.md";
+      "docs/release/0.1/EVIDENCE.md";
+      "docs/release/0.1/REPRO.md";
       "docs/release/surface-syntax/DECISION.md";
       "docs/release/surface-syntax/FOLLOWUPS.md";
       "docs/stdlib.md";
+      "docs/surface-syntax.md";
       "prelude/04-builtins.jqd";
       "prelude/07-enum.jqd";
       "prelude/09-grid.jqd";
@@ -520,13 +572,13 @@ let validate_release_docs ~decision ~followups ~index =
       [
         "D36";
         "partial";
-        "[declaration tests](../../../test/test_surface_decls.ml), [trivia \
+        "The labeled-field portion shipped in SS.8: [declaration \
+         tests](../../../test/test_surface_decls.ml), [trivia \
          tests](../../../test/test_surface_trivia.ml), and [printing \
-         tests](../../../test/test_surface_print.ml) pin labeled field parsing, metadata, trivia, \
-         and rendering. [CLI evidence](../../../test/cli/surface.t) pins `pair.left` as absent \
-         with `E0301`; lowering does not generate accessor definitions, and \
-         missing/duplicate/type-inconsistent labels and explicit-term collisions are not \
-         validated. Labeled patterns remain deferred.";
+         tests](../../../test/test_surface_print.ml) pin parsing, metadata, trivia, lowering, and \
+         rendering. [CLI evidence](../../../test/cli/surface.t) pins `pair.left` as absent with \
+         `E0301`; generated accessor definitions and label validation, including duplicate-label \
+         rejection, are deliberate follow-ups. Labeled patterns remain deferred.";
         "[D36 acceptance criteria](FOLLOWUPS.md#d36-generated-constructor-accessors)";
       ];
       [
@@ -821,7 +873,7 @@ let validate_release_docs ~decision ~followups ~index =
           require (contains required body) ("missing successor evidence contract: " ^ required))
         [
           "Task Master files were not changed";
-          "does not reopen or strengthen the SS.21 surface";
+          "does not reopen or strengthen the SS.21 release";
           ".scratch/ss21-final-gate/transcript.log";
           "not required or expected in a clone";
         ]);
@@ -836,6 +888,7 @@ let validate_release_docs ~decision ~followups ~index =
       "Advertise `.jac`";
       "Bootstrap `.jqd` remains permanently supported";
       "SS.22, prelude naming and text building";
+      "SS.0-SS.22 implementation arc is complete";
     ];
   require (contains "release/surface-syntax/DECISION.md" index) "decision is not indexed";
   require (contains "release/surface-syntax/FOLLOWUPS.md" index) "follow-ups are not indexed";
@@ -849,7 +902,7 @@ let release_sources () =
 
 let assert_release_valid () =
   let decision, followups, index = release_sources () in
-  match validate_release_docs ~decision ~followups ~index with
+  match validate_release_docs ~decision ~followups ~index @ evolving_inventory_errors () with
   | [] -> ()
   | errors -> Alcotest.fail (String.concat "\n" errors)
 
@@ -887,8 +940,9 @@ let decision_semantic_mutations =
     ("D34", "shared case projection and escapes", "separate case projection without escapes");
     ("D35", "mandatory blocks for non-atomic bodies", "optional blocks for non-atomic bodies");
     ( "D36",
-      "lowering does not generate accessor definitions",
-      "lowering generates accessor definitions" );
+      "generated accessor definitions and label validation, including duplicate-label rejection, \
+       are deliberate follow-ups",
+      "generated accessor definitions and label validation are shipped" );
     ( "D37",
       "dotted names as atomic and preserve namespace puns",
       "dotted names as segmented and reject namespace puns" );

@@ -4,9 +4,13 @@
 # reviewable one-line divergence. Run from the repo root:
 #   sh demos/repair.sh
 set -u
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+: "${TMPDIR:=$ROOT/.scratch/tmp}"
+export TMPDIR
+mkdir -p "$TMPDIR"
 JACQUARD="${JACQUARD:-dune exec jac --}"
 here="$(dirname "$0")"
-tmp="$(mktemp "${TMPDIR:-/tmp}/jacquard-repair-tests.XXXXXX.jqd")"
+tmp="$(mktemp "$TMPDIR/jacquard-repair-tests.XXXXXX.jqd")"
 trap 'rm -f "$tmp"' EXIT
 
 echo "== the rows announce the authority: mutation is pure, running candidates is eval =="

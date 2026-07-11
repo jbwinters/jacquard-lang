@@ -2,14 +2,19 @@
 
 This tracked ledger records scope deliberately excluded from SS.21. Successor
 milestone **SS.22, prelude naming and text building**, completed D38 and D39
-without changing the surface grammar. D36 and Tier-F remain open.
+without changing the surface grammar. The SS.0-SS.22 implementation arc is
+complete, but D36 accessor generation and label validation remain deliberately
+partial and Tier-F remains parked. None of this ledger establishes stability or
+a freeze for the whole surface syntax.
 
 ## D36 Generated Constructor Accessors
 
 D36 is partial. Labeled constructor field syntax, field metadata and trivia,
-and canonical printing shipped. Surface lowering does not emit generated
-accessor `DefTerm` declarations, and it does not enforce the draft's
-cross-constructor label consistency or explicit-term collision rules.
+lowering, and canonical printing shipped in SS.8. Surface lowering does not
+emit generated accessor `DefTerm` declarations. Duplicate labels are accepted
+rather than diagnosed, and the draft's cross-constructor label consistency and
+explicit-term collision rules are not enforced. These omissions are the
+reviewed partial boundary, not accidental claims that SS.8 generated accessors.
 
 Current non-generation evidence is pinned in `test/cli/surface.t`: declaring
 `type Pair = | Pair(left: Int, right: Int)` and evaluating

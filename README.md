@@ -55,8 +55,9 @@ will save you time:
   treat it as information about your change, and never weaken a pin to make a
   diff pass.
 - The kernel is 27 forms (`docs/ast.md`); `.jac` is a projection onto those
-  forms, and bootstrap `.jqd` remains permanently supported. Do not extend the
-  frozen surface grammar or add out-of-scope features (`AGENTS.md` lists them).
+  forms, and bootstrap `.jqd` remains permanently supported. Treat the shipped
+  surface boundary and its parked follow-ups as release evidence, not as a
+  frozen grammar; do not add out-of-scope features (`AGENTS.md` lists them).
 - The development gate is `dune build @all && dune runtest && dune fmt`
   followed by a clean `git diff --exit-code`.
 
@@ -342,7 +343,7 @@ JACQUARD_RELEASE_REF=HEAD JACQUARD_RELEASE_BASE=aec2c63 scripts/release/reproduc
 
 The script installs dependencies, builds, runs the full test suite, checks
 formatting, runs public demos, runs gauntlet tests, records `jacquard --version`,
-and writes transcripts under `logs/release/0.1/`.
+and writes generated evidence under `.scratch/release/0.1/`.
 
 Key release docs:
 
@@ -460,8 +461,8 @@ rights.
 ## Current Limits
 
 Jacquard core is a research prototype, not a production compiler. The `.jac`
-surface is the frozen v0 projection and does not change the 27-form kernel or
-permanent `.jqd` support. The project does not claim a VM or optimizer,
+surface is the supported, evolving v0 projection and does not change the
+27-form kernel or permanent `.jqd` support. The project does not claim a VM or optimizer,
 continuous distributions, gradients, typed staging, package management,
 self-hosting, or a formal proof of row soundness. See
 `docs/release/0.1/LIMITS.md` for the no-hype list for the 0.1 release baseline.
@@ -477,5 +478,5 @@ self-hosting, or a formal proof of row soundness. See
   run through Dune from the repo root.
 - Formatting changed files: run `opam exec -- dune fmt`, inspect the diff, and
   commit the formatting changes if they are intended.
-- Release reproduction writes files under `logs/`: that directory is ignored and
-  contains generated transcripts only.
+- Release reproduction writes generated evidence under `.scratch/release/0.1/`
+  by default. Set `JACQUARD_RELEASE_OUT` to use another disposable output path.

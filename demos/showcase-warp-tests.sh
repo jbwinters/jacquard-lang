@@ -3,9 +3,13 @@
 #   sh demos/showcase-warp-tests.sh
 set -eu
 
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+: "${TMPDIR:=$ROOT/.scratch/tmp}"
+export TMPDIR
+mkdir -p "$TMPDIR"
 JACQUARD="${JACQUARD:-dune exec jac --}"
 here="$(dirname "$0")"
-tmp="$(mktemp "${TMPDIR:-/tmp}/jacquard-demo-tests.XXXXXX.jqd")"
+tmp="$(mktemp "$TMPDIR/jacquard-demo-tests.XXXXXX.jqd")"
 trap 'rm -f "$tmp"' EXIT
 
 strip_driver() {

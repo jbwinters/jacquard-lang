@@ -51,9 +51,9 @@ JACQUARD_RELEASE_BASE=aec2c63 \
 scripts/release/reproduce-0.1.sh
 ```
 
-It uploads the release docs and generated transcripts from `logs/release/0.1/`
-as a GitHub Actions artifact. That artifact is the reproducible evidence pack
-for review.
+It uploads the release docs and generated evidence from
+`.scratch/release/0.1/` as a GitHub Actions artifact. That artifact is the
+reproducible evidence pack for review.
 
 ## Release Binaries
 

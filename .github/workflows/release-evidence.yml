@@ -27,6 +27,7 @@ concurrency:
 env:
   OCAML_COMPILER: 5.1.1
   JACQUARD_PRELUDE: ${{ github.workspace }}/prelude
+  TMPDIR: ${{ github.workspace }}/.scratch/tmp
 
 jobs:
   reproduce:
@@ -39,6 +40,9 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ github.event.inputs.ref || github.ref }}
+
+      - name: Prepare temporary storage
+        run: mkdir -p "$TMPDIR"
 
       - name: Set up OCaml
         uses: ocaml/setup-ocaml@v3.6.1
@@ -57,6 +61,7 @@ jobs:
         with:
           name: jacquard-release-0.1-evidence-${{ github.run_number }}
           if-no-files-found: error
+          include-hidden-files: true
           path: |
             docs/release/0.1/
-            logs/release/0.1/
+            .scratch/release/0.1/

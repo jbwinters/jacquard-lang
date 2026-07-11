@@ -3,10 +3,13 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 cd "$ROOT"
+: "${TMPDIR:=$ROOT/.scratch/tmp}"
+export TMPDIR
+mkdir -p "$TMPDIR"
 
 REF=${JACQUARD_RELEASE_REF:-release/0.1-evidence}
 BASE=${JACQUARD_RELEASE_BASE:-aec2c63}
-OUT=${JACQUARD_RELEASE_OUT:-logs/release/0.1}
+OUT=${JACQUARD_RELEASE_OUT:-$ROOT/.scratch/release/0.1}
 TRANSCRIPTS="$OUT/transcripts"
 
 mkdir -p "$TRANSCRIPTS"

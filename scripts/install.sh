@@ -5,6 +5,12 @@ REPO=${JACQUARD_INSTALL_REPO:-jbwinters/jacquard-lang}
 VERSION=${JACQUARD_INSTALL_VERSION:-latest}
 PREFIX=${JACQUARD_INSTALL_PREFIX:-$HOME/.local}
 
+# The installer also runs without a checkout, so its fallback is the user's
+# cache rather than a repository-local .scratch directory.
+: "${TMPDIR:=${XDG_CACHE_HOME:-$HOME/.cache}/jacquard/tmp}"
+export TMPDIR
+mkdir -p "$TMPDIR"
+
 detect_target() {
   os=$(uname -s)
   arch=$(uname -m)
@@ -41,7 +47,7 @@ else
   URL="https://github.com/$REPO/releases/download/$VERSION/$ASSET"
 fi
 
-tmp=$(mktemp -d "${TMPDIR:-/tmp}/jacquard-install.XXXXXX")
+tmp=$(mktemp -d "$TMPDIR/jacquard-install.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 
 echo "Downloading $URL"

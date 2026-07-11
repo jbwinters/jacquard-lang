@@ -4,8 +4,8 @@ Status: RC
 
 Commit: successor merge base `d8b2147a3ad9`; inventory refreshed on the evolving successor
 Version: `0.1.0`  
-Test count: `518` Alcotest/QCheck cases
-Cram count: `29` transcript files
+Test count: `554` Alcotest/QCheck cases
+Cram count: `30` transcript files
 
 ## Known Blockers
 
@@ -45,5 +45,6 @@ scripts/release/reproduce-0.1.sh
 ```
 
 The reproduction script passed from this release branch checkout and writes its
-transcripts under `logs/release/0.1/`. The next step before final tagging is an
-external rejection review against [CLAIMS.md](CLAIMS.md).
+generated evidence under `.scratch/release/0.1/` by default. The next step
+before final tagging is an external rejection review against
+[CLAIMS.md](CLAIMS.md).

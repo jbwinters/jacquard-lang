@@ -8,12 +8,16 @@
 # Reproduce the docs/native-compilation.md table with:
 #   sh scripts/native-bench.sh
 set -eu
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+: "${TMPDIR:=$ROOT/.scratch/tmp}"
+export TMPDIR
+mkdir -p "$TMPDIR"
 export JACQUARD_PRELUDE=${JACQUARD_PRELUDE:-$PWD/prelude}
 export JACQUARD_RUNTIME=${JACQUARD_RUNTIME:-$PWD/runtime}
 export CC=${CC:-clang}
 BIN=${JACQUARD:-"dune exec jacquard --"}
 
-work=$(mktemp -d "${TMPDIR:-/tmp}/jq-bench-XXXXXX")
+work=$(mktemp -d "$TMPDIR/jq-bench-XXXXXX")
 trap 'rm -rf "$work"' EXIT
 echo "(lit 0)" > "$work/null.jqd"
 

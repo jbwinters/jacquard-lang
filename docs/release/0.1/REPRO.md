@@ -44,13 +44,22 @@ The script:
 - records `jacquard --version`
 - runs public demo transcripts
 - runs the gauntlet and escrow transcript
-- writes generated transcripts to `logs/release/0.1/`
+- writes generated evidence to `.scratch/release/0.1/`
 
 The script defaults to `JACQUARD_RELEASE_REF=release/0.1-evidence`. Override it for
 a final immutable commit:
 
 ```sh
 JACQUARD_RELEASE_REF=<commit> scripts/release/reproduce-0.1.sh
+```
+
+The output root defaults to `.scratch/release/0.1/`. Override it only with a
+disposable path that has enough space for the generated transcripts and build
+evidence:
+
+```sh
+JACQUARD_RELEASE_OUT=$PWD/.scratch/my-release \
+  scripts/release/reproduce-0.1.sh
 ```
 
 ## Public Demo Coverage
@@ -73,4 +82,4 @@ JACQUARD_RELEASE_REF=<commit> scripts/release/reproduce-0.1.sh
 | executable escrow | `dune runtest test/cli/escrow.t` |
 
 Generated transcript files are not source artifacts; they live under
-`logs/release/0.1/`, which is ignored by git.
+`.scratch/release/0.1/transcripts/` by default. `.scratch/` is ignored by git.

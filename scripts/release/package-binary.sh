@@ -3,6 +3,9 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 cd "$ROOT"
+: "${TMPDIR:=$ROOT/.scratch/tmp}"
+export TMPDIR
+mkdir -p "$TMPDIR"
 
 detect_target() {
   os=$(uname -s)
@@ -31,7 +34,7 @@ fi
 mkdir -p "$DIST"
 rm -f "$DIST/$ARCHIVE" "$DIST/$ARCHIVE.sha256"
 
-tmp=$(mktemp -d "${TMPDIR:-/tmp}/jacquard-package.XXXXXX")
+tmp=$(mktemp -d "$TMPDIR/jacquard-package.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 
 pkg="$tmp/jacquard-$VERSION-$TARGET"

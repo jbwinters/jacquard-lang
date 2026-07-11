@@ -11,13 +11,17 @@
 # Env: JACQUARD (default `dune exec jacquard --`), JACQUARD_PRELUDE,
 #      JACQUARD_RUNTIME, CC (clang required by the native v1 toolchain).
 set -u
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+: "${TMPDIR:=$ROOT/.scratch/tmp}"
+export TMPDIR
+mkdir -p "$TMPDIR"
 export JACQUARD_PRELUDE=${JACQUARD_PRELUDE:-$PWD/prelude}
 export JACQUARD_RUNTIME=${JACQUARD_RUNTIME:-$PWD/runtime}
 export CC=${CC:-clang}
 BIN=${JACQUARD:-"dune exec jacquard --"}
 MANIFEST=${MANIFEST:-test/native-eligibility.txt}
 
-work=$(mktemp -d "${TMPDIR:-/tmp}/jq-diff-XXXXXX")
+work=$(mktemp -d "$TMPDIR/jq-diff-XXXXXX")
 trap 'rm -rf "$work"' EXIT
 
 files=${*:-"$(find corpus/valid corpus/sigs demos bench -name '*.jqd' 2>/dev/null | sort)"}

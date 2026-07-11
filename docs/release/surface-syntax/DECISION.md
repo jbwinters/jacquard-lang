@@ -13,6 +13,10 @@ independently semantic. The evidence covers the named parser, printer,
 formatter, checker, CLI, corpus, documentation, and demo inventories. It does
 not prove every possible kernel tree or freeze future surface revisions.
 
+The SS.0-SS.22 implementation arc is complete at these evidence boundaries.
+That completion does not promote partial D36 or parked Tier-F scope into the
+release and does not establish a freeze for the entire surface syntax.
+
 Bootstrap `.jqd` remains permanently supported as the kernel/debug format of
 record, quote-literal notation, and a test and tooling carrier. It is not
 deprecated. The surface gate does not change the 27-form kernel, `HASH_V0`,
@@ -41,7 +45,7 @@ Allowed decision statuses at this gate are `shipped`, `partial`, and
 |---|---|---|---|
 | D34 | shipped | [scaffold](../../../test/test_surface_scaffold.ml), [patterns](../../../test/test_surface_patterns.ml), and [twins](../../../test/test_surface_twins.ml) pin shared case projection and escapes. | none |
 | D35 | shipped | [handlers and quote](../../../test/test_surface_handlers_quote.ml) and [printing](../../../test/test_surface_print.ml) pin atomic handler bodies and mandatory blocks for non-atomic bodies. | none |
-| D36 | partial | [declaration tests](../../../test/test_surface_decls.ml), [trivia tests](../../../test/test_surface_trivia.ml), and [printing tests](../../../test/test_surface_print.ml) pin labeled field parsing, metadata, trivia, and rendering. [CLI evidence](../../../test/cli/surface.t) pins `pair.left` as absent with `E0301`; lowering does not generate accessor definitions, and missing/duplicate/type-inconsistent labels and explicit-term collisions are not validated. Labeled patterns remain deferred. | [D36 acceptance criteria](FOLLOWUPS.md#d36-generated-constructor-accessors) |
+| D36 | partial | The labeled-field portion shipped in SS.8: [declaration tests](../../../test/test_surface_decls.ml), [trivia tests](../../../test/test_surface_trivia.ml), and [printing tests](../../../test/test_surface_print.ml) pin parsing, metadata, trivia, lowering, and rendering. [CLI evidence](../../../test/cli/surface.t) pins `pair.left` as absent with `E0301`; generated accessor definitions and label validation, including duplicate-label rejection, are deliberate follow-ups. Labeled patterns remain deferred. | [D36 acceptance criteria](FOLLOWUPS.md#d36-generated-constructor-accessors) |
 | D37 | shipped | [lexer tests](../../../test/test_surface_lex.ml) and [parser tests](../../../test/test_surface_parse.ml) pin dotted names as atomic and preserve namespace puns. | none |
 | D38 | shipped | SS.22 ships a new callable variadic `text.join` object with an unbounded language/interpreter contract and strict argument evidence in [prelude tests](../../../test/test_prelude.ml), [CLI/native/ASAN boundary evidence](../../../test/cli/ss22.t), and [executable stdlib documentation](../../stdlib.md). Deprecated migration-only `text.join-list` preserves the pre-SS.22 list-plus-separator object hash-for-hash. Native v1 variadic parity is limited to 0-8 arguments; 9 is E1101 under its global ABI ceiling. Interpolation remains absent. | none |
 | D39 | shipped | SS.22 ships all four `int.*` and `real.*` predicates plus dotted real arithmetic, with NaN and boundary parity in [the native gauntlet](../../../test/native-gauntlet/g35-stdlib-ss22.jqd). The obsolete hyphenated public names are removed without aliases, while the five historical marker IDs and semantic hashes remain stable; the [identity map](../../../test/test_prelude.ml) and [hash-reference CLI/native test](../../../test/cli/ss22.t) prove old references still load, typecheck, interpret, and native-compile. | none |
@@ -117,8 +121,11 @@ inventory above, including `repair.jac`.
 ## Deferred Scope
 
 D38 and D39 completed as SS.22 standard-library work without grammar changes.
-Tier-F linearity modes and resource-scoped row display remain unscheduled
-headroom with no syntax, semantics, or compatibility promise. Their separate acceptance gates are the
+D36 generated accessors and label validation remain partial after SS.8 and the
+completed SS.0-SS.22 arc. Tier-F linearity modes and resource-scoped row display
+remain unscheduled headroom with no syntax, semantics, or compatibility promise.
+Their separate acceptance gates are the
+[D36 accessor criteria](FOLLOWUPS.md#d36-generated-constructor-accessors),
 [Tier-F linearity criteria](FOLLOWUPS.md#tier-f-linearity-modes) and
 [Tier-F resource-row criteria](FOLLOWUPS.md#tier-f-resource-scoped-rows).
 
@@ -167,8 +174,8 @@ runs from the repository root unless its command starts with `cd`.
 
 The following outcomes were observed for the SS.22 successor overlay.
 Task Master files were not changed. The table updates evidence inventory and
-stdlib/native results; it does not reopen or strengthen the SS.21 surface
-stability claim.
+stdlib/native results; it does not reopen or strengthen the SS.21 release
+claim.
 
 | command | deterministic expected result |
 |---|---|
@@ -188,5 +195,6 @@ stability claim.
 
 Successor milestone **SS.22, prelude naming and text building**, is complete.
 This updates the prelude and evidence; it does not freeze the surface or claim
-production stability. D36 accessor generation and Tier-F headroom require
-their own later acceptance gates.
+production stability. The SS.0-SS.22 arc is complete, while D36 accessor
+generation and label validation plus Tier-F headroom require their own later
+acceptance gates.

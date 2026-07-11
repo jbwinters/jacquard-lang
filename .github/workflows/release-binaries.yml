@@ -20,6 +20,7 @@ concurrency:
 
 env:
   OCAML_COMPILER: 5.1.1
+  TMPDIR: ${{ github.workspace }}/.scratch/tmp
 
 jobs:
   package:
@@ -43,6 +44,9 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.inputs.ref || github.ref }}
 
+      - name: Prepare temporary storage
+        run: mkdir -p "$TMPDIR"
+
       - name: Set up OCaml
         uses: ocaml/setup-ocaml@v3.6.1
         with:
@@ -57,9 +61,11 @@ jobs:
       - name: Smoke packaged commands
         shell: bash
         run: |
-          mkdir -p /tmp/jacquard-smoke
-          tar -xzf "dist/jacquard-${{ matrix.target }}.tar.gz" -C /tmp/jacquard-smoke
-          root=$(find /tmp/jacquard-smoke -mindepth 1 -maxdepth 1 -type d -name 'jacquard-*' | head -1)
+          smoke="$GITHUB_WORKSPACE/.scratch/jacquard-smoke"
+          rm -rf "$smoke"
+          mkdir -p "$smoke"
+          tar -xzf "dist/jacquard-${{ matrix.target }}.tar.gz" -C "$smoke"
+          root=$(find "$smoke" -mindepth 1 -maxdepth 1 -type d -name 'jacquard-*' | head -1)
           "$root/bin/jacquard" --version
           "$root/bin/jac" --version
 
@@ -79,6 +85,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Prepare temporary storage
+        run: mkdir -p "$TMPDIR"
+
       - name: Download packages
         uses: actions/download-artifact@v6.0.0
         with:
