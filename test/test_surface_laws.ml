@@ -60,8 +60,71 @@ let test_one_page_grammar_snapshot () =
     "47fff3e3ced0fced860d6669b46e99954e2ecb729fa69b988283aa9a8f2263d6"
     (Hash.to_hex (Hash.of_string grammar))
 
+let format_surface path source =
+  let recovered = Surface_parse.recover_string ~file:path source in
+  match Surface_print.print_recovered recovered with
+  | Ok text -> text
+  | Error diagnostics -> Eval_support.fail_diags (path ^ " format") diagnostics
+
+let contains needle text =
+  let rec loop index =
+    index + String.length needle <= String.length text
+    && (String.sub text index (String.length needle) = needle || loop (index + 1))
+  in
+  loop 0
+
+let test_surface_formatter_corpus_stability () =
+  let dir = "../corpus/surface" in
+  let files =
+    Sys.readdir dir |> Array.to_list
+    |> List.filter (fun file -> Filename.check_suffix file ".jac")
+    |> List.sort String.compare
+  in
+  Alcotest.(check int) "task 103 formatter corpus size" 3 (List.length files);
+  List.iter
+    (fun file ->
+      let path = Filename.concat dir file in
+      let once = format_surface path (Corpus_support.read_file path) in
+      let twice = format_surface path once in
+      Alcotest.(check string) (file ^ " L2") once twice;
+      match file with
+      | "formatter-sequenced-arm.jac" ->
+          Alcotest.(check bool) "B1 sequenced arm is braced" true (contains "| True -> {" once)
+      | "formatter-long-arm.jac" ->
+          Alcotest.(check bool)
+            "B1 long single expression is unbraced" false (contains "| True -> {" once)
+      | "formatter-constructors.jac" ->
+          Alcotest.(check bool)
+            "B5 long constructor list is vertical" true
+            (contains "type DeploymentOutcome =\n  | CompletelyClear\n" once)
+      | _ -> Alcotest.failf "unexpected formatter corpus file %s" file)
+    files
+
+let test_constructor_standard_width_boundary () =
+  let render constructor_length =
+    let constructor = "A" ^ String.make (constructor_length - 1) 'a' in
+    format_surface "constructors.jac" (Printf.sprintf "type T = | %s | B\n" constructor)
+  in
+  let fits = render 85 in
+  let breaks = render 86 in
+  Alcotest.(check int)
+    "100-column declaration stays on one line" 100
+    (String.length (String.trim fits));
+  Alcotest.(check bool) "100 columns is inline" false (contains "type T =\n" fits);
+  Alcotest.(check string)
+    "101 columns breaks before constructors" "type T =\n"
+    (String.sub breaks 0 (String.length "type T =\n"));
+  Alcotest.(check int)
+    "one constructor per line after boundary" 2
+    (String.split_on_char '\n' (String.trim breaks) |> List.tl |> List.length);
+  Alcotest.(check bool) "second constructor has its own line" true (contains "\n  | B\n" breaks)
+
 let suite =
   [
     Alcotest.test_case "valid corpus printer totality" `Quick test_valid_corpus_printer_totality;
     Alcotest.test_case "one-page grammar snapshot" `Quick test_one_page_grammar_snapshot;
+    Alcotest.test_case "surface formatter corpus stability" `Quick
+      test_surface_formatter_corpus_stability;
+    Alcotest.test_case "constructor standard width boundary" `Quick
+      test_constructor_standard_width_boundary;
   ]

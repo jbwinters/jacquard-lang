@@ -184,6 +184,23 @@ let warning_wide (pattern : Surface_ast.pat) fields =
         future fix"
        fields)
 
+let large_match_scrutinee_lines = 4
+
+let warning_large_scrutinee (subject : Surface_ast.expr) lines =
+  Diag.warning
+    ?span:(Meta.span subject.Surface_ast.meta)
+    ~code:"W1203"
+    ~hint:
+      "introduce a `let` binding before the match and match on that name; formatting never hoists \
+       expressions automatically"
+    (Printf.sprintf
+       "this match scrutinee spans %d lines; scrutinees longer than %d lines are difficult to \
+        review"
+       lines large_match_scrutinee_lines)
+
+let span_line_count meta =
+  Option.map (fun span -> span.Span.end_pos.line - span.Span.start_pos.line + 1) (Meta.span meta)
+
 let constructor_in_names names name =
   List.exists (fun entry -> entry.Resolve.kind = Resolve.KCon) (names.Resolve.lookup name)
 
@@ -219,7 +236,14 @@ let rec lint_expr names constructors (expression : Surface_ast.expr) =
   | Surface_ast.Tuple items | Surface_ast.List items -> exprs items
   | Surface_ast.Block items -> List.concat_map (lint_block_item names constructors) items
   | Surface_ast.Match (subject, clauses) ->
-      lint_expr names constructors subject
+      let large_scrutinee =
+        match span_line_count subject.meta with
+        | Some lines when lines > large_match_scrutinee_lines ->
+            [ warning_large_scrutinee subject lines ]
+        | Some _ | None -> []
+      in
+      large_scrutinee
+      @ lint_expr names constructors subject
       @ List.concat_map
           (fun (clause : Surface_ast.clause) ->
             lint_pat names constructors clause.Surface_ast.cpattern
@@ -273,6 +297,10 @@ let lint_file names tops =
         loop constructors (List.rev_append warnings diagnostics) rest
   in
   loop String_set.empty [] tops
+
+(** [lint ~names tops] reports surface-only review warnings in source order. It does not lower,
+    rewrite, resolve, or typecheck the input. *)
+let lint ~names tops = lint_file names tops
 
 let is_definition_top (top : Surface_ast.top) =
   match top.it with Surface_ast.Signature _ | Surface_ast.Definition _ -> true | _ -> false
@@ -348,7 +376,7 @@ let analyze ~names ctx (recovered : Surface_ast.recovered) : report =
   let additions = ref [] in
   let evolving_names = analysis_names names additions in
   let island = ref 0 in
-  let diagnostics = ref (recovered.diagnostics @ lint_file names recovered.items) in
+  let diagnostics = ref (recovered.diagnostics @ lint ~names recovered.items) in
   let signatures = ref [] in
   let add_one_error errors =
     match sort_diagnostics errors with

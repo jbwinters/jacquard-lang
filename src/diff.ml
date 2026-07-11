@@ -74,28 +74,84 @@ let rec form_divergences ?(syntax = Bootstrap) ~path (fa : Form.t) (fb : Form.t)
 let store_names (s : Store.t) : ((string * Resolve.nkind) * Hash.t) list =
   List.map (fun (n, { Resolve.hash; kind }) -> ((n, kind), hash)) (Store.names s)
 
-let decl_form store (h : Hash.t) : Form.t option =
-  match Store.locate store h with
+type side = { store : Store.t; bindings : ((string * Resolve.nkind) * Hash.t) list }
+(** A diff operand's object store and the exact name bindings exposed as comparison roots. *)
+
+(** [store_side store] exposes every current name binding in [store] to the differ. *)
+let store_side store = { store; bindings = store_names store }
+
+(** [source_side store declarations] exposes only the final name bindings introduced by
+    [declarations]. The complete [store], including any prelude used to resolve those declarations,
+    remains available for object lookup and dependency analysis. *)
+let source_side store declarations =
+  let source_decl_bindings (decl : Kernel.decl) (hashes : Canon.decl_hashes) =
+    let with_kind kind = List.map (fun (name, hash) -> ((name, kind), hash)) in
+    match decl.Kernel.it with
+    | Kernel.DefTerm _ -> with_kind Resolve.KTerm hashes.Canon.named
+    | Kernel.DefType _ -> (
+        match hashes.Canon.named with
+        | [] -> []
+        | head :: constructors ->
+            with_kind Resolve.KType [ head ] @ with_kind Resolve.KCon constructors)
+    | Kernel.DefEffect _ -> (
+        match hashes.Canon.named with
+        | [] -> []
+        | head :: operations ->
+            with_kind Resolve.KEffect [ head ] @ with_kind Resolve.KOp operations)
+  in
+  let kind_rank = function
+    | Resolve.KTerm -> 0
+    | Resolve.KCon -> 1
+    | Resolve.KOp -> 2
+    | Resolve.KType -> 3
+    | Resolve.KEffect -> 4
+  in
+  let sort_bindings bindings =
+    List.sort
+      (fun ((name_a, kind_a), _) ((name_b, kind_b), _) ->
+        match String.compare name_a name_b with
+        | 0 -> compare (kind_rank kind_a) (kind_rank kind_b)
+        | order -> order)
+      bindings
+  in
+  let add_declaration bindings (decl, hashes) =
+    let introduced = source_decl_bindings decl hashes in
+    let replaced ((name, kind), _) =
+      List.exists
+        (fun ((introduced_name, introduced_kind), _) ->
+          name = introduced_name && kind = introduced_kind)
+        introduced
+    in
+    introduced @ List.filter (fun binding -> not (replaced binding)) bindings
+  in
+  { store; bindings = List.fold_left add_declaration [] declarations |> sort_bindings }
+
+(** [decl_form side hash] returns the owning declaration as a form, or [None] when [hash] is not
+    available in the side's store. *)
+let decl_form side (h : Hash.t) : Form.t option =
+  match Store.locate side.store h with
   | Ok { Store.decl; _ } -> Some (Kernel.decl_to_form decl)
   | Error _ -> None
 
-let dependents_names store (h : Hash.t) : string list =
-  match Store.dependents store h with
+(** [dependents_names side hash] returns sorted, deduplicated names exposed by [side] whose
+    declarations directly depend on [hash]. Store lookup failures produce an empty list. *)
+let dependents_names side (h : Hash.t) : string list =
+  match Store.dependents side.store h with
   | Error _ -> []
   | Ok decl_hashes ->
       (* report the names bound to any hash owned by a dependent declaration *)
       List.filter_map
         (fun ((n, _), bh) ->
-          match Store.locate store bh with
+          match Store.locate side.store bh with
           | Ok { Store.decl_hash; _ } when List.exists (Hash.equal decl_hash) decl_hashes -> Some n
           | _ -> None)
-        (store_names store)
+        side.bindings
       |> List.sort_uniq String.compare
 
-(** [diff_with_syntax ~syntax ~old_side ~new_side] classifies every (name, kind) binding across two
-    stores; report keys stay plain names. *)
-let diff_with_syntax ~syntax ~(old_side : Store.t) ~(new_side : Store.t) : report =
-  let a = store_names old_side and b = store_names new_side in
+(** [diff_sides_with_syntax ~syntax ~old_side ~new_side] classifies every exposed (name, kind)
+    binding across two sides; report keys stay plain names. *)
+let diff_sides_with_syntax ~syntax ~(old_side : side) ~(new_side : side) : report =
+  let a = old_side.bindings and b = new_side.bindings in
   let hash_of_key side key = List.assoc_opt key side in
   (* rename detection stays within a kind: store renames never change a binding's kind *)
   let keys_of_hash side kind h =
@@ -120,7 +176,7 @@ let diff_with_syntax ~syntax ~(old_side : Store.t) ~(new_side : Store.t) : repor
                   {
                     divergences;
                     dependents = dependents_names old_side ha;
-                    origin = Store.origin new_side hb;
+                    origin = Store.origin new_side.store hb;
                   } )
         | None -> (
             (* same content under a different old name? that's a rename *)
@@ -144,6 +200,10 @@ let diff_with_syntax ~syntax ~(old_side : Store.t) ~(new_side : Store.t) : repor
       a
   in
   new_entries @ removed
+
+(** [diff_with_syntax ~syntax ~old_side ~new_side] compares every binding in two stores. *)
+let diff_with_syntax ~syntax ~(old_side : Store.t) ~(new_side : Store.t) : report =
+  diff_sides_with_syntax ~syntax ~old_side:(store_side old_side) ~new_side:(store_side new_side)
 
 (** [diff] preserves the established bootstrap-rendered report contract. *)
 let diff ~old_side ~new_side = diff_with_syntax ~syntax:Bootstrap ~old_side ~new_side

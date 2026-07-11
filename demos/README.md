@@ -6,6 +6,8 @@ uncertainty, and identity stay visible to tools.
 
 ## Direct Demos
 
+- `surface-fact.jac`: pure recursive surface program run directly by `jac run`.
+- `surface-expression.jac`: a bare top-level surface expression, with no declaration wrapper.
 - `m1.sh`: factorial, multi-shot choice, and gated eval.
 - `m3.sh`: one probabilistic model under exact enumeration and likelihood weighting.
 - `m4-hostile.sh`: generated-looking code that reaches for `net`; the row exposes it.

@@ -705,6 +705,17 @@ differ gains a surface renderer, so review diffs read as `.jac` while
 comparing trees. The formatter and the printer are the same program, which
 is what printer-first means operationally.
 
+`jacquard diff` accepts either two source files or two store directories. Source files are parsed,
+lowered, and resolved independently against the prelude before the existing store-backed semantic
+differ runs; they must contain declarations only. The prelude remains available for resolution and
+dependency traversal, but root comparison and dependent names are restricted to declarations owned
+by each source operand. A source declaration that shares a name with a prelude declaration is thus a
+source addition, change, or removal rather than a comparison against the prelude definition. Auto
+syntax follows each file extension and uses surface rendering when either source is `.jac`;
+`--syntax` overrides parsing and rendering for both operands. Mixed file/store operands, unreadable
+operands, malformed source, and top-level source expressions are diagnostics with exit status 1.
+Store/store comparison keeps its full-store, bootstrap-rendered default.
+
 Two diagnostics belong to this slice specifically. First, a bare reference
 passed where a thunk type is expected (`fn () -> naive-checkout()` is the
 correct form; a bare `naive-checkout` where a `() ->{| e} T` is wanted is not,

@@ -62,6 +62,8 @@
  (libraries jacquard corpus_support alcotest fmt qcheck-core qcheck-alcotest unix str)
  (deps
   (glob_files_rec ../corpus/*.jqd)
+  (glob_files_rec ../corpus/*.jac)
+  (source_tree ../corpus/surface)
   (glob_files_rec ../corpus/*.expect)
   (glob_files_rec ../corpus/*.golden)
   (glob_files_rec ../prelude/*.jqd)

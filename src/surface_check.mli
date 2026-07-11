@@ -6,6 +6,13 @@ type report = {
       (** Successfully checked names from independent analysis islands, in analysis order. *)
 }
 
+val large_match_scrutinee_lines : int
+(** The maximum inclusive source-line count for a match scrutinee before [lint] emits [W1203]. *)
+
+val lint : names:Resolve.names -> Surface_ast.top list -> Diag.t list
+(** [lint ~names tops] returns source-ordered surface review warnings without lowering, rewriting,
+    resolving, or typechecking. [names] is consulted only for namespace-aware pattern warnings. *)
+
 val analyze : names:Resolve.names -> Check.ctx -> Surface_ast.recovered -> report
 (** [analyze ~names ctx recovered] checks a recovered surface tree for editor feedback. Parser holes
     behave as fresh types with no effect contribution, diagnostics are source ordered, and checking

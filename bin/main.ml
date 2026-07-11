@@ -2,7 +2,8 @@
 
    Exit codes, pinned by cram tests: 0 ok, 1 diagnostics (parse/validate/resolve/store), 2
    runtime error, 3 unhandled effect (the capability refusal). CLI usage errors (unknown
-   subcommand, missing argument) keep cmdliner's conventional 124.
+   subcommand, missing argument) keep cmdliner's conventional 124. Operand and source errors,
+   including [diff]'s file/store validation, are diagnostics and return 1.
 
    `jacquard run` and `jacquard check` operate on an ephemeral store seeded with the prelude
    (directory from --prelude, else $JACQUARD_PRELUDE, else ./prelude); `jacquard store ...`
@@ -46,6 +47,37 @@ let prelude_dir_of = function
   | Some d -> d
   | None -> ( match Sys.getenv_opt "JACQUARD_PRELUDE" with Some d -> d | None -> "prelude")
 
+type syntax = Auto | Bootstrap | Surface
+type parsed_top = Bootstrap_form of Form.t | Surface_top of Kernel.top
+
+let syntax_for_file syntax file =
+  match syntax with
+  | Auto when Filename.check_suffix file ".jac" -> Surface
+  | Auto | Bootstrap -> Bootstrap
+  | Surface -> Surface
+
+let parse_tops ~syntax ~names ~file src =
+  match syntax_for_file syntax file with
+  | Auto -> assert false
+  | Bootstrap ->
+      Result.map
+        (fun forms -> (List.map (fun form -> Bootstrap_form form) forms, []))
+        (Reader.parse_string ~file src)
+  | Surface ->
+      let recovered = Surface_parse.recover_string ~file src in
+      Result.bind (Surface_parse.strict recovered) (fun parsed ->
+          let warnings = Surface_check.lint ~names parsed in
+          Result.map
+            (fun tops -> (List.map (fun top -> Surface_top top) tops, warnings))
+            (Surface_lower.lower_tops parsed))
+
+let validate_parsed_top = function
+  | Bootstrap_form form -> Kernel.of_form form
+  | Surface_top top -> Ok top
+
+let print_warnings warnings =
+  List.iter (fun warning -> prerr_endline (Diag.to_string warning)) warnings
+
 (* Open a store (persistent dir or fresh temp) and seed the prelude into it. *)
 let open_ctx ~prelude ~store_dir =
   let root = match store_dir with Some d -> d | None -> fresh_tmp_dir () in
@@ -60,14 +92,15 @@ let open_ctx ~prelude ~store_dir =
 
 (* Process a file's top-level forms in order: declarations go into the store; expressions
    are handed to [on_expr]. *)
-let process_forms ?origin store ~file src ~on_expr =
-  match Reader.parse_string ~file src with
+let process_forms ?origin ?(on_decl = fun _ _ -> ()) ~syntax store ~file src ~on_expr =
+  match parse_tops ~syntax ~names:(Store.names_view store) ~file src with
   | Error ds -> Error ds
-  | Ok forms ->
+  | Ok (tops, warnings) ->
+      print_warnings warnings;
       let rec go = function
         | [] -> Ok ()
-        | f :: rest -> (
-            match Kernel.of_form f with
+        | parsed :: rest -> (
+            match validate_parsed_top parsed with
             | Error ds -> Error ds
             | Ok (Kernel.Decl d) -> (
                 match Resolve.resolve_decl (Store.names_view store) d with
@@ -75,13 +108,15 @@ let process_forms ?origin store ~file src ~on_expr =
                 | Ok d -> (
                     match Store.put_decl ?origin store d with
                     | Error ds -> Error ds
-                    | Ok _ -> go rest))
+                    | Ok hashes ->
+                        on_decl d hashes;
+                        go rest))
             | Ok (Kernel.Expr e) -> (
                 match Resolve.resolve_expr (Store.names_view store) e with
                 | Error ds -> Error ds
                 | Ok e -> ( match on_expr e with Ok () -> go rest | Error _ as err -> err)))
       in
-      go forms
+      go tops
 
 (* --- run --- *)
 
@@ -103,7 +138,7 @@ let make_checker store =
       | Error _ -> ());
       Ok cctx
 
-let run_cmd file allows prelude store_dir seed infer_cache origin dry_run =
+let run_cmd file allows prelude store_dir seed infer_cache origin dry_run syntax =
   match open_ctx ~prelude ~store_dir with
   | Error ds -> print_diags ds
   | Ok (store, ctx) -> (
@@ -177,7 +212,7 @@ let run_cmd file allows prelude store_dir seed infer_cache origin dry_run =
                             runtime_failure := Some err;
                             Error []))
               in
-              match process_forms ?origin store ~file (read_file file) ~on_expr with
+              match process_forms ?origin ~syntax store ~file (read_file file) ~on_expr with
               | exception Invalid_argument msg
                 when String.length msg > 6 && String.sub msg 0 5 = "error" ->
                   prerr_endline msg;
@@ -214,7 +249,7 @@ let run_cmd file allows prelude store_dir seed infer_cache origin dry_run =
 
 (* --- check --- *)
 
-let check_cmd file prelude print_sigs manifest origin =
+let check_cmd file prelude print_sigs manifest origin syntax =
   match open_ctx ~prelude ~store_dir:None with
   | Error ds -> print_diags ds
   | Ok (store, _ctx) -> (
@@ -261,15 +296,16 @@ let check_cmd file prelude print_sigs manifest origin =
                 | _ -> Ok ())
           in
           (* process: decls also go into the store so later forms resolve *)
-          match Reader.parse_string ~file (read_file file) with
+          match parse_tops ~syntax ~names:(Store.names_view store) ~file (read_file file) with
           | Error ds -> print_diags ds
-          | Ok forms ->
+          | Ok (tops, surface_warnings) ->
+              print_warnings surface_warnings;
               let rec go = function
                 | [] ->
                     if not print_sigs then print_endline "ok";
                     ok
-                | f :: rest -> (
-                    match Kernel.of_form f with
+                | parsed :: rest -> (
+                    match validate_parsed_top parsed with
                     | Error ds -> print_diags ds
                     | Ok top -> (
                         match Resolve.resolve_w (Store.names_view store) top with
@@ -286,21 +322,22 @@ let check_cmd file prelude print_sigs manifest origin =
                                     | Error ds -> print_diags ds)
                                 | Kernel.Expr _ -> go rest))))
               in
-              go forms))
+              go tops))
 
 (* --- hash --- *)
 
-let hash_cmd file prelude =
+let hash_cmd file prelude syntax =
   match open_ctx ~prelude ~store_dir:None with
   | Error ds -> print_diags ds
   | Ok (store, _ctx) -> (
-      match Reader.parse_string ~file (read_file file) with
+      match parse_tops ~syntax ~names:(Store.names_view store) ~file (read_file file) with
       | Error ds -> print_diags ds
-      | Ok forms ->
+      | Ok (tops, surface_warnings) ->
+          print_warnings surface_warnings;
           let rec go idx = function
             | [] -> ok
-            | f :: rest -> (
-                match Kernel.of_form f with
+            | parsed :: rest -> (
+                match validate_parsed_top parsed with
                 | Error ds -> print_diags ds
                 | Ok top -> (
                     match Resolve.resolve (Store.names_view store) top with
@@ -319,7 +356,7 @@ let hash_cmd file prelude =
                             | Kernel.Expr _ -> ());
                             go (idx + 1) rest)))
           in
-          go 0 forms)
+          go 0 tops)
 
 (* --- infer (M3) --- *)
 
@@ -405,11 +442,22 @@ let infer_lw_cmd file prelude seed samples =
 
 (* --- fmt --- *)
 
-let fmt_cmd file write =
-  match Reader.parse_string ~file (read_file file) with
+let fmt_cmd file write syntax =
+  let src = read_file file in
+  let formatted =
+    match syntax_for_file syntax file with
+    | Auto -> assert false
+    | Bootstrap -> Result.map Printer.format_all (Reader.parse_string ~file src)
+    | Surface ->
+        let recovered = Surface_parse.recover_string ~file src in
+        Result.bind (Surface_parse.strict_file recovered) (fun parsed ->
+            print_warnings (Surface_check.lint ~names:Resolve.empty_names parsed.tops);
+            Result.bind (Surface_lower.lower_file parsed) (fun lowered ->
+                Surface_print.print_file_with_trivia ~file_meta:lowered.meta lowered.tops))
+  in
+  match formatted with
   | Error ds -> print_diags ds
-  | Ok forms ->
-      let out = Printer.format_all forms in
+  | Ok out ->
       if write then begin
         let oc = open_out_bin file in
         output_string oc out;
@@ -817,7 +865,9 @@ let replay_cmd log_file program forks to_n compare prelude =
                   prerr_endline (Runtime_err.to_string err);
                   Error []
             in
-            match process_forms store ~file:program (read_file program) ~on_expr with
+            match
+              process_forms ~syntax:Bootstrap store ~file:program (read_file program) ~on_expr
+            with
             | Error ds -> print_diags ds
             | Ok () ->
                 if compare then begin
@@ -1000,21 +1050,117 @@ let test_cmd files allows prelude cache_dir no_cache coverage seed samples exhau
                                        (Warp.coverage_report store ~rings ~tests:test_hashes union));
                                   if totals.Warp.failed > 0 then exit_diags else ok)))))))
 
-let diff_cmd store_a store_b =
-  match List.find_opt (fun d -> not (Sys.file_exists d)) [ store_a; store_b ] with
-  | Some missing ->
-      print_diags [ Diag.error ~code:"E0606" (Printf.sprintf "store %s does not exist" missing) ]
-  | None -> (
-      match (Store.open_store store_a, Store.open_store store_b) with
+type diff_operand = Source_file | Store_dir | Missing | Unsupported
+
+let classify_diff_operand path =
+  match (Unix.stat path).Unix.st_kind with
+  | Unix.S_REG -> Source_file
+  | Unix.S_DIR -> Store_dir
+  | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK -> Unsupported
+  | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> Missing
+  | exception Unix.Unix_error _ -> Unsupported
+
+let read_diff_source file =
+  try Ok (read_file file)
+  with Sys_error message ->
+    Error
+      [ Diag.error ~code:"E0609" (Printf.sprintf "cannot read diff source %s: %s" file message) ]
+
+let open_diff_store dir =
+  try Store.open_store dir with
+  | Sys_error message ->
+      Error
+        [ Diag.error ~code:"E0609" (Printf.sprintf "cannot read diff store %s: %s" dir message) ]
+  | Unix.Unix_error (error, operation, path) ->
+      Error
+        [
+          Diag.error ~code:"E0609"
+            (Printf.sprintf "cannot read diff store %s: %s (%s, %s)" dir (Unix.error_message error)
+               operation path);
+        ]
+
+let load_diff_source ~prelude ~syntax file =
+  match read_diff_source file with
+  | Error _ as error -> error
+  | Ok source -> (
+      match open_ctx ~prelude ~store_dir:None with
+      | Error _ as error -> error
+      | Ok (store, _ctx) ->
+          let declarations = ref [] in
+          Result.map
+            (fun () -> Diff.source_side store (List.rev !declarations))
+            (process_forms ~syntax store ~file source
+               ~on_decl:(fun decl hashes -> declarations := (decl, hashes) :: !declarations)
+               ~on_expr:(fun _ ->
+                 Error
+                   [
+                     Diag.error ~code:"E0610"
+                       (Printf.sprintf
+                          "%s: diff source files must contain declarations only; found a top-level \
+                           expression"
+                          file);
+                   ])))
+
+let render_diff ~syntax ~old_side ~new_side =
+  match Diff.render (Diff.diff_sides_with_syntax ~syntax ~old_side ~new_side) with
+  | None ->
+      print_endline "no semantic changes";
+      ok
+  | Some report ->
+      print_endline report;
+      ok
+
+let diff_cmd operand_a operand_b syntax prelude =
+  match (classify_diff_operand operand_a, classify_diff_operand operand_b) with
+  | Missing, Store_dir ->
+      print_diags [ Diag.error ~code:"E0606" (Printf.sprintf "store %s does not exist" operand_a) ]
+  | Store_dir, Missing ->
+      print_diags [ Diag.error ~code:"E0606" (Printf.sprintf "store %s does not exist" operand_b) ]
+  | Missing, _ ->
+      print_diags
+        [ Diag.error ~code:"E0606" (Printf.sprintf "diff operand %s does not exist" operand_a) ]
+  | _, Missing ->
+      print_diags
+        [ Diag.error ~code:"E0606" (Printf.sprintf "diff operand %s does not exist" operand_b) ]
+  | Unsupported, _ | _, Unsupported ->
+      print_diags
+        [
+          Diag.error ~code:"E0609"
+            "diff operands must both be regular source files or both be store directories";
+        ]
+  | Source_file, Store_dir | Store_dir, Source_file ->
+      print_diags
+        [
+          Diag.error ~code:"E0609"
+            "cannot compare a source file with a store directory; pass two files or two stores";
+        ]
+  | Store_dir, Store_dir -> (
+      match (open_diff_store operand_a, open_diff_store operand_b) with
       | Error ds, _ | _, Error ds -> print_diags ds
-      | Ok old_side, Ok new_side -> (
-          match Diff.render (Diff.diff ~old_side ~new_side) with
-          | None ->
-              print_endline "no semantic changes";
-              ok
-          | Some report ->
-              print_endline report;
-              ok))
+      | Ok old_side, Ok new_side ->
+          let render_syntax =
+            match syntax with Surface -> Diff.Surface | Auto | Bootstrap -> Diff.Bootstrap
+          in
+          render_diff ~syntax:render_syntax ~old_side:(Diff.store_side old_side)
+            ~new_side:(Diff.store_side new_side))
+  | Source_file, Source_file -> (
+      match
+        (load_diff_source ~prelude ~syntax operand_a, load_diff_source ~prelude ~syntax operand_b)
+      with
+      | Error ds, _ | _, Error ds -> print_diags ds
+      | Ok old_side, Ok new_side ->
+          let render_syntax =
+            match syntax with
+            | Surface -> Diff.Surface
+            | Bootstrap -> Diff.Bootstrap
+            | Auto ->
+                if
+                  syntax_for_file Auto operand_a = Surface
+                  || syntax_for_file Auto operand_b = Surface
+                then Diff.Surface
+                else Diff.Bootstrap
+          in
+          render_diff ~syntax:render_syntax ~old_side ~new_side)
 
 (* --- store subcommands (persistent, no implicit prelude) --- *)
 
@@ -1024,7 +1170,7 @@ let with_store store_dir f =
 let store_add_cmd store_dir file origin =
   with_store store_dir (fun store ->
       match
-        process_forms ?origin store ~file (read_file file) ~on_expr:(fun _ ->
+        process_forms ?origin ~syntax:Bootstrap store ~file (read_file file) ~on_expr:(fun _ ->
             Error [ Diag.error ~code:"E0704" "store add expects declarations only" ])
       with
       | Ok () ->
@@ -1067,6 +1213,24 @@ let store_rename_cmd store_dir old_name new_name kind =
 open Cmdliner
 
 let file_arg = Arg.(required & pos 0 (some file) None & info [] ~docv:"FILE")
+
+let syntax_arg =
+  Arg.(
+    value
+    & opt
+        (enum
+           [
+             ("auto", Auto);
+             ("surface", Surface);
+             ("jac", Surface);
+             ("bootstrap", Bootstrap);
+             ("jqd", Bootstrap);
+           ])
+        Auto
+    & info [ "syntax" ] ~docv:"SYNTAX"
+        ~doc:
+          "Source or rendering syntax: auto selects surface for .jac files and bootstrap \
+           otherwise; explicit values are surface/jac or bootstrap/jqd.")
 
 let prelude_arg =
   Arg.(
@@ -1122,10 +1286,10 @@ let infer_cache_arg =
 
 let run_t =
   Cmd.v
-    (Cmd.info "run" ~doc:"Run a .jqd file: declarations load, expressions evaluate and print.")
+    (Cmd.info "run" ~doc:"Run a .jac surface or .jqd bootstrap file in top-level order.")
     Term.(
       const run_cmd $ file_arg $ allows_arg $ prelude_arg $ store_dir_opt_arg $ seed_arg
-      $ infer_cache_arg $ origin_arg $ dry_run_arg)
+      $ infer_cache_arg $ origin_arg $ dry_run_arg $ syntax_arg)
 
 let print_sigs_arg =
   Arg.(
@@ -1141,21 +1305,22 @@ let manifest_arg =
 
 let check_t =
   Cmd.v
-    (Cmd.info "check"
-       ~doc:"Parse, validate, resolve, and typecheck a .jqd file (grammar + names + types).")
-    Term.(const check_cmd $ file_arg $ prelude_arg $ print_sigs_arg $ manifest_arg $ origin_arg)
+    (Cmd.info "check" ~doc:"Parse, validate, resolve, and typecheck a .jac or .jqd file.")
+    Term.(
+      const check_cmd $ file_arg $ prelude_arg $ print_sigs_arg $ manifest_arg $ origin_arg
+      $ syntax_arg)
 
 let hash_t =
   Cmd.v
     (Cmd.info "hash" ~doc:"Print the canonical HASH_V0 hashes of each top-level form.")
-    Term.(const hash_cmd $ file_arg $ prelude_arg)
+    Term.(const hash_cmd $ file_arg $ prelude_arg $ syntax_arg)
 
 let write_arg = Arg.(value & flag & info [ "write"; "w" ] ~doc:"Rewrite the file in place.")
 
 let fmt_t =
   Cmd.v
-    (Cmd.info "fmt" ~doc:"Format a .jqd file canonically, preserving comments.")
-    Term.(const fmt_cmd $ file_arg $ write_arg)
+    (Cmd.info "fmt" ~doc:"Format a .jac or .jqd file canonically, preserving comments.")
+    Term.(const fmt_cmd $ file_arg $ write_arg $ syntax_arg)
 
 let infer_t =
   let enumerate =
@@ -1182,12 +1347,13 @@ let diff_t =
   Cmd.v
     (Cmd.info "diff"
        ~doc:
-         "Semantically compare two stores: renames are renames, reformatting is nothing, real \
-          edits localize to the smallest changed subtrees.")
+         "Semantically compare two source files or two stores: renames are renames, reformatting \
+          is nothing, and real edits localize to the smallest changed subtrees.")
     Term.(
       const diff_cmd
-      $ Arg.(required & pos 0 (some string) None & info [] ~docv:"STORE_A")
-      $ Arg.(required & pos 1 (some string) None & info [] ~docv:"STORE_B"))
+      $ Arg.(required & pos 0 (some string) None & info [] ~docv:"FILE_OR_STORE_A")
+      $ Arg.(required & pos 1 (some string) None & info [] ~docv:"FILE_OR_STORE_B")
+      $ syntax_arg $ prelude_arg)
 
 let store_pos_dir = Arg.(required & pos 0 (some string) None & info [] ~docv:"STORE")
 

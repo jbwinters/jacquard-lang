@@ -2,3 +2,12 @@
  (name main)
  (public_name jacquard)
  (libraries jacquard jacquard_native str cmdliner unix))
+
+(rule
+ (target jac)
+ (deps main.exe)
+ (action (copy %{dep:main.exe} %{target})))
+
+(install
+ (section bin)
+ (files jac))

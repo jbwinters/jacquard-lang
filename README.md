@@ -234,6 +234,7 @@ jac run FILE.jqd [--allow fs] [--allow net] [--dry-run]
 jacquard check FILE.jqd [--print-sigs] [--manifest fs,net,console]
 jacquard hash FILE.jqd
 jacquard fmt FILE.jqd
+jacquard diff FILE_A FILE_B
 jacquard diff STORE_A STORE_B
 jacquard infer enumerate MODEL.jqd
 jacquard infer lw MODEL.jqd --seed 42 --samples 100000

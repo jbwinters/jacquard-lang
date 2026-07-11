@@ -355,6 +355,36 @@ let test_wide_pattern_boundary_and_coexistence () =
     (List.mem "W1202" (codes both)
     && List.exists (fun d -> d.Diag.severity = Diag.Error) both.diagnostics)
 
+let test_large_match_scrutinee_lint_boundary () =
+  let lint source =
+    let recovered = Surface_parse.recover_string ~file:"scrutinee.jac" source in
+    match Surface_parse.strict recovered with
+    | Error diagnostics -> fail_diags "scrutinee lint parse" diagnostics
+    | Ok tops -> Surface_check.lint ~names:Resolve.empty_names tops
+  in
+  let boundary = "match f(\n  1,\n  2\n) { | _ -> 0 }\n" in
+  Alcotest.(check int)
+    "exact four-line boundary is inclusive" 0
+    (List.length (List.filter (fun d -> d.Diag.code = "W1203") (lint boundary)));
+  let large = "match f(\n  1,\n  2,\n  3\n) { | _ -> 0 }\n" in
+  match List.filter (fun d -> d.Diag.code = "W1203") (lint large) with
+  | [ warning ] ->
+      Alcotest.(check bool) "large is warning" true (warning.severity = Diag.Warning);
+      Alcotest.(check string)
+        "first warning reports five source lines"
+        "this match scrutinee spans 5 lines; scrutinees longer than 4 lines are difficult to review"
+        warning.message;
+      Alcotest.(check (option string))
+        "scrutinee span" (Some "scrutinee.jac:1:7-5:2")
+        (Option.map Span.to_string warning.span);
+      Alcotest.(check bool)
+        "manual-only guidance" true
+        (Option.fold ~none:false
+           ~some:(fun hint ->
+             contains "introduce a `let` binding" hint && contains "never hoists" hint)
+           warning.hint)
+  | found -> Alcotest.failf "expected one scrutinee warning, got %d" (List.length found)
+
 let test_warning_exact_order_nested_raw_and_redundancy () =
   let source =
     "match True { | _ -> 0 | _ -> 1 }\n\
@@ -519,6 +549,8 @@ let suite =
       test_case_confusion_scope_and_namespace;
     Alcotest.test_case "wide pattern boundary and coexistence" `Quick
       test_wide_pattern_boundary_and_coexistence;
+    Alcotest.test_case "large match scrutinee lint boundary" `Quick
+      test_large_match_scrutinee_lint_boundary;
     Alcotest.test_case "warning exact order nested raw and redundancy" `Quick
       test_warning_exact_order_nested_raw_and_redundancy;
     Alcotest.test_case "cross-island terms" `Quick test_cross_island_terms;

@@ -1,6 +1,7 @@
 (cram
  (deps
   %{bin:jacquard}
+  %{bin:jac}
   (source_tree ../../prelude)
   (source_tree ../../demos)
   (source_tree ../../corpus)

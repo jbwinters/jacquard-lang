@@ -74,9 +74,11 @@ in `src/` and `bin/` appears in this catalog.
 | E0603 | corrupt store file | hand-edited `names.jqd` or object file |
 | E0604 | unnameable target | naming a defterm group's whole hash |
 | E0605 | invalid name | `jacquard store rename s x "Bad Name"` |
-| E0606 | store directory does not exist | `jacquard diff a /nowhere` |
+| E0606 | diff source or store does not exist | `jacquard diff a /nowhere` |
 | E0607 | name bound to several kinds; needs --kind | renaming `abort` when it is both an effect and an op |
 | E0608 | unknown --kind value | `jacquard store rename --kind bogus` |
+| E0609 | invalid, mismatched, or unreadable diff operands | diffing a file against a store |
+| E0610 | diff source contains a top-level expression | diffing a runnable script instead of declarations |
 
 ## Prelude and grants (E07xx)
 
@@ -160,6 +162,7 @@ in `src/` and `bin/` appears in this catalog.
 |------|---------|---------|
 | W1201 | lowercase binding pattern shadows an in-scope constructor differing only in case | `match Up { | up -> ... }` |
 | W1202 | positional constructor pattern has more than four fields | `Snapshot(_, _, _, _, _)` |
+| W1203 | match scrutinee spans more than four source lines | manually bind the expression with `let`, then match on its name |
 
 The recovering `.jac` lexer emits an in-order invalid-token marker and continues;
 the strict lexer remains fail-fast. Malformed strings resynchronize at a closing

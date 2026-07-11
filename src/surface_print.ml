@@ -874,6 +874,23 @@ let pp_operation context lookup fmt (operation : Kernel.opspec) =
   Format.fprintf fmt " ->@ %a@]" (pp_ty context lookup) operation.op_result;
   pp_trailing context operation.smeta fmt
 
+let flat_type_decl_length lookup tname tvars constructors =
+  let buffer = Buffer.create 128 in
+  let formatter = Format.formatter_of_buffer buffer in
+  Format.pp_set_margin formatter 1_000_000;
+  Format.fprintf formatter "@[<h>type %a" (pp_named Surface_name.Type) tname;
+  List.iter (fun name -> Format.fprintf formatter " %a" (pp_named Surface_name.Tvar) name) tvars;
+  Format.fprintf formatter " =";
+  List.iter
+    (fun constructor ->
+      Format.fprintf formatter " | %a"
+        (pp_constructor ~leading:false canonical_context lookup)
+        constructor)
+    constructors;
+  Format.fprintf formatter "@]";
+  Format.pp_print_flush formatter ();
+  Buffer.length buffer
+
 let pp_decl context lookup fmt (decl : Kernel.decl) =
   pp_leading context decl.meta fmt;
   (match decl.it with
@@ -881,17 +898,20 @@ let pp_decl context lookup fmt (decl : Kernel.decl) =
       if not (printable_term_group bindings) then raise Bug_unsupported_surface_form;
       Format.fprintf fmt "@[<v>%a@]" (pp_sep "" (pp_binding context lookup)) bindings
   | Kernel.DefType { tname; tvars; cons } ->
-      Format.fprintf fmt "@[<hov 2>type %a" (pp_named Surface_name.Type) tname;
-      List.iter (fun name -> Format.fprintf fmt "@ %a" (pp_named Surface_name.Tvar) name) tvars;
-      Format.fprintf fmt "@ =@ @[<hv>";
+      let vertical = flat_type_decl_length lookup tname tvars cons > Format.pp_get_margin fmt () in
+      Format.fprintf fmt
+        (if vertical then "@[<v 2>type %a" else "@[<h>type %a")
+        (pp_named Surface_name.Type) tname;
+      List.iter (fun name -> Format.fprintf fmt " %a" (pp_named Surface_name.Tvar) name) tvars;
+      Format.fprintf fmt (if vertical then " =@," else " = ");
       List.iteri
         (fun index constructor ->
-          if index > 0 then Format.fprintf fmt "@ ";
+          if index > 0 then Format.fprintf fmt (if vertical then "@," else " ");
           pp_leading context constructor.Kernel.kmeta fmt;
           Format.fprintf fmt "| %a" (pp_constructor ~leading:false context lookup) constructor)
         cons;
       pp_inner context decl.meta fmt;
-      Format.fprintf fmt "@]@]"
+      Format.fprintf fmt "@]"
   | Kernel.DefEffect { ename; evars; ops } ->
       Format.fprintf fmt "@[<v 2>effect %a" (pp_named Surface_name.Effect) ename;
       List.iter (fun name -> Format.fprintf fmt " %a" (pp_named Surface_name.Tvar) name) evars;
