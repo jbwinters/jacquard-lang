@@ -1,0 +1,7 @@
+(defterm
+  ((binding simulate
+    ((tarrow
+      ((tref fleet) (tarrow () (row (eref net) (eref clock)) (tref int)))
+      (row)
+      (tref int)))
+    (lam ((pvar fleet) (pvar purchase)) (lit 1)))))

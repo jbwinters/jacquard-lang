@@ -1,0 +1,6 @@
+(defterm
+  ((binding recover-abort ()
+    (lam ((pvar body))
+      (handle (app (var body))
+        (ret (pvar value) (app (var some) (var value)))
+        (opclause abort () k (var none)))))))

@@ -1,0 +1,6 @@
+(defterm
+  ((binding first-child-head ()
+    (lam ((pvar value))
+      (match (var value)
+        (clause (pcon some (ptuple (pvar head) (pvar children))) (var head))
+        (clause (pwild) (lit 0)))))))

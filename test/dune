@@ -9,6 +9,11 @@
  (libraries jacquard corpus_support))
 
 (executable
+ (name gen_surface_twins)
+ (modules gen_surface_twins)
+ (libraries jacquard corpus_support))
+
+(executable
  (name gen_prelude_goldens)
  (modules gen_prelude_goldens)
  (libraries jacquard unix))
@@ -58,11 +63,12 @@
 (test
  (name test_jacquard)
  (modules
-  (:standard \ corpus_support gen_goldens gen_prelude_goldens gen_sig_goldens gen_diag_goldens gen_freeze_goldens gen_native_parity native_fuzz))
+  (:standard \ corpus_support gen_goldens gen_surface_twins gen_prelude_goldens gen_sig_goldens gen_diag_goldens gen_freeze_goldens gen_native_parity native_fuzz))
  (libraries jacquard corpus_support alcotest fmt qcheck-core qcheck-alcotest unix str)
  (deps
   (glob_files_rec ../corpus/*.jqd)
   (glob_files_rec ../corpus/*.jac)
+  (source_tree ../corpus/valid)
   (source_tree ../corpus/surface)
   (glob_files_rec ../corpus/*.expect)
   (glob_files_rec ../corpus/*.golden)

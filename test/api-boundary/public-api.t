@@ -1,6 +1,6 @@
 External clients can construct arbitrary guarded builtins.
 
-  $ JACQUARD_API="$DUNE_SOURCEROOT/_build/install/default/lib/jacquard"
+  $ JACQUARD_API="../../src/.jacquard.objs/public_cmi"
   $ cat > api_present.ml <<'EOF'
   > open Jacquard
   > let make (store : Store.t) : Eval.ctx = Eval.make_ctx store

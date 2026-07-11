@@ -29,6 +29,8 @@ let stub_entries =
       ("option", Resolve.KType);
       ("console", Resolve.KEffect);
       ("net", Resolve.KEffect);
+      ("clock", Resolve.KEffect);
+      ("fleet", Resolve.KType);
       ("map", Resolve.KTerm);
       ("list.map", Resolve.KTerm);
       ("cons", Resolve.KCon);
@@ -47,6 +49,11 @@ let read_file path =
 let jqd_files dir =
   Sys.readdir dir |> Array.to_list
   |> List.filter (fun f -> Filename.check_suffix f ".jqd")
+  |> List.sort String.compare
+
+let jac_files dir =
+  Sys.readdir dir |> Array.to_list
+  |> List.filter (fun f -> Filename.check_suffix f ".jac")
   |> List.sort String.compare
 
 (** Pipeline stages, in order; invalid corpus cases name the stage they must die at. *)
@@ -88,6 +95,75 @@ let staged_pipeline ~file src : (Canon.decl_hashes list, stage * Diag.t list) re
 (** [staged_pipeline] with the stage dropped. *)
 let pipeline ~file src : (Canon.decl_hashes list, Diag.t list) result =
   Result.map_error snd (staged_pipeline ~file src)
+
+(** Parse and validate a bootstrap file into kernel tops. *)
+let bootstrap_tops ~file src : (Kernel.top list, stage * Diag.t list) result =
+  match Reader.parse_string ~file src with
+  | Error ds -> Error (Parse, ds)
+  | Ok forms ->
+      let rec go acc = function
+        | [] -> Ok (List.rev acc)
+        | form :: rest -> (
+            match Kernel.of_form form with
+            | Error ds -> Error (Validate, ds)
+            | Ok top -> go (top :: acc) rest)
+      in
+      go [] forms
+
+(** Strictly parse and lower a surface file, then pass every lowered top through the generic kernel
+    validator. This keeps corpus twins on the same validation boundary as bootstrap files. *)
+let surface_tops ~file src : (Kernel.top list, stage * Diag.t list) result =
+  let recovered = Surface_parse.recover_string ~file src in
+  match Surface_parse.strict recovered with
+  | Error ds -> Error (Parse, ds)
+  | Ok parsed -> (
+      match Surface_lower.lower_tops parsed with
+      | Error ds -> Error (Validate, ds)
+      | Ok tops ->
+          let rec validate acc = function
+            | [] -> Ok (List.rev acc)
+            | top :: rest -> (
+                match Kernel.of_form (Kernel.to_form top) with
+                | Error ds -> Error (Validate, ds)
+                | Ok validated -> validate (validated :: acc) rest)
+          in
+          validate [] tops)
+
+(** Resolve and hash kernel tops in source order. Failures retain the pipeline stage for actionable
+    twin diagnostics. *)
+let resolve_and_hash tops : (Canon.decl_hashes list, stage * Diag.t list) result =
+  let rec go acc = function
+    | [] -> Ok (List.rev acc)
+    | top :: rest -> (
+        match Resolve.resolve stub_names top with
+        | Error ds -> Error (Resolve, ds)
+        | Ok resolved -> (
+            match Canon.hash_top resolved with
+            | Error ds -> Error (Hashing, ds)
+            | Ok hashes -> go (hashes :: acc) rest))
+  in
+  go [] tops
+
+(** Stable, path-independent identity lines for comparing twin pipelines. *)
+let identity_lines hashes =
+  List.concat
+    (List.mapi
+       (fun index { Canon.decl_hash; named } ->
+         Printf.sprintf "%d %s" index (Hash.to_hex decl_hash)
+         :: List.map
+              (fun (name, hash) -> Printf.sprintf "%d:%s %s" index name (Hash.to_hex hash))
+              named)
+       hashes)
+
+(** Render a deterministic mismatch report containing both source paths and both complete identity
+    sets. This function does not decide whether the sets match. *)
+let twin_mismatch_message ~bootstrap_path ~bootstrap_hashes ~surface_path ~surface_hashes =
+  let render path hashes =
+    Printf.sprintf "%s\n  %s" path (String.concat "\n  " (identity_lines hashes))
+  in
+  Printf.sprintf "surface twin hash mismatch:\n%s\n%s"
+    (render bootstrap_path bootstrap_hashes)
+    (render surface_path surface_hashes)
 
 (** Parse a corpus [.expect] sidecar: line 1 [stage: <parse|validate|resolve|hash|check>], line 2
     [code: E0xxx]. Returns the raw stage name; runners map it. *)

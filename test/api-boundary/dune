@@ -1,3 +1,4 @@
 (cram
  (deps
-  ../../src/jacquard.cma))
+  ../../src/jacquard.cma
+  (glob_files ../../src/.jacquard.objs/public_cmi/*.cmi)))

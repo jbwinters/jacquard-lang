@@ -1,0 +1,5 @@
+(defterm
+  ((binding increment-all ()
+    (lam ((pvar items))
+      (app (var list.map) (var items)
+        (lam ((pvar item)) (app (var add) (var item) (lit 1))))))))
