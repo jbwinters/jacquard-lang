@@ -103,11 +103,11 @@ both branches:
 
 ## 8. Capability grants
 
-`demos/m1-gated.jac` - `eval` is a library effect; nothing runs code without the grant:
+`demos/basics/m1-gated.jac` - `eval` is a library effect; nothing runs code without the grant:
 
 ```console
-$ dune exec jacquard -- run demos/m1-gated.jac            # E0814 refusal, exit 3
-$ dune exec jacquard -- run demos/m1-gated.jac --allow eval
+$ dune exec jacquard -- run demos/basics/m1-gated.jac            # E0814 refusal, exit 3
+$ dune exec jacquard -- run demos/basics/m1-gated.jac --allow eval
 42
 ```
 
@@ -116,14 +116,14 @@ manifest; `dune exec jacquard -- check FILE --manifest net,console` audits it wi
 
 ## 9. Probabilistic programming
 
-`demos/m3-two-coins.jac` - sample/observe are ordinary ops of the `dist` effect; inference
+`demos/inference/m3-two-coins.jac` - sample/observe are ordinary ops of the `dist` effect; inference
 algorithms are handlers:
 
 ```console
-$ dune exec jacquard -- infer enumerate demos/m3-two-coins.jac
+$ dune exec jacquard -- infer enumerate demos/inference/m3-two-coins.jac
 0.666667  true
 0.333333  false
-$ dune exec jacquard -- infer lw demos/m3-two-coins.jac --seed 42 --samples 100000
+$ dune exec jacquard -- infer lw demos/inference/m3-two-coins.jac --seed 42 --samples 100000
 0.667898  true
 0.332102  false
 ```

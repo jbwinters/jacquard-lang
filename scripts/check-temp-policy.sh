@@ -8,7 +8,8 @@ cd "$ROOT"
 root_tmp="/""tmp"
 path_token="(^|[=:[:space:]\"'{}-])${root_tmp}(/|[[:space:]\"'{}]|$)"
 if git grep -n -E "$path_token" -- ':(glob).github/workflows/*.yml' \
-  ':(glob)scripts/**/*.sh' ':(glob)runtime/*.sh' ':(glob)demos/*.sh'
+  ':(glob)scripts/**/*.sh' ':(glob)runtime/*.sh' ':(glob)demos/*.sh' \
+  ':(glob)demos/**/*.sh'
 then
   echo "Jacquard automation must keep temporary artifacts out of the root temp directory" >&2
   exit 1

@@ -68,20 +68,22 @@ JACQUARD_RELEASE_OUT=$PWD/.scratch/my-release \
 
 | transcript | command |
 |---|---|
-| M1 factorial/choose/eval | public `.jac` via `sh demos/m1.sh`; paired `.jqd` parity in `dune runtest test/cli/demos.t` |
-| clarifying-question VOI | `sh demos/clarifying-question.sh` and `dune runtest test/cli/demos.t` |
-| agent dream mode | `sh demos/agent-dream.sh` and `dune runtest test/cli/demos.t` |
-| ambiguity-preserving extraction | `sh demos/ambiguity-pipeline.sh` and `dune runtest test/cli/demos.t` |
-| Warp-backed demo checks | `sh demos/showcase-warp-tests.sh` and `dune runtest test/cli/demos.t` |
-| hostile manifest | `sh demos/m4-hostile.sh` and `dune runtest test/cli/hostile-demo.t` |
-| M3 same model/different handler | `sh demos/m3.sh` and `dune runtest test/cli/infer.t` |
-| Bayesian program repair | public `.jac` plus bootstrap Warp fixture via `sh demos/repair.sh` and `dune runtest test/cli/repair.t` |
+| M1 factorial/choose/eval | public `.jac` via `sh demos/basics/m1.sh`; paired `.jqd` parity in `dune runtest test/cli/demos.t` |
+| clarifying-question VOI | `sh demos/inference/clarifying-question.sh` and `dune runtest test/cli/demos.t` |
+| agent dream mode | `sh demos/worlds/agent-dream.sh` and `dune runtest test/cli/demos.t` |
+| ambiguity-preserving extraction | `sh demos/inference/ambiguity-pipeline.sh` and `dune runtest test/cli/demos.t` |
+| Warp-backed demo checks | `sh demos/tooling/showcase-warp-tests.sh` and `dune runtest test/cli/demos.t` |
+| hostile manifest | `sh demos/worlds/m4-hostile.sh` and `dune runtest test/cli/hostile-demo.t` |
+| M3 same model/different handler | `sh demos/inference/m3.sh` and `dune runtest test/cli/infer.t` |
+| Bayesian program repair | public `.jac` plus bootstrap Warp fixture via `sh demos/tooling/repair.sh` and `dune runtest test/cli/repair.t` |
 | Surface/bootstrap carrier parity | `dune runtest test/cli/demos.t test/cli/infer.t test/cli/surface.t` |
 | formatter/diff/errors/tools | `dune runtest test/cli/diff.t test/cli/tools.t test/cli/tutorial.t` |
 | stdlib smoke | `dune runtest test/cli/demos.t test/cli/world.t` |
 | Warp smoke | `dune runtest test/cli/warp.t test/cli/props.t` |
 | gauntlet | `dune runtest test/gauntlet` and selected `gauntlet-*` Alcotest suites |
 | executable escrow | `dune runtest test/cli/escrow.t` |
+| release-risk case study | `sh demos/case-studies/release-risk/run.sh` and `dune runtest test/cli/case-studies.t` |
+| Stormglass incident war game | `sh demos/case-studies/stormglass/run.sh` and `dune runtest test/cli/case-studies.t` |
 
 Generated transcript files are not source artifacts; they live under
 `.scratch/release/0.1/transcripts/` by default. `.scratch/` is ignored by git.

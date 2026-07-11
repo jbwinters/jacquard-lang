@@ -1,3 +1,1 @@
-; M1 demo 3: gated eval. Runs only under --allow eval; otherwise the
-; check refuses the program (exit 3) — capability security at work.
-(app (var eval-code) (quote (app (var mul) (lit 6) (lit 7))))
+basics/m1-gated.jqd

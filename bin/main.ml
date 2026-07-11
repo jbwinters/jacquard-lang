@@ -930,13 +930,16 @@ let test_cmd files allows prelude cache_dir no_cache coverage seed samples exhau
           (* test files are declarations only: a top-level expression is a mistake *)
           let loaded = ref [] in
           let load_file file =
-            match Reader.parse_string ~file (read_file file) with
+            match
+              parse_tops ~syntax:Auto ~names:(Store.names_view store) ~file (read_file file)
+            with
             | Error ds -> Error ds
-            | Ok forms ->
+            | Ok (tops, warnings) ->
+                print_warnings warnings;
                 let rec go = function
                   | [] -> Ok ()
-                  | f :: rest -> (
-                      match Kernel.of_form f with
+                  | parsed :: rest -> (
+                      match validate_parsed_top parsed with
                       | Error ds -> Error ds
                       | Ok (Kernel.Expr _) ->
                           Error
@@ -957,7 +960,7 @@ let test_cmd files allows prelude cache_dir no_cache coverage seed samples exhau
                                   loaded := d :: !loaded;
                                   go rest)))
                 in
-                go forms
+                go tops
           in
           let rec load_all = function
             | [] -> Ok ()

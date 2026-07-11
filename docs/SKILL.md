@@ -141,7 +141,7 @@ Everything below is real, runnable style (compare `demos/` and `prelude/`).
 ```
 
 Multi-shot is load-bearing: the enumeration handler resumes once per element
-of a distribution's support (see `demos/m1-choose.jac` for the public
+of a distribution's support (see `demos/basics/m1-choose.jac` for the public
 version). Tuples: `(tuple)` is unit; `(tuple a b)` pairs. Pattern `(ptuple ...)`
 destructures them; `(pcon mk-pair (pvar x) (pvar p))` destructures constructors.
 
@@ -184,12 +184,12 @@ One type, one effect, zero kernel forms (`prelude/06-dist.jqd`):
   in-language, `dist.enumerate` (exact, normalized, unmerged) or
   `dist.sample-lw` (seeded likelihood weighting); at the CLI,
   `jacquard infer enumerate` / `jacquard infer lw` (these merge equal outcomes).
-  Same model hash, different handler — that's `demos/m3.sh`.
+  Same model hash, different handler — that's `demos/inference/m3.sh`.
 - Merge equal outcomes explicitly: `dist.tally table (app (var mk-eq) (var code.eq?))`
   — tallying asks for its `Eq` honestly.
 - Conditioning idiom: `observe (bernoulli w) true` where `w` is 1.0/0.0 —
-  impossible branches prune to mass zero (see `demos/synthesis.jac`,
-  `demos/repair.jac`).
+  impossible branches prune to mass zero (see `demos/inference/synthesis.jac`,
+  `demos/tooling/repair.jac`).
 - `categorical` weights are **relative**; enumeration normalizes at the end.
 - Gotchas: all-branches-impossible yields `+nan.0` weights in-language (the
   CLI's `jacquard infer enumerate` reports E0901 instead); `observe` reaching the
@@ -203,13 +203,13 @@ One type, one effect, zero kernel forms (`prelude/06-dist.jqd`):
   `var`, `lit`, `pvar` — return `none`), `code.of-int/to-int`,
   `code.of-text/to-text`, `code.eq?` (metadata-erased structural equality),
   `code.diff` (smallest disagreeing subtrees, as text). A full single-edit
-  AST mutation walker in pure Jacquard is in `demos/repair.jac`.
+  AST mutation walker in pure Jacquard is in `demos/tooling/repair.jac`.
 - Running constructed code is the **eval capability**:
   `(app (var eval-code) c)` needs `--allow eval`; it validates, resolves
   against the store, and runs — at root authority (caveat above).
 - `jacquard hash` prints canonical hashes; `jacquard store add/rename` + `jacquard diff`
   show renames as renames and reformatting as nothing. Fixtures, caches, and
-  approval workflows (see `demos/escrow/APPROVAL`) all pin hashes.
+  approval workflows (see `demos/worlds/escrow/APPROVAL`) all pin hashes.
 
 ## The prelude (stdlib), in rings
 
@@ -274,7 +274,8 @@ Read `docs/warp-testing.md`; the API is `prelude/15-warp.jqd` + `16-gen.jqd`.
   (thesis first, then mechanics; CAPS for the one load-bearing word). Match
   it. Files that are demos end with a `; --- demo driver ---` section of
   top-level expressions; shell runners strip it with awk to reuse definitions
-  in Warp suites (pattern: `demos/showcase-warp-tests.sh`, `demos/repair.sh`).
+  in Warp suites (pattern: `demos/tooling/showcase-warp-tests.sh`,
+  `demos/tooling/repair.sh`).
 - **Everything public is pinned**: demo outputs in `test/cli/*.t` cram
   transcripts (run via `dune runtest`; promote intentionally, review diffs),
   hashes in `corpus/golden/` (regen: `dune exec test/gen_goldens.exe`, then

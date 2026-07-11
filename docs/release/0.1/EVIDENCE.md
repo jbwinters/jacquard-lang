@@ -42,9 +42,10 @@ find ../../../test -name '*.t' | wc -l
 Current inventory:
 
 - Alcotest/QCheck cases: `554`
-- Cram transcript files: `30`
+- Cram transcript files: `31`
 - Gauntlet cram files: `4`
 - Escrow transcript: `test/cli/escrow.t`
+- Larger case-study transcript: `test/cli/case-studies.t`
 
 `test/test_surface_laws.ml` validates the two evolving counts above against the
 compiled Alcotest list and the recursive `test/**/*.t` inventory, and requires
@@ -91,6 +92,8 @@ The claim matrix is [CLAIMS.md](CLAIMS.md). The short version:
   `test/test_gauntlet_dist.ml`, and `test/cli/infer.t`
 - Warp/dry-run/replay/dist-diff claims are pinned by `test/cli/warp.t`,
   `test/cli/tools.t`, `test/test_replay.ml`, and `test/cli/escrow.t`
+- product-scale alternate-world examples are pinned by
+  `test/cli/case-studies.t`, including exhaustive 18- and 27-world Warp runs
 
 ## Claims Not Made
 

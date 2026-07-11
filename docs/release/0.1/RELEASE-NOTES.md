@@ -11,6 +11,8 @@ This release candidate includes:
 - exact discrete enumeration and seeded likelihood weighting
 - content-addressed definitions, semantic diff, and metadata-erased identity
 - Warp testing, dry-run, record/replay, fault exploration, and semantic caching
+- organized runnable demos, including release-risk and Stormglass case studies
+  with sampled and exhaustive Warp evidence
 - native binaries for Linux x86-64, macOS Intel, and macOS Apple Silicon
 
 Install:

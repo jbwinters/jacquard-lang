@@ -3,6 +3,24 @@ cache, and semantic coverage.
 
   $ export JACQUARD_PRELUDE=$PWD/../../prelude
 
+Warp accepts the public surface syntax selected by the `.jac` extension. The
+test command still enforces its declarations-only boundary after lowering.
+
+  $ cat > surface-suite.jac <<'JACQUARD'
+  > double(n) = mul(n, 2)
+  > surface-case =
+  >   Case("surface test", fn () ->
+  >     check.eq(double(3), 6, int.eq, int.show, "double"))
+  > JACQUARD
+  $ jacquard test surface-suite.jac --seed 7 --no-cache
+  PASS surface-case/surface test (1 check)
+  1 passed, 0 failed, 0 skipped, 0 refused
+
+  $ printf 'answer = 42\nanswer\n' > surface-oops.jac
+  $ jacquard test surface-oops.jac
+  error[E1001]: surface-oops.jac: test files hold declarations only; found a top-level expression
+  [1]
+
   $ cat > suite.jqd <<'JACQUARD'
   > (defterm ((binding shout ()
   >   (lam ((pvar s)) (app (var text.concat) (var s) (lit "!"))))))

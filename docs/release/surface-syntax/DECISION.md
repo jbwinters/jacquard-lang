@@ -164,8 +164,8 @@ EOF
 ```
 
 Environment: Linux x86_64, repository-local OCaml 5.1.1 opam switch, zsh, and
-`TMPDIR=/home/josh/dev/friendmachine/research/weft-lang/.scratch/tmp`. Each row
-runs from the repository root unless its command starts with `cd`.
+`TMPDIR=$PWD/.scratch/tmp`. Each row runs from the repository root unless its
+command starts with `cd`.
 
 - Historical SS.21 final gate start UTC: `2026-07-11T17:47:30Z`
 - SS.22 successor verification completed UTC: `2026-07-11T19:23:22Z`

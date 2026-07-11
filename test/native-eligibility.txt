@@ -7,17 +7,17 @@
 # eval stays on the interpreter tier (E1102 policy, plan task 73):
 corpus/valid/eval-gated.jqd|uses eval, which requires the interpreter tier
 corpus/sigs/11-eval-fn.jqd|uses eval, which requires the interpreter tier
-demos/m1-gated.jqd|uses eval, which requires the interpreter tier
+demos/basics/m1-gated.jqd|uses eval, which requires the interpreter tier
 #
 # repair's eval-driver acts keep the whole demo on the interpreter; its
 # pure mutation machinery runs natively as gauntlet twin g31 (task 73):
-demos/repair.jqd|uses eval, which requires the interpreter tier
+demos/tooling/repair.jqd|uses eval, which requires the interpreter tier
 #
 # intrinsics not yet ported (docs/native-intrinsics.md tracks the set):
-demos/agent-dream.jqd|builtin `text.contains?` is not yet implemented natively
+demos/worlds/agent-dream.jqd|builtin `text.contains?` is not yet implemented natively
 #
 # companion files: decl-dependent on their sibling demo, not standalone
 # (the interpreter refuses them identically at check time):
-demos/repair-warp-tests.jqd|error[E0301]: unknown name
-demos/showcase-warp-tests.jqd|error[E0301]: unknown name
-demos/escrow/main.jqd|error[E0301]: unknown name `escrow.workflow`
+demos/tooling/repair-warp-tests.jqd|error[E0301]: unknown name
+demos/tooling/showcase-warp-tests.jqd|error[E0301]: unknown name
+demos/worlds/escrow/main.jqd|error[E0301]: unknown name `escrow.workflow`

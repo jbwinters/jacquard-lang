@@ -51,6 +51,11 @@ program does not typecheck. `WorldTest` is where world rows are legal, and the
 unit/integration split stops being a convention enforced in code review and becomes
 two types the compiler distinguishes.
 
+Test files use the same extension-based syntax selection as the rest of the
+CLI: `jac test suite.jac` reads public surface syntax, while `suite.jqd` remains
+available for kernel/debug fixtures. Both routes are declaration-only; a
+top-level expression fails with `E1001` before discovery.
+
 One consequence stated as policy: the runner never retries a `Test`. A hermetic
 failure is real by construction, and retry loops exist only in the `WorldTest`
 lane, where the row admits an unreliable world.

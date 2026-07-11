@@ -1,0 +1,12 @@
+; The M3 flagship model (plan W4.5): two fair coins, observe at least one
+; heads (the Bernoulli(1.0) conditioning trick), posterior of the first coin.
+; Exact answer: P(true) = 2/3, P(false) = 1/3.
+;
+; The same file drives BOTH inference algorithms; only the handler changes:
+;   jacquard infer enumerate demos/m3-two-coins.jqd
+;   jacquard infer lw demos/m3-two-coins.jqd --seed 42 --samples 100000
+(let nonrec (pvar c1) (app (var sample) (app (var bernoulli) (lit 0.5)))
+  (let nonrec (pvar c2) (app (var sample) (app (var bernoulli) (lit 0.5)))
+    (let nonrec (pwild)
+      (app (var observe) (app (var bernoulli) (lit 1.0)) (app (var bool.or) (var c1) (var c2)))
+      (var c1))))

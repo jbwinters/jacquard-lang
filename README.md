@@ -137,17 +137,17 @@ step still runs (it counts eight candidate patches) and then the demo refuses
 until you grant the rest:
 
 ```console
-$ jac run demos/repair.jac
+$ jac run demos/tooling/repair.jac
 8
 error[E0814]: this program requires the `eval` effect, which is not granted (performed via `posterior-over-patches`)
   hint: grant it with --allow eval, or handle the effect in the program
-$ jac run demos/repair.jac --allow eval
+$ jac run demos/tooling/repair.jac --allow eval
 ```
 
 Under the grant, one failing test leaves two surviving patches: the intended
 fix at 0.75 and a patch that games the suite at 0.25. Adding one regression
 test prunes the impostor, and the surviving fix prints as a one-line semantic
-diff: `- sub + add`. See `sh demos/repair.sh` for the full transcript.
+diff: `- sub + add`. See `sh demos/tooling/repair.sh` for the full transcript.
 
 ## Install A Release Binary
 
@@ -248,7 +248,7 @@ Many direct CLI commands need the prelude. From the repository root:
 
 ```bash
 export JACQUARD_PRELUDE=$PWD/prelude
-opam exec -- dune exec jac -- run demos/m1-fact.jac
+opam exec -- dune exec jac -- run demos/basics/m1-fact.jac
 ```
 
 The main commands are:
@@ -286,7 +286,7 @@ where the authority model lives).
 ```bash
 export JACQUARD_PRELUDE=$PWD/prelude
 export JACQUARD_RUNTIME=$PWD/runtime
-jac build demos/word-count.jqd -o word-count
+jac build demos/tooling/word-count.jqd -o word-count
 echo "some words some" | ./word-count --allow console
 ```
 
@@ -313,40 +313,45 @@ Start with these from the repo root:
 
 ```bash
 export JACQUARD_PRELUDE=$PWD/prelude
-opam exec -- sh demos/m1.sh
-opam exec -- sh demos/m3.sh
-opam exec -- sh demos/clarifying-question.sh
-opam exec -- sh demos/agent-dream.sh
-opam exec -- sh demos/ambiguity-pipeline.sh
-opam exec -- sh demos/showcase-warp-tests.sh
-opam exec -- sh demos/repair.sh
-opam exec -- sh demos/m4-hostile.sh
+opam exec -- sh demos/case-studies/stormglass/run.sh
+opam exec -- sh demos/case-studies/release-risk/run.sh
+opam exec -- sh demos/basics/m1.sh
+opam exec -- sh demos/inference/m3.sh
+opam exec -- sh demos/worlds/agent-dream.sh
+opam exec -- sh demos/tooling/repair.sh
 ```
 
 What they show:
 
-- `m1.sh`: factorial, multi-shot choice, and gated eval.
-- `m3.sh`: one model under exact enumeration and likelihood weighting; same
+- `case-studies/stormglass/`: one checkout policy under simulated network and
+  clock laws, exact incident forecasts, and Warp proofs over all 27 worlds.
+- `case-studies/release-risk/`: one release policy under concrete and
+  probabilistic telemetry, plus a Warp safety proof over all 18 worlds.
+- `basics/m1.sh`: factorial, multi-shot choice, and gated eval.
+- `inference/m3.sh`: one model under exact enumeration and likelihood weighting; same
   model hash, different inference handler.
-- `clarifying-question.sh`: an agent computes whether asking the user a
+- `inference/clarifying-question.sh`: an agent computes whether asking the user a
   question is worth the interruption (value of information).
-- `agent-dream.sh`: one policy under scripted and probabilistic world handlers.
-- `ambiguity-pipeline.sh`: an extraction pipeline that keeps its uncertainty;
+- `worlds/agent-dream.sh`: one policy under scripted and probabilistic world handlers.
+- `inference/ambiguity-pipeline.sh`: an extraction pipeline that keeps its uncertainty;
   the user's click becomes an `observe`.
-- `showcase-warp-tests.sh`: Warp checks for the clarifying-question,
+- `tooling/showcase-warp-tests.sh`: Warp checks for the clarifying-question,
   dream-mode, and ambiguity demos.
-- `repair.sh`: program repair as Bayesian inference; a bug report is an
+- `tooling/repair.sh`: program repair as Bayesian inference; a bug report is an
   observation over computed single-edit patches, and the most likely patch
   prints as a one-line semantic diff.
-- `m4-hostile.sh`: generated-looking code that reaches for `net`; signatures and
+- `worlds/m4-hostile.sh`: generated-looking code that reaches for `net`; signatures and
   manifests expose the authority.
-- `demos/escrow/`: product-shaped generated workflow with manifest, dry-run,
+- `demos/worlds/escrow/`: product-shaped generated workflow with manifest, dry-run,
   Warp tests, fault exploration, replay, semantic diff, and approval by hash.
+
+The previous flat paths remain compatibility symlinks, so existing commands do
+not break. The full organized catalog is in `demos/README.md`.
 
 All public demo outputs are pinned by cram tests (recorded command-line
 transcripts that fail on any drift), especially `test/cli/demos.t`,
 `test/cli/hostile-demo.t`, `test/cli/escrow.t`, `test/cli/showcase.t`, and
-`test/cli/repair.t`.
+`test/cli/repair.t`, plus `test/cli/case-studies.t` for the larger applications.
 
 ## Release Evidence
 

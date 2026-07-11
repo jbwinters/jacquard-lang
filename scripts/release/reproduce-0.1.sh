@@ -50,17 +50,20 @@ capture version _build/default/bin/main.exe --version
 
 capture installer-smoke scripts/release/smoke-installer.sh linux-x86_64
 
-capture m1 env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/m1.sh
-capture m3 env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/m3.sh
-capture clarifying-question env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/clarifying-question.sh
-capture agent-dream env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/agent-dream.sh
-capture ambiguity-pipeline env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/ambiguity-pipeline.sh
-capture demo-warp-tests env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/showcase-warp-tests.sh
-capture repair env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/repair.sh
-capture hostile-manifest env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/m4-hostile.sh
+capture m1 env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/basics/m1.sh
+capture m3 env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/inference/m3.sh
+capture clarifying-question env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/inference/clarifying-question.sh
+capture agent-dream env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/worlds/agent-dream.sh
+capture ambiguity-pipeline env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/inference/ambiguity-pipeline.sh
+capture demo-warp-tests env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/tooling/showcase-warp-tests.sh
+capture repair env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/tooling/repair.sh
+capture hostile-manifest env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/worlds/m4-hostile.sh
+capture release-risk env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/case-studies/release-risk/run.sh
+capture stormglass env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/case-studies/stormglass/run.sh
 
 capture cli-and-gauntlet opam exec -- dune runtest \
   test/cli/demos.t \
+  test/cli/case-studies.t \
   test/cli/diff.t \
   test/cli/dist.t \
   test/cli/escrow.t \
