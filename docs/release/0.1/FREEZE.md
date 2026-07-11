@@ -1,7 +1,7 @@
 # Jacquard Core 0.1 Freeze Surface
 
-Candidate base: `738dc8e`  
-Evidence branch predecessor: `7d7733f`  
+Candidate base: `738dc8e`
+Evidence branch predecessor: `7d7733f`
 CLI version: `0.1.0`
 
 This file records the surfaces treated as frozen for the 0.1 release
