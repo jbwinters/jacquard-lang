@@ -76,8 +76,13 @@
   (glob_files ../src/*.ml)
   (glob_files ../bin/*.ml)
   ../docs/errors.md
+  ../docs/README.md
+  ../docs/release/surface-syntax/DECISION.md
+  ../docs/release/surface-syntax/FOLLOWUPS.md
+  ../docs/release/surface-syntax/MANIFEST.sha256
   ../docs/stdlib.md
   ../docs/surface-syntax.md
   ../docs/tutorial.md
   ../docs/warp-testing.md
+  ../scripts/release/check-surface-syntax-manifest.sh
   cli/escrow.t))

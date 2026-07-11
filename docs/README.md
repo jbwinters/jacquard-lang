@@ -45,6 +45,15 @@ Read these together when judging whether the release candidate is credible:
 - `release/0.1/LIMITS.md`: non-goals and known caveats.
 - `release/0.1/DECISION.md`: RC decision memo.
 
+## Post-0.1 Surface Syntax Evidence
+
+- `release/surface-syntax/DECISION.md`: SS.21 advertise/not-advertise decision,
+  L1-L7 status, D34-D40 conformance, caveats, and reproduction commands.
+- `release/surface-syntax/FOLLOWUPS.md`: durable D36/D38/D39 and Tier-F
+  follow-up scope outside the surface release gate.
+- `release/surface-syntax/MANIFEST.sha256`: reconstructible base-plus-overlay
+  evidence context, validated by the release manifest checker.
+
 ## Maintenance Notes
 
 - `native-compilation.md`: native compilation notes and boundaries.

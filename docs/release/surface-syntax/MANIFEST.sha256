@@ -1,0 +1,12 @@
+# Surface syntax SS.21 evidence overlay
+# Base commit: 07bf8aa71d197603c3830bd595ef7dd1e33e6bee
+# The manifest excludes itself.
+
+# Evidence overlay
+11a77c80006ae1ad41898376c85590e3382eadc9d9f622f2ea8dc6fdc6953208  docs/README.md
+1d8ba2e7f2a8dc3e70a68b6c2c338a28df6f0e9360906d5a6c62a80403533721  docs/release/surface-syntax/DECISION.md
+9a10400008afd22c1673205d5bd5631f5a6a04950cf07ebc49184da499ea48f8  docs/release/surface-syntax/FOLLOWUPS.md
+a928d23438386fc361956115b8554f6856143eb0172e54128590d5cb1d78132a  scripts/release/check-surface-syntax-manifest.sh
+7adf6f65f9ca35d51a707a4b66af0d73bda29320a818555baa76fbf0bad130fd  test/cli/surface.t
+663b92acbc252c62e1ef98beae1462ec00487f685d47763c5a3f623d53c8aa86  test/dune
+82b957e82dddc4699fbb75e3336f0616c9b48bc759415d75b9cf0219f9be64c0  test/test_surface_laws.ml

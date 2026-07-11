@@ -15,6 +15,34 @@ public pure demo and the bare-top-level-expression demo both execute directly.
   $ jac hash ../../demos/surface-expression.jac | sed 's/[0-9a-f]\{64\}/HASH/'
   0 HASH
 
+D40 executes every bare top-level expression in document order while declarations before, between,
+and after expressions remain available to the following items. Stdout and exit are exact.
+
+  $ cat > ordered-top-level.jac <<'EOF'
+  > first = 40
+  > first
+  > second = add(first, 1)
+  > second
+  > third = add(second, 1)
+  > third
+  > EOF
+  $ jac run ordered-top-level.jac > ordered.out 2> ordered.err; status=$?; cat ordered.out; cat ordered.err; echo "exit:$status"
+  40
+  41
+  42
+  exit:0
+
+D36 labeled fields retain syntax and printing, but accessor definitions are not generated at this
+gate. The exact current evidence is E0301 and exit 1; the durable acceptance target is in FOLLOWUPS.
+
+  $ cat > no-generated-accessor.jac <<'EOF'
+  > type Pair = | Pair(left: Int, right: Int)
+  > pair.left(Pair(1, 2))
+  > EOF
+  $ jac run no-generated-accessor.jac > accessor.out 2>&1; status=$?; cat accessor.out; echo "exit:$status"
+  no-generated-accessor.jac:2:1-10: error[E0301]: unknown name `pair.left`
+  exit:1
+
 The surface formatter preserves trivia, applies B1/B5, and is idempotent.
 
   $ cat > format.jac <<'EOF'
