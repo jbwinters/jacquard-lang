@@ -1,0 +1,9 @@
+; Runtime erasure puts Int in the middle variadic slot. Arguments on both
+; sides are allocated and owned by join at the fatal boundary.
+(handle
+  (app (var text.join)
+    (app (var text.concat) (lit "first-") (lit "owned"))
+    (app (var get))
+    (app (var text.concat) (lit "last-") (lit "owned")))
+  (ret (pvar x) (var x))
+  (opclause get () k (app (var k) (lit 5))))

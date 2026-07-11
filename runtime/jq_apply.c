@@ -8,6 +8,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 static void fail(const char *fmt, ...) __attribute__((noreturn, format(printf, 1, 2)));
 static void fail(const char *fmt, ...) {
@@ -42,6 +43,14 @@ jq_value jq_apply(JQ_PARAMS) {
     /* builtins validate their own arguments (interpreter type_err parity);
        fn is static, its drop is a no-op */
     jq_drop(fn);
+    if (info->arity == UINT32_MAX) {
+      if (strcmp(info->name, "text.join-variadic-v1") == 0)
+        return jq_i_text_join_variadic_v1(rt, args, n);
+      fail("unknown variadic builtin: %s", info->name);
+    }
+    if (info->arity != n)
+      fail("arity mismatch: builtin %s expects %u argument(s), got %u",
+           info->name, info->arity, n);
     return info->fn(rt, args);
   }
   case JQ_CONSTRUCTOR: {

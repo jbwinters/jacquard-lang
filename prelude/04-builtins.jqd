@@ -13,11 +13,11 @@
 
 (defterm ((binding lt () (quote (builtin-marker lt)))))
 
-(defterm ((binding add-real () (quote (builtin-marker add-real)))))
+(defterm ((binding real.add () (quote (builtin-marker add-real)))))
 
-(defterm ((binding mul-real () (quote (builtin-marker mul-real)))))
+(defterm ((binding real.mul () (quote (builtin-marker mul-real)))))
 
-(defterm ((binding div-real () (quote (builtin-marker div-real)))))
+(defterm ((binding real.div () (quote (builtin-marker div-real)))))
 
 (defterm ((binding int-compare () (quote (builtin-marker int-compare)))))
 
@@ -29,9 +29,15 @@
 
 (defterm ((binding mod () (quote (builtin-marker mod)))))
 
-(defterm ((binding sub-real () (quote (builtin-marker sub-real)))))
+(defterm ((binding real.sub () (quote (builtin-marker sub-real)))))
 
-(defterm ((binding lt-real () (quote (builtin-marker lt-real)))))
+(defterm ((binding real.lt? () (quote (builtin-marker lt-real)))))
+
+(defterm ((binding real.gt? () (quote (builtin-marker real.gt?)))))
+
+(defterm ((binding real.gte? () (quote (builtin-marker real.gte?)))))
+
+(defterm ((binding real.lte? () (quote (builtin-marker real.lte?)))))
 
 ; code reflection (W6.6): build and destructure quote payloads from Jacquard.
 ; The codec layer is these six natives plus ordinary pattern matching.

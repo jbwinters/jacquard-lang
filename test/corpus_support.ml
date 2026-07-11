@@ -33,6 +33,15 @@ let stub_entries =
       ("fleet", Resolve.KType);
       ("map", Resolve.KTerm);
       ("list.map", Resolve.KTerm);
+      ("text.join", Resolve.KTerm);
+      ("int.gt?", Resolve.KTerm);
+      ("int.gte?", Resolve.KTerm);
+      ("int.lt?", Resolve.KTerm);
+      ("int.lte?", Resolve.KTerm);
+      ("real.gt?", Resolve.KTerm);
+      ("real.gte?", Resolve.KTerm);
+      ("real.lt?", Resolve.KTerm);
+      ("real.lte?", Resolve.KTerm);
       ("cons", Resolve.KCon);
       ("nil", Resolve.KCon);
       ("eval-code", Resolve.KOp);

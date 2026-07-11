@@ -2,7 +2,7 @@
 ; ord, and dist.sample-lw discharges dist through the row (SL.5-SL.7 review pin).
 (defterm ((binding csv-swap ()
   (lam ((pvar s))
-    (app (var text.join) (app (var text.split) (var s) (lit ",")) (lit ";"))))))
+    (app (var text.join-list) (app (var text.split) (var s) (lit ",")) (lit ";"))))))
 (defterm ((binding index-of-names ()
   (lam ((pvar names))
     (app (var list.fold) (var names) (app (var map.empty) (var text.ord))

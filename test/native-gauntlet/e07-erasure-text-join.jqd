@@ -1,0 +1,8 @@
+; The effect result type unifies with Text at the call site, while the handler
+; resumes with Int through the runtime-erased operation boundary. Both engines
+; must report text.join's strict eighth-argument diagnostic at exit 2, at the
+; native v1 application boundary.
+(handle (app (var text.join) (lit "a") (lit "b") (lit "c") (lit "d")
+    (lit "e") (lit "f") (lit "g") (app (var get)))
+  (ret (pvar x) (var x))
+  (opclause get () k (app (var k) (lit 5))))

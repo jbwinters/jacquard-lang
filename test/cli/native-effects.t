@@ -23,6 +23,7 @@ assertion, exit codes included.
   identical: e04-erasure-match-failure (exit 2)
   identical: e05-code-form-bad-head (exit 2)
   identical: e06-erasure-splice-not-code (exit 2)
+  identical: e07-erasure-text-join (exit 2)
   identical: g01-choose-tuple (exit 0)
   identical: g02-thrice (exit 0)
   identical: g03-deep-inner-count (exit 0)
@@ -57,6 +58,7 @@ assertion, exit codes included.
   identical: g32-code-ops (exit 0)
   identical: g33-quote-effectful-splice (exit 0)
   identical: g34-spec-const-list (exit 0)
+  identical: g35-stdlib-ss22 (exit 0)
 
 The flagship outputs, pinned so a both-engines regression cannot slip through
 the diff-only loop above:

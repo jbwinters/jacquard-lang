@@ -32,8 +32,13 @@ let intrinsics : (string * int) list =
     ("mul-real", 2);
     ("div-real", 2);
     ("lt-real", 2);
+    ("real.gt?", 2);
+    ("real.gte?", 2);
+    ("real.lte?", 2);
     ("text.length", 1);
     ("text.concat", 2);
+    ("text.join", 2);
+    ("text.join-variadic-v1", -1);
     ("int-compare", 2);
     ("text-compare", 2);
     ("text.trim", 1);

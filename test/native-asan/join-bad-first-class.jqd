@@ -1,0 +1,10 @@
+; The generic jq_apply route has the same ownership contract as a direct
+; intrinsic call and must release every owned argument on fatal validation.
+(let nonrec (pvar join) (var text.join)
+  (handle
+    (app (var join)
+      (app (var text.concat) (lit "first-") (lit "owned"))
+      (app (var get))
+      (app (var text.concat) (lit "last-") (lit "owned")))
+    (ret (pvar x) (var x))
+    (opclause get () k (app (var k) (lit 5)))))

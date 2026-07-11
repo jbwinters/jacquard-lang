@@ -364,6 +364,15 @@ let close_lonely_rows ~gen_level (t : ty) : unit =
              Hashtbl.replace counts id (n + 1, r)
          | _ -> ());
         walk result
+    | TVariadicArrow (param, row, result) ->
+        walk param;
+        (let row = repr_row row in
+         match row.tail with
+         | RVar ({ contents = RUnbound { id; level } } as r) when level > gen_level ->
+             let n = match Hashtbl.find_opt counts id with Some (n, _) -> n | None -> 0 in
+             Hashtbl.replace counts id (n + 1, r)
+         | _ -> ());
+        walk result
   in
   walk t;
   Hashtbl.iter (fun _ (n, r) -> if n = 1 then r := RLink { effects = []; tail = RClosed }) counts
@@ -529,6 +538,16 @@ and infer ctx env ~(ambient : row) (e : Kernel.expr) : ty =
                      ctx.origins <- (h, name) :: ctx.origins)
                  (repr_row frow).effects
            | None -> ());
+          (try Types.unify_rows (opened ctx frow) ambient
+           with Unify_error detail ->
+             err ~meta ~code:"E0801" "effect row mismatch at this application (%s)" detail);
+          result
+      | TVariadicArrow (param, frow, result) ->
+          ctx.tier_apps <- (frow, Tier.KFn) :: ctx.tier_apps;
+          List.iter
+            (fun ((arg : Kernel.expr), actual) ->
+              unify_or ctx ~meta:arg.meta ~what:"variadic argument" param actual)
+            (List.combine args arg_tys);
           (try Types.unify_rows (opened ctx frow) ambient
            with Unify_error detail ->
              err ~meta ~code:"E0801" "effect row mismatch at this application (%s)" detail);

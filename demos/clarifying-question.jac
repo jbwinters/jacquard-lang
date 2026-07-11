@@ -1,7 +1,7 @@
 expectation(model) =
   list.fold(dist.enumerate(model), 0.0,
     fn (acc, e) -> match e {
-                     | MkPair(u, p) -> add-real(acc, mul-real(u, p))})
+                     | MkPair(u, p) -> real.add(acc, real.mul(u, p))})
 
 intent-dist() = Bernoulli(0.35)
 
@@ -18,12 +18,12 @@ audit-first-utility(needs-audit) = match needs-audit {
                                      | False -> 4.0}
 
 best-action-for-answer(needs-audit) =
-  match lt-real(fast-answer-utility(needs-audit), audit-first-utility(needs-audit)) {
+  match real.lt?(fast-answer-utility(needs-audit), audit-first-utility(needs-audit)) {
     | True -> "audit-first"
     | False -> "fast-answer"}
 
 best-utility-for-answer(needs-audit) =
-  match lt-real(fast-answer-utility(needs-audit), audit-first-utility(needs-audit)) {
+  match real.lt?(fast-answer-utility(needs-audit), audit-first-utility(needs-audit)) {
     | True -> audit-first-utility(needs-audit)
     | False -> fast-answer-utility(needs-audit)}
 
@@ -40,12 +40,12 @@ eu-audit-first() =
                audit-first-utility(needs-audit)})
 
 act-now-utility() =
-  match lt-real(eu-fast-answer(), eu-audit-first()) {
+  match real.lt?(eu-fast-answer(), eu-audit-first()) {
     | True -> eu-audit-first()
     | False -> eu-fast-answer()}
 
 act-now-action() =
-  match lt-real(eu-fast-answer(), eu-audit-first()) {
+  match real.lt?(eu-fast-answer(), eu-audit-first()) {
     | True -> "audit-first"
     | False -> "fast-answer"}
 
@@ -55,12 +55,12 @@ informed-utility() =
                let needs-audit = `op:sample`(intent-dist())
                best-utility-for-answer(needs-audit)})
 
-question-value() = sub-real(informed-utility(), act-now-utility())
+question-value() = real.sub(informed-utility(), act-now-utility())
 
-ask-utility(interruption-cost) = sub-real(informed-utility(), interruption-cost)
+ask-utility(interruption-cost) = real.sub(informed-utility(), interruption-cost)
 
 policy(interruption-cost) =
-  match lt-real(interruption-cost, question-value()) {
+  match real.lt?(interruption-cost, question-value()) {
     | True -> "ask-user"
     | False -> act-now-action()}
 

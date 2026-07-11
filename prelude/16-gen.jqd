@@ -38,13 +38,13 @@
 ; --- W6.9: probabilistic assertions ---
 (defterm ((binding real.abs ()
   (lam ((pvar x))
-    (match (app (var lt-real) (var x) (lit 0.0))
-      (clause (pcon true) (app (var sub-real) (lit 0.0) (var x)))
+    (match (app (var real.lt?) (var x) (lit 0.0))
+      (clause (pcon true) (app (var real.sub) (lit 0.0) (var x)))
       (clause (pcon false) (var x)))))))
 
 (defterm ((binding real.close? ()
   (lam ((pvar a) (pvar b) (pvar tol))
-    (match (app (var lt-real) (var tol) (app (var real.abs) (app (var sub-real) (var a) (var b))))
+    (match (app (var real.lt?) (var tol) (app (var real.abs) (app (var real.sub) (var a) (var b))))
       (clause (pcon true) (var false))
       (clause (pcon false) (var true)))))))
 
@@ -56,7 +56,7 @@
         (match (var e)
           (clause (pcon mk-pair (pvar y) (pvar p))
             (match (app (app (var eq.fn) (var d)) (var x) (var y))
-              (clause (pcon true) (app (var add-real) (var acc) (var p)))
+              (clause (pcon true) (app (var real.add) (var acc) (var p)))
               (clause (pcon false) (var acc)))))))))))
 
 ; every first-component of a weighted table, deduped under d, keeping order

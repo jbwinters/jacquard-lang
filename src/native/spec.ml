@@ -26,6 +26,11 @@ type st = {
       (** const member -> (con, field atoms) when its value is one statically-known CON *)
 }
 
+let intrinsic_accepts arity count = arity < 0 || arity = count
+
+let intrinsic_option_accepts arity count =
+  match arity with Some arity -> intrinsic_accepts arity count | None -> false
+
 (* ------------------------------------------------------------------ *)
 (* Keys                                                                *)
 (* ------------------------------------------------------------------ *)
@@ -129,7 +134,9 @@ let rec fold_expr (st : st) (env : atom SMap.t) (lams : lam_info SMap.t) (e : ex
              the same arity invariant the lowerer refuses on (the checker makes a mismatch
              unreachable; the guard keeps this pass honest on its own) *)
           match Hashtbl.find_opt st.builtin_names g with
-          | Some name when Hashtbl.find_opt st.intrinsics name = Some (List.length args) ->
+          | Some name
+            when intrinsic_option_accepts (Hashtbl.find_opt st.intrinsics name) (List.length args)
+            ->
               Let (x, BIntrinsic (name, args), fold_expr st env lams body)
           | _ -> (
               match Hashtbl.find_opt st.member_arity g with
@@ -181,7 +188,9 @@ let rec fold_expr (st : st) (env : atom SMap.t) (lams : lam_info SMap.t) (e : ex
           else TailUnknown (f, args, post)
       | AGlobal g -> (
           match Hashtbl.find_opt st.builtin_names g with
-          | Some name when Hashtbl.find_opt st.intrinsics name = Some (List.length args) ->
+          | Some name
+            when intrinsic_option_accepts (Hashtbl.find_opt st.intrinsics name) (List.length args)
+            ->
               (* a tail intrinsic call has no Tail form; bind and return *)
               Let ("_spec_r", BIntrinsic (name, args), Ret (AVar "_spec_r"))
           | _ -> (

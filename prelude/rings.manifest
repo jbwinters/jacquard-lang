@@ -63,9 +63,9 @@ mul 0
 div 0
 eq 0
 lt 0
-add-real 0
-mul-real 0
-div-real 0
+real.add 0
+real.mul 0
+real.div 0
 int-compare 0
 text-compare 2
 debug.inspect 3
@@ -151,6 +151,10 @@ bool.and 0
 bool.or 0
 bool.and-then 0
 bool.or-else 0
+int.gt? 0
+int.gte? 0
+int.lt? 0
+int.lte? 0
 # --- 10-ring1 (ring 1)
 abort.to-option 1
 abort.or 1
@@ -166,6 +170,7 @@ list.head! 1
 # --- 11-text (ring 2)
 text.length 2
 text.concat 2
+text.join-list 2
 text.join 2
 text.split 2
 text.slice 2
@@ -257,8 +262,11 @@ dist.check-tables 2
 check.posterior 2
 check.same-dist 2
 check.posterior-sampled 2
-sub-real 0
-lt-real 0
+real.sub 0
+real.lt? 0
+real.gt? 0
+real.gte? 0
+real.lte? 0
 # --- 17-codec / 18-fault (W6.6/W6.7): ring 3 (they speak world-effect vocabulary)
 codec 2
 mk-codec 2

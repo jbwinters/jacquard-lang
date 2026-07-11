@@ -218,8 +218,9 @@ name to its ring. Ring rule: a ring references only itself and below.
 
 - **Ring 0 axioms**: `bool option result list ordering`, dictionaries
   (`mk-eq/mk-ord/mk-show`, `eq.fn/ord.fn/show.fn`, `int.eq bool.eq int.ord
-  ...`), arithmetic builtins (`add sub mul div mod eq lt`, `add-real
-  mul-real div-real sub-real lt-real`), `list.* option.* result.* bool.*`
+  ...`), arithmetic builtins (`add sub mul div mod eq lt`, `real.add
+  real.mul real.div real.sub`, numeric `*.gt?/gte?/lt?/lte?`),
+  `list.* option.* result.* bool.*`
   (grid: `map filter fold each length ...`).
 - **Ring 1 control**: `abort throw state emit fault` + canonical handlers
   (`abort.to-option throw.catch throw.to-result state.run emit.collect ...`),

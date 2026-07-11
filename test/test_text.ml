@@ -56,13 +56,11 @@ let test_split_join_units () =
     "split on empty separator" "cons(\"h\", cons(\"é\", cons(\"l\", nil)))"
     (show (Printf.sprintf "(app (var text.split) %s %s)" (lit "hél") (lit "")));
   Alcotest.(check string)
-    "join"
+    "variadic join"
     (Value.show (Value.VText "a-b-c"))
     (show
-       (Printf.sprintf
-          "(app (var text.join) (app (var cons) %s (app (var cons) %s (app (var cons) %s (var \
-           nil)))) %s)"
-          (lit "a") (lit "b") (lit "c") (lit "-")))
+       (Printf.sprintf "(app (var text.join) %s %s %s %s %s)" (lit "a") (lit "-") (lit "b")
+          (lit "-") (lit "c")))
 
 let test_trim_contains_empty () =
   Alcotest.(check string)
@@ -141,10 +139,25 @@ let prop_split_join_inverse =
        QCheck.Gen.(pair ident (oneof_list [ ","; "-"; "ab" ]))
        ~print:(fun (s, sep) -> s ^ " / " ^ sep))
     (fun (s, sep) ->
-      show
-        (Printf.sprintf "(app (var text.join) (app (var text.split) %s %s) %s)" (lit s) (lit sep)
-           (lit sep))
-      = Value.show (Value.VText s))
+      match eval_ok (Printf.sprintf "(app (var text.split) %s %s)" (lit s) (lit sep)) with
+      | split ->
+          let rec texts = function
+            | Value.VCon { name = "nil"; args = []; _ } -> []
+            | Value.VCon { name = "cons"; args = [ Value.VText text; rest ]; _ } ->
+                text :: texts rest
+            | value -> Alcotest.failf "text.split returned %s" (Value.show value)
+          in
+          let pieces = texts split in
+          let source =
+            Printf.sprintf "(app (var text.join-list) %s %s)"
+              (let rec list = function
+                 | [] -> "(var nil)"
+                 | text :: rest -> Printf.sprintf "(app (var cons) %s %s)" (lit text) (list rest)
+               in
+               list pieces)
+              (lit sep)
+          in
+          show source = Value.show (Value.VText s))
 
 (* show instances render the same spellings as Value.show, pinned so they cannot drift *)
 let test_show_instances_match_value_show () =

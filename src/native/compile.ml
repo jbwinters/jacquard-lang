@@ -319,6 +319,8 @@ type head =
   | HKnown of Hash.t * int  (** member function of known arity *)
   | HValue of atom  (** anything else: generic apply on the member's value *)
 
+let intrinsic_accepts arity count = arity < 0 || arity = count
+
 let classify_member_head ctx (h : Hash.t) : head =
   match Hashtbl.find_opt ctx.builtin_names h with
   | Some name -> (
@@ -652,7 +654,7 @@ and lower_app ctx env ~tail (f : Kernel.expr) (args : Kernel.expr list) (k : ato
   | Kernel.Ref (h, Kernel.Term) -> (
       match classify_member_head ctx h with
       | HIntrinsic (name, arity) ->
-          if List.length args <> arity then
+          if not (intrinsic_accepts arity (List.length args)) then
             refuse ctx (Printf.sprintf "builtin `%s` applied with the wrong arity" name)
           else with_args (fun atoms -> bind_call (BIntrinsic (name, atoms)))
       | HKnown (h, arity) when List.length args = arity ->

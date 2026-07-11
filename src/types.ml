@@ -20,6 +20,8 @@ type ty =
   | TCon of Hash.t * ty list  (** a declared (nominal) type applied to arguments *)
   | TTuple of ty list
   | TArrow of ty list * row * ty  (** the row lives on the arrow (design thesis) *)
+  | TVariadicArrow of ty * row * ty
+      (** Homogeneous zero-or-more arguments for trusted builtins; ordinary arrows remain exact. *)
   | TVar of tvar ref
   | TSkolem of int * string  (** rigid annotation variable; the string is its source name *)
 
@@ -86,6 +88,10 @@ let rec occurs_adjust (id : int) (lvl : level) (t : ty) : unit =
       List.iter (occurs_adjust id lvl) params;
       row_occurs_adjust_ty id lvl row;
       occurs_adjust id lvl result
+  | TVariadicArrow (param, row, result) ->
+      occurs_adjust id lvl param;
+      row_occurs_adjust_ty id lvl row;
+      occurs_adjust id lvl result
 
 and row_occurs_adjust_ty id lvl row =
   (* type-var occurs never fails through a row, but nested arrows hide in effect args?
@@ -100,6 +106,10 @@ let rec row_occurs_adjust (id : int) (lvl : level) (t : ty) : unit =
   | TTuple items -> List.iter (row_occurs_adjust id lvl) items
   | TArrow (params, row, result) ->
       List.iter (row_occurs_adjust id lvl) params;
+      row_occurs_in_row id lvl row;
+      row_occurs_adjust id lvl result
+  | TVariadicArrow (param, row, result) ->
+      row_occurs_adjust id lvl param;
       row_occurs_in_row id lvl row;
       row_occurs_adjust id lvl result
 
@@ -140,6 +150,10 @@ let rec unify (a : ty) (b : ty) : unit =
         List.iter2 unify p1 p2;
         unify_rows r1 r2;
         unify t1 t2
+    | TVariadicArrow (p1, r1, t1), TVariadicArrow (p2, r2, t2) ->
+        unify p1 p2;
+        unify_rows r1 r2;
+        unify t1 t2
     | _ -> raise (Unify_error "type mismatch")
 
 (* when binding a type var at [level], row vars inside the bound type must not outlive it *)
@@ -150,6 +164,14 @@ and row_var_levels level t =
   | TTuple items -> List.iter (row_var_levels level) items
   | TArrow (params, row, result) ->
       List.iter (row_var_levels level) params;
+      (let row = repr_row row in
+       match row.tail with
+       | RVar ({ contents = RUnbound { id; level = l' } } as r) when l' > level ->
+           r := RUnbound { id; level }
+       | _ -> ());
+      row_var_levels level result
+  | TVariadicArrow (param, row, result) ->
+      row_var_levels level param;
       (let row = repr_row row in
        match row.tail with
        | RVar ({ contents = RUnbound { id; level = l' } } as r) when l' > level ->
@@ -243,6 +265,7 @@ let instantiate ~level (s : scheme) : ty =
     | TCon (h, args) -> TCon (h, List.map go args)
     | TTuple items -> TTuple (List.map go items)
     | TArrow (params, row, result) -> TArrow (List.map go params, go_row row, go result)
+    | TVariadicArrow (param, row, result) -> TVariadicArrow (go param, go_row row, go result)
   and go_row r =
     let r = repr_row r in
     match r.tail with
@@ -267,6 +290,7 @@ let clone_schemes (schemes : scheme list) : scheme list =
     | TCon (hash, args) -> TCon (hash, List.map go args)
     | TTuple items -> TTuple (List.map go items)
     | TArrow (params, row, result) -> TArrow (List.map go params, go_row row, go result)
+    | TVariadicArrow (param, row, result) -> TVariadicArrow (go param, go_row row, go result)
     | TSkolem (id, name) -> TSkolem (id, name)
     | TVar reference -> (
         match !reference with
@@ -327,6 +351,17 @@ let quantified (s : scheme) : int list * int list =
     | TTuple items -> List.iter go items
     | TArrow (params, row, result) ->
         List.iter go params;
+        (let row = repr_row row in
+         match row.tail with
+         | RVar { contents = RUnbound { id; level } } when level > s.gen_level ->
+             if not (Hashtbl.mem seen_r id) then begin
+               Hashtbl.add seen_r id ();
+               rids := id :: !rids
+             end
+         | _ -> ());
+        go result
+    | TVariadicArrow (param, row, result) ->
+        go param;
         (let row = repr_row row in
          match row.tail with
          | RVar { contents = RUnbound { id; level } } when level > s.gen_level ->
@@ -403,6 +438,12 @@ let show ?(name_of = fun h -> String.sub (Hash.to_hex h) 0 8) ?effect_name_of ?(
           Printf.sprintf "(%s) ->{%s} %s"
             (String.concat ", " (List.map (go ~paren:false) params))
             (show_row row) (go ~paren:false result)
+        in
+        if paren then "(" ^ s ^ ")" else s
+    | TVariadicArrow (param, row, result) ->
+        let s =
+          Printf.sprintf "(%s...) ->{%s} %s" (go ~paren:false param) (show_row row)
+            (go ~paren:false result)
         in
         if paren then "(" ^ s ^ ")" else s
   in

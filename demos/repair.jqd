@@ -150,7 +150,7 @@
     (app (var list.filter) (var table)
       (lam ((pvar entry))
         (match (var entry)
-          (clause (pcon mk-pair (pwild) (pvar p)) (app (var lt-real) (lit 0.0) (var p))))))))))
+          (clause (pcon mk-pair (pwild) (pvar p)) (app (var real.lt?) (lit 0.0) (var p))))))))))
 
 ; The maximum-a-posteriori patch; ties keep the earlier (first-tallied) entry,
 ; and an all-pruned table falls back to the original.
@@ -161,7 +161,7 @@
         (lam ((pvar best) (pvar entry))
           (match (tuple (var best) (var entry))
             (clause (ptuple (pcon mk-pair (pwild) (pvar bp)) (pcon mk-pair (pwild) (pvar ep)))
-              (match (app (var lt-real) (var bp) (var ep))
+              (match (app (var real.lt?) (var bp) (var ep))
                 (clause (pcon true) (var entry))
                 (clause (pcon false) (var best)))))))
       (clause (pcon mk-pair (pvar code) (pwild)) (var code)))))))

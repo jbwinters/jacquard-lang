@@ -296,3 +296,15 @@
     (match (var a)
       (clause (pcon true) (var true))
       (clause (pcon false) (app (var thunk))))))))
+
+; Predicate names are the public numeric vocabulary. Bare eq/lt remain the
+; integer dictionary primitives used by existing ring-0 definitions.
+(defterm
+  ((binding int.gt? ()
+    (lam ((pvar a) (pvar b)) (app (var lt) (var b) (var a))))
+   (binding int.gte? ()
+    (lam ((pvar a) (pvar b)) (app (var bool.not) (app (var lt) (var a) (var b)))))
+   (binding int.lt? ()
+    (lam ((pvar a) (pvar b)) (app (var lt) (var a) (var b))))
+   (binding int.lte? ()
+    (lam ((pvar a) (pvar b)) (app (var bool.not) (app (var lt) (var b) (var a)))))))

@@ -169,18 +169,37 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
     (int2 "mod" (fun a b ->
          if b = 0 then Error (Runtime_err.Arithmetic "modulo by zero")
          else Ok (Value.VInt (a mod b))));
-  optional "add-real" (real2 "add-real" ( +. ));
-  optional "mul-real" (real2 "mul-real" ( *. ));
-  optional "div-real" (real2 "div-real" ( /. ));
-  optional "sub-real" (real2 "sub-real" ( -. ));
-  optional "lt-real" (fun args ->
+  let stable_optional public_name intrinsic_id native =
+    match lookup_hash store ~kind:Resolve.KTerm public_name with
+    | Error _ -> ()
+    | Ok h ->
+        Eval.register_builtin ctx h
+          (Value.VTrustedBuiltin (Trusted_builtin.make intrinsic_id native))
+  in
+  stable_optional "real.add" "add-real" (real2 "real.add" ( +. ));
+  stable_optional "real.mul" "mul-real" (real2 "real.mul" ( *. ));
+  stable_optional "real.div" "div-real" (real2 "real.div" ( /. ));
+  stable_optional "real.sub" "sub-real" (real2 "real.sub" ( -. ));
+  stable_optional "real.lt?" "lt-real" (fun args ->
       match args with
       | [ Value.VReal a; Value.VReal b ] -> Ok (vbool (a < b))
       | args ->
           Error
             (Runtime_err.Type_error
-               (Printf.sprintf "lt-real expects two reals, got %s"
+               (Printf.sprintf "real.lt? expects two reals, got %s"
                   (String.concat ", " (List.map Value.show args)))));
+  let real_predicate name predicate args =
+    match args with
+    | [ Value.VReal a; Value.VReal b ] -> Ok (vbool (predicate a b))
+    | args ->
+        Error
+          (Runtime_err.Type_error
+             (Printf.sprintf "%s expects two reals, got %s" name
+                (String.concat ", " (List.map Value.show args))))
+  in
+  optional "real.gt?" (real_predicate "real.gt?" ( > ));
+  optional "real.gte?" (real_predicate "real.gte?" ( >= ));
+  optional "real.lte?" (real_predicate "real.lte?" ( <= ));
   (* three-way comparison feeding the ord dictionary (stdlib SL.2) *)
   (match
      ( lookup_hash store ~kind:Resolve.KCon "less",
@@ -269,12 +288,12 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
       let vlist_of_texts ts = List.fold_right (fun t acc -> vcons (Value.VText t) acc) ts vnil in
       let rec texts_of_vlist = function
         | Value.VCon { name = "nil"; args = []; _ } -> Ok []
-        | Value.VCon { name = "cons"; args = [ Value.VText t; rest ]; _ } ->
-            Result.map (fun ts -> t :: ts) (texts_of_vlist rest)
-        | v ->
+        | Value.VCon { name = "cons"; args = [ Value.VText text; rest ]; _ } ->
+            Result.map (fun texts -> text :: texts) (texts_of_vlist rest)
+        | value ->
             Error
               (Runtime_err.Type_error
-                 (Printf.sprintf "text.join expects a list of texts, got %s" (Value.show v)))
+                 (Printf.sprintf "text.join expects a list of texts, got %s" (Value.show value)))
       in
       optional "text.split"
         (text2 "text.split" (fun s sep ->
@@ -300,11 +319,26 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
                out := String.sub s !start (sn - !start) :: !out;
                Ok (vlist_of_texts (List.rev !out))
              end));
-      optional "text.join" (fun args ->
+      stable_optional "text.join-list" "text.join" (fun args ->
           match args with
-          | [ xs; Value.VText sep ] ->
-              Result.map (fun ts -> Value.VText (String.concat sep ts)) (texts_of_vlist xs)
-          | args -> type_err "text.join" args)
+          | [ texts; Value.VText separator ] ->
+              Result.map
+                (fun texts -> Value.VText (String.concat separator texts))
+                (texts_of_vlist texts)
+          | args -> type_err "text.join" args);
+      stable_optional "text.join" "text.join-variadic-v1" (fun args ->
+          let rec join buffer index = function
+            | [] -> Ok (Value.VText (Buffer.contents buffer))
+            | Value.VText text :: rest ->
+                Buffer.add_string buffer text;
+                join buffer (index + 1) rest
+            | value :: _ ->
+                Error
+                  (Runtime_err.Type_error
+                     (Printf.sprintf "text.join expects Text at argument %d, got %s" index
+                        (Value.show value)))
+          in
+          join (Buffer.create 32) 1 args)
   | _ -> ());
   (match
      (lookup_hash store ~kind:Resolve.KCon "some", lookup_hash store ~kind:Resolve.KCon "none")
@@ -977,7 +1011,8 @@ let builtin_signatures (store : Store.t) : ((Hash.t * Types.scheme) list, Diag.t
             [
               ("text.length", fn [ text ] int_ty);
               ("text.concat", fn [ text; text ] text);
-              ("text.join", fn [ tlist text; text ] text);
+              ("text.join-list", fn [ tlist text; text ] text);
+              ("text.join", Types.mono (Types.TVariadicArrow (text, Types.empty_row, text)));
               ("text.split", fn [ text; text ] (tlist text));
               ("text.slice", fn [ text; int_ty; int_ty ] text);
               ("text.trim", fn [ text ] text);
@@ -1057,9 +1092,9 @@ let builtin_signatures (store : Store.t) : ((Hash.t * Types.scheme) list, Diag.t
               }
       in
       match
-        ( lookup_hash store ~kind:Resolve.KTerm "add-real",
-          lookup_hash store ~kind:Resolve.KTerm "mul-real",
-          lookup_hash store ~kind:Resolve.KTerm "div-real",
+        ( lookup_hash store ~kind:Resolve.KTerm "real.add",
+          lookup_hash store ~kind:Resolve.KTerm "real.mul",
+          lookup_hash store ~kind:Resolve.KTerm "real.div",
           lookup_hash store ~kind:Resolve.KTerm "pmf",
           lookup_hash store ~kind:Resolve.KTerm "support" )
       with
@@ -1070,15 +1105,21 @@ let builtin_signatures (store : Store.t) : ((Hash.t * Types.scheme) list, Diag.t
             | _ -> []
           in
           let extra_real =
-            (* sub-real / lt-real landed with W6.9's tolerance comparisons *)
+            (* subtraction and ordering support W6.9's tolerance comparisons *)
             match
-              ( lookup_hash store ~kind:Resolve.KTerm "sub-real",
-                lookup_hash store ~kind:Resolve.KTerm "lt-real" )
+              ( lookup_hash store ~kind:Resolve.KTerm "real.sub",
+                lookup_hash store ~kind:Resolve.KTerm "real.lt?",
+                lookup_hash store ~kind:Resolve.KTerm "real.gt?",
+                lookup_hash store ~kind:Resolve.KTerm "real.gte?",
+                lookup_hash store ~kind:Resolve.KTerm "real.lte?" )
             with
-            | Ok sr, Ok lr ->
+            | Ok sr, Ok lr, Ok gr, Ok ger, Ok ler ->
                 [
                   (sr, Types.mono rarrow2);
                   (lr, Types.mono (Types.TArrow ([ real_ty; real_ty ], Types.empty_row, bool_ty)));
+                  (gr, Types.mono (Types.TArrow ([ real_ty; real_ty ], Types.empty_row, bool_ty)));
+                  (ger, Types.mono (Types.TArrow ([ real_ty; real_ty ], Types.empty_row, bool_ty)));
+                  (ler, Types.mono (Types.TArrow ([ real_ty; real_ty ], Types.empty_row, bool_ty)));
                 ]
             | _ -> []
           in

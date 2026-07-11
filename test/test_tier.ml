@@ -30,7 +30,12 @@ let test_classify_ty () =
     (Tier.classify_ty (Types.TArrow ([ int_ty ], Types.closed_row [ h ], int_ty)));
   Alcotest.check tier "open effects"
     (Tier.Effectful { effects = [ h ]; opened = true })
-    (Tier.classify_ty (Types.TArrow ([ int_ty ], Types.open_row 1 [ h ], int_ty)))
+    (Tier.classify_ty (Types.TArrow ([ int_ty ], Types.open_row 1 [ h ], int_ty)));
+  Alcotest.check tier "pure variadic arrow is a function" Tier.Pure
+    (Tier.classify_ty (Types.TVariadicArrow (int_ty, Types.empty_row, int_ty)));
+  Alcotest.check tier "effectful variadic arrow is a function"
+    (Tier.Effectful { effects = [ h ]; opened = false })
+    (Tier.classify_ty (Types.TVariadicArrow (int_ty, Types.closed_row [ h ], int_ty)))
 
 let test_render_roundtrip () =
   let h1 = Hash.of_string "a" and h2 = Hash.of_string "b" in

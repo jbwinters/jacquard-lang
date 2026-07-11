@@ -79,31 +79,46 @@ static jq_value real2(jq_value x, jq_value y, double r) {
 
 jq_value jq_i_add_real(jq_rt *rt, const jq_value *a) {
   (void)rt;
-  REAL2("add-real");
+  REAL2("real.add");
   return real2(a[0], a[1], jq_real_val(a[0]) + jq_real_val(a[1]));
 }
 jq_value jq_i_sub_real(jq_rt *rt, const jq_value *a) {
   (void)rt;
-  REAL2("sub-real");
+  REAL2("real.sub");
   return real2(a[0], a[1], jq_real_val(a[0]) - jq_real_val(a[1]));
 }
 jq_value jq_i_mul_real(jq_rt *rt, const jq_value *a) {
   (void)rt;
-  REAL2("mul-real");
+  REAL2("real.mul");
   return real2(a[0], a[1], jq_real_val(a[0]) * jq_real_val(a[1]));
 }
 jq_value jq_i_div_real(jq_rt *rt, const jq_value *a) {
   (void)rt;
-  REAL2("div-real");
+  REAL2("real.div");
   /* IEEE division: the interpreter divides OCaml floats, inf/nan included */
   return real2(a[0], a[1], jq_real_val(a[0]) / jq_real_val(a[1]));
 }
-jq_value jq_i_lt_real(jq_rt *rt, const jq_value *a) {
-  REAL2("lt-real");
-  bool r = jq_real_val(a[0]) < jq_real_val(a[1]);
+static jq_value real_predicate(jq_rt *rt, const jq_value *a, bool r) {
   jq_drop(a[0]);
   jq_drop(a[1]);
   return vbool(rt, r);
+}
+
+jq_value jq_i_lt_real(jq_rt *rt, const jq_value *a) {
+  REAL2("real.lt?");
+  return real_predicate(rt, a, jq_real_val(a[0]) < jq_real_val(a[1]));
+}
+jq_value jq_i_real_gt_q(jq_rt *rt, const jq_value *a) {
+  REAL2("real.gt?");
+  return real_predicate(rt, a, jq_real_val(a[0]) > jq_real_val(a[1]));
+}
+jq_value jq_i_real_gte_q(jq_rt *rt, const jq_value *a) {
+  REAL2("real.gte?");
+  return real_predicate(rt, a, jq_real_val(a[0]) >= jq_real_val(a[1]));
+}
+jq_value jq_i_real_lte_q(jq_rt *rt, const jq_value *a) {
+  REAL2("real.lte?");
+  return real_predicate(rt, a, jq_real_val(a[0]) <= jq_real_val(a[1]));
 }
 
 jq_value jq_i_text_length(jq_rt *rt, const jq_value *a) {
@@ -120,6 +135,7 @@ jq_value jq_i_text_length(jq_rt *rt, const jq_value *a) {
 
 static void type_err_args(const char *name, const jq_value *a, uint16_t n)
     __attribute__((noreturn));
+static bool is_con_named(jq_value v, const char *name);
 
 jq_value jq_i_text_concat(jq_rt *rt, const jq_value *a) {
   (void)rt;
@@ -136,6 +152,80 @@ jq_value jq_i_text_concat(jq_rt *rt, const jq_value *a) {
   jq_drop(a[0]);
   jq_drop(a[1]);
   return r;
+}
+
+static void text_join_list_error(const jq_value *a, jq_value bad)
+    __attribute__((noreturn));
+static void text_join_list_error(const jq_value *a, jq_value bad) {
+  char *shown = jq_show(bad);
+  fprintf(stderr, "type error: text.join expects a list of texts, got %s\n", shown);
+  free(shown);
+  jq_drop(a[0]);
+  jq_drop(a[1]);
+  exit(2);
+}
+
+jq_value jq_i_text_join(jq_rt *rt, const jq_value *a) {
+  (void)rt;
+  if (!is_text(a[1])) type_err_args("text.join", a, 2);
+  uint64_t count = 0, text_total = 0;
+  jq_value it = a[0];
+  while (is_con_named(it, "cons") && jq_con_arity(it) == 2) {
+    jq_value head = jq_con_fields(it)[0];
+    if (!is_text(head)) text_join_list_error(a, it);
+    text_total += jq_text_len(head);
+    count++;
+    it = jq_con_fields(it)[1];
+  }
+  if (!(is_con_named(it, "nil") && jq_con_arity(it) == 0)) text_join_list_error(a, it);
+  uint64_t separator_len = jq_text_len(a[1]);
+  uint64_t total = text_total + (count > 0 ? (count - 1) * separator_len : 0);
+  uint8_t *tmp = total ? malloc(total) : NULL;
+  if (total && !tmp) jq_runtime_error("jacquard runtime: out of memory");
+  uint64_t offset = 0, index = 0;
+  for (it = a[0]; is_con_named(it, "cons"); it = jq_con_fields(it)[1], index++) {
+    if (index > 0) {
+      memcpy(tmp + offset, jq_text_bytes(a[1]), separator_len);
+      offset += separator_len;
+    }
+    jq_value head = jq_con_fields(it)[0];
+    uint64_t length = jq_text_len(head);
+    memcpy(tmp + offset, jq_text_bytes(head), length);
+    offset += length;
+  }
+  jq_value result = jq_text(total ? tmp : (const uint8_t *)"", total);
+  free(tmp);
+  jq_drop(a[0]);
+  jq_drop(a[1]);
+  return result;
+}
+
+jq_value jq_i_text_join_variadic_v1(jq_rt *rt, const jq_value *a, uint16_t n) {
+  (void)rt;
+  uint64_t total = 0;
+  for (uint16_t i = 0; i < n; i++) {
+    if (!is_text(a[i])) {
+      char *shown = jq_show(a[i]);
+      fprintf(stderr, "type error: text.join expects Text at argument %u, got %s\n",
+              (unsigned)(i + 1), shown);
+      free(shown);
+      for (uint16_t j = 0; j < n; j++) jq_drop(a[j]);
+      exit(2);
+    }
+    total += jq_text_len(a[i]);
+  }
+  uint8_t *tmp = total ? malloc(total) : NULL;
+  if (total && !tmp) jq_runtime_error("jacquard runtime: out of memory");
+  uint64_t offset = 0;
+  for (uint16_t i = 0; i < n; i++) {
+    uint64_t length = jq_text_len(a[i]);
+    memcpy(tmp + offset, jq_text_bytes(a[i]), length);
+    offset += length;
+  }
+  jq_value result = jq_text(total ? tmp : (const uint8_t *)"", total);
+  free(tmp);
+  for (uint16_t i = 0; i < n; i++) jq_drop(a[i]);
+  return result;
 }
 
 static jq_value vord(jq_rt *rt, int c) {
@@ -168,8 +258,10 @@ static void type_err_args(const char *name, const jq_value *a, uint16_t n) {
   for (uint16_t i = 0; i < n; i++) {
     char *s = jq_show(a[i]);
     fprintf(stderr, "%s%s", i ? ", " : "", s);
+    free(s);
   }
   fputc('\n', stderr);
+  for (uint16_t i = 0; i < n; i++) jq_drop(a[i]);
   exit(2);
 }
 

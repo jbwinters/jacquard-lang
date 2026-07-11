@@ -16,7 +16,7 @@
         (clause (pcon cons (pcon mk-pair (pvar y) (pvar q)) (pvar rest))
           (match (app (app (var eq.fn) (var d)) (var x) (var y))
             (clause (pcon true)
-              (app (var cons) (app (var mk-pair) (var y) (app (var add-real) (var p) (var q)))
+              (app (var cons) (app (var mk-pair) (var y) (app (var real.add) (var p) (var q)))
                 (var rest)))
             (clause (pcon false)
               (app (var cons) (app (var mk-pair) (var y) (var q))
@@ -37,7 +37,7 @@
         (match (var e)
           (clause (pcon mk-pair (pvar y) (pvar p))
             (match (app (app (var eq.fn) (var d)) (var x) (var y))
-              (clause (pcon true) (app (var add-real) (var acc) (var p)))
+              (clause (pcon true) (app (var real.add) (var acc) (var p)))
               (clause (pcon false) (var acc)))))))))))
 
 ; seeded, count-bounded likelihood weighting as a native builtin: the splitmix64

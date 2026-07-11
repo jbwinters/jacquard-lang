@@ -1,5 +1,4 @@
 add : (Int, Int) ->{} Int
-add-real : (Real, Real) ->{} Real
 type bool
 bool.and : (Bool, Bool) ->{} Bool
 bool.and-then : forall | e. (Bool, () ->{| e} Bool) ->{| e} Bool
@@ -19,7 +18,6 @@ code.to-text : (Code) ->{} Option Text
 code.un-form : (Code) ->{} Option (Text, List Code)
 con cons
 div : (Int, Int) ->{} Int
-div-real : (Real, Real) ->{} Real
 eq : (Int, Int) ->{} Bool
 type eq
 eq.fn : forall a. (Eq a) ->{} (a, a) ->{} Bool
@@ -33,6 +31,10 @@ type int
 int-compare : (Int, Int) ->{} Ordering
 con int-opaque
 int.eq : Eq Int
+int.gt? : (Int, Int) ->{} Bool
+int.gte? : (Int, Int) ->{} Bool
+int.lt? : (Int, Int) ->{} Bool
+int.lte? : (Int, Int) ->{} Bool
 int.ord : Ord Int
 con less
 type list
@@ -59,14 +61,12 @@ list.sort : forall a. (List a, Ord a) ->{} List a
 list.take : forall a. (List a, Int) ->{} List a
 list.zip : forall a b. (List a, List b) ->{} List (a, b)
 lt : (Int, Int) ->{} Bool
-lt-real : (Real, Real) ->{} Bool
 con mk-eq
 con mk-ord
 con mk-report
 con mk-show
 mod : (Int, Int) ->{} Int
 mul : (Int, Int) ->{} Int
-mul-real : (Real, Real) ->{} Real
 con nil
 con none
 con ok
@@ -88,6 +88,14 @@ ord.to-eq : forall a. (Ord a) ->{} Eq a
 type ordering
 type real
 con real-opaque
+real.add : (Real, Real) ->{} Real
+real.div : (Real, Real) ->{} Real
+real.gt? : (Real, Real) ->{} Bool
+real.gte? : (Real, Real) ->{} Bool
+real.lt? : (Real, Real) ->{} Bool
+real.lte? : (Real, Real) ->{} Bool
+real.mul : (Real, Real) ->{} Real
+real.sub : (Real, Real) ->{} Real
 type report
 type result
 result.each : forall a b c | e. (Result a b, (b) ->{| e} c) ->{| e} ()
@@ -101,7 +109,6 @@ type show
 show.fn : forall a. (Show a) ->{} (a) ->{} Text
 con some
 sub : (Int, Int) ->{} Int
-sub-real : (Real, Real) ->{} Real
 type text
 con text-opaque
 con true

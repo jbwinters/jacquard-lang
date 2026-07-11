@@ -149,16 +149,41 @@ let table_cells line =
   | cells -> cells
 
 let table_rows text =
-  String.split_on_char '\n' text
-  |> List.filter_map (fun line ->
-      let line = trim line in
-      if String.starts_with ~prefix:"|" line then Some (table_cells line) else None)
+  let rec seek = function
+    | [] -> []
+    | line :: rest ->
+        let line = trim line in
+        if String.starts_with ~prefix:"|" line then collect [ table_cells line ] rest else seek rest
+  and collect rev_rows = function
+    | line :: rest ->
+        let line = trim line in
+        if String.starts_with ~prefix:"|" line then collect (table_cells line :: rev_rows) rest
+        else List.rev rev_rows
+    | [] -> List.rev rev_rows
+  in
+  String.split_on_char '\n' text |> seek
   |> List.filter (function
     | first :: _ ->
         not
           (String.equal first "ID" || String.equal first "inventory" || String.equal first "command"
           || String.for_all (function '-' | ':' -> true | _ -> false) first)
     | [] -> false)
+
+let test_table_rows_stop_at_later_subheading () =
+  let markdown =
+    "intro\n\
+     | ID | status |\n\
+     |---|---|\n\
+     | D38 | shipped |\n\n\
+     ### Later audit\n\n\
+     | ID | status |\n\
+     |---|---|\n\
+     | D38 | adjusted |\n"
+  in
+  Alcotest.(check (list (list string)))
+    "only the intended first table is parsed"
+    [ [ "D38"; "shipped" ] ]
+    (table_rows markdown)
 
 let code_tokens text =
   let rec loop start acc =
@@ -306,13 +331,63 @@ let manifest_errors () =
   in
   let overlay =
     [
+      "corpus/golden/hashes.golden";
+      "corpus/golden/prelude-hashes.golden";
+      "corpus/golden/ring0-freeze.golden";
+      "corpus/sigs/24-ring2.jqd";
+      "corpus/valid/stdlib-ss22.jac";
+      "corpus/valid/stdlib-ss22.jqd";
+      "demos/clarifying-question.jac";
+      "demos/clarifying-question.jqd";
+      "demos/cookbook.jqd";
+      "demos/repair.jac";
+      "demos/repair.jqd";
       "docs/README.md";
+      "docs/SKILL.md";
+      "docs/native-intrinsics.md";
       "docs/release/surface-syntax/DECISION.md";
       "docs/release/surface-syntax/FOLLOWUPS.md";
+      "docs/stdlib.md";
+      "prelude/04-builtins.jqd";
+      "prelude/07-enum.jqd";
+      "prelude/09-grid.jqd";
+      "prelude/11-text.jqd";
+      "prelude/13-dist-lib.jqd";
+      "prelude/16-gen.jqd";
+      "prelude/rings.manifest";
+      "runtime/jq_apply.c";
+      "runtime/jq_intrinsics.c";
+      "runtime/jq_value.h";
       "scripts/release/check-surface-syntax-manifest.sh";
+      "src/check.ml";
+      "src/native/build.ml";
+      "src/native/compile.ml";
+      "src/native/emit.ml";
+      "src/native/spec.ml";
+      "src/prelude.ml";
+      "src/tier.ml";
+      "src/types.ml";
+      "test/cli/native-effects.t";
+      "test/cli/dune";
+      "test/cli/ss22.t";
       "test/cli/surface.t";
+      "test/cli/tiers.t";
+      "test/corpus_support.ml";
+      "test/docs-doctest/fixtures/stdlib-text-join.jac";
+      "test/docs-doctest/fixtures/stdlib-text-join.stdout";
       "test/dune";
+      "test/native-gauntlet/MAPPING.md";
+      "test/native-gauntlet/e07-erasure-text-join.jqd";
+      "test/native-gauntlet/g31-repair-pure.jqd";
+      "test/native-gauntlet/g35-stdlib-ss22.jqd";
+      "test/native-asan/join-bad-early.jqd";
+      "test/native-asan/join-bad-first-class.jqd";
+      "test/native-asan/join-bad-last.jqd";
+      "test/native-asan/join-bad-middle.jqd";
+      "test/test_prelude.ml";
       "test/test_surface_laws.ml";
+      "test/test_text.ml";
+      "test/test_tier.ml";
     ]
   in
   let paths = List.map snd entries |> List.sort String.compare in
@@ -464,16 +539,27 @@ let validate_release_docs ~decision ~followups ~index =
       ];
       [
         "D38";
-        "adjusted";
-        "The promised variadic `text.join` is absent; interpolation remains outside v0.";
-        "[D38 acceptance criteria](FOLLOWUPS.md#d38-variadic-text-join)";
+        "shipped";
+        "SS.22 ships a new callable variadic `text.join` object with an unbounded \
+         language/interpreter contract and strict argument evidence in [prelude \
+         tests](../../../test/test_prelude.ml), [CLI/native/ASAN boundary \
+         evidence](../../../test/cli/ss22.t), and [executable stdlib \
+         documentation](../../stdlib.md). Deprecated migration-only `text.join-list` preserves the \
+         pre-SS.22 list-plus-separator object hash-for-hash. Native v1 variadic parity is limited \
+         to 0-8 arguments; 9 is E1101 under its global ABI ceiling. Interpolation remains absent.";
+        "none";
       ];
       [
         "D39";
-        "adjusted";
-        "The `gt?`/`gte?`/`lt?`/`lte?` family and `real.*` migration are absent; executable docs \
-         use current prelude names.";
-        "[D39 acceptance criteria](FOLLOWUPS.md#d39-comparison-naming)";
+        "shipped";
+        "SS.22 ships all four `int.*` and `real.*` predicates plus dotted real arithmetic, with \
+         NaN and boundary parity in [the native \
+         gauntlet](../../../test/native-gauntlet/g35-stdlib-ss22.jqd). The obsolete hyphenated \
+         public names are removed without aliases, while the five historical marker IDs and \
+         semantic hashes remain stable; the [identity map](../../../test/test_prelude.ml) and \
+         [hash-reference CLI/native test](../../../test/cli/ss22.t) prove old references still \
+         load, typecheck, interpret, and native-compile.";
+        "none";
       ];
       [
         "D40";
@@ -526,8 +612,6 @@ let validate_release_docs ~decision ~followups ~index =
     (fun target -> require (contains target decision) ("missing required follow-up link " ^ target))
     [
       "FOLLOWUPS.md#d36-generated-constructor-accessors";
-      "FOLLOWUPS.md#d38-variadic-text-join";
-      "FOLLOWUPS.md#d39-comparison-naming";
       "FOLLOWUPS.md#tier-f-linearity-modes";
       "FOLLOWUPS.md#tier-f-resource-scoped-rows";
     ];
@@ -586,16 +670,26 @@ let validate_release_docs ~decision ~followups ~index =
   acceptance_contract "## D38 Variadic Text Join"
     [
       ("export", "the prelude exports `text.join`");
-      ( "arity",
-        "`text.join` accepts zero or more `Text` arguments, not the current two-argument `(List \
-         Text, Text)` shape" );
+      ("arity", "`text.join` accepts zero or more `Text` arguments");
       ( "semantics",
         "arguments are concatenated in call order and the zero-argument result is empty text" );
       ("type", "`text.join : (Text...) ->{} Text`");
+      ( "compatibility",
+        "deprecated migration-only `text.join-list : (List Text, Text) ->{} Text` retains old \
+         marker `text.join` and hash \
+         `b39cc4607d94b6fc777f781207fff5d9bf9dff9d96ff11361a69d4032a0a4bfd`" );
+      ( "identity",
+        "variadic `text.join` is a distinct object with marker `text.join-variadic-v1` and hash \
+         `c6b3e1429d584f14e81f4b1dd46b314ae038170bafc8ac0abdfb0162ed54141d`" );
       ( "evidence",
         "focused prelude tests, callable `.jac` examples, and executable documentation pin zero, \
          one, and multiple arguments" );
-      ("implementation", "no host-only bypass; `dune build @all` and full `dune runtest` pass");
+      ( "native",
+        "interpreter/native parity is pinned through 8 arguments; 9 succeeds in the interpreter \
+         and is E1101 in native v1" );
+      ( "implementation",
+        "no host-only bypass; focused identity, checker, interpreter, native, ASAN, tier, and \
+         boundary tests are required before the full gate" );
     ];
   acceptance_contract "## D39 Comparison Naming"
     [
@@ -607,6 +701,9 @@ let validate_release_docs ~decision ~followups ~index =
       ( "real names",
         "migrate `add-real`, `sub-real`, `mul-real`, `div-real`, and `lt-real` to the reviewed \
          `real.*` namespace" );
+      ( "identity",
+        "only the public name index changes; all five historical semantic hashes and marker IDs \
+         remain stable" );
       ( "migration",
         "remove obsolete tracked demo, corpus, fixture, and executable-documentation call sites" );
       ( "evidence",
@@ -656,17 +753,17 @@ let validate_release_docs ~decision ~followups ~index =
           [ "opam exec -- dune build @all"; "exit 0" ];
           [
             "opam exec -- dune runtest --force";
-            "exit 0; compiled Alcotest inventory is exactly 549 cases";
+            "exit 0; compiled Alcotest inventory is exactly 554 cases";
           ];
           [ "opam exec -- dune fmt"; "exit 0; no task-file byte changes" ];
           [
             "cd _build/default/test && ./test_jacquard.exe test surface-twins --compact \
              --color=never";
-            "exit 0; exactly 5 selected cases pass over 22 twin pairs";
+            "exit 0; exactly 5 selected cases pass over 23 twin pairs";
           ];
           [
             "opam exec -- dune runtest test/docs-doctest --force";
-            "exit 0; exactly 20 named doctests pass";
+            "exit 0; exactly 21 named doctests pass";
           ];
           [
             "JACQUARD_PRELUDE=$PWD/prelude opam exec -- dune exec jac -- run demos/m1-fact.jac";
@@ -676,15 +773,15 @@ let validate_release_docs ~decision ~followups ~index =
           [ "git -c core.whitespace=trailing-space,space-before-tab diff --check"; "exit 0" ];
           [
             "scripts/release/check-surface-syntax-manifest.sh";
-            "exit 0; exactly seven reconstructible overlay hashes match";
+            "exit 0; the reconstructible SS.21 plus SS.22 overlay hashes match";
           ];
           [
             "clean-copy scripts/release/check-surface-syntax-manifest.sh";
-            "exit 0; seven overlay hashes match and all seven protected drafts are absent";
+            "exit 0; overlay hashes match and all seven protected drafts are absent";
           ];
           [
             "clean-copy opam exec -- dune runtest --force";
-            "exit 0; the isolated base-plus-overlay copy passes all 549 cases";
+            "exit 0; the isolated base-plus-overlay copy passes all 554 cases";
           ];
         ]
       in
@@ -704,28 +801,27 @@ let validate_release_docs ~decision ~followups ~index =
       in
       require (normalized_rows = expected_rows)
         "final gate command order or deterministic expected results changed";
-      let gate_start =
+      let successor_completed =
         body |> String.split_on_char '\n'
         |> List.find_opt (fun line ->
-            String.starts_with ~prefix:"- Final gate start UTC: `" (trim line))
+            String.starts_with ~prefix:"- SS.22 successor verification completed UTC: `" (trim line))
       in
-      (match gate_start with
+      (match successor_completed with
       | Some line ->
           require
             (Str.string_match
                (Str.regexp
-                  "- Final gate start UTC: \
+                  "- SS.22 successor verification completed UTC: \
                    `[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z`")
                (trim line) 0)
-            "final gate start UTC is malformed"
-      | None -> add "final gate start UTC is missing");
+            "SS.22 successor verification UTC is malformed"
+      | None -> add "SS.22 successor verification UTC is missing");
       List.iter
         (fun required ->
-          require (contains required body) ("missing final-gate contract: " ^ required))
+          require (contains required body) ("missing successor evidence contract: " ^ required))
         [
-          "stops at the first mismatch";
-          "every task-file";
-          "mtime and SHA-256 value";
+          "Task Master files were not changed";
+          "does not reopen or strengthen the SS.21 surface";
           ".scratch/ss21-final-gate/transcript.log";
           "not required or expected in a clone";
         ]);
@@ -774,8 +870,8 @@ let decision_status_mutations =
     ("D35", "shipped", "adjusted");
     ("D36", "partial", "shipped");
     ("D37", "shipped", "partial");
-    ("D38", "adjusted", "shipped");
-    ("D39", "adjusted", "partial");
+    ("D38", "shipped", "adjusted");
+    ("D39", "shipped", "adjusted");
     ("D40", "shipped", "adjusted");
   ]
 
@@ -797,9 +893,9 @@ let decision_semantic_mutations =
       "dotted names as atomic and preserve namespace puns",
       "dotted names as segmented and reject namespace puns" );
     ( "D38",
-      "The promised variadic `text.join` is absent",
-      "The promised variadic `text.join` shipped" );
-    ("D39", "family and `real.*` migration are absent", "family and `real.*` migration shipped");
+      "SS.22 ships a new callable variadic `text.join` object",
+      "SS.22 omits callable variadic `text.join`" );
+    ("D39", "public names are removed without aliases", "public names remain as aliases");
     ("D40", "in document order and pins stdout", "in reverse document order and pins stdout");
   ]
 
@@ -829,7 +925,7 @@ let semantic_mutation_test (id, needle, replacement) =
 
 let test_wrong_count_fails =
   assert_mutation_fails ~needle:"twins count" ~mutate_followups:unchanged
-    ~mutate_decision:(replace_once ~needle:"| twins | 22 |" ~replacement:"| twins | 21 |")
+    ~mutate_decision:(replace_once ~needle:"| twins | 23 |" ~replacement:"| twins | 22 |")
 
 let test_wrong_status_fails =
   assert_mutation_fails ~needle:"disallowed status" ~mutate_followups:unchanged
@@ -869,9 +965,7 @@ let followup_mutations =
     );
     ( "D38 wrong arity",
       followup_mutation_test ~heading:"## D38 Variadic Text Join" ~field:"arity"
-        ~needle:
-          "`text.join` accepts zero or more `Text` arguments, not the current two-argument `(List \
-           Text, Text)` shape"
+        ~needle:"`text.join` accepts zero or more `Text` arguments"
         ~replacement:"`text.join` accepts exactly two arguments" );
     ( "D39 wrong names",
       followup_mutation_test ~heading:"## D39 Comparison Naming" ~field:"predicates"
@@ -898,6 +992,8 @@ let suite =
       test_surface_formatter_corpus_stability;
     Alcotest.test_case "constructor standard width boundary" `Quick
       test_constructor_standard_width_boundary;
+    Alcotest.test_case "release tables stop before later subheadings" `Quick
+      test_table_rows_stop_at_later_subheading;
     Alcotest.test_case "structured release decision" `Quick assert_release_valid;
     Alcotest.test_case "mutation: wrong count" `Quick test_wrong_count_fails;
     Alcotest.test_case "mutation: wrong status" `Quick test_wrong_status_fails;

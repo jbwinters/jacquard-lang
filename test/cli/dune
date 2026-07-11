@@ -7,5 +7,6 @@
   (source_tree ../../corpus)
   (source_tree ../../runtime)
   (source_tree ../../bench)
+  (source_tree ../native-asan)
   (source_tree ../native-gauntlet)
   (source_tree ../../scripts)))

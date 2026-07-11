@@ -1,0 +1,12 @@
+(tuple
+  (app (var text.join))
+  (app (var text.join) (lit "one"))
+  (app (var text.join) (lit "a") (lit "") (lit "b"))
+  (app (var int.gt?) (lit 2) (lit 1))
+  (app (var int.gte?) (lit 2) (lit 2))
+  (app (var int.lt?) (lit -4611686018427387904) (lit 4611686018427387903))
+  (app (var int.lte?) (lit 4611686018427387903) (lit 4611686018427387903))
+  (app (var real.gt?) (lit 2.0) (lit 1.0))
+  (app (var real.gte?) (lit 2.0) (lit 2.0))
+  (app (var real.lt?) (lit -1.0) (lit 0.0))
+  (app (var real.lte?) (lit 2.0) (lit 2.0)))

@@ -73,12 +73,12 @@ posterior-over-patches(original, spec) =
 
 surviving-patches(table) =
   list.filter(table, fn (entry) -> match entry {
-                                     | MkPair(_, p) -> lt-real(0.0, p)})
+                                     | MkPair(_, p) -> real.lt?(0.0, p)})
 
 map-patch(original, table) =
   match list.fold(table, MkPair(original, 0.0),
           fn (best, entry) -> match (best, entry) {
-                               | (MkPair(_, bp), MkPair(_, ep)) -> match lt-real(bp, ep) {
+                               | (MkPair(_, bp), MkPair(_, ep)) -> match real.lt?(bp, ep) {
                                                                     | True -> entry | False -> best}}) {
     | MkPair(code, _) -> code}
 

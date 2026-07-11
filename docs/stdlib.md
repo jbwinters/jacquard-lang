@@ -291,17 +291,62 @@ honest middle ground, and the document says plainly that codepoints are not
 graphemes, so `text.length("👍🏽")` is 2. A grapheme-aware layer is future work
 (§9, D9), and nothing here will need renaming when it arrives.
 
-The text block is an interface catalog with no function bodies, so it is not a
-complete source file.
+`text.join` is a callable variadic builtin, not interpolation syntax. Its
+contract is `text.join : (Text...) ->{} Text`: zero arguments return `""`, one
+argument returns that text unchanged, and multiple arguments are concatenated
+deterministically in call order. Every argument is evaluated strictly and must
+be `Text`; a non-text argument reports its one-based argument position. This
+language and interpreter contract is unbounded. Native v1 parity covers zero
+through eight arguments; a nine-argument application is refused with E1101 by
+the general application ceiling documented in `native-compilation.md`.
+
+`text.join-list : (List Text, Text) ->{} Text` is the deprecated migration-only
+compatibility binding. It retains the pre-SS.22 `text.join` marker and member
+hash `b39cc4607d94b6fc777f781207fff5d9bf9dff9d96ff11361a69d4032a0a4bfd`.
+New code should use variadic `text.join`, whose distinct marker is
+`text.join-variadic-v1` and whose member hash is
+`c6b3e1429d584f14e81f4b1dd46b314ae038170bafc8ac0abdfb0162ed54141d`.
+The two bindings are separate canonical objects, not aliases with overloaded
+runtime meaning.
+
+```jacquard doctest=stdlib-text-join mode=run fixture=stdlib-text-join.jac stdout=stdlib-text-join.stdout stderr=empty exit=0
+(text.join(), text.join("one"), text.join("Jac", "qu", "ard"))
+```
+
+The remaining text block is an interface catalog with no function bodies, so
+it is not a complete source file.
 
 ```text
 text.length   : (Text) ->{} Int                 text.concat  : (Text, Text) ->{} Text
-text.join     : (List Text, Text) ->{} Text     text.split   : (Text, Text) ->{} List Text
+text.join     : (Text...) ->{} Text             text.split   : (Text, Text) ->{} List Text
+text.join-list: (List Text, Text) ->{} Text      -- deprecated migration compatibility only
 text.slice    : (Text, Int, Int) ->{} Text      text.trim    : (Text) ->{} Text
 text.contains?: (Text, Text) ->{} Bool          text.empty?  : (Text) ->{} Bool
 text.from-int : (Int) ->{} Text                 text.to-int  : (Text) ->{} Option Int
 text.from-real: (Real) ->{} Text                text.to-real : (Text) ->{} Option Real
 ```
+
+### Numeric operations and predicates
+
+Integer dictionary primitives retain the bare names `eq`, `lt`, and
+`int-compare` where existing dictionary construction uses them. Public numeric
+predicates are consistently subject-first and `?`-suffixed:
+
+```text
+int.gt?  int.gte?  int.lt?  int.lte?   : (Int, Int) ->{} Bool
+real.gt? real.gte? real.lt? real.lte?  : (Real, Real) ->{} Bool
+```
+
+The real arithmetic family is `real.add`, `real.sub`, `real.mul`, and
+`real.div`, each `(Real, Real) ->{} Real`. SS.22 removes the former
+`add-real`/`sub-real`/`mul-real`/`div-real`/`lt-real` names rather than retaining
+aliases, so each operation has one canonical prelude identity. Real arithmetic
+and comparisons follow OCaml/C IEEE-754 behavior. The public rename changes
+only the name index: the five existing operations retain their pre-SS.22
+semantic hashes and internal marker IDs, so old hash references remain valid.
+Division may produce
+infinity or NaN, and all four ordered comparisons return `False` when either
+operand is NaN.
 
 ### Map and Set
 

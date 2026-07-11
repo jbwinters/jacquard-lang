@@ -8,7 +8,7 @@
       (lam ((pvar acc) (pvar e))
         (match (var e)
           (clause (pcon mk-pair (pvar u) (pvar p))
-            (app (var add-real) (var acc) (app (var mul-real) (var u) (var p)))))))))))
+            (app (var real.add) (var acc) (app (var real.mul) (var u) (var p)))))))))))
 
 ; (1) VALUE OF INFORMATION over a two-hypothesis task. Prior P(H)=0.3;
 ; acting blind pays 10 if H else -5 (EU=-0.5); a perfect answer lets you act
@@ -30,10 +30,10 @@
           (clause (pcon false) (lit 0.0)))))))))
 
 (defterm ((binding voi ()
-  (lam () (app (var sub-real) (app (var eu-informed)) (app (var eu-act-now)))))))
+  (lam () (app (var real.sub) (app (var eu-informed)) (app (var eu-act-now)))))))
 
 (defterm ((binding ask? ()
-  (lam ((pvar cost)) (app (var lt-real) (var cost) (app (var voi)))))))
+  (lam ((pvar cost)) (app (var real.lt?) (var cost) (app (var voi)))))))
 
 ; the re-entrancy regression: enumeration INSIDE an enumerated branch — the
 ; drivers' save/restore of the capture flag is what makes this legal
@@ -84,9 +84,9 @@
   (lam ((pvar model-dist) (pvar observed))
     (app (var list.fold) (var observed) (lit 1.0)
       (lam ((pvar acc) (pvar o))
-        (app (var mul-real) (var acc) (app (var pmf) (var model-dist) (var o)))))))))
+        (app (var real.mul) (var acc) (app (var pmf) (var model-dist) (var o)))))))))
 
 (defterm ((binding drift-alarm? ()
   (lam ((pvar model-dist) (pvar observed) (pvar threshold))
-    (app (var lt-real) (app (var run-likelihood) (var model-dist) (var observed))
+    (app (var real.lt?) (app (var run-likelihood) (var model-dist) (var observed))
       (var threshold))))))

@@ -13,7 +13,7 @@
       (lam ((pvar acc) (pvar e))
         (match (var e)
           (clause (pcon mk-pair (pvar u) (pvar p))
-            (app (var add-real) (var acc) (app (var mul-real) (var u) (var p)))))))))))
+            (app (var real.add) (var acc) (app (var real.mul) (var u) (var p)))))))))))
 
 (defterm ((binding intent-dist ()
   (lam () (app (var bernoulli) (lit 0.35))))))
@@ -38,7 +38,7 @@
 
 (defterm ((binding best-action-for-answer ()
   (lam ((pvar needs-audit))
-    (match (app (var lt-real)
+    (match (app (var real.lt?)
              (app (var fast-answer-utility) (var needs-audit))
              (app (var audit-first-utility) (var needs-audit)))
       (clause (pcon true) (lit "audit-first"))
@@ -46,7 +46,7 @@
 
 (defterm ((binding best-utility-for-answer ()
   (lam ((pvar needs-audit))
-    (match (app (var lt-real)
+    (match (app (var real.lt?)
              (app (var fast-answer-utility) (var needs-audit))
              (app (var audit-first-utility) (var needs-audit)))
       (clause (pcon true) (app (var audit-first-utility) (var needs-audit)))
@@ -68,13 +68,13 @@
 
 (defterm ((binding act-now-utility ()
   (lam ()
-    (match (app (var lt-real) (app (var eu-fast-answer)) (app (var eu-audit-first)))
+    (match (app (var real.lt?) (app (var eu-fast-answer)) (app (var eu-audit-first)))
       (clause (pcon true) (app (var eu-audit-first)))
       (clause (pcon false) (app (var eu-fast-answer))))))))
 
 (defterm ((binding act-now-action ()
   (lam ()
-    (match (app (var lt-real) (app (var eu-fast-answer)) (app (var eu-audit-first)))
+    (match (app (var real.lt?) (app (var eu-fast-answer)) (app (var eu-audit-first)))
       (clause (pcon true) (lit "audit-first"))
       (clause (pcon false) (lit "fast-answer")))))))
 
@@ -86,15 +86,15 @@
           (app (var best-utility-for-answer) (var needs-audit)))))))))
 
 (defterm ((binding question-value ()
-  (lam () (app (var sub-real) (app (var informed-utility)) (app (var act-now-utility)))))))
+  (lam () (app (var real.sub) (app (var informed-utility)) (app (var act-now-utility)))))))
 
 (defterm ((binding ask-utility ()
   (lam ((pvar interruption-cost))
-    (app (var sub-real) (app (var informed-utility)) (var interruption-cost))))))
+    (app (var real.sub) (app (var informed-utility)) (var interruption-cost))))))
 
 (defterm ((binding policy ()
   (lam ((pvar interruption-cost))
-    (match (app (var lt-real) (var interruption-cost) (app (var question-value)))
+    (match (app (var real.lt?) (var interruption-cost) (app (var question-value)))
       (clause (pcon true) (lit "ask-user"))
       (clause (pcon false) (app (var act-now-action))))))))
 

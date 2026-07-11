@@ -639,7 +639,11 @@ and emit_bound st buf lives (x : string) (b : bound) : unit =
   | BIntrinsic (name, args) ->
       let vs = List.map (fun a -> use st buf a) args in
       let cname = mangle name in
-      if vs = [] then line buf "%s%s = jq_i_%s(rt, NULL);" (decl_prefix st x) x cname
+      if String.equal name "text.join-variadic-v1" then
+        line buf "%s%s = jq_i_%s(rt, %s, %d);" (decl_prefix st x) x cname
+          (if vs = [] then "NULL" else Printf.sprintf "(jq_value[]){ %s }" (String.concat ", " vs))
+          (List.length vs)
+      else if vs = [] then line buf "%s%s = jq_i_%s(rt, NULL);" (decl_prefix st x) x cname
       else
         line buf "%s%s = jq_i_%s(rt, (jq_value[]){ %s });" (decl_prefix st x) x cname
           (String.concat ", " vs)
@@ -947,8 +951,12 @@ let main_source (prog : program) ~precise ~(v_true : Hash.t) ~(v_false : Hash.t)
   List.iter
     (fun (name, arity) ->
       let c = mangle name in
-      line st.decls "const jq_builtin_info jq_bi_%s = { 0, %d, %s, jq_i_%s };" c arity
-        (c_string name) c;
+      if arity < 0 then
+        line st.decls "const jq_builtin_info jq_bi_%s = { 0, UINT32_MAX, %s, NULL };" c
+          (c_string name)
+      else
+        line st.decls "const jq_builtin_info jq_bi_%s = { 0, %d, %s, jq_i_%s };" c arity
+          (c_string name) c;
       st.declared <- SSet.add ("bi:" ^ name) st.declared)
     intrinsics;
   (* init-once cells for const members, in dependency order *)
