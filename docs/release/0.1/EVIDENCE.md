@@ -2,9 +2,11 @@
 
 Status: release-candidate evidence for `jacquard-core-0.1-rc1`.
 
-Distribution note: RC2 repaired installed demo launchers. RC3 adds an explicit
-runtime/generated-output license exception and packages the native C runtime.
-Neither successor changes the language semantics evidenced here.
+Distribution note: RC2 repaired installed demo launchers. RC3 added an explicit
+runtime/generated-output license exception and packaged the native C runtime.
+The current successor distribution relicenses Jacquard under Apache License
+2.0, retaining an Apache-specific runtime/generated-output permission. These
+successor changes do not change the language semantics evidenced here.
 
 Required lineage base: `738dc8e`
 Exact candidate commit: recorded by `scripts/release/reproduce-0.1.sh` in

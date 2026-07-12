@@ -13,9 +13,13 @@ if [ ! -x "$root/bin/jac" ] || [ ! -d "$demos" ]; then
   exit 1
 fi
 test -f "$root/share/jacquard/LICENSE"
+test -f "$root/share/jacquard/NOTICE"
 test -f "$root/share/jacquard/RUNTIME-EXCEPTION.md"
-test -f "$root/share/jacquard/COMMERCIAL-LICENSE.md"
 test -f "$root/share/jacquard/TRADEMARKS.md"
+test -f "$root/LICENSE"
+test -f "$root/NOTICE"
+test -f "$root/RUNTIME-EXCEPTION.md"
+test -f "$root/TRADEMARKS.md"
 test -f "$root/share/jacquard/runtime/jq_value.h"
 grep -q 'Additional permission applies' "$root/share/jacquard/runtime/jq_value.h"
 

@@ -8,7 +8,7 @@ definitions.
 """
 maintainer: "The Jacquard Project"
 authors: "The Jacquard Project"
-license: "AGPL-3.0-or-later"
+license: "Apache-2.0"
 homepage: "https://github.com/jbwinters/jacquard-lang"
 bug-reports: "https://github.com/jbwinters/jacquard-lang/issues"
 dev-repo: "git+https://github.com/jbwinters/jacquard-lang.git"
@@ -36,4 +36,3 @@ build: [
 run-test: [
   ["dune" "runtest" "-p" name "-j" jobs]
 ]
-

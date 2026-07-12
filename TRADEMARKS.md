@@ -37,7 +37,5 @@ Not acceptable without written permission:
 Compatibility claims should be backed by the public conformance tests for the
 version you claim to support.
 
-## Commercial Trademark Permissions
-
-Commercial licenses may include additional trademark permissions. See
-[COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md).
+The Apache License and the runtime/generated-output permission do not grant
+rights to use the Jacquard marks beyond the accurate referential uses above.

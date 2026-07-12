@@ -78,7 +78,7 @@ Each archive contains:
 - `share/jacquard/prelude`: standard library
 - `share/jacquard/demos`: runnable examples
 - `share/jacquard/runtime`: C runtime sources used by `jac build`
-- `LICENSE`, `RUNTIME-EXCEPTION.md`, and package notes
+- `LICENSE`, `NOTICE`, `RUNTIME-EXCEPTION.md`, `TRADEMARKS.md`, and package notes
 
 Packaging verifies each archive checksum and runs the bundled factorial demo
 through both the long command and the `jac` alias. It then removes Dune from

@@ -73,14 +73,10 @@ artifact.
 ## Contributor licensing
 
 By submitting a contribution, you certify that you have the right to submit it
-and that you license it to the Jacquard project under the GNU Affero General
-Public License, version 3 or later.
-
-You also grant Josh Winters and the Jacquard project a perpetual, worldwide,
-non-exclusive, royalty-free license to use, reproduce, modify, distribute,
-sublicense, and relicense your contribution, including as part of commercial
-Jacquard licenses. This keeps the public AGPL project and commercial dual
-licensing path aligned.
+and that you license it to the Jacquard project under the Apache License,
+Version 2.0. Contributions are subject to the copyright and patent grants in
+that license; no separate contributor license agreement or additional
+relicensing grant is required.
 
 If you cannot grant these rights for a contribution, say so before submitting
 it.

@@ -116,8 +116,10 @@ native compilation, packaged binaries, and product-scale case studies. The RC1
 semantic boundary is pinned by 554 Alcotest/QCheck cases, 32 cram transcripts,
 21 documentation examples, native sanitizer/leak/fuzz lanes, and a fresh-clone
 evidence workflow. RC2 repaired binary-demo packaging; RC3 adds an explicit
-runtime/output license exception and packages the native runtime. Neither
-changes the language semantics pinned at RC1.
+runtime/output license exception and packages the native runtime. The current
+successor distribution relicenses Jacquard under Apache License 2.0 and keeps
+that runtime/output permission as an explicit clarification. These licensing
+and packaging changes do not change the language semantics pinned at RC1.
 
 ## What It Looks Like
 
@@ -220,7 +222,7 @@ platforms currently require the development setup.
 Release archives are attached to `jacquard-core-*` GitHub releases. Each
 archive contains `bin/jacquard`, `bin/jac`, `libexec/jacquard/jacquard`,
 `share/jacquard/prelude`, `share/jacquard/demos`, the native C runtime, and the
-license/exception documents.
+license, notice, exception, and trademark documents.
 
 ## Development Quick Start
 
@@ -521,24 +523,18 @@ See `docs/ci-cd.md` for branch protection recommendations.
 
 ## License
 
-Jacquard is licensed under the GNU Affero General Public License, version 3 or
-later. See [LICENSE](LICENSE).
+Jacquard is licensed under the Apache License, Version 2.0. See
+[LICENSE](LICENSE) and [NOTICE](NOTICE).
 
 **Your programs remain yours.** Jacquard claims no copyright in source merely
 because it is written, checked, interpreted, or compiled with Jacquard. Native
 executables include Jacquard runtime material, so the
 [runtime and generated-output exception](RUNTIME-EXCEPTION.md) explicitly
 allows user programs and compiled output to use any license their authors
-choose, including proprietary licenses. Using Jacquard does not require a
-commercial license.
-
-Commercial licenses are available for organizations that need non-AGPL terms
-for modifications or derivatives of Jacquard itself, modified hosted Jacquard
-services that do not satisfy the AGPL, redistribution of Jacquard, or expanded
-trademark rights. See
-[COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md). This is a statement of project
-licensing intent, not legal advice; organizations relying on the distinction
-should have counsel review the terms.
+choose, including proprietary licenses. The exception also removes Apache
+License notice obligations that would otherwise arise solely from embedded
+Runtime Material in a compiled program. This is a statement of project
+licensing intent, not legal advice.
 
 The Jacquard name and project identity are governed by
 [TRADEMARKS.md](TRADEMARKS.md). The code license does not grant trademark
