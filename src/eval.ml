@@ -202,6 +202,7 @@ exception
     op : Hash.t;
     name : string;
     effect_ : string;
+    mode : Kernel.op_mode;
     args : Value.t list;
     kont : Value.frame list;
   }
@@ -681,6 +682,15 @@ let invoke_trusted_native ctx native args kont =
 
 let handler_covers (h : handler) op = List.exists (fun (o, _) -> Hash.equal o op) h.hops
 
+(* Mode lookup is deliberately store-backed: the declaration hash owns the contract, and a mode
+   change therefore changes both the op hash and the runtime behavior selected for its handler. *)
+let op_mode ctx op =
+  match locate ctx op with
+  | { Store.decl = { Kernel.it = Kernel.DefEffect { ops; _ }; _ }; role = Store.Operation i; _ } ->
+      let { Kernel.op_mode; _ } = nth_or_bug "operation" ops i in
+      op_mode
+  | _ -> rt_type "hash %s is not an effect operation" (Hash.to_hex op)
+
 (** Perform an operation: walk the continuation outward for the nearest matching handler (deep
     semantics; the captured resumption is inner frames + that handler frame); fall back to root
     handlers (grants); otherwise raise [Unhandled]. *)
@@ -701,7 +711,12 @@ let perform_unchecked ctx (op : Hash.t) ~name ~effect_ (args : Value.t list) (k 
           | Some env -> env
           | None -> rt (Runtime_err.Match_failure (Value.show (VTuple args)))
         in
-        let env = Env.add resume (ref (VResume captured)) env in
+        let resume_value =
+          match op_mode ctx op with
+          | Kernel.Multi -> VResume captured
+          | Kernel.Once -> VOnceResume (Once_state.create captured)
+        in
+        let env = Env.add resume (ref resume_value) env in
         SEval ({ h.hscope with env }, obody, outer)
     | f :: outer -> split (f :: inner_rev) outer
     | [] -> (
@@ -709,7 +724,9 @@ let perform_unchecked ctx (op : Hash.t) ~name ~effect_ (args : Value.t list) (k 
         | Some native -> invoke_untrusted_native ctx (VOp { op; name; effect_ }) native args k
         | None ->
             if ctx.capture_ops then
-              raise (Op_captured { op; name; effect_; args; kont = List.rev inner_rev })
+              raise
+                (Op_captured
+                   { op; name; effect_; mode = op_mode ctx op; args; kont = List.rev inner_rev })
             else rt (Runtime_err.Unhandled { effect_; op = name }))
   in
   split [] k
@@ -941,11 +958,14 @@ let run_state ctx state =
 let run_expr ctx (e : Kernel.expr) : (Value.t, Runtime_err.t) result =
   match run_state ctx (SEval (empty_scope, e, [])) with v -> Ok v | exception Rt e -> Error e
 
+type captured_kont = Multi_kont of Value.frame list | Once_kont of Value.t
+
 type capture =
   | CValue of Value.t
-  | COp of { op : Hash.t; name : string; args : Value.t list; kont : Value.frame list }
-      (** an unhandled, ungranted op reached the root; [kont] is the entire remaining continuation
-          as immutable data — resume it as many times as the algorithm needs *)
+  | COp of { op : Hash.t; name : string; args : Value.t list; kont : captured_kont }
+      (** An unhandled, ungranted op reached the root. [Multi_kont] exposes immutable frames for
+          algorithms that deliberately branch; [Once_kont] contains an opaque affine resumption
+          whose budget cannot be recreated from this API. *)
 
 (** [validate_state ctx state] checks a complete state for recovery markers without executing it. *)
 let validate_state ctx state =
@@ -954,9 +974,13 @@ let validate_state ctx state =
 type validated_state = Validated_state of state * mutable_graph_snapshot option
 type validated_kont = Validated_kont of Value.frame list
 
+type validated_captured_kont =
+  | Validated_multi_kont of validated_kont
+  | Validated_once_kont of Value.t
+
 type validated_capture =
   | VCValue of Value.t
-  | VCOp of { op : Hash.t; name : string; args : Value.t list; kont : validated_kont }
+  | VCOp of { op : Hash.t; name : string; args : Value.t list; kont : validated_captured_kont }
 
 (** [validate_state_once ctx state] validates a complete externally supplied state and seals it for
     repeated capture runs. The abstract result cannot be forged by library clients. *)
@@ -992,7 +1016,13 @@ let run_state_capturing_trusted ctx (state : state) : (capture, Runtime_err.t) r
     (fun () ->
       match run_state_unchecked ctx state with
       | v -> Ok (CValue v)
-      | exception Op_captured { op; name; args; kont; _ } -> Ok (COp { op; name; args; kont })
+      | exception Op_captured { op; name; mode; args; kont; _ } ->
+          let kont =
+            match mode with
+            | Kernel.Multi -> Multi_kont kont
+            | Kernel.Once -> Once_kont (VOnceResume (Once_state.create kont))
+          in
+          Ok (COp { op; name; args; kont })
       | exception Rt e -> Error e)
 
 (** [run_validated_state_capturing ctx state] captures a previously validated state without
@@ -1000,15 +1030,24 @@ let run_state_capturing_trusted ctx (state : state) : (capture, Runtime_err.t) r
 let run_validated_state_capturing ctx (Validated_state (state, _)) =
   match run_state_capturing_trusted ctx state with
   | Ok (CValue value) -> Ok (VCValue value)
-  | Ok (COp { op; name; args; kont }) -> Ok (VCOp { op; name; args; kont = Validated_kont kont })
+  | Ok (COp { op; name; args; kont = Multi_kont kont }) ->
+      Ok (VCOp { op; name; args; kont = Validated_multi_kont (Validated_kont kont) })
+  | Ok (COp { op; name; args; kont = Once_kont resume }) ->
+      Ok (VCOp { op; name; args; kont = Validated_once_kont resume })
   | Error error -> Error error
 
 (** [resume_validated_state ctx kont value] seals a state derived from a captured continuation. Only
     the newly introduced value needs validation because [kont] came from a validated run. *)
-let resume_validated_state ctx (Validated_kont kont) value =
-  match checked_result_state ctx value kont with
-  | state -> Ok (Validated_state (state, None))
-  | exception Rt error -> Error error
+let resume_validated_state ctx kont value =
+  match kont with
+  | Validated_multi_kont (Validated_kont frames) -> (
+      match checked_result_state ctx value frames with
+      | state -> Ok (Validated_state (state, None))
+      | exception Rt error -> Error error)
+  | Validated_once_kont resume -> (
+      match apply ctx resume [ value ] [] with
+      | state -> Ok (Validated_state (state, None))
+      | exception Rt error -> Error error)
 
 (** [run_state_capturing ctx state] drives [state] to completion, but instead of dying on an
     unhandled op it returns the op with its continuation ({!COp}). Used by native inference drivers
@@ -1029,9 +1068,24 @@ type once_capture =
 let run_state_capturing_once ctx state =
   match run_state_capturing ctx state with
   | Ok (CValue value) -> Ok (OCValue value)
-  | Ok (COp { op; name; args; kont }) ->
+  | Ok (COp { op; name; args; kont = Multi_kont kont }) ->
       Ok (OCOp { op; name; args; resume = VOnceResume (Once_state.create kont) })
+  | Ok (COp { op; name; args; kont = Once_kont resume }) -> Ok (OCOp { op; name; args; resume })
   | Error error -> Error error
+
+(** [resume_captured_state ctx kont value] constructs the state that resumes a root capture. Multi
+    continuations remain reusable; applying a Once token consumes its single budget and a later call
+    reports E0906. Newly introduced values are recovery-validated at this boundary. *)
+let resume_captured_state ctx kont value =
+  match kont with
+  | Multi_kont frames -> (
+      match checked_result_state ctx value frames with
+      | state -> Ok state
+      | exception Rt error -> Error error)
+  | Once_kont resume -> (
+      match apply ctx resume [ value ] [] with
+      | state -> Ok state
+      | exception Rt error -> Error error)
 
 (** [resume_state kont v] is the state that delivers [v] to a captured continuation. *)
 let resume_state (kont : Value.frame list) (v : Value.t) : state = SApply (v, kont)

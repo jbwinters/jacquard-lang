@@ -161,12 +161,19 @@ module Jacquard
   binding  = (name id, type? annotation, expr value)
   conspec  = (name id, field* fields)
   field    = (name? label, type ty)                        -- labels generate accessor fns
-  opspec   = (name id, type* params, type result)
+  opmode   = Multi | Once
+  opspec   = (name id, opmode mode, type* params, type result)
   row      = (hash* effects, name? var)                    -- effect set + optional row variable
   lit      = Int(int) | Real(real) | Text(text)
   refkind  = Term | Con | Op
 }
 ```
+
+Operation-mode compatibility encoding follows the kernel extension rule: `Multi` is absent in
+bootstrap notation and contributes no bytes to `HASH_V0`, so the legacy
+`(op name (params...) result)` carrier and every existing hash remain unchanged. `Once` prints as
+`(op name once (params...) result)` and appends discriminator byte `0x01` after the result type in
+canonical serialization. Explicit `multi` is rejected to keep the absence encoding unique.
 
 **Count: 12 expr + 6 pat + 6 type + 3 decl = 27 forms.** The stated target was roughly 25.
 Section 10 names the two cheapest cuts if we want the number exactly.

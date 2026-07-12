@@ -55,6 +55,13 @@ operations serialize the field, so the extension is invisible to the store
 until someone uses it. This is the general pattern for extending the kernel
 under content addressing and is worth naming in the kernel spec as such.
 
+The exact bootstrap carriers are `(op fetch ((tref request)) (tref response))`
+for `Multi` and `(op fetch once ((tref request)) (tref response))` for `Once`.
+Explicit `multi` is rejected so absence remains the unique legacy encoding.
+In `HASH_V0`, `Multi` contributes no byte; `Once` appends byte `0x01` after the
+serialized result type. Until the surface-syntax phase lands, tools render a
+`Once` operation in bootstrap notation rather than erase its mode.
+
 Mode is part of the **interface hash**. Tightening an operation from `multi`
 to `once` changes what dependents' handlers are allowed to do, so it is a
 breaking interface change by construction, and `jac pkg diff` reports it in
@@ -148,10 +155,12 @@ site.
 
 L0 (small): dynamic trap and E-code, hostile Warp lane. Ships independently,
 immediately, on the existing runtime counters. L1 (medium): kernel opspec
-field with absence-encoding, surface `once`/`multi` keywords, interface-hash
-inclusion, pkg-diff rendering. L2 (large): `Resume` type and the affine
+field with absence-encoding, interface-hash inclusion, pkg-diff rendering,
+and connection to the L0 runtime backstop. L2 (large): `Resume` type and the affine
 checker. L3 (small): stdlib assignments flip on, migration lint for
-unannotated user effects.
+unannotated user effects. L4 (medium): surface `once`/`multi` keywords and the
+effect-level shorthand; before L4, ordinary `.jac` lowering remains legacy
+`Multi` and cannot print a `Once` declaration without a bootstrap fallback.
 
 | ID | decision | default |
 |----|----------|---------|

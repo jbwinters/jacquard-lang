@@ -17,7 +17,8 @@
       [(defeffect name ((tvar a) ..) opspec+)]
     - auxiliaries: [(clause pat expr)], [(ret pat expr)], [(opclause op (pat ..) resume-name body)],
       [(binding name (ty?) value)], [(con name field ..)], [(field label? ty)],
-      [(op name (ty ..) result)], [(row (eref e) .. var?)], [(eref ref)], [(rvar e)]
+      [(op name (ty ..) result)], [(op name once (ty ..) result)], [(row (eref e) .. var?)],
+      [(eref ref)], [(rvar e)]
 
     References that are names before resolution and hashes after ([gref]) accept either a symbol or
     a [#hash] argument. [Quote] payloads stay raw [Form.t] data (spec §5.1: quoted code is the
@@ -91,7 +92,19 @@ type binding = { bname : string; annot : ty option; value : expr; bmeta : Meta.t
 type conspec = { con_name : string; fields : field list; kmeta : Meta.t }
 and field = { label : string option; fty : ty; fmeta : Meta.t }
 
-type opspec = { op_name : string; op_params : ty list; op_result : ty; smeta : Meta.t }
+(** Operation resumption multiplicity. [Multi] is the legacy default and has no bootstrap or HASH_V0
+    encoding; [Once] is explicit and identity-bearing. *)
+type op_mode = Multi | Once
+
+type opspec = {
+  op_name : string;
+  op_mode : op_mode;
+  op_params : ty list;
+  op_result : ty;
+  smeta : Meta.t;
+}
+(** A validated operation declaration. Construction through {!decl_of_form} defaults an absent mode
+    to [Multi], accepts only explicit [Once], and reports malformed modes as diagnostics. *)
 
 type decl = decl_node node
 
@@ -472,13 +485,33 @@ let conspec_of (f : Form.t) : conspec =
 let opspec_of (f : Form.t) : opspec =
   if f.Form.head <> "op" then
     err ~meta:f.Form.meta ~code:"E0201" "expected an `op` operation spec, got `%s`" f.Form.head;
-  expect_arity f 3;
+  if List.length f.Form.args <> 3 && List.length f.Form.args <> 4 then
+    err ~meta:f.Form.meta ~code:"E0202" "`op` expects 3 or 4 argument(s), got %d"
+      (List.length f.Form.args);
   let op_name = the_sym ~what:"the operation name" f (List.nth f.Form.args 0) in
-  let op_params =
-    List.map ty_of (the_group ~what:"the parameter types" f (List.nth f.Form.args 1))
+  let mode_offset, op_mode =
+    match f.Form.args with
+    | [ _; Form.Sym "once"; _ ] ->
+        err ~meta:f.Form.meta ~code:"E0202"
+          "`op` with mode `once` expects both a parameter group and a result type"
+    | [ _; _; _ ] -> (0, Multi)
+    | [ _; Form.Sym "once"; _; _ ] -> (1, Once)
+    | [ _; Form.Sym mode; _; _ ] ->
+        err ~meta:f.Form.meta ~code:"E0213"
+          "invalid operation mode `%s`: expected `once`, or omit the mode for legacy `multi`" mode
+    | [ _; _; _; _ ] ->
+        err ~meta:f.Form.meta ~code:"E0203"
+          "the optional operation mode in `op` must be the symbol `once`"
+    | _ -> assert false
   in
-  let op_result = ty_of (the_form ~what:"the result type" f (List.nth f.Form.args 2)) in
-  { op_name; op_params; op_result; smeta = f.Form.meta }
+  let op_params =
+    List.map ty_of
+      (the_group ~what:"the parameter types" f (List.nth f.Form.args (1 + mode_offset)))
+  in
+  let op_result =
+    ty_of (the_form ~what:"the result type" f (List.nth f.Form.args (2 + mode_offset)))
+  in
+  { op_name; op_mode; op_params; op_result; smeta = f.Form.meta }
 
 let tvars_group ~what (f : Form.t) arg =
   List.map
@@ -684,14 +717,12 @@ let decl_to_form (d : decl) : Form.t =
         (Form.Sym ename
         :: group (List.map (fun v -> form "tvar" [ Form.Sym v ]) evars)
         :: List.map
-             (fun { op_name; op_params; op_result; smeta } ->
+             (fun { op_name; op_mode; op_params; op_result; smeta } ->
                Form.F
                  (form ~meta:smeta "op"
-                    [
-                      Form.Sym op_name;
-                      group (List.map ty_to_form op_params);
-                      Form.F (ty_to_form op_result);
-                    ]))
+                    ([ Form.Sym op_name ]
+                    @ (match op_mode with Multi -> [] | Once -> [ Form.Sym "once" ])
+                    @ [ group (List.map ty_to_form op_params); Form.F (ty_to_form op_result) ])))
              ops)
 
 (** [to_form t] converts back to the triple encoding, preserving node meta. *)

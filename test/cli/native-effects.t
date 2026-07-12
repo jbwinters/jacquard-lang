@@ -233,3 +233,25 @@ probe goes through jq_handle2/jq_perform/jq_dispatch rather than fabricating an 
   identical
   $ cat once-interpreter.out
   error[E0906]: a once continuation may be resumed at most once per captured instance
+
+EL.1 connects the declared operation mode to those backstops. The ordinary kernel declaration is
+legacy Multi by absence; only the explicit Once declaration below makes both engines reject the
+second invocation of the captured instance.
+
+  $ cat > declared-once.jqd <<'EOF_JQD'
+  > (defeffect linear () (op signal once () (tref int)))
+  > (handle (app (var signal))
+  >   (ret (pvar x) (var x))
+  >   (opclause signal () k
+  >     (let nonrec (pwild) (app (var k) (lit 1))
+  >       (app (var k) (lit 2)))))
+  > EOF_JQD
+  $ jacquard run declared-once.jqd > declared-interpreter.out 2>&1; echo "interpreter exit $?"
+  interpreter exit 2
+  $ jacquard build declared-once.jqd -o declared-native > /dev/null
+  $ ./declared-native > declared-native.out 2>&1; echo "native exit $?"
+  native exit 2
+  $ diff -u declared-interpreter.out declared-native.out && echo identical
+  identical
+  $ cat declared-native.out
+  error[E0906]: a once continuation may be resumed at most once per captured instance

@@ -863,6 +863,9 @@ let pp_constructor ?(leading = true) context lookup fmt (constructor : Kernel.co
   pp_trailing context constructor.kmeta fmt
 
 let pp_operation context lookup fmt (operation : Kernel.opspec) =
+  (* EL.4 owns surface mode syntax. Until then, refusing Once makes fragment and semantic-diff
+     rendering fall back to the exact bootstrap carrier instead of erasing the contract. *)
+  if operation.op_mode = Kernel.Once then raise Bug_unsupported_surface_form;
   let params_meta = Meta.surface_container "params" operation.smeta in
   pp_leading context operation.smeta fmt;
   Format.fprintf fmt "@[<hov 2>%a :@ " (pp_named Surface_name.Op) operation.op_name;
@@ -1043,7 +1046,11 @@ let fragment_error form =
     forms return E1203 rather than guessing. *)
 let print_fragment ?(lookup : lookup option) ?(width = default_width) (form : Form.t) :
     (string, Diag.t list) result =
-  let rendered pp value = Ok (render ~width pp value) in
+  let rendered pp value =
+    match render ~width pp value with
+    | text -> Ok text
+    | exception Bug_unsupported_surface_form -> fragment_error form
+  in
   let dummy_lit = Form.form "lit" [ Form.Int 0 ] in
   let dummy_pat = Form.form "pwild" [] in
   let dummy_ret = Form.form "ret" [ Form.F dummy_pat; Form.F dummy_lit ] in

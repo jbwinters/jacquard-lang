@@ -131,12 +131,20 @@ module Jacquard
   binding  = (name id, type? annotation, expr value)
   conspec  = (name id, field* fields)
   field    = (name? label, type ty)                        -- labels generate accessor fns
-  opspec   = (name id, type* params, type result)
+  opmode   = Multi | Once
+  opspec   = (name id, opmode mode, type* params, type result)
   row      = (hash* effects, name? var)                    -- effect set + optional row variable
   lit      = Int(int) | Real(real) | Text(text)
   refkind  = Term | Con | Op
 }
 ```
+
+Operation-mode compatibility encoding: `Multi` is represented by absence in bootstrap notation
+and contributes no bytes to `HASH_V0`; the legacy `(op name (params...) result)` spelling is
+canonical and every pre-linearity declaration retains its exact identity. `Once` is represented
+explicitly as `(op name once (params...) result)` and appends the discriminator byte `0x01` after
+the result type in that operation's canonical serialization. Explicit `multi` is rejected so the
+legacy value has exactly one carrier.
 
 **Count: 12 expr + 6 pat + 6 type + 3 decl = 27 forms.** The stated target was roughly 25.
 Section 10 names the two cheapest cuts if we want the number exactly.

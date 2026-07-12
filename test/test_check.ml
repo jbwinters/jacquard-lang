@@ -191,6 +191,9 @@ let test_op_clause_arity () =
 
 let test_declaration_kind_checks () =
   let h = make_cctx () in
+  (match check_src h "(defeffect linear () (op signal once () (tref int)))" with
+  | Ok _ -> ()
+  | Error ds -> Eval_support.fail_diags "Once operation declaration" ds);
   (* wrong arity in a field type *)
   (match
      check_src h "(deftype bad ((tvar a)) (con mk (field (tapp (tref option) (tvar a) (tvar a)))))"

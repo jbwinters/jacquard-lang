@@ -666,7 +666,15 @@ let lower_nonterm_top (top : Surface_ast.top) =
       let lower_operation (operation : Surface_ast.operation) =
         let* op_params = map_results lower_ty operation.params in
         let* op_result = lower_ty operation.result in
-        Ok Kernel.{ op_name = operation.name; op_params; op_result; smeta = operation.meta }
+        Ok
+          Kernel.
+            {
+              op_name = operation.name;
+              op_mode = Multi;
+              op_params;
+              op_result;
+              smeta = operation.meta;
+            }
       in
       let* ops = map_results lower_operation operations in
       Ok

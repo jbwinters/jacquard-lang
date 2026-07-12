@@ -39,6 +39,7 @@ in `src/` and `bin/` appears in this catalog.
 | E0210 | invalid ref kind | `(ref #... banana)` |
 | E0211 | invalid rec flag | `(let sometimes ...)` |
 | E0212 | `handle` without exactly one `ret` clause | two `ret` clauses |
+| E0213 | invalid explicit operation mode | `(op fetch multi () (tref text))` (legacy `multi` is encoded by absence) |
 
 ## Name resolution (E03xx)
 

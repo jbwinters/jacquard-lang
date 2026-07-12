@@ -45,14 +45,23 @@ val run_expr : ctx -> Kernel.expr -> (Value.t, Runtime_err.t) result
 (** [run_expr ctx expression] validates and evaluates a resolved expression. Language/runtime
     failures are returned; malformed store invariants may raise an internal [Bug_*] exception. *)
 
+type captured_kont
+(** A mode-aware root continuation. Multi captures are reusable by {!resume_captured_state}; Once
+    captures retain one shared affine budget. The representation is sealed so a Once capture cannot
+    be converted back into raw frames. *)
+
 type capture =
   | CValue of Value.t
-  | COp of { op : Hash.t; name : string; args : Value.t list; kont : Value.frame list }
-      (** A terminal value or an unhandled root operation with its reusable continuation. *)
+  | COp of { op : Hash.t; name : string; args : Value.t list; kont : captured_kont }
+      (** A terminal value or an unhandled root operation with its mode-aware continuation. *)
 
 val run_state_capturing : ctx -> state -> (capture, Runtime_err.t) result
 (** [run_state_capturing ctx state] validates [state], then runs to a value or the first unhandled
     root operation. Runtime failures are returned. *)
+
+val resume_captured_state : ctx -> captured_kont -> Value.t -> (state, Runtime_err.t) result
+(** [resume_captured_state ctx kont value] validates [value] and constructs a resumed state. A Multi
+    capture may be resumed repeatedly; a second use of a Once capture returns E0906. *)
 
 type once_capture =
   | OCValue of Value.t
@@ -68,12 +77,12 @@ val run_state_capturing_once : ctx -> state -> (once_capture, Runtime_err.t) res
 type validated_state
 (** An unforgeable state accepted by the reusable inference driver. *)
 
-type validated_kont
-(** An unforgeable continuation captured from a validated execution. *)
+type validated_captured_kont
+(** An unforgeable, mode-aware continuation captured from a validated execution. *)
 
 type validated_capture =
   | VCValue of Value.t
-  | VCOp of { op : Hash.t; name : string; args : Value.t list; kont : validated_kont }
+  | VCOp of { op : Hash.t; name : string; args : Value.t list; kont : validated_captured_kont }
       (** A terminal value or root operation produced from a validated state. *)
 
 val validate_state_once : ctx -> state -> (validated_state, Runtime_err.t) result
@@ -92,7 +101,7 @@ val run_validated_state_capturing :
     syntax. Memo/native results remain guarded and runtime failures are returned. *)
 
 val resume_validated_state :
-  ctx -> validated_kont -> Value.t -> (validated_state, Runtime_err.t) result
+  ctx -> validated_captured_kont -> Value.t -> (validated_state, Runtime_err.t) result
 (** [resume_validated_state ctx kont value] validates [value] and seals delivery to [kont]. Recovery
     markers or malformed values are returned as runtime errors. *)
 

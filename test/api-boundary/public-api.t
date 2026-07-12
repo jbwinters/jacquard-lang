@@ -100,10 +100,43 @@ Validated inference states cannot be resumed from arbitrary public frame lists.
   $ if ocamlc -I "$JACQUARD_API" -c forged_resume.ml >forged_resume.out 2>&1; then
   >   echo forgeable
   > elif grep -Fq "Error: This expression has type 'a list" forged_resume.out \
-  >   && grep -Fq "but an expression was expected of type Jacquard.Eval.validated_kont" forged_resume.out; then
+  >   && grep -Fq "but an expression was expected of type" forged_resume.out \
+  >   && grep -Fq "Jacquard.Eval.validated_captured_kont" forged_resume.out; then
   >   echo sealed
   > else
   >   cat forged_resume.out
+  >   exit 1
+  > fi
+  sealed
+
+Ordinary mode-aware captures likewise cannot be forged from or unwrapped into public frame lists.
+
+  $ cat > forged_captured_resume.ml <<'EOF'
+  > open Jacquard
+  > let forge ctx value = Eval.resume_captured_state ctx [] value
+  > EOF
+  $ if ocamlc -I "$JACQUARD_API" -c forged_captured_resume.ml >forged_captured_resume.out 2>&1; then
+  >   echo forgeable
+  > elif grep -Fq "Error: This expression has type 'a list" forged_captured_resume.out \
+  >   && grep -Fq "but an expression was expected of type" forged_captured_resume.out \
+  >   && grep -Fq "Jacquard.Eval.captured_kont" forged_captured_resume.out; then
+  >   echo sealed
+  > else
+  >   cat forged_captured_resume.out
+  >   exit 1
+  > fi
+  sealed
+  $ cat > unwrap_captured_resume.ml <<'EOF'
+  > open Jacquard
+  > let unwrap (kont : Eval.captured_kont) =
+  >   match kont with Eval.Multi_kont frames -> frames
+  > EOF
+  $ if ocamlc -I "$JACQUARD_API" -c unwrap_captured_resume.ml >unwrap_captured_resume.out 2>&1; then
+  >   echo unwrap-able
+  > elif grep -Fq "Error: Unbound constructor Eval.Multi_kont" unwrap_captured_resume.out; then
+  >   echo sealed
+  > else
+  >   cat unwrap_captured_resume.out
   >   exit 1
   > fi
   sealed
