@@ -93,7 +93,7 @@ module Runtime_value_key = struct
                 | first :: _ -> mix accumulator (form_arg_fingerprint first)
               in
               loop budget accumulator rest
-          | VResume _ -> loop budget (mix accumulator 11) rest)
+          | VResume _ | VOnceResume _ -> loop budget (mix accumulator 11) rest)
     in
     loop 4 0 [ root ]
 end
@@ -101,7 +101,12 @@ end
 module Runtime_value_seen = Hashtbl.Make (Runtime_value_key)
 module Physical_cache = Ephemeron.K1.Make (Runtime_value_key)
 
-type mutable_snapshot = { snapshot_root : Value.t; snapshot_cells : (Value.t ref * Value.t) list }
+type mutable_graph_snapshot = {
+  cells : (Value.t ref * Value.t) list;
+  once_states : (Value.kont Once_state.t * bool) list;
+}
+
+type mutable_snapshot = { snapshot_root : Value.t; snapshot_graph : mutable_graph_snapshot }
 type native_snapshot_entry = { snapshot : mutable_snapshot; mutable last_used : int }
 type native_snapshot_lru = { entries : native_snapshot_entry option array; mutable clock : int }
 
@@ -405,6 +410,13 @@ let scan_recovery_state ctx ~static_trusted (state : state) =
           kont ~check_static frames;
           if check_static then Physical_cache.replace ctx.recovery_static_clean runtime_value ();
           true
+      | VOnceResume state ->
+          let check_static =
+            (not static_trusted) && not (Physical_cache.mem ctx.recovery_static_clean runtime_value)
+          in
+          kont ~check_static (Once_state.payload state);
+          if check_static then Physical_cache.replace ctx.recovery_static_clean runtime_value ();
+          true
   and scope scope_value =
     if first_visit scope_value then
       Value.Env.iter (fun _ cell -> ignore (value ~static_trusted:false !cell)) scope_value.env
@@ -488,7 +500,7 @@ let rec needs_mutable_recheck ctx value =
         false)
       else true
   | VResume [] -> false
-  | VResume (_ :: _) -> true
+  | VResume (_ :: _) | VOnceResume _ -> true
   | (VTuple items | VCon { args = items; _ }) as container ->
       if Physical_cache.mem ctx.recovery_immutable_clean container then false
       else
@@ -496,11 +508,13 @@ let rec needs_mutable_recheck ctx value =
         if not mutable_edges then Physical_cache.replace ctx.recovery_immutable_clean container ();
         mutable_edges
 
-let snapshot_mutable_cells root =
+let snapshot_mutable_graph root =
   let seen_values = Runtime_value_seen.create 16 in
   let seen_scopes = Physical_seen.create 16 in
   let seen_cells = Physical_seen.create 16 in
+  let seen_once_states = Physical_seen.create 16 in
   let cells = ref [] in
+  let once_states = ref [] in
   let first_visit seen value =
     let key = Obj.repr value in
     if Obj.is_int key || Physical_seen.mem seen key then false
@@ -517,7 +531,11 @@ let snapshot_mutable_cells root =
           ()
       | VTuple items | VCon { args = items; _ } -> List.iter value items
       | VClosure { scope = closure_scope; _ } -> scope closure_scope
-      | VResume frames -> List.iter frame frames)
+      | VResume frames -> List.iter frame frames
+      | VOnceResume state ->
+          if first_visit seen_once_states state then
+            once_states := (state, Once_state.snapshot state) :: !once_states;
+          List.iter frame (Once_state.payload state))
   and scope scope_value =
     if first_visit seen_scopes scope_value then
       Value.Env.iter
@@ -542,22 +560,28 @@ let snapshot_mutable_cells root =
     | FHandle handler -> scope handler.hscope
   in
   value root;
-  !cells
+  { cells = !cells; once_states = !once_states }
 
 let make_mutable_snapshot ctx root =
   {
     snapshot_root = root;
-    snapshot_cells = (if needs_mutable_recheck ctx root then snapshot_mutable_cells root else []);
+    snapshot_graph =
+      (if needs_mutable_recheck ctx root then snapshot_mutable_graph root
+       else { cells = []; once_states = [] });
   }
 
-let rec snapshot_unchanged = function
-  | [] -> true
-  | (cell, captured) :: rest -> !cell == captured && snapshot_unchanged rest
+let snapshot_unchanged snapshot =
+  List.for_all (fun (cell, captured) -> !cell == captured) snapshot.cells
+  && List.for_all
+       (fun (state, captured) -> Once_state.snapshot state = captured)
+       snapshot.once_states
 
 let atomic_value = function
   | VInt _ | VReal _ | VText _ | VConstructor _ | VOp _ | VBuiltin _ | VTrustedBuiltin _ -> true
   | VTuple [] | VCon { args = []; _ } -> true
-  | VTuple (_ :: _) | VCon { args = _ :: _; _ } | VClosure _ | VCode _ | VResume _ -> false
+  | VTuple (_ :: _) | VCon { args = _ :: _; _ } | VClosure _ | VCode _ | VResume _ | VOnceResume _
+    ->
+      false
 
 let reject_recovery_result_value ctx root =
   let rec validate value =
@@ -567,7 +591,7 @@ let reject_recovery_result_value ctx root =
         if Recovery_marker.form payload then
           rt_type "E1202: recovery holes are not valid input to evaluation";
         true
-    | VClosure _ | VResume _ ->
+    | VClosure _ | VResume _ | VOnceResume _ ->
         reject_recovery_state ctx (SApply (value, []));
         false
     | (VTuple items | VCon { args = items; _ }) as container ->
@@ -619,7 +643,7 @@ let replace_native_snapshot ctx root index =
   lru.entries.(index) <-
     Some
       {
-        snapshot = { snapshot_root = root; snapshot_cells = snapshot_mutable_cells root };
+        snapshot = { snapshot_root = root; snapshot_graph = snapshot_mutable_graph root };
         last_used = lru.clock;
       }
 
@@ -629,7 +653,7 @@ let prepare_native_argument ctx root =
     if index < 0 then replace_native_snapshot ctx root index
     else
       let entry = Option.get ctx.native_mutable_snapshots.entries.(index) in
-      if not (snapshot_unchanged entry.snapshot.snapshot_cells) then (
+      if not (snapshot_unchanged entry.snapshot.snapshot_graph) then (
         reject_recovery_state ctx (SApply (root, []));
         replace_native_snapshot ctx root index)
 
@@ -641,7 +665,7 @@ let check_native_argument ctx root =
       replace_native_snapshot ctx root index)
     else
       let entry = Option.get ctx.native_mutable_snapshots.entries.(index) in
-      if not (snapshot_unchanged entry.snapshot.snapshot_cells) then (
+      if not (snapshot_unchanged entry.snapshot.snapshot_graph) then (
         reject_recovery_state ctx (SApply (root, []));
         replace_native_snapshot ctx root index)
 
@@ -716,6 +740,13 @@ let apply_unchecked ctx (fn : Value.t) (args : Value.t list) (k : kont) : state 
       match args with
       | [ v ] -> SApply (v, frames @ k)
       | _ -> rt_arity "a resumption takes exactly one argument, got %d" (List.length args))
+  | VOnceResume once -> (
+      match args with
+      | [ v ] -> (
+          match Once_state.consume once with
+          | Some frames -> SApply (v, frames @ k)
+          | None -> rt Runtime_err.Once_resumed_twice)
+      | _ -> rt_arity "a resumption takes exactly one argument, got %d" (List.length args))
   | v -> rt_type "%s is not applicable" (Value.show v)
 
 (** [apply ctx fn args k] validates all reachable runtime payloads before invoking native code or
@@ -746,7 +777,7 @@ let rec eval_ref ctx (h : Hash.t) (kind : Kernel.refkind) (k : kont) : state =
               | Some clean when clean == v -> (
                   match Hashtbl.find_opt ctx.evaluator_mutable_snapshots h with
                   | Some snapshot
-                    when snapshot.snapshot_root == v && snapshot_unchanged snapshot.snapshot_cells
+                    when snapshot.snapshot_root == v && snapshot_unchanged snapshot.snapshot_graph
                     ->
                       SApply (v, k)
                   | Some _ | None ->
@@ -920,7 +951,7 @@ type capture =
 let validate_state ctx state =
   match reject_recovery_state ctx state with () -> Ok () | exception Rt error -> Error error
 
-type validated_state = Validated_state of state * (Value.t ref * Value.t) list option
+type validated_state = Validated_state of state * mutable_graph_snapshot option
 type validated_kont = Validated_kont of Value.frame list
 
 type validated_capture =
@@ -938,16 +969,16 @@ let validate_state_once ctx state =
             VTuple [ VClosure { scope; params = []; body = expression }; VResume kont ]
         | SApply (value, kont) -> VTuple [ value; VResume kont ]
       in
-      Ok (Validated_state (state, Some (snapshot_mutable_cells root)))
+      Ok (Validated_state (state, Some (snapshot_mutable_graph root)))
   | Error error -> Error error
 
 (** Restore an initial validated state before one semantically independent execution. Immutable
     syntax and values remain shared; mutable cells in the state and evaluator-owned memo graph are
     reset to their validated snapshots. *)
-let fresh_validated_state ctx (Validated_state (state, initial_cells)) =
-  let restore cells = List.iter (fun (cell, value) -> cell := value) cells in
-  Option.iter restore initial_cells;
-  Hashtbl.iter (fun _ snapshot -> restore snapshot.snapshot_cells) ctx.evaluator_mutable_snapshots;
+let fresh_validated_state ctx (Validated_state (state, initial_graph)) =
+  let restore graph = List.iter (fun (cell, value) -> cell := value) graph.cells in
+  Option.iter restore initial_graph;
+  Hashtbl.iter (fun _ snapshot -> restore snapshot.snapshot_graph) ctx.evaluator_mutable_snapshots;
   Validated_state (state, None)
 
 (** [run_state_capturing_trusted ctx state] captures like {!run_state_capturing} without scanning
@@ -987,6 +1018,20 @@ let run_state_capturing ctx (state : state) : (capture, Runtime_err.t) result =
   match validate_state ctx state with
   | Error error -> Error error
   | Ok () -> run_state_capturing_trusted ctx state
+
+type once_capture =
+  | OCValue of Value.t
+  | OCOp of { op : Hash.t; name : string; args : Value.t list; resume : Value.t }
+
+(** [run_state_capturing_once ctx state] is the EL.0 low-level once-capture boundary. A root op's
+    actual continuation is sealed inside an opaque affine token before it crosses the public API;
+    clients cannot extract or rewrap its frames to mint a second budget. *)
+let run_state_capturing_once ctx state =
+  match run_state_capturing ctx state with
+  | Ok (CValue value) -> Ok (OCValue value)
+  | Ok (COp { op; name; args; kont }) ->
+      Ok (OCOp { op; name; args; resume = VOnceResume (Once_state.create kont) })
+  | Error error -> Error error
 
 (** [resume_state kont v] is the state that delivers [v] to a captured continuation. *)
 let resume_state (kont : Value.frame list) (v : Value.t) : state = SApply (v, kont)

@@ -218,3 +218,18 @@ reachable from the surface:
   $ jacquard build iso.jqd -o nope 2>&1 | tail -2
   iso.jqd:2:11-3:49: error[E0815]: top-level definition `poked` performs the `ticker` effect while being defined
     hint: wrap the body in a lambda and perform the effect when called
+
+EL.0's dynamic once backstop is tested below the future mode-syntax layer. Both probes capture a
+real non-empty continuation, resume it once, then attempt the same captured instance again. The C
+probe goes through jq_handle2/jq_perform/jq_dispatch rather than fabricating an empty JQ_RESUME.
+
+  $ SRC="../../runtime/jq_alloc.c ../../runtime/jq_rc.c ../../runtime/jq_text.c ../../runtime/jq_error.c ../../runtime/jq_show.c ../../runtime/jq_utf8.c ../../runtime/jq_rng.c ../../runtime/jq_apply.c ../../runtime/jq_code.c ../../runtime/jq_intrinsics.c ../../runtime/jq_effects.c ../../runtime/jq_frames.c ../../runtime/jq_grants.c ../../runtime/test/test_runtime.c"
+  $ $CC -std=c11 -O2 -Wall -Wextra -Werror -o once-native $SRC
+  $ ../once_interpreter_probe.exe > once-interpreter.out 2>&1; echo "interpreter exit $?"
+  interpreter exit 2
+  $ ./once-native once-resume-twice > once-native.out 2>&1; echo "native exit $?"
+  native exit 2
+  $ diff -u once-interpreter.out once-native.out && echo identical
+  identical
+  $ cat once-interpreter.out
+  error[E0906]: a once continuation may be resumed at most once per captured instance

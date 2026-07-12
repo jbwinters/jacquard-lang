@@ -117,6 +117,7 @@ in `src/` and `bin/` appears in this catalog.
 | E0903 | model file has no expression | a decls-only file passed to `jacquard infer` |
 | E0904 | observe at the sampling root | `observe` under `jacquard run --allow dist` (D7 default: defect) |
 | E0905 | exhaustive verification budget exceeded | a property over `uniform-int(1, 1000000)` under `jacquard test --exhaustive` |
+| E0906 | a once continuation was resumed more than once | applying the same once resumption twice |
 
 ## Warp (E10xx)
 

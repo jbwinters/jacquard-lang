@@ -9,4 +9,5 @@
   (source_tree ../../bench)
   (source_tree ../native-asan)
   (source_tree ../native-gauntlet)
+  ../once_interpreter_probe.exe
   (source_tree ../../scripts)))

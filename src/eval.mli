@@ -54,6 +54,17 @@ val run_state_capturing : ctx -> state -> (capture, Runtime_err.t) result
 (** [run_state_capturing ctx state] validates [state], then runs to a value or the first unhandled
     root operation. Runtime failures are returned. *)
 
+type once_capture =
+  | OCValue of Value.t
+  | OCOp of { op : Hash.t; name : string; args : Value.t list; resume : Value.t }
+      (** A terminal value or root operation whose actual continuation is already sealed as one
+          opaque once-resumption instance. *)
+
+val run_state_capturing_once : ctx -> state -> (once_capture, Runtime_err.t) result
+(** [run_state_capturing_once ctx state] validates and runs [state]. A captured root continuation is
+    sealed before it crosses the API, preventing clients from extracting frames and minting another
+    budget for the same captured instance. *)
+
 type validated_state
 (** An unforgeable state accepted by the reusable inference driver. *)
 
@@ -71,8 +82,9 @@ val validate_state_once : ctx -> state -> (validated_state, Runtime_err.t) resul
 
 val fresh_validated_state : ctx -> validated_state -> validated_state
 (** [fresh_validated_state ctx initial] restores the mutable graph captured by [validate_state_once]
-    and evaluator-owned memo snapshots for one independent execution. A resumed state has no initial
-    snapshot and is returned unchanged. *)
+    and evaluator-owned memo snapshots for one independent execution. Affine resumption consumption
+    is deliberately monotonic and is never restored: reusing the same captured instance still fails.
+    A resumed state has no initial cell snapshot and is returned unchanged. *)
 
 val run_validated_state_capturing :
   ctx -> validated_state -> (validated_capture, Runtime_err.t) result

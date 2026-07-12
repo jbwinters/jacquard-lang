@@ -459,7 +459,7 @@ static jq_value clo1(jq_fn code) { return jq_closure((void *)code, 1, 0, NULL, U
 
 static void test_capture_single_resume(void) {
   jq_rt rt = { 0 };
-  jq_handler_entry e = { OP_A, clo1(cl_resume41), JQ_CLAUSE_CAPTURING, NULL };
+  jq_handler_entry e = { OP_A, clo1(cl_resume41), JQ_CLAUSE_CAPTURING, true, NULL };
   jq_value out = jq_handle2(&rt, 1, &e, clo0(m1_entry), clo1(rc_id));
   CHECK(jq_int_val(out) == 42, "capture + resume once yields 42");
   CHECK(rt.ks_len == 0 && rt.hs_len == 0 && rt.cap_depth == 0,
@@ -468,11 +468,27 @@ static void test_capture_single_resume(void) {
   free(rt.ks);
 }
 
+static void test_once_instances_are_independent(void) {
+  /* The use bit belongs to the captured JQ_RESUME block: a later perform
+     allocates a fresh block and therefore has its own one-resume budget. */
+  jq_rt rt = { 0 };
+  jq_handler_entry left = { OP_A, clo1(cl_resume41), JQ_CLAUSE_CAPTURING, true, NULL };
+  jq_value first = jq_handle2(&rt, 1, &left, clo0(m1_entry), clo1(rc_id));
+  CHECK(jq_int_val(first) == 42, "first once instance resumes");
+  jq_handler_entry right = { OP_A, clo1(cl_resume41), JQ_CLAUSE_CAPTURING, true, NULL };
+  jq_value second = jq_handle2(&rt, 1, &right, clo0(m1_entry), clo1(rc_id));
+  CHECK(jq_int_val(second) == 42, "fresh once instance has a fresh budget");
+  CHECK(rt.ks_len == 0 && rt.hs_len == 0 && rt.cap_depth == 0,
+        "stacks balanced after separate once captures");
+  free(rt.hs);
+  free(rt.ks);
+}
+
 static void test_multishot_two_resumes(void) {
   /* body adds 1; the clause resumes with 1 then 2: (2, 3). Copy-on-resume
      makes the second resume independent of the first. */
   jq_rt rt = { 0 };
-  jq_handler_entry e = { OP_A, clo1(cl_twice), JQ_CLAUSE_CAPTURING, NULL };
+  jq_handler_entry e = { OP_A, clo1(cl_twice), JQ_CLAUSE_CAPTURING, false, NULL };
   jq_value out = jq_handle2(&rt, 1, &e, clo0(m1_entry), clo1(rc_id));
   CHECK(jq_is_ptr(out) && jq_block_of(out)->tag == JQ_TUPLE, "multi-shot returns the tuple");
   CHECK(jq_int_val(jq_fields(out)[0]) == 2 && jq_int_val(jq_fields(out)[1]) == 3,
@@ -523,7 +539,7 @@ static void test_abort_drops_chain(void) {
   /* the clause never resumes: dropping the resumption must free the
      captured frame AND its heap local; ret must NOT run (would add 1000) */
   jq_rt rt = { 0 };
-  jq_handler_entry e = { OP_A, clo1(cl_abort999), JQ_CLAUSE_CAPTURING, NULL };
+  jq_handler_entry e = { OP_A, clo1(cl_abort999), JQ_CLAUSE_CAPTURING, true, NULL };
   jq_value out = jq_handle2(&rt, 1, &e, clo0(m2_entry), clo1(rc_add1000));
   CHECK(jq_int_val(out) == 999, "abort value bypasses the ret clause");
   CHECK(rt.ks_len == 0 && rt.hs_len == 0 && rt.cap_depth == 0,
@@ -536,7 +552,7 @@ static void test_escaped_resume_ret_per_resumption(void) {
   /* the clause returns the resumption; applying it twice outside the
      handler's textual scope runs body-remainder AND ret per application */
   jq_rt rt = { 0 };
-  jq_handler_entry e = { OP_A, clo1(cl_escape), JQ_CLAUSE_CAPTURING, NULL };
+  jq_handler_entry e = { OP_A, clo1(cl_escape), JQ_CLAUSE_CAPTURING, false, NULL };
   jq_value res = jq_handle2(&rt, 1, &e, clo0(m1_entry), clo1(rc_double));
   CHECK(jq_is_ptr(res) && jq_block_of(res)->tag == JQ_RESUME,
         "escaped resumption is the handle's value");
@@ -563,7 +579,7 @@ static void test_clause_perform_escapes_outward(void) {
      continuation), not the inner one — the inner OP_B clause would return
      999 and the inner ret would add 1000, so 42 proves both were skipped */
   jq_rt rt = { 0 };
-  jq_handler_entry outer = { OP_B, clo1(cl_resume41), JQ_CLAUSE_CAPTURING, NULL };
+  jq_handler_entry outer = { OP_B, clo1(cl_resume41), JQ_CLAUSE_CAPTURING, false, NULL };
   jq_value out = jq_handle2(&rt, 1, &outer, clo0(m3_entry), clo1(rc_id));
   /* inner OP_A clause performs OP_B; outer clause resumes it with 41; the
      inner clause returns that 41 as the inner handle's value; inner ret
@@ -591,8 +607,8 @@ static jq_value m3_entry(JQ_PARAMS) {
     jq_ks_push(rt, f);
   }
   jq_handler_entry inner[2] = {
-    { OP_A, clo1(cl_perform_b), JQ_CLAUSE_CAPTURING, NULL },
-    { OP_B, clo1(cl_abort999), JQ_CLAUSE_CAPTURING, NULL },
+    { OP_A, clo1(cl_perform_b), JQ_CLAUSE_CAPTURING, false, NULL },
+    { OP_B, clo1(cl_abort999), JQ_CLAUSE_CAPTURING, false, NULL },
   };
   jq_value r = jq_handle2(rt, 2, inner, clo0(m1_entry), clo1(rc_add1000));
   if (r == JQ_SUSPEND) return JQ_SUSPEND;
@@ -659,7 +675,7 @@ static jq_value cl_resume10(JQ_PARAMS) {
 
 static void test_deep_handler_recovers_inner_performs(void) {
   jq_rt rt = { 0 };
-  jq_handler_entry e = { OP_A, clo1(cl_resume10), JQ_CLAUSE_CAPTURING, NULL };
+  jq_handler_entry e = { OP_A, clo1(cl_resume10), JQ_CLAUSE_CAPTURING, false, NULL };
   jq_value out = jq_handle2(&rt, 1, &e, clo0(m4_entry), clo1(rc_id));
   CHECK(jq_int_val(out) == 20, "deep handler covers the resumed extent");
   CHECK(rt.ks_len == 0 && rt.hs_len == 0 && rt.cap_depth == 0,
@@ -774,7 +790,7 @@ static jq_value m5_thunk_entry(JQ_PARAMS) {
     f = jq_frame_alloc(m5_thunk_reenter, 1, 0, 0);
     jq_ks_push(rt, f);
   }
-  jq_handler_entry inner = { OP_A, clo1(cl_escape), JQ_CLAUSE_CAPTURING, NULL };
+  jq_handler_entry inner = { OP_A, clo1(cl_escape), JQ_CLAUSE_CAPTURING, false, NULL };
   jq_value r = jq_handle2(rt, 1, &inner, clo0(m5_out_entry), clo1(rc_id));
   if (r == JQ_SUSPEND) return JQ_SUSPEND;
   if (f) {
@@ -799,7 +815,7 @@ static void test_chain_order_across_nested_capture(void) {
      doubles (14010), A's ret passes it through. Inverted order gave the
      outer frame the 5. */
   jq_rt rt = { 0 };
-  jq_handler_entry outer = { OP_B, clo1(cl_resume5), JQ_CLAUSE_CAPTURING, NULL };
+  jq_handler_entry outer = { OP_B, clo1(cl_resume5), JQ_CLAUSE_CAPTURING, false, NULL };
   jq_value out = jq_handle2(&rt, 1, &outer, clo0(m5_thunk_entry), clo1(rc_id));
   CHECK(jq_int_val(out) == 14010, "un-entered frame keeps its chain depth");
   CHECK(rt.ks_len == 0 && rt.hs_len == 0 && rt.cap_depth == 0,
@@ -871,6 +887,12 @@ int main(int argc, char **argv) {
     jq_perform(&rt, 0, 0, NULL);
     return 0; /* unreachable */
   }
+  if (argc > 1 && strcmp(argv[1], "once-resume-twice") == 0) {
+    jq_rt rt = { 0 };
+    jq_handler_entry e = { OP_A, clo1(cl_twice), JQ_CLAUSE_CAPTURING, true, NULL };
+    (void)jq_handle2(&rt, 1, &e, clo0(m1_entry), clo1(rc_id));
+    return 0; /* unreachable */
+  }
   long deep_n = argc > 1 ? atol(argv[1]) : 1000000;
   test_int_tagging();
   test_int_edges();
@@ -892,6 +914,7 @@ int main(int argc, char **argv) {
   test_clause_pushes_handler();
   test_grant_fallback();
   test_capture_single_resume();
+  test_once_instances_are_independent();
   test_multishot_two_resumes();
   test_abort_drops_chain();
   test_escaped_resume_ret_per_resumption();
