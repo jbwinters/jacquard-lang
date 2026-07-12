@@ -1,3 +1,7 @@
+/* Copyright (C) 2026 Josh Winters
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ * Additional permission applies; see ../RUNTIME-EXCEPTION.md. */
+
 /* Generic application (task 67): the unknown-callee path. Dispatch and error
  * texts mirror the interpreter's apply (src/eval.ml); Runtime_err renderings
  * come through jq_error.c's contract (stderr + exit 2). Every input is owned:

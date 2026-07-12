@@ -1,3 +1,7 @@
+/* Copyright (C) 2026 Josh Winters
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ * Additional permission applies; see ../RUNTIME-EXCEPTION.md. */
+
 /* Block allocation (task 65; the small-block pool is task 80). Blocks of
  * 1-4 payload words — cons cells, small tuples, closures, reals — come
  * from per-size freelists carved out of grow-only slabs: the profile

@@ -1,3 +1,7 @@
+/* Copyright (C) 2026 Josh Winters
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ * Additional permission applies; see ../RUNTIME-EXCEPTION.md. */
+
 /* The effects runtime (docs/native-plan.md, task 70): a per-run handler
  * stack with nearest-match perform, and the interpreter's exact contracts.
  *

@@ -1,3 +1,7 @@
+/* Copyright (C) 2026 Josh Winters
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ * Additional permission applies; see ../RUNTIME-EXCEPTION.md. */
+
 /* UTF-8 codepoint semantics (task 66): a port of Prelude.utf8_boundaries
  * (src/prelude.ml, D9 decision). The well-formedness table makes overlongs
  * (E0 80-9F, F0 80-8F), surrogates (ED A0-BF), and beyond-U+10FFFF

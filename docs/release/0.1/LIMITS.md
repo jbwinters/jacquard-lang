@@ -3,6 +3,10 @@
 This file describes the actual Jacquard Core 0.1 RC1 boundary. It distinguishes
 features that shipped from adjacent designs and future work.
 
+RC2 and RC3 retain this semantic boundary. RC2 repaired binary-demo packaging;
+RC3 clarifies user-program/output licensing and includes the native C runtime
+in binary distributions.
+
 ## Research Prototype, Not A Production Platform
 
 RC1 has a public parser, checker, CPS interpreter, native AOT compiler, content

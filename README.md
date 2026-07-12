@@ -7,50 +7,61 @@ Jacquard is a research prototype for running, reviewing, simulating, and trustin
 programs written by models and reviewed by people.
 
 Concretely, it is a small programming language with a compact `.jac` surface
-syntax, an OCaml checker and CPS interpreter, a C-emitting native AOT compiler,
-a command-line tool, a Jacquard-written standard library, and a test framework
-called Warp. Version 0.1 works end to end but is a research prototype, not a
-production language; `docs/release/0.1/LIMITS.md` is the honest boundary.
+syntax, an OCaml checker and CPS interpreter, a C-emitting native AOT backend
+that currently compiles the kernel `.jqd` carrier, a command-line tool, a
+Jacquard-written standard library, and a test framework called Warp. Version
+0.1 works end to end but is a research prototype, not a production language;
+`docs/release/0.1/LIMITS.md` is the honest boundary.
 
 Install the 0.1 release candidate without OCaml or opam:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jbwinters/jacquard-lang/jacquard-core-0.1-rc2/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/jbwinters/jacquard-lang/jacquard-core-0.1-rc3/scripts/install.sh | sh
 ~/.local/bin/jac run ~/.local/share/jacquard/demos/basics/m1-fact.jac
 ```
 
 The expected output is `120`. Linux x86-64, macOS Intel, and macOS Apple
 Silicon binaries are published; development from source is documented below.
 
+Then run one policy under concrete and probabilistic telemetry worlds, followed
+by sampled and exhaustive Warp checks:
+
+```bash
+sh ~/.local/share/jacquard/demos/case-studies/release-risk/run.sh
+```
+
 ## For Humans
 
-Most languages tell you what a program computes. Jacquard also tells you what a
-program is allowed to do, how certain it is, and whether two pieces of code
-mean the same thing. Tools can check all three, because they live in the
-language instead of in comments, logs, or your memory of the codebase.
+Most languages tell you what a program computes. Jacquard also exposes which
+effects it may perform, finite discrete uncertainty, and canonical program
+identity. Tools can inspect all three because they live in the language rather
+than only in comments, logs, or your memory of the codebase.
 
 Things you can do here that most languages cannot offer:
 
-- Read one line and know a function's full reach. A signature like
-  `(text) ->{net} text` says this function touches the network. The program
-  will not run until you grant each power it asks for with `--allow`, so
-  generated code cannot quietly open a connection or write a file. If you do
-  not grant `net`, no code in the program can reach the network, including
-  code the program builds and runs at runtime.
+- Read one line and see the effects a function may perform. A signature like
+  `(text) ->{net} text` says the function may perform the `net` effect. The
+  Jacquard runtime rejects unhandled world effects unless their authority is
+  explicitly granted with `--allow`, including effects performed by dynamic
+  code. This is language-level enforcement in a research runtime, not a
+  substitute for an operating-system sandbox.
 - Run one program against many worlds. The same code can run against the real
   network, a scripted fake, a recording of last week's traffic, or a
   probability model of how servers usually behave. A handler is the piece
   that answers a program's requests to the outside world; you swap the
-  handler, and the code never changes. This replaces mocking frameworks, and
-  it makes "what would my agent do if the API went down?" an ordinary test.
-- Ask for exact odds. Probability is part of the language. A program can
-  sample weighted choices and record evidence, and Jacquard will list every
-  possible outcome with its exact chance. The repair demo below uses this to
-  treat a failing test as evidence: it computes which patches to a buggy
-  program remain possible, and how likely each one is.
-- Rename and reformat for free. Jacquard identifies code by a hash of its meaning,
-  not its text. Comments and formatting never break a build or a cache, and
-  pure tests rerun only when the meaning of something they depend on changed.
+  handler, and the code never changes. This can replace much conventional
+  mocking at effect boundaries and makes "what would my agent do if the API
+  went down?" an ordinary test.
+- Enumerate exact probabilities for finite discrete models. A program can
+  sample weighted choices and record evidence, and enumeration lists every
+  reachable outcome with its exact probability. The repair demo below treats a
+  failing test as evidence and computes which patches remain possible and how
+  likely each is.
+- Rename and reformat without changing canonical identity. Jacquard hashes
+  canonical resolved structure rather than source bytes. Comments, formatting,
+  provenance, and ordinary local or term renames are erased; pure tests rerun
+  only when canonical code or dependency content changes. This is structural
+  identity, not a proof that arbitrary programs are behaviorally equivalent.
 
 The bet behind all of this: when most code is written by machines, the humans
 reviewing it need the language itself to answer "what can this touch, and how
@@ -90,18 +101,23 @@ For readers who speak programming languages:
   may perform, so a program's inferred row is its authority manifest.
 - Discrete probabilistic programming as a library: `sample` and `observe` are
   effect operations, and each inference algorithm is a handler.
-- Content-addressed definitions. Identity is a hash computed with all metadata
-  erased, so a rename or reformat changes nothing downstream.
-- Tooling that leans on the above: formatter, semantic differ, Warp tests with
-  a semantic cache, record/replay, and a reproducible release evidence pack.
+- Content-addressed definitions. Identity is a hash of canonical resolved
+  structure with non-identity metadata erased, so formatting, comments, and
+  ordinary local or term renames change nothing downstream.
+- Tooling that leans on the above: formatter, structure-aware differ, Warp
+  tests with a content-addressed cache, record/replay, and a reproducible
+  release evidence pack.
 - A native AOT path that emits C, specializes and caches units by content hash,
   and is differential-tested against the interpreter under clang and gcc.
 
 The prototype is complete against its original core plan and has since added
 the public surface syntax, ringed standard library, Warp properties and cache,
-native compilation, packaged binaries, and product-scale case studies. RC1 is
-pinned by 554 Alcotest/QCheck cases, 32 cram transcripts, 21 documentation
-examples, native sanitizer/leak/fuzz lanes, and a fresh-clone evidence workflow.
+native compilation, packaged binaries, and product-scale case studies. The RC1
+semantic boundary is pinned by 554 Alcotest/QCheck cases, 32 cram transcripts,
+21 documentation examples, native sanitizer/leak/fuzz lanes, and a fresh-clone
+evidence workflow. RC2 repaired binary-demo packaging; RC3 adds an explicit
+runtime/output license exception and packages the native runtime. Neither
+changes the language semantics pinned at RC1.
 
 ## What It Looks Like
 
@@ -149,7 +165,7 @@ $ jac run demos/tooling/repair.jac --allow eval
 
 Under the grant, one failing test leaves two surviving patches: the intended
 fix at 0.75 and a patch that games the suite at 0.25. Adding one regression
-test prunes the impostor, and the surviving fix prints as a one-line semantic
+test prunes the impostor, and the surviving fix prints as a one-line canonical
 diff: `- sub + add`. See `sh demos/tooling/repair.sh` for the full transcript.
 
 ## Install A Release Binary
@@ -157,7 +173,7 @@ diff: `- sub + add`. See `sh demos/tooling/repair.sh` for the full transcript.
 Most users do not need OCaml or opam. Install the reviewed 0.1 RC binary with:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jbwinters/jacquard-lang/jacquard-core-0.1-rc2/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/jbwinters/jacquard-lang/jacquard-core-0.1-rc3/scripts/install.sh | sh
 ```
 
 The installer detects your OS and CPU, downloads the matching archive and
@@ -202,7 +218,8 @@ platforms currently require the development setup.
 
 Release archives are attached to `jacquard-core-*` GitHub releases. Each
 archive contains `bin/jacquard`, `bin/jac`, `libexec/jacquard/jacquard`,
-`share/jacquard/prelude`, and `share/jacquard/demos`.
+`share/jacquard/prelude`, `share/jacquard/demos`, the native C runtime, and the
+license/exception documents.
 
 ## Development Quick Start
 
@@ -297,7 +314,8 @@ corpus and selected demos are evidence fixtures, not an authoring requirement.
 
 ## Native compilation
 
-`jacquard build` compiles a program and its reachable declarations to a
+`jacquard build` currently accepts the kernel `.jqd` carrier and compiles a
+program and its reachable declarations to a
 standalone binary whose output is byte-identical to `jacquard run` —
 stdout, stderr, and exit codes, pinned by a differential harness in CI
 (`scripts/native-diff.sh`). The full effect language compiles, including
@@ -315,6 +333,8 @@ echo "some words some" | ./word-count --allow console
 
 Requirements and knobs:
 
+- Release binaries discover their packaged prelude and C runtime
+  automatically. Source checkouts may set the two variables shown above.
 - A C toolchain: clang (any recent) or gcc. Tail calls are O(1) stack on
   every toolchain: musttail on clang and gcc 15+, a trampoline below
   them (the emitted C is identical either way).
@@ -365,11 +385,11 @@ What they show:
   dream-mode, and ambiguity demos.
 - `tooling/repair.sh`: program repair as Bayesian inference; a bug report is an
   observation over computed single-edit patches, and the most likely patch
-  prints as a one-line semantic diff.
+  prints as a one-line canonical-structure diff.
 - `worlds/m4-hostile.sh`: generated-looking code that reaches for `net`; signatures and
   manifests expose the authority.
 - `worlds/escrow/run.sh`: product-shaped generated workflow with manifest, dry-run,
-  Warp tests, fault exploration, replay, semantic diff, and approval by hash.
+  Warp tests, fault exploration, replay, canonical diff, and approval by hash.
 
 Demo paths are canonical within the categorized directories; there are no
 flat compatibility aliases. The full catalog is in `demos/README.md`.
@@ -433,7 +453,7 @@ Key release docs:
   exhaustiveness.
 - `src/prelude.ml`: prelude loader, builtin wiring, and root grants.
 - `src/infer_dist.ml`: exact enumeration and likelihood weighting.
-- `src/diff.ml`: semantic diff over stores.
+- `src/diff.ml`: canonical-structure diff over stores.
 - `src/warp.ml`: Warp test discovery, running, cache, and properties.
 
 ## Documentation Map
@@ -491,7 +511,8 @@ GitHub Actions has two lanes:
   tags, and manual dispatch; runs `scripts/release/reproduce-0.1.sh` and uploads
   transcripts.
 - `Release Binaries`: `jacquard-core-*` tags and manual dispatch; builds
-  Linux/macOS tarballs with `jacquard`, `jac`, and the packaged prelude.
+  Linux/macOS tarballs with `jacquard`, `jac`, the prelude, demos, and native
+  runtime sources.
 
 See `docs/ci-cd.md` for branch protection recommendations.
 
@@ -500,9 +521,21 @@ See `docs/ci-cd.md` for branch protection recommendations.
 Jacquard is licensed under the GNU Affero General Public License, version 3 or
 later. See [LICENSE](LICENSE).
 
-Commercial licenses are available for organizations that need proprietary
-derivative, hosted-service, redistribution, or expanded trademark terms. See
-[COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md).
+**Your programs remain yours.** Jacquard claims no copyright in source merely
+because it is written, checked, interpreted, or compiled with Jacquard. Native
+executables include Jacquard runtime material, so the
+[runtime and generated-output exception](RUNTIME-EXCEPTION.md) explicitly
+allows user programs and compiled output to use any license their authors
+choose, including proprietary licenses. Using Jacquard does not require a
+commercial license.
+
+Commercial licenses are available for organizations that need non-AGPL terms
+for modifications or derivatives of Jacquard itself, modified hosted Jacquard
+services that do not satisfy the AGPL, redistribution of Jacquard, or expanded
+trademark rights. See
+[COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md). This is a statement of project
+licensing intent, not legal advice; organizations relying on the distinction
+should have counsel review the terms.
 
 The Jacquard name and project identity are governed by
 [TRADEMARKS.md](TRADEMARKS.md). The code license does not grant trademark
@@ -516,7 +549,7 @@ onto the permanent 27-form kernel. Native AOT compilation and C-toolchain
 optimization ship; a VM/JIT, concurrency, membrane enforcement, continuous
 distributions, gradients, typed staging, language package management,
 self-hosting, and formal soundness proofs do not. World grants remain coarse.
-See `docs/release/0.1/LIMITS.md` for the exact RC1 boundary.
+See `docs/release/0.1/LIMITS.md` for the exact Core 0.1 semantic boundary.
 
 ## Troubleshooting
 

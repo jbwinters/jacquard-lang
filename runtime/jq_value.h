@@ -1,3 +1,7 @@
+/* Copyright (C) 2026 Josh Winters
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ * Additional permission applies; see ../RUNTIME-EXCEPTION.md. */
+
 /* The native runtime's value representation (docs/native-plan.md, task 65).
  *
  * A jq_value is a tagged 64-bit word: LSB 1 is a 63-bit integer (matching the

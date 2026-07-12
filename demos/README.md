@@ -71,11 +71,11 @@ Directory: `worlds/`
 - `agent-dream.jac`: one network policy under scripted and probabilistic world
   handlers.
 - `preflight.jac`: several candidate agent plans as quoted Code; weak vs sharp
-  world evidence scores a posterior; semantic diffs name the rejects; the live
+  world evidence scores a posterior; canonical diffs name the rejects; the live
   policy still refuses without a Net grant after the dreams pass.
 - `m4-hostile.jqd`: generated-looking code whose `net` authority is exposed by
   signatures and manifest checks.
-- `escrow/`: manifest, dry-run, Warp, faults, replay, semantic diff, provenance,
+- `escrow/`: manifest, dry-run, Warp, faults, replay, canonical diff, provenance,
   and approval by exact content hash in one executable workflow; run it with
   `sh worlds/escrow/run.sh` from this directory.
 
@@ -93,4 +93,4 @@ Directory: `tooling/`
 Committed transcripts live under `test/cli/`, especially `case-studies.t`,
 `demos.t`, `infer.t`, `repair.t`, `preflight.t`, `showcase.t`, `hostile-demo.t`,
 and `escrow.t`. They pin public `.jac` execution, Warp results, capability
-refusals, and the semantic hash parity of retained surface/bootstrap twins.
+refusals, and the canonical hash parity of retained surface/bootstrap twins.

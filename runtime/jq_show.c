@@ -1,3 +1,7 @@
+/* Copyright (C) 2026 Josh Winters
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ * Additional permission applies; see ../RUNTIME-EXCEPTION.md. */
+
 /* Value rendering (task 66): a byte-for-byte port of the interpreter's
  * Value.show (src/value.ml) and Printer.real_repr / escape_text
  * (src/printer.ml). Parity is pinned by corpus/golden/native/show.golden;

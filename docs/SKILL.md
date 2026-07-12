@@ -1,6 +1,6 @@
 ---
 name: jacquard
-description: Install and use Jacquard; write, check, run, format, hash, infer, test, and compile effect-typed, content-addressed .jac programs. Use for Jacquard surface syntax, capability manifests, handlers, discrete Dist models, Code values, Warp tests, semantic identity, replay, and native AOT builds.
+description: Install and use Jacquard; write, check, run, format, hash, infer, test, and compile effect-typed, content-addressed .jac programs. Use for Jacquard surface syntax, capability manifests, handlers, discrete Dist models, Code values, Warp tests, canonical identity, replay, and native AOT builds.
 ---
 
 # Jacquard Standalone Guide
@@ -14,8 +14,9 @@ visible to the checker and tools:
   installs world handlers only for explicit `--allow` grants.
 - Probability is the ordinary `Dist` effect. Exact enumeration and likelihood
   weighting run the same model under different handlers.
-- Definitions are content-addressed after comments, formatting, spans, and
-  provenance are erased. Semantic identity survives renames and reformats.
+- Definitions are content-addressed from canonical resolved structure after
+  comments, formatting, spans, provenance, and ordinary local or term names
+  are erased. This structural identity is not arbitrary program equivalence.
 - Handlers are deep and resumptions are reusable, including multi-shot use.
 
 This file is self-contained for public use. A repository checkout is needed
@@ -24,10 +25,11 @@ only to develop the OCaml implementation, not to install or write Jacquard.
 ## Install
 
 The release installer downloads a checksum-verified binary, the standard
-prelude, and demos. It does not require OCaml, opam, or Dune.
+prelude, demos, and the C runtime used by native builds. It does not require
+OCaml, opam, or Dune.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/jbwinters/jacquard-lang/jacquard-core-0.1-rc2/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/jbwinters/jacquard-lang/jacquard-core-0.1-rc3/scripts/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 jac --version
 jac run "$HOME/.local/share/jacquard/demos/basics/m1-fact.jac"
@@ -88,7 +90,7 @@ jac test TESTS.jac --seed 42 --exhaustive --budget 10000
 jac test TESTS.jac --cache-dir .jacquard-test-cache
 jac test TESTS.jac --allow fs --allow net --allow clock --allow console
 
-# Content store, semantic diff, traces, and tiers.
+# Content store, canonical-structure diff, traces, and tiers.
 jac store add STORE PROGRAM.jac
 jac store rename STORE old-name new-name
 jac diff STORE_A STORE_B
@@ -579,10 +581,10 @@ resulting row is exactly `{Check}`, it is a hermetic test. `Eval` has no
 in-language hermetic discharger, so eval-dependent behavior belongs in a CLI
 transcript test rather than a Warp unit test.
 
-Warp's cache keys on semantic hashes and dependencies. A comment, format, or
-rename-only edit reruns zero tests. A semantic dependency edit reruns affected
-dependents. Use `--no-cache` for demonstrations and a fixed `--seed` for
-repeatable sampled properties.
+Warp's cache keys on canonical content hashes and dependencies. A comment,
+format, or ordinary term-rename-only edit reruns zero tests. A canonical
+dependency-content edit reruns affected dependents. Use `--no-cache` for
+demonstrations and a fixed `--seed` for repeatable sampled properties.
 
 ## Identity, Formatting, And Review
 
@@ -594,11 +596,12 @@ units. Consequently:
 - Alpha-equivalent local names hash equally.
 - Reordering members of a recursive SCC is stable.
 - Renaming a top-level display name changes the name index, not its object.
-- Provenance can change without changing the approved semantic hash.
+- Provenance can change without changing the approved content hash.
 
 Use `jac fmt --write` for canonical layout. Use stores and `jac diff` when you
-need rename classification, changed subtrees, or affected dependents. Do not
-compare source text when the question is whether behavior changed.
+need rename classification, changed canonical subtrees, or affected
+dependents. Hash or diff equality establishes canonical structural identity,
+not general behavioral equivalence.
 
 Record/replay logs contain operation, argument, and result triples. Strict
 replay fails closed on operation or argument drift. Counterfactual `--fork`
@@ -613,6 +616,7 @@ with optimization and LTO. Native and interpreted behavior are expected to be
 byte-identical for stdout, stderr, and exit status.
 
 ```sh
+# Installed releases discover the runtime automatically. In a checkout only:
 export JACQUARD_RUNTIME=/path/to/jacquard/runtime
 jac build program.jqd -o program
 ./program --allow console --seed 42
@@ -627,6 +631,21 @@ Compiled units cache under `.jacquard-native/` by content hash.
 
 This is an AOT research backend, not a production optimizer, VM, or JIT. Do
 not infer broad performance claims from a single benchmark.
+
+## Licensing User Programs And Output
+
+Jacquard itself is AGPL-3.0-or-later. Jacquard claims no copyright in source
+merely because it is written, checked, interpreted, or compiled with Jacquard.
+Native executables link Jacquard runtime material, so the Jacquard Runtime and
+Generated Output Exception explicitly permits user programs and compiled
+output to use any license their authors choose, including proprietary terms.
+Using Jacquard does not require a commercial license.
+
+The exception does not relicense the compiler or standalone runtime source;
+modifications and derivatives of Jacquard itself remain governed by the AGPL
+unless separately licensed. See `RUNTIME-EXCEPTION.md`, `LICENSE`, and
+`COMMERCIAL-LICENSE.md`. This summarizes project licensing intent and is not
+legal advice.
 
 ## Bootstrap Carrier
 
@@ -685,8 +704,8 @@ Do not invent new kernel forms for surface sugar.
    the explicit world lane and eval/CLI behavior in transcript tests.
 6. Fix seeds for every sampled run. Prefer exact enumeration for small finite
    models and exhaustive properties.
-7. Use hashes and semantic diff for approvals; do not approve mutable paths or
-   source appearance alone.
+7. Use content hashes and canonical diff for approvals; do not approve mutable
+   paths or source appearance alone.
 8. Treat diagnostics as the contract. Do not catch broad failures, add grants,
    relax manifests, or update expected transcripts without understanding the
    semantic change.

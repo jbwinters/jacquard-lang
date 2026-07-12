@@ -12,6 +12,12 @@ if [ ! -x "$root/bin/jac" ] || [ ! -d "$demos" ]; then
   echo "not a Jacquard package root: $root" >&2
   exit 1
 fi
+test -f "$root/share/jacquard/LICENSE"
+test -f "$root/share/jacquard/RUNTIME-EXCEPTION.md"
+test -f "$root/share/jacquard/COMMERCIAL-LICENSE.md"
+test -f "$root/share/jacquard/TRADEMARKS.md"
+test -f "$root/share/jacquard/runtime/jq_value.h"
+grep -q 'Additional permission applies' "$root/share/jacquard/runtime/jq_value.h"
 
 : "${TMPDIR:=$root/.demo-smoke-tmp}"
 export TMPDIR
@@ -30,6 +36,7 @@ fi
 release_risk="$TMPDIR/release-risk.out"
 agent_dream="$TMPDIR/agent-dream.out"
 escrow="$TMPDIR/escrow.out"
+native="$TMPDIR/native-fact"
 
 sh "$demos/case-studies/release-risk/run.sh" >"$release_risk" 2>&1
 grep -q '^== inferred authority ==$' "$release_risk"
@@ -43,4 +50,14 @@ sh "$demos/worlds/escrow/run.sh" >"$escrow" 2>&1
 grep -q '^== dry-run: intended actions, no receipt mutation ==$' "$escrow"
 grep -q 'approval invalidated' "$escrow"
 
-echo "packaged demos: PASS (release-risk, agent-dream, escrow; no dune)"
+native_work="$TMPDIR/native-build"
+rm -rf "$native_work"
+mkdir -p "$native_work"
+(
+  cd "$native_work"
+  jac build "$demos/basics/m1-fact.jqd" -o "$native"
+) >/dev/null
+test "$("$native")" = "120"
+grep -R -q 'licensed under terms chosen by the user' "$native_work/.jacquard-native"
+
+echo "packaged demos: PASS (release-risk, agent-dream, escrow, native build; no dune)"

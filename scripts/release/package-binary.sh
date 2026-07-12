@@ -42,12 +42,18 @@ tmp=$(mktemp -d "$TMPDIR/jacquard-package.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 
 pkg="$tmp/jacquard-$VERSION-$TARGET"
-mkdir -p "$pkg/bin" "$pkg/libexec/jacquard" "$pkg/share/jacquard"
+mkdir -p "$pkg/bin" "$pkg/libexec/jacquard" "$pkg/share/jacquard/runtime"
 
 cp "$BIN" "$pkg/libexec/jacquard/jacquard"
 cp -R prelude "$pkg/share/jacquard/prelude"
 cp -R demos "$pkg/share/jacquard/demos"
+cp runtime/jq_*.c runtime/jq_value.h "$pkg/share/jacquard/runtime/"
+cp LICENSE "$pkg/share/jacquard/LICENSE"
+cp RUNTIME-EXCEPTION.md "$pkg/share/jacquard/RUNTIME-EXCEPTION.md"
+cp TRADEMARKS.md "$pkg/share/jacquard/TRADEMARKS.md"
+cp COMMERCIAL-LICENSE.md "$pkg/share/jacquard/COMMERCIAL-LICENSE.md"
 cp LICENSE "$pkg/LICENSE"
+cp RUNTIME-EXCEPTION.md "$pkg/RUNTIME-EXCEPTION.md"
 cp TRADEMARKS.md "$pkg/TRADEMARKS.md"
 cp COMMERCIAL-LICENSE.md "$pkg/COMMERCIAL-LICENSE.md"
 
@@ -57,7 +63,9 @@ set -eu
 
 prefix=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 : "${JACQUARD_PRELUDE:=$prefix/share/jacquard/prelude}"
+: "${JACQUARD_RUNTIME:=$prefix/share/jacquard/runtime}"
 export JACQUARD_PRELUDE
+export JACQUARD_RUNTIME
 
 exec "$prefix/libexec/jacquard/jacquard" "$@"
 SH
@@ -67,16 +75,20 @@ ln -s jacquard "$pkg/bin/jac"
 cat >"$pkg/README.md" <<EOF
 # Jacquard $VERSION
 
-This archive contains the Jacquard CLI and standard prelude.
+This archive contains the Jacquard CLI, standard prelude, demos, and native C
+runtime.
 
 ## Contents
 
-- \`bin/jacquard\`: wrapper that sets \`JACQUARD_PRELUDE\`
+- \`bin/jacquard\`: wrapper that sets \`JACQUARD_PRELUDE\` and \`JACQUARD_RUNTIME\`
 - \`bin/jac\`: short alias for \`jacquard\`
 - \`libexec/jacquard/jacquard\`: native executable
 - \`share/jacquard/prelude\`: standard library
 - \`share/jacquard/demos\`: runnable examples
+- \`share/jacquard/runtime\`: C runtime used by \`jac build\`
+- \`share/jacquard/LICENSE\` and \`share/jacquard/RUNTIME-EXCEPTION.md\`: installed license terms
 - \`LICENSE\`: AGPL-3.0-or-later public license
+- \`RUNTIME-EXCEPTION.md\`: permission to license user programs and compiled output under terms of their authors' choice
 - \`TRADEMARKS.md\`: Jacquard name and mark policy
 - \`COMMERCIAL-LICENSE.md\`: commercial licensing path
 
@@ -89,6 +101,11 @@ jac --version
 jac run "\$HOME/.local/share/jacquard/demos/basics/m1-fact.jac"
 sh "\$HOME/.local/share/jacquard/demos/worlds/escrow/run.sh"
 \`\`\`
+
+Programs written in Jacquard and native executables produced by \`jac build\`
+may use any license chosen by their authors. The AGPL covers Jacquard itself;
+the runtime/output exception prevents linked runtime material from imposing
+that license on user programs.
 EOF
 
 (cd "$tmp" && tar -czf "$DIST_DIR/$ARCHIVE" "jacquard-$VERSION-$TARGET")

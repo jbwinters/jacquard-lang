@@ -2,6 +2,10 @@
 
 Status: release-candidate evidence for `jacquard-core-0.1-rc1`.
 
+Distribution note: RC2 repaired installed demo launchers. RC3 adds an explicit
+runtime/generated-output license exception and packages the native C runtime.
+Neither successor changes the language semantics evidenced here.
+
 Required lineage base: `738dc8e`
 Exact candidate commit: recorded by `scripts/release/reproduce-0.1.sh` in
 `.scratch/release/0.1/commit.txt`
@@ -12,7 +16,8 @@ the kernel triple reader/validator/resolver, `.jac` surface projection, HASH_V0
 canonical identity, the content store, CPS evaluator and native compiler, deep
 multi-shot handlers, row inference and capability manifests, Dist inference
 handlers, the ringed standard library, Warp tests, record/replay, fault injection,
-dry-run, dist-diff, formatter, semantic diff, and the executable-escrow demo.
+dry-run, dist-diff, formatter, canonical structural diff, and the
+executable-escrow demo.
 
 ## Built Artifact
 

@@ -1,3 +1,7 @@
+/* Copyright (C) 2026 Josh Winters
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ * Additional permission applies; see ../RUNTIME-EXCEPTION.md. */
+
 /* Seeded RNG (task 66): a bit-for-bit port of Infer_dist.Rng
  * (src/infer_dist.ml) — SplitMix64 with the reference constants. LW seeds,
  * posterior tables, and fault.random streams reproduce only if every output
