@@ -35,6 +35,19 @@
 \begin{document}
 \maketitle
 
+\begin{center}
+\fbox{\begin{minipage}{0.91\textwidth}
+\textbf{Status: historical initial design document.}
+This paper records the thesis and architecture that preceded the
+implementation. Its roadmap, implementation status, surface-syntax
+discussion, and some proposed probabilistic features are outdated. For
+current behavior and limits, see \texttt{README.md},
+\texttt{docs/release/0.1/LIMITS.md},
+\texttt{docs/release/0.1/CLAIMS.md}, and
+\texttt{docs/surface-syntax.md}.
+\end{minipage}}
+\end{center}
+
 \begin{abstract}
 \noindent
 \jacquard{} is a small programming language designed for a regime in which most code is written by machine-learning models and reviewed by people. The design derives from a survey of the canonical abstract syntax trees of twenty-one languages, from which we extract recurring verdicts: expression orientation wins; null is universally regretted; patterns deserve first-class status; metaprogramming should operate on hygienic trees rather than text; and a stable, public AST creates a tooling culture. \jacquard{} answers with a 27-form kernel represented uniformly as a quoted triple, algebraic effects as the only control mechanism, capability security obtained by construction (no ambient handlers), probabilistic programming as a library effect whose inference algorithms are handlers, and content-addressed definitions. Surface syntax is a projection of the kernel; formatting, comments, and provenance ride in metadata that is excluded from identity. We give the kernel grammar, the reasoning behind each inclusion and exclusion, a falsifiable roadmap, and the risks we consider most likely to kill the project.

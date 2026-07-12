@@ -206,10 +206,11 @@ Use these launchers rather than directly running a probabilistic model or a
 multi-file entrypoint. The launcher selects `infer` where observation requires
 it and assembles related files in isolated scratch space.
 
-To install somewhere else:
+To install under a different user-owned prefix:
 
 ```bash
-JACQUARD_INSTALL_PREFIX=/usr/local sh scripts/install.sh
+curl -fsSL https://raw.githubusercontent.com/jbwinters/jacquard-lang/jacquard-core-0.1-rc3/scripts/install.sh \
+  | JACQUARD_INSTALL_PREFIX="$HOME/.jacquard" sh
 ```
 
 Set `JACQUARD_INSTALL_VERSION` to install a different release tag. Supported
@@ -468,7 +469,9 @@ Read these in order if you are new:
 
 Deeper design references:
 
-- `docs/whitepaper.tex`: thesis, motivation, roadmap, and risks.
+- `docs/whitepaper.tex`: historical initial design thesis, motivation, risks,
+  and related work; its roadmap and implementation-status sections are
+  outdated.
 - `docs/ast.md`: kernel AST and metadata/hash contract.
 - `spec/jacquard-kernel-ast-m0.md`: kernel source-of-truth spec.
 - `spec/serialization.md`: canonical byte format.
@@ -503,7 +506,7 @@ JACQUARD_RELEASE_REF=HEAD JACQUARD_RELEASE_BASE=738dc8e scripts/release/reproduc
 
 ## CI/CD
 
-GitHub Actions has two lanes:
+GitHub Actions has three principal workflows:
 
 - `CI / Development gate`: build, full tests, clean formatting, version smoke,
   and release-doc presence on PRs, `main`, and `release/**`.

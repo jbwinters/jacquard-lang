@@ -90,7 +90,10 @@ When adding valid corpus files, regenerate the golden hashes with
 - Do not hand-maintain a `.jqd` twin for an ordinary `.jac` program or demo.
   Add paired carriers only when a conformance test explicitly requires hash or
   lowering parity; twins are evidence fixtures, not a publishing requirement.
-- Do not add out-of-scope features from the plan guardrails: performance work, macros beyond quote/unquote/gated eval, records, typed staging, continuous distributions, package management, self-hosting, or ownership/borrowing.
+- During 0.1 release hardening, do not expand the native/performance scope or
+  add macros beyond quote/unquote/gated eval, records, typed staging,
+  continuous distributions, package management, self-hosting, or
+  ownership/borrowing.
 - Use `dune`, `alcotest`, and `qcheck` for build and tests.
 - Use `digestif` for the initial hash implementation unless the owner changes D1.
 - Use `menhir` for the bootstrap reader if a generated parser is needed.
@@ -147,4 +150,3 @@ The plan assumes these defaults until the owner decides otherwise:
 - D3: UTF-8 text, no normalization.
 - D4: seedable splittable PRNG via a `splitmix64` port, seed required in CLI.
 - D5: uncurried final call convention.
-- D6: private until M1 demo.
