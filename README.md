@@ -6,11 +6,11 @@
 Jacquard is a research prototype for running, reviewing, simulating, and trusting
 programs written by models and reviewed by people.
 
-Concretely, it is a small programming language with a compact `.jac` surface syntax, an
-interpreter and type checker written in OCaml, a command-line tool, a standard
-library, and a test framework called Warp. Version 0.1 works end to end but is
-a research prototype, not a production language; `docs/release/0.1/LIMITS.md`
-is the honest list of what it does not do.
+Concretely, it is a small programming language with a compact `.jac` surface
+syntax, an OCaml checker and CPS interpreter, a C-emitting native AOT compiler,
+a command-line tool, a Jacquard-written standard library, and a test framework
+called Warp. Version 0.1 works end to end but is a research prototype, not a
+production language; `docs/release/0.1/LIMITS.md` is the honest boundary.
 
 Install the 0.1 release candidate without OCaml or opam:
 
@@ -94,11 +94,14 @@ For readers who speak programming languages:
   erased, so a rename or reformat changes nothing downstream.
 - Tooling that leans on the above: formatter, semantic differ, Warp tests with
   a semantic cache, record/replay, and a reproducible release evidence pack.
+- A native AOT path that emits C, specializes and caches units by content hash,
+  and is differential-tested against the interpreter under clang and gcc.
 
-The prototype is complete against its original development plan: parser,
-checker, CPS interpreter with multi-shot handlers, capability manifests, exact
-and sampled inference, formatter, semantic differ, error catalog, demos, and
-the release evidence pack all exist and are covered by tests.
+The prototype is complete against its original core plan and has since added
+the public surface syntax, ringed standard library, Warp properties and cache,
+native compilation, packaged binaries, and product-scale case studies. RC1 is
+pinned by 554 Alcotest/QCheck cases, 31 cram transcripts, 21 documentation
+examples, native sanitizer/leak/fuzz lanes, and a fresh-clone evidence workflow.
 
 ## What It Looks Like
 
@@ -263,14 +266,15 @@ jac diff STORE_A STORE_B
 jac infer enumerate MODEL.jac
 jac infer lw MODEL.jac --seed 42 --samples 100000
 jac replay TRACE.jqd PROGRAM.jqd [--fork '1=(response 500 "down")']
-jac test TESTS.jqd [--exhaustive] [--cache-dir CACHE]
+jac test TESTS.jac [TESTS.jqd ...] [--exhaustive] [--cache-dir CACHE]
 jac build FILE.jqd -o PROG
 ```
 
 `.jac` is the user-facing surface carrier. Bootstrap `.jqd` remains fully
-supported as the internal/debug syntax, quote notation, test-fixture carrier,
-and kernel format of record; native build, replay, and current Warp test files
-continue to use it.
+supported as the internal/debug syntax, quote notation, and kernel format of
+record. `run`, `check`, `hash`, `fmt`, `diff`, `infer`, and `test` select
+surface syntax by extension; native build, replay programs, the prelude, and
+many internal fixtures continue to use `.jqd`.
 
 ## Native compilation
 
@@ -483,12 +487,13 @@ rights.
 
 ## Current Limits
 
-Jacquard core is a research prototype, not a production compiler. The `.jac`
-surface is the supported, evolving v0 projection and does not change the
-27-form kernel or permanent `.jqd` support. The project does not claim a VM or optimizer,
-continuous distributions, gradients, typed staging, package management,
-self-hosting, or a formal proof of row soundness. See
-`docs/release/0.1/LIMITS.md` for the no-hype list for the 0.1 release baseline.
+Jacquard core is a research prototype, not a production platform. The `.jac`
+surface is implemented and supported but remains an evolving v0 projection
+onto the permanent 27-form kernel. Native AOT compilation and C-toolchain
+optimization ship; a VM/JIT, concurrency, membrane enforcement, continuous
+distributions, gradients, typed staging, language package management,
+self-hosting, and formal soundness proofs do not. World grants remain coarse.
+See `docs/release/0.1/LIMITS.md` for the exact RC1 boundary.
 
 ## Troubleshooting
 
