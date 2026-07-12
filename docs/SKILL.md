@@ -1,6 +1,6 @@
 ---
 name: jacquard
-description: Read, write, run, and test Jacquard programs - the content-addressed, effect-typed research language implemented in this repo. Use when writing or reviewing public .jac programs or bootstrap .jqd fixtures, adding demos or Warp tests, running the jac CLI, debugging effect rows / capability manifests / handlers / Dist models, or touching the OCaml implementation in src/.
+description: Read, write, run, test, and compile Jacquard programs - the content-addressed, effect-typed research language implemented in this repo. Use when writing or reviewing public .jac programs or bootstrap .jqd fixtures, adding demos or Warp tests, running the jac CLI, debugging effect rows / capability manifests / handlers / Dist models, using the native AOT backend, or touching the OCaml implementation in src/.
 ---
 
 # Jacquard: the language, fast
@@ -23,17 +23,29 @@ conventions. Concretely:
   free; the test cache, semantic differ, and store all key on hashes.
 
 The implementation is OCaml (`src/`), the language ships as a CLI (`jacquard`),
-and the standard library ("prelude") is written in Jacquard itself (`prelude/`).
+the standard library ("prelude") is written in Jacquard itself (`prelude/`),
+and the AOT backend emits C plus the native runtime under `runtime/`. RC1
+publishes checksum-verified Linux and macOS binaries with `jac` as the short
+command.
 
-## Environment and CLI
+## Installation, environment, and CLI
 
-Every shell needs the opam env; direct CLI runs need the prelude:
+Most users should install the published RC rather than build the OCaml toolchain:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jbwinters/jacquard-lang/jacquard-core-0.1-rc1/scripts/install.sh | sh
+~/.local/bin/jac --version
+~/.local/bin/jac run ~/.local/share/jacquard/demos/m1-fact.jac
+```
+
+For development, every fresh shell needs the repo-local opam environment;
+direct development CLI runs need the prelude:
 
 ```bash
 eval "$(opam env)"
 export JACQUARD_PRELUDE=$PWD/prelude
 opam exec -- dune build @all      # build
-opam exec -- dune runtest         # full suite (~25s; alcotest + qcheck + cram)
+opam exec -- dune runtest         # full suite (~1 minute; alcotest + qcheck + cram)
 opam exec -- dune fmt             # then: git diff --exit-code (the dev gate)
 ```
 
@@ -43,7 +55,7 @@ bootstrap `.jqd` remains the internal/debug and kernel format of record:
 ```bash
 jac run FILE.jac [--allow fs|net|console|clock|eval|dist|infer]... [--dry-run]
 jac check FILE.jac [--print-sigs] [--manifest fs,net,console]
-jac test FILES... [--seed N] [--samples N] [--exhaustive] [--budget N]
+jac test TESTS... [--seed N] [--samples N] [--exhaustive] [--budget N]  # .jac or .jqd
                    [--cache-dir DIR | --no-cache] [--allow EFFECT]... [--coverage]
 jac infer enumerate MODEL.jac                 # exact posterior (multi-shot enumeration)
 jac infer lw MODEL.jac --seed 42 --samples 100000   # likelihood weighting
@@ -56,15 +68,18 @@ jac replay LOG PROGRAM [--to N] [--fork 'N=(response 503 "down")']
 jac build FILE.jqd -o PROG                    # AOT-compile the kernel carrier
 ```
 
-`jacquard build` needs a C toolchain (clang or gcc; tail calls are O(1)
-stack on both — musttail where the toolchain has it, a trampoline below
-gcc 15) and `JACQUARD_RUNTIME` pointing at `runtime/` (defaults to the
-prelude's sibling). The binary is byte-identical to `jacquard run` — the
-differential harness (`scripts/native-diff.sh`) and CI enforce it — and
-parses its own `--allow`/`--seed` flags. Quotes, splices, and the
-structural code ops compile (task 73); `eval` stays interpreter-only
-(E1102), and `--dry-run` and `--infer-cache` are interpreter tooling,
-refused with pointed errors.
+`jacquard build` is a real AOT compiler for the `.jqd` kernel carrier. It emits
+C for the reachable program, links the native runtime, performs
+content-keyed specialization and caching, and delegates machine-code
+optimization to clang or gcc (`-O2 -flto`). Tail calls are O(1) stack on both:
+musttail where available, a trampoline otherwise. CI byte-compares native and
+interpreter stdout, stderr, and exits across the eligibility corpus and runs
+ASAN/UBSAN, leak, and 1,000-case fuzz lanes. Capturing and multi-shot handlers,
+Dist inference, quotes, splices, and structural code operations compile.
+Dynamic `eval` stays interpreter-only (E1102); `--dry-run` and `--infer-cache`
+are interpreter tooling and compiled programs refuse them explicitly. The
+measured boundary is in `docs/benchmarks.md`; do not generalize those named
+results into a production-performance claim.
 
 `jacquard run` loads declarations, then evaluates and prints each top-level
 expression in order. Exit codes for `run`: ungranted-effect refusal (E0814)
@@ -89,15 +104,19 @@ The kernel grammar is 27 forms (authoritative: `docs/ast.md`, `spec/`):
 - **type**: `tref tvar tapp tarrow ttuple tforall` (+ `row`/`eref` structures)
 - **decl**: `defterm deftype defeffect`
 
-What is deliberately absent: no `if` (match over library `bool`), no
-statements (`let nonrec (pwild) e1 e2` sequences), no exceptions (failure is
-an effect in the row), no null, no guards or or-patterns, no modules (a
-codebase is hashes + a name index). Do not add kernel forms or surface
-syntax; that is a hard guardrail in `AGENTS.md`.
+The fixed kernel deliberately has no `if`, statement, list-literal, or pipe
+forms. Public `.jac` does have local sugar for `if`/`else`, blocks, lists, and
+pipelines; lowering maps all of it onto the 27 forms above without changing
+identity. Neither carrier has null, guards, or-patterns, or a module system;
+failure is an effect rather than an exception. Do not confuse a missing kernel
+form with a missing surface feature, and do not widen either grammar without an
+explicit owner decision and evidence update.
 
-## Crash course by example
+## Kernel crash course by example
 
-Everything below is real, runnable style (compare `demos/` and `prelude/`).
+Everything below is real `.jqd` kernel notation. For normal `.jac` authoring,
+read `docs/surface-syntax.md` and the two surface case studies under
+`demos/case-studies/`.
 
 ```lisp
 ; application is UNCURRIED: add takes exactly two args (decision D5)
@@ -248,7 +267,7 @@ Read `docs/warp-testing.md`; the API is `prelude/15-warp.jqd` + `16-gen.jqd`.
   Assertions: `check.true`, `check.eq actual expected EQ SHOW label`,
   `check.some`, `check.fails`, `check.throws`, `check.posterior`,
   `check.same-dist`.
-- Tests are ordinary defterms of type `test` or `world-test`; **discovery is
+- Tests are ordinary definitions of type `test` or `world-test`; **discovery is
   by checked type** — no annotations, no registry:
   - `(app (var case) (lit "name") (lam () ...))` — row CLOSED at `{check}`:
     hermetic by typechecking. Discharge other effects *inside* the case with
@@ -267,15 +286,19 @@ Read `docs/warp-testing.md`; the API is `prelude/15-warp.jqd` + `16-gen.jqd`.
   zero tests and editing a dependency reruns exactly its dependents. Use
   `--no-cache` in demos/scripts, `--seed` always for reproducibility.
 - A case that makes zero checks WARNs — a test cannot silently assert nothing.
+- `jacquard test` selects syntax by extension. Public `tests.jac` files and
+  bootstrap `tests.jqd` fixtures use the same type-directed discovery and
+  declaration-only E1001 boundary.
 
 ## House style and workflow
 
 - **Comment voice**: demos and prelude carry meaning-dense narrative comments
   (thesis first, then mechanics; CAPS for the one load-bearing word). Match
-  it. Files that are demos end with a `; --- demo driver ---` section of
-  top-level expressions; shell runners strip it with awk to reuse definitions
-  in Warp suites (pattern: `demos/tooling/showcase-warp-tests.sh`,
-  `demos/tooling/repair.sh`).
+  it. Demo files assembled into Warp suites use a carrier-appropriate driver
+  marker (`-- --- demo driver ---` in `.jac`, `; --- demo driver ---` in
+  `.jqd`); shell runners strip it with awk to reuse definitions (pattern:
+  `demos/case-studies/stormglass/run.sh`,
+  `demos/tooling/showcase-warp-tests.sh`).
 - **Everything public is pinned**: demo outputs in `test/cli/*.t` cram
   transcripts (run via `dune runtest`; promote intentionally, review diffs),
   hashes in `corpus/golden/` (regen: `dune exec test/gen_goldens.exe`, then
@@ -288,9 +311,12 @@ Read `docs/warp-testing.md`; the API is `prelude/15-warp.jqd` + `16-gen.jqd`.
   only for internal invariants, prefixed `Bug_`; public functions get doc
   comments; diagnostics get stable `E####` codes cataloged in
   `docs/errors.md` (a test enforces this).
-- Guardrails (AGENTS.md): keep the 27-form kernel; no perf work, macros
-  beyond quote/unquote/eval, records, typed staging, continuous
-  distributions, packages, or self-hosting.
+- Guardrails (AGENTS.md): keep the 27-form kernel and the reviewed surface
+  boundary. Native AOT and measured optimization already exist; do not add a
+  VM/JIT or reopen performance mechanisms without an explicit decision. Macro
+  expansion beyond quote/unquote/eval, records, typed staging, continuous
+  distributions, language package management, concurrency, and self-hosting
+  remain outside the shipped feature set.
 
 ## Gotchas that cost real debugging time
 
@@ -309,7 +335,8 @@ Read `docs/warp-testing.md`; the API is `prelude/15-warp.jqd` + `16-gen.jqd`.
   ordered (E0505).
 - In cram tests (`test/cli/*.t`), export `JACQUARD_PRELUDE=../../prelude` and
   remember the sandbox only sees dirs listed in `test/cli/dune` cram deps.
-- `jacquard test` files must not contain top-level expressions (E1001);
+- `jacquard test` accepts `.jac` and `.jqd`, but test files must not contain
+  top-level expressions (E1001);
   `--dry-run` refuses programs whose row includes `eval` (E1002).
 
 ## Where to look
@@ -319,8 +346,13 @@ Read `docs/warp-testing.md`; the API is `prelude/15-warp.jqd` + `16-gen.jqd`.
 - Runnable intro: `docs/tutorial.md` (10 examples, all pinned in cram).
 - Stdlib design + errata: `docs/stdlib.md` (§12 errata is required reading).
 - Demo catalog: `demos/README.md` — each demo proves one thesis claim.
+- Product-scale examples: `demos/case-studies/release-risk/` and
+  `demos/case-studies/stormglass/`, each with surface Warp tests and exhaustive
+  world enumeration.
 - Errors: `docs/errors.md` (every code, with a trigger example).
 - Evaluator/handlers: `src/eval.ml` (CPS, multi-shot); checker/rows:
   `src/check.ml`; inference: `src/infer_dist.ml`; Warp: `src/warp.ml`.
+- Native AOT status and measured boundary: `docs/native-compilation.md`,
+  `docs/benchmarks.md`, `src/native/`, and `runtime/`.
 - Release evidence and claims: `docs/release/0.1/` (CLAIMS.md maps every
   semantic claim to its test).
