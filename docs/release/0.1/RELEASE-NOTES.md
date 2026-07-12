@@ -20,7 +20,7 @@ Install:
 ```sh
 curl -fsSL https://raw.githubusercontent.com/jbwinters/jacquard-lang/jacquard-core-0.1-rc1/scripts/install.sh | sh
 ~/.local/bin/jac --version
-~/.local/bin/jac run ~/.local/share/jacquard/demos/m1-fact.jac
+~/.local/bin/jac run ~/.local/share/jacquard/demos/basics/m1-fact.jac
 ```
 
 The installer verifies the published SHA-256 checksum before extracting the

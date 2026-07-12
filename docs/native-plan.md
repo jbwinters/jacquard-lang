@@ -376,7 +376,7 @@ widened to grant-only and tail-resumptive programs.
    established this shape; see docs/perf-vm-decision.md.)
 
 **Definition of done.**
-- demos/word-count.jqd builds and runs natively byte-identical to the
+- demos/tooling/word-count.jqd builds and runs natively byte-identical to the
   interpreter, including the ungranted-refusal path (exit 3, same stderr).
 - A console/clock/fs golden set in native.t (hello, timed loop with
   clock.fixed-style in-language handler if tail-resumptive, file round-trip
@@ -467,7 +467,7 @@ from task 72 (the enum handler reaches them).
   escaping outward; abort skipping pending argument evaluation; state.run
   in its state-passing style; abort/throw/emit batteries) — with the
   mapping table showing every OCaml gauntlet case has a native twin.
-- demos/m1.sh entirely native-identical (fact, choose, gated eval refusal —
+- demos/basics/m1.sh entirely native-identical (fact, choose, gated eval refusal —
   the eval leg stays a refusal, pinned).
 - The in-language enumeration handler (prelude/07-enum.jqd) produces
   byte-identical posteriors natively on the m3 model.
@@ -488,7 +488,7 @@ console.scripted) already compile via task 71; this task is about the
 builtin/root surface. `--dry-run` stays interpreter-only; `jacquard build`
 rejects it with a pinned message.
 
-**Definition of done:** demos/m3.sh fully native-identical (enumerate and
+**Definition of done:** demos/inference/m3.sh fully native-identical (enumerate and
 lw legs, exact seeds — including the posterior table's exact float
 formatting, which src/infer_dist.ml renders with fixed precision; port that
 rendering, do not reinvent it); the replay strict/loose cases and the
@@ -537,7 +537,7 @@ canonical printer, ~150 lines of src/printer.ml), `code.to-text` (full
 printer). `code.of-text` stays refused (it is the reader); `eval` stays
 refused with E1102 "eval requires the interpreter tier".
 
-**Definition of done:** the quote corpus and demos/repair.jqd's pure
+**Definition of done:** the quote corpus and demos/tooling/repair.jqd's pure
 mutation machinery (mutant generation, prior, rendering — everything except
 the eval-driver acts) native-identical; refusals pinned; `Value.show` of
 code values byte-identical (this exercises the ported printer).

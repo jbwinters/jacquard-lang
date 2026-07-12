@@ -1,4 +1,4 @@
-The committed transcript for demos/repair.sh: program repair as Bayesian
+The committed transcript for demos/tooling/repair.sh: program repair as Bayesian
 inference. Candidate patches are computed from the shipped program's quoted
 AST (code.un-form to descend, code.form to splice back — pure, and the rows
 say so); a bug report is an observation; running a candidate is the eval
@@ -9,7 +9,7 @@ posterior itself needs eval, which Warp's closed {check} row cannot grant.
 
   $ export JACQUARD_PRELUDE=../../prelude
 
-  $ JACQUARD=jac sh ../../demos/repair.sh
+  $ JACQUARD=jac sh ../../demos/tooling/repair.sh
   == the rows announce the authority: mutation is pure, running candidates is eval ==
   buggy-sum-to : Code
   intended-fix : Code
@@ -54,7 +54,7 @@ posterior itself needs eval, which Warp's closed {check} row cannot grant.
 The prop lane also proves its property exhaustively over the prior's nine
 support points:
 
-  $ awk '/^; --- demo driver ---$/ { exit } { print }' ../../demos/repair.jqd > repair-defs.jqd
-  $ cat repair-defs.jqd ../../demos/repair-warp-tests.jqd > repair-suite.jqd
+  $ awk '/^; --- demo driver ---$/ { exit } { print }' ../../demos/tooling/repair.jqd > repair-defs.jqd
+  $ cat repair-defs.jqd ../../demos/tooling/repair-warp-tests.jqd > repair-suite.jqd
   $ jac test repair-suite.jqd --exhaustive --no-cache | grep repair-prior-support
   PASS repair-prior-support/sampled patches stay one edit away (verified exhaustively (9 cases))

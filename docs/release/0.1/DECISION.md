@@ -6,7 +6,7 @@ Candidate tag: `jacquard-core-0.1-rc1` (the tag resolves the exact reviewed comm
 Required lineage base: `738dc8e`
 Version: `0.1.0`  
 Test count: `554` Alcotest/QCheck cases
-Cram count: `31` transcript files
+Cram count: `32` transcript files
 
 ## Known Blockers
 

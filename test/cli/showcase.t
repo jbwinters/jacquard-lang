@@ -1,12 +1,12 @@
 
-PROGRAM SYNTHESIS AS BAYESIAN INFERENCE (demos/synthesis.jac): sample a
+PROGRAM SYNTHESIS AS BAYESIAN INFERENCE (demos/inference/synthesis.jac): sample a
 candidate program (code is data), observe that it passes the spec (running
 candidates is the eval CAPABILITY — synthesis refuses without the grant), and
 read the posterior over programs. One weak test leaves two survivors at the
 renormalized prior; one more test proves the correct program at probability 1.
 
   $ export JACQUARD_PRELUDE=../../prelude
-  $ D=../../demos
+  $ D=../../demos/inference
 
   $ cat $D/synthesis.jac > syn.jac
   $ cat >> syn.jac <<'JACQUARD'

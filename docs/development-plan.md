@@ -349,7 +349,7 @@ Done when:
 - [ ] Each command has a happy-path and a failure-path test driving the binary (expect-style).
 - [ ] Exit codes: 0 ok, 1 diagnostics, 2 runtime error, 3 unhandled effect.
 
-Milestone gate M1. Demo script (checked into `demos/m1.sh`): run factorial; run the
+Milestone gate M1. Demo script (checked into `demos/basics/m1.sh`): run factorial; run the
 multi-shot Choose program; run eval-gated program with and without `--allow Eval`.
 Owner decision D5 (curried question) closes here.
 
@@ -495,7 +495,7 @@ Done when:
 
 ### W4.5 Demo 1 assembly (S)
 
-`demos/m3.sh`: one model file, `enumerate` then `lw`, transcript checked in.
+`demos/inference/m3.sh`: one model file, `enumerate` then `lw`, transcript checked in.
 
 Done when:
 - [ ] Script runs clean from a fresh clone in CI and its output matches the committed transcript.
@@ -550,7 +550,7 @@ Done when:
 
 ### W5.5 Demo 2 assembly (S)
 
-`demos/m4-hostile.sh`: the generated-looking function that attempts Net; `jacquard check`
+`demos/worlds/m4-hostile.sh`: the generated-looking function that attempts Net; `jacquard check`
 refusal with the signature printed; the granted run succeeding against the stub
 handler; transcript committed.
 

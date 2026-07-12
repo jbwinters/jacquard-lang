@@ -69,7 +69,7 @@ jobs:
           root=$(find "$smoke" -mindepth 1 -maxdepth 1 -type d -name 'jacquard-*' | head -1)
           "$root/bin/jacquard" --version
           "$root/bin/jac" --version
-          test "$("$root/bin/jac" run "$root/share/jacquard/demos/m1-fact.jac")" = "120"
+          test "$("$root/bin/jac" run "$root/share/jacquard/demos/basics/m1-fact.jac")" = "120"
 
       - name: Upload package artifact
         uses: actions/upload-artifact@v7.0.1

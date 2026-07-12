@@ -238,9 +238,9 @@ multi-shot            18  48%
 Reproduce with:
 
 ```sh
-jacquard tiers demos/*.jqd demos/escrow/workflow.jqd \
-  demos/escrow/workflow-escalated.jqd demos/escrow/tests.jqd \
-  demos/escrow/main.jqd corpus/valid/*.jqd corpus/sigs/*.jqd
+jacquard tiers demos/*.jqd demos/worlds/escrow/workflow.jqd \
+  demos/worlds/escrow/workflow-escalated.jqd demos/worlds/escrow/tests.jqd \
+  demos/worlds/escrow/main.jqd corpus/valid/*.jqd corpus/sigs/*.jqd
 ```
 
 What the numbers say about the design's assumptions:

@@ -59,6 +59,9 @@ Directory: `worlds/`
 
 - `agent-dream.jac`: one network policy under scripted and probabilistic world
   handlers.
+- `preflight.jac`: several candidate agent plans as quoted Code; weak vs sharp
+  world evidence scores a posterior; semantic diffs name the rejects; the live
+  policy still refuses without a Net grant after the dreams pass.
 - `m4-hostile.jqd`: generated-looking code whose `net` authority is exposed by
   signatures and manifest checks.
 - `escrow/`: manifest, dry-run, Warp, faults, replay, semantic diff, provenance,
@@ -73,16 +76,9 @@ Directory: `tooling/`
   dream-mode, and ambiguity demos.
 - `word-count.jac`: console capability and standard-library collection smoke.
 
-## Compatibility Paths
-
-The former flat paths under `demos/` remain symlinks, so commands such as
-`sh demos/m1.sh` and `jac run demos/repair.jac --allow eval` keep working. New
-documentation uses the canonical categorized paths. The aliases contain no
-duplicate program bodies and preserve the reviewed 0.1 evidence paths.
-
 ## Evidence
 
 Committed transcripts live under `test/cli/`, especially `case-studies.t`,
-`demos.t`, `infer.t`, `repair.t`, `showcase.t`, `hostile-demo.t`, and `escrow.t`.
-They pin public `.jac` execution, Warp results, capability refusals, and the
-semantic hash parity of retained surface/bootstrap twins.
+`demos.t`, `infer.t`, `repair.t`, `preflight.t`, `showcase.t`, `hostile-demo.t`,
+and `escrow.t`. They pin public `.jac` execution, Warp results, capability
+refusals, and the semantic hash parity of retained surface/bootstrap twins.

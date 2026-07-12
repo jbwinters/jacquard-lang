@@ -86,7 +86,7 @@ This archive contains the Jacquard CLI and standard prelude.
 cp -R bin libexec share "\$HOME/.local/"
 jacquard --version
 jac --version
-jac run "\$HOME/.local/share/jacquard/demos/m1-fact.jac"
+jac run "\$HOME/.local/share/jacquard/demos/basics/m1-fact.jac"
 \`\`\`
 EOF
 

@@ -1,358 +1,686 @@
 ---
 name: jacquard
-description: Read, write, run, test, and compile Jacquard programs - the content-addressed, effect-typed research language implemented in this repo. Use when writing or reviewing public .jac programs or bootstrap .jqd fixtures, adding demos or Warp tests, running the jac CLI, debugging effect rows / capability manifests / handlers / Dist models, using the native AOT backend, or touching the OCaml implementation in src/.
+description: Install and use Jacquard; write, check, run, format, hash, infer, test, and compile effect-typed, content-addressed .jac programs. Use for Jacquard surface syntax, capability manifests, handlers, discrete Dist models, Code values, Warp tests, semantic identity, replay, and native AOT builds.
 ---
 
-# Jacquard: the language, fast
+# Jacquard Standalone Guide
 
-Jacquard is a research language for programs written by models and reviewed by
-people. Its one design move: **effects, uncertainty, and identity are visible
-to tools** instead of hidden in runtime behavior, mocks, logs, or naming
-conventions. Concretely:
+Jacquard is a research language for model-written, human-reviewed programs.
+Its central promise is that effects, uncertainty, and program identity remain
+visible to the checker and tools:
 
-- A function's signature carries its full story: `(Int, Int) ->{Abort} Int`
-  announces the failure path in the **effect row** on the arrow.
-- A program's inferred row is its **authority manifest** (checked per
-  top-level expression — `main` is a naming convention, not a mechanism); the
-  runtime installs root handlers only for effects granted with `--allow`. No
-  ambient authority.
-- Randomness and conditioning are ordinary effect ops (`sample`, `observe`);
-  an inference algorithm is just a handler. Models are code with `{Dist}` rows.
-- Definitions are **content-addressed**: hashes are computed with all metadata
-  (comments, formatting, spans, provenance) erased. Renames and reformats are
-  free; the test cache, semantic differ, and store all key on hashes.
+- Function arrows carry effect rows, such as `(Text) ->{Net, Console} Int`.
+- A runnable expression's inferred row is its authority manifest. The runtime
+  installs world handlers only for explicit `--allow` grants.
+- Probability is the ordinary `Dist` effect. Exact enumeration and likelihood
+  weighting run the same model under different handlers.
+- Definitions are content-addressed after comments, formatting, spans, and
+  provenance are erased. Semantic identity survives renames and reformats.
+- Handlers are deep and resumptions are reusable, including multi-shot use.
 
-The implementation is OCaml (`src/`), the language ships as a CLI (`jacquard`),
-the standard library ("prelude") is written in Jacquard itself (`prelude/`),
-and the AOT backend emits C plus the native runtime under `runtime/`. RC1
-publishes checksum-verified Linux and macOS binaries with `jac` as the short
-command.
+This file is self-contained for public use. A repository checkout is needed
+only to develop the OCaml implementation, not to install or write Jacquard.
 
-## Installation, environment, and CLI
+## Install
 
-Most users should install the published RC rather than build the OCaml toolchain:
+The release installer downloads a checksum-verified binary, the standard
+prelude, and demos. It does not require OCaml, opam, or Dune.
 
-```bash
+```sh
 curl -fsSL https://raw.githubusercontent.com/jbwinters/jacquard-lang/jacquard-core-0.1-rc1/scripts/install.sh | sh
-~/.local/bin/jac --version
-~/.local/bin/jac run ~/.local/share/jacquard/demos/m1-fact.jac
+export PATH="$HOME/.local/bin:$PATH"
+jac --version
+jac run "$HOME/.local/share/jacquard/demos/basics/m1-fact.jac"
 ```
 
-For development, every fresh shell needs the repo-local opam environment;
-direct development CLI runs need the prelude:
+The last command prints `120`. The published targets are Linux x86-64,
+macOS Intel, and macOS Apple Silicon. Set `JACQUARD_INSTALL_PREFIX` to choose a
+different prefix and `JACQUARD_INSTALL_VERSION` to choose another release tag.
+The long command is `jacquard`; `jac` is its installed short alias.
 
-```bash
+In a source checkout, use the repository-local opam switch:
+
+```sh
 eval "$(opam env)"
 export JACQUARD_PRELUDE=$PWD/prelude
-opam exec -- dune build @all      # build
-opam exec -- dune runtest         # full suite (~1 minute; alcotest + qcheck + cram)
-opam exec -- dune fmt             # then: git diff --exit-code (the dev gate)
+opam exec -- dune build @all
+opam exec -- dune exec jac -- --version
 ```
 
-`jac` during development is `dune exec jac --`. Public programs use `.jac`;
-bootstrap `.jqd` remains the internal/debug and kernel format of record:
+When this guide writes `jac`, source developers may substitute
+`opam exec -- dune exec jac --`.
 
-```bash
-jac run FILE.jac [--allow fs|net|console|clock|eval|dist|infer]... [--dry-run]
-jac check FILE.jac [--print-sigs] [--manifest fs,net,console]
-jac test TESTS... [--seed N] [--samples N] [--exhaustive] [--budget N]  # .jac or .jqd
-                   [--cache-dir DIR | --no-cache] [--allow EFFECT]... [--coverage]
-jac infer enumerate MODEL.jac                 # exact posterior (multi-shot enumeration)
-jac infer lw MODEL.jac --seed 42 --samples 100000   # likelihood weighting
-jac hash FILE.jac                             # canonical HASH_V0 hashes
-jac fmt FILE.jac [--write]                    # canonical formatting, comments kept
-jac store add|rename ... ; jac diff STORE_A STORE_B   # semantic diff
-jac dist-diff MODEL_A MODEL_B                 # posterior divergence between models
-jac tiers [FILES...]                          # effect-row tier statistics (PF.2 phase 1)
-jac replay LOG PROGRAM [--to N] [--fork 'N=(response 503 "down")']
-jac build FILE.jqd -o PROG                    # AOT-compile the kernel carrier
+## Command Reference
+
+Public source files use `.jac`. The CLI chooses the surface parser from that
+extension.
+
+```sh
+# Check without executing.
+jac check PROGRAM.jac
+jac check PROGRAM.jac --print-sigs
+jac check PROGRAM.jac --manifest fs,net,console
+
+# Run, granting only named root effects.
+jac run PROGRAM.jac
+jac run PROGRAM.jac --allow console --allow net
+jac run PROGRAM.jac --dry-run
+
+# Format and identify code.
+jac fmt PROGRAM.jac
+jac fmt PROGRAM.jac --write
+jac hash PROGRAM.jac
+
+# Discrete probabilistic inference.
+jac infer enumerate MODEL.jac
+jac infer lw MODEL.jac --seed 42 --samples 100000
+jac dist-diff MODEL_A.jac MODEL_B.jac
+
+# Warp tests.
+jac test TESTS.jac --seed 42
+jac test TESTS.jac --seed 42 --exhaustive --budget 10000
+jac test TESTS.jac --cache-dir .jacquard-test-cache
+jac test TESTS.jac --allow fs --allow net --allow clock --allow console
+
+# Content store, semantic diff, traces, and tiers.
+jac store add STORE PROGRAM.jac
+jac store rename STORE old-name new-name
+jac diff STORE_A STORE_B
+jac replay TRACE.jqd PROGRAM.jqd --to 12
+jac replay TRACE.jqd PROGRAM.jqd --fork '4=(response 503 "down")'
+jac tiers PROGRAM.jac
+
+# Native AOT currently consumes the kernel carrier.
+jac build PROGRAM.jqd -o program
+./program --allow console
 ```
 
-`jacquard build` is a real AOT compiler for the `.jqd` kernel carrier. It emits
-C for the reachable program, links the native runtime, performs
-content-keyed specialization and caching, and delegates machine-code
-optimization to clang or gcc (`-O2 -flto`). Tail calls are O(1) stack on both:
-musttail where available, a trampoline otherwise. CI byte-compares native and
-interpreter stdout, stderr, and exits across the eligibility corpus and runs
-ASAN/UBSAN, leak, and 1,000-case fuzz lanes. Capturing and multi-shot handlers,
-Dist inference, quotes, splices, and structural code operations compile.
-Dynamic `eval` stays interpreter-only (E1102); `--dry-run` and `--infer-cache`
-are interpreter tooling and compiled programs refuse them explicitly. The
-measured boundary is in `docs/benchmarks.md`; do not generalize those named
-results into a production-performance claim.
+`check --manifest` checks the inferred requirements against the supplied grant
+set and never runs the program. `run` loads declarations, then evaluates each
+bare top-level expression in order. Important exit codes are:
 
-`jacquard run` loads declarations, then evaluates and prints each top-level
-expression in order. Exit codes for `run`: ungranted-effect refusal (E0814)
-= 3, runtime failure = 2, ordinary type errors = 1; `check` refusals = 1.
+- `0`: success
+- `1`: checker or ordinary diagnostic failure
+- `2`: runtime failure
+- `3`: unhandled or ungranted effect
+- `124`: command-line usage error
 
-## Physical syntax: two carriers, one kernel
+Use stderr for diagnostics and stdout for successful program output. Always
+provide an explicit seed for reproducible sampling and property tests.
 
-Surface `.jac` is the public authoring syntax documented in
-`docs/surface-syntax.md`. It lowers locally to the same 27 kernel forms and has
-the same hashes as its paired `.jqd` format-of-record file.
+## Surface Syntax
 
-Every form is a triple `(head, meta, args)`. Bootstrap `.jqd` notation is
-s-expressions: heads are lowercase `[a-z][a-z0-9-]*`; args are forms or
-scalars (int, real, text, symbol, hash); `;` starts a comment; a parenthesized
-list with no head symbol (e.g. a `lam` parameter list) parses as a `group`
-form. Metadata (spans, comments) never affects a hash — **the metadata law**.
+`.jac` is delimiter-based and indentation-insensitive. Newlines or semicolons
+separate top-level and block items. `--` starts a line comment; `--|` starts a
+documentation comment for the next declaration. There is no import or module
+syntax. Free names resolve through the loaded prelude/store.
 
-The kernel grammar is 27 forms (authoritative: `docs/ast.md`, `spec/`):
+Names follow these rules:
 
-- **expr**: `lit var ref lam app let match tuple handle quote unquote ann`
-- **pat**: `pwild pvar plit pcon ptuple pas`
-- **type**: `tref tvar tapp tarrow ttuple tforall` (+ `row`/`eref` structures)
-- **decl**: `defterm deftype defeffect`
+- Terms, operations, variables, and type variables are lowercase kebab-case:
+  `with-default`, `empty?`, `head!`.
+- Dotted names are single global names, not field access: `list.map`,
+  `text.contains?`, `dist.enumerate`.
+- Types, effects, and constructors are PascalCase: `Option`, `Net`, `Some`.
+- A local `code` and a global `code.diff` do not conflict.
+- The only infix operator is `|>`. Arithmetic is called by name.
+- Strings support `\\`, `\"`, `\n`, `\t`, `\r`, and `\xNN` escapes.
+- Integers are signed 63-bit values and wrap. Division truncates toward zero.
+- Reals are floating point. Text is UTF-8 and indexed by codepoint, not
+  grapheme cluster.
 
-The fixed kernel deliberately has no `if`, statement, list-literal, or pipe
-forms. Public `.jac` does have local sugar for `if`/`else`, blocks, lists, and
-pipelines; lowering maps all of it onto the 27 forms above without changing
-identity. Neither carrier has null, guards, or-patterns, or a module system;
-failure is an effect rather than an exception. Do not confuse a missing kernel
-form with a missing surface feature, and do not widen either grammar without an
-explicit owner decision and evidence update.
+Reserved words are `type`, `effect`, `fn`, `let`, `rec`, `match`, `handle`,
+`return`, `resume`, `quote`, `unquote`, `if`, `then`, `else`, `as`, `where`,
+`forall`, and `jqd`.
 
-## Kernel crash course by example
+### Values, Calls, And Definitions
 
-Everything below is real `.jqd` kernel notation. For normal `.jac` authoring,
-read `docs/surface-syntax.md` and the two surface case studies under
-`demos/case-studies/`.
+Calls are uncurried. A function declared with two parameters is called with
+two arguments in one call.
+
+```jacquard
+limit = 100
+
+add-tax(amount, rate) = real.mul(amount, real.add(1.0, rate))
+
+increment = fn (n) -> add(n, 1)
+
+answer : () ->{} Int
+answer() = increment(41)
+
+answer()
+```
+
+Top-level `name = value` and `name(args) = body` create definitions. A
+signature immediately before the matching definition is optional. Bare
+top-level expressions are legal and run in document order. Top-level
+definition bodies must be pure values; put effectful work in a function and
+call it from a top-level expression.
+
+Application may chain, so `make-adder(1)(2)` is valid when the first call
+returns a function. Zero-argument functions are thunks and are called with
+`()`. Parentheses group expressions.
+
+### Blocks, Let, And Recursion
+
+A block is one expression. Each `let` scopes over the rest of the block. A
+non-final expression is sequencing whose value is discarded; the final
+expression is the block's value.
+
+```jacquard
+factorial(n) = {
+  let rec go(k, acc) =
+    match k {
+      | 0 -> acc
+      | remaining -> go(sub(remaining, 1), mul(acc, remaining))
+    }
+  go(n, 1)
+}
+
+greet(name) = {
+  console.print(text.concat("hello ", name))
+  text.length(name)
+}
+```
+
+Local recursive bindings must bind functions. Jacquard is strict and
+evaluates arguments left to right.
+
+### Conditionals And Matches
+
+`if` requires both branches and is an expression:
+
+```jacquard
+sign(n) =
+  if int.lt?(n, 0) then "negative"
+  else if eq(n, 0) then "zero"
+  else "positive"
+```
+
+`match` must be exhaustive. Patterns include `_`, fresh lowercase binders,
+literals, constructors, tuples, and `as` patterns. Constructor patterns start
+uppercase; a lowercase pattern always binds a new variable.
+
+```jacquard
+type Option a =
+  | None
+  | Some a
+
+head(xs) =
+  match xs {
+    | Nil -> None
+    | Cons(x, rest) as whole -> Some((x, rest, whole))
+  }
+```
+
+Use a braced block when an arm sequences work:
+
+```jacquard
+report(result) =
+  match result {
+    | Ok(value) -> {
+        console.print("ok")
+        value
+      }
+    | Err(message) -> {
+        console.print(message)
+        0
+      }
+  }
+```
+
+Lambda and `let` patterns must be irrefutable. Match arms may use refutable
+patterns. Duplicate binders are rejected. There are no guards or or-patterns.
+
+### Tuples, Lists, And Pipe
+
+`()` is both the unit value and unit type. `(a, b)` is a tuple. List literals
+lower to `Cons`/`Nil`.
+
+```jacquard
+top-three(xs) =
+  xs
+  |> list.filter(fn (n) -> int.gt?(n, 0))
+  |> list.map(fn (n) -> mul(n, n))
+  |> list.sort(int.ord)
+  |> list.take(3)
+
+top-three([-2, 4, 1, 3])
+```
+
+Pipe is left-associative and inserts its left side as the first argument.
+`xs |> list.map(f) |> list.sort(int.ord)` means
+`list.sort(list.map(xs, f), int.ord)`. There are no arithmetic, comparison,
+boolean, or custom infix operators.
+
+### Types And Rows
+
+Function types are uncurried and the effect row is part of the arrow:
+
+```text
+(Int, Int) ->{} Int
+(Text) ->{Net} Response
+(() ->{Abort | e} a) ->{| e} Option a
+forall a b | e. (List a, (a) ->{| e} b) ->{| e} List b
+```
+
+`{}` is a pure row. `{Net, Console}` contains named effects. `{Abort | e}`
+contains `Abort` plus an open row variable. `forall a b | e.` quantifies type
+variables before `|` and row variables after it.
+
+Tuples use `(A, B)`, unit uses `()`, and type application is whitespace-based:
+`List Int`, `Option (Pair Text Real)`. `(T,)` is the rare singleton tuple type.
+
+Algebraic data types are declared with constructors. Constructor fields may
+be positional or labeled:
+
+```jacquard
+type Decision =
+  | Ship
+  | Canary(percent: Int)
+  | Hold(reason: Text)
+
+type Result e a =
+  | Err e
+  | Ok a
+```
+
+Labels document constructor fields but do not create record syntax, labeled
+patterns, or generated accessors. Construct values with `Canary(5)` and match
+positionally with `Canary(percent)`.
+
+### Effects And Deep Multi-Shot Handlers
+
+Effects declare operations. Calling an operation looks like an ordinary call;
+there is no `perform` keyword.
+
+```jacquard
+effect Choice where {
+  choose : () -> Bool
+}
+
+effect Abort a where {
+  abort : () -> a
+}
+```
+
+A handler has one mandatory return clause and operation clauses. `resume`
+binds the captured continuation as an ordinary function. Calling it zero times
+aborts that path, once resumes normally, and more than once forks execution.
+
+```jacquard
+all-choices(body) =
+  handle body() {
+    | return value -> [value]
+    | choose() resume continue ->
+        list.append(continue(True), continue(False))
+  }
+```
+
+Handlers are deep: operations performed after `continue(...)` re-enter the
+same handler. The operation-clause body itself runs outside that handler, so
+performing the same operation directly in its own clause forwards outward.
+The return clause also runs outside the completed handled region.
+
+Use `resume _` when a clause deliberately never resumes:
+
+```jacquard
+to-option(body) =
+  handle body() {
+    | return value -> Some(value)
+    | abort() resume _ -> None
+  }
+```
+
+If the handled expression is not an atomic call, use two braces:
+
+```jacquard
+handle { match direction { | Up -> risky() | Down -> safe() } } {
+  | return value -> Some(value)
+  | abort() resume _ -> None
+}
+```
+
+Handling subtracts only the handled effect from the row and forwards all other
+effects. This is why one unchanged policy can run under real, replay, dry-run,
+scripted, hostile, or probabilistic handlers.
+
+### Quote, Unquote, And Code
+
+`quote` captures unresolved surface structure as a `Code` value. `unquote`
+splices a `Code` value while inside a quote.
+
+```jacquard
+make-call(argument) = quote { add(unquote(argument), 1) }
+
+candidate = quote { fn (x) -> add(x, 1) }
+
+run-candidate() = {
+  let function = `op:eval-code`(candidate)
+  function(41)
+}
+```
+
+Evaluation is authority: `eval-code` adds `Eval` to the row and requires
+`--allow eval`. Granting `Eval` does not grant `Net`, `Fs`, or any other world
+effect used by evaluated code. Constructed resolved hash references are
+validated rather than trusted as a capability bypass.
+
+Useful structural operations include:
+
+- `code.eq?(a, b)`: metadata-erased structural equality
+- `code.diff(a, b)`: text describing the smallest disagreeing subtrees
+- `code.form(head, children)` and `code.un-form(code)`
+- `code.of-int`, `code.to-int`, `code.of-text`, `code.to-text`
+
+`unquote` outside `quote` is invalid. A splice must produce `Code`. Nested
+quote levels are significant. `(expression : Type)` is a type annotation.
+
+`jqd { (bootstrap form) }` is the surface escape for a kernel form that cannot
+be represented without preserving an internal grouping. It is not general
+mixed-syntax authoring.
+
+### Compact Grammar
+
+This practical grammar covers ordinary public source:
+
+```text
+file        := top-item*
+top-item    := signature | definition | type-decl | effect-decl | expression
+signature   := name ":" type
+definition  := name ["(" patterns? ")"] "=" expression
+type-decl   := "type" Type type-vars? "=" ("|" constructor)+
+effect-decl := "effect" Effect type-vars? "where" "{" op-signature* "}"
+
+expression  := call ("|>" call)*
+call        := primary ("(" expressions? ")")*
+primary     := literal | name | tuple | list | block | fn | match | if
+             | handle | quote | unquote | annotation
+block       := "{" (let-item | expression)* "}"
+let-item    := "let" ["rec"] pattern ["(" patterns? ")"] "=" expression
+fn          := "fn" "(" patterns? ")" "->" expression
+match       := "match" expression "{" ("|" pattern "->" expression)+ "}"
+if          := "if" expression "then" expression "else" expression
+handle      := "handle" (atomic | block) "{" return-clause op-clause* "}"
+quote       := "quote" "{" expression "}"
+unquote     := "unquote" "(" expression ")"
+annotation  := "(" expression ":" type ")"
+
+pattern     := "_" | name | literal | Constructor ["(" patterns? ")"]
+             | "(" patterns? ")" | pattern "as" name
+type        := type-application | tuple-type | function-type | forall-type
+function-type := "(" types? ")" "->{" effects? ["|" row-var] "}" type
+```
+
+Indentation never determines structure. Calls, lists, tuples, and braced forms
+allow line breaks. After `=`, `:`, `->`, `then`, `else`, and `|>`, a newline is
+continuation rather than item separation.
+
+## Capabilities And Root Authority
+
+World effects are `Console`, `Clock`, `Fs`, `Net`, `Eval`, and `Infer`.
+`Dist` is pure inference rather than world authority. Root handlers exist only
+when explicitly granted:
+
+```sh
+jac check agent.jac --print-sigs
+jac check agent.jac --manifest console,net
+jac run agent.jac --allow console --allow net
+```
+
+Rules to rely on:
+
+- The checker propagates effects through higher-order functions, returned
+  closures, tuples, and polymorphic rows.
+- A handler removes only its own effect.
+- An ungranted world effect refuses before that effect executes.
+- `check --manifest` never runs user code.
+- `--dry-run` forwards reads and console/clock observation as documented,
+  audits writes and network actions, and performs no audited world mutation.
+- `--allow fs` currently grants the whole filesystem. Authority is effect-level,
+  not path- or domain-level object capability.
+- Evaluated code runs with root grants, not under an interposed attenuation
+  handler. Audit its inferred requirements and grants accordingly.
+- Top-level rows are closed. When an API expects an open-row thunk, eta-expand
+  a named computation: `fn () -> model()`.
+
+Never infer authority from a hand-written manifest or comment; use the checked
+row. Never add a grant merely to silence a refusal without reviewing why the
+row contains that effect.
+
+## Discrete Probability With Dist
+
+The prelude defines distribution values such as `Bernoulli(p)`,
+`Categorical(weighted-pairs)`, and `UniformInt(low, high)`. Models perform
+`sample` and `observe` through the `Dist` effect.
+
+```jacquard
+coin-model : () ->{Dist} Bool
+coin-model() = {
+  let first = `op:sample`(Bernoulli(0.5))
+  let second = `op:sample`(Bernoulli(0.5))
+  `op:observe`(
+    Bernoulli(if bool.or(first, second) then 1.0 else 0.0),
+    True)
+  first
+}
+
+coin-model()
+```
+
+Run the exact and approximate handlers over the same file:
+
+```sh
+jac hash coin.jac > before.hash
+jac infer enumerate coin.jac
+jac infer lw coin.jac --seed 42 --samples 100000
+jac hash coin.jac > after.hash
+cmp before.hash after.hash
+```
+
+Exact enumeration resumes once per support value, multiplies observation
+likelihoods, prunes exact zero-weight paths, merges equal outcomes at the CLI,
+and normalizes. Likelihood weighting is deterministic for the same seed and
+sample count. `Categorical` weights are relative. `UniformInt` exact support is
+capped at 10,000 outcomes.
+
+Inside Jacquard, use `dist.enumerate(fn () -> model())`, then
+`dist.tally(table, equality)` when equal outcomes should be merged. The
+in-language all-impossible case may expose NaN weights; CLI enumeration reports
+a diagnostic instead. An unhandled root `observe` is an error.
+
+## Standard Prelude
+
+Jacquard uses explicit dictionaries instead of typeclasses. Operations that
+need equality, ordering, or rendering receive `Eq`, `Ord`, or `Show` values:
+
+```jacquard
+list.sort(numbers, int.ord)
+list.contains?(names, "alice", text.eq)
+check.eq(actual, expected, int.eq, int.show, "same value")
+```
+
+Core data and common functions:
+
+- `Bool`: `True`, `False`; `bool.and`, `bool.or`, `bool.not`,
+  `bool.and-then`, `bool.or-else`
+- `Option a`: `None`, `Some`; `option.map`, `option.then`,
+  `option.with-default`, `option.get!`
+- `Result e a`: `Err`, `Ok`; `result.map`, `result.map-error`,
+  `result.then`, `result.with-default`, `result.get!`
+- `List a`: `Nil`, `Cons`; `list.map`, `filter`, `fold`, `each`, `length`,
+  `reverse`, `append`, `concat`, `range`, `zip`, `sort`, `find`, `take`
+- Numeric: `add`, `sub`, `mul`, `div`, `mod`, `eq`, `lt`; `int.*` and
+  `real.*` predicates/conversions; real arithmetic uses `real.add` etc.
+- Text: `text.concat`, `text.join`, `text.split`, `text.contains?`,
+  `text.length`, `text.from-int`, `text.eq`, `text.ord`
+- Maps and sets carry their comparison dictionary in the value.
+
+Control effects and handlers:
+
+- `Abort`: `abort.to-option`, `abort.or`
+- `Throw`: `throw.catch`, `throw.to-result`
+- `State`: `state.run`, `state.eval`
+- `Emit`: `emit.collect`, `emit.pipe`
+- `Fault`: `fault.none`, `fault.random`, `fault.all`
+
+World fixtures include `net.scripted`, `net.record`, replay handlers,
+`fs.in-memory`, `fs.read-only`, `clock.fixed`, and `console.scripted`. These
+handlers discharge or interpose on effects; they are the testing seam usually
+filled by mocks in other systems.
+
+Naming is subject-first and data-first: `list.sort(xs, int.ord)`. Predicates
+end in `?`; partial/effectful variants commonly end in `!`. `debug.inspect`
+is for debugging output only, not library behavior.
+
+## Warp Tests
+
+Warp tests are ordinary typed Jacquard definitions. Discovery is by checked
+type, not filenames, annotations, or a registry. Test files may contain
+declarations but no bare top-level expressions.
+
+```jacquard
+double(n) = mul(n, 2)
+
+unit-tests =
+  Group("arithmetic", [
+    Case("double", fn () ->
+      check.eq(double(21), 42, int.eq, int.show, "double 21")),
+
+    Prop("doubling is even", fn () -> {
+      let n = sample(UniformInt(-100, 100))
+      check.eq(mod(double(n), 2), 0, int.eq, int.show, "even")
+    })
+  ])
+```
+
+- `Case(name, fn () -> ...)` must close at `{Check}`. This proves hermeticity.
+- `Prop(name, fn () -> ...)` closes at `{Dist, Check}`. The generator is a
+  distribution; seeded mode samples it and `--exhaustive` enumerates support.
+- `Group(name, tests)` nests tests.
+- `WorldTest`/`WCase` may use `Fs`, `Net`, `Clock`, and `Console`; it runs only
+  in the explicitly granted world lane, is never cached, and is never retried
+  as a hermetic test.
+
+Useful assertions include `check.true`, `check.eq`, `check.some`,
+`check.fails`, `check.throws`, `check.posterior`, and `check.same-dist`.
+A case that performs zero checks warns. In sampled property mode, `observe` is
+not conditioning; use `--exhaustive` when the property depends on observation.
+
+Discharge world/control effects inside a `Case` with scripted handlers. If the
+resulting row is exactly `{Check}`, it is a hermetic test. `Eval` has no
+in-language hermetic discharger, so eval-dependent behavior belongs in a CLI
+transcript test rather than a Warp unit test.
+
+Warp's cache keys on semantic hashes and dependencies. A comment, format, or
+rename-only edit reruns zero tests. A semantic dependency edit reruns affected
+dependents. Use `--no-cache` for demonstrations and a fixed `--seed` for
+repeatable sampled properties.
+
+## Identity, Formatting, And Review
+
+`jac hash` computes `HASH_V0` over canonical structure. It erases metadata,
+alpha-normalizes local binders, and hashes recursive definition groups as
+units. Consequently:
+
+- Formatting and comments do not change identity.
+- Alpha-equivalent local names hash equally.
+- Reordering members of a recursive SCC is stable.
+- Renaming a top-level display name changes the name index, not its object.
+- Provenance can change without changing the approved semantic hash.
+
+Use `jac fmt --write` for canonical layout. Use stores and `jac diff` when you
+need rename classification, changed subtrees, or affected dependents. Do not
+compare source text when the question is whether behavior changed.
+
+Record/replay logs contain operation, argument, and result triples. Strict
+replay fails closed on operation or argument drift. Counterfactual `--fork`
+specifications replace an effect result at a trace index; malformed specs are
+diagnostics, not permissive fallbacks.
+
+## Native Compilation
+
+`jac build` currently accepts the `.jqd` kernel carrier. It emits C for the
+reachable program, links the Jacquard runtime, and asks clang or gcc to compile
+with optimization and LTO. Native and interpreted behavior are expected to be
+byte-identical for stdout, stderr, and exit status.
+
+```sh
+export JACQUARD_RUNTIME=/path/to/jacquard/runtime
+jac build program.jqd -o program
+./program --allow console --seed 42
+```
+
+The backend supports deep and multi-shot handlers, Dist, quotes, splices, and
+structural Code operations. Dynamic `eval` is interpreter-only and reports
+E1102 when compiled. `--dry-run` and `--infer-cache` are interpreter tooling
+and compiled binaries refuse them. A C toolchain is required. Deep non-tail
+recursion uses the configured program stack; set `JACQUARD_STACK_MB` if needed.
+Compiled units cache under `.jacquard-native/` by content hash.
+
+This is an AOT research backend, not a production optimizer, VM, or JIT. Do
+not infer broad performance claims from a single benchmark.
+
+## Bootstrap Carrier
+
+`.jqd` is the permanent kernel/debug carrier used by the prelude, replay,
+native build input, and implementation fixtures. It is an s-expression
+encoding of 27 fixed kernel forms. Ordinary users should write `.jac`.
+
+The expression heads are `lit`, `var`, `ref`, `lam`, `app`, `let`, `match`,
+`tuple`, `handle`, `quote`, `unquote`, and `ann`; pattern heads are `pwild`,
+`pvar`, `plit`, `pcon`, `ptuple`, and `pas`; declarations are `defterm`,
+`deftype`, and `defeffect`. `;` starts a bootstrap comment.
 
 ```lisp
-; application is UNCURRIED: add takes exactly two args (decision D5)
+; add(1, 2)
 (app (var add) (lit 1) (lit 2))
 
-; functions: params are irrefutable patterns; zero-ary lam/app = thunk/force
-(lam ((pvar x) (pvar y)) (app (var mul) (var x) (var y)))
-
-; let carries an explicit rec flag; nonrec is the workhorse.
-; sequencing is a pwild let:
-(let nonrec (pvar c) (app (var read) (lit "note.txt"))
-  (let nonrec (pwild) (app (var print) (var c))
-    (var c)))
-
-; match is EXHAUSTIVE (E0813 names the missing witness). No if.
-(match (var b)
-  (clause (pcon true) (lit 0))
-  (clause (pcon false) (lit 1)))
-
-; top-level declarations. A defterm group is one mutually recursive SCC,
-; hashed as a unit; recursion (fact calls fact) just works inside it.
-; The empty () after the name is the optional type-annotation slot.
-(defterm ((binding fact ()
-  (lam ((pvar n))
-    (match (var n)
-      (clause (plit 0) (lit 1))
-      (clause (pvar m)
-        (app (var mul) (var m) (app (var fact) (app (var sub) (var m) (lit 1))))))))))
-
-; sum types; field labels are optional
-(deftype option ((tvar a)) (con none) (con some (field (tvar a))))
-
-; effects: an op whose handler never resumes may promise any result type
-(defeffect abort ((tvar a)) (op abort () (tvar a)))
-
-; handlers are DEEP and MULTI-SHOT; ret clause is mandatory; k is an
-; ordinary function you may call 0, 1, or N times
-(handle (app (var body))
-  (ret (pvar x) (app (var some) (var x)))
-  (opclause abort () k (var none)))
+; fn (x) -> mul(x, x)
+(lam ((pvar x)) (app (var mul) (var x) (var x)))
 ```
 
-Multi-shot is load-bearing: the enumeration handler resumes once per element
-of a distribution's support (see `demos/basics/m1-choose.jac` for the public
-version). Tuples: `(tuple)` is unit; `(tuple a b)` pairs. Pattern `(ptuple ...)`
-destructures them; `(pcon mk-pair (pvar x) (pvar p))` destructures constructors.
+Surface and bootstrap twins lower to the same kernel and must hash equally.
+Do not invent new kernel forms for surface sugar.
 
-## Effects, rows, capabilities
+## Failure Modes And Limits
 
-- Rows live on arrows: `passes? : (Code, List (a, Int)) ->{Eval} Bool`.
-  Handling an effect **subtracts** it from the row; row polymorphism
-  (`forall a | e. (() ->{Abort | e} a) ->{| e} Option a`) passes the rest through.
-- Performing an op is plain application: `(app (var fetch) req)`. There is no
-  `perform` keyword.
-- `jacquard run` refuses ungranted effects (E0814) *before running the effectful
-  expression*; `jacquard check --manifest fs,console` audits without running.
-- Attenuation is handler interposition: `fs.read-only` forwards `read`,
-  throws on `write`. The wrapped code's row honestly keeps `fs`.
-- **Known caveats** (documented, do not "fix" casually):
-  - Rows are *name-sets*: effect payload types are erased, so
-    `eval : (Code) -> a` and `state.run`'s state type are looser than ideal.
-  - `eval`'d code runs at **root authority** — interposed handlers do not
-    attenuate `eval-code` payloads; only root grants apply.
-  - Top-level defterm bodies must be pure values (E0815); top-level rows are
-    CLOSED, so passing a named model where an open row is needed takes an
-    eta-expansion: `(lam () (app (var model)))`.
-  - `--allow fs` grants the whole filesystem; the grant is the sandbox.
+- No ambient authority: missing grants are expected refusals, not runtime
+  configuration bugs.
+- No null, records, modules/imports, guards, or-patterns, custom operators,
+  traits/typeclasses, string interpolation, or generated field accessors.
+- No concurrency or enforced effect membranes in the shipped language.
+- Probability is finite/discrete: no continuous distributions or gradients.
+- Quote/eval is untyped staging; there is no typed staging or macro expander.
+- No Jacquard package manager, dependency solver, registry trust model, or
+  self-hosting compiler.
+- Row soundness and handler semantics have extensive executable evidence but
+  no machine-checked formal proof.
+- `--allow fs` and `--allow net` are coarse effect grants; use host sandboxing
+  and interposed handlers when narrower authority is required.
+- Eight or more structurally identical members in one definition group may be
+  rejected as canonically ambiguous (E0505).
+- Process substitution is not seekable input for `jac run`; use a real file.
+- `jac test` rejects bare top-level expressions in test files (E1001).
+- `--dry-run` refuses a program whose row includes `Eval` (E1002).
 
-## Dist: probability as an effect
+## Recommended Agent Workflow
 
-One type, one effect, zero kernel forms (`prelude/06-dist.jqd`):
-
-```lisp
-(deftype distribution ((tvar a))
-  (con bernoulli (field (tref real)))
-  (con categorical (field (tapp (tref list) (tapp (tref pair) (tvar a) (tref real)))))
-  (con uniform-int (field (tref int)) (field (tref int))))
-(defeffect dist ()
-  (op sample ((tapp (tref distribution) (tvar a))) (tvar a))
-  (op observe ((tapp (tref distribution) (tvar a)) (tvar a)) (ttuple)))
-```
-
-- A model is any `() ->{Dist} a` thunk. Inference = handler choice:
-  in-language, `dist.enumerate` (exact, normalized, unmerged) or
-  `dist.sample-lw` (seeded likelihood weighting); at the CLI,
-  `jacquard infer enumerate` / `jacquard infer lw` (these merge equal outcomes).
-  Same model hash, different handler — that's `demos/inference/m3.sh`.
-- Merge equal outcomes explicitly: `dist.tally table (app (var mk-eq) (var code.eq?))`
-  — tallying asks for its `Eq` honestly.
-- Conditioning idiom: `observe (bernoulli w) true` where `w` is 1.0/0.0 —
-  impossible branches prune to mass zero (see `demos/inference/synthesis.jac`,
-  `demos/tooling/repair.jac`).
-- `categorical` weights are **relative**; enumeration normalizes at the end.
-- Gotchas: all-branches-impossible yields `+nan.0` weights in-language (the
-  CLI's `jacquard infer enumerate` reports E0901 instead); `observe` reaching the
-  root is an error (E0904); `uniform-int` enumeration caps at 10000 outcomes.
-
-## Code as data, identity, stores
-
-- `(quote FORM)` yields a `code` value; `(unquote ...)` splices inside quote.
-- Runtime reflection builtins: `code.form head children` /
-  `code.un-form c -> option (head, children)` (leaves with scalar args —
-  `var`, `lit`, `pvar` — return `none`), `code.of-int/to-int`,
-  `code.of-text/to-text`, `code.eq?` (metadata-erased structural equality),
-  `code.diff` (smallest disagreeing subtrees, as text). A full single-edit
-  AST mutation walker in pure Jacquard is in `demos/tooling/repair.jac`.
-- Running constructed code is the **eval capability**:
-  `(app (var eval-code) c)` needs `--allow eval`; it validates, resolves
-  against the store, and runs — at root authority (caveat above).
-- `jacquard hash` prints canonical hashes; `jacquard store add/rename` + `jacquard diff`
-  show renames as renames and reformatting as nothing. Fixtures, caches, and
-  approval workflows (see `demos/worlds/escrow/APPROVAL`) all pin hashes.
-
-## The prelude (stdlib), in rings
-
-`prelude/*.jqd` load in filename order; `prelude/rings.manifest` maps every
-name to its ring. Ring rule: a ring references only itself and below.
-
-- **Ring 0 axioms**: `bool option result list ordering`, dictionaries
-  (`mk-eq/mk-ord/mk-show`, `eq.fn/ord.fn/show.fn`, `int.eq bool.eq int.ord
-  ...`), arithmetic builtins (`add sub mul div mod eq lt`, `real.add
-  real.mul real.div real.sub`, numeric `*.gt?/gte?/lt?/lte?`),
-  `list.* option.* result.* bool.*`
-  (grid: `map filter fold each length ...`).
-- **Ring 1 control**: `abort throw state emit fault` + canonical handlers
-  (`abort.to-option throw.catch throw.to-result state.run emit.collect ...`),
-  bang variants (`option.get! list.head!`).
-- **Ring 2 structures**: `pair`, `text.*` (codepoint semantics; `text.eq
-  text.ord` live here, not ring 0), `map.*/set.*` (dictionary stored in the
-  value), `dist.*` (inference is pure), most Warp assertions, `codec`,
-  `fault.all`.
-- **Ring 3 world**: `console clock fs net eval infer` (+ `println`,
-  `console.ask`, `fs.read-only`, `net.get`), `world-test`/`wcase`,
-  `net.record` and `replay.*`. When in doubt, `prelude/rings.manifest` is
-  the authority on a name's ring.
-
-Naming: dotted lowercase, subject first, data-first args (`list.sort xs int.ord`);
-`?` for predicates, `!` for the aborting/throwing variant; `then` is the
-sequencing verb. Dictionaries are explicit values — there are no typeclasses.
-`debug.inspect` renders anything as text; debugging only, banned from library
-code.
-
-## Warp: the testing story
-
-Read `docs/warp-testing.md`; the API is `prelude/15-warp.jqd` + `16-gen.jqd`.
-
-- One effect: `check` (`check : (bool, text) -> ()` soft, `fail` hard).
-  Assertions: `check.true`, `check.eq actual expected EQ SHOW label`,
-  `check.some`, `check.fails`, `check.throws`, `check.posterior`,
-  `check.same-dist`.
-- Tests are ordinary definitions of type `test` or `world-test`; **discovery is
-  by checked type** — no annotations, no registry:
-  - `(app (var case) (lit "name") (lam () ...))` — row CLOSED at `{check}`:
-    hermetic by typechecking. Discharge other effects *inside* the case with
-    fixture handlers (`net.scripted`, `clock.fixed`, `fs.in-memory`,
-    `console.scripted`, `fault.all`) and enumeration (`dist.enumerate`).
-    Note: `eval` has no in-language discharger, so eval-dependent behavior is
-    pinned in cram transcripts instead (see `test/cli/repair.t`).
-  - `(app (var prop) (lit "name") (lam () ...))` — row `{dist, check}`; the
-    generator IS a distribution. `jacquard test` samples (seeded); `--exhaustive`
-    proves it over the whole support, budget-bounded. Caveat: the sampling
-    driver ignores `observe`; only `--exhaustive` conditions.
-  - `group` nests; `wcase` is the world lane (`{check, fs, net, clock,
-    console}`), runs only under `--allow` grants, never cached, never retried
-    in the hermetic lane.
-- The cache is semantic: keys are content hashes, so reformat/rename reruns
-  zero tests and editing a dependency reruns exactly its dependents. Use
-  `--no-cache` in demos/scripts, `--seed` always for reproducibility.
-- A case that makes zero checks WARNs — a test cannot silently assert nothing.
-- `jacquard test` selects syntax by extension. Public `tests.jac` files and
-  bootstrap `tests.jqd` fixtures use the same type-directed discovery and
-  declaration-only E1001 boundary.
-
-## House style and workflow
-
-- **Comment voice**: demos and prelude carry meaning-dense narrative comments
-  (thesis first, then mechanics; CAPS for the one load-bearing word). Match
-  it. Demo files assembled into Warp suites use a carrier-appropriate driver
-  marker (`-- --- demo driver ---` in `.jac`, `; --- demo driver ---` in
-  `.jqd`); shell runners strip it with awk to reuse definitions (pattern:
-  `demos/case-studies/stormglass/run.sh`,
-  `demos/tooling/showcase-warp-tests.sh`).
-- **Everything public is pinned**: demo outputs in `test/cli/*.t` cram
-  transcripts (run via `dune runtest`; promote intentionally, review diffs),
-  hashes in `corpus/golden/` (regen: `dune exec test/gen_goldens.exe`, then
-  `gen_prelude_goldens.exe`, `gen_sig_goldens.exe`, `gen_diag_goldens.exe`;
-  diffs should be additive), signatures in `corpus/sigs/`.
-- Dev gate before any PR: `dune build @all && dune runtest && dune fmt` then
-  `git diff --exit-code`. Release-facing changes also run
-  `JACQUARD_RELEASE_REF=HEAD JACQUARD_RELEASE_BASE=738dc8e scripts/release/reproduce-0.1.sh`.
-- OCaml side: library code returns `('a, Diag.t list) result`; exceptions
-  only for internal invariants, prefixed `Bug_`; public functions get doc
-  comments; diagnostics get stable `E####` codes cataloged in
-  `docs/errors.md` (a test enforces this).
-- Guardrails (AGENTS.md): keep the 27-form kernel and the reviewed surface
-  boundary. Native AOT and measured optimization already exist; do not add a
-  VM/JIT or reopen performance mechanisms without an explicit decision. Macro
-  expansion beyond quote/unquote/eval, records, typed staging, continuous
-  distributions, language package management, concurrency, and self-hosting
-  remain outside the shipped feature set.
-
-## Gotchas that cost real debugging time
-
-- The store name index is keyed by **(name, kind)**: an effect and its op
-  legitimately share a name (`abort`, `throw`, `emit`). Never assoc store
-  names by name alone. Bare-name precedence when ambiguous: term > con > op
-  (W0301 warns).
-- Expected-value strings in OCaml tests are `Value.show` renderings
-  (`"cons(1, nil)"`, `"true"`), NOT source syntax (`"(var true)"`).
-- `jacquard run` can't read process substitution (`<(...)`) — Illegal seek. Use
-  temp files.
-- `plit` matches int AND text literals (`(clause (plit "operator") ...)` works).
-- Ints are native 63-bit and wrap (D2); division truncates toward zero;
-  reals are OCaml floats; text is UTF-8 counted in codepoints (not graphemes).
-- 8+ structurally identical members in one defterm group can't be canonically
-  ordered (E0505).
-- In cram tests (`test/cli/*.t`), export `JACQUARD_PRELUDE=../../prelude` and
-  remember the sandbox only sees dirs listed in `test/cli/dune` cram deps.
-- `jacquard test` accepts `.jac` and `.jqd`, but test files must not contain
-  top-level expressions (E1001);
-  `--dry-run` refuses programs whose row includes `eval` (E1002).
-
-## Where to look
-
-- Kernel/AST/hashing: `docs/ast.md`, `spec/jacquard-kernel-ast-m0.md`,
-  `spec/serialization.md`, `src/kernel.ml`, `src/canon.ml`.
-- Runnable intro: `docs/tutorial.md` (10 examples, all pinned in cram).
-- Stdlib design + errata: `docs/stdlib.md` (§12 errata is required reading).
-- Demo catalog: `demos/README.md` — each demo proves one thesis claim.
-- Product-scale examples: `demos/case-studies/release-risk/` and
-  `demos/case-studies/stormglass/`, each with surface Warp tests and exhaustive
-  world enumeration.
-- Errors: `docs/errors.md` (every code, with a trigger example).
-- Evaluator/handlers: `src/eval.ml` (CPS, multi-shot); checker/rows:
-  `src/check.ml`; inference: `src/infer_dist.ml`; Warp: `src/warp.ml`.
-- Native AOT status and measured boundary: `docs/native-compilation.md`,
-  `docs/benchmarks.md`, `src/native/`, and `runtime/`.
-- Release evidence and claims: `docs/release/0.1/` (CLAIMS.md maps every
-  semantic claim to its test).
+1. Write public code in `.jac`; use `.jqd` only for the explicit kernel/native
+   boundaries above.
+2. Run `jac fmt --write FILE.jac`.
+3. Run `jac check FILE.jac --print-sigs` and review every inferred effect.
+4. For deployment, run `jac check FILE.jac --manifest ...` with the intended
+   grant set before `jac run`.
+5. Add hermetic behavior to Warp `Case`/`Prop` tests. Put real-world checks in
+   the explicit world lane and eval/CLI behavior in transcript tests.
+6. Fix seeds for every sampled run. Prefer exact enumeration for small finite
+   models and exhaustive properties.
+7. Use hashes and semantic diff for approvals; do not approve mutable paths or
+   source appearance alone.
+8. Treat diagnostics as the contract. Do not catch broad failures, add grants,
+   relax manifests, or update expected transcripts without understanding the
+   semantic change.
+9. Keep generated code's required authority no broader than necessary.
+10. Preserve the fixed kernel and current non-goals unless a reviewed language
+    decision explicitly changes them.

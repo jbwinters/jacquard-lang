@@ -1,1 +1,0 @@
-basics/m1.sh

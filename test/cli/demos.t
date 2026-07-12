@@ -2,26 +2,26 @@ The public M1 surface demos stay green through the actual jac alias.
 
   $ export JACQUARD_PRELUDE=../../prelude
 
-  $ jac run ../../demos/m1-fact.jac
+  $ jac run ../../demos/basics/m1-fact.jac
   120
-  $ jac run ../../demos/m1-choose.jac
+  $ jac run ../../demos/basics/m1-choose.jac
   cons(1, cons(2, nil))
-  $ jac run ../../demos/m1-gated.jac
+  $ jac run ../../demos/basics/m1-gated.jac
   error[E0814]: this program requires the `eval` effect, which is not granted (performed via `eval-code`)
     hint: grant it with --allow eval, or handle the effect in the program
   [3]
-  $ jac run ../../demos/m1-gated.jac --allow eval
+  $ jac run ../../demos/basics/m1-gated.jac --allow eval
   42
 
 Their retained bootstrap carriers still run, and every paired top-level semantic hash is identical.
 
-  $ jac run ../../demos/m1-fact.jqd
+  $ jac run ../../demos/basics/m1-fact.jqd
   120
-  $ for base in m1-fact m1-choose m1-gated clarifying-question agent-dream ambiguity-pipeline synthesis repair word-count; do jac hash ../../demos/$base.jac > $base.jac.hash; jac hash ../../demos/$base.jqd > $base.jqd.hash; cmp $base.jac.hash $base.jqd.hash || exit; done
+  $ for pair in basics/m1-fact basics/m1-choose basics/m1-gated inference/clarifying-question worlds/agent-dream inference/ambiguity-pipeline inference/synthesis tooling/repair tooling/word-count; do base=${pair##*/}; jac hash ../../demos/$pair.jac > $base.jac.hash; jac hash ../../demos/$pair.jqd > $base.jqd.hash; cmp $base.jac.hash $base.jqd.hash || exit; done
 
 The stdlib worked example (SL.9): word frequency, top 3, console-only manifest.
 
-  $ echo "the cat and the dog and the bird" | jac run ../../demos/word-count.jac --allow console
+  $ echo "the cat and the dog and the bird" | jac run ../../demos/tooling/word-count.jac --allow console
   text?
   the: 3
   and: 2
@@ -30,7 +30,7 @@ The stdlib worked example (SL.9): word frequency, top 3, console-only manifest.
 
 Without the grant it refuses before reading anything:
 
-  $ jac run ../../demos/word-count.jac
+  $ jac run ../../demos/tooling/word-count.jac
   error[E0814]: this program requires the `console` effect, which is not granted (performed via `main`)
     hint: grant it with --allow console, or handle the effect in the program
   [3]
@@ -58,7 +58,7 @@ monitoring — compositions on the M3 machinery, numbers hand-derived.
   >     (app (var cons) (var true) (app (var cons) (var true) (app (var cons) (var true) (var nil))))
   >     (lit 0.05)))
   > JACQUARD
-  $ cat ../../demos/cookbook.jqd cookbook-drive.jqd > cookbook-all.jqd
+  $ cat ../../demos/inference/cookbook.jqd cookbook-drive.jqd > cookbook-all.jqd
   $ jac run cookbook-all.jqd
   (3.5, true, false)
   2.0
@@ -70,7 +70,7 @@ The clarifying-question demo: exact value-of-information for interrupting the
 user. The agent can answer fast or audit first under uncertainty; asking one
 question reveals the user's need, but costs attention.
 
-  $ jac run ../../demos/clarifying-question.jac
+  $ jac run ../../demos/inference/clarifying-question.jac
   (3.1000000000000005, 6.1, 6.1)
   (8.7, 2.5999999999999996)
   cons(mk-pair("needs-audit", 0.35), cons(mk-pair("quick-answer", 0.65), nil))
@@ -81,7 +81,7 @@ Agent dream mode: the same policy runs under scripted worlds and a
 probabilistic world handler. The policy row honestly says it needs net; the
 demo outputs are produced by handlers around that unchanged policy.
 
-  $ JACQUARD=jac sh ../../demos/agent-dream.sh
+  $ JACQUARD=jac sh ../../demos/worlds/agent-dream.sh
   == policy authority ==
   support-policy : () ->{Net} Text
   == scripted worlds and probabilistic dream ==
@@ -92,7 +92,7 @@ demo outputs are produced by handlers around that unchanged policy.
 Ambiguity-preserving extraction: an OCR-ish date parse stays a Dist until a
 human click is represented as an observation. Downstream routing re-enumerates.
 
-  $ JACQUARD=jac sh ../../demos/ambiguity-pipeline.sh
+  $ JACQUARD=jac sh ../../demos/inference/ambiguity-pipeline.sh
   cons(mk-pair("Mar 4, 2025", 0.56), cons(mk-pair("Apr 3, 2025", 0.41), cons(mk-pair("Unknown", 0.03), nil)))
   cons(mk-pair("escalate-overdue", 0.56), cons(mk-pair("schedule-followup", 0.41), cons(mk-pair("ask-human", 0.03), nil)))
   cons(mk-pair("escalate-overdue", 0.0), cons(mk-pair("schedule-followup", 0.9999999999999999), cons(mk-pair("ask-human", 0.0), nil)))
@@ -101,7 +101,7 @@ The same demos also have Warp tests. The runner reuses each demo's definitions,
 strips the top-level output driver, appends `showcase-warp-tests.jqd`, and runs
 the result through `jacquard test`.
 
-  $ JACQUARD=jac sh ../../demos/showcase-warp-tests.sh
+  $ JACQUARD=jac sh ../../demos/tooling/showcase-warp-tests.sh
   PASS demo-ambiguity-click/date posterior survives until user observe (3 checks)
   PASS demo-dream-policy-dist/dream handler matches explicit world distribution (3 checks)
   PASS demo-dream-scripted/scripted worlds run the same policy (2 checks)

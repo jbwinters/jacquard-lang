@@ -1,1 +1,0 @@
-inference/m3.sh
