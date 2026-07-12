@@ -52,4 +52,4 @@ assertion. Counts become printed values via in-language collectors
 | (code values, task 73) | e06-erasure-splice-not-code.jqd | a smuggled non-code splice hits the runtime guard |
 | (SS.22 runtime error parity) | e07-erasure-text-join.jqd | an effect-erased Int reaches variadic join's indexed Text diagnostic at native v1's eighth-argument boundary |
 | (spec soundness, task 73 find) | g34-spec-const-list.jqd | a self-recursive walker over a const member list must not bake its argument |
-| (SS.22 stdlib parity) | g35-stdlib-ss22.jqd | variadic join within native v1's eight-argument ceiling, dotted real arithmetic, numeric boundaries, all predicates, and NaN ordering |
+| (SS.22 stdlib parity) | g35-stdlib-ss22.jqd | variadic join within native v1's eight-argument ceiling, direct text equality, dotted real arithmetic, numeric boundaries, all predicates, and NaN ordering |

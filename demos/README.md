@@ -1,8 +1,9 @@
 # Demos
 
 The demos are grouped by the idea they prove. Public programs use `.jac`;
-retained `.jqd` files are kernel/debug twins or Warp fixtures. Run from a
-repository checkout after building once:
+retained `.jqd` files are curated kernel/debug twins or Warp fixtures. New
+demos do not need `.jqd` counterparts unless they explicitly prove carrier
+parity. Run from a repository checkout after building once:
 
 ```bash
 eval "$(opam env)"

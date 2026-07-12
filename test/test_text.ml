@@ -188,6 +188,12 @@ let test_text_dictionaries () =
     "text.eq" "true"
     (show
        (Printf.sprintf "(app (app (var eq.fn) (var text.eq)) %s %s)" (lit "héllo") (lit "héllo")));
+  Alcotest.(check string)
+    "text.eq? true" "true"
+    (show (Printf.sprintf "(app (var text.eq?) %s %s)" (lit "héllo") (lit "héllo")));
+  Alcotest.(check string)
+    "text.eq? false" "false"
+    (show (Printf.sprintf "(app (var text.eq?) %s %s)" (lit "héllo") (lit "hello")));
   (* sort a list of texts through the captive dictionary machinery *)
   Alcotest.(check string)
     "sort by text.ord" "cons(\"a\", cons(\"b\", cons(\"c\", nil)))"

@@ -183,6 +183,7 @@ text.from-real 2
 text.to-real 2
 text.ord 2
 text.eq 2
+text.eq? 2
 int.show 2
 bool.show 2
 text.show 2

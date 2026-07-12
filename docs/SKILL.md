@@ -513,7 +513,8 @@ Core data and common functions:
 - Numeric: `add`, `sub`, `mul`, `div`, `mod`, `eq`, `lt`; `int.*` and
   `real.*` predicates/conversions; real arithmetic uses `real.add` etc.
 - Text: `text.concat`, `text.join`, `text.split`, `text.contains?`,
-  `text.length`, `text.from-int`, `text.eq`, `text.ord`
+  `text.length`, `text.from-int`, direct predicate `text.eq?`, dictionary
+  `text.eq`, and ordering dictionary `text.ord`
 - Maps and sets carry their comparison dictionary in the value.
 
 Control effects and handlers:
@@ -640,7 +641,9 @@ The expression heads are `lit`, `var`, `ref`, `lam`, `app`, `let`, `match`,
 (lam ((pvar x)) (app (var mul) (var x) (var x)))
 ```
 
-Surface and bootstrap twins lower to the same kernel and must hash equally.
+When both carriers exist, surface and bootstrap twins lower to the same kernel
+and must hash equally. Ordinary programs and demos should not maintain a
+hand-written `.jqd` twin; paired carriers are curated conformance fixtures.
 Do not invent new kernel forms for surface sugar.
 
 ## Failure Modes And Limits

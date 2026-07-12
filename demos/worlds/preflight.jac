@@ -56,18 +56,16 @@ scripted(code, response) =
     fn () -> net.scripted(fn () -> run-plan(code), Cons(response, Nil)),
     fn (e) -> e)
 
-text-eq?(a, b) = eq.fn(text.eq)(a, b)
-
 -- Sharp preflight: refunds only when the body says refund, falls back on
 -- outage, and asks instead of refunding ambiguous 200s.
 passes-sharp?(code) =
-  bool.and(text-eq?(scripted(code, MkResponse(200, "refund")), "issue-refund"),
-    bool.and(text-eq?(scripted(code, MkResponse(503, "down")), "fallback-human"),
-      text-eq?(scripted(code, MkResponse(200, "question")), "ask-more")))
+  bool.and(text.eq?(scripted(code, MkResponse(200, "refund")), "issue-refund"),
+    bool.and(text.eq?(scripted(code, MkResponse(503, "down")), "fallback-human"),
+      text.eq?(scripted(code, MkResponse(200, "question")), "ask-more")))
 
 -- Weak preflight: only the outage world. Every shipped candidate handles it.
 passes-weak?(code) =
-  text-eq?(scripted(code, MkResponse(503, "down")), "fallback-human")
+  text.eq?(scripted(code, MkResponse(503, "down")), "fallback-human")
 
 preflight-weak() =
   {

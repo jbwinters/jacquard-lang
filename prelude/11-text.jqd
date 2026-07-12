@@ -36,6 +36,9 @@
 
 (defterm ((binding text.eq () (app (var ord.to-eq) (var text.ord)))))
 
+; callable convenience beside the explicit Eq dictionary
+(defterm ((binding text.eq? () (app (var eq.fn) (var text.eq)))))
+
 (defterm ((binding int.show () (app (var mk-show) (var text.from-int)))))
 
 (defterm ((binding bool.show ()
