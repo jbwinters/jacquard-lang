@@ -58,6 +58,7 @@ capture ambiguity-pipeline env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh 
 capture demo-warp-tests env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/tooling/showcase-warp-tests.sh
 capture repair env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/tooling/repair.sh
 capture hostile-manifest env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/worlds/m4-hostile.sh
+capture escrow env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/worlds/escrow/run.sh
 capture release-risk env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/case-studies/release-risk/run.sh
 capture stormglass env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/case-studies/stormglass/run.sh
 

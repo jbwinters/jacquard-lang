@@ -1,18 +1,11 @@
 #!/bin/sh
-# Warp-backed checks for the demos. Run from the repo root:
-#   sh demos/tooling/showcase-warp-tests.sh
+# Warp-backed checks for the demos.
 set -eu
 
-ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-: "${TMPDIR:=$ROOT/.scratch/tmp}"
-export TMPDIR
-mkdir -p "$TMPDIR"
-JACQUARD="${JACQUARD:-dune exec jac --}"
-here="$(dirname "$0")"
-case "$(basename "$here")" in
-  demos) demos="$here" ;;
-  *) demos="$here/.." ;;
-esac
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+JACQUARD_DEMO_ROOT=$(CDPATH= cd -- "$here/.." && pwd)
+. "$JACQUARD_DEMO_ROOT/lib/demo-env.sh"
+demos=$JACQUARD_DEMO_ROOT
 tmp="$(mktemp "$TMPDIR/jacquard-demo-tests.XXXXXX.jqd")"
 trap 'rm -f "$tmp"' EXIT
 
@@ -26,4 +19,4 @@ strip_driver "$demos/worlds/agent-dream.jqd"
 strip_driver "$demos/inference/ambiguity-pipeline.jqd"
 cat "$here/showcase-warp-tests.jqd" >> "$tmp"
 
-$JACQUARD test "$tmp" --seed 7 --no-cache
+jacquard_demo test "$tmp" --seed 7 --no-cache

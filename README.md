@@ -15,7 +15,7 @@ production language; `docs/release/0.1/LIMITS.md` is the honest boundary.
 Install the 0.1 release candidate without OCaml or opam:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jbwinters/jacquard-lang/jacquard-core-0.1-rc1/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/jbwinters/jacquard-lang/jacquard-core-0.1-rc2/scripts/install.sh | sh
 ~/.local/bin/jac run ~/.local/share/jacquard/demos/basics/m1-fact.jac
 ```
 
@@ -157,7 +157,7 @@ diff: `- sub + add`. See `sh demos/tooling/repair.sh` for the full transcript.
 Most users do not need OCaml or opam. Install the reviewed 0.1 RC binary with:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jbwinters/jacquard-lang/jacquard-core-0.1-rc1/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/jbwinters/jacquard-lang/jacquard-core-0.1-rc2/scripts/install.sh | sh
 ```
 
 The installer detects your OS and CPU, downloads the matching archive and
@@ -175,6 +175,20 @@ from the installed package, so ordinary runs do not need an environment variable
 ```bash
 jac run ~/.local/share/jacquard/demos/basics/m1-fact.jac
 ```
+
+Narrative demos ship with launchers that choose the installed binary and
+prelude automatically. They do not require Dune:
+
+```bash
+DEMO_ROOT="$HOME/.local/share/jacquard/demos"
+sh "$DEMO_ROOT/case-studies/release-risk/run.sh"
+sh "$DEMO_ROOT/worlds/agent-dream.sh"
+sh "$DEMO_ROOT/worlds/escrow/run.sh"
+```
+
+Use these launchers rather than directly running a probabilistic model or a
+multi-file entrypoint. The launcher selects `infer` where observation requires
+it and assembles related files in isolated scratch space.
 
 To install somewhere else:
 
@@ -318,10 +332,10 @@ Requirements and knobs:
 
 ## Demos
 
-Start with these from the repo root:
+Start with these from the repo root after `dune build @all`. The same scripts
+also work in an installed bundle without opam or Dune:
 
 ```bash
-export JACQUARD_PRELUDE=$PWD/prelude
 opam exec -- sh demos/case-studies/stormglass/run.sh
 opam exec -- sh demos/case-studies/release-risk/run.sh
 opam exec -- sh demos/basics/m1.sh
@@ -354,7 +368,7 @@ What they show:
   prints as a one-line semantic diff.
 - `worlds/m4-hostile.sh`: generated-looking code that reaches for `net`; signatures and
   manifests expose the authority.
-- `demos/worlds/escrow/`: product-shaped generated workflow with manifest, dry-run,
+- `worlds/escrow/run.sh`: product-shaped generated workflow with manifest, dry-run,
   Warp tests, fault exploration, replay, semantic diff, and approval by hash.
 
 Demo paths are canonical within the categorized directories; there are no

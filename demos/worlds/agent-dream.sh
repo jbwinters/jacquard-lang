@@ -1,13 +1,12 @@
 #!/bin/sh
 # Agent dream mode: run one policy under scripted and probabilistic Net handlers.
-# Run from the repo root:
-#   sh demos/worlds/agent-dream.sh
 set -u
-JACQUARD="${JACQUARD:-dune exec jac --}"
-here="$(dirname "$0")"
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+JACQUARD_DEMO_ROOT=$(CDPATH= cd -- "$here/.." && pwd)
+. "$JACQUARD_DEMO_ROOT/lib/demo-env.sh"
 
 echo "== policy authority =="
-$JACQUARD check "$here/agent-dream.jac" --print-sigs | grep '^support-policy'
+jacquard_demo check "$here/agent-dream.jac" --print-sigs | grep '^support-policy'
 
 echo "== scripted worlds and probabilistic dream =="
-$JACQUARD run "$here/agent-dream.jac"
+jacquard_demo run "$here/agent-dream.jac"

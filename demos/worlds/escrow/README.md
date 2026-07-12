@@ -3,6 +3,14 @@
 One product-shaped walk through what makes Jacquard unusual, using only shipped
 machinery (release 0.1; the full transcript is pinned in `test/cli/escrow.t`):
 
+```sh
+sh demos/worlds/escrow/run.sh
+```
+
+The launcher works from a source checkout or an installed binary bundle. It
+assembles the multi-file workflow in private scratch space; `main.jqd` is an
+entrypoint fragment and is not intended to be run by itself.
+
 1. `workflow.jqd` is a generated-looking publish workflow.
 2. `jac check --print-sigs` prints its signature — the row IS its manifest:
    `() ->{fs, console, net} int`, and NOT eval.
