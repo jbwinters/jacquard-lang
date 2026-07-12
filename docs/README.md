@@ -19,7 +19,8 @@ project shape from file names alone.
 
 ## Core Design
 
-- `whitepaper.tex`: thesis, motivation, roadmap, risks, and related work.
+- `whitepaper.tex`: historical initial design thesis, motivation, risks, and
+  related work; its roadmap and implementation-status sections are outdated.
 - `ast.md`: kernel AST draft and metadata/hash contract.
 - `../spec/jacquard-kernel-ast-m0.md`: kernel AST source-of-truth spec.
 - `../spec/serialization.md`: canonical byte serialization and hashing.
