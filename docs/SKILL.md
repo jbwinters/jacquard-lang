@@ -634,18 +634,16 @@ not infer broad performance claims from a single benchmark.
 
 ## Licensing User Programs And Output
 
-Jacquard itself is AGPL-3.0-or-later. Jacquard claims no copyright in source
+Jacquard itself is Apache-2.0. Jacquard claims no copyright in source
 merely because it is written, checked, interpreted, or compiled with Jacquard.
 Native executables link Jacquard runtime material, so the Jacquard Runtime and
-Generated Output Exception explicitly permits user programs and compiled
+Generated Output Permission explicitly permits user programs and compiled
 output to use any license their authors choose, including proprietary terms.
-Using Jacquard does not require a commercial license.
 
-The exception does not relicense the compiler or standalone runtime source;
-modifications and derivatives of Jacquard itself remain governed by the AGPL
-unless separately licensed. See `RUNTIME-EXCEPTION.md`, `LICENSE`, and
-`COMMERCIAL-LICENSE.md`. This summarizes project licensing intent and is not
-legal advice.
+The permission supplements Apache-2.0 for Runtime Material embedded in compiled
+programs and generated output; the compiler and separately distributed runtime
+source remain under Apache-2.0. See `RUNTIME-EXCEPTION.md`, `LICENSE`, and
+`NOTICE`. This summarizes project licensing intent and is not legal advice.
 
 ## Bootstrap Carrier
 

@@ -49,13 +49,13 @@ cp -R prelude "$pkg/share/jacquard/prelude"
 cp -R demos "$pkg/share/jacquard/demos"
 cp runtime/jq_*.c runtime/jq_value.h "$pkg/share/jacquard/runtime/"
 cp LICENSE "$pkg/share/jacquard/LICENSE"
+cp NOTICE "$pkg/share/jacquard/NOTICE"
 cp RUNTIME-EXCEPTION.md "$pkg/share/jacquard/RUNTIME-EXCEPTION.md"
 cp TRADEMARKS.md "$pkg/share/jacquard/TRADEMARKS.md"
-cp COMMERCIAL-LICENSE.md "$pkg/share/jacquard/COMMERCIAL-LICENSE.md"
 cp LICENSE "$pkg/LICENSE"
+cp NOTICE "$pkg/NOTICE"
 cp RUNTIME-EXCEPTION.md "$pkg/RUNTIME-EXCEPTION.md"
 cp TRADEMARKS.md "$pkg/TRADEMARKS.md"
-cp COMMERCIAL-LICENSE.md "$pkg/COMMERCIAL-LICENSE.md"
 
 cat >"$pkg/bin/jacquard" <<'SH'
 #!/usr/bin/env sh
@@ -86,11 +86,11 @@ runtime.
 - \`share/jacquard/prelude\`: standard library
 - \`share/jacquard/demos\`: runnable examples
 - \`share/jacquard/runtime\`: C runtime used by \`jac build\`
-- \`share/jacquard/LICENSE\` and \`share/jacquard/RUNTIME-EXCEPTION.md\`: installed license terms
-- \`LICENSE\`: AGPL-3.0-or-later public license
+- \`share/jacquard/LICENSE\`, \`share/jacquard/NOTICE\`, and \`share/jacquard/RUNTIME-EXCEPTION.md\`: installed license terms
+- \`LICENSE\`: Apache License, Version 2.0
+- \`NOTICE\`: Jacquard attribution notice
 - \`RUNTIME-EXCEPTION.md\`: permission to license user programs and compiled output under terms of their authors' choice
 - \`TRADEMARKS.md\`: Jacquard name and mark policy
-- \`COMMERCIAL-LICENSE.md\`: commercial licensing path
 
 ## Manual Install
 
@@ -103,9 +103,9 @@ sh "\$HOME/.local/share/jacquard/demos/worlds/escrow/run.sh"
 \`\`\`
 
 Programs written in Jacquard and native executables produced by \`jac build\`
-may use any license chosen by their authors. The AGPL covers Jacquard itself;
-the runtime/output exception prevents linked runtime material from imposing
-that license on user programs.
+may use any license chosen by their authors. Jacquard itself is Apache-2.0,
+and the runtime/output permission prevents embedded runtime material from
+imposing notice obligations on user programs.
 EOF
 
 (cd "$tmp" && tar -czf "$DIST_DIR/$ARCHIVE" "jacquard-$VERSION-$TARGET")

@@ -1,5 +1,5 @@
 /* Copyright (C) 2026 Josh Winters
- * SPDX-License-Identifier: AGPL-3.0-or-later
+ * SPDX-License-Identifier: Apache-2.0
  * Additional permission applies; see ../RUNTIME-EXCEPTION.md. */
 
 /* Seeded RNG (task 66): a bit-for-bit port of Infer_dist.Rng

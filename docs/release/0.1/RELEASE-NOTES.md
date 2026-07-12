@@ -10,6 +10,12 @@ any license chosen by their authors. It also packages the C runtime so
 installed `jac build` works. Language semantics and the `0.1.0` CLI version are
 unchanged from the RC1 evidence boundary.
 
+Successor-distribution note (12 July 2026): the current repository distribution
+is relicensed under Apache License 2.0. Its revised runtime/generated-output
+permission preserves author-chosen licensing for user programs and compiled
+output. This licensing-only successor change does not alter the RC1 semantic
+boundary described by these release notes.
+
 This release candidate includes:
 
 - the public `.jac` surface syntax and permanent `.jqd` kernel/debug carrier
