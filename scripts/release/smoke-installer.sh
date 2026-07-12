@@ -27,7 +27,7 @@ JACQUARD_INSTALL_PREFIX="$prefix" \
 
 test "$("$prefix/bin/jacquard" --version)" = "0.1.0"
 test "$("$prefix/bin/jac" --version)" = "0.1.0"
-test "$("$prefix/bin/jac" run "$prefix/share/jacquard/demos/m1-fact.jac")" = "120"
+test "$("$prefix/bin/jac" run "$prefix/share/jacquard/demos/basics/m1-fact.jac")" = "120"
 
 if [ "$expected_platform" = yes ]; then
   bad="$work/bad"

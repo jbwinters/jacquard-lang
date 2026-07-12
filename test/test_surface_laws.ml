@@ -317,7 +317,19 @@ let twin_names () =
       let stem = Filename.remove_extension jac in
       Sys.file_exists (source_path (Filename.concat "corpus/valid" (stem ^ ".jqd"))))
 
-let demo_names () = sorted_directory_files "demos" ".jac"
+let demo_names () =
+  let root = source_path "demos" in
+  let root_symlinks =
+    Sys.readdir root |> Array.to_list
+    |> List.filter (fun entry -> (Unix.lstat (Filename.concat root entry)).st_kind = Unix.S_LNK)
+    |> List.sort String.compare
+  in
+  if root_symlinks <> [] then
+    Alcotest.failf "demos/ must not contain compatibility symlinks: %s"
+      (String.concat ", " root_symlinks);
+  [ "demos/basics"; "demos/inference"; "demos/tooling"; "demos/worlds" ]
+  |> List.concat_map (fun dir -> sorted_directory_files dir ".jac")
+  |> List.sort String.compare
 
 let anchor_of_heading heading =
   let buffer = Buffer.create (String.length heading) in
@@ -384,11 +396,11 @@ let manifest_errors () =
       "corpus/sigs/24-ring2.jqd";
       "corpus/valid/stdlib-ss22.jac";
       "corpus/valid/stdlib-ss22.jqd";
-      "demos/clarifying-question.jac";
-      "demos/clarifying-question.jqd";
-      "demos/cookbook.jqd";
-      "demos/repair.jac";
-      "demos/repair.jqd";
+      "demos/inference/clarifying-question.jac";
+      "demos/inference/clarifying-question.jqd";
+      "demos/inference/cookbook.jqd";
+      "demos/tooling/repair.jac";
+      "demos/tooling/repair.jqd";
       "docs/README.md";
       "docs/SKILL.md";
       "docs/ci-cd.md";
@@ -818,7 +830,8 @@ let validate_release_docs ~decision ~followups ~index =
             "exit 0; exactly 21 named doctests pass";
           ];
           [
-            "JACQUARD_PRELUDE=$PWD/prelude opam exec -- dune exec jac -- run demos/m1-fact.jac";
+            "JACQUARD_PRELUDE=$PWD/prelude opam exec -- dune exec jac -- run \
+             demos/basics/m1-fact.jac";
             "exit 0; stdout is exactly `120`";
           ];
           [ "opam exec -- dune build @doc"; "exit 0" ];

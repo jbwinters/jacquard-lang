@@ -16,7 +16,7 @@ Install the 0.1 release candidate without OCaml or opam:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jbwinters/jacquard-lang/jacquard-core-0.1-rc1/scripts/install.sh | sh
-~/.local/bin/jac run ~/.local/share/jacquard/demos/m1-fact.jac
+~/.local/bin/jac run ~/.local/share/jacquard/demos/basics/m1-fact.jac
 ```
 
 The expected output is `120`. Linux x86-64, macOS Intel, and macOS Apple
@@ -100,7 +100,7 @@ For readers who speak programming languages:
 The prototype is complete against its original core plan and has since added
 the public surface syntax, ringed standard library, Warp properties and cache,
 native compilation, packaged binaries, and product-scale case studies. RC1 is
-pinned by 554 Alcotest/QCheck cases, 31 cram transcripts, 21 documentation
+pinned by 554 Alcotest/QCheck cases, 32 cram transcripts, 21 documentation
 examples, native sanitizer/leak/fuzz lanes, and a fresh-clone evidence workflow.
 
 ## What It Looks Like
@@ -173,7 +173,7 @@ jac --version
 from the installed package, so ordinary runs do not need an environment variable:
 
 ```bash
-jac run ~/.local/share/jacquard/demos/m1-fact.jac
+jac run ~/.local/share/jacquard/demos/basics/m1-fact.jac
 ```
 
 To install somewhere else:
@@ -322,6 +322,7 @@ opam exec -- sh demos/case-studies/release-risk/run.sh
 opam exec -- sh demos/basics/m1.sh
 opam exec -- sh demos/inference/m3.sh
 opam exec -- sh demos/worlds/agent-dream.sh
+opam exec -- sh demos/worlds/preflight.sh
 opam exec -- sh demos/tooling/repair.sh
 ```
 
@@ -337,6 +338,8 @@ What they show:
 - `inference/clarifying-question.sh`: an agent computes whether asking the user a
   question is worth the interruption (value of information).
 - `worlds/agent-dream.sh`: one policy under scripted and probabilistic world handlers.
+- `worlds/preflight.sh`: candidate agent plans scored under alternate worlds; the
+  live policy still needs a Net grant after the dreams pass.
 - `inference/ambiguity-pipeline.sh`: an extraction pipeline that keeps its uncertainty;
   the user's click becomes an `observe`.
 - `tooling/showcase-warp-tests.sh`: Warp checks for the clarifying-question,
@@ -349,13 +352,14 @@ What they show:
 - `demos/worlds/escrow/`: product-shaped generated workflow with manifest, dry-run,
   Warp tests, fault exploration, replay, semantic diff, and approval by hash.
 
-The previous flat paths remain compatibility symlinks, so existing commands do
-not break. The full organized catalog is in `demos/README.md`.
+Demo paths are canonical within the categorized directories; there are no
+flat compatibility aliases. The full catalog is in `demos/README.md`.
 
 All public demo outputs are pinned by cram tests (recorded command-line
 transcripts that fail on any drift), especially `test/cli/demos.t`,
 `test/cli/hostile-demo.t`, `test/cli/escrow.t`, `test/cli/showcase.t`, and
-`test/cli/repair.t`, plus `test/cli/case-studies.t` for the larger applications.
+`test/cli/repair.t`, `test/cli/preflight.t`, plus `test/cli/case-studies.t` for
+the larger applications.
 
 ## Release Evidence
 

@@ -5,13 +5,13 @@ SS.16: `.jac` is a first-class CLI carrier while `.jqd` keeps its bootstrap cont
 All five source commands run through the built/package `jac` alias and extension detection. The
 public pure demo and the bare-top-level-expression demo both execute directly.
 
-  $ jac run ../../demos/surface-fact.jac
+  $ jac run ../../demos/basics/surface-fact.jac
   120
-  $ jac run ../../demos/surface-expression.jac
+  $ jac run ../../demos/basics/surface-expression.jac
   42
-  $ jac check ../../demos/surface-fact.jac
+  $ jac check ../../demos/basics/surface-fact.jac
   ok
-  $ jac hash ../../demos/surface-expression.jac | sed 's/[0-9a-f]\{64\}/HASH/'
+  $ jac hash ../../demos/basics/surface-expression.jac | sed 's/[0-9a-f]\{64\}/HASH/'
   0 HASH
 
 D40 executes every bare top-level expression in document order while declarations before, between,

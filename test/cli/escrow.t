@@ -1,9 +1,9 @@
 The executable escrow (release 0.1's narrative demo): a generated workflow's
 authority, behavior, and identity are machine-checked before anything runs.
-Every beat uses shipped machinery only. See demos/escrow/README.md.
+Every beat uses shipped machinery only. See demos/worlds/escrow/README.md.
 
   $ export JACQUARD_PRELUDE=$PWD/../../prelude
-  $ cp -R ../../demos/escrow/* .
+  $ cp -R -L ../../demos/worlds/escrow/* .
   $ printf 'cfg' > release-config.txt
   $ cat workflow.jqd main.jqd > approved-run.jqd
 

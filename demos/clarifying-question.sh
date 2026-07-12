@@ -1,1 +1,0 @@
-inference/clarifying-question.sh

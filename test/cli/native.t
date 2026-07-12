@@ -187,15 +187,15 @@ error even in a merged capture:
   $ diff i.out n.out && echo identical
   identical
 
-demos/word-count.jqd — the task-70 definition of done — granted and
+demos/tooling/word-count.jqd — the task-70 definition of done — granted and
 refused, byte-identical both ways:
 
-  $ echo "the quick brown fox the lazy dog the fox" | jacquard run ../../demos/word-count.jqd --allow console > i.out 2>&1
-  $ jacquard build ../../demos/word-count.jqd -o wc-prog > /dev/null
+  $ echo "the quick brown fox the lazy dog the fox" | jacquard run ../../demos/tooling/word-count.jqd --allow console > i.out 2>&1
+  $ jacquard build ../../demos/tooling/word-count.jqd -o wc-prog > /dev/null
   $ echo "the quick brown fox the lazy dog the fox" | ./wc-prog --allow console > n.out 2>&1
   $ diff i.out n.out && echo identical
   identical
-  $ jacquard run ../../demos/word-count.jqd > i.out 2>&1; echo "exit $?"
+  $ jacquard run ../../demos/tooling/word-count.jqd > i.out 2>&1; echo "exit $?"
   exit 3
   $ ./wc-prog > n.out 2>&1; echo "exit $?"
   exit 3

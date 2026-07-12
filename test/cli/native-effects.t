@@ -85,20 +85,20 @@ loop above):
   $ cat dst1.out
   mk-report(cons(("net.fetch=ok body99", true), cons(("net.fetch=FAULT net: connection refused (injected)", true), nil)), none)
 
-demos/m1.sh's three legs (task-71 DoD): fact and choose native-identical, the
+demos/basics/m1.sh's three legs (task-71 DoD): fact and choose native-identical, the
 gated-eval leg a pinned refusal.
 
-  $ jacquard run ../../demos/m1-fact.jqd > i.out 2>&1
-  $ jacquard build ../../demos/m1-fact.jqd -o fact > /dev/null
+  $ jacquard run ../../demos/basics/m1-fact.jqd > i.out 2>&1
+  $ jacquard build ../../demos/basics/m1-fact.jqd -o fact > /dev/null
   $ ./fact > n.out 2>&1
   $ diff i.out n.out && echo identical
   identical
-  $ jacquard run ../../demos/m1-choose.jqd > i.out 2>&1
-  $ jacquard build ../../demos/m1-choose.jqd -o choose > /dev/null
+  $ jacquard run ../../demos/basics/m1-choose.jqd > i.out 2>&1
+  $ jacquard build ../../demos/basics/m1-choose.jqd -o choose > /dev/null
   $ ./choose > n.out 2>&1
   $ diff i.out n.out && echo identical
   identical
-  $ jacquard build ../../demos/m1-gated.jqd -o nope
+  $ jacquard build ../../demos/basics/m1-gated.jqd -o nope
   error[E1102]: top-level expression 0 uses eval, which requires the interpreter tier
   [1]
 

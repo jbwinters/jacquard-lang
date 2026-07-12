@@ -1,1 +1,0 @@
-inference/synthesis.jac

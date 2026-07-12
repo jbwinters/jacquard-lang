@@ -40,7 +40,7 @@ The first line announces the failure. The second shows row polymorphism earning 
 **2. Two coins, the M3 flagship model.** Condition-via-observe using the Bernoulli(1.0) trick, which works directly with the pmf semantics pinned in task W4.2.
 
 ```lisp
-; historical bootstrap counterpart of: jac infer enumerate demos/m3-two-coins.jac
+; historical bootstrap counterpart of: jac infer enumerate demos/inference/m3-two-coins.jac
 (defterm ((binding condition ()
   (lam ((pvar b))
     (app (var observe) (app (var bernoulli) (lit 1.0)) (var b))))))

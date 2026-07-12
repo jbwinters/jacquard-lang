@@ -1,4 +1,4 @@
-; task 73 DoD: demos/repair.jqd's pure mutation machinery — mutant
+; task 73 DoD: demos/tooling/repair.jqd's pure mutation machinery — mutant
 ; generation over the quoted AST, the MAP patch fold, and the code.diff
 ; rendering — extracted verbatim, minus the eval-driver acts.
 

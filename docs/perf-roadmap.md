@@ -113,7 +113,7 @@ half-day experiment.
 ## Adjacent, not perf
 
 An embedded interpreter tier inside native binaries (an "eval island")
-would let programs like demos/repair.jqd ship as one binary instead of
+would let programs like demos/tooling/repair.jqd ship as one binary instead of
 a native/interpreter hybrid. That is a capability-model project, not an
 optimization — filed here only so nobody mistakes the E1102 boundary
 for a performance gap: the mutate bench shows the native side of the
