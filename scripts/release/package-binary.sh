@@ -87,6 +87,7 @@ cp -R bin libexec share "\$HOME/.local/"
 jacquard --version
 jac --version
 jac run "\$HOME/.local/share/jacquard/demos/basics/m1-fact.jac"
+sh "\$HOME/.local/share/jacquard/demos/worlds/escrow/run.sh"
 \`\`\`
 EOF
 

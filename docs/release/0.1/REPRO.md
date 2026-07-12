@@ -8,7 +8,7 @@ repo also has `.tool-versions` for asdf users (`opam 2.5.1`).
 ```sh
 git clone https://github.com/jbwinters/jacquard-lang.git
 cd jacquard-lang
-git checkout jacquard-core-0.1-rc1
+git checkout jacquard-core-0.1-rc2
 git merge-base --is-ancestor 738dc8e HEAD
 
 opam switch create . ocaml-base-compiler.5.1.1 -y
@@ -81,7 +81,7 @@ JACQUARD_RELEASE_OUT=$PWD/.scratch/my-release \
 | stdlib smoke | `dune runtest test/cli/demos.t test/cli/world.t` |
 | Warp smoke | `dune runtest test/cli/warp.t test/cli/props.t` |
 | gauntlet | `dune runtest test/gauntlet` and selected `gauntlet-*` Alcotest suites |
-| executable escrow | `dune runtest test/cli/escrow.t` |
+| executable escrow | `sh demos/worlds/escrow/run.sh` and `dune runtest test/cli/escrow.t` |
 | release-risk case study | `sh demos/case-studies/release-risk/run.sh` and `dune runtest test/cli/case-studies.t` |
 | Stormglass incident war game | `sh demos/case-studies/stormglass/run.sh` and `dune runtest test/cli/case-studies.t` |
 

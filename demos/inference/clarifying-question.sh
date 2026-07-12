@@ -1,9 +1,9 @@
 #!/bin/sh
 # Value-of-information demo: ask a clarifying question only when its expected
-# utility beats the interruption cost. Run from the repo root:
-#   sh demos/inference/clarifying-question.sh
+# utility beats the interruption cost.
 set -u
-JACQUARD="${JACQUARD:-dune exec jac --}"
-here="$(dirname "$0")"
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+JACQUARD_DEMO_ROOT=$(CDPATH= cd -- "$here/.." && pwd)
+. "$JACQUARD_DEMO_ROOT/lib/demo-env.sh"
 
-$JACQUARD run "$here/clarifying-question.jac"
+jacquard_demo run "$here/clarifying-question.jac"

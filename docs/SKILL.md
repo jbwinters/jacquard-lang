@@ -27,16 +27,22 @@ The release installer downloads a checksum-verified binary, the standard
 prelude, and demos. It does not require OCaml, opam, or Dune.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/jbwinters/jacquard-lang/jacquard-core-0.1-rc1/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/jbwinters/jacquard-lang/jacquard-core-0.1-rc2/scripts/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 jac --version
 jac run "$HOME/.local/share/jacquard/demos/basics/m1-fact.jac"
+sh "$HOME/.local/share/jacquard/demos/case-studies/release-risk/run.sh"
 ```
 
-The last command prints `120`. The published targets are Linux x86-64,
+The `jac run` command prints `120`; the final command runs the larger release
+risk narrative. The published targets are Linux x86-64,
 macOS Intel, and macOS Apple Silicon. Set `JACQUARD_INSTALL_PREFIX` to choose a
 different prefix and `JACQUARD_INSTALL_VERSION` to choose another release tag.
 The long command is `jacquard`; `jac` is its installed short alias.
+
+Shipped `*.sh` demo launchers work without a source checkout. Use them for
+models that require an inference driver and for multi-file narratives; directly
+running an `observe` model under `jac run` correctly fails with E0904.
 
 In a source checkout, use the repository-local opam switch:
 

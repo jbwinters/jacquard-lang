@@ -3,4 +3,10 @@
 The same program under scripted, hostile, dry-run, replay, or probabilistic
 handlers. Start with `agent-dream.sh`; use `preflight.sh` when the question is
 which candidate plan survives the worlds; use `escrow/` for the full authority
-and audit workflow.
+and audit workflow:
+
+```sh
+sh demos/worlds/agent-dream.sh
+sh demos/worlds/preflight.sh
+sh demos/worlds/escrow/run.sh
+```

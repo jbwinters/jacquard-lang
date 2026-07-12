@@ -3,7 +3,8 @@
 The demos are grouped by the idea they prove. Public programs use `.jac`;
 retained `.jqd` files are curated kernel/debug twins or Warp fixtures. New
 demos do not need `.jqd` counterparts unless they explicitly prove carrier
-parity. Run from a repository checkout after building once:
+parity. Every `*.sh` launcher works from either a repository checkout or an
+installed release. From a checkout, build once and run:
 
 ```bash
 eval "$(opam env)"
@@ -13,7 +14,16 @@ sh demos/case-studies/stormglass/run.sh
 ```
 
 An installed release sets prelude discovery automatically. Its demo root is
-`~/.local/share/jacquard/demos` unless a different install prefix was chosen.
+`~/.local/share/jacquard/demos` unless a different install prefix was chosen:
+
+```bash
+sh ~/.local/share/jacquard/demos/case-studies/stormglass/run.sh
+sh ~/.local/share/jacquard/demos/worlds/escrow/run.sh
+```
+
+Use the launchers for narrative demos. A model containing `observe` must be run
+with `jac infer enumerate model.jac`, not `jac run`; a multi-file demo such as
+escrow must be assembled before execution. Its launcher handles those details.
 
 ## Case Studies
 
@@ -66,7 +76,8 @@ Directory: `worlds/`
 - `m4-hostile.jqd`: generated-looking code whose `net` authority is exposed by
   signatures and manifest checks.
 - `escrow/`: manifest, dry-run, Warp, faults, replay, semantic diff, provenance,
-  and approval by exact content hash in one executable workflow.
+  and approval by exact content hash in one executable workflow; run it with
+  `sh worlds/escrow/run.sh` from this directory.
 
 ## Tooling
 

@@ -1,7 +1,11 @@
-# Jacquard Core 0.1 RC1
+# Jacquard Core 0.1 RC2
 
 Jacquard is a research language for running, reviewing, simulating, and
 trusting programs written by models and reviewed by people.
+
+RC2 corrects an RC1 packaging defect: bundled narrative launchers no longer
+assume Dune or a source checkout, and escrow now has a self-contained launcher.
+The language semantics and `0.1.0` CLI version are unchanged.
 
 This release candidate includes:
 
@@ -14,11 +18,13 @@ This release candidate includes:
 - organized runnable demos, including release-risk and Stormglass case studies
   with sampled and exhaustive Warp evidence
 - native binaries for Linux x86-64, macOS Intel, and macOS Apple Silicon
+- installed demo launchers that run without OCaml, opam, or Dune, including a
+  self-contained executable-escrow narrative
 
 Install:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/jbwinters/jacquard-lang/jacquard-core-0.1-rc1/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/jbwinters/jacquard-lang/jacquard-core-0.1-rc2/scripts/install.sh | sh
 ~/.local/bin/jac --version
 ~/.local/bin/jac run ~/.local/share/jacquard/demos/basics/m1-fact.jac
 ```

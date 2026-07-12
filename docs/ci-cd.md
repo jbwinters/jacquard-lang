@@ -80,9 +80,10 @@ Each archive contains:
 - `LICENSE` and package notes
 
 Packaging verifies each archive checksum and runs the bundled factorial demo
-through both the long command and the `jac` alias. The development gate also
-runs the installer end to end and proves that a corrupted checksum fails
-closed.
+through both the long command and the `jac` alias. It then removes Dune from
+the effective tool path and runs the installed release-risk, agent-dream, and
+escrow launchers. The development gate also runs the installer end to end and
+proves that a corrupted checksum fails closed.
 
 On tag pushes, the workflow creates or updates the GitHub Release and attaches
 the tarballs plus SHA-256 checksum files. Manual runs upload the same files as
@@ -95,8 +96,8 @@ eval "$(opam env)"
 scripts/release/package-binary.sh
 ```
 
-The public installer is `scripts/install.sh`; the 0.1 RC copy defaults to the
-exact `jacquard-core-0.1-rc1` tag and installs into `~/.local`. Set
+The public installer is `scripts/install.sh`; the current 0.1 RC copy defaults
+to the exact `jacquard-core-0.1-rc2` tag and installs into `~/.local`. Set
 `JACQUARD_INSTALL_VERSION` explicitly when testing another release.
 
 ## Recommended Branch Protection
