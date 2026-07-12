@@ -1,3 +1,7 @@
+/* Copyright (C) 2026 Josh Winters
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ * Additional permission applies; see ../RUNTIME-EXCEPTION.md. */
+
 /* Capturing continuations (docs/native-plan.md, task 71).
  *
  * The mechanism is return-unwinding: when jq_perform matches a CAPTURING

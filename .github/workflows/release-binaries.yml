@@ -70,6 +70,7 @@ jobs:
           "$root/bin/jacquard" --version
           "$root/bin/jac" --version
           test "$("$root/bin/jac" run "$root/share/jacquard/demos/basics/m1-fact.jac")" = "120"
+          scripts/release/smoke-packaged-demos.sh "$root"
 
       - name: Upload package artifact
         uses: actions/upload-artifact@v7.0.1

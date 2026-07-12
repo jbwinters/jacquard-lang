@@ -1,3 +1,7 @@
+/* Copyright (C) 2026 Josh Winters
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ * Additional permission applies; see ../RUNTIME-EXCEPTION.md. */
+
 /* Builtin intrinsics (task 67): the native implementations of the prelude's
  * marker builtins, ported from Prelude.wire_builtins (src/prelude.ml) with
  * the interpreter's exact behaviors and error texts. Every intrinsic

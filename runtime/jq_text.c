@@ -1,3 +1,7 @@
+/* Copyright (C) 2026 Josh Winters
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ * Additional permission applies; see ../RUNTIME-EXCEPTION.md. */
+
 /* Text blocks (task 65): allocation, length, bytes. The UTF-8 semantics and
  * text operations land with the parity kit (task 66). */
 

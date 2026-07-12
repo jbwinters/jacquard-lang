@@ -1,3 +1,7 @@
+/* Copyright (C) 2026 Josh Winters
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ * Additional permission applies; see ../RUNTIME-EXCEPTION.md. */
+
 /* Program entry scaffold (task 67): compiled programs run on a dedicated
  * thread with a large stack (default 1 GiB, JACQUARD_STACK_MB overrides)
  * because deep non-tail Jacquard recursion becomes deep C recursion — the

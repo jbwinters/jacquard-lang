@@ -2,7 +2,7 @@
 set -eu
 
 REPO=${JACQUARD_INSTALL_REPO:-jbwinters/jacquard-lang}
-VERSION=${JACQUARD_INSTALL_VERSION:-jacquard-core-0.1-rc2}
+VERSION=${JACQUARD_INSTALL_VERSION:-jacquard-core-0.1-rc3}
 PREFIX=${JACQUARD_INSTALL_PREFIX:-$HOME/.local}
 
 # The installer also runs without a checkout, so its fallback is the user's

@@ -1,3 +1,7 @@
+/* Copyright (C) 2026 Josh Winters
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ * Additional permission applies; see ../RUNTIME-EXCEPTION.md. */
+
 /* Root grant natives (task 70): the --allow implementations, ported from
  * Prelude's installers (src/prelude.ml) with exact behaviors and error
  * texts. Every native consumes its arguments and returns an owned value;

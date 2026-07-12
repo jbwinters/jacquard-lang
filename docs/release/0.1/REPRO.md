@@ -8,7 +8,7 @@ repo also has `.tool-versions` for asdf users (`opam 2.5.1`).
 ```sh
 git clone https://github.com/jbwinters/jacquard-lang.git
 cd jacquard-lang
-git checkout jacquard-core-0.1-rc2
+git checkout jacquard-core-0.1-rc3
 git merge-base --is-ancestor 738dc8e HEAD
 
 opam switch create . ocaml-base-compiler.5.1.1 -y

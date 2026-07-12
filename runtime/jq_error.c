@@ -1,3 +1,7 @@
+/* Copyright (C) 2026 Josh Winters
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ * Additional permission applies; see ../RUNTIME-EXCEPTION.md. */
+
 /* Fatal runtime errors (task 65): the interpreter's runtime-failure contract
  * is a rendered message on stderr and exit 2; emitted code and the runtime
  * both route through here. Messages are pinned against `jacquard run`. */

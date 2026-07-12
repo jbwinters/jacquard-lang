@@ -1,3 +1,7 @@
+/* Copyright (C) 2026 Josh Winters
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ * Additional permission applies; see ../RUNTIME-EXCEPTION.md. */
+
 /* Perceus reference counting (task 65): the free walk and the reuse
  * tokens. The dup/drop fast paths are static inline in jq_value.h since
  * task 85; this file owns the slow path.
