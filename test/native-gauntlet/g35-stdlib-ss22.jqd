@@ -9,6 +9,8 @@
     (app (var join) (lit "a") (lit "b") (lit "c"))
     (app (var join) (lit "a") (lit "b") (lit "c") (lit "d")
       (lit "e") (lit "f") (lit "g") (lit "h"))))
+(app (var text.eq?) (lit "Jacquard") (lit "Jacquard"))
+(app (var text.eq?) (lit "Jacquard") (lit "jacquard"))
 (tuple
   (app (var int.gt?) (lit 4611686018427387903) (lit -4611686018427387904))
   (app (var int.gte?) (lit -4611686018427387904) (lit -4611686018427387904))

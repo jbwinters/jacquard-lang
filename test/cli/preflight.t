@@ -13,7 +13,6 @@ the prior intact; sharp three-world evidence proves the cautious plan.
   plan-prior : () ->{} Distribution Code
   run-plan : forall a. (Code) ->{Eval} a
   scripted : forall a. (Code, Response) ->{Eval} a
-  text-eq? : (Text, Text) ->{} Bool
   passes-sharp? : (Code) ->{Eval} Bool
   passes-weak? : (Code) ->{Eval} Bool
   preflight-weak : () ->{Dist, Eval} Code

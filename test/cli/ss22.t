@@ -6,8 +6,9 @@ through its global eight-argument application ceiling.
   $ export JACQUARD_RUNTIME=../../runtime
   $ export CC=clang
 
-The tracked bootstrap smoke covers zero/one/many joins, integer boundaries,
-all predicates, real arithmetic, and IEEE NaN comparisons.
+The tracked bootstrap smoke covers zero/one/many joins, direct text equality,
+integer boundaries, all numeric predicates, real arithmetic, and IEEE NaN
+comparisons.
 
   $ jacquard run ../native-gauntlet/g35-stdlib-ss22.jqd > interpreter.out 2>&1
   $ jacquard build ../native-gauntlet/g35-stdlib-ss22.jqd -o ss22-native > /dev/null
@@ -20,6 +21,8 @@ all predicates, real arithmetic, and IEEE NaN comparisons.
   "ab"
   "hé👍"
   ("", "one", "abc", "abcdefgh")
+  true
+  false
   (true, true, true, true)
   (3.0, -1.0, 6.0, 0.5)
   (false, true, false, true)

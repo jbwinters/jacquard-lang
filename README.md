@@ -276,6 +276,11 @@ record. `run`, `check`, `hash`, `fmt`, `diff`, `infer`, and `test` select
 surface syntax by extension; native build, replay programs, the prelude, and
 many internal fixtures continue to use `.jqd`.
 
+Ordinary programs and demos need only a `.jac` source file. Do not hand-author
+a `.jqd` twin unless a conformance test specifically needs to prove that both
+carriers lower to the same kernel and hash. The paired files retained in the
+corpus and selected demos are evidence fixtures, not an authoring requirement.
+
 ## Native compilation
 
 `jacquard build` compiles a program and its reachable declarations to a

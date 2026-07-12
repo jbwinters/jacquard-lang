@@ -87,6 +87,9 @@ When adding valid corpus files, regenerate the golden hashes with
 - Keep behavior tied to the 27 kernel forms in `docs/ast.md`. Public `.jac`
   syntax must remain a projection onto those forms, and bootstrap `.jqd`
   remains the permanent kernel/debug carrier.
+- Do not hand-maintain a `.jqd` twin for an ordinary `.jac` program or demo.
+  Add paired carriers only when a conformance test explicitly requires hash or
+  lowering parity; twins are evidence fixtures, not a publishing requirement.
 - Do not add out-of-scope features from the plan guardrails: performance work, macros beyond quote/unquote/gated eval, records, typed staging, continuous distributions, package management, self-hosting, or ownership/borrowing.
 - Use `dune`, `alcotest`, and `qcheck` for build and tests.
 - Use `digestif` for the initial hash implementation unless the owner changes D1.

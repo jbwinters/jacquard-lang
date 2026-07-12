@@ -322,9 +322,14 @@ text.join     : (Text...) ->{} Text             text.split   : (Text, Text) ->{}
 text.join-list: (List Text, Text) ->{} Text      -- deprecated migration compatibility only
 text.slice    : (Text, Int, Int) ->{} Text      text.trim    : (Text) ->{} Text
 text.contains?: (Text, Text) ->{} Bool          text.empty?  : (Text) ->{} Bool
+text.eq?      : (Text, Text) ->{} Bool          text.eq      : Eq Text
 text.from-int : (Int) ->{} Text                 text.to-int  : (Text) ->{} Option Int
 text.from-real: (Real) ->{} Text                text.to-real : (Text) ->{} Option Real
 ```
+
+Use `text.eq?` for a direct comparison and pass `text.eq` to APIs that require
+an explicit `Eq Text` dictionary, such as `list.contains?`, `dist.tally`, or
+`check.eq`.
 
 ### Numeric operations and predicates
 
