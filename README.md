@@ -3,8 +3,9 @@
 [![CI](https://github.com/jbwinters/jacquard-lang/actions/workflows/ci.yml/badge.svg)](https://github.com/jbwinters/jacquard-lang/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/jbwinters/jacquard-lang?include_prereleases&sort=semver)](https://github.com/jbwinters/jacquard-lang/releases)
 
-Jacquard is a research prototype for running, reviewing, simulating, and trusting
-programs written by models and reviewed by people.
+Jacquard is a FriendMachine research project for running, reviewing, simulating,
+and trusting programs written by models and reviewed by people. Start with the
+[human-friendly introduction to Jacquard](https://research.friendmachine.co/jacquard/).
 
 Concretely, it is a small programming language with a compact `.jac` surface
 syntax, an OCaml checker and CPS interpreter, a C-emitting native AOT backend
