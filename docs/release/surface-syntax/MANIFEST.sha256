@@ -3,7 +3,7 @@
 # The manifest excludes itself and protected untracked drafts.
 
 # Reconstructible evidence overlay
-e91a8c13ea6e0c5ec2d67ade3b58452b8148cf295195a9f49a1f0d153731c438  README.md
+838812a371fe7627a921dcedb22325bbdb415fa630c2a9b3c85e0b416a27da15  README.md
 958e8d99f1055f7eb2322c1687f6a9a490f38a7994c437353842800345a9c245  corpus/golden/hashes.golden
 e93f4ba7f81206278bdd0f331884af751fadb9d5df43ab0ba7b86110272e387b  corpus/golden/prelude-hashes.golden
 a159849342085dff62727c56f06439465277574623dc59cd75d6c1136687722e  corpus/golden/ring0-freeze.golden
