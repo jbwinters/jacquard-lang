@@ -375,6 +375,12 @@ let manifest_errors () =
   let add message = errors := message :: !errors in
   if not (contains "# Base commit: 07bf8aa71d197603c3830bd595ef7dd1e33e6bee" manifest) then
     add "manifest base commit is not 07bf8aa";
+  if
+    not
+      (String.equal
+         (manifest |> Hash.of_string |> Hash.to_hex)
+         "c8c245de2c999c805a3902089d9f2c23f698931a451b93e354514811cc069515")
+  then add "historical SS.22 manifest bytes changed";
   let entries =
     manifest |> String.split_on_char '\n'
     |> List.filter_map (fun line ->
@@ -387,39 +393,25 @@ let manifest_errors () =
               add ("malformed manifest row: " ^ line);
               None)
   in
-  let overlay =
+  let historical_inventory =
     [
-      "README.md";
       "corpus/golden/hashes.golden";
       "corpus/golden/prelude-hashes.golden";
       "corpus/golden/ring0-freeze.golden";
       "corpus/sigs/24-ring2.jqd";
       "corpus/valid/stdlib-ss22.jac";
       "corpus/valid/stdlib-ss22.jqd";
-      "corpus/valid/operation-modes.jac";
-      "corpus/valid/operation-modes.jqd";
-      "demos/basics/m1-choose.jac";
-      "demos/case-studies/release-risk/model.jac";
-      "demos/inference/clarifying-question.jac";
-      "demos/inference/clarifying-question.jqd";
-      "demos/inference/cookbook.jqd";
-      "demos/tooling/repair.jac";
-      "demos/tooling/repair.jqd";
+      "demos/clarifying-question.jac";
+      "demos/clarifying-question.jqd";
+      "demos/cookbook.jqd";
+      "demos/repair.jac";
+      "demos/repair.jqd";
       "docs/README.md";
       "docs/SKILL.md";
-      "docs/ast.md";
-      "docs/ci-cd.md";
-      "docs/effect-linearity.md";
-      "docs/errors.md";
       "docs/native-intrinsics.md";
-      "docs/release/0.1/DECISION.md";
-      "docs/release/0.1/EVIDENCE.md";
-      "docs/release/0.1/REPRO.md";
       "docs/release/surface-syntax/DECISION.md";
       "docs/release/surface-syntax/FOLLOWUPS.md";
       "docs/stdlib.md";
-      "docs/surface-syntax.md";
-      "docs/warp-testing.md";
       "prelude/04-builtins.jqd";
       "prelude/07-enum.jqd";
       "prelude/09-grid.jqd";
@@ -437,12 +429,6 @@ let manifest_errors () =
       "src/native/emit.ml";
       "src/native/spec.ml";
       "src/prelude.ml";
-      "src/surface_ast.ml";
-      "src/surface_lex.ml";
-      "src/surface_lower.ml";
-      "src/surface_name.ml";
-      "src/surface_parse.ml";
-      "src/surface_print.ml";
       "src/tier.ml";
       "src/types.ml";
       "test/cli/native-effects.t";
@@ -451,15 +437,8 @@ let manifest_errors () =
       "test/cli/surface.t";
       "test/cli/tiers.t";
       "test/corpus_support.ml";
-      "test/test_diff.ml";
       "test/docs-doctest/fixtures/stdlib-text-join.jac";
       "test/docs-doctest/fixtures/stdlib-text-join.stdout";
-      "test/docs-doctest/fixtures/readme-multishot.jac";
-      "test/docs-doctest/fixtures/stdlib-control-effects.jac";
-      "test/docs-doctest/fixtures/stdlib-dist-declarations.jac";
-      "test/docs-doctest/fixtures/stdlib-handler-policy.jac";
-      "test/docs-doctest/fixtures/warp-check-effect.jac";
-      "test/docs-doctest/fixtures/warp-fault-effect.jac";
       "test/dune";
       "test/native-gauntlet/MAPPING.md";
       "test/native-gauntlet/e07-erasure-text-join.jqd";
@@ -471,22 +450,13 @@ let manifest_errors () =
       "test/native-asan/join-bad-middle.jqd";
       "test/test_prelude.ml";
       "test/test_surface_laws.ml";
-      "test/test_surface_decls.ml";
-      "test/test_surface_print.ml";
-      "test/test_surface_scaffold.ml";
-      "test/test_surface_trivia.ml";
       "test/test_text.ml";
       "test/test_tier.ml";
     ]
   in
   let paths = List.map snd entries |> List.sort String.compare in
-  let expected = List.sort String.compare overlay in
-  if paths <> expected then add "manifest reconstructible overlay inventory is not exact";
-  List.iter
-    (fun (expected_digest, path) ->
-      let actual = read_source path |> Hash.of_string |> Hash.to_hex in
-      if not (String.equal expected_digest actual) then add ("manifest hash mismatch: " ^ path))
-    entries;
+  let expected = List.sort String.compare historical_inventory in
+  if paths <> expected then add "immutable historical manifest inventory is not exact";
   List.rev !errors
 
 let validate_release_docs ~decision ~followups ~index =
@@ -885,7 +855,7 @@ let validate_release_docs ~decision ~followups ~index =
           [ "git -c core.whitespace=trailing-space,space-before-tab diff --check"; "exit 0" ];
           [
             "scripts/release/check-surface-syntax-manifest.sh";
-            "exit 0; the named historical SS.21 plus SS.22 evidence hashes match";
+            "exit 0; the immutable manifest matches the exact SS.22 boundary tree";
           ];
         ]
       in

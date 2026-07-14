@@ -21,11 +21,23 @@ rejects when both sides have a consumption witness; alternative branches merge
 those existential facts. This preserves zero-or-one use per path and two-span
 E0816 diagnostics without enumerating branch products. A 40-branch regression
 would require roughly `2^40` states under concrete path-list enumeration.
+Contextual helper analysis is also summarized once per callable parameter. A
+25-helper regression transfers through duplicate exclusive arms at every level;
+without summaries its recurrence is `T(n)=2T(n-1)`, while the implemented walk
+is linear in the helper chain plus its syntax.
+
+Escape checking precedes ordinary inference, but duplicate checking follows a
+successful inference and clause-result unification. E0817 therefore remains a
+purpose-built diagnostic for laundering or capture, while wrong Resume arity or
+argument types retain E0803/E0801 and cannot count toward E0816.
 
 Stored declarations retain canonical object spans rather than original author
-spans. Contextual helper failures therefore anchor E0817 at the author-visible
-`Resume` transfer site; a regression rejects transient `objects/*.jqd` paths in
-the rendered diagnostic.
+spans. Contextual E0817 failures therefore anchor at the author-visible
+`Resume` transfer site. E0816 witnesses instead use distinct, durable logical
+locations of the form `<stored:name@member-hash>:line:col`; these are honestly
+canonical-helper occurrences, not original source positions. Regressions prove
+that both witnesses differ and no diagnostic exposes transient `objects/*.jqd`
+paths.
 
 ## Reconstruction
 

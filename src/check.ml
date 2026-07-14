@@ -18,8 +18,8 @@
       (removal is implicit: handled effects stop at the handler, everything else shares the outer
       row); the return binder gets the body's type; a [multi] clause's [resume] is an ordinary
       arrow, while a [once] clause receives the built-in affine [Resume] callable; {!Affine_resume}
-      rejects duplication and escape before ordinary inference checks every clause body at the
-      answer type under the outer ambient.
+      rejects escapes before ordinary inference, then rejects duplicate valid consumptions after the
+      clause body checks at the answer type under the outer ambient.
 
     Store terms are checked on demand and cached by hash; the store's hash DAG guarantees no
     cross-declaration cycles. Builtin markers get their signatures from
@@ -378,6 +378,10 @@ let affine_callable ctx hash =
         (fun (params, body) ->
           Affine_resume.
             {
+              resolved_key = Hash.to_hex hash;
+              resolved_source =
+                Printf.sprintf "<stored:%s@%s>" (name_of ctx hash)
+                  (String.sub (Hash.to_hex hash) 0 8);
               resolved_params = params;
               resolved_body = body;
               resolved_recursive = List.length bindings > 1 || contains_group_ref binding.value;
@@ -754,18 +758,28 @@ and infer ctx env ~(ambient : row) (e : Kernel.expr) : ty =
           (match mode with
           | Kernel.Multi -> ()
           | Kernel.Once -> (
-              (* Run before ordinary inference so an escaping Resume receives the purpose-built
-                 affine diagnostic even when laundering it would later cause a secondary type
-                 mismatch (notably quote splices and returned resumptions). *)
+              (* Escape checking runs before inference so laundering a Resume retains E0817.
+                 Duplicate-consumption checking waits until after inference and answer-type
+                 unification, ensuring malformed calls retain their ordinary E0801/E0803 error. *)
               match
-                Affine_resume.check_clause ~resolve_term:(affine_callable ctx)
+                Affine_resume.check_escapes ~resolve_term:(affine_callable ctx)
                   ~resume:oc.Kernel.resume oc.Kernel.obody
               with
               | Ok () -> ()
               | Error (diagnostic :: _) -> raise (Err diagnostic)
               | Error [] -> assert false));
           let cty = infer ctx env' ~ambient oc.Kernel.obody in
-          unify_or ctx ~meta:oc.Kernel.ometa ~what:"op clause result" answer cty)
+          unify_or ctx ~meta:oc.Kernel.ometa ~what:"op clause result" answer cty;
+          match mode with
+          | Kernel.Multi -> ()
+          | Kernel.Once -> (
+              match
+                Affine_resume.check_clause ~resolve_term:(affine_callable ctx)
+                  ~resume:oc.Kernel.resume oc.Kernel.obody
+              with
+              | Ok () -> ()
+              | Error (diagnostic :: _) -> raise (Err diagnostic)
+              | Error [] -> assert false))
         ops;
       answer
   | Kernel.Quote payload ->

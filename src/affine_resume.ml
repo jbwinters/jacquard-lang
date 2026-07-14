@@ -22,25 +22,36 @@ type flow = { unused : bool; used : consumption option }
     composition is invalid exactly when both sides have a consumption witness. *)
 
 type callable = {
+  key : string;
   params : Kernel.pat list;
   body : Kernel.expr;
   closure : callable SMap.t;
   resolver : Hash.t -> resolved_callable option;
   recursive : bool;
-  diagnostic_anchor : Meta.t option;
+  diagnostic_source : string option;
+  state : state;
 }
 
 and resolved_callable = {
+  resolved_key : string;
+  resolved_source : string;
   resolved_params : Kernel.pat list;
   resolved_body : Kernel.expr;
   resolved_recursive : bool;
+}
+
+and state = {
+  summaries : (string, (flow, Diag.t) result) Hashtbl.t;
+  mutable next_callable : int;
+  check_duplication : bool;
 }
 
 type env = {
   aliases : SSet.t;
   callables : callable SMap.t;
   resolve_term : Hash.t -> resolved_callable option;
-  diagnostic_anchor : Meta.t option;
+  diagnostic_source : string option;
+  state : state;
 }
 
 type value_context = Return | Argument | Storage | Scrutinee | Binding | Function
@@ -48,7 +59,12 @@ type value_context = Return | Argument | Storage | Scrutinee | Binding | Functio
 let ( let* ) = Result.bind
 
 let diagnostic_meta env meta =
-  match env.diagnostic_anchor with Some anchor -> anchor | None -> meta
+  match (env.diagnostic_source, Meta.span meta) with
+  | Some file, Some span ->
+      Meta.with_span
+        (Span.make ~file ~start_pos:span.Span.start_pos ~end_pos:span.Span.end_pos)
+        meta
+  | Some _, None | None, _ -> meta
 
 let span_text meta =
   match Meta.span meta with
@@ -93,12 +109,13 @@ let zero = { unused = true; used = None }
 let consume env binder meta =
   { unused = false; used = Some { binder; meta = diagnostic_meta env meta } }
 
-(** [seq left right] composes two expressions that both execute. If each side has any path that
-    consumes the token, those choices form one concrete sequential path and provide the two E0816
-    witnesses. Otherwise the bounded abstraction remains exact. *)
-let seq left right =
+(** [seq state left right] composes two expressions that both execute. If each side has any path
+    that consumes the token, those choices form one concrete sequential path and provide the two
+    E0816 witnesses. Otherwise the bounded abstraction remains exact. *)
+let seq state left right =
   match (left.used, right.used) with
-  | Some first, Some second -> reject_double first second
+  | Some first, Some second when state.check_duplication -> reject_double first second
+  | Some used, Some _ -> Ok { unused = left.unused && right.unused; used = Some used }
   | Some used, None -> Ok { unused = left.unused && right.unused; used = Some used }
   | None, Some used -> Ok { unused = left.unused && right.unused; used = Some used }
   | None, None -> Ok { unused = left.unused && right.unused; used = None }
@@ -125,8 +142,14 @@ let shadow env names =
     aliases = SSet.diff env.aliases names;
     callables = SSet.fold (fun name map -> SMap.remove name map) names env.callables;
     resolve_term = env.resolve_term;
-    diagnostic_anchor = env.diagnostic_anchor;
+    diagnostic_source = env.diagnostic_source;
+    state = env.state;
   }
+
+let fresh_callable_key env =
+  let id = env.state.next_callable in
+  env.state.next_callable <- id + 1;
+  Printf.sprintf "local:%d" id
 
 let rec free_alias (env : env) (expr : Kernel.expr) : (string * Meta.t) option =
   let first xs = List.find_map (free_alias env) xs in
@@ -209,23 +232,27 @@ let callable_expr env (expr : Kernel.expr) =
       Option.map
         (fun resolved ->
           {
+            key = "stored:" ^ resolved.resolved_key;
             params = resolved.resolved_params;
             body = resolved.resolved_body;
             closure = SMap.empty;
             resolver = env.resolve_term;
             recursive = resolved.resolved_recursive;
-            diagnostic_anchor = Some (diagnostic_meta env expr.meta);
+            diagnostic_source = Some resolved.resolved_source;
+            state = env.state;
           })
         (env.resolve_term hash)
   | Kernel.Lam (params, body) ->
       Some
         {
+          key = fresh_callable_key env;
           params;
           body;
           closure = env.callables;
           resolver = env.resolve_term;
           recursive = false;
-          diagnostic_anchor = env.diagnostic_anchor;
+          diagnostic_source = env.diagnostic_source;
+          state = env.state;
         }
   | _ -> None
 
@@ -259,13 +286,13 @@ let rec analyze (env : env) ~(context : value_context) (expr : Kernel.expr) : (f
       match alias_expr env fn with
       | Some (binder, _) ->
           let* args_flow = analyze_sequence env ~context:Argument args in
-          seq args_flow (consume env binder expr.meta)
+          seq env.state args_flow (consume env binder expr.meta)
       | None ->
           let callee = callable_expr env fn in
           let constructor = is_constructor fn in
           let* fn_flow = analyze env ~context:Function fn in
           let* args_flow = analyze_arguments env ~callee ~constructor args in
-          seq fn_flow args_flow)
+          seq env.state fn_flow args_flow)
   | Kernel.Let { isrec; binder; value; body } -> (
       let bound = pat_names binder in
       let body_base = shadow env bound in
@@ -287,25 +314,26 @@ let rec analyze (env : env) ~(context : value_context) (expr : Kernel.expr) : (f
                   aliases = SSet.diff env.aliases bound;
                   callables = SMap.add name callable body_base.callables;
                   resolve_term = env.resolve_term;
-                  diagnostic_anchor = env.diagnostic_anchor;
+                  diagnostic_source = env.diagnostic_source;
+                  state = env.state;
                 }
               in
               let* body_flow = analyze body_env ~context body in
-              seq value_flow body_flow
+              seq env.state value_flow body_flow
           | None ->
               let value_env = if isrec then shadow env bound else env in
               let* value_flow = analyze value_env ~context:Binding value in
               let* body_flow = analyze body_base ~context body in
-              seq value_flow body_flow)
+              seq env.state value_flow body_flow)
       | _ ->
           let value_env = if isrec then shadow env bound else env in
           let* value_flow = analyze value_env ~context:Binding value in
           let* body_flow = analyze body_base ~context body in
-          seq value_flow body_flow)
+          seq env.state value_flow body_flow)
   | Kernel.Match (scrutinee, clauses) ->
       let* scrutinee_flow = analyze env ~context:Scrutinee scrutinee in
       let* arms = analyze_arms env ~context clauses in
-      seq scrutinee_flow (alt arms)
+      seq env.state scrutinee_flow (alt arms)
   | Kernel.Tuple items -> analyze_sequence env ~context:Storage items
   | Kernel.Handle { body; ret; ops } ->
       let* body_flow = analyze env ~context:Binding body in
@@ -329,7 +357,7 @@ and analyze_sequence env ~context expressions =
     | [] -> Ok accumulated
     | expression :: rest ->
         let* next = analyze env ~context expression in
-        let* accumulated = seq accumulated next in
+        let* accumulated = seq env.state accumulated next in
         loop accumulated rest
   in
   loop zero expressions
@@ -353,7 +381,7 @@ and analyze_arguments env ~callee ~constructor args =
                     Ok (consume env binder alias_meta)
                 | None -> reject_escape env ~binder ~meta:alias_meta Argument)
         in
-        let* accumulated = seq accumulated argument_flow in
+        let* accumulated = seq env.state accumulated argument_flow in
         loop (index + 1) accumulated rest
   in
   loop 0 zero args
@@ -400,30 +428,46 @@ and check_transfer callable index ~binder ~transfer_meta =
   else
     match List.nth_opt callable.params index with
     | Some { Kernel.it = Kernel.PWild; _ } -> Ok ()
-    | Some { Kernel.it = Kernel.PVar parameter; _ } ->
+    | Some { Kernel.it = Kernel.PVar parameter; _ } -> (
         let callables =
           List.fold_left
             (fun callables pat ->
               SSet.fold (fun name map -> SMap.remove name map) (pat_names pat) callables)
             callable.closure callable.params
         in
-        let diagnostic_anchor =
-          match callable.diagnostic_anchor with Some _ -> Some transfer_meta | None -> None
+        let summary_key = Printf.sprintf "%s:%d" callable.key index in
+        let summary =
+          match Hashtbl.find_opt callable.state.summaries summary_key with
+          | Some summary -> summary
+          | None ->
+              let summary =
+                analyze
+                  {
+                    aliases = SSet.singleton parameter;
+                    callables;
+                    resolve_term = callable.resolver;
+                    diagnostic_source = callable.diagnostic_source;
+                    state = callable.state;
+                  }
+                  ~context:Return callable.body
+              in
+              Hashtbl.add callable.state.summaries summary_key summary;
+              summary
         in
-        let* _ =
-          analyze
-            {
-              aliases = SSet.singleton parameter;
-              callables;
-              resolve_term = callable.resolver;
-              diagnostic_anchor;
-            }
-            ~context:Return callable.body
-        in
-        Ok ()
+        match summary with
+        | Ok _ -> Ok ()
+        | Error diagnostic when Option.is_some callable.diagnostic_source ->
+            (* Stored object bytes cannot retain original source metadata. E0817 therefore stays
+               anchored at this author-visible transfer, while its message may identify a durable
+               logical helper occurrence. E0816 deliberately keeps its two distinct normalized
+               helper witnesses. *)
+            if diagnostic.Diag.code = "E0817" then
+              Error { diagnostic with Diag.span = Meta.span transfer_meta }
+            else Error diagnostic
+        | Error diagnostic -> Error diagnostic)
     | Some parameter ->
         let meta =
-          match callable.diagnostic_anchor with Some _ -> transfer_meta | None -> parameter.meta
+          match callable.diagnostic_source with Some _ -> transfer_meta | None -> parameter.meta
         in
         reject ~code:"E0817" ~meta ~hint:"bind the transferred resumption to one variable or `_`"
           (Printf.sprintf
@@ -437,24 +481,34 @@ and check_transfer callable index ~binder ~transfer_meta =
 (** [check_clause ~resolve_term ~resume body] verifies the affine contract of one [once] operation
     clause. [resolve_term] may expose a stored lambda so moving the token into a top-level helper is
     checked contextually just like a local helper; absent or non-lambda terms remain escape
-    boundaries. Stored declarations have identity-preserving object bytes rather than author spans,
-    so their contextual failures are anchored at the source transfer site.
+    boundaries. Stored declarations have identity-preserving object bytes rather than author spans.
+    Their E0817 failures stay anchored at the source transfer site, while E0816 uses distinct
+    durable logical locations derived from the helper name, member hash, and canonical positions.
 
     Successful clauses consume the bound resumption on zero or one occurrence along every possible
     execution path. Failure returns exactly one E0816 (duplication) or E0817 (escape) diagnostic;
     the duplication message identifies both consumption spans, and capture failures point at the
-    closure, quote, nested-handler capture, or stored-helper transfer site. *)
-let check_clause ?(resolve_term = fun _ -> None) ~resume (body : Kernel.expr) :
-    (unit, Diag.t list) result =
+    closure, quote, nested-handler capture, or stored-helper transfer site. Contextual helper
+    summaries are memoized per callable parameter so duplicate branch transfers remain polynomial.
+*)
+let check ~check_duplication ?(resolve_term = fun _ -> None) ~resume (body : Kernel.expr) =
+  let state = { summaries = Hashtbl.create 16; next_callable = 0; check_duplication } in
   match
     analyze
       {
         aliases = SSet.singleton resume;
         callables = SMap.empty;
         resolve_term;
-        diagnostic_anchor = None;
+        diagnostic_source = None;
+        state;
       }
       ~context:Return body
   with
   | Ok _ -> Ok ()
   | Error diagnostic -> Error [ diagnostic ]
+
+let check_clause ?resolve_term ~resume body =
+  check ~check_duplication:true ?resolve_term ~resume body
+
+let check_escapes ?resolve_term ~resume body =
+  check ~check_duplication:false ?resolve_term ~resume body

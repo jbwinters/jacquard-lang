@@ -243,8 +243,32 @@ let test_once_resume_branch_flow_is_bounded () =
   check_ok (make_cctx ()) "forty sequential branches keep bounded affine state"
     (once_handler (sequence 40 "(app (var k) (lit 1))"))
 
+let test_once_resume_helper_summaries_are_bounded () =
+  let branch_call callee =
+    Printf.sprintf
+      "(match (var true) (clause (pcon true) (app (var %s) (var next))) (clause (pcon false) (app \
+       (var %s) (var next))))"
+      callee callee
+  in
+  let rec helpers index body =
+    if index < 0 then body
+    else
+      let name = Printf.sprintf "gate-%d" index in
+      let helper_body =
+        if index = 0 then "(app (var next) (lit 1))"
+        else branch_call (Printf.sprintf "gate-%d" (index - 1))
+      in
+      helpers (index - 1)
+        (Printf.sprintf "(let nonrec (pvar %s) (lam ((pvar next)) %s) %s)" name helper_body body)
+  in
+  (* Every helper after gate-0 transfers into its predecessor in both exclusive arms. Rechecking
+     bodies per transfer gives T(n)=2T(n-1); memoized contextual summaries visit each helper once. *)
+  check_ok (make_cctx ()) "deep duplicate-arm helper transfers reuse affine summaries"
+    (once_handler (helpers 24 "(app (var gate-24) (var k))"))
+
 let test_once_resume_double_consumption_spans () =
   test_once_resume_branch_flow_is_bounded ();
+  test_once_resume_helper_summaries_are_bounded ();
   let d =
     err_of (make_cctx ())
       (once_handler "(let nonrec (pwild) (app (var k) (lit 1)) (app (var k) (lit 2)))")
@@ -271,7 +295,19 @@ let test_once_resume_double_consumption_spans () =
   in
   Alcotest.(check string) "the receiving parameter is checked affinely" "E0816" bad_gate.code
 
+let test_once_resume_type_errors_precede_duplication () =
+  let arity =
+    err_of (make_cctx ()) (once_handler "(let nonrec (pwild) (app (var k)) (app (var k) (lit 1)))")
+  in
+  Alcotest.(check string) "malformed resume arity wins" "E0803" arity.code;
+  let argument =
+    err_of (make_cctx ())
+      (once_handler "(let nonrec (pwild) (app (var k) (lit \"not-an-int\")) (app (var k) (lit 1)))")
+  in
+  Alcotest.(check string) "malformed resume argument type wins" "E0801" argument.code
+
 let test_once_resume_aliases_share_one_budget () =
+  test_once_resume_type_errors_precede_duplication ();
   let d =
     err_of (make_cctx ())
       (once_handler
@@ -325,8 +361,42 @@ let test_once_resume_stored_helper_escape_uses_author_span () =
     "diagnostic does not expose the transient Store object path" false
     (contains (Diag.to_string d) "/objects/")
 
+let test_once_resume_stored_helper_has_distinct_logical_witnesses () =
+  let d =
+    err_of (make_cctx ())
+      ("(defeffect linear () (op signal once () (tref int)))\n"
+     ^ "(defterm ((binding bad-gate () (lam ((pvar next)) (let nonrec (pwild) (app (var next) (lit \
+        1)) (app (var next) (lit 2)))))))\n" ^ "(handle (app (var signal)) (ret (pvar x) (var x)) "
+     ^ "(opclause signal () k (app (var bad-gate) (var k))))")
+  in
+  Alcotest.(check string) "stored helper duplication code" "E0816" d.code;
+  let rendered = Diag.to_string d in
+  Alcotest.(check bool)
+    "stored helper witnesses use an honest stable logical source" true
+    (contains rendered "<stored:bad-gate@" && not (contains rendered "/objects/"));
+  let first_marker = "first consumption at " and second_marker = ", second consumption at " in
+  let find_from text needle start =
+    let rec go index =
+      if index + String.length needle > String.length text then None
+      else if String.sub text index (String.length needle) = needle then Some index
+      else go (index + 1)
+    in
+    go start
+  in
+  match (find_from d.message first_marker 0, find_from d.message second_marker 0) with
+  | Some first_start, Some second_start ->
+      let first_start = first_start + String.length first_marker in
+      let second_start = second_start + String.length second_marker in
+      let first =
+        String.sub d.message first_start (second_start - String.length second_marker - first_start)
+      in
+      let second = String.sub d.message second_start (String.length d.message - second_start) in
+      Alcotest.(check bool) "stored helper consumption spans are distinct" true (first <> second)
+  | _ -> Alcotest.failf "missing two stored-helper witnesses in: %s" d.message
+
 let test_multi_resume_remains_ordinary_function () =
   test_once_resume_stored_helper_escape_uses_author_span ();
+  test_once_resume_stored_helper_has_distinct_logical_witnesses ();
   check_ok (make_cctx ()) "legacy Multi clauses remain unrestricted"
     "(handle (app (var abort)) (ret (pvar x) (var x)) (opclause abort () k (let nonrec (pwild) \
      (app (var k) (lit 1)) (app (var k) (lit 2)))))"

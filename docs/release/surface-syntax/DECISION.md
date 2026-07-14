@@ -140,16 +140,15 @@ Their separate acceptance gates are the
 
 ## Reproduction Context
 
-The historical surface context is base commit
-`07bf8aa71d197603c3830bd595ef7dd1e33e6bee` plus the named files and SHA-256 values
-in [MANIFEST.sha256](MANIFEST.sha256). The manifest excludes itself, avoiding a
-self-reference. It is an integrity set for the reviewed SS.21/SS.22 evidence,
-not a complete overlay for reconstructing every later successor checkout or its
-global test suite. Successor milestones that require reconstruction publish a
-separate base-plus-overlay manifest; EL.2 does so under `release/effect-linearity/`.
-Run
-`scripts/release/check-surface-syntax-manifest.sh` from the repository root to
-validate every listed byte sequence.
+The historical surface context is the immutable manifest committed at the
+SS.22 boundary `52f36133b95349ae481f091e0043e71bc1452bc3`. Its entries describe the
+reviewed base-plus-overlay state rooted at
+`07bf8aa71d197603c3830bd595ef7dd1e33e6bee`; the manifest excludes itself to
+avoid self-reference. The checker pins the historical manifest's own digest and,
+when the Git object is available, hashes paths from that exact boundary tree. It
+never compares those historical digests with a later successor checkout.
+Successor milestones publish separate overlays; EL.2 does so under
+`release/effect-linearity/`.
 
 The following manager-only preservation audit is optional and never gates
 `dune runtest`. The six remaining proposal drafts are intentionally untracked and
@@ -198,7 +197,7 @@ claim.
 | `JACQUARD_PRELUDE=$PWD/prelude opam exec -- dune exec jac -- run demos/basics/m1-fact.jac` | exit 0; stdout is exactly `120` |
 | `opam exec -- dune build @doc` | exit 0 |
 | `git -c core.whitespace=trailing-space,space-before-tab diff --check` | exit 0 |
-| `scripts/release/check-surface-syntax-manifest.sh` | exit 0; the named historical SS.21 plus SS.22 evidence hashes match |
+| `scripts/release/check-surface-syntax-manifest.sh` | exit 0; the immutable manifest matches the exact SS.22 boundary tree |
 
 ## Next Milestone
 
