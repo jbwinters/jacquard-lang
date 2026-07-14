@@ -8,13 +8,18 @@
     other value use is an escape.
 
     This is deliberately local to one operation clause. It is not a general linear-type system, and
-    failures are ordinary checker diagnostics rather than internal exceptions. *)
+    failures are ordinary checker diagnostics returned as results. *)
 
 module SSet = Set.Make (String)
 module SMap = Map.Make (String)
 
 type consumption = { binder : string; meta : Meta.t }
-type flow = consumption option list
+
+type flow = { unused : bool; used : consumption option }
+(** A constant-size abstraction of all paths through an expression. [unused] records whether some
+    path leaves the token untouched, while [used] retains one witness for the existential fact that
+    some path consumes it. No client needs the Cartesian product of concrete paths: sequential
+    composition is invalid exactly when both sides have a consumption witness. *)
 
 type callable = {
   params : Kernel.pat list;
@@ -22,6 +27,7 @@ type callable = {
   closure : callable SMap.t;
   resolver : Hash.t -> resolved_callable option;
   recursive : bool;
+  diagnostic_anchor : Meta.t option;
 }
 
 and resolved_callable = {
@@ -34,19 +40,23 @@ type env = {
   aliases : SSet.t;
   callables : callable SMap.t;
   resolve_term : Hash.t -> resolved_callable option;
+  diagnostic_anchor : Meta.t option;
 }
 
 type value_context = Return | Argument | Storage | Scrutinee | Binding | Function
 
-exception Reject of Diag.t
+let ( let* ) = Result.bind
+
+let diagnostic_meta env meta =
+  match env.diagnostic_anchor with Some anchor -> anchor | None -> meta
 
 let span_text meta =
   match Meta.span meta with
   | Some span -> Span.to_string span
   | None -> "an unknown source location"
 
-let reject ?hint ~code ~meta message =
-  raise (Reject (Diag.error ?span:(Meta.span meta) ?hint ~code message))
+let span_text_in env meta = span_text (diagnostic_meta env meta)
+let reject ?hint ~code ~meta message = Error (Diag.error ?span:(Meta.span meta) ?hint ~code message)
 
 let reject_double first second =
   reject ~code:"E0816" ~meta:second.meta
@@ -71,32 +81,36 @@ let escape_message binder = function
   | Function ->
       Printf.sprintf "once resumption `%s` cannot be used as an ordinary function value" binder
 
-let reject_escape ~binder ~meta context =
-  reject ~code:"E0817" ~meta
+let reject_escape env ~binder ~meta context =
+  reject ~code:"E0817" ~meta:(diagnostic_meta env meta)
     ~hint:
       "call the resumption once, drop it, or move it to a local parameter that is checked as \
        Resume-typed"
     (escape_message binder context)
 
-let zero = [ None ]
-let consume binder meta = [ Some { binder; meta } ]
+let zero = { unused = true; used = None }
 
-(* Both expressions execute. Each side carries the possible token state at its exit; a pair of
-   consumptions therefore witnesses one concrete path that spends the same budget twice. *)
+let consume env binder meta =
+  { unused = false; used = Some { binder; meta = diagnostic_meta env meta } }
+
+(** [seq left right] composes two expressions that both execute. If each side has any path that
+    consumes the token, those choices form one concrete sequential path and provide the two E0816
+    witnesses. Otherwise the bounded abstraction remains exact. *)
 let seq left right =
-  List.concat_map
-    (fun l ->
-      List.map
-        (fun r ->
-          match (l, r) with
-          | Some first, Some second -> reject_double first second
-          | (Some _ as used), None | None, (Some _ as used) -> used
-          | None, None -> None)
-        right)
-    left
+  match (left.used, right.used) with
+  | Some first, Some second -> reject_double first second
+  | Some used, None -> Ok { unused = left.unused && right.unused; used = Some used }
+  | None, Some used -> Ok { unused = left.unused && right.unused; used = Some used }
+  | None, None -> Ok { unused = left.unused && right.unused; used = None }
 
-let seq_all flows = List.fold_left seq zero flows
-let alt flows = match flows with [] -> zero | _ -> List.concat flows
+let alt flows =
+  match flows with
+  | [] -> zero
+  | _ ->
+      {
+        unused = List.exists (fun flow -> flow.unused) flows;
+        used = List.find_map (fun flow -> flow.used) flows;
+      }
 
 let rec pat_names (pat : Kernel.pat) =
   match pat.it with
@@ -111,6 +125,7 @@ let shadow env names =
     aliases = SSet.diff env.aliases names;
     callables = SSet.fold (fun name map -> SMap.remove name map) names env.callables;
     resolve_term = env.resolve_term;
+    diagnostic_anchor = env.diagnostic_anchor;
   }
 
 let rec free_alias (env : env) (expr : Kernel.expr) : (string * Meta.t) option =
@@ -199,10 +214,19 @@ let callable_expr env (expr : Kernel.expr) =
             closure = SMap.empty;
             resolver = env.resolve_term;
             recursive = resolved.resolved_recursive;
+            diagnostic_anchor = Some (diagnostic_meta env expr.meta);
           })
         (env.resolve_term hash)
   | Kernel.Lam (params, body) ->
-      Some { params; body; closure = env.callables; resolver = env.resolve_term; recursive = false }
+      Some
+        {
+          params;
+          body;
+          closure = env.callables;
+          resolver = env.resolve_term;
+          recursive = false;
+          diagnostic_anchor = env.diagnostic_anchor;
+        }
   | _ -> None
 
 let is_constructor (expr : Kernel.expr) =
@@ -211,11 +235,13 @@ let is_constructor (expr : Kernel.expr) =
   in
   match (unwrap expr).it with Kernel.Ref (_, Kernel.Con) -> true | _ -> false
 
-let rec analyze (env : env) ~(context : value_context) (expr : Kernel.expr) : flow =
+let rec analyze (env : env) ~(context : value_context) (expr : Kernel.expr) : (flow, Diag.t) result
+    =
   match expr.it with
-  | Kernel.Lit _ | Kernel.Ref _ | Kernel.GroupRef _ -> zero
+  | Kernel.Lit _ | Kernel.Ref _ | Kernel.GroupRef _ -> Ok zero
   | Kernel.Var name ->
-      if SSet.mem name env.aliases then reject_escape ~binder:name ~meta:expr.meta context else zero
+      if SSet.mem name env.aliases then reject_escape env ~binder:name ~meta:expr.meta context
+      else Ok zero
   | Kernel.Lam (params, body) -> (
       let bound =
         List.fold_left (fun names pat -> SSet.union names (pat_names pat)) SSet.empty params
@@ -223,43 +249,30 @@ let rec analyze (env : env) ~(context : value_context) (expr : Kernel.expr) : fl
       let capture_env = shadow env bound in
       match free_alias capture_env body with
       | Some (binder, occurrence) ->
-          reject ~code:"E0817" ~meta:expr.meta
+          reject ~code:"E0817" ~meta:(diagnostic_meta env expr.meta)
             ~hint:"pass the once resumption as a Resume-typed parameter instead of capturing it"
             (Printf.sprintf
                "once resumption `%s` escapes into a closure captured here (free use at %s)" binder
-               (span_text occurrence))
-      | None -> zero)
+               (span_text_in env occurrence))
+      | None -> Ok zero)
   | Kernel.App (fn, args) -> (
       match alias_expr env fn with
       | Some (binder, _) ->
-          seq (seq_all (List.map (analyze env ~context:Argument) args)) (consume binder expr.meta)
+          let* args_flow = analyze_sequence env ~context:Argument args in
+          seq args_flow (consume env binder expr.meta)
       | None ->
           let callee = callable_expr env fn in
           let constructor = is_constructor fn in
-          let fn_flow = analyze env ~context:Function fn in
-          let arg_flows =
-            List.mapi
-              (fun index arg ->
-                match alias_expr env arg with
-                | None -> analyze env ~context:Argument arg
-                | Some (binder, alias_meta) -> (
-                    if constructor then reject_escape ~binder ~meta:alias_meta Storage
-                    else
-                      match callee with
-                      | Some callable ->
-                          check_transfer callable index ~binder ~transfer_meta:alias_meta;
-                          consume binder alias_meta
-                      | None -> reject_escape ~binder ~meta:alias_meta Argument))
-              args
-          in
-          seq fn_flow (seq_all arg_flows))
+          let* fn_flow = analyze env ~context:Function fn in
+          let* args_flow = analyze_arguments env ~callee ~constructor args in
+          seq fn_flow args_flow)
   | Kernel.Let { isrec; binder; value; body } -> (
       let bound = pat_names binder in
       let body_base = shadow env bound in
       match (binder.it, alias_expr env value) with
       | Kernel.PVar alias, Some _ ->
           (* Aliasing does not clone the token: both names refer to one budget. A later use of both
-             aliases is rejected by the path composition above. *)
+             aliases is rejected by sequential composition. *)
           let body_env =
             { body_base with aliases = SSet.add alias body_base.aliases |> SSet.union env.aliases }
           in
@@ -267,69 +280,114 @@ let rec analyze (env : env) ~(context : value_context) (expr : Kernel.expr) : fl
       | Kernel.PVar name, None -> (
           match callable_expr env value with
           | Some callable ->
-              let value_flow = analyze env ~context:Binding value in
+              let* value_flow = analyze env ~context:Binding value in
               let callable = { callable with recursive = isrec } in
               let body_env =
                 {
                   aliases = SSet.diff env.aliases bound;
                   callables = SMap.add name callable body_base.callables;
                   resolve_term = env.resolve_term;
+                  diagnostic_anchor = env.diagnostic_anchor;
                 }
               in
-              seq value_flow (analyze body_env ~context body)
+              let* body_flow = analyze body_env ~context body in
+              seq value_flow body_flow
           | None ->
-              seq
-                (analyze (if isrec then shadow env bound else env) ~context:Binding value)
-                (analyze body_base ~context body))
+              let value_env = if isrec then shadow env bound else env in
+              let* value_flow = analyze value_env ~context:Binding value in
+              let* body_flow = analyze body_base ~context body in
+              seq value_flow body_flow)
       | _ ->
-          seq
-            (analyze (if isrec then shadow env bound else env) ~context:Binding value)
-            (analyze body_base ~context body))
+          let value_env = if isrec then shadow env bound else env in
+          let* value_flow = analyze value_env ~context:Binding value in
+          let* body_flow = analyze body_base ~context body in
+          seq value_flow body_flow)
   | Kernel.Match (scrutinee, clauses) ->
-      let scrutinee_flow = analyze env ~context:Scrutinee scrutinee in
-      let arms =
-        List.map
-          (fun ({ Kernel.cpat; cbody; _ } : Kernel.clause) ->
-            analyze (shadow env (pat_names cpat)) ~context cbody)
-          clauses
-      in
+      let* scrutinee_flow = analyze env ~context:Scrutinee scrutinee in
+      let* arms = analyze_arms env ~context clauses in
       seq scrutinee_flow (alt arms)
-  | Kernel.Tuple items -> seq_all (List.map (analyze env ~context:Storage) items)
+  | Kernel.Tuple items -> analyze_sequence env ~context:Storage items
   | Kernel.Handle { body; ret; ops } ->
-      let body_flow = analyze env ~context:Binding body in
-      let reject_clause_capture meta bound clause_body =
-        match free_alias (shadow env bound) clause_body with
-        | None -> ()
-        | Some (binder, occurrence) ->
-            reject ~code:"E0817" ~meta
-              ~hint:"do not capture an outer once resumption in a nested handler clause"
-              (Printf.sprintf
-                 "once resumption `%s` escapes into a nested handler clause captured here (free \
-                  use at %s)"
-                 binder (span_text occurrence))
-      in
-      reject_clause_capture ret.rmeta (pat_names ret.rbinder) ret.rbody;
-      List.iter
-        (fun (clause : Kernel.opclause) ->
-          let bound =
-            List.fold_left
-              (fun names pat -> SSet.union names (pat_names pat))
-              (SSet.singleton clause.resume) clause.params
-          in
-          reject_clause_capture clause.ometa bound clause.obody)
-        ops;
-      body_flow
+      let* body_flow = analyze env ~context:Binding body in
+      let* () = check_clause_capture env ret.rmeta (pat_names ret.rbinder) ret.rbody in
+      let* () = check_operation_captures env ops in
+      Ok body_flow
   | Kernel.Quote payload -> (
       match free_alias_in_quote env payload with
-      | None -> zero
+      | None -> Ok zero
       | Some (binder, occurrence) ->
-          reject ~code:"E0817" ~meta:expr.meta
+          reject ~code:"E0817" ~meta:(diagnostic_meta env expr.meta)
             ~hint:"a once resumption cannot cross a quote boundary"
             (Printf.sprintf
                "once resumption `%s` escapes into quoted code captured here (splice at %s)" binder
-               (span_text occurrence)))
+               (span_text_in env occurrence)))
   | Kernel.Unquote inner -> analyze env ~context:Argument inner
   | Kernel.Ann (subject, _) -> analyze env ~context subject
+
+and analyze_sequence env ~context expressions =
+  let rec loop accumulated = function
+    | [] -> Ok accumulated
+    | expression :: rest ->
+        let* next = analyze env ~context expression in
+        let* accumulated = seq accumulated next in
+        loop accumulated rest
+  in
+  loop zero expressions
+
+and analyze_arguments env ~callee ~constructor args =
+  let rec loop index accumulated = function
+    | [] -> Ok accumulated
+    | argument :: rest ->
+        let* argument_flow =
+          match alias_expr env argument with
+          | None -> analyze env ~context:Argument argument
+          | Some (binder, alias_meta) -> (
+              if constructor then reject_escape env ~binder ~meta:alias_meta Storage
+              else
+                match callee with
+                | Some callable ->
+                    let* () =
+                      check_transfer callable index ~binder
+                        ~transfer_meta:(diagnostic_meta env alias_meta)
+                    in
+                    Ok (consume env binder alias_meta)
+                | None -> reject_escape env ~binder ~meta:alias_meta Argument)
+        in
+        let* accumulated = seq accumulated argument_flow in
+        loop (index + 1) accumulated rest
+  in
+  loop 0 zero args
+
+and analyze_arms env ~context clauses =
+  let rec loop flows = function
+    | [] -> Ok (List.rev flows)
+    | ({ Kernel.cpat; cbody; _ } : Kernel.clause) :: rest ->
+        let* flow = analyze (shadow env (pat_names cpat)) ~context cbody in
+        loop (flow :: flows) rest
+  in
+  loop [] clauses
+
+and check_clause_capture env meta bound clause_body =
+  match free_alias (shadow env bound) clause_body with
+  | None -> Ok ()
+  | Some (binder, occurrence) ->
+      reject ~code:"E0817" ~meta:(diagnostic_meta env meta)
+        ~hint:"do not capture an outer once resumption in a nested handler clause"
+        (Printf.sprintf
+           "once resumption `%s` escapes into a nested handler clause captured here (free use at \
+            %s)"
+           binder (span_text_in env occurrence))
+
+and check_operation_captures env = function
+  | [] -> Ok ()
+  | (clause : Kernel.opclause) :: rest ->
+      let bound =
+        List.fold_left
+          (fun names pat -> SSet.union names (pat_names pat))
+          (SSet.singleton clause.resume) clause.params
+      in
+      let* () = check_clause_capture env clause.ometa bound clause.obody in
+      check_operation_captures env rest
 
 and check_transfer callable index ~binder ~transfer_meta =
   if callable.recursive then
@@ -338,46 +396,65 @@ and check_transfer callable index ~binder ~transfer_meta =
       (Printf.sprintf
          "once resumption `%s` cannot be transferred to a recursive parameter because its call \
           count is not locally bounded"
-         binder);
-  match List.nth_opt callable.params index with
-  | Some { Kernel.it = Kernel.PWild; _ } -> ()
-  | Some { Kernel.it = Kernel.PVar parameter; _ } ->
-      let callables =
-        List.fold_left
-          (fun callables pat ->
-            SSet.fold (fun name map -> SMap.remove name map) (pat_names pat) callables)
-          callable.closure callable.params
-      in
-      ignore
-        (analyze
-           { aliases = SSet.singleton parameter; callables; resolve_term = callable.resolver }
-           ~context:Return callable.body)
-  | Some parameter ->
-      reject ~code:"E0817" ~meta:parameter.meta
-        ~hint:"bind the transferred resumption to one variable or `_`"
-        (Printf.sprintf
-           "once resumption `%s` cannot be transferred through a destructuring parameter" binder)
-  | None ->
-      (* Ordinary type inference will also report the arity mismatch, but retaining a local affine
-         failure makes this API safe when used independently. *)
-      reject ~code:"E0817" ~meta:transfer_meta
-        (Printf.sprintf "once resumption `%s` has no receiving parameter at this call" binder)
+         binder)
+  else
+    match List.nth_opt callable.params index with
+    | Some { Kernel.it = Kernel.PWild; _ } -> Ok ()
+    | Some { Kernel.it = Kernel.PVar parameter; _ } ->
+        let callables =
+          List.fold_left
+            (fun callables pat ->
+              SSet.fold (fun name map -> SMap.remove name map) (pat_names pat) callables)
+            callable.closure callable.params
+        in
+        let diagnostic_anchor =
+          match callable.diagnostic_anchor with Some _ -> Some transfer_meta | None -> None
+        in
+        let* _ =
+          analyze
+            {
+              aliases = SSet.singleton parameter;
+              callables;
+              resolve_term = callable.resolver;
+              diagnostic_anchor;
+            }
+            ~context:Return callable.body
+        in
+        Ok ()
+    | Some parameter ->
+        let meta =
+          match callable.diagnostic_anchor with Some _ -> transfer_meta | None -> parameter.meta
+        in
+        reject ~code:"E0817" ~meta ~hint:"bind the transferred resumption to one variable or `_`"
+          (Printf.sprintf
+             "once resumption `%s` cannot be transferred through a destructuring parameter" binder)
+    | None ->
+        (* Ordinary type inference will also report the arity mismatch, but retaining a local affine
+           failure makes this API safe when used independently. *)
+        reject ~code:"E0817" ~meta:transfer_meta
+          (Printf.sprintf "once resumption `%s` has no receiving parameter at this call" binder)
 
 (** [check_clause ~resolve_term ~resume body] verifies the affine contract of one [once] operation
     clause. [resolve_term] may expose a stored lambda so moving the token into a top-level helper is
     checked contextually just like a local helper; absent or non-lambda terms remain escape
-    boundaries.
+    boundaries. Stored declarations have identity-preserving object bytes rather than author spans,
+    so their contextual failures are anchored at the source transfer site.
 
     Successful clauses consume the bound resumption on zero or one occurrence along every possible
     execution path. Failure returns exactly one E0816 (duplication) or E0817 (escape) diagnostic;
     the duplication message identifies both consumption spans, and capture failures point at the
-    closure, quote, or nested-handler capture site. *)
+    closure, quote, nested-handler capture, or stored-helper transfer site. *)
 let check_clause ?(resolve_term = fun _ -> None) ~resume (body : Kernel.expr) :
     (unit, Diag.t list) result =
-  try
-    ignore
-      (analyze
-         { aliases = SSet.singleton resume; callables = SMap.empty; resolve_term }
-         ~context:Return body);
-    Ok ()
-  with Reject diagnostic -> Error [ diagnostic ]
+  match
+    analyze
+      {
+        aliases = SSet.singleton resume;
+        callables = SMap.empty;
+        resolve_term;
+        diagnostic_anchor = None;
+      }
+      ~context:Return body
+  with
+  | Ok _ -> Ok ()
+  | Error diagnostic -> Error [ diagnostic ]

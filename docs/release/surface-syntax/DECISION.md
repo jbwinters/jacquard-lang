@@ -140,11 +140,14 @@ Their separate acceptance gates are the
 
 ## Reproduction Context
 
-The immutable context is base commit
-`07bf8aa71d197603c3830bd595ef7dd1e33e6bee` plus the files and SHA-256 values
+The historical surface context is base commit
+`07bf8aa71d197603c3830bd595ef7dd1e33e6bee` plus the named files and SHA-256 values
 in [MANIFEST.sha256](MANIFEST.sha256). The manifest excludes itself, avoiding a
-self-reference, and includes only tracked files reconstructible from that base
-and the SS.21 plus SS.22 plus EL.4 successor evidence overlay. Run
+self-reference. It is an integrity set for the reviewed SS.21/SS.22 evidence,
+not a complete overlay for reconstructing every later successor checkout or its
+global test suite. Successor milestones that require reconstruction publish a
+separate base-plus-overlay manifest; EL.2 does so under `release/effect-linearity/`.
+Run
 `scripts/release/check-surface-syntax-manifest.sh` from the repository root to
 validate every listed byte sequence.
 
@@ -180,7 +183,7 @@ command starts with `cd`.
 - Optional local transcript: `.scratch/ss21-final-gate/transcript.log` (untracked,
   not required or expected in a clone)
 
-The following outcomes are the deterministic gate for the EL.4 successor overlay.
+The following outcomes were observed in the current successor checkout.
 Task Master files were not changed. The table updates evidence inventory and
 stdlib/native results; it does not reopen or strengthen the SS.21 release
 claim.
@@ -195,9 +198,7 @@ claim.
 | `JACQUARD_PRELUDE=$PWD/prelude opam exec -- dune exec jac -- run demos/basics/m1-fact.jac` | exit 0; stdout is exactly `120` |
 | `opam exec -- dune build @doc` | exit 0 |
 | `git -c core.whitespace=trailing-space,space-before-tab diff --check` | exit 0 |
-| `scripts/release/check-surface-syntax-manifest.sh` | exit 0; the reconstructible SS.21 plus SS.22 plus EL.4 overlay hashes match |
-| `clean-copy scripts/release/check-surface-syntax-manifest.sh` | exit 0; overlay hashes match and all six protected drafts are absent |
-| `clean-copy opam exec -- dune runtest --force` | exit 0; the isolated base-plus-overlay copy passes all 560 cases |
+| `scripts/release/check-surface-syntax-manifest.sh` | exit 0; the named historical SS.21 plus SS.22 evidence hashes match |
 
 ## Next Milestone
 

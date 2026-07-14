@@ -229,7 +229,22 @@ let test_once_resume_gate_style_transfer () =
    ^ "(handle (app (var signal)) (ret (pvar x) (var x)) "
    ^ "(opclause signal () k (app (var gate) (var k))))")
 
+let test_once_resume_branch_flow_is_bounded () =
+  let no_use_match =
+    "(match (var true) (clause (pcon true) (lit 0)) (clause (pcon false) (lit 1)))"
+  in
+  let rec sequence count body =
+    if count = 0 then body
+    else sequence (count - 1) (Printf.sprintf "(let nonrec (pwild) %s %s)" no_use_match body)
+  in
+  (* Each match has two token-free paths. Enumerating concrete flow lists makes this fixture require
+     2^40 states, while the affine abstraction needs one constant-size state per syntax node. The
+     assertion is semantic, not a flaky wall-clock threshold. *)
+  check_ok (make_cctx ()) "forty sequential branches keep bounded affine state"
+    (once_handler (sequence 40 "(app (var k) (lit 1))"))
+
 let test_once_resume_double_consumption_spans () =
+  test_once_resume_branch_flow_is_bounded ();
   let d =
     err_of (make_cctx ())
       (once_handler "(let nonrec (pwild) (app (var k) (lit 1)) (app (var k) (lit 2)))")
@@ -294,7 +309,24 @@ let test_once_resume_escape_goldens () =
     "unknown call escape wording" true
     (contains d.message "parameter that is not known to be Resume-typed")
 
+let test_once_resume_stored_helper_escape_uses_author_span () =
+  let d =
+    err_of (make_cctx ())
+      ("(defeffect linear () (op signal once () (tref int)))\n"
+     ^ "(defterm ((binding bad-gate () (lam ((pvar next)) (app (var some) (var next))))))\n"
+     ^ "(handle (app (var signal)) (ret (pvar x) (var x)) "
+     ^ "(opclause signal () k (app (var bad-gate) (var k))))")
+  in
+  Alcotest.(check string) "stored helper escape code" "E0817" d.code;
+  (match d.span with
+  | Some span -> Alcotest.(check string) "primary span is the author input" "c.jqd" span.Span.file
+  | None -> Alcotest.fail "stored helper escape must retain an author source span");
+  Alcotest.(check bool)
+    "diagnostic does not expose the transient Store object path" false
+    (contains (Diag.to_string d) "/objects/")
+
 let test_multi_resume_remains_ordinary_function () =
+  test_once_resume_stored_helper_escape_uses_author_span ();
   check_ok (make_cctx ()) "legacy Multi clauses remain unrestricted"
     "(handle (app (var abort)) (ret (pvar x) (var x)) (opclause abort () k (let nonrec (pwild) \
      (app (var k) (lit 1)) (app (var k) (lit 2)))))"

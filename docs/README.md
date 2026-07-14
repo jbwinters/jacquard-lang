@@ -53,8 +53,16 @@ Read these together when judging whether the release candidate is credible:
   L1-L7 status, D34-D40 conformance, caveats, and reproduction commands.
 - `release/surface-syntax/FOLLOWUPS.md`: durable D36/D38/D39 and Tier-F
   follow-up scope outside the surface release gate.
-- `release/surface-syntax/MANIFEST.sha256`: reconstructible base-plus-overlay
-  evidence context, validated by the release manifest checker.
+- `release/surface-syntax/MANIFEST.sha256`: historical surface-syntax evidence
+  integrity set, validated by the surface manifest checker. Successor milestones
+  publish separate reconstructible overlays rather than extending this set.
+
+## Effect Linearity Evidence
+
+- `release/effect-linearity/EVIDENCE.md`: EL.2 scope, bounded affine-analysis
+  design, diagnostic provenance rule, isolated reconstruction, and verification.
+- `release/effect-linearity/MANIFEST.sha256`: reconstructible EL.2 overlay on
+  the completed EL.1 base.
 
 ## Maintenance Notes
 

@@ -885,15 +885,7 @@ let validate_release_docs ~decision ~followups ~index =
           [ "git -c core.whitespace=trailing-space,space-before-tab diff --check"; "exit 0" ];
           [
             "scripts/release/check-surface-syntax-manifest.sh";
-            "exit 0; the reconstructible SS.21 plus SS.22 plus EL.4 overlay hashes match";
-          ];
-          [
-            "clean-copy scripts/release/check-surface-syntax-manifest.sh";
-            "exit 0; overlay hashes match and all six protected drafts are absent";
-          ];
-          [
-            "clean-copy opam exec -- dune runtest --force";
-            "exit 0; the isolated base-plus-overlay copy passes all 560 cases";
+            "exit 0; the named historical SS.21 plus SS.22 evidence hashes match";
           ];
         ]
       in
