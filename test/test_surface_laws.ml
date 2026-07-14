@@ -440,6 +440,7 @@ let manifest_errors () =
       "src/surface_ast.ml";
       "src/surface_lex.ml";
       "src/surface_lower.ml";
+      "src/surface_name.ml";
       "src/surface_parse.ml";
       "src/surface_print.ml";
       "src/tier.ml";
@@ -450,6 +451,7 @@ let manifest_errors () =
       "test/cli/surface.t";
       "test/cli/tiers.t";
       "test/corpus_support.ml";
+      "test/test_diff.ml";
       "test/docs-doctest/fixtures/stdlib-text-join.jac";
       "test/docs-doctest/fixtures/stdlib-text-join.stdout";
       "test/docs-doctest/fixtures/readme-multishot.jac";
@@ -471,6 +473,7 @@ let manifest_errors () =
       "test/test_surface_laws.ml";
       "test/test_surface_decls.ml";
       "test/test_surface_print.ml";
+      "test/test_surface_scaffold.ml";
       "test/test_surface_trivia.ml";
       "test/test_text.ml";
       "test/test_tier.ml";

@@ -140,7 +140,7 @@ let test_surface_fragment_rendering () =
       ("(binding id () (lam ((pvar x)) (var x)))", "id(x) = x");
       ("(con some (field (tvar a)))", "Some a");
       ("(field value (tref int))", "value: Int");
-      ("(op choose () (tref bool))", "choose : () -> Bool");
+      ("(op choose () (tref bool))", "multi choose : () -> Bool");
       ("(eref net)", "Net");
       ("(rvar e)", "e");
     ]
@@ -207,7 +207,7 @@ and test_operation_mode_interface_diff () =
   check Diff.Bootstrap;
   check Diff.Surface;
   Alcotest.(check string)
-    "Once fragments cannot misleadingly erase the mode" "(op fetch once ((tref int)) (tref int))"
+    "Once fragments retain the mode in surface syntax" "once fetch : (Int) -> Int"
     (Diff.render_form Diff.Surface
        (match Reader.parse_one ~file:"once-op.jqd" "(op fetch once ((tref int)) (tref int))" with
        | Ok form -> form
