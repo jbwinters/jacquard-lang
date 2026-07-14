@@ -29,4 +29,6 @@ val check_escapes :
   (unit, Diag.t list) result
 (** [check_escapes] performs the same capture, storage, and transfer checks as [check_clause] but
     defers duplicate-consumption errors. The checker uses it before ordinary inference so E0817
-    remains purpose-built while malformed applications retain their E0801/E0803 diagnostics. *)
+    remains purpose-built while malformed applications retain their E0801/E0803 diagnostics. In
+    particular, a Resume argument beyond a known local or stored lambda's arity is deferred to
+    inference; [check_clause] retains an E0817 fallback when called independently. *)

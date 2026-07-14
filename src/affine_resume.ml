@@ -44,6 +44,7 @@ and state = {
   summaries : (string, (flow, Diag.t) result) Hashtbl.t;
   mutable next_callable : int;
   check_duplication : bool;
+  defer_out_of_range_transfer : bool;
 }
 
 type env = {
@@ -473,10 +474,15 @@ and check_transfer callable index ~binder ~transfer_meta =
           (Printf.sprintf
              "once resumption `%s` cannot be transferred through a destructuring parameter" binder)
     | None ->
-        (* Ordinary type inference will also report the arity mismatch, but retaining a local affine
-           failure makes this API safe when used independently. *)
-        reject ~code:"E0817" ~meta:transfer_meta
-          (Printf.sprintf "once resumption `%s` has no receiving parameter at this call" binder)
+        if callable.state.defer_out_of_range_transfer then
+          (* A known local or stored lambda has a fixed arity, so ordinary inference will report
+             E0803 for this malformed call. The escape-only prepass must not let the out-of-range
+             Resume argument hide that more fundamental error. Full affine checking retains the
+             E0817 fallback below so [check_clause] remains safe as a standalone API. *)
+          Ok ()
+        else
+          reject ~code:"E0817" ~meta:transfer_meta
+            (Printf.sprintf "once resumption `%s` has no receiving parameter at this call" binder)
 
 (** [check_clause ~resolve_term ~resume body] verifies the affine contract of one [once] operation
     clause. [resolve_term] may expose a stored lambda so moving the token into a top-level helper is
@@ -491,8 +497,16 @@ and check_transfer callable index ~binder ~transfer_meta =
     closure, quote, nested-handler capture, or stored-helper transfer site. Contextual helper
     summaries are memoized per callable parameter so duplicate branch transfers remain polynomial.
 *)
-let check ~check_duplication ?(resolve_term = fun _ -> None) ~resume (body : Kernel.expr) =
-  let state = { summaries = Hashtbl.create 16; next_callable = 0; check_duplication } in
+let check ~check_duplication ~defer_out_of_range_transfer ?(resolve_term = fun _ -> None) ~resume
+    (body : Kernel.expr) =
+  let state =
+    {
+      summaries = Hashtbl.create 16;
+      next_callable = 0;
+      check_duplication;
+      defer_out_of_range_transfer;
+    }
+  in
   match
     analyze
       {
@@ -508,7 +522,7 @@ let check ~check_duplication ?(resolve_term = fun _ -> None) ~resume (body : Ker
   | Error diagnostic -> Error [ diagnostic ]
 
 let check_clause ?resolve_term ~resume body =
-  check ~check_duplication:true ?resolve_term ~resume body
+  check ~check_duplication:true ~defer_out_of_range_transfer:false ?resolve_term ~resume body
 
 let check_escapes ?resolve_term ~resume body =
-  check ~check_duplication:false ?resolve_term ~resume body
+  check ~check_duplication:false ~defer_out_of_range_transfer:true ?resolve_term ~resume body

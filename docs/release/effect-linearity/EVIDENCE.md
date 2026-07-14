@@ -29,7 +29,13 @@ is linear in the helper chain plus its syntax.
 Escape checking precedes ordinary inference, but duplicate checking follows a
 successful inference and clause-result unification. E0817 therefore remains a
 purpose-built diagnostic for laundering or capture, while wrong Resume arity or
-argument types retain E0803/E0801 and cannot count toward E0816.
+argument types retain E0803/E0801 and cannot count toward E0816. The escape-only
+prepass also defers a Resume argument beyond a known local or stored lambda's
+fixed arity so the malformed call receives E0803. The standalone full affine API
+retains E0817 for that unsafe transfer when no inference pass follows it. Direct
+escapes such as passing a Resume to itself or to a non-callable value still
+receive E0817 before inference, and in-range transfers still share one affine
+budget.
 
 Stored declarations retain canonical object spans rather than original author
 spans. Contextual E0817 failures therefore anchor at the author-visible

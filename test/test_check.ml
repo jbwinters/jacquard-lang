@@ -296,6 +296,28 @@ let test_once_resume_double_consumption_spans () =
   Alcotest.(check string) "the receiving parameter is checked affinely" "E0816" bad_gate.code
 
 let test_once_resume_type_errors_precede_duplication () =
+  let unary_gate call =
+    once_handler
+      (Printf.sprintf "(let nonrec (pvar gate) (lam ((pvar next)) (app (var next) (lit 1))) %s)"
+         call)
+  in
+  let too_few = err_of (make_cctx ()) (unary_gate "(app (var gate))") in
+  Alcotest.(check string) "too-few helper arity wins" "E0803" too_few.code;
+  let valid_slot_too_many = err_of (make_cctx ()) (unary_gate "(app (var gate) (var k) (lit 0))") in
+  Alcotest.(check string)
+    "valid Resume slot does not hide too-many helper arity" "E0803" valid_slot_too_many.code;
+  let local_out_of_range = err_of (make_cctx ()) (unary_gate "(app (var gate) (lit 0) (var k))") in
+  Alcotest.(check string)
+    "out-of-range local-helper transfer defers to arity" "E0803" local_out_of_range.code;
+  let stored_out_of_range =
+    err_of (make_cctx ())
+      ("(defeffect linear () (op signal once () (tref int)))\n"
+     ^ "(defterm ((binding gate () (lam ((pvar next)) (app (var next) (lit 1))))))\n"
+     ^ "(handle (app (var signal)) (ret (pvar x) (var x)) "
+     ^ "(opclause signal () k (app (var gate) (lit 0) (var k))))")
+  in
+  Alcotest.(check string)
+    "out-of-range stored-helper transfer defers to arity" "E0803" stored_out_of_range.code;
   let arity =
     err_of (make_cctx ()) (once_handler "(let nonrec (pwild) (app (var k)) (app (var k) (lit 1)))")
   in
@@ -304,7 +326,32 @@ let test_once_resume_type_errors_precede_duplication () =
     err_of (make_cctx ())
       (once_handler "(let nonrec (pwild) (app (var k) (lit \"not-an-int\")) (app (var k) (lit 1)))")
   in
-  Alcotest.(check string) "malformed resume argument type wins" "E0801" argument.code
+  Alcotest.(check string) "malformed resume argument type wins" "E0801" argument.code;
+  let binary_duplication =
+    err_of (make_cctx ())
+      (once_handler
+         "(let nonrec (pvar gate) (lam ((pvar left) (pvar right)) (let nonrec (pwild) (app (var \
+          left) (lit 1)) (app (var right) (lit 2)))) (app (var gate) (var k) (var k)))")
+  in
+  Alcotest.(check string)
+    "two valid helper slots still share one affine budget" "E0816" binary_duplication.code;
+  let standalone_body =
+    match
+      Reader.parse_string ~file:"standalone.jqd"
+        "(let nonrec (pvar gate) (lam ((pvar next)) (app (var next) (lit 1))) (app (var gate) (lit \
+         0) (var k)))"
+    with
+    | Ok [ form ] -> (
+        match Kernel.expr_of_form form with
+        | Ok expr -> expr
+        | Error ds -> Eval_support.fail_diags "standalone affine fixture validation" ds)
+    | Ok _ -> Alcotest.fail "standalone affine fixture must contain one expression"
+    | Error ds -> Eval_support.fail_diags "standalone affine fixture parse" ds
+  in
+  match Affine_resume.check_clause ~resume:"k" standalone_body with
+  | Error [ d ] -> Alcotest.(check string) "standalone safety fallback" "E0817" d.code
+  | Error ds -> Alcotest.failf "standalone safety expected one diagnostic, got %d" (List.length ds)
+  | Ok () -> Alcotest.fail "standalone affine checking must reject an out-of-range transfer"
 
 let test_once_resume_aliases_share_one_budget () =
   test_once_resume_type_errors_precede_duplication ();
@@ -336,6 +383,10 @@ let test_once_resume_escape_goldens () =
   check_escape "constructor storage" "(let nonrec (pvar saved) (app (var some) (var k)) (lit 0))"
     "cannot be stored in data";
   check_escape "return" "(var k)" "escapes by being returned";
+  check_escape "self argument" "(app (var k) (var k))"
+    "parameter that is not known to be Resume-typed";
+  check_escape "non-callable argument" "(app (lit 0) (var k))"
+    "parameter that is not known to be Resume-typed";
   let d =
     err_of (make_cctx ())
       (once_handler "(let nonrec (pvar escaped) (app (var add) (var k) (lit 1)) (lit 0))")
