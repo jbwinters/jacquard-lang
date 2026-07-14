@@ -129,7 +129,7 @@ byte-for-byte to `test/docs-doctest/fixtures/readme-multishot.jac` and run by
 the documentation test lane:
 
 ```jacquard doctest=readme-multishot mode=run fixture=readme-multishot.jac stdout=readme-multishot.stdout stderr=empty exit=0
-effect Choice where {
+multi effect Choice where {
   choose : () -> Bool
 }
 

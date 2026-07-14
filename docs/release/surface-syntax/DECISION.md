@@ -14,13 +14,18 @@ formatter, checker, CLI, corpus, documentation, and demo inventories. It does
 not prove every possible kernel tree or freeze future surface revisions.
 
 The SS.0-SS.22 implementation arc is complete at these evidence boundaries.
-That completion does not promote partial D36 or parked Tier-F scope into the
-release and does not establish a freeze for the entire surface syntax.
+The EL.4 successor overlay additionally ships D41-D42 operation-mode syntax.
+That completion does not promote partial D36, resource-scoped rows, or the
+separately integrated affine-checker/stdlib work into this surface claim and
+does not establish a freeze for the entire surface syntax.
 
 Bootstrap `.jqd` remains permanently supported as the kernel/debug format of
 record, quote-literal notation, and a test and tooling carrier. It is not
 deprecated. The surface gate does not change the 27-form kernel, `HASH_V0`,
-store format, evaluator, native semantics, or authority model.
+store format, evaluator, native semantics, or authority model. EL.1's
+hash-stable operation-mode extension is the kernel input to this overlay:
+legacy `Multi` remains absent and byte-identical, while explicit `Once` is
+interface-visible.
 
 ## Law Status
 
@@ -50,6 +55,8 @@ Allowed decision statuses at this gate are `shipped`, `partial`, and
 | D38 | shipped | SS.22 ships a new callable variadic `text.join` object with an unbounded language/interpreter contract and strict argument evidence in [prelude tests](../../../test/test_prelude.ml), [CLI/native/ASAN boundary evidence](../../../test/cli/ss22.t), and [executable stdlib documentation](../../stdlib.md). Deprecated migration-only `text.join-list` preserves the pre-SS.22 list-plus-separator object hash-for-hash. Native v1 variadic parity is limited to 0-8 arguments; 9 is E1101 under its global ABI ceiling. Interpolation remains absent. | none |
 | D39 | shipped | SS.22 ships all four `int.*` and `real.*` predicates plus dotted real arithmetic, with NaN and boundary parity in [the native gauntlet](../../../test/native-gauntlet/g35-stdlib-ss22.jqd). The obsolete hyphenated public names are removed without aliases, while the five historical marker IDs and semantic hashes remain stable; the [identity map](../../../test/test_prelude.ml) and [hash-reference CLI/native test](../../../test/cli/ss22.t) prove old references still load, typecheck, interpret, and native-compile. | none |
 | D40 | shipped | [declaration tests](../../../test/test_surface_decls.ml) pin lowering order. [CLI evidence](../../../test/cli/surface.t) executes multiple bare expressions interleaved with declarations in document order and pins stdout `40\n41\n42\n` with exit 0. | none |
+| D41 | shipped | [declaration tests](../../../test/test_surface_decls.ml), [printing tests](../../../test/test_surface_print.ml), and [trivia tests](../../../test/test_surface_trivia.ml) pin per-operation `once`/`multi`, uniform effect-level shorthand, canonical emission, recovery, and formatter idempotence. | none |
+| D42 | shipped | [declaration diagnostics](../../../test/test_surface_decls.ml) reject omission, duplication, conflicts, and partially annotated mixed effects with E1236; the [operation-mode twin](../../../corpus/valid/operation-modes.jac) pins resolved `.jac`/`.jqd` hash parity while bootstrap absence remains legacy `Multi`. | none |
 
 ### D39 Stable Identity
 
@@ -90,9 +97,9 @@ compiled Alcotest list and repository sources.
 
 | inventory | count | exact members or source |
 |---|---:|---|
-| tests | 554 | compiled `test_jacquard.exe list` inventory |
+| tests | 558 | compiled `test_jacquard.exe list` inventory |
 | doctests | 21 | `readme-multishot`, `tutorial-literal`, `tutorial-application`, `tutorial-identity`, `tutorial-factorial`, `tutorial-bool-match`, `tutorial-nonexhaustive`, `tutorial-safe-div`, `tutorial-read-only`, `stdlib-core-declarations`, `stdlib-control-effects`, `stdlib-dist-declarations`, `stdlib-multi-effect-signature`, `stdlib-pipe-transformation`, `stdlib-handler-policy`, `stdlib-nested-tuple-destructure`, `stdlib-text-join`, `warp-check-effect`, `warp-test-types`, `warp-fault-effect`, `warp-hermetic-case` |
-| twins | 23 | `app-add.jac`, `case-fold-constructor.jac`, `dotted-names.jac`, `eval-gated.jac`, `even-odd.jac`, `fact.jac`, `handler-policy.jac`, `identity.jac`, `let-shadow.jac`, `lit-int.jac`, `lit-real.jac`, `lit-text.jac`, `match-bool.jac`, `multi-effect-signature.jac`, `nested-tuple-destructure.jac`, `pipe-transformation.jac`, `prelude-map.jac`, `quote-lit.jac`, `safe-div.jac`, `stdlib-ss22.jac`, `surface-ref-v0.jac`, `to-option.jac`, `tuple-unit.jac` |
+| twins | 24 | `app-add.jac`, `case-fold-constructor.jac`, `dotted-names.jac`, `eval-gated.jac`, `even-odd.jac`, `fact.jac`, `handler-policy.jac`, `identity.jac`, `let-shadow.jac`, `lit-int.jac`, `lit-real.jac`, `lit-text.jac`, `match-bool.jac`, `multi-effect-signature.jac`, `nested-tuple-destructure.jac`, `operation-modes.jac`, `pipe-transformation.jac`, `prelude-map.jac`, `quote-lit.jac`, `safe-div.jac`, `stdlib-ss22.jac`, `surface-ref-v0.jac`, `to-option.jac`, `tuple-unit.jac` |
 | demos | 13 | `agent-dream.jac`, `ambiguity-pipeline.jac`, `clarifying-question.jac`, `m1-choose.jac`, `m1-fact.jac`, `m1-gated.jac`, `m3-two-coins.jac`, `preflight.jac`, `repair.jac`, `surface-expression.jac`, `surface-fact.jac`, `synthesis.jac`, `word-count.jac` |
 
 The doctest lane audits the named fences against byte-identical fixtures and
@@ -123,8 +130,9 @@ inventory above, including `repair.jac` and `preflight.jac`.
 
 D38 and D39 completed as SS.22 standard-library work without grammar changes.
 D36 generated accessors and label validation remain partial after SS.8 and the
-completed SS.0-SS.22 arc. Tier-F linearity modes and resource-scoped row display
-remain unscheduled headroom with no syntax, semantics, or compatibility promise.
+completed SS.0-SS.22 arc. D41-D42 operation modes now occupy their reviewed
+grammar headroom; resource-scoped row display remains unscheduled with no
+syntax, semantics, or compatibility promise.
 Their separate acceptance gates are the
 [D36 accessor criteria](FOLLOWUPS.md#d36-generated-constructor-accessors),
 [Tier-F linearity criteria](FOLLOWUPS.md#tier-f-linearity-modes) and
@@ -136,12 +144,12 @@ The immutable context is base commit
 `07bf8aa71d197603c3830bd595ef7dd1e33e6bee` plus the files and SHA-256 values
 in [MANIFEST.sha256](MANIFEST.sha256). The manifest excludes itself, avoiding a
 self-reference, and includes only tracked files reconstructible from that base
-and the SS.21 plus SS.22 successor evidence overlay. Run
+and the SS.21 plus SS.22 plus EL.4 successor evidence overlay. Run
 `scripts/release/check-surface-syntax-manifest.sh` from the repository root to
 validate every listed byte sequence.
 
 The following manager-only preservation audit is optional and never gates
-`dune runtest`. The seven proposal drafts are intentionally untracked and
+`dune runtest`. The six remaining proposal drafts are intentionally untracked and
 outside the mandatory manifest and Dune dependencies. Absent files are expected
 in fresh clones; this command skips them and checks the baseline hash only when
 a manager's local copy exists.
@@ -156,7 +164,6 @@ while read -r expected path; do
 done <<'EOF'
 5bf5cf0eb778bb2d864aba9be8628395f631fefe70f0cb7a6cbfb3774aebe20a  docs/client-playground.md
 4f9f1ca28605b8dcef4db539da8459a5087b100c8086e891f35e5b8927bb23f8  docs/concurrency.md
-738ea3936afd62a8d9a3b051cd79627ca626dd2c87ad888d4e0c9ff6cdf8e0a8  docs/effect-linearity.md
 80165c66c9e33cc1bcd143361470263b358f0212cd3482bc2865ee332a610840  docs/effect-membranes.md
 ab4b3ceb8dea0e0d263f5b0d2088b492916276e34d805bcf744dc59951870c29  docs/effect-taxonomy.md
 cb46e75e6e634fdaaca316114db6ee9831218215dbe87b753ef3e2568b010ce8  docs/jacquard-package-cli.md
@@ -173,7 +180,7 @@ command starts with `cd`.
 - Optional local transcript: `.scratch/ss21-final-gate/transcript.log` (untracked,
   not required or expected in a clone)
 
-The following outcomes were observed for the SS.22 successor overlay.
+The following outcomes are the deterministic gate for the EL.4 successor overlay.
 Task Master files were not changed. The table updates evidence inventory and
 stdlib/native results; it does not reopen or strengthen the SS.21 release
 claim.
@@ -181,21 +188,21 @@ claim.
 | command | deterministic expected result |
 |---|---|
 | `opam exec -- dune build @all` | exit 0 |
-| `opam exec -- dune runtest --force` | exit 0; compiled Alcotest inventory is exactly 554 cases |
+| `opam exec -- dune runtest --force` | exit 0; compiled Alcotest inventory is exactly 558 cases |
 | `opam exec -- dune fmt` | exit 0; no task-file byte changes |
-| `cd _build/default/test && ./test_jacquard.exe test surface-twins --compact --color=never` | exit 0; exactly 5 selected cases pass over 23 twin pairs |
+| `cd _build/default/test && ./test_jacquard.exe test surface-twins --compact --color=never` | exit 0; exactly 5 selected cases pass over 24 twin pairs |
 | `opam exec -- dune runtest test/docs-doctest --force` | exit 0; exactly 21 named doctests pass |
 | `JACQUARD_PRELUDE=$PWD/prelude opam exec -- dune exec jac -- run demos/basics/m1-fact.jac` | exit 0; stdout is exactly `120` |
 | `opam exec -- dune build @doc` | exit 0 |
 | `git -c core.whitespace=trailing-space,space-before-tab diff --check` | exit 0 |
-| `scripts/release/check-surface-syntax-manifest.sh` | exit 0; the reconstructible SS.21 plus SS.22 overlay hashes match |
-| `clean-copy scripts/release/check-surface-syntax-manifest.sh` | exit 0; overlay hashes match and all seven protected drafts are absent |
-| `clean-copy opam exec -- dune runtest --force` | exit 0; the isolated base-plus-overlay copy passes all 554 cases |
+| `scripts/release/check-surface-syntax-manifest.sh` | exit 0; the reconstructible SS.21 plus SS.22 plus EL.4 overlay hashes match |
+| `clean-copy scripts/release/check-surface-syntax-manifest.sh` | exit 0; overlay hashes match and all six protected drafts are absent |
+| `clean-copy opam exec -- dune runtest --force` | exit 0; the isolated base-plus-overlay copy passes all 558 cases |
 
 ## Next Milestone
 
-Successor milestone **SS.22, prelude naming and text building**, is complete.
-This updates the prelude and evidence; it does not freeze the surface or claim
-production stability. The SS.0-SS.22 arc is complete, while D36 accessor
-generation and label validation plus Tier-F headroom require their own later
+Successor milestone **EL.4, explicit surface operation modes**, is complete at
+the D41-D42 evidence boundary. This updates the grammar and evidence; it does
+not freeze the surface or claim production stability. D36 accessor generation
+and label validation plus resource-scoped-row headroom retain their own later
 acceptance gates.

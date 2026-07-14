@@ -157,6 +157,7 @@ in `src/` and `bin/` appears in this catalog.
 | E1233 | malformed local recursive/function binding | `let rec (f, g)(x) = x` |
 | E1234 | generated lowering node lacks a real source span | lowering a hand-built spanless block AST |
 | E1235 | a signature or definition was lowered without its required file context | calling `lower_top` on a signature |
+| E1236 | missing, duplicated, or conflicting surface operation mode | `effect E where { op : () -> T }` |
 
 ### Surface warnings (W12xx)
 

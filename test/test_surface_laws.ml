@@ -57,7 +57,7 @@ let test_one_page_grammar_snapshot () =
   Alcotest.(check bool) "L7 grammar stays within 100 nonblank lines" true (List.length lines <= 100);
   Alcotest.(check string)
     "L7 grammar snapshot (review docs/surface-syntax.md before updating)"
-    "47fff3e3ced0fced860d6669b46e99954e2ecb729fa69b988283aa9a8f2263d6"
+    "e564dd92d4b632d4cd8b724ba8bf830ba2489527387c74e93e722ac7b808ffc8"
     (Hash.to_hex (Hash.of_string grammar))
 
 let format_surface path source =
@@ -396,6 +396,10 @@ let manifest_errors () =
       "corpus/sigs/24-ring2.jqd";
       "corpus/valid/stdlib-ss22.jac";
       "corpus/valid/stdlib-ss22.jqd";
+      "corpus/valid/operation-modes.jac";
+      "corpus/valid/operation-modes.jqd";
+      "demos/basics/m1-choose.jac";
+      "demos/case-studies/release-risk/model.jac";
       "demos/inference/clarifying-question.jac";
       "demos/inference/clarifying-question.jqd";
       "demos/inference/cookbook.jqd";
@@ -403,7 +407,10 @@ let manifest_errors () =
       "demos/tooling/repair.jqd";
       "docs/README.md";
       "docs/SKILL.md";
+      "docs/ast.md";
       "docs/ci-cd.md";
+      "docs/effect-linearity.md";
+      "docs/errors.md";
       "docs/native-intrinsics.md";
       "docs/release/0.1/DECISION.md";
       "docs/release/0.1/EVIDENCE.md";
@@ -412,6 +419,7 @@ let manifest_errors () =
       "docs/release/surface-syntax/FOLLOWUPS.md";
       "docs/stdlib.md";
       "docs/surface-syntax.md";
+      "docs/warp-testing.md";
       "prelude/04-builtins.jqd";
       "prelude/07-enum.jqd";
       "prelude/09-grid.jqd";
@@ -429,6 +437,11 @@ let manifest_errors () =
       "src/native/emit.ml";
       "src/native/spec.ml";
       "src/prelude.ml";
+      "src/surface_ast.ml";
+      "src/surface_lex.ml";
+      "src/surface_lower.ml";
+      "src/surface_parse.ml";
+      "src/surface_print.ml";
       "src/tier.ml";
       "src/types.ml";
       "test/cli/native-effects.t";
@@ -439,6 +452,12 @@ let manifest_errors () =
       "test/corpus_support.ml";
       "test/docs-doctest/fixtures/stdlib-text-join.jac";
       "test/docs-doctest/fixtures/stdlib-text-join.stdout";
+      "test/docs-doctest/fixtures/readme-multishot.jac";
+      "test/docs-doctest/fixtures/stdlib-control-effects.jac";
+      "test/docs-doctest/fixtures/stdlib-dist-declarations.jac";
+      "test/docs-doctest/fixtures/stdlib-handler-policy.jac";
+      "test/docs-doctest/fixtures/warp-check-effect.jac";
+      "test/docs-doctest/fixtures/warp-fault-effect.jac";
       "test/dune";
       "test/native-gauntlet/MAPPING.md";
       "test/native-gauntlet/e07-erasure-text-join.jqd";
@@ -450,6 +469,9 @@ let manifest_errors () =
       "test/native-asan/join-bad-middle.jqd";
       "test/test_prelude.ml";
       "test/test_surface_laws.ml";
+      "test/test_surface_decls.ml";
+      "test/test_surface_print.ml";
+      "test/test_surface_trivia.ml";
       "test/test_text.ml";
       "test/test_tier.ml";
     ]
@@ -633,6 +655,24 @@ let validate_release_docs ~decision ~followups ~index =
          with declarations in document order and pins stdout `40\\n41\\n42\\n` with exit 0.";
         "none";
       ];
+      [
+        "D41";
+        "shipped";
+        "[declaration tests](../../../test/test_surface_decls.ml), [printing \
+         tests](../../../test/test_surface_print.ml), and [trivia \
+         tests](../../../test/test_surface_trivia.ml) pin per-operation `once`/`multi`, uniform \
+         effect-level shorthand, canonical emission, recovery, and formatter idempotence.";
+        "none";
+      ];
+      [
+        "D42";
+        "shipped";
+        "[declaration diagnostics](../../../test/test_surface_decls.ml) reject omission, \
+         duplication, conflicts, and partially annotated mixed effects with E1236; the \
+         [operation-mode twin](../../../corpus/valid/operation-modes.jac) pins resolved \
+         `.jac`/`.jqd` hash parity while bootstrap absence remains legacy `Multi`.";
+        "none";
+      ];
     ]
     [ "shipped"; "partial"; "adjusted" ];
   (match section "## Evidence Inventories" decision with
@@ -776,20 +816,24 @@ let validate_release_docs ~decision ~followups ~index =
     ];
   acceptance_contract "## Tier-F Linearity Modes"
     [
-      ("modes", "declarations distinguish `one-shot` and `multi-shot` operations");
-      ( "one-shot semantics",
-        "a captured continuation may be resumed at most once; a second resume is rejected by the \
-         checker or a pinned runtime diagnostic" );
-      ( "multi-shot semantics",
-        "a captured continuation may be resumed more than once and preserves existing deep-handler \
+      ( "modes",
+        "surface declarations distinguish explicit `once` and `multi` operations, with uniform \
+         effect-level shorthand" );
+      ( "once semantics",
+        "a captured once continuation may be resumed at most once; the interpreter and native \
+         runtime reject a second resume with E0906" );
+      ( "multi semantics",
+        "a multi continuation may be resumed repeatedly and preserves existing deep-handler \
          behavior" );
-      ( "runtime",
-        "specify interaction with native copy-on-resume and interpreter continuation cloning" );
-      ( "migration",
-        "define defaults for existing declarations plus compatibility and migration rules" );
+      ( "compatibility",
+        "bootstrap absent mode remains the unique legacy `Multi` encoding; explicit `once` is \
+         interface-hashed" );
+      ( "surface default",
+        "none; omission, duplication, shorthand/per-operation conflict, and partially annotated \
+         mixed effects are E1236" );
       ( "evidence",
-        "pin checker diagnostics and interpreter/native semantic parity before any grammar change"
-      );
+        "focused parser/printer/recovery tests and a `.jac`/`.jqd` twin pin D41-D42 before release \
+         integration" );
     ];
   acceptance_contract "## Tier-F Resource-Scoped Rows"
     [
@@ -817,13 +861,13 @@ let validate_release_docs ~decision ~followups ~index =
           [ "opam exec -- dune build @all"; "exit 0" ];
           [
             "opam exec -- dune runtest --force";
-            "exit 0; compiled Alcotest inventory is exactly 554 cases";
+            "exit 0; compiled Alcotest inventory is exactly 558 cases";
           ];
           [ "opam exec -- dune fmt"; "exit 0; no task-file byte changes" ];
           [
             "cd _build/default/test && ./test_jacquard.exe test surface-twins --compact \
              --color=never";
-            "exit 0; exactly 5 selected cases pass over 23 twin pairs";
+            "exit 0; exactly 5 selected cases pass over 24 twin pairs";
           ];
           [
             "opam exec -- dune runtest test/docs-doctest --force";
@@ -838,15 +882,15 @@ let validate_release_docs ~decision ~followups ~index =
           [ "git -c core.whitespace=trailing-space,space-before-tab diff --check"; "exit 0" ];
           [
             "scripts/release/check-surface-syntax-manifest.sh";
-            "exit 0; the reconstructible SS.21 plus SS.22 overlay hashes match";
+            "exit 0; the reconstructible SS.21 plus SS.22 plus EL.4 overlay hashes match";
           ];
           [
             "clean-copy scripts/release/check-surface-syntax-manifest.sh";
-            "exit 0; overlay hashes match and all seven protected drafts are absent";
+            "exit 0; overlay hashes match and all six protected drafts are absent";
           ];
           [
             "clean-copy opam exec -- dune runtest --force";
-            "exit 0; the isolated base-plus-overlay copy passes all 554 cases";
+            "exit 0; the isolated base-plus-overlay copy passes all 558 cases";
           ];
         ]
       in
@@ -900,7 +944,7 @@ let validate_release_docs ~decision ~followups ~index =
     [
       "Advertise `.jac`";
       "Bootstrap `.jqd` remains permanently supported";
-      "SS.22, prelude naming and text building";
+      "EL.4, explicit surface operation modes";
       "SS.0-SS.22 implementation arc is complete";
     ];
   require (contains "release/surface-syntax/DECISION.md" index) "decision is not indexed";
@@ -939,6 +983,8 @@ let decision_status_mutations =
     ("D38", "shipped", "adjusted");
     ("D39", "shipped", "adjusted");
     ("D40", "shipped", "adjusted");
+    ("D41", "shipped", "adjusted");
+    ("D42", "shipped", "adjusted");
   ]
 
 let status_mutation_test (id, expected, replacement) =
@@ -964,6 +1010,12 @@ let decision_semantic_mutations =
       "SS.22 omits callable variadic `text.join`" );
     ("D39", "public names are removed without aliases", "public names remain as aliases");
     ("D40", "in document order and pins stdout", "in reverse document order and pins stdout");
+    ( "D41",
+      "per-operation `once`/`multi`, uniform effect-level shorthand",
+      "implicit per-operation modes without shorthand" );
+    ( "D42",
+      "reject omission, duplication, conflicts, and partially annotated mixed effects",
+      "accept omission, duplication, conflicts, and partially annotated mixed effects" );
   ]
 
 let law_semantic_mutations =
@@ -992,7 +1044,7 @@ let semantic_mutation_test (id, needle, replacement) =
 
 let test_wrong_count_fails =
   assert_mutation_fails ~needle:"twins count" ~mutate_followups:unchanged
-    ~mutate_decision:(replace_once ~needle:"| twins | 23 |" ~replacement:"| twins | 22 |")
+    ~mutate_decision:(replace_once ~needle:"| twins | 24 |" ~replacement:"| twins | 23 |")
 
 let test_wrong_status_fails =
   assert_mutation_fails ~needle:"disallowed status" ~mutate_followups:unchanged
@@ -1039,11 +1091,11 @@ let followup_mutations =
         ~needle:"applicable numeric dictionaries export exactly `gt?`, `gte?`, `lt?`, and `lte?`"
         ~replacement:"applicable numeric dictionaries export `gt`, `gte`, `lt`, and `lte`" );
     ( "Tier-F absent mode semantics",
-      followup_mutation_test ~heading:"## Tier-F Linearity Modes" ~field:"one-shot semantics"
+      followup_mutation_test ~heading:"## Tier-F Linearity Modes" ~field:"once semantics"
         ~needle:
-          "a captured continuation may be resumed at most once; a second resume is rejected by the \
-           checker or a pinned runtime diagnostic"
-        ~replacement:"one-shot has implementation-defined behavior" );
+          "a captured once continuation may be resumed at most once; the interpreter and native \
+           runtime reject a second resume with E0906"
+        ~replacement:"once has implementation-defined behavior" );
     ( "Tier-F no resource display",
       followup_mutation_test ~heading:"## Tier-F Resource-Scoped Rows" ~field:"display"
         ~needle:

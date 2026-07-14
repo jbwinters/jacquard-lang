@@ -1,4 +1,4 @@
-effect Check a where {
+once effect Check a where {
   check : (Bool, Text) -> ()
   fail : (Text) -> a
 }

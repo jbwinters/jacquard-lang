@@ -247,22 +247,96 @@ let test_type_declarations () =
 
 let test_effect_declarations () =
   let declaration =
-    only_decl (lower "effect Choice a where {\n  choose : (a, Text) -> Bool\n}\n")
+    only_decl (lower "multi effect Choice a where {\n  choose : (a, Text) -> Bool\n}\n")
   in
   (match declaration.Kernel.it with
   | Kernel.DefEffect
       {
         ename = "choice";
         evars = [ "a" ];
-        ops = [ { op_name = "choose"; op_params = [ { it = TVar "a"; _ }; _ ]; _ } ];
+        ops =
+          [ { op_name = "choose"; op_mode = Multi; op_params = [ { it = TVar "a"; _ }; _ ]; _ } ];
       } ->
       ()
   | _ -> Alcotest.fail "effect parameters or operation signature lowered incorrectly");
-  let phantom = only_decl (lower "effect Choice a where { choose : () -> Bool }\n") in
+  let phantom = only_decl (lower "multi effect Choice a where { choose : () -> Bool }\n") in
   (match phantom.Kernel.it with
-  | Kernel.DefEffect { evars = [ "a" ]; ops = [ { op_params = []; _ } ]; _ } -> ()
+  | Kernel.DefEffect { evars = [ "a" ]; ops = [ { op_mode = Multi; op_params = []; _ } ]; _ } -> ()
   | _ -> Alcotest.fail "phantom effect parameter was not preserved");
-  has_code "E1220" "effect Choice where\n  choose : () -> Bool\n"
+  let once = only_decl (lower "once effect Gate where { enter : () -> () }\n") in
+  (match once.Kernel.it with
+  | Kernel.DefEffect { ops = [ { op_name = "enter"; op_mode = Once; _ } ]; _ } -> ()
+  | _ -> Alcotest.fail "effect-level once shorthand did not lower");
+  let mixed =
+    only_decl
+      (lower "effect Control where {\n  once stop : () -> ()\n  multi branch : () -> ()\n}\n")
+  in
+  (match mixed.Kernel.it with
+  | Kernel.DefEffect
+      {
+        ops =
+          [ { op_name = "stop"; op_mode = Once; _ }; { op_name = "branch"; op_mode = Multi; _ } ];
+        _;
+      } ->
+      ()
+  | _ -> Alcotest.fail "mixed per-operation modes did not lower");
+  has_code "E1220" "multi effect Choice where\n  choose : () -> Bool\n";
+  List.iter (has_code "E1236")
+    [
+      "effect Missing where { op : () -> () }\n";
+      "effect Mixed where { once first : () -> (); second : () -> () }\n";
+      "once effect Duplicate where { once op : () -> () }\n";
+      "once effect Conflict where { multi op : () -> () }\n";
+      "effect Repeated where { once once op : () -> () }\n";
+      "once multi effect PrefixConflict where { op : () -> () }\n";
+    ];
+  let diagnostic_source =
+    "effect Missing where { op : () -> () }\n\
+     effect Mixed where {\n\
+    \  once first : () -> ()\n\
+    \  second : () -> ()\n\
+     }\n\
+     once effect Duplicate where { once op : () -> () }\n\
+     once effect Conflict where { multi op : () -> () }\n\
+     effect Repeated where { once once op : () -> () }\n\
+     once multi effect PrefixConflict where { op : () -> () }\n"
+  in
+  let rendered =
+    Surface_parse.recover_string ~file:"bad-modes.jac" diagnostic_source |> fun recovered ->
+    List.map Diag.to_string recovered.Surface_ast.diagnostics
+  in
+  Alcotest.(check (list string))
+    "mode diagnostics and spans"
+    [
+      "bad-modes.jac:1:24-26: error[E1236]: surface effect operation `op` requires an explicit \
+       `once` or `multi` mode";
+      "bad-modes.jac:4:3-9: error[E1236]: surface effect operation `second` requires an explicit \
+       `once` or `multi` mode";
+      "bad-modes.jac:6:31-35: error[E1236]: `once` is already supplied by the effect-level \
+       shorthand; remove the operation-level mode";
+      "bad-modes.jac:7:30-35: error[E1236]: operation mode `multi` conflicts with the effect-level \
+       `once` shorthand";
+      "bad-modes.jac:8:30-34: error[E1236]: operation mode `once` is duplicated";
+      "bad-modes.jac:9:6-11: error[E1236]: effect-level mode `multi` conflicts with `once`";
+    ]
+    rendered;
+  let format source =
+    let recovered = Surface_parse.recover_string ~file:"format-modes.jac" source in
+    match Surface_print.print_recovered recovered with
+    | Ok text -> text
+    | Error diagnostics -> fail_diags "format modes" diagnostics
+  in
+  let uniform = format "effect Uniform where { once first : () -> (); once second : () -> () }\n" in
+  Alcotest.(check string)
+    "uniform per-operation syntax canonicalizes to shorthand"
+    "once effect Uniform where {\n  first : () -> ()\n  second : () -> ()\n}\n" uniform;
+  Alcotest.(check string) "uniform formatter idempotence" uniform (format uniform);
+  let mixed_source =
+    "effect Mixed where {\n  once stop : () -> ()\n  multi branch : () -> ()\n}\n"
+  in
+  let mixed = format mixed_source in
+  Alcotest.(check string) "mixed canonical syntax" mixed_source mixed;
+  Alcotest.(check string) "mixed formatter idempotence" mixed (format mixed)
 
 let test_ordered_bare_expressions () =
   match lower "first = 1\n10\nsecond = 2\n20\n" with
@@ -279,8 +353,8 @@ let test_declaration_recovery () =
   let legacy_cases =
     [
       "type Bad = | Some(a)\nlater = 1\n";
-      "effect Bad where {\n  op : () -> T\nlater = 1\n";
-      "effect Bad where {\n  broken = 0\n}\nlater = 1\n";
+      "once effect Bad where {\n  op : () -> T\nlater = 1\n";
+      "once effect Bad where {\n  broken = 0\n}\nlater = 1\n";
     ]
   in
   List.iter
@@ -301,7 +375,7 @@ let test_declaration_recovery () =
            `|`";
         ] );
       ( "effect without operation or close",
-        "effect Bad where {\nlater = 1\n",
+        "once effect Bad where {\nlater = 1\n",
         `Effect,
         [ "recover-decls.jac:2:1-6: error[E1221]: expected `}` before the next top-level item" ] );
       ( "field without type or close",
@@ -361,7 +435,7 @@ let test_spans () =
         "positional field span" "SvcMood"
         (source_slice type_source positional.Kernel.fmeta)
   | _ -> Alcotest.fail "field span fixture had the wrong shape");
-  let effect_source = "effect Choice a where {\n  choose : () -> Bool\n}\n" in
+  let effect_source = "multi effect Choice a where {\n  choose : () -> Bool\n}\n" in
   let effect_decl = only_decl (lower effect_source) in
   match effect_decl.Kernel.it with
   | Kernel.DefEffect { ops = [ operation ]; _ } ->
@@ -387,8 +461,10 @@ let test_surface_bootstrap_equivalence () =
     "(deftype option ((tvar a)) (con none) (con some (field (tvar a))))";
   check_equivalent ~names "labeled type" "type Fleet = | MkFleet(inv: SvcMood, SvcMood)\n"
     "(deftype fleet () (con mk-fleet (field inv (tref svc-mood)) (field (tref svc-mood))))";
-  check_equivalent ~names "phantom effect" "effect Choice a where { choose : () -> Bool }\n"
+  check_equivalent ~names "phantom effect" "multi effect Choice a where { choose : () -> Bool }\n"
     "(defeffect choice ((tvar a)) (op choose () (tref bool)))";
+  check_equivalent "once operation" "once effect Gate where { enter : () -> () }\n"
+    "(defeffect gate () (op enter once () (ttuple)))";
   check_equivalent "bare expression" "42\n" "(lit 42)"
 
 let test_bootstrap_reader_unchanged () =

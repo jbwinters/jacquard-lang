@@ -303,11 +303,11 @@ Effects declare operations. Calling an operation looks like an ordinary call;
 there is no `perform` keyword.
 
 ```jacquard
-effect Choice where {
+multi effect Choice where {
   choose : () -> Bool
 }
 
-effect Abort a where {
+once effect Abort a where {
   abort : () -> a
 }
 ```

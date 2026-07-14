@@ -352,7 +352,7 @@ if c then a else b
 ```
 type Distribution a = ...          -- library data: Bernoulli, Categorical, Normal, ...
 
-effect Dist where
+multi effect Dist where
   sample  : Distribution a -> a
   observe : Distribution a -> a -> ()
 ```

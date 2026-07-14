@@ -664,17 +664,19 @@ let lower_nonterm_top (top : Surface_ast.top) =
       Ok (Kernel.Decl Kernel.{ it = DefType { tname = name; tvars = vars; cons }; meta = top.meta })
   | Surface_ast.EffectDecl { name; vars; operations } ->
       let lower_operation (operation : Surface_ast.operation) =
+        let* op_mode =
+          match operation.mode with
+          | Some mode -> Ok mode
+          | None ->
+              error ~meta:operation.meta ~code:"E1236"
+                (Printf.sprintf
+                   "surface effect operation `%s` requires an explicit `once` or `multi` mode"
+                   operation.name)
+        in
         let* op_params = map_results lower_ty operation.params in
         let* op_result = lower_ty operation.result in
         Ok
-          Kernel.
-            {
-              op_name = operation.name;
-              op_mode = Multi;
-              op_params;
-              op_result;
-              smeta = operation.meta;
-            }
+          Kernel.{ op_name = operation.name; op_mode; op_params; op_result; smeta = operation.meta }
       in
       let* ops = map_results lower_operation operations in
       Ok

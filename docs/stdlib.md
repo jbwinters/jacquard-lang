@@ -218,20 +218,20 @@ it ships with. An idiom appears here worth naming once: an operation whose handl
 never resumes may promise any result type, so `abort : () -> a` needs no bottom type.
 
 ```jacquard doctest=stdlib-control-effects mode=check fixture=stdlib-control-effects.jac stdout=stdlib-control-effects.stdout stderr=empty exit=0
-effect Abort a where {
+once effect Abort a where {
   abort : () -> a
 }
 
-effect Throw e a where {
+once effect Throw e a where {
   throw : (e) -> a
 }
 
-effect State s where {
+once effect State s where {
   get : () -> s
   put : (s) -> ()
 }
 
-effect Emit w where {
+once effect Emit w where {
   emit : (w) -> ()
 }
 ```
@@ -382,7 +382,7 @@ type Distribution a =
   | Categorical(values: List (a, Real))
   | UniformInt Int Int
 
-effect Dist a where {
+multi effect Dist a where {
   sample : (Distribution a) -> a
   observe : (Distribution a, a) -> ()
 }
@@ -504,7 +504,7 @@ subject-first library function:
 A handler clause can read as policy wrapped around a workflow:
 
 ```jacquard doctest=stdlib-handler-policy mode=run fixture=stdlib-handler-policy.jac stdout=stdlib-handler-policy.stdout stderr=empty exit=0
-effect Approval where {
+once effect Approval where {
   ask : (Text) -> Bool
 }
 

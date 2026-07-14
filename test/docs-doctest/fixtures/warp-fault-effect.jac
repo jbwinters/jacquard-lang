@@ -1,3 +1,3 @@
-effect Fault where {
+multi effect Fault where {
   flaky : (Text) -> Bool
 }

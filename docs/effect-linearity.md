@@ -73,16 +73,19 @@ repeatedly)."
 Per-operation keyword, with an effect-level shorthand when uniform:
 
 ```
-effect Net where
+effect Net where {
   once fetch : (Request) -> Response
+}
 
-once effect Fs where
+once effect Fs where {
   read : (Text) -> Text
   write : (Text, Text) -> ()
+}
 
-effect Dist where
+effect Dist where {
   multi sample  : (Distribution a) -> a
   multi observe : (Distribution a, a) -> ()
+}
 ```
 
 Surface declarations **require** an explicit mode on every operation (or the
@@ -158,9 +161,11 @@ immediately, on the existing runtime counters. L1 (medium): kernel opspec
 field with absence-encoding, interface-hash inclusion, pkg-diff rendering,
 and connection to the L0 runtime backstop. L2 (large): `Resume` type and the affine
 checker. L3 (small): stdlib assignments flip on, migration lint for
-unannotated user effects. L4 (medium): surface `once`/`multi` keywords and the
-effect-level shorthand; before L4, ordinary `.jac` lowering remains legacy
-`Multi` and cannot print a `Once` declaration without a bootstrap fallback.
+unannotated user effects. L4 (medium, shipped): surface `once`/`multi`
+keywords and the effect-level shorthand. Ordinary `.jac` declarations now
+require explicit modes; the printer emits shorthand for uniform effects and
+per-operation modes for mixed effects, while bootstrap `.jqd` retains its
+compatibility encoding.
 
 | ID | decision | default |
 |----|----------|---------|
