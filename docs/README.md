@@ -59,10 +59,10 @@ Read these together when judging whether the release candidate is credible:
 
 ## Effect Linearity Evidence
 
-- `release/effect-linearity/EVIDENCE.md`: EL.2 scope, bounded affine-analysis
-  design, diagnostic provenance rule, isolated reconstruction, and verification.
-- `release/effect-linearity/MANIFEST.sha256`: reconstructible EL.2 overlay on
-  the completed EL.1 base.
+- `release/effect-linearity/EVIDENCE.md`: EL.2-EL.4 scope, bounded affine-analysis
+  design, frozen stdlib modes, diagnostic provenance, and verification.
+- `release/effect-linearity/MANIFEST.sha256`: reconstructible EL.2-EL.4 overlay
+  on the completed EL.1 base.
 
 ## Maintenance Notes
 

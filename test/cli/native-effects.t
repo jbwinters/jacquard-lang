@@ -255,3 +255,74 @@ source spans at the ordinary check/build boundary.
   $ cat declared-run.out
   declared-once.jqd:6:7-28: error[E0816]: once resumption `k` may be consumed twice on one possible execution path; first consumption at declared-once.jqd:5:25-46, second consumption at declared-once.jqd:6:7-28
     hint: a once resumption may be dropped or moved, but it may be consumed at most once on each possible execution path
+
+A Multi branch outside code that enters a Once handler is legal: each branch enters the handler
+afresh and captures its own Once continuation. Moving the Multi perform into the already-captured
+Once clause is different: the Multi resumption re-enters that clause with the same Once instance,
+so its second branch reaches the E0906 dynamic backstop. Both compositions have interpreter/native
+parity.
+
+  $ cat > multi-around-fresh-once.jqd <<'EOF_JQD'
+  > (defeffect branching () (op pick () (tref bool)))
+  > (defeffect linear () (op ping once () (tref int)))
+  > (handle
+  >   (let nonrec (pvar b) (app (var pick))
+  >     (handle (app (var ping))
+  >       (ret (pvar x) (var x))
+  >       (opclause ping () k
+  >         (app (var k)
+  >           (match (var b)
+  >             (clause (pcon true) (lit 1))
+  >             (clause (pcon false) (lit 2)))))))
+  >   (ret (pvar x) (app (var cons) (var x) (var nil)))
+  >   (opclause pick () k
+  >     (app (var list.append) (app (var k) (var true)) (app (var k) (var false)))))
+  > EOF_JQD
+  $ jacquard run multi-around-fresh-once.jqd > legal-i.out 2>&1; echo "interpreter exit $?"
+  interpreter exit 0
+  $ jacquard build multi-around-fresh-once.jqd -o legal-native > /dev/null
+  $ ./legal-native > legal-n.out 2>&1; echo "native exit $?"
+  native exit 0
+  $ diff -u legal-i.out legal-n.out && cat legal-i.out
+  cons(1, cons(2, nil))
+  $ cat > multi-inside-captured-once.jqd <<'EOF_JQD'
+  > (defeffect branching () (op pick () (tref bool)))
+  > (defeffect linear () (op ping once () (tref int)))
+  > (handle
+  >   (handle (app (var ping))
+  >     (ret (pvar x) (var x))
+  >     (opclause ping () k
+  >       (let nonrec (pvar b) (app (var pick))
+  >         (app (var k)
+  >           (match (var b)
+  >             (clause (pcon true) (lit 1))
+  >             (clause (pcon false) (lit 2)))))))
+  >   (ret (pvar x) (app (var cons) (var x) (var nil)))
+  >   (opclause pick () k
+  >     (app (var list.append) (app (var k) (var true)) (app (var k) (var false)))))
+  > EOF_JQD
+  $ jacquard run multi-inside-captured-once.jqd > illegal-i.out 2>&1; echo "interpreter exit $?"
+  interpreter exit 2
+  $ jacquard build multi-inside-captured-once.jqd -o illegal-native > /dev/null
+  $ ./illegal-native > illegal-n.out 2>&1; echo "native exit $?"
+  native exit 2
+  $ diff -u illegal-i.out illegal-n.out && cat illegal-i.out
+  error[E0906]: a once continuation may be resumed at most once per captured instance
+
+EL.3 generates one statically hostile handler for every reviewed Once operation in the shipped
+prelude. Each program is a lambda, so polymorphic operation parameters need no fabricated values;
+the handler recursively performs the same operation to obtain a correctly typed resume value, then
+tries to consume the same resumption twice. Run and native build must reject the identical source at
+the shared affine-check boundary with E0816. The low-level pair above separately proves that an
+unchecked/host-driven second resume reaches byte-identical E0906 in both runtimes.
+
+  $ ../gen_once_hostile.exe ../../prelude ../../prelude/operation-modes.manifest once-prelude
+  generated 13 once-hostile cases from reviewed inventory
+  $ passed=0; for f in once-prelude/*.jqd; do
+  >   jacquard run "$f" > once-run.out 2>&1; run_status=$?
+  >   jacquard build "$f" -o once-prog > once-build.out 2>&1; build_status=$?
+  >   if [ "$run_status" = 1 ] && [ "$build_status" = 1 ] &&
+  >      diff -q once-run.out once-build.out >/dev/null && grep -q 'error\[E0816\]' once-run.out
+  >   then passed=$((passed + 1)); else echo "FAILED: $(basename "$f")"; fi
+  > done; echo "$passed/13 generated once-operation cases reject identically"
+  13/13 generated once-operation cases reject identically

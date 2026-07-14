@@ -670,7 +670,9 @@ let lower_nonterm_top (top : Surface_ast.top) =
           | None ->
               error ~meta:operation.meta ~code:"E1236"
                 (Printf.sprintf
-                   "surface effect operation `%s` requires an explicit `once` or `multi` mode"
+                   "surface effect operation `%s` requires an explicit `once` or `multi` mode; \
+                    during migration, choose `once` unless its handler deliberately searches, \
+                    captures, or reuses continuations"
                    operation.name)
         in
         let* op_params = map_results lower_ty operation.params in

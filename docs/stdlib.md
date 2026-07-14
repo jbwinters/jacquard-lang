@@ -226,7 +226,7 @@ once effect Throw e a where {
   throw : (e) -> a
 }
 
-once effect State s where {
+multi effect State s where {
   get : () -> s
   put : (s) -> ()
 }
@@ -422,13 +422,18 @@ runtime installs their root handlers, under explicit grants. The row of `main` i
 the program's authority manifest, and this table is what a reviewer is reading when
 they read it:
 
-| effect | operations | granting it means |
-|--------|------------|-------------------|
-| `Console` | `print : (Text) -> ()`, `read-line : () -> Text` | the program talks to the terminal |
-| `Clock` | `now : () -> Int` (ms since epoch), `sleep : (Int) -> ()` | the program observes and waits on time |
-| `Fs` | `read : (Text) -> Text`, `write : (Text, Text) -> ()`, `list-dir : (Text) -> List Text` | the program touches the filesystem |
-| `Net` | `fetch : (Request) -> Response` | the program reaches the network |
-| `Eval` | `eval : (Code) -> a` | the program runs code, including code it constructed |
+| effect | mode | operations | granting it means |
+|--------|------|------------|-------------------|
+| `Console` | `once` | `print : (Text) -> ()`, `read-line : () -> Text` | the program talks to the terminal |
+| `Clock` | `once` | `now : () -> Int` (ms since epoch), `sleep : (Int) -> ()` | the program observes and waits on time |
+| `Fs` | `once` | `read : (Text) -> Text`, `write : (Text, Text) -> ()`, `list-dir : (Text) -> List Text` | the program touches the filesystem |
+| `Net` | `once` | `fetch : (Request) -> Response` | the program reaches the network |
+| `Eval` | `once` | `eval : (Code) -> a` | the program runs code, including code it constructed |
+| `Infer` | `once` | `complete : (Prompt) -> Text` | the program requests a model completion |
+
+The complete reviewed assignment, including control, Warp, Dist, and Fault,
+is frozen in `prelude/operation-modes.manifest`. Modes are declared in the
+interfaces and never inferred from these names or descriptions.
 
 Convenience functions build on the ops in ordinary code: `println`, `console.ask :
 (Text) ->{Console} Text`, `fs.read-lines`. Attenuation is handler interposition and

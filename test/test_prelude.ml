@@ -4,11 +4,215 @@ open Jacquard
    console effect prints only under a grant. *)
 
 let golden_file = "../corpus/golden/prelude-hashes.golden"
+let modes_file = "../prelude/operation-modes.manifest"
+
+type reviewed_mode = { effect_name : string; op_name : string; mode : Kernel.op_mode }
+
+let reviewed_modes () =
+  Corpus_support.read_file modes_file
+  |> String.split_on_char '\n'
+  |> List.filter_map (fun line ->
+      let line = String.trim line in
+      if String.equal line "" || String.starts_with ~prefix:"#" line then None
+      else
+        match String.split_on_char ' ' line with
+        | [ qualified; mode ] -> (
+            match String.split_on_char '.' qualified with
+            | [ effect_name; op_name ] ->
+                Some
+                  {
+                    effect_name;
+                    op_name;
+                    mode =
+                      (match mode with
+                      | "once" -> Kernel.Once
+                      | "multi" -> Kernel.Multi
+                      | other -> Alcotest.failf "unknown reviewed operation mode %s" other);
+                  }
+            | _ -> Alcotest.failf "malformed reviewed operation name %s" qualified)
+        | _ -> Alcotest.failf "malformed reviewed operation-mode row %s" line)
+
+let operation_inventory store =
+  let one_effect effect_name =
+    match Store.lookup_kind store effect_name Resolve.KEffect with
+    | None -> Alcotest.failf "reviewed effect %s is absent from the prelude" effect_name
+    | Some { Resolve.hash; _ } -> (
+        match Store.locate store hash with
+        | Ok
+            {
+              Store.decl_hash;
+              decl = { Kernel.it = Kernel.DefEffect { ops; _ }; _ };
+              role = Store.Whole;
+              _;
+            } ->
+            List.mapi
+              (fun ordinal (operation : Kernel.opspec) ->
+                ( operation.op_name,
+                  operation.op_mode,
+                  Canon.op_hash decl_hash ordinal,
+                  List.length operation.op_params ))
+              ops
+        | Ok _ -> Alcotest.failf "%s did not locate to a whole effect declaration" effect_name
+        | Error diagnostics -> Eval_support.fail_diags ("locate " ^ effect_name) diagnostics)
+  in
+  reviewed_modes ()
+  |> List.map (fun reviewed ->
+      let operations = one_effect reviewed.effect_name in
+      match
+        List.find_opt (fun (name, _, _, _) -> String.equal name reviewed.op_name) operations
+      with
+      | None ->
+          Alcotest.failf "reviewed operation %s.%s is absent" reviewed.effect_name reviewed.op_name
+      | Some (_, actual, hash, arity) ->
+          Alcotest.(check bool)
+            (reviewed.effect_name ^ "." ^ reviewed.op_name ^ " reviewed mode")
+            true (actual = reviewed.mode);
+          (reviewed, hash, arity))
+
+let test_retained_multi_hashes store =
+  let identities =
+    [
+      ("state", Resolve.KEffect, "44a2946788e38fb6a734449880cce3d499aa5e2f876c5d9119773533b3d621a9");
+      ("get", Resolve.KOp, "436ac521990b98f781d2b940ae7411d495bcabbabfd5212d71f6a3803d11e4af");
+      ("put", Resolve.KOp, "5c6c06f1338db14e6651a830a3598cf369da2a2ec53a17b091116da3b6640e70");
+      ("dist", Resolve.KEffect, "5a31778adb668e471820541428a4d809f40206b231b2f9d40aeb36d5684415f0");
+      ("sample", Resolve.KOp, "6a5da9e5bd03d63ee37665097c6cb472fde25578e7d8dbabf388a9f3a46a8a76");
+      ("observe", Resolve.KOp, "5d699ff1e147617ccc1c12bfa921370432618a63fa3cdf5ccdd330f83e446872");
+      ("check", Resolve.KEffect, "d0fd20ea4725129d5b5de718e7332164ca504247793c21454533cbcf81112336");
+      ("check", Resolve.KOp, "4e4065ee81b87920edd760a835a52be10b105f25f3a6a41a6a3bbbc8930126d5");
+      ("fail", Resolve.KOp, "32a7abbad63368d57a2d08265658ac27bff7bfd6f4f25377b9006d3402adc944");
+      ("fault", Resolve.KEffect, "0b7297f7a38573108de121c794c6be6471d9c43bd4749d435a3cd247e7d5f008");
+      ("flaky", Resolve.KOp, "d28d10d5ddd39a0d9f456a22007acc6d84ffd3497000d5cefbda3ef159b54416");
+    ]
+  in
+  List.iter
+    (fun (name, kind, expected) ->
+      match Store.lookup_kind store name kind with
+      | Some { Resolve.hash; _ } ->
+          Alcotest.(check string) (name ^ " retained hash") expected (Hash.to_hex hash)
+      | None -> Alcotest.failf "missing retained Multi identity %s" name)
+    identities
+
+let test_reviewed_operation_modes store =
+  let reviewed = reviewed_modes () in
+  let declared =
+    [
+      "eval";
+      "abort";
+      "throw";
+      "state";
+      "emit";
+      "console";
+      "clock";
+      "net";
+      "fs";
+      "infer";
+      "dist";
+      "check";
+      "fault";
+    ]
+    |> List.concat_map (fun effect_name ->
+        match Store.lookup_kind store effect_name Resolve.KEffect with
+        | None -> Alcotest.failf "blessed effect %s is absent" effect_name
+        | Some { Resolve.hash; _ } -> (
+            match Store.locate store hash with
+            | Ok { Store.decl = { Kernel.it = Kernel.DefEffect { ops; _ }; _ }; _ } ->
+                List.map (fun (op : Kernel.opspec) -> effect_name ^ "." ^ op.op_name) ops
+            | _ -> Alcotest.failf "blessed effect %s is malformed" effect_name))
+    |> List.sort String.compare
+  in
+  let frozen =
+    reviewed
+    |> List.map (fun row -> row.effect_name ^ "." ^ row.op_name)
+    |> List.sort String.compare
+  in
+  Alcotest.(check (list string)) "reviewed inventory is complete" declared frozen;
+  test_retained_multi_hashes store;
+  let ctx = Eval.make_ctx store in
+  operation_inventory store
+  |> List.iter (fun (reviewed, op, arity) ->
+      let meta = Meta.empty in
+      let arg = Kernel.{ it = Lit (LInt 0); meta } in
+      let perform =
+        Kernel.{ it = App ({ it = Ref (op, Op); meta }, List.init arity (fun _ -> arg)); meta }
+      in
+      let expression = Kernel.{ it = Tuple [ perform; { it = Lit (LInt 7); meta } ]; meta } in
+      let captured =
+        match Eval.run_state_capturing ctx (Eval.expr_state expression) with
+        | Ok (Eval.COp { kont; _ }) -> kont
+        | Ok (Eval.CValue value) ->
+            Alcotest.failf "%s.%s unexpectedly returned %s" reviewed.effect_name reviewed.op_name
+              (Value.show value)
+        | Error error ->
+            Alcotest.failf "%s.%s capture failed: %s" reviewed.effect_name reviewed.op_name
+              (Runtime_err.to_string error)
+      in
+      let resume value =
+        Result.bind (Eval.resume_captured_state ctx captured (Value.VInt value)) (fun state ->
+            Eval.run_state_capturing ctx state)
+      in
+      (match resume 11 with
+      | Ok (Eval.CValue _) -> ()
+      | Ok (Eval.COp _) -> Alcotest.fail "first resume unexpectedly performed another operation"
+      | Error error -> Alcotest.failf "first resume failed: %s" (Runtime_err.to_string error));
+      match (reviewed.mode, resume 12) with
+      | Kernel.Once, Error Runtime_err.Once_resumed_twice -> ()
+      | Kernel.Multi, Ok (Eval.CValue _) -> ()
+      | Kernel.Once, Error error | Kernel.Multi, Error error ->
+          Alcotest.failf "%s.%s wrong second-resume error: %s" reviewed.effect_name reviewed.op_name
+            (Runtime_err.to_string error)
+      | Kernel.Once, Ok _ ->
+          Alcotest.failf "%s.%s allowed a second once resume" reviewed.effect_name reviewed.op_name
+      | Kernel.Multi, Ok (Eval.COp _) ->
+          Alcotest.failf "%s.%s second multi resume performed another operation"
+            reviewed.effect_name reviewed.op_name)
 
 let test_loads_with_zero_diagnostics () =
-  let _store, _ctx = Eval_support.make_prelude_ctx () in
-  (* make_prelude_ctx fails the test on any diagnostic *)
-  ()
+  let store, _ctx = Eval_support.make_prelude_ctx () in
+  let checker =
+    match Check.make_ctx store with
+    | Ok checker -> checker
+    | Error diagnostics -> Eval_support.fail_diags "prelude checker" diagnostics
+  in
+  (match Prelude.builtin_signatures store with
+  | Ok signatures -> Check.register_builtin_signatures checker signatures
+  | Error diagnostics -> Eval_support.fail_diags "prelude builtin signatures" diagnostics);
+  let forced = Hashtbl.create 256 in
+  (Store.names_view store).Resolve.all_names ()
+  |> List.iter (fun name ->
+      match Store.lookup_kind store name Resolve.KTerm with
+      | None -> ()
+      | Some { Resolve.hash; _ } when Hashtbl.mem forced hash -> ()
+      | Some { Resolve.hash; _ } -> (
+          Hashtbl.add forced hash ();
+          match Check.force_term checker hash with
+          | Ok _ -> ()
+          | Error diagnostics -> Eval_support.fail_diags ("force prelude term " ^ name) diagnostics));
+  let expected_world_handlers =
+    [
+      ("infer.scripted", "forall a | e. (() ->{Infer, Throw | e} a, List Text) ->{Throw | e} a");
+      ("net.record", "forall a | e. (() ->{Net | e} a) ->{Net | e} (a, Code)");
+      ("test.replay", "forall a. (Code, () ->{Net, Throw} a) ->{Throw} a");
+      ("net.scripted", "forall a | e. (() ->{Net, Throw | e} a, List Response) ->{Throw | e} a");
+      ("console.scripted", "forall a | e. (() ->{Console, Throw | e} a, List Text) ->{Throw | e} a");
+      ( "fs.in-memory",
+        "forall a | e. (() ->{Fs, Throw | e} a, `type:map.t` Text Text) ->{Throw | e} (a, \
+         `type:map.t` Text Text)" );
+      ("test.replay-loose", "forall a. (Code, () ->{Net, Check, Throw} a) ->{Check, Throw} a");
+    ]
+  in
+  List.iter
+    (fun (name, expected) ->
+      match Store.lookup_kind store name Resolve.KTerm with
+      | None -> Alcotest.failf "missing world handler %s" name
+      | Some { Resolve.hash; _ } -> (
+          match Check.force_term checker hash with
+          | Error diagnostics -> Eval_support.fail_diags ("force world handler " ^ name) diagnostics
+          | Ok scheme ->
+              Alcotest.(check string)
+                (name ^ " exact signature") expected
+                (Check.show_scheme checker scheme)))
+    expected_world_handlers
 
 let test_prelude_hashes_golden () =
   let store =
@@ -40,7 +244,8 @@ let test_prelude_hashes_golden () =
       Alcotest.(check (list string))
         "prelude hashes match corpus/golden/prelude-hashes.golden (regenerate with `dune exec \
          test/gen_prelude_goldens.exe` and review the diff)"
-        expected actual
+        expected actual;
+      test_reviewed_operation_modes store
 
 let eval_ok src =
   let store, ctx = Eval_support.make_prelude_ctx () in

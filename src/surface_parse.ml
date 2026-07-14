@@ -2057,7 +2057,10 @@ let parse_operation state ~effect_mode =
     | None, None ->
         report_code state name_token "E1236"
           (Printf.sprintf
-             "surface effect operation `%s` requires an explicit `once` or `multi` mode" name);
+             "surface effect operation `%s` requires an explicit `once` or `multi` mode; during \
+              migration, choose `once` unless its handler deliberately searches, captures, or \
+              reuses continuations"
+             name);
         None
     | None, Some mode -> Some mode
     | Some mode, None -> Some mode

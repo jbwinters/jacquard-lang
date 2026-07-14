@@ -117,7 +117,7 @@ let test_documented_signatures () =
         "../docs/stdlib.md",
         Some "state.run" );
       ( "Warp",
-        "check.throws : forall a b | e. (() ->{Throw, Check | e} a, (b) ->{Check | e} Bool, Show \
+        "check.throws : forall a b | e. (() ->{Check, Throw | e} a, (b) ->{Check | e} Bool, Show \
          b, Text) ->{Check | e} ()",
         "../docs/warp-testing.md",
         Some "check.throws" );

@@ -526,8 +526,8 @@ let test_multi_resume_remains_ordinary_function () =
   test_once_resume_stored_helper_escape_uses_author_span ();
   test_once_resume_stored_helper_has_distinct_logical_witnesses ();
   check_ok (make_cctx ()) "legacy Multi clauses remain unrestricted"
-    "(handle (app (var abort)) (ret (pvar x) (var x)) (opclause abort () k (let nonrec (pwild) \
-     (app (var k) (lit 1)) (app (var k) (lit 2)))))"
+    "(handle (app (var get)) (ret (pvar x) (var x)) (opclause get () k (let nonrec (pwild) (app \
+     (var k) (lit 1)) (app (var k) (lit 2)))))"
 
 let test_declaration_kind_checks () =
   let h = make_cctx () in

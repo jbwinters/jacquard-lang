@@ -309,9 +309,11 @@ let test_effect_declarations () =
     "mode diagnostics and spans"
     [
       "bad-modes.jac:1:24-26: error[E1236]: surface effect operation `op` requires an explicit \
-       `once` or `multi` mode";
+       `once` or `multi` mode; during migration, choose `once` unless its handler deliberately \
+       searches, captures, or reuses continuations";
       "bad-modes.jac:4:3-9: error[E1236]: surface effect operation `second` requires an explicit \
-       `once` or `multi` mode";
+       `once` or `multi` mode; during migration, choose `once` unless its handler deliberately \
+       searches, captures, or reuses continuations";
       "bad-modes.jac:6:31-35: error[E1236]: `once` is already supplied by the effect-level \
        shorthand; remove the operation-level mode";
       "bad-modes.jac:7:30-35: error[E1236]: operation mode `multi` conflicts with the effect-level \

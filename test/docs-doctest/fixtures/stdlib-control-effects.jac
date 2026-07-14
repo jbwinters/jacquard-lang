@@ -6,7 +6,7 @@ once effect Throw e a where {
   throw : (e) -> a
 }
 
-once effect State s where {
+multi effect State s where {
   get : () -> s
   put : (s) -> ()
 }

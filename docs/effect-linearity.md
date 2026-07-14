@@ -112,6 +112,16 @@ which is affine:
   constructor, or returned; escape is how affinity gets laundered, so escape
   is the thing forbidden.
 
+There is one narrow, syntax-directed exception for the prelude's canonical
+function-of-state transformer: an enclosing handler may return clause lambdas
+that directly capture their own `Resume` only when that handler result is
+immediately applied to syntactic-value arguments. The transformer is never
+bound, returned, stored, passed, or aliased, and the captured `Resume` remains
+subject to the ordinary zero-or-one path analysis inside the direct lambda.
+Further lambda, quote, data, or nested-clause capture remains E0817. This keeps
+the original world-handler signatures and leaves a caller's `State` effect
+outward instead of accidentally swallowing it in an implementation carrier.
+
 This is substructural typing scoped to exactly one built-in constructor,
 which is a small fraction of the machinery of general linear types and buys
 the entire stated benefit. The analysis is a per-function affine-usage walk,
@@ -125,13 +135,40 @@ system takes.
 
 ## 6. Stdlib mode assignments
 
-Applying the law to the existing taxonomy: `once` for Net, Fs, Console,
-Clock, Pg, Blob, Serve, Crypto, Log, Eval, Abort, Throw, State, Emit,
-Approval, Audit, Secret, and the future Async and Channel. `multi` for Dist,
-Choose, Fault, and search effects. The striking fact, worth putting in the
-doc that announces this feature: almost everything is `once`. Multi-shot is
-the rare, deliberate, magic case, and after this change the type system says
-so instead of folklore.
+D44 is frozen in `prelude/operation-modes.manifest`; that reviewed inventory is
+evidence and never an input to mode inference. Executable modes come only from
+each `DefEffect` declaration. The shipped assignments are:
+
+| mode | blessed operations |
+|------|--------------------|
+| `once` | `Eval.eval-code`; `Abort.abort`; `Throw.throw`; `Emit.emit`; `Console.print`, `Console.read-line`; `Clock.now`, `Clock.sleep`; `Net.fetch`; `Fs.read`, `Fs.write`, `Fs.list-dir`; `Infer.complete` |
+| `multi` | `State.get`, `State.put`; `Dist.sample`, `Dist.observe`; `Check.check`, `Check.fail`; `Fault.flaky` |
+
+State and Check are deliberate Multi exceptions. Their shipped handlers use
+pure continuation capture: State implements its function-of-state transformer,
+and Check composes reporting across generated worlds. This does not grant world
+authority. `Fault` remains multi because its handlers deliberately explore
+alternate failure worlds. Choose and other search effects are likewise multi when added. Pg,
+Blob, Serve, Crypto, Log, Approval, Audit, Secret, and future Async and Channel
+operations must be once. No such effect is currently shipped in the bootstrap
+prelude, so they are a review rule rather than invented manifest rows.
+
+Almost everything is `once`. Multi-shot is the rare, deliberate search
+mechanism, and the type system now says so instead of relying on folklore.
+
+### Migration boundary
+
+Ordinary `.jac` declarations receive E1236 when an operation omits its mode;
+the diagnostic says to choose `once` unless the handler deliberately searches,
+captures, or reuses continuations. This is the actionable user migration path. Bootstrap `.jqd`
+must retain absent-mode `Multi` forever: absence is both the compatibility
+carrier and the unique hash-stable encoding, while explicit `multi` is
+intentionally invalid. A warning on absent bootstrap modes could not distinguish
+a reviewed `Dist`/`Fault` declaration from an unreviewed user declaration and
+would flood permanent kernel fixtures. Jacquard therefore does not issue that
+unsound warning; bootstrap authors who want an explicit review surface migrate
+the declaration to `.jac`, while the prelude freezes its absent-encoded Multi
+choices in the reviewed manifest.
 
 ## 7. Deferred: handler multiplicity badges
 
@@ -160,8 +197,8 @@ L0 (small): dynamic trap and E-code, hostile Warp lane. Ships independently,
 immediately, on the existing runtime counters. L1 (medium): kernel opspec
 field with absence-encoding, interface-hash inclusion, pkg-diff rendering,
 and connection to the L0 runtime backstop. L2 (large): `Resume` type and the affine
-checker. L3 (small): stdlib assignments flip on, migration lint for
-unannotated user effects. L4 (medium, shipped): surface `once`/`multi`
+checker. L3 (small, shipped): stdlib assignments flip on, with the E1236 migration
+diagnostic and bootstrap compatibility boundary above. L4 (medium, shipped): surface `once`/`multi`
 keywords and the effect-level shorthand. Ordinary `.jac` declarations now
 require explicit modes; the printer emits shorthand for uniform effects and
 per-operation modes for mixed effects, while bootstrap `.jqd` retains its
@@ -171,6 +208,6 @@ compatibility encoding.
 |----|----------|---------|
 | D41 | mode granularity | per-operation, effect-level shorthand |
 | D42 | defaults | kernel `multi` encoded as absence (hash-stable); surface requires explicit mode |
-| D43 | static discipline | affine `Resume` built-in type; escape forbidden, passing allowed |
+| D43 | static discipline | affine `Resume`; escape forbidden except immediate affine transformers; passing allowed |
 | D44 | stdlib assignments | per §6; almost everything `once` |
 | D45 | handler multiplicity badges | deferred, marker retained for the enumerate-over-Net lint |
