@@ -318,6 +318,64 @@ let test_once_resume_type_errors_precede_duplication () =
   in
   Alcotest.(check string)
     "out-of-range stored-helper transfer defers to arity" "E0803" stored_out_of_range.code;
+  let local_recursive_gate call =
+    once_handler
+      (Printf.sprintf
+         "(let rec (pvar gate) (lam ((pvar left) (pvar right)) (app (var gate) (var left) (var \
+          right))) %s)"
+         call)
+  in
+  let stored_recursive_gate call =
+    "(defeffect linear () (op signal once () (tref int)))\n"
+    ^ "(defterm ((binding gate ((tarrow ((tref int) (tref int)) (row) (tref int))) "
+    ^ "(lam ((pvar left) (pvar right)) (app (var gate) (var left) (var right))))))\n"
+    ^ "(handle (app (var signal)) (ret (pvar x) (var x)) "
+    ^ Printf.sprintf "(opclause signal () k %s))" call
+  in
+  let local_recursive_too_few =
+    err_of (make_cctx ()) (local_recursive_gate "(app (var gate) (lit 0))")
+  in
+  Alcotest.(check string)
+    "too-few local recursive helper stays arity" "E0803" local_recursive_too_few.code;
+  let stored_recursive_too_few =
+    err_of (make_cctx ()) (stored_recursive_gate "(app (var gate) (lit 0))")
+  in
+  Alcotest.(check string)
+    "too-few stored recursive helper stays arity" "E0803" stored_recursive_too_few.code;
+  let local_recursive_in_range =
+    err_of (make_cctx ()) (local_recursive_gate "(app (var gate) (var k) (lit 0))")
+  in
+  Alcotest.(check string)
+    "in-range local recursive transfer stays escape" "E0817" local_recursive_in_range.code;
+  let stored_recursive_in_range =
+    err_of (make_cctx ()) (stored_recursive_gate "(app (var gate) (var k) (lit 0))")
+  in
+  Alcotest.(check string)
+    "in-range stored recursive transfer stays escape" "E0817" stored_recursive_in_range.code;
+  let local_recursive_valid_slot_too_many =
+    err_of (make_cctx ()) (local_recursive_gate "(app (var gate) (lit 0) (var k) (lit 0))")
+  in
+  Alcotest.(check string)
+    "valid local recursive slot outranks too-many arity" "E0817"
+    local_recursive_valid_slot_too_many.code;
+  let stored_recursive_valid_slot_too_many =
+    err_of (make_cctx ()) (stored_recursive_gate "(app (var gate) (lit 0) (var k) (lit 0))")
+  in
+  Alcotest.(check string)
+    "valid stored recursive slot outranks too-many arity" "E0817"
+    stored_recursive_valid_slot_too_many.code;
+  let local_recursive_index_two =
+    err_of (make_cctx ()) (local_recursive_gate "(app (var gate) (lit 0) (lit 0) (var k))")
+  in
+  Alcotest.(check string)
+    "out-of-range local recursive binary index two defers to arity" "E0803"
+    local_recursive_index_two.code;
+  let stored_recursive_index_two =
+    err_of (make_cctx ()) (stored_recursive_gate "(app (var gate) (lit 0) (lit 0) (var k))")
+  in
+  Alcotest.(check string)
+    "out-of-range stored recursive binary index two defers to arity" "E0803"
+    stored_recursive_index_two.code;
   let arity =
     err_of (make_cctx ()) (once_handler "(let nonrec (pwild) (app (var k)) (app (var k) (lit 1)))")
   in
@@ -348,10 +406,29 @@ let test_once_resume_type_errors_precede_duplication () =
     | Ok _ -> Alcotest.fail "standalone affine fixture must contain one expression"
     | Error ds -> Eval_support.fail_diags "standalone affine fixture parse" ds
   in
-  match Affine_resume.check_clause ~resume:"k" standalone_body with
+  (match Affine_resume.check_clause ~resume:"k" standalone_body with
   | Error [ d ] -> Alcotest.(check string) "standalone safety fallback" "E0817" d.code
   | Error ds -> Alcotest.failf "standalone safety expected one diagnostic, got %d" (List.length ds)
-  | Ok () -> Alcotest.fail "standalone affine checking must reject an out-of-range transfer"
+  | Ok () -> Alcotest.fail "standalone affine checking must reject an out-of-range transfer");
+  let standalone_recursive_body =
+    match
+      Reader.parse_string ~file:"standalone-recursive.jqd"
+        "(let rec (pvar gate) (lam ((pvar left) (pvar right)) (app (var gate) (var left) (var \
+         right))) (app (var gate) (lit 0) (lit 0) (var k)))"
+    with
+    | Ok [ form ] -> (
+        match Kernel.expr_of_form form with
+        | Ok expr -> expr
+        | Error ds -> Eval_support.fail_diags "standalone recursive affine fixture validation" ds)
+    | Ok _ -> Alcotest.fail "standalone recursive affine fixture must contain one expression"
+    | Error ds -> Eval_support.fail_diags "standalone recursive affine fixture parse" ds
+  in
+  match Affine_resume.check_clause ~resume:"k" standalone_recursive_body with
+  | Error [ d ] -> Alcotest.(check string) "standalone recursive safety fallback" "E0817" d.code
+  | Error ds ->
+      Alcotest.failf "standalone recursive safety expected one diagnostic, got %d" (List.length ds)
+  | Ok () ->
+      Alcotest.fail "standalone affine checking must reject a recursive out-of-range transfer"
 
 let test_once_resume_aliases_share_one_budget () =
   test_once_resume_type_errors_precede_duplication ();

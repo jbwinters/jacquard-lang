@@ -35,7 +35,11 @@ fixed arity so the malformed call receives E0803. The standalone full affine API
 retains E0817 for that unsafe transfer when no inference pass follows it. Direct
 escapes such as passing a Resume to itself or to a non-callable value still
 receive E0817 before inference, and in-range transfers still share one affine
-budget.
+budget. This precedence also applies to recursive helpers: too-few and
+out-of-range calls retain E0803, including a Resume at index two of a binary
+local or stored helper, while any genuine in-range transfer receives E0817 even
+when another argument makes the call too large. Standalone affine checking keeps
+the conservative E0817 fallback for an out-of-range recursive transfer.
 
 Stored declarations retain canonical object spans rather than original author
 spans. Contextual E0817 failures therefore anchor at the author-visible

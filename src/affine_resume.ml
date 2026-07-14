@@ -419,70 +419,69 @@ and check_operation_captures env = function
       check_operation_captures env rest
 
 and check_transfer callable index ~binder ~transfer_meta =
-  if callable.recursive then
-    reject ~code:"E0817" ~meta:transfer_meta
-      ~hint:"move the resumption only to a non-recursive local helper with a visibly affine body"
-      (Printf.sprintf
-         "once resumption `%s` cannot be transferred to a recursive parameter because its call \
-          count is not locally bounded"
-         binder)
-  else
-    match List.nth_opt callable.params index with
-    | Some { Kernel.it = Kernel.PWild; _ } -> Ok ()
-    | Some { Kernel.it = Kernel.PVar parameter; _ } -> (
-        let callables =
-          List.fold_left
-            (fun callables pat ->
-              SSet.fold (fun name map -> SMap.remove name map) (pat_names pat) callables)
-            callable.closure callable.params
-        in
-        let summary_key = Printf.sprintf "%s:%d" callable.key index in
-        let summary =
-          match Hashtbl.find_opt callable.state.summaries summary_key with
-          | Some summary -> summary
-          | None ->
-              let summary =
-                analyze
-                  {
-                    aliases = SSet.singleton parameter;
-                    callables;
-                    resolve_term = callable.resolver;
-                    diagnostic_source = callable.diagnostic_source;
-                    state = callable.state;
-                  }
-                  ~context:Return callable.body
-              in
-              Hashtbl.add callable.state.summaries summary_key summary;
-              summary
-        in
-        match summary with
-        | Ok _ -> Ok ()
-        | Error diagnostic when Option.is_some callable.diagnostic_source ->
-            (* Stored object bytes cannot retain original source metadata. E0817 therefore stays
+  match List.nth_opt callable.params index with
+  | Some _ when callable.recursive ->
+      reject ~code:"E0817" ~meta:transfer_meta
+        ~hint:"move the resumption only to a non-recursive local helper with a visibly affine body"
+        (Printf.sprintf
+           "once resumption `%s` cannot be transferred to a recursive parameter because its call \
+            count is not locally bounded"
+           binder)
+  | Some { Kernel.it = Kernel.PWild; _ } -> Ok ()
+  | Some { Kernel.it = Kernel.PVar parameter; _ } -> (
+      let callables =
+        List.fold_left
+          (fun callables pat ->
+            SSet.fold (fun name map -> SMap.remove name map) (pat_names pat) callables)
+          callable.closure callable.params
+      in
+      let summary_key = Printf.sprintf "%s:%d" callable.key index in
+      let summary =
+        match Hashtbl.find_opt callable.state.summaries summary_key with
+        | Some summary -> summary
+        | None ->
+            let summary =
+              analyze
+                {
+                  aliases = SSet.singleton parameter;
+                  callables;
+                  resolve_term = callable.resolver;
+                  diagnostic_source = callable.diagnostic_source;
+                  state = callable.state;
+                }
+                ~context:Return callable.body
+            in
+            Hashtbl.add callable.state.summaries summary_key summary;
+            summary
+      in
+      match summary with
+      | Ok _ -> Ok ()
+      | Error diagnostic when Option.is_some callable.diagnostic_source ->
+          (* Stored object bytes cannot retain original source metadata. E0817 therefore stays
                anchored at this author-visible transfer, while its message may identify a durable
                logical helper occurrence. E0816 deliberately keeps its two distinct normalized
                helper witnesses. *)
-            if diagnostic.Diag.code = "E0817" then
-              Error { diagnostic with Diag.span = Meta.span transfer_meta }
-            else Error diagnostic
-        | Error diagnostic -> Error diagnostic)
-    | Some parameter ->
-        let meta =
-          match callable.diagnostic_source with Some _ -> transfer_meta | None -> parameter.meta
-        in
-        reject ~code:"E0817" ~meta ~hint:"bind the transferred resumption to one variable or `_`"
-          (Printf.sprintf
-             "once resumption `%s` cannot be transferred through a destructuring parameter" binder)
-    | None ->
-        if callable.state.defer_out_of_range_transfer then
-          (* A known local or stored lambda has a fixed arity, so ordinary inference will report
-             E0803 for this malformed call. The escape-only prepass must not let the out-of-range
-             Resume argument hide that more fundamental error. Full affine checking retains the
-             E0817 fallback below so [check_clause] remains safe as a standalone API. *)
-          Ok ()
-        else
-          reject ~code:"E0817" ~meta:transfer_meta
-            (Printf.sprintf "once resumption `%s` has no receiving parameter at this call" binder)
+          if diagnostic.Diag.code = "E0817" then
+            Error { diagnostic with Diag.span = Meta.span transfer_meta }
+          else Error diagnostic
+      | Error diagnostic -> Error diagnostic)
+  | Some parameter ->
+      let meta =
+        match callable.diagnostic_source with Some _ -> transfer_meta | None -> parameter.meta
+      in
+      reject ~code:"E0817" ~meta ~hint:"bind the transferred resumption to one variable or `_`"
+        (Printf.sprintf
+           "once resumption `%s` cannot be transferred through a destructuring parameter" binder)
+  | None ->
+      if callable.state.defer_out_of_range_transfer then
+        (* A known local or stored lambda has a fixed arity, so ordinary inference will report
+           E0803 for this malformed call. The escape-only prepass must not let the out-of-range
+           Resume argument hide that more fundamental error. Full affine checking retains the
+           E0817 fallback below so [check_clause] remains safe as a standalone API. *)
+        Ok ()
+      else
+        reject ~code:"E0817" ~meta:transfer_meta
+          (Printf.sprintf "once resumption `%s` has no receiving parameter at this call" binder)
 
 (** [check_clause ~resolve_term ~resume body] verifies the affine contract of one [once] operation
     clause. [resolve_term] may expose a stored lambda so moving the token into a top-level helper is
