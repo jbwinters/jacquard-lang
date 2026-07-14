@@ -150,9 +150,9 @@ Warp grows a hostile lane: for every `once` operation in the prelude, a
 generated adversarial handler that resumes twice, asserting the defect fires
 with the right E-code; the differential harness asserts interpreter and
 native agree on the trap. The affine checker gets the usual golden-diagnostic
-treatment, including the two messages that matter most: "resumed on two
-paths" with both spans, and "`k` escapes into a closure" with the capture
-site.
+treatment, including the two messages that matter most: "consumed twice on
+one possible execution path" with both spans, and "`k` escapes into a
+closure" with the capture site.
 
 ## 9. Phasing and decisions
 
