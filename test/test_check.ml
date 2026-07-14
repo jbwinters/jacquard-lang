@@ -54,6 +54,20 @@ let err_of h src =
   | Error [ d ] -> d
   | Error ds -> Alcotest.failf "expected one diagnostic, got %d" (List.length ds)
 
+let once_handler body =
+  Printf.sprintf
+    "(defeffect linear () (op signal once () (tref int)))\n\
+     (handle (app (var signal)) (ret (pvar x) (var x)) (opclause signal () k %s))"
+    body
+
+let check_ok h what src =
+  match check_src h src with Ok _ -> () | Error ds -> Eval_support.fail_diags what ds
+
+let contains haystack needle =
+  let n = String.length needle and m = String.length haystack in
+  let rec go i = i + n <= m && (String.sub haystack i n = needle || go (i + 1)) in
+  go 0
+
 (* --- the 20-program golden corpus --- *)
 
 let test_golden_sigs () =
@@ -189,6 +203,102 @@ let test_op_clause_arity () =
   in
   Alcotest.(check string) "code" "E0803" d.Diag.code
 
+(* --- EL.2: built-in affine Resume for Once clauses --- *)
+
+let test_once_resume_zero_or_one_per_path () =
+  check_ok (make_cctx ()) "once resumption may be dropped" (once_handler "(lit 0)");
+  check_ok (make_cctx ()) "once resumption may be consumed once"
+    (once_handler "(app (var k) (lit 1))");
+  check_ok (make_cctx ()) "exclusive branches have independent affine budgets"
+    (once_handler
+       "(match (var true) (clause (pcon true) (app (var k) (lit 1))) (clause (pcon false) (app \
+        (var k) (lit 2))))")
+
+let test_once_resume_gate_style_transfer () =
+  check_ok (make_cctx ()) "moving Resume into an affine helper parameter"
+    (once_handler
+       "(let nonrec (pvar gate) (lam ((pvar next)) (app (var next) (lit 1))) (app (var gate) (var \
+        k)))");
+  check_ok (make_cctx ()) "the receiving parameter also gets branch-local budgets"
+    (once_handler
+       "(let nonrec (pvar gate) (lam ((pvar next)) (match (var true) (clause (pcon true) (app (var \
+        next) (lit 1))) (clause (pcon false) (app (var next) (lit 2))))) (app (var gate) (var k)))");
+  check_ok (make_cctx ()) "a stored gate is contextually checked at Resume transfer"
+    ("(defeffect linear () (op signal once () (tref int)))\n"
+   ^ "(defterm ((binding gate () (lam ((pvar next)) (app (var next) (lit 1))))))\n"
+   ^ "(handle (app (var signal)) (ret (pvar x) (var x)) "
+   ^ "(opclause signal () k (app (var gate) (var k))))")
+
+let test_once_resume_double_consumption_spans () =
+  let d =
+    err_of (make_cctx ())
+      (once_handler "(let nonrec (pwild) (app (var k) (lit 1)) (app (var k) (lit 2)))")
+  in
+  Alcotest.(check string) "affine duplication code" "E0816" d.Diag.code;
+  Alcotest.(check bool)
+    "both consumption spans are named" true
+    (contains d.message "first consumption at c.jqd:"
+    && contains d.message "second consumption at c.jqd:");
+  Alcotest.(check bool) "the second consumption is the primary span" true (Option.is_some d.span);
+  let branch_then_later =
+    err_of (make_cctx ())
+      (once_handler
+         "(let nonrec (pwild) (match (var true) (clause (pcon true) (app (var k) (lit 1))) (clause \
+          (pcon false) (lit 0))) (app (var k) (lit 2)))")
+  in
+  Alcotest.(check string)
+    "a prior branch and a later call overlap on one possible path" "E0816" branch_then_later.code;
+  let bad_gate =
+    err_of (make_cctx ())
+      (once_handler
+         "(let nonrec (pvar gate) (lam ((pvar next)) (let nonrec (pwild) (app (var next) (lit 1)) \
+          (app (var next) (lit 2)))) (app (var gate) (var k)))")
+  in
+  Alcotest.(check string) "the receiving parameter is checked affinely" "E0816" bad_gate.code
+
+let test_once_resume_aliases_share_one_budget () =
+  let d =
+    err_of (make_cctx ())
+      (once_handler
+         "(let nonrec (pvar k2) (var k) (let nonrec (pwild) (app (var k) (lit 1)) (app (var k2) \
+          (lit 2))))")
+  in
+  Alcotest.(check string) "duplicate alias code" "E0816" d.code;
+  check_ok (make_cctx ()) "a single moved alias remains affine"
+    (once_handler "(let nonrec (pvar k2) (var k) (app (var k2) (lit 1)))")
+
+let check_escape what body expected_fragment =
+  let d = err_of (make_cctx ()) (once_handler body) in
+  Alcotest.(check string) (what ^ " code") "E0817" d.code;
+  Alcotest.(check bool)
+    (what ^ " wording") true
+    (contains d.message expected_fragment && Option.is_some d.span)
+
+let test_once_resume_escape_goldens () =
+  check_escape "lambda capture" "(let nonrec (pvar f) (lam () (app (var k) (lit 1))) (lit 0))"
+    "escapes into a closure captured here";
+  check_escape "quote inside lambda capture"
+    "(let nonrec (pvar f) (lam () (quote (unquote (var k)))) (lit 0))"
+    "escapes into a closure captured here";
+  check_escape "quote capture" "(let nonrec (pvar q) (quote (unquote (var k))) (lit 0))"
+    "escapes into quoted code captured here";
+  check_escape "constructor storage" "(let nonrec (pvar saved) (app (var some) (var k)) (lit 0))"
+    "cannot be stored in data";
+  check_escape "return" "(var k)" "escapes by being returned";
+  let d =
+    err_of (make_cctx ())
+      (once_handler "(let nonrec (pvar escaped) (app (var add) (var k) (lit 1)) (lit 0))")
+  in
+  Alcotest.(check string) "unknown call escape code" "E0817" d.code;
+  Alcotest.(check bool)
+    "unknown call escape wording" true
+    (contains d.message "parameter that is not known to be Resume-typed")
+
+let test_multi_resume_remains_ordinary_function () =
+  check_ok (make_cctx ()) "legacy Multi clauses remain unrestricted"
+    "(handle (app (var abort)) (ret (pvar x) (var x)) (opclause abort () k (let nonrec (pwild) \
+     (app (var k) (lit 1)) (app (var k) (lit 2)))))"
+
 let test_declaration_kind_checks () =
   let h = make_cctx () in
   (match check_src h "(defeffect linear () (op signal once () (tref int)))" with
@@ -249,6 +359,17 @@ let suite =
     Alcotest.test_case "resume type enforced" `Quick test_resume_type_enforced;
     Alcotest.test_case "resume wrong-typed argument" `Quick test_resume_wrong_typed_argument;
     Alcotest.test_case "op clause arity" `Quick test_op_clause_arity;
+    Alcotest.test_case "once Resume: zero/one and exclusive paths" `Quick
+      test_once_resume_zero_or_one_per_path;
+    Alcotest.test_case "once Resume: gate-style transfer" `Quick
+      test_once_resume_gate_style_transfer;
+    Alcotest.test_case "once Resume: double consumption names both spans" `Quick
+      test_once_resume_double_consumption_spans;
+    Alcotest.test_case "once Resume: aliases share one budget" `Quick
+      test_once_resume_aliases_share_one_budget;
+    Alcotest.test_case "once Resume: escape goldens" `Quick test_once_resume_escape_goldens;
+    Alcotest.test_case "multi Resume stays ordinary" `Quick
+      test_multi_resume_remains_ordinary_function;
     Alcotest.test_case "declaration kind checks" `Quick test_declaration_kind_checks;
     Alcotest.test_case "group annotations honored" `Quick test_group_annotations;
   ]

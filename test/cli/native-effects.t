@@ -234,9 +234,9 @@ probe goes through jq_handle2/jq_perform/jq_dispatch rather than fabricating an 
   $ cat once-interpreter.out
   error[E0906]: a once continuation may be resumed at most once per captured instance
 
-EL.1 connects the declared operation mode to those backstops. The ordinary kernel declaration is
-legacy Multi by absence; only the explicit Once declaration below makes both engines reject the
-second invocation of the captured instance.
+EL.2 rejects a statically visible duplicate before either engine runs. EL.0's probes above remain
+the dynamic backstop for unchecked or host-driven paths, while this declared Once clause names both
+source spans at the ordinary check/build boundary.
 
   $ cat > declared-once.jqd <<'EOF_JQD'
   > (defeffect linear () (op signal once () (tref int)))
@@ -246,12 +246,12 @@ second invocation of the captured instance.
   >     (let nonrec (pwild) (app (var k) (lit 1))
   >       (app (var k) (lit 2)))))
   > EOF_JQD
-  $ jacquard run declared-once.jqd > declared-interpreter.out 2>&1; echo "interpreter exit $?"
-  interpreter exit 2
-  $ jacquard build declared-once.jqd -o declared-native > /dev/null
-  $ ./declared-native > declared-native.out 2>&1; echo "native exit $?"
-  native exit 2
-  $ diff -u declared-interpreter.out declared-native.out && echo identical
+  $ jacquard run declared-once.jqd > declared-run.out 2>&1; echo "run exit $?"
+  run exit 1
+  $ jacquard build declared-once.jqd -o declared-native > declared-build.out 2>&1; echo "build exit $?"
+  build exit 1
+  $ diff -u declared-run.out declared-build.out && echo identical
   identical
-  $ cat declared-native.out
-  error[E0906]: a once continuation may be resumed at most once per captured instance
+  $ cat declared-run.out
+  declared-once.jqd:6:7-28: error[E0816]: once resumption `k` may be consumed twice on one possible execution path; first consumption at declared-once.jqd:5:25-46, second consumption at declared-once.jqd:6:7-28
+    hint: a once resumption may be dropped or moved, but it may be consumed at most once on each possible execution path

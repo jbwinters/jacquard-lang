@@ -45,7 +45,7 @@ let classify_row (r : row) : arrow_tier =
 (** [classify_ty t] is the tier of [t]'s outermost arrow row, [Data] for non-arrows. *)
 let classify_ty (t : ty) : arrow_tier =
   match repr t with
-  | TArrow (_, row, _) | TVariadicArrow (_, row, _) -> classify_row row
+  | TArrow (_, row, _) | TResume (_, row, _) | TVariadicArrow (_, row, _) -> classify_row row
   | _ -> Data
 
 (* ------------------------------------------------------------------ *)

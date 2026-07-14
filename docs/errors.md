@@ -107,6 +107,8 @@ in `src/` and `bin/` appears in this catalog.
 | E0813 | non-exhaustive match (with witness) | bool match missing `false` |
 | E0814 | ungranted effect in the program manifest | running a printing program without `--allow console` |
 | E0815 | effectful top-level definition body | `(defterm ((binding x () (app (var print) ...))))` |
+| E0816 | a once resumption may be consumed twice on one possible path | two sequential calls to the same once-clause `resume` binder |
+| E0817 | a once resumption escapes its handler clause | returning, storing, capturing, or passing `resume` to a non-`Resume` parameter |
 | W0801 | redundant match clause | a clause after `(pwild)` |
 
 ## Probabilistic inference (E09xx)
