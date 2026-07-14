@@ -1,6 +1,7 @@
-# Effect Linearity EL.2 Evidence
+# Effect Linearity EL.2 + EL.4 Integration Evidence
 
-Status: successor-milestone evidence for the static affine `Resume` discipline.
+Status: successor-milestone evidence for the static affine `Resume` discipline and explicit
+surface operation modes.
 
 - Reconstruction base: `23e3b5647fa9a9676990db9cf44350e66bf374a7`
 - Evidence overlay: [MANIFEST.sha256](MANIFEST.sha256)
@@ -8,12 +9,14 @@ Status: successor-milestone evidence for the static affine `Resume` discipline.
 
 ## Scope
 
-This overlay covers EL.2 on top of the completed EL.0 runtime backstop and EL.1
-operation-mode encoding. It includes every EL.2 implementation, diagnostic,
-golden, test, and release-document file, including `src/affine_resume.ml`, its
-interface, the checker integration, checker/type tests, and the diagnostic
-golden. It also includes the surface-evidence clarification that keeps the
-historical SS.21/SS.22 manifest separate from successor reconstruction.
+This overlay covers the integrated EL.2 and EL.4 successors on top of the
+completed EL.0 runtime backstop and EL.1 operation-mode encoding. It is the
+exact tracked-file difference from the EL.1 base, excluding only this
+manifest's impossible self-hash. It includes the affine implementation,
+diagnostics, goldens, checker/type tests, explicit `.jac` operation-mode
+parser/printer/lowering changes, surface twins and formatter tests, and all
+release-document changes. It also keeps the historical SS.21/SS.22 manifest
+separate and immutable.
 
 The analyzer uses a constant-size abstract flow state: whether an unused path
 exists and one witness that a consumed path exists. Sequential composition
@@ -95,7 +98,7 @@ Expected deterministic results:
 
 - the effect-linearity manifest checker validates every named byte sequence;
 - `dune build @all` and `dune build @doc` exit zero;
-- the forced suite passes all 560 compiled Alcotest/QCheck cases and 32 cram transcripts;
+- the forced suite passes all 564 compiled Alcotest/QCheck cases and 32 cram transcripts;
 - formatting exits zero without changing tracked source;
 - the native runtime check includes and passes `fatal once-resume-twice`.
 
