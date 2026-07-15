@@ -242,6 +242,10 @@ and conv_row ctx cenv ~effectself (r : Kernel.row) : row =
 (* Constructor scheme: forall vars. (fields) ->{} T vars  (nullary: T vars). Field types are
    declaration types: tyvars come from the decl header, self-references are the decl. *)
 let rec con_scheme ctx ?meta (h : Hash.t) : scheme =
+  if Concurrency_contract.is_task_private_hash h then
+    err ?meta ~code:Concurrency_contract.task_escape_code
+      ~hint:"Task handles are created only by async.spawn inside a structured scheduler scope"
+      "the Task opaque carrier is scheduler-private and cannot be constructed by Jacquard code";
   match Store.locate ctx.store h with
   | Ok
       {

@@ -39,3 +39,4 @@ some("x")
 <closure>
 <builtin add>
 <resume>
+<task>

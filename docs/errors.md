@@ -129,7 +129,7 @@ also emits E0817; consuming the captured resumption twice emits E0816.
 | E0904 | observe at the sampling root | `observe` under `jacquard run --allow dist` (D7 default: defect) |
 | E0905 | exhaustive verification budget exceeded | a property over `uniform-int(1, 1000000)` under `jacquard test --exhaustive` |
 | E0906 | a once continuation was resumed more than once | applying the same once resumption twice |
-| E0907 | a Task escaped or outlived its structured scope | returning a Task from `async.scope` or reusing it after scope close |
+| E0907 | a Task carrier is private, malformed, foreign to the run, or outside its structured scope | constructing `TaskOpaque` by hash or reusing a Task in another run/scope |
 
 ## Warp (E10xx)
 

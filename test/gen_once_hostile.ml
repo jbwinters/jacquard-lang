@@ -21,9 +21,14 @@ let rows path =
       else
         match String.split_on_char ' ' line with
         | [ qualified; "once" ] -> (
-            match String.split_on_char '.' qualified with
-            | [ effect_name; op_name ] -> Some (effect_name, op_name)
-            | _ -> fail "malformed operation name %s" qualified)
+            match String.index_opt qualified '.' with
+            | Some separator ->
+                let effect_name = String.sub qualified 0 separator in
+                let op_name =
+                  String.sub qualified (separator + 1) (String.length qualified - separator - 1)
+                in
+                Some (effect_name, op_name)
+            | None -> fail "malformed operation name %s" qualified)
         | [ _; "multi" ] -> None
         | _ -> fail "malformed operation-mode row %s" line)
 

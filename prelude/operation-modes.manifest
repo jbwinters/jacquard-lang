@@ -15,6 +15,10 @@ fs.read once
 fs.write once
 fs.list-dir once
 infer.complete once
+async.async.spawn once
+async.async.await once
+async.async.cancel once
+async.async.yield once
 dist.sample multi
 dist.observe multi
 check.check multi

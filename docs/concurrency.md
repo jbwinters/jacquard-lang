@@ -1,8 +1,9 @@
 # Structured Concurrency Contract
 
-Status: SC.0 interface and invariant freeze (D46-D50), July 2026. This document
-is authoritative for C1. It defines future runtime behavior; it does not claim
-that Task values, a scheduler, or an Async handler are implemented.
+Status: SC.3 Task value and Async declaration boundary on the SC.0 interface
+and invariant freeze (D46-D50), July 2026. This document is authoritative for
+C1. Task values and the four once operations are represented; scheduler policy,
+scope execution, lifecycle state, and an Async root handler remain future work.
 
 Structured concurrency is an effect interpreted by a scheduler handler. The
 same program can therefore run under deterministic, seeded-random, exhaustive,
@@ -58,8 +59,10 @@ These are structurally derived identities, not name permissions: the checker
 also validates the exact effect variable, operation order/names/modes,
 parameter/result linkage, Task identities, and open self row. This executable
 fixture pins both charging and handler subtraction. `async.scope` here is
-compile-only handler scaffolding; its `TaskOpaque` carrier and clauses are never
-executed and are not a Task runtime implementation.
+compile-only handler scaffolding. Its spawn clause terminates the synthetic
+handler answer instead of constructing the scheduler-private `TaskOpaque`
+carrier; the clauses are never executed and are not a Task runtime
+implementation.
 
 ```jacquard doctest=concurrency-row-contract mode=check fixture=concurrency-row-contract.jac stdout=concurrency-row-contract.stdout stderr=empty exit=0
 type Task a = | TaskOpaque
@@ -75,7 +78,7 @@ once effect Async a where {
 async.scope(body) =
   handle body() {
     | return value -> Done(value)
-    | async.spawn(_) resume continue -> continue(TaskOpaque)
+    | async.spawn(_) resume continue -> Cancelled
     | async.await(_) resume continue -> continue(Cancelled)
     | async.cancel(_) resume continue -> continue(())
     | async.yield() resume continue -> continue(())
@@ -127,7 +130,19 @@ within its parent. Components never depend on addresses, hashes, hash-table
 iteration, or host timing. IDs appear in scheduler traces and diagnostics but
 are not Jacquard values in C1. Their only stable text encoding is `path#spawn`,
 with path components separated by `/`: root child 1 is `0#1`, and task 3 in
-the second nested scope is `0/2#3`.
+the second nested scope is `0/2#3`. Components and spawn indices are unsigned
+32-bit values. A path has at most 65,532 components, matching the native
+unsigned-16-bit block-length domain including its three metadata words.
+
+SC.3 exposes no public evaluator or library constructor for Task values. The
+private scheduler seam always assigns the evaluator's active run and scope.
+Every evaluator entry, native callback result, captured result, and terminal
+machine result recursively validates Task ownership, including Tasks nested in
+tuples, constructors, closures, and resumptions. Reusable validated states and
+captured continuations are sealed to the exact evaluator context that validated
+or captured them. Running or resuming them under another context fails with
+E0907 before execution or affine-continuation consumption. Same-context
+inference samples retain the scan-free validated-state path.
 
 States are `runnable`, `suspended`, `done`, `failed`, and `cancelled`. A task has
 one owning scope and at most one live affine continuation. Every task spawned in
@@ -224,8 +239,10 @@ The corresponding compiled OCaml contract is
 [`Concurrency_contract`](../src/concurrency_contract.mli). It contains only
 types, pinned identities, task-path validation, and pure lifecycle,
 waiter-wakeup, completion/failure-ordering, deadlock-cycle, and queue-order
-relations. Task 127 / SC.3 implements those contracts as the C1 scheduler;
-Jacquard Task values and scheduler state remain future implementation work.
+relations. Task 127 / SC.3 installs the exact declarations and adds an inert
+run/scope-local Task carrier in both runtime representations. It deliberately
+does not implement the C1 scheduler, scopes, lifecycle transitions, or a root
+handler.
 
 ## 6. Interactions and exclusions
 

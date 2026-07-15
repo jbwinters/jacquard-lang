@@ -266,6 +266,11 @@ static void show_into(jq_buf *b, jq_value v) {
   case JQ_RESUME:
     buf_adds(b, "<resume>");
     break;
+  case JQ_TASK:
+    /* Internal diagnostics may identify the opaque category, but never expose the run token or
+       deterministic scheduler ID. Jacquard publishes no Show instance for Task. */
+    buf_adds(b, "<task>");
+    break;
   case JQ_CODE:
     /* Value.show: "(quote " ^ Printer.inline_form payload ^ ")" */
     buf_adds(b, "(quote ");

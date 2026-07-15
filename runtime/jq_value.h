@@ -53,6 +53,7 @@ enum jq_tag {
   JQ_OP = 10,         /* first-class effect operation; static-only */
   JQ_BUILTIN = 11,    /* first-class primitive; static-only */
   JQ_FRAME = 12,      /* a suspended activation (task 71): code, ix, slots */
+  JQ_TASK = 13,       /* opaque run/scope-local structured-concurrency handle */
 };
 
 #define JQ_RC_STATIC UINT32_MAX
@@ -515,6 +516,24 @@ jq_value jq_con(const jq_con_info *info, const jq_value *fields); /* owned */
 jq_value jq_real(double d);
 jq_value jq_text(const uint8_t *bytes, uint64_t len); /* bytes copied */
 jq_value jq_hash(const uint8_t bytes[32]);
+/* Inert SC.3 Task carrier. The block stores only an opaque owner token plus the deterministic
+   scope-path/spawn-index ID; it contains no scheduling state. No Show or serialization API exposes
+   those fields. Creation and validation report defects as data so malformed/foreign handles never
+   become C crashes. */
+enum jq_task_status {
+  JQ_TASK_VALID = 0,
+  JQ_TASK_MALFORMED = 1,
+  JQ_TASK_FOREIGN_RUN = 2,
+  JQ_TASK_FOREIGN_SCOPE = 3,
+};
+/* Shared with Concurrency_contract.task_id: every ID word is uint32, and the block's uint16 word
+   count reserves owner, path length, and spawn index in addition to the path. */
+#define JQ_TASK_MAX_SCOPE_LEN (UINT16_MAX - 3)
+#define JQ_TASK_MAX_COMPONENT UINT32_MAX
+enum jq_task_status jq_task_create(const void *run_owner, const uint32_t *scope_path,
+                                   uint16_t scope_len, uint32_t spawn_index, jq_value *out);
+enum jq_task_status jq_task_validate(jq_value task, const void *run_owner,
+                                     const uint32_t *scope_path, uint16_t scope_len);
 /* env values owned; self_slot < env_n marks a non-owning slot (stored without
    dup by the caller per the cycle rule), self_slot == UINT16_MAX for none */
 jq_value jq_closure(void *code, uint16_t arity, uint16_t env_n,
