@@ -83,6 +83,37 @@ manual hoist. The warning is emitted on stderr and formatting remains successful
   $ head -1 large-formatted.jac
   match add(1, 2, 3) {
 
+DX.3 keeps realistic nested quotes, matches, handlers, conditionals, and blocks stable under
+formatting and canonical identity. Explicit operation namespace intent survives the formatter.
+
+  $ mkdir -p dx3
+  $ for source in ../../corpus/surface/dx3/valid/*.jac; do name=$(basename "$source"); jac fmt "$source" > "dx3/$name"; jac fmt "dx3/$name" > "dx3/$name.twice"; cmp "dx3/$name" "dx3/$name.twice"; jac hash "$source" > "dx3/$name.before-hash"; jac hash "dx3/$name" > "dx3/$name.after-hash"; cmp "dx3/$name.before-hash" "dx3/$name.after-hash"; done
+  $ find dx3 -name '*.jac' | wc -l
+  3
+  $ grep -F '`op:net.request`' dx3/preflight-policy.jac
+            if int.gt?(telemetry, unquote(threshold-code)) then quote { `op:net.request`("release") }
+
+Malformed nested source remains invalid. The formatter emits no recovered source, while `check`
+uses recovery analysis to report one primary syntax error, check a later independent error, and
+retain the later valid declaration before exiting nonzero.
+
+  $ cp ../../corpus/surface/dx3/malformed/missing-quote.jac dx3/missing-quote.jac
+  $ jac fmt dx3/missing-quote.jac > dx3/malformed.out 2> dx3/malformed.err; status=$?; wc -c < dx3/malformed.out; cat dx3/malformed.err; echo "exit:$status"
+  0
+  dx3/missing-quote.jac:6:1-10: error[E1221]: unclosed `quote`: expected `}` before the enclosing boundary
+    hint: the `quote` expression opened at dx3/missing-quote.jac:1:10-15
+  exit:1
+  $ jac check dx3/missing-quote.jac --print-sigs > dx3/check.out 2>&1; status=$?; cat dx3/check.out; echo "exit:$status"
+  dx3/missing-quote.jac:6:1-10: error[E1221]: unclosed `quote`: expected `}` before the enclosing boundary
+    hint: the `quote` expression opened at dx3/missing-quote.jac:1:10-15
+  dx3/missing-quote.jac:6:16-17: error[E0801]: if condition: expected int, got bool (type mismatch)
+    hint: the expected side comes from the surrounding context; make both sides agree
+  broken : forall a. a
+  later-good : Int
+  exit:1
+  $ for source in ../../corpus/surface/dx3/malformed/*.jac; do jac fmt "$source" >/dev/null 2>/dev/null; fmt_status=$?; jac check "$source" >/dev/null 2>/dev/null; check_status=$?; test "$fmt_status" -eq 1 && test "$check_status" -eq 1 || exit 1; done; echo all-malformed-refused
+  all-malformed-refused
+
 File diff parses, lowers, and resolves each side before using semantic identity. Trivia-only edits
 are quiet; semantic edits localize in surface notation. Explicit syntax handles extensionless files.
 

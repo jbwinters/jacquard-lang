@@ -54,6 +54,22 @@ let report_code state token code message =
 
 let report state token message = report_code state token "E1220" message
 
+let report_construct_code state ~opening ~failure ~code ~construct message =
+  let failure = diagnostic_token state failure in
+  let hint =
+    Printf.sprintf "the %s opened at %s" construct (Span.to_string opening.Surface_lex.span)
+  in
+  state.diagnostics <-
+    Diag.error ~span:failure.Surface_lex.span ~hint ~code message :: state.diagnostics
+
+let report_unclosed state ~opening ~failure ~construct message =
+  report_construct_code state ~opening ~failure ~code:"E1221" ~construct message
+
+let mark_recovered_construct state meta =
+  let id = state.next_hole in
+  state.next_hole <- id + 1;
+  meta |> Meta.with_surface_form "recovery-delimiter" |> Meta.with_surface_hole (string_of_int id)
+
 let token_description state token =
   Surface_lex.show_token (diagnostic_token state token).Surface_lex.token
 
@@ -238,6 +254,14 @@ let expect state expected description =
     None
   end
 
+let expect_in_construct state ~opening ~expected ~construct message =
+  let token = current state in
+  if token.Surface_lex.token = expected then Some (advance state)
+  else begin
+    report_construct_code state ~opening ~failure:token ~code:"E1220" ~construct message;
+    None
+  end
+
 let with_limit state limit f =
   let previous = state.limit in
   state.limit <- Some limit;
@@ -310,6 +334,11 @@ let top_boundary_after_continuation state =
     let next = index_after_continuation state layout in
     if next > layout && top_item_ahead state next then Some (token_at state next) else None
 
+let top_boundary_after_layout state =
+  let layout = state.index in
+  let next = index_after_layout state layout in
+  if next > layout && top_item_ahead state next then Some (token_at state next) else None
+
 let is_expression_boundary = function
   | Surface_lex.RParen | Surface_lex.RBracket | Surface_lex.RBrace | Surface_lex.Bar
   | Surface_lex.Eof ->
@@ -334,6 +363,8 @@ let next_arm_boundary state =
           { boundary_index = index; boundary_kind = Arm_delimiter }
       | Surface_lex.Bar -> find (index + 1) parens braces brackets (Some index)
       | Surface_lex.RBrace when parens = 0 && braces = 0 && brackets = 0 ->
+          { boundary_index = index; boundary_kind = Arm_delimiter }
+      | (Surface_lex.RParen | Surface_lex.RBracket) when parens = 0 && braces = 0 && brackets = 0 ->
           { boundary_index = index; boundary_kind = Arm_delimiter }
       | Surface_lex.Eof -> fallback nested Arm_end index
       | (Surface_lex.Newline | Surface_lex.Semi) when parens = 0 && braces = 0 && brackets = 0 ->
@@ -553,54 +584,75 @@ and parse_list_expr state opening =
   Surface_ast.{ it = List items; meta = Meta.with_surface_container "list" meta meta }
 
 and parse_if state ~allow_newlines keyword =
+  let recovered_structure = ref false in
+  let make_if (condition : Surface_ast.expr) (yes : Surface_ast.expr) (no : Surface_ast.expr) =
+    let meta = meta_from_token_to_meta keyword no.Surface_ast.meta in
+    let meta = if !recovered_structure then mark_recovered_construct state meta else meta in
+    Surface_ast.{ it = If (condition, yes, no); meta }
+  in
   let condition = parse_expr state ~allow_newlines in
   match top_boundary_after_continuation state with
   | Some next_top ->
-      report state next_top "expected `then` after the condition before the next top-level item";
+      report_construct_code state ~opening:keyword ~failure:next_top ~code:"E1220"
+        ~construct:"`if` expression"
+        "unclosed `if`: expected `then` after the condition before the next top-level item";
+      recovered_structure := true;
       let yes = expr_hole state (current state) in
       let no = expr_hole state (current state) in
-      Surface_ast.{ it = If (condition, yes, no); meta = meta_from_token_to_meta keyword no.meta }
+      make_if condition yes no
   | None ->
       skip_continuation state;
-      let then_token = expect state (Surface_lex.Keyword "then") "`then` after the condition" in
+      let then_token =
+        expect_in_construct state ~opening:keyword ~expected:(Surface_lex.Keyword "then")
+          ~construct:"`if` expression"
+          (Printf.sprintf "unclosed `if`: expected `then` after the condition, found %s"
+             (token_description state (current state)))
+      in
+      if Option.is_none then_token then recovered_structure := true;
       if Option.is_none then_token && is_expression_boundary (current state).Surface_lex.token then
         let yes = expr_hole state (current state) in
         let no = expr_hole state (current state) in
-        Surface_ast.{ it = If (condition, yes, no); meta = meta_from_token_to_meta keyword no.meta }
+        make_if condition yes no
       else begin
         let branch_boundary =
           match then_token with Some _ -> top_boundary_after_continuation state | None -> None
         in
         match branch_boundary with
         | Some next_top ->
-            report state next_top
-              "expected an expression after `then` before the next top-level item";
+            report_construct_code state ~opening:keyword ~failure:next_top ~code:"E1220"
+              ~construct:"`if` expression"
+              "unclosed `if`: expected an expression after `then` before the next top-level item";
+            recovered_structure := true;
             let yes = expr_hole state (current state) in
             let no = expr_hole state (current state) in
-            Surface_ast.
-              { it = If (condition, yes, no); meta = meta_from_token_to_meta keyword no.meta }
+            make_if condition yes no
         | None -> (
             Option.iter (fun _ -> skip_continuation state) then_token;
             let yes = parse_expr state ~allow_newlines in
             match top_boundary_after_continuation state with
             | Some next_top ->
-                report state next_top
-                  "expected `else` after the then branch before the next top-level item";
+                report_construct_code state ~opening:keyword ~failure:next_top ~code:"E1220"
+                  ~construct:"`if` expression"
+                  "unclosed `if`: expected `else` after the then branch before the next top-level \
+                   item";
+                recovered_structure := true;
                 let no = expr_hole state (current state) in
-                Surface_ast.
-                  { it = If (condition, yes, no); meta = meta_from_token_to_meta keyword no.meta }
+                make_if condition yes no
             | None -> (
                 skip_continuation state;
                 let else_token =
-                  expect state (Surface_lex.Keyword "else") "`else` after the then branch"
+                  expect_in_construct state ~opening:keyword ~expected:(Surface_lex.Keyword "else")
+                    ~construct:"`if` expression"
+                    (Printf.sprintf "unclosed `if`: expected `else` after the then branch, found %s"
+                       (token_description state (current state)))
                 in
+                if Option.is_none else_token then recovered_structure := true;
                 if
                   Option.is_none else_token
                   && is_expression_boundary (current state).Surface_lex.token
                 then
                   let no = expr_hole state (current state) in
-                  Surface_ast.
-                    { it = If (condition, yes, no); meta = meta_from_token_to_meta keyword no.meta }
+                  make_if condition yes no
                 else
                   let branch_boundary =
                     match else_token with
@@ -609,28 +661,26 @@ and parse_if state ~allow_newlines keyword =
                   in
                   match branch_boundary with
                   | Some next_top ->
-                      report state next_top
-                        "expected an expression after `else` before the next top-level item";
+                      report_construct_code state ~opening:keyword ~failure:next_top ~code:"E1220"
+                        ~construct:"`if` expression"
+                        "unclosed `if`: expected an expression after `else` before the next \
+                         top-level item";
+                      recovered_structure := true;
                       let no = expr_hole state (current state) in
-                      Surface_ast.
-                        {
-                          it = If (condition, yes, no);
-                          meta = meta_from_token_to_meta keyword no.meta;
-                        }
+                      make_if condition yes no
                   | None ->
                       Option.iter (fun _ -> skip_continuation state) else_token;
                       let no =
                         if is_expression_boundary (current state).Surface_lex.token then begin
-                          report state (current state) "expected an expression after `else`";
+                          report_construct_code state ~opening:keyword ~failure:(current state)
+                            ~code:"E1220" ~construct:"`if` expression"
+                            "unclosed `if`: expected an expression after `else`";
+                          recovered_structure := true;
                           expr_hole state (current state)
                         end
                         else parse_expr state ~allow_newlines
                       in
-                      Surface_ast.
-                        {
-                          it = If (condition, yes, no);
-                          meta = meta_from_token_to_meta keyword no.meta;
-                        }))
+                      make_if condition yes no))
       end
 
 and parse_paren_expr state opening =
@@ -874,21 +924,30 @@ and parse_constructor_pattern state name_token name_meta constructor =
 and parse_match state ~allow_newlines keyword =
   let subject = parse_expr state ~allow_newlines in
   skip_comments state;
-  match expect state Surface_lex.LBrace "`{` before the match arms" with
+  match
+    expect_in_construct state ~opening:keyword ~expected:Surface_lex.LBrace
+      ~construct:"`match` expression"
+      (Printf.sprintf "unclosed `match`: expected `{` before the match arms, found %s"
+         (token_description state (current state)))
+  with
   | None ->
-      Surface_ast.{ it = Match (subject, []); meta = meta_from_token_to_meta keyword subject.meta }
+      let meta = meta_from_token_to_meta keyword subject.meta |> mark_recovered_construct state in
+      Surface_ast.{ it = Match (subject, []); meta }
   | Some opening ->
       ignore (consume_separators state);
       let clauses = ref [] in
       let closing = ref opening in
       let finished = ref false in
+      let recovered_close = ref false in
       let parse_arm start =
         let clause, next_top = parse_match_arm state start in
         clauses := clause :: !clauses;
         match next_top with
         | None -> ignore (consume_separators state)
         | Some next_top ->
-            report_code state next_top "E1221" "expected `}` before the next top-level item";
+            report_unclosed state ~opening:keyword ~failure:next_top ~construct:"`match` expression"
+              "unclosed `match`: expected `}` before the next top-level item";
+            recovered_close := true;
             closing := current state;
             finished := true
       in
@@ -900,8 +959,17 @@ and parse_match state ~allow_newlines keyword =
             closing := advance state;
             finished := true
         | Surface_lex.Eof ->
-            report_code state token "E1221" "expected `}` before end of match";
+            report_unclosed state ~opening:keyword ~failure:token ~construct:"`match` expression"
+              "unclosed `match`: expected `}` before end of file";
+            recovered_close := true;
             closing := token;
+            finished := true
+        | Surface_lex.RParen | Surface_lex.RBracket ->
+            report_unclosed state ~opening:keyword ~failure:token ~construct:"`match` expression"
+              (Printf.sprintf "unclosed `match`: expected `}`, found %s"
+                 (token_description state token));
+            recovered_close := true;
+            closing := advance state;
             finished := true
         | Surface_lex.Bar ->
             let bar = advance state in
@@ -910,11 +978,9 @@ and parse_match state ~allow_newlines keyword =
             report state token "match arms must begin with `|`";
             parse_arm token
       done;
-      Surface_ast.
-        {
-          it = Match (subject, List.rev !clauses);
-          meta = meta_with_span (span_between keyword !closing);
-        }
+      let meta = meta_with_span (span_between keyword !closing) in
+      let meta = if !recovered_close then mark_recovered_construct state meta else meta in
+      Surface_ast.{ it = Match (subject, List.rev !clauses); meta }
 
 and parse_match_arm state start =
   let pattern_token = current state in
@@ -988,8 +1054,8 @@ and atomic_handle_call_head (expr : Surface_ast.expr) =
   | Surface_ast.Call (head, _) -> atomic_handle_call_head head
   | _ -> false
 
-and missing_return_clause state token =
-  report_code state token "E0212" "`handle` needs exactly one `return` clause";
+and missing_return_clause ?(report = true) state token =
+  if report then report_code state token "E0212" "`handle` needs exactly one `return` clause";
   let rbinder = pat_hole state token in
   let rbody = expr_hole state token in
   Surface_ast.{ rbinder; rbody; rmeta = meta_with_span token.Surface_lex.span }
@@ -1143,13 +1209,23 @@ and parse_handler_clause state start =
 and parse_handle state ~allow_newlines keyword =
   let body = parse_handler_body state ~allow_newlines in
   skip_comments state;
-  let opening = expect state Surface_lex.LBrace "`{` before the handler clauses" in
+  let opening =
+    expect_in_construct state ~opening:keyword ~expected:Surface_lex.LBrace
+      ~construct:"`handle` expression"
+      (Printf.sprintf "unclosed `handle`: expected `{` before the handler clauses, found %s"
+         (token_description state (current state)))
+  in
   let returns = ref None in
   let ops = ref [] in
   let closing = ref keyword in
   let finished = ref false in
+  let recovered_close = ref false in
   let reported_order = ref false in
-  (match opening with Some token -> closing := token | None -> finished := true);
+  (match opening with
+  | Some token -> closing := token
+  | None ->
+      recovered_close := true;
+      finished := true);
   if not !finished then ignore (consume_separators state);
   while not !finished do
     let token = current state in
@@ -1158,8 +1234,17 @@ and parse_handle state ~allow_newlines keyword =
         closing := advance state;
         finished := true
     | Surface_lex.Eof ->
-        report_code state token "E1221" "expected `}` before end of handler";
+        report_unclosed state ~opening:keyword ~failure:token ~construct:"`handle` expression"
+          "unclosed `handle`: expected `}` before end of file";
+        recovered_close := true;
         closing := token;
+        finished := true
+    | Surface_lex.RParen | Surface_lex.RBracket ->
+        report_unclosed state ~opening:keyword ~failure:token ~construct:"`handle` expression"
+          (Printf.sprintf "unclosed `handle`: expected `}`, found %s"
+             (token_description state token));
+        recovered_close := true;
+        closing := advance state;
         finished := true
     | Surface_lex.Bar -> (
         let bar = advance state in
@@ -1179,7 +1264,10 @@ and parse_handle state ~allow_newlines keyword =
         match next_top with
         | None -> ignore (consume_separators state)
         | Some next_top ->
-            report_code state next_top "E1221" "expected `}` before the next top-level item";
+            report_unclosed state ~opening:keyword ~failure:next_top
+              ~construct:"`handle` expression"
+              "unclosed `handle`: expected `}` before the next top-level item";
+            recovered_close := true;
             closing := current state;
             finished := true)
     | _ -> (
@@ -1192,21 +1280,29 @@ and parse_handle state ~allow_newlines keyword =
         match next_top with
         | None -> ignore (consume_separators state)
         | Some next_top ->
-            report_code state next_top "E1221" "expected `}` before the next top-level item";
+            report_unclosed state ~opening:keyword ~failure:next_top
+              ~construct:"`handle` expression"
+              "unclosed `handle`: expected `}` before the next top-level item";
+            recovered_close := true;
             closing := current state;
             finished := true)
   done;
   let ret =
-    match !returns with Some clause -> clause | None -> missing_return_clause state !closing
+    match !returns with
+    | Some clause -> clause
+    | None -> missing_return_clause ~report:(not !recovered_close) state !closing
   in
-  Surface_ast.
-    {
-      it = Handle (body, ret, List.rev !ops);
-      meta = meta_with_span (span_between keyword !closing);
-    }
+  let meta = meta_with_span (span_between keyword !closing) in
+  let meta = if !recovered_close then mark_recovered_construct state meta else meta in
+  Surface_ast.{ it = Handle (body, ret, List.rev !ops); meta }
 
 and parse_quote state keyword =
-  match expect state Surface_lex.LBrace "`{` after `quote`" with
+  match
+    expect_in_construct state ~opening:keyword ~expected:Surface_lex.LBrace
+      ~construct:"`quote` expression"
+      (Printf.sprintf "unclosed `quote`: expected `{` after `quote`, found %s"
+         (token_description state (current state)))
+  with
   | None ->
       let body = expr_hole state (current state) in
       Surface_ast.{ it = Quote (Surface body); meta = meta_from_token_to_meta keyword body.meta }
@@ -1232,21 +1328,38 @@ and parse_quote state keyword =
                 (Surface_ast.Surface (expr_hole state raw), false))
         | _ -> (Surface_ast.Surface (parse_expr state ~allow_newlines:false), false)
       in
+      let recovered_close = ref false in
       let closing =
         if raw_unclosed then current state
         else
           match quote_boundary_after_layout state with
           | Some boundary ->
-              report_code state boundary "E1221"
-                "expected `}` after the quoted expression before the enclosing boundary";
+              report_unclosed state ~opening:keyword ~failure:boundary
+                ~construct:"`quote` expression"
+                "unclosed `quote`: expected `}` before the enclosing boundary";
+              recovered_close := true;
               current state
           | None -> (
               ignore (consume_separators state);
-              match expect state Surface_lex.RBrace "`}` after the quoted expression" with
-              | Some token -> token
-              | None -> current state)
+              match (current state).Surface_lex.token with
+              | Surface_lex.RBrace -> advance state
+              | Surface_lex.RParen | Surface_lex.RBracket ->
+                  let failure = current state in
+                  report_unclosed state ~opening:keyword ~failure ~construct:"`quote` expression"
+                    (Printf.sprintf "unclosed `quote`: expected `}`, found %s"
+                       (token_description state failure));
+                  recovered_close := true;
+                  advance state
+              | _ ->
+                  let failure = current state in
+                  report_unclosed state ~opening:keyword ~failure ~construct:"`quote` expression"
+                    "unclosed `quote`: expected `}` after the quoted expression";
+                  recovered_close := true;
+                  current state)
       in
-      Surface_ast.{ it = Quote body; meta = meta_with_span (span_between keyword closing) }
+      let meta = meta_with_span (span_between keyword closing) in
+      let meta = if !recovered_close then mark_recovered_construct state meta else meta in
+      Surface_ast.{ it = Quote body; meta }
 
 and parse_unquote state keyword =
   match expect state Surface_lex.LParen "`(` after `unquote`" with
@@ -1270,42 +1383,79 @@ and parse_unquote state keyword =
 and parse_block state opening =
   let items = ref [] in
   let closing = ref opening in
+  let recovered_close = ref false in
   ignore (consume_separators state);
   let finished = ref false in
   while not !finished do
     let token = current state in
-    match token.Surface_lex.token with
-    | Surface_lex.RBrace ->
-        closing := advance state;
+    match top_boundary_after_layout state with
+    | Some next_top ->
+        report_unclosed state ~opening ~failure:next_top ~construct:"block"
+          "unclosed block: expected `}` before the next top-level item";
+        items := Surface_ast.Expr (expr_hole state next_top) :: !items;
+        recovered_close := true;
+        closing := next_top;
         finished := true
-    | Surface_lex.Eof ->
-        report_code state token "E1221" "expected `}` before end of file";
+    | None when top_item_ahead state state.index ->
+        report_unclosed state ~opening ~failure:token ~construct:"block"
+          "unclosed block: expected `}` before the next top-level item";
         items := Surface_ast.Expr (expr_hole state token) :: !items;
+        recovered_close := true;
         closing := token;
         finished := true
-    | Surface_lex.Invalid _ ->
-        items := Surface_ast.Expr (expr_hole state token) :: !items;
-        ignore (advance state);
-        finish_block_item state items closing finished
-    | Surface_lex.Keyword "let" ->
-        items := parse_let_item state (advance state) :: !items;
-        finish_block_item state items closing finished
-    | _ ->
-        let expression = parse_expr state ~allow_newlines:false in
-        items := Surface_ast.Expr expression :: !items;
-        finish_block_item state items closing finished
+    | None -> (
+        match token.Surface_lex.token with
+        | Surface_lex.RBrace ->
+            closing := advance state;
+            finished := true
+        | Surface_lex.Eof ->
+            report_unclosed state ~opening ~failure:token ~construct:"block"
+              "unclosed block: expected `}` before end of file";
+            items := Surface_ast.Expr (expr_hole state token) :: !items;
+            recovered_close := true;
+            closing := token;
+            finished := true
+        | Surface_lex.RParen | Surface_lex.RBracket ->
+            report_unclosed state ~opening ~failure:token ~construct:"block"
+              (Printf.sprintf "unclosed block: expected `}`, found %s"
+                 (token_description state token));
+            items := Surface_ast.Expr (expr_hole state token) :: !items;
+            recovered_close := true;
+            closing := advance state;
+            finished := true
+        | Surface_lex.Invalid _ ->
+            items := Surface_ast.Expr (expr_hole state token) :: !items;
+            ignore (advance state);
+            finish_block_item state ~opening ~recovered_close items closing finished
+        | Surface_lex.Keyword "let" ->
+            items := parse_let_item state (advance state) :: !items;
+            finish_block_item state ~opening ~recovered_close items closing finished
+        | _ ->
+            let expression = parse_expr state ~allow_newlines:false in
+            items := Surface_ast.Expr expression :: !items;
+            finish_block_item state ~opening ~recovered_close items closing finished)
   done;
   let meta = meta_with_span (span_between opening !closing) in
+  let meta = if !recovered_close then Meta.with_surface_form "recovery-delimiter" meta else meta in
   Surface_ast.{ it = Block (List.rev !items); meta = Meta.with_surface_container "block" meta meta }
 
-and finish_block_item state items closing finished =
+and finish_block_item state ~opening ~recovered_close items closing finished =
   skip_comments state;
   match (current state).Surface_lex.token with
   | Surface_lex.RBrace ->
       closing := advance state;
       finished := true
   | Surface_lex.Eof -> ()
-  | Surface_lex.Newline | Surface_lex.Semi -> ignore (consume_separators state)
+  | Surface_lex.RParen | Surface_lex.RBracket ->
+      let token = current state in
+      report_unclosed state ~opening ~failure:token ~construct:"block"
+        (Printf.sprintf "unclosed block: expected `}`, found %s" (token_description state token));
+      items := Surface_ast.Expr (expr_hole state token) :: !items;
+      recovered_close := true;
+      closing := advance state;
+      finished := true
+  | Surface_lex.Newline | Surface_lex.Semi ->
+      if Option.is_none (top_boundary_after_layout state) then ignore (consume_separators state)
   | _ ->
       let token = current state in
       report_code state token "E1223" "block items require a newline or `;` separator";

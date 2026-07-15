@@ -22,7 +22,7 @@ let test_recovery_golden () =
       "recover.jac:5:1-5: error[E1220]: expected an expression, found keyword(then)";
     ]
     (rendered_diagnostics recovered);
-  match recovered.items with
+  (match recovered.items with
   | [
    { it = TopExpr { it = Tuple []; _ }; _ };
    { it = TopHole first; meta = first_meta };
@@ -39,7 +39,8 @@ let test_recovery_golden () =
       Alcotest.(check (option string))
         "block span" (Some "recover.jac:4:1-6:2")
         (Option.map Span.to_string (Meta.span block_meta))
-  | _ -> Alcotest.fail "recovery golden produced an unexpected partial tree"
+  | _ -> Alcotest.fail "recovery golden produced an unexpected partial tree");
+  Test_dx_parser_recovery.run ()
 
 let test_each_synchronization_boundary () =
   let cases = [ ("newline", "then\nafter\n"); ("semicolon", "then;after\n") ] in

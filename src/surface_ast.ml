@@ -97,9 +97,12 @@ type recovered = { items : top list; diagnostics : Diag.t list; meta : Meta.t; s
 
 let node ?(meta = Meta.empty) it = { it; meta }
 
-(** [has_holes_top top] is true when parser recovery left any hole in [top]. Strict source entry
-    points reject such trees before lowering, resolution, checking, or hashing. *)
-let rec has_holes_top top =
+(** [has_holes_top top] is true when parser recovery left an explicit hole or synthetic delimiter
+    marker in [top]. Strict source entry points reject such trees before lowering, resolution,
+    checking, or hashing. *)
+let rec has_holes_top (top : top) =
+  Option.is_some (Meta.surface_hole top.meta)
+  ||
   match top.it with
   | Signature (_, ty) -> has_holes_ty ty
   | Definition { params; value; _ } -> List.exists has_holes_pat params || has_holes_expr value
@@ -116,7 +119,9 @@ let rec has_holes_top top =
   | RawTop _ -> false
   | TopHole _ -> true
 
-and has_holes_expr expr =
+and has_holes_expr (expr : expr) =
+  Option.is_some (Meta.surface_hole expr.meta)
+  ||
   match expr.it with
   | Lit _ | Name _ | HashRef _ | GroupRef _ -> false
   | Call (fn, args) -> has_holes_expr fn || List.exists has_holes_expr args
@@ -144,14 +149,18 @@ and has_holes_block_item = function
       has_holes_pat binder || List.exists has_holes_pat params || has_holes_expr value
   | Expr expr -> has_holes_expr expr
 
-and has_holes_pat pat =
+and has_holes_pat (pat : pat) =
+  Option.is_some (Meta.surface_hole pat.meta)
+  ||
   match pat.it with
   | PWild | PBind _ | PLit _ -> false
   | PCon (_, args) | PTuple args -> List.exists has_holes_pat args
   | PAs (inner, _) -> has_holes_pat inner
   | PHole _ -> true
 
-and has_holes_ty ty =
+and has_holes_ty (ty : ty) =
+  Option.is_some (Meta.surface_hole ty.meta)
+  ||
   match ty.it with
   | TyName _ | TyVar _ | TyHash _ -> false
   | TyApp (head, args) -> has_holes_ty head || List.exists has_holes_ty args
