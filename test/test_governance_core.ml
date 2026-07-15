@@ -79,6 +79,18 @@ let test_schema_and_frozen_identities () =
     "ET.2 Decision identity unchanged"
     "4d07b0003ce00355c129e894d589c0626bc7ccb3230305537c908a37d5012e4c"
     (Hash.to_hex (lookup "decision" Resolve.KType));
+  Alcotest.(check string)
+    "ET.6 Proposal identity unchanged"
+    "5eff01f74c47214e9c4ebec752a75959ddb0bb4fb34a5cc5d5bb58c0e47dc9b7"
+    (Hash.to_hex (lookup "proposal" Resolve.KType));
+  Alcotest.(check string)
+    "existing code.hash identity unchanged"
+    "83b76604ebb921438d4ff5ae92173fad8c1d527dc91ae1e39c419ad5310d0c44"
+    (Hash.to_hex (lookup "code.hash" Resolve.KTerm));
+  Alcotest.(check string)
+    "GM.1 GovernanceCall identity unchanged"
+    "20824137b34985dabf9e6bb0c20cf9987c1ca93b5cdd8d1da60cbc69550efc27"
+    (Hash.to_hex (lookup "governance-call" Resolve.KType));
   ignore (lookup "governance.resolve-operation-id" Resolve.KTerm)
 
 let test_confidence_and_policy_refusals () =
@@ -190,6 +202,47 @@ let call_id call =
   show
     (Printf.sprintf "(app (var hash.to-text) (app (var governance.call-id) %s))" (unwrap_ok call))
 
+let live_policy =
+  "(match (app (var governance.make-live-policy) (var low) (var high) (lit 0.75)) (clause (pcon ok \
+   (pvar policy)) (var policy)))"
+
+let bound_live_policy =
+  unwrap_ok (Printf.sprintf "(app (var governance.bind-live-policy) %s)" live_policy)
+
+let assessment ?(risk = "medium") ?(confidence = "0.8") ?(evidence = "(quote (evidence))") () =
+  unwrap_ok
+    (Printf.sprintf
+       "(app (var governance.make-assessment) (var %s) (lit %s) (app (var cons) (lit \"reviewed\") \
+        (var nil)) %s)"
+       risk confidence evidence)
+
+let outcome ?(status = "simulated") ?(digest = hash_c) ?(detail = "safe preview") () =
+  unwrap_ok
+    (Printf.sprintf "(app (var governance.make-outcome-summary) (lit %s) %s (lit %s))"
+       (qtext status) (hash digest) (qtext detail))
+
+let preview = Printf.sprintf "(app (var some) %s)" (outcome ())
+
+let make_proposal ?(call = make_call ()) ?(bound_policy = bound_live_policy)
+    ?(assessment = assessment ()) ?(rendering = "(quote (review (lit \"ship\")))")
+    ?(summary = "ship?") ?(preview = preview) () =
+  Printf.sprintf "(app (var governance.make-proposal) %s %s %s %s (lit %s) %s)" (unwrap_ok call)
+    bound_policy assessment rendering (qtext summary) preview
+
+let proposal_id proposal =
+  show
+    (Printf.sprintf "(app (var hash.to-text) (app (var governance.proposal-id) %s))"
+       (unwrap_ok proposal))
+
+let canonical_proposal ?(call_id = hash_a) ?(policy_id = hash_b) ?(assessment_id = hash_c)
+    ?(authority = authority) ?(rendering = "(quote (review (lit \"ship\")))") ?(summary = "ship?")
+    ?(preview = preview) () =
+  Printf.sprintf "(app (var governance.make-proposal-canonical) %s %s %s %s %s (lit %s) %s)"
+    (hash call_id) (hash policy_id) (hash assessment_id) authority rendering (qtext summary) preview
+
+let canonical_proposal_id value =
+  show (Printf.sprintf "(app (var hash.to-text) (app (var governance.proposal-id) %s))" value)
+
 let test_call_hash_and_verifier () =
   let base = make_call () in
   let base_id = call_id base in
@@ -232,13 +285,72 @@ let test_call_hash_and_verifier () =
     show
       (Printf.sprintf "(app (var code.render) (app (var governance.call-code) %s))" (unwrap_ok base))
   in
-  Alcotest.(check bool)
-    "canonical call code is versioned" true
-    (String.starts_with ~prefix:"\"(governance-call-v0 (governance-v0)" rendered)
+  let operation_id = Hash.to_hex (lookup "write" Resolve.KOp) in
+  let expected_wire =
+    Printf.sprintf
+      "(governance-call-v0 (governance-v0) (hash #%s) (arguments (lit 7)) \
+       (governance-authority-list-v0 (governance-effect-v0 (hash #%s)) (governance-resource-v0 \
+       (hash #%s) (lit \"bucket/a\") (hash #%s))) (preconditions (lit \"fresh\")) (none-v0))"
+      operation_id hash_a hash_a hash_b
+  in
+  Alcotest.(check string) "canonical Call semantic wire" (qtext expected_wire) rendered;
+  Alcotest.(check string)
+    "Call HASH_V0 golden" "\"9426cb4c99c5120487c8c421f948c1de6b4425d2a859a6de2536bd85c6136a85\""
+    base_id
 
-let live_policy =
-  "(match (app (var governance.make-live-policy) (var low) (var high) (lit 0.75)) (clause (pcon ok \
-   (pvar policy)) (var policy)))"
+let test_proposal_hash_and_verifier () =
+  ignore (lookup "governance-proposal" Resolve.KType);
+  let call = make_call () in
+  let proposal = make_proposal ~call () in
+  let value = unwrap_ok proposal in
+  let rendered =
+    show (Printf.sprintf "(app (var code.render) (app (var governance.proposal-code) %s))" value)
+  in
+  let expected_wire =
+    Printf.sprintf
+      "(governance-proposal-v0 (governance-v0) (hash #%s) (hash #%s) (hash #%s) \
+       (governance-authority-list-v0 (governance-effect-v0 (hash #%s)) (governance-resource-v0 \
+       (hash #%s) (lit \"bucket/a\") (hash #%s))) (some-v0 (governance-outcome-summary-v0 \
+       (governance-v0) (lit \"simulated\") (hash #%s) (lit \"safe preview\"))) (review (lit \
+       \"ship\")) (lit \"ship?\"))"
+      "9426cb4c99c5120487c8c421f948c1de6b4425d2a859a6de2536bd85c6136a85"
+      "90b89e26cc677201a904cc1757be0b78814aea45d13cbcd3fd66c9be56927e52"
+      "a2d62fccd52d599b99bd2a595b386b351c1cb7bf033537aa31fd396cd9c9761b" hash_a hash_a hash_b hash_c
+  in
+  Alcotest.(check string) "Proposal canonical wire golden" (qtext expected_wire) rendered;
+  let expected = "88e2c60b4e97c732917fc99a3e7a05eb85e79295fcfed053cae3a5b5421fd26e" in
+  Alcotest.(check string) "Proposal HASH_V0 golden" (qtext expected) (proposal_id proposal);
+  Alcotest.(check string)
+    "safe Proposal validates exact artifacts"
+    (Printf.sprintf "ok(#%s)" expected)
+    (show
+       (Printf.sprintf "(app (var governance.validate-proposal-artifacts) %s %s %s %s)"
+          (unwrap_ok call) bound_live_policy (assessment ()) value));
+  let forged =
+    Printf.sprintf
+      "(app (var governance-proposal-v0) (var governance-v0) %s %s %s %s (quote (review (lit \
+       \"ship\"))) (lit \"ship?\") %s %s)"
+      (hash hash_d) (hash hash_a) (hash hash_b) (hash hash_c) authority preview
+  in
+  Alcotest.(check string)
+    "forged Proposal hash refused"
+    "err(\"invalid Proposal: carried proposal hash does not match canonical governance-proposal-v0 \
+     bytes\")"
+    (show (Printf.sprintf "(app (var governance.validate-proposal) %s)" forged));
+  let divergent_authority = list [ authority_effect ~id:hash_c () ] in
+  let mismatched =
+    Printf.sprintf
+      "(app (var governance.make-proposal-canonical) (app (var governance.call-id) %s) (app (var \
+       governance.bound-policy-id) %s) (app (var governance.assessment-id) %s) %s (quote (review \
+       (lit \"ship\"))) (lit \"ship?\") %s)"
+      (unwrap_ok call) bound_live_policy (assessment ()) divergent_authority preview
+  in
+  Alcotest.(check string)
+    "cross-artifact authority mismatch refused"
+    "err(\"invalid Proposal: authority does not match the validated Call\")"
+    (show
+       (Printf.sprintf "(app (var governance.validate-proposal-artifacts) %s %s %s %s)"
+          (unwrap_ok call) bound_live_policy (assessment ()) mismatched))
 
 let dry_policy =
   "(match (app (var governance.make-dry-policy) (lit 0.75)) (clause (pcon ok (pvar policy)) (var \
@@ -337,9 +449,65 @@ let prop_valid_confidence_is_accepted =
               confidence)))
 
 let prop_call_hash_is_deterministic =
-  QCheck.Test.make ~count:50 ~name:"Call HASH_V0 ignores safe display summaries"
-    QCheck.(make Gen.(string_size ~gen:printable (int_bound 24)))
-    (fun summary -> String.equal (call_id (make_call ())) (call_id (make_call ~summary ())))
+  QCheck.Test.make ~count:60
+    ~name:"Call HASH_V0 ignores formatting metadata and safe display summaries"
+    QCheck.(pair (int_bound 8) (make Gen.(string_size ~gen:printable (int_bound 24))))
+    (fun (padding, summary) ->
+      let spaces = String.make (padding + 1) ' ' in
+      let formatted = "(quote" ^ spaces ^ "(arguments" ^ spaces ^ "(lit 7)))" in
+      String.equal (call_id (make_call ())) (call_id (make_call ~arguments:formatted ~summary ())))
+
+let prop_call_hash_sensitivity =
+  QCheck.Test.make ~count:100
+    ~name:"Call HASH_V0 changes with operation, arguments, authority, or preconditions"
+    QCheck.(pair (int_bound 3) (int_bound 100000))
+    (fun (field, sample) ->
+      let changed =
+        match field with
+        | 0 -> make_call ~operation_name:"fs.read" ()
+        | 1 ->
+            make_call ~arguments:(Printf.sprintf "(quote (arguments (lit %d)))" (sample + 100)) ()
+        | 2 -> make_call ~authority:(list [ authority_effect ~id:hash_c () ]) ()
+        | _ ->
+            make_call
+              ~preconditions:(Printf.sprintf "(quote (preconditions (lit %d)))" (sample + 100))
+              ()
+      in
+      not (String.equal (call_id (make_call ())) (call_id changed)))
+
+let prop_proposal_hash_is_stable =
+  QCheck.Test.make ~count:60
+    ~name:"Proposal HASH_V0 ignores formatting metadata in the exact rendering Code"
+    QCheck.(int_bound 8)
+    (fun padding ->
+      let spaces = String.make (padding + 1) ' ' in
+      let changed_rendering = "(quote" ^ spaces ^ "(review" ^ spaces ^ "(lit \"ship\")))" in
+      String.equal
+        (canonical_proposal_id (canonical_proposal ()))
+        (canonical_proposal_id (canonical_proposal ~rendering:changed_rendering ())))
+
+let prop_proposal_hash_sensitivity =
+  QCheck.Test.make ~count:100
+    ~name:"Proposal HASH_V0 changes with every exact review-artifact field"
+    QCheck.(pair (int_bound 6) (int_bound 100000))
+    (fun (field, sample) ->
+      let changed =
+        match field with
+        | 0 -> canonical_proposal ~call_id:hash_d ()
+        | 1 -> canonical_proposal ~policy_id:hash_d ()
+        | 2 -> canonical_proposal ~assessment_id:hash_d ()
+        | 3 -> canonical_proposal ~authority:(list [ authority_effect ~id:hash_c () ]) ()
+        | 4 -> canonical_proposal ~preview:"(var none)" ()
+        | 5 ->
+            canonical_proposal
+              ~rendering:(Printf.sprintf "(quote (review (lit %d)))" (sample + 100))
+              ()
+        | _ -> canonical_proposal ~summary:(Printf.sprintf "ship-%d?" (sample + 100)) ()
+      in
+      not
+        (String.equal
+           (canonical_proposal_id (canonical_proposal ()))
+           (canonical_proposal_id changed)))
 
 let prop_dry_simulates_with_any_threshold =
   let risk_name = function 0 -> "low" | 1 -> "medium" | 2 -> "high" | _ -> "forbidden" in
@@ -363,10 +531,14 @@ let suite =
     Alcotest.test_case "operation-name table" `Quick test_operation_name_table;
     Alcotest.test_case "authority malformed table" `Quick test_authority_refusal_table;
     Alcotest.test_case "Call hash and verifier" `Quick test_call_hash_and_verifier;
+    Alcotest.test_case "Proposal hash and verifier" `Quick test_proposal_hash_and_verifier;
     Alcotest.test_case "policy laws and BoundPolicy verifier" `Quick
       test_policy_laws_and_bound_verifier;
     Alcotest.test_case "safe summaries" `Quick test_safe_summaries;
     QCheck_alcotest.to_alcotest prop_valid_confidence_is_accepted;
     QCheck_alcotest.to_alcotest prop_call_hash_is_deterministic;
+    QCheck_alcotest.to_alcotest prop_call_hash_sensitivity;
+    QCheck_alcotest.to_alcotest prop_proposal_hash_is_stable;
+    QCheck_alcotest.to_alcotest prop_proposal_hash_sensitivity;
     QCheck_alcotest.to_alcotest prop_dry_simulates_with_any_threshold;
   ]

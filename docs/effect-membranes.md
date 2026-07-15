@@ -7,6 +7,12 @@ implementation. No kernel form, ambient authority, scheduler behavior, or
 general linear type is added. G5 posterior judgment remains a separate research
 phase and is not part of the v0 contract.
 
+Implementation note: GM.2 completes the §10 two-level identity core. The
+successor `GovernanceProposal` is intentionally separate from the frozen ET.6
+carrier, derives its constituent IDs and Call authority through typed GM.1
+artifacts, and hashes the exact tuple below with the existing `code.hash`
+canonical-Code boundary.
+
 ---
 
 ## 1. Thesis

@@ -98,6 +98,8 @@
   ../docs/release/surface-syntax/MANIFEST.sha256
   ../docs/release/governed-membranes/GM1-EVIDENCE.md
   ../docs/release/governed-membranes/GM1-MANIFEST.sha256
+  ../docs/release/governed-membranes/GM2-EVIDENCE.md
+  ../docs/release/governed-membranes/GM2-MANIFEST.sha256
   ../docs/stdlib.md
   ../docs/surface-syntax.md
   ../docs/tutorial.md
