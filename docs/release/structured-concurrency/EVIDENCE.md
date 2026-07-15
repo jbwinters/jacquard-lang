@@ -1,13 +1,13 @@
-# Structured Concurrency SC.7 Evidence
+# Structured Concurrency SC.8 Evidence
 
-Status: cooperative cancellation at await, yield, and routed-effect boundaries
-is implemented over the validated SC.6 structured-scope ownership layer.
-Cancellation delivery owns and destroys affine continuations explicitly and
-preserves deterministic terminal/wakeup behavior. This milestone intentionally
-contains no runnable-queue policy, fail-fast/collect policy, host
+Status: deterministic fail-fast-default and collect scope policies are
+implemented over the validated SC.7 cancellation and ownership layer. Terminal
+observations consume explicit scheduler decision numbers, sibling cancellation
+uses the SC.7 destruction boundary, and aggregate results preserve input order.
+This milestone intentionally contains no runnable-queue policy, host
 concurrency/I/O, or detached/root Async handler.
 
-- Reconstruction base: `b59a570`
+- Reconstruction base: `6321ce5`
 - Evidence overlay: [MANIFEST.sha256](MANIFEST.sha256)
 - Authoritative contract: [concurrency.md](../../concurrency.md)
 
@@ -223,15 +223,58 @@ nested continuation-shaped heap carriers; it does not exercise a native
 scheduler, cancellation route, or callback handoff. External resources still
 require explicit acquire/release handlers rather than language finalizers.
 
+## Deterministic scope policies
+
+`Scope_policy.create` registers an ordered same-scope child list and defaults to
+the frozen `Fail_fast` policy. Duplicate or foreign children fail before any
+observation. `record_terminal` requires a non-negative, strictly increasing
+scheduler decision number. Decision violations, unregistered same-scope
+children, repeated terminal observations, and nonterminal observations produce
+exact E0908 diagnostics; foreign-run, foreign-scope, and stale handles retain
+the public E0907 ownership diagnostic. The controller consumes decisions; it
+does not choose or run a task.
+
+On the first decision that observes `Failed(message)` or `Cancelled`, fail-fast
+freezes that exact non-success and visits unfinished siblings in input order. It
+requests cancellation for each and immediately delivers already-suspended
+siblings through `Structured_scope.deliver_cancel`, so owned resume tokens reach
+the explicit destruction callback once. Runnable or checked-out siblings retain
+an idempotent request. A later failure cannot replace an earlier cancellation,
+and a later cancellation cannot replace an earlier failure.
+
+The terminal decision and result are committed before those cancellation
+attempts. A cancellation diagnostic or destruction-callback exception therefore
+does not roll the observation back. Every sibling cleanup is still attempted in
+input order; if callbacks raise, the first exception is re-raised only after all
+sibling attempts finish. Finish remains unavailable until every child is
+observed terminal, so the scope cannot expose an undrained aggregate.
+
+Collect never requests sibling cancellation. It waits for every child and
+returns `Done`, `Failed`, and `Cancelled` entries in the registered input order,
+not terminal decision order. Fail-fast likewise returns successful values in
+input order and returns no partial list on failure or cancellation. Empty
+inputs are immediately `Done([])` or `[]` respectively, and nested controllers
+retain independent policy and decision sequences.
+
+Focused Alcotest cases cover zero/one/many inputs, default selection, ordered
+sibling cancellation, mixed collect results, nested policies,
+failure-before-cancellation and cancellation-before-failure commitment, cleanup
+after a destruction-callback exception, and exact E0907/E0908 diagnostics. A
+200-case QCheck law permutes terminal observation order while proving collect
+output stays in input order. The `scope-policy.t` transcript runs the same
+decision trace twice, byte-compares it, and pins both aggregate renderings.
+These tests use no host clock, thread, scheduler queue, or root handler.
+
 ## Reconstruction and verification
 
-The manifest is the complete SC.7 successor overlay on validated SC.6
-integration commit `b59a570`. Reconstruct it under repository-local scratch
+The manifest is the complete SC.8 successor overlay on validated SC.7
+integration commit `6321ce5`. Reconstruct it under repository-local scratch
 space:
 
 ```sh
-base=b59a570
-dest="$PWD/.scratch/sc7-evidence-copy"
+set -eu
+base=6321ce5
+dest="$PWD/.scratch/sc8-evidence-copy"
 manifest=docs/release/structured-concurrency/MANIFEST.sha256
 rm -rf "$dest"
 mkdir -p "$dest"
@@ -245,23 +288,36 @@ while IFS= read -r file_path; do
 done
 ```
 
-Run in both this checkout and the reconstructed copy:
+Snapshot the reconstructed source tree, then run every verification command
+against that archive destination. The snapshot excludes only Dune output and
+recipe-local scratch state, so the final comparison is a deterministic
+non-Git cleanliness check:
 
 ```sh
 eval "$(opam env)"
-mkdir -p "$PWD/.scratch/tmp"
-export TMPDIR="$PWD/.scratch/tmp"
-scripts/release/check-structured-concurrency-manifest.sh
-opam exec -- dune build @all
-opam exec -- dune runtest --force
-opam exec -- dune fmt
-git diff --exit-code
-opam exec -- dune build @doc
+mkdir -p "$dest/.scratch/tmp"
+export TMPDIR="$dest/.scratch/tmp"
+snapshot="$dest/.scratch/source.before.sha256"
+snapshot_source() {
+  (
+    cd "$dest"
+    find . -path './_build' -prune -o -path './.scratch' -prune -o \
+      -type f -print0 |
+      LC_ALL=C sort -z |
+      xargs -0 sha256sum
+  )
+}
+snapshot_source >"$snapshot"
+"$dest/scripts/release/check-structured-concurrency-manifest.sh"
+opam exec -- dune build @all --root "$dest"
+opam exec -- dune runtest --force --root "$dest"
+opam exec -- dune fmt --root "$dest"
+snapshot_source | cmp "$snapshot" -
+opam exec -- dune build @doc --root "$dest"
 ```
 
-Runnable-queue policy, failure policy, and the Async root handler remain later
-C1 tasks. SC.7 supplies policy-independent cooperative cancellation operations,
-but it does not choose a next continuation or install the compile-only
-`async.scope` fixture as a root handler. SC.4 continues to supply the static
-child-effect law, including the law that a scope discharges only Async and
-retains child world effects.
+Runnable-queue policy and the Async root handler remain later C1 tasks. SC.8
+supplies policy aggregation over explicit terminal decisions, but it does not
+choose a next continuation or install the compile-only `async.scope` fixture as
+a root handler. SC.4 continues to supply the static child-effect law, including
+the law that a scope discharges only Async and retains child world effects.
