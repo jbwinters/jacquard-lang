@@ -1,6 +1,7 @@
 # Governed Membranes GM.5 Evidence
 
-Status: reconstructible GM.5 overlay on validated GM.1 commit `b5587ce`.
+Status: reconstructible GM.5 overlay on validated GM.1 plus ET.3 integration
+commit `94b5082`.
 
 GM.5 releases the blessed once `Judge` interface and the deterministic
 assessment handlers required by the GM.0 charter. It reuses GM.1's exact

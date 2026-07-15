@@ -1,11 +1,11 @@
 # GM.5 overlay manifest
-# Base commit: b5587ce
+# Base commit: 94b5082
 d3ef8704d8360a9c1134c8c214a4ef17f41e21eac9279bd8a8103732aab5c886  corpus/golden/prelude-hashes.golden
-6b34bb3dc9703dfdd3db9653d5f119d81e22bc7f9f0a2c18dbc69effd10b70a8  docs/README.md
-3c3d6b63e7a0c6d2c6d3721f373008d3151909a15dcc763210014fd33377efa3  docs/effect-taxonomy.md
+bb368119083daef68a1e7b0aadefc2e34deac7350c7cf67c50f9457c6817a741  docs/README.md
+27065f7d49db7c2dbacb233cf962a5d023f5eca8da51acec1120d31eecaa3946  docs/effect-taxonomy.md
 efbb61d31313569c74cbd718b7586f698fff5b9d4d123c6dacceb2928f8ce4f5  docs/release/0.1/DECISION.md
 cbc4435a9ba9cf459b73916320fe083d4d25484d6a38be4999a37100008157ee  docs/release/0.1/EVIDENCE.md
-61f167027100d78842f31fc22598afe348964fe233d7abc8a5d904bd172a60c6  docs/release/governed-membranes/GM5-EVIDENCE.md
+d0a67c9a935461ff4ad493025cb40e991d6a7015d871d9ee8b7ffcc1cdef0673  docs/release/governed-membranes/GM5-EVIDENCE.md
 a6130ed72f664c4438aeefc43da9427c6e64e272361e8a8293ab9ef54af956fa  docs/release/surface-syntax/DECISION.md
 8d713fca028a4aef63fce99a575744c40333a97c07e335265c36c6ac6472c76e  docs/stdlib.md
 4e57d6947495edf7b2d3dd427a795880f4b57eaf2c6f0e0a32b097973e950cd4  prelude/operation-modes.manifest
