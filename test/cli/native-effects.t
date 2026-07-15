@@ -308,7 +308,6 @@ parity.
   native exit 2
   $ diff -u illegal-i.out illegal-n.out && cat illegal-i.out
   error[E0906]: a once continuation may be resumed at most once per captured instance
-
 EL.3 generates one statically hostile handler for every reviewed Once operation in the shipped
 prelude. Each program is a lambda, so polymorphic operation parameters need no fabricated values;
 the handler recursively performs the same operation to obtain a correctly typed resume value, then
