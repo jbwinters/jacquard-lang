@@ -548,6 +548,42 @@ arguments, preconditions, evidence, authority configuration, digests, driver
 details, and all `Secret` values. There is no generic `Show` derivation for
 these carriers.
 
+### Judge assessment handlers
+
+GM.5 releases the ring-3 `Judge` effect. Its executable GM.1 carrier spelling
+is `assess : (GovernanceCall) -> GovernanceAssessment`, corresponding to the
+charter's `Judge.assess : (Call) -> Assessment`. The operation is `once`: one
+assessment may resume each captured call at most once.
+
+The standard handlers validate every assessment before resumption. `Risk`,
+`List Text` reasons, and `Code` evidence are closed typed fields; the trust
+boundary additionally rejects a directly constructed assessment whose
+confidence is NaN, infinite, or outside `[0,1]`. Refusal is the explicit
+`Throw Text` effect, so validation is never hidden:
+
+```text
+judge.rules    : (() ->{Judge, Throw | e} a,
+                  (GovernanceCall) ->{} GovernanceAssessment)
+                 ->{Throw | e} a
+judge.fixed    : (() ->{Judge, Throw | e} a, GovernanceAssessment)
+                 ->{Throw | e} a
+judge.scripted : (() ->{Judge, Throw | e} a,
+                  List GovernanceAssessment)
+                 ->{Throw | e} a
+judge.model    : (() ->{Infer, Judge, Throw | e} a,
+                  (GovernanceCall) ->{Infer} GovernanceAssessment)
+                 ->{Infer, Throw | e} a
+```
+
+`judge.rules` accepts only a pure rule function; an attempted `Fs`, `Net`,
+`Secret`, or other raw-world dependency is a type error rather than authority
+laundered behind `Judge`. `judge.fixed` repeats one validated value, while
+`judge.scripted` consumes assessments in operation order and throws
+`judge.scripted: out of assessments` without resuming when exhausted.
+`judge.model` is only an explicit `Infer` adapter returning the same v0 point
+assessment. Posterior representations, `Dist`, and uncertainty policy remain
+the separate G5 phase.
+
 ### debug.inspect
 
 One reflection escape hatch, because agents debugging themselves need it. This

@@ -437,3 +437,11 @@ governance.tool-error-show 3
 governance.assessment-summary 3
 governance.outcome-summary 3
 governance.call-summary 3
+# --- 22-judge (GM.5 blessed assessment effect and handlers)
+judge 3
+assess 3
+judge.validate-or-throw 3
+judge.rules 3
+judge.fixed 3
+judge.scripted 3
+judge.model 3
