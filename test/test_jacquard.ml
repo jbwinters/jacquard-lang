@@ -24,6 +24,7 @@ let () =
       ("audit", Test_audit.suite);
       ("audit-chain", Test_audit_chain.suite);
       ("approval", Test_approval.suite);
+      ("governance-core", Test_governance_core.suite);
       ("types", Test_types.suite);
       ("check", Test_check.suite);
       ("tier", Test_tier.suite);

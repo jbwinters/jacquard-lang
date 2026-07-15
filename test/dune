@@ -80,6 +80,8 @@
   (glob_files_rec ../corpus/*.jac)
   (source_tree ../corpus/valid)
   (source_tree ../corpus/surface)
+  ../corpus/governance/malformed-operation-names.tsv
+  ../corpus/governance/unresolved-operations.tsv
   (glob_files_rec ../corpus/*.expect)
   (glob_files_rec ../corpus/*.golden)
   (glob_files_rec ../prelude/*.jqd)
@@ -94,6 +96,8 @@
   ../docs/release/surface-syntax/DECISION.md
   ../docs/release/surface-syntax/FOLLOWUPS.md
   ../docs/release/surface-syntax/MANIFEST.sha256
+  ../docs/release/governed-membranes/GM1-EVIDENCE.md
+  ../docs/release/governed-membranes/GM1-MANIFEST.sha256
   ../docs/stdlib.md
   ../docs/surface-syntax.md
   ../docs/tutorial.md

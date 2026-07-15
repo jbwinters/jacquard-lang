@@ -400,7 +400,56 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
               match Hash.of_canonical_hex spelling with
               | Some hash -> Ok (vok (Value.VHash hash))
               | None -> Ok (verr "expected 64 lowercase hexadecimal HASH_V0 digits"))
-          | args -> type_err "hash.parse" args)
+          | args -> type_err "hash.parse" args);
+      optional "governance.resolve-operation-id" (fun args ->
+          match args with
+          | [ Value.VText qualified ] -> (
+              match String.rindex_opt qualified '.' with
+              | None | Some 0 -> Ok (verr "invalid Call: expected a resolved effect.operation name")
+              | Some separator when separator = String.length qualified - 1 ->
+                  Ok (verr "invalid Call: expected a resolved effect.operation name")
+              | Some separator -> (
+                  let effect_name = String.sub qualified 0 separator in
+                  let operation_name =
+                    String.sub qualified (separator + 1) (String.length qualified - separator - 1)
+                  in
+                  match Store.lookup_kind store effect_name Resolve.KEffect with
+                  | None ->
+                      Ok
+                        (verr
+                           (Printf.sprintf
+                              "invalid Call: effect `%s` is not resolved in the current store"
+                              effect_name))
+                  | Some { Resolve.hash = effect_hash; _ } -> (
+                      match Store.locate store effect_hash with
+                      | Ok
+                          {
+                            Store.decl_hash;
+                            decl = { Kernel.it = Kernel.DefEffect { ops; _ }; _ };
+                            role = Store.Whole;
+                            _;
+                          } ->
+                          let rec find ordinal = function
+                            | [] ->
+                                Ok
+                                  (verr
+                                     (Printf.sprintf
+                                        "invalid Call: operation `%s` is not a member of resolved \
+                                         effect `%s`"
+                                        operation_name effect_name))
+                            | ({ Kernel.op_name; _ } : Kernel.opspec) :: _
+                              when String.equal op_name operation_name ->
+                                Ok (vok (Value.VHash (Canon.op_hash decl_hash ordinal)))
+                            | _ :: rest -> find (ordinal + 1) rest
+                          in
+                          find 0 ops
+                      | Ok _ | Error _ ->
+                          Ok
+                            (verr
+                               (Printf.sprintf
+                                  "invalid Call: effect `%s` has no exact resolved declaration"
+                                  effect_name)))))
+          | args -> type_err "governance.resolve-operation-id" args)
   | _ -> ());
   (match
      (lookup_hash store ~kind:Resolve.KCon "some", lookup_hash store ~kind:Resolve.KCon "none")
@@ -1031,7 +1080,12 @@ let builtin_signatures (store : Store.t) : ((Hash.t * Types.scheme) list, Diag.t
               ("hash.to-text", fn [ hash ] text);
             ]
         in
-        Ok (base @ code_sigs)
+        let governance_sigs =
+          match lookup_hash store ~kind:Resolve.KTerm "governance.resolve-operation-id" with
+          | Ok h -> [ (h, fn [ text ] (result text hash)) ]
+          | Error _ -> []
+        in
+        Ok (base @ code_sigs @ governance_sigs)
     | _ -> Ok base
   in
   (* the SL.5 text layer (all-or-nothing: 11-text.jqd declares every marker) *)

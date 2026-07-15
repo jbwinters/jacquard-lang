@@ -505,6 +505,49 @@ malformed or noncanonical records with diagnostics. Because a chain cannot by
 itself reveal removal of a valid suffix, the independently published head is a
 required part of the verification contract.
 
+### Versioned governance membrane values
+
+GM.1 ships the ordinary ring-3 values consumed by later governed facade
+handlers in `prelude/21-governance-core.jqd`. The existing ET.2 `Risk` and
+`Verdict` types remain the four-constructor frozen enums. New versioned carriers
+use the `governance-*` names where ET.2 or ET.6 already owns an unversioned
+public name: `GovernanceVersion`, `ToolError`, `GovernanceAuthority`,
+`GovernanceCall`, `GovernanceAssessment`, `GovernanceOutcomeSummary`,
+`LivePolicy`, `DryPolicy`, `StoredPolicy`, and `BoundPolicy a`.
+
+The `governance.make-*` and `governance.bind-*` functions are pure smart
+constructors returning `Result Text a`. They reject non-finite or out-of-range
+confidence thresholds, reversed live-policy limits, empty/noncanonical
+operation names, unordered or duplicate authority, resource authority without
+its preceding effect authority, and empty resource scopes.
+`governance.make-call` accepts the canonical qualified `effect.operation` name,
+not a caller-supplied digest. The trusted pure
+`governance.resolve-operation-id` boundary locates that exact operation in the
+currently resolved Store effect declaration and derives its operation-member
+hash; missing effects and members return `Err`. `Call.call-id` is HASH_V0 over
+the version, that resolved operation hash, canonical arguments, exact ordered
+authority envelope, preconditions, and optional parent call. It deliberately
+excludes the qualified display name, summary, and carried ID. Validation
+re-resolves the name and rejects a mismatched operation hash before checking
+the Call hash. Policy and assessment IDs likewise hash one versioned Code
+encoding.
+
+`DryPolicy.min-confidence` remains validated, stored, and identity-bearing
+because it is part of the frozen GM.0 carrier schema. It is not a dry verdict
+gate: `governance.dry-verdict` returns `Simulate` for every non-`Forbidden` risk
+when a simulator exists, returns `NoSimulation` only when it does not, and
+always returns `Block` for `Forbidden`.
+
+The kernel has no module-private constructors, and the store privacy primitive
+also removes derived-hash lookup needed by already-resolved constructor calls.
+Consequently `governance-call-v0` and `bound-policy-v0` remain representable,
+while `governance.validate-call` and the two `governance.validate-bound-*`
+functions are mandatory verifier backstops at trust boundaries. Forged
+hash/value pairs return `Err`; they do not raise. Stable summary functions omit
+arguments, preconditions, evidence, authority configuration, digests, driver
+details, and all `Secret` values. There is no generic `Show` derivation for
+these carriers.
+
 ### debug.inspect
 
 One reflection escape hatch, because agents debugging themselves need it. This

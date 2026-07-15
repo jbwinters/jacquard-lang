@@ -81,6 +81,13 @@ Read these together when judging whether the release candidate is credible:
 - `release/effect-taxonomy/ET6-MANIFEST.sha256`: reconstructible ET.6 overlay on
   the validated pre-ET.6 base; earlier evidence manifests remain unchanged.
 
+## Governed Membranes Evidence
+
+- `release/governed-membranes/GM1-EVIDENCE.md`: GM.1 versioned ring-3 values,
+  canonical identities, pure refusal boundaries, and compatibility evidence.
+- `release/governed-membranes/GM1-MANIFEST.sha256`: reconstructible GM.1 overlay
+  on the validated ET.6 plus GM.0 dependency-integration commit.
+
 ## Maintenance Notes
 
 - `native-compilation.md`: native compilation notes and boundaries.

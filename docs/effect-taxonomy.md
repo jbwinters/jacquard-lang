@@ -175,10 +175,19 @@ proposal.
 GM.0 retains that two-level identity rule while naming the successor membrane
 fields `Call.call-id` and `Proposal.proposal-id`, adding `GovernanceV0` and the
 exact constituent IDs, and keeping presentation summary out of call identity.
-The validated ET.6 carrier above remains compatibility evidence; later membrane
-work consumes the GM.0 schema rather than silently rewriting that released
-identity. Every dry-run or scripted Approval handler returns `Escalate`, never
-`Approved`; canonical handlers remain ET.7 scope.
+GM.1 implements that successor vocabulary as distinct versioned
+`governance-*` ring-3 carriers rather than silently rewriting the frozen ET.2
+or ET.6 declarations. Its pure constructors and verifier backstops reject
+invalid confidence and policy thresholds, malformed operation identity,
+noncanonical authority envelopes, and forged Call or BoundPolicy hashes through
+`Result`. Call construction accepts a qualified operation name and derives the
+exact member hash from its resolved Store effect declaration; validation
+repeats that lookup before accepting the carried identity. Dry verdicts
+Simulate every non-Forbidden risk when a simulator exists, independent of the
+stored policy threshold, and return `NoSimulation` only when it does not. The
+validated ET.6 carrier above remains compatibility evidence and keeps its
+original identities. Every dry-run or scripted Approval handler returns
+`Escalate`, never `Approved`; canonical handlers remain ET.7 scope.
 
 The declarations below are an executable surface fixture for the currently
 resolvable reserved world and governance operation boundaries plus Channel.
@@ -366,7 +375,7 @@ receives a record intended for the verified inode.
 | D57 | Secret opacity | opaque, no `Show`, inspect redacts, explicit in-row `secret.expose`; taint deferred |
 | D58 | audit chain | implemented `audit-chain-v1` carrier commits existing canonical entry bytes and predecessor HASH_V0; CLI append publishes a head and governance verification fails closed offline |
 | D59 | Proposal schema | implemented `proposal-v1` binds semantic call subject separately from exact review identity; policy, assessment, ordered authority, rendering, summary, and preview are mandatory hash inputs; decisions embed that exact proposal hash, and hash-less, forged, or mismatched carriers fail before action; GM.0 D67 names the successor membrane identities `call-id` and `proposal-id` |
-| D60 | membrane placement | ring 3 governance module plus cookbook and flagship demo, implemented in later phases |
+| D60 | membrane placement | GM.1 implements the versioned core data and policies in ring 3; handlers, cookbook, and flagship demo remain later phases |
 | D61 | facade shape | domain-specific typed facade effects; no universal stringly `Tool.call` |
 | D62 | raw authority | host is a role; membranes re-perform concrete blessed world effects, never `Host` |
 | D63 | Judge status | blessed once effect with `judge.assess : (Call) -> Assessment` |
