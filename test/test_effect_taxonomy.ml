@@ -77,6 +77,14 @@ let operation_names operations =
       | Some index -> String.sub schema 0 index
       | None -> Alcotest.failf "operation schema lacks a colon: %s" schema)
 
+let implementation_operation_names row =
+  let prefix = row.index_name ^ "." in
+  operation_names row.operations
+  |> List.map (fun name ->
+      if String.starts_with ~prefix name then
+        String.sub name (String.length prefix) (String.length name - String.length prefix)
+      else name)
+
 let compact value =
   value |> String.lowercase_ascii |> Str.global_replace (Str.regexp "[ \t\r\n-]+") ""
 
@@ -165,10 +173,10 @@ let test_complete_contract () =
   let doc = Corpus_support.read_file taxonomy_doc in
   Alcotest.(check int) "blessed effect count" 25 (List.length rows);
   Alcotest.(check int)
-    "implemented count" 12
+    "implemented count" 13
     (List.length (List.filter (fun row -> String.equal row.status "implemented") rows));
   Alcotest.(check int)
-    "reserved count" 13
+    "reserved count" 12
     (List.length (List.filter (fun row -> String.equal row.status "reserved") rows));
   check_unique "effect names unique" (List.map (fun row -> row.effect_name) rows);
   check_unique "official index names unique" (List.map (fun row -> row.index_name) rows);
@@ -220,6 +228,17 @@ let find effect_name =
   | Some row -> row
   | None -> Alcotest.failf "missing taxonomy effect %s" effect_name
 
+let prelude_store () =
+  let store =
+    match Store.open_store (Eval_support.fresh_dir ()) with
+    | Ok store -> store
+    | Error diagnostics -> Eval_support.fail_diags "taxonomy store" diagnostics
+  in
+  (match Prelude.load ~dir:"../prelude" store with
+  | Ok _ -> ()
+  | Error diagnostics -> Eval_support.fail_diags "taxonomy prelude load" diagnostics);
+  store
+
 let test_resolved_reserved_schemas () =
   let expected =
     [
@@ -230,7 +249,6 @@ let test_resolved_reserved_schemas () =
       ("Crypto", [ "crypto.verify"; "crypto.random" ]);
       ("Log", [ "log.emit" ]);
       ("Approval", [ "approval.ask" ]);
-      ("Audit", [ "audit.record" ]);
       ("Secret", [ "secret.read"; "secret.expose" ]);
       ("Judge", [ "judge.assess" ]);
       ("Async", [ "async.spawn"; "async.await"; "async.cancel"; "async.yield" ]);
@@ -297,6 +315,7 @@ let test_resolved_reserved_schemas () =
       "special operation-typing rule";
       "known laundering hazard as an implementation obligation";
     ];
+  let prelude = lazy (prelude_store ()) in
   let constructor_inventory type_name =
     match
       List.find_opt
@@ -308,7 +327,17 @@ let test_resolved_reserved_schemas () =
     | Some { Kernel.it = Kernel.DefType { cons; _ }; _ } ->
         List.map (fun con -> con.Kernel.con_name) cons
     | Some _ -> Alcotest.failf "%s fixture entry is not a type" type_name
-    | None -> Alcotest.failf "%s is missing from the executable schema fixture" type_name
+    | None -> (
+        let store = Lazy.force prelude in
+        match Store.lookup_kind store type_name Resolve.KType with
+        | None -> Alcotest.failf "%s is missing from the fixture and prelude" type_name
+        | Some entry -> (
+            match Store.locate store entry.hash with
+            | Ok { Store.decl = { Kernel.it = Kernel.DefType { cons; _ }; _ }; _ } ->
+                List.map (fun con -> con.Kernel.con_name) cons
+            | Ok _ -> Alcotest.failf "%s prelude entry is not a type" type_name
+            | Error diagnostics ->
+                Eval_support.fail_diags ("locate prelude type " ^ type_name) diagnostics))
   in
   List.iter
     (fun (type_name, constructors) ->
@@ -344,17 +373,6 @@ let test_resolved_reserved_schemas () =
          | _ -> false)
        declarations)
 
-let prelude_store () =
-  let store =
-    match Store.open_store (Eval_support.fresh_dir ()) with
-    | Ok store -> store
-    | Error diagnostics -> Eval_support.fail_diags "taxonomy store" diagnostics
-  in
-  (match Prelude.load ~dir:"../prelude" store with
-  | Ok _ -> ()
-  | Error diagnostics -> Eval_support.fail_diags "taxonomy prelude load" diagnostics);
-  store
-
 let test_implemented_interfaces_match_prelude () =
   let store = prelude_store () in
   let rings = Corpus_support.parse_rings "../prelude/rings.manifest" in
@@ -382,7 +400,7 @@ let test_implemented_interfaces_match_prelude () =
             row.interface_hash (Hash.to_hex decl_hash);
           Alcotest.(check (list string))
             (row.effect_name ^ " operation names")
-            (operation_names row.operations)
+            (implementation_operation_names row)
             (List.map (fun (op : Kernel.opspec) -> op.op_name) ops);
           List.iter
             (fun (op : Kernel.opspec) ->
@@ -457,7 +475,7 @@ let test_typed_registry_matches_contract () =
   let entries = Effect_registry.catalog in
   Alcotest.(check int) "catalog covers every blessed entry" 25 (List.length entries);
   Alcotest.(check int)
-    "only live identities enter the canonical registry" 12
+    "only live identities enter the canonical registry" 13
     (List.length (Effect_registry.entries Effect_registry.canonical));
   Alcotest.(check (list string))
     "catalog names exactly cover the TSV"
@@ -539,24 +557,24 @@ let test_registration_rejects_duplicates () =
   (match Effect_registry.register registered different_name with
   | Error (Effect_registry.Duplicate_index_name "net") -> ()
   | _ -> Alcotest.fail "duplicate official index name was accepted");
-  let reserved = registry_entry "Audit" in
+  let reserved = registry_entry "Approval" in
   (match Effect_registry.register registered reserved with
-  | Error (Effect_registry.Missing_resolved_identity "Audit") -> ()
+  | Error (Effect_registry.Missing_resolved_identity "Approval") -> ()
   | _ -> Alcotest.fail "reserved interface entered the resolved registry");
   let retagged =
     {
       reserved with
       interface =
         Effect_registry.Released
-          { version = "forged"; hash = Hash.of_string "invented audit identity" };
+          { version = "forged"; hash = Hash.of_string "invented approval identity" };
     }
   in
   (match Effect_registry.register Effect_registry.empty retagged with
-  | Error (Effect_registry.Reserved_catalog_name "Audit") -> ()
+  | Error (Effect_registry.Reserved_catalog_name "Approval") -> ()
   | _ -> Alcotest.fail "retagged reserved display name entered the registry");
   let display_renamed = { retagged with display_name = "PretendAudit" } in
   match Effect_registry.register Effect_registry.empty display_renamed with
-  | Error (Effect_registry.Reserved_catalog_name "audit") -> ()
+  | Error (Effect_registry.Reserved_catalog_name "approval") -> ()
   | _ -> Alcotest.fail "retagged reserved index name entered the registry"
 
 let test_unknown_identity_is_uncolored_and_unblessed () =

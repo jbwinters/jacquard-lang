@@ -14,6 +14,7 @@ type t =
   | VInt of int
   | VReal of float
   | VText of string
+  | VHash of Hash.t  (** an opaque, validated HASH_V0 digest; constructed only by trusted natives *)
   | VTuple of t list
   | VCon of { con : Hash.t; name : string; args : t list }
       (** a saturated constructor application; identity is the derived constructor hash (equal to
@@ -73,6 +74,7 @@ let rec show = function
   | VInt i -> string_of_int i
   | VReal r -> Printer.real_repr r
   | VText s -> "\"" ^ Printer.escape_text s ^ "\""
+  | VHash hash -> "#" ^ Hash.to_hex hash
   | VTuple items -> "(" ^ String.concat ", " (List.map show items) ^ ")"
   | VCon { name; args = []; _ } -> name
   | VCon { name; args; _ } -> name ^ "(" ^ String.concat ", " (List.map show args) ^ ")"

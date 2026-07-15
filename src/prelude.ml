@@ -54,7 +54,12 @@ let load ~dir store : ((string * Canon.decl_hashes list) list, Diag.t list) resu
           go [] forms
     in
     let rec go acc = function
-      | [] -> Ok (List.rev acc)
+      | [] -> (
+          match Store.lookup_kind store "hash-opaque" Resolve.KCon with
+          | Some { Resolve.hash; _ } ->
+              Store.hide_derived store hash;
+              Ok (List.rev acc)
+          | None -> Ok (List.rev acc))
       | file :: rest -> (
           match load_file file with
           | Error ds -> Error ds
@@ -367,10 +372,36 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
       match args with
       | [ Value.VInt i ] -> Ok (Value.VCode (Form.form "lit" [ Form.Int i ]))
       | args -> type_err "code.of-int" args);
+  optional "code.of-real" (fun args ->
+      match args with
+      | [ Value.VReal real ] -> Ok (Value.VCode (Form.form "lit" [ Form.Real real ]))
+      | args -> type_err "code.of-real" args);
   optional "code.of-text" (fun args ->
       match args with
       | [ Value.VText t ] -> Ok (Value.VCode (Form.form "lit" [ Form.Text t ]))
       | args -> type_err "code.of-text" args);
+  optional "code.of-hash" (fun args ->
+      match args with
+      | [ Value.VHash hash ] -> Ok (Value.VCode (Form.form "hash" [ Form.Hash hash ]))
+      | args -> type_err "code.of-hash" args);
+  optional "hash.to-text" (fun args ->
+      match args with
+      | [ Value.VHash hash ] -> Ok (Value.VText (Hash.to_hex hash))
+      | args -> type_err "hash.to-text" args);
+  (match
+     (lookup_hash store ~kind:Resolve.KCon "ok", lookup_hash store ~kind:Resolve.KCon "err")
+   with
+  | Ok ok_h, Ok err_h ->
+      let vok value = Value.VCon { con = ok_h; name = "ok"; args = [ value ] } in
+      let verr message = Value.VCon { con = err_h; name = "err"; args = [ Value.VText message ] } in
+      optional "hash.parse" (fun args ->
+          match args with
+          | [ Value.VText spelling ] -> (
+              match Hash.of_canonical_hex spelling with
+              | Some hash -> Ok (vok (Value.VHash hash))
+              | None -> Ok (verr "expected 64 lowercase hexadecimal HASH_V0 digits"))
+          | args -> type_err "hash.parse" args)
+  | _ -> ());
   (match
      (lookup_hash store ~kind:Resolve.KCon "some", lookup_hash store ~kind:Resolve.KCon "none")
    with
@@ -455,6 +486,10 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
                        (fun { Diff.path; a; b } -> Printf.sprintf "at %s: - %s + %s" path a b)
                        ds)))
       | args -> type_err "code.diff" args);
+  optional "code.render" (fun args ->
+      match args with
+      | [ Value.VCode form ] -> Ok (Value.VText (Printer.print_compact form))
+      | args -> type_err "code.render" args);
   (* pmf : (distribution a, a) -> real and support : distribution a -> list (pair a real)
      (W4.1/W4.4); native implementations over the recognized constructors *)
   optional "debug.inspect" (fun args ->
@@ -951,15 +986,20 @@ let builtin_signatures (store : Store.t) : ((Hash.t * Types.scheme) list, Diag.t
   let* base =
     match
       ( lookup_hash store ~kind:Resolve.KType "code",
+        lookup_hash store ~kind:Resolve.KType "real",
         lookup_hash store ~kind:Resolve.KType "text",
+        lookup_hash store ~kind:Resolve.KType "hash",
         lookup_hash store ~kind:Resolve.KType "option",
+        lookup_hash store ~kind:Resolve.KType "result",
         lookup_hash store ~kind:Resolve.KType "list",
         lookup_hash store ~kind:Resolve.KTerm "code.form" )
     with
-    | Ok code_h, Ok text_h, Ok opt_h, Ok list_h, Ok _ ->
+    | Ok code_h, Ok real_h, Ok text_h, Ok hash_h, Ok opt_h, Ok result_h, Ok list_h, Ok _ ->
         let code = Types.TCon (code_h, []) in
         let text = Types.TCon (text_h, []) in
+        let hash = Types.TCon (hash_h, []) in
         let opt t = Types.TCon (opt_h, [ t ]) in
+        let result e a = Types.TCon (result_h, [ e; a ]) in
         let tlist t = Types.TCon (list_h, [ t ]) in
         let fn params result = Types.mono (Types.TArrow (params, Types.empty_row, result)) in
         let rec go acc = function
@@ -972,13 +1012,18 @@ let builtin_signatures (store : Store.t) : ((Hash.t * Types.scheme) list, Diag.t
           go []
             [
               ("code.of-int", fn [ int_ty ] code);
+              ("code.of-real", fn [ Types.TCon (real_h, []) ] code);
               ("code.to-int", fn [ code ] (opt int_ty));
               ("code.of-text", fn [ text ] code);
+              ("code.of-hash", fn [ hash ] code);
               ("code.to-text", fn [ code ] (opt text));
               ("code.form", fn [ text; tlist code ] code);
               ("code.un-form", fn [ code ] (opt (Types.TTuple [ text; tlist code ])));
               ("code.eq?", fn [ code; code ] bool_ty);
               ("code.diff", fn [ code; code ] text);
+              ("code.render", fn [ code ] text);
+              ("hash.parse", fn [ text ] (result text hash));
+              ("hash.to-text", fn [ hash ] text);
             ]
         in
         Ok (base @ code_sigs)

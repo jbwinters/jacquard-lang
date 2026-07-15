@@ -66,6 +66,11 @@ Read these together when judging whether the release candidate is credible:
 - `release/effect-linearity/MANIFEST.sha256`: reconstructible EL.2-EL.4 overlay
   on the completed EL.1 base.
 
+## Effect Taxonomy Evidence
+
+- `release/effect-taxonomy/EVIDENCE.md`: ET.2 released Audit identity, canonical
+  entry encoding, append handler contracts, failure limits, and reproduction.
+
 ## Maintenance Notes
 
 - `native-compilation.md`: native compilation notes and boundaries.

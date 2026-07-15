@@ -81,11 +81,11 @@ paths.
 
 ## D44 frozen prelude modes
 
-`prelude/operation-modes.manifest` reviews all 20 operations without driving
+`prelude/operation-modes.manifest` reviews all 21 operations without driving
 implementation behavior. The completeness test parses every `DefEffect` in
 every loaded `prelude/*.jqd` source and compares its complete qualified-name and
-mode inventory to the manifest; it has no effect-name allowlist. Thirteen are
-Once: Eval, Abort, Throw, Emit, Console, Clock, Net, Fs, and Infer operations.
+mode inventory to the manifest; it has no effect-name allowlist. Fourteen are
+Once: Eval, Abort, Throw, Emit, Console, Clock, Net, Fs, Infer, and Audit operations.
 Seven are Multi: State and Warp Check's pure continuation-capture operations,
 Dist's two search operations, and Fault's world-exploration operation. The test
 inventory must match the prelude exactly, so a new operation cannot inherit a
@@ -165,7 +165,7 @@ there would flag reviewed Dist/Fault and permanent fixtures with no explicit
 bootstrap Multi spelling available.
 
 The generated hostile lane creates one type-correct double-resume handler per
-Once operation. `jacquard run` and `jacquard build` reject all 13 with identical
+Once operation. `jacquard run` and `jacquard build` reject all 14 with identical
 E0816 diagnostics. A direct interpreter capture matrix then proves each exact
 operation produces E0906 on an unchecked second resume, while the existing C
 runtime parity probe pins byte-identical dynamic E0906 behavior.
@@ -180,7 +180,7 @@ byte-identical between interpreter and native execution.
 
 `jacquard tiers` exposes the same distinction rather than treating syntactic
 shape as lowering: the current prelude pin reports six tail-resumptive source
-shapes, one `tokenless-tail-multi` lowering, and 31 `materialized-resume`
+shapes, one `tokenless-tail-multi` lowering, and 33 `materialized-resume`
 lowerings. The detailed table includes each clause's declared mode.
 
 ## Reconstruction
@@ -229,8 +229,8 @@ Expected deterministic results:
 
 - the effect-linearity manifest checker validates every named byte sequence;
 - `dune build @all` and `dune build @doc` exit zero;
-- the forced suite passes all 564 compiled Alcotest/QCheck cases and 32 cram transcripts,
-  including 13 generated Once-operation parity cases;
+- the forced suite passes all 587 compiled Alcotest/QCheck cases and 32 cram transcripts,
+  including 14 generated Once-operation parity cases;
 - the clang native differential reports 69 byte-identical programs, 8 manifested
   refusals, and 0 failures;
 - formatting exits zero without changing tracked source;

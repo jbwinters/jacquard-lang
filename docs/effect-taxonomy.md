@@ -1,6 +1,7 @@
 # Blessed Effect Taxonomy v1
 
-Status: ratified for implementation review (ET.0, D56-D63), July 2026.
+Status: ratified taxonomy (ET.0, D56-D63) with Audit first-release promoted by
+ET.2, July 2026.
 
 This specification freezes the shared effect vocabulary used by signatures,
 authority manifests, package review, and future registry metadata. It is a
@@ -76,7 +77,7 @@ mode; there is no inference from names.
 | `Log` | `log` | `official` | `world` | `-` | `once` | `medium` | `3` | `reserved` | `first-release` | `log.emit:(LogEntry)->()` | emit a structured operational log entry |
 | `Infer` | `infer` | `official` | `model` | `-` | `once` | `medium` | `3` | `implemented` | `324b8f59279db3cabbfaaba430168717057cea8fc1435a11a1a9106e3e6fb4d8` | `complete:(Prompt)->Text` | request a model completion selected by the handler |
 | `Approval` | `approval` | `official` | `governance` | `-` | `once` | `special` | `3` | `reserved` | `first-release` | `approval.ask:(Proposal)->Decision` | request hash-bound consent for an exact proposal |
-| `Audit` | `audit` | `official` | `governance` | `-` | `once` | `special` | `3` | `reserved` | `first-release` | `audit.record:(AuditEntry)->()` | record governance evidence in an append-only stream |
+| `Audit` | `audit` | `official` | `governance` | `-` | `once` | `special` | `3` | `implemented` | `2c148fbc2e26bdc6f01279a8bf176f54d5798536e1f96805aa4f7c7a57e67632` | `audit.record:(AuditEntry)->()` | record governance evidence in an append-only stream |
 | `Secret` | `secret` | `official` | `governance` | `-` | `once` | `special` | `3` | `reserved` | `first-release` | `secret.read:(SecretRef)->Secret;secret.expose:(Secret)->Text` | resolve opaque confidential material or explicitly expose it |
 | `Judge` | `judge` | `official` | `governance` | `-` | `once` | `special` | `3` | `reserved` | `first-release` | `judge.assess:(Call)->Assessment` | assess a proposed call without performing it |
 | `Async` | `async` | `official` | `concurrency` | `a` | `once` | `none` | `2` | `reserved` | `first-release` | `async.spawn:(()->{Async\|e}a)->Task a;async.await:(Task a)->TaskResult a;async.cancel:(Task a)->();async.yield:()->()` | schedule structured tasks while charging child effects to the parent row |
@@ -136,7 +137,10 @@ type ChannelError = ChannelClosed
 ```
 
 `Hash`, `Bytes`, `Secret`, `Task`, and `ChannelHandle` are opaque
-library/runtime types. `Secret`
+library/runtime types. Hash has no public value constructor: `hash.parse`
+accepts only the canonical 64-lowercase-hex HASH_V0 spelling, and
+`hash.to-text` returns that unique spelling. Its marker is unavailable by both
+name and direct derived hash, and the OCaml `Hash.t` representation is abstract. `Secret`
 has no `Show` instance; generic inspection renders it redacted. `secret.expose`
 is the only standard conversion to `Text`, so deliberate exposure remains in
 the effect row. This is non-derivability, not information-flow tracking: after
@@ -148,14 +152,14 @@ declared authority, and preconditions. Presentation summary is excluded.
 scripted Approval handler returns `Escalate`, never `Approved`.
 
 The declarations below are an executable surface fixture for the currently
-resolvable reserved world, governance, and Channel operation boundaries. Its
-small carrier constructors for future opaque types are test scaffolding, not
+resolvable reserved world, governance, and Channel operation boundaries. The
+fixture reuses the released Audit governance types from the prelude; its small
+carrier constructors for other future opaque types are test scaffolding, not
 public constructors. `Async` is deliberately absent: the normative self-row
 above cannot become an executable declaration until the resolver and special
 spawn typing obligation are implemented.
 
 ```jacquard doctest=effect-taxonomy-schemas mode=check fixture=effect-taxonomy-schemas.jac stdout=effect-taxonomy-schemas.stdout stderr=empty exit=0
-type Hash = | HashValue(value: Text)
 type Bytes = | BytesValue(value: Text)
 type Sql = | SqlValue(value: Text)
 type Params = | ParamsValue(value: List Text)
@@ -164,8 +168,6 @@ type Key = | KeyValue(value: Text)
 type Signature = | SignatureValue(value: Bytes)
 type LogEntry = | LogEntryValue(value: Text)
 
-type Risk = | Low | Medium | High | Forbidden
-type Verdict = | Allow | Simulate | Ask | Block
 type Authority =
   | Effect(name: Text)
   | Resource(effect-name: Text, scope: Text)
@@ -177,10 +179,6 @@ type Call =
       authority: List Authority,
       summary: Text,
       preconditions: Code)
-type Assessment =
-  | Assessment(risk: Risk, confidence: Real, reasons: List Text, evidence: Code)
-type OutcomeSummary =
-  | OutcomeSummary(status: Text, digest: Hash, detail: Text)
 type Proposal =
   | Proposal(
       subject: Hash,
@@ -189,14 +187,6 @@ type Proposal =
       summary: Text,
       authority: List Authority,
       preview: Option OutcomeSummary)
-type Decision =
-  | Approved(proposal: Hash, approver: Text, evidence: Code)
-  | Denied(proposal: Hash, approver: Text, reason: Text)
-  | Escalate(proposal: Hash, reason: Text)
-type AuditEntry =
-  | Evaluated(call: Hash, policy: Hash, assessment: Assessment, verdict: Verdict)
-  | Consented(call: Hash, proposal: Hash, decision: Decision)
-  | Completed(call: Hash, branch: Text, outcome: OutcomeSummary)
 type SecretRef = | SecretRef(name: Text, version: Option Text)
 type Secret = | OpaqueSecret
 type Task a = | TaskHandle(id: Int)
@@ -228,9 +218,6 @@ once effect Log where {
 }
 once effect Approval where {
   approval.ask : (Proposal) -> Decision
-}
-once effect Audit where {
-  audit.record : (AuditEntry) -> ()
 }
 once effect Secret where {
   secret.read : (SecretRef) -> Secret
@@ -278,7 +265,7 @@ and is breaking. Adding an operation is also breaking for the same reason;
 handlers silently remain exhaustive. Renames in the mutable name index and
 metadata-only changes retain identity.
 
-The twelve implemented blessed effects keep their exact current declaration
+The thirteen implemented blessed effects keep their exact current declaration
 hashes listed above. ET.0 does not rewrite those declarations. This preserves
 the historical absence encoding for `multi`, the reviewed `once` discriminator,
 and existing operation names—including `Eval.eval-code`. Each reserved effect's
@@ -289,12 +276,14 @@ edit after that point is a new interface, never an in-place revision.
 ### Registry realization
 
 `Effect_registry` is the executable copy used by review tooling. Its resolved
-registry contains exactly the twelve implemented entries and is keyed only by
+registry contains exactly the thirteen implemented entries and is keyed only by
 their full `DefEffect` hashes. The complete 25-entry catalog is also typed, but
-the thirteen `reserved` entries carry no hash and name only the
+the twelve `reserved` entries carry no hash and name only the
 `first-release` policy; registration rejects them until a real first interface is
 implemented and frozen. This keeps schema reservation distinct from resolved
-program identity.
+program identity. Audit is the first reserved interface promoted by that rule:
+its v1 identity above is the shipped `DefEffect` hash, and its sole operation is
+once `audit.record : (AuditEntry) -> ()`.
 
 Plain rendering is deterministic. Optional ANSI styling colors only the risk
 token of an identity-confirmed official entry. An unregistered effect with

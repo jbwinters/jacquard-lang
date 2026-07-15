@@ -453,6 +453,39 @@ This document assumes it exists for exactly two library uses so far: `observe` a
 root, and integer division by zero in `int.div!`'s underlying builtin. Both are
 trivially reworded if D7 resolves the other way.
 
+### Audit evidence and handlers
+
+`Audit` is the released ring-3 governance effect. Its sole operation is once
+`audit.record : (AuditEntry) -> ()`; the `Evaluated`, `Consented`, and
+`Completed` constructors and their nested governance values are stable v1
+interfaces. `audit.in-memory` discharges Audit hermetically and returns the
+result paired with entries in occurrence order.
+
+`Hash` is opaque. There is no public unchecked value constructor:
+`hash.parse : (Text) -> Result Text Hash` accepts exactly 64 lowercase
+hexadecimal digits, and `hash.to-text` returns that unique HASH_V0 spelling.
+Short, uppercase, non-hexadecimal, prefixed, and otherwise alternate spellings
+are rejected. The marker constructor is absent from both the public name index
+and direct derived-hash lookup; the installed OCaml library also exposes
+`Hash.t` abstractly. `code.of-hash` preserves the validated digest as a real
+`#<digest>` form scalar rather than demoting it back to arbitrary text.
+
+`audit.entry-code : (AuditEntry) ->{} Code` is the standard serialization
+path. It builds versioned form data from typed fields. `audit.line-log` renders
+that Code as one compact, reparsable form and passes the line plus LF to an
+injected append callback. It never uses `debug.inspect`, JSON, or a generic
+value renderer. The callback's contract is `(Text) -> Result Text ()`: `Err`
+must mean that no bytes were appended. The handler returns `Err` without
+resuming, so failures of pre-action `Evaluated` and `Consented` writes are
+fail-closed and preserve action ordering.
+
+An `Err` while recording `Completed` is still returned, but the earlier action
+has already happened and cannot be rolled back by a log handler. Irreversible
+drivers must return a receipt or idempotency key in `OutcomeSummary` so an
+operator can reconcile the external action with the audit stream. The handler
+does not retry implicitly: a retry could duplicate an append after an ambiguous
+sink failure. ET.3 adds hash chaining over these same canonical entry forms.
+
 ### debug.inspect
 
 One reflection escape hatch, because agents debugging themselves need it. This
@@ -520,11 +553,9 @@ any mismatch. The dry-run carrier always returns `Escalate` and therefore
 cannot fabricate consent:
 
 ```jacquard doctest=stdlib-handler-policy mode=run fixture=stdlib-handler-policy.jac stdout=stdlib-handler-policy.stdout stderr=empty exit=0
-type Hash = | HashValue(value: Text)
 type Authority =
   | Effect(name: Text)
   | Resource(effect-name: Text, scope: Text)
-type OutcomeSummary = | OutcomeSummary(status: Text, digest: Hash, detail: Text)
 type Proposal =
   | Proposal(
       subject: Hash,
@@ -533,11 +564,6 @@ type Proposal =
       summary: Text,
       authority: List Authority,
       preview: Option OutcomeSummary)
-type Decision =
-  | Approved(proposal: Hash, approver: Text, evidence: Code)
-  | Denied(proposal: Hash, approver: Text, reason: Text)
-  | Escalate(proposal: Hash, reason: Text)
-
 once effect Approval where {
   approval.ask : (Proposal) -> Decision
 }
@@ -549,22 +575,24 @@ dry-run-with-proposal(proposal-hash, workflow) =
         continue(Escalate(proposal-hash, "dry-run cannot consent"))
   }
 
-proposal-hash = HashValue("proposal-v1")
-proposal =
-  Proposal(
-    HashValue("subject"),
-    HashValue("policy"),
-    HashValue("assessment"),
-    "ship?",
-    [],
-    None)
+parsed-hashes = (
+  hash.parse("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+  hash.parse("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+  hash.parse("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"),
+  hash.parse("dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"))
 
-dry-run-with-proposal(proposal-hash, fn () -> match approval.ask(proposal) {
-  | Escalate(HashValue("proposal-v1"), _) -> 42
-  | Escalate(_, _) -> 0
-  | Approved(_, _, _) -> 0
-  | Denied(_, _, _) -> 0
-})
+match parsed-hashes {
+  | (Ok(subject-hash), Ok(policy-hash), Ok(proposal-hash), Ok(assessment-hash)) -> {
+      let proposal-value = Proposal(subject-hash, policy-hash, assessment-hash, "ship?", [], None)
+      dry-run-with-proposal(proposal-hash, fn () -> match approval.ask(proposal-value) {
+	| Escalate(returned, _) ->
+		if code.eq?(code.of-hash(returned), code.of-hash(proposal-hash)) then 42 else 0
+	| Approved(_, _, _) -> 0
+	| Denied(_, _, _) -> 0
+      })
+    }
+  | _ -> None
+}
 ```
 
 Nested tuple destructuring stays visible inside a constructor pattern:

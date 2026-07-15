@@ -49,12 +49,18 @@ let intrinsics : (string * int) list =
     ("pmf", 2);
     ("dist.sample-lw", 3);
     ("code.of-int", 1);
+    ("code.of-real", 1);
+    ("code.of-hash", 1);
+    ("code.of-text", 1);
     ("code.to-int", 1);
     ("code.to-text", 1);
     ("code.form", 2);
     ("code.un-form", 1);
     ("code.eq?", 2);
     ("code.diff", 2);
+    ("code.render", 1);
+    ("hash.parse", 1);
+    ("hash.to-text", 1);
   ]
 
 (* ------------------------------------------------------------------ *)
@@ -234,7 +240,7 @@ let compile_program (store : Store.t) (d : discovery)
       match Store.lookup_kind store n Resolve.KCon with
       | Some e -> note_con e.Resolve.hash
       | None -> ())
-    [ "less"; "equal"; "greater"; "nil"; "cons"; "mk-pair"; "some"; "none" ];
+    [ "less"; "equal"; "greater"; "nil"; "cons"; "mk-pair"; "some"; "none"; "ok"; "err" ];
   (* init order: const members topologically by their const-member deps *)
   let member_list = Hashtbl.fold (fun _ cm acc -> cm :: acc) members [] in
   let member_list =
@@ -572,6 +578,13 @@ let build ~(store : Store.t) ~(tops : (Kernel.expr * string list * (Hash.t * str
             | Some so, Some no -> Some (so.Resolve.hash, no.Resolve.hash)
             | _ -> None
           in
+          let result_cons =
+            match
+              (Store.lookup_kind store "ok" Resolve.KCon, Store.lookup_kind store "err" Resolve.KCon)
+            with
+            | Some ok, Some err -> Some (ok.Resolve.hash, err.Resolve.hash)
+            | _ -> None
+          in
           (* one unit per declaration: group members by owning decl *)
           let by_decl : (Hash.t, Compile.compiled_member list) Hashtbl.t = Hashtbl.create 32 in
           List.iter
@@ -595,7 +608,7 @@ let build ~(store : Store.t) ~(tops : (Kernel.expr * string list * (Hash.t * str
           in
           let main_c =
             Emit.main_source prog ~precise ~v_true ~v_false ~orderings ~listcons ~pair ~option_cons
-              ~intrinsics ~manifests
+              ~result_cons ~intrinsics ~manifests
           in
           let cflags =
             match Sys.getenv_opt "JACQUARD_NATIVE_CFLAGS" with Some f -> f | None -> ""

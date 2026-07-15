@@ -67,7 +67,6 @@ let reserved_catalog_names =
     ("Crypto", "crypto");
     ("Log", "log");
     ("Approval", "approval");
-    ("Audit", "audit");
     ("Secret", "secret");
     ("Judge", "judge");
     ("Async", "async");
@@ -176,7 +175,8 @@ let catalog =
       "request a model completion selected by the handler";
     reserved "Approval" "approval" Governance Special
       "request hash-bound consent for an exact proposal";
-    reserved "Audit" "audit" Governance Special
+    released "Audit" "audit" Governance Special
+      "2c148fbc2e26bdc6f01279a8bf176f54d5798536e1f96805aa4f7c7a57e67632"
       "record governance evidence in an append-only stream";
     reserved "Secret" "secret" Governance Special
       "resolve opaque confidential material or explicitly expose it";

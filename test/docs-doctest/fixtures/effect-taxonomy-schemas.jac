@@ -1,4 +1,3 @@
-type Hash = | HashValue(value: Text)
 type Bytes = | BytesValue(value: Text)
 type Sql = | SqlValue(value: Text)
 type Params = | ParamsValue(value: List Text)
@@ -7,8 +6,6 @@ type Key = | KeyValue(value: Text)
 type Signature = | SignatureValue(value: Bytes)
 type LogEntry = | LogEntryValue(value: Text)
 
-type Risk = | Low | Medium | High | Forbidden
-type Verdict = | Allow | Simulate | Ask | Block
 type Authority =
   | Effect(name: Text)
   | Resource(effect-name: Text, scope: Text)
@@ -20,10 +17,6 @@ type Call =
       authority: List Authority,
       summary: Text,
       preconditions: Code)
-type Assessment =
-  | Assessment(risk: Risk, confidence: Real, reasons: List Text, evidence: Code)
-type OutcomeSummary =
-  | OutcomeSummary(status: Text, digest: Hash, detail: Text)
 type Proposal =
   | Proposal(
       subject: Hash,
@@ -32,14 +25,6 @@ type Proposal =
       summary: Text,
       authority: List Authority,
       preview: Option OutcomeSummary)
-type Decision =
-  | Approved(proposal: Hash, approver: Text, evidence: Code)
-  | Denied(proposal: Hash, approver: Text, reason: Text)
-  | Escalate(proposal: Hash, reason: Text)
-type AuditEntry =
-  | Evaluated(call: Hash, policy: Hash, assessment: Assessment, verdict: Verdict)
-  | Consented(call: Hash, proposal: Hash, decision: Decision)
-  | Completed(call: Hash, branch: Text, outcome: OutcomeSummary)
 type SecretRef = | SecretRef(name: Text, version: Option Text)
 type Secret = | OpaqueSecret
 type Task a = | TaskHandle(id: Int)
@@ -71,9 +56,6 @@ once effect Log where {
 }
 once effect Approval where {
   approval.ask : (Proposal) -> Decision
-}
-once effect Audit where {
-  audit.record : (AuditEntry) -> ()
 }
 once effect Secret where {
   secret.read : (SecretRef) -> Secret

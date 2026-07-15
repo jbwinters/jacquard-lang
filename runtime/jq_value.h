@@ -205,6 +205,8 @@ typedef struct jq_rt {
   const jq_con_info *ci_pair;    /* mk-pair, for the dist intrinsics (task 71) */
   const jq_con_info *ci_some;    /* option some, for the code intrinsics (task 73) */
   jq_value v_none;               /* option none, static (task 73) */
+  const jq_con_info *ci_ok;      /* Result constructors for validated host boundaries */
+  const jq_con_info *ci_err;
   uint16_t apply_n; /* argument count for the next jq_apply (set by the caller
                        immediately before the call: musttail forces jq_apply
                        onto the uniform signature, so n travels here) */
@@ -357,6 +359,9 @@ static inline jq_value jq_code_datum(jq_value v, uint16_t i) {
 static inline bool jq_is_code(jq_value v) {
   return jq_is_ptr(v) && jq_block_of(v)->tag == JQ_CODE;
 }
+static inline bool jq_is_hash(jq_value v) {
+  return jq_is_ptr(v) && jq_block_of(v)->tag == JQ_HASH;
+}
 
 /* allocate a node with the head and argc slots unset; fill each arg with
    jq_code_set (datum ownership transfers in) */
@@ -492,12 +497,18 @@ jq_value jq_i_support(jq_rt *rt, const jq_value *a);
 jq_value jq_i_pmf(jq_rt *rt, const jq_value *a);
 jq_value jq_i_dist_sample_lw(jq_rt *rt, const jq_value *a);
 jq_value jq_i_code_of_int(jq_rt *rt, const jq_value *a);
+jq_value jq_i_code_of_real(jq_rt *rt, const jq_value *a);
+jq_value jq_i_code_of_hash(jq_rt *rt, const jq_value *a);
+jq_value jq_i_code_of_text(jq_rt *rt, const jq_value *a);
 jq_value jq_i_code_to_int(jq_rt *rt, const jq_value *a);
 jq_value jq_i_code_to_text(jq_rt *rt, const jq_value *a);
 jq_value jq_i_code_form(jq_rt *rt, const jq_value *a);
 jq_value jq_i_code_un_form(jq_rt *rt, const jq_value *a);
 jq_value jq_i_code_eq_q(jq_rt *rt, const jq_value *a);
 jq_value jq_i_code_diff(jq_rt *rt, const jq_value *a);
+jq_value jq_i_code_render(jq_rt *rt, const jq_value *a);
+jq_value jq_i_hash_parse(jq_rt *rt, const jq_value *a);
+jq_value jq_i_hash_to_text(jq_rt *rt, const jq_value *a);
 /* the LW driver's root interception (jq_perform's ladder, jq_intrinsics.c) */
 jq_value jq_lw_sample(jq_rt *rt, jq_value dv);
 jq_value jq_lw_observe(jq_rt *rt, jq_value dv, jq_value v);
