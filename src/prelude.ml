@@ -54,12 +54,42 @@ let load ~dir store : ((string * Canon.decl_hashes list) list, Diag.t list) resu
           go [] forms
     in
     let rec go acc = function
-      | [] -> (
-          match Store.lookup_kind store "hash-opaque" Resolve.KCon with
-          | Some { Resolve.hash; _ } ->
-              Store.hide_derived store hash;
-              Ok (List.rev acc)
-          | None -> Ok (List.rev acc))
+      | [] ->
+          List.iter
+            (fun name ->
+              match Store.lookup_kind store name Resolve.KCon with
+              | Some { Resolve.hash; _ } -> Store.hide_derived store hash
+              | None -> ())
+            [ "hash-opaque"; "secret-opaque" ];
+          let bind_operation_alias effect_name operation_name alias =
+            match Store.lookup_kind store effect_name Resolve.KEffect with
+            | None -> err ~code:"E0702" "prelude effect `%s` is missing" effect_name
+            | Some { Resolve.hash = effect_hash; _ } -> (
+                match Store.locate store effect_hash with
+                | Ok { Store.decl = { Kernel.it = Kernel.DefEffect { ops; _ }; _ }; decl_hash; _ }
+                  -> (
+                    let rec find ordinal = function
+                      | [] -> None
+                      | (operation : Kernel.opspec) :: rest ->
+                          if operation.op_name = operation_name then Some ordinal
+                          else find (ordinal + 1) rest
+                    in
+                    match find 0 ops with
+                    | Some ordinal -> Store.bind_name store alias (Canon.op_hash decl_hash ordinal)
+                    | None ->
+                        err ~code:"E0702" "prelude effect `%s` has no `%s` operation" effect_name
+                          operation_name)
+                | Ok _ -> err ~code:"E0702" "prelude name `%s` is not an effect" effect_name
+                | Error diagnostics -> Error diagnostics)
+          in
+          let ( let* ) = Result.bind in
+          (* Kernel names are flat. Keep the long-standing bare [read] spelling for Fs while
+             exposing the collision-free ratified Secret spellings. The declaration still carries
+             the exact operation names [read]/[expose], so its interface identity is unchanged. *)
+          let* () = bind_operation_alias "secret" "read" "secret.read" in
+          let* () = bind_operation_alias "secret" "expose" "secret.expose" in
+          let* () = bind_operation_alias "fs" "read" "read" in
+          Ok (List.rev acc)
       | file :: rest -> (
           match load_file file with
           | Error ds -> Error ds
@@ -829,6 +859,40 @@ let install_infer ?cache_dir (ctx : Eval.ctx) : (unit, Diag.t list) result =
             (Runtime_err.Type_error
                (Printf.sprintf "complete expects one prompt, got %s"
                   (String.concat ", " (List.map Value.show args)))));
+  Ok ()
+
+(** [install_secret ~read ctx] installs the two Secret root operations for an embedding-provided
+    resolver. [read ~name ~version] is the only ingress for secret bytes; [secret.expose] is the
+    only standard operation that converts the opaque runtime value back to [Text]. This helper does
+    not define a CLI provider or ambient authority: callers must explicitly supply one. Resolver
+    failures pass through as runtime errors. *)
+let install_secret ~read (ctx : Eval.ctx) : (unit, Diag.t list) result =
+  let ( let* ) = Result.bind in
+  let* read_op = lookup_hash (Eval.store ctx) ~kind:Resolve.KOp "secret.read" in
+  let* expose_op = lookup_hash (Eval.store ctx) ~kind:Resolve.KOp "secret.expose" in
+  let bad operation args =
+    Error
+      (Runtime_err.Type_error
+         (Printf.sprintf "%s received %s" operation (String.concat ", " (List.map Value.show args))))
+  in
+  Eval.register_root_handler ctx read_op (fun args ->
+      match args with
+      | [ Value.VCon { name = "secret-ref"; args = [ Value.VText name; version ]; _ } ] -> (
+          let version =
+            match version with
+            | Value.VCon { name = "none"; args = []; _ } -> Some None
+            | Value.VCon { name = "some"; args = [ Value.VText value ]; _ } -> Some (Some value)
+            | _ -> None
+          in
+          match version with
+          | Some version ->
+              Result.map (fun bytes -> Value.VSecret (Secret.of_string bytes)) (read ~name ~version)
+          | None -> bad "secret.read" args)
+      | args -> bad "secret.read" args);
+  Eval.register_root_handler ctx expose_op (fun args ->
+      match args with
+      | [ Value.VSecret secret ] -> Ok (Value.VText (Secret.expose secret))
+      | args -> bad "secret.expose" args);
   Ok ()
 
 (* [builtin_signatures] is defined after the grant installers. Module initialization replaces this

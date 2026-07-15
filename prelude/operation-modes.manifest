@@ -17,6 +17,8 @@ fs.list-dir once
 infer.complete once
 audit.record once
 approval.ask once
+secret.read once
+secret.expose once
 judge.assess once
 dist.sample multi
 dist.observe multi

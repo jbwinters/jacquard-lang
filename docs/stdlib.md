@@ -600,6 +600,24 @@ laundered behind `Judge`. `judge.fixed` repeats one validated value, while
 assessment. Posterior representations, `Dist`, and uncertainty policy remain
 the separate G5 phase.
 
+### Secret references and deliberate exposure
+
+`SecretRef(name: Text, version: Option Text)` identifies confidential material;
+it never carries the material itself. `Secret` is an opaque runtime value with
+no public constructor, `Show` instance, Code conversion, or Audit encoder. Its
+marker constructor is removed from both the public name and derived-hash
+indexes. Both `secret.read : (SecretRef) -> Secret` and
+`secret.expose : (Secret) -> Text` are `once` operations, so the authority to
+obtain plaintext remains visible in the `Secret` effect row.
+
+The standard library deliberately does not invent a credential store or an
+ambient CLI grant. Embeddings may explicitly install a resolver with
+`Prelude.install_secret`; native and interpreter values retain distinct opaque
+tags. Generic rendering, runtime errors, traces, and `debug.inspect` always use
+the fixed marker `<secret redacted>`. This is an opacity boundary, not taint
+tracking: after explicit exposure the result is ordinary Text and code can copy
+or leak it. Keep exposure late and typed Audit inputs separate from plaintext.
+
 ### debug.inspect
 
 One reflection escape hatch, because agents debugging themselves need it. This
@@ -610,10 +628,10 @@ term declaration.
 debug.inspect : (a) ->{} Text
 ```
 
-It ignores abstraction, prints anything structurally, and breaks parametricity,
-which is why it is documented as a debugging tool, banned by convention from
-appearing in library code, and flagged as owner decision D8 in case even this is
-too much hole.
+It prints ordinary values structurally and breaks their abstraction, which is
+why it is documented as a debugging tool and banned by convention from library
+code. Secret is the hard exception: inspection returns exactly
+`<secret redacted>` and never touches its payload.
 
 ## 8. Names, versions, and the index
 

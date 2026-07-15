@@ -111,7 +111,7 @@ void jq_block_free(jq_block *b) {
 }
 
 /* TEXT needs byte-granular payload after the length word. */
-static jq_block *alloc_text_block(uint64_t len) {
+static jq_block *alloc_bytes_block(uint8_t tag, uint64_t len) {
   if (len > ((uint64_t)1 << 48)) oom(); /* absurd length: refuse before the size math */
   /* payload: 1 length word + len bytes, rounded up to whole words */
   uint64_t words = 1 + (len + 7) / 8;
@@ -124,7 +124,7 @@ static jq_block *alloc_text_block(uint64_t len) {
   jq_block *b = malloc(sizeof(jq_block) + 8 + (size_t)((len + 7) / 8) * 8);
   if (!b) oom();
   b->rc = 1;
-  b->tag = JQ_TEXT;
+  b->tag = tag;
   b->flags = 0;
   b->n = (uint16_t)words;
   return b;
@@ -153,7 +153,14 @@ jq_value jq_real(double d) {
 }
 
 jq_value jq_text(const uint8_t *bytes, uint64_t len) {
-  jq_block *b = alloc_text_block(len);
+  jq_block *b = alloc_bytes_block(JQ_TEXT, len);
+  b->payload[0] = len;
+  if (len) memcpy(&b->payload[1], bytes, len);
+  return jq_of_block(b);
+}
+
+jq_value jq_secret(const uint8_t *bytes, uint64_t len) {
+  jq_block *b = alloc_bytes_block(JQ_SECRET, len);
   b->payload[0] = len;
   if (len) memcpy(&b->payload[1], bytes, len);
   return jq_of_block(b);
