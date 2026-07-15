@@ -1,10 +1,10 @@
-# Structured Concurrency SC.4 Evidence
+# Structured Concurrency SC.4 + SC.5 Evidence
 
 Status: every spawned child effect is charged through the exact once Async
-interface represented by SC.3. The law now survives every supported
-higher-order transport route. This milestone intentionally contains no
-scheduling policy, executable structured scope, lifecycle engine, or
-detached/root Async handler.
+interface represented by SC.3, including every supported higher-order transport
+route, and the policy-independent scheduler lifecycle core is implemented. This
+combined milestone intentionally contains no scheduling policy, executable
+structured scope, host concurrency/I/O, or detached/root Async handler.
 
 - Reconstruction base: `ed02113`
 - Evidence overlay: [MANIFEST.sha256](MANIFEST.sha256)
@@ -31,8 +31,8 @@ four-operation `Async a` effect frozen by SC.0. The declaration identities are:
 
 The prelude golden pins all whole/member hashes. Focused tests load every
 declaration from the content-addressed store, print it, read it, rebuild the
-kernel declaration, and re-hash the corresponding member. SC.4 changes no
-declaration identity and adds no kernel or runtime form.
+kernel declaration, and re-hash the corresponding member. SC.4 and SC.5 change
+no declaration identity and add no kernel form.
 
 ## Generalized child-effect law
 
@@ -117,14 +117,44 @@ byte-compares interpreter and native output for Done/Failed/Cancelled, tests
 the private carrier diagnostic, and pins the clean unhandled CLI failure. The
 C/OCaml show parity corpus includes a redacted inert Task value.
 
+## Scheduler lifecycle core
+
+`Scheduler_core` owns deterministic body/child IDs, opaque scope-local handles,
+task lifecycle, await edges, immutable terminal results, cooperative
+cancellation requests, and opaque resume tokens. Resume ownership is
+destructive: checkout removes the sole token, suspension returns one token, and
+terminal transitions or cancellation delivery drop it. Explicit scope close
+removes all wait edges and transfers remaining owned tokens to the caller for
+destruction. Invalid lifecycle or ownership operations return E0908; foreign
+handles continue to return E0907.
+
+Await registration permits multiple same-scope waiters and preserves their
+registration order on wakeup. Terminal awaits are immediate. Self-await and
+closed cycles produce the frozen task-failure messages and terminalize cycle
+members atomically with respect to wakeup reporting: every member drops its
+resume and reaches `failed` before registration-ordered external waiters become
+runnable. No terminal cycle member can appear in the returned wakeup list. The
+core returns the handles made runnable by a transition but has no runnable queue
+and makes no policy decision.
+
+Focused Alcotest and QCheck coverage pins the transition table, resume-token
+ownership, deterministic IDs, yield suspension/wakeup, multiple waiters,
+immediate terminal awaits, completion/failure/cancellation, self-await, closed
+two- and three-node cycles, external/cancelled waiter controls, a property that
+every returned wakeup is runnable with one resume, close cleanup, and
+foreign-handle diagnostics. The existing handler
+gauntlet and interpreter/native runtime suites continue to cover affine Once
+capture enforcement and the inert Task boundary around this core.
+
 ## Reconstruction and verification
 
-The manifest is the complete successor overlay on validated SC.3 commit
+The manifest is the complete combined SC.4 + SC.5 successor overlay on validated
+SC.3 commit
 `ed02113`. Reconstruct it under repository-local scratch space:
 
 ```sh
 base=ed02113
-dest="$PWD/.scratch/sc4-evidence-copy"
+dest="$PWD/.scratch/sc4-sc5-evidence-copy"
 manifest=docs/release/structured-concurrency/MANIFEST.sha256
 rm -rf "$dest"
 mkdir -p "$dest"
@@ -152,7 +182,8 @@ git diff --exit-code
 opam exec -- dune build @doc
 ```
 
-The scheduler, executable scopes, cancellation delivery, lifecycle state, and
-root handler remain later C1 tasks. SC.4 is a checker/evidence milestone only;
-its `async.scope` fixture is compile-only handler scaffolding and is never
-claimed as scheduler execution.
+Scheduling policy, executable scopes, effect routing, and the root handler
+remain later C1 tasks. The SC.5 core supplies cancellation request/delivery
+state transitions but does not decide when a routed operation is reached. SC.4
+supplies the static child-effect law; its `async.scope` fixture remains
+compile-only handler scaffolding and is never claimed as scheduler execution.
