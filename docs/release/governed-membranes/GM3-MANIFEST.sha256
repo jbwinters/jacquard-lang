@@ -1,11 +1,11 @@
 # GM.3 overlay manifest
-# Base commit: 1434306
+# Base commit: 3e78a95
 # This attestation excludes itself to avoid a self-hash.
 0c0fafa01bdaef5d8f161f198f9450aefb4e95fd31235e01dc2c74a57b0b22a8  corpus/golden/prelude-hashes.golden
-db2b4775071ffe4067b51939b0bb28eefc0beb194d2259c95d5251b3b22179e2  docs/README.md
+2c4df1e3ca9c3049625e1af3a2221faa6fb49c15fe743bfd99e621b64b2e37b8  docs/README.md
 32bd10d9c8522d59edf9878c2e8c1c0b64a07525a6d3657f125473473b250934  docs/effect-membranes.md
-d9de5728519bcba251a6bcce9c582372d80778a3cd1c9b4157e78f0d7628755d  docs/effect-taxonomy.md
-643d206f06302c4270951f6d0fca3b60c8357bca55b10cf94dd23113cd67b91a  docs/release/governed-membranes/GM3-EVIDENCE.md
+72cda673c5295b7627c8a65a5ff6a6257a4ad545b26ad9f3b0a96988ad35479b  docs/effect-taxonomy.md
+70222d96711b863ca63f2e77f8155f7ab25f7f8234ef25d99957b9a370330572  docs/release/governed-membranes/GM3-EVIDENCE.md
 eb2bb3de901200b07f84a7439f9700c6625150fae21b5023c14817fc03ab124e  docs/stdlib.md
 1f250cf52d21ea33b02aa498a0ed351c269096f810e3564dada5f5e6f969cd8a  prelude/23-governance-policy.jqd
 0fa74e7d971c271c8ad4e4e96ea73b0477b123eccae605a7141fce7e9fb6408a  prelude/rings.manifest

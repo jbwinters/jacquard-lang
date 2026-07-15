@@ -1,6 +1,7 @@
 # Governed Membranes GM.3 Evidence
 
-Status: reconstructible GM.3 policy overlay on validated GM.2 commit `1434306`.
+Status: reconstructible GM.3 policy overlay on validated GM.2 plus ET.3
+integration commit `3e78a95`.
 
 GM.3 completes the pure policy layer frozen by charter §6 and decisions D65,
 D66, and D72. It is additive: the LivePolicy, DryPolicy, StoredPolicy, and

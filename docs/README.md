@@ -94,7 +94,7 @@ Read these together when judging whether the release candidate is credible:
 - `release/governed-membranes/GM3-EVIDENCE.md`: GM.3 validated live, dry,
   stored, and bound policy boundaries plus exhaustive verdict-law evidence.
 - `release/governed-membranes/GM3-MANIFEST.sha256`: reconstructible GM.3 overlay
-  on the validated GM.2 commit `1434306`.
+  on the validated GM.2 plus ET.3 integration commit `3e78a95`.
 
 ## Maintenance Notes
 

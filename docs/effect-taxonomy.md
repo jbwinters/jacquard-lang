@@ -385,7 +385,9 @@ what detects removal of a valid tail.
 Library and CLI reads use one bounded fail-closed path: chain logs are limited
 to 16 MiB and entry inputs to 1 MiB. A read verifies that the regular file's
 descriptor and path identity, size, mtime, and ctime stay stable through EOF.
-Concurrent truncation, growth, replacement, over-limit input, and expected I/O
+A coherent snapshot then undergoes strict byte verification; a malformed
+snapshot returns its ordinary format diagnostic. Truncation, growth, or
+replacement detected during acquisition, over-limit input, and expected I/O
 failures produce E1306 before any record write. A pathname replacement never
 receives a record intended for the verified inode.
 
