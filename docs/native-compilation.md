@@ -19,11 +19,16 @@ The effect row is a static cost model. Compile each arrow by its row:
 
 - **Empty row `{}`** — plain host-stack calls. No CPS, no evidence, nothing.
   The ring-0 stdlib (the grid, map/set internals, dictionaries) lives here.
-- **Tail-resumptive handlers** — the empirically dominant case (state.run,
-  emit.pipe, every root grant): the handler resumes exactly once, in tail
-  position. Compile to a single indirect call through an evidence vector
-  (Xie & Leijen, ICFP 2020/2021, as shipped in Koka). No continuation is ever
-  materialized.
+- **Tail-resumptive `Multi` handlers** — the handler resumes exactly once, in
+  tail position. The current native backend uses a tokenless direct-return
+  protocol; a future evidence-vector optimization can turn the handler search
+  into a single indirect call (Xie & Leijen, ICFP 2020/2021, as shipped in
+  Koka).
+- **Tail-resumptive `Once` handlers** — the source has the same syntactic
+  shape, but the native backend must still materialize a shared affine resume
+  token. An enclosing `Multi` continuation can clone the suspended clause, and
+  all clones must observe the same used bit for E0906. These clauses are never
+  counted as the tokenless path.
 - **Genuinely capturing code** — `abort`-style early exits and one-shot
   captures pay selective CPS on the affected paths only.
 - **Multi-shot** — the priced tier: continuation cloning per extra resume.
@@ -218,7 +223,9 @@ Phase 1 landed as the `jacquard tiers` command plus tier sidecars in the store
 (derived data beside each object, keyed by member hash, excluded from identity
 like all metadata; objects stay write-once). The checker records every
 application's callee row and every handler clause's syntactic resume
-discipline; `test/cli/tiers.t` pins the prelude table so drift is visible.
+discipline. The successor `jacquard tiers` report keeps that source-shape
+table, then combines shape with the declared operation mode in a separate
+native-lowering table; `test/cli/tiers.t` pins both so drift is visible.
 
 Sweep over the prelude, all demos (escrow included), and the valid/sigs corpus:
 
@@ -236,12 +243,18 @@ fn pure              544  49%
 fn row-poly           69   6%
 fn effectful         175  15%
 
-== handler op clauses: 37 ==
+== handler op clauses: 37 (syntactic resumption shape; pre-mode snapshot) ==
 tail-resumptive        8  21%
 aborting               8  21%
 one-shot               3   8%
 multi-shot            18  48%
 ```
+
+This dated 37-clause sweep predates explicit operation modes and remains the
+Phase 1 source-shape record. In the current prelude-only pin, six of 32 clauses
+are syntactically tail-resumptive, but only the one tail-shaped `Multi` clause
+reports `tokenless-tail-multi`; the other 31 clauses, including five
+tail-shaped `Once` clauses, report `materialized-resume`.
 
 Reproduce with:
 

@@ -149,6 +149,11 @@ Multi clauses; every Once clause materializes a shared `JQ_RESUME`, so cloning
 an enclosing Multi continuation cannot clone the Once used-bit. Both cases are
 byte-identical between interpreter and native execution.
 
+`jacquard tiers` exposes the same distinction rather than treating syntactic
+shape as lowering: the current prelude pin reports six tail-resumptive source
+shapes, one `tokenless-tail-multi` lowering, and 31 `materialized-resume`
+lowerings. The detailed table includes each clause's declared mode.
+
 ## Reconstruction
 
 From the successor checkout, create the isolated base-plus-overlay copy under

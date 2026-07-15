@@ -460,9 +460,12 @@ and lower_general ctx env ~tail (e : Kernel.expr) (k : atom -> expr) : expr =
             refuse_eval_op ctx oh;
             note_op ctx oh;
             let capturing =
-              match (op_mode ctx oh, Tier.discipline ~resume:oc.Kernel.resume oc.Kernel.obody) with
-              | Kernel.Multi, Tier.TailResumptive -> false
-              | Kernel.Multi, _ | Kernel.Once, _ -> true
+              match
+                Tier.native_lowering ~mode:(op_mode ctx oh)
+                  (Tier.discipline ~resume:oc.Kernel.resume oc.Kernel.obody)
+              with
+              | Tier.TokenlessTailMulti -> false
+              | Tier.MaterializedResume -> true
             in
             (oh, capturing, oc) :: acc)
           [] ops

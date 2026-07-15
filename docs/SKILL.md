@@ -108,6 +108,11 @@ jac build PROGRAM.jqd -o program
 set and never runs the program. `run` loads declarations, then evaluates each
 bare top-level expression in order. Important exit codes are:
 
+`tiers` reports handler syntax and native lowering as separate tables. A
+tail-resumptive source shape is tokenless only for a `multi` operation; every
+`once` clause materializes the shared affine resume token, including a
+syntactically tail-resumptive clause.
+
 - `0`: success
 - `1`: checker or ordinary diagnostic failure
 - `2`: runtime failure
