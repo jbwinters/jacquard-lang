@@ -95,6 +95,11 @@ Read these together when judging whether the release candidate is credible:
   stored, and bound policy boundaries plus exhaustive verdict-law evidence.
 - `release/governed-membranes/GM3-MANIFEST.sha256`: reconstructible GM.3 overlay
   on the validated GM.2 plus ET.3 integration commit `3e78a95`.
+- `release/governed-membranes/GM4-EVIDENCE.md`: GM.4 hermetic Warp laws,
+  exhaustive finite supports, exact numeric edges, cache behavior, and mutation
+  detection evidence.
+- `release/governed-membranes/GM4-MANIFEST.sha256`: reconstructible GM.4 overlay
+  on validated GM.3 base `f813d11`.
 
 ## Maintenance Notes
 
