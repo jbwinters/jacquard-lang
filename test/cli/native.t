@@ -215,10 +215,10 @@ spelling of --allow works like cmdliner's:
   $ ./two-eff > n.out 2>&1; echo "exit $?"
   exit 3
   $ cat n.out
-  error[E0814]: this program requires the `clock` effect, which is not granted (performed via `now`)
-    hint: grant it with --allow clock, or handle the effect in the program
   error[E0814]: this program requires the `console` effect, which is not granted (performed via `println`)
     hint: grant it with --allow console, or handle the effect in the program
+  error[E0814]: this program requires the `clock` effect, which is not granted (performed via `now`)
+    hint: grant it with --allow clock, or handle the effect in the program
   $ diff i.out n.out && echo identical
   identical
   $ jacquard run hello.jqd --allow=console > i.out 2>&1

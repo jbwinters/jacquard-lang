@@ -56,15 +56,6 @@ local or stored helper, while any genuine in-range transfer receives E0817 even
 when another argument makes the call too large. Standalone affine checking keeps
 the conservative E0817 fallback for an out-of-range recursive transfer.
 
-The sole direct-capture exception is an immediate affine transformer:
-`App(Handle ..., value_args)` is recognized before ordinary application
-inference, and only the direct operation-clause lambda is analyzed with its own
-`Resume` live. The result cannot escape the application and its arguments must
-be syntactic values. Positive coverage pins the canonical transformer;
-negative coverage rejects bound, returned, stored, passed, aliased, repeatedly
-applied, and effectful-argument variants, as well as any capture nested below
-another lambda, quote, data constructor, or handler clause.
-
 Stored declarations retain canonical object spans rather than original author
 spans. Contextual E0817 failures therefore anchor at the author-visible
 `Resume` transfer site. E0816 witnesses instead use distinct, durable logical
@@ -137,6 +128,14 @@ E0816 diagnostics. A direct interpreter capture matrix then proves each exact
 operation produces E0906 on an unchecked second resume, while the existing C
 runtime parity probe pins byte-identical dynamic E0906 behavior.
 
+The composition regression distinguishes a Multi branch outside a freshly
+entered Once handler (legal, with a fresh token in every branch) from a Multi
+perform inside an already-captured Once clause (the second branch must receive
+E0906). Native lowering now reserves its tokenless tail-resumptive fast path for
+Multi clauses; every Once clause materializes a shared `JQ_RESUME`, so cloning
+an enclosing Multi continuation cannot clone the Once used-bit. Both cases are
+byte-identical between interpreter and native execution.
+
 ## Reconstruction
 
 From the successor checkout, create the isolated base-plus-overlay copy under
@@ -185,6 +184,8 @@ Expected deterministic results:
 - `dune build @all` and `dune build @doc` exit zero;
 - the forced suite passes all 564 compiled Alcotest/QCheck cases and 32 cram transcripts,
   including 13 generated Once-operation parity cases;
+- the clang native differential reports 69 byte-identical programs, 8 manifested
+  refusals, and 0 failures;
 - formatting exits zero without changing tracked source;
 - the native runtime check includes and passes `fatal once-resume-twice`.
 
