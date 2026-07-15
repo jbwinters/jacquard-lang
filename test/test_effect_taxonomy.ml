@@ -173,10 +173,10 @@ let test_complete_contract () =
   let doc = Corpus_support.read_file taxonomy_doc in
   Alcotest.(check int) "blessed effect count" 25 (List.length rows);
   Alcotest.(check int)
-    "implemented count" 13
+    "implemented count" 14
     (List.length (List.filter (fun row -> String.equal row.status "implemented") rows));
   Alcotest.(check int)
-    "reserved count" 12
+    "reserved count" 11
     (List.length (List.filter (fun row -> String.equal row.status "reserved") rows));
   check_unique "effect names unique" (List.map (fun row -> row.effect_name) rows);
   check_unique "official index names unique" (List.map (fun row -> row.index_name) rows);
@@ -249,7 +249,6 @@ let test_resolved_reserved_schemas () =
       ("Crypto", [ "crypto.verify"; "crypto.random" ]);
       ("Log", [ "log.emit" ]);
       ("Approval", [ "approval.ask" ]);
-      ("Secret", [ "secret.read"; "secret.expose" ]);
       ("Judge", [ "judge.assess" ]);
       ("Async", [ "async.spawn"; "async.await"; "async.cancel"; "async.yield" ]);
       ("Channel", [ "channel.open"; "channel.send"; "channel.recv"; "channel.close" ]);
@@ -475,7 +474,7 @@ let test_typed_registry_matches_contract () =
   let entries = Effect_registry.catalog in
   Alcotest.(check int) "catalog covers every blessed entry" 25 (List.length entries);
   Alcotest.(check int)
-    "only live identities enter the canonical registry" 13
+    "only live identities enter the canonical registry" 14
     (List.length (Effect_registry.entries Effect_registry.canonical));
   Alcotest.(check (list string))
     "catalog names exactly cover the TSV"

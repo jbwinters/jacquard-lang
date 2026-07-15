@@ -53,6 +53,7 @@ enum jq_tag {
   JQ_OP = 10,         /* first-class effect operation; static-only */
   JQ_BUILTIN = 11,    /* first-class primitive; static-only */
   JQ_FRAME = 12,      /* a suspended activation (task 71): code, ix, slots */
+  JQ_SECRET = 13,     /* opaque bytes; generic rendering is always redacted */
 };
 
 #define JQ_RC_STATIC UINT32_MAX
@@ -509,6 +510,7 @@ jq_value jq_i_code_diff(jq_rt *rt, const jq_value *a);
 jq_value jq_i_code_render(jq_rt *rt, const jq_value *a);
 jq_value jq_i_hash_parse(jq_rt *rt, const jq_value *a);
 jq_value jq_i_hash_to_text(jq_rt *rt, const jq_value *a);
+jq_value jq_i_debug_inspect(jq_rt *rt, const jq_value *a);
 /* the LW driver's root interception (jq_perform's ladder, jq_intrinsics.c) */
 jq_value jq_lw_sample(jq_rt *rt, jq_value dv);
 jq_value jq_lw_observe(jq_rt *rt, jq_value dv, jq_value v);
@@ -526,6 +528,7 @@ jq_value jq_con(const jq_con_info *info, const jq_value *fields); /* owned */
 jq_value jq_real(double d);
 jq_value jq_text(const uint8_t *bytes, uint64_t len); /* bytes copied */
 jq_value jq_hash(const uint8_t bytes[32]);
+jq_value jq_secret(const uint8_t *bytes, uint64_t len); /* bytes copied, opaque */
 /* env values owned; self_slot < env_n marks a non-owning slot (stored without
    dup by the caller per the cycle rule), self_slot == UINT16_MAX for none */
 jq_value jq_closure(void *code, uint16_t arity, uint16_t env_n,
@@ -559,6 +562,15 @@ static inline const uint8_t *jq_text_bytes(jq_value v) {
 }
 static inline const uint8_t *jq_hash_bytes(jq_value v) {
   return (const uint8_t *)&jq_block_of(v)->payload[0];
+}
+static inline bool jq_is_secret(jq_value v) {
+  return jq_is_ptr(v) && jq_block_of(v)->tag == JQ_SECRET;
+}
+static inline uint64_t jq_secret_len(jq_value v) {
+  return jq_block_of(v)->payload[0];
+}
+static inline const uint8_t *jq_secret_bytes(jq_value v) {
+  return (const uint8_t *)&jq_block_of(v)->payload[1];
 }
 
 /* closure payload: [0] code ptr, [1] arity | (self_slot+1) << 16, [2..] env */

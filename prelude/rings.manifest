@@ -343,3 +343,9 @@ audit.decision-code 3
 audit.entry-code 3
 audit.in-memory 3
 audit.line-log 3
+# --- 20-secret (ring 3 opaque authority boundary)
+secret-ref 3
+secret 3
+expose 3
+secret.read 3
+secret.expose 3

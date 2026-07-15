@@ -42,6 +42,7 @@ type ctx = {
   p_text : Hash.t;
   p_code : Hash.t;
   p_hash : Hash.t;
+  p_secret : Hash.t;
   builtin_sigs : (Hash.t, scheme) Hashtbl.t;
   term_sigs : (Hash.t, scheme) Hashtbl.t;
   mutable level : int;
@@ -105,6 +106,15 @@ let name_of ctx h =
   | Error _ -> String.sub (Hash.to_hex h) 0 8
 
 let show_ty ctx t = Types.show ~name_of:(name_of ctx) t
+
+let is_secret_ty ctx t =
+  match repr t with
+  | TCon (identity, []) ->
+      Hash.equal ctx.p_secret identity || String.equal (name_of ctx identity) "secret"
+  | _ -> false
+
+let is_text_ty ctx t =
+  match repr t with TCon (identity, []) -> Hash.equal ctx.p_text identity | _ -> false
 
 let surface_name_of ctx kind hash =
   match Store.locate ctx.store hash with
@@ -588,6 +598,16 @@ and infer ?(immediate_transformer = false) ctx env ~(ambient : row) (e : Kernel.
                 && (match arg.it with Kernel.Ref (_, Kernel.Term) -> true | _ -> false)
                 && eta_expansion_candidate ctx expected actual
               in
+              if
+                is_secret_ty ctx actual
+                && (is_text_ty ctx expected
+                   || Option.equal String.equal (Meta.name fn.meta) (Some "debug.inspect"))
+              then
+                err ~meta:diagnostic_meta ~code:"E0818"
+                  ~hint:
+                    "keep the value opaque; only `secret.expose` converts Secret to Text, and that \
+                     operation remains in the Secret effect row"
+                  "Secret has no Show or serialization instance and generic inspection is redacted";
               try Types.unify expected actual
               with Unify_error detail ->
                 if eta then
@@ -988,7 +1008,8 @@ let constructors_of ctx ?meta (h : Hash.t) (args : ty list) :
   if
     (* the primitive marker types are opaque: their token constructors exist only to give
        the declarations distinct identities and must not drive exhaustiveness *)
-    List.exists (Hash.equal h) [ ctx.p_int; ctx.p_real; ctx.p_text; ctx.p_code; ctx.p_hash ]
+    List.exists (Hash.equal h)
+      [ ctx.p_int; ctx.p_real; ctx.p_text; ctx.p_code; ctx.p_hash; ctx.p_secret ]
   then None
   else
     match Store.locate ctx.store h with
@@ -1279,8 +1300,10 @@ let make_ctx (store : Store.t) : (ctx, Diag.t list) result =
     | Some { Resolve.hash; _ } -> Ok hash
     | None -> Error [ Diag.error ~code:"E0805" (Printf.sprintf "primitive type `%s` missing" name) ]
   in
-  match (lookup "int", lookup "real", lookup "text", lookup "code", lookup "hash") with
-  | Ok p_int, Ok p_real, Ok p_text, Ok p_code, Ok p_hash ->
+  match
+    (lookup "int", lookup "real", lookup "text", lookup "code", lookup "hash", lookup "secret")
+  with
+  | Ok p_int, Ok p_real, Ok p_text, Ok p_code, Ok p_hash, Ok p_secret ->
       Ok
         {
           store;
@@ -1289,6 +1312,7 @@ let make_ctx (store : Store.t) : (ctx, Diag.t list) result =
           p_text;
           p_code;
           p_hash;
+          p_secret;
           builtin_sigs = Hashtbl.create 32;
           term_sigs = Hashtbl.create 64;
           level = 0;
@@ -1298,11 +1322,12 @@ let make_ctx (store : Store.t) : (ctx, Diag.t list) result =
           tier_apps = [];
           tier_ops = [];
         }
-  | Error ds, _, _, _, _
-  | _, Error ds, _, _, _
-  | _, _, Error ds, _, _
-  | _, _, _, Error ds, _
-  | _, _, _, _, Error ds ->
+  | Error ds, _, _, _, _, _
+  | _, Error ds, _, _, _, _
+  | _, _, Error ds, _, _, _
+  | _, _, _, Error ds, _, _
+  | _, _, _, _, Error ds, _
+  | _, _, _, _, _, Error ds ->
       Error ds
 
 type top_sig = {
@@ -1429,6 +1454,7 @@ module Recovery = struct
       p_text = base.p_text;
       p_code = base.p_code;
       p_hash = base.p_hash;
+      p_secret = base.p_secret;
       builtin_sigs;
       term_sigs;
       level = 0;
@@ -1541,6 +1567,7 @@ let checker_codes : (string * string) list =
     ("E0815", "effectful top-level definition body (effects belong on arrows)");
     ("E0816", "once resumption consumed twice on one possible execution path");
     ("E0817", "once resumption escapes its affine handler-clause scope");
+    ("E0818", "opaque Secret used by generic inspection or serialization");
     ("W0801", "redundant match clause");
     ("E1202", "recovery marker rejected by the strict checker");
   ]

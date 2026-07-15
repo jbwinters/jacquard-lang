@@ -74,6 +74,10 @@ Read these together when judging whether the release candidate is credible:
   published-head contract, offline mutation verification, and reproduction.
 - `release/effect-taxonomy/ET3-MANIFEST.sha256`: reconstructible ET.3 overlay on
   the validated ET.2 base; the ET.2 manifest remains unchanged.
+- `release/effect-taxonomy/ET4-EVIDENCE.md`: ET.4 opaque Secret runtime boundary,
+  explicit exposure contract, redaction guarantees, and adversarial evidence.
+- `release/effect-taxonomy/ET4-MANIFEST.sha256`: reconstructible ET.4 overlay on
+  the validated ET.3 base; predecessor manifests remain unchanged.
 
 ## Maintenance Notes
 

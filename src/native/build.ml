@@ -61,6 +61,7 @@ let intrinsics : (string * int) list =
     ("code.render", 1);
     ("hash.parse", 1);
     ("hash.to-text", 1);
+    ("debug.inspect", 1);
   ]
 
 (* ------------------------------------------------------------------ *)

@@ -1,7 +1,7 @@
 # Blessed Effect Taxonomy v1
 
-Status: ratified taxonomy (ET.0, D56-D63) with Audit first-release promoted by
-ET.2, July 2026.
+Status: ratified taxonomy (ET.0, D56-D63), with Audit promoted by ET.2 and
+Secret promoted by ET.4, July 2026.
 
 This specification freezes the shared effect vocabulary used by signatures,
 authority manifests, package review, and future registry metadata. It is a
@@ -78,7 +78,7 @@ mode; there is no inference from names.
 | `Infer` | `infer` | `official` | `model` | `-` | `once` | `medium` | `3` | `implemented` | `324b8f59279db3cabbfaaba430168717057cea8fc1435a11a1a9106e3e6fb4d8` | `complete:(Prompt)->Text` | request a model completion selected by the handler |
 | `Approval` | `approval` | `official` | `governance` | `-` | `once` | `special` | `3` | `reserved` | `first-release` | `approval.ask:(Proposal)->Decision` | request hash-bound consent for an exact proposal |
 | `Audit` | `audit` | `official` | `governance` | `-` | `once` | `special` | `3` | `implemented` | `2c148fbc2e26bdc6f01279a8bf176f54d5798536e1f96805aa4f7c7a57e67632` | `audit.record:(AuditEntry)->()` | record governance evidence in an append-only stream |
-| `Secret` | `secret` | `official` | `governance` | `-` | `once` | `special` | `3` | `reserved` | `first-release` | `secret.read:(SecretRef)->Secret;secret.expose:(Secret)->Text` | resolve opaque confidential material or explicitly expose it |
+| `Secret` | `secret` | `official` | `governance` | `-` | `once` | `special` | `3` | `implemented` | `6d092eccc3c9858a2a95120da5a011964cbb3ad76968e11c1cbb062c119fbb31` | `secret.read:(SecretRef)->Secret;secret.expose:(Secret)->Text` | resolve opaque confidential material or explicitly expose it |
 | `Judge` | `judge` | `official` | `governance` | `-` | `once` | `special` | `3` | `reserved` | `first-release` | `judge.assess:(Call)->Assessment` | assess a proposed call without performing it |
 | `Async` | `async` | `official` | `concurrency` | `a` | `once` | `none` | `2` | `reserved` | `first-release` | `async.spawn:(()->{Async\|e}a)->Task a;async.await:(Task a)->TaskResult a;async.cancel:(Task a)->();async.yield:()->()` | schedule structured tasks while charging child effects to the parent row |
 | `Channel` | `channel` | `official` | `concurrency` | `a` | `once` | `none` | `2` | `reserved` | `first-release` | `channel.open:()->ChannelHandle a;channel.send:(ChannelHandle a,a)->Result ChannelError ();channel.recv:(ChannelHandle a)->Result ChannelError a;channel.close:(ChannelHandle a)->()` | communicate typed values between structured tasks |
@@ -265,7 +265,7 @@ and is breaking. Adding an operation is also breaking for the same reason;
 handlers silently remain exhaustive. Renames in the mutable name index and
 metadata-only changes retain identity.
 
-The thirteen implemented blessed effects keep their exact current declaration
+The fourteen implemented blessed effects keep their exact current declaration
 hashes listed above. ET.0 does not rewrite those declarations. This preserves
 the historical absence encoding for `multi`, the reviewed `once` discriminator,
 and existing operation names—including `Eval.eval-code`. Each reserved effect's
@@ -276,14 +276,13 @@ edit after that point is a new interface, never an in-place revision.
 ### Registry realization
 
 `Effect_registry` is the executable copy used by review tooling. Its resolved
-registry contains exactly the thirteen implemented entries and is keyed only by
+registry contains exactly the fourteen implemented entries and is keyed only by
 their full `DefEffect` hashes. The complete 25-entry catalog is also typed, but
-the twelve `reserved` entries carry no hash and name only the
+the eleven `reserved` entries carry no hash and name only the
 `first-release` policy; registration rejects them until a real first interface is
 implemented and frozen. This keeps schema reservation distinct from resolved
-program identity. Audit is the first reserved interface promoted by that rule:
-its v1 identity above is the shipped `DefEffect` hash, and its sole operation is
-once `audit.record : (AuditEntry) -> ()`.
+program identity. Audit and Secret are the first two interfaces promoted by
+that rule; their v1 identities above are the shipped `DefEffect` hashes.
 
 Plain rendering is deterministic. Optional ANSI styling colors only the risk
 token of an identity-confirmed official entry. An unregistered effect with
