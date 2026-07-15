@@ -30,7 +30,7 @@ nonexhaustive-bool | nonexhaustive-bool.jqd:1:24-31: error[E0813]: this match is
   hint: add a clause matching the witness, or a (pwild) default
 nonexhaustive-nested | nonexhaustive-nested.jqd:1:24-31: error[E0813]: this match is not exhaustive: it misses some(some(false))
   hint: add a clause matching the witness, or a (pwild) default
-ungranted-effect | error[E0814]: this program requires the `console` effect, which is not granted (performed via `print`)
+ungranted-effect | error[E0814]: this program requires console [world/low] — talk to the process terminal, which is not granted (performed via `print`)
   hint: grant it with --allow console, or handle the effect in the program
 effectful-toplevel-body | effectful-toplevel-body.jqd:1:11-78: error[E0815]: top-level definition `sneaky` performs the `net` effect while being defined
   hint: wrap the body in a lambda and perform the effect when called

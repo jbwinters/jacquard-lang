@@ -1740,7 +1740,7 @@ let build_cmd file out prelude dry_run =
                                           in
                                           let manifest =
                                             List.map2
-                                              (fun h d -> (Check.name_of cctx2 h, Diag.to_string d))
+                                              (fun h d -> (h, Diag.to_string d))
                                               r.Types.effects msgs
                                           in
                                           Some

@@ -167,6 +167,65 @@ exit 3:
   $ diff i.out n.out && echo identical
   identical
 
+Grant names never identify effects. A user declaration named `console` stays
+unregistered in both engines, even with `--allow console`; the generated binary
+keeps its manifest and grant slots keyed by the resolved declaration hash:
+
+  $ cat > spoof-console.jqd <<'EOF_JQD'
+  > (defeffect console () (op print once ((tref text)) (ttuple)))
+  > (app (var print) (lit "spoof"))
+  > EOF_JQD
+  $ jacquard build spoof-console.jqd -o spoof-console > /dev/null
+  $ jacquard run spoof-console.jqd > i.out 2>&1; echo "exit $?"
+  exit 3
+  $ ./spoof-console > n.out 2>&1; echo "exit $?"
+  exit 3
+  $ diff i.out n.out && echo identical
+  identical
+  $ cat n.out
+  error[E0814]: this program requires unpackaged:5c34b2aa7fe3/console [unrated user effect #5c34b2aa7fe357ee14e3be78853839546a63f40fe47b597176620e00d8ec58f0], which is not granted (performed via `print`)
+    hint: handle the effect in the program (unregistered user effects have no built-in --allow grant)
+  $ jacquard run spoof-console.jqd --allow console > i.out 2>&1; echo "exit $?"
+  exit 3
+  $ ./spoof-console --allow console > n.out 2>&1; echo "exit $?"
+  exit 3
+  $ diff i.out n.out && echo identical
+  identical
+  $ cat n.out
+  error[E0814]: this program requires unpackaged:5c34b2aa7fe3/console [unrated user effect #5c34b2aa7fe357ee14e3be78853839546a63f40fe47b597176620e00d8ec58f0], which is not granted (performed via `print`)
+    hint: handle the effect in the program (unregistered user effects have no built-in --allow grant)
+
+The official and user-defined `console` identities can coexist in one row.
+Without a grant both are reported distinctly; granting the blessed identity
+removes only that requirement and leaves the user effect refused:
+
+  $ cat > two-consoles.jqd <<'EOF_JQD'
+  > (defeffect console () (op print once ((tref text)) (ttuple)))
+  > (let nonrec (pwild) (app (var println) (lit "official"))
+  >   (app (var print) (lit "spoof")))
+  > EOF_JQD
+  $ jacquard build two-consoles.jqd -o two-consoles > /dev/null
+  $ jacquard run two-consoles.jqd > i.out 2>&1; echo "exit $?"
+  exit 3
+  $ ./two-consoles > n.out 2>&1; echo "exit $?"
+  exit 3
+  $ diff i.out n.out && echo identical
+  identical
+  $ cat n.out
+  error[E0814]: this program requires unpackaged:5c34b2aa7fe3/console [unrated user effect #5c34b2aa7fe357ee14e3be78853839546a63f40fe47b597176620e00d8ec58f0], which is not granted (performed via `print`)
+    hint: handle the effect in the program (unregistered user effects have no built-in --allow grant)
+  error[E0814]: this program requires console [world/low] — talk to the process terminal, which is not granted (performed via `println`)
+    hint: grant it with --allow console, or handle the effect in the program
+  $ jacquard run two-consoles.jqd --allow console > i.out 2>&1; echo "exit $?"
+  exit 3
+  $ ./two-consoles --allow console > n.out 2>&1; echo "exit $?"
+  exit 3
+  $ diff i.out n.out && echo identical
+  identical
+  $ cat n.out
+  error[E0814]: this program requires unpackaged:5c34b2aa7fe3/console [unrated user effect #5c34b2aa7fe357ee14e3be78853839546a63f40fe47b597176620e00d8ec58f0], which is not granted (performed via `print`)
+    hint: handle the effect in the program (unregistered user effects have no built-in --allow grant)
+
 A later expression's refusal happens at ITS turn: the first expression's
 value has already printed and flushed on both engines, so it precedes the
 error even in a merged capture:
@@ -182,7 +241,7 @@ error even in a merged capture:
   exit 3
   $ cat n.out
   1
-  error[E0814]: this program requires the `console` effect, which is not granted (performed via `println`)
+  error[E0814]: this program requires console [world/low] — talk to the process terminal, which is not granted (performed via `println`)
     hint: grant it with --allow console, or handle the effect in the program
   $ diff i.out n.out && echo identical
   identical
@@ -215,9 +274,9 @@ spelling of --allow works like cmdliner's:
   $ ./two-eff > n.out 2>&1; echo "exit $?"
   exit 3
   $ cat n.out
-  error[E0814]: this program requires the `console` effect, which is not granted (performed via `println`)
+  error[E0814]: this program requires console [world/low] — talk to the process terminal, which is not granted (performed via `println`)
     hint: grant it with --allow console, or handle the effect in the program
-  error[E0814]: this program requires the `clock` effect, which is not granted (performed via `now`)
+  error[E0814]: this program requires clock [world/low] — observe wall-clock milliseconds or wait, which is not granted (performed via `now`)
     hint: grant it with --allow clock, or handle the effect in the program
   $ diff i.out n.out && echo identical
   identical

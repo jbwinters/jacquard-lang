@@ -1456,7 +1456,22 @@ let force_term ctx (h : Hash.t) : (scheme, Diag.t list) result =
 (** Render an effect row for manifests and signatures. *)
 let show_row ctx (r : row) : string =
   let r = repr_row r in
-  String.concat ", " (List.map (name_of ctx) (List.sort Hash.compare r.effects))
+  let named =
+    r.effects
+    |> List.map (fun identity -> (name_of ctx identity, identity))
+    |> List.sort (fun (name_a, hash_a) (name_b, hash_b) ->
+        match String.compare name_a name_b with 0 -> Hash.compare hash_a hash_b | order -> order)
+  in
+  let collides name =
+    List.fold_left
+      (fun count (candidate, _) -> if candidate = name then count + 1 else count)
+      0 named
+    > 1
+  in
+  named
+  |> List.map (fun (name, identity) ->
+      if collides name then Printf.sprintf "%s [#%s]" name (Hash.to_hex identity) else name)
+  |> String.concat ", "
 
 (* ------------------------------------------------------------------ *)
 (* Capability manifest (W3.6)                                          *)
@@ -1476,19 +1491,27 @@ let manifest_errors ctx ?(grantable = []) ~(granted : Hash.t list) (row : row) :
           | Some name -> Printf.sprintf " (performed via `%s`)" name
           | None -> ""
         in
-        let name = name_of ctx h in
+        let name_hint = name_of ctx h in
+        let metadata = Effect_registry.find_canonical h in
+        let requirement = Effect_registry.render_manifest_requirement ~name_hint h in
         (* pure effects (abort, state, ...) are never grantable; don't send the user to a
            --allow flag that will bounce with E0703. Callers pass Prelude.grantable_names;
-           an empty list keeps the generic hint. *)
+           an empty list keeps the generic hint. Identity, rather than a colliding user-effect
+           spelling, decides whether a built-in grant is ever suggested. *)
         let hint =
-          if grantable = [] || List.mem name grantable then
-            Printf.sprintf "grant it with --allow %s, or handle the effect in the program" name
-          else "handle the effect in the program (this effect is pure and cannot be granted)"
+          match metadata with
+          | Some metadata
+            when grantable = [] || List.mem metadata.Effect_registry.index_name grantable ->
+              Printf.sprintf "grant it with --allow %s, or handle the effect in the program"
+                metadata.index_name
+          | Some _ -> "handle the effect in the program (this effect is pure and cannot be granted)"
+          | None ->
+              "handle the effect in the program (unregistered user effects have no built-in \
+               --allow grant)"
         in
         Some
           (Diag.error ~code:"E0814" ~hint
-             (Printf.sprintf "this program requires the `%s` effect, which is not granted%s" name
-                via)))
+             (Printf.sprintf "this program requires %s, which is not granted%s" requirement via)))
     row.effects
 
 (** Registry of every diagnostic code the checker can emit (W3.7's coverage check keys on this list;
