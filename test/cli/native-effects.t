@@ -69,6 +69,49 @@ the diff-only loop above:
   $ jacquard build ../../test/native-gauntlet/g04-state-run.jqd -o state-branches > /dev/null
   $ ./state-branches
   cons((1, 1), cons((2, 2), nil))
+
+The D43 successor keeps the two prelude transformers whose next-state values
+must be computed before resuming. These witnesses pin their public behavior on
+both engines after that semantics-preserving source rewrite:
+
+  $ cat > record-transformer.jqd <<'EOF_JQD'
+  > (app (var throw.catch)
+  >   (lam ()
+  >     (app (var net.scripted)
+  >       (lam ()
+  >         (match
+  >           (app (var net.record)
+  >             (lam ()
+  >               (match (app (var fetch) (app (var mk-request) (lit "http://record") (lit "")))
+  >                 (clause (pcon mk-response (pwild) (pvar body)) (var body)))))
+  >           (clause (ptuple (pvar result) (pwild)) (var result))))
+  >       (app (var cons) (app (var mk-response) (lit 200) (lit "recorded")) (var nil))))
+  >   (lam ((pvar error)) (var error)))
+  > EOF_JQD
+  $ jacquard run record-transformer.jqd > record-i.out
+  $ cat record-i.out
+  "recorded"
+  $ jacquard build record-transformer.jqd -o record-transformer
+  error[E1101]: not yet compilable in native v1: net.record builtin `code.of-text` is not yet implemented natively
+  [1]
+  $ cat > fs-transformer.jqd <<'EOF_JQD'
+  > (app (var throw.catch)
+  >   (lam ()
+  >     (match
+  >       (app (var fs.in-memory)
+  >         (lam ()
+  >           (let nonrec (pwild) (app (var write) (lit "note") (lit "hello"))
+  >             (app (var read) (lit "note"))))
+  >         (app (var map.empty) (var text.ord)))
+  >       (clause (ptuple (pvar result) (pwild)) (var result))))
+  >   (lam ((pvar error)) (var error)))
+  > EOF_JQD
+  $ jacquard run fs-transformer.jqd > fs-i.out
+  $ jacquard build fs-transformer.jqd -o fs-transformer > /dev/null
+  $ ./fs-transformer > fs-n.out
+  $ diff fs-i.out fs-n.out && cat fs-i.out
+  "hello"
+
   $ jacquard build ../../test/native-gauntlet/g19-escaped-resume.jqd -o escaped > /dev/null
   $ ./escaped
   (done(2), done(3))

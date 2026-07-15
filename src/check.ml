@@ -406,35 +406,6 @@ let rec is_syntactic_value (e : Kernel.expr) : bool =
   | Kernel.Ann (inner, _) -> is_syntactic_value inner
   | _ -> false
 
-(** [quote_has_live_splice payload] reports whether evaluating a quote payload evaluates an unquote.
-    Such a quote is a value for generalization purposes but is not an effect-free argument for
-    immediate transformer elimination. *)
-let rec quote_has_live_splice ?(level = 0) (payload : Form.t) =
-  if payload.head = "unquote" && level = 0 then true
-  else
-    let nested_level =
-      match payload.head with "quote" -> level + 1 | "unquote" -> level - 1 | _ -> level
-    in
-    List.exists
-      (function Form.F nested -> quote_has_live_splice ~level:nested_level nested | _ -> false)
-      payload.args
-
-(** [is_immediate_transformer_argument e] recognizes expressions whose evaluation only produces a
-    value: literals, lookups, lambdas, inert quotes, tuples of values, and constructor applications
-    of values (with annotations erased). It deliberately excludes ordinary applications, lets,
-    matches, handlers, and quotes with live splices, even when later inference could prove some of
-    them pure. This syntactic boundary keeps the affine-transformer exception local and decidable.
-*)
-let rec is_immediate_transformer_argument (e : Kernel.expr) =
-  match e.it with
-  | Kernel.Lit _ | Kernel.Lam _ | Kernel.Var _ | Kernel.Ref _ | Kernel.GroupRef _ -> true
-  | Kernel.Quote payload -> not (quote_has_live_splice payload)
-  | Kernel.Tuple items -> List.for_all is_immediate_transformer_argument items
-  | Kernel.App ({ it = Kernel.Ref (_, Kernel.Con); _ }, args) ->
-      List.for_all is_immediate_transformer_argument args
-  | Kernel.Ann (inner, _) -> is_immediate_transformer_argument inner
-  | Kernel.App _ | Kernel.Let _ | Kernel.Match _ | Kernel.Handle _ | Kernel.Unquote _ -> false
-
 (* Close generalizable row tails that occur exactly once in the type: an unconstrained
    single-use row var carries no sharing information, and closing it gives honest displays
    like (a) ->{} a and safe-div : (int, int) ->{abort} int. *)
@@ -580,7 +551,7 @@ and infer ?(immediate_transformer = false) ctx env ~(ambient : row) (e : Kernel.
   | Kernel.App (fn, args) -> (
       let fn_ty =
         match fn.it with
-        | Kernel.Handle _ when List.for_all is_immediate_transformer_argument args ->
+        | Kernel.Handle _ when List.for_all Affine_resume.is_immediate_transformer_argument args ->
             (* This context is decided before inference and is not propagated through aliases or
                wrappers: only the literal function child of this one application receives it. *)
             infer ~immediate_transformer:true ctx env ~ambient fn
@@ -801,6 +772,9 @@ and infer ?(immediate_transformer = false) ctx env ~(ambient : row) (e : Kernel.
           | Kernel.Multi -> ()
           | Kernel.Once -> (
               (* Escape checking runs before inference so laundering a Resume retains E0817.
+                 In the immediate-transformer context it also proves each Resume-produced answer
+                 is the direct function child of one application, preventing a later Once token
+                 carried by that answer from being bound or duplicated.
                  Duplicate-consumption checking waits until after inference and answer-type
                  unification, ensuring malformed calls retain their ordinary E0801/E0803 error. *)
               match

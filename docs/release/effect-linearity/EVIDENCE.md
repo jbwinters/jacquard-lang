@@ -34,7 +34,14 @@ The sole affine-closure exception is established syntactically before
 inference. A `Handle` must be the literal function child of one `App`, and all
 arguments must be effect-free syntactic values. In that context only, a direct
 operation-clause lambda is treated as constructed and called once; its body is
-then checked by the same affine walk. Tests pin the canonical function-of-state
+then checked by the same affine walk. Each call of its captured Resume must be
+the direct function child of one nested application with syntactic-value
+arguments, immediately eliminating
+an answer that may carry a later Once token. Tests pin a positive two-Once
+composition and reject binding and duplicating the first answer or evaluating
+a Multi effect in the eliminating arguments, closing the
+composition hole where the second token could otherwise be called twice. Tests
+also pin the canonical function-of-state
 handler and reject a handler result that is bound, returned, stored, passed,
 aliased or applied twice, an effectful argument, a further lambda/quote/data or
 nested-clause capture, and two consumptions inside the transformer. For calls
@@ -88,12 +95,30 @@ in-memory filesystem) retain their original function-of-state transformers and
 public signatures. D43 recognizes only the canonical immediate affine shape:
 the enclosing handler result is applied immediately to syntactic-value
 arguments, a direct clause lambda captures its own resumption, and that lambda
-is checked with the ordinary zero-or-one path rules. Binding, returning,
+is checked with the ordinary zero-or-one path rules. A captured-Resume call is
+accepted only as the direct function child of a nested application whose
+arguments are syntactic values; its answer
+cannot be bound or duplicated and thereby launder a later Once token. Binding, returning,
 storing, passing, aliasing, repeated application, effectful arguments, and any
 further closure/quote/data/nested-clause escape remain E0817. A forced checker
 sweep covers every exported prelude term; exact signature assertions cover all
 seven transformers, and a behavior witness proves caller `State` remains
 outward rather than being swallowed by the world fixture.
+
+The stricter nested-application value boundary required two semantics-preserving
+source rewrites: `net.record` now computes `next-log` before resuming, and
+`fs.in-memory` computes `next-map` before its write resumption. Their public
+signatures remain exactly pinned with the other five transformers. The
+`net.record` interpreter witness still produces `"recorded"`; native retains
+its pre-existing E1101 refusal because `code.of-text` is not implemented in
+the backend. The `fs.in-memory` interpreter and native witnesses both produce
+`"hello"`. The source-visible term hashes change deliberately while their
+effect interface hashes remain unchanged:
+
+| term | old member hash | new member hash |
+|------|-----------------|-----------------|
+| `net.record` | `212354fb4c453a8772c37feb097919897fdd4a01c577ce1762d5aa220a8c3f33` | `468cd3f499430c990615b6df71e4d7bc492f3051f780b1be4021a7ee20d95eac` |
+| `fs.in-memory` | `946c74fc381164f0dc412d96bc309d74c61749326c398649021b990edbd82d25` | `af906d2328c5b721f658811cce936fa29d8a3f374fe80b6c99248b4b9c002c82` |
 
 State branch independence is pinned in the interpreter and native differential
 lanes by placing `state.run` inside Multi `fault.all`. Each branch starts from

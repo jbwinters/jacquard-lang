@@ -18,8 +18,15 @@ type clause_context =
       (** How the enclosing handler result is used. [Immediately_applied_transformer] is a trusted
           checker witness: the [Handle] is the direct function child of one [App], every argument is
           a syntactic value, and therefore a direct clause lambda is constructed and eliminated
-          exactly once. It opens only that outer lambda; captures under any further lambda remain
-          escapes. *)
+          exactly once. It opens only that outer lambda; every captured-Resume call result must then
+          be the direct function child of one nested application, so a result carrying a later Once
+          token cannot be bound or duplicated. Captures under any further lambda remain escapes. *)
+
+val is_immediate_transformer_argument : Kernel.expr -> bool
+(** [is_immediate_transformer_argument expression] recognizes the closed syntactic-value boundary
+    used for both the outer handler application and the nested elimination of a Resume-produced
+    answer. It accepts literals, lookups, lambdas, inert quotes, tuples and constructor trees of
+    values, plus annotations around those forms. *)
 
 val check_clause :
   ?resolve_term:(Hash.t -> resolved_callable option) ->
@@ -31,8 +38,10 @@ val check_clause :
     drop, call, or transfer [resume] at most once on every possible execution path. Match arms are
     exclusive. Transfers are allowed only to a local or resolved lambda parameter whose body passes
     the same check. With [context=Immediately_applied_transformer], a direct outer clause lambda is
-    treated as called exactly once and its body receives the same affine budget. E0816 reports two
-    consumption spans; E0817 reports an escape/capture site. *)
+    treated as called exactly once and its body receives the same affine budget; each Resume call
+    result must be immediately eliminated as the function child of one application whose arguments
+    satisfy {!is_immediate_transformer_argument}. E0816 reports two consumption spans; E0817 reports
+    an escape/capture site. *)
 
 val check_escapes :
   ?resolve_term:(Hash.t -> resolved_callable option) ->

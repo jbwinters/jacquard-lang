@@ -119,8 +119,17 @@ of one immediate `App` and every application argument is a syntactic value.
 Strict function-first evaluation then constructs the handler result, evaluates
 only value arguments, and eliminates that result exactly once. The checker
 opens only the clause's outermost lambda and runs the ordinary affine walk on
-its body; another lambda, quote, data constructor, nested handler clause,
-return, alias, or second consumption remains E0817/E0816.
+its body. Every call of the captured `Resume` must itself be the direct function
+child of exactly one nested application whose arguments are syntactic values,
+such as `(app (app k value) state)` when `state` is a variable.
+This immediately eliminates the handler answer: if resuming reaches a later
+`once` operation, that answer may be another transformer carrying the later
+token and therefore may not be bound, returned, aliased, passed, stored, or
+duplicated. No call, match, let, live splice, or other computation may run in
+the eliminating application's arguments while that later token is live; such
+computations must run first and bind a value. Those escapes remain E0817; consuming the current token twice
+remains E0816. Another lambda, quote, data constructor, or nested handler clause
+also remains E0817.
 
 For this rule, syntactic values are literals, variables and resolved
 references, lambdas, inert quotes with no live unquote, tuples of syntactic

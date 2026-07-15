@@ -239,6 +239,56 @@ let test_once_resume_immediate_transformer () =
   in
   check_ok (make_cctx ()) "canonical once State transformer is immediately eliminated"
     canonical_state;
+  let successive_once clause_body =
+    Printf.sprintf
+      "(defeffect successive () (op first once () (tref int)) (op second once () (tref int)))\n\
+       (app\n\
+       (handle\n\
+       (let nonrec (pvar x) (app (var first))\n\
+       (let nonrec (pvar y) (app (var second))\n\
+       (app (var add) (var x) (var y))))\n\
+       (ret (pvar x) (lam ((pvar unit)) (var x)))\n\
+       (opclause first () k %s)\n\
+       (opclause second () later-k\n\
+       (lam ((pvar unit)) (app (app (var later-k) (lit 2)) (var unit)))))\n\
+       (tuple))"
+      clause_body
+  in
+  check_ok (make_cctx ()) "successive Once transformers eliminate each produced answer immediately"
+    (successive_once "(lam ((pvar unit)) (app (app (var k) (lit 1)) (var unit)))");
+  let laundered_later =
+    err_of (make_cctx ())
+      (successive_once
+         "(lam ((pvar unit))\n\
+          (let nonrec (pvar later) (app (var k) (lit 1))\n\
+          (let nonrec (pwild) (app (var later) (var unit))\n\
+          (app (var later) (var unit)))))")
+  in
+  Alcotest.(check string)
+    "a bound answer cannot launder a later Once token" "E0817" laundered_later.code;
+  Alcotest.(check bool)
+    "later-token laundering has a pointed explanation" true
+    (contains laundered_later.message "may produce a transformer carrying a later once resumption");
+  let intervening_multi =
+    err_of (make_cctx ())
+      (successive_once
+         "(lam ((pvar unit))\n\
+          (app (app (var k) (lit 1))\n\
+          (let nonrec (pwild) (app (var flaky) (lit \"between\")) (var unit))))")
+  in
+  Alcotest.(check string)
+    "a Multi effect cannot run while a later Once transformer is live" "E0817"
+    intervening_multi.code;
+  let duplicated_current =
+    err_of (make_cctx ())
+      (successive_once
+         "(lam ((pvar unit))\n\
+          (let nonrec (pwild) (app (app (var k) (lit 1)) (var unit))\n\
+          (app (app (var k) (lit 1)) (var unit))))")
+  in
+  Alcotest.(check string)
+    "direct duplication in a successive Once transformer remains affine" "E0816"
+    duplicated_current.code;
   let direct body args =
     with_once_transformer (Printf.sprintf "(app %s %s)" (once_transformer_handle body) args)
   in

@@ -45,6 +45,7 @@ and state = {
   mutable next_callable : int;
   check_duplication : bool;
   defer_out_of_range_transfer : bool;
+  eliminate_resume_result : bool;
 }
 
 type clause_context = Ordinary | Immediately_applied_transformer
@@ -224,6 +225,28 @@ let alias_expr env (expr : Kernel.expr) =
   | Kernel.Var name when SSet.mem name env.aliases -> Some (name, expr.meta)
   | _ -> None
 
+(** [quote_has_live_splice payload] reports whether evaluating a quote payload evaluates an unquote.
+    Such a quote is not an effect-free argument for immediate transformer elimination. *)
+let rec quote_has_live_splice ?(level = 0) (payload : Form.t) =
+  if payload.head = "unquote" && level = 0 then true
+  else
+    let nested_level =
+      match payload.head with "quote" -> level + 1 | "unquote" -> level - 1 | _ -> level
+    in
+    List.exists
+      (function Form.F nested -> quote_has_live_splice ~level:nested_level nested | _ -> false)
+      payload.args
+
+let rec is_immediate_transformer_argument (expr : Kernel.expr) =
+  match expr.it with
+  | Kernel.Lit _ | Kernel.Lam _ | Kernel.Var _ | Kernel.Ref _ | Kernel.GroupRef _ -> true
+  | Kernel.Quote payload -> not (quote_has_live_splice payload)
+  | Kernel.Tuple items -> List.for_all is_immediate_transformer_argument items
+  | Kernel.App ({ it = Kernel.Ref (_, Kernel.Con); _ }, args) ->
+      List.for_all is_immediate_transformer_argument args
+  | Kernel.Ann (inner, _) -> is_immediate_transformer_argument inner
+  | Kernel.App _ | Kernel.Let _ | Kernel.Match _ | Kernel.Handle _ | Kernel.Unquote _ -> false
+
 let callable_expr env (expr : Kernel.expr) =
   let rec unwrap expr =
     match expr.Kernel.it with Kernel.Ann (inner, _) -> unwrap inner | _ -> expr
@@ -265,8 +288,8 @@ let is_constructor (expr : Kernel.expr) =
   in
   match (unwrap expr).it with Kernel.Ref (_, Kernel.Con) -> true | _ -> false
 
-let rec analyze (env : env) ~(context : value_context) (expr : Kernel.expr) : (flow, Diag.t) result
-    =
+let rec analyze ?(result_is_immediately_eliminated = false) (env : env) ~(context : value_context)
+    (expr : Kernel.expr) : (flow, Diag.t) result =
   match expr.it with
   | Kernel.Lit _ | Kernel.Ref _ | Kernel.GroupRef _ -> Ok zero
   | Kernel.Var name ->
@@ -289,11 +312,27 @@ let rec analyze (env : env) ~(context : value_context) (expr : Kernel.expr) : (f
       match alias_expr env fn with
       | Some (binder, _) ->
           let* args_flow = analyze_sequence env ~context:Argument args in
-          seq env.state args_flow (consume env binder expr.meta)
+          if
+            env.state.eliminate_resume_result
+            && (not result_is_immediately_eliminated)
+            && not (env.state.defer_out_of_range_transfer && List.length args <> 1)
+          then
+            reject ~code:"E0817" ~meta:(diagnostic_meta env expr.meta)
+              ~hint:
+                "immediately apply the resumption result exactly once as the function child of a \
+                 nested application whose arguments are syntactic values"
+              (Printf.sprintf
+                 "once resumption `%s` may produce a transformer carrying a later once resumption; \
+                  its result must be eliminated immediately"
+                 binder)
+          else seq env.state args_flow (consume env binder expr.meta)
       | None ->
           let callee = callable_expr env fn in
           let constructor = is_constructor fn in
-          let* fn_flow = analyze env ~context:Function fn in
+          let result_is_immediately_eliminated =
+            List.for_all is_immediate_transformer_argument args
+          in
+          let* fn_flow = analyze ~result_is_immediately_eliminated env ~context:Function fn in
           let* args_flow = analyze_arguments env ~callee ~constructor args in
           seq env.state fn_flow args_flow)
   | Kernel.Let { isrec; binder; value; body } -> (
@@ -353,7 +392,7 @@ let rec analyze (env : env) ~(context : value_context) (expr : Kernel.expr) : (f
                "once resumption `%s` escapes into quoted code captured here (splice at %s)" binder
                (span_text_in env occurrence)))
   | Kernel.Unquote inner -> analyze env ~context:Argument inner
-  | Kernel.Ann (subject, _) -> analyze env ~context subject
+  | Kernel.Ann (subject, _) -> analyze ~result_is_immediately_eliminated env ~context subject
 
 and analyze_sequence env ~context expressions =
   let rec loop accumulated = function
@@ -511,7 +550,9 @@ let analyze_clause_body env context (body : Kernel.expr) =
     the duplication message identifies both consumption spans, and capture failures point at the
     closure, quote, nested-handler capture, or stored-helper transfer site. Contextual helper
     summaries are memoized per callable parameter so duplicate branch transfers remain polynomial.
-*)
+    In the immediate-transformer context, every call of the captured resumption must itself be the
+    direct function child of one application. This immediately eliminates the returned answer, which
+    may otherwise carry a later Once token produced by a successive operation clause. *)
 let check ~check_duplication ~defer_out_of_range_transfer ?(resolve_term = fun _ -> None)
     ?(context = Ordinary) ~resume (body : Kernel.expr) =
   let state =
@@ -520,6 +561,7 @@ let check ~check_duplication ~defer_out_of_range_transfer ?(resolve_term = fun _
       next_callable = 0;
       check_duplication;
       defer_out_of_range_transfer;
+      eliminate_resume_result = context = Immediately_applied_transformer;
     }
   in
   match

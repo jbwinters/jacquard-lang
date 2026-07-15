@@ -113,8 +113,11 @@ in `src/` and `bin/` appears in this catalog.
 
 E0817 has one bounded transformer exception: a direct clause lambda may capture
 `resume` when its `handle` expression is immediately applied once to syntactic
-value arguments. Binding, returning, storing, passing, or aliasing that handler
-result still emits E0817; consuming the captured resumption twice emits E0816.
+value arguments. Inside that lambda, a call of `resume` must be the direct
+function child of one nested application with syntactic-value arguments so its
+answer is immediately eliminated; binding or duplicating an answer that could carry a later Once token
+emits E0817. Binding, returning, storing, passing, or aliasing the handler result
+also emits E0817; consuming the captured resumption twice emits E0816.
 
 ## Probabilistic inference (E09xx)
 
