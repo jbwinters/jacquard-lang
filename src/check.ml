@@ -19,7 +19,9 @@
       row); the return binder gets the body's type; a [multi] clause's [resume] is an ordinary
       arrow, while a [once] clause receives the built-in affine [Resume] callable; {!Affine_resume}
       rejects escapes before ordinary inference, then rejects duplicate valid consumptions after the
-      clause body checks at the answer type under the outer ambient.
+      clause body checks at the answer type under the outer ambient. The sole affine-closure rule is
+      a direct clause lambda returned by a [Handle] that is itself immediately applied once to
+      syntactic-value arguments; only that outer lambda boundary is opened.
 
     Store terms are checked on demand and cached by hash; the store's hash DAG guarantees no
     cross-declaration cycles. Builtin markers get their signatures from
@@ -404,6 +406,35 @@ let rec is_syntactic_value (e : Kernel.expr) : bool =
   | Kernel.Ann (inner, _) -> is_syntactic_value inner
   | _ -> false
 
+(** [quote_has_live_splice payload] reports whether evaluating a quote payload evaluates an unquote.
+    Such a quote is a value for generalization purposes but is not an effect-free argument for
+    immediate transformer elimination. *)
+let rec quote_has_live_splice ?(level = 0) (payload : Form.t) =
+  if payload.head = "unquote" && level = 0 then true
+  else
+    let nested_level =
+      match payload.head with "quote" -> level + 1 | "unquote" -> level - 1 | _ -> level
+    in
+    List.exists
+      (function Form.F nested -> quote_has_live_splice ~level:nested_level nested | _ -> false)
+      payload.args
+
+(** [is_immediate_transformer_argument e] recognizes expressions whose evaluation only produces a
+    value: literals, lookups, lambdas, inert quotes, tuples of values, and constructor applications
+    of values (with annotations erased). It deliberately excludes ordinary applications, lets,
+    matches, handlers, and quotes with live splices, even when later inference could prove some of
+    them pure. This syntactic boundary keeps the affine-transformer exception local and decidable.
+*)
+let rec is_immediate_transformer_argument (e : Kernel.expr) =
+  match e.it with
+  | Kernel.Lit _ | Kernel.Lam _ | Kernel.Var _ | Kernel.Ref _ | Kernel.GroupRef _ -> true
+  | Kernel.Quote payload -> not (quote_has_live_splice payload)
+  | Kernel.Tuple items -> List.for_all is_immediate_transformer_argument items
+  | Kernel.App ({ it = Kernel.Ref (_, Kernel.Con); _ }, args) ->
+      List.for_all is_immediate_transformer_argument args
+  | Kernel.Ann (inner, _) -> is_immediate_transformer_argument inner
+  | Kernel.App _ | Kernel.Let _ | Kernel.Match _ | Kernel.Handle _ | Kernel.Unquote _ -> false
+
 (* Close generalizable row tails that occur exactly once in the type: an unconstrained
    single-use row var carries no sharing information, and closing it gives honest displays
    like (a) ->{} a and safe-div : (int, int) ->{abort} int. *)
@@ -522,7 +553,7 @@ let rec term_scheme ctx ?meta (h : Hash.t) : scheme =
           | Error ds ->
               err ?meta ~code:"E0805" "%s" (String.concat "; " (List.map Diag.to_string ds))))
 
-and infer ctx env ~(ambient : row) (e : Kernel.expr) : ty =
+and infer ?(immediate_transformer = false) ctx env ~(ambient : row) (e : Kernel.expr) : ty =
   let meta = e.Kernel.meta in
   match e.Kernel.it with
   | _ when Option.is_some (Meta.surface_hole meta) -> new_tvar ctx.level
@@ -547,7 +578,14 @@ and infer ctx env ~(ambient : row) (e : Kernel.expr) : ty =
       let body_ty = infer ctx env' ~ambient:lam_ambient body in
       TArrow (param_tys, lam_ambient, body_ty)
   | Kernel.App (fn, args) -> (
-      let fn_ty = infer ctx env ~ambient fn in
+      let fn_ty =
+        match fn.it with
+        | Kernel.Handle _ when List.for_all is_immediate_transformer_argument args ->
+            (* This context is decided before inference and is not propagated through aliases or
+               wrappers: only the literal function child of this one application receives it. *)
+            infer ~immediate_transformer:true ctx env ~ambient fn
+        | _ -> infer ctx env ~ambient fn
+      in
       let arg_tys = List.map (infer ctx env ~ambient) args in
       match repr fn_ty with
       | TArrow (params, frow, result) ->
@@ -753,6 +791,10 @@ and infer ctx env ~(ambient : row) (e : Kernel.expr) : ty =
             | Kernel.Once -> TResume (op_result, ambient, answer)
           in
           let env' = bind_all ((oc.Kernel.resume, resume_ty) :: bindings) env in
+          let affine_context =
+            if immediate_transformer then Affine_resume.Immediately_applied_transformer
+            else Affine_resume.Ordinary
+          in
           ctx.tier_ops <-
             (oh, Tier.discipline ~resume:oc.Kernel.resume oc.Kernel.obody) :: ctx.tier_ops;
           (match mode with
@@ -763,7 +805,7 @@ and infer ctx env ~(ambient : row) (e : Kernel.expr) : ty =
                  unification, ensuring malformed calls retain their ordinary E0801/E0803 error. *)
               match
                 Affine_resume.check_escapes ~resolve_term:(affine_callable ctx)
-                  ~resume:oc.Kernel.resume oc.Kernel.obody
+                  ~context:affine_context ~resume:oc.Kernel.resume oc.Kernel.obody
               with
               | Ok () -> ()
               | Error (diagnostic :: _) -> raise (Err diagnostic)
@@ -775,7 +817,7 @@ and infer ctx env ~(ambient : row) (e : Kernel.expr) : ty =
           | Kernel.Once -> (
               match
                 Affine_resume.check_clause ~resolve_term:(affine_callable ctx)
-                  ~resume:oc.Kernel.resume oc.Kernel.obody
+                  ~context:affine_context ~resume:oc.Kernel.resume oc.Kernel.obody
               with
               | Ok () -> ()
               | Error (diagnostic :: _) -> raise (Err diagnostic)

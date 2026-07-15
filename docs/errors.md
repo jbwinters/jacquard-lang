@@ -111,6 +111,11 @@ in `src/` and `bin/` appears in this catalog.
 | E0817 | a once resumption escapes its handler clause | returning, storing, capturing, or passing `resume` to a non-`Resume` parameter |
 | W0801 | redundant match clause | a clause after `(pwild)` |
 
+E0817 has one bounded transformer exception: a direct clause lambda may capture
+`resume` when its `handle` expression is immediately applied once to syntactic
+value arguments. Binding, returning, storing, passing, or aliasing that handler
+result still emits E0817; consuming the captured resumption twice emits E0816.
+
 ## Probabilistic inference (E09xx)
 
 | code | meaning | example |

@@ -47,6 +47,8 @@ and state = {
   defer_out_of_range_transfer : bool;
 }
 
+type clause_context = Ordinary | Immediately_applied_transformer
+
 type env = {
   aliases : SSet.t;
   callables : callable SMap.t;
@@ -483,6 +485,20 @@ and check_transfer callable index ~binder ~transfer_meta =
         reject ~code:"E0817" ~meta:transfer_meta
           (Printf.sprintf "once resumption `%s` has no receiving parameter at this call" binder)
 
+(** [analyze_clause_body env context body] starts the affine walk at an operation-clause boundary.
+    The immediate-transformer context is supplied only after the checker has proved that the
+    enclosing [Handle] is the direct function child of an application with syntactic-value
+    arguments. Strict function-first evaluation then constructs and applies the outer lambda once.
+    Only that one lambda boundary is opened; [analyze] keeps rejecting every nested capture. *)
+let analyze_clause_body env context (body : Kernel.expr) =
+  match (context, body.it) with
+  | Immediately_applied_transformer, Kernel.Lam (params, lambda_body) ->
+      let bound =
+        List.fold_left (fun names pat -> SSet.union names (pat_names pat)) SSet.empty params
+      in
+      analyze (shadow env bound) ~context:Return lambda_body
+  | Ordinary, _ | Immediately_applied_transformer, _ -> analyze env ~context:Return body
+
 (** [check_clause ~resolve_term ~resume body] verifies the affine contract of one [once] operation
     clause. [resolve_term] may expose a stored lambda so moving the token into a top-level helper is
     checked contextually just like a local helper; absent or non-lambda terms remain escape
@@ -496,8 +512,8 @@ and check_transfer callable index ~binder ~transfer_meta =
     closure, quote, nested-handler capture, or stored-helper transfer site. Contextual helper
     summaries are memoized per callable parameter so duplicate branch transfers remain polynomial.
 *)
-let check ~check_duplication ~defer_out_of_range_transfer ?(resolve_term = fun _ -> None) ~resume
-    (body : Kernel.expr) =
+let check ~check_duplication ~defer_out_of_range_transfer ?(resolve_term = fun _ -> None)
+    ?(context = Ordinary) ~resume (body : Kernel.expr) =
   let state =
     {
       summaries = Hashtbl.create 16;
@@ -507,7 +523,7 @@ let check ~check_duplication ~defer_out_of_range_transfer ?(resolve_term = fun _
     }
   in
   match
-    analyze
+    analyze_clause_body
       {
         aliases = SSet.singleton resume;
         callables = SMap.empty;
@@ -515,13 +531,15 @@ let check ~check_duplication ~defer_out_of_range_transfer ?(resolve_term = fun _
         diagnostic_source = None;
         state;
       }
-      ~context:Return body
+      context body
   with
   | Ok _ -> Ok ()
   | Error diagnostic -> Error [ diagnostic ]
 
-let check_clause ?resolve_term ~resume body =
-  check ~check_duplication:true ~defer_out_of_range_transfer:false ?resolve_term ~resume body
+let check_clause ?resolve_term ?context ~resume body =
+  check ~check_duplication:true ~defer_out_of_range_transfer:false ?resolve_term ?context ~resume
+    body
 
-let check_escapes ?resolve_term ~resume body =
-  check ~check_duplication:false ~defer_out_of_range_transfer:true ?resolve_term ~resume body
+let check_escapes ?resolve_term ?context ~resume body =
+  check ~check_duplication:false ~defer_out_of_range_transfer:true ?resolve_term ?context ~resume
+    body

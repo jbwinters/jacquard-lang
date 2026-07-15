@@ -1,7 +1,7 @@
 # Effect Linearity EL.2-EL.4 Integration Evidence
 
-Status: successor-milestone evidence for the static affine `Resume` discipline, frozen stdlib
-operation modes, and explicit surface operation modes.
+Status: successor-milestone evidence for the static affine `Resume` discipline, its bounded
+immediate-transformer rule, frozen stdlib modes, and explicit surface operation modes.
 
 - Reconstruction base: `23e3b5647fa9a9676990db9cf44350e66bf374a7`
 - Evidence overlay: [MANIFEST.sha256](MANIFEST.sha256)
@@ -29,6 +29,17 @@ Contextual helper analysis is also summarized once per callable parameter. A
 25-helper regression transfers through duplicate exclusive arms at every level;
 without summaries its recurrence is `T(n)=2T(n-1)`, while the implemented walk
 is linear in the helper chain plus its syntax.
+
+The sole affine-closure exception is established syntactically before
+inference. A `Handle` must be the literal function child of one `App`, and all
+arguments must be effect-free syntactic values. In that context only, a direct
+operation-clause lambda is treated as constructed and called once; its body is
+then checked by the same affine walk. Tests pin the canonical function-of-state
+handler and reject a handler result that is bound, returned, stored, passed,
+aliased or applied twice, an effectful argument, a further lambda/quote/data or
+nested-clause capture, and two consumptions inside the transformer. Malformed
+outer and resumption calls still receive E0803, and ordinary argument mismatch
+still receives E0801. Existing State and Check programs remain accepted.
 
 Escape checking precedes ordinary inference, but duplicate checking follows a
 successful inference and clause-result unification. E0817 therefore remains a

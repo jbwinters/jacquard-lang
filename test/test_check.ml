@@ -60,6 +60,20 @@ let once_handler body =
      (handle (app (var signal)) (ret (pvar x) (var x)) (opclause signal () k %s))"
     body
 
+let once_transformer_handle body =
+  Printf.sprintf
+    "(handle (app (var signal)) (ret (pvar x) (lam ((ptuple)) (var x))) (opclause signal () k %s))"
+    body
+
+let once_polymorphic_transformer_handle body =
+  Printf.sprintf
+    "(handle (app (var signal)) (ret (pvar x) (lam ((pvar value)) (var x))) (opclause signal () k \
+     %s))"
+    body
+
+let with_once_transformer expression =
+  "(defeffect linear () (op signal once () (tref int)))\n" ^ expression
+
 let check_ok h what src =
   match check_src h src with Ok _ -> () | Error ds -> Eval_support.fail_diags what ds
 
@@ -214,7 +228,100 @@ let test_once_resume_zero_or_one_per_path () =
        "(match (var true) (clause (pcon true) (app (var k) (lit 1))) (clause (pcon false) (app \
         (var k) (lit 2))))")
 
+let test_once_resume_immediate_transformer () =
+  let canonical_state =
+    "(defeffect local-state () (op local-get once () (tref int)) (op local-put once ((tref int)) \
+     (ttuple)))\n\
+     (app (handle (let nonrec (pwild) (app (var local-put) (lit 42)) (app (var local-get))) (ret \
+     (pvar x) (lam ((pvar s)) (tuple (var x) (var s)))) (opclause local-get () k (lam ((pvar s)) \
+     (app (app (var k) (var s)) (var s)))) (opclause local-put ((pvar next-state)) k (lam ((pvar \
+     s)) (app (app (var k) (tuple)) (var next-state))))) (lit 41))"
+  in
+  check_ok (make_cctx ()) "canonical once State transformer is immediately eliminated"
+    canonical_state;
+  let direct body args =
+    with_once_transformer (Printf.sprintf "(app %s %s)" (once_transformer_handle body) args)
+  in
+  let good_body = "(lam ((pvar unit)) (app (app (var k) (lit 1)) (var unit)))" in
+  check_ok (make_cctx ()) "direct transformer over a value argument" (direct good_body "(tuple)");
+  let polymorphic_handle =
+    once_polymorphic_transformer_handle
+      "(lam ((pvar value)) (app (app (var k) (lit 1)) (var value)))"
+  in
+  check_ok (make_cctx ()) "a variable is an immediate value argument"
+    (with_once_transformer
+       (Printf.sprintf "(let nonrec (pvar value) (tuple) (app %s (var value)))" polymorphic_handle));
+  check_ok (make_cctx ()) "constructor trees are immediate value arguments"
+    (with_once_transformer (Printf.sprintf "(app %s (app (var some) (lit 1)))" polymorphic_handle));
+  check_ok (make_cctx ()) "an inert quote is an immediate value argument"
+    (with_once_transformer (Printf.sprintf "(app %s (quote (lit 1)))" polymorphic_handle));
+  let expect_escape what source =
+    let diagnostic = err_of (make_cctx ()) source in
+    Alcotest.(check string) (what ^ " code") "E0817" diagnostic.code;
+    Alcotest.(check bool) (what ^ " has a source span") true (Option.is_some diagnostic.span)
+  in
+  let bare = once_transformer_handle good_body in
+  expect_escape "transformer bound before application"
+    (with_once_transformer
+       (Printf.sprintf "(let nonrec (pvar transformer) %s (app (var transformer) (tuple)))" bare));
+  expect_escape "transformer returned" (with_once_transformer bare);
+  expect_escape "transformer stored" (with_once_transformer (Printf.sprintf "(tuple %s)" bare));
+  expect_escape "transformer passed"
+    (with_once_transformer
+       (Printf.sprintf "(app (lam ((pvar transformer)) (app (var transformer) (tuple))) %s)" bare));
+  expect_escape "transformer aliased and applied twice"
+    (with_once_transformer
+       (Printf.sprintf
+          "(let nonrec (pvar transformer) %s (tuple (app (var transformer) (tuple)) (app (var \
+           transformer) (tuple))))"
+          bare));
+  expect_escape "effectful immediate argument"
+    (direct good_body "(app (var print) (lit \"not a value\"))");
+  expect_escape "live-splice quote argument"
+    (with_once_transformer
+       (Printf.sprintf
+          "(let nonrec (pvar code-value) (quote (lit 1)) (app %s (quote (unquote (var \
+           code-value)))))"
+          polymorphic_handle));
+  expect_escape "nested transformer lambda"
+    (direct "(lam ((pvar unit)) (lam ((pvar later)) (app (app (var k) (lit 1)) (var unit))))"
+       "(tuple)");
+  expect_escape "transformer quote capture"
+    (direct "(lam ((pvar unit)) (quote (unquote (var k))))" "(tuple)");
+  expect_escape "transformer data storage"
+    (direct "(lam ((pvar unit)) (app (var some) (var k)))" "(tuple)");
+  expect_escape "transformer nested handler clause"
+    (direct
+       "(lam ((pvar unit)) (handle (app (var signal)) (ret (pvar x) (var x)) (opclause signal () \
+        inner (app (app (var k) (lit 1)) (var unit)))))"
+       "(tuple)");
+  let doubled =
+    err_of (make_cctx ())
+      (direct
+         "(lam ((pvar unit)) (let nonrec (pwild) (app (app (var k) (lit 1)) (var unit)) (app (app \
+          (var k) (lit 2)) (var unit))))"
+         "(tuple)")
+  in
+  Alcotest.(check string) "double resume in transformer" "E0816" doubled.code;
+  Alcotest.(check bool)
+    "double transformer resume retains both witnesses" true
+    (contains doubled.message "first consumption at c.jqd:"
+    && contains doubled.message "second consumption at c.jqd:");
+  let outer_arity = err_of (make_cctx ()) (direct good_body "(tuple) (tuple)") in
+  Alcotest.(check string)
+    "outer malformed application keeps arity precedence" "E0803" outer_arity.code;
+  let resume_arity = err_of (make_cctx ()) (direct "(lam ((pvar unit)) (app (var k)))" "(tuple)") in
+  Alcotest.(check string) "inner malformed resume keeps arity precedence" "E0803" resume_arity.code;
+  let argument_type = err_of (make_cctx ()) (direct good_body "(lit 1)") in
+  Alcotest.(check string)
+    "value argument still receives ordinary type checking" "E0801" argument_type.code;
+  check_ok (make_cctx ()) "ordinary State remains accepted"
+    "(app (var state.run) (lam () (app (var get))) (lit 41))";
+  check_ok (make_cctx ()) "ordinary Check remains accepted"
+    "(app (var test.run) (lam () (app (var check) (var true) (lit \"still works\"))))"
+
 let test_once_resume_gate_style_transfer () =
+  test_once_resume_immediate_transformer ();
   check_ok (make_cctx ()) "moving Resume into an affine helper parameter"
     (once_handler
        "(let nonrec (pvar gate) (lam ((pvar next)) (app (var next) (lit 1))) (app (var gate) (var \

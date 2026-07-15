@@ -112,15 +112,28 @@ which is affine:
   constructor, or returned; escape is how affinity gets laundered, so escape
   is the thing forbidden.
 
-There is one narrow, syntax-directed exception for the prelude's canonical
-function-of-state transformer: an enclosing handler may return clause lambdas
-that directly capture their own `Resume` only when that handler result is
-immediately applied to syntactic-value arguments. The transformer is never
-bound, returned, stored, passed, or aliased, and the captured `Resume` remains
-subject to the ordinary zero-or-one path analysis inside the direct lambda.
-Further lambda, quote, data, or nested-clause capture remains E0817. This keeps
-the original world-handler signatures and leaves a caller's `State` effect
-outward instead of accidentally swallowing it in an implementation carrier.
+There is one deliberately narrow affine-transformer rule for the canonical
+function-of-state handler shape. A direct operation-clause `Lam` may capture
+its `Resume` only when the enclosing `Handle` is literally the function child
+of one immediate `App` and every application argument is a syntactic value.
+Strict function-first evaluation then constructs the handler result, evaluates
+only value arguments, and eliminates that result exactly once. The checker
+opens only the clause's outermost lambda and runs the ordinary affine walk on
+its body; another lambda, quote, data constructor, nested handler clause,
+return, alias, or second consumption remains E0817/E0816.
+
+For this rule, syntactic values are literals, variables and resolved
+references, lambdas, inert quotes with no live unquote, tuples of syntactic
+values, constructor applications to syntactic values, and annotations around
+those forms. Ordinary calls, lets, matches, handlers, and quotes with live
+splices are excluded even if separate type reasoning might prove one pure.
+Binding, returning, storing, or passing the `Handle` result before applying it
+does not qualify. This is an immediate elimination rule, not general affine
+closures.
+
+This keeps the original world-handler signatures and leaves a caller's
+`State` effect outward instead of accidentally swallowing it in an
+implementation carrier.
 
 This is substructural typing scoped to exactly one built-in constructor,
 which is a small fraction of the machinery of general linear types and buys
@@ -208,6 +221,6 @@ compatibility encoding.
 |----|----------|---------|
 | D41 | mode granularity | per-operation, effect-level shorthand |
 | D42 | defaults | kernel `multi` encoded as absence (hash-stable); surface requires explicit mode |
-| D43 | static discipline | affine `Resume`; escape forbidden except immediate affine transformers; passing allowed |
+| D43 | static discipline | affine `Resume`; passing allowed; only a directly and immediately applied handler transformer may capture it |
 | D44 | stdlib assignments | per §6; almost everything `once` |
 | D45 | handler multiplicity badges | deferred, marker retained for the enumerate-over-Net lint |
