@@ -437,6 +437,16 @@ The pure verdict laws are:
 
 These functions are pure over finite values except for the real-valued confidence comparison. Warp exhaustively verifies the risk and threshold ordering over a representative finite confidence grid, and ordinary unit properties cover the numeric boundary cases.
 
+Implementation status (GM.3): `prelude/23-governance-policy.jqd` exposes safe
+validation for LivePolicy, DryPolicy, StoredPolicy, and exact BoundPolicy
+hashes. The bound live and dry verdict entry points implement these laws as
+total `Result ToolError Verdict` functions. Their executable evidence covers
+all four risks, all sixteen live threshold pairs (rejecting the six reversed
+pairs), four representative observed confidences, both simulator states, and
+the finite/non-finite numeric boundaries. This completes D65, D66, and D72 for
+the pure policy layer; later gate work consumes these verdicts without changing
+their laws.
+
 ## 7. One gate, two execution APIs
 
 Jacquard v0 rows have at most one tail, and affine `Resume` is not a public type
