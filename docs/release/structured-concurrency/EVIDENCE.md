@@ -1,12 +1,12 @@
-# Structured Concurrency SC.4 + SC.5 Evidence
+# Structured Concurrency SC.6 Evidence
 
-Status: every spawned child effect is charged through the exact once Async
-interface represented by SC.3, including every supported higher-order transport
-route, and the policy-independent scheduler lifecycle core is implemented. This
-combined milestone intentionally contains no scheduling policy, executable
-structured scope, host concurrency/I/O, or detached/root Async handler.
+Status: executable policy-independent structured-scope ownership, deterministic
+nested lineage, recursive cleanup, and complete dynamic Task-escape detection
+are implemented over the validated SC.4 child-effect law and SC.5 scheduler
+core. This milestone intentionally contains no runnable-queue policy, routed
+cancellation timing, host concurrency/I/O, or detached/root Async handler.
 
-- Reconstruction base: `ed02113`
+- Reconstruction base: `9708ee1`
 - Evidence overlay: [MANIFEST.sha256](MANIFEST.sha256)
 - Authoritative contract: [concurrency.md](../../concurrency.md)
 
@@ -146,15 +146,51 @@ foreign-handle diagnostics. The existing handler
 gauntlet and interpreter/native runtime suites continue to cover affine Once
 capture enforcement and the inert Task boundary around this core.
 
+## Structured scope ownership and escape boundary
+
+`Structured_scope` opens root path `[0]` and uses the scheduler core's new
+same-run construction seam for nested paths. Every nested scope appends a
+one-based creation ordinal and is registered with its parent. The layer exposes
+the lifecycle operations only while that exact scope remains open; stale or
+cross-scope use is E0907. It introduces no queue, scheduling policy, host
+thread, effect route, or root handler.
+
+Normal return, result-level abort, and host exceptions share one explicit
+bracket cleanup. Descendants close recursively, unfinished tasks become
+cancelled, wait edges are cleared, and every scheduler-owned resume token is
+passed exactly once to the destruction callback. Cleanup completes before an
+escape diagnostic is returned. Recursive counters for open scopes, live tasks,
+runnable tasks, and owned resumes all return to zero, so no registered child
+continuation remains runnable after its scope returns. Repeated close is
+idempotent. This is continuation-memory cleanup, not an automatic external
+resource finalizer; acquire/release handlers remain required around suspended
+resources.
+
+The exit guard rejects returned or stored handles whose creation path is the
+closing scope or any descendant. A nested close may still observe a valid
+enclosing-scope handle. `Eval.reject_task_escape` walks the full reachable
+runtime-value graph, including tuples, constructors, closure cells, cyclic
+closure environments, and multi-shot resumptions, validating the opaque run
+before the path-prefix check.
+
+Focused lifecycle tests cover joins, forgotten children, three-level nested
+lineage, recursive normal/abort cleanup, returned and stored escapes, foreign
+and enclosing handles, stale post-close operations, result aborts, and host
+exceptions. A 200-case QCheck property constructs nested chains and proves that
+every ownership counter returns to baseline. Dynamic graph tests hide Tasks in
+all supported carrier shapes. The native ASAN/LSAN runtime lane additionally
+tears down 4,096 Task and resume-shaped carriers at a simulated scope boundary,
+pinning explicit carrier release without claiming a native scheduler.
+
 ## Reconstruction and verification
 
-The manifest is the complete combined SC.4 + SC.5 successor overlay on validated
-SC.3 commit
-`ed02113`. Reconstruct it under repository-local scratch space:
+The manifest is the complete SC.6 successor overlay on validated SC.4 + SC.5
+integration commit `9708ee1`. Reconstruct it under repository-local scratch
+space:
 
 ```sh
-base=ed02113
-dest="$PWD/.scratch/sc4-sc5-evidence-copy"
+base=9708ee1
+dest="$PWD/.scratch/sc6-evidence-copy"
 manifest=docs/release/structured-concurrency/MANIFEST.sha256
 rm -rf "$dest"
 mkdir -p "$dest"
@@ -182,8 +218,9 @@ git diff --exit-code
 opam exec -- dune build @doc
 ```
 
-Scheduling policy, executable scopes, effect routing, and the root handler
-remain later C1 tasks. The SC.5 core supplies cancellation request/delivery
-state transitions but does not decide when a routed operation is reached. SC.4
-supplies the static child-effect law; its `async.scope` fixture remains
-compile-only handler scaffolding and is never claimed as scheduler execution.
+Runnable-queue policy, cooperative cancellation routing, failure policy, and
+the Async root handler remain later C1 tasks. SC.6 supplies executable
+scope ownership and cleanup over opaque resume tokens, but it does not run a
+continuation or install the compile-only `async.scope` fixture as a root
+handler. SC.4 continues to supply the static child-effect law, including the
+law that a scope discharges only Async and retains child world effects.

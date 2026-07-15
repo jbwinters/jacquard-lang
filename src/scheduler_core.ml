@@ -53,8 +53,7 @@ let validate scheduler handle =
       | Some entry -> Ok entry
       | None -> error ("unknown task " ^ Concurrency_contract.trace_task_id id))
 
-let create ~scope_path ~body_resume =
-  let run = Task_handle.create_run () in
+let create_in_run ~run ~scope_path ~body_resume =
   Result.bind (Task_handle.create ~run ~scope_path ~spawn_index:0) (fun handle ->
       Result.bind (Task_handle.validate_scope ~run ~scope_path handle) (fun id ->
           let entry =
@@ -70,6 +69,28 @@ let create ~scope_path ~body_resume =
             }
           in
           Ok ({ run; scope_path; next_spawn = 1; entries = [ entry ]; closed = false }, handle)))
+
+let create ~scope_path ~body_resume =
+  create_in_run ~run:(Task_handle.create_run ()) ~scope_path ~body_resume
+
+let create_nested ~parent ~scope_path ~body_resume =
+  create_in_run ~run:parent.run ~scope_path ~body_resume
+
+let scope_path scheduler = scheduler.scope_path
+
+let view_of_entry (entry : (_, _) entry) =
+  {
+    id = entry.id;
+    lifecycle = entry.lifecycle;
+    suspension = entry.suspension;
+    result = entry.result;
+    waiters = entry.waiters;
+    cancellation_requested = entry.cancellation_requested;
+    owns_resume = Option.is_some entry.resume;
+  }
+
+let task_views scheduler = List.map view_of_entry scheduler.entries
+let is_closed scheduler = scheduler.closed
 
 let spawn scheduler ~resume =
   if scheduler.closed then error "cannot spawn into a closed scope"
@@ -101,19 +122,8 @@ let spawn scheduler ~resume =
 let id scheduler handle =
   Result.map (fun (entry : (_, _) entry) -> entry.id) (validate scheduler handle)
 
-let inspect scheduler handle =
-  Result.map
-    (fun (entry : (_, _) entry) ->
-      {
-        id = entry.id;
-        lifecycle = entry.lifecycle;
-        suspension = entry.suspension;
-        result = entry.result;
-        waiters = entry.waiters;
-        cancellation_requested = entry.cancellation_requested;
-        owns_resume = Option.is_some entry.resume;
-      })
-    (validate scheduler handle)
+let validate_run_handle scheduler handle = Task_handle.validate_run ~run:scheduler.run handle
+let inspect scheduler handle = Result.map view_of_entry (validate scheduler handle)
 
 let checkout scheduler handle =
   Result.bind (validate scheduler handle) (fun (entry : (_, _) entry) ->

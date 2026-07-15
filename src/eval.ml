@@ -206,6 +206,68 @@ let validate_task_value ctx ~scope_path = function
             "expected an opaque scheduler-owned Task handle";
         ]
 
+let rec scope_prefix prefix path =
+  match (prefix, path) with
+  | [], _ -> true
+  | _, [] -> false
+  | expected :: prefix, actual :: path -> expected = actual && scope_prefix prefix path
+
+(** [reject_task_escape] is the dynamic scope-boundary guard. It walks mutable closure environments
+    and frame-held runtime values instead of checking only a returned value's outer constructor.
+    Physical identity makes the walk terminate on recursive environments. *)
+let reject_task_escape ctx ~scope_path root =
+  let seen = Physical_seen.create 64 in
+  let diagnostics = ref [] in
+  let first_visit value =
+    let key = Obj.repr value in
+    if Obj.is_int key || Physical_seen.mem seen key then false
+    else (
+      Physical_seen.add seen key ();
+      true)
+  in
+  let record_task handle =
+    match Task_handle.validate_run ~run:ctx.task_run handle with
+    | Error task_diagnostics -> diagnostics := List.rev_append task_diagnostics !diagnostics
+    | Ok id when scope_prefix scope_path id.scope_path ->
+        diagnostics :=
+          Diag.error ~code:Concurrency_contract.task_escape_code
+            ~hint:"do not return or store a Task beyond its creating async.scope"
+            (Concurrency_contract.task_escape_message ^ ": Task "
+            ^ Concurrency_contract.trace_task_id id
+            ^ " escaped its creating structured scope")
+          :: !diagnostics
+    | Ok _ -> ()
+  in
+  let rec value runtime_value =
+    if first_visit runtime_value then
+      match runtime_value with
+      | VTask handle -> record_task handle
+      | VTuple items | VCon { args = items; _ } -> List.iter value items
+      | VClosure { scope = closure_scope; _ } -> scope closure_scope
+      | VResume frames -> kont frames
+      | VOnceResume state -> kont (Once_state.payload state)
+      | VInt _ | VReal _ | VText _ | VConstructor _ | VOp _ | VBuiltin _ | VTrustedBuiltin _
+      | VCode _ ->
+          ()
+  and scope scope_value =
+    if first_visit scope_value then Value.Env.iter (fun _ cell -> value !cell) scope_value.env
+  and frame = function
+    | FAppFn { scope = frame_scope; _ }
+    | FLet { scope = frame_scope; _ }
+    | FMatch { scope = frame_scope; _ } ->
+        scope frame_scope
+    | FAppArgs { fn; done_rev; scope = frame_scope; _ } ->
+        value fn;
+        List.iter value done_rev;
+        scope frame_scope
+    | FTuple { done_rev; scope = frame_scope; _ } | FQuote { done_rev; scope = frame_scope; _ } ->
+        List.iter value done_rev;
+        scope frame_scope
+    | FHandle handler -> scope handler.hscope
+  and kont frames = List.iter frame frames in
+  value root;
+  match List.rev !diagnostics with [] -> Ok () | found -> Error found
+
 (** [register_root_handler ctx op handler] installs one explicitly granted root handler. Arguments,
     continuation state, callback mutation, and callback results are guarded at dispatch time. *)
 let register_root_handler ctx op handler = Hashtbl.replace ctx.root_handlers op handler

@@ -40,12 +40,37 @@ val create :
 (** [create] opens a scheduler-owned run and scope and creates its body task at spawn index zero.
     Malformed scope paths return E0907. *)
 
+val create_nested :
+  parent:('resume, 'parent_value) t ->
+  scope_path:int list ->
+  body_resume:'resume ->
+  (('resume, 'value) t * handle, Diag.t list) result
+(** [create_nested ~parent] creates an independent scheduler state in [parent]'s opaque run. The
+    caller remains responsible for choosing and owning the child scope path; no scheduling policy is
+    introduced by this shared-run construction seam. *)
+
+val scope_path : ('resume, 'value) t -> int list
+(** [scope_path scheduler] returns the immutable deterministic path owned by [scheduler]. *)
+
+val task_views : ('resume, 'value) t -> 'value task_view list
+(** [task_views scheduler] returns task views in spawn order for invariant checks and scope-level
+    cleanup accounting. *)
+
+val is_closed : ('resume, 'value) t -> bool
+(** [is_closed scheduler] reports whether {!close} has run. *)
+
 val spawn : ('resume, 'value) t -> resume:'resume -> (handle, Diag.t list) result
 (** [spawn scheduler ~resume] creates the next deterministic one-based child ID. Closed schedulers
     return E0908. *)
 
 val id : ('resume, 'value) t -> handle -> (Concurrency_contract.task_id, Diag.t list) result
 (** [id] validates handle ownership and returns its deterministic scheduler ID. *)
+
+val validate_run_handle :
+  ('resume, 'value) t -> handle -> (Concurrency_contract.task_id, Diag.t list) result
+(** [validate_run_handle scheduler handle] validates only the opaque run owner and returns the
+    handle's ID. It is intended for structured-scope lineage checks; ordinary task operations must
+    use exact-scope validation through {!id}. *)
 
 val inspect : ('resume, 'value) t -> handle -> ('value task_view, Diag.t list) result
 (** [inspect] returns the current task view after validating ownership. *)

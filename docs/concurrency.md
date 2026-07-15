@@ -1,10 +1,11 @@
 # Structured Concurrency Contract
 
-Status: combined SC.4 generalized child-effect charging and SC.5
-policy-independent lifecycle core over the SC.3 Task value and Async declaration
-boundary (D46-D50), July 2026. This document is authoritative for C1's static
-non-laundering law and scheduler state transitions. Scheduler policy, scope
-execution, and an Async root handler remain future work.
+Status: SC.6 structured-scope ownership over the combined SC.4 generalized
+child-effect law and SC.5 policy-independent lifecycle core (D46-D50), July
+2026. This document is authoritative for C1's static non-laundering law,
+scheduler state transitions, nested ownership, cleanup, and dynamic escape
+boundary. Runnable-queue policy, routed cancellation delivery, and an Async
+root handler remain future work.
 
 Structured concurrency is an effect interpreted by a scheduler handler. The
 same program can therefore run under deterministic, seeded-random, exhaustive,
@@ -228,6 +229,25 @@ queue, scheduling policy, host thread, host I/O, or root Async handler.
 Cycle failure terminalizes every member and drops every member resume before
 reporting wakeups, so only live external waiters can enter the runnable output.
 
+SC.6 layers `Structured_scope` over that core. A root opens path `[0]`; each
+nested scope shares the same opaque run and appends its deterministic one-based
+creation ordinal. Scope operations validate the exact open owner before
+delegating to the lifecycle core. Normal return, result-level abort, and a host
+exception all run the same recursive close: descendants close first, unfinished
+tasks become cancelled, wait edges disappear, and every still-owned affine
+resume is passed exactly once to an explicit destruction callback. Recursive
+metrics count open scopes, live/runnable tasks, and owned resumes; every count
+is zero before the bracket returns or re-raises. Thus no child continuation
+remains scheduler-runnable after its owner returns.
+
+The dynamic exit guard rejects E0907 even when a Task is hidden in a tuple,
+constructor, closure cell, cyclic closure environment, or resumption. Closing a
+scope rejects handles created at that path or any descendant path; an
+enclosing-scope handle observed while a nested scope closes remains valid.
+Cleanup completes before an escape diagnostic is returned. Every subsequent
+operation through the closed scope reports E0907 rather than exposing an
+internal lifecycle transition.
+
 ## 3. Scope APIs and failure shapes
 
 The general handler and homogeneous convenience APIs are frozen as:
@@ -275,7 +295,10 @@ runs.
 Dropping a continuation releases language/runtime memory; it does not release
 an external resource automatically. Acquire/release handlers (the bracket or
 `with-file` pattern) are the required C1 idiom for resources crossing a
-suspension point. Finalizers are explicitly deferred.
+suspension point. `Structured_scope.protect` is the implementation bracket for
+continuation ownership: it closes on normal, result-abort, and host-exception
+paths before returning or re-raising. It is not an external-resource finalizer,
+and language finalizers remain explicitly deferred.
 
 ## 5. Deterministic schedule order
 
@@ -302,8 +325,10 @@ types, pinned identities, task-path validation, and pure lifecycle,
 waiter-wakeup, completion/failure-ordering, deadlock-cycle, and queue-order
 relations. Task 127 / SC.3 installs the exact declarations and adds an inert
 run/scope-local Task carrier in both runtime representations. SC.5 adds the
-policy-independent lifecycle engine; runnable-queue policy, executable scopes,
-effect routing, and a root handler remain separate work.
+policy-independent lifecycle engine, and SC.6 adds same-run nested scope
+ownership, recursive cleanup, and complete runtime-value escape scans.
+Runnable-queue policy, effect routing, cooperative delivery timing, and a root
+handler remain separate work.
 
 ## 6. Interactions and exclusions
 
