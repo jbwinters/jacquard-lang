@@ -107,3 +107,11 @@ per-outcome diff rendered through Show.
   PASS sampler-ok/optimized model matches reference (3 checks)
   1 passed, 1 failed, 0 skipped, 0 refused
   [1]
+
+GM.6 exhaustively crosses all four risks, five assessment confidences, five
+dry-policy thresholds, and three simulator states. The property also pins two
+ordered audit records and exactly one Resume on every ordinary path.
+
+  $ jacquard test governance-gate-dry-laws.jqd --exhaustive --budget 1000 --no-cache
+  PASS governance-gate-dry-matrix/world-free dry gate matrix (verified exhaustively (300 cases))
+  1 passed, 0 failed, 0 skipped, 0 refused

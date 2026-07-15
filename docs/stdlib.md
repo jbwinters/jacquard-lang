@@ -457,8 +457,9 @@ trivially reworded if D7 resolves the other way.
 
 `Audit` is the released ring-3 governance effect. Its sole operation is once
 `audit.record : (AuditEntry) -> ()`; the `Evaluated`, `Consented`, and
-`Completed` constructors and their nested governance values are stable v1
-interfaces. `audit.in-memory` discharges Audit hermetically and returns the
+`Completed` constructors now carry exact `GovernanceVersion` and `Int sequence`
+fields. This D69 v2 identity intentionally supersedes the historical ET.2 v1
+interface. `audit.in-memory` discharges Audit hermetically and returns the
 result paired with entries in occurrence order.
 
 `Hash` is opaque. There is no public unchecked value constructor:
@@ -481,15 +482,17 @@ fail-closed and preserve action ordering.
 
 An `Err` while recording `Completed` is still returned, but the earlier action
 has already happened and cannot be rolled back by a log handler. Irreversible
-drivers must return a receipt or idempotency key in `OutcomeSummary` so an
-operator can reconcile the external action with the audit stream. The handler
-does not retry implicitly: a retry could duplicate an append after an ambiguous
-sink failure.
+drivers must return a receipt or idempotency key in
+`GovernanceOutcomeSummary` so an operator can reconcile the external action
+with the audit stream. The handler does not retry implicitly: a retry could
+duplicate an append after an ambiguous sink failure.
 
-ET.3's `audit-chain-v1` carrier commits each existing `audit-entry-v1` form to
+The current `audit-chain-v2` carrier commits each exact `audit-entry-v2` form to
 its predecessor HASH_V0 and publishes a new head. The chain uses
 `audit.entry-code`'s compact canonical bytes directly; there is no parallel
-AuditEntry serializer. The fixed empty head and exact domain-separated digest
+AuditEntry serializer. It also enforces the exact contiguous sequence `0, 1, 2,
+...`, rejecting duplicate, skipped, decreasing, or negative positions. The fixed
+empty head and exact domain-separated digest
 contract are specified in [`effect-taxonomy.md`](effect-taxonomy.md).
 
 `jacquard audit genesis` prints the empty head. A single writer uses
@@ -500,7 +503,8 @@ append command takes a nonblocking advisory whole-file lock and performs its
 bounded read, verification, final pathname-identity check, and append through
 one open file description; replacement or concurrent-change races fail with
 E1306 rather than redirecting the record to a new pathname target. The
-verifier rejects reorder, removal, alteration, duplication, wrong versions, and
+verifier rejects reorder, removal, alteration, duplication, sequence gaps,
+wrong versions, and
 malformed or noncanonical records with diagnostics. Because a chain cannot by
 itself reveal removal of a valid suffix, the independently published head is a
 required part of the verification contract.
@@ -508,7 +512,8 @@ required part of the verification contract.
 ### Versioned governance membrane values
 
 GM.1 ships the ordinary ring-3 values consumed by later governed facade
-handlers in `prelude/21-governance-core.jqd`. The existing ET.2 `Risk` and
+handlers. `GovernanceVersion` is declared in the shared Audit carrier
+`prelude/19-audit.jqd` and reused by `prelude/21-governance-core.jqd`. The existing ET.2 `Risk` and
 `Verdict` types remain the four-constructor frozen enums. New versioned carriers
 use the `governance-*` names where ET.2 or ET.6 already owns an unversioned
 public name: `GovernanceVersion`, `ToolError`, `GovernanceAuthority`,
@@ -581,6 +586,55 @@ always blocks Forbidden; otherwise it returns Simulate exactly when a pure
 simulator exists and `NoSimulation` when none exists. It has no Allow or Ask
 path and does not reinterpret the retained DryPolicy confidence field as a
 gate.
+
+### World-free dry governance gate
+
+GM.6 releases `governance.gate-dry` in
+`prelude/24-governance-gate-dry.jqd`. Its checker-visible contract accepts an
+`AuditSequence`, exact `BoundPolicy DryPolicy`, validated `GovernanceCall`, pure
+simulator thunk, and pure outcome summarizer. It returns the frozen disposition;
+the facade clause retains its affine continuation locally:
+
+```text
+governance.gate-dry :
+  forall a.
+  ( AuditSequence
+  , BoundPolicy DryPolicy
+  , GovernanceCall
+  , Option (() ->{} Result ToolError a)
+  , (Result ToolError a) ->{} GovernanceOutcomeSummary
+  ) ->{State, Judge, Audit} DryDisposition a
+```
+
+The gate validates the call and exact bound policy, obtains its assessment
+only through `Judge.assess`, and records `Evaluated` before simulation or
+refusal. `Forbidden` produces `ToolBlocked`; every other risk either invokes
+the pure simulator or produces `NoSimulation`. A simulator's explicit
+`DriverFailed` is preserved and never falls through to a live action. The
+result is summarized without reflection, `Completed` is recorded, and the
+disposition is returned. The facade clause then consumes its locally bound
+affine continuation exactly once on ordinary paths.
+
+Malformed directly represented `GovernanceCall` or `BoundPolicy` values are a
+defensive precondition refusal: the gate returns `InvalidDecision` before
+`Judge`, `Audit`, simulation, summarization, or any live/approval authority.
+Such verifier-input refusals are intentionally unaudited because no trustworthy
+call ID or policy ID exists to place in an exact AuditEntry.
+
+The simulator and summarizer rows are closed, and the gate's outward row is
+closed over only `State`, `Judge`, and `Audit`; it cannot carry `Approval`,
+`Secret`, `Eval`, `Fs`, `Net`, or another world effect. The caller supplies the
+run-scoped `AuditSequence`; `governance.with-sequence` is the sole API that
+installs and discharges its shared `State` effect. Public signatures still
+expose only `State` and `Int` positions, while the private handler payload is
+`(run-id: Hash, counter: Int)`. Each invocation receives a fresh trusted run
+ID, and `next`/`accept` reject a token whose ID differs from the active handler.
+The constructor and private generator/check markers are absent from both public
+name and derived-hash lookup, including after store reopen; only already-resolved
+owner code has the private construction path. Audit refusal is fail-closed.
+Failure to record `Evaluated` prevents simulation and summarization; failure to
+record `Completed` occurs after simulation but before a disposition can reach
+the facade clause.
 
 ### Judge assessment handlers
 

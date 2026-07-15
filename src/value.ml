@@ -41,9 +41,10 @@ type t =
 
 and env = t ref Env.t
 
-and scope = { env : env; group : Hash.t array }
-(** evaluation scope: lexical environment plus the enclosing defterm group's member hashes (source
-    order), for [GroupRef] *)
+and scope = { env : env; group : Hash.t array; trusted_store_refs : bool }
+(** Evaluation scope: lexical environment, the enclosing defterm group's member hashes, and a
+    private-reference bit. Stored, already-resolved term bodies set the bit; source expressions do
+    not, so explicit hashes cannot reach hidden capability constructors. *)
 
 and frame =
   | FAppFn of { args : Kernel.expr list; scope : scope }
@@ -64,7 +65,7 @@ and handler = {
 
 and kont = frame list
 
-let empty_scope = { env = Env.empty; group = [||] }
+let empty_scope = { env = Env.empty; group = [||]; trusted_store_refs = false }
 let unit_v = VTuple []
 
 (** Stable rendering for goldens and diagnostics. Reals use the reader-compatible spelling; text is

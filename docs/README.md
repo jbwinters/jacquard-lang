@@ -101,6 +101,11 @@ Read these together when judging whether the release candidate is credible:
 - `release/governed-membranes/GM5-MANIFEST.sha256`: reconstructible GM.5 overlay
   on the validated GM.1 plus ET.3 integration base `94b5082`; the GM.1 evidence
   set remains historical.
+- `release/governed-membranes/GM6-EVIDENCE.md`: GM.6 world-free dry gate,
+  fail-closed audit ordering, explicit simulation refusal, and facade-local
+  affine Resume evidence.
+- `release/governed-membranes/GM6-MANIFEST.sha256`: exact GM.6 overlay on
+  integration commit `060e9d6`.
 
 ## Maintenance Notes
 

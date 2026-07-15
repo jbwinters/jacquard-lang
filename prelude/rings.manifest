@@ -333,6 +333,7 @@ consented 3
 completed 3
 audit 3
 record 3
+audit.version-code 3
 audit.hash-code 3
 audit.risk-code 3
 audit.verdict-code 3
@@ -341,6 +342,7 @@ audit.assessment-code 3
 audit.outcome-code 3
 audit.decision-code 3
 audit.entry-code 3
+audit.sequence 3
 audit.in-memory 3
 audit.line-log 3
 # --- 20-approval (ring 3 governance proposal identity and consent boundary)
@@ -471,3 +473,14 @@ judge.rules 3
 judge.fixed 3
 judge.scripted 3
 judge.model 3
+# --- 24-governance-gate-dry (GM.6 world-free simulation gate)
+audit-sequence 3
+dry-disposition 3
+simulated 3
+refuse-dry 3
+governance.next-sequence 3
+governance.accept-sequence 3
+governance.with-sequence 3
+governance.run-dry-simulation 3
+governance.summarize-dry-result 3
+governance.gate-dry 3

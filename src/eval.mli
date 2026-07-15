@@ -12,6 +12,10 @@ val make_ctx : Store.t -> ctx
 val store : ctx -> Store.t
 (** [store ctx] returns the backing store used for declaration and name lookup. *)
 
+val fresh_audit_run_id : ctx -> Hash.t
+(** [fresh_audit_run_id ctx] mints a deterministic identity in [ctx]'s private Audit owner
+    namespace. It is exposed only to trusted prelude wiring. *)
+
 val register_builtin : ctx -> Hash.t -> Value.t -> unit
 (** [register_builtin ctx hash value] installs a native implementation for a term. Recovery-marked
     values are rejected with the evaluator's runtime exception; custom callbacks are guarded before

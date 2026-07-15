@@ -77,7 +77,7 @@ mode; there is no inference from names.
 | `Log` | `log` | `official` | `world` | `-` | `once` | `medium` | `3` | `reserved` | `first-release` | `log.emit:(LogEntry)->()` | emit a structured operational log entry |
 | `Infer` | `infer` | `official` | `model` | `-` | `once` | `medium` | `3` | `implemented` | `324b8f59279db3cabbfaaba430168717057cea8fc1435a11a1a9106e3e6fb4d8` | `complete:(Prompt)->Text` | request a model completion selected by the handler |
 | `Approval` | `approval` | `official` | `governance` | `-` | `once` | `special` | `3` | `implemented` | `362425a29077a7efbcc37047182e579f46199a50473045eb4126a917dfc2a196` | `approval.ask:(Proposal)->Decision` | request hash-bound consent for an exact proposal |
-| `Audit` | `audit` | `official` | `governance` | `-` | `once` | `special` | `3` | `implemented` | `2c148fbc2e26bdc6f01279a8bf176f54d5798536e1f96805aa4f7c7a57e67632` | `audit.record:(AuditEntry)->()` | record governance evidence in an append-only stream |
+| `Audit` | `audit` | `official` | `governance` | `-` | `once` | `special` | `3` | `implemented` | `40bc4343fb2b4bcc18b18f63f7bb68675b746751bb40b876072e622046a81372` | `audit.record:(AuditEntry)->()` | record governance evidence in an append-only stream |
 | `Secret` | `secret` | `official` | `governance` | `-` | `once` | `special` | `3` | `reserved` | `first-release` | `secret.read:(SecretRef)->Secret;secret.expose:(Secret)->Text` | resolve opaque confidential material or explicitly expose it |
 | `Judge` | `judge` | `official` | `governance` | `-` | `once` | `special` | `3` | `implemented` | `9b677b5e2c3ec8521c5d5dfac321ae361a959565e1cbf082fec4512199977354` | `judge.assess:(Call)->Assessment` | assess a proposed call without performing it |
 | `Async` | `async` | `official` | `concurrency` | `a` | `once` | `none` | `2` | `reserved` | `first-release` | `async.spawn:(()->{Async\|e}a)->Task a;async.await:(Task a)->TaskResult a;async.cancel:(Task a)->();async.yield:()->()` | schedule structured tasks while charging child effects to the parent row |
@@ -107,13 +107,13 @@ obligation rather than prematurely changing the runtime or checker.
 
 ## 4. Governance data schemas
 
-This section records the ET.0 boundary vocabulary that preceded the membrane
-charter. GM.0 in [`effect-membranes.md`](effect-membranes.md) supersedes the
-exact governance record fields, version tags, ID inputs, and audit sequence
-fields below. The effect operation boundaries (`Call -> Assessment`,
-`Proposal -> Decision`, `AuditEntry -> ()`, and the two `Secret` operations)
-remain unchanged. Implementations must use the GM.0 schemas; this older block
-and its executable fixture remain historical ET.0 compatibility evidence.
+The following block records the historical ET.0 boundary vocabulary that
+preceded the membrane charter. GM.0 in
+[`effect-membranes.md`](effect-membranes.md) supersedes these exact record
+fields, version tags, ID inputs, and audit sequence fields. The effect-operation
+roles remain, but implementations must use the current GM schemas described
+after the block. This older vocabulary and its executable fixture remain
+historical ET.0 compatibility evidence.
 
 ```text
 type Authority = Effect(name: Text) | Resource(effect-name: Text, scope: Text)
@@ -142,6 +142,16 @@ type ChannelHandle a                            -- opaque, distinct from effect 
 type ChannelError = ChannelClosed
 ```
 
+The current released membrane vocabulary instead names the versioned carriers
+`GovernanceCall`, `GovernanceAssessment`, and
+`GovernanceOutcomeSummary`. D69's current `AuditEntry` is the incompatible v2
+schema: every `Evaluated`, `Consented`, and `Completed` value carries a
+`GovernanceVersion` and contiguous nonnegative `Int sequence`, and its nested
+assessment and outcome fields are exactly `GovernanceAssessment` and
+`GovernanceOutcomeSummary`. The authoritative complete field list is the GM.0
+charter; `prelude/19-audit.jqd` and `prelude/21-governance-core.jqd` are its
+released executable carriers.
+
 `Hash`, `Bytes`, `Secret`, `Task`, and `ChannelHandle` are opaque
 library/runtime types. Hash has no public value constructor: `hash.parse`
 accepts only the canonical 64-lowercase-hex HASH_V0 spelling, and
@@ -161,7 +171,9 @@ optional typed preview. It computes `Proposal.proposal-id` from the one canonica
 `proposal-v1` Code encoding; `approval.validate-proposal` recomputes that hash
 and fails closed on a forged carrier. The earlier ET.2 Decision encoding was
 already versioned as `approved-v1`, `denied-v1`, and `escalate-v1`, so its type
-and Audit identity remain unchanged. `approval.validate-decision` requires the
+remains unchanged. GM.6/D69 deliberately supersedes the historical ET.2 Audit
+identity with an incompatible versioned-and-sequenced identity.
+`approval.validate-decision` requires the
 embedded Decision hash to equal the exact proposal hash, and
 `approval.before-action` forces its action thunk only after both checks pass.
 
@@ -330,14 +342,14 @@ the ten `reserved` entries carry no hash and name only the
 `first-release` policy; registration rejects them until a real first interface is
 implemented and frozen. This keeps schema reservation distinct from resolved
 program identity. Audit, Approval, and Judge are the first three reserved
-interfaces promoted by that rule. Their v1 identities above are the shipped
-`DefEffect` hashes; their operations are once
+interfaces promoted by that rule. Approval and Judge retain their shipped v1
+`DefEffect` hashes. Audit is now the D69 v2 identity; their operations are once
 `audit.record : (AuditEntry) -> ()`, once
 `approval.ask : (Proposal) -> Decision`, and once
-`judge.assess : (Call) -> Assessment`, respectively. The executable GM.5
-declaration uses the collision-safe GM.1 carrier names `GovernanceCall` and
-`GovernanceAssessment`; these are the versioned v0 spellings of the charter
-schemas shown here.
+`judge.assess : (GovernanceCall) -> GovernanceAssessment`, respectively. These
+collision-safe GM.1 carrier names are the current versioned v0 spellings of the
+charter schemas; the unprefixed `Call` and `Assessment` names above belong only
+to the historical ET.0 vocabulary.
 
 Plain rendering is deterministic. Optional ANSI styling colors only the risk
 token of an identity-confirmed official entry. An unregistered effect with
@@ -359,20 +371,22 @@ Semantic diff applies this rendering only to a resolved effect row in the row
 position of a typed arrow. Type-shaped forms below `quote` remain ordinary code
 data and receive structural diffs, never an authority label.
 
-### Audit chain v1
+### Audit chain v2
 
-D58 is implemented by the single canonical carrier
-`(audit-chain-v1 #PREVIOUS #DIGEST ENTRY)`, one compact form plus LF per record.
-`ENTRY` is the existing `audit-entry-v1` form produced by `audit.entry-code`;
+D69 advances D58's historical carrier to the single canonical form
+`(audit-chain-v2 #PREVIOUS #DIGEST ENTRY)`, one compact form plus LF per record.
+`ENTRY` is the exact `audit-entry-v2` form produced by `audit.entry-code`, including
+`governance-v0` and a nonnegative sequence integer;
 the chain layer does not define a second AuditEntry serializer. The fixed empty
 head is
-`5a8760f8a958799a0e38154fae7cc086d9a1ee0153ff62451ac1a07f7b0b50d7`.
+`e30304e99930d8bf631a0b1f364b6d91f6dc798a14c7c0a554ff994ff14ab937`.
 
 For each record, `DIGEST` is HASH_V0 over the domain bytes
-`jacquard-audit-chain-v1\0`, the predecessor's 32 raw HASH_V0 bytes, and the
+`jacquard-audit-chain-v2\0`, the predecessor's 32 raw HASH_V0 bytes, and the
 compact canonical bytes of `ENTRY`. The chain version and domain are frozen
-together; alternate versions fail closed rather than falling through to the v1
-verifier.
+together; alternate versions fail closed rather than falling through to the v2
+verifier. Verification also requires sequences to be exactly `0, 1, 2, ...` in
+record order, rejecting duplicate, skipped, decreasing, or negative values.
 
 `jacquard audit append LOG ENTRY --previous HASH` first reconstructs `LOG`
 against the caller's independently held previous head, appends one record, and
@@ -402,7 +416,7 @@ receives a record intended for the verified inode.
 |---|---|---|
 | D56 | taxonomy freeze v1 | §3 and the TSV artifact; resolved identities govern, additions use new hashes |
 | D57 | Secret opacity | opaque, no `Show`, inspect redacts, explicit in-row `secret.expose`; taint deferred |
-| D58 | audit chain | implemented `audit-chain-v1` carrier commits existing canonical entry bytes and predecessor HASH_V0; CLI append publishes a head and governance verification fails closed offline |
+| D58 | audit chain | the historical v1 carrier established predecessor-bound HASH_V0 records; D69 advances the current released carrier to `audit-chain-v2` and exact contiguous AuditEntry sequences |
 | D59 | Proposal schema | implemented `proposal-v1` binds semantic call subject separately from exact review identity; policy, assessment, ordered authority, rendering, summary, and preview are mandatory hash inputs; decisions embed that exact proposal hash, and hash-less, forged, or mismatched carriers fail before action; GM.0 D67 names the successor membrane identities `call-id` and `proposal-id` |
 | D60 | membrane placement | GM.1 implements the versioned core data and policies in ring 3; handlers, cookbook, and flagship demo remain later phases |
 | D61 | facade shape | domain-specific typed facade effects; no universal stringly `Tool.call` |

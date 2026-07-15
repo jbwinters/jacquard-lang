@@ -11,4 +11,5 @@
   (source_tree ../native-gauntlet)
   ../once_interpreter_probe.exe
   ../gen_once_hostile.exe
-  (source_tree ../../scripts)))
+  (source_tree ../../scripts)
+  governance-gate-dry-laws.jqd))
