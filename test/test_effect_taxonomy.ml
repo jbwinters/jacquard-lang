@@ -2,6 +2,7 @@ open Jacquard
 
 let taxonomy_file = "../spec/effect-taxonomy-v1.tsv"
 let taxonomy_doc = "../docs/effect-taxonomy.md"
+let concurrency_doc = "../docs/concurrency.md"
 let schema_fixture = "docs-doctest/fixtures/effect-taxonomy-schemas.jac"
 let approval_fixture = "docs-doctest/fixtures/stdlib-handler-policy.jac"
 
@@ -19,6 +20,8 @@ type row = {
   operations : string;
   meaning : string;
 }
+
+type effect_shape = { ename : string; evars : string list; ops : Kernel.opspec list }
 
 let split_tabs line = Str.split_delim (Str.regexp "\t") line
 
@@ -93,11 +96,11 @@ let rec schema_ty (ty : Kernel.ty) =
           row.effects
       in
       let row_items =
-        match row.rvar with None -> effects | Some tail -> effects @ [ "|" ^ tail ]
+        String.concat "," effects ^ match row.rvar with None -> "" | Some tail -> "|" ^ tail
       in
       "("
       ^ String.concat "," (List.map schema_ty params)
-      ^ ")->{" ^ String.concat "," row_items ^ "}" ^ schema_ty result
+      ^ ")->{" ^ row_items ^ "}" ^ schema_ty result
   | Kernel.TTuple [] -> "()"
   | Kernel.TTuple items -> "(" ^ String.concat "," (List.map schema_ty items) ^ ")"
   | Kernel.TForall (tvars, rvars, body) ->
@@ -209,9 +212,14 @@ let test_complete_contract () =
                  (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false)
                  row.interface_hash)
       | "reserved" ->
-          Alcotest.(check string)
-            (row.effect_name ^ " first-release policy")
-            "first-release" row.interface_hash
+          if String.equal row.effect_name "Async" then
+            Alcotest.(check string)
+              "Async checker-privileged interface identity" Concurrency_contract.async_effect_hash
+              row.interface_hash
+          else
+            Alcotest.(check string)
+              (row.effect_name ^ " first-release policy")
+              "first-release" row.interface_hash
       | other -> Alcotest.failf "%s has invalid status %s" row.effect_name other)
     rows
 
@@ -249,9 +257,7 @@ let test_resolved_reserved_schemas () =
     "spawn retains Async in the child row" "async.spawn:(()->{Async|e}a)->Task a"
     (List.hd (String.split_on_char ';' (find "Async").operations));
   let declarations = schema_declarations () in
-  let executable_expected =
-    List.filter (fun (effect_name, _) -> not (String.equal effect_name "Async")) expected
-  in
+  let executable_expected = expected in
   List.iter
     (fun (effect_name, _) ->
       let expected_row = find effect_name in
@@ -277,7 +283,7 @@ let test_resolved_reserved_schemas () =
       | None -> Alcotest.failf "%s is missing from the executable schema fixture" effect_name)
     executable_expected;
   Alcotest.(check bool)
-    "Async remains non-executable until self-row resolution lands" false
+    "Async self-row schema is executable after SC.0" true
     (List.exists
        (function
          | { Kernel.it = Kernel.DefEffect { ename; _ }; _ } -> String.equal ename "async"
@@ -292,10 +298,10 @@ let test_resolved_reserved_schemas () =
         true
         (contains_string normalized_doc obligation))
     [
-      "performing `async.spawn` must make the caller row gain `{Async | e}`";
-      "generic operation typing does not enforce the row-charging law";
-      "special operation-typing rule";
-      "known laundering hazard as an implementation obligation";
+      "direct resolved `async.spawn` application";
+      "narrow special typing rule";
+      "higher-order aliases, wrappers, and returned closures";
+      "does not implement Task values, a scheduler, scopes, or a root handler";
     ];
   let constructor_inventory type_name =
     match
@@ -355,6 +361,368 @@ let prelude_store () =
   | Error diagnostics -> Eval_support.fail_diags "taxonomy prelude load" diagnostics);
   store
 
+let install_schema_fixture store =
+  let installed = ref [] in
+  schema_declarations ()
+  |> List.iter (fun declaration ->
+      let resolved =
+        match Resolve.resolve_decl (Store.names_view store) declaration with
+        | Ok declaration -> declaration
+        | Error diagnostics -> Eval_support.fail_diags "resolve taxonomy fixture" diagnostics
+      in
+      let hashes =
+        match Store.put_decl store resolved with
+        | Ok hashes -> hashes
+        | Error diagnostics -> Eval_support.fail_diags "put taxonomy fixture" diagnostics
+      in
+      installed := (resolved, hashes) :: !installed);
+  List.rev !installed
+
+let frozen_async installed =
+  match
+    List.find_opt
+      (function
+        | { Kernel.it = Kernel.DefEffect { ename; _ }; _ }, _ -> String.equal ename "async"
+        | _ -> false)
+      installed
+  with
+  | Some pair -> pair
+  | None -> Alcotest.fail "resolved taxonomy fixture has no Async declaration"
+
+let hex_bytes bytes =
+  let alphabet = "0123456789abcdef" in
+  String.init
+    (String.length bytes * 2)
+    (fun index ->
+      let byte = Char.code bytes.[index / 2] in
+      if index mod 2 = 0 then alphabet.[byte lsr 4] else alphabet.[byte land 0x0f])
+
+let effect_bytes (declaration : Kernel.decl) =
+  match declaration.it with
+  | Kernel.DefEffect { ename; evars; ops } -> (
+      match Canon.canonical_effect_bytes ~ename ~evars ~ops with
+      | Ok bytes -> bytes
+      | Error diagnostics -> Eval_support.fail_diags "canonical effect bytes" diagnostics)
+  | _ -> Alcotest.fail "expected effect declaration"
+
+let test_self_effect_hash_contract () =
+  let store = prelude_store () in
+  let declaration, hashes = frozen_async (install_schema_fixture store) in
+  let bytes = effect_bytes declaration in
+  Alcotest.(check string)
+    "self-effect 0x38 declaration hash" Concurrency_contract.async_effect_hash
+    (Hash.to_hex hashes.decl_hash);
+  Alcotest.(check string)
+    "self-effect 0x38 pinned payload bytes"
+    "42056173796e630104460b6173796e632e737061776e01330038010001000165310100323007791255b44e18c3830038c51396bd3f80cf44a8e89222ff73dc90dd06ec3fb30131010001460b6173796e632e617761697401323007791255b44e18c3830038c51396bd3f80cf44a8e89222ff73dc90dd06ec3fb3013101003230915f69bd6fd8b34c2794b4b0e7ca88f5aafd0187e5c7c36a59091f6d031405ae0131010001460c6173796e632e63616e63656c01323007791255b44e18c3830038c51396bd3f80cf44a8e89222ff73dc90dd06ec3fb301310100340001460b6173796e632e7969656c6400340001"
+    (hex_bytes bytes);
+  Alcotest.(check bool)
+    "self-effect payload contains 0x38" true
+    (String.contains bytes (Char.chr 0x38));
+  let spawn_parameter =
+    match declaration.it with
+    | Kernel.DefEffect { ops = { Kernel.op_params = [ parameter ]; _ } :: _; _ } -> parameter
+    | _ -> Alcotest.fail "frozen Async spawn parameter shape changed"
+  in
+  let spawn_row =
+    match spawn_parameter.it with
+    | Kernel.TArrow ([], row, _) -> row
+    | _ -> Alcotest.fail "frozen Async thunk shape changed"
+  in
+  Alcotest.(check bool)
+    "resolver preserves enclosing self effect as Named" true
+    (spawn_row.effects = [ Kernel.Named "async" ] && spawn_row.rvar = Some "e");
+  let mutate_spawn_row change =
+    match declaration.it with
+    | Kernel.DefEffect { ename; evars; ops = spawn :: rest } ->
+        let spawn =
+          match spawn.op_params with
+          | [ parameter ] ->
+              let parameter =
+                match parameter.it with
+                | Kernel.TArrow (parameters, row, result) ->
+                    { parameter with it = Kernel.TArrow (parameters, change row, result) }
+                | _ -> Alcotest.fail "frozen Async thunk shape changed"
+              in
+              { spawn with op_params = [ parameter ] }
+          | _ -> Alcotest.fail "frozen Async spawn shape changed"
+        in
+        { declaration with it = Kernel.DefEffect { ename; evars; ops = spawn :: rest } }
+    | _ -> Alcotest.fail "frozen Async declaration shape changed"
+  in
+  let closed = mutate_spawn_row (fun row -> { row with Kernel.rvar = None }) in
+  let net_hash =
+    match Store.lookup_kind store "net" Resolve.KEffect with
+    | Some entry -> entry.hash
+    | None -> Alcotest.fail "prelude has no Net effect"
+  in
+  let mixed =
+    mutate_spawn_row (fun row ->
+        { row with Kernel.effects = row.effects @ [ Kernel.Hashed net_hash ] })
+  in
+  let decl_hash declaration =
+    match Canon.hash_decl declaration with
+    | Ok hashes -> hashes.decl_hash
+    | Error diagnostics -> Eval_support.fail_diags "hash self-effect mutation" diagnostics
+  in
+  let open_hash = hashes.decl_hash in
+  let closed_hash = decl_hash closed in
+  let mixed_hash = decl_hash mixed in
+  Alcotest.(check bool)
+    "self open and closed rows are distinct" true
+    (not (Hash.equal open_hash closed_hash));
+  Alcotest.(check bool)
+    "self open and mixed rows are distinct" true
+    (not (Hash.equal open_hash mixed_hash));
+  Alcotest.(check bool)
+    "self closed and mixed rows are distinct" true
+    (not (Hash.equal closed_hash mixed_hash));
+  let abort =
+    match Store.lookup_kind store "abort" Resolve.KEffect with
+    | Some entry -> (
+        match Store.get store entry.hash with
+        | Ok declaration -> declaration
+        | Error diagnostics -> Eval_support.fail_diags "get Abort" diagnostics)
+    | None -> Alcotest.fail "prelude has no Abort effect"
+  in
+  Alcotest.(check string)
+    "legacy 0x36 declaration hash unchanged"
+    "bfdfaeee39c6f5290ebea28e805bdeb92f448f1a1e0b9c47f3c70c53975b4375"
+    (Hash.to_hex (decl_hash abort));
+  Alcotest.(check string)
+    "legacy effect pinned payload bytes" "420561626f72740101460561626f72740031010001"
+    (hex_bytes (effect_bytes abort));
+  Alcotest.(check bool)
+    "legacy payload does not use 0x38" false
+    (String.contains (effect_bytes abort) (Char.chr 0x38));
+  let printed = Printer.print_all [ Kernel.decl_to_form declaration ] in
+  let reparsed =
+    match Reader.parse_one ~file:"async-roundtrip.jqd" printed with
+    | Error diagnostics -> Eval_support.fail_diags "parse Async roundtrip" diagnostics
+    | Ok form -> (
+        match Kernel.decl_of_form form with
+        | Ok declaration -> declaration
+        | Error diagnostics -> Eval_support.fail_diags "validate Async roundtrip" diagnostics)
+  in
+  Alcotest.(check string)
+    "printer/reader preserves self-effect hash" Concurrency_contract.async_effect_hash
+    (Hash.to_hex (decl_hash reparsed));
+  let malformed =
+    match
+      Reader.parse_one ~file:"malformed-self.jqd"
+        "(deftype bad () (con bad-c (field (tarrow () (row (eref task)) (ttuple)))))"
+    with
+    | Error diagnostics -> Eval_support.fail_diags "parse malformed self context" diagnostics
+    | Ok form -> (
+        match Kernel.decl_of_form form with
+        | Ok declaration -> declaration
+        | Error diagnostics -> Eval_support.fail_diags "validate malformed self context" diagnostics
+        )
+  in
+  (match Resolve.resolve_decl (Store.names_view store) malformed with
+  | Error [ diagnostic ] ->
+      Alcotest.(check string) "type used as effect rejected by resolver" "E0302" diagnostic.code
+  | Error diagnostics ->
+      Eval_support.fail_diags "unexpected malformed-context diagnostics" diagnostics
+  | Ok _ -> Alcotest.fail "type used as an effect unexpectedly resolved");
+  (match Canon.hash_decl malformed with
+  | Error [ diagnostic ] ->
+      Alcotest.(check string)
+        "Named row outside enclosing effect rejected by canon" "E0501" diagnostic.code
+  | Error diagnostics -> Eval_support.fail_diags "unexpected malformed hash diagnostics" diagnostics
+  | Ok _ -> Alcotest.fail "malformed Named effect unexpectedly hashed");
+  let reopen_dir = Eval_support.fresh_dir () in
+  let reopen_store =
+    match Store.open_store reopen_dir with
+    | Ok store -> store
+    | Error diagnostics -> Eval_support.fail_diags "open self-effect store" diagnostics
+  in
+  (match Prelude.load ~dir:"../prelude" reopen_store with
+  | Ok _ -> ()
+  | Error diagnostics -> Eval_support.fail_diags "load self-effect store prelude" diagnostics);
+  let _, persisted = frozen_async (install_schema_fixture reopen_store) in
+  let reopened =
+    match Store.open_store reopen_dir with
+    | Ok store -> store
+    | Error diagnostics -> Eval_support.fail_diags "reopen self-effect store" diagnostics
+  in
+  match Store.get reopened persisted.decl_hash with
+  | Ok persisted_decl ->
+      Alcotest.(check string)
+        "store put/get/reopen preserves self-effect hash" Concurrency_contract.async_effect_hash
+        (Hash.to_hex (decl_hash persisted_decl))
+  | Error diagnostics -> Eval_support.fail_diags "get reopened self-effect" diagnostics
+
+let test_async_privilege_mutations () =
+  let store = prelude_store () in
+  let declaration, hashes = frozen_async (install_schema_fixture store) in
+  let ctx =
+    match Check.make_ctx store with
+    | Ok ctx -> ctx
+    | Error diagnostics -> Eval_support.fail_diags "make checker" diagnostics
+  in
+  let exact_spawn = Canon.op_hash hashes.decl_hash 0 in
+  Alcotest.(check bool)
+    "exact frozen Async spawn is privileged" true
+    (Check.is_frozen_async_spawn ctx exact_spawn);
+  Alcotest.(check string)
+    "Task nominal identity is pinned" Concurrency_contract.task_type_hash
+    (match Store.lookup_kind store "task" Resolve.KType with
+    | Some entry -> Hash.to_hex entry.hash
+    | None -> Alcotest.fail "missing Task identity");
+  Alcotest.(check string)
+    "TaskResult nominal identity is pinned" Concurrency_contract.task_result_type_hash
+    (match Store.lookup_kind store "task-result" Resolve.KType with
+    | Some entry -> Hash.to_hex entry.hash
+    | None -> Alcotest.fail "missing TaskResult identity");
+  let mutate_effect change =
+    match declaration.it with
+    | Kernel.DefEffect { ename; evars; ops } ->
+        let changed = change { ename; evars; ops } in
+        {
+          declaration with
+          it = Kernel.DefEffect { ename = changed.ename; evars = changed.evars; ops = changed.ops };
+        }
+    | _ -> Alcotest.fail "Async fixture is not an effect"
+  in
+  let map_nth index change items =
+    List.mapi (fun actual item -> if actual = index then change item else item) items
+  in
+  let change_op index change shape = { shape with ops = map_nth index change shape.ops } in
+  let change_ty ty it = { ty with Kernel.it } in
+  let change_spawn_parameter change op =
+    match op.Kernel.op_params with
+    | [ parameter ] -> { op with op_params = [ change parameter ] }
+    | _ -> Alcotest.fail "frozen spawn parameter shape changed"
+  in
+  let change_spawn_arrow change parameter =
+    match parameter.Kernel.it with
+    | Kernel.TArrow (parameters, row, result) ->
+        let parameters, row, result = change (parameters, row, result) in
+        change_ty parameter (Kernel.TArrow (parameters, row, result))
+    | _ -> Alcotest.fail "frozen spawn thunk shape changed"
+  in
+  let task_result_hash =
+    match Hash.of_hex Concurrency_contract.task_result_type_hash with
+    | Some hash -> hash
+    | None -> Alcotest.fail "invalid pinned TaskResult hash"
+  in
+  let task_hash =
+    match Hash.of_hex Concurrency_contract.task_type_hash with
+    | Some hash -> hash
+    | None -> Alcotest.fail "invalid pinned Task hash"
+  in
+  let replace_app_head replacement ty =
+    match ty.Kernel.it with
+    | Kernel.TApp (head, arguments) ->
+        change_ty ty
+          (Kernel.TApp (change_ty head (Kernel.TRef (Kernel.Hashed replacement)), arguments))
+    | _ -> Alcotest.fail "frozen Task application shape changed"
+  in
+  let wrong_task = replace_app_head task_result_hash in
+  let wrong_task_result = replace_app_head task_hash in
+  let wrong_app_argument ty =
+    match ty.Kernel.it with
+    | Kernel.TApp (head, [ argument ]) ->
+        change_ty ty (Kernel.TApp (head, [ change_ty argument (Kernel.TVar "b") ]))
+    | _ -> Alcotest.fail "frozen unary type application shape changed"
+  in
+  let rename_effect shape =
+    let shape = { shape with ename = "not-async" } in
+    change_op 0
+      (change_spawn_parameter
+         (change_spawn_arrow (fun (parameters, row, result) ->
+              let effects =
+                List.map
+                  (function
+                    | Kernel.Named "async" -> Kernel.Named "not-async" | reference -> reference)
+                  row.Kernel.effects
+              in
+              (parameters, { row with Kernel.effects }, result))))
+      shape
+  in
+  let mutations =
+    [
+      ("non-Async name with otherwise exact shape", mutate_effect rename_effect);
+      ("extra effect variable", mutate_effect (fun shape -> { shape with evars = [ "a"; "b" ] }));
+      ("missing operation", mutate_effect (fun shape -> { shape with ops = List.tl shape.ops }));
+      ("extra operation", mutate_effect (fun shape -> { shape with ops = shape.ops @ shape.ops }));
+      ("operation order", mutate_effect (fun shape -> { shape with ops = List.rev shape.ops }));
+      ( "spawn name",
+        mutate_effect (change_op 0 (fun op -> { op with Kernel.op_name = "not-spawn" })) );
+      ( "await name",
+        mutate_effect (change_op 1 (fun op -> { op with Kernel.op_name = "not-await" })) );
+      ( "cancel name",
+        mutate_effect (change_op 2 (fun op -> { op with Kernel.op_name = "not-cancel" })) );
+      ( "yield name",
+        mutate_effect (change_op 3 (fun op -> { op with Kernel.op_name = "not-yield" })) );
+      ( "spawn mode",
+        mutate_effect (change_op 0 (fun op -> { op with Kernel.op_mode = Kernel.Multi })) );
+      ( "await mode",
+        mutate_effect (change_op 1 (fun op -> { op with Kernel.op_mode = Kernel.Multi })) );
+      ( "cancel mode",
+        mutate_effect (change_op 2 (fun op -> { op with Kernel.op_mode = Kernel.Multi })) );
+      ( "yield mode",
+        mutate_effect (change_op 3 (fun op -> { op with Kernel.op_mode = Kernel.Multi })) );
+      ( "spawn thunk arity",
+        mutate_effect
+          (change_op 0
+             (change_spawn_parameter
+                (change_spawn_arrow (fun (_, row, result) -> ([ result ], row, result))))) );
+      ( "spawn closed self row",
+        mutate_effect
+          (change_op 0
+             (change_spawn_parameter
+                (change_spawn_arrow (fun (parameters, row, result) ->
+                     (parameters, { row with Kernel.rvar = None }, result))))) );
+      ( "spawn mixed self row",
+        mutate_effect
+          (change_op 0
+             (change_spawn_parameter
+                (change_spawn_arrow (fun (parameters, row, result) ->
+                     (parameters, { row with Kernel.effects = row.effects @ row.effects }, result)))))
+      );
+      ( "spawn result variable linkage",
+        mutate_effect
+          (change_op 0
+             (change_spawn_parameter
+                (change_spawn_arrow (fun (parameters, row, result) ->
+                     (parameters, row, change_ty result (Kernel.TVar "b")))))) );
+      ( "spawn Task identity",
+        mutate_effect
+          (change_op 0 (fun op -> { op with Kernel.op_result = wrong_task op.op_result })) );
+      ( "spawn Task argument linkage",
+        mutate_effect
+          (change_op 0 (fun op -> { op with Kernel.op_result = wrong_app_argument op.op_result }))
+      );
+      ( "await Task identity",
+        mutate_effect
+          (change_op 1 (fun op -> { op with Kernel.op_params = List.map wrong_task op.op_params }))
+      );
+      ( "await TaskResult identity",
+        mutate_effect
+          (change_op 1 (fun op -> { op with Kernel.op_result = wrong_task_result op.op_result })) );
+      ( "cancel result",
+        mutate_effect
+          (change_op 2 (fun op -> { op with Kernel.op_result = List.hd op.Kernel.op_params })) );
+      ( "yield parameters",
+        mutate_effect (change_op 3 (fun op -> { op with Kernel.op_params = [ op.op_result ] })) );
+      ( "yield result",
+        mutate_effect
+          (change_op 3 (fun op ->
+               { op with Kernel.op_result = change_ty op.op_result (Kernel.TVar "a") })) );
+    ]
+  in
+  List.iter
+    (fun (label, mutated) ->
+      match Store.put_decl store mutated with
+      | Error diagnostics -> Eval_support.fail_diags ("put Async mutation " ^ label) diagnostics
+      | Ok mutation_hashes ->
+          Alcotest.(check bool)
+            (label ^ " is not privileged") false
+            (Check.is_frozen_async_spawn ctx (Canon.op_hash mutation_hashes.decl_hash 0)))
+    mutations
+
 let test_implemented_interfaces_match_prelude () =
   let store = prelude_store () in
   let rings = Corpus_support.parse_rings "../prelude/rings.manifest" in
@@ -399,6 +767,8 @@ let test_implemented_interfaces_match_prelude () =
 let lowercase = String.lowercase_ascii
 
 let test_governance_and_links () =
+  test_self_effect_hash_contract ();
+  test_async_privilege_mutations ();
   let doc = Corpus_support.read_file taxonomy_doc in
   let manifest = Corpus_support.read_file taxonomy_file in
   let approval = Corpus_support.read_file approval_fixture in
@@ -414,6 +784,14 @@ let test_governance_and_links () =
            true
          with Not_found -> false))
     [ "D56"; "D57"; "D58"; "D59"; "D60"; "D61"; "D62"; "D63" ];
+  let concurrency = Corpus_support.read_file concurrency_doc in
+  List.iter
+    (fun decision ->
+      Alcotest.(check bool)
+        (decision ^ " concurrency decision indexed")
+        true
+        (contains_string concurrency ("| " ^ decision ^ " |")))
+    [ "D46"; "D47"; "D48"; "D49"; "D50" ];
   List.iter
     (fun phrase ->
       Alcotest.(check bool)
@@ -436,12 +814,93 @@ let test_governance_and_links () =
   Alcotest.(check bool)
     "dry-run Approval never fabricates Approved" false
     (contains_string approval "continue(Approved");
-  let linked = [ "../spec/effect-taxonomy-v1.tsv" ] in
+  let linked =
+    [
+      "../spec/effect-taxonomy-v1.tsv";
+      "release/structured-concurrency/EVIDENCE.md";
+      "release/structured-concurrency/MANIFEST.sha256";
+    ]
+  in
   List.iter
     (fun path ->
       let resolved = Filename.concat "../docs" path in
       Alcotest.(check bool) ("linked file exists: " ^ path) true (Sys.file_exists resolved))
-    linked
+    linked;
+
+  let open Concurrency_contract in
+  let parent = task_id ~scope_path:[ 0 ] ~spawn_index:0 in
+  let child = task_id ~scope_path:[ 0 ] ~spawn_index:1 in
+  Alcotest.(check bool) "fail-fast is the default" true (default_failure_policy = Fail_fast);
+  Alcotest.(check string) "task escape code" "E0907" task_escape_code;
+  Alcotest.(check int) "child follows parent in stable ID order" (-1) (compare_task_id parent child);
+  Alcotest.(check string) "task trace spelling" "0#1" (trace_task_id child);
+  Alcotest.(check (list string))
+    "OCaml Async and scope schemas"
+    [
+      "async.spawn:(()->{Async|e}a)->Task a";
+      "async.await:(Task a)->TaskResult a";
+      "async.cancel:(Task a)->()";
+      "async.yield:()->()";
+      "async.scope:(()->{Async|e}a)->{|e}TaskResult a";
+      "async.scope-fail-fast:(List (()->{Async|e}a))->{|e}TaskResult (List a)";
+      "async.scope-collect:(List (()->{Async|e}a))->{|e}List (TaskResult a)";
+    ]
+    [
+      schemas.spawn;
+      schemas.await;
+      schemas.cancel;
+      schemas.yield;
+      schemas.scope;
+      schemas.scope_fail_fast;
+      schemas.scope_collect;
+    ];
+  Alcotest.(check int) "all cancellation point classes frozen" 3 (List.length cancellation_points);
+  Alcotest.(check bool)
+    "spawn queues child before suspended parent" true
+    (requeue_after_spawn ~runnable:[] ~child ~parent = [ child; parent ]);
+  Alcotest.(check bool)
+    "runnable may suspend" true
+    (valid_transition ~from_:Runnable ~into:Suspended);
+  Alcotest.(check bool)
+    "suspended may resume" true
+    (valid_transition ~from_:Suspended ~into:Runnable);
+  Alcotest.(check bool)
+    "terminal state is immutable" false
+    (valid_transition ~from_:Done_state ~into:Runnable);
+  Alcotest.(check bool)
+    "waiters wake in registration order" true
+    (wake_waiters [ child; parent ] = [ child; parent ]);
+  let completions : string completion list =
+    [
+      { sequence = 3; task = child; result = Failed "later" };
+      { sequence = 1; task = parent; result = Done "ok" };
+      { sequence = 2; task = child; result = Cancelled };
+    ]
+  in
+  (match first_failure completions with
+  | Some completion ->
+      Alcotest.(check int) "first failure uses scheduler order" 2 completion.sequence
+  | None -> Alcotest.fail "failure ordering lost terminal failure");
+  Alcotest.(check bool)
+    "self-await is a closed cycle" true
+    (detect_wait_cycle [ { waiter = child; target = child } ] = Some [ child; child ]);
+  Alcotest.check_raises "empty task path rejected"
+    (Bug_invalid_task_id "structured-concurrency task paths must start at root component 0")
+    (fun () -> ignore (task_id ~scope_path:[] ~spawn_index:0));
+  Alcotest.check_raises "non-root task path rejected"
+    (Bug_invalid_task_id "structured-concurrency task paths must start at root component 0")
+    (fun () -> ignore (task_id ~scope_path:[ 1 ] ~spawn_index:0));
+  Alcotest.check_raises "zero nested ordinal rejected"
+    (Bug_invalid_task_id
+       "structured-concurrency nested scope components must be one-based positive ordinals")
+    (fun () -> ignore (task_id ~scope_path:[ 0; 0 ] ~spawn_index:0));
+  Alcotest.check_raises "negative spawn index rejected"
+    (Bug_invalid_task_id "structured-concurrency spawn indices must be non-negative") (fun () ->
+      ignore (task_id ~scope_path:[ 0 ] ~spawn_index:(-1)));
+  match decide_round_robin ~sequence:0 [ child; parent ] with
+  | Some decision ->
+      Alcotest.(check bool) "round-robin chooses FIFO head" true (decision.chosen = child)
+  | None -> Alcotest.fail "nonempty runnable queue produced no decision"
 
 let suite =
   [

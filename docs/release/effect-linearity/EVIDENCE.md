@@ -1,7 +1,7 @@
-# Effect Linearity EL.2-EL.4 Integration Evidence
+# Effect Linearity EL.2-EL.4 + SC.0 Integration Evidence
 
-Status: successor-milestone evidence for the static affine `Resume` discipline, its bounded
-immediate-transformer rule, frozen stdlib modes, and explicit surface operation modes.
+Status: integrated successor-milestone evidence for the static affine `Resume`
+discipline, frozen operation modes, and the SC.0 once-Async interface.
 
 - Reconstruction base: `23e3b5647fa9a9676990db9cf44350e66bf374a7`
 - Evidence overlay: [MANIFEST.sha256](MANIFEST.sha256)
@@ -9,15 +9,18 @@ immediate-transformer rule, frozen stdlib modes, and explicit surface operation 
 
 ## Scope
 
-This overlay covers the integrated EL.2, EL.3, and EL.4 successors on top of the
-completed EL.0 runtime backstop and EL.1 operation-mode encoding. It is the
+This overlay covers the integrated EL.2, EL.3, EL.4, and SC.0 successors on top
+of the completed EL.0 runtime backstop and EL.1 operation-mode encoding. It is the
 exact tracked-file difference from the EL.1 base, excluding only this
 manifest's impossible self-hash. It includes the affine implementation,
 diagnostics, goldens, checker/type tests, explicit `.jac` operation-mode
 parser/printer/lowering changes, frozen prelude assignments and hostile
 operation inventory, surface twins and formatter tests, and all
-release-document changes. It also keeps the historical SS.21/SS.22 manifest
-separate and immutable.
+release-document changes. SC.0 adds the enclosing-effect resolver/canonicalizer,
+the exact Async privilege boundary, pure concurrency contracts, and their
+complete evidence overlay; all are included here rather than excluded from the
+predecessor manifest. It also keeps the historical SS.21/SS.22 manifest separate
+and immutable.
 
 The analyzer uses a bounded abstract flow state: whether an unused path exists,
 one consumed-path witness, and at most one symbolic arm partition for an
@@ -229,7 +232,7 @@ Expected deterministic results:
 
 - the effect-linearity manifest checker validates every named byte sequence;
 - `dune build @all` and `dune build @doc` exit zero;
-- the forced suite passes all 564 compiled Alcotest/QCheck cases and 32 cram transcripts,
+- the forced suite passes all 568 compiled Alcotest/QCheck cases and 34 cram transcripts,
   including 13 generated Once-operation parity cases;
 - the clang native differential reports 69 byte-identical programs, 8 manifested
   refusals, and 0 failures;

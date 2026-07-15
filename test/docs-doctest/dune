@@ -12,6 +12,7 @@
   (source_tree ../../prelude)
   ../../README.md
   ../../docs/effect-taxonomy.md
+  ../../docs/concurrency.md
   ../../docs/tutorial.md
   ../../docs/stdlib.md
   ../../docs/warp-testing.md
@@ -23,6 +24,7 @@
     (run ./docs_doctest.exe %{bin:jacquard} ../../prelude fixtures
      ../../README.md
      ../../docs/effect-taxonomy.md
+     ../../docs/concurrency.md
      ../../docs/tutorial.md
      ../../docs/stdlib.md
      ../../docs/warp-testing.md

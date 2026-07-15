@@ -1,0 +1,3 @@
+async.scope : forall a | e. (() ->{Async | e} a) ->{| e} TaskResult a
+spawn-net : () ->{Async, Net} Task Text
+scoped-net : () ->{Net} TaskResult (TaskResult Text)
