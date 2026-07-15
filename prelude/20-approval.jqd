@@ -141,3 +141,121 @@
       (app (var approval.validate-decision) (var proposal-value) (var decision-value))
       (clause (pcon ok (pwild)) (app (var ok) (app (var action))))
       (clause (pcon err (pvar message)) (app (var err) (var message))))))))
+
+; Canonical ET.7 handlers. Every handler validates the carried Proposal before
+; producing or accepting a Decision. The console prompt is a typed Code form so
+; its field order is stable: exact proposal hash first, requested authority
+; second. Only the exact response "approve" grants consent.
+(defterm ((binding approval.console-prompt-code ()
+  (lam ((pvar proposal-id) (pvar authority))
+    (app (var code.form) (lit "approval-request-v1")
+      (app (var cons) (app (var audit.hash-code) (var proposal-id))
+        (app (var cons) (app (var approval.authority-list-code) (var authority))
+          (var nil))))))))
+
+(defterm ((binding approval.console-decision ()
+  (lam ((pvar proposal-id) (pvar response))
+    (match (app (var text.eq?) (var response) (lit "approve"))
+      (clause (pcon true)
+        (app (var approved) (var proposal-id) (lit "console")
+          (app (var code.form) (lit "console-approval-v1")
+            (app (var cons) (app (var code.of-text) (var response))
+              (var nil)))))
+      (clause (pcon false)
+        (match (app (var text.eq?) (var response) (lit "deny"))
+          (clause (pcon true)
+            (app (var denied) (var proposal-id) (lit "console")
+              (lit "denied by console reviewer")))
+          (clause (pcon false)
+            (app (var escalate) (var proposal-id)
+              (lit "console reviewer escalated"))))))))))
+
+(defterm ((binding approval.console ()
+  (lam ((pvar thunk))
+    (handle (app (var thunk))
+      (ret (pvar value) (var value))
+      (opclause ask ((pvar proposal-value)) k
+        (match (app (var approval.validate-proposal) (var proposal-value))
+          (clause (pcon err (pvar message)) (app (var throw) (var message)))
+          (clause (pcon ok (pvar proposal-id))
+            (match (var proposal-value)
+              (clause
+                (pcon proposal (pwild) (pwild) (pwild) (pwild)
+                  (pvar authority) (pwild) (pwild) (pwild))
+                (let nonrec (pwild)
+                  (app (var println)
+                    (app (var code.render)
+                      (app (var approval.console-prompt-code)
+                        (var proposal-id) (var authority))))
+                  (let nonrec (pvar response) (app (var read-line))
+                    (app (var k)
+                      (app (var approval.console-decision)
+                        (var proposal-id) (var response)))))))))))))))
+
+; Scripted Decisions are explicit test inputs, not synthesized consent. They are
+; consumed in order and each one is rebound to the exact Proposal before the
+; continuation can resume.
+(defterm ((binding approval.scripted ()
+  (lam ((pvar thunk) (pvar decisions))
+    (app
+      (handle (app (var thunk))
+        (ret (pvar value) (lam ((pwild)) (var value)))
+        (opclause ask ((pvar proposal-value)) k
+          (lam ((pvar remaining))
+            (match (var remaining)
+              (clause (pcon nil)
+                (app (var throw)
+                  (lit "approval.scripted: out of scripted decisions")))
+              (clause (pcon cons (pvar decision-value) (pvar more))
+                (match
+                  (app (var approval.validate-decision)
+                    (var proposal-value) (var decision-value))
+                  (clause (pcon err (pvar message))
+                    (app (var throw) (var message)))
+                  (clause (pcon ok (pvar exact-decision))
+                    (app (app (var k) (var exact-decision)) (var more)))))))))
+      (var decisions))))))
+
+; Mandatory simulation handler: Approval is never simulated as consent.
+(defterm ((binding approval.dry-run ()
+  (lam ((pvar thunk))
+    (handle (app (var thunk))
+      (ret (pvar value) (var value))
+      (opclause ask ((pvar proposal-value)) k
+        (match (app (var approval.validate-proposal) (var proposal-value))
+          (clause (pcon err (pvar message)) (app (var throw) (var message)))
+          (clause (pcon ok (pvar proposal-id))
+            (app (var k)
+              (app (var escalate) (var proposal-id)
+                (lit "dry-run cannot consent")))))))))))
+
+; The classifier supplies the already-computed policy verdict for each exact
+; Proposal. Allow is the only branch that can produce Approved: Ask and
+; Simulate escalate, and Block denies.
+(defterm ((binding approval.policy-auto ()
+  (lam ((pvar thunk) (pvar classify))
+    (handle (app (var thunk))
+      (ret (pvar value) (var value))
+      (opclause ask ((pvar proposal-value)) k
+        (match (app (var approval.validate-proposal) (var proposal-value))
+          (clause (pcon err (pvar message)) (app (var throw) (var message)))
+          (clause (pcon ok (pvar proposal-id))
+            (match (app (var classify) (var proposal-value))
+              (clause (pcon allow)
+                (app (var k)
+                  (app (var approved) (var proposal-id) (lit "policy-auto")
+                    (app (var code.form) (lit "policy-auto-v1")
+                      (app (var cons) (app (var audit.verdict-code) (var allow))
+                        (var nil))))))
+              (clause (pcon ask)
+                (app (var k)
+                  (app (var escalate) (var proposal-id)
+                    (lit "policy-auto cannot upgrade Ask"))))
+              (clause (pcon simulate)
+                (app (var k)
+                  (app (var escalate) (var proposal-id)
+                    (lit "policy-auto simulation is not consent"))))
+              (clause (pcon block)
+                (app (var k)
+                  (app (var denied) (var proposal-id) (lit "policy-auto")
+                    (lit "blocked by policy")))))))))))))

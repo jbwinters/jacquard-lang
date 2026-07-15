@@ -78,6 +78,10 @@ Read these together when judging whether the release candidate is credible:
   exact review-artifact hashing, stale-decision rejection, and parity evidence.
 - `release/effect-taxonomy/ET6-MANIFEST.sha256`: reconstructible ET.6 overlay on
   the validated pre-ET.6 base; earlier evidence manifests remain unchanged.
+- `release/effect-taxonomy/ET7-EVIDENCE.md`: ET.7 canonical Approval handlers,
+  exact proposal revalidation, and the no-simulated-consent laws.
+- `release/effect-taxonomy/ET7-MANIFEST.sha256`: reconstructible ET.7 overlay on
+  the validated ET.6 base; earlier evidence manifests remain unchanged.
 
 ## Maintenance Notes
 

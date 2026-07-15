@@ -165,8 +165,15 @@ Code bytes used by `code.render`; it is not a Proposal-specific second
 serializer. Metadata is absent from those bytes. Consequently presentation
 metadata on the semantic call does not change its subject, while authority,
 policy, assessment, preview, rendering, or summary changes produce a different
-proposal. Every dry-run or scripted Approval handler returns `Escalate`, never
-`Approved`; canonical handlers remain ET.7 scope.
+proposal. ET.7 supplies four canonical handlers. `approval.console` prints the
+exact proposal hash followed by the ordered authority request and recognizes
+only the exact response `approve` as consent. `approval.scripted` consumes
+explicit Decisions supplied by a test fixture and validates each Decision
+against the current Proposal; it never synthesizes consent. `approval.dry-run`
+always returns `Escalate`, never `Approved`. `approval.policy-auto` may approve
+only an already-`Allow` policy verdict; `Ask` and `Simulate` escalate, while
+`Block` denies. Every handler recomputes the Proposal hash before it can resume
+the protected computation.
 
 The declarations below are an executable surface fixture for the currently
 resolvable reserved world and governance operation boundaries plus Channel.

@@ -453,7 +453,7 @@ let test_governance_and_links () =
     ];
   Alcotest.(check bool)
     "dry-run Approval escalates with the exact proposal binding" true
-    (contains_string approval "continue(Escalate(proposal-hash, \"dry-run cannot consent\"))");
+    (contains_string approval "approval.dry-run(fn () -> match `op:ask`(proposal-value)");
   Alcotest.(check bool)
     "dry-run Approval never fabricates Approved" false
     (contains_string approval "continue(Approved");

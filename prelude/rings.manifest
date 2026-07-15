@@ -362,3 +362,9 @@ approval.validate-proposal 3
 approval.decision-proposal 3
 approval.validate-decision 3
 approval.before-action 3
+approval.console-prompt-code 3
+approval.console-decision 3
+approval.console 3
+approval.scripted 3
+approval.dry-run 3
+approval.policy-auto 3

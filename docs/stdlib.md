@@ -564,21 +564,17 @@ subject-first library function:
 [1, 2, 3] |> list.reverse |> list.reverse
 ```
 
-A handler clause can read as policy wrapped around a workflow.
+A handler can read as policy wrapped around a workflow.
 `approval.make-proposal` safely constructs the exact review artifact and
-computes its canonical `proposal-v1` hash. The handler returns that same binding
-in its decision. A production handler must verify this hash and reject any
-mismatch. The dry-run carrier always returns `Escalate` and therefore cannot
+computes its canonical `proposal-v1` hash. All four canonical handlers
+recompute that identity before resuming the workflow. `approval.console`
+renders the exact hash and ordered authority before prompting;
+`approval.scripted` consumes explicit, hash-bound test Decisions;
+`approval.policy-auto` approves only a policy verdict already equal to
+`Allow`; and `approval.dry-run` always returns `Escalate`, so simulation cannot
 fabricate consent:
 
 ```jacquard doctest=stdlib-handler-policy mode=run fixture=stdlib-handler-policy.jac stdout=stdlib-handler-policy.stdout stderr=empty exit=0
-dry-run-with-proposal(proposal-hash, workflow) =
-  handle workflow() {
-    | return result -> Some(result)
-    | ask(request) resume continue ->
-        continue(Escalate(proposal-hash, "dry-run cannot consent"))
-  }
-
 parsed-hashes = (
   hash.parse("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
   hash.parse("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
@@ -595,14 +591,16 @@ match parsed-hashes {
         "ship?",
         None)
       let proposal-hash = approval.proposal-id(proposal-value)
-      dry-run-with-proposal(proposal-hash, fn () -> match `op:ask`(proposal-value) {
-	| Escalate(returned, _) ->
-		if code.eq?(code.of-hash(returned), code.of-hash(proposal-hash)) then 42 else 0
-	| Approved(_, _, _) -> 0
-	| Denied(_, _, _) -> 0
-      })
+      throw.catch(
+        fn () -> approval.dry-run(fn () -> match `op:ask`(proposal-value) {
+	  | Escalate(returned, _) ->
+		  if code.eq?(code.of-hash(returned), code.of-hash(proposal-hash)) then 42 else 0
+	  | Approved(_, _, _) -> 0
+	  | Denied(_, _, _) -> 0
+        }),
+        fn (message) -> 0)
     }
-  | _ -> None
+  | _ -> 0
 }
 ```
 
