@@ -507,6 +507,7 @@ jq_value jq_i_code_un_form(jq_rt *rt, const jq_value *a);
 jq_value jq_i_code_eq_q(jq_rt *rt, const jq_value *a);
 jq_value jq_i_code_diff(jq_rt *rt, const jq_value *a);
 jq_value jq_i_code_render(jq_rt *rt, const jq_value *a);
+jq_value jq_i_code_hash(jq_rt *rt, const jq_value *a);
 jq_value jq_i_hash_parse(jq_rt *rt, const jq_value *a);
 jq_value jq_i_hash_to_text(jq_rt *rt, const jq_value *a);
 /* the LW driver's root interception (jq_perform's ladder, jq_intrinsics.c) */

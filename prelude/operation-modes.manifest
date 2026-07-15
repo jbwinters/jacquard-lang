@@ -16,6 +16,7 @@ fs.write once
 fs.list-dir once
 infer.complete once
 audit.record once
+approval.ask once
 dist.sample multi
 dist.observe multi
 check.check multi

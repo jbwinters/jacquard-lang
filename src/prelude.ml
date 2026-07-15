@@ -490,6 +490,10 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
       match args with
       | [ Value.VCode form ] -> Ok (Value.VText (Printer.print_compact form))
       | args -> type_err "code.render" args);
+  optional "code.hash" (fun args ->
+      match args with
+      | [ Value.VCode form ] -> Ok (Value.VHash (Hash.of_string (Printer.print_compact form)))
+      | args -> type_err "code.hash" args);
   (* pmf : (distribution a, a) -> real and support : distribution a -> list (pair a real)
      (W4.1/W4.4); native implementations over the recognized constructors *)
   optional "debug.inspect" (fun args ->
@@ -1022,6 +1026,7 @@ let builtin_signatures (store : Store.t) : ((Hash.t * Types.scheme) list, Diag.t
               ("code.eq?", fn [ code; code ] bool_ty);
               ("code.diff", fn [ code; code ] text);
               ("code.render", fn [ code ] text);
+              ("code.hash", fn [ code ] hash);
               ("hash.parse", fn [ text ] (result text hash));
               ("hash.to-text", fn [ hash ] text);
             ]

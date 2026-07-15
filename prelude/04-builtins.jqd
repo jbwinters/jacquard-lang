@@ -71,3 +71,7 @@
 ; Deterministic one-line bootstrap rendering for typed Code values. This is not
 ; debug.inspect: it accepts only Code and its output reparses as the same form.
 (defterm ((binding code.render () (quote (builtin-marker code.render)))))
+
+; HASH_V0 of the canonical compact bytes of a typed Code value. Metadata is
+; absent from those bytes, so spans/comments/provenance cannot perturb it.
+(defterm ((binding code.hash () (quote (builtin-marker code.hash)))))

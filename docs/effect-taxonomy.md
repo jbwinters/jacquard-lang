@@ -76,7 +76,7 @@ mode; there is no inference from names.
 | `Crypto` | `crypto` | `official` | `world` | `-` | `once` | `high` | `3` | `reserved` | `first-release` | `crypto.verify:(Key,Signature,Hash)->Bool;crypto.random:(Int)->Bytes` | use trusted cryptographic verification or system entropy |
 | `Log` | `log` | `official` | `world` | `-` | `once` | `medium` | `3` | `reserved` | `first-release` | `log.emit:(LogEntry)->()` | emit a structured operational log entry |
 | `Infer` | `infer` | `official` | `model` | `-` | `once` | `medium` | `3` | `implemented` | `324b8f59279db3cabbfaaba430168717057cea8fc1435a11a1a9106e3e6fb4d8` | `complete:(Prompt)->Text` | request a model completion selected by the handler |
-| `Approval` | `approval` | `official` | `governance` | `-` | `once` | `special` | `3` | `reserved` | `first-release` | `approval.ask:(Proposal)->Decision` | request hash-bound consent for an exact proposal |
+| `Approval` | `approval` | `official` | `governance` | `-` | `once` | `special` | `3` | `implemented` | `362425a29077a7efbcc37047182e579f46199a50473045eb4126a917dfc2a196` | `approval.ask:(Proposal)->Decision` | request hash-bound consent for an exact proposal |
 | `Audit` | `audit` | `official` | `governance` | `-` | `once` | `special` | `3` | `implemented` | `2c148fbc2e26bdc6f01279a8bf176f54d5798536e1f96805aa4f7c7a57e67632` | `audit.record:(AuditEntry)->()` | record governance evidence in an append-only stream |
 | `Secret` | `secret` | `official` | `governance` | `-` | `once` | `special` | `3` | `reserved` | `first-release` | `secret.read:(SecretRef)->Secret;secret.expose:(Secret)->Text` | resolve opaque confidential material or explicitly expose it |
 | `Judge` | `judge` | `official` | `governance` | `-` | `once` | `special` | `3` | `reserved` | `first-release` | `judge.assess:(Call)->Assessment` | assess a proposed call without performing it |
@@ -119,8 +119,9 @@ type Assessment = Assessment(
   risk: Risk, confidence: Real, reasons: List Text, evidence: Code)
 type OutcomeSummary = OutcomeSummary(status: Text, digest: Hash, detail: Text)
 type Proposal = Proposal(
-  subject: Hash, policy: Hash, assessment: Hash, summary: Text,
-  authority: List Authority, preview: Option OutcomeSummary)
+  proposal-id: Hash, call-subject: Hash, policy: Hash, assessment-hash: Hash,
+  authority: List Authority, rendering: Code, summary: Text,
+  preview: Option OutcomeSummary)
 type Decision =
   | Approved(proposal: Hash, approver: Text, evidence: Code)
   | Denied(proposal: Hash, approver: Text, reason: Text)
@@ -148,16 +149,32 @@ exposure a program can still leak the text.
 
 `Call.subject` hashes the resolved operation identity, canonical arguments,
 declared authority, and preconditions. Presentation summary is excluded.
-`Proposal` requires its subject hash and exact authority delta. Every dry-run or
-scripted Approval handler returns `Escalate`, never `Approved`.
+ET.6 releases the schema above as `proposal-v1`. `approval.make-proposal`
+requires the semantic call subject, policy and assessment hashes, the exact
+ordered authority list, the reviewed `Code` rendering and summary text, and an
+optional typed preview. It computes `Proposal.proposal-id` from the one canonical
+`proposal-v1` Code encoding; `approval.validate-proposal` recomputes that hash
+and fails closed on a forged carrier. The earlier ET.2 Decision encoding was
+already versioned as `approved-v1`, `denied-v1`, and `escalate-v1`, so its type
+and Audit identity remain unchanged. `approval.validate-decision` requires the
+embedded Decision hash to equal the exact proposal hash, and
+`approval.before-action` forces its action thunk only after both checks pass.
+
+`code.hash : (Code) ->{} Hash` applies HASH_V0 to the same canonical compact
+Code bytes used by `code.render`; it is not a Proposal-specific second
+serializer. Metadata is absent from those bytes. Consequently presentation
+metadata on the semantic call does not change its subject, while authority,
+policy, assessment, preview, rendering, or summary changes produce a different
+proposal. Every dry-run or scripted Approval handler returns `Escalate`, never
+`Approved`; canonical handlers remain ET.7 scope.
 
 The declarations below are an executable surface fixture for the currently
-resolvable reserved world, governance, and Channel operation boundaries. The
-fixture reuses the released Audit governance types from the prelude; its small
-carrier constructors for other future opaque types are test scaffolding, not
-public constructors. `Async` is deliberately absent: the normative self-row
-above cannot become an executable declaration until the resolver and special
-spawn typing obligation are implemented.
+resolvable reserved world and governance operation boundaries plus Channel.
+The fixture reuses the released Audit and Approval governance types from the
+prelude; its small carrier constructors for other future opaque types are test
+scaffolding, not public constructors. `Async` is deliberately absent: the
+normative self-row above cannot become an executable declaration until the
+resolver and special spawn typing obligation are implemented.
 
 ```jacquard doctest=effect-taxonomy-schemas mode=check fixture=effect-taxonomy-schemas.jac stdout=effect-taxonomy-schemas.stdout stderr=empty exit=0
 type Bytes = | BytesValue(value: Text)
@@ -168,9 +185,6 @@ type Key = | KeyValue(value: Text)
 type Signature = | SignatureValue(value: Bytes)
 type LogEntry = | LogEntryValue(value: Text)
 
-type Authority =
-  | Effect(name: Text)
-  | Resource(effect-name: Text, scope: Text)
 type Call =
   | Call(
       subject: Hash,
@@ -179,14 +193,6 @@ type Call =
       authority: List Authority,
       summary: Text,
       preconditions: Code)
-type Proposal =
-  | Proposal(
-      subject: Hash,
-      policy: Hash,
-      assessment: Hash,
-      summary: Text,
-      authority: List Authority,
-      preview: Option OutcomeSummary)
 type SecretRef = | SecretRef(name: Text, version: Option Text)
 type Secret = | OpaqueSecret
 type Task a = | TaskHandle(id: Int)
@@ -215,9 +221,6 @@ once effect Crypto where {
 }
 once effect Log where {
   log.emit : (LogEntry) -> ()
-}
-once effect Approval where {
-  approval.ask : (Proposal) -> Decision
 }
 once effect Secret where {
   secret.read : (SecretRef) -> Secret
@@ -265,7 +268,7 @@ and is breaking. Adding an operation is also breaking for the same reason;
 handlers silently remain exhaustive. Renames in the mutable name index and
 metadata-only changes retain identity.
 
-The thirteen implemented blessed effects keep their exact current declaration
+The fourteen implemented blessed effects keep their exact current declaration
 hashes listed above. ET.0 does not rewrite those declarations. This preserves
 the historical absence encoding for `multi`, the reviewed `once` discriminator,
 and existing operation names—including `Eval.eval-code`. Each reserved effect's
@@ -276,14 +279,15 @@ edit after that point is a new interface, never an in-place revision.
 ### Registry realization
 
 `Effect_registry` is the executable copy used by review tooling. Its resolved
-registry contains exactly the thirteen implemented entries and is keyed only by
+registry contains exactly the fourteen implemented entries and is keyed only by
 their full `DefEffect` hashes. The complete 25-entry catalog is also typed, but
-the twelve `reserved` entries carry no hash and name only the
+the eleven `reserved` entries carry no hash and name only the
 `first-release` policy; registration rejects them until a real first interface is
 implemented and frozen. This keeps schema reservation distinct from resolved
-program identity. Audit is the first reserved interface promoted by that rule:
-its v1 identity above is the shipped `DefEffect` hash, and its sole operation is
-once `audit.record : (AuditEntry) -> ()`.
+program identity. Audit and Approval are the first reserved interfaces promoted
+by that rule. Their v1 identities above are the shipped `DefEffect` hashes;
+their operations are once `audit.record : (AuditEntry) -> ()` and once
+`approval.ask : (Proposal) -> Decision`, respectively.
 
 Plain rendering is deterministic. Optional ANSI styling colors only the risk
 token of an identity-confirmed official entry. An unregistered effect with
@@ -347,7 +351,7 @@ receives a record intended for the verified inode.
 | D56 | taxonomy freeze v1 | §3 and the TSV artifact; resolved identities govern, additions use new hashes |
 | D57 | Secret opacity | opaque, no `Show`, inspect redacts, explicit in-row `secret.expose`; taint deferred |
 | D58 | audit chain | implemented `audit-chain-v1` carrier commits existing canonical entry bytes and predecessor HASH_V0; CLI append publishes a head and governance verification fails closed offline |
-| D59 | Proposal schema | subject hash and authority are mandatory; hash-less proposals are ill-formed |
+| D59 | Proposal schema | implemented `proposal-v1` binds semantic call subject separately from exact review identity; policy, assessment, ordered authority, rendering, summary, and preview are mandatory hash inputs; decisions embed that exact proposal hash, and hash-less, forged, or mismatched carriers fail before action |
 | D60 | membrane placement | ring 3 governance module plus cookbook and flagship demo, implemented in later phases |
 | D61 | facade shape | domain-specific typed facade effects; no universal stringly `Tool.call` |
 | D62 | raw authority | host is a role; membranes re-perform concrete blessed world effects, never `Host` |

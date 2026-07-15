@@ -74,6 +74,10 @@ Read these together when judging whether the release candidate is credible:
   published-head contract, offline mutation verification, and reproduction.
 - `release/effect-taxonomy/ET3-MANIFEST.sha256`: reconstructible ET.3 overlay on
   the validated ET.2 base; the ET.2 manifest remains unchanged.
+- `release/effect-taxonomy/ET6-EVIDENCE.md`: ET.6 released Approval identity,
+  exact review-artifact hashing, stale-decision rejection, and parity evidence.
+- `release/effect-taxonomy/ET6-MANIFEST.sha256`: reconstructible ET.6 overlay on
+  the validated pre-ET.6 base; earlier evidence manifests remain unchanged.
 
 ## Maintenance Notes
 

@@ -43,7 +43,7 @@ val catalog : metadata list
 (** All 25 ratified entries. Twelve entries are [Reserved] and deliberately have no identity. *)
 
 val canonical : t
-(** The canonical registry containing exactly the thirteen released blessed identities. *)
+(** The canonical registry containing exactly the fourteen released blessed identities. *)
 
 val entries : t -> metadata list
 (** [entries registry] returns its entries in stable display-name order. *)

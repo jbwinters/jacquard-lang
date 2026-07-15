@@ -59,6 +59,7 @@ let intrinsics : (string * int) list =
     ("code.eq?", 2);
     ("code.diff", 2);
     ("code.render", 1);
+    ("code.hash", 1);
     ("hash.parse", 1);
     ("hash.to-text", 1);
   ]

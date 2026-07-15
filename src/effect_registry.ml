@@ -66,7 +66,6 @@ let reserved_catalog_names =
     ("Serve", "serve");
     ("Crypto", "crypto");
     ("Log", "log");
-    ("Approval", "approval");
     ("Secret", "secret");
     ("Judge", "judge");
     ("Async", "async");
@@ -173,7 +172,8 @@ let catalog =
     released "Infer" "infer" Model Medium
       "324b8f59279db3cabbfaaba430168717057cea8fc1435a11a1a9106e3e6fb4d8"
       "request a model completion selected by the handler";
-    reserved "Approval" "approval" Governance Special
+    released "Approval" "approval" Governance Special
+      "362425a29077a7efbcc37047182e579f46199a50473045eb4126a917dfc2a196"
       "request hash-bound consent for an exact proposal";
     released "Audit" "audit" Governance Special
       "2c148fbc2e26bdc6f01279a8bf176f54d5798536e1f96805aa4f7c7a57e67632"

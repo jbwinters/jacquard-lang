@@ -60,6 +60,7 @@ assertion, exit codes included.
   identical: g34-spec-const-list (exit 0)
   identical: g35-stdlib-ss22 (exit 0)
   identical: g36-audit-code-render (exit 0)
+  identical: g37-approval-binding (exit 0)
 
 Opaque host values are the exception to the public direct-member carrier: their
 marker identity is absent from the store's derived-hash index, so the checker and
@@ -377,12 +378,12 @@ the shared affine-check boundary with E0816. The low-level pair above separately
 unchecked/host-driven second resume reaches byte-identical E0906 in both runtimes.
 
   $ ../gen_once_hostile.exe ../../prelude ../../prelude/operation-modes.manifest once-prelude
-  generated 14 once-hostile cases from reviewed inventory
+  generated 15 once-hostile cases from reviewed inventory
   $ passed=0; for f in once-prelude/*.jqd; do
   >   jacquard run "$f" > once-run.out 2>&1; run_status=$?
   >   jacquard build "$f" -o once-prog > once-build.out 2>&1; build_status=$?
   >   if [ "$run_status" = 1 ] && [ "$build_status" = 1 ] &&
   >      diff -q once-run.out once-build.out >/dev/null && grep -q 'error\[E0816\]' once-run.out
   >   then passed=$((passed + 1)); else echo "FAILED: $(basename "$f")"; fi
-  > done; echo "$passed/14 generated once-operation cases reject identically"
-  14/14 generated once-operation cases reject identically
+  > done; echo "$passed/15 generated once-operation cases reject identically"
+  15/15 generated once-operation cases reject identically

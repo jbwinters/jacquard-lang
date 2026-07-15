@@ -343,3 +343,22 @@ audit.decision-code 3
 audit.entry-code 3
 audit.in-memory 3
 audit.line-log 3
+# --- 20-approval (ring 3 governance proposal identity and consent boundary)
+code.hash 3
+authority 3
+effect 3
+resource 3
+proposal 3
+approval 3
+ask 3
+approval.authority-code 3
+approval.authority-list-code 3
+approval.preview-code 3
+approval.review-code 3
+approval.proposal-code 3
+approval.make-proposal 3
+approval.proposal-id 3
+approval.validate-proposal 3
+approval.decision-proposal 3
+approval.validate-decision 3
+approval.before-action 3

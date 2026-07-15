@@ -6,9 +6,6 @@ type Key = | KeyValue(value: Text)
 type Signature = | SignatureValue(value: Bytes)
 type LogEntry = | LogEntryValue(value: Text)
 
-type Authority =
-  | Effect(name: Text)
-  | Resource(effect-name: Text, scope: Text)
 type Call =
   | Call(
       subject: Hash,
@@ -17,14 +14,6 @@ type Call =
       authority: List Authority,
       summary: Text,
       preconditions: Code)
-type Proposal =
-  | Proposal(
-      subject: Hash,
-      policy: Hash,
-      assessment: Hash,
-      summary: Text,
-      authority: List Authority,
-      preview: Option OutcomeSummary)
 type SecretRef = | SecretRef(name: Text, version: Option Text)
 type Secret = | OpaqueSecret
 type Task a = | TaskHandle(id: Int)
@@ -53,9 +42,6 @@ once effect Crypto where {
 }
 once effect Log where {
   log.emit : (LogEntry) -> ()
-}
-once effect Approval where {
-  approval.ask : (Proposal) -> Decision
 }
 once effect Secret where {
   secret.read : (SecretRef) -> Secret
