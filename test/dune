@@ -102,6 +102,8 @@
   ../docs/release/governed-membranes/GM2-MANIFEST.sha256
   ../docs/release/governed-membranes/GM3-EVIDENCE.md
   ../docs/release/governed-membranes/GM3-MANIFEST.sha256
+  ../docs/release/governed-membranes/GM5-EVIDENCE.md
+  ../docs/release/governed-membranes/GM5-MANIFEST.sha256
   ../docs/stdlib.md
   ../docs/surface-syntax.md
   ../docs/tutorial.md
