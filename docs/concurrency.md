@@ -1,6 +1,6 @@
 # Structured Concurrency Contract
 
-Status: SC.9 deterministic FIFO round-robin scheduling over SC.8
+Status: SC.10 versioned scheduler traces and strict replay over SC.9
 fail-fast/collect scope policies, SC.7 cooperative cancellation, SC.6
 structured-scope ownership, the SC.5
 policy-independent lifecycle core, and the SC.4 generalized child-effect law
@@ -373,10 +373,10 @@ D46 fixes the default scheduler to FIFO round-robin over the runnable queue:
    completion order. Multiple terminals discovered by one step use the stable
    sub-observation ordinal after that step's D46 decision number.
 
-The host scheduler is never consulted by this default. Seeded random,
-Choose-driven exhaustive, recorded/replay, and host scheduling are later
-handlers over the same decision boundary. Strict replay must validate the full
-runnable queue and chosen ID before divergent user or world work executes.
+The host scheduler is never consulted by this default. Seeded-random,
+Choose-driven exhaustive, and host scheduling remain later handlers over the
+same decision boundary. SC.10 record/replay validates the full runnable queue
+and chosen ID before divergent user or world work executes.
 
 SC.9 implements this boundary in `Round_robin`. Each scheduler step renders the
 exact pre-decision queue and chosen head before advancing one real `Eval.state`
@@ -406,8 +406,76 @@ and all results remain in task-creation order. Cache identity is the canonical
 program hash plus scheduler version, failure policy, and both bounds. Entries
 contain trace/decision proof only; they never retain evaluator closures,
 continuations, results, or Task handles, and a hit is checked against a fresh
-execution. This is the default C1 policy implementation and the decision seam
-for later C2 handlers, not a versioned replay format or a host scheduler.
+execution. SC.10 adds the trace format version to that cache identity. This is
+the default C1 policy implementation and the decision seam used by the first C2
+handler; it is not a host scheduler.
+
+### 5.1 Versioned schedule record and strict replay
+
+SC.10 defines canonical text format version 1. A trace is UTF-8 text ending in
+one LF. Its first line is exactly:
+
+```text
+jacquard-schedule format=1 scheduler=S program=HASH policy=P max-tasks=N max-decisions=N fork=F
+```
+
+`S` is `fifo-round-robin-v0`; `HASH` is the 64-lowercase-hex `HASH_V0` identity
+of the single scheduled expression; `P` is `fail-fast` or `collect`; both
+bounds are positive decimal integers; and `F` is `-` or `K:TASK`. Remaining
+lines use one of two closed records:
+
+```text
+create scope=PATH task=TASK parent=-|TASK
+decision sequence=K runnable=TASK[,TASK]* chosen=TASK operation=OP
+```
+
+Task syntax is the deterministic `PATH#SPAWN_INDEX` carrier from §2. The
+runnable list is ordered and nonempty. `OP` is one of `return`, `failure`,
+`async.spawn`, `async.await`, `async.cancel`, `async.yield`, `async.scope`, or
+`routed:HASH`. Unknown fields, tokens, operation names, versions, extra spaces,
+missing final LF, duplicate task IDs, noncontiguous decisions, and impossible
+queues are malformed E0908 traces. Serialization has exactly the field order
+and spelling above; parse followed by serialize must reproduce every input byte.
+Load-time validation is one linear pass over events and runnable entries. It
+refuses more than `N` creations or decisions, a runnable queue wider than
+`max-tasks`, and any task that reappears after its recorded `return` or
+`failure`. Hash tables provide membership checks but are never iterated to
+derive ordering or choices.
+
+The CLI reads replay input incrementally before constructing its complete byte
+string. The v1 transport ceiling is 4 KiB for the header, 1 MiB per line, 64
+MiB total, and 200,001 lines total. The header further lowers the permitted
+line count to `1 + max-tasks + max-decisions` and lowers the byte ceiling using
+that event count. Oversized inputs fail with E0908 before program execution;
+a tiny declared bound therefore cannot carry an arbitrarily large trace.
+
+Strict replay checks the header against the requested program, scheduler,
+policy, and bounds before creating the root scope. It consumes every `create`
+before mutating allocation state, then at each decision checks the sequence and
+exact ordered runnable list before selecting the recorded runnable task. It
+checks the observed operation before applying a spawn/scope allocation or
+calling a routed world callback. Missing, extra, reordered, malformed, or
+impossible events and any EOF/leftover event are E0908 drift; replay never
+falls back to FIFO. Consequently the first divergent world operation is not
+executed.
+
+Unversioned logs and every version other than 1 are refused. There is no
+best-effort legacy parser or implicit migration: record a fresh v1 trace with
+the matching program and configuration.
+
+An explicit fork `K=TASK` strictly consumes the source trace before decision
+`K`, validates that decision's exact runnable queue, and requires `TASK` to be
+in it. The branch records its actual decision and then resumes FIFO. Its header
+retains `fork=K:TASK`; that provenance is descriptive and does not weaken
+strict replay of the resulting trace. The CLI exposes these contracts as
+`jacquard run FILE --schedule-record TRACE`, `--schedule-replay TRACE`, and
+`--schedule-fork K=TASK` (the fork requires replay). Traced CLI runs accept
+exactly one top-level expression so the header has one unambiguous program
+identity. `Round_robin.run_expr_scheduled` exposes the same record/replay/fork
+contract to OCaml callers. Missing or unreadable replay paths use the same E0908
+file diagnostic as other trace I/O. A record path is opened only after
+successful program completion; a write failure reports E0908 without claiming
+that the program itself failed to run.
 
 The corresponding compiled OCaml contract is
 [`Concurrency_contract`](../src/concurrency_contract.mli). It contains only
@@ -420,9 +488,10 @@ recursive cleanup, and complete runtime-value escape scans, and SC.7 adds
 cooperative delivery at await, yield, and routed-effect boundaries. SC.8 adds
 deterministic fail-fast and collect aggregation over explicit terminal decision
 events. SC.9 adds the default deterministic queue and real evaluator-state Async
-driver used by interpreted CLI and Warp Case execution. Raw `Eval.run_expr`
-remains the low-level unscheduled evaluator seam; native root scheduling remains
-separate work.
+driver used by interpreted CLI and Warp Case execution. SC.10 adds canonical
+record, fail-closed replay, and provenance-preserving explicit fork over that
+same driver. Raw `Eval.run_expr` remains the low-level unscheduled evaluator
+seam; native root scheduling remains separate work.
 
 The public language has no `async.current-task` operation, so a checked
 Jacquard program cannot name its own handle and self-cancel. The scheduler
@@ -448,7 +517,7 @@ The following are excluded from C1 and from this interface freeze:
 - shared mutable memory, locks, atomics, and data-race semantics;
 - automatic external-resource finalizers;
 - channels before C3 and actors/supervision before C4+;
-- seeded-random/exhaustive schedule exploration and trace replay before C2;
+- seeded-random and exhaustive schedule exploration;
 - host threads, host scheduling, and real asynchronous I/O before C4.
 
 Pure `parallel.map` and `parallel.both` are separate empty-row hints. Their
@@ -458,7 +527,8 @@ interpreter semantics are sequential and they introduce no Async effect.
 
 C0 is pure parallel hints. C1 is Task lifecycle, Async, structured scopes,
 cooperative cancellation, fail-fast/collect, and the deterministic scheduler.
-C2 adds schedule traces, replay, seeded random, and bounded exhaustive schedules.
+C2 adds schedule tooling. SC.10 implements its versioned record/strict-replay
+slice; seeded random and bounded exhaustive schedules remain future work.
 C3 adds typed channels. C4 adds host asynchronous I/O; actor supervision opens
 only after channels and lifecycle evidence exist.
 

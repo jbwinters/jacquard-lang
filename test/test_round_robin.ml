@@ -331,6 +331,188 @@ let test_global_nested_fifo_and_bounds () =
       Alcotest.failf "wrong nested decision-bound error: %s" (Runtime_err.to_string error)
   | Ok value -> Alcotest.failf "nested decision bound was not global: %s" (Value.show value)
 
+let scheduled_ok = function
+  | Ok execution -> execution
+  | Error error -> Alcotest.failf "unexpected scheduled error: %s" (Runtime_err.to_string error)
+
+let contains needle haystack =
+  let length = String.length needle in
+  let rec loop index =
+    index + length <= String.length haystack
+    && (String.sub haystack index length = needle || loop (index + 1))
+  in
+  loop 0
+
+let expect_schedule_error label needle = function
+  | Error (Runtime_err.Scheduler_error message) ->
+      if not (contains needle message) then
+        Alcotest.failf "%s expected %S in %S" label needle message
+  | Error error ->
+      Alcotest.failf "%s returned the wrong error: %s" label (Runtime_err.to_string error)
+  | Ok execution ->
+      Alcotest.failf "%s unexpectedly ran to %s" label (Value.show execution.Round_robin.value)
+
+let test_schedule_record_replay_drift_and_fork () =
+  let store, ctx = Eval_support.make_prelude_ctx () in
+  let expr = expression store mixed_source in
+  let root = Concurrency_contract.task_id ~scope_path:[ 0 ] ~spawn_index:0 in
+  let recorded =
+    Round_robin.run_expr_scheduled ctx ~policy:Concurrency_contract.Collect
+      ~mode:Round_robin.Record_schedule expr
+    |> scheduled_ok
+  in
+  let bytes = Schedule_trace.serialize recorded.schedule in
+  let replayed =
+    Round_robin.run_expr_scheduled ctx ~policy:Concurrency_contract.Collect
+      ~mode:(Round_robin.Replay_schedule recorded.schedule) expr
+    |> scheduled_ok
+  in
+  Alcotest.(check string)
+    "record/replay value" (Value.show recorded.value) (Value.show replayed.value);
+  Alcotest.(check string)
+    "record/replay schedule bytes" bytes
+    (Schedule_trace.serialize replayed.schedule);
+  let missing =
+    { recorded.schedule with events = List.rev (List.tl (List.rev recorded.schedule.events)) }
+  in
+  expect_schedule_error "missing decision fails closed" "missing decision"
+    (Round_robin.run_expr_scheduled ctx ~policy:Concurrency_contract.Collect
+       ~mode:(Round_robin.Replay_schedule missing) expr);
+  let extra_sequence =
+    List.fold_left
+      (fun next -> function
+        | Schedule_trace.Decide decision -> max next (decision.sequence + 1)
+        | Schedule_trace.Create _ -> next)
+      0 recorded.schedule.events
+  in
+  let extra =
+    {
+      recorded.schedule with
+      events =
+        recorded.schedule.events
+        @ [
+            Schedule_trace.Decide
+              {
+                sequence = extra_sequence;
+                runnable = [ root ];
+                chosen = root;
+                operation = Schedule_trace.Return;
+              };
+          ];
+    }
+  in
+  expect_schedule_error "extra event fails closed" "terminal task 0#0 reappears"
+    (Round_robin.run_expr_scheduled ctx ~policy:Concurrency_contract.Collect
+       ~mode:(Round_robin.Replay_schedule extra) expr);
+  let forked =
+    Round_robin.run_expr_scheduled ctx ~policy:Concurrency_contract.Collect
+      ~mode:(Round_robin.Fork_schedule { trace = recorded.schedule; decision = 1; chosen = root })
+      expr
+    |> scheduled_ok
+  in
+  (match forked.schedule.fork with
+  | Some { decision = 1; chosen } ->
+      Alcotest.(check string)
+        "fork provenance task" "0#0"
+        (Concurrency_contract.trace_task_id chosen)
+  | _ -> Alcotest.fail "fork trace omitted exact provenance");
+  Alcotest.(check bool)
+    "fork changes the schedule" true
+    (not (String.equal bytes (Schedule_trace.serialize forked.schedule)));
+  let fork_replay =
+    Round_robin.run_expr_scheduled ctx ~policy:Concurrency_contract.Collect
+      ~mode:(Round_robin.Replay_schedule forked.schedule) expr
+    |> scheduled_ok
+  in
+  Alcotest.(check string)
+    "fork trace strictly replays"
+    (Schedule_trace.serialize forked.schedule)
+    (Schedule_trace.serialize fork_replay.schedule)
+
+let test_creation_and_world_operation_drift_preempt_actions () =
+  let store, ctx = Eval_support.make_prelude_ctx () in
+  let nested_expr =
+    expression store
+      "(app (var async.scope)\n   (lam () (let nonrec (pwild) (app (var async.yield)) (lit 42))))"
+  in
+  let nested_record =
+    Round_robin.run_expr_scheduled ctx ~mode:Round_robin.Record_schedule nested_expr |> scheduled_ok
+  in
+  let actual_nested = Concurrency_contract.task_id ~scope_path:[ 0; 1 ] ~spawn_index:0 in
+  let drift_nested = Concurrency_contract.task_id ~scope_path:[ 0; 2 ] ~spawn_index:0 in
+  let map_id id =
+    if Concurrency_contract.compare_task_id id actual_nested = 0 then drift_nested else id
+  in
+  let map_event = function
+    | Schedule_trace.Create creation
+      when Concurrency_contract.compare_task_id creation.task actual_nested = 0 ->
+        Schedule_trace.Create { creation with scope_path = [ 0; 2 ]; task = drift_nested }
+    | Schedule_trace.Create creation -> Schedule_trace.Create creation
+    | Schedule_trace.Decide decision ->
+        Schedule_trace.Decide
+          {
+            decision with
+            runnable = List.map map_id decision.runnable;
+            chosen = map_id decision.chosen;
+          }
+  in
+  let creation_drift =
+    { nested_record.schedule with events = List.map map_event nested_record.schedule.events }
+  in
+  expect_schedule_error "creation drift precedes allocation" "creation expected task=0/2#0"
+    (Round_robin.run_expr_scheduled ctx ~mode:(Round_robin.Replay_schedule creation_drift)
+       nested_expr);
+  let calls = ref 0 in
+  Eval.register_root_handler ctx (print_hash store) (fun _ ->
+      incr calls;
+      Ok Value.unit_v);
+  let world_expr = expression store "(app (var print) (lit \"world\"))" in
+  let world_record =
+    Round_robin.run_expr_scheduled ctx ~mode:Round_robin.Record_schedule world_expr |> scheduled_ok
+  in
+  Alcotest.(check int) "record invoked world callback once" 1 !calls;
+  calls := 0;
+  let actual_hash = Hash.to_hex (print_hash store) in
+  let toggled = Bytes.of_string actual_hash in
+  Bytes.set toggled 0
+    (match Bytes.get toggled 0 with
+    | '0' -> '1'
+    | '1' -> '0'
+    | '2' -> '3'
+    | '3' -> '2'
+    | '4' -> '5'
+    | '5' -> '4'
+    | '6' -> '7'
+    | '7' -> '6'
+    | '8' -> '9'
+    | '9' -> '8'
+    | 'a' -> 'b'
+    | 'b' -> 'a'
+    | 'c' -> 'd'
+    | 'd' -> 'c'
+    | 'e' -> 'f'
+    | 'f' -> 'e'
+    | _ -> assert false);
+  let drift_hash = Option.get (Hash.of_hex (Bytes.to_string toggled)) in
+  let changed = ref false in
+  let operation_drift =
+    {
+      world_record.schedule with
+      events =
+        List.map
+          (function
+            | Schedule_trace.Decide decision when not !changed ->
+                changed := true;
+                Schedule_trace.Decide { decision with operation = Schedule_trace.Routed drift_hash }
+            | event -> event)
+          world_record.schedule.events;
+    }
+  in
+  expect_schedule_error "operation drift fails closed" "operation expected routed:"
+    (Round_robin.run_expr_scheduled ctx ~mode:(Round_robin.Replay_schedule operation_drift)
+       world_expr);
+  Alcotest.(check int) "drift preempted world callback" 0 !calls
+
 let prop_128_exact_real_eval_traces =
   let expected = (run_mixed ()).trace in
   QCheck.Test.make ~count:128 ~name:"128 real Eval schedules retain the exact FIFO trace" QCheck.int
@@ -345,6 +527,8 @@ let run () =
   test_real_failure_policies_and_linked_terminal_ordinals ();
   test_multiple_waiters_nested_escape_and_bounds ();
   test_global_nested_fifo_and_bounds ();
+  test_schedule_record_replay_drift_and_fork ();
+  test_creation_and_world_operation_drift_preempt_actions ();
   QCheck.Test.check_exn prop_128_exact_real_eval_traces
 
 let suite = [ Alcotest.test_case "real evaluator FIFO lifecycle" `Quick run ]
