@@ -63,6 +63,13 @@ simultaneously the security manifest and the parallelism license, one fact
 serving two masters. Warp obligation: differential tests that sequential and
 parallel execution produce identical results and identical hashes of output.
 
+SC.2 audited the optional native-thread path and declined it for the current
+runtime: emitted C does not retain the callback-row proof, the allocator and
+reference counts are single-threaded, and fatal runtime errors cannot be joined
+and selected in source order. Native binaries therefore keep the sequential
+fallback. The prerequisite audit, parity/sanitizer lane, and benchmark are in
+`native-parallel-decision.md`.
+
 ## 4. Structured scopes
 
 Detached tasks are the mistake every ecosystem regrets, so they do not exist.

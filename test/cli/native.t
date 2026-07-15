@@ -47,6 +47,25 @@ neither path introduces Async or a task runtime.
   $ diff i.out n.out && echo identical
   identical
 
+SC.2 keeps the native fallback sequential after its proof/runtime audit. The
+evidence lane pins successful output, first-failure selection, repeated native
+stability, and ASAN/LeakSanitizer parity across success and both failures. TSAN
+and the decision benchmark are manual options documented in
+docs/native-parallel-decision.md.
+
+  $ export JACQUARD=jacquard
+  $ JACQUARD_PARALLEL_EVIDENCE_ITERATIONS=3 sh ../../scripts/native-parallel-evidence.sh
+  success: exit 0, stdout 9450378b42e682c1897c3028a48e3c6696a4fb654f52f21c16eb5bda47c39936, stderr e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+  fail-map: exit 2, stdout e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855, stderr ab8672cea2e1a058029d6365bb8421c4a941d82dd9988dd038bff7b44cb589dc
+  fail-both: exit 2, stdout e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855, stderr ab8672cea2e1a058029d6365bb8421c4a941d82dd9988dd038bff7b44cb589dc
+  failure order: map first-of-two and both left-before-right select division before modulo
+  stress: 3 identical native runs
+  asan-success: exit 0, stdout 9450378b42e682c1897c3028a48e3c6696a4fb654f52f21c16eb5bda47c39936, stderr e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+  asan-fail-map: exit 2, stdout e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855, stderr ab8672cea2e1a058029d6365bb8421c4a941d82dd9988dd038bff7b44cb589dc
+  asan-fail-both: exit 2, stdout e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855, stderr ab8672cea2e1a058029d6365bb8421c4a941d82dd9988dd038bff7b44cb589dc
+  tsan: skipped (set JACQUARD_PARALLEL_TSAN=1 where available)
+  benchmark: skipped (set JACQUARD_PARALLEL_BENCH=1)
+
 The benchmark file (recursion, list traffic, a dictionary sort) too:
 
   $ jacquard run ../../bench/pure.jqd > i.out 2>&1
