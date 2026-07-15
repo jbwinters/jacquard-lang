@@ -269,26 +269,27 @@ let claimed_inventory_count ~path ~prefix source =
           | None -> Error (Printf.sprintf "%s has a non-integer `%s` count" path prefix))
       | _ -> Error (Printf.sprintf "%s must state exactly one `%s` count" path prefix))
 
-let evolving_inventory_errors () =
+let inventory_claim_errors ~path claims =
+  let source = read_source path in
+  claims
+  |> List.filter_map (fun (prefix, expected) ->
+      match claimed_inventory_count ~path ~prefix source with
+      | Ok claimed when claimed = expected -> None
+      | Ok claimed ->
+          Some
+            (Printf.sprintf "%s `%s` is stale (claimed %d, expected %d)" path prefix claimed
+               expected)
+      | Error message -> Some message)
+
+let release_inventory_errors () =
   let actual_tests = Lazy.force compiled_test_count in
   let actual_crams = count_files_with_suffix (source_path "test") ".t" in
-  [
-    ( "docs/release/0.1/EVIDENCE.md",
-      [ ("- Alcotest/QCheck cases:", actual_tests); ("- Cram transcript files:", actual_crams) ] );
-    ( "docs/release/0.1/DECISION.md",
-      [ ("Test count:", actual_tests); ("Cram count:", actual_crams) ] );
-  ]
-  |> List.concat_map (fun (path, claims) ->
-      let source = read_source path in
-      claims
-      |> List.filter_map (fun (prefix, actual) ->
-          match claimed_inventory_count ~path ~prefix source with
-          | Ok claimed when claimed = actual -> None
-          | Ok claimed ->
-              Some
-                (Printf.sprintf "%s `%s` is stale (claimed %d, actual %d)" path prefix claimed
-                   actual)
-          | Error message -> Some message))
+  inventory_claim_errors ~path:"docs/release/0.1/EVIDENCE.md"
+    [ ("- Alcotest/QCheck cases:", 554); ("- Cram transcript files:", 32) ]
+  @ inventory_claim_errors ~path:"docs/release/0.1/DECISION.md"
+      [ ("Test count:", 554); ("Cram count:", 32) ]
+  @ inventory_claim_errors ~path:"docs/release/dx-jac-export/EVIDENCE.md"
+      [ ("- Alcotest/QCheck cases:", actual_tests); ("- Cram transcript files:", actual_crams) ]
 
 let doctest_names () =
   [ "README.md"; "docs/tutorial.md"; "docs/stdlib.md"; "docs/warp-testing.md"; "demos/README.md" ]
@@ -390,6 +391,7 @@ let manifest_errors () =
   let overlay =
     [
       "README.md";
+      "bin/main.ml";
       "corpus/golden/hashes.golden";
       "corpus/golden/prelude-hashes.golden";
       "corpus/golden/ring0-freeze.golden";
@@ -404,10 +406,14 @@ let manifest_errors () =
       "docs/README.md";
       "docs/SKILL.md";
       "docs/ci-cd.md";
+      "docs/errors.md";
+      "docs/native-compilation.md";
       "docs/native-intrinsics.md";
       "docs/release/0.1/DECISION.md";
       "docs/release/0.1/EVIDENCE.md";
       "docs/release/0.1/REPRO.md";
+      "docs/release/dx-jac-export/DECISION.md";
+      "docs/release/dx-jac-export/EVIDENCE.md";
       "docs/release/surface-syntax/DECISION.md";
       "docs/release/surface-syntax/FOLLOWUPS.md";
       "docs/stdlib.md";
@@ -423,7 +429,10 @@ let manifest_errors () =
       "runtime/jq_intrinsics.c";
       "runtime/jq_value.h";
       "scripts/release/check-surface-syntax-manifest.sh";
+      "scripts/native-diff.sh";
       "src/check.ml";
+      "src/export.ml";
+      "src/export.mli";
       "src/native/build.ml";
       "src/native/compile.ml";
       "src/native/emit.ml";
@@ -433,6 +442,7 @@ let manifest_errors () =
       "src/types.ml";
       "test/cli/native-effects.t";
       "test/cli/dune";
+      "test/cli/export.t";
       "test/cli/ss22.t";
       "test/cli/surface.t";
       "test/cli/tiers.t";
@@ -449,6 +459,9 @@ let manifest_errors () =
       "test/native-asan/join-bad-last.jqd";
       "test/native-asan/join-bad-middle.jqd";
       "test/test_prelude.ml";
+      "test/test_export.ml";
+      "test/test_jacquard.ml";
+      "test/test_printer.ml";
       "test/test_surface_laws.ml";
       "test/test_text.ml";
       "test/test_tier.ml";
@@ -657,7 +670,7 @@ let validate_release_docs ~decision ~followups ~index =
                      name (String.concat ", " claimed) (String.concat ", " actual))
         | _ -> add (name ^ " inventory must have exactly one three-column row")
       in
-      check_inventory "tests" (List.init (Lazy.force compiled_test_count) string_of_int) false;
+      check_inventory "tests" (List.init 554 string_of_int) false;
       check_inventory "doctests" (doctest_names ()) true;
       check_inventory "twins" (twin_names ()) true;
       check_inventory "demos" (demo_names ()) true);
@@ -915,7 +928,7 @@ let release_sources () =
 
 let assert_release_valid () =
   let decision, followups, index = release_sources () in
-  match validate_release_docs ~decision ~followups ~index @ evolving_inventory_errors () with
+  match validate_release_docs ~decision ~followups ~index @ release_inventory_errors () with
   | [] -> ()
   | errors -> Alcotest.fail (String.concat "\n" errors)
 

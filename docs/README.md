@@ -55,6 +55,10 @@ Read these together when judging whether the release candidate is credible:
   follow-up scope outside the surface release gate.
 - `release/surface-syntax/MANIFEST.sha256`: reconstructible base-plus-overlay
   evidence context, validated by the release manifest checker.
+- `release/dx-jac-export/DECISION.md`: DX.2 direct `.jac` native build and
+  explicit deterministic bootstrap-export decision, guarantees, and non-goals.
+- `release/dx-jac-export/EVIDENCE.md`: successor-only inventory, filesystem
+  adversarial coverage, native carrier parity, and reproduction commands.
 
 ## Maintenance Notes
 

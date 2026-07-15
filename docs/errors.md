@@ -164,6 +164,14 @@ in `src/` and `bin/` appears in this catalog.
 | W1202 | positional constructor pattern has more than four fields | `Snapshot(_, _, _, _, _)` |
 | W1203 | match scrutinee spans more than four source lines | manually bind the expression with `let`, then match on its name |
 
+## Explicit bootstrap export (E13xx)
+
+| code | meaning | example |
+|------|---------|---------|
+| E1301 | export destination collision | `jac export a.jac -o existing.jqd` |
+| E1302 | export input is missing, unreadable, stdin, or non-regular/non-seekable | `printf '1' \| jac export - -o out.jqd` |
+| E1303 | same-directory atomic publication failed | exporting into a missing or unwritable directory |
+
 The recovering `.jac` lexer emits an in-order invalid-token marker and continues;
 the strict lexer remains fail-fast. Malformed strings resynchronize at a closing
 quote or newline, so an unterminated line does not discard valid later items. The

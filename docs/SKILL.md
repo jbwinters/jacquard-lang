@@ -98,8 +98,9 @@ jac replay TRACE.jqd PROGRAM.jqd --to 12
 jac replay TRACE.jqd PROGRAM.jqd --fork '4=(response 503 "down")'
 jac tiers PROGRAM.jac
 
-# Native AOT currently consumes the kernel carrier.
-jac build PROGRAM.jqd -o program
+# Native AOT accepts public surface input directly.
+jac build PROGRAM.jac -o program
+jac export PROGRAM.jac -o PROGRAM.jqd  # explicit evidence/debug carrier only
 ./program --allow console
 ```
 
@@ -610,17 +611,27 @@ diagnostics, not permissive fallbacks.
 
 ## Native Compilation
 
-`jac build` currently accepts the `.jqd` kernel carrier. It emits C for the
-reachable program, links the Jacquard runtime, and asks clang or gcc to compile
-with optimization and LTO. Native and interpreted behavior are expected to be
+`jac build` accepts `.jac` surface input directly as well as retained `.jqd`
+kernel input. It uses the same parse/lower/resolution path as check and hash,
+emits C for the reachable program, links the Jacquard runtime, and asks clang
+or gcc to compile with optimization and LTO. It does not generate a persistent
+bootstrap twin. Native and interpreted behavior are expected to be
 byte-identical for stdout, stderr, and exit status.
 
 ```sh
 # Installed releases discover the runtime automatically. In a checkout only:
 export JACQUARD_RUNTIME=/path/to/jacquard/runtime
-jac build program.jqd -o program
+jac build program.jac -o program
 ./program --allow console --seed 42
 ```
+
+`jac export INPUT.jac -o OUTPUT.jqd` is the explicit conformance/debug escape
+hatch. Under the same prelude context, repeated exports are byte-identical and
+reparse to the same semantic top/member hashes; quoted constructor and
+operation intent remains encoded with `surface-ref-v0`. Publication is atomic
+and refuses an existing destination. The canonical bootstrap output erases
+comments, formatting, spans, documentation, and provenance metadata by design.
+Materialize stdin or other non-seekable input before export.
 
 The backend supports deep and multi-shot handlers, Dist, quotes, splices, and
 structural Code operations. Dynamic `eval` is interpreter-only and reports
@@ -648,8 +659,9 @@ source remain under Apache-2.0. See `RUNTIME-EXCEPTION.md`, `LICENSE`, and
 ## Bootstrap Carrier
 
 `.jqd` is the permanent kernel/debug carrier used by the prelude, replay,
-native build input, and implementation fixtures. It is an s-expression
-encoding of 27 fixed kernel forms. Ordinary users should write `.jac`.
+explicit export, and implementation fixtures. It is an s-expression encoding
+of 27 fixed kernel forms. Native build also accepts `.jqd`, but ordinary users
+should write and build `.jac` directly.
 
 The expression heads are `lit`, `var`, `ref`, `lam`, `app`, `let`, `match`,
 `tuple`, `handle`, `quote`, `unquote`, and `ann`; pattern heads are `pwild`,
@@ -692,8 +704,8 @@ Do not invent new kernel forms for surface sugar.
 
 ## Recommended Agent Workflow
 
-1. Write public code in `.jac`; use `.jqd` only for the explicit kernel/native
-   boundaries above.
+1. Write and build public code in `.jac`; use `.jqd` only for explicit
+   export, replay, prelude, or implementation-fixture boundaries above.
 2. Run `jac fmt --write FILE.jac`.
 3. Run `jac check FILE.jac --print-sigs` and review every inferred effect.
 4. For deployment, run `jac check FILE.jac --manifest ...` with the intended
