@@ -25,6 +25,7 @@ project shape from file names alone.
 - `../spec/jacquard-kernel-ast-m0.md`: kernel AST source-of-truth spec.
 - `../spec/serialization.md`: canonical byte serialization and hashing.
 - `development-plan.md`: original task plan and milestone discipline.
+- `concurrency.md`: phase-zero pure parallel hints and the staged structured-concurrency design.
 
 ## User-Facing Runtime
 

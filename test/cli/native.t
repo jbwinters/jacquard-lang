@@ -26,6 +26,27 @@ Ten pure programs, interpreter vs native, byte-compared (stdout and exit):
   identical: even-odd
   identical: prelude-map
 
+The phase-zero parallel hints are ordinary pure definitions. Their explicitly
+sequential interpreter result is byte-identical through the native backend;
+neither path introduces Async or a task runtime.
+
+  $ cat > parallel-pure.jqd <<'EOF_JQD'
+  > (tuple
+  >   (app (var parallel.map)
+  >     (app (var cons) (lit 3) (app (var cons) (lit 1) (app (var cons) (lit 4) (var nil))))
+  >     (lam ((pvar n)) (app (var sub) (app (var mul) (var n) (lit 2)) (lit 1))))
+  >   (app (var parallel.both)
+  >     (lam () (app (var mul) (lit 6) (lit 7)))
+  >     (lam () (app (var sub) (lit 100) (lit 1)))))
+  > EOF_JQD
+  $ jacquard run parallel-pure.jqd > i.out 2>&1
+  $ jacquard build parallel-pure.jqd -o parallel-pure > /dev/null 2>&1
+  $ ./parallel-pure > n.out 2>&1
+  $ cat n.out
+  (cons(5, cons(1, cons(7, nil))), (42, 99))
+  $ diff i.out n.out && echo identical
+  identical
+
 The benchmark file (recursion, list traffic, a dictionary sort) too:
 
   $ jacquard run ../../bench/pure.jqd > i.out 2>&1

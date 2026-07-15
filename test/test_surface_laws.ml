@@ -404,6 +404,7 @@ let manifest_errors () =
       "docs/README.md";
       "docs/SKILL.md";
       "docs/ci-cd.md";
+      "docs/concurrency.md";
       "docs/native-intrinsics.md";
       "docs/release/0.1/DECISION.md";
       "docs/release/0.1/EVIDENCE.md";
@@ -817,7 +818,7 @@ let validate_release_docs ~decision ~followups ~index =
           [ "opam exec -- dune build @all"; "exit 0" ];
           [
             "opam exec -- dune runtest --force";
-            "exit 0; compiled Alcotest inventory is exactly 554 cases";
+            "exit 0; compiled Alcotest inventory is exactly 559 cases";
           ];
           [ "opam exec -- dune fmt"; "exit 0; no task-file byte changes" ];
           [
@@ -842,11 +843,11 @@ let validate_release_docs ~decision ~followups ~index =
           ];
           [
             "clean-copy scripts/release/check-surface-syntax-manifest.sh";
-            "exit 0; overlay hashes match and all seven protected drafts are absent";
+            "exit 0; overlay hashes match and all six protected drafts are absent";
           ];
           [
             "clean-copy opam exec -- dune runtest --force";
-            "exit 0; the isolated base-plus-overlay copy passes all 554 cases";
+            "exit 0; the isolated base-plus-overlay copy passes all 559 cases";
           ];
         ]
       in
