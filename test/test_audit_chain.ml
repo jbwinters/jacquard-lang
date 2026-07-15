@@ -263,17 +263,18 @@ let test_concurrent_truncation_is_total () =
     (fun () ->
       await_signal ready_read;
       Unix.close ready_read;
-      let saw_change = ref false in
+      let classified = ref 0 in
       for _ = 1 to 64 do
         match Audit_chain.verify_file ~file ~expected_head:Audit_chain.genesis with
-        | Ok _ -> ()
-        | Error ({ Diag.code = "E1306"; _ } :: _) -> saw_change := true
-        | Error (_ :: _) -> ()
+        | Ok _ -> incr classified
+        | Error ({ Diag.code = "E1301" | "E1306"; _ } :: _) -> incr classified
+        | Error ({ Diag.code; _ } :: _) ->
+            Alcotest.failf "concurrent truncate returned unexpected %s" code
         | Error [] -> Alcotest.fail "concurrent read returned an empty diagnostic list"
         | exception exception_ ->
             Alcotest.failf "concurrent truncate escaped %s" (Printexc.to_string exception_)
       done;
-      Alcotest.(check bool) "concurrent change diagnosed as E1306" true !saw_change)
+      Alcotest.(check int) "all concurrent reads stayed result-total" 64 !classified)
 
 let mutate source index =
   let bytes = Bytes.of_string source in

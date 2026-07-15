@@ -53,11 +53,14 @@ log, a direct one-byte mutation witness, 160 sampled one-byte mutations that all
 fail without exceptions, and 50 generated valid chains where every sample
 contains Evaluated, Consented, and Completed entries and reconstructs to its
 expected head. A coordinated sparse-file truncation regression repeatedly
-changes a 2 MiB file while the public verifier reads it, pins E1306, and proves
-that no expected I/O exception escapes. A lock-coordinated replacement
-regression atomically replaces the pathname only after append has locked the
-original inode; it pins E1306 and proves that neither the replacement nor the
-verified original inode receives the proposed record.
+changes a 2 MiB file while the public verifier reads it and proves that every
+attempt stays result-total: a coherent empty snapshot verifies to genesis, a
+coherent sparse snapshot is rejected as malformed with E1301, and a change
+detected during acquisition returns E1306. No expected I/O exception escapes.
+A lock-coordinated replacement regression atomically replaces the pathname only
+after append has locked the original inode; it pins E1306 and proves that
+neither the replacement nor the verified original inode receives the proposed
+record.
 
 `test/cli/tools.t` independently exercises the public CLI surface: genesis,
 bounded and missing entry/log reads with append no-write evidence, three appends
