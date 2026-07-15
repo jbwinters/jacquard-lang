@@ -389,6 +389,52 @@ let test_once_resume_gate_style_transfer () =
    ^ "(opclause signal () k (app (var gate) (var k))))")
 
 let test_once_resume_branch_flow_is_bounded () =
+  let correlated second_true second_false =
+    Printf.sprintf
+      "(defeffect linear () (op signal once () (tref int)))\n\
+       (lam ((pvar flag)) (handle (app (var signal)) (ret (pvar x) (var x)) (opclause signal () k \
+       (let nonrec (pwild) (match (var flag) (clause (pcon true) (app (var k) (lit 1))) (clause \
+       (pcon false) (lit 0))) (match (var flag) (clause (pcon true) %s) (clause (pcon false) \
+       %s))))))"
+      second_true second_false
+  in
+  check_ok (make_cctx ()) "sequential matches over one immutable value preserve complementary arms"
+    (correlated "(lit 0)" "(app (var k) (lit 2))");
+  check_ok (make_cctx ()) "an immutable let alias preserves scrutinee identity"
+    "(defeffect linear () (op signal once () (tref int)))\n\
+    \     (lam ((pvar flag)) (handle (app (var signal)) (ret (pvar x) (var x)) (opclause signal () k\n\
+    \     (let nonrec (pvar alias) (var flag) (let nonrec (pwild) (match (var flag) (clause (pcon \
+     true)\n\
+    \     (app (var k) (lit 1))) (clause (pcon false) (lit 0))) (match (var alias) (clause (pcon \
+     true)\n\
+    \     (lit 0)) (clause (pcon false) (app (var k) (lit 2)))))))))";
+  check_ok (make_cctx ()) "a stable constructor tree preserves aligned nested arms"
+    (once_handler
+       "(let nonrec (pwild) (match (app (var some) (lit 1)) (clause (pcon some (pwild)) (app (var\n\
+       \        k) (lit 1))) (clause (pcon none) (lit 0))) (match (app (var some) (lit 1)) (clause \
+        (pcon\n\
+       \        some (pvar value)) (lit 0)) (clause (pcon none) (app (var k) (lit 2)))))");
+  let correlated_overlap = err_of (make_cctx ()) (correlated "(app (var k) (lit 2))" "(lit 0)") in
+  Alcotest.(check string)
+    "a feasible repeated arm still consumes twice" "E0816" correlated_overlap.code;
+  let shadowed =
+    err_of (make_cctx ())
+      "(defeffect linear () (op signal once () (tref int)))\n\
+       (lam ((pvar flag)) (handle (app (var signal)) (ret (pvar x) (var x)) (opclause signal () k \
+       (let nonrec (pwild) (match (var flag) (clause (pcon true) (app (var k) (lit 1))) (clause \
+       (pcon false) (lit 0))) (let nonrec (pvar flag) (var false) (match (var flag) (clause (pcon \
+       true) (lit 0)) (clause (pcon false) (app (var k) (lit 2)))))))))"
+  in
+  Alcotest.(check string) "a shadowed name cannot forge scrutinee correlation" "E0816" shadowed.code;
+  let unstable =
+    err_of (make_cctx ())
+      (once_handler
+         "(let nonrec (pwild) (match (app (var flaky) (lit \"first\")) (clause (pcon true) (app\n\
+         \          (var k) (lit 1))) (clause (pcon false) (lit 0))) (match (app (var flaky) (lit \
+          \"second\"))\n\
+         \          (clause (pcon true) (lit 0)) (clause (pcon false) (app (var k) (lit 2)))))")
+  in
+  Alcotest.(check string) "unstable scrutinees remain conservative" "E0816" unstable.code;
   let no_use_match =
     "(match (var true) (clause (pcon true) (lit 0)) (clause (pcon false) (lit 1)))"
   in

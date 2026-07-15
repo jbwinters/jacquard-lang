@@ -148,6 +148,11 @@ This is substructural typing scoped to exactly one built-in constructor,
 which is a small fraction of the machinery of general linear types and buys
 the entire stated benefit. The analysis is a per-function affine-usage walk,
 the same shape as the exhaustiveness checker: syntactic, local, decidable.
+Its bounded flow summary retains one aligned arm partition for sequential
+matches over the same immutable variable or resolved reference. Complementary
+consuming arms therefore remain mutually exclusive, while a consuming arm that
+can recur on the same value still reports E0816; unrelated or unstable
+scrutinees use the conservative summary.
 
 The runtime trap stays as the backstop regardless: a second resume of a
 `once` continuation is a defect with its own E-code, dynamically enforced

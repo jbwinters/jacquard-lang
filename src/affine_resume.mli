@@ -36,12 +36,13 @@ val check_clause :
   (unit, Diag.t list) result
 (** [check_clause ~resolve_term ~resume body] accepts exactly those once-operation clauses that
     drop, call, or transfer [resume] at most once on every possible execution path. Match arms are
-    exclusive. Transfers are allowed only to a local or resolved lambda parameter whose body passes
-    the same check. With [context=Immediately_applied_transformer], a direct outer clause lambda is
-    treated as called exactly once and its body receives the same affine budget; each Resume call
-    result must be immediately eliminated as the function child of one application whose arguments
-    satisfy {!is_immediate_transformer_argument}. E0816 reports two consumption spans; E0817 reports
-    an escape/capture site. *)
+    exclusive, and aligned sequential matches over the same immutable variable or resolved reference
+    preserve their arm correlation. Transfers are allowed only to a local or resolved lambda
+    parameter whose body passes the same check. With [context=Immediately_applied_transformer], a
+    direct outer clause lambda is treated as called exactly once and its body receives the same
+    affine budget; each Resume call result must be immediately eliminated as the function child of
+    one application whose arguments satisfy {!is_immediate_transformer_argument}. E0816 reports two
+    consumption spans; E0817 reports an escape/capture site. *)
 
 val check_escapes :
   ?resolve_term:(Hash.t -> resolved_callable option) ->

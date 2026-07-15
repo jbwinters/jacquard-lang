@@ -19,12 +19,16 @@ operation inventory, surface twins and formatter tests, and all
 release-document changes. It also keeps the historical SS.21/SS.22 manifest
 separate and immutable.
 
-The analyzer uses a constant-size abstract flow state: whether an unused path
-exists and one witness that a consumed path exists. Sequential composition
-rejects when both sides have a consumption witness; alternative branches merge
-those existential facts. This preserves zero-or-one use per path and two-span
-E0816 diagnostics without enumerating branch products. A 40-branch regression
-would require roughly `2^40` states under concrete path-list enumeration.
+The analyzer uses a bounded abstract flow state: whether an unused path exists,
+one consumed-path witness, and at most one symbolic arm partition for an
+immutable match scrutinee. Aligned sequential matches over the same variable or
+resolved reference compose their arms pointwise. Thus complementary consuming
+arms are accepted because no feasible execution consumes twice, while a
+repeated consuming arm still supplies two-span E0816 witnesses. Unrelated or
+unstable control flow keeps the conservative existential composition. The
+partition never forms a Cartesian product: a 40-branch regression would require
+roughly `2^40` states under concrete path-list enumeration but remains bounded
+here.
 Contextual helper analysis is also summarized once per callable parameter. A
 25-helper regression transfers through duplicate exclusive arms at every level;
 without summaries its recurrence is `T(n)=2T(n-1)`, while the implemented walk
