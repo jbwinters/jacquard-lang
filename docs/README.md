@@ -78,6 +78,10 @@ Read these together when judging whether the release candidate is credible:
   explicit exposure contract, redaction guarantees, and adversarial evidence.
 - `release/effect-taxonomy/ET4-MANIFEST.sha256`: reconstructible ET.4 overlay on
   the validated ET.3 base; predecessor manifests remain unchanged.
+- `release/effect-taxonomy/ET5-EVIDENCE.md`: ET.5 fixed, environment-granted,
+  and provider-neutral vault Secret handler boundaries with leak scans.
+- `release/effect-taxonomy/ET5-MANIFEST.sha256`: reconstructible ET.5 overlay on
+  the validated ET.4 base; predecessor manifests remain unchanged.
 
 ## Maintenance Notes
 

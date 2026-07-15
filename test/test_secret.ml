@@ -14,7 +14,7 @@ let install_provider () =
   match
     Prelude.install_secret ctx ~read:(fun ~name ~version ->
         if name = "fixture" && version = Some "v1" then Ok fixture
-        else Error (Runtime_err.Io "secret fixture not found"))
+        else Error Prelude.Secret_reference_missing)
   with
   | Ok () -> ()
   | Error diagnostics -> fail_diags "install secret provider" diagnostics
@@ -141,6 +141,98 @@ let prop_show_never_leaks =
            (Value.show (Value.VTuple [ secret; Value.VText "witness" ]))
            "(<secret redacted>, \"witness\")")
 
+let ref_for name version =
+  let version =
+    match version with
+    | None -> "(var none)"
+    | Some version -> Printf.sprintf "(app (var some) (lit %S))" version
+  in
+  Printf.sprintf "(app (var secret-ref) (lit %S) %s)" name version
+
+let read_ref name version = Printf.sprintf "(app (var secret.read) %s)" (ref_for name version)
+let expose_ref name version = Printf.sprintf "(app (var secret.expose) %s)" (read_ref name version)
+
+let test_fixed_handler_is_deterministic () =
+  let latest = "ET5-fixed-latest-not-for-output" in
+  let pinned = "ET5-fixed-v1-not-for-output" in
+  let fixtures : Prelude.secret_fixture list =
+    [
+      { secret_name = "service"; secret_version = None; secret_bytes = latest };
+      { secret_name = "service"; secret_version = Some "v1"; secret_bytes = pinned };
+    ]
+  in
+  (match Prelude.install_secret_fixed ctx fixtures with
+  | Ok () -> ()
+  | Error diagnostics -> fail_diags "install fixed Secret handler" diagnostics);
+  let twice =
+    Value.show
+      (eval (Printf.sprintf "(tuple %s %s)" (read_ref "service" None) (read_ref "service" None)))
+  in
+  Alcotest.(check string)
+    "repeated exact lookup is stable" "(<secret redacted>, <secret redacted>)" twice;
+  Alcotest.(check string)
+    "version selects exact fixture" (Value.show (Value.VText pinned))
+    (Value.show (eval (expose_ref "service" (Some "v1"))));
+  let missing source expected =
+    match Eval_support.eval_with ctx store source with
+    | Error error ->
+        let rendered = Runtime_err.to_string error in
+        Alcotest.(check string) "sanitized missing lookup" expected rendered;
+        Alcotest.(check bool) "latest bytes absent" false (contains rendered latest);
+        Alcotest.(check bool) "versioned bytes absent" false (contains rendered pinned)
+    | Ok value -> Alcotest.failf "missing fixed Secret returned %s" (Value.show value)
+  in
+  missing (read_ref "absent" None) "io error: secret reference not found: absent";
+  missing (read_ref "service" (Some "v2")) "io error: secret version not found: service@v2"
+
+let test_environment_and_vault_boundaries () =
+  let payload = "ET5-adapter-payload-not-for-output" in
+  let requested_keys = ref [] in
+  let getenv key =
+    requested_keys := key :: !requested_keys;
+    if String.equal key "JACQUARD_SECRET_V0_617069_VERSION_7632" then Some payload else None
+  in
+  (match Prelude.install_secret_environment ~getenv ctx with
+  | Ok () -> ()
+  | Error diagnostics -> fail_diags "install environment Secret handler" diagnostics);
+  Alcotest.(check string)
+    "environment key is collision-free and versioned" "JACQUARD_SECRET_V0_617069_VERSION_7632"
+    (Prelude.secret_environment_key ~name:"api" ~version:(Some "v2"));
+  Alcotest.(check string)
+    "environment result stays opaque" "<secret redacted>"
+    (Value.show (eval (read_ref "api" (Some "v2"))));
+  Alcotest.(check (list string))
+    "environment lookup records only the safe key"
+    [ "JACQUARD_SECRET_V0_617069_VERSION_7632" ]
+    (List.rev !requested_keys);
+  let calls = ref [] in
+  let scripted = ref [ Ok payload; Error Prelude.Secret_backend_failure ] in
+  let read ~name ~version =
+    calls := (name, version) :: !calls;
+    match !scripted with
+    | answer :: rest ->
+        scripted := rest;
+        answer
+    | [] -> Error Prelude.Secret_backend_failure
+  in
+  (match Prelude.install_secret_vault ~read ctx with
+  | Ok () -> ()
+  | Error diagnostics -> fail_diags "install scripted vault adapter" diagnostics);
+  Alcotest.(check string)
+    "scripted replay result remains opaque" "<secret redacted>"
+    (Value.show (eval (read_ref "vault" (Some "42"))));
+  (match Eval_support.eval_with ctx store (read_ref "vault" (Some "42")) with
+  | Error error ->
+      let rendered = Runtime_err.to_string error in
+      Alcotest.(check string)
+        "fault is sanitized" "io error: secret backend failure for reference: vault" rendered;
+      Alcotest.(check bool) "adapter bytes absent from failure" false (contains rendered payload)
+  | Ok value -> Alcotest.failf "faulting vault returned %s" (Value.show value));
+  Alcotest.(check int) "recorded two safe calls" 2 (List.length !calls);
+  Alcotest.(check bool)
+    "record contains only references" true
+    (List.for_all (fun (name, version) -> name = "vault" && version = Some "42") !calls)
+
 let suite =
   [
     Alcotest.test_case "schema, once modes, and sealed marker" `Quick test_schema_and_sealed_marker;
@@ -148,5 +240,8 @@ let suite =
       test_explicit_exposure_and_generic_redaction;
     Alcotest.test_case "checker and runtime diagnostics redact" `Quick
       test_diagnostics_never_render_payload;
+    Alcotest.test_case "fixed handler is deterministic" `Quick test_fixed_handler_is_deterministic;
+    Alcotest.test_case "environment and vault adapter boundaries" `Quick
+      test_environment_and_vault_boundaries;
     QCheck_alcotest.to_alcotest prop_show_never_leaks;
   ]

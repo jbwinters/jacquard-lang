@@ -515,13 +515,19 @@ indexes. Both `secret.read : (SecretRef) -> Secret` and
 `secret.expose : (Secret) -> Text` are `once` operations, so the authority to
 obtain plaintext remains visible in the `Secret` effect row.
 
-The standard library deliberately does not invent a credential store or an
-ambient CLI grant. Embeddings may explicitly install a resolver with
-`Prelude.install_secret`; native and interpreter values retain distinct opaque
-tags. Generic rendering, runtime errors, traces, and `debug.inspect` always use
-the fixed marker `<secret redacted>`. This is an opacity boundary, not taint
-tracking: after explicit exposure the result is ordinary Text and code can copy
-or leak it. Keep exposure late and typed Audit inputs separate from plaintext.
+The standard library deliberately does not invent a credential store or select
+a vault provider. `Prelude.install_secret_fixed` supplies deterministic exact
+fixtures for hermetic tests. `Prelude.install_secret_vault` accepts an injected
+adapter whose closed failure type cannot carry backend text or values.
+`--allow secret` is the explicit live grant for the environment adapter; it
+looks up collision-free keys derived from the UTF-8 bytes of the safe
+`SecretRef`. Dry-run ignores that live grant, installs no Secret handler, and
+refuses the remaining row before lookup. Native and interpreter values retain
+distinct opaque tags. Generic rendering, runtime errors, traces, and
+`debug.inspect` always use the fixed marker `<secret redacted>`. This is an
+opacity boundary, not taint tracking: after explicit exposure the result is
+ordinary Text and code can copy or leak it. Keep exposure late and typed Audit
+inputs separate from plaintext.
 
 ### debug.inspect
 

@@ -1,7 +1,7 @@
 # Blessed Effect Taxonomy v1
 
 Status: ratified taxonomy (ET.0, D56-D63), with Audit promoted by ET.2 and
-Secret promoted by ET.4, July 2026.
+Secret promoted by ET.4 and its canonical handler boundaries added by ET.5, July 2026.
 
 This specification freezes the shared effect vocabulary used by signatures,
 authority manifests, package review, and future registry metadata. It is a
@@ -145,6 +145,17 @@ has no `Show` instance; generic inspection renders it redacted. `secret.expose`
 is the only standard conversion to `Text`, so deliberate exposure remains in
 the effect row. This is non-derivability, not information-flow tracking: after
 exposure a program can still leak the text.
+
+ET.5 supplies three explicit handler boundaries without changing the interface
+identity or opaque value representation. `secret.fixed` is the deterministic
+embedding fixture installed by `Prelude.install_secret_fixed`; exact
+`(name, version)` matches return opaque values and missing names or versions
+fail separately. `--allow secret` installs the environment adapter, whose
+collision-free `JACQUARD_SECRET_V0_<name-hex>_{LATEST|VERSION_<version-hex>}`
+keys are derived only from safe `SecretRef` data. `Prelude.install_secret_vault`
+accepts an injected provider callback and selects no vendor or transport. Its
+closed failure type carries no backend message or value. Dry-run installs none
+of these live handlers and therefore refuses a remaining `Secret` row.
 
 `Call.subject` hashes the resolved operation identity, canonical arguments,
 declared authority, and preconditions. Presentation summary is excluded.

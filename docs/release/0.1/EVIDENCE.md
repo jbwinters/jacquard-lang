@@ -48,8 +48,8 @@ find ../../../test -name '*.t' | wc -l
 
 Current inventory:
 
-- Alcotest/QCheck cases: `597`
-- Cram transcript files: `32`
+- Alcotest/QCheck cases: `599`
+- Cram transcript files: `33`
 - Gauntlet cram files: `4`
 - Escrow transcript: `test/cli/escrow.t`
 - Larger case-study transcript: `test/cli/case-studies.t`
