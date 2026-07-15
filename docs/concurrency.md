@@ -1,12 +1,14 @@
 # Structured Concurrency Contract
 
-Status: SC.8 deterministic fail-fast/collect scope policies over SC.7
-cooperative cancellation, SC.6 structured-scope ownership, the SC.5
+Status: SC.9 deterministic FIFO round-robin scheduling over SC.8
+fail-fast/collect scope policies, SC.7 cooperative cancellation, SC.6
+structured-scope ownership, the SC.5
 policy-independent lifecycle core, and the SC.4 generalized child-effect law
 (D46-D50), July 2026. This document is authoritative for C1's static
 non-laundering law, lifecycle and nested ownership, cancellation delivery, and
-homogeneous scope aggregation. Runnable-queue policy and an Async root handler
-remain future work.
+homogeneous scope aggregation. The default CLI, prelude-evaluation, and Warp
+Case paths now drive real evaluator states and affine continuations through the
+deterministic Async scheduler. Native root scheduling remains unsupported.
 
 Structured concurrency is an effect interpreted by a scheduler handler. The
 same program can therefore run under deterministic, seeded-random, exhaustive,
@@ -184,8 +186,15 @@ the second nested scope is `0/2#3`. Components and spawn indices are unsigned
 32-bit values. A path has at most 65,532 components, matching the native
 unsigned-16-bit block-length domain including its three metadata words.
 
-SC.3 exposes no public evaluator or library constructor for Task values. The
-private scheduler seam always assigns the evaluator's active run and scope.
+SC.3 exposes no public evaluator or library constructor for Task values. A
+private, unforgeable capability is required to wrap or unwrap the scheduler's
+opaque handles. Every `Round_robin` invocation allocates a fresh Task run even
+when it reuses an evaluator context, then dynamically binds validation to the
+active run and scope while a scheduler step executes.
+The run-identity, capability, and raw-handle modules are all absent from the
+installed public CMI set; external OCaml clients can use `Round_robin` but
+cannot name `Concurrency_owner.create`, `Task_capability.runtime`, or
+`Task_handle.create_run`.
 Every evaluator entry, native callback result, captured result, and terminal
 machine result recursively validates Task ownership, including Tasks nested in
 tuples, constructors, closures, and resumptions. Reusable validated states and
@@ -283,8 +292,11 @@ heterogeneously typed child values can inhabit one list. Within a general scope,
 programs obtain heterogeneous typed results explicitly with `async.await`.
 
 SC.8 implements these two policies in `Scope_policy`. A controller registers an
-ordered same-scope child list and consumes terminal observations carrying
-strictly increasing scheduler decision numbers. Fail-fast is the default. Its
+ordered same-scope child list and consumes terminal observations carrying a
+strictly increasing lexicographic `(D46 decision, sub-observation ordinal)`
+pair. The ordinal is zero for the first terminal observed in a step and rises
+in stable scope-child order when one step terminalizes more children through
+fail-fast cancellation. Fail-fast is the default. Its
 first observed `Failed(message)` or `Cancelled` freezes that exact non-success,
 requests cancellation of each unfinished sibling in input order, and
 immediately delivers already-suspended siblings through the SC.7 destruction
@@ -358,12 +370,44 @@ D46 fixes the default scheduler to FIFO round-robin over the runnable queue:
 4. `await` on a live task blocks the waiter; terminal completion wakes waiters
    in waiter-registration order and appends them to the tail.
 5. Results and collect aggregates are rendered in creation/input order, never
-   completion order. Simultaneous failures are ordered by decision sequence.
+   completion order. Multiple terminals discovered by one step use the stable
+   sub-observation ordinal after that step's D46 decision number.
 
 The host scheduler is never consulted by this default. Seeded random,
 Choose-driven exhaustive, recorded/replay, and host scheduling are later
 handlers over the same decision boundary. Strict replay must validate the full
 runnable queue and chosen ID before divergent user or world work executes.
+
+SC.9 implements this boundary in `Round_robin`. Each scheduler step renders the
+exact pre-decision queue and chosen head before advancing one real `Eval.state`
+to an Async operation, routed world operation, return, or failure. One global
+FIFO, decision sequence, trace, task/live counter, and pair of configured bounds
+cover the root and every nested scope. Opening `async.scope` suspends its parent
+and appends the nested body behind tasks already runnable; nested completion
+requeues that parent. There is no recursive sub-scheduler. The queue contains
+only handles whose deterministic IDs appear in the decision; task discovery and
+wakeup order come from spawn-ordered lifecycle state and registration-ordered
+waiter lists, never hash-table iteration. Spawn appends child then parent, a
+blocked await removes its waiter, completion appends awakened waiters, and yield
+appends its current task. Cancellation remains cooperative at the three SC.7
+boundaries.
+
+Policy traces include `policy-observe decision=N ordinal=M task=ID`, directly
+linking every child terminal observation to the D46 step that caused it.
+`Task` values are real opaque evaluator values with a fresh scheduler-run owner
+and exact scope path. The recursive value guard rejects E0907 if one escapes
+its creating scope or is reused by a later scheduler invocation on the same
+evaluator. Routed root dispatch snapshots and rechecks the suspended affine
+resume together with the operation, arguments, and result, so a hostile root
+callback cannot mutate the continuation graph to smuggle a foreign Task.
+Positive task and decision bounds close and drain
+the scheduler on refusal. Fail-fast and collect reuse the D50 result shapes,
+and all results remain in task-creation order. Cache identity is the canonical
+program hash plus scheduler version, failure policy, and both bounds. Entries
+contain trace/decision proof only; they never retain evaluator closures,
+continuations, results, or Task handles, and a hit is checked against a fresh
+execution. This is the default C1 policy implementation and the decision seam
+for later C2 handlers, not a versioned replay format or a host scheduler.
 
 The corresponding compiled OCaml contract is
 [`Concurrency_contract`](../src/concurrency_contract.mli). It contains only
@@ -375,7 +419,20 @@ policy-independent lifecycle engine, SC.6 adds same-run nested scope ownership,
 recursive cleanup, and complete runtime-value escape scans, and SC.7 adds
 cooperative delivery at await, yield, and routed-effect boundaries. SC.8 adds
 deterministic fail-fast and collect aggregation over explicit terminal decision
-events. Runnable-queue policy and a root handler remain separate work.
+events. SC.9 adds the default deterministic queue and real evaluator-state Async
+driver used by interpreted CLI and Warp Case execution. Raw `Eval.run_expr`
+remains the low-level unscheduled evaluator seam; native root scheduling remains
+separate work.
+
+The public language has no `async.current-task` operation, so a checked
+Jacquard program cannot name its own handle and self-cancel. The scheduler
+lifecycle integration test therefore exercises self-cancel at the real
+`Structured_scope.cancel` route; the real-evaluator suite covers failing-child
+fail-fast/collect and same-step cancellation ordinals. Warp Case coverage is
+limited to checker-representable programs (nested spawn/await/yield/cancel).
+Ill-typed child faults and direct self-handle injection remain hostile OCaml
+integration cases, not purported checked Warp programs. Warp Props still vary
+data, not schedules: C1 exposes one fixed FIFO schedule.
 
 ## 6. Interactions and exclusions
 

@@ -1,7 +1,7 @@
-type run = unit ref
+type run = Concurrency_owner.t
 type t = { run : run; scope_path : int list; spawn_index : int }
 
-let create_run () = ref ()
+let create_run = Concurrency_owner.create
 
 let diagnostic detail =
   Diag.error ~code:Concurrency_contract.task_escape_code
@@ -20,7 +20,8 @@ let create ~run ~scope_path ~spawn_index =
 
 let validate_run ~run handle =
   Result.bind (checked_id handle.scope_path handle.spawn_index) (fun id ->
-      if handle.run == run then Ok id else Error [ diagnostic "the handle belongs to another run" ])
+      if Concurrency_owner.equal handle.run run then Ok id
+      else Error [ diagnostic "the handle belongs to another run" ])
 
 let validate_scope ~run ~scope_path handle =
   Result.bind (validate_run ~run handle) (fun id ->

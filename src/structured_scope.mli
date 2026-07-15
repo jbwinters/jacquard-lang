@@ -56,6 +56,17 @@ val spawn : ('resume, 'value) t -> resume:'resume -> (handle, Diag.t list) resul
 val id : ('resume, 'value) t -> handle -> (Concurrency_contract.task_id, Diag.t list) result
 (** [id scope handle] validates exact open-scope ownership. *)
 
+val with_eval_task_context :
+  Task_capability.t -> Eval.ctx -> ('resume, 'value) t -> (unit -> 'a) -> 'a
+(** Runtime-private binding of evaluator Task validation to this scope's fresh run and path. *)
+
+val task_value : Task_capability.t -> ('resume, 'value) t -> handle -> (Value.t, Diag.t list) result
+(** Runtime-private Task wrapping, gated by the unforgeable scheduler capability. *)
+
+val task_handle :
+  Task_capability.t -> ('resume, 'value) t -> Value.t -> (handle, Diag.t list) result
+(** Runtime-private Task unwrapping, gated by the unforgeable scheduler capability. *)
+
 val inspect : ('resume, 'value) t -> handle -> ('value Scheduler_core.task_view, Diag.t list) result
 (** [inspect scope handle] returns the lifecycle view for an open scope. *)
 

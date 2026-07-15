@@ -263,3 +263,5 @@ let run () =
   test_suspended_target_and_precancelled_caller ();
   test_bracket_cleanup_without_post_cancel_step ();
   QCheck.Test.check_exn prop_duplicate_requests_deliver_once
+
+let suite = [ Alcotest.test_case "cooperative boundary delivery" `Quick run ]

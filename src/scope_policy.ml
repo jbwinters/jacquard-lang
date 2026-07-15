@@ -9,9 +9,10 @@ type frozen_non_success = Frozen_failed of string | Frozen_cancelled
 type ('resume, 'value) t = {
   scope : ('resume, 'value) Structured_scope.t;
   policy : Concurrency_contract.failure_policy;
-  children : 'value child list;
-  mutable last_decision : int option;
+  mutable children : 'value child list;
+  mutable last_observation : (int * int) option;
   mutable first_non_success : frozen_non_success option;
+  mutable awakened : Structured_scope.handle list;
 }
 
 type 'value aggregate =
@@ -32,7 +33,14 @@ let create ?(policy = Concurrency_contract.default_failure_policy) scope ~childr
   let rec validate seen acc = function
     | [] ->
         Ok
-          { scope; policy; children = List.rev acc; last_decision = None; first_non_success = None }
+          {
+            scope;
+            policy;
+            children = List.rev acc;
+            last_observation = None;
+            first_non_success = None;
+            awakened = [];
+          }
     | handle :: rest ->
         Result.bind (Structured_scope.id scope handle) (fun id ->
             if List.exists (fun prior -> Concurrency_contract.compare_task_id prior id = 0) seen
@@ -42,6 +50,22 @@ let create ?(policy = Concurrency_contract.default_failure_policy) scope ~childr
   validate [] [] children
 
 let policy controller = controller.policy
+
+let take_awakened controller =
+  let awakened = controller.awakened in
+  controller.awakened <- [];
+  awakened
+
+let register_child controller handle =
+  Result.bind (Structured_scope.id controller.scope handle) (fun id ->
+      if
+        List.exists
+          (fun child -> Concurrency_contract.compare_task_id child.id id = 0)
+          controller.children
+      then diagnostic ("duplicate child " ^ Concurrency_contract.trace_task_id id)
+      else (
+        controller.children <- controller.children @ [ { handle; id; terminal = None } ];
+        Ok ()))
 
 let find_child controller id =
   List.find_opt
@@ -56,42 +80,49 @@ let cancel_unfinished controller ~drop =
   let ( let* ) = Result.bind in
   let diagnostics = ref [] in
   let first_exception = ref None in
+  let awakened = ref [] in
   let attempt operation =
     match operation () with
-    | Ok () -> ()
+    | Ok woken -> awakened := !awakened @ woken
     | Error errors -> diagnostics := !diagnostics @ errors
     | exception exn -> if Option.is_none !first_exception then first_exception := Some exn
   in
   let cancel child =
     let* view = Structured_scope.inspect controller.scope child.handle in
     match (view.result, view.suspension) with
-    | Some _, _ -> Ok ()
+    | Some _, _ -> Ok []
     | None, suspension -> (
         let* () = Structured_scope.request_cancel controller.scope child.handle in
         match suspension with
-        | None -> Ok ()
+        | None -> Ok []
         | Some suspension ->
-            let* _ =
-              Structured_scope.deliver_cancel controller.scope
-                ~point:(cancellation_point suspension) child.handle ~drop
-            in
-            Ok ())
+            Structured_scope.deliver_cancel controller.scope ~point:(cancellation_point suspension)
+              child.handle ~drop)
   in
   List.iter (fun child -> attempt (fun () -> cancel child)) controller.children;
   match !first_exception with
   | Some exn -> raise exn
-  | None -> if !diagnostics = [] then Ok () else Error !diagnostics
+  | None ->
+      if !diagnostics = [] then (
+        controller.awakened <- controller.awakened @ !awakened;
+        Ok ())
+      else Error !diagnostics
 
-let valid_decision controller decision =
+let valid_observation controller decision ordinal =
   if decision < 0 then diagnostic "decision sequence must be non-negative"
+  else if ordinal < 0 then diagnostic "terminal observation ordinal must be non-negative"
   else
-    match controller.last_decision with
-    | Some previous when decision <= previous ->
-        diagnostic (Printf.sprintf "decision sequence %d does not follow %d" decision previous)
+    match controller.last_observation with
+    | Some (previous_decision, previous_ordinal)
+      when decision < previous_decision
+           || (decision = previous_decision && ordinal <= previous_ordinal) ->
+        diagnostic
+          (Printf.sprintf "terminal observation (%d,%d) does not follow (%d,%d)" decision ordinal
+             previous_decision previous_ordinal)
     | None | Some _ -> Ok ()
 
-let record_terminal controller ~decision handle ~drop =
-  Result.bind (valid_decision controller decision) (fun () ->
+let record_terminal controller ~decision ?(ordinal = 0) handle ~drop =
+  Result.bind (valid_observation controller decision ordinal) (fun () ->
       Result.bind (Structured_scope.id controller.scope handle) (fun id ->
           match find_child controller id with
           | None ->
@@ -104,7 +135,7 @@ let record_terminal controller ~decision handle ~drop =
                   match view.result with
                   | None -> diagnostic ("child " ^ child_name child ^ " is not terminal")
                   | Some result -> (
-                      controller.last_decision <- Some decision;
+                      controller.last_observation <- Some (decision, ordinal);
                       child.terminal <- Some result;
                       match (controller.policy, result, controller.first_non_success) with
                       | Concurrency_contract.Fail_fast, Concurrency_contract.Failed message, None ->

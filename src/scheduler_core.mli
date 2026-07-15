@@ -73,6 +73,16 @@ val spawn : ('resume, 'value) t -> resume:'resume -> (handle, Diag.t list) resul
 val id : ('resume, 'value) t -> handle -> (Concurrency_contract.task_id, Diag.t list) result
 (** [id] validates handle ownership and returns its deterministic scheduler ID. *)
 
+val task_run : Task_capability.t -> ('resume, 'value) t -> Concurrency_owner.t
+(** Runtime-private, capability-gated access to the run owner for evaluator validation binding. *)
+
+val task_value : Task_capability.t -> ('resume, 'value) t -> handle -> (Value.t, Diag.t list) result
+(** Runtime-private, capability-gated wrapping of a validated handle. *)
+
+val task_handle :
+  Task_capability.t -> ('resume, 'value) t -> Value.t -> (handle, Diag.t list) result
+(** Runtime-private, capability-gated unwrapping and exact-scope validation. *)
+
 val validate_run_handle :
   ('resume, 'value) t -> handle -> (Concurrency_contract.task_id, Diag.t list) result
 (** [validate_run_handle scheduler handle] validates only the opaque run owner and returns the

@@ -122,12 +122,22 @@ let process_forms ?origin ?(on_decl = fun _ _ -> ()) ~syntax store ~file src ~on
 
 (* effect hashes for the granted names, for the manifest check (W3.6) *)
 let granted_hashes store allows =
-  List.filter_map
-    (fun name ->
-      match Store.lookup_kind store (String.lowercase_ascii name) Resolve.KEffect with
-      | Some { Resolve.hash; _ } -> Some hash
-      | _ -> None)
-    allows
+  let explicit =
+    List.filter_map
+      (fun name ->
+        match Store.lookup_kind store (String.lowercase_ascii name) Resolve.KEffect with
+        | Some { Resolve.hash; _ } -> Some hash
+        | _ -> None)
+      allows
+  in
+  let scheduler_async =
+    match Store.lookup_kind store "async" Resolve.KEffect with
+    | Some { Resolve.hash; _ }
+      when String.equal (Hash.to_hex hash) Concurrency_contract.async_effect_hash ->
+        [ hash ]
+    | Some _ | None -> []
+  in
+  explicit @ scheduler_async
 
 let make_checker store =
   match Check.make_ctx store with
@@ -204,7 +214,7 @@ let run_cmd file allows prelude store_dir seed infer_cache origin dry_run syntax
                         refused := true;
                         Error ds
                     | [] -> (
-                        match Eval.run_expr ctx e with
+                        match Round_robin.run_expr ctx e with
                         | Ok v ->
                             print_endline (Value.show v);
                             Ok ()
@@ -858,7 +868,7 @@ let replay_cmd log_file program forks to_n compare prelude =
                                 (String.concat ", " (List.map Value.show args)))))
             | _ -> ());
             let on_expr e =
-              match Eval.run_expr ctx e with
+              match Round_robin.run_expr ctx e with
               | Ok v ->
                   print_endline (Value.show v);
                   Ok ()

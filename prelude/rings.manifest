@@ -67,6 +67,7 @@ async.spawn 2
 async.await 2
 async.cancel 2
 async.yield 2
+async.scope 2
 # --- 04-builtins
 add 0
 sub 0

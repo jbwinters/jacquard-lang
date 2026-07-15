@@ -4,7 +4,7 @@
     or serialization operation: a handle is useful only after validation against the current run and
     structured scope. *)
 
-type run
+type run = Concurrency_owner.t
 (** An opaque runtime identity. It is compared by identity and never enters a Task's deterministic
     scheduler ID or a user-visible value. *)
 

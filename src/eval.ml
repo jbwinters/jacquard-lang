@@ -117,9 +117,10 @@ type native_snapshot_lru = { entries : native_snapshot_entry option array; mutab
 type ctx = {
   store : Store.t;
   task_run : Task_handle.run;
-      (** opaque owner token for Task values created by a future scheduler attached to this
-          evaluator; it carries no scheduling policy *)
-  task_scope_path : int list;
+      (** evaluator-lifetime owner for affine Once resumptions; scheduler Task runs are distinct *)
+  mutable scheduler_task_run : Task_handle.run option;
+      (** fresh run owner dynamically installed only by the private scheduler bridge *)
+  mutable task_scope_path : int list;
       (** currently active structured scope. SC.3 has only the inert root scope; the scheduler task
           that introduces executable scopes will own updates to this private field *)
   builtins : (Hash.t, Value.t) Hashtbl.t;
@@ -141,6 +142,8 @@ type ctx = {
       (** when set (by {!run_state_capturing}), an op that reaches the root with no handler and no
           grant is CAPTURED — returned with its continuation — instead of dying [Unhandled]; this is
           how native inference drivers (M3) receive resumptions *)
+  mutable capture_root_handlers : bool;
+      (** scheduler-only mode: capture granted operations before invoking their root handlers *)
   mutable track_coverage : bool;
       (** coverage bookkeeping costs a hash-keyed table write per term reference — measured ~12% of
           a pure-recursion run (PF.2 phase 2). The run path never reads coverage, so the CLI turns
@@ -164,6 +167,7 @@ let make_ctx store =
   {
     store;
     task_run = Task_handle.create_run ();
+    scheduler_task_run = None;
     task_scope_path = [ 0 ];
     builtins = Hashtbl.create 64;
     memo = Hashtbl.create 64;
@@ -172,6 +176,7 @@ let make_ctx store =
     native_mutable_snapshots = { entries = Array.make 64 None; clock = 0 };
     root_handlers = Hashtbl.create 8;
     capture_ops = false;
+    capture_root_handlers = false;
     track_coverage = true;
     coverage = Hashtbl.create 64;
     recovery_immutable_clean = Physical_cache.create 128;
@@ -181,24 +186,29 @@ let make_ctx store =
 (** [store ctx] returns the immutable store handle used for name and declaration lookup. *)
 let store ctx = ctx.store
 
+let current_task_run ctx = Option.value ctx.scheduler_task_run ~default:ctx.task_run
+
+let with_scheduler_task_run _capability ctx ~run ~scope_path operation =
+  let previous_run = ctx.scheduler_task_run in
+  let previous_path = ctx.task_scope_path in
+  ctx.scheduler_task_run <- Some run;
+  ctx.task_scope_path <- scope_path;
+  Fun.protect
+    ~finally:(fun () ->
+      ctx.scheduler_task_run <- previous_run;
+      ctx.task_scope_path <- previous_path)
+    operation
+
 let task_message diagnostics =
   String.concat "; " (List.map (fun diagnostic -> diagnostic.Diag.message) diagnostics)
 
 let foreign_evaluator_context kind =
   Runtime_err.Invalid_task_handle (Printf.sprintf "%s belongs to another evaluator run" kind)
 
-(** [scheduler_task_value ctx] is the private scheduler-only Task allocation seam. It assigns no
-    policy or lifecycle state and always uses the evaluator's active structured scope. It is
-    intentionally absent from [eval.mli]. *)
-let[@warning "-32"] scheduler_task_value ctx ~spawn_index =
-  Result.map
-    (fun handle -> VTask handle)
-    (Task_handle.create ~run:ctx.task_run ~scope_path:ctx.task_scope_path ~spawn_index)
-
 (** [validate_task_value ctx] checks run and exact structured-scope ownership without scheduling.
     Non-Task, malformed, stale, foreign-run, and cross-scope values return E0907. *)
 let validate_task_value ctx ~scope_path = function
-  | VTask handle -> Task_handle.validate_scope ~run:ctx.task_run ~scope_path handle
+  | VTask handle -> Task_handle.validate_scope ~run:(current_task_run ctx) ~scope_path handle
   | _ ->
       Error
         [
@@ -226,7 +236,7 @@ let reject_task_escape ctx ~scope_path root =
       true)
   in
   let record_task handle =
-    match Task_handle.validate_run ~run:ctx.task_run handle with
+    match Task_handle.validate_run ~run:(current_task_run ctx) handle with
     | Error task_diagnostics -> diagnostics := List.rev_append task_diagnostics !diagnostics
     | Ok id when scope_prefix scope_path id.scope_path ->
         diagnostics :=
@@ -489,7 +499,8 @@ let scan_recovery_state ctx ~static_trusted (state : state) =
           false
       | VTask handle -> (
           match
-            Task_handle.validate_scope ~run:ctx.task_run ~scope_path:ctx.task_scope_path handle
+            Task_handle.validate_scope ~run:(current_task_run ctx) ~scope_path:ctx.task_scope_path
+              handle
           with
           | Ok _ -> true
           | Error diagnostics -> rt (Runtime_err.Invalid_task_handle (task_message diagnostics)))
@@ -600,7 +611,10 @@ let rec needs_mutable_recheck ctx value =
   match value with
   | VInt _ | VReal _ | VText _ | VConstructor _ | VOp _ | VBuiltin _ | VTrustedBuiltin _ -> false
   | VTask handle -> (
-      match Task_handle.validate_scope ~run:ctx.task_run ~scope_path:ctx.task_scope_path handle with
+      match
+        Task_handle.validate_scope ~run:(current_task_run ctx) ~scope_path:ctx.task_scope_path
+          handle
+      with
       | Ok _ -> true
       | Error diagnostics -> rt (Runtime_err.Invalid_task_handle (task_message diagnostics)))
   | VCode payload ->
@@ -710,7 +724,8 @@ let reject_recovery_result_value ctx root =
     | VInt _ | VReal _ | VText _ | VConstructor _ | VOp _ | VBuiltin _ | VTrustedBuiltin _ -> true
     | VTask handle -> (
         match
-          Task_handle.validate_scope ~run:ctx.task_run ~scope_path:ctx.task_scope_path handle
+          Task_handle.validate_scope ~run:(current_task_run ctx) ~scope_path:ctx.task_scope_path
+            handle
         with
         | Ok _ -> false
         | Error diagnostics -> rt (Runtime_err.Invalid_task_handle (task_message diagnostics)))
@@ -847,8 +862,9 @@ let perform_unchecked ctx (op : Hash.t) ~name ~effect_ (args : Value.t list) (k 
     | f :: outer -> split (f :: inner_rev) outer
     | [] -> (
         match Hashtbl.find_opt ctx.root_handlers op with
-        | Some native -> invoke_untrusted_native ctx (VOp { op; name; effect_ }) native args k
-        | None ->
+        | Some native when not ctx.capture_root_handlers ->
+            invoke_untrusted_native ctx (VOp { op; name; effect_ }) native args k
+        | Some _ | None ->
             if ctx.capture_ops then
               raise
                 (Op_captured
@@ -873,6 +889,21 @@ let apply_unchecked ctx (fn : Value.t) (args : Value.t list) (k : kont) : state 
         in
         SEval ({ scope with env }, body, k)
   | VBuiltin (_, native) as fn -> invoke_untrusted_native ctx fn native args k
+  | VTrustedBuiltin builtin when String.equal (Trusted_builtin.name builtin) "async.scope-v0" -> (
+      match args with
+      | [ _body ] when ctx.capture_ops ->
+          raise
+            (Op_captured
+               {
+                 op = Concurrency_contract.scope_control_hash;
+                 name = "async.scope";
+                 effect_ = "Async";
+                 mode = Kernel.Once;
+                 args;
+                 kont = k;
+               })
+      | [ _ ] -> rt (Runtime_err.Unhandled { effect_ = "Async"; op = "async.scope" })
+      | _ -> rt_arity "async.scope expects one thunk, got %d" (List.length args))
   | VTrustedBuiltin builtin -> invoke_trusted_native ctx (Trusted_builtin.invoke builtin) args k
   | VConstructor { con; name; arity } ->
       if List.length args <> arity then
@@ -1141,11 +1172,16 @@ let fresh_validated_state ctx (Validated_state (owner, state, initial_graph) as 
 (** [run_state_capturing_trusted ctx state] captures like {!run_state_capturing} without scanning
     [state] first. The caller must have validated the immutable initial state and must only supply
     states derived from evaluator transitions; memo and native result guards remain active. *)
-let run_state_capturing_trusted ctx (state : state) : (capture, Runtime_err.t) result =
+let run_state_capturing_trusted ?(capture_root_handlers = false) ctx (state : state) :
+    (capture, Runtime_err.t) result =
   let saved = ctx.capture_ops in
+  let saved_root = ctx.capture_root_handlers in
   ctx.capture_ops <- true;
+  ctx.capture_root_handlers <- capture_root_handlers;
   Fun.protect
-    ~finally:(fun () -> ctx.capture_ops <- saved)
+    ~finally:(fun () ->
+      ctx.capture_ops <- saved;
+      ctx.capture_root_handlers <- saved_root)
     (fun () ->
       match run_state_unchecked ctx state with
       | v -> Ok (CValue v)
@@ -1219,6 +1255,48 @@ let run_state_capturing_once ctx state =
   | Ok (COp { op; name; args; kont = Once_kont (_, resume) }) ->
       Ok (OCOp { op; name; args; resume })
   | Error error -> Error error
+
+let run_state_capturing_once_routed ctx state =
+  match validate_state ctx state with
+  | Error error -> Error error
+  | Ok () -> (
+      match run_state_capturing_trusted ~capture_root_handlers:true ctx state with
+      | Ok (CValue value) -> Ok (OCValue value)
+      | Ok (COp { op; name; args; kont = Multi_kont (owner, kont) }) ->
+          Ok
+            (OCOp
+               {
+                 op;
+                 name;
+                 args;
+                 resume = VOnceResume (Once_state.create ~owner:owner.task_run kont);
+               })
+      | Ok (COp { op; name; args; kont = Once_kont (_, resume) }) ->
+          Ok (OCOp { op; name; args; resume })
+      | Error error -> Error error)
+
+let dispatch_root_operation ctx ~resume ~op ~name ~effect_ args =
+  let effect_ =
+    match locate ctx op with
+    | { Store.decl = { Kernel.it = Kernel.DefEffect { ename; _ }; _ }; role = Store.Operation _; _ }
+      ->
+        ename
+    | _ -> effect_
+  in
+  match Hashtbl.find_opt ctx.root_handlers op with
+  | None -> Error (Runtime_err.Unhandled { effect_; op = name })
+  | Some native -> (
+      try
+        let roots = [ VOp { op; name; effect_ }; VTuple args; resume ] in
+        List.iter (prepare_native_argument ctx) roots;
+        let result = native args in
+        List.iter (check_native_argument ctx) roots;
+        match result with
+        | Ok value ->
+            if not (atomic_non_task_value value) then reject_recovery_result_value ctx value;
+            Ok value
+        | Error error -> Error error
+      with Rt error -> Error error)
 
 (** [resume_captured_state ctx kont value] constructs the state that resumes a root capture. Multi
     continuations remain reusable; applying a Once token consumes its single budget and a later call

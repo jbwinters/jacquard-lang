@@ -206,3 +206,5 @@ let run () =
   test_bracket_cleans_normal_abort_and_exception ();
   test_dynamic_escape_graph_scan ();
   QCheck.Test.check_exn prop_recursive_close_restores_baseline
+
+let suite = [ Alcotest.test_case "nested ownership, cleanup, and escape" `Quick run ]

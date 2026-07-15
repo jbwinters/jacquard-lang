@@ -1,5 +1,6 @@
-SC.3 publishes TaskResult as ordinary data with interpreter/native parity, but
-keeps Task's carrier scheduler-private. Async has no ambient root handler yet.
+SC.3 publishes TaskResult as ordinary data with interpreter/native parity and
+keeps Task's carrier scheduler-private. SC.9 gives the default interpreter a
+deterministic structured scheduler for the exact frozen Async declaration.
 
   $ export JACQUARD_PRELUDE=../../prelude
   $ export JACQUARD_RUNTIME=../../runtime
@@ -27,13 +28,12 @@ checker path.
   private-task.jqd:LINE:SPAN: error[E0907]: the Task opaque carrier is scheduler-private and cannot be constructed by Jacquard code
     hint: Task handles are created only by async.spawn inside a structured scheduler scope
 
-Without a scheduler handler, Async fails cleanly instead of acquiring ambient
-authority or silently running a child.
+The default interpreted path now routes Async through that scheduler. This
+does not grant world authority and does not add native root scheduling.
 
   $ cat > yield.jqd <<'EOF'
   > (app (var async.yield))
   > EOF
   $ jacquard run yield.jqd 2>&1; echo "exit $?"
-  error[E0814]: this program requires the `async` effect, which is not granted (performed via `async.yield`)
-    hint: handle the effect in the program (this effect is pure and cannot be granted)
-  exit 3
+  ()
+  exit 0

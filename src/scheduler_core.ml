@@ -126,6 +126,20 @@ let spawn scheduler ~resume =
 let id scheduler handle =
   Result.map (fun (entry : (_, _) entry) -> entry.id) (validate scheduler handle)
 
+let task_run _capability scheduler = scheduler.run
+
+let task_value _capability scheduler handle =
+  Result.map (fun _ -> Value.VTask handle) (id scheduler handle)
+
+let task_handle _capability scheduler = function
+  | Value.VTask handle -> Result.map (fun _ -> handle) (id scheduler handle)
+  | _ ->
+      Error
+        [
+          Diag.error ~code:Concurrency_contract.task_escape_code
+            "Async operation expected an opaque Task handle";
+        ]
+
 let validate_run_handle scheduler handle = Task_handle.validate_run ~run:scheduler.run handle
 let inspect scheduler handle = Result.map view_of_entry (validate scheduler handle)
 

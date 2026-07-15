@@ -1,13 +1,13 @@
-# Structured Concurrency SC.8 Evidence
+# Structured Concurrency SC.9 Evidence
 
-Status: deterministic fail-fast-default and collect scope policies are
-implemented over the validated SC.7 cancellation and ownership layer. Terminal
-observations consume explicit scheduler decision numbers, sibling cancellation
-uses the SC.7 destruction boundary, and aggregate results preserve input order.
-This milestone intentionally contains no runnable-queue policy, host
-concurrency/I/O, or detached/root Async handler.
+Status: deterministic FIFO round-robin scheduling is implemented over the
+validated SC.8 scope-policy layer. The driver advances real evaluator states and
+affine continuations using only explicit queues and deterministic TaskIds; it
+preserves the SC.7 cancellation and lifecycle boundary and the SC.4 child-row
+law. This milestone contains no host scheduling, versioned replay, detached
+tasks, or native root scheduler.
 
-- Reconstruction base: `6321ce5`
+- Reconstruction base: `af7501c`
 - Evidence overlay: [MANIFEST.sha256](MANIFEST.sha256)
 - Authoritative contract: [concurrency.md](../../concurrency.md)
 
@@ -228,7 +228,7 @@ require explicit acquire/release handlers rather than language finalizers.
 `Scope_policy.create` registers an ordered same-scope child list and defaults to
 the frozen `Fail_fast` policy. Duplicate or foreign children fail before any
 observation. `record_terminal` requires a non-negative, strictly increasing
-scheduler decision number. Decision violations, unregistered same-scope
+lexicographic `(D46 decision, sub-observation ordinal)` pair. Decision violations, unregistered same-scope
 children, repeated terminal observations, and nonterminal observations produce
 exact E0908 diagnostics; foreign-run, foreign-scope, and stale handles retain
 the public E0907 ownership diagnostic. The controller consumes decisions; it
@@ -265,16 +265,125 @@ output stays in input order. The `scope-policy.t` transcript runs the same
 decision trace twice, byte-compares it, and pins both aggregate renderings.
 These tests use no host clock, thread, scheduler queue, or root handler.
 
+## Deterministic round-robin interpreter
+
+`Round_robin.run_state` owns an explicit FIFO handle queue and converts it to the
+exact TaskId list consumed by `Concurrency_contract.decide_round_robin` at every
+decision. It advances one real `Eval.state` to the next captured operation,
+return, or failure. Spawn assigns the next ID and queues child then parent;
+yield queues its task at the tail; live await removes the waiter until
+registration-ordered wakeup; cancellation requests are delivered only at SC.7
+boundaries. Root and nested scopes share one FIFO, decision sequence, trace,
+task/live high-water accounting, and configured task/decision bounds. Opening
+`async.scope` suspends the parent and appends the nested body behind every
+already-runnable task; nested completion requeues the parent. No recursive
+sub-scheduler resets ordering, counters, traces, or bounds. Spawn, await, yield,
+cancel, and every captured granted world operation route through
+`Structured_scope` before their action. Neither runnable discovery nor
+selection uses hash-table iteration, a host clock, a thread, or host randomness.
+
+Every scheduler invocation creates a fresh opaque Task owner, even on a reused
+evaluator context, and a private capability binds evaluator validation to the
+active run/scope. Recursive result validation rejects E0907 when a Task is
+reachable through a returned value or retained into a later run. Root dispatch
+snapshots the suspended affine resume alongside operation arguments and
+rechecks both plus the result after the callback.
+The external-client boundary cram compiles ordinary `Eval` and `Round_robin`
+uses against `public_cmi`, then proves `Concurrency_owner.create`,
+`Task_capability.runtime`, and `Task_handle.create_run` each fail because their
+installed-private module CMI is absent.
+Positive task and decision limits bound every run and close the lifecycle core
+on refusal. Fail-fast freezes the first decision-ordered `Failed` or
+`Cancelled`; collect never propagates sibling cancellation. Both aggregate in
+creation order. The cache key is the canonical program hash, scheduler version,
+policy, and both bounds. It stores only trace/decision/task-count proof; every
+lookup executes fresh, so no closure, continuation, value, or Task can alias
+across runs.
+
+The focused scheduler suite pins a real evaluator
+spawn/blocked-await/yield/cancel trace, multiple registration-ordered waiters,
+cancellation before a routed Console action, cross-scope FIFO interleaving,
+cumulative nested task/decision bounds and live high-water accounting, E0907
+Task escape, exact bound diagnostics, zero post-close recursive metrics, and
+cache miss/hit equality, including an independent `max_decisions` miss. It also
+pins same-context stale-run rejection, hostile mutation of a suspended Once
+resume, real failing-child fail-fast/collect, and stable same-decision terminal
+ordinals. Its 128-case property changes the host random seed and
+proves the same decisions and bytes as an unseeded rerun. The `round-robin.t`
+transcript repeats a fresh process 128 times, byte-compares every trace, pins the
+exact cross-scope trace and cumulative counters, runs real CLI Async programs,
+and runs a Warp Case containing a nested Async lifecycle. The dedicated
+concurrency lane also runs the prior child-row, cancellation, ownership, and
+policy suites.
+
+The hostile-case coverage matrix is intentionally split at the checker/runtime
+boundary:
+
+| case | checked Warp Case | real runtime integration |
+|---|---:|---:|
+| nested spawn/await | yes, `async-case` | yes |
+| yield and affine continuation resumption | yes, `async-yield-case` | yes |
+| cancel then await `Cancelled` | yes, `async-cancel-case` | yes |
+| fail-fast selection of a cancelled child | yes, `async-fail-fast-case` | yes |
+| cancellation before routed Console work | yes, granted `async-routed-cancel` with empty output | yes |
+| child-row authority | closed Case is rejected with E0801 retaining `net` | SC.4 row tests |
+| Task escape | top-level CLI fixture is rejected with E0907; a Case cannot return `Task` as `Check` | yes |
+| task/decision bounds | no per-Case bounds API in C1 | yes, exact task and global nested-decision refusals |
+| failing child under fail-fast and collect | no: the hostile fixture is deliberately ill-typed | yes |
+| self-cancel | no: C1 has no `async.current-task` handle | yes, through `Structured_scope.cancel` |
+| hostile root mutation of a suspended Once resume | no: host callback attack | yes |
+
+Warp Props remain data properties over the single C1 FIFO schedule; they do not
+claim schedule exploration.
+
+## Compiled test discovery
+
+The lifecycle evidence is registered directly in the compiled Alcotest
+inventory rather than hidden inside the effect-taxonomy governance case. The
+five independently selectable groups and their case names are:
+
+| group | compiled case |
+|---|---|
+| `scheduler-core` | `lifecycle, waits, cycles, and ownership` |
+| `structured-scope` | `nested ownership, cleanup, and escape` |
+| `cancellation` | `cooperative boundary delivery` |
+| `scope-policy` | `fail-fast and collect aggregation` |
+| `round-robin` | `real evaluator FIFO lifecycle` |
+
+The exact discovery and focused execution commands are:
+
+```sh
+opam exec -- dune build test/test_jacquard.exe
+(
+  cd _build/default/test
+  ./test_jacquard.exe list --color=never 2>/dev/null |
+    grep -E '^(scheduler-core|structured-scope|cancellation|scope-policy|round-robin) '
+  ./test_jacquard.exe test \
+    'scheduler-core|structured-scope|cancellation|scope-policy|round-robin' \
+    --compact --color=never
+)
+```
+
+The compiled inventory is exactly 578 cases and the source inventory is 35
+cram transcripts. `effect-taxonomy/3` retains only taxonomy governance and hash
+checks, so the five lifecycle suites execute exactly once during the full gate.
+
+Native scheduling remains outside the current backend. Differential coverage is
+therefore limited to the supported case: an Async operation discharged by an
+in-language handler produces byte-identical interpreter/native output. No Task
+carrier, native runnable queue, performance work, or unsupported root Async
+grant was added.
+
 ## Reconstruction and verification
 
-The manifest is the complete SC.8 successor overlay on validated SC.7
-integration commit `6321ce5`. Reconstruct it under repository-local scratch
+The manifest is the complete SC.9 successor overlay on validated SC.8 commit
+`af7501c`. Reconstruct it under repository-local scratch
 space:
 
 ```sh
 set -eu
-base=6321ce5
-dest="$PWD/.scratch/sc8-evidence-copy"
+base=af7501c
+dest="$PWD/.scratch/sc9-evidence-copy"
 manifest=docs/release/structured-concurrency/MANIFEST.sha256
 rm -rf "$dest"
 mkdir -p "$dest"
@@ -316,8 +425,11 @@ snapshot_source | cmp "$snapshot" -
 opam exec -- dune build @doc --root "$dest"
 ```
 
-Runnable-queue policy and the Async root handler remain later C1 tasks. SC.8
-supplies policy aggregation over explicit terminal decisions, but it does not
-choose a next continuation or install the compile-only `async.scope` fixture as
-a root handler. SC.4 continues to supply the static child-effect law, including
-the law that a scope discharges only Async and retains child world effects.
+The default interpreted CLI, prelude-evaluation, and Warp Case paths use this
+scheduler. `async.scope` is a trusted internal term marker, not a fifth Async
+operation, and opens a real nested `Structured_scope`; all four frozen operation
+hashes remain unchanged. Raw `Eval.run_expr` remains a low-level unscheduled
+seam. SC.4 continues to supply the static child-effect law: a scope discharges
+only Async and retains child world effects. Native root scheduling remains
+future work; native parity evidence is labeled only for Async discharged by an
+in-language handler.
