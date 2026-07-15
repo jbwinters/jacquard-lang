@@ -484,7 +484,26 @@ has already happened and cannot be rolled back by a log handler. Irreversible
 drivers must return a receipt or idempotency key in `OutcomeSummary` so an
 operator can reconcile the external action with the audit stream. The handler
 does not retry implicitly: a retry could duplicate an append after an ambiguous
-sink failure. ET.3 adds hash chaining over these same canonical entry forms.
+sink failure.
+
+ET.3's `audit-chain-v1` carrier commits each existing `audit-entry-v1` form to
+its predecessor HASH_V0 and publishes a new head. The chain uses
+`audit.entry-code`'s compact canonical bytes directly; there is no parallel
+AuditEntry serializer. The fixed empty head and exact domain-separated digest
+contract are specified in [`effect-taxonomy.md`](effect-taxonomy.md).
+
+`jacquard audit genesis` prints the empty head. A single writer uses
+`jacquard audit append LOG ENTRY --previous HASH`, persists the returned head
+independently, and passes that head to
+`jacquard governance verify-log LOG --head HASH` for offline review. The
+append command takes a nonblocking advisory whole-file lock and performs its
+bounded read, verification, final pathname-identity check, and append through
+one open file description; replacement or concurrent-change races fail with
+E1306 rather than redirecting the record to a new pathname target. The
+verifier rejects reorder, removal, alteration, duplication, wrong versions, and
+malformed or noncanonical records with diagnostics. Because a chain cannot by
+itself reveal removal of a valid suffix, the independently published head is a
+required part of the verification contract.
 
 ### debug.inspect
 

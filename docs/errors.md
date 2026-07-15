@@ -194,6 +194,24 @@ are available to later islands through analysis-local names and schemes without
 installing declarations in the store. Type and effect declarations are checked in
 isolation; references to them from later islands require strict installation first.
 
+## Audit chain (E13xx)
+
+| code | meaning | example |
+|------|---------|---------|
+| E1301 | malformed or noncanonical Audit chain carrier | a blank line, alternate whitespace, or missing final LF |
+| E1302 | unsupported chain version or malformed released AuditEntry | `audit-chain-v2` or a non-v1 entry shape |
+| E1303 | broken predecessor linkage | reordered, removed, or duplicated records |
+| E1304 | stored digest does not match the predecessor and entry bytes | altering one entry byte without recomputing the record digest |
+| E1305 | reconstructed chain head differs from the independently published head | removing the final record or appending from a stale head |
+| E1306 | Audit chain I/O failure, size refusal, or concurrent file change | an unreadable/over-limit entry, a log truncated while being read, or its pathname replaced during append |
+| E1307 | malformed CLI Audit head | `--head beef` instead of 64 lowercase hexadecimal digits |
+
+`jacquard governance verify-log LOG --head HASH` verifies offline and fails
+closed. It accepts only LF-terminated canonical `audit-chain-v1` records, checks
+every predecessor and digest in order, then compares the reconstruction with the
+separately supplied published head. Malformed input returns diagnostics; it does
+not raise an exception.
+
 ## Appendix: the W5.3 audit (ten message rewrites)
 
 Before/after wording improvements applied during the audit:

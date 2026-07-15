@@ -305,13 +305,48 @@ Semantic diff applies this rendering only to a resolved effect row in the row
 position of a typed arrow. Type-shaped forms below `quote` remain ordinary code
 data and receive structural diffs, never an authority label.
 
+### Audit chain v1
+
+D58 is implemented by the single canonical carrier
+`(audit-chain-v1 #PREVIOUS #DIGEST ENTRY)`, one compact form plus LF per record.
+`ENTRY` is the existing `audit-entry-v1` form produced by `audit.entry-code`;
+the chain layer does not define a second AuditEntry serializer. The fixed empty
+head is
+`5a8760f8a958799a0e38154fae7cc086d9a1ee0153ff62451ac1a07f7b0b50d7`.
+
+For each record, `DIGEST` is HASH_V0 over the domain bytes
+`jacquard-audit-chain-v1\0`, the predecessor's 32 raw HASH_V0 bytes, and the
+compact canonical bytes of `ENTRY`. The chain version and domain are frozen
+together; alternate versions fail closed rather than falling through to the v1
+verifier.
+
+`jacquard audit append LOG ENTRY --previous HASH` first reconstructs `LOG`
+against the caller's independently held previous head, appends one record, and
+prints the new publishable head. It is a single-writer interface: callers must
+serialize competing appenders. Append also takes a nonblocking advisory
+whole-file lock, then verifies and writes through the same open file
+description. Immediately before writing it rechecks that the pathname still
+identifies that regular file. This lock is a fail-closed race check, not a
+multi-writer protocol. `jacquard governance verify-log LOG --head HASH`
+performs offline verification and rejects malformed or noncanonical records,
+wrong versions, broken predecessors, digest mismatches, and a reconstructed
+head different from the independently published head. The final comparison is
+what detects removal of a valid tail.
+
+Library and CLI reads use one bounded fail-closed path: chain logs are limited
+to 16 MiB and entry inputs to 1 MiB. A read verifies that the regular file's
+descriptor and path identity, size, mtime, and ctime stay stable through EOF.
+Concurrent truncation, growth, replacement, over-limit input, and expected I/O
+failures produce E1306 before any record write. A pathname replacement never
+receives a record intended for the verified inode.
+
 ## 7. Indexed decisions
 
 | ID | decision | ratified result |
 |---|---|---|
 | D56 | taxonomy freeze v1 | §3 and the TSV artifact; resolved identities govern, additions use new hashes |
 | D57 | Secret opacity | opaque, no `Show`, inspect redacts, explicit in-row `secret.expose`; taint deferred |
-| D58 | audit chain | canonical handler hash-chains entries, publishes a head, and supports offline verification |
+| D58 | audit chain | implemented `audit-chain-v1` carrier commits existing canonical entry bytes and predecessor HASH_V0; CLI append publishes a head and governance verification fails closed offline |
 | D59 | Proposal schema | subject hash and authority are mandatory; hash-less proposals are ill-formed |
 | D60 | membrane placement | ring 3 governance module plus cookbook and flagship demo, implemented in later phases |
 | D61 | facade shape | domain-specific typed facade effects; no universal stringly `Tool.call` |

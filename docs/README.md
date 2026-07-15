@@ -70,6 +70,10 @@ Read these together when judging whether the release candidate is credible:
 
 - `release/effect-taxonomy/EVIDENCE.md`: ET.2 released Audit identity, canonical
   entry encoding, append handler contracts, failure limits, and reproduction.
+- `release/effect-taxonomy/ET3-EVIDENCE.md`: ET.3 canonical hash-chain carrier,
+  published-head contract, offline mutation verification, and reproduction.
+- `release/effect-taxonomy/ET3-MANIFEST.sha256`: reconstructible ET.3 overlay on
+  the validated ET.2 base; the ET.2 manifest remains unchanged.
 
 ## Maintenance Notes
 
