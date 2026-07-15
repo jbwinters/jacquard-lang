@@ -277,6 +277,8 @@ let test_once_resume_immediate_transformer () =
           bare));
   expect_escape "effectful immediate argument"
     (direct good_body "(app (var print) (lit \"not a value\"))");
+  expect_escape "effectful argument keeps malformed outer call outside the transformer boundary"
+    (direct good_body "(app (var print) (lit \"not a value\")) (tuple)");
   expect_escape "live-splice quote argument"
     (with_once_transformer
        (Printf.sprintf

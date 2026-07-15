@@ -14,7 +14,7 @@ assertion. Counts become printed values via in-language collectors
 | test_multishot_choose | g01-choose-tuple.jqd | resume twice, both branches collected in order |
 | test_multishot_thrice | g02-thrice.jqd | same resumption applied three times |
 | test_multishot_deep_inner_effect_exact_count | g03-deep-inner-count.jqd | exact emit count 2: deep handler covers both resumed extents |
-| test_state_effect | g04-state-run.jqd | state.run threads get/put; pure body keeps init |
+| test_state_effect / EL.3 branch independence | g04-state-run.jqd | Multi fault branches each run state.run from fresh state 0; leaked state would change branch two from (2, 2) to (3, 3) |
 | test_abort_short_circuits | g05-abort-short-circuit.jqd | pending (add 1 _) abandoned |
 | test_deep_second_perform | g06-deep-second-perform.jqd | one deep handler covers two sequential performs |
 | test_forwarding | g07-forwarding.jqd | non-matching inner handler forwards outward |

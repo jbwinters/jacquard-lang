@@ -17,7 +17,8 @@ visible to the checker and tools:
 - Definitions are content-addressed from canonical resolved structure after
   comments, formatting, spans, provenance, and ordinary local or term names
   are erased. This structural identity is not arbitrary program equivalence.
-- Handlers are deep and resumptions are reusable, including multi-shot use.
+- Handlers are deep. `multi` operations bind reusable continuations; `once`
+  operations bind affine `Resume` values with static and runtime reuse checks.
 
 This file is self-contained for public use. A repository checkout is needed
 only to develop the OCaml implementation, not to install or write Jacquard.
@@ -297,7 +298,7 @@ Labels document constructor fields but do not create record syntax, labeled
 patterns, or generated accessors. Construct values with `Canary(5)` and match
 positionally with `Canary(percent)`.
 
-### Effects And Deep Multi-Shot Handlers
+### Effects And Deep Mode-Aware Handlers
 
 Effects declare operations. Calling an operation looks like an ordinary call;
 there is no `perform` keyword.
@@ -312,9 +313,15 @@ once effect Abort a where {
 }
 ```
 
-A handler has one mandatory return clause and operation clauses. `resume`
-binds the captured continuation as an ordinary function. Calling it zero times
-aborts that path, once resumes normally, and more than once forks execution.
+A handler has one mandatory return clause and operation clauses. For a `multi`
+operation, `resume` binds a reusable continuation: calling it zero times aborts
+that path, once resumes normally, and more than once forks execution. For a
+`once` operation, it binds an affine `Resume` that may be dropped or consumed
+once on each possible execution path. The bounded syntactic affine analysis
+reports E0816 for a possible double consumption and E0817 for an unsupported
+escape; it is engineering enforcement, not a formal proof. The interpreter and
+native runtime independently report E0906 if one captured `once` instance is
+resumed twice.
 
 ```jacquard
 all-choices(body) =
@@ -622,8 +629,10 @@ jac build program.jqd -o program
 ./program --allow console --seed 42
 ```
 
-The backend supports deep and multi-shot handlers, Dist, quotes, splices, and
-structural Code operations. Dynamic `eval` is interpreter-only and reports
+The backend supports deep handlers with both reusable `multi` continuations and
+affine `once` resumptions, including the E0906 repeated-resume backstop. It also
+supports Dist, quotes, splices, and structural Code operations. Dynamic `eval`
+is interpreter-only and reports
 E1102 when compiled. `--dry-run` and `--infer-cache` are interpreter tooling
 and compiled binaries refuse them. A C toolchain is required. Deep non-tail
 recursion uses the configured program stack; set `JACQUARD_STACK_MB` if needed.

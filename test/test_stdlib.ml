@@ -377,7 +377,19 @@ let prop_state_laws =
 let test_state_pure_body () =
   Alcotest.(check string)
     "pure body leaves state alone" "(3, 17)"
-    (show "(app (var state.run) (lam () (lit 3)) (lit 17))")
+    (show "(app (var state.run) (lam () (lit 3)) (lit 17))");
+  (* Fault is Multi and encloses State. Both resumed branches start from state 0,
+     then add their branch-specific delta. If the first branch's final state 1
+     leaked into the second, the second result would be (3, 3), not (2, 2). *)
+  Alcotest.(check string)
+    "multi branches receive independent state" "cons((1, 1), cons((2, 2), nil))"
+    (show
+       "(handle (handle (app (var fault.all) (lam () (app (var state.run) (lam () (let nonrec \
+        (pvar delta) (match (app (var flaky) (lit \"state-branch\")) (clause (pcon false) (lit 1)) \
+        (clause (pcon true) (lit 2))) (let nonrec (pwild) (app (var put) (app (var add) (app (var \
+        get)) (var delta))) (app (var get))))) (lit 0))) (lit 4)) (ret (pvar xs) (var xs)) \
+        (opclause check ((pwild) (pwild)) k (app (var k) (tuple))) (opclause fail ((pwild)) k (var \
+        nil))) (ret (pvar xs) (var xs)) (opclause throw ((pwild)) k (var nil)))")
 
 let prop_emit_collect_order =
   qtest ~count:200 "emit.collect is chronological" ints_arb (fun xs ->

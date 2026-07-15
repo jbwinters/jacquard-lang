@@ -32,6 +32,27 @@ let reviewed_modes () =
             | _ -> Alcotest.failf "malformed reviewed operation name %s" qualified)
         | _ -> Alcotest.failf "malformed reviewed operation-mode row %s" line)
 
+let mode_name = function Kernel.Once -> "once" | Kernel.Multi -> "multi"
+
+let prelude_source_modes () =
+  Corpus_support.jqd_files "../prelude"
+  |> List.concat_map (fun file ->
+      let path = Filename.concat "../prelude" file in
+      let tops =
+        match Corpus_support.bootstrap_tops ~file:path (Corpus_support.read_file path) with
+        | Ok tops -> tops
+        | Error (_, diagnostics) ->
+            Eval_support.fail_diags ("parse prelude operation inventory " ^ file) diagnostics
+      in
+      tops
+      |> List.concat_map (function
+        | Kernel.Decl { it = Kernel.DefEffect { ename; ops; _ }; _ } ->
+            List.map
+              (fun (operation : Kernel.opspec) ->
+                { effect_name = ename; op_name = operation.op_name; mode = operation.op_mode })
+              ops
+        | Kernel.Decl _ | Kernel.Expr _ -> []))
+
 let operation_inventory store =
   let one_effect effect_name =
     match Store.lookup_kind store effect_name Resolve.KEffect with
@@ -95,38 +116,14 @@ let test_retained_multi_hashes store =
 
 let test_reviewed_operation_modes store =
   let reviewed = reviewed_modes () in
-  let declared =
-    [
-      "eval";
-      "abort";
-      "throw";
-      "state";
-      "emit";
-      "console";
-      "clock";
-      "net";
-      "fs";
-      "infer";
-      "dist";
-      "check";
-      "fault";
-    ]
-    |> List.concat_map (fun effect_name ->
-        match Store.lookup_kind store effect_name Resolve.KEffect with
-        | None -> Alcotest.failf "blessed effect %s is absent" effect_name
-        | Some { Resolve.hash; _ } -> (
-            match Store.locate store hash with
-            | Ok { Store.decl = { Kernel.it = Kernel.DefEffect { ops; _ }; _ }; _ } ->
-                List.map (fun (op : Kernel.opspec) -> effect_name ^ "." ^ op.op_name) ops
-            | _ -> Alcotest.failf "blessed effect %s is malformed" effect_name))
-    |> List.sort String.compare
+  let row ({ effect_name; op_name; mode } : reviewed_mode) =
+    Printf.sprintf "%s.%s %s" effect_name op_name (mode_name mode)
   in
-  let frozen =
-    reviewed
-    |> List.map (fun row -> row.effect_name ^ "." ^ row.op_name)
-    |> List.sort String.compare
-  in
-  Alcotest.(check (list string)) "reviewed inventory is complete" declared frozen;
+  let declared = prelude_source_modes () |> List.map row |> List.sort String.compare in
+  let frozen = reviewed |> List.map row |> List.sort String.compare in
+  Alcotest.(check int) "current prelude operation inventory size" 20 (List.length declared);
+  Alcotest.(check (list string))
+    "every operation from every prelude DefEffect has an exact reviewed mode" declared frozen;
   test_retained_multi_hashes store;
   let ctx = Eval.make_ctx store in
   operation_inventory store

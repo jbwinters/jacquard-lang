@@ -37,9 +37,13 @@ operation-clause lambda is treated as constructed and called once; its body is
 then checked by the same affine walk. Tests pin the canonical function-of-state
 handler and reject a handler result that is bound, returned, stored, passed,
 aliased or applied twice, an effectful argument, a further lambda/quote/data or
-nested-clause capture, and two consumptions inside the transformer. Malformed
-outer and resumption calls still receive E0803, and ordinary argument mismatch
-still receives E0801. Existing State and Check programs remain accepted.
+nested-clause capture, and two consumptions inside the transformer. For calls
+whose arguments all satisfy the immediate-transformer syntactic-value boundary,
+malformed outer and resumption calls still receive E0803, and ordinary argument
+mismatch still receives E0801. An effectful or otherwise non-value argument
+intentionally prevents the exception from applying, so its captured `Resume`
+receives E0817 even when the outer call is also malformed. Existing State and
+Check programs remain accepted.
 
 Escape checking precedes ordinary inference, but duplicate checking follows a
 successful inference and clause-result unification. E0817 therefore remains a
@@ -66,14 +70,17 @@ paths.
 
 ## D44 frozen prelude modes
 
-`prelude/operation-modes.manifest` reviews all 20 blessed operations without
-driving implementation behavior. Thirteen are Once: Eval, Abort, Throw, Emit,
-Console, Clock, Net, Fs, and Infer operations. Seven are Multi: State and Warp
-Check's pure continuation-capture operations, Dist's two search operations,
-and Fault's world-exploration operation. The test inventory must match the prelude exactly, so a new blessed
-operation cannot inherit a mode by name or omission without failing review.
-Future resource, governance, Async, and Channel operations are required to be
-Once; future Choose/search operations are Multi.
+`prelude/operation-modes.manifest` reviews all 20 operations without driving
+implementation behavior. The completeness test parses every `DefEffect` in
+every loaded `prelude/*.jqd` source and compares its complete qualified-name and
+mode inventory to the manifest; it has no effect-name allowlist. Thirteen are
+Once: Eval, Abort, Throw, Emit, Console, Clock, Net, Fs, and Infer operations.
+Seven are Multi: State and Warp Check's pure continuation-capture operations,
+Dist's two search operations, and Fault's world-exploration operation. The test
+inventory must match the prelude exactly, so a new operation cannot inherit a
+mode by name or omission without failing review. Future resource, governance,
+Async, and Channel operations are required to be Once; future Choose/search
+operations are Multi.
 
 The pure State/Check exceptions preserve D43 rather than weaken it. Stateful
 world fixtures (`infer.scripted`, record/replay, scripted Net/Console, and the
@@ -87,6 +94,12 @@ further closure/quote/data/nested-clause escape remain E0817. A forced checker
 sweep covers every exported prelude term; exact signature assertions cover all
 seven transformers, and a behavior witness proves caller `State` remains
 outward rather than being swallowed by the world fixture.
+
+State branch independence is pinned in the interpreter and native differential
+lanes by placing `state.run` inside Multi `fault.all`. Each branch starts from
+state `0` and adds its own delta (`1` or `2`), yielding
+`cons((1, 1), cons((2, 2), nil))`; leaked state from the first branch would make
+the second pair `(3, 3)`.
 
 The effect declaration hash is the interface hash: it covers the full ordered
 operation signatures and their modes; operation member hashes are derived from

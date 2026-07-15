@@ -66,6 +66,9 @@ the diff-only loop above:
   $ jacquard build ../../test/native-gauntlet/g01-choose-tuple.jqd -o choose > /dev/null
   $ ./choose
   cons(1, cons(2, nil))
+  $ jacquard build ../../test/native-gauntlet/g04-state-run.jqd -o state-branches > /dev/null
+  $ ./state-branches
+  cons((1, 1), cons((2, 2), nil))
   $ jacquard build ../../test/native-gauntlet/g19-escaped-resume.jqd -o escaped > /dev/null
   $ ./escaped
   (done(2), done(3))

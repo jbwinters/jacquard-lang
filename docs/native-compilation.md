@@ -31,6 +31,14 @@ The effect row is a static cost model. Compile each arrow by its row:
   their cost is the branch count anyway — the clone is a constant factor on
   work that is exponential by design.
 
+These tiers do not make every captured continuation reusable. A `Multi`
+operation binds the ordinary reusable continuation described by the priced
+tier. A `Once` operation binds an affine `Resume`; the checker rejects a
+possible double consumption with E0816 and the interpreter/native runtimes trap
+a repeated resume of one captured instance with E0906. The affine checker is a
+bounded syntactic discipline, not a formal soundness proof, so the runtime
+backstop is part of the contract.
+
 Jacquard-specific detail: the checker's row model (set-semantics heads, closed/var
 tails, open coercion at App) already computes the tier at every call site. The
 tier assignment is exactly `repr_row`'s answer at generalization time; no new
@@ -297,8 +305,8 @@ experiment; the case follows from the runtime's structure. RC on top of a
 tracing host GC double-pays: OCaml reclaims every value regardless, so
 headers and dup/drop insertion are purely additive overhead. The pillar's
 actual win is in-place reuse, and reuse requires trusting a count of one —
-but frames-as-data means a captured resumption shares its environments
-across resumes, so every value reachable from a captured continuation must
+but frames-as-data means a captured Multi resumption shares its environments
+across resumes, so every value reachable from that reusable continuation must
 be dup'd conservatively at capture time. That forfeits reuse in exactly the
 handler-dense code this tree exists to run, and phase 2's measurement
 already established that engine-level constant work inside the interpreter
