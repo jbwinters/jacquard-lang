@@ -178,25 +178,112 @@ let test_operation_name_table () =
     unresolved
 
 let test_authority_refusal_table () =
+  let net = Hash.to_hex (lookup "net" Resolve.KEffect) in
+  let secret = Hash.to_hex (lookup "secret" Resolve.KEffect) in
+  let order_key identity =
+    show (Printf.sprintf "(app (var governance.effect-order-key) %s)" (hash identity))
+  in
+  let unknown_a_key = order_key hash_a in
+  let unknown_b_key = order_key hash_b in
+  List.iteri
+    (fun position (entry : Effect_registry.metadata) ->
+      match entry.interface with
+      | Effect_registry.Released { hash = identity; _ } ->
+          let hex = Hash.to_hex identity in
+          let expected = qtext (Printf.sprintf "0:%08d:%s" position hex) in
+          let actual = order_key hex in
+          Alcotest.(check string)
+            (Printf.sprintf "%s exact frozen order key" entry.display_name)
+            expected actual;
+          Alcotest.(check bool)
+            (Printf.sprintf "%s sorts before unknown fallback" entry.display_name)
+            true
+            (String.compare actual unknown_a_key < 0)
+      | Effect_registry.Reserved _ -> ())
+    Effect_registry.catalog;
+  Alcotest.(check string)
+    "unknown fallback key is canonical and deterministic"
+    (qtext ("1:" ^ hash_a))
+    unknown_a_key;
+  Alcotest.(check bool)
+    "unknown fallback retains hash order" true
+    (String.compare unknown_a_key unknown_b_key < 0);
+  let validate value = show (Printf.sprintf "(app (var governance.validate-authority) %s)" value) in
+  let strict_order_error =
+    "err(\"invalid Authority: entries must be in strict canonical order without duplicates\")"
+  in
   let malformed =
     [
-      ("resource without effect", list [ resource () ]);
-      ("empty resource scope", list [ authority_effect (); resource ~scope:"" () ]);
-      ("duplicate effect", list [ authority_effect (); authority_effect () ]);
-      ("noncanonical order", list [ authority_effect ~id:hash_b (); authority_effect ~id:hash_a () ]);
+      ( "resource without effect",
+        "err(\"invalid Authority: Resource must refine a preceding Effect\")",
+        list [ resource () ] );
+      ( "resource for a different preceding effect",
+        "err(\"invalid Authority: Resource must refine a preceding Effect\")",
+        list [ authority_effect (); resource ~effect_id:hash_b () ] );
+      ( "empty resource scope",
+        "err(\"invalid Authority: Resource scope is empty\")",
+        list [ authority_effect (); resource ~scope:"" () ] );
+      ("duplicate effect", strict_order_error, list [ authority_effect (); authority_effect () ]);
+      ( "duplicate resource",
+        strict_order_error,
+        list [ authority_effect (); resource (); resource () ] );
+      ( "unknown effect reverse order",
+        strict_order_error,
+        list [ authority_effect ~id:hash_b (); authority_effect ~id:hash_a () ] );
+      ( "reversed blessed taxonomy order",
+        strict_order_error,
+        list [ authority_effect ~id:secret (); authority_effect ~id:net () ] );
+      ( "resource scope reverse order",
+        strict_order_error,
+        list [ authority_effect (); resource ~scope:"scope/b" (); resource ~scope:"scope/a" () ] );
+      ( "resource delimiter-prefix reverse order",
+        strict_order_error,
+        list
+          [
+            authority_effect ();
+            resource ~scope:"a::" ();
+            resource ~scope:"a:" ();
+            resource ~scope:"a" ();
+          ] );
+      ( "resource configuration reverse order",
+        strict_order_error,
+        list
+          [
+            authority_effect ();
+            resource ~scope:"scope/a" ~configuration:hash_b ();
+            resource ~scope:"scope/a" ~configuration:hash_a ();
+          ] );
     ]
   in
   List.iter
-    (fun (label, value) ->
-      Alcotest.(check bool)
-        label true
-        (String.starts_with ~prefix:"err("
-           (show (Printf.sprintf "(app (var governance.validate-authority) %s)" value))))
+    (fun (label, expected, value) -> Alcotest.(check string) label expected (validate value))
     malformed;
   Alcotest.(check bool)
     "canonical envelope accepted" true
+    (String.starts_with ~prefix:"ok(" (validate authority));
+  Alcotest.(check bool)
+    "Net then Secret follows frozen taxonomy order" true
     (String.starts_with ~prefix:"ok("
-       (show (Printf.sprintf "(app (var governance.validate-authority) %s)" authority)))
+       (validate (list [ authority_effect ~id:net (); authority_effect ~id:secret () ])));
+  Alcotest.(check bool)
+    "unknown fallback accepts ascending hashes" true
+    (String.starts_with ~prefix:"ok("
+       (validate (list [ authority_effect (); authority_effect ~id:hash_b () ])));
+  Alcotest.(check bool)
+    "Resource entries are adjacent and bytewise ordered across prefix/delimiter scopes then \
+     configuration"
+    true
+    (String.starts_with ~prefix:"ok("
+       (validate
+          (list
+             [
+               authority_effect ();
+               resource ~scope:"a" ~configuration:hash_a ();
+               resource ~scope:"a" ~configuration:hash_b ();
+               resource ~scope:"a:" ~configuration:hash_a ();
+               resource ~scope:"a::" ~configuration:hash_a ();
+               authority_effect ~id:hash_b ();
+             ])))
 
 let call_id call =
   show

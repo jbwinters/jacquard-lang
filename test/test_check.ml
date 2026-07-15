@@ -816,7 +816,7 @@ let test_manifest_uses_resolved_effect_identity () =
 
 let test_manifest_renders_blessed_risk () =
   let handle = make_cctx () in
-  match check_src handle "(app (var net.get) (lit \"https://example.com\"))" with
+  (match check_src handle "(app (var net.get) (lit \"https://example.com\"))" with
   | Ok { Check.row = Some row; _ } ->
       let text = manifest_text handle row in
       Alcotest.(check bool) "blessed tier and risk" true (contains text "net [world/high]");
@@ -824,7 +824,22 @@ let test_manifest_renders_blessed_risk () =
         "blessed reviewer meaning" true
         (contains text "reach a network endpoint through the granted handler")
   | Ok _ -> Alcotest.fail "Net expression had no manifest"
-  | Error diagnostics -> Eval_support.fail_diags "Net manifest" diagnostics
+  | Error diagnostics -> Eval_support.fail_diags "Net manifest" diagnostics);
+  let workspace = make_cctx () in
+  match
+    check_src workspace "(app (var workspace.read-file) (app (var path-value) (lit \"README.md\")))"
+  with
+  | Ok { Check.row = Some row; _ } ->
+      Alcotest.(check string)
+        "Workspace is a handled facade, not a pure or root-grantable effect"
+        "error[E0814]: this program requires workspace [world/high] — request mediated workspace \
+         reads, writes, or fetches without directly acquiring raw authority, which is not granted \
+         (performed via `workspace.read-file`)\n\
+        \  hint: handle Workspace in the program (Workspace is a world facade and is not \
+         root-grantable)"
+        (manifest_text workspace row)
+  | Ok _ -> Alcotest.fail "Workspace expression had no manifest"
+  | Error diagnostics -> Eval_support.fail_diags "Workspace manifest" diagnostics
 
 let test_show_row_preserves_same_name_identities () =
   let store, ctx = make_cctx () in

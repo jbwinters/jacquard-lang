@@ -162,6 +162,10 @@ let catalog =
     released "Net" "net" World High
       "be1aad7345c6215f227e63df6c7d05874a464f207599d4f5b85de8b0a6675b45"
       "reach a network endpoint through the granted handler";
+    released "Workspace" "workspace" World High
+      "d5831f495fdb26e05d53d886786f07230f7bb808ac4933ab32e0a9238c89f9d0"
+      "request mediated workspace reads, writes, or fetches without directly acquiring raw \
+       authority";
     reserved "Pg" "pg" World High "issue a parameterized PostgreSQL query";
     reserved "Blob" "blob" World High "read or add immutable objects in configured blob storage";
     reserved "Serve" "serve" World High "receive and answer server requests";
@@ -210,6 +214,16 @@ let find registry identity =
     registry
 
 let find_canonical identity = find canonical identity
+
+let canonical_order identity =
+  let rec find position = function
+    | [] -> None
+    | metadata :: rest -> (
+        match metadata.interface with
+        | Released { hash; _ } when Hash.equal identity hash -> Some position
+        | Released _ | Reserved _ -> find (position + 1) rest)
+  in
+  find 0 catalog
 
 type style = Plain | Ansi
 

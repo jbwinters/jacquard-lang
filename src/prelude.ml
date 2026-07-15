@@ -89,6 +89,10 @@ let load ~dir store : ((string * Canon.decl_hashes list) list, Diag.t list) resu
           let* () = bind_operation_alias "secret" "read" "secret.read" in
           let* () = bind_operation_alias "secret" "expose" "secret.expose" in
           let* () = bind_operation_alias "fs" "read" "read" in
+          let* () = bind_operation_alias "workspace" "read-file" "workspace.read-file" in
+          let* () = bind_operation_alias "workspace" "write-file" "workspace.write-file" in
+          let* () = bind_operation_alias "workspace" "fetch" "workspace.fetch" in
+          let* () = bind_operation_alias "net" "fetch" "fetch" in
           Ok (List.rev acc)
       | file :: rest -> (
           match load_file file with
@@ -479,7 +483,18 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
                                (Printf.sprintf
                                   "invalid Call: effect `%s` has no exact resolved declaration"
                                   effect_name)))))
-          | args -> type_err "governance.resolve-operation-id" args)
+          | args -> type_err "governance.resolve-operation-id" args);
+      optional "governance.effect-order-key" (fun args ->
+          match args with
+          | [ Value.VHash identity ] ->
+              let hex = Hash.to_hex identity in
+              let key =
+                match Effect_registry.canonical_order identity with
+                | Some position -> Printf.sprintf "0:%08d:%s" position hex
+                | None -> "1:" ^ hex
+              in
+              Ok (Value.VText key)
+          | args -> type_err "governance.effect-order-key" args)
   | _ -> ());
   (match
      (lookup_hash store ~kind:Resolve.KCon "some", lookup_hash store ~kind:Resolve.KCon "none")
@@ -1145,9 +1160,13 @@ let builtin_signatures (store : Store.t) : ((Hash.t * Types.scheme) list, Diag.t
             ]
         in
         let governance_sigs =
-          match lookup_hash store ~kind:Resolve.KTerm "governance.resolve-operation-id" with
-          | Ok h -> [ (h, fn [ text ] (result text hash)) ]
-          | Error _ -> []
+          let optional_sig name signature =
+            match lookup_hash store ~kind:Resolve.KTerm name with
+            | Ok hash -> [ (hash, signature) ]
+            | Error _ -> []
+          in
+          optional_sig "governance.resolve-operation-id" (fn [ text ] (result text hash))
+          @ optional_sig "governance.effect-order-key" (fn [ hash ] text)
         in
         Ok (base @ code_sigs @ governance_sigs)
     | _ -> Ok base

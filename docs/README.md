@@ -101,6 +101,12 @@ Read these together when judging whether the release candidate is credible:
 - `release/governed-membranes/GM5-MANIFEST.sha256`: reconstructible GM.5 overlay
   on the validated GM.1 plus ET.3 integration base `94b5082`; the GM.1 evidence
   set remains historical.
+- `release/governed-membranes/GM9-EVIDENCE.md`: GM.9 once Workspace facade,
+  frozen Path carrier, inspectable exact operation specs, typed Call
+  normalizers, safe outcome summaries, and HASH_V0 identity laws.
+- `release/governed-membranes/GM9-MANIFEST.sha256`: reconstructible GM.9 overlay
+  on the GM.2 plus GM.5 integration commit `62bac22`; predecessor evidence sets
+  remain historical.
 
 ## Maintenance Notes
 

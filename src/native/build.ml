@@ -62,6 +62,7 @@ let intrinsics : (string * int) list =
     ("code.hash", 1);
     ("hash.parse", 1);
     ("hash.to-text", 1);
+    ("governance.effect-order-key-v0", 1);
     ("debug.inspect", 1);
   ]
 

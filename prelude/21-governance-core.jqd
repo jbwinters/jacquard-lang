@@ -76,6 +76,12 @@
 (defterm ((binding governance.resolve-operation-id ()
   (quote (builtin-marker governance.resolve-operation-id-v0)))))
 
+; Trusted pure ordering boundary. Released effects receive their frozen
+; effect-taxonomy-v1 position; unknown identities retain a deterministic
+; hash-based fallback after all blessed effects.
+(defterm ((binding governance.effect-order-key ()
+  (quote (builtin-marker governance.effect-order-key-v0)))))
+
 (defterm ((binding governance.hash-eq? ()
   (lam ((pvar left) (pvar right))
     (app (var code.eq?) (app (var code.of-hash) (var left))
@@ -129,24 +135,69 @@
           (clause (pcon false)
             (app (var governance.hash-member?) (var needle) (var tail))))))))))
 
-(defterm ((binding governance.key-after? ()
-  (lam ((pvar previous) (pvar key))
+(defterm ((binding governance.authority-effect-key ()
+  (lam ((pvar authority))
+    (match (var authority)
+      (clause (pcon governance-effect (pvar effect-id))
+        (app (var governance.effect-order-key) (var effect-id)))
+      (clause
+        (pcon governance-resource (pvar effect-id) (pwild) (pwild))
+        (app (var governance.effect-order-key) (var effect-id))))))))
+
+; A structured lexicographic comparison: effect taxonomy/fallback first;
+; within one exact effect, Effect precedes Resources; Resources compare by D3
+; bytewise scope and then canonical configuration hash text. No delimiter or
+; length encoding participates in this order.
+(defterm ((binding governance.authority-after? ()
+  (lam ((pvar previous) (pvar current))
     (match (var previous)
       (clause (pcon none) (var true))
       (clause (pcon some (pvar prior))
-        (match (app (var text-compare) (var prior) (var key))
+        (match
+          (app (var text-compare)
+            (app (var governance.authority-effect-key) (var prior))
+            (app (var governance.authority-effect-key) (var current)))
           (clause (pcon less) (var true))
-          (clause (pcon equal) (var false))
-          (clause (pcon greater) (var false)))))))))
+          (clause (pcon greater) (var false))
+          (clause (pcon equal)
+            (match (tuple (var prior) (var current))
+              (clause
+                (ptuple (pcon governance-effect (pwild))
+                  (pcon governance-effect (pwild)))
+                (var false))
+              (clause
+                (ptuple (pcon governance-effect (pwild))
+                  (pcon governance-resource (pwild) (pwild) (pwild)))
+                (var true))
+              (clause
+                (ptuple (pcon governance-resource (pwild) (pwild) (pwild))
+                  (pcon governance-effect (pwild)))
+                (var false))
+              (clause
+                (ptuple
+                  (pcon governance-resource (pwild) (pvar prior-scope)
+                    (pvar prior-configuration))
+                  (pcon governance-resource (pwild) (pvar current-scope)
+                    (pvar current-configuration)))
+                (match
+                  (app (var text-compare) (var prior-scope) (var current-scope))
+                  (clause (pcon less) (var true))
+                  (clause (pcon greater) (var false))
+                  (clause (pcon equal)
+                    (match
+                      (app (var text-compare)
+                        (app (var hash.to-text) (var prior-configuration))
+                        (app (var hash.to-text) (var current-configuration)))
+                      (clause (pcon less) (var true))
+                      (clause (pcon equal) (var false))
+                      (clause (pcon greater) (var false)))))))))))))))
 
 (defterm ((binding governance.validate-authority-loop ()
   (lam ((pvar remaining) (pvar seen-effects) (pvar previous))
     (match (var remaining)
       (clause (pcon nil) (app (var ok) (tuple)))
       (clause (pcon cons (pvar head) (pvar tail))
-        (let nonrec (pvar key)
-          (app (var code.render) (app (var governance.authority-code) (var head)))
-          (match (app (var governance.key-after?) (var previous) (var key))
+          (match (app (var governance.authority-after?) (var previous) (var head))
             (clause (pcon false)
               (app (var err)
                 (lit "invalid Authority: entries must be in strict canonical order without duplicates")))
@@ -160,7 +211,7 @@
                     (clause (pcon false)
                       (app (var governance.validate-authority-loop) (var tail)
                         (app (var cons) (var effect-id) (var seen-effects))
-                        (app (var some) (var key))))))
+                        (app (var some) (var head))))))
                 (clause
                   (pcon governance-resource (pvar effect-id) (pvar scope) (pwild))
                   (match (app (var text.empty?) (var scope))
@@ -175,7 +226,7 @@
                             (lit "invalid Authority: Resource must refine a preceding Effect")))
                         (clause (pcon true)
                           (app (var governance.validate-authority-loop) (var tail)
-                            (var seen-effects) (app (var some) (var key))))))))))))))))))
+                            (var seen-effects) (app (var some) (var head)))))))))))))))))
 
 (defterm ((binding governance.validate-authority ()
   (lam ((pvar authority))

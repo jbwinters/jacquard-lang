@@ -447,6 +447,51 @@ needs no library support beyond `Handle` itself, though ring 3 ships worked exam
 `fs.read-only`, a handler that forwards `read` and turns `write` into a `Throw`, is
 twelve lines and doubles as the tutorial on interposition.
 
+### Workspace facade schemas and calls
+
+GM.9 releases one narrow, typed request facade before any membrane driver or
+handler is installed:
+
+```text
+workspace.read-file  : (Path) -> Result ToolError Text
+workspace.write-file : (Path, Text) -> Result ToolError ()
+workspace.fetch      : (Request) -> Result ToolError Response
+```
+
+All three operations are `once`. `Path = PathValue(Text)` is the frozen
+facade carrier, while `Request`/`Response` remain the existing network
+carriers. Merely having Workspace in a row grants no root capability.
+Later live/dry layers handle it and may translate an allowed request to raw
+authority.
+
+`workspace.operation-spec` maps each member of the closed
+`WorkspaceOperation` enumeration to ordinary inspectable data: its resolved
+operation identity, canonical name, exact raw-authority envelope, explicit
+preconditions, and safe secret references. Read and write declare `Fs`.
+Fetch declares the exact ordered `Net, Secret` envelope and carries only
+`SecretRef("workspace", None)`; no `Secret` value or exposed text can fit the
+spec. `governance.validate-authority` orders blessed effects by the frozen
+effect-taxonomy sequence and uses a deterministic hash fallback only for
+non-taxonomy identities.
+
+The pure `workspace.call-read`, `workspace.call-write`, and
+`workspace.call-fetch` normalizers produce `Result Text GovernanceCall` via
+the canonical governance constructor. Each accepts only its typed operation
+arguments and recomputes its exact operation spec; there is no public generic
+`workspace.call` or `workspace.call-from-spec` path. Preconditions are the
+frozen empty `quote {()}` Code. Path wrappers and URLs remain readable. File
+contents and request bodies contribute their HASH_V0 digest to argument Code,
+so meaningful changes re-key the call without copying body text into the Call
+or its deterministic human summary. Call summary text remains presentation
+metadata and is excluded from `call-id` by the GM.2 identity contract.
+
+`workspace.summarize-read`, `workspace.summarize-write`, and
+`workspace.summarize-fetch` are separate pure typed functions. Success values
+contribute canonical payload digests while their human details expose only a
+codepoint count, completion label, or HTTP status. Error summaries use the
+closed `ToolError` label and omit driver detail. They never use
+`debug.inspect` or a generic renderer.
+
 `Defect`, the pending owner decision D7 from the exhaustiveness discussion, would
 live in this ring as the visible-but-auto-granted channel for invariant violations.
 This document assumes it exists for exactly two library uses so far: `observe` at

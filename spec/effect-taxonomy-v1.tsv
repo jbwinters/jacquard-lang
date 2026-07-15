@@ -13,6 +13,7 @@ Clock	clock	official	world	-	once	low	3	implemented	9041c22386c41541b6b6818bcb26
 Env	env	official	world	-	once	low	3	reserved	first-release	env.get:(Text)->Option Text	read one named process configuration value
 Fs	fs	official	world	-	once	medium	3	implemented	8ec13169c7181851364e55353232af8e3c7f5ee4a010fa3067fcf2058dd5ed84	read:(Text)->Text;write:(Text,Text)->();list-dir:(Text)->List Text	read or mutate the filesystem under the granted root handler
 Net	net	official	world	-	once	high	3	implemented	be1aad7345c6215f227e63df6c7d05874a464f207599d4f5b85de8b0a6675b45	fetch:(Request)->Response	reach a network endpoint through the granted handler
+Workspace	workspace	official	world	-	once	high	3	implemented	d5831f495fdb26e05d53d886786f07230f7bb808ac4933ab32e0a9238c89f9d0	workspace.read-file:(Path)->Result ToolError Text;workspace.write-file:(Path,Text)->Result ToolError ();workspace.fetch:(Request)->Result ToolError Response	request mediated workspace reads, writes, or fetches without directly acquiring raw authority
 Pg	pg	official	world	-	once	high	3	reserved	first-release	pg.query:(Sql,Params)->Rows	issue a parameterized PostgreSQL query
 Blob	blob	official	world	-	once	high	3	reserved	first-release	blob.get:(Hash)->Option Bytes;blob.put-if-absent:(Hash,Bytes)->();blob.exists?:(Hash)->Bool	read or add immutable objects in configured blob storage
 Serve	serve	official	world	-	once	high	3	reserved	first-release	serve.next:()->Request;serve.respond:(Response)->()	receive and answer server requests

@@ -511,6 +511,7 @@ jq_value jq_i_code_render(jq_rt *rt, const jq_value *a);
 jq_value jq_i_code_hash(jq_rt *rt, const jq_value *a);
 jq_value jq_i_hash_parse(jq_rt *rt, const jq_value *a);
 jq_value jq_i_hash_to_text(jq_rt *rt, const jq_value *a);
+jq_value jq_i_governance_effect_order_key_v0(jq_rt *rt, const jq_value *a);
 jq_value jq_i_debug_inspect(jq_rt *rt, const jq_value *a);
 /* the LW driver's root interception (jq_perform's ladder, jq_intrinsics.c) */
 jq_value jq_lw_sample(jq_rt *rt, jq_value dv);

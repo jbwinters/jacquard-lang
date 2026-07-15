@@ -20,6 +20,9 @@ approval.ask once
 secret.read once
 secret.expose once
 judge.assess once
+workspace.read-file once
+workspace.write-file once
+workspace.fetch once
 dist.sample multi
 dist.observe multi
 check.check multi
