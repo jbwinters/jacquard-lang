@@ -32,6 +32,8 @@ project shape from file names alone.
 - `stdlib.md`: prelude, rings, library effects, and standard handlers.
 - `effect-taxonomy.md`: ratified blessed effect names, schemas, risks, rings,
   interface compatibility, and user-effect governance.
+- `effect-review.md`: identity-first manifest and authority-diff review,
+  uncertainty wording, canonical boundaries, and explicit non-goals.
 - `warp-testing.md`: Warp test model, rows, handlers, cache, properties, and
   world lanes.
 - `errors.md`: diagnostic code catalog.
@@ -90,6 +92,10 @@ Read these together when judging whether the release candidate is credible:
   exact proposal revalidation, and the no-simulated-consent laws.
 - `release/effect-taxonomy/ET7-MANIFEST.sha256`: reconstructible ET.7 overlay on
   the validated ET.6 base; earlier evidence manifests remain unchanged.
+- `release/effect-taxonomy/ET8-EVIDENCE.md`: ET.8 taxonomy closure, canonical
+  handler/boundary inventory, review wording, and exact tooling evidence.
+- `release/effect-taxonomy/ET8-MANIFEST.sha256`: reconstructible ET.8 overlay on
+  the integrated Secret/Approval base; predecessor manifests remain historical.
 
 ## Maintenance Notes
 

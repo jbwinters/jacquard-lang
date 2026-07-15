@@ -1,7 +1,7 @@
 # Blessed Effect Taxonomy v1
 
-Status: ratified taxonomy (ET.0, D56-D63), with Audit promoted by ET.2 and
-Secret promoted by ET.4 and its canonical handler boundaries added by ET.5, July 2026.
+Status: ET.8 release-frozen taxonomy (D56-D63), with Audit, Secret, and
+Approval shipped and their canonical boundaries evidenced, July 2026.
 
 This specification freezes the shared effect vocabulary used by signatures,
 authority manifests, package review, and future registry metadata. It is a
@@ -33,15 +33,17 @@ lowercase short name. Every blessed row is in the `official` namespace. That
 namespace is an index classification backed by resolved effect identity; it is
 not part of canonical hashing and it is not a string-prefix authorization check.
 
-Risk defaults mean:
+Risk defaults are review-routing metadata, not permissions or guarantees:
 
-- `none`: no external authority by itself;
+- `none`: no external authority by itself; behavioral and uncertainty review
+  can still be required;
 - `low`: externally observable, normally read-only or human-local authority;
 - `medium`: durable or operational external effects needing deliberate review;
 - `high`: code execution, network-facing, storage, database, or cryptographic
   authority needing explicit attention; and
 - `special`: governance semantics whose rendering is effect-specific rather
-  than ordered as ordinary operational risk.
+  than ordered as ordinary operational risk; the effect's own contract must be
+  reviewed.
 
 Rings retain the standard-library layering contract: control in ring 1,
 world-free structures and scheduling contracts in ring 2, and world/model/meta/
@@ -87,6 +89,47 @@ The full 64-hex identities and unabridged operation strings are normative in
 the TSV artifact. In particular, `Check` remains a prelude testing protocol,
 not a blessed program-authority name; search packages may define additional
 multi effects without acquiring an official short name.
+
+### Canonical handler and boundary inventory
+
+“Canonical” means the shipped, reviewed way to discharge or install the effect;
+it does not imply that every boundary is pure or available to user code. A root
+grant is a runtime boundary. The Secret entries are embedding APIs because
+plaintext must not become an ordinary prelude value before explicit exposure.
+
+| effect | canonical handlers or installation boundaries |
+|---|---|
+| `Abort` | `abort.to-option`, `abort.or` |
+| `Throw` | `throw.to-result`, `throw.catch` |
+| `State` | `state.run`, `state.eval` |
+| `Emit` | `emit.collect`, `emit.pipe` |
+| `Dist` | `dist.enumerate`, `dist.sample-lw`, explicit root sampling grant |
+| `Fault` | `fault.none`, `fault.random`, `fault.all` |
+| `Eval` | explicit root grant only |
+| `Console` | `console.scripted`, explicit root grant |
+| `Clock` | `clock.fixed`, explicit root grant |
+| `Fs` | `fs.in-memory`, `fs.read-only`, explicit root grant |
+| `Net` | `net.scripted`, `net.record`, explicit root grant |
+| `Infer` | `infer.scripted`, explicit root grant |
+| `Approval` | `approval.console`, `approval.scripted`, `approval.dry-run`, `approval.policy-auto` |
+| `Audit` | `audit.in-memory`, `audit.line-log` |
+| `Secret` | `Prelude.install_secret_fixed`, `Prelude.install_secret_vault`, explicit environment root grant |
+
+The remaining ten blessed names are **reserved and unimplemented**:
+`Choose`, `Env`, `Pg`, `Blob`, `Serve`, `Crypto`, `Log`, `Judge`, `Async`, and
+`Channel`. Their schemas reserve compatibility vocabulary only. They have no
+shipped declaration hash, canonical handler, root grant, or product-availability
+claim. A future first implementation must match the reserved schema and publish
+its resulting full identity before tooling may classify it as released.
+
+### Uncertainty review is separate from authority review
+
+`Dist` has risk `none` because it needs no external authority, not because a
+probabilistic result is certainly correct. Review its support, weights,
+observations, handler, seed, and whether approximation error is acceptable.
+`Infer` is `medium` because it crosses a model boundary; a completion is model
+output, not a verified fact. A posterior or `Assessment.confidence` is evidence,
+not consent: neither can substitute for an exact hash-bound `Approval` decision.
 
 ### Async implementation obligation
 
@@ -286,7 +329,7 @@ and is breaking. Adding an operation is also breaking for the same reason;
 handlers silently remain exhaustive. Renames in the mutable name index and
 metadata-only changes retain identity.
 
-The fourteen implemented blessed effects keep their exact current declaration
+The fifteen implemented blessed effects keep their exact current declaration
 hashes listed above. ET.0 does not rewrite those declarations. This preserves
 the historical absence encoding for `multi`, the reviewed `once` discriminator,
 and existing operation names—including `Eval.eval-code`. Each reserved effect's
@@ -297,9 +340,9 @@ edit after that point is a new interface, never an in-place revision.
 ### Registry realization
 
 `Effect_registry` is the executable copy used by review tooling. Its resolved
-registry contains exactly the fourteen implemented entries and is keyed only by
+registry contains exactly the fifteen implemented entries and is keyed only by
 their full `DefEffect` hashes. The complete 25-entry catalog is also typed, but
-the eleven `reserved` entries carry no hash and name only the
+the ten `reserved` entries carry no hash and name only the
 `first-release` policy; registration rejects them until a real first interface is
 implemented and frozen. This keeps schema reservation distinct from resolved
 program identity. Audit, Secret, and Approval are the first reserved interfaces
@@ -327,6 +370,23 @@ therefore cannot acquire its grant.
 Semantic diff applies this rendering only to a resolved effect row in the row
 position of a typed arrow. Type-shaped forms below `quote` remain ordinary code
 data and receive structural diffs, never an authority label.
+
+### Review non-goals
+
+- Taxonomy metadata never grants authority; only a checked row plus an explicit
+  root installation or enclosing handler can make an operation run.
+- Risk defaults are not vulnerability scores, policy verdicts, or claims that a
+  computation is safe. User effects stay unrated until metadata is reviewed for
+  their exact identity.
+- The taxonomy does not provide path-scoped object capabilities, a production
+  sandbox, continuous probability, verified model truth, automatic consent, or
+  a universal host/tool effect.
+- Secret opacity is non-derivability, not taint tracking. After
+  `secret.expose`, plaintext is ordinary `Text` and may be copied or leaked.
+- A reserved schema is neither an implementation nor a roadmap promise. In
+  particular, this release has no `Async` scheduler, typed `Channel` runtime,
+  database/blob/serve/crypto/log provider, pure `Choose` interface, or `Judge`
+  handler.
 
 ### Audit chain v1
 
@@ -376,6 +436,7 @@ receives a record intended for the verified inode.
 | D62 | raw authority | host is a role; membranes re-perform concrete blessed world effects, never `Host` |
 | D63 | Judge status | blessed once effect with `judge.assess : (Call) -> Assessment` |
 
-Later tasks implement registry coloring, governance handlers, membranes, and
-product review surfaces. This task freezes the vocabulary they consume without
-claiming those later artifacts already exist.
+ET.8 closes the taxonomy slice with released-identity, registry, prelude,
+documentation, manifest, and authority-diff evidence. Governed membranes and
+other later milestones remain separate; this freeze does not claim those
+products or the reserved interfaces already exist.
