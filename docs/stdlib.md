@@ -72,6 +72,12 @@ Naming convention: dotted lowercase, `list.map`, `text.split`, subject type firs
 Names live in the metadata index, so all of this is curation rather than structure,
 and renames are free (§8 returns to what that buys).
 
+The complete blessed effect vocabulary—including reserved but unimplemented
+interfaces, risk defaults, user-effect coloring rules, and exact hash policy—is
+ratified in [`effect-taxonomy.md`](effect-taxonomy.md). This document describes
+the shipped prelude; the taxonomy is the compatibility contract consumed by
+future registry and manifest tooling.
+
 ## 3. Ring 0: the axioms
 
 ### Core types
@@ -382,7 +388,7 @@ type Distribution a =
   | Categorical(values: List (a, Real))
   | UniformInt Int Int
 
-multi effect Dist a where {
+multi effect Dist where {
   sample : (Distribution a) -> a
   observe : (Distribution a, a) -> ()
 }
@@ -428,7 +434,7 @@ they read it:
 | `Clock` | `once` | `now : () -> Int` (ms since epoch), `sleep : (Int) -> ()` | the program observes and waits on time |
 | `Fs` | `once` | `read : (Text) -> Text`, `write : (Text, Text) -> ()`, `list-dir : (Text) -> List Text` | the program touches the filesystem |
 | `Net` | `once` | `fetch : (Request) -> Response` | the program reaches the network |
-| `Eval` | `once` | `eval : (Code) -> a` | the program runs code, including code it constructed |
+| `Eval` | `once` | `eval-code : (Code) -> a` | the program runs code, including code it constructed |
 | `Infer` | `once` | `complete : (Prompt) -> Text` | the program requests a model completion |
 
 The complete reviewed assignment, including control, Warp, Dist, and Fault,
@@ -506,20 +512,59 @@ subject-first library function:
 [1, 2, 3] |> list.reverse |> list.reverse
 ```
 
-A handler clause can read as policy wrapped around a workflow:
+A handler clause can read as policy wrapped around a workflow. The
+`proposal-hash` argument below stands for the canonical hash of the exact
+`proposal` passed to `approval.ask`; the handler returns that same binding in
+its decision. A production handler must derive or verify this hash and reject
+any mismatch. The dry-run carrier always returns `Escalate` and therefore
+cannot fabricate consent:
 
 ```jacquard doctest=stdlib-handler-policy mode=run fixture=stdlib-handler-policy.jac stdout=stdlib-handler-policy.stdout stderr=empty exit=0
+type Hash = | HashValue(value: Text)
+type Authority =
+  | Effect(name: Text)
+  | Resource(effect-name: Text, scope: Text)
+type OutcomeSummary = | OutcomeSummary(status: Text, digest: Hash, detail: Text)
+type Proposal =
+  | Proposal(
+      subject: Hash,
+      policy: Hash,
+      assessment: Hash,
+      summary: Text,
+      authority: List Authority,
+      preview: Option OutcomeSummary)
+type Decision =
+  | Approved(proposal: Hash, approver: Text, evidence: Code)
+  | Denied(proposal: Hash, approver: Text, reason: Text)
+  | Escalate(proposal: Hash, reason: Text)
+
 once effect Approval where {
-  ask : (Text) -> Bool
+  approval.ask : (Proposal) -> Decision
 }
 
-approve-and-run(workflow) =
+dry-run-with-proposal(proposal-hash, workflow) =
   handle workflow() {
     | return result -> Some(result)
-    | ask(prompt) resume continue -> continue(True)
+    | approval.ask(request) resume continue ->
+        continue(Escalate(proposal-hash, "dry-run cannot consent"))
   }
 
-approve-and-run(fn () -> if ask("ship?") then 42 else 0)
+proposal-hash = HashValue("proposal-v1")
+proposal =
+  Proposal(
+    HashValue("subject"),
+    HashValue("policy"),
+    HashValue("assessment"),
+    "ship?",
+    [],
+    None)
+
+dry-run-with-proposal(proposal-hash, fn () -> match approval.ask(proposal) {
+  | Escalate(HashValue("proposal-v1"), _) -> 42
+  | Escalate(_, _) -> 0
+  | Approved(_, _, _) -> 0
+  | Denied(_, _, _) -> 0
+})
 ```
 
 Nested tuple destructuring stays visible inside a constructor pattern:
@@ -608,7 +653,7 @@ This makes the shipped ring-1 handlers looser than their ideal signatures — e.
 to the initial value, so `state.run(fn () -> { put("hi"); get() }, 0)` elaborates as
 `(a, Int)` but returns `("hi", "hi")` at runtime. The same holds for `throw.to-result`'s
 error type and `emit.collect`'s element type, and it is the long-standing shape of
-`eval : (Code) -> a`. The future fix direction is parameterized effect instances; until
+`eval-code : (Code) -> a`. The future fix direction is parameterized effect instances; until
 then the approximation is documented at the checker's `op_scheme`.
 
 **`dist.enumerate` has no error channel.** When every branch is impossible (total mass 0),

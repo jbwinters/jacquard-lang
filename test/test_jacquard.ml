@@ -20,6 +20,7 @@ let () =
       ("handlers", Test_handlers.suite);
       ("quote", Test_quote.suite);
       ("prelude", Test_prelude.suite);
+      ("effect-taxonomy", Test_effect_taxonomy.suite);
       ("types", Test_types.suite);
       ("check", Test_check.suite);
       ("tier", Test_tier.suite);

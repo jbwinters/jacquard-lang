@@ -291,7 +291,14 @@ let evolving_inventory_errors () =
           | Error message -> Some message))
 
 let doctest_names () =
-  [ "README.md"; "docs/tutorial.md"; "docs/stdlib.md"; "docs/warp-testing.md"; "demos/README.md" ]
+  [
+    "README.md";
+    "docs/effect-taxonomy.md";
+    "docs/tutorial.md";
+    "docs/stdlib.md";
+    "docs/warp-testing.md";
+    "demos/README.md";
+  ]
   |> List.concat_map (fun path ->
       read_source path |> String.split_on_char '\n'
       |> List.filter_map (fun line ->
@@ -834,7 +841,7 @@ let validate_release_docs ~decision ~followups ~index =
           [ "opam exec -- dune build @all"; "exit 0" ];
           [
             "opam exec -- dune runtest --force";
-            "exit 0; compiled Alcotest inventory is exactly 564 cases";
+            "exit 0; compiled Alcotest inventory is exactly 568 cases";
           ];
           [ "opam exec -- dune fmt"; "exit 0; no task-file byte changes" ];
           [
@@ -844,7 +851,7 @@ let validate_release_docs ~decision ~followups ~index =
           ];
           [
             "opam exec -- dune runtest test/docs-doctest --force";
-            "exit 0; exactly 21 named doctests pass";
+            "exit 0; exactly 22 named doctests pass";
           ];
           [
             "JACQUARD_PRELUDE=$PWD/prelude opam exec -- dune exec jac -- run \

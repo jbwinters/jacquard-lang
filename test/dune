@@ -84,9 +84,11 @@
   (glob_files_rec ../corpus/*.golden)
   (glob_files_rec ../prelude/*.jqd)
   ../prelude/operation-modes.manifest
+  ../prelude/rings.manifest
   (glob_files ../src/*.ml)
   (glob_files ../bin/*.ml)
   ../docs/errors.md
+  ../docs/effect-taxonomy.md
   ../docs/README.md
   ../docs/release/surface-syntax/DECISION.md
   ../docs/release/surface-syntax/FOLLOWUPS.md
@@ -95,5 +97,8 @@
   ../docs/surface-syntax.md
   ../docs/tutorial.md
   ../docs/warp-testing.md
+  ../spec/effect-taxonomy-v1.tsv
+  docs-doctest/fixtures/effect-taxonomy-schemas.jac
+  docs-doctest/fixtures/stdlib-handler-policy.jac
   ../scripts/release/check-surface-syntax-manifest.sh
   cli/escrow.t))
