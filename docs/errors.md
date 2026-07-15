@@ -106,6 +106,7 @@ in `src/` and `bin/` appears in this catalog.
 | E0813 | non-exhaustive match (with witness) | bool match missing `false` |
 | E0814 | ungranted effect in the program manifest | running a printing program without `--allow console` |
 | E0815 | effectful top-level definition body | `(defterm ((binding x () (app (var print) ...))))` |
+| E0816 | polymorphic reuse of a non-value local binding (value restriction) | bind an application result, then call it at two unrelated types |
 | W0801 | redundant match clause | a clause after `(pwild)` |
 
 ## Probabilistic inference (E09xx)

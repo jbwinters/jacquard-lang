@@ -34,6 +34,8 @@ ungranted-effect | error[E0814]: this program requires the `console` effect, whi
   hint: grant it with --allow console, or handle the effect in the program
 effectful-toplevel-body | effectful-toplevel-body.jqd:1:11-78: error[E0815]: top-level definition `sneaky` performs the `net` effect while being defined
   hint: wrap the body in a lambda and perform the effect when called
+value-restriction | value-restriction.jqd:1:112-119: error[E0816]: local binding `i` comes from a non-value and remains monomorphic under the value restriction
+  hint: eta-expand the binding to a lambda value, or give each use its own binding
 redundant-clause | redundant-clause.jqd:1:57-85: warning[W0801]: this clause is redundant: earlier clauses match everything it does
 eta-positive | eta-positive.jac:2:21-30: error[E0807]: this position expects a thunk, but `condition` is a bare reference; wrap it in `fn () -> ...`
   hint: wrap the reference in `fn () -> ...` so the computation is delayed

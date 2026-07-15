@@ -90,7 +90,7 @@ compiled Alcotest list and repository sources.
 
 | inventory | count | exact members or source |
 |---|---:|---|
-| tests | 554 | compiled `test_jacquard.exe list` inventory |
+| tests | 562 | compiled `test_jacquard.exe list` inventory for the DX.1 successor overlay |
 | doctests | 21 | `readme-multishot`, `tutorial-literal`, `tutorial-application`, `tutorial-identity`, `tutorial-factorial`, `tutorial-bool-match`, `tutorial-nonexhaustive`, `tutorial-safe-div`, `tutorial-read-only`, `stdlib-core-declarations`, `stdlib-control-effects`, `stdlib-dist-declarations`, `stdlib-multi-effect-signature`, `stdlib-pipe-transformation`, `stdlib-handler-policy`, `stdlib-nested-tuple-destructure`, `stdlib-text-join`, `warp-check-effect`, `warp-test-types`, `warp-fault-effect`, `warp-hermetic-case` |
 | twins | 23 | `app-add.jac`, `case-fold-constructor.jac`, `dotted-names.jac`, `eval-gated.jac`, `even-odd.jac`, `fact.jac`, `handler-policy.jac`, `identity.jac`, `let-shadow.jac`, `lit-int.jac`, `lit-real.jac`, `lit-text.jac`, `match-bool.jac`, `multi-effect-signature.jac`, `nested-tuple-destructure.jac`, `pipe-transformation.jac`, `prelude-map.jac`, `quote-lit.jac`, `safe-div.jac`, `stdlib-ss22.jac`, `surface-ref-v0.jac`, `to-option.jac`, `tuple-unit.jac` |
 | demos | 13 | `agent-dream.jac`, `ambiguity-pipeline.jac`, `clarifying-question.jac`, `m1-choose.jac`, `m1-fact.jac`, `m1-gated.jac`, `m3-two-coins.jac`, `preflight.jac`, `repair.jac`, `surface-expression.jac`, `surface-fact.jac`, `synthesis.jac`, `word-count.jac` |
@@ -103,6 +103,15 @@ distributed across [demos.t](../../../test/cli/demos.t),
 [preflight.t](../../../test/cli/preflight.t), and
 [surface.t](../../../test/cli/surface.t); their union is exactly the demo
 inventory above, including `repair.jac` and `preflight.jac`.
+
+### DX.1 successor overlay
+
+DX.1 extends the reconstructible evidence overlay with directional effect-row
+inclusion, constructive non-aliasing branch joins, handler subtraction through
+typed wrappers, and the associated demos, diagnostics, and regression tests.
+The current `tests` inventory above belongs to this successor overlay. It does
+not rewrite the frozen RC1 inventory of 554 cases or backdate DX.1 into the
+SS.21 and SS.22 timestamps and observed-command table below.
 
 ## Caveats
 
@@ -136,7 +145,7 @@ The immutable context is base commit
 `07bf8aa71d197603c3830bd595ef7dd1e33e6bee` plus the files and SHA-256 values
 in [MANIFEST.sha256](MANIFEST.sha256). The manifest excludes itself, avoiding a
 self-reference, and includes only tracked files reconstructible from that base
-and the SS.21 plus SS.22 successor evidence overlay. Run
+and the SS.21, SS.22, and DX.1 successor evidence overlays. Run
 `scripts/release/check-surface-syntax-manifest.sh` from the repository root to
 validate every listed byte sequence.
 

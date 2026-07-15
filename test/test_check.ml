@@ -108,7 +108,12 @@ let test_value_restriction () =
        (var i) (lit 1)) (app (var i) (lit \"s\"))))"
   with
   | Ok _ -> Alcotest.fail "non-value must not generalize"
-  | Error [ d ] -> Alcotest.(check string) "mismatch code" "E0801" d.Diag.code
+  | Error [ d ] ->
+      Alcotest.(check string) "focused code" "E0816" d.Diag.code;
+      Alcotest.(check (option string))
+        "actionable value-restriction hint"
+        (Some "eta-expand the binding to a lambda value, or give each use its own binding")
+        d.Diag.hint
   | Error _ -> Alcotest.fail "expected one diagnostic"
 
 let test_ann_mismatch_elaborated () =

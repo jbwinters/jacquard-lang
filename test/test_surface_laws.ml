@@ -244,17 +244,6 @@ let compiled_test_count =
      | Unix.WEXITED 0 -> total
      | _ -> Alcotest.fail "compiled Alcotest inventory command failed")
 
-let rec count_files_with_suffix path suffix =
-  Sys.readdir path |> Array.to_list
-  |> List.fold_left
-       (fun count entry ->
-         let child = Filename.concat path entry in
-         match (Unix.stat child).st_kind with
-         | Unix.S_DIR -> count + count_files_with_suffix child suffix
-         | Unix.S_REG when Filename.check_suffix entry suffix -> count + 1
-         | _ -> count)
-       0
-
 let claimed_inventory_count ~path ~prefix source =
   match
     source |> String.split_on_char '\n'
@@ -269,14 +258,11 @@ let claimed_inventory_count ~path ~prefix source =
           | None -> Error (Printf.sprintf "%s has a non-integer `%s` count" path prefix))
       | _ -> Error (Printf.sprintf "%s must state exactly one `%s` count" path prefix))
 
-let evolving_inventory_errors () =
-  let actual_tests = Lazy.force compiled_test_count in
-  let actual_crams = count_files_with_suffix (source_path "test") ".t" in
+let rc1_inventory_errors () =
   [
     ( "docs/release/0.1/EVIDENCE.md",
-      [ ("- Alcotest/QCheck cases:", actual_tests); ("- Cram transcript files:", actual_crams) ] );
-    ( "docs/release/0.1/DECISION.md",
-      [ ("Test count:", actual_tests); ("Cram count:", actual_crams) ] );
+      [ ("- Alcotest/QCheck cases:", 554); ("- Cram transcript files:", 32) ] );
+    ("docs/release/0.1/DECISION.md", [ ("Test count:", 554); ("Cram count:", 32) ]);
   ]
   |> List.concat_map (fun (path, claims) ->
       let source = read_source path in
@@ -286,8 +272,8 @@ let evolving_inventory_errors () =
           | Ok claimed when claimed = actual -> None
           | Ok claimed ->
               Some
-                (Printf.sprintf "%s `%s` is stale (claimed %d, actual %d)" path prefix claimed
-                   actual)
+                (Printf.sprintf "%s `%s` changed historical RC1 inventory (claimed %d, required %d)"
+                   path prefix claimed actual)
           | Error message -> Some message))
 
 let doctest_names () =
@@ -390,20 +376,25 @@ let manifest_errors () =
   let overlay =
     [
       "README.md";
+      "corpus/golden/diags.golden";
       "corpus/golden/hashes.golden";
       "corpus/golden/prelude-hashes.golden";
       "corpus/golden/ring0-freeze.golden";
+      "corpus/golden/sigs.golden";
       "corpus/sigs/24-ring2.jqd";
       "corpus/valid/stdlib-ss22.jac";
       "corpus/valid/stdlib-ss22.jqd";
+      "demos/case-studies/stormglass/model.jac";
       "demos/inference/clarifying-question.jac";
       "demos/inference/clarifying-question.jqd";
       "demos/inference/cookbook.jqd";
       "demos/tooling/repair.jac";
       "demos/tooling/repair.jqd";
+      "demos/worlds/preflight.jac";
       "docs/README.md";
       "docs/SKILL.md";
       "docs/ci-cd.md";
+      "docs/errors.md";
       "docs/native-intrinsics.md";
       "docs/release/0.1/DECISION.md";
       "docs/release/0.1/EVIDENCE.md";
@@ -412,6 +403,7 @@ let manifest_errors () =
       "docs/release/surface-syntax/FOLLOWUPS.md";
       "docs/stdlib.md";
       "docs/surface-syntax.md";
+      "docs/warp-testing.md";
       "prelude/04-builtins.jqd";
       "prelude/07-enum.jqd";
       "prelude/09-grid.jqd";
@@ -431,7 +423,9 @@ let manifest_errors () =
       "src/prelude.ml";
       "src/tier.ml";
       "src/types.ml";
+      "test/cli/case-studies.t";
       "test/cli/native-effects.t";
+      "test/cli/preflight.t";
       "test/cli/dune";
       "test/cli/ss22.t";
       "test/cli/surface.t";
@@ -449,9 +443,13 @@ let manifest_errors () =
       "test/native-asan/join-bad-last.jqd";
       "test/native-asan/join-bad-middle.jqd";
       "test/test_prelude.ml";
+      "test/test_check.ml";
+      "test/test_surface_check.ml";
       "test/test_surface_laws.ml";
+      "test/test_surface_types.ml";
       "test/test_text.ml";
       "test/test_tier.ml";
+      "test/test_types.ml";
     ]
   in
   let paths = List.map snd entries |> List.sort String.compare in
@@ -915,7 +913,7 @@ let release_sources () =
 
 let assert_release_valid () =
   let decision, followups, index = release_sources () in
-  match validate_release_docs ~decision ~followups ~index @ evolving_inventory_errors () with
+  match validate_release_docs ~decision ~followups ~index @ rc1_inventory_errors () with
   | [] -> ()
   | errors -> Alcotest.fail (String.concat "\n" errors)
 

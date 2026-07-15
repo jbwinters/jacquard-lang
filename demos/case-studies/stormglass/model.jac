@@ -202,7 +202,7 @@ resilient-checkout() = {
 -- --- the analyses: enumeration runs a policy in EVERY world at once ---
 
 --| exact customer-outcome posterior for one policy under the forecast
-tally-policy : (() ->{State, Dist, Net, Clock | e} Purchase) ->{| e} (List (Pair Text Real))
+tally-policy : (() ->{State, Net, Clock | e} Purchase) ->{| e} (List (Pair Text Real))
 tally-policy(policy) =
   dist.enumerate(fn () -> outcome.text(run-graded(forecast(), policy)))
   |> dist.tally(text.eq)

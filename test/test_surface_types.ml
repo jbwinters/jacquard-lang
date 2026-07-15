@@ -117,8 +117,7 @@ let test_documented_signatures () =
         "../docs/stdlib.md",
         Some "state.run" );
       ( "Warp",
-        "check.throws : forall a b | e. (() ->{Throw, Check | e} a, (b) ->{Check | e} Bool, Show \
-         b, Text) ->{Check | e} ()",
+        {|check.throws : forall a b | e. (() ->{Throw | e} a, (b) ->{| e} Bool, Show b, Text) ->{Check | e} ()|},
         "../docs/warp-testing.md",
         Some "check.throws" );
       ("demo", "escrow.workflow : () ->{Fs, Console, Net} Int", "cli/escrow.t", None);
