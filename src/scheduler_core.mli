@@ -35,6 +35,13 @@ type 'value await_outcome =
       (** Result of registering an await. A terminal target is observed immediately; a live target
           suspends the waiter; a self-await or closed cycle fails the participating task(s). *)
 
+type 'resume cancellation_boundary =
+  | Boundary_continue of 'resume
+  | Boundary_cancelled of { resume : 'resume; awakened : handle list }
+      (** Atomic result of reaching a cancellation point with a checked-out continuation. A
+          delivered or already-delivered cancellation returns that continuation for explicit
+          destruction; it can never be resumed through this result. *)
+
 val create :
   scope_path:int list -> body_resume:'resume -> (('resume, 'value) t * handle, Diag.t list) result
 (** [create] opens a scheduler-owned run and scope and creates its body task at spawn index zero.
@@ -109,9 +116,22 @@ val deliver_cancel :
   ('resume, 'value) t ->
   point:Concurrency_contract.cancellation_point ->
   handle ->
-  (handle list, Diag.t list) result
-(** [deliver_cancel] terminalizes a requested live task at a frozen cancellation point, dropping any
-    owned resume and waking its waiters. Without a request it is a no-op. *)
+  (handle list * 'resume list, Diag.t list) result
+(** [deliver_cancel] terminalizes a requested live task at a frozen cancellation point and wakes its
+    waiters. On first delivery it transfers every scheduler-owned resume removed from the target to
+    the caller for destruction. Duplicate delivery and terminal targets return empty lists. No
+    resume is discarded inside the core. *)
+
+val cancellation_boundary :
+  ('resume, 'value) t ->
+  point:Concurrency_contract.cancellation_point ->
+  handle ->
+  resume:'resume ->
+  ('resume cancellation_boundary, Diag.t list) result
+(** [cancellation_boundary scheduler ~point task ~resume] atomically checks a checked-out runnable
+    task before a suspension or routed effect. A pending request terminalizes the task exactly once;
+    an already-cancelled task also refuses the stale continuation. Suspended, completed, and failed
+    tasks return E0908. *)
 
 val close : ('resume, 'value) t -> 'resume list
 (** [close] cancels all unfinished tasks, removes every wait edge, and transfers all still-owned

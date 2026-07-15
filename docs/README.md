@@ -32,10 +32,10 @@ project shape from file names alone.
 - `stdlib.md`: prelude, rings, library effects, and standard handlers.
 - `effect-taxonomy.md`: ratified blessed effect names, schemas, risks, rings,
   interface compatibility, and user-effect governance.
-- `concurrency.md`: SC.6 structured-scope ownership and escape cleanup over the
-  SC.4 generalized child-effect law and SC.5 policy-independent lifecycle,
-  plus scope contracts, deterministic scheduling, cancellation, exclusions,
-  and D46-D50.
+- `concurrency.md`: SC.7 cooperative cancellation at scheduler boundaries over
+  SC.6 structured-scope ownership, the SC.5 policy-independent lifecycle, and
+  the SC.4 generalized child-effect law, plus scope contracts, deterministic
+  scheduling, exclusions, and D46-D50.
 - `warp-testing.md`: Warp test model, rows, handlers, cache, properties, and
   world lanes.
 - `errors.md`: diagnostic code catalog.
@@ -72,11 +72,11 @@ Read these together when judging whether the release candidate is credible:
 
 ## Structured Concurrency Evidence
 
-- `release/structured-concurrency/EVIDENCE.md`: SC.6 nested scope ownership,
-  cleanup, escape-scan, lifecycle/memory/QCheck evidence over the validated
-  SC.4 + SC.5 integration base.
+- `release/structured-concurrency/EVIDENCE.md`: SC.7 cooperative cancellation,
+  nested scope ownership, cleanup, escape-scan, lifecycle/memory/QCheck
+  evidence over the validated SC.6 integration base.
 - `release/structured-concurrency/MANIFEST.sha256`: reconstructible complete
-  SC.6 overlay on integration commit `9708ee1`.
+  SC.7 overlay on integration commit `b59a570`.
 
 ## Maintenance Notes
 

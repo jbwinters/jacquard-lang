@@ -923,6 +923,24 @@ static void test_structured_scope_carrier_teardown(void) {
   CHECK(true, "native structured-scope carrier teardown is ASAN-clean");
 }
 
+static void test_cancelled_continuation_teardown(void) {
+  /* The native runtime does not yet contain a scheduler or cancellation route.
+     This ownership-only stress probe verifies that 4,096 nested continuation-
+     shaped heap roots can be released explicitly under ASAN+LSAN. */
+  enum { cancellation_count = 4096 };
+  jq_value *continuations = calloc(cancellation_count, sizeof(*continuations));
+  if (!continuations) abort();
+  for (uint32_t index = 0; index < cancellation_count; index++) {
+    jq_value payload = jq_tuple(1, (jq_value[]){ jq_int(index) });
+    continuations[index] = jq_tuple(1, (jq_value[]){ payload });
+  }
+  for (uint32_t index = 0; index < cancellation_count; index++) {
+    jq_drop(continuations[index]);
+  }
+  free(continuations);
+  CHECK(true, "native explicit continuation-carrier teardown is ASAN-clean");
+}
+
 int main(int argc, char **argv) {
   /* fatal-path modes: check.sh asserts the message and exit code 2 */
   if (argc > 1 && strcmp(argv[1], "div0") == 0) {
@@ -984,6 +1002,7 @@ int main(int argc, char **argv) {
   test_grant_fallback();
   test_inert_task_handles();
   test_structured_scope_carrier_teardown();
+  test_cancelled_continuation_teardown();
   test_capture_single_resume();
   test_once_instances_are_independent();
   test_multishot_two_resumes();
