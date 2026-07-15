@@ -1,7 +1,7 @@
 # Blessed Effect Taxonomy v1
 
-Status: ratified taxonomy (ET.0, D56-D63) with Audit first-release promoted by
-ET.2, July 2026.
+Status: ratified taxonomy (ET.0, D56-D63), with Audit promoted by ET.2 and
+Secret promoted by ET.4 and its canonical handler boundaries added by ET.5, July 2026.
 
 This specification freezes the shared effect vocabulary used by signatures,
 authority manifests, package review, and future registry metadata. It is a
@@ -78,7 +78,7 @@ mode; there is no inference from names.
 | `Infer` | `infer` | `official` | `model` | `-` | `once` | `medium` | `3` | `implemented` | `324b8f59279db3cabbfaaba430168717057cea8fc1435a11a1a9106e3e6fb4d8` | `complete:(Prompt)->Text` | request a model completion selected by the handler |
 | `Approval` | `approval` | `official` | `governance` | `-` | `once` | `special` | `3` | `implemented` | `362425a29077a7efbcc37047182e579f46199a50473045eb4126a917dfc2a196` | `approval.ask:(Proposal)->Decision` | request hash-bound consent for an exact proposal |
 | `Audit` | `audit` | `official` | `governance` | `-` | `once` | `special` | `3` | `implemented` | `2c148fbc2e26bdc6f01279a8bf176f54d5798536e1f96805aa4f7c7a57e67632` | `audit.record:(AuditEntry)->()` | record governance evidence in an append-only stream |
-| `Secret` | `secret` | `official` | `governance` | `-` | `once` | `special` | `3` | `reserved` | `first-release` | `secret.read:(SecretRef)->Secret;secret.expose:(Secret)->Text` | resolve opaque confidential material or explicitly expose it |
+| `Secret` | `secret` | `official` | `governance` | `-` | `once` | `special` | `3` | `implemented` | `6d092eccc3c9858a2a95120da5a011964cbb3ad76968e11c1cbb062c119fbb31` | `secret.read:(SecretRef)->Secret;secret.expose:(Secret)->Text` | resolve opaque confidential material or explicitly expose it |
 | `Judge` | `judge` | `official` | `governance` | `-` | `once` | `special` | `3` | `reserved` | `first-release` | `judge.assess:(Call)->Assessment` | assess a proposed call without performing it |
 | `Async` | `async` | `official` | `concurrency` | `a` | `once` | `none` | `2` | `reserved` | `first-release` | `async.spawn:(()->{Async\|e}a)->Task a;async.await:(Task a)->TaskResult a;async.cancel:(Task a)->();async.yield:()->()` | schedule structured tasks while charging child effects to the parent row |
 | `Channel` | `channel` | `official` | `concurrency` | `a` | `once` | `none` | `2` | `reserved` | `first-release` | `channel.open:()->ChannelHandle a;channel.send:(ChannelHandle a,a)->Result ChannelError ();channel.recv:(ChannelHandle a)->Result ChannelError a;channel.close:(ChannelHandle a)->()` | communicate typed values between structured tasks |
@@ -146,6 +146,17 @@ has no `Show` instance; generic inspection renders it redacted. `secret.expose`
 is the only standard conversion to `Text`, so deliberate exposure remains in
 the effect row. This is non-derivability, not information-flow tracking: after
 exposure a program can still leak the text.
+
+ET.5 supplies three explicit handler boundaries without changing the interface
+identity or opaque value representation. `secret.fixed` is the deterministic
+embedding fixture installed by `Prelude.install_secret_fixed`; exact
+`(name, version)` matches return opaque values and missing names or versions
+fail separately. `--allow secret` installs the environment adapter, whose
+collision-free `JACQUARD_SECRET_V0_<name-hex>_{LATEST|VERSION_<version-hex>}`
+keys are derived only from safe `SecretRef` data. `Prelude.install_secret_vault`
+accepts an injected provider callback and selects no vendor or transport. Its
+closed failure type carries no backend message or value. Dry-run installs none
+of these live handlers and therefore refuses a remaining `Secret` row.
 
 `Call.subject` hashes the resolved operation identity, canonical arguments,
 declared authority, and preconditions. Presentation summary is excluded.
@@ -291,10 +302,11 @@ their full `DefEffect` hashes. The complete 25-entry catalog is also typed, but
 the eleven `reserved` entries carry no hash and name only the
 `first-release` policy; registration rejects them until a real first interface is
 implemented and frozen. This keeps schema reservation distinct from resolved
-program identity. Audit and Approval are the first reserved interfaces promoted
-by that rule. Their v1 identities above are the shipped `DefEffect` hashes;
-their operations are once `audit.record : (AuditEntry) -> ()` and once
-`approval.ask : (Proposal) -> Decision`, respectively.
+program identity. Audit, Secret, and Approval are the first reserved interfaces
+promoted by that rule. Their v1 identities above are the shipped `DefEffect`
+hashes. Their operations are once `audit.record : (AuditEntry) -> ()`, once
+`secret.read : (SecretRef) -> Secret`, once `secret.expose : (Secret) -> Text`,
+and once `approval.ask : (Proposal) -> Decision`.
 
 Plain rendering is deterministic. Optional ANSI styling colors only the risk
 token of an identity-confirmed official entry. An unregistered effect with

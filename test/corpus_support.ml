@@ -391,6 +391,10 @@ let diag_cases : (string * string * string list option) list =
         "(let nonrec (pvar saved) (app (var some) (var k)) (lit 0))",
       None );
     ("once-return", once_diag "linear-return" "signal-return" "(var k)", None);
+    ( "secret-generic-inspection",
+      "(app (var debug.inspect) (app (var secret.read) (app (var secret-ref) (lit \"fixture\") \
+       (var none))))",
+      None );
     ( "redundant-clause",
       "(lam ((pvar b)) (match (var b) (clause (pwild) (lit 0)) (clause (pcon true) (lit 1))))",
       None );

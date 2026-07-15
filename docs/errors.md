@@ -109,6 +109,7 @@ in `src/` and `bin/` appears in this catalog.
 | E0815 | effectful top-level definition body | `(defterm ((binding x () (app (var print) ...))))` |
 | E0816 | a once resumption may be consumed twice on one possible path | two sequential calls to the same once-clause `resume` binder |
 | E0817 | a once resumption escapes its handler clause | returning, storing, capturing, or passing `resume` to a non-`Resume` parameter |
+| E0818 | opaque Secret used by generic inspection or serialization | passing a `Secret` to `debug.inspect` or a Text encoder instead of explicitly calling `secret.expose` |
 | W0801 | redundant match clause | a clause after `(pwild)` |
 
 E0817 has one bounded transformer exception: a direct clause lambda may capture

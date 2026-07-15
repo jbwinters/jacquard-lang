@@ -97,7 +97,7 @@ compiled Alcotest list and repository sources.
 
 | inventory | count | exact members or source |
 |---|---:|---|
-| tests | 604 | compiled `test_jacquard.exe list` inventory |
+| tests | 610 | compiled `test_jacquard.exe list` inventory |
 | doctests | 22 | `readme-multishot`, `effect-taxonomy-schemas`, `tutorial-literal`, `tutorial-application`, `tutorial-identity`, `tutorial-factorial`, `tutorial-bool-match`, `tutorial-nonexhaustive`, `tutorial-safe-div`, `tutorial-read-only`, `stdlib-core-declarations`, `stdlib-control-effects`, `stdlib-dist-declarations`, `stdlib-multi-effect-signature`, `stdlib-pipe-transformation`, `stdlib-handler-policy`, `stdlib-nested-tuple-destructure`, `stdlib-text-join`, `warp-check-effect`, `warp-test-types`, `warp-fault-effect`, `warp-hermetic-case` |
 | twins | 24 | `app-add.jac`, `case-fold-constructor.jac`, `dotted-names.jac`, `eval-gated.jac`, `even-odd.jac`, `fact.jac`, `handler-policy.jac`, `identity.jac`, `let-shadow.jac`, `lit-int.jac`, `lit-real.jac`, `lit-text.jac`, `match-bool.jac`, `multi-effect-signature.jac`, `nested-tuple-destructure.jac`, `operation-modes.jac`, `pipe-transformation.jac`, `prelude-map.jac`, `quote-lit.jac`, `safe-div.jac`, `stdlib-ss22.jac`, `surface-ref-v0.jac`, `to-option.jac`, `tuple-unit.jac` |
 | demos | 13 | `agent-dream.jac`, `ambiguity-pipeline.jac`, `clarifying-question.jac`, `m1-choose.jac`, `m1-fact.jac`, `m1-gated.jac`, `m3-two-coins.jac`, `preflight.jac`, `repair.jac`, `surface-expression.jac`, `surface-fact.jac`, `synthesis.jac`, `word-count.jac` |
@@ -190,7 +190,7 @@ claim.
 | command | deterministic expected result |
 |---|---|
 | `opam exec -- dune build @all` | exit 0 |
-| `opam exec -- dune runtest --force` | exit 0; compiled Alcotest inventory is exactly 604 cases |
+| `opam exec -- dune runtest --force` | exit 0; compiled Alcotest inventory is exactly 610 cases |
 | `opam exec -- dune fmt` | exit 0; no task-file byte changes |
 | `cd _build/default/test && ./test_jacquard.exe test surface-twins --compact --color=never` | exit 0; exactly 5 selected cases pass over 24 twin pairs |
 | `opam exec -- dune runtest test/docs-doctest --force` | exit 0; exactly 22 named doctests pass |

@@ -505,6 +505,30 @@ malformed or noncanonical records with diagnostics. Because a chain cannot by
 itself reveal removal of a valid suffix, the independently published head is a
 required part of the verification contract.
 
+### Secret references and deliberate exposure
+
+`SecretRef(name: Text, version: Option Text)` identifies confidential material;
+it never carries the material itself. `Secret` is an opaque runtime value with
+no public constructor, `Show` instance, Code conversion, or Audit encoder. Its
+marker constructor is removed from both the public name and derived-hash
+indexes. Both `secret.read : (SecretRef) -> Secret` and
+`secret.expose : (Secret) -> Text` are `once` operations, so the authority to
+obtain plaintext remains visible in the `Secret` effect row.
+
+The standard library deliberately does not invent a credential store or select
+a vault provider. `Prelude.install_secret_fixed` supplies deterministic exact
+fixtures for hermetic tests. `Prelude.install_secret_vault` accepts an injected
+adapter whose closed failure type cannot carry backend text or values.
+`--allow secret` is the explicit live grant for the environment adapter; it
+looks up collision-free keys derived from the UTF-8 bytes of the safe
+`SecretRef`. Dry-run ignores that live grant, installs no Secret handler, and
+refuses the remaining row before lookup. Native and interpreter values retain
+distinct opaque tags. Generic rendering, runtime errors, traces, and
+`debug.inspect` always use the fixed marker `<secret redacted>`. This is an
+opacity boundary, not taint tracking: after explicit exposure the result is
+ordinary Text and code can copy or leak it. Keep exposure late and typed Audit
+inputs separate from plaintext.
+
 ### debug.inspect
 
 One reflection escape hatch, because agents debugging themselves need it. This
@@ -515,10 +539,10 @@ term declaration.
 debug.inspect : (a) ->{} Text
 ```
 
-It ignores abstraction, prints anything structurally, and breaks parametricity,
-which is why it is documented as a debugging tool, banned by convention from
-appearing in library code, and flagged as owner decision D8 in case even this is
-too much hole.
+It prints ordinary values structurally and breaks their abstraction, which is
+why it is documented as a debugging tool and banned by convention from library
+code. Secret is the hard exception: inspection returns exactly
+`<secret redacted>` and never touches its payload.
 
 ## 8. Names, versions, and the index
 

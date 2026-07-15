@@ -1,0 +1,16 @@
+# Effect-taxonomy ET.5 reconstructible integration overlay
+# Base commit: 9b402ae
+# Attestation manifest excludes itself and predecessor manifests.
+
+5c0e6e3dc239942f026f6cf55a078600c8612336dacf5c48358ef6568da0157e  docs/README.md
+c153abb65703b37ffce7a4faf5a86fe0904a87f439a9bfc24948498affd4efd2  docs/effect-taxonomy.md
+640948378f36a3cdb69dfff15b78dfcc3a38ed97ac00d2f8bcecaf4a8a3fa9ac  docs/release/0.1/DECISION.md
+643b7aaebf7bca647208035932252fb652a698e8c946a37487cca92f12f61a04  docs/release/0.1/EVIDENCE.md
+d74291cce6934b640a3dad38e8f3baf029025de5090de6a5c132a71e588cdc80  docs/release/effect-linearity/EVIDENCE.md
+b07a42c2c48b6e41a9e867e0bd22953f307c200d0810fa4809bf815916f45c18  docs/release/effect-taxonomy/ET5-EVIDENCE.md
+fc2e9870b9f440167bedb383b285703a7e9f8f238bfea9f1336d809acd863e4b  docs/release/surface-syntax/DECISION.md
+fc3ed9012fedc729365e79adc60226b602a89918410c6bc7ac8ad8c8b0d3214a  docs/stdlib.md
+1ed5d5478007851caa224767f343b6842d43ac8f8b692e295a8452bdcb8dfa4d  src/prelude.ml
+28686e884c5bc01fbe167ab5a8fee86fb81c7421f3fbf424e2fec3a84d1033d1  test/cli/secret.t
+951f3a2cadb8f04650387a978ac35e41b7c87985f2b5e28fb744f5a6a819d943  test/test_secret.ml
+1e676baa10c8e0c9d7d70dedbab285a7a41fcf329d73496e2e65f306d638a1c1  test/test_surface_laws.ml

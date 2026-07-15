@@ -368,3 +368,9 @@ approval.console 3
 approval.scripted 3
 approval.dry-run 3
 approval.policy-auto 3
+# --- 20-secret (ring 3 opaque authority boundary)
+secret-ref 3
+secret 3
+expose 3
+secret.read 3
+secret.expose 3
