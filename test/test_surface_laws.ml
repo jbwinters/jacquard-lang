@@ -294,6 +294,7 @@ let doctest_names () =
   [
     "README.md";
     "docs/effect-taxonomy.md";
+    "docs/concurrency.md";
     "docs/tutorial.md";
     "docs/stdlib.md";
     "docs/warp-testing.md";
@@ -841,7 +842,7 @@ let validate_release_docs ~decision ~followups ~index =
           [ "opam exec -- dune build @all"; "exit 0" ];
           [
             "opam exec -- dune runtest --force";
-            "exit 0; compiled Alcotest inventory is exactly 572 cases";
+            "exit 0; compiled Alcotest inventory is exactly 573 cases";
           ];
           [ "opam exec -- dune fmt"; "exit 0; no task-file byte changes" ];
           [
@@ -851,7 +852,7 @@ let validate_release_docs ~decision ~followups ~index =
           ];
           [
             "opam exec -- dune runtest test/docs-doctest --force";
-            "exit 0; exactly 22 named doctests pass";
+            "exit 0; exactly 24 named doctests pass";
           ];
           [
             "JACQUARD_PRELUDE=$PWD/prelude opam exec -- dune exec jac -- run \

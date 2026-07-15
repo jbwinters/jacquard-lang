@@ -94,18 +94,19 @@ The one-law schema is exactly
 performing `async.spawn` must make the caller row gain `{Async | e}`, so a
 child cannot launder authority out of its parent signature.
 
-SC.0 admits an effect's own name inside its operation rows and gives a direct
-resolved `async.spawn` application the narrow special typing rule that unions
-the solved thunk row into its caller as `{Async | e}`. The executable
-concurrency fixtures pin the resulting `{Async, Net}` signature and reject a
-laundering `{Async}` annotation. Generic operation typing remains unchanged,
-and higher-order aliases, wrappers, and returned closures are deliberately not
-claimed until SC.4 closes them. `Async` is still reserved: SC.3 represents
-opaque run/scope-local Task values, but does not implement a scheduler,
-executable scopes, or a root handler. See
+SC.4 admits an effect's own name inside its operation rows and gives the exact
+resolved `async.spawn` identity a dependent operation scheme: its thunk and
+caller share `{Async | e}`. The dependency survives aliases, higher-order
+wrappers, returned closures, tuples, polymorphic row instantiation, and nested
+scopes. Executable concurrency fixtures pin `{Async, Net}` before a scope and
+`{Net}` after one, and reject misleading closed annotations and cyclic rows.
+Generic operation typing remains unchanged. `Async` is still reserved: SC.3
+represents opaque run/scope-local Task values, while SC.4 adds only the static
+non-laundering rule; neither milestone implements a scheduler, executable
+scopes, or a root handler. See
 [`concurrency.md`](concurrency.md).
 
-The reserved interface nevertheless has a full identity because SC.0 makes it
+The reserved interface nevertheless has a full identity because SC.4 keeps it
 checker-privileged. Its HASH_V0 identity is
 `4ff8ce05ab09968163492b3be40fc91381b47dee5fb4b2980f9416d50f38e66f`,
 structurally derived from the exact `Task`, `TaskResult`, four operation
