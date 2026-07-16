@@ -882,6 +882,47 @@ static void test_grant_fallback(void) {
   free(rt.hs);
 }
 
+static void test_inert_task_handles(void) {
+  int run_a = 0, run_b = 0;
+  uint32_t root[] = { 0 };
+  uint32_t nested[] = { 0, 2 };
+  jq_value task = JQ_UNIT;
+  CHECK(jq_task_create(&run_a, nested, 2, 3, &task) == JQ_TASK_VALID,
+        "task deterministic ID constructs");
+  CHECK(jq_block_of(task)->tag == JQ_TASK, "task has a distinct opaque native tag");
+  CHECK(jq_task_validate(task, &run_a, nested, 2) == JQ_TASK_VALID,
+        "task validates in its owning run and scope");
+  CHECK(jq_task_validate(task, &run_b, nested, 2) == JQ_TASK_FOREIGN_RUN,
+        "task rejects cross-run reuse");
+  CHECK(jq_task_validate(task, &run_a, root, 1) == JQ_TASK_FOREIGN_SCOPE,
+        "task rejects cross-scope reuse");
+  CHECK(jq_task_validate(jq_int(7), &run_a, root, 1) == JQ_TASK_MALFORMED,
+        "malformed task diagnoses without a crash");
+  char *shown = jq_show(task);
+  CHECK(strcmp(shown, "<task>") == 0, "native task diagnostics remain opaque");
+  free(shown);
+  jq_drop(task);
+  CHECK(jq_task_create(&run_a, (uint32_t[]){ 1 }, 1, 0, &task) == JQ_TASK_MALFORMED,
+        "invalid task path diagnoses without allocation");
+  uint16_t max_scope_len = JQ_TASK_MAX_SCOPE_LEN;
+  uint32_t *deep = calloc(max_scope_len + 1, sizeof(*deep));
+  if (!deep) abort();
+  for (uint32_t i = 1; i <= max_scope_len; i++) deep[i] = JQ_TASK_MAX_COMPONENT;
+  CHECK(jq_task_create(&run_a, deep, max_scope_len, JQ_TASK_MAX_COMPONENT, &task) == JQ_TASK_VALID,
+        "native uint32/uint16 Task ID boundary constructs");
+  CHECK(jq_task_validate(task, &run_a, deep, max_scope_len) == JQ_TASK_VALID,
+        "native maximum Task ID validates");
+  jq_block_of(task)->payload[2 + max_scope_len] =
+    (uint64_t)JQ_TASK_MAX_COMPONENT + UINT64_C(1);
+  CHECK(jq_task_validate(task, &run_a, deep, max_scope_len) == JQ_TASK_MALFORMED,
+        "native Task spawn index one past uint32 diagnoses");
+  jq_drop(task);
+  CHECK(jq_task_create(&run_a, deep, (uint16_t)(max_scope_len + 1), 0, &task) ==
+            JQ_TASK_MALFORMED,
+        "native Task block depth overflow diagnoses");
+  free(deep);
+}
+
 int main(int argc, char **argv) {
   /* fatal-path modes: check.sh asserts the message and exit code 2 */
   if (argc > 1 && strcmp(argv[1], "div0") == 0) {
@@ -947,6 +988,7 @@ int main(int argc, char **argv) {
   test_perform_outer_continuation();
   test_clause_pushes_handler();
   test_grant_fallback();
+  test_inert_task_handles();
   test_capture_single_resume();
   test_once_instances_are_independent();
   test_multishot_two_resumes();

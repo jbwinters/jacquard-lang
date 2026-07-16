@@ -56,6 +56,17 @@ prompt 3
 mk-prompt 3
 infer 3
 complete 3
+# --- 03-concurrency (ring 2; declarations only, no scheduler/root handler)
+task 2
+task-result 2
+done 2
+failed 2
+cancelled 2
+async 2
+async.spawn 2
+async.await 2
+async.cancel 2
+async.yield 2
 # --- 04-builtins
 add 0
 sub 0
