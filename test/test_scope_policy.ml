@@ -339,6 +339,77 @@ let prop_collect_is_input_ordered =
       close scope;
       actual = Ok (Scope_policy.Collect_result expected))
 
+let prop_fail_fast_agrees_with_frozen_first_failure =
+  QCheck.Test.make ~count:200
+    ~name:"fail-fast selection agrees with the frozen first_failure relation" QCheck.nat_small
+    (fun seed ->
+      let count = 1 + (seed mod 8) in
+      let scope, _ = Structured_scope.create ~body_resume:(-1) |> ok in
+      let children =
+        List.init count (fun index -> Structured_scope.spawn scope ~resume:index |> ok)
+      in
+      let entries =
+        List.mapi
+          (fun index child ->
+            let result =
+              match (seed + index) mod 3 with
+              | 0 ->
+                  finish_done scope child index;
+                  Concurrency_contract.Done index
+              | 1 ->
+                  let message = Printf.sprintf "failure-%d" index in
+                  finish_failed scope child message;
+                  Concurrency_contract.Failed message
+              | _ ->
+                  finish_cancelled scope child ~resume:(100 + index) ~drop:ignore;
+                  Concurrency_contract.Cancelled
+            in
+            (index, child, result))
+          children
+      in
+      let scheduled =
+        entries
+        |> List.sort (fun (left, _, _) (right, _, _) ->
+            Int.compare (Hashtbl.hash (seed, left)) (Hashtbl.hash (seed, right)))
+        |> List.mapi (fun decision (index, child, result) -> (decision, index, child, result))
+      in
+      let decision_for index =
+        scheduled
+        |> List.find_map (fun (decision, candidate, _, _) ->
+            if candidate = index then Some decision else None)
+        |> Option.get
+      in
+      let completions : int Concurrency_contract.completion list =
+        List.map
+          (fun (index, child, result) ->
+            ({ sequence = decision_for index; task = Structured_scope.id scope child |> ok; result }
+              : int Concurrency_contract.completion))
+          entries
+      in
+      let expected =
+        match Concurrency_contract.first_failure completions with
+        | Some { result = Concurrency_contract.Failed message; _ } ->
+            Concurrency_contract.Failed message
+        | Some { result = Concurrency_contract.Cancelled; _ } -> Concurrency_contract.Cancelled
+        | Some { result = Concurrency_contract.Done _; _ } -> assert false
+        | None ->
+            Concurrency_contract.Done
+              (List.map
+                 (function
+                   | _, _, Concurrency_contract.Done value -> value
+                   | _, _, (Concurrency_contract.Failed _ | Concurrency_contract.Cancelled) ->
+                       assert false)
+                 entries)
+      in
+      let policy = Scope_policy.create scope ~children |> ok in
+      List.iter
+        (fun (decision, _, child, _) ->
+          Scope_policy.record_terminal policy ~decision child ~drop:ignore |> ok)
+        scheduled;
+      let actual = Scope_policy.finish policy in
+      close scope;
+      actual = Ok (Scope_policy.Fail_fast_result expected))
+
 let run () =
   test_zero_and_one_default ();
   test_fail_fast_cancels_in_input_order ();
@@ -349,4 +420,5 @@ let run () =
   test_cancellation_before_failure_keeps_first_decision ();
   test_cancellation_cleanup_survives_drop_failure ();
   test_exact_diagnostics ();
-  QCheck.Test.check_exn prop_collect_is_input_ordered
+  QCheck.Test.check_exn prop_collect_is_input_ordered;
+  QCheck.Test.check_exn prop_fail_fast_agrees_with_frozen_first_failure

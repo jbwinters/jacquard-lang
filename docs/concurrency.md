@@ -317,6 +317,11 @@ points, in this exact contract order:
 3. any effect operation routed through the scheduler, including Async
    operations and scheduler-mediated world operations.
 
+There is no preemption between those boundaries. A child that spins forever
+without reaching await, yield, or a routed effect cannot observe a pending
+cancellation request and can therefore prevent fail-fast scope drain. C1 makes
+no progress guarantee for such a child.
+
 At every boundary the scheduler checks an already requested cancellation
 before executing the routed operation. Thus cancellation delivered at spawn
 creates no child, and cancellation delivered at await registers no waiter.

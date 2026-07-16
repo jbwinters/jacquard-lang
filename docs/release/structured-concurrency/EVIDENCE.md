@@ -261,9 +261,12 @@ sibling cancellation, mixed collect results, nested policies,
 failure-before-cancellation and cancellation-before-failure commitment, cleanup
 after a destruction-callback exception, and exact E0907/E0908 diagnostics. A
 200-case QCheck law permutes terminal observation order while proving collect
-output stays in input order. The `scope-policy.t` transcript runs the same
-decision trace twice, byte-compares it, and pins both aggregate renderings.
-These tests use no host clock, thread, scheduler queue, or root handler.
+output stays in input order. A second 200-case law generates mixed terminal
+results and decision permutations, then proves incremental fail-fast selection
+agrees exactly with the frozen `Concurrency_contract.first_failure` relation.
+The `scope-policy.t` transcript runs the same decision trace twice,
+byte-compares it, and pins both aggregate renderings. These tests use no host
+clock, thread, scheduler queue, or root handler.
 
 ## Reconstruction and verification
 
