@@ -12,4 +12,5 @@
   (source_tree ../native-gauntlet)
   ../once_interpreter_probe.exe
   ../gen_once_hostile.exe
+  (source_tree ../native-parallel)
   (source_tree ../../scripts)))

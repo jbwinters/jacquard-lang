@@ -38,13 +38,12 @@ continuation's memory is freed by the RC runtime, but external resources it
 held are the cancellation-cleanup problem, owned by the concurrency design's
 scope rules, not by this mode.
 
-Per-instance matters and deserves its paragraph. A multi-shot region (an
+Per-instance matters. A multi-shot region (an
 enumeration) wrapped around code that performs a `once` operation is legal:
 each resumed branch re-executes the perform freshly, and each fresh
 continuation instance is itself resumed at most once. Semantically that is
-"every world touches the world," which is correct and occasionally unwise
-(enumerating over live Net), and unwisdom is a lint, not a mode violation
-(§7).
+"every world touches the world." Enumerating over live Net can still be
+surprising, but that is a lint concern rather than a mode violation (§7).
 
 ## 3. Kernel change, hash-stable
 
@@ -157,8 +156,7 @@ scrutinees use the conservative summary.
 The runtime trap stays as the backstop regardless: a second resume of a
 `once` continuation is a defect with its own E-code, dynamically enforced
 always (the copy-on-resume machinery already counts). Static where checkable,
-dynamic everywhere, which is the same belt-and-suspenders stance the grant
-system takes.
+dynamic everywhere, matching the grant system's layered enforcement.
 
 ## 6. Stdlib mode assignments
 
@@ -181,7 +179,7 @@ operations must be once. No such effect is currently shipped in the bootstrap
 prelude, so they are a review rule rather than invented manifest rows.
 
 Almost everything is `once`. Multi-shot is the rare, deliberate search
-mechanism, and the type system now says so instead of relying on folklore.
+mechanism, and the type system records that distinction.
 
 ### Migration boundary
 
