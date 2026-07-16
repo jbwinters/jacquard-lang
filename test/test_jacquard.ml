@@ -22,6 +22,10 @@ let () =
       ("quote", Test_quote.suite);
       ("prelude", Test_prelude.suite);
       ("effect-taxonomy", Test_effect_taxonomy.suite);
+      ("audit", Test_audit.suite);
+      ("secret", Test_secret.suite);
+      ("audit-chain", Test_audit_chain.suite);
+      ("approval", Test_approval.suite);
       ("types", Test_types.suite);
       ("check", Test_check.suite);
       ("tier", Test_tier.suite);
