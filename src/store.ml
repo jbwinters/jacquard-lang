@@ -4,8 +4,10 @@
     - [objects/<decl-hash-hex>.jqd] — the canonical printed form of one resolved declaration,
       written once and never modified (immutable; a re-put of an alpha-equivalent declaration keeps
       the first bytes).
-    - [names.jqd] — the name-to-hash index, the only mutable file. Each entry is a
-      [(named <name> <kind> #<hash>)] form, kinds [term|con|op|type|effect], kept sorted.
+    - [names.jqd] — the public index, the only mutable file. Named entries are
+      [(named <name> <kind> #<hash>)] forms, kinds [term|con|op|type|effect], kept sorted;
+      [(hidden #<derived-hash>)] entries persist opaque host-value members that must not be
+      reconstructed by direct hash after reopen.
 
     Derived hashes (defterm members, constructors, operations) have no object files of their own; an
     in-memory index from every known hash to its owning declaration is rebuilt by scanning
@@ -22,6 +24,7 @@ type located = { decl : Kernel.decl; decl_hash : Hash.t; role : role }
 type t = {
   root : string;
   mutable names : (string * Resolve.entry) list; (* sorted by name *)
+  mutable hidden : Hash.t list; (* sorted derived hashes intentionally absent from public lookup *)
   mutable index : (Hash.t * (Hash.t * role)) list; (* any hash -> owning decl hash + role *)
 }
 
@@ -76,17 +79,18 @@ let sort_names ns =
       | c -> c)
     ns
 
-let render_names names =
+let render_names names hidden =
   Printer.print_all
     (List.map
        (fun (n, { Resolve.hash; kind }) ->
          Form.form "named" [ Form.Sym n; Form.Sym (kind_sym kind); Form.Hash hash ])
-       names)
+       names
+    @ List.map (fun hash -> Form.form "hidden" [ Form.Hash hash ]) hidden)
 
 let write_names t =
   (* render fully before opening: open_out_bin truncates, and a render failure after
      truncation would destroy the index *)
-  let rendered = render_names t.names in
+  let rendered = render_names t.names t.hidden in
   let oc = open_out_bin (names_file t) in
   Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () -> output_string oc rendered)
 
@@ -94,17 +98,18 @@ let parse_names ~file src =
   match Reader.parse_string ~file src with
   | Error ds -> Error ds
   | Ok forms ->
-      let rec go acc = function
-        | [] -> Ok (List.rev acc)
+      let rec go names hidden = function
+        | [] -> Ok (List.rev names, List.sort_uniq Hash.compare hidden)
         | { Form.head = "named"; args = [ Form.Sym n; Form.Sym k; Form.Hash h ]; _ } :: rest -> (
             match kind_of_sym k with
             | Some _ when Concurrency_contract.is_task_private_hash h ->
                 Error [ private_name_diagnostic n h ]
-            | Some kind -> go ((n, { Resolve.hash = h; kind }) :: acc) rest
+            | Some kind -> go ((n, { Resolve.hash = h; kind }) :: names) hidden rest
             | None -> err ~code:"E0603" "corrupt names.jqd: unknown kind `%s`" k)
+        | { Form.head = "hidden"; args = [ Form.Hash h ]; _ } :: rest -> go names (h :: hidden) rest
         | f :: _ -> err ~code:"E0603" "corrupt names.jqd: unexpected `%s` form" f.Form.head
       in
-      go [] forms
+      go [] [] forms
 
 (* --- objects --- *)
 
@@ -144,18 +149,19 @@ let index_entries (decl : Kernel.decl) (hs : Canon.decl_hashes) =
     from the object files. A persisted name exposing a scheduler-private hash is rejected with E0907
     before the index becomes observable. *)
 let open_store root : (t, Diag.t list) result =
-  let t = { root; names = []; index = [] } in
+  let t = { root; names = []; hidden = []; index = [] } in
   if not (Sys.file_exists root) then Sys.mkdir root 0o755;
   if not (Sys.file_exists (objects_dir t)) then Sys.mkdir (objects_dir t) 0o755;
   let names_res =
     if Sys.file_exists (names_file t) then
       parse_names ~file:(names_file t) (read_file (names_file t))
-    else Ok []
+    else Ok ([], [])
   in
   match names_res with
   | Error ds -> Error ds
-  | Ok names -> (
+  | Ok (names, hidden) -> (
       t.names <- names;
+      t.hidden <- hidden;
       let rec scan acc = function
         | [] -> Ok acc
         | file :: rest -> (
@@ -176,7 +182,8 @@ let open_store root : (t, Diag.t list) result =
       with
       | Error ds -> Error ds
       | Ok index ->
-          t.index <- index;
+          t.index <-
+            List.filter (fun (hash, _) -> not (List.exists (Hash.equal hash) t.hidden)) index;
           Ok t)
 
 let entry_kind (decl : Kernel.decl) = function
@@ -230,7 +237,10 @@ let put_decl ?origin t (decl : Kernel.decl) : (Canon.decl_hashes, Diag.t list) r
               close_out oc
             with Sys_error m -> Printf.eprintf "origin sidecar unwritable (%s)\n%!" m)
       | None -> ());
-      let fresh = index_entries decl hs in
+      let fresh =
+        index_entries decl hs
+        |> List.filter (fun (hash, _) -> not (List.exists (Hash.equal hash) t.hidden))
+      in
       t.index <- fresh @ List.filter (fun (h, _) -> not (List.mem_assoc h fresh)) t.index;
       let new_names =
         List.filter_map
@@ -331,6 +341,22 @@ let lookup_name t n = match lookup_all t n with [] -> None | e :: _ -> Some e
 
 (** All name bindings, sorted by (name, kind rank) — the whole mutable index. *)
 let names t = t.names
+
+(** [hide_derived t hash] removes a known member, constructor, or operation from both public store
+    indexes while preserving its owning immutable declaration object. Prelude loading uses this for
+    marker constructors of opaque host values: neither a name nor a direct derived-hash reference
+    may reconstruct such a value. Unknown and whole-declaration hashes are left unchanged. *)
+let hide_derived t hash =
+  match List.find_opt (fun (candidate, _) -> Hash.equal candidate hash) t.index with
+  | Some (_, (_, (Member _ | Constructor _ | Operation _))) ->
+      t.hidden <- List.sort_uniq Hash.compare (hash :: t.hidden);
+      t.index <- List.filter (fun (candidate, _) -> not (Hash.equal candidate hash)) t.index;
+      t.names <-
+        List.filter
+          (fun (_, (entry : Resolve.entry)) -> not (Hash.equal entry.Resolve.hash hash))
+          t.names;
+      write_names t
+  | Some (_, (_, Whole)) | None -> ()
 
 (** [names_view t] is the resolver's view of this store (the W1.4 seam). *)
 let names_view t : Resolve.names =

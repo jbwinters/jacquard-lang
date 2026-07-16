@@ -117,7 +117,7 @@ For readers who speak programming languages:
 The prototype is complete against its original core plan and has since added
 the public surface syntax, ringed standard library, Warp properties and cache,
 native compilation, packaged binaries, and product-scale case studies. The RC1
-semantic boundary is pinned by 554 Alcotest/QCheck cases, 32 cram transcripts,
+semantic boundary is pinned by 604 Alcotest/QCheck cases, 33 cram transcripts,
 21 documentation examples, native sanitizer/leak/fuzz lanes, and a fresh-clone
 evidence workflow. RC2 repaired binary-demo packaging; RC3 adds an explicit
 runtime/output license exception and packages the native runtime. The current
