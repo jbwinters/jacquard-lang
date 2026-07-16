@@ -79,7 +79,8 @@ A. Ordinary in-language Once resumptions share this private owner check.
 
 ## Async boundary and parity
 
-All four Async operations are reviewed as `once`; no handler is installed.
+All four Async operations are reviewed as `once`; the taxonomy still marks
+Async as reserved, and no handler or built-in `--allow` grant is installed.
 Direct evaluator calls therefore reach the ordinary `Unhandled` result for
 spawn, await, cancel, and yield. The CLI rejects an unhandled Async program at
 its effect gate with E0814. Neither path schedules work or grants ambient
@@ -158,6 +159,11 @@ git diff --exit-code
 opam exec -- dune build @doc
 ```
 
+Expected results are zero exits, 602 compiled Alcotest/QCheck cases, 34 cram
+transcripts, and 24 doctest examples across 7 documents.
+
 Scheduling policy, executable scopes, effect routing, and the root handler
 remain later C1 tasks. The SC.5 core supplies cancellation request/delivery
-state transitions but does not decide when a routed operation is reached.
+state transitions but does not decide when a routed operation is reached. SC.4
+also remains responsible for the general higher-order non-laundering proof
+beyond SC.0's direct-spawn rule.

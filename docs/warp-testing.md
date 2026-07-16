@@ -70,8 +70,8 @@ in the prelude and standalone signatures are not complete surface source.
 check.true : (Bool, Text) ->{Check} ()
 check.eq : forall a. (a, a, Eq a, Show a, Text) ->{Check} ()
 check.some : forall a b. (Option a, b, Text) ->{Check} ()
-check.fails : forall a | e. (() ->{Abort, Check | e} a, Text) ->{Check | e} ()
-check.throws : forall a b | e. (() ->{Check, Throw | e} a, (b) ->{Check | e} Bool, Show b, Text) ->{Check | e} ()
+check.fails : forall a | e. (() ->{Abort | e} a, Text) ->{Check | e} ()
+check.throws : forall a b | e. (() ->{Throw | e} a, (b) ->{| e} Bool, Show b, Text) ->{Check | e} ()
 ```
 
 `check.fails` deserves a note: testing a failure path means handling the failure,

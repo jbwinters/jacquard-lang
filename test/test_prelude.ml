@@ -191,15 +191,15 @@ let test_loads_with_zero_diagnostics () =
           | Error diagnostics -> Eval_support.fail_diags ("force prelude term " ^ name) diagnostics));
   let expected_world_handlers =
     [
-      ("infer.scripted", "forall a | e. (() ->{Infer, Throw | e} a, List Text) ->{Throw | e} a");
+      ("infer.scripted", "forall a | e. (() ->{Infer | e} a, List Text) ->{Throw | e} a");
       ("net.record", "forall a | e. (() ->{Net | e} a) ->{Net | e} (a, Code)");
-      ("test.replay", "forall a. (Code, () ->{Net, Throw} a) ->{Throw} a");
-      ("net.scripted", "forall a | e. (() ->{Net, Throw | e} a, List Response) ->{Throw | e} a");
-      ("console.scripted", "forall a | e. (() ->{Console, Throw | e} a, List Text) ->{Throw | e} a");
+      ("test.replay", "forall a. (Code, () ->{Net} a) ->{Throw} a");
+      ("net.scripted", "forall a | e. (() ->{Net | e} a, List Response) ->{Throw | e} a");
+      ("console.scripted", "forall a | e. (() ->{Console | e} a, List Text) ->{Throw | e} a");
       ( "fs.in-memory",
-        "forall a | e. (() ->{Fs, Throw | e} a, `type:map.t` Text Text) ->{Throw | e} (a, \
-         `type:map.t` Text Text)" );
-      ("test.replay-loose", "forall a. (Code, () ->{Net, Check, Throw} a) ->{Check, Throw} a");
+        "forall a | e. (() ->{Fs | e} a, `type:map.t` Text Text) ->{Throw | e} (a, `type:map.t` \
+         Text Text)" );
+      ("test.replay-loose", "forall a. (Code, () ->{Net} a) ->{Check, Throw} a");
     ]
   in
   List.iter
@@ -495,7 +495,11 @@ let test_handler_overrides_grant () =
   Alcotest.(check string) "handler swallowed the print" "" (Buffer.contents buf)
 
 (* Hostile host-value tests intentionally forge the private payload representation with [Obj.magic].
-   Ordinary library code cannot name [Task_handle.t], and Eval exposes no Task constructor. *)
+   Ordinary library code cannot name [Task_handle.t], and Eval exposes no Task constructor. This
+   helper depends on two private layouts: [ctx.task_run] is field 1 of the evaluation context, and
+   [Task_handle.t] is a three-field block ordered [(run, scope_path, spawn_index)]. Reordering
+   either representation requires updating this helper; otherwise it can forge the wrong value and
+   make these hostile-boundary tests pass or fail for accidental layout reasons. *)
 let foreign_task ~scope_path ~spawn_index =
   Value.VTask (Obj.magic (ref (), scope_path, spawn_index))
 

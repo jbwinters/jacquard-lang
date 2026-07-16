@@ -7,7 +7,7 @@
 # expected error line. Runs with no grants and no stdin, so every eligible
 # program is deterministic on both engines.
 #
-# Usage: scripts/native-diff.sh [FILE.jqd ...]   (default: the full walk)
+# Usage: scripts/native-diff.sh [FILE.jac|FILE.jqd ...]   (default: the full retained-carrier walk)
 # Env: JACQUARD (default `dune exec jacquard --`), JACQUARD_PRELUDE,
 #      JACQUARD_RUNTIME, CC (clang required by the native v1 toolchain).
 set -u
