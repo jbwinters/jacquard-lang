@@ -57,6 +57,10 @@ Read these together when judging whether the release candidate is credible:
 - `release/surface-syntax/MANIFEST.sha256`: historical surface-syntax evidence
   integrity set, validated by the surface manifest checker. Successor milestones
   publish separate reconstructible overlays rather than extending this set.
+- `release/dx-jac-export/DECISION.md`: DX.2 direct `.jac` native build and
+  explicit deterministic bootstrap-export decision, guarantees, and non-goals.
+- `release/dx-jac-export/EVIDENCE.md`: successor-only inventory, filesystem
+  adversarial coverage, native carrier parity, and reproduction commands.
 
 ## Effect Linearity Evidence
 
