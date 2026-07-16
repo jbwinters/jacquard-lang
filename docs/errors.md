@@ -120,7 +120,7 @@ answer is immediately eliminated; binding or duplicating an answer that could ca
 emits E0817. Binding, returning, storing, passing, or aliasing the handler result
 also emits E0817; consuming the captured resumption twice emits E0816.
 
-## Probabilistic inference (E09xx)
+## Runtime and probabilistic inference (E09xx)
 
 | code | meaning | example |
 |------|---------|---------|
@@ -130,6 +130,7 @@ also emits E0817; consuming the captured resumption twice emits E0816.
 | E0904 | observe at the sampling root | `observe` under `jacquard run --allow dist` (D7 default: defect) |
 | E0905 | exhaustive verification budget exceeded | a property over `uniform-int(1, 1000000)` under `jacquard test --exhaustive` |
 | E0906 | a once continuation was resumed more than once | applying the same once resumption twice |
+| E0907 | a Task escaped or outlived its structured scope | returning a Task from `async.scope` or reusing it after scope close |
 
 ## Warp (E10xx)
 

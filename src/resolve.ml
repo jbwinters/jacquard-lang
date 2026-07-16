@@ -14,7 +14,7 @@
     against the same index and must have the matching kind. [Quote] payloads are data and are left
     unresolved, except that every [(unquote e)] splice inside them is resolved (splices evaluate).
 
-    The store dependency is the seam the plan calls out: resolution takes a {!names} record; W1.4
+    The store dependency is the seam the plan calls out: resolution takes a [names] record; W1.4
     tests it against an in-memory stub and W1.6's store provides the real one.
 
     Diagnostics (accumulated; resolution visits the whole tree): E0301 unknown name (with near-miss
@@ -167,10 +167,12 @@ let rec resolve_pat st ~locals (p : Kernel.pat) : Kernel.pat =
   in
   { p with Kernel.it }
 
-(* [tyself] is the enclosing type/effect declaration's own name: a [tref] to it stays
-   [Named] (a recursive type cannot contain its own hash; canonicalization serializes the
-   self-reference with a dedicated tag, spec/serialization.md). *)
-let rec resolve_ty st ~locals ~tyself (t : Kernel.ty) : Kernel.ty =
+(** [resolve_ty st ~locals ~tyself ~effectself ty] resolves type and effect references while
+    retaining the enclosing nominal type reference [tyself] and enclosing row reference [effectself]
+    as [Named]. Those two recursive identities cannot contain their declaration hash;
+    canonicalization assigns them dedicated bytes. Unknown and wrong-kind references are retained
+    and accumulated in [st] as E0301/E0302, so callers must finish through [run]. *)
+let rec resolve_ty st ~locals ~tyself ~effectself (t : Kernel.ty) : Kernel.ty =
   let it =
     match t.Kernel.it with
     | Kernel.TRef (Kernel.Named n) when tyself = Some n -> Kernel.TRef (Kernel.Named n)
@@ -181,25 +183,33 @@ let rec resolve_ty st ~locals ~tyself (t : Kernel.ty) : Kernel.ty =
     | Kernel.TVar _ as it -> it
     | Kernel.TApp (head, args) ->
         Kernel.TApp
-          (resolve_ty st ~locals ~tyself head, List.map (resolve_ty st ~locals ~tyself) args)
+          ( resolve_ty st ~locals ~tyself ~effectself head,
+            List.map (resolve_ty st ~locals ~tyself ~effectself) args )
     | Kernel.TArrow (params, row, result) ->
         Kernel.TArrow
-          ( List.map (resolve_ty st ~locals ~tyself) params,
-            resolve_row st ~locals row,
-            resolve_ty st ~locals ~tyself result )
-    | Kernel.TTuple items -> Kernel.TTuple (List.map (resolve_ty st ~locals ~tyself) items)
+          ( List.map (resolve_ty st ~locals ~tyself ~effectself) params,
+            resolve_row st ~locals ~effectself row,
+            resolve_ty st ~locals ~tyself ~effectself result )
+    | Kernel.TTuple items ->
+        Kernel.TTuple (List.map (resolve_ty st ~locals ~tyself ~effectself) items)
     | Kernel.TForall (tvs, rvs, body) ->
-        Kernel.TForall (tvs, rvs, resolve_ty st ~locals ~tyself body)
+        Kernel.TForall (tvs, rvs, resolve_ty st ~locals ~tyself ~effectself body)
   in
   { t with Kernel.it }
 
-and resolve_row st ~locals (r : Kernel.row) : Kernel.row =
+(** [resolve_row st ~locals ~effectself row] resolves every ordinary row member as an effect hash.
+    Only a member equal to the enclosing effect name remains [Named]; with [effectself = None], no
+    unresolved row name is accepted. Diagnostics accumulate in [st] as for {!resolve_ty}. *)
+and resolve_row st ~locals ~effectself (r : Kernel.row) : Kernel.row =
   {
     r with
     Kernel.effects =
       List.map
-        (resolve_gref st ~meta:r.Kernel.wmeta ~locals ~expected_kind:KEffect
-           ~expected_desc:"an effect" ~what:"effect")
+        (function
+          | Kernel.Named n when effectself = Some n -> Kernel.Named n
+          | effect_ref ->
+              resolve_gref st ~meta:r.Kernel.wmeta ~locals ~expected_kind:KEffect
+                ~expected_desc:"an effect" ~what:"effect" effect_ref)
         r.Kernel.effects;
   }
 
@@ -343,7 +353,8 @@ let rec resolve_expr_in st ~group ~locals (e : Kernel.expr) : Kernel.expr =
   | Kernel.Ann (subject, ty) ->
       mk
         (Kernel.Ann
-           (resolve_expr_in st ~group ~locals subject, resolve_ty st ~locals ~tyself:None ty))
+           ( resolve_expr_in st ~group ~locals subject,
+             resolve_ty st ~locals ~tyself:None ~effectself:None ty ))
 
 (* Quoted code stays data; only LIVE (level-0) unquote splices resolve. Nested quotes raise
    the quasiquote level; their unquotes are data until the inner quote itself evaluates. *)
@@ -375,7 +386,8 @@ and resolve_quote_payload st ~group ~locals ?(level = 0) (f : Form.t) : Form.t =
 let resolve_binding st ~group (b : Kernel.binding) : Kernel.binding =
   {
     b with
-    Kernel.annot = Option.map (resolve_ty st ~locals:[] ~tyself:None) b.Kernel.annot;
+    Kernel.annot =
+      Option.map (resolve_ty st ~locals:[] ~tyself:None ~effectself:None) b.Kernel.annot;
     value = resolve_expr_in st ~group ~locals:[] b.Kernel.value;
   }
 
@@ -410,7 +422,9 @@ let resolve_decl_in st (d : Kernel.decl) : Kernel.decl =
                         (fun fl ->
                           {
                             fl with
-                            Kernel.fty = resolve_ty st ~locals:[] ~tyself:(Some tname) fl.Kernel.fty;
+                            Kernel.fty =
+                              resolve_ty st ~locals:[] ~tyself:(Some tname) ~effectself:None
+                                fl.Kernel.fty;
                           })
                         c.Kernel.fields;
                   })
@@ -427,8 +441,12 @@ let resolve_decl_in st (d : Kernel.decl) : Kernel.decl =
                   {
                     o with
                     Kernel.op_params =
-                      List.map (resolve_ty st ~locals:[] ~tyself:(Some ename)) o.Kernel.op_params;
-                    op_result = resolve_ty st ~locals:[] ~tyself:(Some ename) o.Kernel.op_result;
+                      List.map
+                        (resolve_ty st ~locals:[] ~tyself:(Some ename) ~effectself:(Some ename))
+                        o.Kernel.op_params;
+                    op_result =
+                      resolve_ty st ~locals:[] ~tyself:(Some ename) ~effectself:(Some ename)
+                        o.Kernel.op_result;
                   })
                 ops;
           }
