@@ -17,7 +17,8 @@ visible to the checker and tools:
 - Definitions are content-addressed from canonical resolved structure after
   comments, formatting, spans, provenance, and ordinary local or term names
   are erased. This structural identity is not arbitrary program equivalence.
-- Handlers are deep and resumptions are reusable, including multi-shot use.
+- Handlers are deep. `multi` operations bind reusable continuations; `once`
+  operations bind affine `Resume` values with static and runtime reuse checks.
 
 This file is self-contained for public use. A repository checkout is needed
 only to develop the OCaml implementation, not to install or write Jacquard.
@@ -98,14 +99,20 @@ jac replay TRACE.jqd PROGRAM.jqd --to 12
 jac replay TRACE.jqd PROGRAM.jqd --fork '4=(response 503 "down")'
 jac tiers PROGRAM.jac
 
-# Native AOT currently consumes the kernel carrier.
-jac build PROGRAM.jqd -o program
+# Native AOT accepts public surface input directly.
+jac build PROGRAM.jac -o program
+jac export PROGRAM.jac -o PROGRAM.jqd  # explicit evidence/debug carrier only
 ./program --allow console
 ```
 
 `check --manifest` checks the inferred requirements against the supplied grant
 set and never runs the program. `run` loads declarations, then evaluates each
 bare top-level expression in order. Important exit codes are:
+
+`tiers` reports handler syntax and native lowering as separate tables. A
+tail-resumptive source shape is tokenless only for a `multi` operation; every
+`once` clause materializes the shared affine resume token, including a
+syntactically tail-resumptive clause.
 
 - `0`: success
 - `1`: checker or ordinary diagnostic failure
@@ -297,24 +304,30 @@ Labels document constructor fields but do not create record syntax, labeled
 patterns, or generated accessors. Construct values with `Canary(5)` and match
 positionally with `Canary(percent)`.
 
-### Effects And Deep Multi-Shot Handlers
+### Effects And Deep Mode-Aware Handlers
 
 Effects declare operations. Calling an operation looks like an ordinary call;
 there is no `perform` keyword.
 
 ```jacquard
-effect Choice where {
+multi effect Choice where {
   choose : () -> Bool
 }
 
-effect Abort a where {
+once effect Abort a where {
   abort : () -> a
 }
 ```
 
-A handler has one mandatory return clause and operation clauses. `resume`
-binds the captured continuation as an ordinary function. Calling it zero times
-aborts that path, once resumes normally, and more than once forks execution.
+A handler has one mandatory return clause and operation clauses. For a `multi`
+operation, `resume` binds a reusable continuation: calling it zero times aborts
+that path, once resumes normally, and more than once forks execution. For a
+`once` operation, it binds an affine `Resume` that may be dropped or consumed
+once on each possible execution path. The bounded syntactic affine analysis
+reports E0816 for a possible double consumption and E0817 for an unsupported
+escape; it is engineering enforcement, not a formal proof. The interpreter and
+native runtime independently report E0906 if one captured `once` instance is
+resumed twice.
 
 ```jacquard
 all-choices(body) =
@@ -610,20 +623,34 @@ diagnostics, not permissive fallbacks.
 
 ## Native Compilation
 
-`jac build` currently accepts the `.jqd` kernel carrier. It emits C for the
-reachable program, links the Jacquard runtime, and asks clang or gcc to compile
-with optimization and LTO. Native and interpreted behavior are expected to be
+`jac build` accepts `.jac` surface input directly as well as retained `.jqd`
+kernel input. It uses the same parse/lower/resolution path as check and hash,
+emits C for the reachable program, links the Jacquard runtime, and asks clang
+or gcc to compile with optimization and LTO. It does not generate a persistent
+bootstrap twin. Native and interpreted behavior are expected to be
 byte-identical for stdout, stderr, and exit status.
 
 ```sh
 # Installed releases discover the runtime automatically. In a checkout only:
 export JACQUARD_RUNTIME=/path/to/jacquard/runtime
-jac build program.jqd -o program
+jac build program.jac -o program
 ./program --allow console --seed 42
 ```
 
-The backend supports deep and multi-shot handlers, Dist, quotes, splices, and
-structural Code operations. Dynamic `eval` is interpreter-only and reports
+`jac export INPUT.jac -o OUTPUT.jqd` is the explicit conformance/debug escape
+hatch. Under the same prelude context, repeated exports are byte-identical and
+reparse to the same semantic top/member hashes; quoted constructor and
+operation intent remains encoded with `surface-ref-v0`. Publication is atomic
+and refuses an existing destination. The canonical bootstrap output erases
+comments, formatting, spans, documentation, and provenance metadata by design.
+Export validates parsing, resolution, and canonical identity, but does not
+typecheck; use `jac check`, `jac run`, or `jac build` for that guarantee.
+Materialize stdin or other non-seekable input before export.
+
+The backend supports deep handlers with both reusable `multi` continuations and
+affine `once` resumptions, including the E0906 repeated-resume backstop. It also
+supports Dist, quotes, splices, and structural Code operations. Dynamic `eval`
+is interpreter-only and reports
 E1102 when compiled. `--dry-run` and `--infer-cache` are interpreter tooling
 and compiled binaries refuse them. A C toolchain is required. Deep non-tail
 recursion uses the configured program stack; set `JACQUARD_STACK_MB` if needed.
@@ -648,8 +675,9 @@ source remain under Apache-2.0. See `RUNTIME-EXCEPTION.md`, `LICENSE`, and
 ## Bootstrap Carrier
 
 `.jqd` is the permanent kernel/debug carrier used by the prelude, replay,
-native build input, and implementation fixtures. It is an s-expression
-encoding of 27 fixed kernel forms. Ordinary users should write `.jac`.
+explicit export, and implementation fixtures. It is an s-expression encoding
+of 27 fixed kernel forms. Native build also accepts `.jqd`, but ordinary users
+should write and build `.jac` directly.
 
 The expression heads are `lit`, `var`, `ref`, `lam`, `app`, `let`, `match`,
 `tuple`, `handle`, `quote`, `unquote`, and `ann`; pattern heads are `pwild`,
@@ -692,8 +720,8 @@ Do not invent new kernel forms for surface sugar.
 
 ## Recommended Agent Workflow
 
-1. Write public code in `.jac`; use `.jqd` only for the explicit kernel/native
-   boundaries above.
+1. Write and build public code in `.jac`; use `.jqd` only for explicit
+   export, replay, prelude, or implementation-fixture boundaries above.
 2. Run `jac fmt --write FILE.jac`.
 3. Run `jac check FILE.jac --print-sigs` and review every inferred effect.
 4. For deployment, run `jac check FILE.jac --manifest ...` with the intended

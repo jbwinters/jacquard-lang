@@ -268,8 +268,37 @@ let test_declarations () =
           "(deftype fleet () (con mk-fleet (field inv (tref svc-mood)) (field pay (tref \
            svc-mood))))"));
   Alcotest.(check string)
-    "effect declaration" "effect Choice a where {\n  choose : () -> Bool\n}"
+    "effect declaration" "multi effect Choice a where {\n  choose : () -> Bool\n}"
     (print (top_ok "(defeffect choice ((tvar a)) (op choose () (tref bool)))"));
+  Alcotest.(check string)
+    "uniform once shorthand" "once effect Gate where {\n  enter : () -> ()\n}"
+    (print (top_ok "(defeffect gate () (op enter once () (ttuple)))"));
+  Alcotest.(check string)
+    "mixed modes remain per-operation"
+    "effect Control where {\n  once stop : () -> ()\n  multi branch : () -> ()\n}"
+    (print (top_ok "(defeffect control () (op stop once () (ttuple)) (op branch () (ttuple)))"));
+  List.iter
+    (fun source ->
+      let rendered = print (top_ok source) ^ "\n" in
+      match Surface_parse.parse_string ~file:"emitted-modes.jac" rendered with
+      | Error diagnostics -> Eval_support.fail_diags "emitted effect declaration parse" diagnostics
+      | Ok tops -> (
+          match Surface_lower.lower_tops tops with
+          | Error diagnostics ->
+              Eval_support.fail_diags "emitted effect declaration lowering" diagnostics
+          | Ok [ reparsed ] ->
+              Alcotest.(check bool)
+                (source ^ " emitted declaration inversion")
+                true
+                (Form.equal_ignoring_meta
+                   (Kernel.to_form (top_ok source))
+                   (Kernel.to_form reparsed))
+          | Ok _ -> Alcotest.fail "emitted effect declaration changed top count"))
+    [
+      "(defeffect gate () (op enter once () (ttuple)))";
+      "(defeffect choice () (op choose () (ttuple)))";
+      "(defeffect control () (op stop once () (ttuple)) (op branch () (ttuple)))";
+    ];
   Alcotest.(check string)
     "mutually recursive group" "even(n) = #group[1](n)\nodd(n) = #group[0](n)"
     (print

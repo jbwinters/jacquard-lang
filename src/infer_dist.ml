@@ -116,16 +116,18 @@ let pmf ctx (d : dist_v) (v : Value.t) : (float, Runtime_err.t) result =
 (* --- driving the machine --- *)
 
 (* Run a state to either a terminal value or the first root-reaching dist op. *)
-type outcome = Done of Value.t | Op of { name : string; args : Value.t list; resume : Value.t }
+type outcome =
+  | Done of Value.t
+  | Op of { name : string; args : Value.t list; resume : Eval.captured_kont }
 
 type validated_outcome =
   | Validated_done of Value.t
-  | Validated_op of { name : string; args : Value.t list; resume : Eval.validated_kont }
+  | Validated_op of { name : string; args : Value.t list; resume : Eval.validated_captured_kont }
 
 let run_until_op (ctx : Eval.ctx) (state : Eval.state) : (outcome, Runtime_err.t) result =
   match Eval.run_state_capturing ctx state with
   | Ok (Eval.CValue v) -> Ok (Done v)
-  | Ok (Eval.COp { name; args; kont; _ }) -> Ok (Op { name; args; resume = VResume kont })
+  | Ok (Eval.COp { name; args; kont; _ }) -> Ok (Op { name; args; resume = kont })
   | Error e -> Error e
 
 let run_until_op_validated (ctx : Eval.ctx) (state : Eval.validated_state) :
@@ -158,22 +160,27 @@ let enumerate (ctx : Eval.ctx) (model : Eval.state) : (posterior, Diag.t list) r
           incr branch_counter;
           leaves := { value = v; weight } :: !leaves;
           Ok ()
-      | Ok (Op { name = "sample"; args = [ dv ]; resume = VResume kont }) -> (
+      | Ok (Op { name = "sample"; args = [ dv ]; resume }) -> (
           match Result.bind (dist_of_value ctx dv) (support ctx) with
           | Error e -> Error e
           | Ok entries ->
               let rec branches = function
                 | [] -> Ok ()
                 | (x, p) :: rest -> (
-                    match explore (Eval.resume_state kont x) (weight *. p) with
+                    match Eval.resume_captured_state ctx resume x with
                     | Error e -> Error e
-                    | Ok () -> branches rest)
+                    | Ok state -> (
+                        match explore state (weight *. p) with
+                        | Error e -> Error e
+                        | Ok () -> branches rest))
               in
               branches entries)
-      | Ok (Op { name = "observe"; args = [ dv; v ]; resume = VResume kont }) -> (
+      | Ok (Op { name = "observe"; args = [ dv; v ]; resume }) -> (
           match Result.bind (dist_of_value ctx dv) (fun d -> pmf ctx d v) with
           | Error e -> Error e
-          | Ok p -> explore (Eval.resume_state kont Value.unit_v) (weight *. p))
+          | Ok p ->
+              Result.bind (Eval.resume_captured_state ctx resume Value.unit_v) (fun state ->
+                  explore state (weight *. p)))
       | Ok (Op { name; args; _ }) ->
           Error
             (Runtime_err.Type_error

@@ -14,6 +14,8 @@ type t =
   | Observe_at_root
       (** [observe] reached the root sampling handler (D7 default: a defect; observation needs an
           inference driver) *)
+  | Once_resumed_twice
+      (** a once resumption was applied after its captured instance had already been resumed *)
   | Type_error of string  (** applying a non-function, spliced non-code, and similar *)
   | Unresolved of string  (** an unresolved name or dangling hash reached evaluation *)
   | Eval_error of string  (** the gated [eval] op rejected its payload at the boundary *)
@@ -24,6 +26,8 @@ let to_string = function
   | Observe_at_root ->
       "observe reached the sampling root handler; observation requires an inference driver (use \
        jacquard infer)"
+  | Once_resumed_twice ->
+      "error[E0906]: a once continuation may be resumed at most once per captured instance"
   | Unhandled { effect_; op } ->
       Printf.sprintf "unhandled effect %s: operation `%s` reached the root without a handler"
         effect_ op

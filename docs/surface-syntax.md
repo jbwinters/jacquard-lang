@@ -25,17 +25,20 @@ roughly 1,900 lines written by two different models.
 Draft 0.2 supplied the reviewed design for the completed SS.0-SS.22
 implementation arc. This document now records both that design and the exact
 shipped boundary; it is not a claim that the whole surface grammar is stable or
-frozen. Decisions D27-D40 in section 10 remain the design record, with D36
+frozen. Decisions D27-D42 in section 10 remain the design record, with D36
 formally partial as described below. Any later revision must record and review
 its decision change rather than quietly choosing different syntax.
 
 This work is post-0.1 and follows the completed native differential harness
 (task 74). It is a projection onto the existing kernel, not a kernel revision.
-In particular, it does not change the 27 kernel forms, canonical serialization,
-HASH_V0, store objects, evaluator semantics, native semantics, or permanent
-support for bootstrap `.jqd` files. D38 and D39 completed in SS.22 as
-standard-library work without expanding the grammar. D36 generated accessors,
-D36 label validation, and Tier-F remain separate follow-ups.
+In particular, it does not change the 27 kernel forms, evaluator semantics,
+native semantics, or permanent support for bootstrap `.jqd` files. EL.1 added
+the hash-stable operation-mode field: legacy `multi` remains encoded by absence,
+while `once` adds its reviewed discriminator. EL.4 spends the reserved grammar
+headroom on explicit surface modes without changing that kernel contract. D38
+and D39 completed in SS.22 as standard-library work without expanding the
+grammar. D36 generated accessors and D36 label validation remain separate
+follow-ups.
 
 There is one explicit compatibility reservation in the generic pre-resolution form layer:
 `(surface-ref-v0 con name)` and `(surface-ref-v0 op name)`. Surface lowering uses these forms to
@@ -71,8 +74,11 @@ type-decl     := "type" type-name type-vars? "=" cont "|"? constructor (seps? "|
 constructor   := con-name type-atom*
 | con-name "(" fields? ")"
 field         := [term-name ":" cont] type
-effect-decl   := "effect" effect-name type-vars? "where" "{" seps? op-signature (seps op-signature)* seps? "}"
-op-signature  := op-name ":" cont "(" types? ")" "->" cont type
+effect-decl   := mode "effect" effect-name type-vars? "where" "{" seps? uniform-op-signature (seps uniform-op-signature)* seps? "}"
+| "effect" effect-name type-vars? "where" "{" seps? mode-op-signature (seps mode-op-signature)* seps? "}"
+uniform-op-signature := op-name ":" cont "(" types? ")" "->" cont type
+mode-op-signature := mode op-name ":" cont "(" types? ")" "->" cont type
+mode          := "once" | "multi"
 raw-top       := "jqd" raw-bootstrap-form
 
 expr          := call (cont "|>" cont call)*
@@ -209,7 +215,7 @@ type Fleet = | MkFleet(inv: SvcMood, pay: SvcMood, shp: SvcMood)
 Effect parameters may be unused by an operation:
 
 ```jacquard
-effect Choice a where {
+multi effect Choice a where {
   choose : () -> Bool
 }
 ```
@@ -388,7 +394,7 @@ dotted (`int.add(k, 1)`) until the trait decision lands, at which point
 operators arrive as method sugar on whatever that mechanism is. Dotted
 arithmetic is also, honestly, more reviewable: the type is in the name.
 
-Reserved keywords, the complete list: `type effect fn let rec match handle
+Reserved keywords, the complete list: `type effect once multi fn let rec match handle
 return resume quote unquote if then else as where forall jqd`. Comments are `--` to end
 of line; `--|` is a doc comment attaching to the next declaration's `doc`
 metadata. Strings are `"..."` with the usual escapes, UTF-8 per D3. Numbers
@@ -551,11 +557,11 @@ type Option a = | None | Some a
 
 type Fleet = | MkFleet(inv: SvcMood, pay: SvcMood, shp: SvcMood)
 
-effect Approval where {
+once effect Approval where {
   ask : (Text) -> Bool
 }
 
-effect Choice a where {
+multi effect Choice a where {
   choose : () -> Bool
 }
 ```
@@ -567,6 +573,14 @@ It did not generate accessor definitions, so `fleet.inv` remains unresolved
 unless declared explicitly. Both field exercises invented this exact
 `Ctor(field: Type, ...)` notation independently. Labeled patterns are deferred
 past v0 (§5, Match).
+
+Every operation has an explicit mode. A uniform effect uses the canonical
+`once effect` or `multi effect` shorthand; an effect containing both modes
+uses `effect` and prefixes every operation individually. Omitting a mode is an
+error. Repeating an effect-level mode on an operation is also an error, even
+when the words agree, so there is exactly one reviewed source of mode intent.
+The kernel's absent-`multi` representation remains a bootstrap compatibility
+encoding, not a surface default (D41-D42).
 
 The braces after `where` are mandatory. Operation signatures and top-level
 term signatures otherwise have the same lexical shape, so an unbraced effect
@@ -686,13 +700,10 @@ dictionary names, `gte?/lte?/gt?/lt?`, the `real.*` rename); both of these
 are stdlib content, not grammar, and land in docs/stdlib.md rather than
 here.
 
-Two features get grammar headroom reserved without being designed:
-linearity modes on effect declarations (one-shot versus multi-shot
-operations; task 71's copy-on-resume is the runtime half, a declared mode
-would be the static half) and resource-scoped row display (`Fs(read:
-./config)`). Neither changes anything in this draft; both are noted so a
-future row or effect-declaration change doesn't have to fight an unstated
-assumption. Structured concurrency, scoped capabilities, traits, typed
+Resource-scoped row display (`Fs(read: ./config)`) retains grammar headroom
+without being designed. Operation linearity modes now ship under D41-D42;
+resource scopes remain noted so a future row change does not have to fight an
+unstated assumption. Structured concurrency, scoped capabilities, traits, typed
 staging, formal row soundness, and a blessed effect-name taxonomy are
 recorded in the language-level backlog and are out of this document's scope
 entirely.
@@ -771,8 +782,8 @@ across each pair and continue to execute selected `.jqd` kernel routes.
 The SS.0-SS.22 implementation arc below is complete. Completion means the
 named parser, printer, formatter, checker, CLI, corpus, documentation, demo,
 and SS.22 prelude work shipped to their recorded evidence boundaries. It does
-not complete the partial D36 accessor/validation design or the parked Tier-F
-ideas, and it does not freeze future surface revisions.
+not complete the partial D36 accessor/validation design or the parked
+resource-scoped-row idea, and it does not freeze future surface revisions.
 
 - **S0 (SS.0-SS.4, tasks 87-91), printer and spec, M.** Record the
   decisions, scaffold the modules, build the canonical printer over kernel
@@ -811,3 +822,5 @@ in commit messages and task dependencies.)
 | D38 | text building | a variadic `text.join` ships in the prelude now; interpolation sugar is a separate design note, not v0 |
 | D39 | comparison naming | `?`-suffixed predicates beside bare dictionary names; prelude gains `gt? gte? lt? lte?`; the `add-real` family migrates to `real.*` |
 | D40 | top-level items | a bare expression is a legal top-level item, evaluated in document order (ratifies existing `jacquard run` behavior) |
+| D41 | operation-mode granularity | per-operation `once`/`multi`, with `once effect`/`multi effect` shorthand only for uniform effects |
+| D42 | operation-mode defaults | no surface default; every operation is explicit, while bootstrap legacy `multi` remains encoded by absence |

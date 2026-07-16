@@ -88,7 +88,10 @@ Declarations: 0x40 defterm (+ varint n + members in canonical order; member = 0x
 annotation option (0x00/0x01+type) + value), 0x41 deftype (+ name + varint tyvarc + varint
 conc + conspecs; conspec = 0x44 + name + varint fieldc + fields; field = 0x45 + label option
 + type), 0x42 defeffect (+ name + varint tyvarc + varint opc + opspecs; opspec = 0x46 + name
-+ varint paramc + param types + result type).
++ varint paramc + param types + result type + optional mode discriminator). The legacy `Multi`
+mode is encoded by complete absence and therefore contributes no byte. `Once` appends `0x01`
+after the result type. This compatibility extension leaves every pre-EL.1 defeffect byte string
+and hash unchanged while making `Once` interface-visible.
 
 ## Hash derivations (domain-separated)
 

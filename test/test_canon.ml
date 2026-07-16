@@ -34,7 +34,7 @@ let hash_of_top ~what t =
 
 (* --- golden hashes for the whole corpus; CI fails on drift --- *)
 
-let test_golden_corpus_hashes () =
+let rec test_golden_corpus_hashes () =
   let expected =
     Corpus_support.read_file golden_file
     |> String.split_on_char '\n'
@@ -44,7 +44,58 @@ let test_golden_corpus_hashes () =
   Alcotest.(check (list string))
     "corpus hashes match corpus/golden/hashes.golden (regenerate with `dune exec \
      test/gen_goldens.exe` and review the diff)"
-    expected actual
+    expected actual;
+  test_operation_mode_hash_compatibility ()
+
+and test_operation_mode_hash_compatibility () =
+  let legacy =
+    hash_of_top ~what:"legacy multi"
+      (List.hd
+         (resolved_tops ~what:"legacy multi"
+            "(defeffect signal () (op fetch ((tref int)) (tref int)))"))
+  in
+  let once =
+    hash_of_top ~what:"once"
+      (List.hd
+         (resolved_tops ~what:"once" "(defeffect signal () (op fetch once ((tref int)) (tref int)))"))
+  in
+  Alcotest.(check string)
+    "legacy Multi hash remains byte-for-byte pinned"
+    "df13c6a56ab3a1f8126bc544ee0e6446adf24f8096f338ca33275a213f493efb"
+    (Hash.to_hex legacy.Canon.decl_hash);
+  Alcotest.(check string)
+    "Once hash is stable and distinct"
+    "77b5b5c96102359a7144ac0a6f07f7751c052401fe45352f1ef7849df2fad4e7"
+    (Hash.to_hex once.Canon.decl_hash);
+  Alcotest.(check bool)
+    "mode is interface identity" false
+    (Hash.equal legacy.Canon.decl_hash once.Canon.decl_hash);
+  let boundary_hash mode1 mode2 mode3 =
+    let operation name mode =
+      Printf.sprintf "(op %s%s () (tref int))" name (if mode then " once" else "")
+    in
+    let source =
+      Printf.sprintf "(defeffect boundary () %s %s %s)" (operation "first" mode1)
+        (operation "middle" mode2) (operation "last" mode3)
+    in
+    hash_of_top ~what:"operation-mode boundary"
+      (List.hd (resolved_tops ~what:"operation-mode boundary" source))
+    |> fun hashed -> Hash.to_hex hashed.Canon.decl_hash
+  in
+  let first = boundary_hash true false false in
+  let middle = boundary_hash false true false in
+  let last = boundary_hash false false true in
+  Alcotest.(check (list string))
+    "Once discriminator is position-sensitive beside Multi operations"
+    [
+      "a8b30daa5643279a7a992491b11458e2fb4f70d5dbc6c6142b1c9e13b99a4e07";
+      "741b21723f1619a6dd53ad441ca03f3b021ababd7a5c41185938577d166c7038";
+      "cfdc3868ef37d3118d62101ed3dd7fce8ba84963e6f536e032f880b2cc1035d9";
+    ]
+    [ first; middle; last ];
+  Alcotest.(check int)
+    "first/middle/last hashes are distinct" 3
+    (List.sort_uniq String.compare [ first; middle; last ] |> List.length)
 
 (* --- alpha-renaming locals never changes a hash --- *)
 

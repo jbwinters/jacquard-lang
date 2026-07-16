@@ -121,7 +121,7 @@ let test_docs_attach_only_to_declarations () =
      --| type\n\
      type T = | T\n\n\
      --| effect\n\
-     effect E where { op : () -> T }\n"
+     once effect E where { op : () -> T }\n"
   in
   let lowered = lower_file source in
   (match lowered.tops with
@@ -227,7 +227,7 @@ let test_container_comment_printing () =
       \ -- fields inner\n\
        )\n\
        --| e\n\
-       effect E where {\n\
+       once effect E where {\n\
       \ -- op\n\
       \ op : (-- param\n\
       \ Pair a) -> Pair a\n\
@@ -389,7 +389,7 @@ let test_parameter_container_ownership () =
     [
       ("definition", "f(x\n-- params-inner\n) = x\n", "-- params-inner");
       ("function", "f = fn (x\n-- fn-inner\n) -> x\n", "-- fn-inner");
-      ("operation", "effect E where { op : (T\n-- op-inner\n) -> T }\n", "-- op-inner");
+      ("operation", "once effect E where { op : (T\n-- op-inner\n) -> T }\n", "-- op-inner");
       ( "handler operation",
         "f = handle x { | return y -> y | op(x\n-- handler-inner\n) resume k -> k(x) }\n",
         "-- handler-inner" );
@@ -478,7 +478,7 @@ let test_remaining_delimited_containers () =
       ("empty definition", "f(-- empty-definition-inner\n) = 1\n", "-- empty-definition-inner");
       ("empty function", "f = fn (-- empty-function-inner\n) -> 1\n", "-- empty-function-inner");
       ( "empty effect operation",
-        "effect E where { op : (-- empty-operation-inner\n) -> T }\n",
+        "once effect E where { op : (-- empty-operation-inner\n) -> T }\n",
         "-- empty-operation-inner" );
       ( "empty handler operation",
         "f = handle x { | return y -> y | op(-- empty-handler-inner\n) resume k -> 1 }\n",

@@ -66,6 +66,52 @@ the diff-only loop above:
   $ jacquard build ../../test/native-gauntlet/g01-choose-tuple.jqd -o choose > /dev/null
   $ ./choose
   cons(1, cons(2, nil))
+  $ jacquard build ../../test/native-gauntlet/g04-state-run.jqd -o state-branches > /dev/null
+  $ ./state-branches
+  cons((1, 1), cons((2, 2), nil))
+
+The D43 successor keeps the two prelude transformers whose next-state values
+must be computed before resuming. These witnesses pin their public behavior on
+both engines after that semantics-preserving source rewrite:
+
+  $ cat > record-transformer.jqd <<'EOF_JQD'
+  > (app (var throw.catch)
+  >   (lam ()
+  >     (app (var net.scripted)
+  >       (lam ()
+  >         (match
+  >           (app (var net.record)
+  >             (lam ()
+  >               (match (app (var fetch) (app (var mk-request) (lit "http://record") (lit "")))
+  >                 (clause (pcon mk-response (pwild) (pvar body)) (var body)))))
+  >           (clause (ptuple (pvar result) (pwild)) (var result))))
+  >       (app (var cons) (app (var mk-response) (lit 200) (lit "recorded")) (var nil))))
+  >   (lam ((pvar error)) (var error)))
+  > EOF_JQD
+  $ jacquard run record-transformer.jqd > record-i.out
+  $ cat record-i.out
+  "recorded"
+  $ jacquard build record-transformer.jqd -o record-transformer
+  error[E1101]: not yet compilable in native v1: net.record builtin `code.of-text` is not yet implemented natively
+  [1]
+  $ cat > fs-transformer.jqd <<'EOF_JQD'
+  > (app (var throw.catch)
+  >   (lam ()
+  >     (match
+  >       (app (var fs.in-memory)
+  >         (lam ()
+  >           (let nonrec (pwild) (app (var write) (lit "note") (lit "hello"))
+  >             (app (var read) (lit "note"))))
+  >         (app (var map.empty) (var text.ord)))
+  >       (clause (ptuple (pvar result) (pwild)) (var result))))
+  >   (lam ((pvar error)) (var error)))
+  > EOF_JQD
+  $ jacquard run fs-transformer.jqd > fs-i.out
+  $ jacquard build fs-transformer.jqd -o fs-transformer > /dev/null
+  $ ./fs-transformer > fs-n.out
+  $ diff fs-i.out fs-n.out && cat fs-i.out
+  "hello"
+
   $ jacquard build ../../test/native-gauntlet/g19-escaped-resume.jqd -o escaped > /dev/null
   $ ./escaped
   (done(2), done(3))
@@ -218,3 +264,110 @@ reachable from the surface:
   $ jacquard build iso.jqd -o nope 2>&1 | tail -2
   iso.jqd:2:11-3:49: error[E0815]: top-level definition `poked` performs the `ticker` effect while being defined
     hint: wrap the body in a lambda and perform the effect when called
+
+EL.0's dynamic once backstop is tested below the future mode-syntax layer. Both probes capture a
+real non-empty continuation, resume it once, then attempt the same captured instance again. The C
+probe goes through jq_handle2/jq_perform/jq_dispatch rather than fabricating an empty JQ_RESUME.
+
+  $ SRC="../../runtime/jq_alloc.c ../../runtime/jq_rc.c ../../runtime/jq_text.c ../../runtime/jq_error.c ../../runtime/jq_show.c ../../runtime/jq_utf8.c ../../runtime/jq_rng.c ../../runtime/jq_apply.c ../../runtime/jq_code.c ../../runtime/jq_intrinsics.c ../../runtime/jq_effects.c ../../runtime/jq_frames.c ../../runtime/jq_grants.c ../../runtime/test/test_runtime.c"
+  $ $CC -std=c11 -O2 -Wall -Wextra -Werror -o once-native $SRC
+  $ ../once_interpreter_probe.exe > once-interpreter.out 2>&1; echo "interpreter exit $?"
+  interpreter exit 2
+  $ ./once-native once-resume-twice > once-native.out 2>&1; echo "native exit $?"
+  native exit 2
+  $ diff -u once-interpreter.out once-native.out && echo identical
+  identical
+  $ cat once-interpreter.out
+  error[E0906]: a once continuation may be resumed at most once per captured instance
+
+EL.2 rejects a statically visible duplicate before either engine runs. EL.0's probes above remain
+the dynamic backstop for unchecked or host-driven paths, while this declared Once clause names both
+source spans at the ordinary check/build boundary.
+
+  $ cat > declared-once.jqd <<'EOF_JQD'
+  > (defeffect linear () (op signal once () (tref int)))
+  > (handle (app (var signal))
+  >   (ret (pvar x) (var x))
+  >   (opclause signal () k
+  >     (let nonrec (pwild) (app (var k) (lit 1))
+  >       (app (var k) (lit 2)))))
+  > EOF_JQD
+  $ jacquard run declared-once.jqd > declared-run.out 2>&1; echo "run exit $?"
+  run exit 1
+  $ jacquard build declared-once.jqd -o declared-native > declared-build.out 2>&1; echo "build exit $?"
+  build exit 1
+  $ diff -u declared-run.out declared-build.out && echo identical
+  identical
+  $ cat declared-run.out
+  declared-once.jqd:6:7-28: error[E0816]: once resumption `k` may be consumed twice on one possible execution path; first consumption at declared-once.jqd:5:25-46, second consumption at declared-once.jqd:6:7-28
+    hint: a once resumption may be dropped or moved, but it may be consumed at most once on each possible execution path
+
+A Multi branch outside code that enters a Once handler is legal: each branch enters the handler
+afresh and captures its own Once continuation. Moving the Multi perform into the already-captured
+Once clause is different: the Multi resumption re-enters that clause with the same Once instance,
+so its second branch reaches the E0906 dynamic backstop. Both compositions have interpreter/native
+parity.
+
+  $ cat > multi-around-fresh-once.jqd <<'EOF_JQD'
+  > (defeffect branching () (op pick () (tref bool)))
+  > (defeffect linear () (op ping once () (tref int)))
+  > (handle
+  >   (let nonrec (pvar b) (app (var pick))
+  >     (handle (app (var ping))
+  >       (ret (pvar x) (var x))
+  >       (opclause ping () k
+  >         (app (var k)
+  >           (match (var b)
+  >             (clause (pcon true) (lit 1))
+  >             (clause (pcon false) (lit 2)))))))
+  >   (ret (pvar x) (app (var cons) (var x) (var nil)))
+  >   (opclause pick () k
+  >     (app (var list.append) (app (var k) (var true)) (app (var k) (var false)))))
+  > EOF_JQD
+  $ jacquard run multi-around-fresh-once.jqd > legal-i.out 2>&1; echo "interpreter exit $?"
+  interpreter exit 0
+  $ jacquard build multi-around-fresh-once.jqd -o legal-native > /dev/null
+  $ ./legal-native > legal-n.out 2>&1; echo "native exit $?"
+  native exit 0
+  $ diff -u legal-i.out legal-n.out && cat legal-i.out
+  cons(1, cons(2, nil))
+  $ cat > multi-inside-captured-once.jqd <<'EOF_JQD'
+  > (defeffect branching () (op pick () (tref bool)))
+  > (defeffect linear () (op ping once () (tref int)))
+  > (handle
+  >   (handle (app (var ping))
+  >     (ret (pvar x) (var x))
+  >     (opclause ping () k
+  >       (let nonrec (pvar b) (app (var pick))
+  >         (app (var k)
+  >           (match (var b)
+  >             (clause (pcon true) (lit 1))
+  >             (clause (pcon false) (lit 2)))))))
+  >   (ret (pvar x) (app (var cons) (var x) (var nil)))
+  >   (opclause pick () k
+  >     (app (var list.append) (app (var k) (var true)) (app (var k) (var false)))))
+  > EOF_JQD
+  $ jacquard run multi-inside-captured-once.jqd > illegal-i.out 2>&1; echo "interpreter exit $?"
+  interpreter exit 2
+  $ jacquard build multi-inside-captured-once.jqd -o illegal-native > /dev/null
+  $ ./illegal-native > illegal-n.out 2>&1; echo "native exit $?"
+  native exit 2
+  $ diff -u illegal-i.out illegal-n.out && cat illegal-i.out
+  error[E0906]: a once continuation may be resumed at most once per captured instance
+EL.3 generates one statically hostile handler for every reviewed Once operation in the shipped
+prelude. Each program is a lambda, so polymorphic operation parameters need no fabricated values;
+the handler recursively performs the same operation to obtain a correctly typed resume value, then
+tries to consume the same resumption twice. Run and native build must reject the identical source at
+the shared affine-check boundary with E0816. The low-level pair above separately proves that an
+unchecked/host-driven second resume reaches byte-identical E0906 in both runtimes.
+
+  $ ../gen_once_hostile.exe ../../prelude ../../prelude/operation-modes.manifest once-prelude
+  generated 13 once-hostile cases from reviewed inventory
+  $ passed=0; for f in once-prelude/*.jqd; do
+  >   jacquard run "$f" > once-run.out 2>&1; run_status=$?
+  >   jacquard build "$f" -o once-prog > once-build.out 2>&1; build_status=$?
+  >   if [ "$run_status" = 1 ] && [ "$build_status" = 1 ] &&
+  >      diff -q once-run.out once-build.out >/dev/null && grep -q 'error\[E0816\]' once-run.out
+  >   then passed=$((passed + 1)); else echo "FAILED: $(basename "$f")"; fi
+  > done; echo "$passed/13 generated once-operation cases reject identically"
+  13/13 generated once-operation cases reject identically

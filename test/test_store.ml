@@ -222,16 +222,40 @@ let prop_dependents_inverse_of_deps =
 
 (* --- reopening rebuilds the index --- *)
 
-let test_reopen_rebuilds_index () =
+let rec test_reopen_rebuilds_index () =
   let root = fresh_root () in
   let hs =
     let t = open_ok root in
     put_ok t (decl_of ~names:Resolve.empty_names "(deftype bool () (con false) (con true))")
   in
   let t2 = open_ok root in
-  match Store.locate t2 (List.assoc "true" hs.Canon.named) with
+  (match Store.locate t2 (List.assoc "true" hs.Canon.named) with
   | Ok { Store.role = Store.Constructor 1; _ } -> ()
-  | _ -> Alcotest.fail "derived hash index must survive reopen"
+  | _ -> Alcotest.fail "derived hash index must survive reopen");
+  test_once_effect_survives_store_reopen ()
+
+and test_once_effect_survives_store_reopen () =
+  let root = fresh_root () in
+  let hs =
+    let t = open_ok root in
+    put_ok t
+      (decl_of ~names:Resolve.empty_names
+         "(defeffect signal ((tvar a)) (op fetch once ((tvar a)) (tvar a)))")
+  in
+  let t = open_ok root in
+  match Store.locate t (List.assoc "fetch" hs.Canon.named) with
+  | Ok
+      {
+        Store.role = Store.Operation 0;
+        decl = { Kernel.it = Kernel.DefEffect { ops = [ operation ]; _ }; _ };
+        _;
+      } ->
+      Alcotest.(check bool) "Once preserved" true (operation.Kernel.op_mode = Kernel.Once);
+      Alcotest.(check string)
+        "stored bootstrap remains explicit"
+        "(defeffect signal ((tvar a)) (op fetch once ((tvar a)) (tvar a)))"
+        (Printer.inline_form (Kernel.decl_to_form (Result.get_ok (Store.get t hs.Canon.decl_hash))))
+  | _ -> Alcotest.fail "Once operation must survive store reopen with its derived role"
 
 let test_unknown_hash () =
   let t = open_ok (fresh_root ()) in

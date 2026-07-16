@@ -9,7 +9,7 @@ and trusting programs written by models and reviewed by people. Start with the
 
 Concretely, it is a small programming language with a compact `.jac` surface
 syntax, an OCaml checker and CPS interpreter, a C-emitting native AOT backend
-that currently compiles the kernel `.jqd` carrier, a command-line tool, a
+that accepts public `.jac` and kernel `.jqd` carriers, a command-line tool, a
 Jacquard-written standard library, and a test framework called Warp. Version
 0.1 works end to end but is a research prototype, not a production language;
 `docs/release/0.1/LIMITS.md` is the honest boundary.
@@ -92,9 +92,12 @@ For readers who speak programming languages:
 
 - One uniform representation: every form is a `(head, meta, args)` triple, and
   the kernel grammar has 27 forms. Quoted code is ordinary data.
-- Algebraic effects with deep, multi-shot handlers. A handler can resume a
-  computation zero, one, or many times, which is what makes exhaustive search
-  and exact inference ordinary library code.
+- Algebraic effects with deep, mode-aware handlers. A `multi` operation has a
+  reusable continuation and can resume zero, one, or many times, which makes
+  exhaustive search and exact inference ordinary library code. A `once`
+  operation instead binds an affine `Resume`: the checker reports E0816 when
+  one possible path consumes it twice, and the runtime retains E0906 as a
+  repeated-resume backstop for each captured instance.
 - Explicit capability grants. The runtime installs handlers for the outside
   world only for effects you pass with `--allow`; there is no ambient
   authority.
@@ -129,7 +132,7 @@ byte-for-byte to `test/docs-doctest/fixtures/readme-multishot.jac` and run by
 the documentation test lane:
 
 ```jacquard doctest=readme-multishot mode=run fixture=readme-multishot.jac stdout=readme-multishot.stdout stderr=empty exit=0
-effect Choice where {
+multi effect Choice where {
   choose : () -> Bool
 }
 
@@ -149,11 +152,12 @@ $ jac run test/docs-doctest/fixtures/readme-multishot.jac
 3
 ```
 
-The handler ran the rest of the program once with `true` and once with
-`false`, then collected both results. That ability to resume more than once is
-why exact Bayesian inference is a library handler here rather than a runtime
-feature. The repair demo builds on it: mutate a buggy program's quoted AST
-into candidate patches, treat a failing test as an observation, and read off
+The `Choice` operation is `multi`, so its handler ran the rest of the program
+once with `true` and once with `false`, then collected both results. That
+ability to resume more than once is why exact Bayesian inference is a library
+handler here rather than a runtime feature. The repair demo builds on it: mutate
+a buggy program's quoted AST into candidate patches, treat a failing test as an
+observation, and read off
 the updated probabilities. Running candidate code is an authority, so the pure
 step still runs (it counts eight candidate patches) and then the demo refuses
 until you grant the rest:
@@ -302,14 +306,16 @@ jac infer enumerate MODEL.jac
 jac infer lw MODEL.jac --seed 42 --samples 100000
 jac replay TRACE.jqd PROGRAM.jqd [--fork '1=(response 500 "down")']
 jac test TESTS.jac [TESTS.jqd ...] [--exhaustive] [--cache-dir CACHE]
-jac build FILE.jqd -o PROG
+jac build FILE.jac -o PROG
+jac export FILE.jac -o FILE.jqd
 ```
 
 `.jac` is the user-facing surface carrier. Bootstrap `.jqd` remains fully
 supported as the internal/debug syntax, quote notation, and kernel format of
 record. `run`, `check`, `hash`, `fmt`, `diff`, `infer`, and `test` select
-surface syntax by extension; native build, replay programs, the prelude, and
-many internal fixtures continue to use `.jqd`.
+surface syntax by extension. Native build accepts either carrier without
+writing an intermediate twin; replay programs, the prelude, and many internal
+fixtures continue to use `.jqd`.
 
 Ordinary programs and demos need only a `.jac` source file. Do not hand-author
 a `.jqd` twin unless a conformance test specifically needs to prove that both
@@ -318,8 +324,8 @@ corpus and selected demos are evidence fixtures, not an authoring requirement.
 
 ## Native compilation
 
-`jacquard build` currently accepts the kernel `.jqd` carrier and compiles a
-program and its reachable declarations to a
+`jacquard build` accepts a public `.jac` program directly (or a retained kernel
+`.jqd` carrier) and compiles it and its reachable declarations to a
 standalone binary whose output is byte-identical to `jacquard run` —
 stdout, stderr, and exit codes, pinned by a differential harness in CI
 (`scripts/native-diff.sh`). The full effect language compiles, including
@@ -331,9 +337,18 @@ where the authority model lives).
 ```bash
 export JACQUARD_PRELUDE=$PWD/prelude
 export JACQUARD_RUNTIME=$PWD/runtime
-jac build demos/tooling/word-count.jqd -o word-count
+jac build demos/tooling/word-count.jac -o word-count
 echo "some words some" | ./word-count --allow console
 ```
+
+Build uses the same surface parse/lower/resolution pipeline as check and hash
+and does not create a `.jqd` twin. Use `jac export INPUT.jac -o OUTPUT.jqd`
+only when conformance evidence or kernel debugging needs an explicit canonical
+carrier. Export is deterministic and exclusive/atomic; it preserves semantic
+member hashes and quote namespace markers, while intentionally erasing
+comments, formatting, spans, documentation, and provenance metadata.
+Export resolves and canonicalizes input but does not typecheck it; use
+`jac check`, `jac run`, or `jac build` when typechecking is required.
 
 Requirements and knobs:
 
@@ -452,7 +467,7 @@ Key release docs:
 - `src/resolve.ml`: names to content-addressed references.
 - `src/canon.ml`, `src/hash.ml`: HASH_V0 canonical serialization and hashing.
 - `src/store.ml`: object store and mutable name index.
-- `src/value.ml`, `src/eval.ml`: CPS evaluator and multi-shot handlers.
+- `src/value.ml`, `src/eval.ml`: CPS evaluator and mode-aware deep handlers.
 - `src/types.ml`, `src/check.ml`: type/effect inference, rows, manifests,
   exhaustiveness.
 - `src/prelude.ml`: prelude loader, builtin wiring, and root grants.
@@ -546,9 +561,11 @@ rights.
 Jacquard core is a research prototype, not a production platform. The `.jac`
 surface is implemented and supported but remains an evolving v0 projection
 onto the permanent 27-form kernel. Native AOT compilation and C-toolchain
-optimization ship; a VM/JIT, concurrency, membrane enforcement, continuous
-distributions, gradients, typed staging, language package management,
-self-hosting, and formal soundness proofs do not. World grants remain coarse.
+optimization ship; `parallel.map` and `parallel.both` are pure, sequential
+optimization hints, while structured concurrency and its runtime remain
+unimplemented. A VM/JIT, membrane enforcement, continuous distributions,
+gradients, typed staging, language package management, self-hosting, and formal
+soundness proofs also do not ship. World grants remain coarse.
 See `docs/release/0.1/LIMITS.md` for the exact Core 0.1 semantic boundary.
 
 ## Troubleshooting

@@ -16,7 +16,7 @@ Version surface: `jacquard --version` prints `0.1.0`
 This pack describes Jacquard core as implemented in the current successor checkout:
 the kernel triple reader/validator/resolver, `.jac` surface projection, HASH_V0
 canonical identity, the content store, CPS evaluator and native compiler, deep
-multi-shot handlers, row inference and capability manifests, Dist inference
+mode-aware handlers (multi-shot for Multi operations and affine for Once), row inference and capability manifests, Dist inference
 handlers, the ringed standard library, Warp tests, record/replay, fault injection,
 dry-run, dist-diff, formatter, canonical structural diff, and the
 executable-escrow demo.
@@ -46,7 +46,7 @@ cd _build/default/test
 find ../../../test -name '*.t' | wc -l
 ```
 
-Current inventory:
+Frozen RC1 inventory:
 
 - Alcotest/QCheck cases: `554`
 - Cram transcript files: `32`

@@ -7,6 +7,20 @@ records the four-pillar route from the current CPS tree-walker to native
 performance while its reasoning is fresh, states which programs stay slow, and
 bounds the claim. The plan's culture: big directions start as decision docs.
 
+## Source-carrier boundary (DX.2, 2026-07-15)
+
+The backend still begins from the resolved 27-form kernel, but the CLI no
+longer requires users to hand-author that carrier. `jac build PROGRAM.jac -o
+PROGRAM` runs the shared surface parse/lower/resolution path and passes its
+resolved tops to the unchanged checker and native backend; no `.jqd` twin is
+written. Retained `.jqd` inputs remain supported.
+
+`jac export INPUT.jac -o OUTPUT.jqd` exists only for conformance and kernel
+debugging. It emits deterministic canonical bootstrap notation atomically,
+preserves semantic member hashes and quote namespace encodings, and erases
+non-identity source metadata. The reviewed decision and exact boundary are in
+`release/dx-jac-export/DECISION.md`.
+
 ## Why this is plausible at all
 
 Jacquard's semantics were chosen for analyzability: strict evaluation, immutable
@@ -19,17 +33,30 @@ The effect row is a static cost model. Compile each arrow by its row:
 
 - **Empty row `{}`** — plain host-stack calls. No CPS, no evidence, nothing.
   The ring-0 stdlib (the grid, map/set internals, dictionaries) lives here.
-- **Tail-resumptive handlers** — the empirically dominant case (state.run,
-  emit.pipe, every root grant): the handler resumes exactly once, in tail
-  position. Compile to a single indirect call through an evidence vector
-  (Xie & Leijen, ICFP 2020/2021, as shipped in Koka). No continuation is ever
-  materialized.
+- **Tail-resumptive `Multi` handlers** — the handler resumes exactly once, in
+  tail position. The current native backend uses a tokenless direct-return
+  protocol; a future evidence-vector optimization can turn the handler search
+  into a single indirect call (Xie & Leijen, ICFP 2020/2021, as shipped in
+  Koka).
+- **Tail-resumptive `Once` handlers** — the source has the same syntactic
+  shape, but the native backend must still materialize a shared affine resume
+  token. An enclosing `Multi` continuation can clone the suspended clause, and
+  all clones must observe the same used bit for E0906. These clauses are never
+  counted as the tokenless path.
 - **Genuinely capturing code** — `abort`-style early exits and one-shot
   captures pay selective CPS on the affected paths only.
 - **Multi-shot** — the priced tier: continuation cloning per extra resume.
   Enumeration, `fault.all`, and the exhaustive prop driver live here, and
   their cost is the branch count anyway — the clone is a constant factor on
   work that is exponential by design.
+
+These tiers do not make every captured continuation reusable. A `Multi`
+operation binds the ordinary reusable continuation described by the priced
+tier. A `Once` operation binds an affine `Resume`; the checker rejects a
+possible double consumption with E0816 and the interpreter/native runtimes trap
+a repeated resume of one captured instance with E0906. The affine checker is a
+bounded syntactic discipline, not a formal soundness proof, so the runtime
+backstop is part of the contract.
 
 Jacquard-specific detail: the checker's row model (set-semantics heads, closed/var
 tails, open coercion at App) already computes the tier at every call site. The
@@ -210,7 +237,9 @@ Phase 1 landed as the `jacquard tiers` command plus tier sidecars in the store
 (derived data beside each object, keyed by member hash, excluded from identity
 like all metadata; objects stay write-once). The checker records every
 application's callee row and every handler clause's syntactic resume
-discipline; `test/cli/tiers.t` pins the prelude table so drift is visible.
+discipline. The successor `jacquard tiers` report keeps that source-shape
+table, then combines shape with the declared operation mode in a separate
+native-lowering table; `test/cli/tiers.t` pins both so drift is visible.
 
 Sweep over the prelude, all demos (escrow included), and the valid/sigs corpus:
 
@@ -228,12 +257,18 @@ fn pure              544  49%
 fn row-poly           69   6%
 fn effectful         175  15%
 
-== handler op clauses: 37 ==
+== handler op clauses: 37 (syntactic resumption shape; pre-mode snapshot) ==
 tail-resumptive        8  21%
 aborting               8  21%
 one-shot               3   8%
 multi-shot            18  48%
 ```
+
+This dated 37-clause sweep predates explicit operation modes and remains the
+Phase 1 source-shape record. In the current prelude-only pin, six of 32 clauses
+are syntactically tail-resumptive, but only the one tail-shaped `Multi` clause
+reports `tokenless-tail-multi`; the other 31 clauses, including five
+tail-shaped `Once` clauses, report `materialized-resume`.
 
 Reproduce with:
 
@@ -297,8 +332,8 @@ experiment; the case follows from the runtime's structure. RC on top of a
 tracing host GC double-pays: OCaml reclaims every value regardless, so
 headers and dup/drop insertion are purely additive overhead. The pillar's
 actual win is in-place reuse, and reuse requires trusting a count of one —
-but frames-as-data means a captured resumption shares its environments
-across resumes, so every value reachable from a captured continuation must
+but frames-as-data means a captured Multi resumption shares its environments
+across resumes, so every value reachable from that reusable continuation must
 be dup'd conservatively at capture time. That forfeits reuse in exactly the
 handler-dense code this tree exists to run, and phase 2's measurement
 already established that engine-level constant work inside the interpreter

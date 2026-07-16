@@ -14,16 +14,24 @@ open Types
     exactly these. *)
 type arrow_tier = Data | Pure | RowPoly | Effectful of { effects : Hash.t list; opened : bool }
 
-(** How an op clause uses its resumption, syntactically:
+(** How an op clause uses its resumption, syntactically. This classification describes source shape,
+    not the native representation selected after the operation's mode is known:
 
     - [Aborting]: no path resumes. The continuation is dropped, exception-style.
-    - [TailResumptive]: every path resumes exactly once, in tail position — the evidence-passing
-      fast path (no continuation is ever materialized).
+    - [TailResumptive]: every path resumes exactly once, in tail position. A [Multi] clause with
+      this shape uses the tokenless native fast path; a [Once] clause still materializes a shared
+      affine resume token.
     - [OneShot]: at most one resume per path, but some path resumes off tail or not at all —
       selective capture territory.
     - [MultiShot]: the resumption escapes as a value or a path resumes more than once — continuation
       cloning, priced by branch count. *)
 type discipline = Aborting | TailResumptive | OneShot | MultiShot
+
+(** Native representation chosen from both operation mode and syntactic discipline.
+    [TokenlessTailMulti] is valid only for a tail-resumptive [Multi] clause. Every [Once] clause
+    uses [MaterializedResume], even when syntactically tail-resumptive, so clones of an enclosing
+    Multi continuation share one affine consumption token. *)
+type native_lowering = TokenlessTailMulti | MaterializedResume
 
 (** What sits in an application's function position, for bucketing call-site statistics:
     constructors and op performs have rows fixed by construction (empty and singleton respectively),
@@ -45,7 +53,7 @@ let classify_row (r : row) : arrow_tier =
 (** [classify_ty t] is the tier of [t]'s outermost arrow row, [Data] for non-arrows. *)
 let classify_ty (t : ty) : arrow_tier =
   match repr t with
-  | TArrow (_, row, _) | TVariadicArrow (_, row, _) -> classify_row row
+  | TArrow (_, row, _) | TResume (_, row, _) | TVariadicArrow (_, row, _) -> classify_row row
   | _ -> Data
 
 (* ------------------------------------------------------------------ *)
@@ -90,6 +98,19 @@ let discipline_to_string = function
   | TailResumptive -> "tail-resumptive"
   | OneShot -> "one-shot"
   | MultiShot -> "multi-shot"
+
+(** [native_lowering_to_string lowering] is the stable CLI label for [lowering]. *)
+let native_lowering_to_string = function
+  | TokenlessTailMulti -> "tokenless-tail-multi"
+  | MaterializedResume -> "materialized-resume"
+
+(** [native_lowering ~mode discipline] reports the native handler-clause representation without
+    changing the syntactic discipline classification. *)
+let native_lowering ~mode discipline =
+  match (mode, discipline) with
+  | Kernel.Multi, TailResumptive -> TokenlessTailMulti
+  | (Kernel.Multi | Kernel.Once), (Aborting | TailResumptive | OneShot | MultiShot) ->
+      MaterializedResume
 
 (* ------------------------------------------------------------------ *)
 (* Resume-usage analysis                                               *)

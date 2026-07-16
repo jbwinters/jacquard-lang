@@ -44,7 +44,7 @@ clang 18.1.3, gcc 13.3, Python 3.11.6).
 | text | 10k ints comma-joined by folded concat, split back | the TEXT path: quadratic immutable concat, from-int rendering, split |
 | pure | mixed arithmetic/list battery | the empty-row core in aggregate |
 | avl | 10k map.set | in-place reuse on the rebuilt spine (Perceus reuse tokens) |
-| state-loop | 1M get/put pairs through a handler | the tail-resumptive effect tier — the OCaml/Koka band the design doc targets |
+| state-loop | 1M get/put pairs through a handler | the materialized handler tier — state.run's function-of-state source shape is classified as capturing |
 | enum | 2^14 multi-shot branches | continuation cloning, priced per branch by design |
 | mutate | 300 rounds of single-edit mutant generation over a quoted AST | code values (task 73): form construction, un-form/form traffic, structural equality over quote statics |
 

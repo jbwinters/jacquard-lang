@@ -310,7 +310,14 @@ let check_pipeline ~prelude_dir ~file src : (unit, stage_ext * Diag.t list) resu
                   in
                   go forms)))
 
-(** The W3.7 golden diagnostic battery: 20 sources covering every checker code (the coverage test
+(** A bootstrap source that declares one uniquely named once operation and exercises its clause. *)
+let once_diag effect_name operation body =
+  Printf.sprintf
+    "(defeffect %s () (op %s once () (tref int)))\n\
+     (handle (app (var %s)) (ret (pvar x) (var x)) (opclause %s () k %s))"
+    effect_name operation operation operation body
+
+(** The W3.7 golden diagnostic battery: 20+ sources covering every checker code (the coverage test
     keys on {!Check.checker_codes}); each renders exactly one diagnostic. [granted] triggers the
     W3.6 manifest check with that effect-name set. *)
 let diag_cases : (string * string * string list option) list =
@@ -362,6 +369,32 @@ let diag_cases : (string * string * string list option) list =
     ( "effectful-toplevel-body",
       "(defterm ((binding sneaky () (app (var net.get) (lit \"http://evil.example\")))))",
       None );
+    ( "value-restriction",
+      "(let nonrec (pvar i) (app (lam ((pvar x)) (var x)) (lam ((pvar y)) (var y))) (tuple (app \
+       (var i) (lit 1)) (app (var i) (lit \"s\"))))",
+      None );
+    ( "once-double-call",
+      once_diag "linear-double" "signal-double"
+        "(let nonrec (pwild) (app (var k) (lit 1)) (app (var k) (lit 2)))",
+      None );
+    ( "once-alias-duplication",
+      once_diag "linear-alias" "signal-alias"
+        "(let nonrec (pvar k2) (var k) (let nonrec (pwild) (app (var k) (lit 1)) (app (var k2) \
+         (lit 2))))",
+      None );
+    ( "once-lambda-capture",
+      once_diag "linear-lambda" "signal-lambda"
+        "(let nonrec (pvar f) (lam () (app (var k) (lit 1))) (lit 0))",
+      None );
+    ( "once-quote-capture",
+      once_diag "linear-quote" "signal-quote"
+        "(let nonrec (pvar q) (quote (unquote (var k))) (lit 0))",
+      None );
+    ( "once-constructor-storage",
+      once_diag "linear-storage" "signal-storage"
+        "(let nonrec (pvar saved) (app (var some) (var k)) (lit 0))",
+      None );
+    ("once-return", once_diag "linear-return" "signal-return" "(var k)", None);
     ( "redundant-clause",
       "(lam ((pvar b)) (match (var b) (clause (pwild) (lit 0)) (clause (pcon true) (lit 1))))",
       None );
@@ -398,6 +431,14 @@ let diag_golden_lines ~prelude_dir : (string list, Diag.t list) result =
                   | Error ds -> Ok (render ds)
                   | Ok { Check.warnings = _ :: _ as ws; _ } -> Ok (render ws)
                   | Ok { Check.row; _ } -> (
+                      let continue () =
+                        match resolved with
+                        | Kernel.Expr _ -> go rest
+                        | Kernel.Decl declaration -> (
+                            match Store.put_decl store declaration with
+                            | Ok _ -> go rest
+                            | Error ds -> Ok (render ds))
+                      in
                       match (granted, row) with
                       | Some names, Some r -> (
                           let g =
@@ -412,9 +453,9 @@ let diag_golden_lines ~prelude_dir : (string list, Diag.t list) result =
                             Check.manifest_errors ctx ~grantable:Prelude.grantable_names ~granted:g
                               r
                           with
-                          | [] -> go rest
+                          | [] -> continue ()
                           | ds -> Ok (render ds))
-                      | _ -> go rest))))
+                      | _ -> continue ()))))
     in
     go forms
   in

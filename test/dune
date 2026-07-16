@@ -43,6 +43,16 @@
  (modules native_fuzz)
  (libraries unix))
 
+(executable
+ (name once_interpreter_probe)
+ (modules once_interpreter_probe)
+ (libraries jacquard unix))
+
+(executable
+ (name gen_once_hostile)
+ (modules gen_once_hostile)
+ (libraries jacquard unix))
+
 ; the fuzz lane (task 74): seeded random pure programs through both engines.
 ; Not in the default runtest — run `dune build @native-fuzz` (1000 cases) or
 ; the executable directly with a count for the 10k pre-merge sweep.
@@ -63,7 +73,7 @@
 (test
  (name test_jacquard)
  (modules
-  (:standard \ corpus_support gen_goldens gen_surface_twins gen_prelude_goldens gen_sig_goldens gen_diag_goldens gen_freeze_goldens gen_native_parity native_fuzz))
+  (:standard \ corpus_support gen_goldens gen_surface_twins gen_prelude_goldens gen_sig_goldens gen_diag_goldens gen_freeze_goldens gen_native_parity native_fuzz once_interpreter_probe gen_once_hostile))
  (libraries jacquard corpus_support alcotest fmt qcheck-core qcheck-alcotest unix str)
  (deps
   (glob_files_rec ../corpus/*.jqd)
@@ -73,6 +83,7 @@
   (glob_files_rec ../corpus/*.expect)
   (glob_files_rec ../corpus/*.golden)
   (glob_files_rec ../prelude/*.jqd)
+  ../prelude/operation-modes.manifest
   (glob_files ../src/*.ml)
   (glob_files ../bin/*.ml)
   ../docs/errors.md
@@ -80,6 +91,7 @@
   ../docs/release/surface-syntax/DECISION.md
   ../docs/release/surface-syntax/FOLLOWUPS.md
   ../docs/release/surface-syntax/MANIFEST.sha256
+  ../docs/release/dx-jac-export/EVIDENCE.md
   ../docs/stdlib.md
   ../docs/surface-syntax.md
   ../docs/tutorial.md

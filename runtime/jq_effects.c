@@ -58,6 +58,7 @@ jq_value jq_perform(jq_rt *rt, uint32_t op_ord, uint16_t n, const jq_value *args
       jq_dup(rt->pending.clause);
       for (uint16_t k = 0; k < n; k++) rt->pending.args[k] = args[k];
       rt->pending.n_args = n;
+      rt->pending.once = rt->hs[at].once;
       rt->pending.mark = rt->hs[at].hf;
       return JQ_SUSPEND;
     }

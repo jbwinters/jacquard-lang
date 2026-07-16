@@ -315,9 +315,18 @@ let equation_definition_ahead_at state start =
       find_closing (start + 1) 0
   | _ -> false
 
+let rec mode_effect_ahead state index =
+  match (token_at state index).Surface_lex.token with
+  | Surface_lex.Keyword ("once" | "multi") ->
+      let next = index_after_comments state (index + 1) in
+      mode_effect_ahead state next
+  | Surface_lex.Keyword "effect" -> true
+  | _ -> false
+
 let top_item_ahead state index =
   match (token_at state index).Surface_lex.token with
   | Surface_lex.Keyword ("type" | "effect" | "jqd") -> true
+  | Surface_lex.Keyword ("once" | "multi") -> mode_effect_ahead state index
   | token -> (
       match term_name token with
       | None -> false
@@ -2166,32 +2175,88 @@ let parse_operation_types state =
         let params, closing = loop [] in
         (params, Some (meta_with_span (span_between opening closing)))
 
-let parse_operation state =
+let operation_mode = function
+  | Surface_lex.Keyword "once" -> Some Kernel.Once
+  | Surface_lex.Keyword "multi" -> Some Kernel.Multi
+  | _ -> None
+
+let mode_name = function Kernel.Once -> "once" | Kernel.Multi -> "multi"
+
+let parse_operation state ~effect_mode =
+  let first_mode_token = ref None in
+  let explicit_mode = ref None in
+  while Option.is_some (operation_mode (current state).Surface_lex.token) do
+    let token = advance state in
+    let mode = Option.get (operation_mode token.Surface_lex.token) in
+    (match !explicit_mode with
+    | None ->
+        first_mode_token := Some token;
+        explicit_mode := Some mode
+    | Some prior ->
+        report_code state token "E1236"
+          (if prior = mode then Printf.sprintf "operation mode `%s` is duplicated" (mode_name mode)
+           else
+             Printf.sprintf "operation mode `%s` conflicts with `%s`" (mode_name mode)
+               (mode_name prior)));
+    skip_comments state
+  done;
   let name_token = current state in
   let name = Option.value ~default:"__surface_hole" (op_name name_token.Surface_lex.token) in
   ignore (advance state);
+  let mode =
+    match (effect_mode, !explicit_mode) with
+    | None, None ->
+        report_code state name_token "E1236"
+          (Printf.sprintf
+             "surface effect operation `%s` requires an explicit `once` or `multi` mode; during \
+              migration, choose `once` unless its handler deliberately searches, captures, or \
+              reuses continuations"
+             name);
+        None
+    | None, Some mode -> Some mode
+    | Some mode, None -> Some mode
+    | Some inherited, Some local ->
+        let token = Option.get !first_mode_token in
+        report_code state token "E1236"
+          (if inherited = local then
+             Printf.sprintf
+               "`%s` is already supplied by the effect-level shorthand; remove the operation-level \
+                mode"
+               (mode_name local)
+           else
+             Printf.sprintf "operation mode `%s` conflicts with the effect-level `%s` shorthand"
+               (mode_name local) (mode_name inherited));
+        Some inherited
+  in
   ignore (expect state Surface_lex.Colon "`:` in the operation signature");
   skip_continuation state;
   let params, params_meta = parse_operation_types state in
   ignore (expect state Surface_lex.Arrow "`->` in the operation signature");
   skip_continuation state;
   let result = parse_type state ~allow_newlines:false in
-  let meta = meta_from_token_to_meta name_token result.meta in
+  let start_token = Option.value ~default:name_token !first_mode_token in
+  let meta = meta_from_token_to_meta start_token result.meta in
   let meta =
     match params_meta with
     | Some params_meta -> Meta.with_surface_container "params" params_meta meta
     | None -> meta
   in
-  Surface_ast.{ name; params; result; meta }
+  Surface_ast.{ name; mode; params; result; meta }
 
 let operation_ahead state index =
+  let rec skip_modes index =
+    match operation_mode (token_at state index).Surface_lex.token with
+    | Some _ -> skip_modes (index_after_comments state (index + 1))
+    | None -> index
+  in
+  let index = skip_modes index in
   match op_name (token_at state index).Surface_lex.token with
   | None -> false
   | Some _ ->
       let next = index_after_comments state (index + 1) in
       (token_at state next).Surface_lex.token = Surface_lex.Colon
 
-let parse_effect_decl state keyword =
+let parse_effect_decl state ~start ~effect_mode keyword =
   let name, _ = parse_decl_name state "an effect name" effect_decl_name in
   let vars = parse_type_vars state (fun token -> token = Surface_lex.Keyword "where") in
   ignore (expect state (Surface_lex.Keyword "where") "`where` in the effect declaration");
@@ -2222,7 +2287,7 @@ let parse_effect_decl state keyword =
             report_code state token "E1221" "expected `}` before end of effect declaration";
             finished := true
         | _ when operation_ahead state state.index -> (
-            operations := parse_operation state :: !operations;
+            operations := parse_operation state ~effect_mode :: !operations;
             skip_comments state;
             match (current state).Surface_lex.token with
             | Surface_lex.RBrace -> ()
@@ -2264,8 +2329,33 @@ let parse_effect_decl state keyword =
   Surface_ast.
     {
       it = EffectDecl { name; vars; operations };
-      meta = meta_with_span (Span.merge keyword.Surface_lex.span end_span);
+      meta = meta_with_span (Span.merge start.Surface_lex.span end_span);
     }
+
+let parse_mode_effect_decl state first =
+  let first_mode = Option.get (operation_mode first.Surface_lex.token) in
+  let mode = ref first_mode in
+  while Option.is_some (operation_mode (current state).Surface_lex.token) do
+    let token = advance state in
+    let next_mode = Option.get (operation_mode token.Surface_lex.token) in
+    report_code state token "E1236"
+      (if !mode = next_mode then
+         Printf.sprintf "effect-level mode `%s` is duplicated" (mode_name next_mode)
+       else
+         Printf.sprintf "effect-level mode `%s` conflicts with `%s`" (mode_name next_mode)
+           (mode_name !mode));
+    skip_comments state
+  done;
+  match (current state).Surface_lex.token with
+  | Surface_lex.Keyword "effect" ->
+      let keyword = advance state in
+      parse_effect_decl state ~start:first ~effect_mode:(Some !mode) keyword
+  | _ ->
+      let token = current state in
+      report_code state token "E1236"
+        (Printf.sprintf "`%s` may prefix only an `effect` declaration" (mode_name first_mode));
+      synchronize_item state;
+      top_hole state first
 
 let parse_raw_top state keyword =
   skip_comments state;
@@ -2301,7 +2391,10 @@ let parse_top state =
       ignore (advance state);
       top_hole state token
   | Surface_lex.Keyword "type" -> parse_type_decl state (advance state)
-  | Surface_lex.Keyword "effect" -> parse_effect_decl state (advance state)
+  | Surface_lex.Keyword "effect" ->
+      let keyword = advance state in
+      parse_effect_decl state ~start:keyword ~effect_mode:None keyword
+  | Surface_lex.Keyword ("once" | "multi") -> parse_mode_effect_decl state (advance state)
   | Surface_lex.Keyword "jqd" -> parse_raw_top state (advance state)
   | surface_token -> (
       match term_name surface_token with
