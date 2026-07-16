@@ -32,6 +32,38 @@ let check_live_wakeups scheduler awakened =
         true (is_live_wakeup scheduler handle))
     awakened
 
+let expect_rejected_without_transition label scheduler handle operation =
+  let before = view scheduler handle in
+  Alcotest.(check string) label "E0908" (operation () |> error_code);
+  Alcotest.(check bool) (label ^ " preserves task state") true (before = view scheduler handle)
+
+let lifecycle_name = function
+  | Concurrency_contract.Runnable -> "runnable"
+  | Concurrency_contract.Suspended -> "suspended"
+  | Concurrency_contract.Done_state -> "done"
+  | Concurrency_contract.Failed_state -> "failed"
+  | Concurrency_contract.Cancelled_state -> "cancelled"
+
+let deterministic_scenario seed =
+  let scheduler, target = Scheduler_core.create ~scope_path:[ 0; 7 ] ~body_resume:seed |> ok in
+  let first = Scheduler_core.spawn scheduler ~resume:(seed + 1) |> ok in
+  let second = Scheduler_core.spawn scheduler ~resume:(seed + 2) |> ok in
+  ignore (Scheduler_core.checkout scheduler first |> ok);
+  ignore (Scheduler_core.await scheduler ~waiter:first ~target ~resume:(seed + 11) |> ok);
+  ignore (Scheduler_core.checkout scheduler second |> ok);
+  ignore (Scheduler_core.await scheduler ~waiter:second ~target ~resume:(seed + 12) |> ok);
+  ignore (Scheduler_core.checkout scheduler target |> ok);
+  let awakened = Scheduler_core.complete scheduler target seed |> ok in
+  [
+    trace scheduler target;
+    trace scheduler first;
+    trace scheduler second;
+    String.concat "," (List.map (trace scheduler) awakened);
+    lifecycle_name (view scheduler target).lifecycle;
+    lifecycle_name (view scheduler first).lifecycle;
+    lifecycle_name (view scheduler second).lifecycle;
+  ]
+
 let test_deterministic_ids_and_yield () =
   let scheduler, body = Scheduler_core.create ~scope_path:[ 0; 4 ] ~body_resume:10 |> ok in
   let child = Scheduler_core.spawn scheduler ~resume:20 |> ok in
@@ -48,7 +80,32 @@ let test_deterministic_ids_and_yield () =
   Alcotest.(check bool) "one owned resume" true yielded.owns_resume;
   Scheduler_core.wake_yielded scheduler child |> ok;
   check_lifecycle Concurrency_contract.Runnable scheduler child;
-  Alcotest.(check int) "returned token" 21 (Scheduler_core.checkout scheduler child |> ok)
+  Alcotest.(check int) "returned token" 21 (Scheduler_core.checkout scheduler child |> ok);
+  Alcotest.(check (list string))
+    "back-to-back scheduler scenarios are identical" (deterministic_scenario 70)
+    (deterministic_scenario 70)
+
+let test_rejected_transition_table () =
+  let scheduler, suspended = Scheduler_core.create ~scope_path:[ 0 ] ~body_resume:1 |> ok in
+  ignore (Scheduler_core.checkout scheduler suspended |> ok);
+  Scheduler_core.suspend_yield scheduler suspended ~resume:2 |> ok;
+  expect_rejected_without_transition "suspend_yield on suspended" scheduler suspended (fun () ->
+      Scheduler_core.suspend_yield scheduler suspended ~resume:3);
+  expect_rejected_without_transition "checkout of suspended" scheduler suspended (fun () ->
+      Scheduler_core.checkout scheduler suspended);
+  expect_rejected_without_transition "complete of suspended" scheduler suspended (fun () ->
+      Scheduler_core.complete scheduler suspended 4);
+  let scheduler, runnable = Scheduler_core.create ~scope_path:[ 0 ] ~body_resume:5 |> ok in
+  expect_rejected_without_transition "wake_yielded on runnable" scheduler runnable (fun () ->
+      Scheduler_core.wake_yielded scheduler runnable);
+  let terminal = Scheduler_core.spawn scheduler ~resume:6 |> ok in
+  ignore (Scheduler_core.checkout scheduler terminal |> ok);
+  ignore (Scheduler_core.complete scheduler terminal 7 |> ok);
+  expect_rejected_without_transition "checkout of terminal" scheduler terminal (fun () ->
+      Scheduler_core.checkout scheduler terminal);
+  let target = Scheduler_core.spawn scheduler ~resume:8 |> ok in
+  expect_rejected_without_transition "await with an owned waiter token" scheduler runnable
+    (fun () -> Scheduler_core.await scheduler ~waiter:runnable ~target ~resume:9)
 
 let test_multiple_awaiters_and_terminal_result () =
   let scheduler, target = Scheduler_core.create ~scope_path:[ 0 ] ~body_resume:100 |> ok in
@@ -128,16 +185,20 @@ let test_self_await_and_cycle_fail_without_exception () =
   let scheduler, a = Scheduler_core.create ~scope_path:[ 0 ] ~body_resume:0 |> ok in
   let b = Scheduler_core.spawn scheduler ~resume:1 |> ok in
   let c = Scheduler_core.spawn scheduler ~resume:2 |> ok in
-  let first_external = Scheduler_core.spawn scheduler ~resume:3 |> ok in
-  let cancelled_external = Scheduler_core.spawn scheduler ~resume:4 |> ok in
-  let second_external = Scheduler_core.spawn scheduler ~resume:5 |> ok in
-  ignore (block scheduler first_external a 30);
-  ignore (block scheduler cancelled_external b 40);
+  let on_c = Scheduler_core.spawn scheduler ~resume:3 |> ok in
+  let first_on_a = Scheduler_core.spawn scheduler ~resume:4 |> ok in
+  let on_b = Scheduler_core.spawn scheduler ~resume:5 |> ok in
+  let second_on_a = Scheduler_core.spawn scheduler ~resume:6 |> ok in
+  let cancelled_external = Scheduler_core.spawn scheduler ~resume:7 |> ok in
+  ignore (block scheduler on_c c 30);
+  ignore (block scheduler first_on_a a 40);
+  ignore (block scheduler on_b b 50);
+  ignore (block scheduler second_on_a a 60);
+  ignore (block scheduler cancelled_external b 70);
   Scheduler_core.request_cancel scheduler cancelled_external |> ok;
   ignore
     (Scheduler_core.deliver_cancel scheduler ~point:Concurrency_contract.Await cancelled_external
     |> ok);
-  ignore (block scheduler second_external a 50);
   ignore (block scheduler a b 10);
   ignore (block scheduler b c 11);
   let outcome, awakened = block scheduler c a 12 in
@@ -154,7 +215,8 @@ let test_self_await_and_cycle_fail_without_exception () =
       Alcotest.(check bool) "cycle member dropped resume" false task.owns_resume)
     [ a; b; c ];
   Alcotest.(check (list string))
-    "only external waiters wake in registration order" [ "0#3"; "0#5" ]
+    "external waiters group by cycle member, preserving per-member registration"
+    [ "0#4"; "0#6"; "0#5"; "0#3" ]
     (List.map (trace scheduler) awakened);
   check_live_wakeups scheduler awakened;
   Alcotest.(check bool)
@@ -203,6 +265,58 @@ let prop_transition_table =
       && (view scheduler body).lifecycle = Concurrency_contract.Done_state
       && not (view scheduler body).owns_resume)
 
+let prop_public_transitions_match_contract =
+  QCheck.Test.make ~count:200
+    ~name:"every public lifecycle transition satisfies Concurrency_contract.valid_transition"
+    QCheck.nat_small (fun seed ->
+      let transition_agrees scheduler handle operation =
+        let before = (view scheduler handle).lifecycle in
+        match operation () with
+        | Error _ -> false
+        | Ok () ->
+            let after = (view scheduler handle).lifecycle in
+            before = after || Concurrency_contract.valid_transition ~from_:before ~into:after
+      in
+      let scheduler, yielded = Scheduler_core.create ~scope_path:[ 0 ] ~body_resume:seed |> ok in
+      ignore (Scheduler_core.checkout scheduler yielded |> ok);
+      let suspended =
+        transition_agrees scheduler yielded (fun () ->
+            Scheduler_core.suspend_yield scheduler yielded ~resume:(seed + 1))
+      in
+      let runnable =
+        transition_agrees scheduler yielded (fun () ->
+            Scheduler_core.wake_yielded scheduler yielded)
+      in
+      ignore (Scheduler_core.checkout scheduler yielded |> ok);
+      let done_ =
+        transition_agrees scheduler yielded (fun () ->
+            Result.map ignore (Scheduler_core.complete scheduler yielded seed))
+      in
+      let failed = Scheduler_core.spawn scheduler ~resume:(seed + 2) |> ok in
+      ignore (Scheduler_core.checkout scheduler failed |> ok);
+      let failed_ =
+        transition_agrees scheduler failed (fun () ->
+            Result.map ignore (Scheduler_core.fail scheduler failed "property failure"))
+      in
+      let cancelled = Scheduler_core.spawn scheduler ~resume:(seed + 3) |> ok in
+      Scheduler_core.request_cancel scheduler cancelled |> ok;
+      let cancelled_ =
+        transition_agrees scheduler cancelled (fun () ->
+            Result.map ignore
+              (Scheduler_core.deliver_cancel scheduler ~point:Concurrency_contract.Yield cancelled))
+      in
+      let suspended_cancel = Scheduler_core.spawn scheduler ~resume:(seed + 4) |> ok in
+      ignore (Scheduler_core.checkout scheduler suspended_cancel |> ok);
+      Scheduler_core.suspend_yield scheduler suspended_cancel ~resume:(seed + 5) |> ok;
+      Scheduler_core.request_cancel scheduler suspended_cancel |> ok;
+      let suspended_cancelled =
+        transition_agrees scheduler suspended_cancel (fun () ->
+            Result.map ignore
+              (Scheduler_core.deliver_cancel scheduler ~point:Concurrency_contract.Yield
+                 suspended_cancel))
+      in
+      suspended && runnable && done_ && failed_ && cancelled_ && suspended_cancelled)
+
 let prop_cycle_wakeups_are_live =
   QCheck.Test.make ~count:200
     ~name:"every cycle-failure wakeup is runnable and owns exactly one resume" QCheck.nat_small
@@ -239,10 +353,12 @@ let prop_cycle_wakeups_are_live =
 
 let run () =
   test_deterministic_ids_and_yield ();
+  test_rejected_transition_table ();
   test_multiple_awaiters_and_terminal_result ();
   test_terminal_await_is_immediate ();
   test_self_await_and_cycle_fail_without_exception ();
   test_cancel_and_cleanup ();
   test_foreign_handle_diagnostic ();
   QCheck.Test.check_exn prop_transition_table;
+  QCheck.Test.check_exn prop_public_transitions_match_contract;
   QCheck.Test.check_exn prop_cycle_wakeups_are_live

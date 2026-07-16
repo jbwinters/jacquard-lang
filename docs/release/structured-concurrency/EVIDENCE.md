@@ -106,14 +106,18 @@ registration order on wakeup. Terminal awaits are immediate. Self-await and
 closed cycles produce the frozen task-failure messages and terminalize cycle
 members atomically with respect to wakeup reporting: every member drops its
 resume and reaches `failed` before registration-ordered external waiters become
-runnable. No terminal cycle member can appear in the returned wakeup list. The
-core returns the handles made runnable by a transition but has no runnable queue
-and makes no policy decision.
+runnable. Multi-member evidence pins cycle-discovery grouping and per-member
+registration order, including a cancelled external waiter that is omitted. No
+terminal cycle member can appear in the returned wakeup list. The core returns
+the handles made runnable by a transition but has no runnable queue and makes no
+policy decision.
 
 Focused Alcotest and QCheck coverage pins the transition table, resume-token
 ownership, deterministic IDs, yield suspension/wakeup, multiple waiters,
 immediate terminal awaits, completion/failure/cancellation, self-await, closed
-two- and three-node cycles, external/cancelled waiter controls, a property that
+two- and three-node cycles, external/cancelled waiter controls, the complete
+public rejection table, identical back-to-back scenarios, a property that every
+observed lifecycle transition satisfies the frozen contract, a property that
 every returned wakeup is runnable with one resume, close cleanup, and
 foreign-handle diagnostics. The existing handler
 gauntlet and interpreter/native runtime suites continue to cover affine Once
