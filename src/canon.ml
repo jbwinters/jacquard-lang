@@ -106,9 +106,13 @@ type env = {
   tyself : string option;
       (* the enclosing type/effect declaration's own name: a [TRef (Named self)] serializes
          as the self tag 0x37 (a recursive declaration cannot contain its own hash) *)
+  effectself : string option;
+      (* only an enclosing effect may remain [Named] in a row; it uses the SC.0 0x38 row tag *)
 }
 
-let empty_env = { locals = []; group = No_group; tyvars = []; rowvars = []; tyself = None }
+let empty_env =
+  { locals = []; group = No_group; tyvars = []; rowvars = []; tyself = None; effectself = None }
+
 let push vars env = { env with locals = List.rev vars @ env.locals }
 
 let local_index env ~meta x =
@@ -269,11 +273,42 @@ and ser_ty buf env (t : Kernel.ty) =
         body
 
 and ser_row buf env ({ Kernel.effects; rvar; wmeta } : Kernel.row) =
-  tag buf 0x36;
-  (* effect sets are unordered: serialize hashes sorted *)
-  let hashes = List.map (the_hash ~meta:wmeta ~what:"effect") effects |> List.sort Hash.compare in
-  varint buf (List.length hashes);
-  List.iter (hash_bytes buf) hashes;
+  let entries =
+    List.map
+      (function
+        | Kernel.Hashed hash -> `Hash hash
+        | Kernel.Named name when env.effectself = Some name -> `Self
+        | Kernel.Named name ->
+            err ~meta:wmeta ~code:"E0501" "unresolved effect `%s` reached hashing" name)
+      effects
+  in
+  let compare_entry left right =
+    match (left, right) with
+    | `Self, `Self -> 0
+    | `Self, `Hash _ -> -1
+    | `Hash _, `Self -> 1
+    | `Hash left, `Hash right -> Hash.compare left right
+  in
+  let entries = List.sort compare_entry entries in
+  if List.exists (function `Self -> true | `Hash _ -> false) entries then begin
+    (* 0x38 extends HASH_V0 only for the previously invalid self-effect-row case. Existing rows
+       retain byte-for-byte 0x36 encoding. Entries are tagged because a self reference has no hash
+       until the declaration itself has been serialized. *)
+    tag buf 0x38;
+    varint buf (List.length entries);
+    List.iter
+      (function
+        | `Self -> tag buf 0x00
+        | `Hash hash ->
+            tag buf 0x01;
+            hash_bytes buf hash)
+      entries
+  end
+  else begin
+    tag buf 0x36;
+    varint buf (List.length entries);
+    List.iter (function `Hash hash -> hash_bytes buf hash | `Self -> assert false) entries
+  end;
   match rvar with
   | None -> tag buf 0x00
   | Some v -> (
@@ -480,6 +515,36 @@ type decl_hashes = { decl_hash : Hash.t; named : (string * Hash.t) list }
     defterm members, constructors, or operations, each with the name the store should index it
     under. *)
 
+let serialize_effect ~ename ~evars ~ops =
+  let buf = Buffer.create 512 in
+  tag buf 0x42;
+  text buf ename;
+  varint buf (List.length evars);
+  let env =
+    { empty_env with tyvars = List.rev evars; tyself = Some ename; effectself = Some ename }
+  in
+  varint buf (List.length ops);
+  List.iter
+    (fun { Kernel.op_name; op_mode; op_params; op_result; _ } ->
+      tag buf 0x46;
+      text buf op_name;
+      varint buf (List.length op_params);
+      List.iter (ser_ty buf env) op_params;
+      ser_ty buf env op_result;
+      (* Compatibility extension: legacy Multi contributes no byte whatsoever. Once is a trailing
+         explicit discriminator, so all pre-EL.1 HASH_V0 inputs stay identical. *)
+      match op_mode with
+      | Kernel.Multi -> ()
+      | Kernel.Once -> tag buf 0x01)
+    ops;
+  Buffer.contents buf
+
+(** [canonical_effect_bytes ~ename ~evars ~ops] returns the exact HASH_V0 declaration payload,
+    before the ["D"] domain prefix, for a resolved effect declaration. It exists as a conformance
+    seam for byte-level compatibility tests. Unresolved non-self references return E0501. *)
+let canonical_effect_bytes ~ename ~evars ~ops =
+  try Ok (serialize_effect ~ename ~evars ~ops) with Err diagnostic -> Error [ diagnostic ]
+
 (** [hash_decl d] canonicalizes and hashes a resolved declaration. For a [defterm] the result lists
     each binding's member hash; for [deftype]/[defeffect] it lists the declaration hash under the
     type/effect name plus each constructor/operation's derived hash. *)
@@ -541,26 +606,8 @@ let hash_decl (d : Kernel.decl) : (decl_hashes, Diag.t list) result =
               :: List.mapi (fun i { Kernel.con_name; _ } -> (con_name, con_hash decl_hash i)) cons;
           }
     | Kernel.DefEffect { ename; evars; ops } ->
-        let buf = Buffer.create 512 in
-        tag buf 0x42;
-        text buf ename;
-        varint buf (List.length evars);
-        let env = { empty_env with tyvars = List.rev evars; tyself = Some ename } in
-        varint buf (List.length ops);
-        List.iter
-          (fun { Kernel.op_name; op_mode; op_params; op_result; _ } ->
-            tag buf 0x46;
-            text buf op_name;
-            varint buf (List.length op_params);
-            List.iter (ser_ty buf env) op_params;
-            ser_ty buf env op_result;
-            (* Compatibility extension: legacy Multi contributes no byte whatsoever. Once is a
-               trailing explicit discriminator, so all pre-EL.1 HASH_V0 inputs stay identical. *)
-            match op_mode with
-            | Kernel.Multi -> ()
-            | Kernel.Once -> tag buf 0x01)
-          ops;
-        let decl_hash = domain_hash "D" (Buffer.contents buf) in
+        let bytes = serialize_effect ~ename ~evars ~ops in
+        let decl_hash = domain_hash "D" bytes in
         Ok
           {
             decl_hash;

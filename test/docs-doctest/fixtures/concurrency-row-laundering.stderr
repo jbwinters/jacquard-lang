@@ -1,0 +1,1 @@
+fixtures/concurrency-row-laundering.jac:12:1-69: error[E0804]: equation definition `launder` does not match its signature: expected () ->{async} task text, got () ->{async, net | e} task text (a closed effect row cannot absorb extra effects; a stored definition passed as a thunk can be eta-expanded at the use site: (lam () (app (var f))))
