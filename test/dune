@@ -92,6 +92,7 @@
   ../docs/errors.md
   ../docs/effect-membranes.md
   ../docs/effect-taxonomy.md
+  ../docs/concurrency.md
   ../docs/README.md
   ../docs/release/surface-syntax/DECISION.md
   ../docs/release/surface-syntax/FOLLOWUPS.md
@@ -106,6 +107,8 @@
   ../docs/release/governed-membranes/GM5-MANIFEST.sha256
   ../docs/release/governed-membranes/GM6-EVIDENCE.md
   ../docs/release/governed-membranes/GM6-MANIFEST.sha256
+  ../docs/release/structured-concurrency/EVIDENCE.md
+  ../docs/release/structured-concurrency/MANIFEST.sha256
   ../docs/release/dx-jac-export/EVIDENCE.md
   ../docs/stdlib.md
   ../docs/surface-syntax.md
@@ -115,6 +118,9 @@
   docs-doctest/fixtures/effect-taxonomy-schemas.jac
   docs-doctest/fixtures/governed-membrane-signatures.jac
   docs-doctest/fixtures/governed-membrane-signatures.stdout
+  docs-doctest/fixtures/concurrency-row-contract.jac
+  docs-doctest/fixtures/concurrency-row-laundering.jac
   docs-doctest/fixtures/stdlib-handler-policy.jac
   ../scripts/release/check-surface-syntax-manifest.sh
+  ../scripts/release/check-structured-concurrency-manifest.sh
   cli/escrow.t))

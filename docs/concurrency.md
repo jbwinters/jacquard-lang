@@ -1,172 +1,272 @@
-# Structured Concurrency — Design, Draft 0.1
+# Structured Concurrency Contract
 
-Companion to the effect linearity design (a hard dependency: Async operations
-are `once`) and the effects runtime. Origin: convergent external review
-matching our own long-held stance, plus three specifics adopted from it: the
-row-charging law for spawn, deterministic scheduling as the default handler,
-and pure parallelism as phase zero.
+Status: SC.0 interface and invariant freeze (D46-D50), July 2026. This document
+is authoritative for C1. It defines future runtime behavior; it does not claim
+that Task values, a scheduler, or an Async handler are implemented.
 
-## 1. Why this is Jacquard-shaped
+Structured concurrency is an effect interpreted by a scheduler handler. The
+same program can therefore run under deterministic, seeded-random, exhaustive,
+or replay scheduling without hiding world authority in a runtime API. All Async
+operations are `once`, as required by the effect-linearity contract.
 
-Every other language bolts concurrency onto its runtime and then spends a
-decade retrofitting visibility (data-race detectors, structured-concurrency
-libraries, async coloring). Jacquard's substrate inverts the order:
-concurrency is an effect interpreted by a scheduler handler, which means it
-inherits, on day one, everything effects already have. Schedules become
-worlds: the same program runs under a deterministic scheduler, a seeded
-random one, an exhaustive one, or a recorded one, because a scheduler is a
-handler and handlers swap. Authority stays visible: a background task cannot
-carry powers its parent's signature doesn't show. And replay works, because
-scheduler decisions are effect operations and effect operations are what the
-trace records.
+## 1. The one law
 
-## 2. The one law
+**Every child effect is charged to the parent row.** The exact bootstrap
+interface is:
 
-**Child effects are charged to the parent row.**
-
-```
-effect Async where
-  once spawn  : (() ->{Async | e} a) -> Task a     -- caller row gains {Async | e}
-  once await  : (Task a) -> TaskResult a
-  once cancel : (Task a) -> ()
-  once yield  : () -> ()
-
-type TaskResult a = | Done(a) | Failed(Text) | Cancelled
+```text
+(deftype task-id () (con task-id-opaque))         ; scheduler-private carrier
+(deftype task ((tvar a)) (con task-opaque))       ; scheduler-private carrier
+(deftype task-result ((tvar a))
+  (con done (field value (tvar a)))
+  (con failed (field message (tref text)))
+  (con cancelled))
+(defeffect async ((tvar a))
+  (op async.spawn once
+    ((tarrow () (row (eref async) e) (tvar a)))
+    (tapp (tref task) (tvar a)))
+  (op async.await once
+    ((tapp (tref task) (tvar a)))
+    (tapp (tref task-result) (tvar a)))
+  (op async.cancel once ((tapp (tref task) (tvar a))) (ttuple))
+  (op async.yield once () (ttuple)))
 ```
 
-`spawn`'s argument row flows into the caller's row, so a function that spawns
-a Net-touching task has Net in its own signature. There is no fire-and-forget
-authority laundering, by typing rather than by policy. This is the single
-most important line in the design and everything else defends it.
+`task-id-opaque` and `task-opaque` are identity carriers in bootstrap data,
+like the primitive opaque constructors. They are never installed in the public
+constructor index; only the scheduler can create their runtime values.
 
-`Task` is an abstract runtime type owned by the scheduler handler. Tasks are
-scope-local (§4); a task value escaping its scope is a defect in v0, with the
-static version (rank-2 scoping in the manner of runST) recorded as future
-work rather than promised.
+In surface notation the law-bearing operation is exactly:
 
-## 3. Phase zero: pure parallelism, free of semantics
-
-The empty row is a parallelism license. A function `(a) ->{} b` cannot
-observe evaluation order, touch the world, or race anything, so:
-
-```
-parallel.map  : (List a, (a) ->{} b) ->{} List b
-parallel.both : (() ->{} a, () ->{} b) ->{} (a, b)
+```text
+async.spawn : (() ->{Async | e} a) -> Task a
 ```
 
-are **semantically identical to their sequential versions**. They are hints.
-The interpreter runs them sequentially; the native backend may run them on
-threads; no program can tell the difference, which is why C0 ships with zero
-semantic risk and no Async effect at all. This is also the sentence that
-connects the effect system to the compilation story: the row is
-simultaneously the security manifest and the parallelism license, one fact
-serving two masters. Warp obligation: differential tests that sequential and
-parallel execution produce identical results and identical hashes of output.
+Calling it contributes both `Async` and the solved child row `e` to the caller.
+Merely checking the parameter type is insufficient: without the special
+application rule, unification could absorb `Net` into `e` and then discard it.
+
+SC.0 implements that special rule only for the direct resolved operation
+identity whose complete declaration is the exact four-operation interface
+above. The nominal HASH_V0 identities are `Task`
+`07791255b44e18c3830038c51396bd3f80cf44a8e89222ff73dc90dd06ec3fb3`,
+`TaskResult`
+`915f69bd6fd8b34c2794b4b0e7ca88f5aafd0187e5c7c36a59091f6d031405ae`,
+and `Async`
+`4ff8ce05ab09968163492b3be40fc91381b47dee5fb4b2980f9416d50f38e66f`.
+These are structurally derived identities, not name permissions: the checker
+also validates the exact effect variable, operation order/names/modes,
+parameter/result linkage, Task identities, and open self row. This executable
+fixture pins both charging and handler subtraction. `async.scope` here is
+compile-only handler scaffolding; its `TaskOpaque` carrier and clauses are never
+executed and are not a Task runtime implementation.
+
+```jacquard doctest=concurrency-row-contract mode=check fixture=concurrency-row-contract.jac stdout=concurrency-row-contract.stdout stderr=empty exit=0
+type Task a = | TaskOpaque
+type TaskResult a = | Done(value: a) | Failed(message: Text) | Cancelled
+
+once effect Async a where {
+  async.spawn : (() ->{Async | e} a) -> Task a
+  async.await : (Task a) -> TaskResult a
+  async.cancel : (Task a) -> ()
+  async.yield : () -> ()
+}
+
+async.scope(body) =
+  handle body() {
+    | return value -> Done(value)
+    | async.spawn(_) resume continue -> continue(TaskOpaque)
+    | async.await(_) resume continue -> continue(Cancelled)
+    | async.cancel(_) resume continue -> continue(())
+    | async.yield() resume continue -> continue(())
+  }
+
+spawn-net() = async.spawn(fn () -> net.get("https://example.invalid"))
+
+scoped-net() =
+  async.scope(fn () -> {
+    let child = async.spawn(fn () -> net.get("https://example.invalid"))
+    async.await(child)
+  })
+```
+
+The mutation guard refuses the formerly laundering annotation:
+
+```jacquard doctest=concurrency-row-laundering mode=check fixture=concurrency-row-laundering.jac stdout=empty stderr=concurrency-row-laundering.stderr exit=1
+type Task a = | TaskOpaque
+type TaskResult a = | Done(value: a) | Failed(message: Text) | Cancelled
+
+once effect Async a where {
+  async.spawn : (() ->{Async | e} a) -> Task a
+  async.await : (Task a) -> TaskResult a
+  async.cancel : (Task a) -> ()
+  async.yield : () -> ()
+}
+
+launder : () ->{Async} Task Text
+launder() = async.spawn(fn () -> net.get("https://example.invalid"))
+```
+
+This SC.0 bridge is deliberately not the SC.4 closure proof. Aliasing the
+operation, passing it through a wrapper, returning a closure that later spawns,
+and adversarial row-polymorphic wrappers still require SC.4's general inference
+rule and negative suite before Async can ship. No such case is accepted here as
+evidence of complete non-laundering.
+
+## 2. Task identity and lifecycle
+
+`Task a` is an opaque, scheduler-owned, run-local handle. It has no public
+constructor, `Show`, canonical serialization, equality, or cross-run reuse.
+`TaskResult a` is exactly `Done(value: a) | Failed(message: Text) | Cancelled`.
+The failure payload is stable text, not an exception or an erased value.
+
+Internally a task ID is `(scope-path, spawn-index)`. The root scope path is
+`[0]`. A scope body has index 0; children receive one-based indices in spawn
+creation order. Each nested scope appends its one-based scope-creation ordinal
+within its parent. Components never depend on addresses, hashes, hash-table
+iteration, or host timing. IDs appear in scheduler traces and diagnostics but
+are not Jacquard values in C1. Their only stable text encoding is `path#spawn`,
+with path components separated by `/`: root child 1 is `0#1`, and task 3 in
+the second nested scope is `0/2#3`.
+
+States are `runnable`, `suspended`, `done`, `failed`, and `cancelled`. A task has
+one owning scope and at most one live affine continuation. Every task spawned in
+a scope must reach a terminal state before that scope returns. Scope exit
+cancels unfinished children and drains them to terminal states.
+
+Returning or storing a Task beyond its creating scope, using it after scope
+close, or using it in a different scope/run is the v0 dynamic defect:
+
+```text
+error[E0907]: a Task may not escape, outlive, or be used outside the structured scope that created it
+```
+
+Rank-2 static scoping is future work, not a C1 claim.
+
+Any number of tasks in the same owning scope may await one Task. A terminal
+result is immutable and every waiter receives that same typed `TaskResult`;
+waiters wake in registration order. Awaiting an already terminal task returns
+immediately. Self-await and a closed await cycle are scheduler-detected task
+failures, never a host deadlock. The exact templates are
+`async deadlock: task ID awaited itself` and
+`async deadlock: await cycle ID -> ... -> ID`, using the stable ID encoding
+above. Cross-scope or stale awaits are E0907 instead.
+
+## 3. Scope APIs and failure shapes
+
+The general handler and homogeneous convenience APIs are frozen as:
+
+```text
+async.scope : (() ->{Async | e} a) ->{| e} TaskResult a
+async.scope-fail-fast : (List (() ->{Async | e} a)) ->{| e} TaskResult (List a)
+async.scope-collect : (List (() ->{Async | e} a)) ->{| e} List (TaskResult a)
+```
+
+`async.scope` uses fail-fast by default. It discharges only `Async`; all child
+world effects remain in `e`. Its body may spawn, await, cancel, and yield
+directly. A successfully returned body value is `Done`; the first child failure
+selected by scheduler decision order is `Failed`, and cancellation is
+`Cancelled`.
+
+`async.scope-fail-fast` is the homogeneous aggregate: `Done(values)` preserves
+input/creation order. The first `Failed` cancels unfinished siblings; a failure
+or cancellation returns no partial value list. `async.scope-collect` never
+cancels siblings merely because one failed and returns one `TaskResult` per
+input, in input/creation order. These separate shapes avoid pretending that
+heterogeneously typed child values can inhabit one list. Within a general scope,
+programs obtain heterogeneous typed results explicitly with `async.await`.
+
+## 4. Cancellation and resources
+
+Cancellation is cooperative and becomes observable only at these suspension
+points, in this exact contract order:
+
+1. `async.await`;
+2. `async.yield`; and
+3. any effect operation routed through the scheduler, including Async
+   operations and scheduler-mediated world operations.
+
+At every boundary the scheduler checks an already requested cancellation
+before executing the routed operation. Thus cancellation delivered at spawn
+creates no child, and cancellation delivered at await registers no waiter.
+Otherwise `async.cancel(target)` atomically requests target cancellation and
+returns unit. Delivery changes the target to `cancelled` once and drops its
+affine continuation. Cancel of an already terminal or already requested task is
+an idempotent no-op. A task cancelling itself observes cancellation at that
+`async.cancel` routing point. No user expression after delivered cancellation
+runs.
+
+Dropping a continuation releases language/runtime memory; it does not release
+an external resource automatically. Acquire/release handlers (the bracket or
+`with-file` pattern) are the required C1 idiom for resources crossing a
+suspension point. Finalizers are explicitly deferred.
+
+## 5. Deterministic schedule order
+
+D46 fixes the default scheduler to FIFO round-robin over the runnable queue:
+
+1. A decision records a zero-based sequence number, the exact pre-decision
+   runnable queue, and its chosen head.
+2. A still-runnable task that suspends is appended after tasks already runnable.
+3. `spawn` atomically assigns the next task ID, appends the child, then appends
+   the suspended parent. With no sibling already queued, the child runs next.
+4. `await` on a live task blocks the waiter; terminal completion wakes waiters
+   in waiter-registration order and appends them to the tail.
+5. Results and collect aggregates are rendered in creation/input order, never
+   completion order. Simultaneous failures are ordered by decision sequence.
+
+The host scheduler is never consulted by this default. Seeded random,
+Choose-driven exhaustive, recorded/replay, and host scheduling are later
+handlers over the same decision boundary. Strict replay must validate the full
+runnable queue and chosen ID before divergent user or world work executes.
+
+The corresponding compiled OCaml contract is
+[`Concurrency_contract`](../src/concurrency_contract.mli). It contains only
+types, pinned identities, task-path validation, and pure lifecycle,
+waiter-wakeup, completion/failure-ordering, deadlock-cycle, and queue-order
+relations. Task 127 / SC.3 implements those contracts as the C1 scheduler;
+Jacquard Task values and scheduler state remain future implementation work.
+
+## 6. Interactions and exclusions
+
+All Async operations are `once`. Scheduler handlers own at most one live
+`Resume` per task. Deterministically scheduled scopes do not add schedules to a
+Dist sample space; a Choose-driven scheduler does so explicitly. A State region
+shared by tasks is serialized at suspension points, giving atomicity between
+yields rather than shared mutable memory or locks.
+
+The following are excluded from C1 and from this interface freeze:
+
+- detached or daemon tasks and any fire-and-forget root handler;
+- shared mutable memory, locks, atomics, and data-race semantics;
+- automatic external-resource finalizers;
+- channels before C3 and actors/supervision before C4+;
+- seeded-random/exhaustive schedule exploration and trace replay before C2;
+- host threads, host scheduling, and real asynchronous I/O before C4; and
+- a claim that the SC.0 direct-spawn bridge proves higher-order row charging.
+
+Pure `parallel.map` and `parallel.both` are separate empty-row hints. Their
+interpreter semantics are sequential and they introduce no Async effect.
 
 SC.2 audited the optional native-thread path and declined it for the current
 runtime: emitted C does not retain the callback-row proof, the allocator and
 reference counts are single-threaded, and fatal runtime errors cannot be joined
 and selected in source order. Native binaries therefore keep the sequential
 fallback. The prerequisite audit, parity/sanitizer lane, and benchmark are in
-`native-parallel-decision.md`.
+[`native-parallel-decision.md`](native-parallel-decision.md).
 
-## 4. Structured scopes
+## 7. Phases and indexed decisions
 
-Detached tasks are the mistake every ecosystem regrets, so they do not exist.
-All spawning happens inside a scope, and the scope rule is the second law:
-**every task spawned in a scope is completed, awaited, or cancelled before
-the scope exits.**
+C0 is pure parallel hints. C1 is Task lifecycle, Async, structured scopes,
+cooperative cancellation, fail-fast/collect, and the deterministic scheduler.
+C2 adds schedule traces, replay, seeded random, and bounded exhaustive schedules.
+C3 adds typed channels. C4 adds host asynchronous I/O; actor supervision opens
+only after channels and lifecycle evidence exist.
 
-```
-fetch-all(urls) =
-  async.scope(fn () -> {
-    let tasks = urls |> list.map(fn (u) -> spawn(fn () -> net.fetch(u)))
-    tasks |> list.map(fn (t) -> await(t))
-  })
-
-fetch-all : (List Url) ->{Net} List (TaskResult Response)
-```
-
-Note the public signature: `Async` is discharged by the scope's scheduler
-handler, Net remains. Concurrency internal, authority external, exactly the
-subtraction-you-can-see story handlers already tell.
-
-Scope exit with live tasks cancels them (fail-safe default). Failure policy
-is a scope parameter: `fail-fast` (first Failed cancels siblings, scope
-returns the failure) or `collect` (all tasks run to completion, results
-gathered). Cancellation is cooperative: it lands at suspension points
-(`await`, `yield`, and any effect operation routed through the scheduler),
-and a cancelled task's continuation is dropped, which is legal because Async
-is affine (`once` permits zero resumes). The honest gap, inherited from the
-linearity doc and owned here: dropping a continuation releases memory, not
-external resources. The v0 answer is the bracket pattern (acquire/release as
-a handler, `with-file`-style) documented as the idiom for resources that
-cross suspension points; finalizer machinery is future work, noted not
-promised.
-
-Shared mutable memory does not exist. Tasks communicate by value; a `State`
-region shared across tasks is serialized by the scheduler at suspension
-points, which gives atomicity between yields and is documented plainly so
-nobody mistakes it for locks.
-
-## 5. Schedulers are handlers, and one scheduler is many
-
-The scheduler is written once, parameterized over a decision effect. Which
-task runs next is `decide : (List TaskId) -> TaskId`, and the interpretation
-of `decide` is somebody else's handler:
-
-| plug in | you get |
-|---|---|
-| deterministic round-robin (default) | reproducible runs, Warp-cacheable, replayable by construction |
-| seeded random | interleaving fuzz: `jacquard test --schedules N --seed S`, a new Warp lane |
-| **Choose** | every interleaving, exhaustively, via multi-shot enumeration: model checking for small task counts as ordinary library code |
-| a recorded log | exact replay of a production schedule; fork at decision k for counterfactual debugging |
-
-The third row is the design's best trick and it costs nothing: `decide`
-performed via Choose under `dist.enumerate` is `fault.all` for schedules, the
-same machinery pointed at a new nondeterminism source. The many-worlds grid
-in the playground design gains a scheduler axis the day this lands. Statement
-of default, because it is a values statement: **determinism is the default
-and the host's arbitrary scheduling is the opt-in**, reversing every
-mainstream runtime.
-
-## 6. Interactions, stated
-
-With linearity: all Async operations are `once`; scheduler handlers are the
-canonical consumers of the affine `Resume` type, holding at most one live
-resumption per task. With Dist: a deterministically-scheduled scope is a
-deterministic computation, so models containing one enumerate cleanly;
-schedules join the sample space only when the Choose-driven scheduler
-explicitly puts them there. With replay: traces gain task-id and
-decision-sequence entries, and strict replay enforces the recorded
-interleaving. With the world: `run-host`, the scheduler that suspends fibers
-on real async IO, is deliberately last (C4), because everything before it is
-pure machinery testable in Warp's hermetic lane.
-
-## 7. Channels, later, and actors, later still
-
-Typed channels (`channel`, `send`, `recv`, `close`, all `once`) arrive only
-after task lifecycle is solid, because channels import ordering, blocking,
-fan-in, and close semantics all at once. Actors are a library on top of
-channels plus supervision, and supervision (restart policies on scopes, the
-BEAM inheritance) is designed when there is something real to supervise.
-Recording the restraint here so the scope of C1 stays small.
-
-## 8. Phasing
-
-C0 (small): `parallel.map`/`both`, sequential implementation, differential
-tests; native thread backend whenever the compiler wants it, invisibly.
-C1 (large): Async, Task, scopes, deterministic scheduler, cancellation,
-fail-fast/collect; hermetic Warp suite since no world is involved.
-C2 (medium): trace extension, replay-with-schedule, seeded-random Warp lane,
-Choose-driven exhaustive scheduler with a budget.
-C3 (medium): channels. C4 (large): `run-host` with real async IO in the
-native runtime; supervision design opens after.
-
-| ID | decision | default |
-|----|----------|---------|
-| D46 | default scheduler | deterministic round-robin; host scheduling is opt-in |
-| D47 | cancellation | cooperative at suspension points; bracket idiom for resource cleanup, finalizers future work |
-| D48 | task escape | dynamic defect in v0; static scoping recorded as future work |
-| D49 | channels and actors | deferred to C3/C4+, after task lifecycle proves out |
-| D50 | scope failure policy | `fail-fast` default, `collect` by parameter |
+| ID | decision | frozen result |
+|---|---|---|
+| D46 | default scheduler | deterministic FIFO round-robin; host scheduling is opt-in |
+| D47 | cancellation | cooperative at the three suspension classes above; bracket for cleanup; finalizers deferred |
+| D48 | task escape | E0907 dynamic defect in v0; rank-2 static scoping is future work |
+| D49 | channels and actors | channels deferred to C3; actors/supervision to C4+ |
+| D50 | scope failure policy | fail-fast default; collect explicit, with the exact result shapes in §3 |
