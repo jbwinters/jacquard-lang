@@ -11,6 +11,7 @@
   (source_tree fixtures)
   (source_tree ../../prelude)
   ../../README.md
+  ../../docs/effect-membranes.md
   ../../docs/effect-taxonomy.md
   ../../docs/concurrency.md
   ../../docs/tutorial.md
@@ -23,6 +24,7 @@
     (run ./docs_doctest.exe --self-test %{bin:jacquard} ../../prelude)
     (run ./docs_doctest.exe %{bin:jacquard} ../../prelude fixtures
      ../../README.md
+     ../../docs/effect-membranes.md
      ../../docs/effect-taxonomy.md
      ../../docs/concurrency.md
      ../../docs/tutorial.md

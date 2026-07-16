@@ -114,8 +114,13 @@ the special rule.
 
 ## 4. Governance data schemas
 
-The governance operations above are not placeholders. Their boundary types are
-frozen as follows:
+This section records the ET.0 boundary vocabulary that preceded the membrane
+charter. GM.0 in [`effect-membranes.md`](effect-membranes.md) supersedes the
+exact governance record fields, version tags, ID inputs, and audit sequence
+fields below. The effect operation boundaries (`Call -> Assessment`,
+`Proposal -> Decision`, `AuditEntry -> ()`, and the two `Secret` operations)
+remain unchanged. Implementations must use the GM.0 schemas; this older block
+and its executable fixture remain historical ET.0 compatibility evidence.
 
 ```text
 type Authority = Effect(name: Text) | Resource(effect-name: Text, scope: Text)
@@ -150,10 +155,10 @@ is the only standard conversion to `Text`, so deliberate exposure remains in
 the effect row. This is non-derivability, not information-flow tracking: after
 exposure a program can still leak the text.
 
-`Call.subject` hashes the resolved operation identity, canonical arguments,
-declared authority, and preconditions. Presentation summary is excluded.
-`Proposal` requires its subject hash and exact authority delta. Every dry-run or
-scripted Approval handler returns `Escalate`, never `Approved`.
+GM.0 names the semantic identities `Call.call-id` and
+`Proposal.proposal-id`, adds `GovernanceV0` and the exact constituent IDs, and
+keeps presentation summary out of the call identity. Every dry-run or scripted
+Approval handler returns `Escalate`, never `Approved`.
 
 The declarations below are an executable surface fixture for the reserved
 world, governance, Async, and Channel operation boundaries. Its small carrier
@@ -268,6 +273,8 @@ typed operations. Its membrane handles that facade and re-performs the exact
 concrete effects it needs—`Fs`, `Net`, `Pg`, `Blob`, `Secret`, `Serve`, and so
 on. A universal stringly `Tool.call` would erase argument/result types; an
 opaque `Host` row would erase real authority. Both are forbidden by D61-D62.
+Any earlier planning shorthand written as generic `Tool -> Host` is therefore
+superseded by GM.0. There is no `Tool` or `Host` effect in governed-membrane v0.
 
 `Judge` is blessed by D63 because assessment is shared governance vocabulary.
 It assesses calls and does not perform them. A rules handler may discharge it
@@ -336,7 +343,7 @@ data and receive structural diffs, never an authority label.
 | D56 | taxonomy freeze v1 | §3 and the TSV artifact; resolved identities govern, additions use new hashes |
 | D57 | Secret opacity | opaque, no `Show`, inspect redacts, explicit in-row `secret.expose`; taint deferred |
 | D58 | audit chain | canonical handler hash-chains entries, publishes a head, and supports offline verification |
-| D59 | Proposal schema | subject hash and authority are mandatory; hash-less proposals are ill-formed |
+| D59 | Proposal schema | semantic identity and authority are mandatory; GM.0 D67 supersedes the earlier `subject` field name with exact `call-id` and `proposal-id` schemas |
 | D60 | membrane placement | ring 3 governance module plus cookbook and flagship demo, implemented in later phases |
 | D61 | facade shape | domain-specific typed facade effects; no universal stringly `Tool.call` |
 | D62 | raw authority | host is a role; membranes re-perform concrete blessed world effects, never `Host` |
