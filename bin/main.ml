@@ -198,7 +198,9 @@ let write_schedule path trace =
     let channel = open_out_bin path in
     Fun.protect
       ~finally:(fun () -> close_out_noerr channel)
-      (fun () -> output_string channel (Schedule_trace.serialize trace));
+      (fun () ->
+        output_string channel (Schedule_trace.serialize trace);
+        close_out channel);
     Ok ()
   with Sys_error message -> Error (schedule_file_error "write" path message)
 

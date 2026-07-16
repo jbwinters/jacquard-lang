@@ -138,3 +138,9 @@ only after the program has completed successfully.
   child-world99
   $ grep -F 'cannot write schedule trace record-target: Is a directory' write-failure.err
   error[E0908]: cannot write schedule trace record-target: Is a directory
+  $ jacquard run replay.jqd --allow console --schedule-record /dev/full > flush-failure.out 2> flush-failure.err; echo "exit $?"
+  exit 1
+  $ cat flush-failure.out
+  child-world99
+  $ grep -F 'cannot write schedule trace /dev/full: No space left on device' flush-failure.err
+  error[E0908]: cannot write schedule trace /dev/full: No space left on device
