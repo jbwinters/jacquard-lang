@@ -46,17 +46,17 @@ cd _build/default/test
 find ../../../test -name '*.t' | wc -l
 ```
 
-Current inventory:
+Frozen RC1 inventory:
 
-- Alcotest/QCheck cases: `568`
+- Alcotest/QCheck cases: `554`
 - Cram transcript files: `32`
 - Gauntlet cram files: `4`
 - Escrow transcript: `test/cli/escrow.t`
 - Larger case-study transcript: `test/cli/case-studies.t`
 
-`test/test_surface_laws.ml` validates the two evolving counts above against the
-compiled Alcotest list and the recursive `test/**/*.t` inventory, and requires
-this evidence file and `DECISION.md` to agree.
+`test/test_surface_laws.ml` freezes the two historical counts above and separately
+validates each successor evidence inventory against the compiled Alcotest list and
+the recursive `test/**/*.t` inventory.
 
 ## Commands
 
@@ -93,7 +93,7 @@ The claim matrix is [CLAIMS.md](CLAIMS.md). The short version:
 - handler claims are pinned by `test/test_handlers.ml` and
   `test/test_gauntlet_handlers.ml`
 - capability claims are pinned by `test/cli/manifest.t`,
-  `test/cli/world.t`, `test/gauntlet/eval-capabilities.t`, and
+  `test/cli/world.t`, `test/cli/native.t`, `test/gauntlet/eval-capabilities.t`, and
   `test/cli/escrow.t`
 - Dist claims are pinned by `test/test_infer.ml`, `test/test_dist_lib.ml`,
   `test/test_gauntlet_dist.ml`, and `test/cli/infer.t`

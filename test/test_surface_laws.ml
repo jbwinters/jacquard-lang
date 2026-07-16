@@ -269,26 +269,27 @@ let claimed_inventory_count ~path ~prefix source =
           | None -> Error (Printf.sprintf "%s has a non-integer `%s` count" path prefix))
       | _ -> Error (Printf.sprintf "%s must state exactly one `%s` count" path prefix))
 
-let evolving_inventory_errors () =
+let inventory_claim_errors ~path claims =
+  let source = read_source path in
+  claims
+  |> List.filter_map (fun (prefix, expected) ->
+      match claimed_inventory_count ~path ~prefix source with
+      | Ok claimed when claimed = expected -> None
+      | Ok claimed ->
+          Some
+            (Printf.sprintf "%s `%s` is stale (claimed %d, expected %d)" path prefix claimed
+               expected)
+      | Error message -> Some message)
+
+let release_inventory_errors () =
   let actual_tests = Lazy.force compiled_test_count in
   let actual_crams = count_files_with_suffix (source_path "test") ".t" in
-  [
-    ( "docs/release/0.1/EVIDENCE.md",
-      [ ("- Alcotest/QCheck cases:", actual_tests); ("- Cram transcript files:", actual_crams) ] );
-    ( "docs/release/0.1/DECISION.md",
-      [ ("Test count:", actual_tests); ("Cram count:", actual_crams) ] );
-  ]
-  |> List.concat_map (fun (path, claims) ->
-      let source = read_source path in
-      claims
-      |> List.filter_map (fun (prefix, actual) ->
-          match claimed_inventory_count ~path ~prefix source with
-          | Ok claimed when claimed = actual -> None
-          | Ok claimed ->
-              Some
-                (Printf.sprintf "%s `%s` is stale (claimed %d, actual %d)" path prefix claimed
-                   actual)
-          | Error message -> Some message))
+  inventory_claim_errors ~path:"docs/release/0.1/EVIDENCE.md"
+    [ ("- Alcotest/QCheck cases:", 554); ("- Cram transcript files:", 32) ]
+  @ inventory_claim_errors ~path:"docs/release/0.1/DECISION.md"
+      [ ("Test count:", 554); ("Cram count:", 32) ]
+  @ inventory_claim_errors ~path:"docs/release/dx-jac-export/EVIDENCE.md"
+      [ ("- Alcotest/QCheck cases:", actual_tests); ("- Cram transcript files:", actual_crams) ]
 
 let doctest_names () =
   [
@@ -677,6 +678,7 @@ let validate_release_docs ~decision ~followups ~index =
                      name (String.concat ", " claimed) (String.concat ", " actual))
         | _ -> add (name ^ " inventory must have exactly one three-column row")
       in
+      (* Successor evidence is checked against the live executable and repository inventories. *)
       check_inventory "tests" (List.init (Lazy.force compiled_test_count) string_of_int) false;
       check_inventory "doctests" (doctest_names ()) true;
       check_inventory "twins" (twin_names ()) true;
@@ -841,7 +843,7 @@ let validate_release_docs ~decision ~followups ~index =
           [ "opam exec -- dune build @all"; "exit 0" ];
           [
             "opam exec -- dune runtest --force";
-            "exit 0; compiled Alcotest inventory is exactly 568 cases";
+            "exit 0; compiled Alcotest inventory is exactly 554 cases";
           ];
           [ "opam exec -- dune fmt"; "exit 0; no task-file byte changes" ];
           [
@@ -931,7 +933,7 @@ let release_sources () =
 
 let assert_release_valid () =
   let decision, followups, index = release_sources () in
-  match validate_release_docs ~decision ~followups ~index @ evolving_inventory_errors () with
+  match validate_release_docs ~decision ~followups ~index @ release_inventory_errors () with
   | [] -> ()
   | errors -> Alcotest.fail (String.concat "\n" errors)
 

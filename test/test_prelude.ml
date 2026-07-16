@@ -187,15 +187,15 @@ let test_loads_with_zero_diagnostics () =
           | Error diagnostics -> Eval_support.fail_diags ("force prelude term " ^ name) diagnostics));
   let expected_world_handlers =
     [
-      ("infer.scripted", "forall a | e. (() ->{Infer, Throw | e} a, List Text) ->{Throw | e} a");
+      ("infer.scripted", "forall a | e. (() ->{Infer | e} a, List Text) ->{Throw | e} a");
       ("net.record", "forall a | e. (() ->{Net | e} a) ->{Net | e} (a, Code)");
-      ("test.replay", "forall a. (Code, () ->{Net, Throw} a) ->{Throw} a");
-      ("net.scripted", "forall a | e. (() ->{Net, Throw | e} a, List Response) ->{Throw | e} a");
-      ("console.scripted", "forall a | e. (() ->{Console, Throw | e} a, List Text) ->{Throw | e} a");
+      ("test.replay", "forall a. (Code, () ->{Net} a) ->{Throw} a");
+      ("net.scripted", "forall a | e. (() ->{Net | e} a, List Response) ->{Throw | e} a");
+      ("console.scripted", "forall a | e. (() ->{Console | e} a, List Text) ->{Throw | e} a");
       ( "fs.in-memory",
-        "forall a | e. (() ->{Fs, Throw | e} a, `type:map.t` Text Text) ->{Throw | e} (a, \
-         `type:map.t` Text Text)" );
-      ("test.replay-loose", "forall a. (Code, () ->{Net, Check, Throw} a) ->{Check, Throw} a");
+        "forall a | e. (() ->{Fs | e} a, `type:map.t` Text Text) ->{Throw | e} (a, `type:map.t` \
+         Text Text)" );
+      ("test.replay-loose", "forall a. (Code, () ->{Net} a) ->{Check, Throw} a");
     ]
   in
   List.iter
