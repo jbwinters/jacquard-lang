@@ -49,6 +49,17 @@ Five principles generate the whole design:
    same `for-each` with `println` carries `Console`. The library never hides an
    effect and never adds one.
 
+Fixed helper effects and callback effects compose without contaminating each other.
+For example, Preflight's reusable gate has signature
+`forall | e. ((Code) ->{| e} Bool) ->{Dist | e} Code`: `Dist` belongs to the gate,
+while a pure predicate keeps `e` empty and a scripted predicate closes `e` to
+`Eval`. Top-level callers remain closed (`{Dist}` or `{Dist, Eval}`), so this
+precision does not add implicit authority. Handler subtraction is unchanged: a
+handler requires only its declared handled labels on flexible computations invoked
+inside the handled body, including callbacks reached through typed wrappers. It
+then removes those labels; helper-owned and before/after effects remain on the
+outer row instead of leaking into the callback contract.
+
 Everything else is elaboration.
 
 ## 2. The shape of the library: rings

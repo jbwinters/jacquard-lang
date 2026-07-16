@@ -46,9 +46,9 @@ cd _build/default/test
 find ../../../test -name '*.t' | wc -l
 ```
 
-Current inventory:
+Frozen RC1 inventory:
 
-- Alcotest/QCheck cases: `569`
+- Alcotest/QCheck cases: `554`
 - Cram transcript files: `32`
 - Gauntlet cram files: `4`
 - Escrow transcript: `test/cli/escrow.t`

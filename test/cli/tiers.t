@@ -8,29 +8,29 @@ tier land here on purpose, like the sigs goldens.
 
   $ jacquard tiers
   == declarations: 199 named terms ==
-  pure                 114  57%
-  row-poly              38  19%
-  effectful             35  17%
+  pure                 116  58%
+  row-poly              39  19%
+  effectful             32  16%
   data                  12   6%
   
   == call sites: 582 applications ==
   constructor          103  17%
   op-perform            45   7%
-  fn pure              289  49%
-  fn row-poly           55   9%
-  fn effectful          90  15%
+  fn pure              299  51%
+  fn row-poly           93  15%
+  fn effectful          42   7%
     abort                2
-    check               34
+    check               10
     clock                1
     console              2
-    dist                 7
+    dist                 1
     emit                 2
-    fault                5
-    fs                   4
+    fault                4
+    fs                   2
     infer                1
-    net                  9
+    net                  6
     state                1
-    throw               52
+    throw               14
   
   == handler op clauses: 32 (syntactic resumption shape) ==
   tail-resumptive        6  18%

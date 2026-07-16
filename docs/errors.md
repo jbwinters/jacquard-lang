@@ -109,6 +109,7 @@ in `src/` and `bin/` appears in this catalog.
 | E0815 | effectful top-level definition body | `(defterm ((binding x () (app (var print) ...))))` |
 | E0816 | a once resumption may be consumed twice on one possible path | two sequential calls to the same once-clause `resume` binder |
 | E0817 | a once resumption escapes its handler clause | returning, storing, capturing, or passing `resume` to a non-`Resume` parameter |
+| E0818 | polymorphic reuse of a non-value local binding (value restriction) | bind an application result, then call it at two unrelated types |
 | W0801 | redundant match clause | a clause after `(pwild)` |
 
 E0817 has one bounded transformer exception: a direct clause lambda may capture

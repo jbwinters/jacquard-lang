@@ -34,6 +34,8 @@ ungranted-effect | error[E0814]: this program requires the `console` effect, whi
   hint: grant it with --allow console, or handle the effect in the program
 effectful-toplevel-body | effectful-toplevel-body.jqd:1:11-78: error[E0815]: top-level definition `sneaky` performs the `net` effect while being defined
   hint: wrap the body in a lambda and perform the effect when called
+value-restriction | value-restriction.jqd:1:112-119: error[E0818]: local binding `i` comes from a non-value and remains monomorphic under the value restriction
+  hint: eta-expand the binding to a lambda value, or give each use its own binding
 once-double-call | once-double-call.jqd:2:129-150: error[E0816]: once resumption `k` may be consumed twice on one possible execution path; first consumption at once-double-call.jqd:2:107-128, second consumption at once-double-call.jqd:2:129-150
   hint: a once resumption may be dropped or moved, but it may be consumed at most once on each possible execution path
 once-alias-duplication | once-alias-duplication.jqd:2:157-179: error[E0816]: once resumption `k2` may be consumed twice on one possible execution path; first consumption at once-alias-duplication.jqd:2:135-156, second consumption at once-alias-duplication.jqd:2:157-179
