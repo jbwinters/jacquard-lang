@@ -97,7 +97,7 @@ git diff --exit-code
 opam exec -- dune build @doc
 ```
 
-Expected results are zero exits, 568 compiled Alcotest/QCheck cases, 32 cram
+Expected results are zero exits, 598 compiled Alcotest/QCheck cases, 33 cram
 transcripts, and 24 doctest examples across 7 documents. The direct-spawn rule
 is intentionally narrow: SC.4 still owns higher-order aliases, wrappers, and
 returned-closure non-laundering.

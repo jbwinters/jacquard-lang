@@ -248,6 +248,13 @@ The following are excluded from C1 and from this interface freeze:
 Pure `parallel.map` and `parallel.both` are separate empty-row hints. Their
 interpreter semantics are sequential and they introduce no Async effect.
 
+SC.2 audited the optional native-thread path and declined it for the current
+runtime: emitted C does not retain the callback-row proof, the allocator and
+reference counts are single-threaded, and fatal runtime errors cannot be joined
+and selected in source order. Native binaries therefore keep the sequential
+fallback. The prerequisite audit, parity/sanitizer lane, and benchmark are in
+[`native-parallel-decision.md`](native-parallel-decision.md).
+
 ## 7. Phases and indexed decisions
 
 C0 is pure parallel hints. C1 is Task lifecycle, Async, structured scopes,
