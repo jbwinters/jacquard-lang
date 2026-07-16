@@ -264,7 +264,7 @@ let hash_static st (h : Hash.t) =
   let hex = Hash.to_hex h in
   let name = "hs_" ^ String.sub hex 0 12 in
   declare st ("hs:" ^ name) (fun () ->
-      let (Hash.Digest_bytes bytes) = h in
+      let bytes = Hash.to_raw h in
       let words =
         List.init 32 (fun i -> Printf.sprintf "0x%02x" (Char.code (String.get bytes i)))
       in
@@ -916,8 +916,9 @@ let unit_source (prog : program) ~precise ~(decl_hex : string) (members : compil
     with the interpreter's output and exit-code contract. *)
 let main_source (prog : program) ~precise ~(v_true : Hash.t) ~(v_false : Hash.t)
     ~(option_cons : (Hash.t * Hash.t) option) ~(orderings : (Hash.t * Hash.t * Hash.t) option)
-    ~(listcons : (Hash.t * Hash.t) option) ~(pair : Hash.t option)
-    ~(intrinsics : (string * int) list) ~(manifests : (Hash.t * string) list list) : string =
+    ~(result_cons : (Hash.t * Hash.t) option) ~(listcons : (Hash.t * Hash.t) option)
+    ~(pair : Hash.t option) ~(intrinsics : (string * int) list)
+    ~(manifests : (Hash.t * string) list list) : string =
   let st = new_state ~precise prog in
   (* constructor infos: the shared identities every unit externs *)
   let cons = Hashtbl.fold (fun _ cr acc -> cr :: acc) prog.cons [] in
@@ -1006,10 +1007,8 @@ let main_source (prog : program) ~precise ~(v_true : Hash.t) ~(v_false : Hash.t)
       st.ub.indent <- st.ub.indent - 1;
       line st.ub "}")
     consts;
-  (* lifted lambdas of const members and of top-level expressions *)
-  List.iter
-    (fun ((_, m) : Hash.t * compiled_member) -> List.iter (emit_fn st) m.lifted)
-    (List.filter (fun ((_, m) : Hash.t * compiled_member) -> m.main_fn = None) consts);
+  (* Const-member lifted lambdas live in their declaration unit. Emitting them again here would
+     create duplicate symbols once a previously refused intrinsic makes that const reachable. *)
   List.iter (fun (_, lifted, _) -> List.iter (emit_fn st) lifted) prog.tops;
   (* the program body runs on a large-stack thread (deep non-tail recursion
      is deep C recursion here; see runtime/jq_main.c) *)
@@ -1043,6 +1042,13 @@ let main_source (prog : program) ~precise ~(v_true : Hash.t) ~(v_false : Hash.t)
       declare_con_info st some_h;
       line st.ub "rt->ci_some = &%s;" (ci_name some_h);
       line st.ub "rt->v_none = %s;" (con_value_static st none_h)
+  | None -> ());
+  (match result_cons with
+  | Some (ok_h, err_h) ->
+      declare_con_info st ok_h;
+      declare_con_info st err_h;
+      line st.ub "rt->ci_ok = &%s;" (ci_name ok_h);
+      line st.ub "rt->ci_err = &%s;" (ci_name err_h)
   | None -> ());
   (* dist ordinals (task 72): the LW driver and the root sampler dispatch by
      these; UINT32_MAX when the program reaches neither op *)
