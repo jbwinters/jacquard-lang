@@ -33,6 +33,8 @@ project shape from file names alone.
 - `stdlib.md`: prelude, rings, library effects, and standard handlers.
 - `effect-taxonomy.md`: ratified blessed effect names, schemas, risks, rings,
   interface compatibility, and user-effect governance.
+- `effect-membranes.md`: GM.0 charter for typed governed facades, versioned
+  decision artifacts, live/dry boundaries, and monotonic composition.
 - `concurrency.md`: SC.4 generalized child-effect charging over the SC.3
   Task/Async boundary, scope contracts, deterministic scheduling, cancellation,
   exclusions, and D46-D50.
