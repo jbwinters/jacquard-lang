@@ -6,10 +6,11 @@
     checking against an annotation's [tforall]; they unify only with themselves.
 
     Effect rows are set-semantics (Leijen, POPL 2017, simplified: no duplicate labels): a sorted,
-    deduplicated set of effect hashes plus an optional tail. Row unification cancels the
-    intersection; a closed row absorbs a remainder only if that remainder is empty; two open rows
-    bind each tail to the other side's remainder plus a fresh common tail. Occurs checks run on both
-    type and row variables.
+    deduplicated set of effect hashes plus an optional tail. Row records are immutable; inference
+    builds directional unions while mutable row-variable links carry equality constraints shared by
+    arrow types. Row unification cancels the intersection; a closed row absorbs a remainder only if
+    that remainder is empty; two open rows bind each tail to the other side's remainder plus a fresh
+    common tail. Occurs checks run on both type and row variables.
 
     Failure modes surface as [Unify_error] carrying a rendered mismatch; the checker (W3.2+)
     converts these to diagnostics with spans. *)
@@ -33,7 +34,8 @@ type ty =
 and tvar = Unbound of { id : int; level : level } | Link of ty
 
 and row = { effects : Hash.t list; tail : rtail }
-(** [effects] is sorted and deduplicated after {!repr_row}. *)
+(** [effects] is sorted and deduplicated after {!repr_row}. Row values are immutable; sharing and
+    refinement happen only through private [rvar] links. *)
 
 and rtail = RClosed | RVar of rvar ref | RSkolem of int * string
 and rvar = RUnbound of { id : int; level : level } | RLink of row
@@ -68,11 +70,13 @@ let rec repr (t : ty) : ty =
       t''
   | t -> t
 
-(** Normalize a row: follow tail links and merge their effect sets. *)
+(** Normalize a row: follow tail links, merge their effect sets, and compress the private tail link.
+    The source row record is never modified. *)
 let rec repr_row (r : row) : row =
   match r.tail with
-  | RVar { contents = RLink inner } ->
+  | RVar ({ contents = RLink inner } as rv) ->
       let inner = repr_row inner in
+      rv := RLink inner;
       { effects = List.sort_uniq Hash.compare (r.effects @ inner.effects); tail = inner.tail }
   | _ -> { r with effects = List.sort_uniq Hash.compare r.effects }
 
@@ -241,7 +245,7 @@ and unify_rows (ra : row) (rb : row) : unit =
   | RVar rva, RVar rvb -> (
       match (!rva, !rvb) with
       | RUnbound { id = ia; _ }, RUnbound { id = ib; _ } when ia = ib ->
-          (* same tail: remainders must agree exactly *)
+          (* same tail: exact row equality still requires equal fixed sets *)
           if only_a <> [] || only_b <> [] then
             raise (Unify_error "occurs check: effect rows with the same tail differ")
       | RUnbound { level = la; _ }, RUnbound { level = lb; _ } ->
@@ -268,6 +272,120 @@ and bind_rvar (rv : rvar ref) (r : row) : unit =
               r' := RUnbound { id = id'; level }
           | _ -> ());
           rv := RLink r)
+
+(** [include_rows sub into] returns the directional union recording that [sub] is evaluated in
+    [into]. It never modifies either operand. Open tails are unified so later specialization of
+    [sub] remains visible in the result; a closed ambient closes an otherwise unconstrained tail. On
+    failure the private tail constraints may already have been refined, as with {!unify_rows}. *)
+let include_rows ~(sub : row) ~(into : row) : row =
+  let sub = repr_row sub in
+  let into = repr_row into in
+  (match sub.tail with
+  | RClosed -> ()
+  | tail -> unify_rows { effects = []; tail } { effects = []; tail = into.tail });
+  repr_row { effects = List.sort_uniq Hash.compare (into.effects @ sub.effects); tail = into.tail }
+
+(** [require_effects ~level effects row] specializes an open computation row so it contains every
+    label in [effects]. This is the semantic constraint used for calls under handlers: a flexible
+    tail absorbs missing handled labels, a closed row is already exact and needs no refinement, and
+    a rigid annotation rejects a missing label. Row records are not modified. *)
+let require_effects ~level effects row : unit =
+  let row = repr_row row in
+  let missing = hash_set_diff (List.sort_uniq Hash.compare effects) row.effects in
+  match (missing, row.tail) with
+  | [], _ | _, RClosed -> ()
+  | _, RVar rv -> bind_rvar rv { effects = missing; tail = new_rvar level }
+  | _, RSkolem _ ->
+      raise
+        (Unify_error
+           "a handler requires this callback row to include its handled effect before the rigid \
+            row tail")
+
+(** [copy_join_result ty] constructs an independent outer type and row shape for an alternative
+    result. Unification variables remain shared so ordinary type constraints still propagate, but no
+    source row record can become the branch accumulator by aliasing. *)
+let rec copy_join_result ty =
+  match repr ty with
+  | (TVar _ | TSkolem _) as ty -> ty
+  | TCon (head, args) -> TCon (head, List.map copy_join_result args)
+  | TTuple items -> TTuple (List.map copy_join_result items)
+  | TArrow (params, row, result) ->
+      TArrow (List.map copy_join_result params, copy_join_row row, copy_join_result result)
+  | TResume (input, row, answer) ->
+      TResume (copy_join_result input, copy_join_row row, copy_join_result answer)
+  | TVariadicArrow (param, row, result) ->
+      TVariadicArrow (copy_join_result param, copy_join_row row, copy_join_result result)
+
+and copy_join_row row =
+  let row = repr_row row in
+  { effects = row.effects; tail = row.tail }
+
+(** [join ~level left right] constructs the least-upper-bound type of two alternative results.
+    Flexible rows with a common tail contribute the union of their fixed labels to a fresh result
+    row without refining that shared tail. This prevents a branch result from widening callback
+    input rows that happen to share it. Ordinary type constraints still use {!unify}; rigid rows
+    remain exact. Failure raises [Unify_error]. *)
+let rec join ~level (left : ty) (right : ty) : ty =
+  let left = repr left and right = repr right in
+  if left == right then copy_join_result left
+  else
+    match (left, right) with
+    | TTuple lefts, TTuple rights when List.length lefts = List.length rights ->
+        TTuple (List.map2 (join ~level) lefts rights)
+    | TCon (left_head, left_args), TCon (right_head, right_args)
+      when Hash.equal left_head right_head && List.length left_args = List.length right_args ->
+        TCon (left_head, List.map2 (join ~level) left_args right_args)
+    | TArrow (left_params, left_row, left_result), TArrow (right_params, right_row, right_result)
+      when List.length left_params = List.length right_params ->
+        List.iter2 unify left_params right_params;
+        TArrow
+          ( List.map copy_join_result left_params,
+            join_rows left_row right_row,
+            join ~level left_result right_result )
+    | TResume (left_input, left_row, left_answer), TResume (right_input, right_row, right_answer) ->
+        unify left_input right_input;
+        TResume
+          ( copy_join_result left_input,
+            join_rows left_row right_row,
+            join ~level left_answer right_answer )
+    | ( TVariadicArrow (left_param, left_row, left_result),
+        TVariadicArrow (right_param, right_row, right_result) ) ->
+        unify left_param right_param;
+        TVariadicArrow
+          ( copy_join_result left_param,
+            join_rows left_row right_row,
+            join ~level left_result right_result )
+    | _ ->
+        unify left right;
+        copy_join_result left
+
+and join_rows left right =
+  let left = repr_row left and right = repr_row right in
+  match (left.tail, right.tail) with
+  | ( RVar { contents = RUnbound { id = left_id; _ } },
+      RVar { contents = RUnbound { id = right_id; _ } } )
+    when left_id = right_id ->
+      { effects = List.sort_uniq Hash.compare (left.effects @ right.effects); tail = left.tail }
+  | RClosed, RClosed ->
+      { effects = List.sort_uniq Hash.compare (left.effects @ right.effects); tail = RClosed }
+  | _ ->
+      unify_rows left right;
+      copy_join_row left
+
+(** [join_into ~level accumulator alternative] updates a dedicated unification-variable accumulator
+    to an independent join result. It is used where resumptions need to refer to the eventual
+    handler answer type before every alternative has been visited. *)
+let join_into ~level accumulator alternative =
+  match accumulator with
+  | TVar cell -> (
+      match (!cell, repr alternative) with
+      | Unbound { id; _ }, TVar { contents = Unbound { id = other; _ } } when id = other -> ()
+      | Unbound { id; level }, alternative ->
+          occurs_adjust id level alternative;
+          row_var_levels level alternative;
+          cell := Link (copy_join_result alternative)
+      | Link current, alternative -> cell := Link (join ~level current alternative))
+  | _ -> raise (Unify_error "join accumulator is not a dedicated type variable")
 
 (* ------------------------------------------------------------------ *)
 (* Schemes: generalize / instantiate                                   *)

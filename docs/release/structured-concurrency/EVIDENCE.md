@@ -62,7 +62,10 @@ fails with the same-tail occurs check at the `async.spawn` source, and the Types
 regression rejects different effect sets sharing the same tail. Both negative
 crams declare the complete frozen four-operation Async identity rather than a
 near-match. A generated property checks that every subset of two independent
-child effects remains visible in the shared caller row.
+child effects remains visible in the shared caller row. The converted-shape
+defense fails closed with E0805 if a future checker refactor makes the validated
+frozen declaration and its internal arrow disagree; a source regression keeps
+that path diagnostic-only and forbids the former internal assertion.
 
 ## Opaque Task boundary
 
@@ -107,7 +110,8 @@ A. Ordinary in-language Once resumptions share this private owner check.
 
 ## Async boundary and parity
 
-All four Async operations are reviewed as `once`; no handler is installed.
+All four Async operations are reviewed as `once`; the taxonomy still marks
+Async as reserved, and no handler or built-in `--allow` grant is installed.
 Direct evaluator calls therefore reach the ordinary `Unhandled` result for
 spawn, await, cancel, and yield. The CLI rejects an unhandled Async program at
 its effect gate with E0814. Neither path schedules work or grants ambient
@@ -134,14 +138,18 @@ registration order on wakeup. Terminal awaits are immediate. Self-await and
 closed cycles produce the frozen task-failure messages and terminalize cycle
 members atomically with respect to wakeup reporting: every member drops its
 resume and reaches `failed` before registration-ordered external waiters become
-runnable. No terminal cycle member can appear in the returned wakeup list. The
-core returns the handles made runnable by a transition but has no runnable queue
-and makes no policy decision.
+runnable. Multi-member evidence pins cycle-discovery grouping and per-member
+registration order, including a cancelled external waiter that is omitted. No
+terminal cycle member can appear in the returned wakeup list. The core returns
+the handles made runnable by a transition but has no runnable queue and makes no
+policy decision.
 
 Focused Alcotest and QCheck coverage pins the transition table, resume-token
 ownership, deterministic IDs, yield suspension/wakeup, multiple waiters,
 immediate terminal awaits, completion/failure/cancellation, self-await, closed
-two- and three-node cycles, external/cancelled waiter controls, a property that
+two- and three-node cycles, external/cancelled waiter controls, the complete
+public rejection table, identical back-to-back scenarios, a property that every
+observed lifecycle transition satisfies the frozen contract, a property that
 every returned wakeup is runnable with one resume, close cleanup, and
 foreign-handle diagnostics. The existing handler
 gauntlet and interpreter/native runtime suites continue to cover affine Once
@@ -268,6 +276,9 @@ opam exec -- dune fmt
 git diff --exit-code
 opam exec -- dune build @doc
 ```
+
+Expected results are zero exits, 603 compiled Alcotest/QCheck cases, 34 cram
+transcripts, and 24 doctest examples across 7 documents.
 
 Runnable-queue policy, failure policy, and the Async root handler remain later
 C1 tasks. SC.7 supplies policy-independent cooperative cancellation operations,
