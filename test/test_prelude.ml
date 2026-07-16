@@ -495,7 +495,11 @@ let test_handler_overrides_grant () =
   Alcotest.(check string) "handler swallowed the print" "" (Buffer.contents buf)
 
 (* Hostile host-value tests intentionally forge the private payload representation with [Obj.magic].
-   Ordinary library code cannot name [Task_handle.t], and Eval exposes no Task constructor. *)
+   Ordinary library code cannot name [Task_handle.t], and Eval exposes no Task constructor. This
+   helper depends on two private layouts: [ctx.task_run] is field 1 of the evaluation context, and
+   [Task_handle.t] is a three-field block ordered [(run, scope_path, spawn_index)]. Reordering
+   either representation requires updating this helper; otherwise it can forge the wrong value and
+   make these hostile-boundary tests pass or fail for accidental layout reasons. *)
 let foreign_task ~scope_path ~spawn_index =
   Value.VTask (Obj.magic (ref (), scope_path, spawn_index))
 
