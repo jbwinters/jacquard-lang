@@ -11,6 +11,22 @@ let t_int = TCon (Hash.of_string "ty-int", [])
 let t_text = TCon (Hash.of_string "ty-text", [])
 let unifies f = match f () with () -> true | exception Unify_error _ -> false
 
+let source_contains source needle =
+  try
+    ignore (Str.search_forward (Str.regexp_string needle) source 0);
+    true
+  with Not_found -> false
+
+let check_frozen_spawn_shape_guard () =
+  let source = Corpus_support.read_file "../src/check.ml" in
+  Alcotest.(check bool)
+    "frozen spawn shape disagreement is an E0805 diagnostic" true
+    (source_contains source
+       "frozen async.spawn identity resolved to an invalid converted parameter shape");
+  Alcotest.(check bool)
+    "frozen spawn shape disagreement never asserts" false
+    (source_contains source "assert false (* the identity guard proved the exact frozen shape *)")
+
 let test_type_cases () =
   let cases =
     [
@@ -76,7 +92,8 @@ let test_type_cases () =
         false );
     ]
   in
-  List.iter (fun (name, f, expected) -> Alcotest.(check bool) name expected (unifies f)) cases
+  List.iter (fun (name, f, expected) -> Alcotest.(check bool) name expected (unifies f)) cases;
+  check_frozen_spawn_shape_guard ()
 
 let arrow_with_row row = TArrow ([ t_int ], row, t_int)
 

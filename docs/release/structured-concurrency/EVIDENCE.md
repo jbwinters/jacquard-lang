@@ -61,7 +61,10 @@ fails with the same-tail occurs check at the `async.spawn` source, and the Types
 regression rejects different effect sets sharing the same tail. Both negative
 crams declare the complete frozen four-operation Async identity rather than a
 near-match. A generated property checks that every subset of two independent
-child effects remains visible in the shared caller row.
+child effects remains visible in the shared caller row. The converted-shape
+defense fails closed with E0805 if a future checker refactor makes the validated
+frozen declaration and its internal arrow disagree; a source regression keeps
+that path diagnostic-only and forbids the former internal assertion.
 
 ## Opaque Task boundary
 

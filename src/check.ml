@@ -413,7 +413,9 @@ let op_scheme ctx ?meta (h : Hash.t) : scheme =
         if is_frozen_async_spawn ctx h then
           match params with
           | [ TArrow ([], child_row, _) ] -> child_row
-          | _ -> assert false (* the identity guard proved the exact frozen shape *)
+          | _ ->
+              err ?meta ~code:"E0805"
+                "frozen async.spawn identity resolved to an invalid converted parameter shape"
         else closed_row [ decl_hash ]
       in
       { ty = TArrow (params, operation_row, result); gen_level = ctx.level }
