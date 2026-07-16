@@ -53,3 +53,5 @@ assertion. Counts become printed values via in-language collectors
 | (SS.22 runtime error parity) | e07-erasure-text-join.jqd | an effect-erased Int reaches variadic join's indexed Text diagnostic at native v1's eighth-argument boundary |
 | (spec soundness, task 73 find) | g34-spec-const-list.jqd | a self-recursive walker over a const member list must not bake its argument |
 | (SS.22 stdlib parity) | g35-stdlib-ss22.jqd | variadic join within native v1's eight-argument ceiling, direct text equality, dotted real arithmetic, numeric boundaries, all predicates, and NaN ordering |
+| (ET.2 Audit parity) | g36-audit-code-render.jqd | canonical Hash acceptance/rejection including direct `Ok(Hash)` rendering, ordinary direct constructor/member references, hash-form Code rendering, and deterministic Audit line-log output with escaped control and UTF-8 text |
+| (ET.6 Approval parity) | g37-approval-binding.jqd | proposal-v1 canonical HASH_V0 identity and stale Decision refusal before the action thunk runs |

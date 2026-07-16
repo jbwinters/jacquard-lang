@@ -12,7 +12,7 @@
         (handle
           (match (app (var flip))
             (clause (pcon true)
-              (let nonrec (pvar x) (app (var ask))
+	      (let nonrec (pvar x) (app (surface-ref-v0 op ask))
                 (let nonrec (pwild) (app (var emit) (var x)) (lit 1))))
             (clause (pcon false)
               (let nonrec (pwild) (app (var emit) (lit 200)) (lit 2))))
