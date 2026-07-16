@@ -471,8 +471,11 @@ row is exactly `{State, Judge, Audit}`; there is no live closure and no
 `Approval`, `Secret`, `Eval`, `Fs`, `Net`, or other world effect. It reserves the
 next shared audit position, records `Evaluated`, derives an explicit blocked,
 missing-simulation, simulated, or simulation-failed result, reserves the next
-position, records `Completed`, and returns the disposition. A refused pre-action
-Audit write prevents the simulator and summarizer; a refused completion write
+position, records `Completed`, and returns the disposition. For a policy verdict
+of `Simulate`, `Evaluated` records that verdict before simulator availability is
+known; if no simulator exists, the `Completed` outcome records `NoSimulation`
+and the disposition is `RefuseDry(NoSimulation)`. A refused pre-action Audit
+write prevents the simulator and summarizer; a refused completion write
 prevents the disposition from returning. The facade clause remains the sole
 owner that consumes its local `Resume`. This implements D64-D66 without
 replacing the frozen representation below; the workspace facade and live gate

@@ -29,6 +29,10 @@ supersedes their current Audit and chain identities.
   validated call, pure simulator thunk, and pure outcome summarizer. It returns
   `DryDisposition a`, never accepts or exports `Resume`, and has the exact
   closed outward row `{State, Judge, Audit}`.
+- When policy evaluation yields `Simulate`, `Evaluated` records that verdict
+  before simulator availability is known. With no simulator, the subsequent
+  `Completed` outcome records `NoSimulation` and the returned disposition is
+  `RefuseDry(NoSimulation)`.
 - Malformed directly represented Call or BoundPolicy inputs return unaudited
   `InvalidDecision` before Judge, Audit, simulation, summarization, Approval,
   or world authority. This defensive path has no trustworthy IDs to record.
