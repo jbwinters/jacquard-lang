@@ -90,6 +90,7 @@
   (glob_files ../src/*.ml)
   (glob_files ../bin/*.ml)
   ../docs/errors.md
+  ../docs/effect-review.md
   ../docs/effect-membranes.md
   ../docs/effect-review.md
   ../docs/effect-taxonomy.md
@@ -109,6 +110,8 @@
   ../docs/release/structured-concurrency/EVIDENCE.md
   ../docs/release/structured-concurrency/MANIFEST.sha256
   ../docs/release/dx-jac-export/EVIDENCE.md
+  ../docs/release/governed-membranes/GM1-EVIDENCE.md
+  ../docs/release/governed-membranes/GM1-MANIFEST.sha256
   ../docs/stdlib.md
   ../docs/surface-syntax.md
   ../docs/tutorial.md
