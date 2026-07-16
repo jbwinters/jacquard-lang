@@ -127,6 +127,139 @@ let test_primary_plus_later_type_error () =
     (report_golden report);
   Alcotest.(check bool) "later good island checked" true (List.mem "good" (signature_names report))
 
+let test_higher_order_row_accumulation () =
+  let source =
+    "preflight : forall | e. ((Code) ->{| e} Bool) ->{Dist | e} Code\n\
+     preflight(passes?) = {\n\
+    \  let plan = `op:sample`(Categorical(Cons(MkPair(quote { 1 }, 1.0), Nil)))\n\
+    \  `op:observe`(Bernoulli(match passes?(plan) {\n\
+    \    | True -> 1.0\n\
+    \    | False -> 0.0\n\
+    \  }), True)\n\
+    \  plan\n\
+     }\n\
+     pure?(code) = code.eq?(code, quote { 1 })\n\
+     noisy?(code) = { print(\"checking\"); code.eq?(code, quote { 1 }) }\n\
+     pure-preflight() = preflight(pure?)\n\
+     noisy-preflight() = preflight(noisy?)\n"
+  in
+  let store, context = make () in
+  let report =
+    analyze_with ~file:"row-accumulation.jac" ~names:(Store.names_view store) context source
+  in
+  Alcotest.(check (list string)) "explicit row-polymorphic helper checks" [] (codes report);
+  let signatures =
+    List.map
+      (fun (name, scheme) -> name ^ " : " ^ Check.show_scheme context scheme)
+      report.Surface_check.signatures
+  in
+  Alcotest.(check (list string))
+    "the helper row excludes its own Dist effect while closed callers accumulate it"
+    [
+      "preflight : forall | e. ((Code) ->{| e} Bool) ->{Dist | e} Code";
+      "pure? : (Code) ->{} Bool";
+      "noisy? : (Code) ->{Console} Bool";
+      "pure-preflight : () ->{Dist} Code";
+      "noisy-preflight : () ->{Dist, Console} Code";
+    ]
+    signatures
+
+let test_handler_row_subtraction_through_wrapper () =
+  let source =
+    "identity-callback : forall a | e. (() ->{| e} a) ->{} (() ->{| e} a)\n\
+     identity-callback(callback) = callback\n\
+     catch-wrapped : forall a | e. (() ->{Abort | e} a) ->{Console | e} Option a\n\
+     catch-wrapped(body) =\n\
+    \  handle {\n\
+    \    print(\"before\")\n\
+    \    let value = identity-callback(body)()\n\
+    \    print(\"after\")\n\
+    \    value\n\
+    \  } {\n\
+    \    | return value -> Some(value)\n\
+    \    | abort() resume continue -> None\n\
+    \  }\n"
+  in
+  let store, context = make () in
+  let report =
+    analyze_with ~file:"wrapped-handler-row.jac" ~names:(Store.names_view store) context source
+  in
+  Alcotest.(check (list string)) "wrapped callback checks" [] (codes report);
+  let signatures =
+    List.map
+      (fun (name, scheme) -> name ^ " : " ^ Check.show_scheme context scheme)
+      report.Surface_check.signatures
+  in
+  Alcotest.(check (list string))
+    "only Abort is required on the callback; before/after Console remains outside"
+    [
+      "identity-callback : forall a | e. (() ->{| e} a) ->{} () ->{| e} a";
+      "catch-wrapped : forall a | e. (() ->{Abort | e} a) ->{Console | e} Option a";
+    ]
+    signatures
+
+let test_handler_row_annotation_conflict_recipe () =
+  let bad =
+    analyze ~file:"handler-row-conflict.jac"
+      "catch-bad : forall a | e. (() ->{| e} a) ->{| e} Option a\n\
+       catch-bad(body) = handle body() {\n\
+      \  | return value -> Some(value)\n\
+      \  | abort() resume continue -> None\n\
+       }\n"
+  in
+  match diagnostics "E0804" bad with
+  | [ diagnostic ] ->
+      Alcotest.(check (option string))
+        "handler conflict gives a compiling row recipe"
+        (Some
+           "include the handled effect on the callback row, for example `() ->{Abort | e} a`; the \
+            handler removes it from the outer row")
+        diagnostic.Diag.hint
+  | diagnostics ->
+      Alcotest.failf "expected one E0804, got %d: %s" (List.length diagnostics)
+        (String.concat "; " (List.map Diag.to_string bad.diagnostics))
+
+let test_branch_join_does_not_widen_callback_rows () =
+  let source =
+    "select-and-run : forall a | e. (Bool, () ->{| e} a) ->{Console | e} a\n\
+     select-and-run(flag, body) =\n\
+    \  (if flag then body else fn () -> { print(\"selected\"); body() })()\n\
+     select-and-run-reversed : forall a | e. (Bool, () ->{| e} a) ->{Console | e} a\n\
+     select-and-run-reversed(flag, body) =\n\
+    \  (if flag then fn () -> { print(\"selected\"); body() } else body)()\n\
+     select-abort : forall a | e. (Bool, () ->{Abort | e} a) ->{Console | e} Option a\n\
+     select-abort(flag, body) =\n\
+    \  handle select-and-run(flag, body) {\n\
+    \    | return value -> Some(value)\n\
+    \    | abort() resume continue -> None\n\
+    \  }\n\
+     select-abort-reversed : forall a | e. (Bool, () ->{Abort | e} a) ->{Console | e} Option a\n\
+     select-abort-reversed(flag, body) =\n\
+    \  handle select-and-run-reversed(flag, body) {\n\
+    \    | return value -> Some(value)\n\
+    \    | abort() resume continue -> None\n\
+    \  }\n"
+  in
+  let store, context = make () in
+  let report =
+    analyze_with ~file:"branch-row-join.jac" ~names:(Store.names_view store) context source
+  in
+  Alcotest.(check (list string)) "both branch orders and handlers check" [] (codes report);
+  let signatures =
+    List.map
+      (fun (name, scheme) -> name ^ " : " ^ Check.show_scheme context scheme)
+      report.Surface_check.signatures
+  in
+  Alcotest.(check (list string))
+    "Console remains on the result while callback rows remain e or Abort|e"
+    [
+      "select-and-run : forall a | e. (Bool, () ->{| e} a) ->{Console | e} a";
+      "select-and-run-reversed : forall a | e. (Bool, () ->{| e} a) ->{Console | e} a";
+      "select-abort : forall a | e. (Bool, () ->{Abort | e} a) ->{Console | e} Option a";
+      "select-abort-reversed : forall a | e. (Bool, () ->{Abort | e} a) ->{Console | e} Option a";
+    ]
+    signatures
+
 let one_error code source =
   let report = analyze ~file:"wording.jac" source in
   match diagnostics code report with
@@ -539,6 +672,13 @@ let suite =
     Alcotest.test_case "hole kinds and independent islands" `Quick
       test_hole_kinds_and_independent_islands;
     Alcotest.test_case "primary plus later type error" `Quick test_primary_plus_later_type_error;
+    Alcotest.test_case "higher-order row accumulation" `Quick test_higher_order_row_accumulation;
+    Alcotest.test_case "handler subtraction through typed wrapper" `Quick
+      test_handler_row_subtraction_through_wrapper;
+    Alcotest.test_case "handler row annotation conflict recipe" `Quick
+      test_handler_row_annotation_conflict_recipe;
+    Alcotest.test_case "branch joins do not widen callback rows" `Quick
+      test_branch_join_does_not_widen_callback_rows;
     Alcotest.test_case "malformed row checks as any row" `Quick test_malformed_row_checks_as_any_row;
     Alcotest.test_case "surface wording and spans" `Quick test_surface_wording_and_spans;
     Alcotest.test_case "eta guidance matrix" `Quick test_eta_guidance_matrix;
