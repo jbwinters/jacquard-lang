@@ -15,6 +15,7 @@ the prior intact; sharp three-world evidence proves the cautious plan.
   scripted : forall a. (Code, Response) ->{Eval} a
   passes-sharp? : (Code) ->{Eval} Bool
   passes-weak? : (Code) ->{Eval} Bool
+  preflight : forall | e. ((Code) ->{| e} Bool) ->{Dist | e} Code
   preflight-weak : () ->{Dist, Eval} Code
   preflight-sharp : () ->{Dist, Eval} Code
   posterior-weak : () ->{Eval} List (Pair Code Real)

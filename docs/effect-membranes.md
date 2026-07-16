@@ -39,9 +39,9 @@ workspace.dry-run(agent)
              : () ->{Judge, Audit} Report
 ```
 
-That pair of signatures is the design in miniature. The live boundary reveals its complete authority. The dry-run boundary has no world authority to misuse. The same agent body is used in both.
+The live signature exposes the boundary's complete authority. The dry-run signature has no world authority. Both handle the same agent body.
 
-This is not a policy engine bolted beside the language. It is ordinary Jacquard code built from typed effects, handlers, rows, affine resumptions, content hashes, code values, semantic diffs, and Warp. The language’s existing invariants do almost all of the security work.
+The membrane is ordinary Jacquard code built from typed effects, handlers, rows, affine resumptions, content hashes, code values, semantic diffs, and Warp. Existing language invariants enforce most of the boundary.
 
 ## 2. Why this is Jacquard-shaped
 
@@ -716,6 +716,9 @@ surface contract for the run-level sequence owner, layer APIs, `agent`,
 `workspace.live`, and `workspace.dry-run`. It uses small carrier declarations
 and literal handler clauses only to make the checker elaborate these rows; the
 disposition gate representation above is already frozen for G2.
+The fixture proves effect-row elaboration and `State` discharge only. It does
+not execute disposition branches or prove audit-entry positions; the G2/G3
+gate acceptance suites must pin those behaviors.
 
 ```jacquard doctest=governed-membrane-signatures mode=check fixture=governed-membrane-signatures.jac stdout=governed-membrane-signatures.stdout stderr=empty exit=0
 type GovernanceVersion = | GovernanceV0
@@ -1163,7 +1166,7 @@ A `jac governance check` pass, or an equivalent checker lane, verifies:
 * transitive expansion of the call-specific live/forward action produces that same envelope;
 * the gate-owned `Judge`, `Approval`, and `Audit` effects and the locally consumed continuation are outside the action projection; no effect inside the action is silently excluded;
 * every facade operation has both a live clause and a dry-run clause;
-* every clause obtains a canonical disposition before invoking a driver and records completion before consuming its local `Resume`;
+* every clause obtains a canonical disposition before invoking a driver; action and simulation paths record completion before consuming their local `Resume`, while refusal paths consume `Resume` after the pre-action `Evaluated` entry and do not fabricate a `Completed` entry;
 * one `with-sequence` owner surrounds every set of nested layers that publishes one audit stream, and every such layer receives the owner's exact token;
 * summaries and outcome renderers are pure;
 * call normalizers are pure and hash-stable;
@@ -1399,4 +1402,4 @@ It refines three earlier sketches without changing their direction:
    world effects. There is no `Tool` or `Host` effect in v0.
 3. `Judge`, already load-bearing in the canonized pattern, joins the blessed governance vocabulary rather than remaining an unnamed user effect.
 
-Everything else is the existing language used deliberately. No kernel form, ambient privilege, policy DSL, sandbox runtime, general linear type system, or second audit serialization is introduced. That restraint is the strongest part of the design: the membrane is impressive because Jacquard already had the right pieces.
+Everything else uses existing language mechanisms. No kernel form, ambient privilege, policy DSL, sandbox runtime, general linear type system, or second audit serialization is introduced.

@@ -88,6 +88,8 @@ ord.on-second : forall a b. (Ord b) ->{} Ord (a, b)
 ord.reverse : forall a. (Ord a) ->{} Ord a
 ord.to-eq : forall a. (Ord a) ->{} Eq a
 type ordering
+parallel.both : forall a b. (() ->{} a, () ->{} b) ->{} (a, b)
+parallel.map : forall a b. (List b, (b) ->{} a) ->{} List a
 type real
 con real-opaque
 real.add : (Real, Real) ->{} Real
