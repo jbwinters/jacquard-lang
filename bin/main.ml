@@ -327,34 +327,55 @@ let check_cmd file prelude print_sigs manifest origin syntax =
                     | ds -> Error ds)
                 | _ -> Ok ())
           in
+          let source = read_file file in
+          let malformed_surface_report =
+            match syntax_for_file syntax file with
+            | Surface -> (
+                let recovered = Surface_parse.recover_string ~file source in
+                match Surface_parse.strict recovered with
+                | Ok _ -> None
+                | Error _ ->
+                    Some (Surface_check.analyze ~names:(Store.names_view store) cctx recovered))
+            | Auto -> assert false
+            | Bootstrap -> None
+          in
           (* process: decls also go into the store so later forms resolve *)
-          match parse_tops ~syntax ~names:(Store.names_view store) ~file (read_file file) with
-          | Error ds -> print_diags ds
-          | Ok (tops, surface_warnings) ->
-              print_warnings surface_warnings;
-              let rec go = function
-                | [] ->
-                    if not print_sigs then print_endline "ok";
-                    ok
-                | parsed :: rest -> (
-                    match validate_parsed_top parsed with
-                    | Error ds -> print_diags ds
-                    | Ok top -> (
-                        match Resolve.resolve_w (Store.names_view store) top with
+          match malformed_surface_report with
+          | Some report ->
+              if print_sigs then
+                List.iter
+                  (fun (name, scheme) ->
+                    Printf.printf "%s : %s\n" name (Check.show_scheme cctx scheme))
+                  report.Surface_check.signatures;
+              print_diags report.diagnostics
+          | None -> (
+              match parse_tops ~syntax ~names:(Store.names_view store) ~file source with
+              | Error ds -> print_diags ds
+              | Ok (tops, surface_warnings) ->
+                  print_warnings surface_warnings;
+                  let rec go = function
+                    | [] ->
+                        if not print_sigs then print_endline "ok";
+                        ok
+                    | parsed :: rest -> (
+                        match validate_parsed_top parsed with
                         | Error ds -> print_diags ds
-                        | Ok (resolved, warns) -> (
-                            List.iter (fun w -> prerr_endline (Diag.to_string w)) warns;
-                            match on_top resolved with
+                        | Ok top -> (
+                            match Resolve.resolve_w (Store.names_view store) top with
                             | Error ds -> print_diags ds
-                            | Ok () -> (
-                                match resolved with
-                                | Kernel.Decl d -> (
-                                    match Store.put_decl ?origin store d with
-                                    | Ok _ -> go rest
-                                    | Error ds -> print_diags ds)
-                                | Kernel.Expr _ -> go rest))))
-              in
-              go tops))
+                            | Ok (resolved, warns) -> (
+                                List.iter (fun w -> prerr_endline (Diag.to_string w)) warns;
+                                match on_top resolved with
+                                | Error ds -> print_diags ds
+                                | Ok () -> (
+                                    match resolved with
+                                    | Kernel.Decl d -> (
+                                        match Store.put_decl ?origin store d with
+                                        | Ok _ -> go rest
+                                        | Error ds -> print_diags ds)
+                                    | Kernel.Expr _ -> go rest))))
+                  in
+                  go tops)))
 
 (* --- hash --- *)
 

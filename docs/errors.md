@@ -156,7 +156,7 @@ also emits E0817; consuming the captured resumption twice emits E0816.
 | E1217 | malformed internal group reference | `#group[x]` |
 | E1218 | invalid raw UTF-8 scalar in a surface string | a raw `0xff` byte between quotes |
 | E1220 | unexpected token in the recovering surface parser | stray `|` at top level |
-| E1221 | missing closing brace during surface recovery | a block truncated before `}` |
+| E1221 | unclosed braced construct during surface recovery, with opening and failure spans | a `quote`, `match`, `handle`, or block truncated before `}` or closed with `]`/`)` |
 | E1222 | reserved pre-SS.9 binding-pattern parser gate; refutable binders now use E0205/E0206 during lowering | `fn (Some) -> 1` |
 | E1223 | missing block-item separator | `{ 1 2 }` instead of `{ 1; 2 }` |
 | E1224 | a term signature is not followed by the same definition | `x : T; x = value` |
@@ -189,10 +189,13 @@ also emits E0817; consuming the captured resumption twice emits E0816.
 The recovering `.jac` lexer emits an in-order invalid-token marker and continues;
 the strict lexer remains fail-fast. Malformed strings resynchronize at a closing
 quote or newline, so an unterminated line does not discard valid later items. The
-parser synchronizes at `}`, `|`, `;`, and newline so a malformed expression does
-not hide later syntax errors. Each damage site leaves an explicit surface hole
-with its source span, a stable `surface-hole` ID, and `surface-form =
-recovery-hole` provenance. `Surface_parse.strict` rejects both error diagnostics
+parser synchronizes at construct boundaries including `}`, wrong `]`/`)` closers, `|`, `;`, and
+newline so a malformed expression does
+not hide later syntax errors. Unclosed `quote`, `match`, `if`, `handle`, and block
+diagnostics use the failure token as the primary span and name the opening span in
+the hint. Each damage site leaves an explicit surface hole or synthetic delimiter
+marker with a stable `surface-hole` ID and `surface-form = recovery-hole` or
+`recovery-delimiter` provenance. `Surface_parse.strict` rejects both error diagnostics
 and any remaining hole before lowering. Semantic boundaries also recursively reject
 marked trees before strict checking, execution, storage, or canonical hashing,
 including markers nested in patterns, types, handlers, and quote payloads.
