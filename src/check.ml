@@ -223,7 +223,10 @@ let rec conv_ty ctx cenv (t : Kernel.ty) : ty =
       TCon (h, List.map (conv_ty ctx cenv) args)
   | Kernel.TApp _ -> err ~meta ~code:"E0810" "only declared types can be applied"
   | Kernel.TArrow (params, row, result) ->
-      TArrow (List.map (conv_ty ctx cenv) params, conv_row ctx cenv row, conv_ty ctx cenv result)
+      TArrow
+        ( List.map (conv_ty ctx cenv) params,
+          conv_row ctx cenv ~effectself:None row,
+          conv_ty ctx cenv result )
   | Kernel.TTuple items -> TTuple (List.map (conv_ty ctx cenv) items)
   | Kernel.TForall (tvs, rvs, body) ->
       (* binders introduce (or shadow) names in the conversion scope *)
@@ -231,12 +234,15 @@ let rec conv_ty ctx cenv (t : Kernel.ty) : ty =
       List.iter (fun e -> ignore (conv_fresh_rv ctx cenv e)) rvs;
       conv_ty ctx cenv body
 
-and conv_row ctx cenv (r : Kernel.row) : row =
+and conv_row ctx cenv ~effectself (r : Kernel.row) : row =
   let effects =
     List.map
       (function
         | Kernel.Hashed h -> h
-        | Kernel.Named n -> err ~meta:r.Kernel.wmeta ~code:"E0811" "unresolved effect name `%s`" n)
+        | Kernel.Named n -> (
+            match effectself with
+            | Some (self_name, hash) when String.equal n self_name -> hash
+            | _ -> err ~meta:r.Kernel.wmeta ~code:"E0811" "unresolved effect name `%s`" n))
       r.Kernel.effects
   in
   let tail =
@@ -290,7 +296,8 @@ and ty_mentions name (t : Kernel.ty) : bool =
 
 (* Declaration-context conversion: like conv_ty but self-references map to [self]. Unbound
    type variables are an error here (E0811), not implicit quantification. *)
-and conv_decl_ty ctx cenv ?(unbound_code = "E0811") ~self (t : Kernel.ty) : ty =
+and conv_decl_ty ctx cenv ?(unbound_code = "E0811") ?(effectself = None) ~self (t : Kernel.ty) : ty
+    =
   let self_name, self_ty = self in
   let meta = t.Kernel.meta in
   match t.Kernel.it with
@@ -303,7 +310,7 @@ and conv_decl_ty ctx cenv ?(unbound_code = "E0811") ~self (t : Kernel.ty) : ty =
             ~code:unbound_code "unbound type variable `%s` in declaration" a)
   | Kernel.TApp ({ Kernel.it = Kernel.TRef (Kernel.Named n); _ }, args) when n = self_name -> (
       (* recursive application must match the declared parameters *)
-      let args = List.map (conv_decl_ty ctx cenv ~unbound_code ~self) args in
+      let args = List.map (conv_decl_ty ctx cenv ~unbound_code ~effectself ~self) args in
       match repr self_ty with
       | TCon (h, params) ->
           if List.length args <> List.length params then
@@ -320,13 +327,14 @@ and conv_decl_ty ctx cenv ?(unbound_code = "E0811") ~self (t : Kernel.ty) : ty =
       if arity <> List.length args then
         err ~meta ~code:"E0810" "type %s expects %d argument(s), got %d" (name_of ctx h) arity
           (List.length args);
-      TCon (h, List.map (conv_decl_ty ctx cenv ~unbound_code ~self) args)
+      TCon (h, List.map (conv_decl_ty ctx cenv ~unbound_code ~effectself ~self) args)
   | Kernel.TArrow (params, row, result) ->
       TArrow
-        ( List.map (conv_decl_ty ctx cenv ~unbound_code ~self) params,
-          conv_row ctx cenv row,
-          conv_decl_ty ctx cenv ~unbound_code ~self result )
-  | Kernel.TTuple items -> TTuple (List.map (conv_decl_ty ctx cenv ~unbound_code ~self) items)
+        ( List.map (conv_decl_ty ctx cenv ~unbound_code ~effectself ~self) params,
+          conv_row ctx cenv ~effectself row,
+          conv_decl_ty ctx cenv ~unbound_code ~effectself ~self result )
+  | Kernel.TTuple items ->
+      TTuple (List.map (conv_decl_ty ctx cenv ~unbound_code ~effectself ~self) items)
   | _ -> conv_ty ctx cenv t
 
 (* Operation scheme: forall effect-vars (+free op vars). (params) ->{E} result. The row
@@ -344,8 +352,9 @@ let op_scheme ctx ?meta (h : Hash.t) : scheme =
       let vars = List.map (fun a -> (a, new_tvar inner)) evars in
       let cenv = { mode = Flexible; tvs = vars; rvs = [] } in
       let self = (ename, TCon (decl_hash, List.map snd vars)) in
-      let params = List.map (conv_decl_ty ctx cenv ~self) o.Kernel.op_params in
-      let result = conv_decl_ty ctx cenv ~self o.Kernel.op_result in
+      let effectself = Some (ename, decl_hash) in
+      let params = List.map (conv_decl_ty ctx cenv ~effectself ~self) o.Kernel.op_params in
+      let result = conv_decl_ty ctx cenv ~effectself ~self o.Kernel.op_result in
       (* the row carries the EFFECT's hash: rows name capabilities, not operations *)
       { ty = TArrow (params, closed_row [ decl_hash ], result); gen_level = ctx.level }
   | Ok _ -> err ?meta ~code:"E0805" "hash %s is not an operation" (Hash.to_hex h)
@@ -361,6 +370,79 @@ let operation_mode ctx ?meta (h : Hash.t) : Kernel.op_mode =
       (List.nth ops i).Kernel.op_mode
   | Ok _ -> err ?meta ~code:"E0805" "hash %s is not an operation" (Hash.to_hex h)
   | Error ds -> err ?meta ~code:"E0805" "%s" (String.concat "; " (List.map Diag.to_string ds))
+
+(** [is_frozen_async_spawn ctx operation] recognizes only the pinned SC.0 [async.spawn] member. In
+    addition to the nominal HASH_V0 identities it checks the complete resolved declaration shape, so
+    a name collision or a partially matching future interface never gains privileged typing. *)
+let is_frozen_async_spawn ctx operation =
+  let hash_is expected hash = String.equal expected (Hash.to_hex hash) in
+  let tvar_is expected (ty : Kernel.ty) =
+    match ty.it with Kernel.TVar actual -> String.equal expected actual | _ -> false
+  in
+  let unit_is (ty : Kernel.ty) = match ty.it with Kernel.TTuple [] -> true | _ -> false in
+  let app_is expected_hash argument_is (ty : Kernel.ty) =
+    match ty.it with
+    | Kernel.TApp ({ it = Kernel.TRef (Kernel.Hashed hash); _ }, [ argument ]) ->
+        hash_is expected_hash hash && argument_is argument
+    | _ -> false
+  in
+  let task_is = app_is Concurrency_contract.task_type_hash (tvar_is "a") in
+  let task_result_is = app_is Concurrency_contract.task_result_type_hash (tvar_is "a") in
+  let self_row_is ename (row : Kernel.row) =
+    match (row.effects, row.rvar) with
+    | [ Kernel.Named name ], Some tail -> String.equal name ename && String.equal tail "e"
+    | _ -> false
+  in
+  let spawn_is ename (op : Kernel.opspec) =
+    String.equal op.op_name "async.spawn"
+    && op.op_mode = Kernel.Once && task_is op.op_result
+    &&
+    match op.op_params with
+    | [ { it = Kernel.TArrow ([], row, result); _ } ] -> self_row_is ename row && tvar_is "a" result
+    | _ -> false
+  in
+  let await_is (op : Kernel.opspec) =
+    String.equal op.op_name "async.await"
+    && op.op_mode = Kernel.Once
+    && List.length op.op_params = 1
+    && task_is (List.hd op.op_params)
+    && task_result_is op.op_result
+  in
+  let cancel_is (op : Kernel.opspec) =
+    String.equal op.op_name "async.cancel"
+    && op.op_mode = Kernel.Once
+    && List.length op.op_params = 1
+    && task_is (List.hd op.op_params)
+    && unit_is op.op_result
+  in
+  let yield_is (op : Kernel.opspec) =
+    String.equal op.op_name "async.yield"
+    && op.op_mode = Kernel.Once && op.op_params = [] && unit_is op.op_result
+  in
+  match Store.locate ctx.store operation with
+  | Ok
+      {
+        Store.decl = { Kernel.it = Kernel.DefEffect { ename; evars; ops }; _ };
+        decl_hash;
+        role = Store.Operation 0;
+      } -> (
+      hash_is Concurrency_contract.async_effect_hash decl_hash
+      && hash_is (List.assoc "async.spawn" Concurrency_contract.async_operation_hashes) operation
+      && String.equal ename "async" && evars = [ "a" ]
+      &&
+      match ops with
+      | [ spawn; await; cancel; yield ] ->
+          spawn_is ename spawn && await_is await && cancel_is cancel && yield_is yield
+      | _ -> false)
+  | Ok _ | Error _ -> false
+
+(** [async_spawn_child_row ctx operation params] returns the solved child thunk row only when a
+    direct call targets {!is_frozen_async_spawn}. This is the narrow SC.0 bridge; higher-order
+    closure remains the SC.4 obligation. *)
+let async_spawn_child_row ctx operation params =
+  if is_frozen_async_spawn ctx operation then
+    match params with [ TArrow ([], child_row, _) ] -> Some child_row | _ -> None
+  else None
 
 (** [contains_group_ref expression] reports whether [expression] can recur through its definition
     group. The affine-resumption checker uses it to reject transfers into helpers whose number of
@@ -698,6 +780,16 @@ and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(requir
                       ~code:"E0801" "%s: expected %s, got %s (%s)" what (show_ty ctx expected)
                       (show_ty ctx actual) detail))
             (List.combine args (List.combine params arg_tys));
+          (match fn.Kernel.it with
+          | Kernel.Ref (operation, Kernel.Op) -> (
+              match async_spawn_child_row ctx operation params with
+              | Some child_row -> (
+                  try ambient := Types.include_rows ~sub:child_row ~into:!ambient
+                  with Unify_error detail ->
+                    err ~meta ~code:"E0801"
+                      "spawned child effect row does not fit the parent computation (%s)" detail)
+              | None -> ())
+          | _ -> ());
           (* record who introduced each effect, for the manifest diagnostic (W3.6) *)
           (let callee =
              match fn.Kernel.it with
@@ -995,14 +1087,16 @@ and check_type_decl ctx (d : Kernel.decl) : unit =
       | None -> ());
       let inner = ctx.level + 1 in
       let vars = List.map (fun a -> (a, new_tvar inner)) evars in
-      let self = (ename, TCon (Hash.of_string "self-placeholder", List.map snd vars)) in
+      let placeholder = Hash.of_string "self-placeholder" in
+      let self = (ename, TCon (placeholder, List.map snd vars)) in
+      let effectself = Some (ename, placeholder) in
       List.iter
         (fun (o : Kernel.opspec) ->
           let cenv = { mode = Flexible; tvs = vars; rvs = [] } in
           List.iter
-            (fun p -> ignore (conv_decl_ty ctx cenv ~unbound_code:"E0812" ~self p))
+            (fun p -> ignore (conv_decl_ty ctx cenv ~unbound_code:"E0812" ~effectself ~self p))
             o.Kernel.op_params;
-          ignore (conv_decl_ty ctx cenv ~unbound_code:"E0812" ~self o.Kernel.op_result))
+          ignore (conv_decl_ty ctx cenv ~unbound_code:"E0812" ~effectself ~self o.Kernel.op_result))
         ops
   | Kernel.DefTerm _ -> ()
 

@@ -82,7 +82,7 @@ mode; there is no inference from names.
 | `Audit` | `audit` | `official` | `governance` | `-` | `once` | `special` | `3` | `implemented` | `2c148fbc2e26bdc6f01279a8bf176f54d5798536e1f96805aa4f7c7a57e67632` | `audit.record:(AuditEntry)->()` | record governance evidence in an append-only stream |
 | `Secret` | `secret` | `official` | `governance` | `-` | `once` | `special` | `3` | `implemented` | `6d092eccc3c9858a2a95120da5a011964cbb3ad76968e11c1cbb062c119fbb31` | `secret.read:(SecretRef)->Secret;secret.expose:(Secret)->Text` | resolve opaque confidential material or explicitly expose it |
 | `Judge` | `judge` | `official` | `governance` | `-` | `once` | `special` | `3` | `reserved` | `first-release` | `judge.assess:(Call)->Assessment` | assess a proposed call without performing it |
-| `Async` | `async` | `official` | `concurrency` | `a` | `once` | `none` | `2` | `reserved` | `first-release` | `async.spawn:(()->{Async\|e}a)->Task a;async.await:(Task a)->TaskResult a;async.cancel:(Task a)->();async.yield:()->()` | schedule structured tasks while charging child effects to the parent row |
+| `Async` | `async` | `official` | `concurrency` | `a` | `once` | `none` | `2` | `reserved` | `4ff8ce05ab09968163492b3be40fc91381b47dee5fb4b2980f9416d50f38e66f` | `async.spawn:(()->{Async\|e}a)->Task a;async.await:(Task a)->TaskResult a;async.cancel:(Task a)->();async.yield:()->()` | schedule structured tasks while charging child effects to the parent row |
 | `Channel` | `channel` | `official` | `concurrency` | `a` | `once` | `none` | `2` | `reserved` | `first-release` | `channel.open:()->ChannelHandle a;channel.send:(ChannelHandle a,a)->Result ChannelError ();channel.recv:(ChannelHandle a)->Result ChannelError a;channel.close:(ChannelHandle a)->()` | communicate typed values between structured tasks |
 
 The full 64-hex identities and unabridged operation strings are normative in
@@ -138,15 +138,23 @@ The one-law schema is exactly
 performing `async.spawn` must make the caller row gain `{Async | e}`, so a
 child cannot launder authority out of its parent signature.
 
-This is a reserved interface, not a claim about the current checker. The
-surface resolver does not yet resolve an effect's own name inside that same
-effect declaration, and generic operation typing does not enforce the
-row-charging law. Before `Async` ships, resolution must admit this self-row
-and `async.spawn` must receive a special operation-typing rule that unions the
-thunk row into the caller row as `{Async | e}`. Merely accepting a generic
-operation declaration or erasing `Async` from the thunk row is not evidence
-that the law holds. ET.0 pins that known laundering hazard as an implementation
-obligation rather than prematurely changing the runtime or checker.
+SC.0 admits an effect's own name inside its operation rows and gives a direct
+resolved `async.spawn` application the narrow special typing rule that unions
+the solved thunk row into its caller as `{Async | e}`. The executable
+concurrency fixtures pin the resulting `{Async, Net}` signature and reject a
+laundering `{Async}` annotation. Generic operation typing remains unchanged,
+and higher-order aliases, wrappers, and returned closures are deliberately not
+claimed until SC.4 closes them. `Async` is still reserved: this checker bridge
+does not implement Task values, a scheduler, scopes, or a root handler. See
+[`concurrency.md`](concurrency.md).
+
+The reserved interface nevertheless has a full identity because SC.0 makes it
+checker-privileged. Its HASH_V0 identity is
+`4ff8ce05ab09968163492b3be40fc91381b47dee5fb4b2980f9416d50f38e66f`,
+structurally derived from the exact `Task`, `TaskResult`, four operation
+schemas/modes, and self-effect row. The checker also revalidates that complete
+resolved structure; neither the spelling `async` nor a partial shape grants
+the special rule.
 
 ## 4. Governance data schemas
 
@@ -231,13 +239,9 @@ the protected computation. The classifier that supplies the verdict is a
 trusted handler dependency: a live membrane must derive it from the exact
 validated policy and assessment, never from governed caller input.
 
-The declarations below are an executable surface fixture for the currently
-resolvable reserved world and governance operation boundaries plus Channel.
+The declarations below are an executable surface fixture for the reserved
 The fixture reuses the released Audit and Approval governance types from the
-prelude; its small carrier constructors for other future opaque types are test
-scaffolding, not public constructors. `Async` is deliberately absent: the
-normative self-row above cannot become an executable declaration until the
-resolver and special spawn typing obligation are implemented.
+prelude.
 
 ```jacquard doctest=effect-taxonomy-schemas mode=check fixture=effect-taxonomy-schemas.jac stdout=effect-taxonomy-schemas.stdout stderr=empty exit=0
 type Bytes = | BytesValue(value: Text)
@@ -258,7 +262,7 @@ type Call =
       preconditions: Code)
 type SecretRef = | SecretRef(name: Text, version: Option Text)
 type Secret = | OpaqueSecret
-type Task a = | TaskHandle(id: Int)
+type Task a = | TaskOpaque
 type TaskResult a = | Done(value: a) | Failed(message: Text) | Cancelled
 type ChannelHandle a = | ChannelHandleValue(id: Int)
 type ChannelError = | ChannelClosed
@@ -291,6 +295,12 @@ once effect Secret where {
 }
 once effect Judge where {
   judge.assess : (Call) -> Assessment
+}
+once effect Async a where {
+  async.spawn : (() ->{Async | e} a) -> Task a
+  async.await : (Task a) -> TaskResult a
+  async.cancel : (Task a) -> ()
+  async.yield : () -> ()
 }
 once effect Channel a where {
   channel.open : () -> ChannelHandle a
