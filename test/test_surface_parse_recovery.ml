@@ -40,6 +40,13 @@ let test_recovery_golden () =
         "block span" (Some "recover.jac:4:1-6:2")
         (Option.map Span.to_string (Meta.span block_meta))
   | _ -> Alcotest.fail "recovery golden produced an unexpected partial tree");
+  let block = recover "{" in
+  (match block.items with
+  | [ { it = TopExpr { it = Block [ Expr { it = Hole 0; _ } ]; meta }; _ } ] ->
+      Alcotest.(check (option string))
+        "block recovery form" (Some "recovery-delimiter") (Meta.surface_form meta);
+      Alcotest.(check (option string)) "block recovery hole" (Some "1") (Meta.surface_hole meta)
+  | _ -> Alcotest.fail "unclosed block did not produce a marked partial container");
   Test_dx_parser_recovery.run ()
 
 let test_each_synchronization_boundary () =

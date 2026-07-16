@@ -1336,7 +1336,8 @@ and parse_quote state keyword =
           | Some boundary ->
               report_unclosed state ~opening:keyword ~failure:boundary
                 ~construct:"`quote` expression"
-                "unclosed `quote`: expected `}` before the enclosing boundary";
+                (Printf.sprintf "unclosed `quote`: expected `}` before %s"
+                   (token_description state boundary));
               recovered_close := true;
               current state
           | None -> (
@@ -1436,7 +1437,7 @@ and parse_block state opening =
             finish_block_item state ~opening ~recovered_close items closing finished)
   done;
   let meta = meta_with_span (span_between opening !closing) in
-  let meta = if !recovered_close then Meta.with_surface_form "recovery-delimiter" meta else meta in
+  let meta = if !recovered_close then mark_recovered_construct state meta else meta in
   Surface_ast.{ it = Block (List.rev !items); meta = Meta.with_surface_container "block" meta meta }
 
 and finish_block_item state ~opening ~recovered_close items closing finished =

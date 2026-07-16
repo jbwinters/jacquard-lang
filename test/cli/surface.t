@@ -100,11 +100,11 @@ retain the later valid declaration before exiting nonzero.
   $ cp ../../corpus/surface/dx3/malformed/missing-quote.jac dx3/missing-quote.jac
   $ jac fmt dx3/missing-quote.jac > dx3/malformed.out 2> dx3/malformed.err; status=$?; wc -c < dx3/malformed.out; cat dx3/malformed.err; echo "exit:$status"
   0
-  dx3/missing-quote.jac:6:1-10: error[E1221]: unclosed `quote`: expected `}` before the enclosing boundary
+  dx3/missing-quote.jac:6:1-10: error[E1221]: unclosed `quote`: expected `}` before ident(later-bad)
     hint: the `quote` expression opened at dx3/missing-quote.jac:1:10-15
   exit:1
   $ jac check dx3/missing-quote.jac --print-sigs > dx3/check.out 2>&1; status=$?; cat dx3/check.out; echo "exit:$status"
-  dx3/missing-quote.jac:6:1-10: error[E1221]: unclosed `quote`: expected `}` before the enclosing boundary
+  dx3/missing-quote.jac:6:1-10: error[E1221]: unclosed `quote`: expected `}` before ident(later-bad)
     hint: the `quote` expression opened at dx3/missing-quote.jac:1:10-15
   dx3/missing-quote.jac:6:16-17: error[E0801]: if condition: expected int, got bool (type mismatch)
     hint: the expected side comes from the surrounding context; make both sides agree

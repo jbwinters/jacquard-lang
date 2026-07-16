@@ -650,13 +650,6 @@ markers, but `surface-ref-v0` is a reserved head: malformed arity, argument sort
 validation errors even when nested as quote data. The normative grammar and diagnostics are in
 `spec/jacquard-kernel-ast-m0.md` §4.1; byte-level compatibility is in `spec/serialization.md`.
 
-For a large generated policy, factor stable quoted subtrees into named `Code` values and splice
-those names into the outer quote. A short outer `quote` makes staging depth reviewable, gives each
-sub-policy an independent hash and diff boundary, and reduces the number of closing braces an
-author must balance at once. Keep a small expression inline when splitting it would hide the
-policy's control flow; the recommendation is for substantial repeated or independently reviewed
-fragments, not every nested quote.
-
 Delimiter recovery is construct-aware for `quote`, `match`, `if`, `handle`, and expression blocks.
 The primary diagnostic points at the token or EOF where closing became impossible and its hint
 points back to the construct's opening span. The recovery tree receives a synthetic, metadata-marked

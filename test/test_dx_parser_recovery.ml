@@ -10,8 +10,8 @@ let malformed_goldens =
   [
     ( "missing-quote.jac",
       [
-        "missing-quote.jac:6:1-10: error[E1221]: unclosed `quote`: expected `}` before the \
-         enclosing boundary\n\
+        "missing-quote.jac:6:1-10: error[E1221]: unclosed `quote`: expected `}` before \
+         ident(later-bad)\n\
         \  hint: the `quote` expression opened at missing-quote.jac:1:10-15";
       ] );
     ( "missing-match.jac",

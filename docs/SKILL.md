@@ -384,11 +384,6 @@ Useful structural operations include:
 `unquote` outside `quote` is invalid. A splice must produce `Code`. Nested
 quote levels are significant. `(expression : Type)` is a type annotation.
 
-Factor a large quoted policy into named `Code` values, then splice those
-values into a short outer quote. This keeps staging depth and delimiter ownership
-reviewable and gives stable sub-policies their own hash/diff boundaries. Keep
-small one-use expressions inline when extraction would obscure control flow.
-
 `jqd { (bootstrap form) }` is the surface escape for a kernel form that cannot
 be represented without preserving an internal grouping. It is not general
 mixed-syntax authoring.
