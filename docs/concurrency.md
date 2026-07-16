@@ -231,6 +231,9 @@ OCaml exceptions. The core reports runnable task IDs but contains no runnable
 queue, scheduling policy, host thread, host I/O, or root Async handler.
 Cycle failure terminalizes every member and drops every member resume before
 reporting wakeups, so only live external waiters can enter the runnable output.
+Those external wakeups are grouped by cycle discovery order, with registration
+order preserved within each member; cancelled or otherwise terminal waiters are
+removed before the groups are emitted.
 
 SC.6 layers `Structured_scope` over that core. A root opens path `[0]`; each
 nested scope shares the same opaque run and appends its deterministic one-based
