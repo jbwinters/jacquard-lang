@@ -7,42 +7,45 @@ tier land here on purpose, like the sigs goldens.
   $ export JACQUARD_PRELUDE=../../prelude
 
   $ jacquard tiers
-  == declarations: 311 named terms ==
-  pure                 214  68%
-  row-poly              41  13%
-  effectful             40  12%
+  == declarations: 319 named terms ==
+  pure                 220  68%
+  row-poly              42  13%
+  effectful             41  12%
   data                  16   5%
   
-  == call sites: 1125 applications ==
-  constructor          296  26%
-  op-perform            47   4%
-  fn pure              614  54%
-  fn row-poly           61   5%
-  fn effectful         107   9%
+  == call sites: 1177 applications ==
+  constructor          308  26%
+  op-perform            53   4%
+  fn pure              643  54%
+  fn row-poly          108   9%
+  fn effectful          65   5%
     abort                2
+    approval             4
     audit                2
     check               10
     clock                1
-    console              2
+    console              3
     dist                 1
     emit                 2
-    fault                5
-    fs                   4
+    fault                4
+    fs                   2
     infer                4
     judge                4
-    net                  9
+    net                  6
     state                1
-    throw               66
+    throw               29
   
-  == handler op clauses: 38 (syntactic resumption shape) ==
-  tail-resumptive        9  23%
-  aborting               6  15%
-  one-shot               4  10%
-  multi-shot            19  50%
-  == native handler lowering: 38 (shape + operation mode) ==
+  == handler op clauses: 42 (syntactic resumption shape) ==
+  tail-resumptive        9  21%
+  aborting               6  14%
+  one-shot               7  16%
+  multi-shot            20  47%
+  == native handler lowering: 42 (shape + operation mode) ==
   tokenless-tail-multi         1   2%
-  materialized-resume         37  97%
+  materialized-resume         41  97%
     abort            once   aborting         materialized-resume        2
+    ask              once   one-shot         materialized-resume        3
+    ask              once   multi-shot       materialized-resume        1
     assess           once   tail-resumptive  materialized-resume        3
     assess           once   multi-shot       materialized-resume        1
     check            multi  one-shot         materialized-resume        1
@@ -72,7 +75,7 @@ tier land here on purpose, like the sigs goldens.
     write            once   aborting         materialized-resume        1
     write            once   multi-shot       materialized-resume        1
   
-  stamped 311 tier sidecars
+  stamped 319 tier sidecars
 
 A file that does not resolve is an error, not a partial table:
 

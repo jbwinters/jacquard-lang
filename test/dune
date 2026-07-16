@@ -91,6 +91,7 @@
   (glob_files ../bin/*.ml)
   ../docs/errors.md
   ../docs/effect-membranes.md
+  ../docs/effect-review.md
   ../docs/effect-taxonomy.md
   ../docs/README.md
   ../docs/release/surface-syntax/DECISION.md

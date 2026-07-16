@@ -1,8 +1,8 @@
 # Blessed Effect Taxonomy v1
 
-Status: ratified taxonomy (ET.0, D56-D63) with Audit, Secret, Approval, and
-Judge first-release interfaces promoted by ET.2, ET.4, ET.6, and GM.5,
-July 2026.
+Status: ET.8 release-frozen taxonomy (D56-D63), with Audit, Secret, Approval,
+Judge, and Workspace shipped and their canonical boundaries evidenced through
+ET.8, GM.5, and GM.9, July 2026.
 
 This specification freezes the shared effect vocabulary used by signatures,
 authority manifests, package review, and future registry metadata. It is a
@@ -34,15 +34,17 @@ lowercase short name. Every blessed row is in the `official` namespace. That
 namespace is an index classification backed by resolved effect identity; it is
 not part of canonical hashing and it is not a string-prefix authorization check.
 
-Risk defaults mean:
+Risk defaults are review-routing metadata, not permissions or guarantees:
 
-- `none`: no external authority by itself;
+- `none`: no external authority by itself; behavioral and uncertainty review
+  can still be required;
 - `low`: externally observable, normally read-only or human-local authority;
 - `medium`: durable or operational external effects needing deliberate review;
 - `high`: code execution, network-facing, storage, database, or cryptographic
   authority needing explicit attention; and
 - `special`: governance semantics whose rendering is effect-specific rather
-  than ordered as ordinary operational risk.
+  than ordered as ordinary operational risk; the effect's own contract must be
+  reviewed.
 
 Rings retain the standard-library layering contract: control in ring 1,
 world-free structures and scheduling contracts in ring 2, and world/model/meta/
@@ -89,6 +91,49 @@ The full 64-hex identities and unabridged operation strings are normative in
 the TSV artifact. In particular, `Check` remains a prelude testing protocol,
 not a blessed program-authority name; search packages may define additional
 multi effects without acquiring an official short name.
+
+### Canonical handler and boundary inventory
+
+“Canonical” means the shipped, reviewed way to discharge or install the effect;
+it does not imply that every boundary is pure or available to user code. A root
+grant is a runtime boundary. The Secret entries are embedding APIs because
+plaintext must not become an ordinary prelude value before explicit exposure.
+
+| effect | canonical handlers or installation boundaries |
+|---|---|
+| `Abort` | `abort.to-option`, `abort.or` |
+| `Throw` | `throw.to-result`, `throw.catch` |
+| `State` | `state.run`, `state.eval` |
+| `Emit` | `emit.collect`, `emit.pipe` |
+| `Dist` | `dist.enumerate`, `dist.sample-lw`, explicit root sampling grant |
+| `Fault` | `fault.none`, `fault.random`, `fault.all` |
+| `Eval` | explicit root grant only |
+| `Console` | `console.scripted`, explicit root grant |
+| `Clock` | `clock.fixed`, explicit root grant |
+| `Fs` | `fs.in-memory`, `fs.read-only`, explicit root grant |
+| `Net` | `net.scripted`, `net.record`, explicit root grant |
+| `Infer` | `infer.scripted`, explicit root grant |
+| `Approval` | `approval.console`, `approval.scripted`, `approval.dry-run`, `approval.policy-auto` |
+| `Audit` | `audit.in-memory`, `audit.line-log` |
+| `Secret` | `Prelude.install_secret_fixed`, `Prelude.install_secret_vault`, explicit environment root grant |
+| `Judge` | `judge.rules`, `judge.fixed`, `judge.scripted`, `judge.model` |
+| `Workspace` | `workspace.read-file`, `workspace.write-file`, `workspace.fetch` typed facade |
+
+The remaining nine blessed names are **reserved and unimplemented**:
+`Choose`, `Env`, `Pg`, `Blob`, `Serve`, `Crypto`, `Log`, `Async`, and `Channel`.
+Their schemas reserve compatibility vocabulary only. They have no
+shipped declaration hash, canonical handler, root grant, or product-availability
+claim. A future first implementation must match the reserved schema and publish
+its resulting full identity before tooling may classify it as released.
+
+### Uncertainty review is separate from authority review
+
+`Dist` has risk `none` because it needs no external authority, not because a
+probabilistic result is certainly correct. Review its support, weights,
+observations, handler, seed, and whether approximation error is acceptable.
+`Infer` is `medium` because it crosses a model boundary; a completion is model
+output, not a verified fact. A posterior or `Assessment.confidence` is evidence,
+not consent: neither can substitute for an exact hash-bound `Approval` decision.
 
 ### Async implementation obligation
 
@@ -154,6 +199,17 @@ is the only standard conversion to `Text`, so deliberate exposure remains in
 the effect row. This is non-derivability, not information-flow tracking: after
 exposure a program can still leak the text.
 
+ET.5 supplies three explicit handler boundaries without changing the interface
+identity or opaque value representation. `secret.fixed` is the deterministic
+embedding fixture installed by `Prelude.install_secret_fixed`; exact
+`(name, version)` matches return opaque values and missing names or versions
+fail separately. `--allow secret` installs the environment adapter, whose
+collision-free `JACQUARD_SECRET_V0_<name-hex>_{LATEST|VERSION_<version-hex>}`
+keys are derived only from safe `SecretRef` data. `Prelude.install_secret_vault`
+accepts an injected provider callback and selects no vendor or transport. Its
+closed failure type carries no backend message or value. Dry-run installs none
+of these live handlers and therefore refuses a remaining `Secret` row.
+
 `Call.subject` hashes the resolved operation identity, canonical arguments,
 declared authority, and preconditions. Presentation summary is excluded.
 ET.6 releases the schema above as `proposal-v1`. `approval.make-proposal`
@@ -173,6 +229,18 @@ serializer. Metadata is absent from those bytes. Consequently presentation
 metadata on the semantic call does not change its subject, while authority,
 policy, assessment, preview, rendering, or summary changes produce a different
 proposal.
+
+ET.7 supplies four canonical handlers. `approval.console` prints the exact
+proposal hash followed by the ordered authority request and recognizes only
+the exact response `approve` as consent. `approval.scripted` consumes explicit
+Decisions supplied by a test fixture and validates each Decision against the
+current Proposal; it never synthesizes consent. `approval.dry-run` always
+returns `Escalate`, never `Approved`. `approval.policy-auto` may approve only
+an already-`Allow` policy verdict; `Ask` and `Simulate` escalate, while `Block`
+denies. Every handler recomputes the Proposal hash before it can resume the
+protected computation. The classifier that supplies the verdict is a trusted
+handler dependency: a live membrane must derive it from the exact validated
+policy and assessment, never from governed caller input.
 
 GM.0 retains that two-level identity rule while naming the successor membrane
 fields `Call.call-id` and `Proposal.proposal-id`, adding `GovernanceV0` and the
@@ -320,14 +388,15 @@ their full `DefEffect` hashes. The complete 26-entry catalog is also typed, but
 the nine `reserved` entries carry no hash and name only the
 `first-release` policy; registration rejects them until a real first interface is
 implemented and frozen. This keeps schema reservation distinct from resolved
-program identity. Audit, Secret, Approval, and Judge are the first four reserved
-interfaces promoted by that rule. Their v1 identities above are the shipped
-`DefEffect` hashes. The released operations are once
+program identity. Audit, Secret, Approval, Judge, and Workspace are released
+governance interfaces. Their identities above are the shipped `DefEffect`
+hashes. The released operations are once
 `audit.record : (AuditEntry) -> ()`, once
 `secret.read : (SecretRef) -> Secret`, once
 `secret.expose : (Secret) -> Text`, once
 `approval.ask : (Proposal) -> Decision`, and once
-`judge.assess : (Call) -> Assessment`. The executable GM.5
+`judge.assess : (Call) -> Assessment`, plus once `workspace.read-file`,
+`workspace.write-file`, and `workspace.fetch`. The executable GM.5
 declaration uses the collision-safe GM.1 carrier names `GovernanceCall` and
 `GovernanceAssessment`; these are the versioned v0 spellings of the charter
 schemas shown here.
@@ -351,6 +420,25 @@ therefore cannot acquire its grant.
 Semantic diff applies this rendering only to a resolved effect row in the row
 position of a typed arrow. Type-shaped forms below `quote` remain ordinary code
 data and receive structural diffs, never an authority label.
+
+### Review non-goals
+
+- Taxonomy metadata never grants authority; only a checked row plus an explicit
+  root installation or enclosing handler can make an operation run.
+- Risk defaults are not vulnerability scores, policy verdicts, or claims that a
+  computation is safe. User effects stay unrated until metadata is reviewed for
+  their exact identity.
+- The taxonomy does not provide path-scoped object capabilities, a production
+  sandbox, continuous probability, verified model truth, automatic consent, or
+  a universal host/tool effect.
+- Secret opacity is non-derivability, not taint tracking. After
+  `secret.expose`, plaintext is ordinary `Text` and may be copied or leaked.
+- Secret redaction does not promise process-memory scrubbing. The v0 OCaml and
+  native carriers do not zero payload bytes when a Secret is released, so
+  process memory and crash-dump protection remain embedding responsibilities.
+- A reserved schema is neither an implementation nor a roadmap promise. In
+  particular, this release has no `Async` scheduler, typed `Channel` runtime,
+  database/blob/serve/crypto/log provider, or pure `Choose` interface.
 
 ### Audit chain v1
 
@@ -402,6 +490,7 @@ receives a record intended for the verified inode.
 | D62 | raw authority | host is a role; membranes re-perform concrete blessed world effects, never `Host` |
 | D63 | Judge status | blessed once effect with `judge.assess : (Call) -> Assessment` |
 
-Later tasks implement registry coloring, governance handlers, membranes, and
-product review surfaces. This task freezes the vocabulary they consume without
-claiming those later artifacts already exist.
+ET.8 closes the taxonomy slice with released-identity, registry, prelude,
+documentation, manifest, and authority-diff evidence. Governed membranes and
+other later milestones remain separate; this freeze does not claim those
+products or the reserved interfaces already exist.

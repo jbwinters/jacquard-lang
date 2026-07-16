@@ -33,8 +33,8 @@
     application arity, E0804 annotation mismatch, E0805 unknown hash/metadata, E0806 constructor
     pattern arity, E0807 surface eta-expansion guidance, E0810 type-constructor arity in an
     annotation, E0811 unbound type/row variable in a declaration or annotation, E0816 an affine
-    resumption consumed twice, E0817 an affine resumption escape, and E0818 an attempted polymorphic
-    reuse of a non-value local binding. *)
+    resumption consumed twice, E0817 an affine resumption escape, E0818 an attempted polymorphic
+    reuse of a non-value local binding, and E0819 an opaque Secret inspection or serialization. *)
 
 open Types
 module SMap = Map.Make (String)
@@ -669,7 +669,7 @@ and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(requir
                 && (is_text_ty ctx expected
                    || Option.equal String.equal (Meta.name fn.meta) (Some "debug.inspect"))
               then
-                err ~meta:diagnostic_meta ~code:"E0818"
+                err ~meta:diagnostic_meta ~code:"E0819"
                   ~hint:
                     "keep the value opaque; only `secret.expose` converts Secret to Text, and that \
                      operation remains in the Secret effect row"

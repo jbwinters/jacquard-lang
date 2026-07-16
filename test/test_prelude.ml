@@ -219,6 +219,11 @@ let test_loads_with_zero_diagnostics () =
       ( "judge.model",
         "forall a | e. (() ->{Infer, Judge, Throw | e} a, (GovernanceCall) ->{Infer} \
          GovernanceAssessment) ->{Infer, Throw | e} a" );
+      ("approval.console", "forall a | e. (() ->{Approval | e} a) ->{Console, Throw | e} a");
+      ("approval.scripted", "forall a | e. (() ->{Approval | e} a, List Decision) ->{Throw | e} a");
+      ("approval.dry-run", "forall a | e. (() ->{Approval | e} a) ->{Throw | e} a");
+      ( "approval.policy-auto",
+        "forall a | e. (() ->{Approval | e} a, (Proposal) ->{| e} Verdict) ->{Throw | e} a" );
     ]
   in
   List.iter
