@@ -1,0 +1,9 @@
+# GM.1 operation identities that must fail the pure Call constructor boundary.
+empty	<empty>
+uppercase	Fs.write
+empty-component	fs..write
+punctuation-after-dot	fs.-write
+suffix-not-final	fs.write?x
+underscore	fs.write_unsafe
+digit-at-component-start	fs.7write
+trailing-separator	fs.write-
