@@ -106,6 +106,7 @@
   ../docs/release/surface-syntax/MANIFEST.sha256
   ../docs/release/structured-concurrency/EVIDENCE.md
   ../docs/release/structured-concurrency/MANIFEST.sha256
+  ../docs/release/dx-jac-export/EVIDENCE.md
   ../docs/stdlib.md
   ../docs/surface-syntax.md
   ../docs/tutorial.md

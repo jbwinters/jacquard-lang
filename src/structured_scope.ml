@@ -169,6 +169,10 @@ let cancel scope ~caller ~target ~resume ~drop =
                       (function
                         | Boundary_continue resume -> Cancel_continues { resume; awakened = [] }
                         | Boundary_cancelled awakened -> Cancel_caller_cancelled awakened)
+                      (* Recheck after the request so [target = caller] observes its
+                         cancellation at this routed-effect boundary. For another
+                         runnable or terminal target, the caller continuation is
+                         preserved. *)
                       (at_cancellation_point scope ~point:Concurrency_contract.Routed_effect
                          ~task:caller ~resume ~drop))))
 

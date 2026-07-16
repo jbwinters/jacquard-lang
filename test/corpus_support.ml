@@ -369,6 +369,10 @@ let diag_cases : (string * string * string list option) list =
     ( "effectful-toplevel-body",
       "(defterm ((binding sneaky () (app (var net.get) (lit \"http://evil.example\")))))",
       None );
+    ( "value-restriction",
+      "(let nonrec (pvar i) (app (lam ((pvar x)) (var x)) (lam ((pvar y)) (var y))) (tuple (app \
+       (var i) (lit 1)) (app (var i) (lit \"s\"))))",
+      None );
     ( "once-double-call",
       once_diag "linear-double" "signal-double"
         "(let nonrec (pwild) (app (var k) (lit 1)) (app (var k) (lit 2)))",

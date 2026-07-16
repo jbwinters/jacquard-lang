@@ -73,7 +73,10 @@ val force_term : ctx -> Hash.t -> (Types.scheme, Diag.t list) result
 *)
 
 val show_row : ctx -> Types.row -> string
-(** [show_row ctx row] renders the row's known effects in deterministic name order. *)
+(** [show_row ctx row] renders every resolved identity in deterministic name/hash order. Distinct
+    identities with the same declaration name are disambiguated by full hash rather than collapsed.
+    This compact renderer is for signatures; authority review metadata is provided by
+    {!Effect_registry}. *)
 
 val manifest_errors :
   ctx -> ?grantable:string list -> granted:Hash.t list -> Types.row -> Diag.t list

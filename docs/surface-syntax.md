@@ -664,6 +664,13 @@ markers, but `surface-ref-v0` is a reserved head: malformed arity, argument sort
 validation errors even when nested as quote data. The normative grammar and diagnostics are in
 `spec/jacquard-kernel-ast-m0.md` §4.1; byte-level compatibility is in `spec/serialization.md`.
 
+Delimiter recovery is construct-aware for `quote`, `match`, `if`, `handle`, and expression blocks.
+The primary diagnostic points at the token or EOF where closing became impossible and its hint
+points back to the construct's opening span. The recovery tree receives a synthetic, metadata-marked
+delimiter or hole so analysis can continue at a safe later top-level item. That marker is editor
+state only: strict parsing, formatting, hashing, storage, and execution all continue to reject the
+original malformed source.
+
 ### Annotation
 
 `(e : T)` is kernel `Ann`.

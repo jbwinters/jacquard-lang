@@ -167,6 +167,8 @@ int.gt? 0
 int.gte? 0
 int.lt? 0
 int.lte? 0
+parallel.map 0
+parallel.both 0
 # --- 10-ring1 (ring 1)
 abort.to-option 1
 abort.or 1

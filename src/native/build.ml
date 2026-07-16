@@ -114,8 +114,8 @@ let discover (store : Store.t) : discovery =
 type outcome = { prog : Emit.program; refusals : Compile.refusal list }
 
 let compile_program (store : Store.t) (d : discovery)
-    (tops_src : (Kernel.expr * string list * (string * string) list) list) :
-    outcome * (string * string) list list =
+    (tops_src : (Kernel.expr * string list * (Hash.t * string) list) list) :
+    outcome * (Hash.t * string) list list =
   let itbl = Hashtbl.create 16 in
   List.iter (fun (n, a) -> Hashtbl.replace itbl n a) intrinsics;
   let refusals = ref [] in
@@ -275,6 +275,7 @@ let compile_program (store : Store.t) (d : discovery)
       | Ok
           {
             Store.decl = { Kernel.it = Kernel.DefEffect { ename; ops = specs; _ }; _ };
+            decl_hash;
             role = Store.Operation oi;
             _;
           } ->
@@ -283,7 +284,8 @@ let compile_program (store : Store.t) (d : discovery)
             | Some { Kernel.op_name; op_mode; _ } -> (op_name, op_mode)
             | None -> ("?", Kernel.Multi)
           in
-          Hashtbl.replace ops h { Emit.ohash = h; oeffect = ename; oname; omode; oord = i }
+          Hashtbl.replace ops h
+            { Emit.ohash = h; oeffect_hash = decl_hash; oeffect = ename; oname; omode; oord = i }
       | _ -> ())
     op_list;
   (* frame-style classification (task 71): a fn may suspend when its body performs,
@@ -478,7 +480,7 @@ let runtime_dir_of ~prelude_dir =
 
 (** [build ~store ~tops ~prelude_dir ~out] compiles the checked top-level expressions and every
     reachable declaration to a standalone binary at [out]. *)
-let build ~(store : Store.t) ~(tops : (Kernel.expr * string list * (string * string) list) list)
+let build ~(store : Store.t) ~(tops : (Kernel.expr * string list * (Hash.t * string) list) list)
     ~prelude_dir ~out : (int, [ `Refused of Compile.refusal list | `Toolchain of string ]) result =
   let d = discover store in
   let { prog; refusals }, manifests = compile_program store d tops in
