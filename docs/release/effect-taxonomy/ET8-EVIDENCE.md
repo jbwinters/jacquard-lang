@@ -65,7 +65,7 @@ schema comparison rejects it. Coordinated TSV/Markdown drift can therefore no
 longer pass merely because it leaves a stale hash field untouched.
 
 ET.8 adds that regression to the existing `effect-taxonomy` suite without
-adding a cram file. The candidate inventory is 611 compiled Alcotest/QCheck
+adding a cram file. The candidate inventory is 631 compiled Alcotest/QCheck
 cases and 35 cram transcript files.
 
 ## Reproduction
