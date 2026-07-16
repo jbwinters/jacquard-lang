@@ -195,6 +195,10 @@ suspended continuations to its caller, and `Structured_scope.deliver_cancel`
 passes every transferred token exactly once to its explicit destruction
 callback. Duplicate and terminal delivery transfer nothing, so cancellation
 never relies on garbage collection to discharge affine ownership.
+The registered-waiter regression additionally pins that cancellation returns
+waiters in registration order, transitions each waiter to `Runnable` with its
+resume owned again, and leaves the immutable `Cancelled` target result
+available to every subsequent await.
 
 `Structured_scope` applies that primitive before await registration, yield
 suspension, and a routed-effect action. A delivered await registers no waiter;
@@ -209,12 +213,18 @@ runnable target receives one idempotent request, while an await- or
 yield-suspended target is delivered immediately and its stored continuation is
 destroyed. Completed, failed, already-cancelled, and duplicate requests are
 deterministic no-ops. Self-cancel requests and delivers at the same routing
-point; no continuation is returned for a post-cancel user step.
+point; the second caller-boundary check exists for that case, and no
+continuation is returned for a post-cancel user step. An already-cancelled
+caller reaching another boundary destroys the newly supplied stale
+continuation and wakes nobody.
 
 Focused Alcotest coverage pins all three boundary classes, no-waiter/no-child
 preemption, routed-effect fault injection, duplicate/completed/self behavior,
-and the exact public handoff that destroys suspended resume token 21 once. It
-also pins the rule that a pre-cancelled caller does not request another target.
+the exact public handoff that destroys suspended resume token 21 once, and the
+stale already-cancelled boundary handoff. It also pins the rule that a
+pre-cancelled caller does not request another target, plus registered-waiter
+wake order, runnable/resume ownership, and repeated observation of the
+immutable `Cancelled` result.
 The bracket fixture records acquire, continuation destruction, and release in
 order and proves that no later user step executes. A 200-case QCheck property
 proves duplicate requests yield exactly one terminal delivery and one

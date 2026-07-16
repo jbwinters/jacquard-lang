@@ -256,6 +256,9 @@ effects check before invoking their action. Delivery terminalizes the task as
 `Cancelled`, wakes existing waiters in registration order, and transfers the
 boundary continuation exactly once to the destruction callback. The layer
 still contains no runnable queue, scheduling policy, or root Async handler.
+The cancellation regression pins the full waiter handoff: each registered
+waiter becomes runnable in registration order, owns its resume again, and
+observes the same immutable `Cancelled` result when it awaits the target again.
 
 ## 3. Scope APIs and failure shapes
 
@@ -308,9 +311,11 @@ pending request. If A may continue, it requests cancellation of the target.
 A suspended target is delivered immediately and its scheduler-owned resume is
 destroyed; a runnable target retains an idempotent request until its next
 boundary. A completed, failed, cancelled, or already-requested target is a
-deterministic no-op. Self-cancel requests and delivers at the same routed
-boundary, so the caller receives no continuation with which to execute a later
-user expression.
+deterministic no-op. The second caller-boundary check after requesting the
+target exists specifically for self-cancel: it requests and delivers at the
+same routed boundary, so the caller receives no continuation with which to
+execute a later user expression. Re-entering a boundary with an already
+cancelled task also destroys the supplied stale continuation and wakes nobody.
 
 Dropping a continuation releases language/runtime memory; it does not release
 an external resource automatically. Acquire/release handlers (the bracket or
