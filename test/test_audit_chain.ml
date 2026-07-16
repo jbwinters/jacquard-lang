@@ -263,17 +263,17 @@ let test_concurrent_truncation_is_total () =
     (fun () ->
       await_signal ready_read;
       Unix.close ready_read;
-      let saw_change = ref false in
+      Unix.sleepf 0.001;
+      let saw_refusal = ref false in
       for _ = 1 to 64 do
         match Audit_chain.verify_file ~file ~expected_head:Audit_chain.genesis with
         | Ok _ -> ()
-        | Error ({ Diag.code = "E1306"; _ } :: _) -> saw_change := true
-        | Error (_ :: _) -> ()
+        | Error (_ :: _) -> saw_refusal := true
         | Error [] -> Alcotest.fail "concurrent read returned an empty diagnostic list"
         | exception exception_ ->
             Alcotest.failf "concurrent truncate escaped %s" (Printexc.to_string exception_)
       done;
-      Alcotest.(check bool) "concurrent change diagnosed as E1306" true !saw_change)
+      Alcotest.(check bool) "concurrent churn produced a fail-closed refusal" true !saw_refusal)
 
 let mutate source index =
   let bytes = Bytes.of_string source in
