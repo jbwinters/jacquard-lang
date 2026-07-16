@@ -18,7 +18,7 @@ Granting net without eval still fails before runtime because the surface program
 manifest requires eval.
 
   $ jacquard run eval-net.jqd --allow net
-  error[E0814]: this program requires the `eval` effect, which is not granted (performed via `eval-code`)
+  error[E0814]: this program requires eval [meta/high] — run code constructed or loaded at runtime, which is not granted (performed via `eval-code`)
     hint: grant it with --allow eval, or handle the effect in the program
   [3]
 
@@ -28,7 +28,7 @@ Even pure eval is gated; there is no pure-code shortcut around the capability.
   > (app (var eval-code) (quote (lit 1)))
   > EOF_JQD
   $ jacquard run pure-eval.jqd
-  error[E0814]: this program requires the `eval` effect, which is not granted (performed via `eval-code`)
+  error[E0814]: this program requires eval [meta/high] — run code constructed or loaded at runtime, which is not granted (performed via `eval-code`)
     hint: grant it with --allow eval, or handle the effect in the program
   [3]
 
@@ -39,7 +39,7 @@ resolve or execute the payload early.
   > eval-code(quote { add(40, 2) })
   > EOF_JAC
   $ jacquard run pure-eval.jac
-  error[E0814]: this program requires the `eval` effect, which is not granted (performed via `eval-code`)
+  error[E0814]: this program requires eval [meta/high] — run code constructed or loaded at runtime, which is not granted (performed via `eval-code`)
     hint: grant it with --allow eval, or handle the effect in the program
   [3]
   $ jacquard run pure-eval.jac --allow eval
@@ -52,7 +52,7 @@ manifest. Granting console without Eval refuses before the payload can print.
   > eval-code(quote { print("AUTHORITY LEAK\n") })
   > EOF_JAC
   $ jacquard run hidden-console.jac --allow console
-  error[E0814]: this program requires the `eval` effect, which is not granted (performed via `eval-code`)
+  error[E0814]: this program requires eval [meta/high] — run code constructed or loaded at runtime, which is not granted (performed via `eval-code`)
     hint: grant it with --allow eval, or handle the effect in the program
   [3]
 

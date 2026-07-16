@@ -17,7 +17,7 @@ value; the seed makes runs reproducible.
 Without the grant, the manifest refuses to start (exit 3):
 
   $ jacquard run die.jqd
-  error[E0814]: this program requires the `dist` effect, which is not granted (performed via `sample`)
+  error[E0814]: this program requires dist [uncertainty/none] — denote and condition finite possibilities, which is not granted (performed via `sample`)
     hint: grant it with --allow dist, or handle the effect in the program
   [3]
 

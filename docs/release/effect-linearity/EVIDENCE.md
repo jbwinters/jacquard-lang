@@ -232,7 +232,7 @@ Expected deterministic results:
 
 - the effect-linearity manifest checker validates every named byte sequence;
 - `dune build @all` and `dune build @doc` exit zero;
-- the forced suite passes all 568 compiled Alcotest/QCheck cases and 34 cram transcripts,
+- the forced suite passes all 603 compiled Alcotest/QCheck cases and 34 cram transcripts,
   including 13 generated Once-operation parity cases;
 - the clang native differential reports 69 byte-identical programs, 8 manifested
   refusals, and 0 failures;

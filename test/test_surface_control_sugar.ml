@@ -460,8 +460,12 @@ let test_malformed_and_recovery () =
     "exact malformed diagnostics"
     [
       "bad-ss13.jac:1:4-5: error[E1220]: list literals do not permit a trailing comma";
-      "bad-ss13.jac:2:6-7: error[E1220]: expected `then` after the condition, found ident(a)";
-      "bad-ss13.jac:3:13-14: error[E1220]: expected `else` after the then branch, found ident(b)";
+      "bad-ss13.jac:2:6-7: error[E1220]: unclosed `if`: expected `then` after the condition, found \
+       ident(a)\n\
+      \  hint: the `if` expression opened at bad-ss13.jac:2:1-3";
+      "bad-ss13.jac:3:13-14: error[E1220]: unclosed `if`: expected `else` after the then branch, \
+       found ident(b)\n\
+      \  hint: the `if` expression opened at bad-ss13.jac:3:1-3";
     ]
     (List.map Diag.to_string recovered.diagnostics);
   (match List.rev recovered.items with
@@ -492,8 +496,9 @@ let test_top_level_recovery_boundaries () =
   Alcotest.(check (list string))
     "if boundary diagnostic"
     [
-      "if-boundary.jac:2:1-6: error[E1220]: expected `else` after the then branch before the next \
-       top-level item";
+      "if-boundary.jac:2:1-6: error[E1220]: unclosed `if`: expected `else` after the then branch \
+       before the next top-level item\n\
+      \  hint: the `if` expression opened at if-boundary.jac:1:1-3";
     ]
     (List.map Diag.to_string if_recovered.diagnostics);
   match if_recovered.items with
@@ -530,7 +535,9 @@ let test_nested_recovery_boundaries () =
         "nested-list-call.jac:2:1-2: error[E1220]: expected `,` or `]`, found )" );
       ( "nested-if-call.jac",
         "f(if c then a\n)\nafter = 7\n",
-        "nested-if-call.jac:2:1-2: error[E1220]: expected `else` after the then branch, found )" );
+        "nested-if-call.jac:2:1-2: error[E1220]: unclosed `if`: expected `else` after the then \
+         branch, found )\n\
+        \  hint: the `if` expression opened at nested-if-call.jac:1:3-5" );
       ( "nested-list-block.jac",
         "{\n[1\n}\nafter = 7\n",
         "nested-list-block.jac:3:1-2: error[E1220]: expected `,` or `]`, found }" );
