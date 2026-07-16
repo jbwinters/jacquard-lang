@@ -66,7 +66,6 @@ let reserved_catalog_names =
     ("Serve", "serve");
     ("Crypto", "crypto");
     ("Log", "log");
-    ("Judge", "judge");
     ("Async", "async");
     ("Channel", "channel");
   ]
@@ -175,12 +174,14 @@ let catalog =
       "362425a29077a7efbcc37047182e579f46199a50473045eb4126a917dfc2a196"
       "request hash-bound consent for an exact proposal";
     released "Audit" "audit" Governance Special
-      "2c148fbc2e26bdc6f01279a8bf176f54d5798536e1f96805aa4f7c7a57e67632"
+      "40bc4343fb2b4bcc18b18f63f7bb68675b746751bb40b876072e622046a81372"
       "record governance evidence in an append-only stream";
     released "Secret" "secret" Governance Special
       "6d092eccc3c9858a2a95120da5a011964cbb3ad76968e11c1cbb062c119fbb31"
       "resolve opaque confidential material or explicitly expose it";
-    reserved "Judge" "judge" Governance Special "assess a proposed call without performing it";
+    released "Judge" "judge" Governance Special
+      "9b677b5e2c3ec8521c5d5dfac321ae361a959565e1cbf082fec4512199977354"
+      "assess a proposed call without performing it";
     reserved "Async" "async" Concurrency No_risk
       "schedule structured tasks while charging child effects to the parent row";
     reserved "Channel" "channel" Concurrency No_risk

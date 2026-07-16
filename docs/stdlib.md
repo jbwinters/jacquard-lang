@@ -92,8 +92,8 @@ in [`effect-review.md`](effect-review.md).
 
 | ET.8 blessed status | exact names |
 |---|---|
-| implemented (15) | `Abort`, `Throw`, `State`, `Emit`, `Dist`, `Fault`, `Eval`, `Console`, `Clock`, `Fs`, `Net`, `Infer`, `Approval`, `Audit`, `Secret` |
-| reserved/unimplemented (10) | `Choose`, `Env`, `Pg`, `Blob`, `Serve`, `Crypto`, `Log`, `Judge`, `Async`, `Channel` |
+| implemented (16) | `Abort`, `Throw`, `State`, `Emit`, `Dist`, `Fault`, `Eval`, `Console`, `Clock`, `Fs`, `Net`, `Infer`, `Approval`, `Audit`, `Secret`, `Judge` |
+| reserved/unimplemented (9) | `Choose`, `Env`, `Pg`, `Blob`, `Serve`, `Crypto`, `Log`, `Async`, `Channel` |
 
 The status table is descriptive, not a grant list. The full identity table is
 machine-checked against `Effect_registry`, the prelude declarations, and the

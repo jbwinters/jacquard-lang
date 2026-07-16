@@ -121,7 +121,7 @@ let test_reviewed_operation_modes store =
   in
   let declared = prelude_source_modes () |> List.map row |> List.sort String.compare in
   let frozen = reviewed |> List.map row |> List.sort String.compare in
-  Alcotest.(check int) "current prelude operation inventory size" 24 (List.length declared);
+  Alcotest.(check int) "current prelude operation inventory size" 25 (List.length declared);
   Alcotest.(check (list string))
     "every operation from every prelude DefEffect has an exact reviewed mode" declared frozen;
   test_retained_multi_hashes store;
@@ -209,6 +209,16 @@ let test_loads_with_zero_diagnostics () =
         "(Hash, Hash, Hash, List Authority, Code, Text, Option OutcomeSummary) ->{} Proposal" );
       ( "approval.before-action",
         "forall a | e. (Proposal, Decision, () ->{| e} a) ->{| e} Result Text a" );
+      ( "judge.rules",
+        "forall a | e. (() ->{Judge, Throw | e} a, (GovernanceCall) ->{} GovernanceAssessment) \
+         ->{Throw | e} a" );
+      ( "judge.fixed",
+        "forall a | e. (() ->{Judge, Throw | e} a, GovernanceAssessment) ->{Throw | e} a" );
+      ( "judge.scripted",
+        "forall a | e. (() ->{Judge, Throw | e} a, List GovernanceAssessment) ->{Throw | e} a" );
+      ( "judge.model",
+        "forall a | e. (() ->{Infer, Judge, Throw | e} a, (GovernanceCall) ->{Infer} \
+         GovernanceAssessment) ->{Infer, Throw | e} a" );
       ("approval.console", "forall a | e. (() ->{Approval | e} a) ->{Console, Throw | e} a");
       ("approval.scripted", "forall a | e. (() ->{Approval | e} a, List Decision) ->{Throw | e} a");
       ("approval.dry-run", "forall a | e. (() ->{Approval | e} a) ->{Throw | e} a");
