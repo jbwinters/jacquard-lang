@@ -1,7 +1,5 @@
 # Governed-membranes GM.1 + GM.5 reconstructible integration overlay
 # Base commit: 95b2be5
-# Attestation manifests exclude themselves (and successor manifests) to avoid self/cross-hashes.
-
 40b419510c7fb14a860bfdcd3c4453a1a4c2b20bfa280de59439893a94b94e0b  README.md
 c6f3755b008be94075aa4a1ebd8adb5758bbffcf195d532a63bf887584c04120  bin/main.ml
 def1eea29b4a574fce10cda378c59fdaabfa9946acaa6617543a380342139c4e  corpus/golden/diags.golden
