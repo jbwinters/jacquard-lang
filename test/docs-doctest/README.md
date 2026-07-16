@@ -1,8 +1,8 @@
 # Documentation doctests
 
 The `runtest` rule in this directory audits executable Jacquard examples in
-`README.md`, `docs/tutorial.md`, `docs/stdlib.md`, `docs/warp-testing.md`, and
-`demos/README.md`.
+`README.md`, `docs/effect-taxonomy.md`, `docs/tutorial.md`, `docs/stdlib.md`,
+`docs/warp-testing.md`, and `demos/README.md`.
 
 To add or update an example:
 

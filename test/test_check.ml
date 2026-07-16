@@ -805,6 +805,74 @@ let test_group_annotations () =
   | Error [ d ] -> Alcotest.(check string) "annotation mismatch" "E0804" d.Diag.code
   | _ -> Alcotest.fail "expected E0804"
 
+let manifest_text (_, ctx) row =
+  Check.manifest_errors ctx ~grantable:Prelude.grantable_names ~granted:[] row
+  |> List.map Diag.to_string |> String.concat "\n"
+
+let test_manifest_uses_resolved_effect_identity () =
+  let handle = make_cctx () in
+  let checked =
+    check_src handle
+      "(defeffect net () (op package.fetch once () (tref text)))\n(app (var package.fetch))"
+  in
+  let text =
+    match checked with
+    | Ok { Check.row = Some row; _ } -> manifest_text handle row
+    | Ok _ -> Alcotest.fail "custom effect expression had no manifest"
+    | Error diagnostics -> Eval_support.fail_diags "custom effect manifest" diagnostics
+  in
+  Alcotest.(check bool)
+    "colliding user effect remains unrated" true
+    (contains text "unrated user effect");
+  Alcotest.(check bool)
+    "unpackaged effect gets an honest qualified fallback" true (contains text "unpackaged:");
+  Alcotest.(check bool)
+    "colliding user effect includes full hash" true
+    (match Store.lookup_kind (fst handle) "net" Resolve.KEffect with
+    | Some entry -> contains text (Hash.to_hex entry.hash)
+    | None -> false);
+  Alcotest.(check bool)
+    "colliding user effect gets no official risk" false (contains text "world/high");
+  Alcotest.(check bool)
+    "colliding user effect gets no built-in grant hint" false
+    (contains text "grant it with --allow net");
+  Alcotest.(check bool)
+    "unknown-effects remediation is explicit" true
+    (contains text "unregistered user effects have no built-in --allow grant")
+
+let test_manifest_renders_blessed_risk () =
+  let handle = make_cctx () in
+  match check_src handle "(app (var net.get) (lit \"https://example.com\"))" with
+  | Ok { Check.row = Some row; _ } ->
+      let text = manifest_text handle row in
+      Alcotest.(check bool) "blessed tier and risk" true (contains text "net [world/high]");
+      Alcotest.(check bool)
+        "blessed reviewer meaning" true
+        (contains text "reach a network endpoint through the granted handler")
+  | Ok _ -> Alcotest.fail "Net expression had no manifest"
+  | Error diagnostics -> Eval_support.fail_diags "Net manifest" diagnostics
+
+let test_show_row_preserves_same_name_identities () =
+  let store, ctx = make_cctx () in
+  let add operation =
+    Eval_support.put_src store (Store.names_view store)
+      (Printf.sprintf "(defeffect same-name () (op %s once () (tref text)))" operation)
+    |> fun hashes -> List.assoc "same-name" hashes.Canon.named
+  in
+  let first = add "first-op" in
+  let second = add "second-op" in
+  let expected =
+    [ first; second ] |> List.sort Hash.compare
+    |> List.map (fun hash -> Printf.sprintf "same-name [#%s]" (Hash.to_hex hash))
+    |> String.concat ", "
+  in
+  Alcotest.(check string)
+    "same ename identities stay distinct" expected
+    (Check.show_row ctx (Types.closed_row [ second; first ]));
+  Alcotest.(check string)
+    "input order cannot perturb tie-breaking" expected
+    (Check.show_row ctx (Types.closed_row [ first; second ]))
+
 let suite =
   [
     Alcotest.test_case "golden signatures (20+ programs)" `Quick test_golden_sigs;
@@ -835,4 +903,9 @@ let suite =
       test_multi_resume_remains_ordinary_function;
     Alcotest.test_case "declaration kind checks" `Quick test_declaration_kind_checks;
     Alcotest.test_case "group annotations honored" `Quick test_group_annotations;
+    Alcotest.test_case "manifest keys blessing by identity" `Quick
+      test_manifest_uses_resolved_effect_identity;
+    Alcotest.test_case "manifest renders blessed risk" `Quick test_manifest_renders_blessed_risk;
+    Alcotest.test_case "show row preserves same-name identities" `Quick
+      test_show_row_preserves_same_name_identities;
   ]

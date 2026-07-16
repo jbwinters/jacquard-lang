@@ -31,6 +31,8 @@ project shape from file names alone.
 
 - `tutorial.md`: worked CLI examples.
 - `stdlib.md`: prelude, rings, library effects, and standard handlers.
+- `effect-taxonomy.md`: ratified blessed effect names, schemas, risks, rings,
+  interface compatibility, and user-effect governance.
 - `warp-testing.md`: Warp test model, rows, handlers, cache, properties, and
   world lanes.
 - `errors.md`: diagnostic code catalog.

@@ -292,7 +292,14 @@ let release_inventory_errors () =
       [ ("- Alcotest/QCheck cases:", actual_tests); ("- Cram transcript files:", actual_crams) ]
 
 let doctest_names () =
-  [ "README.md"; "docs/tutorial.md"; "docs/stdlib.md"; "docs/warp-testing.md"; "demos/README.md" ]
+  [
+    "README.md";
+    "docs/effect-taxonomy.md";
+    "docs/tutorial.md";
+    "docs/stdlib.md";
+    "docs/warp-testing.md";
+    "demos/README.md";
+  ]
   |> List.concat_map (fun path ->
       read_source path |> String.split_on_char '\n'
       |> List.filter_map (fun line ->
@@ -846,7 +853,7 @@ let validate_release_docs ~decision ~followups ~index =
           ];
           [
             "opam exec -- dune runtest test/docs-doctest --force";
-            "exit 0; exactly 21 named doctests pass";
+            "exit 0; exactly 22 named doctests pass";
           ];
           [
             "JACQUARD_PRELUDE=$PWD/prelude opam exec -- dune exec jac -- run \

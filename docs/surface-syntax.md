@@ -465,7 +465,7 @@ explicitly rather than reject it by accident.
 
 ```
 run(request) = {
-  let ok = approval.ask("Run this?")
+  let ok = confirmation.ask("Run this?")
   console.print("checked")
   if ok then console.print("yes") else console.print("no")
 }
@@ -558,7 +558,7 @@ type Option a = | None | Some a
 type Fleet = | MkFleet(inv: SvcMood, pay: SvcMood, shp: SvcMood)
 
 once effect Approval where {
-  ask : (Text) -> Bool
+  approval.ask : (Proposal) -> Decision
 }
 
 multi effect Choice a where {
