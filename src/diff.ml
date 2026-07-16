@@ -42,11 +42,42 @@ let render_form syntax form =
       | Ok text when not (String.equal text "") -> text
       | Ok _ | Error _ -> Printer.inline_form form)
 
+let operation_mode (form : Form.t) =
+  if form.Form.head <> "op" then None
+  else
+    match form.Form.args with
+    | Form.Sym name :: [ Form.F _; Form.F _ ] -> Some (name, Kernel.Multi)
+    | Form.Sym name :: Form.Sym "once" :: [ Form.F _; Form.F _ ] -> Some (name, Kernel.Once)
+    | _ -> None
+
 (* Smallest disagreeing subtrees between two forms, with head-paths. If heads or arities
    differ the whole node is the divergence; otherwise recurse into exactly the differing
    arguments. *)
 let rec form_divergences ?(syntax = Bootstrap) ~path (fa : Form.t) (fb : Form.t) : divergence list =
   if Form.equal_ignoring_meta fa fb then []
+  else if
+    match (operation_mode fa, operation_mode fb) with
+    | Some (a_name, Kernel.Multi), Some (b_name, Kernel.Once) when a_name = b_name -> true
+    | Some (a_name, Kernel.Once), Some (b_name, Kernel.Multi) when a_name = b_name -> true
+    | _ -> false
+  then
+    let name, a_mode, b_mode =
+      match (operation_mode fa, operation_mode fb) with
+      | Some (name, a_mode), Some (_, b_mode) -> (name, a_mode, b_mode)
+      | _ -> assert false
+    in
+    let show = function Kernel.Multi -> "multi" | Kernel.Once -> "once" in
+    [
+      {
+        path;
+        a = Printf.sprintf "op `%s`: %s" name (show a_mode);
+        b =
+          Printf.sprintf "op `%s`: %s%s" name (show b_mode)
+            (match (a_mode, b_mode) with
+            | Kernel.Multi, Kernel.Once -> " (handlers may no longer resume repeatedly)"
+            | _ -> "");
+      };
+    ]
   else if fa.Form.head <> fb.Form.head || List.length fa.Form.args <> List.length fb.Form.args then
     [ { path; a = render_form syntax fa; b = render_form syntax fb } ]
   else

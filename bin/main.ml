@@ -1631,25 +1631,61 @@ let tiers_cmd files prelude =
                   Hashtbl.fold (fun h n acc -> (Check.name_of cctx h, n) :: acc) by_effect []
                   |> List.sort compare
                   |> List.iter (fun (name, n) -> Printf.printf "  %-16s %5d\n" name n);
-                  (* handler op clauses by resume discipline *)
+                  (* Handler clauses have two related classifications: [discipline] is syntax,
+                     while native lowering also depends on the declared operation mode. *)
                   let ops = Check.tier_operations cctx in
+                  let operation_mode h =
+                    match Store.locate store h with
+                    | Ok
+                        {
+                          Store.decl = { Kernel.it = Kernel.DefEffect { ops; _ }; _ };
+                          role = Store.Operation i;
+                          _;
+                        } -> (
+                        match List.nth_opt ops i with
+                        | Some { Kernel.op_mode; _ } -> op_mode
+                        | None -> failwith "Bug_tiers: operation ordinal is out of range")
+                    | _ -> failwith "Bug_tiers: checked operation does not resolve"
+                  in
+                  let op_rows =
+                    List.map
+                      (fun (h, discipline) ->
+                        let mode = operation_mode h in
+                        (h, mode, discipline, Tier.native_lowering ~mode discipline))
+                      ops
+                  in
                   let ot = List.length ops in
-                  Printf.printf "\n== handler op clauses: %d ==\n" ot;
+                  Printf.printf "\n== handler op clauses: %d (syntactic resumption shape) ==\n" ot;
                   List.iter
                     (fun d ->
                       line (Tier.discipline_to_string d) (count (fun (_, d') -> d' = d) ops) ot)
                     [ Tier.TailResumptive; Tier.Aborting; Tier.OneShot; Tier.MultiShot ];
+                  Printf.printf "== native handler lowering: %d (shape + operation mode) ==\n" ot;
+                  let native_line label n = Printf.printf "%-24s %5d %3d%%\n" label n (pct n ot) in
+                  List.iter
+                    (fun lowering ->
+                      native_line
+                        (Tier.native_lowering_to_string lowering)
+                        (count (fun (_, _, _, l) -> l = lowering) op_rows))
+                    [ Tier.TokenlessTailMulti; Tier.MaterializedResume ];
                   let by_op = Hashtbl.create 16 in
                   List.iter
-                    (fun (h, d) ->
-                      let key = (Check.name_of cctx h, d) in
+                    (fun (h, mode, discipline, lowering) ->
+                      let key = (Check.name_of cctx h, mode, discipline, lowering) in
                       Hashtbl.replace by_op key
                         (1 + Option.value ~default:0 (Hashtbl.find_opt by_op key)))
-                    ops;
-                  Hashtbl.fold (fun (name, d) n acc -> (name, d, n) :: acc) by_op []
+                    op_rows;
+                  Hashtbl.fold
+                    (fun (name, mode, discipline, lowering) n acc ->
+                      (name, mode, discipline, lowering, n) :: acc)
+                    by_op []
                   |> List.sort compare
-                  |> List.iter (fun (name, d, n) ->
-                      Printf.printf "  %-16s %-16s %3d\n" name (Tier.discipline_to_string d) n);
+                  |> List.iter (fun (name, mode, discipline, lowering, n) ->
+                      Printf.printf "  %-16s %-6s %-16s %-24s %3d\n" name
+                        (match mode with Kernel.Multi -> "multi" | Kernel.Once -> "once")
+                        (Tier.discipline_to_string discipline)
+                        (Tier.native_lowering_to_string lowering)
+                        n);
                   Printf.printf "\nstamped %d tier sidecars\n" (List.length schemes);
                   0)))
 

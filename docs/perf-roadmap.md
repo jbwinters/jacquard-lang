@@ -20,9 +20,10 @@ From the benchmark report (docs/benchmarks.md, same session):
   traffic on field reads: every `jq_con_fields` access in the merge
   dups a value the callee immediately consumes.
 - **state-loop, 159 ms vs 76 ms of Python method calls (2x)** — the
-  suite's only row where Python wins. The cost is handler dispatch: a
-  tail-resumptive perform walks the handler stack and calls the clause
-  closure through the uniform ABI on every operation.
+  suite's only row where Python wins. The cost is handler dispatch: each
+  perform walks the handler stack and calls state.run's materialized clause
+  through the uniform ABI. Its function-of-state encoding is semantically
+  single-resume but syntactically capturing, not the tokenless tail path.
 - **fib, 4-5 ms vs 3 ms hand C** — the residue (per the task-79
   decline's disassembly) is the boolean living as a static CON matched
   through pointer, tag, and con-info compares where C uses a CPU flag,
@@ -65,15 +66,17 @@ asymmetry note (SL.8) is the precedent for how to reason about it.
 
 ### 3. Evidence-passing handlers (state-loop's residue)
 
-The design doc's pillar 1 already names the destination: compile
-tail-resumptive handlers to an indirect call through an evidence vector
+The design doc's pillar 1 already names the destination: compile eligible
+tail-resumptive `Multi` handlers to an indirect call through an evidence vector
 (Xie & Leijen, ICFP 2020/2021, as shipped in Koka), so a perform in the
 common case is one load and one call instead of a handler-stack search.
 The measured gap this attacks is the 2x against Python method calls —
 the one headline currently pointing the wrong way. This is the deepest
 compiler change on the list (it touches the perform protocol, the frame
 machinery, and the LW driver's root hooks), so it wants its own design
-round before code.
+round before code. Extending that optimization to `Once` handlers must
+preserve the shared affine token; treating source shape alone as tokenless
+would reintroduce the clone bug pinned by EL.3.
 
 ### 4. Reuse tokens inside framed bodies (avl's traded discipline)
 

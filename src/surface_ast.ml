@@ -74,7 +74,16 @@ and row = { effects : gref list; tail : name option; row_hole : int option; row_
 
 type field = { label : name option; ty : ty; meta : Meta.t }
 type constructor = { name : name; fields : field list; meta : Meta.t }
-type operation = { name : name; params : ty list; result : ty; meta : Meta.t }
+
+type operation = {
+  name : name;
+  mode : Kernel.op_mode option;
+  params : ty list;
+  result : ty;
+  meta : Meta.t;
+}
+(** [mode = None] is a recovery hole for an omitted surface mode. Strict surface parsing diagnoses
+    and rejects it; lowering never supplies the kernel's compatibility default silently. *)
 
 type top = top_node node
 
@@ -110,7 +119,9 @@ let rec has_holes_top top =
   | EffectDecl { operations; _ } ->
       List.exists
         (fun operation ->
-          List.exists has_holes_ty operation.params || has_holes_ty operation.result)
+          Option.is_none operation.mode
+          || List.exists has_holes_ty operation.params
+          || has_holes_ty operation.result)
         operations
   | TopExpr expr -> has_holes_expr expr
   | RawTop _ -> false

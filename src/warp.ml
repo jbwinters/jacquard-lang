@@ -205,19 +205,25 @@ let drive_prop ctx ~rng ~(forced : int list) (thunk : Value.t) :
             | Some i -> (
                 match choice_value ctx d i with
                 | Error e -> Error (`Runtime (Runtime_err.to_string e))
-                | Ok v ->
+                | Ok v -> (
                     log := { c_dist = d; c_index = i } :: !log;
-                    go (Eval.resume_state kont v) rest)))
-    | Ok (Eval.COp { name = "observe"; args = [ _; _ ]; kont; _ }) ->
+                    match Eval.resume_captured_state ctx kont v with
+                    | Error e -> Error (`Runtime (Runtime_err.to_string e))
+                    | Ok state -> go state rest))))
+    | Ok (Eval.COp { name = "observe"; args = [ _; _ ]; kont; _ }) -> (
         (* sampling lane: conditioning is ignored (weights are an enumeration
                concept); the exhaustive lane scales branches properly *)
-        go (Eval.resume_state kont Value.unit_v) forced
+        match Eval.resume_captured_state ctx kont Value.unit_v with
+        | Error e -> Error (`Runtime (Runtime_err.to_string e))
+        | Ok state -> go state forced)
     | Ok
         (Eval.COp
            { name = "check"; args = [ Value.VCon { name = ok; _ }; Value.VText label ]; kont; _ })
-      ->
+      -> (
         entries := (label, ok = "true") :: !entries;
-        go (Eval.resume_state kont Value.unit_v) forced
+        match Eval.resume_captured_state ctx kont Value.unit_v with
+        | Error e -> Error (`Runtime (Runtime_err.to_string e))
+        | Ok state -> go state forced)
     | Ok (Eval.COp { name = "fail"; args = [ Value.VText msg ]; _ }) ->
         let es = List.rev !entries in
         let soft = List.filter_map (fun (l, ok) -> if ok then None else Some l) es in
@@ -356,20 +362,28 @@ let run_prop_exhaustive ctx ~budget (thunk : Value.t) : (verdict * string, Diag.
               let rec go = function
                 | [] -> Ok ()
                 | (v, p) :: rest -> (
-                    match explore (Eval.resume_state kont v) (weight *. p) entries with
-                    | Error e -> Error e
-                    | Ok () -> go rest)
+                    match Eval.resume_captured_state ctx kont v with
+                    | Error e -> Error (Runtime_err.to_string e)
+                    | Ok state -> (
+                        match explore state (weight *. p) entries with
+                        | Error e -> Error e
+                        | Ok () -> go rest))
               in
               go support)
       | Ok (Eval.COp { name = "observe"; args = [ dv; v ]; kont; _ }) -> (
           match Result.bind (Infer_dist.dist_of_value ctx dv) (fun d -> Infer_dist.pmf ctx d v) with
           | Error e -> Error (Runtime_err.to_string e)
-          | Ok p -> explore (Eval.resume_state kont Value.unit_v) (weight *. p) entries)
+          | Ok p -> (
+              match Eval.resume_captured_state ctx kont Value.unit_v with
+              | Error e -> Error (Runtime_err.to_string e)
+              | Ok state -> explore state (weight *. p) entries))
       | Ok
           (Eval.COp
              { name = "check"; args = [ Value.VCon { name = ok; _ }; Value.VText label ]; kont; _ })
-        ->
-          explore (Eval.resume_state kont Value.unit_v) weight ((label, ok = "true") :: entries)
+        -> (
+          match Eval.resume_captured_state ctx kont Value.unit_v with
+          | Error e -> Error (Runtime_err.to_string e)
+          | Ok state -> explore state weight ((label, ok = "true") :: entries))
       | Ok (Eval.COp { name = "fail"; args = [ Value.VText msg ]; _ }) ->
           let es = List.rev entries in
           let soft = List.filter_map (fun (l, ok) -> if ok then None else Some l) es in

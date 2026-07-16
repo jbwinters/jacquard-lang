@@ -25,6 +25,7 @@ project shape from file names alone.
 - `../spec/jacquard-kernel-ast-m0.md`: kernel AST source-of-truth spec.
 - `../spec/serialization.md`: canonical byte serialization and hashing.
 - `development-plan.md`: original task plan and milestone discipline.
+- `concurrency.md`: phase-zero pure parallel hints and the staged structured-concurrency design.
 
 ## User-Facing Runtime
 
@@ -53,16 +54,26 @@ Read these together when judging whether the release candidate is credible:
   L1-L7 status, D34-D40 conformance, caveats, and reproduction commands.
 - `release/surface-syntax/FOLLOWUPS.md`: durable D36/D38/D39 and Tier-F
   follow-up scope outside the surface release gate.
-- `release/surface-syntax/MANIFEST.sha256`: reconstructible base-plus-overlay
-  evidence context, validated by the release manifest checker.
+- `release/surface-syntax/MANIFEST.sha256`: historical surface-syntax evidence
+  integrity set, validated by the surface manifest checker. Successor milestones
+  publish separate reconstructible overlays rather than extending this set.
 - `release/dx-jac-export/DECISION.md`: DX.2 direct `.jac` native build and
   explicit deterministic bootstrap-export decision, guarantees, and non-goals.
 - `release/dx-jac-export/EVIDENCE.md`: successor-only inventory, filesystem
   adversarial coverage, native carrier parity, and reproduction commands.
 
+## Effect Linearity Evidence
+
+- `release/effect-linearity/EVIDENCE.md`: EL.2-EL.4 scope, bounded affine-analysis
+  design, frozen stdlib modes, diagnostic provenance, and verification.
+- `release/effect-linearity/MANIFEST.sha256`: reconstructible EL.2-EL.4 overlay
+  on the completed EL.1 base.
+
 ## Maintenance Notes
 
 - `native-compilation.md`: native compilation notes and boundaries.
+- `native-parallel-decision.md`: SC.2 proof/runtime audit, fallback evidence,
+  and the decision not to emit native workers yet.
 - `perf-vm-decision.md`: why VM/performance work is not in 0.1.
 - `example-code.md`: early target examples retained as design context.
 - `../test/docs-doctest/README.md`: how executable documentation fences map

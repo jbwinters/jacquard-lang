@@ -1,4 +1,4 @@
-effect Choice where {
+multi effect Choice where {
   choose : () -> Bool
 }
 

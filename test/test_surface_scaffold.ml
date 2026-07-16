@@ -32,13 +32,63 @@ let pp_kind fmt kind =
 
 let test_name_fallbacks () =
   Alcotest.(check string) "keyword" "`term:match`" (Surface_name.render Surface_name.Term "match");
+  List.iter
+    (fun keyword ->
+      if String.equal keyword (String.lowercase_ascii keyword) then
+        List.iter
+          (fun (kind, tag) ->
+            Alcotest.(check string)
+              (Printf.sprintf "%s keyword %s" tag keyword)
+              (Printf.sprintf "`%s:%s`" tag keyword)
+              (Surface_name.render kind keyword))
+          [
+            (Surface_name.Term, "term");
+            (Surface_name.Op, "op");
+            (Surface_name.Tvar, "tvar");
+            (Surface_name.Rvar, "rvar");
+          ])
+    Surface_lex.keywords;
   Alcotest.(check string)
     "non-invertible constructor" "`con:a--b`"
     (Surface_name.render Surface_name.Con "a--b");
   Alcotest.(check (option (pair (testable pp_kind ( = )) string)))
     "decode"
     (Some (Surface_name.Con, "a--b"))
-    (Surface_name.decode_escaped "`con:a--b`")
+    (Surface_name.decode_escaped "`con:a--b`");
+  let invert source =
+    let original =
+      match Reader.parse_one ~file:"reserved-name.jqd" source with
+      | Ok form -> (
+          match Kernel.of_form form with
+          | Ok top -> top
+          | Error diagnostics -> Eval_support.fail_diags "reserved-name kernel" diagnostics)
+      | Error diagnostics -> Eval_support.fail_diags "reserved-name bootstrap" diagnostics
+    in
+    let rendered =
+      match Surface_print.print_top original with
+      | Ok text -> text ^ "\n"
+      | Error diagnostics -> Eval_support.fail_diags "reserved-name print" diagnostics
+    in
+    match Surface_parse.parse_string ~file:"reserved-name.jac" rendered with
+    | Error diagnostics -> Eval_support.fail_diags "reserved-name parse" diagnostics
+    | Ok tops -> (
+        match Surface_lower.lower_tops tops with
+        | Error diagnostics -> Eval_support.fail_diags "reserved-name lower" diagnostics
+        | Ok [ reparsed ] ->
+            Alcotest.(check bool)
+              (source ^ " print/parse inversion")
+              true
+              (Form.equal_ignoring_meta (Kernel.to_form original) (Kernel.to_form reparsed))
+        | Ok _ -> Alcotest.fail "reserved-name inversion changed the top count")
+  in
+  List.iter invert
+    [
+      "(defterm ((binding once () (lit 1)) (binding multi () (lit 2))))";
+      "(defeffect modes ((tvar once) (tvar multi)) (op once once ((tvar multi)) (tvar once)) (op \
+       multi ((tvar once)) (tvar multi)))";
+      "(defterm ((binding once ((tarrow () (row once) (ttuple))) (lit 1))))";
+      "(defterm ((binding multi ((tarrow () (row multi) (ttuple))) (lit 2))))";
+    ]
 
 let test_surface_metadata () =
   let meta =

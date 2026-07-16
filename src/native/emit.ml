@@ -65,6 +65,7 @@ type opref = {
   ohash : Hash.t;
   oeffect : string;
   oname : string;
+  omode : Kernel.op_mode;
   oord : int;  (** dense link-time ordinal: the perform/grant index *)
 }
 
@@ -727,8 +728,10 @@ and emit_bound st buf lives (x : string) (b : bound) : unit =
             List.map
               (fun (oh, capturing, a) ->
                 let oref = Hashtbl.find st.prog.ops oh in
-                Printf.sprintf "{ .op_ord = %d, .clause = %s, .kind = %s }" oref.oord (use st buf a)
-                  (if capturing then "JQ_CLAUSE_CAPTURING" else "JQ_CLAUSE_TAIL"))
+                Printf.sprintf "{ .op_ord = %d, .clause = %s, .kind = %s, .once = %s }" oref.oord
+                  (use st buf a)
+                  (if capturing then "JQ_CLAUSE_CAPTURING" else "JQ_CLAUSE_TAIL")
+                  (match oref.omode with Kernel.Multi -> "false" | Kernel.Once -> "true"))
               entries
           in
           line buf "jq_handler_entry _he_%s[] = { %s };" x (String.concat ", " evs);

@@ -32,7 +32,7 @@
 25-warp.jqd:fails-on-empty : forall a. (List a) ->{Check} ()
 25-warp.jqd:helper-with-open-row : () ->{Check} ()
 25-warp.jqd:sealed-case : Test
-25-warp.jqd:fails-alias : forall a | e. (() ->{Abort, Check | e} a, Text) ->{Check | e} ()
+25-warp.jqd:fails-alias : forall a | e. (() ->{Abort | e} a, Text) ->{Check | e} ()
 26-replay.jqd:hermetified : (Code) ->{Throw} Text
-26-replay.jqd:chaos-explored : (Int) ->{Throw, Check} List ()
+26-replay.jqd:chaos-explored : (Int) ->{Check, Throw} List ()
 26-replay.jqd:hermetified-multi : (Code) ->{Throw} Text

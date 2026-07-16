@@ -1,4 +1,4 @@
-effect Approval where {
+once effect Approval where {
   ask : (Text) -> Bool
 }
 

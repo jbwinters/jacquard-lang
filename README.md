@@ -92,9 +92,12 @@ For readers who speak programming languages:
 
 - One uniform representation: every form is a `(head, meta, args)` triple, and
   the kernel grammar has 27 forms. Quoted code is ordinary data.
-- Algebraic effects with deep, multi-shot handlers. A handler can resume a
-  computation zero, one, or many times, which is what makes exhaustive search
-  and exact inference ordinary library code.
+- Algebraic effects with deep, mode-aware handlers. A `multi` operation has a
+  reusable continuation and can resume zero, one, or many times, which makes
+  exhaustive search and exact inference ordinary library code. A `once`
+  operation instead binds an affine `Resume`: the checker reports E0816 when
+  one possible path consumes it twice, and the runtime retains E0906 as a
+  repeated-resume backstop for each captured instance.
 - Explicit capability grants. The runtime installs handlers for the outside
   world only for effects you pass with `--allow`; there is no ambient
   authority.
@@ -129,7 +132,7 @@ byte-for-byte to `test/docs-doctest/fixtures/readme-multishot.jac` and run by
 the documentation test lane:
 
 ```jacquard doctest=readme-multishot mode=run fixture=readme-multishot.jac stdout=readme-multishot.stdout stderr=empty exit=0
-effect Choice where {
+multi effect Choice where {
   choose : () -> Bool
 }
 
@@ -149,11 +152,12 @@ $ jac run test/docs-doctest/fixtures/readme-multishot.jac
 3
 ```
 
-The handler ran the rest of the program once with `true` and once with
-`false`, then collected both results. That ability to resume more than once is
-why exact Bayesian inference is a library handler here rather than a runtime
-feature. The repair demo builds on it: mutate a buggy program's quoted AST
-into candidate patches, treat a failing test as an observation, and read off
+The `Choice` operation is `multi`, so its handler ran the rest of the program
+once with `true` and once with `false`, then collected both results. That
+ability to resume more than once is why exact Bayesian inference is a library
+handler here rather than a runtime feature. The repair demo builds on it: mutate
+a buggy program's quoted AST into candidate patches, treat a failing test as an
+observation, and read off
 the updated probabilities. Running candidate code is an authority, so the pure
 step still runs (it counts eight candidate patches) and then the demo refuses
 until you grant the rest:
@@ -463,7 +467,7 @@ Key release docs:
 - `src/resolve.ml`: names to content-addressed references.
 - `src/canon.ml`, `src/hash.ml`: HASH_V0 canonical serialization and hashing.
 - `src/store.ml`: object store and mutable name index.
-- `src/value.ml`, `src/eval.ml`: CPS evaluator and multi-shot handlers.
+- `src/value.ml`, `src/eval.ml`: CPS evaluator and mode-aware deep handlers.
 - `src/types.ml`, `src/check.ml`: type/effect inference, rows, manifests,
   exhaustiveness.
 - `src/prelude.ml`: prelude loader, builtin wiring, and root grants.
@@ -557,9 +561,11 @@ rights.
 Jacquard core is a research prototype, not a production platform. The `.jac`
 surface is implemented and supported but remains an evolving v0 projection
 onto the permanent 27-form kernel. Native AOT compilation and C-toolchain
-optimization ship; a VM/JIT, concurrency, membrane enforcement, continuous
-distributions, gradients, typed staging, language package management,
-self-hosting, and formal soundness proofs do not. World grants remain coarse.
+optimization ship; `parallel.map` and `parallel.both` are pure, sequential
+optimization hints, while structured concurrency and its runtime remain
+unimplemented. A VM/JIT, membrane enforcement, continuous distributions,
+gradients, typed staging, language package management, self-hosting, and formal
+soundness proofs also do not ship. World grants remain coarse.
 See `docs/release/0.1/LIMITS.md` for the exact Core 0.1 semantic boundary.
 
 ## Troubleshooting

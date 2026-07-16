@@ -39,6 +39,7 @@ in `src/` and `bin/` appears in this catalog.
 | E0210 | invalid ref kind | `(ref #... banana)` |
 | E0211 | invalid rec flag | `(let sometimes ...)` |
 | E0212 | `handle` without exactly one `ret` clause | two `ret` clauses |
+| E0213 | invalid explicit operation mode | `(op fetch multi () (tref text))` (legacy `multi` is encoded by absence) |
 
 ## Name resolution (E03xx)
 
@@ -106,7 +107,18 @@ in `src/` and `bin/` appears in this catalog.
 | E0813 | non-exhaustive match (with witness) | bool match missing `false` |
 | E0814 | ungranted effect in the program manifest | running a printing program without `--allow console` |
 | E0815 | effectful top-level definition body | `(defterm ((binding x () (app (var print) ...))))` |
+| E0816 | a once resumption may be consumed twice on one possible path | two sequential calls to the same once-clause `resume` binder |
+| E0817 | a once resumption escapes its handler clause | returning, storing, capturing, or passing `resume` to a non-`Resume` parameter |
+| E0818 | polymorphic reuse of a non-value local binding (value restriction) | bind an application result, then call it at two unrelated types |
 | W0801 | redundant match clause | a clause after `(pwild)` |
+
+E0817 has one bounded transformer exception: a direct clause lambda may capture
+`resume` when its `handle` expression is immediately applied once to syntactic
+value arguments. Inside that lambda, a call of `resume` must be the direct
+function child of one nested application with syntactic-value arguments so its
+answer is immediately eliminated; binding or duplicating an answer that could carry a later Once token
+emits E0817. Binding, returning, storing, passing, or aliasing the handler result
+also emits E0817; consuming the captured resumption twice emits E0816.
 
 ## Probabilistic inference (E09xx)
 
@@ -117,6 +129,7 @@ in `src/` and `bin/` appears in this catalog.
 | E0903 | model file has no expression | a decls-only file passed to `jacquard infer` |
 | E0904 | observe at the sampling root | `observe` under `jacquard run --allow dist` (D7 default: defect) |
 | E0905 | exhaustive verification budget exceeded | a property over `uniform-int(1, 1000000)` under `jacquard test --exhaustive` |
+| E0906 | a once continuation was resumed more than once | applying the same once resumption twice |
 
 ## Warp (E10xx)
 
@@ -155,6 +168,7 @@ in `src/` and `bin/` appears in this catalog.
 | E1233 | malformed local recursive/function binding | `let rec (f, g)(x) = x` |
 | E1234 | generated lowering node lacks a real source span | lowering a hand-built spanless block AST |
 | E1235 | a signature or definition was lowered without its required file context | calling `lower_top` on a signature |
+| E1236 | missing, duplicated, or conflicting surface operation mode; an omitted mode includes migration guidance | `effect E where { op : () -> T }` |
 
 ### Surface warnings (W12xx)
 

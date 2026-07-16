@@ -292,9 +292,11 @@ Semantics to implement (deep handlers, spec §5.1 and §7):
 3. Performing an op = `App` of an `Op`-kind `Ref`: walk the kont outward for the
    nearest `FHandle` handling that op's hash. Split the kont: `inner` (frames up to
    and excluding that `FHandle`) and `outer` (the rest).
-4. The resumption value captures `inner ++ [FHandle h]` (deep: the handler re-wraps).
-   Resumptions are immutable data, so invoking one twice is just reusing the list:
-   multi-shot for free.
+4. For a `Multi` operation, the resumption value captures `inner ++ [FHandle h]`
+   (deep: the handler re-wraps). Those resumptions are immutable data, so invoking
+   one twice is just reusing the list: multi-shot for free. Successor work added
+   guarded affine tokens for `Once`; this paragraph describes the historical
+   `Multi` path only.
 5. Evaluate the matching op clause in `outer` with op args bound and `resume` bound
    to the resumption.
 6. Invoking a resumption with v: prepend its captured frames onto the current kont

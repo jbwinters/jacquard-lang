@@ -1,0 +1,22 @@
+# D44 reviewed operation-mode inventory. This file is evidence, not an input to
+# mode inference: executable modes come only from each DefEffect declaration.
+eval.eval-code once
+abort.abort once
+throw.throw once
+state.get multi
+state.put multi
+emit.emit once
+console.print once
+console.read-line once
+clock.now once
+clock.sleep once
+net.fetch once
+fs.read once
+fs.write once
+fs.list-dir once
+infer.complete once
+dist.sample multi
+dist.observe multi
+check.check multi
+check.fail multi
+fault.flaky multi

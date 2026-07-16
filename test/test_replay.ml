@@ -140,7 +140,14 @@ let test_clock_fixed_and_console_scripted () =
     "fixed clock, scripted console" "(1234, \"hi\")"
     (show
        "(app (var clock.fixed) (lam () (app (var console.scripted) (lam () (tuple (app (var now)) \
-        (app (var read-line)))) (app (var cons) (lit \"hi\") (var nil)))) (lit 1234))")
+        (app (var read-line)))) (app (var cons) (lit \"hi\") (var nil)))) (lit 1234))");
+  Alcotest.(check string)
+    "scripted Net leaves caller State outward" "(9, 9)"
+    (show
+       "(app (var state.run) (lam () (app (var net.scripted) (lam () (let nonrec (pwild) (app (var \
+        put) (lit 9)) (let nonrec (pwild) (app (var fetch) (app (var mk-request) (lit \
+        \"http://state\") (lit \"\"))) (app (var get))))) (app (var cons) (app (var mk-response) \
+        (lit 200) (lit \"ok\")) (var nil)))) (lit 0))")
 
 (* --- W6.7 fault --- *)
 

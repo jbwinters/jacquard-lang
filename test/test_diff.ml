@@ -140,7 +140,7 @@ let test_surface_fragment_rendering () =
       ("(binding id () (lam ((pvar x)) (var x)))", "id(x) = x");
       ("(con some (field (tvar a)))", "Some a");
       ("(field value (tref int))", "value: Int");
-      ("(op choose () (tref bool))", "choose : () -> Bool");
+      ("(op choose () (tref bool))", "multi choose : () -> Bool");
       ("(eref net)", "Net");
       ("(rvar e)", "e");
     ]
@@ -177,7 +177,7 @@ let test_added_removed () =
 
 (* SL.1 regression: a name bound to two kinds (effect + op) in identical stores must not
    be misreported as changed — each binding compares against its own kind's hash. *)
-let test_multi_kind_name_identical () =
+let rec test_multi_kind_name_identical () =
   let srcs =
     [ "(deftype any-t () (con any-v))"; "(defeffect signal () (op signal () (tref any-t)))" ]
   in
@@ -189,7 +189,29 @@ let test_multi_kind_name_identical () =
       | Diff.Identical -> ()
       | _ -> Alcotest.failf "identical stores must diff clean, but %s was not Identical" n)
     report;
-  Alcotest.(check bool) "render is quiet" true (Diff.render report = None)
+  Alcotest.(check bool) "render is quiet" true (Diff.render report = None);
+  test_operation_mode_interface_diff ()
+
+and test_operation_mode_interface_diff () =
+  let a = mk_store [ "(defeffect signal ((tvar a)) (op fetch ((tvar a)) (tvar a)))" ] in
+  let b = mk_store [ "(defeffect signal ((tvar a)) (op fetch once ((tvar a)) (tvar a)))" ] in
+  let check syntax =
+    let report = Diff.diff_with_syntax ~syntax ~old_side:a ~new_side:b in
+    match List.assoc_opt "signal" report with
+    | Some (Diff.Changed { divergences = [ d ]; _ }) ->
+        Alcotest.(check string) "old authority" "op `fetch`: multi" d.Diff.a;
+        Alcotest.(check string)
+          "new authority" "op `fetch`: once (handlers may no longer resume repeatedly)" d.Diff.b
+    | _ -> Alcotest.fail "effect mode edit must be a localized interface change"
+  in
+  check Diff.Bootstrap;
+  check Diff.Surface;
+  Alcotest.(check string)
+    "Once fragments retain the mode in surface syntax" "once fetch : (Int) -> Int"
+    (Diff.render_form Diff.Surface
+       (match Reader.parse_one ~file:"once-op.jqd" "(op fetch once ((tref int)) (tref int))" with
+       | Ok form -> form
+       | Error ds -> Eval_support.fail_diags "once op" ds))
 
 let suite =
   [

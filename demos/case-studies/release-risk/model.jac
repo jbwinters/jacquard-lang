@@ -19,7 +19,7 @@ type Assessment =
       spike: Bool,
       decision: Decision)
 
-effect Telemetry where {
+multi effect Telemetry where {
   inventory-health : () -> Health
   payments-health : () -> Health
   error-spike? : () -> Bool
