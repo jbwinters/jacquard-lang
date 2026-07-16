@@ -34,6 +34,6 @@ authority or silently running a child.
   > (app (var async.yield))
   > EOF
   $ jacquard run yield.jqd 2>&1; echo "exit $?"
-  error[E0814]: this program requires the `async` effect, which is not granted (performed via `async.yield`)
-    hint: handle the effect in the program (this effect is pure and cannot be granted)
+  error[E0814]: this program requires unpackaged:4ff8ce05ab09/async [unrated user effect #4ff8ce05ab09968163492b3be40fc91381b47dee5fb4b2980f9416d50f38e66f], which is not granted (performed via `async.yield`)
+    hint: handle the effect in the program (unregistered user effects have no built-in --allow grant)
   exit 3
