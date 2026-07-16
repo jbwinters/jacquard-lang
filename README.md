@@ -546,9 +546,11 @@ rights.
 Jacquard core is a research prototype, not a production platform. The `.jac`
 surface is implemented and supported but remains an evolving v0 projection
 onto the permanent 27-form kernel. Native AOT compilation and C-toolchain
-optimization ship; a VM/JIT, concurrency, membrane enforcement, continuous
-distributions, gradients, typed staging, language package management,
-self-hosting, and formal soundness proofs do not. World grants remain coarse.
+optimization ship; `parallel.map` and `parallel.both` are pure, sequential
+optimization hints, while structured concurrency and its runtime remain
+unimplemented. A VM/JIT, membrane enforcement, continuous distributions,
+gradients, typed staging, language package management, self-hosting, and formal
+soundness proofs also do not ship. World grants remain coarse.
 See `docs/release/0.1/LIMITS.md` for the exact Core 0.1 semantic boundary.
 
 ## Troubleshooting

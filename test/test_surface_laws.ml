@@ -404,7 +404,9 @@ let manifest_errors () =
       "docs/README.md";
       "docs/SKILL.md";
       "docs/ci-cd.md";
+      "docs/concurrency.md";
       "docs/native-intrinsics.md";
+      "docs/native-parallel-decision.md";
       "docs/release/0.1/DECISION.md";
       "docs/release/0.1/EVIDENCE.md";
       "docs/release/0.1/REPRO.md";
@@ -422,6 +424,7 @@ let manifest_errors () =
       "runtime/jq_apply.c";
       "runtime/jq_intrinsics.c";
       "runtime/jq_value.h";
+      "scripts/native-parallel-evidence.sh";
       "scripts/release/check-surface-syntax-manifest.sh";
       "src/check.ml";
       "src/native/build.ml";
@@ -433,6 +436,7 @@ let manifest_errors () =
       "src/types.ml";
       "test/cli/native-effects.t";
       "test/cli/dune";
+      "test/cli/native.t";
       "test/cli/ss22.t";
       "test/cli/surface.t";
       "test/cli/tiers.t";
@@ -448,6 +452,11 @@ let manifest_errors () =
       "test/native-asan/join-bad-first-class.jqd";
       "test/native-asan/join-bad-last.jqd";
       "test/native-asan/join-bad-middle.jqd";
+      "test/native-parallel/bench-hint.jqd";
+      "test/native-parallel/bench-sequential.jqd";
+      "test/native-parallel/fail-both.jqd";
+      "test/native-parallel/fail-map.jqd";
+      "test/native-parallel/success.jqd";
       "test/test_prelude.ml";
       "test/test_surface_laws.ml";
       "test/test_text.ml";
@@ -817,7 +826,7 @@ let validate_release_docs ~decision ~followups ~index =
           [ "opam exec -- dune build @all"; "exit 0" ];
           [
             "opam exec -- dune runtest --force";
-            "exit 0; compiled Alcotest inventory is exactly 554 cases";
+            "exit 0; compiled Alcotest inventory is exactly 559 cases";
           ];
           [ "opam exec -- dune fmt"; "exit 0; no task-file byte changes" ];
           [
@@ -842,11 +851,11 @@ let validate_release_docs ~decision ~followups ~index =
           ];
           [
             "clean-copy scripts/release/check-surface-syntax-manifest.sh";
-            "exit 0; overlay hashes match and all seven protected drafts are absent";
+            "exit 0; overlay hashes match and all six protected drafts are absent";
           ];
           [
             "clean-copy opam exec -- dune runtest --force";
-            "exit 0; the isolated base-plus-overlay copy passes all 554 cases";
+            "exit 0; the isolated base-plus-overlay copy passes all 559 cases";
           ];
         ]
       in

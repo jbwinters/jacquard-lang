@@ -25,6 +25,7 @@ project shape from file names alone.
 - `../spec/jacquard-kernel-ast-m0.md`: kernel AST source-of-truth spec.
 - `../spec/serialization.md`: canonical byte serialization and hashing.
 - `development-plan.md`: original task plan and milestone discipline.
+- `concurrency.md`: phase-zero pure parallel hints and the staged structured-concurrency design.
 
 ## User-Facing Runtime
 
@@ -59,6 +60,8 @@ Read these together when judging whether the release candidate is credible:
 ## Maintenance Notes
 
 - `native-compilation.md`: native compilation notes and boundaries.
+- `native-parallel-decision.md`: SC.2 proof/runtime audit, fallback evidence,
+  and the decision not to emit native workers yet.
 - `perf-vm-decision.md`: why VM/performance work is not in 0.1.
 - `example-code.md`: early target examples retained as design context.
 - `../test/docs-doctest/README.md`: how executable documentation fences map

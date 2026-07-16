@@ -9,4 +9,5 @@
   (source_tree ../../bench)
   (source_tree ../native-asan)
   (source_tree ../native-gauntlet)
+  (source_tree ../native-parallel)
   (source_tree ../../scripts)))
