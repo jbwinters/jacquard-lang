@@ -146,6 +146,13 @@ explicitly as `(op name once (params...) result)` and appends the discriminator 
 the result type in that operation's canonical serialization. Explicit `multi` is rejected so the
 legacy value has exactly one carrier.
 
+SC.0 self-effect-row extension: within a `DefEffect` operation type only, an `eref` naming that
+same enclosing effect remains a positional self reference through resolution. It is required by
+`async.spawn : (() ->{Async | e} a) -> Task a`; a declaration cannot contain its own hash. The
+0x38 row encoding in `serialization.md` gives this previously invalid case canonical bytes without
+changing any existing 0x36 row bytes. Self names are not accepted in ordinary annotations or in a
+`DefType` row.
+
 **Count: 12 expr + 6 pat + 6 type + 3 decl = 27 forms.** The stated target was roughly 25.
 Section 10 names the two cheapest cuts if we want the number exactly.
 

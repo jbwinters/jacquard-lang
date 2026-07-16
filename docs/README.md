@@ -37,6 +37,10 @@ project shape from file names alone.
   decision artifacts, live/dry boundaries, and monotonic composition.
 - `effect-review.md`: identity-first manifest and authority-diff review,
   uncertainty wording, canonical boundaries, and explicit non-goals.
+- `effect-membranes.md`: GM.0 charter for typed governed facades, versioned
+  decision artifacts, live/dry boundaries, and monotonic composition.
+- `concurrency.md`: SC.0 Task/Async/scope contracts, row charging, deterministic
+  scheduling, cancellation, exclusions, and D46-D50.
 - `warp-testing.md`: Warp test model, rows, handlers, cache, properties, and
   world lanes.
 - `errors.md`: diagnostic code catalog.
@@ -126,6 +130,13 @@ Read these together when judging whether the release candidate is credible:
   handler/boundary inventory, review wording, and exact tooling evidence.
 - `release/effect-taxonomy/ET8-MANIFEST.sha256`: reconstructible ET.8 overlay on
   the integrated Secret/Approval base; predecessor manifests remain historical.
+
+## Structured Concurrency Evidence
+
+- `release/structured-concurrency/EVIDENCE.md`: SC.0 interface, identity,
+  row-charging, pure invariant, mutation, and compatibility evidence.
+- `release/structured-concurrency/MANIFEST.sha256`: reconstructible SC.0 overlay
+  on the completed release-hardening base.
 
 ## Maintenance Notes
 
