@@ -308,3 +308,29 @@
     (lam ((pvar a) (pvar b)) (app (var lt) (var a) (var b))))
    (binding int.lte? ()
     (lam ((pvar a) (pvar b)) (app (var bool.not) (app (var lt) (var b) (var a)))))))
+
+; Pure parallelism is a semantic hint: the closed callback row is the license.
+; This phase-zero implementation delegates to list.map, which evaluates each
+; callback in input order. No Async effect or task exists.
+(defterm ((binding parallel.map
+  ((tforall ((tvar a) (tvar b)) ()
+    (tarrow
+      ((tapp (tref list) (tvar a))
+       (tarrow ((tvar a)) (row) (tvar b)))
+      (row)
+      (tapp (tref list) (tvar b)))))
+  (lam ((pvar xs) (pvar f)) (app (var list.map) (var xs) (var f))))))
+
+; Explicit lets pin the sequential interpreter contract: force the left thunk,
+; then the right thunk, then construct the pair.
+(defterm ((binding parallel.both
+  ((tforall ((tvar a) (tvar b)) ()
+    (tarrow
+      ((tarrow () (row) (tvar a))
+       (tarrow () (row) (tvar b)))
+      (row)
+      (ttuple (tvar a) (tvar b)))))
+  (lam ((pvar left) (pvar right))
+    (let nonrec (pvar a) (app (var left))
+      (let nonrec (pvar b) (app (var right))
+        (tuple (var a) (var b))))))))
