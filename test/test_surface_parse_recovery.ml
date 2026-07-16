@@ -223,7 +223,7 @@ let test_nested_unmatched_braces () =
        TopExpr
          {
            it =
-             Block [ Expr { it = Block [ Expr { it = Hole 0; _ } ]; _ }; Expr { it = Hole 1; _ } ];
+             Block [ Expr { it = Block [ Expr { it = Hole 0; _ } ]; _ }; Expr { it = Hole 2; _ } ];
            _;
          };
      _;
