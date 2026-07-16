@@ -49,6 +49,17 @@ Five principles generate the whole design:
    same `for-each` with `println` carries `Console`. The library never hides an
    effect and never adds one.
 
+Fixed helper effects and callback effects compose without contaminating each other.
+For example, Preflight's reusable gate has signature
+`forall | e. ((Code) ->{| e} Bool) ->{Dist | e} Code`: `Dist` belongs to the gate,
+while a pure predicate keeps `e` empty and a scripted predicate closes `e` to
+`Eval`. Top-level callers remain closed (`{Dist}` or `{Dist, Eval}`), so this
+precision does not add implicit authority. Handler subtraction is unchanged: a
+handler requires only its declared handled labels on flexible computations invoked
+inside the handled body, including callbacks reached through typed wrappers. It
+then removes those labels; helper-owned and before/after effects remain on the
+outer row instead of leaking into the callback contract.
+
 Everything else is elaboration.
 
 ## 2. The shape of the library: rings
@@ -77,6 +88,13 @@ interfaces, risk defaults, user-effect coloring rules, and exact hash policy—i
 ratified in [`effect-taxonomy.md`](effect-taxonomy.md). This document describes
 the shipped prelude; the taxonomy is the compatibility contract consumed by
 future registry and manifest tooling.
+
+Phase-zero parallelism also lives in ring 0. `parallel.map` and `parallel.both`
+accept only closed-empty-row callbacks, remain pure themselves, and are
+observably sequential in the interpreter. They introduce neither an `Async`
+effect nor a task runtime; a future native implementation may use threads only
+when it preserves the same values, failures, ordering contract, and output
+identity. See `concurrency.md` §3.
 
 ## 3. Ring 0: the axioms
 
@@ -161,6 +179,20 @@ list.each   : (List a, (a) ->{| e} ()) ->{| e} ()
 
 Note every one of these accepts an effectful function and threads its row through
 untouched, per principle 5. There is no separate `mapM`; the map is the map.
+
+### Pure parallel hints
+
+```text
+parallel.map  : (List a, (a) ->{} b) ->{} List b
+parallel.both : (() ->{} a, () ->{} b) ->{} (a, b)
+```
+
+The empty callback rows are closed contracts, not inferred open rows. Passing a
+callback or thunk with any effect is a type error. The interpreter maps in input
+order and forces `parallel.both`'s left thunk before its right thunk; ordinary
+failure and control behavior is therefore exactly the behavior of `list.map`
+and explicit left-then-right tuple evaluation. These APIs are optimization hints,
+not observable concurrency.
 
 ### List, the rest of it
 

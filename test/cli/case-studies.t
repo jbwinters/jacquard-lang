@@ -13,7 +13,7 @@ probabilistic handler, then proves the safety property over all 18 worlds.
   == inferred authority ==
   release-assessment : () ->{Telemetry} Assessment
   with-snapshot : forall a | e. (Health, Health, Bool, () ->{Telemetry | e} a) ->{| e} a
-  with-risk-model : forall a | e. (() ->{Dist, Telemetry | e} a) ->{Dist | e} a
+  with-risk-model : forall a | e. (() ->{Telemetry | e} a) ->{Dist | e} a
   conditioned-release-risk : () ->{Dist} Decision
   == the same policy under a concrete snapshot handler ==
   assessment(healthy, degraded, false, canary(5))
