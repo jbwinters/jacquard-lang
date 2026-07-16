@@ -98,6 +98,7 @@
   (glob_files ../src/*.ml)
   (glob_files ../bin/*.ml)
   ../docs/errors.md
+  ../docs/effect-membranes.md
   ../docs/effect-taxonomy.md
   ../docs/concurrency.md
   ../docs/README.md
@@ -113,6 +114,8 @@
   ../docs/warp-testing.md
   ../spec/effect-taxonomy-v1.tsv
   docs-doctest/fixtures/effect-taxonomy-schemas.jac
+  docs-doctest/fixtures/governed-membrane-signatures.jac
+  docs-doctest/fixtures/governed-membrane-signatures.stdout
   docs-doctest/fixtures/concurrency-row-contract.jac
   docs-doctest/fixtures/concurrency-row-laundering.jac
   docs-doctest/fixtures/stdlib-handler-policy.jac
