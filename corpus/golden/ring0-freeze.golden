@@ -12,7 +12,9 @@ code.diff : (Code, Code) ->{} Text
 code.eq? : (Code, Code) ->{} Bool
 code.form : (Text, List Code) ->{} Code
 code.of-int : (Int) ->{} Code
+code.of-real : (Real) ->{} Code
 code.of-text : (Text) ->{} Code
+code.render : (Code) ->{} Text
 code.to-int : (Code) ->{} Option Int
 code.to-text : (Code) ->{} Option Text
 code.un-form : (Code) ->{} Option (Text, List Code)

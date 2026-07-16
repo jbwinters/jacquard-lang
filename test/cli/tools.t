@@ -176,3 +176,71 @@ TL.3: malformed --fork specs refuse instead of silently running the baseline.
   $ jacquard replay trace.jqd prog.jqd --fork 'garbage'
   error[E0104]: invalid --fork "garbage" (expected N=FORM with a parseable form)
   [1]
+
+ET.3: the writer verifies the currently published predecessor before appending,
+then prints the new head for independent publication. The offline review surface
+reconstructs that exact head from canonical AuditEntry bytes.
+
+  $ genesis=$(jacquard audit genesis | awk '{print $2}')
+  $ echo "$genesis"
+  5a8760f8a958799a0e38154fae7cc086d9a1ee0153ff62451ac1a07f7b0b50d7
+  $ jacquard audit append absent.audit missing-entry.jqd --previous "$genesis"
+  error[E1306]: cannot read Audit entry missing-entry.jqd: missing-entry.jqd: No such file or directory
+  [1]
+  $ test ! -e absent.audit && echo no-write
+  no-write
+  $ truncate -s 1048577 oversized-entry.jqd
+  $ jacquard audit append bounded.audit oversized-entry.jqd --previous "$genesis"
+  error[E1306]: cannot read Audit entry oversized-entry.jqd: exceeds the 1048576-byte limit
+  [1]
+  $ test ! -e bounded.audit && echo no-write
+  no-write
+  $ cat > evaluated.jqd <<'ENTRY'
+  > (audit-entry-v1 (evaluated-v1 (hash #aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa) (hash #bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb) (assessment-v1 (medium) (confidence-v1 (lit 0.75)) (text-list-v1 (lit "rule matched")) (evidence (lit "typed"))) (ask)))
+  > ENTRY
+  $ cat > consented.jqd <<'ENTRY'
+  > (audit-entry-v1 (consented-v1 (hash #aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa) (hash #cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc) (approved-v1 (hash #cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc) (lit "reviewer") (ticket (lit "T-7")))))
+  > ENTRY
+  $ cat > completed.jqd <<'ENTRY'
+  > (audit-entry-v1 (completed-v1 (hash #aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa) (lit "live") (outcome-summary-v1 (lit "succeeded") (hash #dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd) (lit "receipt-7"))))
+  > ENTRY
+  $ head1=$(jacquard audit append chain.audit evaluated.jqd --previous "$genesis" | awk '{print $2}')
+  $ head2=$(jacquard audit append chain.audit consented.jqd --previous "$head1" | awk '{print $2}')
+  $ head3=$(jacquard audit append chain.audit completed.jqd --previous "$head2" | awk '{print $2}')
+  $ printf '%s\n%s\n%s\n' "$head1" "$head2" "$head3"
+  8843ae62f23f139c39c15006ff49d07fb83ac6ceab2978e3d997d891d27b11ba
+  0c64fd14360aea8d03a0f0acc2ac785e215f560b8dcdd96d7d71e47f0f3033be
+  257b42d9957e846671b0a31fc9850e493657e0abc4ea37c26db4bd213152fbd1
+  $ jacquard governance verify-log chain.audit --head "$head3"
+  ok 257b42d9957e846671b0a31fc9850e493657e0abc4ea37c26db4bd213152fbd1
+  $ jacquard governance verify-log chain.audit --head beef
+  error[E1307]: --head must be exactly 64 lowercase hexadecimal HASH_V0 digits
+  [1]
+  $ jacquard governance verify-log missing.audit --head "$head3"
+  error[E1306]: cannot read Audit chain missing.audit: missing.audit: No such file or directory
+  [1]
+
+Removal, duplication, alteration, wrong versions, and malformed records all
+fail closed with diagnostics. Tail removal is detected only because the
+published head is supplied independently.
+
+  $ sed '$d' chain.audit > removed.audit
+  $ jacquard governance verify-log removed.audit --head "$head3"
+  error[E1305]: published Audit head mismatch: expected #257b42d9957e846671b0a31fc9850e493657e0abc4ea37c26db4bd213152fbd1, reconstructed #0c64fd14360aea8d03a0f0acc2ac785e215f560b8dcdd96d7d71e47f0f3033be
+  [1]
+  $ sed -n '1p;1p;2,3p' chain.audit > duplicated.audit
+  $ jacquard governance verify-log duplicated.audit --head "$head3"
+  error[E1303]: duplicated.audit:2: broken Audit predecessor: expected #8843ae62f23f139c39c15006ff49d07fb83ac6ceab2978e3d997d891d27b11ba, found #5a8760f8a958799a0e38154fae7cc086d9a1ee0153ff62451ac1a07f7b0b50d7
+  [1]
+  $ sed '1s/rule matched/rule patched/' chain.audit > altered.audit
+  $ jacquard governance verify-log altered.audit --head "$head3"
+  error[E1304]: altered.audit:1: Audit record digest mismatch: stored #8843ae62f23f139c39c15006ff49d07fb83ac6ceab2978e3d997d891d27b11ba, computed #4865130eeabd1c10017eab3ce81c19832ce0f632fe149b6d05bb63208d370982
+  [1]
+  $ sed '1s/audit-chain-v1/audit-chain-v2/' chain.audit > version.audit
+  $ jacquard governance verify-log version.audit --head "$head3"
+  error[E1302]: version.audit:1: unsupported Audit chain version `audit-chain-v2`
+  [1]
+  $ printf '@\n' > malformed.audit
+  $ jacquard governance verify-log malformed.audit --head "$head3"
+  error[E1301]: malformed.audit:1: malformed Audit chain record: expected a form at top level, found "@"
+  [1]

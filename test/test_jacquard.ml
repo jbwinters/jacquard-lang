@@ -27,6 +27,10 @@ let () =
       ("cancellation", Test_cancellation.suite);
       ("scope-policy", Test_scope_policy.suite);
       ("round-robin", Test_round_robin.suite);
+      ("audit", Test_audit.suite);
+      ("secret", Test_secret.suite);
+      ("audit-chain", Test_audit_chain.suite);
+      ("approval", Test_approval.suite);
       ("types", Test_types.suite);
       ("check", Test_check.suite);
       ("tier", Test_tier.suite);

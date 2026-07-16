@@ -41,6 +41,8 @@ expect_fatal() {
 expect_fatal div0 2 "arithmetic error: division by zero"
 expect_fatal mod0 2 "arithmetic error: modulo by zero"
 expect_fatal arity-overflow 2 "jacquard runtime: constructor arity exceeds the 65535 limit"
+expect_fatal secret-code-of-text 2 \
+  "type error: code.of-text got unexpected arguments <secret redacted>"
 expect_fatal unhandled-op 3 'unhandled effect console: operation `print` reached the root without a handler'
 expect_fatal match-fail 2 "no clause matched the value 5"
 expect_fatal once-resume-twice 2 \

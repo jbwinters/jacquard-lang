@@ -16,7 +16,7 @@ An unknown name is a diagnostic with a near-miss suggestion:
   > EOF
   $ jacquard check typo.jqd
   typo.jqd:1:6-14: error[E0301]: unknown name `ad`
-    hint: did you mean one of: add, eq, fs?
+    hint: did you mean one of: add, ask, eq?
   [1]
 
 Grammar violations are caught before resolution:

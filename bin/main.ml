@@ -1275,6 +1275,45 @@ let store_rename_cmd store_dir old_name new_name kind =
           | Ok () -> ok
           | Error ds -> print_diags ds))
 
+(* --- Audit chain subcommands (ET.3) --- *)
+
+let audit_head_arg label spelling =
+  match Hash.of_canonical_hex spelling with
+  | Some hash -> Ok hash
+  | None ->
+      Error
+        [
+          Diag.error ~code:"E1307"
+            (Printf.sprintf "%s must be exactly 64 lowercase hexadecimal HASH_V0 digits" label);
+        ]
+
+let audit_genesis_cmd () =
+  Printf.printf "head %s\n" (Hash.to_hex Audit_chain.genesis);
+  ok
+
+let audit_append_cmd log_file entry_file previous_spelling =
+  match audit_head_arg "--previous" previous_spelling with
+  | Error diagnostics -> print_diags diagnostics
+  | Ok previous -> (
+      match Audit_chain.read_entry_file ~file:entry_file with
+      | Error diagnostics -> print_diags diagnostics
+      | Ok entry -> (
+          match Audit_chain.append_file ~file:log_file ~previous entry with
+          | Error diagnostics -> print_diags diagnostics
+          | Ok head ->
+              Printf.printf "head %s\n" (Hash.to_hex head);
+              ok))
+
+let audit_verify_cmd log_file head_spelling =
+  match audit_head_arg "--head" head_spelling with
+  | Error diagnostics -> print_diags diagnostics
+  | Ok expected_head -> (
+      match Audit_chain.verify_file ~file:log_file ~expected_head with
+      | Error diagnostics -> print_diags diagnostics
+      | Ok head ->
+          Printf.printf "ok %s\n" (Hash.to_hex head);
+          ok)
+
 (* --- cmdliner wiring --- *)
 
 open Cmdliner
@@ -1458,6 +1497,50 @@ let store_t =
   Cmd.group
     (Cmd.info "store" ~doc:"Operate on a persistent content-addressed store.")
     [ add; name; rename ]
+
+let audit_t =
+  let genesis =
+    Cmd.v
+      (Cmd.info "genesis" ~doc:"Print the fixed predecessor/head of an empty Audit v1 chain.")
+      Term.(const audit_genesis_cmd $ const ())
+  in
+  let append =
+    Cmd.v
+      (Cmd.info "append"
+         ~doc:
+           "Verify LOG against its published predecessor, append one canonical AuditEntry, and \
+            print the new publishable head.")
+      Term.(
+        const audit_append_cmd
+        $ Arg.(required & pos 0 (some string) None & info [] ~docv:"LOG")
+        $ Arg.(required & pos 1 (some string) None & info [] ~docv:"AUDIT_ENTRY")
+        $ Arg.(
+            required
+            & opt (some string) None
+            & info [ "previous" ] ~docv:"HASH"
+                ~doc:
+                  "Previously published lowercase head; use `jac audit genesis` for an empty log."))
+  in
+  Cmd.group
+    (Cmd.info "audit" ~doc:"Append ET.3 hash-chained Audit records and publish their heads.")
+    [ genesis; append ]
+
+let governance_t =
+  let verify_log =
+    Cmd.v
+      (Cmd.info "verify-log"
+         ~doc:"Strictly verify a canonical Audit v1 chain against an independently published head.")
+      Term.(
+        const audit_verify_cmd
+        $ Arg.(required & pos 0 (some string) None & info [] ~docv:"LOG")
+        $ Arg.(
+            required
+            & opt (some string) None
+            & info [ "head" ] ~docv:"HASH" ~doc:"Expected published lowercase chain head."))
+  in
+  Cmd.group
+    (Cmd.info "governance" ~doc:"Verify governance artifacts and review surfaces.")
+    [ verify_log ]
 
 let dist_diff_t =
   Cmd.v
@@ -1935,6 +2018,8 @@ let main =
       diff_t;
       infer_t;
       store_t;
+      audit_t;
+      governance_t;
       test_t;
       replay_t;
       dist_diff_t;

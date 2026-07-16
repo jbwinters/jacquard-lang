@@ -40,6 +40,11 @@ let of_hex s =
     let raw = String.init digest_size byte in
     if !ok then Some (Digest_bytes raw) else None
 
+(** [of_canonical_hex s] parses exactly the public HASH_V0 spelling: 64 lowercase hexadecimal
+    digits. Unlike {!of_hex}, it rejects uppercase and every alternate textual spelling. *)
+let of_canonical_hex s =
+  match of_hex s with Some hash when String.equal s (to_hex hash) -> Some hash | _ -> None
+
 let equal (Digest_bytes a) (Digest_bytes b) = String.equal a b
 let compare (Digest_bytes a) (Digest_bytes b) = String.compare a b
 let pp fmt t = Format.pp_print_string fmt (to_hex t)
