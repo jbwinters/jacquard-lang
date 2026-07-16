@@ -35,6 +35,8 @@ project shape from file names alone.
   interface compatibility, and user-effect governance.
 - `effect-membranes.md`: GM.0 charter for typed governed facades, versioned
   decision artifacts, live/dry boundaries, and monotonic composition.
+- `concurrency.md`: SC.0 Task/Async/scope contracts, row charging, deterministic
+  scheduling, cancellation, exclusions, and D46-D50.
 - `warp-testing.md`: Warp test model, rows, handlers, cache, properties, and
   world lanes.
 - `errors.md`: diagnostic code catalog.
@@ -92,6 +94,13 @@ Read these together when judging whether the release candidate is credible:
   canonical identities, pure refusal boundaries, and compatibility evidence.
 - `release/governed-membranes/GM1-MANIFEST.sha256`: reconstructible GM.1 overlay
   on the validated ET.6 plus GM.0 dependency-integration commit.
+
+## Structured Concurrency Evidence
+
+- `release/structured-concurrency/EVIDENCE.md`: SC.0 interface, identity,
+  row-charging, pure invariant, mutation, and compatibility evidence.
+- `release/structured-concurrency/MANIFEST.sha256`: reconstructible SC.0 overlay
+  on the completed release-hardening base.
 
 ## Maintenance Notes
 

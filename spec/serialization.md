@@ -56,8 +56,12 @@ Types: 0x30 tref (+ hash), 0x31 tvar (+ bound/free subtag), 0x32 tapp (+ head + 
 args), 0x33 tarrow (+ varint n + params + row + result), 0x34 ttuple, 0x35 tforall (+ varint
 tyvarc + varint rowvarc + body), 0x37 self-reference (a `tref` naming the enclosing
 `deftype`/`defeffect` itself — a recursive declaration cannot contain its own hash, so the
-self-reference is positional, like `groupref` for terms). Rows: 0x36 + varint n + effect
-hashes **sorted bytewise** (effect sets are unordered) + 0x00 closed / 0x01 + var.
+self-reference is positional, like `groupref` for terms). Ordinary rows retain their exact
+encoding: 0x36 + varint n + effect hashes **sorted bytewise** (effect sets are unordered) +
+0x00 closed / 0x01 + var. A row containing its enclosing effect uses 0x38 + varint n + sorted
+tagged entries (0x00 self, or 0x01 + hash), followed by the same closed/open-tail encoding.
+The 0x38 extension assigns bytes only to declarations that were invalid before SC.0; every
+previously valid HASH_V0 input remains byte-for-byte unchanged.
 
 Quoted payloads (raw triples, meta erased): 0x50 form (+ head text + varint argc + args),
 where scalar args tag 0x52 int64, 0x53 real, 0x54 text, 0x55 sym, 0x56 hash — except an
