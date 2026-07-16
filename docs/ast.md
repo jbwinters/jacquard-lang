@@ -169,6 +169,12 @@ module Jacquard
 }
 ```
 
+SC.0 additionally permits an `eref` naming its own enclosing `DefEffect` inside an operation type.
+That name remains a positional self reference through resolution because a declaration cannot
+contain its own hash. `spec/serialization.md` assigns these previously invalid rows the 0x38
+encoding while leaving every existing 0x36 row byte unchanged. Ordinary annotations and
+`DefType` rows cannot use an effect self reference.
+
 Operation-mode compatibility encoding follows the kernel extension rule: `Multi` is absent in
 bootstrap notation and contributes no bytes to `HASH_V0`, so the legacy
 `(op name (params...) result)` carrier and every existing hash remain unchanged. `Once` prints as

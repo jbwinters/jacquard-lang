@@ -16,7 +16,7 @@ type Call =
       preconditions: Code)
 type SecretRef = | SecretRef(name: Text, version: Option Text)
 type Secret = | OpaqueSecret
-type Task a = | TaskHandle(id: Int)
+type Task a = | TaskOpaque
 type TaskResult a = | Done(value: a) | Failed(message: Text) | Cancelled
 type ChannelHandle a = | ChannelHandleValue(id: Int)
 type ChannelError = | ChannelClosed
@@ -49,6 +49,12 @@ once effect Secret where {
 }
 once effect Judge where {
   judge.assess : (Call) -> Assessment
+}
+once effect Async a where {
+  async.spawn : (() ->{Async | e} a) -> Task a
+  async.await : (Task a) -> TaskResult a
+  async.cancel : (Task a) -> ()
+  async.yield : () -> ()
 }
 once effect Channel a where {
   channel.open : () -> ChannelHandle a
