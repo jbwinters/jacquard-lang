@@ -172,6 +172,49 @@ jq_value jq_hash(const uint8_t bytes[32]) {
   return jq_of_block(b);
 }
 
+static bool task_path_valid(const void *run_owner, const uint32_t *scope_path,
+                            uint16_t scope_len) {
+  if (!run_owner || !scope_path || scope_len == 0 || scope_path[0] != 0) return false;
+  for (uint16_t i = 1; i < scope_len; i++)
+    if (scope_path[i] == 0) return false;
+  return true;
+}
+
+enum jq_task_status jq_task_create(const void *run_owner, const uint32_t *scope_path,
+                                   uint16_t scope_len, uint32_t spawn_index, jq_value *out) {
+  if (!out || scope_len > JQ_TASK_MAX_SCOPE_LEN ||
+      !task_path_valid(run_owner, scope_path, scope_len))
+    return JQ_TASK_MALFORMED;
+  jq_block *b = jq_alloc_block(JQ_TASK, 0, (uint16_t)(scope_len + 3));
+  b->payload[0] = (uint64_t)run_owner;
+  b->payload[1] = scope_len;
+  for (uint16_t i = 0; i < scope_len; i++) b->payload[2 + i] = scope_path[i];
+  b->payload[2 + scope_len] = spawn_index;
+  *out = jq_of_block(b);
+  return JQ_TASK_VALID;
+}
+
+enum jq_task_status jq_task_validate(jq_value task, const void *run_owner,
+                                     const uint32_t *scope_path, uint16_t scope_len) {
+  if (jq_is_int(task)) return JQ_TASK_MALFORMED;
+  jq_block *b = jq_block_of(task);
+  if (b->tag != JQ_TASK || b->n < 4) return JQ_TASK_MALFORMED;
+  uint64_t stored_len = b->payload[1];
+  if (stored_len == 0 || stored_len > JQ_TASK_MAX_SCOPE_LEN || b->n != stored_len + 3 ||
+      b->payload[2] != 0)
+    return JQ_TASK_MALFORMED;
+  for (uint16_t i = 1; i < (uint16_t)stored_len; i++)
+    if (b->payload[2 + i] == 0 || b->payload[2 + i] > JQ_TASK_MAX_COMPONENT)
+      return JQ_TASK_MALFORMED;
+  if (b->payload[2 + stored_len] > JQ_TASK_MAX_COMPONENT) return JQ_TASK_MALFORMED;
+  if ((const void *)(uintptr_t)b->payload[0] != run_owner) return JQ_TASK_FOREIGN_RUN;
+  if (!task_path_valid(run_owner, scope_path, scope_len) || stored_len != scope_len)
+    return JQ_TASK_FOREIGN_SCOPE;
+  for (uint16_t i = 0; i < scope_len; i++)
+    if (b->payload[2 + i] != scope_path[i]) return JQ_TASK_FOREIGN_SCOPE;
+  return JQ_TASK_VALID;
+}
+
 jq_value jq_closure(void *code, uint16_t arity, uint16_t env_n,
                     const jq_value *env, uint16_t self_slot) {
   arity_guard((uint64_t)env_n + 2, "closure environment");

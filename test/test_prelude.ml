@@ -17,8 +17,12 @@ let reviewed_modes () =
       else
         match String.split_on_char ' ' line with
         | [ qualified; mode ] -> (
-            match String.split_on_char '.' qualified with
-            | [ effect_name; op_name ] ->
+            match String.index_opt qualified '.' with
+            | Some separator ->
+                let effect_name = String.sub qualified 0 separator in
+                let op_name =
+                  String.sub qualified (separator + 1) (String.length qualified - separator - 1)
+                in
                 Some
                   {
                     effect_name;
@@ -29,7 +33,7 @@ let reviewed_modes () =
                       | "multi" -> Kernel.Multi
                       | other -> Alcotest.failf "unknown reviewed operation mode %s" other);
                   }
-            | _ -> Alcotest.failf "malformed reviewed operation name %s" qualified)
+            | None -> Alcotest.failf "malformed reviewed operation name %s" qualified)
         | _ -> Alcotest.failf "malformed reviewed operation-mode row %s" line)
 
 let mode_name = function Kernel.Once -> "once" | Kernel.Multi -> "multi"
@@ -121,7 +125,7 @@ let test_reviewed_operation_modes store =
   in
   let declared = prelude_source_modes () |> List.map row |> List.sort String.compare in
   let frozen = reviewed |> List.map row |> List.sort String.compare in
-  Alcotest.(check int) "current prelude operation inventory size" 24 (List.length declared);
+  Alcotest.(check int) "current prelude operation inventory size" 28 (List.length declared);
   Alcotest.(check (list string))
     "every operation from every prelude DefEffect has an exact reviewed mode" declared frozen;
   test_retained_multi_hashes store;
@@ -508,6 +512,303 @@ let test_handler_overrides_grant () =
   | Error e -> Alcotest.failf "interposed run failed: %s" (Runtime_err.to_string e));
   Alcotest.(check string) "handler swallowed the print" "" (Buffer.contents buf)
 
+(* Hostile host-value tests intentionally forge the private payload representation with [Obj.magic].
+   Ordinary library code cannot name [Task_handle.t], and Eval exposes no Task constructor. This
+   helper depends on two private layouts: [ctx.task_run] is field 1 of the evaluation context, and
+   [Task_handle.t] is a three-field block ordered [(run, scope_path, spawn_index)]. Reordering
+   either representation requires updating this helper; otherwise it can forge the wrong value and
+   make these hostile-boundary tests pass or fail for accidental layout reasons. *)
+let foreign_task ~scope_path ~spawn_index =
+  Value.VTask (Obj.magic (ref (), scope_path, spawn_index))
+
+let hostile_task_for_ctx ctx ~scope_path ~spawn_index =
+  let payload = Obj.new_block 0 3 in
+  Obj.set_field payload 0 (Obj.field (Obj.repr ctx) 1);
+  Obj.set_field payload 1 (Obj.repr scope_path);
+  Obj.set_field payload 2 (Obj.repr spawn_index);
+  Value.VTask (Obj.obj payload)
+
+let test_sc3_task_declarations_and_values () =
+  let store, ctx = Eval_support.make_prelude_ctx () in
+  let pinned name kind expected =
+    match Store.lookup_kind store name kind with
+    | Some entry ->
+        Alcotest.(check string) (name ^ " identity") expected (Hash.to_hex entry.hash);
+        let declaration =
+          match Store.get store entry.hash with
+          | Ok declaration -> declaration
+          | Error diagnostics -> Eval_support.fail_diags ("load " ^ name) diagnostics
+        in
+        let printed = Printer.print_all [ Kernel.decl_to_form declaration ] in
+        let reparsed =
+          match Reader.parse_one ~file:(name ^ "-roundtrip.jqd") printed with
+          | Error diagnostics -> Eval_support.fail_diags ("parse " ^ name) diagnostics
+          | Ok form -> (
+              match Kernel.decl_of_form form with
+              | Ok declaration -> declaration
+              | Error diagnostics -> Eval_support.fail_diags ("validate " ^ name) diagnostics)
+        in
+        let actual =
+          match Canon.hash_decl reparsed with
+          | Ok hashes -> (
+              match List.assoc_opt name hashes.named with
+              | Some hash -> Hash.to_hex hash
+              | None -> Hash.to_hex hashes.decl_hash)
+          | Error diagnostics -> Eval_support.fail_diags ("hash " ^ name) diagnostics
+        in
+        Alcotest.(check string) (name ^ " print/read/kernel roundtrip") expected actual
+    | None -> Alcotest.failf "missing SC.3 prelude name %s" name
+  in
+  pinned "task" Resolve.KType Concurrency_contract.task_type_hash;
+  pinned "task-result" Resolve.KType Concurrency_contract.task_result_type_hash;
+  pinned "async" Resolve.KEffect Concurrency_contract.async_effect_hash;
+  List.iter
+    (fun (name, expected) -> pinned name Resolve.KOp expected)
+    Concurrency_contract.async_operation_hashes;
+  Alcotest.(check bool)
+    "Task opaque carrier has no public constructor" true
+    (Store.lookup_kind store "task-opaque" Resolve.KCon = None);
+  List.iter
+    (fun name ->
+      Alcotest.(check bool)
+        (name ^ " is not published") true
+        (Store.lookup_kind store name Resolve.KTerm = None))
+    [ "task.show"; "show.task"; "codec.task" ];
+  let expect_value source expected =
+    match Eval_support.eval_with ctx store source with
+    | Ok value -> Alcotest.(check string) source expected (Value.show value)
+    | Error error -> Alcotest.failf "%s failed: %s" source (Runtime_err.to_string error)
+  in
+  expect_value "(app (var done) (lit 42))" "done(42)";
+  expect_value "(app (var failed) (lit \"stable\"))" "failed(\"stable\")";
+  expect_value "(var cancelled)" "cancelled";
+  let id = Concurrency_contract.task_id ~scope_path:[ 0; 2 ] ~spawn_index:3 in
+  Alcotest.(check string)
+    "deterministic scheduler ID" "0/2#3"
+    (Concurrency_contract.trace_task_id id);
+  let root_task = hostile_task_for_ctx ctx ~scope_path:[ 0 ] ~spawn_index:1 in
+  Alcotest.(check string) "internal rendering stays opaque" "<task>" (Value.show root_task);
+  (match Eval.validate_task_value ctx ~scope_path:[ 0 ] root_task with
+  | Ok root_id ->
+      Alcotest.(check string) "owned root ID" "0#1" (Concurrency_contract.trace_task_id root_id)
+  | Error diagnostics -> Eval_support.fail_diags "validate hostile owned Task" diagnostics);
+  let cross_scope = hostile_task_for_ctx ctx ~scope_path:[ 0; 2 ] ~spawn_index:3 in
+  (match Eval.validate_task_value ctx ~scope_path:[ 0 ] cross_scope with
+  | Error [ diagnostic ] -> Alcotest.(check string) "cross-scope code" "E0907" diagnostic.Diag.code
+  | Error diagnostics -> Eval_support.fail_diags "unexpected cross-scope diagnostics" diagnostics
+  | Ok _ -> Alcotest.fail "same-run cross-scope Task was accepted");
+  let task = foreign_task ~scope_path:[ 0; 2 ] ~spawn_index:3 in
+  let other_store, other_ctx = Eval_support.make_prelude_ctx () in
+  ignore other_store;
+  (match Eval.validate_task_value other_ctx ~scope_path:[ 0; 2 ] task with
+  | Error [ diagnostic ] -> Alcotest.(check string) "cross-run code" "E0907" diagnostic.code
+  | Error diagnostics -> Eval_support.fail_diags "unexpected cross-run diagnostics" diagnostics
+  | Ok _ -> Alcotest.fail "cross-run Task reuse was accepted");
+  let expect_invalid label result =
+    match result with
+    | Error (Runtime_err.Invalid_task_handle _) -> ()
+    | Error error -> Alcotest.failf "%s wrong runtime error: %s" label (Runtime_err.to_string error)
+    | Ok value -> Alcotest.failf "%s accepted foreign Task graph: %s" label (Value.show value)
+  in
+  let tuple_builtin =
+    Value.VBuiltin ("foreign-tuple", function [] -> Ok (Value.VTuple [ task ]) | _ -> assert false)
+  in
+  expect_invalid "internal apply/builtin tuple" (Eval.call ctx tuple_builtin []);
+  let done_hash =
+    match Store.lookup_kind store "done" Resolve.KCon with
+    | Some entry -> entry.hash
+    | None -> Alcotest.fail "missing Done constructor"
+  in
+  let declaration =
+    Eval_support.put_src store (Store.names_view store)
+      "(defterm ((binding foreign-task-result () (lit 0))))"
+  in
+  let member = List.assoc "foreign-task-result" declaration.Canon.named in
+  Eval.register_builtin ctx member
+    (Value.VBuiltin
+       ( "foreign-task-result",
+         function
+         | [] -> Ok (Value.VCon { con = done_hash; name = "done"; args = [ task ] })
+         | _ -> assert false ));
+  expect_invalid "run_expr constructor result"
+    (Eval_support.eval_with ctx store "(app (var foreign-task-result))");
+  expect_invalid "terminal tuple state"
+    (match Eval.run_state_capturing ctx (Eval.SApply (Value.VTuple [ task ], [])) with
+    | Ok (Eval.CValue value) -> Ok value
+    | Ok (Eval.COp _) -> Alcotest.fail "foreign terminal state unexpectedly performed"
+    | Error error -> Error error);
+  let malformed = foreign_task ~scope_path:[] ~spawn_index:(-1) in
+  match Eval.validate_task_value ctx ~scope_path:[ 0 ] malformed with
+  | Error [ diagnostic ] -> Alcotest.(check string) "malformed handle code" "E0907" diagnostic.code
+  | Error diagnostics -> Eval_support.fail_diags "unexpected malformed diagnostics" diagnostics
+  | Ok _ -> Alcotest.fail "malformed Task handle was accepted"
+
+let test_sc3_task_opaque_checker_and_unhandled_async () =
+  let store, ctx = Eval_support.make_prelude_ctx () in
+  let opaque_source =
+    Printf.sprintf "(ref #%s con)" Concurrency_contract.task_opaque_constructor_hash
+  in
+  let expression =
+    match Reader.parse_one ~file:"private-task.jqd" opaque_source with
+    | Ok form -> Result.get_ok (Kernel.expr_of_form form)
+    | Error diagnostics -> Eval_support.fail_diags "parse private Task ref" diagnostics
+  in
+  let checker =
+    match Check.make_ctx store with
+    | Ok checker -> checker
+    | Error diagnostics -> Eval_support.fail_diags "make Task checker" diagnostics
+  in
+  (match Check.check_top checker (Kernel.Expr expression) with
+  | Error [ diagnostic ] ->
+      Alcotest.(check string) "private constructor code" "E0907" diagnostic.code
+  | Error diagnostics -> Eval_support.fail_diags "unexpected private Task diagnostics" diagnostics
+  | Ok _ -> Alcotest.fail "checker accepted the scheduler-private Task carrier");
+  (match Eval.run_expr ctx expression with
+  | Error (Runtime_err.Invalid_task_handle _) -> ()
+  | Error error ->
+      Alcotest.failf "private Task wrong runtime error: %s" (Runtime_err.to_string error)
+  | Ok value -> Alcotest.failf "runtime constructed private Task carrier: %s" (Value.show value));
+  let lit = Kernel.{ it = Lit (LInt 1); meta = Meta.empty } in
+  let thunk = Value.VClosure { scope = Value.empty_scope; params = []; body = lit } in
+  let task = hostile_task_for_ctx ctx ~scope_path:[ 0 ] ~spawn_index:1 in
+  let cases =
+    [
+      ("async.spawn", [ thunk ]);
+      ("async.await", [ task ]);
+      ("async.cancel", [ task ]);
+      ("async.yield", []);
+    ]
+  in
+  List.iter
+    (fun (name, args) ->
+      let operation =
+        match Eval_support.eval_with ctx store (Printf.sprintf "(var %s)" name) with
+        | Ok operation -> operation
+        | Error error -> Alcotest.failf "load %s: %s" name (Runtime_err.to_string error)
+      in
+      match Eval.call ctx operation args with
+      | Error (Runtime_err.Unhandled { effect_; op }) ->
+          Alcotest.(check string) (name ^ " unhandled effect") "async" effect_;
+          Alcotest.(check string) (name ^ " unhandled op") name op
+      | Error error -> Alcotest.failf "%s wrong error: %s" name (Runtime_err.to_string error)
+      | Ok value -> Alcotest.failf "%s unexpectedly returned %s" name (Value.show value))
+    cases
+
+let test_sc3_validated_state_context_binding () =
+  let store_a, ctx_a = Eval_support.make_prelude_ctx () in
+  let _store_b, ctx_b = Eval_support.make_prelude_ctx () in
+  let task = hostile_task_for_ctx ctx_a ~scope_path:[ 0 ] ~spawn_index:7 in
+  let expect_e0907 label = function
+    | Error (Runtime_err.Invalid_task_handle _) -> ()
+    | Error error ->
+        Alcotest.failf "%s returned the wrong error: %s" label (Runtime_err.to_string error)
+    | Ok _ -> Alcotest.failf "%s accepted an artifact from another evaluator context" label
+  in
+  let validate label state =
+    match Eval.validate_state_once ctx_a state with
+    | Ok validated -> validated
+    | Error error ->
+        Alcotest.failf "%s failed validation in its owning context: %s" label
+          (Runtime_err.to_string error)
+  in
+  let terminal = validate "terminal state" (Eval.SApply (Value.VTuple [ task ], [])) in
+  expect_e0907 "validated state executed under B"
+    (Eval.run_validated_state_capturing ctx_b terminal);
+  expect_e0907 "validated state freshened and executed under B"
+    (Eval.run_validated_state_capturing ctx_b (Eval.fresh_validated_state ctx_b terminal));
+  let await =
+    match Eval_support.eval_with ctx_a store_a "(var async.await)" with
+    | Ok operation -> operation
+    | Error error -> Alcotest.failf "load async.await: %s" (Runtime_err.to_string error)
+  in
+  let operation_state =
+    Eval.SApply
+      ( task,
+        [
+          Value.FAppArgs { fn = await; done_rev = []; pending = []; scope = Value.empty_scope };
+          Value.FTuple { done_rev = [ task ]; pending = []; scope = Value.empty_scope };
+        ] )
+  in
+  let validated_operation = validate "operation state" operation_state in
+  expect_e0907 "validated operation captured under B"
+    (Eval.run_validated_state_capturing ctx_b validated_operation);
+  let args, validated_kont =
+    match Eval.run_validated_state_capturing ctx_a validated_operation with
+    | Ok (Eval.VCOp { name = "async.await"; args; kont; _ }) -> (args, kont)
+    | Ok (Eval.VCOp { name; _ }) -> Alcotest.failf "captured unexpected operation %s" name
+    | Ok (Eval.VCValue value) ->
+        Alcotest.failf "operation state returned instead of capturing: %s" (Value.show value)
+    | Error error ->
+        Alcotest.failf "owning-context capture failed: %s" (Runtime_err.to_string error)
+  in
+  (match args with
+  | [ Value.VTask _ ] -> ()
+  | _ -> Alcotest.fail "captured async.await arguments lost their Task payload");
+  expect_e0907 "captured operation arguments reused under B"
+    (Eval.run_state_capturing ctx_b (Eval.SApply (Value.VTuple args, [])));
+  expect_e0907 "validated continuation resumed under B"
+    (Eval.resume_validated_state ctx_b validated_kont (Value.VInt 11));
+  let resumed_in_a =
+    match Eval.resume_validated_state ctx_a validated_kont (Value.VInt 11) with
+    | Ok state -> state
+    | Error error ->
+        Alcotest.failf "foreign resume consumed the validated Once budget: %s"
+          (Runtime_err.to_string error)
+  in
+  (match Eval.run_validated_state_capturing ctx_a resumed_in_a with
+  | Ok (Eval.VCValue value) ->
+      Alcotest.(check string)
+        "validated continuation remains usable in A" "(<task>, 11)" (Value.show value)
+  | Ok (Eval.VCOp _) -> Alcotest.fail "validated resume unexpectedly captured another operation"
+  | Error error -> Alcotest.failf "validated resumed run failed: %s" (Runtime_err.to_string error));
+  let ordinary_kont =
+    match Eval.run_state_capturing ctx_a operation_state with
+    | Ok (Eval.COp { name = "async.await"; kont; _ }) -> kont
+    | Ok (Eval.COp { name; _ }) -> Alcotest.failf "captured unexpected operation %s" name
+    | Ok (Eval.CValue value) ->
+        Alcotest.failf "ordinary operation state returned: %s" (Value.show value)
+    | Error error ->
+        Alcotest.failf "ordinary owning-context capture failed: %s" (Runtime_err.to_string error)
+  in
+  expect_e0907 "ordinary continuation resumed under B"
+    (Eval.resume_captured_state ctx_b ordinary_kont (Value.VInt 12));
+  let resumed_in_a =
+    match Eval.resume_captured_state ctx_a ordinary_kont (Value.VInt 12) with
+    | Ok state -> state
+    | Error error ->
+        Alcotest.failf "foreign resume consumed the ordinary Once budget: %s"
+          (Runtime_err.to_string error)
+  in
+  (match Eval.run_state_capturing ctx_a resumed_in_a with
+  | Ok (Eval.CValue value) ->
+      Alcotest.(check string)
+        "ordinary continuation remains usable in A" "(<task>, 12)" (Value.show value)
+  | Ok (Eval.COp _) -> Alcotest.fail "ordinary resume unexpectedly captured another operation"
+  | Error error -> Alcotest.failf "ordinary resumed run failed: %s" (Runtime_err.to_string error));
+  let yield_operation =
+    match Eval_support.eval_with ctx_a store_a "(var async.yield)" with
+    | Ok operation -> operation
+    | Error error -> Alcotest.failf "load async.yield: %s" (Runtime_err.to_string error)
+  in
+  let once_resume =
+    let state =
+      Eval.SApply (yield_operation, [ Value.FAppFn { args = []; scope = Value.empty_scope } ])
+    in
+    match Eval.run_state_capturing_once ctx_a state with
+    | Ok (Eval.OCOp { name = "async.yield"; resume; _ }) -> resume
+    | Ok (Eval.OCOp { name; _ }) -> Alcotest.failf "captured unexpected operation %s" name
+    | Ok (Eval.OCValue value) ->
+        Alcotest.failf "async.yield returned instead of capturing: %s" (Value.show value)
+    | Error error -> Alcotest.failf "async.yield capture failed: %s" (Runtime_err.to_string error)
+  in
+  expect_e0907 "low-level Once resume invoked under B"
+    (Eval.call ctx_b once_resume [ Value.unit_v ]);
+  match Eval.call ctx_a once_resume [ Value.unit_v ] with
+  | Ok value -> Alcotest.(check string) "low-level Once remains usable in A" "()" (Value.show value)
+  | Error error ->
+      Alcotest.failf "foreign low-level resume consumed the Once budget: %s"
+        (Runtime_err.to_string error)
+
 let suite =
   [
     Alcotest.test_case "prelude loads with zero diagnostics" `Quick test_loads_with_zero_diagnostics;
@@ -523,4 +824,10 @@ let suite =
     Alcotest.test_case "console gated" `Quick test_console_gated;
     Alcotest.test_case "grant mapping" `Quick test_grant_mapping;
     Alcotest.test_case "handler overrides grant" `Quick test_handler_overrides_grant;
+    Alcotest.test_case "SC.3 Task declarations and values" `Quick
+      test_sc3_task_declarations_and_values;
+    Alcotest.test_case "SC.3 private Task and unhandled Async" `Quick
+      test_sc3_task_opaque_checker_and_unhandled_async;
+    Alcotest.test_case "SC.3 validated state context binding" `Quick
+      test_sc3_validated_state_context_binding;
   ]
