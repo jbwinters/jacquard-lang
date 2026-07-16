@@ -77,10 +77,10 @@
                   (lit "judge.scripted: out of assessments")))))))
       (var script))))))
 
-; Model-backed assessment is an explicit adapter, not posterior judgment. The
-; supplied model's Infer effect remains in the outward row and the returned
-; point Assessment is validated exactly like deterministic assessments. Dist
-; and posterior semantics remain deferred to G5.
+; Model-backed assessment is an explicit point-assessment adapter. The supplied
+; model's Infer effect remains in the outward row and the returned Assessment is
+; validated exactly like deterministic assessments. Dist and posterior
+; semantics remain deferred to G5.
 (defterm ((binding judge.model
   ((tforall ((tvar a)) ((rvar e))
     (tarrow

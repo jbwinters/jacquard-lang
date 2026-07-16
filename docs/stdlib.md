@@ -673,9 +673,9 @@ judge.model    : (() ->{Infer, Judge, Throw | e} a,
 laundered behind `Judge`. `judge.fixed` repeats one validated value, while
 `judge.scripted` consumes assessments in operation order and throws
 `judge.scripted: out of assessments` without resuming when exhausted.
-`judge.model` is only an explicit `Infer` adapter returning the same v0 point
-assessment. Posterior representations, `Dist`, and uncertainty policy remain
-the separate G5 phase.
+`judge.model` is an explicit `Infer` adapter returning the same v0 point
+assessment. Posterior representations, `Dist`, and uncertainty policy belong
+to the separate G5 phase.
 
 ### Secret references and deliberate exposure
 
