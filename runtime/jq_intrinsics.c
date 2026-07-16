@@ -837,6 +837,15 @@ jq_value jq_i_code_hash(jq_rt *rt, const jq_value *a) {
   return jq_hash(digest);
 }
 
+jq_value jq_i_debug_inspect(jq_rt *rt, const jq_value *a) {
+  (void)rt;
+  char *rendered = jq_show(a[0]);
+  jq_value result = jq_text((const uint8_t *)rendered, strlen(rendered));
+  free(rendered);
+  jq_drop(a[0]);
+  return result;
+}
+
 jq_value jq_i_support(jq_rt *rt, const jq_value *a) {
   if (!jq_is_ptr(a[0]) || jq_block_of(a[0])->tag != JQ_CON) {
     char *s = jq_show(a[0]);

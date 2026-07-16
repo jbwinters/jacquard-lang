@@ -209,6 +209,22 @@ static void test_blocks(void) {
         "hash show composes inside constructors");
   free(boxed_shown);
   jq_drop(boxed_hash); /* owns and releases hv; ASAN proves the nested path is leak-free */
+
+  const char *fixture = "ET4-native-fixture-secret";
+  jq_value secret = jq_secret((const uint8_t *)fixture, strlen(fixture));
+  CHECK(jq_is_secret(secret), "secret has a distinct runtime tag");
+  CHECK(jq_secret_len(secret) == strlen(fixture) &&
+            memcmp(jq_secret_bytes(secret), fixture, strlen(fixture)) == 0,
+        "explicit secret accessor preserves bytes");
+  char *secret_shown = jq_show(secret);
+  CHECK(strcmp(secret_shown, "<secret redacted>") == 0 && strstr(secret_shown, fixture) == NULL,
+        "secret show is fixed redaction");
+  free(secret_shown);
+  jq_value inspected = jq_i_debug_inspect(NULL, (jq_value[]){ secret });
+  CHECK(jq_text_len(inspected) == strlen("<secret redacted>") &&
+            memcmp(jq_text_bytes(inspected), "<secret redacted>", jq_text_len(inspected)) == 0,
+        "native debug.inspect redacts secret bytes");
+  jq_drop(inspected);
 }
 
 /* --- effects: the handler stack and perform (task 70) --- */
@@ -881,6 +897,12 @@ int main(int argc, char **argv) {
     jq_value fields[1] = { jq_int(0) }; /* never copied: the guard fires first */
     jq_con(&huge, fields);
     return 0;
+  }
+  if (argc > 1 && strcmp(argv[1], "secret-code-of-text") == 0) {
+    const char *fixture = "ET4-MUST-NOT-APPEAR";
+    jq_value secret = jq_secret((const uint8_t *)fixture, strlen(fixture));
+    jq_i_code_of_text(NULL, (jq_value[]){ secret });
+    return 0; /* unreachable */
   }
   if (argc > 1 && strcmp(argv[1], "match-fail") == 0) {
     /* surface-unreachable (the checker refuses inexhaustive matches with

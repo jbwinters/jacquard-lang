@@ -54,12 +54,42 @@ let load ~dir store : ((string * Canon.decl_hashes list) list, Diag.t list) resu
           go [] forms
     in
     let rec go acc = function
-      | [] -> (
-          match Store.lookup_kind store "hash-opaque" Resolve.KCon with
-          | Some { Resolve.hash; _ } ->
-              Store.hide_derived store hash;
-              Ok (List.rev acc)
-          | None -> Ok (List.rev acc))
+      | [] ->
+          List.iter
+            (fun name ->
+              match Store.lookup_kind store name Resolve.KCon with
+              | Some { Resolve.hash; _ } -> Store.hide_derived store hash
+              | None -> ())
+            [ "hash-opaque"; "secret-opaque" ];
+          let bind_operation_alias effect_name operation_name alias =
+            match Store.lookup_kind store effect_name Resolve.KEffect with
+            | None -> err ~code:"E0702" "prelude effect `%s` is missing" effect_name
+            | Some { Resolve.hash = effect_hash; _ } -> (
+                match Store.locate store effect_hash with
+                | Ok { Store.decl = { Kernel.it = Kernel.DefEffect { ops; _ }; _ }; decl_hash; _ }
+                  -> (
+                    let rec find ordinal = function
+                      | [] -> None
+                      | (operation : Kernel.opspec) :: rest ->
+                          if operation.op_name = operation_name then Some ordinal
+                          else find (ordinal + 1) rest
+                    in
+                    match find 0 ops with
+                    | Some ordinal -> Store.bind_name store alias (Canon.op_hash decl_hash ordinal)
+                    | None ->
+                        err ~code:"E0702" "prelude effect `%s` has no `%s` operation" effect_name
+                          operation_name)
+                | Ok _ -> err ~code:"E0702" "prelude name `%s` is not an effect" effect_name
+                | Error diagnostics -> Error diagnostics)
+          in
+          let ( let* ) = Result.bind in
+          (* Kernel names are flat. Keep the long-standing bare [read] spelling for Fs while
+             exposing the collision-free ratified Secret spellings. The declaration still carries
+             the exact operation names [read]/[expose], so its interface identity is unchanged. *)
+          let* () = bind_operation_alias "secret" "read" "secret.read" in
+          let* () = bind_operation_alias "secret" "expose" "secret.expose" in
+          let* () = bind_operation_alias "fs" "read" "read" in
+          Ok (List.rev acc)
       | file :: rest -> (
           match load_file file with
           | Error ds -> Error ds
@@ -831,6 +861,125 @@ let install_infer ?cache_dir (ctx : Eval.ctx) : (unit, Diag.t list) result =
                   (String.concat ", " (List.map Value.show args)))));
   Ok ()
 
+(** A provider-facing Secret lookup failure. The variants deliberately carry no provider response,
+    exception text, or secret bytes, so translating a backend failure into a runtime diagnostic
+    cannot disclose confidential material. *)
+type secret_lookup_error =
+  | Secret_reference_missing
+  | Secret_version_missing
+  | Secret_backend_failure
+
+type secret_fixture = {
+  secret_name : string;
+  secret_version : string option;
+  secret_bytes : string;
+}
+(** One deterministic fixture accepted by {!install_secret_fixed}. [secret_bytes] belongs to the
+    trusted test harness and is converted directly to an opaque {!Value.VSecret}. *)
+
+let secret_ref_label ~name ~version =
+  match version with None -> name | Some version -> Printf.sprintf "%s@%s" name version
+
+let secret_lookup_runtime_error ~name ~version = function
+  | Secret_reference_missing ->
+      Runtime_err.Io (Printf.sprintf "secret reference not found: %s" name)
+  | Secret_version_missing ->
+      Runtime_err.Io
+        (Printf.sprintf "secret version not found: %s" (secret_ref_label ~name ~version))
+  | Secret_backend_failure ->
+      Runtime_err.Io (Printf.sprintf "secret backend failure for reference: %s" name)
+
+(** [install_secret ~read ctx] installs the two Secret root operations for an explicitly supplied
+    provider adapter. [read ~name ~version] is the only ingress for secret bytes; [secret.expose] is
+    the only standard operation that converts the opaque runtime value back to [Text]. Provider
+    failures use {!secret_lookup_error}, whose payload-free variants are rendered without backend
+    text or values. Installing this handler is itself the embedding's explicit Secret grant; the CLI
+    reaches it only through [--allow secret]. *)
+let install_secret ~read (ctx : Eval.ctx) : (unit, Diag.t list) result =
+  let ( let* ) = Result.bind in
+  let* read_op = lookup_hash (Eval.store ctx) ~kind:Resolve.KOp "secret.read" in
+  let* expose_op = lookup_hash (Eval.store ctx) ~kind:Resolve.KOp "secret.expose" in
+  let bad operation args =
+    Error
+      (Runtime_err.Type_error
+         (Printf.sprintf "%s received %s" operation (String.concat ", " (List.map Value.show args))))
+  in
+  Eval.register_root_handler ctx read_op (fun args ->
+      match args with
+      | [ Value.VCon { name = "secret-ref"; args = [ Value.VText name; version ]; _ } ] -> (
+          let version =
+            match version with
+            | Value.VCon { name = "none"; args = []; _ } -> Some None
+            | Value.VCon { name = "some"; args = [ Value.VText value ]; _ } -> Some (Some value)
+            | _ -> None
+          in
+          match version with
+          | Some version -> (
+              match read ~name ~version with
+              | Ok bytes -> Ok (Value.VSecret (Secret.of_string bytes))
+              | Error lookup_error ->
+                  Error (secret_lookup_runtime_error ~name ~version lookup_error))
+          | None -> bad "secret.read" args)
+      | args -> bad "secret.read" args);
+  Eval.register_root_handler ctx expose_op (fun args ->
+      match args with
+      | [ Value.VSecret secret ] -> Ok (Value.VText (Secret.expose secret))
+      | args -> bad "secret.expose" args);
+  Ok ()
+
+(** [install_secret_vault ~read ctx] is the provider-neutral vault boundary. The injected callback
+    may be backed by a real client, a scripted adapter, record/replay, or fault injection; no vendor
+    or transport is selected here, and its failure channel cannot carry provider text or values. *)
+let install_secret_vault ~read ctx = install_secret ~read ctx
+
+(** [install_secret_fixed ctx fixtures] installs a deterministic hermetic Secret handler. Exact
+    [(name, version)] lookup uses the first matching fixture; an absent name and an absent version
+    produce distinct sanitized failures. The handler performs no IO and emits no logs. *)
+let install_secret_fixed (ctx : Eval.ctx) (fixtures : secret_fixture list) =
+  let read ~name ~version =
+    match
+      List.find_opt
+        (fun fixture ->
+          String.equal fixture.secret_name name
+          && Option.equal String.equal fixture.secret_version version)
+        fixtures
+    with
+    | Some fixture -> Ok fixture.secret_bytes
+    | None ->
+        if List.exists (fun fixture -> String.equal fixture.secret_name name) fixtures then
+          Error Secret_version_missing
+        else Error Secret_reference_missing
+  in
+  install_secret ~read ctx
+
+let hex_bytes value =
+  let buffer = Buffer.create (String.length value * 2) in
+  String.iter (fun byte -> Buffer.add_string buffer (Printf.sprintf "%02x" (Char.code byte))) value;
+  Buffer.contents buffer
+
+(** [secret_environment_key ~name ~version] returns the collision-free environment key used by the
+    canonical live environment handler. Names and versions are byte-encoded rather than normalized:
+    [JACQUARD_SECRET_V0_<name-hex>_LATEST] or [JACQUARD_SECRET_V0_<name-hex>_VERSION_<version-hex>].
+*)
+let secret_environment_key ~name ~version =
+  let prefix = "JACQUARD_SECRET_V0_" ^ hex_bytes name in
+  match version with
+  | None -> prefix ^ "_LATEST"
+  | Some version -> prefix ^ "_VERSION_" ^ hex_bytes version
+
+(** [install_secret_environment ?getenv ctx] installs the canonical environment-backed Secret grant.
+    [getenv] is injectable for hermetic tests; the default reads the process environment. Missing
+    keys become reference/version failures, and values are never included in diagnostics or logs. *)
+let install_secret_environment ?(getenv = Sys.getenv_opt) (ctx : Eval.ctx) =
+  let read ~name ~version =
+    match getenv (secret_environment_key ~name ~version) with
+    | Some value -> Ok value
+    | None ->
+        Error
+          (match version with None -> Secret_reference_missing | Some _ -> Secret_version_missing)
+  in
+  install_secret ~read ctx
+
 (* [builtin_signatures] is defined after the grant installers. Module initialization replaces this
    hook before any client can call [install_eval]. *)
 let eval_builtin_signatures = ref (fun (_ : Store.t) -> Ok [])
@@ -976,7 +1125,7 @@ let install_dry (ctx : Eval.ctx) ~(audit : string list ref) : (unit, Diag.t list
 
 (** The only effects [grant] can install, i.e. the valid [--allow] values; the E0814 hint consults
     this so it never suggests granting a pure effect. *)
-let grantable_names = [ "clock"; "console"; "dist"; "eval"; "fs"; "infer"; "net" ]
+let grantable_names = [ "clock"; "console"; "dist"; "eval"; "fs"; "infer"; "net"; "secret" ]
 
 (** [grant ctx name ~out ~seed] installs the root handler for effect [name] (case-insensitive:
     "Eval" and "eval" both work); [seed] feeds the dist sampling handler only. Returns E0703 for
@@ -991,6 +1140,7 @@ let grant (ctx : Eval.ctx) name ~infer_cache ~out ~seed : (unit, Diag.t list) re
   | "clock" -> install_clock ctx
   | "fs" -> install_fs ctx
   | "infer" -> install_infer ?cache_dir:infer_cache ctx
+  | "secret" -> install_secret_environment ctx
   | other -> err ~code:"E0703" "effect `%s` is not grantable" other
 
 (** Builtin type signatures for the checker (W3.2): the marker bodies would type as [code], so the

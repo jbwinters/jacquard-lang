@@ -1,5 +1,5 @@
 # GM.1 operation identities that must fail the pure Call constructor boundary.
-empty	
+empty	<empty>
 uppercase	Fs.write
 empty-component	fs..write
 punctuation-after-dot	fs.-write
