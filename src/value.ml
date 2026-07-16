@@ -15,6 +15,9 @@ type t =
   | VReal of float
   | VText of string
   | VHash of Hash.t  (** an opaque, validated HASH_V0 digest; constructed only by trusted natives *)
+  | VSecret of Secret.t
+      (** opaque secret bytes. Only the trusted [secret.expose] boundary may inspect this payload;
+          generic rendering and diagnostics must use the fixed redaction marker. *)
   | VTuple of t list
   | VCon of { con : Hash.t; name : string; args : t list }
       (** a saturated constructor application; identity is the derived constructor hash (equal to
@@ -76,6 +79,7 @@ let rec show = function
   | VReal r -> Printer.real_repr r
   | VText s -> "\"" ^ Printer.escape_text s ^ "\""
   | VHash hash -> "#" ^ Hash.to_hex hash
+  | VSecret _ -> "<secret redacted>"
   | VTuple items -> "(" ^ String.concat ", " (List.map show items) ^ ")"
   | VCon { name; args = []; _ } -> name
   | VCon { name; args; _ } -> name ^ "(" ^ String.concat ", " (List.map show args) ^ ")"

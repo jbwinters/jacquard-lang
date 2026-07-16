@@ -63,6 +63,13 @@ let lookup name kind =
   | Some entry -> entry.Resolve.hash
   | None -> Alcotest.failf "missing released Approval name %s" name
 
+let approval_ask proposal =
+  Printf.sprintf "(app (ref #%s op) %s)" (Hash.to_hex (lookup "ask" Resolve.KOp)) proposal
+
+let catch expression =
+  Printf.sprintf "(app (var throw.catch) (lam () %s) (lam ((pvar message)) (var message)))"
+    expression
+
 let test_released_identity_and_once_mode () =
   let approval = lookup "approval" Resolve.KEffect in
   ignore (lookup "ask" Resolve.KOp);
@@ -209,6 +216,170 @@ let test_decision_binding_precedes_action () =
   in
   Alcotest.(check string) "valid binding runs action once" "(ok(42), 1)" (show (run approved))
 
+let test_console_handler_exact_prompt_and_choices () =
+  let value = proposal () in
+  let exact = Printf.sprintf "(app (var approval.proposal-id) %s)" value in
+  let prompt =
+    show
+      (Printf.sprintf "(app (var code.render) (app (var approval.console-prompt-code) %s %s))" exact
+         authority)
+  in
+  Alcotest.(check string)
+    "prompt field order is exact hash then authority"
+    (Printf.sprintf
+       "\"(approval-request-v1 (hash #%s) (authority-list-v1 (effect-v1 (lit \\\"Net\\\")) \
+        (resource-v1 (lit \\\"Net\\\") (lit \\\"api.example\\\"))))\""
+       (String.sub (proposal_id value) 1 64))
+    prompt;
+  let run response =
+    show
+      (catch
+         (Printf.sprintf
+            "(app (var console.scripted) (lam () (app (var approval.console) (lam () %s))) (app \
+             (var cons) (lit %s) (var nil)))"
+            (approval_ask value) (qtext response)))
+  in
+  Alcotest.(check bool)
+    "exact approve grants" true
+    (String.starts_with ~prefix:"approved(" (run "approve"));
+  Alcotest.(check bool)
+    "exact deny refuses" true
+    (String.starts_with ~prefix:"denied(" (run "deny"));
+  Alcotest.(check bool)
+    "every other response escalates" true
+    (String.starts_with ~prefix:"escalate(" (run "later"));
+  let forged =
+    Printf.sprintf
+      "(app (var proposal) %s %s %s %s %s (quote (review (lit \"ship\"))) (lit \"ship?\") %s)"
+      (hash alternate_hash) (hash call_hash) (hash policy_hash) (hash assessment_hash) authority
+      preview
+  in
+  Alcotest.(check string)
+    "console rejects before prompting on a mismatched Proposal"
+    "\"invalid Proposal: carried proposal hash does not match canonical proposal-v1 bytes\""
+    (show
+       (catch
+          (Printf.sprintf
+             "(app (var console.scripted) (lam () (app (var approval.console) (lam () %s))) (var \
+              nil))"
+             (approval_ask forged))))
+
+let test_scripted_handler_is_explicit_and_exact () =
+  let value = proposal () in
+  let exact = Printf.sprintf "(app (var approval.proposal-id) %s)" value in
+  let decisions =
+    Printf.sprintf
+      "(app (var cons) (app (var approved) %s (lit \"fixture\") (quote (ticket))) (app (var cons) \
+       (app (var denied) %s (lit \"fixture\") (lit \"no\")) (app (var cons) (app (var escalate) %s \
+       (lit \"later\")) (var nil))))"
+      exact exact exact
+  in
+  let calls =
+    Printf.sprintf
+      "(let nonrec (pvar one) %s (let nonrec (pvar two) %s (let nonrec (pvar three) %s (tuple (var \
+       one) (var two) (var three)))))"
+      (approval_ask value) (approval_ask value) (approval_ask value)
+  in
+  let result =
+    show (Printf.sprintf "(app (var approval.scripted) (lam () %s) %s)" calls decisions)
+  in
+  Alcotest.(check bool)
+    "explicit fixture covers Approved, Denied, Escalate" true
+    (String.starts_with ~prefix:"(approved(" result
+    && String.contains result ','
+    && String.ends_with ~suffix:"\"later\"))" result);
+  let exhausted =
+    show
+      (catch
+         (Printf.sprintf "(app (var approval.scripted) (lam () %s) (var nil))" (approval_ask value)))
+  in
+  Alcotest.(check string)
+    "script exhaustion fails closed" "\"approval.scripted: out of scripted decisions\"" exhausted;
+  let stale =
+    Printf.sprintf "(app (var approved) %s (lit \"fixture\") (quote (ticket)))"
+      (hash alternate_hash)
+  in
+  let stale_result =
+    show
+      (catch
+         (Printf.sprintf "(app (var approval.scripted) (lam () %s) (app (var cons) %s (var nil)))"
+            (approval_ask value) stale))
+  in
+  Alcotest.(check string)
+    "stale scripted Decision is rejected"
+    "\"stale Decision: embedded proposal hash does not match the exact review artifact\""
+    stale_result;
+  let forged =
+    Printf.sprintf
+      "(app (var proposal) %s %s %s %s %s (quote (review (lit \"ship\"))) (lit \"ship?\") %s)"
+      (hash alternate_hash) (hash call_hash) (hash policy_hash) (hash assessment_hash) authority
+      preview
+  in
+  let forged_result =
+    show
+      (Printf.sprintf
+         "(app (var state.run) (lam () (app (var throw.catch) (lam () (app (var approval.scripted) \
+          (lam () (let nonrec (pwild) %s (let nonrec (pwild) (app (var put) (lit 1)) (lit \
+          \"resumed\")))) (app (var cons) %s (var nil)))) (lam ((pvar message)) (var message)))) \
+          (lit 0))"
+         (approval_ask forged) stale)
+  in
+  Alcotest.(check string)
+    "forged scripted Proposal is rejected before continuation"
+    "(\"invalid Proposal: carried proposal hash does not match canonical proposal-v1 bytes\", 0)"
+    forged_result
+
+let test_dry_run_handler_never_fabricates_consent () =
+  let value = proposal () in
+  let result =
+    show (Printf.sprintf "(app (var approval.dry-run) (lam () %s))" (approval_ask value))
+  in
+  Alcotest.(check bool)
+    "dry-run always escalates" true
+    (String.starts_with ~prefix:"escalate(" result);
+  Alcotest.(check bool)
+    "dry-run cannot return Approved" false
+    (String.starts_with ~prefix:"approved(" result);
+  let forged =
+    Printf.sprintf
+      "(app (var proposal) %s %s %s %s %s (quote (review (lit \"ship\"))) (lit \"ship?\") %s)"
+      (hash alternate_hash) (hash call_hash) (hash policy_hash) (hash assessment_hash) authority
+      preview
+  in
+  Alcotest.(check string)
+    "dry-run rejects a mismatched Proposal"
+    "\"invalid Proposal: carried proposal hash does not match canonical proposal-v1 bytes\""
+    (show (catch (Printf.sprintf "(app (var approval.dry-run) (lam () %s))" (approval_ask forged))))
+
+let test_policy_auto_cannot_upgrade_ask_or_simulate () =
+  let value = proposal () in
+  let run verdict =
+    show
+      (Printf.sprintf "(app (var approval.policy-auto) (lam () %s) (lam ((pwild)) (var %s)))"
+         (approval_ask value) verdict)
+  in
+  Alcotest.(check bool)
+    "Allow may approve" true
+    (String.starts_with ~prefix:"approved(" (run "allow"));
+  Alcotest.(check bool) "Ask escalates" true (String.starts_with ~prefix:"escalate(" (run "ask"));
+  Alcotest.(check bool)
+    "Simulate escalates" true
+    (String.starts_with ~prefix:"escalate(" (run "simulate"));
+  Alcotest.(check bool) "Block denies" true (String.starts_with ~prefix:"denied(" (run "block"));
+  let forged =
+    Printf.sprintf
+      "(app (var proposal) %s %s %s %s %s (quote (review (lit \"ship\"))) (lit \"ship?\") %s)"
+      (hash alternate_hash) (hash call_hash) (hash policy_hash) (hash assessment_hash) authority
+      preview
+  in
+  Alcotest.(check string)
+    "policy-auto validates before classifying"
+    "\"invalid Proposal: carried proposal hash does not match canonical proposal-v1 bytes\""
+    (show
+       (catch
+          (Printf.sprintf "(app (var approval.policy-auto) (lam () %s) (lam ((pwild)) (var allow)))"
+             (approval_ask forged))))
+
 let prop_code_hash_ignores_metadata =
   QCheck.Test.make ~count:100 ~name:"code HASH_V0 ignores all Form metadata"
     QCheck.(make Gen.(string_size ~gen:printable (int_bound 32)))
@@ -234,5 +405,13 @@ let suite =
     Alcotest.test_case "malformed and hashless refusal" `Quick test_malformed_and_hashless_rejected;
     Alcotest.test_case "decision validation before action" `Quick
       test_decision_binding_precedes_action;
+    Alcotest.test_case "console exact prompt and choices" `Quick
+      test_console_handler_exact_prompt_and_choices;
+    Alcotest.test_case "scripted explicit decisions and exhaustion" `Quick
+      test_scripted_handler_is_explicit_and_exact;
+    Alcotest.test_case "dry-run never fabricates consent" `Quick
+      test_dry_run_handler_never_fabricates_consent;
+    Alcotest.test_case "policy-auto cannot upgrade Ask" `Quick
+      test_policy_auto_cannot_upgrade_ask_or_simulate;
     QCheck_alcotest.to_alcotest prop_code_hash_ignores_metadata;
   ]

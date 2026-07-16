@@ -366,6 +366,18 @@ approval.validate-proposal 3
 approval.decision-proposal 3
 approval.validate-decision 3
 approval.before-action 3
+approval.console-prompt-code 3
+approval.console-decision 3
+approval.console 3
+approval.scripted 3
+approval.dry-run 3
+approval.policy-auto 3
+# --- 20-secret (ring 3 opaque authority boundary)
+secret-ref 3
+secret 3
+expose 3
+secret.read 3
+secret.expose 3
 # --- 21-governance-core (GM.1 versioned membrane values and policy artifacts)
 governance-version 3
 governance-v0 3

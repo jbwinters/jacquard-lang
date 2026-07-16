@@ -66,6 +66,7 @@ module Runtime_value_key = struct
           | VReal value -> loop budget (scalar (mix accumulator 2) value) rest
           | VText value -> loop budget (scalar (mix accumulator 3) value) rest
           | VHash value -> loop budget (scalar (mix accumulator 12) value) rest
+          | VSecret _ -> loop budget (mix accumulator 13) rest
           | VTuple items -> loop budget (mix accumulator 4) (prepend_bounded budget items rest)
           | VCon { con; name; args } ->
               let accumulator = scalar (scalar (mix accumulator 5) con) name in
@@ -398,7 +399,7 @@ let scan_recovery_state ctx ~static_trusted (state : state) =
     else
       let () = Runtime_value_seen.add seen_values runtime_value () in
       match runtime_value with
-      | VInt _ | VReal _ | VText _ | VHash _ | VConstructor _ | VOp _ | VBuiltin _
+      | VInt _ | VReal _ | VText _ | VHash _ | VSecret _ | VConstructor _ | VOp _ | VBuiltin _
       | VTrustedBuiltin _ ->
           false
       | VCode payload ->
@@ -504,8 +505,8 @@ let register_builtin ctx hash value =
 
 let rec needs_mutable_recheck ctx value =
   match value with
-  | VInt _ | VReal _ | VText _ | VHash _ | VConstructor _ | VOp _ | VBuiltin _ | VTrustedBuiltin _
-    ->
+  | VInt _ | VReal _ | VText _ | VHash _ | VSecret _ | VConstructor _ | VOp _ | VBuiltin _
+  | VTrustedBuiltin _ ->
       false
   | VCode payload ->
       if Recovery_marker.form payload then
@@ -546,7 +547,7 @@ let snapshot_mutable_graph root =
     if not (Runtime_value_seen.mem seen_values runtime_value) then (
       Runtime_value_seen.add seen_values runtime_value ();
       match runtime_value with
-      | VInt _ | VReal _ | VText _ | VHash _ | VConstructor _ | VOp _ | VBuiltin _
+      | VInt _ | VReal _ | VText _ | VHash _ | VSecret _ | VConstructor _ | VOp _ | VBuiltin _
       | VTrustedBuiltin _ | VCode _ ->
           ()
       | VTuple items | VCon { args = items; _ } -> List.iter value items
@@ -597,8 +598,8 @@ let snapshot_unchanged snapshot =
        snapshot.once_states
 
 let atomic_value = function
-  | VInt _ | VReal _ | VText _ | VHash _ | VConstructor _ | VOp _ | VBuiltin _ | VTrustedBuiltin _
-    ->
+  | VInt _ | VReal _ | VText _ | VHash _ | VSecret _ | VConstructor _ | VOp _ | VBuiltin _
+  | VTrustedBuiltin _ ->
       true
   | VTuple [] | VCon { args = []; _ } -> true
   | VTuple (_ :: _) | VCon { args = _ :: _; _ } | VClosure _ | VCode _ | VResume _ | VOnceResume _
@@ -608,8 +609,8 @@ let atomic_value = function
 let reject_recovery_result_value ctx root =
   let rec validate value =
     match value with
-    | VInt _ | VReal _ | VText _ | VHash _ | VConstructor _ | VOp _ | VBuiltin _ | VTrustedBuiltin _
-      ->
+    | VInt _ | VReal _ | VText _ | VHash _ | VSecret _ | VConstructor _ | VOp _ | VBuiltin _
+    | VTrustedBuiltin _ ->
         true
     | VCode payload ->
         if Recovery_marker.form payload then
