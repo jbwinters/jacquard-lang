@@ -1,7 +1,5 @@
 # Effect-linearity EL.2-EL.4 + GM.3 reconstructible integration overlay
 # Base commit: 23e3b5647fa9a9676990db9cf44350e66bf374a7
-# Attestation manifests exclude themselves (and successor manifests) to avoid self/cross-hashes.
-
 40b419510c7fb14a860bfdcd3c4453a1a4c2b20bfa280de59439893a94b94e0b  README.md
 6f126fddcde955275123d511996d4505317dc169ede3a93766a49afd91ed7837  bench/state-loop.jqd
 c6f3755b008be94075aa4a1ebd8adb5758bbffcf195d532a63bf887584c04120  bin/main.ml
