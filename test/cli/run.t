@@ -48,7 +48,7 @@ Console prints only under its grant (exit 3 = unhandled effect):
   hello jacquard
   ()
   $ jacquard run hello.jqd
-  error[E0814]: this program requires the `console` effect, which is not granted (performed via `print`)
+  error[E0814]: this program requires console [world/low] — talk to the process terminal, which is not granted (performed via `print`)
     hint: grant it with --allow console, or handle the effect in the program
   [3]
 

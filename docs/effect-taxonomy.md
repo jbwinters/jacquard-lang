@@ -301,6 +301,36 @@ first shipped `DefEffect` must match this schema; its resulting full hash is
 then added to the table and frozen. A mode, operation, order, or referenced-type
 edit after that point is a new interface, never an in-place revision.
 
+### Registry realization
+
+`Effect_registry` is the executable copy used by review tooling. Its resolved
+registry contains exactly the twelve implemented entries and is keyed only by
+their full `DefEffect` hashes. The complete 25-entry catalog is also typed, but
+the thirteen `reserved` entries carry no hash and name only the
+`first-release` policy; registration rejects them until a real first interface is
+implemented and frozen. This keeps schema reservation distinct from resolved
+program identity.
+
+Plain rendering is deterministic. Optional ANSI styling colors only the risk
+token of an identity-confirmed official entry. An unregistered effect with
+package metadata preserves its canonical `pk:<publisher-key>/<package>` hint.
+Until package identity is available, tooling uses the explicit deterministic
+fallback `unpackaged:<hash-prefix>/<local-name>`; it does not invent a
+publisher. Both forms include the full resolved hash and `unrated user effect`,
+and styling never colors them. In particular, a user effect whose local
+spelling is `net` does not inherit `Net` metadata or a built-in `--allow net`
+suggestion.
+
+This identity rule continues through native compilation. Baked manifests retain
+the resolved effect hash, generated grant flags are hash-keyed, and a named
+`--allow` installs native operations only when their owning `DefEffect` hash is
+the frozen official identity. Reusing an official effect or operation name
+therefore cannot acquire its grant.
+
+Semantic diff applies this rendering only to a resolved effect row in the row
+position of a typed arrow. Type-shaped forms below `quote` remain ordinary code
+data and receive structural diffs, never an authority label.
+
 ## 7. Indexed decisions
 
 | ID | decision | ratified result |

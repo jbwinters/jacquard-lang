@@ -63,6 +63,7 @@ type conref = { chash : Hash.t; cname : string; carity : int; ctype_id : int; co
 
 type opref = {
   ohash : Hash.t;
+  oeffect_hash : Hash.t;
   oeffect : string;
   oname : string;
   omode : Kernel.op_mode;
@@ -104,6 +105,18 @@ let c_string (s : string) =
     s;
   Buffer.add_char b '"';
   Buffer.contents b
+
+let effect_flag (identity : Hash.t) = "g_eff_" ^ Hash.to_hex identity
+
+let canonical_effect_hash index_name =
+  match
+    List.find_opt
+      (fun (metadata : Effect_registry.metadata) -> metadata.index_name = index_name)
+      (Effect_registry.entries Effect_registry.canonical)
+  with
+  | Some { interface = Released { hash; _ }; _ } -> hash
+  | Some { interface = Reserved _; _ } | None ->
+      invalid_arg ("native grant has no released canonical effect identity: " ^ index_name)
 
 (* C double literal that reparses to the identical double *)
 let c_double (r : float) =
@@ -904,7 +917,7 @@ let unit_source (prog : program) ~precise ~(decl_hex : string) (members : compil
 let main_source (prog : program) ~precise ~(v_true : Hash.t) ~(v_false : Hash.t)
     ~(option_cons : (Hash.t * Hash.t) option) ~(orderings : (Hash.t * Hash.t * Hash.t) option)
     ~(listcons : (Hash.t * Hash.t) option) ~(pair : Hash.t option)
-    ~(intrinsics : (string * int) list) ~(manifests : (string * string) list list) : string =
+    ~(intrinsics : (string * int) list) ~(manifests : (Hash.t * string) list list) : string =
   let st = new_state ~precise prog in
   (* constructor infos: the shared identities every unit externs *)
   let cons = Hashtbl.fold (fun _ cr acc -> cr :: acc) prog.cons [] in
@@ -935,13 +948,18 @@ let main_source (prog : program) ~precise ~(v_true : Hash.t) ~(v_false : Hash.t)
      generated main installs these by op name *)
   let implemented =
     [
-      ("console", [ ("print", "jq_g_print"); ("read-line", "jq_g_read_line") ]);
-      ("clock", [ ("now", "jq_g_now"); ("sleep", "jq_g_sleep") ]);
+      ( "console",
+        canonical_effect_hash "console",
+        [ ("print", "jq_g_print"); ("read-line", "jq_g_read_line") ] );
+      ("clock", canonical_effect_hash "clock", [ ("now", "jq_g_now"); ("sleep", "jq_g_sleep") ]);
       ( "fs",
+        canonical_effect_hash "fs",
         [ ("read", "jq_g_fs_read"); ("write", "jq_g_fs_write"); ("list-dir", "jq_g_fs_list_dir") ]
       );
-      ("dist", [ ("sample", "jq_g_dist_sample"); ("observe", "jq_g_dist_observe") ]);
-      ("infer", [ ("complete", "jq_g_infer_complete") ]);
+      ( "dist",
+        canonical_effect_hash "dist",
+        [ ("sample", "jq_g_dist_sample"); ("observe", "jq_g_dist_observe") ] );
+      ("infer", canonical_effect_hash "infer", [ ("complete", "jq_g_infer_complete") ]);
     ]
   in
   (* one granted flag per effect a manifest checks, plus the implemented
@@ -949,9 +967,11 @@ let main_source (prog : program) ~precise ~(v_true : Hash.t) ~(v_false : Hash.t)
      in-language never reaches a manifest, and its unused flag would be a
      clang warning in the generated unit. *)
   let effects =
-    List.sort_uniq compare (List.map fst implemented @ List.concat_map (List.map fst) manifests)
+    List.sort_uniq Hash.compare
+      (List.map (fun (_, identity, _) -> identity) implemented
+      @ List.concat_map (List.map fst) manifests)
   in
-  List.iter (fun e -> line st.decls "static bool g_eff_%s;" (mangle e)) effects;
+  List.iter (fun identity -> line st.decls "static bool %s;" (effect_flag identity)) effects;
   (* builtin infos for the implemented intrinsics *)
   List.iter
     (fun (name, arity) ->
@@ -1026,9 +1046,11 @@ let main_source (prog : program) ~precise ~(v_true : Hash.t) ~(v_false : Hash.t)
   | None -> ());
   (* dist ordinals (task 72): the LW driver and the root sampler dispatch by
      these; UINT32_MAX when the program reaches neither op *)
+  let dist_identity = canonical_effect_hash "dist" in
   let dist_ord name =
     Hashtbl.fold
-      (fun _ o acc -> if o.oeffect = "dist" && o.oname = name then Some o.oord else acc)
+      (fun _ o acc ->
+        if Hash.equal o.oeffect_hash dist_identity && o.oname = name then Some o.oord else acc)
       prog.ops None
   in
   line st.ub "rt->ord_sample = %s;"
@@ -1053,7 +1075,7 @@ let main_source (prog : program) ~precise ~(v_true : Hash.t) ~(v_false : Hash.t)
           line st.ub "bool _refused = false;";
           List.iter
             (fun (eff, msg) ->
-              line st.ub "if (!g_eff_%s) { fputs(%s, stderr); _refused = true; }" (mangle eff)
+              line st.ub "if (!%s) { fputs(%s, stderr); _refused = true; }" (effect_flag eff)
                 (c_string (msg ^ "\n")))
             entries;
           line st.ub "if (_refused) exit(3);");
@@ -1112,13 +1134,13 @@ let main_source (prog : program) ~precise ~(v_true : Hash.t) ~(v_false : Hash.t)
   line st.ub "low[li] = 0;";
   (* implemented grants: install natives for the ops this program actually reaches *)
   List.iter
-    (fun (eff, natives) ->
+    (fun (eff, identity, natives) ->
       line st.ub "if (strcmp(low, %s) == 0) {" (c_string eff);
       st.ub.indent <- st.ub.indent + 1;
-      line st.ub "g_eff_%s = true;" (mangle eff);
+      line st.ub "%s = true;" (effect_flag identity);
       Hashtbl.iter
         (fun _ o ->
-          if o.oeffect = eff then
+          if Hash.equal o.oeffect_hash identity then
             match List.assoc_opt o.oname natives with
             | Some native -> line st.ub "jq_grant_tbl[%d] = %s;" o.oord native
             | None -> ())
