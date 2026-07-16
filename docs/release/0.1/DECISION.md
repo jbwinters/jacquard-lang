@@ -5,8 +5,8 @@ Status: RC
 Candidate tag: `jacquard-core-0.1-rc1` (the tag resolves the exact reviewed commit)
 Required lineage base: `738dc8e`
 Version: `0.1.0`  
-Test count: `611` Alcotest/QCheck cases
-Cram count: `34` transcript files
+Test count: `554` Alcotest/QCheck cases
+Cram count: `32` transcript files
 
 ## Known Blockers
 

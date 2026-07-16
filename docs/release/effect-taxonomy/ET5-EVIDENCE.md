@@ -34,7 +34,7 @@ may be copied or leaked.
 The dedicated Secret suite pins repeated fixed lookup, exact version
 selection, sanitized missing cases, injected environment lookup, scripted
 vault replay, safe reference-only call recording, and a backend fault. It also
-retains ET.4's schema, store opacity, E0818/E0801, generic redaction, and
+retains ET.4's schema, store opacity, E0819/E0801, generic redaction, and
 300-case arbitrary-byte property.
 
 `test/cli/secret.t` proves an ungranted program refuses with E0814, an explicit

@@ -7,6 +7,20 @@ records the four-pillar route from the current CPS tree-walker to native
 performance while its reasoning is fresh, states which programs stay slow, and
 bounds the claim. The plan's culture: big directions start as decision docs.
 
+## Source-carrier boundary (DX.2, 2026-07-15)
+
+The backend still begins from the resolved 27-form kernel, but the CLI no
+longer requires users to hand-author that carrier. `jac build PROGRAM.jac -o
+PROGRAM` runs the shared surface parse/lower/resolution path and passes its
+resolved tops to the unchanged checker and native backend; no `.jqd` twin is
+written. Retained `.jqd` inputs remain supported.
+
+`jac export INPUT.jac -o OUTPUT.jqd` exists only for conformance and kernel
+debugging. It emits deterministic canonical bootstrap notation atomically,
+preserves semantic member hashes and quote namespace encodings, and erases
+non-identity source metadata. The reviewed decision and exact boundary are in
+`release/dx-jac-export/DECISION.md`.
+
 ## Why this is plausible at all
 
 Jacquard's semantics were chosen for analyzability: strict evaluation, immutable

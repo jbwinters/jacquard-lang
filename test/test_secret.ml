@@ -106,12 +106,12 @@ let test_diagnostics_never_render_payload () =
       Alcotest.(check bool) "redaction marker present" true (contains rendered "<secret redacted>")
   | Ok value -> Alcotest.failf "text serializer accepted %s" (Value.show value));
   (match check source with
-  | Error [ { Diag.code = "E0818"; message; _ } ] ->
+  | Error [ { Diag.code = "E0819"; message; _ } ] ->
       Alcotest.(check bool) "checker message contains no fixture" false (contains message fixture)
   | Error diagnostics -> fail_diags "Secret checker diagnostic" diagnostics
   | Ok _ -> Alcotest.fail "checker allowed Secret at a Text serialization boundary");
   (match check (Printf.sprintf "(app (var debug.inspect) %s)" read_secret) with
-  | Error [ { Diag.code = "E0818"; _ } ] -> ()
+  | Error [ { Diag.code = "E0819"; _ } ] -> ()
   | Error diagnostics -> fail_diags "Secret inspect diagnostic" diagnostics
   | Ok _ -> Alcotest.fail "checker allowed generic Secret inspection");
   let audit_source = Printf.sprintf "(app (var audit.entry-code) %s)" read_secret in

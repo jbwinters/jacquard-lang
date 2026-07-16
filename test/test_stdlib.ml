@@ -103,6 +103,32 @@ let prop_map =
            (wints xs))
       = vlist (List.map (fun n -> n * 3) xs))
 
+let prop_parallel_map =
+  qtest ~count:200 "parallel.map = list.map = List.map, including output hash" ints_arb (fun xs ->
+      let f = "(lam ((pvar n)) (app (var sub) (app (var mul) (var n) (lit 3)) (lit 1)))" in
+      let parallel = show (Printf.sprintf "(app (var parallel.map) %s %s)" (wints xs) f) in
+      let sequential = show (Printf.sprintf "(app (var list.map) %s %s)" (wints xs) f) in
+      parallel = sequential
+      && parallel = vlist (List.map (fun n -> (n * 3) - 1) xs)
+      && Hash.equal (Hash.of_string parallel) (Hash.of_string sequential))
+
+let prop_parallel_both =
+  qtest ~count:200 "parallel.both = sequential tuple, including output hash"
+    QCheck.(pair int int)
+    (fun (a, b) ->
+      let left = Printf.sprintf "(lam () (app (var mul) %s (lit 3)))" (wint a) in
+      let right = Printf.sprintf "(lam () (app (var sub) %s (lit 7)))" (wint b) in
+      let parallel = show (Printf.sprintf "(app (var parallel.both) %s %s)" left right) in
+      let sequential =
+        show
+          (Printf.sprintf
+             "(let nonrec (pvar a) (app %s) (let nonrec (pvar b) (app %s) (tuple (var a) (var b))))"
+             left right)
+      in
+      parallel = sequential
+      && parallel = Printf.sprintf "(%d, %d)" (a * 3) (b - 7)
+      && Hash.equal (Hash.of_string parallel) (Hash.of_string sequential))
+
 let prop_filter =
   qtest "list.filter = List.filter" ints_arb (fun xs ->
       show
@@ -434,6 +460,72 @@ let sig_of src =
               | Ok _ -> Alcotest.fail "expected one signature"
               | Error ds -> Eval_support.fail_diags "check" ds)))
 
+let check_expr src =
+  match Reader.parse_one ~file:"parallel-row.jqd" src with
+  | Error ds -> Error ds
+  | Ok f -> (
+      match Kernel.expr_of_form f with
+      | Error ds -> Error ds
+      | Ok e -> (
+          match Resolve.resolve_expr (Store.names_view store) e with
+          | Error ds -> Error ds
+          | Ok e -> Result.map (fun _ -> ()) (Check.check_top check_ctx (Kernel.Expr e))))
+
+let test_parallel_closed_rows () =
+  Alcotest.(check string)
+    "parallel.map signature" "forall a b. (List b, (b) ->{} a) ->{} List a"
+    (sig_of "(var parallel.map)");
+  Alcotest.(check string)
+    "parallel.both signature" "forall a b. (() ->{} a, () ->{} b) ->{} (a, b)"
+    (sig_of "(var parallel.both)");
+  let rejects_effect label src =
+    match check_expr src with
+    | Ok () -> Alcotest.failf "%s accepted an effectful callback" label
+    | Error ds ->
+        Alcotest.(check bool)
+          (label ^ " reports a type mismatch")
+          true
+          (List.exists (fun (d : Diag.t) -> d.code = "E0801") ds)
+  in
+  rejects_effect "parallel.map"
+    "(app (var parallel.map) (app (var cons) (lit 1) (var nil)) (lam ((pvar n)) (app (var emit) \
+     (var n))))";
+  rejects_effect "parallel.both"
+    "(app (var parallel.both) (lam () (app (var emit) (lit 1))) (lam () (lit 2)))"
+
+let test_parallel_sequential_control () =
+  let outcome src =
+    match Eval_support.eval_with ctx store src with
+    | Ok value -> "ok: " ^ Value.show value
+    | Error error -> "error: " ^ Runtime_err.to_string error
+  in
+  let map_f = "(lam ((pvar n)) (app (var div) (lit 12) (var n)))" in
+  let inputs = wints [ 3; 0; 2 ] in
+  let parallel_map = outcome (Printf.sprintf "(app (var parallel.map) %s %s)" inputs map_f) in
+  let sequential_map = outcome (Printf.sprintf "(app (var list.map) %s %s)" inputs map_f) in
+  Alcotest.(check string) "map preserves failure/control" sequential_map parallel_map;
+  Alcotest.(check string)
+    "map reaches the same arithmetic failure" "error: arithmetic error: division by zero"
+    parallel_map;
+  let left = "(lam () (app (var div) (lit 1) (lit 0)))" in
+  let right = "(lam () (app (var add) (lit \"wrong\") (lit 1)))" in
+  let parallel_both = outcome (Printf.sprintf "(app (var parallel.both) %s %s)" left right) in
+  let sequential_both =
+    outcome
+      (Printf.sprintf
+         "(let nonrec (pvar a) (app %s) (let nonrec (pvar b) (app %s) (tuple (var a) (var b))))"
+         left right)
+  in
+  Alcotest.(check string) "both forces left before right" sequential_both parallel_both;
+  Alcotest.(check string)
+    "left failure wins" "error: arithmetic error: division by zero" parallel_both
+
+let test_parallel_introduces_no_async_runtime () =
+  List.iter
+    (fun name ->
+      Alcotest.(check bool) (name ^ " is absent in C0") true (Store.lookup_name store name = None))
+    [ "async"; "task"; "spawn"; "await"; "cancel"; "yield" ]
+
 let test_ring1_rows () =
   let has needle s =
     let nl = String.length needle and hl = String.length s in
@@ -458,6 +550,8 @@ let suite =
     prop_eq_for_list |> QCheck_alcotest.to_alcotest;
     Alcotest.test_case "eq.for-pair" `Quick test_eq_for_pair;
     prop_map;
+    prop_parallel_map;
+    prop_parallel_both;
     prop_filter;
     prop_fold;
     prop_reverse_append;
@@ -484,4 +578,10 @@ let suite =
     prop_emit_collect_order;
     Alcotest.test_case "emit.pipe" `Quick test_emit_pipe;
     Alcotest.test_case "ring 1 rows name and discharge effects" `Quick test_ring1_rows;
+    Alcotest.test_case "parallel callbacks require closed empty rows" `Quick
+      test_parallel_closed_rows;
+    Alcotest.test_case "parallel control behavior is sequential" `Quick
+      test_parallel_sequential_control;
+    Alcotest.test_case "parallel C0 has no Async runtime" `Quick
+      test_parallel_introduces_no_async_runtime;
   ]

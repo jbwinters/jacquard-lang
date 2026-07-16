@@ -18,7 +18,7 @@ Its exact operations are once `secret.read : (SecretRef) -> Secret` and once
   `<secret redacted>`. Nested values, runtime errors, traces, and
   `debug.inspect` use that same marker without reading the payload.
 - No Show instance, Code conversion, generic Audit encoder, or serialization
-  path accepts Secret. E0818 gives a targeted checker diagnostic for generic
+  path accepts Secret. E0819 gives a targeted checker diagnostic for generic
   inspection and Text serialization attempts; ordinary typed Audit rejection
   remains E0801.
 - `Prelude.install_secret` requires an embedding to supply an explicit resolver;
