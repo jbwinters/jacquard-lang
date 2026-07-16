@@ -131,12 +131,20 @@ module Jacquard
   binding  = (name id, type? annotation, expr value)
   conspec  = (name id, field* fields)
   field    = (name? label, type ty)                        -- labels generate accessor fns
-  opspec   = (name id, type* params, type result)
+  opmode   = Multi | Once
+  opspec   = (name id, opmode mode, type* params, type result)
   row      = (hash* effects, name? var)                    -- effect set + optional row variable
   lit      = Int(int) | Real(real) | Text(text)
   refkind  = Term | Con | Op
 }
 ```
+
+Operation-mode compatibility encoding: `Multi` is represented by absence in bootstrap notation
+and contributes no bytes to `HASH_V0`; the legacy `(op name (params...) result)` spelling is
+canonical and every pre-linearity declaration retains its exact identity. `Once` is represented
+explicitly as `(op name once (params...) result)` and appends the discriminator byte `0x01` after
+the result type in that operation's canonical serialization. Explicit `multi` is rejected so the
+legacy value has exactly one carrier.
 
 **Count: 12 expr + 6 pat + 6 type + 3 decl = 27 forms.** The stated target was roughly 25.
 Section 10 names the two cheapest cuts if we want the number exactly.
@@ -212,8 +220,9 @@ Decisions within what remains:
   cheap and natural.
 - **`Handle` uses deep handlers with a mandatory return clause.** Deep is the
   Koka/Eff default and the easier one to reason about. Each `opclause` binds the operation's
-  arguments as patterns plus a named continuation (`resume`), which is an ordinary variable
-  of function type; invoking it is ordinary `App`.
+  arguments as patterns plus a named continuation (`resume`). A `Multi` operation gives it
+  ordinary reusable arrow type; a `Once` operation gives it the built-in affine `Resume` type.
+  Both use ordinary `App` syntax.
 - **`Quote` yields a value of library type `Code`** whose payload is the triple form
   *before* name resolution (macros need names and structure), with hygiene scope-sets in
   `meta`. `eval : Code ->{Eval} a` is a library effect operation, which means evaluation is
@@ -311,13 +320,14 @@ a syntax document:
   Laziness on demand is zero-ary `Lam` (thunk) and zero-ary `App` (force), and a delayed
   computation's type honestly displays its row: `() ->{IO} a` is Unison's `'{IO} a` without
   new syntax.
-- **Deep handlers, multi-shot resumptions.** Multi-shot is not a luxury: exact enumeration
-  inference for `Dist` works by resuming the captured continuation once per element of a
-  distribution's support. This is the standard effects-and-PPL construction and it is the
-  M3 demo. Honest correction to the earlier plan: **OCaml 5's native effect handlers are
-  one-shot** (resuming a continuation twice raises), so the M1 interpreter cannot lean on
-  them directly. The interpreter should be written in CPS (or with defunctionalized
-  continuations) so resumptions are ordinary values we may invoke any number of times.
+- **Deep handlers with explicit resumption modes.** Multi-shot is not a luxury for `Multi`
+  operations: exact enumeration inference for `Dist` resumes a reusable continuation once per
+  element of a distribution's support. Resource-bearing `Once` operations instead expose an
+  affine `Resume` that may be consumed at most once per possible path, with a per-instance
+  runtime backstop. This is the standard effects-and-PPL construction with a linearity boundary.
+  Honest correction to the earlier plan: **OCaml 5's native effect handlers are one-shot**, so
+  the interpreter cannot lean on them directly for `Multi`. It uses CPS/defunctionalized
+  continuations, retaining reusable values for `Multi` and guarded affine values for `Once`.
   OCaml remains a fine host; the free lunch just isn't there.
 - **Exhaustive `Match`, no null, no exceptions.** Failure is an effect with a row entry.
 - **No ambient handlers.** The runtime's root handler set is exactly the program's granted

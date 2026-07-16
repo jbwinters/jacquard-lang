@@ -14,10 +14,12 @@ support-policy() =
             | True -> "issue-refund"
             | False -> "ask-more"}}}
 
-net.dream(thunk, world-model) =
+net.dream(thunk, world-model) = {
+  let response = `op:sample`(world-model)
   handle thunk() {
     | return x -> x
-    | fetch(_) resume k -> k(`op:sample`(world-model))}
+    | fetch(_) resume k -> k(response)}
+}
 
 scripted-refund() =
   throw.catch(

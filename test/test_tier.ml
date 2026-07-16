@@ -14,6 +14,7 @@ let parse_expr src =
 
 let disc = Alcotest.testable (Fmt.of_to_string Tier.discipline_to_string) ( = )
 let tier = Alcotest.testable (Fmt.of_to_string Tier.to_string) ( = )
+let lowering = Alcotest.testable (Fmt.of_to_string Tier.native_lowering_to_string) ( = )
 let classify src = Tier.discipline ~resume:"k" (parse_expr src)
 
 let test_classify_ty () =
@@ -70,7 +71,16 @@ let test_disciplines () =
        "(match (var c) (clause (pcon true) (app (var k) (lit 1))) (clause (pcon false) (app (var \
         k) (lit 2))))");
   Alcotest.check disc "shadowed k does not count" Tier.Aborting
-    (classify "(app (lam ((pvar k)) (app (var k) (lit 1))) (lam ((pvar x)) (var x)))")
+    (classify "(app (lam ((pvar k)) (app (var k) (lit 1))) (lam ((pvar x)) (var x)))");
+  Alcotest.check lowering "tail Multi uses tokenless fast path" Tier.TokenlessTailMulti
+    (Tier.native_lowering ~mode:Kernel.Multi Tier.TailResumptive);
+  Alcotest.check lowering "tail Once retains affine token" Tier.MaterializedResume
+    (Tier.native_lowering ~mode:Kernel.Once Tier.TailResumptive);
+  List.iter
+    (fun discipline ->
+      Alcotest.check lowering "non-tail shape materializes" Tier.MaterializedResume
+        (Tier.native_lowering ~mode:Kernel.Multi discipline))
+    [ Tier.Aborting; Tier.OneShot; Tier.MultiShot ]
 
 (* --- sidecar persistence --- *)
 

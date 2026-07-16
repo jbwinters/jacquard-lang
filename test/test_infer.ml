@@ -95,7 +95,26 @@ let test_two_coins_branch_count () =
   | Ok _ -> ()
   | Error ds -> Eval_support.fail_diags "enumerate" ds);
   (* 2 coins x 2 outcomes = exactly 4 leaves: no duplicate resumption *)
-  Alcotest.(check int) "exactly 4 branches" 4 (Infer_dist.last_branch_count ())
+  Alcotest.(check int) "exactly 4 branches" 4 (Infer_dist.last_branch_count ());
+  let store, ctx = Eval_support.make_prelude_ctx () in
+  ignore
+    (Eval_support.put_src store (Store.names_view store)
+       "(defeffect linear-dist ((tvar a)) (op sample once ((tvar a)) (tvar a)))");
+  match
+    Infer_dist.enumerate ctx
+      (model_state (store, ctx) "(app (var sample) (app (var bernoulli) (lit 0.5)))")
+  with
+  | Error [ diagnostic ] ->
+      Alcotest.(check string) "driver reports runtime capture failure" "E0902" diagnostic.Diag.code;
+      Alcotest.(check bool)
+        "enumeration cannot duplicate a declared Once sample" true
+        (String.starts_with ~prefix:"error[E0906]" diagnostic.Diag.message)
+  | Error diagnostics ->
+      Alcotest.failf "declared Once sample returned unexpected diagnostics: %s"
+        (String.concat "; " (List.map Diag.to_string diagnostics))
+  | Ok posterior ->
+      Alcotest.failf "enumeration duplicated declared Once sample: %s"
+        (Infer_dist.show_posterior posterior)
 
 let test_sprinkler_exact () =
   let h = Eval_support.make_prelude_ctx () in

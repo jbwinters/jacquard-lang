@@ -82,18 +82,25 @@ demo, identity, hash-reference, and native evidence meets the contract below.
 
 ## Tier-F Linearity Modes
 
-No one-shot or multi-shot declaration syntax or checker rule ships in v0.
+EL.0 and EL.1 shipped the interpreter/native once-resumption backstop and the
+hash-stable kernel operation-mode field. EL.4 now ships D41-D42: `.jac`
+requires an explicit `once` or `multi` mode for every operation, accepts
+`once effect`/`multi effect` only as uniform-effect shorthand, and prints
+mixed effects with a mode on every operation. Bootstrap `.jqd` remains
+compatible: absent mode uniquely means legacy `Multi`, and explicit `once`
+changes canonical identity. The affine `Resume` checker and stdlib assignments
+remain owned by their companion EL.2/EL.3 tasks rather than this surface slice.
 
 **Acceptance contract:**
 
 | contract | required value |
 |---|---|
-| modes | declarations distinguish `one-shot` and `multi-shot` operations |
-| one-shot semantics | a captured continuation may be resumed at most once; a second resume is rejected by the checker or a pinned runtime diagnostic |
-| multi-shot semantics | a captured continuation may be resumed more than once and preserves existing deep-handler behavior |
-| runtime | specify interaction with native copy-on-resume and interpreter continuation cloning |
-| migration | define defaults for existing declarations plus compatibility and migration rules |
-| evidence | pin checker diagnostics and interpreter/native semantic parity before any grammar change |
+| modes | surface declarations distinguish explicit `once` and `multi` operations, with uniform effect-level shorthand |
+| once semantics | a captured once continuation may be resumed at most once; the interpreter and native runtime reject a second resume with E0906 |
+| multi semantics | a multi continuation may be resumed repeatedly and preserves existing deep-handler behavior |
+| compatibility | bootstrap absent mode remains the unique legacy `Multi` encoding; explicit `once` is interface-hashed |
+| surface default | none; omission, duplication, shorthand/per-operation conflict, and partially annotated mixed effects are E1236 |
+| evidence | focused parser/printer/recovery tests and a `.jac`/`.jqd` twin pin D41-D42 before release integration |
 
 ## Tier-F Resource-Scoped Rows
 

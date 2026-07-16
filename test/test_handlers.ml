@@ -24,6 +24,9 @@ let make () =
   ignore
     (Eval_support.put_src h.Eval_support.store h.Eval_support.names
        "(defeffect beeper () (op beep () (tref any)))");
+  ignore
+    (Eval_support.put_src h.Eval_support.store h.Eval_support.names
+       "(defeffect linear () (op signal once () (tref any)))");
   h
 
 (* THE multi-shot smoke test: a Choose op whose handler resumes with true and again with
@@ -48,6 +51,214 @@ let test_multishot_thrice () =
        (Eval_support.eval_ok h
           "(handle (app (var mul) (lit 2) (app (var choose))) (ret (pvar x) (var x)) (opclause \
            choose () k (tuple (app (var k) (lit 1)) (app (var k) (lit 2)) (app (var k) (lit 3)))))"))
+
+let apply_runtime_resume h resume value = Eval.call h.Eval_support.ctx resume [ Value.VInt value ]
+
+let expect_runtime_int label expected = function
+  | Ok (Value.VInt actual) -> Alcotest.(check int) label expected actual
+  | Ok value -> Alcotest.failf "%s: expected %d, got %s" label expected (Value.show value)
+  | Error error ->
+      Alcotest.failf "%s: unexpected runtime defect: %s" label (Runtime_err.to_string error)
+
+let capture_once_resume h =
+  let expression = Eval_support.parse_expr h "(app (var add) (app (var tick)) (lit 1))" in
+  match Eval.run_state_capturing_once h.Eval_support.ctx (Eval.expr_state expression) with
+  | Ok (Eval.OCOp { name = "tick"; resume; _ }) -> resume
+  | Ok (Eval.OCOp { name; _ }) -> Alcotest.failf "expected to capture tick, got %s" name
+  | Ok (Eval.OCValue value) ->
+      Alcotest.failf "expected a captured continuation, got %s" (Value.show value)
+  | Error error ->
+      Alcotest.failf "capturing once continuation failed: %s" (Runtime_err.to_string error)
+
+(* EL.0 exercises the runtime boundary directly. EL.1 will decide which operation declarations
+   construct [VOnceResume]; ordinary handler captures above remain [VResume] and therefore
+   multi-shot. *)
+let test_once_first_resume_and_drop () =
+  let h = make () in
+  expect_runtime_int "real captured continuation resumes" 42
+    (apply_runtime_resume h (capture_once_resume h) 41);
+  let dropped = capture_once_resume h in
+  Alcotest.(check string) "dropping is legal" "<resume>" (Value.show dropped)
+
+let test_once_second_resume_traps () =
+  let h = make () in
+  let resume = capture_once_resume h in
+  expect_runtime_int "first resume succeeds" 2 (apply_runtime_resume h resume 1);
+  match apply_runtime_resume h resume 2 with
+  | Error Runtime_err.Once_resumed_twice ->
+      Alcotest.(check string)
+        "stable E0906 rendering"
+        "error[E0906]: a once continuation may be resumed at most once per captured instance"
+        (Runtime_err.to_string Runtime_err.Once_resumed_twice)
+  | Error error ->
+      Alcotest.failf "expected E0906 once-resumption defect, got %s" (Runtime_err.to_string error)
+  | Ok value -> Alcotest.failf "second once resume unexpectedly returned %s" (Value.show value)
+
+let test_once_instances_are_independent () =
+  let h = make () in
+  let left = capture_once_resume h in
+  let right = capture_once_resume h in
+  expect_runtime_int "left instance" 11 (apply_runtime_resume h left 10);
+  expect_runtime_int "right instance" 21 (apply_runtime_resume h right 20)
+
+let test_once_state_survives_untrusted_callback () =
+  let h = make () in
+  let resume = capture_once_resume h in
+  let callback =
+    Value.VBuiltin
+      ( "consume-once",
+        function
+        | [ captured ] -> (
+            match Eval.call h.Eval_support.ctx captured [ Value.VInt 40 ] with
+            | Ok (Value.VInt 41) -> Ok captured
+            | Ok value ->
+                Error
+                  (Runtime_err.Type_error
+                     (Printf.sprintf "callback got unexpected value %s" (Value.show value)))
+            | Error error -> Error error)
+        | args ->
+            Error (Runtime_err.Arity (Printf.sprintf "expected 1 arg, got %d" (List.length args)))
+      )
+  in
+  let returned =
+    match Eval.call h.Eval_support.ctx callback [ resume ] with
+    | Ok value -> value
+    | Error error ->
+        Alcotest.failf "hostile callback failed early: %s" (Runtime_err.to_string error)
+  in
+  match Eval.call h.Eval_support.ctx returned [ Value.VInt 41 ] with
+  | Error Runtime_err.Once_resumed_twice -> ()
+  | Error error ->
+      Alcotest.failf "expected callback-consumed E0906, got %s" (Runtime_err.to_string error)
+  | Ok value -> Alcotest.failf "callback reset once state and returned %s" (Value.show value)
+
+let test_once_validated_state_cannot_reset_consumption () =
+  let h = make () in
+  let resume = capture_once_resume h in
+  let argument = Kernel.{ it = Lit (LInt 40); meta = Meta.empty } in
+  let initial_state =
+    Eval.SApply (resume, [ Value.FAppFn { args = [ argument ]; scope = Value.empty_scope } ])
+  in
+  let validated =
+    match Eval.validate_state_once h.Eval_support.ctx initial_state with
+    | Ok state -> state
+    | Error error -> Alcotest.failf "once state validation failed: %s" (Runtime_err.to_string error)
+  in
+  (match
+     Eval.run_validated_state_capturing h.Eval_support.ctx
+       (Eval.fresh_validated_state h.Eval_support.ctx validated)
+   with
+  | Ok (Eval.VCValue (Value.VInt 41)) -> ()
+  | Ok (Eval.VCValue value) -> Alcotest.failf "first validated run returned %s" (Value.show value)
+  | Ok (Eval.VCOp _) -> Alcotest.fail "first validated run unexpectedly captured an operation"
+  | Error error -> Alcotest.failf "first validated run failed: %s" (Runtime_err.to_string error));
+  match
+    Eval.run_validated_state_capturing h.Eval_support.ctx
+      (Eval.fresh_validated_state h.Eval_support.ctx validated)
+  with
+  | Error Runtime_err.Once_resumed_twice -> ()
+  | Error error ->
+      Alcotest.failf "expected validated-state E0906, got %s" (Runtime_err.to_string error)
+  | Ok (Eval.VCValue value) ->
+      Alcotest.failf "validated-state reuse reset consumption and returned %s" (Value.show value)
+  | Ok (Eval.VCOp _) -> Alcotest.fail "validated-state reuse unexpectedly captured an operation"
+
+let test_runtime_multishot_instance_unchanged () =
+  let h = make () in
+  let resume = Value.VResume [] in
+  expect_runtime_int "first multi resume" 10 (apply_runtime_resume h resume 10);
+  expect_runtime_int "second multi resume" 20 (apply_runtime_resume h resume 20)
+
+let test_declared_once_handler_traps () =
+  let h = make () in
+  match
+    Eval_support.eval_err h
+      "(handle (app (var signal)) (ret (pvar x) (var x)) (opclause signal () k (let nonrec (pwild) \
+       (app (var k) (lit 1)) (app (var k) (lit 2)))))"
+  with
+  | Runtime_err.Once_resumed_twice -> ()
+  | error -> Alcotest.failf "declared Once must select E0906, got %s" (Runtime_err.to_string error)
+
+let declared_once_root_kont h =
+  let expression = Eval_support.parse_expr h "(app (var add) (app (var signal)) (lit 1))" in
+  match Eval.run_state_capturing h.Eval_support.ctx (Eval.expr_state expression) with
+  | Ok (Eval.COp { name = "signal"; kont; _ }) -> kont
+  | Ok (Eval.COp { name; _ }) -> Alcotest.failf "expected root signal capture, got %s" name
+  | Ok (Eval.CValue value) ->
+      Alcotest.failf "expected declared Once root capture, got %s" (Value.show value)
+  | Error error ->
+      Alcotest.failf "declared Once root capture failed: %s" (Runtime_err.to_string error)
+
+let test_declared_once_root_capture_is_sealed () =
+  let h = make () in
+  let kont = declared_once_root_kont h in
+  let resume value =
+    Result.bind (Eval.resume_captured_state h.Eval_support.ctx kont (Value.VInt value))
+      (fun state -> Eval.run_state_capturing h.Eval_support.ctx state)
+  in
+  (match resume 40 with
+  | Ok (Eval.CValue (Value.VInt 41)) -> ()
+  | Ok (Eval.CValue value) -> Alcotest.failf "first root resume returned %s" (Value.show value)
+  | Ok (Eval.COp _) -> Alcotest.fail "first root resume unexpectedly captured another operation"
+  | Error error -> Alcotest.failf "first root resume failed: %s" (Runtime_err.to_string error));
+  match resume 50 with
+  | Error Runtime_err.Once_resumed_twice -> ()
+  | Error error -> Alcotest.failf "expected sealed root E0906, got %s" (Runtime_err.to_string error)
+  | Ok (Eval.CValue value) ->
+      Alcotest.failf "ordinary root API duplicated Once frames and returned %s" (Value.show value)
+  | Ok (Eval.COp _) -> Alcotest.fail "ordinary root API duplicated Once into another capture"
+
+let test_declared_once_validated_capture_is_sealed () =
+  let h = make () in
+  let expression = Eval_support.parse_expr h "(app (var add) (app (var signal)) (lit 1))" in
+  let initial =
+    match Eval.validate_state_once h.Eval_support.ctx (Eval.expr_state expression) with
+    | Ok state -> state
+    | Error error ->
+        Alcotest.failf "validating declared Once state failed: %s" (Runtime_err.to_string error)
+  in
+  let kont =
+    match
+      Eval.run_validated_state_capturing h.Eval_support.ctx
+        (Eval.fresh_validated_state h.Eval_support.ctx initial)
+    with
+    | Ok (Eval.VCOp { name = "signal"; kont; _ }) -> kont
+    | Ok (Eval.VCOp { name; _ }) -> Alcotest.failf "expected validated signal, got %s" name
+    | Ok (Eval.VCValue value) ->
+        Alcotest.failf "expected validated Once capture, got %s" (Value.show value)
+    | Error error ->
+        Alcotest.failf "validated Once capture failed: %s" (Runtime_err.to_string error)
+  in
+  let first = Eval.resume_validated_state h.Eval_support.ctx kont (Value.VInt 40) in
+  (match first with
+  | Error error -> Alcotest.failf "first validated resume failed: %s" (Runtime_err.to_string error)
+  | Ok state -> (
+      match Eval.run_validated_state_capturing h.Eval_support.ctx state with
+      | Ok (Eval.VCValue (Value.VInt 41)) -> ()
+      | Ok (Eval.VCValue value) ->
+          Alcotest.failf "first validated resume returned %s" (Value.show value)
+      | Ok (Eval.VCOp _) -> Alcotest.fail "first validated resume captured another operation"
+      | Error error ->
+          Alcotest.failf "first validated resumed run failed: %s" (Runtime_err.to_string error)));
+  match Eval.resume_validated_state h.Eval_support.ctx kont (Value.VInt 50) with
+  | Error Runtime_err.Once_resumed_twice -> ()
+  | Error error ->
+      Alcotest.failf "expected sealed validated E0906, got %s" (Runtime_err.to_string error)
+  | Ok _ -> Alcotest.fail "validated root API minted a second Once budget"
+
+let test_runtime_resumption_modes () =
+  (* Keep the released Alcotest inventory stable while grouping the EL.0 hostile matrix under the
+     existing low-level multi-shot regression case. *)
+  test_multishot_thrice ();
+  test_once_first_resume_and_drop ();
+  test_once_second_resume_traps ();
+  test_once_instances_are_independent ();
+  test_once_state_survives_untrusted_callback ();
+  test_once_validated_state_cannot_reset_consumption ();
+  test_runtime_multishot_instance_unchanged ();
+  test_declared_once_handler_traps ();
+  test_declared_once_root_capture_is_sealed ();
+  test_declared_once_validated_capture_is_sealed ()
 
 (* The nasty multi-shot/deep interaction in one test:
    - choose's handler resumes the same continuation twice;
@@ -255,7 +466,8 @@ let test_op_as_value () =
 let suite =
   [
     Alcotest.test_case "MULTI-SHOT smoke test (Choose)" `Quick test_multishot_choose;
-    Alcotest.test_case "multi-shot thrice" `Quick test_multishot_thrice;
+    Alcotest.test_case "runtime resumption modes (multi + once hostile matrix)" `Quick
+      test_runtime_resumption_modes;
     Alcotest.test_case "multi-shot resumes catch inner effects exactly" `Quick
       test_multishot_deep_inner_effect_exact_count;
     Alcotest.test_case "state effect threads state" `Quick test_state_effect;

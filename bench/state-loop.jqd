@@ -1,5 +1,6 @@
-; handler-tier benchmark (task 75): a tail-resumptive state loop — one
-; million get/put pairs through state.run's function-of-state encoding.
+; handler-tier benchmark (task 75): a semantically single-resume state loop whose
+; function-of-state encoding is syntactically capturing and materializes resumptions —
+; one million get/put pairs through state.run.
 ; The claim boundary puts this in the OCaml/Koka band, not near-C.
 (defterm ((binding spin ()
   (lam ((pvar n))

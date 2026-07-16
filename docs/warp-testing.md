@@ -23,7 +23,7 @@ kept byte-identical with fixtures by the docs-doctest lane.
 ## 1. Core: one effect, two test types
 
 ```jacquard doctest=warp-check-effect mode=check fixture=warp-check-effect.jac stdout=warp-check-effect.stdout stderr=empty exit=0
-effect Check a where {
+multi effect Check a where {
   check : (Bool, Text) -> ()
   fail : (Text) -> a
 }
@@ -71,7 +71,7 @@ check.true : (Bool, Text) ->{Check} ()
 check.eq : forall a. (a, a, Eq a, Show a, Text) ->{Check} ()
 check.some : forall a b. (Option a, b, Text) ->{Check} ()
 check.fails : forall a | e. (() ->{Abort, Check | e} a, Text) ->{Check | e} ()
-check.throws : forall a b | e. (() ->{Throw, Check | e} a, (b) ->{Check | e} Bool, Show b, Text) ->{Check | e} ()
+check.throws : forall a b | e. (() ->{Check, Throw | e} a, (b) ->{Check | e} Bool, Show b, Text) ->{Check | e} ()
 ```
 
 `check.fails` deserves a note: testing a failure path means handling the failure,
@@ -177,7 +177,7 @@ resampling for the sampling lane is future work.
 One small effect turns the fixture handlers into a simulation rig:
 
 ```jacquard doctest=warp-fault-effect mode=check fixture=warp-fault-effect.jac stdout=warp-fault-effect.stdout stderr=empty exit=0
-effect Fault where {
+multi effect Fault where {
   flaky : (Text) -> Bool
 }
 ```

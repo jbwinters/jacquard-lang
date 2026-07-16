@@ -1,6 +1,8 @@
 Tier statistics for the native route (PF.2 phase 1): the same table
-docs/native-compilation.md publishes for the prelude. Sig changes that move a
-row tier land here on purpose, like the sigs goldens.
+docs/native-compilation.md publishes for the prelude. Handler reporting keeps
+syntactic resume shape separate from mode-aware native lowering: a tail-shaped
+Once clause still materializes its affine token. Sig changes that move a row
+tier land here on purpose, like the sigs goldens.
 
   $ export JACQUARD_PRELUDE=../../prelude
 
@@ -30,36 +32,39 @@ row tier land here on purpose, like the sigs goldens.
     state                1
     throw               52
   
-  == handler op clauses: 32 ==
+  == handler op clauses: 32 (syntactic resumption shape) ==
   tail-resumptive        6  18%
   aborting               6  18%
   one-shot               3   9%
   multi-shot            17  53%
-    abort            aborting           2
-    check            one-shot           1
-    check            multi-shot         2
-    complete         multi-shot         1
-    emit             tail-resumptive    1
-    emit             one-shot           1
-    fail             aborting           1
-    fetch            multi-shot         4
-    flaky            tail-resumptive    1
-    flaky            multi-shot         2
-    get              multi-shot         1
-    list-dir         tail-resumptive    1
-    list-dir         multi-shot         1
-    now              tail-resumptive    1
-    observe          one-shot           1
-    print            multi-shot         1
-    put              multi-shot         1
-    read             tail-resumptive    1
-    read             multi-shot         1
-    read-line        multi-shot         1
-    sample           multi-shot         1
-    sleep            tail-resumptive    1
-    throw            aborting           2
-    write            aborting           1
-    write            multi-shot         1
+  == native handler lowering: 32 (shape + operation mode) ==
+  tokenless-tail-multi         1   3%
+  materialized-resume         31  96%
+    abort            once   aborting         materialized-resume        2
+    check            multi  one-shot         materialized-resume        1
+    check            multi  multi-shot       materialized-resume        2
+    complete         once   multi-shot       materialized-resume        1
+    emit             once   tail-resumptive  materialized-resume        1
+    emit             once   one-shot         materialized-resume        1
+    fail             multi  aborting         materialized-resume        1
+    fetch            once   multi-shot       materialized-resume        4
+    flaky            multi  tail-resumptive  tokenless-tail-multi       1
+    flaky            multi  multi-shot       materialized-resume        2
+    get              multi  multi-shot       materialized-resume        1
+    list-dir         once   tail-resumptive  materialized-resume        1
+    list-dir         once   multi-shot       materialized-resume        1
+    now              once   tail-resumptive  materialized-resume        1
+    observe          multi  one-shot         materialized-resume        1
+    print            once   multi-shot       materialized-resume        1
+    put              multi  multi-shot       materialized-resume        1
+    read             once   tail-resumptive  materialized-resume        1
+    read             once   multi-shot       materialized-resume        1
+    read-line        once   multi-shot       materialized-resume        1
+    sample           multi  multi-shot       materialized-resume        1
+    sleep            once   tail-resumptive  materialized-resume        1
+    throw            once   aborting         materialized-resume        2
+    write            once   aborting         materialized-resume        1
+    write            once   multi-shot       materialized-resume        1
   
   stamped 199 tier sidecars
 

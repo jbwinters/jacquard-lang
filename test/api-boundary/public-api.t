@@ -100,10 +100,88 @@ Validated inference states cannot be resumed from arbitrary public frame lists.
   $ if ocamlc -I "$JACQUARD_API" -c forged_resume.ml >forged_resume.out 2>&1; then
   >   echo forgeable
   > elif grep -Fq "Error: This expression has type 'a list" forged_resume.out \
-  >   && grep -Fq "but an expression was expected of type Jacquard.Eval.validated_kont" forged_resume.out; then
+  >   && grep -Fq "but an expression was expected of type" forged_resume.out \
+  >   && grep -Fq "Jacquard.Eval.validated_captured_kont" forged_resume.out; then
   >   echo sealed
   > else
   >   cat forged_resume.out
+  >   exit 1
+  > fi
+  sealed
+
+Ordinary mode-aware captures likewise cannot be forged from or unwrapped into public frame lists.
+
+  $ cat > forged_captured_resume.ml <<'EOF'
+  > open Jacquard
+  > let forge ctx value = Eval.resume_captured_state ctx [] value
+  > EOF
+  $ if ocamlc -I "$JACQUARD_API" -c forged_captured_resume.ml >forged_captured_resume.out 2>&1; then
+  >   echo forgeable
+  > elif grep -Fq "Error: This expression has type 'a list" forged_captured_resume.out \
+  >   && grep -Fq "but an expression was expected of type" forged_captured_resume.out \
+  >   && grep -Fq "Jacquard.Eval.captured_kont" forged_captured_resume.out; then
+  >   echo sealed
+  > else
+  >   cat forged_captured_resume.out
+  >   exit 1
+  > fi
+  sealed
+  $ cat > unwrap_captured_resume.ml <<'EOF'
+  > open Jacquard
+  > let unwrap (kont : Eval.captured_kont) =
+  >   match kont with Eval.Multi_kont frames -> frames
+  > EOF
+  $ if ocamlc -I "$JACQUARD_API" -c unwrap_captured_resume.ml >unwrap_captured_resume.out 2>&1; then
+  >   echo unwrap-able
+  > elif grep -Fq "Error: Unbound constructor Eval.Multi_kont" unwrap_captured_resume.out; then
+  >   echo sealed
+  > else
+  >   cat unwrap_captured_resume.out
+  >   exit 1
+  > fi
+  sealed
+
+Once-resumption consumption and captured frames belong to a private module. The evaluator seals a
+real capture before returning it; clients cannot construct a token, inspect it, restore it, or
+extract frames and rewrap the same capture with a fresh budget.
+
+  $ cat > once_state_public.ml <<'EOF'
+  > open Jacquard
+  > let _ = Once_state.snapshot
+  > EOF
+  $ if ocamlc -I "$JACQUARD_API" -c once_state_public.ml >once_state_public.out 2>&1; then
+  >   echo "Once_state exposed"
+  > elif grep -Fq "module Once_state is an alias for module Jacquard__Once_state, which is missing" once_state_public.out; then
+  >   echo "Once_state unavailable"
+  > else
+  >   cat once_state_public.out
+  >   exit 1
+  > fi
+  Once_state unavailable
+  $ cat > once_factory.ml <<'EOF'
+  > open Jacquard
+  > let _ = Value.once_resume
+  > EOF
+  $ if ocamlc -I "$JACQUARD_API" -c once_factory.ml >once_factory.out 2>&1; then
+  >   echo "once factory exposed"
+  > elif grep -Fq "Error: Unbound value Value.once_resume" once_factory.out; then
+  >   echo "factory sealed"
+  > else
+  >   cat once_factory.out
+  >   exit 1
+  > fi
+  factory sealed
+  $ cat > once_forge.ml <<'EOF'
+  > open Jacquard
+  > let forge (frames : Value.kont) = Value.VOnceResume frames
+  > EOF
+  $ if ocamlc -I "$JACQUARD_API" -c once_forge.ml >once_forge.out 2>&1; then
+  >   echo forgeable
+  > elif grep -Fq "Jacquard.Value.kont Jacquard.Once_state.t" once_forge.out \
+  >   && grep -Fq "Jacquard.Once_state.t is abstract because" once_forge.out; then
+  >   echo sealed
+  > else
+  >   cat once_forge.out
   >   exit 1
   > fi
   sealed

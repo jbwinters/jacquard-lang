@@ -1,5 +1,6 @@
 ; The fault effect and its handlers (W6.7): fault injection is a library.
 ; flaky names its site so reports can say WHERE the world failed.
+; D44 reviewed Multi: exhaustive fault handlers explore alternate worlds.
 (defeffect fault () (op flaky ((tref text)) (tref bool)))
 
 ; the explicit happy path (an unhandled flaky in a hermetic Test already fails

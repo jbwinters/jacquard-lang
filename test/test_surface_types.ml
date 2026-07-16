@@ -117,11 +117,11 @@ let test_documented_signatures () =
         "../docs/stdlib.md",
         Some "state.run" );
       ( "Warp",
-        "check.throws : forall a b | e. (() ->{Throw, Check | e} a, (b) ->{Check | e} Bool, Show \
+        "check.throws : forall a b | e. (() ->{Check, Throw | e} a, (b) ->{Check | e} Bool, Show \
          b, Text) ->{Check | e} ()",
         "../docs/warp-testing.md",
         Some "check.throws" );
-      ("demo", "escrow.workflow : () ->{Fs, Console, Net} Int", "cli/escrow.t", None);
+      ("demo", "escrow.workflow : () ->{Console, Fs, Net} Int", "cli/escrow.t", None);
       ("tutorial safe-div", "safe-div : (Int, Int) ->{Abort} Int", "../docs/tutorial.md", None);
       ( "tutorial to-option",
         "to-option : forall a | e. (() ->{Abort | e} a) ->{| e} Option a",

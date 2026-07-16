@@ -3,7 +3,7 @@ type Distribution a =
   | Categorical(values: List (a, Real))
   | UniformInt Int Int
 
-effect Dist a where {
+multi effect Dist a where {
   sample : (Distribution a) -> a
   observe : (Distribution a, a) -> ()
 }

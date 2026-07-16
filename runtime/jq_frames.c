@@ -100,7 +100,8 @@ static jq_value call_n(jq_rt *rt, jq_value fn, uint16_t n, const jq_value *args)
   return jq_tc_drive(rt, jq_apply(rt, fn, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7]));
 }
 
-/* HF slot layout: [0] ret clause; then per entry [1+2i] jq_int(ord<<1|kind),
+/* HF slot layout: [0] ret clause; then per entry [1+2i]
+   jq_int(ord<<2|once<<1|kind),
    [2+2i] clause. aux = entry count. */
 
 static void push_entries_of(jq_rt *rt, jq_block *hf) {
@@ -113,9 +114,10 @@ static void push_entries_of(jq_rt *rt, jq_block *hf) {
     uint64_t word = (uint64_t)jq_int_val(slots[1 + 2 * i]);
     jq_value clause = slots[2 + 2 * i];
     jq_dup(clause); /* hs takes its own ref; hf keeps its copy for re-installs */
-    es[i] = (jq_handler_entry){ .op_ord = (uint32_t)(word >> 1),
+    es[i] = (jq_handler_entry){ .op_ord = (uint32_t)(word >> 2),
                                 .clause = clause,
                                 .kind = (uint8_t)(word & 1),
+                                .once = (word & 2) != 0,
                                 .hf = hf };
   }
   jq_handle_push(rt, n, es);
@@ -150,6 +152,8 @@ static jq_value jq_dispatch(jq_rt *rt, jq_block *hf, jq_value v) {
     if (at == 0) jq_runtime_error("jacquard runtime: capture lost its handler frame (internal)");
     uint32_t cnt = rt->ks_len - (at - 1);
     jq_block *res = jq_alloc_block(JQ_RESUME, 0, (uint16_t)(1 + cnt));
+    if (rt->pending.once) res->flags |= JQ_FLAG_RESUME_ONCE;
+    rt->pending.once = false;
     res->payload[0] = cnt;
     for (uint32_t i = 0; i < cnt; i++) res->payload[1 + i] = (uint64_t)rt->ks[at - 1 + i];
     rt->ks_len = at - 1;
@@ -179,7 +183,9 @@ jq_value jq_handle2(jq_rt *rt, uint32_t n, const jq_handler_entry *entries, jq_v
   jq_value *slots = jq_frame_slots(hf);
   slots[0] = ret_clause; /* ownership transfers in */
   for (uint32_t i = 0; i < n; i++) {
-    slots[1 + 2 * i] = jq_int((int64_t)((uint64_t)entries[i].op_ord << 1 | entries[i].kind));
+    slots[1 + 2 * i] =
+        jq_int((int64_t)((uint64_t)entries[i].op_ord << 2 |
+                         (uint64_t)entries[i].once << 1 | entries[i].kind));
     slots[2 + 2 * i] = entries[i].clause; /* ownership transfers in */
   }
   jq_ks_push(rt, hf);
@@ -227,6 +233,12 @@ static jq_block *clone_frame(jq_block *f) {
    single argument, owned. */
 jq_value jq_resume(jq_rt *rt, jq_value resume, jq_value v) {
   jq_block *r = jq_block_of(resume);
+  if (r->flags & JQ_FLAG_RESUME_ONCE) {
+    if (r->flags & JQ_FLAG_RESUME_USED)
+      jq_runtime_error(
+          "error[E0906]: a once continuation may be resumed at most once per captured instance");
+    r->flags |= JQ_FLAG_RESUME_USED;
+  }
   uint32_t n = (uint32_t)r->payload[0];
   jq_block **chain = malloc(n * sizeof(jq_block *));
   if (!chain) jq_runtime_error("jacquard runtime: out of memory");

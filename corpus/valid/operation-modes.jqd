@@ -1,0 +1,3 @@
+(defeffect gate () (op enter once () (ttuple)))
+(defeffect choice () (op choose () (ttuple)))
+(defeffect control () (op stop once () (ttuple)) (op branch () (ttuple)))

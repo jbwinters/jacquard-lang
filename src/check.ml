@@ -16,9 +16,12 @@
       honored as checks).
     - [Handle] (W3.4): the body's ambient is the handled effects joined onto the outer ambient
       (removal is implicit: handled effects stop at the handler, everything else shares the outer
-      row); the return binder gets the body's type; [resume] has type
-      [(op result) ->{outer ambient} answer]; every clause body checks at the answer type under the
-      outer ambient.
+      row); the return binder gets the body's type; a [multi] clause's [resume] is an ordinary
+      arrow, while a [once] clause receives the built-in affine [Resume] callable; {!Affine_resume}
+      rejects escapes before ordinary inference, then rejects duplicate valid consumptions after the
+      clause body checks at the answer type under the outer ambient. The sole affine-closure rule is
+      a direct clause lambda returned by a [Handle] that is itself immediately applied once to
+      syntactic-value arguments; only that outer lambda boundary is opened.
 
     Store terms are checked on demand and cached by hash; the store's hash DAG guarantees no
     cross-declaration cycles. Builtin markers get their signatures from
@@ -330,6 +333,64 @@ let op_scheme ctx ?meta (h : Hash.t) : scheme =
   | Ok _ -> err ?meta ~code:"E0805" "hash %s is not an operation" (Hash.to_hex h)
   | Error ds -> err ?meta ~code:"E0805" "%s" (String.concat "; " (List.map Diag.to_string ds))
 
+(** [operation_mode ctx h] returns the identity-bearing multiplicity declared for operation [h]. It
+    reports E0805 if [h] does not locate an operation, so callers never silently treat malformed
+    metadata as legacy [Multi]. *)
+let operation_mode ctx ?meta (h : Hash.t) : Kernel.op_mode =
+  match Store.locate ctx.store h with
+  | Ok { Store.decl = { Kernel.it = Kernel.DefEffect { ops; _ }; _ }; role = Store.Operation i; _ }
+    ->
+      (List.nth ops i).Kernel.op_mode
+  | Ok _ -> err ?meta ~code:"E0805" "hash %s is not an operation" (Hash.to_hex h)
+  | Error ds -> err ?meta ~code:"E0805" "%s" (String.concat "; " (List.map Diag.to_string ds))
+
+(** [contains_group_ref expression] reports whether [expression] can recur through its definition
+    group. The affine-resumption checker uses it to reject transfers into helpers whose number of
+    calls cannot be bounded syntactically. *)
+let rec contains_group_ref (expression : Kernel.expr) =
+  match expression.it with
+  | Kernel.GroupRef _ -> true
+  | Kernel.Lam (_, body) | Kernel.Unquote body | Kernel.Ann (body, _) -> contains_group_ref body
+  | Kernel.App (fn, args) -> contains_group_ref fn || List.exists contains_group_ref args
+  | Kernel.Let { value; body; _ } -> contains_group_ref value || contains_group_ref body
+  | Kernel.Match (scrutinee, clauses) ->
+      contains_group_ref scrutinee
+      || List.exists (fun (clause : Kernel.clause) -> contains_group_ref clause.cbody) clauses
+  | Kernel.Tuple items -> List.exists contains_group_ref items
+  | Kernel.Handle { body; ret; ops } ->
+      contains_group_ref body || contains_group_ref ret.rbody
+      || List.exists (fun (clause : Kernel.opclause) -> contains_group_ref clause.obody) ops
+  | Kernel.Lit _ | Kernel.Var _ | Kernel.Ref _ | Kernel.Quote _ -> false
+
+(** [affine_callable ctx hash] exposes a stored lambda to the once-resumption checker. Only direct
+    term lambdas are eligible; builtins and computed callable values remain escape boundaries. A
+    recursive SCC is marked so transferring an affine token into an unbounded call cycle is rejected
+    rather than guessed safe. *)
+let affine_callable ctx hash =
+  match Store.locate ctx.store hash with
+  | Ok { Store.decl = { Kernel.it = Kernel.DefTerm bindings; _ }; role = Store.Member index; _ } ->
+      let binding = List.nth bindings index in
+      let rec lambda expression =
+        match expression.Kernel.it with
+        | Kernel.Lam (params, body) -> Some (params, body)
+        | Kernel.Ann (subject, _) -> lambda subject
+        | _ -> None
+      in
+      Option.map
+        (fun (params, body) ->
+          Affine_resume.
+            {
+              resolved_key = Hash.to_hex hash;
+              resolved_source =
+                Printf.sprintf "<stored:%s@%s>" (name_of ctx hash)
+                  (String.sub (Hash.to_hex hash) 0 8);
+              resolved_params = params;
+              resolved_body = body;
+              resolved_recursive = List.length bindings > 1 || contains_group_ref binding.value;
+            })
+        (lambda binding.value)
+  | Ok _ | Error _ -> None
+
 (* ------------------------------------------------------------------ *)
 (* Generalization                                                      *)
 (* ------------------------------------------------------------------ *)
@@ -343,6 +404,12 @@ let rec is_syntactic_value (e : Kernel.expr) : bool =
   | Kernel.App ({ Kernel.it = Kernel.Ref (_, Kernel.Con); _ }, args) ->
       List.for_all is_syntactic_value args
   | Kernel.Ann (inner, _) -> is_syntactic_value inner
+  | _ -> false
+
+let rec is_immediately_applied_handle (e : Kernel.expr) : bool =
+  match e.Kernel.it with
+  | Kernel.Handle _ -> true
+  | Kernel.Ann (inner, _) -> is_immediately_applied_handle inner
   | _ -> false
 
 (* Close generalizable row tails that occur exactly once in the type: an unconstrained
@@ -364,6 +431,16 @@ let close_lonely_rows ~gen_level (t : ty) : unit =
              Hashtbl.replace counts id (n + 1, r)
          | _ -> ());
         walk result
+    | TResume (input, row, answer) ->
+        walk input;
+        (let row = repr_row row in
+         match row.tail with
+         | RVar ({ contents = RUnbound { id; level } } as rv) when level > gen_level -> (
+             match Hashtbl.find_opt counts id with
+             | None -> Hashtbl.add counts id (1, rv)
+             | Some (n, _) -> Hashtbl.replace counts id (n + 1, rv))
+         | _ -> ());
+        walk answer
     | TVariadicArrow (param, row, result) ->
         walk param;
         (let row = repr_row row in
@@ -453,7 +530,7 @@ let rec term_scheme ctx ?meta (h : Hash.t) : scheme =
           | Error ds ->
               err ?meta ~code:"E0805" "%s" (String.concat "; " (List.map Diag.to_string ds))))
 
-and infer ctx env ~(ambient : row) (e : Kernel.expr) : ty =
+and infer ?(immediate_transformer = false) ctx env ~(ambient : row) (e : Kernel.expr) : ty =
   let meta = e.Kernel.meta in
   match e.Kernel.it with
   | _ when Option.is_some (Meta.surface_hole meta) -> new_tvar ctx.level
@@ -478,7 +555,17 @@ and infer ctx env ~(ambient : row) (e : Kernel.expr) : ty =
       let body_ty = infer ctx env' ~ambient:lam_ambient body in
       TArrow (param_tys, lam_ambient, body_ty)
   | Kernel.App (fn, args) -> (
-      let fn_ty = infer ctx env ~ambient fn in
+      let fn_ty =
+        if
+          is_immediately_applied_handle fn
+          && List.for_all Affine_resume.is_immediate_transformer_argument args
+        then
+          (* This context is decided before inference and is not propagated through aliases.
+             Type annotations are transparent, so only annotations around the literal function
+             child of this one application may preserve it. *)
+          infer ~immediate_transformer:true ctx env ~ambient fn
+        else infer ctx env ~ambient fn
+      in
       let arg_tys = List.map (infer ctx env ~ambient) args in
       match repr fn_ty with
       | TArrow (params, frow, result) ->
@@ -541,6 +628,17 @@ and infer ctx env ~(ambient : row) (e : Kernel.expr) : ty =
           (try Types.unify_rows (opened ctx frow) ambient
            with Unify_error detail ->
              err ~meta ~code:"E0801" "effect row mismatch at this application (%s)" detail);
+          result
+      | TResume (param, frow, result) ->
+          if List.length args <> 1 then
+            err ~meta ~hint:"a resumption accepts exactly the operation's result value"
+              ~code:"E0803" "this resumption expects 1 argument, got %d" (List.length args);
+          ctx.tier_apps <- (frow, Tier.KFn) :: ctx.tier_apps;
+          let arg = List.hd args and actual = List.hd arg_tys in
+          unify_or ctx ~meta:arg.meta ~what:"resumption argument" param actual;
+          (try Types.unify_rows (opened ctx frow) ambient
+           with Unify_error detail ->
+             err ~meta ~code:"E0801" "effect row mismatch at this resumption (%s)" detail);
           result
       | TVariadicArrow (param, frow, result) ->
           ctx.tier_apps <- (frow, Tier.KFn) :: ctx.tier_apps;
@@ -664,13 +762,49 @@ and infer ctx env ~(ambient : row) (e : Kernel.expr) : ty =
                 bs)
               op_params oc.Kernel.params
           in
-          (* resume : (op result) ->{outer ambient} answer *)
-          let resume_ty = TArrow ([ op_result ], ambient, answer) in
+          (* Multi resumptions remain ordinary functions. Once resumptions are callable but affine;
+             their local usage pass runs first so escape errors are reported at the capture site. *)
+          let mode = operation_mode ctx ~meta:oc.Kernel.ometa oh in
+          let resume_ty =
+            match mode with
+            | Kernel.Multi -> TArrow ([ op_result ], ambient, answer)
+            | Kernel.Once -> TResume (op_result, ambient, answer)
+          in
           let env' = bind_all ((oc.Kernel.resume, resume_ty) :: bindings) env in
+          let affine_context =
+            if immediate_transformer then Affine_resume.Immediately_applied_transformer
+            else Affine_resume.Ordinary
+          in
           ctx.tier_ops <-
             (oh, Tier.discipline ~resume:oc.Kernel.resume oc.Kernel.obody) :: ctx.tier_ops;
+          (match mode with
+          | Kernel.Multi -> ()
+          | Kernel.Once -> (
+              (* Escape checking runs before inference so laundering a Resume retains E0817.
+                 In the immediate-transformer context it also proves each Resume-produced answer
+                 is the direct function child of one application, preventing a later Once token
+                 carried by that answer from being bound or duplicated.
+                 Duplicate-consumption checking waits until after inference and answer-type
+                 unification, ensuring malformed calls retain their ordinary E0801/E0803 error. *)
+              match
+                Affine_resume.check_escapes ~resolve_term:(affine_callable ctx)
+                  ~context:affine_context ~resume:oc.Kernel.resume oc.Kernel.obody
+              with
+              | Ok () -> ()
+              | Error (diagnostic :: _) -> raise (Err diagnostic)
+              | Error [] -> assert false));
           let cty = infer ctx env' ~ambient oc.Kernel.obody in
-          unify_or ctx ~meta:oc.Kernel.ometa ~what:"op clause result" answer cty)
+          unify_or ctx ~meta:oc.Kernel.ometa ~what:"op clause result" answer cty;
+          match mode with
+          | Kernel.Multi -> ()
+          | Kernel.Once -> (
+              match
+                Affine_resume.check_clause ~resolve_term:(affine_callable ctx)
+                  ~context:affine_context ~resume:oc.Kernel.resume oc.Kernel.obody
+              with
+              | Ok () -> ()
+              | Error (diagnostic :: _) -> raise (Err diagnostic)
+              | Error [] -> assert false))
         ops;
       answer
   | Kernel.Quote payload ->
@@ -698,7 +832,7 @@ and infer ctx env ~(ambient : row) (e : Kernel.expr) : ty =
   | Kernel.Ann (subject, ann) ->
       let cenv = { mode = Rigid; tvs = []; rvs = [] } in
       let expected = conv_ty ctx cenv ann in
-      let actual = infer ctx env ~ambient subject in
+      let actual = infer ~immediate_transformer ctx env ~ambient subject in
       (try Types.unify expected actual
        with Unify_error detail ->
          err ~meta ~hint:"the annotation is the contract: change the body or the annotation"
@@ -1383,6 +1517,8 @@ let checker_codes : (string * string) list =
     ("E0813", "non-exhaustive match (with a missing-pattern witness)");
     ("E0814", "ungranted effect in the program manifest");
     ("E0815", "effectful top-level definition body (effects belong on arrows)");
+    ("E0816", "once resumption consumed twice on one possible execution path");
+    ("E0817", "once resumption escapes its affine handler-clause scope");
     ("W0801", "redundant match clause");
     ("E1202", "recovery marker rejected by the strict checker");
   ]

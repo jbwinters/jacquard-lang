@@ -64,6 +64,10 @@ enum jq_tag {
    through jq_block_free, never libc free. Shell-reuse paths must preserve
    this bit. */
 #define JQ_FLAG_POOLED 2u
+/* JQ_RESUME only: ONCE selects the affine runtime backstop; USED is shared by
+ * every alias of that captured block and flips before its first re-entry. */
+#define JQ_FLAG_RESUME_ONCE 4u
+#define JQ_FLAG_RESUME_USED 8u
 
 typedef struct jq_block {
   uint32_t rc;
@@ -176,6 +180,7 @@ typedef struct jq_handler_entry {
   uint32_t op_ord;
   jq_value clause;
   uint8_t kind;      /* enum jq_clause_kind */
+  bool once;         /* captured resumption gets the per-instance once backstop */
   jq_block *hf;      /* CAPTURING only: the owning handler frame on rt->ks */
 } jq_handler_entry;
 
@@ -185,6 +190,7 @@ typedef struct jq_pending {
   jq_value clause; /* dup of the matched entry's clause */
   jq_value args[8];
   uint16_t n_args;
+  bool once;
   jq_block *mark; /* the matched entry's handler frame */
 } jq_pending;
 
