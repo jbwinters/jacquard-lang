@@ -136,7 +136,12 @@ let test_value_restriction () =
        (var i) (lit 1)) (app (var i) (lit \"s\"))))"
   with
   | Ok _ -> Alcotest.fail "non-value must not generalize"
-  | Error [ d ] -> Alcotest.(check string) "mismatch code" "E0801" d.Diag.code
+  | Error [ d ] ->
+      Alcotest.(check string) "focused code" "E0818" d.Diag.code;
+      Alcotest.(check (option string))
+        "actionable value-restriction hint"
+        (Some "eta-expand the binding to a lambda value, or give each use its own binding")
+        d.Diag.hint
   | Error _ -> Alcotest.fail "expected one diagnostic"
 
 let test_ann_mismatch_elaborated () =
@@ -185,6 +190,20 @@ let test_handler_removes_effect () =
     (sig_of h
        "(handle (app (var div) (lit 1) (lit 0)) (ret (pvar x) (app (var some) (var x))) (opclause \
         abort () k (var none)))")
+
+let test_handler_preserves_unhandled_continuation_row () =
+  let h = make_cctx () in
+  Alcotest.(check string)
+    "unhandled subject suffix escapes even when the clause drops resume" "() ->{Abort} ()"
+    (sig_of h
+       "(lam () (handle (let nonrec (pwild) (app (var print) (lit \"x\")) (app (var abort))) (ret \
+        (pvar x) (var x)) (opclause print ((pvar text)) k (tuple))))");
+  Alcotest.(check string)
+    "a Once resumption carries the same unhandled continuation row" "() ->{Console} ()"
+    (sig_of h
+       "(defeffect linear () (op signal once () (tref int)))\n\
+        (lam () (handle (let nonrec (pwild) (app (var signal)) (app (var print) (lit \"x\"))) (ret \
+        (pvar x) (var x)) (opclause signal () k (tuple))))")
 
 let test_resume_type_enforced () =
   let h = make_cctx () in
@@ -311,6 +330,13 @@ let test_once_resume_immediate_transformer () =
     Alcotest.(check bool) (what ^ " has a source span") true (Option.is_some diagnostic.span)
   in
   let bare = once_transformer_handle good_body in
+  let annotated = Printf.sprintf "(ann %s (tarrow ((ttuple)) (row) (tref int)))" bare in
+  check_ok (make_cctx ()) "a transparent annotation preserves immediate elimination"
+    (with_once_transformer (Printf.sprintf "(app %s (tuple))" annotated));
+  expect_escape "annotated transformer bound before application"
+    (with_once_transformer
+       (Printf.sprintf "(let nonrec (pvar transformer) %s (app (var transformer) (tuple)))"
+          annotated));
   expect_escape "transformer bound before application"
     (with_once_transformer
        (Printf.sprintf "(let nonrec (pvar transformer) %s (app (var transformer) (tuple)))" bare));
@@ -874,6 +900,8 @@ let suite =
     Alcotest.test_case "application arity" `Quick test_application_arity;
     Alcotest.test_case "not a function" `Quick test_not_a_function;
     Alcotest.test_case "handler removes effect" `Quick test_handler_removes_effect;
+    Alcotest.test_case "handler preserves unhandled continuation row" `Quick
+      test_handler_preserves_unhandled_continuation_row;
     Alcotest.test_case "resume type enforced" `Quick test_resume_type_enforced;
     Alcotest.test_case "resume wrong-typed argument" `Quick test_resume_wrong_typed_argument;
     Alcotest.test_case "op clause arity" `Quick test_op_clause_arity;

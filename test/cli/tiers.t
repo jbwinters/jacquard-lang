@@ -21,10 +21,10 @@ tier land here on purpose, like the sigs goldens.
   fn effectful         107   9%
     abort                2
     audit                2
-    check               34
+    check               10
     clock                1
     console              2
-    dist                 7
+    dist                 1
     emit                 2
     fault                5
     fs                   4

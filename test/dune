@@ -104,6 +104,7 @@
   ../docs/release/governed-membranes/GM5-MANIFEST.sha256
   ../docs/release/governed-membranes/GM9-EVIDENCE.md
   ../docs/release/governed-membranes/GM9-MANIFEST.sha256
+  ../docs/release/dx-jac-export/EVIDENCE.md
   ../docs/stdlib.md
   ../docs/surface-syntax.md
   ../docs/tutorial.md
