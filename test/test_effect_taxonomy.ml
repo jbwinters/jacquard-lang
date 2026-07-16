@@ -832,6 +832,12 @@ let test_governance_and_links () =
   let child = task_id ~scope_path:[ 0 ] ~spawn_index:1 in
   Alcotest.(check bool) "fail-fast is the default" true (default_failure_policy = Fail_fast);
   Alcotest.(check string) "task escape code" "E0907" task_escape_code;
+  Alcotest.(check string)
+    "self-await diagnostic is exact" "async deadlock: task 0#0 awaited itself"
+    (self_await_message parent);
+  Alcotest.(check string)
+    "wait-cycle diagnostic is exact" "async deadlock: await cycle 0#0 -> 0#1 -> 0#0"
+    (wait_cycle_message [ parent; child; parent ]);
   Alcotest.(check int) "child follows parent in stable ID order" (-1) (compare_task_id parent child);
   Alcotest.(check string) "task trace spelling" "0#1" (trace_task_id child);
   Alcotest.(check (list string))

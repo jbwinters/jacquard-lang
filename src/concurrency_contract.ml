@@ -119,6 +119,12 @@ let task_escape_code = "E0907"
 let task_escape_message =
   "a Task may not escape, outlive, or be used outside the structured scope that created it"
 
+let self_await_message task =
+  Printf.sprintf "async deadlock: task %s awaited itself" (trace_task_id task)
+
+let wait_cycle_message cycle =
+  "async deadlock: await cycle " ^ String.concat " -> " (List.map trace_task_id cycle)
+
 type decision = { sequence : int; runnable : task_id list; chosen : task_id }
 
 let decide_round_robin ~sequence runnable =
