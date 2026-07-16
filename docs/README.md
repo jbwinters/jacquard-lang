@@ -33,6 +33,8 @@ project shape from file names alone.
 - `stdlib.md`: prelude, rings, library effects, and standard handlers.
 - `effect-taxonomy.md`: ratified blessed effect names, schemas, risks, rings,
   interface compatibility, and user-effect governance.
+- `concurrency.md`: SC.0 Task/Async/scope contracts, row charging, deterministic
+  scheduling, cancellation, exclusions, and D46-D50.
 - `warp-testing.md`: Warp test model, rows, handlers, cache, properties, and
   world lanes.
 - `errors.md`: diagnostic code catalog.
@@ -70,6 +72,13 @@ Read these together when judging whether the release candidate is credible:
   design, frozen stdlib modes, diagnostic provenance, and verification.
 - `release/effect-linearity/MANIFEST.sha256`: reconstructible EL.2-EL.4 overlay
   on the completed EL.1 base.
+
+## Structured Concurrency Evidence
+
+- `release/structured-concurrency/EVIDENCE.md`: SC.0 interface, identity,
+  row-charging, pure invariant, mutation, and compatibility evidence.
+- `release/structured-concurrency/MANIFEST.sha256`: reconstructible SC.0 overlay
+  on the completed release-hardening base.
 
 ## Maintenance Notes
 
