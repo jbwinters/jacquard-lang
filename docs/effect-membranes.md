@@ -446,9 +446,12 @@ pairs), four representative observed confidences, both simulator states, and
 the finite/non-finite numeric boundaries. GM.4 adds a separately discoverable
 hermetic Warp property for each pure law below, enumerating all ten valid
 threshold pairs and all four risks over a five-point confidence grid. Exact
-adjacent-real and non-finite cases remain unit checks. This completes D65, D66,
-and D72 for the pure policy layer; later gate work consumes these verdicts
-without changing their laws.
+adjacent-real and non-finite cases remain unit checks. A separate confidence-
+threshold tightening property holds the risk thresholds at `Low`/`High` while
+enumerating all 25 ordered minimum-confidence pairs, all four risks, and the
+same five observed confidences. This completes D65, D66, and D72 for the pure
+policy layer; later gate work consumes these verdicts without changing their
+laws.
 
 ## 7. One gate, two execution APIs
 
@@ -1280,13 +1283,14 @@ Warp receives a dedicated governance suite.
 * Confidence monotonicity: decreasing confidence never changes `Ask` or `Block` into `Allow`.
 * Forbidden absorption: `Forbidden` always blocks.
 * Dry-run totality: dry policy never yields `Allow` or `Ask`.
-* Policy tightening: lowering thresholds never increases the allowed set.
+* Risk-threshold tightening: lowering risk thresholds never increases the allowed set.
+* Minimum-confidence tightening: raising `min-confidence` never increases the allowed set.
 * Call ID stability: metadata, formatting, and summary changes do not alter the semantic call ID.
 * Call ID sensitivity: operation, arguments, authority, or preconditions do.
 * Policy binding: changing a bound policy value without changing its hash is rejected.
 
 Implementation status (GM.4): `test/cli/governance-policy-laws.jqd` implements
-all eight pure properties above as closed-row Warp `Prop` values, plus a
+all nine pure properties above as closed-row Warp `Prop` values, plus a
 six-check exact numeric-edge `Case`. `jac test` runs the sampled governance
 lane; `jac test --exhaustive` proves finite supports of 5 to 4,000 cases per
 property under the default budget. Counterexample labels include the complete
