@@ -305,20 +305,20 @@ let rec join ~level (left : ty) (right : ty) : ty =
         List.iter2 unify left_params right_params;
         TArrow
           ( List.map copy_join_result left_params,
-            join_rows ~level left_row right_row,
+            join_rows left_row right_row,
             join ~level left_result right_result )
     | ( TVariadicArrow (left_param, left_row, left_result),
         TVariadicArrow (right_param, right_row, right_result) ) ->
         unify left_param right_param;
         TVariadicArrow
           ( copy_join_result left_param,
-            join_rows ~level left_row right_row,
+            join_rows left_row right_row,
             join ~level left_result right_result )
     | _ ->
         unify left right;
         copy_join_result left
 
-and join_rows ~level:_ left right =
+and join_rows left right =
   let left = repr_row left and right = repr_row right in
   match (left.tail, right.tail) with
   | ( RVar { contents = RUnbound { id = left_id; _ } },

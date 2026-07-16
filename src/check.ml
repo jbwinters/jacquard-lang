@@ -753,8 +753,11 @@ and infer ctx env ~(ambient : row ref) ~(required : Hash.t list) (e : Kernel.exp
                 bs)
               op_params oc.Kernel.params
           in
-          (* Resuming performs the body's unhandled continuation, not effects introduced by other
-             clauses or by expressions evaluated before/after this handler. *)
+          (* The same continuation row is used twice on purpose. It is the effect of invoking
+             [resume], because resumption runs the body's unhandled suffix; it also escapes through
+             the handler even when a clause drops [resume], because the subject can execute that
+             suffix on paths where no handled operation intercepts it. Effects introduced only by
+             clauses or by expressions outside this handler remain in their ordinary ambients. *)
           let resume_ty = TArrow ([ op_result ], continuation_row, answer) in
           let env' = bind_all ((oc.Kernel.resume, resume_ty) :: bindings) env in
           ctx.tier_ops <-

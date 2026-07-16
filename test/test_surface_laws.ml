@@ -258,6 +258,8 @@ let claimed_inventory_count ~path ~prefix source =
           | None -> Error (Printf.sprintf "%s has a non-integer `%s` count" path prefix))
       | _ -> Error (Printf.sprintf "%s must state exactly one `%s` count" path prefix))
 
+(* These counts attest the frozen 0.1 RC1 documents. They are historical facts, not the inventory
+   of the current successor branch. *)
 let rc1_inventory_errors () =
   [
     ( "docs/release/0.1/EVIDENCE.md",
@@ -655,6 +657,7 @@ let validate_release_docs ~decision ~followups ~index =
                      name (String.concat ", " claimed) (String.concat ", " actual))
         | _ -> add (name ^ " inventory must have exactly one three-column row")
       in
+      (* Successor evidence is checked against the live executable and repository inventories. *)
       check_inventory "tests" (List.init (Lazy.force compiled_test_count) string_of_int) false;
       check_inventory "doctests" (doctest_names ()) true;
       check_inventory "twins" (twin_names ()) true;

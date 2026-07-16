@@ -163,6 +163,14 @@ let test_handler_removes_effect () =
        "(handle (app (var div) (lit 1) (lit 0)) (ret (pvar x) (app (var some) (var x))) (opclause \
         abort () k (var none)))")
 
+let test_handler_preserves_unhandled_continuation_row () =
+  let h = make_cctx () in
+  Alcotest.(check string)
+    "unhandled subject suffix escapes even when the clause drops resume" "() ->{Abort} ()"
+    (sig_of h
+       "(lam () (handle (let nonrec (pwild) (app (var print) (lit \"x\")) (app (var abort))) (ret \
+        (pvar x) (var x)) (opclause print ((pvar text)) k (tuple))))")
+
 let test_resume_type_enforced () =
   let h = make_cctx () in
   (* resume takes the op result (here: polymorphic abort result unifies), so applying resume
@@ -248,6 +256,8 @@ let suite =
     Alcotest.test_case "application arity" `Quick test_application_arity;
     Alcotest.test_case "not a function" `Quick test_not_a_function;
     Alcotest.test_case "handler removes effect" `Quick test_handler_removes_effect;
+    Alcotest.test_case "handler preserves unhandled continuation row" `Quick
+      test_handler_preserves_unhandled_continuation_row;
     Alcotest.test_case "resume type enforced" `Quick test_resume_type_enforced;
     Alcotest.test_case "resume wrong-typed argument" `Quick test_resume_wrong_typed_argument;
     Alcotest.test_case "op clause arity" `Quick test_op_clause_arity;
