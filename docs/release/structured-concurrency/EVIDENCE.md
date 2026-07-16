@@ -281,6 +281,10 @@ sub-scheduler resets ordering, counters, traces, or bounds. Spawn, await, yield,
 cancel, and every captured granted world operation route through
 `Structured_scope` before their action. Neither runnable discovery nor
 selection uses hash-table iteration, a host clock, a thread, or host randomness.
+The interpreted CLI automatically includes only the exact frozen `Async` effect
+in the scheduler grant set; users do not pass `--allow async`. Child world
+effects remain in the parent manifest and still need their ordinary explicit
+grants.
 
 Every scheduler invocation creates a fresh opaque Task owner, even on a reused
 evaluator context, and a private capability binds evaluator validation to the
@@ -307,8 +311,11 @@ cumulative nested task/decision bounds and live high-water accounting, E0907
 Task escape, exact bound diagnostics, zero post-close recursive metrics, and
 cache miss/hit equality, including an independent `max_decisions` miss. It also
 pins same-context stale-run rejection, hostile mutation of a suspended Once
-resume, real failing-child fail-fast/collect, and stable same-decision terminal
-ordinals. Its 128-case property changes the host random seed and
+resume, real failing-child fail-fast/collect, a fail-fast cancellation that
+requeues an awakened waiter, the integrated self-await deadlock refusal, and
+stable same-decision terminal ordinals. Checkout-bracket tests separately prove
+that normal, diagnostic, and host-exception exits restore an unsettled affine
+token before scope cleanup. Its 128-case property changes the host random seed and
 proves the same decisions and bytes as an unseeded rerun. The `round-robin.t`
 transcript repeats a fresh process 128 times, byte-compares every trace, pins the
 exact cross-scope trace and cumulative counters, runs real CLI Async programs,

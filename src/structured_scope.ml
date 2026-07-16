@@ -83,6 +83,9 @@ let inspect scope handle =
 let checkout scope handle =
   ensure_open scope (fun () -> Scheduler_core.checkout scope.scheduler handle)
 
+let with_checkout scope handle operation =
+  ensure_open scope (fun () -> Scheduler_core.with_checkout scope.scheduler handle operation)
+
 let suspend_yield scope handle ~resume =
   ensure_open scope (fun () -> Scheduler_core.suspend_yield scope.scheduler handle ~resume)
 

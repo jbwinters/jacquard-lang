@@ -409,6 +409,12 @@ continuations, results, or Task handles, and a hit is checked against a fresh
 execution. This is the default C1 policy implementation and the decision seam
 for later C2 handlers, not a versioned replay format or a host scheduler.
 
+The CLI treats the exact frozen `Async` declaration as scheduler infrastructure,
+so a program does not need `--allow async` to use these operations. This is a
+narrow automatic grant: effects performed by a child are still charged to the
+parent row, and world effects such as Console, Fs, or Net still require their
+own explicit `--allow` grants.
+
 The corresponding compiled OCaml contract is
 [`Concurrency_contract`](../src/concurrency_contract.mli). It contains only
 types, pinned identities, task-path validation, and pure lifecycle,
