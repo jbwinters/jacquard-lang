@@ -117,6 +117,13 @@ Read these together when judging whether the release candidate is credible:
 - `release/structured-concurrency/MANIFEST.sha256`: reconstructible complete
   SC.10 overlay on commit `59b12eb`.
 
+## Governed Membranes Evidence
+
+- `release/governed-membranes/GM1-EVIDENCE.md`: GM.1 versioned ring-3 values,
+  canonical identities, pure refusal boundaries, and compatibility evidence.
+- `release/governed-membranes/GM1-MANIFEST.sha256`: reconstructible GM.1 overlay
+  on the validated ET.6 plus GM.0 dependency-integration commit.
+
 ## Maintenance Notes
 
 - `native-compilation.md`: native compilation notes and boundaries.
