@@ -21,7 +21,15 @@ let test_hex_roundtrip () =
 let test_of_hex_rejects () =
   Alcotest.(check bool) "short" true (Hash.of_hex "abc" = None);
   Alcotest.(check bool) "non-hex" true (Hash.of_hex (String.make (2 * Hash.digest_size) 'g') = None);
-  Alcotest.(check bool) "empty" true (Hash.of_hex "" = None)
+  Alcotest.(check bool) "empty" true (Hash.of_hex "" = None);
+  let spelling = Hash.(to_hex (of_string "canonical")) in
+  Alcotest.(check bool) "canonical lowercase accepted" true (Hash.of_canonical_hex spelling <> None);
+  Alcotest.(check bool)
+    "canonical boundary rejects uppercase" true
+    (Hash.of_canonical_hex (String.uppercase_ascii spelling) = None);
+  Alcotest.(check bool)
+    "canonical boundary rejects prefix" true
+    (Hash.of_canonical_hex ("#" ^ spelling) = None)
 
 let test_equality_and_order () =
   let a = Hash.of_string "a" and b = Hash.of_string "b" in

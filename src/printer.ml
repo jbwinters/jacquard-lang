@@ -79,6 +79,12 @@ let rec inline_form (f : Form.t) =
 
 and inline_arg = function Form.F f -> inline_form f | scalar -> scalar_to_string scalar
 
+(** [print_compact f] renders [f] as one deterministic, reparsable bootstrap-form line, without a
+    trailing newline. Unlike {!print}, nested forms are not expanded across lines. This is the
+    canonical line-carrier used at append-only structured-log boundaries. It raises
+    {!Bug_unprintable} under the same internal-invariant conditions as {!print}. *)
+let print_compact = inline_form
+
 (** [print f] renders one top-level form canonically, without a trailing newline. *)
 let print (f : Form.t) =
   let has_form_arg = List.exists (function Form.F _ -> true | _ -> false) f.Form.args in

@@ -33,6 +33,8 @@ project shape from file names alone.
 - `stdlib.md`: prelude, rings, library effects, and standard handlers.
 - `effect-taxonomy.md`: ratified blessed effect names, schemas, risks, rings,
   interface compatibility, and user-effect governance.
+- `effect-review.md`: identity-first manifest and authority-diff review,
+  uncertainty wording, canonical boundaries, and explicit non-goals.
 - `effect-membranes.md`: GM.0 charter for typed governed facades, versioned
   decision artifacts, live/dry boundaries, and monotonic composition.
 - `concurrency.md`: SC.7 cooperative cancellation at scheduler boundaries over
@@ -76,6 +78,35 @@ Read these together when judging whether the release candidate is credible:
   design, frozen stdlib modes, diagnostic provenance, and verification.
 - `release/effect-linearity/MANIFEST.sha256`: reconstructible EL.2-EL.4 overlay
   on the completed EL.1 base.
+
+## Effect Taxonomy Evidence
+
+- `release/effect-taxonomy/EVIDENCE.md`: ET.2 released Audit identity, canonical
+  entry encoding, append handler contracts, failure limits, and reproduction.
+- `release/effect-taxonomy/ET3-EVIDENCE.md`: ET.3 canonical hash-chain carrier,
+  published-head contract, offline mutation verification, and reproduction.
+- `release/effect-taxonomy/ET3-MANIFEST.sha256`: reconstructible ET.3 overlay on
+  the validated ET.2 base; the ET.2 manifest remains unchanged.
+- `release/effect-taxonomy/ET4-EVIDENCE.md`: ET.4 opaque Secret runtime boundary,
+  explicit exposure contract, redaction guarantees, and adversarial evidence.
+- `release/effect-taxonomy/ET4-MANIFEST.sha256`: reconstructible ET.4 overlay on
+  the validated ET.3 base; predecessor manifests remain unchanged.
+- `release/effect-taxonomy/ET5-EVIDENCE.md`: ET.5 fixed, environment-granted,
+  and provider-neutral vault Secret handler boundaries with leak scans.
+- `release/effect-taxonomy/ET5-MANIFEST.sha256`: reconstructible ET.5 overlay on
+  the validated ET.4 base; predecessor manifests remain unchanged.
+- `release/effect-taxonomy/ET6-EVIDENCE.md`: ET.6 released Approval identity,
+  exact review-artifact hashing, stale-decision rejection, and parity evidence.
+- `release/effect-taxonomy/ET6-MANIFEST.sha256`: reconstructible ET.6 overlay on
+  the validated pre-ET.6 base; earlier evidence manifests remain unchanged.
+- `release/effect-taxonomy/ET7-EVIDENCE.md`: ET.7 canonical Approval handlers,
+  exact proposal revalidation, and the no-simulated-consent laws.
+- `release/effect-taxonomy/ET7-MANIFEST.sha256`: reconstructible ET.7 overlay on
+  the validated ET.6 base; earlier evidence manifests remain unchanged.
+- `release/effect-taxonomy/ET8-EVIDENCE.md`: ET.8 taxonomy closure, canonical
+  handler/boundary inventory, review wording, and exact tooling evidence.
+- `release/effect-taxonomy/ET8-MANIFEST.sha256`: reconstructible ET.8 overlay on
+  the integrated Secret/Approval base; predecessor manifests remain historical.
 
 ## Structured Concurrency Evidence
 
