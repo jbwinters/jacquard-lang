@@ -8,7 +8,7 @@ Decision, and the console prints hash then authority before reading its answer.
   >   | Ok(value) -> value
   >   | Err(message) -> throw(message)
   > }
-  >
+  > 
   > proposal-value() = approval.make-proposal(
   >   must-hash("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
   >   must-hash("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
@@ -17,7 +17,7 @@ Decision, and the console prints hash then authority before reading its answer.
   >   quote { review("ship") },
   >   "ship?",
   >   None)
-  >
+  > 
   > throw.to-result(fn () -> {
   >   let proposal-value = proposal-value()
   >   let proposal-hash = approval.proposal-id(proposal-value)
@@ -43,13 +43,13 @@ The scripted handler fails closed when its explicit Decision list is exhausted.
   >   | Ok(value) -> value
   >   | Err(message) -> throw(message)
   > }
-  >
+  > 
   > proposal-value() = approval.make-proposal(
   >   must-hash("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
   >   must-hash("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
   >   must-hash("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"),
   >   [], quote { "ship" }, "ship?", None)
-  >
+  > 
   > throw.to-result(fn () -> {
   >   let proposal-value = proposal-value()
   >   approval.scripted(fn () -> `op:ask`(proposal-value), [])
