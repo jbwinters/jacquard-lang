@@ -124,6 +124,7 @@ let test_operation_name_table () =
         if String.equal line "" || String.starts_with ~prefix:"#" line then None
         else
           match String.split_on_char '\t' line with
+          | [ label; "<empty>" ] -> Some (label, "")
           | [ label; name ] -> Some (label, name)
           | _ -> Alcotest.failf "malformed governance corpus row: %s" line)
   in

@@ -175,3 +175,39 @@ is pinned by this doctest and the runtime behavior by `test/cli/world.t`.
 One asymmetry, documented until the owner decision lands: `eval`'d code runs at root
 authority and bypasses interposed handlers, so `fs.read-only` does **not** confine
 `eval-code` payloads.
+
+## 12. Reviewing blessed and user effects
+
+Start with the checked row, then use the frozen taxonomy rather than guessing
+from an operation's spelling:
+
+```console
+$ dune exec jacquard -- check PROGRAM.jac --print-sigs
+$ dune exec jacquard -- check PROGRAM.jac --manifest console,net
+$ dune exec jacquard -- diff REVIEWED.jac PROPOSED.jac
+```
+
+The complete 25-effect table, exact released interface hashes, canonical
+handlers, and reserved status live in
+[`effect-taxonomy.md`](effect-taxonomy.md). The short review workflow and exact
+tool output are in [`effect-review.md`](effect-review.md).
+
+Risk labels route attention: `none` has no external authority by itself, `low`
+is normally observable or human-local, `medium` needs deliberate operational
+review, `high` calls out execution/network/storage/crypto authority, and
+`special` requires the governance contract's own review. They do not grant an
+effect or certify that a result is safe.
+
+Two distinctions prevent common review mistakes:
+
+- `Dist` is authority-free but not uncertainty-free. Review support, weights,
+  observations, handler, seed, and approximation error. `Infer` completions and
+  assessment confidence are evidence, not verified truth or consent.
+- A user effect named `net` remains an unrated user identity. It does not inherit
+  official `Net` risk or `--allow net`. Conversely, the reserved names `Choose`,
+  `Env`, `Pg`, `Blob`, `Serve`, `Crypto`, `Log`, `Async`, and `Channel`
+  are unimplemented in this release.
+
+`Secret` is opaque before `secret.expose`, including under generic inspection,
+but Jacquard does not provide taint tracking. After exposure, the plaintext is
+ordinary `Text`; keep exposure late and do not place it in typed Audit data.
