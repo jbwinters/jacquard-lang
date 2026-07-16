@@ -33,6 +33,8 @@ project shape from file names alone.
 - `stdlib.md`: prelude, rings, library effects, and standard handlers.
 - `effect-taxonomy.md`: ratified blessed effect names, schemas, risks, rings,
   interface compatibility, and user-effect governance.
+- `effect-membranes.md`: GM.0 charter for typed governed facades, versioned
+  decision artifacts, live/dry boundaries, and monotonic composition.
 - `concurrency.md`: SC.9 deterministic FIFO round-robin over SC.8
   fail-fast/collect policies, SC.7 cooperative cancellation, SC.6 structured-scope ownership, the SC.5
   policy-independent lifecycle, and the SC.4 generalized child-effect law,
