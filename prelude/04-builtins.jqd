@@ -43,9 +43,20 @@
 ; The codec layer is these six natives plus ordinary pattern matching.
 (defterm ((binding code.of-int () (quote (builtin-marker code.of-int)))))
 
+(defterm ((binding code.of-real () (quote (builtin-marker code.of-real)))))
+
 (defterm ((binding code.to-int () (quote (builtin-marker code.to-int)))))
 
 (defterm ((binding code.of-text () (quote (builtin-marker code.of-text)))))
+
+; Opaque HASH_V0 boundary. hash.parse accepts only the single canonical public
+; spelling (64 lowercase hexadecimal digits); hash.to-text returns that spelling.
+(defterm ((binding hash.parse () (quote (builtin-marker hash.parse)))))
+
+(defterm ((binding hash.to-text () (quote (builtin-marker hash.to-text)))))
+
+; Preserve a validated Hash as the canonical #<digest> scalar in Code/form data.
+(defterm ((binding code.of-hash () (quote (builtin-marker code.of-hash)))))
 
 (defterm ((binding code.to-text () (quote (builtin-marker code.to-text)))))
 
@@ -56,3 +67,11 @@
 (defterm ((binding code.eq? () (quote (builtin-marker code.eq?)))))
 
 (defterm ((binding code.diff () (quote (builtin-marker code.diff)))))
+
+; Deterministic one-line bootstrap rendering for typed Code values. This is not
+; debug.inspect: it accepts only Code and its output reparses as the same form.
+(defterm ((binding code.render () (quote (builtin-marker code.render)))))
+
+; HASH_V0 of the canonical compact bytes of a typed Code value. Metadata is
+; absent from those bytes, so spans/comments/provenance cannot perturb it.
+(defterm ((binding code.hash () (quote (builtin-marker code.hash)))))

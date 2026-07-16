@@ -66,6 +66,7 @@ void jq_free_walk(jq_block *root) {
       break;
     }
     case JQ_TEXT:
+    case JQ_SECRET:
     case JQ_REAL:
     case JQ_HASH:
     case JQ_TASK:

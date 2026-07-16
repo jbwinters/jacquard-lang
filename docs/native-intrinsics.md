@@ -30,11 +30,12 @@ stable while only the public name index changes.
 | text.from-int | 1 | yes | task 70; plain text result |
 | code.eq? | 2 | yes | task 73; metadata-erased equality, OCaml real compare (nan = nan) |
 | text.to-int, text.to-real, text.from-real | 1 | not yet | option results |
-| code.form, code.un-form, code.of-int, code.to-int | 2/1/1/1 | yes | task 73; head grammar validated, un-form splits all-form args only; runtime-built forms cap at 32767 args (uint16 representation, clean abort) |
-| code.to-text, code.diff | 1/2 | yes | task 73; diff renders smallest disagreeing subtrees over the ported inline printer |
-| code.of-text | - | refused for good | it is the reader |
+| code.form, code.un-form, code.of-int, code.of-real, code.to-int | 2/1/1/1/1 | yes | task 73 plus ET.2 real-form support; head grammar validated, un-form splits all-form args only; runtime-built forms cap at 32767 args (uint16 representation, clean abort) |
+| code.of-text, code.of-hash, code.to-text, code.render, code.diff | 1/1/1/1/2 | yes | ET.2 adds typed scalar construction and the deterministic compact renderer; diff renders smallest disagreeing subtrees over the same ported inline printer |
+| code.hash | 1 | yes | ET.6 applies HASH_V0 to the same metadata-erased canonical compact Code bytes as `code.render`; interpreter/native parity is pinned by g37 |
+| hash.parse, hash.to-text | 1/1 | yes | ET.2 opaque HASH_V0 boundary; parsing accepts only 64 lowercase hexadecimal digits and native values use the existing 32-byte `JQ_HASH` carrier |
 | eval-code | - | refused for good | interpreter tier only |
-| debug.inspect | 1 | not yet | |
+| debug.inspect | 1 | yes | `jq_show` parity; `JQ_SECRET` always yields the fixed `<secret redacted>` marker |
 | pmf, support | 2/1 | yes | task 71 (the enum handler reaches them); name-recognized dist cons, show-based pmf equality, interpreter's exact error texts |
 | dist.sample-lw | 3 | yes | task 72; exact seeded stream (split per run, one draw per sample), merge/normalize/sort on the rendering key, E0901 on an empty posterior |
 | obsolete hyphenated real family public names | | no | removed in SS.22; historical IDs are internal and create no duplicate objects |
