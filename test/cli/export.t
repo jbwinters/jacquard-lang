@@ -159,7 +159,7 @@ their spans and resolution retains suggestions.
   $ printf 'ad(1, 2)\n' > unresolved.jac
   $ jacquard export unresolved.jac -o unresolved.jqd > unresolved.err 2>&1; status=$?; grep -E 'error\[E0301\]|hint: did you mean' unresolved.err; echo "exit:$status"
   unresolved.jac:1:1-3: error[E0301]: unknown name `ad`
-    hint: did you mean one of: add, eq, fs?
+    hint: did you mean one of: add, ask, eq?
   exit:1
   $ test ! -e unresolved.jqd && echo no-partial-unresolved
   no-partial-unresolved
