@@ -67,6 +67,7 @@ let show_corpus () =
     VText "ctrl \x01 and del \x7f";
     VText "utf-8: h\xc3\xa9llo \xe2\x86\x92 \xf0\x9f\x8e\x89";
     VText "nul\x00mid" (* embedded NUL: the renderer is length-based, not C-string *);
+    VSecret (Secret.of_string "ET4-native-parity-fixture");
     (* tuples *)
     VTuple [];
     VTuple [ VInt 1 ];

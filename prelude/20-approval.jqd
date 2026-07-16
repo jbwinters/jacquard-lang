@@ -1,0 +1,261 @@
+; ET.6 hash-bound consent artifacts. Proposal identity is the HASH_V0 of the
+; single typed proposal-v1 Code encoding below. The carried proposal-id is
+; excluded from that encoding and is always recomputed by validation.
+
+(deftype authority ()
+  (con effect
+    (field name (tref text)))
+  (con resource
+    (field effect-name (tref text))
+    (field scope (tref text))))
+
+(deftype proposal ()
+  (con proposal
+    (field proposal-id (tref hash))
+    (field call-subject (tref hash))
+    (field policy (tref hash))
+    (field assessment-hash (tref hash))
+    (field authority (tapp (tref list) (tref authority)))
+    (field rendering (tref code))
+    (field summary (tref text))
+    (field preview (tapp (tref option) (tref outcome-summary)))))
+
+(defeffect approval ()
+  (op ask once ((tref proposal)) (tref decision)))
+
+(defterm ((binding approval.authority-code ()
+  (lam ((pvar value))
+    (match (var value)
+      (clause (pcon effect (pvar name))
+        (app (var code.form) (lit "effect-v1")
+          (app (var cons) (app (var code.of-text) (var name)) (var nil))))
+      (clause (pcon resource (pvar effect-name) (pvar scope))
+        (app (var code.form) (lit "resource-v1")
+          (app (var cons) (app (var code.of-text) (var effect-name))
+            (app (var cons) (app (var code.of-text) (var scope)) (var nil))))))))))
+
+(defterm ((binding approval.authority-list-code ()
+  (lam ((pvar values))
+    (app (var code.form) (lit "authority-list-v1")
+      (app (var list.map) (var values) (var approval.authority-code)))))))
+
+(defterm ((binding approval.preview-code ()
+  (lam ((pvar value))
+    (match (var value)
+      (clause (pcon none)
+        (app (var code.form) (lit "none-v1") (var nil)))
+      (clause (pcon some (pvar outcome))
+        (app (var code.form) (lit "some-v1")
+          (app (var cons) (app (var audit.outcome-code) (var outcome)) (var nil)))))))))
+
+(defterm ((binding approval.review-code ()
+  (lam
+    ((pvar call-subject) (pvar policy) (pvar assessment-hash)
+      (pvar authority) (pvar rendering) (pvar summary) (pvar preview))
+    (app (var code.form) (lit "proposal-v1")
+      (app (var cons) (app (var audit.hash-code) (var call-subject))
+        (app (var cons) (app (var audit.hash-code) (var policy))
+          (app (var cons) (app (var audit.hash-code) (var assessment-hash))
+            (app (var cons) (app (var approval.authority-list-code) (var authority))
+              (app (var cons) (var rendering)
+                (app (var cons) (app (var code.of-text) (var summary))
+                  (app (var cons) (app (var approval.preview-code) (var preview))
+                    (var nil)))))))))))))
+
+(defterm ((binding approval.proposal-code ()
+  (lam ((pvar value))
+    (match (var value)
+      (clause
+        (pcon proposal (pwild) (pvar call-subject) (pvar policy)
+          (pvar assessment-hash) (pvar authority) (pvar rendering)
+          (pvar summary) (pvar preview))
+        (app (var approval.review-code) (var call-subject) (var policy)
+          (var assessment-hash) (var authority) (var rendering) (var summary)
+          (var preview))))))))
+
+(defterm ((binding approval.make-proposal ()
+  (lam
+    ((pvar call-subject) (pvar policy) (pvar assessment-hash)
+      (pvar authority) (pvar rendering) (pvar summary) (pvar preview))
+    (let nonrec (pvar review)
+      (app (var approval.review-code) (var call-subject) (var policy)
+        (var assessment-hash) (var authority) (var rendering) (var summary)
+        (var preview))
+      (app (var proposal) (app (var code.hash) (var review))
+        (var call-subject) (var policy) (var assessment-hash) (var authority)
+        (var rendering) (var summary) (var preview)))))))
+
+(defterm ((binding approval.proposal-id ()
+  (lam ((pvar value))
+    (match (var value)
+      (clause
+        (pcon proposal (pvar proposal-id) (pwild) (pwild) (pwild)
+          (pwild) (pwild) (pwild) (pwild))
+        (var proposal-id)))))))
+
+(defterm ((binding approval.validate-proposal ()
+  (lam ((pvar value))
+    (let nonrec (pvar carried)
+      (app (var approval.proposal-id) (var value))
+      (let nonrec (pvar computed)
+        (app (var code.hash) (app (var approval.proposal-code) (var value)))
+        (match
+          (app (var code.eq?) (app (var code.of-hash) (var carried))
+            (app (var code.of-hash) (var computed)))
+          (clause (pcon true) (app (var ok) (var computed)))
+          (clause (pcon false)
+            (app (var err)
+              (lit "invalid Proposal: carried proposal hash does not match canonical proposal-v1 bytes"))))))))))
+
+(defterm ((binding approval.decision-proposal ()
+  (lam ((pvar value))
+    (match (var value)
+      (clause (pcon approved (pvar proposal-id) (pwild) (pwild))
+        (var proposal-id))
+      (clause (pcon denied (pvar proposal-id) (pwild) (pwild))
+        (var proposal-id))
+      (clause (pcon escalate (pvar proposal-id) (pwild))
+        (var proposal-id)))))))
+
+(defterm ((binding approval.validate-decision ()
+  (lam ((pvar proposal-value) (pvar decision-value))
+    (match (app (var approval.validate-proposal) (var proposal-value))
+      (clause (pcon err (pvar message)) (app (var err) (var message)))
+      (clause (pcon ok (pvar proposal-id))
+        (let nonrec (pvar returned)
+          (app (var approval.decision-proposal) (var decision-value))
+          (match
+            (app (var code.eq?) (app (var code.of-hash) (var returned))
+              (app (var code.of-hash) (var proposal-id)))
+            (clause (pcon true) (app (var ok) (var decision-value)))
+            (clause (pcon false)
+              (app (var err)
+                (lit "stale Decision: embedded proposal hash does not match the exact review artifact")))))))))))
+
+; The action thunk is forced only after both the carried Proposal identity and
+; the Decision binding validate. Callers cannot accidentally perform the action
+; while merely inspecting the returned Result.
+(defterm ((binding approval.before-action ()
+  (lam ((pvar proposal-value) (pvar decision-value) (pvar action))
+    (match
+      (app (var approval.validate-decision) (var proposal-value) (var decision-value))
+      (clause (pcon ok (pwild)) (app (var ok) (app (var action))))
+      (clause (pcon err (pvar message)) (app (var err) (var message))))))))
+
+; Canonical ET.7 handlers. Every handler validates the carried Proposal before
+; producing or accepting a Decision. The console prompt is a typed Code form so
+; its field order is stable: exact proposal hash first, requested authority
+; second. Only the exact response "approve" grants consent.
+(defterm ((binding approval.console-prompt-code ()
+  (lam ((pvar proposal-id) (pvar authority))
+    (app (var code.form) (lit "approval-request-v1")
+      (app (var cons) (app (var audit.hash-code) (var proposal-id))
+        (app (var cons) (app (var approval.authority-list-code) (var authority))
+          (var nil))))))))
+
+(defterm ((binding approval.console-decision ()
+  (lam ((pvar proposal-id) (pvar response))
+    (match (app (var text.eq?) (var response) (lit "approve"))
+      (clause (pcon true)
+        (app (var approved) (var proposal-id) (lit "console")
+          (app (var code.form) (lit "console-approval-v1")
+            (app (var cons) (app (var code.of-text) (var response))
+              (var nil)))))
+      (clause (pcon false)
+        (match (app (var text.eq?) (var response) (lit "deny"))
+          (clause (pcon true)
+            (app (var denied) (var proposal-id) (lit "console")
+              (lit "denied by console reviewer")))
+          (clause (pcon false)
+            (app (var escalate) (var proposal-id)
+              (lit "console reviewer escalated"))))))))))
+
+(defterm ((binding approval.console ()
+  (lam ((pvar thunk))
+    (handle (app (var thunk))
+      (ret (pvar value) (var value))
+      (opclause ask ((pvar proposal-value)) k
+        (match (app (var approval.validate-proposal) (var proposal-value))
+          (clause (pcon err (pvar message)) (app (var throw) (var message)))
+          (clause (pcon ok (pvar proposal-id))
+            (match (var proposal-value)
+              (clause
+                (pcon proposal (pwild) (pwild) (pwild) (pwild)
+                  (pvar authority) (pwild) (pwild) (pwild))
+                (let nonrec (pwild)
+                  (app (var println)
+                    (app (var code.render)
+                      (app (var approval.console-prompt-code)
+                        (var proposal-id) (var authority))))
+                  (let nonrec (pvar response) (app (var read-line))
+                    (app (var k)
+                      (app (var approval.console-decision)
+                        (var proposal-id) (var response)))))))))))))))
+
+; Scripted Decisions are explicit test inputs, not synthesized consent. They are
+; consumed in order and each one is rebound to the exact Proposal before the
+; continuation can resume.
+(defterm ((binding approval.scripted ()
+  (lam ((pvar thunk) (pvar decisions))
+    (app
+      (handle (app (var thunk))
+        (ret (pvar value) (lam ((pwild)) (var value)))
+        (opclause ask ((pvar proposal-value)) k
+          (lam ((pvar remaining))
+            (match (var remaining)
+              (clause (pcon nil)
+                (app (var throw)
+                  (lit "approval.scripted: out of scripted decisions")))
+              (clause (pcon cons (pvar decision-value) (pvar more))
+                (match
+                  (app (var approval.validate-decision)
+                    (var proposal-value) (var decision-value))
+                  (clause (pcon err (pvar message))
+                    (app (var throw) (var message)))
+                  (clause (pcon ok (pvar exact-decision))
+                    (app (app (var k) (var exact-decision)) (var more)))))))))
+      (var decisions))))))
+
+; Mandatory simulation handler: Approval is never simulated as consent.
+(defterm ((binding approval.dry-run ()
+  (lam ((pvar thunk))
+    (handle (app (var thunk))
+      (ret (pvar value) (var value))
+      (opclause ask ((pvar proposal-value)) k
+        (match (app (var approval.validate-proposal) (var proposal-value))
+          (clause (pcon err (pvar message)) (app (var throw) (var message)))
+          (clause (pcon ok (pvar proposal-id))
+            (app (var k)
+              (app (var escalate) (var proposal-id)
+                (lit "dry-run cannot consent")))))))))))
+
+; The classifier supplies the already-computed policy verdict for each exact
+; Proposal. Allow is the only branch that can produce Approved: Ask and
+; Simulate escalate, and Block denies.
+(defterm ((binding approval.policy-auto ()
+  (lam ((pvar thunk) (pvar classify))
+    (handle (app (var thunk))
+      (ret (pvar value) (var value))
+      (opclause ask ((pvar proposal-value)) k
+        (match (app (var approval.validate-proposal) (var proposal-value))
+          (clause (pcon err (pvar message)) (app (var throw) (var message)))
+          (clause (pcon ok (pvar proposal-id))
+            (match (app (var classify) (var proposal-value))
+              (clause (pcon allow)
+                (app (var k)
+                  (app (var approved) (var proposal-id) (lit "policy-auto")
+                    (app (var code.form) (lit "policy-auto-v1")
+                      (app (var cons) (app (var audit.verdict-code) (var allow))
+                        (var nil))))))
+              (clause (pcon ask)
+                (app (var k)
+                  (app (var escalate) (var proposal-id)
+                    (lit "policy-auto cannot upgrade Ask"))))
+              (clause (pcon simulate)
+                (app (var k)
+                  (app (var escalate) (var proposal-id)
+                    (lit "policy-auto simulation is not consent"))))
+              (clause (pcon block)
+                (app (var k)
+                  (app (var denied) (var proposal-id) (lit "policy-auto")
+                    (lit "blocked by policy")))))))))))))

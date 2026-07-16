@@ -1,0 +1,34 @@
+; ET.6: canonical proposal hashing and stale-decision fail-closed behavior are
+; direct interpreter/native parity surfaces.
+(match
+  (tuple
+    (app (var hash.parse) (lit "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+    (app (var hash.parse) (lit "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"))
+    (app (var hash.parse) (lit "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"))
+    (app (var hash.parse) (lit "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"))
+    (app (var hash.parse) (lit "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")))
+  (clause
+    (ptuple
+      (pcon ok (pvar call))
+      (pcon ok (pvar policy))
+      (pcon ok (pvar assessment))
+      (pcon ok (pvar stale))
+      (pcon ok (pvar outcome)))
+    (let nonrec (pvar proposal-value)
+      (app (var approval.make-proposal)
+        (var call)
+        (var policy)
+        (var assessment)
+        (app (var cons) (app (var effect) (lit "Net"))
+          (app (var cons) (app (var resource) (lit "Net") (lit "api.example")) (var nil)))
+        (quote (review (lit "ship")))
+        (lit "ship?")
+        (app (var some) (app (var outcome-summary) (lit "simulated") (var outcome) (lit "ok"))))
+      (tuple
+        (app (var hash.to-text) (app (var approval.proposal-id) (var proposal-value)))
+        (app (var approval.before-action)
+          (var proposal-value)
+          (app (var approved) (var stale) (lit "reviewer") (quote (ticket)))
+          (lam () (lit 42))))))
+  (clause (pwild)
+    (tuple (lit "hash parse failed") (app (var err) (lit "hash parse failed")))))
