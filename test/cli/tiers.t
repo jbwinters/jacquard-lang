@@ -26,7 +26,6 @@ tier land here on purpose, like the sigs goldens.
     console              2
     dist                 1
     emit                 2
-<<<<<<< HEAD
     fault                5
     fs                   4
     infer                4
@@ -34,14 +33,6 @@ tier land here on purpose, like the sigs goldens.
     net                  9
     state                6
     throw               66
-=======
-    fault                4
-    fs                   2
-    infer                1
-    net                  6
-    state                1
-    throw               14
->>>>>>> task/gm3-policies
   
   == handler op clauses: 38 (syntactic resumption shape) ==
   tail-resumptive        9  23%
