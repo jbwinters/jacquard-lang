@@ -1,0 +1,7 @@
+; SC.2 decision benchmark. This is the semantic reference for bench-hint.jqd.
+(app (var list.fold)
+  (app (var list.map)
+    (app (var list.range) (lit 0) (lit 1000000))
+    (lam ((pvar n)) (app (var add) (app (var mul) (var n) (lit 3)) (lit 1))))
+  (lit 0)
+  (lam ((pvar acc) (pvar n)) (app (var add) (var acc) (var n))))

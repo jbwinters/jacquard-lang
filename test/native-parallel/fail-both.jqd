@@ -1,0 +1,5 @@
+; The left thunk's failure must win and the right thunk must not become an
+; independently observable worker failure.
+(app (var parallel.both)
+  (lam () (app (var div) (lit 1) (lit 0)))
+  (lam () (app (var mod) (lit 1) (lit 0))))
