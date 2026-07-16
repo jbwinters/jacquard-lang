@@ -239,6 +239,9 @@ static void show_into(jq_buf *b, jq_value v) {
   case JQ_HASH:
     add_hash_repr(b, v);
     break;
+  case JQ_SECRET:
+    buf_adds(b, "<secret redacted>");
+    break;
   case JQ_TUPLE:
     buf_adds(b, "(");
     for (uint16_t i = 0; i < blk->n; i++) {

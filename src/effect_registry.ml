@@ -66,7 +66,6 @@ let reserved_catalog_names =
     ("Serve", "serve");
     ("Crypto", "crypto");
     ("Log", "log");
-    ("Secret", "secret");
     ("Judge", "judge");
     ("Async", "async");
     ("Channel", "channel");
@@ -178,7 +177,8 @@ let catalog =
     released "Audit" "audit" Governance Special
       "2c148fbc2e26bdc6f01279a8bf176f54d5798536e1f96805aa4f7c7a57e67632"
       "record governance evidence in an append-only stream";
-    reserved "Secret" "secret" Governance Special
+    released "Secret" "secret" Governance Special
+      "6d092eccc3c9858a2a95120da5a011964cbb3ad76968e11c1cbb062c119fbb31"
       "resolve opaque confidential material or explicitly expose it";
     reserved "Judge" "judge" Governance Special "assess a proposed call without performing it";
     reserved "Async" "async" Concurrency No_risk

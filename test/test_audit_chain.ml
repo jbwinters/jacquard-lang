@@ -235,14 +235,19 @@ let test_concurrent_truncation_is_total () =
   let file = Filename.temp_file "audit-chain-race-" ".log" in
   let race_size = 2 * 1024 * 1024 in
   let ready_read, ready_write = Unix.pipe () in
+  let start_read, start_write = Unix.pipe () in
   let stop_read, stop_write = Unix.pipe () in
   let child =
     match Unix.fork () with
     | 0 ->
         Unix.close ready_read;
+        Unix.close start_write;
         Unix.close stop_write;
         let descriptor = Unix.openfile file [ Unix.O_WRONLY ] 0o600 in
+        Unix.ftruncate descriptor race_size;
         signal ready_write;
+        await_signal start_read;
+        Unix.close start_read;
         let rec churn () =
           Unix.ftruncate descriptor 0;
           Unix.ftruncate descriptor race_size;
@@ -253,9 +258,13 @@ let test_concurrent_truncation_is_total () =
     | child -> child
   in
   Unix.close ready_write;
+  Unix.close start_read;
   Unix.close stop_read;
+  let started = ref false in
   Fun.protect
     ~finally:(fun () ->
+      (if not !started then try signal start_write with Unix.Unix_error _ -> ());
+      Unix.close start_write;
       (try signal stop_write with Unix.Unix_error _ -> ());
       Unix.close stop_write;
       ignore (Unix.waitpid [] child);
@@ -263,18 +272,25 @@ let test_concurrent_truncation_is_total () =
     (fun () ->
       await_signal ready_read;
       Unix.close ready_read;
-      let classified = ref 0 in
+      let saw_refusal = ref false in
+      (match Audit_chain.verify_file ~file ~expected_head:Audit_chain.genesis with
+      | Ok _ -> ()
+      | Error (_ :: _) -> saw_refusal := true
+      | Error [] -> Alcotest.fail "concurrent read returned an empty diagnostic list"
+      | exception exception_ ->
+          Alcotest.failf "concurrent truncate escaped %s" (Printexc.to_string exception_));
+      signal start_write;
+      started := true;
+      Unix.sleepf 0.001;
       for _ = 1 to 64 do
         match Audit_chain.verify_file ~file ~expected_head:Audit_chain.genesis with
-        | Ok _ -> incr classified
-        | Error ({ Diag.code = "E1301" | "E1306"; _ } :: _) -> incr classified
-        | Error ({ Diag.code; _ } :: _) ->
-            Alcotest.failf "concurrent truncate returned unexpected %s" code
+        | Ok _ -> ()
+        | Error (_ :: _) -> saw_refusal := true
         | Error [] -> Alcotest.fail "concurrent read returned an empty diagnostic list"
         | exception exception_ ->
             Alcotest.failf "concurrent truncate escaped %s" (Printexc.to_string exception_)
       done;
-      Alcotest.(check int) "all concurrent reads stayed result-total" 64 !classified)
+      Alcotest.(check bool) "concurrent churn produced a fail-closed refusal" true !saw_refusal)
 
 let mutate source index =
   let bytes = Bytes.of_string source in

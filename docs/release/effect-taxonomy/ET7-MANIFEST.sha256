@@ -1,5 +1,5 @@
-# Governed-membranes GM.1-GM.3 + SC.0 reconstructible integration overlay
-# Base commit: 95b2be5
+# Effect-taxonomy ET.7-ET.8 + GM.1 + GM.0 reconstructible integration overlay
+# Base commit: 15bd544
 # Attestation manifests exclude themselves (and successor manifests) to avoid self/cross-hashes.
 23e5c2dcec8f2aa6c96df0b0363cf9d9a393b99d326640b0f9507832d3cd8461  README.md
 c6f3755b008be94075aa4a1ebd8adb5758bbffcf195d532a63bf887584c04120  bin/main.ml
@@ -117,6 +117,8 @@ e86ed17b4123d008979edf3d7ad1f49b751c3a2c6db9bef9812bd4408f51ffc5  test/docs-doct
 d189b7e31800edea3f5b7018dc0bb440dc3165a5531c8b713f686c943c015340  test/docs-doctest/fixtures/concurrency-row-laundering.jac
 ac5ac172f5406b2b4639ff0ff410980c6ea2f232f0961869babb66b68087b060  test/docs-doctest/fixtures/concurrency-row-laundering.stderr
 f32c143a23165d885769de9f69f1d100008cf21925dfa6f2d2ddd4dbc93eace6  test/docs-doctest/fixtures/effect-taxonomy-schemas.jac
+960022b703fc06ef32b3d0de515021d91bbcc515d83210f9a3689d0eae9cb3d9  test/docs-doctest/fixtures/governed-membrane-signatures.jac
+b8ddef489f513d2c7491c013742a731d88715f6d455f1676a71f57303624aaa7  test/docs-doctest/fixtures/governed-membrane-signatures.stdout
 c32a5f13116e6f12bf82f2c35753538ce84adf7bb42ea4a5f6026737865b3da4  test/docs-doctest/fixtures/stdlib-handler-policy.jac
 084c799cd551dd1d8d5c5f9a5d593b2e931f5e36122ee5c793c1d08a19839cc0  test/docs-doctest/fixtures/stdlib-handler-policy.stdout
 e22fedc1c712d9f7704360c63e6092ab313de22c5226420e4a35ac992c355c62  test/dune
