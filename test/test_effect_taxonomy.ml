@@ -854,7 +854,15 @@ let test_governance_and_links () =
       schemas.scope_fail_fast;
       schemas.scope_collect;
     ];
-  Alcotest.(check int) "all cancellation point classes frozen" 3 (List.length cancellation_points);
+  let cancellation_point_name = function
+    | Await -> "await"
+    | Yield -> "yield"
+    | Routed_effect -> "routed-effect"
+  in
+  Alcotest.(check (list string))
+    "all cancellation point classes frozen in contract order"
+    [ "await"; "yield"; "routed-effect" ]
+    (List.map cancellation_point_name cancellation_points);
   Alcotest.(check bool)
     "spawn queues child before suspended parent" true
     (requeue_after_spawn ~runnable:[] ~child ~parent = [ child; parent ]);
