@@ -43,6 +43,8 @@ let keywords =
   [
     "type";
     "effect";
+    "once";
+    "multi";
     "fn";
     "let";
     "rec";

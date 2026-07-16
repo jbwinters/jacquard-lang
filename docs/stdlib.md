@@ -83,6 +83,13 @@ Naming convention: dotted lowercase, `list.map`, `text.split`, subject type firs
 Names live in the metadata index, so all of this is curation rather than structure,
 and renames are free (§8 returns to what that buys).
 
+Phase-zero parallelism also lives in ring 0. `parallel.map` and `parallel.both`
+accept only closed-empty-row callbacks, remain pure themselves, and are
+observably sequential in the interpreter. They introduce neither an `Async`
+effect nor a task runtime; a future native implementation may use threads only
+when it preserves the same values, failures, ordering contract, and output
+identity. See `concurrency.md` §3.
+
 ## 3. Ring 0: the axioms
 
 ### Core types
@@ -167,6 +174,20 @@ list.each   : (List a, (a) ->{| e} ()) ->{| e} ()
 Note every one of these accepts an effectful function and threads its row through
 untouched, per principle 5. There is no separate `mapM`; the map is the map.
 
+### Pure parallel hints
+
+```text
+parallel.map  : (List a, (a) ->{} b) ->{} List b
+parallel.both : (() ->{} a, () ->{} b) ->{} (a, b)
+```
+
+The empty callback rows are closed contracts, not inferred open rows. Passing a
+callback or thunk with any effect is a type error. The interpreter maps in input
+order and forces `parallel.both`'s left thunk before its right thunk; ordinary
+failure and control behavior is therefore exactly the behavior of `list.map`
+and explicit left-then-right tuple evaluation. These APIs are optimization hints,
+not observable concurrency.
+
 ### List, the rest of it
 
 The following signature-only catalog intentionally omits term bodies and is
@@ -229,20 +250,20 @@ it ships with. An idiom appears here worth naming once: an operation whose handl
 never resumes may promise any result type, so `abort : () -> a` needs no bottom type.
 
 ```jacquard doctest=stdlib-control-effects mode=check fixture=stdlib-control-effects.jac stdout=stdlib-control-effects.stdout stderr=empty exit=0
-effect Abort a where {
+once effect Abort a where {
   abort : () -> a
 }
 
-effect Throw e a where {
+once effect Throw e a where {
   throw : (e) -> a
 }
 
-effect State s where {
+multi effect State s where {
   get : () -> s
   put : (s) -> ()
 }
 
-effect Emit w where {
+once effect Emit w where {
   emit : (w) -> ()
 }
 ```
@@ -393,7 +414,7 @@ type Distribution a =
   | Categorical(values: List (a, Real))
   | UniformInt Int Int
 
-effect Dist a where {
+multi effect Dist a where {
   sample : (Distribution a) -> a
   observe : (Distribution a, a) -> ()
 }
@@ -433,13 +454,18 @@ runtime installs their root handlers, under explicit grants. The row of `main` i
 the program's authority manifest, and this table is what a reviewer is reading when
 they read it:
 
-| effect | operations | granting it means |
-|--------|------------|-------------------|
-| `Console` | `print : (Text) -> ()`, `read-line : () -> Text` | the program talks to the terminal |
-| `Clock` | `now : () -> Int` (ms since epoch), `sleep : (Int) -> ()` | the program observes and waits on time |
-| `Fs` | `read : (Text) -> Text`, `write : (Text, Text) -> ()`, `list-dir : (Text) -> List Text` | the program touches the filesystem |
-| `Net` | `fetch : (Request) -> Response` | the program reaches the network |
-| `Eval` | `eval : (Code) -> a` | the program runs code, including code it constructed |
+| effect | mode | operations | granting it means |
+|--------|------|------------|-------------------|
+| `Console` | `once` | `print : (Text) -> ()`, `read-line : () -> Text` | the program talks to the terminal |
+| `Clock` | `once` | `now : () -> Int` (ms since epoch), `sleep : (Int) -> ()` | the program observes and waits on time |
+| `Fs` | `once` | `read : (Text) -> Text`, `write : (Text, Text) -> ()`, `list-dir : (Text) -> List Text` | the program touches the filesystem |
+| `Net` | `once` | `fetch : (Request) -> Response` | the program reaches the network |
+| `Eval` | `once` | `eval : (Code) -> a` | the program runs code, including code it constructed |
+| `Infer` | `once` | `complete : (Prompt) -> Text` | the program requests a model completion |
+
+The complete reviewed assignment, including control, Warp, Dist, and Fault,
+is frozen in `prelude/operation-modes.manifest`. Modes are declared in the
+interfaces and never inferred from these names or descriptions.
 
 Convenience functions build on the ops in ordinary code: `println`, `console.ask :
 (Text) ->{Console} Text`, `fs.read-lines`. Attenuation is handler interposition and
@@ -515,7 +541,7 @@ subject-first library function:
 A handler clause can read as policy wrapped around a workflow:
 
 ```jacquard doctest=stdlib-handler-policy mode=run fixture=stdlib-handler-policy.jac stdout=stdlib-handler-policy.stdout stderr=empty exit=0
-effect Approval where {
+once effect Approval where {
   ask : (Text) -> Bool
 }
 

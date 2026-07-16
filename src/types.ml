@@ -21,6 +21,11 @@ type ty =
   | TCon of Hash.t * ty list  (** a declared (nominal) type applied to arguments *)
   | TTuple of ty list
   | TArrow of ty list * row * ty  (** the row lives on the arrow (design thesis) *)
+  | TResume of ty * row * ty
+      (** Built-in affine callable for a [once] operation clause. The two visible parameters are the
+          operation result and handler answer; the row is retained internally because applying a
+          resumption performs the continuation's outward effects. It is compatible with a unary
+          arrow only at a call boundary; {!Check}'s affine pass still forbids copying or escape. *)
   | TVariadicArrow of ty * row * ty
       (** Homogeneous zero-or-more arguments for trusted builtins; ordinary arrows remain exact. *)
   | TVar of tvar ref
@@ -92,6 +97,10 @@ let rec occurs_adjust (id : int) (lvl : level) (t : ty) : unit =
       List.iter (occurs_adjust id lvl) params;
       row_occurs_adjust_ty id lvl row;
       occurs_adjust id lvl result
+  | TResume (input, row, answer) ->
+      occurs_adjust id lvl input;
+      row_occurs_adjust_ty id lvl row;
+      occurs_adjust id lvl answer
   | TVariadicArrow (param, row, result) ->
       occurs_adjust id lvl param;
       row_occurs_adjust_ty id lvl row;
@@ -112,6 +121,10 @@ let rec row_occurs_adjust (id : int) (lvl : level) (t : ty) : unit =
       List.iter (row_occurs_adjust id lvl) params;
       row_occurs_in_row id lvl row;
       row_occurs_adjust id lvl result
+  | TResume (input, row, answer) ->
+      row_occurs_adjust id lvl input;
+      row_occurs_in_row id lvl row;
+      row_occurs_adjust id lvl answer
   | TVariadicArrow (param, row, result) ->
       row_occurs_adjust id lvl param;
       row_occurs_in_row id lvl row;
@@ -154,6 +167,18 @@ let rec unify (a : ty) (b : ty) : unit =
         List.iter2 unify p1 p2;
         unify_rows r1 r2;
         unify t1 t2
+    | TResume (p1, r1, t1), TResume (p2, r2, t2) ->
+        unify p1 p2;
+        unify_rows r1 r2;
+        unify t1 t2
+    | TResume (p1, r1, t1), TArrow ([ p2 ], r2, t2) | TArrow ([ p2 ], r2, t2), TResume (p1, r1, t1)
+      ->
+        (* A local helper parameter is inferred as an ordinary unary arrow before a once
+           resumption is passed to it. Structural compatibility lets the call typecheck; the
+           affine checker validates that helper's parameter and treats the argument as a move. *)
+        unify p1 p2;
+        unify_rows r1 r2;
+        unify t1 t2
     | TVariadicArrow (p1, r1, t1), TVariadicArrow (p2, r2, t2) ->
         unify p1 p2;
         unify_rows r1 r2;
@@ -174,6 +199,14 @@ and row_var_levels level t =
            r := RUnbound { id; level }
        | _ -> ());
       row_var_levels level result
+  | TResume (input, row, answer) ->
+      row_var_levels level input;
+      (let row = repr_row row in
+       match row.tail with
+       | RVar ({ contents = RUnbound { id; level = l' } } as r) when l' > level ->
+           r := RUnbound { id; level }
+       | _ -> ());
+      row_var_levels level answer
   | TVariadicArrow (param, row, result) ->
       row_var_levels level param;
       (let row = repr_row row in
@@ -278,6 +311,8 @@ let rec copy_join_result ty =
   | TTuple items -> TTuple (List.map copy_join_result items)
   | TArrow (params, row, result) ->
       TArrow (List.map copy_join_result params, copy_join_row row, copy_join_result result)
+  | TResume (input, row, answer) ->
+      TResume (copy_join_result input, copy_join_row row, copy_join_result answer)
   | TVariadicArrow (param, row, result) ->
       TVariadicArrow (copy_join_result param, copy_join_row row, copy_join_result result)
 
@@ -307,6 +342,12 @@ let rec join ~level (left : ty) (right : ty) : ty =
           ( List.map copy_join_result left_params,
             join_rows left_row right_row,
             join ~level left_result right_result )
+    | TResume (left_input, left_row, left_answer), TResume (right_input, right_row, right_answer) ->
+        unify left_input right_input;
+        TResume
+          ( copy_join_result left_input,
+            join_rows left_row right_row,
+            join ~level left_answer right_answer )
     | ( TVariadicArrow (left_param, left_row, left_result),
         TVariadicArrow (right_param, right_row, right_result) ) ->
         unify left_param right_param;
@@ -375,6 +416,7 @@ let instantiate ~level (s : scheme) : ty =
     | TCon (h, args) -> TCon (h, List.map go args)
     | TTuple items -> TTuple (List.map go items)
     | TArrow (params, row, result) -> TArrow (List.map go params, go_row row, go result)
+    | TResume (input, row, answer) -> TResume (go input, go_row row, go answer)
     | TVariadicArrow (param, row, result) -> TVariadicArrow (go param, go_row row, go result)
   and go_row r =
     let r = repr_row r in
@@ -400,6 +442,7 @@ let clone_schemes (schemes : scheme list) : scheme list =
     | TCon (hash, args) -> TCon (hash, List.map go args)
     | TTuple items -> TTuple (List.map go items)
     | TArrow (params, row, result) -> TArrow (List.map go params, go_row row, go result)
+    | TResume (input, row, answer) -> TResume (go input, go_row row, go answer)
     | TVariadicArrow (param, row, result) -> TVariadicArrow (go param, go_row row, go result)
     | TSkolem (id, name) -> TSkolem (id, name)
     | TVar reference -> (
@@ -470,6 +513,17 @@ let quantified (s : scheme) : int list * int list =
              end
          | _ -> ());
         go result
+    | TResume (input, row, answer) ->
+        go input;
+        (let row = repr_row row in
+         match row.tail with
+         | RVar { contents = RUnbound { id; level } } when level > s.gen_level ->
+             if not (Hashtbl.mem seen_r id) then begin
+               Hashtbl.add seen_r id ();
+               rids := id :: !rids
+             end
+         | _ -> ());
+        go answer
     | TVariadicArrow (param, row, result) ->
         go param;
         (let row = repr_row row in
@@ -549,6 +603,9 @@ let show ?(name_of = fun h -> String.sub (Hash.to_hex h) 0 8) ?effect_name_of ?(
             (String.concat ", " (List.map (go ~paren:false) params))
             (show_row row) (go ~paren:false result)
         in
+        if paren then "(" ^ s ^ ")" else s
+    | TResume (input, _row, answer) ->
+        let s = Printf.sprintf "Resume %s %s" (go ~paren:true input) (go ~paren:true answer) in
         if paren then "(" ^ s ^ ")" else s
     | TVariadicArrow (param, row, result) ->
         let s =

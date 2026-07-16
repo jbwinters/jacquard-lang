@@ -56,6 +56,24 @@ let test_type_cases () =
         false );
       ("skolem vs concrete", (fun () -> unify (TSkolem (fresh_id (), "a")) t_int), false);
       ("var ~ skolem ok", (fun () -> unify (new_tvar 0) (TSkolem (fresh_id (), "a"))), true);
+      ( "Resume unifies with the same Resume shape",
+        (fun () ->
+          unify
+            (TResume (t_int, closed_row [ ha ], t_text))
+            (TResume (t_int, closed_row [ ha ], t_text))),
+        true );
+      ( "Resume crosses a unary local-helper boundary",
+        (fun () ->
+          unify
+            (TResume (t_int, closed_row [ ha ], t_text))
+            (TArrow ([ t_int ], closed_row [ ha ], t_text))),
+        true );
+      ( "Resume does not cross a multi-argument function boundary",
+        (fun () ->
+          unify
+            (TResume (t_int, closed_row [ ha ], t_text))
+            (TArrow ([ t_int; t_int ], closed_row [ ha ], t_text))),
+        false );
     ]
   in
   List.iter (fun (name, f, expected) -> Alcotest.(check bool) name expected (unifies f)) cases

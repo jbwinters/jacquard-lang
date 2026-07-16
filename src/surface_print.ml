@@ -862,9 +862,15 @@ let pp_constructor ?(leading = true) context lookup fmt (constructor : Kernel.co
   Format.fprintf fmt "@]";
   pp_trailing context constructor.kmeta fmt
 
-let pp_operation context lookup fmt (operation : Kernel.opspec) =
+let mode_name = function Kernel.Once -> "once" | Kernel.Multi -> "multi"
+
+let pp_operation ?inherited_mode context lookup fmt (operation : Kernel.opspec) =
   let params_meta = Meta.surface_container "params" operation.smeta in
   pp_leading context operation.smeta fmt;
+  (match inherited_mode with
+  | Some mode when mode = operation.op_mode -> ()
+  | Some _ -> raise Bug_unsupported_surface_form
+  | None -> Format.fprintf fmt "%s " (mode_name operation.op_mode));
   Format.fprintf fmt "@[<hov 2>%a :@ " (pp_named Surface_name.Op) operation.op_name;
   pp_leading context params_meta fmt;
   Format.fprintf fmt "(%a" (pp_sep "," (pp_ty context lookup)) operation.op_params;
@@ -913,9 +919,23 @@ let pp_decl context lookup fmt (decl : Kernel.decl) =
       pp_inner context decl.meta fmt;
       Format.fprintf fmt "@]"
   | Kernel.DefEffect { ename; evars; ops } ->
-      Format.fprintf fmt "@[<v 2>effect %a" (pp_named Surface_name.Effect) ename;
+      let uniform_mode =
+        match ops with
+        | [] -> None
+        | first :: rest ->
+            if List.for_all (fun operation -> operation.Kernel.op_mode = first.op_mode) rest then
+              Some first.op_mode
+            else None
+      in
+      (match uniform_mode with
+      | Some mode ->
+          Format.fprintf fmt "@[<v 2>%s effect %a" (mode_name mode) (pp_named Surface_name.Effect)
+            ename
+      | None -> Format.fprintf fmt "@[<v 2>effect %a" (pp_named Surface_name.Effect) ename);
       List.iter (fun name -> Format.fprintf fmt " %a" (pp_named Surface_name.Tvar) name) evars;
-      Format.fprintf fmt " where {@,%a" (pp_sep "" (pp_operation context lookup)) ops;
+      Format.fprintf fmt " where {@,%a"
+        (pp_sep "" (pp_operation ?inherited_mode:uniform_mode context lookup))
+        ops;
       pp_inner context decl.meta fmt;
       Format.fprintf fmt "@]@,}");
   pp_trailing context decl.meta fmt
@@ -1043,7 +1063,11 @@ let fragment_error form =
     forms return E1203 rather than guessing. *)
 let print_fragment ?(lookup : lookup option) ?(width = default_width) (form : Form.t) :
     (string, Diag.t list) result =
-  let rendered pp value = Ok (render ~width pp value) in
+  let rendered pp value =
+    match render ~width pp value with
+    | text -> Ok text
+    | exception Bug_unsupported_surface_form -> fragment_error form
+  in
   let dummy_lit = Form.form "lit" [ Form.Int 0 ] in
   let dummy_pat = Form.form "pwild" [] in
   let dummy_ret = Form.form "ret" [ Form.F dummy_pat; Form.F dummy_lit ] in

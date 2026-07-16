@@ -278,10 +278,12 @@ let compile_program (store : Store.t) (d : discovery)
             role = Store.Operation oi;
             _;
           } ->
-          let oname =
-            match List.nth_opt specs oi with Some { Kernel.op_name; _ } -> op_name | None -> "?"
+          let oname, omode =
+            match List.nth_opt specs oi with
+            | Some { Kernel.op_name; op_mode; _ } -> (op_name, op_mode)
+            | None -> ("?", Kernel.Multi)
           in
-          Hashtbl.replace ops h { Emit.ohash = h; oeffect = ename; oname; oord = i }
+          Hashtbl.replace ops h { Emit.ohash = h; oeffect = ename; oname; omode; oord = i }
       | _ -> ())
     op_list;
   (* frame-style classification (task 71): a fn may suspend when its body performs,

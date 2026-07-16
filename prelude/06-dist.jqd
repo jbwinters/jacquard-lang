@@ -8,6 +8,7 @@
   (con categorical (field (tapp (tref list) (tapp (tref pair) (tvar a) (tref real)))))
   (con uniform-int (field (tref int)) (field (tref int))))
 
+; D44 reviewed Multi: inference handlers resume once per support element.
 (defeffect dist ()
   (op sample ((tapp (tref distribution) (tvar a))) (tvar a))
   (op observe ((tapp (tref distribution) (tvar a)) (tvar a)) (ttuple)))

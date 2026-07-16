@@ -548,12 +548,17 @@ let hash_decl (d : Kernel.decl) : (decl_hashes, Diag.t list) result =
         let env = { empty_env with tyvars = List.rev evars; tyself = Some ename } in
         varint buf (List.length ops);
         List.iter
-          (fun { Kernel.op_name; op_params; op_result; _ } ->
+          (fun { Kernel.op_name; op_mode; op_params; op_result; _ } ->
             tag buf 0x46;
             text buf op_name;
             varint buf (List.length op_params);
             List.iter (ser_ty buf env) op_params;
-            ser_ty buf env op_result)
+            ser_ty buf env op_result;
+            (* Compatibility extension: legacy Multi contributes no byte whatsoever. Once is a
+               trailing explicit discriminator, so all pre-EL.1 HASH_V0 inputs stay identical. *)
+            match op_mode with
+            | Kernel.Multi -> ()
+            | Kernel.Once -> tag buf 0x01)
           ops;
         let decl_hash = domain_hash "D" (Buffer.contents buf) in
         Ok

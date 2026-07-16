@@ -1,6 +1,8 @@
 ; Warp W6.1: the check effect, reports, test.run, and the assertion library.
 ; After SL.1's kind-aware index the effect can be named `check` while the
 ; assertions are check.* term names — no collision.
+; D44 reviewed Multi: generated-world reporting composes through captured
+; continuations; this is pure control and grants no world authority.
 (defeffect check ((tvar a))
   (op check ((tref bool) (tref text)) (ttuple))
   (op fail ((tref text)) (tvar a)))

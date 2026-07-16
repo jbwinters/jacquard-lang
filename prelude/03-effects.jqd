@@ -1,26 +1,28 @@
 ; Library effects (plan W2.6). Granting an effect at the root is the CLI's
 ; --allow flag; nothing is ambient.
-(defeffect eval ((tvar a)) (op eval-code ((tref code)) (tvar a)))
+(defeffect eval ((tvar a)) (op eval-code once ((tref code)) (tvar a)))
 
 ; ring 1 control effects (stdlib SL.4): pure effects any caller may handle.
-(defeffect abort ((tvar a)) (op abort () (tvar a)))
+(defeffect abort ((tvar a)) (op abort once () (tvar a)))
 
-(defeffect throw ((tvar e) (tvar a)) (op throw ((tvar e)) (tvar a)))
+(defeffect throw ((tvar e) (tvar a)) (op throw once ((tvar e)) (tvar a)))
 
+; D44 reviewed Multi: the canonical handler deliberately captures pure
+; continuations to implement the function-of-state transformer.
 (defeffect state ((tvar s)) (op get () (tvar s)) (op put ((tvar s)) (ttuple)))
 
-(defeffect emit ((tvar w)) (op emit ((tvar w)) (ttuple)))
+(defeffect emit ((tvar w)) (op emit once ((tvar w)) (ttuple)))
 
 (defeffect console ()
-  (op print ((tref text)) (ttuple))
-  (op read-line () (tref text)))
+  (op print once ((tref text)) (ttuple))
+  (op read-line once () (tref text)))
 
 ; ring 3 world effects (stdlib SL.8). The grant IS the sandbox boundary in this
 ; draft: --allow fs means the WHOLE filesystem (path-scoped grants are future
 ; work); clock is real time; net stays a stub returning canned responses.
 (defeffect clock ()
-  (op now () (tref int))
-  (op sleep ((tref int)) (ttuple)))
+  (op now once () (tref int))
+  (op sleep once ((tref int)) (ttuple)))
 
 (deftype request ()
   (con mk-request (field url (tref text)) (field body (tref text))))
@@ -28,16 +30,16 @@
 (deftype response ()
   (con mk-response (field status (tref int)) (field body (tref text))))
 
-(defeffect net () (op fetch ((tref request)) (tref response)))
+(defeffect net () (op fetch once ((tref request)) (tref response)))
 
 (defeffect fs ()
-  (op read ((tref text)) (tref text))
-  (op write ((tref text) (tref text)) (ttuple))
-  (op list-dir ((tref text)) (tapp (tref list) (tref text))))
+  (op read once ((tref text)) (tref text))
+  (op write once ((tref text) (tref text)) (ttuple))
+  (op list-dir once ((tref text)) (tapp (tref list) (tref text))))
 
 ; the Infer effect (stdlib SL.10): model completions as a library effect. The
 ; prompt record starts minimal so fields can grow without renaming the effect.
 (deftype prompt ()
   (con mk-prompt (field text (tref text)) (field model (tapp (tref option) (tref text)))))
 
-(defeffect infer () (op complete ((tref prompt)) (tref text)))
+(defeffect infer () (op complete once ((tref prompt)) (tref text)))

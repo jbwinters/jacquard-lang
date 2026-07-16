@@ -26,10 +26,11 @@
 
 (defterm ((binding net.dream ()
   (lam ((pvar thunk) (pvar world-model))
-    (handle (app (var thunk))
-      (ret (pvar x) (var x))
-      (opclause fetch ((pwild)) k
-        (app (var k) (app (var sample) (var world-model)))))))))
+    (let nonrec (pvar response) (app (var sample) (var world-model))
+      (handle (app (var thunk))
+        (ret (pvar x) (var x))
+        (opclause fetch ((pwild)) k
+          (app (var k) (var response)))))))))
 
 (defterm ((binding scripted-refund ()
   (lam ()

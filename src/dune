@@ -1,5 +1,5 @@
 (library
  (name jacquard)
  (public_name jacquard)
- (private_modules Trusted_builtin Recovery_marker)
+ (private_modules Trusted_builtin Recovery_marker Once_state)
  (libraries digestif unix))

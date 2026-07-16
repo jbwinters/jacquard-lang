@@ -34,6 +34,9 @@ type t =
   | VResume of frame list
       (** a resumption: the sliced continuation as immutable data — invoking it twice just reuses
           the list (multi-shot for free, plan W2.4) *)
+  | VOnceResume of kont Once_state.t
+      (** an affine resumption. Aliases share opaque consumption state, so the dynamic at-most-once
+          check belongs to the captured instance rather than to a particular variable holding it. *)
 
 and env = t ref Env.t
 
@@ -79,6 +82,6 @@ let rec show = function
   | VBuiltin (name, _) -> Printf.sprintf "<builtin %s>" name
   | VTrustedBuiltin builtin -> Printf.sprintf "<builtin %s>" (Trusted_builtin.name builtin)
   | VCode payload -> "(quote " ^ Printer.inline_form payload ^ ")"
-  | VResume _ -> "<resume>"
+  | VResume _ | VOnceResume _ -> "<resume>"
 
 let pp fmt v = Format.pp_print_string fmt (show v)
