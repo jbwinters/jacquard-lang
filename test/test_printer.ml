@@ -16,7 +16,19 @@ let test_canonical_layout () =
   Alcotest.(check string) "scalar-only form inline" "(lit 1)" (Printer.print l);
   let g = List.hd (parse_ok ~what:"lam" "(lam ((pvar x)) (var x))") in
   Alcotest.(check string)
-    "groups print as bare parens" "(lam\n  ((pvar x))\n  (var x))" (Printer.print g)
+    "groups print as bare parens" "(lam\n  ((pvar x))\n  (var x))" (Printer.print g);
+  let decorated =
+    {
+      f with
+      Form.meta =
+        f.Form.meta
+        |> Meta.add Meta.key_origin (Meta.Text "agent:export-test")
+        |> Meta.add Meta.key_doc (Meta.Text "source-only documentation");
+    }
+  in
+  Alcotest.(check string)
+    "canonical export erases provenance and documentation" (Printer.print_all [ f ])
+    (Printer.print_all [ decorated ])
 
 let test_real_reprs () =
   let cases = [ 0.1; 1.0; -0.5; 1e300; 3.14; 1.0 /. 3.0; -0.0; 2e-8 ] in

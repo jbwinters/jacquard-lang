@@ -15,14 +15,14 @@ fs write-then-read round trip in the cram's scratch directory:
 Ungranted world effects refuse by name, before any IO happens:
 
   $ jacquard run roundtrip.jqd
-  error[E0814]: this program requires the `fs` effect, which is not granted (performed via `write`)
+  error[E0814]: this program requires fs [world/medium] — read or mutate the filesystem under the granted root handler, which is not granted (performed via `write`)
     hint: grant it with --allow fs, or handle the effect in the program
   [3]
   $ cat > clocky.jqd <<'JACQUARD'
   > (let nonrec (pwild) (app (var sleep) (lit 0)) (app (var lt) (lit 0) (app (var now))))
   > JACQUARD
   $ jacquard run clocky.jqd
-  error[E0814]: this program requires the `clock` effect, which is not granted (performed via `sleep`)
+  error[E0814]: this program requires clock [world/low] — observe wall-clock milliseconds or wait, which is not granted (performed via `sleep`)
     hint: grant it with --allow clock, or handle the effect in the program
   [3]
   $ jacquard run clocky.jqd --allow clock
@@ -63,7 +63,7 @@ The infer effect (SL.10): stub completions behind the grant; ungranted refuses:
   > (app (var complete) (app (var mk-prompt) (lit "write a haiku") (var none)))
   > JACQUARD
   $ jacquard run agent.jqd
-  error[E0814]: this program requires the `infer` effect, which is not granted (performed via `complete`)
+  error[E0814]: this program requires infer [model/medium] — request a model completion selected by the handler, which is not granted (performed via `complete`)
     hint: grant it with --allow infer, or handle the effect in the program
   [3]
   $ jacquard run agent.jqd --allow infer
