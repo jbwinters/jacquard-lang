@@ -5,9 +5,12 @@ let taxonomy_doc = "../docs/effect-taxonomy.md"
 let review_doc = "../docs/effect-review.md"
 let stdlib_doc = "../docs/stdlib.md"
 let tutorial_doc = "../docs/tutorial.md"
+let membrane_doc = "../docs/effect-membranes.md"
 let concurrency_doc = "../docs/concurrency.md"
 let schema_fixture = "docs-doctest/fixtures/effect-taxonomy-schemas.jac"
 let approval_fixture = "docs-doctest/fixtures/stdlib-handler-policy.jac"
+let membrane_fixture = "docs-doctest/fixtures/governed-membrane-signatures.jac"
+let membrane_stdout = "docs-doctest/fixtures/governed-membrane-signatures.stdout"
 
 type row = {
   effect_name : string;
@@ -454,6 +457,16 @@ let contains_string haystack needle =
     ignore (Str.search_forward (Str.regexp_string needle) haystack 0);
     true
   with Not_found -> false
+
+let count_string haystack needle =
+  let expression = Str.regexp_string needle in
+  let rec loop position count =
+    try
+      let found = Str.search_forward expression haystack position in
+      loop (found + String.length needle) (count + 1)
+    with Not_found -> count
+  in
+  loop 0 0
 
 let normalize_whitespace value = Str.global_replace (Str.regexp "[ \t\r\n]+") " " value
 let mode_name = function Kernel.Once -> "once" | Kernel.Multi -> "multi"
@@ -1517,6 +1530,97 @@ let test_registry_order_is_stable () =
   in
   Alcotest.(check (list string)) "stable display ordering" (List.sort String.compare names) names
 
+let test_governed_membrane_charter () =
+  let doc = Corpus_support.read_file membrane_doc in
+  let fixture = Corpus_support.read_file membrane_fixture in
+  let stdout = Corpus_support.read_file membrane_stdout in
+  let check_contains label source phrase =
+    Alcotest.(check bool) (label ^ ": " ^ phrase) true (contains_string source phrase)
+  in
+  let check_decision decision = check_contains "indexed decision" doc ("| " ^ decision ^ " |") in
+  Alcotest.(check bool)
+    "no unresolved choice marker in membrane charter" false
+    (contains_string (lowercase doc) "tbd");
+  List.iter check_decision
+    [ "D61"; "D62"; "D63"; "D64"; "D65"; "D66"; "D67"; "D68"; "D69"; "D70"; "D71"; "D72"; "D73" ];
+  List.iter
+    (check_contains "membrane contract" doc)
+    [
+      "GovernanceV0";
+      "resources are configured evidence, never row proofs";
+      "Result ToolError";
+      "missing simulation refuses and never falls back live";
+      "`governance.with-sequence` is the sole owner API";
+      "ordinary single-tail Jacquard types";
+      "G0-G4 phase may replace this disposition-and-local-Resume representation";
+      "| Some(simulator) -> Some(fn () -> simulator(path))";
+      "transitive raw-authority envelope";
+      "parent-call-id = Some(previous-call-id)";
+      "other authority exclusions";
+      "versioned `SecretRef` values";
+      "let secret = secret.read(SecretRef(GovernanceV0, \"workspace\", None))";
+      "let exposed = secret.expose(secret)";
+      "let result = match exposed { | _ -> Ok(net.fetch(request)) }";
+      "The action therefore derives `{Net, Secret}`";
+      "Dry simulators continue to receive only safe request";
+      "governed bodies carrying `Eval` are rejected";
+      "G5 may add posterior judgment";
+      "There is no `Tool` or `Host` effect in v0";
+    ];
+  List.iter
+    (check_contains "signature fixture" fixture)
+    [
+      "workspace.read-file : (Path) -> Result ToolError Text";
+      "type AuditSequence";
+      "workspace.live-layer : (AuditSequence";
+      "workspace.dry-layer : (AuditSequence";
+      "workspace.live(policy";
+      "workspace.dry-run(policy";
+      "| None -> Err(NoSimulation)";
+      "secret.read(SecretRef(GovernanceV0";
+      "type WorkspaceOperation";
+      "Effect(HashValue(\"effect:Fs\"))";
+      "Effect(HashValue(\"effect:Net\")), Effect(HashValue(\"effect:Secret\"))";
+      "authority-for(operation)";
+      "parent-call-id: Option Hash";
+      "let handled = state.run";
+      "next-sequence(sequence)";
+      "governance.with-sequence(body)";
+      "PathValue(\"docs/README.md\")";
+    ];
+  Alcotest.(check bool)
+    "fixture never restarts a literal operation sequence" false
+    (contains_string fixture "Evaluated(GovernanceV0, 0");
+  Alcotest.(check bool)
+    "fixture never substitutes an empty authority envelope" false (contains_string fixture "[]");
+  Alcotest.(check int)
+    "only the run-level owner initializes sequence State" 1
+    (count_string fixture "state.run");
+  Alcotest.(check bool)
+    "charter has no impossible two-tail gate row" false (contains_string doc "| h | e");
+  Alcotest.(check bool)
+    "normative fetch action is not Net-only" false
+    (contains_string doc "let result = Ok(net.fetch(request))");
+  List.iter
+    (check_contains "checked signature" stdout)
+    [
+      "agent : () ->{Workspace} Result ToolError Text";
+      "next-sequence : (AuditSequence) ->{State} Int";
+      "workspace.live-layer :";
+      ") ->{Secret, Approval, Judge, State, Fs, Net, Audit} Result ToolError Text";
+      "workspace.dry-layer :";
+      ") ->{Judge, State, Audit} Result ToolError Text";
+      "governance.with-sequence : forall a | e.";
+      "workspace.live :";
+      ") ->{Secret, Approval, Judge, Fs, Net, Audit} Result ToolError Text";
+      "workspace.dry-run :";
+      ") ->{Judge, Audit} Result ToolError Text";
+    ]
+
+let test_governance_contracts () =
+  test_governance_and_links ();
+  test_governed_membrane_charter ()
+
 let suite =
   [
     Alcotest.test_case "complete machine contract" `Quick test_complete_contract;
@@ -1525,7 +1629,7 @@ let suite =
       test_implemented_interfaces_match_prelude;
     Alcotest.test_case "stale hash cannot mask schema drift" `Quick
       test_stale_hash_cannot_mask_schema_drift;
-    Alcotest.test_case "decision and governance index" `Quick test_governance_and_links;
+    Alcotest.test_case "decision and governance index" `Quick test_governance_contracts;
     Alcotest.test_case "typed registry matches contract" `Quick test_typed_registry_matches_contract;
     Alcotest.test_case "duplicate registration rejection" `Quick
       test_registration_rejects_duplicates;

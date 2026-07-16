@@ -35,6 +35,8 @@ project shape from file names alone.
   interface compatibility, and user-effect governance.
 - `effect-review.md`: identity-first manifest and authority-diff review,
   uncertainty wording, canonical boundaries, and explicit non-goals.
+- `effect-membranes.md`: GM.0 charter for typed governed facades, versioned
+  decision artifacts, live/dry boundaries, and monotonic composition.
 - `concurrency.md`: SC.0 Task/Async/scope contracts, row charging, deterministic
   scheduling, cancellation, exclusions, and D46-D50.
 - `warp-testing.md`: Warp test model, rows, handlers, cache, properties, and
