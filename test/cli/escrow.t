@@ -16,11 +16,11 @@ console covers println. Eval is absent.
   escrow.workflow : () ->{Console, Fs, Net} Int
   _ : Int
   $ jacquard run approved-run.jqd
-  error[E0814]: this program requires the `console` effect, which is not granted (performed via `escrow.workflow`)
+  error[E0814]: this program requires console [world/low] — talk to the process terminal, which is not granted (performed via `escrow.workflow`)
     hint: grant it with --allow console, or handle the effect in the program
-  error[E0814]: this program requires the `fs` effect, which is not granted (performed via `escrow.workflow`)
+  error[E0814]: this program requires fs [world/medium] — read or mutate the filesystem under the granted root handler, which is not granted (performed via `escrow.workflow`)
     hint: grant it with --allow fs, or handle the effect in the program
-  error[E0814]: this program requires the `net` effect, which is not granted (performed via `escrow.workflow`)
+  error[E0814]: this program requires net [world/high] — reach a network endpoint through the granted handler, which is not granted (performed via `escrow.workflow`)
     hint: grant it with --allow net, or handle the effect in the program
   [3]
 
@@ -121,7 +121,7 @@ refuses it, and semantic diff localizes the escalation.
   $ jacquard check workflow-escalated.jqd --print-sigs
   escrow.workflow : () ->{Console, Fs, Eval, Net} Int
   $ jacquard check escalated-run.jqd --manifest fs,net,console
-  error[E0814]: this program requires the `eval` effect, which is not granted (performed via `eval-code`)
+  error[E0814]: this program requires eval [meta/high] — run code constructed or loaded at runtime, which is not granted (performed via `eval-code`)
     hint: grant it with --allow eval, or handle the effect in the program
   [1]
   $ mkdir escalated

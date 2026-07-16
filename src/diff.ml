@@ -50,11 +50,57 @@ let operation_mode (form : Form.t) =
     | Form.Sym name :: Form.Sym "once" :: [ Form.F _; Form.F _ ] -> Some (name, Kernel.Once)
     | _ -> None
 
-(* Smallest disagreeing subtrees between two forms, with head-paths. If heads or arities
-   differ the whole node is the divergence; otherwise recurse into exactly the differing
-   arguments. *)
-let rec form_divergences ?(syntax = Bootstrap) ~path (fa : Form.t) (fb : Form.t) : divergence list =
+(** [authority_row form] extracts a fully resolved kernel row for review rendering. Named or
+    malformed rows return [None] and retain the ordinary structural-diff path. *)
+let authority_row (form : Form.t) =
+  if form.Form.head <> "row" then None
+  else
+    let rec collect effects = function
+      | [] -> Some (List.rev effects, None)
+      | [ Form.Sym tail ] -> Some (List.rev effects, Some tail)
+      | Form.F { Form.head = "eref"; args = [ Form.Hash hash ]; _ } :: rest ->
+          collect (hash :: effects) rest
+      | _ -> None
+    in
+    collect [] form.Form.args
+
+(** [render_authority_row ~effect_name_of row] renders resolved identities through the blessed
+    registry, using [effect_name_of] only as the unblessed package/name hint. *)
+let render_authority_row ~effect_name_of (effects, tail) =
+  let effects =
+    effects
+    |> List.map (fun identity ->
+        Effect_registry.render_resolved ~name_hint:(effect_name_of identity) identity)
+    |> List.sort String.compare
+  in
+  let items = match tail with Some tail -> effects @ [ "| " ^ tail ] | None -> effects in
+  "authority {" ^ String.concat ", " items ^ "}"
+
+(** Internal traversal. Only the row child of a typed [tarrow] is authority. [raw_context] becomes
+    true at a quote boundary and prevents even type-shaped quoted data from receiving authority
+    semantics. *)
+let rec form_divergences_in ~syntax ~effect_name_of ~authority_context ~raw_context ~path
+    (fa : Form.t) (fb : Form.t) : divergence list =
   if Form.equal_ignoring_meta fa fb then []
+  else if
+    authority_context
+    &&
+    match (authority_row fa, authority_row fb) with
+    | Some old_row, Some new_row -> old_row <> new_row
+    | _ -> false
+  then
+    let old_row, new_row =
+      match (authority_row fa, authority_row fb) with
+      | Some old_row, Some new_row -> (old_row, new_row)
+      | _ -> assert false
+    in
+    [
+      {
+        path;
+        a = render_authority_row ~effect_name_of old_row;
+        b = render_authority_row ~effect_name_of new_row;
+      };
+    ]
   else if
     match (operation_mode fa, operation_mode fb) with
     | Some (a_name, Kernel.Multi), Some (b_name, Kernel.Once) when a_name = b_name -> true
@@ -86,7 +132,17 @@ let rec form_divergences ?(syntax = Bootstrap) ~path (fa : Form.t) (fb : Form.t)
          (fun i (arg_a, arg_b) ->
            let path = Printf.sprintf "%s/%s[%d]" path fa.Form.head i in
            match (arg_a, arg_b) with
-           | Form.F ga, Form.F gb -> form_divergences ~syntax ~path ga gb
+           | Form.F ga, Form.F gb ->
+               let child_raw_context =
+                 raw_context || fa.Form.head = "quote" || fb.Form.head = "quote"
+               in
+               let child_authority_context =
+                 (not child_raw_context) && fa.Form.head = "tarrow" && fb.Form.head = "tarrow"
+                 && i = 1
+               in
+               form_divergences_in ~syntax ~effect_name_of
+                 ~authority_context:child_authority_context ~raw_context:child_raw_context ~path ga
+                 gb
            | a, b ->
                if Form.equal_arg a b then []
                else
@@ -98,6 +154,15 @@ let rec form_divergences ?(syntax = Bootstrap) ~path (fa : Form.t) (fb : Form.t)
                  in
                  [ { path; a = render a; b = render b } ])
          (List.combine fa.Form.args fb.Form.args))
+
+(** [form_divergences ~path old new] finds the smallest disagreeing subtrees with head paths. If
+    heads or arities differ, the whole node is the divergence; otherwise it recurses into exactly
+    the differing arguments. Resolved type-level effect rows receive authority review metadata,
+    while rows below [quote] remain ordinary data. [effect_name_of] supplies only the fallback hint
+    for identities absent from the registry. *)
+let form_divergences ?(syntax = Bootstrap) ?(effect_name_of = fun _ -> "unregistered") ~path fa fb =
+  form_divergences_in ~syntax ~effect_name_of ~authority_context:false ~raw_context:false ~path fa
+    fb
 
 (* All ((name, kind), hash) bindings of a store, plus a way to fetch a decl's printed form.
    Keys carry the kind: a name bound to several kinds (an effect and its op, say) must be
@@ -184,6 +249,17 @@ let dependents_names side (h : Hash.t) : string list =
 let diff_sides_with_syntax ~syntax ~(old_side : side) ~(new_side : side) : report =
   let a = old_side.bindings and b = new_side.bindings in
   let hash_of_key side key = List.assoc_opt key side in
+  let effect_name_of hash =
+    let find side =
+      List.find_map
+        (fun ((name, kind), candidate) ->
+          if kind = Resolve.KEffect && Hash.equal hash candidate then Some name else None)
+        side.bindings
+    in
+    match find old_side with
+    | Some name -> name
+    | None -> Option.value ~default:"unregistered" (find new_side)
+  in
   (* rename detection stays within a kind: store renames never change a binding's kind *)
   let keys_of_hash side kind h =
     List.filter_map
@@ -198,7 +274,7 @@ let diff_sides_with_syntax ~syntax ~(old_side : side) ~(new_side : side) : repor
         | Some ha ->
             let divergences =
               match (decl_form old_side ha, decl_form new_side hb) with
-              | Some fa, Some fb -> form_divergences ~syntax ~path:n fa fb
+              | Some fa, Some fb -> form_divergences ~syntax ~effect_name_of ~path:n fa fb
               | _ -> []
             in
             Some

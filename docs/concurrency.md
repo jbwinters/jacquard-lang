@@ -64,7 +64,10 @@ and `Async`
 These are structurally derived identities, not name permissions: the checker
 also validates the exact effect variable, operation order/names/modes,
 parameter/result linkage, Task identities, and open self row. This executable
-fixture pins both charging and handler subtraction. `async.scope` here is
+fixture pins both charging and handler subtraction. If a future checker change
+makes that validated kernel shape disagree with its converted parameter type,
+the checker fails closed with E0805 rather than raising an internal assertion.
+`async.scope` here is
 compile-only handler scaffolding. Its spawn clause terminates the synthetic
 handler answer instead of constructing the scheduler-private `TaskOpaque`
 carrier; the clauses are never executed and are not a Task runtime
@@ -349,6 +352,13 @@ The following are excluded from C1 and from this interface freeze:
 
 Pure `parallel.map` and `parallel.both` are separate empty-row hints. Their
 interpreter semantics are sequential and they introduce no Async effect.
+
+SC.2 audited the optional native-thread path and declined it for the current
+runtime: emitted C does not retain the callback-row proof, the allocator and
+reference counts are single-threaded, and fatal runtime errors cannot be joined
+and selected in source order. Native binaries therefore keep the sequential
+fallback. The prerequisite audit, parity/sanitizer lane, and benchmark are in
+[`native-parallel-decision.md`](native-parallel-decision.md).
 
 ## 7. Phases and indexed decisions
 

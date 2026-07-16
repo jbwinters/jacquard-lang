@@ -22,7 +22,7 @@ let test_recovery_golden () =
       "recover.jac:5:1-5: error[E1220]: expected an expression, found keyword(then)";
     ]
     (rendered_diagnostics recovered);
-  match recovered.items with
+  (match recovered.items with
   | [
    { it = TopExpr { it = Tuple []; _ }; _ };
    { it = TopHole first; meta = first_meta };
@@ -39,7 +39,15 @@ let test_recovery_golden () =
       Alcotest.(check (option string))
         "block span" (Some "recover.jac:4:1-6:2")
         (Option.map Span.to_string (Meta.span block_meta))
-  | _ -> Alcotest.fail "recovery golden produced an unexpected partial tree"
+  | _ -> Alcotest.fail "recovery golden produced an unexpected partial tree");
+  let block = recover "{" in
+  (match block.items with
+  | [ { it = TopExpr { it = Block [ Expr { it = Hole 0; _ } ]; meta }; _ } ] ->
+      Alcotest.(check (option string))
+        "block recovery form" (Some "recovery-delimiter") (Meta.surface_form meta);
+      Alcotest.(check (option string)) "block recovery hole" (Some "1") (Meta.surface_hole meta)
+  | _ -> Alcotest.fail "unclosed block did not produce a marked partial container");
+  Test_dx_parser_recovery.run ()
 
 let test_each_synchronization_boundary () =
   let cases = [ ("newline", "then\nafter\n"); ("semicolon", "then;after\n") ] in
@@ -215,7 +223,7 @@ let test_nested_unmatched_braces () =
        TopExpr
          {
            it =
-             Block [ Expr { it = Block [ Expr { it = Hole 0; _ } ]; _ }; Expr { it = Hole 1; _ } ];
+             Block [ Expr { it = Block [ Expr { it = Hole 0; _ } ]; _ }; Expr { it = Hole 2; _ } ];
            _;
          };
      _;

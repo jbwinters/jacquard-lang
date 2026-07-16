@@ -61,7 +61,10 @@ fails with the same-tail occurs check at the `async.spawn` source, and the Types
 regression rejects different effect sets sharing the same tail. Both negative
 crams declare the complete frozen four-operation Async identity rather than a
 near-match. A generated property checks that every subset of two independent
-child effects remains visible in the shared caller row.
+child effects remains visible in the shared caller row. The converted-shape
+defense fails closed with E0805 if a future checker refactor makes the validated
+frozen declaration and its internal arrow disagree; a source regression keeps
+that path diagnostic-only and forbids the former internal assertion.
 
 ## Opaque Task boundary
 
@@ -106,7 +109,8 @@ A. Ordinary in-language Once resumptions share this private owner check.
 
 ## Async boundary and parity
 
-All four Async operations are reviewed as `once`; no handler is installed.
+All four Async operations are reviewed as `once`; the taxonomy still marks
+Async as reserved, and no handler or built-in `--allow` grant is installed.
 Direct evaluator calls therefore reach the ordinary `Unhandled` result for
 spawn, await, cancel, and yield. The CLI rejects an unhandled Async program at
 its effect gate with E0814. Neither path schedules work or grants ambient
@@ -217,6 +221,9 @@ opam exec -- dune fmt
 git diff --exit-code
 opam exec -- dune build @doc
 ```
+
+Expected results are zero exits, 603 compiled Alcotest/QCheck cases, 34 cram
+transcripts, and 24 doctest examples across 7 documents.
 
 Runnable-queue policy, cooperative cancellation routing, failure policy, and
 the Async root handler remain later C1 tasks. SC.6 supplies executable

@@ -835,6 +835,12 @@ let test_governance_and_links () =
   let child = task_id ~scope_path:[ 0 ] ~spawn_index:1 in
   Alcotest.(check bool) "fail-fast is the default" true (default_failure_policy = Fail_fast);
   Alcotest.(check string) "task escape code" "E0907" task_escape_code;
+  Alcotest.(check string)
+    "self-await diagnostic is exact" "async deadlock: task 0#0 awaited itself"
+    (self_await_message parent);
+  Alcotest.(check string)
+    "wait-cycle diagnostic is exact" "async deadlock: await cycle 0#0 -> 0#1 -> 0#0"
+    (wait_cycle_message [ parent; child; parent ]);
   Alcotest.(check int) "child follows parent in stable ID order" (-1) (compare_task_id parent child);
   Alcotest.(check string) "task trace spelling" "0#1" (trace_task_id child);
   Alcotest.(check (list string))
@@ -857,7 +863,15 @@ let test_governance_and_links () =
       schemas.scope_fail_fast;
       schemas.scope_collect;
     ];
-  Alcotest.(check int) "all cancellation point classes frozen" 3 (List.length cancellation_points);
+  let cancellation_point_name = function
+    | Await -> "await"
+    | Yield -> "yield"
+    | Routed_effect -> "routed-effect"
+  in
+  Alcotest.(check (list string))
+    "all cancellation point classes frozen in contract order"
+    [ "await"; "yield"; "routed-effect" ]
+    (List.map cancellation_point_name cancellation_points);
   Alcotest.(check bool)
     "spawn queues child before suspended parent" true
     (requeue_after_spawn ~runnable:[] ~child ~parent = [ child; parent ]);
@@ -922,6 +936,155 @@ let test_governance_and_links () =
       Alcotest.(check bool) "round-robin chooses FIFO head" true (decision.chosen = child)
   | None -> Alcotest.fail "nonempty runnable queue produced no decision"
 
+let registry_entry display_name =
+  match
+    List.find_opt
+      (fun (entry : Effect_registry.metadata) -> entry.display_name = display_name)
+      Effect_registry.catalog
+  with
+  | Some entry -> entry
+  | None -> Alcotest.failf "registry catalog missing %s" display_name
+
+let test_typed_registry_matches_contract () =
+  let rows = rows () in
+  let entries = Effect_registry.catalog in
+  Alcotest.(check int) "catalog covers every blessed entry" 25 (List.length entries);
+  Alcotest.(check int)
+    "only live identities enter the canonical registry" 12
+    (List.length (Effect_registry.entries Effect_registry.canonical));
+  Alcotest.(check (list string))
+    "catalog names exactly cover the TSV"
+    (rows |> List.map (fun row -> row.effect_name) |> List.sort String.compare)
+    (entries
+    |> List.map (fun (entry : Effect_registry.metadata) -> entry.display_name)
+    |> List.sort String.compare);
+  List.iter
+    (fun (entry : Effect_registry.metadata) ->
+      let row = find entry.display_name in
+      Alcotest.(check string) (entry.display_name ^ " index") row.index_name entry.index_name;
+      Alcotest.(check string)
+        (entry.display_name ^ " tier") row.tier
+        (Effect_registry.tier_name entry.tier);
+      Alcotest.(check string)
+        (entry.display_name ^ " risk") row.risk
+        (Effect_registry.risk_name entry.default_risk);
+      Alcotest.(check string) (entry.display_name ^ " meaning") row.meaning entry.reviewer_meaning;
+      match (row.status, entry.interface) with
+      | "implemented", Effect_registry.Released { version; hash } ->
+          Alcotest.(check string) (entry.display_name ^ " interface version") "v1" version;
+          Alcotest.(check string)
+            (entry.display_name ^ " interface hash")
+            row.interface_hash (Hash.to_hex hash);
+          Alcotest.(check bool)
+            (entry.display_name ^ " identity lookup")
+            true
+            (match Effect_registry.find_canonical hash with
+            | Some found -> found.display_name = entry.display_name
+            | None -> false)
+      | "reserved", Effect_registry.Reserved { first_version } -> (
+          Alcotest.(check string)
+            (entry.display_name ^ " remains identity-free")
+            "first-release" first_version;
+          Alcotest.(check bool)
+            (entry.display_name ^ " exposes no invented hash")
+            true
+            (Effect_registry.interface_hash entry = None);
+          let retagged =
+            {
+              entry with
+              interface =
+                Effect_registry.Released
+                  {
+                    version = "forged";
+                    hash = Hash.of_string ("forged reserved " ^ entry.display_name);
+                  };
+            }
+          in
+          match Effect_registry.register Effect_registry.empty retagged with
+          | Error (Effect_registry.Reserved_catalog_name _) -> ()
+          | _ -> Alcotest.failf "%s accepted a fabricated identity" entry.display_name)
+      | status, _ -> Alcotest.failf "%s registry status disagrees with %s" entry.display_name status)
+    entries;
+  Alcotest.(check int) "TSV and registry counts agree" (List.length rows) (List.length entries)
+
+let test_registration_rejects_duplicates () =
+  let net = registry_entry "Net" in
+  let registered =
+    match Effect_registry.register Effect_registry.empty net with
+    | Ok registry -> registry
+    | Error error -> Alcotest.fail (Effect_registry.registration_error_to_string error)
+  in
+  (match Effect_registry.register registered net with
+  | Error (Effect_registry.Duplicate_identity _) -> ()
+  | _ -> Alcotest.fail "duplicate resolved identity was accepted");
+  let different_identity =
+    {
+      net with
+      interface =
+        Effect_registry.Released
+          { version = "test"; hash = Hash.of_string "different-net-interface" };
+    }
+  in
+  (match Effect_registry.register registered different_identity with
+  | Error (Effect_registry.Duplicate_display_name "Net") -> ()
+  | _ -> Alcotest.fail "duplicate blessed display name was accepted");
+  let different_name = { different_identity with display_name = "OtherNet" } in
+  (match Effect_registry.register registered different_name with
+  | Error (Effect_registry.Duplicate_index_name "net") -> ()
+  | _ -> Alcotest.fail "duplicate official index name was accepted");
+  let reserved = registry_entry "Audit" in
+  (match Effect_registry.register registered reserved with
+  | Error (Effect_registry.Missing_resolved_identity "Audit") -> ()
+  | _ -> Alcotest.fail "reserved interface entered the resolved registry");
+  let retagged =
+    {
+      reserved with
+      interface =
+        Effect_registry.Released
+          { version = "forged"; hash = Hash.of_string "invented audit identity" };
+    }
+  in
+  (match Effect_registry.register Effect_registry.empty retagged with
+  | Error (Effect_registry.Reserved_catalog_name "Audit") -> ()
+  | _ -> Alcotest.fail "retagged reserved display name entered the registry");
+  let display_renamed = { retagged with display_name = "PretendAudit" } in
+  match Effect_registry.register Effect_registry.empty display_renamed with
+  | Error (Effect_registry.Reserved_catalog_name "audit") -> ()
+  | _ -> Alcotest.fail "retagged reserved index name entered the registry"
+
+let test_unknown_identity_is_uncolored_and_unblessed () =
+  let fake = Hash.of_string "publisher effect that happens to be named net" in
+  let hint = "pk:attacker.example/tools/net" in
+  let plain = Effect_registry.render_manifest_requirement ~name_hint:hint fake in
+  let styled =
+    Effect_registry.render_manifest_requirement ~style:Effect_registry.Ansi ~name_hint:hint fake
+  in
+  Alcotest.(check string) "styling never colors unknown effects" plain styled;
+  Alcotest.(check bool) "publisher hint retained" true (contains_string plain hint);
+  Alcotest.(check bool) "full identity retained" true (contains_string plain (Hash.to_hex fake));
+  Alcotest.(check bool) "unknown identity is unrated" true (contains_string plain "unrated");
+  Alcotest.(check bool)
+    "official Net metadata not inherited" false
+    (contains_string plain "world/high");
+  let unpackaged = Effect_registry.render_manifest_requirement ~name_hint:"net" fake in
+  Alcotest.(check bool)
+    "missing package metadata gets an honest qualified fallback" true
+    (contains_string unpackaged ("unpackaged:" ^ String.sub (Hash.to_hex fake) 0 12 ^ "/net"));
+  let official = Effect_registry.render_metadata (registry_entry "Net") in
+  Alcotest.(check bool) "plain registry output has no ANSI" false (contains_string official "\027[");
+  Alcotest.(check bool) "official risk renders" true (contains_string official "world/high");
+  let styled_official =
+    Effect_registry.render_metadata ~style:Effect_registry.Ansi (registry_entry "Net")
+  in
+  Alcotest.(check bool) "ANSI styling is explicit" true (contains_string styled_official "\027[")
+
+let test_registry_order_is_stable () =
+  let names =
+    Effect_registry.entries Effect_registry.canonical
+    |> List.map (fun (entry : Effect_registry.metadata) -> entry.display_name)
+  in
+  Alcotest.(check (list string)) "stable display ordering" (List.sort String.compare names) names
+
 let suite =
   [
     Alcotest.test_case "complete machine contract" `Quick test_complete_contract;
@@ -929,4 +1092,10 @@ let suite =
     Alcotest.test_case "implemented prelude compatibility" `Quick
       test_implemented_interfaces_match_prelude;
     Alcotest.test_case "decision and governance index" `Quick test_governance_and_links;
+    Alcotest.test_case "typed registry matches contract" `Quick test_typed_registry_matches_contract;
+    Alcotest.test_case "duplicate registration rejection" `Quick
+      test_registration_rejects_duplicates;
+    Alcotest.test_case "unknown identity stays unblessed" `Quick
+      test_unknown_identity_is_uncolored_and_unblessed;
+    Alcotest.test_case "registry ordering stable" `Quick test_registry_order_is_stable;
   ]

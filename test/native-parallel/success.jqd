@@ -1,0 +1,13 @@
+; SC.2 stress fixture: the native backend must keep this hint on the
+; sequential path until it can carry an empty-row proof into emitted code.
+(app (var list.fold)
+  (app (var parallel.map)
+    (app (var list.range) (lit 0) (lit 10000))
+    (lam ((pvar n))
+      (app (var add) (app (var mul) (var n) (var n)) (lit 1))))
+  (lit 0)
+  (lam ((pvar acc) (pvar n)) (app (var add) (var acc) (var n))))
+
+(app (var parallel.both)
+  (lam () (app (var list.length) (app (var list.range) (lit 0) (lit 1000))))
+  (lam () (app (var list.length) (app (var list.range) (lit 0) (lit 2000)))))
