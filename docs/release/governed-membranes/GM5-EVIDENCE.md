@@ -5,8 +5,7 @@ commit `94b5082`.
 
 GM.5 releases the blessed once `Judge` interface and the deterministic
 assessment handlers required by the GM.0 charter. It reuses GM.1's exact
-versioned `GovernanceCall` and `GovernanceAssessment` carriers; it does not
-introduce parallel call, risk, or assessment vocabulary.
+versioned `GovernanceCall` and `GovernanceAssessment` carriers throughout.
 
 ## Contract
 
