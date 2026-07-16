@@ -631,6 +631,8 @@ reparse to the same semantic top/member hashes; quoted constructor and
 operation intent remains encoded with `surface-ref-v0`. Publication is atomic
 and refuses an existing destination. The canonical bootstrap output erases
 comments, formatting, spans, documentation, and provenance metadata by design.
+Export validates parsing, resolution, and canonical identity, but does not
+typecheck; use `jac check`, `jac run`, or `jac build` for that guarantee.
 Materialize stdin or other non-seekable input before export.
 
 The backend supports deep and multi-shot handlers, Dist, quotes, splices, and

@@ -343,6 +343,8 @@ only when conformance evidence or kernel debugging needs an explicit canonical
 carrier. Export is deterministic and exclusive/atomic; it preserves semantic
 member hashes and quote namespace markers, while intentionally erasing
 comments, formatting, spans, documentation, and provenance metadata.
+Export resolves and canonicalizes input but does not typecheck it; use
+`jac check`, `jac run`, or `jac build` when typechecking is required.
 
 Requirements and knobs:
 

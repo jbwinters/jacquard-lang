@@ -40,6 +40,9 @@ identity system, kernel form, store format, or prelude format.
   source under that context. Quote payloads retain the versioned
   `surface-ref-v0` constructor/operation encoding, so namespace intent is not
   collapsed inside unresolved code data.
+- Export establishes parse, resolution, and canonical-identity validity; it
+  does not typecheck the program. Use `jac check`, `jac run`, or `jac build`
+  when successful typechecking is part of the required boundary.
 - Export deliberately erases comments, formatting, spans, documentation, and
   provenance metadata. Those are excluded from semantic identity and are not
   promised to round-trip through the bootstrap carrier.
