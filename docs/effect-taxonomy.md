@@ -227,7 +227,9 @@ against the current Proposal; it never synthesizes consent. `approval.dry-run`
 always returns `Escalate`, never `Approved`. `approval.policy-auto` may approve
 only an already-`Allow` policy verdict; `Ask` and `Simulate` escalate, while
 `Block` denies. Every handler recomputes the Proposal hash before it can resume
-the protected computation.
+the protected computation. The classifier that supplies the verdict is a
+trusted handler dependency: a live membrane must derive it from the exact
+validated policy and assessment, never from governed caller input.
 
 The declarations below are an executable surface fixture for the currently
 resolvable reserved world and governance operation boundaries plus Channel.
@@ -383,6 +385,9 @@ data and receive structural diffs, never an authority label.
   a universal host/tool effect.
 - Secret opacity is non-derivability, not taint tracking. After
   `secret.expose`, plaintext is ordinary `Text` and may be copied or leaked.
+- Secret redaction does not promise process-memory scrubbing. The v0 OCaml and
+  native carriers do not zero payload bytes when a Secret is released, so
+  process memory and crash-dump protection remain embedding responsibilities.
 - A reserved schema is neither an implementation nor a roadmap promise. In
   particular, this release has no `Async` scheduler, typed `Channel` runtime,
   database/blob/serve/crypto/log provider, pure `Choose` interface, or `Judge`

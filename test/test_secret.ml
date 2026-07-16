@@ -103,9 +103,7 @@ let test_diagnostics_never_render_payload () =
       let rendered = Runtime_err.to_string error in
       Alcotest.(check bool)
         "fixture absent from runtime diagnostic" false (contains rendered fixture);
-      Alcotest.(check bool)
-        "redaction marker present" true
-        (String.ends_with ~suffix:"<secret redacted>" rendered || String.contains rendered '<')
+      Alcotest.(check bool) "redaction marker present" true (contains rendered "<secret redacted>")
   | Ok value -> Alcotest.failf "text serializer accepted %s" (Value.show value));
   (match check source with
   | Error [ { Diag.code = "E0818"; message; _ } ] ->
