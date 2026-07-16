@@ -1,7 +1,5 @@
 # Effect-linearity EL.2-EL.4 + SC.8 reconstructible integration overlay
 # Base commit: 23e3b5647fa9a9676990db9cf44350e66bf374a7
-# Attestation manifests exclude themselves (and successor manifests) to avoid self/cross-hashes.
-
 40b419510c7fb14a860bfdcd3c4453a1a4c2b20bfa280de59439893a94b94e0b  README.md
 6f126fddcde955275123d511996d4505317dc169ede3a93766a49afd91ed7837  bench/state-loop.jqd
 236eb8def1f8654545e35b9eddf7406219e8adc3c6b806c28f325e94c31ef4ab  bin/main.ml
@@ -54,6 +52,7 @@ d4fea490203ee9e841e9f854eb4bd1807e69dddb0bbbc754ee35d21fb787a4ba  docs/release/0
 12c94bfdf62244bb4b74829e7d75c74e747abec79468a913c1c1827884c1ad11  docs/release/dx-jac-export/EVIDENCE.md
 821eca1a3e474d46db63de3cb1efade3e369ce03acc09c0626be78feec5f79dc  docs/release/effect-linearity/EVIDENCE.md
 a9f96b2b0f74f582a36511d3a3f46561551a8e81a3f6c50ae78c26e871cec239  docs/release/structured-concurrency/EVIDENCE.md
+edf014550d43f05180fbdcaf7cfe749e0e82b9e0c9179774a7b91d19e66123ed  docs/release/structured-concurrency/MANIFEST.sha256
 63d807754acee18b463934c693f7127f8ed3a53d2feb9d6bcb1bee14f605d237  docs/release/surface-syntax/DECISION.md
 2fabf31143e9d20d59ff0767b76a95c316df2fe022561b604078b9615c87876f  docs/release/surface-syntax/FOLLOWUPS.md
 c8c245de2c999c805a3902089d9f2c23f698931a451b93e354514811cc069515  docs/release/surface-syntax/MANIFEST.sha256
