@@ -1,0 +1,3 @@
+# Canonical names whose exact operation identity must not resolve.
+unresolved-effect	missing.write
+operation-absent-from-resolved-effect	fs.missing
