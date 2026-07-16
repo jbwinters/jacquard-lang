@@ -2,6 +2,48 @@ Warp property lanes (W6.4 sampling + shrinking, W6.5 exhaustive, W6.9).
 
   $ export JACQUARD_PRELUDE=$PWD/../../prelude
 
+Phase-zero parallel hints are proved against their sequential definitions over
+generated pure inputs. The callbacks themselves stay empty-row even though the
+property generators and checks use Dist and Check around them.
+
+  $ cat > parallel-laws.jqd <<'JACQUARD'
+  > (defterm ((binding parallel-map-law ()
+  >   (app (var prop) (lit "parallel.map matches list.map")
+  >     (lam ()
+  >       (app (var prop.for)
+  >         (lam () (app (var gen.list)
+  >           (lam () (app (var sample) (app (var uniform-int) (lit -20) (lit 20))))
+  >           (lit 7)))
+  >         (lam ((pvar xs))
+  >           (let nonrec (pvar f)
+  >             (lam ((pvar n)) (app (var sub) (app (var mul) (var n) (lit 3)) (lit 1)))
+  >             (app (var check.eq)
+  >               (app (var parallel.map) (var xs) (var f))
+  >               (app (var list.map) (var xs) (var f))
+  >               (app (var eq.for-list) (var int.eq))
+  >               (app (var show.for-list) (var int.show))
+  >               (lit "parallel.map"))))))))))
+  > (defterm ((binding parallel-both-law ()
+  >   (app (var prop) (lit "parallel.both matches sequential tuple")
+  >     (lam ()
+  >       (app (var prop.for)
+  >         (lam () (tuple
+  >           (app (var sample) (app (var uniform-int) (lit -20) (lit 20)))
+  >           (app (var sample) (app (var uniform-int) (lit -20) (lit 20)))))
+  >         (lam ((ptuple (pvar x) (pvar y)))
+  >           (app (var check.true)
+  >             (app (app (var eq.fn) (app (var eq.for-pair) (var int.eq) (var int.eq)))
+  >               (app (var parallel.both)
+  >                 (lam () (app (var mul) (var x) (lit 2)))
+  >                 (lam () (app (var add) (var y) (lit 5))))
+  >               (tuple (app (var mul) (var x) (lit 2)) (app (var add) (var y) (lit 5))))
+  >             (lit "parallel.both")))))))))
+  > JACQUARD
+  $ jacquard test parallel-laws.jqd --seed 125 --samples 100 --no-cache
+  PASS parallel-both-law/parallel.both matches sequential tuple (prop: 100 cases, seed 125)
+  PASS parallel-map-law/parallel.map matches list.map (prop: 100 cases, seed 125)
+  2 passed, 0 failed, 0 skipped, 0 refused
+
   $ cat > props.jqd <<'JACQUARD'
   > (defterm ((binding rev-broken ()
   >   (app (var prop) (lit "rev is identity (mutated)")

@@ -1,0 +1,8 @@
+; Both elements fail differently. The first source-order failure must win,
+; independently of host scheduling: division, never the later modulo.
+(app (var parallel.map)
+  (app (var cons) (lit 0) (app (var cons) (lit 1) (var nil)))
+  (lam ((pvar n))
+    (match (var n)
+      (clause (plit 0) (app (var div) (lit 1) (lit 0)))
+      (clause (pvar later) (app (var mod) (var later) (lit 0))))))
