@@ -474,12 +474,90 @@ static struct {
 } jq_lit_text = { JQ_RC_STATIC, JQ_TEXT, 0, 2, 3, "lit" };
 #define JQ_LIT_TEXT ((jq_value)&jq_lit_text)
 
+static struct {
+  uint32_t rc;
+  uint8_t tag;
+  uint8_t flags;
+  uint16_t n;
+  uint64_t len;
+  char bytes[8];
+} jq_hash_text = { JQ_RC_STATIC, JQ_TEXT, 0, 2, 4, "hash" };
+#define JQ_HASH_TEXT ((jq_value)&jq_hash_text)
+
 jq_value jq_i_code_of_int(jq_rt *rt, const jq_value *a) {
   (void)rt;
   if (!jq_is_int(a[0])) type_err_args("code.of-int", a, 1);
   jq_value node = jq_code_node(JQ_LIT_TEXT, 1);
   jq_code_set(node, 0, JQ_CA_INT, a[0]);
   return node;
+}
+
+jq_value jq_i_code_of_real(jq_rt *rt, const jq_value *a) {
+  (void)rt;
+  if (!is_real(a[0])) type_err_args("code.of-real", a, 1);
+  jq_value node = jq_code_node(JQ_LIT_TEXT, 1);
+  jq_code_set(node, 0, JQ_CA_REAL, a[0]);
+  return node;
+}
+
+jq_value jq_i_code_of_hash(jq_rt *rt, const jq_value *a) {
+  (void)rt;
+  if (!jq_is_hash(a[0])) type_err_args("code.of-hash", a, 1);
+  jq_value node = jq_code_node(JQ_HASH_TEXT, 1);
+  jq_code_set(node, 0, JQ_CA_HASH, a[0]);
+  return node;
+}
+
+jq_value jq_i_code_of_text(jq_rt *rt, const jq_value *a) {
+  (void)rt;
+  if (!is_text(a[0])) type_err_args("code.of-text", a, 1);
+  jq_value node = jq_code_node(JQ_LIT_TEXT, 1);
+  jq_code_set(node, 0, JQ_CA_TEXT, a[0]);
+  return node;
+}
+
+static int lowercase_hex(uint8_t c) {
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+  return -1;
+}
+
+jq_value jq_i_hash_parse(jq_rt *rt, const jq_value *a) {
+  if (!is_text(a[0])) type_err_args("hash.parse", a, 1);
+  const uint8_t *spelling = jq_text_bytes(a[0]);
+  uint64_t n = jq_text_len(a[0]);
+  uint8_t bytes[32];
+  bool valid = n == 64;
+  if (valid) {
+    for (uint64_t i = 0; i < 32; i++) {
+      int high = lowercase_hex(spelling[2 * i]);
+      int low = lowercase_hex(spelling[2 * i + 1]);
+      if (high < 0 || low < 0) {
+	valid = false;
+	break;
+      }
+      bytes[i] = (uint8_t)((high << 4) | low);
+    }
+  }
+  jq_drop(a[0]);
+  if (valid) return jq_con(rt->ci_ok, (jq_value[]){ jq_hash(bytes) });
+  static const char message[] = "expected 64 lowercase hexadecimal HASH_V0 digits";
+  jq_value error = jq_text((const uint8_t *)message, sizeof(message) - 1);
+  return jq_con(rt->ci_err, (jq_value[]){ error });
+}
+
+jq_value jq_i_hash_to_text(jq_rt *rt, const jq_value *a) {
+  (void)rt;
+  if (!jq_is_hash(a[0])) type_err_args("hash.to-text", a, 1);
+  static const char digits[] = "0123456789abcdef";
+  const uint8_t *bytes = jq_hash_bytes(a[0]);
+  uint8_t spelling[64];
+  for (uint64_t i = 0; i < 32; i++) {
+    spelling[2 * i] = (uint8_t)digits[bytes[i] >> 4];
+    spelling[2 * i + 1] = (uint8_t)digits[bytes[i] & 15];
+  }
+  jq_drop(a[0]);
+  return jq_text(spelling, 64);
 }
 
 jq_value jq_i_code_to_int(jq_rt *rt, const jq_value *a) {
@@ -656,6 +734,116 @@ jq_value jq_i_code_diff(jq_rt *rt, const jq_value *a) {
   jq_drop(a[0]);
   jq_drop(a[1]);
   return r;
+}
+
+jq_value jq_i_code_render(jq_rt *rt, const jq_value *a) {
+  (void)rt;
+  if (!jq_is_code(a[0])) type_err_args("code.render", a, 1);
+  char *txt = jq_code_inline(a[0]);
+  jq_value rendered = jq_text((const uint8_t *)txt, strlen(txt));
+  free(txt);
+  jq_drop(a[0]);
+  return rendered;
+}
+
+/* HASH_V0 is SHA-256. This compact port hashes the exact bytes returned by
+   jq_code_inline, the same canonical Code rendering used by the interpreter.
+   It is deliberately local to the intrinsic rather than a second proposal
+   serializer. */
+static uint32_t sha256_rotr(uint32_t value, uint32_t count) {
+  return (value >> count) | (value << (32U - count));
+}
+
+static void sha256_block(uint32_t state[8], const uint8_t block[64]) {
+  static const uint32_t k[64] = {
+    0x428a2f98U, 0x71374491U, 0xb5c0fbcfU, 0xe9b5dba5U, 0x3956c25bU, 0x59f111f1U,
+    0x923f82a4U, 0xab1c5ed5U, 0xd807aa98U, 0x12835b01U, 0x243185beU, 0x550c7dc3U,
+    0x72be5d74U, 0x80deb1feU, 0x9bdc06a7U, 0xc19bf174U, 0xe49b69c1U, 0xefbe4786U,
+    0x0fc19dc6U, 0x240ca1ccU, 0x2de92c6fU, 0x4a7484aaU, 0x5cb0a9dcU, 0x76f988daU,
+    0x983e5152U, 0xa831c66dU, 0xb00327c8U, 0xbf597fc7U, 0xc6e00bf3U, 0xd5a79147U,
+    0x06ca6351U, 0x14292967U, 0x27b70a85U, 0x2e1b2138U, 0x4d2c6dfcU, 0x53380d13U,
+    0x650a7354U, 0x766a0abbU, 0x81c2c92eU, 0x92722c85U, 0xa2bfe8a1U, 0xa81a664bU,
+    0xc24b8b70U, 0xc76c51a3U, 0xd192e819U, 0xd6990624U, 0xf40e3585U, 0x106aa070U,
+    0x19a4c116U, 0x1e376c08U, 0x2748774cU, 0x34b0bcb5U, 0x391c0cb3U, 0x4ed8aa4aU,
+    0x5b9cca4fU, 0x682e6ff3U, 0x748f82eeU, 0x78a5636fU, 0x84c87814U, 0x8cc70208U,
+    0x90befffaU, 0xa4506cebU, 0xbef9a3f7U, 0xc67178f2U
+  };
+  uint32_t words[64];
+  for (uint32_t i = 0; i < 16; i++) {
+    uint32_t j = 4U * i;
+    words[i] = ((uint32_t)block[j] << 24) | ((uint32_t)block[j + 1] << 16) |
+               ((uint32_t)block[j + 2] << 8) | (uint32_t)block[j + 3];
+  }
+  for (uint32_t i = 16; i < 64; i++) {
+    uint32_t x = words[i - 15];
+    uint32_t y = words[i - 2];
+    uint32_t s0 = sha256_rotr(x, 7) ^ sha256_rotr(x, 18) ^ (x >> 3);
+    uint32_t s1 = sha256_rotr(y, 17) ^ sha256_rotr(y, 19) ^ (y >> 10);
+    words[i] = words[i - 16] + s0 + words[i - 7] + s1;
+  }
+  uint32_t a = state[0], b = state[1], c = state[2], d = state[3];
+  uint32_t e = state[4], f = state[5], g = state[6], h = state[7];
+  for (uint32_t i = 0; i < 64; i++) {
+    uint32_t s1 = sha256_rotr(e, 6) ^ sha256_rotr(e, 11) ^ sha256_rotr(e, 25);
+    uint32_t choice = (e & f) ^ ((~e) & g);
+    uint32_t t1 = h + s1 + choice + k[i] + words[i];
+    uint32_t s0 = sha256_rotr(a, 2) ^ sha256_rotr(a, 13) ^ sha256_rotr(a, 22);
+    uint32_t majority = (a & b) ^ (a & c) ^ (b & c);
+    uint32_t t2 = s0 + majority;
+    h = g; g = f; f = e; e = d + t1;
+    d = c; c = b; b = a; a = t1 + t2;
+  }
+  state[0] += a; state[1] += b; state[2] += c; state[3] += d;
+  state[4] += e; state[5] += f; state[6] += g; state[7] += h;
+}
+
+static void sha256_bytes(const uint8_t *bytes, size_t length, uint8_t digest[32]) {
+  uint32_t state[8] = {
+    0x6a09e667U, 0xbb67ae85U, 0x3c6ef372U, 0xa54ff53aU,
+    0x510e527fU, 0x9b05688cU, 0x1f83d9abU, 0x5be0cd19U
+  };
+  size_t offset = 0;
+  while (length - offset >= 64) {
+    sha256_block(state, bytes + offset);
+    offset += 64;
+  }
+  uint8_t tail[128] = { 0 };
+  size_t remaining = length - offset;
+  memcpy(tail, bytes + offset, remaining);
+  tail[remaining] = 0x80;
+  size_t tail_length = remaining < 56 ? 64 : 128;
+  uint64_t bit_length = (uint64_t)length * 8U;
+  for (uint32_t i = 0; i < 8; i++)
+    tail[tail_length - 1U - i] = (uint8_t)(bit_length >> (8U * i));
+  sha256_block(state, tail);
+  if (tail_length == 128) sha256_block(state, tail + 64);
+  for (uint32_t i = 0; i < 8; i++) {
+    digest[4U * i] = (uint8_t)(state[i] >> 24);
+    digest[4U * i + 1] = (uint8_t)(state[i] >> 16);
+    digest[4U * i + 2] = (uint8_t)(state[i] >> 8);
+    digest[4U * i + 3] = (uint8_t)state[i];
+  }
+}
+
+jq_value jq_i_code_hash(jq_rt *rt, const jq_value *a) {
+  (void)rt;
+  if (!jq_is_code(a[0])) type_err_args("code.hash", a, 1);
+  char *canonical = jq_code_inline(a[0]);
+  size_t length = strlen(canonical);
+  uint8_t digest[32];
+  sha256_bytes((const uint8_t *)canonical, length, digest);
+  free(canonical);
+  jq_drop(a[0]);
+  return jq_hash(digest);
+}
+
+jq_value jq_i_debug_inspect(jq_rt *rt, const jq_value *a) {
+  (void)rt;
+  char *rendered = jq_show(a[0]);
+  jq_value result = jq_text((const uint8_t *)rendered, strlen(rendered));
+  free(rendered);
+  jq_drop(a[0]);
+  return result;
 }
 
 jq_value jq_i_support(jq_rt *rt, const jq_value *a) {

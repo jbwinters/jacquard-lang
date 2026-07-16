@@ -48,6 +48,8 @@ once-constructor-storage | once-constructor-storage.jqd:2:130-137: error[E0817]:
   hint: call the resumption once, drop it, or move it to a local parameter that is checked as Resume-typed
 once-return | once-return.jqd:2:87-94: error[E0817]: once resumption `k` escapes by being returned from its handler clause
   hint: call the resumption once, drop it, or move it to a local parameter that is checked as Resume-typed
+secret-generic-inspection | secret-generic-inspection.jqd:1:1-100: error[E0819]: Secret has no Show or serialization instance and generic inspection is redacted
+  hint: keep the value opaque; only `secret.expose` converts Secret to Text, and that operation remains in the Secret effect row
 redundant-clause | redundant-clause.jqd:1:57-85: warning[W0801]: this clause is redundant: earlier clauses match everything it does
 eta-positive | eta-positive.jac:2:21-30: error[E0807]: this position expects a thunk, but `condition` is a bare reference; wrap it in `fn () -> ...`
   hint: wrap the reference in `fn () -> ...` so the computation is delayed

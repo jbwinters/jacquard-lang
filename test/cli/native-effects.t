@@ -59,6 +59,21 @@ assertion, exit codes included.
   identical: g33-quote-effectful-splice (exit 0)
   identical: g34-spec-const-list (exit 0)
   identical: g35-stdlib-ss22 (exit 0)
+  identical: g36-audit-code-render (exit 0)
+  identical: g37-approval-binding (exit 0)
+
+Opaque host values are the exception to the public direct-member carrier: their
+marker identity is absent from the store's derived-hash index, so the checker and
+native builder both fail closed before a generic constructor value can cross the
+validated Hash boundary.
+
+  $ cat > opaque-hash-ref.jqd <<'EOF_JQD'
+  > (ref #d48426af83dd64417666d11346b732136f39950871f9c4708e947515f9eda3db con)
+  > EOF_JQD
+  $ jacquard check opaque-hash-ref.jqd 2>&1 | sed 's/opaque-hash-ref.jqd:[0-9]*:[0-9]*-[0-9]*/opaque-hash-ref.jqd:LINE:SPAN/'
+  opaque-hash-ref.jqd:LINE:SPAN: error[E0805]: error[E0601]: unknown hash d48426af83dd64417666d11346b732136f39950871f9c4708e947515f9eda3db
+  $ jacquard build opaque-hash-ref.jqd -o opaque-native 2>&1 | sed 's/opaque-hash-ref.jqd:[0-9]*:[0-9]*-[0-9]*/opaque-hash-ref.jqd:LINE:SPAN/'
+  opaque-hash-ref.jqd:LINE:SPAN: error[E0805]: error[E0601]: unknown hash d48426af83dd64417666d11346b732136f39950871f9c4708e947515f9eda3db
 
 The flagship outputs, pinned so a both-engines regression cannot slip through
 the diff-only loop above:
@@ -91,9 +106,10 @@ both engines after that semantics-preserving source rewrite:
   $ jacquard run record-transformer.jqd > record-i.out
   $ cat record-i.out
   "recorded"
-  $ jacquard build record-transformer.jqd -o record-transformer
-  error[E1101]: not yet compilable in native v1: net.record builtin `code.of-text` is not yet implemented natively
-  [1]
+  $ jacquard build record-transformer.jqd -o record-transformer > /dev/null
+  $ ./record-transformer > record-n.out
+  $ diff record-i.out record-n.out && cat record-i.out
+  "recorded"
   $ cat > fs-transformer.jqd <<'EOF_JQD'
   > (app (var throw.catch)
   >   (lam ()
@@ -362,12 +378,12 @@ the shared affine-check boundary with E0816. The low-level pair above separately
 unchecked/host-driven second resume reaches byte-identical E0906 in both runtimes.
 
   $ ../gen_once_hostile.exe ../../prelude ../../prelude/operation-modes.manifest once-prelude
-  generated 13 once-hostile cases from reviewed inventory
+  generated 17 once-hostile cases from reviewed inventory
   $ passed=0; for f in once-prelude/*.jqd; do
   >   jacquard run "$f" > once-run.out 2>&1; run_status=$?
   >   jacquard build "$f" -o once-prog > once-build.out 2>&1; build_status=$?
   >   if [ "$run_status" = 1 ] && [ "$build_status" = 1 ] &&
   >      diff -q once-run.out once-build.out >/dev/null && grep -q 'error\[E0816\]' once-run.out
   >   then passed=$((passed + 1)); else echo "FAILED: $(basename "$f")"; fi
-  > done; echo "$passed/13 generated once-operation cases reject identically"
-  13/13 generated once-operation cases reject identically
+  > done; echo "$passed/17 generated once-operation cases reject identically"
+  17/17 generated once-operation cases reject identically

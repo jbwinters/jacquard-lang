@@ -102,6 +102,20 @@ static void add_escaped_text(jq_buf *b, const uint8_t *s, uint64_t n) {
   buf_adds(b, "\"");
 }
 
+/* Value.show VHash and Printer's hash scalar spelling are identical: one '#'
+ * followed by the fixed 32-byte digest as 64 lowercase hexadecimal digits. */
+static void add_hash_repr(jq_buf *b, jq_value hash) {
+  static const char hex[] = "0123456789abcdef";
+  const uint8_t *bytes = jq_hash_bytes(hash);
+  char rendered[65];
+  rendered[0] = '#';
+  for (size_t i = 0; i < 32; i++) {
+    rendered[1 + (i * 2)] = hex[bytes[i] >> 4];
+    rendered[2 + (i * 2)] = hex[bytes[i] & 0x0f];
+  }
+  buf_add(b, rendered, sizeof rendered);
+}
+
 /* --- the canonical inline printer (task 73; src/printer.ml) --------- */
 
 /* Reader.valid_head: [a-z][a-z0-9-]* */
@@ -162,9 +176,7 @@ static void scalar_into(jq_buf *b, uint64_t kind, jq_value datum) {
     break;
   }
   case JQ_CA_HASH: {
-    buf_adds(b, "#");
-    const uint8_t *h = jq_hash_bytes(datum);
-    for (int i = 0; i < 32; i++) buf_addf(b, "%02x", h[i]);
+    add_hash_repr(b, datum);
     break;
   }
   case JQ_CA_FORM:
@@ -223,6 +235,12 @@ static void show_into(jq_buf *b, jq_value v) {
     break;
   case JQ_TEXT:
     add_escaped_text(b, jq_text_bytes(v), jq_text_len(v));
+    break;
+  case JQ_HASH:
+    add_hash_repr(b, v);
+    break;
+  case JQ_SECRET:
+    buf_adds(b, "<secret redacted>");
     break;
   case JQ_TUPLE:
     buf_adds(b, "(");
