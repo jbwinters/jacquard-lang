@@ -311,6 +311,13 @@ let test_once_resume_immediate_transformer () =
     Alcotest.(check bool) (what ^ " has a source span") true (Option.is_some diagnostic.span)
   in
   let bare = once_transformer_handle good_body in
+  let annotated = Printf.sprintf "(ann %s (tarrow ((ttuple)) (row) (tref int)))" bare in
+  check_ok (make_cctx ()) "a transparent annotation preserves immediate elimination"
+    (with_once_transformer (Printf.sprintf "(app %s (tuple))" annotated));
+  expect_escape "annotated transformer bound before application"
+    (with_once_transformer
+       (Printf.sprintf "(let nonrec (pvar transformer) %s (app (var transformer) (tuple)))"
+          annotated));
   expect_escape "transformer bound before application"
     (with_once_transformer
        (Printf.sprintf "(let nonrec (pvar transformer) %s (app (var transformer) (tuple)))" bare));

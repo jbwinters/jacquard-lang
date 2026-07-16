@@ -406,6 +406,12 @@ let rec is_syntactic_value (e : Kernel.expr) : bool =
   | Kernel.Ann (inner, _) -> is_syntactic_value inner
   | _ -> false
 
+let rec is_immediately_applied_handle (e : Kernel.expr) : bool =
+  match e.Kernel.it with
+  | Kernel.Handle _ -> true
+  | Kernel.Ann (inner, _) -> is_immediately_applied_handle inner
+  | _ -> false
+
 (* Close generalizable row tails that occur exactly once in the type: an unconstrained
    single-use row var carries no sharing information, and closing it gives honest displays
    like (a) ->{} a and safe-div : (int, int) ->{abort} int. *)
@@ -550,12 +556,15 @@ and infer ?(immediate_transformer = false) ctx env ~(ambient : row) (e : Kernel.
       TArrow (param_tys, lam_ambient, body_ty)
   | Kernel.App (fn, args) -> (
       let fn_ty =
-        match fn.it with
-        | Kernel.Handle _ when List.for_all Affine_resume.is_immediate_transformer_argument args ->
-            (* This context is decided before inference and is not propagated through aliases or
-               wrappers: only the literal function child of this one application receives it. *)
-            infer ~immediate_transformer:true ctx env ~ambient fn
-        | _ -> infer ctx env ~ambient fn
+        if
+          is_immediately_applied_handle fn
+          && List.for_all Affine_resume.is_immediate_transformer_argument args
+        then
+          (* This context is decided before inference and is not propagated through aliases.
+             Type annotations are transparent, so only annotations around the literal function
+             child of this one application may preserve it. *)
+          infer ~immediate_transformer:true ctx env ~ambient fn
+        else infer ctx env ~ambient fn
       in
       let arg_tys = List.map (infer ctx env ~ambient) args in
       match repr fn_ty with
@@ -823,7 +832,7 @@ and infer ?(immediate_transformer = false) ctx env ~(ambient : row) (e : Kernel.
   | Kernel.Ann (subject, ann) ->
       let cenv = { mode = Rigid; tvs = []; rvs = [] } in
       let expected = conv_ty ctx cenv ann in
-      let actual = infer ctx env ~ambient subject in
+      let actual = infer ~immediate_transformer ctx env ~ambient subject in
       (try Types.unify expected actual
        with Unify_error detail ->
          err ~meta ~hint:"the annotation is the contract: change the body or the annotation"
