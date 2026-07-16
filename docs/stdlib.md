@@ -41,9 +41,10 @@ Five principles generate the whole design:
    marks the variant that performs `Abort` or `Throw`, visible at every call site and
    confirmed by the row. `list.head` returns `Option a`; `list.head!` has `{Abort}`
    in its signature.
-4. **Handlers ship with effects.** An effect declaration without its canonical
-   handlers is a hole. Every effect in this library arrives with the handlers that
-   discharge it, so the library teaches its own control flow.
+4. **Boundaries ship with implemented effects.** A shipped library effect names
+   canonical handlers, an explicit runtime grant, or a documented embedding
+   boundary. Reserved taxonomy names are labeled unimplemented rather than
+   presented as usable library declarations.
 5. **Combinators are row-transparent.** A higher-order function performs what its
    argument performs and nothing else. `for-each` with a pure function is pure; the
    same `for-each` with `println` carries `Console`. The library never hides an
@@ -73,7 +74,7 @@ a ring may reference hashes only from itself and rings below.
 | 0 | Axioms | `Bool`, `Ordering`, `Option`, `Result`, `List`, dictionaries (`Eq`, `Ord`, `Show`), arithmetic and comparison builtins | empty only |
 | 1 | Control | `Abort`, `Throw`, `State`, `Emit` with their canonical handlers; the data/control seams | effect rows, all dischargeable in pure code |
 | 2 | Structures | `Text` operations, `Map`, `Set`; `Dist` with `Distribution` and the pure inference handlers | empty rows plus `Dist` |
-| 3 | World | `Console`, `Clock`, `Fs`, `Net`, `Eval`; root handlers installed only by the runtime under grants | authority; these rows in `main` are the program's manifest |
+| 3 | Boundaries | `Console`, `Clock`, `Fs`, `Net`, `Eval`, `Infer`, `Approval`, `Audit`, and `Secret`; runtime grants, governance handlers, and embedding boundaries | authority/model/governance rows reviewed in the program manifest |
 
 The placement of `Dist` in ring 2 is a deliberate statement: inference is pure.
 Enumeration needs no world at all, and likelihood weighting needs only a seed, which
@@ -84,10 +85,20 @@ Names live in the metadata index, so all of this is curation rather than structu
 and renames are free (§8 returns to what that buys).
 
 The complete blessed effect vocabulary—including reserved but unimplemented
-interfaces, risk defaults, user-effect coloring rules, and exact hash policy—is
-ratified in [`effect-taxonomy.md`](effect-taxonomy.md). This document describes
-the shipped prelude; the taxonomy is the compatibility contract consumed by
-future registry and manifest tooling.
+interfaces, risk defaults, user-effect coloring rules, exact hashes, and
+canonical handler or installation boundaries—is release-frozen in
+[`effect-taxonomy.md`](effect-taxonomy.md). Review-tool behavior is documented
+in [`effect-review.md`](effect-review.md).
+
+| ET.8 blessed status | exact names |
+|---|---|
+| implemented (15) | `Abort`, `Throw`, `State`, `Emit`, `Dist`, `Fault`, `Eval`, `Console`, `Clock`, `Fs`, `Net`, `Infer`, `Approval`, `Audit`, `Secret` |
+| reserved/unimplemented (10) | `Choose`, `Env`, `Pg`, `Blob`, `Serve`, `Crypto`, `Log`, `Judge`, `Async`, `Channel` |
+
+The status table is descriptive, not a grant list. The full identity table is
+machine-checked against `Effect_registry`, the prelude declarations, and the
+TSV artifact. Reserved names have no declaration hash or handler in this
+release.
 
 Phase-zero parallelism also lives in ring 0. `parallel.map` and `parallel.both`
 accept only closed-empty-row callbacks, remain pure themselves, and are
@@ -444,6 +455,12 @@ Granting `Dist` at the root installs the entropy-seeded sampling handler; an
 `observe` reaching the root is an error, since conditioning requires an inference
 handler and the root has nothing to condition.
 
+Risk `none` for `Dist` means no external authority. It does not mean “no
+review”: support, weights, observations, seeds, inference handler, and
+approximation error remain part of the result's uncertainty review. Likewise,
+model output from `Infer` and governance confidence are evidence rather than
+verified truth or consent.
+
 One more consumer leans on `Dist`'s constructors: Warp's shrinker (W6.4) orders
 each distribution's outcomes by SIMPLICITY, and shrinking lowers outcome indices.
 The ordering per constructor, pinned here because generators inherit it:
@@ -453,21 +470,24 @@ tables); `Bernoulli` places `false` at index 0 — "toward false" is the shrink
 direction. Deleting a choice from the log replays the generator without it, which
 is how one `UniformInt` length choice makes whole-list shrinking fall out.
 
-## 7. Ring 3: the world
+## 7. Ring 3: world, model, meta, and governance boundaries
 
 World effects are declared like any other; what distinguishes them is that only the
 runtime installs their root handlers, under explicit grants. The row of `main` is
 the program's authority manifest, and this table is what a reviewer is reading when
 they read it:
 
-| effect | mode | operations | granting it means |
-|--------|------|------------|-------------------|
-| `Console` | `once` | `print : (Text) -> ()`, `read-line : () -> Text` | the program talks to the terminal |
-| `Clock` | `once` | `now : () -> Int` (ms since epoch), `sleep : (Int) -> ()` | the program observes and waits on time |
-| `Fs` | `once` | `read : (Text) -> Text`, `write : (Text, Text) -> ()`, `list-dir : (Text) -> List Text` | the program touches the filesystem |
-| `Net` | `once` | `fetch : (Request) -> Response` | the program reaches the network |
-| `Eval` | `once` | `eval-code : (Code) -> a` | the program runs code, including code it constructed |
-| `Infer` | `once` | `complete : (Prompt) -> Text` | the program requests a model completion |
+| effect | risk | canonical boundary | reviewing it means |
+|--------|------|--------------------|--------------------|
+| `Console` | low | `console.scripted` or explicit root grant | terminal observation or interaction |
+| `Clock` | low | `clock.fixed` or explicit root grant | wall-clock observation or waiting |
+| `Fs` | medium | `fs.in-memory`, `fs.read-only`, or explicit root grant | filesystem access; the root grant is not path-scoped |
+| `Net` | high | `net.scripted`, `net.record`, or explicit root grant | network access |
+| `Eval` | high | explicit root grant only | execution of constructed code at root authority |
+| `Infer` | medium | `infer.scripted` or explicit root grant | unverified model output |
+| `Approval` | special | four hash-revalidating Approval handlers | exact consent semantics, not ordinary risk ordering |
+| `Audit` | special | `audit.in-memory` or `audit.line-log` | evidence ordering and sink-failure behavior |
+| `Secret` | special | fixed/vault embedding APIs or environment root grant | opaque lookup and deliberate plaintext exposure |
 
 The complete reviewed assignment, including control, Warp, Dist, and Fault,
 is frozen in `prelude/operation-modes.manifest`. Modes are declared in the
@@ -537,6 +557,29 @@ malformed or noncanonical records with diagnostics. Because a chain cannot by
 itself reveal removal of a valid suffix, the independently published head is a
 required part of the verification contract.
 
+### Secret references and deliberate exposure
+
+`SecretRef(name: Text, version: Option Text)` identifies confidential material;
+it never carries the material itself. `Secret` is an opaque runtime value with
+no public constructor, `Show` instance, Code conversion, or Audit encoder. Its
+marker constructor is removed from both the public name and derived-hash
+indexes. Both `secret.read : (SecretRef) -> Secret` and
+`secret.expose : (Secret) -> Text` are `once` operations, so the authority to
+obtain plaintext remains visible in the `Secret` effect row.
+
+The standard library deliberately does not invent a credential store or select
+a vault provider. `Prelude.install_secret_fixed` supplies deterministic exact
+fixtures for hermetic tests. `Prelude.install_secret_vault` accepts an injected
+adapter whose closed failure type cannot carry backend text or values.
+`--allow secret` is the explicit live grant for the environment adapter; it
+looks up collision-free keys derived from the UTF-8 bytes of the safe
+`SecretRef`. Dry-run ignores that live grant, installs no Secret handler, and
+refuses the remaining row before lookup. Native and interpreter values retain
+distinct opaque tags. Generic rendering, runtime errors, traces, and
+`debug.inspect` always use the fixed marker `<secret redacted>`. This is an
+opacity boundary, not taint tracking: after explicit exposure the result is
+ordinary Text and code can copy or leak it. Keep exposure late and typed Audit
+inputs separate from plaintext.
 ### Versioned governance membrane values
 
 GM.1 ships the ordinary ring-3 values consumed by later governed facade
@@ -624,10 +667,10 @@ term declaration.
 debug.inspect : (a) ->{} Text
 ```
 
-It ignores abstraction, prints anything structurally, and breaks parametricity,
-which is why it is documented as a debugging tool, banned by convention from
-appearing in library code, and flagged as owner decision D8 in case even this is
-too much hole.
+It prints ordinary values structurally and breaks their abstraction, which is
+why it is documented as a debugging tool and banned by convention from library
+code. Secret is the hard exception: inspection returns exactly
+`<secret redacted>` and never touches its payload.
 
 ## 8. Names, versions, and the index
 
@@ -673,21 +716,17 @@ subject-first library function:
 [1, 2, 3] |> list.reverse |> list.reverse
 ```
 
-A handler clause can read as policy wrapped around a workflow.
+A handler can read as policy wrapped around a workflow.
 `approval.make-proposal` safely constructs the exact review artifact and
-computes its canonical `proposal-v1` hash. The handler returns that same binding
-in its decision. A production handler must verify this hash and reject any
-mismatch. The dry-run carrier always returns `Escalate` and therefore cannot
+computes its canonical `proposal-v1` hash. All four canonical handlers
+recompute that identity before resuming the workflow. `approval.console`
+renders the exact hash and ordered authority before prompting;
+`approval.scripted` consumes explicit, hash-bound test Decisions;
+`approval.policy-auto` approves only a policy verdict already equal to
+`Allow`; and `approval.dry-run` always returns `Escalate`, so simulation cannot
 fabricate consent:
 
 ```jacquard doctest=stdlib-handler-policy mode=run fixture=stdlib-handler-policy.jac stdout=stdlib-handler-policy.stdout stderr=empty exit=0
-dry-run-with-proposal(proposal-hash, workflow) =
-  handle workflow() {
-    | return result -> Some(result)
-    | ask(request) resume continue ->
-        continue(Escalate(proposal-hash, "dry-run cannot consent"))
-  }
-
 parsed-hashes = (
   hash.parse("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
   hash.parse("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
@@ -704,14 +743,16 @@ match parsed-hashes {
         "ship?",
         None)
       let proposal-hash = approval.proposal-id(proposal-value)
-      dry-run-with-proposal(proposal-hash, fn () -> match `op:ask`(proposal-value) {
-	| Escalate(returned, _) ->
-		if code.eq?(code.of-hash(returned), code.of-hash(proposal-hash)) then 42 else 0
-	| Approved(_, _, _) -> 0
-	| Denied(_, _, _) -> 0
-      })
+      throw.catch(
+        fn () -> approval.dry-run(fn () -> match `op:ask`(proposal-value) {
+	  | Escalate(returned, _) ->
+		  if code.eq?(code.of-hash(returned), code.of-hash(proposal-hash)) then 42 else 0
+	  | Approved(_, _, _) -> 0
+	  | Denied(_, _, _) -> 0
+        }),
+        fn (message) -> 0)
     }
-  | _ -> None
+  | _ -> 0
 }
 ```
 
