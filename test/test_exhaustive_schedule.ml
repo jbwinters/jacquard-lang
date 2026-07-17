@@ -37,6 +37,16 @@ let two_immediate =
   "(let nonrec (pwild) (app (var async.spawn) (lam () (lit 1)))   (let nonrec (pwild) (app (var \
    async.spawn) (lam () (lit 2))) (lit 0)))"
 
+let channel_rendezvous =
+  "(match (app (var channel.open) (lit 0))\n\
+  \  (clause (pcon ok (pvar channel))\n\
+  \    (let nonrec (pvar sender)\n\
+  \      (app (var async.spawn)\n\
+  \        (lam () (app (var channel.send) (var channel) (lit 7))))\n\
+  \      (let nonrec (pvar received) (app (var channel.recv) (var channel))\n\
+  \        (tuple (var received) (app (var async.await) (var sender))))))\n\
+  \  (clause (pcon err (pvar error)) (var error)))"
+
 let require_complete expected (report : Exhaustive_schedule.report) =
   Alcotest.(check int) "exact explored count" expected report.explored;
   Alcotest.(check int) "explored agrees with worlds" expected (List.length report.worlds);
@@ -56,7 +66,50 @@ let test_hand_counted_schedule_trees () =
   let two = run two_immediate in
   require_complete 8 two;
   let unique = List.sort_uniq String.compare (List.map trace_key two.worlds) in
-  Alcotest.(check int) "default search performs no deduplication" 8 (List.length unique)
+  Alcotest.(check int) "default search performs no deduplication" 8 (List.length unique);
+  let channels = run channel_rendezvous in
+  require_complete 4 channels;
+  Alcotest.(check int)
+    "all Channel rendezvous schedules have distinct canonical traces" 4
+    (channels.worlds |> List.map trace_key |> List.sort_uniq String.compare |> List.length);
+  let channel_hashes =
+    Channel_contract.channel_operation_hashes
+    |> List.map (fun (_, encoded) -> Option.get (Hash.of_hex encoded))
+  in
+  let is_channel_hash hash = List.exists (Hash.equal hash) channel_hashes in
+  List.iter
+    (fun world ->
+      (match world.Exhaustive_schedule.result with
+      | Ok value ->
+          Alcotest.(check string)
+            "every exhaustive Channel world completes the rendezvous" "(ok(7), done(ok(())))"
+            (Value.show value)
+      | Error error ->
+          Alcotest.failf "exhaustive Channel world failed: %s" (Runtime_err.to_string error));
+      let channel_decisions =
+        world.schedule.events
+        |> List.filter_map (function
+          | Schedule_trace.Decide { operation = Schedule_trace.Routed hash; _ }
+            when is_channel_hash hash ->
+              Some hash
+          | Schedule_trace.Create _ | Schedule_trace.Decide _ -> None)
+      in
+      Alcotest.(check int)
+        "every exhaustive world executes open/send/recv exactly once" 3
+        (List.length channel_decisions);
+      match
+        Round_robin.run_expr_outcome_scheduled ctx ~policy:Concurrency_contract.Collect
+          ~allow_routed:false ~mode:(Round_robin.Replay_schedule world.schedule)
+          (expression channel_rendezvous)
+      with
+      | Error error ->
+          Alcotest.failf "strict Channel world replay failed: %s" (Runtime_err.to_string error)
+      | Ok replayed ->
+          Alcotest.(check string)
+            "every exhaustive Channel trace strictly replays byte-for-byte"
+            (Schedule_trace.serialize world.schedule)
+            (Schedule_trace.serialize replayed.execution_schedule))
+    channels.worlds
 
 let test_warp_case_exact_count_and_replay () =
   let warp_case =

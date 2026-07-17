@@ -1,14 +1,14 @@
 # Structured Concurrency Contract
 
-Status: SC.13 typed-channel interface and semantic freeze over SC.12 budgeted
-exhaustive scheduling, SC.11 seeded randomized schedules, SC.10 canonical
-record/replay, and the implemented SC.9 FIFO round-robin scheduler; Channel
-runtime is deferred to SC.14. The prior fail-fast/collect policies, cooperative
-cancellation, structured-scope ownership, lifecycle core, and generalized
-child-effect law remain authoritative. The default CLI, prelude-evaluation, and
-Warp Case paths drive real evaluator states and affine continuations through
-the Async scheduler. Native root scheduling and Channel execution remain
-unsupported.
+Status: SC.14 ships scoped typed Channel execution through the interpreted
+scheduler over SC.12 budgeted exhaustive scheduling, SC.11 seeded randomized
+schedules, SC.10 canonical record/replay, and the SC.9 FIFO round-robin driver.
+The prior fail-fast/collect policies, cooperative cancellation, structured-scope
+ownership, lifecycle core, and generalized child-effect law remain
+authoritative. The default CLI, prelude-evaluation, and Warp Case paths drive
+real evaluator states and affine continuations through the Async and Channel
+scheduler routes. Native root scheduling, native Channel execution, host
+scheduling, and host asynchronous I/O remain outside SC.14 and deferred to C4.
 
 Structured concurrency is an effect interpreted by a scheduler handler. The
 same program can therefore run under deterministic, seeded-random, exhaustive,
@@ -631,12 +631,12 @@ Dist sample space; a Choose-driven scheduler does so explicitly. A State region
 shared by tasks is serialized at suspension points, giving atomicity between
 yields rather than shared mutable memory or locks.
 
-The following are excluded from C1 and from this interface freeze:
+The following are excluded from the shipped SC.14/C3 contract:
 
 - detached or daemon tasks and any fire-and-forget root handler;
 - shared mutable memory, locks, atomics, and data-race semantics;
 - automatic external-resource finalizers;
-- Channel runtime before SC.14 and actors/supervision before C4+;
+- actors, mailboxes, and supervision before C4+;
 - host threads, host scheduling, and real asynchronous I/O before C4.
 
 Pure `parallel.map` and `parallel.both` are separate empty-row hints. Their
@@ -667,19 +667,21 @@ I/O; actor supervision opens only after channels and lifecycle evidence exist.
 | D49 | channels and actors | SC.13 freezes scoped typed channels for C3; SC.14 implements them; actors/supervision remain C4+ |
 | D50 | scope failure policy | fail-fast default; collect explicit, with the exact result shapes in §3 |
 
-## 8. Typed channels (SC.13 / C3 contract)
+## 8. Typed channels (SC.13-SC.14 / C3 contract)
 
-SC.13 is an interface and behavior freeze, not a runtime implementation. The
-declarations, hashes, transitions, rows, ownership checks, and policy
-interactions below are normative for SC.14. `ChannelHandle` constructors remain
-private, no Channel handler is installed, and actors/supervision remain out of
-scope.
+SC.13 froze the interface and behavior. SC.14 implements that exact contract in
+the default interpreted structured scheduler: declarations, hashes,
+transitions, rows, ownership checks, schedule modes, cache identity, and policy
+interactions below are executable. `ChannelHandle` constructors remain private,
+there is no user-installed root grant or `--allow channel`, and
+actors/supervision remain out of scope.
 
 ### 8.1 Exact declarations, modes, identities, and rows
 
 The frozen source fixture is executable checker input. `ChannelOpaque` is the
-future private runtime carrier; its source-level constructor exists here only
-to make the complete declaration hashable before SC.14.
+private runtime carrier; its source-level constructor exists in the declaration
+so the complete public interface is hashable, while direct construction remains
+E0907.
 
 ```jacquard doctest=concurrency-channel-contract mode=check fixture=concurrency-channel-contract.jac stdout=concurrency-channel-contract.stdout stderr=empty exit=0
 type ChannelHandle a = | ChannelOpaque
@@ -748,9 +750,11 @@ treatment. The currently scheduled task supplies the owner scope: a root task
 uses scope path `[0]`, and a task inside `async.scope` uses that exact nested
 path. A language handler may intercept Channel in the ordinary algebraic-effect
 way; this contract governs only an operation that reaches the scheduler. Raw
-`Eval.run_expr` and the native backend remain unsupported Channel seams in
-SC.14. Keeping Channel in the outward row makes this routing visible instead of
-silently pretending that `async.scope` discharged a second effect.
+`Eval.run_expr` intentionally remains the low-level unscheduled seam, and the
+native backend has no root Channel scheduler. The shipped default interpreted
+route is the supported SC.14 execution path. Keeping Channel in the outward row
+makes this routing visible instead of silently pretending that `async.scope`
+discharged a second effect.
 
 The element type is invariantly shared by handle, send argument, and receive
 result. This negative checker fixture must fail before any runtime exists:
@@ -861,8 +865,9 @@ The normative design traces are
 pre/post abstract state, results, and wake order. The rendezvous trace also pins
 negative-capacity rejection, blocked-receiver cancellation and close; the
 buffered trace pins blocked-sender cancellation, survivor order, close
-rejection order, and drain order. They are SC.14 acceptance fixtures rather
-than a claim that SC.13 executes channels.
+rejection order, and drain order. SC.13 froze these acceptance fixtures; SC.14
+executes the same transitions through seeded, replay, exhaustive, and cached
+scheduler paths.
 
 ### 8.5 Cancellation, ownership, and escape
 
@@ -923,7 +928,8 @@ SC.14 is conforming only if all of the following remain true:
 - [x] exact declarations, four `once` modes, whole/member/type hashes, and rows
   above;
 - [x] exact-identity scheduler admission, no `--allow channel`, current-task
-  root/nested scope routing, and unsupported raw/native seams;
+  root/nested scope routing, shipped default interpreted execution, and the
+  explicit low-level raw-evaluator/native exclusions;
 - [x] typed negative-capacity result before allocation, rendezvous at zero, and
   bounded FIFO backpressure above zero;
 - [x] sender/receiver registration, fan-in, promotion, and wake append order;

@@ -227,22 +227,31 @@ let sorted_directory_files dir suffix =
   |> List.filter (fun file -> Filename.check_suffix file suffix)
   |> List.sort String.compare
 
-let compiled_test_count =
+let compiled_test_inventory =
   lazy
-    (let argv = [| Sys.argv.(0); "list" |] in
+    (let argv = [| Sys.argv.(0); "list"; "--color=never" |] in
      let channel = Unix.open_process_args_in Sys.argv.(0) argv in
-     let rec count n =
+     let rec read lines =
        match input_line channel with
        | line ->
            let line = trim line in
            let is_case = not (String.equal line "" || contains "qcheck random seed:" line) in
-           count (if is_case then n + 1 else n)
-       | exception End_of_file -> n
+           read (if is_case then line :: lines else lines)
+       | exception End_of_file -> List.rev lines
      in
-     let total = count 0 in
+     let inventory = read [] in
      match Unix.close_process_in channel with
-     | Unix.WEXITED 0 -> total
+     | Unix.WEXITED 0 -> inventory
      | _ -> Alcotest.fail "compiled Alcotest inventory command failed")
+
+let compiled_test_count = lazy (List.length (Lazy.force compiled_test_inventory))
+
+let compiled_group_count group =
+  let prefix = group ^ " " in
+  Lazy.force compiled_test_inventory
+  |> List.fold_left
+       (fun count line -> if String.starts_with ~prefix line then count + 1 else count)
+       0
 
 let rec count_files_with_suffix path suffix =
   Sys.readdir path |> Array.to_list
@@ -284,12 +293,25 @@ let inventory_claim_errors ~path claims =
 let release_inventory_errors () =
   let actual_tests = Lazy.force compiled_test_count in
   let actual_crams = count_files_with_suffix (source_path "test") ".t" in
+  let concurrency_path = "docs/release/structured-concurrency/EVIDENCE.md" in
+  let concurrency_evidence = read_source concurrency_path in
+  let channel_cases = compiled_group_count "channel-contract" in
+  let channel_row = Printf.sprintf "| `channel-contract` | %d |" channel_cases in
   inventory_claim_errors ~path:"docs/release/0.1/EVIDENCE.md"
     [ ("- Alcotest/QCheck cases:", 554); ("- Cram transcript files:", 32) ]
   @ inventory_claim_errors ~path:"docs/release/0.1/DECISION.md"
       [ ("Test count:", 554); ("Cram count:", 32) ]
   @ inventory_claim_errors ~path:"docs/release/dx-jac-export/EVIDENCE.md"
       [ ("- Alcotest/QCheck cases:", actual_tests); ("- Cram transcript files:", actual_crams) ]
+  @ inventory_claim_errors ~path:concurrency_path
+      [ ("- Alcotest/QCheck cases:", actual_tests); ("- Cram transcript files:", actual_crams) ]
+  @
+  if contains channel_row concurrency_evidence then []
+  else
+    [
+      Printf.sprintf "%s compiled-discovery table is stale (expected row prefix `%s`)"
+        concurrency_path channel_row;
+    ]
 
 let doctest_names () =
   [
