@@ -37,9 +37,9 @@ project shape from file names alone.
   uncertainty wording, canonical boundaries, and explicit non-goals.
 - `effect-membranes.md`: GM.0 charter for typed governed facades, versioned
   decision artifacts, live/dry boundaries, and monotonic composition.
-- `concurrency.md`: SC.4 generalized child-effect charging over the SC.3
-  Task/Async boundary, scope contracts, deterministic scheduling, cancellation,
-  exclusions, and D46-D50.
+- `concurrency.md`: combined SC.4 child-effect charging and SC.5 lifecycle core
+  over the SC.3 Task/Async boundary, scope contracts, deterministic scheduling,
+  cancellation, exclusions, and D46-D50.
 - `warp-testing.md`: Warp test model, rows, handlers, cache, properties, and
   world lanes.
 - `errors.md`: diagnostic code catalog.
@@ -143,11 +143,11 @@ Read these together when judging whether the release candidate is credible:
 
 ## Structured Concurrency Evidence
 
-- `release/structured-concurrency/EVIDENCE.md`: SC.4 generalized row-law evidence
-  over the SC.3 Task value, private-carrier, Async declaration, and native
-  parity boundary.
-- `release/structured-concurrency/MANIFEST.sha256`: reconstructible SC.4 overlay
-  on the validated SC.3 base.
+- `release/structured-concurrency/EVIDENCE.md`: combined SC.4 generalized
+  row-law and SC.5 lifecycle evidence over the SC.3 Task value,
+  private-carrier, Async declaration, and native parity boundary.
+- `release/structured-concurrency/MANIFEST.sha256`: reconstructible SC.4-SC.5
+  overlay on the validated SC.3 base.
 
 ## Maintenance Notes
 
