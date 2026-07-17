@@ -332,10 +332,12 @@ let test_concurrent_truncation_is_total () =
     (fun () ->
       await_signal ready_read;
       Unix.close ready_read;
-      let saw_refusal = ref false in
+      let classified = ref 0 in
       (match Audit_chain.verify_file ~file ~expected_head:Audit_chain.genesis with
-      | Ok _ -> ()
-      | Error (_ :: _) -> saw_refusal := true
+      | Ok _ -> Alcotest.fail "held invalid audit snapshot was accepted"
+      | Error ({ Diag.code = "E1301" | "E1306"; _ } :: _) -> ()
+      | Error ({ Diag.code; _ } :: _) ->
+          Alcotest.failf "held invalid audit snapshot returned unexpected %s" code
       | Error [] -> Alcotest.fail "concurrent read returned an empty diagnostic list"
       | exception exception_ ->
           Alcotest.failf "concurrent truncate escaped %s" (Printexc.to_string exception_));
@@ -344,13 +346,15 @@ let test_concurrent_truncation_is_total () =
       Unix.sleepf 0.001;
       for _ = 1 to 64 do
         match Audit_chain.verify_file ~file ~expected_head:Audit_chain.genesis with
-        | Ok _ -> ()
-        | Error (_ :: _) -> saw_refusal := true
+        | Ok _ -> incr classified
+        | Error ({ Diag.code = "E1301" | "E1306"; _ } :: _) -> incr classified
+        | Error ({ Diag.code; _ } :: _) ->
+            Alcotest.failf "concurrent truncate returned unexpected %s" code
         | Error [] -> Alcotest.fail "concurrent read returned an empty diagnostic list"
         | exception exception_ ->
             Alcotest.failf "concurrent truncate escaped %s" (Printexc.to_string exception_)
       done;
-      Alcotest.(check bool) "concurrent churn produced a fail-closed refusal" true !saw_refusal)
+      Alcotest.(check int) "all concurrent reads stayed result-total" 64 !classified)
 
 let mutate source index =
   let bytes = Bytes.of_string source in

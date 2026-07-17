@@ -137,6 +137,10 @@ Read these together when judging whether the release candidate is credible:
   exact audit sequencing, simulator/refusal matrix, and native parity evidence.
 - `release/governed-membranes/GM6-MANIFEST.sha256`: reconstructible GM.6 overlay
   on the validated GM.3 plus GM.5 integration stack.
+- `release/governed-membranes/GM9-EVIDENCE.md`: GM.9 typed Workspace calls,
+  safe secret references, outcome summaries, and authority-order evidence.
+- `release/governed-membranes/GM9-MANIFEST.sha256`: reconstructible GM.9 overlay
+  on the validated identity, Judge, and secret integration stack.
 
 ## Structured Concurrency Evidence
 
@@ -145,13 +149,6 @@ Read these together when judging whether the release candidate is credible:
   SC.4 + SC.5 inputs integrated with GM.6 main.
 - `release/structured-concurrency/MANIFEST.sha256`: reconstructible complete
   SC.4-SC.6 overlay on GM.6 main commit `89175fca`.
-
-## Governed Membranes Evidence
-
-- `release/governed-membranes/GM1-EVIDENCE.md`: GM.1 versioned ring-3 values,
-  canonical identities, pure refusal boundaries, and compatibility evidence.
-- `release/governed-membranes/GM1-MANIFEST.sha256`: reconstructible GM.1 overlay
-  on the validated ET.6 plus GM.0 dependency-integration commit.
 
 ## Maintenance Notes
 
