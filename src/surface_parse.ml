@@ -2596,6 +2596,7 @@ module Trivia_ownership = struct
   end
 
   module Key_map = Map.Make (Key)
+  module Offset_map = Map.Make (Int)
 
   let empty_addition () = { leading = []; trailing = []; inner = []; eof = []; docs = [] }
   let key role span = (role, span.Span.start_pos.offset, span.end_pos.offset)
@@ -2758,15 +2759,25 @@ module Trivia_ownership = struct
 
   type source_atom = { atom : Meta.trivia_atom; start_line : int; end_line : int }
 
-  let source_atoms source tokens start_offset end_offset =
-    let comments =
-      List.filter
-        (fun (token : Surface_lex.located) ->
-          token.Surface_lex.span.start_pos.offset >= start_offset
-          && token.span.end_pos.offset <= end_offset
-          && match token.token with Comment _ | DocComment _ -> true | _ -> false)
-        tokens
+  (* [comments_before_boundaries] indexes each comment exactly once under the next significant
+     token (or EOF). [attach] visits those same boundaries in source order, so every gap can look
+     up its comments without rescanning the complete token stream. *)
+  let comments_before_boundaries tokens =
+    let rec build pending index = function
+      | [] -> index
+      | (token : Surface_lex.located) :: rest -> (
+          match token.token with
+          | Comment _ | DocComment _ -> build (token :: pending) index rest
+          | token_kind when significant token_kind || token_kind = Eof ->
+              let offset = token.span.start_pos.offset in
+              let index = Offset_map.add offset (List.rev pending) index in
+              build [] index rest
+          | Newline | Semi -> build pending index rest
+          | _ -> assert false)
     in
+    build [] Offset_map.empty tokens
+
+  let source_atoms source (comments : Surface_lex.located list) start_offset end_offset =
     let layout start finish line =
       if finish <= start then []
       else
@@ -2839,6 +2850,7 @@ module Trivia_ownership = struct
   let attach ~source ~tokens items =
     let slots = List.concat_map top items in
     let additions = ref Key_map.empty in
+    let comments_before = comments_before_boundaries tokens in
     let boundary_tokens =
       List.filter
         (fun token -> significant token.Surface_lex.token || token.token = Surface_lex.Eof)
@@ -2852,7 +2864,10 @@ module Trivia_ownership = struct
             match previous with None -> 0 | Some token -> token.Surface_lex.span.end_pos.offset
           in
           let end_offset = next.Surface_lex.span.start_pos.offset in
-          let gap = source_atoms source tokens start_offset end_offset in
+          let comments =
+            Option.value ~default:[] (Offset_map.find_opt end_offset comments_before)
+          in
+          let gap = source_atoms source comments start_offset end_offset in
           let possible_trailing, possible_remaining =
             match previous with
             | Some previous ->
