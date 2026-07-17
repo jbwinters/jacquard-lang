@@ -1,14 +1,11 @@
 # Structured Concurrency SC.13 Evidence
 
-Status: the typed-channel interface and complete deterministic semantic contract
-are frozen over the implemented SC.9 FIFO round-robin scheduler. SC.13 supplies
-executable declarations, exact identities and rows, normative rendezvous and
-buffered traces, scope/policy rules, and an implementation checklist. It does
-not add a Channel handler or runtime. The underlying scheduler still advances
-real evaluator states and affine continuations using explicit queues and
-deterministic TaskIds.
+Status: the typed Channel interface, identity, static checker contract, and
+deterministic behavior are frozen over the complete SC.12 scheduler stack.
+SC.13 supplies executable type fixtures and normative SC.14 acceptance traces,
+but no Channel runtime handler, root grant, native route, or host scheduling.
 
-- Reconstruction base: `59b12eb`
+- Reconstruction base: `2fc2d306c1236b8faeaee37a2e1c9d2848d16f52`
 - Evidence overlay: [MANIFEST.sha256](MANIFEST.sha256)
 - Authoritative contract: [concurrency.md](../../concurrency.md)
 
@@ -111,17 +108,21 @@ A. Ordinary in-language Once resumptions share this private owner check.
 
 ## Async boundary and parity
 
-All four Async operations are reviewed as `once`; the taxonomy still marks
-Async as reserved, and no handler or built-in `--allow` grant is installed.
-Direct evaluator calls therefore reach the ordinary `Unhandled` result for
-spawn, await, cancel, and yield. The CLI rejects an unhandled Async program at
-its effect gate with E0814. Neither path schedules work or grants ambient
-authority.
+All four Async operations are reviewed as `once`, and the taxonomy still marks
+Async as reserved. The default interpreted CLI, prelude-evaluation, and Warp
+paths automatically admit only the exact frozen Async effect and execute it
+through `Round_robin`; users do not install a root handler or pass
+`--allow async`. This scheduler infrastructure grant does not admit Console,
+Fs, Net, or any other world effect. Raw `Eval.run_expr` remains an unscheduled
+low-level seam whose unhandled Async operations produce `Unhandled`, and the
+native backend has no root Async scheduler. Native execution therefore requires
+an in-language handler to discharge Async before the root.
 
 `TaskResult` constructors execute in both tiers. The `task-values.t` cram test
 byte-compares interpreter and native output for Done/Failed/Cancelled, tests
-the private carrier diagnostic, and pins the clean unhandled CLI failure. The
-C/OCaml show parity corpus includes a redacted inert Task value.
+the private carrier diagnostic, and pins successful scheduled CLI execution of
+`async.yield`. The C/OCaml show parity corpus includes a redacted inert Task
+value.
 
 ## Scheduler lifecycle core
 
@@ -264,9 +265,14 @@ and a later cancellation cannot replace an earlier failure.
 The terminal decision and result are committed before those cancellation
 attempts. A cancellation diagnostic or destruction-callback exception therefore
 does not roll the observation back. Every sibling cleanup is still attempted in
-input order; if callbacks raise, the first exception is re-raised only after all
-sibling attempts finish. Finish remains unavailable until every child is
-observed terminal, so the scope cannot expose an undrained aggregate.
+input order. The policy catches each user callback failure around the unchanged
+SC.7 delivery primitive, buffers waiters returned by that same delivery, and
+then continues cleanup. If callbacks raise, the first physical exception is
+re-raised with its captured backtrace only after all sibling attempts finish.
+`Scope_policy.take_awakened` drains retained waiters exactly once in sibling
+input order and each target's waiter-registration order. Finish remains
+unavailable until every child is observed terminal, so the scope cannot expose
+an undrained aggregate.
 
 Collect never requests sibling cancellation. It waits for every child and
 returns `Done`, `Failed`, and `Cancelled` entries in the registered input order,
@@ -337,7 +343,8 @@ resume, real failing-child fail-fast/collect, a fail-fast cancellation that
 requeues an awakened waiter, the integrated self-await deadlock refusal, and
 stable same-decision terminal ordinals. Checkout-bracket tests separately prove
 that normal, diagnostic, and host-exception exits restore an unsettled affine
-token before scope cleanup. Its 128-case property changes the host random seed and
+token before scope cleanup, while preserving the physical host exception and
+its raw backtrace prefix. Its 128-case property changes the host random seed and
 proves the same decisions and bytes as an unseeded rerun. The `round-robin.t`
 transcript repeats a fresh process 128 times, byte-compares every trace, pins the
 exact cross-scope trace and cumulative counters, runs real CLI Async programs,
@@ -364,6 +371,145 @@ boundary:
 
 Warp Props remain data properties over the single C1 FIFO schedule; they do not
 claim schedule exploration.
+
+## Versioned scheduler traces and strict replay
+
+`Schedule_trace` defines canonical format v1 as a closed, line-oriented codec.
+Its header pins the format, scheduler identity, canonical program hash, failure
+policy, positive task/decision bounds, and optional fork decision/task. Create
+events pin scope path, TaskId, and parent. Decision events pin the contiguous
+sequence, exact ordered runnable queue, selected runnable TaskId, and the
+observed operation class. Routed world operations carry their `HASH_V0`
+identity. The parser validates semantic coherence and then requires
+parse/serialize byte identity, including one final LF.
+
+The compatibility policy is refusal: unversioned logs and every version other
+than 1 return E0908 with guidance to record a fresh trace. No legacy bytes are
+guessed or migrated. Unknown fields/operations, noncanonical whitespace,
+duplicate creations, invalid parents, noncontiguous decisions, duplicate or
+unknown runnable IDs, choices outside the queue, creations/decisions beyond
+their declared bounds, queues wider than `max-tasks`, and statically terminal
+TaskIds reappearing after `return`/`failure` are rejected during load. The
+validator uses hash-table membership in one linear pass and never derives
+ordering from hash-table iteration.
+
+CLI replay loading is incremental: the header is capped at 4 KiB, each line at
+1 MiB, the whole transport at 64 MiB, and the input at 200,001 lines. After the
+header, the declared task/decision bounds reduce both line and byte ceilings.
+The complete string is allocated only after those checks. Missing/unreadable
+paths and delayed record-write failures retain exact E0908 diagnostics;
+recording still opens its output only after successful program completion.
+
+`Schedule_control` validates the complete header before root-scope allocation.
+It consumes each expected creation before `Structured_scope` mutates allocation
+state, and consumes each exact sequence/queue/choice before advancing the
+chosen evaluator state. The resulting operation is compared before spawning or
+opening a scope and before dispatching a routed world callback. EOF, leftovers,
+missing/extra/reordered/impossible events, queue drift, and operation drift are
+fatal E0908 results followed by recursive cleanup; replay has no FIFO fallback.
+
+An explicit fork strictly consumes all earlier decisions, validates the exact
+queue at decision K, and accepts only a named runnable TaskId. The new branch
+then uses FIFO and its canonical header records `fork=K:TASK`. Strictly replaying
+that branch checks all recorded bytes normally; the provenance field grants no
+exception. `Round_robin.run_expr_scheduled` provides Record, Replay, and Fork
+modes. The CLI maps them to `--schedule-record`, `--schedule-replay`, and
+`--schedule-fork K=TASK`, requiring exactly one scheduled top-level expression
+and writing output traces only after successful completion.
+
+`test_schedule_trace.ml` pins the exact header, canonical identity and round
+trip, explicit fork provenance, old/unknown/noncanonical refusal, declared
+task/decision/queue bounds, terminal reappearance, and malformed semantic
+records. `test_round_robin.ml` pins byte-identical record/replay,
+missing and extra events, strict fork and replay of its branch, creation drift
+before allocation, and routed-operation drift before callback invocation. The
+`schedule-replay.t` golden transcript exercises the public CLI with the exact
+v1 bytes, malformed/legacy/impossible logs, missing/extra/reordered events,
+declared-line and per-line transport refusals, missing/unreadable paths, a
+post-success write failure, a flush-time write failure, fork-at-decision,
+byte-identical original and fork replays, and an empty stdout probe proving a
+one-bit world-operation-hash drift was refused before `print`.
+
+Scheduler cache identity now includes `schedule-format-v1` in addition to the
+program hash, scheduler identity, policy, and bounds. Cache payloads remain
+proof-only and every hit still executes a fresh evaluator run.
+
+## Budgeted exhaustive schedule enumeration
+
+`Exhaustive_schedule` makes each exact runnable TaskId queue one ordered
+multi-shot choice support. It explores every choice through SC.10 strict trace
+forks. Each fork starts from a fresh evaluator run, so the search never copies
+or consumes one affine Async resumption twice. The v0 search deliberately does
+no state hashing, schedule deduplication, or partial-order pruning.
+
+Reports contain the complete worlds, exact `explored` and `worlds_started`
+counts, and `Complete` or structured incomplete reasons. Task, decision, and
+world budgets are separately positive. A task- or decision-bounded prefix is
+not counted as a complete world, and any exhausted budget prevents a complete
+claim. The stopped prefix remains canonical and forkable, so earlier alternate
+choices are explored even when the FIFO seed exceeds a bound. Unhandled routed
+operations are recorded and refused before their root callback; the incomplete
+reason names the exact decision and operation hash. Program failures remain
+complete world results so a schedule-sensitive failure is visible rather than
+aborting enumeration.
+
+The hand-counted fixtures prove 2 schedules for one immediate child, 3 for one
+yielding child, and 8 for two immediate children. A Warp `test.run` fixture has
+exactly 2 schedules, produces the same passing report in both, and strictly
+replays every canonical trace byte-for-byte. A fail-fast fixture reaches two
+different first failures under its 8 schedules. Structured budget regressions
+pin incomplete results at all three axes. Two uneven-tree regressions begin
+with an over-budget FIFO seed yet retain exactly three shorter worlds: one at
+five decisions and one at three tasks. A hostile Console fixture proves the
+installed callback is never invoked. The multi-shot handler gauntlet and the
+eight-world two-child fixture prove no world reports E0906, each world creates
+exactly three tasks, and recursive affine-ownership metrics drain to zero.
+
+## Seeded randomized Warp schedules
+
+`jacquard test --schedules N --seed S` reruns every hermetic Case under the
+`seeded-random-v0` decision policy. The CLI rejects non-positive `N`, rejects a
+missing or malformed seed, and never calls `Random.self_init` on this path. A
+SplitMix64 stream mixes the root seed with the canonical discovered-member hash
+and a length-framed relative group/Case label path, excluding the renameable
+top-level name, plus the zero-based structural child-index path to the leaf. The
+framing distinguishes NUL-containing labels and the indices distinguish
+duplicate labels. The resulting identity supplies an independent decision seed
+to each run and is also the program identity checked before strict replay.
+Discovery order, top-level renames, cache hits, and host `Random` state therefore
+cannot move a test's schedule stream.
+
+Only the D46 choice changes: each step selects an index from the exact ordered
+runnable queue using 62-bit bounded-integer rejection sampling. The fixed
+three-way-queue regression and 10,000 bounded draws pin non-power-of-two range
+behavior without float or modulo bias. The scheduler still records format-v1
+creation and decision events. Strict replay accepts the scheduler identity stored in a validated
+trace and checks every queue, chosen task, and operation without drawing again.
+The focused scheduler regression pins same-seed byte identity under different
+host random states, a changed interleaving for another seed, and byte-identical
+strict replay of the seeded trace. Warp identity regressions pin distinct seeds
+and trace identities for duplicate labels and for `["a"; "b"]` versus
+`["a\000b"]`, plus strict refusal when a trace from one duplicate-label leaf is
+presented to the other.
+
+The first failing Warp execution prints the root seed, child decision seed, and
+exact rerun command. It prints a canonical schedule log only after a complete
+trace; the decision-bound regression pins a seed/rerun/error refusal with no
+partial-log claim. The CLI transcript runs the ordinary failing command twice
+and byte-compares the failures. It also pins positive-count and explicit-seed
+diagnostics, pass reporting, and cache misses when either `N` or `S` changes.
+The scheduled cache key is the ordinary Merkle member/Prop key plus
+`seeded-random-v0`, the schedule-leaf identity version, `N`, and `S`; the
+schedule trace program identity is the framed member/label/structural-index
+identity. A top-level rename is a cache hit with current display text, while a
+Case-label edit is a miss. Scheduled failures are not cached; a shared-cache
+moved-path regression proves their replay command is rebuilt from the current
+source/prelude paths. WorldTests remain uncached and Props retain their separate
+data-generation modes.
+
+SC.11 seeded scheduling remains part of this successor. Host scheduling remains
+outside SC.12.
+
 
 ## SC.13 typed-channel freeze
 
@@ -432,7 +578,7 @@ and channel runtime remain excluded.
 
 The lifecycle evidence is registered directly in the compiled Alcotest
 inventory rather than hidden inside the effect-taxonomy governance case. The
-five independently selectable groups and their case names are:
+seven independently selectable groups and their case names are:
 
 | group | compiled case |
 |---|---|
@@ -441,6 +587,8 @@ five independently selectable groups and their case names are:
 | `cancellation` | `cooperative boundary delivery` |
 | `scope-policy` | `fail-fast and collect aggregation` |
 | `round-robin` | `real evaluator FIFO lifecycle` |
+| `schedule-trace` | `canonical codec and identity`; `legacy, unknown, and noncanonical refusal`; `impossible event refusal` |
+| `exhaustive-schedule` | hand counts; Warp/replay; schedule-sensitive failure; budgets and stopped-prefix alternatives; hermeticity; Once ownership |
 
 The exact discovery and focused execution commands are:
 
@@ -449,17 +597,17 @@ opam exec -- dune build test/test_jacquard.exe
 (
   cd _build/default/test
   ./test_jacquard.exe list --color=never 2>/dev/null |
-    grep -E '^(scheduler-core|structured-scope|cancellation|scope-policy|round-robin) '
+    grep -E '^(scheduler-core|structured-scope|cancellation|scope-policy|round-robin|schedule-trace|exhaustive-schedule) '
   ./test_jacquard.exe test \
-    'scheduler-core|structured-scope|cancellation|scope-policy|round-robin' \
+    'scheduler-core|structured-scope|cancellation|scope-policy|round-robin|schedule-trace|exhaustive-schedule' \
     --compact --color=never
 )
 ```
 
-The compiled inventory is exactly 652 cases and the source inventory is 38
+The compiled inventory is exactly 687 cases and the source inventory is 39
 cram transcripts. `effect-taxonomy/2` is the independently selectable SC.13
-interface/trace/checklist proof; the five lifecycle suites execute exactly once
-during the full gate.
+interface, trace, and checklist proof; the seven scheduler/lifecycle suites
+execute exactly once during the full gate.
 
 Native scheduling remains outside the current backend. Differential coverage is
 therefore limited to the supported case: an Async operation discharged by an
@@ -469,13 +617,13 @@ grant was added.
 
 ## Reconstruction and verification
 
-The manifest is the complete SC.13 successor overlay on validated SC.9 commit
-`59b12eb`. Reconstruct it under repository-local scratch
-space:
+The manifest is the complete SC.13 successor overlay on validated SC.12 commit
+`2fc2d306c1236b8faeaee37a2e1c9d2848d16f52`. Reconstruct it under repository-local
+scratch space:
 
 ```sh
 set -eu
-base=59b12eb
+base=2fc2d306c1236b8faeaee37a2e1c9d2848d16f52
 dest="$PWD/.scratch/sc13-evidence-copy"
 manifest=docs/release/structured-concurrency/MANIFEST.sha256
 rm -rf "$dest"
@@ -518,7 +666,7 @@ snapshot_source | cmp "$snapshot" -
 opam exec -- dune build @doc --root "$dest"
 ```
 
-Expected results are zero exits, 652 compiled Alcotest/QCheck cases, 38 cram
+Expected results are zero exits, 687 compiled Alcotest/QCheck cases, 39 cram
 transcripts, and 27 doctest examples across 8 documents.
 
 The default interpreted CLI, prelude-evaluation, and Warp Case paths use this
@@ -528,4 +676,10 @@ hashes remain unchanged. Raw `Eval.run_expr` remains a low-level unscheduled
 seam. SC.4 continues to supply the static child-effect law: a scope discharges
 only Async and retains child world effects. Native root scheduling remains
 future work; native parity evidence is labeled only for Async discharged by an
-in-language handler.
+in-language handler. SC.11 randomizes this explicit interpreter decision seam,
+while SC.12 adds hermetic bounded exhaustive exploration. Neither claims host
+scheduling.
+SC.13 adds only the Channel contract, published identity, checker fixtures, and
+acceptance traces. Channel remains visible in outward effect rows and has no
+runtime route until SC.14; the SC.10-SC.12 scheduling and replay guarantees
+remain unchanged.

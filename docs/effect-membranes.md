@@ -7,6 +7,21 @@ implementation. No kernel form, ambient authority, scheduler behavior, or
 general linear type is added. G5 posterior judgment remains a separate research
 phase and is not part of the v0 contract.
 
+Implementation note: GM.2 completes the §10 two-level identity core. The
+successor `GovernanceProposal` is intentionally separate from the frozen ET.6
+carrier, derives its constituent IDs and Call authority through typed GM.1
+artifacts, and hashes the exact tuple below with the existing `code.hash`
+canonical-Code boundary.
+
+GM.9 implements the §3/§8 Workspace request boundary before membrane handlers:
+the executable prelude publishes the charter's frozen
+`Path = PathValue(Text)` carrier and reuses the frozen `Request`,
+`Response`, `ToolError`, and `SecretRef` types. Its three once operations,
+finite inspectable specs, pure call normalizers, and type-specific outcome
+summarizers are released; live/dry gates and drivers remain later phases. The
+fetch spec records the exact `[Net, Secret]` envelope in the frozen blessed
+effect-taxonomy order required by `governance.validate-authority`.
+
 ---
 
 ## 1. Thesis
@@ -137,16 +152,16 @@ type Call =
       preconditions: Code,
       parent-call-id: Option Hash)
 
-type Assessment =
-  | Assessment(
+type GovernanceAssessment =
+  | GovernanceAssessment(
       version: GovernanceVersion,
       risk: Risk,
       confidence: Real,
       reasons: List Text,
       evidence: Code)
 
-type OutcomeSummary =
-  | OutcomeSummary(
+type GovernanceOutcomeSummary =
+  | GovernanceOutcomeSummary(
       version: GovernanceVersion,
       status: Text,
       digest: Hash,
@@ -162,7 +177,7 @@ type Proposal =
       rendering: Code,
       summary: Text,
       authority: List Authority,
-      preview: Option OutcomeSummary)
+      preview: Option GovernanceOutcomeSummary)
 
 type Decision =
   | Approved(proposal-id: Hash, approver: Text, evidence: Code)
@@ -175,7 +190,7 @@ type AuditEntry =
       sequence: Int,
       call-id: Hash,
       policy-id: Hash,
-      assessment: Assessment,
+      assessment: GovernanceAssessment,
       verdict: Verdict)
   | Consented(
       version: GovernanceVersion,
@@ -188,7 +203,7 @@ type AuditEntry =
       sequence: Int,
       call-id: Hash,
       branch: Text,
-      outcome: OutcomeSummary)
+      outcome: GovernanceOutcomeSummary)
 
 type SecretRef =
   | SecretRef(
@@ -212,7 +227,7 @@ preview, deterministic rendering, and summary, excluding the carried
 `proposal-id` field. The governance verifier recomputes both IDs.
 
 `policy-id` hashes `(GovernanceV0, canonical policy value)` and excludes the
-carried ID. `assessment-id` hashes the exact versioned `Assessment` value.
+carried ID. `assessment-id` hashes the exact versioned `GovernanceAssessment` value.
 `Authority.Resource.configuration` hashes the resolved grant configuration
 whose scope is being claimed. These inputs use canonical code encoding and
 `HASH_V0`; mutable names are never substituted for resolved identities.
@@ -225,6 +240,17 @@ uses the resolved interface identity, not a display name. A resource entry may
 refine one of those effect entries with configured evidence, but never replaces
 the effect-level claim. `Call.authority` and `Proposal.authority` must both equal
 that envelope byte for byte.
+
+Canonical blessed-effect order is the row order of
+`spec/effect-taxonomy-v1.tsv`, not rendered Code or hash lexical order.
+`Authority.Resource` entries sort immediately after their matching Effect.
+Resources for that exact identity then compare structurally by D3 bytewise
+scope and, only when scopes are equal, canonical configuration-hash bytes/text;
+no delimiter-concatenated or length-prefixed surrogate key defines this order.
+Non-taxonomy identities use a deterministic hash fallback after blessed
+effects. This total order preserves duplicate rejection and the rule that a
+Resource refines a preceding Effect. The frozen Workspace fetch envelope is
+therefore exactly `[Effect(Net-id), Effect(Secret-id)]`.
 
 The verifier computes the same envelope from the call-specific action. Raw
 effects remain unchanged; a re-performed facade operation expands recursively
@@ -264,7 +290,7 @@ above; the complete executable declarations appear in the §8 fixture.
 
 ```text
 once effect Judge where
-  assess : (Call) -> Assessment
+  assess : (Call) -> GovernanceAssessment
 
 once effect Approval where
   ask : (Proposal) -> Decision
@@ -281,7 +307,7 @@ judge.model     : (() ->{Judge | e} a) ->{Infer | e} a
 judge.posterior : (() ->{Judge | e} a) ->{Dist | e} a
 ```
 
-The v0 `Assessment` carries one conservative risk class and a confidence. A posterior-aware representation over the finite `Risk` type is the natural next step, but policy should not pretend a scalar confidence has more meaning than the judge can justify. Section 14 keeps that extension explicit.
+The v0 `GovernanceAssessment` carries one conservative risk class and a confidence. A posterior-aware representation over the finite `Risk` type is the natural next step, but policy should not pretend a scalar confidence has more meaning than the judge can justify. Section 14 keeps that extension explicit.
 
 ### 5.1 Approval as a typed transaction
 
@@ -299,7 +325,7 @@ type Proposal =
       rendering: Code,
       summary: Text,
       authority: List Authority,
-      preview: Option OutcomeSummary)
+      preview: Option GovernanceOutcomeSummary)
 
 type Decision =
   | Approved(proposal-id: Hash, approver: Text, evidence: Code)
@@ -326,24 +352,35 @@ supplies all referenced types.
 type AuditEntry =
   | Evaluated(
       version: GovernanceVersion, sequence: Int, call-id: Hash,
-      policy-id: Hash, assessment: Assessment, verdict: Verdict)
+      policy-id: Hash, assessment: GovernanceAssessment, verdict: Verdict)
   | Consented(
       version: GovernanceVersion, sequence: Int, call-id: Hash,
       proposal-id: Hash, decision: Decision)
   | Completed(
       version: GovernanceVersion, sequence: Int, call-id: Hash,
-      branch: Text, outcome: OutcomeSummary)
+      branch: Text, outcome: GovernanceOutcomeSummary)
 ```
 
 `sequence` starts at zero once for the entire governed run and increases by one
-for every accepted entry. `governance.with-sequence` is the sole owner API: it
-installs one private `State Int` handler, creates one run-scoped
+only after an accepted `Audit.record` resumes; a refused write leaves it
+unchanged. `governance.with-sequence` is the sole owner API: it
+installs one `State` handler whose private payload is `(run-id: Hash,
+counter: Int)`, creates one run-scoped
 `AuditSequence` token, and passes that token to the membrane-layer callback.
+The public owner and layer signatures remain unchanged: they expose only the
+`State` effect and `Int` sequence positions, never the payload refinement.
 Every live or dry layer accepts and threads the same token; no layer initializes
 `State`, and nesting a public runner inside another runner is non-conforming.
 Nested membranes that write one audit stream are instead assembled inside one
 `with-sequence` callback and receive its single token. Separately published
 audit streams are separate owner invocations and each begin at zero.
+The token constructor and the fresh-id/check marker terms are unavailable
+through both their source names and exact derived hashes, and stay hidden after
+reopening the Store. Trusted evaluation of the already-resolved owner is the
+only construction path. Each `with-sequence` invocation receives a fresh ID;
+`next-sequence` and `accept-sequence` compare the token ID with the active
+private state before reading or advancing, so returned tokens, cross-owner
+reuse, arbitrary `state.run`, and nesting under a different owner fail closed.
 `Evaluated` is recorded before approval, simulation, forwarding, or live
 execution. When approval is required, `Consented` is recorded after the answer
 and before the live driver. `Completed` is recorded after the branch returns.
@@ -351,6 +388,11 @@ Duplicate, skipped, or decreasing sequences are rejected by the canonical
 audit handler.
 
 The pre-action writes are fail-closed: if they cannot be recorded, the real or forwarded action does not run. A completion-write failure is surfaced but cannot undo an action that already happened; irreversible drivers should return an external receipt or idempotency key so the audit stream can be reconciled. The hash-chain handler links entries and publishes the current head exactly as D58 requires.
+
+Malformed directly represented Call or BoundPolicy carriers are rejected as
+`InvalidDecision` before Judge or Audit. This defensive precondition path is
+intentionally unaudited: the malformed value has no trustworthy canonical ID to
+record. It performs no simulation, summarization, approval, or world action.
 
 Audit renderers never call `debug.inspect` on arbitrary values. Each facade operation supplies a pure, type-specific outcome summarizer. This is more verbose than reflection and is the right default: generic inspection is how secrets enter logs.
 
@@ -431,6 +473,40 @@ The pure verdict laws are:
 
 These functions are pure over finite values except for the real-valued confidence comparison. Warp exhaustively verifies the risk and threshold ordering over a representative finite confidence grid, and ordinary unit properties cover the numeric boundary cases.
 
+Implementation status (GM.4): `prelude/23-governance-policy.jqd` exposes safe
+validation for LivePolicy, DryPolicy, StoredPolicy, and exact BoundPolicy
+hashes. The bound live and dry verdict entry points implement these laws as
+total `Result ToolError Verdict` functions. Their executable evidence covers
+all four risks, all sixteen live threshold pairs (rejecting the six reversed
+pairs), four representative observed confidences, both simulator states, and
+the finite/non-finite numeric boundaries. GM.4 adds a separately discoverable
+hermetic Warp property for each pure law below, enumerating all ten valid
+threshold pairs and all four risks over a five-point confidence grid. Exact
+adjacent-real and non-finite cases remain unit checks. A separate confidence-
+threshold tightening property holds the risk thresholds at `Low`/`High` while
+enumerating all 25 ordered minimum-confidence pairs, all four risks, and the
+same five observed confidences. This completes D65, D66, and D72 for the pure
+policy layer; later gate work consumes these verdicts without changing their
+laws.
+
+Implementation status (GM.6): `prelude/24-governance-gate-dry.jqd` consumes
+the exact bound dry policy, shared `AuditSequence`, and pure
+simulator/summarizer boundary. It returns the frozen `DryDisposition` and does
+not accept or export the facade clause's affine continuation. Its closed control
+row is exactly `{State, Judge, Audit}`; there is no live closure and no
+`Approval`, `Secret`, `Eval`, `Fs`, `Net`, or other world effect. It reserves the
+next shared audit position, records `Evaluated`, derives an explicit blocked,
+missing-simulation, simulated, or simulation-failed result, reserves the next
+position, records `Completed`, and returns the disposition. For a policy verdict
+of `Simulate`, `Evaluated` records that verdict before simulator availability is
+known; if no simulator exists, the `Completed` outcome records `NoSimulation`
+and the disposition is `RefuseDry(NoSimulation)`. A refused pre-action Audit
+write prevents the simulator and summarizer; a refused completion write
+prevents the disposition from returning. The facade clause remains the sole
+owner that consumes its local `Resume`. This implements D64-D66 without
+replacing the frozen representation below; the workspace facade and live gate
+remain later G2 work.
+
 ## 7. One gate, two execution APIs
 
 Jacquard v0 rows have at most one tail, and affine `Resume` is not a public type
@@ -454,7 +530,7 @@ governance.gate-live :
   , BoundPolicy LivePolicy
   , Call
   , Option (() ->{} Result ToolError a)
-  , (Result ToolError a) ->{} OutcomeSummary
+  , (Result ToolError a) ->{} GovernanceOutcomeSummary
   ) ->{State, Judge, Approval, Audit} LiveDisposition
 
 governance.gate-dry :
@@ -463,11 +539,11 @@ governance.gate-dry :
   , BoundPolicy DryPolicy
   , Call
   , Option (() ->{} Result ToolError a)
-  , (Result ToolError a) ->{} OutcomeSummary
+  , (Result ToolError a) ->{} GovernanceOutcomeSummary
   ) ->{State, Judge, Audit} DryDisposition a
 
 governance.complete :
-  (AuditSequence, Call, Text, OutcomeSummary) ->{State, Audit} ()
+  (AuditSequence, Call, Text, GovernanceOutcomeSummary) ->{State, Audit} ()
 ```
 
 These are ordinary single-tail Jacquard types. `gate-live` and `gate-dry` have
@@ -751,15 +827,15 @@ type Call =
       summary: Text,
       preconditions: Code,
       parent-call-id: Option Hash)
-type Assessment =
-  | Assessment(
+type GovernanceAssessment =
+  | GovernanceAssessment(
       version: GovernanceVersion,
       risk: Risk,
       confidence: Real,
       reasons: List Text,
       evidence: Code)
-type OutcomeSummary =
-  | OutcomeSummary(
+type GovernanceOutcomeSummary =
+  | GovernanceOutcomeSummary(
       version: GovernanceVersion,
       status: Text,
       digest: Hash,
@@ -774,7 +850,7 @@ type Proposal =
       rendering: Code,
       summary: Text,
       authority: List Authority,
-      preview: Option OutcomeSummary)
+      preview: Option GovernanceOutcomeSummary)
 type Decision =
   | Approved(proposal-id: Hash, approver: Text, evidence: Code)
   | Denied(proposal-id: Hash, approver: Text, reason: Text)
@@ -785,7 +861,7 @@ type AuditEntry =
       sequence: Int,
       call-id: Hash,
       policy-id: Hash,
-      assessment: Assessment,
+      assessment: GovernanceAssessment,
       verdict: Verdict)
   | Consented(
       version: GovernanceVersion,
@@ -798,7 +874,7 @@ type AuditEntry =
       sequence: Int,
       call-id: Hash,
       branch: Text,
-      outcome: OutcomeSummary)
+      outcome: GovernanceOutcomeSummary)
 
 type LivePolicy =
   | LivePolicy(
@@ -812,7 +888,7 @@ type BoundPolicy a =
   | BoundPolicy(version: GovernanceVersion, policy-id: Hash, value: a)
 
 once effect Judge where {
-  judge.assess : (Call) -> Assessment
+  judge.assess : (Call) -> GovernanceAssessment
 }
 once effect Approval where {
   approval.ask : (Proposal) -> Decision
@@ -874,7 +950,7 @@ proposal-for(operation) =
     None)
 
 outcome-for(branch) =
-  OutcomeSummary(GovernanceV0, branch, fixture-hash, "fixture outcome")
+  GovernanceOutcomeSummary(GovernanceV0, branch, fixture-hash, "fixture outcome")
 
 run-read-simulator : ((Path) ->{} Result ToolError Text, Path) ->{} Result ToolError Text
 run-read-simulator(simulator, path) = simulator(path)
@@ -887,11 +963,12 @@ run-fetch-simulator(simulator, request) = simulator(request)
 
 next-sequence : (AuditSequence) ->{State} Int
 next-sequence(owner) = match owner {
-  | AuditSequence(_) -> {
-      let sequence = get()
-      put(add(sequence, 1))
-      sequence
-    }
+  | AuditSequence(_) -> get()
+}
+
+accept-sequence : (AuditSequence) ->{State} ()
+accept-sequence(owner) = match owner {
+  | AuditSequence(_) -> put(add(get(), 1))
 }
 
 agent() = {
@@ -910,12 +987,15 @@ workspace.live-layer(sequence, policy, read-simulator, write-simulator, fetch-si
         let judgment = judge.assess(request-call)
         let evaluated-sequence = next-sequence(sequence)
         audit.record(Evaluated(GovernanceV0, evaluated-sequence, request-id, fixture-hash, judgment, Ask))
+        accept-sequence(sequence)
         let decision = approval.ask(proposal-for(ReadFileOperation))
         let consented-sequence = next-sequence(sequence)
         audit.record(Consented(GovernanceV0, consented-sequence, request-id, fixture-hash, decision))
+        accept-sequence(sequence)
         let result = match path { | PathValue(raw) -> Ok(read(raw)) }
         let completed-sequence = next-sequence(sequence)
         audit.record(Completed(GovernanceV0, completed-sequence, request-id, "live", outcome-for("live")))
+        accept-sequence(sequence)
         continue(result)
       }
     | workspace.write-file(path, text) resume continue -> {
@@ -924,12 +1004,15 @@ workspace.live-layer(sequence, policy, read-simulator, write-simulator, fetch-si
         let judgment = judge.assess(request-call)
         let evaluated-sequence = next-sequence(sequence)
         audit.record(Evaluated(GovernanceV0, evaluated-sequence, request-id, fixture-hash, judgment, Ask))
+        accept-sequence(sequence)
         let decision = approval.ask(proposal-for(WriteFileOperation))
         let consented-sequence = next-sequence(sequence)
         audit.record(Consented(GovernanceV0, consented-sequence, request-id, fixture-hash, decision))
+        accept-sequence(sequence)
         let result = match path { | PathValue(raw) -> { write(raw, text); Ok(()) } }
         let completed-sequence = next-sequence(sequence)
         audit.record(Completed(GovernanceV0, completed-sequence, request-id, "live", outcome-for("live")))
+        accept-sequence(sequence)
         continue(result)
       }
     | workspace.fetch(request) resume continue -> {
@@ -938,14 +1021,17 @@ workspace.live-layer(sequence, policy, read-simulator, write-simulator, fetch-si
         let judgment = judge.assess(request-call)
         let evaluated-sequence = next-sequence(sequence)
         audit.record(Evaluated(GovernanceV0, evaluated-sequence, request-id, fixture-hash, judgment, Ask))
+        accept-sequence(sequence)
         let decision = approval.ask(proposal-for(FetchOperation))
         let consented-sequence = next-sequence(sequence)
         audit.record(Consented(GovernanceV0, consented-sequence, request-id, fixture-hash, decision))
+        accept-sequence(sequence)
         let secret = secret.read(SecretRef(GovernanceV0, "workspace", None))
         let exposed = secret.expose(secret)
         let result = match exposed { | _ -> Ok(fetch(request)) }
         let completed-sequence = next-sequence(sequence)
         audit.record(Completed(GovernanceV0, completed-sequence, request-id, "live", outcome-for("live")))
+        accept-sequence(sequence)
         continue(result)
       }
   }
@@ -960,12 +1046,14 @@ workspace.dry-layer(sequence, policy, read-simulator, write-simulator, fetch-sim
         let judgment = judge.assess(request-call)
         let evaluated-sequence = next-sequence(sequence)
         audit.record(Evaluated(GovernanceV0, evaluated-sequence, request-id, fixture-hash, judgment, Simulate))
+        accept-sequence(sequence)
         let result = match read-simulator {
           | None -> Err(NoSimulation)
           | Some(simulator) -> run-read-simulator(simulator, path)
         }
         let completed-sequence = next-sequence(sequence)
         audit.record(Completed(GovernanceV0, completed-sequence, request-id, "simulated", outcome-for("simulated")))
+        accept-sequence(sequence)
         continue(result)
       }
     | workspace.write-file(path, text) resume continue -> {
@@ -974,12 +1062,14 @@ workspace.dry-layer(sequence, policy, read-simulator, write-simulator, fetch-sim
         let judgment = judge.assess(request-call)
         let evaluated-sequence = next-sequence(sequence)
         audit.record(Evaluated(GovernanceV0, evaluated-sequence, request-id, fixture-hash, judgment, Simulate))
+        accept-sequence(sequence)
         let result = match write-simulator {
           | None -> Err(NoSimulation)
           | Some(simulator) -> run-write-simulator(simulator, path, text)
         }
         let completed-sequence = next-sequence(sequence)
         audit.record(Completed(GovernanceV0, completed-sequence, request-id, "simulated", outcome-for("simulated")))
+        accept-sequence(sequence)
         continue(result)
       }
     | workspace.fetch(request) resume continue -> {
@@ -988,12 +1078,14 @@ workspace.dry-layer(sequence, policy, read-simulator, write-simulator, fetch-sim
         let judgment = judge.assess(request-call)
         let evaluated-sequence = next-sequence(sequence)
         audit.record(Evaluated(GovernanceV0, evaluated-sequence, request-id, fixture-hash, judgment, Simulate))
+        accept-sequence(sequence)
         let result = match fetch-simulator {
           | None -> Err(NoSimulation)
           | Some(simulator) -> run-fetch-simulator(simulator, request)
         }
         let completed-sequence = next-sequence(sequence)
         audit.record(Completed(GovernanceV0, completed-sequence, request-id, "simulated", outcome-for("simulated")))
+        accept-sequence(sequence)
         continue(result)
       }
   }
@@ -1264,12 +1356,26 @@ Warp receives a dedicated governance suite.
 * Confidence monotonicity: decreasing confidence never changes `Ask` or `Block` into `Allow`.
 * Forbidden absorption: `Forbidden` always blocks.
 * Dry-run totality: dry policy never yields `Allow` or `Ask`.
-* Policy tightening: lowering thresholds never increases the allowed set.
+* Risk-threshold tightening: lowering risk thresholds never increases the allowed set.
+* Minimum-confidence tightening: raising `min-confidence` never increases the allowed set.
 * Call ID stability: metadata, formatting, and summary changes do not alter the semantic call ID.
 * Call ID sensitivity: operation, arguments, authority, or preconditions do.
 * Policy binding: changing a bound policy value without changing its hash is rejected.
 
+Implementation status (GM.4): `test/cli/governance-policy-laws.jqd` implements
+all nine pure properties above as closed-row Warp `Prop` values, plus a
+six-check exact numeric-edge `Case`. `jac test` runs the sampled governance
+lane; `jac test --exhaustive` proves finite supports of 5 to 4,000 cases per
+property under the default budget. Counterexample labels include the complete
+policy thresholds, confidence, canonical policy or call hashes, risks, and
+verdicts. `test/cli/props.t` also creates a scratch-only one-law inversion and
+records Warp rejecting it with a concrete hashed counterexample. No mutant is
+retained in the source tree.
+
 ### Handler and world properties
+
+These remain future gate/driver work. GM.4 deliberately adds no handler,
+world-test, live driver, simulator driver, or audit orchestration.
 
 * `Allow` invokes the live driver exactly once and resumes exactly once.
 * `Block`, `Denied`, `Escalate`, and `NoSimulation` invoke it zero times.
@@ -1373,7 +1479,7 @@ silently change a v0 assessment or policy decision.
 | --- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | D61 | facade shape      | domain-specific typed facade effects; no universal stringly `Tool.call`                                                                                    |
 | D62 | raw authority     | “host” is a role; membranes re-perform concrete blessed world effects, never an opaque `Host` effect                                                       |
-| D63 | Judge status      | bless `Judge` as a once governance effect with `assess : Call -> Assessment`                                                                               |
+| D63 | Judge status      | bless `Judge` as a once governance effect with `assess : Call -> GovernanceAssessment`                                                                               |
 | D64 | refusal semantics | facade operations return `Result ToolError a`; the gate returns a disposition and the facade clause consumes its local `Resume` exactly once on ordinary paths                 |
 | D65 | execution modes   | separate live and dry-run policy types and entry points; dry-run accepts no live driver and carries no world, `Approval`, or `Secret` row                  |
 | D66 | simulation        | simulator is explicit and pure at the gate; missing simulation refuses and never falls back live                                                           |

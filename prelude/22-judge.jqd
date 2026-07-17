@@ -1,0 +1,101 @@
+; GM.5 blessed governance assessment. The collision-safe GovernanceCall and
+; GovernanceAssessment carriers are the executable GM.1 spellings of the
+; charter's Call and Assessment schemas.
+(defeffect judge ()
+  (op assess once ((tref governance-call)) (tref governance-assessment)))
+
+; Constructors remain public in v0, so every handler validates an Assessment
+; before resuming. Risk, reasons, and evidence are closed algebraic values;
+; governance.validate-assessment also rejects non-finite or out-of-range
+; confidence from a directly constructed carrier.
+(defterm ((binding judge.validate-or-throw
+  ((tarrow ((tref governance-assessment)) (row (eref throw))
+    (tref governance-assessment)))
+  (lam ((pvar value))
+    (match (app (var governance.validate-assessment) (var value))
+      (clause (pcon ok (pvar valid)) (var valid))
+      (clause (pcon err (pvar message)) (app (var throw) (var message))))))))
+
+; Deterministic pure-rule adapter. The supplied assessor is deliberately closed
+; and pure; non-pure dependencies are rejected rather than hidden behind Judge.
+; The explicit Throw validation boundary remains outward.
+(defterm ((binding judge.rules
+  ((tforall ((tvar a)) ((rvar e))
+    (tarrow
+      ((tarrow () (row (eref judge) (eref throw) e) (tvar a))
+        (tarrow ((tref governance-call)) (row)
+          (tref governance-assessment)))
+      (row (eref throw) e) (tvar a))))
+  (lam ((pvar thunk) (pvar rule))
+    (handle (app (var thunk))
+      (ret (pvar value) (var value))
+      (opclause assess ((pvar call)) k
+        (app (var k)
+          (app (var judge.validate-or-throw)
+            (app
+              (ann (var rule)
+                (tarrow ((tref governance-call)) (row)
+                  (tref governance-assessment)))
+              (var call))))))))))
+
+; One validated Assessment is replayed for every call. This is intentionally a
+; fixture handler: it does not inspect the Call and carries no world authority.
+(defterm ((binding judge.fixed
+  ((tforall ((tvar a)) ((rvar e))
+    (tarrow
+      ((tarrow () (row (eref judge) (eref throw) e) (tvar a))
+        (tref governance-assessment))
+      (row (eref throw) e) (tvar a))))
+  (lam ((pvar thunk) (pvar assessment-value))
+    (let nonrec (pvar valid)
+      (app (var judge.validate-or-throw) (var assessment-value))
+      (handle (app (var thunk))
+        (ret (pvar value) (var value))
+        (opclause assess ((pwild)) k (app (var k) (var valid)))))))))
+
+; Script entries are consumed once in operation order. Exhaustion and a
+; malformed entry fail through Throw without resuming the affine continuation.
+(defterm ((binding judge.scripted
+  ((tforall ((tvar a)) ((rvar e))
+    (tarrow
+      ((tarrow () (row (eref judge) (eref throw) e) (tvar a))
+        (tapp (tref list) (tref governance-assessment)))
+      (row (eref throw) e) (tvar a))))
+  (lam ((pvar thunk) (pvar script))
+    (app
+      (handle (app (var thunk))
+        (ret (pvar value) (lam ((pwild)) (var value)))
+        (opclause assess ((pwild)) k
+          (lam ((pvar remaining))
+            (match (var remaining)
+              (clause (pcon cons (pvar entry) (pvar more))
+                (app
+                  (app (var k) (app (var judge.validate-or-throw) (var entry)))
+                  (var more)))
+              (clause (pcon nil)
+                (app (var throw)
+                  (lit "judge.scripted: out of assessments")))))))
+      (var script))))))
+
+; Model-backed assessment is an explicit point-assessment adapter. The supplied
+; model's Infer effect remains in the outward row and the returned Assessment is
+; validated exactly like deterministic assessments. Dist and posterior
+; semantics remain deferred to G5.
+(defterm ((binding judge.model
+  ((tforall ((tvar a)) ((rvar e))
+    (tarrow
+      ((tarrow () (row (eref judge) (eref infer) (eref throw) e) (tvar a))
+        (tarrow ((tref governance-call)) (row (eref infer))
+          (tref governance-assessment)))
+      (row (eref infer) (eref throw) e) (tvar a))))
+  (lam ((pvar thunk) (pvar model))
+    (handle (app (var thunk))
+      (ret (pvar value) (var value))
+      (opclause assess ((pvar call)) k
+        (app (var k)
+          (app (var judge.validate-or-throw)
+            (app
+              (ann (var model)
+                (tarrow ((tref governance-call)) (row (eref infer))
+                  (tref governance-assessment)))
+              (var call))))))))))

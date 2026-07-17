@@ -187,7 +187,7 @@ $ dune exec jacquard -- check PROGRAM.jac --manifest console,net
 $ dune exec jacquard -- diff REVIEWED.jac PROPOSED.jac
 ```
 
-The complete 25-effect table, exact released interface hashes, canonical
+The complete 26-effect table, exact released interface hashes, canonical
 handlers, and reserved status live in
 [`effect-taxonomy.md`](effect-taxonomy.md). The short review workflow and exact
 tool output are in [`effect-review.md`](effect-review.md).
@@ -207,7 +207,7 @@ Two distinctions prevent common review mistakes:
   official `Net` risk or `--allow net`. Of the schema-reserved names, `Async`
   has the interpreted structured scheduler and `Channel` has a published SC.13
   identity and contract with its runtime deferred to SC.14. `Choose`, `Env`,
-  `Pg`, `Blob`, `Serve`, `Crypto`, `Log`, and `Judge` remain unimplemented.
+  `Pg`, `Blob`, `Serve`, `Crypto`, and `Log` remain unimplemented.
 
 `Secret` is opaque before `secret.expose`, including under generic inspection,
 but Jacquard does not provide taint tracking. After exposure, the plaintext is

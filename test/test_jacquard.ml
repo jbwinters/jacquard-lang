@@ -27,11 +27,16 @@ let () =
       ("cancellation", Test_cancellation.suite);
       ("scope-policy", Test_scope_policy.suite);
       ("round-robin", Test_round_robin.suite);
+      ("exhaustive-schedule", Test_exhaustive_schedule.suite);
+      ("schedule-trace", Test_schedule_trace.suite);
       ("audit", Test_audit.suite);
       ("secret", Test_secret.suite);
       ("audit-chain", Test_audit_chain.suite);
       ("approval", Test_approval.suite);
       ("governance-core", Test_governance_core.suite);
+      ("judge", Test_judge.suite);
+      ("governance-gate", Test_governance_gate.suite);
+      ("workspace", Test_workspace.suite);
       ("types", Test_types.suite);
       ("check", Test_check.suite);
       ("tier", Test_tier.suite);

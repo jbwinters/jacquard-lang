@@ -13,7 +13,9 @@ let expression store source =
 
 let () =
   let prelude = Option.value ~default:"../prelude" (Sys.getenv_opt "JACQUARD_PRELUDE") in
-  let store_dir = Filename.concat (Sys.getcwd ()) "round-robin-trace-store" in
+  let store_dir =
+    Filename.concat (Sys.getcwd ()) (Printf.sprintf "round-robin-trace-store-%d" (Unix.getpid ()))
+  in
   let store = match Store.open_store store_dir with Ok s -> s | Error ds -> fail ds in
   (match Prelude.load ~dir:prelude store with Ok _ -> () | Error ds -> fail ds);
   let ctx = Eval.make_ctx store in

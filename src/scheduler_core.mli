@@ -87,7 +87,7 @@ val validate_run_handle :
   ('resume, 'value) t -> handle -> (Concurrency_contract.task_id, Diag.t list) result
 (** [validate_run_handle scheduler handle] validates only the opaque run owner and returns the
     handle's ID. It is intended for structured-scope lineage checks; ordinary task operations must
-    use exact-scope validation through {!id}. *)
+    use exact-scope validation through {!val-id}. *)
 
 val inspect : ('resume, 'value) t -> handle -> ('value task_view, Diag.t list) result
 (** [inspect] returns the current task view after validating ownership. *)
@@ -100,7 +100,8 @@ val with_checkout :
   ('resume, 'value) t -> handle -> ('resume -> ('a, Diag.t list) result) -> ('a, Diag.t list) result
 (** [with_checkout scheduler handle operation] transfers the runnable task's token to [operation].
     If [operation] returns or raises before settling that token through a scheduler transition,
-    ownership is restored before control leaves the bracket. A missing, suspended, terminal, or
+    ownership is restored before control leaves the bracket. A raised physical exception is
+    re-thrown with its original raw backtrace after restoration. A missing, suspended, terminal, or
     foreign task returns the same diagnostics as {!checkout}. *)
 
 val suspend_yield : ('resume, 'value) t -> handle -> resume:'resume -> (unit, Diag.t list) result

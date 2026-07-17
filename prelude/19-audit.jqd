@@ -3,9 +3,30 @@
 ; and validated values enter only through hash.parse.
 (deftype hash () (con hash-opaque))
 
+; D69's governance audit schema owns the shared version carrier. Later
+; governance modules reuse this exact type and constructor.
+(deftype governance-version () (con governance-v0))
+
 (deftype risk () (con low) (con medium) (con high) (con forbidden))
 
 (deftype verdict () (con allow) (con simulate) (con ask) (con block))
+
+; Frozen D69 carriers belong to Audit so audit-entry-v2 can name them without
+; introducing a second identity in later governance rings.
+(deftype governance-assessment ()
+  (con governance-assessment-v0
+    (field version (tref governance-version))
+    (field risk (tref risk))
+    (field confidence (tref real))
+    (field reasons (tapp (tref list) (tref text)))
+    (field evidence (tref code))))
+
+(deftype governance-outcome-summary ()
+  (con governance-outcome-summary-v0
+    (field version (tref governance-version))
+    (field status (tref text))
+    (field digest (tref hash))
+    (field detail (tref text))))
 
 (deftype assessment ()
   (con assessment
@@ -35,23 +56,42 @@
 
 (deftype audit-entry ()
   (con evaluated
-    (field call (tref hash))
-    (field policy (tref hash))
-    (field assessment (tref assessment))
+    (field version (tref governance-version))
+    (field sequence (tref int))
+    (field call-id (tref hash))
+    (field policy-id (tref hash))
+    (field assessment (tref governance-assessment))
     (field verdict (tref verdict)))
   (con consented
-    (field call (tref hash))
-    (field proposal (tref hash))
+    (field version (tref governance-version))
+    (field sequence (tref int))
+    (field call-id (tref hash))
+    (field proposal-id (tref hash))
     (field decision (tref decision)))
   (con completed
-    (field call (tref hash))
+    (field version (tref governance-version))
+    (field sequence (tref int))
+    (field call-id (tref hash))
     (field branch (tref text))
-    (field outcome (tref outcome-summary))))
+    (field outcome (tref governance-outcome-summary))))
 
 (defeffect audit () (op record once ((tref audit-entry)) (ttuple)))
 
-; The audit wire value is Code built only from typed fields. The outer
-; audit-entry-v1 tag is the version boundary consumed by ET.3's hash chain.
+; The audit wire value is Code built only from typed fields. D69 adds the
+; GovernanceVersion and sequence fields incompatibly, so the outer and variant
+; tags advance to v2; audit-chain-v2 consumes this exact encoding.
+(defterm ((binding audit.version-code ()
+  (lam ((pvar version))
+    (match (var version)
+      (clause (pcon governance-v0)
+        (app (var code.form) (lit "governance-v0") (var nil))))))))
+
+(defterm ((binding governance.version-code ()
+  (lam ((pvar version))
+    (match (var version)
+      (clause (pcon governance-v0)
+        (app (var code.form) (lit "governance-v0") (var nil))))))))
+
 (defterm ((binding audit.hash-code ()
   (lam ((pvar hash))
     (app (var code.of-hash) (var hash))))))
@@ -76,6 +116,32 @@
   (lam ((pvar values))
     (app (var code.form) (lit "text-list-v1")
       (app (var list.map) (var values) (var code.of-text)))))))
+
+(defterm ((binding governance.assessment-code ()
+  (lam ((pvar value))
+    (match (var value)
+      (clause
+        (pcon governance-assessment-v0 (pvar version) (pvar risk)
+          (pvar confidence) (pvar reasons) (pvar evidence))
+        (app (var code.form) (lit "governance-assessment-v0")
+          (app (var cons) (app (var governance.version-code) (var version))
+            (app (var cons) (app (var audit.risk-code) (var risk))
+              (app (var cons) (app (var code.of-real) (var confidence))
+                (app (var cons) (app (var audit.text-list-code) (var reasons))
+                  (app (var cons) (var evidence) (var nil)))))))))))))
+
+(defterm ((binding governance.outcome-summary-code ()
+  (lam ((pvar value))
+    (match (var value)
+      (clause
+        (pcon governance-outcome-summary-v0 (pvar version) (pvar status)
+          (pvar digest) (pvar detail))
+        (app (var code.form) (lit "governance-outcome-summary-v0")
+          (app (var cons) (app (var governance.version-code) (var version))
+            (app (var cons) (app (var code.of-text) (var status))
+              (app (var cons) (app (var code.of-hash) (var digest))
+                (app (var cons) (app (var code.of-text) (var detail))
+                  (var nil))))))))))))
 
 (defterm ((binding audit.assessment-code ()
   (lam ((pvar value))
@@ -120,26 +186,52 @@
 
 (defterm ((binding audit.entry-code ()
   (lam ((pvar entry))
-    (app (var code.form) (lit "audit-entry-v1")
+    (app (var code.form) (lit "audit-entry-v2")
       (app (var cons)
         (match (var entry)
-          (clause (pcon evaluated (pvar call) (pvar policy) (pvar assessment) (pvar verdict))
-            (app (var code.form) (lit "evaluated-v1")
-              (app (var cons) (app (var audit.hash-code) (var call))
-                (app (var cons) (app (var audit.hash-code) (var policy))
-                  (app (var cons) (app (var audit.assessment-code) (var assessment))
-                    (app (var cons) (app (var audit.verdict-code) (var verdict)) (var nil)))))))
-          (clause (pcon consented (pvar call) (pvar proposal) (pvar decision))
-            (app (var code.form) (lit "consented-v1")
-              (app (var cons) (app (var audit.hash-code) (var call))
-                (app (var cons) (app (var audit.hash-code) (var proposal))
-                  (app (var cons) (app (var audit.decision-code) (var decision)) (var nil))))))
-          (clause (pcon completed (pvar call) (pvar branch) (pvar outcome))
-            (app (var code.form) (lit "completed-v1")
-              (app (var cons) (app (var audit.hash-code) (var call))
-                (app (var cons) (app (var code.of-text) (var branch))
-                  (app (var cons) (app (var audit.outcome-code) (var outcome)) (var nil)))))))
+          (clause
+            (pcon evaluated (pvar version) (pvar sequence) (pvar call) (pvar policy)
+              (pvar assessment) (pvar verdict))
+            (app (var code.form) (lit "evaluated-v2")
+              (app (var cons) (app (var governance.version-code) (var version))
+                (app (var cons) (app (var code.of-int) (var sequence))
+                  (app (var cons) (app (var audit.hash-code) (var call))
+                    (app (var cons) (app (var audit.hash-code) (var policy))
+                      (app (var cons) (app (var governance.assessment-code) (var assessment))
+                        (app (var cons) (app (var audit.verdict-code) (var verdict))
+                          (var nil)))))))))
+          (clause
+            (pcon consented (pvar version) (pvar sequence) (pvar call) (pvar proposal)
+              (pvar decision))
+            (app (var code.form) (lit "consented-v2")
+              (app (var cons) (app (var governance.version-code) (var version))
+                (app (var cons) (app (var code.of-int) (var sequence))
+                  (app (var cons) (app (var audit.hash-code) (var call))
+                    (app (var cons) (app (var audit.hash-code) (var proposal))
+                      (app (var cons) (app (var audit.decision-code) (var decision))
+                        (var nil))))))))
+          (clause
+            (pcon completed (pvar version) (pvar sequence) (pvar call) (pvar branch)
+              (pvar outcome))
+            (app (var code.form) (lit "completed-v2")
+              (app (var cons) (app (var governance.version-code) (var version))
+                (app (var cons) (app (var code.of-int) (var sequence))
+                  (app (var cons) (app (var audit.hash-code) (var call))
+                    (app (var cons) (app (var code.of-text) (var branch))
+                      (app (var cons) (app (var governance.outcome-summary-code) (var outcome))
+                        (var nil)))))))))
         (var nil)))))))
+
+; Pure sequence projection used by canonical handlers and evidence.
+(defterm ((binding audit.sequence ()
+  (lam ((pvar entry))
+    (match (var entry)
+      (clause (pcon evaluated (pwild) (pvar sequence) (pwild) (pwild) (pwild) (pwild))
+        (var sequence))
+      (clause (pcon consented (pwild) (pvar sequence) (pwild) (pwild) (pwild))
+        (var sequence))
+      (clause (pcon completed (pwild) (pvar sequence) (pwild) (pwild) (pwild))
+        (var sequence)))))))
 
 ; Hermetic handler. Entries are accumulated in occurrence order and returned
 ; with the thunk result. list.append makes the append-only order explicit.

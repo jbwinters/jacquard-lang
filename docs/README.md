@@ -37,11 +37,11 @@ project shape from file names alone.
   uncertainty wording, canonical boundaries, and explicit non-goals.
 - `effect-membranes.md`: GM.0 charter for typed governed facades, versioned
   decision artifacts, live/dry boundaries, and monotonic composition.
-- `concurrency.md`: SC.13 typed-channel interface and semantic freeze over the
-  SC.9 deterministic FIFO round-robin runtime, including exact Channel hashes,
-  capacity/backpressure, close, cancellation, fan-in, ownership, policy
-  interaction, and SC.14 acceptance traces; actors and channel runtime remain
-  deferred.
+- `concurrency.md`: SC.13 freezes the typed Channel interface and deterministic
+  semantics over the complete SC.12 scheduling stack. It publishes exact
+  identities, capacity/backpressure, close, cancellation, fan-in, ownership,
+  policy interaction, and SC.14 acceptance traces; Channel runtime and actors
+  remain deferred.
 - `warp-testing.md`: Warp test model, rows, handlers, cache, properties, and
   world lanes.
 - `errors.md`: diagnostic code catalog.
@@ -52,8 +52,8 @@ Read these together when judging whether the release candidate is credible:
 
 - `release/0.1/EVIDENCE.md`: built artifact, test inventory, commands, summary.
 - `release/0.1/CLAIMS.md`: claims mapped to proving tests/demos and caveats.
-- `release/structured-concurrency/EVIDENCE.md`: SC.13 contract evidence over the
-  implemented SC.9 lifecycle and scheduler foundation.
+- `release/structured-concurrency/EVIDENCE.md`: SC.13 Channel contract evidence
+  over the complete SC.12 scheduler stack.
 - `release/0.1/REPRO.md`: fresh-clone reproduction.
 - `release/0.1/FREEZE.md`: frozen version/hash/store/trace/CLI/error surfaces.
 - `release/0.1/GAUNTLET.md`: adversarial tests present and omitted.
@@ -113,11 +113,53 @@ Read these together when judging whether the release candidate is credible:
 
 ## Structured Concurrency Evidence
 
-- `release/structured-concurrency/EVIDENCE.md`: SC.13 typed-channel contract,
-  exact interface hashes, checker fixtures, normative traces, and checklist over
-  the implemented SC.9 scheduler foundation.
+- `release/structured-concurrency/EVIDENCE.md`: SC.13 typed-Channel contract,
+  exact interface hashes, checker fixtures, normative traces, and checklist
+  over the complete SC.12 scheduler stack.
 - `release/structured-concurrency/MANIFEST.sha256`: reconstructible complete
-  SC.13 overlay on commit `59b12eb`.
+  SC.13 overlay on exact SC.12 commit `2fc2d30`.
+
+## Governed Membranes Evidence
+
+- `release/governed-membranes/GM1-EVIDENCE.md`: GM.1 versioned ring-3 values,
+  canonical identities, pure refusal boundaries, and compatibility evidence.
+- `release/governed-membranes/GM1-MANIFEST.sha256`: reconstructible GM.1 overlay
+  on the validated ET.6 plus GM.0 dependency-integration commit.
+- `release/governed-membranes/GM2-EVIDENCE.md`: GM.2 exact Call and successor
+  Proposal identities, canonical-Code goldens, and stability/sensitivity laws.
+- `release/governed-membranes/GM2-MANIFEST.sha256`: reconstructible GM.2 overlay
+  on the validated GM.1 commit `b5587ce`.
+- `release/governed-membranes/GM3-EVIDENCE.md`: GM.3 validated live, dry,
+  stored, and bound policy boundaries plus exhaustive verdict-law evidence.
+- `release/governed-membranes/GM3-MANIFEST.sha256`: reconstructible GM.3 overlay
+  on the validated GM.2 plus ET.3 integration commit `3e78a95`.
+- `release/governed-membranes/GM4-EVIDENCE.md`: GM.4 hermetic Warp laws,
+  exhaustive finite supports, exact numeric edges, cache behavior, and mutation
+  detection evidence.
+- `release/governed-membranes/GM4-MANIFEST.sha256`: reconstructible GM.4 overlay
+  on validated GM.3 base `f813d11`.
+- `release/governed-membranes/GM5-EVIDENCE.md`: GM.5 released Judge identity,
+  validated deterministic handlers, explicit model `Infer` row, and refusal
+  evidence.
+- `release/governed-membranes/GM5-MANIFEST.sha256`: reconstructible GM.5 overlay
+  on the validated GM.1 plus ET.3 integration base `94b5082`; the GM.1 evidence
+  set remains historical.
+- `release/governed-membranes/GM6-EVIDENCE.md`: GM.6 world-free dry-gate,
+  exact audit sequencing, simulator/refusal matrix, and native parity evidence.
+- `release/governed-membranes/GM6-MANIFEST.sha256`: reconstructible GM.6 overlay
+  on the validated GM.3 plus GM.5 integration stack.
+- `release/governed-membranes/GM9-EVIDENCE.md`: GM.9 typed Workspace calls,
+  safe secret references, outcome summaries, and authority-order evidence.
+- `release/governed-membranes/GM9-MANIFEST.sha256`: reconstructible GM.9 overlay
+  on the validated identity, Judge, and secret integration stack.
+
+## Structured Concurrency Evidence
+
+- `release/structured-concurrency/EVIDENCE.md`: SC.13 typed-Channel contract
+  evidence over SC.12 exhaustive and seeded scheduling, record/replay, and the
+  validated SC.9 scheduler.
+- `release/structured-concurrency/MANIFEST.sha256`: reconstructible complete
+  SC.13 overlay on exact SC.12 commit `2fc2d30`.
 
 ## Governed Membranes Evidence
 

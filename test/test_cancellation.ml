@@ -135,6 +135,42 @@ let test_public_delivery_destroys_suspended_resume_once () =
   Alcotest.(check (list int)) "completed delivery destroys nothing" [ 21; 23 ] !dropped;
   Structured_scope.close scope ~reason:Structured_scope.Normal ~escaping:[] ~drop:ignore |> ok
 
+let test_raising_drop_keeps_immediate_cancellation_terminal () =
+  let scope, caller = Structured_scope.create ~body_resume:0 |> ok in
+  let target = Structured_scope.spawn scope ~resume:1 |> ok in
+  ignore (Structured_scope.checkout scope target |> ok);
+  Structured_scope.suspend_yield scope target ~resume:80 |> ok;
+  ignore (Structured_scope.checkout scope caller |> ok);
+  let cleanup_failure = Failure "cancel destruction failed" in
+  let drop_calls = ref [] in
+  (match
+     Structured_scope.cancel scope ~caller ~target ~resume:81 ~drop:(fun resume ->
+         drop_calls := resume :: !drop_calls;
+         raise cleanup_failure)
+   with
+  | exception caught when caught == cleanup_failure -> ()
+  | exception exn ->
+      Alcotest.failf "wrong cancellation cleanup exception: %s" (Printexc.to_string exn)
+  | Ok _ | Error _ -> Alcotest.fail "raising cancellation cleanup was swallowed");
+  let target_view = view scope target in
+  Alcotest.(check bool)
+    "target remains terminal after raising drop" true
+    (target_view.lifecycle = Concurrency_contract.Cancelled_state
+    && target_view.result = Some Concurrency_contract.Cancelled);
+  Alcotest.(check bool) "target resume is not re-owned" false target_view.owns_resume;
+  Alcotest.(check (list int)) "transferred resume was offered once" [ 80 ] !drop_calls;
+  Alcotest.(check int)
+    "scope owns no resume after failed destruction" 0 (Structured_scope.metrics scope).owned_resumes;
+  let duplicate_drop_calls = ref 0 in
+  let awakened =
+    Structured_scope.deliver_cancel scope ~point:Concurrency_contract.Yield target ~drop:(fun _ ->
+        incr duplicate_drop_calls)
+    |> ok
+  in
+  Alcotest.(check int) "duplicate delivery wakes nobody" 0 (List.length awakened);
+  Alcotest.(check int) "duplicate delivery does not re-drop" 0 !duplicate_drop_calls;
+  Structured_scope.close scope ~reason:Structured_scope.Normal ~escaping:[] ~drop:ignore |> ok
+
 let test_cancelled_target_wakes_registered_waiters_in_order () =
   let scope, target = Structured_scope.create ~body_resume:0 |> ok in
   let first = Structured_scope.spawn scope ~resume:1 |> ok in
@@ -329,6 +365,7 @@ let run () =
   test_routed_effect_preemption_and_fault_result ();
   test_spawn_action_is_not_created_after_delivery ();
   test_public_delivery_destroys_suspended_resume_once ();
+  test_raising_drop_keeps_immediate_cancellation_terminal ();
   test_cancelled_target_wakes_registered_waiters_in_order ();
   test_duplicate_completed_and_self_cancel ();
   test_suspended_target_and_precancelled_caller ();

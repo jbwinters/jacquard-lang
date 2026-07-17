@@ -11,7 +11,7 @@ including for a reserved taxonomy name.
 
 ## Released identity ledger
 
-These are the exact fifteen released blessed identities. Review tooling must
+These are the exact seventeen implemented blessed identities. Review tooling must
 not approve an abbreviation or a name-only match.
 
 | effect | exact `HASH_V0` interface identity |
@@ -27,20 +27,22 @@ not approve an abbreviation or a name-only match.
 | `Clock` | `9041c22386c41541b6b6818bcb26f1aeb02ae8f0dce3fedbf5f411e4bff9eecb` |
 | `Fs` | `8ec13169c7181851364e55353232af8e3c7f5ee4a010fa3067fcf2058dd5ed84` |
 | `Net` | `be1aad7345c6215f227e63df6c7d05874a464f207599d4f5b85de8b0a6675b45` |
+| `Workspace` | `d5831f495fdb26e05d53d886786f07230f7bb808ac4933ab32e0a9238c89f9d0` |
 | `Infer` | `324b8f59279db3cabbfaaba430168717057cea8fc1435a11a1a9106e3e6fb4d8` |
 | `Approval` | `362425a29077a7efbcc37047182e579f46199a50473045eb4126a917dfc2a196` |
-| `Audit` | `2c148fbc2e26bdc6f01279a8bf176f54d5798536e1f96805aa4f7c7a57e67632` |
+| `Audit` | `40bc4343fb2b4bcc18b18f63f7bb68675b746751bb40b876072e622046a81372` |
 | `Secret` | `6d092eccc3c9858a2a95120da5a011964cbb3ad76968e11c1cbb062c119fbb31` |
+| `Judge` | `9b677b5e2c3ec8521c5d5dfac321ae361a959565e1cbf082fec4512199977354` |
 
-Two schema-reserved names now have published identities:
+Two schema-reserved names also have published identities:
 
 | effect | exact `HASH_V0` interface identity | shipped boundary |
 |---|---|---|
 | `Async` | `4ff8ce05ab09968163492b3be40fc91381b47dee5fb4b2980f9416d50f38e66f` | interpreted structured scheduler from SC.9 |
 | `Channel` | `bf9a334188ac13495eeb070fdc215d51763d9761b4775c98c61f44ebb1b03756` | SC.13 contract only; runtime deferred to SC.14 |
 
-The eight remaining blessed names are **reserved/unimplemented**: `Choose`,
-`Env`, `Pg`, `Blob`, `Serve`, `Crypto`, `Log`, and `Judge`. They have schemas
+The seven remaining blessed names are **reserved/unimplemented**: `Choose`,
+`Env`, `Pg`, `Blob`, `Serve`, `Crypto`, and `Log`. They have schemas
 and a `first-release` compatibility policy, but no shipped interface hash,
 handler, grant, or availability promise.
 
@@ -107,5 +109,6 @@ an authority label; only the resolved row position of a typed arrow does.
   `Assessment.confidence` cannot fabricate consent.
 - The release implements finite discrete uncertainty only; it does not provide
   continuous distributions or verified model truth.
-- Reserved effects are compatibility vocabulary, not implemented product
-  surfaces or roadmap commitments.
+- A reserved schema alone is compatibility vocabulary, not an implementation or
+  roadmap commitment. Async is implemented; Channel has a published SC.13
+  contract but no runtime until SC.14.

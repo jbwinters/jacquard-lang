@@ -12,6 +12,8 @@ let error_text = function
       Alcotest.failf "expected one scope-policy diagnostic, got %d" (List.length diagnostics)
   | Ok _ -> Alcotest.fail "scope-policy operation unexpectedly succeeded"
 
+let trace scope task = Structured_scope.id scope task |> ok |> Concurrency_contract.trace_task_id
+
 let finish_done scope child value =
   ignore (Structured_scope.checkout scope child |> ok);
   ignore (Structured_scope.complete scope child value |> ok)
@@ -79,6 +81,108 @@ let test_fail_fast_cancels_in_input_order () =
     "first failure has no partial results" true
     (Scope_policy.finish policy
    = Ok (Scope_policy.Fail_fast_result (Concurrency_contract.Failed "first failure")));
+  close scope
+
+let test_fail_fast_retains_awakened_waiters () =
+  let scope, _ = Structured_scope.create ~body_resume:0 |> ok in
+  let failed = Structured_scope.spawn scope ~resume:1 |> ok in
+  let target = Structured_scope.spawn scope ~resume:2 |> ok in
+  let first_waiter = Structured_scope.spawn scope ~resume:3 |> ok in
+  let second_waiter = Structured_scope.spawn scope ~resume:4 |> ok in
+  let policy = Scope_policy.create scope ~children:[ failed; target ] |> ok in
+  ignore (Structured_scope.checkout scope target |> ok);
+  Structured_scope.suspend_yield scope target ~resume:21 |> ok;
+  ignore (Structured_scope.checkout scope first_waiter |> ok);
+  (match Structured_scope.await scope ~waiter:first_waiter ~target ~resume:31 |> ok with
+  | Scheduler_core.Await_suspended, [] -> ()
+  | _ -> Alcotest.fail "first policy waiter did not suspend");
+  ignore (Structured_scope.checkout scope second_waiter |> ok);
+  (match Structured_scope.await scope ~waiter:second_waiter ~target ~resume:41 |> ok with
+  | Scheduler_core.Await_suspended, [] -> ()
+  | _ -> Alcotest.fail "second policy waiter did not suspend");
+  finish_failed scope failed "wake waiters";
+  let dropped = ref [] in
+  Scope_policy.record_terminal policy ~decision:0 failed ~drop:(fun resume ->
+      dropped := resume :: !dropped)
+  |> ok;
+  let awakened = Scope_policy.take_awakened policy in
+  Alcotest.(check (list string))
+    "fail-fast retains waiter registration order"
+    [ trace scope first_waiter; trace scope second_waiter ]
+    (List.map (trace scope) awakened);
+  Alcotest.(check (list int)) "cancelled target resume was destroyed" [ 21 ] !dropped;
+  List.iter
+    (fun waiter ->
+      let waiter_view = Structured_scope.inspect scope waiter |> ok in
+      Alcotest.(check bool)
+        "retained waiter is runnable with its resume" true
+        (waiter_view.lifecycle = Concurrency_contract.Runnable && waiter_view.owns_resume))
+    awakened;
+  Alcotest.(check int)
+    "awakened handoff drains exactly once" 0
+    (List.length (Scope_policy.take_awakened policy));
+  Scope_policy.record_terminal policy ~decision:1 target ~drop:ignore |> ok;
+  close scope
+
+let test_fail_fast_retains_same_delivery_waiter_when_drop_raises () =
+  let scope, _ = Structured_scope.create ~body_resume:0 |> ok in
+  let failed = Structured_scope.spawn scope ~resume:1 |> ok in
+  let target = Structured_scope.spawn scope ~resume:2 |> ok in
+  let waiter = Structured_scope.spawn scope ~resume:3 |> ok in
+  let policy = Scope_policy.create scope ~children:[ failed; target ] |> ok in
+  ignore (Structured_scope.checkout scope target |> ok);
+  Structured_scope.suspend_yield scope target ~resume:21 |> ok;
+  ignore (Structured_scope.checkout scope waiter |> ok);
+  (match Structured_scope.await scope ~waiter ~target ~resume:31 |> ok with
+  | Scheduler_core.Await_suspended, [] -> ()
+  | _ -> Alcotest.fail "same-delivery policy waiter did not suspend");
+  finish_failed scope failed "wake waiter before raising";
+  let dropped = ref [] in
+  let drop_exception = Failure "same delivery drop failed" in
+  let backtraces_were_enabled = Printexc.backtrace_status () in
+  Printexc.record_backtrace true;
+  Fun.protect
+    ~finally:(fun () -> Printexc.record_backtrace backtraces_were_enabled)
+    (fun () ->
+      let drop_backtrace =
+        match raise drop_exception with
+        | exception caught when caught == drop_exception -> Printexc.get_raw_backtrace ()
+        | _ -> Alcotest.fail "failed to capture the physical drop exception backtrace"
+      in
+      match
+        Scope_policy.record_terminal policy ~decision:0 failed ~drop:(fun resume ->
+            dropped := resume :: !dropped;
+            Printexc.raise_with_backtrace drop_exception drop_backtrace)
+      with
+      | exception caught when caught == drop_exception ->
+          let original = Printexc.raw_backtrace_to_string drop_backtrace in
+          let reraised = Printexc.raw_backtrace_to_string (Printexc.get_raw_backtrace ()) in
+          Alcotest.(check bool)
+            "same-delivery drop keeps its original backtrace" true
+            (String.starts_with ~prefix:original reraised)
+      | exception exn ->
+          Alcotest.failf "policy replaced the physical drop exception: %s" (Printexc.to_string exn)
+      | Ok () | Error _ -> Alcotest.fail "policy swallowed the physical drop exception");
+  Alcotest.(check (list int)) "raising drop receives the target resume once" [ 21 ] !dropped;
+  let awakened = Scope_policy.take_awakened policy in
+  Alcotest.(check (list string))
+    "same-delivery waiter remains buffered"
+    [ trace scope waiter ]
+    (List.map (trace scope) awakened);
+  let waiter_view = Structured_scope.inspect scope waiter |> ok in
+  Alcotest.(check bool)
+    "same-delivery waiter is runnable with its resume" true
+    (waiter_view.lifecycle = Concurrency_contract.Runnable && waiter_view.owns_resume);
+  Alcotest.(check int)
+    "same-delivery handoff drains exactly once" 0
+    (List.length (Scope_policy.take_awakened policy));
+  let duplicate =
+    Structured_scope.deliver_cancel scope ~point:Concurrency_contract.Yield target ~drop:(fun _ ->
+        Alcotest.fail "duplicate cancellation repeated the drop")
+    |> ok
+  in
+  Alcotest.(check int) "duplicate cancellation has no awakened handoff" 0 (List.length duplicate);
+  Scope_policy.record_terminal policy ~decision:1 target ~drop:ignore |> ok;
   close scope
 
 let test_collect_mixed_results_in_input_order () =
@@ -204,11 +308,16 @@ let test_cancellation_cleanup_survives_drop_failure () =
   let first = Structured_scope.spawn scope ~resume:1 |> ok in
   let left = Structured_scope.spawn scope ~resume:2 |> ok in
   let right = Structured_scope.spawn scope ~resume:3 |> ok in
+  let right_waiter = Structured_scope.spawn scope ~resume:4 |> ok in
   let policy = Scope_policy.create scope ~children:[ first; left; right ] |> ok in
   ignore (Structured_scope.checkout scope left |> ok);
   Structured_scope.suspend_yield scope left ~resume:21 |> ok;
   ignore (Structured_scope.checkout scope right |> ok);
   Structured_scope.suspend_yield scope right ~resume:31 |> ok;
+  ignore (Structured_scope.checkout scope right_waiter |> ok);
+  (match Structured_scope.await scope ~waiter:right_waiter ~target:right ~resume:41 |> ok with
+  | Scheduler_core.Await_suspended, [] -> ()
+  | _ -> Alcotest.fail "waiter on later sibling did not suspend");
   finish_failed scope first "first failure";
   let dropped = ref [] in
   Alcotest.check_raises "first drop failure is re-raised after cleanup" (Failure "drop 21")
@@ -219,6 +328,10 @@ let test_cancellation_cleanup_survives_drop_failure () =
              if resume = 21 then failwith "drop 21")));
   Alcotest.(check (list int))
     "later siblings are still cancelled after a drop failure" [ 21; 31 ] !dropped;
+  Alcotest.(check (list string))
+    "later awakened waiters survive an earlier drop failure"
+    [ trace scope right_waiter ]
+    (List.map (trace scope) (Scope_policy.take_awakened policy));
   Scope_policy.record_terminal policy ~decision:5 left ~drop:ignore |> ok;
   Scope_policy.record_terminal policy ~decision:6 right ~drop:ignore |> ok;
   Alcotest.(check bool)
@@ -413,6 +526,8 @@ let prop_fail_fast_agrees_with_frozen_first_failure =
 let run () =
   test_zero_and_one_default ();
   test_fail_fast_cancels_in_input_order ();
+  test_fail_fast_retains_awakened_waiters ();
+  test_fail_fast_retains_same_delivery_waiter_when_drop_raises ();
   test_collect_mixed_results_in_input_order ();
   test_scheduler_decision_selects_first_failure ();
   test_nested_policies ();

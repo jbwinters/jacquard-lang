@@ -12,6 +12,10 @@ val make_ctx : Store.t -> ctx
 val store : ctx -> Store.t
 (** [store ctx] returns the backing store used for declaration and name lookup. *)
 
+val fresh_audit_run_id : ctx -> Hash.t
+(** [fresh_audit_run_id ctx] mints a deterministic identity in [ctx]'s private Audit owner
+    namespace. It is exposed only to trusted prelude wiring. *)
+
 val with_scheduler_task_run :
   Task_capability.t -> ctx -> run:Concurrency_owner.t -> scope_path:int list -> (unit -> 'a) -> 'a
 (** Runtime-private bridge binding Task validation to one fresh scheduler run and exact scope. The

@@ -132,7 +132,7 @@ also emits E0817; consuming the captured resumption twice emits E0816.
 | E0905 | exhaustive verification budget exceeded | a property over `uniform-int(1, 1000000)` under `jacquard test --exhaustive` |
 | E0906 | a once continuation was resumed more than once | applying the same once resumption twice |
 | E0907 | a Task or ChannelHandle carrier is private, malformed, foreign to the run, escaped, stale, or outside its exact structured scope | returning/storing a Task or ChannelHandle beyond `async.scope`, constructing its private carrier by hash, reusing it after its creating scope closes or in another run, or using a parent/descendant/foreign handle |
-| E0908 | a deterministic scheduler or same-scope policy/channel operation is illegal for its lifecycle, decision order, registration, continuation ownership, deadlock state, or configured positive bound | checking out a suspended task, repeating/decreasing a decision number, exceeding a task/decision/channel-ID bound, observing a terminal child twice, completing a continuation twice, or leaving every live task channel-blocked with no possible transition under either policy |
+| E0908 | a deterministic scheduler, schedule trace, trace I/O, or same-scope policy operation is illegal for its lifecycle, decision order, registration, continuation ownership, configured positive/transport bound, or strict-replay contract | checking out a suspended task, exceeding a task/decision/input bound, observing or scheduling a terminal child twice, reading/writing an unavailable trace path, parsing an unversioned/malformed trace, or replaying a missing, extra, reordered, impossible, queue-drifted, or operation-drifted event |
 
 ## Warp (E10xx)
 
@@ -214,16 +214,17 @@ isolation; references to them from later islands require strict installation fir
 | code | meaning | example |
 |------|---------|---------|
 | E1301 | malformed or noncanonical Audit chain carrier | a blank line, alternate whitespace, or missing final LF |
-| E1302 | unsupported chain version or malformed released AuditEntry | `audit-chain-v2` or a non-v1 entry shape |
+| E1302 | unsupported chain version or malformed released AuditEntry | `audit-chain-v3` or a non-v2 entry shape |
 | E1303 | broken predecessor linkage | reordered, removed, or duplicated records |
 | E1304 | stored digest does not match the predecessor and entry bytes | altering one entry byte without recomputing the record digest |
 | E1305 | reconstructed chain head differs from the independently published head | removing the final record or appending from a stale head |
 | E1306 | Audit chain I/O failure, size refusal, or concurrent file change | an unreadable/over-limit entry, a log truncated while being read, or its pathname replaced during append |
 | E1307 | malformed CLI Audit head | `--head beef` instead of 64 lowercase hexadecimal digits |
+| E1308 | noncontiguous AuditEntry sequence | a duplicate, skipped, decreasing, or negative sequence position |
 
 `jacquard governance verify-log LOG --head HASH` verifies offline and fails
-closed. It accepts only LF-terminated canonical `audit-chain-v1` records, checks
-every predecessor and digest in order, then compares the reconstruction with the
+closed. It accepts only LF-terminated canonical `audit-chain-v2` records, checks
+every predecessor, digest, and exact sequence `0, 1, 2, ...` in order, then compares the reconstruction with the
 separately supplied published head. Malformed input returns diagnostics; it does
 not raise an exception.
 

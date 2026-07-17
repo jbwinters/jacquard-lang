@@ -34,6 +34,7 @@ stable while only the public name index changes.
 | code.of-text, code.of-hash, code.to-text, code.render, code.diff | 1/1/1/1/2 | yes | ET.2 adds typed scalar construction and the deterministic compact renderer; diff renders smallest disagreeing subtrees over the same ported inline printer |
 | code.hash | 1 | yes | ET.6 applies HASH_V0 to the same metadata-erased canonical compact Code bytes as `code.render`; interpreter/native parity is pinned by g37 |
 | hash.parse, hash.to-text | 1/1 | yes | ET.2 opaque HASH_V0 boundary; parsing accepts only 64 lowercase hexadecimal digits and native values use the existing 32-byte `JQ_HASH` carrier |
+| governance.effect-order-key marker (`governance.effect-order-key-v0`) | 1 | yes | GM.9 pure frozen-taxonomy ordering; all 26 catalog positions, including reserved gaps, match `Effect_registry.catalog`; unknown hashes sort deterministically afterwards; g38 reaches authority validation on both engines |
 | eval-code | - | refused for good | interpreter tier only |
 | debug.inspect | 1 | yes | `jq_show` parity; `JQ_SECRET` always yields the fixed `<secret redacted>` marker |
 | pmf, support | 2/1 | yes | task 71 (the enum handler reaches them); name-recognized dist cons, show-based pmf equality, interpreter's exact error texts |
