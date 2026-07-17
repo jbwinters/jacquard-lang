@@ -214,16 +214,20 @@ let close scope ~reason:_ ~escaping ~drop =
   match diagnostics with [] -> Ok () | _ -> Error diagnostics
 
 let protect scope ~drop ~escapes body =
-  try
-    match body scope with
-    | Ok value ->
-        Result.map (fun () -> value) (close scope ~reason:Normal ~escaping:(escapes value) ~drop)
-    | Error diagnostics ->
-        ignore (close scope ~reason:Aborted ~escaping:[] ~drop);
-        Error diagnostics
-  with exn ->
-    ignore (close scope ~reason:Raised ~escaping:[] ~drop);
-    raise exn
+  match body scope with
+  | Ok value ->
+      Result.map (fun () -> value) (close scope ~reason:Normal ~escaping:(escapes value) ~drop)
+  | Error diagnostics ->
+      (match close scope ~reason:Aborted ~escaping:[] ~drop with
+      | Ok () | Error _ -> ()
+      | exception _ -> ());
+      Error diagnostics
+  | exception exn ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      (match close scope ~reason:Raised ~escaping:[] ~drop with
+      | Ok () | Error _ -> ()
+      | exception _ -> ());
+      Printexc.raise_with_backtrace exn backtrace
 
 let add_metrics left right =
   {

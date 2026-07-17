@@ -81,11 +81,19 @@ let cancel_unfinished controller ~drop =
   let diagnostics = ref [] in
   let first_exception = ref None in
   let awakened = ref [] in
+  let remember_exception exn backtrace =
+    if Option.is_none !first_exception then first_exception := Some (exn, backtrace)
+  in
+  let guarded_drop resume =
+    match drop resume with
+    | () -> ()
+    | exception exn -> remember_exception exn (Printexc.get_raw_backtrace ())
+  in
   let attempt operation =
     match operation () with
     | Ok woken -> awakened := !awakened @ woken
     | Error errors -> diagnostics := !diagnostics @ errors
-    | exception exn -> if Option.is_none !first_exception then first_exception := Some exn
+    | exception exn -> remember_exception exn (Printexc.get_raw_backtrace ())
   in
   let cancel child =
     let* view = Structured_scope.inspect controller.scope child.handle in
@@ -97,16 +105,13 @@ let cancel_unfinished controller ~drop =
         | None -> Ok []
         | Some suspension ->
             Structured_scope.deliver_cancel controller.scope ~point:(cancellation_point suspension)
-              child.handle ~drop)
+              child.handle ~drop:guarded_drop)
   in
   List.iter (fun child -> attempt (fun () -> cancel child)) controller.children;
+  controller.awakened <- controller.awakened @ !awakened;
   match !first_exception with
-  | Some exn -> raise exn
-  | None ->
-      if !diagnostics = [] then (
-        controller.awakened <- controller.awakened @ !awakened;
-        Ok ())
-      else Error !diagnostics
+  | Some (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace
+  | None -> if !diagnostics = [] then Ok () else Error !diagnostics
 
 let valid_observation controller decision ordinal =
   if decision < 0 then diagnostic "decision sequence must be non-negative"
