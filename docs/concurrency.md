@@ -1,9 +1,10 @@
 # Structured Concurrency Contract
 
-Status: SC.3 Task value and Async declaration boundary on the SC.0 interface
-and invariant freeze (D46-D50), July 2026. This document is authoritative for
-C1. Task values and the four once operations are represented; scheduler policy,
-scope execution, lifecycle state, and an Async root handler remain future work.
+Status: SC.5 policy-independent lifecycle core on the SC.3 Task value and Async
+declaration boundary, July 2026. This document is authoritative for C1. Task
+values, the four once operations, and scheduler state transitions are
+represented; scheduler policy, scope execution, and an Async root handler remain
+future work.
 
 Structured concurrency is an effect interpreted by a scheduler handler. The
 same program can therefore run under deterministic, seeded-random, exhaustive,
@@ -167,6 +168,22 @@ failures, never a host deadlock. The exact templates are
 `async deadlock: await cycle ID -> ... -> ID`, using the stable ID encoding
 above. Cross-scope or stale awaits are E0907 instead.
 
+The SC.5 scheduler core implements this lifecycle as a policy-independent state
+machine. Runnable and suspended tasks may own at most one opaque affine resume
+token; destructive checkout transfers that ownership to the handler, and
+yield/await suspension returns exactly one token. Terminal transitions clear
+the token, retain one immutable `TaskResult`, remove the task's await edge, and
+wake registered waiters in registration order. Scope cleanup clears every edge
+and transfers any still-owned tokens for explicit destruction. Illegal state or
+ownership transitions return E0908 diagnostics and never surface user-caused
+OCaml exceptions. The core reports runnable task IDs but contains no runnable
+queue, scheduling policy, host thread, host I/O, or root Async handler.
+Cycle failure terminalizes every member and drops every member resume before
+reporting wakeups, so only live external waiters can enter the runnable output.
+Those external wakeups are grouped by cycle discovery order, with registration
+order preserved within each member; cancelled or otherwise terminal waiters are
+removed before the groups are emitted.
+
 ## 3. Scope APIs and failure shapes
 
 The general handler and homogeneous convenience APIs are frozen as:
@@ -240,9 +257,9 @@ The corresponding compiled OCaml contract is
 types, pinned identities, task-path validation, and pure lifecycle,
 waiter-wakeup, completion/failure-ordering, deadlock-cycle, and queue-order
 relations. Task 127 / SC.3 installs the exact declarations and adds an inert
-run/scope-local Task carrier in both runtime representations. It deliberately
-does not implement the C1 scheduler, scopes, lifecycle transitions, or a root
-handler.
+run/scope-local Task carrier in both runtime representations. SC.5 adds the
+policy-independent lifecycle engine; runnable-queue policy, executable scopes,
+effect routing, and a root handler remain separate work.
 
 ## 6. Interactions and exclusions
 

@@ -203,7 +203,7 @@ claim.
 | `opam exec -- dune runtest --force` | exit 0; compiled Alcotest inventory is exactly 554 cases |
 | `opam exec -- dune fmt` | exit 0; no task-file byte changes |
 | `cd _build/default/test && ./test_jacquard.exe test surface-twins --compact --color=never` | exit 0; exactly 5 selected cases pass over 24 twin pairs |
-| `opam exec -- dune runtest test/docs-doctest --force` | exit 0; exactly 23 named doctests pass |
+| `opam exec -- dune runtest test/docs-doctest --force` | exit 0; exactly 25 named doctests pass |
 | `JACQUARD_PRELUDE=$PWD/prelude opam exec -- dune exec jac -- run demos/basics/m1-fact.jac` | exit 0; stdout is exactly `120` |
 | `opam exec -- dune build @doc` | exit 0 |
 | `git -c core.whitespace=trailing-space,space-before-tab diff --check` | exit 0 |
