@@ -1,7 +1,7 @@
 # Effect-taxonomy ET.5-ET.8 + SC.0-SC.14 + SC.16 + GM.0-GM.6 + GM.9 reconstructible integration overlay
 # Base commit: 9b402ae
 # Attestation manifests exclude themselves (and successor manifests) to avoid self/cross-hashes.
-dfc81aec5032df031a29e73a601eeb604587a55648059f6106c655fd8082af79  README.md
+7af107b123f186462ddc1dac936fd31204ce41b2baad1034eea1dc63dd0b1a6d  README.md
 7ff4f644b6e95a057ce7d874ee9b774d7dcf17ca9758df8570f1fd26e307fb84  bin/main.ml
 8b21a691daf7f20b3bbc91edd102d3fe205c51652793d8781a7f5e11f5f41525  corpus/channel/README.md
 691f852482a0d69742c0ecf0cbb283fcf2dd6367117089acec306f19385713a2  corpus/channel/buffered-v1.trace
