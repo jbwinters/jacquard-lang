@@ -2,8 +2,8 @@
 # Base commit: 404147e56a9e8b6bbec63e19748389d499d17673
 # Attestation manifests exclude themselves (and successor manifests) to avoid self/cross-hashes.
 0937ad41b14c0badcd35f147c83b8a950c43c45b8fa0f373f78b28abb5cb466d  README.md
-9f785812380a624bbf179d67dc1fa0d4d4494672a4e019e7dac7c8de65597639  docs/README.md
-7a785b2924e5c56dd89dfb80a781639a924fd329dca05fcd586ebdf155e15de9  docs/concurrency.md
+df1be900aa21d0676faf329b29030225fec33764dfd3a6c84a91188d6abff0b0  docs/README.md
+8752bb0d8e6365178fc280b74df17b8938dfea7b145c751ba0b6fd4308b4dc50  docs/concurrency.md
 73fe389684cc04c3ad5701ae063f8a016a05605a9561a1f4bf6bccbf54f98ba1  docs/release/dx-jac-export/EVIDENCE.md
 615ab98cf841a55ee212d09de84319a96feeca7bc7af5ca0aafbbaa21f54776c  docs/release/effect-linearity/EVIDENCE.md
 4df855abf63c833603df2e7289248464c7b6cd4930b1dc7e80a82a3a150819e5  docs/release/structured-concurrency/EVIDENCE.md
