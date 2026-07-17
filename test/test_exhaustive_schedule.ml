@@ -76,6 +76,11 @@ let test_hand_counted_schedule_trees () =
     Channel_contract.channel_operation_hashes
     |> List.map (fun (_, encoded) -> Option.get (Hash.of_hex encoded))
   in
+  let channel_hash name = List.assoc name Channel_contract.channel_operation_hashes in
+  let required_channel_hashes =
+    [ channel_hash "channel.open"; channel_hash "channel.send"; channel_hash "channel.recv" ]
+    |> List.sort String.compare
+  in
   let is_channel_hash hash = List.exists (Hash.equal hash) channel_hashes in
   List.iter
     (fun world ->
@@ -94,9 +99,9 @@ let test_hand_counted_schedule_trees () =
               Some hash
           | Schedule_trace.Create _ | Schedule_trace.Decide _ -> None)
       in
-      Alcotest.(check int)
-        "every exhaustive world executes open/send/recv exactly once" 3
-        (List.length channel_decisions);
+      Alcotest.(check (list string))
+        "every exhaustive world executes exactly one open, send, and recv" required_channel_hashes
+        (channel_decisions |> List.map Hash.to_hex |> List.sort String.compare);
       match
         Round_robin.run_expr_outcome_scheduled ctx ~policy:Concurrency_contract.Collect
           ~allow_routed:false ~mode:(Round_robin.Replay_schedule world.schedule)

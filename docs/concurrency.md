@@ -757,7 +757,7 @@ makes this routing visible instead of silently pretending that `async.scope`
 discharged a second effect.
 
 The element type is invariantly shared by handle, send argument, and receive
-result. This negative checker fixture must fail before any runtime exists:
+result. This negative checker fixture must fail before runtime execution:
 
 ```jacquard doctest=concurrency-channel-type-mismatch mode=check fixture=concurrency-channel-type-mismatch.jac stdout=empty stderr=concurrency-channel-type-mismatch.stderr exit=1
 type ChannelHandle a = | ChannelOpaque
@@ -883,8 +883,8 @@ does not roll it back.
 
 Every successful open creates a private ChannelId `(scope-path,
 zero-based-successful-open-index)`. Invalid capacity consumes no index. IDs are
-trace/diagnostic data only and have no Jacquard `Show`; SC.14 must use the same
-native-domain validation as TaskId and report internal exhaustion as E0908
+trace/diagnostic data only and have no Jacquard `Show`; SC.14 uses the same
+native-domain validation as TaskId and reports internal exhaustion as E0908
 before allocation.
 
 A handle carries an unforgeable evaluator-run owner and its exact creating

@@ -574,7 +574,7 @@ compiled case is named `SC.14 Channel interface identity`:
 The positive fixture pins rows for open/send/recv/close and proves Async's
 existing shared child-row law produces `{Async, Channel}` for a spawned sender.
 The negative fixture rejects sending `Text` through `ChannelHandle Int` with
-E0804 before a runtime exists.
+E0804 before runtime execution.
 
 The SC.14 routing boundary is also frozen: only the exact Channel whole/member
 identities are admitted by the default interpreted scheduler, never by
