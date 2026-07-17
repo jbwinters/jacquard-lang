@@ -174,6 +174,14 @@ idempotent. This is continuation-memory cleanup, not an automatic external
 resource finalizer; acquire/release handlers remain required around suspended
 resources.
 
+Cleanup exception precedence is deterministic. Every still-owned resume is
+offered to the destruction callback even if an earlier callback raises. A
+cleanup exception propagates after a normal successful body. An original
+result-level diagnostic takes precedence over cleanup exceptions, and an
+original host exception is re-raised after cleanup with its raw backtrace
+preserved as the prefix of any OCaml re-raise frames. Focused regressions pin
+all three outcomes and the all-drops-attempted law.
+
 The exit guard rejects returned or stored handles whose creation path is the
 closing scope or any descendant. A nested close may still observe a valid
 enclosing-scope handle. `Eval.reject_task_escape` walks the full reachable
