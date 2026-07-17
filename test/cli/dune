@@ -13,4 +13,5 @@
   ../once_interpreter_probe.exe
   ../gen_once_hostile.exe
   (source_tree ../native-parallel)
-  (source_tree ../../scripts)))
+  (source_tree ../../scripts)
+  governance-gate-dry-laws.jqd))
