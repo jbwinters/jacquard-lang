@@ -190,7 +190,7 @@ git diff --exit-code
 opam exec -- dune build @doc
 ```
 
-Expected results are zero exits, 674 compiled Alcotest/QCheck cases, 36 cram
+Expected results are zero exits, 675 compiled Alcotest/QCheck cases, 36 cram
 transcripts, and 25 doctest examples across 8 documents.
 
 Scheduling policy, executable scopes, effect routing, and the root handler
