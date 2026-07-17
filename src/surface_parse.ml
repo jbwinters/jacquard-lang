@@ -2437,7 +2437,7 @@ type depth_work =
 (* Recursive descent alone is not a structural bound: postfix calls and pipes are parsed by
    iterative loops into left-deep trees. Check the completed syntax tree with an explicit worklist
    before the recursive trivia and lowering consumers see it. *)
-let structural_depth_violation (tops : Surface_ast.top list) =
+let structural_depth_violation (top : Surface_ast.top) =
   let work = ref [] in
   let violation = ref None in
   let push_expr depth expression = work := Depth_expr (depth, expression) :: !work in
@@ -2463,7 +2463,7 @@ let structural_depth_violation (tops : Surface_ast.top list) =
     | TopExpr expression -> push_expr 1 expression
     | RawTop _ | TopHole _ -> ()
   in
-  List.iter push_top tops;
+  push_top top;
   while Option.is_none !violation && !work <> [] do
     match !work with
     | [] -> ()
@@ -2548,6 +2548,15 @@ let structural_depth_violation (tops : Surface_ast.top list) =
           end
   done;
   !violation
+
+let quarantine_overdeep_top state span (top : Surface_ast.top) =
+  let id = state.next_hole in
+  state.next_hole <- id + 1;
+  let meta = match span with Some span -> Meta.with_span span Meta.empty | None -> top.meta in
+  let meta =
+    meta |> Meta.with_surface_form "depth-quarantine" |> Meta.with_surface_hole (string_of_int id)
+  in
+  Surface_ast.{ it = TopHole id; meta }
 
 let signature_interruption state token message = report_code state token "E1224" message
 
@@ -3199,23 +3208,21 @@ let parse_tokens ~source tokens =
       signature_interruption state (current state)
         (Printf.sprintf "signature for `%s` has no following definition" name)
   | None -> ());
-  let items = List.rev !items in
-  match structural_depth_violation items with
-  | Some span ->
-      let diagnostic =
-        Diag.error ?span ~code:"E1227"
-          (Printf.sprintf "surface syntax nesting exceeds the limit of %d" max_nesting_depth)
-      in
-      Surface_ast.
-        {
-          items;
-          diagnostics = List.rev (diagnostic :: state.diagnostics);
-          meta = Meta.empty;
-          source;
-        }
-  | None ->
-      let items, meta = Trivia_ownership.run ~source ~tokens items in
-      Surface_ast.{ items; diagnostics = List.rev state.diagnostics; meta; source }
+  let items =
+    List.rev !items
+    |> List.map (fun top ->
+        match structural_depth_violation top with
+        | None -> top
+        | Some span ->
+            let diagnostic =
+              Diag.error ?span ~code:"E1227"
+                (Printf.sprintf "surface syntax nesting exceeds the limit of %d" max_nesting_depth)
+            in
+            state.diagnostics <- diagnostic :: state.diagnostics;
+            quarantine_overdeep_top state span top)
+  in
+  let items, meta = Trivia_ownership.run ~source ~tokens items in
+  Surface_ast.{ items; diagnostics = List.rev state.diagnostics; meta; source }
 
 (** [recover_string] returns a partial tree and source-ordered diagnostics. Lexical damage becomes
     an in-order hole, allowing valid surrounding items and later parser errors to survive. *)

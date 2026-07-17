@@ -44,6 +44,39 @@ let expect_ok label = function
       Alcotest.failf "%s: expected success, got %s" label
         (String.concat "; " (List.map Diag.to_string diagnostics))
 
+let expect_exact_e1227 label diagnostics =
+  match diagnostics with
+  | [ diagnostic ] ->
+      Alcotest.(check string) (label ^ " code") "E1227" diagnostic.Diag.code;
+      Alcotest.(check string)
+        (label ^ " wording") "surface syntax nesting exceeds the limit of 10000" diagnostic.message
+  | diagnostics ->
+      Alcotest.failf "%s: expected exactly one diagnostic, got %s" label
+        (String.concat "; " (List.map Diag.to_string diagnostics))
+
+let expect_quarantined_analysis label source =
+  let recovered = Surface_parse.recover_string ~file:(label ^ ".jac") (source ^ "\nlater = 42\n") in
+  expect_exact_e1227 (label ^ " recovery") recovered.diagnostics;
+  (match recovered.items with
+  | [
+   { Surface_ast.it = Surface_ast.TopHole _; _ };
+   { Surface_ast.it = Surface_ast.Definition { name = "later"; _ }; _ };
+  ] ->
+      ()
+  | _ -> Alcotest.failf "%s: over-deep top was not quarantined before recovery" label);
+  let store, _ = Eval_support.make_prelude_ctx () in
+  let context =
+    match Check.make_ctx store with
+    | Ok context -> context
+    | Error diagnostics ->
+        Alcotest.failf "%s: checker context failed: %s" label
+          (String.concat "; " (List.map Diag.to_string diagnostics))
+  in
+  let report = Surface_check.analyze ~names:(Store.names_view store) context recovered in
+  expect_exact_e1227 (label ^ " analysis") report.diagnostics;
+  Alcotest.(check (list string))
+    (label ^ " later recovery") [ "later" ] (List.map fst report.signatures)
+
 let test_kernel_expression_boundary () =
   let leaf = Form.form "lit" [ Form.Int 0 ] in
   let at_limit = nested_form "tuple" (Kernel.max_nesting_depth - 1) leaf in
@@ -88,12 +121,14 @@ let test_surface_boundary () =
     (Surface_parse.parse_string ~file:"postfix-depth.jac" postfix_at);
   expect_code "surface postfix chain over limit" "E1227"
     (Surface_parse.parse_string ~file:"postfix-depth.jac" postfix_over);
+  expect_quarantined_analysis "postfix-depth-analyze" postfix_over;
   let pipe_at = repeated_suffix "0" " |> f" (Surface_parse.max_nesting_depth - 1) in
   let pipe_over = repeated_suffix "0" " |> f" Surface_parse.max_nesting_depth in
   expect_ok "surface pipe chain at limit"
     (Surface_parse.parse_string ~file:"pipe-depth.jac" pipe_at);
   expect_code "surface pipe chain over limit" "E1227"
-    (Surface_parse.parse_string ~file:"pipe-depth.jac" pipe_over)
+    (Surface_parse.parse_string ~file:"pipe-depth.jac" pipe_over);
+  expect_quarantined_analysis "pipe-depth-analyze" pipe_over
 
 let test_surface_pattern_and_type_paths () =
   let nested count leaf = nested_source ~open_text:"(" ~close_text:")" count leaf in
