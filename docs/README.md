@@ -37,12 +37,10 @@ project shape from file names alone.
   uncertainty wording, canonical boundaries, and explicit non-goals.
 - `effect-membranes.md`: GM.0 charter for typed governed facades, versioned
   decision artifacts, live/dry boundaries, and monotonic composition.
-- `concurrency.md`: SC.12 budgeted exhaustive schedule enumeration over the
-  SC.10 canonical record/replay and explicit-fork seam, including exact world
-  counts, structured incomplete results, hermetic refusal, and replayable
-  worlds; plus SC.9 deterministic FIFO, SC.8 fail-fast/collect, SC.7 cooperative
-  cancellation, SC.6 structured-scope ownership, the SC.5 policy-independent
-  lifecycle, the SC.4 generalized child-effect law, and D46-D50.
+- `concurrency.md`: SC.13 freezes the scoped typed-Channel contract over the
+  SC.12 exhaustive, seeded, replay, and FIFO scheduler stack, including exact
+  identities, capacity and backpressure, close, cancellation, ownership, and
+  policy interaction; SC.14 remains the runtime implementation milestone.
 - `warp-testing.md`: Warp test model, rows, handlers, cache, properties, and
   world lanes.
 - `errors.md`: diagnostic code catalog.
