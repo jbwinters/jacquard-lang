@@ -62,9 +62,14 @@ sample is not exhaustive evidence.
 - There is no shared mutable memory, lock, atomic, or data-race model.
 - There are no host threads, host scheduling, or real asynchronous host I/O.
 
-## C3 and C4 are not part of this gate
+## C3 is interpreted; C4 is not part of this gate
 
-At this exact base there are no typed channels, select, timeouts, mailboxes,
-actors, links, monitors, supervision trees, or host asynchronous I/O. Those are
-C3/C4+ work. Their absence does not block the C0-C2 release gate, and the C0-C2
-evidence must not be quoted as proof for them.
+SC.14 ships scoped typed channels through the interpreted scheduler, including
+rendezvous and buffered FIFO behavior, close, cancellation, deadlock handling,
+and deterministic, seeded, replay, exhaustive, and cached schedule parity.
+Channel handles remain dynamically checked, run-local, scope-local values.
+
+There is still no channel `select`, timeout operation, native Channel route,
+mailbox, actor, link, monitor, supervision tree, host scheduler, or asynchronous
+host I/O. Those are C4+ work, and the C0-C3 evidence must not be quoted as proof
+for them.

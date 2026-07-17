@@ -665,9 +665,10 @@ exhaustive schedules. C3 adds typed channels: SC.13 freezes their interface and
 semantics without a runtime, and SC.14 implements them. C4 adds host asynchronous
 I/O; actor supervision opens only after channels and lifecycle evidence exist.
 
-SC.16 closes this C0-C2 gate without waiting for C3 or C4. Its one-program
-four-handler demo, exact inventories, decision summary, claim-to-test map, and
-explicit caveats are published in
+SC.16 closes the C0-C2 publication gate after the interpreted C3 Channel
+runtime shipped in SC.14. Its one-program four-handler demo, exact inventories,
+decision summary, claim-to-test map, integrated C3 evidence, and explicit C4
+caveats are published in
 [`release/structured-concurrency/EVIDENCE.md`](release/structured-concurrency/EVIDENCE.md)
 and
 [`release/structured-concurrency/LIMITS.md`](release/structured-concurrency/LIMITS.md).

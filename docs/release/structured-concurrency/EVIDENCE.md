@@ -70,7 +70,7 @@ pins the signatures, program hash, trace identities, counts, and replay claims.
 | D46 | FIFO round-robin is the default scheduler; host scheduling is opt-in future work. | The queue and selected TaskId are recorded at every decision. Seeded and exhaustive handlers replace only the choice policy. |
 | D47 | Cancellation is cooperative at await, yield, and scheduler-routed effects; resource cleanup uses explicit brackets; finalizers are deferred. | Boundary tests prove cancellation wins before routed work and destroys each affine continuation once. External-resource release remains a handler obligation. |
 | D48 | Task escape is an E0907 dynamic defect in v0; rank-2 static scoping is future work. | Recursive guards cover tuples, constructors, closures, resumptions, cycles, callbacks, stale scopes, and later runs. |
-| D49 | Channels are deferred to C3; actors and supervision to C4+. | No channel, mailbox, actor, or supervision claim appears in this gate. |
+| D49 | Channels belong to C3; actors and supervision to C4+. | SC.13 freezes scoped typed channels and SC.14 implements their interpreted scheduler route. Mailboxes, actors, and supervision remain unclaimed. |
 | D50 | Fail-fast is the default scope policy; collect is explicit. | Fail-fast returns the first decision-ordered non-success without partial values; collect preserves one result per input in creation order. |
 
 ## Claim-to-proof checklist

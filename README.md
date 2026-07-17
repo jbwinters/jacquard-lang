@@ -117,8 +117,8 @@ For readers who speak programming languages:
 The prototype is complete against its original core plan and has since added
 the public surface syntax, ringed standard library, Warp properties and cache,
 native compilation, packaged binaries, and product-scale case studies. The RC1
-semantic boundary remains historical; the current successor is pinned by 686
-Alcotest/QCheck cases, 40 cram transcripts, 25 documentation examples, native
+semantic boundary remains historical; the current successor is pinned by 700
+Alcotest/QCheck cases, 40 cram transcripts, 27 documentation examples, native
 sanitizer/leak/fuzz lanes, and fresh-clone evidence workflows. RC2 repaired
 binary-demo packaging; RC3 adds an explicit
 runtime/output license exception and packages the native runtime. The current
@@ -449,10 +449,11 @@ Key release docs:
 - `docs/release/0.1/LIMITS.md`: explicit non-goals and caveats
 - `docs/release/0.1/DECISION.md`: release-candidate decision memo
 - `docs/release/0.1/RELEASE-NOTES.md`: public RC contents and install command
-- `docs/release/structured-concurrency/EVIDENCE.md`: successor C0-C2 claims,
-  decisions, exact counts, demo, and proving tests
+- `docs/release/structured-concurrency/EVIDENCE.md`: successor C0-C2 publication
+  claims plus the shipped interpreted C3 Channel runtime, exact counts, demo,
+  and proving tests
 - `docs/release/structured-concurrency/LIMITS.md`: structured-concurrency
-  caveats and explicit C3/C4 non-claims
+  caveats and explicit C4 non-claims
 
 ## Repository Map
 
