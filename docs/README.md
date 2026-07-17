@@ -112,10 +112,25 @@ Read these together when judging whether the release candidate is credible:
   canonical identities, pure refusal boundaries, and compatibility evidence.
 - `release/governed-membranes/GM1-MANIFEST.sha256`: reconstructible GM.1 overlay
   on the validated ET.6 plus GM.0 dependency-integration commit.
+- `release/governed-membranes/GM5-EVIDENCE.md`: GM.5 released Judge identity,
+  validated deterministic handlers, explicit model `Infer` row, and refusal
+  evidence.
+- `release/governed-membranes/GM5-MANIFEST.sha256`: reconstructible GM.5 overlay
+  on the validated GM.1 plus ET.3 integration base `94b5082`; the GM.1 evidence
+  set remains historical.
 - `release/governed-membranes/GM2-EVIDENCE.md`: GM.2 exact Call and successor
   Proposal identities, canonical-Code goldens, and stability/sensitivity laws.
 - `release/governed-membranes/GM2-MANIFEST.sha256`: reconstructible GM.2 overlay
   on the validated GM.1 commit `b5587ce`.
+- `release/governed-membranes/GM3-EVIDENCE.md`: GM.3 validated live, dry,
+  stored, and bound policy boundaries plus exhaustive verdict-law evidence.
+- `release/governed-membranes/GM3-MANIFEST.sha256`: reconstructible GM.3 overlay
+  on the validated GM.2 plus ET.3 integration commit `3e78a95`.
+- `release/governed-membranes/GM4-EVIDENCE.md`: GM.4 hermetic Warp laws,
+  exhaustive finite supports, exact numeric edges, cache behavior, and mutation
+  detection evidence.
+- `release/governed-membranes/GM4-MANIFEST.sha256`: reconstructible GM.4 overlay
+  on validated GM.3 base `f813d11`.
 
 ## Structured Concurrency Evidence
 
