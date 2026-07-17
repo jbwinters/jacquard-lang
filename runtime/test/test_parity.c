@@ -132,6 +132,11 @@ static void mode_show(void) {
     uint64_t payload[1];
   } resume0 = { JQ_RC_STATIC, JQ_RESUME, 0, 0, { 0 } };
   show_line((jq_value)&resume0);
+  int run = 0;
+  jq_value task;
+  if (jq_task_create(&run, (uint32_t[]){ 0 }, 1, 1, &task) != JQ_TASK_VALID) abort();
+  show_line(task);
+  jq_drop(task);
 }
 
 static void mode_rng(void) {
