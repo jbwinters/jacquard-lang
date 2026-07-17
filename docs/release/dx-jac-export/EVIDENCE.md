@@ -6,11 +6,12 @@ artifacts and are not retroactively updated by DX.2.
 
 ## Current inventory
 
-- Alcotest/QCheck cases: `655`
+- Alcotest/QCheck cases: `661`
 - Cram transcript files: `36`
 
-The test count includes six DX.2 filesystem-boundary cases. The additional
-cram transcript is `test/cli/export.t`.
+The test count includes six DX.2 filesystem-boundary cases and six DX.5/DX.7
+structural-depth and diagnostic-compatibility cases. The additional cram
+transcript is `test/cli/export.t`.
 
 ## Proved behavior
 

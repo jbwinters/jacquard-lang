@@ -30,7 +30,7 @@
     hash literal, E0105 malformed number, E0106 unexpected end of input, E0107 bad form head, E0108
     unexpected `)`, E0109 integer out of range, E0110 non-form group element, E0111 invalid quoted
     symbol, E0112 invalid bare symbol, E0113 non-form at top level, E0114 more than one form where
-    one was expected. *)
+    one was expected, E0115 excessive structural nesting. *)
 
 type state = {
   src : string;
@@ -38,11 +38,15 @@ type state = {
   mutable off : int;
   mutable line : int;
   mutable col : int;
+  mutable nesting_depth : int;
   mutable pending_comments : string list; (* reverse order; drained by the next form *)
 }
 
 (* Internal control flow only; never escapes this module. *)
 exception Err of Diag.t
+
+(** Maximum active form nodes accepted by the bootstrap reader. *)
+let max_nesting_depth = 10_000
 
 let error st ~code ?hint msg ~start_pos =
   let span =
@@ -285,6 +289,19 @@ let read_text st =
   go ()
 
 let rec read_form st : Form.t =
+  if st.nesting_depth >= max_nesting_depth then
+    error st ~code:"E0115" ~start_pos:(pos st)
+      (Printf.sprintf "bootstrap form nesting exceeds the limit of %d" max_nesting_depth);
+  st.nesting_depth <- st.nesting_depth + 1;
+  match read_form_body st with
+  | form ->
+      st.nesting_depth <- st.nesting_depth - 1;
+      form
+  | exception exn ->
+      st.nesting_depth <- st.nesting_depth - 1;
+      raise exn
+
+and read_form_body st : Form.t =
   (* leading comments captured since the previous form belong to this one *)
   let leading = List.rev st.pending_comments in
   st.pending_comments <- [];
@@ -386,7 +403,9 @@ and read_arg st : Form.arg =
 (** [parse_string ~file s] reads every top-level form in [s]. Top level admits only forms, not
     scalars. Stops at the first error. *)
 let parse_string ~file s : (Form.t list, Diag.t list) result =
-  let st = { src = s; file; off = 0; line = 1; col = 1; pending_comments = [] } in
+  let st =
+    { src = s; file; off = 0; line = 1; col = 1; nesting_depth = 0; pending_comments = [] }
+  in
   let rec go acc =
     skip_ws st;
     match peek st with

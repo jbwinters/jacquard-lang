@@ -2018,4 +2018,13 @@ let main =
       build_t;
     ]
 
-let () = exit (Cmd.eval' main)
+let () =
+  let status =
+    match Cmd.eval' main with
+    | status -> status
+    | exception Stack_overflow ->
+        prerr_endline
+          "error[E0003]: input exhausted the host stack before a structural nesting guard";
+        exit_diags
+  in
+  exit status
