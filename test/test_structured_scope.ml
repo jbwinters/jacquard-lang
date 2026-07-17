@@ -236,12 +236,30 @@ let test_checkout_bracket_restores_error_and_exception () =
   Alcotest.(check (list int)) "restored error token is dropped" [ 41 ] !dropped;
   check_zero_metrics "checkout error" aborted;
   let raised, body = Structured_scope.create ~body_resume:42 |> ok in
-  (match
-     Structured_scope.with_checkout raised body (fun _ -> raise (Failure "checkout host abort"))
-   with
-  | exception Failure message when String.equal message "checkout host abort" -> ()
-  | exception exn -> Alcotest.failf "wrong checkout exception: %s" (Printexc.to_string exn)
-  | Ok _ | Error _ -> Alcotest.fail "checkout host exception was swallowed");
+  let checkout_exception = Failure "checkout host abort" in
+  let backtraces_were_enabled = Printexc.backtrace_status () in
+  Printexc.record_backtrace true;
+  Fun.protect
+    ~finally:(fun () -> Printexc.record_backtrace backtraces_were_enabled)
+    (fun () ->
+      let checkout_backtrace =
+        match raise checkout_exception with
+        | exception caught when caught == checkout_exception -> Printexc.get_raw_backtrace ()
+        | _ -> Alcotest.fail "failed to capture checkout exception backtrace"
+      in
+      match
+        Structured_scope.with_checkout raised body (fun _ ->
+            Printexc.raise_with_backtrace checkout_exception checkout_backtrace)
+      with
+      | exception caught when caught == checkout_exception ->
+          let original = Printexc.raw_backtrace_to_string checkout_backtrace in
+          let reraised = Printexc.raw_backtrace_to_string (Printexc.get_raw_backtrace ()) in
+          Alcotest.(check bool)
+            "checkout exception keeps its original backtrace" true
+            (String.starts_with ~prefix:original reraised)
+      | exception exn ->
+          Alcotest.failf "checkout replaced the physical exception: %s" (Printexc.to_string exn)
+      | Ok _ | Error _ -> Alcotest.fail "checkout host exception was swallowed");
   Alcotest.(check bool)
     "checkout exception restores scheduler ownership" true
     (Structured_scope.inspect raised body |> ok).owns_resume;

@@ -110,17 +110,21 @@ A. Ordinary in-language Once resumptions share this private owner check.
 
 ## Async boundary and parity
 
-All four Async operations are reviewed as `once`; the taxonomy still marks
-Async as reserved, and no handler or built-in `--allow` grant is installed.
-Direct evaluator calls therefore reach the ordinary `Unhandled` result for
-spawn, await, cancel, and yield. The CLI rejects an unhandled Async program at
-its effect gate with E0814. Neither path schedules work or grants ambient
-authority.
+All four Async operations are reviewed as `once`, and the taxonomy still marks
+Async as reserved. The default interpreted CLI, prelude-evaluation, and Warp
+paths automatically admit only the exact frozen Async effect and execute it
+through `Round_robin`; users do not install a root handler or pass
+`--allow async`. This scheduler infrastructure grant does not admit Console,
+Fs, Net, or any other world effect. Raw `Eval.run_expr` remains an unscheduled
+low-level seam whose unhandled Async operations produce `Unhandled`, and the
+native backend has no root Async scheduler. Native execution therefore requires
+an in-language handler to discharge Async before the root.
 
 `TaskResult` constructors execute in both tiers. The `task-values.t` cram test
 byte-compares interpreter and native output for Done/Failed/Cancelled, tests
-the private carrier diagnostic, and pins the clean unhandled CLI failure. The
-C/OCaml show parity corpus includes a redacted inert Task value.
+the private carrier diagnostic, and pins successful scheduled CLI execution of
+`async.yield`. The C/OCaml show parity corpus includes a redacted inert Task
+value.
 
 ## Scheduler lifecycle core
 
@@ -341,7 +345,8 @@ resume, real failing-child fail-fast/collect, a fail-fast cancellation that
 requeues an awakened waiter, the integrated self-await deadlock refusal, and
 stable same-decision terminal ordinals. Checkout-bracket tests separately prove
 that normal, diagnostic, and host-exception exits restore an unsettled affine
-token before scope cleanup. Its 128-case property changes the host random seed and
+token before scope cleanup, while preserving the physical host exception and
+its raw backtrace prefix. Its 128-case property changes the host random seed and
 proves the same decisions and bytes as an unseeded rerun. The `round-robin.t`
 transcript repeats a fresh process 128 times, byte-compares every trace, pins the
 exact cross-scope trace and cumulative counters, runs real CLI Async programs,

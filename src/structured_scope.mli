@@ -80,7 +80,8 @@ val with_checkout :
   ('resume, 'value) t -> handle -> ('resume -> ('a, Diag.t list) result) -> ('a, Diag.t list) result
 (** [with_checkout scope handle operation] brackets a runnable-token transfer. If [operation]
     returns or raises before a lifecycle transition settles the token, the scope owns it again
-    before control leaves the bracket. Closed scopes and invalid handles return diagnostics. *)
+    before control leaves the bracket. A raised physical exception retains its original raw
+    backtrace. Closed scopes and invalid handles return diagnostics. *)
 
 val suspend_yield : ('resume, 'value) t -> handle -> resume:'resume -> (unit, Diag.t list) result
 (** [suspend_yield] returns a checked-out token and records a yielded suspension. *)

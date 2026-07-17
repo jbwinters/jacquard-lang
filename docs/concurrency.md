@@ -428,6 +428,11 @@ blocked await removes its waiter, completion appends awakened waiters, and yield
 appends its current task. Cancellation remains cooperative at the three SC.7
 boundaries.
 
+Each selected task advances inside an affine checkout bracket. If a scheduler
+step returns a diagnostic or a host exception before settling the token, the
+bracket restores scheduler ownership first; a host exception is then re-raised
+as the same physical value with its original raw backtrace.
+
 Policy traces include `policy-observe decision=N ordinal=M task=ID`, directly
 linking every child terminal observation to the D46 step that caused it.
 `Task` values are real opaque evaluator values with a fresh scheduler-run owner
