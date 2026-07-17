@@ -211,6 +211,19 @@ let test_frozen_identities_and_id_bounds () =
     "only opaque is private" true
     (Channel_contract.is_channel_private_hash opaque
     && not (Channel_contract.is_channel_private_hash (Hash.of_string "near-channel")));
+  let check_hot_predicate label predicate =
+    let near = Hash.of_string label in
+    let before = Gc.allocated_bytes () in
+    for _ = 1 to 100_000 do
+      ignore (predicate near)
+    done;
+    let allocated = Gc.allocated_bytes () -. before in
+    Alcotest.(check bool) label true (allocated < 4_096.0)
+  in
+  check_hot_predicate "Channel private-hash check stays allocation-free"
+    Channel_contract.is_channel_private_hash;
+  check_hot_predicate "Task private-hash check stays allocation-free"
+    Concurrency_contract.is_task_private_hash;
   let id = Channel_contract.channel_id ~scope_path:[ 0; 2 ] ~open_index:3 in
   Alcotest.(check string) "trace spelling" "0/2@3" (Channel_contract.trace_channel_id id);
   let rejects build =

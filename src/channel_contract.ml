@@ -1,4 +1,5 @@
 exception Bug_invalid_channel_id of string
+exception Bug_invalid_channel_hash of string
 
 let channel_handle_type_hash = "f4f5601a435906a47faedae9006e44b874146f3ad4b586bf9d04535be14dccb4"
 
@@ -23,7 +24,12 @@ let channel_operation_hashes =
     ("channel.close", "ffa22eb01ff7aa206fec56f540b6fd1758b8590e8e797e83f3cbfd295ebce29b");
   ]
 
-let is_channel_private_hash hash = String.equal (Hash.to_hex hash) channel_opaque_constructor_hash
+let channel_opaque_constructor =
+  match Hash.of_hex channel_opaque_constructor_hash with
+  | Some hash -> hash
+  | None -> raise (Bug_invalid_channel_hash "malformed frozen ChannelOpaque constructor hash")
+
+let is_channel_private_hash hash = Hash.equal hash channel_opaque_constructor
 
 type channel_id = { scope_path : int list; open_index : int }
 

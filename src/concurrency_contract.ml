@@ -1,11 +1,17 @@
 exception Bug_invalid_task_id of string
+exception Bug_invalid_concurrency_hash of string
 
 let task_type_hash = "07791255b44e18c3830038c51396bd3f80cf44a8e89222ff73dc90dd06ec3fb3"
 
 let task_opaque_constructor_hash =
   "9b4eaa5e872fa3f768c71fc4cba4d3262a9ebf8a719f0cfb78f22fa9eade4310"
 
-let is_task_private_hash hash = String.equal (Hash.to_hex hash) task_opaque_constructor_hash
+let task_opaque_constructor =
+  match Hash.of_hex task_opaque_constructor_hash with
+  | Some hash -> hash
+  | None -> raise (Bug_invalid_concurrency_hash "malformed frozen TaskOpaque constructor hash")
+
+let is_task_private_hash hash = Hash.equal hash task_opaque_constructor
 let task_result_type_hash = "915f69bd6fd8b34c2794b4b0e7ca88f5aafd0187e5c7c36a59091f6d031405ae"
 let async_effect_hash = "4ff8ce05ab09968163492b3be40fc91381b47dee5fb4b2980f9416d50f38e66f"
 
