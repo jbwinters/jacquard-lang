@@ -1,67 +1,81 @@
 Tier statistics for the native route (PF.2 phase 1): the same table
-docs/native-compilation.md publishes for the prelude. Sig changes that move a
-row tier land here on purpose, like the sigs goldens.
+docs/native-compilation.md publishes for the prelude. Handler reporting keeps
+syntactic resume shape separate from mode-aware native lowering: a tail-shaped
+Once clause still materializes its affine token. Sig changes that move a row
+tier land here on purpose, like the sigs goldens.
 
   $ export JACQUARD_PRELUDE=../../prelude
 
   $ jacquard tiers
-  == declarations: 197 named terms ==
-  pure                 112  56%
-  row-poly              38  19%
-  effectful             35  17%
-  data                  12   6%
+  == declarations: 339 named terms ==
+  pure                 235  69%
+  row-poly              44  12%
+  effectful             44  12%
+  data                  16   4%
   
-  == call sites: 579 applications ==
-  constructor          103  17%
-  op-perform            45   7%
-  fn pure              286  49%
-  fn row-poly           55   9%
-  fn effectful          90  15%
+  == call sites: 1275 applications ==
+  constructor          356  27%
+  op-perform            59   4%
+  fn pure              681  53%
+  fn row-poly          109   8%
+  fn effectful          70   5%
     abort                2
-    check               34
+    approval             4
+    audit                2
+    check               10
     clock                1
-    console              2
-    dist                 7
+    console              3
+    dist                 1
     emit                 2
-    fault                5
-    fs                   4
-    infer                1
-    net                  9
-    state                1
-    throw               52
+    fault                4
+    fs                   2
+    infer                4
+    judge                4
+    net                  6
+    state                6
+    throw               29
   
-  == handler op clauses: 32 ==
-  tail-resumptive        6  18%
-  aborting               6  18%
-  one-shot               3   9%
-  multi-shot            17  53%
-    abort            aborting           2
-    check            one-shot           1
-    check            multi-shot         2
-    complete         multi-shot         1
-    emit             tail-resumptive    1
-    emit             one-shot           1
-    fail             aborting           1
-    fetch            multi-shot         4
-    flaky            tail-resumptive    1
-    flaky            multi-shot         2
-    get              multi-shot         1
-    list-dir         tail-resumptive    1
-    list-dir         multi-shot         1
-    now              tail-resumptive    1
-    observe          one-shot           1
-    print            multi-shot         1
-    put              multi-shot         1
-    read             tail-resumptive    1
-    read             multi-shot         1
-    read-line        multi-shot         1
-    sample           multi-shot         1
-    sleep            tail-resumptive    1
-    throw            aborting           2
-    write            aborting           1
-    write            multi-shot         1
+  == handler op clauses: 42 (syntactic resumption shape) ==
+  tail-resumptive        9  21%
+  aborting               6  14%
+  one-shot               7  16%
+  multi-shot            20  47%
+  == native handler lowering: 42 (shape + operation mode) ==
+  tokenless-tail-multi         1   2%
+  materialized-resume         41  97%
+    abort            once   aborting         materialized-resume        2
+    ask              once   one-shot         materialized-resume        3
+    ask              once   multi-shot       materialized-resume        1
+    assess           once   tail-resumptive  materialized-resume        3
+    assess           once   multi-shot       materialized-resume        1
+    check            multi  one-shot         materialized-resume        1
+    check            multi  multi-shot       materialized-resume        2
+    complete         once   multi-shot       materialized-resume        1
+    emit             once   tail-resumptive  materialized-resume        1
+    emit             once   one-shot         materialized-resume        1
+    fail             multi  aborting         materialized-resume        1
+    fetch            once   multi-shot       materialized-resume        4
+    flaky            multi  tail-resumptive  tokenless-tail-multi       1
+    flaky            multi  multi-shot       materialized-resume        2
+    get              multi  multi-shot       materialized-resume        1
+    list-dir         once   tail-resumptive  materialized-resume        1
+    list-dir         once   multi-shot       materialized-resume        1
+    now              once   tail-resumptive  materialized-resume        1
+    observe          multi  one-shot         materialized-resume        1
+    print            once   multi-shot       materialized-resume        1
+    put              multi  multi-shot       materialized-resume        1
+    read             once   tail-resumptive  materialized-resume        1
+    read             once   multi-shot       materialized-resume        1
+    read-line        once   multi-shot       materialized-resume        1
+    record           once   one-shot         materialized-resume        1
+    record           once   multi-shot       materialized-resume        1
+    sample           multi  multi-shot       materialized-resume        1
+    sleep            once   tail-resumptive  materialized-resume        1
+    throw            once   aborting         materialized-resume        2
+    write            once   aborting         materialized-resume        1
+    write            once   multi-shot       materialized-resume        1
   
-  stamped 197 tier sidecars
+  stamped 339 tier sidecars
 
 A file that does not resolve is an error, not a partial table:
 

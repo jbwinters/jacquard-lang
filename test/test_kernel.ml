@@ -196,10 +196,17 @@ let table =
         ("E0201", "(deftype bool () (binding one () (lit 1)))");
       ] );
     ( "defeffect",
-      [ "(defeffect console () (op print ((tref text)) (ttuple)))" ],
+      [
+        "(defeffect console () (op print ((tref text)) (ttuple)))";
+        "(defeffect console () (op print once ((tref text)) (ttuple)))";
+      ],
       [
         ("E0202", "(defeffect console ())");
         ("E0202", "(defeffect console () (op print ((tref text))))");
+        ("E0202", "(defeffect console () (op print once (ttuple)))");
+        ("E0213", "(defeffect console () (op print multi ((tref text)) (ttuple)))");
+        ("E0213", "(defeffect console () (op print sometimes ((tref text)) (ttuple)))");
+        ("E0203", "(defeffect console () (op print 1 ((tref text)) (ttuple)))");
         ("E0201", "(defeffect console () (con print))");
       ] );
   ]

@@ -196,7 +196,35 @@ static void test_blocks(void) {
   for (int i = 0; i < 32; i++) h[i] = (uint8_t)i;
   jq_value hv = jq_hash(h);
   CHECK(memcmp(jq_hash_bytes(hv), h, 32) == 0, "hash bytes");
-  jq_drop(hv);
+  char *hash_shown = jq_show(hv);
+  CHECK(strcmp(hash_shown,
+               "#000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f") == 0,
+        "hash show uses canonical lowercase hex");
+  free(hash_shown);
+  static const jq_con_info hash_box_info = { 2, 0, 1, "hash-box" };
+  jq_value boxed_hash = jq_con(&hash_box_info, (jq_value[]){ hv });
+  char *boxed_shown = jq_show(boxed_hash);
+  CHECK(strcmp(boxed_shown,
+               "hash-box(#000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f)") == 0,
+        "hash show composes inside constructors");
+  free(boxed_shown);
+  jq_drop(boxed_hash); /* owns and releases hv; ASAN proves the nested path is leak-free */
+
+  const char *fixture = "ET4-native-fixture-secret";
+  jq_value secret = jq_secret((const uint8_t *)fixture, strlen(fixture));
+  CHECK(jq_is_secret(secret), "secret has a distinct runtime tag");
+  CHECK(jq_secret_len(secret) == strlen(fixture) &&
+            memcmp(jq_secret_bytes(secret), fixture, strlen(fixture)) == 0,
+        "explicit secret accessor preserves bytes");
+  char *secret_shown = jq_show(secret);
+  CHECK(strcmp(secret_shown, "<secret redacted>") == 0 && strstr(secret_shown, fixture) == NULL,
+        "secret show is fixed redaction");
+  free(secret_shown);
+  jq_value inspected = jq_i_debug_inspect(NULL, (jq_value[]){ secret });
+  CHECK(jq_text_len(inspected) == strlen("<secret redacted>") &&
+            memcmp(jq_text_bytes(inspected), "<secret redacted>", jq_text_len(inspected)) == 0,
+        "native debug.inspect redacts secret bytes");
+  jq_drop(inspected);
 }
 
 /* --- effects: the handler stack and perform (task 70) --- */
@@ -459,7 +487,7 @@ static jq_value clo1(jq_fn code) { return jq_closure((void *)code, 1, 0, NULL, U
 
 static void test_capture_single_resume(void) {
   jq_rt rt = { 0 };
-  jq_handler_entry e = { OP_A, clo1(cl_resume41), JQ_CLAUSE_CAPTURING, NULL };
+  jq_handler_entry e = { OP_A, clo1(cl_resume41), JQ_CLAUSE_CAPTURING, true, NULL };
   jq_value out = jq_handle2(&rt, 1, &e, clo0(m1_entry), clo1(rc_id));
   CHECK(jq_int_val(out) == 42, "capture + resume once yields 42");
   CHECK(rt.ks_len == 0 && rt.hs_len == 0 && rt.cap_depth == 0,
@@ -468,11 +496,27 @@ static void test_capture_single_resume(void) {
   free(rt.ks);
 }
 
+static void test_once_instances_are_independent(void) {
+  /* The use bit belongs to the captured JQ_RESUME block: a later perform
+     allocates a fresh block and therefore has its own one-resume budget. */
+  jq_rt rt = { 0 };
+  jq_handler_entry left = { OP_A, clo1(cl_resume41), JQ_CLAUSE_CAPTURING, true, NULL };
+  jq_value first = jq_handle2(&rt, 1, &left, clo0(m1_entry), clo1(rc_id));
+  CHECK(jq_int_val(first) == 42, "first once instance resumes");
+  jq_handler_entry right = { OP_A, clo1(cl_resume41), JQ_CLAUSE_CAPTURING, true, NULL };
+  jq_value second = jq_handle2(&rt, 1, &right, clo0(m1_entry), clo1(rc_id));
+  CHECK(jq_int_val(second) == 42, "fresh once instance has a fresh budget");
+  CHECK(rt.ks_len == 0 && rt.hs_len == 0 && rt.cap_depth == 0,
+        "stacks balanced after separate once captures");
+  free(rt.hs);
+  free(rt.ks);
+}
+
 static void test_multishot_two_resumes(void) {
   /* body adds 1; the clause resumes with 1 then 2: (2, 3). Copy-on-resume
      makes the second resume independent of the first. */
   jq_rt rt = { 0 };
-  jq_handler_entry e = { OP_A, clo1(cl_twice), JQ_CLAUSE_CAPTURING, NULL };
+  jq_handler_entry e = { OP_A, clo1(cl_twice), JQ_CLAUSE_CAPTURING, false, NULL };
   jq_value out = jq_handle2(&rt, 1, &e, clo0(m1_entry), clo1(rc_id));
   CHECK(jq_is_ptr(out) && jq_block_of(out)->tag == JQ_TUPLE, "multi-shot returns the tuple");
   CHECK(jq_int_val(jq_fields(out)[0]) == 2 && jq_int_val(jq_fields(out)[1]) == 3,
@@ -523,7 +567,7 @@ static void test_abort_drops_chain(void) {
   /* the clause never resumes: dropping the resumption must free the
      captured frame AND its heap local; ret must NOT run (would add 1000) */
   jq_rt rt = { 0 };
-  jq_handler_entry e = { OP_A, clo1(cl_abort999), JQ_CLAUSE_CAPTURING, NULL };
+  jq_handler_entry e = { OP_A, clo1(cl_abort999), JQ_CLAUSE_CAPTURING, true, NULL };
   jq_value out = jq_handle2(&rt, 1, &e, clo0(m2_entry), clo1(rc_add1000));
   CHECK(jq_int_val(out) == 999, "abort value bypasses the ret clause");
   CHECK(rt.ks_len == 0 && rt.hs_len == 0 && rt.cap_depth == 0,
@@ -536,7 +580,7 @@ static void test_escaped_resume_ret_per_resumption(void) {
   /* the clause returns the resumption; applying it twice outside the
      handler's textual scope runs body-remainder AND ret per application */
   jq_rt rt = { 0 };
-  jq_handler_entry e = { OP_A, clo1(cl_escape), JQ_CLAUSE_CAPTURING, NULL };
+  jq_handler_entry e = { OP_A, clo1(cl_escape), JQ_CLAUSE_CAPTURING, false, NULL };
   jq_value res = jq_handle2(&rt, 1, &e, clo0(m1_entry), clo1(rc_double));
   CHECK(jq_is_ptr(res) && jq_block_of(res)->tag == JQ_RESUME,
         "escaped resumption is the handle's value");
@@ -563,7 +607,7 @@ static void test_clause_perform_escapes_outward(void) {
      continuation), not the inner one — the inner OP_B clause would return
      999 and the inner ret would add 1000, so 42 proves both were skipped */
   jq_rt rt = { 0 };
-  jq_handler_entry outer = { OP_B, clo1(cl_resume41), JQ_CLAUSE_CAPTURING, NULL };
+  jq_handler_entry outer = { OP_B, clo1(cl_resume41), JQ_CLAUSE_CAPTURING, false, NULL };
   jq_value out = jq_handle2(&rt, 1, &outer, clo0(m3_entry), clo1(rc_id));
   /* inner OP_A clause performs OP_B; outer clause resumes it with 41; the
      inner clause returns that 41 as the inner handle's value; inner ret
@@ -591,8 +635,8 @@ static jq_value m3_entry(JQ_PARAMS) {
     jq_ks_push(rt, f);
   }
   jq_handler_entry inner[2] = {
-    { OP_A, clo1(cl_perform_b), JQ_CLAUSE_CAPTURING, NULL },
-    { OP_B, clo1(cl_abort999), JQ_CLAUSE_CAPTURING, NULL },
+    { OP_A, clo1(cl_perform_b), JQ_CLAUSE_CAPTURING, false, NULL },
+    { OP_B, clo1(cl_abort999), JQ_CLAUSE_CAPTURING, false, NULL },
   };
   jq_value r = jq_handle2(rt, 2, inner, clo0(m1_entry), clo1(rc_add1000));
   if (r == JQ_SUSPEND) return JQ_SUSPEND;
@@ -659,7 +703,7 @@ static jq_value cl_resume10(JQ_PARAMS) {
 
 static void test_deep_handler_recovers_inner_performs(void) {
   jq_rt rt = { 0 };
-  jq_handler_entry e = { OP_A, clo1(cl_resume10), JQ_CLAUSE_CAPTURING, NULL };
+  jq_handler_entry e = { OP_A, clo1(cl_resume10), JQ_CLAUSE_CAPTURING, false, NULL };
   jq_value out = jq_handle2(&rt, 1, &e, clo0(m4_entry), clo1(rc_id));
   CHECK(jq_int_val(out) == 20, "deep handler covers the resumed extent");
   CHECK(rt.ks_len == 0 && rt.hs_len == 0 && rt.cap_depth == 0,
@@ -774,7 +818,7 @@ static jq_value m5_thunk_entry(JQ_PARAMS) {
     f = jq_frame_alloc(m5_thunk_reenter, 1, 0, 0);
     jq_ks_push(rt, f);
   }
-  jq_handler_entry inner = { OP_A, clo1(cl_escape), JQ_CLAUSE_CAPTURING, NULL };
+  jq_handler_entry inner = { OP_A, clo1(cl_escape), JQ_CLAUSE_CAPTURING, false, NULL };
   jq_value r = jq_handle2(rt, 1, &inner, clo0(m5_out_entry), clo1(rc_id));
   if (r == JQ_SUSPEND) return JQ_SUSPEND;
   if (f) {
@@ -799,7 +843,7 @@ static void test_chain_order_across_nested_capture(void) {
      doubles (14010), A's ret passes it through. Inverted order gave the
      outer frame the 5. */
   jq_rt rt = { 0 };
-  jq_handler_entry outer = { OP_B, clo1(cl_resume5), JQ_CLAUSE_CAPTURING, NULL };
+  jq_handler_entry outer = { OP_B, clo1(cl_resume5), JQ_CLAUSE_CAPTURING, false, NULL };
   jq_value out = jq_handle2(&rt, 1, &outer, clo0(m5_thunk_entry), clo1(rc_id));
   CHECK(jq_int_val(out) == 14010, "un-entered frame keeps its chain depth");
   CHECK(rt.ks_len == 0 && rt.hs_len == 0 && rt.cap_depth == 0,
@@ -838,6 +882,93 @@ static void test_grant_fallback(void) {
   free(rt.hs);
 }
 
+static void test_inert_task_handles(void) {
+  int run_a = 0, run_b = 0;
+  uint32_t root[] = { 0 };
+  uint32_t nested[] = { 0, 2 };
+  jq_value task = JQ_UNIT;
+  CHECK(jq_task_create(&run_a, nested, 2, 3, &task) == JQ_TASK_VALID,
+        "task deterministic ID constructs");
+  CHECK(jq_block_of(task)->tag == JQ_TASK, "task has a distinct opaque native tag");
+  CHECK(jq_task_validate(task, &run_a, nested, 2) == JQ_TASK_VALID,
+        "task validates in its owning run and scope");
+  CHECK(jq_task_validate(task, &run_b, nested, 2) == JQ_TASK_FOREIGN_RUN,
+        "task rejects cross-run reuse");
+  CHECK(jq_task_validate(task, &run_a, root, 1) == JQ_TASK_FOREIGN_SCOPE,
+        "task rejects cross-scope reuse");
+  CHECK(jq_task_validate(jq_int(7), &run_a, root, 1) == JQ_TASK_MALFORMED,
+        "malformed task diagnoses without a crash");
+  char *shown = jq_show(task);
+  CHECK(strcmp(shown, "<task>") == 0, "native task diagnostics remain opaque");
+  free(shown);
+  jq_drop(task);
+  CHECK(jq_task_create(&run_a, (uint32_t[]){ 1 }, 1, 0, &task) == JQ_TASK_MALFORMED,
+        "invalid task path diagnoses without allocation");
+  uint16_t max_scope_len = JQ_TASK_MAX_SCOPE_LEN;
+  uint32_t *deep = calloc(max_scope_len + 1, sizeof(*deep));
+  if (!deep) abort();
+  for (uint32_t i = 1; i <= max_scope_len; i++) deep[i] = JQ_TASK_MAX_COMPONENT;
+  CHECK(jq_task_create(&run_a, deep, max_scope_len, JQ_TASK_MAX_COMPONENT, &task) == JQ_TASK_VALID,
+        "native uint32/uint16 Task ID boundary constructs");
+  CHECK(jq_task_validate(task, &run_a, deep, max_scope_len) == JQ_TASK_VALID,
+        "native maximum Task ID validates");
+  jq_block_of(task)->payload[2 + max_scope_len] =
+    (uint64_t)JQ_TASK_MAX_COMPONENT + UINT64_C(1);
+  CHECK(jq_task_validate(task, &run_a, deep, max_scope_len) == JQ_TASK_MALFORMED,
+        "native Task spawn index one past uint32 diagnoses");
+  jq_drop(task);
+  CHECK(jq_task_create(&run_a, deep, (uint16_t)(max_scope_len + 1), 0, &task) ==
+            JQ_TASK_MALFORMED,
+        "native Task block depth overflow diagnoses");
+  free(deep);
+}
+
+static void test_structured_scope_carrier_teardown(void) {
+  /* SC.6 scheduling remains policy-independent in OCaml. This native stress probe pins the
+     ownership boundary it will lower to: every forgotten Task carrier and resume-shaped heap root
+     is explicitly released on scope exit. check.sh runs this under ASAN+LSAN. */
+  enum { child_count = 4096 };
+  int run_owner = 0;
+  uint32_t scope_path[] = { 0, 1 };
+  jq_value *tasks = calloc(child_count, sizeof(*tasks));
+  jq_value *resumes = calloc(child_count, sizeof(*resumes));
+  if (!tasks || !resumes) abort();
+  bool all_constructed = true;
+  for (uint32_t index = 0; index < child_count; index++) {
+    if (jq_task_create(&run_owner, scope_path, 2, index, &tasks[index]) != JQ_TASK_VALID) {
+      all_constructed = false;
+      tasks[index] = JQ_UNIT;
+    }
+    resumes[index] = jq_tuple(1, (jq_value[]){ jq_int(index) });
+  }
+  CHECK(all_constructed, "structured-scope Task carriers construct");
+  for (uint32_t index = 0; index < child_count; index++) {
+    jq_drop(resumes[index]);
+    jq_drop(tasks[index]);
+  }
+  free(resumes);
+  free(tasks);
+  CHECK(true, "native structured-scope carrier teardown is ASAN-clean");
+}
+
+static void test_cancelled_continuation_teardown(void) {
+  /* The native runtime does not yet contain a scheduler or cancellation route.
+     This ownership-only stress probe verifies that 4,096 nested continuation-
+     shaped heap roots can be released explicitly under ASAN+LSAN. */
+  enum { cancellation_count = 4096 };
+  jq_value *continuations = calloc(cancellation_count, sizeof(*continuations));
+  if (!continuations) abort();
+  for (uint32_t index = 0; index < cancellation_count; index++) {
+    jq_value payload = jq_tuple(1, (jq_value[]){ jq_int(index) });
+    continuations[index] = jq_tuple(1, (jq_value[]){ payload });
+  }
+  for (uint32_t index = 0; index < cancellation_count; index++) {
+    jq_drop(continuations[index]);
+  }
+  free(continuations);
+  CHECK(true, "native explicit continuation-carrier teardown is ASAN-clean");
+}
+
 int main(int argc, char **argv) {
   /* fatal-path modes: check.sh asserts the message and exit code 2 */
   if (argc > 1 && strcmp(argv[1], "div0") == 0) {
@@ -854,6 +985,12 @@ int main(int argc, char **argv) {
     jq_con(&huge, fields);
     return 0;
   }
+  if (argc > 1 && strcmp(argv[1], "secret-code-of-text") == 0) {
+    const char *fixture = "ET4-MUST-NOT-APPEAR";
+    jq_value secret = jq_secret((const uint8_t *)fixture, strlen(fixture));
+    jq_i_code_of_text(NULL, (jq_value[]){ secret });
+    return 0; /* unreachable */
+  }
   if (argc > 1 && strcmp(argv[1], "match-fail") == 0) {
     /* surface-unreachable (the checker refuses inexhaustive matches with
        E0813) but the defensive rendering must stay interpreter-exact */
@@ -869,6 +1006,12 @@ int main(int argc, char **argv) {
     rt.op_meta = meta;
     rt.n_ops = 1;
     jq_perform(&rt, 0, 0, NULL);
+    return 0; /* unreachable */
+  }
+  if (argc > 1 && strcmp(argv[1], "once-resume-twice") == 0) {
+    jq_rt rt = { 0 };
+    jq_handler_entry e = { OP_A, clo1(cl_twice), JQ_CLAUSE_CAPTURING, true, NULL };
+    (void)jq_handle2(&rt, 1, &e, clo0(m1_entry), clo1(rc_id));
     return 0; /* unreachable */
   }
   long deep_n = argc > 1 ? atol(argv[1]) : 1000000;
@@ -891,7 +1034,11 @@ int main(int argc, char **argv) {
   test_perform_outer_continuation();
   test_clause_pushes_handler();
   test_grant_fallback();
+  test_inert_task_handles();
+  test_structured_scope_carrier_teardown();
+  test_cancelled_continuation_teardown();
   test_capture_single_resume();
+  test_once_instances_are_independent();
   test_multishot_two_resumes();
   test_abort_drops_chain();
   test_escaped_resume_ret_per_resumption();

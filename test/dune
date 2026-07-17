@@ -43,6 +43,26 @@
  (modules native_fuzz)
  (libraries unix))
 
+(executable
+ (name once_interpreter_probe)
+ (modules once_interpreter_probe)
+ (libraries jacquard unix))
+
+(executable
+ (name gen_once_hostile)
+ (modules gen_once_hostile)
+ (libraries jacquard unix))
+
+(executable
+ (name scope_policy_trace)
+ (modules scope_policy_trace)
+ (libraries jacquard))
+
+(executable
+ (name round_robin_trace)
+ (modules round_robin_trace)
+ (libraries jacquard))
+
 ; the fuzz lane (task 74): seeded random pure programs through both engines.
 ; Not in the default runtest — run `dune build @native-fuzz` (1000 cases) or
 ; the executable directly with a count for the 10k pre-merge sweep.
@@ -63,26 +83,57 @@
 (test
  (name test_jacquard)
  (modules
-  (:standard \ corpus_support gen_goldens gen_surface_twins gen_prelude_goldens gen_sig_goldens gen_diag_goldens gen_freeze_goldens gen_native_parity native_fuzz))
+  (:standard \ corpus_support gen_goldens gen_surface_twins gen_prelude_goldens gen_sig_goldens gen_diag_goldens gen_freeze_goldens gen_native_parity native_fuzz once_interpreter_probe gen_once_hostile scope_policy_trace round_robin_trace))
  (libraries jacquard corpus_support alcotest fmt qcheck-core qcheck-alcotest unix str)
  (deps
   (glob_files_rec ../corpus/*.jqd)
   (glob_files_rec ../corpus/*.jac)
   (source_tree ../corpus/valid)
   (source_tree ../corpus/surface)
+  ../corpus/governance/malformed-operation-names.tsv
+  ../corpus/governance/unresolved-operations.tsv
   (glob_files_rec ../corpus/*.expect)
   (glob_files_rec ../corpus/*.golden)
   (glob_files_rec ../prelude/*.jqd)
+  ../prelude/operation-modes.manifest
+  ../prelude/rings.manifest
   (glob_files ../src/*.ml)
   (glob_files ../bin/*.ml)
   ../docs/errors.md
+  ../docs/effect-review.md
+  ../docs/effect-membranes.md
+  ../docs/effect-taxonomy.md
+  ../docs/concurrency.md
   ../docs/README.md
   ../docs/release/surface-syntax/DECISION.md
   ../docs/release/surface-syntax/FOLLOWUPS.md
   ../docs/release/surface-syntax/MANIFEST.sha256
+  ../docs/release/governed-membranes/GM1-EVIDENCE.md
+  ../docs/release/governed-membranes/GM1-MANIFEST.sha256
+  ../docs/release/governed-membranes/GM2-EVIDENCE.md
+  ../docs/release/governed-membranes/GM2-MANIFEST.sha256
+  ../docs/release/governed-membranes/GM3-EVIDENCE.md
+  ../docs/release/governed-membranes/GM3-MANIFEST.sha256
+  ../docs/release/governed-membranes/GM4-EVIDENCE.md
+  ../docs/release/governed-membranes/GM4-MANIFEST.sha256
+  ../docs/release/governed-membranes/GM5-EVIDENCE.md
+  ../docs/release/governed-membranes/GM5-MANIFEST.sha256
+  ../docs/release/governed-membranes/GM9-EVIDENCE.md
+  ../docs/release/governed-membranes/GM9-MANIFEST.sha256
+  ../docs/release/structured-concurrency/EVIDENCE.md
+  ../docs/release/structured-concurrency/MANIFEST.sha256
+  ../docs/release/dx-jac-export/EVIDENCE.md
   ../docs/stdlib.md
   ../docs/surface-syntax.md
   ../docs/tutorial.md
   ../docs/warp-testing.md
+  ../spec/effect-taxonomy-v1.tsv
+  docs-doctest/fixtures/effect-taxonomy-schemas.jac
+  docs-doctest/fixtures/governed-membrane-signatures.jac
+  docs-doctest/fixtures/governed-membrane-signatures.stdout
+  docs-doctest/fixtures/concurrency-row-contract.jac
+  docs-doctest/fixtures/concurrency-row-laundering.jac
+  docs-doctest/fixtures/stdlib-handler-policy.jac
   ../scripts/release/check-surface-syntax-manifest.sh
+  ../scripts/release/check-structured-concurrency-manifest.sh
   cli/escrow.t))

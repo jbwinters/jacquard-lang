@@ -28,6 +28,11 @@ let show_corpus () =
   let v_closure =
     Value.VClosure { scope = Value.empty_scope; params = []; body = expr "(lit 1)" }
   in
+  let task =
+    (* Parity covers diagnostic redaction only. The hostile payload is deliberately forged because
+       the public Eval API exposes no Task construction seam. *)
+    Value.VTask (Obj.magic (ref (), [ 0 ], 1))
+  in
   [
     (* ints *)
     Value.VInt 0;
@@ -62,6 +67,7 @@ let show_corpus () =
     VText "ctrl \x01 and del \x7f";
     VText "utf-8: h\xc3\xa9llo \xe2\x86\x92 \xf0\x9f\x8e\x89";
     VText "nul\x00mid" (* embedded NUL: the renderer is length-based, not C-string *);
+    VSecret (Secret.of_string "ET4-native-parity-fixture");
     (* tuples *)
     VTuple [];
     VTuple [ VInt 1 ];
@@ -77,6 +83,7 @@ let show_corpus () =
     v_closure;
     VBuiltin ("add", fun _ -> Ok (Value.VTuple []));
     VResume [];
+    task;
   ]
 
 (* --- rng.golden: SplitMix64 streams (lockstep with jq_rng.c) --- *)

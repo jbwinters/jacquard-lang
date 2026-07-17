@@ -4,9 +4,9 @@
     Algorithm W with levels (see {!Types}), an ambient effect row threaded through inference, and
     [Ann] as a checking anchor (bidirectional lite):
 
-    - Every application unifies the callee's row with the ambient row, after OPENING a closed callee
-      row with a fresh tail (Leijen's open coercion) so a pure or fewer-effects function can run in
-      a richer context — subsumption without subtyping.
+    - Every application includes the callee's row in the ambient row. Under a handler, an open
+      callee row is specialized with the handled labels before inclusion; shared row variables carry
+      that requirement through typed wrappers without copying unrelated ambient effects.
     - [Lam] starts a fresh open ambient row that lands on its arrow.
     - Generalization at [Let] obeys the value restriction (only syntactic values), and closes
       generalizable row tails that occur exactly once in the scheme, so an unconstrained function
@@ -14,11 +14,16 @@
     - Annotations are converted with RIGID variables (skolems) for checking; the same annotation
       converts with flexible variables when used as a mutual-recursion signature (W3.3: annotations
       honored as checks).
-    - [Handle] (W3.4): the body's ambient is the handled effects joined onto the outer ambient
-      (removal is implicit: handled effects stop at the handler, everything else shares the outer
-      row); the return binder gets the body's type; [resume] has type
-      [(op result) ->{outer ambient} answer]; every clause body checks at the answer type under the
-      outer ambient.
+    - [Handle] (W3.4): the body gets an independent ambient seeded with the handled effects. Its
+      applications require those labels on flexible computation rows; after inference the handler
+      subtracts them and directionally joins only the remainder into the outer ambient. The return
+      binder gets the body's type. A [multi] clause's [resume] is an ordinary arrow, while a [once]
+      clause receives the built-in affine [Resume] callable; both carry the body's unhandled
+      continuation row. {!Affine_resume} rejects escapes before ordinary inference, then rejects
+      duplicate valid consumptions after the clause body checks at the answer type under the outer
+      ambient. The sole affine-closure rule is a direct clause lambda returned by a [Handle] that is
+      itself immediately applied once to syntactic-value arguments; only that outer lambda boundary
+      is opened.
 
     Store terms are checked on demand and cached by hash; the store's hash DAG guarantees no
     cross-declaration cycles. Builtin markers get their signatures from
@@ -27,17 +32,23 @@
     Diagnostics (first error wins, codes E08xx): E0801 type mismatch, E0802 not a function, E0803
     application arity, E0804 annotation mismatch, E0805 unknown hash/metadata, E0806 constructor
     pattern arity, E0807 surface eta-expansion guidance, E0810 type-constructor arity in an
-    annotation, E0811 unbound type/row variable in a declaration or annotation. *)
+    annotation, E0811 unbound type/row variable in a declaration or annotation, E0816 an affine
+    resumption consumed twice, E0817 an affine resumption escape, E0818 an attempted polymorphic
+    reuse of a non-value local binding, and E0819 an opaque Secret inspection or serialization. *)
 
 open Types
 module SMap = Map.Make (String)
+module SSet = Set.Make (String)
 
 type ctx = {
   store : Store.t;
+  mutable trusted_store_refs : bool;
   p_int : Hash.t;
   p_real : Hash.t;
   p_text : Hash.t;
   p_code : Hash.t;
+  p_hash : Hash.t;
+  p_secret : Hash.t;
   builtin_sigs : (Hash.t, scheme) Hashtbl.t;
   term_sigs : (Hash.t, scheme) Hashtbl.t;
   mutable level : int;
@@ -72,10 +83,10 @@ let tier_applications ctx = ctx.tier_apps
 (** [tier_operations ctx] returns the operation disciplines recorded by strict checks. *)
 let tier_operations ctx = ctx.tier_ops
 
-type env = { vars : scheme SMap.t; group : (string * ty) array }
+type env = { vars : scheme SMap.t; restricted : SSet.t; group : (string * ty) array }
 (** [group]: during a defterm group check, member index -> (name, mono or annotated type). *)
 
-let empty_env = { vars = SMap.empty; group = [||] }
+let empty_env = { vars = SMap.empty; restricted = SSet.empty; group = [||] }
 
 (* Internal control flow only; never escapes this module. *)
 exception Err of Diag.t
@@ -85,8 +96,23 @@ let err ?meta ?hint ~code fmt =
     (fun msg -> raise (Err (Diag.error ?span:(Option.bind meta Meta.span) ?hint ~code msg)))
     fmt
 
+(* Stored declarations have already crossed the public resolver/checker boundary. Their resolved
+   bodies may use a hidden prelude capability hash, while source expressions must use public
+   lookup and therefore fail closed on the same explicit hash. *)
+let locate ctx hash =
+  if ctx.trusted_store_refs then Store.locate_internal ctx.store hash
+  else Store.locate ctx.store hash
+
+let with_trusted_store_refs ctx f =
+  let saved = ctx.trusted_store_refs in
+  Fun.protect
+    ~finally:(fun () -> ctx.trusted_store_refs <- saved)
+    (fun () ->
+      ctx.trusted_store_refs <- true;
+      f ())
+
 let name_of ctx h =
-  match Store.locate ctx.store h with
+  match locate ctx h with
   | Ok { Store.decl; role; _ } -> (
       match (decl.Kernel.it, role) with
       | Kernel.DefType { tname; _ }, Store.Whole -> tname
@@ -102,8 +128,17 @@ let name_of ctx h =
 
 let show_ty ctx t = Types.show ~name_of:(name_of ctx) t
 
+let is_secret_ty ctx t =
+  match repr t with
+  | TCon (identity, []) ->
+      Hash.equal ctx.p_secret identity || String.equal (name_of ctx identity) "secret"
+  | _ -> false
+
+let is_text_ty ctx t =
+  match repr t with TCon (identity, []) -> Hash.equal ctx.p_text identity | _ -> false
+
 let surface_name_of ctx kind hash =
-  match Store.locate ctx.store hash with
+  match locate ctx hash with
   | Ok _ -> Surface_name.render kind (name_of ctx hash)
   | Error _ -> Printf.sprintf "#%s:%s" (Hash.to_hex hash) (Surface_name.kind_tag kind)
 
@@ -135,11 +170,13 @@ let unify_or ctx ?meta ?hint ~what expected actual =
       ~code:"E0801" "%s: expected %s, got %s (%s)" what (show_ty ctx expected) (show_ty ctx actual)
       detail
 
-(* Open coercion: a closed callee row gains a fresh tail before meeting the ambient row,
-   so exact rows mean "at most these effects" at call sites. *)
-let opened ctx (r : row) : row =
-  let r = repr_row r in
-  match r.tail with RClosed -> { r with tail = new_rvar ctx.level } | _ -> r
+let unify_join_or ctx ?meta ~what expected actual =
+  try Types.join_into ~level:ctx.level expected actual
+  with Unify_error detail ->
+    err ?meta
+      ~hint:"the expected side comes from the surrounding context; make both sides agree"
+      ~code:"E0801" "%s: expected %s, got %s (%s)" what (show_ty ctx expected) (show_ty ctx actual)
+      detail
 
 let prim h = TCon (h, [])
 
@@ -148,7 +185,7 @@ let prim h = TCon (h, [])
 (* ------------------------------------------------------------------ *)
 
 let type_arity ctx ?meta (h : Hash.t) : int =
-  match Store.locate ctx.store h with
+  match locate ctx h with
   | Ok { Store.decl = { Kernel.it = Kernel.DefType { tvars; _ }; _ }; role = Store.Whole; _ } ->
       List.length tvars
   | Ok _ -> err ?meta ~code:"E0805" "hash %s is not a type" (Hash.to_hex h)
@@ -202,7 +239,10 @@ let rec conv_ty ctx cenv (t : Kernel.ty) : ty =
       TCon (h, List.map (conv_ty ctx cenv) args)
   | Kernel.TApp _ -> err ~meta ~code:"E0810" "only declared types can be applied"
   | Kernel.TArrow (params, row, result) ->
-      TArrow (List.map (conv_ty ctx cenv) params, conv_row ctx cenv row, conv_ty ctx cenv result)
+      TArrow
+        ( List.map (conv_ty ctx cenv) params,
+          conv_row ctx cenv ~effectself:None row,
+          conv_ty ctx cenv result )
   | Kernel.TTuple items -> TTuple (List.map (conv_ty ctx cenv) items)
   | Kernel.TForall (tvs, rvs, body) ->
       (* binders introduce (or shadow) names in the conversion scope *)
@@ -210,12 +250,15 @@ let rec conv_ty ctx cenv (t : Kernel.ty) : ty =
       List.iter (fun e -> ignore (conv_fresh_rv ctx cenv e)) rvs;
       conv_ty ctx cenv body
 
-and conv_row ctx cenv (r : Kernel.row) : row =
+and conv_row ctx cenv ~effectself (r : Kernel.row) : row =
   let effects =
     List.map
       (function
         | Kernel.Hashed h -> h
-        | Kernel.Named n -> err ~meta:r.Kernel.wmeta ~code:"E0811" "unresolved effect name `%s`" n)
+        | Kernel.Named n -> (
+            match effectself with
+            | Some (self_name, hash) when String.equal n self_name -> hash
+            | _ -> err ~meta:r.Kernel.wmeta ~code:"E0811" "unresolved effect name `%s`" n))
       r.Kernel.effects
   in
   let tail =
@@ -233,7 +276,11 @@ and conv_row ctx cenv (r : Kernel.row) : row =
 (* Constructor scheme: forall vars. (fields) ->{} T vars  (nullary: T vars). Field types are
    declaration types: tyvars come from the decl header, self-references are the decl. *)
 let rec con_scheme ctx ?meta (h : Hash.t) : scheme =
-  match Store.locate ctx.store h with
+  if Concurrency_contract.is_task_private_hash h then
+    err ?meta ~code:Concurrency_contract.task_escape_code
+      ~hint:"Task handles are created only by async.spawn inside a structured scheduler scope"
+      "the Task opaque carrier is scheduler-private and cannot be constructed by Jacquard code";
+  match locate ctx h with
   | Ok
       {
         Store.decl = { Kernel.it = Kernel.DefType { tname; tvars; cons }; _ };
@@ -269,7 +316,8 @@ and ty_mentions name (t : Kernel.ty) : bool =
 
 (* Declaration-context conversion: like conv_ty but self-references map to [self]. Unbound
    type variables are an error here (E0811), not implicit quantification. *)
-and conv_decl_ty ctx cenv ?(unbound_code = "E0811") ~self (t : Kernel.ty) : ty =
+and conv_decl_ty ctx cenv ?(unbound_code = "E0811") ?(effectself = None) ~self (t : Kernel.ty) : ty
+    =
   let self_name, self_ty = self in
   let meta = t.Kernel.meta in
   match t.Kernel.it with
@@ -282,7 +330,7 @@ and conv_decl_ty ctx cenv ?(unbound_code = "E0811") ~self (t : Kernel.ty) : ty =
             ~code:unbound_code "unbound type variable `%s` in declaration" a)
   | Kernel.TApp ({ Kernel.it = Kernel.TRef (Kernel.Named n); _ }, args) when n = self_name -> (
       (* recursive application must match the declared parameters *)
-      let args = List.map (conv_decl_ty ctx cenv ~unbound_code ~self) args in
+      let args = List.map (conv_decl_ty ctx cenv ~unbound_code ~effectself ~self) args in
       match repr self_ty with
       | TCon (h, params) ->
           if List.length args <> List.length params then
@@ -299,19 +347,88 @@ and conv_decl_ty ctx cenv ?(unbound_code = "E0811") ~self (t : Kernel.ty) : ty =
       if arity <> List.length args then
         err ~meta ~code:"E0810" "type %s expects %d argument(s), got %d" (name_of ctx h) arity
           (List.length args);
-      TCon (h, List.map (conv_decl_ty ctx cenv ~unbound_code ~self) args)
+      TCon (h, List.map (conv_decl_ty ctx cenv ~unbound_code ~effectself ~self) args)
   | Kernel.TArrow (params, row, result) ->
       TArrow
-        ( List.map (conv_decl_ty ctx cenv ~unbound_code ~self) params,
-          conv_row ctx cenv row,
-          conv_decl_ty ctx cenv ~unbound_code ~self result )
-  | Kernel.TTuple items -> TTuple (List.map (conv_decl_ty ctx cenv ~unbound_code ~self) items)
+        ( List.map (conv_decl_ty ctx cenv ~unbound_code ~effectself ~self) params,
+          conv_row ctx cenv ~effectself row,
+          conv_decl_ty ctx cenv ~unbound_code ~effectself ~self result )
+  | Kernel.TTuple items ->
+      TTuple (List.map (conv_decl_ty ctx cenv ~unbound_code ~effectself ~self) items)
   | _ -> conv_ty ctx cenv t
 
-(* Operation scheme: forall effect-vars (+free op vars). (params) ->{E} result. The row
-   carries just the effect hash (set semantics; effect type arguments do not row-match). *)
+(** [is_frozen_async_spawn ctx operation] recognizes only the exact Async declaration that receives
+    the identity-guarded SC.4 dependent typing rule. The check is store-shaped rather than
+    name-shaped: aliases and wrappers may transport the resulting type, but a near-match declaration
+    never acquires the privilege. *)
+let is_frozen_async_spawn ctx operation =
+  let hash_is expected hash = String.equal expected (Hash.to_hex hash) in
+  let tvar_is expected (ty : Kernel.ty) =
+    match ty.it with Kernel.TVar actual -> String.equal expected actual | _ -> false
+  in
+  let unit_is (ty : Kernel.ty) = match ty.it with Kernel.TTuple [] -> true | _ -> false in
+  let app_is expected_hash argument_is (ty : Kernel.ty) =
+    match ty.it with
+    | Kernel.TApp ({ it = Kernel.TRef (Kernel.Hashed hash); _ }, [ argument ]) ->
+        hash_is expected_hash hash && argument_is argument
+    | _ -> false
+  in
+  let task_is = app_is Concurrency_contract.task_type_hash (tvar_is "a") in
+  let task_result_is = app_is Concurrency_contract.task_result_type_hash (tvar_is "a") in
+  let self_row_is ename (row : Kernel.row) =
+    match (row.effects, row.rvar) with
+    | [ Kernel.Named name ], Some tail -> String.equal name ename && String.equal tail "e"
+    | _ -> false
+  in
+  let spawn_is ename (op : Kernel.opspec) =
+    String.equal op.op_name "async.spawn"
+    && op.op_mode = Kernel.Once && task_is op.op_result
+    &&
+    match op.op_params with
+    | [ { it = Kernel.TArrow ([], row, result); _ } ] -> self_row_is ename row && tvar_is "a" result
+    | _ -> false
+  in
+  let await_is (op : Kernel.opspec) =
+    String.equal op.op_name "async.await"
+    && op.op_mode = Kernel.Once
+    && List.length op.op_params = 1
+    && task_is (List.hd op.op_params)
+    && task_result_is op.op_result
+  in
+  let cancel_is (op : Kernel.opspec) =
+    String.equal op.op_name "async.cancel"
+    && op.op_mode = Kernel.Once
+    && List.length op.op_params = 1
+    && task_is (List.hd op.op_params)
+    && unit_is op.op_result
+  in
+  let yield_is (op : Kernel.opspec) =
+    String.equal op.op_name "async.yield"
+    && op.op_mode = Kernel.Once && op.op_params = [] && unit_is op.op_result
+  in
+  match Store.locate ctx.store operation with
+  | Ok
+      {
+        Store.decl = { Kernel.it = Kernel.DefEffect { ename; evars; ops }; _ };
+        decl_hash;
+        role = Store.Operation 0;
+      } -> (
+      hash_is Concurrency_contract.async_effect_hash decl_hash
+      && hash_is (List.assoc "async.spawn" Concurrency_contract.async_operation_hashes) operation
+      && String.equal ename "async" && evars = [ "a" ]
+      &&
+      match ops with
+      | [ spawn; await; cancel; yield ] ->
+          spawn_is ename spawn && await_is await && cancel_is cancel && yield_is yield
+      | _ -> false)
+  | Ok _ | Error _ -> false
+
+(* Operation scheme: forall effect-vars (+free op vars). Ordinarily the callable row carries just
+   the owning effect hash. Frozen [async.spawn] instead shares its thunk's exact [{Async | e}] row:
+   this is the SC.4 non-laundering law in the type itself, so it survives every ordinary higher-order
+   transport and instantiation rather than depending on direct-call syntax. *)
 let op_scheme ctx ?meta (h : Hash.t) : scheme =
-  match Store.locate ctx.store h with
+  match locate ctx h with
   | Ok
       {
         Store.decl = { Kernel.it = Kernel.DefEffect { ename; evars; ops }; _ };
@@ -323,12 +440,79 @@ let op_scheme ctx ?meta (h : Hash.t) : scheme =
       let vars = List.map (fun a -> (a, new_tvar inner)) evars in
       let cenv = { mode = Flexible; tvs = vars; rvs = [] } in
       let self = (ename, TCon (decl_hash, List.map snd vars)) in
-      let params = List.map (conv_decl_ty ctx cenv ~self) o.Kernel.op_params in
-      let result = conv_decl_ty ctx cenv ~self o.Kernel.op_result in
-      (* the row carries the EFFECT's hash: rows name capabilities, not operations *)
-      { ty = TArrow (params, closed_row [ decl_hash ], result); gen_level = ctx.level }
+      let effectself = Some (ename, decl_hash) in
+      let params = List.map (conv_decl_ty ctx cenv ~effectself ~self) o.Kernel.op_params in
+      let result = conv_decl_ty ctx cenv ~effectself ~self o.Kernel.op_result in
+      let operation_row =
+        if is_frozen_async_spawn ctx h then
+          match params with
+          | [ TArrow ([], child_row, _) ] -> child_row
+          | _ ->
+              err ?meta ~code:"E0805"
+                "frozen async.spawn identity resolved to an invalid converted parameter shape"
+        else closed_row [ decl_hash ]
+      in
+      { ty = TArrow (params, operation_row, result); gen_level = ctx.level }
   | Ok _ -> err ?meta ~code:"E0805" "hash %s is not an operation" (Hash.to_hex h)
   | Error ds -> err ?meta ~code:"E0805" "%s" (String.concat "; " (List.map Diag.to_string ds))
+
+(** [operation_mode ctx h] returns the identity-bearing multiplicity declared for operation [h]. It
+    reports E0805 if [h] does not locate an operation, so callers never silently treat malformed
+    metadata as legacy [Multi]. *)
+let operation_mode ctx ?meta (h : Hash.t) : Kernel.op_mode =
+  match locate ctx h with
+  | Ok { Store.decl = { Kernel.it = Kernel.DefEffect { ops; _ }; _ }; role = Store.Operation i; _ }
+    ->
+      (List.nth ops i).Kernel.op_mode
+  | Ok _ -> err ?meta ~code:"E0805" "hash %s is not an operation" (Hash.to_hex h)
+  | Error ds -> err ?meta ~code:"E0805" "%s" (String.concat "; " (List.map Diag.to_string ds))
+
+(** [contains_group_ref expression] reports whether [expression] can recur through its definition
+    group. The affine-resumption checker uses it to reject transfers into helpers whose number of
+    calls cannot be bounded syntactically. *)
+let rec contains_group_ref (expression : Kernel.expr) =
+  match expression.it with
+  | Kernel.GroupRef _ -> true
+  | Kernel.Lam (_, body) | Kernel.Unquote body | Kernel.Ann (body, _) -> contains_group_ref body
+  | Kernel.App (fn, args) -> contains_group_ref fn || List.exists contains_group_ref args
+  | Kernel.Let { value; body; _ } -> contains_group_ref value || contains_group_ref body
+  | Kernel.Match (scrutinee, clauses) ->
+      contains_group_ref scrutinee
+      || List.exists (fun (clause : Kernel.clause) -> contains_group_ref clause.cbody) clauses
+  | Kernel.Tuple items -> List.exists contains_group_ref items
+  | Kernel.Handle { body; ret; ops } ->
+      contains_group_ref body || contains_group_ref ret.rbody
+      || List.exists (fun (clause : Kernel.opclause) -> contains_group_ref clause.obody) ops
+  | Kernel.Lit _ | Kernel.Var _ | Kernel.Ref _ | Kernel.Quote _ -> false
+
+(** [affine_callable ctx hash] exposes a stored lambda to the once-resumption checker. Only direct
+    term lambdas are eligible; builtins and computed callable values remain escape boundaries. A
+    recursive SCC is marked so transferring an affine token into an unbounded call cycle is rejected
+    rather than guessed safe. *)
+let affine_callable ctx hash =
+  match locate ctx hash with
+  | Ok { Store.decl = { Kernel.it = Kernel.DefTerm bindings; _ }; role = Store.Member index; _ } ->
+      let binding = List.nth bindings index in
+      let rec lambda expression =
+        match expression.Kernel.it with
+        | Kernel.Lam (params, body) -> Some (params, body)
+        | Kernel.Ann (subject, _) -> lambda subject
+        | _ -> None
+      in
+      Option.map
+        (fun (params, body) ->
+          Affine_resume.
+            {
+              resolved_key = Hash.to_hex hash;
+              resolved_source =
+                Printf.sprintf "<stored:%s@%s>" (name_of ctx hash)
+                  (String.sub (Hash.to_hex hash) 0 8);
+              resolved_params = params;
+              resolved_body = body;
+              resolved_recursive = List.length bindings > 1 || contains_group_ref binding.value;
+            })
+        (lambda binding.value)
+  | Ok _ | Error _ -> None
 
 (* ------------------------------------------------------------------ *)
 (* Generalization                                                      *)
@@ -343,6 +527,12 @@ let rec is_syntactic_value (e : Kernel.expr) : bool =
   | Kernel.App ({ Kernel.it = Kernel.Ref (_, Kernel.Con); _ }, args) ->
       List.for_all is_syntactic_value args
   | Kernel.Ann (inner, _) -> is_syntactic_value inner
+  | _ -> false
+
+let rec is_immediately_applied_handle (e : Kernel.expr) : bool =
+  match e.Kernel.it with
+  | Kernel.Handle _ -> true
+  | Kernel.Ann (inner, _) -> is_immediately_applied_handle inner
   | _ -> false
 
 (* Close generalizable row tails that occur exactly once in the type: an unconstrained
@@ -364,6 +554,16 @@ let close_lonely_rows ~gen_level (t : ty) : unit =
              Hashtbl.replace counts id (n + 1, r)
          | _ -> ());
         walk result
+    | TResume (input, row, answer) ->
+        walk input;
+        (let row = repr_row row in
+         match row.tail with
+         | RVar ({ contents = RUnbound { id; level } } as rv) when level > gen_level -> (
+             match Hashtbl.find_opt counts id with
+             | None -> Hashtbl.add counts id (1, rv)
+             | Some (n, _) -> Hashtbl.replace counts id (n + 1, rv))
+         | _ -> ());
+        walk answer
     | TVariadicArrow (param, row, result) ->
         walk param;
         (let row = repr_row row in
@@ -430,21 +630,61 @@ let rec infer_pat ctx (p : Kernel.pat) : ty * (string * ty) list =
 (* ------------------------------------------------------------------ *)
 
 let bind_all bindings env =
-  { env with vars = List.fold_left (fun m (x, t) -> SMap.add x (mono t) m) env.vars bindings }
+  {
+    env with
+    vars = List.fold_left (fun m (x, t) -> SMap.add x (mono t) m) env.vars bindings;
+    restricted = List.fold_left (fun s (x, _) -> SSet.remove x s) env.restricted bindings;
+  }
+
+let rec expr_contains_handle (e : Kernel.expr) =
+  match e.it with
+  | Kernel.Handle _ -> true
+  | Kernel.Lam (_, body) | Kernel.Unquote body | Kernel.Ann (body, _) -> expr_contains_handle body
+  | Kernel.App (fn, args) -> expr_contains_handle fn || List.exists expr_contains_handle args
+  | Kernel.Let { value; body; _ } -> expr_contains_handle value || expr_contains_handle body
+  | Kernel.Match (scrutinee, clauses) ->
+      expr_contains_handle scrutinee
+      || List.exists (fun (clause : Kernel.clause) -> expr_contains_handle clause.cbody) clauses
+  | Kernel.Tuple items -> List.exists expr_contains_handle items
+  | Kernel.Lit _ | Kernel.Var _ | Kernel.Ref _ | Kernel.Quote _ | Kernel.GroupRef _ -> false
+
+let handler_annotation_hint =
+  "include the handled effect on the callback row, for example `() ->{Abort | e} a`; the handler \
+   removes it from the outer row"
+
+let contains_substring text fragment =
+  let text_length = String.length text and fragment_length = String.length fragment in
+  let rec search offset =
+    offset + fragment_length <= text_length
+    && (String.sub text offset fragment_length = fragment || search (offset + 1))
+  in
+  search 0
+
+let handler_mismatch_hint expression detail =
+  if expr_contains_handle expression && contains_substring detail "effect row" then
+    Some handler_annotation_hint
+  else None
 
 let rec term_scheme ctx ?meta (h : Hash.t) : scheme =
-  match Hashtbl.find_opt ctx.builtin_sigs h with
+  match Hashtbl.find_opt ctx.term_sigs h with
   | Some s -> s
   | None -> (
-      match Hashtbl.find_opt ctx.term_sigs h with
+      let () =
+        if not ctx.trusted_store_refs then
+          match Store.locate ctx.store h with
+          | Ok _ -> ()
+          | Error ds ->
+              err ?meta ~code:"E0805" "%s" (String.concat "; " (List.map Diag.to_string ds))
+      in
+      match Hashtbl.find_opt ctx.builtin_sigs h with
       | Some s -> s
       | None -> (
-          match Store.locate ctx.store h with
+          match locate ctx h with
           | Ok { Store.decl = { Kernel.it = Kernel.DefTerm _; _ } as decl; decl_hash; _ } ->
               if List.exists (Hash.equal decl_hash) ctx.checking then
                 err ?meta ~code:"E0805" "cyclic dependency between declarations reached the checker"
               else begin
-                check_group ctx decl;
+                with_trusted_store_refs ctx (fun () -> check_group ctx decl);
                 match Hashtbl.find_opt ctx.term_sigs h with
                 | Some s -> s
                 | None -> err ?meta ~code:"E0805" "term %s did not check" (Hash.to_hex h)
@@ -453,7 +693,8 @@ let rec term_scheme ctx ?meta (h : Hash.t) : scheme =
           | Error ds ->
               err ?meta ~code:"E0805" "%s" (String.concat "; " (List.map Diag.to_string ds))))
 
-and infer ctx env ~(ambient : row) (e : Kernel.expr) : ty =
+and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(required : Hash.t list)
+    (e : Kernel.expr) : ty =
   let meta = e.Kernel.meta in
   match e.Kernel.it with
   | _ when Option.is_some (Meta.surface_hole meta) -> new_tvar ctx.level
@@ -474,12 +715,38 @@ and infer ctx env ~(ambient : row) (e : Kernel.expr) : ty =
       let params_tys_bs = List.map (infer_pat ctx) params in
       let param_tys = List.map fst params_tys_bs in
       let env' = bind_all (List.concat_map snd params_tys_bs) env in
-      let lam_ambient = { effects = []; tail = new_rvar ctx.level } in
-      let body_ty = infer ctx env' ~ambient:lam_ambient body in
-      TArrow (param_tys, lam_ambient, body_ty)
+      let lam_ambient = ref (open_row ctx.level []) in
+      let body_ty = infer ctx env' ~ambient:lam_ambient ~required:[] body in
+      TArrow (param_tys, !lam_ambient, body_ty)
   | Kernel.App (fn, args) -> (
-      let fn_ty = infer ctx env ~ambient fn in
-      let arg_tys = List.map (infer ctx env ~ambient) args in
+      let fn_ty =
+        if
+          is_immediately_applied_handle fn
+          && List.for_all Affine_resume.is_immediate_transformer_argument args
+        then
+          (* This context is decided before inference and is not propagated through aliases.
+             Type annotations are transparent, so only annotations around the literal function
+             child of this one application may preserve it. *)
+          infer ~immediate_transformer:true ctx env ~ambient ~required fn
+        else infer ctx env ~ambient ~required fn
+      in
+      let arg_tys = List.map (infer ctx env ~ambient ~required) args in
+      let restricted_callee =
+        let rec local_name (e : Kernel.expr) =
+          match e.it with
+          | Kernel.Var x -> Some x
+          | Kernel.Ann (inner, _) -> local_name inner
+          | _ -> None
+        in
+        Option.bind (local_name fn) (fun x -> if SSet.mem x env.restricted then Some x else None)
+      in
+      let include_callee frow =
+        try
+          Types.require_effects ~level:ctx.level required frow;
+          ambient := Types.include_rows ~sub:frow ~into:!ambient
+        with Unify_error detail ->
+          err ~meta ~code:"E0801" "effect row mismatch at this application (%s)" detail
+      in
       match repr fn_ty with
       | TArrow (params, frow, result) ->
           if List.length params <> List.length args then
@@ -509,20 +776,39 @@ and infer ctx env ~(ambient : row) (e : Kernel.expr) : ty =
                 && (match arg.it with Kernel.Ref (_, Kernel.Term) -> true | _ -> false)
                 && eta_expansion_candidate ctx expected actual
               in
+              if
+                is_secret_ty ctx actual
+                && (is_text_ty ctx expected
+                   || Option.equal String.equal (Meta.name fn.meta) (Some "debug.inspect"))
+              then
+                err ~meta:diagnostic_meta ~code:"E0819"
+                  ~hint:
+                    "keep the value opaque; only `secret.expose` converts Secret to Text, and that \
+                     operation remains in the Secret effect row"
+                  "Secret has no Show or serialization instance and generic inspection is redacted";
               try Types.unify expected actual
-              with Unify_error detail ->
-                if eta then
-                  err ~meta:arg.meta ~code:"E0807"
-                    ~hint:"wrap the reference in `fn () -> ...` so the computation is delayed"
-                    "this position expects a thunk, but `%s` is a bare reference; wrap it in `fn \
-                     () -> ...`"
-                    (Option.value ~default:"this value" (Meta.name arg.meta))
-                else
-                  err ~meta:diagnostic_meta
-                    ~hint:
-                      "the expected side comes from the surrounding context; make both sides agree"
-                    ~code:"E0801" "%s: expected %s, got %s (%s)" what (show_ty ctx expected)
-                    (show_ty ctx actual) detail)
+              with Unify_error detail -> (
+                match restricted_callee with
+                | Some name ->
+                    err ~meta:fn.meta ~code:"E0818"
+                      ~hint:
+                        "eta-expand the binding to a lambda value, or give each use its own binding"
+                      "local binding `%s` comes from a non-value and remains monomorphic under the \
+                       value restriction"
+                      name
+                | None when eta ->
+                    err ~meta:arg.meta ~code:"E0807"
+                      ~hint:"wrap the reference in `fn () -> ...` so the computation is delayed"
+                      "this position expects a thunk, but `%s` is a bare reference; wrap it in `fn \
+                       () -> ...`"
+                      (Option.value ~default:"this value" (Meta.name arg.meta))
+                | None ->
+                    err ~meta:diagnostic_meta
+                      ~hint:
+                        "the expected side comes from the surrounding context; make both sides \
+                         agree"
+                      ~code:"E0801" "%s: expected %s, got %s (%s)" what (show_ty ctx expected)
+                      (show_ty ctx actual) detail))
             (List.combine args (List.combine params arg_tys));
           (* record who introduced each effect, for the manifest diagnostic (W3.6) *)
           (let callee =
@@ -538,9 +824,16 @@ and infer ctx env ~(ambient : row) (e : Kernel.expr) : ty =
                      ctx.origins <- (h, name) :: ctx.origins)
                  (repr_row frow).effects
            | None -> ());
-          (try Types.unify_rows (opened ctx frow) ambient
-           with Unify_error detail ->
-             err ~meta ~code:"E0801" "effect row mismatch at this application (%s)" detail);
+          include_callee frow;
+          result
+      | TResume (param, frow, result) ->
+          if List.length args <> 1 then
+            err ~meta ~hint:"a resumption accepts exactly the operation's result value"
+              ~code:"E0803" "this resumption expects 1 argument, got %d" (List.length args);
+          ctx.tier_apps <- (frow, Tier.KFn) :: ctx.tier_apps;
+          let arg = List.hd args and actual = List.hd arg_tys in
+          unify_or ctx ~meta:arg.meta ~what:"resumption argument" param actual;
+          include_callee frow;
           result
       | TVariadicArrow (param, frow, result) ->
           ctx.tier_apps <- (frow, Tier.KFn) :: ctx.tier_apps;
@@ -548,15 +841,14 @@ and infer ctx env ~(ambient : row) (e : Kernel.expr) : ty =
             (fun ((arg : Kernel.expr), actual) ->
               unify_or ctx ~meta:arg.meta ~what:"variadic argument" param actual)
             (List.combine args arg_tys);
-          (try Types.unify_rows (opened ctx frow) ambient
-           with Unify_error detail ->
-             err ~meta ~code:"E0801" "effect row mismatch at this application (%s)" detail);
+          include_callee frow;
           result
       | TVar _ ->
           let result = new_tvar ctx.level in
-          unify_or ctx ~meta ~what:"function position" fn_ty (TArrow (arg_tys, ambient, result));
-          (* unknown callee: the call runs with ambient effects; record what ambient resolves to *)
-          ctx.tier_apps <- (ambient, Tier.KFn) :: ctx.tier_apps;
+          let frow = open_row ctx.level [] in
+          unify_or ctx ~meta ~what:"function position" fn_ty (TArrow (arg_tys, frow, result));
+          include_callee frow;
+          ctx.tier_apps <- (frow, Tier.KFn) :: ctx.tier_apps;
           result
       | t ->
           if surface_form_is meta [ "pipe" ] then
@@ -573,32 +865,54 @@ and infer ctx env ~(ambient : row) (e : Kernel.expr) : ty =
              binding is attached directly (no unification with an outer-level variable,
              which would demote the levels and kill generalization). *)
           ctx.level <- ctx.level + 1;
-          let vty = infer ctx env ~ambient value in
+          let vty = infer ctx env ~ambient ~required value in
           ctx.level <- ctx.level - 1;
           close_lonely_rows ~gen_level:ctx.level vty;
-          let env' = { env with vars = SMap.add x { ty = vty; gen_level = ctx.level } env.vars } in
-          infer ctx env' ~ambient body
+          let env' =
+            {
+              env with
+              vars = SMap.add x { ty = vty; gen_level = ctx.level } env.vars;
+              restricted = SSet.remove x env.restricted;
+            }
+          in
+          infer ctx env' ~ambient ~required body
       | _ ->
           (* monomorphic: destructuring binders and non-value bindings *)
-          let vty = infer ctx env ~ambient value in
+          let vty = infer ctx env ~ambient ~required value in
           let pat_ty, bindings = infer_pat ctx binder in
           unify_or ctx ~meta ~what:"let binder" pat_ty vty;
-          infer ctx (bind_all bindings env) ~ambient body)
+          let env' = bind_all bindings env in
+          let env' =
+            if is_syntactic_value value then env'
+            else
+              {
+                env' with
+                restricted =
+                  List.fold_left (fun names (x, _) -> SSet.add x names) env'.restricted bindings;
+              }
+          in
+          infer ctx env' ~ambient ~required body)
   | Kernel.Let { isrec = true; binder; value; body } -> (
       match binder.Kernel.it with
       | Kernel.PVar x ->
           ctx.level <- ctx.level + 1;
           let fty = new_tvar ctx.level in
           let env_rec = bind_all [ (x, fty) ] env in
-          let vty = infer ctx env_rec ~ambient value in
+          let vty = infer ctx env_rec ~ambient ~required value in
           unify_or ctx ~meta ~what:"recursive binding" fty vty;
           ctx.level <- ctx.level - 1;
           close_lonely_rows ~gen_level:ctx.level fty;
-          let env' = { env with vars = SMap.add x { ty = fty; gen_level = ctx.level } env.vars } in
-          infer ctx env' ~ambient body
+          let env' =
+            {
+              env with
+              vars = SMap.add x { ty = fty; gen_level = ctx.level } env.vars;
+              restricted = SSet.remove x env.restricted;
+            }
+          in
+          infer ctx env' ~ambient ~required body
       | _ -> err ~meta ~code:"E0805" "malformed let rec survived validation")
   | Kernel.Match (scrutinee, clauses) ->
-      let sty = infer ctx env ~ambient scrutinee in
+      let sty = infer ctx env ~ambient ~required scrutinee in
       let result = new_tvar ctx.level in
       let surface_if = surface_form_is meta [ "if" ] in
       List.iteri
@@ -608,41 +922,49 @@ and infer ctx env ~(ambient : row) (e : Kernel.expr) : ty =
             ~meta:(if surface_if then scrutinee.meta else cmeta)
             ~what:(if surface_if then "if condition" else "match pattern")
             sty pty;
-          let bty = infer ctx (bind_all bindings env) ~ambient cbody in
+          let bty = infer ctx (bind_all bindings env) ~ambient ~required cbody in
           let what =
             if surface_if then if index = 0 then "if `then` branch" else "if `else` branch"
             else "match clause result"
           in
-          unify_or ctx ~meta:(if surface_if then cbody.meta else cmeta) ~what result bty)
+          unify_join_or ctx ~meta:(if surface_if then cbody.meta else cmeta) ~what result bty)
         clauses;
       ctx.sites <-
         { scrutinee_ty = sty; arms = clauses; site_meta = scrutinee.Kernel.meta } :: ctx.sites;
       result
-  | Kernel.Tuple items -> TTuple (List.map (infer ctx env ~ambient) items)
+  | Kernel.Tuple items -> TTuple (List.map (infer ctx env ~ambient ~required) items)
   | Kernel.Handle { body; ret = { rbinder; rbody; rmeta }; ops } ->
-      (* body ambient = handled effects joined onto the outer ambient *)
       let handled =
         List.filter_map
           (fun (oc : Kernel.opclause) ->
             match oc.Kernel.op with
             | Kernel.Hashed h -> (
-                match Store.locate ctx.store h with
+                match locate ctx h with
                 | Ok { Store.decl_hash; role = Store.Operation _; _ } -> Some decl_hash
                 | _ -> err ~meta:oc.Kernel.ometa ~code:"E0805" "op clause is not an operation")
             | Kernel.Named n -> err ~meta:oc.Kernel.ometa ~code:"E0811" "unresolved op `%s`" n)
           ops
       in
-      let outer = repr_row ambient in
-      let body_ambient =
-        { effects = List.sort_uniq Hash.compare (handled @ outer.effects); tail = outer.tail }
+      (* The body starts with an independent tail. Calls inside it specialize flexible computation
+         rows with exactly the handled labels; after solving, subtraction joins only the body's
+         unhandled remainder into the surrounding ambient. *)
+      let body_ambient = ref (open_row ctx.level handled) in
+      let body_required = List.sort_uniq Hash.compare (handled @ required) in
+      let body_ty = infer ctx env ~ambient:body_ambient ~required:body_required body in
+      let solved_body = repr_row !body_ambient in
+      let continuation_row =
+        {
+          effects =
+            List.filter (fun eff -> not (List.exists (Hash.equal eff) handled)) solved_body.effects;
+          tail = solved_body.tail;
+        }
       in
-      let body_ty = infer ctx env ~ambient:body_ambient body in
       let answer = new_tvar ctx.level in
       (* return clause: binder gets the body's type; result is the answer type *)
       let rpt, rbindings = infer_pat ctx rbinder in
       unify_or ctx ~meta:rmeta ~what:"return clause binder" body_ty rpt;
-      let rty = infer ctx (bind_all rbindings env) ~ambient rbody in
-      unify_or ctx ~meta:rmeta ~what:"return clause result" answer rty;
+      let rty = infer ctx (bind_all rbindings env) ~ambient ~required rbody in
+      unify_join_or ctx ~meta:rmeta ~what:"return clause result" answer rty;
       (* op clauses *)
       List.iter
         (fun (oc : Kernel.opclause) ->
@@ -664,14 +986,58 @@ and infer ctx env ~(ambient : row) (e : Kernel.expr) : ty =
                 bs)
               op_params oc.Kernel.params
           in
-          (* resume : (op result) ->{outer ambient} answer *)
-          let resume_ty = TArrow ([ op_result ], ambient, answer) in
+          (* The same continuation row is used twice on purpose. It is the effect of invoking
+             [resume], because resumption runs the body's unhandled suffix; it also escapes through
+             the handler even when a clause drops [resume], because the subject can execute that
+             suffix on paths where no handled operation intercepts it. Effects introduced only by
+             clauses or by expressions outside this handler remain in their ordinary ambients.
+             Multi resumptions remain ordinary functions. Once resumptions are callable but affine;
+             their local usage pass runs first so escape errors are reported at the capture site. *)
+          let mode = operation_mode ctx ~meta:oc.Kernel.ometa oh in
+          let resume_ty =
+            match mode with
+            | Kernel.Multi -> TArrow ([ op_result ], continuation_row, answer)
+            | Kernel.Once -> TResume (op_result, continuation_row, answer)
+          in
           let env' = bind_all ((oc.Kernel.resume, resume_ty) :: bindings) env in
+          let affine_context =
+            if immediate_transformer then Affine_resume.Immediately_applied_transformer
+            else Affine_resume.Ordinary
+          in
           ctx.tier_ops <-
             (oh, Tier.discipline ~resume:oc.Kernel.resume oc.Kernel.obody) :: ctx.tier_ops;
-          let cty = infer ctx env' ~ambient oc.Kernel.obody in
-          unify_or ctx ~meta:oc.Kernel.ometa ~what:"op clause result" answer cty)
+          (match mode with
+          | Kernel.Multi -> ()
+          | Kernel.Once -> (
+              (* Escape checking runs before inference so laundering a Resume retains E0817.
+                 In the immediate-transformer context it also proves each Resume-produced answer
+                 is the direct function child of one application, preventing a later Once token
+                 carried by that answer from being bound or duplicated.
+                 Duplicate-consumption checking waits until after inference and answer-type
+                 unification, ensuring malformed calls retain their ordinary E0801/E0803 error. *)
+              match
+                Affine_resume.check_escapes ~resolve_term:(affine_callable ctx)
+                  ~context:affine_context ~resume:oc.Kernel.resume oc.Kernel.obody
+              with
+              | Ok () -> ()
+              | Error (diagnostic :: _) -> raise (Err diagnostic)
+              | Error [] -> assert false));
+          let cty = infer ctx env' ~ambient ~required oc.Kernel.obody in
+          unify_join_or ctx ~meta:oc.Kernel.ometa ~what:"op clause result" answer cty;
+          match mode with
+          | Kernel.Multi -> ()
+          | Kernel.Once -> (
+              match
+                Affine_resume.check_clause ~resolve_term:(affine_callable ctx)
+                  ~context:affine_context ~resume:oc.Kernel.resume oc.Kernel.obody
+              with
+              | Ok () -> ()
+              | Error (diagnostic :: _) -> raise (Err diagnostic)
+              | Error [] -> assert false))
         ops;
+      (try ambient := Types.include_rows ~sub:continuation_row ~into:!ambient
+       with Unify_error detail ->
+         err ~meta ~code:"E0801" "effect row mismatch leaving this handler (%s)" detail);
       answer
   | Kernel.Quote payload ->
       (* the payload is data; live splices evaluate at quote time, so they must produce
@@ -682,7 +1048,7 @@ and infer ctx env ~(ambient : row) (e : Kernel.expr) : ty =
           | [ Form.F sp ] -> (
               match Kernel.expr_of_form sp with
               | Ok se ->
-                  let st = infer ctx env ~ambient se in
+                  let st = infer ctx env ~ambient ~required se in
                   unify_or ctx ~meta:f.Form.meta ~what:"unquote splice" (prim ctx.p_code) st
               | Error ds -> raise (Err (List.hd ds)))
           | _ -> err ~meta:f.Form.meta ~code:"E0805" "malformed unquote"
@@ -698,10 +1064,14 @@ and infer ctx env ~(ambient : row) (e : Kernel.expr) : ty =
   | Kernel.Ann (subject, ann) ->
       let cenv = { mode = Rigid; tvs = []; rvs = [] } in
       let expected = conv_ty ctx cenv ann in
-      let actual = infer ctx env ~ambient subject in
+      let actual = infer ~immediate_transformer ctx env ~ambient ~required subject in
       (try Types.unify expected actual
        with Unify_error detail ->
-         err ~meta ~hint:"the annotation is the contract: change the body or the annotation"
+         err ~meta
+           ~hint:
+             (Option.value
+                ~default:"the annotation is the contract: change the body or the annotation"
+                (handler_mismatch_hint subject detail))
            ~code:"E0804" "annotation mismatch: expected %s, got %s (%s)" (show_ty ctx expected)
            (show_ty ctx actual) detail);
       expected
@@ -737,14 +1107,16 @@ and check_type_decl ctx (d : Kernel.decl) : unit =
       | None -> ());
       let inner = ctx.level + 1 in
       let vars = List.map (fun a -> (a, new_tvar inner)) evars in
-      let self = (ename, TCon (Hash.of_string "self-placeholder", List.map snd vars)) in
+      let placeholder = Hash.of_string "self-placeholder" in
+      let self = (ename, TCon (placeholder, List.map snd vars)) in
+      let effectself = Some (ename, placeholder) in
       List.iter
         (fun (o : Kernel.opspec) ->
           let cenv = { mode = Flexible; tvs = vars; rvs = [] } in
           List.iter
-            (fun p -> ignore (conv_decl_ty ctx cenv ~unbound_code:"E0812" ~self p))
+            (fun p -> ignore (conv_decl_ty ctx cenv ~unbound_code:"E0812" ~effectself ~self p))
             o.Kernel.op_params;
-          ignore (conv_decl_ty ctx cenv ~unbound_code:"E0812" ~self o.Kernel.op_result))
+          ignore (conv_decl_ty ctx cenv ~unbound_code:"E0812" ~effectself ~self o.Kernel.op_result))
         ops
   | Kernel.DefTerm _ -> ()
 
@@ -785,12 +1157,12 @@ and check_group ?recovery_group ctx (decl : Kernel.decl) : unit =
           let env = { empty_env with group } in
           List.iteri
             (fun i (b : Kernel.binding) ->
-              let ambient = { effects = []; tail = new_rvar ctx.level } in
-              let vty = infer ctx env ~ambient b.Kernel.value in
+              let ambient = ref (open_row ctx.level []) in
+              let vty = infer ctx env ~ambient ~required:[] b.Kernel.value in
               (* the binding BODY itself must be effect-free (its value's effects live on
                  arrows): a non-lambda effectful body would otherwise type as pure and give
                  `check --manifest` a false pass (review finding) *)
-              (match (repr_row ambient).effects with
+              (match (repr_row !ambient).effects with
               | [] -> ()
               | h :: _ ->
                   err ~meta:b.Kernel.bmeta ~code:"E0815"
@@ -804,17 +1176,18 @@ and check_group ?recovery_group ctx (decl : Kernel.decl) : unit =
                   let rigid = conv_ty ctx cenv ann in
                   try Types.unify rigid vty
                   with Unify_error detail ->
+                    let hint = handler_mismatch_hint b.Kernel.value detail in
                     if surface_form_is b.Kernel.bmeta [ "equation-definition" ] then
-                      err ~meta:b.Kernel.value.meta ~code:"E0804"
+                      err ?hint ~meta:b.Kernel.value.meta ~code:"E0804"
                         "equation definition `%s` does not match its signature: expected %s, got \
                          %s (%s)"
                         b.Kernel.bname (show_ty ctx rigid) (show_ty ctx vty) detail
                     else
-                      err ~meta:b.Kernel.bmeta ~code:"E0804"
+                      err ?hint ~meta:b.Kernel.bmeta ~code:"E0804"
                         "binding %s does not match its annotation: expected %s, got %s (%s)"
                         b.Kernel.bname (show_ty ctx rigid) (show_ty ctx vty) detail)
               | None ->
-                  unify_or ctx ~meta:b.Kernel.bmeta
+                  unify_join_or ctx ~meta:b.Kernel.bmeta
                     ~what:
                       (if surface_form_is b.Kernel.bmeta [ "equation-definition" ] then
                          "equation definition"
@@ -862,10 +1235,11 @@ let constructors_of ctx ?meta (h : Hash.t) (args : ty list) :
   if
     (* the primitive marker types are opaque: their token constructors exist only to give
        the declarations distinct identities and must not drive exhaustiveness *)
-    List.exists (Hash.equal h) [ ctx.p_int; ctx.p_real; ctx.p_text; ctx.p_code ]
+    List.exists (Hash.equal h)
+      [ ctx.p_int; ctx.p_real; ctx.p_text; ctx.p_code; ctx.p_hash; ctx.p_secret ]
   then None
   else
-    match Store.locate ctx.store h with
+    match locate ctx h with
     | Ok { Store.decl = { Kernel.it = Kernel.DefType { tname; tvars; cons }; _ }; decl_hash; _ }
       when List.length tvars = List.length args ->
         let cenv = { mode = Flexible; tvs = List.combine tvars args; rvs = [] } in
@@ -1153,15 +1527,20 @@ let make_ctx (store : Store.t) : (ctx, Diag.t list) result =
     | Some { Resolve.hash; _ } -> Ok hash
     | None -> Error [ Diag.error ~code:"E0805" (Printf.sprintf "primitive type `%s` missing" name) ]
   in
-  match (lookup "int", lookup "real", lookup "text", lookup "code") with
-  | Ok p_int, Ok p_real, Ok p_text, Ok p_code ->
+  match
+    (lookup "int", lookup "real", lookup "text", lookup "code", lookup "hash", lookup "secret")
+  with
+  | Ok p_int, Ok p_real, Ok p_text, Ok p_code, Ok p_hash, Ok p_secret ->
       Ok
         {
           store;
+          trusted_store_refs = false;
           p_int;
           p_real;
           p_text;
           p_code;
+          p_hash;
+          p_secret;
           builtin_sigs = Hashtbl.create 32;
           term_sigs = Hashtbl.create 64;
           level = 0;
@@ -1171,7 +1550,13 @@ let make_ctx (store : Store.t) : (ctx, Diag.t list) result =
           tier_apps = [];
           tier_ops = [];
         }
-  | Error ds, _, _, _ | _, Error ds, _, _ | _, _, Error ds, _ | _, _, _, Error ds -> Error ds
+  | Error ds, _, _, _, _, _
+  | _, Error ds, _, _, _, _
+  | _, _, Error ds, _, _, _
+  | _, _, _, Error ds, _, _
+  | _, _, _, _, Error ds, _
+  | _, _, _, _, _, Error ds ->
+      Error ds
 
 type top_sig = {
   names : (string * scheme) list;  (** defterm members, or [("_", scheme)] for an expr *)
@@ -1193,19 +1578,19 @@ let check_top_with ?recovery_identity ~recovery ctx (top : Kernel.top) :
     let partial =
       match top with
       | Kernel.Expr e ->
-          let ambient = { effects = []; tail = new_rvar ctx.level } in
+          let ambient = ref (open_row ctx.level []) in
           let saved = ctx.level in
           let ty =
             Fun.protect
               ~finally:(fun () -> ctx.level <- saved)
               (fun () ->
                 ctx.level <- ctx.level + 1;
-                infer ctx empty_env ~ambient e)
+                infer ctx empty_env ~ambient ~required:[] e)
           in
           close_lonely_rows ~gen_level:ctx.level ty;
           {
             names = [ ("_", { ty; gen_level = ctx.level }) ];
-            row = Some (repr_row ambient);
+            row = Some (repr_row !ambient);
             warnings = [];
           }
       | Kernel.Decl d -> (
@@ -1292,10 +1677,13 @@ module Recovery = struct
     let builtin_sigs, term_sigs = clone_table_pairs base.builtin_sigs base.term_sigs in
     {
       store = base.store;
+      trusted_store_refs = false;
       p_int = base.p_int;
       p_real = base.p_real;
       p_text = base.p_text;
       p_code = base.p_code;
+      p_hash = base.p_hash;
+      p_secret = base.p_secret;
       builtin_sigs;
       term_sigs;
       level = 0;
@@ -1331,7 +1719,22 @@ let force_term ctx (h : Hash.t) : (scheme, Diag.t list) result =
 (** Render an effect row for manifests and signatures. *)
 let show_row ctx (r : row) : string =
   let r = repr_row r in
-  String.concat ", " (List.map (name_of ctx) (List.sort Hash.compare r.effects))
+  let named =
+    r.effects
+    |> List.map (fun identity -> (name_of ctx identity, identity))
+    |> List.sort (fun (name_a, hash_a) (name_b, hash_b) ->
+        match String.compare name_a name_b with 0 -> Hash.compare hash_a hash_b | order -> order)
+  in
+  let collides name =
+    List.fold_left
+      (fun count (candidate, _) -> if candidate = name then count + 1 else count)
+      0 named
+    > 1
+  in
+  named
+  |> List.map (fun (name, identity) ->
+      if collides name then Printf.sprintf "%s [#%s]" name (Hash.to_hex identity) else name)
+  |> String.concat ", "
 
 (* ------------------------------------------------------------------ *)
 (* Capability manifest (W3.6)                                          *)
@@ -1351,19 +1754,32 @@ let manifest_errors ctx ?(grantable = []) ~(granted : Hash.t list) (row : row) :
           | Some name -> Printf.sprintf " (performed via `%s`)" name
           | None -> ""
         in
-        let name = name_of ctx h in
-        (* pure effects (abort, state, ...) are never grantable; don't send the user to a
-           --allow flag that will bounce with E0703. Callers pass Prelude.grantable_names;
-           an empty list keeps the generic hint. *)
+        let name_hint = name_of ctx h in
+        let metadata = Effect_registry.find_canonical h in
+        let requirement = Effect_registry.render_manifest_requirement ~name_hint h in
+        (* Pure effects (abort, state, ...) and world facades are never root-grantable, but their
+           remediation differs: pure effects explain the language-level restriction, while a
+           facade such as Workspace must be handled by its membrane. Callers pass
+           Prelude.grantable_names; an empty list keeps the generic hint. Identity, rather than a
+           colliding user-effect spelling, decides whether a built-in grant is ever suggested. *)
         let hint =
-          if grantable = [] || List.mem name grantable then
-            Printf.sprintf "grant it with --allow %s, or handle the effect in the program" name
-          else "handle the effect in the program (this effect is pure and cannot be granted)"
+          match metadata with
+          | Some metadata
+            when grantable = [] || List.mem metadata.Effect_registry.index_name grantable ->
+              Printf.sprintf "grant it with --allow %s, or handle the effect in the program"
+                metadata.index_name
+          | Some metadata when metadata.tier = Effect_registry.World ->
+              Printf.sprintf
+                "handle %s in the program (%s is a world facade and is not root-grantable)"
+                metadata.display_name metadata.display_name
+          | Some _ -> "handle the effect in the program (this effect is pure and cannot be granted)"
+          | None ->
+              "handle the effect in the program (unregistered user effects have no built-in \
+               --allow grant)"
         in
         Some
           (Diag.error ~code:"E0814" ~hint
-             (Printf.sprintf "this program requires the `%s` effect, which is not granted%s" name
-                via)))
+             (Printf.sprintf "this program requires %s, which is not granted%s" requirement via)))
     row.effects
 
 (** Registry of every diagnostic code the checker can emit (W3.7's coverage check keys on this list;
@@ -1383,6 +1799,10 @@ let checker_codes : (string * string) list =
     ("E0813", "non-exhaustive match (with a missing-pattern witness)");
     ("E0814", "ungranted effect in the program manifest");
     ("E0815", "effectful top-level definition body (effects belong on arrows)");
+    ("E0816", "once resumption consumed twice on one possible execution path");
+    ("E0817", "once resumption escapes its affine handler-clause scope");
+    ("E0818", "polymorphic reuse of a non-value local binding (value restriction)");
+    ("E0819", "opaque Secret used by generic inspection or serialization");
     ("W0801", "redundant match clause");
     ("E1202", "recovery marker rejected by the strict checker");
   ]

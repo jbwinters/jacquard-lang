@@ -67,21 +67,20 @@ passes-sharp?(code) =
 passes-weak?(code) =
   text.eq?(scripted(code, MkResponse(503, "down")), "fallback-human")
 
-preflight-weak() =
+-- Reusable higher-order gate: its own Dist effect stays fixed on the outer
+-- arrow, while the predicate's effects flow through the shared row variable.
+preflight : forall | e. ((Code) ->{| e} Bool) ->{Dist | e} Code
+preflight(passes?) =
   {
     let plan = `op:sample`(plan-prior())
-    `op:observe`(Bernoulli(match passes-weak?(plan) {
+    `op:observe`(Bernoulli(match passes?(plan) {
                              | True -> 1.0
                              | False -> 0.0}), True)
     plan}
 
-preflight-sharp() =
-  {
-    let plan = `op:sample`(plan-prior())
-    `op:observe`(Bernoulli(match passes-sharp?(plan) {
-                             | True -> 1.0
-                             | False -> 0.0}), True)
-    plan}
+preflight-weak() = preflight(passes-weak?)
+
+preflight-sharp() = preflight(passes-sharp?)
 
 posterior-weak() =
   dist.tally(dist.enumerate(fn () -> preflight-weak()), MkEq(code.eq?))

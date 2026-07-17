@@ -14,6 +14,10 @@ type t =
   | VInt of int
   | VReal of float
   | VText of string
+  | VHash of Hash.t  (** an opaque, validated HASH_V0 digest; constructed only by trusted natives *)
+  | VSecret of Secret.t
+      (** opaque secret bytes. Only the trusted [secret.expose] boundary may inspect this payload;
+          generic rendering and diagnostics must use the fixed redaction marker. *)
   | VTuple of t list
   | VCon of { con : Hash.t; name : string; args : t list }
       (** a saturated constructor application; identity is the derived constructor hash (equal to
@@ -31,15 +35,23 @@ type t =
       (** a reviewed internal prelude callback. Its payload type belongs to a Dune-private module,
           so external library clients cannot attach callbacks to this constructor. *)
   | VCode of Form.t  (** a quoted triple; payload is pre-resolution data (spec §5.1) *)
+  | VTask of Task_handle.t
+      (** an opaque scheduler-owned Task handle. The payload has no public constructor, equality,
+          Show instance, or serialization; evaluator boundaries validate its owning run. *)
   | VResume of frame list
       (** a resumption: the sliced continuation as immutable data — invoking it twice just reuses
           the list (multi-shot for free, plan W2.4) *)
+  | VOnceResume of kont Once_state.t
+      (** an affine resumption. Aliases share opaque consumption state, so the dynamic at-most-once
+          check belongs to the captured instance rather than to a particular variable holding it.
+          The private state also binds the token to its creating evaluator run. *)
 
 and env = t ref Env.t
 
-and scope = { env : env; group : Hash.t array }
-(** evaluation scope: lexical environment plus the enclosing defterm group's member hashes (source
-    order), for [GroupRef] *)
+and scope = { env : env; group : Hash.t array; trusted_store_refs : bool }
+(** Evaluation scope: lexical environment, the enclosing defterm group's member hashes, and a
+    private-reference bit. Stored, already-resolved term bodies set the bit; source expressions do
+    not, so explicit hashes cannot reach hidden capability constructors. *)
 
 and frame =
   | FAppFn of { args : Kernel.expr list; scope : scope }
@@ -60,7 +72,7 @@ and handler = {
 
 and kont = frame list
 
-let empty_scope = { env = Env.empty; group = [||] }
+let empty_scope = { env = Env.empty; group = [||]; trusted_store_refs = false }
 let unit_v = VTuple []
 
 (** Stable rendering for goldens and diagnostics. Reals use the reader-compatible spelling; text is
@@ -70,6 +82,8 @@ let rec show = function
   | VInt i -> string_of_int i
   | VReal r -> Printer.real_repr r
   | VText s -> "\"" ^ Printer.escape_text s ^ "\""
+  | VHash hash -> "#" ^ Hash.to_hex hash
+  | VSecret _ -> "<secret redacted>"
   | VTuple items -> "(" ^ String.concat ", " (List.map show items) ^ ")"
   | VCon { name; args = []; _ } -> name
   | VCon { name; args; _ } -> name ^ "(" ^ String.concat ", " (List.map show args) ^ ")"
@@ -79,6 +93,7 @@ let rec show = function
   | VBuiltin (name, _) -> Printf.sprintf "<builtin %s>" name
   | VTrustedBuiltin builtin -> Printf.sprintf "<builtin %s>" (Trusted_builtin.name builtin)
   | VCode payload -> "(quote " ^ Printer.inline_form payload ^ ")"
-  | VResume _ -> "<resume>"
+  | VTask _ -> "<task>"
+  | VResume _ | VOnceResume _ -> "<resume>"
 
 let pp fmt v = Format.pp_print_string fmt (show v)

@@ -1,0 +1,205 @@
+; GM.6 exhaustive support: 4 risks x 5 confidences x 5 dry thresholds x
+; 3 simulator states = 300 cases. The gate returns a disposition and the
+; facade-local once continuation consumes it.
+
+(defeffect gm6-dry-facade ()
+  (op gm6-invoke once ()
+    (tapp (tref result) (tref tool-error) (tref int))))
+
+(defterm
+  ((binding governance-gate-dry-matrix ()
+    (app (var prop) (lit "world-free dry gate matrix")
+      (lam ()
+        (app (var throw.catch)
+          (lam ()
+            (let nonrec (pvar risk-index)
+              (app (var sample) (app (var uniform-int) (lit 0) (lit 3)))
+              (let nonrec (pvar confidence-index)
+                (app (var sample) (app (var uniform-int) (lit 0) (lit 4)))
+                (let nonrec (pvar threshold-index)
+                  (app (var sample) (app (var uniform-int) (lit 0) (lit 4)))
+                  (let nonrec (pvar simulator-index)
+                    (app (var sample) (app (var uniform-int) (lit 0) (lit 2)))
+                    (let nonrec (pvar risk-value)
+                      (match (var risk-index)
+                        (clause (plit 0) (var low))
+                        (clause (plit 1) (var medium))
+                        (clause (plit 2) (var high))
+                        (clause (pwild) (var forbidden)))
+                      (let nonrec (pvar confidence)
+                        (match (var confidence-index)
+                          (clause (plit 0) (lit 0.0))
+                          (clause (plit 1) (lit 0.25))
+                          (clause (plit 2) (lit 0.5))
+                          (clause (plit 3) (lit 0.75))
+                          (clause (pwild) (lit 1.0)))
+                        (let nonrec (pvar threshold)
+                          (match (var threshold-index)
+                            (clause (plit 0) (lit 0.0))
+                            (clause (plit 1) (lit 0.25))
+                            (clause (plit 2) (lit 0.5))
+                            (clause (plit 3) (lit 0.75))
+                            (clause (pwild) (lit 1.0)))
+                          (let nonrec (pvar fixture-hash)
+                            (match
+                              (app (var hash.parse)
+                                (lit
+                                  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+                              (clause (pcon ok (pvar value)) (var value))
+                              (clause (pcon err (pwild))
+                                (app (var throw) (lit "invalid fixture hash"))))
+                            (let nonrec (pvar authority)
+                                (app (var cons)
+                                  (app (var governance-effect) (var fixture-hash))
+                                  (app (var cons)
+                                    (app (var governance-resource)
+                                      (var fixture-hash) (lit "bucket/a")
+                                      (var fixture-hash))
+                                    (var nil)))
+                                (let nonrec (pvar call)
+                                  (match
+                                    (app (var governance.make-call)
+                                      (lit "fs.write")
+                                      (quote (arguments (lit 7)))
+                                      (var authority) (lit "dry write")
+                                      (quote (preconditions)) (var none))
+                                    (clause (pcon ok (pvar value)) (var value))
+                                    (clause (pcon err (pwild))
+                                      (app (var throw) (lit "invalid fixture call"))))
+                                  (let nonrec (pvar policy)
+                                    (match
+                                      (app (var governance.make-dry-policy)
+                                        (var threshold))
+                                      (clause (pcon err (pwild))
+                                        (app (var throw)
+                                          (lit "invalid fixture policy")))
+                                      (clause (pcon ok (pvar value))
+                                        (match
+                                          (app
+                                            (var governance.bind-dry-policy)
+                                            (var value))
+                                          (clause (pcon ok (pvar bound))
+                                            (var bound))
+                                          (clause (pcon err (pwild))
+                                            (app (var throw)
+                                              (lit "invalid bound policy"))))))
+                                    (let nonrec (pvar simulator)
+                                      (match (var simulator-index)
+                                        (clause (plit 0) (var none))
+                                        (clause (plit 1)
+                                          (app (var some)
+                                            (lam () (app (var ok) (lit 7)))))
+                                        (clause (pwild)
+                                          (app (var some)
+                                            (lam ()
+                                              (app (var err)
+                                                (app (var driver-failed)
+                                                  (lit "sim-failed")))))))
+                                      (let nonrec (pvar observed)
+                                        (app (var throw.to-result)
+                                          (lam ()
+                                            (app (var judge.fixed)
+                                              (lam ()
+                                                (app (var audit.in-memory)
+                                                  (lam ()
+                                                    (app (var governance.with-sequence)
+                                                      (lam ((pvar sequence))
+                                                        (handle
+                                                          (let nonrec
+                                                            (pvar result)
+                                                            (app (var gm6-invoke))
+                                                            (tuple (var result)
+                                                              (lit "resumed")))
+                                                          (ret (pvar value)
+                                                            (var value))
+                                                          (opclause gm6-invoke () k
+                                                            (match
+                                                              (app
+                                                                (var
+                                                                  governance.gate-dry)
+                                                                (var sequence)
+                                                                (var policy)
+                                                                (var call)
+                                                                (var simulator)
+                                                                (lam ((pwild))
+                                                                  (app
+                                                                    (var
+                                                                      governance-outcome-summary-v0)
+                                                                    (var governance-v0)
+                                                                    (lit "dry")
+                                                                    (var fixture-hash)
+                                                                    (lit "matrix"))))
+                                                              (clause
+                                                                (pcon simulated
+                                                                  (pvar result))
+                                                                (app (var k)
+                                                                  (var result)))
+                                                              (clause
+                                                                (pcon refuse-dry
+                                                                  (pvar error))
+                                                                (app (var k)
+                                                                  (app (var err)
+                                                                    (var error))))))))
+                                                      ))))
+                                              (app
+                                                (var governance-assessment-v0)
+                                                (var governance-v0)
+                                                (var risk-value) (var confidence)
+                                                (var nil) (quote (evidence))))))
+                                        (match (var observed)
+                                          (clause
+                                            (pcon ok
+                                              (ptuple
+                                                (ptuple (pvar result)
+                                                  (plit "resumed"))
+                                                (pcon cons
+                                                  (pcon evaluated (pcon governance-v0)
+                                                    (plit 0) (pwild) (pwild) (pwild)
+                                                    (pvar verdict-value))
+                                                  (pcon cons
+                                                    (pcon completed (pcon governance-v0)
+                                                      (plit 1) (pwild) (pvar branch) (pwild))
+                                                    (pcon nil)))))
+                                            (app (var check.true)
+                                              (match
+                                                (tuple (var risk-index)
+                                                  (var simulator-index)
+                                                  (var verdict-value)
+                                                  (var result) (var branch))
+                                                (clause
+                                                  (ptuple (plit 3) (pwild)
+                                                    (pcon block)
+                                                    (pcon err
+                                                      (pcon tool-blocked (pwild)))
+                                                    (plit "blocked"))
+                                                  (var true))
+                                                (clause
+                                                  (ptuple (pwild) (plit 0)
+                                                    (pcon simulate)
+                                                    (pcon err
+                                                      (pcon no-simulation))
+                                                    (plit "no-simulation"))
+                                                  (var true))
+                                                (clause
+                                                  (ptuple (pwild) (plit 1)
+                                                    (pcon simulate)
+                                                    (pcon ok (plit 7))
+                                                    (plit "simulated"))
+                                                  (var true))
+                                                (clause
+                                                  (ptuple (pwild) (pwild)
+                                                    (pcon simulate)
+                                                    (pcon err
+                                                      (pcon driver-failed (pwild)))
+                                                    (plit "simulation-failed"))
+                                                  (var true))
+                                                (clause (pwild) (var false)))
+                                              (lit
+                                                "disposition, audit order, sequence, and local Resume")))
+                                          (clause (pwild)
+                                            (app (var check.true) (var false)
+                                              (lit
+                                                "gate must return ordered audit evidence"))))))))))))))))))
+          (lam ((pwild))
+            (app (var check.true) (var false)
+              (lit "fixture construction must remain valid")))))))))

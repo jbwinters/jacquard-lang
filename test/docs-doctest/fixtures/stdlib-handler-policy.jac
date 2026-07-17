@@ -1,11 +1,27 @@
-effect Approval where {
-  ask : (Text) -> Bool
+parsed-hashes = (
+  hash.parse("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+  hash.parse("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+  hash.parse("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"))
+
+match parsed-hashes {
+  | (Ok(subject-hash), Ok(policy-hash), Ok(assessment-hash)) -> {
+      let proposal-value = approval.make-proposal(
+        subject-hash,
+        policy-hash,
+        assessment-hash,
+        [],
+        quote { "ship" },
+        "ship?",
+        None)
+      let proposal-hash = approval.proposal-id(proposal-value)
+      throw.catch(
+        fn () -> approval.dry-run(fn () -> match `op:ask`(proposal-value) {
+	  | Escalate(returned, _) ->
+		  if code.eq?(code.of-hash(returned), code.of-hash(proposal-hash)) then 42 else 0
+	  | Approved(_, _, _) -> 0
+	  | Denied(_, _, _) -> 0
+        }),
+        fn (message) -> 0)
+    }
+  | _ -> 0
 }
-
-approve-and-run(workflow) =
-  handle workflow() {
-    | return result -> Some(result)
-    | ask(prompt) resume continue -> continue(True)
-  }
-
-approve-and-run(fn () -> if ask("ship?") then 42 else 0)

@@ -95,7 +95,7 @@
           (opclause fetch ((pvar req)) k
             (lam ((pvar log))
               (let nonrec (pvar resp) (app (var fetch) (var req))
-                (app (app (var k) (var resp))
+                (let nonrec (pvar next-log)
                   (app (var list.append) (var log)
                     (app (var cons)
                       (app (var code.form) (lit "op")
@@ -103,7 +103,8 @@
                           (app (var cons) (app (app (var codec.encode) (var codec.request)) (var req))
                             (app (var cons) (app (app (var codec.encode) (var codec.response)) (var resp))
                               (var nil)))))
-                      (var nil))))))))
+                      (var nil)))
+                  (app (app (var k) (var resp)) (var next-log)))))))
         (var nil))
       (clause (ptuple (pvar x) (pvar entries))
         (tuple (var x) (app (var code.form) (lit "log") (var entries)))))))))
@@ -216,8 +217,9 @@
                   (app (var text.concat) (lit "fs.in-memory: no such file: ") (var path)))))))
         (opclause write ((pvar path) (pvar content)) k
           (lam ((pvar fs-map))
-            (app (app (var k) (tuple))
-              (app (var map.set) (var fs-map) (var path) (var content)))))
+            (let nonrec (pvar next-map)
+              (app (var map.set) (var fs-map) (var path) (var content))
+              (app (app (var k) (tuple)) (var next-map)))))
         (opclause list-dir ((pwild)) k
           (lam ((pvar fs-map))
             (app (app (var k)

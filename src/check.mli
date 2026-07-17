@@ -30,6 +30,13 @@ val name_of : ctx -> Hash.t -> string
 val show_scheme : ctx -> Types.scheme -> string
 (** [show_scheme ctx scheme] renders a deterministic surface signature using store names. *)
 
+val is_frozen_async_spawn : ctx -> Hash.t -> bool
+(** [is_frozen_async_spawn ctx operation] is true only for the exact pinned SC.4 [async.spawn]
+    identity whose complete resolved Async declaration matches all four frozen operations, modes,
+    type-variable links, Task identities, and self-effect row. Missing or near-match declarations
+    return false. The recognized operation's inferred callable row shares its child thunk row, so
+    every higher-order transport preserves the child-effect charge. *)
+
 val con_scheme : ctx -> ?meta:Meta.t -> Hash.t -> Types.scheme
 (** [con_scheme ctx hash] returns a constructor scheme. It raises [Err] when [hash] is missing, has
     the wrong role, or its declaration is malformed. *)
@@ -66,7 +73,10 @@ val force_term : ctx -> Hash.t -> (Types.scheme, Diag.t list) result
 *)
 
 val show_row : ctx -> Types.row -> string
-(** [show_row ctx row] renders the row's known effects in deterministic name order. *)
+(** [show_row ctx row] renders every resolved identity in deterministic name/hash order. Distinct
+    identities with the same declaration name are disambiguated by full hash rather than collapsed.
+    This compact renderer is for signatures; authority review metadata is provided by
+    {!Effect_registry}. *)
 
 val manifest_errors :
   ctx -> ?grantable:string list -> granted:Hash.t list -> Types.row -> Diag.t list

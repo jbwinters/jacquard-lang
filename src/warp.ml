@@ -2,9 +2,9 @@
 
     Discovery is by CHECKED TYPE (decision D12): a store term whose elaborated type is [test] is a
     hermetic test, [world-test] a world test; names are display only. The hermetic lane runs each
-    thunk under the in-language [test.run] handler via {!Eval.call} (the M1 entry point built for
-    exactly this); the world lane runs only tests whose row the CLI's grants cover, refusing the
-    rest by name.
+    thunk under the in-language [test.run] handler through {!Round_robin.run_call}, so a scoped
+    Async lifecycle uses the same deterministic evaluator driver as the CLI; the world lane runs
+    only tests whose row the CLI's grants cover, refusing the rest by name.
 
     The result cache (W6.3) is an honest lookup table over the Merkle discipline: a Case's key is
     its member hash (which covers its transitive references), a Prop's key adds mode/samples/seed
@@ -59,7 +59,7 @@ let discover (store : Store.t) (cctx : Check.ctx) : discovered list =
 (* --- running (W6.2) --- *)
 
 let value_of ctx (h : Hash.t) : (Value.t, Runtime_err.t) result =
-  Eval.run_expr ctx { Kernel.it = Kernel.Ref (h, Kernel.Term); meta = Meta.empty }
+  Round_robin.run_expr ctx { Kernel.it = Kernel.Ref (h, Kernel.Term); meta = Meta.empty }
 
 (* decompose a runtime report; the shape is pinned by prelude/15-warp.jqd *)
 let verdict_of_report (v : Value.t) : (verdict, string) result =
@@ -97,7 +97,9 @@ let verdict_of_report (v : Value.t) : (verdict, string) result =
    tests record the constant itself but not what it touched. Safe direction only — a
    warm complement can over-report "uncovered", never falsely claim covered. *)
 let run_thunk ctx ~test_run (thunk : Value.t) : (verdict * Hash.t list, string) result =
-  let result, mine = Eval.with_fresh_coverage ctx (fun () -> Eval.call ctx test_run [ thunk ]) in
+  let result, mine =
+    Eval.with_fresh_coverage ctx (fun () -> Round_robin.run_call ctx test_run [ thunk ])
+  in
   match result with
   | Ok report -> Result.map (fun v -> (v, mine)) (verdict_of_report report)
   | Error e ->
@@ -205,19 +207,25 @@ let drive_prop ctx ~rng ~(forced : int list) (thunk : Value.t) :
             | Some i -> (
                 match choice_value ctx d i with
                 | Error e -> Error (`Runtime (Runtime_err.to_string e))
-                | Ok v ->
+                | Ok v -> (
                     log := { c_dist = d; c_index = i } :: !log;
-                    go (Eval.resume_state kont v) rest)))
-    | Ok (Eval.COp { name = "observe"; args = [ _; _ ]; kont; _ }) ->
+                    match Eval.resume_captured_state ctx kont v with
+                    | Error e -> Error (`Runtime (Runtime_err.to_string e))
+                    | Ok state -> go state rest))))
+    | Ok (Eval.COp { name = "observe"; args = [ _; _ ]; kont; _ }) -> (
         (* sampling lane: conditioning is ignored (weights are an enumeration
                concept); the exhaustive lane scales branches properly *)
-        go (Eval.resume_state kont Value.unit_v) forced
+        match Eval.resume_captured_state ctx kont Value.unit_v with
+        | Error e -> Error (`Runtime (Runtime_err.to_string e))
+        | Ok state -> go state forced)
     | Ok
         (Eval.COp
            { name = "check"; args = [ Value.VCon { name = ok; _ }; Value.VText label ]; kont; _ })
-      ->
+      -> (
         entries := (label, ok = "true") :: !entries;
-        go (Eval.resume_state kont Value.unit_v) forced
+        match Eval.resume_captured_state ctx kont Value.unit_v with
+        | Error e -> Error (`Runtime (Runtime_err.to_string e))
+        | Ok state -> go state forced)
     | Ok (Eval.COp { name = "fail"; args = [ Value.VText msg ]; _ }) ->
         let es = List.rev !entries in
         let soft = List.filter_map (fun (l, ok) -> if ok then None else Some l) es in
@@ -356,20 +364,28 @@ let run_prop_exhaustive ctx ~budget (thunk : Value.t) : (verdict * string, Diag.
               let rec go = function
                 | [] -> Ok ()
                 | (v, p) :: rest -> (
-                    match explore (Eval.resume_state kont v) (weight *. p) entries with
-                    | Error e -> Error e
-                    | Ok () -> go rest)
+                    match Eval.resume_captured_state ctx kont v with
+                    | Error e -> Error (Runtime_err.to_string e)
+                    | Ok state -> (
+                        match explore state (weight *. p) entries with
+                        | Error e -> Error e
+                        | Ok () -> go rest))
               in
               go support)
       | Ok (Eval.COp { name = "observe"; args = [ dv; v ]; kont; _ }) -> (
           match Result.bind (Infer_dist.dist_of_value ctx dv) (fun d -> Infer_dist.pmf ctx d v) with
           | Error e -> Error (Runtime_err.to_string e)
-          | Ok p -> explore (Eval.resume_state kont Value.unit_v) (weight *. p) entries)
+          | Ok p -> (
+              match Eval.resume_captured_state ctx kont Value.unit_v with
+              | Error e -> Error (Runtime_err.to_string e)
+              | Ok state -> explore state (weight *. p) entries))
       | Ok
           (Eval.COp
              { name = "check"; args = [ Value.VCon { name = ok; _ }; Value.VText label ]; kont; _ })
-        ->
-          explore (Eval.resume_state kont Value.unit_v) weight ((label, ok = "true") :: entries)
+        -> (
+          match Eval.resume_captured_state ctx kont Value.unit_v with
+          | Error e -> Error (Runtime_err.to_string e)
+          | Ok state -> explore state weight ((label, ok = "true") :: entries))
       | Ok (Eval.COp { name = "fail"; args = [ Value.VText msg ]; _ }) ->
           let es = List.rev entries in
           let soft = List.filter_map (fun (l, ok) -> if ok then None else Some l) es in

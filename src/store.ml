@@ -4,8 +4,10 @@
     - [objects/<decl-hash-hex>.jqd] — the canonical printed form of one resolved declaration,
       written once and never modified (immutable; a re-put of an alpha-equivalent declaration keeps
       the first bytes).
-    - [names.jqd] — the name-to-hash index, the only mutable file. Each entry is a
-      [(named <name> <kind> #<hash>)] form, kinds [term|con|op|type|effect], kept sorted.
+    - [names.jqd] — the public index, the only mutable file. Named entries are
+      [(named <name> <kind> #<hash>)] forms, kinds [term|con|op|type|effect], kept sorted;
+      [(hidden #<derived-hash>)] entries persist opaque host-value members that must not be
+      reconstructed by direct hash after reopen.
 
     Derived hashes (defterm members, constructors, operations) have no object files of their own; an
     in-memory index from every known hash to its owning declaration is rebuilt by scanning
@@ -22,6 +24,7 @@ type located = { decl : Kernel.decl; decl_hash : Hash.t; role : role }
 type t = {
   root : string;
   mutable names : (string * Resolve.entry) list; (* sorted by name *)
+  mutable hidden : Hash.t list; (* sorted derived hashes intentionally absent from public lookup *)
   mutable index : (Hash.t * (Hash.t * role)) list; (* any hash -> owning decl hash + role *)
 }
 
@@ -50,6 +53,11 @@ let kind_of_sym = function
   | "effect" -> Some Resolve.KEffect
   | _ -> None
 
+let private_name_diagnostic name hash =
+  Diag.error ~code:Concurrency_contract.task_escape_code
+    ~hint:"Task handles are created only by async.spawn inside a structured scheduler scope"
+    (Printf.sprintf "name `%s` cannot expose scheduler-private hash %s" name (Hash.to_hex hash))
+
 (* --- names.jqd --- *)
 
 (* Names must be printable symbols or names.jqd could not round-trip through the reader.
@@ -71,17 +79,18 @@ let sort_names ns =
       | c -> c)
     ns
 
-let render_names names =
+let render_names names hidden =
   Printer.print_all
     (List.map
        (fun (n, { Resolve.hash; kind }) ->
          Form.form "named" [ Form.Sym n; Form.Sym (kind_sym kind); Form.Hash hash ])
-       names)
+       names
+    @ List.map (fun hash -> Form.form "hidden" [ Form.Hash hash ]) hidden)
 
 let write_names t =
   (* render fully before opening: open_out_bin truncates, and a render failure after
      truncation would destroy the index *)
-  let rendered = render_names t.names in
+  let rendered = render_names t.names t.hidden in
   let oc = open_out_bin (names_file t) in
   Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () -> output_string oc rendered)
 
@@ -89,15 +98,18 @@ let parse_names ~file src =
   match Reader.parse_string ~file src with
   | Error ds -> Error ds
   | Ok forms ->
-      let rec go acc = function
-        | [] -> Ok (List.rev acc)
+      let rec go names hidden = function
+        | [] -> Ok (List.rev names, List.sort_uniq Hash.compare hidden)
         | { Form.head = "named"; args = [ Form.Sym n; Form.Sym k; Form.Hash h ]; _ } :: rest -> (
             match kind_of_sym k with
-            | Some kind -> go ((n, { Resolve.hash = h; kind }) :: acc) rest
+            | Some _ when Concurrency_contract.is_task_private_hash h ->
+                Error [ private_name_diagnostic n h ]
+            | Some kind -> go ((n, { Resolve.hash = h; kind }) :: names) hidden rest
             | None -> err ~code:"E0603" "corrupt names.jqd: unknown kind `%s`" k)
+        | { Form.head = "hidden"; args = [ Form.Hash h ]; _ } :: rest -> go names (h :: hidden) rest
         | f :: _ -> err ~code:"E0603" "corrupt names.jqd: unexpected `%s` form" f.Form.head
       in
-      go [] forms
+      go [] [] forms
 
 (* --- objects --- *)
 
@@ -134,20 +146,22 @@ let index_entries (decl : Kernel.decl) (hs : Canon.decl_hashes) =
   (hs.Canon.decl_hash, (hs.Canon.decl_hash, Whole)) :: derived
 
 (** [open_store root] opens (creating if needed) a store rooted at [root], rebuilding the hash index
-    from the object files. *)
+    from the object files. A persisted name exposing a scheduler-private hash is rejected with E0907
+    before the index becomes observable. *)
 let open_store root : (t, Diag.t list) result =
-  let t = { root; names = []; index = [] } in
+  let t = { root; names = []; hidden = []; index = [] } in
   if not (Sys.file_exists root) then Sys.mkdir root 0o755;
   if not (Sys.file_exists (objects_dir t)) then Sys.mkdir (objects_dir t) 0o755;
   let names_res =
     if Sys.file_exists (names_file t) then
       parse_names ~file:(names_file t) (read_file (names_file t))
-    else Ok []
+    else Ok ([], [])
   in
   match names_res with
   | Error ds -> Error ds
-  | Ok names -> (
+  | Ok (names, hidden) -> (
       t.names <- names;
+      t.hidden <- hidden;
       let rec scan acc = function
         | [] -> Ok acc
         | file :: rest -> (
@@ -168,6 +182,9 @@ let open_store root : (t, Diag.t list) result =
       with
       | Error ds -> Error ds
       | Ok index ->
+          (* Hidden derived members remain in the private immutable index so already-resolved,
+             store-backed library code can evaluate them. [locate] is the public boundary and
+             rejects them; [locate_internal] is reserved for evaluating such stored code. *)
           t.index <- index;
           Ok t)
 
@@ -182,8 +199,11 @@ let entry_kind (decl : Kernel.decl) = function
   | Operation _ -> Resolve.KOp
 
 (** [put_decl t decl] canonicalizes, hashes, and stores a resolved declaration, then binds every
-    name it introduces (members, type + constructors, effect + operations) in the name index,
-    replacing existing bindings of the same names. Idempotent on the object file. *)
+    public name it introduces (members, type + constructors, effect + operations) in the name index,
+    replacing existing bindings of the same names. The exact frozen Task opaque carrier is indexed
+    by hash for runtime validation but deliberately receives no public constructor name; any stale
+    private binding already in memory is evicted before [names.jqd] is rewritten. Idempotent on the
+    object file. *)
 let put_decl ?origin t (decl : Kernel.decl) : (Canon.decl_hashes, Diag.t list) result =
   let hashes =
     if Recovery_marker.decl decl then Error [ Recovery_marker.diagnostic "store insertion" ]
@@ -225,8 +245,11 @@ let put_decl ?origin t (decl : Kernel.decl) : (Canon.decl_hashes, Diag.t list) r
         List.filter_map
           (fun (n, h) ->
             match List.assoc_opt h fresh with
-            | Some (_, role) -> Some (n, { Resolve.hash = h; kind = entry_kind decl role })
-            | None -> None)
+            | Some (_, role)
+              when (not (List.exists (Hash.equal h) t.hidden))
+                   && not (Concurrency_contract.is_task_private_hash h) ->
+                Some (n, { Resolve.hash = h; kind = entry_kind decl role })
+            | Some _ | None -> None)
           hs.Canon.named
       in
       (* replacement is per (name, kind): a term named x does not evict a type named x *)
@@ -235,7 +258,14 @@ let put_decl ?origin t (decl : Kernel.decl) : (Canon.decl_hashes, Diag.t list) r
           (fun (n', (e' : Resolve.entry)) -> n = n' && e.Resolve.kind = e'.Resolve.kind)
           new_names
       in
-      t.names <- sort_names (new_names @ List.filter (fun b -> not (evicted b)) t.names);
+      t.names <-
+        sort_names
+          (new_names
+          @ List.filter
+              (fun ((_, entry) as binding) ->
+                (not (Concurrency_contract.is_task_private_hash entry.Resolve.hash))
+                && not (evicted binding))
+              t.names);
       write_names t;
       Ok hs
 
@@ -283,8 +313,9 @@ let tier t (h : Hash.t) : Tier.arrow_tier option =
   else
     match read_file path with exception Sys_error _ -> None | s -> Tier.of_string (String.trim s)
 
-(** [locate t h] finds the declaration owning [h] (a decl hash or any derived hash). *)
-let locate t (h : Hash.t) : (located, Diag.t list) result =
+(** [locate_internal t h] finds the declaration owning [h], including a hidden derived member. Only
+    evaluation of already-resolved store objects may use this private-capability path. *)
+let locate_internal t (h : Hash.t) : (located, Diag.t list) result =
   match List.find_opt (fun (h', _) -> Hash.equal h h') t.index with
   | None -> err ~code:"E0601" "unknown hash %s" (Hash.to_hex h)
   | Some (_, (decl_hash, role)) -> (
@@ -296,6 +327,12 @@ let locate t (h : Hash.t) : (located, Diag.t list) result =
         | Error ds -> Error ds
         | Ok (decl, _) -> Ok { decl; decl_hash; role })
 
+(** [locate t h] finds the public declaration owning [h]. Hidden derived members are deliberately
+    reported as unknown so neither direct hash references nor rebinding can reconstruct them. *)
+let locate t (h : Hash.t) : (located, Diag.t list) result =
+  if List.exists (Hash.equal h) t.hidden then err ~code:"E0601" "unknown hash %s" (Hash.to_hex h)
+  else locate_internal t h
+
 (** [get t h] is [locate]'s declaration. *)
 let get t h = Result.map (fun l -> l.decl) (locate t h)
 
@@ -306,11 +343,55 @@ let lookup_all t n = List.filter_map (fun (m, e) -> if m = n then Some e else No
 (** The binding of [n] with kind [k], if any. *)
 let lookup_kind t n k = List.find_opt (fun e -> e.Resolve.kind = k) (lookup_all t n)
 
+(** [lookup_internal_kind t name kind] resolves a public binding or a hidden derived prelude member
+    by its immutable declaration metadata. This is a trusted host-only seam for wiring private
+    builtin markers after reopen; language resolution must continue to use [names_view]. *)
+let lookup_internal_kind t name kind =
+  match lookup_kind t name kind with
+  | Some _ as public -> public
+  | None ->
+      let hidden_name hash =
+        match locate_internal t hash with
+        | Error _ -> None
+        | Ok { decl; role; _ } ->
+            let candidate =
+              match (decl.Kernel.it, role) with
+              | Kernel.DefTerm bindings, Member index ->
+                  Option.map (fun binding -> binding.Kernel.bname) (List.nth_opt bindings index)
+              | Kernel.DefType { cons; _ }, Constructor index ->
+                  Option.map (fun con -> con.Kernel.con_name) (List.nth_opt cons index)
+              | Kernel.DefEffect { ops; _ }, Operation index ->
+                  Option.map (fun op -> op.Kernel.op_name) (List.nth_opt ops index)
+              | _ -> None
+            in
+            Option.bind candidate (fun candidate_name ->
+                if String.equal candidate_name name && entry_kind decl role = kind then
+                  Some { Resolve.hash; kind }
+                else None)
+      in
+      List.find_map hidden_name t.hidden
+
 (** First binding of [n] by kind rank; prefer {!lookup_kind} when the kind is known. *)
 let lookup_name t n = match lookup_all t n with [] -> None | e :: _ -> Some e
 
 (** All name bindings, sorted by (name, kind rank) — the whole mutable index. *)
 let names t = t.names
+
+(** [hide_derived t hash] removes a known member, constructor, or operation from public name and
+    hash lookup while retaining its private immutable index entry for already-resolved store code.
+    Prelude loading uses this for opaque marker and capability constructors: neither a name nor a
+    direct derived-hash reference may reconstruct such a value. Unknown and whole-declaration hashes
+    are left unchanged. *)
+let hide_derived t hash =
+  match List.find_opt (fun (candidate, _) -> Hash.equal candidate hash) t.index with
+  | Some (_, (_, (Member _ | Constructor _ | Operation _))) ->
+      t.hidden <- List.sort_uniq Hash.compare (hash :: t.hidden);
+      t.names <-
+        List.filter
+          (fun (_, (entry : Resolve.entry)) -> not (Hash.equal entry.Resolve.hash hash))
+          t.names;
+      write_names t
+  | Some (_, (_, Whole)) | None -> ()
 
 (** [names_view t] is the resolver's view of this store (the W1.4 seam). *)
 let names_view t : Resolve.names =
@@ -318,13 +399,18 @@ let names_view t : Resolve.names =
 
 (** [bind_name t name hash] binds [name] to a hash already known to the store. Fails on an
     unprintable name (E0605) and on a [defterm] group's whole hash (E0604) — groups are addressed
-    through their members. *)
+    through their members. Scheduler-private hashes fail with E0907 even when their object is
+    present. *)
 let bind_name t name hash : (unit, Diag.t list) result =
   if not (valid_name name) then
     err ~code:"E0605" "invalid name %S: names are lowercase symbols [a-z][a-z0-9-]*" name
+  else if Concurrency_contract.is_task_private_hash hash then
+    Error [ private_name_diagnostic name hash ]
   else
     match List.find_opt (fun (h, _) -> Hash.equal hash h) t.index with
     | None -> err ~code:"E0601" "cannot name unknown hash %s" (Hash.to_hex hash)
+    | Some _ when List.exists (Hash.equal hash) t.hidden ->
+        err ~code:"E0601" "cannot name unknown hash %s" (Hash.to_hex hash)
     | Some (_, (decl_hash, role)) -> (
         match get t decl_hash with
         | Error ds -> Error ds

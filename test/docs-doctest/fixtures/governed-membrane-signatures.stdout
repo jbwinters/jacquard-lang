@@ -1,0 +1,18 @@
+fixture-hash : Hash
+operation-name-of : (WorkspaceOperation) ->{} Text
+call-id-for : (WorkspaceOperation) ->{} Hash
+authority-for : (WorkspaceOperation) ->{} List Authority
+call-for : (WorkspaceOperation) ->{} Call
+proposal-for : (WorkspaceOperation) ->{} Proposal
+outcome-for : (Text) ->{} GovernanceOutcomeSummary
+run-read-simulator : ((Path) ->{} Result ToolError Text, Path) ->{} Result ToolError Text
+run-write-simulator : ((Path, Text) ->{} Result ToolError (), Path, Text) ->{} Result ToolError ()
+run-fetch-simulator : ((Request) ->{} Result ToolError Response, Request) ->{} Result ToolError Response
+next-sequence : (AuditSequence) ->{State} Int
+accept-sequence : (AuditSequence) ->{State} ()
+agent : () ->{Workspace} Result ToolError Text
+workspace.live-layer : (AuditSequence, BoundPolicy LivePolicy, Option ((Path) ->{} Result ToolError Text), Option ((Path, Text) ->{} Result ToolError ()), Option ((Request) ->{} Result ToolError Response)) ->{Secret, Judge, Approval, State, Audit, Fs, Net} Result ToolError Text
+workspace.dry-layer : (AuditSequence, BoundPolicy DryPolicy, Option ((Path) ->{} Result ToolError Text), Option ((Path, Text) ->{} Result ToolError ()), Option ((Request) ->{} Result ToolError Response)) ->{Judge, State, Audit} Result ToolError Text
+governance.with-sequence : forall a | e. ((AuditSequence) ->{State | e} a) ->{| e} a
+workspace.live : (BoundPolicy LivePolicy, Option ((Path) ->{} Result ToolError Text), Option ((Path, Text) ->{} Result ToolError ()), Option ((Request) ->{} Result ToolError Response)) ->{Secret, Judge, Approval, Audit, Fs, Net} Result ToolError Text
+workspace.dry-run : (BoundPolicy DryPolicy, Option ((Path) ->{} Result ToolError Text), Option ((Path, Text) ->{} Result ToolError ()), Option ((Request) ->{} Result ToolError Response)) ->{Judge, Audit} Result ToolError Text

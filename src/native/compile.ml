@@ -88,9 +88,11 @@ and bound =
           tree. The root is CForm, or CSplice when the whole payload is one live unquote. *)
   | BHandle of (Hash.t * bool * atom) list * atom * atom
       (** jq_handle2: (op, capturing?, clause closure) entries, the 0-arity body thunk, and the
-          1-parameter ret-clause closure. A tail-resumptive clause closure takes the op params (its
+          1-parameter ret-clause closure. A tail-resumptive Multi clause takes the op params (its
           return is the resume); a capturing clause takes them PLUS the resumption appended as its
-          last parameter (task 71). The handle expression's value is the driver's return. *)
+          last parameter. Once clauses always capture: the materialized resumption owns the affine
+          token that must stay shared when an enclosing Multi handler clones the clause extent. The
+          handle expression's value is the driver's return. *)
 
 and closure_alloc = {
   code : Hash.t * int;
@@ -244,25 +246,43 @@ let con_arity ctx (h : Hash.t) : int =
       | None -> refuse ctx "constructor ordinal out of range (corrupt store)")
   | _ -> refuse ctx "constructor reference does not resolve (corrupt store)"
 
-(* The op's owning effect declaration (for eval refusal and error metadata). *)
-let op_effect ctx (h : Hash.t) : string * string =
+(* The op's owning effect declaration (for eval refusal and error metadata). The declaration hash,
+   not its presentation name, is the authority identity. *)
+let op_effect ctx (h : Hash.t) : Hash.t * string * string =
   match Store.locate ctx.store h with
   | Ok
       {
         Store.decl = { Kernel.it = Kernel.DefEffect { ename; ops; _ }; _ };
+        decl_hash;
         role = Store.Operation i;
         _;
       } -> (
       match List.nth_opt ops i with
-      | Some { Kernel.op_name; _ } -> (ename, op_name)
+      | Some { Kernel.op_name; _ } -> (decl_hash, ename, op_name)
+      | None -> refuse ctx "operation ordinal out of range (corrupt store)")
+  | _ -> refuse ctx "operation reference does not resolve (corrupt store)"
+
+(* A Once clause must materialize its resumption even when its single use is syntactically tail.
+   An enclosing Multi handler can capture and clone the clause before that use. The materialized
+   JQ_RESUME block is the per-instance affine token shared by those clones; the legacy direct-return
+   protocol has no value on which to record E0906. *)
+let op_mode ctx (h : Hash.t) : Kernel.op_mode =
+  match Store.locate ctx.store h with
+  | Ok { Store.decl = { Kernel.it = Kernel.DefEffect { ops; _ }; _ }; role = Store.Operation i; _ }
+    -> (
+      match List.nth_opt ops i with
+      | Some { Kernel.op_mode; _ } -> op_mode
       | None -> refuse ctx "operation ordinal out of range (corrupt store)")
   | _ -> refuse ctx "operation reference does not resolve (corrupt store)"
 
 (* eval runs at root authority through the interpreter; a standalone binary has no
    interpreter tier, so the whole effect stays refused (E1102 per the plan) *)
 let refuse_eval_op ctx (h : Hash.t) : unit =
-  let ename, _ = op_effect ctx h in
-  if ename = "eval" then refuse ctx "uses eval, which requires the interpreter tier"
+  let effect_hash, _, _ = op_effect ctx h in
+  match Effect_registry.find_canonical effect_hash with
+  | Some metadata when metadata.index_name = "eval" ->
+      refuse ctx "uses eval, which requires the interpreter tier"
+  | Some _ | None -> ()
 
 (* env: source name -> atom for the current function *)
 type env = atom SMap.t
@@ -364,6 +384,8 @@ and lower_general ctx env ~tail (e : Kernel.expr) (k : atom -> expr) : expr =
           else refuse ctx (Printf.sprintf "builtin `%s` is not yet implemented natively" name)
       | None -> k (member_value_atom ctx h))
   | Kernel.Ref (h, Kernel.Con) ->
+      if Concurrency_contract.is_task_private_hash h then
+        refuse ctx "the Task opaque carrier is scheduler-private";
       note_con ctx h;
       k (ACon h)
   | Kernel.Ref (h, Kernel.Op) ->
@@ -428,11 +450,12 @@ and lower_general ctx env ~tail (e : Kernel.expr) (k : atom -> expr) : expr =
           let t = fresh ctx "t" in
           Let (t, BAllocTuple atoms, k (AVar t)))
   | Kernel.Handle { body; ret = { rbinder; rbody; _ }; ops } ->
-      (* every discipline compiles since task 71: a tail-resumptive clause is a plain
-         lambda whose return is the resume (task 70's protocol at the perform site);
-         anything else — aborting, one-shot, multi-shot — is a capturing clause, an
-         ordinary lambda taking the resumption appended as its last parameter. The
-         handle runs through the jq_handle2 driver with a materialized ret closure. *)
+      (* Every discipline compiles since task 71. A tail-resumptive Multi clause is a plain lambda
+         whose return is the resume (task 70's protocol at the perform site). Once always captures,
+         even for a syntactically tail use: an outer Multi handler may clone the suspended clause,
+         and all clones must retain one shared per-instance token. Everything else — aborting,
+         one-shot, multi-shot — also captures. The handle runs through jq_handle2 with a
+         materialized ret closure. *)
       let entries_rev =
         List.fold_left
           (fun acc (oc : Kernel.opclause) ->
@@ -444,9 +467,12 @@ and lower_general ctx env ~tail (e : Kernel.expr) (k : atom -> expr) : expr =
             refuse_eval_op ctx oh;
             note_op ctx oh;
             let capturing =
-              match Tier.discipline ~resume:oc.Kernel.resume oc.Kernel.obody with
-              | Tier.TailResumptive -> false
-              | _ -> true
+              match
+                Tier.native_lowering ~mode:(op_mode ctx oh)
+                  (Tier.discipline ~resume:oc.Kernel.resume oc.Kernel.obody)
+              with
+              | Tier.TokenlessTailMulti -> false
+              | Tier.MaterializedResume -> true
             in
             (oh, capturing, oc) :: acc)
           [] ops
@@ -670,6 +696,8 @@ and lower_app ctx env ~tail (f : Kernel.expr) (args : Kernel.expr list) (k : ato
           if tail then with_args (fun atoms -> TailUnknown (a, atoms, []))
           else with_args (fun atoms -> bind_call (BCallUnknown (a, atoms))))
   | Kernel.Ref (h, Kernel.Con) ->
+      if Concurrency_contract.is_task_private_hash h then
+        refuse ctx "the Task opaque carrier is scheduler-private";
       note_con ctx h;
       let arity = con_arity ctx h in
       if List.length args <> arity then

@@ -14,7 +14,7 @@ assertion. Counts become printed values via in-language collectors
 | test_multishot_choose | g01-choose-tuple.jqd | resume twice, both branches collected in order |
 | test_multishot_thrice | g02-thrice.jqd | same resumption applied three times |
 | test_multishot_deep_inner_effect_exact_count | g03-deep-inner-count.jqd | exact emit count 2: deep handler covers both resumed extents |
-| test_state_effect | g04-state-run.jqd | state.run threads get/put; pure body keeps init |
+| test_state_effect / EL.3 branch independence | g04-state-run.jqd | Multi fault branches each run state.run from fresh state 0; leaked state would change branch two from (2, 2) to (3, 3) |
 | test_abort_short_circuits | g05-abort-short-circuit.jqd | pending (add 1 _) abandoned |
 | test_deep_second_perform | g06-deep-second-perform.jqd | one deep handler covers two sequential performs |
 | test_forwarding | g07-forwarding.jqd | non-matching inner handler forwards outward |
@@ -53,3 +53,6 @@ assertion. Counts become printed values via in-language collectors
 | (SS.22 runtime error parity) | e07-erasure-text-join.jqd | an effect-erased Int reaches variadic join's indexed Text diagnostic at native v1's eighth-argument boundary |
 | (spec soundness, task 73 find) | g34-spec-const-list.jqd | a self-recursive walker over a const member list must not bake its argument |
 | (SS.22 stdlib parity) | g35-stdlib-ss22.jqd | variadic join within native v1's eight-argument ceiling, direct text equality, dotted real arithmetic, numeric boundaries, all predicates, and NaN ordering |
+| (D69 Audit v2 parity) | g36-audit-code-render.jqd | canonical Hash acceptance/rejection including direct `Ok(Hash)` rendering, ordinary direct constructor/member references, hash-form Code rendering, and deterministic versioned/sequenced Audit line-log output with escaped control and UTF-8 text |
+| (ET.6 Approval parity) | g37-approval-binding.jqd | proposal-v1 canonical HASH_V0 identity and stale Decision refusal before the action thunk runs |
+| (GM.9 authority-order parity) | g38-governance-authority.jqd | `governance.validate-authority` accepts Net→Secret, live Audit-v2→Secret, and structured unknown/Resource order, including `a < a: < a::` and the configuration tie-break, while reversed and duplicate cases refuse byte-identically |

@@ -11,16 +11,16 @@ The row is the authority manifest: fs covers read/write, net covers fetch, and
 console covers println. Eval is absent.
 
   $ jacquard check workflow.jqd --print-sigs
-  escrow.workflow : () ->{Fs, Console, Net} Int
+  escrow.workflow : () ->{Console, Fs, Net} Int
   $ jacquard check approved-run.jqd --print-sigs
-  escrow.workflow : () ->{Fs, Console, Net} Int
+  escrow.workflow : () ->{Console, Fs, Net} Int
   _ : Int
   $ jacquard run approved-run.jqd
-  error[E0814]: this program requires the `fs` effect, which is not granted (performed via `escrow.workflow`)
-    hint: grant it with --allow fs, or handle the effect in the program
-  error[E0814]: this program requires the `console` effect, which is not granted (performed via `escrow.workflow`)
+  error[E0814]: this program requires console [world/low] — talk to the process terminal, which is not granted (performed via `escrow.workflow`)
     hint: grant it with --allow console, or handle the effect in the program
-  error[E0814]: this program requires the `net` effect, which is not granted (performed via `escrow.workflow`)
+  error[E0814]: this program requires fs [world/medium] — read or mutate the filesystem under the granted root handler, which is not granted (performed via `escrow.workflow`)
+    hint: grant it with --allow fs, or handle the effect in the program
+  error[E0814]: this program requires net [world/high] — reach a network endpoint through the granted handler, which is not granted (performed via `escrow.workflow`)
     hint: grant it with --allow net, or handle the effect in the program
   [3]
 
@@ -51,14 +51,14 @@ property, and the world lane only runs with world grants.
   PASS fault-space-exhaustive/fault.all explores every single and double fault (1 check)
   PASS receipt-well-formed/receipt body round-trips the scripted world (1 check)
   PASS status-classifier-total/every status classifies (prop: 100 cases, seed 7)
-  REFUSED world-smoke: requires --allow fs,clock,console,net
+  REFUSED world-smoke: requires --allow console,fs,clock,net
   3 passed, 0 failed, 0 skipped, 1 refused
   cache: 0 hit, 3 ran
   $ jacquard test tests.jqd --seed 7 --cache-dir escrow-cache --exhaustive
   PASS fault-space-exhaustive/fault.all explores every single and double fault (1 check) [cached]
   PASS receipt-well-formed/receipt body round-trips the scripted world (1 check) [cached]
   PASS status-classifier-total/every status classifies (verified exhaustively (400 cases))
-  REFUSED world-smoke: requires --allow fs,clock,console,net
+  REFUSED world-smoke: requires --allow console,fs,clock,net
   3 passed, 0 failed, 0 skipped, 1 refused
   cache: 2 hit, 1 ran
   $ jacquard test tests.jqd --seed 7 --cache-dir escrow-cache --allow fs --allow clock --allow console --allow net
@@ -119,9 +119,9 @@ refuses it, and semantic diff localizes the escalation.
 
   $ cat workflow-escalated.jqd main.jqd > escalated-run.jqd
   $ jacquard check workflow-escalated.jqd --print-sigs
-  escrow.workflow : () ->{Fs, Eval, Console, Net} Int
+  escrow.workflow : () ->{Console, Fs, Eval, Net} Int
   $ jacquard check escalated-run.jqd --manifest fs,net,console
-  error[E0814]: this program requires the `eval` effect, which is not granted (performed via `eval-code`)
+  error[E0814]: this program requires eval [meta/high] — run code constructed or loaded at runtime, which is not granted (performed via `eval-code`)
     hint: grant it with --allow eval, or handle the effect in the program
   [1]
   $ mkdir escalated
@@ -130,15 +130,15 @@ refuses it, and semantic diff localizes the escalation.
   ok
   $ jacquard diff approved escalated | grep -E 'changed|receipt.txt'
   changed  escrow.workflow
-      - (app (ref #8eb73e2dbdff11b3c3b01622390d04de2fb7eed9b63f1310ee6bd7fdcd7ea876 op) (lit "receipt.txt") (var receipt))
-      + (app (ref #8eb73e2dbdff11b3c3b01622390d04de2fb7eed9b63f1310ee6bd7fdcd7ea876 op) (lit "receipt.txt") (var receipt))
+      - (app (ref #543ff548b2d3f4fd32f78e8634a32d4d6217ad569816b8da33cac31686d9a43a op) (lit "receipt.txt") (var receipt))
+      + (app (ref #543ff548b2d3f4fd32f78e8634a32d4d6217ad569816b8da33cac31686d9a43a op) (lit "receipt.txt") (var receipt))
 
 Approval is by exact member hash; a semantic edit invalidates it.
 
   $ grep member-hash APPROVAL
-  member-hash: a550668489d194f48e864ce22155e2c872cf374395c9d47e1ed5f897f5a08a2f
+  member-hash: 885689aad7921df4a5f3fb2eeda074792e09d1b20a189605987ab0e8898409cd
   $ awk '/0:escrow.workflow/ {print "workflow-hash:", $2}' workflow.hash
-  workflow-hash: a550668489d194f48e864ce22155e2c872cf374395c9d47e1ed5f897f5a08a2f
+  workflow-hash: 885689aad7921df4a5f3fb2eeda074792e09d1b20a189605987ab0e8898409cd
   $ sed 's/(lit "receipt.txt")/(lit "receipt-v2.txt")/' workflow.jqd > workflow-changed.jqd
   $ jacquard hash workflow-changed.jqd | awk '/0:escrow.workflow/ {print "changed-hash:", $2}'
-  changed-hash: ca69f6e26e5425303d077230ecdb8f9221555cf8a3917f89fee741f091b810db
+  changed-hash: 9a3a94589e7f1e658f02e2aac2aceca65c66f756c7358d9898abd537b0075dfe

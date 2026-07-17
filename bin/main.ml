@@ -78,6 +78,38 @@ let validate_parsed_top = function
 let print_warnings warnings =
   List.iter (fun warning -> prerr_endline (Diag.to_string warning)) warnings
 
+(** [resolve_source_tops] parses, surface-lowers when selected, validates, and resolves a whole
+    source artifact in order. Declarations are installed in [store] as they are encountered so later
+    tops see exactly the same name context as [check] and [hash]. Parse, validation, resolution, and
+    store failures are returned without producing a partial result. *)
+let resolve_source_tops ~syntax store ~file src =
+  match parse_tops ~syntax ~names:(Store.names_view store) ~file src with
+  | Error _ as error -> error
+  | Ok (parsed, surface_warnings) ->
+      let rec go resolved warnings = function
+        | [] -> Ok (List.rev resolved, surface_warnings @ List.rev warnings)
+        | parsed_top :: rest -> (
+            match validate_parsed_top parsed_top with
+            | Error _ as error -> error
+            | Ok top -> (
+                match Resolve.resolve_w (Store.names_view store) top with
+                | Error _ as error -> error
+                | Ok (resolved_top, resolver_warnings) -> (
+                    match resolved_top with
+                    | Kernel.Expr _ ->
+                        go (resolved_top :: resolved)
+                          (List.rev_append resolver_warnings warnings)
+                          rest
+                    | Kernel.Decl declaration -> (
+                        match Store.put_decl store declaration with
+                        | Error _ as error -> error
+                        | Ok _ ->
+                            go (resolved_top :: resolved)
+                              (List.rev_append resolver_warnings warnings)
+                              rest))))
+      in
+      go [] [] parsed
+
 (* Open a store (persistent dir or fresh temp) and seed the prelude into it. *)
 let open_ctx ~prelude ~store_dir =
   let root = match store_dir with Some d -> d | None -> fresh_tmp_dir () in
@@ -122,12 +154,22 @@ let process_forms ?origin ?(on_decl = fun _ _ -> ()) ~syntax store ~file src ~on
 
 (* effect hashes for the granted names, for the manifest check (W3.6) *)
 let granted_hashes store allows =
-  List.filter_map
-    (fun name ->
-      match Store.lookup_kind store (String.lowercase_ascii name) Resolve.KEffect with
-      | Some { Resolve.hash; _ } -> Some hash
-      | _ -> None)
-    allows
+  let explicit =
+    List.filter_map
+      (fun name ->
+        match Store.lookup_kind store (String.lowercase_ascii name) Resolve.KEffect with
+        | Some { Resolve.hash; _ } -> Some hash
+        | _ -> None)
+      allows
+  in
+  let scheduler_async =
+    match Store.lookup_kind store "async" Resolve.KEffect with
+    | Some { Resolve.hash; _ }
+      when String.equal (Hash.to_hex hash) Concurrency_contract.async_effect_hash ->
+        [ hash ]
+    | Some _ | None -> []
+  in
+  explicit @ scheduler_async
 
 let make_checker store =
   match Check.make_ctx store with
@@ -138,114 +180,239 @@ let make_checker store =
       | Error _ -> ());
       Ok cctx
 
-let run_cmd file allows prelude store_dir seed infer_cache origin dry_run syntax =
-  match open_ctx ~prelude ~store_dir with
-  | Error ds -> print_diags ds
-  | Ok (store, ctx) -> (
-      (* run never reads coverage; skip the per-reference bookkeeping (PF.2 phase 2) *)
-      Eval.set_coverage_tracking ctx false;
-      let seed =
-        (* OS-entropy seeded unless pinned; --seed makes sampling runs reproducible (SL.7) *)
-        match seed with
-        | Some s -> s
-        | None ->
-            Random.self_init ();
-            Random.bits ()
-      in
-      let rec grant_all = function
-        | [] -> Ok ()
-        | a :: rest -> (
-            match Prelude.grant ctx a ~infer_cache ~out:print_string ~seed with
-            | Ok () -> grant_all rest
-            | Error ds -> Error ds)
-      in
-      let audit : string list ref = ref [] in
-      let grants_result = if dry_run then Prelude.install_dry ctx ~audit else grant_all allows in
-      match grants_result with
+let schedule_file_error action path message =
+  let prefix = path ^ ": " in
+  let message =
+    if String.starts_with ~prefix message then
+      String.sub message (String.length prefix) (String.length message - String.length prefix)
+    else message
+  in
+  [
+    Diag.error ~code:"E0908" (Printf.sprintf "cannot %s schedule trace %s: %s" action path message);
+  ]
+
+let load_schedule path =
+  try
+    let channel = open_in_bin path in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr channel)
+      (fun () -> Schedule_trace.parse_channel channel)
+  with Sys_error message -> Error (schedule_file_error "read" path message)
+
+let parse_schedule_fork spec =
+  match String.index_opt spec '=' with
+  | None -> Error [ Diag.error ~code:"E0908" "invalid --schedule-fork (expected DECISION=TASK)" ]
+  | Some index ->
+      let decision = String.sub spec 0 index in
+      let task = String.sub spec (index + 1) (String.length spec - index - 1) in
+      Result.bind
+        (match int_of_string_opt decision with
+        | Some decision when decision >= 0 -> Ok decision
+        | Some _ | None ->
+            Error [ Diag.error ~code:"E0908" "schedule fork decision must be non-negative" ])
+        (fun decision ->
+          Result.map (fun chosen -> (decision, chosen)) (Schedule_trace.task_id_of_string task))
+
+let schedule_mode replay_file fork_spec =
+  match (replay_file, fork_spec) with
+  | None, None -> Ok None
+  | None, Some _ -> Error [ Diag.error ~code:"E0908" "--schedule-fork requires --schedule-replay" ]
+  | Some path, None ->
+      Result.map (fun trace -> Some (Round_robin.Replay_schedule trace)) (load_schedule path)
+  | Some path, Some spec ->
+      Result.bind (load_schedule path) (fun trace ->
+          Result.map
+            (fun (decision, chosen) -> Some (Round_robin.Fork_schedule { trace; decision; chosen }))
+            (parse_schedule_fork spec))
+
+let write_schedule path trace =
+  try
+    let channel = open_out_bin path in
+    Fun.protect
+      ~finally:(fun () -> close_out_noerr channel)
+      (fun () ->
+        output_string channel (Schedule_trace.serialize trace);
+        close_out channel);
+    Ok ()
+  with Sys_error message -> Error (schedule_file_error "write" path message)
+
+let run_cmd file allows prelude store_dir seed infer_cache origin dry_run schedule_record
+    schedule_replay schedule_fork syntax =
+  match schedule_mode schedule_replay schedule_fork with
+  | Error diagnostics -> print_diags diagnostics
+  | Ok requested_mode -> (
+      match open_ctx ~prelude ~store_dir with
       | Error ds -> print_diags ds
-      | Ok () -> (
-          match make_checker store with
-          | Error ds -> print_diags ds
-          | Ok cctx -> (
-              let granted =
-                if dry_run then
-                  (* the dry handlers discharge the whole world; the manifest sees it granted *)
-                  granted_hashes store [ "console"; "clock"; "fs"; "net"; "infer"; "dist" ]
-                else granted_hashes store allows
+      | Ok (store, ctx) -> (
+          let source = read_file file in
+          let trace_enabled = Option.is_some schedule_record || Option.is_some requested_mode in
+          let expression_count =
+            if not trace_enabled then Ok ()
+            else
+              Result.bind
+                (parse_tops ~syntax ~names:(Store.names_view store) ~file source)
+                (fun (tops, _warnings) ->
+                  let rec count_expressions count = function
+                    | [] -> Ok count
+                    | parsed :: rest ->
+                        Result.bind (validate_parsed_top parsed) (function
+                          | Kernel.Expr _ -> count_expressions (count + 1) rest
+                          | Kernel.Decl _ -> count_expressions count rest)
+                  in
+                  Result.bind (count_expressions 0 tops) (fun count ->
+                      if count = 1 then Ok ()
+                      else
+                        Error
+                          [
+                            Diag.error ~code:"E0908"
+                              (Printf.sprintf
+                                 "schedule record/replay requires exactly one top-level \
+                                  expression, found %d"
+                                 count);
+                          ]))
+          in
+          match expression_count with
+          | Error diagnostics -> print_diags diagnostics
+          | Ok () -> (
+              (* run never reads coverage; skip the per-reference bookkeeping (PF.2 phase 2) *)
+              Eval.set_coverage_tracking ctx false;
+              let seed =
+                (* OS-entropy seeded unless pinned; --seed makes sampling runs reproducible (SL.7) *)
+                match seed with
+                | Some s -> s
+                | None ->
+                    Random.self_init ();
+                    Random.bits ()
               in
-              let eval_hash =
-                match Store.lookup_kind store "eval" Resolve.KEffect with
-                | Some { Resolve.hash; _ } -> Some hash
-                | None -> None
+              let rec grant_all = function
+                | [] -> Ok ()
+                | a :: rest -> (
+                    match Prelude.grant ctx a ~infer_cache ~out:print_string ~seed with
+                    | Ok () -> grant_all rest
+                    | Error ds -> Error ds)
               in
-              let refused = ref false in
-              let runtime_failure = ref None in
-              let on_expr e =
-                (* W3.6: the program's inferred row is its authority manifest; refuse to
+              let audit : string list ref = ref [] in
+              let grants_result =
+                if dry_run then Prelude.install_dry ctx ~audit else grant_all allows
+              in
+              match grants_result with
+              | Error ds -> print_diags ds
+              | Ok () -> (
+                  match make_checker store with
+                  | Error ds -> print_diags ds
+                  | Ok cctx -> (
+                      let granted =
+                        if dry_run then
+                          (* the dry handlers discharge the whole world; the manifest sees it granted *)
+                          granted_hashes store [ "console"; "clock"; "fs"; "net"; "infer"; "dist" ]
+                        else granted_hashes store allows
+                      in
+                      let eval_hash =
+                        match Store.lookup_kind store "eval" Resolve.KEffect with
+                        | Some { Resolve.hash; _ } -> Some hash
+                        | None -> None
+                      in
+                      let refused = ref false in
+                      let runtime_failure = ref None in
+                      let completed_schedule = ref None in
+                      let on_expr e =
+                        (* W3.6: the program's inferred row is its authority manifest; refuse to
                    start anything that needs an ungranted effect *)
-                match Check.check_top cctx (Kernel.Expr e) with
-                | Error ds -> Error ds
-                | Ok { Check.row; warnings; _ } -> (
-                    List.iter (fun w -> prerr_endline (Diag.to_string w)) warnings;
-                    (if dry_run then
-                       let r = Types.repr_row (Option.value row ~default:Types.empty_row) in
-                       match eval_hash with
-                       | Some eh when List.exists (Hash.equal eh) r.Types.effects ->
-                           raise
-                             (Invalid_argument
-                                "error[E1002]: --dry-run cannot sandbox eval: eval'd code runs at \
-                                 root authority and bypasses the dry handlers")
-                       | _ -> ());
-                    match
-                      Check.manifest_errors cctx ~grantable:Prelude.grantable_names ~granted
-                        (Option.value row ~default:Types.empty_row)
-                    with
-                    | _ :: _ as ds ->
-                        refused := true;
-                        Error ds
-                    | [] -> (
-                        match Eval.run_expr ctx e with
-                        | Ok v ->
-                            print_endline (Value.show v);
-                            Ok ()
-                        | Error err ->
-                            runtime_failure := Some err;
-                            Error []))
-              in
-              match process_forms ?origin ~syntax store ~file (read_file file) ~on_expr with
-              | exception Invalid_argument msg
-                when String.length msg > 6 && String.sub msg 0 5 = "error" ->
-                  prerr_endline msg;
-                  exit_diags
-              | Ok () ->
-                  if dry_run then begin
-                    (* the consent sheet: each world effect's disposition, then the trail *)
-                    print_endline
-                      "dry-run dispositions: console=forwarded clock=forwarded fs.read=forwarded \
-                       fs.write=audited net.fetch=audited+simulated \
-                       infer.complete=audited+simulated dist=simulated(seed 0) eval=refused";
-                    print_endline "dry-run: this run WOULD have:";
-                    if !audit = [] then print_endline "  (no world mutations)"
-                    else List.iter (fun l -> print_endline ("  " ^ l)) (List.rev !audit)
-                  end;
-                  ok
-              | Error _ when !runtime_failure <> None -> (
-                  match Option.get !runtime_failure with
-                  | Runtime_err.Unhandled _ as e ->
-                      prerr_endline (Runtime_err.to_string e);
-                      exit_unhandled
-                  | Runtime_err.Observe_at_root as e ->
-                      prerr_endline
-                        (Diag.to_string (Diag.error ~code:"E0904" (Runtime_err.to_string e)));
-                      exit_runtime
-                  | e ->
-                      prerr_endline (Runtime_err.to_string e);
-                      exit_runtime)
-              | Error ds when !refused ->
-                  (* the capability refusal keeps its own exit code, now at the type level *)
-                  List.iter (fun d -> prerr_endline (Diag.to_string d)) ds;
-                  exit_unhandled
-              | Error ds -> print_diags ds)))
+                        match Check.check_top cctx (Kernel.Expr e) with
+                        | Error ds -> Error ds
+                        | Ok { Check.row; warnings; _ } -> (
+                            List.iter (fun w -> prerr_endline (Diag.to_string w)) warnings;
+                            (if dry_run then
+                               let r = Types.repr_row (Option.value row ~default:Types.empty_row) in
+                               match eval_hash with
+                               | Some eh when List.exists (Hash.equal eh) r.Types.effects ->
+                                   raise
+                                     (Invalid_argument
+                                        "error[E1002]: --dry-run cannot sandbox eval: eval'd code \
+                                         runs at root authority and bypasses the dry handlers")
+                               | _ -> ());
+                            match
+                              Check.manifest_errors cctx ~grantable:Prelude.grantable_names ~granted
+                                (Option.value row ~default:Types.empty_row)
+                            with
+                            | _ :: _ as ds ->
+                                refused := true;
+                                Error ds
+                            | [] -> (
+                                let execution =
+                                  match requested_mode with
+                                  | Some mode ->
+                                      Result.map
+                                        (fun scheduled ->
+                                          completed_schedule := Some scheduled.Round_robin.schedule;
+                                          scheduled.value)
+                                        (Round_robin.run_expr_scheduled ctx ~mode e)
+                                  | None when Option.is_some schedule_record ->
+                                      Result.map
+                                        (fun scheduled ->
+                                          completed_schedule := Some scheduled.Round_robin.schedule;
+                                          scheduled.value)
+                                        (Round_robin.run_expr_scheduled ctx
+                                           ~mode:Round_robin.Record_schedule e)
+                                  | None -> Round_robin.run_expr ctx e
+                                in
+                                match execution with
+                                | Ok v ->
+                                    print_endline (Value.show v);
+                                    Ok ()
+                                | Error err ->
+                                    runtime_failure := Some err;
+                                    Error []))
+                      in
+                      match process_forms ?origin ~syntax store ~file source ~on_expr with
+                      | exception Invalid_argument msg
+                        when String.length msg > 6 && String.sub msg 0 5 = "error" ->
+                          prerr_endline msg;
+                          exit_diags
+                      | Ok () -> (
+                          let write_result =
+                            match (schedule_record, !completed_schedule) with
+                            | Some path, Some trace -> write_schedule path trace
+                            | None, _ -> Ok ()
+                            | Some _, None ->
+                                Error
+                                  [
+                                    Diag.error ~code:"E0908" "scheduled execution produced no trace";
+                                  ]
+                          in
+                          match write_result with
+                          | Error diagnostics -> print_diags diagnostics
+                          | Ok () ->
+                              if dry_run then begin
+                                (* the consent sheet: each world effect's disposition, then the trail *)
+                                print_endline
+                                  "dry-run dispositions: console=forwarded clock=forwarded \
+                                   fs.read=forwarded fs.write=audited net.fetch=audited+simulated \
+                                   infer.complete=audited+simulated dist=simulated(seed 0) \
+                                   eval=refused";
+                                print_endline "dry-run: this run WOULD have:";
+                                if !audit = [] then print_endline "  (no world mutations)"
+                                else List.iter (fun l -> print_endline ("  " ^ l)) (List.rev !audit)
+                              end;
+                              ok)
+                      | Error _ when !runtime_failure <> None -> (
+                          match Option.get !runtime_failure with
+                          | Runtime_err.Unhandled _ as e ->
+                              prerr_endline (Runtime_err.to_string e);
+                              exit_unhandled
+                          | Runtime_err.Observe_at_root as e ->
+                              prerr_endline
+                                (Diag.to_string
+                                   (Diag.error ~code:"E0904" (Runtime_err.to_string e)));
+                              exit_runtime
+                          | e ->
+                              prerr_endline (Runtime_err.to_string e);
+                              exit_runtime)
+                      | Error ds when !refused ->
+                          (* the capability refusal keeps its own exit code, now at the type level *)
+                          List.iter (fun d -> prerr_endline (Diag.to_string d)) ds;
+                          exit_unhandled
+                      | Error ds -> print_diags ds)))))
 
 (* --- check --- *)
 
@@ -295,34 +462,55 @@ let check_cmd file prelude print_sigs manifest origin syntax =
                     | ds -> Error ds)
                 | _ -> Ok ())
           in
+          let source = read_file file in
+          let malformed_surface_report =
+            match syntax_for_file syntax file with
+            | Surface -> (
+                let recovered = Surface_parse.recover_string ~file source in
+                match Surface_parse.strict recovered with
+                | Ok _ -> None
+                | Error _ ->
+                    Some (Surface_check.analyze ~names:(Store.names_view store) cctx recovered))
+            | Auto -> assert false
+            | Bootstrap -> None
+          in
           (* process: decls also go into the store so later forms resolve *)
-          match parse_tops ~syntax ~names:(Store.names_view store) ~file (read_file file) with
-          | Error ds -> print_diags ds
-          | Ok (tops, surface_warnings) ->
-              print_warnings surface_warnings;
-              let rec go = function
-                | [] ->
-                    if not print_sigs then print_endline "ok";
-                    ok
-                | parsed :: rest -> (
-                    match validate_parsed_top parsed with
-                    | Error ds -> print_diags ds
-                    | Ok top -> (
-                        match Resolve.resolve_w (Store.names_view store) top with
+          match malformed_surface_report with
+          | Some report ->
+              if print_sigs then
+                List.iter
+                  (fun (name, scheme) ->
+                    Printf.printf "%s : %s\n" name (Check.show_scheme cctx scheme))
+                  report.Surface_check.signatures;
+              print_diags report.diagnostics
+          | None -> (
+              match parse_tops ~syntax ~names:(Store.names_view store) ~file source with
+              | Error ds -> print_diags ds
+              | Ok (tops, surface_warnings) ->
+                  print_warnings surface_warnings;
+                  let rec go = function
+                    | [] ->
+                        if not print_sigs then print_endline "ok";
+                        ok
+                    | parsed :: rest -> (
+                        match validate_parsed_top parsed with
                         | Error ds -> print_diags ds
-                        | Ok (resolved, warns) -> (
-                            List.iter (fun w -> prerr_endline (Diag.to_string w)) warns;
-                            match on_top resolved with
+                        | Ok top -> (
+                            match Resolve.resolve_w (Store.names_view store) top with
                             | Error ds -> print_diags ds
-                            | Ok () -> (
-                                match resolved with
-                                | Kernel.Decl d -> (
-                                    match Store.put_decl ?origin store d with
-                                    | Ok _ -> go rest
-                                    | Error ds -> print_diags ds)
-                                | Kernel.Expr _ -> go rest))))
-              in
-              go tops))
+                            | Ok (resolved, warns) -> (
+                                List.iter (fun w -> prerr_endline (Diag.to_string w)) warns;
+                                match on_top resolved with
+                                | Error ds -> print_diags ds
+                                | Ok () -> (
+                                    match resolved with
+                                    | Kernel.Decl d -> (
+                                        match Store.put_decl ?origin store d with
+                                        | Ok _ -> go rest
+                                        | Error ds -> print_diags ds)
+                                    | Kernel.Expr _ -> go rest))))
+                  in
+                  go tops)))
 
 (* --- hash --- *)
 
@@ -858,7 +1046,7 @@ let replay_cmd log_file program forks to_n compare prelude =
                                 (String.concat ", " (List.map Value.show args)))))
             | _ -> ());
             let on_expr e =
-              match Eval.run_expr ctx e with
+              match Round_robin.run_expr ctx e with
               | Ok v ->
                   print_endline (Value.show v);
                   Ok ()
@@ -1212,6 +1400,45 @@ let store_rename_cmd store_dir old_name new_name kind =
           | Ok () -> ok
           | Error ds -> print_diags ds))
 
+(* --- Audit chain subcommands (ET.3) --- *)
+
+let audit_head_arg label spelling =
+  match Hash.of_canonical_hex spelling with
+  | Some hash -> Ok hash
+  | None ->
+      Error
+        [
+          Diag.error ~code:"E1307"
+            (Printf.sprintf "%s must be exactly 64 lowercase hexadecimal HASH_V0 digits" label);
+        ]
+
+let audit_genesis_cmd () =
+  Printf.printf "head %s\n" (Hash.to_hex Audit_chain.genesis);
+  ok
+
+let audit_append_cmd log_file entry_file previous_spelling =
+  match audit_head_arg "--previous" previous_spelling with
+  | Error diagnostics -> print_diags diagnostics
+  | Ok previous -> (
+      match Audit_chain.read_entry_file ~file:entry_file with
+      | Error diagnostics -> print_diags diagnostics
+      | Ok entry -> (
+          match Audit_chain.append_file ~file:log_file ~previous entry with
+          | Error diagnostics -> print_diags diagnostics
+          | Ok head ->
+              Printf.printf "head %s\n" (Hash.to_hex head);
+              ok))
+
+let audit_verify_cmd log_file head_spelling =
+  match audit_head_arg "--head" head_spelling with
+  | Error diagnostics -> print_diags diagnostics
+  | Ok expected_head -> (
+      match Audit_chain.verify_file ~file:log_file ~expected_head with
+      | Error diagnostics -> print_diags diagnostics
+      | Ok head ->
+          Printf.printf "ok %s\n" (Hash.to_hex head);
+          ok)
+
 (* --- cmdliner wiring --- *)
 
 open Cmdliner
@@ -1288,12 +1515,38 @@ let infer_cache_arg =
           "Cache directory for infer completions (content-addressed by prompt); the second \
            identical run is a full hit.")
 
+let schedule_record_arg =
+  Arg.(
+    value
+    & opt (some string) None
+    & info [ "schedule-record" ] ~docv:"TRACE"
+        ~doc:"Write the successful run's canonical versioned scheduler trace to TRACE.")
+
+let schedule_replay_arg =
+  Arg.(
+    value
+    & opt (some string) None
+    & info [ "schedule-replay" ] ~docv:"TRACE"
+        ~doc:
+          "Strictly replay TRACE: every header, creation, ordered runnable queue, chosen task, and \
+           operation must match; drift never falls back.")
+
+let schedule_fork_arg =
+  Arg.(
+    value
+    & opt (some string) None
+    & info [ "schedule-fork" ] ~docv:"DECISION=TASK"
+        ~doc:
+          "With --schedule-replay, strictly replay before DECISION, choose the named runnable \
+           TASK, then continue FIFO and record fork provenance.")
+
 let run_t =
   Cmd.v
     (Cmd.info "run" ~doc:"Run a .jac surface or .jqd bootstrap file in top-level order.")
     Term.(
       const run_cmd $ file_arg $ allows_arg $ prelude_arg $ store_dir_opt_arg $ seed_arg
-      $ infer_cache_arg $ origin_arg $ dry_run_arg $ syntax_arg)
+      $ infer_cache_arg $ origin_arg $ dry_run_arg $ schedule_record_arg $ schedule_replay_arg
+      $ schedule_fork_arg $ syntax_arg)
 
 let print_sigs_arg =
   Arg.(
@@ -1395,6 +1648,50 @@ let store_t =
   Cmd.group
     (Cmd.info "store" ~doc:"Operate on a persistent content-addressed store.")
     [ add; name; rename ]
+
+let audit_t =
+  let genesis =
+    Cmd.v
+      (Cmd.info "genesis" ~doc:"Print the fixed predecessor/head of an empty Audit v1 chain.")
+      Term.(const audit_genesis_cmd $ const ())
+  in
+  let append =
+    Cmd.v
+      (Cmd.info "append"
+         ~doc:
+           "Verify LOG against its published predecessor, append one canonical AuditEntry, and \
+            print the new publishable head.")
+      Term.(
+        const audit_append_cmd
+        $ Arg.(required & pos 0 (some string) None & info [] ~docv:"LOG")
+        $ Arg.(required & pos 1 (some string) None & info [] ~docv:"AUDIT_ENTRY")
+        $ Arg.(
+            required
+            & opt (some string) None
+            & info [ "previous" ] ~docv:"HASH"
+                ~doc:
+                  "Previously published lowercase head; use `jac audit genesis` for an empty log."))
+  in
+  Cmd.group
+    (Cmd.info "audit" ~doc:"Append ET.3 hash-chained Audit records and publish their heads.")
+    [ genesis; append ]
+
+let governance_t =
+  let verify_log =
+    Cmd.v
+      (Cmd.info "verify-log"
+         ~doc:"Strictly verify a canonical Audit v1 chain against an independently published head.")
+      Term.(
+        const audit_verify_cmd
+        $ Arg.(required & pos 0 (some string) None & info [] ~docv:"LOG")
+        $ Arg.(
+            required
+            & opt (some string) None
+            & info [ "head" ] ~docv:"HASH" ~doc:"Expected published lowercase chain head."))
+  in
+  Cmd.group
+    (Cmd.info "governance" ~doc:"Verify governance artifacts and review surfaces.")
+    [ verify_log ]
 
 let dist_diff_t =
   Cmd.v
@@ -1599,31 +1896,129 @@ let tiers_cmd files prelude =
                   Hashtbl.fold (fun h n acc -> (Check.name_of cctx h, n) :: acc) by_effect []
                   |> List.sort compare
                   |> List.iter (fun (name, n) -> Printf.printf "  %-16s %5d\n" name n);
-                  (* handler op clauses by resume discipline *)
+                  (* Handler clauses have two related classifications: [discipline] is syntax,
+                     while native lowering also depends on the declared operation mode. *)
                   let ops = Check.tier_operations cctx in
+                  let operation_mode h =
+                    match Store.locate store h with
+                    | Ok
+                        {
+                          Store.decl = { Kernel.it = Kernel.DefEffect { ops; _ }; _ };
+                          role = Store.Operation i;
+                          _;
+                        } -> (
+                        match List.nth_opt ops i with
+                        | Some { Kernel.op_mode; _ } -> op_mode
+                        | None -> failwith "Bug_tiers: operation ordinal is out of range")
+                    | _ -> failwith "Bug_tiers: checked operation does not resolve"
+                  in
+                  let op_rows =
+                    List.map
+                      (fun (h, discipline) ->
+                        let mode = operation_mode h in
+                        (h, mode, discipline, Tier.native_lowering ~mode discipline))
+                      ops
+                  in
                   let ot = List.length ops in
-                  Printf.printf "\n== handler op clauses: %d ==\n" ot;
+                  Printf.printf "\n== handler op clauses: %d (syntactic resumption shape) ==\n" ot;
                   List.iter
                     (fun d ->
                       line (Tier.discipline_to_string d) (count (fun (_, d') -> d' = d) ops) ot)
                     [ Tier.TailResumptive; Tier.Aborting; Tier.OneShot; Tier.MultiShot ];
+                  Printf.printf "== native handler lowering: %d (shape + operation mode) ==\n" ot;
+                  let native_line label n = Printf.printf "%-24s %5d %3d%%\n" label n (pct n ot) in
+                  List.iter
+                    (fun lowering ->
+                      native_line
+                        (Tier.native_lowering_to_string lowering)
+                        (count (fun (_, _, _, l) -> l = lowering) op_rows))
+                    [ Tier.TokenlessTailMulti; Tier.MaterializedResume ];
                   let by_op = Hashtbl.create 16 in
                   List.iter
-                    (fun (h, d) ->
-                      let key = (Check.name_of cctx h, d) in
+                    (fun (h, mode, discipline, lowering) ->
+                      let key = (Check.name_of cctx h, mode, discipline, lowering) in
                       Hashtbl.replace by_op key
                         (1 + Option.value ~default:0 (Hashtbl.find_opt by_op key)))
-                    ops;
-                  Hashtbl.fold (fun (name, d) n acc -> (name, d, n) :: acc) by_op []
+                    op_rows;
+                  Hashtbl.fold
+                    (fun (name, mode, discipline, lowering) n acc ->
+                      (name, mode, discipline, lowering, n) :: acc)
+                    by_op []
                   |> List.sort compare
-                  |> List.iter (fun (name, d, n) ->
-                      Printf.printf "  %-16s %-16s %3d\n" name (Tier.discipline_to_string d) n);
+                  |> List.iter (fun (name, mode, discipline, lowering, n) ->
+                      Printf.printf "  %-16s %-6s %-16s %-24s %3d\n" name
+                        (match mode with Kernel.Multi -> "multi" | Kernel.Once -> "once")
+                        (Tier.discipline_to_string discipline)
+                        (Tier.native_lowering_to_string lowering)
+                        n);
                   Printf.printf "\nstamped %d tier sidecars\n" (List.length schemes);
                   0)))
 
+(* --- export (DX.2: explicit evidence/debug bootstrap carrier) --- *)
+
+let read_export_source file =
+  match Export.read_regular_file file with
+  | Ok source -> Ok source
+  | Error Export.Stdin ->
+      Error
+        [
+          Diag.error ~code:"E1302"
+            "jacquard export requires a named regular input file; materialize stdin first";
+        ]
+  | Error Export.Not_regular ->
+      Error
+        [
+          Diag.error ~code:"E1302"
+            (Printf.sprintf
+               "export input %s is not a regular seekable file; materialize the source first" file);
+        ]
+  | Error (Export.Read_failure message) ->
+      Error
+        [ Diag.error ~code:"E1302" (Printf.sprintf "cannot read export input %s: %s" file message) ]
+
+let export_cmd file out prelude syntax =
+  match read_export_source file with
+  | Error ds -> print_diags ds
+  | Ok source -> (
+      match open_ctx ~prelude ~store_dir:None with
+      | Error ds -> print_diags ds
+      | Ok (store, _ctx) -> (
+          match resolve_source_tops ~syntax store ~file source with
+          | Error ds -> print_diags ds
+          | Ok (tops, warnings) -> (
+              print_warnings warnings;
+              let rec validate_identity = function
+                | [] -> Ok ()
+                | top :: rest -> (
+                    match Canon.hash_top top with
+                    | Error _ as error -> error
+                    | Ok _ -> validate_identity rest)
+              in
+              match validate_identity tops with
+              | Error ds -> print_diags ds
+              | Ok () -> (
+                  let contents = Printer.print_all (List.map Kernel.to_form tops) in
+                  match Export.write_atomic_exclusive ~path:out contents with
+                  | Ok () -> ok
+                  | Error Export.Collision ->
+                      print_diags
+                        [
+                          Diag.error ~code:"E1301"
+                            (Printf.sprintf
+                               "export output %s already exists; choose a new path or remove it \
+                                explicitly"
+                               out);
+                        ]
+                  | Error (Export.Atomic_failure message) ->
+                      print_diags
+                        [
+                          Diag.error ~code:"E1303"
+                            (Printf.sprintf "cannot publish export atomically: %s" message);
+                        ]))))
+
 (* --- build (native compilation, docs/native-plan.md task 67) --- *)
 
-let build_cmd file out prelude dry_run =
+let build_cmd file out prelude dry_run syntax =
   if dry_run then begin
     (* the consent sheet is an interpreter run: the dry handlers wrap live
        evaluation, and a compiled binary has nothing to wrap after the fact *)
@@ -1640,134 +2035,120 @@ let build_cmd file out prelude dry_run =
         | Error ds -> print_diags ds
         | Ok cctx -> (
             let tops = ref [] in
-            let rec load_forms = function
+            let rec check_forms = function
               | [] -> Ok ()
               | top :: rest -> (
                   match top with
                   | Kernel.Decl d -> (
-                      match Resolve.resolve_decl (Store.names_view store) d with
+                      match Check.check_top cctx (Kernel.Decl d) with
                       | Error ds -> Error ds
-                      | Ok d -> (
-                          match Store.put_decl store d with
-                          | Error ds -> Error ds
-                          | Ok _ -> (
-                              match Check.check_top cctx (Kernel.Decl d) with
-                              | Error ds -> Error ds
-                              | Ok _ -> load_forms rest)))
+                      | Ok _ -> check_forms rest)
                   | Kernel.Expr e -> (
-                      match Resolve.resolve_expr (Store.names_view store) e with
+                      match Check.check_top cctx (Kernel.Expr e) with
                       | Error ds -> Error ds
-                      | Ok e -> (
-                          match Check.check_top cctx (Kernel.Expr e) with
-                          | Error ds -> Error ds
-                          | Ok _ ->
-                              tops := e :: !tops;
-                              load_forms rest)))
+                      | Ok _ ->
+                          tops := e :: !tops;
+                          check_forms rest))
             in
-            match Reader.parse_string ~file (read_file file) with
+            match resolve_source_tops ~syntax store ~file (read_file file) with
             | Error ds -> print_diags ds
-            | Ok forms -> (
-                match
-                  List.fold_left
-                    (fun acc form ->
-                      Result.bind acc (fun tops ->
-                          Result.map (fun t -> t :: tops) (Kernel.of_form form)))
-                    (Ok []) forms
-                with
+            | Ok (resolved_tops, warnings) -> (
+                print_warnings warnings;
+                match check_forms resolved_tops with
                 | Error ds -> print_diags ds
-                | Ok rev_tops -> (
-                    match load_forms (List.rev rev_tops) with
-                    | Error ds -> print_diags ds
-                    | Ok () -> (
-                        (* warnings and manifests are harvested from a SECOND, run-alike
+                | Ok () -> (
+                    (* warnings and manifests are harvested from a SECOND, run-alike
                          checker context that checks only the top expressions: the loader's
                          eager decl checking seeds Check's origin map in a different order
                          than run_cmd's lazy checking, and the E0814 origins
                          (`performed via ...`) must match run byte-for-byte *)
-                        let baked =
-                          match make_checker store with
-                          | Error _ -> None
-                          | Ok cctx2 ->
-                              List.fold_left
-                                (fun acc e ->
-                                  Option.bind acc (fun acc ->
-                                      match Check.check_top cctx2 (Kernel.Expr e) with
-                                      | Error _ -> None
-                                      | Ok { Check.warnings; row; _ } ->
-                                          let r =
-                                            Types.repr_row
-                                              (Option.value row ~default:Types.empty_row)
-                                          in
-                                          let msgs =
-                                            Check.manifest_errors cctx2
-                                              ~grantable:Prelude.grantable_names ~granted:[] r
-                                          in
-                                          let manifest =
-                                            List.map2
-                                              (fun h d -> (Check.name_of cctx2 h, Diag.to_string d))
-                                              r.Types.effects msgs
-                                          in
-                                          Some
-                                            ((e, List.map Diag.to_string warnings, manifest) :: acc)))
-                                (Some []) (List.rev !tops)
-                        in
-                        match baked with
-                        | None ->
-                            prerr_endline
-                              "error[E1103]: internal: the manifest pass diverged from the load \
-                               pass";
-                            exit_diags
-                        | Some rev_baked -> (
-                            match
-                              Jacquard_native.Build.build ~store ~tops:(List.rev rev_baked)
-                                ~prelude_dir:(prelude_dir_of prelude) ~out
-                            with
-                            | Ok n ->
-                                Printf.printf "native: compiled %d unit(s)\n" n;
-                                ok
-                            | Error (`Refused rs) ->
-                                List.iter
-                                  (fun (r : Jacquard_native.Compile.refusal) ->
-                                    (* eval is policy (E1102): dynamically loaded code runs at
+                    let baked =
+                      match make_checker store with
+                      | Error _ -> None
+                      | Ok cctx2 ->
+                          List.fold_left
+                            (fun acc e ->
+                              Option.bind acc (fun acc ->
+                                  match Check.check_top cctx2 (Kernel.Expr e) with
+                                  | Error _ -> None
+                                  | Ok { Check.warnings; row; _ } ->
+                                      let r =
+                                        Types.repr_row (Option.value row ~default:Types.empty_row)
+                                      in
+                                      let msgs =
+                                        Check.manifest_errors cctx2
+                                          ~grantable:Prelude.grantable_names ~granted:[] r
+                                      in
+                                      let manifest =
+                                        List.map2
+                                          (fun h d -> (h, Diag.to_string d))
+                                          r.Types.effects msgs
+                                      in
+                                      Some ((e, List.map Diag.to_string warnings, manifest) :: acc)))
+                            (Some []) (List.rev !tops)
+                    in
+                    match baked with
+                    | None ->
+                        prerr_endline
+                          "error[E1103]: internal: the manifest pass diverged from the load pass";
+                        exit_diags
+                    | Some rev_baked -> (
+                        match
+                          Jacquard_native.Build.build ~store ~tops:(List.rev rev_baked)
+                            ~prelude_dir:(prelude_dir_of prelude) ~out
+                        with
+                        | Ok n ->
+                            Printf.printf "native: compiled %d unit(s)\n" n;
+                            ok
+                        | Error (`Refused rs) ->
+                            List.iter
+                              (fun (r : Jacquard_native.Compile.refusal) ->
+                                (* eval is policy (E1102): dynamically loaded code runs at
                                        the interpreter tier; everything else is E1101, a
                                        not-yet-compiled surface *)
-                                    let what = r.Jacquard_native.Compile.what in
-                                    let sub = "requires the interpreter tier" in
-                                    let is_eval =
-                                      let n = String.length sub in
-                                      let rec go i =
-                                        i + n <= String.length what
-                                        && (String.sub what i n = sub || go (i + 1))
-                                      in
-                                      go 0
-                                    in
-                                    if is_eval then
-                                      Printf.eprintf "error[E1102]: %s %s\n"
-                                        r.Jacquard_native.Compile.where what
-                                    else
-                                      Printf.eprintf
-                                        "error[E1101]: not yet compilable in native v1: %s %s\n"
-                                        r.Jacquard_native.Compile.where what)
-                                  rs;
-                                exit_diags
-                            | Error (`Toolchain m) ->
-                                Printf.eprintf "error[E1103]: %s\n" m;
-                                exit_diags))))))
+                                let what = r.Jacquard_native.Compile.what in
+                                let sub = "requires the interpreter tier" in
+                                let is_eval =
+                                  let n = String.length sub in
+                                  let rec go i =
+                                    i + n <= String.length what
+                                    && (String.sub what i n = sub || go (i + 1))
+                                  in
+                                  go 0
+                                in
+                                if is_eval then
+                                  Printf.eprintf "error[E1102]: %s %s\n"
+                                    r.Jacquard_native.Compile.where what
+                                else
+                                  Printf.eprintf
+                                    "error[E1101]: not yet compilable in native v1: %s %s\n"
+                                    r.Jacquard_native.Compile.where what)
+                              rs;
+                            exit_diags
+                        | Error (`Toolchain m) ->
+                            Printf.eprintf "error[E1103]: %s\n" m;
+                            exit_diags)))))
 
 let out_arg =
-  Arg.(
-    required
-    & opt (some string) None
-    & info [ "o"; "output" ] ~docv:"OUT" ~doc:"Output executable path.")
+  Arg.(required & opt (some string) None & info [ "o"; "output" ] ~docv:"OUT" ~doc:"Output path.")
+
+let export_file_arg = Arg.(required & pos 0 (some string) None & info [] ~docv:"INPUT.jac")
+
+let export_t =
+  Cmd.v
+    (Cmd.info "export"
+       ~doc:
+         "Export a .jac source artifact as deterministic canonical .jqd for conformance or \
+          debugging; the output is created atomically and never replaces an existing path.")
+    Term.(const export_cmd $ export_file_arg $ out_arg $ prelude_arg $ syntax_arg)
 
 let build_t =
   Cmd.v
     (Cmd.info "build"
        ~doc:
-         "Compile a .jqd file and its reachable declarations to a standalone native executable \
-          (tasks 67-71: the effect-full language, capturing and multi-shot handlers included; code \
-          values land with task 73).")
-    Term.(const build_cmd $ file_arg $ out_arg $ prelude_arg $ dry_run_arg)
+         "Compile a .jac surface or .jqd bootstrap file and its reachable declarations to a \
+          standalone native executable without generating an intermediate twin.")
+    Term.(const build_cmd $ file_arg $ out_arg $ prelude_arg $ dry_run_arg $ syntax_arg)
 
 let tiers_t =
   Cmd.v
@@ -1788,10 +2169,13 @@ let main =
       diff_t;
       infer_t;
       store_t;
+      audit_t;
+      governance_t;
       test_t;
       replay_t;
       dist_diff_t;
       tiers_t;
+      export_t;
       build_t;
     ]
 

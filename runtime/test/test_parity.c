@@ -72,6 +72,10 @@ static void mode_show(void) {
   jq_value nul = jq_text((const uint8_t *)"nul\0mid", 7);
   show_line(nul);
   jq_drop(nul);
+  jq_value secret =
+      jq_secret((const uint8_t *)"ET4-native-parity-fixture", 25);
+  show_line(secret);
+  jq_drop(secret);
   /* tuples */
   show_line(JQ_UNIT);
   jq_value t1 = jq_tuple(1, (jq_value[]){ jq_int(1) });
@@ -128,6 +132,11 @@ static void mode_show(void) {
     uint64_t payload[1];
   } resume0 = { JQ_RC_STATIC, JQ_RESUME, 0, 0, { 0 } };
   show_line((jq_value)&resume0);
+  int run = 0;
+  jq_value task;
+  if (jq_task_create(&run, (uint32_t[]){ 0 }, 1, 1, &task) != JQ_TASK_VALID) abort();
+  show_line(task);
+  jq_drop(task);
 }
 
 static void mode_rng(void) {

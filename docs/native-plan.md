@@ -346,10 +346,15 @@ widened to grant-only and tail-resumptive programs.
    reachable operations (finer than the sketched per-effect ids, and what
    the grant table and metadata table index by).
 3. **Clause discipline is decided at compile time** using the existing
-   classifier (src/tier.ml `discipline`): a TailResumptive clause compiles
-   to a plain function the perform site calls directly — its `resume(x)` is
-   the return path; no continuation exists. The handle body compiles as a
-   0-arity thunk so the push/pop stays structured around one call. Root
+   classifier (src/tier.ml `discipline`). In the Task 70 implementation, a
+   TailResumptive clause compiled to a plain function the perform site called
+   directly — its `resume(x)` was the return path and no continuation existed.
+   The effect-linearity successor narrows that tokenless protocol to
+   tail-resumptive `Multi` clauses. Every `Once` clause now materializes a
+   shared affine resume token even when its source is tail-shaped, so an
+   enclosing `Multi` clone cannot duplicate the used bit. The handle body
+   remains a 0-arity thunk so the push/pop stays structured around one call.
+   Root
    grants are runtime C functions with the same shape, ported byte-for-byte
    from Prelude.grant: console (print → fwrite, read-line with EOF as ""),
    clock (now → ms since epoch, sleep → nanosleep), fs (read/write/list-dir

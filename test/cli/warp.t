@@ -56,7 +56,7 @@ refuses without grants. Zero-check warning and failure detail render inline.
   PASS a-group/grouped/inner (1 check)
   PASS freq-prop/sampled (prop: 100 cases, seed 7)
   WARN lazy-one/does nothing: made no checks
-  REFUSED needs-world: requires --allow fs,clock,console,net
+  REFUSED needs-world: requires --allow console,fs,clock,net
   PASS pure-math/arithmetic (1 check)
   PASS shout-appends/appends bang (1 check)
   5 passed, 0 failed, 0 skipped, 1 refused
@@ -88,7 +88,7 @@ shout-appends) re-keys and reruns — and now fails, honestly.
   PASS a-group/grouped/inner (1 check) [cached]
   PASS freq-prop/sampled (prop: 100 cases, seed 7) [cached]
   WARN lazy-one/does nothing: made no checks [cached]
-  REFUSED needs-world: requires --allow fs,clock,console,net
+  REFUSED needs-world: requires --allow console,fs,clock,net
   PASS pure-math/arithmetic (1 check) [cached]
   FAIL shout-appends/appends bang
     - shout: expected hi!, got hi?

@@ -41,13 +41,25 @@ Five principles generate the whole design:
    marks the variant that performs `Abort` or `Throw`, visible at every call site and
    confirmed by the row. `list.head` returns `Option a`; `list.head!` has `{Abort}`
    in its signature.
-4. **Handlers ship with effects.** An effect declaration without its canonical
-   handlers is a hole. Every effect in this library arrives with the handlers that
-   discharge it, so the library teaches its own control flow.
+4. **Boundaries ship with implemented effects.** A shipped library effect names
+   canonical handlers, an explicit runtime grant, or a documented embedding
+   boundary. Reserved taxonomy names are labeled unimplemented rather than
+   presented as usable library declarations.
 5. **Combinators are row-transparent.** A higher-order function performs what its
    argument performs and nothing else. `for-each` with a pure function is pure; the
    same `for-each` with `println` carries `Console`. The library never hides an
    effect and never adds one.
+
+Fixed helper effects and callback effects compose without contaminating each other.
+For example, Preflight's reusable gate has signature
+`forall | e. ((Code) ->{| e} Bool) ->{Dist | e} Code`: `Dist` belongs to the gate,
+while a pure predicate keeps `e` empty and a scripted predicate closes `e` to
+`Eval`. Top-level callers remain closed (`{Dist}` or `{Dist, Eval}`), so this
+precision does not add implicit authority. Handler subtraction is unchanged: a
+handler requires only its declared handled labels on flexible computations invoked
+inside the handled body, including callbacks reached through typed wrappers. It
+then removes those labels; helper-owned and before/after effects remain on the
+outer row instead of leaking into the callback contract.
 
 Everything else is elaboration.
 
@@ -62,7 +74,7 @@ a ring may reference hashes only from itself and rings below.
 | 0 | Axioms | `Bool`, `Ordering`, `Option`, `Result`, `List`, dictionaries (`Eq`, `Ord`, `Show`), arithmetic and comparison builtins | empty only |
 | 1 | Control | `Abort`, `Throw`, `State`, `Emit` with their canonical handlers; the data/control seams | effect rows, all dischargeable in pure code |
 | 2 | Structures | `Text` operations, `Map`, `Set`; `Dist` with `Distribution` and the pure inference handlers | empty rows plus `Dist` |
-| 3 | World | `Console`, `Clock`, `Fs`, `Net`, `Eval`; root handlers installed only by the runtime under grants | authority; these rows in `main` are the program's manifest |
+| 3 | Boundaries | `Console`, `Clock`, `Fs`, `Net`, `Eval`, `Infer`, `Approval`, `Audit`, and `Secret`; runtime grants, governance handlers, and embedding boundaries | authority/model/governance rows reviewed in the program manifest |
 
 The placement of `Dist` in ring 2 is a deliberate statement: inference is pure.
 Enumeration needs no world at all, and likelihood weighting needs only a seed, which
@@ -71,6 +83,29 @@ is a number. Only entropy acquisition (a fresh seed) touches ring 3.
 Naming convention: dotted lowercase, `list.map`, `text.split`, subject type first.
 Names live in the metadata index, so all of this is curation rather than structure,
 and renames are free (§8 returns to what that buys).
+
+The complete blessed effect vocabulary—including reserved but unimplemented
+interfaces, risk defaults, user-effect coloring rules, exact hashes, and
+canonical handler or installation boundaries—is release-frozen in
+[`effect-taxonomy.md`](effect-taxonomy.md). Review-tool behavior is documented
+in [`effect-review.md`](effect-review.md).
+
+| ET.8 blessed status | exact names |
+|---|---|
+| implemented (17) | `Abort`, `Throw`, `State`, `Emit`, `Dist`, `Fault`, `Eval`, `Console`, `Clock`, `Fs`, `Net`, `Workspace`, `Infer`, `Approval`, `Audit`, `Secret`, `Judge` |
+| reserved/unimplemented (9) | `Choose`, `Env`, `Pg`, `Blob`, `Serve`, `Crypto`, `Log`, `Async`, `Channel` |
+
+The status table is descriptive, not a grant list. The full identity table is
+machine-checked against `Effect_registry`, the prelude declarations, and the
+TSV artifact. Reserved names have no declaration hash or handler in this
+release.
+
+Phase-zero parallelism also lives in ring 0. `parallel.map` and `parallel.both`
+accept only closed-empty-row callbacks, remain pure themselves, and are
+observably sequential in the interpreter. They introduce neither an `Async`
+effect nor a task runtime; a future native implementation may use threads only
+when it preserves the same values, failures, ordering contract, and output
+identity. See `concurrency.md` §3.
 
 ## 3. Ring 0: the axioms
 
@@ -156,6 +191,20 @@ list.each   : (List a, (a) ->{| e} ()) ->{| e} ()
 Note every one of these accepts an effectful function and threads its row through
 untouched, per principle 5. There is no separate `mapM`; the map is the map.
 
+### Pure parallel hints
+
+```text
+parallel.map  : (List a, (a) ->{} b) ->{} List b
+parallel.both : (() ->{} a, () ->{} b) ->{} (a, b)
+```
+
+The empty callback rows are closed contracts, not inferred open rows. Passing a
+callback or thunk with any effect is a type error. The interpreter maps in input
+order and forces `parallel.both`'s left thunk before its right thunk; ordinary
+failure and control behavior is therefore exactly the behavior of `list.map`
+and explicit left-then-right tuple evaluation. These APIs are optimization hints,
+not observable concurrency.
+
 ### List, the rest of it
 
 The following signature-only catalog intentionally omits term bodies and is
@@ -218,20 +267,20 @@ it ships with. An idiom appears here worth naming once: an operation whose handl
 never resumes may promise any result type, so `abort : () -> a` needs no bottom type.
 
 ```jacquard doctest=stdlib-control-effects mode=check fixture=stdlib-control-effects.jac stdout=stdlib-control-effects.stdout stderr=empty exit=0
-effect Abort a where {
+once effect Abort a where {
   abort : () -> a
 }
 
-effect Throw e a where {
+once effect Throw e a where {
   throw : (e) -> a
 }
 
-effect State s where {
+multi effect State s where {
   get : () -> s
   put : (s) -> ()
 }
 
-effect Emit w where {
+once effect Emit w where {
   emit : (w) -> ()
 }
 ```
@@ -382,7 +431,7 @@ type Distribution a =
   | Categorical(values: List (a, Real))
   | UniformInt Int Int
 
-effect Dist a where {
+multi effect Dist where {
   sample : (Distribution a) -> a
   observe : (Distribution a, a) -> ()
 }
@@ -406,6 +455,12 @@ Granting `Dist` at the root installs the entropy-seeded sampling handler; an
 `observe` reaching the root is an error, since conditioning requires an inference
 handler and the root has nothing to condition.
 
+Risk `none` for `Dist` means no external authority. It does not mean “no
+review”: support, weights, observations, seeds, inference handler, and
+approximation error remain part of the result's uncertainty review. Likewise,
+model output from `Infer` and governance confidence are evidence rather than
+verified truth or consent.
+
 One more consumer leans on `Dist`'s constructors: Warp's shrinker (W6.4) orders
 each distribution's outcomes by SIMPLICITY, and shrinking lowers outcome indices.
 The ordering per constructor, pinned here because generators inherit it:
@@ -415,20 +470,28 @@ tables); `Bernoulli` places `false` at index 0 — "toward false" is the shrink
 direction. Deleting a choice from the log replays the generator without it, which
 is how one `UniformInt` length choice makes whole-list shrinking fall out.
 
-## 7. Ring 3: the world
+## 7. Ring 3: world, model, meta, and governance boundaries
 
 World effects are declared like any other; what distinguishes them is that only the
 runtime installs their root handlers, under explicit grants. The row of `main` is
 the program's authority manifest, and this table is what a reviewer is reading when
 they read it:
 
-| effect | operations | granting it means |
-|--------|------------|-------------------|
-| `Console` | `print : (Text) -> ()`, `read-line : () -> Text` | the program talks to the terminal |
-| `Clock` | `now : () -> Int` (ms since epoch), `sleep : (Int) -> ()` | the program observes and waits on time |
-| `Fs` | `read : (Text) -> Text`, `write : (Text, Text) -> ()`, `list-dir : (Text) -> List Text` | the program touches the filesystem |
-| `Net` | `fetch : (Request) -> Response` | the program reaches the network |
-| `Eval` | `eval : (Code) -> a` | the program runs code, including code it constructed |
+| effect | risk | canonical boundary | reviewing it means |
+|--------|------|--------------------|--------------------|
+| `Console` | low | `console.scripted` or explicit root grant | terminal observation or interaction |
+| `Clock` | low | `clock.fixed` or explicit root grant | wall-clock observation or waiting |
+| `Fs` | medium | `fs.in-memory`, `fs.read-only`, or explicit root grant | filesystem access; the root grant is not path-scoped |
+| `Net` | high | `net.scripted`, `net.record`, or explicit root grant | network access |
+| `Eval` | high | explicit root grant only | execution of constructed code at root authority |
+| `Infer` | medium | `infer.scripted` or explicit root grant | unverified model output |
+| `Approval` | special | four hash-revalidating Approval handlers | exact consent semantics, not ordinary risk ordering |
+| `Audit` | special | `audit.in-memory` or `audit.line-log` | evidence ordering and sink-failure behavior |
+| `Secret` | special | fixed/vault embedding APIs or environment root grant | opaque lookup and deliberate plaintext exposure |
+
+The complete reviewed assignment, including control, Warp, Dist, and Fault,
+is frozen in `prelude/operation-modes.manifest`. Modes are declared in the
+interfaces and never inferred from these names or descriptions.
 
 Convenience functions build on the ops in ordinary code: `println`, `console.ask :
 (Text) ->{Console} Text`, `fs.read-lines`. Attenuation is handler interposition and
@@ -436,11 +499,301 @@ needs no library support beyond `Handle` itself, though ring 3 ships worked exam
 `fs.read-only`, a handler that forwards `read` and turns `write` into a `Throw`, is
 twelve lines and doubles as the tutorial on interposition.
 
+### Workspace facade schemas and calls
+
+GM.9 releases one narrow, typed request facade before any membrane driver or
+handler is installed:
+
+```text
+workspace.read-file  : (Path) -> Result ToolError Text
+workspace.write-file : (Path, Text) -> Result ToolError ()
+workspace.fetch      : (Request) -> Result ToolError Response
+```
+
+All three operations are `once`. `Path = PathValue(Text)` is the frozen
+facade carrier, while `Request`/`Response` remain the existing network
+carriers. Merely having Workspace in a row grants no root capability.
+Later live/dry layers handle it and may translate an allowed request to raw
+authority.
+
+`workspace.operation-spec` maps each member of the closed
+`WorkspaceOperation` enumeration to ordinary inspectable data: its resolved
+operation identity, canonical name, exact raw-authority envelope, explicit
+preconditions, and safe secret references. Read and write declare `Fs`.
+Fetch declares the exact ordered `Net, Secret` envelope and carries only
+`SecretRef("workspace", None)`; no `Secret` value or exposed text can fit the
+spec. `governance.validate-authority` orders blessed effects by the frozen
+effect-taxonomy sequence and uses a deterministic hash fallback only for
+non-taxonomy identities.
+
+The pure `workspace.call-read`, `workspace.call-write`, and
+`workspace.call-fetch` normalizers produce `Result Text GovernanceCall` via
+the canonical governance constructor. Each accepts only its typed operation
+arguments and recomputes its exact operation spec; there is no public generic
+`workspace.call` or `workspace.call-from-spec` path. Preconditions are the
+frozen empty `quote {()}` Code. Path wrappers and URLs remain readable. File
+contents and request bodies contribute their HASH_V0 digest to argument Code,
+so meaningful changes re-key the call without copying body text into the Call
+or its deterministic human summary. Call summary text remains presentation
+metadata and is excluded from `call-id` by the GM.2 identity contract.
+
+`workspace.summarize-read`, `workspace.summarize-write`, and
+`workspace.summarize-fetch` are separate pure typed functions. Success values
+contribute canonical payload digests while their human details expose only a
+codepoint count, completion label, or HTTP status. Error summaries use the
+closed `ToolError` label and omit driver detail. They never use
+`debug.inspect` or a generic renderer.
+
 `Defect`, the pending owner decision D7 from the exhaustiveness discussion, would
 live in this ring as the visible-but-auto-granted channel for invariant violations.
 This document assumes it exists for exactly two library uses so far: `observe` at
 root, and integer division by zero in `int.div!`'s underlying builtin. Both are
 trivially reworded if D7 resolves the other way.
+
+### Audit evidence and handlers
+
+`Audit` is the released ring-3 governance effect. Its sole operation is once
+`audit.record : (AuditEntry) -> ()`; the `Evaluated`, `Consented`, and
+`Completed` constructors now carry exact `GovernanceVersion` and `Int sequence`
+fields. This D69 v2 identity intentionally supersedes the historical ET.2 v1
+interface. `audit.in-memory` discharges Audit hermetically and returns the
+result paired with entries in occurrence order.
+
+`Hash` is opaque. There is no public unchecked value constructor:
+`hash.parse : (Text) -> Result Text Hash` accepts exactly 64 lowercase
+hexadecimal digits, and `hash.to-text` returns that unique HASH_V0 spelling.
+Short, uppercase, non-hexadecimal, prefixed, and otherwise alternate spellings
+are rejected. The marker constructor is absent from both the public name index
+and direct derived-hash lookup; the installed OCaml library also exposes
+`Hash.t` abstractly. `code.of-hash` preserves the validated digest as a real
+`#<digest>` form scalar rather than demoting it back to arbitrary text.
+
+`audit.entry-code : (AuditEntry) ->{} Code` is the standard serialization
+path. It builds versioned form data from typed fields. `audit.line-log` renders
+that Code as one compact, reparsable form and passes the line plus LF to an
+injected append callback. It never uses `debug.inspect`, JSON, or a generic
+value renderer. The callback's contract is `(Text) -> Result Text ()`: `Err`
+must mean that no bytes were appended. The handler returns `Err` without
+resuming, so failures of pre-action `Evaluated` and `Consented` writes are
+fail-closed and preserve action ordering.
+
+An `Err` while recording `Completed` is still returned, but the earlier action
+has already happened and cannot be rolled back by a log handler. Irreversible
+drivers must return a receipt or idempotency key in
+`GovernanceOutcomeSummary` so an operator can reconcile the external action
+with the audit stream. The handler does not retry implicitly: a retry could
+duplicate an append after an ambiguous sink failure.
+
+The current `audit-chain-v2` carrier commits each exact `audit-entry-v2` form to
+its predecessor HASH_V0 and publishes a new head. The chain uses
+`audit.entry-code`'s compact canonical bytes directly; there is no parallel
+AuditEntry serializer. It also enforces the exact contiguous sequence `0, 1, 2,
+...`, rejecting duplicate, skipped, decreasing, or negative positions. The fixed
+empty head and exact domain-separated digest
+contract are specified in [`effect-taxonomy.md`](effect-taxonomy.md).
+
+`jacquard audit genesis` prints the empty head. A single writer uses
+`jacquard audit append LOG ENTRY --previous HASH`, persists the returned head
+independently, and passes that head to
+`jacquard governance verify-log LOG --head HASH` for offline review. The
+append command takes a nonblocking advisory whole-file lock and performs its
+bounded read, verification, final pathname-identity check, and append through
+one open file description; replacement or concurrent-change races fail with
+E1306 rather than redirecting the record to a new pathname target. The
+verifier rejects reorder, removal, alteration, duplication, sequence gaps,
+wrong versions, and
+malformed or noncanonical records with diagnostics. Because a chain cannot by
+itself reveal removal of a valid suffix, the independently published head is a
+required part of the verification contract.
+
+### Versioned governance membrane values
+
+GM.1 ships the ordinary ring-3 values consumed by later governed facade
+handlers. `GovernanceVersion` is declared in the shared Audit carrier
+`prelude/19-audit.jqd` and reused by `prelude/21-governance-core.jqd`. The existing ET.2 `Risk` and
+`Verdict` types remain the four-constructor frozen enums. New versioned carriers
+use the `governance-*` names where ET.2 or ET.6 already owns an unversioned
+public name: `GovernanceVersion`, `ToolError`, `GovernanceAuthority`,
+`GovernanceCall`, `GovernanceAssessment`, `GovernanceOutcomeSummary`,
+`LivePolicy`, `DryPolicy`, `StoredPolicy`, and `BoundPolicy a`.
+
+The `governance.make-*` and `governance.bind-*` functions are pure smart
+constructors returning `Result Text a`. They reject non-finite or out-of-range
+confidence thresholds, reversed live-policy limits, empty/noncanonical
+operation names, unordered or duplicate authority, resource authority without
+its preceding effect authority, and empty resource scopes.
+`governance.make-call` accepts the canonical qualified `effect.operation` name,
+not a caller-supplied digest. The trusted pure
+`governance.resolve-operation-id` boundary locates that exact operation in the
+currently resolved Store effect declaration and derives its operation-member
+hash; missing effects and members return `Err`. `Call.call-id` is HASH_V0 over
+the version, that resolved operation hash, canonical arguments, exact ordered
+authority envelope, preconditions, and optional parent call. It deliberately
+excludes the qualified display name, summary, and carried ID. Validation
+re-resolves the name and rejects a mismatched operation hash before checking
+the Call hash. Policy and assessment IDs likewise hash one versioned Code
+encoding.
+
+`DryPolicy.min-confidence` remains validated, stored, and identity-bearing
+because it is part of the frozen GM.0 carrier schema. It is not a dry verdict
+gate: `governance.dry-verdict` returns `Simulate` for every non-`Forbidden` risk
+when a simulator exists, returns `NoSimulation` only when it does not, and
+always returns `Block` for `Forbidden`.
+
+The kernel has no module-private constructors, and the store privacy primitive
+also removes derived-hash lookup needed by already-resolved constructor calls.
+Consequently `governance-call-v0` and `bound-policy-v0` remain representable,
+while `governance.validate-call` and the two `governance.validate-bound-*`
+functions are mandatory verifier backstops at trust boundaries. Forged
+hash/value pairs return `Err`; they do not raise. Stable summary functions omit
+arguments, preconditions, evidence, authority configuration, digests, driver
+details, and all `Secret` values. There is no generic `Show` derivation for
+these carriers.
+
+### Judge assessment handlers
+
+GM.5 releases the ring-3 `Judge` effect. Its executable GM.1 carrier spelling
+is `assess : (GovernanceCall) -> GovernanceAssessment`, corresponding to the
+charter's `Judge.assess : (Call) -> Assessment`. The operation is `once`: one
+assessment may resume each captured call at most once.
+
+The standard handlers validate every assessment before resumption. `Risk`,
+`List Text` reasons, and `Code` evidence are closed typed fields; the trust
+boundary additionally rejects a directly constructed assessment whose
+confidence is NaN, infinite, or outside `[0,1]`. Refusal is the explicit
+`Throw Text` effect, so validation is never hidden:
+
+```text
+judge.rules    : (() ->{Judge, Throw | e} a,
+                  (GovernanceCall) ->{} GovernanceAssessment)
+                 ->{Throw | e} a
+judge.fixed    : (() ->{Judge, Throw | e} a, GovernanceAssessment)
+                 ->{Throw | e} a
+judge.scripted : (() ->{Judge, Throw | e} a,
+                  List GovernanceAssessment)
+                 ->{Throw | e} a
+judge.model    : (() ->{Infer, Judge, Throw | e} a,
+                  (GovernanceCall) ->{Infer} GovernanceAssessment)
+                 ->{Infer, Throw | e} a
+```
+
+`judge.rules` accepts only a pure rule function; an attempted `Fs`, `Net`,
+`Secret`, or other raw-world dependency is a type error rather than authority
+laundered behind `Judge`. `judge.fixed` repeats one validated value, while
+`judge.scripted` consumes assessments in operation order and throws
+`judge.scripted: out of assessments` without resuming when exhausted.
+`judge.model` is an explicit `Infer` adapter returning the same v0 point
+assessment. Posterior representations, `Dist`, and uncertainty policy belong
+to the separate G5 phase.
+
+### Canonical governance proposals
+
+GM.2 adds the successor `GovernanceProposal` carrier in
+`prelude/22-governance-identity.jqd` without changing the frozen ET.6
+`Proposal` or `Approval` identities. `governance.make-proposal` accepts the
+validated `GovernanceCall`, `BoundPolicy LivePolicy`, and
+`GovernanceAssessment` values plus the reviewed rendering, summary, and
+optional `GovernanceOutcomeSummary`. It derives the call, policy, and
+assessment IDs and copies the exact authority envelope from the Call; callers
+do not repeat those security-sensitive fields. Its proposal ID is HASH_V0 over
+one `governance-proposal-v0` Code value ordered as version, call ID, policy ID,
+assessment ID, authority, preview, rendering, and summary. The carried ID is
+excluded. `governance.validate-proposal` recomputes that hash, while
+`governance.validate-proposal-artifacts` also rejects any call, policy,
+assessment, or authority mismatch. All encoding reuses `code.hash` and the GM.1
+authority, assessment, policy, and outcome encoders; no second serializer is
+introduced.
+
+GM.3 adds the validated execution boundary in
+`prelude/23-governance-policy.jqd` without changing any GM.1 or GM.2 carrier or
+identity. `governance.validate-{live,dry}-policy` reapply the safe-constructor
+checks to directly represented values. Safe StoredPolicy constructors and the
+`stored-policy-v0` canonical Code encoding provide one exact HASH_V0 identity
+for registry/file values, while `governance.bind-stored-policy` and
+`governance.validate-bound-stored-policy` reject forged carried hashes.
+
+Execution uses `governance.live-policy-verdict` and
+`governance.dry-policy-verdict`. Both require an exactly validated BoundPolicy.
+The live boundary also rejects non-finite or out-of-range observed confidence
+as `InvalidDecision`, then applies `Low < Medium < High < Forbidden`, with
+Forbidden always blocked and under-confidence never allowed. The dry boundary
+always blocks Forbidden; otherwise it returns Simulate exactly when a pure
+simulator exists and `NoSimulation` when none exists. It has no Allow or Ask
+path and does not reinterpret the retained DryPolicy confidence field as a
+gate.
+
+### World-free dry governance gate
+
+GM.6 releases `governance.gate-dry` in
+`prelude/24-governance-gate-dry.jqd`. Its checker-visible contract accepts an
+`AuditSequence`, exact `BoundPolicy DryPolicy`, validated `GovernanceCall`, pure
+simulator thunk, and pure outcome summarizer. It returns the frozen disposition;
+the facade clause retains its affine continuation locally:
+
+```text
+governance.gate-dry :
+  forall a.
+  ( AuditSequence
+  , BoundPolicy DryPolicy
+  , GovernanceCall
+  , Option (() ->{} Result ToolError a)
+  , (Result ToolError a) ->{} GovernanceOutcomeSummary
+  ) ->{State, Judge, Audit} DryDisposition a
+```
+
+The gate validates the call and exact bound policy, obtains its assessment
+only through `Judge.assess`, and records `Evaluated` before simulation or
+refusal. `Forbidden` produces `ToolBlocked`; every other risk either invokes
+the pure simulator or produces `NoSimulation`. A simulator's explicit
+`DriverFailed` is preserved and never falls through to a live action. The
+result is summarized without reflection, `Completed` is recorded, and the
+disposition is returned. The facade clause then consumes its locally bound
+affine continuation exactly once on ordinary paths.
+
+Malformed directly represented `GovernanceCall` or `BoundPolicy` values are a
+defensive precondition refusal: the gate returns `InvalidDecision` before
+`Judge`, `Audit`, simulation, summarization, or any live/approval authority.
+Such verifier-input refusals are intentionally unaudited because no trustworthy
+call ID or policy ID exists to place in an exact AuditEntry.
+
+The simulator and summarizer rows are closed, and the gate's outward row is
+closed over only `State`, `Judge`, and `Audit`; it cannot carry `Approval`,
+`Secret`, `Eval`, `Fs`, `Net`, or another world effect. The caller supplies the
+run-scoped `AuditSequence`; `governance.with-sequence` is the sole API that
+installs and discharges its shared `State` effect. Public signatures still
+expose only `State` and `Int` positions, while the private handler payload is
+`(run-id: Hash, counter: Int)`. Each invocation receives a fresh trusted run
+ID, and `next`/`accept` reject a token whose ID differs from the active handler.
+The constructor and private generator/check markers are absent from both public
+name and derived-hash lookup, including after store reopen; only already-resolved
+owner code has the private construction path. Audit refusal is fail-closed.
+Failure to record `Evaluated` prevents simulation and summarization; failure to
+record `Completed` occurs after simulation but before a disposition can reach
+the facade clause.
+
+### Secret references and deliberate exposure
+
+`SecretRef(name: Text, version: Option Text)` identifies confidential material;
+it never carries the material itself. `Secret` is an opaque runtime value with
+no public constructor, `Show` instance, Code conversion, or Audit encoder. Its
+marker constructor is removed from both the public name and derived-hash
+indexes. Both `secret.read : (SecretRef) -> Secret` and
+`secret.expose : (Secret) -> Text` are `once` operations, so the authority to
+obtain plaintext remains visible in the `Secret` effect row.
+
+The standard library deliberately does not invent a credential store or select
+a vault provider. `Prelude.install_secret_fixed` supplies deterministic exact
+fixtures for hermetic tests. `Prelude.install_secret_vault` accepts an injected
+adapter whose closed failure type cannot carry backend text or values.
+`--allow secret` is the explicit live grant for the environment adapter; it
+looks up collision-free keys derived from the UTF-8 bytes of the safe
+`SecretRef`. Dry-run ignores that live grant, installs no Secret handler, and
+refuses the remaining row before lookup. Native and interpreter values retain
+distinct opaque tags. Generic rendering, runtime errors, traces, and
+`debug.inspect` always use the fixed marker `<secret redacted>`. This is an
+opacity boundary, not taint tracking: after explicit exposure the result is
+ordinary Text and code can copy or leak it. Keep exposure late and typed Audit
+inputs separate from plaintext.
 
 ### debug.inspect
 
@@ -452,10 +805,10 @@ term declaration.
 debug.inspect : (a) ->{} Text
 ```
 
-It ignores abstraction, prints anything structurally, and breaks parametricity,
-which is why it is documented as a debugging tool, banned by convention from
-appearing in library code, and flagged as owner decision D8 in case even this is
-too much hole.
+It prints ordinary values structurally and breaks their abstraction, which is
+why it is documented as a debugging tool and banned by convention from library
+code. Secret is the hard exception: inspection returns exactly
+`<secret redacted>` and never touches its payload.
 
 ## 8. Names, versions, and the index
 
@@ -501,20 +854,44 @@ subject-first library function:
 [1, 2, 3] |> list.reverse |> list.reverse
 ```
 
-A handler clause can read as policy wrapped around a workflow:
+A handler can read as policy wrapped around a workflow.
+`approval.make-proposal` safely constructs the exact review artifact and
+computes its canonical `proposal-v1` hash. All four canonical handlers
+recompute that identity before resuming the workflow. `approval.console`
+renders the exact hash and ordered authority before prompting;
+`approval.scripted` consumes explicit, hash-bound test Decisions;
+`approval.policy-auto` approves only a policy verdict already equal to
+`Allow`; and `approval.dry-run` always returns `Escalate`, so simulation cannot
+fabricate consent:
 
 ```jacquard doctest=stdlib-handler-policy mode=run fixture=stdlib-handler-policy.jac stdout=stdlib-handler-policy.stdout stderr=empty exit=0
-effect Approval where {
-  ask : (Text) -> Bool
+parsed-hashes = (
+  hash.parse("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+  hash.parse("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+  hash.parse("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"))
+
+match parsed-hashes {
+  | (Ok(subject-hash), Ok(policy-hash), Ok(assessment-hash)) -> {
+      let proposal-value = approval.make-proposal(
+        subject-hash,
+        policy-hash,
+        assessment-hash,
+        [],
+        quote { "ship" },
+        "ship?",
+        None)
+      let proposal-hash = approval.proposal-id(proposal-value)
+      throw.catch(
+        fn () -> approval.dry-run(fn () -> match `op:ask`(proposal-value) {
+	  | Escalate(returned, _) ->
+		  if code.eq?(code.of-hash(returned), code.of-hash(proposal-hash)) then 42 else 0
+	  | Approved(_, _, _) -> 0
+	  | Denied(_, _, _) -> 0
+        }),
+        fn (message) -> 0)
+    }
+  | _ -> 0
 }
-
-approve-and-run(workflow) =
-  handle workflow() {
-    | return result -> Some(result)
-    | ask(prompt) resume continue -> continue(True)
-  }
-
-approve-and-run(fn () -> if ask("ship?") then 42 else 0)
 ```
 
 Nested tuple destructuring stays visible inside a constructor pattern:
@@ -603,7 +980,7 @@ This makes the shipped ring-1 handlers looser than their ideal signatures — e.
 to the initial value, so `state.run(fn () -> { put("hi"); get() }, 0)` elaborates as
 `(a, Int)` but returns `("hi", "hi")` at runtime. The same holds for `throw.to-result`'s
 error type and `emit.collect`'s element type, and it is the long-standing shape of
-`eval : (Code) -> a`. The future fix direction is parameterized effect instances; until
+`eval-code : (Code) -> a`. The future fix direction is parameterized effect instances; until
 then the approximation is documented at the checker's `op_scheme`.
 
 **`dist.enumerate` has no error channel.** When every branch is impossible (total mass 0),

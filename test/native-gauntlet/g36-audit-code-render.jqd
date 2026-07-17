@@ -1,0 +1,45 @@
+; D69: canonical Hash validation and sequenced Audit v2 line rendering are direct native parity.
+(ref #497a26ccc6b7aa5d0ce6a929d1e57d852f87b4b053c7f734e7f5e2385a4406d3 con)
+
+(match
+  (app (var hash.parse)
+    (lit "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+  (clause (pcon ok (pvar hash))
+    (app (ref #f15fb6d1d980ba825cf0bdeaab929b149a26bc9b990a6961919a41b54d797426 term)
+      (var hash)))
+  (clause (pcon err (pvar message)) (var message)))
+
+(match
+  (app (var hash.parse)
+    (lit "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+  (clause (pcon ok (pvar hash))
+    (app (var code.render) (app (var code.of-hash) (var hash))))
+  (clause (pcon err (pvar message)) (var message)))
+
+; Direct successful result renders the first-class Hash nested in Ok.
+(app (var hash.parse)
+  (lit "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+
+(app (var hash.parse)
+  (lit "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"))
+
+(match
+  (app (var hash.parse)
+    (lit "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+  (clause (pcon ok (pvar hash))
+    (app (var emit.collect)
+      (lam ()
+        (app (var audit.line-log)
+          (lam ()
+            (let nonrec (pwild)
+              (app (var record)
+                (app (var completed) (var governance-v0) (lit 0) (var hash) (lit "native")
+                  (app (var governance-outcome-summary-v0) (var governance-v0)
+                    (lit "ok") (var hash)
+                    (lit "control:\n\t\x01 utf8:héllo"))))
+              (lit 7)))
+          (lam ((pvar line))
+            (let nonrec (pwild) (app (var emit) (var line))
+              (app (var ok) (tuple))))))))
+  (clause (pcon err (pvar message))
+    (tuple (app (var err) (var message)) (var nil))))

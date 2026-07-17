@@ -139,6 +139,33 @@ let test_defterm_group_hash_not_nameable () =
   | Error [ d ] -> Alcotest.(check string) "code" "E0604" d.Diag.code
   | _ -> Alcotest.fail "naming a defterm group hash must fail"
 
+let test_task_private_hash_never_nameable () =
+  let root = fresh_root () in
+  let store = open_ok root in
+  let hashes =
+    put_ok store (decl_of ~names:Resolve.empty_names "(deftype task ((tvar a)) (con task-opaque))")
+  in
+  let private_hash = List.assoc "task-opaque" hashes.Canon.named in
+  Alcotest.(check bool)
+    "private constructor omitted" true
+    (Store.lookup_kind store "task-opaque" Resolve.KCon = None);
+  (match Store.bind_name store "leaked-task" private_hash with
+  | Error [ diagnostic ] -> Alcotest.(check string) "bind code" "E0907" diagnostic.Diag.code
+  | Error diagnostics ->
+      Alcotest.failf "unexpected private bind diagnostics: %s"
+        (String.concat "; " (List.map Diag.to_string diagnostics))
+  | Ok () -> Alcotest.fail "bind_name exposed TaskOpaque");
+  let names_path = Filename.concat root "names.jqd" in
+  let output = open_out_gen [ Open_wronly; Open_append; Open_text ] 0o644 names_path in
+  Printf.fprintf output "(named persisted-task con #%s)\n" (Hash.to_hex private_hash);
+  close_out output;
+  match Store.open_store root with
+  | Error [ diagnostic ] -> Alcotest.(check string) "persisted code" "E0907" diagnostic.Diag.code
+  | Error diagnostics ->
+      Alcotest.failf "unexpected persisted private diagnostics: %s"
+        (String.concat "; " (List.map Diag.to_string diagnostics))
+  | Ok _ -> Alcotest.fail "persisted names.jqd exposed TaskOpaque"
+
 (* --- deps and dependents --- *)
 
 (* A 3-decl chain: c-three depends on b-two depends on a-one. *)
@@ -222,16 +249,40 @@ let prop_dependents_inverse_of_deps =
 
 (* --- reopening rebuilds the index --- *)
 
-let test_reopen_rebuilds_index () =
+let rec test_reopen_rebuilds_index () =
   let root = fresh_root () in
   let hs =
     let t = open_ok root in
     put_ok t (decl_of ~names:Resolve.empty_names "(deftype bool () (con false) (con true))")
   in
   let t2 = open_ok root in
-  match Store.locate t2 (List.assoc "true" hs.Canon.named) with
+  (match Store.locate t2 (List.assoc "true" hs.Canon.named) with
   | Ok { Store.role = Store.Constructor 1; _ } -> ()
-  | _ -> Alcotest.fail "derived hash index must survive reopen"
+  | _ -> Alcotest.fail "derived hash index must survive reopen");
+  test_once_effect_survives_store_reopen ()
+
+and test_once_effect_survives_store_reopen () =
+  let root = fresh_root () in
+  let hs =
+    let t = open_ok root in
+    put_ok t
+      (decl_of ~names:Resolve.empty_names
+         "(defeffect signal ((tvar a)) (op fetch once ((tvar a)) (tvar a)))")
+  in
+  let t = open_ok root in
+  match Store.locate t (List.assoc "fetch" hs.Canon.named) with
+  | Ok
+      {
+        Store.role = Store.Operation 0;
+        decl = { Kernel.it = Kernel.DefEffect { ops = [ operation ]; _ }; _ };
+        _;
+      } ->
+      Alcotest.(check bool) "Once preserved" true (operation.Kernel.op_mode = Kernel.Once);
+      Alcotest.(check string)
+        "stored bootstrap remains explicit"
+        "(defeffect signal ((tvar a)) (op fetch once ((tvar a)) (tvar a)))"
+        (Printer.inline_form (Kernel.decl_to_form (Result.get_ok (Store.get t hs.Canon.decl_hash))))
+  | _ -> Alcotest.fail "Once operation must survive store reopen with its derived role"
 
 let test_unknown_hash () =
   let t = open_ok (fresh_root ()) in
@@ -288,6 +339,8 @@ let suite =
     Alcotest.test_case "rename unknown name" `Quick test_rename_unknown;
     Alcotest.test_case "invalid names rejected safely" `Quick test_invalid_names_rejected_safely;
     Alcotest.test_case "defterm group hash not nameable" `Quick test_defterm_group_hash_not_nameable;
+    Alcotest.test_case "Task private hash never nameable" `Quick
+      test_task_private_hash_never_nameable;
     Alcotest.test_case "deps on a 3-decl chain" `Quick test_deps_chain;
     QCheck_alcotest.to_alcotest prop_dependents_inverse_of_deps;
     Alcotest.test_case "reopen rebuilds index" `Quick test_reopen_rebuilds_index;

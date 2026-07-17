@@ -39,6 +39,7 @@ in `src/` and `bin/` appears in this catalog.
 | E0210 | invalid ref kind | `(ref #... banana)` |
 | E0211 | invalid rec flag | `(let sometimes ...)` |
 | E0212 | `handle` without exactly one `ret` clause | two `ret` clauses |
+| E0213 | invalid explicit operation mode | `(op fetch multi () (tref text))` (legacy `multi` is encoded by absence) |
 
 ## Name resolution (E03xx)
 
@@ -106,9 +107,21 @@ in `src/` and `bin/` appears in this catalog.
 | E0813 | non-exhaustive match (with witness) | bool match missing `false` |
 | E0814 | ungranted effect in the program manifest | running a printing program without `--allow console` |
 | E0815 | effectful top-level definition body | `(defterm ((binding x () (app (var print) ...))))` |
+| E0816 | a once resumption may be consumed twice on one possible path | two sequential calls to the same once-clause `resume` binder |
+| E0817 | a once resumption escapes its handler clause | returning, storing, capturing, or passing `resume` to a non-`Resume` parameter |
+| E0818 | polymorphic reuse of a non-value local binding (value restriction) | bind an application result, then call it at two unrelated types |
+| E0819 | opaque Secret used by generic inspection or serialization | passing a `Secret` to `debug.inspect` or a Text encoder instead of explicitly calling `secret.expose` |
 | W0801 | redundant match clause | a clause after `(pwild)` |
 
-## Probabilistic inference (E09xx)
+E0817 has one bounded transformer exception: a direct clause lambda may capture
+`resume` when its `handle` expression is immediately applied once to syntactic
+value arguments. Inside that lambda, a call of `resume` must be the direct
+function child of one nested application with syntactic-value arguments so its
+answer is immediately eliminated; binding or duplicating an answer that could carry a later Once token
+emits E0817. Binding, returning, storing, passing, or aliasing the handler result
+also emits E0817; consuming the captured resumption twice emits E0816.
+
+## Runtime and probabilistic inference (E09xx)
 
 | code | meaning | example |
 |------|---------|---------|
@@ -117,6 +130,9 @@ in `src/` and `bin/` appears in this catalog.
 | E0903 | model file has no expression | a decls-only file passed to `jacquard infer` |
 | E0904 | observe at the sampling root | `observe` under `jacquard run --allow dist` (D7 default: defect) |
 | E0905 | exhaustive verification budget exceeded | a property over `uniform-int(1, 1000000)` under `jacquard test --exhaustive` |
+| E0906 | a once continuation was resumed more than once | applying the same once resumption twice |
+| E0907 | a Task carrier is private, malformed, foreign to the run, escaped, stale, or outside its structured scope | returning/storing a Task beyond `async.scope`, constructing `TaskOpaque` by hash, reusing a Task after close/in another run, or passing a foreign handle to a scope policy |
+| E0908 | a deterministic scheduler, schedule trace, trace I/O, or same-scope policy operation is illegal for its lifecycle, decision order, registration, continuation ownership, configured positive/transport bound, or strict-replay contract | checking out a suspended task, exceeding a task/decision/input bound, observing or scheduling a terminal child twice, reading/writing an unavailable trace path, parsing an unversioned/malformed trace, or replaying a missing, extra, reordered, impossible, queue-drifted, or operation-drifted event |
 
 ## Warp (E10xx)
 
@@ -143,7 +159,7 @@ in `src/` and `bin/` appears in this catalog.
 | E1217 | malformed internal group reference | `#group[x]` |
 | E1218 | invalid raw UTF-8 scalar in a surface string | a raw `0xff` byte between quotes |
 | E1220 | unexpected token in the recovering surface parser | stray `|` at top level |
-| E1221 | missing closing brace during surface recovery | a block truncated before `}` |
+| E1221 | unclosed braced construct during surface recovery, with opening and failure spans | a `quote`, `match`, `handle`, or block truncated before `}` or closed with `]`/`)` |
 | E1222 | reserved pre-SS.9 binding-pattern parser gate; refutable binders now use E0205/E0206 during lowering | `fn (Some) -> 1` |
 | E1223 | missing block-item separator | `{ 1 2 }` instead of `{ 1; 2 }` |
 | E1224 | a term signature is not followed by the same definition | `x : T; x = value` |
@@ -155,6 +171,7 @@ in `src/` and `bin/` appears in this catalog.
 | E1233 | malformed local recursive/function binding | `let rec (f, g)(x) = x` |
 | E1234 | generated lowering node lacks a real source span | lowering a hand-built spanless block AST |
 | E1235 | a signature or definition was lowered without its required file context | calling `lower_top` on a signature |
+| E1236 | missing, duplicated, or conflicting surface operation mode; an omitted mode includes migration guidance | `effect E where { op : () -> T }` |
 
 ### Surface warnings (W12xx)
 
@@ -164,13 +181,24 @@ in `src/` and `bin/` appears in this catalog.
 | W1202 | positional constructor pattern has more than four fields | `Snapshot(_, _, _, _, _)` |
 | W1203 | match scrutinee spans more than four source lines | manually bind the expression with `let`, then match on its name |
 
+## Explicit bootstrap export (E13xx)
+
+| code | meaning | example |
+|------|---------|---------|
+| E1301 | export destination collision | `jac export a.jac -o existing.jqd` |
+| E1302 | export input is missing, unreadable, stdin, or non-regular/non-seekable | `printf '1' \| jac export - -o out.jqd` |
+| E1303 | same-directory atomic publication failed | exporting into a missing or unwritable directory |
+
 The recovering `.jac` lexer emits an in-order invalid-token marker and continues;
 the strict lexer remains fail-fast. Malformed strings resynchronize at a closing
 quote or newline, so an unterminated line does not discard valid later items. The
-parser synchronizes at `}`, `|`, `;`, and newline so a malformed expression does
-not hide later syntax errors. Each damage site leaves an explicit surface hole
-with its source span, a stable `surface-hole` ID, and `surface-form =
-recovery-hole` provenance. `Surface_parse.strict` rejects both error diagnostics
+parser synchronizes at construct boundaries including `}`, wrong `]`/`)` closers, `|`, `;`, and
+newline so a malformed expression does
+not hide later syntax errors. Unclosed `quote`, `match`, `if`, `handle`, and block
+diagnostics use the failure token as the primary span and name the opening span in
+the hint. Each damage site leaves an explicit surface hole or synthetic delimiter
+marker with a stable `surface-hole` ID and `surface-form = recovery-hole` or
+`recovery-delimiter` provenance. `Surface_parse.strict` rejects both error diagnostics
 and any remaining hole before lowering. Semantic boundaries also recursively reject
 marked trees before strict checking, execution, storage, or canonical hashing,
 including markers nested in patterns, types, handlers, and quote payloads.
@@ -180,6 +208,25 @@ returns only diagnostics and inferred signatures. Successfully checked term isla
 are available to later islands through analysis-local names and schemes without
 installing declarations in the store. Type and effect declarations are checked in
 isolation; references to them from later islands require strict installation first.
+
+## Audit chain (E13xx)
+
+| code | meaning | example |
+|------|---------|---------|
+| E1301 | malformed or noncanonical Audit chain carrier | a blank line, alternate whitespace, or missing final LF |
+| E1302 | unsupported chain version or malformed released AuditEntry | `audit-chain-v3` or a non-v2 entry shape |
+| E1303 | broken predecessor linkage | reordered, removed, or duplicated records |
+| E1304 | stored digest does not match the predecessor and entry bytes | altering one entry byte without recomputing the record digest |
+| E1305 | reconstructed chain head differs from the independently published head | removing the final record or appending from a stale head |
+| E1306 | Audit chain I/O failure, size refusal, or concurrent file change | an unreadable/over-limit entry, a log truncated while being read, or its pathname replaced during append |
+| E1307 | malformed CLI Audit head | `--head beef` instead of 64 lowercase hexadecimal digits |
+| E1308 | noncontiguous AuditEntry sequence | a duplicate, skipped, decreasing, or negative sequence position |
+
+`jacquard governance verify-log LOG --head HASH` verifies offline and fails
+closed. It accepts only LF-terminated canonical `audit-chain-v2` records, checks
+every predecessor, digest, and exact sequence `0, 1, 2, ...` in order, then compares the reconstruction with the
+separately supplied published head. Malformed input returns diagnostics; it does
+not raise an exception.
 
 ## Appendix: the W5.3 audit (ten message rewrites)
 

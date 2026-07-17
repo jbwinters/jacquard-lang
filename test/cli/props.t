@@ -2,6 +2,48 @@ Warp property lanes (W6.4 sampling + shrinking, W6.5 exhaustive, W6.9).
 
   $ export JACQUARD_PRELUDE=$PWD/../../prelude
 
+Phase-zero parallel hints are proved against their sequential definitions over
+generated pure inputs. The callbacks themselves stay empty-row even though the
+property generators and checks use Dist and Check around them.
+
+  $ cat > parallel-laws.jqd <<'JACQUARD'
+  > (defterm ((binding parallel-map-law ()
+  >   (app (var prop) (lit "parallel.map matches list.map")
+  >     (lam ()
+  >       (app (var prop.for)
+  >         (lam () (app (var gen.list)
+  >           (lam () (app (var sample) (app (var uniform-int) (lit -20) (lit 20))))
+  >           (lit 7)))
+  >         (lam ((pvar xs))
+  >           (let nonrec (pvar f)
+  >             (lam ((pvar n)) (app (var sub) (app (var mul) (var n) (lit 3)) (lit 1)))
+  >             (app (var check.eq)
+  >               (app (var parallel.map) (var xs) (var f))
+  >               (app (var list.map) (var xs) (var f))
+  >               (app (var eq.for-list) (var int.eq))
+  >               (app (var show.for-list) (var int.show))
+  >               (lit "parallel.map"))))))))))
+  > (defterm ((binding parallel-both-law ()
+  >   (app (var prop) (lit "parallel.both matches sequential tuple")
+  >     (lam ()
+  >       (app (var prop.for)
+  >         (lam () (tuple
+  >           (app (var sample) (app (var uniform-int) (lit -20) (lit 20)))
+  >           (app (var sample) (app (var uniform-int) (lit -20) (lit 20)))))
+  >         (lam ((ptuple (pvar x) (pvar y)))
+  >           (app (var check.true)
+  >             (app (app (var eq.fn) (app (var eq.for-pair) (var int.eq) (var int.eq)))
+  >               (app (var parallel.both)
+  >                 (lam () (app (var mul) (var x) (lit 2)))
+  >                 (lam () (app (var add) (var y) (lit 5))))
+  >               (tuple (app (var mul) (var x) (lit 2)) (app (var add) (var y) (lit 5))))
+  >             (lit "parallel.both")))))))))
+  > JACQUARD
+  $ jacquard test parallel-laws.jqd --seed 125 --samples 100 --no-cache
+  PASS parallel-both-law/parallel.both matches sequential tuple (prop: 100 cases, seed 125)
+  PASS parallel-map-law/parallel.map matches list.map (prop: 100 cases, seed 125)
+  2 passed, 0 failed, 0 skipped, 0 refused
+
   $ cat > props.jqd <<'JACQUARD'
   > (defterm ((binding rev-broken ()
   >   (app (var prop) (lit "rev is identity (mutated)")
@@ -33,6 +75,70 @@ all-zero elements — found from a length-8 generator.
     - rev roundtrip: expected [0, 0, 0], got [0, 0, 0, 0]
   1 passed, 1 failed, 0 skipped, 0 refused
   [1]
+
+GM.4 governance laws are a dedicated hermetic Warp suite.  The sampled lane is
+the fast governance check; each law remains separately discoverable.
+
+  $ jac test governance-policy-laws.jqd --seed 145 --no-cache
+  PASS gm4-bound-policy-mismatch/BoundPolicy mismatch rejection (prop: 100 cases, seed 145)
+  PASS gm4-call-hash-sensitivity/Call hash sensitivity (prop: 100 cases, seed 145)
+  PASS gm4-call-hash-stability/Call hash stability (prop: 100 cases, seed 145)
+  PASS gm4-confidence-monotonicity/confidence monotonicity (prop: 100 cases, seed 145)
+  PASS gm4-confidence-threshold-tightening/confidence threshold tightening (prop: 100 cases, seed 145)
+  PASS gm4-dry-totality/dry-run totality (prop: 100 cases, seed 145)
+  PASS gm4-forbidden-absorption/Forbidden absorption (prop: 100 cases, seed 145)
+  PASS gm4-numeric-edges/exact numeric edges (6 checks)
+  PASS gm4-policy-tightening/policy tightening (prop: 100 cases, seed 145)
+  PASS gm4-risk-monotonicity/risk monotonicity (prop: 100 cases, seed 145)
+  10 passed, 0 failed, 0 skipped, 0 refused
+
+The exhaustive governance lane enumerates the complete finite supports.  The
+largest law remains below Warp's default refusal budget.
+
+  $ jac test governance-policy-laws.jqd --exhaustive --no-cache
+  PASS gm4-bound-policy-mismatch/BoundPolicy mismatch rejection (verified exhaustively (150 cases))
+  PASS gm4-call-hash-sensitivity/Call hash sensitivity (verified exhaustively (20 cases))
+  PASS gm4-call-hash-stability/Call hash stability (verified exhaustively (5 cases))
+  PASS gm4-confidence-monotonicity/confidence monotonicity (verified exhaustively (1000 cases))
+  PASS gm4-confidence-threshold-tightening/confidence threshold tightening (verified exhaustively (500 cases))
+  PASS gm4-dry-totality/dry-run totality (verified exhaustively (40 cases))
+  PASS gm4-forbidden-absorption/Forbidden absorption (verified exhaustively (500 cases))
+  PASS gm4-numeric-edges/exact numeric edges (6 checks)
+  PASS gm4-policy-tightening/policy tightening (verified exhaustively (2000 cases))
+  PASS gm4-risk-monotonicity/risk monotonicity (verified exhaustively (4000 cases))
+  10 passed, 0 failed, 0 skipped, 0 refused
+
+Normal and exhaustive property proofs have separate cache keys; the pure unit
+case is shared, both reruns are full hits, and exhaustive property entries
+render explicitly as cached proofs.
+
+  $ jac test governance-policy-laws.jqd --seed 145 --cache-dir gm4-cache | tail -1
+  cache: 0 hit, 10 ran
+  $ jac test governance-policy-laws.jqd --seed 145 --cache-dir gm4-cache | tail -1
+  cache: 10 hit, 0 ran
+  $ jac test governance-policy-laws.jqd --exhaustive --cache-dir gm4-cache | tail -2
+  10 passed, 0 failed, 0 skipped, 0 refused
+  cache: 1 hit, 9 ran
+  $ jac test governance-policy-laws.jqd --exhaustive --cache-dir gm4-cache | grep 'cached proof' | wc -l
+  9
+
+Mutation evidence: invert only the first monotonic ordering operator in a
+scratch copy.  Warp finds a concrete policy/risk counterexample, including the
+canonical policy hash; the committed fixture is never modified.
+
+  $ sed '0,/(var int.lte?)/s//(var int.gte?)/' governance-policy-laws.jqd > gm4-risk-mutant.jqd
+  $ jac test gm4-risk-mutant.jqd --exhaustive --no-cache 2>&1 | grep -A2 '^FAIL gm4-risk-monotonicity'
+  FAIL gm4-risk-monotonicity/risk monotonicity (prop: falsified exhaustively)
+    - risk monotonicity: policy={auto=Low,ask=Low,min-confidence=0.0,hash=4495856b093db12ce1add61c7aa1a3ace0a69223f11f3dca17176a18bcbcbe6e}, lhs={risk=Low,confidence=0.0,verdict=Allow}, rhs={risk=Medium,confidence=0.0,verdict=Block}
+  9 passed, 1 failed, 0 skipped, 0 refused
+
+Independently invert the new minimum-confidence ordering.  Warp finds the
+boundary where the lower threshold allows and the higher threshold asks.
+
+  $ sed '/(app (var int.lte?) (var loose-threshold-index)/s/int.lte?/int.gte?/' governance-policy-laws.jqd > gm4-confidence-mutant.jqd
+  $ jac test gm4-confidence-mutant.jqd --exhaustive --no-cache 2>&1 | grep -A1 '^FAIL gm4-confidence-threshold-tightening'
+  FAIL gm4-confidence-threshold-tightening/confidence threshold tightening (prop: falsified exhaustively)
+    - confidence threshold tightening: tight=policy={auto=Low,ask=High,min-confidence=0.0,hash=3c364878390289d3d83a5162d876945b9285139665b54098adf587d9855e329e},loose=policy={auto=Low,ask=High,min-confidence=0.25,hash=e6869e7318d2ffa8ef842c28b54f5185f195d4220c5a2d8cafac6c7086acf900},risk=Low,confidence=0.0,tight-verdict=Allow,loose-verdict=Ask
 
 The doc's whole argument in one run: needle PASSES sampling (seed-lucky above)
 but exhaustive mode explores every support element and finds 777 — same Prop
@@ -107,3 +213,11 @@ per-outcome diff rendered through Show.
   PASS sampler-ok/optimized model matches reference (3 checks)
   1 passed, 1 failed, 0 skipped, 0 refused
   [1]
+
+GM.6 exhaustively crosses all four risks, five assessment confidences, five
+dry-policy thresholds, and three simulator states. The property also pins two
+ordered audit records and exactly one Resume on every ordinary path.
+
+  $ jacquard test governance-gate-dry-laws.jqd --exhaustive --budget 1000 --no-cache
+  PASS governance-gate-dry-matrix/world-free dry gate matrix (verified exhaustively (300 cases))
+  1 passed, 0 failed, 0 skipped, 0 refused

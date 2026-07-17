@@ -1,0 +1,28 @@
+# effect-taxonomy-v1
+# effect	index-name	namespace	tier	parameters	mode	risk	ring	status	interface-hash	operations	reviewer-meaning
+Abort	abort	official	control	a	once	none	1	implemented	bfdfaeee39c6f5290ebea28e805bdeb92f448f1a1e0b9c47f3c70c53975b4375	abort:()->a	stop a computation without an error payload
+Throw	throw	official	control	e,a	once	none	1	implemented	f236e77750a9c066fdff9220b81ab1ba6b6a5dd5226ab63dfd112f4b14aa504e	throw:(e)->a	stop a computation with a typed error payload
+State	state	official	control	s	multi	none	1	implemented	44a2946788e38fb6a734449880cce3d499aa5e2f876c5d9119773533b3d621a9	get:()->s;put:(s)->()	read or replace handler-local state
+Emit	emit	official	control	w	once	none	1	implemented	28afafc8cbec5108fa6103e4670269080373bc0d9a07b1f0f257861ef4b948f6	emit:(w)->()	append a value to a handler-defined stream
+Dist	dist	official	uncertainty	-	multi	none	2	implemented	5a31778adb668e471820541428a4d809f40206b231b2f9d40aeb36d5684415f0	sample:(Distribution a)->a;observe:(Distribution a,a)->()	denote and condition finite possibilities
+Choose	choose	official	uncertainty	a	multi	none	2	reserved	first-release	choose:(List a)->a	explore one or more alternatives under a search handler
+Fault	fault	official	uncertainty	-	multi	none	1	implemented	0b7297f7a38573108de121c794c6be6471d9c43bd4749d435a3cd247e7d5f008	flaky:(Text)->Bool	explore whether a named failure site fires
+Eval	eval	official	meta	a	once	high	3	implemented	94f82f3c17d019d6ca5092b24f19d51ad40720d0accbc4c50641ade0ca056c24	eval-code:(Code)->a	run code constructed or loaded at runtime
+Console	console	official	world	-	once	low	3	implemented	73e8a208eb7fadc43e3bd7aef1474884cf99ce86f8108ddf0e3baff0a74b3fc9	print:(Text)->();read-line:()->Text	talk to the process terminal
+Clock	clock	official	world	-	once	low	3	implemented	9041c22386c41541b6b6818bcb26f1aeb02ae8f0dce3fedbf5f411e4bff9eecb	now:()->Int;sleep:(Int)->()	observe wall-clock milliseconds or wait
+Env	env	official	world	-	once	low	3	reserved	first-release	env.get:(Text)->Option Text	read one named process configuration value
+Fs	fs	official	world	-	once	medium	3	implemented	8ec13169c7181851364e55353232af8e3c7f5ee4a010fa3067fcf2058dd5ed84	read:(Text)->Text;write:(Text,Text)->();list-dir:(Text)->List Text	read or mutate the filesystem under the granted root handler
+Net	net	official	world	-	once	high	3	implemented	be1aad7345c6215f227e63df6c7d05874a464f207599d4f5b85de8b0a6675b45	fetch:(Request)->Response	reach a network endpoint through the granted handler
+Workspace	workspace	official	world	-	once	high	3	implemented	d5831f495fdb26e05d53d886786f07230f7bb808ac4933ab32e0a9238c89f9d0	workspace.read-file:(Path)->Result ToolError Text;workspace.write-file:(Path,Text)->Result ToolError ();workspace.fetch:(Request)->Result ToolError Response	request mediated workspace reads, writes, or fetches without directly acquiring raw authority
+Pg	pg	official	world	-	once	high	3	reserved	first-release	pg.query:(Sql,Params)->Rows	issue a parameterized PostgreSQL query
+Blob	blob	official	world	-	once	high	3	reserved	first-release	blob.get:(Hash)->Option Bytes;blob.put-if-absent:(Hash,Bytes)->();blob.exists?:(Hash)->Bool	read or add immutable objects in configured blob storage
+Serve	serve	official	world	-	once	high	3	reserved	first-release	serve.next:()->Request;serve.respond:(Response)->()	receive and answer server requests
+Crypto	crypto	official	world	-	once	high	3	reserved	first-release	crypto.verify:(Key,Signature,Hash)->Bool;crypto.random:(Int)->Bytes	use trusted cryptographic verification or system entropy
+Log	log	official	world	-	once	medium	3	reserved	first-release	log.emit:(LogEntry)->()	emit a structured operational log entry
+Infer	infer	official	model	-	once	medium	3	implemented	324b8f59279db3cabbfaaba430168717057cea8fc1435a11a1a9106e3e6fb4d8	complete:(Prompt)->Text	request a model completion selected by the handler
+Approval	approval	official	governance	-	once	special	3	implemented	362425a29077a7efbcc37047182e579f46199a50473045eb4126a917dfc2a196	approval.ask:(Proposal)->Decision	request hash-bound consent for an exact proposal
+Audit	audit	official	governance	-	once	special	3	implemented	40bc4343fb2b4bcc18b18f63f7bb68675b746751bb40b876072e622046a81372	audit.record:(AuditEntry)->()	record governance evidence in an append-only stream
+Secret	secret	official	governance	-	once	special	3	implemented	6d092eccc3c9858a2a95120da5a011964cbb3ad76968e11c1cbb062c119fbb31	secret.read:(SecretRef)->Secret;secret.expose:(Secret)->Text	resolve opaque confidential material or explicitly expose it
+Judge	judge	official	governance	-	once	special	3	implemented	9b677b5e2c3ec8521c5d5dfac321ae361a959565e1cbf082fec4512199977354	judge.assess:(Call)->Assessment	assess a proposed call without performing it
+Async	async	official	concurrency	a	once	none	2	reserved	4ff8ce05ab09968163492b3be40fc91381b47dee5fb4b2980f9416d50f38e66f	async.spawn:(()->{Async|e}a)->Task a;async.await:(Task a)->TaskResult a;async.cancel:(Task a)->();async.yield:()->()	schedule structured tasks while charging child effects to the parent row
+Channel	channel	official	concurrency	a	once	none	2	reserved	first-release	channel.open:()->ChannelHandle a;channel.send:(ChannelHandle a,a)->Result ChannelError ();channel.recv:(ChannelHandle a)->Result ChannelError a;channel.close:(ChannelHandle a)->()	communicate typed values between structured tasks

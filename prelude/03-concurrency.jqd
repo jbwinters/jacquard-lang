@@ -1,0 +1,24 @@
+; C1 Task/Async value boundary (SC.3). task-opaque is an identity carrier only:
+; Store suppresses it from the public constructor index and all execution tiers
+; reject a direct hash reference. No scheduler or ambient root handler is
+; installed by this declaration file.
+(deftype task ((tvar a)) (con task-opaque))
+
+(deftype task-result ((tvar a))
+  (con done (field value (tvar a)))
+  (con failed (field message (tref text)))
+  (con cancelled))
+
+(defeffect async ((tvar a))
+  (op async.spawn once
+    ((tarrow () (row (eref async) e) (tvar a)))
+    (tapp (tref task) (tvar a)))
+  (op async.await once
+    ((tapp (tref task) (tvar a)))
+    (tapp (tref task-result) (tvar a)))
+  (op async.cancel once ((tapp (tref task) (tvar a))) (ttuple))
+  (op async.yield once () (ttuple)))
+
+; Trusted internal scope control. This is a term, not a fifth Async operation;
+; the interpreter intercepts its reviewed marker and opens a nested Structured_scope.
+(defterm ((binding async.scope () (quote (builtin-marker async.scope-v0)))))

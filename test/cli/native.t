@@ -26,6 +26,46 @@ Ten pure programs, interpreter vs native, byte-compared (stdout and exit):
   identical: even-odd
   identical: prelude-map
 
+The phase-zero parallel hints are ordinary pure definitions. Their explicitly
+sequential interpreter result is byte-identical through the native backend;
+neither path introduces Async or a task runtime.
+
+  $ cat > parallel-pure.jqd <<'EOF_JQD'
+  > (tuple
+  >   (app (var parallel.map)
+  >     (app (var cons) (lit 3) (app (var cons) (lit 1) (app (var cons) (lit 4) (var nil))))
+  >     (lam ((pvar n)) (app (var sub) (app (var mul) (var n) (lit 2)) (lit 1))))
+  >   (app (var parallel.both)
+  >     (lam () (app (var mul) (lit 6) (lit 7)))
+  >     (lam () (app (var sub) (lit 100) (lit 1)))))
+  > EOF_JQD
+  $ jacquard run parallel-pure.jqd > i.out 2>&1
+  $ jacquard build parallel-pure.jqd -o parallel-pure > /dev/null 2>&1
+  $ ./parallel-pure > n.out 2>&1
+  $ cat n.out
+  (cons(5, cons(1, cons(7, nil))), (42, 99))
+  $ diff i.out n.out && echo identical
+  identical
+
+SC.2 keeps the native fallback sequential after its proof/runtime audit. The
+evidence lane pins successful output, first-failure selection, repeated native
+stability, and ASAN/LeakSanitizer parity across success and both failures. TSAN
+and the decision benchmark are manual options documented in
+docs/native-parallel-decision.md.
+
+  $ export JACQUARD=jacquard
+  $ JACQUARD_PARALLEL_EVIDENCE_ITERATIONS=3 sh ../../scripts/native-parallel-evidence.sh
+  success: exit 0, stdout 9450378b42e682c1897c3028a48e3c6696a4fb654f52f21c16eb5bda47c39936, stderr e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+  fail-map: exit 2, stdout e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855, stderr ab8672cea2e1a058029d6365bb8421c4a941d82dd9988dd038bff7b44cb589dc
+  fail-both: exit 2, stdout e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855, stderr ab8672cea2e1a058029d6365bb8421c4a941d82dd9988dd038bff7b44cb589dc
+  failure order: map first-of-two and both left-before-right select division before modulo
+  stress: 3 identical native runs
+  asan-success: exit 0, stdout 9450378b42e682c1897c3028a48e3c6696a4fb654f52f21c16eb5bda47c39936, stderr e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+  asan-fail-map: exit 2, stdout e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855, stderr ab8672cea2e1a058029d6365bb8421c4a941d82dd9988dd038bff7b44cb589dc
+  asan-fail-both: exit 2, stdout e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855, stderr ab8672cea2e1a058029d6365bb8421c4a941d82dd9988dd038bff7b44cb589dc
+  tsan: skipped (set JACQUARD_PARALLEL_TSAN=1 where available)
+  benchmark: skipped (set JACQUARD_PARALLEL_BENCH=1)
+
 The benchmark file (recursion, list traffic, a dictionary sort) too:
 
   $ jacquard run ../../bench/pure.jqd > i.out 2>&1
@@ -167,6 +207,65 @@ exit 3:
   $ diff i.out n.out && echo identical
   identical
 
+Grant names never identify effects. A user declaration named `console` stays
+unregistered in both engines, even with `--allow console`; the generated binary
+keeps its manifest and grant slots keyed by the resolved declaration hash:
+
+  $ cat > spoof-console.jqd <<'EOF_JQD'
+  > (defeffect console () (op print once ((tref text)) (ttuple)))
+  > (app (var print) (lit "spoof"))
+  > EOF_JQD
+  $ jacquard build spoof-console.jqd -o spoof-console > /dev/null
+  $ jacquard run spoof-console.jqd > i.out 2>&1; echo "exit $?"
+  exit 3
+  $ ./spoof-console > n.out 2>&1; echo "exit $?"
+  exit 3
+  $ diff i.out n.out && echo identical
+  identical
+  $ cat n.out
+  error[E0814]: this program requires unpackaged:5c34b2aa7fe3/console [unrated user effect #5c34b2aa7fe357ee14e3be78853839546a63f40fe47b597176620e00d8ec58f0], which is not granted (performed via `print`)
+    hint: handle the effect in the program (unregistered user effects have no built-in --allow grant)
+  $ jacquard run spoof-console.jqd --allow console > i.out 2>&1; echo "exit $?"
+  exit 3
+  $ ./spoof-console --allow console > n.out 2>&1; echo "exit $?"
+  exit 3
+  $ diff i.out n.out && echo identical
+  identical
+  $ cat n.out
+  error[E0814]: this program requires unpackaged:5c34b2aa7fe3/console [unrated user effect #5c34b2aa7fe357ee14e3be78853839546a63f40fe47b597176620e00d8ec58f0], which is not granted (performed via `print`)
+    hint: handle the effect in the program (unregistered user effects have no built-in --allow grant)
+
+The official and user-defined `console` identities can coexist in one row.
+Without a grant both are reported distinctly; granting the blessed identity
+removes only that requirement and leaves the user effect refused:
+
+  $ cat > two-consoles.jqd <<'EOF_JQD'
+  > (defeffect console () (op print once ((tref text)) (ttuple)))
+  > (let nonrec (pwild) (app (var println) (lit "official"))
+  >   (app (var print) (lit "spoof")))
+  > EOF_JQD
+  $ jacquard build two-consoles.jqd -o two-consoles > /dev/null
+  $ jacquard run two-consoles.jqd > i.out 2>&1; echo "exit $?"
+  exit 3
+  $ ./two-consoles > n.out 2>&1; echo "exit $?"
+  exit 3
+  $ diff i.out n.out && echo identical
+  identical
+  $ cat n.out
+  error[E0814]: this program requires unpackaged:5c34b2aa7fe3/console [unrated user effect #5c34b2aa7fe357ee14e3be78853839546a63f40fe47b597176620e00d8ec58f0], which is not granted (performed via `print`)
+    hint: handle the effect in the program (unregistered user effects have no built-in --allow grant)
+  error[E0814]: this program requires console [world/low] — talk to the process terminal, which is not granted (performed via `println`)
+    hint: grant it with --allow console, or handle the effect in the program
+  $ jacquard run two-consoles.jqd --allow console > i.out 2>&1; echo "exit $?"
+  exit 3
+  $ ./two-consoles --allow console > n.out 2>&1; echo "exit $?"
+  exit 3
+  $ diff i.out n.out && echo identical
+  identical
+  $ cat n.out
+  error[E0814]: this program requires unpackaged:5c34b2aa7fe3/console [unrated user effect #5c34b2aa7fe357ee14e3be78853839546a63f40fe47b597176620e00d8ec58f0], which is not granted (performed via `print`)
+    hint: handle the effect in the program (unregistered user effects have no built-in --allow grant)
+
 A later expression's refusal happens at ITS turn: the first expression's
 value has already printed and flushed on both engines, so it precedes the
 error even in a merged capture:
@@ -182,7 +281,7 @@ error even in a merged capture:
   exit 3
   $ cat n.out
   1
-  error[E0814]: this program requires the `console` effect, which is not granted (performed via `println`)
+  error[E0814]: this program requires console [world/low] — talk to the process terminal, which is not granted (performed via `println`)
     hint: grant it with --allow console, or handle the effect in the program
   $ diff i.out n.out && echo identical
   identical
@@ -215,10 +314,10 @@ spelling of --allow works like cmdliner's:
   $ ./two-eff > n.out 2>&1; echo "exit $?"
   exit 3
   $ cat n.out
-  error[E0814]: this program requires the `clock` effect, which is not granted (performed via `now`)
-    hint: grant it with --allow clock, or handle the effect in the program
-  error[E0814]: this program requires the `console` effect, which is not granted (performed via `println`)
+  error[E0814]: this program requires console [world/low] — talk to the process terminal, which is not granted (performed via `println`)
     hint: grant it with --allow console, or handle the effect in the program
+  error[E0814]: this program requires clock [world/low] — observe wall-clock milliseconds or wait, which is not granted (performed via `now`)
+    hint: grant it with --allow clock, or handle the effect in the program
   $ diff i.out n.out && echo identical
   identical
   $ jacquard run hello.jqd --allow=console > i.out 2>&1

@@ -53,6 +53,8 @@ enum jq_tag {
   JQ_OP = 10,         /* first-class effect operation; static-only */
   JQ_BUILTIN = 11,    /* first-class primitive; static-only */
   JQ_FRAME = 12,      /* a suspended activation (task 71): code, ix, slots */
+  JQ_SECRET = 13,     /* opaque bytes; generic rendering is always redacted */
+  JQ_TASK = 14,       /* opaque run/scope-local structured-concurrency handle */
 };
 
 #define JQ_RC_STATIC UINT32_MAX
@@ -64,6 +66,10 @@ enum jq_tag {
    through jq_block_free, never libc free. Shell-reuse paths must preserve
    this bit. */
 #define JQ_FLAG_POOLED 2u
+/* JQ_RESUME only: ONCE selects the affine runtime backstop; USED is shared by
+ * every alias of that captured block and flips before its first re-entry. */
+#define JQ_FLAG_RESUME_ONCE 4u
+#define JQ_FLAG_RESUME_USED 8u
 
 typedef struct jq_block {
   uint32_t rc;
@@ -176,6 +182,7 @@ typedef struct jq_handler_entry {
   uint32_t op_ord;
   jq_value clause;
   uint8_t kind;      /* enum jq_clause_kind */
+  bool once;         /* captured resumption gets the per-instance once backstop */
   jq_block *hf;      /* CAPTURING only: the owning handler frame on rt->ks */
 } jq_handler_entry;
 
@@ -185,6 +192,7 @@ typedef struct jq_pending {
   jq_value clause; /* dup of the matched entry's clause */
   jq_value args[8];
   uint16_t n_args;
+  bool once;
   jq_block *mark; /* the matched entry's handler frame */
 } jq_pending;
 
@@ -199,6 +207,8 @@ typedef struct jq_rt {
   const jq_con_info *ci_pair;    /* mk-pair, for the dist intrinsics (task 71) */
   const jq_con_info *ci_some;    /* option some, for the code intrinsics (task 73) */
   jq_value v_none;               /* option none, static (task 73) */
+  const jq_con_info *ci_ok;      /* Result constructors for validated host boundaries */
+  const jq_con_info *ci_err;
   uint16_t apply_n; /* argument count for the next jq_apply (set by the caller
                        immediately before the call: musttail forces jq_apply
                        onto the uniform signature, so n travels here) */
@@ -351,6 +361,9 @@ static inline jq_value jq_code_datum(jq_value v, uint16_t i) {
 static inline bool jq_is_code(jq_value v) {
   return jq_is_ptr(v) && jq_block_of(v)->tag == JQ_CODE;
 }
+static inline bool jq_is_hash(jq_value v) {
+  return jq_is_ptr(v) && jq_block_of(v)->tag == JQ_HASH;
+}
 
 /* allocate a node with the head and argc slots unset; fill each arg with
    jq_code_set (datum ownership transfers in) */
@@ -486,12 +499,21 @@ jq_value jq_i_support(jq_rt *rt, const jq_value *a);
 jq_value jq_i_pmf(jq_rt *rt, const jq_value *a);
 jq_value jq_i_dist_sample_lw(jq_rt *rt, const jq_value *a);
 jq_value jq_i_code_of_int(jq_rt *rt, const jq_value *a);
+jq_value jq_i_code_of_real(jq_rt *rt, const jq_value *a);
+jq_value jq_i_code_of_hash(jq_rt *rt, const jq_value *a);
+jq_value jq_i_code_of_text(jq_rt *rt, const jq_value *a);
 jq_value jq_i_code_to_int(jq_rt *rt, const jq_value *a);
 jq_value jq_i_code_to_text(jq_rt *rt, const jq_value *a);
 jq_value jq_i_code_form(jq_rt *rt, const jq_value *a);
 jq_value jq_i_code_un_form(jq_rt *rt, const jq_value *a);
 jq_value jq_i_code_eq_q(jq_rt *rt, const jq_value *a);
 jq_value jq_i_code_diff(jq_rt *rt, const jq_value *a);
+jq_value jq_i_code_render(jq_rt *rt, const jq_value *a);
+jq_value jq_i_code_hash(jq_rt *rt, const jq_value *a);
+jq_value jq_i_hash_parse(jq_rt *rt, const jq_value *a);
+jq_value jq_i_hash_to_text(jq_rt *rt, const jq_value *a);
+jq_value jq_i_governance_effect_order_key_v0(jq_rt *rt, const jq_value *a);
+jq_value jq_i_debug_inspect(jq_rt *rt, const jq_value *a);
 /* the LW driver's root interception (jq_perform's ladder, jq_intrinsics.c) */
 jq_value jq_lw_sample(jq_rt *rt, jq_value dv);
 jq_value jq_lw_observe(jq_rt *rt, jq_value dv, jq_value v);
@@ -509,6 +531,25 @@ jq_value jq_con(const jq_con_info *info, const jq_value *fields); /* owned */
 jq_value jq_real(double d);
 jq_value jq_text(const uint8_t *bytes, uint64_t len); /* bytes copied */
 jq_value jq_hash(const uint8_t bytes[32]);
+/* Inert SC.3 Task carrier. The block stores only an opaque owner token plus the deterministic
+   scope-path/spawn-index ID; it contains no scheduling state. No Show or serialization API exposes
+   those fields. Creation and validation report defects as data so malformed/foreign handles never
+   become C crashes. */
+enum jq_task_status {
+  JQ_TASK_VALID = 0,
+  JQ_TASK_MALFORMED = 1,
+  JQ_TASK_FOREIGN_RUN = 2,
+  JQ_TASK_FOREIGN_SCOPE = 3,
+};
+/* Shared with Concurrency_contract.task_id: every ID word is uint32, and the block's uint16 word
+   count reserves owner, path length, and spawn index in addition to the path. */
+#define JQ_TASK_MAX_SCOPE_LEN (UINT16_MAX - 3)
+#define JQ_TASK_MAX_COMPONENT UINT32_MAX
+enum jq_task_status jq_task_create(const void *run_owner, const uint32_t *scope_path,
+                                   uint16_t scope_len, uint32_t spawn_index, jq_value *out);
+enum jq_task_status jq_task_validate(jq_value task, const void *run_owner,
+                                     const uint32_t *scope_path, uint16_t scope_len);
+jq_value jq_secret(const uint8_t *bytes, uint64_t len); /* bytes copied, opaque */
 /* env values owned; self_slot < env_n marks a non-owning slot (stored without
    dup by the caller per the cycle rule), self_slot == UINT16_MAX for none */
 jq_value jq_closure(void *code, uint16_t arity, uint16_t env_n,
@@ -542,6 +583,15 @@ static inline const uint8_t *jq_text_bytes(jq_value v) {
 }
 static inline const uint8_t *jq_hash_bytes(jq_value v) {
   return (const uint8_t *)&jq_block_of(v)->payload[0];
+}
+static inline bool jq_is_secret(jq_value v) {
+  return jq_is_ptr(v) && jq_block_of(v)->tag == JQ_SECRET;
+}
+static inline uint64_t jq_secret_len(jq_value v) {
+  return jq_block_of(v)->payload[0];
+}
+static inline const uint8_t *jq_secret_bytes(jq_value v) {
+  return (const uint8_t *)&jq_block_of(v)->payload[1];
 }
 
 /* closure payload: [0] code ptr, [1] arity | (self_slot+1) << 16, [2..] env */
