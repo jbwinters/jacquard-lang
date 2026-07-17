@@ -687,7 +687,7 @@ opam exec -- dune runtest --force --root "$dest"
   test "$(./test_jacquard.exe list --color=never 2>/dev/null | wc -l)" -eq 686
 )
 test "$(find "$dest/test" -name '*.t' | wc -l)" -eq 40
-test "$(grep -h -o 'doctest=[^ ]*' \
+test "$(grep -h -E '^```jacquard doctest=' \
   "$dest/README.md" \
   "$dest/docs/effect-membranes.md" \
   "$dest/docs/effect-taxonomy.md" \
