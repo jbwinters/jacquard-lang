@@ -75,3 +75,21 @@ the diff shows add+remove):
   $ jacquard store rename prov-b fav favourite
   $ jacquard diff prov-a prov-b | head -1
   added    favourite
+
+Scheduler-private constructor hashes cannot be named through the CLI or smuggled
+through a persisted names index.
+
+  $ cat > task.jqd <<'EOF'
+  > (deftype task ((tvar a)) (con task-opaque))
+  > EOF
+  $ jacquard store add task-store task.jqd
+  ok
+  $ jacquard store name task-store leaked-task 9b4eaa5e872fa3f768c71fc4cba4d3262a9ebf8a719f0cfb78f22fa9eade4310
+  error[E0907]: name `leaked-task` cannot expose scheduler-private hash 9b4eaa5e872fa3f768c71fc4cba4d3262a9ebf8a719f0cfb78f22fa9eade4310
+    hint: Task handles are created only by async.spawn inside a structured scheduler scope
+  [1]
+  $ printf '(named persisted-task con #9b4eaa5e872fa3f768c71fc4cba4d3262a9ebf8a719f0cfb78f22fa9eade4310)\n' >> task-store/names.jqd
+  $ jacquard store name task-store harmless 07791255b44e18c3830038c51396bd3f80cf44a8e89222ff73dc90dd06ec3fb3
+  error[E0907]: name `persisted-task` cannot expose scheduler-private hash 9b4eaa5e872fa3f768c71fc4cba4d3262a9ebf8a719f0cfb78f22fa9eade4310
+    hint: Task handles are created only by async.spawn inside a structured scheduler scope
+  [1]

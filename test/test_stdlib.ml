@@ -521,10 +521,20 @@ let test_parallel_sequential_control () =
     "left failure wins" "error: arithmetic error: division by zero" parallel_both
 
 let test_parallel_introduces_no_async_runtime () =
+  let contains needle haystack =
+    let needle_length = String.length needle and haystack_length = String.length haystack in
+    let rec search index =
+      index + needle_length <= haystack_length
+      && (String.sub haystack index needle_length = needle || search (index + 1))
+    in
+    search 0
+  in
   List.iter
     (fun name ->
-      Alcotest.(check bool) (name ^ " is absent in C0") true (Store.lookup_name store name = None))
-    [ "async"; "task"; "spawn"; "await"; "cancel"; "yield" ]
+      let signature = sig_of ("(var " ^ name ^ ")") in
+      Alcotest.(check bool) (name ^ " does not require Async") false (contains "Async" signature);
+      Alcotest.(check bool) (name ^ " does not expose Task") false (contains "Task" signature))
+    [ "parallel.map"; "parallel.both" ]
 
 let test_ring1_rows () =
   let has needle s =
@@ -582,6 +592,6 @@ let suite =
       test_parallel_closed_rows;
     Alcotest.test_case "parallel control behavior is sequential" `Quick
       test_parallel_sequential_control;
-    Alcotest.test_case "parallel C0 has no Async runtime" `Quick
+    Alcotest.test_case "parallel C0 does not depend on Async runtime" `Quick
       test_parallel_introduces_no_async_runtime;
   ]
