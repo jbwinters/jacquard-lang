@@ -1,7 +1,7 @@
 # DX.6 Parser-depth performance evidence
 
-Status: opt-in release-hardening evidence based on the final DX.5/DX.7
-integration parent `2f5872a`.
+Status: opt-in release-hardening evidence based on the final DX.5/DX.7 and
+SC.4-SC.5 integration parent `12a972a`.
 
 ## Finding
 
