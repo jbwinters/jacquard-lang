@@ -1641,12 +1641,12 @@ let test_governed_membrane_charter () =
       "agent : () ->{Workspace} Result ToolError Text";
       "next-sequence : (AuditSequence) ->{State} Int";
       "workspace.live-layer :";
-      ") ->{Secret, Approval, Judge, State, Fs, Net, Audit} Result ToolError Text";
+      ") ->{Secret, Judge, Approval, State, Audit, Fs, Net} Result ToolError Text";
       "workspace.dry-layer :";
       ") ->{Judge, State, Audit} Result ToolError Text";
       "governance.with-sequence : forall a | e.";
       "workspace.live :";
-      ") ->{Secret, Approval, Judge, Fs, Net, Audit} Result ToolError Text";
+      ") ->{Secret, Judge, Approval, Audit, Fs, Net} Result ToolError Text";
       "workspace.dry-run :";
       ") ->{Judge, Audit} Result ToolError Text";
     ]

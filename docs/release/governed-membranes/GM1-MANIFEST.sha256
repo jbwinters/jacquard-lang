@@ -1,4 +1,4 @@
-# Governed-membranes GM.0-GM.2 + ET.3-ET.8 + SC.0-SC.4 reconstructible integration overlay
+# Governed-membranes GM.0-GM.6 + ET.3-ET.8 + SC.0-SC.4 reconstructible integration overlay
 # Base commit: 95b2be5
 # Attestation manifests exclude themselves (and successor manifests) to avoid self/cross-hashes.
 23e5c2dcec8f2aa6c96df0b0363cf9d9a393b99d326640b0f9507832d3cd8461  README.md

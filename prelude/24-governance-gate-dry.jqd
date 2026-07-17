@@ -1,0 +1,198 @@
+; GM.6 simulation-only governance gate. The gate returns a disposition; the
+; facade clause that owns the affine Resume consumes it locally. Simulator and
+; summarizer callbacks are closed and pure.
+
+(deftype audit-sequence ()
+  (con audit-sequence-v0 (field run-id (tref hash))))
+
+(deftype dry-disposition ((tvar a))
+  (con simulated
+    (field result (tapp (tref result) (tref tool-error) (tvar a))))
+  (con refuse-dry (field error (tref tool-error))))
+
+; Trusted markers are hidden from both public name and direct-hash lookup after
+; prelude load. The evaluator mints a fresh run id per invocation and compares
+; it at every owner use; neither operation is ambiently callable.
+(defterm
+  ((binding governance.fresh-audit-run-id ()
+    (quote (builtin-marker governance.fresh-audit-run-id-v0)))
+   (binding governance.require-audit-run-id ()
+    (quote (builtin-marker governance.require-audit-run-id-v0)))))
+
+; The run-level owner installs State once. Every layer receives the same opaque
+; token. Public signatures still expose State with an Int counter; the private
+; handler payload refines that state to (run-id, counter). Reading a position
+; does not consume it: only an accepted Audit record advances the counter.
+(defterm
+  ((binding governance.next-sequence ()
+    (lam ((pvar owner))
+      (match (var owner)
+        (clause (pcon audit-sequence-v0 (pvar token-run-id))
+          (match (app (var get))
+            (clause (ptuple (pvar active-run-id) (pvar counter))
+              (let nonrec (pwild)
+                (app (var governance.require-audit-run-id)
+                  (var token-run-id) (var active-run-id))
+                (var counter))))))))
+   (binding governance.accept-sequence ()
+    (lam ((pvar owner))
+      (match (var owner)
+        (clause (pcon audit-sequence-v0 (pvar token-run-id))
+          (match (app (var get))
+            (clause (ptuple (pvar active-run-id) (pvar counter))
+              (let nonrec (pwild)
+                (app (var governance.require-audit-run-id)
+                  (var token-run-id) (var active-run-id))
+                (app (var put)
+                  (tuple (var active-run-id)
+                    (app (var add) (var counter) (lit 1)))))))))))
+   (binding governance.with-sequence ()
+    (lam ((pvar body))
+      (let nonrec (pvar run-id)
+        (app (var governance.fresh-audit-run-id))
+        (match
+          (app (var state.run)
+            (lam ()
+              (app (var body) (app (var audit-sequence-v0) (var run-id))))
+            (tuple (var run-id) (lit 0)))
+          (clause (ptuple (pvar value) (pwild)) (var value))))))))
+
+; Keep callback invocation in closed-row helpers. This prevents the ambient
+; State/Judge/Audit row from being inferred onto either caller-supplied pure
+; closure.
+(defterm
+  ((binding governance.run-dry-simulation
+    ((tforall ((tvar a)) ()
+      (tarrow
+        ((tapp (tref option)
+          (tarrow () (row)
+            (tapp (tref result) (tref tool-error) (tvar a)))))
+        (row) (tapp (tref result) (tref tool-error) (tvar a)))))
+    (lam ((pvar simulator))
+      (match (var simulator)
+        (clause (pcon none) (app (var err) (var no-simulation)))
+        (clause (pcon some (pvar run-simulator))
+          (app (var run-simulator))))))
+   (binding governance.summarize-dry-result
+    ((tforall ((tvar a)) ()
+      (tarrow
+        ((tarrow
+          ((tapp (tref result) (tref tool-error) (tvar a)))
+          (row) (tref governance-outcome-summary))
+          (tapp (tref result) (tref tool-error) (tvar a)))
+        (row) (tref governance-outcome-summary))))
+    (lam ((pvar summarize) (pvar result-value))
+      (app (var summarize) (var result-value))))))
+
+(defterm
+  ((binding governance.gate-dry
+    ((tforall ((tvar a)) ()
+      (tarrow
+        ((tref audit-sequence)
+          (tapp (tref bound-policy) (tref dry-policy))
+          (tref governance-call)
+          (tapp (tref option)
+            (tarrow () (row)
+              (tapp (tref result) (tref tool-error) (tvar a))))
+          (tarrow
+            ((tapp (tref result) (tref tool-error) (tvar a)))
+            (row) (tref governance-outcome-summary)))
+        (row (eref state) (eref judge) (eref audit))
+        (tapp (tref dry-disposition) (tvar a)))))
+    (lam
+      ((pvar sequence) (pvar bound-policy) (pvar call) (pvar simulator)
+        (pvar summarize))
+      (match (app (var governance.validate-call) (var call))
+        (clause (pcon err (pwild))
+          (app (var refuse-dry) (var invalid-decision)))
+        (clause (pcon ok (pvar call-id))
+          (match
+            (app (var governance.validate-bound-dry-policy)
+              (var bound-policy))
+            (clause (pcon err (pwild))
+              (app (var refuse-dry) (var invalid-decision)))
+            (clause (pcon ok (pvar policy-id))
+              (let nonrec (pvar assessment-value)
+                (app (var assess) (var call))
+                (match (var assessment-value)
+                  (clause
+                    (pcon governance-assessment-v0 (pwild) (pvar risk-value)
+                      (pwild) (pwild) (pwild))
+                    (match
+                      (app (var governance.dry-policy-verdict)
+                        (var bound-policy) (var risk-value) (var true))
+                      (clause (pcon err (pvar error))
+                        (app (var refuse-dry) (var error)))
+                      (clause (pcon ok (pvar verdict-value))
+                        (let nonrec (pvar evaluated-sequence)
+                          (app (var governance.next-sequence) (var sequence))
+                          (let nonrec (pwild)
+                            (app (var record)
+                              (app (var evaluated) (var governance-v0)
+                                (var evaluated-sequence) (var call-id) (var policy-id)
+                                (var assessment-value)
+                                (var verdict-value)))
+                            (let nonrec (pwild)
+                              (app (var governance.accept-sequence) (var sequence))
+                              (let nonrec (pvar result-value)
+                              (match (var verdict-value)
+                                (clause (pcon block)
+                                  (app (var err)
+                                    (app (var tool-blocked)
+                                      (lit "dry policy blocked call"))))
+                                (clause (pcon simulate)
+                                  (app (var governance.run-dry-simulation)
+                                    (var simulator)))
+                                (clause (pcon allow)
+                                  (app (var err) (var invalid-decision)))
+                                (clause (pcon ask)
+                                  (app (var err) (var invalid-decision))))
+                              (let nonrec (pvar branch)
+                                (match (tuple (var verdict-value) (var simulator)
+                                  (var result-value))
+                                  (clause
+                                    (ptuple (pcon block) (pwild) (pwild))
+                                    (lit "blocked"))
+                                  (clause
+                                    (ptuple (pcon simulate) (pcon none) (pwild))
+                                    (lit "no-simulation"))
+                                  (clause
+                                    (ptuple (pcon simulate) (pcon some (pwild))
+                                      (pcon ok (pwild)))
+                                    (lit "simulated"))
+                                  (clause
+                                    (ptuple (pcon simulate) (pcon some (pwild))
+                                      (pcon err (pwild)))
+                                    (lit "simulation-failed"))
+                                  (clause (pwild) (lit "invalid")))
+                                (let nonrec (pvar outcome)
+                                  (app (var governance.summarize-dry-result)
+                                    (var summarize) (var result-value))
+                                  (let nonrec (pvar completed-sequence)
+                                    (app (var governance.next-sequence)
+                                      (var sequence))
+                                    (let nonrec (pwild)
+                                      (app (var record)
+                                        (app (var completed) (var governance-v0)
+                                          (var completed-sequence) (var call-id) (var branch)
+                                          (var outcome)))
+                                      (let nonrec (pwild)
+                                        (app (var governance.accept-sequence) (var sequence))
+                                        (match (tuple (var verdict-value)
+                                          (var simulator))
+                                        (clause (ptuple (pcon block) (pwild))
+                                          (app (var refuse-dry)
+                                            (app (var tool-blocked)
+                                              (lit "dry policy blocked call"))))
+                                        (clause
+                                          (ptuple (pcon simulate) (pcon none))
+                                          (app (var refuse-dry)
+                                            (var no-simulation)))
+                                        (clause
+                                          (ptuple (pcon simulate)
+                                            (pcon some (pwild)))
+                                          (app (var simulated)
+                                            (var result-value)))
+                                        (clause (pwild)
+                                          (app (var refuse-dry)
+                                            (var invalid-decision))))))))))))))))))))))))))

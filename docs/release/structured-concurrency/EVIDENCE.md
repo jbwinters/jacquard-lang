@@ -156,8 +156,8 @@ git diff --exit-code
 opam exec -- dune build @doc
 ```
 
-Expected results are zero exits, 656 compiled Alcotest/QCheck cases, 36 cram
-transcripts, and 24 doctest examples across 7 documents.
+Expected results are zero exits, 664 compiled Alcotest/QCheck cases, 36 cram
+transcripts, and 25 doctest examples across 8 documents.
 
 The scheduler, executable scopes, cancellation delivery, lifecycle state, and
 root handler remain later C1 tasks. SC.4 is a checker/evidence milestone only;

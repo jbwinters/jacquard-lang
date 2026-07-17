@@ -1,4 +1,4 @@
-# Structured-concurrency SC.0-SC.4 + ET.3-ET.8 + GM.0-GM.2 reconstructible integration overlay
+# Structured-concurrency SC.0-SC.4 + ET.3-ET.8 + GM.0-GM.6 reconstructible integration overlay
 # Base commit: ed02113
 # Attestation manifests exclude themselves (and successor manifests) to avoid self/cross-hashes.
 23e5c2dcec8f2aa6c96df0b0363cf9d9a393b99d326640b0f9507832d3cd8461  README.md
