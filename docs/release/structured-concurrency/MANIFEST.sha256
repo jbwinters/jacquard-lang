@@ -1,6 +1,7 @@
 # Structured-concurrency SC.0-SC.12 + ET.3-ET.8 + GM.0-GM.6 + GM.9 reconstructible integration overlay
 # Base commit: 404147e56a9e8b6bbec63e19748389d499d17673
 # Attestation manifests exclude themselves (and successor manifests) to avoid self/cross-hashes.
+0937ad41b14c0badcd35f147c83b8a950c43c45b8fa0f373f78b28abb5cb466d  README.md
 9f785812380a624bbf179d67dc1fa0d4d4494672a4e019e7dac7c8de65597639  docs/README.md
 7a785b2924e5c56dd89dfb80a781639a924fd329dca05fcd586ebdf155e15de9  docs/concurrency.md
 73fe389684cc04c3ad5701ae063f8a016a05605a9561a1f4bf6bccbf54f98ba1  docs/release/dx-jac-export/EVIDENCE.md

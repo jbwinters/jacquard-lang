@@ -1,7 +1,7 @@
 # Governed-membranes GM.0-GM.6 + GM.9 + ET.3-ET.8 + SC.0-SC.12 reconstructible integration overlay
 # Base commit: b5587ce
 # Attestation manifests exclude themselves (and successor manifests) to avoid self/cross-hashes.
-81d7c39767f72efec5dc7c75504b3d6be6e66e2207a9cc2e7f008b54eb3ab288  README.md
+0937ad41b14c0badcd35f147c83b8a950c43c45b8fa0f373f78b28abb5cb466d  README.md
 358e53df4fd5dd3f92ee3037f8292f101b7bbc02d8d45a3b34a615636a930160  bin/main.ml
 7822ae62dfd037e2460b3c0328ee09a1d8a35b8ffea5e89dfbe81678cbfbc67d  corpus/golden/audit-chain-v2-head.golden
 f13c973a687285d354b496d49da62f873455a2adac34ddc1d437e0b711f2afd8  corpus/golden/audit-chain-v2.golden
