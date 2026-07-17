@@ -163,6 +163,17 @@ cached, preventing a moved suite from receiving a stale source/prelude command.
 `--schedules` requires a positive count and an explicit `--seed`; it never
 consults host randomness.
 
+The GM.4 governance suite is the concrete policy-scale instance. The eight
+named properties in `test/cli/governance-policy-laws.jqd` cover risk and
+confidence monotonicity, Forbidden absorption, dry-run totality, tightening,
+Call hash stability and sensitivity, and BoundPolicy mismatch rejection. Their
+finite exhaustive supports range from 5 to 4,000 cases, spanning all ten valid
+live threshold pairs, all four risks, both simulator states where relevant,
+and the confidence grid `0.0, 0.25, 0.5, 0.75, 1.0`. A unit `Case` separately
+pins adjacent representable values around `0.5`, inclusive endpoints,
+out-of-range finite values, NaN, and both infinities. Failure labels carry the
+policy values and canonical hashes needed to replay a counterexample.
+
 ### Shrinking without shrinkers
 
 Shrinking follows Hypothesis rather than QuickCheck: shrink the choices, never the

@@ -179,8 +179,9 @@ let with_checkout scheduler handle operation =
               restore_checkout entry resume;
               result
           | exception exn ->
+              let backtrace = Printexc.get_raw_backtrace () in
               restore_checkout entry resume;
-              raise exn))
+              Printexc.raise_with_backtrace exn backtrace))
 
 let ensure_checked_out (entry : (_, _) entry) =
   match (entry.lifecycle, entry.resume) with

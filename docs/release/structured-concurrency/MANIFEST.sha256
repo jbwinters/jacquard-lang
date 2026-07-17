@@ -1,12 +1,12 @@
-# Structured-concurrency SC.11 seeded randomized schedule testing reconstructible overlay
-# Base commit: f3977fc
+# Structured-concurrency SC.0-SC.11 + ET.3-ET.8 + GM.0-GM.6 + GM.9 reconstructible integration overlay
+# Base commit: 242a64121a530897075bea0c8eec11eee84001e0
 # Attestation manifests exclude themselves (and successor manifests) to avoid self/cross-hashes.
 81d7c39767f72efec5dc7c75504b3d6be6e66e2207a9cc2e7f008b54eb3ab288  README.md
 358e53df4fd5dd3f92ee3037f8292f101b7bbc02d8d45a3b34a615636a930160  bin/main.ml
-c028851f5f5d1b6d831bed665cead11b63c6c42c71f71a400d84a09686b5164e  docs/concurrency.md
-f026917c68883757c310bc8a098d81e1dc2dfa317d95cfc672162d7454b4175c  docs/release/structured-concurrency/EVIDENCE.md
-6978616aa790ef48671d7f7212dccf12957e2fa759d826141d7677369cee25b9  docs/warp-testing.md
-be1f6fc0379a1ead4974867c76eaddbb5ec821d1f1439c7f499c1cd17b0eb7fd  scripts/release/check-structured-concurrency-manifest.sh
+95b0017015e71c308069160e5e1709f26a7137f73c0ff918daf39ee79015bcea  docs/concurrency.md
+9d543ac3bb917a76bd194f0c4b67748864cbd3b83ec66b1bb30226efdaa124a1  docs/release/structured-concurrency/EVIDENCE.md
+eaa09eec1eb29f8034b043da9226dcc7c6e9c75a18d6656e7e0bd37697df01f4  docs/warp-testing.md
+e0db7c19c50a484c70ca3b7a3d15ad913a58b3fc0703c2f32830f0778d390fc7  scripts/release/check-structured-concurrency-manifest.sh
 9542cfda45a2c040a7bfb94985622a30040ca8fda6d69b7dbed2ae7524aec6e8  src/infer_dist.ml
 f13093a9d66a7ed6332f219c6b8ecbd90fb7bf361d8ff3616c0ede1fe34262e8  src/round_robin.ml
 9b3e2012d894b94b7192df2cfab55ce722f0b0a253dddf0ccba546392b7a773d  src/round_robin.mli

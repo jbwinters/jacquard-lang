@@ -5,7 +5,7 @@ schedule record and fail-closed strict replay. Replay validates creation before
 allocation and routed operations before world callbacks. This milestone adds no
 host scheduling, exhaustive scheduler, detached tasks, or native root scheduler.
 
-- Reconstruction base: `f3977fc`
+- Reconstruction base: `242a64121a530897075bea0c8eec11eee84001e0`
 - Evidence overlay: [MANIFEST.sha256](MANIFEST.sha256)
 - Authoritative contract: [concurrency.md](../../concurrency.md)
 
@@ -108,17 +108,21 @@ A. Ordinary in-language Once resumptions share this private owner check.
 
 ## Async boundary and parity
 
-All four Async operations are reviewed as `once`; the taxonomy still marks
-Async as reserved, and no handler or built-in `--allow` grant is installed.
-Direct evaluator calls therefore reach the ordinary `Unhandled` result for
-spawn, await, cancel, and yield. The CLI rejects an unhandled Async program at
-its effect gate with E0814. Neither path schedules work or grants ambient
-authority.
+All four Async operations are reviewed as `once`, and the taxonomy still marks
+Async as reserved. The default interpreted CLI, prelude-evaluation, and Warp
+paths automatically admit only the exact frozen Async effect and execute it
+through `Round_robin`; users do not install a root handler or pass
+`--allow async`. This scheduler infrastructure grant does not admit Console,
+Fs, Net, or any other world effect. Raw `Eval.run_expr` remains an unscheduled
+low-level seam whose unhandled Async operations produce `Unhandled`, and the
+native backend has no root Async scheduler. Native execution therefore requires
+an in-language handler to discharge Async before the root.
 
 `TaskResult` constructors execute in both tiers. The `task-values.t` cram test
 byte-compares interpreter and native output for Done/Failed/Cancelled, tests
-the private carrier diagnostic, and pins the clean unhandled CLI failure. The
-C/OCaml show parity corpus includes a redacted inert Task value.
+the private carrier diagnostic, and pins successful scheduled CLI execution of
+`async.yield`. The C/OCaml show parity corpus includes a redacted inert Task
+value.
 
 ## Scheduler lifecycle core
 
@@ -261,9 +265,14 @@ and a later cancellation cannot replace an earlier failure.
 The terminal decision and result are committed before those cancellation
 attempts. A cancellation diagnostic or destruction-callback exception therefore
 does not roll the observation back. Every sibling cleanup is still attempted in
-input order; if callbacks raise, the first exception is re-raised only after all
-sibling attempts finish. Finish remains unavailable until every child is
-observed terminal, so the scope cannot expose an undrained aggregate.
+input order. The policy catches each user callback failure around the unchanged
+SC.7 delivery primitive, buffers waiters returned by that same delivery, and
+then continues cleanup. If callbacks raise, the first physical exception is
+re-raised with its captured backtrace only after all sibling attempts finish.
+`Scope_policy.take_awakened` drains retained waiters exactly once in sibling
+input order and each target's waiter-registration order. Finish remains
+unavailable until every child is observed terminal, so the scope cannot expose
+an undrained aggregate.
 
 Collect never requests sibling cancellation. It waits for every child and
 returns `Done`, `Failed`, and `Cancelled` entries in the registered input order,
@@ -334,7 +343,8 @@ resume, real failing-child fail-fast/collect, a fail-fast cancellation that
 requeues an awakened waiter, the integrated self-await deadlock refusal, and
 stable same-decision terminal ordinals. Checkout-bracket tests separately prove
 that normal, diagnostic, and host-exception exits restore an unsettled affine
-token before scope cleanup. Its 128-case property changes the host random seed and
+token before scope cleanup, while preserving the physical host exception and
+its raw backtrace prefix. Its 128-case property changes the host random seed and
 proves the same decisions and bytes as an unseeded rerun. The `round-robin.t`
 transcript repeats a fresh process 128 times, byte-compares every trace, pins the
 exact cross-scope trace and cumulative counters, runs real CLI Async programs,
@@ -416,9 +426,9 @@ before allocation, and routed-operation drift before callback invocation. The
 `schedule-replay.t` golden transcript exercises the public CLI with the exact
 v1 bytes, malformed/legacy/impossible logs, missing/extra/reordered events,
 declared-line and per-line transport refusals, missing/unreadable paths, a
-post-success write failure, fork-at-decision, byte-identical original and fork
-replays, and an empty stdout probe proving a one-bit world-operation-hash drift
-was refused before `print`.
+post-success write failure, a flush-time write failure, fork-at-decision,
+byte-identical original and fork replays, and an empty stdout probe proving a
+one-bit world-operation-hash drift was refused before `print`.
 
 Scheduler cache identity now includes `schedule-format-v1` in addition to the
 program hash, scheduler identity, policy, and bounds. Cache payloads remain
@@ -497,7 +507,7 @@ opam exec -- dune build test/test_jacquard.exe
 )
 ```
 
-The compiled inventory is exactly 658 cases and the source inventory is 39
+The compiled inventory is exactly 677 cases and the source inventory is 39
 cram transcripts. `effect-taxonomy/3` retains only taxonomy governance and hash
 checks, so the six scheduler/lifecycle suites execute exactly once during the
 full gate.
@@ -511,12 +521,12 @@ grant was added.
 ## Reconstruction and verification
 
 The manifest is the complete SC.11 successor overlay on validated SC.10 commit
-`f3977fc`. Reconstruct it under repository-local scratch
+`242a64121a530897075bea0c8eec11eee84001e0`. Reconstruct it under repository-local scratch
 space:
 
 ```sh
 set -eu
-base=f3977fc
+base=242a64121a530897075bea0c8eec11eee84001e0
 dest="$PWD/.scratch/sc11-evidence-copy"
 manifest=docs/release/structured-concurrency/MANIFEST.sha256
 rm -rf "$dest"
@@ -559,7 +569,7 @@ snapshot_source | cmp "$snapshot" -
 opam exec -- dune build @doc --root "$dest"
 ```
 
-Expected results are zero exits, 658 compiled Alcotest/QCheck cases, 39 cram
+Expected results are zero exits, 677 compiled Alcotest/QCheck cases, 39 cram
 transcripts, and 25 doctest examples across 8 documents.
 
 The default interpreted CLI, prelude-evaluation, and Warp Case paths use this
