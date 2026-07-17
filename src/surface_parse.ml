@@ -2429,6 +2429,126 @@ let parse_top state =
           let expression = parse_expr state ~allow_newlines:false in
           Surface_ast.{ it = TopExpr expression; meta = expression.meta })
 
+type depth_work =
+  | Depth_expr of int * Surface_ast.expr
+  | Depth_pat of int * Surface_ast.pat
+  | Depth_ty of int * Surface_ast.ty
+
+(* Recursive descent alone is not a structural bound: postfix calls and pipes are parsed by
+   iterative loops into left-deep trees. Check the completed syntax tree with an explicit worklist
+   before the recursive trivia and lowering consumers see it. *)
+let structural_depth_violation (tops : Surface_ast.top list) =
+  let work = ref [] in
+  let violation = ref None in
+  let push_expr depth expression = work := Depth_expr (depth, expression) :: !work in
+  let push_pat depth pattern = work := Depth_pat (depth, pattern) :: !work in
+  let push_ty depth annotation = work := Depth_ty (depth, annotation) :: !work in
+  let push_top (top : Surface_ast.top) =
+    match top.it with
+    | Signature (_, annotation) -> push_ty 1 annotation
+    | Definition { params; value; _ } ->
+        List.iter (push_pat 1) params;
+        push_expr 1 value
+    | TypeDecl { constructors; _ } ->
+        List.iter
+          (fun (constructor : Surface_ast.constructor) ->
+            List.iter (fun (field : Surface_ast.field) -> push_ty 1 field.ty) constructor.fields)
+          constructors
+    | EffectDecl { operations; _ } ->
+        List.iter
+          (fun (operation : Surface_ast.operation) ->
+            List.iter (push_ty 1) operation.params;
+            push_ty 1 operation.result)
+          operations
+    | TopExpr expression -> push_expr 1 expression
+    | RawTop _ | TopHole _ -> ()
+  in
+  List.iter push_top tops;
+  while Option.is_none !violation && !work <> [] do
+    match !work with
+    | [] -> ()
+    | Depth_expr (depth, expression) :: rest ->
+        work := rest;
+        if depth > max_nesting_depth then violation := Some (Meta.span expression.meta)
+        else
+          let child_depth = depth + 1 in
+          begin match expression.it with
+          | Lit _ | Name _ | HashRef _ | GroupRef _ | Hole _ -> ()
+          | Call (fn, args) ->
+              push_expr child_depth fn;
+              List.iter (push_expr child_depth) args
+          | Fn (params, body) ->
+              List.iter (push_pat child_depth) params;
+              push_expr child_depth body
+          | Tuple items | List items -> List.iter (push_expr child_depth) items
+          | Block items ->
+              List.iter
+                (function
+                  | Surface_ast.Expr expression -> push_expr child_depth expression
+                  | Let { binder; params; value; _ } ->
+                      push_pat child_depth binder;
+                      List.iter (push_pat child_depth) params;
+                      push_expr child_depth value)
+                items
+          | Match (subject, clauses) ->
+              push_expr child_depth subject;
+              List.iter
+                (fun (clause : Surface_ast.clause) ->
+                  push_pat child_depth clause.cpattern;
+                  push_expr child_depth clause.cbody)
+                clauses
+          | If (condition, yes, no) ->
+              push_expr child_depth condition;
+              push_expr child_depth yes;
+              push_expr child_depth no
+          | Pipe (left, right) ->
+              push_expr child_depth left;
+              push_expr child_depth right
+          | Handle (body, ret, ops) ->
+              push_expr child_depth body;
+              push_pat child_depth ret.rbinder;
+              push_expr child_depth ret.rbody;
+              List.iter
+                (fun (clause : Surface_ast.op_clause) ->
+                  List.iter (push_pat child_depth) clause.oparams;
+                  push_expr child_depth clause.obody)
+                ops
+          | Quote (Surface body) -> push_expr child_depth body
+          | Quote (Raw _) -> ()
+          | Unquote body -> push_expr child_depth body
+          | Ann (subject, annotation) ->
+              push_expr child_depth subject;
+              push_ty child_depth annotation
+          end
+    | Depth_pat (depth, pattern) :: rest ->
+        work := rest;
+        if depth > max_nesting_depth then violation := Some (Meta.span pattern.meta)
+        else
+          let child_depth = depth + 1 in
+          begin match pattern.it with
+          | PWild | PBind _ | PLit _ | PHole _ -> ()
+          | PCon (_, args) | PTuple args -> List.iter (push_pat child_depth) args
+          | PAs (inner, _) -> push_pat child_depth inner
+          end
+    | Depth_ty (depth, annotation) :: rest ->
+        work := rest;
+        if depth > max_nesting_depth then violation := Some (Meta.span annotation.meta)
+        else
+          let child_depth = depth + 1 in
+          begin match annotation.it with
+          | TyName _ | TyVar _ | TyHash _ | TyHole _ -> ()
+          | TyApp (head, args) ->
+              push_ty child_depth head;
+              List.iter (push_ty child_depth) args
+          | TyArrow (params, _, result) ->
+              List.iter (push_ty child_depth) params;
+              push_ty child_depth result
+          | TyTuple items -> List.iter (push_ty child_depth) items
+          | TyForall (_, _, body) -> push_ty child_depth body
+          end
+  done;
+  !violation
+
 let signature_interruption state token message = report_code state token "E1224" message
 
 module Trivia_ownership = struct
@@ -3079,8 +3199,23 @@ let parse_tokens ~source tokens =
       signature_interruption state (current state)
         (Printf.sprintf "signature for `%s` has no following definition" name)
   | None -> ());
-  let items, meta = Trivia_ownership.run ~source ~tokens (List.rev !items) in
-  Surface_ast.{ items; diagnostics = List.rev state.diagnostics; meta; source }
+  let items = List.rev !items in
+  match structural_depth_violation items with
+  | Some span ->
+      let diagnostic =
+        Diag.error ?span ~code:"E1227"
+          (Printf.sprintf "surface syntax nesting exceeds the limit of %d" max_nesting_depth)
+      in
+      Surface_ast.
+        {
+          items;
+          diagnostics = List.rev (diagnostic :: state.diagnostics);
+          meta = Meta.empty;
+          source;
+        }
+  | None ->
+      let items, meta = Trivia_ownership.run ~source ~tokens items in
+      Surface_ast.{ items; diagnostics = List.rev state.diagnostics; meta; source }
 
 (** [recover_string] returns a partial tree and source-ordered diagnostics. Lexical damage becomes
     an in-order hole, allowing valid surrounding items and later parser errors to survive. *)

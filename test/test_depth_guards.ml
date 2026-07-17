@@ -21,6 +21,14 @@ let nested_source ~open_text ~close_text count leaf =
   done;
   Buffer.contents buffer
 
+let repeated_suffix prefix suffix count =
+  let buffer = Buffer.create (String.length prefix + (count * String.length suffix)) in
+  Buffer.add_string buffer prefix;
+  for _ = 1 to count do
+    Buffer.add_string buffer suffix
+  done;
+  Buffer.contents buffer
+
 let expect_code label code = function
   | Error diagnostics
     when List.exists (fun diagnostic -> String.equal diagnostic.Diag.code code) diagnostics ->
@@ -73,18 +81,44 @@ let test_surface_boundary () =
   in
   expect_ok "surface expression at limit" (Surface_parse.parse_string ~file:"depth.jac" at_limit);
   expect_code "surface expression over limit" "E1227"
-    (Surface_parse.parse_string ~file:"depth.jac" over_limit)
+    (Surface_parse.parse_string ~file:"depth.jac" over_limit);
+  let postfix_at = repeated_suffix "f" "()" (Surface_parse.max_nesting_depth - 1) in
+  let postfix_over = repeated_suffix "f" "()" Surface_parse.max_nesting_depth in
+  expect_ok "surface postfix chain at limit"
+    (Surface_parse.parse_string ~file:"postfix-depth.jac" postfix_at);
+  expect_code "surface postfix chain over limit" "E1227"
+    (Surface_parse.parse_string ~file:"postfix-depth.jac" postfix_over);
+  let pipe_at = repeated_suffix "0" " |> f" (Surface_parse.max_nesting_depth - 1) in
+  let pipe_over = repeated_suffix "0" " |> f" Surface_parse.max_nesting_depth in
+  expect_ok "surface pipe chain at limit"
+    (Surface_parse.parse_string ~file:"pipe-depth.jac" pipe_at);
+  expect_code "surface pipe chain over limit" "E1227"
+    (Surface_parse.parse_string ~file:"pipe-depth.jac" pipe_over)
 
 let test_surface_pattern_and_type_paths () =
   let nested count leaf = nested_source ~open_text:"(" ~close_text:")" count leaf in
-  let pattern = Printf.sprintf "fn (%s) -> 0" (nested Surface_parse.max_nesting_depth "x") in
+  let accepted_pattern =
+    Printf.sprintf "fn (%s) -> 0" (nested (Surface_parse.max_nesting_depth - 2) "x")
+  in
+  let rejected_pattern =
+    Printf.sprintf "fn (%s) -> 0" (nested (Surface_parse.max_nesting_depth - 1) "x")
+  in
+  expect_ok "surface pattern at limit"
+    (Surface_parse.parse_string ~file:"pattern-depth.jac" accepted_pattern);
   expect_code "surface pattern over limit" "E1227"
-    (Surface_parse.parse_string ~file:"pattern-depth.jac" pattern);
-  let annotation = Printf.sprintf "(x : %s)" (nested Surface_parse.max_nesting_depth "Int") in
+    (Surface_parse.parse_string ~file:"pattern-depth.jac" rejected_pattern);
+  let accepted_annotation =
+    Printf.sprintf "(x : %s)" (nested (Surface_parse.max_nesting_depth - 2) "Int")
+  in
+  let rejected_annotation =
+    Printf.sprintf "(x : %s)" (nested (Surface_parse.max_nesting_depth - 1) "Int")
+  in
+  expect_ok "surface type at limit"
+    (Surface_parse.parse_string ~file:"type-depth.jac" accepted_annotation);
   expect_code "surface type over limit" "E1227"
-    (Surface_parse.parse_string ~file:"type-depth.jac" annotation)
+    (Surface_parse.parse_string ~file:"type-depth.jac" rejected_annotation)
 
-let kernel_message source =
+let kernel_diagnostic source =
   let form =
     match Reader.parse_one ~file:"dedup.jqd" source with
     | Ok form -> form
@@ -93,20 +127,55 @@ let kernel_message source =
           (String.concat "; " (List.map Diag.to_string diagnostics))
   in
   match Kernel.of_form form with
-  | Error [ diagnostic ] -> diagnostic.Diag.message
+  | Error [ diagnostic ] -> diagnostic
   | Error diagnostics -> Alcotest.failf "expected one diagnostic, got %d" (List.length diagnostics)
   | Ok _ -> Alcotest.fail "expected the DX.7 fixture to fail"
 
+let check_variable_group_diagnostic label ~wrong_form ~message source =
+  let diagnostic = kernel_diagnostic source in
+  Alcotest.(check string) (label ^ " code") "E0203" diagnostic.code;
+  Alcotest.(check string) (label ^ " wording") message diagnostic.message;
+  let expected_start = Str.search_forward (Str.regexp_string wrong_form) source 0 in
+  match diagnostic.span with
+  | Some span ->
+      Alcotest.(check int) (label ^ " span start") expected_start span.Span.start_pos.offset;
+      Alcotest.(check int)
+        (label ^ " span end")
+        (expected_start + String.length wrong_form)
+        span.Span.end_pos.offset
+  | None -> Alcotest.failf "%s: diagnostic span is missing" label
+
+let capture_entry exception_value =
+  let buffer = Buffer.create 128 in
+  let formatter = Format.formatter_of_buffer buffer in
+  let status = Cli_entry.run ~program:"jacquard" ~err:formatter (fun () -> raise exception_value) in
+  Format.pp_print_flush formatter ();
+  (status, Buffer.contents buffer)
+
 let test_variable_group_diagnostics_unchanged () =
+  check_variable_group_diagnostic "tforall tvar" ~wrong_form:"(rvar a)"
+    ~message:"type variables in `tforall` must be `tvar` forms"
+    "(ann (lit 0) (tforall ((rvar a)) () (tvar a)))";
+  check_variable_group_diagnostic "tforall rvar" ~wrong_form:"(tvar e)"
+    ~message:"row variables in `tforall` must be `rvar` forms"
+    "(ann (lit 0) (tforall () ((tvar e)) (tref int)))";
+  check_variable_group_diagnostic "deftype tvar" ~wrong_form:"(rvar a)"
+    ~message:"the type parameters must be `tvar` forms" "(deftype option ((rvar a)) (con none))";
+  check_variable_group_diagnostic "defeffect tvar" ~wrong_form:"(rvar a)"
+    ~message:"the effect parameters must be `tvar` forms"
+    "(defeffect console ((rvar a)) (op print () (tref int)))";
+  let stack_status, stack_output = capture_entry Stack_overflow in
+  Alcotest.(check int) "entry stack exit" 1 stack_status;
   Alcotest.(check string)
-    "tforall tvar wording" "type variables in `tforall` must be `tvar` forms"
-    (kernel_message "(ann (lit 0) (tforall ((rvar a)) () (tvar a)))");
-  Alcotest.(check string)
-    "tforall rvar wording" "row variables in `tforall` must be `rvar` forms"
-    (kernel_message "(ann (lit 0) (tforall () ((tvar e)) (tref int)))");
-  Alcotest.(check string)
-    "declaration tvar wording" "the type parameters must be `tvar` forms"
-    (kernel_message "(deftype option ((rvar a)) (con none))")
+    "entry stack classification"
+    "error[E0003]: input exhausted the host stack before a structural nesting guard\n" stack_output;
+  let internal_status, internal_output = capture_entry (Failure "entry-probe") in
+  Alcotest.(check int) "entry internal exit" 125 internal_status;
+  Alcotest.(check bool)
+    "entry internal report" true
+    (String.starts_with
+       ~prefix:"jacquard: internal error, uncaught exception:\nFailure(\"entry-probe\")"
+       internal_output)
 
 let suite =
   [

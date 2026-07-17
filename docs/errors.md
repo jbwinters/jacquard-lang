@@ -172,7 +172,7 @@ also emits E0817; consuming the captured resumption twice emits E0816.
 | E1224 | a term signature is not followed by the same definition | `x : T; x = value` |
 | E1225 | malformed type/effect declaration structure | `type Option a = Some(a)` |
 | E1226 | malformed handler boundary, clause, or raw inversion escape | `handle match x { ... } { ... }` without the D35 body wrapper |
-| E1227 | surface syntax nesting exceeds the structural limit | more than 10,000 nested parentheses, patterns, or types |
+| E1227 | surface syntax nesting exceeds the structural limit | more than 10,000 nested calls, pipes, parentheses, patterns, or types |
 | E1230 | surface node is outside the SS.7 local-lowering slice | lowering a list before SS.12 |
 | E1231 | empty expression block | `{}` |
 | E1232 | local `let` is the final block item | `{ let x = 1 }` |
