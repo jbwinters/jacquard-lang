@@ -7,6 +7,7 @@ let ok = function
         (String.concat "\n" (List.map Diag.to_string diagnostics))
 
 let view scope task = Structured_scope.inspect scope task |> ok
+let trace scope task = Structured_scope.id scope task |> ok |> Concurrency_contract.trace_task_id
 let is_cancelled scope task = (view scope task).result = Some Concurrency_contract.Cancelled
 
 let test_await_and_yield_deliver_before_suspension () =
@@ -114,6 +115,16 @@ let test_public_delivery_destroys_suspended_resume_once () =
   Alcotest.(check (list int)) "suspended resume 21 destroyed exactly once" [ 21 ] !dropped;
   ignore (Structured_scope.deliver_cancel scope ~point:Concurrency_contract.Yield target ~drop |> ok);
   Alcotest.(check (list int)) "duplicate delivery destroys nothing" [ 21 ] !dropped;
+  (match
+     Structured_scope.at_cancellation_point scope ~point:Concurrency_contract.Yield ~task:target
+       ~resume:23 ~drop
+     |> ok
+   with
+  | Structured_scope.Boundary_cancelled awakened ->
+      Alcotest.(check int) "stale cancelled boundary wakes nobody" 0 (List.length awakened)
+  | Structured_scope.Boundary_continue _ ->
+      Alcotest.fail "an already-cancelled task must not continue");
+  Alcotest.(check (list int)) "stale boundary continuation destroyed once" [ 21; 23 ] !dropped;
   let completed = Structured_scope.spawn scope ~resume:22 |> ok in
   ignore (Structured_scope.checkout scope completed |> ok);
   ignore (Structured_scope.complete scope completed 99 |> ok);
@@ -121,8 +132,67 @@ let test_public_delivery_destroys_suspended_resume_once () =
   ignore
     (Structured_scope.deliver_cancel scope ~point:Concurrency_contract.Routed_effect completed ~drop
     |> ok);
-  Alcotest.(check (list int)) "completed delivery destroys nothing" [ 21 ] !dropped;
+  Alcotest.(check (list int)) "completed delivery destroys nothing" [ 21; 23 ] !dropped;
   Structured_scope.close scope ~reason:Structured_scope.Normal ~escaping:[] ~drop:ignore |> ok
+
+let test_cancelled_target_wakes_registered_waiters_in_order () =
+  let scope, target = Structured_scope.create ~body_resume:0 |> ok in
+  let first = Structured_scope.spawn scope ~resume:1 |> ok in
+  let second = Structured_scope.spawn scope ~resume:2 |> ok in
+  let caller = Structured_scope.spawn scope ~resume:3 |> ok in
+  ignore (Structured_scope.checkout scope target |> ok);
+  Structured_scope.suspend_yield scope target ~resume:10 |> ok;
+  ignore (Structured_scope.checkout scope first |> ok);
+  (match Structured_scope.await scope ~waiter:first ~target ~resume:11 |> ok with
+  | Scheduler_core.Await_suspended, [] -> ()
+  | _ -> Alcotest.fail "first waiter must suspend without wakeups");
+  ignore (Structured_scope.checkout scope second |> ok);
+  (match Structured_scope.await scope ~waiter:second ~target ~resume:12 |> ok with
+  | Scheduler_core.Await_suspended, [] -> ()
+  | _ -> Alcotest.fail "second waiter must suspend without wakeups");
+  ignore (Structured_scope.checkout scope caller |> ok);
+  let dropped = ref [] in
+  let drop resume = dropped := !dropped @ [ resume ] in
+  (match Structured_scope.cancel scope ~caller ~target ~resume:13 ~drop |> ok with
+  | Structured_scope.Cancel_continues { resume; awakened } ->
+      Alcotest.(check int) "caller continuation" 13 resume;
+      Alcotest.(check (list string))
+        "waiters wake in registration order"
+        [ trace scope first; trace scope second ]
+        (List.map (trace scope) awakened)
+  | Structured_scope.Cancel_caller_cancelled _ ->
+      Alcotest.fail "cancelling another task must preserve the caller");
+  let target_view = view scope target in
+  Alcotest.(check bool)
+    "target is cancelled" true
+    (target_view.lifecycle = Concurrency_contract.Cancelled_state);
+  Alcotest.(check bool)
+    "target result is cancelled" true
+    (target_view.result = Some Concurrency_contract.Cancelled);
+  let check_awakened label task =
+    let task_view = view scope task in
+    Alcotest.(check bool)
+      (label ^ " is runnable") true
+      (task_view.lifecycle = Concurrency_contract.Runnable);
+    Alcotest.(check bool) (label ^ " no longer suspended") true (task_view.suspension = None);
+    Alcotest.(check bool) (label ^ " has no result") true (task_view.result = None);
+    Alcotest.(check bool) (label ^ " owns its resume") true task_view.owns_resume
+  in
+  check_awakened "first waiter" first;
+  check_awakened "second waiter" second;
+  let observe_cancelled label task resume =
+    ignore (Structured_scope.checkout scope task |> ok);
+    match Structured_scope.await scope ~waiter:task ~target ~resume |> ok with
+    | Scheduler_core.Await_ready Concurrency_contract.Cancelled, [] -> ()
+    | Scheduler_core.Await_ready _, _ -> Alcotest.fail (label ^ " observed wrong result")
+    | Scheduler_core.Await_suspended, _ | Scheduler_core.Await_deadlocked _, _ ->
+        Alcotest.fail (label ^ " must observe the terminal result")
+  in
+  observe_cancelled "first waiter" first 14;
+  observe_cancelled "second waiter" second 15;
+  Structured_scope.suspend_yield scope caller ~resume:13 |> ok;
+  Structured_scope.close scope ~reason:Structured_scope.Normal ~escaping:[] ~drop |> ok;
+  Alcotest.(check (list int)) "all owned continuations destroyed once" [ 10; 14; 15; 13 ] !dropped
 
 let test_duplicate_completed_and_self_cancel () =
   let scope, caller = Structured_scope.create ~body_resume:0 |> ok in
@@ -259,6 +329,7 @@ let run () =
   test_routed_effect_preemption_and_fault_result ();
   test_spawn_action_is_not_created_after_delivery ();
   test_public_delivery_destroys_suspended_resume_once ();
+  test_cancelled_target_wakes_registered_waiters_in_order ();
   test_duplicate_completed_and_self_cancel ();
   test_suspended_target_and_precancelled_caller ();
   test_bracket_cleanup_without_post_cancel_step ();

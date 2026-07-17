@@ -164,6 +164,37 @@ let run_state_global ctx ~policy ~bounds initial_state =
         max_live := max !max_live !live_count;
         Ok ())
     in
+    let rec queue_ids acc = function
+      | [] -> Ok (List.rev acc)
+      | (run, handle) :: rest ->
+          let* task_id = id run handle in
+          queue_ids (task_id :: acc) rest
+    in
+    let verify_queue relation expected =
+      let* actual = queue_ids [] !queue in
+      if actual = expected then Ok ()
+      else
+        Error
+          [
+            Diag.error ~code:"E0908"
+              ("round-robin queue drifted from frozen " ^ relation ^ " relation");
+          ]
+    in
+    let append_after_suspend run handle =
+      let* runnable = queue_ids [] !queue in
+      let* current = id run handle in
+      append [ (run, handle) ];
+      verify_queue "requeue_after_suspend"
+        (Concurrency_contract.requeue_after_suspend ~runnable ~current)
+    in
+    let append_after_spawn run child parent =
+      let* runnable = queue_ids [] !queue in
+      let* child_id = id run child in
+      let* parent_id = id run parent in
+      append [ (run, child); (run, parent) ];
+      verify_queue "requeue_after_spawn"
+        (Concurrency_contract.requeue_after_spawn ~runnable ~child:child_id ~parent:parent_id)
+    in
     let rec reject_results run body aggregate =
       let values =
         body
@@ -195,21 +226,20 @@ let run_state_global ctx ~policy ~bounds initial_state =
           | Some _ -> Ok ()
           | None ->
               let* () = Structured_scope.wake_yielded parent_run.scope parent_task in
-              let* owned = Structured_scope.checkout parent_run.scope parent_task in
-              let continuation =
-                match owned with
-                | Global_nested_wait owned -> owned
-                | Global_state _ | Global_awaiting _ ->
-                    failwith "Bug_round_robin: nested parent owned the wrong continuation"
-              in
-              let next = Eval.apply_state ctx continuation [ task_result_value result ] in
-              let* () =
-                Structured_scope.suspend_yield parent_run.scope parent_task
-                  ~resume:(Global_state next)
-              in
-              let* () = Structured_scope.wake_yielded parent_run.scope parent_task in
-              append [ (parent_run, parent_task) ];
-              Ok ())
+              Structured_scope.with_checkout parent_run.scope parent_task (fun owned ->
+                  let continuation =
+                    match owned with
+                    | Global_nested_wait owned -> owned
+                    | Global_state _ | Global_awaiting _ ->
+                        failwith "Bug_round_robin: nested parent owned the wrong continuation"
+                  in
+                  let next = Eval.apply_state ctx continuation [ task_result_value result ] in
+                  let* () =
+                    Structured_scope.suspend_yield parent_run.scope parent_task
+                      ~resume:(Global_state next)
+                  in
+                  let* () = Structured_scope.wake_yielded parent_run.scope parent_task in
+                  append_after_suspend parent_run parent_task))
     and maybe_finalize run =
       match run.aggregate with
       | Some _ -> Ok ()
@@ -284,8 +314,7 @@ let run_state_global ctx ~policy ~bounds initial_state =
     let suspend_and_requeue run handle resume =
       let* () = Structured_scope.suspend_yield run.scope handle ~resume in
       let* () = Structured_scope.wake_yielded run.scope handle in
-      append [ (run, handle) ];
-      Ok ()
+      append_after_suspend run handle
     in
     let state_for_awakened run = function
       | Global_state state -> Ok state
@@ -353,13 +382,14 @@ let run_state_global ctx ~policy ~bounds initial_state =
                         | Global_state _ | Global_nested_wait _ -> assert false
                       in
                       let next = Eval.apply_state ctx continuation [ child_value ] in
-                      let* () = suspend_and_requeue run handle (Global_state next) in
+                      let* () =
+                        Structured_scope.suspend_yield run.scope handle ~resume:(Global_state next)
+                      in
+                      let* () = Structured_scope.wake_yielded run.scope handle in
                       add_event
                         (Printf.sprintf "spawn parent=%s child=%s" (id_text parent_id)
                            (id_text child_id));
-                      remove_task run handle;
-                      append [ (run, child); (run, handle) ];
-                      Ok ())
+                      append_after_spawn run child handle)
               | _ -> fail_task run handle (Runtime_err.Arity "async.spawn expects one thunk"))
           | Ok (Eval.OCOp { op; args; resume; _ }) when Hash.equal op await_hash -> (
               match args with
@@ -387,8 +417,8 @@ let run_state_global ctx ~policy ~bounds initial_state =
                     ->
                       append (List.map (fun awakened -> (run, awakened)) awakened);
                       let next = Eval.apply_state ctx resume [ task_result_value result ] in
-                      let* _ = Structured_scope.checkout run.scope handle in
-                      suspend_and_requeue run handle (Global_state next)
+                      Structured_scope.with_checkout run.scope handle (fun _ ->
+                          suspend_and_requeue run handle (Global_state next))
                   | Structured_scope.Await_performed
                       (Scheduler_core.Await_deadlocked message, awakened) ->
                       append (List.map (fun awakened -> (run, awakened)) awakened);
@@ -406,11 +436,11 @@ let run_state_global ctx ~policy ~bounds initial_state =
               | Structured_scope.Yield_suspended ->
                   let next = Eval.apply_state ctx resume [ Value.unit_v ] in
                   let* () = Structured_scope.wake_yielded run.scope handle in
-                  let* _ = Structured_scope.checkout run.scope handle in
-                  let* () = suspend_and_requeue run handle (Global_state next) in
-                  let* task_id = id run handle in
-                  add_event ("yield task=" ^ id_text task_id);
-                  Ok ())
+                  Structured_scope.with_checkout run.scope handle (fun _ ->
+                      let* () = suspend_and_requeue run handle (Global_state next) in
+                      let* task_id = id run handle in
+                      add_event ("yield task=" ^ id_text task_id);
+                      Ok ()))
           | Ok (Eval.OCOp { op; args; resume; _ }) when Hash.equal op cancel_hash -> (
               match args with
               | [ target_value ] -> (
@@ -509,31 +539,34 @@ let run_state_global ctx ~policy ~bounds initial_state =
       | _ when !sequence >= bounds.max_decisions ->
           Error [ Diag.error ~code:"E0908" "decision bound exceeded" ]
       | runnable ->
-          let rec ids acc = function
-            | [] -> Ok (List.rev acc)
-            | (run, handle) :: rest ->
-                let* task_id = id run handle in
-                ids (task_id :: acc) rest
-          in
-          let* runnable_ids = ids [] runnable in
+          let* runnable_ids = queue_ids [] runnable in
           let decision =
             Option.get (Concurrency_contract.decide_round_robin ~sequence:!sequence runnable_ids)
+          in
+          let rec take_chosen acc = function
+            | [] ->
+                Error [ Diag.error ~code:"E0908" "round-robin decision chose a non-runnable task" ]
+            | ((run, handle) as task) :: rest ->
+                let* task_id = id run handle in
+                if Concurrency_contract.compare_task_id task_id decision.chosen = 0 then
+                  Ok (task, List.rev_append acc rest)
+                else take_chosen (task :: acc) rest
           in
           decisions := decision :: !decisions;
           add_event
             (Printf.sprintf "decision=%d runnable=[%s] chosen=%s" decision.sequence
                (String.concat "," (List.map id_text decision.runnable))
                (id_text decision.chosen));
-          let chosen_run, chosen = List.hd runnable in
-          queue := List.tl runnable;
+          let* (chosen_run, chosen), remaining = take_chosen [] runnable in
+          queue := remaining;
           current_decision := decision.sequence;
           terminal_ordinal := 0;
           let* () =
             Structured_scope.with_eval_task_context Task_capability.runtime ctx chosen_run.scope
               (fun () ->
-                let* owned = Structured_scope.checkout chosen_run.scope chosen in
-                let* state = state_for_awakened chosen_run owned in
-                step chosen_run chosen state)
+                Structured_scope.with_checkout chosen_run.scope chosen (fun owned ->
+                    let* state = state_for_awakened chosen_run owned in
+                    step chosen_run chosen state))
           in
           incr sequence;
           drive ()

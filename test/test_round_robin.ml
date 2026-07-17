@@ -4,6 +4,15 @@ let ok = function
   | Ok value -> value
   | Error error -> Alcotest.failf "unexpected scheduler error: %s" (Runtime_err.to_string error)
 
+let contains text ~substring =
+  let text_length = String.length text in
+  let substring_length = String.length substring in
+  let rec loop offset =
+    offset + substring_length <= text_length
+    && (String.sub text offset substring_length = substring || loop (offset + 1))
+  in
+  loop 0
+
 let expression store source =
   match Reader.parse_one ~file:"round-robin.jqd" source with
   | Error diagnostics -> Eval_support.fail_diags "parse round-robin fixture" diagnostics
@@ -196,6 +205,85 @@ let test_real_failure_policies_and_linked_terminal_ordinals () =
         String.starts_with ~prefix:"policy-observe decision=" line
         && String.ends_with ~suffix:"ordinal=1 task=0#2" line))
 
+let test_fail_fast_requeues_awakened_waiter () =
+  let store, ctx = Eval_support.make_prelude_ctx () in
+  let output = Buffer.create 16 in
+  (match Prelude.install_console ctx ~out:(Buffer.add_string output) with
+  | Ok () -> ()
+  | Error diagnostics -> Eval_support.fail_diags "install console" diagnostics);
+  let source =
+    "(let nonrec (pvar blocker)\n\
+    \   (app (var async.spawn)\n\
+    \     (lam ()\n\
+    \       (let nonrec (pwild) (app (var async.yield))\n\
+    \         (let nonrec (pwild) (app (var async.yield))\n\
+    \           (let nonrec (pwild) (app (var async.yield))\n\
+    \             (let nonrec (pwild) (app (var async.yield)) (lit 1)))))))\n\
+    \   (let nonrec (pvar target)\n\
+    \     (app (var async.spawn) (lam () (app (var async.await) (var blocker))))\n\
+    \     (let nonrec (pvar waiter)\n\
+    \       (app (var async.spawn)\n\
+    \         (lam ()\n\
+    \           (let nonrec (pwild) (app (var async.await) (var target))\n\
+    \             (app (var print) (lit \"must-not-run\")))))\n\
+    \       (let nonrec (pwild) (app (var async.spawn) (lam () (app (lit 1))))\n\
+    \         (lit 0)))))"
+  in
+  let outcome =
+    Round_robin.run_state ctx ~policy:Concurrency_contract.Fail_fast
+      (Eval.expr_state (expression store source))
+    |> ok
+  in
+  (match outcome.aggregate with
+  | Scope_policy.Fail_fast_result (Concurrency_contract.Failed _) -> ()
+  | _ -> Alcotest.fail "fail-fast did not retain the triggering child failure");
+  Alcotest.(check bool)
+    "waiter awakened by sibling cancellation is returned to the global queue" true
+    (contains outcome.trace ~substring:"runnable=[0#0,0#1,0#3]");
+  Alcotest.(check bool)
+    "awakened waiter observes its pending cancellation" true
+    (contains outcome.trace ~substring:"terminal task=0#3 result=cancelled");
+  Alcotest.(check string)
+    "cancelled awakened waiter performs no later world work" "" (Buffer.contents output);
+  Alcotest.(check bool)
+    "fail-fast waiter path closes all ownership" true
+    (outcome.metrics_after_close
+    = Structured_scope.{ open_scopes = 0; live_tasks = 0; runnable_tasks = 0; owned_resumes = 0 })
+
+let test_real_eval_self_await_deadlock () =
+  let store, ctx = Eval_support.make_prelude_ctx () in
+  let retained = ref None in
+  Eval.register_root_handler ctx (print_hash store) (fun args ->
+      match (!retained, args) with
+      | None, [ task ] ->
+          retained := Some task;
+          Ok Value.unit_v
+      | Some task, [ _ ] -> Ok task
+      | _, _ -> Error (Runtime_err.Arity "test print handler expects one argument"));
+  let source =
+    "(let nonrec (pvar child)\n\
+    \   (app (var async.spawn)\n\
+    \     (lam ()\n\
+    \       (let nonrec (pwild) (app (var async.yield))\n\
+    \         (let nonrec (pvar self) (app (var print) (lit \"self\"))\n\
+    \           (app (var async.await) (var self))))))\n\
+    \   (let nonrec (pwild) (app (var print) (var child))\n\
+    \     (app (var async.await) (var child))))"
+  in
+  let outcome = Round_robin.run_state ctx (Eval.expr_state (expression store source)) |> ok in
+  let message = "async deadlock: task 0#1 awaited itself" in
+  if not (contains outcome.trace ~substring:("deadlock=" ^ Printf.sprintf "%S" message)) then
+    Alcotest.failf "real evaluator missed self-await deadlock:\n%s" outcome.trace;
+  (match outcome.aggregate with
+  | Scope_policy.Fail_fast_result (Concurrency_contract.Failed actual)
+    when String.equal actual message ->
+      ()
+  | _ -> Alcotest.fail "self-await deadlock did not become the frozen fail-fast result");
+  Alcotest.(check bool)
+    "deadlock refusal closes all ownership" true
+    (outcome.metrics_after_close
+    = Structured_scope.{ open_scopes = 0; live_tasks = 0; runnable_tasks = 0; owned_resumes = 0 })
+
 let test_multiple_waiters_nested_escape_and_bounds () =
   let store, ctx = Eval_support.make_prelude_ctx () in
   let multiple =
@@ -343,6 +431,8 @@ let run () =
   test_real_eval_trace_and_cache ();
   test_fresh_run_identity_and_routed_resume_guard ();
   test_real_failure_policies_and_linked_terminal_ordinals ();
+  test_fail_fast_requeues_awakened_waiter ();
+  test_real_eval_self_await_deadlock ();
   test_multiple_waiters_nested_escape_and_bounds ();
   test_global_nested_fifo_and_bounds ();
   QCheck.Test.check_exn prop_128_exact_real_eval_traces

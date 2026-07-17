@@ -246,17 +246,19 @@ let con_arity ctx (h : Hash.t) : int =
       | None -> refuse ctx "constructor ordinal out of range (corrupt store)")
   | _ -> refuse ctx "constructor reference does not resolve (corrupt store)"
 
-(* The op's owning effect declaration (for eval refusal and error metadata). *)
-let op_effect ctx (h : Hash.t) : string * string =
+(* The op's owning effect declaration (for eval refusal and error metadata). The declaration hash,
+   not its presentation name, is the authority identity. *)
+let op_effect ctx (h : Hash.t) : Hash.t * string * string =
   match Store.locate ctx.store h with
   | Ok
       {
         Store.decl = { Kernel.it = Kernel.DefEffect { ename; ops; _ }; _ };
+        decl_hash;
         role = Store.Operation i;
         _;
       } -> (
       match List.nth_opt ops i with
-      | Some { Kernel.op_name; _ } -> (ename, op_name)
+      | Some { Kernel.op_name; _ } -> (decl_hash, ename, op_name)
       | None -> refuse ctx "operation ordinal out of range (corrupt store)")
   | _ -> refuse ctx "operation reference does not resolve (corrupt store)"
 
@@ -276,8 +278,11 @@ let op_mode ctx (h : Hash.t) : Kernel.op_mode =
 (* eval runs at root authority through the interpreter; a standalone binary has no
    interpreter tier, so the whole effect stays refused (E1102 per the plan) *)
 let refuse_eval_op ctx (h : Hash.t) : unit =
-  let ename, _ = op_effect ctx h in
-  if ename = "eval" then refuse ctx "uses eval, which requires the interpreter tier"
+  let effect_hash, _, _ = op_effect ctx h in
+  match Effect_registry.find_canonical effect_hash with
+  | Some metadata when metadata.index_name = "eval" ->
+      refuse ctx "uses eval, which requires the interpreter tier"
+  | Some _ | None -> ()
 
 (* env: source name -> atom for the current function *)
 type env = atom SMap.t

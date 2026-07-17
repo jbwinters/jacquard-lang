@@ -12,7 +12,9 @@ code.diff : (Code, Code) ->{} Text
 code.eq? : (Code, Code) ->{} Bool
 code.form : (Text, List Code) ->{} Code
 code.of-int : (Int) ->{} Code
+code.of-real : (Real) ->{} Code
 code.of-text : (Text) ->{} Code
+code.render : (Code) ->{} Text
 code.to-int : (Code) ->{} Option Int
 code.to-text : (Code) ->{} Option Text
 code.un-form : (Code) ->{} Option (Text, List Code)
@@ -86,6 +88,8 @@ ord.on-second : forall a b. (Ord b) ->{} Ord (a, b)
 ord.reverse : forall a. (Ord a) ->{} Ord a
 ord.to-eq : forall a. (Ord a) ->{} Eq a
 type ordering
+parallel.both : forall a b. (() ->{} a, () ->{} b) ->{} (a, b)
+parallel.map : forall a b. (List b, (b) ->{} a) ->{} List a
 type real
 con real-opaque
 real.add : (Real, Real) ->{} Real

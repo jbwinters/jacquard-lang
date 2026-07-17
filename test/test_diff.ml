@@ -213,6 +213,76 @@ and test_operation_mode_interface_diff () =
        | Ok form -> form
        | Error ds -> Eval_support.fail_diags "once op" ds))
 
+let hash_exn value =
+  match Hash.of_hex value with Some hash -> hash | None -> Alcotest.fail "invalid test hash"
+
+let contains haystack needle =
+  let n = String.length needle and m = String.length haystack in
+  let rec go i = i + n <= m && (String.sub haystack i n = needle || go (i + 1)) in
+  go 0
+
+let row_form effects =
+  Form.form "row" (List.map (fun hash -> Form.F (Form.form "eref" [ Form.Hash hash ])) effects)
+
+let arrow_form effects =
+  Form.form "tarrow"
+    [
+      Form.F (Form.form "group" []);
+      Form.F (row_form effects);
+      Form.F (Form.form "tref" [ Form.Hash (Hash.of_string "diff row result type") ]);
+    ]
+
+let test_authority_row_diff_uses_registry () =
+  let net = hash_exn "be1aad7345c6215f227e63df6c7d05874a464f207599d4f5b85de8b0a6675b45" in
+  let fs = hash_exn "8ec13169c7181851364e55353232af8e3c7f5ee4a010fa3067fcf2058dd5ed84" in
+  match Diff.form_divergences ~path:"policy" (arrow_form [ fs ]) (arrow_form [ net ]) with
+  | [ { Diff.a; b; _ } ] ->
+      Alcotest.(check bool)
+        "old authority has blessed Fs risk" true (contains a "Fs [world/medium]");
+      Alcotest.(check bool)
+        "new authority has blessed Net risk" true (contains b "Net [world/high]");
+      Alcotest.(check bool)
+        "review meaning is present" true
+        (contains b "reach a network endpoint through the granted handler")
+  | _ -> Alcotest.fail "effect-row edit did not produce one authority divergence"
+
+let test_unknown_authority_diff_is_unrated () =
+  let unknown = Hash.of_string "unknown diff authority" in
+  match
+    Diff.form_divergences
+      ~effect_name_of:(fun _ -> "pk:publisher.example/pkg/custom")
+      ~path:"policy" (arrow_form []) (arrow_form [ unknown ])
+  with
+  | [ { Diff.b; _ } ] ->
+      Alcotest.(check bool) "unknown authority is unrated" true (contains b "unrated");
+      Alcotest.(check bool)
+        "unknown authority retains publisher scope" true
+        (contains b "pk:publisher.example/pkg/custom");
+      Alcotest.(check bool)
+        "unknown authority keeps full identity" true
+        (contains b (Hash.to_hex unknown));
+      Alcotest.(check bool) "unknown authority receives no ANSI" false (contains b "\027[")
+  | _ -> Alcotest.fail "unknown effect-row edit did not produce one authority divergence"
+
+let test_quoted_row_store_diff_stays_data () =
+  let old_hash = "8ec13169c7181851364e55353232af8e3c7f5ee4a010fa3067fcf2058dd5ed84" in
+  let new_hash = "be1aad7345c6215f227e63df6c7d05874a464f207599d4f5b85de8b0a6675b45" in
+  let source hash =
+    Printf.sprintf
+      "(defterm ((binding quoted-row () (quote (tarrow () (row (eref #%s)) (tref int))))))" hash
+  in
+  let old_store = mk_store [ source old_hash ] in
+  let new_store = mk_store [ source new_hash ] in
+  match Diff.render (Diff.diff ~old_side:old_store ~new_side:new_store) with
+  | Some rendered ->
+      Alcotest.(check bool)
+        "quoted row is not labeled authority" false (contains rendered "authority {");
+      Alcotest.(check bool)
+        "quoted old hash remains structural data" true (contains rendered old_hash);
+      Alcotest.(check bool)
+        "quoted new hash remains structural data" true (contains rendered new_hash)
+  | None -> Alcotest.fail "quoted row data edit disappeared from the store diff"
+
 let suite =
   [
     Alcotest.test_case "multi-kind name diffs clean" `Quick test_multi_kind_name_identical;
@@ -228,4 +298,10 @@ let suite =
     Alcotest.test_case "surface fragment rendering" `Quick test_surface_fragment_rendering;
     Alcotest.test_case "helper edit lists dependents" `Quick test_helper_edit_lists_dependents;
     Alcotest.test_case "added and removed" `Quick test_added_removed;
+    Alcotest.test_case "authority row diff uses registry" `Quick
+      test_authority_row_diff_uses_registry;
+    Alcotest.test_case "unknown authority diff is unrated" `Quick
+      test_unknown_authority_diff_is_unrated;
+    Alcotest.test_case "quoted row store diff stays data" `Quick
+      test_quoted_row_store_diff_stays_data;
   ]

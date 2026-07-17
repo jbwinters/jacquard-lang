@@ -18,6 +18,28 @@ External clients can construct arbitrary guarded builtins.
   > EOF
   $ ocamlc -I "$JACQUARD_API" -c custom_builtin.ml
 
+HASH_V0 values have an abstract validated representation. Clients may wrap a hash produced by the
+public factories in `VHash`, but cannot forge raw bytes of the wrong length.
+
+  $ cat > valid_hash_value.ml <<'EOF'
+  > open Jacquard
+  > let _ = Value.VHash (Hash.of_string "validated")
+  > EOF
+  $ ocamlc -I "$JACQUARD_API" -c valid_hash_value.ml
+  $ cat > forged_hash_value.ml <<'EOF'
+  > open Jacquard
+  > let _ = Value.VHash (Hash.Digest_bytes "short")
+  > EOF
+  $ if ocamlc -I "$JACQUARD_API" -c forged_hash_value.ml >forged_hash_value.out 2>&1; then
+  >   echo forgeable
+  > elif grep -Fq "Error: Unbound constructor Hash.Digest_bytes" forged_hash_value.out; then
+  >   echo sealed
+  > else
+  >   cat forged_hash_value.out
+  >   exit 1
+  > fi
+  sealed
+
 The trusted payload belongs to a private module. Check the private module directly so this cannot
 pass because an attempted `VTrustedBuiltin` payload happened to have some unrelated wrong type.
 

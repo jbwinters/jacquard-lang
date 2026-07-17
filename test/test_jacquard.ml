@@ -10,6 +10,7 @@ let () =
       ("form", Test_form.suite);
       ("reader", Test_reader.suite);
       ("printer", Test_printer.suite);
+      ("export", Test_export.suite);
       ("kernel", Test_kernel.suite);
       ("resolve", Test_resolve.suite);
       ("canon", Test_canon.suite);
@@ -26,6 +27,11 @@ let () =
       ("cancellation", Test_cancellation.suite);
       ("scope-policy", Test_scope_policy.suite);
       ("round-robin", Test_round_robin.suite);
+      ("audit", Test_audit.suite);
+      ("secret", Test_secret.suite);
+      ("audit-chain", Test_audit_chain.suite);
+      ("approval", Test_approval.suite);
+      ("governance-core", Test_governance_core.suite);
       ("types", Test_types.suite);
       ("check", Test_check.suite);
       ("tier", Test_tier.suite);

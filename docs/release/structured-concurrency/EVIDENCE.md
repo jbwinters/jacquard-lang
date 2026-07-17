@@ -63,7 +63,10 @@ fails with the same-tail occurs check at the `async.spawn` source, and the Types
 regression rejects different effect sets sharing the same tail. Both negative
 crams declare the complete frozen four-operation Async identity rather than a
 near-match. A generated property checks that every subset of two independent
-child effects remains visible in the shared caller row.
+child effects remains visible in the shared caller row. The converted-shape
+defense fails closed with E0805 if a future checker refactor makes the validated
+frozen declaration and its internal arrow disagree; a source regression keeps
+that path diagnostic-only and forbids the former internal assertion.
 
 ## Opaque Task boundary
 
@@ -108,7 +111,8 @@ A. Ordinary in-language Once resumptions share this private owner check.
 
 ## Async boundary and parity
 
-All four Async operations are reviewed as `once`; no handler is installed.
+All four Async operations are reviewed as `once`; the taxonomy still marks
+Async as reserved, and no handler or built-in `--allow` grant is installed.
 Direct evaluator calls therefore reach the ordinary `Unhandled` result for
 spawn, await, cancel, and yield. The CLI rejects an unhandled Async program at
 its effect gate with E0814. Neither path schedules work or grants ambient
@@ -135,14 +139,18 @@ registration order on wakeup. Terminal awaits are immediate. Self-await and
 closed cycles produce the frozen task-failure messages and terminalize cycle
 members atomically with respect to wakeup reporting: every member drops its
 resume and reaches `failed` before registration-ordered external waiters become
-runnable. No terminal cycle member can appear in the returned wakeup list. The
-core returns the handles made runnable by a transition but has no runnable queue
-and makes no policy decision.
+runnable. Multi-member evidence pins cycle-discovery grouping and per-member
+registration order, including a cancelled external waiter that is omitted. No
+terminal cycle member can appear in the returned wakeup list. The core returns
+the handles made runnable by a transition but has no runnable queue and makes no
+policy decision.
 
 Focused Alcotest and QCheck coverage pins the transition table, resume-token
 ownership, deterministic IDs, yield suspension/wakeup, multiple waiters,
 immediate terminal awaits, completion/failure/cancellation, self-await, closed
-two- and three-node cycles, external/cancelled waiter controls, a property that
+two- and three-node cycles, external/cancelled waiter controls, the complete
+public rejection table, identical back-to-back scenarios, a property that every
+observed lifecycle transition satisfies the frozen contract, a property that
 every returned wakeup is runnable with one resume, close cleanup, and
 foreign-handle diagnostics. The existing handler
 gauntlet and interpreter/native runtime suites continue to cover affine Once
@@ -196,6 +204,10 @@ suspended continuations to its caller, and `Structured_scope.deliver_cancel`
 passes every transferred token exactly once to its explicit destruction
 callback. Duplicate and terminal delivery transfer nothing, so cancellation
 never relies on garbage collection to discharge affine ownership.
+The registered-waiter regression additionally pins that cancellation returns
+waiters in registration order, transitions each waiter to `Runnable` with its
+resume owned again, and leaves the immutable `Cancelled` target result
+available to every subsequent await.
 
 `Structured_scope` applies that primitive before await registration, yield
 suspension, and a routed-effect action. A delivered await registers no waiter;
@@ -210,12 +222,18 @@ runnable target receives one idempotent request, while an await- or
 yield-suspended target is delivered immediately and its stored continuation is
 destroyed. Completed, failed, already-cancelled, and duplicate requests are
 deterministic no-ops. Self-cancel requests and delivers at the same routing
-point; no continuation is returned for a post-cancel user step.
+point; the second caller-boundary check exists for that case, and no
+continuation is returned for a post-cancel user step. An already-cancelled
+caller reaching another boundary destroys the newly supplied stale
+continuation and wakes nobody.
 
 Focused Alcotest coverage pins all three boundary classes, no-waiter/no-child
 preemption, routed-effect fault injection, duplicate/completed/self behavior,
-and the exact public handoff that destroys suspended resume token 21 once. It
-also pins the rule that a pre-cancelled caller does not request another target.
+the exact public handoff that destroys suspended resume token 21 once, and the
+stale already-cancelled boundary handoff. It also pins the rule that a
+pre-cancelled caller does not request another target, plus registered-waiter
+wake order, runnable/resume ownership, and repeated observation of the
+immutable `Cancelled` result.
 The bracket fixture records acquire, continuation destruction, and release in
 order and proves that no later user step executes. A 200-case QCheck property
 proves duplicate requests yield exactly one terminal delivery and one
@@ -262,9 +280,12 @@ sibling cancellation, mixed collect results, nested policies,
 failure-before-cancellation and cancellation-before-failure commitment, cleanup
 after a destruction-callback exception, and exact E0907/E0908 diagnostics. A
 200-case QCheck law permutes terminal observation order while proving collect
-output stays in input order. The `scope-policy.t` transcript runs the same
-decision trace twice, byte-compares it, and pins both aggregate renderings.
-These tests use no host clock, thread, scheduler queue, or root handler.
+output stays in input order. A second 200-case law generates mixed terminal
+results and decision permutations, then proves incremental fail-fast selection
+agrees exactly with the frozen `Concurrency_contract.first_failure` relation.
+The `scope-policy.t` transcript runs the same decision trace twice,
+byte-compares it, and pins both aggregate renderings. These tests use no host
+clock, thread, scheduler queue, or root handler.
 
 ## Deterministic round-robin interpreter
 
@@ -282,6 +303,10 @@ sub-scheduler resets ordering, counters, traces, or bounds. Spawn, await, yield,
 cancel, and every captured granted world operation route through
 `Structured_scope` before their action. Neither runnable discovery nor
 selection uses hash-table iteration, a host clock, a thread, or host randomness.
+The interpreted CLI automatically includes only the exact frozen `Async` effect
+in the scheduler grant set; users do not pass `--allow async`. Child world
+effects remain in the parent manifest and still need their ordinary explicit
+grants.
 
 Every scheduler invocation creates a fresh opaque Task owner, even on a reused
 evaluator context, and a private capability binds evaluator validation to the
@@ -308,8 +333,11 @@ cumulative nested task/decision bounds and live high-water accounting, E0907
 Task escape, exact bound diagnostics, zero post-close recursive metrics, and
 cache miss/hit equality, including an independent `max_decisions` miss. It also
 pins same-context stale-run rejection, hostile mutation of a suspended Once
-resume, real failing-child fail-fast/collect, and stable same-decision terminal
-ordinals. Its 128-case property changes the host random seed and
+resume, real failing-child fail-fast/collect, a fail-fast cancellation that
+requeues an awakened waiter, the integrated self-await deadlock refusal, and
+stable same-decision terminal ordinals. Checkout-bracket tests separately prove
+that normal, diagnostic, and host-exception exits restore an unsettled affine
+token before scope cleanup. Its 128-case property changes the host random seed and
 proves the same decisions and bytes as an unseeded rerun. The `round-robin.t`
 transcript repeats a fresh process 128 times, byte-compares every trace, pins the
 exact cross-scope trace and cumulative counters, runs real CLI Async programs,
@@ -428,7 +456,7 @@ opam exec -- dune build test/test_jacquard.exe
 )
 ```
 
-The compiled inventory is exactly 579 cases and the source inventory is 35
+The compiled inventory is exactly 652 cases and the source inventory is 38
 cram transcripts. `effect-taxonomy/2` is the independently selectable SC.13
 interface/trace/checklist proof; the five lifecycle suites execute exactly once
 during the full gate.
@@ -489,6 +517,9 @@ opam exec -- dune fmt --root "$dest"
 snapshot_source | cmp "$snapshot" -
 opam exec -- dune build @doc --root "$dest"
 ```
+
+Expected results are zero exits, 652 compiled Alcotest/QCheck cases, 38 cram
+transcripts, and 27 doctest examples across 8 documents.
 
 The default interpreted CLI, prelude-evaluation, and Warp Case paths use this
 scheduler. `async.scope` is a trusted internal term marker, not a fifth Async

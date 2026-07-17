@@ -156,6 +156,32 @@ let checkout scheduler handle =
           _ ) ->
           error "cannot check out a terminal task")
 
+let restore_checkout (entry : (_, _) entry) resume =
+  match (entry.lifecycle, entry.resume) with
+  | Concurrency_contract.Runnable, None -> entry.resume <- Some resume
+  | Concurrency_contract.Runnable, Some _
+  | Concurrency_contract.Suspended, Some _
+  | ( ( Concurrency_contract.Done_state | Concurrency_contract.Failed_state
+      | Concurrency_contract.Cancelled_state ),
+      None ) ->
+      ()
+  | Concurrency_contract.Suspended, None
+  | ( ( Concurrency_contract.Done_state | Concurrency_contract.Failed_state
+      | Concurrency_contract.Cancelled_state ),
+      Some _ ) ->
+      failwith "Bug_scheduler_core: checkout operation left invalid resume ownership"
+
+let with_checkout scheduler handle operation =
+  Result.bind (validate scheduler handle) (fun entry ->
+      Result.bind (checkout scheduler handle) (fun resume ->
+          match operation resume with
+          | (Ok _ | Error _) as result ->
+              restore_checkout entry resume;
+              result
+          | exception exn ->
+              restore_checkout entry resume;
+              raise exn))
+
 let ensure_checked_out (entry : (_, _) entry) =
   match (entry.lifecycle, entry.resume) with
   | Concurrency_contract.Runnable, None -> Ok ()

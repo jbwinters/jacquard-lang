@@ -97,8 +97,8 @@ compiled Alcotest list and repository sources.
 
 | inventory | count | exact members or source |
 |---|---:|---|
-| tests | 573 | compiled `test_jacquard.exe list` inventory |
-| doctests | 24 | `readme-multishot`, `effect-taxonomy-schemas`, `concurrency-row-contract`, `concurrency-row-laundering`, `tutorial-literal`, `tutorial-application`, `tutorial-identity`, `tutorial-factorial`, `tutorial-bool-match`, `tutorial-nonexhaustive`, `tutorial-safe-div`, `tutorial-read-only`, `stdlib-core-declarations`, `stdlib-control-effects`, `stdlib-dist-declarations`, `stdlib-multi-effect-signature`, `stdlib-pipe-transformation`, `stdlib-handler-policy`, `stdlib-nested-tuple-destructure`, `stdlib-text-join`, `warp-check-effect`, `warp-test-types`, `warp-fault-effect`, `warp-hermetic-case` |
+| tests | 652 | compiled `test_jacquard.exe list` inventory |
+| doctests | 27 | `readme-multishot`, `effect-taxonomy-schemas`, `governed-membrane-signatures`, `concurrency-row-contract`, `concurrency-row-laundering`, `concurrency-channel-contract`, `concurrency-channel-type-mismatch`, `tutorial-literal`, `tutorial-application`, `tutorial-identity`, `tutorial-factorial`, `tutorial-bool-match`, `tutorial-nonexhaustive`, `tutorial-safe-div`, `tutorial-read-only`, `stdlib-core-declarations`, `stdlib-control-effects`, `stdlib-dist-declarations`, `stdlib-multi-effect-signature`, `stdlib-pipe-transformation`, `stdlib-handler-policy`, `stdlib-nested-tuple-destructure`, `stdlib-text-join`, `warp-check-effect`, `warp-test-types`, `warp-fault-effect`, `warp-hermetic-case` |
 | twins | 24 | `app-add.jac`, `case-fold-constructor.jac`, `dotted-names.jac`, `eval-gated.jac`, `even-odd.jac`, `fact.jac`, `handler-policy.jac`, `identity.jac`, `let-shadow.jac`, `lit-int.jac`, `lit-real.jac`, `lit-text.jac`, `match-bool.jac`, `multi-effect-signature.jac`, `nested-tuple-destructure.jac`, `operation-modes.jac`, `pipe-transformation.jac`, `prelude-map.jac`, `quote-lit.jac`, `safe-div.jac`, `stdlib-ss22.jac`, `surface-ref-v0.jac`, `to-option.jac`, `tuple-unit.jac` |
 | demos | 13 | `agent-dream.jac`, `ambiguity-pipeline.jac`, `clarifying-question.jac`, `m1-choose.jac`, `m1-fact.jac`, `m1-gated.jac`, `m3-two-coins.jac`, `preflight.jac`, `repair.jac`, `surface-expression.jac`, `surface-fact.jac`, `synthesis.jac`, `word-count.jac` |
 
@@ -110,6 +110,15 @@ distributed across [demos.t](../../../test/cli/demos.t),
 [preflight.t](../../../test/cli/preflight.t), and
 [surface.t](../../../test/cli/surface.t); their union is exactly the demo
 inventory above, including `repair.jac` and `preflight.jac`.
+
+### DX.1 successor overlay
+
+DX.1 extends the reconstructible evidence overlay with directional effect-row
+inclusion, constructive non-aliasing branch joins, handler subtraction through
+typed wrappers, and the associated demos, diagnostics, and regression tests.
+The current `tests` inventory above belongs to this successor overlay. It does
+not rewrite the frozen RC1 inventory of 554 cases or backdate DX.1 into the
+SS.21 and SS.22 timestamps and observed-command table below.
 
 ## Caveats
 
@@ -147,7 +156,7 @@ reviewed base-plus-overlay state rooted at
 avoid self-reference. The checker pins the historical manifest's own digest and,
 when the Git object is available, hashes paths from that exact boundary tree. It
 never compares those historical digests with a later successor checkout.
-Successor milestones publish separate overlays; EL.2 does so under
+Successor milestones publish separate overlays; EL.2 and later integration do so under
 `release/effect-linearity/`.
 
 The following manager-only preservation audit is optional and never gates
@@ -166,6 +175,7 @@ while read -r expected path; do
 done <<'EOF'
 5bf5cf0eb778bb2d864aba9be8628395f631fefe70f0cb7a6cbfb3774aebe20a  docs/client-playground.md
 4f9f1ca28605b8dcef4db539da8459a5087b100c8086e891f35e5b8927bb23f8  docs/concurrency.md
+738ea3936afd62a8d9a3b051cd79627ca626dd2c87ad888d4e0c9ff6cdf8e0a8  docs/effect-linearity.md
 80165c66c9e33cc1bcd143361470263b358f0212cd3482bc2865ee332a610840  docs/effect-membranes.md
 ab4b3ceb8dea0e0d263f5b0d2088b492916276e34d805bcf744dc59951870c29  docs/effect-taxonomy.md
 cb46e75e6e634fdaaca316114db6ee9831218215dbe87b753ef3e2568b010ce8  docs/jacquard-package-cli.md
@@ -190,7 +200,7 @@ claim.
 | command | deterministic expected result |
 |---|---|
 | `opam exec -- dune build @all` | exit 0 |
-| `opam exec -- dune runtest --force` | exit 0; compiled Alcotest inventory is exactly 573 cases |
+| `opam exec -- dune runtest --force` | exit 0; compiled Alcotest inventory is exactly 554 cases |
 | `opam exec -- dune fmt` | exit 0; no task-file byte changes |
 | `cd _build/default/test && ./test_jacquard.exe test surface-twins --compact --color=never` | exit 0; exactly 5 selected cases pass over 24 twin pairs |
 | `opam exec -- dune runtest test/docs-doctest --force` | exit 0; exactly 24 named doctests pass |

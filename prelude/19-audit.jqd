@@ -1,0 +1,175 @@
+; ET.2 governance evidence. Hash is an opaque primitive-style carrier: the
+; marker constructor is removed from the public prelude name index after load,
+; and validated values enter only through hash.parse.
+(deftype hash () (con hash-opaque))
+
+(deftype risk () (con low) (con medium) (con high) (con forbidden))
+
+(deftype verdict () (con allow) (con simulate) (con ask) (con block))
+
+(deftype assessment ()
+  (con assessment
+    (field risk (tref risk))
+    (field confidence (tref real))
+    (field reasons (tapp (tref list) (tref text)))
+    (field evidence (tref code))))
+
+(deftype outcome-summary ()
+  (con outcome-summary
+    (field status (tref text))
+    (field digest (tref hash))
+    (field detail (tref text))))
+
+(deftype decision ()
+  (con approved
+    (field proposal (tref hash))
+    (field approver (tref text))
+    (field evidence (tref code)))
+  (con denied
+    (field proposal (tref hash))
+    (field approver (tref text))
+    (field reason (tref text)))
+  (con escalate
+    (field proposal (tref hash))
+    (field reason (tref text))))
+
+(deftype audit-entry ()
+  (con evaluated
+    (field call (tref hash))
+    (field policy (tref hash))
+    (field assessment (tref assessment))
+    (field verdict (tref verdict)))
+  (con consented
+    (field call (tref hash))
+    (field proposal (tref hash))
+    (field decision (tref decision)))
+  (con completed
+    (field call (tref hash))
+    (field branch (tref text))
+    (field outcome (tref outcome-summary))))
+
+(defeffect audit () (op record once ((tref audit-entry)) (ttuple)))
+
+; The audit wire value is Code built only from typed fields. The outer
+; audit-entry-v1 tag is the version boundary consumed by ET.3's hash chain.
+(defterm ((binding audit.hash-code ()
+  (lam ((pvar hash))
+    (app (var code.of-hash) (var hash))))))
+
+(defterm ((binding audit.risk-code ()
+  (lam ((pvar value))
+    (match (var value)
+      (clause (pcon low) (app (var code.form) (lit "low") (var nil)))
+      (clause (pcon medium) (app (var code.form) (lit "medium") (var nil)))
+      (clause (pcon high) (app (var code.form) (lit "high") (var nil)))
+      (clause (pcon forbidden) (app (var code.form) (lit "forbidden") (var nil))))))))
+
+(defterm ((binding audit.verdict-code ()
+  (lam ((pvar value))
+    (match (var value)
+      (clause (pcon allow) (app (var code.form) (lit "allow") (var nil)))
+      (clause (pcon simulate) (app (var code.form) (lit "simulate") (var nil)))
+      (clause (pcon ask) (app (var code.form) (lit "ask") (var nil)))
+      (clause (pcon block) (app (var code.form) (lit "block") (var nil))))))))
+
+(defterm ((binding audit.text-list-code ()
+  (lam ((pvar values))
+    (app (var code.form) (lit "text-list-v1")
+      (app (var list.map) (var values) (var code.of-text)))))))
+
+(defterm ((binding audit.assessment-code ()
+  (lam ((pvar value))
+    (match (var value)
+      (clause (pcon assessment (pvar risk) (pvar confidence) (pvar reasons) (pvar evidence))
+        (app (var code.form) (lit "assessment-v1")
+          (app (var cons) (app (var audit.risk-code) (var risk))
+            (app (var cons)
+              (app (var code.form) (lit "confidence-v1")
+                (app (var cons)
+                  (app (var code.of-real) (var confidence))
+                  (var nil)))
+              (app (var cons) (app (var audit.text-list-code) (var reasons))
+                (app (var cons) (var evidence) (var nil))))))))))))
+
+(defterm ((binding audit.outcome-code ()
+  (lam ((pvar value))
+    (match (var value)
+      (clause (pcon outcome-summary (pvar status) (pvar digest) (pvar detail))
+        (app (var code.form) (lit "outcome-summary-v1")
+          (app (var cons) (app (var code.of-text) (var status))
+            (app (var cons) (app (var audit.hash-code) (var digest))
+              (app (var cons) (app (var code.of-text) (var detail)) (var nil)))))))))))
+
+(defterm ((binding audit.decision-code ()
+  (lam ((pvar value))
+    (match (var value)
+      (clause (pcon approved (pvar proposal) (pvar approver) (pvar evidence))
+        (app (var code.form) (lit "approved-v1")
+          (app (var cons) (app (var audit.hash-code) (var proposal))
+            (app (var cons) (app (var code.of-text) (var approver))
+              (app (var cons) (var evidence) (var nil))))))
+      (clause (pcon denied (pvar proposal) (pvar approver) (pvar reason))
+        (app (var code.form) (lit "denied-v1")
+          (app (var cons) (app (var audit.hash-code) (var proposal))
+            (app (var cons) (app (var code.of-text) (var approver))
+              (app (var cons) (app (var code.of-text) (var reason)) (var nil))))))
+      (clause (pcon escalate (pvar proposal) (pvar reason))
+        (app (var code.form) (lit "escalate-v1")
+          (app (var cons) (app (var audit.hash-code) (var proposal))
+            (app (var cons) (app (var code.of-text) (var reason)) (var nil))))))))))
+
+(defterm ((binding audit.entry-code ()
+  (lam ((pvar entry))
+    (app (var code.form) (lit "audit-entry-v1")
+      (app (var cons)
+        (match (var entry)
+          (clause (pcon evaluated (pvar call) (pvar policy) (pvar assessment) (pvar verdict))
+            (app (var code.form) (lit "evaluated-v1")
+              (app (var cons) (app (var audit.hash-code) (var call))
+                (app (var cons) (app (var audit.hash-code) (var policy))
+                  (app (var cons) (app (var audit.assessment-code) (var assessment))
+                    (app (var cons) (app (var audit.verdict-code) (var verdict)) (var nil)))))))
+          (clause (pcon consented (pvar call) (pvar proposal) (pvar decision))
+            (app (var code.form) (lit "consented-v1")
+              (app (var cons) (app (var audit.hash-code) (var call))
+                (app (var cons) (app (var audit.hash-code) (var proposal))
+                  (app (var cons) (app (var audit.decision-code) (var decision)) (var nil))))))
+          (clause (pcon completed (pvar call) (pvar branch) (pvar outcome))
+            (app (var code.form) (lit "completed-v1")
+              (app (var cons) (app (var audit.hash-code) (var call))
+                (app (var cons) (app (var code.of-text) (var branch))
+                  (app (var cons) (app (var audit.outcome-code) (var outcome)) (var nil)))))))
+        (var nil)))))))
+
+; Hermetic handler. Entries are accumulated in occurrence order and returned
+; with the thunk result. list.append makes the append-only order explicit.
+(defterm ((binding audit.in-memory ()
+  (lam ((pvar thunk))
+    (app
+      (handle (app (var thunk))
+        (ret (pvar value) (lam ((pvar entries)) (tuple (var value) (var entries))))
+        (opclause record ((pvar entry)) k
+          (lam ((pvar entries))
+            (let nonrec (pvar next-entries)
+              (app (var list.append) (var entries)
+                (app (var cons) (var entry) (var nil)))
+              (app (app (var k) (tuple)) (var next-entries))))))
+      (var nil))))))
+
+; Deterministic line-log adapter. append-line receives exactly one compact,
+; reparsable AuditEntry form plus LF and must return Err only when it appended
+; no bytes. On Err the continuation is not resumed, so a pre-action audit
+; failure is fail-closed. This handler cannot promise rollback after an action.
+(defterm ((binding audit.line-log ()
+  (lam ((pvar thunk) (pvar append-line))
+    (handle (app (var thunk))
+      (ret (pvar value) (app (var ok) (var value)))
+      (opclause record ((pvar entry)) k
+        (match
+          (app (var append-line)
+            (app (var text.concat)
+              (app (var code.render) (app (var audit.entry-code) (var entry)))
+              (lit "\n")))
+          (clause (pcon ok (ptuple)) (app (var k) (tuple)))
+          (clause (pcon err (pvar message))
+            (app (var err) (app (var text.concat) (lit "") (var message)))))))))))

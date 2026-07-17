@@ -155,6 +155,14 @@ val task_escape_message : string
 (** [task_escape_message] is the stable diagnostic text for returning, storing beyond, or using a
     [Task] outside the scope that created it. *)
 
+val self_await_message : task_id -> string
+(** [self_await_message task] renders the frozen scheduler failure for a task awaiting itself. *)
+
+val wait_cycle_message : task_id list -> string
+(** [wait_cycle_message cycle] renders the frozen scheduler failure for a closed await cycle. The
+    caller supplies the cycle in deterministic traversal order, including the repeated closing task.
+*)
+
 type decision = { sequence : int; runnable : task_id list; chosen : task_id }
 (** A deterministic scheduler decision records its zero-based sequence, the exact FIFO runnable
     queue before selection, and the selected head. *)

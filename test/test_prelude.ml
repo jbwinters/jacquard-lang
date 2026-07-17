@@ -125,7 +125,7 @@ let test_reviewed_operation_modes store =
   in
   let declared = prelude_source_modes () |> List.map row |> List.sort String.compare in
   let frozen = reviewed |> List.map row |> List.sort String.compare in
-  Alcotest.(check int) "current prelude operation inventory size" 24 (List.length declared);
+  Alcotest.(check int) "current prelude operation inventory size" 28 (List.length declared);
   Alcotest.(check (list string))
     "every operation from every prelude DefEffect has an exact reviewed mode" declared frozen;
   test_retained_multi_hashes store;
@@ -191,15 +191,33 @@ let test_loads_with_zero_diagnostics () =
           | Error diagnostics -> Eval_support.fail_diags ("force prelude term " ^ name) diagnostics));
   let expected_world_handlers =
     [
-      ("infer.scripted", "forall a | e. (() ->{Infer, Throw | e} a, List Text) ->{Throw | e} a");
+      ("infer.scripted", "forall a | e. (() ->{Infer | e} a, List Text) ->{Throw | e} a");
       ("net.record", "forall a | e. (() ->{Net | e} a) ->{Net | e} (a, Code)");
-      ("test.replay", "forall a. (Code, () ->{Net, Throw} a) ->{Throw} a");
-      ("net.scripted", "forall a | e. (() ->{Net, Throw | e} a, List Response) ->{Throw | e} a");
-      ("console.scripted", "forall a | e. (() ->{Console, Throw | e} a, List Text) ->{Throw | e} a");
+      ("test.replay", "forall a. (Code, () ->{Net} a) ->{Throw} a");
+      ("net.scripted", "forall a | e. (() ->{Net | e} a, List Response) ->{Throw | e} a");
+      ("console.scripted", "forall a | e. (() ->{Console | e} a, List Text) ->{Throw | e} a");
       ( "fs.in-memory",
-        "forall a | e. (() ->{Fs, Throw | e} a, `type:map.t` Text Text) ->{Throw | e} (a, \
-         `type:map.t` Text Text)" );
-      ("test.replay-loose", "forall a. (Code, () ->{Net, Check, Throw} a) ->{Check, Throw} a");
+        "forall a | e. (() ->{Fs | e} a, `type:map.t` Text Text) ->{Throw | e} (a, `type:map.t` \
+         Text Text)" );
+      ("test.replay-loose", "forall a. (Code, () ->{Net} a) ->{Check, Throw} a");
+      ("audit.in-memory", "forall a | e. (() ->{Audit | e} a) ->{| e} (a, List AuditEntry)");
+      ( "audit.line-log",
+        "forall a | e. (() ->{Audit | e} a, (Text) ->{| e} Result Text ()) ->{| e} Result Text a" );
+      ("hash.parse", "(Text) ->{} Result Text Hash");
+      ("hash.to-text", "(Hash) ->{} Text");
+      ("code.of-hash", "(Hash) ->{} Code");
+      ("code.of-real", "(Real) ->{} Code");
+      ("code.render", "(Code) ->{} Text");
+      ("code.hash", "(Code) ->{} Hash");
+      ( "approval.make-proposal",
+        "(Hash, Hash, Hash, List Authority, Code, Text, Option OutcomeSummary) ->{} Proposal" );
+      ( "approval.before-action",
+        "forall a | e. (Proposal, Decision, () ->{| e} a) ->{| e} Result Text a" );
+      ("approval.console", "forall a | e. (() ->{Approval | e} a) ->{Console, Throw | e} a");
+      ("approval.scripted", "forall a | e. (() ->{Approval | e} a, List Decision) ->{Throw | e} a");
+      ("approval.dry-run", "forall a | e. (() ->{Approval | e} a) ->{Throw | e} a");
+      ( "approval.policy-auto",
+        "forall a | e. (() ->{Approval | e} a, (Proposal) ->{| e} Verdict) ->{Throw | e} a" );
     ]
   in
   List.iter
@@ -495,7 +513,11 @@ let test_handler_overrides_grant () =
   Alcotest.(check string) "handler swallowed the print" "" (Buffer.contents buf)
 
 (* Hostile host-value tests intentionally forge the private payload representation with [Obj.magic].
-   Ordinary library code cannot name [Task_handle.t], and Eval exposes no Task constructor. *)
+   Ordinary library code cannot name [Task_handle.t], and Eval exposes no Task constructor. This
+   helper depends on two private layouts: [ctx.task_run] is field 1 of the evaluation context, and
+   [Task_handle.t] is a three-field block ordered [(run, scope_path, spawn_index)]. Reordering
+   either representation requires updating this helper; otherwise it can forge the wrong value and
+   make these hostile-boundary tests pass or fail for accidental layout reasons. *)
 let foreign_task ~scope_path ~spawn_index =
   Value.VTask (Obj.magic (ref (), scope_path, spawn_index))
 

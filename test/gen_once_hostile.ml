@@ -44,14 +44,14 @@ let locate_operation store effect_name op_name =
           | None -> fail "missing operation %s.%s" effect_name op_name)
       | _ -> fail "%s is not a stored effect" effect_name)
 
-let app name args = Printf.sprintf "(app (var %s)%s)" name (String.concat "" args)
+let op_app name args = Printf.sprintf "(app (surface-ref-v0 op %s)%s)" name (String.concat "" args)
 let var name = " (var " ^ name ^ ")"
 
 let source op_name arity =
   let outer = List.init arity (fun index -> "a" ^ string_of_int index) in
   let inner = List.init arity (fun index -> "p" ^ string_of_int index) in
   let pats names = String.concat "" (List.map (fun name -> " (pvar " ^ name ^ ")") names) in
-  let recurse = app op_name (List.map var inner) in
+  let recurse = op_app op_name (List.map var inner) in
   Printf.sprintf
     "(lam (%s)\n\
     \  (handle %s\n\
@@ -60,7 +60,7 @@ let source op_name arity =
     \      (let nonrec (pwild) (app (var k) %s)\n\
     \        (app (var k) %s)))))\n"
     (pats outer)
-    (app op_name (List.map var outer))
+    (op_app op_name (List.map var outer))
     op_name (pats inner) recurse recurse
 
 let () =

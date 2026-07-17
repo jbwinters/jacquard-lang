@@ -96,6 +96,13 @@ val checkout : ('resume, 'value) t -> handle -> ('resume, Diag.t list) result
 (** [checkout] destructively transfers the sole resume token of a runnable task to its caller.
     Missing, suspended, terminal, or foreign tasks return diagnostics rather than raising. *)
 
+val with_checkout :
+  ('resume, 'value) t -> handle -> ('resume -> ('a, Diag.t list) result) -> ('a, Diag.t list) result
+(** [with_checkout scheduler handle operation] transfers the runnable task's token to [operation].
+    If [operation] returns or raises before settling that token through a scheduler transition,
+    ownership is restored before control leaves the bracket. A missing, suspended, terminal, or
+    foreign task returns the same diagnostics as {!checkout}. *)
+
 val suspend_yield : ('resume, 'value) t -> handle -> resume:'resume -> (unit, Diag.t list) result
 (** [suspend_yield] returns a checked-out token and transitions Runnable to Suspended/Yielded. *)
 

@@ -90,6 +90,8 @@
   (glob_files_rec ../corpus/*.jac)
   (source_tree ../corpus/valid)
   (source_tree ../corpus/surface)
+  ../corpus/governance/malformed-operation-names.tsv
+  ../corpus/governance/unresolved-operations.tsv
   (glob_files_rec ../corpus/*.expect)
   (glob_files_rec ../corpus/*.golden)
   (glob_files_rec ../prelude/*.jqd)
@@ -98,6 +100,8 @@
   (glob_files ../src/*.ml)
   (glob_files ../bin/*.ml)
   ../docs/errors.md
+  ../docs/effect-review.md
+  ../docs/effect-membranes.md
   ../docs/effect-taxonomy.md
   ../docs/concurrency.md
   ../docs/README.md
@@ -106,6 +110,9 @@
   ../docs/release/surface-syntax/MANIFEST.sha256
   ../docs/release/structured-concurrency/EVIDENCE.md
   ../docs/release/structured-concurrency/MANIFEST.sha256
+  ../docs/release/dx-jac-export/EVIDENCE.md
+  ../docs/release/governed-membranes/GM1-EVIDENCE.md
+  ../docs/release/governed-membranes/GM1-MANIFEST.sha256
   ../docs/stdlib.md
   ../docs/surface-syntax.md
   ../docs/tutorial.md
@@ -118,6 +125,8 @@
   docs-doctest/fixtures/concurrency-channel-contract.stdout
   docs-doctest/fixtures/concurrency-channel-type-mismatch.jac
   docs-doctest/fixtures/concurrency-channel-type-mismatch.stderr
+  docs-doctest/fixtures/governed-membrane-signatures.jac
+  docs-doctest/fixtures/governed-membrane-signatures.stdout
   docs-doctest/fixtures/concurrency-row-contract.jac
   docs-doctest/fixtures/concurrency-row-laundering.jac
   docs-doctest/fixtures/stdlib-handler-policy.jac

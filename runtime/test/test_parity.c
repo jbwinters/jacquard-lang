@@ -72,6 +72,10 @@ static void mode_show(void) {
   jq_value nul = jq_text((const uint8_t *)"nul\0mid", 7);
   show_line(nul);
   jq_drop(nul);
+  jq_value secret =
+      jq_secret((const uint8_t *)"ET4-native-parity-fixture", 25);
+  show_line(secret);
+  jq_drop(secret);
   /* tuples */
   show_line(JQ_UNIT);
   jq_value t1 = jq_tuple(1, (jq_value[]){ jq_int(1) });

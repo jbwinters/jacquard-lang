@@ -1,45 +1,27 @@
-type Hash = | HashValue(value: Text)
-type Authority =
-  | Effect(name: Text)
-  | Resource(effect-name: Text, scope: Text)
-type OutcomeSummary = | OutcomeSummary(status: Text, digest: Hash, detail: Text)
-type Proposal =
-  | Proposal(
-      subject: Hash,
-      policy: Hash,
-      assessment: Hash,
-      summary: Text,
-      authority: List Authority,
-      preview: Option OutcomeSummary)
-type Decision =
-  | Approved(proposal: Hash, approver: Text, evidence: Code)
-  | Denied(proposal: Hash, approver: Text, reason: Text)
-  | Escalate(proposal: Hash, reason: Text)
+parsed-hashes = (
+  hash.parse("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+  hash.parse("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+  hash.parse("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"))
 
-once effect Approval where {
-  approval.ask : (Proposal) -> Decision
+match parsed-hashes {
+  | (Ok(subject-hash), Ok(policy-hash), Ok(assessment-hash)) -> {
+      let proposal-value = approval.make-proposal(
+        subject-hash,
+        policy-hash,
+        assessment-hash,
+        [],
+        quote { "ship" },
+        "ship?",
+        None)
+      let proposal-hash = approval.proposal-id(proposal-value)
+      throw.catch(
+        fn () -> approval.dry-run(fn () -> match `op:ask`(proposal-value) {
+	  | Escalate(returned, _) ->
+		  if code.eq?(code.of-hash(returned), code.of-hash(proposal-hash)) then 42 else 0
+	  | Approved(_, _, _) -> 0
+	  | Denied(_, _, _) -> 0
+        }),
+        fn (message) -> 0)
+    }
+  | _ -> 0
 }
-
-dry-run-with-proposal(proposal-hash, workflow) =
-  handle workflow() {
-    | return result -> Some(result)
-    | approval.ask(request) resume continue ->
-        continue(Escalate(proposal-hash, "dry-run cannot consent"))
-  }
-
-proposal-hash = HashValue("proposal-v1")
-proposal =
-  Proposal(
-    HashValue("subject"),
-    HashValue("policy"),
-    HashValue("assessment"),
-    "ship?",
-    [],
-    None)
-
-dry-run-with-proposal(proposal-hash, fn () -> match approval.ask(proposal) {
-  | Escalate(HashValue("proposal-v1"), _) -> 42
-  | Escalate(_, _) -> 0
-  | Approved(_, _, _) -> 0
-  | Denied(_, _, _) -> 0
-})

@@ -143,6 +143,46 @@ let test_bracket_cleans_normal_abort_and_exception () =
     |> error_code);
   check_zero_metrics "escaping bracket" escaping
 
+let test_checkout_bracket_restores_error_and_exception () =
+  let returned, body = Structured_scope.create ~body_resume:40 |> ok in
+  Alcotest.(check int)
+    "unsettled checkout result is preserved" 40
+    (Structured_scope.with_checkout returned body (fun resume -> Ok resume) |> ok);
+  Alcotest.(check bool)
+    "normal return restores unsettled ownership" true
+    (Structured_scope.inspect returned body |> ok).owns_resume;
+  Structured_scope.close returned ~reason:Structured_scope.Normal ~escaping:[] ~drop:ignore |> ok;
+  check_zero_metrics "checkout normal return" returned;
+  let aborted, body = Structured_scope.create ~body_resume:41 |> ok in
+  Alcotest.(check string)
+    "checkout error is preserved" "E9998"
+    (Structured_scope.with_checkout aborted body (fun _ -> Error [ abort_diagnostic ]) |> error_code);
+  Alcotest.(check bool)
+    "checkout error restores scheduler ownership" true
+    (Structured_scope.inspect aborted body |> ok).owns_resume;
+  let dropped = ref [] in
+  Structured_scope.close aborted ~reason:Structured_scope.Aborted ~escaping:[] ~drop:(fun resume ->
+      dropped := resume :: !dropped)
+  |> ok;
+  Alcotest.(check (list int)) "restored error token is dropped" [ 41 ] !dropped;
+  check_zero_metrics "checkout error" aborted;
+  let raised, body = Structured_scope.create ~body_resume:42 |> ok in
+  (match
+     Structured_scope.with_checkout raised body (fun _ -> raise (Failure "checkout host abort"))
+   with
+  | exception Failure message when String.equal message "checkout host abort" -> ()
+  | exception exn -> Alcotest.failf "wrong checkout exception: %s" (Printexc.to_string exn)
+  | Ok _ | Error _ -> Alcotest.fail "checkout host exception was swallowed");
+  Alcotest.(check bool)
+    "checkout exception restores scheduler ownership" true
+    (Structured_scope.inspect raised body |> ok).owns_resume;
+  let dropped = ref [] in
+  Structured_scope.close raised ~reason:Structured_scope.Raised ~escaping:[] ~drop:(fun resume ->
+      dropped := resume :: !dropped)
+  |> ok;
+  Alcotest.(check (list int)) "restored exception token is dropped" [ 42 ] !dropped;
+  check_zero_metrics "checkout exception" raised
+
 let hostile_task_for_ctx ctx ~scope_path ~spawn_index =
   let payload = Obj.new_block 0 3 in
   Obj.set_field payload 0 (Obj.field (Obj.repr ctx) 1);
@@ -204,6 +244,7 @@ let run () =
   test_nested_lineage_and_recursive_cleanup ();
   test_returned_stored_and_ancestor_handles ();
   test_bracket_cleans_normal_abort_and_exception ();
+  test_checkout_bracket_restores_error_and_exception ();
   test_dynamic_escape_graph_scan ();
   QCheck.Test.check_exn prop_recursive_close_restores_baseline
 

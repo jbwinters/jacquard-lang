@@ -4,7 +4,7 @@
 
 (defterm ((binding run-gate ()
   (lam ((pvar n))
-    (handle (app (var some) (app (var add) (lit 1) (app (var ask) (var n))))
+    (handle (app (var some) (app (var add) (lit 1) (app (surface-ref-v0 op ask) (var n))))
       (ret (pvar x) (var x))
       (opclause ask ((pvar v)) k
         (match (app (var lt) (var v) (lit 100))
