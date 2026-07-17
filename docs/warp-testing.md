@@ -140,6 +140,7 @@ Jacquard source.
 ```console
 jacquard test                      -- sampling handler: N random cases, seeded
 jacquard test --exhaustive         -- enumeration handler: every case, budget-bounded
+jacquard test --schedules 100 --seed 42  -- reproducible Async interleavings for Cases
 ```
 
 Under sampling it is QuickCheck. Under enumeration, for generators with small
@@ -147,6 +148,14 @@ finite support, the identical property becomes a proof over the whole scope, and
 the runner reports "verified exhaustively (128 cases)" instead of "100 samples
 passed". Small-scope exhaustiveness stops being a separate tool with separate
 generators; it is a flag.
+
+The schedule lane is separate from property-data sampling. It reruns each
+hermetic Case under SplitMix64 choices from the exact runnable queue. The root
+seed is mixed with the Case's Merkle member hash and display path, so another
+test being added, removed, or served from cache does not move its stream. A
+failure prints the child decision seed, exact rerun command, and canonical
+versioned schedule log. `--schedules` requires a positive count and an explicit
+`--seed`; it never consults host randomness.
 
 ### Shrinking without shrinkers
 
@@ -211,6 +220,7 @@ below define cache keys mathematically and are not Jacquard expressions.
 ```text
 memo key (Test)      = the test's own hash
 memo key (Prop)      = (hash, mode, samples, seed)
+memo key (scheduled Test) = (hash, scheduler-version, schedules, seed)
 WorldTest            = never cached
 ```
 

@@ -1,5 +1,9 @@
 type mode =
   | Record
+  | Record_with of
+      (sequence:int ->
+      runnable:Concurrency_contract.task_id list ->
+      (Concurrency_contract.task_id, Diag.t list) result)
   | Replay of Schedule_trace.t
   | Fork of { trace : Schedule_trace.t; decision : int; chosen : Concurrency_contract.task_id }
 
@@ -25,6 +29,7 @@ type current = {
 }
 
 type t = {
+  mode : mode;
   scheduler : string;
   program : Hash.t;
   policy : Concurrency_contract.failure_policy;
@@ -89,7 +94,7 @@ let create ~scheduler ~program ~policy ~max_tasks ~max_decisions mode =
   let ( let* ) = Result.bind in
   let* replay, provenance =
     match mode with
-    | Record -> Ok (Recording, None)
+    | Record | Record_with _ -> Ok (Recording, None)
     | Replay trace ->
         let* trace = validate_trace trace in
         let* () = check_header ~scheduler ~program ~policy ~max_tasks ~max_decisions trace in
@@ -105,6 +110,7 @@ let create ~scheduler ~program ~policy ~max_tasks ~max_decisions mode =
   in
   Ok
     {
+      mode;
       scheduler;
       program;
       policy;
@@ -185,9 +191,14 @@ let begin_decision controller ~sequence ~runnable =
     let* chosen, expected_operation =
       match controller.replay with
       | Recording -> (
-          match runnable with
-          | chosen :: _ -> Ok (chosen, None)
-          | [] -> error "cannot choose from an empty runnable queue")
+          match controller.mode with
+          | Record -> (
+              match runnable with
+              | chosen :: _ -> Ok (chosen, None)
+              | [] -> error "cannot choose from an empty runnable queue")
+          | Record_with choose ->
+              Result.map (fun chosen -> (chosen, None)) (choose ~sequence ~runnable)
+          | Replay _ | Fork _ -> assert false)
       | Strict state ->
           let* expected = recorded_decision state sequence runnable in
           Ok (expected.chosen, Some expected.operation)

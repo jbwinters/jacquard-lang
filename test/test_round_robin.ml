@@ -517,6 +517,38 @@ let test_schedule_record_replay_drift_and_fork () =
     (Schedule_trace.serialize forked.schedule)
     (Schedule_trace.serialize fork_replay.schedule)
 
+let test_seeded_schedule_is_reproducible_and_replayable () =
+  let store, ctx = Eval_support.make_prelude_ctx () in
+  let expr = expression store mixed_source in
+  let run seed =
+    Round_robin.run_expr_scheduled ctx ~policy:Concurrency_contract.Collect
+      ~mode:(Round_robin.Seeded_schedule { seed })
+      expr
+    |> scheduled_ok
+  in
+  Random.init 17;
+  let first = run 912_345 in
+  Random.init 99;
+  let same = run 912_345 in
+  let different = run 912_346 in
+  let first_bytes = Schedule_trace.serialize first.schedule in
+  Alcotest.(check string)
+    "same seed ignores host Random state" first_bytes
+    (Schedule_trace.serialize same.schedule);
+  Alcotest.(check string)
+    "seeded scheduler identity" Round_robin.seeded_scheduler_version first.schedule.scheduler;
+  Alcotest.(check bool)
+    "nearby seeds can select another interleaving" true
+    (not (String.equal first_bytes (Schedule_trace.serialize different.schedule)));
+  let replayed =
+    Round_robin.run_expr_scheduled ctx ~policy:Concurrency_contract.Collect
+      ~mode:(Round_robin.Replay_schedule first.schedule) expr
+    |> scheduled_ok
+  in
+  Alcotest.(check string)
+    "printed seeded log strictly replays" first_bytes
+    (Schedule_trace.serialize replayed.schedule)
+
 let test_creation_and_world_operation_drift_preempt_actions () =
   let store, ctx = Eval_support.make_prelude_ctx () in
   let nested_expr =
@@ -618,6 +650,7 @@ let run () =
   test_multiple_waiters_nested_escape_and_bounds ();
   test_global_nested_fifo_and_bounds ();
   test_schedule_record_replay_drift_and_fork ();
+  test_seeded_schedule_is_reproducible_and_replayable ();
   test_creation_and_world_operation_drift_preempt_actions ();
   QCheck.Test.check_exn prop_128_exact_real_eval_traces
 

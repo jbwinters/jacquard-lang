@@ -8,6 +8,9 @@
 val scheduler_version : string
 (** Stable cache-identity component for this scheduler semantics. *)
 
+val seeded_scheduler_version : string
+(** Stable cache-identity component for the SplitMix64 decision policy. *)
+
 type bounds = { max_tasks : int; max_decisions : int }
 (** Positive deterministic refusal bounds. *)
 
@@ -15,16 +18,18 @@ val default_bounds : bounds
 
 type schedule_mode =
   | Record_schedule
+  | Seeded_schedule of { seed : int }
   | Replay_schedule of Schedule_trace.t
   | Fork_schedule of {
       trace : Schedule_trace.t;
       decision : int;
       chosen : Concurrency_contract.task_id;
     }
-      (** Explicit schedule handling. Strict replay never falls back. A fork validates the source
-          trace through decision [decision - 1], validates that decision's exact queue, selects
-          [chosen] only if it is runnable, and records the resulting FIFO branch with fork
-          provenance. *)
+      (** Explicit schedule handling. [Seeded_schedule] chooses only from the recorded runnable
+          queue with the existing SplitMix64 policy and never consults host randomness. Strict
+          replay never falls back. A fork validates the source trace through decision
+          [decision - 1], validates that decision's exact queue, selects [chosen] only if it is
+          runnable, and records the resulting FIFO branch with fork provenance. *)
 
 type outcome = {
   body : Value.t Concurrency_contract.task_result;
@@ -43,6 +48,15 @@ type outcome = {
 type scheduled = { value : Value.t; outcome : outcome; schedule : Schedule_trace.t }
 (** Successful scheduled execution plus its complete freshly recorded canonical trace. Strict replay
     therefore exposes byte-for-byte comparison without retaining a prior runtime value. *)
+
+type recorded_call = {
+  result : (Value.t, Runtime_err.t) result;
+  outcome : outcome;
+  schedule : Schedule_trace.t;
+}
+(** A completed scheduled callable run. Runtime failures remain in [result] while [schedule] retains
+    the exact decisions that reached them. Structural scheduler failures still return from the outer
+    result because they cannot claim a complete replayable trace. *)
 
 val run_state :
   Eval.ctx ->
@@ -83,6 +97,30 @@ val run_call :
   Value.t list ->
   (Value.t, Runtime_err.t) result
 (** [run_call] is the corresponding scheduled entry for an already evaluated callable. *)
+
+val run_call_scheduled :
+  Eval.ctx ->
+  ?policy:Concurrency_contract.failure_policy ->
+  ?bounds:bounds ->
+  program:Hash.t ->
+  mode:schedule_mode ->
+  Value.t ->
+  Value.t list ->
+  (scheduled, Runtime_err.t) result
+(** [run_call_scheduled] runs a callable under an explicit scheduler policy. [program] is the
+    canonical test/program identity written into the replayable schedule header. *)
+
+val run_call_recorded :
+  Eval.ctx ->
+  ?policy:Concurrency_contract.failure_policy ->
+  ?bounds:bounds ->
+  program:Hash.t ->
+  mode:schedule_mode ->
+  Value.t ->
+  Value.t list ->
+  (recorded_call, Runtime_err.t) result
+(** [run_call_recorded] is the evidence-preserving form of [run_call_scheduled]: a language runtime
+    failure does not discard the complete canonical schedule that produced it. *)
 
 type cache
 type cache_status = Hit | Miss

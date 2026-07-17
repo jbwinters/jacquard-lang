@@ -343,13 +343,13 @@ let run_cmd file allows prelude store_dir seed infer_cache origin dry_run schedu
                                   match requested_mode with
                                   | Some mode ->
                                       Result.map
-                                        (fun scheduled ->
+                                        (fun (scheduled : Round_robin.scheduled) ->
                                           completed_schedule := Some scheduled.Round_robin.schedule;
                                           scheduled.value)
                                         (Round_robin.run_expr_scheduled ctx ~mode e)
                                   | None when Option.is_some schedule_record ->
                                       Result.map
-                                        (fun scheduled ->
+                                        (fun (scheduled : Round_robin.scheduled) ->
                                           completed_schedule := Some scheduled.Round_robin.schedule;
                                           scheduled.value)
                                         (Round_robin.run_expr_scheduled ctx
@@ -1091,156 +1091,196 @@ let replay_cmd log_file program forks to_n compare prelude =
 
 (* --- test (Warp W6.2/W6.3/W6.8) --- *)
 
-let test_cmd files allows prelude cache_dir no_cache coverage seed samples exhaustive budget =
-  match open_ctx ~prelude ~store_dir:None with
-  | Error ds -> print_diags ds
-  | Ok (store, ctx) -> (
-      let seed =
-        match seed with
-        | Some s -> s
-        | None ->
-            Random.self_init ();
-            Random.bits ()
-      in
-      let prop_mode =
-        if exhaustive then Warp.Exhaustive { budget } else Warp.Sampling { seed; samples }
-      in
-      let rec grant_all = function
-        | [] -> Ok ()
-        | a :: rest -> (
-            match Prelude.grant ctx a ~infer_cache:None ~out:print_string ~seed with
-            | Ok () -> grant_all rest
-            | Error ds -> Error ds)
-      in
-      match grant_all allows with
+let test_cmd files allows prelude cache_dir no_cache coverage seed samples exhaustive budget
+    schedules =
+  let configuration =
+    match (schedules, seed) with
+    | Some count, _ when count <= 0 ->
+        Error
+          [
+            Diag.error ~code:"E0908" ~hint:"pass --schedules N with N greater than zero"
+              "--schedules must be positive";
+          ]
+    | Some _, None ->
+        Error
+          [
+            Diag.error ~code:"E0908" ~hint:"add an explicit --seed S"
+              "--schedules requires --seed so every interleaving is reproducible";
+          ]
+    | Some schedules, Some seed ->
+        let command =
+          String.concat " "
+            ([ "jacquard"; "test" ] @ List.map Filename.quote files
+            @ [
+                "--prelude";
+                Filename.quote (prelude_dir_of prelude);
+                "--schedules";
+                string_of_int schedules;
+                "--seed";
+                string_of_int seed;
+                "--no-cache";
+              ])
+        in
+        Ok (seed, Warp.Seeded_schedules { seed; schedules; replay_command = command })
+    | None, seed ->
+        let seed =
+          match seed with
+          | Some seed -> seed
+          | None ->
+              Random.self_init ();
+              Random.bits ()
+        in
+        Ok (seed, Warp.Default_schedule)
+  in
+  match configuration with
+  | Error diagnostics -> print_diags diagnostics
+  | Ok (seed, schedule_plan) -> (
+      match open_ctx ~prelude ~store_dir:None with
       | Error ds -> print_diags ds
-      | Ok () -> (
-          (* test files are declarations only: a top-level expression is a mistake *)
-          let loaded = ref [] in
-          let load_file file =
-            match
-              parse_tops ~syntax:Auto ~names:(Store.names_view store) ~file (read_file file)
-            with
-            | Error ds -> Error ds
-            | Ok (tops, warnings) ->
-                print_warnings warnings;
-                let rec go = function
-                  | [] -> Ok ()
-                  | parsed :: rest -> (
-                      match validate_parsed_top parsed with
-                      | Error ds -> Error ds
-                      | Ok (Kernel.Expr _) ->
-                          Error
-                            [
-                              Diag.error ~code:"E1001"
-                                (Printf.sprintf
-                                   "%s: test files hold declarations only; found a top-level \
-                                    expression"
-                                   file);
-                            ]
-                      | Ok (Kernel.Decl d) -> (
-                          match Resolve.resolve_decl (Store.names_view store) d with
-                          | Error ds -> Error ds
-                          | Ok d -> (
-                              match Store.put_decl store d with
-                              | Error ds -> Error ds
-                              | Ok _ ->
-                                  loaded := d :: !loaded;
-                                  go rest)))
-                in
-                go tops
+      | Ok (store, ctx) -> (
+          let prop_mode =
+            if exhaustive then Warp.Exhaustive { budget } else Warp.Sampling { seed; samples }
           in
-          let rec load_all = function
+          let rec grant_all = function
             | [] -> Ok ()
-            | f :: rest -> ( match load_file f with Ok () -> load_all rest | e -> e)
+            | a :: rest -> (
+                match Prelude.grant ctx a ~infer_cache:None ~out:print_string ~seed with
+                | Ok () -> grant_all rest
+                | Error ds -> Error ds)
           in
-          match load_all files with
+          match grant_all allows with
           | Error ds -> print_diags ds
           | Ok () -> (
-              match make_checker store with
+              (* test files are declarations only: a top-level expression is a mistake *)
+              let loaded = ref [] in
+              let load_file file =
+                match
+                  parse_tops ~syntax:Auto ~names:(Store.names_view store) ~file (read_file file)
+                with
+                | Error ds -> Error ds
+                | Ok (tops, warnings) ->
+                    print_warnings warnings;
+                    let rec go = function
+                      | [] -> Ok ()
+                      | parsed :: rest -> (
+                          match validate_parsed_top parsed with
+                          | Error ds -> Error ds
+                          | Ok (Kernel.Expr _) ->
+                              Error
+                                [
+                                  Diag.error ~code:"E1001"
+                                    (Printf.sprintf
+                                       "%s: test files hold declarations only; found a top-level \
+                                        expression"
+                                       file);
+                                ]
+                          | Ok (Kernel.Decl d) -> (
+                              match Resolve.resolve_decl (Store.names_view store) d with
+                              | Error ds -> Error ds
+                              | Ok d -> (
+                                  match Store.put_decl store d with
+                                  | Error ds -> Error ds
+                                  | Ok _ ->
+                                      loaded := d :: !loaded;
+                                      go rest)))
+                    in
+                    go tops
+              in
+              let rec load_all = function
+                | [] -> Ok ()
+                | f :: rest -> ( match load_file f with Ok () -> load_all rest | e -> e)
+              in
+              match load_all files with
               | Error ds -> print_diags ds
-              | Ok cctx -> (
-                  (* an ill-typed test must FAIL the run, not silently vanish from
-                     discovery (review finding: false green) *)
-                  let rec check_loaded = function
-                    | [] -> Ok ()
-                    | d :: rest -> (
-                        match Check.check_top cctx (Kernel.Decl d) with
-                        | Error ds -> Error ds
-                        | Ok { Check.warnings; _ } ->
-                            List.iter (fun w -> prerr_endline (Diag.to_string w)) warnings;
-                            check_loaded rest)
-                  in
-                  match check_loaded (List.rev !loaded) with
+              | Ok () -> (
+                  match make_checker store with
                   | Error ds -> print_diags ds
-                  | Ok () -> (
-                      match Store.lookup_kind store "test.run" Resolve.KTerm with
-                      | None -> print_diags [ Diag.error ~code:"E0702" "prelude has no test.run" ]
-                      | Some { Resolve.hash = tr; _ } -> (
-                          match Warp.value_of ctx tr with
-                          | Error e ->
-                              prerr_endline (Runtime_err.to_string e);
-                              exit_runtime
-                          | Ok test_run -> (
-                              let discovered = Warp.discover store cctx in
-                              let test_hashes =
-                                List.map
-                                  (function Warp.Hermetic (_, h) | Warp.World (_, h) -> h)
-                                  discovered
-                              in
-                              let granted = granted_hashes store allows in
-                              let cache_dir =
-                                if no_cache then None
-                                else Some (Option.value cache_dir ~default:"test-cache")
-                              in
-                              let totals =
-                                {
-                                  Warp.passed = 0;
-                                  failed = 0;
-                                  skipped = 0;
-                                  refused = 0;
-                                  hits = 0;
-                                  ran = 0;
-                                }
-                              in
-                              let union = Hashtbl.create 64 in
-                              let rec go = function
-                                | [] -> Ok ()
-                                | d :: rest -> (
-                                    match
-                                      Warp.run_discovered ctx cctx ~test_run ~prop_mode ~cache_dir
-                                        ~granted d
-                                    with
-                                    | Error e -> Error e
-                                    | Ok outcomes ->
-                                        List.iter
-                                          (fun (o : Warp.outcome) ->
-                                            List.iter
-                                              (fun h -> Hashtbl.replace union h ())
-                                              o.Warp.coverage;
-                                            List.iter print_endline (Warp.render_outcome totals o))
-                                          outcomes;
-                                        go rest)
-                              in
-                              match go discovered with
+                  | Ok cctx -> (
+                      (* an ill-typed test must FAIL the run, not silently vanish from
+                     discovery (review finding: false green) *)
+                      let rec check_loaded = function
+                        | [] -> Ok ()
+                        | d :: rest -> (
+                            match Check.check_top cctx (Kernel.Decl d) with
+                            | Error ds -> Error ds
+                            | Ok { Check.warnings; _ } ->
+                                List.iter (fun w -> prerr_endline (Diag.to_string w)) warnings;
+                                check_loaded rest)
+                      in
+                      match check_loaded (List.rev !loaded) with
+                      | Error ds -> print_diags ds
+                      | Ok () -> (
+                          match Store.lookup_kind store "test.run" Resolve.KTerm with
+                          | None ->
+                              print_diags [ Diag.error ~code:"E0702" "prelude has no test.run" ]
+                          | Some { Resolve.hash = tr; _ } -> (
+                              match Warp.value_of ctx tr with
                               | Error e ->
-                                  prerr_endline ("test runner error: " ^ e);
+                                  prerr_endline (Runtime_err.to_string e);
                                   exit_runtime
-                              | Ok () ->
-                                  Printf.printf "%d passed, %d failed, %d skipped, %d refused\n"
-                                    totals.Warp.passed totals.Warp.failed totals.Warp.skipped
-                                    totals.Warp.refused;
-                                  if cache_dir <> None then
-                                    Printf.printf "cache: %d hit, %d ran\n" totals.Warp.hits
-                                      totals.Warp.ran;
-                                  (if coverage then
-                                     let rings =
-                                       Warp.parse_rings
-                                         (Filename.concat (prelude_dir_of prelude) "rings.manifest")
-                                     in
-                                     List.iter print_endline
-                                       (Warp.coverage_report store ~rings ~tests:test_hashes union));
-                                  if totals.Warp.failed > 0 then exit_diags else ok)))))))
+                              | Ok test_run -> (
+                                  let discovered = Warp.discover store cctx in
+                                  let test_hashes =
+                                    List.map
+                                      (function Warp.Hermetic (_, h) | Warp.World (_, h) -> h)
+                                      discovered
+                                  in
+                                  let granted = granted_hashes store allows in
+                                  let cache_dir =
+                                    if no_cache then None
+                                    else Some (Option.value cache_dir ~default:"test-cache")
+                                  in
+                                  let totals =
+                                    {
+                                      Warp.passed = 0;
+                                      failed = 0;
+                                      skipped = 0;
+                                      refused = 0;
+                                      hits = 0;
+                                      ran = 0;
+                                    }
+                                  in
+                                  let union = Hashtbl.create 64 in
+                                  let rec go = function
+                                    | [] -> Ok ()
+                                    | d :: rest -> (
+                                        match
+                                          Warp.run_discovered ctx cctx ~test_run ~prop_mode
+                                            ~schedule_plan ~cache_dir ~granted d
+                                        with
+                                        | Error e -> Error e
+                                        | Ok outcomes ->
+                                            List.iter
+                                              (fun (o : Warp.outcome) ->
+                                                List.iter
+                                                  (fun h -> Hashtbl.replace union h ())
+                                                  o.Warp.coverage;
+                                                List.iter print_endline
+                                                  (Warp.render_outcome totals o))
+                                              outcomes;
+                                            go rest)
+                                  in
+                                  match go discovered with
+                                  | Error e ->
+                                      prerr_endline ("test runner error: " ^ e);
+                                      exit_runtime
+                                  | Ok () ->
+                                      Printf.printf "%d passed, %d failed, %d skipped, %d refused\n"
+                                        totals.Warp.passed totals.Warp.failed totals.Warp.skipped
+                                        totals.Warp.refused;
+                                      if cache_dir <> None then
+                                        Printf.printf "cache: %d hit, %d ran\n" totals.Warp.hits
+                                          totals.Warp.ran;
+                                      (if coverage then
+                                         let rings =
+                                           Warp.parse_rings
+                                             (Filename.concat (prelude_dir_of prelude)
+                                                "rings.manifest")
+                                         in
+                                         List.iter print_endline
+                                           (Warp.coverage_report store ~rings ~tests:test_hashes
+                                              union));
+                                      if totals.Warp.failed > 0 then exit_diags else ok))))))))
 
 type diff_operand = Source_file | Store_dir | Missing | Unsupported
 
@@ -1758,6 +1798,15 @@ let budget_arg =
           "Exploration budget for exhaustive verification (default 10000); exceeding it is a clean \
            refusal, never a partial pass.")
 
+let schedules_arg =
+  Arg.(
+    value
+    & opt (some int) None
+    & info [ "schedules" ] ~docv:"N"
+        ~doc:
+          "Run each hermetic Case under N SplitMix64 scheduler interleavings. Requires --seed; a \
+           failure prints its decision seed and canonical replay log.")
+
 let test_t =
   Cmd.v
     (Cmd.info "test"
@@ -1766,7 +1815,7 @@ let test_t =
           test.run, the world lane behind --allow grants.")
     Term.(
       const test_cmd $ test_files_arg $ allows_arg $ prelude_arg $ cache_dir_arg $ no_cache_arg
-      $ coverage_arg $ seed_arg $ samples_arg $ exhaustive_arg $ budget_arg)
+      $ coverage_arg $ seed_arg $ samples_arg $ exhaustive_arg $ budget_arg $ schedules_arg)
 
 (* --- tiers (PF.2 phase 1) --- *)
 

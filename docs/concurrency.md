@@ -1,14 +1,15 @@
 # Structured Concurrency Contract
 
-Status: SC.10 versioned scheduler traces and strict replay over SC.9
-fail-fast/collect scope policies, SC.7 cooperative cancellation, SC.6
-structured-scope ownership, the SC.5
+Status: SC.11 seeded randomized schedule testing over SC.10 versioned
+scheduler traces and strict replay over SC.9 fail-fast/collect scope policies,
+SC.7 cooperative cancellation, SC.6 structured-scope ownership, the SC.5
 policy-independent lifecycle core, and the SC.4 generalized child-effect law
 (D46-D50), July 2026. This document is authoritative for C1's static
 non-laundering law, lifecycle and nested ownership, cancellation delivery, and
-homogeneous scope aggregation. The default CLI, prelude-evaluation, and Warp
-Case paths now drive real evaluator states and affine continuations through the
-deterministic Async scheduler. Native root scheduling remains unsupported.
+homogeneous scope aggregation, plus C2's record/replay and seeded decision
+policies. The default CLI, prelude-evaluation, and Warp Case paths drive real
+evaluator states and affine continuations through the Async scheduler. Native
+root scheduling remains unsupported.
 
 Structured concurrency is an effect interpreted by a scheduler handler. The
 same program can therefore run under deterministic, seeded-random, exhaustive,
@@ -389,10 +390,11 @@ D46 fixes the default scheduler to FIFO round-robin over the runnable queue:
    completion order. Multiple terminals discovered by one step use the stable
    sub-observation ordinal after that step's D46 decision number.
 
-The host scheduler is never consulted by this default. Seeded-random,
-Choose-driven exhaustive, and host scheduling remain later handlers over the
-same decision boundary. SC.10 record/replay validates the full runnable queue
-and chosen ID before divergent user or world work executes.
+The host scheduler is never consulted by this default. Seeded-random scheduling
+is the first C2 handler over the same decision boundary. Choose-driven
+exhaustive and host scheduling remain later handlers. SC.10 record/replay
+validates the full runnable queue and chosen ID before divergent user or world
+work executes.
 
 SC.9 implements this boundary in `Round_robin`. Each scheduler step renders the
 exact pre-decision queue and chosen head before advancing one real `Eval.state`
@@ -523,7 +525,36 @@ fail-fast/collect and same-step cancellation ordinals. Warp Case coverage is
 limited to checker-representable programs (nested spawn/await/yield/cancel).
 Ill-typed child faults and direct self-handle injection remain hostile OCaml
 integration cases, not purported checked Warp programs. Warp Props still vary
-data, not schedules: C1 exposes one fixed FIFO schedule.
+data, not schedules.
+
+### 5.2 Seeded randomized Warp schedules
+
+SC.11 adds `jacquard test --schedules N --seed S` for hermetic Warp Cases. `N`
+must be positive and `--seed` is required whenever this lane is selected. The
+CLI does not fall back to OS entropy in this lane. Each discovered member gets
+a SplitMix64 stream mixed from `S`, its canonical member hash, and the leaf
+Case display path. Each of the `N` executions then gets a child decision seed.
+This makes one test's schedules independent of discovery order, cache hits,
+and host `Random` state.
+
+At each D46 decision, the handler draws one index from the exact ordered
+runnable queue. Task creation, wakeup, cancellation, scope aggregation, and all
+other lifecycle rules remain unchanged. The scheduler identity is
+`seeded-random-v0`. Every execution records the ordinary canonical v1 schedule
+trace, including the full queue and chosen task. Strict replay consumes that
+recorded scheduler identity and validates the trace before divergent work; it
+does not draw again.
+
+The first failing execution stops the test. Its output includes the root seed,
+the failing child decision seed, an exact rerun command, and the canonical
+schedule log. Repeating the printed command is byte-for-byte reproducible. A
+passing Case reports the number of explored schedules and the root seed.
+
+Hermetic cache identity is the existing Merkle test/member key plus the
+scheduler version, `N`, and `S`. Cache entries retain only ordinary rendered
+test evidence; no Task, evaluator closure, continuation, PRNG state, or host
+random value enters the cache. WorldTests stay uncached, and Props retain their
+separate data-generation sampling/exhaustive modes.
 
 ## 6. Interactions and exclusions
 
@@ -539,7 +570,7 @@ The following are excluded from C1 and from this interface freeze:
 - shared mutable memory, locks, atomics, and data-race semantics;
 - automatic external-resource finalizers;
 - channels before C3 and actors/supervision before C4+;
-- seeded-random and exhaustive schedule exploration;
+- exhaustive schedule exploration;
 - host threads, host scheduling, and real asynchronous I/O before C4.
 
 Pure `parallel.map` and `parallel.both` are separate empty-row hints. Their
@@ -557,7 +588,8 @@ fallback. The prerequisite audit, parity/sanitizer lane, and benchmark are in
 C0 is pure parallel hints. C1 is Task lifecycle, Async, structured scopes,
 cooperative cancellation, fail-fast/collect, and the deterministic scheduler.
 C2 adds schedule tooling. SC.10 implements its versioned record/strict-replay
-slice; seeded random and bounded exhaustive schedules remain future work.
+slice and SC.11 adds seeded randomized Warp schedules. Bounded exhaustive
+schedules remain future work.
 C3 adds typed channels. C4 adds host asynchronous I/O; actor supervision opens
 only after channels and lifecycle evidence exist.
 

@@ -193,6 +193,37 @@ let test_coverage_memo_trap () =
     "memoized run still counts the dep" true
     (List.exists (Hash.equal dep_hash) second)
 
+let test_schedule_seed_splitting_and_cache_identity () =
+  let member = Hash.of_string "scheduled-member" in
+  Random.init 1;
+  let first = Warp.schedule_test_seed ~seed:42 ~member ~display:"suite/first" in
+  Random.init 999;
+  let same = Warp.schedule_test_seed ~seed:42 ~member ~display:"suite/first" in
+  let other_leaf = Warp.schedule_test_seed ~seed:42 ~member ~display:"suite/second" in
+  let other_member =
+    Warp.schedule_test_seed ~seed:42 ~member:(Hash.of_string "other-member") ~display:"suite/first"
+  in
+  Alcotest.(check int) "same canonical test split" first same;
+  Alcotest.(check bool) "leaf path participates in split" true (first <> other_leaf);
+  Alcotest.(check bool) "member hash participates in split" true (first <> other_member);
+  let base = Warp.cache_key_string (Warp.Hermetic ("display-only", member)) in
+  let key = Warp.schedule_key_string ~base ~schedules:8 ~seed:42 in
+  Alcotest.(check string)
+    "complete scheduled cache identity"
+    (Printf.sprintf "%s|scheduler=%s|schedules=8|schedule-seed=42" base
+       Round_robin.seeded_scheduler_version)
+    key;
+  Alcotest.(check bool)
+    "changed count rekeys" true
+    (not (String.equal key (Warp.schedule_key_string ~base ~schedules:9 ~seed:42)));
+  Alcotest.(check bool)
+    "changed seed rekeys" true
+    (not (String.equal key (Warp.schedule_key_string ~base ~schedules:8 ~seed:43)))
+
+let test_coverage_and_schedule_identity () =
+  test_coverage_memo_trap ();
+  test_schedule_seed_splitting_and_cache_identity ()
+
 let suite =
   [
     Alcotest.test_case "report: all pass, in order" `Quick test_report_all_pass;
@@ -205,5 +236,5 @@ let suite =
     Alcotest.test_case "check.eq renders both sides" `Quick test_check_eq_renders_both_sides;
     Alcotest.test_case "suite is pure (zero grants)" `Quick test_manifest_pure;
     Alcotest.test_case "cache entry round-trip" `Quick test_cache_entry_roundtrip;
-    Alcotest.test_case "coverage counts memo hits" `Quick test_coverage_memo_trap;
+    Alcotest.test_case "coverage counts memo hits" `Quick test_coverage_and_schedule_identity;
   ]
