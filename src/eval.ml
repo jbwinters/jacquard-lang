@@ -158,7 +158,11 @@ type ctx = {
       (** weak cache recording that a closure's params/body or a resumption's frame AST has passed
           recovery validation. Mutable scopes and frame-held runtime values are never trusted by
           this cache. *)
+  audit_context_id : int;
+  mutable next_audit_run_id : int;
 }
+
+let next_audit_context_id = Atomic.make 0
 
 (** [make_ctx store] builds a fresh evaluation context over [store]: empty builtin, memo, and
     root-handler tables. *)
@@ -178,10 +182,21 @@ let make_ctx store =
     coverage = Hashtbl.create 64;
     recovery_immutable_clean = Physical_cache.create 128;
     recovery_static_clean = Physical_cache.create 128;
+    audit_context_id = Atomic.fetch_and_add next_audit_context_id 1;
+    next_audit_run_id = 0;
   }
 
 (** [store ctx] returns the immutable store handle used for name and declaration lookup. *)
 let store ctx = ctx.store
+
+(** [fresh_audit_run_id ctx] returns a deterministic, context-local sequence-owner identity. The
+    private counter is not reachable from Jacquard code, and distinct evaluator contexts receive
+    disjoint identity domains. *)
+let fresh_audit_run_id ctx =
+  let ordinal = ctx.next_audit_run_id in
+  ctx.next_audit_run_id <- ordinal + 1;
+  Hash.of_string
+    (Printf.sprintf "jacquard-governance-audit-run-v0\000%d:%d" ctx.audit_context_id ordinal)
 
 let task_message diagnostics =
   String.concat "; " (List.map (fun diagnostic -> diagnostic.Diag.message) diagnostics)
@@ -298,8 +313,8 @@ and match_pats vs ps env =
 (* Store-backed references                                             *)
 (* ------------------------------------------------------------------ *)
 
-let locate ctx h =
-  match Store.locate ctx.store h with
+let locate ctx ~trusted h =
+  match if trusted then Store.locate_internal ctx.store h else Store.locate ctx.store h with
   | Ok l -> l
   | Error ds -> rt (Runtime_err.Unresolved (String.concat "; " (List.map Diag.to_string ds)))
 
@@ -309,12 +324,12 @@ let group_hashes (decl : Kernel.decl) : Hash.t array =
   | Ok { Canon.named; _ } -> Array.of_list (List.map snd named)
   | Error ds -> rt (Runtime_err.Unresolved (String.concat "; " (List.map Diag.to_string ds)))
 
-let con_value ctx h =
+let con_value ctx ~trusted h =
   if Concurrency_contract.is_task_private_hash h then
     rt
       (Runtime_err.Invalid_task_handle
          "the Task opaque carrier is scheduler-private and cannot be constructed");
-  match locate ctx h with
+  match locate ctx ~trusted h with
   | { Store.decl = { Kernel.it = Kernel.DefType { cons; _ }; _ }; role = Store.Constructor i; _ } ->
       let { Kernel.con_name; fields; _ } = nth_or_bug "constructor" cons i in
       let arity = List.length fields in
@@ -322,8 +337,8 @@ let con_value ctx h =
       else VConstructor { con = h; name = con_name; arity }
   | _ -> rt_type "hash %s is not a constructor" (Hash.to_hex h)
 
-let op_value ctx h =
-  match locate ctx h with
+let op_value ctx ~trusted h =
+  match locate ctx ~trusted h with
   | {
    Store.decl = { Kernel.it = Kernel.DefEffect { ename; ops; _ }; _ };
    role = Store.Operation i;
@@ -758,7 +773,7 @@ let handler_covers (h : handler) op = List.exists (fun (o, _) -> Hash.equal o op
 (* Mode lookup is deliberately store-backed: the declaration hash owns the contract, and a mode
    change therefore changes both the op hash and the runtime behavior selected for its handler. *)
 let op_mode ctx op =
-  match locate ctx op with
+  match locate ctx ~trusted:true op with
   | { Store.decl = { Kernel.it = Kernel.DefEffect { ops; _ }; _ }; role = Store.Operation i; _ } ->
       let { Kernel.op_mode; _ } = nth_or_bug "operation" ops i in
       op_mode
@@ -852,11 +867,15 @@ let apply ctx fn args k =
     the referencing expression, or a handled branch's value could be memoized and leak past the
     handler's dynamic extent. A top-level body therefore either handles its own effects, uses
     granted root handlers, or dies with [Unhandled] at the referencing point. *)
-let rec eval_ref ctx (h : Hash.t) (kind : Kernel.refkind) (k : kont) : state =
+let rec eval_ref ctx ~trusted (h : Hash.t) (kind : Kernel.refkind) (k : kont) : state =
   match kind with
-  | Kernel.Con -> SApply (con_value ctx h, k)
-  | Kernel.Op -> SApply (op_value ctx h, k)
+  | Kernel.Con -> SApply (con_value ctx ~trusted h, k)
+  | Kernel.Op -> SApply (op_value ctx ~trusted h, k)
   | Kernel.Term -> (
+      (* A native registration is an implementation override, not public reachability. Source
+         references must cross [Store.locate] before builtin/memo shortcuts; only evaluation of an
+         already-resolved stored body may use a hidden marker hash. *)
+      if not trusted then ignore (locate ctx ~trusted:false h);
       if ctx.track_coverage then Hashtbl.replace ctx.coverage h ();
       match Hashtbl.find_opt ctx.builtins h with
       | Some v -> checked_result_state ctx v k
@@ -877,14 +896,16 @@ let rec eval_ref ctx (h : Hash.t) (kind : Kernel.refkind) (k : kont) : state =
                       next)
               | Some _ | None -> checked_result_state ctx v k)
           | None -> (
-              match locate ctx h with
+              match locate ctx ~trusted h with
               | {
                Store.decl = { Kernel.it = Kernel.DefTerm bindings; _ } as decl;
                role = Store.Member i;
                _;
               } ->
                   let binding = nth_or_bug "member" bindings i in
-                  let scope = { env = Env.empty; group = group_hashes decl } in
+                  let scope =
+                    { env = Env.empty; group = group_hashes decl; trusted_store_refs = true }
+                  in
                   (* capture is disabled inside the isolated sub-run: an op escaping a
                      top-level body must die loudly (Unhandled) rather than be captured
                      with a truncated continuation (review finding; E0815 makes this
@@ -922,10 +943,10 @@ and step_unchecked ctx (state : state) : state option =
           match Env.find_opt x scope.env with
           | Some cell -> Some (SApply (!cell, k))
           | None -> rt (Runtime_err.Unresolved (Printf.sprintf "variable `%s`" x)))
-      | Kernel.Ref (h, kind) -> Some (eval_ref ctx h kind k)
+      | Kernel.Ref (h, kind) -> Some (eval_ref ctx ~trusted:scope.trusted_store_refs h kind k)
       | Kernel.GroupRef i ->
           if i >= 0 && i < Array.length scope.group then
-            Some (eval_ref ctx scope.group.(i) Kernel.Term k)
+            Some (eval_ref ctx ~trusted:scope.trusted_store_refs scope.group.(i) Kernel.Term k)
           else rt_type "groupref %d outside its group at runtime" i
       | Kernel.Lam (params, body) -> Some (SApply (VClosure { scope; params; body }, k))
       | Kernel.App (fn, args) -> Some (SEval (scope, fn, FAppFn { args; scope } :: k))

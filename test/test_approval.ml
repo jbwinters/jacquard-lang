@@ -83,8 +83,7 @@ let test_released_identity_and_once_mode () =
     "4d07b0003ce00355c129e894d589c0626bc7ccb3230305537c908a37d5012e4c"
     (Hash.to_hex (lookup "decision" Resolve.KType));
   Alcotest.(check string)
-    "ET.2 Audit identity remains stable"
-    "2c148fbc2e26bdc6f01279a8bf176f54d5798536e1f96805aa4f7c7a57e67632"
+    "D69 Audit v2 identity" "40bc4343fb2b4bcc18b18f63f7bb68675b746751bb40b876072e622046a81372"
     (Hash.to_hex (lookup "audit" Resolve.KEffect));
   match Store.locate store approval with
   | Ok { Store.decl = { Kernel.it = Kernel.DefEffect { ops = [ operation ]; _ }; _ }; _ } ->
