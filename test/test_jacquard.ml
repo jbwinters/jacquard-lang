@@ -23,6 +23,7 @@ let () =
       ("prelude", Test_prelude.suite);
       ("effect-taxonomy", Test_effect_taxonomy.suite);
       ("scheduler-core", Test_scheduler_core.suite);
+      ("channel-contract", Test_channel_contract.suite);
       ("structured-scope", Test_structured_scope.suite);
       ("cancellation", Test_cancellation.suite);
       ("scope-policy", Test_scope_policy.suite);
