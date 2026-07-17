@@ -234,6 +234,8 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
   stable_optional "real.mul" "mul-real" (real2 "real.mul" ( *. ));
   stable_optional "real.div" "div-real" (real2 "real.div" ( /. ));
   stable_optional "real.sub" "sub-real" (real2 "real.sub" ( -. ));
+  stable_optional "async.scope" "async.scope-v0" (fun _ ->
+      Error (Runtime_err.Type_error "async.scope requires the deterministic interpreter scheduler"));
   stable_optional "real.lt?" "lt-real" (fun args ->
       match args with
       | [ Value.VReal a; Value.VReal b ] -> Ok (vbool (a < b))
@@ -1056,7 +1058,7 @@ let install_eval (ctx : Eval.ctx) : (unit, Diag.t list) result =
                           | Error _ -> ());
                           match Check.check_top cctx (Kernel.Expr e) with
                           | Error ds -> Error (Runtime_err.Eval_error (diags_msg ds))
-                          | Ok _ -> Eval.run_expr ctx e))))
+                          | Ok _ -> Round_robin.run_expr ctx e))))
           | args ->
               Error
                 (Runtime_err.Eval_error
@@ -1217,6 +1219,29 @@ let builtin_signatures (store : Store.t) : ((Hash.t * Types.scheme) list, Diag.t
     match lookup_hash store ~kind:Resolve.KTerm "mod" with
     | Ok h -> Ok (base @ [ (h, Types.mono (arrow2 int_ty)) ])
     | Error _ -> Ok base
+  in
+  let* base =
+    match
+      ( lookup_hash store ~kind:Resolve.KTerm "async.scope",
+        Hash.of_hex Concurrency_contract.async_effect_hash,
+        Hash.of_hex Concurrency_contract.task_result_type_hash )
+    with
+    | Ok scope_h, Some async_h, Some task_result_h ->
+        let level = 1 in
+        let value = Types.new_tvar level in
+        let tail = Types.new_rvar level in
+        let child_row = Types.{ effects = [ async_h ]; tail } in
+        let result_row = Types.{ effects = []; tail } in
+        let thunk = Types.TArrow ([], child_row, value) in
+        let result = Types.TCon (task_result_h, [ value ]) in
+        Ok
+          (base
+          @ [
+              (scope_h, { Types.ty = Types.TArrow ([ thunk ], result_row, result); gen_level = 0 });
+            ])
+    | Error _, _, _ -> Ok base
+    | Ok _, (None | Some _), (None | Some _) ->
+        Error [ Diag.error ~code:"E0908" "invalid frozen Async scope identities" ]
   in
   (* int-compare ships with ring 0; its ordering result type lives in 02-data *)
   let* base =

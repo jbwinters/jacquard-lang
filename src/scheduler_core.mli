@@ -73,6 +73,16 @@ val spawn : ('resume, 'value) t -> resume:'resume -> (handle, Diag.t list) resul
 val id : ('resume, 'value) t -> handle -> (Concurrency_contract.task_id, Diag.t list) result
 (** [id] validates handle ownership and returns its deterministic scheduler ID. *)
 
+val task_run : Task_capability.t -> ('resume, 'value) t -> Concurrency_owner.t
+(** Runtime-private, capability-gated access to the run owner for evaluator validation binding. *)
+
+val task_value : Task_capability.t -> ('resume, 'value) t -> handle -> (Value.t, Diag.t list) result
+(** Runtime-private, capability-gated wrapping of a validated handle. *)
+
+val task_handle :
+  Task_capability.t -> ('resume, 'value) t -> Value.t -> (handle, Diag.t list) result
+(** Runtime-private, capability-gated unwrapping and exact-scope validation. *)
+
 val validate_run_handle :
   ('resume, 'value) t -> handle -> (Concurrency_contract.task_id, Diag.t list) result
 (** [validate_run_handle scheduler handle] validates only the opaque run owner and returns the
@@ -85,6 +95,13 @@ val inspect : ('resume, 'value) t -> handle -> ('value task_view, Diag.t list) r
 val checkout : ('resume, 'value) t -> handle -> ('resume, Diag.t list) result
 (** [checkout] destructively transfers the sole resume token of a runnable task to its caller.
     Missing, suspended, terminal, or foreign tasks return diagnostics rather than raising. *)
+
+val with_checkout :
+  ('resume, 'value) t -> handle -> ('resume -> ('a, Diag.t list) result) -> ('a, Diag.t list) result
+(** [with_checkout scheduler handle operation] transfers the runnable task's token to [operation].
+    If [operation] returns or raises before settling that token through a scheduler transition,
+    ownership is restored before control leaves the bracket. A missing, suspended, terminal, or
+    foreign task returns the same diagnostics as {!checkout}. *)
 
 val suspend_yield : ('resume, 'value) t -> handle -> resume:'resume -> (unit, Diag.t list) result
 (** [suspend_yield] returns a checked-out token and transitions Runnable to Suspended/Yielded. *)

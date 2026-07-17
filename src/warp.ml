@@ -2,9 +2,9 @@
 
     Discovery is by CHECKED TYPE (decision D12): a store term whose elaborated type is [test] is a
     hermetic test, [world-test] a world test; names are display only. The hermetic lane runs each
-    thunk under the in-language [test.run] handler via {!Eval.call} (the M1 entry point built for
-    exactly this); the world lane runs only tests whose row the CLI's grants cover, refusing the
-    rest by name.
+    thunk under the in-language [test.run] handler through {!Round_robin.run_call}, so a scoped
+    Async lifecycle uses the same deterministic evaluator driver as the CLI; the world lane runs
+    only tests whose row the CLI's grants cover, refusing the rest by name.
 
     The result cache (W6.3) is an honest lookup table over the Merkle discipline: a Case's key is
     its member hash (which covers its transitive references), a Prop's key adds mode/samples/seed
@@ -59,7 +59,7 @@ let discover (store : Store.t) (cctx : Check.ctx) : discovered list =
 (* --- running (W6.2) --- *)
 
 let value_of ctx (h : Hash.t) : (Value.t, Runtime_err.t) result =
-  Eval.run_expr ctx { Kernel.it = Kernel.Ref (h, Kernel.Term); meta = Meta.empty }
+  Round_robin.run_expr ctx { Kernel.it = Kernel.Ref (h, Kernel.Term); meta = Meta.empty }
 
 (* decompose a runtime report; the shape is pinned by prelude/15-warp.jqd *)
 let verdict_of_report (v : Value.t) : (verdict, string) result =
@@ -97,7 +97,9 @@ let verdict_of_report (v : Value.t) : (verdict, string) result =
    tests record the constant itself but not what it touched. Safe direction only — a
    warm complement can over-report "uncovered", never falsely claim covered. *)
 let run_thunk ctx ~test_run (thunk : Value.t) : (verdict * Hash.t list, string) result =
-  let result, mine = Eval.with_fresh_coverage ctx (fun () -> Eval.call ctx test_run [ thunk ]) in
+  let result, mine =
+    Eval.with_fresh_coverage ctx (fun () -> Round_robin.run_call ctx test_run [ thunk ])
+  in
   match result with
   | Ok report -> Result.map (fun v -> (v, mine)) (verdict_of_report report)
   | Error e ->

@@ -1,7 +1,8 @@
 (** Deterministic homogeneous scope-result policies over {!Structured_scope}.
 
-    This layer records terminal observations supplied in scheduler decision order. It never chooses
-    a runnable task, consults host timing, resumes a continuation, or installs an Async handler. *)
+    This layer records terminal observations supplied in lexicographic scheduler-decision and stable
+    sub-observation order. It never chooses a runnable task, consults host timing, resumes a
+    continuation, or installs an Async handler. *)
 
 type ('resume, 'value) t
 (** A controller for one ordered set of same-scope child handles. The input order is the result
@@ -25,21 +26,24 @@ val create :
 val policy : ('resume, 'value) t -> Concurrency_contract.failure_policy
 (** [policy controller] returns its immutable policy. *)
 
-val take_awakened : ('resume, 'value) t -> Structured_scope.handle list
-(** [take_awakened controller] returns and clears every waiter made runnable by fail-fast sibling
-    cancellation. Handles preserve sibling input order and each target's waiter-registration order.
-    A scheduler must drain this handoff after [record_terminal] before choosing its next task. *)
+val register_child : ('resume, 'value) t -> Structured_scope.handle -> (unit, Diag.t list) result
+(** [register_child controller handle] appends one newly spawned same-scope child to the policy's
+    creation-ordered result set. Duplicate, foreign, or stale registration is rejected before
+    mutating the controller. *)
 
 val record_terminal :
   ('resume, 'value) t ->
   decision:int ->
+  ?ordinal:int ->
   Structured_scope.handle ->
   drop:('resume -> unit) ->
   (unit, Diag.t list) result
-(** [record_terminal controller ~decision child ~drop] records one terminal result. Decisions must
-    be non-negative and strictly increase. An unregistered same-scope child, a duplicate terminal
-    observation, or a nonterminal observation returns E0908. Foreign-run, foreign-scope, and stale
-    handles retain E0907 from {!Structured_scope}.
+(** [record_terminal controller ~decision ~ordinal child ~drop] records one terminal result under
+    the lexicographic observation key [(decision, ordinal)]. Both components must be non-negative,
+    and keys must strictly increase. [ordinal] defaults to zero for schedulers that observe at most
+    one terminal per decision. An unregistered same-scope child, a duplicate terminal observation,
+    or a nonterminal observation returns E0908. Foreign-run, foreign-scope, and stale handles retain
+    E0907 from {!Structured_scope}.
 
     Once a valid terminal state is inspected, its decision and result are committed before any
     fail-fast cancellation is attempted; cancellation diagnostics or an exception from [drop] do not
@@ -51,11 +55,15 @@ val record_terminal :
     even if [drop] raises; the first such physical exception is re-raised with its original
     backtrace only after all sibling cleanup has been attempted. The policy-local wrapper lets
     {!Structured_scope.deliver_cancel} return normally after a user [drop] failure, so waiters from
-    that same delivery are buffered for {!take_awakened}. Waiters from successful earlier or later
-    deliveries are buffered as well. [Collect] never requests sibling cancellation. *)
+    that same delivery are retained for {!take_awakened}. [Collect] never requests sibling
+    cancellation. *)
+
+val take_awakened : ('resume, 'value) t -> Structured_scope.handle list
+(** [take_awakened controller] returns and clears waiters awakened by policy-triggered immediate
+    cancellation. The scheduler appends them to its FIFO queue after the current transition. *)
 
 val finish : ('resume, 'value) t -> ('value aggregate, Diag.t list) result
 (** [finish controller] succeeds only after every child has been observed terminal. Fail-fast
-    returns the first scheduler-decision-ordered [Failed] or [Cancelled], otherwise [Done values] in
-    input order. Collect returns every terminal result in input order. Calling it early returns
-    E0908. *)
+    returns the first lexicographically scheduler-observed [Failed] or [Cancelled], otherwise
+    [Done values] in input order. Collect returns every terminal result in input order. Calling it
+    early returns E0908. *)

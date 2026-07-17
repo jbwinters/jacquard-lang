@@ -126,6 +126,20 @@ let spawn scheduler ~resume =
 let id scheduler handle =
   Result.map (fun (entry : (_, _) entry) -> entry.id) (validate scheduler handle)
 
+let task_run _capability scheduler = scheduler.run
+
+let task_value _capability scheduler handle =
+  Result.map (fun _ -> Value.VTask handle) (id scheduler handle)
+
+let task_handle _capability scheduler = function
+  | Value.VTask handle -> Result.map (fun _ -> handle) (id scheduler handle)
+  | _ ->
+      Error
+        [
+          Diag.error ~code:Concurrency_contract.task_escape_code
+            "Async operation expected an opaque Task handle";
+        ]
+
 let validate_run_handle scheduler handle = Task_handle.validate_run ~run:scheduler.run handle
 let inspect scheduler handle = Result.map view_of_entry (validate scheduler handle)
 
@@ -141,6 +155,32 @@ let checkout scheduler handle =
           | Concurrency_contract.Cancelled_state ),
           _ ) ->
           error "cannot check out a terminal task")
+
+let restore_checkout (entry : (_, _) entry) resume =
+  match (entry.lifecycle, entry.resume) with
+  | Concurrency_contract.Runnable, None -> entry.resume <- Some resume
+  | Concurrency_contract.Runnable, Some _
+  | Concurrency_contract.Suspended, Some _
+  | ( ( Concurrency_contract.Done_state | Concurrency_contract.Failed_state
+      | Concurrency_contract.Cancelled_state ),
+      None ) ->
+      ()
+  | Concurrency_contract.Suspended, None
+  | ( ( Concurrency_contract.Done_state | Concurrency_contract.Failed_state
+      | Concurrency_contract.Cancelled_state ),
+      Some _ ) ->
+      failwith "Bug_scheduler_core: checkout operation left invalid resume ownership"
+
+let with_checkout scheduler handle operation =
+  Result.bind (validate scheduler handle) (fun entry ->
+      Result.bind (checkout scheduler handle) (fun resume ->
+          match operation resume with
+          | (Ok _ | Error _) as result ->
+              restore_checkout entry resume;
+              result
+          | exception exn ->
+              restore_checkout entry resume;
+              raise exn))
 
 let ensure_checked_out (entry : (_, _) entry) =
   match (entry.lifecycle, entry.resume) with

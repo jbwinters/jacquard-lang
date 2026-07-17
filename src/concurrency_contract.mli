@@ -33,6 +33,10 @@ val async_operation_hashes : (string * string) list
 (** Exact operation-member identities, in declaration order from [async.spawn] through
     [async.yield]. *)
 
+val scope_control_hash : Hash.t
+(** Internal non-Async identity used only to transfer [async.scope] control from the evaluator to
+    the trusted scheduler. It is not a fifth Async operation and is never serialized as a value. *)
+
 type task_id = private { scope_path : int list; spawn_index : int }
 (** Opaque, run-local identity. The root [scope_path] is [[0]]; a nested scope appends its one-based
     creation ordinal. [spawn_index] is zero for the scope body and otherwise the one-based spawn

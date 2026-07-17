@@ -224,7 +224,7 @@ let test_scheduler_decision_selects_first_failure () =
   finish_failed scope created_first "created-first";
   finish_failed scope decided_first "decision-first";
   Scope_policy.record_terminal policy ~decision:20 decided_first ~drop:ignore |> ok;
-  Scope_policy.record_terminal policy ~decision:21 created_first ~drop:ignore |> ok;
+  Scope_policy.record_terminal policy ~decision:20 ~ordinal:1 created_first ~drop:ignore |> ok;
   Alcotest.(check bool)
     "decision order wins over creation order for simultaneous failures" true
     (Scope_policy.finish policy
@@ -370,14 +370,14 @@ let test_exact_diagnostics () =
   Scope_policy.record_terminal policy ~decision:2 child ~drop:ignore |> ok;
   Alcotest.(check string)
     "duplicate observation checks sequence first"
-    "error[E0908]: invalid structured-concurrency scope policy: decision sequence 2 does not \
-     follow 2\n\
+    "error[E0908]: invalid structured-concurrency scope policy: terminal observation (2,0) does \
+     not follow (2,0)\n\
     \  hint: record each child terminal state once in scheduler decision order"
     (Scope_policy.record_terminal policy ~decision:2 child ~drop:ignore |> error_text);
   Alcotest.(check string)
     "decreasing decision"
-    "error[E0908]: invalid structured-concurrency scope policy: decision sequence 1 does not \
-     follow 2\n\
+    "error[E0908]: invalid structured-concurrency scope policy: terminal observation (1,0) does \
+     not follow (2,0)\n\
     \  hint: record each child terminal state once in scheduler decision order"
     (Scope_policy.record_terminal policy ~decision:1 child ~drop:ignore |> error_text);
   Alcotest.(check string)
@@ -537,3 +537,5 @@ let run () =
   test_exact_diagnostics ();
   QCheck.Test.check_exn prop_collect_is_input_ordered;
   QCheck.Test.check_exn prop_fail_fast_agrees_with_frozen_first_failure
+
+let suite = [ Alcotest.test_case "fail-fast and collect aggregation" `Quick run ]
