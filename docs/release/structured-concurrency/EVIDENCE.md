@@ -279,14 +279,18 @@ and a later cancellation cannot replace an earlier failure.
 The terminal decision and result are committed before those cancellation
 attempts. A cancellation diagnostic or destruction-callback exception therefore
 does not roll the observation back. Every sibling cleanup is still attempted in
-input order; if callbacks raise, the first exception is re-raised only after all
-sibling attempts finish. Finish remains unavailable until every child is
-observed terminal, so the scope cannot expose an undrained aggregate.
+input order. The policy catches each user callback failure around the unchanged
+SC.7 delivery primitive, buffers the waiters returned by that same delivery,
+then continues cleanup. If callbacks raise, the first physical exception is
+re-raised with its captured backtrace only after all sibling attempts finish.
+Finish remains unavailable until every child is observed terminal, so the scope
+cannot expose an undrained aggregate.
 
-Waiters returned by a successful immediate sibling cancellation are retained
-rather than discarded. `Scope_policy.take_awakened` drains them in
-sibling-input order and each target's waiter-registration order for the later
-scheduler layer. The focused regression pins both ordering levels,
+Waiters returned by an immediate sibling cancellation are retained rather than
+discarded, including when that delivery's destruction callback raises.
+`Scope_policy.take_awakened` drains them in sibling-input order and each
+target's waiter-registration order for the later scheduler layer. The focused
+regressions pin both ordering levels, physical exception identity and backtrace,
 runnable/resume ownership, and exactly-once draining.
 
 Collect never requests sibling cancellation. It waits for every child and

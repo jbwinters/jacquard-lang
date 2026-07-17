@@ -305,15 +305,18 @@ The terminal decision and result are committed before sibling cancellation is
 attempted. Cancellation diagnostics or an exception from the destruction
 callback do not roll back that observation. Cleanup still attempts every
 sibling in input order, and the first destruction-callback exception is
-re-raised only after all sibling cleanup attempts finish. Finish is legal only
-after every registered child is terminal, preserving the structured drain
-invariant.
+re-raised with its original backtrace only after all sibling cleanup attempts
+finish. The policy layer catches each user callback failure around the SC.7
+delivery call, allowing that call to return its awakened waiters without
+changing the public SC.7 primitive. Finish is legal only after every registered
+child is terminal, preserving the structured drain invariant.
 
-A successfully returned immediate sibling cancellation can wake tasks already
-awaiting that sibling. The policy controller retains those handles in
-sibling-input order and each target's waiter-registration order. A scheduler
-drains them through `Scope_policy.take_awakened` before its next choice; the
-policy layer never silently discards or independently schedules them.
+An immediate sibling cancellation can wake tasks already awaiting that sibling.
+The policy controller retains those handles even when the same delivery's user
+destruction callback raises, in sibling-input order and each target's
+waiter-registration order. A scheduler drains them exactly once through
+`Scope_policy.take_awakened` before its next choice; the policy layer never
+silently discards or independently schedules them.
 
 Collect never requests sibling cancellation. It waits for every registered
 child and returns the immutable terminal results in input order, independently
