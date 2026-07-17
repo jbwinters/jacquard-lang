@@ -296,6 +296,7 @@ let doctest_names () =
     "README.md";
     "docs/effect-membranes.md";
     "docs/effect-taxonomy.md";
+    "docs/concurrency.md";
     "docs/tutorial.md";
     "docs/stdlib.md";
     "docs/warp-testing.md";

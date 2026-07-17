@@ -42,6 +42,7 @@ module SSet = Set.Make (String)
 
 type ctx = {
   store : Store.t;
+  mutable trusted_store_refs : bool;
   p_int : Hash.t;
   p_real : Hash.t;
   p_text : Hash.t;
@@ -95,8 +96,23 @@ let err ?meta ?hint ~code fmt =
     (fun msg -> raise (Err (Diag.error ?span:(Option.bind meta Meta.span) ?hint ~code msg)))
     fmt
 
+(* Stored declarations have already crossed the public resolver/checker boundary. Their resolved
+   bodies may use a hidden prelude capability hash, while source expressions must use public
+   lookup and therefore fail closed on the same explicit hash. *)
+let locate ctx hash =
+  if ctx.trusted_store_refs then Store.locate_internal ctx.store hash
+  else Store.locate ctx.store hash
+
+let with_trusted_store_refs ctx f =
+  let saved = ctx.trusted_store_refs in
+  Fun.protect
+    ~finally:(fun () -> ctx.trusted_store_refs <- saved)
+    (fun () ->
+      ctx.trusted_store_refs <- true;
+      f ())
+
 let name_of ctx h =
-  match Store.locate ctx.store h with
+  match locate ctx h with
   | Ok { Store.decl; role; _ } -> (
       match (decl.Kernel.it, role) with
       | Kernel.DefType { tname; _ }, Store.Whole -> tname
@@ -122,7 +138,7 @@ let is_text_ty ctx t =
   match repr t with TCon (identity, []) -> Hash.equal ctx.p_text identity | _ -> false
 
 let surface_name_of ctx kind hash =
-  match Store.locate ctx.store hash with
+  match locate ctx hash with
   | Ok _ -> Surface_name.render kind (name_of ctx hash)
   | Error _ -> Printf.sprintf "#%s:%s" (Hash.to_hex hash) (Surface_name.kind_tag kind)
 
@@ -169,7 +185,7 @@ let prim h = TCon (h, [])
 (* ------------------------------------------------------------------ *)
 
 let type_arity ctx ?meta (h : Hash.t) : int =
-  match Store.locate ctx.store h with
+  match locate ctx h with
   | Ok { Store.decl = { Kernel.it = Kernel.DefType { tvars; _ }; _ }; role = Store.Whole; _ } ->
       List.length tvars
   | Ok _ -> err ?meta ~code:"E0805" "hash %s is not a type" (Hash.to_hex h)
@@ -260,7 +276,11 @@ and conv_row ctx cenv ~effectself (r : Kernel.row) : row =
 (* Constructor scheme: forall vars. (fields) ->{} T vars  (nullary: T vars). Field types are
    declaration types: tyvars come from the decl header, self-references are the decl. *)
 let rec con_scheme ctx ?meta (h : Hash.t) : scheme =
-  match Store.locate ctx.store h with
+  if Concurrency_contract.is_task_private_hash h then
+    err ?meta ~code:Concurrency_contract.task_escape_code
+      ~hint:"Task handles are created only by async.spawn inside a structured scheduler scope"
+      "the Task opaque carrier is scheduler-private and cannot be constructed by Jacquard code";
+  match locate ctx h with
   | Ok
       {
         Store.decl = { Kernel.it = Kernel.DefType { tname; tvars; cons }; _ };
@@ -340,7 +360,7 @@ and conv_decl_ty ctx cenv ?(unbound_code = "E0811") ?(effectself = None) ~self (
 (* Operation scheme: forall effect-vars (+free op vars). (params) ->{E} result. The row
    carries just the effect hash (set semantics; effect type arguments do not row-match). *)
 let op_scheme ctx ?meta (h : Hash.t) : scheme =
-  match Store.locate ctx.store h with
+  match locate ctx h with
   | Ok
       {
         Store.decl = { Kernel.it = Kernel.DefEffect { ename; evars; ops }; _ };
@@ -364,7 +384,7 @@ let op_scheme ctx ?meta (h : Hash.t) : scheme =
     reports E0805 if [h] does not locate an operation, so callers never silently treat malformed
     metadata as legacy [Multi]. *)
 let operation_mode ctx ?meta (h : Hash.t) : Kernel.op_mode =
-  match Store.locate ctx.store h with
+  match locate ctx h with
   | Ok { Store.decl = { Kernel.it = Kernel.DefEffect { ops; _ }; _ }; role = Store.Operation i; _ }
     ->
       (List.nth ops i).Kernel.op_mode
@@ -467,7 +487,7 @@ let rec contains_group_ref (expression : Kernel.expr) =
     recursive SCC is marked so transferring an affine token into an unbounded call cycle is rejected
     rather than guessed safe. *)
 let affine_callable ctx hash =
-  match Store.locate ctx.store hash with
+  match locate ctx hash with
   | Ok { Store.decl = { Kernel.it = Kernel.DefTerm bindings; _ }; role = Store.Member index; _ } ->
       let binding = List.nth bindings index in
       let rec lambda expression =
@@ -643,18 +663,25 @@ let handler_mismatch_hint expression detail =
   else None
 
 let rec term_scheme ctx ?meta (h : Hash.t) : scheme =
-  match Hashtbl.find_opt ctx.builtin_sigs h with
+  match Hashtbl.find_opt ctx.term_sigs h with
   | Some s -> s
   | None -> (
-      match Hashtbl.find_opt ctx.term_sigs h with
+      let () =
+        if not ctx.trusted_store_refs then
+          match Store.locate ctx.store h with
+          | Ok _ -> ()
+          | Error ds ->
+              err ?meta ~code:"E0805" "%s" (String.concat "; " (List.map Diag.to_string ds))
+      in
+      match Hashtbl.find_opt ctx.builtin_sigs h with
       | Some s -> s
       | None -> (
-          match Store.locate ctx.store h with
+          match locate ctx h with
           | Ok { Store.decl = { Kernel.it = Kernel.DefTerm _; _ } as decl; decl_hash; _ } ->
               if List.exists (Hash.equal decl_hash) ctx.checking then
                 err ?meta ~code:"E0805" "cyclic dependency between declarations reached the checker"
               else begin
-                check_group ctx decl;
+                with_trusted_store_refs ctx (fun () -> check_group ctx decl);
                 match Hashtbl.find_opt ctx.term_sigs h with
                 | Some s -> s
                 | None -> err ?meta ~code:"E0805" "term %s did not check" (Hash.to_hex h)
@@ -919,7 +946,7 @@ and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(requir
           (fun (oc : Kernel.opclause) ->
             match oc.Kernel.op with
             | Kernel.Hashed h -> (
-                match Store.locate ctx.store h with
+                match locate ctx h with
                 | Ok { Store.decl_hash; role = Store.Operation _; _ } -> Some decl_hash
                 | _ -> err ~meta:oc.Kernel.ometa ~code:"E0805" "op clause is not an operation")
             | Kernel.Named n -> err ~meta:oc.Kernel.ometa ~code:"E0811" "unresolved op `%s`" n)
@@ -1219,7 +1246,7 @@ let constructors_of ctx ?meta (h : Hash.t) (args : ty list) :
       [ ctx.p_int; ctx.p_real; ctx.p_text; ctx.p_code; ctx.p_hash; ctx.p_secret ]
   then None
   else
-    match Store.locate ctx.store h with
+    match locate ctx h with
     | Ok { Store.decl = { Kernel.it = Kernel.DefType { tname; tvars; cons }; _ }; decl_hash; _ }
       when List.length tvars = List.length args ->
         let cenv = { mode = Flexible; tvs = List.combine tvars args; rvs = [] } in
@@ -1514,6 +1541,7 @@ let make_ctx (store : Store.t) : (ctx, Diag.t list) result =
       Ok
         {
           store;
+          trusted_store_refs = false;
           p_int;
           p_real;
           p_text;
@@ -1656,6 +1684,7 @@ module Recovery = struct
     let builtin_sigs, term_sigs = clone_table_pairs base.builtin_sigs base.term_sigs in
     {
       store = base.store;
+      trusted_store_refs = false;
       p_int = base.p_int;
       p_real = base.p_real;
       p_text = base.p_text;

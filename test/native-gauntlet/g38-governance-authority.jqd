@@ -3,12 +3,14 @@
 (match
   (tuple
     (app (var hash.parse) (lit "be1aad7345c6215f227e63df6c7d05874a464f207599d4f5b85de8b0a6675b45"))
+    (app (var hash.parse) (lit "40bc4343fb2b4bcc18b18f63f7bb68675b746751bb40b876072e622046a81372"))
     (app (var hash.parse) (lit "6d092eccc3c9858a2a95120da5a011964cbb3ad76968e11c1cbb062c119fbb31"))
     (app (var hash.parse) (lit "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
     (app (var hash.parse) (lit "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")))
   (clause
     (ptuple
       (pcon ok (pvar net))
+      (pcon ok (pvar audit))
       (pcon ok (pvar secret))
       (pcon ok (pvar unknown-a))
       (pcon ok (pvar unknown-b)))
@@ -19,6 +21,12 @@
       (app (var governance.validate-authority)
         (app (var cons) (app (var governance-effect) (var secret))
           (app (var cons) (app (var governance-effect) (var net)) (var nil))))
+      (app (var governance.validate-authority)
+        (app (var cons) (app (var governance-effect) (var audit))
+          (app (var cons) (app (var governance-effect) (var secret)) (var nil))))
+      (app (var governance.validate-authority)
+        (app (var cons) (app (var governance-effect) (var secret))
+          (app (var cons) (app (var governance-effect) (var audit)) (var nil))))
       (app (var governance.validate-authority)
         (app (var cons) (app (var governance-effect) (var unknown-a))
           (app (var cons) (app (var governance-effect) (var unknown-b)) (var nil))))
@@ -57,6 +65,8 @@
           (app (var cons) (app (var governance-effect) (var unknown-a)) (var nil))))))
   (clause (pwild)
     (tuple
+      (app (var err) (lit "hash parse failed"))
+      (app (var err) (lit "hash parse failed"))
       (app (var err) (lit "hash parse failed"))
       (app (var err) (lit "hash parse failed"))
       (app (var err) (lit "hash parse failed"))

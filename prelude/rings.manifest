@@ -56,6 +56,17 @@ prompt 3
 mk-prompt 3
 infer 3
 complete 3
+# --- 03-concurrency (ring 2; declarations only, no scheduler/root handler)
+task 2
+task-result 2
+done 2
+failed 2
+cancelled 2
+async 2
+async.spawn 2
+async.await 2
+async.cancel 2
+async.yield 2
 # --- 04-builtins
 add 0
 sub 0
@@ -335,6 +346,7 @@ consented 3
 completed 3
 audit 3
 record 3
+audit.version-code 3
 audit.hash-code 3
 audit.risk-code 3
 audit.verdict-code 3
@@ -343,6 +355,7 @@ audit.assessment-code 3
 audit.outcome-code 3
 audit.decision-code 3
 audit.entry-code 3
+audit.sequence 3
 audit.in-memory 3
 audit.line-log 3
 # --- 20-approval (ring 3 governance proposal identity and consent boundary)
@@ -467,6 +480,18 @@ governance.make-proposal-canonical 3
 governance.make-proposal 3
 governance.validate-proposal 3
 governance.validate-proposal-artifacts 3
+# --- 23-governance-policy (GM.3 validated policy boundaries)
+governance.validate-live-policy 3
+governance.validate-dry-policy 3
+governance.make-stored-live-policy 3
+governance.make-stored-dry-policy 3
+governance.stored-policy-code 3
+governance.stored-policy-id 3
+governance.validate-stored-policy 3
+governance.bind-stored-policy 3
+governance.validate-bound-stored-policy 3
+governance.live-policy-verdict 3
+governance.dry-policy-verdict 3
 # --- 22-judge (GM.5 blessed assessment effect and handlers)
 judge 3
 assess 3
@@ -475,6 +500,17 @@ judge.rules 3
 judge.fixed 3
 judge.scripted 3
 judge.model 3
+# --- 24-governance-gate-dry (GM.6 world-free simulation gate)
+audit-sequence 3
+dry-disposition 3
+simulated 3
+refuse-dry 3
+governance.next-sequence 3
+governance.accept-sequence 3
+governance.with-sequence 3
+governance.run-dry-simulation 3
+governance.summarize-dry-result 3
+governance.gate-dry 3
 # --- 23-workspace (GM.9 typed facade schemas and pure normalizers)
 path 3
 path-value 3

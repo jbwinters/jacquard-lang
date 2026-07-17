@@ -92,7 +92,6 @@
   ../docs/errors.md
   ../docs/effect-review.md
   ../docs/effect-membranes.md
-  ../docs/effect-review.md
   ../docs/effect-taxonomy.md
   ../docs/concurrency.md
   ../docs/README.md
@@ -103,6 +102,10 @@
   ../docs/release/governed-membranes/GM1-MANIFEST.sha256
   ../docs/release/governed-membranes/GM2-EVIDENCE.md
   ../docs/release/governed-membranes/GM2-MANIFEST.sha256
+  ../docs/release/governed-membranes/GM3-EVIDENCE.md
+  ../docs/release/governed-membranes/GM3-MANIFEST.sha256
+  ../docs/release/governed-membranes/GM4-EVIDENCE.md
+  ../docs/release/governed-membranes/GM4-MANIFEST.sha256
   ../docs/release/governed-membranes/GM5-EVIDENCE.md
   ../docs/release/governed-membranes/GM5-MANIFEST.sha256
   ../docs/release/governed-membranes/GM9-EVIDENCE.md
@@ -110,8 +113,6 @@
   ../docs/release/structured-concurrency/EVIDENCE.md
   ../docs/release/structured-concurrency/MANIFEST.sha256
   ../docs/release/dx-jac-export/EVIDENCE.md
-  ../docs/release/governed-membranes/GM1-EVIDENCE.md
-  ../docs/release/governed-membranes/GM1-MANIFEST.sha256
   ../docs/stdlib.md
   ../docs/surface-syntax.md
   ../docs/tutorial.md

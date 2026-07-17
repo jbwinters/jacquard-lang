@@ -13,24 +13,35 @@ let parse source =
 let entries =
   List.map parse
     [
-      "(audit-entry-v1 (evaluated-v1 (hash \
+      "(audit-entry-v2 (evaluated-v2 (governance-v0) (lit 0) (hash \
        #aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa) (hash \
-       #bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb) (assessment-v1 (medium) \
-       (confidence-v1 (lit 0.75)) (text-list-v1 (lit \"rule matched\")) (evidence (lit \
-       \"typed\"))) (ask)))";
-      "(audit-entry-v1 (consented-v1 (hash \
+       #bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb) \
+       (governance-assessment-v0 (governance-v0) (medium) (lit 0.75) (text-list-v1 (lit \"rule \
+       matched\")) (evidence (lit \"typed\"))) (ask)))";
+      "(audit-entry-v2 (consented-v2 (governance-v0) (lit 1) (hash \
        #aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa) (hash \
        #cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc) (approved-v1 (hash \
        #cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc) (lit \"reviewer\") \
        (ticket (lit \"T-7\")))))";
-      "(audit-entry-v1 (completed-v1 (hash \
+      "(audit-entry-v2 (completed-v2 (governance-v0) (lit 2) (hash \
        #aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa) (lit \"live\") \
-       (outcome-summary-v1 (lit \"succeeded\") (hash \
+       (governance-outcome-summary-v0 (governance-v0) (lit \"succeeded\") (hash \
        #dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd) (lit \"receipt-7\"))))";
     ]
 
 let hash label = Form.form "hash" [ Form.Hash (Hash.of_string label) ]
 let lit text = Form.form "lit" [ Form.Text text ]
+let int value = Form.form "lit" [ Form.Int value ]
+let governance_v0 = Form.form "governance-v0" []
+
+let with_sequence value = function
+  | {
+      Form.head = "audit-entry-v2";
+      args = [ Form.F ({ Form.args = version :: _old_sequence :: rest; _ } as variant) ];
+      _;
+    } as entry ->
+      { entry with args = [ Form.F { variant with args = version :: Form.F (int value) :: rest } ] }
+  | _ -> Alcotest.fail "test entry does not have a v2 sequence field"
 
 let chain entries =
   let rec go previous records = function
@@ -52,15 +63,15 @@ let expect_error label code = function
 
 let test_fixed_golden_and_clean_verification () =
   Alcotest.(check string)
-    "fixed genesis" "5a8760f8a958799a0e38154fae7cc086d9a1ee0153ff62451ac1a07f7b0b50d7"
+    "fixed genesis" "e30304e99930d8bf631a0b1f364b6d91f6dc798a14c7c0a554ff994ff14ab937"
     (Hash.to_hex Audit_chain.genesis);
   Alcotest.(check string)
     "fixed three-entry chain"
-    (Corpus_support.read_file "../corpus/golden/audit-chain-v1.golden")
+    (Corpus_support.read_file "../corpus/golden/audit-chain-v2.golden")
     golden_bytes;
   Alcotest.(check string)
     "fixed published head"
-    (String.trim (Corpus_support.read_file "../corpus/golden/audit-chain-v1-head.golden"))
+    (String.trim (Corpus_support.read_file "../corpus/golden/audit-chain-v2-head.golden"))
     (Hash.to_hex golden_head);
   match Audit_chain.verify_string ~file:"golden.audit" ~expected_head:golden_head golden_bytes with
   | Ok verified ->
@@ -89,7 +100,7 @@ let test_structural_mutations_fail_closed () =
       expect_error "removed tail" "E1305" (verify (stream [ first; second ]));
       expect_error "duplicated" "E1303" (verify (stream [ first; first; second; third ]));
       expect_error "wrong version" "E1302"
-        (verify (replace_first ~pattern:"audit-chain-v1" ~with_:"audit-chain-v2" golden_bytes));
+        (verify (replace_first ~pattern:"audit-chain-v2" ~with_:"audit-chain-v3" golden_bytes));
       expect_error "malformed" "E1301" (verify ("@" ^ golden_bytes));
       expect_error "altered entry" "E1304"
         (verify (replace_first ~pattern:"rule matched" ~with_:"rule patched" golden_bytes));
@@ -97,6 +108,52 @@ let test_structural_mutations_fail_closed () =
       expect_error "missing final LF" "E1301"
         (verify (String.sub golden_bytes 0 (String.length golden_bytes - 1)))
   | _ -> Alcotest.fail "fixed chain does not contain exactly three records"
+
+let test_sequence_mutations_fail_closed () =
+  let verify label entries =
+    let bytes, head = chain entries in
+    expect_error label "E1308"
+      (Audit_chain.verify_string ~file:"sequence.audit" ~expected_head:head bytes)
+  in
+  verify "duplicate sequence" [ List.nth entries 0; with_sequence 0 (List.nth entries 1) ];
+  verify "skipped sequence" [ List.nth entries 0; with_sequence 2 (List.nth entries 1) ];
+  verify "decreasing sequence"
+    [ List.nth entries 0; List.nth entries 1; with_sequence 1 (List.nth entries 2) ];
+  verify "negative sequence" [ with_sequence (-1) (List.nth entries 0) ];
+  let file = Filename.temp_file "audit-chain-negative-" ".log" in
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove file with Sys_error _ -> ())
+    (fun () ->
+      let before = Corpus_support.read_file file in
+      expect_error "negative append" "E1308"
+        (Audit_chain.append_file ~file ~previous:Audit_chain.genesis
+           (with_sequence (-1) (List.nth entries 0)));
+      Alcotest.(check string)
+        "negative append wrote no bytes" before (Corpus_support.read_file file))
+
+let test_append_sequence_mismatches_write_no_bytes () =
+  let file = Filename.temp_file "audit-chain-sequence-" ".log" in
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove file with Sys_error _ -> ())
+    (fun () ->
+      let append previous entry =
+        match Audit_chain.append_file ~file ~previous entry with
+        | Ok head -> head
+        | Error diagnostics -> fail_diags "seed append sequence mismatch file" diagnostics
+      in
+      let first = append Audit_chain.genesis (List.nth entries 0) in
+      let second = append first (List.nth entries 1) in
+      let third = append second (List.nth entries 2) in
+      let reject_without_writing label sequence =
+        let before = Corpus_support.read_file file in
+        expect_error label "E1308"
+          (Audit_chain.append_file ~file ~previous:third
+             (with_sequence sequence (List.nth entries 2)));
+        Alcotest.(check string) (label ^ " wrote no bytes") before (Corpus_support.read_file file)
+      in
+      reject_without_writing "positive duplicate append sequence" 2;
+      reject_without_writing "positive skipped append sequence" 4;
+      reject_without_writing "positive decreasing append sequence" 1)
 
 let test_single_byte_mutation () =
   let bytes = Bytes.of_string golden_bytes in
@@ -152,16 +209,19 @@ let test_path_replacement_never_receives_append () =
   let replacement = Filename.temp_file "audit-chain-replacement-" ".log" in
   let detail = String.make (4 * 1024 * 1024) 'x' in
   let large_entry =
-    Form.form "audit-entry-v1"
+    Form.form "audit-entry-v2"
       [
         Form.F
-          (Form.form "completed-v1"
+          (Form.form "completed-v2"
              [
+               Form.F governance_v0;
+               Form.F (int 0);
                Form.F (hash "replacement-race-call");
                Form.F (lit "replacement-race");
                Form.F
-                 (Form.form "outcome-summary-v1"
+                 (Form.form "governance-outcome-summary-v0"
                     [
+                      Form.F governance_v0;
                       Form.F (lit "ok");
                       Form.F (hash "replacement-race-outcome");
                       Form.F (lit detail);
@@ -314,20 +374,22 @@ let prop_every_one_byte_mutation_is_rejected =
       | Error [] | Ok _ -> false
       | exception _ -> false)
 
-let evaluated_entry suffix =
-  Form.form "audit-entry-v1"
+let evaluated_entry sequence suffix =
+  Form.form "audit-entry-v2"
     [
       Form.F
-        (Form.form "evaluated-v1"
+        (Form.form "evaluated-v2"
            [
+             Form.F governance_v0;
+             Form.F (int sequence);
              Form.F (hash ("evaluated-call-" ^ suffix));
              Form.F (hash "property-policy");
              Form.F
-               (Form.form "assessment-v1"
+               (Form.form "governance-assessment-v0"
                   [
+                    Form.F governance_v0;
                     Form.F (Form.form "medium" []);
-                    Form.F
-                      (Form.form "confidence-v1" [ Form.F (Form.form "lit" [ Form.Real 0.5 ]) ]);
+                    Form.F (Form.form "lit" [ Form.Real 0.5 ]);
                     Form.F (Form.form "text-list-v1" [ Form.F (lit ("reason-" ^ suffix)) ]);
                     Form.F (Form.form "evidence" [ Form.F (lit ("proof-" ^ suffix)) ]);
                   ]);
@@ -335,13 +397,15 @@ let evaluated_entry suffix =
            ]);
     ]
 
-let consented_entry suffix =
+let consented_entry sequence suffix =
   let proposal = hash ("proposal-" ^ suffix) in
-  Form.form "audit-entry-v1"
+  Form.form "audit-entry-v2"
     [
       Form.F
-        (Form.form "consented-v1"
+        (Form.form "consented-v2"
            [
+             Form.F governance_v0;
+             Form.F (int sequence);
              Form.F (hash ("consented-call-" ^ suffix));
              Form.F proposal;
              Form.F
@@ -354,17 +418,20 @@ let consented_entry suffix =
            ]);
     ]
 
-let completed_entry suffix =
-  Form.form "audit-entry-v1"
+let completed_entry sequence suffix =
+  Form.form "audit-entry-v2"
     [
       Form.F
-        (Form.form "completed-v1"
+        (Form.form "completed-v2"
            [
+             Form.F governance_v0;
+             Form.F (int sequence);
              Form.F (hash "property-call");
              Form.F (lit ("branch-" ^ suffix));
              Form.F
-               (Form.form "outcome-summary-v1"
+               (Form.form "governance-outcome-summary-v0"
                   [
+                    Form.F governance_v0;
                     Form.F (lit "ok");
                     Form.F (hash "property-outcome");
                     Form.F (lit ("detail-" ^ suffix));
@@ -377,9 +444,16 @@ let prop_generated_chains_verify =
     QCheck.(make Gen.(list_size (1 -- 8) string_small))
     (fun suffixes ->
       let generated =
-        List.concat_map
-          (fun suffix -> [ evaluated_entry suffix; consented_entry suffix; completed_entry suffix ])
+        List.mapi
+          (fun index suffix ->
+            let base = index * 3 in
+            [
+              evaluated_entry base suffix;
+              consented_entry (base + 1) suffix;
+              completed_entry (base + 2) suffix;
+            ])
           suffixes
+        |> List.concat
       in
       let bytes, expected_head = chain generated in
       match Audit_chain.verify_string ~file:"generated.audit" ~expected_head bytes with
@@ -391,6 +465,9 @@ let suite =
     Alcotest.test_case "fixed golden verifies" `Quick test_fixed_golden_and_clean_verification;
     Alcotest.test_case "structural mutations fail closed" `Quick
       test_structural_mutations_fail_closed;
+    Alcotest.test_case "sequence mutations fail closed" `Quick test_sequence_mutations_fail_closed;
+    Alcotest.test_case "append sequence mismatches write no bytes" `Quick
+      test_append_sequence_mismatches_write_no_bytes;
     Alcotest.test_case "single-byte mutation" `Quick test_single_byte_mutation;
     Alcotest.test_case "append and concurrent reads fail closed" `Quick (fun () ->
         test_append_file_publishes_and_requires_current_head ();

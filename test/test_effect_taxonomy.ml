@@ -661,7 +661,8 @@ let test_resolved_reserved_schemas () =
       "direct resolved `async.spawn` application";
       "narrow special typing rule";
       "higher-order aliases, wrappers, and returned closures";
-      "does not implement Task values, a scheduler, scopes, or a root handler";
+      "SC.3 represents opaque run/scope-local Task values";
+      "does not implement a scheduler, executable scopes, or a root handler";
     ];
   let prelude = lazy (prelude_store ()) in
   let constructor_inventory type_name =
@@ -1399,6 +1400,23 @@ let test_governance_and_links () =
   Alcotest.check_raises "negative spawn index rejected"
     (Bug_invalid_task_id "structured-concurrency spawn indices must be non-negative") (fun () ->
       ignore (task_id ~scope_path:[ 0 ] ~spawn_index:(-1)));
+  ignore (task_id ~scope_path:[ 0; 0xffff_ffff ] ~spawn_index:0xffff_ffff);
+  Alcotest.check_raises "uint32 path component overflow rejected"
+    (Bug_invalid_task_id
+       "structured-concurrency task path components exceed the native uint32 domain") (fun () ->
+      ignore (task_id ~scope_path:[ 0; 0x1_0000_0000 ] ~spawn_index:0));
+  Alcotest.check_raises "uint32 spawn index overflow rejected"
+    (Bug_invalid_task_id "structured-concurrency spawn indices exceed the native uint32 domain")
+    (fun () -> ignore (task_id ~scope_path:[ 0 ] ~spawn_index:0x1_0000_0000));
+  ignore
+    (task_id ~scope_path:(List.init 65532 (fun index -> if index = 0 then 0 else 1)) ~spawn_index:0);
+  Alcotest.check_raises "native block depth overflow rejected"
+    (Bug_invalid_task_id
+       "structured-concurrency task paths exceed the native uint16 block-length domain") (fun () ->
+      ignore
+        (task_id
+           ~scope_path:(List.init 65533 (fun index -> if index = 0 then 0 else 1))
+           ~spawn_index:0));
   match decide_round_robin ~sequence:0 [ child; parent ] with
   | Some decision ->
       Alcotest.(check bool) "round-robin chooses FIFO head" true (decision.chosen = child)
@@ -1664,12 +1682,12 @@ let test_governed_membrane_charter () =
       "agent : () ->{Workspace} Result ToolError Text";
       "next-sequence : (AuditSequence) ->{State} Int";
       "workspace.live-layer :";
-      ") ->{Secret, Approval, Judge, State, Fs, Net, Audit} Result ToolError Text";
+      ") ->{Secret, Judge, Approval, State, Audit, Fs, Net} Result ToolError Text";
       "workspace.dry-layer :";
       ") ->{Judge, State, Audit} Result ToolError Text";
       "governance.with-sequence : forall a | e.";
       "workspace.live :";
-      ") ->{Secret, Approval, Judge, Fs, Net, Audit} Result ToolError Text";
+      ") ->{Secret, Judge, Approval, Audit, Fs, Net} Result ToolError Text";
       "workspace.dry-run :";
       ") ->{Judge, Audit} Result ToolError Text";
     ]

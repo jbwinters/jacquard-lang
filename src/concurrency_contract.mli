@@ -11,6 +11,16 @@ exception Bug_invalid_task_id of string
 val task_type_hash : string
 (** HASH_V0 identity of the exact frozen [Task a = TaskOpaque] declaration. *)
 
+val task_opaque_constructor_hash : string
+(** Derived constructor identity of the frozen scheduler-private [TaskOpaque] carrier. The store,
+    checker, interpreter, and native lowerer use this identity to prevent Jacquard code from
+    constructing a Task value. *)
+
+val is_task_private_hash : Hash.t -> bool
+(** [is_task_private_hash hash] is the single store/checker/runtime predicate for identities that
+    must never receive a Jacquard name or construction path. In SC.3 this set contains exactly the
+    frozen [TaskOpaque] constructor identity. *)
+
 val task_result_type_hash : string
 (** HASH_V0 identity of the exact frozen [TaskResult a] declaration. *)
 
@@ -32,7 +42,9 @@ type task_id = private { scope_path : int list; spawn_index : int }
 val task_id : scope_path:int list -> spawn_index:int -> task_id
 (** [task_id ~scope_path ~spawn_index] constructs a scheduler-owned ID. The path must be nonempty,
     begin with zero, and have only positive one-based components after the root; the spawn index
-    must be non-negative. Invalid input raises [Bug_invalid_task_id]. *)
+    must be non-negative. Every component and spawn index must fit unsigned 32 bits, and the path
+    length is at most 65,532 components so the native Task block length fits unsigned 16 bits.
+    Invalid input raises [Bug_invalid_task_id]. *)
 
 val compare_task_id : task_id -> task_id -> int
 (** [compare_task_id left right] orders scope paths lexicographically, then spawn ordinals. It is

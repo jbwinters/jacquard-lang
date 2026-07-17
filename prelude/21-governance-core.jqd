@@ -1,8 +1,6 @@
 ; GM.1 versioned governance membrane carriers. These names deliberately do
 ; not replace ET.2/ET.6's frozen audit and approval carriers.
 
-(deftype governance-version () (con governance-v0))
-
 (deftype tool-error ()
   (con tool-blocked (field detail (tref text)))
   (con tool-denied (field detail (tref text)))
@@ -33,21 +31,6 @@
     (field summary (tref text))
     (field preconditions (tref code))
     (field parent-call-id (tapp (tref option) (tref hash)))))
-
-(deftype governance-assessment ()
-  (con governance-assessment-v0
-    (field version (tref governance-version))
-    (field risk (tref risk))
-    (field confidence (tref real))
-    (field reasons (tapp (tref list) (tref text)))
-    (field evidence (tref code))))
-
-(deftype governance-outcome-summary ()
-  (con governance-outcome-summary-v0
-    (field version (tref governance-version))
-    (field status (tref text))
-    (field digest (tref hash))
-    (field detail (tref text))))
 
 (deftype live-policy ()
   (con live-policy-v0
@@ -90,12 +73,6 @@
 (defterm ((binding governance.int-eq? ()
   (lam ((pvar left) (pvar right))
     (app (app (var eq.fn) (var int.eq)) (var left) (var right))))))
-
-(defterm ((binding governance.version-code ()
-  (lam ((pvar version))
-    (match (var version)
-      (clause (pcon governance-v0)
-        (app (var code.form) (lit "governance-v0") (var nil))))))))
 
 (defterm ((binding governance.hash-option-code ()
   (lam ((pvar value))
@@ -417,19 +394,6 @@
           (app (var governance-assessment-v0) (var governance-v0) (var risk)
             (var confidence) (var reasons) (var evidence)))))))))
 
-(defterm ((binding governance.assessment-code ()
-  (lam ((pvar value))
-    (match (var value)
-      (clause
-        (pcon governance-assessment-v0 (pvar version) (pvar risk)
-          (pvar confidence) (pvar reasons) (pvar evidence))
-        (app (var code.form) (lit "governance-assessment-v0")
-          (app (var cons) (app (var governance.version-code) (var version))
-            (app (var cons) (app (var audit.risk-code) (var risk))
-              (app (var cons) (app (var code.of-real) (var confidence))
-                (app (var cons) (app (var audit.text-list-code) (var reasons))
-                  (app (var cons) (var evidence) (var nil)))))))))))))
-
 (defterm ((binding governance.assessment-id ()
   (lam ((pvar value))
     (app (var code.hash) (app (var governance.assessment-code) (var value)))))))
@@ -455,19 +419,6 @@
         (app (var ok)
           (app (var governance-outcome-summary-v0) (var governance-v0)
             (var status) (var digest) (var detail)))))))))
-
-(defterm ((binding governance.outcome-summary-code ()
-  (lam ((pvar value))
-    (match (var value)
-      (clause
-        (pcon governance-outcome-summary-v0 (pvar version) (pvar status)
-          (pvar digest) (pvar detail))
-        (app (var code.form) (lit "governance-outcome-summary-v0")
-          (app (var cons) (app (var governance.version-code) (var version))
-            (app (var cons) (app (var code.of-text) (var status))
-              (app (var cons) (app (var code.of-hash) (var digest))
-                (app (var cons) (app (var code.of-text) (var detail))
-                  (var nil))))))))))))
 
 (defterm ((binding governance.outcome-summary-id ()
   (lam ((pvar value))

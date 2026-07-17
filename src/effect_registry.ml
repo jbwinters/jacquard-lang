@@ -178,7 +178,7 @@ let catalog =
       "362425a29077a7efbcc37047182e579f46199a50473045eb4126a917dfc2a196"
       "request hash-bound consent for an exact proposal";
     released "Audit" "audit" Governance Special
-      "2c148fbc2e26bdc6f01279a8bf176f54d5798536e1f96805aa4f7c7a57e67632"
+      "40bc4343fb2b4bcc18b18f63f7bb68675b746751bb40b876072e622046a81372"
       "record governance evidence in an append-only stream";
     released "Secret" "secret" Governance Special
       "6d092eccc3c9858a2a95120da5a011964cbb3ad76968e11c1cbb062c119fbb31"

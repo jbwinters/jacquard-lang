@@ -33,8 +33,6 @@ project shape from file names alone.
 - `stdlib.md`: prelude, rings, library effects, and standard handlers.
 - `effect-taxonomy.md`: ratified blessed effect names, schemas, risks, rings,
   interface compatibility, and user-effect governance.
-- `effect-membranes.md`: GM.0 charter for typed governed facades, versioned
-  decision artifacts, live/dry boundaries, and monotonic composition.
 - `effect-review.md`: identity-first manifest and authority-diff review,
   uncertainty wording, canonical boundaries, and explicit non-goals.
 - `effect-membranes.md`: GM.0 charter for typed governed facades, versioned
@@ -99,6 +97,15 @@ Read these together when judging whether the release candidate is credible:
   exact review-artifact hashing, stale-decision rejection, and parity evidence.
 - `release/effect-taxonomy/ET6-MANIFEST.sha256`: reconstructible ET.6 overlay on
   the validated pre-ET.6 base; earlier evidence manifests remain unchanged.
+- `release/effect-taxonomy/ET7-EVIDENCE.md`: ET.7 canonical Approval handlers,
+  exact proposal revalidation, and the no-simulated-consent laws.
+- `release/effect-taxonomy/ET7-MANIFEST.sha256`: reconstructible ET.7 overlay on
+  the validated ET.6 base; earlier evidence manifests remain unchanged.
+- `release/effect-taxonomy/ET8-EVIDENCE.md`: ET.8 taxonomy closure, canonical
+  handler/boundary inventory, review wording, and exact tooling evidence.
+- `release/effect-taxonomy/ET8-MANIFEST.sha256`: reconstructible ET.8 overlay on
+  the integrated Secret/Approval base; predecessor manifests remain historical.
+
 ## Governed Membranes Evidence
 
 - `release/governed-membranes/GM1-EVIDENCE.md`: GM.1 versioned ring-3 values,
@@ -109,27 +116,29 @@ Read these together when judging whether the release candidate is credible:
   Proposal identities, canonical-Code goldens, and stability/sensitivity laws.
 - `release/governed-membranes/GM2-MANIFEST.sha256`: reconstructible GM.2 overlay
   on the validated GM.1 commit `b5587ce`.
+- `release/governed-membranes/GM3-EVIDENCE.md`: GM.3 validated live, dry,
+  stored, and bound policy boundaries plus exhaustive verdict-law evidence.
+- `release/governed-membranes/GM3-MANIFEST.sha256`: reconstructible GM.3 overlay
+  on the validated GM.2 plus ET.3 integration commit `3e78a95`.
+- `release/governed-membranes/GM4-EVIDENCE.md`: GM.4 hermetic Warp laws,
+  exhaustive finite supports, exact numeric edges, cache behavior, and mutation
+  detection evidence.
+- `release/governed-membranes/GM4-MANIFEST.sha256`: reconstructible GM.4 overlay
+  on validated GM.3 base `f813d11`.
 - `release/governed-membranes/GM5-EVIDENCE.md`: GM.5 released Judge identity,
   validated deterministic handlers, explicit model `Infer` row, and refusal
   evidence.
 - `release/governed-membranes/GM5-MANIFEST.sha256`: reconstructible GM.5 overlay
   on the validated GM.1 plus ET.3 integration base `94b5082`; the GM.1 evidence
   set remains historical.
-- `release/governed-membranes/GM9-EVIDENCE.md`: GM.9 once Workspace facade,
-  frozen Path carrier, inspectable exact operation specs, typed Call
-  normalizers, safe outcome summaries, and HASH_V0 identity laws.
+- `release/governed-membranes/GM6-EVIDENCE.md`: GM.6 world-free dry-gate,
+  exact audit sequencing, simulator/refusal matrix, and native parity evidence.
+- `release/governed-membranes/GM6-MANIFEST.sha256`: reconstructible GM.6 overlay
+  on the validated GM.3 plus GM.5 integration stack.
+- `release/governed-membranes/GM9-EVIDENCE.md`: GM.9 typed Workspace calls,
+  safe secret references, outcome summaries, and authority-order evidence.
 - `release/governed-membranes/GM9-MANIFEST.sha256`: reconstructible GM.9 overlay
-  on the GM.2 plus GM.5 integration commit `62bac22`; predecessor evidence sets
-  remain historical.
-
-- `release/effect-taxonomy/ET7-EVIDENCE.md`: ET.7 canonical Approval handlers,
-  exact proposal revalidation, and the no-simulated-consent laws.
-- `release/effect-taxonomy/ET7-MANIFEST.sha256`: reconstructible ET.7 overlay on
-  the validated ET.6 base; earlier evidence manifests remain unchanged.
-- `release/effect-taxonomy/ET8-EVIDENCE.md`: ET.8 taxonomy closure, canonical
-  handler/boundary inventory, review wording, and exact tooling evidence.
-- `release/effect-taxonomy/ET8-MANIFEST.sha256`: reconstructible ET.8 overlay on
-  the integrated Secret/Approval base; predecessor manifests remain historical.
+  on the validated identity, Judge, and secret integration stack.
 
 ## Structured Concurrency Evidence
 

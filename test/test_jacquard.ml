@@ -28,6 +28,7 @@ let () =
       ("approval", Test_approval.suite);
       ("governance-core", Test_governance_core.suite);
       ("judge", Test_judge.suite);
+      ("governance-gate", Test_governance_gate.suite);
       ("workspace", Test_workspace.suite);
       ("types", Test_types.suite);
       ("check", Test_check.suite);
