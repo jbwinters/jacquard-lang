@@ -1,4 +1,4 @@
-# Effect-taxonomy ET.4-ET.8 + SC.0-SC.3 + GM.0-GM.6 + GM.9 + DX.5/DX.7 reconstructible integration overlay
+# Effect-taxonomy ET.4-ET.8 + SC.0-SC.3 + GM.0-GM.6 + GM.9 + DX.5/DX.6/DX.7 reconstructible integration overlay
 # Base commit: 950fab6
 # Attestation manifests exclude themselves (and successor manifests) to avoid self/cross-hashes.
 23e5c2dcec8f2aa6c96df0b0363cf9d9a393b99d326640b0f9507832d3cd8461  README.md
