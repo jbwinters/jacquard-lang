@@ -114,13 +114,20 @@ plaintext must not become an ordinary prelude value before explicit exposure.
 | `Approval` | `approval.console`, `approval.scripted`, `approval.dry-run`, `approval.policy-auto` |
 | `Audit` | `audit.in-memory`, `audit.line-log` |
 | `Secret` | `Prelude.install_secret_fixed`, `Prelude.install_secret_vault`, explicit environment root grant |
+| `Async` | interpreted structured scheduler installed by SC.9 |
 
-The remaining ten blessed names are **reserved and unimplemented**:
-`Choose`, `Env`, `Pg`, `Blob`, `Serve`, `Crypto`, `Log`, `Judge`, `Async`, and
-`Channel`. Their schemas reserve compatibility vocabulary only. They have no
-shipped declaration hash, canonical handler, root grant, or product-availability
-claim. A future first implementation must match the reserved schema and publish
-its resulting full identity before tooling may classify it as released.
+`Async` and `Channel` remain reserved taxonomy names, but they are no longer
+mere placeholders. `Async` has the exact published identity shown above and an
+interpreted structured scheduler. `Channel` has the exact published identity
+and frozen SC.13 contract shown above, but its scheduler runtime is deferred to
+SC.14.
+
+The remaining eight blessed names are **reserved and unimplemented**:
+`Choose`, `Env`, `Pg`, `Blob`, `Serve`, `Crypto`, `Log`, and `Judge`. Their
+schemas reserve compatibility vocabulary only. They have no shipped declaration
+hash, canonical handler, root grant, or product-availability claim. A future
+first implementation must match the reserved schema and publish its resulting
+full identity before tooling may classify it as released.
 
 ### Uncertainty review is separate from authority review
 
@@ -144,11 +151,11 @@ caller share `{Async | e}`. The dependency survives aliases, higher-order
 wrappers, returned closures, tuples, polymorphic row instantiation, and nested
 scopes. Executable concurrency fixtures pin `{Async, Net}` before a scope and
 `{Net}` after one, and reject misleading closed annotations and cyclic rows.
-Generic operation typing remains unchanged. `Async` is still reserved: SC.3
-represents opaque run/scope-local Task values, SC.4 adds the static
-non-laundering rule, and SC.5 adds the policy-independent lifecycle core. No
-milestone yet implements scheduling policy, executable scopes, or a root
-handler. See
+Generic operation typing remains unchanged. `Async` is still a reserved
+taxonomy name, while its implementation has progressed beyond a placeholder:
+SC.3 represents opaque run/scope-local Task values, SC.4 adds the static
+non-laundering rule, SC.5 adds the policy-independent lifecycle core, and SC.9
+installs the interpreted structured scheduler. See
 [`concurrency.md`](concurrency.md).
 
 The reserved interface nevertheless has a full identity because SC.4 keeps it
@@ -446,8 +453,9 @@ data and receive structural diffs, never an authority label.
 - Secret redaction does not promise process-memory scrubbing. The v0 OCaml and
   native carriers do not zero payload bytes when a Secret is released, so
   process memory and crash-dump protection remain embedding responsibilities.
-- A reserved schema is neither an implementation nor a roadmap promise. In
-  particular, this release has no `Async` scheduler, typed `Channel` runtime,
+- A reserved schema is neither an implementation nor a roadmap promise. This
+  release has an interpreted `Async` scheduler, and SC.13 publishes the exact
+  `Channel` identity and contract without a Channel runtime. It has no
   database/blob/serve/crypto/log provider, pure `Choose` interface, or `Judge`
   handler.
 
