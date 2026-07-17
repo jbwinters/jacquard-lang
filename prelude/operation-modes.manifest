@@ -15,10 +15,10 @@ fs.read once
 fs.write once
 fs.list-dir once
 infer.complete once
-async.async.spawn once
-async.async.await once
-async.async.cancel once
-async.async.yield once
+async.spawn once
+async.await once
+async.cancel once
+async.yield once
 audit.record once
 approval.ask once
 judge.assess once
