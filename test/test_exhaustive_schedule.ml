@@ -164,6 +164,69 @@ let test_budgets_are_structured_incomplete_results () =
         (List.for_all (fun diagnostic -> String.equal diagnostic.Diag.code "E0908") diagnostics)
   | Ok _ -> Alcotest.fail "non-positive exhaustive budgets were accepted"
 
+let test_decision_budget_keeps_short_alternative_worlds () =
+  let source =
+    "(let nonrec (pwild)     (app (var async.spawn)       (lam ()         (let nonrec (pwild)  \
+     (app (var async.yield))           (let nonrec (pwild) (app (var async.yield)) (lit 1)))))  \
+     (let nonrec (pwild)       (app (var async.spawn) (lam () (app (var div) (lit 1) (lit 0))))  \
+     (lit 0)))"
+  in
+  let full = run ~policy:Concurrency_contract.Fail_fast source in
+  require_complete 36 full;
+  let decision_count world =
+    world.Exhaustive_schedule.schedule.events
+    |> List.filter_map (function
+      | Schedule_trace.Decide decision -> Some decision
+      | Create _ -> None)
+    |> List.length
+  in
+  (match full.worlds with
+  | fifo :: _ ->
+      Alcotest.(check int) "FIFO seed is the long seven-decision world" 7 (decision_count fifo)
+  | [] -> Alcotest.fail "complete uneven schedule tree was empty");
+  let bounded =
+    run ~policy:Concurrency_contract.Fail_fast
+      ~bounds:{ Exhaustive_schedule.max_tasks = 8; max_decisions = 5; max_worlds = 1_000 }
+      source
+  in
+  Alcotest.(check int) "three short alternatives survive the long FIFO refusal" 3 bounded.explored;
+  Alcotest.(check bool)
+    "every retained world fits the exact decision bound" true
+    (List.for_all (fun world -> decision_count world = 5) bounded.worlds);
+  Alcotest.(check int)
+    "the three bounded traces are distinct" 3
+    (bounded.worlds |> List.map trace_key |> List.sort_uniq String.compare |> List.length);
+  Alcotest.(check bool)
+    "the omitted long schedules keep the report incomplete" true
+    (has_reason
+       (function Exhaustive_schedule.Decision_budget { limit = 5 } -> true | _ -> false)
+       bounded.completeness)
+
+let test_task_budget_keeps_nonallocating_alternative_worlds () =
+  let source =
+    "(let nonrec (pwild)     (app (var async.spawn)       (lam ()         (let nonrec (pwild)  \
+     (app (var async.spawn) (lam () (lit 9))) (lit 1))))     (let nonrec (pwild)       (app  (var \
+     async.spawn) (lam () (app (var div) (lit 1) (lit 0))))       (lit 0)))"
+  in
+  let bounded =
+    run ~policy:Concurrency_contract.Fail_fast
+      ~bounds:{ Exhaustive_schedule.max_tasks = 3; max_decisions = 64; max_worlds = 1_000 }
+      source
+  in
+  Alcotest.(check int)
+    "three alternatives finish without allocating the fourth task" 3 bounded.explored;
+  Alcotest.(check bool)
+    "every retained world respects the exact task budget" true
+    (List.for_all (fun world -> world.Exhaustive_schedule.outcome.task_count = 3) bounded.worlds);
+  Alcotest.(check int)
+    "the three task-bounded traces are distinct" 3
+    (bounded.worlds |> List.map trace_key |> List.sort_uniq String.compare |> List.length);
+  Alcotest.(check bool)
+    "allocating branches keep the report incomplete" true
+    (has_reason
+       (function Exhaustive_schedule.Task_budget { limit = 3 } -> true | _ -> false)
+       bounded.completeness)
+
 let test_routed_world_effect_is_not_executed () =
   let store, world_ctx = Eval_support.make_prelude_ctx () in
   let output = Buffer.create 16 in
@@ -221,6 +284,10 @@ let suite =
     Alcotest.test_case "schedule-sensitive failure" `Quick test_schedule_sensitive_failure_is_found;
     Alcotest.test_case "structured incomplete budgets" `Quick
       test_budgets_are_structured_incomplete_results;
+    Alcotest.test_case "decision budget keeps short alternatives" `Quick
+      test_decision_budget_keeps_short_alternative_worlds;
+    Alcotest.test_case "task budget keeps nonallocating alternatives" `Quick
+      test_task_budget_keeps_nonallocating_alternative_worlds;
     Alcotest.test_case "hermetic routed-effect refusal" `Quick
       test_routed_world_effect_is_not_executed;
     Alcotest.test_case "Once resumptions stay world-local" `Quick

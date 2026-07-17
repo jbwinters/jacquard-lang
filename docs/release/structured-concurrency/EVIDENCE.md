@@ -439,21 +439,24 @@ Reports contain the complete worlds, exact `explored` and `worlds_started`
 counts, and `Complete` or structured incomplete reasons. Task, decision, and
 world budgets are separately positive. A task- or decision-bounded prefix is
 not counted as a complete world, and any exhausted budget prevents a complete
-claim. Unhandled routed operations are recorded and refused before their root
-callback; the incomplete reason names the exact decision and operation hash.
-Program failures remain complete world results so a schedule-sensitive failure
-is visible rather than aborting enumeration.
+claim. The stopped prefix remains canonical and forkable, so earlier alternate
+choices are explored even when the FIFO seed exceeds a bound. Unhandled routed
+operations are recorded and refused before their root callback; the incomplete
+reason names the exact decision and operation hash. Program failures remain
+complete world results so a schedule-sensitive failure is visible rather than
+aborting enumeration.
 
 The hand-counted fixtures prove 2 schedules for one immediate child, 3 for one
 yielding child, and 8 for two immediate children. A Warp `test.run` fixture has
 exactly 2 schedules, produces the same passing report in both, and strictly
 replays every canonical trace byte-for-byte. A fail-fast fixture reaches two
 different first failures under its 8 schedules. Structured budget regressions
-pin incomplete results at all three axes, and a hostile Console fixture proves
-the installed callback is never invoked. The multi-shot handler gauntlet and
-the eight-world two-child fixture prove no world reports E0906, each world
-creates exactly three tasks, and recursive affine-ownership metrics drain to
-zero.
+pin incomplete results at all three axes. Two uneven-tree regressions begin
+with an over-budget FIFO seed yet retain exactly three shorter worlds: one at
+five decisions and one at three tasks. A hostile Console fixture proves the
+installed callback is never invoked. The multi-shot handler gauntlet and the
+eight-world two-child fixture prove no world reports E0906, each world creates
+exactly three tasks, and recursive affine-ownership metrics drain to zero.
 
 ## Compiled test discovery
 
@@ -469,7 +472,7 @@ seven independently selectable groups and their case names are:
 | `scope-policy` | `fail-fast and collect aggregation` |
 | `round-robin` | `real evaluator FIFO lifecycle` |
 | `schedule-trace` | `canonical codec and identity`; `legacy, unknown, and noncanonical refusal`; `impossible event refusal` |
-| `exhaustive-schedule` | hand counts; Warp/replay; schedule-sensitive failure; budgets; hermeticity; Once ownership |
+| `exhaustive-schedule` | hand counts; Warp/replay; schedule-sensitive failure; budgets and stopped-prefix alternatives; hermeticity; Once ownership |
 
 The exact discovery and focused execution commands are:
 
@@ -485,7 +488,7 @@ opam exec -- dune build test/test_jacquard.exe
 )
 ```
 
-The compiled inventory is exactly 665 cases and the source inventory is 39
+The compiled inventory is exactly 667 cases and the source inventory is 39
 cram transcripts. `effect-taxonomy/3` retains only taxonomy governance and hash
 checks, so the seven scheduler/lifecycle suites execute exactly once during the
 full gate.
@@ -547,7 +550,7 @@ snapshot_source | cmp "$snapshot" -
 opam exec -- dune build @doc --root "$dest"
 ```
 
-Expected results are zero exits, 665 compiled Alcotest/QCheck cases, 39 cram
+Expected results are zero exits, 667 compiled Alcotest/QCheck cases, 39 cram
 transcripts, and 25 doctest examples across 8 documents.
 
 The default interpreted CLI, prelude-evaluation, and Warp Case paths use this

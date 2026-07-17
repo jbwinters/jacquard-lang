@@ -24,8 +24,10 @@ type report = {
   completeness : completeness;
 }
 
+type path = World_execution of Round_robin.scheduled_outcome | Stopped_prefix of Schedule_trace.t
+
 type work =
-  | Explore of Round_robin.scheduled_outcome * Schedule_trace.decision list
+  | Explore of path * Schedule_trace.decision list
   | Fork of { trace : Schedule_trace.t; decision : int; chosen : Concurrency_contract.task_id }
 
 let incomplete_reason_to_string = function
@@ -90,12 +92,13 @@ let value_of_outcome (outcome : Round_robin.outcome) =
       Error (Runtime_err.Scheduler_error "scope was cancelled")
   | { body = Concurrency_contract.Done value; _ } -> Ok value
 
-let classify_refusal bounds = function
-  | Runtime_err.Scheduler_error message when String.starts_with ~prefix:"task bound " message ->
-      Task_budget { limit = bounds.max_tasks }
-  | Runtime_err.Scheduler_error "decision bound exceeded" ->
-      Decision_budget { limit = bounds.max_decisions }
-  | error -> Scheduler_refusal (Runtime_err.to_string error)
+let reason_of_budget bounds = function
+  | Round_robin.Task_limit -> Task_budget { limit = bounds.max_tasks }
+  | Round_robin.Decision_limit -> Decision_budget { limit = bounds.max_decisions }
+
+let trace_of_path = function
+  | World_execution execution -> execution.Round_robin.execution_schedule
+  | Stopped_prefix trace -> trace
 
 let validate_bounds bounds =
   let invalid field value =
@@ -129,17 +132,21 @@ let run_expr ctx ?(policy = Concurrency_contract.default_failure_policy) ?(bound
     else (
       incr worlds_started;
       match
-        Round_robin.run_expr_outcome_scheduled ctx ~policy ~bounds:scheduler_bounds
+        Round_robin.run_expr_scheduled_attempt ctx ~policy ~bounds:scheduler_bounds
           ~allow_routed:false ~mode expression
       with
-      | Ok execution -> Some execution
+      | Ok (Round_robin.Finished execution) -> Some (World_execution execution)
+      | Ok (Round_robin.Stopped { budget; schedule_prefix; _ }) ->
+          add_reason reasons (reason_of_budget bounds budget);
+          Some (Stopped_prefix schedule_prefix)
       | Error error ->
-          add_reason reasons (classify_refusal bounds error);
+          add_reason reasons (Scheduler_refusal (Runtime_err.to_string error));
           None)
   in
   let rec drive = function
     | [] -> ()
-    | Explore (execution, []) :: rest ->
+    | Explore (Stopped_prefix _, []) :: rest -> drive rest
+    | Explore (World_execution execution, []) :: rest ->
         (match first_routed execution.execution_schedule with
         | Some (decision, operation) -> add_reason reasons (Routed_effect { decision; operation })
         | None ->
@@ -151,27 +158,27 @@ let run_expr ctx ?(policy = Concurrency_contract.default_failure_policy) ?(bound
               }
               :: !worlds_rev);
         drive rest
-    | Explore (execution, decision :: later) :: rest ->
+    | Explore (path, decision :: later) :: rest ->
+        let trace = trace_of_path path in
         let choices =
           List.map
             (fun chosen ->
               if Concurrency_contract.compare_task_id chosen decision.chosen = 0 then
-                Explore (execution, later)
-              else
-                Fork { trace = execution.execution_schedule; decision = decision.sequence; chosen })
+                Explore (path, later)
+              else Fork { trace; decision = decision.sequence; chosen })
             decision.runnable
         in
         drive (choices @ rest)
     | Fork { trace; decision; chosen } :: rest -> (
         match execute (Round_robin.Fork_schedule { trace; decision; chosen }) with
         | None -> drive rest
-        | Some execution ->
-            let later = decisions execution.execution_schedule |> drop (decision + 1) in
-            drive (Explore (execution, later) :: rest))
+        | Some path ->
+            let later = decisions (trace_of_path path) |> drop (decision + 1) in
+            drive (Explore (path, later) :: rest))
   in
   (match execute Round_robin.Record_schedule with
   | None -> ()
-  | Some execution -> drive [ Explore (execution, decisions execution.execution_schedule) ]);
+  | Some path -> drive [ Explore (path, decisions (trace_of_path path)) ]);
   let worlds = List.rev !worlds_rev in
   Ok
     {

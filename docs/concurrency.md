@@ -534,7 +534,9 @@ The report states the exact number of complete worlds, the number of executions
 started, and either `Complete` or a structured list of task, decision, world,
 or hermeticity reasons. Reaching a budget never returns a successful complete
 claim. A prefix that stops at a task or decision bound is not counted as an
-explored world.
+explored world. Its canonical decisions remain search input: the handler still
+forks every earlier runnable choice, so a long FIFO seed cannot hide shorter
+worlds that finish within the same decision or task budget.
 
 Exhaustive runs are hermetic. An unhandled routed operation is recorded, then
 refused before its root callback can run; the report is incomplete and names

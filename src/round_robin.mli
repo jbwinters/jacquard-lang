@@ -47,6 +47,19 @@ type scheduled = { value : Value.t; outcome : outcome; schedule : Schedule_trace
 type scheduled_outcome = { execution_outcome : outcome; execution_schedule : Schedule_trace.t }
 (** One complete scheduled execution, including a terminal program failure. *)
 
+type schedule_budget = Task_limit | Decision_limit
+
+type scheduled_attempt =
+  | Finished of scheduled_outcome
+  | Stopped of {
+      budget : schedule_budget;
+      error : Runtime_err.t;
+      schedule_prefix : Schedule_trace.t;
+    }
+      (** A complete execution or a validated canonical prefix stopped by one scheduler bound. A
+          stopped prefix is not a world, but retains every observed runnable choice so exhaustive
+          search can fork alternatives that may complete within the same bound. *)
+
 val run_state :
   Eval.ctx ->
   ?policy:Concurrency_contract.failure_policy ->
@@ -91,6 +104,19 @@ val run_expr_outcome_scheduled :
     its trace. When [allow_routed] is false, the scheduler records but does not invoke an unhandled
     routed operation; the world terminates with a hermeticity error. Lifecycle, replay, and budget
     defects still return [Error] because they do not describe a complete world. *)
+
+val run_expr_scheduled_attempt :
+  Eval.ctx ->
+  ?policy:Concurrency_contract.failure_policy ->
+  ?bounds:bounds ->
+  ?allow_routed:bool ->
+  mode:schedule_mode ->
+  Kernel.expr ->
+  (scheduled_attempt, Runtime_err.t) result
+(** [run_expr_scheduled_attempt] is the bounded-search seam. Task and decision exhaustion return a
+    [Stopped] canonical prefix after recursive cleanup; invalid inputs, lifecycle defects, and
+    replay drift remain [Error]. The prefix contains no evaluator state, Task handle, or resumption.
+    Callers must never count [Stopped] as a complete world. *)
 
 val run_call :
   Eval.ctx ->

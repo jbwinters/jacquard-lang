@@ -47,8 +47,10 @@ val run_expr :
   (report, Diag.t list) result
 (** [run_expr] explores every bounded runnable-task choice in deterministic depth-first queue order.
     No schedules are deduplicated. Invalid non-positive bounds return diagnostics. Reaching any
-    bound returns [Ok] with [Incomplete _], never [Complete]. Unhandled routed effects are recorded
-    and refused without invoking a root callback. *)
+    bound returns [Ok] with [Incomplete _], never [Complete]. A stopped schedule retains its
+    canonical choice prefix, so alternatives before the refusal are still explored and complete
+    in-bound worlds remain in the report. Unhandled routed effects are recorded and refused without
+    invoking a root callback. *)
 
 val incomplete_reason_to_string : incomplete_reason -> string
 (** Stable human-readable rendering for evidence and test reports. *)
