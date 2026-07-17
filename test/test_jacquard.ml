@@ -27,6 +27,7 @@ let () =
       ("cancellation", Test_cancellation.suite);
       ("scope-policy", Test_scope_policy.suite);
       ("round-robin", Test_round_robin.suite);
+      ("exhaustive-schedule", Test_exhaustive_schedule.suite);
       ("schedule-trace", Test_schedule_trace.suite);
       ("audit", Test_audit.suite);
       ("secret", Test_secret.suite);

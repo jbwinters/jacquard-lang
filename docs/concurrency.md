@@ -1,6 +1,7 @@
 # Structured Concurrency Contract
 
-Status: SC.10 versioned scheduler traces and strict replay over SC.9
+Status: SC.12 budgeted exhaustive schedule enumeration over SC.10 versioned
+scheduler traces and strict replay, over SC.9
 fail-fast/collect scope policies, SC.7 cooperative cancellation, SC.6
 structured-scope ownership, the SC.5
 policy-independent lifecycle core, and the SC.4 generalized child-effect law
@@ -390,9 +391,10 @@ D46 fixes the default scheduler to FIFO round-robin over the runnable queue:
    sub-observation ordinal after that step's D46 decision number.
 
 The host scheduler is never consulted by this default. Seeded-random,
-Choose-driven exhaustive, and host scheduling remain later handlers over the
+Choose-driven exhaustive, and host scheduling are separate handlers over the
 same decision boundary. SC.10 record/replay validates the full runnable queue
-and chosen ID before divergent user or world work executes.
+and chosen ID before divergent user or world work executes. SC.12 uses that
+strict fork seam to implement bounded exhaustive choice.
 
 SC.9 implements this boundary in `Round_robin`. Each scheduler step renders the
 exact pre-decision queue and chosen head before advancing one real `Eval.state`
@@ -515,6 +517,34 @@ record, fail-closed replay, and provenance-preserving explicit fork over that
 same driver. Raw `Eval.run_expr` remains the low-level unscheduled evaluator
 seam; native root scheduling remains separate work.
 
+### 5.2 Budgeted exhaustive schedules
+
+SC.12 treats the exact ordered runnable TaskId list at each decision as the
+support of one multi-shot `Choose`. The default exhaustive handler explores
+every ID in that order. Its implementation follows a branch by strictly
+replaying the already chosen prefix and forking at the next decision. Every
+branch starts a fresh evaluator run. This is important: the search duplicates
+the scheduler choice, but never copies or resumes one affine Async
+continuation in two worlds. There is no state hashing, partial-order reduction,
+or other pruning in v0.
+
+The three positive budgets are independent. `max-tasks` and `max-decisions`
+apply to each schedule, while `max-worlds` bounds fresh schedule executions.
+The report states the exact number of complete worlds, the number of executions
+started, and either `Complete` or a structured list of task, decision, world,
+or hermeticity reasons. Reaching a budget never returns a successful complete
+claim. A prefix that stops at a task or decision bound is not counted as an
+explored world.
+
+Exhaustive runs are hermetic. An unhandled routed operation is recorded, then
+refused before its root callback can run; the report is incomplete and names
+the decision and operation hash. Language-handled effects remain ordinary
+deterministic state inside the world. Every complete world retains its
+canonical SC.10 trace, including exact queues and choices, and strict replay
+must reproduce those bytes. Program failure is a complete world result rather
+than an enumeration failure, which lets model checking find a
+schedule-sensitive failure policy or property.
+
 The public language has no `async.current-task` operation, so a checked
 Jacquard program cannot name its own handle and self-cancel. The scheduler
 lifecycle integration test therefore exercises self-cancel at the real
@@ -539,7 +569,7 @@ The following are excluded from C1 and from this interface freeze:
 - shared mutable memory, locks, atomics, and data-race semantics;
 - automatic external-resource finalizers;
 - channels before C3 and actors/supervision before C4+;
-- seeded-random and exhaustive schedule exploration;
+- seeded-random schedule exploration;
 - host threads, host scheduling, and real asynchronous I/O before C4.
 
 Pure `parallel.map` and `parallel.both` are separate empty-row hints. Their
@@ -556,8 +586,9 @@ fallback. The prerequisite audit, parity/sanitizer lane, and benchmark are in
 
 C0 is pure parallel hints. C1 is Task lifecycle, Async, structured scopes,
 cooperative cancellation, fail-fast/collect, and the deterministic scheduler.
-C2 adds schedule tooling. SC.10 implements its versioned record/strict-replay
-slice; seeded random and bounded exhaustive schedules remain future work.
+C2 adds schedule tooling. SC.10 implements versioned record/strict replay and
+SC.12 implements budgeted exhaustive schedules. Seeded-random scheduling is a
+parallel C2 handler and is not claimed by this overlay.
 C3 adds typed channels. C4 adds host asynchronous I/O; actor supervision opens
 only after channels and lifecycle evidence exist.
 

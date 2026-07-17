@@ -37,9 +37,10 @@ project shape from file names alone.
   uncertainty wording, canonical boundaries, and explicit non-goals.
 - `effect-membranes.md`: GM.0 charter for typed governed facades, versioned
   decision artifacts, live/dry boundaries, and monotonic composition.
-- `concurrency.md`: SC.10 canonical schedule record, strict replay, and explicit
-  fork over SC.9 deterministic FIFO round-robin, including the fail-closed v1
-  schema and legacy-log policy; plus SC.8 fail-fast/collect, SC.7 cooperative
+- `concurrency.md`: SC.12 budgeted exhaustive schedule enumeration over the
+  SC.10 canonical record/replay and explicit-fork seam, including exact world
+  counts, structured incomplete results, hermetic refusal, and replayable
+  worlds; plus SC.9 deterministic FIFO, SC.8 fail-fast/collect, SC.7 cooperative
   cancellation, SC.6 structured-scope ownership, the SC.5 policy-independent
   lifecycle, the SC.4 generalized child-effect law, and D46-D50.
 - `warp-testing.md`: Warp test model, rows, handlers, cache, properties, and
@@ -122,11 +123,11 @@ Read these together when judging whether the release candidate is credible:
 
 ## Structured Concurrency Evidence
 
-- `release/structured-concurrency/EVIDENCE.md`: SC.10 versioned record/replay
-  and fork evidence over the validated SC.9 scheduler, with the prior
+- `release/structured-concurrency/EVIDENCE.md`: SC.12 exhaustive schedule
+  evidence over SC.10 versioned record/replay and the validated SC.9 scheduler, with the prior
   scope-policy, ownership, lifecycle, property, cache, and repeated-run evidence.
 - `release/structured-concurrency/MANIFEST.sha256`: reconstructible complete
-  SC.10 overlay on commit `59b12eb`.
+  SC.12 overlay on commit `59b12eb`.
 
 ## Governed Membranes Evidence
 
