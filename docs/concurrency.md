@@ -309,6 +309,12 @@ re-raised only after all sibling cleanup attempts finish. Finish is legal only
 after every registered child is terminal, preserving the structured drain
 invariant.
 
+A successfully returned immediate sibling cancellation can wake tasks already
+awaiting that sibling. The policy controller retains those handles in
+sibling-input order and each target's waiter-registration order. A scheduler
+drains them through `Scope_policy.take_awakened` before its next choice; the
+policy layer never silently discards or independently schedules them.
+
 Collect never requests sibling cancellation. It waits for every registered
 child and returns the immutable terminal results in input order, independently
 of terminal observation order. Zero children produce `Done([])` under
@@ -354,13 +360,24 @@ same routed boundary, so the caller receives no continuation with which to
 execute a later user expression. Re-entering a boundary with an already
 cancelled task also destroys the supplied stale continuation and wakes nobody.
 
+Cancellation state and ownership change before the destruction callback runs.
+The callback is a runtime destruction primitive and must normally not raise. If
+it does raise, that exception propagates, but the task remains terminal and the
+scheduler does not re-own the transferred continuation. In particular, a
+second delivery of the same suspended-task cancellation neither transfers nor
+destroys that continuation again.
+
 Dropping a continuation releases language/runtime memory; it does not release
 an external resource automatically. Acquire/release handlers (the bracket or
 `with-file` pattern) are the required C1 idiom for resources crossing a
 suspension point. `Structured_scope.protect` is the implementation bracket for
 continuation ownership: it closes on normal, result-abort, and host-exception
-paths before returning or re-raising. It is not an external-resource finalizer,
-and language finalizers remain explicitly deferred.
+paths before returning or re-raising, and cleanup attempts every still-owned
+resume even when a destruction callback raises. A cleanup exception propagates
+after an otherwise successful body. Original result-level diagnostics or a host
+exception and its raw backtrace take precedence over cleanup exceptions. It is
+not an external-resource finalizer, and language finalizers remain explicitly
+deferred.
 
 ## 5. Deterministic schedule order
 

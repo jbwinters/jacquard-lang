@@ -25,6 +25,11 @@ val create :
 val policy : ('resume, 'value) t -> Concurrency_contract.failure_policy
 (** [policy controller] returns its immutable policy. *)
 
+val take_awakened : ('resume, 'value) t -> Structured_scope.handle list
+(** [take_awakened controller] returns and clears every waiter made runnable by fail-fast sibling
+    cancellation. Handles preserve sibling input order and each target's waiter-registration order.
+    A scheduler must drain this handoff after [record_terminal] before choosing its next task. *)
+
 val record_terminal :
   ('resume, 'value) t ->
   decision:int ->
@@ -44,7 +49,9 @@ val record_terminal :
     {!Structured_scope.deliver_cancel}, which passes their resumes to [drop]. Runnable siblings
     retain an idempotent request until their next cancellation boundary. Every sibling is attempted
     even if [drop] raises; the first such exception is re-raised only after all sibling cleanup has
-    been attempted. [Collect] never requests sibling cancellation. *)
+    been attempted. Waiters awakened by successful immediate deliveries remain buffered for
+    {!take_awakened}, including when a later sibling attempt fails. [Collect] never requests sibling
+    cancellation. *)
 
 val finish : ('resume, 'value) t -> ('value aggregate, Diag.t list) result
 (** [finish controller] succeeds only after every child has been observed terminal. Fail-fast

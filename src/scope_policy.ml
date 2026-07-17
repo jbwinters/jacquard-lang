@@ -12,6 +12,7 @@ type ('resume, 'value) t = {
   children : 'value child list;
   mutable last_decision : int option;
   mutable first_non_success : frozen_non_success option;
+  mutable awakened : Structured_scope.handle list;
 }
 
 type 'value aggregate =
@@ -32,7 +33,14 @@ let create ?(policy = Concurrency_contract.default_failure_policy) scope ~childr
   let rec validate seen acc = function
     | [] ->
         Ok
-          { scope; policy; children = List.rev acc; last_decision = None; first_non_success = None }
+          {
+            scope;
+            policy;
+            children = List.rev acc;
+            last_decision = None;
+            first_non_success = None;
+            awakened = [];
+          }
     | handle :: rest ->
         Result.bind (Structured_scope.id scope handle) (fun id ->
             if List.exists (fun prior -> Concurrency_contract.compare_task_id prior id = 0) seen
@@ -42,6 +50,11 @@ let create ?(policy = Concurrency_contract.default_failure_policy) scope ~childr
   validate [] [] children
 
 let policy controller = controller.policy
+
+let take_awakened controller =
+  let awakened = controller.awakened in
+  controller.awakened <- [];
+  awakened
 
 let find_child controller id =
   List.find_opt
@@ -58,24 +71,21 @@ let cancel_unfinished controller ~drop =
   let first_exception = ref None in
   let attempt operation =
     match operation () with
-    | Ok () -> ()
+    | Ok awakened -> controller.awakened <- controller.awakened @ awakened
     | Error errors -> diagnostics := !diagnostics @ errors
     | exception exn -> if Option.is_none !first_exception then first_exception := Some exn
   in
   let cancel child =
     let* view = Structured_scope.inspect controller.scope child.handle in
     match (view.result, view.suspension) with
-    | Some _, _ -> Ok ()
+    | Some _, _ -> Ok []
     | None, suspension -> (
         let* () = Structured_scope.request_cancel controller.scope child.handle in
         match suspension with
-        | None -> Ok ()
+        | None -> Ok []
         | Some suspension ->
-            let* _ =
-              Structured_scope.deliver_cancel controller.scope
-                ~point:(cancellation_point suspension) child.handle ~drop
-            in
-            Ok ())
+            Structured_scope.deliver_cancel controller.scope ~point:(cancellation_point suspension)
+              child.handle ~drop)
   in
   List.iter (fun child -> attempt (fun () -> cancel child)) controller.children;
   match !first_exception with

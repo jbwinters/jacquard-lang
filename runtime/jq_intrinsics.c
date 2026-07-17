@@ -560,6 +560,65 @@ jq_value jq_i_hash_to_text(jq_rt *rt, const jq_value *a) {
   return jq_text(spelling, 64);
 }
 
+/* The frozen effect-taxonomy-v1 row order, including NULL slots for reserved
+ * rows. This mirrors Effect_registry.catalog: released identities compare by
+ * their catalog position, while every unknown identity sorts afterwards by
+ * its canonical lowercase HASH_V0 spelling. */
+static const char *const effect_catalog_v1[26] = {
+  "bfdfaeee39c6f5290ebea28e805bdeb92f448f1a1e0b9c47f3c70c53975b4375",
+  "f236e77750a9c066fdff9220b81ab1ba6b6a5dd5226ab63dfd112f4b14aa504e",
+  "44a2946788e38fb6a734449880cce3d499aa5e2f876c5d9119773533b3d621a9",
+  "28afafc8cbec5108fa6103e4670269080373bc0d9a07b1f0f257861ef4b948f6",
+  "5a31778adb668e471820541428a4d809f40206b231b2f9d40aeb36d5684415f0",
+  NULL,
+  "0b7297f7a38573108de121c794c6be6471d9c43bd4749d435a3cd247e7d5f008",
+  "94f82f3c17d019d6ca5092b24f19d51ad40720d0accbc4c50641ade0ca056c24",
+  "73e8a208eb7fadc43e3bd7aef1474884cf99ce86f8108ddf0e3baff0a74b3fc9",
+  "9041c22386c41541b6b6818bcb26f1aeb02ae8f0dce3fedbf5f411e4bff9eecb",
+  NULL,
+  "8ec13169c7181851364e55353232af8e3c7f5ee4a010fa3067fcf2058dd5ed84",
+  "be1aad7345c6215f227e63df6c7d05874a464f207599d4f5b85de8b0a6675b45",
+  "d5831f495fdb26e05d53d886786f07230f7bb808ac4933ab32e0a9238c89f9d0",
+  NULL,
+  NULL,
+  NULL,
+  NULL,
+  NULL,
+  "324b8f59279db3cabbfaaba430168717057cea8fc1435a11a1a9106e3e6fb4d8",
+  "362425a29077a7efbcc37047182e579f46199a50473045eb4126a917dfc2a196",
+  "40bc4343fb2b4bcc18b18f63f7bb68675b746751bb40b876072e622046a81372",
+  "6d092eccc3c9858a2a95120da5a011964cbb3ad76968e11c1cbb062c119fbb31",
+  "9b677b5e2c3ec8521c5d5dfac321ae361a959565e1cbf082fec4512199977354",
+  NULL,
+  NULL
+};
+
+jq_value jq_i_governance_effect_order_key_v0(jq_rt *rt, const jq_value *a) {
+  (void)rt;
+  if (!jq_is_hash(a[0])) type_err_args("governance.effect-order-key", a, 1);
+  static const char digits[] = "0123456789abcdef";
+  const uint8_t *bytes = jq_hash_bytes(a[0]);
+  char hex[65];
+  for (uint64_t i = 0; i < 32; i++) {
+    hex[2 * i] = digits[bytes[i] >> 4];
+    hex[2 * i + 1] = digits[bytes[i] & 15];
+  }
+  hex[64] = '\0';
+  int position = -1;
+  for (int i = 0; i < 26; i++) {
+    if (effect_catalog_v1[i] != NULL && strcmp(hex, effect_catalog_v1[i]) == 0) {
+      position = i;
+      break;
+    }
+  }
+  char key[76];
+  int length = position >= 0
+    ? snprintf(key, sizeof(key), "0:%08d:%s", position, hex)
+    : snprintf(key, sizeof(key), "1:%s", hex);
+  jq_drop(a[0]);
+  return jq_text((const uint8_t *)key, (uint64_t)length);
+}
+
 jq_value jq_i_code_to_int(jq_rt *rt, const jq_value *a) {
   if (!jq_is_code(a[0])) type_err_args("code.to-int", a, 1);
   jq_value f = a[0];

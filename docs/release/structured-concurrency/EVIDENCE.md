@@ -7,7 +7,7 @@ uses the SC.7 destruction boundary, and aggregate results preserve input order.
 This milestone intentionally contains no runnable-queue policy, host
 concurrency/I/O, or detached/root Async handler.
 
-- Reconstruction base: `6321ce5`
+- Reconstruction base: `85c25bc244273c262db6e2bfe688bff112c531a0`
 - Evidence overlay: [MANIFEST.sha256](MANIFEST.sha256)
 - Authoritative contract: [concurrency.md](../../concurrency.md)
 
@@ -175,6 +175,14 @@ idempotent. This is continuation-memory cleanup, not an automatic external
 resource finalizer; acquire/release handlers remain required around suspended
 resources.
 
+Cleanup exception precedence is deterministic. Every still-owned resume is
+offered to the destruction callback even if an earlier callback raises. A
+cleanup exception propagates after a normal successful body. An original
+result-level diagnostic takes precedence over cleanup exceptions, and an
+original host exception is re-raised after cleanup with its raw backtrace
+preserved as the prefix of any OCaml re-raise frames. Focused regressions pin
+all three outcomes and the all-drops-attempted law.
+
 The exit guard rejects returned or stored handles whose creation path is the
 closing scope or any descendant. A nested close may still observe a valid
 enclosing-scope handle. `Eval.reject_task_escape` walks the full reachable
@@ -226,6 +234,14 @@ continuation is returned for a post-cancel user step. An already-cancelled
 caller reaching another boundary destroys the newly supplied stale
 continuation and wakes nobody.
 
+Terminalization and ownership transfer happen before the destruction callback.
+Destruction callbacks must normally not raise. If one does, its exception
+propagates, while the cancelled task remains terminal and owns no resume. A
+duplicate delivery cannot transfer or destroy that suspended resume again.
+The focused raising-drop regression pins the exception identity, terminal
+`Cancelled` result, zero scheduler-owned resumes, one callback invocation, and
+zero callback invocations on duplicate delivery.
+
 Focused Alcotest coverage pins all three boundary classes, no-waiter/no-child
 preemption, routed-effect fault injection, duplicate/completed/self behavior,
 the exact public handoff that destroys suspended resume token 21 once, and the
@@ -267,6 +283,12 @@ input order; if callbacks raise, the first exception is re-raised only after all
 sibling attempts finish. Finish remains unavailable until every child is
 observed terminal, so the scope cannot expose an undrained aggregate.
 
+Waiters returned by a successful immediate sibling cancellation are retained
+rather than discarded. `Scope_policy.take_awakened` drains them in
+sibling-input order and each target's waiter-registration order for the later
+scheduler layer. The focused regression pins both ordering levels,
+runnable/resume ownership, and exactly-once draining.
+
 Collect never requests sibling cancellation. It waits for every child and
 returns `Done`, `Failed`, and `Cancelled` entries in the registered input order,
 not terminal decision order. Fail-fast likewise returns successful values in
@@ -289,12 +311,12 @@ clock, thread, scheduler queue, or root handler.
 ## Reconstruction and verification
 
 The manifest is the complete SC.8 successor overlay on validated SC.7
-integration commit `6321ce5`. Reconstruct it under repository-local scratch
+commit `85c25bc244273c262db6e2bfe688bff112c531a0`. Reconstruct it under repository-local scratch
 space:
 
 ```sh
 set -eu
-base=6321ce5
+base=85c25bc244273c262db6e2bfe688bff112c531a0
 dest="$PWD/.scratch/sc8-evidence-copy"
 manifest=docs/release/structured-concurrency/MANIFEST.sha256
 rm -rf "$dest"
@@ -337,8 +359,8 @@ snapshot_source | cmp "$snapshot" -
 opam exec -- dune build @doc --root "$dest"
 ```
 
-Expected results are zero exits, 603 compiled Alcotest/QCheck cases, 35 cram
-transcripts, and 24 doctest examples across 7 documents.
+Expected results are zero exits, 669 compiled Alcotest/QCheck cases, 37 cram
+transcripts, and 25 doctest examples across 8 scanned documents.
 
 Runnable-queue policy and the Async root handler remain later C1 tasks. SC.8
 supplies policy aggregation over explicit terminal decisions, but it does not

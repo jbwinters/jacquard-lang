@@ -66,7 +66,6 @@ let reserved_catalog_names =
     ("Serve", "serve");
     ("Crypto", "crypto");
     ("Log", "log");
-    ("Judge", "judge");
     ("Async", "async");
     ("Channel", "channel");
   ]
@@ -163,6 +162,10 @@ let catalog =
     released "Net" "net" World High
       "be1aad7345c6215f227e63df6c7d05874a464f207599d4f5b85de8b0a6675b45"
       "reach a network endpoint through the granted handler";
+    released "Workspace" "workspace" World High
+      "d5831f495fdb26e05d53d886786f07230f7bb808ac4933ab32e0a9238c89f9d0"
+      "request mediated workspace reads, writes, or fetches without directly acquiring raw \
+       authority";
     reserved "Pg" "pg" World High "issue a parameterized PostgreSQL query";
     reserved "Blob" "blob" World High "read or add immutable objects in configured blob storage";
     reserved "Serve" "serve" World High "receive and answer server requests";
@@ -175,12 +178,14 @@ let catalog =
       "362425a29077a7efbcc37047182e579f46199a50473045eb4126a917dfc2a196"
       "request hash-bound consent for an exact proposal";
     released "Audit" "audit" Governance Special
-      "2c148fbc2e26bdc6f01279a8bf176f54d5798536e1f96805aa4f7c7a57e67632"
+      "40bc4343fb2b4bcc18b18f63f7bb68675b746751bb40b876072e622046a81372"
       "record governance evidence in an append-only stream";
     released "Secret" "secret" Governance Special
       "6d092eccc3c9858a2a95120da5a011964cbb3ad76968e11c1cbb062c119fbb31"
       "resolve opaque confidential material or explicitly expose it";
-    reserved "Judge" "judge" Governance Special "assess a proposed call without performing it";
+    released "Judge" "judge" Governance Special
+      "9b677b5e2c3ec8521c5d5dfac321ae361a959565e1cbf082fec4512199977354"
+      "assess a proposed call without performing it";
     reserved "Async" "async" Concurrency No_risk
       "schedule structured tasks while charging child effects to the parent row";
     reserved "Channel" "channel" Concurrency No_risk
@@ -209,6 +214,16 @@ let find registry identity =
     registry
 
 let find_canonical identity = find canonical identity
+
+let canonical_order identity =
+  let rec find position = function
+    | [] -> None
+    | metadata :: rest -> (
+        match metadata.interface with
+        | Released { hash; _ } when Hash.equal identity hash -> Some position
+        | Released _ | Reserved _ -> find (position + 1) rest)
+  in
+  find 0 catalog
 
 type style = Plain | Ansi
 

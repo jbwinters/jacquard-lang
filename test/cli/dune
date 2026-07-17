@@ -2,6 +2,7 @@
  (deps
   %{bin:jacquard}
   %{bin:jac}
+  governance-policy-laws.jqd
   (source_tree ../../prelude)
   (source_tree ../../demos)
   (source_tree ../../corpus)
@@ -13,4 +14,5 @@
   ../gen_once_hostile.exe
   ../scope_policy_trace.exe
   (source_tree ../native-parallel)
-  (source_tree ../../scripts)))
+  (source_tree ../../scripts)
+  governance-gate-dry-laws.jqd))

@@ -34,15 +34,15 @@ type Call =
       summary: Text,
       preconditions: Code,
       parent-call-id: Option Hash)
-type Assessment =
-  | Assessment(
+type GovernanceAssessment =
+  | GovernanceAssessment(
       version: GovernanceVersion,
       risk: Risk,
       confidence: Real,
       reasons: List Text,
       evidence: Code)
-type OutcomeSummary =
-  | OutcomeSummary(
+type GovernanceOutcomeSummary =
+  | GovernanceOutcomeSummary(
       version: GovernanceVersion,
       status: Text,
       digest: Hash,
@@ -57,7 +57,7 @@ type Proposal =
       rendering: Code,
       summary: Text,
       authority: List Authority,
-      preview: Option OutcomeSummary)
+      preview: Option GovernanceOutcomeSummary)
 type Decision =
   | Approved(proposal-id: Hash, approver: Text, evidence: Code)
   | Denied(proposal-id: Hash, approver: Text, reason: Text)
@@ -68,7 +68,7 @@ type AuditEntry =
       sequence: Int,
       call-id: Hash,
       policy-id: Hash,
-      assessment: Assessment,
+      assessment: GovernanceAssessment,
       verdict: Verdict)
   | Consented(
       version: GovernanceVersion,
@@ -81,7 +81,7 @@ type AuditEntry =
       sequence: Int,
       call-id: Hash,
       branch: Text,
-      outcome: OutcomeSummary)
+      outcome: GovernanceOutcomeSummary)
 
 type LivePolicy =
   | LivePolicy(
@@ -95,7 +95,7 @@ type BoundPolicy a =
   | BoundPolicy(version: GovernanceVersion, policy-id: Hash, value: a)
 
 once effect Judge where {
-  judge.assess : (Call) -> Assessment
+  judge.assess : (Call) -> GovernanceAssessment
 }
 once effect Approval where {
   approval.ask : (Proposal) -> Decision
@@ -157,7 +157,7 @@ proposal-for(operation) =
     None)
 
 outcome-for(branch) =
-  OutcomeSummary(GovernanceV0, branch, fixture-hash, "fixture outcome")
+  GovernanceOutcomeSummary(GovernanceV0, branch, fixture-hash, "fixture outcome")
 
 run-read-simulator : ((Path) ->{} Result ToolError Text, Path) ->{} Result ToolError Text
 run-read-simulator(simulator, path) = simulator(path)
@@ -170,11 +170,12 @@ run-fetch-simulator(simulator, request) = simulator(request)
 
 next-sequence : (AuditSequence) ->{State} Int
 next-sequence(owner) = match owner {
-  | AuditSequence(_) -> {
-      let sequence = get()
-      put(add(sequence, 1))
-      sequence
-    }
+  | AuditSequence(_) -> get()
+}
+
+accept-sequence : (AuditSequence) ->{State} ()
+accept-sequence(owner) = match owner {
+  | AuditSequence(_) -> put(add(get(), 1))
 }
 
 agent() = {
@@ -193,12 +194,15 @@ workspace.live-layer(sequence, policy, read-simulator, write-simulator, fetch-si
         let judgment = judge.assess(request-call)
         let evaluated-sequence = next-sequence(sequence)
         audit.record(Evaluated(GovernanceV0, evaluated-sequence, request-id, fixture-hash, judgment, Ask))
+        accept-sequence(sequence)
         let decision = approval.ask(proposal-for(ReadFileOperation))
         let consented-sequence = next-sequence(sequence)
         audit.record(Consented(GovernanceV0, consented-sequence, request-id, fixture-hash, decision))
+        accept-sequence(sequence)
         let result = match path { | PathValue(raw) -> Ok(read(raw)) }
         let completed-sequence = next-sequence(sequence)
         audit.record(Completed(GovernanceV0, completed-sequence, request-id, "live", outcome-for("live")))
+        accept-sequence(sequence)
         continue(result)
       }
     | workspace.write-file(path, text) resume continue -> {
@@ -207,12 +211,15 @@ workspace.live-layer(sequence, policy, read-simulator, write-simulator, fetch-si
         let judgment = judge.assess(request-call)
         let evaluated-sequence = next-sequence(sequence)
         audit.record(Evaluated(GovernanceV0, evaluated-sequence, request-id, fixture-hash, judgment, Ask))
+        accept-sequence(sequence)
         let decision = approval.ask(proposal-for(WriteFileOperation))
         let consented-sequence = next-sequence(sequence)
         audit.record(Consented(GovernanceV0, consented-sequence, request-id, fixture-hash, decision))
+        accept-sequence(sequence)
         let result = match path { | PathValue(raw) -> { write(raw, text); Ok(()) } }
         let completed-sequence = next-sequence(sequence)
         audit.record(Completed(GovernanceV0, completed-sequence, request-id, "live", outcome-for("live")))
+        accept-sequence(sequence)
         continue(result)
       }
     | workspace.fetch(request) resume continue -> {
@@ -221,14 +228,17 @@ workspace.live-layer(sequence, policy, read-simulator, write-simulator, fetch-si
         let judgment = judge.assess(request-call)
         let evaluated-sequence = next-sequence(sequence)
         audit.record(Evaluated(GovernanceV0, evaluated-sequence, request-id, fixture-hash, judgment, Ask))
+        accept-sequence(sequence)
         let decision = approval.ask(proposal-for(FetchOperation))
         let consented-sequence = next-sequence(sequence)
         audit.record(Consented(GovernanceV0, consented-sequence, request-id, fixture-hash, decision))
+        accept-sequence(sequence)
         let secret = secret.read(SecretRef(GovernanceV0, "workspace", None))
         let exposed = secret.expose(secret)
         let result = match exposed { | _ -> Ok(fetch(request)) }
         let completed-sequence = next-sequence(sequence)
         audit.record(Completed(GovernanceV0, completed-sequence, request-id, "live", outcome-for("live")))
+        accept-sequence(sequence)
         continue(result)
       }
   }
@@ -243,12 +253,14 @@ workspace.dry-layer(sequence, policy, read-simulator, write-simulator, fetch-sim
         let judgment = judge.assess(request-call)
         let evaluated-sequence = next-sequence(sequence)
         audit.record(Evaluated(GovernanceV0, evaluated-sequence, request-id, fixture-hash, judgment, Simulate))
+        accept-sequence(sequence)
         let result = match read-simulator {
           | None -> Err(NoSimulation)
           | Some(simulator) -> run-read-simulator(simulator, path)
         }
         let completed-sequence = next-sequence(sequence)
         audit.record(Completed(GovernanceV0, completed-sequence, request-id, "simulated", outcome-for("simulated")))
+        accept-sequence(sequence)
         continue(result)
       }
     | workspace.write-file(path, text) resume continue -> {
@@ -257,12 +269,14 @@ workspace.dry-layer(sequence, policy, read-simulator, write-simulator, fetch-sim
         let judgment = judge.assess(request-call)
         let evaluated-sequence = next-sequence(sequence)
         audit.record(Evaluated(GovernanceV0, evaluated-sequence, request-id, fixture-hash, judgment, Simulate))
+        accept-sequence(sequence)
         let result = match write-simulator {
           | None -> Err(NoSimulation)
           | Some(simulator) -> run-write-simulator(simulator, path, text)
         }
         let completed-sequence = next-sequence(sequence)
         audit.record(Completed(GovernanceV0, completed-sequence, request-id, "simulated", outcome-for("simulated")))
+        accept-sequence(sequence)
         continue(result)
       }
     | workspace.fetch(request) resume continue -> {
@@ -271,12 +285,14 @@ workspace.dry-layer(sequence, policy, read-simulator, write-simulator, fetch-sim
         let judgment = judge.assess(request-call)
         let evaluated-sequence = next-sequence(sequence)
         audit.record(Evaluated(GovernanceV0, evaluated-sequence, request-id, fixture-hash, judgment, Simulate))
+        accept-sequence(sequence)
         let result = match fetch-simulator {
           | None -> Err(NoSimulation)
           | Some(simulator) -> run-fetch-simulator(simulator, request)
         }
         let completed-sequence = next-sequence(sequence)
         audit.record(Completed(GovernanceV0, completed-sequence, request-id, "simulated", outcome-for("simulated")))
+        accept-sequence(sequence)
         continue(result)
       }
   }
