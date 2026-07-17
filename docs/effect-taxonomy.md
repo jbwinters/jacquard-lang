@@ -507,7 +507,7 @@ receives a record intended for the verified inode.
 | D57 | Secret opacity | opaque, no `Show`, inspect redacts, explicit in-row `secret.expose`; taint deferred |
 | D58 | audit chain | implemented `audit-chain-v1` carrier commits existing canonical entry bytes and predecessor HASH_V0; CLI append publishes a head and governance verification fails closed offline |
 | D59 | Proposal schema | implemented `proposal-v1` binds semantic call subject separately from exact review identity; policy, assessment, ordered authority, rendering, summary, and preview are mandatory hash inputs; decisions embed that exact proposal hash, and hash-less, forged, or mismatched carriers fail before action. GM.0 D67 supersedes the earlier `subject` field name with exact `call-id` and `proposal-id` schemas. |
-| D60 | membrane placement | GM.1 implements the versioned core in ring 3; GM.5 releases Judge handlers and GM.9 releases the typed Workspace facade, while cookbook and flagship demo work remain later phases |
+| D60 | membrane placement | GM.1 implements the versioned core data and policies in ring 3; GM.5 releases Judge handlers and GM.9 releases the typed Workspace facade, while cookbook and flagship demo work remain later phases |
 | D61 | facade shape | domain-specific typed facade effects; no universal stringly `Tool.call` |
 | D62 | raw authority | host is a role; membranes re-perform concrete blessed world effects, never `Host` |
 | D63 | Judge status | blessed once effect with `judge.assess : (Call) -> Assessment` |
