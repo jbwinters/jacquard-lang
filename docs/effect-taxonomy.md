@@ -80,7 +80,7 @@ mode; there is no inference from names.
 | `Secret` | `secret` | `official` | `governance` | `-` | `once` | `special` | `3` | `reserved` | `first-release` | `secret.read:(SecretRef)->Secret;secret.expose:(Secret)->Text` | resolve opaque confidential material or explicitly expose it |
 | `Judge` | `judge` | `official` | `governance` | `-` | `once` | `special` | `3` | `reserved` | `first-release` | `judge.assess:(Call)->Assessment` | assess a proposed call without performing it |
 | `Async` | `async` | `official` | `concurrency` | `a` | `once` | `none` | `2` | `reserved` | `4ff8ce05ab09968163492b3be40fc91381b47dee5fb4b2980f9416d50f38e66f` | `async.spawn:(()->{Async\|e}a)->Task a;async.await:(Task a)->TaskResult a;async.cancel:(Task a)->();async.yield:()->()` | schedule structured tasks while charging child effects to the parent row |
-| `Channel` | `channel` | `official` | `concurrency` | `a` | `once` | `none` | `2` | `reserved` | `first-release` | `channel.open:()->ChannelHandle a;channel.send:(ChannelHandle a,a)->Result ChannelError ();channel.recv:(ChannelHandle a)->Result ChannelError a;channel.close:(ChannelHandle a)->()` | communicate typed values between structured tasks |
+| `Channel` | `channel` | `official` | `concurrency` | `a` | `once` | `none` | `2` | `reserved` | `bf9a334188ac13495eeb070fdc215d51763d9761b4775c98c61f44ebb1b03756` | `channel.open:(Int)->Result ChannelError (ChannelHandle a);channel.send:(ChannelHandle a,a)->Result ChannelError ();channel.recv:(ChannelHandle a)->Result ChannelError a;channel.close:(ChannelHandle a)->()` | communicate typed values between structured tasks |
 
 The full 64-hex identities and unabridged operation strings are normative in
 the TSV artifact. In particular, `Check` remains a prelude testing protocol,
@@ -143,7 +143,7 @@ type SecretRef = SecretRef(name: Text, version: Option Text)
 type Task a                                      -- opaque scheduler handle
 type TaskResult a = Done(value: a) | Failed(message: Text) | Cancelled
 type ChannelHandle a                            -- opaque, distinct from effect Channel
-type ChannelError = ChannelClosed
+type ChannelError = ChannelClosed | InvalidCapacity(requested: Int)
 ```
 
 `Hash`, `Bytes`, `Secret`, `Task`, and `ChannelHandle` are opaque
@@ -211,8 +211,8 @@ type SecretRef = | SecretRef(name: Text, version: Option Text)
 type Secret = | OpaqueSecret
 type Task a = | TaskOpaque
 type TaskResult a = | Done(value: a) | Failed(message: Text) | Cancelled
-type ChannelHandle a = | ChannelHandleValue(id: Int)
-type ChannelError = | ChannelClosed
+type ChannelHandle a = | ChannelOpaque
+type ChannelError = | ChannelClosed | InvalidCapacity(requested: Int)
 
 once effect Env where {
   env.get : (Text) -> Option Text
@@ -256,12 +256,29 @@ once effect Async a where {
   async.yield : () -> ()
 }
 once effect Channel a where {
-  channel.open : () -> ChannelHandle a
+  channel.open : (Int) -> Result ChannelError (ChannelHandle a)
   channel.send : (ChannelHandle a, a) -> Result ChannelError ()
   channel.recv : (ChannelHandle a) -> Result ChannelError a
   channel.close : (ChannelHandle a) -> ()
 }
 ```
+
+### Channel implementation obligation
+
+SC.13 freezes the complete Channel interface and its HASH_V0 identity before a
+handler exists. A capacity of zero denotes a rendezvous channel, a positive
+capacity denotes a bounded FIFO channel, and a negative capacity returns
+`Err(InvalidCapacity(requested))` before allocating a handle. `ChannelHandle`
+is an opaque exact-scope/run capability. Close is idempotent, rejects pending
+and future sends with `ChannelClosed`, and lets receivers drain values already
+accepted into the buffer before returning `ChannelClosed`. The ordering,
+cancellation, fan-in, policy interaction, trace fixtures, and SC.14
+implementation checklist are normative in
+[`concurrency.md`](concurrency.md#8-typed-channels-sc13--c3-contract). The
+reserved status means no runtime handler is shipped by SC.13. SC.14 admits only
+this exact interface hash to the interpreted scheduler; Channel is never a
+world grant, `--allow channel` remains invalid, and a near-match receives no
+special routing.
 
 ## 5. Typed facades and concrete authority
 

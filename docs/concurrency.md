@@ -1,6 +1,6 @@
 # Structured Concurrency Contract
 
-Status: SC.9 deterministic FIFO round-robin scheduling over SC.8
+Status: SC.13 typed-channel interface and semantic freeze over SC.9; runtime deferred to SC.14
 fail-fast/collect scope policies, SC.7 cooperative cancellation, SC.6
 structured-scope ownership, the SC.5
 policy-independent lifecycle core, and the SC.4 generalized child-effect law
@@ -447,7 +447,7 @@ The following are excluded from C1 and from this interface freeze:
 - detached or daemon tasks and any fire-and-forget root handler;
 - shared mutable memory, locks, atomics, and data-race semantics;
 - automatic external-resource finalizers;
-- channels before C3 and actors/supervision before C4+;
+- channel runtime before SC.14 and actors/supervision before C4+;
 - seeded-random/exhaustive schedule exploration and trace replay before C2;
 - host threads, host scheduling, and real asynchronous I/O before C4.
 
@@ -459,13 +459,292 @@ interpreter semantics are sequential and they introduce no Async effect.
 C0 is pure parallel hints. C1 is Task lifecycle, Async, structured scopes,
 cooperative cancellation, fail-fast/collect, and the deterministic scheduler.
 C2 adds schedule traces, replay, seeded random, and bounded exhaustive schedules.
-C3 adds typed channels. C4 adds host asynchronous I/O; actor supervision opens
-only after channels and lifecycle evidence exist.
+C3 adds typed channels. SC.13 freezes their interface and semantics without a
+runtime; SC.14 implements them. C4 adds host asynchronous I/O; actor supervision
+opens only after channels and lifecycle evidence exist.
 
 | ID | decision | frozen result |
 |---|---|---|
 | D46 | default scheduler | deterministic FIFO round-robin; host scheduling is opt-in |
 | D47 | cancellation | cooperative at the three suspension classes above; bracket for cleanup; finalizers deferred |
 | D48 | task escape | E0907 dynamic defect in v0; rank-2 static scoping is future work |
-| D49 | channels and actors | channels deferred to C3; actors/supervision to C4+ |
+| D49 | channels and actors | SC.13 freezes scoped typed channels for C3; SC.14 implements them; actors/supervision remain C4+ |
 | D50 | scope failure policy | fail-fast default; collect explicit, with the exact result shapes in §3 |
+
+## 8. Typed channels (SC.13 / C3 contract)
+
+SC.13 is an interface and behavior freeze, not a runtime implementation. The
+declarations, hashes, transitions, rows, ownership checks, and policy
+interactions below are normative for SC.14. `ChannelHandle` constructors remain
+private, no Channel handler is installed, and actors/supervision remain out of
+scope.
+
+### 8.1 Exact declarations, modes, identities, and rows
+
+The frozen source fixture is executable checker input. `ChannelOpaque` is the
+future private runtime carrier; its source-level constructor exists here only
+to make the complete declaration hashable before SC.14.
+
+```jacquard doctest=concurrency-channel-contract mode=check fixture=concurrency-channel-contract.jac stdout=concurrency-channel-contract.stdout stderr=empty exit=0
+type ChannelHandle a = | ChannelOpaque
+type ChannelError = | ChannelClosed | InvalidCapacity(requested: Int)
+type Task a = | TaskOpaque
+type TaskResult a = | Done(value: a) | Failed(message: Text) | Cancelled
+
+once effect Channel a where {
+  channel.open : (Int) -> Result ChannelError (ChannelHandle a)
+  channel.send : (ChannelHandle a, a) -> Result ChannelError ()
+  channel.recv : (ChannelHandle a) -> Result ChannelError a
+  channel.close : (ChannelHandle a) -> ()
+}
+
+once effect Async a where {
+  async.spawn : (() ->{Async | e} a) -> Task a
+  async.await : (Task a) -> TaskResult a
+  async.cancel : (Task a) -> ()
+  async.yield : () -> ()
+}
+
+open-channel(capacity) = channel.open(capacity)
+send-one(channel, value) = channel.send(channel, value)
+recv-one(channel) = channel.recv(channel)
+close-channel(channel) = channel.close(channel)
+spawn-send(channel, value) = async.spawn(fn () -> channel.send(channel, value))
+```
+
+Every Channel operation is `once`; mode is included in its member and whole
+interface hash. The exact `HASH_V0` identities are:
+
+| declaration/member | HASH_V0 identity |
+|---|---|
+| `ChannelHandle a` | `f4f5601a435906a47faedae9006e44b874146f3ad4b586bf9d04535be14dccb4` |
+| private `ChannelOpaque` | `dc7a12f5fc0476b674d52535e9895220edf41f2a017b1dd97fc078950a3dbb36` |
+| `ChannelError` | `25dc8f513c91c80fd6d33e843fc3f6cab183800805f46e269f716155149b4da7` |
+| `ChannelClosed` | `de3da3e601fbba2c66864b87c6848d8224411df99f1967e132aaa166c1a3f3a9` |
+| `InvalidCapacity` | `01b719cb597275f097c2c36b5e86b3d71604eb531fe00ef66d9c93ec3f55acfb` |
+| `Channel a` | `bf9a334188ac13495eeb070fdc215d51763d9761b4775c98c61f44ebb1b03756` |
+| `channel.open` | `23f13bd2fd87d17716873bf34c708d6c9a2ddd5f2b4e4f634db6e5d1827b1f07` |
+| `channel.send` | `348fc5c967097b939360ecb2b066ba22ea8b924834e507c87a0e0f05f26fbfb0` |
+| `channel.recv` | `db28d70a061da1f1108e01dfaa7e248c4268b9460971c518a9c37f1b51b52860` |
+| `channel.close` | `ffa22eb01ff7aa206fec56f540b6fd1758b8590e8e797e83f3cbfd295ebce29b` |
+
+The checker output above pins these rows:
+
+```text
+open-channel : forall a. (Int) ->{Channel} Result ChannelError (ChannelHandle a)
+send-one : forall a. (ChannelHandle a, a) ->{Channel} Result ChannelError ()
+recv-one : forall a. (ChannelHandle a) ->{Channel} Result ChannelError a
+close-channel : forall a. (ChannelHandle a) ->{Channel} ()
+spawn-send : forall a. (ChannelHandle a, a) ->{Async, Channel} Task (Result ChannelError ())
+```
+
+The block is signature output rather than source, so it is intentionally a
+`text` fence. Channel does not receive a special dependent-row rule: Async's
+existing child-row law carries the child's Channel effect to the spawning
+caller. An Async scope may discharge only Async and therefore retains Channel.
+
+SC.14 routes only the exact frozen Channel declaration and member identities
+through the default interpreted scheduler, just as SC.9 routes only the exact
+frozen Async identity. The CLI manifest admits that exact Channel hash as a
+scheduler-managed effect; it is not a world grant, `--allow channel` remains
+invalid, and a same-named or structurally different effect receives no special
+treatment. The currently scheduled task supplies the owner scope: a root task
+uses scope path `[0]`, and a task inside `async.scope` uses that exact nested
+path. A language handler may intercept Channel in the ordinary algebraic-effect
+way; this contract governs only an operation that reaches the scheduler. Raw
+`Eval.run_expr` and the native backend remain unsupported Channel seams in
+SC.14. Keeping Channel in the outward row makes this routing visible instead of
+silently pretending that `async.scope` discharged a second effect.
+
+The element type is invariantly shared by handle, send argument, and receive
+result. This negative checker fixture must fail before any runtime exists:
+
+```jacquard doctest=concurrency-channel-type-mismatch mode=check fixture=concurrency-channel-type-mismatch.jac stdout=empty stderr=concurrency-channel-type-mismatch.stderr exit=1
+type ChannelHandle a = | ChannelOpaque
+type ChannelError = | ChannelClosed | InvalidCapacity(requested: Int)
+
+once effect Channel a where {
+  channel.open : (Int) -> Result ChannelError (ChannelHandle a)
+  channel.send : (ChannelHandle a, a) -> Result ChannelError ()
+  channel.recv : (ChannelHandle a) -> Result ChannelError a
+  channel.close : (ChannelHandle a) -> ()
+}
+
+send-text-to-int : (ChannelHandle Int) ->{Channel} Result ChannelError ()
+send-text-to-int(channel) = channel.send(channel, "wrong")
+```
+
+### 8.2 Capacity, acceptance, and atomic transition order
+
+`channel.open(n)` returns `Err(InvalidCapacity(n))` for `n < 0`, before carrier
+allocation or consumption of a channel creation ordinal. This is an ordinary
+typed result, never E0908, and there is no second capacity wrapper type. A
+successful open returns `Ok(handle)` and establishes:
+
+- `n = 0`: rendezvous; no value can be buffered;
+- `n > 0`: a bounded FIFO buffer with capacity exactly `n`; allocation may be
+  lazy and must not reserve `n` host slots eagerly.
+
+Once the exact operation identity reaches the scheduler, common checks occur in
+this order before the transition table below:
+
+1. deliver a pending cancellation for the chosen task before inspecting
+   capacity or handle state; the task becomes `Cancelled`, no Channel result is
+   produced, and no Channel continuation or state is mutated;
+2. for `open`, reject negative capacity with the typed result above, then check
+   the native ChannelId bounds before allocation (E0908 on exhaustion);
+3. for `send`, `recv`, and `close`, validate the opaque carrier's evaluator run,
+   exact current open scope, and live channel ownership recursively; failure is
+   E0907 before consuming the Once continuation or inspecting closed/buffered
+   state;
+4. only a valid, non-cancelled operation applies the first matching transition
+   below and consumes or transfers its continuation exactly once.
+
+A send succeeds only when its value is accepted into the buffer or delivered
+directly to a receiver. Merely entering the blocked-sender queue is not success;
+the suspended continuation retains the value. Every operation is one atomic
+scheduler step with this priority:
+
+| operation | frozen transition |
+|---|---|
+| send on closed | `Err(ChannelClosed)`; value is not accepted |
+| send with waiting receiver | deliver to oldest receiver; sender and receiver return `Ok` |
+| send with buffer space | append value; return `Ok(())` |
+| send otherwise | append sender/value/Once continuation to sender FIFO; suspend |
+| recv with buffered value | remove oldest value; if a sender waits, append its value into the new slot and complete that oldest sender; return removed value |
+| recv with no buffer and waiting sender | rendezvous with oldest sender; both return `Ok` |
+| recv on closed and drained | `Err(ChannelClosed)` |
+| recv otherwise | append receiver/Once continuation to receiver FIFO; suspend |
+| close on open | atomically mark closed and apply §8.3 |
+| close on closed | return `()` with no additional wakeup; close is idempotent |
+
+The invariant is one FIFO buffer plus FIFO sender and receiver queues. A
+well-formed state never retains both sender and receiver waiters: the operation
+that would create the second kind pairs with the oldest opposite waiter instead.
+Values are communicated exactly once by ordinary Jacquard value semantics;
+channels add no shared mutable cells, reference identity, equality, or
+broadcast. Accepted buffer order is never completion, TaskId, or hash-table
+order.
+
+### 8.3 Close and blocked operations
+
+Explicit close is drain-on-close:
+
+1. mark the channel closed;
+2. preserve values already accepted in the FIFO buffer;
+3. remove every blocked sender in registration order, discard its unaccepted
+   value, and complete its send with `Err(ChannelClosed)`;
+4. when the buffer is empty, remove every blocked receiver in registration
+   order and complete it with `Err(ChannelClosed)`;
+5. append awakened counterparts before the closing task resumes.
+
+After close, receives drain accepted values in FIFO order and then return
+`Err(ChannelClosed)` forever. Sends return `Err(ChannelClosed)` forever. Close
+returns `()` on both its first and subsequent calls. A close cannot race inside
+one transition: the scheduler decision containing the earlier atomic operation
+wins.
+
+### 8.4 Deterministic fan-in and wake order
+
+Scheduler decision order determines when a runnable producer reaches send.
+When producers block, sender registration order is that decision order and the
+oldest surviving sender is paired/promoted first. Receiver ordering is the same.
+Cancellation removes one waiter without reordering survivors.
+
+Every transition appends wakeups behind tasks already runnable. A matched or
+promoted counterpart is appended first, followed by the currently chosen task
+when its operation continuation remains runnable. Close appends its waiter FIFO
+first and the closer last. An immediate open/send/recv/close result therefore
+records the chosen task as its sole wake entry; `wake=-` is reserved for a
+chosen task that actually suspends. Thus fan-in is deterministic without
+sorting by TaskId or iterating a hash table.
+
+The normative design traces are
+[`rendezvous-v1.trace`](../corpus/channel/rendezvous-v1.trace) and
+[`buffered-v1.trace`](../corpus/channel/buffered-v1.trace). They pin exact
+pre/post abstract state, results, and wake order. The rendezvous trace also pins
+negative-capacity rejection, blocked-receiver cancellation and close; the
+buffered trace pins blocked-sender cancellation, survivor order, close
+rejection order, and drain order. They are SC.14 acceptance fixtures rather
+than a claim that SC.13 executes channels.
+
+### 8.5 Cancellation, ownership, and escape
+
+Channel routing is an SC.7 cancellation boundary, including nonblocking `open`
+and `close`. A cancellation already requested when a task reaches
+open/send/recv/close wins before capacity or handle validation as frozen in
+§8.2. Cancelling a blocked sender removes its waiter and drops its
+unaccepted value; cancelling a blocked receiver removes its waiter without
+consuming a value. Both resume the task only along the existing Task
+cancellation path, not with a Channel result. If an earlier scheduler decision
+already completed a match, that result is committed and a later cancellation
+does not roll it back.
+
+Every successful open creates a private ChannelId `(scope-path,
+zero-based-successful-open-index)`. Invalid capacity consumes no index. IDs are
+trace/diagnostic data only and have no Jacquard `Show`; SC.14 must use the same
+native-domain validation as TaskId and report internal exhaustion as E0908
+before allocation.
+
+A handle carries an unforgeable evaluator-run owner and its exact creating
+scope. Any task in that exact scope may send, receive, or close it. A nested,
+parent, foreign, closed scope or later scheduler run cannot use it. Recursive
+state/result scans reject a handle returned from its creating scope, retained in
+a tuple/constructor/closure, or smuggled through a hostile root callback with
+E0907 before continuation consumption or channel mutation. Nested scopes create
+their own channels; parent/descendant channel sharing is deliberately absent in
+v1.
+
+### 8.6 Scope policy, teardown, and deadlock
+
+Fail-fast and collect do not change FIFO, close results, or deadlock detection:
+
+- fail-fast selects the existing first decision-ordered non-success, requests
+  sibling cancellation in creation order, removes channel-blocked siblings via
+  §8.5, then closes owned channels in ChannelId order during scope teardown;
+  cancelled operations yield Task `Cancelled`, not `Err(ChannelClosed)`;
+- collect does not cancel siblings or implicitly close a channel when one child
+  fails. Other children may continue to communicate and their results remain in
+  creation order;
+- under either policy, if every remaining live task is channel-blocked and no
+  channel transition is possible, the scheduler reports deadlock E0908. In
+  particular, fail-fast has no failure to prefer in this state; collect cannot
+  return a partial aggregate. Deadlock never implies an implicit close. Cleanup
+  removes waiters and destroys continuations;
+- explicit close while the scope is active uses §8.3 regardless of policy;
+- final scope destruction closes owned channels in creation order, removes any
+  waiter before destroying its Once continuation, and drops undrained buffered
+  values. No Channel result is observable after scope destruction.
+
+Normal structured scope completion still requires all children terminal. A
+body cannot return its channel to evade that rule because the recursive escape
+scan rejects it first.
+
+### 8.7 SC.14 implementation checklist and exclusions
+
+SC.14 is conforming only if all of the following remain true:
+
+- [x] exact declarations, four `once` modes, whole/member/type hashes, and rows
+  above;
+- [x] exact-identity scheduler admission, no `--allow channel`, current-task
+  root/nested scope routing, and unsupported raw/native seams;
+- [x] typed negative-capacity result before allocation, rendezvous at zero, and
+  bounded FIFO backpressure above zero;
+- [x] sender/receiver registration, fan-in, promotion, and wake append order;
+- [x] idempotent drain-on-close and exact blocked sender/receiver results;
+- [x] cancellation-before-mutation, waiter removal, value ownership, and no
+  double continuation consumption;
+- [x] exact run/scope ownership, recursive escape scans, hostile callback
+  revalidation, and deterministic ChannelId creation;
+- [x] fail-fast cancellation, collect non-interference, policy-independent
+  all-channel-blocked E0908 refusal, and exception-safe teardown;
+- [x] rendezvous and buffered contract traces plus positive/negative checker
+  fixtures.
+
+The checked boxes mean the design question is resolved, not that SC.13 ships a
+runtime. Out of scope remain unbounded channels, select/try-send/try-recv,
+timeouts, channel iteration, cloning or splitting endpoints, cross-scope
+handles, broadcast/pub-sub, shared memory, locks/atomics, host I/O readiness,
+actors, mailboxes, links, monitors, supervision, distributed channels, and
+native/runtime implementation. Any such addition requires a new interface and
+compatibility decision; SC.14 must not infer one from this freeze.

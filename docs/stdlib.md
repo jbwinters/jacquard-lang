@@ -78,6 +78,11 @@ ratified in [`effect-taxonomy.md`](effect-taxonomy.md). This document describes
 the shipped prelude; the taxonomy is the compatibility contract consumed by
 future registry and manifest tooling.
 
+The reserved `Channel a` interface is now frozen by SC.13, including its exact
+hash, typed capacity error, FIFO/close/cancellation rules, and scope ownership;
+see [`concurrency.md`](concurrency.md#8-typed-channels-sc13--c3-contract).
+SC.13 does not add it to the shipped prelude or install a runtime handler.
+
 ## 3. Ring 0: the axioms
 
 ### Core types

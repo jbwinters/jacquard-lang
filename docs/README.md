@@ -32,10 +32,11 @@ project shape from file names alone.
 - `stdlib.md`: prelude, rings, library effects, and standard handlers.
 - `effect-taxonomy.md`: ratified blessed effect names, schemas, risks, rings,
   interface compatibility, and user-effect governance.
-- `concurrency.md`: SC.9 deterministic FIFO round-robin over SC.8
-  fail-fast/collect policies, SC.7 cooperative cancellation, SC.6 structured-scope ownership, the SC.5
-  policy-independent lifecycle, and the SC.4 generalized child-effect law,
-  plus scope contracts, scheduling exclusions, and D46-D50.
+- `concurrency.md`: SC.13 typed-channel interface and semantic freeze over the
+  SC.9 deterministic FIFO round-robin runtime, including exact Channel hashes,
+  capacity/backpressure, close, cancellation, fan-in, ownership, policy
+  interaction, and SC.14 acceptance traces; actors and channel runtime remain
+  deferred.
 - `warp-testing.md`: Warp test model, rows, handlers, cache, properties, and
   world lanes.
 - `errors.md`: diagnostic code catalog.
@@ -46,6 +47,8 @@ Read these together when judging whether the release candidate is credible:
 
 - `release/0.1/EVIDENCE.md`: built artifact, test inventory, commands, summary.
 - `release/0.1/CLAIMS.md`: claims mapped to proving tests/demos and caveats.
+- `release/structured-concurrency/EVIDENCE.md`: SC.13 contract evidence over the
+  implemented SC.9 lifecycle and scheduler foundation.
 - `release/0.1/REPRO.md`: fresh-clone reproduction.
 - `release/0.1/FREEZE.md`: frozen version/hash/store/trace/CLI/error surfaces.
 - `release/0.1/GAUNTLET.md`: adversarial tests present and omitted.
@@ -72,11 +75,11 @@ Read these together when judging whether the release candidate is credible:
 
 ## Structured Concurrency Evidence
 
-- `release/structured-concurrency/EVIDENCE.md`: SC.9 deterministic scheduler,
-  scope-policy, ownership, lifecycle, property, cache, and repeated-run evidence
-  over the validated SC.8 base.
+- `release/structured-concurrency/EVIDENCE.md`: SC.13 typed-channel contract,
+  exact interface hashes, checker fixtures, normative traces, and checklist over
+  the implemented SC.9 scheduler foundation.
 - `release/structured-concurrency/MANIFEST.sha256`: reconstructible complete
-  SC.9 overlay on commit `af7501c`.
+  SC.13 overlay on commit `59b12eb`.
 
 ## Maintenance Notes
 

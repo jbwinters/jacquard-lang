@@ -682,7 +682,16 @@ let validate_release_docs ~decision ~followups ~index =
          current inventory is validated separately against the 0.1 decision and
          evidence files by [evolving_inventory_errors]. *)
       check_inventory "tests" (List.init 573 string_of_int) false;
-      check_inventory "doctests" (doctest_names ()) true;
+      let surface_snapshot_doctests =
+        (* SC.13 doctests are successor evidence and must not rewrite the immutable SS.22
+           inventory asserted by this case. *)
+        doctest_names ()
+        |> List.filter (fun name ->
+            not
+              (List.mem name
+                 [ "concurrency-channel-contract"; "concurrency-channel-type-mismatch" ]))
+      in
+      check_inventory "doctests" surface_snapshot_doctests true;
       check_inventory "twins" (twin_names ()) true;
       check_inventory "demos" (demo_names ()) true);
   let evidence_sections =

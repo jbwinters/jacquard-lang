@@ -129,8 +129,8 @@ also emits E0817; consuming the captured resumption twice emits E0816.
 | E0904 | observe at the sampling root | `observe` under `jacquard run --allow dist` (D7 default: defect) |
 | E0905 | exhaustive verification budget exceeded | a property over `uniform-int(1, 1000000)` under `jacquard test --exhaustive` |
 | E0906 | a once continuation was resumed more than once | applying the same once resumption twice |
-| E0907 | a Task carrier is private, malformed, foreign to the run, escaped, stale, or outside its structured scope | returning/storing a Task beyond `async.scope`, constructing `TaskOpaque` by hash, reusing a Task after close/in another run, or passing a foreign handle to a scope policy |
-| E0908 | a deterministic scheduler or same-scope policy operation is illegal for its lifecycle, decision order, registration, continuation ownership, or configured positive bound | checking out a suspended task, recording a nonterminal or unregistered child, repeating/decreasing a decision number, exceeding a task/decision bound, observing a terminal child twice, or completing a task twice |
+| E0907 | a Task or ChannelHandle carrier is private, malformed, foreign to the run, escaped, stale, or outside its exact structured scope | returning/storing a Task or ChannelHandle beyond `async.scope`, constructing its private carrier by hash, reusing it after close/in another run, or using a parent/descendant/foreign handle |
+| E0908 | a deterministic scheduler or same-scope policy/channel operation is illegal for its lifecycle, decision order, registration, continuation ownership, deadlock state, or configured positive bound | checking out a suspended task, repeating/decreasing a decision number, exceeding a task/decision/channel-ID bound, observing a terminal child twice, completing a continuation twice, or leaving every live task channel-blocked with no possible transition under either policy |
 
 ## Warp (E10xx)
 

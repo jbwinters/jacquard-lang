@@ -1,13 +1,14 @@
-# Structured Concurrency SC.9 Evidence
+# Structured Concurrency SC.13 Evidence
 
-Status: deterministic FIFO round-robin scheduling is implemented over the
-validated SC.8 scope-policy layer. The driver advances real evaluator states and
-affine continuations using only explicit queues and deterministic TaskIds; it
-preserves the SC.7 cancellation and lifecycle boundary and the SC.4 child-row
-law. This milestone contains no host scheduling, versioned replay, detached
-tasks, or native root scheduler.
+Status: the typed-channel interface and complete deterministic semantic contract
+are frozen over the implemented SC.9 FIFO round-robin scheduler. SC.13 supplies
+executable declarations, exact identities and rows, normative rendezvous and
+buffered traces, scope/policy rules, and an implementation checklist. It does
+not add a Channel handler or runtime. The underlying scheduler still advances
+real evaluator states and affine continuations using explicit queues and
+deterministic TaskIds.
 
-- Reconstruction base: `af7501c`
+- Reconstruction base: `59b12eb`
 - Evidence overlay: [MANIFEST.sha256](MANIFEST.sha256)
 - Authoritative contract: [concurrency.md](../../concurrency.md)
 
@@ -336,6 +337,69 @@ boundary:
 Warp Props remain data properties over the single C1 FIFO schedule; they do not
 claim schedule exploration.
 
+## SC.13 typed-channel freeze
+
+The machine-readable taxonomy and two executable checker fixtures agree on four
+`once` operations:
+
+```text
+channel.open : (Int) -> Result ChannelError (ChannelHandle a)
+channel.send : (ChannelHandle a, a) -> Result ChannelError ()
+channel.recv : (ChannelHandle a) -> Result ChannelError a
+channel.close : (ChannelHandle a) -> ()
+```
+
+`ChannelError` is exactly `ChannelClosed | InvalidCapacity(requested: Int)`.
+The complete HASH_V0 identities are pinned by `effect-taxonomy/2`:
+
+| declaration/member | HASH_V0 identity |
+|---|---|
+| `ChannelHandle a` | `f4f5601a435906a47faedae9006e44b874146f3ad4b586bf9d04535be14dccb4` |
+| private `ChannelOpaque` | `dc7a12f5fc0476b674d52535e9895220edf41f2a017b1dd97fc078950a3dbb36` |
+| `ChannelError` | `25dc8f513c91c80fd6d33e843fc3f6cab183800805f46e269f716155149b4da7` |
+| `ChannelClosed` | `de3da3e601fbba2c66864b87c6848d8224411df99f1967e132aaa166c1a3f3a9` |
+| `InvalidCapacity` | `01b719cb597275f097c2c36b5e86b3d71604eb531fe00ef66d9c93ec3f55acfb` |
+| `Channel a` | `bf9a334188ac13495eeb070fdc215d51763d9761b4775c98c61f44ebb1b03756` |
+| `channel.open` | `23f13bd2fd87d17716873bf34c708d6c9a2ddd5f2b4e4f634db6e5d1827b1f07` |
+| `channel.send` | `348fc5c967097b939360ecb2b066ba22ea8b924834e507c87a0e0f05f26fbfb0` |
+| `channel.recv` | `db28d70a061da1f1108e01dfaa7e248c4268b9460971c518a9c37f1b51b52860` |
+| `channel.close` | `ffa22eb01ff7aa206fec56f540b6fd1758b8590e8e797e83f3cbfd295ebce29b` |
+
+The positive fixture pins rows for open/send/recv/close and proves Async's
+existing shared child-row law produces `{Async, Channel}` for a spawned sender.
+The negative fixture rejects sending `Text` through `ChannelHandle Int` with
+E0804 before a runtime exists.
+
+The SC.14 routing boundary is also frozen: only the exact Channel whole/member
+identities are admitted by the default interpreted scheduler, never by
+`--allow channel`. The chosen task's current root or nested structured scope is
+the owner; a near-match, raw evaluator call, or native execution receives no
+special Channel route. `async.scope` still subtracts only Async, leaving Channel
+visible in the outward row until scheduler admission or an ordinary language
+handler intercepts it.
+
+Capacity zero is rendezvous; a positive capacity is bounded FIFO; a negative
+capacity returns typed `InvalidCapacity` before allocation. The contract fixes
+oldest-waiter pairing, bounded backpressure, buffer-first receive with sender
+promotion, counterpart-before-current wake order, deterministic fan-in, and
+idempotent drain-on-close. Cancellation is delivered before channel mutation
+and removes a blocked waiter without reordering survivors. Handles are exact
+run/scope capabilities and escape or parent/descendant use is E0907.
+Fail-fast removes channel-blocked siblings through cancellation; collect does
+not cancel or auto-close. Under either policy, an all-channel-blocked live set
+with no possible transition is E0908; fail-fast has no failure to prefer.
+
+`corpus/channel/rendezvous-v1.trace` and
+`corpus/channel/buffered-v1.trace` pin exact abstract states, results, and wake
+order. Together they include negative capacity without ChannelId consumption,
+chosen-task wake after successful open, rendezvous, buffer promotion, blocked
+receiver and sender cancellation, survivor order, close rejection/wakeup,
+drain order, and an explicit second close. Their SHA-256 identities are pinned
+by the focused test, which parses and checks every semantic field and contiguous
+decision number. These are SC.14 acceptance fixtures, not runtime transcripts.
+Actors, supervision, select, unbounded/cross-scope channels, host I/O readiness,
+and channel runtime remain excluded.
+
 ## Compiled test discovery
 
 The lifecycle evidence is registered directly in the compiled Alcotest
@@ -364,9 +428,10 @@ opam exec -- dune build test/test_jacquard.exe
 )
 ```
 
-The compiled inventory is exactly 578 cases and the source inventory is 35
-cram transcripts. `effect-taxonomy/3` retains only taxonomy governance and hash
-checks, so the five lifecycle suites execute exactly once during the full gate.
+The compiled inventory is exactly 579 cases and the source inventory is 35
+cram transcripts. `effect-taxonomy/2` is the independently selectable SC.13
+interface/trace/checklist proof; the five lifecycle suites execute exactly once
+during the full gate.
 
 Native scheduling remains outside the current backend. Differential coverage is
 therefore limited to the supported case: an Async operation discharged by an
@@ -376,14 +441,14 @@ grant was added.
 
 ## Reconstruction and verification
 
-The manifest is the complete SC.9 successor overlay on validated SC.8 commit
-`af7501c`. Reconstruct it under repository-local scratch
+The manifest is the complete SC.13 successor overlay on validated SC.9 commit
+`59b12eb`. Reconstruct it under repository-local scratch
 space:
 
 ```sh
 set -eu
-base=af7501c
-dest="$PWD/.scratch/sc9-evidence-copy"
+base=59b12eb
+dest="$PWD/.scratch/sc13-evidence-copy"
 manifest=docs/release/structured-concurrency/MANIFEST.sha256
 rm -rf "$dest"
 mkdir -p "$dest"
