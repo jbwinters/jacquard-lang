@@ -91,18 +91,39 @@ let test_schema_and_frozen_identities () =
     "GM.1 GovernanceCall identity unchanged"
     "20824137b34985dabf9e6bb0c20cf9987c1ca93b5cdd8d1da60cbc69550efc27"
     (Hash.to_hex (lookup "governance-call" Resolve.KType));
+  List.iter
+    (fun (name, expected) ->
+      Alcotest.(check string)
+        (name ^ " identity unchanged") expected
+        (Hash.to_hex (lookup name Resolve.KType)))
+    [
+      ("live-policy", "313c11b97a460ed1c4b2fc3c215dc76e3af85378f9ec2146604094acf0fe9269");
+      ("dry-policy", "465569b1f1b94025f3e40d3efe4fc99cd780e887fe1366da8b74011a810ffae1");
+      ("stored-policy", "f520783c93ebab3648d5996bc431c78e3a0e6e11135ec73424531e67fb7928f7");
+      ("bound-policy", "71eba002ffd98c2be9d0bf74e9bce53275ba87c763367450f8bef74a439fbf82");
+      ("governance-proposal", "c3acd6332f0fdb23bcc800edd64a11192d2744cc824447fbbd7c8d6069f487b8");
+    ];
   ignore (lookup "governance.resolve-operation-id" Resolve.KTerm)
 
 let test_confidence_and_policy_refusals () =
   List.iter
     (fun (label, confidence) ->
-      Alcotest.(check bool)
-        label true
-        (String.starts_with ~prefix:"err("
-           (show
-              (Printf.sprintf
-                 "(app (var governance.make-assessment) (var low) %s (var nil) (quote (evidence)))"
-                 confidence))))
+      List.iter
+        (fun (constructor, expression) ->
+          Alcotest.(check bool)
+            (label ^ " rejected by " ^ constructor)
+            true
+            (String.starts_with ~prefix:"err(" (show expression)))
+        [
+          ( "Assessment",
+            Printf.sprintf
+              "(app (var governance.make-assessment) (var low) %s (var nil) (quote (evidence)))"
+              confidence );
+          ( "LivePolicy",
+            Printf.sprintf "(app (var governance.make-live-policy) (var low) (var high) %s)"
+              confidence );
+          ("DryPolicy", Printf.sprintf "(app (var governance.make-dry-policy) %s)" confidence);
+        ])
     [
       ("negative confidence", "(lit -0.01)");
       ("confidence above one", "(lit 1.01)");
@@ -117,6 +138,17 @@ let test_confidence_and_policy_refusals () =
        "(tuple (app (var governance.make-assessment) (var low) (lit 0.0) (var nil) (quote \
         (evidence))) (app (var governance.make-assessment) (var high) (lit 1.0) (var nil) (quote \
         (evidence))))");
+  List.iter
+    (fun (label, expression) ->
+      Alcotest.(check bool) label true (String.starts_with ~prefix:"ok(" (show expression)))
+    [
+      ( "live confidence endpoint zero",
+        "(app (var governance.make-live-policy) (var low) (var high) (lit 0.0))" );
+      ( "live confidence endpoint one",
+        "(app (var governance.make-live-policy) (var low) (var high) (lit 1.0))" );
+      ("dry confidence endpoint zero", "(app (var governance.make-dry-policy) (lit 0.0))");
+      ("dry confidence endpoint one", "(app (var governance.make-dry-policy) (lit 1.0))");
+    ];
   Alcotest.(check string)
     "reversed live thresholds refused" "err(\"invalid LivePolicy: auto-up-to exceeds ask-up-to\")"
     (show "(app (var governance.make-live-policy) (var high) (var low) (lit 0.5))");
@@ -126,7 +158,19 @@ let test_confidence_and_policy_refusals () =
        (show
           "(app (var governance.validate-assessment) (app (var governance-assessment-v0) (var \
            governance-v0) (var low) (app (var real.div) (lit 0.0) (lit 0.0)) (var nil) (quote \
-           (evidence))))"))
+           (evidence))))"));
+  Alcotest.(check bool)
+    "verifier catches directly constructed invalid live policy" true
+    (String.starts_with ~prefix:"err("
+       (show
+          "(app (var governance.validate-live-policy) (app (var live-policy-v0) (var \
+           governance-v0) (var high) (var low) (lit 0.5)))"));
+  Alcotest.(check bool)
+    "verifier catches directly constructed invalid dry policy" true
+    (String.starts_with ~prefix:"err("
+       (show
+          "(app (var governance.validate-dry-policy) (app (var dry-policy-v0) (var governance-v0) \
+           (app (var real.div) (lit 1.0) (lit 0.0))))"))
 
 let test_operation_name_table () =
   let malformed =
@@ -357,6 +401,18 @@ let dry_policy =
   "(match (app (var governance.make-dry-policy) (lit 0.75)) (clause (pcon ok (pvar policy)) (var \
    policy)))"
 
+let bound_dry_policy =
+  unwrap_ok (Printf.sprintf "(app (var governance.bind-dry-policy) %s)" dry_policy)
+
+let risk_names = [| "low"; "medium"; "high"; "forbidden" |]
+
+let expected_live_verdict ~auto ~ask ~risk ~confidence =
+  if risk = 3 then "ok(block)"
+  else if confidence < 0.75 then if risk <= ask then "ok(ask)" else "ok(block)"
+  else if risk <= auto then "ok(allow)"
+  else if risk <= ask then "ok(ask)"
+  else "ok(block)"
+
 let test_policy_laws_and_bound_verifier () =
   List.iter
     (fun (label, expression, expected) -> Alcotest.(check string) label expected (show expression))
@@ -384,12 +440,32 @@ let test_policy_laws_and_bound_verifier () =
         Printf.sprintf "(app (var governance.dry-verdict) %s (var forbidden) (var true))" dry_policy,
         "ok(block)" );
     ];
+  List.iter
+    (fun (label, encoder, value, expected_hash) ->
+      Alcotest.(check string)
+        (label ^ " HASH_V0") (qtext expected_hash)
+        (show
+           (Printf.sprintf "(app (var hash.to-text) (app (var code.hash) (app (var %s) %s)))"
+              encoder value)))
+    [
+      ( "live policy",
+        "governance.live-policy-code",
+        live_policy,
+        "90b89e26cc677201a904cc1757be0b78814aea45d13cbcd3fd66c9be56927e52" );
+      ( "dry policy",
+        "governance.dry-policy-code",
+        dry_policy,
+        "60c734f066602ee2c7846ed4b4ead349bd3820077508a6de771b2a6cfe9396a1" );
+    ];
   let bound = Printf.sprintf "(app (var governance.bind-live-policy) %s)" live_policy in
-  Alcotest.(check bool)
-    "canonical bound policy validates" true
-    (String.starts_with ~prefix:"ok(#"
-       (show
-          (Printf.sprintf "(app (var governance.validate-bound-live-policy) %s)" (unwrap_ok bound))));
+  Alcotest.(check string)
+    "canonical bound policy validates exact hash"
+    "ok(#90b89e26cc677201a904cc1757be0b78814aea45d13cbcd3fd66c9be56927e52)"
+    (show (Printf.sprintf "(app (var governance.validate-bound-live-policy) %s)" (unwrap_ok bound)));
+  Alcotest.(check string)
+    "canonical dry bound policy validates exact hash"
+    "ok(#60c734f066602ee2c7846ed4b4ead349bd3820077508a6de771b2a6cfe9396a1)"
+    (show (Printf.sprintf "(app (var governance.validate-bound-dry-policy) %s)" bound_dry_policy));
   let forged =
     Printf.sprintf "(app (var bound-policy-v0) (var governance-v0) %s %s)" (hash hash_d) live_policy
   in
@@ -397,7 +473,136 @@ let test_policy_laws_and_bound_verifier () =
     "forged bound policy refused"
     "err(\"invalid BoundPolicy: carried policy hash does not match canonical live-policy-v0 \
      bytes\")"
-    (show (Printf.sprintf "(app (var governance.validate-bound-live-policy) %s)" forged))
+    (show (Printf.sprintf "(app (var governance.validate-bound-live-policy) %s)" forged));
+  Alcotest.(check string)
+    "bound execution rejects forged live policy" "err(invalid-decision)"
+    (show
+       (Printf.sprintf "(app (var governance.live-policy-verdict) %s (var low) (lit 1.0))" forged));
+  Alcotest.(check string)
+    "bound execution rejects non-finite confidence" "err(invalid-decision)"
+    (show
+       (Printf.sprintf
+          "(app (var governance.live-policy-verdict) %s (var low) (app (var real.div) (lit 0.0) \
+           (lit 0.0)))"
+          bound_live_policy));
+  let forged_dry =
+    Printf.sprintf "(app (var bound-policy-v0) (var governance-v0) %s %s)" (hash hash_d) dry_policy
+  in
+  Alcotest.(check string)
+    "bound execution rejects forged dry policy" "err(invalid-decision)"
+    (show
+       (Printf.sprintf "(app (var governance.dry-policy-verdict) %s (var low) (var true))"
+          forged_dry));
+  let stored_live =
+    unwrap_ok (Printf.sprintf "(app (var governance.make-stored-live-policy) %s)" live_policy)
+  in
+  let stored_dry =
+    unwrap_ok (Printf.sprintf "(app (var governance.make-stored-dry-policy) %s)" dry_policy)
+  in
+  List.iter
+    (fun (label, value, wire, expected_hash) ->
+      Alcotest.(check string)
+        (label ^ " canonical wire") (qtext wire)
+        (show
+           (Printf.sprintf "(app (var code.render) (app (var governance.stored-policy-code) %s))"
+              value));
+      Alcotest.(check string)
+        (label ^ " HASH_V0") (qtext expected_hash)
+        (show
+           (Printf.sprintf "(app (var hash.to-text) (app (var governance.stored-policy-id) %s))"
+              value));
+      Alcotest.(check bool)
+        (label ^ " validates") true
+        (String.starts_with ~prefix:"ok("
+           (show (Printf.sprintf "(app (var governance.validate-stored-policy) %s)" value))))
+    [
+      ( "stored live policy",
+        stored_live,
+        "(stored-live-policy-v0 (live-policy-v0 (governance-v0) (low) (high) (lit 0.75)))",
+        "a36470e6ca6572907676552bf34ff9f6b014477b72c9b5db7404614aaaeb3de0" );
+      ( "stored dry policy",
+        stored_dry,
+        "(stored-dry-policy-v0 (dry-policy-v0 (governance-v0) (lit 0.75)))",
+        "036336921aef6c48b284574788a8e509fe67d7ce31356f73ea815597ffc77be0" );
+    ];
+  let bound_stored =
+    unwrap_ok (Printf.sprintf "(app (var governance.bind-stored-policy) %s)" stored_live)
+  in
+  Alcotest.(check string)
+    "canonical stored BoundPolicy validates exact hash"
+    "ok(#a36470e6ca6572907676552bf34ff9f6b014477b72c9b5db7404614aaaeb3de0)"
+    (show (Printf.sprintf "(app (var governance.validate-bound-stored-policy) %s)" bound_stored));
+  let forged_stored =
+    Printf.sprintf "(app (var bound-policy-v0) (var governance-v0) %s %s)" (hash hash_d) stored_live
+  in
+  Alcotest.(check string)
+    "forged stored BoundPolicy refused"
+    "err(\"invalid BoundPolicy: carried policy hash does not match canonical stored-policy-v0 \
+     bytes\")"
+    (show (Printf.sprintf "(app (var governance.validate-bound-stored-policy) %s)" forged_stored));
+  Array.iteri
+    (fun auto auto_name ->
+      Array.iteri
+        (fun ask ask_name ->
+          let policy =
+            Printf.sprintf "(app (var governance.make-live-policy) (var %s) (var %s) (lit 0.75))"
+              auto_name ask_name
+          in
+          if auto > ask then
+            Alcotest.(check bool)
+              (Printf.sprintf "invalid threshold grid %s/%s" auto_name ask_name)
+              true
+              (String.starts_with ~prefix:"err(" (show policy))
+          else
+            let bound =
+              unwrap_ok
+                (Printf.sprintf "(app (var governance.bind-live-policy) %s)" (unwrap_ok policy))
+            in
+            Array.iteri
+              (fun risk risk_name ->
+                List.iter
+                  (fun confidence ->
+                    let label =
+                      Printf.sprintf "live grid auto=%s ask=%s risk=%s confidence=%.2f" auto_name
+                        ask_name risk_name confidence
+                    in
+                    let actual =
+                      show
+                        (Printf.sprintf
+                           "(app (var governance.live-policy-verdict) %s (var %s) (lit %.17f))"
+                           bound risk_name confidence)
+                    in
+                    Alcotest.(check string)
+                      label
+                      (expected_live_verdict ~auto ~ask ~risk ~confidence)
+                      actual)
+                  [ 0.; 0.5; 0.75; 1. ])
+              risk_names)
+        risk_names)
+    risk_names;
+  List.iter
+    (fun threshold ->
+      let policy =
+        unwrap_ok (Printf.sprintf "(app (var governance.make-dry-policy) (lit %.17f))" threshold)
+      in
+      let bound = unwrap_ok (Printf.sprintf "(app (var governance.bind-dry-policy) %s)" policy) in
+      Array.iteri
+        (fun risk risk_name ->
+          List.iter
+            (fun (has_simulator, expected) ->
+              let expected = if risk = 3 then "ok(block)" else expected in
+              let actual =
+                show
+                  (Printf.sprintf "(app (var governance.dry-policy-verdict) %s (var %s) (var %b))"
+                     bound risk_name has_simulator)
+              in
+              Alcotest.(check string)
+                (Printf.sprintf "dry grid threshold=%.2f risk=%s simulator=%b" threshold risk_name
+                   has_simulator)
+                expected actual)
+            [ (true, "ok(simulate)"); (false, "err(no-simulation)") ])
+        risk_names)
+    [ 0.; 0.5; 1. ]
 
 let test_safe_summaries () =
   Alcotest.(check string)
@@ -439,15 +644,21 @@ let test_safe_summaries () =
      with Not_found -> false)
 
 let prop_valid_confidence_is_accepted =
-  QCheck.Test.make ~count:60 ~name:"all finite confidence samples in [0,1] are accepted"
+  QCheck.Test.make ~count:60
+    ~name:"all finite confidence samples in [0,1] are accepted by policy and assessment boundaries"
     QCheck.(make Gen.(map (fun n -> float_of_int n /. 1000.) (int_bound 1000)))
     (fun confidence ->
-      String.starts_with ~prefix:"ok("
-        (show
-           (Printf.sprintf
-              "(app (var governance.make-assessment) (var medium) (lit %.17f) (var nil) (quote \
-               (evidence)))"
-              confidence)))
+      List.for_all
+        (fun expression -> String.starts_with ~prefix:"ok(" (show expression))
+        [
+          Printf.sprintf
+            "(app (var governance.make-assessment) (var medium) (lit %.17f) (var nil) (quote \
+             (evidence)))"
+            confidence;
+          Printf.sprintf "(app (var governance.make-live-policy) (var low) (var high) (lit %.17f))"
+            confidence;
+          Printf.sprintf "(app (var governance.make-dry-policy) (lit %.17f))" confidence;
+        ])
 
 let prop_call_hash_is_deterministic =
   QCheck.Test.make ~count:60
@@ -510,20 +721,27 @@ let prop_proposal_hash_sensitivity =
            (canonical_proposal_id (canonical_proposal ()))
            (canonical_proposal_id changed)))
 
-let prop_dry_simulates_with_any_threshold =
-  let risk_name = function 0 -> "low" | 1 -> "medium" | 2 -> "high" | _ -> "forbidden" in
+let prop_policy_numeric_boundaries =
   QCheck.Test.make ~count:80
-    ~name:"dry policy Simulates every non-Forbidden risk when a simulator exists"
-    QCheck.(pair (int_bound 3) (int_bound 1000))
-    (fun (risk_rank, threshold_millis) ->
+    ~name:"live policy confidence comparison is inclusive and rejects values outside [0,1]"
+    QCheck.(int_bound 1000)
+    (fun threshold_millis ->
       let threshold = float_of_int threshold_millis /. 1000. in
-      let expected = if risk_rank = 3 then "ok(block)" else "ok(simulate)" in
-      String.equal expected
-        (show
-           (Printf.sprintf
-              "(app (var governance.dry-verdict) (match (app (var governance.make-dry-policy) (lit \
-               %.17f)) (clause (pcon ok (pvar policy)) (var policy))) (var %s) (var true))"
-              threshold (risk_name risk_rank))))
+      let policy =
+        unwrap_ok
+          (Printf.sprintf "(app (var governance.make-live-policy) (var low) (var high) (lit %.17f))"
+             threshold)
+      in
+      let bound = unwrap_ok (Printf.sprintf "(app (var governance.bind-live-policy) %s)" policy) in
+      let verdict confidence =
+        show
+          (Printf.sprintf "(app (var governance.live-policy-verdict) %s (var low) (lit %.17f))"
+             bound confidence)
+      in
+      String.equal "ok(allow)" (verdict threshold)
+      && (threshold = 0. || String.equal "ok(ask)" (verdict (threshold -. 0.001)))
+      && String.equal "err(invalid-decision)" (verdict (-0.001))
+      && String.equal "err(invalid-decision)" (verdict 1.001))
 
 let suite =
   [
@@ -541,5 +759,5 @@ let suite =
     QCheck_alcotest.to_alcotest prop_call_hash_sensitivity;
     QCheck_alcotest.to_alcotest prop_proposal_hash_is_stable;
     QCheck_alcotest.to_alcotest prop_proposal_hash_sensitivity;
-    QCheck_alcotest.to_alcotest prop_dry_simulates_with_any_threshold;
+    QCheck_alcotest.to_alcotest prop_policy_numeric_boundaries;
   ]

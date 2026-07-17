@@ -130,10 +130,16 @@ let handler_contracts =
       terms = [];
       root_grant = true;
     };
+    {
+      handled_effect = "Judge";
+      boundary = "`judge.rules`, `judge.fixed`, `judge.scripted`, `judge.model`";
+      terms = [ "judge.rules"; "judge.fixed"; "judge.scripted"; "judge.model" ];
+      root_grant = false;
+    };
   ]
 
 let reserved_effects =
-  [ "Choose"; "Env"; "Pg"; "Blob"; "Serve"; "Crypto"; "Log"; "Judge"; "Async"; "Channel" ]
+  [ "Choose"; "Env"; "Pg"; "Blob"; "Serve"; "Crypto"; "Log"; "Async"; "Channel" ]
 
 type effect_shape = { ename : string; evars : string list; ops : Kernel.opspec list }
 
@@ -245,6 +251,13 @@ let row_type_parameters row =
   if String.equal row.parameters "-" then [] else String.split_on_char ',' row.parameters
 
 let implementation_operation_schema row schema =
+  let schema =
+    if String.equal row.effect_name "Judge" then
+      Str.global_replace
+        (Str.regexp_string "(Call)->Assessment")
+        "(GovernanceCall)->GovernanceAssessment" schema
+    else schema
+  in
   match String.index_opt schema ':' with
   | None -> Alcotest.failf "operation schema lacks a colon: %s" schema
   | Some index ->
@@ -494,10 +507,10 @@ let test_complete_contract () =
   let doc = Corpus_support.read_file taxonomy_doc in
   Alcotest.(check int) "blessed effect count" 25 (List.length rows);
   Alcotest.(check int)
-    "implemented count" 15
+    "implemented count" 16
     (List.length (List.filter (fun row -> String.equal row.status "implemented") rows));
   Alcotest.(check int)
-    "reserved count" 10
+    "reserved count" 9
     (List.length (List.filter (fun row -> String.equal row.status "reserved") rows));
   check_unique "effect names unique" (List.map (fun row -> row.effect_name) rows);
   check_unique "official index names unique" (List.map (fun row -> row.index_name) rows);
@@ -574,7 +587,6 @@ let test_resolved_reserved_schemas () =
       ("Serve", [ "serve.next"; "serve.respond" ]);
       ("Crypto", [ "crypto.verify"; "crypto.random" ]);
       ("Log", [ "log.emit" ]);
-      ("Judge", [ "judge.assess" ]);
       ("Async", [ "async.spawn"; "async.await"; "async.cancel"; "async.yield" ]);
       ("Channel", [ "channel.open"; "channel.send"; "channel.recv"; "channel.close" ]);
     ]
@@ -627,6 +639,10 @@ let test_resolved_reserved_schemas () =
   Alcotest.(check string) "Approval is released" "implemented" approval.status;
   Alcotest.(check string)
     "Approval exact operation schema" "approval.ask:(Proposal)->Decision" approval.operations;
+  let judge = find "Judge" in
+  Alcotest.(check string) "Judge is released" "implemented" judge.status;
+  Alcotest.(check string)
+    "Judge exact operation schema" "judge.assess:(Call)->Assessment" judge.operations;
   let doc = Corpus_support.read_file taxonomy_doc in
   let normalized_doc = normalize_whitespace doc in
   List.iter
@@ -1264,11 +1280,11 @@ let test_governance_and_links () =
   Alcotest.(check bool)
     "stdlib implemented inventory is exact" true
     (contains_string stdlib
-       "| implemented (15) | `Abort`, `Throw`, `State`, `Emit`, `Dist`, `Fault`, `Eval`, \
-        `Console`, `Clock`, `Fs`, `Net`, `Infer`, `Approval`, `Audit`, `Secret` |");
+       "| implemented (16) | `Abort`, `Throw`, `State`, `Emit`, `Dist`, `Fault`, `Eval`, \
+        `Console`, `Clock`, `Fs`, `Net`, `Infer`, `Approval`, `Audit`, `Secret`, `Judge` |");
   Alcotest.(check bool)
     "stdlib reserved inventory is exact" true
-    (contains_string stdlib ("| reserved/unimplemented (10) | " ^ reserved_csv ^ " |"));
+    (contains_string stdlib ("| reserved/unimplemented (9) | " ^ reserved_csv ^ " |"));
   List.iter
     (fun phrase ->
       Alcotest.(check bool)
@@ -1415,7 +1431,7 @@ let test_typed_registry_matches_contract () =
   let entries = Effect_registry.catalog in
   Alcotest.(check int) "catalog covers every blessed entry" 25 (List.length entries);
   Alcotest.(check int)
-    "only live identities enter the canonical registry" 15
+    "only live identities enter the canonical registry" 16
     (List.length (Effect_registry.entries Effect_registry.canonical));
   Alcotest.(check (list string))
     "catalog names exactly cover the TSV"
@@ -1497,24 +1513,24 @@ let test_registration_rejects_duplicates () =
   (match Effect_registry.register registered different_name with
   | Error (Effect_registry.Duplicate_index_name "net") -> ()
   | _ -> Alcotest.fail "duplicate official index name was accepted");
-  let reserved = registry_entry "Judge" in
+  let reserved = registry_entry "Env" in
   (match Effect_registry.register registered reserved with
-  | Error (Effect_registry.Missing_resolved_identity "Judge") -> ()
+  | Error (Effect_registry.Missing_resolved_identity "Env") -> ()
   | _ -> Alcotest.fail "reserved interface entered the resolved registry");
   let retagged =
     {
       reserved with
       interface =
         Effect_registry.Released
-          { version = "forged"; hash = Hash.of_string "invented judge identity" };
+          { version = "forged"; hash = Hash.of_string "invented env identity" };
     }
   in
   (match Effect_registry.register Effect_registry.empty retagged with
-  | Error (Effect_registry.Reserved_catalog_name "Judge") -> ()
+  | Error (Effect_registry.Reserved_catalog_name "Env") -> ()
   | _ -> Alcotest.fail "retagged reserved display name entered the registry");
-  let display_renamed = { retagged with display_name = "PretendJudge" } in
+  let display_renamed = { retagged with display_name = "PretendEnv" } in
   match Effect_registry.register Effect_registry.empty display_renamed with
-  | Error (Effect_registry.Reserved_catalog_name "judge") -> ()
+  | Error (Effect_registry.Reserved_catalog_name "env") -> ()
   | _ -> Alcotest.fail "retagged reserved index name entered the registry"
 
 let test_unknown_identity_is_uncolored_and_unblessed () =

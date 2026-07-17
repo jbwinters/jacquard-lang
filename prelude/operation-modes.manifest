@@ -21,6 +21,7 @@ async.async.cancel once
 async.async.yield once
 audit.record once
 approval.ask once
+judge.assess once
 secret.read once
 secret.expose once
 dist.sample multi
