@@ -500,3 +500,27 @@ let metrics scope =
     List.fold_left (fun totals child -> add_metrics totals (loop child)) own scope.children
   in
   loop scope
+
+let channel_deadlocked scope =
+  let rec collect (all_suspended, has_channel, live_count) current =
+    let local =
+      List.fold_left
+        (fun (all_suspended, has_channel, live_count) view ->
+          match view.Scheduler_core.result with
+          | Some _ -> (all_suspended, has_channel, live_count)
+          | None ->
+              let suspended = view.lifecycle = Concurrency_contract.Suspended in
+              let channel_wait =
+                match view.suspension with
+                | Some (Scheduler_core.Channel_sending _ | Scheduler_core.Channel_receiving _) ->
+                    true
+                | Some (Scheduler_core.Yielded | Scheduler_core.Awaiting _) | None -> false
+              in
+              (all_suspended && suspended, has_channel || channel_wait, live_count + 1))
+        (all_suspended, has_channel, live_count)
+        (Scheduler_core.task_views current.scheduler)
+    in
+    List.fold_left collect local current.children
+  in
+  let all_suspended, has_channel, live_count = collect (true, false, 0) scope in
+  (not scope.closed) && live_count > 0 && all_suspended && has_channel

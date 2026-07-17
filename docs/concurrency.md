@@ -937,10 +937,10 @@ SC.14 is conforming only if all of the following remain true:
 - [x] rendezvous and buffered contract traces plus positive/negative checker
   fixtures.
 
-The checked boxes mean the design question is resolved, not that SC.13 ships a
-runtime. Out of scope remain unbounded channels, select/try-send/try-recv,
+The checked boxes now describe the shipped SC.14 interpreted runtime and its
+acceptance evidence. Out of scope remain unbounded channels, select/try-send/try-recv,
 timeouts, channel iteration, cloning or splitting endpoints, cross-scope
 handles, broadcast/pub-sub, shared memory, locks/atomics, host I/O readiness,
 actors, mailboxes, links, monitors, supervision, distributed channels, and
-native/runtime implementation. Any such addition requires a new interface and
-compatibility decision; SC.14 must not infer one from this freeze.
+native runtime implementation. Any such addition requires a new interface and
+compatibility decision; SC.14 does not infer one from this freeze.

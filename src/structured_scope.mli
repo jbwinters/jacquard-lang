@@ -282,3 +282,8 @@ val protect :
 val metrics : ('resume, 'value) t -> metrics
 (** [metrics scope] recursively counts open scopes, nonterminal tasks, runnable tasks, and owned
     resume tokens. *)
+
+val channel_deadlocked : ('resume, 'value) t -> bool
+(** [channel_deadlocked] holds when every remaining live task in this scope tree is suspended and at
+    least one waits on a Channel. It is a read-only empty-runnable-queue diagnostic; it never closes
+    a channel or changes task state. *)

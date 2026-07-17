@@ -612,6 +612,46 @@ let test_channel_open_refusal_domains () =
     "closed scope is not invalid capacity" "E0907"
     (Structured_scope.channel_open exhausted ~capacity:1 |> error_code)
 
+let test_channel_closer_mapper_and_live_registry_preflight () =
+  let scope, body = Structured_scope.create ~body_resume:1 |> ok in
+  let channel = opened_channel scope 0 in
+  let close_raised =
+    match
+      Structured_scope.with_checkout scope body (fun resume ->
+          Structured_scope.channel_close scope ~task:body ~channel ~resume
+            ~map_resume:map_channel_resume ~map_closer:(fun _ -> raise Exit))
+    with
+    | exception Exit -> true
+    | Ok _ | Error _ -> false
+  in
+  Alcotest.(check bool) "raising closer mapper propagates" true close_raised;
+  let sender = Structured_scope.spawn scope ~resume:10 |> ok in
+  (match
+     Structured_scope.with_checkout scope sender (fun resume ->
+         Structured_scope.channel_send scope ~task:sender ~channel ~resume ~value:"still-open"
+           ~map_resume:map_channel_resume)
+     |> ok
+   with
+  | Structured_scope.Channel_suspended -> ()
+  | Structured_scope.Channel_continues _ ->
+      Alcotest.fail "raising closer mapper changed the channel to closed");
+  let forged_payload = Obj.dup (Obj.repr channel) in
+  let forged_id = Obj.dup (Obj.field forged_payload 1) in
+  Obj.set_field forged_id 1 (Obj.repr 99);
+  Obj.set_field forged_payload 1 forged_id;
+  let unregistered : Structured_scope.channel_handle = Obj.obj forged_payload in
+  Alcotest.(check string)
+    "structurally valid unregistered handle fails live lookup" "E0907"
+    (Structured_scope.with_checkout scope body (fun resume ->
+         Structured_scope.channel_recv scope ~task:body ~channel:unregistered ~resume
+           ~map_resume:map_channel_resume)
+    |> error_code);
+  Alcotest.(check bool)
+    "unregistered handle preserves caller ownership" true
+    (Structured_scope.inspect scope body |> ok).owns_resume;
+  Structured_scope.close scope ~reason:Structured_scope.Normal ~escaping:[] ~drop:ignore |> ok;
+  check_zero_metrics "closer mapper and live registry" scope
+
 let prop_recursive_close_restores_baseline =
   QCheck.Test.make ~count:200 ~name:"recursive scope close restores every ownership counter"
     QCheck.nat_small (fun seed ->
@@ -646,6 +686,7 @@ let run () =
   test_channel_close_preflights_every_waiter ();
   test_channel_cancellation_preflight_and_drop_exception ();
   test_channel_open_refusal_domains ();
+  test_channel_closer_mapper_and_live_registry_preflight ();
   QCheck.Test.check_exn prop_recursive_close_restores_baseline
 
 let suite = [ Alcotest.test_case "nested ownership, cleanup, and escape" `Quick run ]

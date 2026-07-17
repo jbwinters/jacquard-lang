@@ -85,7 +85,7 @@ mode; there is no inference from names.
 | `Secret` | `secret` | `official` | `governance` | `-` | `once` | `special` | `3` | `implemented` | `6d092eccc3c9858a2a95120da5a011964cbb3ad76968e11c1cbb062c119fbb31` | `secret.read:(SecretRef)->Secret;secret.expose:(Secret)->Text` | resolve opaque confidential material or explicitly expose it |
 | `Judge` | `judge` | `official` | `governance` | `-` | `once` | `special` | `3` | `implemented` | `9b677b5e2c3ec8521c5d5dfac321ae361a959565e1cbf082fec4512199977354` | `judge.assess:(Call)->Assessment` | assess a proposed call without performing it |
 | `Async` | `async` | `official` | `concurrency` | `a` | `once` | `none` | `2` | `reserved` | `4ff8ce05ab09968163492b3be40fc91381b47dee5fb4b2980f9416d50f38e66f` | `async.spawn:(()->{Async\|e}a)->Task a;async.await:(Task a)->TaskResult a;async.cancel:(Task a)->();async.yield:()->()` | schedule structured tasks while charging child effects to the parent row |
-| `Channel` | `channel` | `official` | `concurrency` | `a` | `once` | `none` | `2` | `reserved` | `bf9a334188ac13495eeb070fdc215d51763d9761b4775c98c61f44ebb1b03756` | `channel.open:(Int)->Result ChannelError (ChannelHandle a);channel.send:(ChannelHandle a,a)->Result ChannelError ();channel.recv:(ChannelHandle a)->Result ChannelError a;channel.close:(ChannelHandle a)->()` | communicate typed values between structured tasks |
+| `Channel` | `channel` | `official` | `concurrency` | `a` | `once` | `none` | `2` | `implemented` | `bf9a334188ac13495eeb070fdc215d51763d9761b4775c98c61f44ebb1b03756` | `channel.open:(Int)->Result ChannelError (ChannelHandle a);channel.send:(ChannelHandle a,a)->Result ChannelError ();channel.recv:(ChannelHandle a)->Result ChannelError a;channel.close:(ChannelHandle a)->()` | communicate typed values between structured tasks |
 
 The full 64-hex identities and unabridged operation strings are normative in
 the TSV artifact. In particular, `Check` remains a prelude testing protocol,
@@ -119,12 +119,12 @@ plaintext must not become an ordinary prelude value before explicit exposure.
 | `Judge` | `judge.rules`, `judge.fixed`, `judge.scripted`, `judge.model` |
 | `Workspace` | `workspace.read-file`, `workspace.write-file`, `workspace.fetch` typed facade |
 | `Async` | interpreted structured scheduler installed by SC.9 |
+| `Channel` | interpreted exact-scope FIFO channels installed by SC.14 |
 
-`Async` and `Channel` remain reserved taxonomy names, but they are no longer
-mere placeholders. `Async` has the exact published identity shown above and an
-interpreted structured scheduler. `Channel` has the exact published identity
-and frozen SC.13 contract shown above, but its scheduler runtime is deferred to
-SC.14.
+`Async` remains a schema-reserved taxonomy name with the exact published
+identity shown above and an interpreted structured scheduler. `Channel` is a
+released prelude effect: SC.14 admits only its frozen SC.13 identity to the
+interpreted scheduler, without a root grant or `--allow channel`.
 
 The remaining seven blessed names are **reserved and unimplemented**:
 `Choose`, `Env`, `Pg`, `Blob`, `Serve`, `Crypto`, and `Log`. Their
@@ -368,10 +368,10 @@ once effect Channel a where {
 }
 ```
 
-### Channel implementation obligation
+### Channel implementation contract
 
-SC.13 freezes the complete Channel interface and its HASH_V0 identity before a
-handler exists. A capacity of zero denotes a rendezvous channel, a positive
+SC.13 froze the complete Channel interface and its HASH_V0 identity before a
+handler existed; SC.14 implements that exact contract. A capacity of zero denotes a rendezvous channel, a positive
 capacity denotes a bounded FIFO channel, and a negative capacity returns
 `Err(InvalidCapacity(requested))` before allocating a handle. `ChannelHandle`
 is an opaque exact-scope/run capability. Close is idempotent, rejects pending
@@ -379,11 +379,10 @@ and future sends with `ChannelClosed`, and lets receivers drain values already
 accepted into the buffer before returning `ChannelClosed`. The ordering,
 cancellation, fan-in, policy interaction, trace fixtures, and SC.14
 implementation checklist are normative in
-[`concurrency.md`](concurrency.md#8-typed-channels-sc13--c3-contract). The
-reserved status means no runtime handler is shipped by SC.13. SC.14 admits only
-this exact interface hash to the interpreted scheduler; Channel is never a
-world grant, `--allow channel` remains invalid, and a near-match receives no
-special routing.
+[`concurrency.md`](concurrency.md#8-typed-channels-sc13--c3-contract). SC.14
+admits only this exact interface hash to the interpreted scheduler; Channel is
+never a world grant, `--allow channel` remains invalid, and a near-match
+receives no special routing. Native compilation still has no Channel runtime.
 
 ## 5. Typed facades and concrete authority
 
@@ -483,9 +482,8 @@ data and receive structural diffs, never an authority label.
   native carriers do not zero payload bytes when a Secret is released, so
   process memory and crash-dump protection remain embedding responsibilities.
 - A reserved schema is neither an implementation nor a roadmap promise. This
-  release has an interpreted `Async` scheduler, and SC.13 publishes the exact
-  `Channel` identity and contract without a Channel runtime. It has no
-  database/blob/serve/crypto/log provider or pure `Choose` interface.
+  release has interpreted `Async` and exact-identity `Channel` scheduling, but
+  no database/blob/serve/crypto/log provider or pure `Choose` interface.
 
 ### Audit chain v1
 

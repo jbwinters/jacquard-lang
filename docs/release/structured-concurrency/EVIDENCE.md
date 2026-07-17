@@ -1,9 +1,10 @@
-# Structured Concurrency SC.13 Evidence
+# Structured Concurrency SC.14 Evidence
 
-Status: the typed Channel interface, identity, static checker contract, and
-deterministic behavior are frozen over the complete SC.12 scheduler stack.
-SC.13 supplies executable type fixtures and normative SC.14 acceptance traces,
-but no Channel runtime handler, root grant, native route, or host scheduling.
+Status: the typed Channel interface frozen by SC.13 now runs through the SC.14
+interpreted scheduler over the complete SC.12 stack. Exact-scope FIFO state,
+atomic continuation ownership, cancellation, close, teardown, deadlock refusal,
+and exact-identity admission are executable. Channel has no root grant, native
+route, host scheduling, or shared-memory carrier.
 
 - Reconstruction base: `2fc2d306c1236b8faeaee37a2e1c9d2848d16f52`
 - Evidence overlay: [MANIFEST.sha256](MANIFEST.sha256)
@@ -32,6 +33,36 @@ The prelude golden pins all whole/member hashes. Focused tests load every
 declaration from the content-addressed store, print it, read it, rebuild the
 kernel declaration, and re-hash the corresponding member. SC.4 and SC.5 change
 no declaration identity and add no kernel form.
+
+## Scoped Channel runtime
+
+`prelude/08z-channel.jqd` publishes only the frozen declarations: private
+`ChannelOpaque`, `ChannelHandle a`, `ChannelError`, and four `once` Channel
+operations. Their exact whole/member hashes match the SC.13 contract. Store,
+checker, evaluator, and native lowering all reject direct use of the private
+carrier with E0907. Runtime values show only `<channel>` and carry an
+unforgeable evaluator-run owner plus `(scope-path, successful-open-index)`.
+
+`Channel_contract` owns bounded FIFO values and task IDs, never raw resumes.
+`Scheduler_core` remains the only owner of Once continuations. Structured scope
+transitions use capability-gated prepare/commit proofs: caller lifecycle,
+counterpart suspension identity, every waiter mapping, and the closer mapping
+are validated before channel mutation; commit has no remaining diagnostic or
+callback seam. Adversarial tests pin invalid callers, raised mappers, a wrong
+second close waiter, no partial close/wake, no-request and duplicate
+cancellation, raised destruction callbacks, unregistered handles, and ChannelId
+exhaustion.
+
+The exact Channel operation hashes are scheduler infrastructure. They run under
+the default interpreted round-robin scheduler even when routed world effects
+are disabled, while near matches remain ordinary routed effects. No
+`--allow channel` spelling is introduced. End-to-end evidence covers negative
+capacity, rendezvous, bounded buffering, sender/receiver FIFO, drain-on-close,
+blocked-sibling fail-fast cancellation, collect progress after an unrelated
+failure, cancellation before malformed arguments, and all-channel-blocked E0908
+cleanup. The frozen rendezvous and buffered traces are replayed field for field,
+and the mixed reference-model property checks conservation, no duplication,
+FIFO, close, cancellation, and teardown.
 
 ## Generalized child-effect law
 

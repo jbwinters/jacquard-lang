@@ -204,10 +204,11 @@ Two distinctions prevent common review mistakes:
   observations, handler, seed, and approximation error. `Infer` completions and
   assessment confidence are evidence, not verified truth or consent.
 - A user effect named `net` remains an unrated user identity. It does not inherit
-  official `Net` risk or `--allow net`. Of the schema-reserved names, `Async`
-  has the interpreted structured scheduler and `Channel` has a published SC.13
-  identity and contract with its runtime deferred to SC.14. `Choose`, `Env`,
-  `Pg`, `Blob`, `Serve`, `Crypto`, and `Log` remain unimplemented.
+  official `Net` risk or `--allow net`. `Async` is interpreted scheduler
+  infrastructure. `Channel` is released only for its exact SC.13 identity and
+  runs through the SC.14 interpreted scheduler without `--allow channel`.
+  `Choose`, `Env`, `Pg`, `Blob`, `Serve`, `Crypto`, and `Log` remain
+  unimplemented.
 
 `Secret` is opaque before `secret.expose`, including under generic inspection,
 but Jacquard does not provide taint tracking. After exposure, the plaintext is

@@ -162,14 +162,19 @@ let granted_hashes store allows =
         | _ -> None)
       allows
   in
-  let scheduler_async =
-    match Store.lookup_kind store "async" Resolve.KEffect with
-    | Some { Resolve.hash; _ }
-      when String.equal (Hash.to_hex hash) Concurrency_contract.async_effect_hash ->
-        [ hash ]
-    | Some _ | None -> []
+  let exact_scheduler_effect name expected =
+    match Store.lookup_kind store name Resolve.KEffect with
+    | Some { Resolve.hash; _ } when String.equal (Hash.to_hex hash) expected -> Some hash
+    | Some _ | None -> None
   in
-  explicit @ scheduler_async
+  let scheduler_infrastructure =
+    List.filter_map Fun.id
+      [
+        exact_scheduler_effect "async" Concurrency_contract.async_effect_hash;
+        exact_scheduler_effect "channel" Channel_contract.channel_effect_hash;
+      ]
+  in
+  explicit @ scheduler_infrastructure
 
 let make_checker store =
   match Check.make_ctx store with

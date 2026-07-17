@@ -33,13 +33,13 @@ not approve an abbreviation or a name-only match.
 | `Audit` | `40bc4343fb2b4bcc18b18f63f7bb68675b746751bb40b876072e622046a81372` |
 | `Secret` | `6d092eccc3c9858a2a95120da5a011964cbb3ad76968e11c1cbb062c119fbb31` |
 | `Judge` | `9b677b5e2c3ec8521c5d5dfac321ae361a959565e1cbf082fec4512199977354` |
+| `Channel` | `bf9a334188ac13495eeb070fdc215d51763d9761b4775c98c61f44ebb1b03756` |
 
-Two schema-reserved names also have published identities:
+One schema-reserved name also has a published identity:
 
 | effect | exact `HASH_V0` interface identity | shipped boundary |
 |---|---|---|
 | `Async` | `4ff8ce05ab09968163492b3be40fc91381b47dee5fb4b2980f9416d50f38e66f` | interpreted structured scheduler from SC.9 |
-| `Channel` | `bf9a334188ac13495eeb070fdc215d51763d9761b4775c98c61f44ebb1b03756` | SC.13 contract only; runtime deferred to SC.14 |
 
 The seven remaining blessed names are **reserved/unimplemented**: `Choose`,
 `Env`, `Pg`, `Blob`, `Serve`, `Crypto`, and `Log`. They have schemas
@@ -110,5 +110,5 @@ an authority label; only the resolved row position of a typed arrow does.
 - The release implements finite discrete uncertainty only; it does not provide
   continuous distributions or verified model truth.
 - A reserved schema alone is compatibility vocabulary, not an implementation or
-  roadmap commitment. Async is implemented; Channel has a published SC.13
-  contract but no runtime until SC.14.
+  roadmap commitment. Async is interpreted scheduler infrastructure; Channel is
+  a released exact-identity interpreted facility and has no native runtime.

@@ -68,6 +68,16 @@ async.await 2
 async.cancel 2
 async.yield 2
 async.scope 2
+# --- 08z-channel (SC.14 exact scheduler-only scoped channels)
+channel-handle 2
+channel-error 2
+channel-closed 2
+invalid-capacity 2
+channel 2
+channel.open 2
+channel.send 2
+channel.recv 2
+channel.close 2
 # --- 04-builtins
 add 0
 sub 0
