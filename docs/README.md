@@ -37,10 +37,11 @@ project shape from file names alone.
   uncertainty wording, canonical boundaries, and explicit non-goals.
 - `effect-membranes.md`: GM.0 charter for typed governed facades, versioned
   decision artifacts, live/dry boundaries, and monotonic composition.
-- `concurrency.md`: SC.9 deterministic FIFO round-robin over SC.8
-  fail-fast/collect policies, SC.7 cooperative cancellation, SC.6 structured-scope ownership, the SC.5
-  policy-independent lifecycle, and the SC.4 generalized child-effect law,
-  plus scope contracts, scheduling exclusions, and D46-D50.
+- `concurrency.md`: SC.10 canonical schedule record, strict replay, and explicit
+  fork over SC.9 deterministic FIFO round-robin, including the fail-closed v1
+  schema and legacy-log policy; plus SC.8 fail-fast/collect, SC.7 cooperative
+  cancellation, SC.6 structured-scope ownership, the SC.5 policy-independent
+  lifecycle, the SC.4 generalized child-effect law, and D46-D50.
 - `warp-testing.md`: Warp test model, rows, handlers, cache, properties, and
   world lanes.
 - `errors.md`: diagnostic code catalog.
@@ -110,11 +111,11 @@ Read these together when judging whether the release candidate is credible:
 
 ## Structured Concurrency Evidence
 
-- `release/structured-concurrency/EVIDENCE.md`: SC.9 deterministic scheduler,
-  scope-policy, ownership, lifecycle, property, cache, and repeated-run evidence
-  over the validated SC.8 base.
+- `release/structured-concurrency/EVIDENCE.md`: SC.10 versioned record/replay
+  and fork evidence over the validated SC.9 scheduler, with the prior
+  scope-policy, ownership, lifecycle, property, cache, and repeated-run evidence.
 - `release/structured-concurrency/MANIFEST.sha256`: reconstructible complete
-  SC.9 overlay on approved SC.8 commit `ebc18e5`.
+  SC.10 overlay on approved SC.9 commit `f8af018`.
 
 ## Governed Membranes Evidence
 

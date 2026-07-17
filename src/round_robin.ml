@@ -2,6 +2,16 @@ type bounds = { max_tasks : int; max_decisions : int }
 
 let scheduler_version = "fifo-round-robin-v0"
 let default_bounds = { max_tasks = 1024; max_decisions = 100_000 }
+let anonymous_program = Hash.of_string "jacquard-round-robin-anonymous-state-v0"
+
+type schedule_mode =
+  | Record_schedule
+  | Replay_schedule of Schedule_trace.t
+  | Fork_schedule of {
+      trace : Schedule_trace.t;
+      decision : int;
+      chosen : Concurrency_contract.task_id;
+    }
 
 type outcome = {
   body : Value.t Concurrency_contract.task_result;
@@ -13,6 +23,8 @@ type outcome = {
   max_live : int;
   metrics_after_close : Structured_scope.metrics;
 }
+
+type scheduled = { value : Value.t; outcome : outcome; schedule : Schedule_trace.t }
 
 type proof = {
   decisions : Concurrency_contract.decision list;
@@ -33,6 +45,7 @@ type global_scope_run = {
   mutable children : Structured_scope.handle list;
   mutable seen_terminal : Structured_scope.handle list;
   mutable aggregate : Value.t Scope_policy.aggregate option;
+  mutable next_nested : int;
   parent : global_parent option;
 }
 
@@ -93,12 +106,28 @@ let result_text = function
 let zero_metrics =
   Structured_scope.{ open_scopes = 0; live_tasks = 0; runnable_tasks = 0; owned_resumes = 0 }
 
-let run_state_global ctx ~policy ~bounds initial_state =
+let control_mode = function
+  | Record_schedule -> Schedule_control.Record
+  | Replay_schedule trace -> Schedule_control.Replay trace
+  | Fork_schedule { trace; decision; chosen } -> Schedule_control.Fork { trace; decision; chosen }
+
+let run_state_global ctx ~policy ~bounds ~program ~schedule_mode initial_state =
   if bounds.max_tasks <= 0 then Error (Runtime_err.Scheduler_error "task bound must be positive")
   else if bounds.max_decisions <= 0 then
     Error (Runtime_err.Scheduler_error "decision bound must be positive")
   else
     let ( let* ) = Result.bind in
+    let* schedule_control =
+      Schedule_control.create ~scheduler:scheduler_version ~program ~policy
+        ~max_tasks:bounds.max_tasks ~max_decisions:bounds.max_decisions (control_mode schedule_mode)
+      |> Result.map_error runtime_of_diagnostics
+    in
+    let root_id = Concurrency_contract.task_id ~scope_path:[ 0 ] ~spawn_index:0 in
+    let* () =
+      Schedule_control.creation schedule_control
+        Schedule_trace.{ scope_path = [ 0 ]; task = root_id; parent = None }
+      |> Result.map_error runtime_of_diagnostics
+    in
     let* root_scope, root_body =
       Structured_scope.create ~body_resume:(Global_state initial_state)
       |> Result.map_error runtime_of_diagnostics
@@ -116,6 +145,7 @@ let run_state_global ctx ~policy ~bounds initial_state =
           children = [];
           seen_terminal = [];
           aggregate = None;
+          next_nested = 1;
           parent;
         }
     in
@@ -132,6 +162,13 @@ let run_state_global ctx ~policy ~bounds initial_state =
     let live_count = ref 1 in
     let max_live = ref 1 in
     let fatal_diagnostics = ref [] in
+    let validate_creation creation =
+      match Schedule_control.creation schedule_control creation with
+      | Ok () -> Ok ()
+      | Error diagnostics ->
+          fatal_diagnostics := diagnostics;
+          Error diagnostics
+    in
     let add_event event = events := event :: !events in
     let append runnable = queue := !queue @ runnable in
     let id run handle = Structured_scope.id run.scope handle in
@@ -345,23 +382,49 @@ let run_state_global ctx ~policy ~bounds initial_state =
       match outcome with
       | Structured_scope.Effect_cancelled awakened -> finish_cancelled run handle awakened
       | Structured_scope.Effect_routed { resume; result = Ok value } -> continue resume value
+      | Structured_scope.Effect_routed { result = Error diagnostics; _ }
+        when !fatal_diagnostics <> [] ->
+          Error diagnostics
       | Structured_scope.Effect_routed { result = Error diagnostics; _ } ->
           fail_task run handle (error_of_diagnostics diagnostics)
     in
     let step run handle state =
       Structured_scope.with_eval_task_context Task_capability.runtime ctx run.scope (fun () ->
           match Eval.run_state_capturing_once_routed ctx state with
-          | Error error -> fail_task run handle error
+          | Error error ->
+              let* () =
+                Schedule_control.observe_operation schedule_control Schedule_trace.Failure
+              in
+              fail_task run handle error
           | Ok (Eval.OCValue value) ->
+              let* () = Schedule_control.observe_operation schedule_control Schedule_trace.Return in
               let* awakened = Structured_scope.complete run.scope handle value in
               append (List.map (fun awakened -> (run, awakened)) awakened);
               observe_terminal run handle
           | Ok (Eval.OCOp { op; args; resume; _ }) when Hash.equal op spawn_hash -> (
+              let* () =
+                Schedule_control.observe_operation schedule_control Schedule_trace.Async_spawn
+              in
               match args with
               | [ thunk ] ->
                   route run handle
                     (Global_awaiting (handle, resume))
                     ~action:(fun () ->
+                      let* parent = id run handle in
+                      let child_id =
+                        Concurrency_contract.task_id
+                          ~scope_path:(Structured_scope.scope_path run.scope)
+                          ~spawn_index:(List.length run.children + 1)
+                      in
+                      let* () =
+                        validate_creation
+                          Schedule_trace.
+                            {
+                              scope_path = Structured_scope.scope_path run.scope;
+                              task = child_id;
+                              parent = Some parent;
+                            }
+                      in
                       let* () = allocate_task () in
                       let child_state = Eval.apply_state ctx thunk [] in
                       let* child =
@@ -392,6 +455,9 @@ let run_state_global ctx ~policy ~bounds initial_state =
                       append_after_spawn run child handle)
               | _ -> fail_task run handle (Runtime_err.Arity "async.spawn expects one thunk"))
           | Ok (Eval.OCOp { op; args; resume; _ }) when Hash.equal op await_hash -> (
+              let* () =
+                Schedule_control.observe_operation schedule_control Schedule_trace.Async_await
+              in
               match args with
               | [ target_value ] -> (
                   let* target =
@@ -425,23 +491,33 @@ let run_state_global ctx ~policy ~bounds initial_state =
                       add_event ("deadlock=" ^ Printf.sprintf "%S" message);
                       observe_all_children run run.children)
               | _ -> fail_task run handle (Runtime_err.Arity "async.await expects one Task"))
-          | Ok (Eval.OCOp { op; args = []; resume; _ }) when Hash.equal op yield_hash -> (
-              let* outcome =
-                Structured_scope.yield_cooperatively run.scope ~task:handle
-                  ~resume:(Global_awaiting (handle, resume))
-                  ~drop
+          | Ok (Eval.OCOp { op; args; resume; _ }) when Hash.equal op yield_hash -> (
+              let* () =
+                Schedule_control.observe_operation schedule_control Schedule_trace.Async_yield
               in
-              match outcome with
-              | Structured_scope.Yield_cancelled awakened -> finish_cancelled run handle awakened
-              | Structured_scope.Yield_suspended ->
-                  let next = Eval.apply_state ctx resume [ Value.unit_v ] in
-                  let* () = Structured_scope.wake_yielded run.scope handle in
-                  Structured_scope.with_checkout run.scope handle (fun _ ->
-                      let* () = suspend_and_requeue run handle (Global_state next) in
-                      let* task_id = id run handle in
-                      add_event ("yield task=" ^ id_text task_id);
-                      Ok ()))
+              match args with
+              | [] -> (
+                  let* outcome =
+                    Structured_scope.yield_cooperatively run.scope ~task:handle
+                      ~resume:(Global_awaiting (handle, resume))
+                      ~drop
+                  in
+                  match outcome with
+                  | Structured_scope.Yield_cancelled awakened ->
+                      finish_cancelled run handle awakened
+                  | Structured_scope.Yield_suspended ->
+                      let next = Eval.apply_state ctx resume [ Value.unit_v ] in
+                      let* () = Structured_scope.wake_yielded run.scope handle in
+                      Structured_scope.with_checkout run.scope handle (fun _ ->
+                          let* () = suspend_and_requeue run handle (Global_state next) in
+                          let* task_id = id run handle in
+                          add_event ("yield task=" ^ id_text task_id);
+                          Ok ()))
+              | _ -> fail_task run handle (Runtime_err.Arity "async.yield expects no arguments"))
           | Ok (Eval.OCOp { op; args; resume; _ }) when Hash.equal op cancel_hash -> (
+              let* () =
+                Schedule_control.observe_operation schedule_control Schedule_trace.Async_cancel
+              in
               match args with
               | [ target_value ] -> (
                   let* target =
@@ -475,42 +551,70 @@ let run_state_global ctx ~policy ~bounds initial_state =
                            (id_text target_id));
                       observe_all_children run run.children)
               | _ -> fail_task run handle (Runtime_err.Arity "async.cancel expects one Task"))
-          | Ok (Eval.OCOp { op; name = "async.scope"; args = [ body ]; resume })
-            when Hash.equal op Concurrency_contract.scope_control_hash ->
-              route run handle (Global_nested_wait resume)
-                ~action:(fun () ->
-                  let* () = allocate_task () in
-                  let nested_state = Eval.apply_state ctx body [] in
-                  let* nested_scope, nested_body =
-                    Structured_scope.nest run.scope ~body_resume:(Global_state nested_state)
-                  in
-                  let parent = Some { parent_run = run; parent_task = handle } in
-                  let* nested_run =
-                    make_scope_run nested_scope nested_body parent Concurrency_contract.Fail_fast
-                    |> Result.map_error (fun error ->
-                        [ Diag.error ~code:"E0908" (Runtime_err.to_string error) ])
-                  in
-                  all_scopes := nested_run :: !all_scopes;
-                  Ok nested_run)
-                ~continue:(fun owned nested_run ->
-                  let continuation =
-                    match owned with
-                    | Global_nested_wait continuation -> continuation
-                    | Global_state _ | Global_awaiting _ -> assert false
-                  in
-                  let* () =
-                    Structured_scope.suspend_yield run.scope handle
-                      ~resume:(Global_nested_wait continuation)
-                  in
-                  add_event
-                    (Printf.sprintf "scope-open parent=%s child=%s"
-                       (String.concat "/"
-                          (List.map string_of_int (Structured_scope.scope_path run.scope)))
-                       (String.concat "/"
-                          (List.map string_of_int (Structured_scope.scope_path nested_run.scope))));
-                  append [ (nested_run, nested_run.body_handle) ];
-                  Ok ())
+          | Ok (Eval.OCOp { op; args; resume; _ })
+            when Hash.equal op Concurrency_contract.scope_control_hash -> (
+              let* () =
+                Schedule_control.observe_operation schedule_control Schedule_trace.Async_scope
+              in
+              match args with
+              | [ body ] ->
+                  route run handle (Global_nested_wait resume)
+                    ~action:(fun () ->
+                      let* parent_task = id run handle in
+                      let nested_path =
+                        Structured_scope.scope_path run.scope @ [ run.next_nested ]
+                      in
+                      let nested_id =
+                        Concurrency_contract.task_id ~scope_path:nested_path ~spawn_index:0
+                      in
+                      let* () =
+                        validate_creation
+                          Schedule_trace.
+                            {
+                              scope_path = nested_path;
+                              task = nested_id;
+                              parent = Some parent_task;
+                            }
+                      in
+                      let* () = allocate_task () in
+                      let nested_state = Eval.apply_state ctx body [] in
+                      let* nested_scope, nested_body =
+                        Structured_scope.nest run.scope ~body_resume:(Global_state nested_state)
+                      in
+                      let parent = Some { parent_run = run; parent_task = handle } in
+                      let* nested_run =
+                        make_scope_run nested_scope nested_body parent
+                          Concurrency_contract.Fail_fast
+                        |> Result.map_error (fun error ->
+                            [ Diag.error ~code:"E0908" (Runtime_err.to_string error) ])
+                      in
+                      run.next_nested <- run.next_nested + 1;
+                      all_scopes := nested_run :: !all_scopes;
+                      Ok nested_run)
+                    ~continue:(fun owned nested_run ->
+                      let continuation =
+                        match owned with
+                        | Global_nested_wait continuation -> continuation
+                        | Global_state _ | Global_awaiting _ -> assert false
+                      in
+                      let* () =
+                        Structured_scope.suspend_yield run.scope handle
+                          ~resume:(Global_nested_wait continuation)
+                      in
+                      add_event
+                        (Printf.sprintf "scope-open parent=%s child=%s"
+                           (String.concat "/"
+                              (List.map string_of_int (Structured_scope.scope_path run.scope)))
+                           (String.concat "/"
+                              (List.map string_of_int
+                                 (Structured_scope.scope_path nested_run.scope))));
+                      append [ (nested_run, nested_run.body_handle) ];
+                      Ok ())
+              | _ -> fail_task run handle (Runtime_err.Arity "async.scope expects one thunk"))
           | Ok (Eval.OCOp { op; name; args; resume }) ->
+              let* () =
+                Schedule_control.observe_operation schedule_control (Schedule_trace.Routed op)
+              in
               let routed_error = ref None in
               route run handle
                 (Global_awaiting (handle, resume))
@@ -540,12 +644,16 @@ let run_state_global ctx ~policy ~bounds initial_state =
           Error [ Diag.error ~code:"E0908" "decision bound exceeded" ]
       | runnable ->
           let* runnable_ids = queue_ids [] runnable in
+          let* chosen_id =
+            Schedule_control.begin_decision schedule_control ~sequence:!sequence
+              ~runnable:runnable_ids
+          in
           let decision =
-            Option.get (Concurrency_contract.decide_round_robin ~sequence:!sequence runnable_ids)
+            Concurrency_contract.
+              { sequence = !sequence; runnable = runnable_ids; chosen = chosen_id }
           in
           let rec take_chosen acc = function
-            | [] ->
-                Error [ Diag.error ~code:"E0908" "round-robin decision chose a non-runnable task" ]
+            | [] -> Error [ Diag.error ~code:"E0908" "chosen replay task is not runnable" ]
             | ((run, handle) as task) :: rest ->
                 let* task_id = id run handle in
                 if Concurrency_contract.compare_task_id task_id decision.chosen = 0 then
@@ -568,6 +676,7 @@ let run_state_global ctx ~policy ~bounds initial_state =
                     let* state = state_for_awakened chosen_run owned in
                     step chosen_run chosen state))
           in
+          let* () = Schedule_control.finish_decision schedule_control in
           incr sequence;
           drive ()
     in
@@ -598,6 +707,7 @@ let run_state_global ctx ~policy ~bounds initial_state =
             | None -> Error [ Diag.error ~code:"E0908" "root scope did not drain" ]
           in
           let* () = reject_results root_run body aggregate in
+          let* schedule = Schedule_control.finish schedule_control in
           let root_error =
             List.find_map
               (fun (run, handle, error) ->
@@ -611,7 +721,8 @@ let run_state_global ctx ~policy ~bounds initial_state =
               List.rev !decisions,
               String.concat "\n" (List.rev !events) ^ "\n",
               !task_count,
-              !max_live ))
+              !max_live,
+              schedule ))
     in
     let metrics_after_close = Structured_scope.metrics root_scope in
     if metrics_after_close <> zero_metrics then
@@ -619,60 +730,63 @@ let run_state_global ctx ~policy ~bounds initial_state =
     else
       match protected with
       | Error diagnostics -> Error (runtime_of_diagnostics diagnostics)
-      | Ok (body, root_error, aggregate, decisions, trace, task_count, max_live) ->
+      | Ok (body, root_error, aggregate, decisions, trace, task_count, max_live, schedule) ->
           Ok
-            {
-              body;
-              root_error;
-              aggregate;
-              decisions;
-              trace;
-              task_count;
-              max_live;
-              metrics_after_close;
-            }
+            ( {
+                body;
+                root_error;
+                aggregate;
+                decisions;
+                trace;
+                task_count;
+                max_live;
+                metrics_after_close;
+              },
+              schedule )
 
 let run_state ctx ?(policy = Concurrency_contract.default_failure_policy) ?(bounds = default_bounds)
     initial_state =
-  run_state_global ctx ~policy ~bounds initial_state
+  Result.map fst
+    (run_state_global ctx ~policy ~bounds ~program:anonymous_program ~schedule_mode:Record_schedule
+       initial_state)
+
+let value_of_outcome = function
+  | { root_error = Some error; _ } -> Error error
+  | { body = Concurrency_contract.Failed message; _ } -> Error (Runtime_err.Scheduler_error message)
+  | { body = Concurrency_contract.Cancelled; _ } ->
+      Error (Runtime_err.Scheduler_error "root task was cancelled")
+  | {
+      body = Concurrency_contract.Done _;
+      aggregate = Scope_policy.Fail_fast_result (Concurrency_contract.Failed message);
+      _;
+    } ->
+      Error (Runtime_err.Scheduler_error message)
+  | {
+      body = Concurrency_contract.Done _;
+      aggregate = Scope_policy.Fail_fast_result Concurrency_contract.Cancelled;
+      _;
+    } ->
+      Error (Runtime_err.Scheduler_error "scope was cancelled")
+  | { body = Concurrency_contract.Done value; _ } -> Ok value
 
 let run_expr ctx ?policy ?bounds expression =
-  match run_state ctx ?policy ?bounds (Eval.expr_state expression) with
-  | Error error -> Error error
-  | Ok { root_error = Some error; _ } -> Error error
-  | Ok { body = Concurrency_contract.Failed message; _ } ->
-      Error (Runtime_err.Scheduler_error message)
-  | Ok { body = Concurrency_contract.Cancelled; _ } ->
-      Error (Runtime_err.Scheduler_error "root task was cancelled")
-  | Ok
-      {
-        body = Concurrency_contract.Done _;
-        aggregate = Scope_policy.Fail_fast_result (Concurrency_contract.Failed message);
-        _;
-      } ->
-      Error (Runtime_err.Scheduler_error message)
-  | Ok
-      {
-        body = Concurrency_contract.Done _;
-        aggregate = Scope_policy.Fail_fast_result Concurrency_contract.Cancelled;
-        _;
-      } ->
-      Error (Runtime_err.Scheduler_error "scope was cancelled")
-  | Ok { body = Concurrency_contract.Done value; _ } -> Ok value
+  Result.bind (run_state ctx ?policy ?bounds (Eval.expr_state expression)) value_of_outcome
+
+let run_expr_scheduled ctx ?(policy = Concurrency_contract.default_failure_policy)
+    ?(bounds = default_bounds) ~mode expression =
+  match Canon.hash_expr expression with
+  | Error diagnostics -> Error (runtime_of_diagnostics diagnostics)
+  | Ok program ->
+      Result.bind
+        (run_state_global ctx ~policy ~bounds ~program ~schedule_mode:mode
+           (Eval.expr_state expression))
+        (fun (outcome, schedule) ->
+          Result.map (fun value -> { value; outcome; schedule }) (value_of_outcome outcome))
 
 let run_call ctx ?policy ?bounds callable arguments =
-  match run_state ctx ?policy ?bounds (Eval.apply_state ctx callable arguments) with
-  | Error error -> Error error
-  | Ok { root_error = Some error; _ } -> Error error
-  | Ok { body = Concurrency_contract.Failed message; _ } ->
-      Error (Runtime_err.Scheduler_error message)
-  | Ok { body = Concurrency_contract.Cancelled; _ } ->
-      Error (Runtime_err.Scheduler_error "root task was cancelled")
-  | Ok { aggregate = Scope_policy.Fail_fast_result (Concurrency_contract.Failed message); _ } ->
-      Error (Runtime_err.Scheduler_error message)
-  | Ok { aggregate = Scope_policy.Fail_fast_result Concurrency_contract.Cancelled; _ } ->
-      Error (Runtime_err.Scheduler_error "scope was cancelled")
-  | Ok { body = Concurrency_contract.Done value; _ } -> Ok value
+  Result.bind
+    (run_state ctx ?policy ?bounds (Eval.apply_state ctx callable arguments))
+    value_of_outcome
 
 let policy_text = function Concurrency_contract.Fail_fast -> "fail-fast" | Collect -> "collect"
 
@@ -700,6 +814,7 @@ let run_expr_cached cache ctx ?(policy = Concurrency_contract.default_failure_po
           [
             Hash.to_hex program_hash;
             scheduler_version;
+            "schedule-format-v" ^ string_of_int Schedule_trace.format_version;
             policy_text policy;
             string_of_int bounds.max_tasks;
             string_of_int bounds.max_decisions;

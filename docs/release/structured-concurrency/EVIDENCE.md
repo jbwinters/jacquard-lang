@@ -1,13 +1,12 @@
-# Structured Concurrency SC.9 Evidence
+# Structured Concurrency SC.10 Evidence
 
-Status: deterministic FIFO round-robin scheduling is implemented over the
-validated SC.8 scope-policy layer. The driver advances real evaluator states and
-affine continuations using only explicit queues and deterministic TaskIds; it
-preserves the SC.7 cancellation and lifecycle boundary and the SC.4 child-row
-law. This milestone contains no host scheduling, versioned replay, detached
-tasks, or native root scheduler.
+Status: canonical schedule record, fail-closed strict replay, and explicit
+provenance-carrying forks are implemented over the validated SC.9 deterministic
+FIFO scheduler. Replay validates creation before allocation and routed
+operations before world callbacks. This milestone adds no host scheduling,
+random/exhaustive scheduler, detached tasks, or native root scheduler.
 
-- Reconstruction base: `ebc18e5122093875cd4ae6816faaef349a49b3e0`
+- Reconstruction base: `f8af0184c0c0d4a7aa20be8b6145d5742d5e3ed8`
 - Evidence overlay: [MANIFEST.sha256](MANIFEST.sha256)
 - Authoritative contract: [concurrency.md](../../concurrency.md)
 
@@ -374,11 +373,74 @@ boundary:
 Warp Props remain data properties over the single C1 FIFO schedule; they do not
 claim schedule exploration.
 
+## Versioned scheduler traces and strict replay
+
+`Schedule_trace` defines canonical format v1 as a closed, line-oriented codec.
+Its header pins the format, scheduler identity, canonical program hash, failure
+policy, positive task/decision bounds, and optional fork decision/task. Create
+events pin scope path, TaskId, and parent. Decision events pin the contiguous
+sequence, exact ordered runnable queue, selected runnable TaskId, and the
+observed operation class. Routed world operations carry their `HASH_V0`
+identity. The parser validates semantic coherence and then requires
+parse/serialize byte identity, including one final LF.
+
+The compatibility policy is refusal: unversioned logs and every version other
+than 1 return E0908 with guidance to record a fresh trace. No legacy bytes are
+guessed or migrated. Unknown fields/operations, noncanonical whitespace,
+duplicate creations, invalid parents, noncontiguous decisions, duplicate or
+unknown runnable IDs, choices outside the queue, creations/decisions beyond
+their declared bounds, queues wider than `max-tasks`, and statically terminal
+TaskIds reappearing after `return`/`failure` are rejected during load. The
+validator uses hash-table membership in one linear pass and never derives
+ordering from hash-table iteration.
+
+CLI replay loading is incremental: the header is capped at 4 KiB, each line at
+1 MiB, the whole transport at 64 MiB, and the input at 200,001 lines. After the
+header, the declared task/decision bounds reduce both line and byte ceilings.
+The complete string is allocated only after those checks. Missing/unreadable
+paths and delayed record-write failures retain exact E0908 diagnostics;
+recording still opens its output only after successful program completion.
+
+`Schedule_control` validates the complete header before root-scope allocation.
+It consumes each expected creation before `Structured_scope` mutates allocation
+state, and consumes each exact sequence/queue/choice before advancing the
+chosen evaluator state. The resulting operation is compared before spawning or
+opening a scope and before dispatching a routed world callback. EOF, leftovers,
+missing/extra/reordered/impossible events, queue drift, and operation drift are
+fatal E0908 results followed by recursive cleanup; replay has no FIFO fallback.
+
+An explicit fork strictly consumes all earlier decisions, validates the exact
+queue at decision K, and accepts only a named runnable TaskId. The new branch
+then uses FIFO and its canonical header records `fork=K:TASK`. Strictly replaying
+that branch checks all recorded bytes normally; the provenance field grants no
+exception. `Round_robin.run_expr_scheduled` provides Record, Replay, and Fork
+modes. The CLI maps them to `--schedule-record`, `--schedule-replay`, and
+`--schedule-fork K=TASK`, requiring exactly one scheduled top-level expression
+and writing output traces only after successful completion.
+
+`test_schedule_trace.ml` pins the exact header, canonical identity and round
+trip, explicit fork provenance, old/unknown/noncanonical refusal, declared
+task/decision/queue bounds, terminal reappearance, and malformed semantic
+records. `test_round_robin.ml` pins byte-identical record/replay,
+missing and extra events, strict fork and replay of its branch, creation drift
+before allocation, and routed-operation drift before callback invocation. The
+`schedule-replay.t` golden transcript exercises the public CLI with the exact
+v1 bytes, malformed/legacy/impossible logs, missing/extra/reordered events,
+declared-line and per-line transport refusals, missing/unreadable paths, a
+post-success write failure, a flush-time write failure, fork-at-decision,
+byte-identical original and fork replays, and an empty stdout probe proving a
+one-bit world-operation-hash drift was refused before `print`.
+
+Scheduler cache identity now includes `schedule-format-v1` in addition to the
+program hash, scheduler identity, policy, and bounds. Cache payloads remain
+proof-only and every hit still executes a fresh evaluator run. Host scheduling,
+random choices, and exhaustive exploration remain outside SC.10.
+
 ## Compiled test discovery
 
 The lifecycle evidence is registered directly in the compiled Alcotest
 inventory rather than hidden inside the effect-taxonomy governance case. The
-five independently selectable groups and their case names are:
+six independently selectable groups and their case names are:
 
 | group | compiled case |
 |---|---|
@@ -387,6 +449,7 @@ five independently selectable groups and their case names are:
 | `cancellation` | `cooperative boundary delivery` |
 | `scope-policy` | `fail-fast and collect aggregation` |
 | `round-robin` | `real evaluator FIFO lifecycle` |
+| `schedule-trace` | `canonical codec and identity`; `legacy, unknown, and noncanonical refusal`; `impossible event refusal` |
 
 The exact discovery and focused execution commands are:
 
@@ -395,16 +458,17 @@ opam exec -- dune build test/test_jacquard.exe
 (
   cd _build/default/test
   ./test_jacquard.exe list --color=never 2>/dev/null |
-    grep -E '^(scheduler-core|structured-scope|cancellation|scope-policy|round-robin) '
+    grep -E '^(scheduler-core|structured-scope|cancellation|scope-policy|round-robin|schedule-trace) '
   ./test_jacquard.exe test \
-    'scheduler-core|structured-scope|cancellation|scope-policy|round-robin' \
+    'scheduler-core|structured-scope|cancellation|scope-policy|round-robin|schedule-trace' \
     --compact --color=never
 )
 ```
 
-The compiled inventory is exactly 674 cases and the source inventory is 38
+The compiled inventory is exactly 677 cases and the source inventory is 39
 cram transcripts. `effect-taxonomy/3` retains only taxonomy governance and hash
-checks, so the five lifecycle suites execute exactly once during the full gate.
+checks, so the six scheduler/lifecycle suites execute exactly once during the
+full gate.
 
 Native scheduling remains outside the current backend. Differential coverage is
 therefore limited to the supported case: an Async operation discharged by an
@@ -414,14 +478,14 @@ grant was added.
 
 ## Reconstruction and verification
 
-The manifest is the complete SC.9 successor overlay on approved SC.8 commit
-`ebc18e5122093875cd4ae6816faaef349a49b3e0`. Reconstruct it under repository-local scratch
+The manifest is the complete SC.10 successor overlay on approved SC.9 commit
+`f8af0184c0c0d4a7aa20be8b6145d5742d5e3ed8`. Reconstruct it under repository-local scratch
 space:
 
 ```sh
 set -eu
-base=ebc18e5122093875cd4ae6816faaef349a49b3e0
-dest="$PWD/.scratch/sc9-evidence-copy"
+base=f8af0184c0c0d4a7aa20be8b6145d5742d5e3ed8
+dest="$PWD/.scratch/sc10-evidence-copy"
 manifest=docs/release/structured-concurrency/MANIFEST.sha256
 rm -rf "$dest"
 mkdir -p "$dest"
@@ -463,7 +527,7 @@ snapshot_source | cmp "$snapshot" -
 opam exec -- dune build @doc --root "$dest"
 ```
 
-Expected results are zero exits, 674 compiled Alcotest/QCheck cases, 38 cram
+Expected results are zero exits, 677 compiled Alcotest/QCheck cases, 39 cram
 transcripts, and 25 doctest examples across 8 documents.
 
 The default interpreted CLI, prelude-evaluation, and Warp Case paths use this
@@ -473,4 +537,5 @@ hashes remain unchanged. Raw `Eval.run_expr` remains a low-level unscheduled
 seam. SC.4 continues to supply the static child-effect law: a scope discharges
 only Async and retains child world effects. Native root scheduling remains
 future work; native parity evidence is labeled only for Async discharged by an
-in-language handler.
+in-language handler. SC.10 records and replays only this deterministic
+interpreter seam and makes no host-scheduling or random-exploration claim.

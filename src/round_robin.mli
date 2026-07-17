@@ -13,6 +13,19 @@ type bounds = { max_tasks : int; max_decisions : int }
 
 val default_bounds : bounds
 
+type schedule_mode =
+  | Record_schedule
+  | Replay_schedule of Schedule_trace.t
+  | Fork_schedule of {
+      trace : Schedule_trace.t;
+      decision : int;
+      chosen : Concurrency_contract.task_id;
+    }
+      (** Explicit schedule handling. Strict replay never falls back. A fork validates the source
+          trace through decision [decision - 1], validates that decision's exact queue, selects
+          [chosen] only if it is runnable, and records the resulting FIFO branch with fork
+          provenance. *)
+
 type outcome = {
   body : Value.t Concurrency_contract.task_result;
   root_error : Runtime_err.t option;
@@ -26,6 +39,10 @@ type outcome = {
 (** A fully drained evaluator scope. [root_error] retains the exact runtime error when [body] is a
     failed root task, so the CLI preserves established error codes and exit behavior. The recursive
     metrics are always zero. *)
+
+type scheduled = { value : Value.t; outcome : outcome; schedule : Schedule_trace.t }
+(** Successful scheduled execution plus its complete freshly recorded canonical trace. Strict replay
+    therefore exposes byte-for-byte comparison without retaining a prior runtime value. *)
 
 val run_state :
   Eval.ctx ->
@@ -45,6 +62,18 @@ val run_expr :
   (Value.t, Runtime_err.t) result
 (** [run_expr] is the default interpreted root scheduler. Pure and language-handled Async programs
     retain their ordinary results; unhandled frozen Async operations use this scheduler. *)
+
+val run_expr_scheduled :
+  Eval.ctx ->
+  ?policy:Concurrency_contract.failure_policy ->
+  ?bounds:bounds ->
+  mode:schedule_mode ->
+  Kernel.expr ->
+  (scheduled, Runtime_err.t) result
+(** [run_expr_scheduled] records, strictly replays, or explicitly forks one canonical expression.
+    Header, creation, sequence, exact queue, chosen-task, operation, EOF, and leftover drift return
+    E0908 after recursive cleanup. Creation records are checked before allocation; routed operation
+    hashes are checked before their root callbacks. *)
 
 val run_call :
   Eval.ctx ->
@@ -68,6 +97,7 @@ val run_expr_cached :
   Kernel.expr ->
   (outcome * cache_status, Runtime_err.t) result
 (** [run_expr_cached] computes its key from the canonical expression hash, scheduler version,
-    failure policy, and both bounds. Cache entries contain only deterministic trace/decision proof,
-    never evaluator closures, continuations, Task handles, or result values; execution still
-    produces a fresh run-local result and verifies a hit against the stored proof. *)
+    schedule format version, failure policy, and both bounds. Cache entries contain only
+    deterministic trace/decision proof, never evaluator closures, continuations, Task handles, or
+    result values; execution still produces a fresh run-local result and verifies a hit against the
+    stored proof. *)

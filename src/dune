@@ -7,5 +7,6 @@
   Once_state
   Concurrency_owner
   Task_capability
-  Task_handle)
+  Task_handle
+  Schedule_control)
  (libraries digestif unix))
