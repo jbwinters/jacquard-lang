@@ -1,14 +1,20 @@
 # Structured Concurrency Contract
 
-Status: SC.14 ships scoped typed Channel execution through the interpreted
-scheduler over SC.12 budgeted exhaustive scheduling, SC.11 seeded randomized
-schedules, SC.10 canonical record/replay, and the SC.9 FIFO round-robin driver.
-The prior fail-fast/collect policies, cooperative cancellation, structured-scope
-ownership, lifecycle core, and generalized child-effect law remain
-authoritative. The default CLI, prelude-evaluation, and Warp Case paths drive
-real evaluator states and affine continuations through the Async and Channel
-scheduler routes. Native root scheduling, native Channel execution, host
-scheduling, and host asynchronous I/O remain outside SC.14 and deferred to C4.
+Status: SC.16 publishes the C0-C2 evidence and limits for SC.12 budgeted
+exhaustive schedule enumeration and SC.11 seeded randomized schedule testing
+over SC.10 versioned scheduler traces and strict replay, SC.9 deterministic
+round-robin, SC.8 fail-fast/collect scope policies, SC.7 cooperative
+cancellation, SC.6 structured-scope ownership, the SC.5
+policy-independent lifecycle core, and the SC.4 generalized child-effect law
+(D46-D50), July 2026. This document is authoritative for C1's static
+non-laundering law, lifecycle and nested ownership, cancellation delivery, and
+homogeneous scope aggregation, plus C2's record/replay and seeded decision
+policies. SC.14 also ships the C3 scoped typed-Channel runtime through those
+same deterministic, seeded, replay, exhaustive, and cached interpreter routes.
+The default CLI, prelude-evaluation, and Warp Case paths drive real evaluator
+states and affine continuations through the Async and Channel scheduler.
+Native root scheduling, native Channel execution, host scheduling, host
+asynchronous I/O, and actors remain outside this gate and are deferred to C4.
 
 Structured concurrency is an effect interpreted by a scheduler handler. The
 same program can therefore run under deterministic, seeded-random, exhaustive,
@@ -658,6 +664,14 @@ SC.11 adds seeded randomized Warp schedules, and SC.12 implements budgeted
 exhaustive schedules. C3 adds typed channels: SC.13 freezes their interface and
 semantics without a runtime, and SC.14 implements them. C4 adds host asynchronous
 I/O; actor supervision opens only after channels and lifecycle evidence exist.
+
+SC.16 closes this C0-C2 gate without waiting for C3 or C4. Its one-program
+four-handler demo, exact inventories, decision summary, claim-to-test map, and
+explicit caveats are published in
+[`release/structured-concurrency/EVIDENCE.md`](release/structured-concurrency/EVIDENCE.md)
+and
+[`release/structured-concurrency/LIMITS.md`](release/structured-concurrency/LIMITS.md).
+Those documents do not widen the runtime contract defined here.
 
 | ID | decision | frozen result |
 |---|---|---|

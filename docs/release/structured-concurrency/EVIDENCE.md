@@ -1,14 +1,101 @@
-# Structured Concurrency SC.14 Evidence
+# Structured Concurrency C0-C3 Evidence
 
-Status: the typed Channel interface frozen by SC.13 now runs through the SC.14
-interpreted scheduler over the complete SC.12 stack. Exact-scope FIFO state,
-atomic continuation ownership, cancellation, close, teardown, deadlock refusal,
-and exact-identity admission are executable. Channel has no root grant, native
-route, host scheduling, or shared-memory carrier.
+Status: SC.16 closes the C0-C2 publication gate. C0 pure parallel hints, C1
+structured task lifecycles, and C2 deterministic schedule tooling are shipped
+at the boundaries below. Budgeted exhaustive enumeration is implemented over
+SC.11 seeded scheduling and SC.10 canonical record, fail-closed strict replay,
+and explicit provenance-carrying forks. Enumeration explores every bounded
+runnable TaskId choice, retains exact counts and replayable traces, and refuses
+routed effects before world callbacks. SC.14 also ships the C3 typed-Channel
+runtime through the same interpreted scheduler: exact-scope FIFO state, atomic
+continuation ownership, cancellation, close, teardown, deadlock refusal, and
+exact-identity admission are executable. This gate makes no C4 host-async,
+native Channel, actor, or supervision claim.
 
-- Reconstruction base: `2fc2d306c1236b8faeaee37a2e1c9d2848d16f52`
+- Reconstruction base: `b82809959c085a51eb3e9f8ae7623692983acd65`
 - Evidence overlay: [MANIFEST.sha256](MANIFEST.sha256)
 - Authoritative contract: [concurrency.md](../../concurrency.md)
+- Explicit caveats: [LIMITS.md](LIMITS.md)
+
+## Published gate
+
+| phase | shipped claim | proving evidence |
+|---|---|---|
+| C0 | `parallel.map` and `parallel.both` accept only closed, empty-row callbacks and preserve source order. Both interpreter and native implementations are sequential hints. | `test/test_stdlib.ml`, `test/cli/props.t`, `test/cli/native.t`, `scripts/native-parallel-evidence.sh`, and `docs/native-parallel-decision.md` |
+| C1 | Opaque scope-owned Tasks, structured drain, cooperative cancellation, fail-fast/collect, and deterministic FIFO scheduling run real interpreter continuations. Child world effects remain in the parent row. | scheduler/scope/cancellation/policy/round-robin suites below, `test/cli/round-robin.t`, `test/cli/scope-policy.t`, `test/cli/task-values.t`, and the concurrency row doctests |
+| C2 | Canonical format-v1 record/replay/fork, seeded random scheduling, and budgeted exhaustive schedule enumeration operate over the same decision boundary. | schedule-trace/exhaustive suites below, `test/cli/schedule-replay.t`, `test/cli/warp.t`, and `test/cli/concurrency-evidence.t` |
+| C3 | Scoped typed channels run through deterministic FIFO, seeded, replay, exhaustive, and cached interpreter scheduling with exact run/scope ownership, rendezvous and buffering, close, cancellation, and deadlock behavior. | `channel-contract`, `round-robin`, and `exhaustive-schedule` suites; `test/cli/task-values.t`; `test/cli/schedule-replay.t`; and the frozen traces below |
+| C4 | Not claimed: host asynchronous I/O, actors, and supervision are absent. | [LIMITS.md](LIMITS.md) |
+
+The final inventory is exactly 700 compiled Alcotest/QCheck cases, 40 recursive
+cram transcript files, and 27 named doctest examples across 8 documents. The
+commands in [Reconstruction and verification](#reconstruction-and-verification)
+recompute those counts instead of trusting this paragraph.
+
+## One program under four schedule handlers
+
+[`demos/concurrency/task-schedules.jac`](../../../demos/concurrency/task-schedules.jac)
+contains one task expression: it spawns two immediate children and returns `0`.
+The source also contains two declarations whose checked signatures prove that
+spawning preserves `Net`, while `async.scope` removes only `Async`:
+
+```text
+spawn-net : () ->{Async, Net} Task Text
+scoped-net : () ->{Net} TaskResult (TaskResult Text)
+```
+
+Run `sh demos/concurrency/run.sh` after `dune build @all`. The developer driver
+executes that same resolved expression through the existing library handlers;
+it does not substitute four similar programs:
+
+```text
+program-hash=0c6c2bb245f0fd38e47abfd04313156954f74e7a1ca2eb4d0ca553c93ce1098a
+trace-format=1
+round-robin scheduler=fifo-round-robin-v0 result=0 tasks=3 decisions=5 trace=13b32f8467e9d40e38117f9d46ca47e6ab9665fe68272efa8a9082c63aab94a8
+seeded scheduler=seeded-random-v0 seed=20260717 result=0 tasks=3 decisions=5 trace=f911e0e95e08a9b1c1e312381a7f8c6ae6d07101d1e2e9a4ddfecf0216044327
+exhaustive completeness=complete explored=8 worlds-started=8 unique-traces=8 all-zero=true
+replay source=round-robin result=0 byte-identical=true
+exhaustive-replay worlds=8 byte-identical=true
+```
+
+The eight-world count is the complete unpruned schedule tree for two immediate
+children. Every world has a distinct canonical trace, returns the same program
+value, and strictly replays byte for byte. `test/cli/concurrency-evidence.t`
+pins the signatures, program hash, trace identities, counts, and replay claims.
+
+## Decisions D46-D50
+
+| ID | frozen decision | evidence consequence |
+|---|---|---|
+| D46 | FIFO round-robin is the default scheduler; host scheduling is opt-in future work. | The queue and selected TaskId are recorded at every decision. Seeded and exhaustive handlers replace only the choice policy. |
+| D47 | Cancellation is cooperative at await, yield, and scheduler-routed effects; resource cleanup uses explicit brackets; finalizers are deferred. | Boundary tests prove cancellation wins before routed work and destroys each affine continuation once. External-resource release remains a handler obligation. |
+| D48 | Task escape is an E0907 dynamic defect in v0; rank-2 static scoping is future work. | Recursive guards cover tuples, constructors, closures, resumptions, cycles, callbacks, stale scopes, and later runs. |
+| D49 | Channels are deferred to C3; actors and supervision to C4+. | No channel, mailbox, actor, or supervision claim appears in this gate. |
+| D50 | Fail-fast is the default scope policy; collect is explicit. | Fail-fast returns the first decision-ordered non-success without partial values; collect preserves one result per input in creation order. |
+
+## Claim-to-proof checklist
+
+Every advertised claim has an executable owner:
+
+- C0 purity, sequential equivalence, ordered failure, and native fallback map
+  to `test/test_stdlib.ml`, `test/cli/props.t`, `test/cli/native.t`, and the
+  native parallel evidence script.
+- Child-effect visibility maps to the positive/negative concurrency doctests,
+  checker crams, and the two signatures in the C0-C2 demo.
+- Opaque Task ownership, lifecycle, cancellation, cleanup, and failure-policy
+  claims map to their independently selectable compiled suites and the
+  `task-values.t`, `scope-policy.t`, and `round-robin.t` transcripts.
+- FIFO repeatability maps to 128 in-process property runs and 128 fresh-process
+  transcript runs. Seeded repeatability maps to `test/cli/warp.t` and focused
+  scheduler tests.
+- Format-v1 strict replay/fork and drift-before-world-work map to
+  `test_schedule_trace.ml`, `test_round_robin.ml`, and
+  `test/cli/schedule-replay.t`.
+- Exhaustive exact counts, incomplete budget reports, hermetic refusal, fresh
+  affine worlds, and replayability map to `test_exhaustive_schedule.ml`, the
+  handler gauntlet, and the eight-world demo transcript.
+- The exclusions and caveats map to [LIMITS.md](LIMITS.md), which is part of
+  the reconstructible manifest and is checked by the release gate.
 
 ## Published declarations
 
@@ -652,7 +739,7 @@ opam exec -- dune build test/test_jacquard.exe
 The current inventory is mechanically checked against compiled discovery:
 
 - Alcotest/QCheck cases: `700`
-- Cram transcript files: `39`
+- Cram transcript files: `40`
 
 The arithmetic from the prior 687-case inventory is exact: twelve compiled
 `channel-contract` cases plus the `store/9` Channel-private-hash case produce
@@ -668,14 +755,14 @@ grant was added.
 
 ## Reconstruction and verification
 
-The manifest is the complete SC.14 successor overlay on validated SC.12 commit
-`2fc2d306c1236b8faeaee37a2e1c9d2848d16f52`. Reconstruct it under repository-local
-scratch space:
+The manifest is the complete SC.16 publication overlay on exact SC.12 commit
+`b82809959c085a51eb3e9f8ae7623692983acd65`. Reconstruct it under
+repository-local scratch space:
 
 ```sh
 set -eu
-base=2fc2d306c1236b8faeaee37a2e1c9d2848d16f52
-dest="$PWD/.scratch/sc14-evidence-copy"
+base=b82809959c085a51eb3e9f8ae7623692983acd65
+dest="$PWD/.scratch/sc16-evidence-copy"
 manifest=docs/release/structured-concurrency/MANIFEST.sha256
 rm -rf "$dest"
 mkdir -p "$dest"
@@ -712,6 +799,28 @@ snapshot_source >"$snapshot"
 "$dest/scripts/release/check-structured-concurrency-manifest.sh"
 opam exec -- dune build @all --root "$dest"
 opam exec -- dune runtest --force --root "$dest"
+(
+  cd "$dest/_build/default/test"
+  test "$(./test_jacquard.exe list --color=never 2>/dev/null | wc -l)" -eq 700
+)
+test "$(find "$dest/test" -name '*.t' | wc -l)" -eq 40
+test "$(grep -h -o 'doctest=[^ ]*' \
+  "$dest/README.md" \
+  "$dest/docs/effect-membranes.md" \
+  "$dest/docs/effect-taxonomy.md" \
+  "$dest/docs/concurrency.md" \
+  "$dest/docs/tutorial.md" \
+  "$dest/docs/stdlib.md" \
+  "$dest/docs/warp-testing.md" \
+  "$dest/demos/README.md" | wc -l)" -eq 27
+opam exec -- dune runtest test/cli/concurrency-evidence.t --force --root "$dest"
+(
+  cd "$dest/_build/default/test"
+  ./test_jacquard.exe test \
+    'scheduler-core|structured-scope|cancellation|scope-policy|round-robin|schedule-trace|exhaustive-schedule' \
+    --compact --color=never
+)
+JACQUARD_PRELUDE="$dest/prelude" sh "$dest/demos/concurrency/run.sh"
 opam exec -- dune fmt --root "$dest"
 snapshot_source | cmp "$snapshot" -
 opam exec -- dune build @doc --root "$dest"
