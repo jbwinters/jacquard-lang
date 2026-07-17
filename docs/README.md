@@ -37,9 +37,10 @@ project shape from file names alone.
   uncertainty wording, canonical boundaries, and explicit non-goals.
 - `effect-membranes.md`: GM.0 charter for typed governed facades, versioned
   decision artifacts, live/dry boundaries, and monotonic composition.
-- `concurrency.md`: combined SC.4 child-effect charging and SC.5 lifecycle core
-  over the SC.3 Task/Async boundary, scope contracts, deterministic scheduling,
-  cancellation, exclusions, and D46-D50.
+- `concurrency.md`: SC.6 structured-scope ownership and escape cleanup over the
+  SC.4 generalized child-effect law and SC.5 policy-independent lifecycle,
+  plus scope contracts, deterministic scheduling, cancellation, exclusions,
+  and D46-D50.
 - `warp-testing.md`: Warp test model, rows, handlers, cache, properties, and
   world lanes.
 - `errors.md`: diagnostic code catalog.
@@ -143,11 +144,11 @@ Read these together when judging whether the release candidate is credible:
 
 ## Structured Concurrency Evidence
 
-- `release/structured-concurrency/EVIDENCE.md`: combined SC.4 generalized
-  row-law and SC.5 lifecycle evidence over the SC.3 Task value,
-  private-carrier, Async declaration, and native parity boundary.
-- `release/structured-concurrency/MANIFEST.sha256`: reconstructible SC.4-SC.5
-  overlay on the validated SC.3 base.
+- `release/structured-concurrency/EVIDENCE.md`: SC.6 nested scope ownership,
+  cleanup, escape-scan, and lifecycle/memory/QCheck evidence over the reviewed
+  SC.4 + SC.5 inputs integrated with GM.6 main.
+- `release/structured-concurrency/MANIFEST.sha256`: reconstructible complete
+  SC.4-SC.6 overlay on GM.6 main commit `89175fca`.
 
 ## Maintenance Notes
 

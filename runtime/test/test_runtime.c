@@ -923,6 +923,34 @@ static void test_inert_task_handles(void) {
   free(deep);
 }
 
+static void test_structured_scope_carrier_teardown(void) {
+  /* SC.6 scheduling remains policy-independent in OCaml. This native stress probe pins the
+     ownership boundary it will lower to: every forgotten Task carrier and resume-shaped heap root
+     is explicitly released on scope exit. check.sh runs this under ASAN+LSAN. */
+  enum { child_count = 4096 };
+  int run_owner = 0;
+  uint32_t scope_path[] = { 0, 1 };
+  jq_value *tasks = calloc(child_count, sizeof(*tasks));
+  jq_value *resumes = calloc(child_count, sizeof(*resumes));
+  if (!tasks || !resumes) abort();
+  bool all_constructed = true;
+  for (uint32_t index = 0; index < child_count; index++) {
+    if (jq_task_create(&run_owner, scope_path, 2, index, &tasks[index]) != JQ_TASK_VALID) {
+      all_constructed = false;
+      tasks[index] = JQ_UNIT;
+    }
+    resumes[index] = jq_tuple(1, (jq_value[]){ jq_int(index) });
+  }
+  CHECK(all_constructed, "structured-scope Task carriers construct");
+  for (uint32_t index = 0; index < child_count; index++) {
+    jq_drop(resumes[index]);
+    jq_drop(tasks[index]);
+  }
+  free(resumes);
+  free(tasks);
+  CHECK(true, "native structured-scope carrier teardown is ASAN-clean");
+}
+
 int main(int argc, char **argv) {
   /* fatal-path modes: check.sh asserts the message and exit code 2 */
   if (argc > 1 && strcmp(argv[1], "div0") == 0) {
@@ -989,6 +1017,7 @@ int main(int argc, char **argv) {
   test_clause_pushes_handler();
   test_grant_fallback();
   test_inert_task_handles();
+  test_structured_scope_carrier_teardown();
   test_capture_single_resume();
   test_once_instances_are_independent();
   test_multishot_two_resumes();

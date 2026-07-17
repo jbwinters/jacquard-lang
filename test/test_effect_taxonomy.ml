@@ -662,7 +662,7 @@ let test_resolved_reserved_schemas () =
       "dependent operation scheme";
       "aliases, higher-order wrappers, returned closures, tuples";
       "SC.3 represents opaque run/scope-local Task values";
-      "neither milestone implements a scheduler, executable scopes, or a root handler";
+      "No milestone yet implements scheduling policy, executable scopes, or a root handler";
     ];
   let prelude = lazy (prelude_store ()) in
   let constructor_inventory type_name =
@@ -1162,6 +1162,7 @@ let test_governance_and_links () =
   test_self_effect_hash_contract ();
   test_async_privilege_mutations ();
   Test_scheduler_core.run ();
+  Test_structured_scope.run ();
   let doc = Corpus_support.read_file taxonomy_doc in
   let manifest = Corpus_support.read_file taxonomy_file in
   let approval = Corpus_support.read_file approval_fixture in

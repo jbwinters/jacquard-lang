@@ -21,6 +21,12 @@ val validate_task_value :
 (** [validate_task_value ctx ~scope_path value] accepts a Task only in its creating evaluator run
     and exact structured scope. Malformed, non-Task, stale, or foreign values return E0907. *)
 
+val reject_task_escape : ctx -> scope_path:int list -> Value.t -> (unit, Diag.t list) result
+(** [reject_task_escape ctx ~scope_path value] scans the complete reachable runtime-value graph and
+    rejects with E0907 when a Task created in [scope_path] or one of its descendants is reachable.
+    Tuples, constructors, closure cells, resumptions, and cyclic environments are handled. Tasks
+    owned by an enclosing scope remain valid. *)
+
 val register_builtin : ctx -> Hash.t -> Value.t -> unit
 (** [register_builtin ctx hash value] installs a native implementation for a term. Recovery-marked
     values are rejected with the evaluator's runtime exception; custom callbacks are guarded before

@@ -294,9 +294,9 @@ let release_inventory_errors () =
 let doctest_names () =
   [
     "README.md";
+    "docs/effect-taxonomy.md";
     "docs/concurrency.md";
     "docs/effect-membranes.md";
-    "docs/effect-taxonomy.md";
     "docs/tutorial.md";
     "docs/stdlib.md";
     "docs/warp-testing.md";
