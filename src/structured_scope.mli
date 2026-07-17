@@ -99,6 +99,16 @@ val channel_open : ('resume, 'value) t -> capacity:int -> channel_open_outcome
     scheduler code must establish the routed cancellation boundary before calling this lower seam.
 *)
 
+val channel_value :
+  Task_capability.t -> ('resume, 'value) t -> channel_handle -> (Value.t, Diag.t list) result
+(** Runtime-private wrapping of a validated live exact-scope channel handle. The unforgeable
+    scheduler capability prevents ordinary OCaml clients from manufacturing the opaque carrier. *)
+
+val channel_handle :
+  Task_capability.t -> ('resume, 'value) t -> Value.t -> (channel_handle, Diag.t list) result
+(** Runtime-private unwrapping of a [Value.VChannel]. Non-channel, stale, foreign-run, and
+    cross-scope values return E0907 without exposing channel state. *)
+
 val channel_send :
   ('resume, 'value) t ->
   task:handle ->

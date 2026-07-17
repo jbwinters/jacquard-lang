@@ -111,16 +111,30 @@ let channel_open scope ~capacity =
 let same_channel_id left right = Channel_contract.compare_channel_id left right = 0
 
 let find_channel scope channel =
-  Result.bind
-    (Channel_handle.validate_scope ~run:(channel_run scope) ~scope_path:(scope_path scope) channel)
-    (fun id ->
-      match
-        List.find_opt
-          (fun entry -> same_channel_id (Channel_contract.view entry.state).id id)
-          scope.channels
-      with
-      | Some entry -> Ok entry
-      | None -> closed_error ())
+  ensure_open scope (fun () ->
+      Result.bind
+        (Channel_handle.validate_scope ~run:(channel_run scope) ~scope_path:(scope_path scope)
+           channel)
+        (fun id ->
+          match
+            List.find_opt
+              (fun entry -> same_channel_id (Channel_contract.view entry.state).id id)
+              scope.channels
+          with
+          | Some entry -> Ok entry
+          | None -> closed_error ()))
+
+let channel_value _capability scope channel =
+  Result.map (fun _ -> Value.VChannel channel) (find_channel scope channel)
+
+let channel_handle _capability scope = function
+  | Value.VChannel channel -> Result.map (fun _ -> channel) (find_channel scope channel)
+  | _ ->
+      Error
+        [
+          Diag.error ~code:Concurrency_contract.task_escape_code
+            "Channel operation expected an opaque ChannelHandle";
+        ]
 
 let wake_channel scope channel_id task_id result ~map_resume =
   Result.bind (Scheduler_core.handle_of_id scope.scheduler task_id) (fun handle ->

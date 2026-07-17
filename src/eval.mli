@@ -26,11 +26,17 @@ val validate_task_value :
 (** [validate_task_value ctx ~scope_path value] accepts a Task only in its creating evaluator run
     and exact structured scope. Malformed, non-Task, stale, or foreign values return E0907. *)
 
+val validate_channel_value :
+  ctx -> scope_path:int list -> Value.t -> (Channel_contract.channel_id, Diag.t list) result
+(** [validate_channel_value] accepts only an opaque ChannelHandle from the current evaluator run and
+    exact structured scope. Other values and foreign, parent, child, sibling, or stale handles
+    return E0907 without exposing channel state. *)
+
 val reject_task_escape : ctx -> scope_path:int list -> Value.t -> (unit, Diag.t list) result
 (** [reject_task_escape ctx ~scope_path value] scans the complete reachable runtime-value graph and
-    rejects with E0907 when a Task created in [scope_path] or one of its descendants is reachable.
-    Tuples, constructors, closure cells, resumptions, and cyclic environments are handled. Tasks
-    owned by an enclosing scope remain valid. *)
+    rejects with E0907 when a Task or ChannelHandle created in [scope_path] or one of its
+    descendants is reachable. Tuples, constructors, closure cells, resumptions, and cyclic
+    environments are handled. Scoped handles owned by an enclosing scope remain valid. *)
 
 val register_builtin : ctx -> Hash.t -> Value.t -> unit
 (** [register_builtin ctx hash value] installs a native implementation for a term. Recovery-marked

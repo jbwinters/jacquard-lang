@@ -112,7 +112,9 @@ type ('task, 'value) cancellation =
 
 val cancel :
   equal_task:('task -> 'task -> bool) -> ('task, 'value) t -> 'task -> ('task, 'value) cancellation
-(** [cancel] removes at most one blocked operation for [task] without reordering survivors. *)
+(** [cancel] removes at most one blocked operation for [task] without reordering survivors. The
+    trusted [equal_task] predicate must be total and non-raising; if it raises, the exception
+    propagates before channel state is changed. *)
 
 type ('task, 'value) teardown = {
   dropped_values : 'value list;
@@ -139,3 +141,17 @@ type view = {
 
 val view : ('task, 'value) t -> view
 (** [view] observes state without transferring any payload or resume ownership. *)
+
+type ('task, 'value) snapshot = {
+  snapshot_id : channel_id;
+  snapshot_capacity : int;
+  snapshot_closed : bool;
+  snapshot_buffer : 'value list;
+  snapshot_senders : ('task, 'value) pending_sender list;
+  snapshot_receivers : 'task pending_receiver list;
+}
+(** Read-only structural snapshot for invariant checking and deterministic trace evidence. Lists are
+    returned in their normative FIFO order; taking a snapshot transfers no payload ownership. *)
+
+val snapshot : ('task, 'value) t -> ('task, 'value) snapshot
+(** [snapshot] copies the channel's structural lists without changing state. *)

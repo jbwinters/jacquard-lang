@@ -206,3 +206,22 @@ let view (channel : (_, _) t) =
     waiting_senders = List.length channel.senders;
     waiting_receivers = List.length channel.receivers;
   }
+
+type ('task, 'value) snapshot = {
+  snapshot_id : channel_id;
+  snapshot_capacity : int;
+  snapshot_closed : bool;
+  snapshot_buffer : 'value list;
+  snapshot_senders : ('task, 'value) pending_sender list;
+  snapshot_receivers : 'task pending_receiver list;
+}
+
+let snapshot (channel : (_, _) t) =
+  {
+    snapshot_id = channel.id;
+    snapshot_capacity = channel.capacity;
+    snapshot_closed = channel.closed;
+    snapshot_buffer = channel.buffer;
+    snapshot_senders = channel.senders;
+    snapshot_receivers = channel.receivers;
+  }

@@ -9,9 +9,16 @@ let diagnostic detail =
 
 let create ~run ~id = { run; id }
 
+let checked_id (id : Channel_contract.channel_id) =
+  match Channel_contract.channel_id ~scope_path:id.scope_path ~open_index:id.open_index with
+  | checked -> Ok checked
+  | exception Channel_contract.Bug_invalid_channel_id detail ->
+      Error [ diagnostic ("malformed scheduler ID (" ^ detail ^ ")") ]
+
 let validate_run ~run handle =
-  if Concurrency_owner.equal run handle.run then Ok handle.id
-  else Error [ diagnostic "the handle belongs to another run" ]
+  Result.bind (checked_id handle.id) (fun id ->
+      if Concurrency_owner.equal run handle.run then Ok id
+      else Error [ diagnostic "the handle belongs to another run" ])
 
 let validate_scope ~run ~scope_path handle =
   Result.bind (validate_run ~run handle) (fun id ->

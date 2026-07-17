@@ -277,6 +277,15 @@ let hostile_task_for_ctx ctx ~scope_path ~spawn_index =
   Obj.set_field payload 2 (Obj.repr spawn_index);
   Value.VTask (Obj.obj payload)
 
+let hostile_channel_for_ctx ctx ~scope_path ~open_index =
+  let id = Obj.new_block 0 2 in
+  Obj.set_field id 0 (Obj.repr scope_path);
+  Obj.set_field id 1 (Obj.repr open_index);
+  let payload = Obj.new_block 0 2 in
+  Obj.set_field payload 0 (Obj.field (Obj.repr ctx) 1);
+  Obj.set_field payload 1 id;
+  Value.VChannel (Obj.obj payload)
+
 let expect_escape label ctx ~scope_path value =
   Alcotest.(check string) label "E0907" (Eval.reject_task_escape ctx ~scope_path value |> error_code)
 
@@ -304,7 +313,33 @@ let test_dynamic_escape_graph_scan () =
   in
   expect_escape "resumption escape" ctx ~scope_path:[ 0 ] resume;
   let outer_task = hostile_task_for_ctx ctx ~scope_path:[ 0 ] ~spawn_index:3 in
-  Eval.reject_task_escape ctx ~scope_path:[ 0; 1 ] (Value.VTuple [ outer_task ]) |> ok
+  Eval.reject_task_escape ctx ~scope_path:[ 0; 1 ] (Value.VTuple [ outer_task ]) |> ok;
+  let channel = hostile_channel_for_ctx ctx ~scope_path:[ 0; 1 ] ~open_index:2 in
+  Eval.validate_channel_value ctx ~scope_path:[ 0; 1 ] channel |> ok |> ignore;
+  List.iter
+    (fun (label, path) ->
+      Alcotest.(check string)
+        label "E0907"
+        (Eval.validate_channel_value ctx ~scope_path:path channel |> error_code))
+    [
+      ("channel parent scope", [ 0 ]);
+      ("channel child scope", [ 0; 1; 1 ]);
+      ("channel sibling scope", [ 0; 2 ]);
+    ];
+  let foreign_ctx = (Eval_support.make ()).ctx in
+  Alcotest.(check string)
+    "channel foreign run" "E0907"
+    (Eval.validate_channel_value foreign_ctx ~scope_path:[ 0; 1 ] channel |> error_code);
+  let malformed = hostile_channel_for_ctx ctx ~scope_path:[] ~open_index:(-1) in
+  Alcotest.(check string)
+    "forged malformed channel ID" "E0907"
+    (Eval.validate_channel_value ctx ~scope_path:[] malformed |> error_code);
+  expect_escape "channel tuple escape" ctx ~scope_path:[ 0 ] (Value.VTuple [ channel ]);
+  let channel_resume =
+    Value.VResume
+      [ Value.FTuple { done_rev = [ channel ]; pending = []; scope = Value.empty_scope } ]
+  in
+  expect_escape "channel resumption escape" ctx ~scope_path:[ 0 ] channel_resume
 
 let map_channel_resume resume = function
   | Structured_scope.Channel_send_ok -> resume + 1000
@@ -378,6 +413,32 @@ let test_scoped_channel_ownership_and_cancellation () =
   Structured_scope.close scope ~reason:Structured_scope.Normal ~escaping:[] ~drop:ignore |> ok;
   check_zero_metrics "channel cancellation close" scope
 
+let test_closed_channel_remains_live_until_scope_teardown () =
+  let scope, body = Structured_scope.create ~body_resume:1 |> ok in
+  let channel = opened_channel scope 0 in
+  let close_once () =
+    let resume = Structured_scope.checkout scope body |> ok in
+    match
+      Structured_scope.channel_close scope ~task:body ~channel ~resume
+        ~map_resume:map_channel_resume
+      |> ok
+    with
+    | Structured_scope.Channel_suspended -> Alcotest.fail "channel.close suspended"
+    | Structured_scope.Channel_continues { resume; awakened = [] } ->
+        Structured_scope.suspend_yield scope body ~resume |> ok;
+        Structured_scope.wake_yielded scope body |> ok
+    | Structured_scope.Channel_continues _ -> Alcotest.fail "empty close woke a task"
+  in
+  close_once ();
+  close_once ();
+  Structured_scope.close scope ~reason:Structured_scope.Normal ~escaping:[] ~drop:ignore |> ok;
+  Alcotest.(check string)
+    "teardown makes channel operation stale" "E0907"
+    (Structured_scope.with_checkout scope body (fun resume ->
+         Structured_scope.channel_send scope ~task:body ~channel ~resume ~value:"stale"
+           ~map_resume:map_channel_resume)
+    |> error_code)
+
 let prop_recursive_close_restores_baseline =
   QCheck.Test.make ~count:200 ~name:"recursive scope close restores every ownership counter"
     QCheck.nat_small (fun seed ->
@@ -407,6 +468,7 @@ let run () =
   test_checkout_bracket_restores_error_and_exception ();
   test_dynamic_escape_graph_scan ();
   test_scoped_channel_ownership_and_cancellation ();
+  test_closed_channel_remains_live_until_scope_teardown ();
   QCheck.Test.check_exn prop_recursive_close_restores_baseline
 
 let suite = [ Alcotest.test_case "nested ownership, cleanup, and escape" `Quick run ]

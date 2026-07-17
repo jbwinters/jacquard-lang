@@ -96,7 +96,8 @@ module Runtime_value_key = struct
               in
               loop budget accumulator rest
           | VResume _ | VOnceResume _ -> loop budget (mix accumulator 11) rest
-          | VTask _ -> loop budget (mix accumulator 12) rest)
+          | VTask _ -> loop budget (mix accumulator 12) rest
+          | VChannel _ -> loop budget (mix accumulator 14) rest)
     in
     loop 4 0 [ root ]
 end
@@ -233,6 +234,15 @@ let validate_task_value ctx ~scope_path = function
             "expected an opaque scheduler-owned Task handle";
         ]
 
+let validate_channel_value ctx ~scope_path = function
+  | VChannel handle -> Channel_handle.validate_scope ~run:(current_task_run ctx) ~scope_path handle
+  | _ ->
+      Error
+        [
+          Diag.error ~code:Concurrency_contract.task_escape_code
+            "expected an opaque scheduler-owned ChannelHandle";
+        ]
+
 let rec scope_prefix prefix path =
   match (prefix, path) with
   | [], _ -> true
@@ -265,10 +275,24 @@ let reject_task_escape ctx ~scope_path root =
           :: !diagnostics
     | Ok _ -> ()
   in
+  let record_channel handle =
+    match Channel_handle.validate_run ~run:(current_task_run ctx) handle with
+    | Error channel_diagnostics -> diagnostics := List.rev_append channel_diagnostics !diagnostics
+    | Ok id when scope_prefix scope_path id.scope_path ->
+        diagnostics :=
+          Diag.error ~code:Concurrency_contract.task_escape_code
+            ~hint:"do not return or store a ChannelHandle beyond its creating async.scope"
+            ("a ChannelHandle may not escape its creating structured scope: Channel "
+            ^ Channel_contract.trace_channel_id id
+            ^ " escaped")
+          :: !diagnostics
+    | Ok _ -> ()
+  in
   let rec value runtime_value =
     if first_visit runtime_value then
       match runtime_value with
       | VTask handle -> record_task handle
+      | VChannel handle -> record_channel handle
       | VTuple items | VCon { args = items; _ } -> List.iter value items
       | VClosure { scope = closure_scope; _ } -> scope closure_scope
       | VResume frames -> kont frames
@@ -397,10 +421,10 @@ let group_hashes (decl : Kernel.decl) : Hash.t array =
   | Error ds -> rt (Runtime_err.Unresolved (String.concat "; " (List.map Diag.to_string ds)))
 
 let con_value ctx ~trusted h =
-  if Concurrency_contract.is_task_private_hash h then
+  if Concurrency_contract.is_task_private_hash h || Channel_contract.is_channel_private_hash h then
     rt
       (Runtime_err.Invalid_task_handle
-         "the Task opaque carrier is scheduler-private and cannot be constructed");
+         "the opaque scoped-handle carrier is scheduler-private and cannot be constructed");
   match locate ctx ~trusted h with
   | { Store.decl = { Kernel.it = Kernel.DefType { cons; _ }; _ }; role = Store.Constructor i; _ } ->
       let { Kernel.con_name; fields; _ } = nth_or_bug "constructor" cons i in
@@ -522,6 +546,13 @@ let scan_recovery_state ctx ~static_trusted (state : state) =
           with
           | Ok _ -> true
           | Error diagnostics -> rt (Runtime_err.Invalid_task_handle (task_message diagnostics)))
+      | VChannel handle -> (
+          match
+            Channel_handle.validate_scope ~run:(current_task_run ctx)
+              ~scope_path:ctx.task_scope_path handle
+          with
+          | Ok _ -> true
+          | Error diagnostics -> rt (Runtime_err.Invalid_task_handle (task_message diagnostics)))
       | VCode payload ->
           if (not static_trusted) && Recovery_marker.form payload then marked ();
           false
@@ -637,6 +668,13 @@ let rec needs_mutable_recheck ctx value =
       with
       | Ok _ -> true
       | Error diagnostics -> rt (Runtime_err.Invalid_task_handle (task_message diagnostics)))
+  | VChannel handle -> (
+      match
+        Channel_handle.validate_scope ~run:(current_task_run ctx) ~scope_path:ctx.task_scope_path
+          handle
+      with
+      | Ok _ -> true
+      | Error diagnostics -> rt (Runtime_err.Invalid_task_handle (task_message diagnostics)))
   | VCode payload ->
       if Recovery_marker.form payload then
         rt_type "E1202: recovery holes are not valid input to evaluation";
@@ -680,7 +718,7 @@ let snapshot_mutable_graph root =
       | VInt _ | VReal _ | VText _ | VHash _ | VSecret _ | VConstructor _ | VOp _ | VBuiltin _
       | VTrustedBuiltin _ | VCode _ ->
           ()
-      | VTask _ -> contains_task := true
+      | VTask _ | VChannel _ -> contains_task := true
       | VTuple items | VCon { args = items; _ } -> List.iter value items
       | VClosure { scope = closure_scope; _ } -> scope closure_scope
       | VResume frames -> List.iter frame frames
@@ -734,7 +772,7 @@ let atomic_non_task_value = function
   | VTrustedBuiltin _ ->
       true
   | VTuple [] | VCon { args = []; _ } -> true
-  | VTask _
+  | VTask _ | VChannel _
   | VTuple (_ :: _)
   | VCon { args = _ :: _; _ }
   | VClosure _ | VCode _ | VResume _ | VOnceResume _ ->
@@ -749,6 +787,13 @@ let reject_recovery_result_value ctx root =
     | VTask handle -> (
         match
           Task_handle.validate_scope ~run:(current_task_run ctx) ~scope_path:ctx.task_scope_path
+            handle
+        with
+        | Ok _ -> false
+        | Error diagnostics -> rt (Runtime_err.Invalid_task_handle (task_message diagnostics)))
+    | VChannel handle -> (
+        match
+          Channel_handle.validate_scope ~run:(current_task_run ctx) ~scope_path:ctx.task_scope_path
             handle
         with
         | Ok _ -> false
