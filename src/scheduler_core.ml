@@ -35,6 +35,10 @@ type 'value await_outcome =
   | Await_suspended
   | Await_deadlocked of string
 
+type 'resume cancellation_boundary =
+  | Boundary_continue of 'resume
+  | Boundary_cancelled of { resume : 'resume; awakened : handle list }
+
 let diagnostic message =
   Diag.error ~code:"E0908" ~hint:"scheduler task state was not advanced"
     ("invalid structured-concurrency scheduler state: " ^ message)
@@ -286,8 +290,30 @@ let request_cancel scheduler handle =
 
 let deliver_cancel scheduler ~point:_ handle =
   Result.bind (validate scheduler handle) (fun (entry : (_, _) entry) ->
-      if entry.result <> None || not entry.cancellation_requested then Ok []
-      else terminalize scheduler entry Concurrency_contract.Cancelled)
+      if entry.result <> None || not entry.cancellation_requested then Ok ([], [])
+      else
+        let resumes = Option.to_list entry.resume in
+        Result.map
+          (fun awakened -> (awakened, resumes))
+          (terminalize scheduler entry Concurrency_contract.Cancelled))
+
+let cancellation_boundary scheduler ~point:_ handle ~resume =
+  Result.bind (validate scheduler handle) (fun (entry : (_, _) entry) ->
+      match (entry.lifecycle, entry.result) with
+      | Concurrency_contract.Runnable, None ->
+          Result.bind (ensure_checked_out entry) (fun () ->
+              if not entry.cancellation_requested then Ok (Boundary_continue resume)
+              else
+                Result.map
+                  (fun awakened -> Boundary_cancelled { resume; awakened })
+                  (terminalize scheduler entry Concurrency_contract.Cancelled))
+      | Concurrency_contract.Cancelled_state, Some Concurrency_contract.Cancelled ->
+          Ok (Boundary_cancelled { resume; awakened = [] })
+      | Concurrency_contract.Suspended, None -> error "a suspended task cannot reach a new boundary"
+      | Concurrency_contract.Done_state, Some (Concurrency_contract.Done _)
+      | Concurrency_contract.Failed_state, Some (Concurrency_contract.Failed _) ->
+          error "a completed task cannot reach a new boundary"
+      | _ -> error "task lifecycle and terminal result disagree at cancellation boundary")
 
 let close scheduler =
   if scheduler.closed then []
