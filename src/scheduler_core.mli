@@ -70,7 +70,7 @@ val validate_run_handle :
   ('resume, 'value) t -> handle -> (Concurrency_contract.task_id, Diag.t list) result
 (** [validate_run_handle scheduler handle] validates only the opaque run owner and returns the
     handle's ID. It is intended for structured-scope lineage checks; ordinary task operations must
-    use exact-scope validation through {!id}. *)
+    use exact-scope validation through {!val-id}. *)
 
 val inspect : ('resume, 'value) t -> handle -> ('value task_view, Diag.t list) result
 (** [inspect] returns the current task view after validating ownership. *)
