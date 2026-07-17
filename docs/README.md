@@ -153,21 +153,6 @@ Read these together when judging whether the release candidate is credible:
 - `release/governed-membranes/GM9-MANIFEST.sha256`: reconstructible GM.9 overlay
   on the validated identity, Judge, and secret integration stack.
 
-## Structured Concurrency Evidence
-
-- `release/structured-concurrency/EVIDENCE.md`: SC.14 typed-Channel runtime
-  evidence over SC.12 exhaustive and seeded scheduling, record/replay, cache
-  identity, and the validated SC.9 scheduler.
-- `release/structured-concurrency/MANIFEST.sha256`: reconstructible complete
-  SC.14 overlay on exact SC.12 commit `2fc2d30`.
-
-## Governed Membranes Evidence
-
-- `release/governed-membranes/GM1-EVIDENCE.md`: GM.1 versioned ring-3 values,
-  canonical identities, pure refusal boundaries, and compatibility evidence.
-- `release/governed-membranes/GM1-MANIFEST.sha256`: reconstructible GM.1 overlay
-  on the validated ET.6 plus GM.0 dependency-integration commit.
-
 ## Maintenance Notes
 
 - `native-compilation.md`: native compilation notes and boundaries.
