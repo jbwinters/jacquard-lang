@@ -37,10 +37,10 @@ project shape from file names alone.
   uncertainty wording, canonical boundaries, and explicit non-goals.
 - `effect-membranes.md`: GM.0 charter for typed governed facades, versioned
   decision artifacts, live/dry boundaries, and monotonic composition.
-- `concurrency.md`: SC.6 structured-scope ownership and escape cleanup over the
-  SC.4 generalized child-effect law and SC.5 policy-independent lifecycle,
-  plus scope contracts, deterministic scheduling, cancellation, exclusions,
-  and D46-D50.
+- `concurrency.md`: SC.7 cooperative cancellation at scheduler boundaries over
+  SC.6 structured-scope ownership, the SC.5 policy-independent lifecycle, and
+  the SC.4 generalized child-effect law, plus scope contracts, deterministic
+  scheduling, exclusions, and D46-D50.
 - `warp-testing.md`: Warp test model, rows, handlers, cache, properties, and
   world lanes.
 - `errors.md`: diagnostic code catalog.
@@ -146,11 +146,11 @@ Read these together when judging whether the release candidate is credible:
 
 ## Structured Concurrency Evidence
 
-- `release/structured-concurrency/EVIDENCE.md`: SC.6 nested scope ownership,
-  cleanup, escape-scan, and lifecycle/memory/QCheck evidence over the reviewed
-  SC.4 + SC.5 inputs integrated with DX.5/DX.7 hardening.
-- `release/structured-concurrency/MANIFEST.sha256`: reconstructible SC.0-SC.6
-  plus DX.5/DX.7 integration overlay on the ratified concurrency base.
+- `release/structured-concurrency/EVIDENCE.md`: SC.7 cooperative cancellation,
+  nested scope ownership, cleanup, escape-scan, and lifecycle/memory/QCheck
+  evidence integrated with DX.5/DX.6/DX.7 hardening.
+- `release/structured-concurrency/MANIFEST.sha256`: reconstructible SC.0-SC.7
+  plus DX.5/DX.6/DX.7 integration overlay on the ratified concurrency base.
 
 ## Maintenance Notes
 

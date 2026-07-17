@@ -1,11 +1,12 @@
 # Structured Concurrency Contract
 
-Status: SC.6 structured-scope ownership over the combined SC.4 generalized
-child-effect law and SC.5 policy-independent lifecycle core (D46-D50), July
-2026. This document is authoritative for C1's static non-laundering law,
-scheduler state transitions, nested ownership, cleanup, and dynamic escape
-boundary. Runnable-queue policy, routed cancellation delivery, and an Async
-root handler remain future work.
+Status: SC.7 cooperative cancellation over SC.6 structured-scope ownership,
+the SC.5 policy-independent lifecycle core, and the SC.4 generalized
+child-effect law (D46-D50), July 2026. This document is authoritative for C1's
+static non-laundering law, scheduler state transitions, nested ownership,
+cleanup, dynamic escape boundary, and cancellation delivery at scheduler
+boundaries. Runnable-queue policy, scope failure policy, and an Async root
+handler remain future work.
 
 Structured concurrency is an effect interpreted by a scheduler handler. The
 same program can therefore run under deterministic, seeded-random, exhaustive,
@@ -254,6 +255,17 @@ Cleanup completes before an escape diagnostic is returned. Every subsequent
 operation through the closed scope reports E0907 rather than exposing an
 internal lifecycle transition.
 
+SC.7 adds an atomic cancellation boundary to the lifecycle core and explicit
+cooperative operations to `Structured_scope`. Await checks before registering
+a waiter, yield checks before returning a suspended continuation, and routed
+effects check before invoking their action. Delivery terminalizes the task as
+`Cancelled`, wakes existing waiters in registration order, and transfers the
+boundary continuation exactly once to the destruction callback. The layer
+still contains no runnable queue, scheduling policy, or root Async handler.
+The cancellation regression pins the full waiter handoff: each registered
+waiter becomes runnable in registration order, owns its resume again, and
+observes the same immutable `Cancelled` result when it awaits the target again.
+
 ## 3. Scope APIs and failure shapes
 
 The general handler and homogeneous convenience APIs are frozen as:
@@ -298,6 +310,26 @@ an idempotent no-op. A task cancelling itself observes cancellation at that
 `async.cancel` routing point. No user expression after delivered cancellation
 runs.
 
+The compiled seam makes continuation ownership explicit. A successful boundary
+returns the resume token to its caller; a delivered boundary destroys it and
+returns only awakened handles. A cancel routed by task A first checks A's own
+pending request. If A may continue, it requests cancellation of the target.
+A suspended target is delivered immediately and its scheduler-owned resume is
+destroyed; a runnable target retains an idempotent request until its next
+boundary. A completed, failed, cancelled, or already-requested target is a
+deterministic no-op. The second caller-boundary check after requesting the
+target exists specifically for self-cancel: it requests and delivers at the
+same routed boundary, so the caller receives no continuation with which to
+execute a later user expression. Re-entering a boundary with an already
+cancelled task also destroys the supplied stale continuation and wakes nobody.
+
+Cancellation state and ownership change before the destruction callback runs.
+The callback is a runtime destruction primitive and must normally not raise. If
+it does raise, that exception propagates, but the task remains terminal and the
+scheduler does not re-own the transferred continuation. In particular, a
+second delivery of the same suspended-task cancellation neither transfers nor
+destroys that continuation again.
+
 Dropping a continuation releases language/runtime memory; it does not release
 an external resource automatically. Acquire/release handlers (the bracket or
 `with-file` pattern) are the required C1 idiom for resources crossing a
@@ -335,10 +367,11 @@ types, pinned identities, task-path validation, and pure lifecycle,
 waiter-wakeup, completion/failure-ordering, deadlock-cycle, and queue-order
 relations. Task 127 / SC.3 installs the exact declarations and adds an inert
 run/scope-local Task carrier in both runtime representations. SC.5 adds the
-policy-independent lifecycle engine, and SC.6 adds same-run nested scope
-ownership, recursive cleanup, and complete runtime-value escape scans.
-Runnable-queue policy, effect routing, cooperative delivery timing, and a root
-handler remain separate work.
+policy-independent lifecycle engine, SC.6 adds same-run nested scope ownership,
+recursive cleanup, and complete runtime-value escape scans, and SC.7 adds
+cooperative delivery at await, yield, and routed-effect boundaries.
+Runnable-queue policy, scope failure policy, and a root handler remain separate
+work.
 
 ## 6. Interactions and exclusions
 

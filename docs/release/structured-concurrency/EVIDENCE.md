@@ -1,10 +1,11 @@
-# Structured Concurrency SC.6 Evidence
+# Structured Concurrency SC.7 Evidence
 
-Status: executable policy-independent structured-scope ownership, deterministic
-nested lineage, recursive cleanup, and complete dynamic Task-escape detection
-are implemented over the validated SC.4 child-effect law and SC.5 scheduler
-core. This milestone intentionally contains no runnable-queue policy, routed
-cancellation timing, host concurrency/I/O, or detached/root Async handler.
+Status: cooperative cancellation at await, yield, and routed-effect boundaries
+is implemented over the validated SC.6 structured-scope ownership layer.
+Cancellation delivery owns and destroys affine continuations explicitly and
+preserves deterministic terminal/wakeup behavior. This milestone intentionally
+contains no runnable-queue policy, fail-fast/collect policy, host
+concurrency/I/O, or detached/root Async handler.
 
 - Reconstruction base: `d3807218823dfc152145e48616c3141c5b05d1ef`
 - Evidence overlay: [MANIFEST.sha256](MANIFEST.sha256)
@@ -198,15 +199,73 @@ all supported carrier shapes. The native ASAN/LSAN runtime lane additionally
 tears down 4,096 Task and resume-shaped carriers at a simulated scope boundary,
 pinning explicit carrier release without claiming a native scheduler.
 
+## Cooperative cancellation delivery
+
+`Scheduler_core.cancellation_boundary` atomically checks a checked-out runnable
+task before a suspension-class operation. With no pending request it returns
+the affine continuation unchanged. With a pending request it terminalizes the
+task as `Cancelled`, clears its await edge, wakes existing waiters in
+registration order, and transfers the boundary continuation for exactly-once
+destruction. `Scheduler_core.deliver_cancel` transfers scheduler-owned
+suspended continuations to its caller, and `Structured_scope.deliver_cancel`
+passes every transferred token exactly once to its explicit destruction
+callback. Duplicate and terminal delivery transfer nothing, so cancellation
+never relies on garbage collection to discharge affine ownership.
+The registered-waiter regression additionally pins that cancellation returns
+waiters in registration order, transitions each waiter to `Runnable` with its
+resume owned again, and leaves the immutable `Cancelled` target result
+available to every subsequent await.
+
+`Structured_scope` applies that primitive before await registration, yield
+suspension, and a routed-effect action. A delivered await registers no waiter;
+a delivered yield stores no continuation; and a delivered routed effect never
+invokes its action, including a lazily supplied spawn action. Routed action
+failures remain result values paired with the still-owned continuation, so the
+fault path neither cancels implicitly nor loses ownership.
+
+Cancel first checks the caller at its routed-effect boundary. A caller already
+selected for cancellation therefore cannot mutate its target. Otherwise a
+runnable target receives one idempotent request, while an await- or
+yield-suspended target is delivered immediately and its stored continuation is
+destroyed. Completed, failed, already-cancelled, and duplicate requests are
+deterministic no-ops. Self-cancel requests and delivers at the same routing
+point; the second caller-boundary check exists for that case, and no
+continuation is returned for a post-cancel user step. An already-cancelled
+caller reaching another boundary destroys the newly supplied stale
+continuation and wakes nobody.
+
+Terminalization and ownership transfer happen before the destruction callback.
+Destruction callbacks must normally not raise. If one does, its exception
+propagates, while the cancelled task remains terminal and owns no resume. A
+duplicate delivery cannot transfer or destroy that suspended resume again.
+The focused raising-drop regression pins the exception identity, terminal
+`Cancelled` result, zero scheduler-owned resumes, one callback invocation, and
+zero callback invocations on duplicate delivery.
+
+Focused Alcotest coverage pins all three boundary classes, no-waiter/no-child
+preemption, routed-effect fault injection, duplicate/completed/self behavior,
+the exact public handoff that destroys suspended resume token 21 once, and the
+stale already-cancelled boundary handoff. It also pins the rule that a
+pre-cancelled caller does not request another target, plus registered-waiter
+wake order, runnable/resume ownership, and repeated observation of the
+immutable `Cancelled` result.
+The bracket fixture records acquire, continuation destruction, and release in
+order and proves that no later user step executes. A 200-case QCheck property
+proves duplicate requests yield exactly one terminal delivery and one
+continuation destruction. The native ASAN/LSAN lane only stress-destroys 4,096
+nested continuation-shaped heap carriers; it does not exercise a native
+scheduler, cancellation route, or callback handoff. External resources still
+require explicit acquire/release handlers rather than language finalizers.
+
 ## Reconstruction and verification
 
-The manifest is the complete SC.0-SC.6 + DX.5/DX.7 integration overlay on the
-ratified structured-concurrency base `d3807218823dfc152145e48616c3141c5b05d1ef`.
+The manifest is the complete SC.0-SC.7 + DX.5/DX.6/DX.7 integration overlay on
+the ratified structured-concurrency base `d3807218823dfc152145e48616c3141c5b05d1ef`.
 Reconstruct it under repository-local scratch space:
 
 ```sh
 base=d3807218823dfc152145e48616c3141c5b05d1ef
-dest="$PWD/.scratch/sc6-dx-evidence-copy"
+dest="$PWD/.scratch/sc7-dx-evidence-copy"
 manifest=docs/release/structured-concurrency/MANIFEST.sha256
 rm -rf "$dest"
 mkdir -p "$dest"
@@ -237,9 +296,9 @@ opam exec -- dune build @doc
 Expected results are zero exits, 675 compiled Alcotest/QCheck cases, 36 cram
 transcripts, and 25 doctest examples across 8 documents.
 
-Runnable-queue policy, cooperative cancellation routing, failure policy, and
-the Async root handler remain later C1 tasks. SC.6 supplies executable
-scope ownership and cleanup over opaque resume tokens, but it does not run a
-continuation or install the compile-only `async.scope` fixture as a root
-handler. SC.4 continues to supply the static child-effect law, including the
-law that a scope discharges only Async and retains child world effects.
+Runnable-queue policy, failure policy, and the Async root handler remain later
+C1 tasks. SC.7 supplies policy-independent cooperative cancellation operations,
+but it does not choose a next continuation or install the compile-only
+`async.scope` fixture as a root handler. SC.4 continues to supply the static
+child-effect law, including the law that a scope discharges only Async and
+retains child world effects.

@@ -1,6 +1,21 @@
 type handle = Scheduler_core.handle
 type exit_reason = Normal | Aborted | Raised
 type metrics = { open_scopes : int; live_tasks : int; runnable_tasks : int; owned_resumes : int }
+type 'resume boundary_outcome = Boundary_continue of 'resume | Boundary_cancelled of handle list
+
+type 'value cooperative_await_outcome =
+  | Await_performed of 'value Scheduler_core.await_outcome * handle list
+  | Await_cancelled of handle list
+
+type yield_outcome = Yield_suspended | Yield_cancelled of handle list
+
+type ('resume, 'value) routed_effect_outcome =
+  | Effect_routed of { resume : 'resume; result : ('value, Diag.t list) result }
+  | Effect_cancelled of handle list
+
+type 'resume cancel_outcome =
+  | Cancel_continues of { resume : 'resume; awakened : handle list }
+  | Cancel_caller_cancelled of handle list
 
 type ('resume, 'value) t = {
   scheduler : ('resume, 'value) Scheduler_core.t;
@@ -16,6 +31,17 @@ let escape_diagnostic detail =
 
 let closed_error () = Error [ escape_diagnostic "the handle's structured scope is already closed" ]
 let ensure_open scope operation = if scope.closed then closed_error () else operation ()
+
+let drop_all drop resumes =
+  let first_exception = ref None in
+  List.iter
+    (fun resume ->
+      match drop resume with
+      | () -> ()
+      | exception exn -> if Option.is_none !first_exception then first_exception := Some exn)
+    resumes;
+  Option.iter raise !first_exception
+
 let make_root scheduler = { scheduler; next_nested = 1; children = []; closed = false }
 
 let create ~body_resume =
@@ -64,8 +90,77 @@ let fail scope handle message =
 let request_cancel scope handle =
   ensure_open scope (fun () -> Scheduler_core.request_cancel scope.scheduler handle)
 
-let deliver_cancel scope ~point handle =
-  ensure_open scope (fun () -> Scheduler_core.deliver_cancel scope.scheduler ~point handle)
+let deliver_cancel scope ~point handle ~drop =
+  ensure_open scope (fun () ->
+      Result.map
+        (fun (awakened, resumes) ->
+          drop_all drop resumes;
+          awakened)
+        (Scheduler_core.deliver_cancel scope.scheduler ~point handle))
+
+let at_cancellation_point scope ~point ~task ~resume ~drop =
+  ensure_open scope (fun () ->
+      Result.map
+        (function
+          | Scheduler_core.Boundary_continue resume -> Boundary_continue resume
+          | Scheduler_core.Boundary_cancelled { resume; awakened } ->
+              drop resume;
+              Boundary_cancelled awakened)
+        (Scheduler_core.cancellation_boundary scope.scheduler ~point task ~resume))
+
+let await_cooperatively scope ~waiter ~target ~resume ~drop =
+  Result.bind
+    (at_cancellation_point scope ~point:Concurrency_contract.Await ~task:waiter ~resume ~drop)
+    (function
+    | Boundary_cancelled awakened -> Ok (Await_cancelled awakened)
+    | Boundary_continue resume ->
+        Result.map
+          (fun (outcome, awakened) -> Await_performed (outcome, awakened))
+          (await scope ~waiter ~target ~resume))
+
+let yield_cooperatively scope ~task ~resume ~drop =
+  Result.bind (at_cancellation_point scope ~point:Concurrency_contract.Yield ~task ~resume ~drop)
+    (function
+    | Boundary_cancelled awakened -> Ok (Yield_cancelled awakened)
+    | Boundary_continue resume ->
+        Result.map (fun () -> Yield_suspended) (suspend_yield scope task ~resume))
+
+let route_effect scope ~task ~resume ~drop ~action =
+  Result.map
+    (function
+      | Boundary_cancelled awakened -> Effect_cancelled awakened
+      | Boundary_continue resume -> Effect_routed { resume; result = action () })
+    (at_cancellation_point scope ~point:Concurrency_contract.Routed_effect ~task ~resume ~drop)
+
+let cancel scope ~caller ~target ~resume ~drop =
+  Result.bind
+    (at_cancellation_point scope ~point:Concurrency_contract.Routed_effect ~task:caller ~resume
+       ~drop) (function
+    | Boundary_cancelled awakened -> Ok (Cancel_caller_cancelled awakened)
+    | Boundary_continue resume ->
+        Result.bind (request_cancel scope target) (fun () ->
+            Result.bind (inspect scope target) (fun target_view ->
+                match (target_view.lifecycle, target_view.suspension) with
+                | Concurrency_contract.Suspended, Some suspension ->
+                    let point =
+                      match suspension with
+                      | Scheduler_core.Yielded -> Concurrency_contract.Yield
+                      | Scheduler_core.Awaiting _ -> Concurrency_contract.Await
+                    in
+                    Result.map
+                      (fun awakened -> Cancel_continues { resume; awakened })
+                      (deliver_cancel scope ~point target ~drop)
+                | _ ->
+                    Result.map
+                      (function
+                        | Boundary_continue resume -> Cancel_continues { resume; awakened = [] }
+                        | Boundary_cancelled awakened -> Cancel_caller_cancelled awakened)
+                      (* Recheck after the request so [target = caller] observes its
+                         cancellation at this routed-effect boundary. For another
+                         runnable or terminal target, the caller continuation is
+                         preserved. *)
+                      (at_cancellation_point scope ~point:Concurrency_contract.Routed_effect
+                         ~task:caller ~resume ~drop))))
 
 let rec is_prefix prefix path =
   match (prefix, path) with
@@ -98,16 +193,6 @@ let rec close_owned scope =
     let own_resumes = Scheduler_core.close scope.scheduler in
     scope.closed <- true;
     child_resumes @ own_resumes
-
-let drop_all drop resumes =
-  let first_exception = ref None in
-  List.iter
-    (fun resume ->
-      match drop resume with
-      | () -> ()
-      | exception exn -> if Option.is_none !first_exception then first_exception := Some exn)
-    resumes;
-  Option.iter raise !first_exception
 
 let close scope ~reason:_ ~escaping ~drop =
   let diagnostics = if scope.closed then [] else escaping_diagnostics scope escaping in
