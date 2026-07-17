@@ -1,6 +1,7 @@
 # Structured-concurrency SC.0-SC.13 + ET.3-ET.8 + GM.0-GM.6 + GM.9 reconstructible integration overlay
 # Base commit: 2fc2d306c1236b8faeaee37a2e1c9d2848d16f52
 # Attestation manifests exclude themselves (and successor manifests) to avoid self/cross-hashes.
+0937ad41b14c0badcd35f147c83b8a950c43c45b8fa0f373f78b28abb5cb466d  README.md
 8b21a691daf7f20b3bbc91edd102d3fe205c51652793d8781a7f5e11f5f41525  corpus/channel/README.md
 691f852482a0d69742c0ecf0cbb283fcf2dd6367117089acec306f19385713a2  corpus/channel/buffered-v1.trace
 da61f5bce576aa1660d0db7f249a26f58297497feab2bf7c49cf3c5d712fd383  corpus/channel/rendezvous-v1.trace
