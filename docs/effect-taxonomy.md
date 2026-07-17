@@ -1,7 +1,7 @@
 # Blessed Effect Taxonomy v1
 
-Status: ET.8 release-frozen taxonomy (D56-D63), with Audit, Secret, and
-Approval shipped and their canonical boundaries evidenced, July 2026.
+Status: ET.8 release-frozen taxonomy (D56-D63), with Audit, Secret, Approval,
+and Judge shipped and their canonical boundaries evidenced, July 2026.
 
 This specification freezes the shared effect vocabulary used by signatures,
 authority manifests, package review, and future registry metadata. It is a
@@ -81,7 +81,7 @@ mode; there is no inference from names.
 | `Approval` | `approval` | `official` | `governance` | `-` | `once` | `special` | `3` | `implemented` | `362425a29077a7efbcc37047182e579f46199a50473045eb4126a917dfc2a196` | `approval.ask:(Proposal)->Decision` | request hash-bound consent for an exact proposal |
 | `Audit` | `audit` | `official` | `governance` | `-` | `once` | `special` | `3` | `implemented` | `2c148fbc2e26bdc6f01279a8bf176f54d5798536e1f96805aa4f7c7a57e67632` | `audit.record:(AuditEntry)->()` | record governance evidence in an append-only stream |
 | `Secret` | `secret` | `official` | `governance` | `-` | `once` | `special` | `3` | `implemented` | `6d092eccc3c9858a2a95120da5a011964cbb3ad76968e11c1cbb062c119fbb31` | `secret.read:(SecretRef)->Secret;secret.expose:(Secret)->Text` | resolve opaque confidential material or explicitly expose it |
-| `Judge` | `judge` | `official` | `governance` | `-` | `once` | `special` | `3` | `reserved` | `first-release` | `judge.assess:(Call)->Assessment` | assess a proposed call without performing it |
+| `Judge` | `judge` | `official` | `governance` | `-` | `once` | `special` | `3` | `implemented` | `9b677b5e2c3ec8521c5d5dfac321ae361a959565e1cbf082fec4512199977354` | `judge.assess:(Call)->Assessment` | assess a proposed call without performing it |
 | `Async` | `async` | `official` | `concurrency` | `a` | `once` | `none` | `2` | `reserved` | `4ff8ce05ab09968163492b3be40fc91381b47dee5fb4b2980f9416d50f38e66f` | `async.spawn:(()->{Async\|e}a)->Task a;async.await:(Task a)->TaskResult a;async.cancel:(Task a)->();async.yield:()->()` | schedule structured tasks while charging child effects to the parent row |
 | `Channel` | `channel` | `official` | `concurrency` | `a` | `once` | `none` | `2` | `reserved` | `first-release` | `channel.open:()->ChannelHandle a;channel.send:(ChannelHandle a,a)->Result ChannelError ();channel.recv:(ChannelHandle a)->Result ChannelError a;channel.close:(ChannelHandle a)->()` | communicate typed values between structured tasks |
 
@@ -114,10 +114,11 @@ plaintext must not become an ordinary prelude value before explicit exposure.
 | `Approval` | `approval.console`, `approval.scripted`, `approval.dry-run`, `approval.policy-auto` |
 | `Audit` | `audit.in-memory`, `audit.line-log` |
 | `Secret` | `Prelude.install_secret_fixed`, `Prelude.install_secret_vault`, explicit environment root grant |
+| `Judge` | `judge.rules`, `judge.fixed`, `judge.scripted`, `judge.model` |
 
-The remaining ten blessed names are **reserved and unimplemented**:
-`Choose`, `Env`, `Pg`, `Blob`, `Serve`, `Crypto`, `Log`, `Judge`, `Async`, and
-`Channel`. Their schemas reserve compatibility vocabulary only. They have no
+The remaining nine blessed names are **reserved and unimplemented**:
+`Choose`, `Env`, `Pg`, `Blob`, `Serve`, `Crypto`, `Log`, `Async`, and `Channel`.
+Their schemas reserve compatibility vocabulary only. They have no
 shipped declaration hash, canonical handler, root grant, or product-availability
 claim. A future first implementation must match the reserved schema and publish
 its resulting full identity before tooling may classify it as released.
@@ -403,16 +404,20 @@ edit after that point is a new interface, never an in-place revision.
 ### Registry realization
 
 `Effect_registry` is the executable copy used by review tooling. Its resolved
-registry contains exactly the fifteen implemented entries and is keyed only by
+registry contains exactly the sixteen implemented entries and is keyed only by
 their full `DefEffect` hashes. The complete 25-entry catalog is also typed, but
-the ten `reserved` entries carry no hash and name only the
+the nine `reserved` entries carry no hash and name only the
 `first-release` policy; registration rejects them until a real first interface is
 implemented and frozen. This keeps schema reservation distinct from resolved
-program identity. Audit, Secret, and Approval are the first reserved interfaces
+program identity. Audit, Secret, Approval, and Judge are the reserved interfaces
 promoted by that rule. Their v1 identities above are the shipped `DefEffect`
 hashes. Their operations are once `audit.record : (AuditEntry) -> ()`, once
 `secret.read : (SecretRef) -> Secret`, once `secret.expose : (Secret) -> Text`,
-and once `approval.ask : (Proposal) -> Decision`.
+once `approval.ask : (Proposal) -> Decision`, and once
+`judge.assess : (GovernanceCall) -> GovernanceAssessment`. The executable GM.5
+declaration uses the collision-safe GM.1 carrier names `GovernanceCall` and
+`GovernanceAssessment`, the versioned v0 spellings of the charter schemas shown
+here.
 
 Plain rendering is deterministic. Optional ANSI styling colors only the risk
 token of an identity-confirmed official entry. An unregistered effect with

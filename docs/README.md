@@ -112,6 +112,12 @@ Read these together when judging whether the release candidate is credible:
   canonical identities, pure refusal boundaries, and compatibility evidence.
 - `release/governed-membranes/GM1-MANIFEST.sha256`: reconstructible GM.1 overlay
   on the validated ET.6 plus GM.0 dependency-integration commit.
+- `release/governed-membranes/GM5-EVIDENCE.md`: GM.5 released Judge identity,
+  validated deterministic handlers, explicit model `Infer` row, and refusal
+  evidence.
+- `release/governed-membranes/GM5-MANIFEST.sha256`: reconstructible GM.5 overlay
+  on the validated GM.1 plus ET.3 integration base `94b5082`; the GM.1 evidence
+  set remains historical.
 - `release/governed-membranes/GM2-EVIDENCE.md`: GM.2 exact Call and successor
   Proposal identities, canonical-Code goldens, and stability/sensitivity laws.
 - `release/governed-membranes/GM2-MANIFEST.sha256`: reconstructible GM.2 overlay
