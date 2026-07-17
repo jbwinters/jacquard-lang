@@ -1,12 +1,12 @@
 # Structured Concurrency Contract
 
-Status: SC.7 cooperative cancellation over SC.6 structured-scope ownership,
-the SC.5 policy-independent lifecycle core, and the SC.4 generalized
-child-effect law (D46-D50), July 2026. This document is authoritative for C1's
-static non-laundering law, scheduler state transitions, nested ownership,
-cleanup, dynamic escape boundary, and cancellation delivery at scheduler
-boundaries. Runnable-queue policy, scope failure policy, and an Async root
-handler remain future work.
+Status: SC.8 deterministic fail-fast/collect scope policies over SC.7
+cooperative cancellation, SC.6 structured-scope ownership, the SC.5
+policy-independent lifecycle core, and the SC.4 generalized child-effect law
+(D46-D50), July 2026. This document is authoritative for C1's static
+non-laundering law, lifecycle and nested ownership, cancellation delivery, and
+homogeneous scope aggregation. Runnable-queue policy and an Async root handler
+remain future work.
 
 Structured concurrency is an effect interpreted by a scheduler handler. The
 same program can therefore run under deterministic, seeded-random, exhaustive,
@@ -278,17 +278,52 @@ async.scope-collect : (List (() ->{Async | e} a)) ->{| e} List (TaskResult a)
 
 `async.scope` uses fail-fast by default. It discharges only `Async`; all child
 world effects remain in `e`. Its body may spawn, await, cancel, and yield
-directly. A successfully returned body value is `Done`; the first child failure
-selected by scheduler decision order is `Failed`, and cancellation is
-`Cancelled`.
+directly. A successfully returned body value is `Done`; the first child
+non-success selected by scheduler decision order is its exact `Failed` or
+`Cancelled` result.
 
 `async.scope-fail-fast` is the homogeneous aggregate: `Done(values)` preserves
-input/creation order. The first `Failed` cancels unfinished siblings; a failure
-or cancellation returns no partial value list. `async.scope-collect` never
-cancels siblings merely because one failed and returns one `TaskResult` per
-input, in input/creation order. These separate shapes avoid pretending that
+input/creation order. The first scheduler-ordered `Failed` or `Cancelled`
+cancels unfinished siblings and returns no partial value list.
+`async.scope-collect` never cancels siblings merely because one failed and
+returns one `TaskResult` per input, in input/creation order. These separate
+shapes avoid pretending that
 heterogeneously typed child values can inhabit one list. Within a general scope,
 programs obtain heterogeneous typed results explicitly with `async.await`.
+
+SC.8 implements these two policies in `Scope_policy`. A controller registers an
+ordered same-scope child list and consumes terminal observations carrying
+strictly increasing scheduler decision numbers. Fail-fast is the default. Its
+first observed `Failed(message)` or `Cancelled` freezes that exact non-success,
+requests cancellation of each unfinished sibling in input order, and
+immediately delivers already-suspended siblings through the SC.7 destruction
+callback. A runnable sibling retains the request until its next cancellation
+boundary; neither a later failure nor a later cancellation can replace the
+earlier decision.
+
+The terminal decision and result are committed before sibling cancellation is
+attempted. Cancellation diagnostics or an exception from the destruction
+callback do not roll back that observation. Cleanup still attempts every
+sibling in input order, and the first destruction-callback exception is
+re-raised with its original backtrace only after all sibling cleanup attempts
+finish. The policy layer catches each user callback failure around the SC.7
+delivery call, allowing that call to return its awakened waiters without
+changing the public SC.7 primitive. Finish is legal only after every registered
+child is terminal, preserving the structured drain invariant.
+
+An immediate sibling cancellation can wake tasks already awaiting that sibling.
+The policy controller retains those handles even when the same delivery's user
+destruction callback raises, in sibling-input order and each target's
+waiter-registration order. A scheduler drains them exactly once through
+`Scope_policy.take_awakened` before its next choice; the policy layer never
+silently discards or independently schedules them.
+
+Collect never requests sibling cancellation. It waits for every registered
+child and returns the immutable terminal results in input order, independently
+of terminal observation order. Zero children produce `Done([])` under
+fail-fast and `[]` under collect. These controllers consume scheduler decisions
+but do not create a runnable queue, choose a task, resume a continuation,
+consult host timing, or install a root handler.
 
 ## 4. Cancellation and resources
 
@@ -299,6 +334,11 @@ points, in this exact contract order:
 2. `async.yield`; and
 3. any effect operation routed through the scheduler, including Async
    operations and scheduler-mediated world operations.
+
+There is no preemption between those boundaries. A child that spins forever
+without reaching await, yield, or a routed effect cannot observe a pending
+cancellation request and can therefore prevent fail-fast scope drain. C1 makes
+no progress guarantee for such a child.
 
 At every boundary the scheduler checks an already requested cancellation
 before executing the routed operation. Thus cancellation delivered at spawn
@@ -369,9 +409,9 @@ relations. Task 127 / SC.3 installs the exact declarations and adds an inert
 run/scope-local Task carrier in both runtime representations. SC.5 adds the
 policy-independent lifecycle engine, SC.6 adds same-run nested scope ownership,
 recursive cleanup, and complete runtime-value escape scans, and SC.7 adds
-cooperative delivery at await, yield, and routed-effect boundaries.
-Runnable-queue policy, scope failure policy, and a root handler remain separate
-work.
+cooperative delivery at await, yield, and routed-effect boundaries. SC.8 adds
+deterministic fail-fast and collect aggregation over explicit terminal decision
+events. Runnable-queue policy and a root handler remain separate work.
 
 ## 6. Interactions and exclusions
 

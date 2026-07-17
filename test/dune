@@ -53,6 +53,11 @@
  (modules gen_once_hostile)
  (libraries jacquard unix))
 
+(executable
+ (name scope_policy_trace)
+ (modules scope_policy_trace)
+ (libraries jacquard))
+
 ; the fuzz lane (task 74): seeded random pure programs through both engines.
 ; Not in the default runtest — run `dune build @native-fuzz` (1000 cases) or
 ; the executable directly with a count for the 10k pre-merge sweep.
@@ -73,7 +78,7 @@
 (test
  (name test_jacquard)
  (modules
-  (:standard \ corpus_support gen_goldens gen_surface_twins gen_prelude_goldens gen_sig_goldens gen_diag_goldens gen_freeze_goldens gen_native_parity native_fuzz once_interpreter_probe gen_once_hostile))
+  (:standard \ corpus_support gen_goldens gen_surface_twins gen_prelude_goldens gen_sig_goldens gen_diag_goldens gen_freeze_goldens gen_native_parity native_fuzz once_interpreter_probe gen_once_hostile scope_policy_trace))
  (libraries jacquard corpus_support alcotest fmt qcheck-core qcheck-alcotest unix str)
  (deps
   (glob_files_rec ../corpus/*.jqd)

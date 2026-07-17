@@ -37,10 +37,10 @@ project shape from file names alone.
   uncertainty wording, canonical boundaries, and explicit non-goals.
 - `effect-membranes.md`: GM.0 charter for typed governed facades, versioned
   decision artifacts, live/dry boundaries, and monotonic composition.
-- `concurrency.md`: SC.7 cooperative cancellation at scheduler boundaries over
-  SC.6 structured-scope ownership, the SC.5 policy-independent lifecycle, and
-  the SC.4 generalized child-effect law, plus scope contracts, deterministic
-  scheduling, exclusions, and D46-D50.
+- `concurrency.md`: SC.8 deterministic fail-fast/collect policies over SC.7
+  cooperative cancellation, SC.6 structured-scope ownership, the SC.5
+  policy-independent lifecycle, and the SC.4 generalized child-effect law,
+  plus scope contracts, scheduling exclusions, and D46-D50.
 - `warp-testing.md`: Warp test model, rows, handlers, cache, properties, and
   world lanes.
 - `errors.md`: diagnostic code catalog.
@@ -144,11 +144,11 @@ Read these together when judging whether the release candidate is credible:
 
 ## Structured Concurrency Evidence
 
-- `release/structured-concurrency/EVIDENCE.md`: SC.7 cooperative cancellation,
-  nested scope ownership, cleanup, escape-scan, lifecycle/memory/QCheck
-  evidence over the validated SC.6 integration base.
+- `release/structured-concurrency/EVIDENCE.md`: SC.8 deterministic scope
+  policies plus cooperative cancellation, ownership, lifecycle, property, and
+  repeated-run transcript evidence over the validated SC.7 integration base.
 - `release/structured-concurrency/MANIFEST.sha256`: reconstructible complete
-  SC.7 overlay on approved SC.6 commit `ada462b`.
+  SC.8 overlay on approved SC.7 commit `85c25bc`.
 
 ## Maintenance Notes
 
