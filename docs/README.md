@@ -108,6 +108,17 @@ Read these together when judging whether the release candidate is credible:
 - `release/effect-taxonomy/ET8-MANIFEST.sha256`: reconstructible ET.8 overlay on
   the integrated Secret/Approval base; predecessor manifests remain historical.
 
+## Governed Membranes Evidence
+
+- `release/governed-membranes/GM1-EVIDENCE.md`: GM.1 versioned ring-3 values,
+  canonical identities, pure refusal boundaries, and compatibility evidence.
+- `release/governed-membranes/GM1-MANIFEST.sha256`: reconstructible GM.1 overlay
+  on the validated ET.6 plus GM.0 dependency-integration commit.
+- `release/governed-membranes/GM2-EVIDENCE.md`: GM.2 exact Call and successor
+  Proposal identities, canonical-Code goldens, and stability/sensitivity laws.
+- `release/governed-membranes/GM2-MANIFEST.sha256`: reconstructible GM.2 overlay
+  on the validated GM.1 commit `b5587ce`.
+
 ## Structured Concurrency Evidence
 
 - `release/structured-concurrency/EVIDENCE.md`: SC.6 nested scope ownership,
