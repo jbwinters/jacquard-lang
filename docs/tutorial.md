@@ -205,7 +205,7 @@ Two distinctions prevent common review mistakes:
   assessment confidence are evidence, not verified truth or consent.
 - A user effect named `net` remains an unrated user identity. It does not inherit
   official `Net` risk or `--allow net`. Conversely, the reserved names `Choose`,
-  `Env`, `Pg`, `Blob`, `Serve`, `Crypto`, `Log`, `Judge`, `Async`, and `Channel`
+  `Env`, `Pg`, `Blob`, `Serve`, `Crypto`, `Log`, `Async`, and `Channel`
   are unimplemented in this release.
 
 `Secret` is opaque before `secret.expose`, including under generic inspection,

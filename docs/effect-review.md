@@ -31,9 +31,10 @@ not approve an abbreviation or a name-only match.
 | `Approval` | `362425a29077a7efbcc37047182e579f46199a50473045eb4126a917dfc2a196` |
 | `Audit` | `2c148fbc2e26bdc6f01279a8bf176f54d5798536e1f96805aa4f7c7a57e67632` |
 | `Secret` | `6d092eccc3c9858a2a95120da5a011964cbb3ad76968e11c1cbb062c119fbb31` |
+| `Judge` | `9b677b5e2c3ec8521c5d5dfac321ae361a959565e1cbf082fec4512199977354` |
 
-The ten remaining blessed names are **reserved/unimplemented**: `Choose`,
-`Env`, `Pg`, `Blob`, `Serve`, `Crypto`, `Log`, `Judge`, `Async`, and `Channel`.
+The nine remaining blessed names are **reserved/unimplemented**: `Choose`,
+`Env`, `Pg`, `Blob`, `Serve`, `Crypto`, `Log`, `Async`, and `Channel`.
 They have schemas and a `first-release` compatibility policy, but no shipped
 interface hash, handler, grant, or availability promise.
 

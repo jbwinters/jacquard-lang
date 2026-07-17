@@ -66,7 +66,6 @@ let reserved_catalog_names =
     ("Serve", "serve");
     ("Crypto", "crypto");
     ("Log", "log");
-    ("Judge", "judge");
     ("Async", "async");
     ("Channel", "channel");
   ]
@@ -180,7 +179,9 @@ let catalog =
     released "Secret" "secret" Governance Special
       "6d092eccc3c9858a2a95120da5a011964cbb3ad76968e11c1cbb062c119fbb31"
       "resolve opaque confidential material or explicitly expose it";
-    reserved "Judge" "judge" Governance Special "assess a proposed call without performing it";
+    released "Judge" "judge" Governance Special
+      "9b677b5e2c3ec8521c5d5dfac321ae361a959565e1cbf082fec4512199977354"
+      "assess a proposed call without performing it";
     reserved "Async" "async" Concurrency No_risk
       "schedule structured tasks while charging child effects to the parent row";
     reserved "Channel" "channel" Concurrency No_risk
