@@ -623,6 +623,22 @@ arguments, preconditions, evidence, authority configuration, digests, driver
 details, and all `Secret` values. There is no generic `Show` derivation for
 these carriers.
 
+GM.2 adds the successor `GovernanceProposal` carrier in
+`prelude/22-governance-identity.jqd` without changing the frozen ET.6
+`Proposal` or `Approval` identities. `governance.make-proposal` accepts the
+validated `GovernanceCall`, `BoundPolicy LivePolicy`, and
+`GovernanceAssessment` values plus the reviewed rendering, summary, and
+optional `GovernanceOutcomeSummary`. It derives the call, policy, and
+assessment IDs and copies the exact authority envelope from the Call; callers
+do not repeat those security-sensitive fields. Its proposal ID is HASH_V0 over
+one `governance-proposal-v0` Code value ordered as version, call ID, policy ID,
+assessment ID, authority, preview, rendering, and summary. The carried ID is
+excluded. `governance.validate-proposal` recomputes that hash, while
+`governance.validate-proposal-artifacts` also rejects any call, policy,
+assessment, or authority mismatch. All encoding reuses `code.hash` and the GM.1
+authority, assessment, policy, and outcome encoders; no second serializer is
+introduced.
+
 ### debug.inspect
 
 One reflection escape hatch, because agents debugging themselves need it. This
