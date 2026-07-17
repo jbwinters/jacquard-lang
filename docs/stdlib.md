@@ -92,8 +92,8 @@ in [`effect-review.md`](effect-review.md).
 
 | ET.8 blessed status | exact names |
 |---|---|
-| implemented (15) | `Abort`, `Throw`, `State`, `Emit`, `Dist`, `Fault`, `Eval`, `Console`, `Clock`, `Fs`, `Net`, `Infer`, `Approval`, `Audit`, `Secret` |
-| reserved/unimplemented (10) | `Choose`, `Env`, `Pg`, `Blob`, `Serve`, `Crypto`, `Log`, `Judge`, `Async`, `Channel` |
+| implemented (16) | `Abort`, `Throw`, `State`, `Emit`, `Dist`, `Fault`, `Eval`, `Console`, `Clock`, `Fs`, `Net`, `Infer`, `Approval`, `Audit`, `Secret`, `Judge` |
+| reserved/unimplemented (9) | `Choose`, `Env`, `Pg`, `Blob`, `Serve`, `Crypto`, `Log`, `Async`, `Channel` |
 
 The status table is descriptive, not a grant list. The full identity table is
 machine-checked against `Effect_registry`, the prelude declarations, and the
@@ -623,6 +623,44 @@ arguments, preconditions, evidence, authority configuration, digests, driver
 details, and all `Secret` values. There is no generic `Show` derivation for
 these carriers.
 
+### Judge assessment handlers
+
+GM.5 releases the ring-3 `Judge` effect. Its executable GM.1 carrier spelling
+is `assess : (GovernanceCall) -> GovernanceAssessment`, corresponding to the
+charter's `Judge.assess : (Call) -> Assessment`. The operation is `once`: one
+assessment may resume each captured call at most once.
+
+The standard handlers validate every assessment before resumption. `Risk`,
+`List Text` reasons, and `Code` evidence are closed typed fields; the trust
+boundary additionally rejects a directly constructed assessment whose
+confidence is NaN, infinite, or outside `[0,1]`. Refusal is the explicit
+`Throw Text` effect, so validation is never hidden:
+
+```text
+judge.rules    : (() ->{Judge, Throw | e} a,
+                  (GovernanceCall) ->{} GovernanceAssessment)
+                 ->{Throw | e} a
+judge.fixed    : (() ->{Judge, Throw | e} a, GovernanceAssessment)
+                 ->{Throw | e} a
+judge.scripted : (() ->{Judge, Throw | e} a,
+                  List GovernanceAssessment)
+                 ->{Throw | e} a
+judge.model    : (() ->{Infer, Judge, Throw | e} a,
+                  (GovernanceCall) ->{Infer} GovernanceAssessment)
+                 ->{Infer, Throw | e} a
+```
+
+`judge.rules` accepts only a pure rule function; an attempted `Fs`, `Net`,
+`Secret`, or other raw-world dependency is a type error rather than authority
+laundered behind `Judge`. `judge.fixed` repeats one validated value, while
+`judge.scripted` consumes assessments in operation order and throws
+`judge.scripted: out of assessments` without resuming when exhausted.
+`judge.model` is an explicit `Infer` adapter returning the same v0 point
+assessment. Posterior representations, `Dist`, and uncertainty policy belong
+to the separate G5 phase.
+
+### Canonical governance proposals
+
 GM.2 adds the successor `GovernanceProposal` carrier in
 `prelude/22-governance-identity.jqd` without changing the frozen ET.6
 `Proposal` or `Approval` identities. `governance.make-proposal` accepts the
@@ -638,6 +676,24 @@ excluded. `governance.validate-proposal` recomputes that hash, while
 assessment, or authority mismatch. All encoding reuses `code.hash` and the GM.1
 authority, assessment, policy, and outcome encoders; no second serializer is
 introduced.
+
+GM.3 adds the validated execution boundary in
+`prelude/23-governance-policy.jqd` without changing any GM.1 or GM.2 carrier or
+identity. `governance.validate-{live,dry}-policy` reapply the safe-constructor
+checks to directly represented values. Safe StoredPolicy constructors and the
+`stored-policy-v0` canonical Code encoding provide one exact HASH_V0 identity
+for registry/file values, while `governance.bind-stored-policy` and
+`governance.validate-bound-stored-policy` reject forged carried hashes.
+
+Execution uses `governance.live-policy-verdict` and
+`governance.dry-policy-verdict`. Both require an exactly validated BoundPolicy.
+The live boundary also rejects non-finite or out-of-range observed confidence
+as `InvalidDecision`, then applies `Low < Medium < High < Forbidden`, with
+Forbidden always blocked and under-confidence never allowed. The dry boundary
+always blocks Forbidden; otherwise it returns Simulate exactly when a pure
+simulator exists and `NoSimulation` when none exists. It has no Allow or Ask
+path and does not reinterpret the retained DryPolicy confidence field as a
+gate.
 
 ### debug.inspect
 

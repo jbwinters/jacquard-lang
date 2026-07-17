@@ -476,3 +476,23 @@ governance.make-proposal-canonical 3
 governance.make-proposal 3
 governance.validate-proposal 3
 governance.validate-proposal-artifacts 3
+# --- 22-judge (GM.5 blessed assessment effect and handlers)
+judge 3
+assess 3
+judge.validate-or-throw 3
+judge.rules 3
+judge.fixed 3
+judge.scripted 3
+judge.model 3
+# --- 23-governance-policy (GM.3 validated policy boundaries)
+governance.validate-live-policy 3
+governance.validate-dry-policy 3
+governance.make-stored-live-policy 3
+governance.make-stored-dry-policy 3
+governance.stored-policy-code 3
+governance.stored-policy-id 3
+governance.validate-stored-policy 3
+governance.bind-stored-policy 3
+governance.validate-bound-stored-policy 3
+governance.live-policy-verdict 3
+governance.dry-policy-verdict 3
