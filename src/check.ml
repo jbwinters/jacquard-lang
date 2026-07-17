@@ -357,43 +357,10 @@ and conv_decl_ty ctx cenv ?(unbound_code = "E0811") ?(effectself = None) ~self (
       TTuple (List.map (conv_decl_ty ctx cenv ~unbound_code ~effectself ~self) items)
   | _ -> conv_ty ctx cenv t
 
-(* Operation scheme: forall effect-vars (+free op vars). (params) ->{E} result. The row
-   carries just the effect hash (set semantics; effect type arguments do not row-match). *)
-let op_scheme ctx ?meta (h : Hash.t) : scheme =
-  match locate ctx h with
-  | Ok
-      {
-        Store.decl = { Kernel.it = Kernel.DefEffect { ename; evars; ops }; _ };
-        decl_hash;
-        role = Store.Operation i;
-      } ->
-      let o = List.nth ops i in
-      let inner = ctx.level + 1 in
-      let vars = List.map (fun a -> (a, new_tvar inner)) evars in
-      let cenv = { mode = Flexible; tvs = vars; rvs = [] } in
-      let self = (ename, TCon (decl_hash, List.map snd vars)) in
-      let effectself = Some (ename, decl_hash) in
-      let params = List.map (conv_decl_ty ctx cenv ~effectself ~self) o.Kernel.op_params in
-      let result = conv_decl_ty ctx cenv ~effectself ~self o.Kernel.op_result in
-      (* the row carries the EFFECT's hash: rows name capabilities, not operations *)
-      { ty = TArrow (params, closed_row [ decl_hash ], result); gen_level = ctx.level }
-  | Ok _ -> err ?meta ~code:"E0805" "hash %s is not an operation" (Hash.to_hex h)
-  | Error ds -> err ?meta ~code:"E0805" "%s" (String.concat "; " (List.map Diag.to_string ds))
-
-(** [operation_mode ctx h] returns the identity-bearing multiplicity declared for operation [h]. It
-    reports E0805 if [h] does not locate an operation, so callers never silently treat malformed
-    metadata as legacy [Multi]. *)
-let operation_mode ctx ?meta (h : Hash.t) : Kernel.op_mode =
-  match locate ctx h with
-  | Ok { Store.decl = { Kernel.it = Kernel.DefEffect { ops; _ }; _ }; role = Store.Operation i; _ }
-    ->
-      (List.nth ops i).Kernel.op_mode
-  | Ok _ -> err ?meta ~code:"E0805" "hash %s is not an operation" (Hash.to_hex h)
-  | Error ds -> err ?meta ~code:"E0805" "%s" (String.concat "; " (List.map Diag.to_string ds))
-
-(** [is_frozen_async_spawn ctx operation] recognizes only the pinned SC.0 [async.spawn] member. In
-    addition to the nominal HASH_V0 identities it checks the complete resolved declaration shape, so
-    a name collision or a partially matching future interface never gains privileged typing. *)
+(** [is_frozen_async_spawn ctx operation] recognizes only the exact Async declaration that receives
+    the identity-guarded SC.4 dependent typing rule. The check is store-shaped rather than
+    name-shaped: aliases and wrappers may transport the resulting type, but a near-match declaration
+    never acquires the privilege. *)
 let is_frozen_async_spawn ctx operation =
   let hash_is expected hash = String.equal expected (Hash.to_hex hash) in
   let tvar_is expected (ty : Kernel.ty) =
@@ -456,13 +423,49 @@ let is_frozen_async_spawn ctx operation =
       | _ -> false)
   | Ok _ | Error _ -> false
 
-(** [async_spawn_child_row ctx operation params] returns the solved child thunk row only when a
-    direct call targets {!is_frozen_async_spawn}. This is the narrow SC.0 bridge; higher-order
-    closure remains the SC.4 obligation. *)
-let async_spawn_child_row ctx operation params =
-  if is_frozen_async_spawn ctx operation then
-    match params with [ TArrow ([], child_row, _) ] -> Some child_row | _ -> None
-  else None
+(* Operation scheme: forall effect-vars (+free op vars). Ordinarily the callable row carries just
+   the owning effect hash. Frozen [async.spawn] instead shares its thunk's exact [{Async | e}] row:
+   this is the SC.4 non-laundering law in the type itself, so it survives every ordinary higher-order
+   transport and instantiation rather than depending on direct-call syntax. *)
+let op_scheme ctx ?meta (h : Hash.t) : scheme =
+  match locate ctx h with
+  | Ok
+      {
+        Store.decl = { Kernel.it = Kernel.DefEffect { ename; evars; ops }; _ };
+        decl_hash;
+        role = Store.Operation i;
+      } ->
+      let o = List.nth ops i in
+      let inner = ctx.level + 1 in
+      let vars = List.map (fun a -> (a, new_tvar inner)) evars in
+      let cenv = { mode = Flexible; tvs = vars; rvs = [] } in
+      let self = (ename, TCon (decl_hash, List.map snd vars)) in
+      let effectself = Some (ename, decl_hash) in
+      let params = List.map (conv_decl_ty ctx cenv ~effectself ~self) o.Kernel.op_params in
+      let result = conv_decl_ty ctx cenv ~effectself ~self o.Kernel.op_result in
+      let operation_row =
+        if is_frozen_async_spawn ctx h then
+          match params with
+          | [ TArrow ([], child_row, _) ] -> child_row
+          | _ ->
+              err ?meta ~code:"E0805"
+                "frozen async.spawn identity resolved to an invalid converted parameter shape"
+        else closed_row [ decl_hash ]
+      in
+      { ty = TArrow (params, operation_row, result); gen_level = ctx.level }
+  | Ok _ -> err ?meta ~code:"E0805" "hash %s is not an operation" (Hash.to_hex h)
+  | Error ds -> err ?meta ~code:"E0805" "%s" (String.concat "; " (List.map Diag.to_string ds))
+
+(** [operation_mode ctx h] returns the identity-bearing multiplicity declared for operation [h]. It
+    reports E0805 if [h] does not locate an operation, so callers never silently treat malformed
+    metadata as legacy [Multi]. *)
+let operation_mode ctx ?meta (h : Hash.t) : Kernel.op_mode =
+  match locate ctx h with
+  | Ok { Store.decl = { Kernel.it = Kernel.DefEffect { ops; _ }; _ }; role = Store.Operation i; _ }
+    ->
+      (List.nth ops i).Kernel.op_mode
+  | Ok _ -> err ?meta ~code:"E0805" "hash %s is not an operation" (Hash.to_hex h)
+  | Error ds -> err ?meta ~code:"E0805" "%s" (String.concat "; " (List.map Diag.to_string ds))
 
 (** [contains_group_ref expression] reports whether [expression] can recur through its definition
     group. The affine-resumption checker uses it to reject transfers into helpers whose number of
@@ -807,16 +810,6 @@ and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(requir
                       ~code:"E0801" "%s: expected %s, got %s (%s)" what (show_ty ctx expected)
                       (show_ty ctx actual) detail))
             (List.combine args (List.combine params arg_tys));
-          (match fn.Kernel.it with
-          | Kernel.Ref (operation, Kernel.Op) -> (
-              match async_spawn_child_row ctx operation params with
-              | Some child_row -> (
-                  try ambient := Types.include_rows ~sub:child_row ~into:!ambient
-                  with Unify_error detail ->
-                    err ~meta ~code:"E0801"
-                      "spawned child effect row does not fit the parent computation (%s)" detail)
-              | None -> ())
-          | _ -> ());
           (* record who introduced each effect, for the manifest diagnostic (W3.6) *)
           (let callee =
              match fn.Kernel.it with

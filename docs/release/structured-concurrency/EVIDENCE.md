@@ -1,10 +1,10 @@
-# Structured Concurrency SC.5 Evidence
+# Structured Concurrency SC.4-SC.5 Evidence
 
-Status: Task values and the exact once Async interface are represented on the
-validated SC.0 contract, and the policy-independent scheduler lifecycle core is
-implemented. This milestone intentionally contains no scheduling policy,
-executable structured scope, host concurrency/I/O, or detached/root Async
-handler.
+Status: every spawned child effect is charged through the exact once Async
+interface represented by SC.3, including every supported higher-order transport
+route, and the policy-independent scheduler lifecycle core is implemented. This
+combined milestone intentionally contains no scheduling policy, executable
+structured scope, host concurrency/I/O, or detached/root Async handler.
 
 - Reconstruction base: `ed02113`
 - Evidence overlay: [MANIFEST.sha256](MANIFEST.sha256)
@@ -31,10 +31,40 @@ four-operation `Async a` effect frozen by SC.0. The declaration identities are:
 
 The prelude golden pins all whole/member hashes. Focused tests load every
 declaration from the content-addressed store, print it, read it, rebuild the
-kernel declaration, and re-hash the corresponding member. The existing SC.0
-effect-taxonomy mutation suite and executable documentation continue to prove
-that direct spawn charges the child row and that handling Async subtracts only
-Async, never child world effects.
+kernel declaration, and re-hash the corresponding member. SC.4 changes no
+declaration identity and adds no kernel or runtime form.
+
+## Generalized child-effect law
+
+The checker recognizes only the fully revalidated frozen `async.spawn`
+identity. Its instantiated operation scheme uses one shared open row for the
+child thunk and the operation call:
+
+```text
+(() ->{Async | e} a) ->{Async | e} Task a
+```
+
+Because the dependency is carried in the type, it survives an operation alias,
+a higher-order forwarding function, a returned closure, tuple storage and
+destructuring, independent Net/Fs row-polymorphic uses, and nested scopes. The
+executable concurrency doctest pins every route and the documented aggregate:
+
+```text
+fetch-all : (List Text) ->{Net} TaskResult (List (TaskResult Text))
+```
+
+The manifest cram executes the same law through a wrapper. A console-only
+manifest fails with E0814 naming `net.get`; a Net manifest succeeds, proving
+that `async.scope` removed Async but did not remove Net. A misleading closed
+annotation reports the propagated Net row. An adversarial row-polymorphic shape
+fails with the same-tail occurs check at the `async.spawn` source, and the Types
+regression rejects different effect sets sharing the same tail. Both negative
+crams declare the complete frozen four-operation Async identity rather than a
+near-match. A generated property checks that every subset of two independent
+child effects remains visible in the shared caller row. The converted-shape
+defense fails closed with E0805 if a future checker refactor makes the validated
+frozen declaration and its internal arrow disagree; a source regression keeps
+that path diagnostic-only and forbids the former internal assertion.
 
 ## Opaque Task boundary
 
@@ -126,12 +156,13 @@ capture enforcement and the inert Task boundary around this core.
 
 ## Reconstruction and verification
 
-The manifest is the complete SC.5 successor overlay on validated SC.3 commit
+The manifest is the complete combined SC.4-SC.5 successor overlay on validated
+SC.3 commit
 `ed02113`. Reconstruct it under repository-local scratch space:
 
 ```sh
 base=ed02113
-dest="$PWD/.scratch/sc5-evidence-copy"
+dest="$PWD/.scratch/sc4-sc5-evidence-copy"
 manifest=docs/release/structured-concurrency/MANIFEST.sha256
 rm -rf "$dest"
 mkdir -p "$dest"
@@ -159,11 +190,11 @@ git diff --exit-code
 opam exec -- dune build @doc
 ```
 
-Expected results are zero exits, 668 compiled Alcotest/QCheck cases, 36 cram
+Expected results are zero exits, 669 compiled Alcotest/QCheck cases, 36 cram
 transcripts, and 25 doctest examples across 8 documents.
 
 Scheduling policy, executable scopes, effect routing, and the root handler
 remain later C1 tasks. The SC.5 core supplies cancellation request/delivery
 state transitions but does not decide when a routed operation is reached. SC.4
-also remains responsible for the general higher-order non-laundering proof
-beyond SC.0's direct-spawn rule.
+supplies the general higher-order non-laundering proof; its `async.scope`
+fixture remains compile-only handler scaffolding and is not scheduler execution.

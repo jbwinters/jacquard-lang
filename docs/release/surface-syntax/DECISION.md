@@ -97,7 +97,7 @@ compiled Alcotest list and repository sources.
 
 | inventory | count | exact members or source |
 |---|---:|---|
-| tests | 668 | compiled `test_jacquard.exe list` inventory |
+| tests | 669 | compiled `test_jacquard.exe list` inventory |
 | doctests | 25 | `concurrency-row-contract`, `concurrency-row-laundering`, `effect-taxonomy-schemas`, `governed-membrane-signatures`, `readme-multishot`, `stdlib-control-effects`, `stdlib-core-declarations`, `stdlib-dist-declarations`, `stdlib-handler-policy`, `stdlib-multi-effect-signature`, `stdlib-nested-tuple-destructure`, `stdlib-pipe-transformation`, `stdlib-text-join`, `tutorial-application`, `tutorial-bool-match`, `tutorial-factorial`, `tutorial-identity`, `tutorial-literal`, `tutorial-nonexhaustive`, `tutorial-read-only`, `tutorial-safe-div`, `warp-check-effect`, `warp-fault-effect`, `warp-hermetic-case`, `warp-test-types` |
 | twins | 24 | `app-add.jac`, `case-fold-constructor.jac`, `dotted-names.jac`, `eval-gated.jac`, `even-odd.jac`, `fact.jac`, `handler-policy.jac`, `identity.jac`, `let-shadow.jac`, `lit-int.jac`, `lit-real.jac`, `lit-text.jac`, `match-bool.jac`, `multi-effect-signature.jac`, `nested-tuple-destructure.jac`, `operation-modes.jac`, `pipe-transformation.jac`, `prelude-map.jac`, `quote-lit.jac`, `safe-div.jac`, `stdlib-ss22.jac`, `surface-ref-v0.jac`, `to-option.jac`, `tuple-unit.jac` |
 | demos | 13 | `agent-dream.jac`, `ambiguity-pipeline.jac`, `clarifying-question.jac`, `m1-choose.jac`, `m1-fact.jac`, `m1-gated.jac`, `m3-two-coins.jac`, `preflight.jac`, `repair.jac`, `surface-expression.jac`, `surface-fact.jac`, `synthesis.jac`, `word-count.jac` |
