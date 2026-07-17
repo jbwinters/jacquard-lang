@@ -1,7 +1,7 @@
 # Effect-taxonomy ET.2-ET.8 + SC.0-SC.11 + GM.0-GM.6 + GM.9 reconstructible integration overlay
 # Base commit: 8bb10e6
 # Attestation manifests exclude themselves (and successor manifests) to avoid self/cross-hashes.
-81d7c39767f72efec5dc7c75504b3d6be6e66e2207a9cc2e7f008b54eb3ab288  README.md
+0937ad41b14c0badcd35f147c83b8a950c43c45b8fa0f373f78b28abb5cb466d  README.md
 358e53df4fd5dd3f92ee3037f8292f101b7bbc02d8d45a3b34a615636a930160  bin/main.ml
 c74471982b3d5239a10034be1b4e78ef790498d8a2c97565575b2bb320a31522  corpus/golden/audit-chain-v1-head.golden
 e4570e94d5037da9bf561d51c3c873152f60fec3e006a20772fdac684fbe6513  corpus/golden/audit-chain-v1.golden
