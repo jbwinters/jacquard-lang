@@ -1,7 +1,7 @@
 # Structured-concurrency SC.16 C0-C3 publication overlay
 # Base commit: b82809959c085a51eb3e9f8ae7623692983acd65
 # Attestation manifests exclude themselves (and successor manifests) to avoid self/cross-hashes.
-18e412a3e55725c4bdac646604ba8cdf8400bf1f69dbc82f05bf21221590d3cc  README.md
+dfc81aec5032df031a29e73a601eeb604587a55648059f6106c655fd8082af79  README.md
 7ff4f644b6e95a057ce7d874ee9b774d7dcf17ca9758df8570f1fd26e307fb84  bin/main.ml
 8b21a691daf7f20b3bbc91edd102d3fe205c51652793d8781a7f5e11f5f41525  corpus/channel/README.md
 691f852482a0d69742c0ecf0cbb283fcf2dd6367117089acec306f19385713a2  corpus/channel/buffered-v1.trace

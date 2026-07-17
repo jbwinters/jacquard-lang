@@ -7,11 +7,16 @@ Jacquard is a FriendMachine research project for running, reviewing, simulating,
 and trusting programs written by models and reviewed by people. Start with the
 [human-friendly introduction to Jacquard](https://research.friendmachine.co/jacquard/).
 
-Concretely, it is a small programming language with a compact `.jac` surface
-syntax, an OCaml checker and CPS interpreter, a C-emitting native AOT backend
-that accepts public `.jac` and kernel `.jqd` carriers, a command-line tool, a
-Jacquard-written standard library, and a test framework called Warp. Version
-0.1 works end to end but is a research prototype, not a production language;
+Concretely, it is a small programming language where every function signature
+lists the outside-world effects the function may perform — network, files,
+clock, randomness — and the runtime refuses any effect you have not granted
+on the command line. A reviewer reads the signature to learn what a change
+can touch; the checker guarantees the signature is complete. The
+implementation is an OCaml checker and interpreter, a compiler that accepts
+public `.jac` or lower-level `.jqd` files and produces standalone native
+binaries by emitting C, the `jac` command-line tool, a standard library written
+in Jacquard itself, and a test framework called Warp. Version 0.1 works end to
+end but is a research prototype, not a production language;
 `docs/release/0.1/LIMITS.md` is the honest boundary.
 
 Install the 0.1 release candidate without OCaml or opam:
@@ -52,7 +57,12 @@ Things you can do here that most languages cannot offer:
   that answers a program's requests to the outside world; you swap the
   handler, and the code never changes. This can replace much conventional
   mocking at effect boundaries and makes "what would my agent do if the API
-  went down?" an ordinary test.
+  went down?" an ordinary test. If this sounds like dependency injection: an
+  injected dependency is the special case of a handler that resumes the
+  program exactly once. A handler can also decline to resume, aborting the
+  rest of the computation cleanly, or resume many times, forking the rest of
+  the program to explore every outcome. That last case is what makes
+  exhaustive testing and exact inference ordinary library code here.
 - Enumerate exact probabilities for finite discrete models. A program can
   sample weighted choices and record evidence, and enumeration lists every
   reachable outcome with its exact probability. The repair demo below treats a
@@ -68,12 +78,47 @@ The bet behind all of this: when most code is written by machines, the humans
 reviewing it need the language itself to answer "what can this touch, and how
 sure are we" without reading every line.
 
+## The Review Case In Miniature
+
+Suppose a model hands you this one-line change in Python:
+
+```python
+def normalize_name(name):
+    return lookup_alias(name).strip().lower()
+```
+
+To learn whether the change can reach the network, you read `lookup_alias`,
+then everything it calls. The answer lives in the transitive closure of the
+diff, and nothing checks whatever answer you settle on.
+
+The same change in Jacquard arrives with this checked signature:
+
+```text
+normalize-name : (text) ->{net} text
+```
+
+Some function below `lookup-alias` performs a `net` operation, so `net`
+surfaces in the row of every caller until a handler discharges it. The
+checker computes the row; a signature that omits an effect is a type error.
+The reviewer's first question about generated code — what can this touch —
+is answered on the first line of the diff, before reading any body. At run
+time the same row is enforced: `jac run` refuses the program without
+`--allow net`, and that includes effects performed by dynamically loaded
+code.
+
+Effect rows are also what separates this from an ordinary type system: they
+propagate through the call graph without hand annotation, and they are tied
+to runtime authority. Ordinary types describe the values a function handles;
+the row describes what running it may do to the world, and the runtime holds
+it to that.
+
 ## For Agents
 
 Read `docs/SKILL.md` first. It compresses the kernel, the CLI, the prelude,
 Warp testing, and the known gotchas into one file, and it loads as a project
-skill from `docs/SKILL.md`. Operating rules are in `AGENTS.md`. What
-will save you time:
+skill from `docs/SKILL.md`. The language is deliberately small enough that an
+agent with no Jacquard in its training data can work from that one file.
+Operating rules are in `AGENTS.md`. What will save you time:
 
 - Behavior is pinned by evidence: cram transcripts under `test/cli/`, corpus
   goldens, demo scripts, and `docs/release/0.1/CLAIMS.md`. If a pin fails,
@@ -114,6 +159,23 @@ For readers who speak programming languages:
 - A native AOT path that emits C, specializes and caches units by content hash,
   and is differential-tested against the interpreter under clang and gcc.
 
+## Design Lineage
+
+The design borrows deliberately from languages whose ASTs and semantics were
+studied during planning; `docs/ast.md` records each debt in detail:
+
+- Unison: effects carried on function arrows, operations as ordinary
+  functions, content-addressed definitions, and cycle hashing.
+- Koka: effect rows, uncurried arrows, the tail-resumptive handler
+  discipline, and a warning heeded about row-inference ergonomics.
+- Racket: scope-set hygiene for quoted code.
+- Haskell: strict evaluation as the verdict on laziness, and exhaustive
+  matching as a checker obligation rather than a lint.
+- OCaml: the host language, plus negative lessons on builtin structural
+  equality and on deferring ad-hoc polymorphism.
+- Roslyn (C#): full-fidelity syntax metadata so tools can round-trip source
+  without losing comments or formatting.
+
 The prototype is complete against its original core plan and has since added
 the public surface syntax, ringed standard library, Warp properties and cache,
 native compilation, packaged binaries, and product-scale case studies. The RC1
@@ -153,13 +215,21 @@ $ jac run test/docs-doctest/fixtures/readme-multishot.jac
 3
 ```
 
-The `Choice` operation is `multi`, so its handler ran the rest of the program
-once with `true` and once with `false`, then collected both results. That
-ability to resume more than once is why exact Bayesian inference is a library
-handler here rather than a runtime feature. The repair demo builds on it: mutate
-a buggy program's quoted AST into candidate patches, treat a failing test as an
-observation, and read off
-the updated probabilities. Running candidate code is an authority, so the pure
+Reading it line by line: `multi effect Choice` declares an effect with one
+operation, `choose`, which takes nothing and answers a boolean. `multi` means
+its continuation may be resumed more than once. The `handle`
+block runs the code in the first braces. When that code calls `choose()`,
+control jumps to the matching clause below, which receives the paused
+rest-of-the-computation as `continue`. The clause calls `continue` twice,
+once per answer, so the `match` runs once with `True` (producing 1) and once
+with `False` (producing 2), and `add` combines the two runs into 3. The
+`return x -> x` clause says finished runs pass through unchanged.
+
+That ability to resume more than once is why exact Bayesian inference is a
+library handler here rather than a runtime feature. The repair demo builds on
+it: mutate a buggy program's quoted AST into candidate patches, treat a failing
+test as an observation, and read off the updated probabilities. Running
+candidate code is an authority, so the pure
 step still runs (it counts eight candidate patches) and then the demo refuses
 until you grant the rest:
 
@@ -311,16 +381,17 @@ jac build FILE.jac -o PROG
 jac export FILE.jac -o FILE.jqd
 ```
 
-`.jac` is the user-facing surface carrier. Bootstrap `.jqd` remains fully
-supported as the internal/debug syntax, quote notation, and kernel format of
-record. `run`, `check`, `hash`, `fmt`, `diff`, `infer`, and `test` select
-surface syntax by extension. Native build accepts either carrier without
-writing an intermediate twin; replay programs, the prelude, and many internal
-fixtures continue to use `.jqd`.
+`.jac` is the source format people and agents write. `.jqd` is the lower-level
+format that `.jac` files reduce to — a small fixed grammar of 27 forms, called
+the kernel — and it remains fully supported as the internal/debug syntax,
+quote notation, and format of record. `run`, `check`, `hash`, `fmt`, `diff`,
+`infer`, and `test` select surface syntax by extension. Native build accepts
+either format without writing an intermediate twin; replay programs, the
+prelude, and many internal fixtures continue to use `.jqd`.
 
 Ordinary programs and demos need only a `.jac` source file. Do not hand-author
 a `.jqd` twin unless a conformance test specifically needs to prove that both
-carriers lower to the same kernel and hash. The paired files retained in the
+formats lower to the same kernel and hash. The paired files retained in the
 corpus and selected demos are evidence fixtures, not an authoring requirement.
 
 ## Native compilation
