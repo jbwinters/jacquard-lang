@@ -39,8 +39,8 @@ type schedule_plan =
   | Seeded_schedules of { seed : int; schedules : int; replay_command : string }
       (** A Warp Case normally uses the fixed FIFO scheduler. [Seeded_schedules] reruns each
           hermetic Case under reproducible SplitMix64 decisions. The root seed is mixed with the
-          canonical member hash and leaf display path, so discovery order and cache hits cannot
-          change another test's schedule stream. *)
+          canonical member hash and relative leaf path, so discovery order, top-level renames, and
+          cache hits cannot change another test's schedule stream. *)
 
 (* --- discovery (W6.2) --- *)
 
@@ -113,8 +113,10 @@ let run_thunk ctx ~test_run (thunk : Value.t) : (verdict * Hash.t list, string) 
   | Error e ->
       Ok (Fail { soft = []; hard = Some ("runtime error: " ^ Runtime_err.to_string e) }, mine)
 
-let schedule_test_seed ~seed ~member ~display =
-  let identity = Hash.of_string (Hash.to_hex member ^ "\000" ^ display) |> Hash.to_hex in
+let schedule_test_seed ~seed ~member ~relative_path =
+  let identity =
+    Hash.of_string (Hash.to_hex member ^ "\000" ^ String.concat "\000" relative_path) |> Hash.to_hex
+  in
   let identity_bits = int_of_string ("0x" ^ String.sub identity 0 14) in
   let rng = Infer_dist.Rng.make (seed lxor identity_bits) in
   Int64.to_int (Infer_dist.Rng.next_int64 rng)
@@ -138,8 +140,9 @@ let schedule_failure ~seed ~index ~schedules ~replay_command schedule verdict =
         }
   | Pass _ | NoChecks -> verdict
 
-let run_thunk_seeded ctx ~test_run ~program ~root_seed ~test_seed ~schedules ~replay_command
-    (thunk : Value.t) : (verdict * Hash.t list * string option, string) result =
+let run_thunk_seeded ctx ?(bounds = Round_robin.default_bounds) ~test_run ~program ~root_seed
+    ~test_seed ~schedules ~replay_command (thunk : Value.t) :
+    (verdict * Hash.t list * string option, string) result =
   let master = Infer_dist.Rng.make test_seed in
   let rec run index coverage last_verdict =
     if index >= schedules then
@@ -153,7 +156,7 @@ let run_thunk_seeded ctx ~test_run ~program ~root_seed ~test_seed ~schedules ~re
       in
       let result, mine =
         Eval.with_fresh_coverage ctx (fun () ->
-            Round_robin.run_call_recorded ctx ~program
+            Round_robin.run_call_recorded ctx ~bounds ~program
               ~mode:(Round_robin.Seeded_schedule { seed = decision_seed })
               test_run [ thunk ])
       in
@@ -167,7 +170,8 @@ let run_thunk_seeded ctx ~test_run ~program ~root_seed ~test_seed ~schedules ~re
                   hard =
                     Some
                       (Printf.sprintf
-                         "random schedule %d of %d failed (decision seed %d)\n\
+                         "random schedule %d of %d refused before a complete trace (decision seed \
+                          %d)\n\
                           replay: %s\n\
                           runtime error: %s"
                          (index + 1) schedules decision_seed replay_command
@@ -677,19 +681,22 @@ let rec value_has_prop (v : Value.t) : bool =
 let with_coverage ctx f = Eval.with_fresh_coverage ctx f
 
 (* walk one discovered test VALUE, recursing into groups *)
-let rec run_value ctx ~test_run ~prop_mode ~schedule_plan ~member ~display (v : Value.t) :
-    (outcome list, string) result =
+let rec run_value ctx ~test_run ~prop_mode ~schedule_plan ~member ~schedule_path ~display
+    (v : Value.t) : (outcome list, string) result =
   match v with
   | Value.VCon { name = "case"; args = [ Value.VText label; thunk ]; _ } -> (
       let display = display ^ "/" ^ label in
+      let schedule_path = schedule_path @ [ label ] in
       let run =
         match schedule_plan with
         | Default_schedule ->
             Result.map (fun (v, c) -> (v, c, None)) (run_thunk ctx ~test_run thunk)
         | Seeded_schedules { seed; schedules; replay_command } ->
-            let test_seed = schedule_test_seed ~seed ~member ~display in
+            let test_seed = schedule_test_seed ~seed ~member ~relative_path:schedule_path in
             let program =
-              Hash.of_string ("warp-schedule-v0\000" ^ Hash.to_hex member ^ "\000" ^ display)
+              Hash.of_string
+                ("warp-schedule-v0\000" ^ Hash.to_hex member ^ "\000"
+                ^ String.concat "\000" schedule_path)
             in
             run_thunk_seeded ctx ~test_run ~program ~root_seed:seed ~test_seed ~schedules
               ~replay_command thunk
@@ -735,6 +742,7 @@ let rec run_value ctx ~test_run ~prop_mode ~schedule_plan ~member ~display (v : 
         | Value.VCon { name = "cons"; args = [ t; rest ]; _ } -> (
             match
               run_value ctx ~test_run ~prop_mode ~schedule_plan ~member
+                ~schedule_path:(schedule_path @ [ label ])
                 ~display:(display ^ "/" ^ label)
                 t
             with
@@ -779,20 +787,57 @@ let run_discovered ctx (cctx : Check.ctx) ~test_run ~prop_mode ~schedule_plan ~c
             | Seeded_schedules { seed; schedules; _ } ->
                 schedule_key_string ~base:base_key ~schedules ~seed
           in
-          match cache_lookup ~cache_dir key with
+          let cached = cache_lookup ~cache_dir key in
+          let cached =
+            match (schedule_plan, cached) with
+            | Seeded_schedules _, Some stored
+              when List.exists
+                     (fun (_, verdict, _, _) -> match verdict with Fail _ -> true | _ -> false)
+                     stored ->
+                None
+            | _, cached -> cached
+          in
+          match cached with
           | Some stored ->
+              let current_display stored_display =
+                match String.index_opt stored_display '/' with
+                | Some separator ->
+                    name
+                    ^ String.sub stored_display separator (String.length stored_display - separator)
+                | None -> name
+              in
               Ok
                 (List.map
                    (fun (display, verdict, note, coverage) ->
-                     { display; verdict = Some verdict; note; coverage; cached = true })
+                     {
+                       display = current_display display;
+                       verdict = Some verdict;
+                       note;
+                       coverage;
+                       cached = true;
+                     })
                    stored)
           | None -> (
-              match run_value ctx ~test_run ~prop_mode ~schedule_plan ~member:h ~display:name v with
+              match
+                run_value ctx ~test_run ~prop_mode ~schedule_plan ~member:h ~schedule_path:[]
+                  ~display:name v
+              with
               | Error e -> Error e
               | Ok outcomes ->
                   (* every EXECUTED outcome caches, display and note included, keyed by
                      this test's member hash (a group hash Merkle-covers its members) *)
-                  if List.for_all (fun o -> o.verdict <> None) outcomes && outcomes <> [] then
+                  let cacheable =
+                    match schedule_plan with
+                    | Default_schedule -> List.for_all (fun o -> o.verdict <> None) outcomes
+                    | Seeded_schedules _ ->
+                        List.for_all
+                          (fun o ->
+                            match o.verdict with
+                            | Some (Pass _ | NoChecks) -> true
+                            | Some (Fail _) | None -> false)
+                          outcomes
+                  in
+                  if cacheable && outcomes <> [] then
                     cache_store ~cache_dir key
                       (List.map
                          (fun o -> (o.display, Option.get o.verdict, o.note, o.coverage))
@@ -826,7 +871,7 @@ let run_discovered ctx (cctx : Check.ctx) ~test_run ~prop_mode ~schedule_plan ~c
           (Result.map_error Runtime_err.to_string (value_of ctx h))
           (fun v ->
             run_value ctx ~test_run ~prop_mode ~schedule_plan:Default_schedule ~member:h
-              ~display:name v)
+              ~schedule_path:[] ~display:name v)
 
 (* --- rendering --- *)
 

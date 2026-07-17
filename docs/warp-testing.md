@@ -150,12 +150,15 @@ passed". Small-scope exhaustiveness stops being a separate tool with separate
 generators; it is a flag.
 
 The schedule lane is separate from property-data sampling. It reruns each
-hermetic Case under SplitMix64 choices from the exact runnable queue. The root
-seed is mixed with the Case's Merkle member hash and display path, so another
-test being added, removed, or served from cache does not move its stream. A
-failure prints the child decision seed, exact rerun command, and canonical
-versioned schedule log. `--schedules` requires a positive count and an explicit
-`--seed`; it never consults host randomness.
+hermetic Case under unbiased SplitMix64 bounded-integer choices from the exact
+runnable queue. The root seed is mixed with the Case's Merkle member hash and
+relative group/Case label path, excluding the renameable top-level name, so a
+rename or another test being added, removed, or served from cache does not move
+its stream. A failure prints the child decision seed and exact rerun command; a
+canonical versioned log is included only when the scheduler completed one.
+Scheduled failures are not cached, preventing a moved suite from receiving a
+stale source/prelude command. `--schedules` requires a positive count and an
+explicit `--seed`; it never consults host randomness.
 
 ### Shrinking without shrinkers
 

@@ -119,11 +119,7 @@ let seeded_chooser seed =
   fun ~sequence:_ ~runnable ->
     match runnable with
     | [] -> Error [ Diag.error ~code:"E0908" "seeded scheduler cannot choose from an empty queue" ]
-    | _ ->
-        let index =
-          int_of_float (Infer_dist.Rng.float rng *. float_of_int (List.length runnable))
-        in
-        Ok (List.nth runnable index)
+    | _ -> Ok (List.nth runnable (Infer_dist.Rng.bounded_int rng (List.length runnable)))
 
 let control_configuration = function
   | Record_schedule -> Ok (scheduler_version, Schedule_control.Record)

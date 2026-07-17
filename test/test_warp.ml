@@ -196,14 +196,16 @@ let test_coverage_memo_trap () =
 let test_schedule_seed_splitting_and_cache_identity () =
   let member = Hash.of_string "scheduled-member" in
   Random.init 1;
-  let first = Warp.schedule_test_seed ~seed:42 ~member ~display:"suite/first" in
+  let first = Warp.schedule_test_seed ~seed:42 ~member ~relative_path:[ "group"; "first" ] in
   Random.init 999;
-  let same = Warp.schedule_test_seed ~seed:42 ~member ~display:"suite/first" in
-  let other_leaf = Warp.schedule_test_seed ~seed:42 ~member ~display:"suite/second" in
+  let same = Warp.schedule_test_seed ~seed:42 ~member ~relative_path:[ "group"; "first" ] in
+  let other_leaf = Warp.schedule_test_seed ~seed:42 ~member ~relative_path:[ "group"; "second" ] in
   let other_member =
-    Warp.schedule_test_seed ~seed:42 ~member:(Hash.of_string "other-member") ~display:"suite/first"
+    Warp.schedule_test_seed ~seed:42 ~member:(Hash.of_string "other-member")
+      ~relative_path:[ "group"; "first" ]
   in
   Alcotest.(check int) "same canonical test split" first same;
+  Alcotest.(check int) "top-level rename does not move the split" first same;
   Alcotest.(check bool) "leaf path participates in split" true (first <> other_leaf);
   Alcotest.(check bool) "member hash participates in split" true (first <> other_member);
   let base = Warp.cache_key_string (Warp.Hermetic ("display-only", member)) in
@@ -218,7 +220,37 @@ let test_schedule_seed_splitting_and_cache_identity () =
     (not (String.equal key (Warp.schedule_key_string ~base ~schedules:9 ~seed:42)));
   Alcotest.(check bool)
     "changed seed rekeys" true
-    (not (String.equal key (Warp.schedule_key_string ~base ~schedules:8 ~seed:43)))
+    (not (String.equal key (Warp.schedule_key_string ~base ~schedules:8 ~seed:43)));
+  let test_run = eval_ok "(var test.run)" in
+  let thunk =
+    eval_ok
+      "(lam ()\n\
+      \  (let nonrec (pwild)\n\
+      \    (app (var async.scope)\n\
+      \      (lam () (let nonrec (pwild) (app (var async.yield)) (tuple))))\n\
+      \    (app (var check.true) (var true) (lit \"after\"))))"
+  in
+  let replay_command = "jacquard test bounds.jac --schedules 1 --seed 42 --no-cache" in
+  let verdict =
+    match
+      Warp.run_thunk_seeded ctx
+        ~bounds:{ Round_robin.max_tasks = 8; max_decisions = 1 }
+        ~test_run
+        ~program:(Hash.of_string "bounded-schedule-test")
+        ~root_seed:42 ~test_seed:77 ~schedules:1 ~replay_command thunk
+    with
+    | Ok (verdict, _, _) -> verdict
+    | Error error -> Alcotest.fail error
+  in
+  match verdict with
+  | Warp.Fail { soft = []; hard = Some hard } ->
+      Alcotest.(check string)
+        "bound refusal reports seed and rerun without claiming a complete log"
+        "random schedule 1 of 1 refused before a complete trace (decision seed 77)\n\
+         replay: jacquard test bounds.jac --schedules 1 --seed 42 --no-cache\n\
+         runtime error: error[E0908]: decision bound exceeded"
+        hard
+  | _ -> Alcotest.fail "bounded seeded schedule did not return the expected hard failure"
 
 let test_coverage_and_schedule_identity () =
   test_coverage_memo_trap ();

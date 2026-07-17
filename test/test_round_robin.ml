@@ -540,6 +540,24 @@ let test_seeded_schedule_is_reproducible_and_replayable () =
   Alcotest.(check bool)
     "nearby seeds can select another interleaving" true
     (not (String.equal first_bytes (Schedule_trace.serialize different.schedule)));
+  let three_way =
+    List.find_map
+      (function
+        | Schedule_trace.Decide { runnable; chosen; _ } when List.length runnable = 3 -> Some chosen
+        | Schedule_trace.Create _ | Schedule_trace.Decide _ -> None)
+      first.schedule.events
+  in
+  Alcotest.(check (option string))
+    "three-way queue uses the bounded SplitMix64 choice" (Some "0#0")
+    (Option.map Concurrency_contract.trace_task_id three_way);
+  let rng = Infer_dist.Rng.make 73 in
+  let draws = List.init 10_000 (fun _ -> Infer_dist.Rng.bounded_int rng 3) in
+  Alcotest.(check bool)
+    "non-power-of-two bounded draws stay in range" true
+    (List.for_all (fun index -> index >= 0 && index < 3) draws);
+  Alcotest.(check (list int))
+    "all three non-power-of-two outcomes are reachable" [ 0; 1; 2 ]
+    (List.sort_uniq Int.compare draws);
   let replayed =
     Round_robin.run_expr_scheduled ctx ~policy:Concurrency_contract.Collect
       ~mode:(Round_robin.Replay_schedule first.schedule) expr

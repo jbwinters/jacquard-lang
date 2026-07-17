@@ -48,6 +48,14 @@ and root seed in the hermetic cache identity.
   cache: 0 hit, 1 ran
   $ jacquard test seeded-schedules.jac --schedules 4 --seed 73 --cache-dir schedule-cache | tail -1
   cache: 0 hit, 1 ran
+  $ sed 's/seeded-case/renamed-case/' seeded-schedules.jac > renamed-schedules.jac
+  $ jacquard test renamed-schedules.jac --schedules 3 --seed 73 --cache-dir schedule-cache | grep -E '^(PASS|cache:)'
+  PASS renamed-case/seeded pass (schedules: 3, seed 73) [cached]
+  cache: 1 hit, 0 ran
+  $ sed 's/seeded pass/changed display/' seeded-schedules.jac > changed-display.jac
+  $ jacquard test changed-display.jac --schedules 3 --seed 73 --cache-dir schedule-cache | grep -E '^(PASS|cache:)'
+  PASS seeded-case/changed display (schedules: 3, seed 73)
+  cache: 0 hit, 1 ran
 
 A failing run prints the exact root replay command, the failing decision seed,
 and the canonical log. Repeating the printed command reproduces byte for byte.
@@ -59,11 +67,26 @@ and the canonical log. Repeating the printed command reproduces byte for byte.
   identical
   $ grep -E '^(FAIL|  ! random schedule|replay: jacquard|schedule log:|jacquard-schedule format=1|decision sequence=)' failure-a.txt | head -6
   FAIL seeded-case/seeded pass (schedule: failed 1/3, seed 73)
-    ! random schedule 1 of 3 failed (decision seed -1984518348094897688)
+    ! random schedule 1 of 3 failed (decision seed -140780218347462620)
   replay: jacquard test 'failing-schedule.jac' --prelude '$TESTCASE_ROOT/../../prelude' --schedules 3 --seed 73 --no-cache
   schedule log:
-  jacquard-schedule format=1 scheduler=seeded-random-v0 program=c1d0128d5bb67fccdb81466e42aa7d02fb9217b13fa19d2951f751a55967601c policy=fail-fast max-tasks=1024 max-decisions=100000 fork=-
+  jacquard-schedule format=1 scheduler=seeded-random-v0 program=5a74300682334e15fa4e130bc632dba1183233bddbe5505c114906577aa777b0 policy=fail-fast max-tasks=1024 max-decisions=100000 fork=-
   decision sequence=0 runnable=0#0 chosen=0#0 operation=async.scope
+
+Scheduled failures are deliberately not cached: replay presentation contains
+the current source and prelude paths. A shared cache therefore cannot return a
+stale command after the failing suite moves.
+
+  $ rm -rf failing-cache moved-suite && mkdir moved-suite
+  $ jacquard test failing-schedule.jac --schedules 3 --seed 73 --cache-dir failing-cache > failure-cache-a.txt 2>&1; test $? = 1
+  $ cp failing-schedule.jac moved-suite/
+  $ jacquard test moved-suite/failing-schedule.jac --schedules 3 --seed 73 --cache-dir failing-cache > failure-cache-b.txt 2>&1; test $? = 1
+  $ grep -E '^(replay:|cache:)' failure-cache-a.txt
+  replay: jacquard test 'failing-schedule.jac' --prelude '$TESTCASE_ROOT/../../prelude' --schedules 3 --seed 73 --no-cache
+  cache: 0 hit, 1 ran
+  $ grep -E '^(replay:|cache:)' failure-cache-b.txt
+  replay: jacquard test 'moved-suite/failing-schedule.jac' --prelude '$TESTCASE_ROOT/../../prelude' --schedules 3 --seed 73 --no-cache
+  cache: 0 hit, 1 ran
 
   $ cat > surface-suite.jac <<'JACQUARD'
   > double(n) = mul(n, 2)

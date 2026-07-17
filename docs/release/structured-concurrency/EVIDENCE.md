@@ -430,25 +430,33 @@ proof-only and every hit still executes a fresh evaluator run.
 `seeded-random-v0` decision policy. The CLI rejects non-positive `N`, rejects a
 missing or malformed seed, and never calls `Random.self_init` on this path. A
 SplitMix64 stream mixes the root seed with the canonical discovered-member hash
-and leaf display path, then supplies an independent decision seed to each run.
-Discovery order, cache hits, and host `Random` state therefore cannot move a
+and relative group/Case label path, excluding the renameable top-level name,
+then supplies an independent decision seed to each run. Discovery order,
+top-level renames, cache hits, and host `Random` state therefore cannot move a
 test's schedule stream.
 
 Only the D46 choice changes: each step selects an index from the exact ordered
-runnable queue. The scheduler still records format-v1 creation and decision
-events. Strict replay accepts the scheduler identity stored in a validated
+runnable queue using 62-bit bounded-integer rejection sampling. The fixed
+three-way-queue regression and 10,000 bounded draws pin non-power-of-two range
+behavior without float or modulo bias. The scheduler still records format-v1
+creation and decision events. Strict replay accepts the scheduler identity stored in a validated
 trace and checks every queue, chosen task, and operation without drawing again.
 The focused scheduler regression pins same-seed byte identity under different
 host random states, a changed interleaving for another seed, and byte-identical
 strict replay of the seeded trace.
 
-The first failing Warp execution prints the root seed, child decision seed,
-exact rerun command, and canonical schedule log. The CLI transcript runs that
-command twice and byte-compares the failures. It also pins positive-count and
-explicit-seed diagnostics, pass reporting, and cache misses when either `N` or
-`S` changes. The scheduled cache key is the ordinary Merkle member/Prop key
-plus `seeded-random-v0`, `N`, and `S`; the schedule trace program identity also
-combines the member hash and leaf display path. WorldTests remain uncached and
+The first failing Warp execution prints the root seed, child decision seed, and
+exact rerun command. It prints a canonical schedule log only after a complete
+trace; the decision-bound regression pins a seed/rerun/error refusal with no
+partial-log claim. The CLI transcript runs the ordinary failing command twice
+and byte-compares the failures. It also pins positive-count and explicit-seed
+diagnostics, pass reporting, and cache misses when either `N` or `S` changes.
+The scheduled cache key is the ordinary Merkle member/Prop key plus
+`seeded-random-v0`, `N`, and `S`; the schedule trace program identity combines
+the member hash and relative label path. A top-level rename is a cache hit with
+current display text, while a Case-label edit is a miss. Scheduled failures are
+not cached; a shared-cache moved-path regression proves their replay command is
+rebuilt from the current source/prelude paths. WorldTests remain uncached and
 Props retain their separate data-generation modes.
 
 Host scheduling and exhaustive schedule exploration remain outside SC.11.
