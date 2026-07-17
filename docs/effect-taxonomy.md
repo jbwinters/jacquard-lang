@@ -79,7 +79,7 @@ mode; there is no inference from names.
 | `Log` | `log` | `official` | `world` | `-` | `once` | `medium` | `3` | `reserved` | `first-release` | `log.emit:(LogEntry)->()` | emit a structured operational log entry |
 | `Infer` | `infer` | `official` | `model` | `-` | `once` | `medium` | `3` | `implemented` | `324b8f59279db3cabbfaaba430168717057cea8fc1435a11a1a9106e3e6fb4d8` | `complete:(Prompt)->Text` | request a model completion selected by the handler |
 | `Approval` | `approval` | `official` | `governance` | `-` | `once` | `special` | `3` | `implemented` | `362425a29077a7efbcc37047182e579f46199a50473045eb4126a917dfc2a196` | `approval.ask:(Proposal)->Decision` | request hash-bound consent for an exact proposal |
-| `Audit` | `audit` | `official` | `governance` | `-` | `once` | `special` | `3` | `implemented` | `2c148fbc2e26bdc6f01279a8bf176f54d5798536e1f96805aa4f7c7a57e67632` | `audit.record:(AuditEntry)->()` | record governance evidence in an append-only stream |
+| `Audit` | `audit` | `official` | `governance` | `-` | `once` | `special` | `3` | `implemented` | `40bc4343fb2b4bcc18b18f63f7bb68675b746751bb40b876072e622046a81372` | `audit.record:(AuditEntry)->()` | record governance evidence in an append-only stream |
 | `Secret` | `secret` | `official` | `governance` | `-` | `once` | `special` | `3` | `implemented` | `6d092eccc3c9858a2a95120da5a011964cbb3ad76968e11c1cbb062c119fbb31` | `secret.read:(SecretRef)->Secret;secret.expose:(Secret)->Text` | resolve opaque confidential material or explicitly expose it |
 | `Judge` | `judge` | `official` | `governance` | `-` | `once` | `special` | `3` | `implemented` | `9b677b5e2c3ec8521c5d5dfac321ae361a959565e1cbf082fec4512199977354` | `judge.assess:(Call)->Assessment` | assess a proposed call without performing it |
 | `Async` | `async` | `official` | `concurrency` | `a` | `once` | `none` | `2` | `reserved` | `4ff8ce05ab09968163492b3be40fc91381b47dee5fb4b2980f9416d50f38e66f` | `async.spawn:(()->{Async\|e}a)->Task a;async.await:(Task a)->TaskResult a;async.cancel:(Task a)->();async.yield:()->()` | schedule structured tasks while charging child effects to the parent row |
@@ -264,28 +264,6 @@ stored policy threshold, and return `NoSimulation` only when it does not. The
 validated ET.6 carrier above remains compatibility evidence and keeps its
 original identities. Every dry-run or scripted Approval handler returns
 `Escalate`, never `Approved`; canonical handlers remain ET.7 scope.
-
-GM.2 completes the successor review identity as the separate
-`GovernanceProposal`/`governance-proposal-v0` carrier. Its smart constructor
-derives the Call, live BoundPolicy, and Assessment identities from validated
-values and obtains the authority envelope from the Call. The exact proposal
-Code commits, in order, `GovernanceV0`, call ID, policy ID, assessment ID,
-authority, optional preview, reviewed rendering, and summary. Validation
-recomputes the carried hash and the artifact-aware boundary additionally
-checks every constituent ID and the byte-identical authority envelope. This
-uses the already released `code.hash` canonical-Code boundary; the ET.6
-`proposal-v1` carrier and `Approval` effect remain hash-for-hash unchanged.
-
-GM.3 makes the §6 policy laws executable at validated trust boundaries.
-LivePolicy and DryPolicy retain their frozen GM.1 schemas, while safe
-StoredPolicy construction, canonical stored-policy hashing, and exact
-BoundPolicy verification prevent directly represented or forged values from
-reaching execution. Live evaluation rejects invalid observed confidence and
-never auto-allows below the policy threshold. Dry evaluation blocks Forbidden,
-otherwise Simulates iff a simulator exists, and returns NoSimulation without
-an Allow, Ask, Approval, or live fallback path. Exhaustive risk/threshold grids
-and numeric-boundary properties pin these total laws; existing ET.2, ET.6,
-GM.1, and GM.2 identities remain unchanged.
 
 The declarations below are an executable surface fixture for the reserved
 world, governance, Async, and Channel operation boundaries. Its small carrier
