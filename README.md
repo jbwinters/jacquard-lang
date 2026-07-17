@@ -646,14 +646,17 @@ onto the permanent 27-form kernel. Native AOT compilation and C-toolchain
 optimization ship. `parallel.map` and `parallel.both` remain pure, sequential
 optimization hints. The interpreted runtime now supports opaque scoped Tasks,
 cooperative cancellation, fail-fast/collect, FIFO and seeded scheduling,
-versioned strict replay, and bounded exhaustive schedule enumeration. It does
-not provide native root scheduling, preemptive cancellation, finalizers, shared
-memory, channels, actors/supervision, host scheduling, or real asynchronous
-host I/O at this evidence base. A VM/JIT, continuous distributions, gradients,
+versioned strict replay, bounded exhaustive schedule enumeration, and scoped
+typed channels with rendezvous and buffered FIFO behavior, close, cancellation,
+and exact run/scope ownership. It does not provide native root scheduling or
+native Channel execution, preemptive cancellation, finalizers, shared memory,
+channel select or timeouts, actors/supervision, host scheduling, or real
+asynchronous host I/O at this evidence base. A VM/JIT, continuous
+distributions, gradients,
 typed staging, language package management, self-hosting, and formal soundness
 proofs also do not ship. World grants remain coarse. See
 `docs/release/0.1/LIMITS.md` for the historical Core 0.1 boundary and
-`docs/release/structured-concurrency/LIMITS.md` for the successor C0-C2 boundary.
+`docs/release/structured-concurrency/LIMITS.md` for the successor C0-C3 boundary.
 
 ## Troubleshooting
 
