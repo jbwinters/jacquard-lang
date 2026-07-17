@@ -1,4 +1,4 @@
-# Effect-taxonomy ET.8 + SC.0-SC.13 + GM.0-GM.6 + GM.9 reconstructible integration overlay
+# Effect-taxonomy ET.8 + SC.0-SC.14 + GM.0-GM.6 + GM.9 reconstructible integration overlay
 # Base commit: 3591bc0398e73e0617da0a6bc64d3986497848d0
 # Attestation manifests exclude themselves (and successor manifests) to avoid self/cross-hashes.
 0937ad41b14c0badcd35f147c83b8a950c43c45b8fa0f373f78b28abb5cb466d  README.md
@@ -65,6 +65,7 @@ a7106baeca9cf151e6d7bbb4ac5f5bc7771e52cebf2b6f9acc1385efeab66eda  docs/stdlib.md
 9fe87b4cb95be2ad95670a907fd1ea3e5de24b369de22fc1201a650be1ff5cd4  docs/tutorial.md
 eaa09eec1eb29f8034b043da9226dcc7c6e9c75a18d6656e7e0bd37697df01f4  docs/warp-testing.md
 19350aaaa795bb311dc4a9b8d5481cf9d061e46308a0fa631b645c1b9a6c87cf  prelude/03-concurrency.jqd
+ac3baf965e2bf7a7433f216e0b1cf8439ffd0e637160fa209e9e3e0725e404b7  prelude/08z-channel.jqd
 09d8c56da1e9d77bae133f3462a0b193e8402603b5911d2c5a1bd155797f3fb9  prelude/09-grid.jqd
 2650768a19498420fcb606b7f60f262b06857154e4a6377102f79b4b5da1dadb  prelude/19-audit.jqd
 2e4bab073d132c7adfbef7c47eb1303d4d114631374ef2710fee70c5dfb398e2  prelude/21-governance-core.jqd
@@ -91,6 +92,10 @@ a38101fd43a84f2c7c106688c6293c1882e953cf4e21a8c2538bc726c39d42e6  spec/effect-ta
 4e816b71ece5c71199fc69662e1c35acc3825cf4c07c090b04021ddb82725a64  src/audit_chain.ml
 f54728429aa2bf918c4ca8853bf83f43fea7ef59d65799b32492aa25d3943cee  src/audit_chain.mli
 edcbef172137fded25d8551245f1a83b0024569c35a9d327d127e2052216751d  src/canon.ml
+c0e5692575f5930c9e75e134253fa13c08f41c40c42f9355531742125d1dfa28  src/channel_contract.ml
+a32a9a798258c36501da43240160bbb7b0075ba7ea281bfd4eaaef478a79a5c6  src/channel_contract.mli
+6d57ffa943f8583c8936c2b4157d0cd7a294c0bc111e59a24de2b377290c7240  src/channel_handle.ml
+d86b593b559b076a06138b27883f36c38d9437ed778575b29a93f0f98f2025e8  src/channel_handle.mli
 b9ed04954dcef8a83f711df7193283621da5e039e2070e59b4336285546c8acb  src/check.ml
 b19309edadabcffe5f892c9454914f86718a3c95f4eafdc19301192bf42c0b0e  src/check.mli
 9b9692f31050059c06ab08a38d4260cd8dd1e6ddb57e0729a8ba095e459e69d0  src/concurrency_contract.ml
@@ -187,6 +192,7 @@ faadeeb9fb4a3726792dc1f925875ef60c365b787f90182292c128718dd91e85  test/test_appr
 494e8e326535f45ae8f8d05edef5499d93250c61679cb1357ebe27f54d00fe1c  test/test_audit.ml
 7336d4ad0f61e4f44292e244bfae8447294b72b85ebe83d9c6789ffe970de47d  test/test_audit_chain.ml
 62e227967c9219527f5eb1c83d07b9d8e3d9e1ded1262200a5a5d94b3481a503  test/test_cancellation.ml
+a250af735df8d1810878d77974c3af33cc2f132bfb27d6e1f7b5d73e3a626afe  test/test_channel_contract.ml
 9414df20bc4a6816d57888fc97d6826467209805df2a03767a6bfdee45af4400  test/test_check.ml
 f2504465a3eef5c410ecab7fea78bee05ffc187515e5737cf17791d6164a13b9  test/test_dx_parser_recovery.ml
 ce092e2d01fc742408644cbc5c5fc29607aed1cdef87c3b39fac88e231a3842e  test/test_effect_taxonomy.ml
