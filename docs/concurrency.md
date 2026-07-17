@@ -584,7 +584,7 @@ Ill-typed child faults and direct self-handle injection remain hostile OCaml
 integration cases, not purported checked Warp programs. Warp Props still vary
 data, not schedules.
 
-### 5.2 Seeded randomized Warp schedules
+### 5.3 Seeded randomized Warp schedules
 
 SC.11 adds `jacquard test --schedules N --seed S` for hermetic Warp Cases. `N`
 must be positive and `--seed` is required whenever this lane is selected. The
