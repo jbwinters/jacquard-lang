@@ -681,7 +681,7 @@ let test_resolved_reserved_schemas () =
       "dependent operation scheme";
       "aliases, higher-order wrappers, returned closures, tuples";
       "SC.3 represents opaque run/scope-local Task values";
-      "No milestone yet implements scheduling policy, executable scopes, or a root handler";
+      "SC.9 installs the interpreted structured scheduler";
     ];
   let prelude = lazy (prelude_store ()) in
   let constructor_inventory type_name =
