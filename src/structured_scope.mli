@@ -3,7 +3,11 @@
     A scope owns one {!Scheduler_core.t}, all nested scopes opened through it, and every affine
     resume token registered in those schedulers. Closing a scope recursively closes descendants and
     explicitly returns each token to a caller-provided destruction function. The module does not
-    choose runnable order, deliver cooperative cancellation, or install an Async handler. *)
+    choose runnable order or install an Async handler. Cooperative cancellation is delivered only
+    through the explicit suspension/routed-effect boundaries below. Cancellation terminalizes and
+    transfers continuation ownership before invoking a supplied [drop] callback. Destruction
+    callbacks must normally not raise. If one does, its exception propagates, but the scheduler does
+    not re-own or transfer that continuation again. *)
 
 type handle = Scheduler_core.handle
 
@@ -17,6 +21,26 @@ type metrics = { open_scopes : int; live_tasks : int; runnable_tasks : int; owne
 
 type ('resume, 'value) t
 (** One scope in a same-run deterministic scope tree. *)
+
+type 'resume boundary_outcome =
+  | Boundary_continue of 'resume
+  | Boundary_cancelled of handle list
+      (** Result of a cancellation-point check. The continuation is returned only when execution may
+          continue; cancellation destroys it through the supplied [drop] callback. *)
+
+type 'value cooperative_await_outcome =
+  | Await_performed of 'value Scheduler_core.await_outcome * handle list
+  | Await_cancelled of handle list
+
+type yield_outcome = Yield_suspended | Yield_cancelled of handle list
+
+type ('resume, 'value) routed_effect_outcome =
+  | Effect_routed of { resume : 'resume; result : ('value, Diag.t list) result }
+  | Effect_cancelled of handle list
+
+type 'resume cancel_outcome =
+  | Cancel_continues of { resume : 'resume; awakened : handle list }
+  | Cancel_caller_cancelled of handle list
 
 val create : body_resume:'resume -> (('resume, 'value) t * handle, Diag.t list) result
 (** [create] opens root scope path [[0]] and creates its body task at spawn index zero. *)
@@ -62,14 +86,76 @@ val fail : ('resume, 'value) t -> handle -> string -> (handle list, Diag.t list)
 (** [fail] terminalizes a checked-out runnable task with a stable failure message. *)
 
 val request_cancel : ('resume, 'value) t -> handle -> (unit, Diag.t list) result
-(** [request_cancel] records a cooperative request; delivery remains an SC.7 concern. *)
+(** [request_cancel] records a cooperative request. Repeated and terminal-target requests are
+    deterministic no-ops. *)
 
 val deliver_cancel :
   ('resume, 'value) t ->
   point:Concurrency_contract.cancellation_point ->
   handle ->
+  drop:('resume -> unit) ->
   (handle list, Diag.t list) result
-(** [deliver_cancel] delegates explicit frozen-point delivery to the scheduler core. *)
+(** [deliver_cancel] delegates frozen-point delivery to the scheduler core and passes every removed
+    scheduler-owned resume exactly once to [drop] before returning awakened handles. Duplicate and
+    terminal delivery call [drop] zero times. The target is terminal and its resume has transferred
+    before [drop] runs. If [drop] raises, the exception propagates; later duplicate delivery neither
+    re-owns nor re-drops that resume. *)
+
+val at_cancellation_point :
+  ('resume, 'value) t ->
+  point:Concurrency_contract.cancellation_point ->
+  task:handle ->
+  resume:'resume ->
+  drop:('resume -> unit) ->
+  ('resume boundary_outcome, Diag.t list) result
+(** [at_cancellation_point] checks before any boundary action. First delivery terminalizes the task,
+    wakes waiters, and explicitly destroys [resume]. Already-cancelled tasks also destroy a stale
+    [resume], ensuring no post-cancellation user step can be recovered. The handoff is consumed even
+    if [drop] raises: the exception propagates and the task remains terminal. *)
+
+val await_cooperatively :
+  ('resume, 'value) t ->
+  waiter:handle ->
+  target:handle ->
+  resume:'resume ->
+  drop:('resume -> unit) ->
+  ('value cooperative_await_outcome, Diag.t list) result
+(** [await_cooperatively] delivers a pending request before observing the target or registering a
+    waiter. *)
+
+val yield_cooperatively :
+  ('resume, 'value) t ->
+  task:handle ->
+  resume:'resume ->
+  drop:('resume -> unit) ->
+  (yield_outcome, Diag.t list) result
+(** [yield_cooperatively] delivers before recording a yielded suspension. *)
+
+val route_effect :
+  ('resume, 'task_value) t ->
+  task:handle ->
+  resume:'resume ->
+  drop:('resume -> unit) ->
+  action:(unit -> ('value, Diag.t list) result) ->
+  (('resume, 'value) routed_effect_outcome, Diag.t list) result
+(** [route_effect] checks before invoking one scheduler-routed Async or world operation. On
+    cancellation [action] is never called. Otherwise its result, including a fault diagnostic, is
+    returned beside the still-caller-owned continuation; this layer does not schedule or resume it.
+*)
+
+val cancel :
+  ('resume, 'value) t ->
+  caller:handle ->
+  target:handle ->
+  resume:'resume ->
+  drop:('resume -> unit) ->
+  ('resume cancel_outcome, Diag.t list) result
+(** [cancel] implements the routed [async.cancel] boundary. A pre-cancelled caller performs no
+    target request. Self-cancel is delivered at this same routed-effect point. A suspended target is
+    delivered immediately at its existing await/yield point; runnable targets observe the request at
+    their next boundary. Completed and duplicate target requests are no-ops. Immediate delivery
+    terminalizes and transfers the target resume before calling [drop]. If [drop] raises, the
+    exception propagates without restoring that resume or making a later duplicate call drop it. *)
 
 val close :
   ('resume, 'value) t ->

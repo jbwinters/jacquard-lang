@@ -196,9 +196,11 @@ let test_self_await_and_cycle_fail_without_exception () =
   ignore (block scheduler second_on_a a 60);
   ignore (block scheduler cancelled_external b 70);
   Scheduler_core.request_cancel scheduler cancelled_external |> ok;
-  ignore
-    (Scheduler_core.deliver_cancel scheduler ~point:Concurrency_contract.Await cancelled_external
-    |> ok);
+  let _, cancelled_resumes =
+    Scheduler_core.deliver_cancel scheduler ~point:Concurrency_contract.Await cancelled_external
+    |> ok
+  in
+  Alcotest.(check (list int)) "cancelled external resume transferred" [ 70 ] cancelled_resumes;
   ignore (block scheduler a b 10);
   ignore (block scheduler b c 11);
   let outcome, awakened = block scheduler c a 12 in
@@ -229,10 +231,11 @@ let test_cancel_and_cleanup () =
   ignore (Scheduler_core.checkout scheduler waiter |> ok);
   ignore (Scheduler_core.await scheduler ~waiter ~target ~resume:21 |> ok);
   Scheduler_core.request_cancel scheduler waiter |> ok;
-  let awakened =
+  let awakened, cancelled_resumes =
     Scheduler_core.deliver_cancel scheduler ~point:Concurrency_contract.Await waiter |> ok
   in
   Alcotest.(check int) "cancel wakes no waiter" 0 (List.length awakened);
+  Alcotest.(check (list int)) "cancel transfers resume for destruction" [ 21 ] cancelled_resumes;
   Alcotest.(check bool)
     "cancel result" true
     ((view scheduler waiter).result = Some Concurrency_contract.Cancelled);
@@ -334,9 +337,11 @@ let prop_cycle_wakeups_are_live =
           ignore (Scheduler_core.await scheduler ~waiter ~target:a ~resume:(200 + index) |> ok);
           if index mod 2 = 1 then (
             Scheduler_core.request_cancel scheduler waiter |> ok;
-            ignore
-              (Scheduler_core.deliver_cancel scheduler ~point:Concurrency_contract.Await waiter
-              |> ok)))
+            match
+              Scheduler_core.deliver_cancel scheduler ~point:Concurrency_contract.Await waiter |> ok
+            with
+            | [], [ resume ] when resume = 200 + index -> ()
+            | _ -> Alcotest.fail "cancel did not transfer the suspended resume exactly once"))
         waiters;
       ignore (Scheduler_core.checkout scheduler a |> ok);
       ignore (Scheduler_core.await scheduler ~waiter:a ~target:b ~resume:300 |> ok);

@@ -132,7 +132,7 @@ also emits E0817; consuming the captured resumption twice emits E0816.
 | E0905 | exhaustive verification budget exceeded | a property over `uniform-int(1, 1000000)` under `jacquard test --exhaustive` |
 | E0906 | a once continuation was resumed more than once | applying the same once resumption twice |
 | E0907 | a Task carrier is private, malformed, foreign to the run, escaped, stale, or outside its structured scope | returning/storing a Task beyond `async.scope`, constructing `TaskOpaque` by hash, or reusing a Task after close/in another run |
-| E0908 | an internal scheduler operation is illegal for the task's current lifecycle or continuation ownership | checking out a suspended task or completing a task twice |
+| E0908 | an internal scheduler operation is illegal for the task's current lifecycle or continuation ownership | checking out a suspended task, delivering a boundary to an unchecked-out task, or completing a task twice |
 
 ## Warp (E10xx)
 
