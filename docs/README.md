@@ -141,10 +141,10 @@ Read these together when judging whether the release candidate is credible:
 ## Structured Concurrency Evidence
 
 - `release/structured-concurrency/EVIDENCE.md`: SC.6 nested scope ownership,
-  cleanup, escape-scan, lifecycle/memory/QCheck evidence over the validated
-  SC.4 + SC.5 integration base.
+  cleanup, escape-scan, and lifecycle/memory/QCheck evidence over the reviewed
+  SC.4 + SC.5 inputs integrated with GM.6 main.
 - `release/structured-concurrency/MANIFEST.sha256`: reconstructible complete
-  SC.6 overlay on integration commit `9708ee1`.
+  SC.4-SC.6 overlay on GM.6 main commit `89175fca`.
 
 ## Governed Membranes Evidence
 

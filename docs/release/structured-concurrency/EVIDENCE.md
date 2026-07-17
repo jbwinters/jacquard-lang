@@ -6,7 +6,7 @@ are implemented over the validated SC.4 child-effect law and SC.5 scheduler
 core. This milestone intentionally contains no runnable-queue policy, routed
 cancellation timing, host concurrency/I/O, or detached/root Async handler.
 
-- Reconstruction base: `9708ee1`
+- Reconstruction base: `89175fca17d66bd0579323cd0b3014944d5155b1`
 - Evidence overlay: [MANIFEST.sha256](MANIFEST.sha256)
 - Authoritative contract: [concurrency.md](../../concurrency.md)
 
@@ -192,12 +192,12 @@ pinning explicit carrier release without claiming a native scheduler.
 
 ## Reconstruction and verification
 
-The manifest is the complete SC.6 successor overlay on validated SC.4 + SC.5
-integration commit `9708ee1`. Reconstruct it under repository-local scratch
-space:
+The manifest is the complete reviewed SC.4 + SC.5 + SC.6 successor overlay on
+GM.6 main commit `89175fca17d66bd0579323cd0b3014944d5155b1`. Reconstruct it under
+repository-local scratch space:
 
 ```sh
-base=9708ee1
+base=89175fca17d66bd0579323cd0b3014944d5155b1
 dest="$PWD/.scratch/sc6-evidence-copy"
 manifest=docs/release/structured-concurrency/MANIFEST.sha256
 rm -rf "$dest"
@@ -226,8 +226,8 @@ git diff --exit-code
 opam exec -- dune build @doc
 ```
 
-Expected results are zero exits, 656 compiled Alcotest/QCheck cases, 36 cram
-transcripts, and 24 doctest examples across 7 documents.
+Expected results are zero exits, 664 compiled Alcotest/QCheck cases, 36 cram
+transcripts, and 25 doctest examples across 8 scanned documents.
 
 Runnable-queue policy, cooperative cancellation routing, failure policy, and
 the Async root handler remain later C1 tasks. SC.6 supplies executable
