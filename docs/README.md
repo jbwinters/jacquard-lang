@@ -122,6 +122,10 @@ Read these together when judging whether the release candidate is credible:
   Proposal identities, canonical-Code goldens, and stability/sensitivity laws.
 - `release/governed-membranes/GM2-MANIFEST.sha256`: reconstructible GM.2 overlay
   on the validated GM.1 commit `b5587ce`.
+- `release/governed-membranes/GM3-EVIDENCE.md`: GM.3 validated live, dry,
+  stored, and bound policy boundaries plus exhaustive verdict-law evidence.
+- `release/governed-membranes/GM3-MANIFEST.sha256`: reconstructible GM.3 overlay
+  on the validated GM.2 plus ET.3 integration commit `3e78a95`.
 
 ## Structured Concurrency Evidence
 

@@ -677,6 +677,24 @@ assessment, or authority mismatch. All encoding reuses `code.hash` and the GM.1
 authority, assessment, policy, and outcome encoders; no second serializer is
 introduced.
 
+GM.3 adds the validated execution boundary in
+`prelude/23-governance-policy.jqd` without changing any GM.1 or GM.2 carrier or
+identity. `governance.validate-{live,dry}-policy` reapply the safe-constructor
+checks to directly represented values. Safe StoredPolicy constructors and the
+`stored-policy-v0` canonical Code encoding provide one exact HASH_V0 identity
+for registry/file values, while `governance.bind-stored-policy` and
+`governance.validate-bound-stored-policy` reject forged carried hashes.
+
+Execution uses `governance.live-policy-verdict` and
+`governance.dry-policy-verdict`. Both require an exactly validated BoundPolicy.
+The live boundary also rejects non-finite or out-of-range observed confidence
+as `InvalidDecision`, then applies `Low < Medium < High < Forbidden`, with
+Forbidden always blocked and under-confidence never allowed. The dry boundary
+always blocks Forbidden; otherwise it returns Simulate exactly when a pure
+simulator exists and `NoSimulation` when none exists. It has no Allow or Ask
+path and does not reinterpret the retained DryPolicy confidence field as a
+gate.
+
 ### debug.inspect
 
 One reflection escape hatch, because agents debugging themselves need it. This

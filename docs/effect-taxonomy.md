@@ -274,6 +274,17 @@ checks every constituent ID and the byte-identical authority envelope. This
 uses the already released `code.hash` canonical-Code boundary; the ET.6
 `proposal-v1` carrier and `Approval` effect remain hash-for-hash unchanged.
 
+GM.3 makes the §6 policy laws executable at validated trust boundaries.
+LivePolicy and DryPolicy retain their frozen GM.1 schemas, while safe
+StoredPolicy construction, canonical stored-policy hashing, and exact
+BoundPolicy verification prevent directly represented or forged values from
+reaching execution. Live evaluation rejects invalid observed confidence and
+never auto-allows below the policy threshold. Dry evaluation blocks Forbidden,
+otherwise Simulates iff a simulator exists, and returns NoSimulation without
+an Allow, Ask, Approval, or live fallback path. Exhaustive risk/threshold grids
+and numeric-boundary properties pin these total laws; existing ET.2, ET.6,
+GM.1, and GM.2 identities remain unchanged.
+
 The declarations below are an executable surface fixture for the reserved
 world, governance, Async, and Channel operation boundaries. Its small carrier
 constructors for future opaque types are test scaffolding, not public
