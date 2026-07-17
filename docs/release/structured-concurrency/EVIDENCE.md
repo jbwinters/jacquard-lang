@@ -5,7 +5,7 @@ validated SC.0 contract. This milestone intentionally contains no scheduling
 policy, executable structured scope, lifecycle engine, or detached/root Async
 handler.
 
-- Reconstruction base: `dd0e7f2`
+- Reconstruction base: `d3807218823dfc152145e48616c3141c5b05d1ef`
 - Evidence overlay: [MANIFEST.sha256](MANIFEST.sha256)
 - Authoritative contract: [concurrency.md](../../concurrency.md)
 
@@ -92,11 +92,13 @@ C/OCaml show parity corpus includes a redacted inert Task value.
 
 ## Reconstruction and verification
 
-The manifest is the complete successor overlay on validated SC.0 commit
-`dd0e7f2`. Reconstruct it under repository-local scratch space:
+The manifest is the complete integrated overlay on commit
+`d3807218823dfc152145e48616c3141c5b05d1ef`. It includes the SC.3 work and the
+governance changes combined with it on this branch. Reconstruct it under
+repository-local scratch space:
 
 ```sh
-base=dd0e7f2
+base=d3807218823dfc152145e48616c3141c5b05d1ef
 dest="$PWD/.scratch/sc3-evidence-copy"
 manifest=docs/release/structured-concurrency/MANIFEST.sha256
 rm -rf "$dest"
@@ -125,8 +127,8 @@ git diff --exit-code
 opam exec -- dune build @doc
 ```
 
-Expected results are zero exits, 602 compiled Alcotest/QCheck cases, 34 cram
-transcripts, and 24 doctest examples across 7 documents.
+Expected results are zero exits, 669 compiled Alcotest/QCheck cases, 36 cram
+transcripts, and 25 doctest examples across 8 documents.
 
 The scheduler, executable scopes, cancellation delivery, lifecycle state, and
 root handler remain later C1 tasks. SC.4 also remains responsible for the

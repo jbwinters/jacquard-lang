@@ -1,8 +1,8 @@
-(** ET.3's single Audit chain carrier.
+(** D69's sequenced Audit chain carrier.
 
     The record syntax is:
 
-    [(audit-chain-v1 #PREVIOUS #DIGEST (audit-entry-v1 ...))]
+    [(audit-chain-v2 #PREVIOUS #DIGEST (audit-entry-v2 ...))]
 
     DIGEST is HASH_V0 over the domain tag, PREVIOUS's 32 raw bytes, and the embedded entry's
     existing [Printer.print_compact] bytes. The record wrapper is transport, not a second semantic
@@ -10,21 +10,17 @@
 
 type record = { previous : Hash.t; digest : Hash.t; entry : Form.t }
 
-let domain = "jacquard-audit-chain-v1\000"
-let genesis = Hash.of_string "jacquard-audit-chain-v1-genesis\000"
+let domain = "jacquard-audit-chain-v2\000"
+let genesis = Hash.of_string "jacquard-audit-chain-v2-genesis\000"
 let error ~code fmt = Printf.ksprintf (fun message -> Error [ Diag.error ~code message ]) fmt
 let form0 names = function { Form.head; args = []; _ } -> List.mem head names | _ -> false
 let hash_form = function { Form.head = "hash"; args = [ Form.Hash _ ]; _ } -> true | _ -> false
 let lit_text = function { Form.head = "lit"; args = [ Form.Text _ ]; _ } -> true | _ -> false
+let governance_version = form0 [ "governance-v0" ]
 
-let confidence = function
-  | {
-      Form.head = "confidence-v1";
-      args = [ Form.F { Form.head = "lit"; args = [ Form.Real _ ]; _ } ];
-      _;
-    } ->
-      true
-  | _ -> false
+let sequence = function
+  | { Form.head = "lit"; args = [ Form.Int value ]; _ } -> Some value
+  | _ -> None
 
 let text_list = function
   | { Form.head = "text-list-v1"; args; _ } ->
@@ -33,11 +29,20 @@ let text_list = function
 
 let assessment = function
   | {
-      Form.head = "assessment-v1";
-      args = [ Form.F risk; Form.F conf; Form.F reasons; Form.F _evidence ];
+      Form.head = "governance-assessment-v0";
+      args =
+        [
+          Form.F version;
+          Form.F risk;
+          Form.F { Form.head = "lit"; args = [ Form.Real _ ]; _ };
+          Form.F reasons;
+          Form.F _evidence;
+        ];
       _;
     } ->
-      form0 [ "low"; "medium"; "high"; "forbidden" ] risk && confidence conf && text_list reasons
+      governance_version version
+      && form0 [ "low"; "medium"; "high"; "forbidden" ] risk
+      && text_list reasons
   | _ -> false
 
 let decision = function
@@ -51,60 +56,108 @@ let decision = function
   | _ -> false
 
 let outcome = function
-  | { Form.head = "outcome-summary-v1"; args = [ Form.F status; Form.F digest; Form.F detail ]; _ }
-    ->
-      lit_text status && hash_form digest && lit_text detail
+  | {
+      Form.head = "governance-outcome-summary-v0";
+      args = [ Form.F version; Form.F status; Form.F digest; Form.F detail ];
+      _;
+    } ->
+      governance_version version && lit_text status && hash_form digest && lit_text detail
   | _ -> false
 
 let entry_shape = function
   | {
-      Form.head = "audit-entry-v1";
+      Form.head = "audit-entry-v2";
       args =
         [
           Form.F
             {
-              Form.head = "evaluated-v1";
-              args = [ Form.F call; Form.F policy; Form.F assessment_value; Form.F verdict ];
+              Form.head = "evaluated-v2";
+              args =
+                [
+                  Form.F version;
+                  Form.F sequence_value;
+                  Form.F call;
+                  Form.F policy;
+                  Form.F assessment_value;
+                  Form.F verdict;
+                ];
               _;
             };
         ];
       _;
     } ->
-      hash_form call && hash_form policy && assessment assessment_value
+      governance_version version
+      && Option.is_some (sequence sequence_value)
+      && hash_form call && hash_form policy && assessment assessment_value
       && form0 [ "allow"; "simulate"; "ask"; "block" ] verdict
   | {
-      Form.head = "audit-entry-v1";
+      Form.head = "audit-entry-v2";
       args =
         [
           Form.F
             {
-              Form.head = "consented-v1";
-              args = [ Form.F call; Form.F proposal; Form.F decision_value ];
+              Form.head = "consented-v2";
+              args =
+                [
+                  Form.F version;
+                  Form.F sequence_value;
+                  Form.F call;
+                  Form.F proposal;
+                  Form.F decision_value;
+                ];
               _;
             };
         ];
       _;
     } ->
-      hash_form call && hash_form proposal && decision decision_value
+      governance_version version
+      && Option.is_some (sequence sequence_value)
+      && hash_form call && hash_form proposal && decision decision_value
   | {
-      Form.head = "audit-entry-v1";
+      Form.head = "audit-entry-v2";
       args =
         [
           Form.F
             {
-              Form.head = "completed-v1";
-              args = [ Form.F call; Form.F branch; Form.F outcome_value ];
+              Form.head = "completed-v2";
+              args =
+                [
+                  Form.F version;
+                  Form.F sequence_value;
+                  Form.F call;
+                  Form.F branch;
+                  Form.F outcome_value;
+                ];
               _;
             };
         ];
       _;
     } ->
-      hash_form call && lit_text branch && outcome outcome_value
+      governance_version version
+      && Option.is_some (sequence sequence_value)
+      && hash_form call && lit_text branch && outcome outcome_value
   | _ -> false
+
+let entry_sequence = function
+  | {
+      Form.head = "audit-entry-v2";
+      args =
+        [
+          Form.F
+            {
+              Form.head = "evaluated-v2" | "consented-v2" | "completed-v2";
+              args = Form.F _version :: Form.F sequence_value :: _;
+              _;
+            };
+        ];
+      _;
+    } ->
+      sequence sequence_value
+  | _ -> None
 
 let entry_bytes entry =
   if not (entry_shape entry) then
-    error ~code:"E1302" "malformed AuditEntry: expected the exact released audit-entry-v1 schema"
+    error ~code:"E1302" "malformed AuditEntry: expected the exact released audit-entry-v2 schema"
   else
     match Printer.print_compact entry with
     | bytes -> Ok bytes
@@ -125,7 +178,7 @@ let append ~previous entry =
 let head record = record.digest
 
 let record_form record =
-  Form.form "audit-chain-v1"
+  Form.form "audit-chain-v2"
     [ Form.Hash record.previous; Form.Hash record.digest; Form.F record.entry ]
 
 (** See {!Audit_chain.render}. *)
@@ -145,14 +198,14 @@ let parse_record ~file ~line_number line =
         line_number
   | Ok
       {
-        Form.head = "audit-chain-v1";
+        Form.head = "audit-chain-v2";
         args = [ Form.Hash previous; Form.Hash stored; Form.F entry ];
         _;
       } ->
       Ok { previous; digest = stored; entry }
-  | Ok { Form.head; _ } when not (String.equal head "audit-chain-v1") ->
+  | Ok { Form.head; _ } when not (String.equal head "audit-chain-v2") ->
       error ~code:"E1302" "%s:%d: unsupported Audit chain version `%s`" file line_number head
-  | Ok _ -> error ~code:"E1301" "%s:%d: malformed audit-chain-v1 record" file line_number
+  | Ok _ -> error ~code:"E1301" "%s:%d: malformed audit-chain-v2 record" file line_number
 
 let finish ~expected_head actual =
   if Hash.equal actual expected_head then Ok actual
@@ -168,7 +221,7 @@ let verify_string ~file ~expected_head source =
   else
     let lines = String.split_on_char '\n' source in
     let lines = List.rev (List.tl (List.rev lines)) in
-    let rec verify line_number previous = function
+    let rec verify line_number expected_sequence previous = function
       | [] -> finish ~expected_head previous
       | "" :: _ ->
           error ~code:"E1301" "%s:%d: blank lines are not valid Audit chain records" file
@@ -180,6 +233,9 @@ let verify_string ~file ~expected_head source =
               if not (Hash.equal record.previous previous) then
                 error ~code:"E1303" "%s:%d: broken Audit predecessor: expected #%s, found #%s" file
                   line_number (Hash.to_hex previous) (Hash.to_hex record.previous)
+              else if entry_sequence record.entry <> Some expected_sequence then
+                error ~code:"E1308" "%s:%d: Audit sequence mismatch: expected %d" file line_number
+                  expected_sequence
               else
                 match digest ~previous record.entry with
                 | Error diagnostics ->
@@ -196,9 +252,9 @@ let verify_string ~file ~expected_head source =
                     error ~code:"E1304"
                       "%s:%d: Audit record digest mismatch: stored #%s, computed #%s" file
                       line_number (Hash.to_hex record.digest) (Hash.to_hex computed)
-                | Ok computed -> verify (line_number + 1) computed rest))
+                | Ok computed -> verify (line_number + 1) (expected_sequence + 1) computed rest))
     in
-    verify 1 genesis lines
+    verify 1 0 genesis lines
 
 let max_log_bytes = 16 * 1024 * 1024
 let max_entry_bytes = 1024 * 1024
@@ -274,60 +330,77 @@ let verify_file ~file ~expected_head =
 
 (** See {!Audit_chain.append_file}. *)
 let append_file ~file ~previous entry =
-  let rec open_descriptor attempts =
-    if attempts = 4 then raise (Sys_error "path changed repeatedly while opening for append")
-    else
-      match Unix.openfile file [ Unix.O_RDWR; Unix.O_APPEND ] 0 with
-      | descriptor -> descriptor
-      | exception Unix.Unix_error (Unix.ENOENT, _, _) -> (
-          if not (Hash.equal previous genesis) then
-            raise (Sys_error "the Audit chain disappeared before append")
-          else
-            match
-              Unix.openfile file [ Unix.O_RDWR; Unix.O_APPEND; Unix.O_CREAT; Unix.O_EXCL ] 0o600
-            with
-            | descriptor -> descriptor
-            | exception Unix.Unix_error (Unix.EEXIST, _, _) -> open_descriptor (attempts + 1))
-  in
-  Result.bind (append ~previous entry) (fun record ->
-      match
-        try
-          let descriptor = open_descriptor 0 in
-          Fun.protect
-            ~finally:(fun () -> Unix.close descriptor)
-            (fun () ->
-              ignore (Unix.lseek descriptor 0 Unix.SEEK_SET);
-              Unix.lockf descriptor Unix.F_TLOCK 0;
-              match read_descriptor_bounded ~max_bytes:max_log_bytes ~file descriptor with
-              | Error message -> Error (Append_io message)
-              | Ok snapshot -> (
-                  match verify_string ~file ~expected_head:previous snapshot.bytes with
-                  | Error diagnostics -> Error (Append_verify diagnostics)
-                  | Ok _ ->
-                      let descriptor_now = Unix.fstat descriptor in
-                      let path_now = Unix.stat file in
-                      if changed snapshot.stats descriptor_now || changed descriptor_now path_now
-                      then Error (Append_io "changed after verification and before append")
-                      else
-                        let line = render record ^ "\n" in
-                        let offset = Unix.lseek descriptor 0 Unix.SEEK_END in
-                        if offset <> descriptor_now.st_size then
-                          Error (Append_io "size changed after verification and before append")
+  if match entry_sequence entry with Some value -> value < 0 | None -> false then
+    error ~code:"E1308" "Audit sequence mismatch: expected a non-negative sequence"
+  else
+    let rec open_descriptor attempts =
+      if attempts = 4 then raise (Sys_error "path changed repeatedly while opening for append")
+      else
+        match Unix.openfile file [ Unix.O_RDWR; Unix.O_APPEND ] 0 with
+        | descriptor -> descriptor
+        | exception Unix.Unix_error (Unix.ENOENT, _, _) -> (
+            if not (Hash.equal previous genesis) then
+              raise (Sys_error "the Audit chain disappeared before append")
+            else
+              match
+                Unix.openfile file [ Unix.O_RDWR; Unix.O_APPEND; Unix.O_CREAT; Unix.O_EXCL ] 0o600
+              with
+              | descriptor -> descriptor
+              | exception Unix.Unix_error (Unix.EEXIST, _, _) -> open_descriptor (attempts + 1))
+    in
+    Result.bind (append ~previous entry) (fun record ->
+        match
+          try
+            let descriptor = open_descriptor 0 in
+            Fun.protect
+              ~finally:(fun () -> Unix.close descriptor)
+              (fun () ->
+                ignore (Unix.lseek descriptor 0 Unix.SEEK_SET);
+                Unix.lockf descriptor Unix.F_TLOCK 0;
+                match read_descriptor_bounded ~max_bytes:max_log_bytes ~file descriptor with
+                | Error message -> Error (Append_io message)
+                | Ok snapshot -> (
+                    match verify_string ~file ~expected_head:previous snapshot.bytes with
+                    | Error diagnostics -> Error (Append_verify diagnostics)
+                    | Ok _ ->
+                        let next_sequence =
+                          if String.equal snapshot.bytes "" then 0
+                          else String.split_on_char '\n' snapshot.bytes |> List.length |> pred
+                        in
+                        if entry_sequence entry <> Some next_sequence then
+                          Error
+                            (Append_verify
+                               [
+                                 Diag.error ~code:"E1308"
+                                   (Printf.sprintf "Audit sequence mismatch: expected %d"
+                                      next_sequence);
+                               ])
                         else
-                          let written =
-                            Unix.write_substring descriptor line 0 (String.length line)
-                          in
-                          if written <> String.length line then
-                            raise (Sys_error "short write while appending the Audit record")
-                          else (
-                            Unix.fsync descriptor;
-                            Ok (head record))))
-        with exception_ -> (
-          match io_exception exception_ with
-          | Some message -> Error (Append_io message)
-          | None -> raise exception_)
-      with
-      | Ok head -> Ok head
-      | Error (Append_verify diagnostics) -> Error diagnostics
-      | Error (Append_io message) ->
-          error ~code:"E1306" "cannot append Audit chain %s: %s" file message)
+                          let descriptor_now = Unix.fstat descriptor in
+                          let path_now = Unix.stat file in
+                          if
+                            changed snapshot.stats descriptor_now || changed descriptor_now path_now
+                          then Error (Append_io "changed after verification and before append")
+                          else
+                            let line = render record ^ "\n" in
+                            let offset = Unix.lseek descriptor 0 Unix.SEEK_END in
+                            if offset <> descriptor_now.st_size then
+                              Error (Append_io "size changed after verification and before append")
+                            else
+                              let written =
+                                Unix.write_substring descriptor line 0 (String.length line)
+                              in
+                              if written <> String.length line then
+                                raise (Sys_error "short write while appending the Audit record")
+                              else (
+                                Unix.fsync descriptor;
+                                Ok (head record))))
+          with exception_ -> (
+            match io_exception exception_ with
+            | Some message -> Error (Append_io message)
+            | None -> raise exception_)
+        with
+        | Ok head -> Ok head
+        | Error (Append_verify diagnostics) -> Error diagnostics
+        | Error (Append_io message) ->
+            error ~code:"E1306" "cannot append Audit chain %s: %s" file message)

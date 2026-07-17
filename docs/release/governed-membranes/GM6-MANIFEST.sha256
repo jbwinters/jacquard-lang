@@ -1,5 +1,5 @@
 # Governed-membranes GM.0-GM.6 + ET.3-ET.8 + SC.0-SC.3 + DX.5/DX.7 reconstructible integration overlay
-# Base commit: 94b5082
+# Base commit: 060e9d6
 # Attestation manifests exclude themselves (and successor manifests) to avoid self/cross-hashes.
 23e5c2dcec8f2aa6c96df0b0363cf9d9a393b99d326640b0f9507832d3cd8461  README.md
 e1ab74d323f55857ddca473bc9c7e0fcba7d1843cd1b2ef2b37c06fd6ed5ca72  bin/main.ml
@@ -49,8 +49,6 @@ d4fea490203ee9e841e9f854eb4bd1807e69dddb0bbbc754ee35d21fb787a4ba  docs/release/0
 d36861cb68eb5c319030249c88e7b267d88f92485c3b5aa6fed9b1fd443c99b3  docs/release/effect-taxonomy/ET5-EVIDENCE.md
 af53655eb77e6f7897361e9e09cb718a271c81691b3d3ce5e392c46ac321f6c5  docs/release/effect-taxonomy/ET7-EVIDENCE.md
 8627ead6a685e5ff7f653327fcce5b1dcc7e0c10d465f926ba7e564a3bcbf92a  docs/release/effect-taxonomy/ET8-EVIDENCE.md
-e9bcf7d8eaae1581027997ac757bbc287545c4d44a0b80e1bd8071bbfab2bd19  docs/release/governed-membranes/GM2-EVIDENCE.md
-70222d96711b863ca63f2e77f8155f7ab25f7f8234ef25d99957b9a370330572  docs/release/governed-membranes/GM3-EVIDENCE.md
 6914459379678743105a33333bccf69a71650dcf2a01c17d0915bd31d35e8020  docs/release/governed-membranes/GM4-EVIDENCE.md
 aaeb320c507266079ecc9c779bb33dfcf92463ac87b16d709eef0d977bed4071  docs/release/governed-membranes/GM5-EVIDENCE.md
 eb60e7b79f69f47009190a6e1677118dcff9974143987fe21392b71062a52f0f  docs/release/governed-membranes/GM6-EVIDENCE.md
@@ -66,9 +64,7 @@ c224581a90bbd493db3af08afb4a892bbb25eec9d9fe80179fe17f62fffd9594  prelude/03-con
 e5193aefa6826050b34a1112a63b10cec1763d89eb6e0465b23f3774a9b826f1  prelude/20-approval.jqd
 86be8f5ab15da038633c7087ac4a426597c54147e468d4bcdb973bf8052bf537  prelude/20-secret.jqd
 a1dbf541127eee36991085d6451e4e8b851161add167ce41e3dc1488b8689491  prelude/21-governance-core.jqd
-1a1567016dbd9ca34a67d240974f1c5bbb125bece3cce9919725759d478232eb  prelude/22-governance-identity.jqd
 d8ef9a09146fd9bcc15a4781770833a9d1cf5b31293240f33c1100e2fc78b0ba  prelude/22-judge.jqd
-1f250cf52d21ea33b02aa498a0ed351c269096f810e3564dada5f5e6f969cd8a  prelude/23-governance-policy.jqd
 3ebb50bb8243130bf69804549694a3828c4d377bc5027ccaaf8c7c30cf1fe8e6  prelude/24-governance-gate-dry.jqd
 402a280bc96aad9f5fd825fb7a9a044b4f9245fc292f67b65ae169b047c8e65f  prelude/operation-modes.manifest
 daef44bf6e25edde1a8b57e8799adb02c086c4e419373a1456ed99eb85b7058b  prelude/rings.manifest
@@ -169,7 +165,6 @@ ed8f82ec6fdcc05f91f4b3ded57da84c69657a0131fc0eae3035cdf8ae7c83a3  test/test_expo
 6839f28ec62d06cdc523668cf15be906457cb930cbc6f018dbbcaba865a0d3fe  test/test_governance_core.ml
 3aada4240136fd175850d20954d271549cbfe1428f65efe633ecb7ad436210a0  test/test_governance_gate.ml
 85279e60a5db52d52981d620b7af5ff8405b5c5787b79222444c8f4f0efef5cc  test/test_jacquard.ml
-4fd4e6fe526264ae7010e26e1a662ca7edf7f8c8714cd268b3302ef5f32054be  test/test_judge.ml
 f803355f05a7ce1390e9a38e28605eaaa49eaf7b247b49d0c5c44e7f05da309c  test/test_prelude.ml
 755a6ded14a1681a50959738daaa32715cb12531281ecabbf7b111bfbb4ebfed  test/test_printer.ml
 b32e247ec5e7fa076662c8b8989d80160dfe81557f011999e3bfccb929ff93b2  test/test_secret.ml

@@ -106,6 +106,8 @@
   ../docs/release/governed-membranes/GM2-MANIFEST.sha256
   ../docs/release/governed-membranes/GM3-EVIDENCE.md
   ../docs/release/governed-membranes/GM3-MANIFEST.sha256
+  ../docs/release/governed-membranes/GM4-EVIDENCE.md
+  ../docs/release/governed-membranes/GM4-MANIFEST.sha256
   ../docs/release/structured-concurrency/EVIDENCE.md
   ../docs/release/structured-concurrency/MANIFEST.sha256
   ../docs/release/dx-jac-export/EVIDENCE.md

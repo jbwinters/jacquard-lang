@@ -41,22 +41,24 @@ let check_expr source =
           | Error diagnostics -> Error diagnostics
           | Ok expression -> Check.check_top checker (Kernel.Expr expression)))
 
-let evaluated ?(confidence = "0.75") ?(reason = "rule matched")
+let evaluated ?(sequence = 0) ?(confidence = "0.75") ?(reason = "rule matched")
     ?(evidence = "(quote (evidence (lit \"typed\")))") () =
   Printf.sprintf
-    "(app (var evaluated) %s %s (app (var assessment) (var medium) (lit %s) (app (var cons) (lit \
-     %s) (var nil)) %s) (var ask))"
-    (hash call_hash) (hash policy_hash) confidence (qtext reason) evidence
+    "(app (var evaluated) (var governance-v0) (lit %d) %s %s (app (var governance-assessment-v0) \
+     (var governance-v0) (var medium) (lit %s) (app (var cons) (lit %s) (var nil)) %s) (var ask))"
+    sequence (hash call_hash) (hash policy_hash) confidence (qtext reason) evidence
 
-let consented ?(approver = "reviewer") ?(evidence = "(quote (ticket (lit \"T-7\")))") () =
-  Printf.sprintf "(app (var consented) %s %s (app (var approved) %s (lit %s) %s))" (hash call_hash)
-    (hash proposal_hash) (hash proposal_hash) (qtext approver) evidence
-
-let completed ?(detail = "receipt-7") () =
+let consented ?(sequence = 1) ?(approver = "reviewer")
+    ?(evidence = "(quote (ticket (lit \"T-7\")))") () =
   Printf.sprintf
-    "(app (var completed) %s (lit \"live\") (app (var outcome-summary) (lit \"succeeded\") %s (lit \
-     %s)))"
-    (hash call_hash) (hash outcome_hash) (qtext detail)
+    "(app (var consented) (var governance-v0) (lit %d) %s %s (app (var approved) %s (lit %s) %s))"
+    sequence (hash call_hash) (hash proposal_hash) (hash proposal_hash) (qtext approver) evidence
+
+let completed ?(sequence = 2) ?(detail = "receipt-7") () =
+  Printf.sprintf
+    "(app (var completed) (var governance-v0) (lit %d) %s (lit \"live\") (app (var \
+     governance-outcome-summary-v0) (var governance-v0) (lit \"succeeded\") %s (lit %s)))"
+    sequence (hash call_hash) (hash outcome_hash) (qtext detail)
 
 let render entry =
   match
@@ -79,7 +81,7 @@ let test_released_types_and_once_effect () =
   let audit = lookup "audit" Resolve.KEffect in
   Alcotest.(check string)
     "released Audit interface hash"
-    "2c148fbc2e26bdc6f01279a8bf176f54d5798536e1f96805aa4f7c7a57e67632" (Hash.to_hex audit);
+    "40bc4343fb2b4bcc18b18f63f7bb68675b746751bb40b876072e622046a81372" (Hash.to_hex audit);
   List.iter
     (fun name -> ignore (lookup name Resolve.KCon))
     [ "evaluated"; "consented"; "completed" ];
@@ -157,10 +159,11 @@ let test_in_memory_preserves_order () =
   Alcotest.(check string)
     "records append in occurrence order"
     (Printf.sprintf
-       "(7, cons(evaluated(#%s, #%s, assessment(medium, 0.75, cons(\"rule matched\", nil), (quote \
-        (evidence (lit \"typed\")))), ask), cons(consented(#%s, #%s, approved(#%s, \"reviewer\", \
-        (quote (ticket (lit \"T-7\"))))), cons(completed(#%s, \"live\", \
-        outcome-summary(\"succeeded\", #%s, \"receipt-7\")), nil))))"
+       "(7, cons(evaluated(governance-v0, 0, #%s, #%s, governance-assessment-v0(governance-v0, \
+        medium, 0.75, cons(\"rule matched\", nil), (quote (evidence (lit \"typed\")))), ask), \
+        cons(consented(governance-v0, 1, #%s, #%s, approved(#%s, \"reviewer\", (quote (ticket (lit \
+        \"T-7\"))))), cons(completed(governance-v0, 2, #%s, \"live\", \
+        governance-outcome-summary-v0(governance-v0, \"succeeded\", #%s, \"receipt-7\")), nil))))"
        call_hash policy_hash call_hash proposal_hash proposal_hash call_hash outcome_hash)
     (show
        (Printf.sprintf
@@ -175,25 +178,26 @@ let test_canonical_encoding_all_variants () =
     (fun line ->
       Alcotest.(check bool) "one physical line" false (String.contains line '\n');
       match Reader.parse_one ~file:"audit.log" line with
-      | Ok { Form.head = "audit-entry-v1"; _ } -> ()
+      | Ok { Form.head = "audit-entry-v2"; _ } -> ()
       | Ok form -> Alcotest.failf "wrong audit root %s" form.Form.head
       | Error diagnostics -> Eval_support.fail_diags "reparse audit line" diagnostics)
     lines;
   Alcotest.(check (list string))
-    "golden deterministic v1 encodings"
+    "golden deterministic v2 encodings"
     [
       Printf.sprintf
-        "(audit-entry-v1 (evaluated-v1 (hash #%s) (hash #%s) (assessment-v1 (medium) \
-         (confidence-v1 (lit 0.75)) (text-list-v1 (lit \"rule matched\")) (evidence (lit \
-         \"typed\"))) (ask)))"
+        "(audit-entry-v2 (evaluated-v2 (governance-v0) (lit 0) (hash #%s) (hash #%s) \
+         (governance-assessment-v0 (governance-v0) (medium) (lit 0.75) (text-list-v1 (lit \"rule \
+         matched\")) (evidence (lit \"typed\"))) (ask)))"
         call_hash policy_hash;
       Printf.sprintf
-        "(audit-entry-v1 (consented-v1 (hash #%s) (hash #%s) (approved-v1 (hash #%s) (lit \
-         \"reviewer\") (ticket (lit \"T-7\")))))"
+        "(audit-entry-v2 (consented-v2 (governance-v0) (lit 1) (hash #%s) (hash #%s) (approved-v1 \
+         (hash #%s) (lit \"reviewer\") (ticket (lit \"T-7\")))))"
         call_hash proposal_hash proposal_hash;
       Printf.sprintf
-        "(audit-entry-v1 (completed-v1 (hash #%s) (lit \"live\") (outcome-summary-v1 (lit \
-         \"succeeded\") (hash #%s) (lit \"receipt-7\"))))"
+        "(audit-entry-v2 (completed-v2 (governance-v0) (lit 2) (hash #%s) (lit \"live\") \
+         (governance-outcome-summary-v0 (governance-v0) (lit \"succeeded\") (hash #%s) (lit \
+         \"receipt-7\"))))"
         call_hash outcome_hash;
     ]
     lines
@@ -306,7 +310,7 @@ let prop_encoding_is_deterministic =
           && (not (String.contains first '\n'))
           &&
           match Reader.parse_one ~file:"audit-property.log" first with
-          | Ok { Form.head = "audit-entry-v1"; _ } -> true
+          | Ok { Form.head = "audit-entry-v2"; _ } -> true
           | Ok _ | Error _ -> false)
         entries)
 
