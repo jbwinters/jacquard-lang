@@ -463,3 +463,17 @@ governance.tool-error-show 3
 governance.assessment-summary 3
 governance.outcome-summary 3
 governance.call-summary 3
+# --- 22-governance-identity (GM.2 canonical Call/Proposal identity)
+governance-proposal 3
+governance-proposal-v0 3
+governance.call-authority 3
+governance.bound-policy-id 3
+governance.proposal-preview-code 3
+governance.proposal-subject-code 3
+governance.proposal-code 3
+governance.proposal-id 3
+governance.validate-proposal-preview 3
+governance.make-proposal-canonical 3
+governance.make-proposal 3
+governance.validate-proposal 3
+governance.validate-proposal-artifacts 3
