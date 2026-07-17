@@ -9,6 +9,7 @@ External clients can construct arbitrary guarded builtins.
   $ cat > api_present.ml <<'EOF'
   > open Jacquard
   > let make (store : Store.t) : Eval.ctx = Eval.make_ctx store
+  > let scheduler_bounds = Round_robin.default_bounds
   > EOF
   $ ocamlc -I "$JACQUARD_API" -c api_present.ml
   $ cat > custom_builtin.ml <<'EOF'
@@ -54,6 +55,30 @@ pass because an attempted `VTrustedBuiltin` payload happened to have some unrela
   >   exit 1
   > fi
   Jacquard.Trusted_builtin unavailable
+
+Task run identities and the capability that authorizes handle conversion belong entirely to
+installed-private modules. Probe each constructor directly: an ordinary type mismatch is not
+sufficient evidence because it could leave another forging route public.
+
+  $ for pair in "Concurrency_owner create" "Task_capability runtime" "Task_handle create_run"; do
+  >   set -- $pair
+  >   module=$1
+  >   value=$2
+  >   cat > task_private.ml <<EOF
+  > let _ = Jacquard.$module.$value
+  > EOF
+  >   if ocamlc -I "$JACQUARD_API" -c task_private.ml >task_private.out 2>&1; then
+  >     echo "Jacquard.$module.$value exposed"
+  >   elif grep -Fq "module Jacquard.$module is an alias for module Jacquard__$module, which is missing" task_private.out; then
+  >     echo "Jacquard.$module unavailable"
+  >   else
+  >     cat task_private.out
+  >     exit 1
+  >   fi
+  > done
+  Jacquard.Concurrency_owner unavailable
+  Jacquard.Task_capability unavailable
+  Jacquard.Task_handle unavailable
 
 Unchecked evaluator drivers are absent from the installed interface.
 

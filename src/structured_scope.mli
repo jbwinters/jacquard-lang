@@ -11,6 +11,10 @@
 
 type handle = Scheduler_core.handle
 
+type channel_handle
+(** Opaque run- and exact-scope-owned channel handle. It has no public constructor, equality,
+    rendering, or serialization operation. *)
+
 type exit_reason =
   | Normal
   | Aborted
@@ -42,6 +46,25 @@ type 'resume cancel_outcome =
   | Cancel_continues of { resume : 'resume; awakened : handle list }
   | Cancel_caller_cancelled of handle list
 
+type channel_open_outcome =
+  | Channel_opened of channel_handle
+  | Channel_invalid_capacity of int
+      (** Typed result of [channel.open]. Rejected negative capacities allocate no channel identity.
+      *)
+
+type 'value channel_result =
+  | Channel_send_ok
+  | Channel_recv_ok of 'value
+  | Channel_closed
+      (** Scheduler-internal result used to transform a channel operation's affine resume. *)
+
+type 'resume channel_transition =
+  | Channel_continues of { resume : 'resume; awakened : handle list }
+  | Channel_suspended
+      (** A channel operation either leaves its caller continuation checked out and reports
+          counterpart wakeups in required FIFO order, or returns that continuation to the caller's
+          scheduler entry as one channel suspension. *)
+
 val create : body_resume:'resume -> (('resume, 'value) t * handle, Diag.t list) result
 (** [create] opens root scope path [[0]] and creates its body task at spawn index zero. *)
 
@@ -59,11 +82,84 @@ val spawn : ('resume, 'value) t -> resume:'resume -> (handle, Diag.t list) resul
 val id : ('resume, 'value) t -> handle -> (Concurrency_contract.task_id, Diag.t list) result
 (** [id scope handle] validates exact open-scope ownership. *)
 
+val with_eval_task_context :
+  Task_capability.t -> Eval.ctx -> ('resume, 'value) t -> (unit -> 'a) -> 'a
+(** Runtime-private binding of evaluator Task validation to this scope's fresh run and path. *)
+
+val task_value : Task_capability.t -> ('resume, 'value) t -> handle -> (Value.t, Diag.t list) result
+(** Runtime-private Task wrapping, gated by the unforgeable scheduler capability. *)
+
+val task_handle :
+  Task_capability.t -> ('resume, 'value) t -> Value.t -> (handle, Diag.t list) result
+(** Runtime-private Task unwrapping, gated by the unforgeable scheduler capability. *)
+
+val channel_open : ('resume, 'value) t -> capacity:int -> (channel_open_outcome, Diag.t list) result
+(** [channel_open] allocates the next zero-based successful-open identity in this exact open scope.
+    A negative capacity returns [Channel_invalid_capacity] before identity allocation. A closed
+    scope returns E0907 and native ChannelId exhaustion returns E0908 without allocation. Trusted
+    scheduler code must establish the routed cancellation boundary before calling this lower seam.
+*)
+
+val channel_value :
+  Task_capability.t -> ('resume, 'value) t -> channel_handle -> (Value.t, Diag.t list) result
+(** Runtime-private wrapping of a validated live exact-scope channel handle. The unforgeable
+    scheduler capability prevents ordinary OCaml clients from manufacturing the opaque carrier. *)
+
+val channel_handle :
+  Task_capability.t -> ('resume, 'value) t -> Value.t -> (channel_handle, Diag.t list) result
+(** Runtime-private unwrapping of a [Value.VChannel]. Non-channel, stale, foreign-run, and
+    cross-scope values return E0907 without exposing channel state. *)
+
+val channel_send :
+  ('resume, 'value) t ->
+  task:handle ->
+  channel:channel_handle ->
+  resume:'resume ->
+  value:'value ->
+  map_resume:('resume -> 'value channel_result -> 'resume) ->
+  ('resume channel_transition, Diag.t list) result
+(** [channel_send] requires a cancellation-checked, checked-out caller continuation. It validates
+    exact live run/scope ownership and preflights all resume mappings before channel mutation, then
+    commits FIFO handoff, buffering, or scheduler-owned suspension without another failure point.
+    Invalid handles or task lifecycle return diagnostics without consuming the continuation or
+    payload. *)
+
+val channel_recv :
+  ('resume, 'value) t ->
+  task:handle ->
+  channel:channel_handle ->
+  resume:'resume ->
+  map_resume:('resume -> 'value channel_result -> 'resume) ->
+  ('resume channel_transition, Diag.t list) result
+(** [channel_recv] is the receive counterpart of {!channel_send}. Buffered values are FIFO and one
+    oldest blocked sender is promoted or rendezvous-completed before the receiver continues. *)
+
+val channel_close :
+  ('resume, 'value) t ->
+  task:handle ->
+  channel:channel_handle ->
+  resume:'resume ->
+  map_resume:('resume -> 'value channel_result -> 'resume) ->
+  map_closer:('resume -> 'resume) ->
+  ('resume channel_transition, Diag.t list) result
+(** [channel_close] preserves accepted buffered values, wakes rejected senders and drained receivers
+    FIFO before the closer, and is idempotent. [map_resume] supplies typed closed results to waiters
+    while [map_closer] supplies the close operation's unit result. Exact ownership and every waiter
+    mapping are prepared before state or continuation consumption, so a later invalid waiter cannot
+    partially close the channel. *)
+
 val inspect : ('resume, 'value) t -> handle -> ('value Scheduler_core.task_view, Diag.t list) result
 (** [inspect scope handle] returns the lifecycle view for an open scope. *)
 
 val checkout : ('resume, 'value) t -> handle -> ('resume, Diag.t list) result
 (** [checkout scope handle] transfers its runnable resume token. *)
+
+val with_checkout :
+  ('resume, 'value) t -> handle -> ('resume -> ('a, Diag.t list) result) -> ('a, Diag.t list) result
+(** [with_checkout scope handle operation] brackets a runnable-token transfer. If [operation]
+    returns or raises before a lifecycle transition settles the token, the scope owns it again
+    before control leaves the bracket. A raised physical exception retains its original raw
+    backtrace. Closed scopes and invalid handles return diagnostics. *)
 
 val suspend_yield : ('resume, 'value) t -> handle -> resume:'resume -> (unit, Diag.t list) result
 (** [suspend_yield] returns a checked-out token and records a yielded suspension. *)
@@ -186,3 +282,8 @@ val protect :
 val metrics : ('resume, 'value) t -> metrics
 (** [metrics scope] recursively counts open scopes, nonterminal tasks, runnable tasks, and owned
     resume tokens. *)
+
+val channel_deadlocked : ('resume, 'value) t -> bool
+(** [channel_deadlocked] holds when every remaining live task in this scope tree is suspended and at
+    least one waits on a Channel. It is a read-only empty-runnable-queue diagnostic; it never closes
+    a channel or changes task state. *)

@@ -1,5 +1,13 @@
 (library
  (name jacquard)
  (public_name jacquard)
- (private_modules Trusted_builtin Recovery_marker Once_state Task_handle)
+ (private_modules
+  Trusted_builtin
+  Recovery_marker
+  Once_state
+  Concurrency_owner
+  Task_capability
+  Task_handle
+  Channel_handle
+  Schedule_control)
  (libraries digestif unix))

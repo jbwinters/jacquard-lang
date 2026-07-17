@@ -124,8 +124,7 @@ opam exec -- dune build --root "$PWD" @doc
 sha256sum -c docs/release/governed-membranes/GM9-MANIFEST.sha256
 ```
 
-The integrated GM.9 + SC.4-SC.6 + DX.5/DX.7 checkout contains 675 compiled
-Alcotest/QCheck cases and 36
+The integrated GM.9 + SC.4 checkout contains 669 compiled Alcotest/QCheck cases, 36
 cram transcript files, 25 documentation examples across 8 documents, and 44
 interpreter/native gauntlet twins. The complete native walk reports 69 identical
 programs, eight manifested refusals, and zero failures. Historical GM.1, GM.2,

@@ -2,9 +2,9 @@
 
     Discovery is by CHECKED TYPE (decision D12): a store term whose elaborated type is [test] is a
     hermetic test, [world-test] a world test; names are display only. The hermetic lane runs each
-    thunk under the in-language [test.run] handler via {!Eval.call} (the M1 entry point built for
-    exactly this); the world lane runs only tests whose row the CLI's grants cover, refusing the
-    rest by name.
+    thunk under the in-language [test.run] handler through {!Round_robin.run_call}, so a scoped
+    Async lifecycle uses the same deterministic evaluator driver as the CLI; the world lane runs
+    only tests whose row the CLI's grants cover, refusing the rest by name.
 
     The result cache (W6.3) is an honest lookup table over the Merkle discipline: a Case's key is
     its member hash (which covers its transitive references), a Prop's key adds mode/samples/seed
@@ -34,6 +34,14 @@ type discovered = Hermetic of string * Hash.t | World of string * Hash.t
     branch budget (W6.5) *)
 type prop_mode = Sampling of { seed : int; samples : int } | Exhaustive of { budget : int }
 
+type schedule_plan =
+  | Default_schedule
+  | Seeded_schedules of { seed : int; schedules : int; replay_command : string }
+      (** A Warp Case normally uses the fixed FIFO scheduler. [Seeded_schedules] reruns each
+          hermetic Case under reproducible SplitMix64 decisions. The root seed is mixed with the
+          canonical member hash and relative leaf path, so discovery order, top-level renames, and
+          cache hits cannot change another test's schedule stream. *)
+
 (* --- discovery (W6.2) --- *)
 
 let discover (store : Store.t) (cctx : Check.ctx) : discovered list =
@@ -59,7 +67,7 @@ let discover (store : Store.t) (cctx : Check.ctx) : discovered list =
 (* --- running (W6.2) --- *)
 
 let value_of ctx (h : Hash.t) : (Value.t, Runtime_err.t) result =
-  Eval.run_expr ctx { Kernel.it = Kernel.Ref (h, Kernel.Term); meta = Meta.empty }
+  Round_robin.run_expr ctx { Kernel.it = Kernel.Ref (h, Kernel.Term); meta = Meta.empty }
 
 (* decompose a runtime report; the shape is pinned by prelude/15-warp.jqd *)
 let verdict_of_report (v : Value.t) : (verdict, string) result =
@@ -97,11 +105,144 @@ let verdict_of_report (v : Value.t) : (verdict, string) result =
    tests record the constant itself but not what it touched. Safe direction only — a
    warm complement can over-report "uncovered", never falsely claim covered. *)
 let run_thunk ctx ~test_run (thunk : Value.t) : (verdict * Hash.t list, string) result =
-  let result, mine = Eval.with_fresh_coverage ctx (fun () -> Eval.call ctx test_run [ thunk ]) in
+  let result, mine =
+    Eval.with_fresh_coverage ctx (fun () -> Round_robin.run_call ctx test_run [ thunk ])
+  in
   match result with
   | Ok report -> Result.map (fun v -> (v, mine)) (verdict_of_report report)
   | Error e ->
       Ok (Fail { soft = []; hard = Some ("runtime error: " ^ Runtime_err.to_string e) }, mine)
+
+let schedule_identity_version = "warp-schedule-leaf-v1"
+
+let add_schedule_identity_frame buffer value =
+  Printf.bprintf buffer "%d:" (String.length value);
+  Buffer.add_string buffer value
+
+(** [schedule_leaf_identity ~member ~relative_path ~structural_path] binds one scheduled Case to its
+    Merkle member, length-framed relative labels, and zero-based structural child-index path. The
+    framing is injective even when labels contain NUL bytes, while the index path distinguishes
+    duplicate labels without depending on the renameable top-level display name. *)
+let schedule_leaf_identity ~member ~relative_path ~structural_path =
+  if List.exists (fun index -> index < 0) structural_path then
+    invalid_arg "Warp.schedule_leaf_identity: structural indices must be non-negative";
+  let buffer = Buffer.create 160 in
+  let frame = add_schedule_identity_frame buffer in
+  frame schedule_identity_version;
+  frame (Hash.to_hex member);
+  frame "labels";
+  frame (string_of_int (List.length relative_path));
+  List.iter frame relative_path;
+  frame "indices";
+  frame (string_of_int (List.length structural_path));
+  List.iter (fun index -> frame (string_of_int index)) structural_path;
+  Hash.of_string (Buffer.contents buffer)
+
+(** [schedule_test_seed] derives a leaf-local SplitMix64 seed from the root seed and the complete
+    framed structural identity used by schedule traces. *)
+let schedule_test_seed ~seed ~member ~relative_path ~structural_path =
+  let identity = schedule_leaf_identity ~member ~relative_path ~structural_path |> Hash.to_hex in
+  let identity_bits = int_of_string ("0x" ^ String.sub identity 0 14) in
+  let rng = Infer_dist.Rng.make (seed lxor identity_bits) in
+  Int64.to_int (Infer_dist.Rng.next_int64 rng)
+
+let add_coverage accumulated current = List.sort_uniq Hash.compare (current @ accumulated)
+
+let schedule_failure ~seed ~index ~schedules ~replay_command schedule verdict =
+  let prefix =
+    Printf.sprintf
+      "random schedule %d of %d failed (decision seed %d)\nreplay: %s\nschedule log:\n%s"
+      (index + 1) schedules seed replay_command
+      (Schedule_trace.serialize schedule)
+  in
+  match verdict with
+  | Fail { soft; hard } ->
+      Fail
+        {
+          soft;
+          hard =
+            Some (prefix ^ Option.fold ~none:"" ~some:(fun detail -> "failure:\n" ^ detail) hard);
+        }
+  | Pass _ | NoChecks -> verdict
+
+let run_thunk_seeded ctx ?(bounds = Round_robin.default_bounds) ~test_run ~program ~root_seed
+    ~test_seed ~schedules ~replay_command (thunk : Value.t) :
+    (verdict * Hash.t list * string option, string) result =
+  let master = Infer_dist.Rng.make test_seed in
+  let rec run index coverage last_verdict =
+    if index >= schedules then
+      Ok
+        ( Option.value ~default:NoChecks last_verdict,
+          coverage,
+          Some (Printf.sprintf "schedules: %d, seed %d" schedules root_seed) )
+    else
+      let decision_seed =
+        if index = 0 then test_seed else Int64.to_int (Infer_dist.Rng.next_int64 master)
+      in
+      let result, mine =
+        Eval.with_fresh_coverage ctx (fun () ->
+            Round_robin.run_call_recorded ctx ~bounds ~program
+              ~mode:(Round_robin.Seeded_schedule { seed = decision_seed })
+              test_run [ thunk ])
+      in
+      let coverage = add_coverage coverage mine in
+      match result with
+      | Error error ->
+          Ok
+            ( Fail
+                {
+                  soft = [];
+                  hard =
+                    Some
+                      (Printf.sprintf
+                         "random schedule %d of %d refused before a complete trace (decision seed \
+                          %d)\n\
+                          replay: %s\n\
+                          runtime error: %s"
+                         (index + 1) schedules decision_seed replay_command
+                         (Runtime_err.to_string error));
+                },
+              coverage,
+              Some
+                (Printf.sprintf "schedule: failed %d/%d, seed %d" (index + 1) schedules root_seed)
+            )
+      | Ok { Round_robin.result = Error error; schedule; _ } ->
+          Ok
+            ( Fail
+                {
+                  soft = [];
+                  hard =
+                    Some
+                      (Printf.sprintf
+                         "random schedule %d of %d failed (decision seed %d)\n\
+                          replay: %s\n\
+                          schedule log:\n\
+                          %sruntime error: %s"
+                         (index + 1) schedules decision_seed replay_command
+                         (Schedule_trace.serialize schedule)
+                         (Runtime_err.to_string error));
+                },
+              coverage,
+              Some
+                (Printf.sprintf "schedule: failed %d/%d, seed %d" (index + 1) schedules root_seed)
+            )
+      | Ok { Round_robin.result = Ok value; schedule; _ } -> (
+          match verdict_of_report value with
+          | Error error -> Error error
+          | Ok (Fail _ as verdict) ->
+              Ok
+                ( schedule_failure ~seed:decision_seed ~index ~schedules ~replay_command schedule
+                    verdict,
+                  coverage,
+                  Some
+                    (Printf.sprintf "schedule: failed %d/%d, seed %d" (index + 1) schedules
+                       root_seed) )
+          | Ok NoChecks -> run (index + 1) coverage (Some NoChecks)
+          | Ok (Pass _ as verdict) ->
+              let verdict = match last_verdict with Some NoChecks -> NoChecks | _ -> verdict in
+              run (index + 1) coverage (Some verdict))
+  in
+  run 0 [] None
 
 (* the world row a wcase thunk needs, read from the constructor's own scheme *)
 let world_required (cctx : Check.ctx) (store : Store.t) : Hash.t list =
@@ -420,6 +561,10 @@ let prop_key_string ~member ~mode ~samples ~seed =
   Printf.sprintf "%s|prop|%s|mode=%s|samples=%d|seed=%d" version (Hash.to_hex member) mode samples
     seed
 
+let schedule_key_string ~base ~schedules ~seed =
+  Printf.sprintf "%s|scheduler=%s|schedule-identity=%s|schedules=%d|schedule-seed=%d" base
+    Round_robin.seeded_scheduler_version schedule_identity_version schedules seed
+
 let verdict_form (verdict : verdict) : Form.t =
   match verdict with
   | Pass n -> Form.form "pass" [ Form.Int n ]
@@ -561,13 +706,29 @@ let rec value_has_prop (v : Value.t) : bool =
 let with_coverage ctx f = Eval.with_fresh_coverage ctx f
 
 (* walk one discovered test VALUE, recursing into groups *)
-let rec run_value ctx ~test_run ~prop_mode ~display (v : Value.t) : (outcome list, string) result =
+let rec run_value ctx ~test_run ~prop_mode ~schedule_plan ~member ~schedule_path ~structural_path
+    ~display (v : Value.t) : (outcome list, string) result =
   match v with
   | Value.VCon { name = "case"; args = [ Value.VText label; thunk ]; _ } -> (
       let display = display ^ "/" ^ label in
-      match run_thunk ctx ~test_run thunk with
-      | Ok (verdict, coverage) ->
-          Ok [ { display; verdict = Some verdict; note = None; coverage; cached = false } ]
+      let schedule_path = schedule_path @ [ label ] in
+      let run =
+        match schedule_plan with
+        | Default_schedule ->
+            Result.map (fun (v, c) -> (v, c, None)) (run_thunk ctx ~test_run thunk)
+        | Seeded_schedules { seed; schedules; replay_command } ->
+            let program =
+              schedule_leaf_identity ~member ~relative_path:schedule_path ~structural_path
+            in
+            let test_seed =
+              schedule_test_seed ~seed ~member ~relative_path:schedule_path ~structural_path
+            in
+            run_thunk_seeded ctx ~test_run ~program ~root_seed:seed ~test_seed ~schedules
+              ~replay_command thunk
+      in
+      match run with
+      | Ok (verdict, coverage, note) ->
+          Ok [ { display; verdict = Some verdict; note; coverage; cached = false } ]
       | Error e -> Error (Printf.sprintf "%s: %s" display e))
   | Value.VCon { name = "prop"; args = [ Value.VText label; thunk ]; _ } -> (
       let display = display ^ "/" ^ label in
@@ -601,15 +762,21 @@ let rec run_value ctx ~test_run ~prop_mode ~display (v : Value.t) : (outcome lis
                   };
                 ]))
   | Value.VCon { name = "group"; args = [ Value.VText label; tests ]; _ } ->
-      let rec walk acc = function
+      let rec walk child_index acc = function
         | Value.VCon { name = "nil"; _ } -> Ok (List.concat (List.rev acc))
         | Value.VCon { name = "cons"; args = [ t; rest ]; _ } -> (
-            match run_value ctx ~test_run ~prop_mode ~display:(display ^ "/" ^ label) t with
-            | Ok os -> walk (os :: acc) rest
+            match
+              run_value ctx ~test_run ~prop_mode ~schedule_plan ~member
+                ~schedule_path:(schedule_path @ [ label ])
+                ~structural_path:(structural_path @ [ child_index ])
+                ~display:(display ^ "/" ^ label)
+                t
+            with
+            | Ok os -> walk (child_index + 1) (os :: acc) rest
             | Error e -> Error e)
         | v -> Error (Printf.sprintf "malformed group: %s" (Value.show v))
       in
-      walk [] tests
+      walk 0 [] tests
   | Value.VCon { name = "wcase"; args = [ Value.VText label; thunk ]; _ } -> (
       (* world lane: the caller already verified grants; never cached *)
       let display = display ^ "/" ^ label in
@@ -622,8 +789,8 @@ let rec run_value ctx ~test_run ~prop_mode ~display (v : Value.t) : (outcome lis
 (** [run_discovered ctx ~test_run ~cache_dir ~granted d] executes one discovered test. Hermetic
     Cases consult the cache by member hash; groups cache as a unit under the group's member hash
     (its hash covers the members). World tests check grant coverage. *)
-let run_discovered ctx (cctx : Check.ctx) ~test_run ~prop_mode ~cache_dir ~(granted : Hash.t list)
-    (d : discovered) : (outcome list, string) result =
+let run_discovered ctx (cctx : Check.ctx) ~test_run ~prop_mode ~schedule_plan ~cache_dir
+    ~(granted : Hash.t list) (d : discovered) : (outcome list, string) result =
   match d with
   | Hermetic (name, h) -> (
       match value_of ctx h with
@@ -632,7 +799,7 @@ let run_discovered ctx (cctx : Check.ctx) ~test_run ~prop_mode ~cache_dir ~(gran
           (* a term whose value contains a prop keys by (hash, mode, samples, seed) —
              the run parameters are part of what the entry means; pure-case terms key
              by member hash alone *)
-          let key =
+          let base_key =
             if value_has_prop v then
               match prop_mode with
               | Sampling { seed; samples } ->
@@ -640,20 +807,63 @@ let run_discovered ctx (cctx : Check.ctx) ~test_run ~prop_mode ~cache_dir ~(gran
               | Exhaustive _ -> prop_key_string ~member:h ~mode:"exhaustive" ~samples:0 ~seed:0
             else cache_key_string d
           in
-          match cache_lookup ~cache_dir key with
+          let key =
+            match schedule_plan with
+            | Default_schedule -> base_key
+            | Seeded_schedules { seed; schedules; _ } ->
+                schedule_key_string ~base:base_key ~schedules ~seed
+          in
+          let cached = cache_lookup ~cache_dir key in
+          let cached =
+            match (schedule_plan, cached) with
+            | Seeded_schedules _, Some stored
+              when List.exists
+                     (fun (_, verdict, _, _) -> match verdict with Fail _ -> true | _ -> false)
+                     stored ->
+                None
+            | _, cached -> cached
+          in
+          match cached with
           | Some stored ->
+              let current_display stored_display =
+                match String.index_opt stored_display '/' with
+                | Some separator ->
+                    name
+                    ^ String.sub stored_display separator (String.length stored_display - separator)
+                | None -> name
+              in
               Ok
                 (List.map
                    (fun (display, verdict, note, coverage) ->
-                     { display; verdict = Some verdict; note; coverage; cached = true })
+                     {
+                       display = current_display display;
+                       verdict = Some verdict;
+                       note;
+                       coverage;
+                       cached = true;
+                     })
                    stored)
           | None -> (
-              match run_value ctx ~test_run ~prop_mode ~display:name v with
+              match
+                run_value ctx ~test_run ~prop_mode ~schedule_plan ~member:h ~schedule_path:[]
+                  ~structural_path:[ 0 ] ~display:name v
+              with
               | Error e -> Error e
               | Ok outcomes ->
                   (* every EXECUTED outcome caches, display and note included, keyed by
                      this test's member hash (a group hash Merkle-covers its members) *)
-                  if List.for_all (fun o -> o.verdict <> None) outcomes && outcomes <> [] then
+                  let cacheable =
+                    match schedule_plan with
+                    | Default_schedule -> List.for_all (fun o -> o.verdict <> None) outcomes
+                    | Seeded_schedules _ ->
+                        List.for_all
+                          (fun o ->
+                            match o.verdict with
+                            | Some (Pass _ | NoChecks) -> true
+                            | Some (Fail _) | None -> false)
+                          outcomes
+                  in
+                  if cacheable && outcomes <> [] then
                     cache_store ~cache_dir key
                       (List.map
                          (fun o -> (o.display, Option.get o.verdict, o.note, o.coverage))
@@ -685,7 +895,9 @@ let run_discovered ctx (cctx : Check.ctx) ~test_run ~prop_mode ~cache_dir ~(gran
       else
         Result.bind
           (Result.map_error Runtime_err.to_string (value_of ctx h))
-          (fun v -> run_value ctx ~test_run ~prop_mode ~display:name v)
+          (fun v ->
+            run_value ctx ~test_run ~prop_mode ~schedule_plan:Default_schedule ~member:h
+              ~schedule_path:[] ~structural_path:[ 0 ] ~display:name v)
 
 (* --- rendering --- *)
 

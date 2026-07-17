@@ -1,0 +1,19 @@
+; SC.14 scoped channels. channel-opaque is a scheduler-private identity carrier:
+; Store, checker, evaluator, and native lowering reject direct construction.
+(deftype channel-handle ((tvar a)) (con channel-opaque))
+
+(deftype channel-error ()
+  (con channel-closed)
+  (con invalid-capacity (field requested (tref int))))
+
+(defeffect channel ((tvar a))
+  (op channel.open once
+    ((tref int))
+    (tapp (tref result) (tref channel-error) (tapp (tref channel-handle) (tvar a))))
+  (op channel.send once
+    ((tapp (tref channel-handle) (tvar a)) (tvar a))
+    (tapp (tref result) (tref channel-error) (ttuple)))
+  (op channel.recv once
+    ((tapp (tref channel-handle) (tvar a)))
+    (tapp (tref result) (tref channel-error) (tvar a)))
+  (op channel.close once ((tapp (tref channel-handle) (tvar a))) (ttuple)))

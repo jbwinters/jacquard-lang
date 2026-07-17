@@ -9,6 +9,7 @@ let tutorial_doc = "../docs/tutorial.md"
 let concurrency_doc = "../docs/concurrency.md"
 let schema_fixture = "docs-doctest/fixtures/effect-taxonomy-schemas.jac"
 let approval_fixture = "docs-doctest/fixtures/stdlib-handler-policy.jac"
+let channel_effect_hash = "bf9a334188ac13495eeb070fdc215d51763d9761b4775c98c61f44ebb1b03756"
 let membrane_fixture = "docs-doctest/fixtures/governed-membrane-signatures.jac"
 let membrane_stdout = "docs-doctest/fixtures/governed-membrane-signatures.stdout"
 
@@ -142,12 +143,29 @@ let handler_contracts =
       terms = [];
       root_grant = false;
     };
+    {
+      handled_effect = "Channel";
+      boundary = "interpreted exact-scope FIFO channels installed by SC.14";
+      terms = [];
+      root_grant = false;
+    };
   ]
 
-let reserved_effects =
-  [ "Choose"; "Env"; "Pg"; "Blob"; "Serve"; "Crypto"; "Log"; "Async"; "Channel" ]
+let schema_reserved_effects = [ "Choose"; "Env"; "Pg"; "Blob"; "Serve"; "Crypto"; "Log"; "Async" ]
+let unimplemented_reserved_effects = [ "Choose"; "Env"; "Pg"; "Blob"; "Serve"; "Crypto"; "Log" ]
 
 type effect_shape = { ename : string; evars : string list; ops : Kernel.opspec list }
+
+type channel_trace_event = {
+  decision : int;
+  task : string;
+  operation : string;
+  before : string;
+  action : string;
+  after : string;
+  result : string;
+  wake : string;
+}
 
 let split_tabs line = Str.split_delim (Str.regexp "\t") line
 
@@ -207,12 +225,14 @@ let operation_names operations =
       | None -> Alcotest.failf "operation schema lacks a colon: %s" schema)
 
 let implementation_operation_names row =
-  let prefix = row.index_name ^ "." in
-  operation_names row.operations
-  |> List.map (fun name ->
-      if String.starts_with ~prefix name then
-        String.sub name (String.length prefix) (String.length name - String.length prefix)
-      else name)
+  if String.equal row.effect_name "Channel" then operation_names row.operations
+  else
+    let prefix = row.index_name ^ "." in
+    operation_names row.operations
+    |> List.map (fun name ->
+        if String.starts_with ~prefix name then
+          String.sub name (String.length prefix) (String.length name - String.length prefix)
+        else name)
 
 let compact value =
   value |> String.lowercase_ascii |> Str.global_replace (Str.regexp "[ \t\r\n-]+") ""
@@ -242,7 +262,7 @@ let rec schema_ty (ty : Kernel.ty) =
 
 and schema_ty_atom ty =
   match ty.Kernel.it with
-  | Kernel.TArrow _ | Kernel.TForall _ -> "(" ^ schema_ty ty ^ ")"
+  | Kernel.TApp _ | Kernel.TArrow _ | Kernel.TForall _ -> "(" ^ schema_ty ty ^ ")"
   | _ -> schema_ty ty
 
 let operation_schemas (ops : Kernel.opspec list) =
@@ -270,7 +290,7 @@ let implementation_operation_schema row schema =
       let name = String.sub schema 0 index in
       let prefix = row.index_name ^ "." in
       let name =
-        if String.starts_with ~prefix name then
+        if (not (String.equal row.effect_name "Channel")) && String.starts_with ~prefix name then
           String.sub name (String.length prefix) (String.length name - String.length prefix)
         else name
       in
@@ -491,6 +511,32 @@ let normalize_whitespace value = Str.global_replace (Str.regexp "[ \t\r\n]+") " 
 let mode_name = function Kernel.Once -> "once" | Kernel.Multi -> "multi"
 let markdown_operations operations = Str.global_replace (Str.regexp_string "|") "\\|" operations
 
+let trace_field path line key token =
+  let prefix = key ^ "=" in
+  match String.starts_with ~prefix token with
+  | true -> String.sub token (String.length prefix) (String.length token - String.length prefix)
+  | false -> Alcotest.failf "%s trace field %s is malformed in %S" path key line
+
+let parse_channel_trace_event path line =
+  match String.split_on_char ' ' line with
+  | [ decision; task; operation; before; action; after; result; wake ] ->
+      let decision = trace_field path line "decision" decision in
+      {
+        decision =
+          (match int_of_string_opt decision with
+          | Some decision -> decision
+          | None -> Alcotest.failf "%s has non-integer decision %S" path decision);
+        task = trace_field path line "task" task;
+        operation = trace_field path line "op" operation;
+        before = trace_field path line "before" before;
+        action = trace_field path line "action" action;
+        after = trace_field path line "after" after;
+        result = trace_field path line "result" result;
+        wake = trace_field path line "wake" wake;
+      }
+  | fields ->
+      Alcotest.failf "%s trace event has %d fields, expected 8: %S" path (List.length fields) line
+
 let markdown_row (row : row) =
   Printf.sprintf
     "| `%s` | `%s` | `%s` | `%s` | `%s` | `%s` | `%s` | `%d` | `%s` | `%s` | `%s` | %s |"
@@ -513,10 +559,10 @@ let test_complete_contract () =
   let doc = Corpus_support.read_file taxonomy_doc in
   Alcotest.(check int) "blessed effect count" 26 (List.length rows);
   Alcotest.(check int)
-    "implemented count" 17
+    "implemented count" 18
     (List.length (List.filter (fun row -> String.equal row.status "implemented") rows));
   Alcotest.(check int)
-    "reserved count" 9
+    "reserved count" 8
     (List.length (List.filter (fun row -> String.equal row.status "reserved") rows));
   check_unique "effect names unique" (List.map (fun row -> row.effect_name) rows);
   check_unique "official index names unique" (List.map (fun row -> row.index_name) rows);
@@ -561,6 +607,9 @@ let test_complete_contract () =
             Alcotest.(check string)
               "Async checker-privileged interface identity" Concurrency_contract.async_effect_hash
               row.interface_hash
+          else if String.equal row.effect_name "Channel" then
+            Alcotest.(check string)
+              "Channel SC.13 interface identity" channel_effect_hash row.interface_hash
           else
             Alcotest.(check string)
               (row.effect_name ^ " first-release policy")
@@ -594,7 +643,6 @@ let test_resolved_reserved_schemas () =
       ("Crypto", [ "crypto.verify"; "crypto.random" ]);
       ("Log", [ "log.emit" ]);
       ("Async", [ "async.spawn"; "async.await"; "async.cancel"; "async.yield" ]);
-      ("Channel", [ "channel.open"; "channel.send"; "channel.recv"; "channel.close" ]);
     ]
   in
   List.iter
@@ -662,7 +710,7 @@ let test_resolved_reserved_schemas () =
       "dependent operation scheme";
       "aliases, higher-order wrappers, returned closures, tuples";
       "SC.3 represents opaque run/scope-local Task values";
-      "No milestone yet implements scheduling policy, executable scopes, or a root handler";
+      "SC.9 installs the interpreted structured scheduler";
     ];
   let prelude = lazy (prelude_store ()) in
   let constructor_inventory type_name =
@@ -705,7 +753,8 @@ let test_resolved_reserved_schemas () =
       ("audit-entry", [ "evaluated"; "consented"; "completed" ]);
       ("secret-ref", [ "secret-ref" ]);
       ("task-result", [ "done"; "failed"; "cancelled" ]);
-      ("channel-error", [ "channel-closed" ]);
+      ("channel-handle", [ "channel-opaque" ]);
+      ("channel-error", [ "channel-closed"; "invalid-capacity" ]);
     ];
   Alcotest.(check bool)
     "Channel effect has no colliding Channel data type" false
@@ -749,6 +798,381 @@ let frozen_async installed =
   with
   | Some pair -> pair
   | None -> Alcotest.fail "resolved taxonomy fixture has no Async declaration"
+
+let frozen_channel installed =
+  match
+    List.find_opt
+      (function
+        | { Kernel.it = Kernel.DefEffect { ename; _ }; _ }, _ -> String.equal ename "channel"
+        | _ -> false)
+      installed
+  with
+  | Some pair -> pair
+  | None -> Alcotest.fail "resolved taxonomy fixture has no Channel declaration"
+
+let frozen_type installed type_name =
+  match
+    List.find_opt
+      (function
+        | { Kernel.it = Kernel.DefType { tname; _ }; _ }, _ -> String.equal tname type_name
+        | _ -> false)
+      installed
+  with
+  | Some pair -> pair
+  | None -> Alcotest.failf "resolved taxonomy fixture has no %s declaration" type_name
+
+let named_hash hashes name =
+  match List.assoc_opt name hashes.Canon.named with
+  | Some hash -> Hash.to_hex hash
+  | None -> Alcotest.failf "frozen declaration has no member named %s" name
+
+let test_channel_interface_hash_contract () =
+  let installed = install_schema_fixture (prelude_store ()) in
+  let declaration, hashes = frozen_channel installed in
+  Alcotest.(check string)
+    "Channel declaration hash" channel_effect_hash
+    (Hash.to_hex hashes.Canon.decl_hash);
+  let operation_hashes =
+    [
+      ("channel.open", "23f13bd2fd87d17716873bf34c708d6c9a2ddd5f2b4e4f634db6e5d1827b1f07");
+      ("channel.send", "348fc5c967097b939360ecb2b066ba22ea8b924834e507c87a0e0f05f26fbfb0");
+      ("channel.recv", "db28d70a061da1f1108e01dfaa7e248c4268b9460971c518a9c37f1b51b52860");
+      ("channel.close", "ffa22eb01ff7aa206fec56f540b6fd1758b8590e8e797e83f3cbfd295ebce29b");
+    ]
+  in
+  List.iteri
+    (fun ordinal (name, expected) ->
+      Alcotest.(check string)
+        (name ^ " derived hash") expected
+        (Hash.to_hex (Canon.op_hash hashes.decl_hash ordinal));
+      Alcotest.(check string) (name ^ " indexed hash") expected (named_hash hashes name))
+    operation_hashes;
+  (match declaration.it with
+  | Kernel.DefEffect { ops; _ } ->
+      Alcotest.(check (list string))
+        "Channel operation modes"
+        [ "once"; "once"; "once"; "once" ]
+        (List.map (fun op -> mode_name op.Kernel.op_mode) ops)
+  | _ -> Alcotest.fail "frozen Channel declaration is not an effect");
+  let check_type type_name expected_decl expected_members =
+    let _, type_hashes = frozen_type installed type_name in
+    Alcotest.(check string)
+      (type_name ^ " declaration hash") expected_decl
+      (Hash.to_hex type_hashes.Canon.decl_hash);
+    List.iter
+      (fun (name, expected) ->
+        Alcotest.(check string) (name ^ " constructor hash") expected (named_hash type_hashes name))
+      expected_members
+  in
+  check_type "channel-handle" "f4f5601a435906a47faedae9006e44b874146f3ad4b586bf9d04535be14dccb4"
+    [ ("channel-opaque", "dc7a12f5fc0476b674d52535e9895220edf41f2a017b1dd97fc078950a3dbb36") ];
+  check_type "channel-error" "25dc8f513c91c80fd6d33e843fc3f6cab183800805f46e269f716155149b4da7"
+    [
+      ("channel-closed", "de3da3e601fbba2c66864b87c6848d8224411df99f1967e132aaa166c1a3f3a9");
+      ("invalid-capacity", "01b719cb597275f097c2c36b5e86b3d71604eb531fe00ef66d9c93ec3f55acfb");
+    ];
+  let check_trace path header expected_hash expected_events =
+    let contents = Corpus_support.read_file path in
+    Alcotest.(check string)
+      (path ^ " content hash") expected_hash
+      (Hash.to_hex (Hash.of_string contents));
+    match String.split_on_char '\n' contents |> List.filter (fun line -> line <> "") with
+    | actual_header :: decisions ->
+        Alcotest.(check string) (path ^ " header") header actual_header;
+        let actual_events = List.map (parse_channel_trace_event path) decisions in
+        Alcotest.(check int)
+          (path ^ " event count") (List.length expected_events) (List.length actual_events);
+        List.iter2
+          (fun expected actual ->
+            let label = Printf.sprintf "%s decision %d" path expected.decision in
+            Alcotest.(check int) (label ^ " contiguous decision") expected.decision actual.decision;
+            Alcotest.(check string) (label ^ " chosen task") expected.task actual.task;
+            Alcotest.(check string) (label ^ " operation") expected.operation actual.operation;
+            Alcotest.(check string) (label ^ " before state") expected.before actual.before;
+            Alcotest.(check string) (label ^ " action") expected.action actual.action;
+            Alcotest.(check string) (label ^ " after state") expected.after actual.after;
+            Alcotest.(check string) (label ^ " result") expected.result actual.result;
+            Alcotest.(check string) (label ^ " wake order") expected.wake actual.wake)
+          expected_events actual_events
+    | [] -> Alcotest.failf "%s is empty" path
+  in
+  check_trace "../corpus/channel/rendezvous-v1.trace"
+    "jacquard-channel-contract format=1 scenario=rendezvous channel=0@0 capacity=0"
+    "da61f5bce576aa1660d0db7f249a26f58297497feab2bf7c49cf3c5d712fd383"
+    [
+      {
+        decision = 0;
+        task = "0#0";
+        operation = "open:-1";
+        before = "-";
+        action = "reject-capacity";
+        after = "-";
+        result = "error:invalid-capacity:-1";
+        wake = "0#0";
+      };
+      {
+        decision = 1;
+        task = "0#0";
+        operation = "open:0";
+        before = "-";
+        action = "create";
+        after = "open|buffer=-|senders=-|receivers=-";
+        result = "ok:0@0";
+        wake = "0#0";
+      };
+      {
+        decision = 2;
+        task = "0#1";
+        operation = "send:7";
+        before = "open|buffer=-|senders=-|receivers=-";
+        action = "block-sender";
+        after = "open|buffer=-|senders=0#1:7|receivers=-";
+        result = "pending";
+        wake = "-";
+      };
+      {
+        decision = 3;
+        task = "0#2";
+        operation = "recv";
+        before = "open|buffer=-|senders=0#1:7|receivers=-";
+        action = "rendezvous:0#1";
+        after = "open|buffer=-|senders=-|receivers=-";
+        result = "receiver-ok:7,sender-ok:unit";
+        wake = "0#1,0#2";
+      };
+      {
+        decision = 4;
+        task = "0#3";
+        operation = "recv";
+        before = "open|buffer=-|senders=-|receivers=-";
+        action = "block-receiver";
+        after = "open|buffer=-|senders=-|receivers=0#3";
+        result = "pending";
+        wake = "-";
+      };
+      {
+        decision = 5;
+        task = "0#4";
+        operation = "recv";
+        before = "open|buffer=-|senders=-|receivers=0#3";
+        action = "block-receiver";
+        after = "open|buffer=-|senders=-|receivers=0#3,0#4";
+        result = "pending";
+        wake = "-";
+      };
+      {
+        decision = 6;
+        task = "0#0";
+        operation = "cancel:0#3";
+        before = "open|buffer=-|senders=-|receivers=0#3,0#4";
+        action = "cancel-receiver:0#3";
+        after = "open|buffer=-|senders=-|receivers=0#4";
+        result = "unit,target-cancelled";
+        wake = "0#0";
+      };
+      {
+        decision = 7;
+        task = "0#0";
+        operation = "close";
+        before = "open|buffer=-|senders=-|receivers=0#4";
+        action = "close,reject-receivers";
+        after = "closed|buffer=-|senders=-|receivers=-";
+        result = "closer-unit,receiver-error:0#4:channel-closed";
+        wake = "0#4,0#0";
+      };
+      {
+        decision = 8;
+        task = "0#2";
+        operation = "recv";
+        before = "closed|buffer=-|senders=-|receivers=-";
+        action = "closed-empty";
+        after = "closed|buffer=-|senders=-|receivers=-";
+        result = "error:channel-closed";
+        wake = "0#2";
+      };
+      {
+        decision = 9;
+        task = "0#0";
+        operation = "close";
+        before = "closed|buffer=-|senders=-|receivers=-";
+        action = "already-closed";
+        after = "closed|buffer=-|senders=-|receivers=-";
+        result = "unit";
+        wake = "0#0";
+      };
+    ];
+  check_trace "../corpus/channel/buffered-v1.trace"
+    "jacquard-channel-contract format=1 scenario=buffered channel=0@0 capacity=2"
+    "691f852482a0d69742c0ecf0cbb283fcf2dd6367117089acec306f19385713a2"
+    [
+      {
+        decision = 0;
+        task = "0#0";
+        operation = "open:2";
+        before = "-";
+        action = "create";
+        after = "open|buffer=-|senders=-|receivers=-";
+        result = "ok:0@0";
+        wake = "0#0";
+      };
+      {
+        decision = 1;
+        task = "0#1";
+        operation = "send:a";
+        before = "open|buffer=-|senders=-|receivers=-";
+        action = "buffer";
+        after = "open|buffer=a|senders=-|receivers=-";
+        result = "ok:unit";
+        wake = "0#1";
+      };
+      {
+        decision = 2;
+        task = "0#2";
+        operation = "send:b";
+        before = "open|buffer=a|senders=-|receivers=-";
+        action = "buffer";
+        after = "open|buffer=a,b|senders=-|receivers=-";
+        result = "ok:unit";
+        wake = "0#2";
+      };
+      {
+        decision = 3;
+        task = "0#3";
+        operation = "send:c";
+        before = "open|buffer=a,b|senders=-|receivers=-";
+        action = "block-sender";
+        after = "open|buffer=a,b|senders=0#3:c|receivers=-";
+        result = "pending";
+        wake = "-";
+      };
+      {
+        decision = 4;
+        task = "0#4";
+        operation = "recv";
+        before = "open|buffer=a,b|senders=0#3:c|receivers=-";
+        action = "dequeue:a,promote:0#3:c";
+        after = "open|buffer=b,c|senders=-|receivers=-";
+        result = "receiver-ok:a,sender-ok:unit";
+        wake = "0#3,0#4";
+      };
+      {
+        decision = 5;
+        task = "0#5";
+        operation = "send:d";
+        before = "open|buffer=b,c|senders=-|receivers=-";
+        action = "block-sender";
+        after = "open|buffer=b,c|senders=0#5:d|receivers=-";
+        result = "pending";
+        wake = "-";
+      };
+      {
+        decision = 6;
+        task = "0#6";
+        operation = "send:e";
+        before = "open|buffer=b,c|senders=0#5:d|receivers=-";
+        action = "block-sender";
+        after = "open|buffer=b,c|senders=0#5:d,0#6:e|receivers=-";
+        result = "pending";
+        wake = "-";
+      };
+      {
+        decision = 7;
+        task = "0#0";
+        operation = "cancel:0#5";
+        before = "open|buffer=b,c|senders=0#5:d,0#6:e|receivers=-";
+        action = "cancel-sender:0#5-drop:d";
+        after = "open|buffer=b,c|senders=0#6:e|receivers=-";
+        result = "unit,target-cancelled";
+        wake = "0#0";
+      };
+      {
+        decision = 8;
+        task = "0#7";
+        operation = "send:f";
+        before = "open|buffer=b,c|senders=0#6:e|receivers=-";
+        action = "block-sender";
+        after = "open|buffer=b,c|senders=0#6:e,0#7:f|receivers=-";
+        result = "pending";
+        wake = "-";
+      };
+      {
+        decision = 9;
+        task = "0#0";
+        operation = "close";
+        before = "open|buffer=b,c|senders=0#6:e,0#7:f|receivers=-";
+        action = "close,reject-senders";
+        after = "closed|buffer=b,c|senders=-|receivers=-";
+        result = "closer-unit,sender-error:0#6:channel-closed,sender-error:0#7:channel-closed";
+        wake = "0#6,0#7,0#0";
+      };
+      {
+        decision = 10;
+        task = "0#4";
+        operation = "recv";
+        before = "closed|buffer=b,c|senders=-|receivers=-";
+        action = "drain:b";
+        after = "closed|buffer=c|senders=-|receivers=-";
+        result = "ok:b";
+        wake = "0#4";
+      };
+      {
+        decision = 11;
+        task = "0#4";
+        operation = "recv";
+        before = "closed|buffer=c|senders=-|receivers=-";
+        action = "drain:c";
+        after = "closed|buffer=-|senders=-|receivers=-";
+        result = "ok:c";
+        wake = "0#4";
+      };
+      {
+        decision = 12;
+        task = "0#4";
+        operation = "recv";
+        before = "closed|buffer=-|senders=-|receivers=-";
+        action = "closed-empty";
+        after = "closed|buffer=-|senders=-|receivers=-";
+        result = "error:channel-closed";
+        wake = "0#4";
+      };
+    ];
+  let concurrency = Corpus_support.read_file concurrency_doc |> normalize_whitespace in
+  let documented_hashes =
+    [
+      channel_effect_hash;
+      "f4f5601a435906a47faedae9006e44b874146f3ad4b586bf9d04535be14dccb4";
+      "dc7a12f5fc0476b674d52535e9895220edf41f2a017b1dd97fc078950a3dbb36";
+      "25dc8f513c91c80fd6d33e843fc3f6cab183800805f46e269f716155149b4da7";
+      "de3da3e601fbba2c66864b87c6848d8224411df99f1967e132aaa166c1a3f3a9";
+      "01b719cb597275f097c2c36b5e86b3d71604eb531fe00ef66d9c93ec3f55acfb";
+    ]
+    @ List.map snd operation_hashes
+  in
+  List.iter
+    (fun hash ->
+      Alcotest.(check bool)
+        ("SC.13 documented identity: " ^ hash)
+        true
+        (contains_string concurrency hash))
+    documented_hashes;
+  List.iter
+    (fun obligation ->
+      Alcotest.(check bool)
+        ("SC.13 checklist: " ^ obligation)
+        true
+        (contains_string concurrency obligation))
+    [
+      "exact-identity scheduler admission";
+      "--allow channel` remains invalid";
+      "typed negative-capacity result before allocation";
+      "idempotent drain-on-close";
+      "cancellation-before-mutation";
+      "blocked-receiver cancellation and close";
+      "blocked-sender cancellation, survivor order";
+      "exact run/scope ownership";
+      "policy-independent all-channel-blocked E0908 refusal";
+      "actors, mailboxes, links, monitors, supervision";
+    ]
 
 let hex_bytes bytes =
   let alphabet = "0123456789abcdef" in
@@ -1161,9 +1585,6 @@ let lowercase = String.lowercase_ascii
 let test_governance_and_links () =
   test_self_effect_hash_contract ();
   test_async_privilege_mutations ();
-  Test_scheduler_core.run ();
-  Test_structured_scope.run ();
-  Test_cancellation.run ();
   let doc = Corpus_support.read_file taxonomy_doc in
   let manifest = Corpus_support.read_file taxonomy_file in
   let approval = Corpus_support.read_file approval_fixture in
@@ -1254,12 +1675,13 @@ let test_governance_and_links () =
     |> List.filter (fun row -> String.equal row.status "reserved")
     |> List.map (fun row -> row.effect_name)
   in
-  Alcotest.(check (list string)) "reserved inventory is exact" reserved_effects reserved;
+  Alcotest.(check (list string))
+    "schema-reserved inventory is exact" schema_reserved_effects reserved;
   let reserved_csv =
-    String.concat ", " (List.map (fun name -> "`" ^ name ^ "`") reserved_effects)
+    String.concat ", " (List.map (fun name -> "`" ^ name ^ "`") unimplemented_reserved_effects)
   in
   let reserved_prose =
-    match List.rev reserved_effects with
+    match List.rev unimplemented_reserved_effects with
     | final :: reversed_rest ->
         String.concat ", " (List.rev_map (fun name -> "`" ^ name ^ "`") reversed_rest)
         ^ ", and `" ^ final ^ "`"
@@ -1287,12 +1709,15 @@ let test_governance_and_links () =
   Alcotest.(check bool)
     "stdlib implemented inventory is exact" true
     (contains_string stdlib
-       "| implemented (17) | `Abort`, `Throw`, `State`, `Emit`, `Dist`, `Fault`, `Eval`, \
+       "| implemented (18) | `Abort`, `Throw`, `State`, `Emit`, `Dist`, `Fault`, `Eval`, \
         `Console`, `Clock`, `Fs`, `Net`, `Workspace`, `Infer`, `Approval`, `Audit`, `Secret`, \
-        `Judge` |");
+        `Judge`, `Channel` |");
   Alcotest.(check bool)
-    "stdlib reserved inventory is exact" true
-    (contains_string stdlib ("| reserved/unimplemented (9) | " ^ reserved_csv ^ " |"));
+    "stdlib unimplemented reserved inventory is exact" true
+    (contains_string stdlib ("| reserved/unimplemented (7) | " ^ reserved_csv ^ " |"));
+  Alcotest.(check bool)
+    "stdlib published reserved identities are exact" true
+    (contains_string stdlib "| reserved with published identity (1) | `Async` |");
   List.iter
     (fun phrase ->
       Alcotest.(check bool)
@@ -1303,7 +1728,7 @@ let test_governance_and_links () =
       "`Dist` is authority-free but not uncertainty-free";
       "evidence, not consent";
       "Secret opacity is not taint tracking";
-      "Reserved effects are compatibility vocabulary, not implemented product";
+      "A reserved schema alone is compatibility vocabulary, not an implementation";
     ];
   let linked =
     [
@@ -1439,7 +1864,7 @@ let test_typed_registry_matches_contract () =
   let entries = Effect_registry.catalog in
   Alcotest.(check int) "catalog covers every blessed entry" 26 (List.length entries);
   Alcotest.(check int)
-    "only live identities enter the canonical registry" 17
+    "only live identities enter the canonical registry" 18
     (List.length (Effect_registry.entries Effect_registry.canonical));
   Alcotest.(check (list string))
     "catalog names exactly cover the TSV"
@@ -1597,6 +2022,7 @@ let test_registry_order_is_stable () =
       | "reserved", Effect_registry.Reserved _ ->
           let expected_identity =
             if String.equal row.effect_name "Async" then Concurrency_contract.async_effect_hash
+            else if String.equal row.effect_name "Channel" then channel_effect_hash
             else "first-release"
           in
           Alcotest.(check string)
@@ -1703,6 +2129,8 @@ let suite =
   [
     Alcotest.test_case "complete machine contract" `Quick test_complete_contract;
     Alcotest.test_case "reserved schemas resolved" `Quick test_resolved_reserved_schemas;
+    Alcotest.test_case "SC.14 Channel interface identity" `Quick
+      test_channel_interface_hash_contract;
     Alcotest.test_case "implemented prelude compatibility" `Quick
       test_implemented_interfaces_match_prelude;
     Alcotest.test_case "stale hash cannot mask schema drift" `Quick

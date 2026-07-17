@@ -6,6 +6,103 @@ cache, and semantic coverage.
 Warp accepts the public surface syntax selected by the `.jac` extension. The
 test command still enforces its declarations-only boundary after lowering.
 
+SC.11's optional schedule lane requires an explicit seed, validates its count,
+uses the same bytes for repeated runs, and puts the scheduler version, count,
+and root seed in the hermetic cache identity.
+
+  $ cat > seeded-schedules.jac <<'JACQUARD'
+  > seeded-case =
+  >   Case("seeded pass", fn () -> {
+  >     let _ = async.scope(fn () -> {
+  >       let left = async.spawn(fn () -> { async.yield(); 1 })
+  >       let right = async.spawn(fn () -> { async.yield(); 2 })
+  >       let _ = async.await(left)
+  >       async.await(right)
+  >     })
+  >     check.true(True, "scheduled")
+  >   })
+  > JACQUARD
+  $ jacquard test seeded-schedules.jac --schedules 0 --seed 73 --no-cache
+  error[E0908]: --schedules must be positive
+    hint: pass --schedules N with N greater than zero
+  [1]
+  $ jacquard test seeded-schedules.jac --schedules 3 --no-cache
+  error[E0908]: --schedules requires --seed so every interleaving is reproducible
+    hint: add an explicit --seed S
+  [1]
+  $ jacquard test seeded-schedules.jac --schedules 3 --seed nope --no-cache 2>&1 | head -2
+  Usage: jacquard test [--help] [OPTION]… [FILES]…
+  jacquard: option '--seed': invalid value 'nope', expected an integer
+  $ jacquard test seeded-schedules.jac --schedules 3 --seed 73 --no-cache
+  PASS seeded-case/seeded pass (schedules: 3, seed 73)
+  1 passed, 0 failed, 0 skipped, 0 refused
+  $ jacquard test seeded-schedules.jac --schedules 3 --seed 73 --no-cache > schedule-a.txt
+  $ jacquard test seeded-schedules.jac --schedules 3 --seed 73 --no-cache > schedule-b.txt
+  $ diff schedule-a.txt schedule-b.txt && echo identical
+  identical
+  $ jacquard test seeded-schedules.jac --schedules 3 --seed 73 --cache-dir schedule-cache | tail -1
+  cache: 0 hit, 1 ran
+  $ jacquard test seeded-schedules.jac --schedules 3 --seed 73 --cache-dir schedule-cache | tail -1
+  cache: 1 hit, 0 ran
+  $ jacquard test seeded-schedules.jac --schedules 3 --seed 74 --cache-dir schedule-cache | tail -1
+  cache: 0 hit, 1 ran
+  $ jacquard test seeded-schedules.jac --schedules 4 --seed 73 --cache-dir schedule-cache | tail -1
+  cache: 0 hit, 1 ran
+  $ sed 's/seeded-case/renamed-case/' seeded-schedules.jac > renamed-schedules.jac
+  $ jacquard test renamed-schedules.jac --schedules 3 --seed 73 --cache-dir schedule-cache | grep -E '^(PASS|cache:)'
+  PASS renamed-case/seeded pass (schedules: 3, seed 73) [cached]
+  cache: 1 hit, 0 ran
+  $ sed 's/seeded pass/changed display/' seeded-schedules.jac > changed-display.jac
+  $ jacquard test changed-display.jac --schedules 3 --seed 73 --cache-dir schedule-cache | grep -E '^(PASS|cache:)'
+  PASS seeded-case/changed display (schedules: 3, seed 73)
+  cache: 0 hit, 1 ran
+
+Duplicate display labels still identify different structural leaves. Their
+decision seeds and trace program identities must both be distinct.
+
+  $ cat > duplicate-schedules.jac <<'JACQUARD'
+  > duplicate-suite = Group("duplicate group", [
+  >   Case("same label", fn () -> check.true(False, "first")),
+  >   Case("same label", fn () -> check.true(False, "second"))
+  > ])
+  > JACQUARD
+  $ jacquard test duplicate-schedules.jac --schedules 1 --seed 73 --no-cache > duplicate-failures.txt 2>&1; test $? = 1
+  $ grep 'random schedule 1 of 1 failed (decision seed' duplicate-failures.txt | sort -u | wc -l
+  2
+  $ grep '^jacquard-schedule .* program=' duplicate-failures.txt | sed 's/.* program=\([^ ]*\).*/\1/' | sort -u | wc -l
+  2
+
+A failing run prints the exact root replay command, the failing decision seed,
+and the canonical log. Repeating the printed command reproduces byte for byte.
+
+  $ sed 's/check.true(True/check.true(False/' seeded-schedules.jac > failing-schedule.jac
+  $ jacquard test failing-schedule.jac --schedules 3 --seed 73 --no-cache > failure-a.txt 2>&1; test $? = 1
+  $ jacquard test failing-schedule.jac --schedules 3 --seed 73 --no-cache > failure-b.txt 2>&1; test $? = 1
+  $ diff failure-a.txt failure-b.txt && echo identical
+  identical
+  $ grep -E '^(FAIL|  ! random schedule|replay: jacquard|schedule log:|jacquard-schedule format=1|decision sequence=)' failure-a.txt | head -6
+  FAIL seeded-case/seeded pass (schedule: failed 1/3, seed 73)
+    ! random schedule 1 of 3 failed (decision seed -3550775722416792546)
+  replay: jacquard test 'failing-schedule.jac' --prelude '$TESTCASE_ROOT/../../prelude' --schedules 3 --seed 73 --no-cache
+  schedule log:
+  jacquard-schedule format=1 scheduler=seeded-random-v0 program=dfbf5d14431239ca80ad332b408233974e2cfbe841669cc5e0b712648a9a35be policy=fail-fast max-tasks=1024 max-decisions=100000 fork=-
+  decision sequence=0 runnable=0#0 chosen=0#0 operation=async.scope
+
+Scheduled failures are deliberately not cached: replay presentation contains
+the current source and prelude paths. A shared cache therefore cannot return a
+stale command after the failing suite moves.
+
+  $ rm -rf failing-cache moved-suite && mkdir moved-suite
+  $ jacquard test failing-schedule.jac --schedules 3 --seed 73 --cache-dir failing-cache > failure-cache-a.txt 2>&1; test $? = 1
+  $ cp failing-schedule.jac moved-suite/
+  $ jacquard test moved-suite/failing-schedule.jac --schedules 3 --seed 73 --cache-dir failing-cache > failure-cache-b.txt 2>&1; test $? = 1
+  $ grep -E '^(replay:|cache:)' failure-cache-a.txt
+  replay: jacquard test 'failing-schedule.jac' --prelude '$TESTCASE_ROOT/../../prelude' --schedules 3 --seed 73 --no-cache
+  cache: 0 hit, 1 ran
+  $ grep -E '^(replay:|cache:)' failure-cache-b.txt
+  replay: jacquard test 'moved-suite/failing-schedule.jac' --prelude '$TESTCASE_ROOT/../../prelude' --schedules 3 --seed 73 --no-cache
+  cache: 0 hit, 1 ran
+
   $ cat > surface-suite.jac <<'JACQUARD'
   > double(n) = mul(n, 2)
   > surface-case =

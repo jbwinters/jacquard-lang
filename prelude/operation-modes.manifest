@@ -19,6 +19,10 @@ async.async.spawn once
 async.async.await once
 async.async.cancel once
 async.async.yield once
+channel.channel.open once
+channel.channel.send once
+channel.channel.recv once
+channel.channel.close once
 audit.record once
 approval.ask once
 secret.read once
