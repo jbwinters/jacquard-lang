@@ -182,8 +182,10 @@ let open_store root : (t, Diag.t list) result =
       with
       | Error ds -> Error ds
       | Ok index ->
-          t.index <-
-            List.filter (fun (hash, _) -> not (List.exists (Hash.equal hash) t.hidden)) index;
+          (* Hidden derived members remain in the private immutable index so already-resolved,
+             store-backed library code can evaluate them. [locate] is the public boundary and
+             rejects them; [locate_internal] is reserved for evaluating such stored code. *)
+          t.index <- index;
           Ok t)
 
 let entry_kind (decl : Kernel.decl) = function
@@ -237,19 +239,17 @@ let put_decl ?origin t (decl : Kernel.decl) : (Canon.decl_hashes, Diag.t list) r
               close_out oc
             with Sys_error m -> Printf.eprintf "origin sidecar unwritable (%s)\n%!" m)
       | None -> ());
-      let fresh =
-        index_entries decl hs
-        |> List.filter (fun (hash, _) -> not (List.exists (Hash.equal hash) t.hidden))
-      in
+      let fresh = index_entries decl hs in
       t.index <- fresh @ List.filter (fun (h, _) -> not (List.mem_assoc h fresh)) t.index;
       let new_names =
         List.filter_map
           (fun (n, h) ->
             match List.assoc_opt h fresh with
-            | Some (_, role) when not (Concurrency_contract.is_task_private_hash h) ->
+            | Some (_, role)
+              when (not (List.exists (Hash.equal h) t.hidden))
+                   && not (Concurrency_contract.is_task_private_hash h) ->
                 Some (n, { Resolve.hash = h; kind = entry_kind decl role })
-            | Some _ -> None
-            | None -> None)
+            | Some _ | None -> None)
           hs.Canon.named
       in
       (* replacement is per (name, kind): a term named x does not evict a type named x *)
@@ -313,8 +313,9 @@ let tier t (h : Hash.t) : Tier.arrow_tier option =
   else
     match read_file path with exception Sys_error _ -> None | s -> Tier.of_string (String.trim s)
 
-(** [locate t h] finds the declaration owning [h] (a decl hash or any derived hash). *)
-let locate t (h : Hash.t) : (located, Diag.t list) result =
+(** [locate_internal t h] finds the declaration owning [h], including a hidden derived member. Only
+    evaluation of already-resolved store objects may use this private-capability path. *)
+let locate_internal t (h : Hash.t) : (located, Diag.t list) result =
   match List.find_opt (fun (h', _) -> Hash.equal h h') t.index with
   | None -> err ~code:"E0601" "unknown hash %s" (Hash.to_hex h)
   | Some (_, (decl_hash, role)) -> (
@@ -326,6 +327,12 @@ let locate t (h : Hash.t) : (located, Diag.t list) result =
         | Error ds -> Error ds
         | Ok (decl, _) -> Ok { decl; decl_hash; role })
 
+(** [locate t h] finds the public declaration owning [h]. Hidden derived members are deliberately
+    reported as unknown so neither direct hash references nor rebinding can reconstruct them. *)
+let locate t (h : Hash.t) : (located, Diag.t list) result =
+  if List.exists (Hash.equal h) t.hidden then err ~code:"E0601" "unknown hash %s" (Hash.to_hex h)
+  else locate_internal t h
+
 (** [get t h] is [locate]'s declaration. *)
 let get t h = Result.map (fun l -> l.decl) (locate t h)
 
@@ -336,21 +343,49 @@ let lookup_all t n = List.filter_map (fun (m, e) -> if m = n then Some e else No
 (** The binding of [n] with kind [k], if any. *)
 let lookup_kind t n k = List.find_opt (fun e -> e.Resolve.kind = k) (lookup_all t n)
 
+(** [lookup_internal_kind t name kind] resolves a public binding or a hidden derived prelude member
+    by its immutable declaration metadata. This is a trusted host-only seam for wiring private
+    builtin markers after reopen; language resolution must continue to use [names_view]. *)
+let lookup_internal_kind t name kind =
+  match lookup_kind t name kind with
+  | Some _ as public -> public
+  | None ->
+      let hidden_name hash =
+        match locate_internal t hash with
+        | Error _ -> None
+        | Ok { decl; role; _ } ->
+            let candidate =
+              match (decl.Kernel.it, role) with
+              | Kernel.DefTerm bindings, Member index ->
+                  Option.map (fun binding -> binding.Kernel.bname) (List.nth_opt bindings index)
+              | Kernel.DefType { cons; _ }, Constructor index ->
+                  Option.map (fun con -> con.Kernel.con_name) (List.nth_opt cons index)
+              | Kernel.DefEffect { ops; _ }, Operation index ->
+                  Option.map (fun op -> op.Kernel.op_name) (List.nth_opt ops index)
+              | _ -> None
+            in
+            Option.bind candidate (fun candidate_name ->
+                if String.equal candidate_name name && entry_kind decl role = kind then
+                  Some { Resolve.hash; kind }
+                else None)
+      in
+      List.find_map hidden_name t.hidden
+
 (** First binding of [n] by kind rank; prefer {!lookup_kind} when the kind is known. *)
 let lookup_name t n = match lookup_all t n with [] -> None | e :: _ -> Some e
 
 (** All name bindings, sorted by (name, kind rank) — the whole mutable index. *)
 let names t = t.names
 
-(** [hide_derived t hash] removes a known member, constructor, or operation from both public store
-    indexes while preserving its owning immutable declaration object. Prelude loading uses this for
-    marker constructors of opaque host values: neither a name nor a direct derived-hash reference
-    may reconstruct such a value. Unknown and whole-declaration hashes are left unchanged. *)
+(** [hide_derived t hash] removes a known member, constructor, or operation from public name and
+    hash lookup while retaining its private immutable index entry for already-resolved store code.
+    Prelude loading uses this for opaque marker and capability constructors: neither a name nor a
+    direct derived-hash reference may reconstruct such a value. Unknown and whole-declaration hashes
+    are left unchanged. *)
 let hide_derived t hash =
   match List.find_opt (fun (candidate, _) -> Hash.equal candidate hash) t.index with
   | Some (_, (_, (Member _ | Constructor _ | Operation _))) ->
       t.hidden <- List.sort_uniq Hash.compare (hash :: t.hidden);
-      t.index <- List.filter (fun (candidate, _) -> not (Hash.equal candidate hash)) t.index;
       t.names <-
         List.filter
           (fun (_, (entry : Resolve.entry)) -> not (Hash.equal entry.Resolve.hash hash))
@@ -374,6 +409,8 @@ let bind_name t name hash : (unit, Diag.t list) result =
   else
     match List.find_opt (fun (h, _) -> Hash.equal hash h) t.index with
     | None -> err ~code:"E0601" "cannot name unknown hash %s" (Hash.to_hex hash)
+    | Some _ when List.exists (Hash.equal hash) t.hidden ->
+        err ~code:"E0601" "cannot name unknown hash %s" (Hash.to_hex hash)
     | Some (_, (decl_hash, role)) -> (
         match get t decl_hash with
         | Error ds -> Error ds

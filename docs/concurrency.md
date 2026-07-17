@@ -1,15 +1,16 @@
 # Structured Concurrency Contract
 
-Status: SC.12 budgeted exhaustive schedule enumeration over SC.10 versioned
-scheduler traces and strict replay, over SC.9
-fail-fast/collect scope policies, SC.7 cooperative cancellation, SC.6
-structured-scope ownership, the SC.5
+Status: SC.12 budgeted exhaustive schedule enumeration and SC.11 seeded
+randomized schedule testing over SC.10 versioned scheduler traces and strict
+replay, SC.9 fail-fast/collect scope policies, SC.7 cooperative cancellation,
+SC.6 structured-scope ownership, the SC.5
 policy-independent lifecycle core, and the SC.4 generalized child-effect law
 (D46-D50), July 2026. This document is authoritative for C1's static
 non-laundering law, lifecycle and nested ownership, cancellation delivery, and
-homogeneous scope aggregation. The default CLI, prelude-evaluation, and Warp
-Case paths now drive real evaluator states and affine continuations through the
-deterministic Async scheduler. Native root scheduling remains unsupported.
+homogeneous scope aggregation, plus C2's record/replay and seeded decision
+policies. The default CLI, prelude-evaluation, and Warp Case paths drive real
+evaluator states and affine continuations through the Async scheduler. Native
+root scheduling remains unsupported.
 
 Structured concurrency is an effect interpreted by a scheduler handler. The
 same program can therefore run under deterministic, seeded-random, exhaustive,
@@ -318,9 +319,18 @@ The terminal decision and result are committed before sibling cancellation is
 attempted. Cancellation diagnostics or an exception from the destruction
 callback do not roll back that observation. Cleanup still attempts every
 sibling in input order, and the first destruction-callback exception is
-re-raised only after all sibling cleanup attempts finish. Finish is legal only
-after every registered child is terminal, preserving the structured drain
-invariant.
+re-raised with its original backtrace only after all sibling cleanup attempts
+finish. The policy layer catches each user callback failure around the SC.7
+delivery call, allowing that call to return its awakened waiters without
+changing the public SC.7 primitive. Finish is legal only after every registered
+child is terminal, preserving the structured drain invariant.
+
+An immediate sibling cancellation can wake tasks already awaiting that sibling.
+The policy controller retains those handles even when the same delivery's user
+destruction callback raises, in sibling-input order and each target's
+waiter-registration order. A scheduler drains them exactly once through
+`Scope_policy.take_awakened` before its next choice; the policy layer never
+silently discards or independently schedules them.
 
 Collect never requests sibling cancellation. It waits for every registered
 child and returns the immutable terminal results in input order, independently
@@ -367,13 +377,24 @@ same routed boundary, so the caller receives no continuation with which to
 execute a later user expression. Re-entering a boundary with an already
 cancelled task also destroys the supplied stale continuation and wakes nobody.
 
+Cancellation state and ownership change before the destruction callback runs.
+The callback is a runtime destruction primitive and must normally not raise. If
+it does raise, that exception propagates, but the task remains terminal and the
+scheduler does not re-own the transferred continuation. In particular, a
+second delivery of the same suspended-task cancellation neither transfers nor
+destroys that continuation again.
+
 Dropping a continuation releases language/runtime memory; it does not release
 an external resource automatically. Acquire/release handlers (the bracket or
 `with-file` pattern) are the required C1 idiom for resources crossing a
 suspension point. `Structured_scope.protect` is the implementation bracket for
 continuation ownership: it closes on normal, result-abort, and host-exception
-paths before returning or re-raising. It is not an external-resource finalizer,
-and language finalizers remain explicitly deferred.
+paths before returning or re-raising, and cleanup attempts every still-owned
+resume even when a destruction callback raises. A cleanup exception propagates
+after an otherwise successful body. Original result-level diagnostics or a host
+exception and its raw backtrace take precedence over cleanup exceptions. It is
+not an external-resource finalizer, and language finalizers remain explicitly
+deferred.
 
 ## 5. Deterministic schedule order
 
@@ -409,6 +430,11 @@ waiter lists, never hash-table iteration. Spawn appends child then parent, a
 blocked await removes its waiter, completion appends awakened waiters, and yield
 appends its current task. Cancellation remains cooperative at the three SC.7
 boundaries.
+
+Each selected task advances inside an affine checkout bracket. If a scheduler
+step returns a diagnostic or a host exception before settling the token, the
+bracket restores scheduler ownership first; a host exception is then re-raised
+as the same physical value with its original raw backtrace.
 
 Policy traces include `policy-observe decision=N ordinal=M task=ID`, directly
 linking every child terminal observation to the D46 step that caused it.
@@ -555,7 +581,49 @@ fail-fast/collect and same-step cancellation ordinals. Warp Case coverage is
 limited to checker-representable programs (nested spawn/await/yield/cancel).
 Ill-typed child faults and direct self-handle injection remain hostile OCaml
 integration cases, not purported checked Warp programs. Warp Props still vary
-data, not schedules: C1 exposes one fixed FIFO schedule.
+data, not schedules.
+
+### 5.2 Seeded randomized Warp schedules
+
+SC.11 adds `jacquard test --schedules N --seed S` for hermetic Warp Cases. `N`
+must be positive and `--seed` is required whenever this lane is selected. The
+CLI does not fall back to OS entropy in this lane. Each discovered member gets
+a SplitMix64 stream mixed from `S`, its canonical member hash, the length-framed
+relative group/Case label path (never the renameable top-level name), and the
+zero-based structural child-index path to the leaf. Length framing keeps labels
+containing NUL bytes unambiguous, while the structural indices distinguish
+duplicate labels. Each of the `N` executions then gets a child decision seed.
+This makes one test's schedules independent of discovery order, top-level
+renames, cache hits, and host `Random` state.
+
+At each D46 decision, the handler draws one index from the exact ordered
+runnable queue with 62-bit rejection sampling. Non-power-of-two queue lengths
+therefore have no float-rounding or modulo bias, and every positive queue length
+is range-safe. Task creation, wakeup, cancellation, scope aggregation, and all
+other lifecycle rules remain unchanged. The scheduler identity is
+`seeded-random-v0`. Every execution records the ordinary canonical v1 schedule
+trace, including the full queue and chosen task. Strict replay consumes that
+recorded scheduler identity and validates the trace before divergent work; it
+does not draw again.
+
+The first failing execution stops the test. Its output includes the root seed,
+the failing child decision seed, and an exact rerun command. If the scheduler
+completed a trace, it also prints that canonical log. A task/decision-bound or
+other scheduler refusal before completion is explicitly labeled as lacking a
+complete trace and prints no misleading partial log. Repeating the command is
+byte-for-byte reproducible. A passing Case reports the number of explored
+schedules and the root seed.
+
+Hermetic cache identity is the existing Merkle test/member key plus the
+scheduler version, schedule-leaf identity version, `N`, and `S`. The same
+framed member/label/index identity is the trace program identity checked before
+strict replay. Cache entries retain only ordinary rendered test evidence; no
+Task, evaluator closure, continuation, PRNG state, or host random value enters
+the cache. Scheduled failures are not cached because their rerun command
+contains current source/prelude paths. Cached passing evidence rebuilds its
+top-level display name from the current name index, so a semantic rename remains
+a hit without stale presentation. WorldTests stay uncached, and Props retain
+their separate data-generation sampling/exhaustive modes.
 
 ## 6. Interactions and exclusions
 
@@ -571,7 +639,6 @@ The following are excluded from C1 and from this interface freeze:
 - shared mutable memory, locks, atomics, and data-race semantics;
 - automatic external-resource finalizers;
 - channels before C3 and actors/supervision before C4+;
-- seeded-random schedule exploration;
 - host threads, host scheduling, and real asynchronous I/O before C4.
 
 Pure `parallel.map` and `parallel.both` are separate empty-row hints. Their
@@ -589,8 +656,8 @@ fallback. The prerequisite audit, parity/sanitizer lane, and benchmark are in
 C0 is pure parallel hints. C1 is Task lifecycle, Async, structured scopes,
 cooperative cancellation, fail-fast/collect, and the deterministic scheduler.
 C2 adds schedule tooling. SC.10 implements versioned record/strict replay and
-SC.12 implements budgeted exhaustive schedules. Seeded-random scheduling is a
-parallel C2 handler and is not claimed by this overlay.
+SC.11 adds seeded randomized Warp schedules, while SC.12 implements budgeted
+exhaustive schedules.
 C3 adds typed channels. C4 adds host asynchronous I/O; actor supervision opens
 only after channels and lifecycle evidence exist.
 

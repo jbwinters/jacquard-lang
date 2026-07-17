@@ -142,6 +142,20 @@ solving a cyclic child/caller row.
     hint: the expected side comes from the surrounding context; make both sides agree
   [1]
 
+World facade effects are also not root-grantable, but they are not pure. Their
+diagnostic directs the caller to the required membrane handler:
+
+  $ cat > workspace.jqd <<'JACQUARD'
+  > (app (var workspace.read-file) (app (var path-value) (lit "README.md")))
+  > JACQUARD
+  $ jacquard run workspace.jqd
+  error[E0814]: this program requires workspace [world/high] — request mediated workspace reads, writes, or fetches without directly acquiring raw authority, which is not granted (performed via `workspace.read-file`)
+    hint: handle Workspace in the program (Workspace is a world facade and is not root-grantable)
+  [3]
+  $ jacquard run workspace.jqd --allow workspace
+  error[E0703]: effect `workspace` is not grantable
+  [1]
+
 A user effect that reuses an official short name does not inherit its risk or grant:
 
   $ cat > spoof.jqd <<'JACQUARD'

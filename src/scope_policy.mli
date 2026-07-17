@@ -52,8 +52,11 @@ val record_terminal :
     order. Already-suspended siblings are delivered immediately through
     {!Structured_scope.deliver_cancel}, which passes their resumes to [drop]. Runnable siblings
     retain an idempotent request until their next cancellation boundary. Every sibling is attempted
-    even if [drop] raises; the first such exception is re-raised only after all sibling cleanup has
-    been attempted. [Collect] never requests sibling cancellation. *)
+    even if [drop] raises; the first such physical exception is re-raised with its original
+    backtrace only after all sibling cleanup has been attempted. The policy-local wrapper lets
+    {!Structured_scope.deliver_cancel} return normally after a user [drop] failure, so waiters from
+    that same delivery are retained for {!take_awakened}. [Collect] never requests sibling
+    cancellation. *)
 
 val take_awakened : ('resume, 'value) t -> Structured_scope.handle list
 (** [take_awakened controller] returns and clears waiters awakened by policy-triggered immediate

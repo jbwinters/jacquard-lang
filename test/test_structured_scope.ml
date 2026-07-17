@@ -143,6 +143,75 @@ let test_bracket_cleans_normal_abort_and_exception () =
     |> error_code);
   check_zero_metrics "escaping bracket" escaping
 
+let test_cleanup_exception_precedence () =
+  let normal, _ = Structured_scope.create ~body_resume:1 |> ok in
+  let normal_drops = ref 0 in
+  (match
+     Structured_scope.protect normal
+       ~drop:(fun _ ->
+         incr normal_drops;
+         raise (Failure "normal cleanup failed"))
+       ~escapes:(fun _ -> [])
+       (fun scope ->
+         ignore (Structured_scope.spawn scope ~resume:2 |> ok);
+         ignore (Structured_scope.spawn scope ~resume:3 |> ok);
+         Ok 42)
+   with
+  | exception Failure message when String.equal message "normal cleanup failed" -> ()
+  | exception exn -> Alcotest.failf "wrong normal cleanup exception: %s" (Printexc.to_string exn)
+  | Ok _ | Error _ -> Alcotest.fail "normal cleanup exception was swallowed");
+  Alcotest.(check int) "normal cleanup attempts every drop" 3 !normal_drops;
+  check_zero_metrics "normal cleanup exception" normal;
+  let aborted, _ = Structured_scope.create ~body_resume:4 |> ok in
+  let aborted_drops = ref 0 in
+  Alcotest.(check string)
+    "body diagnostic precedes cleanup exception" "E9998"
+    (Structured_scope.protect aborted
+       ~drop:(fun _ ->
+         incr aborted_drops;
+         raise (Failure "aborted cleanup failed"))
+       ~escapes:(fun _ -> [])
+       (fun scope ->
+         ignore (Structured_scope.spawn scope ~resume:5 |> ok);
+         Error [ abort_diagnostic ])
+    |> error_code);
+  Alcotest.(check int) "aborted cleanup attempts every drop" 2 !aborted_drops;
+  check_zero_metrics "aborted cleanup exception" aborted;
+  let raised, _ = Structured_scope.create ~body_resume:6 |> ok in
+  let raised_drops = ref 0 in
+  let backtraces_were_enabled = Printexc.backtrace_status () in
+  Printexc.record_backtrace true;
+  Fun.protect
+    ~finally:(fun () -> Printexc.record_backtrace backtraces_were_enabled)
+    (fun () ->
+      let body_exception = Failure "host body failed" in
+      let body_backtrace =
+        match raise body_exception with
+        | exception caught when caught == body_exception -> Printexc.get_raw_backtrace ()
+        | _ -> Alcotest.fail "failed to capture host body backtrace"
+      in
+      match
+        Structured_scope.protect raised
+          ~drop:(fun _ ->
+            incr raised_drops;
+            raise (Failure "raised cleanup failed"))
+          ~escapes:(fun _ -> [])
+          (fun scope ->
+            ignore (Structured_scope.spawn scope ~resume:7 |> ok);
+            Printexc.raise_with_backtrace body_exception body_backtrace)
+      with
+      | exception caught when caught == body_exception ->
+          let original = Printexc.raw_backtrace_to_string body_backtrace in
+          let reraised = Printexc.raw_backtrace_to_string (Printexc.get_raw_backtrace ()) in
+          Alcotest.(check bool)
+            "host backtrace precedes cleanup backtrace" true
+            (String.starts_with ~prefix:original reraised)
+      | exception exn ->
+          Alcotest.failf "cleanup masked the host exception: %s" (Printexc.to_string exn)
+      | Ok _ | Error _ -> Alcotest.fail "host exception was swallowed");
+  Alcotest.(check int) "raised cleanup attempts every drop" 2 !raised_drops;
+  check_zero_metrics "raised cleanup exception" raised
+
 let test_checkout_bracket_restores_error_and_exception () =
   let returned, body = Structured_scope.create ~body_resume:40 |> ok in
   Alcotest.(check int)
@@ -167,12 +236,30 @@ let test_checkout_bracket_restores_error_and_exception () =
   Alcotest.(check (list int)) "restored error token is dropped" [ 41 ] !dropped;
   check_zero_metrics "checkout error" aborted;
   let raised, body = Structured_scope.create ~body_resume:42 |> ok in
-  (match
-     Structured_scope.with_checkout raised body (fun _ -> raise (Failure "checkout host abort"))
-   with
-  | exception Failure message when String.equal message "checkout host abort" -> ()
-  | exception exn -> Alcotest.failf "wrong checkout exception: %s" (Printexc.to_string exn)
-  | Ok _ | Error _ -> Alcotest.fail "checkout host exception was swallowed");
+  let checkout_exception = Failure "checkout host abort" in
+  let backtraces_were_enabled = Printexc.backtrace_status () in
+  Printexc.record_backtrace true;
+  Fun.protect
+    ~finally:(fun () -> Printexc.record_backtrace backtraces_were_enabled)
+    (fun () ->
+      let checkout_backtrace =
+        match raise checkout_exception with
+        | exception caught when caught == checkout_exception -> Printexc.get_raw_backtrace ()
+        | _ -> Alcotest.fail "failed to capture checkout exception backtrace"
+      in
+      match
+        Structured_scope.with_checkout raised body (fun _ ->
+            Printexc.raise_with_backtrace checkout_exception checkout_backtrace)
+      with
+      | exception caught when caught == checkout_exception ->
+          let original = Printexc.raw_backtrace_to_string checkout_backtrace in
+          let reraised = Printexc.raw_backtrace_to_string (Printexc.get_raw_backtrace ()) in
+          Alcotest.(check bool)
+            "checkout exception keeps its original backtrace" true
+            (String.starts_with ~prefix:original reraised)
+      | exception exn ->
+          Alcotest.failf "checkout replaced the physical exception: %s" (Printexc.to_string exn)
+      | Ok _ | Error _ -> Alcotest.fail "checkout host exception was swallowed");
   Alcotest.(check bool)
     "checkout exception restores scheduler ownership" true
     (Structured_scope.inspect raised body |> ok).owns_resume;
@@ -244,6 +331,7 @@ let run () =
   test_nested_lineage_and_recursive_cleanup ();
   test_returned_stored_and_ancestor_handles ();
   test_bracket_cleans_normal_abort_and_exception ();
+  test_cleanup_exception_precedence ();
   test_checkout_bracket_restores_error_and_exception ();
   test_dynamic_escape_graph_scan ();
   QCheck.Test.check_exn prop_recursive_close_restores_baseline

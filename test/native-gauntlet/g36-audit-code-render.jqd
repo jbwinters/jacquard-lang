@@ -1,5 +1,5 @@
-; ET.2: canonical Hash validation and Audit line rendering are direct native parity surface.
-(ref #bf5c9d86f11ef2591a2f1b7b9dcbc26342dcb093fce099341ce56e14b75482fb con)
+; D69: canonical Hash validation and sequenced Audit v2 line rendering are direct native parity.
+(ref #497a26ccc6b7aa5d0ce6a929d1e57d852f87b4b053c7f734e7f5e2385a4406d3 con)
 
 (match
   (app (var hash.parse)
@@ -33,8 +33,9 @@
           (lam ()
             (let nonrec (pwild)
               (app (var record)
-                (app (var completed) (var hash) (lit "native")
-                  (app (var outcome-summary) (lit "ok") (var hash)
+                (app (var completed) (var governance-v0) (lit 0) (var hash) (lit "native")
+                  (app (var governance-outcome-summary-v0) (var governance-v0)
+                    (lit "ok") (var hash)
                     (lit "control:\n\t\x01 utf8:héllo"))))
               (lit 7)))
           (lam ((pvar line))

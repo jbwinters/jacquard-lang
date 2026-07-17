@@ -1,13 +1,13 @@
 # Structured Concurrency SC.12 Evidence
 
-Status: budgeted exhaustive schedule enumeration is implemented over SC.10
-canonical record, fail-closed strict replay, and explicit provenance-carrying
-forks. Enumeration explores every bounded runnable TaskId choice, retains exact
-counts and replayable traces, and refuses routed effects before world callbacks.
-This milestone adds no host scheduling, seeded-random scheduler, detached
-tasks, or native root scheduler.
+Status: budgeted exhaustive schedule enumeration is implemented over SC.11
+seeded scheduling and SC.10 canonical record, fail-closed strict replay, and
+explicit provenance-carrying forks. Enumeration explores every bounded runnable
+TaskId choice, retains exact counts and replayable traces, and refuses routed
+effects before world callbacks. This milestone adds no host scheduling,
+detached tasks, or native root scheduler.
 
-- Reconstruction base: `59b12eb`
+- Reconstruction base: `404147e56a9e8b6bbec63e19748389d499d17673`
 - Evidence overlay: [MANIFEST.sha256](MANIFEST.sha256)
 - Authoritative contract: [concurrency.md](../../concurrency.md)
 
@@ -110,17 +110,21 @@ A. Ordinary in-language Once resumptions share this private owner check.
 
 ## Async boundary and parity
 
-All four Async operations are reviewed as `once`; the taxonomy still marks
-Async as reserved, and no handler or built-in `--allow` grant is installed.
-Direct evaluator calls therefore reach the ordinary `Unhandled` result for
-spawn, await, cancel, and yield. The CLI rejects an unhandled Async program at
-its effect gate with E0814. Neither path schedules work or grants ambient
-authority.
+All four Async operations are reviewed as `once`, and the taxonomy still marks
+Async as reserved. The default interpreted CLI, prelude-evaluation, and Warp
+paths automatically admit only the exact frozen Async effect and execute it
+through `Round_robin`; users do not install a root handler or pass
+`--allow async`. This scheduler infrastructure grant does not admit Console,
+Fs, Net, or any other world effect. Raw `Eval.run_expr` remains an unscheduled
+low-level seam whose unhandled Async operations produce `Unhandled`, and the
+native backend has no root Async scheduler. Native execution therefore requires
+an in-language handler to discharge Async before the root.
 
 `TaskResult` constructors execute in both tiers. The `task-values.t` cram test
 byte-compares interpreter and native output for Done/Failed/Cancelled, tests
-the private carrier diagnostic, and pins the clean unhandled CLI failure. The
-C/OCaml show parity corpus includes a redacted inert Task value.
+the private carrier diagnostic, and pins successful scheduled CLI execution of
+`async.yield`. The C/OCaml show parity corpus includes a redacted inert Task
+value.
 
 ## Scheduler lifecycle core
 
@@ -263,9 +267,14 @@ and a later cancellation cannot replace an earlier failure.
 The terminal decision and result are committed before those cancellation
 attempts. A cancellation diagnostic or destruction-callback exception therefore
 does not roll the observation back. Every sibling cleanup is still attempted in
-input order; if callbacks raise, the first exception is re-raised only after all
-sibling attempts finish. Finish remains unavailable until every child is
-observed terminal, so the scope cannot expose an undrained aggregate.
+input order. The policy catches each user callback failure around the unchanged
+SC.7 delivery primitive, buffers waiters returned by that same delivery, and
+then continues cleanup. If callbacks raise, the first physical exception is
+re-raised with its captured backtrace only after all sibling attempts finish.
+`Scope_policy.take_awakened` drains retained waiters exactly once in sibling
+input order and each target's waiter-registration order. Finish remains
+unavailable until every child is observed terminal, so the scope cannot expose
+an undrained aggregate.
 
 Collect never requests sibling cancellation. It waits for every child and
 returns `Done`, `Failed`, and `Cancelled` entries in the registered input order,
@@ -336,7 +345,8 @@ resume, real failing-child fail-fast/collect, a fail-fast cancellation that
 requeues an awakened waiter, the integrated self-await deadlock refusal, and
 stable same-decision terminal ordinals. Checkout-bracket tests separately prove
 that normal, diagnostic, and host-exception exits restore an unsettled affine
-token before scope cleanup. Its 128-case property changes the host random seed and
+token before scope cleanup, while preserving the physical host exception and
+its raw backtrace prefix. Its 128-case property changes the host random seed and
 proves the same decisions and bytes as an unseeded rerun. The `round-robin.t`
 transcript repeats a fresh process 128 times, byte-compares every trace, pins the
 exact cross-scope trace and cumulative counters, runs real CLI Async programs,
@@ -418,14 +428,13 @@ before allocation, and routed-operation drift before callback invocation. The
 `schedule-replay.t` golden transcript exercises the public CLI with the exact
 v1 bytes, malformed/legacy/impossible logs, missing/extra/reordered events,
 declared-line and per-line transport refusals, missing/unreadable paths, a
-post-success write failure, fork-at-decision, byte-identical original and fork
-replays, and an empty stdout probe proving a one-bit world-operation-hash drift
-was refused before `print`.
+post-success write failure, a flush-time write failure, fork-at-decision,
+byte-identical original and fork replays, and an empty stdout probe proving a
+one-bit world-operation-hash drift was refused before `print`.
 
 Scheduler cache identity now includes `schedule-format-v1` in addition to the
 program hash, scheduler identity, policy, and bounds. Cache payloads remain
-proof-only and every hit still executes a fresh evaluator run. Host scheduling
-and random choices remain outside SC.10.
+proof-only and every hit still executes a fresh evaluator run.
 
 ## Budgeted exhaustive schedule enumeration
 
@@ -458,6 +467,51 @@ installed callback is never invoked. The multi-shot handler gauntlet and the
 eight-world two-child fixture prove no world reports E0906, each world creates
 exactly three tasks, and recursive affine-ownership metrics drain to zero.
 
+## Seeded randomized Warp schedules
+
+`jacquard test --schedules N --seed S` reruns every hermetic Case under the
+`seeded-random-v0` decision policy. The CLI rejects non-positive `N`, rejects a
+missing or malformed seed, and never calls `Random.self_init` on this path. A
+SplitMix64 stream mixes the root seed with the canonical discovered-member hash
+and a length-framed relative group/Case label path, excluding the renameable
+top-level name, plus the zero-based structural child-index path to the leaf. The
+framing distinguishes NUL-containing labels and the indices distinguish
+duplicate labels. The resulting identity supplies an independent decision seed
+to each run and is also the program identity checked before strict replay.
+Discovery order, top-level renames, cache hits, and host `Random` state therefore
+cannot move a test's schedule stream.
+
+Only the D46 choice changes: each step selects an index from the exact ordered
+runnable queue using 62-bit bounded-integer rejection sampling. The fixed
+three-way-queue regression and 10,000 bounded draws pin non-power-of-two range
+behavior without float or modulo bias. The scheduler still records format-v1
+creation and decision events. Strict replay accepts the scheduler identity stored in a validated
+trace and checks every queue, chosen task, and operation without drawing again.
+The focused scheduler regression pins same-seed byte identity under different
+host random states, a changed interleaving for another seed, and byte-identical
+strict replay of the seeded trace. Warp identity regressions pin distinct seeds
+and trace identities for duplicate labels and for `["a"; "b"]` versus
+`["a\000b"]`, plus strict refusal when a trace from one duplicate-label leaf is
+presented to the other.
+
+The first failing Warp execution prints the root seed, child decision seed, and
+exact rerun command. It prints a canonical schedule log only after a complete
+trace; the decision-bound regression pins a seed/rerun/error refusal with no
+partial-log claim. The CLI transcript runs the ordinary failing command twice
+and byte-compares the failures. It also pins positive-count and explicit-seed
+diagnostics, pass reporting, and cache misses when either `N` or `S` changes.
+The scheduled cache key is the ordinary Merkle member/Prop key plus
+`seeded-random-v0`, the schedule-leaf identity version, `N`, and `S`; the
+schedule trace program identity is the framed member/label/structural-index
+identity. A top-level rename is a cache hit with current display text, while a
+Case-label edit is a miss. Scheduled failures are not cached; a shared-cache
+moved-path regression proves their replay command is rebuilt from the current
+source/prelude paths. WorldTests remain uncached and Props retain their separate
+data-generation modes.
+
+SC.11 seeded scheduling remains part of this successor. Host scheduling remains
+outside SC.12.
+
 ## Compiled test discovery
 
 The lifecycle evidence is registered directly in the compiled Alcotest
@@ -488,7 +542,7 @@ opam exec -- dune build test/test_jacquard.exe
 )
 ```
 
-The compiled inventory is exactly 667 cases and the source inventory is 39
+The compiled inventory is exactly 686 cases and the source inventory is 39
 cram transcripts. `effect-taxonomy/3` retains only taxonomy governance and hash
 checks, so the seven scheduler/lifecycle suites execute exactly once during the
 full gate.
@@ -501,14 +555,14 @@ grant was added.
 
 ## Reconstruction and verification
 
-The manifest is the complete SC.12 successor overlay on validated SC.9 commit
-`59b12eb`. Reconstruct it under repository-local scratch
+The manifest is the complete SC.12 successor overlay on validated SC.11 commit
+`404147e56a9e8b6bbec63e19748389d499d17673`. Reconstruct it under repository-local scratch
 space:
 
 ```sh
 set -eu
-base=59b12eb
-dest="$PWD/.scratch/sc10-evidence-copy"
+base=404147e56a9e8b6bbec63e19748389d499d17673
+dest="$PWD/.scratch/sc12-evidence-copy"
 manifest=docs/release/structured-concurrency/MANIFEST.sha256
 rm -rf "$dest"
 mkdir -p "$dest"
@@ -550,7 +604,7 @@ snapshot_source | cmp "$snapshot" -
 opam exec -- dune build @doc --root "$dest"
 ```
 
-Expected results are zero exits, 667 compiled Alcotest/QCheck cases, 39 cram
+Expected results are zero exits, 686 compiled Alcotest/QCheck cases, 39 cram
 transcripts, and 25 doctest examples across 8 documents.
 
 The default interpreted CLI, prelude-evaluation, and Warp Case paths use this
@@ -560,6 +614,6 @@ hashes remain unchanged. Raw `Eval.run_expr` remains a low-level unscheduled
 seam. SC.4 continues to supply the static child-effect law: a scope discharges
 only Async and retains child world effects. Native root scheduling remains
 future work; native parity evidence is labeled only for Async discharged by an
-in-language handler. SC.10 records and replays only this deterministic
-interpreter seam. SC.12 adds hermetic bounded exhaustive exploration and makes
-no host-scheduling or seeded-random claim.
+in-language handler. SC.11 randomizes this explicit interpreter decision seam,
+while SC.12 adds hermetic bounded exhaustive exploration. Neither claims host
+scheduling.
