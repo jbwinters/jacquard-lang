@@ -234,6 +234,14 @@ continuation is returned for a post-cancel user step. An already-cancelled
 caller reaching another boundary destroys the newly supplied stale
 continuation and wakes nobody.
 
+Terminalization and ownership transfer happen before the destruction callback.
+Destruction callbacks must normally not raise. If one does, its exception
+propagates, while the cancelled task remains terminal and owns no resume. A
+duplicate delivery cannot transfer or destroy that suspended resume again.
+The focused raising-drop regression pins the exception identity, terminal
+`Cancelled` result, zero scheduler-owned resumes, one callback invocation, and
+zero callback invocations on duplicate delivery.
+
 Focused Alcotest coverage pins all three boundary classes, no-waiter/no-child
 preemption, routed-effect fault injection, duplicate/completed/self behavior,
 the exact public handoff that destroys suspended resume token 21 once, and the

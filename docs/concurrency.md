@@ -323,6 +323,13 @@ same routed boundary, so the caller receives no continuation with which to
 execute a later user expression. Re-entering a boundary with an already
 cancelled task also destroys the supplied stale continuation and wakes nobody.
 
+Cancellation state and ownership change before the destruction callback runs.
+The callback is a runtime destruction primitive and must normally not raise. If
+it does raise, that exception propagates, but the task remains terminal and the
+scheduler does not re-own the transferred continuation. In particular, a
+second delivery of the same suspended-task cancellation neither transfers nor
+destroys that continuation again.
+
 Dropping a continuation releases language/runtime memory; it does not release
 an external resource automatically. Acquire/release handlers (the bracket or
 `with-file` pattern) are the required C1 idiom for resources crossing a

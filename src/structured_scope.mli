@@ -4,7 +4,10 @@
     resume token registered in those schedulers. Closing a scope recursively closes descendants and
     explicitly returns each token to a caller-provided destruction function. The module does not
     choose runnable order or install an Async handler. Cooperative cancellation is delivered only
-    through the explicit suspension/routed-effect boundaries below. *)
+    through the explicit suspension/routed-effect boundaries below. Cancellation terminalizes and
+    transfers continuation ownership before invoking a supplied [drop] callback. Destruction
+    callbacks must normally not raise. If one does, its exception propagates, but the scheduler does
+    not re-own or transfer that continuation again. *)
 
 type handle = Scheduler_core.handle
 
@@ -94,7 +97,9 @@ val deliver_cancel :
   (handle list, Diag.t list) result
 (** [deliver_cancel] delegates frozen-point delivery to the scheduler core and passes every removed
     scheduler-owned resume exactly once to [drop] before returning awakened handles. Duplicate and
-    terminal delivery call [drop] zero times. *)
+    terminal delivery call [drop] zero times. The target is terminal and its resume has transferred
+    before [drop] runs. If [drop] raises, the exception propagates; later duplicate delivery neither
+    re-owns nor re-drops that resume. *)
 
 val at_cancellation_point :
   ('resume, 'value) t ->
@@ -105,7 +110,8 @@ val at_cancellation_point :
   ('resume boundary_outcome, Diag.t list) result
 (** [at_cancellation_point] checks before any boundary action. First delivery terminalizes the task,
     wakes waiters, and explicitly destroys [resume]. Already-cancelled tasks also destroy a stale
-    [resume], ensuring no post-cancellation user step can be recovered. *)
+    [resume], ensuring no post-cancellation user step can be recovered. The handoff is consumed even
+    if [drop] raises: the exception propagates and the task remains terminal. *)
 
 val await_cooperatively :
   ('resume, 'value) t ->
@@ -147,7 +153,9 @@ val cancel :
 (** [cancel] implements the routed [async.cancel] boundary. A pre-cancelled caller performs no
     target request. Self-cancel is delivered at this same routed-effect point. A suspended target is
     delivered immediately at its existing await/yield point; runnable targets observe the request at
-    their next boundary. Completed and duplicate target requests are no-ops. *)
+    their next boundary. Completed and duplicate target requests are no-ops. Immediate delivery
+    terminalizes and transfers the target resume before calling [drop]. If [drop] raises, the
+    exception propagates without restoring that resume or making a later duplicate call drop it. *)
 
 val close :
   ('resume, 'value) t ->
