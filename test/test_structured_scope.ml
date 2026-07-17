@@ -347,14 +347,14 @@ let map_channel_resume resume = function
   | Structured_scope.Channel_closed -> resume + 3000
 
 let opened_channel scope capacity =
-  match Structured_scope.channel_open scope ~capacity with
+  match Structured_scope.channel_open scope ~capacity |> ok with
   | Structured_scope.Channel_opened channel -> channel
   | Structured_scope.Channel_invalid_capacity rejected ->
       Alcotest.failf "capacity %d unexpectedly rejected" rejected
 
 let test_scoped_channel_ownership_and_cancellation () =
   let scope, body = Structured_scope.create ~body_resume:10 |> ok in
-  (match Structured_scope.channel_open scope ~capacity:(-1) with
+  (match Structured_scope.channel_open scope ~capacity:(-1) |> ok with
   | Structured_scope.Channel_invalid_capacity -1 -> ()
   | _ -> Alcotest.fail "negative channel capacity was not a typed refusal");
   let channel = opened_channel scope 0 in
@@ -420,7 +420,7 @@ let test_closed_channel_remains_live_until_scope_teardown () =
     let resume = Structured_scope.checkout scope body |> ok in
     match
       Structured_scope.channel_close scope ~task:body ~channel ~resume
-        ~map_resume:map_channel_resume
+        ~map_resume:map_channel_resume ~map_closer:(fun resume -> resume + 2000)
       |> ok
     with
     | Structured_scope.Channel_suspended -> Alcotest.fail "channel.close suspended"
@@ -438,6 +438,179 @@ let test_closed_channel_remains_live_until_scope_teardown () =
          Structured_scope.channel_send scope ~task:body ~channel ~resume ~value:"stale"
            ~map_resume:map_channel_resume)
     |> error_code)
+
+let test_channel_transition_preflight_is_atomic () =
+  let scope, receiver = Structured_scope.create ~body_resume:10 |> ok in
+  let channel = opened_channel scope 0 in
+  Alcotest.(check string)
+    "owned caller resume rejects receive" "E0908"
+    (Structured_scope.channel_recv scope ~task:receiver ~channel ~resume:99
+       ~map_resume:map_channel_resume
+    |> error_code);
+  Alcotest.(check bool)
+    "invalid caller lifecycle preserves resume" true
+    (Structured_scope.inspect scope receiver |> ok).owns_resume;
+  let receiver_resume = Structured_scope.checkout scope receiver |> ok in
+  (match
+     Structured_scope.channel_recv scope ~task:receiver ~channel ~resume:receiver_resume
+       ~map_resume:map_channel_resume
+     |> ok
+   with
+  | Structured_scope.Channel_suspended -> ()
+  | Structured_scope.Channel_continues _ -> Alcotest.fail "receiver did not suspend");
+  let sender = Structured_scope.spawn scope ~resume:20 |> ok in
+  let mapper_raised =
+    match
+      Structured_scope.with_checkout scope sender (fun resume ->
+          Structured_scope.channel_send scope ~task:sender ~channel ~resume ~value:"first"
+            ~map_resume:(fun _ _ -> raise Exit))
+    with
+    | exception Exit -> true
+    | Ok _ | Error _ -> false
+  in
+  Alcotest.(check bool) "raising waiter mapper propagates" true mapper_raised;
+  Alcotest.(check bool)
+    "raising mapper leaves receiver suspended" true
+    ((Structured_scope.inspect scope receiver |> ok).lifecycle = Concurrency_contract.Suspended);
+  let transition =
+    Structured_scope.with_checkout scope sender (fun resume ->
+        Structured_scope.channel_send scope ~task:sender ~channel ~resume ~value:"second"
+          ~map_resume:map_channel_resume)
+    |> ok
+  in
+  (match transition with
+  | Structured_scope.Channel_continues { awakened = [ awakened ]; _ } ->
+      Alcotest.(check string)
+        "the original receiver wakes once" "0#0"
+        (Structured_scope.id scope awakened |> ok |> Concurrency_contract.trace_task_id)
+  | Structured_scope.Channel_suspended -> Alcotest.fail "valid rendezvous sender suspended"
+  | Structured_scope.Channel_continues _ -> Alcotest.fail "rendezvous wake count changed");
+  let later = Structured_scope.spawn scope ~resume:30 |> ok in
+  (match
+     Structured_scope.with_checkout scope later (fun resume ->
+         Structured_scope.channel_send scope ~task:later ~channel ~resume ~value:"later"
+           ~map_resume:map_channel_resume)
+     |> ok
+   with
+  | Structured_scope.Channel_suspended -> ()
+  | Structured_scope.Channel_continues _ ->
+      Alcotest.fail "a rejected receive or mapper left a phantom receiver");
+  Structured_scope.close scope ~reason:Structured_scope.Normal ~escaping:[] ~drop:ignore |> ok;
+  check_zero_metrics "atomic channel preflight" scope
+
+let scheduler_of_scope_for_test scope =
+  (Obj.obj (Obj.field (Obj.repr scope) 0) : (int, string) Scheduler_core.t)
+
+let test_channel_close_preflights_every_waiter () =
+  let scope, body = Structured_scope.create ~body_resume:1 |> ok in
+  let channel = opened_channel scope 0 in
+  let first = Structured_scope.spawn scope ~resume:10 |> ok in
+  let second = Structured_scope.spawn scope ~resume:20 |> ok in
+  let block sender value =
+    match
+      Structured_scope.with_checkout scope sender (fun resume ->
+          Structured_scope.channel_send scope ~task:sender ~channel ~resume ~value
+            ~map_resume:map_channel_resume)
+      |> ok
+    with
+    | Structured_scope.Channel_suspended -> ()
+    | Structured_scope.Channel_continues _ -> Alcotest.fail "rendezvous sender did not block"
+  in
+  block first "first";
+  block second "second";
+  let scheduler = scheduler_of_scope_for_test scope in
+  let channel_id =
+    match (Scheduler_core.inspect scheduler second |> ok).suspension with
+    | Some (Scheduler_core.Channel_sending id) -> id
+    | _ -> Alcotest.fail "second sender lost its channel suspension"
+  in
+  Scheduler_core.wake_channel_with scheduler second ~channel:channel_id ~map_resume:(fun resume ->
+      Ok resume)
+  |> ok;
+  let second_resume = Scheduler_core.checkout scheduler second |> ok in
+  let wrong_channel = Channel_contract.channel_id ~scope_path:[ 0 ] ~open_index:99 in
+  Scheduler_core.suspend_channel scheduler second ~channel:wrong_channel ~direction:`Send
+    ~resume:second_resume
+  |> ok;
+  Alcotest.(check string)
+    "second invalid close wake rejects atomically" "E0908"
+    (Structured_scope.with_checkout scope body (fun resume ->
+         Structured_scope.channel_close scope ~task:body ~channel ~resume
+           ~map_resume:map_channel_resume ~map_closer:Fun.id)
+    |> error_code);
+  Alcotest.(check bool)
+    "first waiter was not partially woken" true
+    ((Structured_scope.inspect scope first |> ok).lifecycle = Concurrency_contract.Suspended);
+  let third = Structured_scope.spawn scope ~resume:30 |> ok in
+  (match
+     Structured_scope.with_checkout scope third (fun resume ->
+         Structured_scope.channel_send scope ~task:third ~channel ~resume ~value:"third"
+           ~map_resume:map_channel_resume)
+     |> ok
+   with
+  | Structured_scope.Channel_suspended -> ()
+  | Structured_scope.Channel_continues _ -> Alcotest.fail "failed close still closed the channel");
+  Structured_scope.close scope ~reason:Structured_scope.Normal ~escaping:[] ~drop:ignore |> ok;
+  check_zero_metrics "all-waiter close preflight" scope
+
+let test_channel_cancellation_preflight_and_drop_exception () =
+  let scope, _ = Structured_scope.create ~body_resume:1 |> ok in
+  let channel = opened_channel scope 0 in
+  let sender = Structured_scope.spawn scope ~resume:20 |> ok in
+  (match
+     Structured_scope.with_checkout scope sender (fun resume ->
+         Structured_scope.channel_send scope ~task:sender ~channel ~resume ~value:"pending"
+           ~map_resume:map_channel_resume)
+     |> ok
+   with
+  | Structured_scope.Channel_suspended -> ()
+  | Structured_scope.Channel_continues _ -> Alcotest.fail "sender did not block");
+  let dropped = ref 0 in
+  let awakened =
+    Structured_scope.deliver_cancel scope ~point:Concurrency_contract.Routed_effect sender
+      ~drop:(fun _ -> incr dropped)
+    |> ok
+  in
+  Alcotest.(check int) "no-request delivery wakes nobody" 0 (List.length awakened);
+  Alcotest.(check int) "no-request delivery drops nothing" 0 !dropped;
+  Alcotest.(check bool)
+    "no-request delivery preserves channel suspension" true
+    ((Structured_scope.inspect scope sender |> ok).lifecycle = Concurrency_contract.Suspended);
+  Structured_scope.request_cancel scope sender |> ok;
+  let drop_raised =
+    match
+      Structured_scope.deliver_cancel scope ~point:Concurrency_contract.Routed_effect sender
+        ~drop:(fun _ -> raise Exit)
+    with
+    | exception Exit -> true
+    | Ok _ | Error _ -> false
+  in
+  Alcotest.(check bool) "drop exception propagates after transfer" true drop_raised;
+  Alcotest.(check bool)
+    "raising drop still terminalizes exactly once" true
+    ((Structured_scope.inspect scope sender |> ok).result = Some Concurrency_contract.Cancelled);
+  let duplicate =
+    Structured_scope.deliver_cancel scope ~point:Concurrency_contract.Routed_effect sender
+      ~drop:(fun _ -> incr dropped)
+    |> ok
+  in
+  Alcotest.(check int) "duplicate cancellation wakes nobody" 0 (List.length duplicate);
+  Alcotest.(check int) "duplicate cancellation drops nothing" 0 !dropped;
+  Structured_scope.close scope ~reason:Structured_scope.Normal ~escaping:[] ~drop:ignore |> ok;
+  check_zero_metrics "channel cancellation preflight" scope
+
+let test_channel_open_refusal_domains () =
+  let exhausted, _ = Structured_scope.create ~body_resume:1 |> ok in
+  Obj.set_field (Obj.repr exhausted) 3 (Obj.repr (Int64.to_int 0x1_0000_0000L));
+  Alcotest.(check string)
+    "ChannelId exhaustion is scheduler refusal" "E0908"
+    (Structured_scope.channel_open exhausted ~capacity:1 |> error_code);
+  Obj.set_field (Obj.repr exhausted) 3 (Obj.repr 0);
+  ignore (opened_channel exhausted 1);
+  Structured_scope.close exhausted ~reason:Structured_scope.Normal ~escaping:[] ~drop:ignore |> ok;
+  Alcotest.(check string)
+    "closed scope is not invalid capacity" "E0907"
+    (Structured_scope.channel_open exhausted ~capacity:1 |> error_code)
 
 let prop_recursive_close_restores_baseline =
   QCheck.Test.make ~count:200 ~name:"recursive scope close restores every ownership counter"
@@ -469,6 +642,10 @@ let run () =
   test_dynamic_escape_graph_scan ();
   test_scoped_channel_ownership_and_cancellation ();
   test_closed_channel_remains_live_until_scope_teardown ();
+  test_channel_transition_preflight_is_atomic ();
+  test_channel_close_preflights_every_waiter ();
+  test_channel_cancellation_preflight_and_drop_exception ();
+  test_channel_open_refusal_domains ();
   QCheck.Test.check_exn prop_recursive_close_restores_baseline
 
 let suite = [ Alcotest.test_case "nested ownership, cleanup, and escape" `Quick run ]

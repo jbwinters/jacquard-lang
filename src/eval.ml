@@ -234,6 +234,8 @@ let validate_task_value ctx ~scope_path = function
             "expected an opaque scheduler-owned Task handle";
         ]
 
+(** Structural carrier validation only: live-channel membership remains scheduler-owned and every
+    routed operation rechecks it through [Structured_scope.channel_handle]/[find_channel]. *)
 let validate_channel_value ctx ~scope_path = function
   | VChannel handle -> Channel_handle.validate_scope ~run:(current_task_run ctx) ~scope_path handle
   | _ ->

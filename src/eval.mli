@@ -29,8 +29,10 @@ val validate_task_value :
 val validate_channel_value :
   ctx -> scope_path:int list -> Value.t -> (Channel_contract.channel_id, Diag.t list) result
 (** [validate_channel_value] accepts only an opaque ChannelHandle from the current evaluator run and
-    exact structured scope. Other values and foreign, parent, child, sibling, or stale handles
-    return E0907 without exposing channel state. *)
+    exact structured scope. This is a structural carrier check and does not claim registry liveness;
+    every routed Channel operation additionally performs the scheduler-owned live-registry lookup.
+    Other values and foreign, parent, child, or sibling handles return E0907 without exposing
+    channel state. *)
 
 val reject_task_escape : ctx -> scope_path:int list -> Value.t -> (unit, Diag.t list) result
 (** [reject_task_escape ctx ~scope_path value] scans the complete reachable runtime-value graph and

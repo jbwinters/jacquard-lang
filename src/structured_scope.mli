@@ -93,9 +93,10 @@ val task_handle :
   Task_capability.t -> ('resume, 'value) t -> Value.t -> (handle, Diag.t list) result
 (** Runtime-private Task unwrapping, gated by the unforgeable scheduler capability. *)
 
-val channel_open : ('resume, 'value) t -> capacity:int -> channel_open_outcome
+val channel_open : ('resume, 'value) t -> capacity:int -> (channel_open_outcome, Diag.t list) result
 (** [channel_open] allocates the next zero-based successful-open identity in this exact open scope.
-    A negative capacity returns [Channel_invalid_capacity] before identity allocation. Trusted
+    A negative capacity returns [Channel_invalid_capacity] before identity allocation. A closed
+    scope returns E0907 and native ChannelId exhaustion returns E0908 without allocation. Trusted
     scheduler code must establish the routed cancellation boundary before calling this lower seam.
 *)
 
@@ -118,9 +119,10 @@ val channel_send :
   map_resume:('resume -> 'value channel_result -> 'resume) ->
   ('resume channel_transition, Diag.t list) result
 (** [channel_send] requires a cancellation-checked, checked-out caller continuation. It validates
-    exact live run/scope ownership before channel mutation, then performs FIFO handoff, buffering,
-    or scheduler-owned suspension. Invalid handles return E0907 without consuming the continuation
-    or payload. *)
+    exact live run/scope ownership and preflights all resume mappings before channel mutation, then
+    commits FIFO handoff, buffering, or scheduler-owned suspension without another failure point.
+    Invalid handles or task lifecycle return diagnostics without consuming the continuation or
+    payload. *)
 
 val channel_recv :
   ('resume, 'value) t ->
@@ -138,10 +140,13 @@ val channel_close :
   channel:channel_handle ->
   resume:'resume ->
   map_resume:('resume -> 'value channel_result -> 'resume) ->
+  map_closer:('resume -> 'resume) ->
   ('resume channel_transition, Diag.t list) result
 (** [channel_close] preserves accepted buffered values, wakes rejected senders and drained receivers
-    FIFO before the closer, and is idempotent. Exact ownership is validated before state or
-    continuation consumption. *)
+    FIFO before the closer, and is idempotent. [map_resume] supplies typed closed results to waiters
+    while [map_closer] supplies the close operation's unit result. Exact ownership and every waiter
+    mapping are prepared before state or continuation consumption, so a later invalid waiter cannot
+    partially close the channel. *)
 
 val inspect : ('resume, 'value) t -> handle -> ('value Scheduler_core.task_view, Diag.t list) result
 (** [inspect scope handle] returns the lifecycle view for an open scope. *)

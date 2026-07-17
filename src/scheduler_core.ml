@@ -44,6 +44,20 @@ type 'resume cancellation_boundary =
   | Boundary_continue of 'resume
   | Boundary_cancelled of { resume : 'resume; awakened : handle list }
 
+type ('resume, 'value) prepared_channel_suspend = {
+  suspend_entry : ('resume, 'value) entry;
+  suspend_channel : Channel_contract.channel_id;
+  suspend_direction : [ `Send | `Recv ];
+  suspend_resume : 'resume;
+  mutable suspend_committed : bool;
+}
+
+type ('resume, 'value) prepared_channel_wake = {
+  wake_entry : ('resume, 'value) entry;
+  wake_resume : 'resume;
+  mutable wake_committed : bool;
+}
+
 let diagnostic message =
   Diag.error ~code:"E0908" ~hint:"scheduler task state was not advanced"
     ("invalid structured-concurrency scheduler state: " ^ message)
@@ -224,22 +238,42 @@ let wake_yielded scheduler handle =
           Ok ()
       | _ -> error "only a yielded task with one resume token can be made runnable")
 
-let suspend_channel scheduler handle ~channel ~direction ~resume =
+let validate_channel_caller _capability scheduler handle =
+  Result.bind (validate scheduler handle) ensure_checked_out
+
+let prepare_channel_suspend _capability scheduler handle ~channel ~direction ~resume =
   Result.bind (validate scheduler handle) (fun (entry : (_, _) entry) ->
       Result.map
         (fun () ->
-          entry.resume <- Some resume;
-          entry.lifecycle <- Concurrency_contract.Suspended;
-          entry.suspension <-
-            Some
-              (match direction with
-              | `Send -> Channel_sending channel
-              | `Recv -> Channel_receiving channel))
+          {
+            suspend_entry = entry;
+            suspend_channel = channel;
+            suspend_direction = direction;
+            suspend_resume = resume;
+            suspend_committed = false;
+          })
         (ensure_checked_out entry))
+
+let commit_channel_suspend _capability prepared =
+  if prepared.suspend_committed then
+    failwith "Bug_scheduler_core: prepared channel suspension committed twice";
+  prepared.suspend_committed <- true;
+  prepared.suspend_entry.resume <- Some prepared.suspend_resume;
+  prepared.suspend_entry.lifecycle <- Concurrency_contract.Suspended;
+  prepared.suspend_entry.suspension <-
+    Some
+      (match prepared.suspend_direction with
+      | `Send -> Channel_sending prepared.suspend_channel
+      | `Recv -> Channel_receiving prepared.suspend_channel)
+
+let suspend_channel scheduler handle ~channel ~direction ~resume =
+  Result.map
+    (fun prepared -> commit_channel_suspend Task_capability.runtime prepared)
+    (prepare_channel_suspend Task_capability.runtime scheduler handle ~channel ~direction ~resume)
 
 let same_channel left right = Channel_contract.compare_channel_id left right = 0
 
-let wake_channel_with scheduler handle ~channel ~map_resume =
+let prepare_channel_wake _capability scheduler handle ~channel ~map_resume =
   Result.bind (validate scheduler handle) (fun (entry : (_, _) entry) ->
       match (entry.lifecycle, entry.suspension, entry.resume) with
       | ( Concurrency_contract.Suspended,
@@ -247,12 +281,22 @@ let wake_channel_with scheduler handle ~channel ~map_resume =
           Some resume )
         when same_channel waiting channel ->
           Result.map
-            (fun mapped ->
-              entry.resume <- Some mapped;
-              entry.lifecycle <- Concurrency_contract.Runnable;
-              entry.suspension <- None)
+            (fun mapped -> { wake_entry = entry; wake_resume = mapped; wake_committed = false })
             (map_resume resume)
       | _ -> error "only a task suspended on the exact channel can be channel-woken")
+
+let commit_channel_wake _capability prepared =
+  if prepared.wake_committed then
+    failwith "Bug_scheduler_core: prepared channel wake committed twice";
+  prepared.wake_committed <- true;
+  prepared.wake_entry.resume <- Some prepared.wake_resume;
+  prepared.wake_entry.lifecycle <- Concurrency_contract.Runnable;
+  prepared.wake_entry.suspension <- None
+
+let wake_channel_with scheduler handle ~channel ~map_resume =
+  Result.map
+    (fun prepared -> commit_channel_wake Task_capability.runtime prepared)
+    (prepare_channel_wake Task_capability.runtime scheduler handle ~channel ~map_resume)
 
 let result_lifecycle = function
   | Concurrency_contract.Done _ -> Concurrency_contract.Done_state
@@ -370,6 +414,11 @@ let request_cancel scheduler handle =
   Result.map
     (fun (entry : (_, _) entry) ->
       match entry.result with None -> entry.cancellation_requested <- true | Some _ -> ())
+    (validate scheduler handle)
+
+let cancellation_pending scheduler handle =
+  Result.map
+    (fun (entry : (_, _) entry) -> entry.result = None && entry.cancellation_requested)
     (validate scheduler handle)
 
 let deliver_cancel scheduler ~point:_ handle =

@@ -18,6 +18,12 @@ type ('resume, 'value) t
 (** Scheduler state for one structured scope. Resume tokens and task values remain opaque to the
     core, so the same state machine can own interpreter or native-runtime continuations. *)
 
+type ('resume, 'value) prepared_channel_suspend
+(** Runtime-private proof that a checked-out task can be suspended on one exact channel. *)
+
+type ('resume, 'value) prepared_channel_wake
+(** Runtime-private proof containing a successfully mapped resume for one exact channel waiter. *)
+
 type 'value task_view = {
   id : Concurrency_contract.task_id;
   lifecycle : Concurrency_contract.lifecycle;
@@ -118,6 +124,38 @@ val suspend_yield : ('resume, 'value) t -> handle -> resume:'resume -> (unit, Di
 val wake_yielded : ('resume, 'value) t -> handle -> (unit, Diag.t list) result
 (** [wake_yielded] transitions a yielded task back to Runnable. It does not enqueue or run it. *)
 
+val validate_channel_caller :
+  Task_capability.t -> ('resume, 'value) t -> handle -> (unit, Diag.t list) result
+(** Runtime-private preflight proving that a channel caller is live, runnable, and checked out. It
+    does not mutate scheduler state. *)
+
+val prepare_channel_suspend :
+  Task_capability.t ->
+  ('resume, 'value) t ->
+  handle ->
+  channel:Channel_contract.channel_id ->
+  direction:[ `Send | `Recv ] ->
+  resume:'resume ->
+  (('resume, 'value) prepared_channel_suspend, Diag.t list) result
+(** [prepare_channel_suspend] validates a pending channel suspension without changing task state.
+    The returned proof can be committed only by trusted structured-scope code. *)
+
+val commit_channel_suspend : Task_capability.t -> ('resume, 'value) prepared_channel_suspend -> unit
+(** [commit_channel_suspend] applies one previously prepared, infallible scheduler transition. *)
+
+val prepare_channel_wake :
+  Task_capability.t ->
+  ('resume, 'value) t ->
+  handle ->
+  channel:Channel_contract.channel_id ->
+  map_resume:('resume -> ('resume, Diag.t list) result) ->
+  (('resume, 'value) prepared_channel_wake, Diag.t list) result
+(** [prepare_channel_wake] validates the exact suspended channel and maps its resume without
+    changing scheduler state. Callback errors and exceptions therefore precede channel mutation. *)
+
+val commit_channel_wake : Task_capability.t -> ('resume, 'value) prepared_channel_wake -> unit
+(** [commit_channel_wake] makes one previously prepared waiter runnable without further failure. *)
+
 val suspend_channel :
   ('resume, 'value) t ->
   handle ->
@@ -158,6 +196,10 @@ val fail : ('resume, 'value) t -> handle -> string -> (handle list, Diag.t list)
 val request_cancel : ('resume, 'value) t -> handle -> (unit, Diag.t list) result
 (** [request_cancel] records a cooperative request. Repeated requests and terminal targets are
     idempotent. *)
+
+val cancellation_pending : ('resume, 'value) t -> handle -> (bool, Diag.t list) result
+(** [cancellation_pending] reports whether first delivery would terminalize this task. It is a
+    read-only preflight used before removing a channel waiter. *)
 
 val deliver_cancel :
   ('resume, 'value) t ->
