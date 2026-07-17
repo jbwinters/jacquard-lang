@@ -98,6 +98,10 @@ let load ~dir store : ((string * Canon.decl_hashes list) list, Diag.t list) resu
           let* () = bind_operation_alias "secret" "read" "secret.read" in
           let* () = bind_operation_alias "secret" "expose" "secret.expose" in
           let* () = bind_operation_alias "fs" "read" "read" in
+          let* () = bind_operation_alias "workspace" "read-file" "workspace.read-file" in
+          let* () = bind_operation_alias "workspace" "write-file" "workspace.write-file" in
+          let* () = bind_operation_alias "workspace" "fetch" "workspace.fetch" in
+          let* () = bind_operation_alias "net" "fetch" "fetch" in
           Ok (List.rev acc)
       | file :: rest -> (
           match load_file file with
@@ -461,7 +465,7 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
       optional "governance.resolve-operation-id" (fun args ->
           match args with
           | [ Value.VText qualified ] -> (
-              match String.rindex_opt qualified '.' with
+              match String.index_opt qualified '.' with
               | None | Some 0 -> Ok (verr "invalid Call: expected a resolved effect.operation name")
               | Some separator when separator = String.length qualified - 1 ->
                   Ok (verr "invalid Call: expected a resolved effect.operation name")
@@ -506,7 +510,18 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
                                (Printf.sprintf
                                   "invalid Call: effect `%s` has no exact resolved declaration"
                                   effect_name)))))
-          | args -> type_err "governance.resolve-operation-id" args)
+          | args -> type_err "governance.resolve-operation-id" args);
+      optional "governance.effect-order-key" (fun args ->
+          match args with
+          | [ Value.VHash identity ] ->
+              let hex = Hash.to_hex identity in
+              let key =
+                match Effect_registry.canonical_order identity with
+                | Some position -> Printf.sprintf "0:%08d:%s" position hex
+                | None -> "1:" ^ hex
+              in
+              Ok (Value.VText key)
+          | args -> type_err "governance.effect-order-key" args)
   | _ -> ());
   (match
      (lookup_hash store ~kind:Resolve.KCon "some", lookup_hash store ~kind:Resolve.KCon "none")
@@ -1258,9 +1273,9 @@ let builtin_signatures (store : Store.t) : ((Hash.t * Types.scheme) list, Diag.t
             ]
         in
         let governance_sigs =
-          let public =
-            match lookup_hash store ~kind:Resolve.KTerm "governance.resolve-operation-id" with
-            | Ok h -> [ (h, fn [ text ] (result text hash)) ]
+          let optional_sig name signature =
+            match lookup_hash store ~kind:Resolve.KTerm name with
+            | Ok hash -> [ (hash, signature) ]
             | Error _ -> []
           in
           let hidden name signature =
@@ -1268,7 +1283,8 @@ let builtin_signatures (store : Store.t) : ((Hash.t * Types.scheme) list, Diag.t
             | Some { Resolve.hash; _ } -> [ (hash, signature) ]
             | None -> []
           in
-          public
+          optional_sig "governance.resolve-operation-id" (fn [ text ] (result text hash))
+          @ optional_sig "governance.effect-order-key" (fn [ hash ] text)
           @ hidden "governance.fresh-audit-run-id" (fn [] hash)
           @ hidden "governance.require-audit-run-id" (fn [ hash; hash ] (Types.TTuple []))
         in
