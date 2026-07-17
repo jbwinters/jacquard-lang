@@ -149,9 +149,10 @@ wrappers, returned closures, tuples, polymorphic row instantiation, and nested
 scopes. Executable concurrency fixtures pin `{Async, Net}` before a scope and
 `{Net}` after one, and reject misleading closed annotations and cyclic rows.
 Generic operation typing remains unchanged. `Async` is still reserved: SC.3
-represents opaque run/scope-local Task values, while SC.4 adds only the static
-non-laundering rule; neither milestone implements a scheduler, executable
-scopes, or a root handler. See
+represents opaque run/scope-local Task values, SC.4 adds the static
+non-laundering rule, and SC.5 adds the policy-independent lifecycle core. No
+milestone yet implements scheduling policy, executable scopes, or a root
+handler. See
 [`concurrency.md`](concurrency.md).
 
 The reserved interface nevertheless has a full identity because SC.4 keeps it
