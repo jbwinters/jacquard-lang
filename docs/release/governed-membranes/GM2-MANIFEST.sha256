@@ -1,5 +1,5 @@
-# Effect-taxonomy ET.7-ET.8 + SC.0-SC.7 + GM.0-GM.2 reconstructible integration overlay
-# Base commit: 15bd544
+# Governed-membranes GM.0-GM.2 + ET.3-ET.8 + SC.0-SC.7 reconstructible integration overlay
+# Base commit: b5587ce
 # Attestation manifests exclude themselves (and successor manifests) to avoid self/cross-hashes.
 23e5c2dcec8f2aa6c96df0b0363cf9d9a393b99d326640b0f9507832d3cd8461  README.md
 c6f3755b008be94075aa4a1ebd8adb5758bbffcf195d532a63bf887584c04120  bin/main.ml
@@ -9,7 +9,6 @@ c6f3755b008be94075aa4a1ebd8adb5758bbffcf195d532a63bf887584c04120  bin/main.ml
 c4445aa103318b0d04f4af4294a8aa342a7a76de4245f6fd65202b2d84ae0a87  corpus/golden/ring0-freeze.golden
 f2b957a3376ea9b863c682562219053a1efe509c9c06c907de87eadfca9e4311  corpus/golden/sigs.golden
 d09a3bddcac09ec2e7fa3671eb98dc6eafd10bba97af206ba0ca5511de4dd155  corpus/governance/malformed-operation-names.tsv
-25d2ecae2ae5ab82f514fea61a70bf3616717d1a7e2f2e78edc05542b0dee413  corpus/governance/unresolved-operations.tsv
 8caa635e97d993640afcfa20b0917b31351c66b7b584535fb4ba80c938c9757a  corpus/surface/dx3/malformed/eof-nested.jac
 7f7785db144ff86cd0ebf053bf07ba3147348e1ad412f10b63e563c938d7178f  corpus/surface/dx3/malformed/extra-delimiter.jac
 b5915ce9934f5960c1d7f84894aad686ad8e44756fbd16343e890507b396eee2  corpus/surface/dx3/malformed/mismatched-block.jac
@@ -47,7 +46,6 @@ d4fea490203ee9e841e9f854eb4bd1807e69dddb0bbbc754ee35d21fb787a4ba  docs/release/0
 d36861cb68eb5c319030249c88e7b267d88f92485c3b5aa6fed9b1fd443c99b3  docs/release/effect-taxonomy/ET5-EVIDENCE.md
 af53655eb77e6f7897361e9e09cb718a271c81691b3d3ce5e392c46ac321f6c5  docs/release/effect-taxonomy/ET7-EVIDENCE.md
 8627ead6a685e5ff7f653327fcce5b1dcc7e0c10d465f926ba7e564a3bcbf92a  docs/release/effect-taxonomy/ET8-EVIDENCE.md
-18751712cc96a6ad909054e2e6ac4e18f646746ae395221b3cf5c6948133f0d8  docs/release/governed-membranes/GM1-EVIDENCE.md
 e9bcf7d8eaae1581027997ac757bbc287545c4d44a0b80e1bd8071bbfab2bd19  docs/release/governed-membranes/GM2-EVIDENCE.md
 cb29f4ceea607463b9baadcd1ed8c13f9943ee7e6739488b1c8462b82e181f77  docs/release/structured-concurrency/EVIDENCE.md
 32cb29894bd1834350fade7c147f8698e8323caf2ea65c825e0cc35f50ddd448  docs/release/surface-syntax/DECISION.md
@@ -59,7 +57,6 @@ c224581a90bbd493db3af08afb4a892bbb25eec9d9fe80179fe17f62fffd9594  prelude/03-con
 09d8c56da1e9d77bae133f3462a0b193e8402603b5911d2c5a1bd155797f3fb9  prelude/09-grid.jqd
 e5193aefa6826050b34a1112a63b10cec1763d89eb6e0465b23f3774a9b826f1  prelude/20-approval.jqd
 86be8f5ab15da038633c7087ac4a426597c54147e468d4bcdb973bf8052bf537  prelude/20-secret.jqd
-4c3aa3dbc4f0c642efd7fb682c7df358e70140ee7788d73ad9e056fc76bfb468  prelude/21-governance-core.jqd
 1a1567016dbd9ca34a67d240974f1c5bbb125bece3cce9919725759d478232eb  prelude/22-governance-identity.jqd
 dcf4a2300809d22b207b0731e506166dd85fa20d3dba322a8c961af7c9ce62b8  prelude/operation-modes.manifest
 0270d8aac1ad2b62a0f1f5e7911fd7c2472c5bcd8d12e40ac6cbef181afcc84a  prelude/rings.manifest
@@ -131,8 +128,6 @@ a4a79c18d5167c97d2a8c534889e9e66206a645b3bfa92cd5449a93a683dcaba  test/docs-doct
 d189b7e31800edea3f5b7018dc0bb440dc3165a5531c8b713f686c943c015340  test/docs-doctest/fixtures/concurrency-row-laundering.jac
 ac5ac172f5406b2b4639ff0ff410980c6ea2f232f0961869babb66b68087b060  test/docs-doctest/fixtures/concurrency-row-laundering.stderr
 f32c143a23165d885769de9f69f1d100008cf21925dfa6f2d2ddd4dbc93eace6  test/docs-doctest/fixtures/effect-taxonomy-schemas.jac
-960022b703fc06ef32b3d0de515021d91bbcc515d83210f9a3689d0eae9cb3d9  test/docs-doctest/fixtures/governed-membrane-signatures.jac
-b8ddef489f513d2c7491c013742a731d88715f6d455f1676a71f57303624aaa7  test/docs-doctest/fixtures/governed-membrane-signatures.stdout
 c32a5f13116e6f12bf82f2c35753538ce84adf7bb42ea4a5f6026737865b3da4  test/docs-doctest/fixtures/stdlib-handler-policy.jac
 084c799cd551dd1d8d5c5f9a5d593b2e931f5e36122ee5c793c1d08a19839cc0  test/docs-doctest/fixtures/stdlib-handler-policy.stdout
 65b94bcab4229d6876a99d8cbf9e55f6140c38c62eff484a16c31b4ce694af98  test/dune
