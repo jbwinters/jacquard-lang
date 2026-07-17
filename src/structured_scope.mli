@@ -11,6 +11,10 @@
 
 type handle = Scheduler_core.handle
 
+type channel_handle
+(** Opaque run- and exact-scope-owned channel handle. It has no public constructor, equality,
+    rendering, or serialization operation. *)
+
 type exit_reason =
   | Normal
   | Aborted
@@ -42,6 +46,25 @@ type 'resume cancel_outcome =
   | Cancel_continues of { resume : 'resume; awakened : handle list }
   | Cancel_caller_cancelled of handle list
 
+type channel_open_outcome =
+  | Channel_opened of channel_handle
+  | Channel_invalid_capacity of int
+      (** Typed result of [channel.open]. Rejected negative capacities allocate no channel identity.
+      *)
+
+type 'value channel_result =
+  | Channel_send_ok
+  | Channel_recv_ok of 'value
+  | Channel_closed
+      (** Scheduler-internal result used to transform a channel operation's affine resume. *)
+
+type 'resume channel_transition =
+  | Channel_continues of { resume : 'resume; awakened : handle list }
+  | Channel_suspended
+      (** A channel operation either leaves its caller continuation checked out and reports
+          counterpart wakeups in required FIFO order, or returns that continuation to the caller's
+          scheduler entry as one channel suspension. *)
+
 val create : body_resume:'resume -> (('resume, 'value) t * handle, Diag.t list) result
 (** [create] opens root scope path [[0]] and creates its body task at spawn index zero. *)
 
@@ -69,6 +92,46 @@ val task_value : Task_capability.t -> ('resume, 'value) t -> handle -> (Value.t,
 val task_handle :
   Task_capability.t -> ('resume, 'value) t -> Value.t -> (handle, Diag.t list) result
 (** Runtime-private Task unwrapping, gated by the unforgeable scheduler capability. *)
+
+val channel_open : ('resume, 'value) t -> capacity:int -> channel_open_outcome
+(** [channel_open] allocates the next zero-based successful-open identity in this exact open scope.
+    A negative capacity returns [Channel_invalid_capacity] before identity allocation. Trusted
+    scheduler code must establish the routed cancellation boundary before calling this lower seam.
+*)
+
+val channel_send :
+  ('resume, 'value) t ->
+  task:handle ->
+  channel:channel_handle ->
+  resume:'resume ->
+  value:'value ->
+  map_resume:('resume -> 'value channel_result -> 'resume) ->
+  ('resume channel_transition, Diag.t list) result
+(** [channel_send] requires a cancellation-checked, checked-out caller continuation. It validates
+    exact live run/scope ownership before channel mutation, then performs FIFO handoff, buffering,
+    or scheduler-owned suspension. Invalid handles return E0907 without consuming the continuation
+    or payload. *)
+
+val channel_recv :
+  ('resume, 'value) t ->
+  task:handle ->
+  channel:channel_handle ->
+  resume:'resume ->
+  map_resume:('resume -> 'value channel_result -> 'resume) ->
+  ('resume channel_transition, Diag.t list) result
+(** [channel_recv] is the receive counterpart of {!channel_send}. Buffered values are FIFO and one
+    oldest blocked sender is promoted or rendezvous-completed before the receiver continues. *)
+
+val channel_close :
+  ('resume, 'value) t ->
+  task:handle ->
+  channel:channel_handle ->
+  resume:'resume ->
+  map_resume:('resume -> 'value channel_result -> 'resume) ->
+  ('resume channel_transition, Diag.t list) result
+(** [channel_close] preserves accepted buffered values, wakes rejected senders and drained receivers
+    FIFO before the closer, and is idempotent. Exact ownership is validated before state or
+    continuation consumption. *)
 
 val inspect : ('resume, 'value) t -> handle -> ('value Scheduler_core.task_view, Diag.t list) result
 (** [inspect scope handle] returns the lifecycle view for an open scope. *)

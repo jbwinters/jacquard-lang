@@ -1,5 +1,10 @@
 type handle = Task_handle.t
-type suspension = Yielded | Awaiting of Concurrency_contract.task_id
+
+type suspension =
+  | Yielded
+  | Awaiting of Concurrency_contract.task_id
+  | Channel_sending of Channel_contract.channel_id
+  | Channel_receiving of Channel_contract.channel_id
 
 type ('resume, 'value) entry = {
   handle : handle;
@@ -126,6 +131,14 @@ let spawn scheduler ~resume =
 let id scheduler handle =
   Result.map (fun (entry : (_, _) entry) -> entry.id) (validate scheduler handle)
 
+let handle_of_id scheduler (id : Concurrency_contract.task_id) =
+  if scheduler.closed then error "cannot resolve a task in a closed scope"
+  else if id.scope_path <> scheduler.scope_path then error "task identity belongs to another scope"
+  else
+    match find_entry scheduler id with
+    | Some entry -> Ok entry.handle
+    | None -> error ("unknown task " ^ Concurrency_contract.trace_task_id id)
+
 let task_run _capability scheduler = scheduler.run
 
 let task_value _capability scheduler handle =
@@ -211,6 +224,36 @@ let wake_yielded scheduler handle =
           Ok ()
       | _ -> error "only a yielded task with one resume token can be made runnable")
 
+let suspend_channel scheduler handle ~channel ~direction ~resume =
+  Result.bind (validate scheduler handle) (fun (entry : (_, _) entry) ->
+      Result.map
+        (fun () ->
+          entry.resume <- Some resume;
+          entry.lifecycle <- Concurrency_contract.Suspended;
+          entry.suspension <-
+            Some
+              (match direction with
+              | `Send -> Channel_sending channel
+              | `Recv -> Channel_receiving channel))
+        (ensure_checked_out entry))
+
+let same_channel left right = Channel_contract.compare_channel_id left right = 0
+
+let wake_channel_with scheduler handle ~channel ~map_resume =
+  Result.bind (validate scheduler handle) (fun (entry : (_, _) entry) ->
+      match (entry.lifecycle, entry.suspension, entry.resume) with
+      | ( Concurrency_contract.Suspended,
+          Some (Channel_sending waiting | Channel_receiving waiting),
+          Some resume )
+        when same_channel waiting channel ->
+          Result.map
+            (fun mapped ->
+              entry.resume <- Some mapped;
+              entry.lifecycle <- Concurrency_contract.Runnable;
+              entry.suspension <- None)
+            (map_resume resume)
+      | _ -> error "only a task suspended on the exact channel can be channel-woken")
+
 let result_lifecycle = function
   | Concurrency_contract.Done _ -> Concurrency_contract.Done_state
   | Concurrency_contract.Failed _ -> Concurrency_contract.Failed_state
@@ -233,7 +276,7 @@ let wake_waiters scheduler (entry : (_, _) entry) =
              &&
              match waiter.suspension with
              | Some (Awaiting target) -> equal_id target entry.id
-             | Some Yielded | None -> false ->
+             | Some (Yielded | Channel_sending _ | Channel_receiving _) | None -> false ->
           waiter.lifecycle <- Concurrency_contract.Runnable;
           waiter.suspension <- None;
           Some waiter.handle

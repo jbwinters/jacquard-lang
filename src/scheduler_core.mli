@@ -10,6 +10,8 @@ type handle
 type suspension =
   | Yielded
   | Awaiting of Concurrency_contract.task_id
+  | Channel_sending of Channel_contract.channel_id
+  | Channel_receiving of Channel_contract.channel_id
       (** Why a task is suspended. A task has at most one live await edge. *)
 
 type ('resume, 'value) t
@@ -73,6 +75,12 @@ val spawn : ('resume, 'value) t -> resume:'resume -> (handle, Diag.t list) resul
 val id : ('resume, 'value) t -> handle -> (Concurrency_contract.task_id, Diag.t list) result
 (** [id] validates handle ownership and returns its deterministic scheduler ID. *)
 
+val handle_of_id :
+  ('resume, 'value) t -> Concurrency_contract.task_id -> (handle, Diag.t list) result
+(** [handle_of_id] resolves a scheduler-owned task identity in this exact scope. Unknown,
+    cross-scope, or closed-scope identities return E0908 without changing task state. This seam lets
+    scope-owned wait queues retain deterministic IDs rather than opaque runtime handles. *)
+
 val task_run : Task_capability.t -> ('resume, 'value) t -> Concurrency_owner.t
 (** Runtime-private, capability-gated access to the run owner for evaluator validation binding. *)
 
@@ -109,6 +117,27 @@ val suspend_yield : ('resume, 'value) t -> handle -> resume:'resume -> (unit, Di
 
 val wake_yielded : ('resume, 'value) t -> handle -> (unit, Diag.t list) result
 (** [wake_yielded] transitions a yielded task back to Runnable. It does not enqueue or run it. *)
+
+val suspend_channel :
+  ('resume, 'value) t ->
+  handle ->
+  channel:Channel_contract.channel_id ->
+  direction:[ `Send | `Recv ] ->
+  resume:'resume ->
+  (unit, Diag.t list) result
+(** [suspend_channel] atomically returns a checked-out affine resume to its task entry and records
+    one exact channel wait. Invalid lifecycle state leaves ownership unchanged and returns E0908. *)
+
+val wake_channel_with :
+  ('resume, 'value) t ->
+  handle ->
+  channel:Channel_contract.channel_id ->
+  map_resume:('resume -> ('resume, Diag.t list) result) ->
+  (unit, Diag.t list) result
+(** [wake_channel_with] validates an exact channel suspension, transforms the scheduler-owned resume
+    with its operation result, and makes the task runnable as one transition. If validation,
+    [map_resume], or a raised callback fails, the task remains suspended with its original resume;
+    the callback exception propagates. *)
 
 val await :
   ('resume, 'value) t ->

@@ -119,9 +119,9 @@ type ('task, 'value) teardown = {
   dropped_senders : ('task, 'value) pending_sender list;
   dropped_receivers : 'task pending_receiver list;
 }
-(** Every remaining channel-owned payload and waiter identity transferred out during scope
-    teardown, in deterministic channel-local FIFO order. Scheduler entries continue to own the
-    corresponding affine resumes. *)
+(** Every remaining channel-owned payload and waiter identity transferred out during scope teardown,
+    in deterministic channel-local FIFO order. Scheduler entries continue to own the corresponding
+    affine resumes. *)
 
 val teardown : ('task, 'value) t -> ('task, 'value) teardown
 (** [teardown] closes and empties the channel, transferring all remaining ownership exactly once.

@@ -306,6 +306,78 @@ let test_dynamic_escape_graph_scan () =
   let outer_task = hostile_task_for_ctx ctx ~scope_path:[ 0 ] ~spawn_index:3 in
   Eval.reject_task_escape ctx ~scope_path:[ 0; 1 ] (Value.VTuple [ outer_task ]) |> ok
 
+let map_channel_resume resume = function
+  | Structured_scope.Channel_send_ok -> resume + 1000
+  | Structured_scope.Channel_recv_ok value -> resume + String.length value
+  | Structured_scope.Channel_closed -> resume + 3000
+
+let opened_channel scope capacity =
+  match Structured_scope.channel_open scope ~capacity with
+  | Structured_scope.Channel_opened channel -> channel
+  | Structured_scope.Channel_invalid_capacity rejected ->
+      Alcotest.failf "capacity %d unexpectedly rejected" rejected
+
+let test_scoped_channel_ownership_and_cancellation () =
+  let scope, body = Structured_scope.create ~body_resume:10 |> ok in
+  (match Structured_scope.channel_open scope ~capacity:(-1) with
+  | Structured_scope.Channel_invalid_capacity -1 -> ()
+  | _ -> Alcotest.fail "negative channel capacity was not a typed refusal");
+  let channel = opened_channel scope 0 in
+  let senders =
+    List.init 3 (fun index -> Structured_scope.spawn scope ~resume:(20 + index) |> ok)
+  in
+  List.iteri
+    (fun index sender ->
+      let resume = Structured_scope.checkout scope sender |> ok in
+      match
+        Structured_scope.channel_send scope ~task:sender ~channel ~resume
+          ~value:(string_of_int (index + 1))
+          ~map_resume:map_channel_resume
+        |> ok
+      with
+      | Structured_scope.Channel_suspended -> ()
+      | Structured_scope.Channel_continues _ -> Alcotest.fail "rendezvous sender did not suspend")
+    senders;
+  let middle = List.nth senders 1 in
+  Structured_scope.request_cancel scope middle |> ok;
+  let dropped = ref [] in
+  let awakened =
+    Structured_scope.deliver_cancel scope ~point:Concurrency_contract.Routed_effect middle
+      ~drop:(fun resume -> dropped := resume :: !dropped)
+    |> ok
+  in
+  Alcotest.(check (list int)) "middle blocked resume dropped once" [ 21 ] !dropped;
+  Alcotest.(check int) "channel cancellation wakes nobody" 0 (List.length awakened);
+  let receive expected =
+    let resume = Structured_scope.checkout scope body |> ok in
+    match
+      Structured_scope.channel_recv scope ~task:body ~channel ~resume ~map_resume:map_channel_resume
+      |> ok
+    with
+    | Structured_scope.Channel_suspended -> Alcotest.fail "surviving sender was stranded"
+    | Structured_scope.Channel_continues { resume; awakened = [ sender ] } ->
+        Alcotest.(check string)
+          "sender FIFO" expected
+          (Structured_scope.id scope sender |> ok |> Concurrency_contract.trace_task_id);
+        Structured_scope.suspend_yield scope body ~resume |> ok;
+        Structured_scope.wake_yielded scope body |> ok
+    | Structured_scope.Channel_continues _ -> Alcotest.fail "wrong channel wakeup cardinality"
+  in
+  receive "0#1";
+  receive "0#3";
+  let nested, nested_body = Structured_scope.nest scope ~body_resume:40 |> ok in
+  Alcotest.(check string)
+    "nested task cannot use parent channel" "E0907"
+    (Structured_scope.with_checkout nested nested_body (fun resume ->
+         Structured_scope.channel_send nested ~task:nested_body ~channel ~resume ~value:"escape"
+           ~map_resume:map_channel_resume)
+    |> error_code);
+  Alcotest.(check bool)
+    "foreign-handle refusal preserves continuation" true
+    (Structured_scope.inspect nested nested_body |> ok).owns_resume;
+  Structured_scope.close scope ~reason:Structured_scope.Normal ~escaping:[] ~drop:ignore |> ok;
+  check_zero_metrics "channel cancellation close" scope
+
 let prop_recursive_close_restores_baseline =
   QCheck.Test.make ~count:200 ~name:"recursive scope close restores every ownership counter"
     QCheck.nat_small (fun seed ->
@@ -334,6 +406,7 @@ let run () =
   test_cleanup_exception_precedence ();
   test_checkout_bracket_restores_error_and_exception ();
   test_dynamic_escape_graph_scan ();
+  test_scoped_channel_ownership_and_cancellation ();
   QCheck.Test.check_exn prop_recursive_close_restores_baseline
 
 let suite = [ Alcotest.test_case "nested ownership, cleanup, and escape" `Quick run ]

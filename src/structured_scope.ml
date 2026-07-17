@@ -1,4 +1,5 @@
 type handle = Scheduler_core.handle
+type channel_handle = Channel_handle.t
 type exit_reason = Normal | Aborted | Raised
 type metrics = { open_scopes : int; live_tasks : int; runnable_tasks : int; owned_resumes : int }
 type 'resume boundary_outcome = Boundary_continue of 'resume | Boundary_cancelled of handle list
@@ -17,10 +18,23 @@ type 'resume cancel_outcome =
   | Cancel_continues of { resume : 'resume; awakened : handle list }
   | Cancel_caller_cancelled of handle list
 
+type channel_open_outcome = Channel_opened of channel_handle | Channel_invalid_capacity of int
+type 'value channel_result = Channel_send_ok | Channel_recv_ok of 'value | Channel_closed
+
+type 'resume channel_transition =
+  | Channel_continues of { resume : 'resume; awakened : handle list }
+  | Channel_suspended
+
+type ('resume, 'value) channel_entry = {
+  state : (Concurrency_contract.task_id, 'value) Channel_contract.t;
+}
+
 type ('resume, 'value) t = {
   scheduler : ('resume, 'value) Scheduler_core.t;
   mutable next_nested : int;
   mutable children : ('resume, 'value) t list;
+  mutable next_channel : int;
+  mutable channels : ('resume, 'value) channel_entry list;
   mutable closed : bool;
 }
 
@@ -42,7 +56,8 @@ let drop_all drop resumes =
     resumes;
   Option.iter raise !first_exception
 
-let make_root scheduler = { scheduler; next_nested = 1; children = []; closed = false }
+let make_root scheduler =
+  { scheduler; next_nested = 1; children = []; next_channel = 0; channels = []; closed = false }
 
 let create ~body_resume =
   Result.map
@@ -77,6 +92,108 @@ let task_value capability scope handle =
 let task_handle capability scope value =
   ensure_open scope (fun () -> Scheduler_core.task_handle capability scope.scheduler value)
 
+let channel_run scope = Scheduler_core.task_run Task_capability.runtime scope.scheduler
+
+let channel_open scope ~capacity =
+  if capacity < 0 then Channel_invalid_capacity capacity
+  else if scope.closed then Channel_invalid_capacity capacity
+  else
+    let open_index = scope.next_channel in
+    match Channel_contract.open_channel ~scope_path:(scope_path scope) ~open_index ~capacity with
+    | Channel_contract.Invalid_capacity rejected -> Channel_invalid_capacity rejected
+    | Channel_contract.Opened state ->
+        let id = (Channel_contract.view state).id in
+        let channel_handle = Channel_handle.create ~run:(channel_run scope) ~id in
+        scope.next_channel <- open_index + 1;
+        scope.channels <- scope.channels @ [ { state } ];
+        Channel_opened channel_handle
+
+let same_channel_id left right = Channel_contract.compare_channel_id left right = 0
+
+let find_channel scope channel =
+  Result.bind
+    (Channel_handle.validate_scope ~run:(channel_run scope) ~scope_path:(scope_path scope) channel)
+    (fun id ->
+      match
+        List.find_opt
+          (fun entry -> same_channel_id (Channel_contract.view entry.state).id id)
+          scope.channels
+      with
+      | Some entry -> Ok entry
+      | None -> closed_error ())
+
+let wake_channel scope channel_id task_id result ~map_resume =
+  Result.bind (Scheduler_core.handle_of_id scope.scheduler task_id) (fun handle ->
+      Result.map
+        (fun () -> handle)
+        (Scheduler_core.wake_channel_with scope.scheduler handle ~channel:channel_id
+           ~map_resume:(fun resume -> Ok (map_resume resume result))))
+
+let validate_channel_operation scope ~task ~channel =
+  ensure_open scope (fun () ->
+      Result.bind (Scheduler_core.id scope.scheduler task) (fun task_id ->
+          Result.map (fun channel_entry -> (task_id, channel_entry)) (find_channel scope channel)))
+
+let channel_send scope ~task ~channel ~resume ~value ~map_resume =
+  Result.bind (validate_channel_operation scope ~task ~channel) (fun (task_id, entry) ->
+      let channel_id = (Channel_contract.view entry.state).id in
+      match Channel_contract.send entry.state ~sender:task_id ~value with
+      | Channel_contract.Send_completed ->
+          Ok (Channel_continues { resume = map_resume resume Channel_send_ok; awakened = [] })
+      | Channel_contract.Send_closed ->
+          Ok (Channel_continues { resume = map_resume resume Channel_closed; awakened = [] })
+      | Channel_contract.Send_delivered receiver ->
+          Result.map
+            (fun awakened ->
+              Channel_continues
+                { resume = map_resume resume Channel_send_ok; awakened = [ awakened ] })
+            (wake_channel scope channel_id receiver.receiver (Channel_recv_ok value) ~map_resume)
+      | Channel_contract.Send_blocked ->
+          Result.map
+            (fun () -> Channel_suspended)
+            (Scheduler_core.suspend_channel scope.scheduler task ~channel:channel_id
+               ~direction:`Send ~resume))
+
+let channel_recv scope ~task ~channel ~resume ~map_resume =
+  Result.bind (validate_channel_operation scope ~task ~channel) (fun (task_id, entry) ->
+      let channel_id = (Channel_contract.view entry.state).id in
+      match Channel_contract.recv entry.state ~receiver:task_id with
+      | Channel_contract.Recv_closed ->
+          Ok (Channel_continues { resume = map_resume resume Channel_closed; awakened = [] })
+      | Channel_contract.Recv_blocked ->
+          Result.map
+            (fun () -> Channel_suspended)
+            (Scheduler_core.suspend_channel scope.scheduler task ~channel:channel_id
+               ~direction:`Recv ~resume)
+      | Channel_contract.Recv_delivered { value; completed_sender = None } ->
+          Ok
+            (Channel_continues { resume = map_resume resume (Channel_recv_ok value); awakened = [] })
+      | Channel_contract.Recv_delivered { value; completed_sender = Some sender } ->
+          Result.map
+            (fun awakened ->
+              Channel_continues
+                { resume = map_resume resume (Channel_recv_ok value); awakened = [ awakened ] })
+            (wake_channel scope channel_id sender.sender Channel_send_ok ~map_resume))
+
+let channel_close scope ~task ~channel ~resume ~map_resume =
+  Result.bind (validate_channel_operation scope ~task ~channel) (fun (_, entry) ->
+      let channel_id = (Channel_contract.view entry.state).id in
+      let closed = Channel_contract.close entry.state in
+      let pending =
+        List.map (fun sender -> sender.Channel_contract.sender) closed.rejected_senders
+        @ List.map (fun receiver -> receiver.Channel_contract.receiver) closed.rejected_receivers
+      in
+      let rec wake reversed = function
+        | [] ->
+            Ok
+              (Channel_continues
+                 { resume = map_resume resume Channel_send_ok; awakened = List.rev reversed })
+        | pending_task :: rest ->
+            Result.bind (wake_channel scope channel_id pending_task Channel_closed ~map_resume)
+              (fun awakened -> wake (awakened :: reversed) rest)
+      in
+      wake [] pending)
+
 let inspect scope handle =
   ensure_open scope (fun () -> Scheduler_core.inspect scope.scheduler handle)
 
@@ -104,13 +221,25 @@ let fail scope handle message =
 let request_cancel scope handle =
   ensure_open scope (fun () -> Scheduler_core.request_cancel scope.scheduler handle)
 
+let equal_task_id left right = Concurrency_contract.compare_task_id left right = 0
+
+let remove_channel_waiter scope handle =
+  Result.map
+    (fun task_id ->
+      List.iter
+        (fun entry ->
+          ignore (Channel_contract.cancel ~equal_task:equal_task_id entry.state task_id))
+        scope.channels)
+    (Scheduler_core.id scope.scheduler handle)
+
 let deliver_cancel scope ~point handle ~drop =
   ensure_open scope (fun () ->
-      Result.map
-        (fun (awakened, resumes) ->
-          drop_all drop resumes;
-          awakened)
-        (Scheduler_core.deliver_cancel scope.scheduler ~point handle))
+      Result.bind (remove_channel_waiter scope handle) (fun () ->
+          Result.map
+            (fun (awakened, resumes) ->
+              drop_all drop resumes;
+              awakened)
+            (Scheduler_core.deliver_cancel scope.scheduler ~point handle)))
 
 let at_cancellation_point scope ~point ~task ~resume ~drop =
   ensure_open scope (fun () ->
@@ -160,6 +289,8 @@ let cancel scope ~caller ~target ~resume ~drop =
                       match suspension with
                       | Scheduler_core.Yielded -> Concurrency_contract.Yield
                       | Scheduler_core.Awaiting _ -> Concurrency_contract.Await
+                      | Scheduler_core.Channel_sending _ | Scheduler_core.Channel_receiving _ ->
+                          Concurrency_contract.Routed_effect
                     in
                     Result.map
                       (fun awakened -> Cancel_continues { resume; awakened })
@@ -204,6 +335,7 @@ let rec close_owned scope =
   if scope.closed then []
   else
     let child_resumes = List.concat_map close_owned scope.children in
+    List.iter (fun entry -> ignore (Channel_contract.teardown entry.state)) scope.channels;
     let own_resumes = Scheduler_core.close scope.scheduler in
     scope.closed <- true;
     child_resumes @ own_resumes
