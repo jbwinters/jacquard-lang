@@ -118,6 +118,10 @@ Read these together when judging whether the release candidate is credible:
 - `release/governed-membranes/GM5-MANIFEST.sha256`: reconstructible GM.5 overlay
   on the validated GM.1 plus ET.3 integration base `94b5082`; the GM.1 evidence
   set remains historical.
+- `release/governed-membranes/GM2-EVIDENCE.md`: GM.2 exact Call and successor
+  Proposal identities, canonical-Code goldens, and stability/sensitivity laws.
+- `release/governed-membranes/GM2-MANIFEST.sha256`: reconstructible GM.2 overlay
+  on the validated GM.1 commit `b5587ce`.
 
 ## Structured Concurrency Evidence
 
