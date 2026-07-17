@@ -2,10 +2,10 @@ open Jacquard
 
 let taxonomy_file = "../spec/effect-taxonomy-v1.tsv"
 let taxonomy_doc = "../docs/effect-taxonomy.md"
+let membrane_doc = "../docs/effect-membranes.md"
 let review_doc = "../docs/effect-review.md"
 let stdlib_doc = "../docs/stdlib.md"
 let tutorial_doc = "../docs/tutorial.md"
-let membrane_doc = "../docs/effect-membranes.md"
 let concurrency_doc = "../docs/concurrency.md"
 let schema_fixture = "docs-doctest/fixtures/effect-taxonomy-schemas.jac"
 let approval_fixture = "docs-doctest/fixtures/stdlib-handler-policy.jac"
@@ -134,6 +134,12 @@ let handler_contracts =
       handled_effect = "Judge";
       boundary = "`judge.rules`, `judge.fixed`, `judge.scripted`, `judge.model`";
       terms = [ "judge.rules"; "judge.fixed"; "judge.scripted"; "judge.model" ];
+      root_grant = false;
+    };
+    {
+      handled_effect = "Workspace";
+      boundary = "`workspace.read-file`, `workspace.write-file`, `workspace.fetch` typed facade";
+      terms = [];
       root_grant = false;
     };
   ]
@@ -505,9 +511,9 @@ let check_unique label values =
 let test_complete_contract () =
   let rows = rows () in
   let doc = Corpus_support.read_file taxonomy_doc in
-  Alcotest.(check int) "blessed effect count" 25 (List.length rows);
+  Alcotest.(check int) "blessed effect count" 26 (List.length rows);
   Alcotest.(check int)
-    "implemented count" 16
+    "implemented count" 17
     (List.length (List.filter (fun row -> String.equal row.status "implemented") rows));
   Alcotest.(check int)
     "reserved count" 9
@@ -1279,8 +1285,9 @@ let test_governance_and_links () =
   Alcotest.(check bool)
     "stdlib implemented inventory is exact" true
     (contains_string stdlib
-       "| implemented (16) | `Abort`, `Throw`, `State`, `Emit`, `Dist`, `Fault`, `Eval`, \
-        `Console`, `Clock`, `Fs`, `Net`, `Infer`, `Approval`, `Audit`, `Secret`, `Judge` |");
+       "| implemented (17) | `Abort`, `Throw`, `State`, `Emit`, `Dist`, `Fault`, `Eval`, \
+        `Console`, `Clock`, `Fs`, `Net`, `Workspace`, `Infer`, `Approval`, `Audit`, `Secret`, \
+        `Judge` |");
   Alcotest.(check bool)
     "stdlib reserved inventory is exact" true
     (contains_string stdlib ("| reserved/unimplemented (9) | " ^ reserved_csv ^ " |"));
@@ -1428,9 +1435,9 @@ let registry_entry display_name =
 let test_typed_registry_matches_contract () =
   let rows = rows () in
   let entries = Effect_registry.catalog in
-  Alcotest.(check int) "catalog covers every blessed entry" 25 (List.length entries);
+  Alcotest.(check int) "catalog covers every blessed entry" 26 (List.length entries);
   Alcotest.(check int)
-    "only live identities enter the canonical registry" 16
+    "only live identities enter the canonical registry" 17
     (List.length (Effect_registry.entries Effect_registry.canonical));
   Alcotest.(check (list string))
     "catalog names exactly cover the TSV"
@@ -1563,7 +1570,41 @@ let test_registry_order_is_stable () =
     Effect_registry.entries Effect_registry.canonical
     |> List.map (fun (entry : Effect_registry.metadata) -> entry.display_name)
   in
-  Alcotest.(check (list string)) "stable display ordering" (List.sort String.compare names) names
+  Alcotest.(check (list string)) "stable display ordering" (List.sort String.compare names) names;
+  let contract = rows () in
+  Alcotest.(check int)
+    "catalog and TSV have the same positional extent" (List.length contract)
+    (List.length Effect_registry.catalog);
+  List.iteri
+    (fun position (row, (entry : Effect_registry.metadata)) ->
+      Alcotest.(check string)
+        (Printf.sprintf "catalog row %d name" position)
+        row.effect_name entry.display_name;
+      Alcotest.(check string)
+        (Printf.sprintf "catalog row %d index" position)
+        row.index_name entry.index_name;
+      match (row.status, entry.interface) with
+      | "implemented", Effect_registry.Released { hash; _ } ->
+          Alcotest.(check string)
+            (Printf.sprintf "catalog row %d released identity" position)
+            row.interface_hash (Hash.to_hex hash);
+          Alcotest.(check (option int))
+            (Printf.sprintf "catalog row %d canonical position" position)
+            (Some position)
+            (Effect_registry.canonical_order hash)
+      | "reserved", Effect_registry.Reserved _ ->
+          let expected_identity =
+            if String.equal row.effect_name "Async" then Concurrency_contract.async_effect_hash
+            else "first-release"
+          in
+          Alcotest.(check string)
+            (Printf.sprintf "catalog row %d reserved identity" position)
+            expected_identity row.interface_hash
+      | _ -> Alcotest.failf "catalog row %d status/interface mismatch" position)
+    (List.combine contract Effect_registry.catalog);
+  Alcotest.(check (option int))
+    "unknown identity has no blessed position" None
+    (Effect_registry.canonical_order (Hash.of_string "unblessed ordering fallback"))
 
 let test_governed_membrane_charter () =
   let doc = Corpus_support.read_file membrane_doc in

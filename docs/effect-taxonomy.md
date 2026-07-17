@@ -1,7 +1,8 @@
 # Blessed Effect Taxonomy v1
 
 Status: ET.8 release-frozen taxonomy (D56-D63), with Audit, Secret, Approval,
-and Judge shipped and their canonical boundaries evidenced, July 2026.
+Judge, and Workspace shipped and their canonical boundaries evidenced through
+ET.8, GM.5, and GM.9, July 2026.
 
 This specification freezes the shared effect vocabulary used by signatures,
 authority manifests, package review, and future registry metadata. It is a
@@ -72,6 +73,7 @@ mode; there is no inference from names.
 | `Env` | `env` | `official` | `world` | `-` | `once` | `low` | `3` | `reserved` | `first-release` | `env.get:(Text)->Option Text` | read one named process configuration value |
 | `Fs` | `fs` | `official` | `world` | `-` | `once` | `medium` | `3` | `implemented` | `8ec13169c7181851364e55353232af8e3c7f5ee4a010fa3067fcf2058dd5ed84` | `read:(Text)->Text;write:(Text,Text)->();list-dir:(Text)->List Text` | read or mutate the filesystem under the granted root handler |
 | `Net` | `net` | `official` | `world` | `-` | `once` | `high` | `3` | `implemented` | `be1aad7345c6215f227e63df6c7d05874a464f207599d4f5b85de8b0a6675b45` | `fetch:(Request)->Response` | reach a network endpoint through the granted handler |
+| `Workspace` | `workspace` | `official` | `world` | `-` | `once` | `high` | `3` | `implemented` | `d5831f495fdb26e05d53d886786f07230f7bb808ac4933ab32e0a9238c89f9d0` | `workspace.read-file:(Path)->Result ToolError Text;workspace.write-file:(Path,Text)->Result ToolError ();workspace.fetch:(Request)->Result ToolError Response` | request mediated workspace reads, writes, or fetches without directly acquiring raw authority |
 | `Pg` | `pg` | `official` | `world` | `-` | `once` | `high` | `3` | `reserved` | `first-release` | `pg.query:(Sql,Params)->Rows` | issue a parameterized PostgreSQL query |
 | `Blob` | `blob` | `official` | `world` | `-` | `once` | `high` | `3` | `reserved` | `first-release` | `blob.get:(Hash)->Option Bytes;blob.put-if-absent:(Hash,Bytes)->();blob.exists?:(Hash)->Bool` | read or add immutable objects in configured blob storage |
 | `Serve` | `serve` | `official` | `world` | `-` | `once` | `high` | `3` | `reserved` | `first-release` | `serve.next:()->Request;serve.respond:(Response)->()` | receive and answer server requests |
@@ -115,6 +117,7 @@ plaintext must not become an ordinary prelude value before explicit exposure.
 | `Audit` | `audit.in-memory`, `audit.line-log` |
 | `Secret` | `Prelude.install_secret_fixed`, `Prelude.install_secret_vault`, explicit environment root grant |
 | `Judge` | `judge.rules`, `judge.fixed`, `judge.scripted`, `judge.model` |
+| `Workspace` | `workspace.read-file`, `workspace.write-file`, `workspace.fetch` typed facade |
 
 The remaining nine blessed names are **reserved and unimplemented**:
 `Choose`, `Env`, `Pg`, `Blob`, `Serve`, `Crypto`, `Log`, `Async`, and `Channel`.
@@ -234,17 +237,19 @@ Code bytes used by `code.render`; it is not a Proposal-specific second
 serializer. Metadata is absent from those bytes. Consequently presentation
 metadata on the semantic call does not change its subject, while authority,
 policy, assessment, preview, rendering, or summary changes produce a different
-proposal. ET.7 supplies four canonical handlers. `approval.console` prints the
-exact proposal hash followed by the ordered authority request and recognizes
-only the exact response `approve` as consent. `approval.scripted` consumes
-explicit Decisions supplied by a test fixture and validates each Decision
-against the current Proposal; it never synthesizes consent. `approval.dry-run`
-always returns `Escalate`, never `Approved`. `approval.policy-auto` may approve
-only an already-`Allow` policy verdict; `Ask` and `Simulate` escalate, while
-`Block` denies. Every handler recomputes the Proposal hash before it can resume
-the protected computation. The classifier that supplies the verdict is a
-trusted handler dependency: a live membrane must derive it from the exact
-validated policy and assessment, never from governed caller input.
+proposal.
+
+ET.7 supplies four canonical handlers. `approval.console` prints the exact
+proposal hash followed by the ordered authority request and recognizes only
+the exact response `approve` as consent. `approval.scripted` consumes explicit
+Decisions supplied by a test fixture and validates each Decision against the
+current Proposal; it never synthesizes consent. `approval.dry-run` always
+returns `Escalate`, never `Approved`. `approval.policy-auto` may approve only
+an already-`Allow` policy verdict; `Ask` and `Simulate` escalate, while `Block`
+denies. Every handler recomputes the Proposal hash before it can resume the
+protected computation. The classifier that supplies the verdict is a trusted
+handler dependency: a live membrane must derive it from the exact validated
+policy and assessment, never from governed caller input.
 
 GM.0 retains that two-level identity rule while naming the successor membrane
 fields `Call.call-id` and `Proposal.proposal-id`, adding `GovernanceV0` and the
@@ -262,6 +267,22 @@ stored policy threshold, and return `NoSimulation` only when it does not. The
 validated ET.6 carrier above remains compatibility evidence and keeps its
 original identities. Every dry-run or scripted Approval handler returns
 `Escalate`, never `Approved`; canonical handlers remain ET.7 scope.
+
+GM.2 completes the successor review identity as the separate
+`GovernanceProposal`/`governance-proposal-v0` carrier. Its smart constructor
+derives the Call, live BoundPolicy, and Assessment identities from validated
+values and obtains the authority envelope from the Call. The exact proposal
+Code commits, in order, `GovernanceV0`, call ID, policy ID, assessment ID,
+authority, optional preview, reviewed rendering, and summary. Validation
+recomputes the carried hash and the artifact-aware boundary additionally
+checks every constituent ID and the byte-identical authority envelope. This
+uses the already released `code.hash` canonical-Code boundary; the ET.6
+`proposal-v1` carrier and `Approval` effect remain hash-for-hash unchanged.
+
+GM.0 names the semantic identities `Call.call-id` and
+`Proposal.proposal-id`, adds `GovernanceV0` and the exact constituent IDs, and
+keeps presentation summary out of the call identity. Every dry-run or scripted
+Approval handler returns `Escalate`, never `Approved`.
 
 The declarations below are an executable surface fixture for the reserved
 world, governance, Async, and Channel operation boundaries. Its small carrier
@@ -371,7 +392,7 @@ and is breaking. Adding an operation is also breaking for the same reason;
 handlers silently remain exhaustive. Renames in the mutable name index and
 metadata-only changes retain identity.
 
-The fifteen implemented blessed effects keep their exact current declaration
+The seventeen implemented blessed effects keep their exact current declaration
 hashes listed above. ET.0 does not rewrite those declarations. This preserves
 the historical absence encoding for `multi`, the reviewed `once` discriminator,
 and existing operation names—including `Eval.eval-code`. Each reserved effect's
@@ -382,20 +403,23 @@ edit after that point is a new interface, never an in-place revision.
 ### Registry realization
 
 `Effect_registry` is the executable copy used by review tooling. Its resolved
-registry contains exactly the sixteen implemented entries and is keyed only by
-their full `DefEffect` hashes. The complete 25-entry catalog is also typed, but
+registry contains exactly the seventeen implemented entries and is keyed only by
+their full `DefEffect` hashes. The complete 26-entry catalog is also typed, but
 the nine `reserved` entries carry no hash and name only the
 `first-release` policy; registration rejects them until a real first interface is
 implemented and frozen. This keeps schema reservation distinct from resolved
-program identity. Audit, Secret, Approval, and Judge are the reserved interfaces
-promoted by that rule. Their v1 identities above are the shipped `DefEffect`
-hashes. Their operations are once `audit.record : (AuditEntry) -> ()`, once
-`secret.read : (SecretRef) -> Secret`, once `secret.expose : (Secret) -> Text`,
-once `approval.ask : (Proposal) -> Decision`, and once
-`judge.assess : (GovernanceCall) -> GovernanceAssessment`. The executable GM.5
+program identity. Audit, Secret, Approval, Judge, and Workspace are released
+governance interfaces. Their identities above are the shipped `DefEffect`
+hashes. The released operations are once
+`audit.record : (AuditEntry) -> ()`, once
+`secret.read : (SecretRef) -> Secret`, once
+`secret.expose : (Secret) -> Text`, once
+`approval.ask : (Proposal) -> Decision`, and once
+`judge.assess : (Call) -> Assessment`, plus once `workspace.read-file`,
+`workspace.write-file`, and `workspace.fetch`. The executable GM.5
 declaration uses the collision-safe GM.1 carrier names `GovernanceCall` and
-`GovernanceAssessment`, the versioned v0 spellings of the charter schemas shown
-here.
+`GovernanceAssessment`; these are the versioned v0 spellings of the charter
+schemas shown here.
 
 Plain rendering is deterministic. Optional ANSI styling colors only the risk
 token of an identity-confirmed official entry. An unregistered effect with
@@ -434,8 +458,7 @@ data and receive structural diffs, never an authority label.
   process memory and crash-dump protection remain embedding responsibilities.
 - A reserved schema is neither an implementation nor a roadmap promise. In
   particular, this release has no `Async` scheduler, typed `Channel` runtime,
-  database/blob/serve/crypto/log provider, pure `Choose` interface, or `Judge`
-  handler.
+  database/blob/serve/crypto/log provider, or pure `Choose` interface.
 
 ### Audit chain v1
 
@@ -468,7 +491,9 @@ what detects removal of a valid tail.
 Library and CLI reads use one bounded fail-closed path: chain logs are limited
 to 16 MiB and entry inputs to 1 MiB. A read verifies that the regular file's
 descriptor and path identity, size, mtime, and ctime stay stable through EOF.
-Concurrent truncation, growth, replacement, over-limit input, and expected I/O
+A coherent snapshot then undergoes strict byte verification; a malformed
+snapshot returns its ordinary format diagnostic. Truncation, growth, or
+replacement detected during acquisition, over-limit input, and expected I/O
 failures produce E1306 before any record write. A pathname replacement never
 receives a record intended for the verified inode.
 
@@ -480,7 +505,7 @@ receives a record intended for the verified inode.
 | D57 | Secret opacity | opaque, no `Show`, inspect redacts, explicit in-row `secret.expose`; taint deferred |
 | D58 | audit chain | implemented `audit-chain-v1` carrier commits existing canonical entry bytes and predecessor HASH_V0; CLI append publishes a head and governance verification fails closed offline |
 | D59 | Proposal schema | implemented `proposal-v1` binds semantic call subject separately from exact review identity; policy, assessment, ordered authority, rendering, summary, and preview are mandatory hash inputs; decisions embed that exact proposal hash, and hash-less, forged, or mismatched carriers fail before action. GM.0 D67 supersedes the earlier `subject` field name with exact `call-id` and `proposal-id` schemas. |
-| D60 | membrane placement | GM.1 implements the versioned core data and policies in ring 3; handlers, cookbook, and flagship demo remain later phases |
+| D60 | membrane placement | GM.1 implements the versioned core data and policies in ring 3; GM.5 releases Judge handlers and GM.9 releases the typed Workspace facade, while cookbook and flagship demo work remain later phases |
 | D61 | facade shape | domain-specific typed facade effects; no universal stringly `Tool.call` |
 | D62 | raw authority | host is a role; membranes re-perform concrete blessed world effects, never `Host` |
 | D63 | Judge status | blessed once effect with `judge.assess : (Call) -> Assessment` |
