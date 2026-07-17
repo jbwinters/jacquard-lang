@@ -19,8 +19,8 @@ if [ -z "$base" ]; then
 fi
 if git cat-file -e "$base^{commit}" 2>/dev/null; then
   mkdir -p "$repo_root/.scratch/tmp"
-  expected=$(mktemp "$repo_root/.scratch/tmp/sc4-expected.XXXXXX")
-  actual=$(mktemp "$repo_root/.scratch/tmp/sc4-actual.XXXXXX")
+  expected=$(mktemp "$repo_root/.scratch/tmp/sc4-sc5-expected.XXXXXX")
+  actual=$(mktemp "$repo_root/.scratch/tmp/sc4-sc5-actual.XXXXXX")
   trap 'rm -f "$expected" "$actual"' EXIT HUP INT TERM
   {
     git diff --name-only "$base"
