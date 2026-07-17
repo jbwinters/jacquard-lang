@@ -37,10 +37,11 @@ project shape from file names alone.
   uncertainty wording, canonical boundaries, and explicit non-goals.
 - `effect-membranes.md`: GM.0 charter for typed governed facades, versioned
   decision artifacts, live/dry boundaries, and monotonic composition.
-- `concurrency.md`: SC.7 cooperative cancellation at scheduler boundaries over
-  SC.6 structured-scope ownership, the SC.5 policy-independent lifecycle, and
-  the SC.4 generalized child-effect law, plus scope contracts, deterministic
-  scheduling, exclusions, and D46-D50.
+- `concurrency.md`: SC.14 ships the exact scoped typed Channel contract frozen
+  by SC.13 through deterministic, seeded, replay, exhaustive, and cached
+  interpreted scheduling. It publishes exact identities, capacity/backpressure,
+  close, cancellation, fan-in, ownership, and policy interaction. Native
+  Channel execution, host I/O readiness, and actors remain deferred to C4+.
 - `warp-testing.md`: Warp test model, rows, handlers, cache, properties, and
   world lanes.
 - `errors.md`: diagnostic code catalog.
@@ -51,6 +52,8 @@ Read these together when judging whether the release candidate is credible:
 
 - `release/0.1/EVIDENCE.md`: built artifact, test inventory, commands, summary.
 - `release/0.1/CLAIMS.md`: claims mapped to proving tests/demos and caveats.
+- `release/structured-concurrency/EVIDENCE.md`: SC.14 scoped Channel runtime and
+  schedule-parity evidence over the complete SC.12 scheduler stack.
 - `release/0.1/REPRO.md`: fresh-clone reproduction.
 - `release/0.1/FREEZE.md`: frozen version/hash/store/trace/CLI/error surfaces.
 - `release/0.1/GAUNTLET.md`: adversarial tests present and omitted.
@@ -110,6 +113,17 @@ Read these together when judging whether the release candidate is credible:
 - `release/effect-taxonomy/ET8-MANIFEST.sha256`: reconstructible ET.8 overlay on
   the integrated Secret/Approval base; predecessor manifests remain historical.
 
+## Structured Concurrency Evidence
+
+- `release/structured-concurrency/EVIDENCE.md`: final C0-C2 publication gate
+  plus the shipped interpreted C3 typed-Channel runtime, exact identities,
+  schedule parity, counts, and claim-to-test links.
+- `release/structured-concurrency/LIMITS.md`: dynamic Task and Channel lifetime
+  checks, cooperative cancellation, explicit bracket cleanup, interpreter-only
+  scheduling, sequential C0 hints, and explicit C4 exclusions.
+- `release/structured-concurrency/MANIFEST.sha256`: reconstructible SC.16
+  publication overlay on exact SC.12 commit `b828099`.
+
 ## Governed Membranes Evidence
 
 - `release/governed-membranes/GM1-EVIDENCE.md`: GM.1 versioned ring-3 values,
@@ -143,14 +157,6 @@ Read these together when judging whether the release candidate is credible:
   safe secret references, outcome summaries, and authority-order evidence.
 - `release/governed-membranes/GM9-MANIFEST.sha256`: reconstructible GM.9 overlay
   on the validated identity, Judge, and secret integration stack.
-
-## Structured Concurrency Evidence
-
-- `release/structured-concurrency/EVIDENCE.md`: SC.7 cooperative cancellation,
-  nested scope ownership, cleanup, escape-scan, and lifecycle/memory/QCheck
-  evidence integrated with DX.5/DX.6/DX.7 hardening.
-- `release/structured-concurrency/MANIFEST.sha256`: reconstructible SC.0-SC.7
-  plus DX.5/DX.6/DX.7 integration overlay on the ratified concurrency base.
 
 ## Maintenance Notes
 

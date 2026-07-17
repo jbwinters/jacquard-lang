@@ -3,8 +3,9 @@
 The demos are grouped by the idea they prove. Public programs use `.jac`;
 retained `.jqd` files are curated kernel/debug twins or Warp fixtures. New
 demos do not need `.jqd` counterparts unless they explicitly prove carrier
-parity. Every `*.sh` launcher works from either a repository checkout or an
-installed release. From a checkout, build once and run:
+parity. Narrative `*.sh` launchers work from either a repository checkout or
+an installed release. Developer-only evidence drivers state their source-build
+requirement explicitly. From a checkout, build once and run:
 
 ```bash
 eval "$(opam env)"
@@ -87,6 +88,20 @@ Directory: `tooling/`
 - `showcase-warp-tests.sh`: Warp checks shared by the value-of-information,
   dream-mode, and ambiguity demos.
 - `word-count.jac`: console capability and standard-library collection smoke.
+
+## Structured Concurrency Evidence
+
+Directory: `concurrency/`
+
+- `task-schedules.jac`: one two-child task expression plus signatures proving
+  a spawned child's `Net` effect remains visible.
+- `run.sh`: runs that exact expression through FIFO, seeded random, exhaustive,
+  and strict replay handlers, pinning eight complete schedule worlds and
+  version-1 trace identities.
+
+This is a developer evidence demo and requires a source checkout built with
+Dune because exhaustive schedule enumeration is a library/review seam, not a
+public `jac run` flag. Its transcript is `test/cli/concurrency-evidence.t`.
 
 ## Evidence
 

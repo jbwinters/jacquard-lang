@@ -18,3 +18,7 @@
     (tapp (tref task-result) (tvar a)))
   (op async.cancel once ((tapp (tref task) (tvar a))) (ttuple))
   (op async.yield once () (ttuple)))
+
+; Trusted internal scope control. This is a term, not a fifth Async operation;
+; the interpreter intercepts its reviewed marker and opens a nested Structured_scope.
+(defterm ((binding async.scope () (quote (builtin-marker async.scope-v0)))))

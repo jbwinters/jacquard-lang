@@ -38,6 +38,9 @@ type t =
   | VTask of Task_handle.t
       (** an opaque scheduler-owned Task handle. The payload has no public constructor, equality,
           Show instance, or serialization; evaluator boundaries validate its owning run. *)
+  | VChannel of Channel_handle.t
+      (** an opaque scheduler-owned ChannelHandle, valid only in the exact evaluator run and
+          structured scope that successfully opened it. *)
   | VResume of frame list
       (** a resumption: the sliced continuation as immutable data — invoking it twice just reuses
           the list (multi-shot for free, plan W2.4) *)
@@ -94,6 +97,7 @@ let rec show = function
   | VTrustedBuiltin builtin -> Printf.sprintf "<builtin %s>" (Trusted_builtin.name builtin)
   | VCode payload -> "(quote " ^ Printer.inline_form payload ^ ")"
   | VTask _ -> "<task>"
+  | VChannel _ -> "<channel>"
   | VResume _ | VOnceResume _ -> "<resume>"
 
 let pp fmt v = Format.pp_print_string fmt (show v)

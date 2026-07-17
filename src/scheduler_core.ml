@@ -1,5 +1,10 @@
 type handle = Task_handle.t
-type suspension = Yielded | Awaiting of Concurrency_contract.task_id
+
+type suspension =
+  | Yielded
+  | Awaiting of Concurrency_contract.task_id
+  | Channel_sending of Channel_contract.channel_id
+  | Channel_receiving of Channel_contract.channel_id
 
 type ('resume, 'value) entry = {
   handle : handle;
@@ -38,6 +43,20 @@ type 'value await_outcome =
 type 'resume cancellation_boundary =
   | Boundary_continue of 'resume
   | Boundary_cancelled of { resume : 'resume; awakened : handle list }
+
+type ('resume, 'value) prepared_channel_suspend = {
+  suspend_entry : ('resume, 'value) entry;
+  suspend_channel : Channel_contract.channel_id;
+  suspend_direction : [ `Send | `Recv ];
+  suspend_resume : 'resume;
+  mutable suspend_committed : bool;
+}
+
+type ('resume, 'value) prepared_channel_wake = {
+  wake_entry : ('resume, 'value) entry;
+  wake_resume : 'resume;
+  mutable wake_committed : bool;
+}
 
 let diagnostic message =
   Diag.error ~code:"E0908" ~hint:"scheduler task state was not advanced"
@@ -126,6 +145,28 @@ let spawn scheduler ~resume =
 let id scheduler handle =
   Result.map (fun (entry : (_, _) entry) -> entry.id) (validate scheduler handle)
 
+let handle_of_id scheduler (id : Concurrency_contract.task_id) =
+  if scheduler.closed then error "cannot resolve a task in a closed scope"
+  else if id.scope_path <> scheduler.scope_path then error "task identity belongs to another scope"
+  else
+    match find_entry scheduler id with
+    | Some entry -> Ok entry.handle
+    | None -> error ("unknown task " ^ Concurrency_contract.trace_task_id id)
+
+let task_run _capability scheduler = scheduler.run
+
+let task_value _capability scheduler handle =
+  Result.map (fun _ -> Value.VTask handle) (id scheduler handle)
+
+let task_handle _capability scheduler = function
+  | Value.VTask handle -> Result.map (fun _ -> handle) (id scheduler handle)
+  | _ ->
+      Error
+        [
+          Diag.error ~code:Concurrency_contract.task_escape_code
+            "Async operation expected an opaque Task handle";
+        ]
+
 let validate_run_handle scheduler handle = Task_handle.validate_run ~run:scheduler.run handle
 let inspect scheduler handle = Result.map view_of_entry (validate scheduler handle)
 
@@ -141,6 +182,33 @@ let checkout scheduler handle =
           | Concurrency_contract.Cancelled_state ),
           _ ) ->
           error "cannot check out a terminal task")
+
+let restore_checkout (entry : (_, _) entry) resume =
+  match (entry.lifecycle, entry.resume) with
+  | Concurrency_contract.Runnable, None -> entry.resume <- Some resume
+  | Concurrency_contract.Runnable, Some _
+  | Concurrency_contract.Suspended, Some _
+  | ( ( Concurrency_contract.Done_state | Concurrency_contract.Failed_state
+      | Concurrency_contract.Cancelled_state ),
+      None ) ->
+      ()
+  | Concurrency_contract.Suspended, None
+  | ( ( Concurrency_contract.Done_state | Concurrency_contract.Failed_state
+      | Concurrency_contract.Cancelled_state ),
+      Some _ ) ->
+      failwith "Bug_scheduler_core: checkout operation left invalid resume ownership"
+
+let with_checkout scheduler handle operation =
+  Result.bind (validate scheduler handle) (fun entry ->
+      Result.bind (checkout scheduler handle) (fun resume ->
+          match operation resume with
+          | (Ok _ | Error _) as result ->
+              restore_checkout entry resume;
+              result
+          | exception exn ->
+              let backtrace = Printexc.get_raw_backtrace () in
+              restore_checkout entry resume;
+              Printexc.raise_with_backtrace exn backtrace))
 
 let ensure_checked_out (entry : (_, _) entry) =
   match (entry.lifecycle, entry.resume) with
@@ -170,6 +238,66 @@ let wake_yielded scheduler handle =
           Ok ()
       | _ -> error "only a yielded task with one resume token can be made runnable")
 
+let validate_channel_caller _capability scheduler handle =
+  Result.bind (validate scheduler handle) ensure_checked_out
+
+let prepare_channel_suspend _capability scheduler handle ~channel ~direction ~resume =
+  Result.bind (validate scheduler handle) (fun (entry : (_, _) entry) ->
+      Result.map
+        (fun () ->
+          {
+            suspend_entry = entry;
+            suspend_channel = channel;
+            suspend_direction = direction;
+            suspend_resume = resume;
+            suspend_committed = false;
+          })
+        (ensure_checked_out entry))
+
+let commit_channel_suspend _capability prepared =
+  if prepared.suspend_committed then
+    failwith "Bug_scheduler_core: prepared channel suspension committed twice";
+  prepared.suspend_committed <- true;
+  prepared.suspend_entry.resume <- Some prepared.suspend_resume;
+  prepared.suspend_entry.lifecycle <- Concurrency_contract.Suspended;
+  prepared.suspend_entry.suspension <-
+    Some
+      (match prepared.suspend_direction with
+      | `Send -> Channel_sending prepared.suspend_channel
+      | `Recv -> Channel_receiving prepared.suspend_channel)
+
+let suspend_channel scheduler handle ~channel ~direction ~resume =
+  Result.map
+    (fun prepared -> commit_channel_suspend Task_capability.runtime prepared)
+    (prepare_channel_suspend Task_capability.runtime scheduler handle ~channel ~direction ~resume)
+
+let same_channel left right = Channel_contract.compare_channel_id left right = 0
+
+let prepare_channel_wake _capability scheduler handle ~channel ~map_resume =
+  Result.bind (validate scheduler handle) (fun (entry : (_, _) entry) ->
+      match (entry.lifecycle, entry.suspension, entry.resume) with
+      | ( Concurrency_contract.Suspended,
+          Some (Channel_sending waiting | Channel_receiving waiting),
+          Some resume )
+        when same_channel waiting channel ->
+          Result.map
+            (fun mapped -> { wake_entry = entry; wake_resume = mapped; wake_committed = false })
+            (map_resume resume)
+      | _ -> error "only a task suspended on the exact channel can be channel-woken")
+
+let commit_channel_wake _capability prepared =
+  if prepared.wake_committed then
+    failwith "Bug_scheduler_core: prepared channel wake committed twice";
+  prepared.wake_committed <- true;
+  prepared.wake_entry.resume <- Some prepared.wake_resume;
+  prepared.wake_entry.lifecycle <- Concurrency_contract.Runnable;
+  prepared.wake_entry.suspension <- None
+
+let wake_channel_with scheduler handle ~channel ~map_resume =
+  Result.map
+    (fun prepared -> commit_channel_wake Task_capability.runtime prepared)
+    (prepare_channel_wake Task_capability.runtime scheduler handle ~channel ~map_resume)
+
 let result_lifecycle = function
   | Concurrency_contract.Done _ -> Concurrency_contract.Done_state
   | Concurrency_contract.Failed _ -> Concurrency_contract.Failed_state
@@ -192,7 +320,7 @@ let wake_waiters scheduler (entry : (_, _) entry) =
              &&
              match waiter.suspension with
              | Some (Awaiting target) -> equal_id target entry.id
-             | Some Yielded | None -> false ->
+             | Some (Yielded | Channel_sending _ | Channel_receiving _) | None -> false ->
           waiter.lifecycle <- Concurrency_contract.Runnable;
           waiter.suspension <- None;
           Some waiter.handle
@@ -286,6 +414,11 @@ let request_cancel scheduler handle =
   Result.map
     (fun (entry : (_, _) entry) ->
       match entry.result with None -> entry.cancellation_requested <- true | Some _ -> ())
+    (validate scheduler handle)
+
+let cancellation_pending scheduler handle =
+  Result.map
+    (fun (entry : (_, _) entry) -> entry.result = None && entry.cancellation_requested)
     (validate scheduler handle)
 
 let deliver_cancel scheduler ~point:_ handle =

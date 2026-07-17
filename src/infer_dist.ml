@@ -237,6 +237,20 @@ module Rng = struct
     let bits = Int64.shift_right_logical (next_int64 t) 11 in
     Int64.to_float bits /. 9007199254740992.0
 
+  (** [bounded_int t bound] draws uniformly from zero (inclusive) to [bound] (exclusive). It uses 62
+      unsigned bits and rejection sampling, so non-power-of-two bounds have no modulo/float bias and
+      every positive OCaml-int bound is range-safe on the supported 64-bit runtime. *)
+  let bounded_int t bound =
+    if bound <= 0 then invalid_arg "Infer_dist.Rng.bounded_int: bound must be positive";
+    let range = Int64.shift_left 1L 62 in
+    let bound = Int64.of_int bound in
+    let limit = Int64.sub range (Int64.rem range bound) in
+    let rec draw () =
+      let bits = Int64.shift_right_logical (next_int64 t) 2 in
+      if Int64.compare bits limit < 0 then Int64.to_int (Int64.rem bits bound) else draw ()
+    in
+    draw ()
+
   let split t = make (Int64.to_int (next_int64 t))
 end
 

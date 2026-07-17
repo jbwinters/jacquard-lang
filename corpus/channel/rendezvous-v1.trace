@@ -1,0 +1,11 @@
+jacquard-channel-contract format=1 scenario=rendezvous channel=0@0 capacity=0
+decision=0 task=0#0 op=open:-1 before=- action=reject-capacity after=- result=error:invalid-capacity:-1 wake=0#0
+decision=1 task=0#0 op=open:0 before=- action=create after=open|buffer=-|senders=-|receivers=- result=ok:0@0 wake=0#0
+decision=2 task=0#1 op=send:7 before=open|buffer=-|senders=-|receivers=- action=block-sender after=open|buffer=-|senders=0#1:7|receivers=- result=pending wake=-
+decision=3 task=0#2 op=recv before=open|buffer=-|senders=0#1:7|receivers=- action=rendezvous:0#1 after=open|buffer=-|senders=-|receivers=- result=receiver-ok:7,sender-ok:unit wake=0#1,0#2
+decision=4 task=0#3 op=recv before=open|buffer=-|senders=-|receivers=- action=block-receiver after=open|buffer=-|senders=-|receivers=0#3 result=pending wake=-
+decision=5 task=0#4 op=recv before=open|buffer=-|senders=-|receivers=0#3 action=block-receiver after=open|buffer=-|senders=-|receivers=0#3,0#4 result=pending wake=-
+decision=6 task=0#0 op=cancel:0#3 before=open|buffer=-|senders=-|receivers=0#3,0#4 action=cancel-receiver:0#3 after=open|buffer=-|senders=-|receivers=0#4 result=unit,target-cancelled wake=0#0
+decision=7 task=0#0 op=close before=open|buffer=-|senders=-|receivers=0#4 action=close,reject-receivers after=closed|buffer=-|senders=-|receivers=- result=closer-unit,receiver-error:0#4:channel-closed wake=0#4,0#0
+decision=8 task=0#2 op=recv before=closed|buffer=-|senders=-|receivers=- action=closed-empty after=closed|buffer=-|senders=-|receivers=- result=error:channel-closed wake=0#2
+decision=9 task=0#0 op=close before=closed|buffer=-|senders=-|receivers=- action=already-closed after=closed|buffer=-|senders=-|receivers=- result=unit wake=0#0

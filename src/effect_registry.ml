@@ -67,7 +67,6 @@ let reserved_catalog_names =
     ("Crypto", "crypto");
     ("Log", "log");
     ("Async", "async");
-    ("Channel", "channel");
   ]
 
 let register registry metadata =
@@ -188,7 +187,8 @@ let catalog =
       "assess a proposed call without performing it";
     reserved "Async" "async" Concurrency No_risk
       "schedule structured tasks while charging child effects to the parent row";
-    reserved "Channel" "channel" Concurrency No_risk
+    released "Channel" "channel" Concurrency No_risk
+      "bf9a334188ac13495eeb070fdc215d51763d9761b4775c98c61f44ebb1b03756"
       "communicate typed values between structured tasks";
   ]
 
