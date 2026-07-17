@@ -53,6 +53,11 @@ let kind_of_sym = function
   | "effect" -> Some Resolve.KEffect
   | _ -> None
 
+let private_name_diagnostic name hash =
+  Diag.error ~code:Concurrency_contract.task_escape_code
+    ~hint:"Task handles are created only by async.spawn inside a structured scheduler scope"
+    (Printf.sprintf "name `%s` cannot expose scheduler-private hash %s" name (Hash.to_hex hash))
+
 (* --- names.jqd --- *)
 
 (* Names must be printable symbols or names.jqd could not round-trip through the reader.
@@ -97,6 +102,8 @@ let parse_names ~file src =
         | [] -> Ok (List.rev names, List.sort_uniq Hash.compare hidden)
         | { Form.head = "named"; args = [ Form.Sym n; Form.Sym k; Form.Hash h ]; _ } :: rest -> (
             match kind_of_sym k with
+            | Some _ when Concurrency_contract.is_task_private_hash h ->
+                Error [ private_name_diagnostic n h ]
             | Some kind -> go ((n, { Resolve.hash = h; kind }) :: names) hidden rest
             | None -> err ~code:"E0603" "corrupt names.jqd: unknown kind `%s`" k)
         | { Form.head = "hidden"; args = [ Form.Hash h ]; _ } :: rest -> go names (h :: hidden) rest
@@ -139,7 +146,8 @@ let index_entries (decl : Kernel.decl) (hs : Canon.decl_hashes) =
   (hs.Canon.decl_hash, (hs.Canon.decl_hash, Whole)) :: derived
 
 (** [open_store root] opens (creating if needed) a store rooted at [root], rebuilding the hash index
-    from the object files. *)
+    from the object files. A persisted name exposing a scheduler-private hash is rejected with E0907
+    before the index becomes observable. *)
 let open_store root : (t, Diag.t list) result =
   let t = { root; names = []; hidden = []; index = [] } in
   if not (Sys.file_exists root) then Sys.mkdir root 0o755;
@@ -191,8 +199,11 @@ let entry_kind (decl : Kernel.decl) = function
   | Operation _ -> Resolve.KOp
 
 (** [put_decl t decl] canonicalizes, hashes, and stores a resolved declaration, then binds every
-    name it introduces (members, type + constructors, effect + operations) in the name index,
-    replacing existing bindings of the same names. Idempotent on the object file. *)
+    public name it introduces (members, type + constructors, effect + operations) in the name index,
+    replacing existing bindings of the same names. The exact frozen Task opaque carrier is indexed
+    by hash for runtime validation but deliberately receives no public constructor name; any stale
+    private binding already in memory is evicted before [names.jqd] is rewritten. Idempotent on the
+    object file. *)
 let put_decl ?origin t (decl : Kernel.decl) : (Canon.decl_hashes, Diag.t list) result =
   let hashes =
     if Recovery_marker.decl decl then Error [ Recovery_marker.diagnostic "store insertion" ]
@@ -234,7 +245,9 @@ let put_decl ?origin t (decl : Kernel.decl) : (Canon.decl_hashes, Diag.t list) r
         List.filter_map
           (fun (n, h) ->
             match List.assoc_opt h fresh with
-            | Some (_, role) when not (List.exists (Hash.equal h) t.hidden) ->
+            | Some (_, role)
+              when (not (List.exists (Hash.equal h) t.hidden))
+                   && not (Concurrency_contract.is_task_private_hash h) ->
                 Some (n, { Resolve.hash = h; kind = entry_kind decl role })
             | Some _ | None -> None)
           hs.Canon.named
@@ -245,7 +258,14 @@ let put_decl ?origin t (decl : Kernel.decl) : (Canon.decl_hashes, Diag.t list) r
           (fun (n', (e' : Resolve.entry)) -> n = n' && e.Resolve.kind = e'.Resolve.kind)
           new_names
       in
-      t.names <- sort_names (new_names @ List.filter (fun b -> not (evicted b)) t.names);
+      t.names <-
+        sort_names
+          (new_names
+          @ List.filter
+              (fun ((_, entry) as binding) ->
+                (not (Concurrency_contract.is_task_private_hash entry.Resolve.hash))
+                && not (evicted binding))
+              t.names);
       write_names t;
       Ok hs
 
@@ -379,10 +399,13 @@ let names_view t : Resolve.names =
 
 (** [bind_name t name hash] binds [name] to a hash already known to the store. Fails on an
     unprintable name (E0605) and on a [defterm] group's whole hash (E0604) — groups are addressed
-    through their members. *)
+    through their members. Scheduler-private hashes fail with E0907 even when their object is
+    present. *)
 let bind_name t name hash : (unit, Diag.t list) result =
   if not (valid_name name) then
     err ~code:"E0605" "invalid name %S: names are lowercase symbols [a-z][a-z0-9-]*" name
+  else if Concurrency_contract.is_task_private_hash hash then
+    Error [ private_name_diagnostic name hash ]
   else
     match List.find_opt (fun (h, _) -> Hash.equal hash h) t.index with
     | None -> err ~code:"E0601" "cannot name unknown hash %s" (Hash.to_hex hash)

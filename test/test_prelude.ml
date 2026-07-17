@@ -17,8 +17,12 @@ let reviewed_modes () =
       else
         match String.split_on_char ' ' line with
         | [ qualified; mode ] -> (
-            match String.split_on_char '.' qualified with
-            | [ effect_name; op_name ] ->
+            match String.index_opt qualified '.' with
+            | Some separator ->
+                let effect_name = String.sub qualified 0 separator in
+                let op_name =
+                  String.sub qualified (separator + 1) (String.length qualified - separator - 1)
+                in
                 Some
                   {
                     effect_name;
@@ -29,7 +33,7 @@ let reviewed_modes () =
                       | "multi" -> Kernel.Multi
                       | other -> Alcotest.failf "unknown reviewed operation mode %s" other);
                   }
-            | _ -> Alcotest.failf "malformed reviewed operation name %s" qualified)
+            | None -> Alcotest.failf "malformed reviewed operation name %s" qualified)
         | _ -> Alcotest.failf "malformed reviewed operation-mode row %s" line)
 
 let mode_name = function Kernel.Once -> "once" | Kernel.Multi -> "multi"
@@ -121,7 +125,7 @@ let test_reviewed_operation_modes store =
   in
   let declared = prelude_source_modes () |> List.map row |> List.sort String.compare in
   let frozen = reviewed |> List.map row |> List.sort String.compare in
-  Alcotest.(check int) "current prelude operation inventory size" 25 (List.length declared);
+  Alcotest.(check int) "current prelude operation inventory size" 29 (List.length declared);
   Alcotest.(check (list string))
     "every operation from every prelude DefEffect has an exact reviewed mode" declared frozen;
   test_retained_multi_hashes store;

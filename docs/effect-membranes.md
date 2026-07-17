@@ -453,15 +453,21 @@ The pure verdict laws are:
 
 These functions are pure over finite values except for the real-valued confidence comparison. Warp exhaustively verifies the risk and threshold ordering over a representative finite confidence grid, and ordinary unit properties cover the numeric boundary cases.
 
-Implementation status (GM.3): `prelude/23-governance-policy.jqd` exposes safe
+Implementation status (GM.4): `prelude/23-governance-policy.jqd` exposes safe
 validation for LivePolicy, DryPolicy, StoredPolicy, and exact BoundPolicy
 hashes. The bound live and dry verdict entry points implement these laws as
 total `Result ToolError Verdict` functions. Their executable evidence covers
 all four risks, all sixteen live threshold pairs (rejecting the six reversed
 pairs), four representative observed confidences, both simulator states, and
-the finite/non-finite numeric boundaries. This completes D65, D66, and D72 for
-the pure policy layer; later gate work consumes these verdicts without changing
-their laws.
+the finite/non-finite numeric boundaries. GM.4 adds a separately discoverable
+hermetic Warp property for each pure law below, enumerating all ten valid
+threshold pairs and all four risks over a five-point confidence grid. Exact
+adjacent-real and non-finite cases remain unit checks. A separate confidence-
+threshold tightening property holds the risk thresholds at `Low`/`High` while
+enumerating all 25 ordered minimum-confidence pairs, all four risks, and the
+same five observed confidences. This completes D65, D66, and D72 for the pure
+policy layer; later gate work consumes these verdicts without changing their
+laws.
 
 Implementation status (GM.6): `prelude/24-governance-gate-dry.jqd` consumes
 the exact bound dry policy, shared `AuditSequence`, and pure
@@ -1330,12 +1336,26 @@ Warp receives a dedicated governance suite.
 * Confidence monotonicity: decreasing confidence never changes `Ask` or `Block` into `Allow`.
 * Forbidden absorption: `Forbidden` always blocks.
 * Dry-run totality: dry policy never yields `Allow` or `Ask`.
-* Policy tightening: lowering thresholds never increases the allowed set.
+* Risk-threshold tightening: lowering risk thresholds never increases the allowed set.
+* Minimum-confidence tightening: raising `min-confidence` never increases the allowed set.
 * Call ID stability: metadata, formatting, and summary changes do not alter the semantic call ID.
 * Call ID sensitivity: operation, arguments, authority, or preconditions do.
 * Policy binding: changing a bound policy value without changing its hash is rejected.
 
+Implementation status (GM.4): `test/cli/governance-policy-laws.jqd` implements
+all nine pure properties above as closed-row Warp `Prop` values, plus a
+six-check exact numeric-edge `Case`. `jac test` runs the sampled governance
+lane; `jac test --exhaustive` proves finite supports of 5 to 4,000 cases per
+property under the default budget. Counterexample labels include the complete
+policy thresholds, confidence, canonical policy or call hashes, risks, and
+verdicts. `test/cli/props.t` also creates a scratch-only one-law inversion and
+records Warp rejecting it with a concrete hashed counterexample. No mutant is
+retained in the source tree.
+
 ### Handler and world properties
+
+These remain future gate/driver work. GM.4 deliberately adds no handler,
+world-test, live driver, simulator driver, or audit orchestration.
 
 * `Allow` invokes the live driver exactly once and resumes exactly once.
 * `Block`, `Denied`, `Escalate`, and `NoSimulation` invoke it zero times.

@@ -16,6 +16,11 @@ val fresh_audit_run_id : ctx -> Hash.t
 (** [fresh_audit_run_id ctx] mints a deterministic identity in [ctx]'s private Audit owner
     namespace. It is exposed only to trusted prelude wiring. *)
 
+val validate_task_value :
+  ctx -> scope_path:int list -> Value.t -> (Concurrency_contract.task_id, Diag.t list) result
+(** [validate_task_value ctx ~scope_path value] accepts a Task only in its creating evaluator run
+    and exact structured scope. Malformed, non-Task, stale, or foreign values return E0907. *)
+
 val register_builtin : ctx -> Hash.t -> Value.t -> unit
 (** [register_builtin ctx hash value] installs a native implementation for a term. Recovery-marked
     values are rejected with the evaluator's runtime exception; custom callbacks are guarded before
@@ -51,8 +56,9 @@ val run_expr : ctx -> Kernel.expr -> (Value.t, Runtime_err.t) result
 
 type captured_kont
 (** A mode-aware root continuation. Multi captures are reusable by {!resume_captured_state}; Once
-    captures retain one shared affine budget. The representation is sealed so a Once capture cannot
-    be converted back into raw frames. *)
+    captures retain one shared affine budget. Captures are bound to their originating evaluator
+    context. The representation is sealed so a Once capture cannot be converted back into raw
+    frames. *)
 
 type capture =
   | CValue of Value.t
@@ -65,21 +71,24 @@ val run_state_capturing : ctx -> state -> (capture, Runtime_err.t) result
 
 val resume_captured_state : ctx -> captured_kont -> Value.t -> (state, Runtime_err.t) result
 (** [resume_captured_state ctx kont value] validates [value] and constructs a resumed state. A Multi
-    capture may be resumed repeatedly; a second use of a Once capture returns E0906. *)
+    capture may be resumed repeatedly; a second use of a Once capture returns E0906. Resuming under
+    a context other than the capturing context returns E0907 before consuming a Once budget. *)
 
 type once_capture =
   | OCValue of Value.t
   | OCOp of { op : Hash.t; name : string; args : Value.t list; resume : Value.t }
       (** A terminal value or root operation whose actual continuation is already sealed as one
-          opaque once-resumption instance. *)
+          opaque, originating-context-bound once-resumption instance. *)
 
 val run_state_capturing_once : ctx -> state -> (once_capture, Runtime_err.t) result
 (** [run_state_capturing_once ctx state] validates and runs [state]. A captured root continuation is
     sealed before it crosses the API, preventing clients from extracting frames and minting another
-    budget for the same captured instance. *)
+    budget for the same captured instance. Calling its resume value under another context returns
+    E0907 before consuming the Once budget. *)
 
 type validated_state
-(** An unforgeable state accepted by the reusable inference driver. *)
+(** An unforgeable state accepted by the reusable inference driver and bound to the exact evaluator
+    context that validated it. *)
 
 type validated_captured_kont
 (** An unforgeable, mode-aware continuation captured from a validated execution. *)
@@ -97,17 +106,20 @@ val fresh_validated_state : ctx -> validated_state -> validated_state
 (** [fresh_validated_state ctx initial] restores the mutable graph captured by [validate_state_once]
     and evaluator-owned memo snapshots for one independent execution. Affine resumption consumption
     is deliberately monotonic and is never restored: reusing the same captured instance still fails.
-    A resumed state has no initial cell snapshot and is returned unchanged. *)
+    A resumed state has no initial cell snapshot and is returned unchanged. A foreign-context state
+    is returned without restoring either graph and remains foreign for the guarded runner. *)
 
 val run_validated_state_capturing :
   ctx -> validated_state -> (validated_capture, Runtime_err.t) result
 (** [run_validated_state_capturing ctx state] runs a sealed state without rescanning immutable
-    syntax. Memo/native results remain guarded and runtime failures are returned. *)
+    syntax when [ctx] is its validating context. Cross-context use returns E0907; memo/native
+    results remain guarded and runtime failures are returned. *)
 
 val resume_validated_state :
   ctx -> validated_captured_kont -> Value.t -> (validated_state, Runtime_err.t) result
 (** [resume_validated_state ctx kont value] validates [value] and seals delivery to [kont]. Recovery
-    markers or malformed values are returned as runtime errors. *)
+    markers, malformed values, and a context other than the capturing context are returned as
+    runtime errors. *)
 
 val resume_state : Value.frame list -> Value.t -> state
 (** [resume_state kont value] constructs a guarded state that delivers [value] to [kont]. *)

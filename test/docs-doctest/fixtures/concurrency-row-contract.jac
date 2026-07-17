@@ -11,7 +11,7 @@ once effect Async a where {
 async.scope(body) =
   handle body() {
     | return value -> Done(value)
-    | async.spawn(_) resume continue -> continue(TaskOpaque)
+    | async.spawn(_) resume continue -> Cancelled
     | async.await(_) resume continue -> continue(Cancelled)
     | async.cancel(_) resume continue -> continue(())
     | async.yield() resume continue -> continue(())
