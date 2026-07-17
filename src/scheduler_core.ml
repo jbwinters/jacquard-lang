@@ -1,0 +1,297 @@
+type handle = Task_handle.t
+type suspension = Yielded | Awaiting of Concurrency_contract.task_id
+
+type ('resume, 'value) entry = {
+  handle : handle;
+  id : Concurrency_contract.task_id;
+  mutable lifecycle : Concurrency_contract.lifecycle;
+  mutable suspension : suspension option;
+  mutable result : 'value Concurrency_contract.task_result option;
+  mutable waiters : Concurrency_contract.task_id list;
+  mutable cancellation_requested : bool;
+  mutable resume : 'resume option;
+}
+
+type ('resume, 'value) t = {
+  run : Task_handle.run;
+  scope_path : int list;
+  mutable next_spawn : int;
+  mutable entries : ('resume, 'value) entry list;
+  mutable closed : bool;
+}
+
+type 'value task_view = {
+  id : Concurrency_contract.task_id;
+  lifecycle : Concurrency_contract.lifecycle;
+  suspension : suspension option;
+  result : 'value Concurrency_contract.task_result option;
+  waiters : Concurrency_contract.task_id list;
+  cancellation_requested : bool;
+  owns_resume : bool;
+}
+
+type 'value await_outcome =
+  | Await_ready of 'value Concurrency_contract.task_result
+  | Await_suspended
+  | Await_deadlocked of string
+
+let diagnostic message =
+  Diag.error ~code:"E0908" ~hint:"scheduler task state was not advanced"
+    ("invalid structured-concurrency scheduler state: " ^ message)
+
+let error message = Error [ diagnostic message ]
+let equal_id left right = Concurrency_contract.compare_task_id left right = 0
+
+let find_entry scheduler id =
+  List.find_opt (fun (entry : (_, _) entry) -> equal_id entry.id id) scheduler.entries
+
+let validate scheduler handle =
+  Result.bind
+    (Task_handle.validate_scope ~run:scheduler.run ~scope_path:scheduler.scope_path handle)
+    (fun id ->
+      match find_entry scheduler id with
+      | Some entry -> Ok entry
+      | None -> error ("unknown task " ^ Concurrency_contract.trace_task_id id))
+
+let create ~scope_path ~body_resume =
+  let run = Task_handle.create_run () in
+  Result.bind (Task_handle.create ~run ~scope_path ~spawn_index:0) (fun handle ->
+      Result.bind (Task_handle.validate_scope ~run ~scope_path handle) (fun id ->
+          let entry =
+            {
+              handle;
+              id;
+              lifecycle = Concurrency_contract.Runnable;
+              suspension = None;
+              result = None;
+              waiters = [];
+              cancellation_requested = false;
+              resume = Some body_resume;
+            }
+          in
+          Ok ({ run; scope_path; next_spawn = 1; entries = [ entry ]; closed = false }, handle)))
+
+let spawn scheduler ~resume =
+  if scheduler.closed then error "cannot spawn into a closed scope"
+  else
+    let spawn_index = scheduler.next_spawn in
+    Result.bind
+      (Task_handle.create ~run:scheduler.run ~scope_path:scheduler.scope_path ~spawn_index)
+      (fun handle ->
+        Result.bind
+          (Task_handle.validate_scope ~run:scheduler.run ~scope_path:scheduler.scope_path handle)
+          (fun id ->
+            scheduler.next_spawn <- spawn_index + 1;
+            scheduler.entries <-
+              scheduler.entries
+              @ [
+                  {
+                    handle;
+                    id;
+                    lifecycle = Concurrency_contract.Runnable;
+                    suspension = None;
+                    result = None;
+                    waiters = [];
+                    cancellation_requested = false;
+                    resume = Some resume;
+                  };
+                ];
+            Ok handle))
+
+let id scheduler handle =
+  Result.map (fun (entry : (_, _) entry) -> entry.id) (validate scheduler handle)
+
+let inspect scheduler handle =
+  Result.map
+    (fun (entry : (_, _) entry) ->
+      {
+        id = entry.id;
+        lifecycle = entry.lifecycle;
+        suspension = entry.suspension;
+        result = entry.result;
+        waiters = entry.waiters;
+        cancellation_requested = entry.cancellation_requested;
+        owns_resume = Option.is_some entry.resume;
+      })
+    (validate scheduler handle)
+
+let checkout scheduler handle =
+  Result.bind (validate scheduler handle) (fun (entry : (_, _) entry) ->
+      match (entry.lifecycle, entry.resume) with
+      | Concurrency_contract.Runnable, Some resume ->
+          entry.resume <- None;
+          Ok resume
+      | Concurrency_contract.Runnable, None -> error "runnable task is already checked out"
+      | Concurrency_contract.Suspended, _ -> error "cannot check out a suspended task"
+      | ( ( Concurrency_contract.Done_state | Concurrency_contract.Failed_state
+          | Concurrency_contract.Cancelled_state ),
+          _ ) ->
+          error "cannot check out a terminal task")
+
+let ensure_checked_out (entry : (_, _) entry) =
+  match (entry.lifecycle, entry.resume) with
+  | Concurrency_contract.Runnable, None -> Ok ()
+  | Concurrency_contract.Runnable, Some _ -> error "task still owns a resume token"
+  | Concurrency_contract.Suspended, _ -> error "task is suspended"
+  | ( ( Concurrency_contract.Done_state | Concurrency_contract.Failed_state
+      | Concurrency_contract.Cancelled_state ),
+      _ ) ->
+      error "task is terminal"
+
+let suspend_yield scheduler handle ~resume =
+  Result.bind (validate scheduler handle) (fun (entry : (_, _) entry) ->
+      Result.map
+        (fun () ->
+          entry.resume <- Some resume;
+          entry.lifecycle <- Concurrency_contract.Suspended;
+          entry.suspension <- Some Yielded)
+        (ensure_checked_out entry))
+
+let wake_yielded scheduler handle =
+  Result.bind (validate scheduler handle) (fun (entry : (_, _) entry) ->
+      match (entry.lifecycle, entry.suspension, entry.resume) with
+      | Concurrency_contract.Suspended, Some Yielded, Some _ ->
+          entry.lifecycle <- Concurrency_contract.Runnable;
+          entry.suspension <- None;
+          Ok ()
+      | _ -> error "only a yielded task with one resume token can be made runnable")
+
+let result_lifecycle = function
+  | Concurrency_contract.Done _ -> Concurrency_contract.Done_state
+  | Concurrency_contract.Failed _ -> Concurrency_contract.Failed_state
+  | Concurrency_contract.Cancelled -> Concurrency_contract.Cancelled_state
+
+let remove_waiter scheduler waiter =
+  List.iter
+    (fun (entry : (_, _) entry) ->
+      entry.waiters <- List.filter (fun id -> not (equal_id id waiter)) entry.waiters)
+    scheduler.entries
+
+let wake_waiters scheduler (entry : (_, _) entry) =
+  let ids = Concurrency_contract.wake_waiters entry.waiters in
+  entry.waiters <- [];
+  List.filter_map
+    (fun waiter_id ->
+      match find_entry scheduler waiter_id with
+      | Some waiter
+        when waiter.lifecycle = Concurrency_contract.Suspended
+             &&
+             match waiter.suspension with
+             | Some (Awaiting target) -> equal_id target entry.id
+             | Some Yielded | None -> false ->
+          waiter.lifecycle <- Concurrency_contract.Runnable;
+          waiter.suspension <- None;
+          Some waiter.handle
+      | _ -> None)
+    ids
+
+let terminalize scheduler (entry : (_, _) entry) result =
+  match entry.result with
+  | Some _ -> error "terminal task result is immutable"
+  | None ->
+      remove_waiter scheduler entry.id;
+      entry.resume <- None;
+      entry.lifecycle <- result_lifecycle result;
+      entry.suspension <- None;
+      entry.result <- Some result;
+      entry.cancellation_requested <- false;
+      Ok (wake_waiters scheduler entry)
+
+let wait_edges scheduler =
+  List.filter_map
+    (fun (entry : (_, _) entry) ->
+      match (entry.lifecycle, entry.suspension) with
+      | Concurrency_contract.Suspended, Some (Awaiting target) ->
+          Some Concurrency_contract.{ waiter = entry.id; target }
+      | _ -> None)
+    scheduler.entries
+
+let cycle_message cycle =
+  match cycle with
+  | [ id; repeated ] when equal_id id repeated ->
+      "async deadlock: task " ^ Concurrency_contract.trace_task_id id ^ " awaited itself"
+  | _ ->
+      "async deadlock: await cycle "
+      ^ String.concat " -> " (List.map Concurrency_contract.trace_task_id cycle)
+
+let unique_cycle cycle =
+  List.fold_left
+    (fun ids id -> if List.exists (equal_id id) ids then ids else ids @ [ id ])
+    [] cycle
+
+let fail_cycle scheduler cycle =
+  let message = cycle_message cycle in
+  let members =
+    unique_cycle cycle
+    |> List.filter_map (fun id ->
+        match find_entry scheduler id with
+        | Some entry when entry.result = None -> Some entry
+        | Some _ | None -> None)
+  in
+  (* Terminalize the complete cycle before reporting any wakeup. In particular, a cycle predecessor
+     removed from another member's waiter list must never be transiently reported as runnable. *)
+  List.iter (fun (entry : (_, _) entry) -> remove_waiter scheduler entry.id) members;
+  List.iter
+    (fun (entry : (_, _) entry) ->
+      entry.resume <- None;
+      entry.lifecycle <- Concurrency_contract.Failed_state;
+      entry.suspension <- None;
+      entry.result <- Some (Concurrency_contract.Failed message);
+      entry.cancellation_requested <- false)
+    members;
+  let awakened = List.concat_map (wake_waiters scheduler) members in
+  (message, awakened)
+
+let await scheduler ~waiter ~target ~resume =
+  Result.bind (validate scheduler waiter) (fun waiter_entry ->
+      Result.bind (validate scheduler target) (fun target_entry ->
+          Result.bind (ensure_checked_out waiter_entry) (fun () ->
+              match target_entry.result with
+              | Some result ->
+                  waiter_entry.resume <- Some resume;
+                  Ok (Await_ready result, [])
+              | None -> (
+                  waiter_entry.resume <- Some resume;
+                  waiter_entry.lifecycle <- Concurrency_contract.Suspended;
+                  waiter_entry.suspension <- Some (Awaiting target_entry.id);
+                  target_entry.waiters <- target_entry.waiters @ [ waiter_entry.id ];
+                  match Concurrency_contract.detect_wait_cycle (wait_edges scheduler) with
+                  | None -> Ok (Await_suspended, [])
+                  | Some cycle ->
+                      let message, awakened = fail_cycle scheduler cycle in
+                      Ok (Await_deadlocked message, awakened)))))
+
+let finish scheduler handle result =
+  Result.bind (validate scheduler handle) (fun (entry : (_, _) entry) ->
+      Result.bind (ensure_checked_out entry) (fun () -> terminalize scheduler entry result))
+
+let complete scheduler handle value = finish scheduler handle (Concurrency_contract.Done value)
+let fail scheduler handle message = finish scheduler handle (Concurrency_contract.Failed message)
+
+let request_cancel scheduler handle =
+  Result.map
+    (fun (entry : (_, _) entry) ->
+      match entry.result with None -> entry.cancellation_requested <- true | Some _ -> ())
+    (validate scheduler handle)
+
+let deliver_cancel scheduler ~point:_ handle =
+  Result.bind (validate scheduler handle) (fun (entry : (_, _) entry) ->
+      if entry.result <> None || not entry.cancellation_requested then Ok []
+      else terminalize scheduler entry Concurrency_contract.Cancelled)
+
+let close scheduler =
+  if scheduler.closed then []
+  else (
+    scheduler.closed <- true;
+    let resumes = List.filter_map (fun (entry : (_, _) entry) -> entry.resume) scheduler.entries in
+    List.iter
+      (fun (entry : (_, _) entry) ->
+        entry.resume <- None;
+        entry.waiters <- [];
+        entry.suspension <- None;
+        if entry.result = None then (
+          entry.lifecycle <- Concurrency_contract.Cancelled_state;
+          entry.result <- Some Concurrency_contract.Cancelled;
+          entry.cancellation_requested <- false))
+      scheduler.entries;
+    resumes)

@@ -1,9 +1,10 @@
 # Structured Concurrency Contract
 
-Status: SC.3 Task value and Async declaration boundary on the SC.0 interface
-and invariant freeze (D46-D50), July 2026. This document is authoritative for
-C1. Task values and the four once operations are represented; scheduler policy,
-scope execution, lifecycle state, and an Async root handler remain future work.
+Status: combined SC.4 generalized child-effect charging and SC.5
+policy-independent lifecycle core over the SC.3 Task value and Async declaration
+boundary (D46-D50), July 2026. This document is authoritative for C1's static
+non-laundering law and scheduler state transitions. Scheduler policy, executable
+scope ownership, and an Async root handler remain future work.
 
 Structured concurrency is an effect interpreted by a scheduler handler. The
 same program can therefore run under deterministic, seeded-random, exhaustive,
@@ -44,12 +45,16 @@ async.spawn : (() ->{Async | e} a) -> Task a
 ```
 
 Calling it contributes both `Async` and the solved child row `e` to the caller.
-Merely checking the parameter type is insufficient: without the special
-application rule, unification could absorb `Net` into `e` and then discard it.
+Merely checking the parameter type is insufficient: unification could absorb
+`Net` into `e` and then discard it. SC.4 therefore gives the exact frozen
+operation a dependent scheme whose thunk row and callable row are the same row
+object. That dependency travels with the value through aliases, wrappers,
+returned closures, tuples, and independent polymorphic instantiations. It is
+not a syntax-directed application exception.
 
-SC.0 implements that special rule only for the direct resolved operation
-identity whose complete declaration is the exact four-operation interface
-above. The nominal HASH_V0 identities are `Task`
+The identity guard applies only to the resolved operation whose complete
+declaration is the exact four-operation interface above. The nominal HASH_V0
+identities are `Task`
 `07791255b44e18c3830038c51396bd3f80cf44a8e89222ff73dc90dd06ec3fb3`,
 `TaskResult`
 `915f69bd6fd8b34c2794b4b0e7ca88f5aafd0187e5c7c36a59091f6d031405ae`,
@@ -58,7 +63,10 @@ and `Async`
 These are structurally derived identities, not name permissions: the checker
 also validates the exact effect variable, operation order/names/modes,
 parameter/result linkage, Task identities, and open self row. This executable
-fixture pins both charging and handler subtraction. `async.scope` here is
+fixture pins both charging and handler subtraction. If a future checker change
+makes that validated kernel shape disagree with its converted parameter type,
+the checker fails closed with E0805 rather than raising an internal assertion.
+`async.scope` here is
 compile-only handler scaffolding. Its spawn clause terminates the synthetic
 handler answer instead of constructing the scheduler-private `TaskOpaque`
 carrier; the clauses are never executed and are not a Task runtime
@@ -86,10 +94,44 @@ async.scope(body) =
 
 spawn-net() = async.spawn(fn () -> net.get("https://example.invalid"))
 
+spawn-alias = async.spawn
+
+alias-net() = spawn-alias(fn () -> net.get("https://example.invalid"))
+
+forward(spawner, child) = spawner(child)
+
+wrapped-net() = forward(async.spawn, fn () -> net.get("https://example.invalid"))
+
+make-spawner() = fn (child) -> async.spawn(child)
+
+returned-net() = make-spawner()(fn () -> net.get("https://example.invalid"))
+
+spawn-bundle = (async.spawn, 0)
+
+tuple-net() = {
+  let (spawner, _) = spawn-bundle
+  spawner(fn () -> net.get("https://example.invalid"))
+}
+
+wrapped-fs() = forward(async.spawn, fn () -> read("child-effects.txt"))
+
 scoped-net() =
   async.scope(fn () -> {
     let child = async.spawn(fn () -> net.get("https://example.invalid"))
     async.await(child)
+  })
+
+nested-scoped-net() =
+  async.scope(fn () ->
+    async.scope(fn () -> {
+      let child = async.spawn(fn () -> net.get("https://example.invalid"))
+      async.await(child)
+    }))
+
+fetch-all(urls) =
+  async.scope(fn () -> {
+    let tasks = list.map(urls, fn (url) -> async.spawn(fn () -> net.get(url)))
+    list.map(tasks, fn (task) -> async.await(task))
   })
 ```
 
@@ -110,11 +152,20 @@ launder : () ->{Async} Task Text
 launder() = async.spawn(fn () -> net.get("https://example.invalid"))
 ```
 
-This SC.0 bridge is deliberately not the SC.4 closure proof. Aliasing the
-operation, passing it through a wrapper, returning a closure that later spawns,
-and adversarial row-polymorphic wrappers still require SC.4's general inference
-rule and negative suite before Async can ship. No such case is accepted here as
-evidence of complete non-laundering.
+The fixture is the SC.4 closure proof: every transport route retains `Async`
+and the child's world effects. The two uses of `forward` independently solve
+the shared row to `Net` and `Fs`; nested scopes remove only `Async`. The
+documented aggregate therefore has the pinned signature:
+
+```text
+fetch-all : (List Text) ->{Net} TaskResult (List (TaskResult Text))
+```
+
+Negative checker and manifest crams use the same complete frozen four-operation
+declaration to cover a misleading closed annotation through an alias and an
+adversarial same-tail row cycle. The annotation diagnostic retains the
+propagated `Net` effect, the row-cycle primary span identifies `async.spawn`,
+and the missing-grant diagnostic preserves `net.get` as the child effect source.
 
 ## 2. Task identity and lifecycle
 
@@ -166,6 +217,22 @@ failures, never a host deadlock. The exact templates are
 `async deadlock: task ID awaited itself` and
 `async deadlock: await cycle ID -> ... -> ID`, using the stable ID encoding
 above. Cross-scope or stale awaits are E0907 instead.
+
+The SC.5 scheduler core implements this lifecycle as a policy-independent state
+machine. Runnable and suspended tasks may own at most one opaque affine resume
+token; destructive checkout transfers that ownership to the handler, and
+yield/await suspension returns exactly one token. Terminal transitions clear
+the token, retain one immutable `TaskResult`, remove the task's await edge, and
+wake registered waiters in registration order. Scope cleanup clears every edge
+and transfers any still-owned tokens for explicit destruction. Illegal state or
+ownership transitions return E0908 diagnostics and never surface user-caused
+OCaml exceptions. The core reports runnable task IDs but contains no runnable
+queue, scheduling policy, host thread, host I/O, or root Async handler.
+Cycle failure terminalizes every member and drops every member resume before
+reporting wakeups, so only live external waiters can enter the runnable output.
+Those external wakeups are grouped by cycle discovery order, with registration
+order preserved within each member; cancelled or otherwise terminal waiters are
+removed before the groups are emitted.
 
 ## 3. Scope APIs and failure shapes
 
@@ -240,9 +307,9 @@ The corresponding compiled OCaml contract is
 types, pinned identities, task-path validation, and pure lifecycle,
 waiter-wakeup, completion/failure-ordering, deadlock-cycle, and queue-order
 relations. Task 127 / SC.3 installs the exact declarations and adds an inert
-run/scope-local Task carrier in both runtime representations. It deliberately
-does not implement the C1 scheduler, scopes, lifecycle transitions, or a root
-handler.
+run/scope-local Task carrier in both runtime representations. SC.5 adds the
+policy-independent lifecycle engine; runnable-queue policy, executable scopes,
+effect routing, and a root handler remain separate work.
 
 ## 6. Interactions and exclusions
 
@@ -259,8 +326,7 @@ The following are excluded from C1 and from this interface freeze:
 - automatic external-resource finalizers;
 - channels before C3 and actors/supervision before C4+;
 - seeded-random/exhaustive schedule exploration and trace replay before C2;
-- host threads, host scheduling, and real asynchronous I/O before C4; and
-- a claim that the SC.0 direct-spawn bridge proves higher-order row charging.
+- host threads, host scheduling, and real asynchronous I/O before C4.
 
 Pure `parallel.map` and `parallel.both` are separate empty-row hints. Their
 interpreter semantics are sequential and they introduce no Async effect.

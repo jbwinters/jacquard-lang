@@ -1,3 +1,14 @@
 async.scope : forall a | e. (() ->{Async | e} a) ->{| e} TaskResult a
 spawn-net : () ->{Async, Net} Task Text
+spawn-alias : forall a | e. (() ->{Async | e} a) ->{Async | e} Task a
+alias-net : () ->{Async, Net} Task Text
+forward : forall a b | e. ((b) ->{| e} a, b) ->{| e} a
+wrapped-net : () ->{Async, Net} Task Text
+make-spawner : forall a | e. () ->{} (() ->{Async | e} a) ->{Async | e} Task a
+returned-net : () ->{Async, Net} Task Text
+spawn-bundle : forall a | e. ((() ->{Async | e} a) ->{Async | e} Task a, Int)
+tuple-net : () ->{Async, Net} Task Text
+wrapped-fs : () ->{Async, Fs} Task Text
 scoped-net : () ->{Net} TaskResult (TaskResult Text)
+nested-scoped-net : () ->{Net} TaskResult (TaskResult (TaskResult Text))
+fetch-all : (List Text) ->{Net} TaskResult (List (TaskResult Text))

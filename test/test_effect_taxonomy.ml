@@ -635,7 +635,7 @@ let test_resolved_reserved_schemas () =
       | None -> Alcotest.failf "%s is missing from the executable schema fixture" effect_name)
     executable_expected;
   Alcotest.(check bool)
-    "Async self-row schema is executable after SC.0" true
+    "Async self-row schema is executable through SC.4" true
     (List.exists
        (function
          | { Kernel.it = Kernel.DefEffect { ename; _ }; _ } -> String.equal ename "async"
@@ -658,11 +658,11 @@ let test_resolved_reserved_schemas () =
         true
         (contains_string normalized_doc obligation))
     [
-      "direct resolved `async.spawn` application";
-      "narrow special typing rule";
-      "higher-order aliases, wrappers, and returned closures";
+      "exact resolved `async.spawn` identity";
+      "dependent operation scheme";
+      "aliases, higher-order wrappers, returned closures, tuples";
       "SC.3 represents opaque run/scope-local Task values";
-      "does not implement a scheduler, executable scopes, or a root handler";
+      "neither milestone implements a scheduler, executable scopes, or a root handler";
     ];
   let prelude = lazy (prelude_store ()) in
   let constructor_inventory type_name =
@@ -1161,6 +1161,7 @@ let lowercase = String.lowercase_ascii
 let test_governance_and_links () =
   test_self_effect_hash_contract ();
   test_async_privilege_mutations ();
+  Test_scheduler_core.run ();
   let doc = Corpus_support.read_file taxonomy_doc in
   let manifest = Corpus_support.read_file taxonomy_file in
   let approval = Corpus_support.read_file approval_fixture in

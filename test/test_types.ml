@@ -11,6 +11,22 @@ let t_int = TCon (Hash.of_string "ty-int", [])
 let t_text = TCon (Hash.of_string "ty-text", [])
 let unifies f = match f () with () -> true | exception Unify_error _ -> false
 
+let source_contains source needle =
+  try
+    ignore (Str.search_forward (Str.regexp_string needle) source 0);
+    true
+  with Not_found -> false
+
+let check_frozen_spawn_shape_guard () =
+  let source = Corpus_support.read_file "../src/check.ml" in
+  Alcotest.(check bool)
+    "frozen spawn shape disagreement is an E0805 diagnostic" true
+    (source_contains source
+       "frozen async.spawn identity resolved to an invalid converted parameter shape");
+  Alcotest.(check bool)
+    "frozen spawn shape disagreement never asserts" false
+    (source_contains source "assert false (* the identity guard proved the exact frozen shape *)")
+
 let test_type_cases () =
   let cases =
     [
@@ -76,7 +92,8 @@ let test_type_cases () =
         false );
     ]
   in
-  List.iter (fun (name, f, expected) -> Alcotest.(check bool) name expected (unifies f)) cases
+  List.iter (fun (name, f, expected) -> Alcotest.(check bool) name expected (unifies f)) cases;
+  check_frozen_spawn_shape_guard ()
 
 let arrow_with_row row = TArrow ([ t_int ], row, t_int)
 
@@ -113,6 +130,15 @@ let test_row_cases () =
         (fun () ->
           let tail = new_rvar 0 in
           unify_rows { effects = [ ha ]; tail } { effects = [ hb ]; tail }),
+        false );
+      ( "spawn-dependent child/caller row cannot hide an extra effect",
+        (fun () ->
+          let shared = open_row 0 [ ha ] in
+          let spawn = TArrow ([ TArrow ([], shared, t_text) ], shared, t_int) in
+          let misleading =
+            TArrow ([ TArrow ([], shared, t_text) ], { shared with effects = [ ha; hb ] }, t_int)
+          in
+          unify spawn misleading),
         false );
       ( "row via arrows",
         (fun () -> unify (arrow_with_row (open_row 0 [])) (arrow_with_row (closed_row [ hc ]))),
@@ -295,6 +321,24 @@ let prop_unify_symmetric =
       | Some s1, Some s2 -> s1 = s2 (* zonked rendering agrees up to var naming *)
       | _ -> false)
 
+let prop_spawn_dependent_row_charges_child_effects =
+  QCheck.Test.make ~count:200 ~name:"spawn-dependent row retains every generated child effect"
+    QCheck.(make Gen.(pair bool bool))
+    (fun (uses_b, uses_c) ->
+      let shared = open_row 0 [ ha ] in
+      let spawn = TArrow ([ TArrow ([], shared, t_text) ], shared, t_int) in
+      let child_effects = ha :: ((if uses_b then [ hb ] else []) @ if uses_c then [ hc ] else []) in
+      let child = TArrow ([], closed_row child_effects, t_text) in
+      match unify spawn (TArrow ([ child ], open_row 0 [], t_int)) with
+      | () ->
+          let charged =
+            match repr spawn with TArrow (_, row, _) -> (repr_row row).effects | _ -> assert false
+          in
+          List.for_all
+            (fun child_effect -> List.exists (Hash.equal child_effect) charged)
+            child_effects
+      | exception Unify_error _ -> false)
+
 let prop_row_inclusion_keeps_fixed_effects_directional =
   QCheck.Test.make ~count:300 ~name:"row inclusion never copies ambient fixed effects into callee"
     QCheck.(make Gen.(pair bool bool))
@@ -322,5 +366,6 @@ let suite =
     Alcotest.test_case "mono schemes do not generalize rows" `Quick
       test_mono_scheme_does_not_implicitly_generalize_rows;
     QCheck_alcotest.to_alcotest prop_unify_symmetric;
+    QCheck_alcotest.to_alcotest prop_spawn_dependent_row_charges_child_effects;
     QCheck_alcotest.to_alcotest prop_row_inclusion_keeps_fixed_effects_directional;
   ]

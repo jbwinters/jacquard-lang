@@ -1,11 +1,12 @@
-# Structured Concurrency SC.3 Evidence
+# Structured Concurrency SC.4-SC.5 Evidence
 
-Status: Task values and the exact once Async interface are represented on the
-validated SC.0 contract. This milestone intentionally contains no scheduling
-policy, executable structured scope, lifecycle engine, or detached/root Async
-handler.
+Status: every spawned child effect is charged through the exact once Async
+interface represented by SC.3, including every supported higher-order transport
+route, and the policy-independent scheduler lifecycle core is implemented. This
+combined milestone intentionally contains no scheduling policy, executable
+structured scope, host concurrency/I/O, or detached/root Async handler.
 
-- Reconstruction base: `d3807218823dfc152145e48616c3141c5b05d1ef`
+- Reconstruction base: `ed02113`
 - Evidence overlay: [MANIFEST.sha256](MANIFEST.sha256)
 - Authoritative contract: [concurrency.md](../../concurrency.md)
 
@@ -30,10 +31,40 @@ four-operation `Async a` effect frozen by SC.0. The declaration identities are:
 
 The prelude golden pins all whole/member hashes. Focused tests load every
 declaration from the content-addressed store, print it, read it, rebuild the
-kernel declaration, and re-hash the corresponding member. The existing SC.0
-effect-taxonomy mutation suite and executable documentation continue to prove
-that direct spawn charges the child row and that handling Async subtracts only
-Async, never child world effects.
+kernel declaration, and re-hash the corresponding member. SC.4 changes no
+declaration identity and adds no kernel or runtime form.
+
+## Generalized child-effect law
+
+The checker recognizes only the fully revalidated frozen `async.spawn`
+identity. Its instantiated operation scheme uses one shared open row for the
+child thunk and the operation call:
+
+```text
+(() ->{Async | e} a) ->{Async | e} Task a
+```
+
+Because the dependency is carried in the type, it survives an operation alias,
+a higher-order forwarding function, a returned closure, tuple storage and
+destructuring, independent Net/Fs row-polymorphic uses, and nested scopes. The
+executable concurrency doctest pins every route and the documented aggregate:
+
+```text
+fetch-all : (List Text) ->{Net} TaskResult (List (TaskResult Text))
+```
+
+The manifest cram executes the same law through a wrapper. A console-only
+manifest fails with E0814 naming `net.get`; a Net manifest succeeds, proving
+that `async.scope` removed Async but did not remove Net. A misleading closed
+annotation reports the propagated Net row. An adversarial row-polymorphic shape
+fails with the same-tail occurs check at the `async.spawn` source, and the Types
+regression rejects different effect sets sharing the same tail. Both negative
+crams declare the complete frozen four-operation Async identity rather than a
+near-match. A generated property checks that every subset of two independent
+child effects remains visible in the shared caller row. The converted-shape
+defense fails closed with E0805 if a future checker refactor makes the validated
+frozen declaration and its internal arrow disagree; a source regression keeps
+that path diagnostic-only and forbids the former internal assertion.
 
 ## Opaque Task boundary
 
@@ -90,16 +121,48 @@ byte-compares interpreter and native output for Done/Failed/Cancelled, tests
 the private carrier diagnostic, and pins the clean unhandled CLI failure. The
 C/OCaml show parity corpus includes a redacted inert Task value.
 
+## Scheduler lifecycle core
+
+`Scheduler_core` owns deterministic body/child IDs, opaque scope-local handles,
+task lifecycle, await edges, immutable terminal results, cooperative
+cancellation requests, and opaque resume tokens. Resume ownership is
+destructive: checkout removes the sole token, suspension returns one token, and
+terminal transitions or cancellation delivery drop it. Explicit scope close
+removes all wait edges and transfers remaining owned tokens to the caller for
+destruction. Invalid lifecycle or ownership operations return E0908; foreign
+handles continue to return E0907.
+
+Await registration permits multiple same-scope waiters and preserves their
+registration order on wakeup. Terminal awaits are immediate. Self-await and
+closed cycles produce the frozen task-failure messages and terminalize cycle
+members atomically with respect to wakeup reporting: every member drops its
+resume and reaches `failed` before registration-ordered external waiters become
+runnable. Multi-member evidence pins cycle-discovery grouping and per-member
+registration order, including a cancelled external waiter that is omitted. No
+terminal cycle member can appear in the returned wakeup list. The core returns
+the handles made runnable by a transition but has no runnable queue and makes no
+policy decision.
+
+Focused Alcotest and QCheck coverage pins the transition table, resume-token
+ownership, deterministic IDs, yield suspension/wakeup, multiple waiters,
+immediate terminal awaits, completion/failure/cancellation, self-await, closed
+two- and three-node cycles, external/cancelled waiter controls, the complete
+public rejection table, identical back-to-back scenarios, a property that every
+observed lifecycle transition satisfies the frozen contract, a property that
+every returned wakeup is runnable with one resume, close cleanup, and
+foreign-handle diagnostics. The existing handler
+gauntlet and interpreter/native runtime suites continue to cover affine Once
+capture enforcement and the inert Task boundary around this core.
+
 ## Reconstruction and verification
 
-The manifest is the complete integrated overlay on commit
-`d3807218823dfc152145e48616c3141c5b05d1ef`. It includes the SC.3 work and the
-governance changes combined with it on this branch. Reconstruct it under
-repository-local scratch space:
+The manifest is the complete combined SC.4-SC.5 successor overlay on validated
+SC.3 commit
+`ed02113`. Reconstruct it under repository-local scratch space:
 
 ```sh
-base=d3807218823dfc152145e48616c3141c5b05d1ef
-dest="$PWD/.scratch/sc3-evidence-copy"
+base=ed02113
+dest="$PWD/.scratch/sc4-sc5-evidence-copy"
 manifest=docs/release/structured-concurrency/MANIFEST.sha256
 rm -rf "$dest"
 mkdir -p "$dest"
@@ -130,6 +193,8 @@ opam exec -- dune build @doc
 Expected results are zero exits, 674 compiled Alcotest/QCheck cases, 36 cram
 transcripts, and 25 doctest examples across 8 documents.
 
-The scheduler, executable scopes, cancellation delivery, lifecycle state, and
-root handler remain later C1 tasks. SC.4 also remains responsible for the
-general higher-order non-laundering proof beyond SC.0's direct-spawn rule.
+Scheduling policy, executable scopes, effect routing, and the root handler
+remain later C1 tasks. The SC.5 core supplies cancellation request/delivery
+state transitions but does not decide when a routed operation is reached. SC.4
+supplies the general higher-order non-laundering proof; its `async.scope`
+fixture remains compile-only handler scaffolding and is not scheduler execution.

@@ -31,10 +31,11 @@ val show_scheme : ctx -> Types.scheme -> string
 (** [show_scheme ctx scheme] renders a deterministic surface signature using store names. *)
 
 val is_frozen_async_spawn : ctx -> Hash.t -> bool
-(** [is_frozen_async_spawn ctx operation] is true only for the exact pinned SC.0 [async.spawn]
+(** [is_frozen_async_spawn ctx operation] is true only for the exact pinned SC.4 [async.spawn]
     identity whose complete resolved Async declaration matches all four frozen operations, modes,
     type-variable links, Task identities, and self-effect row. Missing or near-match declarations
-    return false. *)
+    return false. The recognized operation's inferred callable row shares its child thunk row, so
+    every higher-order transport preserves the child-effect charge. *)
 
 val con_scheme : ctx -> ?meta:Meta.t -> Hash.t -> Types.scheme
 (** [con_scheme ctx hash] returns a constructor scheme. It raises [Err] when [hash] is missing, has
