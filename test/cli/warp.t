@@ -57,6 +57,21 @@ and root seed in the hermetic cache identity.
   PASS seeded-case/changed display (schedules: 3, seed 73)
   cache: 0 hit, 1 ran
 
+Duplicate display labels still identify different structural leaves. Their
+decision seeds and trace program identities must both be distinct.
+
+  $ cat > duplicate-schedules.jac <<'JACQUARD'
+  > duplicate-suite = Group("duplicate group", [
+  >   Case("same label", fn () -> check.true(False, "first")),
+  >   Case("same label", fn () -> check.true(False, "second"))
+  > ])
+  > JACQUARD
+  $ jacquard test duplicate-schedules.jac --schedules 1 --seed 73 --no-cache > duplicate-failures.txt 2>&1; test $? = 1
+  $ grep 'random schedule 1 of 1 failed (decision seed' duplicate-failures.txt | sort -u | wc -l
+  2
+  $ grep '^jacquard-schedule .* program=' duplicate-failures.txt | sed 's/.* program=\([^ ]*\).*/\1/' | sort -u | wc -l
+  2
+
 A failing run prints the exact root replay command, the failing decision seed,
 and the canonical log. Repeating the printed command reproduces byte for byte.
 
@@ -67,10 +82,10 @@ and the canonical log. Repeating the printed command reproduces byte for byte.
   identical
   $ grep -E '^(FAIL|  ! random schedule|replay: jacquard|schedule log:|jacquard-schedule format=1|decision sequence=)' failure-a.txt | head -6
   FAIL seeded-case/seeded pass (schedule: failed 1/3, seed 73)
-    ! random schedule 1 of 3 failed (decision seed -140780218347462620)
+    ! random schedule 1 of 3 failed (decision seed -3550775722416792546)
   replay: jacquard test 'failing-schedule.jac' --prelude '$TESTCASE_ROOT/../../prelude' --schedules 3 --seed 73 --no-cache
   schedule log:
-  jacquard-schedule format=1 scheduler=seeded-random-v0 program=5a74300682334e15fa4e130bc632dba1183233bddbe5505c114906577aa777b0 policy=fail-fast max-tasks=1024 max-decisions=100000 fork=-
+  jacquard-schedule format=1 scheduler=seeded-random-v0 program=dfbf5d14431239ca80ad332b408233974e2cfbe841669cc5e0b712648a9a35be policy=fail-fast max-tasks=1024 max-decisions=100000 fork=-
   decision sequence=0 runnable=0#0 chosen=0#0 operation=async.scope
 
 Scheduled failures are deliberately not cached: replay presentation contains

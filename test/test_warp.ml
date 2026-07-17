@@ -196,24 +196,67 @@ let test_coverage_memo_trap () =
 let test_schedule_seed_splitting_and_cache_identity () =
   let member = Hash.of_string "scheduled-member" in
   Random.init 1;
-  let first = Warp.schedule_test_seed ~seed:42 ~member ~relative_path:[ "group"; "first" ] in
+  let first =
+    Warp.schedule_test_seed ~seed:42 ~member ~relative_path:[ "group"; "first" ]
+      ~structural_path:[ 0; 0 ]
+  in
   Random.init 999;
-  let same = Warp.schedule_test_seed ~seed:42 ~member ~relative_path:[ "group"; "first" ] in
-  let other_leaf = Warp.schedule_test_seed ~seed:42 ~member ~relative_path:[ "group"; "second" ] in
+  let same =
+    Warp.schedule_test_seed ~seed:42 ~member ~relative_path:[ "group"; "first" ]
+      ~structural_path:[ 0; 0 ]
+  in
+  let other_leaf =
+    Warp.schedule_test_seed ~seed:42 ~member ~relative_path:[ "group"; "second" ]
+      ~structural_path:[ 0; 0 ]
+  in
   let other_member =
     Warp.schedule_test_seed ~seed:42 ~member:(Hash.of_string "other-member")
-      ~relative_path:[ "group"; "first" ]
+      ~relative_path:[ "group"; "first" ] ~structural_path:[ 0; 0 ]
+  in
+  let duplicate_leaf =
+    Warp.schedule_test_seed ~seed:42 ~member ~relative_path:[ "group"; "first" ]
+      ~structural_path:[ 0; 1 ]
+  in
+  let split_path =
+    Warp.schedule_test_seed ~seed:42 ~member ~relative_path:[ "a"; "b" ] ~structural_path:[ 0; 0 ]
+  in
+  let nul_path =
+    Warp.schedule_test_seed ~seed:42 ~member ~relative_path:[ "a\000b" ] ~structural_path:[ 0; 0 ]
   in
   Alcotest.(check int) "same canonical test split" first same;
   Alcotest.(check int) "top-level rename does not move the split" first same;
   Alcotest.(check bool) "leaf path participates in split" true (first <> other_leaf);
   Alcotest.(check bool) "member hash participates in split" true (first <> other_member);
+  Alcotest.(check bool)
+    "duplicate labels have distinct structural seeds" true (first <> duplicate_leaf);
+  Alcotest.(check bool)
+    "length framing distinguishes split and NUL paths" true (split_path <> nul_path);
+  let first_program =
+    Warp.schedule_leaf_identity ~member ~relative_path:[ "group"; "first" ]
+      ~structural_path:[ 0; 0 ]
+  in
+  let duplicate_program =
+    Warp.schedule_leaf_identity ~member ~relative_path:[ "group"; "first" ]
+      ~structural_path:[ 0; 1 ]
+  in
+  let split_program =
+    Warp.schedule_leaf_identity ~member ~relative_path:[ "a"; "b" ] ~structural_path:[ 0; 0 ]
+  in
+  let nul_program =
+    Warp.schedule_leaf_identity ~member ~relative_path:[ "a\000b" ] ~structural_path:[ 0; 0 ]
+  in
+  Alcotest.(check bool)
+    "duplicate labels have distinct trace identities" true
+    (not (Hash.equal first_program duplicate_program));
+  Alcotest.(check bool)
+    "framed NUL path has a distinct trace identity" true
+    (not (Hash.equal split_program nul_program));
   let base = Warp.cache_key_string (Warp.Hermetic ("display-only", member)) in
   let key = Warp.schedule_key_string ~base ~schedules:8 ~seed:42 in
   Alcotest.(check string)
     "complete scheduled cache identity"
-    (Printf.sprintf "%s|scheduler=%s|schedules=8|schedule-seed=42" base
-       Round_robin.seeded_scheduler_version)
+    (Printf.sprintf "%s|scheduler=%s|schedule-identity=%s|schedules=8|schedule-seed=42" base
+       Round_robin.seeded_scheduler_version Warp.schedule_identity_version)
     key;
   Alcotest.(check bool)
     "changed count rekeys" true
@@ -231,6 +274,26 @@ let test_schedule_seed_splitting_and_cache_identity () =
       \    (app (var check.true) (var true) (lit \"after\"))))"
   in
   let replay_command = "jacquard test bounds.jac --schedules 1 --seed 42 --no-cache" in
+  let recorded =
+    match
+      Round_robin.run_call_recorded ctx ~program:first_program
+        ~mode:(Round_robin.Seeded_schedule { seed = first })
+        test_run [ thunk ]
+    with
+    | Ok recorded -> recorded
+    | Error error -> Alcotest.fail (Runtime_err.to_string error)
+  in
+  (match
+     Round_robin.run_call_recorded ctx ~program:duplicate_program
+       ~mode:(Round_robin.Replay_schedule recorded.schedule) test_run [ thunk ]
+   with
+  | Error (Runtime_err.Scheduler_error message) ->
+      Alcotest.(check bool)
+        "wrong duplicate-label leaf strict replay is refused before execution" true
+        (String.starts_with ~prefix:"schedule replay drift: program identity expected" message)
+  | Error error ->
+      Alcotest.failf "wrong-leaf replay returned the wrong error: %s" (Runtime_err.to_string error)
+  | Ok _ -> Alcotest.fail "wrong duplicate-label leaf replay unexpectedly succeeded");
   let verdict =
     match
       Warp.run_thunk_seeded ctx

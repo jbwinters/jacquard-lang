@@ -113,10 +113,35 @@ let run_thunk ctx ~test_run (thunk : Value.t) : (verdict * Hash.t list, string) 
   | Error e ->
       Ok (Fail { soft = []; hard = Some ("runtime error: " ^ Runtime_err.to_string e) }, mine)
 
-let schedule_test_seed ~seed ~member ~relative_path =
-  let identity =
-    Hash.of_string (Hash.to_hex member ^ "\000" ^ String.concat "\000" relative_path) |> Hash.to_hex
-  in
+let schedule_identity_version = "warp-schedule-leaf-v1"
+
+let add_schedule_identity_frame buffer value =
+  Printf.bprintf buffer "%d:" (String.length value);
+  Buffer.add_string buffer value
+
+(** [schedule_leaf_identity ~member ~relative_path ~structural_path] binds one scheduled Case to its
+    Merkle member, length-framed relative labels, and zero-based structural child-index path. The
+    framing is injective even when labels contain NUL bytes, while the index path distinguishes
+    duplicate labels without depending on the renameable top-level display name. *)
+let schedule_leaf_identity ~member ~relative_path ~structural_path =
+  if List.exists (fun index -> index < 0) structural_path then
+    invalid_arg "Warp.schedule_leaf_identity: structural indices must be non-negative";
+  let buffer = Buffer.create 160 in
+  let frame = add_schedule_identity_frame buffer in
+  frame schedule_identity_version;
+  frame (Hash.to_hex member);
+  frame "labels";
+  frame (string_of_int (List.length relative_path));
+  List.iter frame relative_path;
+  frame "indices";
+  frame (string_of_int (List.length structural_path));
+  List.iter (fun index -> frame (string_of_int index)) structural_path;
+  Hash.of_string (Buffer.contents buffer)
+
+(** [schedule_test_seed] derives a leaf-local SplitMix64 seed from the root seed and the complete
+    framed structural identity used by schedule traces. *)
+let schedule_test_seed ~seed ~member ~relative_path ~structural_path =
+  let identity = schedule_leaf_identity ~member ~relative_path ~structural_path |> Hash.to_hex in
   let identity_bits = int_of_string ("0x" ^ String.sub identity 0 14) in
   let rng = Infer_dist.Rng.make (seed lxor identity_bits) in
   Int64.to_int (Infer_dist.Rng.next_int64 rng)
@@ -537,8 +562,8 @@ let prop_key_string ~member ~mode ~samples ~seed =
     seed
 
 let schedule_key_string ~base ~schedules ~seed =
-  Printf.sprintf "%s|scheduler=%s|schedules=%d|schedule-seed=%d" base
-    Round_robin.seeded_scheduler_version schedules seed
+  Printf.sprintf "%s|scheduler=%s|schedule-identity=%s|schedules=%d|schedule-seed=%d" base
+    Round_robin.seeded_scheduler_version schedule_identity_version schedules seed
 
 let verdict_form (verdict : verdict) : Form.t =
   match verdict with
@@ -681,8 +706,8 @@ let rec value_has_prop (v : Value.t) : bool =
 let with_coverage ctx f = Eval.with_fresh_coverage ctx f
 
 (* walk one discovered test VALUE, recursing into groups *)
-let rec run_value ctx ~test_run ~prop_mode ~schedule_plan ~member ~schedule_path ~display
-    (v : Value.t) : (outcome list, string) result =
+let rec run_value ctx ~test_run ~prop_mode ~schedule_plan ~member ~schedule_path ~structural_path
+    ~display (v : Value.t) : (outcome list, string) result =
   match v with
   | Value.VCon { name = "case"; args = [ Value.VText label; thunk ]; _ } -> (
       let display = display ^ "/" ^ label in
@@ -692,11 +717,11 @@ let rec run_value ctx ~test_run ~prop_mode ~schedule_plan ~member ~schedule_path
         | Default_schedule ->
             Result.map (fun (v, c) -> (v, c, None)) (run_thunk ctx ~test_run thunk)
         | Seeded_schedules { seed; schedules; replay_command } ->
-            let test_seed = schedule_test_seed ~seed ~member ~relative_path:schedule_path in
             let program =
-              Hash.of_string
-                ("warp-schedule-v0\000" ^ Hash.to_hex member ^ "\000"
-                ^ String.concat "\000" schedule_path)
+              schedule_leaf_identity ~member ~relative_path:schedule_path ~structural_path
+            in
+            let test_seed =
+              schedule_test_seed ~seed ~member ~relative_path:schedule_path ~structural_path
             in
             run_thunk_seeded ctx ~test_run ~program ~root_seed:seed ~test_seed ~schedules
               ~replay_command thunk
@@ -737,20 +762,21 @@ let rec run_value ctx ~test_run ~prop_mode ~schedule_plan ~member ~schedule_path
                   };
                 ]))
   | Value.VCon { name = "group"; args = [ Value.VText label; tests ]; _ } ->
-      let rec walk acc = function
+      let rec walk child_index acc = function
         | Value.VCon { name = "nil"; _ } -> Ok (List.concat (List.rev acc))
         | Value.VCon { name = "cons"; args = [ t; rest ]; _ } -> (
             match
               run_value ctx ~test_run ~prop_mode ~schedule_plan ~member
                 ~schedule_path:(schedule_path @ [ label ])
+                ~structural_path:(structural_path @ [ child_index ])
                 ~display:(display ^ "/" ^ label)
                 t
             with
-            | Ok os -> walk (os :: acc) rest
+            | Ok os -> walk (child_index + 1) (os :: acc) rest
             | Error e -> Error e)
         | v -> Error (Printf.sprintf "malformed group: %s" (Value.show v))
       in
-      walk [] tests
+      walk 0 [] tests
   | Value.VCon { name = "wcase"; args = [ Value.VText label; thunk ]; _ } -> (
       (* world lane: the caller already verified grants; never cached *)
       let display = display ^ "/" ^ label in
@@ -820,7 +846,7 @@ let run_discovered ctx (cctx : Check.ctx) ~test_run ~prop_mode ~schedule_plan ~c
           | None -> (
               match
                 run_value ctx ~test_run ~prop_mode ~schedule_plan ~member:h ~schedule_path:[]
-                  ~display:name v
+                  ~structural_path:[ 0 ] ~display:name v
               with
               | Error e -> Error e
               | Ok outcomes ->
@@ -871,7 +897,7 @@ let run_discovered ctx (cctx : Check.ctx) ~test_run ~prop_mode ~schedule_plan ~c
           (Result.map_error Runtime_err.to_string (value_of ctx h))
           (fun v ->
             run_value ctx ~test_run ~prop_mode ~schedule_plan:Default_schedule ~member:h
-              ~schedule_path:[] ~display:name v)
+              ~schedule_path:[] ~structural_path:[ 0 ] ~display:name v)
 
 (* --- rendering --- *)
 

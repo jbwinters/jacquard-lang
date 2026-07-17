@@ -152,13 +152,16 @@ generators; it is a flag.
 The schedule lane is separate from property-data sampling. It reruns each
 hermetic Case under unbiased SplitMix64 bounded-integer choices from the exact
 runnable queue. The root seed is mixed with the Case's Merkle member hash and
-relative group/Case label path, excluding the renameable top-level name, so a
-rename or another test being added, removed, or served from cache does not move
-its stream. A failure prints the child decision seed and exact rerun command; a
-canonical versioned log is included only when the scheduler completed one.
-Scheduled failures are not cached, preventing a moved suite from receiving a
-stale source/prelude command. `--schedules` requires a positive count and an
-explicit `--seed`; it never consults host randomness.
+length-framed relative group/Case label path, excluding the renameable top-level
+name, plus the leaf's zero-based structural index path. The framing distinguishes
+embedded NUL bytes and the indices distinguish duplicate labels, while a rename
+or another test being added, removed, or served from cache does not move its
+stream. The same identity is pinned in the replay trace header. A failure prints
+the child decision seed and exact rerun command; a canonical versioned log is
+included only when the scheduler completed one. Scheduled failures are not
+cached, preventing a moved suite from receiving a stale source/prelude command.
+`--schedules` requires a positive count and an explicit `--seed`; it never
+consults host randomness.
 
 ### Shrinking without shrinkers
 

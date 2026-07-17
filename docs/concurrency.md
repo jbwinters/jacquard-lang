@@ -532,11 +532,13 @@ data, not schedules.
 SC.11 adds `jacquard test --schedules N --seed S` for hermetic Warp Cases. `N`
 must be positive and `--seed` is required whenever this lane is selected. The
 CLI does not fall back to OS entropy in this lane. Each discovered member gets
-a SplitMix64 stream mixed from `S`, its canonical member hash, and the relative
-group/Case label path (never the renameable top-level name). Each of the `N`
-executions then gets a child decision seed. This makes one test's schedules
-independent of discovery order, top-level renames, cache hits, and host
-`Random` state.
+a SplitMix64 stream mixed from `S`, its canonical member hash, the length-framed
+relative group/Case label path (never the renameable top-level name), and the
+zero-based structural child-index path to the leaf. Length framing keeps labels
+containing NUL bytes unambiguous, while the structural indices distinguish
+duplicate labels. Each of the `N` executions then gets a child decision seed.
+This makes one test's schedules independent of discovery order, top-level
+renames, cache hits, and host `Random` state.
 
 At each D46 decision, the handler draws one index from the exact ordered
 runnable queue with 62-bit rejection sampling. Non-power-of-two queue lengths
@@ -557,13 +559,15 @@ byte-for-byte reproducible. A passing Case reports the number of explored
 schedules and the root seed.
 
 Hermetic cache identity is the existing Merkle test/member key plus the
-scheduler version, `N`, and `S`. Cache entries retain only ordinary rendered
-test evidence; no Task, evaluator closure, continuation, PRNG state, or host
-random value enters the cache. Scheduled failures are not cached because their
-rerun command contains current source/prelude paths. Cached passing evidence
-rebuilds its top-level display name from the current name index, so a semantic
-rename remains a hit without stale presentation. WorldTests stay uncached, and
-Props retain their separate data-generation sampling/exhaustive modes.
+scheduler version, schedule-leaf identity version, `N`, and `S`. The same
+framed member/label/index identity is the trace program identity checked before
+strict replay. Cache entries retain only ordinary rendered test evidence; no
+Task, evaluator closure, continuation, PRNG state, or host random value enters
+the cache. Scheduled failures are not cached because their rerun command
+contains current source/prelude paths. Cached passing evidence rebuilds its
+top-level display name from the current name index, so a semantic rename remains
+a hit without stale presentation. WorldTests stay uncached, and Props retain
+their separate data-generation sampling/exhaustive modes.
 
 ## 6. Interactions and exclusions
 
