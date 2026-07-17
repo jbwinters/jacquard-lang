@@ -145,8 +145,9 @@ the solved thunk row into its caller as `{Async | e}`. The executable
 concurrency fixtures pin the resulting `{Async, Net}` signature and reject a
 laundering `{Async}` annotation. Generic operation typing remains unchanged,
 and higher-order aliases, wrappers, and returned closures are deliberately not
-claimed until SC.4 closes them. `Async` is still reserved: this checker bridge
-does not implement Task values, a scheduler, scopes, or a root handler. See
+claimed until SC.4 closes them. `Async` is still reserved: SC.3 represents
+opaque run/scope-local Task values, but does not implement a scheduler,
+executable scopes, or a root handler. See
 [`concurrency.md`](concurrency.md).
 
 The reserved interface nevertheless has a full identity because SC.0 makes it

@@ -16,6 +16,8 @@ type t =
           inference driver) *)
   | Once_resumed_twice
       (** a once resumption was applied after its captured instance had already been resumed *)
+  | Invalid_task_handle of string
+      (** a malformed, foreign-run, or cross-scope Task handle reached a runtime boundary *)
   | Type_error of string  (** applying a non-function, spliced non-code, and similar *)
   | Unresolved of string  (** an unresolved name or dangling hash reached evaluation *)
   | Eval_error of string  (** the gated [eval] op rejected its payload at the boundary *)
@@ -28,6 +30,7 @@ let to_string = function
        jacquard infer)"
   | Once_resumed_twice ->
       "error[E0906]: a once continuation may be resumed at most once per captured instance"
+  | Invalid_task_handle message -> "error[E0907]: " ^ message
   | Unhandled { effect_; op } ->
       Printf.sprintf "unhandled effect %s: operation `%s` reached the root without a handler"
         effect_ op

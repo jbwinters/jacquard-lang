@@ -121,10 +121,11 @@ Read these together when judging whether the release candidate is credible:
 
 ## Structured Concurrency Evidence
 
-- `release/structured-concurrency/EVIDENCE.md`: SC.0 interface, identity,
-  row-charging, pure invariant, mutation, and compatibility evidence.
-- `release/structured-concurrency/MANIFEST.sha256`: reconstructible SC.0 overlay
-  on the completed release-hardening base.
+- `release/structured-concurrency/EVIDENCE.md`: SC.0 interface/row-law evidence
+  plus the SC.3 Task value, private-carrier, Async declaration, and native parity
+  boundary.
+- `release/structured-concurrency/MANIFEST.sha256`: reconstructible SC.3 overlay
+  on the validated SC.0 base.
 
 ## Governed Membranes Evidence
 
