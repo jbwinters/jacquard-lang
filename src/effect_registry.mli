@@ -40,10 +40,10 @@ val register : t -> metadata -> (t, registration_error) result
     name, or official index name, without changing [registry]. *)
 
 val catalog : metadata list
-(** All 25 ratified entries. Ten entries are [Reserved] and deliberately have no identity. *)
+(** All 26 ratified entries. Nine entries are [Reserved] and deliberately have no identity. *)
 
 val canonical : t
-(** The canonical registry containing exactly the fifteen released blessed identities. *)
+(** The canonical registry containing exactly the seventeen released blessed identities. *)
 
 val entries : t -> metadata list
 (** [entries registry] returns its entries in stable display-name order. *)
@@ -53,6 +53,10 @@ val find : t -> Hash.t -> metadata option
 
 val find_canonical : Hash.t -> metadata option
 (** [find_canonical identity] is [find canonical identity]. *)
+
+val canonical_order : Hash.t -> int option
+(** [canonical_order identity] returns the zero-based position of a released identity in the frozen
+    taxonomy catalog. Reserved catalog rows retain their positions but never match. *)
 
 type style = Plain | Ansi
 

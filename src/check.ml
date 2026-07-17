@@ -1757,16 +1757,21 @@ let manifest_errors ctx ?(grantable = []) ~(granted : Hash.t list) (row : row) :
         let name_hint = name_of ctx h in
         let metadata = Effect_registry.find_canonical h in
         let requirement = Effect_registry.render_manifest_requirement ~name_hint h in
-        (* pure effects (abort, state, ...) are never grantable; don't send the user to a
-           --allow flag that will bounce with E0703. Callers pass Prelude.grantable_names;
-           an empty list keeps the generic hint. Identity, rather than a colliding user-effect
-           spelling, decides whether a built-in grant is ever suggested. *)
+        (* Pure effects (abort, state, ...) and world facades are never root-grantable, but their
+           remediation differs: pure effects explain the language-level restriction, while a
+           facade such as Workspace must be handled by its membrane. Callers pass
+           Prelude.grantable_names; an empty list keeps the generic hint. Identity, rather than a
+           colliding user-effect spelling, decides whether a built-in grant is ever suggested. *)
         let hint =
           match metadata with
           | Some metadata
             when grantable = [] || List.mem metadata.Effect_registry.index_name grantable ->
               Printf.sprintf "grant it with --allow %s, or handle the effect in the program"
                 metadata.index_name
+          | Some metadata when metadata.tier = Effect_registry.World ->
+              Printf.sprintf
+                "handle %s in the program (%s is a world facade and is not root-grantable)"
+                metadata.display_name metadata.display_name
           | Some _ -> "handle the effect in the program (this effect is pure and cannot be granted)"
           | None ->
               "handle the effect in the program (unregistered user effects have no built-in \
