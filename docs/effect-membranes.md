@@ -13,6 +13,15 @@ carrier, derives its constituent IDs and Call authority through typed GM.1
 artifacts, and hashes the exact tuple below with the existing `code.hash`
 canonical-Code boundary.
 
+GM.9 implements the §3/§8 Workspace request boundary before membrane handlers:
+the executable prelude publishes the charter's frozen
+`Path = PathValue(Text)` carrier and reuses the frozen `Request`,
+`Response`, `ToolError`, and `SecretRef` types. Its three once operations,
+finite inspectable specs, pure call normalizers, and type-specific outcome
+summarizers are released; live/dry gates and drivers remain later phases. The
+fetch spec records the exact `[Net, Secret]` envelope in the frozen blessed
+effect-taxonomy order required by `governance.validate-authority`.
+
 ---
 
 ## 1. Thesis
@@ -231,6 +240,17 @@ uses the resolved interface identity, not a display name. A resource entry may
 refine one of those effect entries with configured evidence, but never replaces
 the effect-level claim. `Call.authority` and `Proposal.authority` must both equal
 that envelope byte for byte.
+
+Canonical blessed-effect order is the row order of
+`spec/effect-taxonomy-v1.tsv`, not rendered Code or hash lexical order.
+`Authority.Resource` entries sort immediately after their matching Effect.
+Resources for that exact identity then compare structurally by D3 bytewise
+scope and, only when scopes are equal, canonical configuration-hash bytes/text;
+no delimiter-concatenated or length-prefixed surrogate key defines this order.
+Non-taxonomy identities use a deterministic hash fallback after blessed
+effects. This total order preserves duplicate rejection and the rule that a
+Resource refines a preceding Effect. The frozen Workspace fetch envelope is
+therefore exactly `[Effect(Net-id), Effect(Secret-id)]`.
 
 The verifier computes the same envelope from the call-specific action. Raw
 effects remain unchanged; a re-performed facade operation expands recursively
