@@ -1161,10 +1161,6 @@ let lowercase = String.lowercase_ascii
 let test_governance_and_links () =
   test_self_effect_hash_contract ();
   test_async_privilege_mutations ();
-  Test_scheduler_core.run ();
-  Test_structured_scope.run ();
-  Test_cancellation.run ();
-  Test_scope_policy.run ();
   let doc = Corpus_support.read_file taxonomy_doc in
   let manifest = Corpus_support.read_file taxonomy_file in
   let approval = Corpus_support.read_file approval_fixture in

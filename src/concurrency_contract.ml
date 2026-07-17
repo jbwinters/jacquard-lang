@@ -17,6 +17,8 @@ let async_operation_hashes =
     ("async.yield", "3f67a20859f53ca48578469efd2c4bc2956bfa6b37d241fcbf2fe19d1ddf3e6a");
   ]
 
+let scope_control_hash = Hash.of_string "jacquard-internal-async-scope-v0"
+
 type task_id = { scope_path : int list; spawn_index : int }
 
 let max_task_component = Int64.to_int 0xffff_ffffL

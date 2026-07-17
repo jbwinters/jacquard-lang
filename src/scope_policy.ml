@@ -9,8 +9,8 @@ type frozen_non_success = Frozen_failed of string | Frozen_cancelled
 type ('resume, 'value) t = {
   scope : ('resume, 'value) Structured_scope.t;
   policy : Concurrency_contract.failure_policy;
-  children : 'value child list;
-  mutable last_decision : int option;
+  mutable children : 'value child list;
+  mutable last_observation : (int * int) option;
   mutable first_non_success : frozen_non_success option;
   mutable awakened : Structured_scope.handle list;
 }
@@ -37,7 +37,7 @@ let create ?(policy = Concurrency_contract.default_failure_policy) scope ~childr
             scope;
             policy;
             children = List.rev acc;
-            last_decision = None;
+            last_observation = None;
             first_non_success = None;
             awakened = [];
           }
@@ -56,6 +56,17 @@ let take_awakened controller =
   controller.awakened <- [];
   awakened
 
+let register_child controller handle =
+  Result.bind (Structured_scope.id controller.scope handle) (fun id ->
+      if
+        List.exists
+          (fun child -> Concurrency_contract.compare_task_id child.id id = 0)
+          controller.children
+      then diagnostic ("duplicate child " ^ Concurrency_contract.trace_task_id id)
+      else (
+        controller.children <- controller.children @ [ { handle; id; terminal = None } ];
+        Ok ()))
+
 let find_child controller id =
   List.find_opt
     (fun child -> Concurrency_contract.compare_task_id child.id id = 0)
@@ -69,6 +80,7 @@ let cancel_unfinished controller ~drop =
   let ( let* ) = Result.bind in
   let diagnostics = ref [] in
   let first_exception = ref None in
+  let awakened = ref [] in
   let remember_exception exn backtrace =
     if Option.is_none !first_exception then first_exception := Some (exn, backtrace)
   in
@@ -79,7 +91,7 @@ let cancel_unfinished controller ~drop =
   in
   let attempt operation =
     match operation () with
-    | Ok awakened -> controller.awakened <- controller.awakened @ awakened
+    | Ok woken -> awakened := !awakened @ woken
     | Error errors -> diagnostics := !diagnostics @ errors
     | exception exn -> remember_exception exn (Printexc.get_raw_backtrace ())
   in
@@ -96,20 +108,26 @@ let cancel_unfinished controller ~drop =
               child.handle ~drop:guarded_drop)
   in
   List.iter (fun child -> attempt (fun () -> cancel child)) controller.children;
+  controller.awakened <- controller.awakened @ !awakened;
   match !first_exception with
   | Some (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace
   | None -> if !diagnostics = [] then Ok () else Error !diagnostics
 
-let valid_decision controller decision =
+let valid_observation controller decision ordinal =
   if decision < 0 then diagnostic "decision sequence must be non-negative"
+  else if ordinal < 0 then diagnostic "terminal observation ordinal must be non-negative"
   else
-    match controller.last_decision with
-    | Some previous when decision <= previous ->
-        diagnostic (Printf.sprintf "decision sequence %d does not follow %d" decision previous)
+    match controller.last_observation with
+    | Some (previous_decision, previous_ordinal)
+      when decision < previous_decision
+           || (decision = previous_decision && ordinal <= previous_ordinal) ->
+        diagnostic
+          (Printf.sprintf "terminal observation (%d,%d) does not follow (%d,%d)" decision ordinal
+             previous_decision previous_ordinal)
     | None | Some _ -> Ok ()
 
-let record_terminal controller ~decision handle ~drop =
-  Result.bind (valid_decision controller decision) (fun () ->
+let record_terminal controller ~decision ?(ordinal = 0) handle ~drop =
+  Result.bind (valid_observation controller decision ordinal) (fun () ->
       Result.bind (Structured_scope.id controller.scope handle) (fun id ->
           match find_child controller id with
           | None ->
@@ -122,7 +140,7 @@ let record_terminal controller ~decision handle ~drop =
                   match view.result with
                   | None -> diagnostic ("child " ^ child_name child ^ " is not terminal")
                   | Some result -> (
-                      controller.last_decision <- Some decision;
+                      controller.last_observation <- Some (decision, ordinal);
                       child.terminal <- Some result;
                       match (controller.policy, result, controller.first_non_success) with
                       | Concurrency_contract.Fail_fast, Concurrency_contract.Failed message, None ->

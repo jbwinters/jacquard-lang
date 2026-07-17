@@ -367,3 +367,5 @@ let run () =
   QCheck.Test.check_exn prop_transition_table;
   QCheck.Test.check_exn prop_public_transitions_match_contract;
   QCheck.Test.check_exn prop_cycle_wakeups_are_live
+
+let suite = [ Alcotest.test_case "lifecycle, waits, cycles, and ownership" `Quick run ]

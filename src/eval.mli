@@ -16,6 +16,11 @@ val fresh_audit_run_id : ctx -> Hash.t
 (** [fresh_audit_run_id ctx] mints a deterministic identity in [ctx]'s private Audit owner
     namespace. It is exposed only to trusted prelude wiring. *)
 
+val with_scheduler_task_run :
+  Task_capability.t -> ctx -> run:Concurrency_owner.t -> scope_path:int list -> (unit -> 'a) -> 'a
+(** Runtime-private bridge binding Task validation to one fresh scheduler run and exact scope. The
+    unforgeable first argument keeps run selection out of the public OCaml construction surface. *)
+
 val validate_task_value :
   ctx -> scope_path:int list -> Value.t -> (Concurrency_contract.task_id, Diag.t list) result
 (** [validate_task_value ctx ~scope_path value] accepts a Task only in its creating evaluator run
@@ -91,6 +96,23 @@ val run_state_capturing_once : ctx -> state -> (once_capture, Runtime_err.t) res
     sealed before it crosses the API, preventing clients from extracting frames and minting another
     budget for the same captured instance. Calling its resume value under another context returns
     E0907 before consuming the Once budget. *)
+
+val run_state_capturing_once_routed : ctx -> state -> (once_capture, Runtime_err.t) result
+(** [run_state_capturing_once_routed] also captures operations with installed root handlers, so a
+    deterministic scheduler can check cancellation before routing world work. *)
+
+val dispatch_root_operation :
+  ctx ->
+  resume:Value.t ->
+  op:Hash.t ->
+  name:string ->
+  effect_:string ->
+  Value.t list ->
+  (Value.t, Runtime_err.t) result
+(** [dispatch_root_operation] invokes an installed root handler after the scheduler boundary. The
+    suspended affine resume is included in the same mutable-graph snapshot as the operation and
+    arguments, so hostile callbacks cannot mutate its continuation graph unnoticed. Missing handlers
+    return [Unhandled], and callback argument/result guards remain active. *)
 
 type validated_state
 (** An unforgeable state accepted by the reusable inference driver and bound to the exact evaluator

@@ -37,8 +37,8 @@ project shape from file names alone.
   uncertainty wording, canonical boundaries, and explicit non-goals.
 - `effect-membranes.md`: GM.0 charter for typed governed facades, versioned
   decision artifacts, live/dry boundaries, and monotonic composition.
-- `concurrency.md`: SC.8 deterministic fail-fast/collect policies over SC.7
-  cooperative cancellation, SC.6 structured-scope ownership, the SC.5
+- `concurrency.md`: SC.9 deterministic FIFO round-robin over SC.8
+  fail-fast/collect policies, SC.7 cooperative cancellation, SC.6 structured-scope ownership, the SC.5
   policy-independent lifecycle, and the SC.4 generalized child-effect law,
   plus scope contracts, scheduling exclusions, and D46-D50.
 - `warp-testing.md`: Warp test model, rows, handlers, cache, properties, and
@@ -107,6 +107,14 @@ Read these together when judging whether the release candidate is credible:
   handler/boundary inventory, review wording, and exact tooling evidence.
 - `release/effect-taxonomy/ET8-MANIFEST.sha256`: reconstructible ET.8 overlay on
   the integrated Secret/Approval base; predecessor manifests remain historical.
+
+## Structured Concurrency Evidence
+
+- `release/structured-concurrency/EVIDENCE.md`: SC.9 deterministic scheduler,
+  scope-policy, ownership, lifecycle, property, cache, and repeated-run evidence
+  over the validated SC.8 base.
+- `release/structured-concurrency/MANIFEST.sha256`: reconstructible complete
+  SC.9 overlay on approved SC.8 commit `ebc18e5`.
 
 ## Governed Membranes Evidence
 

@@ -20,8 +20,8 @@ fi
 git_top=$(git rev-parse --show-toplevel 2>/dev/null || true)
 if [ "$git_top" = "$repo_root" ] && git cat-file -e "$base^{commit}" 2>/dev/null; then
   mkdir -p "$repo_root/.scratch/tmp"
-  expected=$(mktemp "$repo_root/.scratch/tmp/sc8-expected.XXXXXX")
-  actual=$(mktemp "$repo_root/.scratch/tmp/sc8-actual.XXXXXX")
+  expected=$(mktemp "$repo_root/.scratch/tmp/sc9-expected.XXXXXX")
+  actual=$(mktemp "$repo_root/.scratch/tmp/sc9-actual.XXXXXX")
   trap 'rm -f "$expected" "$actual"' EXIT HUP INT TERM
   {
     git diff --name-only "$base"

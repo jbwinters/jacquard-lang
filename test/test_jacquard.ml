@@ -22,6 +22,11 @@ let () =
       ("quote", Test_quote.suite);
       ("prelude", Test_prelude.suite);
       ("effect-taxonomy", Test_effect_taxonomy.suite);
+      ("scheduler-core", Test_scheduler_core.suite);
+      ("structured-scope", Test_structured_scope.suite);
+      ("cancellation", Test_cancellation.suite);
+      ("scope-policy", Test_scope_policy.suite);
+      ("round-robin", Test_round_robin.suite);
       ("audit", Test_audit.suite);
       ("secret", Test_secret.suite);
       ("audit-chain", Test_audit_chain.suite);

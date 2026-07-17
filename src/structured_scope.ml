@@ -51,6 +51,11 @@ let create ~body_resume =
 
 let scope_path scope = Scheduler_core.scope_path scope.scheduler
 
+let with_eval_task_context capability ctx scope operation =
+  Eval.with_scheduler_task_run capability ctx
+    ~run:(Scheduler_core.task_run capability scope.scheduler)
+    ~scope_path:(scope_path scope) operation
+
 let nest parent ~body_resume =
   ensure_open parent (fun () ->
       let ordinal = parent.next_nested in
@@ -66,11 +71,20 @@ let nest parent ~body_resume =
 let spawn scope ~resume = ensure_open scope (fun () -> Scheduler_core.spawn scope.scheduler ~resume)
 let id scope handle = ensure_open scope (fun () -> Scheduler_core.id scope.scheduler handle)
 
+let task_value capability scope handle =
+  ensure_open scope (fun () -> Scheduler_core.task_value capability scope.scheduler handle)
+
+let task_handle capability scope value =
+  ensure_open scope (fun () -> Scheduler_core.task_handle capability scope.scheduler value)
+
 let inspect scope handle =
   ensure_open scope (fun () -> Scheduler_core.inspect scope.scheduler handle)
 
 let checkout scope handle =
   ensure_open scope (fun () -> Scheduler_core.checkout scope.scheduler handle)
+
+let with_checkout scope handle operation =
+  ensure_open scope (fun () -> Scheduler_core.with_checkout scope.scheduler handle operation)
 
 let suspend_yield scope handle ~resume =
   ensure_open scope (fun () -> Scheduler_core.suspend_yield scope.scheduler handle ~resume)

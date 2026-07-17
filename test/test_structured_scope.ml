@@ -212,6 +212,64 @@ let test_cleanup_exception_precedence () =
   Alcotest.(check int) "raised cleanup attempts every drop" 2 !raised_drops;
   check_zero_metrics "raised cleanup exception" raised
 
+let test_checkout_bracket_restores_error_and_exception () =
+  let returned, body = Structured_scope.create ~body_resume:40 |> ok in
+  Alcotest.(check int)
+    "unsettled checkout result is preserved" 40
+    (Structured_scope.with_checkout returned body (fun resume -> Ok resume) |> ok);
+  Alcotest.(check bool)
+    "normal return restores unsettled ownership" true
+    (Structured_scope.inspect returned body |> ok).owns_resume;
+  Structured_scope.close returned ~reason:Structured_scope.Normal ~escaping:[] ~drop:ignore |> ok;
+  check_zero_metrics "checkout normal return" returned;
+  let aborted, body = Structured_scope.create ~body_resume:41 |> ok in
+  Alcotest.(check string)
+    "checkout error is preserved" "E9998"
+    (Structured_scope.with_checkout aborted body (fun _ -> Error [ abort_diagnostic ]) |> error_code);
+  Alcotest.(check bool)
+    "checkout error restores scheduler ownership" true
+    (Structured_scope.inspect aborted body |> ok).owns_resume;
+  let dropped = ref [] in
+  Structured_scope.close aborted ~reason:Structured_scope.Aborted ~escaping:[] ~drop:(fun resume ->
+      dropped := resume :: !dropped)
+  |> ok;
+  Alcotest.(check (list int)) "restored error token is dropped" [ 41 ] !dropped;
+  check_zero_metrics "checkout error" aborted;
+  let raised, body = Structured_scope.create ~body_resume:42 |> ok in
+  let checkout_exception = Failure "checkout host abort" in
+  let backtraces_were_enabled = Printexc.backtrace_status () in
+  Printexc.record_backtrace true;
+  Fun.protect
+    ~finally:(fun () -> Printexc.record_backtrace backtraces_were_enabled)
+    (fun () ->
+      let checkout_backtrace =
+        match raise checkout_exception with
+        | exception caught when caught == checkout_exception -> Printexc.get_raw_backtrace ()
+        | _ -> Alcotest.fail "failed to capture checkout exception backtrace"
+      in
+      match
+        Structured_scope.with_checkout raised body (fun _ ->
+            Printexc.raise_with_backtrace checkout_exception checkout_backtrace)
+      with
+      | exception caught when caught == checkout_exception ->
+          let original = Printexc.raw_backtrace_to_string checkout_backtrace in
+          let reraised = Printexc.raw_backtrace_to_string (Printexc.get_raw_backtrace ()) in
+          Alcotest.(check bool)
+            "checkout exception keeps its original backtrace" true
+            (String.starts_with ~prefix:original reraised)
+      | exception exn ->
+          Alcotest.failf "checkout replaced the physical exception: %s" (Printexc.to_string exn)
+      | Ok _ | Error _ -> Alcotest.fail "checkout host exception was swallowed");
+  Alcotest.(check bool)
+    "checkout exception restores scheduler ownership" true
+    (Structured_scope.inspect raised body |> ok).owns_resume;
+  let dropped = ref [] in
+  Structured_scope.close raised ~reason:Structured_scope.Raised ~escaping:[] ~drop:(fun resume ->
+      dropped := resume :: !dropped)
+  |> ok;
+  Alcotest.(check (list int)) "restored exception token is dropped" [ 42 ] !dropped;
+  check_zero_metrics "checkout exception" raised
+
 let hostile_task_for_ctx ctx ~scope_path ~spawn_index =
   let payload = Obj.new_block 0 3 in
   Obj.set_field payload 0 (Obj.field (Obj.repr ctx) 1);
@@ -274,5 +332,8 @@ let run () =
   test_returned_stored_and_ancestor_handles ();
   test_bracket_cleans_normal_abort_and_exception ();
   test_cleanup_exception_precedence ();
+  test_checkout_bracket_restores_error_and_exception ();
   test_dynamic_escape_graph_scan ();
   QCheck.Test.check_exn prop_recursive_close_restores_baseline
+
+let suite = [ Alcotest.test_case "nested ownership, cleanup, and escape" `Quick run ]
