@@ -263,6 +263,17 @@ validated ET.6 carrier above remains compatibility evidence and keeps its
 original identities. Every dry-run or scripted Approval handler returns
 `Escalate`, never `Approved`; canonical handlers remain ET.7 scope.
 
+GM.2 completes the successor review identity as the separate
+`GovernanceProposal`/`governance-proposal-v0` carrier. Its smart constructor
+derives the Call, live BoundPolicy, and Assessment identities from validated
+values and obtains the authority envelope from the Call. The exact proposal
+Code commits, in order, `GovernanceV0`, call ID, policy ID, assessment ID,
+authority, optional preview, reviewed rendering, and summary. Validation
+recomputes the carried hash and the artifact-aware boundary additionally
+checks every constituent ID and the byte-identical authority envelope. This
+uses the already released `code.hash` canonical-Code boundary; the ET.6
+`proposal-v1` carrier and `Approval` effect remain hash-for-hash unchanged.
+
 The declarations below are an executable surface fixture for the reserved
 world, governance, Async, and Channel operation boundaries. Its small carrier
 constructors for future opaque types are test scaffolding, not public
