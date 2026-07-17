@@ -133,8 +133,11 @@ let handler_contracts =
     };
   ]
 
-let reserved_effects =
+let schema_reserved_effects =
   [ "Choose"; "Env"; "Pg"; "Blob"; "Serve"; "Crypto"; "Log"; "Judge"; "Async"; "Channel" ]
+
+let unimplemented_reserved_effects =
+  [ "Choose"; "Env"; "Pg"; "Blob"; "Serve"; "Crypto"; "Log"; "Judge" ]
 
 type effect_shape = { ename : string; evars : string list; ops : Kernel.opspec list }
 
@@ -1646,12 +1649,13 @@ let test_governance_and_links () =
     |> List.filter (fun row -> String.equal row.status "reserved")
     |> List.map (fun row -> row.effect_name)
   in
-  Alcotest.(check (list string)) "reserved inventory is exact" reserved_effects reserved;
+  Alcotest.(check (list string))
+    "schema-reserved inventory is exact" schema_reserved_effects reserved;
   let reserved_csv =
-    String.concat ", " (List.map (fun name -> "`" ^ name ^ "`") reserved_effects)
+    String.concat ", " (List.map (fun name -> "`" ^ name ^ "`") unimplemented_reserved_effects)
   in
   let reserved_prose =
-    match List.rev reserved_effects with
+    match List.rev unimplemented_reserved_effects with
     | final :: reversed_rest ->
         String.concat ", " (List.rev_map (fun name -> "`" ^ name ^ "`") reversed_rest)
         ^ ", and `" ^ final ^ "`"
@@ -1682,8 +1686,11 @@ let test_governance_and_links () =
        "| implemented (15) | `Abort`, `Throw`, `State`, `Emit`, `Dist`, `Fault`, `Eval`, \
         `Console`, `Clock`, `Fs`, `Net`, `Infer`, `Approval`, `Audit`, `Secret` |");
   Alcotest.(check bool)
-    "stdlib reserved inventory is exact" true
-    (contains_string stdlib ("| reserved/unimplemented (10) | " ^ reserved_csv ^ " |"));
+    "stdlib unimplemented reserved inventory is exact" true
+    (contains_string stdlib ("| reserved/unimplemented (8) | " ^ reserved_csv ^ " |"));
+  Alcotest.(check bool)
+    "stdlib published reserved identities are exact" true
+    (contains_string stdlib "| reserved with published identity (2) | `Async`, `Channel` |");
   List.iter
     (fun phrase ->
       Alcotest.(check bool)

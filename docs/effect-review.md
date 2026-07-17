@@ -6,8 +6,8 @@ Status: ET.8 tooling guide. The normative metadata is
 
 Jacquard review is identity-first. A short name helps a person read a row, but
 only the resolved `DefEffect` hash selects blessed metadata. A user effect that
-spells itself `net` is not official `Net`; a reserved name has no released
-identity at all.
+spells itself `net` is not official `Net`; a name-only match is never enough,
+including for a reserved taxonomy name.
 
 ## Released identity ledger
 
@@ -32,10 +32,17 @@ not approve an abbreviation or a name-only match.
 | `Audit` | `2c148fbc2e26bdc6f01279a8bf176f54d5798536e1f96805aa4f7c7a57e67632` |
 | `Secret` | `6d092eccc3c9858a2a95120da5a011964cbb3ad76968e11c1cbb062c119fbb31` |
 
-The ten remaining blessed names are **reserved/unimplemented**: `Choose`,
-`Env`, `Pg`, `Blob`, `Serve`, `Crypto`, `Log`, `Judge`, `Async`, and `Channel`.
-They have schemas and a `first-release` compatibility policy, but no shipped
-interface hash, handler, grant, or availability promise.
+Two schema-reserved names now have published identities:
+
+| effect | exact `HASH_V0` interface identity | shipped boundary |
+|---|---|---|
+| `Async` | `4ff8ce05ab09968163492b3be40fc91381b47dee5fb4b2980f9416d50f38e66f` | interpreted structured scheduler from SC.9 |
+| `Channel` | `bf9a334188ac13495eeb070fdc215d51763d9761b4775c98c61f44ebb1b03756` | SC.13 contract only; runtime deferred to SC.14 |
+
+The eight remaining blessed names are **reserved/unimplemented**: `Choose`,
+`Env`, `Pg`, `Blob`, `Serve`, `Crypto`, `Log`, and `Judge`. They have schemas
+and a `first-release` compatibility policy, but no shipped interface hash,
+handler, grant, or availability promise.
 
 ## Review workflow
 
