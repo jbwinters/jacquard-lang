@@ -99,6 +99,7 @@
   ../prelude/rings.manifest
   (glob_files ../src/*.ml)
   (glob_files ../bin/*.ml)
+  ../README.md
   ../docs/errors.md
   ../docs/effect-review.md
   ../docs/effect-membranes.md
@@ -121,7 +122,10 @@
   ../docs/release/governed-membranes/GM9-EVIDENCE.md
   ../docs/release/governed-membranes/GM9-MANIFEST.sha256
   ../docs/release/structured-concurrency/EVIDENCE.md
+  ../docs/release/structured-concurrency/LIMITS.md
   ../docs/release/structured-concurrency/MANIFEST.sha256
+  ../demos/README.md
+  (source_tree ../demos/concurrency)
   ../docs/release/dx-jac-export/EVIDENCE.md
   ../docs/stdlib.md
   ../docs/surface-syntax.md
@@ -136,4 +140,6 @@
   docs-doctest/fixtures/stdlib-handler-policy.jac
   ../scripts/release/check-surface-syntax-manifest.sh
   ../scripts/release/check-structured-concurrency-manifest.sh
+  cli/concurrency-evidence.t
+  cli/dune
   cli/escrow.t))

@@ -1,9 +1,10 @@
 # Structured Concurrency Contract
 
-Status: SC.12 budgeted exhaustive schedule enumeration and SC.11 seeded
-randomized schedule testing over SC.10 versioned scheduler traces and strict
-replay, SC.9 fail-fast/collect scope policies, SC.7 cooperative cancellation,
-SC.6 structured-scope ownership, the SC.5
+Status: SC.16 publishes the C0-C2 evidence and limits for SC.12 budgeted
+exhaustive schedule enumeration and SC.11 seeded randomized schedule testing
+over SC.10 versioned scheduler traces and strict replay, SC.9 deterministic
+round-robin, SC.8 fail-fast/collect scope policies, SC.7 cooperative
+cancellation, SC.6 structured-scope ownership, the SC.5
 policy-independent lifecycle core, and the SC.4 generalized child-effect law
 (D46-D50), July 2026. This document is authoritative for C1's static
 non-laundering law, lifecycle and nested ownership, cancellation delivery, and
@@ -660,6 +661,14 @@ SC.11 adds seeded randomized Warp schedules, while SC.12 implements budgeted
 exhaustive schedules.
 C3 adds typed channels. C4 adds host asynchronous I/O; actor supervision opens
 only after channels and lifecycle evidence exist.
+
+SC.16 closes this C0-C2 gate without waiting for C3 or C4. Its one-program
+four-handler demo, exact inventories, decision summary, claim-to-test map, and
+explicit caveats are published in
+[`release/structured-concurrency/EVIDENCE.md`](release/structured-concurrency/EVIDENCE.md)
+and
+[`release/structured-concurrency/LIMITS.md`](release/structured-concurrency/LIMITS.md).
+Those documents do not widen the runtime contract defined here.
 
 | ID | decision | frozen result |
 |---|---|---|

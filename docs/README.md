@@ -112,11 +112,14 @@ Read these together when judging whether the release candidate is credible:
 
 ## Structured Concurrency Evidence
 
-- `release/structured-concurrency/EVIDENCE.md`: SC.12 budgeted exhaustive
-  schedule evidence over SC.11 seeded schedules and SC.10 versioned
-  record/replay, with the prior scheduler, scope, and lifecycle evidence.
-- `release/structured-concurrency/MANIFEST.sha256`: reconstructible complete
-  SC.12 overlay on approved SC.11 commit `404147e`.
+- `release/structured-concurrency/EVIDENCE.md`: final C0-C2 publication gate,
+  including the one-program/four-handler demo, exact schedule and test counts,
+  D46-D50, and claim-to-test links over the SC.12 implementation.
+- `release/structured-concurrency/LIMITS.md`: dynamic Task escape,
+  cooperative cancellation, explicit bracket cleanup, interpreter-only
+  scheduling, sequential C0 hints, and explicit C3/C4 exclusions.
+- `release/structured-concurrency/MANIFEST.sha256`: reconstructible SC.16
+  publication overlay on exact SC.12 commit `b828099`.
 
 ## Governed Membranes Evidence
 
@@ -154,11 +157,11 @@ Read these together when judging whether the release candidate is credible:
 
 ## Structured Concurrency Evidence
 
-- `release/structured-concurrency/EVIDENCE.md`: SC.12 exhaustive schedule
-  evidence over SC.11 seeded schedules, SC.10 versioned record/replay, and the
-  validated SC.9 scheduler, with the prior scope and lifecycle evidence.
-- `release/structured-concurrency/MANIFEST.sha256`: reconstructible complete
-  SC.12 overlay on approved SC.11 commit `404147e`.
+- `release/structured-concurrency/EVIDENCE.md`: SC.16 C0-C2 evidence over the
+  validated SC.12 exhaustive, seeded, replay, FIFO, scope, and lifecycle stack.
+- `release/structured-concurrency/LIMITS.md`: exact non-claims and caveats.
+- `release/structured-concurrency/MANIFEST.sha256`: reconstructible SC.16
+  publication overlay on exact SC.12 commit `b828099`.
 
 ## Governed Membranes Evidence
 
