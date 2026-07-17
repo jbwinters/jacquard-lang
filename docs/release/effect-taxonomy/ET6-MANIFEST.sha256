@@ -1,4 +1,4 @@
-# Effect-taxonomy ET.6-ET.8 + SC.0-SC.14 + GM.0-GM.6 + GM.9 reconstructible integration overlay
+# Effect-taxonomy ET.6-ET.8 + SC.0-SC.14 + SC.16 + GM.0-GM.6 + GM.9 reconstructible integration overlay
 # Base commit: 950fab6
 # Attestation manifests exclude themselves (and successor manifests) to avoid self/cross-hashes.
 dfc81aec5032df031a29e73a601eeb604587a55648059f6106c655fd8082af79  README.md
@@ -29,7 +29,13 @@ d8b7f3a131e71da703a3dbec0f5c214c60edddc5a6646adaa21d8560703ecb75  corpus/surface
 c607faee749162ff6e7cf730c90f5afeb8f5392627a7d7adec645223c939e881  corpus/surface/dx3/valid/nested-if-handler.jac
 121eee3ff4362e4dc1f2d5497675fd82d11fb57960ecc041417d5dee0ddbb7b3  corpus/surface/dx3/valid/nested-quote-match.jac
 414935565b83ec542d77b8f0ab0001d2f4d7192bb795902a5cec050a108c2626  corpus/surface/dx3/valid/preflight-policy.jac
+9bb8e917c6e657f2bf98f996339c5b6b04d5763199ccfed3dff4418262ff5741  demos/README.md
 4fd85534285cdcd0a168b40d4240f9d89b97953899d64572448e7add19f8afc6  demos/case-studies/stormglass/model.jac
+e5f560711548689688b8bc748644783f1384e56a64c441c5c8a9f6a3dfcaeccd  demos/concurrency/README.md
+5f8d8ad537cac98d5b11e9501309e1b4f209e9d65fea13c4c1ed330a2697d0bb  demos/concurrency/concurrency_evidence.ml
+4b906fcf6a4417b0f67e6da9a888768659e796da311521f976daf9e17256ec08  demos/concurrency/dune
+c0660f146f6a627824bc63c575e9e351d2caa058d5abc7600e158f7789469c48  demos/concurrency/run.sh
+83c296aeb4280e020a7c82ec025b0eecb93895572d365ec7ed39f058b63a4801  demos/concurrency/task-schedules.jac
 bfd647f54fa06da203d734906a7213331c68346f9ba5f25da865c43b0cbf2f0c  demos/worlds/preflight.jac
 8ae0341e149ccc2e94d988f7df4790ec29bde70f3f24ed279f2dc33b17cf2c99  docs/README.md
 6d7472bd7dc7bc409085c0279ad2085bd454d83b22a37143761d0f8bd1a04b12  docs/SKILL.md
@@ -61,6 +67,7 @@ aaeb320c507266079ecc9c779bb33dfcf92463ac87b16d709eef0d977bed4071  docs/release/g
 eb60e7b79f69f47009190a6e1677118dcff9974143987fe21392b71062a52f0f  docs/release/governed-membranes/GM6-EVIDENCE.md
 5ad914ee459f5da265e50cfec978e9b57967d25ebf2bb4797c30e2ed966c6f21  docs/release/governed-membranes/GM9-EVIDENCE.md
 c582bb2df34af9cc1c9515b11ca5380fe3d2abfef2c3916929d1706e87367351  docs/release/structured-concurrency/EVIDENCE.md
+7c56c24c1a32d3113bc45a359575aabc472fa951c979a33ae090ec65973de377  docs/release/structured-concurrency/LIMITS.md
 b967a19f7568bf3277d6c7e6eff25f4c84b4e11ae79b8c891678aba5a5dc3761  docs/release/surface-syntax/DECISION.md
 a7106baeca9cf151e6d7bbb4ac5f5bc7771e52cebf2b6f9acc1385efeab66eda  docs/stdlib.md
 80ee109a08a5414e262425bc8f69d666d7fcb0b3b6e865dc35a42d178859d6b2  docs/surface-syntax.md
@@ -151,6 +158,7 @@ fec09c19a8ae37d2b6444f0d18b23da20eb8b46936f09a4441ea3b3707d7f829  src/warp.ml
 ddf62a4f232e4d9324474a045474b4c10c446d23fb8f8e7ca53e2c2619defdca  test/api-boundary/public-api.t
 9c72f882e9176ae4ba713894c8af5cb5747d181a0ec09464af0ec3fa864e0595  test/cli/approval-handlers.t
 41d2e66eb42d0138bfa2aecf4ad1cfb33608cddd4fd67644e399fb6ddb64426c  test/cli/case-studies.t
+f7adfd7d907dd81821d902e8cbd9fd56a1ffcf39c14f03fe136f00ddd3a591a9  test/cli/concurrency-evidence.t
 199b1eec986fea6076459440e2ff80e0d647e558a0b007a52eac1c42fb03dda2  test/cli/diff.t
 57973a1bc329126281a202ae1af9da67595cec8fc1528d2737403ce1ab79bc97  test/cli/dune
 2a505edf3216c04b5d8ffd3704b2613f8040f8d00a69e3e6c3bbec4702bf004d  test/cli/export.t

@@ -1,4 +1,4 @@
-# Structured-concurrency SC.16 C0-C3 publication overlay
+# Structured-concurrency SC.0-SC.14 + SC.16 C0-C3 publication overlay
 # Base commit: b82809959c085a51eb3e9f8ae7623692983acd65
 # Attestation manifests exclude themselves (and successor manifests) to avoid self/cross-hashes.
 dfc81aec5032df031a29e73a601eeb604587a55648059f6106c655fd8082af79  README.md
