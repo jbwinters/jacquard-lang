@@ -7,7 +7,7 @@ preserves deterministic terminal/wakeup behavior. This milestone intentionally
 contains no runnable-queue policy, fail-fast/collect policy, host
 concurrency/I/O, or detached/root Async handler.
 
-- Reconstruction base: `b59a570`
+- Reconstruction base: `ada462b939b43ca846ce9805648f11141316e88b`
 - Evidence overlay: [MANIFEST.sha256](MANIFEST.sha256)
 - Authoritative contract: [concurrency.md](../../concurrency.md)
 
@@ -175,6 +175,14 @@ idempotent. This is continuation-memory cleanup, not an automatic external
 resource finalizer; acquire/release handlers remain required around suspended
 resources.
 
+Cleanup exception precedence is deterministic. Every still-owned resume is
+offered to the destruction callback even if an earlier callback raises. A
+cleanup exception propagates after a normal successful body. An original
+result-level diagnostic takes precedence over cleanup exceptions, and an
+original host exception is re-raised after cleanup with its raw backtrace
+preserved as the prefix of any OCaml re-raise frames. Focused regressions pin
+all three outcomes and the all-drops-attempted law.
+
 The exit guard rejects returned or stored handles whose creation path is the
 closing scope or any descendant. A nested close may still observe a valid
 enclosing-scope handle. `Eval.reject_task_escape` walks the full reachable
@@ -244,11 +252,11 @@ require explicit acquire/release handlers rather than language finalizers.
 ## Reconstruction and verification
 
 The manifest is the complete SC.7 successor overlay on validated SC.6
-integration commit `b59a570`. Reconstruct it under repository-local scratch
-space:
+integration commit `ada462b939b43ca846ce9805648f11141316e88b`.
+Reconstruct it under repository-local scratch space:
 
 ```sh
-base=b59a570
+base=ada462b939b43ca846ce9805648f11141316e88b
 dest="$PWD/.scratch/sc7-evidence-copy"
 manifest=docs/release/structured-concurrency/MANIFEST.sha256
 rm -rf "$dest"
@@ -277,8 +285,8 @@ git diff --exit-code
 opam exec -- dune build @doc
 ```
 
-Expected results are zero exits, 603 compiled Alcotest/QCheck cases, 34 cram
-transcripts, and 24 doctest examples across 7 documents.
+Expected results are zero exits, 669 compiled Alcotest/QCheck cases, 36 cram
+transcripts, and 25 doctest examples across 8 scanned documents.
 
 Runnable-queue policy, failure policy, and the Async root handler remain later
 C1 tasks. SC.7 supplies policy-independent cooperative cancellation operations,

@@ -296,6 +296,7 @@ let doctest_names () =
     "README.md";
     "docs/effect-taxonomy.md";
     "docs/concurrency.md";
+    "docs/effect-membranes.md";
     "docs/tutorial.md";
     "docs/stdlib.md";
     "docs/warp-testing.md";
@@ -854,7 +855,7 @@ let validate_release_docs ~decision ~followups ~index =
           ];
           [
             "opam exec -- dune runtest test/docs-doctest --force";
-            "exit 0; exactly 24 named doctests pass";
+            "exit 0; exactly 25 named doctests pass";
           ];
           [
             "JACQUARD_PRELUDE=$PWD/prelude opam exec -- dune exec jac -- run \

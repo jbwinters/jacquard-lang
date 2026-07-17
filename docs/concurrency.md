@@ -328,8 +328,12 @@ an external resource automatically. Acquire/release handlers (the bracket or
 `with-file` pattern) are the required C1 idiom for resources crossing a
 suspension point. `Structured_scope.protect` is the implementation bracket for
 continuation ownership: it closes on normal, result-abort, and host-exception
-paths before returning or re-raising. It is not an external-resource finalizer,
-and language finalizers remain explicitly deferred.
+paths before returning or re-raising, and cleanup attempts every still-owned
+resume even when a destruction callback raises. A cleanup exception propagates
+after an otherwise successful body. Original result-level diagnostics or a host
+exception and its raw backtrace take precedence over cleanup exceptions. It is
+not an external-resource finalizer, and language finalizers remain explicitly
+deferred.
 
 ## 5. Deterministic schedule order
 

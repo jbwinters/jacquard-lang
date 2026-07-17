@@ -187,7 +187,7 @@ $ dune exec jacquard -- check PROGRAM.jac --manifest console,net
 $ dune exec jacquard -- diff REVIEWED.jac PROPOSED.jac
 ```
 
-The complete 25-effect table, exact released interface hashes, canonical
+The complete 26-effect table, exact released interface hashes, canonical
 handlers, and reserved status live in
 [`effect-taxonomy.md`](effect-taxonomy.md). The short review workflow and exact
 tool output are in [`effect-review.md`](effect-review.md).
@@ -205,8 +205,8 @@ Two distinctions prevent common review mistakes:
   assessment confidence are evidence, not verified truth or consent.
 - A user effect named `net` remains an unrated user identity. It does not inherit
   official `Net` risk or `--allow net`. Conversely, the reserved names `Choose`,
-  `Env`, `Pg`, `Blob`, `Serve`, `Crypto`, `Log`, `Judge`, `Async`, and `Channel`
-  are unimplemented in this release.
+  `Env`, `Pg`, `Blob`, `Serve`, `Crypto`, `Log`, `Async`, and `Channel` are
+  unimplemented in this release.
 
 `Secret` is opaque before `secret.expose`, including under generic inspection,
 but Jacquard does not provide taint tracking. After exposure, the plaintext is

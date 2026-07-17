@@ -346,6 +346,7 @@ consented 3
 completed 3
 audit 3
 record 3
+audit.version-code 3
 audit.hash-code 3
 audit.risk-code 3
 audit.verdict-code 3
@@ -354,6 +355,7 @@ audit.assessment-code 3
 audit.outcome-code 3
 audit.decision-code 3
 audit.entry-code 3
+audit.sequence 3
 audit.in-memory 3
 audit.line-log 3
 # --- 20-approval (ring 3 governance proposal identity and consent boundary)
@@ -417,6 +419,7 @@ stored-dry-run 3
 bound-policy 3
 bound-policy-v0 3
 governance.resolve-operation-id 3
+governance.effect-order-key 3
 governance.hash-eq? 3
 governance.int-eq? 3
 governance.version-code 3
@@ -424,7 +427,8 @@ governance.hash-option-code 3
 governance.authority-code 3
 governance.authority-list-code 3
 governance.hash-member? 3
-governance.key-after? 3
+governance.authority-effect-key 3
+governance.authority-after? 3
 governance.validate-authority-loop 3
 governance.validate-authority 3
 governance.lower? 3
@@ -476,3 +480,72 @@ governance.make-proposal-canonical 3
 governance.make-proposal 3
 governance.validate-proposal 3
 governance.validate-proposal-artifacts 3
+# --- 22-judge (GM.5 blessed assessment effect and handlers)
+judge 3
+assess 3
+judge.validate-or-throw 3
+judge.rules 3
+judge.fixed 3
+judge.scripted 3
+judge.model 3
+# --- 23-governance-policy (GM.3 validated policy boundaries)
+governance.validate-live-policy 3
+governance.validate-dry-policy 3
+governance.make-stored-live-policy 3
+governance.make-stored-dry-policy 3
+governance.stored-policy-code 3
+governance.stored-policy-id 3
+governance.validate-stored-policy 3
+governance.bind-stored-policy 3
+governance.validate-bound-stored-policy 3
+governance.live-policy-verdict 3
+governance.dry-policy-verdict 3
+# --- 24-governance-gate-dry (GM.6 world-free simulation gate)
+audit-sequence 3
+dry-disposition 3
+simulated 3
+refuse-dry 3
+governance.next-sequence 3
+governance.accept-sequence 3
+governance.with-sequence 3
+governance.run-dry-simulation 3
+governance.summarize-dry-result 3
+governance.gate-dry 3
+# --- 23-workspace (GM.9 typed facade schemas and pure normalizers)
+path 3
+path-value 3
+workspace 3
+read-file 3
+write-file 3
+workspace.read-file 3
+workspace.write-file 3
+workspace.fetch 3
+workspace-operation 3
+workspace-read-file 3
+workspace-write-file 3
+workspace-fetch 3
+workspace-operation-spec 3
+workspace-operation-spec-v0 3
+workspace.operation-name 3
+workspace.fs-authority 3
+workspace.net-authority 3
+workspace.secret-authority 3
+workspace.secret-reference 3
+workspace.authority 3
+workspace.preconditions 3
+workspace.secret-refs 3
+workspace.operation-spec 3
+workspace.text-option-code 3
+workspace.secret-ref-code 3
+workspace.text-digest-code 3
+workspace.path-code 3
+workspace.read-arguments 3
+workspace.write-arguments 3
+workspace.fetch-arguments 3
+workspace.call-read 3
+workspace.call-write 3
+workspace.call-fetch 3
+workspace.error-summary 3
+workspace.summarize-read 3
+workspace.summarize-write 3
+workspace.summarize-fetch 3

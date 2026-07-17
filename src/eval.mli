@@ -12,6 +12,10 @@ val make_ctx : Store.t -> ctx
 val store : ctx -> Store.t
 (** [store ctx] returns the backing store used for declaration and name lookup. *)
 
+val fresh_audit_run_id : ctx -> Hash.t
+(** [fresh_audit_run_id ctx] mints a deterministic identity in [ctx]'s private Audit owner
+    namespace. It is exposed only to trusted prelude wiring. *)
+
 val validate_task_value :
   ctx -> scope_path:int list -> Value.t -> (Concurrency_contract.task_id, Diag.t list) result
 (** [validate_task_value ctx ~scope_path value] accepts a Task only in its creating evaluator run

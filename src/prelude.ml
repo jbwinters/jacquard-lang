@@ -61,6 +61,15 @@ let load ~dir store : ((string * Canon.decl_hashes list) list, Diag.t list) resu
               | Some { Resolve.hash; _ } -> Store.hide_derived store hash
               | None -> ())
             [ "hash-opaque"; "secret-opaque" ];
+          (match Store.lookup_kind store "audit-sequence-v0" Resolve.KCon with
+          | Some { Resolve.hash; _ } -> Store.hide_derived store hash
+          | None -> ());
+          List.iter
+            (fun name ->
+              match Store.lookup_kind store name Resolve.KTerm with
+              | Some { Resolve.hash; _ } -> Store.hide_derived store hash
+              | None -> ())
+            [ "governance.fresh-audit-run-id"; "governance.require-audit-run-id" ];
           let bind_operation_alias effect_name operation_name alias =
             match Store.lookup_kind store effect_name Resolve.KEffect with
             | None -> err ~code:"E0702" "prelude effect `%s` is missing" effect_name
@@ -89,6 +98,10 @@ let load ~dir store : ((string * Canon.decl_hashes list) list, Diag.t list) resu
           let* () = bind_operation_alias "secret" "read" "secret.read" in
           let* () = bind_operation_alias "secret" "expose" "secret.expose" in
           let* () = bind_operation_alias "fs" "read" "read" in
+          let* () = bind_operation_alias "workspace" "read-file" "workspace.read-file" in
+          let* () = bind_operation_alias "workspace" "write-file" "workspace.write-file" in
+          let* () = bind_operation_alias "workspace" "fetch" "workspace.fetch" in
+          let* () = bind_operation_alias "net" "fetch" "fetch" in
           Ok (List.rev acc)
       | file :: rest -> (
           match load_file file with
@@ -199,6 +212,12 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
     match lookup_hash store ~kind:Resolve.KTerm name with
     | Error _ -> () (* prelude without this layer *)
     | Ok h -> Eval.register_builtin ctx h (Value.VTrustedBuiltin (Trusted_builtin.make name native))
+  in
+  let optional_internal name native =
+    match Store.lookup_internal_kind store name Resolve.KTerm with
+    | None -> ()
+    | Some { Resolve.hash; _ } ->
+        Eval.register_builtin ctx hash (Value.VTrustedBuiltin (Trusted_builtin.make name native))
   in
   optional "mod"
     (int2 "mod" (fun a b ->
@@ -375,6 +394,18 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
           in
           join (Buffer.create 32) 1 args)
   | _ -> ());
+  optional_internal "governance.fresh-audit-run-id" (fun args ->
+      match args with
+      | [] -> Ok (Value.VHash (Eval.fresh_audit_run_id ctx))
+      | args -> type_err "governance.fresh-audit-run-id" args);
+  optional_internal "governance.require-audit-run-id" (fun args ->
+      match args with
+      | [ Value.VHash token; Value.VHash owner ] when Hash.equal token owner -> Ok (Value.VTuple [])
+      | [ Value.VHash _; Value.VHash _ ] ->
+          Error
+            (Runtime_err.Type_error
+               "stale AuditSequence: token does not belong to the active with-sequence owner")
+      | args -> type_err "governance.require-audit-run-id" args);
   (match
      (lookup_hash store ~kind:Resolve.KCon "some", lookup_hash store ~kind:Resolve.KCon "none")
    with
@@ -434,7 +465,7 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
       optional "governance.resolve-operation-id" (fun args ->
           match args with
           | [ Value.VText qualified ] -> (
-              match String.rindex_opt qualified '.' with
+              match String.index_opt qualified '.' with
               | None | Some 0 -> Ok (verr "invalid Call: expected a resolved effect.operation name")
               | Some separator when separator = String.length qualified - 1 ->
                   Ok (verr "invalid Call: expected a resolved effect.operation name")
@@ -479,7 +510,18 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
                                (Printf.sprintf
                                   "invalid Call: effect `%s` has no exact resolved declaration"
                                   effect_name)))))
-          | args -> type_err "governance.resolve-operation-id" args)
+          | args -> type_err "governance.resolve-operation-id" args);
+      optional "governance.effect-order-key" (fun args ->
+          match args with
+          | [ Value.VHash identity ] ->
+              let hex = Hash.to_hex identity in
+              let key =
+                match Effect_registry.canonical_order identity with
+                | Some position -> Printf.sprintf "0:%08d:%s" position hex
+                | None -> "1:" ^ hex
+              in
+              Ok (Value.VText key)
+          | args -> type_err "governance.effect-order-key" args)
   | _ -> ());
   (match
      (lookup_hash store ~kind:Resolve.KCon "some", lookup_hash store ~kind:Resolve.KCon "none")
@@ -1231,9 +1273,20 @@ let builtin_signatures (store : Store.t) : ((Hash.t * Types.scheme) list, Diag.t
             ]
         in
         let governance_sigs =
-          match lookup_hash store ~kind:Resolve.KTerm "governance.resolve-operation-id" with
-          | Ok h -> [ (h, fn [ text ] (result text hash)) ]
-          | Error _ -> []
+          let optional_sig name signature =
+            match lookup_hash store ~kind:Resolve.KTerm name with
+            | Ok hash -> [ (hash, signature) ]
+            | Error _ -> []
+          in
+          let hidden name signature =
+            match Store.lookup_internal_kind store name Resolve.KTerm with
+            | Some { Resolve.hash; _ } -> [ (hash, signature) ]
+            | None -> []
+          in
+          optional_sig "governance.resolve-operation-id" (fn [ text ] (result text hash))
+          @ optional_sig "governance.effect-order-key" (fn [ hash ] text)
+          @ hidden "governance.fresh-audit-run-id" (fn [] hash)
+          @ hidden "governance.require-audit-run-id" (fn [ hash; hash ] (Types.TTuple []))
         in
         Ok (base @ code_sigs @ governance_sigs)
     | _ -> Ok base

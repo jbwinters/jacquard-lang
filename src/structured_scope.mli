@@ -158,7 +158,8 @@ val close :
 (** [close scope ~reason ~escaping ~drop] recursively closes descendants, cancels unfinished tasks,
     and calls [drop] exactly once for every still-owned resume. A returned or stored handle created
     in this scope tree returns E0907, but cleanup completes before the diagnostic is returned.
-    Repeated close is harmless. *)
+    Repeated close is harmless. If one or more [drop] calls raise, cleanup still attempts every
+    resume and re-raises the first cleanup exception. *)
 
 val protect :
   ('resume, 'value) t ->
@@ -167,8 +168,12 @@ val protect :
   (('resume, 'value) t -> ('a, Diag.t list) result) ->
   ('a, Diag.t list) result
 (** [protect scope ~drop ~escapes body] is the explicit bracket idiom. It closes normally after
-    [Ok], aborts after [Error], and closes before re-raising a host exception. Jacquard does not
-    rely on language finalizers for scope cleanup. *)
+    [Ok], aborts after [Error], and closes before re-raising a host exception. Cleanup always
+    attempts every still-owned resume. After a normal [Ok], a cleanup exception propagates. After a
+    body [Error], the original diagnostics take precedence over cleanup exceptions. After a host
+    exception, the original exception and raw backtrace take precedence. Re-raising may append OCaml
+    re-raise frames, but the original backtrace remains its prefix. Jacquard does not rely on
+    language finalizers for scope cleanup. *)
 
 val metrics : ('resume, 'value) t -> metrics
 (** [metrics scope] recursively counts open scopes, nonterminal tasks, runnable tasks, and owned
