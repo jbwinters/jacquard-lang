@@ -2,6 +2,10 @@
 
 type mode =
   | Record
+  | Record_with of
+      (sequence:int ->
+      runnable:Concurrency_contract.task_id list ->
+      (Concurrency_contract.task_id, Diag.t list) result)
   | Replay of Schedule_trace.t
   | Fork of { trace : Schedule_trace.t; decision : int; chosen : Concurrency_contract.task_id }
 
@@ -27,8 +31,9 @@ val begin_decision :
   runnable:Concurrency_contract.task_id list ->
   (Concurrency_contract.task_id, Diag.t list) result
 (** Validates the exact sequence and ordered runnable queue and returns the task that may be chosen.
-    Strict replay returns the recorded task; record mode returns the FIFO head; an explicit fork
-    returns its requested live task only at the named decision. *)
+    Strict replay returns the recorded task; plain record mode returns the FIFO head; [Record_with]
+    delegates to a deterministic policy; an explicit fork returns its requested live task only at
+    the named decision. *)
 
 val observe_operation : t -> Schedule_trace.operation -> (unit, Diag.t list) result
 (** Validates the chosen step's operation. Callers must invoke this before a routed world callback

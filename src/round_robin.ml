@@ -1,11 +1,13 @@
 type bounds = { max_tasks : int; max_decisions : int }
 
 let scheduler_version = "fifo-round-robin-v0"
+let seeded_scheduler_version = "seeded-random-v0"
 let default_bounds = { max_tasks = 1024; max_decisions = 100_000 }
 let anonymous_program = Hash.of_string "jacquard-round-robin-anonymous-state-v0"
 
 type schedule_mode =
   | Record_schedule
+  | Seeded_schedule of { seed : int }
   | Replay_schedule of Schedule_trace.t
   | Fork_schedule of {
       trace : Schedule_trace.t;
@@ -25,6 +27,12 @@ type outcome = {
 }
 
 type scheduled = { value : Value.t; outcome : outcome; schedule : Schedule_trace.t }
+
+type recorded_call = {
+  result : (Value.t, Runtime_err.t) result;
+  outcome : outcome;
+  schedule : Schedule_trace.t;
+}
 
 type proof = {
   decisions : Concurrency_contract.decision list;
@@ -106,10 +114,29 @@ let result_text = function
 let zero_metrics =
   Structured_scope.{ open_scopes = 0; live_tasks = 0; runnable_tasks = 0; owned_resumes = 0 }
 
-let control_mode = function
-  | Record_schedule -> Schedule_control.Record
-  | Replay_schedule trace -> Schedule_control.Replay trace
-  | Fork_schedule { trace; decision; chosen } -> Schedule_control.Fork { trace; decision; chosen }
+let seeded_chooser seed =
+  let rng = Infer_dist.Rng.make seed in
+  fun ~sequence:_ ~runnable ->
+    match runnable with
+    | [] -> Error [ Diag.error ~code:"E0908" "seeded scheduler cannot choose from an empty queue" ]
+    | _ -> Ok (List.nth runnable (Infer_dist.Rng.bounded_int rng (List.length runnable)))
+
+let control_configuration = function
+  | Record_schedule -> Ok (scheduler_version, Schedule_control.Record)
+  | Seeded_schedule { seed } ->
+      Ok (seeded_scheduler_version, Schedule_control.Record_with (seeded_chooser seed))
+  | Replay_schedule trace
+    when String.equal trace.Schedule_trace.scheduler scheduler_version
+         || String.equal trace.scheduler seeded_scheduler_version ->
+      Ok (trace.scheduler, Schedule_control.Replay trace)
+  | Replay_schedule trace ->
+      Error
+        [
+          Diag.error ~code:"E0908"
+            (Printf.sprintf "unsupported schedule scheduler identity %s" trace.scheduler);
+        ]
+  | Fork_schedule { trace; decision; chosen } ->
+      Ok (scheduler_version, Schedule_control.Fork { trace; decision; chosen })
 
 let run_state_global ctx ~policy ~bounds ~program ~schedule_mode initial_state =
   if bounds.max_tasks <= 0 then Error (Runtime_err.Scheduler_error "task bound must be positive")
@@ -117,9 +144,12 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode initial_state =
     Error (Runtime_err.Scheduler_error "decision bound must be positive")
   else
     let ( let* ) = Result.bind in
+    let* scheduler, control_mode =
+      control_configuration schedule_mode |> Result.map_error runtime_of_diagnostics
+    in
     let* schedule_control =
-      Schedule_control.create ~scheduler:scheduler_version ~program ~policy
-        ~max_tasks:bounds.max_tasks ~max_decisions:bounds.max_decisions (control_mode schedule_mode)
+      Schedule_control.create ~scheduler ~program ~policy ~max_tasks:bounds.max_tasks
+        ~max_decisions:bounds.max_decisions control_mode
       |> Result.map_error runtime_of_diagnostics
     in
     let root_id = Concurrency_contract.task_id ~scope_path:[ 0 ] ~spawn_index:0 in
@@ -787,6 +817,21 @@ let run_call ctx ?policy ?bounds callable arguments =
   Result.bind
     (run_state ctx ?policy ?bounds (Eval.apply_state ctx callable arguments))
     value_of_outcome
+
+let run_call_scheduled ctx ?(policy = Concurrency_contract.default_failure_policy)
+    ?(bounds = default_bounds) ~program ~mode callable arguments =
+  Result.bind
+    (run_state_global ctx ~policy ~bounds ~program ~schedule_mode:mode
+       (Eval.apply_state ctx callable arguments))
+    (fun (outcome, schedule) ->
+      Result.map (fun value -> { value; outcome; schedule }) (value_of_outcome outcome))
+
+let run_call_recorded ctx ?(policy = Concurrency_contract.default_failure_policy)
+    ?(bounds = default_bounds) ~program ~mode callable arguments =
+  Result.map
+    (fun (outcome, schedule) -> { result = value_of_outcome outcome; outcome; schedule })
+    (run_state_global ctx ~policy ~bounds ~program ~schedule_mode:mode
+       (Eval.apply_state ctx callable arguments))
 
 let policy_text = function Concurrency_contract.Fail_fast -> "fail-fast" | Collect -> "collect"
 

@@ -193,6 +193,132 @@ let test_coverage_memo_trap () =
     "memoized run still counts the dep" true
     (List.exists (Hash.equal dep_hash) second)
 
+let test_schedule_seed_splitting_and_cache_identity () =
+  let member = Hash.of_string "scheduled-member" in
+  Random.init 1;
+  let first =
+    Warp.schedule_test_seed ~seed:42 ~member ~relative_path:[ "group"; "first" ]
+      ~structural_path:[ 0; 0 ]
+  in
+  Random.init 999;
+  let same =
+    Warp.schedule_test_seed ~seed:42 ~member ~relative_path:[ "group"; "first" ]
+      ~structural_path:[ 0; 0 ]
+  in
+  let other_leaf =
+    Warp.schedule_test_seed ~seed:42 ~member ~relative_path:[ "group"; "second" ]
+      ~structural_path:[ 0; 0 ]
+  in
+  let other_member =
+    Warp.schedule_test_seed ~seed:42 ~member:(Hash.of_string "other-member")
+      ~relative_path:[ "group"; "first" ] ~structural_path:[ 0; 0 ]
+  in
+  let duplicate_leaf =
+    Warp.schedule_test_seed ~seed:42 ~member ~relative_path:[ "group"; "first" ]
+      ~structural_path:[ 0; 1 ]
+  in
+  let split_path =
+    Warp.schedule_test_seed ~seed:42 ~member ~relative_path:[ "a"; "b" ] ~structural_path:[ 0; 0 ]
+  in
+  let nul_path =
+    Warp.schedule_test_seed ~seed:42 ~member ~relative_path:[ "a\000b" ] ~structural_path:[ 0; 0 ]
+  in
+  Alcotest.(check int) "same canonical test split" first same;
+  Alcotest.(check int) "top-level rename does not move the split" first same;
+  Alcotest.(check bool) "leaf path participates in split" true (first <> other_leaf);
+  Alcotest.(check bool) "member hash participates in split" true (first <> other_member);
+  Alcotest.(check bool)
+    "duplicate labels have distinct structural seeds" true (first <> duplicate_leaf);
+  Alcotest.(check bool)
+    "length framing distinguishes split and NUL paths" true (split_path <> nul_path);
+  let first_program =
+    Warp.schedule_leaf_identity ~member ~relative_path:[ "group"; "first" ]
+      ~structural_path:[ 0; 0 ]
+  in
+  let duplicate_program =
+    Warp.schedule_leaf_identity ~member ~relative_path:[ "group"; "first" ]
+      ~structural_path:[ 0; 1 ]
+  in
+  let split_program =
+    Warp.schedule_leaf_identity ~member ~relative_path:[ "a"; "b" ] ~structural_path:[ 0; 0 ]
+  in
+  let nul_program =
+    Warp.schedule_leaf_identity ~member ~relative_path:[ "a\000b" ] ~structural_path:[ 0; 0 ]
+  in
+  Alcotest.(check bool)
+    "duplicate labels have distinct trace identities" true
+    (not (Hash.equal first_program duplicate_program));
+  Alcotest.(check bool)
+    "framed NUL path has a distinct trace identity" true
+    (not (Hash.equal split_program nul_program));
+  let base = Warp.cache_key_string (Warp.Hermetic ("display-only", member)) in
+  let key = Warp.schedule_key_string ~base ~schedules:8 ~seed:42 in
+  Alcotest.(check string)
+    "complete scheduled cache identity"
+    (Printf.sprintf "%s|scheduler=%s|schedule-identity=%s|schedules=8|schedule-seed=42" base
+       Round_robin.seeded_scheduler_version Warp.schedule_identity_version)
+    key;
+  Alcotest.(check bool)
+    "changed count rekeys" true
+    (not (String.equal key (Warp.schedule_key_string ~base ~schedules:9 ~seed:42)));
+  Alcotest.(check bool)
+    "changed seed rekeys" true
+    (not (String.equal key (Warp.schedule_key_string ~base ~schedules:8 ~seed:43)));
+  let test_run = eval_ok "(var test.run)" in
+  let thunk =
+    eval_ok
+      "(lam ()\n\
+      \  (let nonrec (pwild)\n\
+      \    (app (var async.scope)\n\
+      \      (lam () (let nonrec (pwild) (app (var async.yield)) (tuple))))\n\
+      \    (app (var check.true) (var true) (lit \"after\"))))"
+  in
+  let replay_command = "jacquard test bounds.jac --schedules 1 --seed 42 --no-cache" in
+  let recorded =
+    match
+      Round_robin.run_call_recorded ctx ~program:first_program
+        ~mode:(Round_robin.Seeded_schedule { seed = first })
+        test_run [ thunk ]
+    with
+    | Ok recorded -> recorded
+    | Error error -> Alcotest.fail (Runtime_err.to_string error)
+  in
+  (match
+     Round_robin.run_call_recorded ctx ~program:duplicate_program
+       ~mode:(Round_robin.Replay_schedule recorded.schedule) test_run [ thunk ]
+   with
+  | Error (Runtime_err.Scheduler_error message) ->
+      Alcotest.(check bool)
+        "wrong duplicate-label leaf strict replay is refused before execution" true
+        (String.starts_with ~prefix:"schedule replay drift: program identity expected" message)
+  | Error error ->
+      Alcotest.failf "wrong-leaf replay returned the wrong error: %s" (Runtime_err.to_string error)
+  | Ok _ -> Alcotest.fail "wrong duplicate-label leaf replay unexpectedly succeeded");
+  let verdict =
+    match
+      Warp.run_thunk_seeded ctx
+        ~bounds:{ Round_robin.max_tasks = 8; max_decisions = 1 }
+        ~test_run
+        ~program:(Hash.of_string "bounded-schedule-test")
+        ~root_seed:42 ~test_seed:77 ~schedules:1 ~replay_command thunk
+    with
+    | Ok (verdict, _, _) -> verdict
+    | Error error -> Alcotest.fail error
+  in
+  match verdict with
+  | Warp.Fail { soft = []; hard = Some hard } ->
+      Alcotest.(check string)
+        "bound refusal reports seed and rerun without claiming a complete log"
+        "random schedule 1 of 1 refused before a complete trace (decision seed 77)\n\
+         replay: jacquard test bounds.jac --schedules 1 --seed 42 --no-cache\n\
+         runtime error: error[E0908]: decision bound exceeded"
+        hard
+  | _ -> Alcotest.fail "bounded seeded schedule did not return the expected hard failure"
+
+let test_coverage_and_schedule_identity () =
+  test_coverage_memo_trap ();
+  test_schedule_seed_splitting_and_cache_identity ()
+
 let suite =
   [
     Alcotest.test_case "report: all pass, in order" `Quick test_report_all_pass;
@@ -205,5 +331,5 @@ let suite =
     Alcotest.test_case "check.eq renders both sides" `Quick test_check_eq_renders_both_sides;
     Alcotest.test_case "suite is pure (zero grants)" `Quick test_manifest_pure;
     Alcotest.test_case "cache entry round-trip" `Quick test_cache_entry_roundtrip;
-    Alcotest.test_case "coverage counts memo hits" `Quick test_coverage_memo_trap;
+    Alcotest.test_case "coverage counts memo hits" `Quick test_coverage_and_schedule_identity;
   ]

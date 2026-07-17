@@ -1,12 +1,11 @@
-# Structured Concurrency SC.10 Evidence
+# Structured Concurrency SC.11 Evidence
 
-Status: canonical schedule record, fail-closed strict replay, and explicit
-provenance-carrying forks are implemented over the validated SC.9 deterministic
-FIFO scheduler. Replay validates creation before allocation and routed
-operations before world callbacks. This milestone adds no host scheduling,
-random/exhaustive scheduler, detached tasks, or native root scheduler.
+Status: seeded randomized Warp schedules are implemented over SC.10 canonical
+schedule record and fail-closed strict replay. Replay validates creation before
+allocation and routed operations before world callbacks. This milestone adds no
+host scheduling, exhaustive scheduler, detached tasks, or native root scheduler.
 
-- Reconstruction base: `f8af0184c0c0d4a7aa20be8b6145d5742d5e3ed8`
+- Reconstruction base: `242a64121a530897075bea0c8eec11eee84001e0`
 - Evidence overlay: [MANIFEST.sha256](MANIFEST.sha256)
 - Authoritative contract: [concurrency.md](../../concurrency.md)
 
@@ -433,8 +432,51 @@ one-bit world-operation-hash drift was refused before `print`.
 
 Scheduler cache identity now includes `schedule-format-v1` in addition to the
 program hash, scheduler identity, policy, and bounds. Cache payloads remain
-proof-only and every hit still executes a fresh evaluator run. Host scheduling,
-random choices, and exhaustive exploration remain outside SC.10.
+proof-only and every hit still executes a fresh evaluator run.
+
+## Seeded randomized Warp schedules
+
+`jacquard test --schedules N --seed S` reruns every hermetic Case under the
+`seeded-random-v0` decision policy. The CLI rejects non-positive `N`, rejects a
+missing or malformed seed, and never calls `Random.self_init` on this path. A
+SplitMix64 stream mixes the root seed with the canonical discovered-member hash
+and a length-framed relative group/Case label path, excluding the renameable
+top-level name, plus the zero-based structural child-index path to the leaf. The
+framing distinguishes NUL-containing labels and the indices distinguish
+duplicate labels. The resulting identity supplies an independent decision seed
+to each run and is also the program identity checked before strict replay.
+Discovery order, top-level renames, cache hits, and host `Random` state therefore
+cannot move a test's schedule stream.
+
+Only the D46 choice changes: each step selects an index from the exact ordered
+runnable queue using 62-bit bounded-integer rejection sampling. The fixed
+three-way-queue regression and 10,000 bounded draws pin non-power-of-two range
+behavior without float or modulo bias. The scheduler still records format-v1
+creation and decision events. Strict replay accepts the scheduler identity stored in a validated
+trace and checks every queue, chosen task, and operation without drawing again.
+The focused scheduler regression pins same-seed byte identity under different
+host random states, a changed interleaving for another seed, and byte-identical
+strict replay of the seeded trace. Warp identity regressions pin distinct seeds
+and trace identities for duplicate labels and for `["a"; "b"]` versus
+`["a\000b"]`, plus strict refusal when a trace from one duplicate-label leaf is
+presented to the other.
+
+The first failing Warp execution prints the root seed, child decision seed, and
+exact rerun command. It prints a canonical schedule log only after a complete
+trace; the decision-bound regression pins a seed/rerun/error refusal with no
+partial-log claim. The CLI transcript runs the ordinary failing command twice
+and byte-compares the failures. It also pins positive-count and explicit-seed
+diagnostics, pass reporting, and cache misses when either `N` or `S` changes.
+The scheduled cache key is the ordinary Merkle member/Prop key plus
+`seeded-random-v0`, the schedule-leaf identity version, `N`, and `S`; the
+schedule trace program identity is the framed member/label/structural-index
+identity. A top-level rename is a cache hit with current display text, while a
+Case-label edit is a miss. Scheduled failures are not cached; a shared-cache
+moved-path regression proves their replay command is rebuilt from the current
+source/prelude paths. WorldTests remain uncached and Props retain their separate
+data-generation modes.
+
+Host scheduling and exhaustive schedule exploration remain outside SC.11.
 
 ## Compiled test discovery
 
@@ -478,14 +520,14 @@ grant was added.
 
 ## Reconstruction and verification
 
-The manifest is the complete SC.10 successor overlay on approved SC.9 commit
-`f8af0184c0c0d4a7aa20be8b6145d5742d5e3ed8`. Reconstruct it under repository-local scratch
+The manifest is the complete SC.11 successor overlay on validated SC.10 commit
+`242a64121a530897075bea0c8eec11eee84001e0`. Reconstruct it under repository-local scratch
 space:
 
 ```sh
 set -eu
-base=f8af0184c0c0d4a7aa20be8b6145d5742d5e3ed8
-dest="$PWD/.scratch/sc10-evidence-copy"
+base=242a64121a530897075bea0c8eec11eee84001e0
+dest="$PWD/.scratch/sc11-evidence-copy"
 manifest=docs/release/structured-concurrency/MANIFEST.sha256
 rm -rf "$dest"
 mkdir -p "$dest"
@@ -537,5 +579,5 @@ hashes remain unchanged. Raw `Eval.run_expr` remains a low-level unscheduled
 seam. SC.4 continues to supply the static child-effect law: a scope discharges
 only Async and retains child world effects. Native root scheduling remains
 future work; native parity evidence is labeled only for Async discharged by an
-in-language handler. SC.10 records and replays only this deterministic
-interpreter seam and makes no host-scheduling or random-exploration claim.
+in-language handler. SC.11 randomizes only this explicit interpreter decision
+seam and makes no host-scheduling or exhaustive-exploration claim.

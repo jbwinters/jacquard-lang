@@ -375,7 +375,7 @@ jac diff STORE_A STORE_B
 jac infer enumerate MODEL.jac
 jac infer lw MODEL.jac --seed 42 --samples 100000
 jac replay TRACE.jqd PROGRAM.jqd [--fork '1=(response 500 "down")']
-jac test TESTS.jac [TESTS.jqd ...] [--exhaustive] [--cache-dir CACHE]
+jac test TESTS.jac [TESTS.jqd ...] [--exhaustive] [--schedules N --seed S] [--cache-dir CACHE]
 jac build FILE.jac -o PROG
 jac export FILE.jac -o FILE.jqd
 ```
