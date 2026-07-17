@@ -37,11 +37,12 @@ project shape from file names alone.
   uncertainty wording, canonical boundaries, and explicit non-goals.
 - `effect-membranes.md`: GM.0 charter for typed governed facades, versioned
   decision artifacts, live/dry boundaries, and monotonic composition.
-- `concurrency.md`: SC.13 freezes the typed Channel interface and deterministic
-  semantics over the complete SC.12 scheduling stack. It publishes exact
-  identities, capacity/backpressure, close, cancellation, fan-in, ownership,
-  policy interaction, and SC.14 acceptance traces; Channel runtime and actors
-  remain deferred.
+- `concurrency.md`: SC.12 budgeted exhaustive schedule enumeration over the
+  SC.10 canonical record/replay and explicit-fork seam, including exact world
+  counts, structured incomplete results, hermetic refusal, and replayable
+  worlds; plus SC.9 deterministic FIFO, SC.8 fail-fast/collect, SC.7 cooperative
+  cancellation, SC.6 structured-scope ownership, the SC.5 policy-independent
+  lifecycle, the SC.4 generalized child-effect law, and D46-D50.
 - `warp-testing.md`: Warp test model, rows, handlers, cache, properties, and
   world lanes.
 - `errors.md`: diagnostic code catalog.
@@ -52,8 +53,6 @@ Read these together when judging whether the release candidate is credible:
 
 - `release/0.1/EVIDENCE.md`: built artifact, test inventory, commands, summary.
 - `release/0.1/CLAIMS.md`: claims mapped to proving tests/demos and caveats.
-- `release/structured-concurrency/EVIDENCE.md`: SC.13 Channel contract evidence
-  over the complete SC.12 scheduler stack.
 - `release/0.1/REPRO.md`: fresh-clone reproduction.
 - `release/0.1/FREEZE.md`: frozen version/hash/store/trace/CLI/error surfaces.
 - `release/0.1/GAUNTLET.md`: adversarial tests present and omitted.
@@ -113,9 +112,9 @@ Read these together when judging whether the release candidate is credible:
 
 ## Structured Concurrency Evidence
 
-- `release/structured-concurrency/EVIDENCE.md`: SC.13 typed-Channel contract,
-  exact interface hashes, checker fixtures, normative traces, and checklist
-  over the complete SC.12 scheduler stack.
+- `release/structured-concurrency/EVIDENCE.md`: SC.13 typed-Channel contract
+  evidence over SC.12 exhaustive and seeded scheduling, record/replay, and the
+  validated SC.9 scheduler.
 - `release/structured-concurrency/MANIFEST.sha256`: reconstructible complete
   SC.13 overlay on exact SC.12 commit `2fc2d30`.
 
@@ -152,21 +151,6 @@ Read these together when judging whether the release candidate is credible:
   safe secret references, outcome summaries, and authority-order evidence.
 - `release/governed-membranes/GM9-MANIFEST.sha256`: reconstructible GM.9 overlay
   on the validated identity, Judge, and secret integration stack.
-
-## Structured Concurrency Evidence
-
-- `release/structured-concurrency/EVIDENCE.md`: SC.13 typed-Channel contract
-  evidence over SC.12 exhaustive and seeded scheduling, record/replay, and the
-  validated SC.9 scheduler.
-- `release/structured-concurrency/MANIFEST.sha256`: reconstructible complete
-  SC.13 overlay on exact SC.12 commit `2fc2d30`.
-
-## Governed Membranes Evidence
-
-- `release/governed-membranes/GM1-EVIDENCE.md`: GM.1 versioned ring-3 values,
-  canonical identities, pure refusal boundaries, and compatibility evidence.
-- `release/governed-membranes/GM1-MANIFEST.sha256`: reconstructible GM.1 overlay
-  on the validated ET.6 plus GM.0 dependency-integration commit.
 
 ## Maintenance Notes
 
