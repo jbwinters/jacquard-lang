@@ -1,0 +1,6 @@
+(defterm
+  ((binding factorial () (lam ((pvar n)) (match (var n) (clause (plit 0) (lit 0)) (clause (pvar m) (app (ref #dc4f095e4e9e508c3644c04972a8e7a696e1875bb5206297a58997df46850a52 term) (var m) (app (groupref 0) (app (ref #e487565dcfd7ca43e957eaf644fa0691e9aa10bb2cd717b9ca53a0688b522174 term) (var m) (lit 1))))))))))
+
+(app
+  (ref #338b5aba5e6c5e1cc3b187bfe5dc7441e8364dd12e8b7750dd92610ef91c02d5 term)
+  (lit 5))

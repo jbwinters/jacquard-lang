@@ -1,0 +1,119 @@
+{
+  "schema_version": "readability-fixtures-v0",
+  "protocol_version": "readability-protocol-v0",
+  "license": "Apache-2.0",
+  "carriers": ["jac", "jqd", "python"],
+  "jobs": ["seeded-bug", "predict-output", "authority-escalation"],
+  "presentation": {
+    "media_type": "text/plain; charset=utf-8",
+    "syntax_highlighting": false,
+    "ansi_styling": false,
+    "timeout_ms": 300000
+  },
+  "python_matching_limits": [
+    "Python sources are task-equivalent controls, not Jacquard semantic twins.",
+    "Python has no Jacquard HASH_V0 canonical identity or 27-form kernel projection.",
+    "Python has no Jacquard row-polymorphic effect checker or capability-grant refusal boundary.",
+    "Python evaluation, integer, recursion, tuple-printing, and dynamic-eval rules are its own runtime semantics.",
+    "Only the stated reviewer question and pinned stdout are matched across Python and Jacquard."
+  ],
+  "model_condition": {
+    "provider": "Anthropic",
+    "model": "claude-fable-5",
+    "client": "Claude Code 2.1.212",
+    "prompt": "model-prompt.txt",
+    "prompt_sha256": "7964459745c1a53cd98d3fc96af74d24bac1c9aa3d199ae6d3d355739b031295",
+    "temperature": 0.0,
+    "repetitions_per_condition": 30,
+    "tools": "disabled",
+    "session_memory": "disabled"
+  },
+  "fixtures": [
+    {
+      "id": "seeded-bug",
+      "job": "seeded-bug",
+      "prompt": "The program is intended to compute factorial(5) as 120, but it produces 0. Which part contains the seeded bug?",
+      "options": [
+        {"id": "base-case", "label": "The base case returns 0."},
+        {"id": "recursive-multiply", "label": "The recursive case multiplies by m."},
+        {"id": "decrement", "label": "The recursive call subtracts 1."},
+        {"id": "final-call", "label": "The final expression calls factorial with 5."}
+      ],
+      "correct_answer": "base-case",
+      "wrong_answer_errors": {
+        "recursive-multiply": "recursion-trace",
+        "decrement": "recursion-trace",
+        "final-call": "symptom-location"
+      },
+      "expected_stdout": "0\n",
+      "jacquard_run_args": [],
+      "semantic_hash_lines": [
+        "0 6bdb43f7c5e598478f372bdc2ebe2005253b95728a327303c8992fd9e2297694",
+        "0:factorial 338b5aba5e6c5e1cc3b187bfe5dc7441e8364dd12e8b7750dd92610ef91c02d5",
+        "1 2e0dbc19d5c683ef4fd66892550e9a54c6c6feb32eeceb9561891fbaf96e7fa9"
+      ],
+      "sources": {
+        "jac": {"path": "fixtures/seeded-bug.jac", "sha256": "88f14d0958aaa0a108d28f28798a1bee23aea5167893595b46c9baa0ba46a926"},
+        "jqd": {"path": "fixtures/seeded-bug.jqd", "sha256": "02a6a579e3a511d0c1b856383b5570c36ebbefef962ac4a7c0c2246ac29c862f"},
+        "python": {"path": "fixtures/seeded-bug.py", "sha256": "63b83b9b3af1ac8e91561320d327fe6a217661b8e82458e1f4a14cc9d598dbdf"}
+      }
+    },
+    {
+      "id": "predict-output",
+      "job": "predict-output",
+      "prompt": "Without running the program, what exact value does it print?",
+      "options": [
+        {"id": "five-five", "label": "(5, 5)"},
+        {"id": "five-ten", "label": "(5, 10)"},
+        {"id": "zero-five", "label": "(0, 5)"},
+        {"id": "two-seven", "label": "(2, 7)"}
+      ],
+      "correct_answer": "five-five",
+      "wrong_answer_errors": {
+        "five-ten": "branch-direction",
+        "zero-five": "arithmetic-trace",
+        "two-seven": "call-trace"
+      },
+      "expected_stdout": "(5, 5)\n",
+      "jacquard_run_args": [],
+      "semantic_hash_lines": [
+        "0 faafaf4fa991439289d1b7e75922c1c54c016b31badbe6ea6ed9940471a5e9c7",
+        "0:adjust 8194cd93b769648ea306016653b256879bc90b47b91c3d860d9c7385437a3a1c",
+        "1 d93e8000ab5d6354c811473616f3f228248b57f7c0ac4481ca92275b95efeae7"
+      ],
+      "sources": {
+        "jac": {"path": "fixtures/predict-output.jac", "sha256": "2c329896c857a7c3e94a644b8cf4e328333160d632f3f87cd562496b9c734854"},
+        "jqd": {"path": "fixtures/predict-output.jqd", "sha256": "523000843c661023d13d0da522379082e60f7d913686087d8a2f1211c07f8751"},
+        "python": {"path": "fixtures/predict-output.py", "sha256": "0eec665bc0129e920c2e4e46946a450a827e06aa8b81b10197d88a44718f2caa"}
+      }
+    },
+    {
+      "id": "authority-escalation",
+      "job": "authority-escalation",
+      "prompt": "Which authority-sensitive operation does this program introduce?",
+      "options": [
+        {"id": "dynamic-eval", "label": "Dynamic code evaluation."},
+        {"id": "filesystem", "label": "Filesystem access."},
+        {"id": "network", "label": "Network access."},
+        {"id": "none", "label": "No authority-sensitive operation."}
+      ],
+      "correct_answer": "dynamic-eval",
+      "wrong_answer_errors": {
+        "filesystem": "capability-kind",
+        "network": "capability-kind",
+        "none": "capability-omission"
+      },
+      "expected_stdout": "42\n",
+      "jacquard_run_args": ["--allow", "eval"],
+      "refusal_without_args": "E0814",
+      "semantic_hash_lines": [
+        "0 4c09fbc944795dfb5403172021d9158ca753fc5d7909c1efe531587ed3a417bd"
+      ],
+      "sources": {
+        "jac": {"path": "fixtures/authority-escalation.jac", "sha256": "8db759ef46df543655dd7f9992d4bcf35b1b257100da450dfae4d807fc4dffe3"},
+        "jqd": {"path": "fixtures/authority-escalation.jqd", "sha256": "5431fd720880c80a2eb2dadf32b52a49df91a9371c9ee1ce4e47980f2262ff6d"},
+        "python": {"path": "fixtures/authority-escalation.py", "sha256": "7563d4ea0738d3a24f10865112cbba6de176d85fb88fc708203cd4e500bc1dfd"}
+      }
+    }
+  ]
+}

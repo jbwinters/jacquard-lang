@@ -1,0 +1,6 @@
+(defterm
+  ((binding adjust () (lam ((pvar n)) (match (app (ref #e64a74366d0d3d19ad26bd0b645c11b629a2c32e48fe6b1c7ee61886c39fee0f term) (var n) (lit 4)) (clause (pcon #bf5c9d86f11ef2591a2f1b7b9dcbc26342dcb093fce099341ce56e14b75482fb) (app (ref #e487565dcfd7ca43e957eaf644fa0691e9aa10bb2cd717b9ca53a0688b522174 term) (var n) (lit 2))) (clause (pcon #c665b4997cada5268e43d722a9da3883b9eddd5e10ef5b1d39ee5c0034390e8c) (app (ref #2c16b4f49e8261504cba9692cb27bbd26e767dd293785379041e95e1e0e61c4d term) (var n) (lit 3))))))))
+
+(tuple
+  (app (ref #8194cd93b769648ea306016653b256879bc90b47b91c3d860d9c7385437a3a1c term) (lit 2))
+  (app (ref #8194cd93b769648ea306016653b256879bc90b47b91c3d860d9c7385437a3a1c term) (lit 7)))

@@ -1,0 +1,7 @@
+You are completing one code-review trial. Use only the plain-text prompt and
+source shown below. Do not call tools, execute code, or use outside material.
+
+Choose exactly one listed answer ID. Return one JSON object and no prose:
+{"answer_id":"<ID>","confidence":<integer from 0 through 100>}
+
+Confidence means your estimated percent chance that the answer is correct.
