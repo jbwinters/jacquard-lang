@@ -143,11 +143,15 @@ let handler_contracts =
       terms = [];
       root_grant = false;
     };
+    {
+      handled_effect = "Channel";
+      boundary = "interpreted exact-scope FIFO channels installed by SC.14";
+      terms = [];
+      root_grant = false;
+    };
   ]
 
-let schema_reserved_effects =
-  [ "Choose"; "Env"; "Pg"; "Blob"; "Serve"; "Crypto"; "Log"; "Async"; "Channel" ]
-
+let schema_reserved_effects = [ "Choose"; "Env"; "Pg"; "Blob"; "Serve"; "Crypto"; "Log"; "Async" ]
 let unimplemented_reserved_effects = [ "Choose"; "Env"; "Pg"; "Blob"; "Serve"; "Crypto"; "Log" ]
 
 type effect_shape = { ename : string; evars : string list; ops : Kernel.opspec list }
@@ -221,12 +225,14 @@ let operation_names operations =
       | None -> Alcotest.failf "operation schema lacks a colon: %s" schema)
 
 let implementation_operation_names row =
-  let prefix = row.index_name ^ "." in
-  operation_names row.operations
-  |> List.map (fun name ->
-      if String.starts_with ~prefix name then
-        String.sub name (String.length prefix) (String.length name - String.length prefix)
-      else name)
+  if String.equal row.effect_name "Channel" then operation_names row.operations
+  else
+    let prefix = row.index_name ^ "." in
+    operation_names row.operations
+    |> List.map (fun name ->
+        if String.starts_with ~prefix name then
+          String.sub name (String.length prefix) (String.length name - String.length prefix)
+        else name)
 
 let compact value =
   value |> String.lowercase_ascii |> Str.global_replace (Str.regexp "[ \t\r\n-]+") ""
@@ -284,7 +290,7 @@ let implementation_operation_schema row schema =
       let name = String.sub schema 0 index in
       let prefix = row.index_name ^ "." in
       let name =
-        if String.starts_with ~prefix name then
+        if (not (String.equal row.effect_name "Channel")) && String.starts_with ~prefix name then
           String.sub name (String.length prefix) (String.length name - String.length prefix)
         else name
       in
@@ -553,10 +559,10 @@ let test_complete_contract () =
   let doc = Corpus_support.read_file taxonomy_doc in
   Alcotest.(check int) "blessed effect count" 26 (List.length rows);
   Alcotest.(check int)
-    "implemented count" 17
+    "implemented count" 18
     (List.length (List.filter (fun row -> String.equal row.status "implemented") rows));
   Alcotest.(check int)
-    "reserved count" 9
+    "reserved count" 8
     (List.length (List.filter (fun row -> String.equal row.status "reserved") rows));
   check_unique "effect names unique" (List.map (fun row -> row.effect_name) rows);
   check_unique "official index names unique" (List.map (fun row -> row.index_name) rows);
@@ -637,7 +643,6 @@ let test_resolved_reserved_schemas () =
       ("Crypto", [ "crypto.verify"; "crypto.random" ]);
       ("Log", [ "log.emit" ]);
       ("Async", [ "async.spawn"; "async.await"; "async.cancel"; "async.yield" ]);
-      ("Channel", [ "channel.open"; "channel.send"; "channel.recv"; "channel.close" ]);
     ]
   in
   List.iter
@@ -1704,15 +1709,15 @@ let test_governance_and_links () =
   Alcotest.(check bool)
     "stdlib implemented inventory is exact" true
     (contains_string stdlib
-       "| implemented (17) | `Abort`, `Throw`, `State`, `Emit`, `Dist`, `Fault`, `Eval`, \
+       "| implemented (18) | `Abort`, `Throw`, `State`, `Emit`, `Dist`, `Fault`, `Eval`, \
         `Console`, `Clock`, `Fs`, `Net`, `Workspace`, `Infer`, `Approval`, `Audit`, `Secret`, \
-        `Judge` |");
+        `Judge`, `Channel` |");
   Alcotest.(check bool)
     "stdlib unimplemented reserved inventory is exact" true
     (contains_string stdlib ("| reserved/unimplemented (7) | " ^ reserved_csv ^ " |"));
   Alcotest.(check bool)
     "stdlib published reserved identities are exact" true
-    (contains_string stdlib "| reserved with published identity (2) | `Async`, `Channel` |");
+    (contains_string stdlib "| reserved with published identity (1) | `Async` |");
   List.iter
     (fun phrase ->
       Alcotest.(check bool)
@@ -1859,7 +1864,7 @@ let test_typed_registry_matches_contract () =
   let entries = Effect_registry.catalog in
   Alcotest.(check int) "catalog covers every blessed entry" 26 (List.length entries);
   Alcotest.(check int)
-    "only live identities enter the canonical registry" 17
+    "only live identities enter the canonical registry" 18
     (List.length (Effect_registry.entries Effect_registry.canonical));
   Alcotest.(check (list string))
     "catalog names exactly cover the TSV"
@@ -2124,7 +2129,7 @@ let suite =
   [
     Alcotest.test_case "complete machine contract" `Quick test_complete_contract;
     Alcotest.test_case "reserved schemas resolved" `Quick test_resolved_reserved_schemas;
-    Alcotest.test_case "SC.13 Channel interface identity" `Quick
+    Alcotest.test_case "SC.14 Channel interface identity" `Quick
       test_channel_interface_hash_contract;
     Alcotest.test_case "implemented prelude compatibility" `Quick
       test_implemented_interfaces_match_prelude;

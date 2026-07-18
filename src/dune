@@ -8,5 +8,6 @@
   Concurrency_owner
   Task_capability
   Task_handle
+  Channel_handle
   Schedule_control)
  (libraries digestif unix))

@@ -75,6 +75,8 @@ let find_child controller id =
 let cancellation_point = function
   | Scheduler_core.Yielded -> Concurrency_contract.Yield
   | Scheduler_core.Awaiting _ -> Concurrency_contract.Await
+  | Scheduler_core.Channel_sending _ | Scheduler_core.Channel_receiving _ ->
+      Concurrency_contract.Routed_effect
 
 let cancel_unfinished controller ~drop =
   let ( let* ) = Result.bind in

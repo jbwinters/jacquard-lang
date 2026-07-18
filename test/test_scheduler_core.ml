@@ -107,6 +107,33 @@ let test_rejected_transition_table () =
   expect_rejected_without_transition "await with an owned waiter token" scheduler runnable
     (fun () -> Scheduler_core.await scheduler ~waiter:runnable ~target ~resume:9)
 
+let test_atomic_channel_suspend_and_wake () =
+  let scheduler, task = Scheduler_core.create ~scope_path:[ 0 ] ~body_resume:10 |> ok in
+  let channel = Channel_contract.channel_id ~scope_path:[ 0 ] ~open_index:0 in
+  let other = Channel_contract.channel_id ~scope_path:[ 0 ] ~open_index:1 in
+  ignore (Scheduler_core.checkout scheduler task |> ok);
+  Scheduler_core.suspend_channel scheduler task ~channel ~direction:`Send ~resume:11 |> ok;
+  let suspended = view scheduler task in
+  Alcotest.(check bool)
+    "exact channel suspension" true
+    (suspended.suspension = Some (Scheduler_core.Channel_sending channel));
+  Alcotest.(check bool) "scheduler retains raw resume" true suspended.owns_resume;
+  let before = view scheduler task in
+  Alcotest.(check string)
+    "wrong channel cannot wake" "E0908"
+    (Scheduler_core.wake_channel_with scheduler task ~channel:other ~map_resume:(fun resume ->
+         Ok (resume + 100))
+    |> error_code);
+  Alcotest.(check bool) "rejected wake is atomic" true (before = view scheduler task);
+  Scheduler_core.wake_channel_with scheduler task ~channel ~map_resume:(fun resume ->
+      Ok (resume + 1))
+  |> ok;
+  check_lifecycle Concurrency_contract.Runnable scheduler task;
+  Alcotest.(check int) "mapped wake resume" 12 (Scheduler_core.checkout scheduler task |> ok);
+  let resolved = Scheduler_core.handle_of_id scheduler suspended.id |> ok in
+  Alcotest.(check string)
+    "ID resolves to same task" (trace scheduler task) (trace scheduler resolved)
+
 let test_multiple_awaiters_and_terminal_result () =
   let scheduler, target = Scheduler_core.create ~scope_path:[ 0 ] ~body_resume:100 |> ok in
   let first = Scheduler_core.spawn scheduler ~resume:1 |> ok in
@@ -359,6 +386,7 @@ let prop_cycle_wakeups_are_live =
 let run () =
   test_deterministic_ids_and_yield ();
   test_rejected_transition_table ();
+  test_atomic_channel_suspend_and_wake ();
   test_multiple_awaiters_and_terminal_result ();
   test_terminal_await_is_immediate ();
   test_self_await_and_cycle_fail_without_exception ();

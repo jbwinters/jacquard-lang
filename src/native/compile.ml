@@ -384,8 +384,8 @@ and lower_general ctx env ~tail (e : Kernel.expr) (k : atom -> expr) : expr =
           else refuse ctx (Printf.sprintf "builtin `%s` is not yet implemented natively" name)
       | None -> k (member_value_atom ctx h))
   | Kernel.Ref (h, Kernel.Con) ->
-      if Concurrency_contract.is_task_private_hash h then
-        refuse ctx "the Task opaque carrier is scheduler-private";
+      if Concurrency_contract.is_task_private_hash h || Channel_contract.is_channel_private_hash h
+      then refuse ctx "the opaque scoped-handle carrier is scheduler-private";
       note_con ctx h;
       k (ACon h)
   | Kernel.Ref (h, Kernel.Op) ->
@@ -696,8 +696,8 @@ and lower_app ctx env ~tail (f : Kernel.expr) (args : Kernel.expr list) (k : ato
           if tail then with_args (fun atoms -> TailUnknown (a, atoms, []))
           else with_args (fun atoms -> bind_call (BCallUnknown (a, atoms))))
   | Kernel.Ref (h, Kernel.Con) ->
-      if Concurrency_contract.is_task_private_hash h then
-        refuse ctx "the Task opaque carrier is scheduler-private";
+      if Concurrency_contract.is_task_private_hash h || Channel_contract.is_channel_private_hash h
+      then refuse ctx "the opaque scoped-handle carrier is scheduler-private";
       note_con ctx h;
       let arity = con_arity ctx h in
       if List.length args <> arity then

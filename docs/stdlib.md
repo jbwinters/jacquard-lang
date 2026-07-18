@@ -91,15 +91,15 @@ in [`effect-review.md`](effect-review.md).
 
 | ET.8 blessed status | exact names |
 |---|---|
-| implemented (17) | `Abort`, `Throw`, `State`, `Emit`, `Dist`, `Fault`, `Eval`, `Console`, `Clock`, `Fs`, `Net`, `Workspace`, `Infer`, `Approval`, `Audit`, `Secret`, `Judge` |
-| reserved with published identity (2) | `Async`, `Channel` |
+| implemented (18) | `Abort`, `Throw`, `State`, `Emit`, `Dist`, `Fault`, `Eval`, `Console`, `Clock`, `Fs`, `Net`, `Workspace`, `Infer`, `Approval`, `Audit`, `Secret`, `Judge`, `Channel` |
+| reserved with published identity (1) | `Async` |
 | reserved/unimplemented (7) | `Choose`, `Env`, `Pg`, `Blob`, `Serve`, `Crypto`, `Log` |
 
 The status table is descriptive, not a grant list. The full identity table is
 machine-checked against `Effect_registry`, the prelude declarations, and the
-TSV artifact. `Async` has an interpreted scheduler. `Channel` has a frozen
-identity and contract but no runtime until SC.14. The other seven reserved
-names have no published declaration hash or handler in this release.
+TSV artifact. `Async` has an interpreted scheduler. `Channel` has the exact
+SC.14 interpreted scheduler route and requires no world grant. The other seven
+reserved names have no published declaration hash or handler in this release.
 
 Phase-zero parallelism also lives in ring 0. `parallel.map` and `parallel.both`
 accept only closed-empty-row callbacks, remain pure themselves, and are
@@ -108,10 +108,10 @@ effect nor a task runtime; a future native implementation may use threads only
 when it preserves the same values, failures, ordering contract, and output
 identity. See `concurrency.md` §3.
 
-The reserved `Channel a` interface is frozen by SC.13, including its exact
+The `Channel a` interface frozen by SC.13 is shipped by SC.14 with its exact
 hash, typed capacity error, FIFO/close/cancellation rules, and scope ownership;
 see [`concurrency.md`](concurrency.md#8-typed-channels-sc13--c3-contract).
-SC.13 does not add it to the shipped prelude or install a runtime handler.
+It is an interpreted scheduler facility, not a world grant or native runtime.
 
 ## 3. Ring 0: the axioms
 

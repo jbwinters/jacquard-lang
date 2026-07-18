@@ -63,6 +63,7 @@ type global_resume =
   | Global_state of Eval.state
   | Global_awaiting of Structured_scope.handle * Value.t
   | Global_nested_wait of Value.t
+  | Global_channel of Value.t
 
 type global_scope_run = {
   scope : (global_resume, Value.t) Structured_scope.t;
@@ -93,6 +94,21 @@ let spawn_hash = hash_of_pinned "async.spawn" Concurrency_contract.async_operati
 let await_hash = hash_of_pinned "async.await" Concurrency_contract.async_operation_hashes
 let cancel_hash = hash_of_pinned "async.cancel" Concurrency_contract.async_operation_hashes
 let yield_hash = hash_of_pinned "async.yield" Concurrency_contract.async_operation_hashes
+let channel_open_hash = hash_of_pinned "channel.open" Channel_contract.channel_operation_hashes
+let channel_send_hash = hash_of_pinned "channel.send" Channel_contract.channel_operation_hashes
+let channel_recv_hash = hash_of_pinned "channel.recv" Channel_contract.channel_operation_hashes
+let channel_close_hash = hash_of_pinned "channel.close" Channel_contract.channel_operation_hashes
+
+let result_ok_hash =
+  Option.get (Hash.of_hex "fc7e8018da11f1e0cc0c516bd50c27c8c3900881df816e50cb7881d8a2f490cc")
+
+let result_err_hash =
+  Option.get (Hash.of_hex "6bf597bd76a9d52fa2405404f03511f07bafdb7620c8e45d9faf9a9a5aa88cee")
+
+let channel_closed_hash = Option.get (Hash.of_hex Channel_contract.channel_closed_constructor_hash)
+
+let invalid_capacity_hash =
+  Option.get (Hash.of_hex Channel_contract.invalid_capacity_constructor_hash)
 
 let done_hash =
   Option.get (Hash.of_hex "8bb29144a0570c1b4e6da9f9bb899b7938bb5eda078f5800a7acb24bb295a095")
@@ -110,6 +126,20 @@ let task_result_value = function
       Value.VCon { con = failed_hash; name = "failed"; args = [ Value.VText message ] }
   | Concurrency_contract.Cancelled ->
       Value.VCon { con = cancelled_hash; name = "cancelled"; args = [] }
+
+let result_ok value = Value.VCon { con = result_ok_hash; name = "ok"; args = [ value ] }
+let result_err value = Value.VCon { con = result_err_hash; name = "err"; args = [ value ] }
+
+let channel_result_value = function
+  | Structured_scope.Channel_send_ok -> result_ok Value.unit_v
+  | Structured_scope.Channel_recv_ok value -> result_ok value
+  | Structured_scope.Channel_closed ->
+      result_err (Value.VCon { con = channel_closed_hash; name = "channel-closed"; args = [] })
+
+let invalid_capacity_value requested =
+  result_err
+    (Value.VCon
+       { con = invalid_capacity_hash; name = "invalid-capacity"; args = [ Value.VInt requested ] })
 
 let runtime_of_diagnostics diagnostics =
   let message =
@@ -322,7 +352,7 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed i
                   let continuation =
                     match owned with
                     | Global_nested_wait owned -> owned
-                    | Global_state _ | Global_awaiting _ ->
+                    | Global_state _ | Global_awaiting _ | Global_channel _ ->
                         failwith "Bug_round_robin: nested parent owned the wrong continuation"
                   in
                   let next = Eval.apply_state ctx continuation [ task_result_value result ] in
@@ -408,6 +438,19 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed i
       let* () = Structured_scope.wake_yielded run.scope handle in
       append_after_suspend run handle
     in
+    let map_channel_value owned value =
+      match owned with
+      | Global_channel continuation -> Global_state (Eval.apply_state ctx continuation [ value ])
+      | Global_state _ | Global_awaiting _ | Global_nested_wait _ ->
+          failwith "Bug_round_robin: channel task owned the wrong continuation"
+    in
+    let map_channel_resume owned result = map_channel_value owned (channel_result_value result) in
+    let finish_channel_transition run handle = function
+      | Structured_scope.Channel_suspended -> Ok ()
+      | Structured_scope.Channel_continues { resume; awakened } ->
+          append (List.map (fun awakened -> (run, awakened)) awakened);
+          suspend_and_requeue run handle resume
+    in
     let state_for_awakened run = function
       | Global_state state -> Ok state
       | Global_awaiting (target, continuation) ->
@@ -420,6 +463,8 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed i
           Ok (Eval.apply_state ctx continuation [ task_result_value result ])
       | Global_nested_wait _ ->
           Error [ Diag.error ~code:"E0908" "nested scope parent woke before scope completion" ]
+      | Global_channel _ ->
+          Error [ Diag.error ~code:"E0908" "channel waiter woke without an operation result" ]
     in
     let fail_task run handle error =
       task_errors := (run, handle, error) :: !task_errors;
@@ -442,6 +487,15 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed i
           Error diagnostics
       | Structured_scope.Effect_routed { result = Error diagnostics; _ } ->
           fail_task run handle (error_of_diagnostics diagnostics)
+    in
+    let at_channel_boundary run handle resume continue =
+      let* outcome =
+        Structured_scope.at_cancellation_point run.scope ~point:Concurrency_contract.Routed_effect
+          ~task:handle ~resume:(Global_channel resume) ~drop
+      in
+      match outcome with
+      | Structured_scope.Boundary_cancelled awakened -> finish_cancelled run handle awakened
+      | Structured_scope.Boundary_continue owned -> continue owned
     in
     let step run handle state =
       Structured_scope.with_eval_task_context Task_capability.runtime ctx run.scope (fun () ->
@@ -497,7 +551,7 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed i
                       let continuation =
                         match owned with
                         | Global_awaiting (_, continuation) -> continuation
-                        | Global_state _ | Global_nested_wait _ -> assert false
+                        | Global_state _ | Global_nested_wait _ | Global_channel _ -> assert false
                       in
                       let next = Eval.apply_state ctx continuation [ child_value ] in
                       let* () =
@@ -595,7 +649,7 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed i
                       let continuation =
                         match owned with
                         | Global_awaiting (_, continuation) -> continuation
-                        | Global_state _ | Global_nested_wait _ -> assert false
+                        | Global_state _ | Global_nested_wait _ | Global_channel _ -> assert false
                       in
                       let next = Eval.apply_state ctx continuation [ Value.unit_v ] in
                       let* () = suspend_and_requeue run handle (Global_state next) in
@@ -606,6 +660,97 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed i
                            (id_text target_id));
                       observe_all_children run run.children)
               | _ -> fail_task run handle (Runtime_err.Arity "async.cancel expects one Task"))
+          | Ok (Eval.OCOp { op; args; resume; _ }) when Hash.equal op channel_open_hash ->
+              let* () =
+                Schedule_control.observe_operation schedule_control (Schedule_trace.Routed op)
+              in
+              at_channel_boundary run handle resume (fun owned ->
+                  match args with
+                  | [ Value.VInt capacity ] ->
+                      let* opened = Structured_scope.channel_open run.scope ~capacity in
+                      let* result =
+                        match opened with
+                        | Structured_scope.Channel_invalid_capacity requested ->
+                            Ok (invalid_capacity_value requested)
+                        | Structured_scope.Channel_opened channel ->
+                            let* channel_value =
+                              Structured_scope.channel_value Task_capability.runtime run.scope
+                                channel
+                            in
+                            Ok (result_ok channel_value)
+                      in
+                      let* task_id = id run handle in
+                      add_event
+                        (Printf.sprintf "channel-open task=%s capacity=%d" (id_text task_id)
+                           capacity);
+                      suspend_and_requeue run handle (map_channel_value owned result)
+                  | _ ->
+                      fail_task run handle
+                        (Runtime_err.Arity "channel.open expects one Int capacity"))
+          | Ok (Eval.OCOp { op; args; resume; _ }) when Hash.equal op channel_send_hash ->
+              let* () =
+                Schedule_control.observe_operation schedule_control (Schedule_trace.Routed op)
+              in
+              at_channel_boundary run handle resume (fun owned ->
+                  match args with
+                  | [ channel_value; value ] ->
+                      let* channel =
+                        Structured_scope.channel_handle Task_capability.runtime run.scope
+                          channel_value
+                      in
+                      let* transition =
+                        Structured_scope.channel_send run.scope ~task:handle ~channel ~resume:owned
+                          ~value ~map_resume:map_channel_resume
+                      in
+                      let* task_id = id run handle in
+                      add_event ("channel-send task=" ^ id_text task_id);
+                      finish_channel_transition run handle transition
+                  | _ ->
+                      fail_task run handle
+                        (Runtime_err.Arity "channel.send expects one ChannelHandle and one value"))
+          | Ok (Eval.OCOp { op; args; resume; _ }) when Hash.equal op channel_recv_hash ->
+              let* () =
+                Schedule_control.observe_operation schedule_control (Schedule_trace.Routed op)
+              in
+              at_channel_boundary run handle resume (fun owned ->
+                  match args with
+                  | [ channel_value ] ->
+                      let* channel =
+                        Structured_scope.channel_handle Task_capability.runtime run.scope
+                          channel_value
+                      in
+                      let* transition =
+                        Structured_scope.channel_recv run.scope ~task:handle ~channel ~resume:owned
+                          ~map_resume:map_channel_resume
+                      in
+                      let* task_id = id run handle in
+                      add_event ("channel-recv task=" ^ id_text task_id);
+                      finish_channel_transition run handle transition
+                  | _ ->
+                      fail_task run handle
+                        (Runtime_err.Arity "channel.recv expects one ChannelHandle"))
+          | Ok (Eval.OCOp { op; args; resume; _ }) when Hash.equal op channel_close_hash ->
+              let* () =
+                Schedule_control.observe_operation schedule_control (Schedule_trace.Routed op)
+              in
+              at_channel_boundary run handle resume (fun owned ->
+                  match args with
+                  | [ channel_value ] ->
+                      let* channel =
+                        Structured_scope.channel_handle Task_capability.runtime run.scope
+                          channel_value
+                      in
+                      let* transition =
+                        Structured_scope.channel_close run.scope ~task:handle ~channel ~resume:owned
+                          ~map_resume:map_channel_resume ~map_closer:(fun continuation ->
+                            map_channel_value continuation Value.unit_v)
+                      in
+                      let* task_id = id run handle in
+                      add_event ("channel-close task=" ^ id_text task_id);
+                      finish_channel_transition run handle transition
+                  | _ ->
+                      fail_task run handle
+                        (Runtime_err.Arity "channel.close expects one ChannelHandle"))
           | Ok (Eval.OCOp { op; args; resume; _ })
             when Hash.equal op Concurrency_contract.scope_control_hash -> (
               let* () =
@@ -650,7 +795,7 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed i
                       let continuation =
                         match owned with
                         | Global_nested_wait continuation -> continuation
-                        | Global_state _ | Global_awaiting _ -> assert false
+                        | Global_state _ | Global_awaiting _ | Global_channel _ -> assert false
                       in
                       let* () =
                         Structured_scope.suspend_yield run.scope handle
@@ -697,13 +842,19 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed i
                   let continuation =
                     match owned with
                     | Global_awaiting (_, continuation) -> continuation
-                    | Global_state _ | Global_nested_wait _ -> assert false
+                    | Global_state _ | Global_nested_wait _ | Global_channel _ -> assert false
                   in
                   suspend_and_requeue run handle
                     (Global_state (Eval.apply_state ctx continuation [ value ]))))
     in
     let rec drive () =
       match !queue with
+      | [] when Structured_scope.channel_deadlocked root_scope ->
+          Error
+            [
+              Diag.error ~code:"E0908"
+                "async deadlock: all remaining live tasks are blocked on channels";
+            ]
       | [] -> Ok ()
       | _ when !sequence >= bounds.max_decisions ->
           budget_refusal := Some Decision_limit;

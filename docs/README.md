@@ -37,10 +37,11 @@ project shape from file names alone.
   uncertainty wording, canonical boundaries, and explicit non-goals.
 - `effect-membranes.md`: GM.0 charter for typed governed facades, versioned
   decision artifacts, live/dry boundaries, and monotonic composition.
-- `concurrency.md`: SC.13 freezes the scoped typed-Channel contract over the
-  SC.12 exhaustive, seeded, replay, and FIFO scheduler stack, including exact
-  identities, capacity and backpressure, close, cancellation, ownership, and
-  policy interaction; SC.14 remains the runtime implementation milestone.
+- `concurrency.md`: SC.14 ships the exact scoped typed Channel contract frozen
+  by SC.13 through deterministic, seeded, replay, exhaustive, and cached
+  interpreted scheduling. It publishes exact identities, capacity/backpressure,
+  close, cancellation, fan-in, ownership, and policy interaction. Native
+  Channel execution, host I/O readiness, and actors remain deferred to C4+.
 - `warp-testing.md`: Warp test model, rows, handlers, cache, properties, and
   world lanes.
 - `errors.md`: diagnostic code catalog.
@@ -51,6 +52,8 @@ Read these together when judging whether the release candidate is credible:
 
 - `release/0.1/EVIDENCE.md`: built artifact, test inventory, commands, summary.
 - `release/0.1/CLAIMS.md`: claims mapped to proving tests/demos and caveats.
+- `release/structured-concurrency/EVIDENCE.md`: SC.14 scoped Channel runtime and
+  schedule-parity evidence over the complete SC.12 scheduler stack.
 - `release/0.1/REPRO.md`: fresh-clone reproduction.
 - `release/0.1/FREEZE.md`: frozen version/hash/store/trace/CLI/error surfaces.
 - `release/0.1/GAUNTLET.md`: adversarial tests present and omitted.
@@ -110,11 +113,11 @@ Read these together when judging whether the release candidate is credible:
 
 ## Structured Concurrency Evidence
 
-- `release/structured-concurrency/EVIDENCE.md`: SC.13 typed-Channel contract
-  evidence over SC.12 exhaustive and seeded scheduling, record/replay, and the
-  validated SC.9 scheduler.
+- `release/structured-concurrency/EVIDENCE.md`: SC.14 typed-Channel runtime,
+  exact interface hashes, checker fixtures, normative traces, schedule parity,
+  and checklist over the complete SC.12 scheduler stack.
 - `release/structured-concurrency/MANIFEST.sha256`: reconstructible complete
-  SC.13 overlay on exact SC.12 commit `2fc2d30`.
+  SC.14 overlay on exact SC.12 commit `2fc2d30`.
 
 ## Governed Membranes Evidence
 

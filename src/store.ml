@@ -55,8 +55,11 @@ let kind_of_sym = function
 
 let private_name_diagnostic name hash =
   Diag.error ~code:Concurrency_contract.task_escape_code
-    ~hint:"Task handles are created only by async.spawn inside a structured scheduler scope"
+    ~hint:"Task and Channel handles are created only inside a structured scheduler scope"
     (Printf.sprintf "name `%s` cannot expose scheduler-private hash %s" name (Hash.to_hex hash))
+
+let scheduler_private_hash hash =
+  Concurrency_contract.is_task_private_hash hash || Channel_contract.is_channel_private_hash hash
 
 (* --- names.jqd --- *)
 
@@ -102,8 +105,7 @@ let parse_names ~file src =
         | [] -> Ok (List.rev names, List.sort_uniq Hash.compare hidden)
         | { Form.head = "named"; args = [ Form.Sym n; Form.Sym k; Form.Hash h ]; _ } :: rest -> (
             match kind_of_sym k with
-            | Some _ when Concurrency_contract.is_task_private_hash h ->
-                Error [ private_name_diagnostic n h ]
+            | Some _ when scheduler_private_hash h -> Error [ private_name_diagnostic n h ]
             | Some kind -> go ((n, { Resolve.hash = h; kind }) :: names) hidden rest
             | None -> err ~code:"E0603" "corrupt names.jqd: unknown kind `%s`" k)
         | { Form.head = "hidden"; args = [ Form.Hash h ]; _ } :: rest -> go names (h :: hidden) rest
@@ -246,8 +248,7 @@ let put_decl ?origin t (decl : Kernel.decl) : (Canon.decl_hashes, Diag.t list) r
           (fun (n, h) ->
             match List.assoc_opt h fresh with
             | Some (_, role)
-              when (not (List.exists (Hash.equal h) t.hidden))
-                   && not (Concurrency_contract.is_task_private_hash h) ->
+              when (not (List.exists (Hash.equal h) t.hidden)) && not (scheduler_private_hash h) ->
                 Some (n, { Resolve.hash = h; kind = entry_kind decl role })
             | Some _ | None -> None)
           hs.Canon.named
@@ -263,8 +264,7 @@ let put_decl ?origin t (decl : Kernel.decl) : (Canon.decl_hashes, Diag.t list) r
           (new_names
           @ List.filter
               (fun ((_, entry) as binding) ->
-                (not (Concurrency_contract.is_task_private_hash entry.Resolve.hash))
-                && not (evicted binding))
+                (not (scheduler_private_hash entry.Resolve.hash)) && not (evicted binding))
               t.names);
       write_names t;
       Ok hs
@@ -404,8 +404,7 @@ let names_view t : Resolve.names =
 let bind_name t name hash : (unit, Diag.t list) result =
   if not (valid_name name) then
     err ~code:"E0605" "invalid name %S: names are lowercase symbols [a-z][a-z0-9-]*" name
-  else if Concurrency_contract.is_task_private_hash hash then
-    Error [ private_name_diagnostic name hash ]
+  else if scheduler_private_hash hash then Error [ private_name_diagnostic name hash ]
   else
     match List.find_opt (fun (h, _) -> Hash.equal hash h) t.index with
     | None -> err ~code:"E0601" "cannot name unknown hash %s" (Hash.to_hex hash)

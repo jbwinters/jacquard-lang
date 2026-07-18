@@ -1,9 +1,10 @@
-# Structured Concurrency SC.13 Evidence
+# Structured Concurrency SC.14 Evidence
 
-Status: the typed Channel interface, identity, static checker contract, and
-deterministic behavior are frozen over the complete SC.12 scheduler stack.
-SC.13 supplies executable type fixtures and normative SC.14 acceptance traces,
-but no Channel runtime handler, root grant, native route, or host scheduling.
+Status: the typed Channel interface frozen by SC.13 now runs through the SC.14
+interpreted scheduler over the complete SC.12 stack. Exact-scope FIFO state,
+atomic continuation ownership, cancellation, close, teardown, deadlock refusal,
+and exact-identity admission are executable. Channel has no root grant, native
+route, host scheduling, or shared-memory carrier.
 
 - Reconstruction base: `2fc2d306c1236b8faeaee37a2e1c9d2848d16f52`
 - Evidence overlay: [MANIFEST.sha256](MANIFEST.sha256)
@@ -32,6 +33,36 @@ The prelude golden pins all whole/member hashes. Focused tests load every
 declaration from the content-addressed store, print it, read it, rebuild the
 kernel declaration, and re-hash the corresponding member. SC.4 and SC.5 change
 no declaration identity and add no kernel form.
+
+## Scoped Channel runtime
+
+`prelude/08z-channel.jqd` publishes only the frozen declarations: private
+`ChannelOpaque`, `ChannelHandle a`, `ChannelError`, and four `once` Channel
+operations. Their exact whole/member hashes match the SC.13 contract. Store,
+checker, evaluator, and native lowering all reject direct use of the private
+carrier with E0907. Runtime values show only `<channel>` and carry an
+unforgeable evaluator-run owner plus `(scope-path, successful-open-index)`.
+
+`Channel_contract` owns bounded FIFO values and task IDs, never raw resumes.
+`Scheduler_core` remains the only owner of Once continuations. Structured scope
+transitions use capability-gated prepare/commit proofs: caller lifecycle,
+counterpart suspension identity, every waiter mapping, and the closer mapping
+are validated before channel mutation; commit has no remaining diagnostic or
+callback seam. Adversarial tests pin invalid callers, raised mappers, a wrong
+second close waiter, no partial close/wake, no-request and duplicate
+cancellation, raised destruction callbacks, unregistered handles, and ChannelId
+exhaustion.
+
+The exact Channel operation hashes are scheduler infrastructure. They run under
+the default interpreted round-robin scheduler even when routed world effects
+are disabled, while near matches remain ordinary routed effects. No
+`--allow channel` spelling is introduced. End-to-end evidence covers negative
+capacity, rendezvous, bounded buffering, sender/receiver FIFO, drain-on-close,
+blocked-sibling fail-fast cancellation, collect progress after an unrelated
+failure, cancellation before malformed arguments, and all-channel-blocked E0908
+cleanup. The frozen rendezvous and buffered traces are replayed field for field,
+and the mixed reference-model property checks conservation, no duplication,
+FIFO, close, cancellation, and teardown.
 
 ## Generalized child-effect law
 
@@ -524,7 +555,8 @@ channel.close : (ChannelHandle a) -> ()
 ```
 
 `ChannelError` is exactly `ChannelClosed | InvalidCapacity(requested: Int)`.
-The complete HASH_V0 identities are pinned by `effect-taxonomy/2`:
+The complete HASH_V0 identities are pinned by `effect-taxonomy/2`, whose
+compiled case is named `SC.14 Channel interface identity`:
 
 | declaration/member | HASH_V0 identity |
 |---|---|
@@ -542,7 +574,7 @@ The complete HASH_V0 identities are pinned by `effect-taxonomy/2`:
 The positive fixture pins rows for open/send/recv/close and proves Async's
 existing shared child-row law produces `{Async, Channel}` for a spawned sender.
 The negative fixture rejects sending `Text` through `ChannelHandle Int` with
-E0804 before a runtime exists.
+E0804 before runtime execution.
 
 The SC.14 routing boundary is also frozen: only the exact Channel whole/member
 identities are admitted by the default interpreted scheduler, never by
@@ -572,23 +604,36 @@ drain order, and an explicit second close. Their SHA-256 identities are pinned
 by the focused test, which parses and checks every semantic field and contiguous
 decision number. These are SC.14 acceptance fixtures, not runtime transcripts.
 Actors, supervision, select, unbounded/cross-scope channels, host I/O readiness,
-and channel runtime remain excluded.
+and a native channel runtime remain excluded.
+
+Channel scheduling also crosses the SC.10-SC.12 decision seams in executable
+tests. The round-robin suite runs one real rendezvous program under fixed seeded
+schedules, proves the same seed ignores host `Random` state, reaches multiple
+interleavings, and strictly replays the canonical seeded trace byte-for-byte.
+The same program has a cold scheduler-cache miss, an exact-identity hit that
+still executes a fresh equal run, and a miss when the sent value changes.
+The exhaustive suite enumerates the rendezvous's exact four worlds, checks that
+each world executes the pinned open/send/recv hashes once, and strictly replays
+every canonical trace. It treats only those four frozen scheduler-owned hashes
+as internal; the existing hostile Console case still proves every other routed
+operation is refused before its callback.
 
 ## Compiled test discovery
 
 The lifecycle evidence is registered directly in the compiled Alcotest
 inventory rather than hidden inside the effect-taxonomy governance case. The
-seven independently selectable groups and their case names are:
+eight independently selectable groups and their case counts are:
 
-| group | compiled case |
-|---|---|
-| `scheduler-core` | `lifecycle, waits, cycles, and ownership` |
-| `structured-scope` | `nested ownership, cleanup, and escape` |
-| `cancellation` | `cooperative boundary delivery` |
-| `scope-policy` | `fail-fast and collect aggregation` |
-| `round-robin` | `real evaluator FIFO lifecycle` |
-| `schedule-trace` | `canonical codec and identity`; `legacy, unknown, and noncanonical refusal`; `impossible event refusal` |
-| `exhaustive-schedule` | hand counts; Warp/replay; schedule-sensitive failure; budgets and stopped-prefix alternatives; hermeticity; Once ownership |
+| group | cases | compiled evidence |
+|---|---:|---|
+| `scheduler-core` | 1 | lifecycle, waits, cycles, and ownership |
+| `channel-contract` | 12 | identities and bounds; FIFO rendezvous/buffering; close/cancel/teardown; frozen traces; model properties |
+| `structured-scope` | 1 | nested ownership, cleanup, and escape |
+| `cancellation` | 1 | cooperative boundary delivery |
+| `scope-policy` | 1 | fail-fast and collect aggregation |
+| `round-robin` | 1 | real evaluator FIFO lifecycle, including Channel seeded/replay/cache parity |
+| `schedule-trace` | 3 | canonical identity; refusal compatibility; impossible-event refusal |
+| `exhaustive-schedule` | 8 | hand counts and Channel worlds; Warp/replay; failures; budgets; hermeticity; Once ownership |
 
 The exact discovery and focused execution commands are:
 
@@ -597,17 +642,23 @@ opam exec -- dune build test/test_jacquard.exe
 (
   cd _build/default/test
   ./test_jacquard.exe list --color=never 2>/dev/null |
-    grep -E '^(scheduler-core|structured-scope|cancellation|scope-policy|round-robin|schedule-trace|exhaustive-schedule) '
+    grep -E '^(scheduler-core|channel-contract|structured-scope|cancellation|scope-policy|round-robin|schedule-trace|exhaustive-schedule) '
   ./test_jacquard.exe test \
-    'scheduler-core|structured-scope|cancellation|scope-policy|round-robin|schedule-trace|exhaustive-schedule' \
+    'scheduler-core|channel-contract|structured-scope|cancellation|scope-policy|round-robin|schedule-trace|exhaustive-schedule' \
     --compact --color=never
 )
 ```
 
-The compiled inventory is exactly 687 cases and the source inventory is 39
-cram transcripts. `effect-taxonomy/2` is the independently selectable SC.13
-interface, trace, and checklist proof; the seven scheduler/lifecycle suites
-execute exactly once during the full gate.
+The current inventory is mechanically checked against compiled discovery:
+
+- Alcotest/QCheck cases: `700`
+- Cram transcript files: `39`
+
+The arithmetic from the prior 687-case inventory is exact: twelve compiled
+`channel-contract` cases plus the `store/9` Channel-private-hash case produce
+700. `effect-taxonomy/2` is the independently selectable SC.14 interface
+identity proof; `channel-contract/8` and `/9` replay the two frozen traces, and
+the eight groups above execute exactly once during the full gate.
 
 Native scheduling remains outside the current backend. Differential coverage is
 therefore limited to the supported case: an Async operation discharged by an
@@ -617,14 +668,14 @@ grant was added.
 
 ## Reconstruction and verification
 
-The manifest is the complete SC.13 successor overlay on validated SC.12 commit
+The manifest is the complete SC.14 successor overlay on validated SC.12 commit
 `2fc2d306c1236b8faeaee37a2e1c9d2848d16f52`. Reconstruct it under repository-local
 scratch space:
 
 ```sh
 set -eu
 base=2fc2d306c1236b8faeaee37a2e1c9d2848d16f52
-dest="$PWD/.scratch/sc13-evidence-copy"
+dest="$PWD/.scratch/sc14-evidence-copy"
 manifest=docs/release/structured-concurrency/MANIFEST.sha256
 rm -rf "$dest"
 mkdir -p "$dest"
@@ -666,8 +717,8 @@ snapshot_source | cmp "$snapshot" -
 opam exec -- dune build @doc --root "$dest"
 ```
 
-Expected results are zero exits, 687 compiled Alcotest/QCheck cases, 39 cram
-transcripts, and 27 doctest examples across 8 documents.
+Expected results are zero exits, the mechanically checked inventories above,
+and 27 doctest examples across 8 documents.
 
 The default interpreted CLI, prelude-evaluation, and Warp Case paths use this
 scheduler. `async.scope` is a trusted internal term marker, not a fifth Async
@@ -679,7 +730,6 @@ future work; native parity evidence is labeled only for Async discharged by an
 in-language handler. SC.11 randomizes this explicit interpreter decision seam,
 while SC.12 adds hermetic bounded exhaustive exploration. Neither claims host
 scheduling.
-SC.13 adds only the Channel contract, published identity, checker fixtures, and
-acceptance traces. Channel remains visible in outward effect rows and has no
-runtime route until SC.14; the SC.10-SC.12 scheduling and replay guarantees
-remain unchanged.
+SC.13 added the Channel contract, published identity, checker fixtures, and
+acceptance traces. SC.14 supplies the exact interpreted route and executable
+SC.10-SC.12 seeded, replay, exhaustive, and cache parity described above.

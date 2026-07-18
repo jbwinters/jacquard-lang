@@ -40,6 +40,18 @@ let mixed_source =
   \       (let nonrec (pwild) (app (var async.cancel) (var second))\n\
   \         (lit 99)))))"
 
+let channel_rendezvous_source value =
+  Printf.sprintf
+    "(match (app (var channel.open) (lit 0))\n\
+    \  (clause (pcon ok (pvar channel))\n\
+    \    (let nonrec (pvar sender)\n\
+    \      (app (var async.spawn)\n\
+    \        (lam () (app (var channel.send) (var channel) (lit %d))))\n\
+    \      (let nonrec (pvar received) (app (var channel.recv) (var channel))\n\
+    \        (tuple (var received) (app (var async.await) (var sender))))))\n\
+    \  (clause (pcon err (pvar error)) (var error)))"
+    value
+
 let run_mixed () =
   let store, ctx = Eval_support.make_prelude_ctx () in
   let expr = expression store mixed_source in
@@ -651,6 +663,182 @@ let test_creation_and_world_operation_drift_preempt_actions () =
        world_expr);
   Alcotest.(check int) "drift preempted world callback" 0 !calls
 
+let test_scoped_channels_run_end_to_end_without_world_allowance () =
+  let store, ctx = Eval_support.make_prelude_ctx () in
+  let rendezvous = expression store (channel_rendezvous_source 7) in
+  let outcome = Round_robin.run_state ctx (Eval.expr_state rendezvous) |> ok in
+  Alcotest.(check string)
+    "rendezvous result and sender completion" "(ok(7), done(ok(())))"
+    (match outcome.body with
+    | Concurrency_contract.Done value -> Value.show value
+    | result -> result_text result);
+  Alcotest.(check bool)
+    "rendezvous wake is counterpart before receiver" true
+    (contains "runnable=[0#1,0#0]" outcome.trace);
+  let invalid = expression store "(app (var channel.open) (lit -1))" in
+  Alcotest.(check string)
+    "negative capacity is typed and allocates no handle" "err(invalid-capacity(-1))"
+    (Value.show (Round_robin.run_expr ctx invalid |> ok));
+  let close_drain =
+    expression store
+      "(match (app (var channel.open) (lit 1))\n\
+      \  (clause (pcon ok (pvar channel))\n\
+      \    (let nonrec (pwild) (app (var channel.send) (var channel) (lit 9))\n\
+      \      (let nonrec (pwild) (app (var channel.close) (var channel))\n\
+      \        (tuple (app (var channel.recv) (var channel))\n\
+      \          (app (var channel.recv) (var channel))))))\n\
+      \  (clause (pcon err (pvar error)) (var error)))"
+  in
+  Alcotest.(check string)
+    "close preserves accepted buffer then reports drained close" "(ok(9), err(channel-closed))"
+    (Value.show (Round_robin.run_expr ctx close_drain |> ok));
+  let hermetic =
+    Round_robin.run_expr_outcome_scheduled ctx ~allow_routed:false ~mode:Round_robin.Record_schedule
+      rendezvous
+    |> scheduled_ok
+  in
+  Alcotest.(check string)
+    "exact Channel hashes are scheduler-admitted without routed-world allowance"
+    "done((ok(7), done(ok(()))))"
+    (result_text hermetic.execution_outcome.body);
+  Alcotest.(check bool)
+    "channel run closes all ownership" true
+    (outcome.metrics_after_close
+    = Structured_scope.{ open_scopes = 0; live_tasks = 0; runnable_tasks = 0; owned_resumes = 0 });
+  let blocked =
+    expression store
+      "(match (app (var channel.open) (lit 0))\n\
+      \        (clause (pcon ok (pvar channel)) (app (var channel.recv) (var channel)))\n\
+      \        (clause (pcon err (pvar error)) (var error)))"
+  in
+  (match Round_robin.run_expr ctx blocked with
+  | Error (Runtime_err.Scheduler_error message) ->
+      Alcotest.(check string)
+        "all-channel-blocked deadlock"
+        "async deadlock: all remaining live tasks are blocked on channels" message
+  | Error error -> Alcotest.failf "wrong channel deadlock error: %s" (Runtime_err.to_string error)
+  | Ok value -> Alcotest.failf "channel deadlock returned %s" (Value.show value));
+  let fail_fast_source =
+    expression store
+      "(match (app (var channel.open) (lit 0))\n\
+      \        (clause (pcon ok (pvar channel))\n\
+      \          (let nonrec (pwild)\n\
+      \            (app (var async.spawn)\n\
+      \              (lam () (app (var channel.send) (var channel) (lit 1))))\n\
+      \            (let nonrec (pwild) (app (var async.spawn) (lam () (app (lit 1))))\n\
+      \              (lit 0))))\n\
+      \        (clause (pcon err (pvar error)) (var error)))"
+  in
+  let fail_fast =
+    Round_robin.run_state ctx ~policy:Concurrency_contract.Fail_fast
+      (Eval.expr_state fail_fast_source)
+    |> ok
+  in
+  (match fail_fast.aggregate with
+  | Scope_policy.Fail_fast_result (Concurrency_contract.Failed _) -> ()
+  | _ -> Alcotest.fail "fail-fast did not retain the triggering failure");
+  Alcotest.(check bool)
+    "fail-fast cancels a channel-blocked sibling" true
+    (contains "terminal task=0#1 result=cancelled" fail_fast.trace);
+  let collect_source =
+    expression store
+      "(match (app (var channel.open) (lit 0))\n\
+      \        (clause (pcon ok (pvar channel))\n\
+      \          (let nonrec (pvar sender)\n\
+      \            (app (var async.spawn)\n\
+      \              (lam () (app (var channel.send) (var channel) (lit 7))))\n\
+      \            (let nonrec (pvar bad) (app (var async.spawn) (lam () (app (lit 1))))\n\
+      \              (tuple (app (var channel.recv) (var channel))\n\
+      \                (app (var async.await) (var sender))\n\
+      \                (app (var async.await) (var bad))))))\n\
+      \        (clause (pcon err (pvar error)) (var error)))"
+  in
+  let collect =
+    Round_robin.run_state ctx ~policy:Concurrency_contract.Collect (Eval.expr_state collect_source)
+    |> ok
+  in
+  Alcotest.(check string)
+    "collect preserves channel progress after another child fails"
+    "done((ok(7), done(ok(())), failed(\"type error: 1 is not applicable\")))"
+    (result_text collect.body);
+  let cancelled_before_malformed =
+    expression store
+      "(let nonrec (pvar target)\n\
+      \        (app (var async.spawn)\n\
+      \          (lam ()\n\
+      \            (let nonrec (pwild) (app (var async.yield))\n\
+      \              (app (var channel.send) (lit 1) (lit 2)))))\n\
+      \        (let nonrec (pwild) (app (var async.cancel) (var target))\n\
+      \          (app (var async.await) (var target))))"
+  in
+  Alcotest.(check string)
+    "pending cancellation beats malformed Channel arguments" "cancelled"
+    (Value.show
+       (Round_robin.run_expr ctx ~policy:Concurrency_contract.Collect cancelled_before_malformed
+       |> ok))
+
+let test_channel_seed_replay_and_cache_parity () =
+  let store, ctx = Eval_support.make_prelude_ctx () in
+  let expr = expression store (channel_rendezvous_source 7) in
+  let run seed =
+    Round_robin.run_expr_scheduled ctx ~policy:Concurrency_contract.Collect
+      ~mode:(Round_robin.Seeded_schedule { seed })
+      expr
+    |> scheduled_ok
+  in
+  Random.init 17;
+  let first = run 0 in
+  Random.init 99;
+  let same = run 0 in
+  let first_bytes = Schedule_trace.serialize first.schedule in
+  Alcotest.(check string)
+    "Channel seed ignores host Random state" first_bytes
+    (Schedule_trace.serialize same.schedule);
+  let seeded = List.init 16 run in
+  let distinct =
+    seeded
+    |> List.map (fun (execution : Round_robin.scheduled) ->
+        Schedule_trace.serialize execution.schedule)
+    |> List.sort_uniq String.compare
+  in
+  Alcotest.(check bool)
+    "fixed Channel seeds reach more than one rendezvous interleaving" true
+    (List.length distinct > 1);
+  List.iter
+    (fun (execution : Round_robin.scheduled) ->
+      Alcotest.(check string)
+        "every seeded Channel interleaving returns the same rendezvous value"
+        "(ok(7), done(ok(())))"
+        (Value.show execution.Round_robin.value))
+    seeded;
+  let replayed =
+    Round_robin.run_expr_scheduled ctx ~policy:Concurrency_contract.Collect
+      ~mode:(Round_robin.Replay_schedule first.schedule) expr
+    |> scheduled_ok
+  in
+  Alcotest.(check string)
+    "seeded Channel trace strictly replays byte-for-byte" first_bytes
+    (Schedule_trace.serialize replayed.schedule);
+  let cache = Round_robin.create_cache () in
+  let cold, cold_status =
+    Round_robin.run_expr_cached cache ctx ~policy:Concurrency_contract.Collect expr |> ok
+  in
+  let warm, warm_status =
+    Round_robin.run_expr_cached cache ctx ~policy:Concurrency_contract.Collect expr |> ok
+  in
+  let changed = expression store (channel_rendezvous_source 8) in
+  let _, changed_status =
+    Round_robin.run_expr_cached cache ctx ~policy:Concurrency_contract.Collect changed |> ok
+  in
+  Alcotest.(check bool) "first Channel proof misses" true (cold_status = Round_robin.Miss);
+  Alcotest.(check bool) "same Channel identity hits" true (warm_status = Round_robin.Hit);
+  Alcotest.(check bool)
+    "Channel program identity includes the sent value" true
+    (changed_status = Round_robin.Miss);
+  Alcotest.(check string) "Channel cache hit executes a fresh equal run" cold.trace warm.trace;
+  Alcotest.(check string)
+    "Channel cache hit preserves the result" (result_text cold.body) (result_text warm.body)
+
 let prop_128_exact_real_eval_traces =
   let expected = (run_mixed ()).trace in
   QCheck.Test.make ~count:128 ~name:"128 real Eval schedules retain the exact FIFO trace" QCheck.int
@@ -670,6 +858,8 @@ let run () =
   test_schedule_record_replay_drift_and_fork ();
   test_seeded_schedule_is_reproducible_and_replayable ();
   test_creation_and_world_operation_drift_preempt_actions ();
+  test_scoped_channels_run_end_to_end_without_world_allowance ();
+  test_channel_seed_replay_and_cache_parity ();
   QCheck.Test.check_exn prop_128_exact_real_eval_traces
 
 let suite = [ Alcotest.test_case "real evaluator FIFO lifecycle" `Quick run ]

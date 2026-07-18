@@ -61,10 +61,21 @@ let decisions trace =
     (function Schedule_trace.Decide decision -> Some decision | Schedule_trace.Create _ -> None)
     trace.Schedule_trace.events
 
-let first_routed trace =
+let scheduler_owned_routed_operations =
+  Channel_contract.channel_operation_hashes
+  |> List.map (fun (name, encoded) ->
+      match Hash.of_hex encoded with
+      | Some hash -> hash
+      | None -> failwith ("Bug_exhaustive_schedule: malformed pinned hash for " ^ name))
+
+let is_scheduler_owned_routed operation =
+  List.exists (Hash.equal operation) scheduler_owned_routed_operations
+
+let first_external_routed trace =
   List.find_map
     (function
-      | Schedule_trace.Decide { sequence; operation = Schedule_trace.Routed operation; _ } ->
+      | Schedule_trace.Decide { sequence; operation = Schedule_trace.Routed operation; _ }
+        when not (is_scheduler_owned_routed operation) ->
           Some (sequence, operation)
       | Schedule_trace.Decide _ | Schedule_trace.Create _ -> None)
     trace.Schedule_trace.events
@@ -147,7 +158,7 @@ let run_expr ctx ?(policy = Concurrency_contract.default_failure_policy) ?(bound
     | [] -> ()
     | Explore (Stopped_prefix _, []) :: rest -> drive rest
     | Explore (World_execution execution, []) :: rest ->
-        (match first_routed execution.execution_schedule with
+        (match first_external_routed execution.execution_schedule with
         | Some (decision, operation) -> add_reason reasons (Routed_effect { decision; operation })
         | None ->
             worlds_rev :=

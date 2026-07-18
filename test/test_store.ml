@@ -166,6 +166,37 @@ let test_task_private_hash_never_nameable () =
         (String.concat "; " (List.map Diag.to_string diagnostics))
   | Ok _ -> Alcotest.fail "persisted names.jqd exposed TaskOpaque"
 
+let test_channel_private_hash_never_nameable () =
+  let root = fresh_root () in
+  let store = open_ok root in
+  let hashes =
+    put_ok store
+      (decl_of ~names:Resolve.empty_names "(deftype channel-handle ((tvar a)) (con channel-opaque))")
+  in
+  let private_hash = List.assoc "channel-opaque" hashes.Canon.named in
+  Alcotest.(check string)
+    "frozen private hash" Channel_contract.channel_opaque_constructor_hash
+    (Hash.to_hex private_hash);
+  Alcotest.(check bool)
+    "private constructor omitted" true
+    (Store.lookup_kind store "channel-opaque" Resolve.KCon = None);
+  (match Store.bind_name store "leaked-channel" private_hash with
+  | Error [ diagnostic ] -> Alcotest.(check string) "bind code" "E0907" diagnostic.Diag.code
+  | Error diagnostics ->
+      Alcotest.failf "unexpected private bind diagnostics: %s"
+        (String.concat "; " (List.map Diag.to_string diagnostics))
+  | Ok () -> Alcotest.fail "bind_name exposed ChannelOpaque");
+  let names_path = Filename.concat root "names.jqd" in
+  let output = open_out_gen [ Open_wronly; Open_append; Open_text ] 0o644 names_path in
+  Printf.fprintf output "(named persisted-channel con #%s)\n" (Hash.to_hex private_hash);
+  close_out output;
+  match Store.open_store root with
+  | Error [ diagnostic ] -> Alcotest.(check string) "persisted code" "E0907" diagnostic.Diag.code
+  | Error diagnostics ->
+      Alcotest.failf "unexpected persisted private diagnostics: %s"
+        (String.concat "; " (List.map Diag.to_string diagnostics))
+  | Ok _ -> Alcotest.fail "persisted names.jqd exposed ChannelOpaque"
+
 (* --- deps and dependents --- *)
 
 (* A 3-decl chain: c-three depends on b-two depends on a-one. *)
@@ -341,6 +372,8 @@ let suite =
     Alcotest.test_case "defterm group hash not nameable" `Quick test_defterm_group_hash_not_nameable;
     Alcotest.test_case "Task private hash never nameable" `Quick
       test_task_private_hash_never_nameable;
+    Alcotest.test_case "Channel private hash never nameable" `Quick
+      test_channel_private_hash_never_nameable;
     Alcotest.test_case "deps on a 3-decl chain" `Quick test_deps_chain;
     QCheck_alcotest.to_alcotest prop_dependents_inverse_of_deps;
     Alcotest.test_case "reopen rebuilds index" `Quick test_reopen_rebuilds_index;
