@@ -179,9 +179,10 @@ studied during planning; `docs/ast.md` records each debt in detail:
 The prototype is complete against its original core plan and has since added
 the public surface syntax, ringed standard library, Warp properties and cache,
 native compilation, packaged binaries, and product-scale case studies. The RC1
-semantic boundary is pinned by 604 Alcotest/QCheck cases, 33 cram transcripts,
-21 documentation examples, native sanitizer/leak/fuzz lanes, and a fresh-clone
-evidence workflow. RC2 repaired binary-demo packaging; RC3 adds an explicit
+semantic boundary remains historical; the current successor is pinned by 700
+Alcotest/QCheck cases, 40 cram transcripts, 27 documentation examples, native
+sanitizer/leak/fuzz lanes, and fresh-clone evidence workflows. RC2 repaired
+binary-demo packaging; RC3 adds an explicit
 runtime/output license exception and packages the native runtime. The current
 successor distribution relicenses Jacquard under Apache License 2.0 and keeps
 that runtime/output permission as an explicit clarification. These licensing
@@ -453,6 +454,7 @@ opam exec -- sh demos/inference/m3.sh
 opam exec -- sh demos/worlds/agent-dream.sh
 opam exec -- sh demos/worlds/preflight.sh
 opam exec -- sh demos/tooling/repair.sh
+opam exec -- sh demos/concurrency/run.sh
 ```
 
 What they show:
@@ -476,6 +478,10 @@ What they show:
 - `tooling/repair.sh`: program repair as Bayesian inference; a bug report is an
   observation over computed single-edit patches, and the most likely patch
   prints as a one-line canonical-structure diff.
+- `concurrency/run.sh`: one task program under FIFO, seeded, exhaustive, and
+  strict replay scheduling, with exact child-authority signatures and eight
+  replayable schedule worlds. This developer evidence demo requires a source
+  checkout built with Dune.
 - `worlds/m4-hostile.sh`: generated-looking code that reaches for `net`; signatures and
   manifests expose the authority.
 - `worlds/escrow/run.sh`: product-shaped generated workflow with manifest, dry-run,
@@ -514,6 +520,11 @@ Key release docs:
 - `docs/release/0.1/LIMITS.md`: explicit non-goals and caveats
 - `docs/release/0.1/DECISION.md`: release-candidate decision memo
 - `docs/release/0.1/RELEASE-NOTES.md`: public RC contents and install command
+- `docs/release/structured-concurrency/EVIDENCE.md`: successor C0-C2 publication
+  claims plus the shipped interpreted C3 Channel runtime, exact counts, demo,
+  and proving tests
+- `docs/release/structured-concurrency/LIMITS.md`: structured-concurrency
+  caveats and explicit C4 non-claims
 
 ## Repository Map
 
@@ -632,12 +643,20 @@ rights.
 Jacquard core is a research prototype, not a production platform. The `.jac`
 surface is implemented and supported but remains an evolving v0 projection
 onto the permanent 27-form kernel. Native AOT compilation and C-toolchain
-optimization ship; `parallel.map` and `parallel.both` are pure, sequential
-optimization hints, while structured concurrency and its runtime remain
-unimplemented. A VM/JIT, membrane enforcement, continuous distributions,
-gradients, typed staging, language package management, self-hosting, and formal
-soundness proofs also do not ship. World grants remain coarse.
-See `docs/release/0.1/LIMITS.md` for the exact Core 0.1 semantic boundary.
+optimization ship. `parallel.map` and `parallel.both` remain pure, sequential
+optimization hints. The interpreted runtime now supports opaque scoped Tasks,
+cooperative cancellation, fail-fast/collect, FIFO and seeded scheduling,
+versioned strict replay, bounded exhaustive schedule enumeration, and scoped
+typed channels with rendezvous and buffered FIFO behavior, close, cancellation,
+and exact run/scope ownership. It does not provide native root scheduling or
+native Channel execution, preemptive cancellation, finalizers, shared memory,
+channel select or timeouts, actors/supervision, host scheduling, or real
+asynchronous host I/O at this evidence base. A VM/JIT, continuous
+distributions, gradients,
+typed staging, language package management, self-hosting, and formal soundness
+proofs also do not ship. World grants remain coarse. See
+`docs/release/0.1/LIMITS.md` for the historical Core 0.1 boundary and
+`docs/release/structured-concurrency/LIMITS.md` for the successor C0-C3 boundary.
 
 ## Troubleshooting
 

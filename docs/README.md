@@ -113,11 +113,14 @@ Read these together when judging whether the release candidate is credible:
 
 ## Structured Concurrency Evidence
 
-- `release/structured-concurrency/EVIDENCE.md`: SC.14 typed-Channel runtime,
-  exact interface hashes, checker fixtures, normative traces, schedule parity,
-  and checklist over the complete SC.12 scheduler stack.
-- `release/structured-concurrency/MANIFEST.sha256`: reconstructible complete
-  SC.14 overlay on exact SC.12 commit `2fc2d30`.
+- `release/structured-concurrency/EVIDENCE.md`: final C0-C2 publication gate
+  plus the shipped interpreted C3 typed-Channel runtime, exact identities,
+  schedule parity, counts, and claim-to-test links.
+- `release/structured-concurrency/LIMITS.md`: dynamic Task and Channel lifetime
+  checks, cooperative cancellation, explicit bracket cleanup, interpreter-only
+  scheduling, sequential C0 hints, and explicit C4 exclusions.
+- `release/structured-concurrency/MANIFEST.sha256`: reconstructible SC.16
+  publication overlay on exact SC.12 commit `b828099`.
 
 ## Governed Membranes Evidence
 
