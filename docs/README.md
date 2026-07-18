@@ -15,6 +15,9 @@ project shape from file names alone.
 - `../demos/README.md`: demo catalog and what each demo proves.
 - `surface-syntax.md`: public `.jac` authoring syntax and its projection onto
   the retained `.jqd` kernel/debug carrier.
+- `research/readability-benchmark/PROTOCOL.md`: preregistered reviewer tasks,
+  paired-carrier fixtures, scoring, privacy, and synthetic reproduction evidence
+  for future syntax decisions.
 - `ci-cd.md`: GitHub gates, branch protection, and release evidence workflow.
 
 ## Core Design

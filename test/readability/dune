@@ -1,0 +1,18 @@
+(rule
+ (aliases readability-protocol runtest)
+ (deps
+  readability_benchmark.py
+  fixture-manifest.json
+  result.schema.json
+  model-prompt.txt
+  (source_tree fixtures)
+  ../../docs/research/readability-benchmark/PROTOCOL.md
+  (source_tree ../../prelude))
+ (action
+  (setenv TMPDIR .
+   (run %{bin:python3} readability_benchmark.py verify
+    --manifest fixture-manifest.json
+    --schema result.schema.json
+    --protocol ../../docs/research/readability-benchmark/PROTOCOL.md
+    --jacquard %{bin:jacquard}
+    --prelude ../../prelude))))

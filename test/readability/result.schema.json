@@ -1,0 +1,168 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jacquard.example/schema/readability-result-v0.json",
+  "title": "Jacquard readability benchmark result row v0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "protocol_version",
+    "row_id",
+    "run_kind",
+    "subject_kind",
+    "subject_id",
+    "carrier",
+    "job",
+    "fixture_id",
+    "condition_id",
+    "presentation_order",
+    "answer_id",
+    "correct",
+    "completion_ms",
+    "confidence",
+    "error_code",
+    "excluded",
+    "exclusion_codes",
+    "assignment_seed_sha256",
+    "fixture_sha256",
+    "plain_text",
+    "syntax_highlighting",
+    "consent_version",
+    "model",
+    "recorded_at"
+  ],
+  "properties": {
+    "schema_version": {"const": "readability-result-v0"},
+    "protocol_version": {"const": "readability-protocol-v0"},
+    "row_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "run_kind": {"enum": ["confirmatory", "dry-run"]},
+    "subject_kind": {"enum": ["human", "model", "synthetic"]},
+    "subject_id": {"type": "string", "pattern": "^[0-9a-f]{16,64}$"},
+    "carrier": {"enum": ["jac", "jqd", "python"]},
+    "job": {"enum": ["seeded-bug", "predict-output", "authority-escalation"]},
+    "fixture_id": {"enum": ["seeded-bug", "predict-output", "authority-escalation"]},
+    "condition_id": {
+      "enum": [
+        "jac/seeded-bug",
+        "jac/predict-output",
+        "jac/authority-escalation",
+        "jqd/seeded-bug",
+        "jqd/predict-output",
+        "jqd/authority-escalation",
+        "python/seeded-bug",
+        "python/predict-output",
+        "python/authority-escalation"
+      ]
+    },
+    "presentation_order": {"type": "integer", "minimum": 1, "maximum": 3},
+    "answer_id": {"type": "string", "minLength": 1, "maxLength": 64},
+    "correct": {"type": "boolean"},
+    "completion_ms": {"type": "integer", "minimum": 0, "maximum": 300000},
+    "confidence": {"type": "integer", "minimum": 0, "maximum": 100},
+    "error_code": {
+      "type": ["string", "null"],
+      "enum": [
+        null,
+        "recursion-trace",
+        "symptom-location",
+        "branch-direction",
+        "arithmetic-trace",
+        "call-trace",
+        "capability-kind",
+        "capability-omission",
+        "timeout",
+        "invalid-answer"
+      ]
+    },
+    "excluded": {"type": "boolean"},
+    "exclusion_codes": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "no-consent",
+          "eligibility-failed",
+          "prior-fixture-exposure",
+          "prohibited-tools",
+          "duplicate-enrollment",
+          "system-failure",
+          "model-training-contamination",
+          "model-version-drift",
+          "prompt-parse-failure"
+        ]
+      }
+    },
+    "assignment_seed_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "fixture_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "plain_text": {"const": true},
+    "syntax_highlighting": {"const": false},
+    "consent_version": {"type": ["string", "null"], "maxLength": 64},
+    "model": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "model",
+            "client",
+            "prompt_sha256",
+            "temperature",
+            "repetition",
+            "training_cutoff_attested"
+          ],
+          "properties": {
+            "provider": {"type": "string", "minLength": 1, "maxLength": 64},
+            "model": {"type": "string", "minLength": 1, "maxLength": 128},
+            "client": {"type": "string", "minLength": 1, "maxLength": 128},
+            "prompt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "temperature": {"type": "number", "minimum": 0, "maximum": 2},
+            "repetition": {"type": "integer", "minimum": 1, "maximum": 30},
+            "training_cutoff_attested": {"type": "boolean"}
+          }
+        }
+      ]
+    },
+    "recorded_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"subject_kind": {"const": "human"}}},
+      "then": {
+        "properties": {
+          "run_kind": {"const": "confirmatory"},
+          "consent_version": {"type": "string", "minLength": 1},
+          "model": {"type": "null"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"subject_kind": {"const": "model"}}},
+      "then": {
+        "properties": {
+          "run_kind": {"const": "confirmatory"},
+          "consent_version": {"type": "null"},
+          "model": {"type": "object"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"subject_kind": {"const": "synthetic"}}},
+      "then": {
+        "properties": {
+          "run_kind": {"const": "dry-run"},
+          "consent_version": {"type": "null"},
+          "model": {"type": "null"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"run_kind": {"const": "dry-run"}}},
+      "then": {"properties": {"subject_kind": {"const": "synthetic"}}}
+    }
+  ]
+}
