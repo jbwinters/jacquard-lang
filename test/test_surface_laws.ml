@@ -855,7 +855,7 @@ let validate_release_docs ~decision ~followups ~index =
           ];
           [
             "opam exec -- dune runtest test/docs-doctest --force";
-            "exit 0; exactly 25 named doctests pass";
+            "exit 0; exactly 27 named doctests pass";
           ];
           [
             "JACQUARD_PRELUDE=$PWD/prelude opam exec -- dune exec jac -- run \

@@ -1,13 +1,11 @@
-# Structured Concurrency SC.12 Evidence
+# Structured Concurrency SC.13 Evidence
 
-Status: budgeted exhaustive schedule enumeration is implemented over SC.11
-seeded scheduling and SC.10 canonical record, fail-closed strict replay, and
-explicit provenance-carrying forks. Enumeration explores every bounded runnable
-TaskId choice, retains exact counts and replayable traces, and refuses routed
-effects before world callbacks. This milestone adds no host scheduling,
-detached tasks, or native root scheduler.
+Status: the typed Channel interface, identity, static checker contract, and
+deterministic behavior are frozen over the complete SC.12 scheduler stack.
+SC.13 supplies executable type fixtures and normative SC.14 acceptance traces,
+but no Channel runtime handler, root grant, native route, or host scheduling.
 
-- Reconstruction base: `404147e56a9e8b6bbec63e19748389d499d17673`
+- Reconstruction base: `2fc2d306c1236b8faeaee37a2e1c9d2848d16f52`
 - Evidence overlay: [MANIFEST.sha256](MANIFEST.sha256)
 - Authoritative contract: [concurrency.md](../../concurrency.md)
 
@@ -512,6 +510,70 @@ data-generation modes.
 SC.11 seeded scheduling remains part of this successor. Host scheduling remains
 outside SC.12.
 
+
+## SC.13 typed-channel freeze
+
+The machine-readable taxonomy and two executable checker fixtures agree on four
+`once` operations:
+
+```text
+channel.open : (Int) -> Result ChannelError (ChannelHandle a)
+channel.send : (ChannelHandle a, a) -> Result ChannelError ()
+channel.recv : (ChannelHandle a) -> Result ChannelError a
+channel.close : (ChannelHandle a) -> ()
+```
+
+`ChannelError` is exactly `ChannelClosed | InvalidCapacity(requested: Int)`.
+The complete HASH_V0 identities are pinned by `effect-taxonomy/2`:
+
+| declaration/member | HASH_V0 identity |
+|---|---|
+| `ChannelHandle a` | `f4f5601a435906a47faedae9006e44b874146f3ad4b586bf9d04535be14dccb4` |
+| private `ChannelOpaque` | `dc7a12f5fc0476b674d52535e9895220edf41f2a017b1dd97fc078950a3dbb36` |
+| `ChannelError` | `25dc8f513c91c80fd6d33e843fc3f6cab183800805f46e269f716155149b4da7` |
+| `ChannelClosed` | `de3da3e601fbba2c66864b87c6848d8224411df99f1967e132aaa166c1a3f3a9` |
+| `InvalidCapacity` | `01b719cb597275f097c2c36b5e86b3d71604eb531fe00ef66d9c93ec3f55acfb` |
+| `Channel a` | `bf9a334188ac13495eeb070fdc215d51763d9761b4775c98c61f44ebb1b03756` |
+| `channel.open` | `23f13bd2fd87d17716873bf34c708d6c9a2ddd5f2b4e4f634db6e5d1827b1f07` |
+| `channel.send` | `348fc5c967097b939360ecb2b066ba22ea8b924834e507c87a0e0f05f26fbfb0` |
+| `channel.recv` | `db28d70a061da1f1108e01dfaa7e248c4268b9460971c518a9c37f1b51b52860` |
+| `channel.close` | `ffa22eb01ff7aa206fec56f540b6fd1758b8590e8e797e83f3cbfd295ebce29b` |
+
+The positive fixture pins rows for open/send/recv/close and proves Async's
+existing shared child-row law produces `{Async, Channel}` for a spawned sender.
+The negative fixture rejects sending `Text` through `ChannelHandle Int` with
+E0804 before a runtime exists.
+
+The SC.14 routing boundary is also frozen: only the exact Channel whole/member
+identities are admitted by the default interpreted scheduler, never by
+`--allow channel`. The chosen task's current root or nested structured scope is
+the owner; a near-match, raw evaluator call, or native execution receives no
+special Channel route. `async.scope` still subtracts only Async, leaving Channel
+visible in the outward row until scheduler admission or an ordinary language
+handler intercepts it.
+
+Capacity zero is rendezvous; a positive capacity is bounded FIFO; a negative
+capacity returns typed `InvalidCapacity` before allocation. The contract fixes
+oldest-waiter pairing, bounded backpressure, buffer-first receive with sender
+promotion, counterpart-before-current wake order, deterministic fan-in, and
+idempotent drain-on-close. Cancellation is delivered before channel mutation
+and removes a blocked waiter without reordering survivors. Handles are exact
+run/scope capabilities and escape or parent/descendant use is E0907.
+Fail-fast removes channel-blocked siblings through cancellation; collect does
+not cancel or auto-close. Under either policy, an all-channel-blocked live set
+with no possible transition is E0908; fail-fast has no failure to prefer.
+
+`corpus/channel/rendezvous-v1.trace` and
+`corpus/channel/buffered-v1.trace` pin exact abstract states, results, and wake
+order. Together they include negative capacity without ChannelId consumption,
+chosen-task wake after successful open, rendezvous, buffer promotion, blocked
+receiver and sender cancellation, survivor order, close rejection/wakeup,
+drain order, and an explicit second close. Their SHA-256 identities are pinned
+by the focused test, which parses and checks every semantic field and contiguous
+decision number. These are SC.14 acceptance fixtures, not runtime transcripts.
+Actors, supervision, select, unbounded/cross-scope channels, host I/O readiness,
+and channel runtime remain excluded.
+
 ## Compiled test discovery
 
 The lifecycle evidence is registered directly in the compiled Alcotest
@@ -542,10 +604,10 @@ opam exec -- dune build test/test_jacquard.exe
 )
 ```
 
-The compiled inventory is exactly 686 cases and the source inventory is 39
-cram transcripts. `effect-taxonomy/3` retains only taxonomy governance and hash
-checks, so the seven scheduler/lifecycle suites execute exactly once during the
-full gate.
+The compiled inventory is exactly 687 cases and the source inventory is 39
+cram transcripts. `effect-taxonomy/2` is the independently selectable SC.13
+interface, trace, and checklist proof; the seven scheduler/lifecycle suites
+execute exactly once during the full gate.
 
 Native scheduling remains outside the current backend. Differential coverage is
 therefore limited to the supported case: an Async operation discharged by an
@@ -555,14 +617,14 @@ grant was added.
 
 ## Reconstruction and verification
 
-The manifest is the complete SC.12 successor overlay on validated SC.11 commit
-`404147e56a9e8b6bbec63e19748389d499d17673`. Reconstruct it under repository-local scratch
-space:
+The manifest is the complete SC.13 successor overlay on validated SC.12 commit
+`2fc2d306c1236b8faeaee37a2e1c9d2848d16f52`. Reconstruct it under repository-local
+scratch space:
 
 ```sh
 set -eu
-base=404147e56a9e8b6bbec63e19748389d499d17673
-dest="$PWD/.scratch/sc12-evidence-copy"
+base=2fc2d306c1236b8faeaee37a2e1c9d2848d16f52
+dest="$PWD/.scratch/sc13-evidence-copy"
 manifest=docs/release/structured-concurrency/MANIFEST.sha256
 rm -rf "$dest"
 mkdir -p "$dest"
@@ -604,8 +666,8 @@ snapshot_source | cmp "$snapshot" -
 opam exec -- dune build @doc --root "$dest"
 ```
 
-Expected results are zero exits, 686 compiled Alcotest/QCheck cases, 39 cram
-transcripts, and 25 doctest examples across 8 documents.
+Expected results are zero exits, 687 compiled Alcotest/QCheck cases, 39 cram
+transcripts, and 27 doctest examples across 8 documents.
 
 The default interpreted CLI, prelude-evaluation, and Warp Case paths use this
 scheduler. `async.scope` is a trusted internal term marker, not a fifth Async
@@ -617,3 +679,7 @@ future work; native parity evidence is labeled only for Async discharged by an
 in-language handler. SC.11 randomizes this explicit interpreter decision seam,
 while SC.12 adds hermetic bounded exhaustive exploration. Neither claims host
 scheduling.
+SC.13 adds only the Channel contract, published identity, checker fixtures, and
+acceptance traces. Channel remains visible in outward effect rows and has no
+runtime route until SC.14; the SC.10-SC.12 scheduling and replay guarantees
+remain unchanged.

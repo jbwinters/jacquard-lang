@@ -84,8 +84,7 @@ Naming convention: dotted lowercase, `list.map`, `text.split`, subject type firs
 Names live in the metadata index, so all of this is curation rather than structure,
 and renames are free (§8 returns to what that buys).
 
-The complete blessed effect vocabulary—including reserved but unimplemented
-interfaces, risk defaults, user-effect coloring rules, exact hashes, and
+The complete blessed effect vocabulary—including schema-reserved interfaces, risk defaults, user-effect coloring rules, exact hashes, and
 canonical handler or installation boundaries—is release-frozen in
 [`effect-taxonomy.md`](effect-taxonomy.md). Review-tool behavior is documented
 in [`effect-review.md`](effect-review.md).
@@ -93,12 +92,14 @@ in [`effect-review.md`](effect-review.md).
 | ET.8 blessed status | exact names |
 |---|---|
 | implemented (17) | `Abort`, `Throw`, `State`, `Emit`, `Dist`, `Fault`, `Eval`, `Console`, `Clock`, `Fs`, `Net`, `Workspace`, `Infer`, `Approval`, `Audit`, `Secret`, `Judge` |
-| reserved/unimplemented (9) | `Choose`, `Env`, `Pg`, `Blob`, `Serve`, `Crypto`, `Log`, `Async`, `Channel` |
+| reserved with published identity (2) | `Async`, `Channel` |
+| reserved/unimplemented (7) | `Choose`, `Env`, `Pg`, `Blob`, `Serve`, `Crypto`, `Log` |
 
 The status table is descriptive, not a grant list. The full identity table is
 machine-checked against `Effect_registry`, the prelude declarations, and the
-TSV artifact. Reserved names have no declaration hash or handler in this
-release.
+TSV artifact. `Async` has an interpreted scheduler. `Channel` has a frozen
+identity and contract but no runtime until SC.14. The other seven reserved
+names have no published declaration hash or handler in this release.
 
 Phase-zero parallelism also lives in ring 0. `parallel.map` and `parallel.both`
 accept only closed-empty-row callbacks, remain pure themselves, and are
@@ -106,6 +107,11 @@ observably sequential in the interpreter. They introduce neither an `Async`
 effect nor a task runtime; a future native implementation may use threads only
 when it preserves the same values, failures, ordering contract, and output
 identity. See `concurrency.md` §3.
+
+The reserved `Channel a` interface is frozen by SC.13, including its exact
+hash, typed capacity error, FIFO/close/cancellation rules, and scope ownership;
+see [`concurrency.md`](concurrency.md#8-typed-channels-sc13--c3-contract).
+SC.13 does not add it to the shipped prelude or install a runtime handler.
 
 ## 3. Ring 0: the axioms
 

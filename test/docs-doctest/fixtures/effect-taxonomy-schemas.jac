@@ -18,8 +18,8 @@ type SecretRef = | SecretRef(name: Text, version: Option Text)
 type Secret = | OpaqueSecret
 type Task a = | TaskOpaque
 type TaskResult a = | Done(value: a) | Failed(message: Text) | Cancelled
-type ChannelHandle a = | ChannelHandleValue(id: Int)
-type ChannelError = | ChannelClosed
+type ChannelHandle a = | ChannelOpaque
+type ChannelError = | ChannelClosed | InvalidCapacity(requested: Int)
 
 once effect Env where {
   env.get : (Text) -> Option Text
@@ -57,7 +57,7 @@ once effect Async a where {
   async.yield : () -> ()
 }
 once effect Channel a where {
-  channel.open : () -> ChannelHandle a
+  channel.open : (Int) -> Result ChannelError (ChannelHandle a)
   channel.send : (ChannelHandle a, a) -> Result ChannelError ()
   channel.recv : (ChannelHandle a) -> Result ChannelError a
   channel.close : (ChannelHandle a) -> ()

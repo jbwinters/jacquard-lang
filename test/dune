@@ -128,7 +128,13 @@
   ../docs/tutorial.md
   ../docs/warp-testing.md
   ../spec/effect-taxonomy-v1.tsv
+  ../corpus/channel/rendezvous-v1.trace
+  ../corpus/channel/buffered-v1.trace
   docs-doctest/fixtures/effect-taxonomy-schemas.jac
+  docs-doctest/fixtures/concurrency-channel-contract.jac
+  docs-doctest/fixtures/concurrency-channel-contract.stdout
+  docs-doctest/fixtures/concurrency-channel-type-mismatch.jac
+  docs-doctest/fixtures/concurrency-channel-type-mismatch.stderr
   docs-doctest/fixtures/governed-membrane-signatures.jac
   docs-doctest/fixtures/governed-membrane-signatures.stdout
   docs-doctest/fixtures/concurrency-row-contract.jac

@@ -1,0 +1,14 @@
+jacquard-channel-contract format=1 scenario=buffered channel=0@0 capacity=2
+decision=0 task=0#0 op=open:2 before=- action=create after=open|buffer=-|senders=-|receivers=- result=ok:0@0 wake=0#0
+decision=1 task=0#1 op=send:a before=open|buffer=-|senders=-|receivers=- action=buffer after=open|buffer=a|senders=-|receivers=- result=ok:unit wake=0#1
+decision=2 task=0#2 op=send:b before=open|buffer=a|senders=-|receivers=- action=buffer after=open|buffer=a,b|senders=-|receivers=- result=ok:unit wake=0#2
+decision=3 task=0#3 op=send:c before=open|buffer=a,b|senders=-|receivers=- action=block-sender after=open|buffer=a,b|senders=0#3:c|receivers=- result=pending wake=-
+decision=4 task=0#4 op=recv before=open|buffer=a,b|senders=0#3:c|receivers=- action=dequeue:a,promote:0#3:c after=open|buffer=b,c|senders=-|receivers=- result=receiver-ok:a,sender-ok:unit wake=0#3,0#4
+decision=5 task=0#5 op=send:d before=open|buffer=b,c|senders=-|receivers=- action=block-sender after=open|buffer=b,c|senders=0#5:d|receivers=- result=pending wake=-
+decision=6 task=0#6 op=send:e before=open|buffer=b,c|senders=0#5:d|receivers=- action=block-sender after=open|buffer=b,c|senders=0#5:d,0#6:e|receivers=- result=pending wake=-
+decision=7 task=0#0 op=cancel:0#5 before=open|buffer=b,c|senders=0#5:d,0#6:e|receivers=- action=cancel-sender:0#5-drop:d after=open|buffer=b,c|senders=0#6:e|receivers=- result=unit,target-cancelled wake=0#0
+decision=8 task=0#7 op=send:f before=open|buffer=b,c|senders=0#6:e|receivers=- action=block-sender after=open|buffer=b,c|senders=0#6:e,0#7:f|receivers=- result=pending wake=-
+decision=9 task=0#0 op=close before=open|buffer=b,c|senders=0#6:e,0#7:f|receivers=- action=close,reject-senders after=closed|buffer=b,c|senders=-|receivers=- result=closer-unit,sender-error:0#6:channel-closed,sender-error:0#7:channel-closed wake=0#6,0#7,0#0
+decision=10 task=0#4 op=recv before=closed|buffer=b,c|senders=-|receivers=- action=drain:b after=closed|buffer=c|senders=-|receivers=- result=ok:b wake=0#4
+decision=11 task=0#4 op=recv before=closed|buffer=c|senders=-|receivers=- action=drain:c after=closed|buffer=-|senders=-|receivers=- result=ok:c wake=0#4
+decision=12 task=0#4 op=recv before=closed|buffer=-|senders=-|receivers=- action=closed-empty after=closed|buffer=-|senders=-|receivers=- result=error:channel-closed wake=0#4

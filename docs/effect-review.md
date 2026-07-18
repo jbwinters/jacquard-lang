@@ -6,12 +6,12 @@ Status: ET.8 tooling guide. The normative metadata is
 
 Jacquard review is identity-first. A short name helps a person read a row, but
 only the resolved `DefEffect` hash selects blessed metadata. A user effect that
-spells itself `net` is not official `Net`; a reserved name has no released
-identity at all.
+spells itself `net` is not official `Net`; a name-only match is never enough,
+including for a reserved taxonomy name.
 
 ## Released identity ledger
 
-These are the exact fifteen released blessed identities. Review tooling must
+These are the exact seventeen implemented blessed identities. Review tooling must
 not approve an abbreviation or a name-only match.
 
 | effect | exact `HASH_V0` interface identity |
@@ -34,10 +34,17 @@ not approve an abbreviation or a name-only match.
 | `Secret` | `6d092eccc3c9858a2a95120da5a011964cbb3ad76968e11c1cbb062c119fbb31` |
 | `Judge` | `9b677b5e2c3ec8521c5d5dfac321ae361a959565e1cbf082fec4512199977354` |
 
-The nine remaining blessed names are **reserved/unimplemented**: `Choose`,
-`Env`, `Pg`, `Blob`, `Serve`, `Crypto`, `Log`, `Async`, and `Channel`.
-They have schemas and a `first-release` compatibility policy, but no shipped
-interface hash, handler, grant, or availability promise.
+Two schema-reserved names also have published identities:
+
+| effect | exact `HASH_V0` interface identity | shipped boundary |
+|---|---|---|
+| `Async` | `4ff8ce05ab09968163492b3be40fc91381b47dee5fb4b2980f9416d50f38e66f` | interpreted structured scheduler from SC.9 |
+| `Channel` | `bf9a334188ac13495eeb070fdc215d51763d9761b4775c98c61f44ebb1b03756` | SC.13 contract only; runtime deferred to SC.14 |
+
+The seven remaining blessed names are **reserved/unimplemented**: `Choose`,
+`Env`, `Pg`, `Blob`, `Serve`, `Crypto`, and `Log`. They have schemas
+and a `first-release` compatibility policy, but no shipped interface hash,
+handler, grant, or availability promise.
 
 ## Review workflow
 
@@ -102,5 +109,6 @@ an authority label; only the resolved row position of a typed arrow does.
   `Assessment.confidence` cannot fabricate consent.
 - The release implements finite discrete uncertainty only; it does not provide
   continuous distributions or verified model truth.
-- Reserved effects are compatibility vocabulary, not implemented product
-  surfaces or roadmap commitments.
+- A reserved schema alone is compatibility vocabulary, not an implementation or
+  roadmap commitment. Async is implemented; Channel has a published SC.13
+  contract but no runtime until SC.14.
