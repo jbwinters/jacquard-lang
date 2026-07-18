@@ -4,6 +4,12 @@ Every diagnostic the toolchain can emit, with an example that triggers it. Codes
 stable: never reused, never renumbered. A test enforces that every code emitted anywhere
 in `src/` and `bin/` appears in this catalog.
 
+## Process safety (E00xx)
+
+| code | meaning | example |
+|------|---------|---------|
+| E0003 | last-resort host-stack guard for an unbounded internal path | input that reaches an unguarded recursive path before a structural depth diagnostic |
+
 ## Reader (E01xx)
 
 | code | meaning | example |
@@ -22,6 +28,7 @@ in `src/` and `bin/` appears in this catalog.
 | E0112 | invalid bare symbol | `(var a@b)` |
 | E0113 | non-form at top level | `42` |
 | E0114 | more than one form where one was expected | two forms passed to a one-form entry point |
+| E0115 | bootstrap form nesting exceeds the structural limit | more than 10,000 nested `.jqd` forms |
 
 ## Kernel validator (E02xx)
 
@@ -40,6 +47,7 @@ in `src/` and `bin/` appears in this catalog.
 | E0211 | invalid rec flag | `(let sometimes ...)` |
 | E0212 | `handle` without exactly one `ret` clause | two `ret` clauses |
 | E0213 | invalid explicit operation mode | `(op fetch multi () (tref text))` (legacy `multi` is encoded by absence) |
+| E0214 | kernel form nesting exceeds the structural limit | more than 10,000 nested expression, pattern, type, or quote-payload forms |
 
 ## Name resolution (E03xx)
 
@@ -165,6 +173,7 @@ also emits E0817; consuming the captured resumption twice emits E0816.
 | E1224 | a term signature is not followed by the same definition | `x : T; x = value` |
 | E1225 | malformed type/effect declaration structure | `type Option a = Some(a)` |
 | E1226 | malformed handler boundary, clause, or raw inversion escape | `handle match x { ... } { ... }` without the D35 body wrapper |
+| E1227 | surface syntax nesting exceeds the structural limit | more than 10,000 nested calls, pipes, parentheses, patterns, or types |
 | E1230 | surface node is outside the SS.7 local-lowering slice | lowering a list before SS.12 |
 | E1231 | empty expression block | `{}` |
 | E1232 | local `let` is the final block item | `{ let x = 1 }` |

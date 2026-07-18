@@ -27,7 +27,7 @@ native Channel, actor, or supervision claim.
 | C3 | Scoped typed channels run through deterministic FIFO, seeded, replay, exhaustive, and cached interpreter scheduling with exact run/scope ownership, rendezvous and buffering, close, cancellation, and deadlock behavior. | `channel-contract`, `round-robin`, and `exhaustive-schedule` suites; `test/cli/task-values.t`; `test/cli/schedule-replay.t`; and the frozen traces below |
 | C4 | Not claimed: host asynchronous I/O, actors, and supervision are absent. | [LIMITS.md](LIMITS.md) |
 
-The final inventory is exactly 700 compiled Alcotest/QCheck cases, 40 recursive
+The final inventory is exactly 706 compiled Alcotest/QCheck cases, 40 recursive
 cram transcript files, and 27 named doctest examples across 8 documents. The
 commands in [Reconstruction and verification](#reconstruction-and-verification)
 recompute those counts instead of trusting this paragraph.
@@ -738,14 +738,16 @@ opam exec -- dune build test/test_jacquard.exe
 
 The current inventory is mechanically checked against compiled discovery:
 
-- Alcotest/QCheck cases: `700`
+- Alcotest/QCheck cases: `706`
 - Cram transcript files: `40`
 
-The arithmetic from the prior 687-case inventory is exact: twelve compiled
-`channel-contract` cases plus the `store/9` Channel-private-hash case produce
-700. `effect-taxonomy/2` is the independently selectable SC.14 interface
-identity proof; `channel-contract/8` and `/9` replay the two frozen traces, and
-the eight groups above execute exactly once during the full gate.
+The SC.14 baseline arithmetic remains exact: twelve compiled
+`channel-contract` cases plus the `store/9` Channel-private-hash case took the
+prior 687-case inventory to 700. DX.5/DX.7 add six `depth-guards` cases, which
+produces the current total of 706. `effect-taxonomy/2` is the independently
+selectable SC.14 interface identity proof; `channel-contract/8` and `/9` replay
+the two frozen traces, and the eight groups above execute exactly once during
+the full gate.
 
 Native scheduling remains outside the current backend. Differential coverage is
 therefore limited to the supported case: an Async operation discharged by an
@@ -801,7 +803,7 @@ opam exec -- dune build @all --root "$dest"
 opam exec -- dune runtest --force --root "$dest"
 (
   cd "$dest/_build/default/test"
-  test "$(./test_jacquard.exe list --color=never 2>/dev/null | wc -l)" -eq 700
+  test "$(./test_jacquard.exe list --color=never 2>/dev/null | wc -l)" -eq 706
 )
 test "$(find "$dest/test" -name '*.t' | wc -l)" -eq 40
 test "$(grep -h -E '^```jacquard doctest=' \

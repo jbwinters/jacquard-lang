@@ -12,6 +12,7 @@ let () =
       ("printer", Test_printer.suite);
       ("export", Test_export.suite);
       ("kernel", Test_kernel.suite);
+      ("depth-guards", Test_depth_guards.suite);
       ("resolve", Test_resolve.suite);
       ("canon", Test_canon.suite);
       ("store", Test_store.suite);

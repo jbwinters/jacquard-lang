@@ -2233,4 +2233,4 @@ let main =
       build_t;
     ]
 
-let () = exit (Cmd.eval' main)
+let () = exit (Cli_entry.run ~program:"jacquard" (fun () -> Cmd.eval' ~catch:false main))

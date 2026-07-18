@@ -34,7 +34,7 @@
     [Lam] params (E0205) and [Let] binders (E0206) irrefutable; [Let rec] binder a variable (E0207)
     with a [Lam] value (E0208); [Match] nonempty (E0209); [Handle] exactly one [ret] clause (E0212).
     Shape errors use E0201 (unknown head), E0202 (wrong arity), E0203 (wrong argument sort), E0210
-    (bad ref kind), E0211 (bad rec flag). *)
+    (bad ref kind), E0211 (bad rec flag), E0214 (excessive structural nesting). *)
 
 type gref = Named of string | Hashed of Hash.t
 type refkind = Term | Con | Op
@@ -123,6 +123,10 @@ type top = Decl of decl | Expr of expr
 (* Internal control flow only; never escapes this module. *)
 exception Err of Diag.t
 
+(** Maximum active structural nodes accepted by the kernel validator. The bound is deliberately well
+    below the host stack limit so untrusted forms fail with E0214 instead of [Stack_overflow]. *)
+let max_nesting_depth = 10_000
+
 let err ?meta ~code fmt =
   Printf.ksprintf
     (fun msg -> raise (Err (Diag.error ?span:(Option.bind meta Meta.span) ~code msg)))
@@ -193,7 +197,27 @@ let decode_surface_ref (f : Form.t) =
         "invalid `%s` kind `%s`: expected con or op (term references use `var`)" surface_ref_head
         kind
 
-let rec expr_of (f : Form.t) : expr =
+let guard_depth depth (f : Form.t) =
+  if depth >= max_nesting_depth then
+    err ~meta:f.Form.meta ~code:"E0214" "kernel form nesting exceeds the limit of %d"
+      max_nesting_depth
+
+(* DX.7: [tforall], [deftype], and [defeffect] use the same group-shape validator. [head]
+   parameterizes the only semantic difference. [group_what] names a malformed container while
+   [element_what] and [variable_what] preserve the old element diagnostics byte-for-byte. *)
+let vars_group ~depth ~head ~group_what ~element_what ~variable_what (f : Form.t) arg =
+  List.map
+    (fun g ->
+      guard_depth depth g;
+      if g.Form.head <> head then
+        err ~meta:g.Form.meta ~code:"E0203" "%s must be `%s` forms" element_what head;
+      expect_arity g 1;
+      the_sym ~what:variable_what g (List.nth g.Form.args 0))
+    (the_group ~what:group_what f arg)
+
+let rec expr_of depth (f : Form.t) : expr =
+  guard_depth depth f;
+  let child_depth = depth + 1 in
   let node it = { it; meta = f.Form.meta } in
   match f.Form.head with
   | "lit" ->
@@ -224,9 +248,10 @@ let rec expr_of (f : Form.t) : expr =
   | "lam" ->
       expect_arity f 2;
       let params =
-        List.map pat_of (the_group ~what:"the parameter list" f (List.nth f.Form.args 0))
+        List.map (pat_of child_depth)
+          (the_group ~what:"the parameter list" f (List.nth f.Form.args 0))
       in
-      let body = expr_of (the_form ~what:"the body" f (List.nth f.Form.args 1)) in
+      let body = expr_of child_depth (the_form ~what:"the body" f (List.nth f.Form.args 1)) in
       List.iter
         (fun p ->
           if not (is_irrefutable p) then
@@ -236,9 +261,11 @@ let rec expr_of (f : Form.t) : expr =
       node (Lam (params, body))
   | "app" ->
       expect_min_arity f 1;
-      let fn = expr_of (the_form ~what:"the function" f (List.nth f.Form.args 0)) in
+      let fn = expr_of child_depth (the_form ~what:"the function" f (List.nth f.Form.args 0)) in
       let args =
-        List.map (fun a -> expr_of (the_form ~what:"an argument" f a)) (List.tl f.Form.args)
+        List.map
+          (fun a -> expr_of child_depth (the_form ~what:"an argument" f a))
+          (List.tl f.Form.args)
       in
       node (App (fn, args))
   | "let" ->
@@ -249,9 +276,11 @@ let rec expr_of (f : Form.t) : expr =
         | "nonrec" -> false
         | s -> err ~meta:f.Form.meta ~code:"E0211" "invalid rec flag `%s`: expected rec or nonrec" s
       in
-      let binder = pat_of (the_form ~what:"the binder" f (List.nth f.Form.args 1)) in
-      let value = expr_of (the_form ~what:"the bound value" f (List.nth f.Form.args 2)) in
-      let body = expr_of (the_form ~what:"the body" f (List.nth f.Form.args 3)) in
+      let binder = pat_of child_depth (the_form ~what:"the binder" f (List.nth f.Form.args 1)) in
+      let value =
+        expr_of child_depth (the_form ~what:"the bound value" f (List.nth f.Form.args 2))
+      in
+      let body = expr_of child_depth (the_form ~what:"the body" f (List.nth f.Form.args 3)) in
       if isrec then
         (* rec-shape checks come first so `(let rec (plit 0) ...)` reports the specific
            E0207, not the generic irrefutability error *)
@@ -266,28 +295,36 @@ let rec expr_of (f : Form.t) : expr =
       end
   | "match" ->
       expect_min_arity f 1;
-      let scrutinee = expr_of (the_form ~what:"the scrutinee" f (List.nth f.Form.args 0)) in
+      let scrutinee =
+        expr_of child_depth (the_form ~what:"the scrutinee" f (List.nth f.Form.args 0))
+      in
       let clauses =
-        List.map (fun a -> clause_of (the_form ~what:"a clause" f a)) (List.tl f.Form.args)
+        List.map
+          (fun a -> clause_of child_depth (the_form ~what:"a clause" f a))
+          (List.tl f.Form.args)
       in
       if clauses = [] then err ~meta:f.Form.meta ~code:"E0209" "`match` needs at least one clause";
       node (Match (scrutinee, clauses))
   | "tuple" ->
-      node (Tuple (List.map (fun a -> expr_of (the_form ~what:"a tuple item" f a)) f.Form.args))
+      node
+        (Tuple
+           (List.map (fun a -> expr_of child_depth (the_form ~what:"a tuple item" f a)) f.Form.args))
   | "handle" ->
       expect_min_arity f 2;
-      let body = expr_of (the_form ~what:"the body" f (List.nth f.Form.args 0)) in
-      let ret = ret_of (the_form ~what:"the return clause" f (List.nth f.Form.args 1)) in
+      let body = expr_of child_depth (the_form ~what:"the body" f (List.nth f.Form.args 0)) in
+      let ret =
+        ret_of child_depth (the_form ~what:"the return clause" f (List.nth f.Form.args 1))
+      in
       let ops =
         List.map
-          (fun a -> opclause_of (the_form ~what:"an op clause" f a))
+          (fun a -> opclause_of child_depth (the_form ~what:"an op clause" f a))
           (List.filteri (fun i _ -> i >= 2) f.Form.args)
       in
       node (Handle { body; ret; ops })
   | "quote" ->
       expect_arity f 1;
       let payload = the_form ~what:"the quoted form" f (List.nth f.Form.args 0) in
-      check_quote_payload payload;
+      check_quote_payload child_depth payload;
       node (Quote payload)
   | "unquote" -> err ~meta:f.Form.meta ~code:"E0204" "`unquote` is only legal under `quote`"
   | "groupref" -> (
@@ -299,8 +336,8 @@ let rec expr_of (f : Form.t) : expr =
             "the index of `groupref` must be a non-negative integer")
   | "ann" ->
       expect_arity f 2;
-      let subject = expr_of (the_form ~what:"the subject" f (List.nth f.Form.args 0)) in
-      let ty = ty_of (the_form ~what:"the ascription" f (List.nth f.Form.args 1)) in
+      let subject = expr_of child_depth (the_form ~what:"the subject" f (List.nth f.Form.args 0)) in
+      let ty = ty_of child_depth (the_form ~what:"the ascription" f (List.nth f.Form.args 1)) in
       node (Ann (subject, ty))
   | h -> err ~meta:f.Form.meta ~code:"E0201" "`%s` is not a kernel expression form" h
 
@@ -309,48 +346,67 @@ let rec expr_of (f : Form.t) : expr =
    belonging to the inner quote (conventional quasiquote nesting). Live splices must be valid
    expressions; reserved surface-reference markers are validated at every depth, and all other
    forms are uninterpreted data. *)
-and check_quote_payload ?(level = 0) (f : Form.t) =
+and check_quote_payload ?(level = 0) depth (f : Form.t) =
+  guard_depth depth f;
+  let child_depth = depth + 1 in
   if String.equal f.Form.head surface_ref_head then ignore (decode_surface_ref f);
   if f.Form.head = "unquote" && level = 0 then begin
     expect_arity f 1;
-    ignore (expr_of (the_form ~what:"the spliced expression" f (List.nth f.Form.args 0)))
+    ignore
+      (expr_of child_depth (the_form ~what:"the spliced expression" f (List.nth f.Form.args 0)))
   end
   else
     let level =
       match f.Form.head with "quote" -> level + 1 | "unquote" -> level - 1 | _ -> level
     in
-    List.iter (function Form.F g -> check_quote_payload ~level g | _ -> ()) f.Form.args
+    List.iter
+      (function Form.F g -> check_quote_payload ~level child_depth g | _ -> ())
+      f.Form.args
 
-and clause_of (f : Form.t) : clause =
+and clause_of depth (f : Form.t) : clause =
+  guard_depth depth f;
+  let child_depth = depth + 1 in
   if f.Form.head <> "clause" then
     err ~meta:f.Form.meta ~code:"E0201" "expected a `clause` form, got `%s`" f.Form.head;
   expect_arity f 2;
-  let cpat = pat_of (the_form ~what:"the pattern" f (List.nth f.Form.args 0)) in
-  let cbody = expr_of (the_form ~what:"the clause body" f (List.nth f.Form.args 1)) in
+  let cpat = pat_of child_depth (the_form ~what:"the pattern" f (List.nth f.Form.args 0)) in
+  let cbody = expr_of child_depth (the_form ~what:"the clause body" f (List.nth f.Form.args 1)) in
   { cpat; cbody; cmeta = f.Form.meta }
 
-and ret_of (f : Form.t) : ret =
+and ret_of depth (f : Form.t) : ret =
+  guard_depth depth f;
+  let child_depth = depth + 1 in
   if f.Form.head <> "ret" then
     err ~meta:f.Form.meta ~code:"E0212"
       "`handle` needs exactly one `ret` clause as its second argument, got `%s`" f.Form.head;
   expect_arity f 2;
-  let rbinder = pat_of (the_form ~what:"the return binder" f (List.nth f.Form.args 0)) in
-  let rbody = expr_of (the_form ~what:"the return body" f (List.nth f.Form.args 1)) in
+  let rbinder =
+    pat_of child_depth (the_form ~what:"the return binder" f (List.nth f.Form.args 0))
+  in
+  let rbody = expr_of child_depth (the_form ~what:"the return body" f (List.nth f.Form.args 1)) in
   { rbinder; rbody; rmeta = f.Form.meta }
 
-and opclause_of (f : Form.t) : opclause =
+and opclause_of depth (f : Form.t) : opclause =
+  guard_depth depth f;
+  let child_depth = depth + 1 in
   if f.Form.head = "ret" then
     err ~meta:f.Form.meta ~code:"E0212" "`handle` has more than one `ret` clause";
   if f.Form.head <> "opclause" then
     err ~meta:f.Form.meta ~code:"E0201" "expected an `opclause` form, got `%s`" f.Form.head;
   expect_arity f 4;
   let op = the_gref ~what:"the operation" f (List.nth f.Form.args 0) in
-  let params = List.map pat_of (the_group ~what:"the parameter list" f (List.nth f.Form.args 1)) in
+  let params =
+    List.map (pat_of child_depth) (the_group ~what:"the parameter list" f (List.nth f.Form.args 1))
+  in
   let resume = the_sym ~what:"the resume name" f (List.nth f.Form.args 2) in
-  let obody = expr_of (the_form ~what:"the op clause body" f (List.nth f.Form.args 3)) in
+  let obody =
+    expr_of child_depth (the_form ~what:"the op clause body" f (List.nth f.Form.args 3))
+  in
   { op; params; resume; obody; ometa = f.Form.meta }
 
-and pat_of (f : Form.t) : pat =
+and pat_of depth (f : Form.t) : pat =
+  guard_depth depth f;
+  let child_depth = depth + 1 in
   let node it = { it; meta = f.Form.meta } in
   match f.Form.head with
   | "pwild" ->
@@ -366,19 +422,27 @@ and pat_of (f : Form.t) : pat =
       expect_min_arity f 1;
       let con = the_gref ~what:"the constructor" f (List.nth f.Form.args 0) in
       let args =
-        List.map (fun a -> pat_of (the_form ~what:"a subpattern" f a)) (List.tl f.Form.args)
+        List.map
+          (fun a -> pat_of child_depth (the_form ~what:"a subpattern" f a))
+          (List.tl f.Form.args)
       in
       node (PCon (con, args))
   | "ptuple" ->
-      node (PTuple (List.map (fun a -> pat_of (the_form ~what:"a tuple item" f a)) f.Form.args))
+      node
+        (PTuple
+           (List.map (fun a -> pat_of child_depth (the_form ~what:"a tuple item" f a)) f.Form.args))
   | "pas" ->
       expect_arity f 2;
       let name = the_sym ~what:"the binder name" f (List.nth f.Form.args 0) in
-      let inner = pat_of (the_form ~what:"the inner pattern" f (List.nth f.Form.args 1)) in
+      let inner =
+        pat_of child_depth (the_form ~what:"the inner pattern" f (List.nth f.Form.args 1))
+      in
       node (PAs (name, inner))
   | h -> err ~meta:f.Form.meta ~code:"E0201" "`%s` is not a kernel pattern form" h
 
-and ty_of (f : Form.t) : ty =
+and ty_of depth (f : Form.t) : ty =
+  guard_depth depth f;
+  let child_depth = depth + 1 in
   let node it = { it; meta = f.Form.meta } in
   match f.Form.head with
   | "tref" ->
@@ -389,46 +453,47 @@ and ty_of (f : Form.t) : ty =
       node (TVar (the_sym ~what:"the type variable" f (List.nth f.Form.args 0)))
   | "tapp" ->
       expect_min_arity f 2;
-      let head = ty_of (the_form ~what:"the type head" f (List.nth f.Form.args 0)) in
+      let head = ty_of child_depth (the_form ~what:"the type head" f (List.nth f.Form.args 0)) in
       let args =
-        List.map (fun a -> ty_of (the_form ~what:"a type argument" f a)) (List.tl f.Form.args)
+        List.map
+          (fun a -> ty_of child_depth (the_form ~what:"a type argument" f a))
+          (List.tl f.Form.args)
       in
       node (TApp (head, args))
   | "tarrow" ->
       expect_arity f 3;
       let params =
-        List.map ty_of (the_group ~what:"the parameter types" f (List.nth f.Form.args 0))
+        List.map (ty_of child_depth)
+          (the_group ~what:"the parameter types" f (List.nth f.Form.args 0))
       in
-      let row = row_of (the_form ~what:"the effect row" f (List.nth f.Form.args 1)) in
-      let result = ty_of (the_form ~what:"the result type" f (List.nth f.Form.args 2)) in
+      let row = row_of child_depth (the_form ~what:"the effect row" f (List.nth f.Form.args 1)) in
+      let result =
+        ty_of child_depth (the_form ~what:"the result type" f (List.nth f.Form.args 2))
+      in
       node (TArrow (params, row, result))
   | "ttuple" ->
-      node (TTuple (List.map (fun a -> ty_of (the_form ~what:"a tuple item" f a)) f.Form.args))
+      node
+        (TTuple
+           (List.map (fun a -> ty_of child_depth (the_form ~what:"a tuple item" f a)) f.Form.args))
   | "tforall" ->
       expect_arity f 3;
       let tyvars =
-        List.map
-          (fun g ->
-            if g.Form.head <> "tvar" then
-              err ~meta:g.Form.meta ~code:"E0203" "type variables in `tforall` must be `tvar` forms";
-            expect_arity g 1;
-            the_sym ~what:"the type variable" g (List.nth g.Form.args 0))
-          (the_group ~what:"the type variables" f (List.nth f.Form.args 0))
+        vars_group ~depth:child_depth ~head:"tvar" ~group_what:"the type variables"
+          ~element_what:"type variables in `tforall`" ~variable_what:"the type variable" f
+          (List.nth f.Form.args 0)
       in
       let rowvars =
-        List.map
-          (fun g ->
-            if g.Form.head <> "rvar" then
-              err ~meta:g.Form.meta ~code:"E0203" "row variables in `tforall` must be `rvar` forms";
-            expect_arity g 1;
-            the_sym ~what:"the row variable" g (List.nth g.Form.args 0))
-          (the_group ~what:"the row variables" f (List.nth f.Form.args 1))
+        vars_group ~depth:child_depth ~head:"rvar" ~group_what:"the row variables"
+          ~element_what:"row variables in `tforall`" ~variable_what:"the row variable" f
+          (List.nth f.Form.args 1)
       in
-      let body = ty_of (the_form ~what:"the body" f (List.nth f.Form.args 2)) in
+      let body = ty_of child_depth (the_form ~what:"the body" f (List.nth f.Form.args 2)) in
       node (TForall (tyvars, rowvars, body))
   | h -> err ~meta:f.Form.meta ~code:"E0201" "`%s` is not a kernel type form" h
 
-and row_of (f : Form.t) : row =
+and row_of depth (f : Form.t) : row =
+  guard_depth depth f;
+  let child_depth = depth + 1 in
   if f.Form.head <> "row" then
     err ~meta:f.Form.meta ~code:"E0201" "expected a `row` form, got `%s`" f.Form.head;
   let effects, rvar =
@@ -436,6 +501,7 @@ and row_of (f : Form.t) : row =
       | [] -> (List.rev acc, None)
       | [ Form.Sym v ] -> (List.rev acc, Some v)
       | Form.F g :: rest ->
+          guard_depth child_depth g;
           if g.Form.head <> "eref" then
             err ~meta:g.Form.meta ~code:"E0203" "row effects must be `eref` forms";
           expect_arity g 1;
@@ -448,7 +514,9 @@ and row_of (f : Form.t) : row =
   in
   { effects; rvar; wmeta = f.Form.meta }
 
-let binding_of (f : Form.t) : binding =
+let binding_of depth (f : Form.t) : binding =
+  guard_depth depth f;
+  let child_depth = depth + 1 in
   if f.Form.head <> "binding" then
     err ~meta:f.Form.meta ~code:"E0201" "expected a `binding` form, got `%s`" f.Form.head;
   expect_arity f 3;
@@ -456,13 +524,15 @@ let binding_of (f : Form.t) : binding =
   let annot =
     match the_group ~what:"the annotation" f (List.nth f.Form.args 1) with
     | [] -> None
-    | [ t ] -> Some (ty_of t)
+    | [ t ] -> Some (ty_of child_depth t)
     | _ -> err ~meta:f.Form.meta ~code:"E0202" "a binding annotation group holds at most one type"
   in
-  let value = expr_of (the_form ~what:"the bound value" f (List.nth f.Form.args 2)) in
+  let value = expr_of child_depth (the_form ~what:"the bound value" f (List.nth f.Form.args 2)) in
   { bname; annot; value; bmeta = f.Form.meta }
 
-let conspec_of (f : Form.t) : conspec =
+let conspec_of depth (f : Form.t) : conspec =
+  guard_depth depth f;
+  let child_depth = depth + 1 in
   if f.Form.head <> "con" then
     err ~meta:f.Form.meta ~code:"E0201" "expected a `con` constructor spec, got `%s`" f.Form.head;
   expect_min_arity f 1;
@@ -471,18 +541,22 @@ let conspec_of (f : Form.t) : conspec =
     List.map
       (fun a ->
         let g = the_form ~what:"a field" f a in
+        guard_depth child_depth g;
         if g.Form.head <> "field" then
           err ~meta:g.Form.meta ~code:"E0201" "expected a `field` form, got `%s`" g.Form.head;
         match g.Form.args with
-        | [ Form.F t ] -> { label = None; fty = ty_of t; fmeta = g.Form.meta }
-        | [ Form.Sym l; Form.F t ] -> { label = Some l; fty = ty_of t; fmeta = g.Form.meta }
+        | [ Form.F t ] -> { label = None; fty = ty_of (child_depth + 1) t; fmeta = g.Form.meta }
+        | [ Form.Sym l; Form.F t ] ->
+            { label = Some l; fty = ty_of (child_depth + 1) t; fmeta = g.Form.meta }
         | _ ->
             err ~meta:g.Form.meta ~code:"E0203" "`field` takes an optional label symbol and a type")
       (List.tl f.Form.args)
   in
   { con_name; fields; kmeta = f.Form.meta }
 
-let opspec_of (f : Form.t) : opspec =
+let opspec_of depth (f : Form.t) : opspec =
+  guard_depth depth f;
+  let child_depth = depth + 1 in
   if f.Form.head <> "op" then
     err ~meta:f.Form.meta ~code:"E0201" "expected an `op` operation spec, got `%s`" f.Form.head;
   if List.length f.Form.args <> 3 && List.length f.Form.args <> 4 then
@@ -505,30 +579,24 @@ let opspec_of (f : Form.t) : opspec =
     | _ -> assert false
   in
   let op_params =
-    List.map ty_of
+    List.map (ty_of child_depth)
       (the_group ~what:"the parameter types" f (List.nth f.Form.args (1 + mode_offset)))
   in
   let op_result =
-    ty_of (the_form ~what:"the result type" f (List.nth f.Form.args (2 + mode_offset)))
+    ty_of child_depth (the_form ~what:"the result type" f (List.nth f.Form.args (2 + mode_offset)))
   in
   { op_name; op_mode; op_params; op_result; smeta = f.Form.meta }
 
-let tvars_group ~what (f : Form.t) arg =
-  List.map
-    (fun g ->
-      if g.Form.head <> "tvar" then
-        err ~meta:g.Form.meta ~code:"E0203" "%s must be `tvar` forms" what;
-      expect_arity g 1;
-      the_sym ~what:"the type variable" g (List.nth g.Form.args 0))
-    (the_group ~what f arg)
-
-let decl_of (f : Form.t) : decl =
+let decl_of depth (f : Form.t) : decl =
+  guard_depth depth f;
+  let child_depth = depth + 1 in
   let node it = { it; meta = f.Form.meta } in
   match f.Form.head with
   | "defterm" ->
       expect_arity f 1;
       let bindings =
-        List.map binding_of (the_group ~what:"the binding group" f (List.nth f.Form.args 0))
+        List.map (binding_of child_depth)
+          (the_group ~what:"the binding group" f (List.nth f.Form.args 0))
       in
       if bindings = [] then
         err ~meta:f.Form.meta ~code:"E0202" "`defterm` needs at least one binding";
@@ -536,20 +604,28 @@ let decl_of (f : Form.t) : decl =
   | "deftype" ->
       expect_min_arity f 3;
       let tname = the_sym ~what:"the type name" f (List.nth f.Form.args 0) in
-      let tvars = tvars_group ~what:"the type parameters" f (List.nth f.Form.args 1) in
+      let tvars =
+        vars_group ~depth:child_depth ~head:"tvar" ~group_what:"the type parameters"
+          ~element_what:"the type parameters" ~variable_what:"the type variable" f
+          (List.nth f.Form.args 1)
+      in
       let cons =
         List.map
-          (fun a -> conspec_of (the_form ~what:"a constructor spec" f a))
+          (fun a -> conspec_of child_depth (the_form ~what:"a constructor spec" f a))
           (List.filteri (fun i _ -> i >= 2) f.Form.args)
       in
       node (DefType { tname; tvars; cons })
   | "defeffect" ->
       expect_min_arity f 3;
       let ename = the_sym ~what:"the effect name" f (List.nth f.Form.args 0) in
-      let evars = tvars_group ~what:"the effect parameters" f (List.nth f.Form.args 1) in
+      let evars =
+        vars_group ~depth:child_depth ~head:"tvar" ~group_what:"the effect parameters"
+          ~element_what:"the effect parameters" ~variable_what:"the type variable" f
+          (List.nth f.Form.args 1)
+      in
       let ops =
         List.map
-          (fun a -> opspec_of (the_form ~what:"an operation spec" f a))
+          (fun a -> opspec_of child_depth (the_form ~what:"an operation spec" f a))
           (List.filteri (fun i _ -> i >= 2) f.Form.args)
       in
       node (DefEffect { ename; evars; ops })
@@ -561,23 +637,23 @@ let decl_heads = [ "defterm"; "deftype"; "defeffect" ]
 
 (** [expr_of_form f] validates [f] as a kernel expression. *)
 let expr_of_form (f : Form.t) : (expr, Diag.t list) result =
-  match expr_of f with e -> Ok e | exception Err d -> Error [ d ]
+  match expr_of 0 f with e -> Ok e | exception Err d -> Error [ d ]
 
 (** [decl_of_form f] validates [f] as a kernel declaration. *)
 let decl_of_form (f : Form.t) : (decl, Diag.t list) result =
-  match decl_of f with d -> Ok d | exception Err d -> Error [ d ]
+  match decl_of 0 f with d -> Ok d | exception Err d -> Error [ d ]
 
 (** [pat_of_form f] validates [f] as a kernel pattern. *)
 let pat_of_form (f : Form.t) : (pat, Diag.t list) result =
-  match pat_of f with p -> Ok p | exception Err d -> Error [ d ]
+  match pat_of 0 f with p -> Ok p | exception Err d -> Error [ d ]
 
 (** [ty_of_form f] validates [f] as a kernel type. *)
 let ty_of_form (f : Form.t) : (ty, Diag.t list) result =
-  match ty_of f with ty -> Ok ty | exception Err d -> Error [ d ]
+  match ty_of 0 f with ty -> Ok ty | exception Err d -> Error [ d ]
 
 (** [row_of_form f] validates [f] as a kernel effect row. *)
 let row_of_form (f : Form.t) : (row, Diag.t list) result =
-  match row_of f with row -> Ok row | exception Err d -> Error [ d ]
+  match row_of 0 f with row -> Ok row | exception Err d -> Error [ d ]
 
 (** [of_form f] validates [f] as a declaration when its head is one, otherwise as an expression. *)
 let of_form (f : Form.t) : (top, Diag.t list) result =
