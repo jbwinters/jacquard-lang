@@ -20,11 +20,13 @@ The IR records source metadata and relationships that are not expressible in a
 single inferred effect row. It is verifier evidence, not a serialized policy
 format, a user-authored proof, or an authority grant.
 
-The verifier resolves the canonical governance identities and actual referenced
-terms from `Store`. Missing vocabulary, unknown operations, unresolved terms,
-and unsupported evidence versions fail closed. Verification does not evaluate
-terms or mutate the store. A later tooling slice may extract this evidence and
-expose `jac governance check`; GM.8 does not claim that interface.
+The verifier resolves actual referenced terms from `Store`, confirms canonical
+effects through the frozen effect registry, and pins the v0 governance terms
+and result types by hash rather than trusting mutable name bindings. Missing or
+rebound vocabulary, unknown operations, unresolved terms, and unsupported
+evidence versions fail closed. Verification does not evaluate terms or mutate
+the store. A later tooling slice may extract this evidence and expose `jac
+governance check`; GM.8 does not claim that interface.
 
 ## Checked relationships
 
@@ -36,17 +38,20 @@ For every canonical `once` facade operation, the verifier checks:
 - one outer audit-sequence owner and exact binder-token provenance through all
   nested layers;
 - closed, pure inferred schemes for the actual stored call normalizer and
-  outcome summarizer, plus a canonical `governance.make-call` dependency;
+  outcome summarizer, including every nested arrow and their exact result
+  shapes, plus a canonical `governance.make-call` dependency;
 - recomputed HASH_V0 identities for Call, BoundPolicy, assessment, and Proposal;
 - equality between the frozen, Call, Proposal, and transitively expanded action
   authority envelopes;
 - exclusion of gate-owned State, Judge, GovernanceApprovalV1, Audit, and local
   continuation control from the action projection;
-- absence of serialized Secret values and generic inspection, while allowing
-  safe `SecretRef` evidence;
+- absence of Secret values across serialized data and every canonical review
+  subject, plus independent rejection of generic inspection in both the
+  normalizer and summarizer, while allowing safe `SecretRef` evidence;
 - exact Ask bindings for call, policy, assessment, and authority hashes;
 - stable unchanged forwarding and explicit parent/new identity for transformed
-  calls; and
+  calls, with every current lineage ID anchored to the operation's carried
+  Call; and
 - the absolute absence of reachable `Eval`, even if code attempts to handle it
   locally.
 
@@ -62,7 +67,7 @@ Workspace facade, its real stored normalizers and summarizers, exact gate
 identities, and the Fs/Fs/Net+Secret frozen authority envelopes. It also proves
 transitive forwarding and structured resource evidence.
 
-The versioned corpus names 32 independent adversarial mutations. The focused
+The versioned corpus names 44 independent adversarial mutations. The focused
 suite applies them and asserts both the stable E-code and the originating
 source span. The cases cover version/environment refusal,
 facade mode, operation and branch coverage, gate and flow ordering, sequence
@@ -72,6 +77,14 @@ inspection, Ask completeness, call lineage, and reachable `Eval`. The
 diagnostic-catalog test pins the complete public code set. A cram transcript
 runs this analysis lane from its built artifact and records success without
 claiming the later public CLI.
+
+The adversarial catalog includes canonical name rebinding, duplicate and
+missing clause coverage, an effect hidden in a nested function parameter,
+malformed nested resource evidence, Secret-bearing BoundPolicy and assessment
+subjects, simultaneous inspection in both review functions, and internally
+consistent lineage IDs that are unrelated to the carried Call. The reference
+walker records every visited term globally, so shared dependency graphs remain
+linear in the number of reachable stored terms.
 
 ## Explicit exclusions
 

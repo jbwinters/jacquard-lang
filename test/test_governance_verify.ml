@@ -32,6 +32,15 @@ let judge = lookup "judge" Resolve.KEffect
 let eval = lookup "eval" Resolve.KEffect
 let state = lookup "state" Resolve.KEffect
 
+let effect_hiding_hash =
+  let hashes =
+    Eval_support.put_src store (Store.names_view store)
+      "(defterm ((binding verifier-effect-hiding ((tarrow ((tarrow () (row (eref fs)) (tref text)) \
+       (tref path)) (row) (tapp (tref result) (tref text) (tref governance-call)))) (lam ((pvar \
+       hidden) (pvar path)) (app (var workspace.call-read) (var path))))))"
+  in
+  List.assoc "verifier-effect-hiding" hashes.Canon.named
+
 type fixture_expectation = { code : string; line : int }
 
 let fixture_expectations =
@@ -155,6 +164,7 @@ let base_contract () =
     }
 
 let verify contract = G.verify store contract
+let verify_with verifier_store contract = G.verify verifier_store contract
 let fail_diags diagnostics = String.concat "\n" (List.map Diag.to_string diagnostics)
 
 let expect_ok label contract =
@@ -162,9 +172,9 @@ let expect_ok label contract =
   | Ok report -> report
   | Error diagnostics -> Alcotest.failf "%s unexpectedly failed:\n%s" label (fail_diags diagnostics)
 
-let expect_fixture name contract =
+let expect_fixture_with verifier_store name contract =
   let { code; line = expected_line } = fixture name in
-  match verify contract with
+  match verify_with verifier_store contract with
   | Ok _ -> Alcotest.failf "expected %s" code
   | Error diagnostics -> (
       match
@@ -174,6 +184,30 @@ let expect_fixture name contract =
       | Some diagnostic ->
           let line = Option.map (fun span -> span.Span.start_pos.line) diagnostic.Diag.span in
           Alcotest.(check (option int)) (code ^ " source line") (Some expected_line) line)
+
+let expect_fixture name contract = expect_fixture_with store name contract
+
+let expect_fixture_count name expected_count contract =
+  let { code; line = expected_line } = fixture name in
+  match verify contract with
+  | Ok _ -> Alcotest.failf "expected %s" code
+  | Error diagnostics ->
+      let matching =
+        List.filter (fun diagnostic -> String.equal diagnostic.Diag.code code) diagnostics
+      in
+      Alcotest.(check int) (code ^ " diagnostic count") expected_count (List.length matching);
+      let first_line =
+        match matching with
+        | first :: _ -> Option.map (fun span -> span.Span.start_pos.line) first.Diag.span
+        | [] -> None
+      in
+      Alcotest.(check (option int)) (code ^ " first source line") (Some expected_line) first_line
+
+let bind_name verifier_store name hash =
+  match Store.bind_name verifier_store name hash with
+  | Ok () -> ()
+  | Error diagnostics ->
+      Alcotest.failf "cannot rebind verifier fixture name `%s`:\n%s" name (fail_diags diagnostics)
 
 let replace_operation index (replacement : G.operation) (contract : G.contract) =
   G.
@@ -224,12 +258,32 @@ let test_version_and_facade_shape_fail_closed () =
   expect_fixture "unsupported-version" G.{ contract with version = "governance-verifier-v9" };
   expect_fixture "non-effect-facade"
     G.{ contract with facade_effect = lookup "workspace.call-read" Resolve.KTerm };
-  expect_fixture "non-once-facade" G.{ contract with facade_effect = state }
+  expect_fixture "non-once-facade" G.{ contract with facade_effect = state };
+  let effect_store, _ = Eval_support.make_prelude_ctx () in
+  let effect_fs =
+    match Store.lookup_kind effect_store "fs" Resolve.KEffect with
+    | Some entry -> entry.Resolve.hash
+    | None -> Alcotest.fail "fresh prelude is missing Fs"
+  in
+  bind_name effect_store "eval" effect_fs;
+  expect_fixture_with effect_store "canonical-effect-rebind" contract;
+  let type_store, _ = Eval_support.make_prelude_ctx () in
+  let outcome_type =
+    match Store.lookup_kind type_store "governance-outcome-summary" Resolve.KType with
+    | Some entry -> entry.Resolve.hash
+    | None -> Alcotest.fail "fresh prelude is missing GovernanceOutcomeSummary"
+  in
+  bind_name type_store "governance-call" outcome_type;
+  expect_fixture_with type_store "canonical-identity-rebind" contract
 
 let test_operation_and_clause_coverage () =
   let contract = base_contract () in
   expect_fixture "missing-operation" G.{ contract with operations = List.tl contract.operations };
   let read = operation contract 0 in
+  expect_fixture "duplicate-operation"
+    G.{ contract with operations = [ read; read; operation contract 2 ] };
+  expect_fixture "missing-live-clause"
+    (replace_operation 0 G.{ read with live_flows = None } contract);
   expect_fixture "missing-dry-clause"
     (replace_operation 0 G.{ read with dry_flows = None } contract)
 
@@ -292,7 +346,9 @@ let test_sequence_owner_provenance () =
       {
         contract with
         sequence = { contract.sequence with layer_tokens = [ 7; 8 ]; meta = meta 98 };
-      }
+      };
+  expect_fixture "empty-layer-tokens"
+    G.{ contract with sequence = { contract.sequence with layer_tokens = []; meta = meta 106 } }
 
 let test_purity_and_canonical_constructor () =
   let contract = base_contract () in
@@ -302,7 +358,16 @@ let test_purity_and_canonical_constructor () =
   expect_fixture "impure-summarizer"
     (replace_operation 0 G.{ read with summarizer = term 100 "governance.gate-live" } contract);
   expect_fixture "noncanonical-call-constructor"
-    (replace_operation 0 G.{ read with normalizer = term 101 "workspace.operation-name" } contract)
+    (replace_operation 0 G.{ read with normalizer = term 101 "workspace.operation-name" } contract);
+  expect_fixture "effect-hiding-nested-arrow"
+    (replace_operation 0
+       G.
+         {
+           read with
+           normalizer =
+             { hash = effect_hiding_hash; label = "verifier-effect-hiding"; meta = meta 107 };
+         }
+       contract)
 
 let test_every_identity_recomputes () =
   let contract = base_contract () in
@@ -369,6 +434,18 @@ let test_authority_projection_and_controls () =
            action = [ Raw { effect_id = fs; resources = [ actual_resource ] } ];
          }
        contract);
+  expect_fixture "resource-effect-entry"
+    (replace_operation 0
+       G.{ read with action = [ Raw { effect_id = fs; resources = [ Effect net ] } ] }
+       contract);
+  let wrong_effect_resource =
+    G.Resource
+      { effect_id = net; scope = "workspace"; configuration = Hash.of_string "workspace-root-v0" }
+  in
+  expect_fixture "resource-wrong-effect"
+    (replace_operation 0
+       G.{ read with action = [ Raw { effect_id = fs; resources = [ wrong_effect_resource ] } ] }
+       contract);
   expect_fixture "unknown-forward"
     (replace_operation 0
        G.{ read with action = [ Forward (Hash.of_string "unknown-operation") ] }
@@ -394,11 +471,28 @@ let test_secret_serialization_and_generic_inspection () =
     (replace_operation 0
        G.{ read with serialized_call_data = [ Form.form "secret-opaque" [] ] }
        contract);
+  let secret_claim line =
+    let canonical_subject = Form.form "secret-opaque" [] in
+    G.{ carried = code_hash canonical_subject; canonical_subject; meta = meta line }
+  in
+  expect_fixture "secret-bound-policy"
+    (replace_operation 0 G.{ read with bound_policy = secret_claim 110 } contract);
+  expect_fixture "secret-assessment"
+    (replace_operation 0 G.{ read with assessment = secret_claim 111 } contract);
   match Store.lookup_kind store "debug.inspect" Resolve.KTerm with
   | None -> Alcotest.fail "prelude must expose debug.inspect for secret-safe verifier coverage"
   | Some _ ->
       expect_fixture "generic-inspection"
-        (replace_operation 0 G.{ read with summarizer = term 108 "debug.inspect" } contract)
+        (replace_operation 0 G.{ read with summarizer = term 108 "debug.inspect" } contract);
+      expect_fixture_count "dual-generic-inspection" 2
+        (replace_operation 0
+           G.
+             {
+               read with
+               normalizer = term 112 "debug.inspect";
+               summarizer = term 113 "debug.inspect";
+             }
+           contract)
 
 let test_ask_binding_and_lineage () =
   let contract = base_contract () in
@@ -418,6 +512,15 @@ let test_ask_binding_and_lineage () =
                  previous_call_id = read.call.carried;
                  current_call_id = Hash.of_string "changed-unchanged-call";
                };
+         }
+       contract);
+  let unrelated = Hash.of_string "self-consistent-but-unrelated-call" in
+  expect_fixture "unanchored-lineage"
+    (replace_operation 0
+       G.
+         {
+           read with
+           lineage = Unchanged_forward { previous_call_id = unrelated; current_call_id = unrelated };
          }
        contract);
   expect_fixture "transformed-without-parent"
@@ -467,7 +570,7 @@ let test_diagnostic_catalog_is_complete () =
 
 let test_adversarial_corpus_is_complete () =
   let names = List.map fst fixture_expectations in
-  Alcotest.(check int) "one named mutation per corpus row" 32 (List.length names);
+  Alcotest.(check int) "one named mutation per corpus row" 44 (List.length names);
   Alcotest.(check int)
     "unique fixture names" (List.length names)
     (List.length (List.sort_uniq String.compare names));

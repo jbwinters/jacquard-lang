@@ -105,7 +105,10 @@ type vocabulary = {
   gate_live : Hash.t;
   gate_dry : Hash.t;
   make_call : Hash.t;
-  debug_inspect : Hash.t option;
+  debug_inspect : Hash.t;
+  result_type : Hash.t;
+  governance_call : Hash.t;
+  outcome_summary : Hash.t;
   secret_constructor : Hash.t;
 }
 
@@ -113,30 +116,99 @@ let span meta = Meta.span meta
 let diagnostic ?hint meta code message = Diag.error ?span:(span meta) ?hint ~code message
 let hex hash = Hash.to_hex hash
 
-let lookup store ~kind name =
+let pinned_hash name spelling =
+  match Hash.of_canonical_hex spelling with
+  | Some hash -> hash
+  | None -> invalid_arg ("Bug_governance verifier has malformed pinned hash for " ^ name)
+
+let gate_live_v0 =
+  pinned_hash "governance.gate-live"
+    "16503e4a588c7611487371fc49ee0e0ec7e3f809178ce30f2cab0162fea7ce8b"
+
+let gate_dry_v0 =
+  pinned_hash "governance.gate-dry"
+    "a87cd8a1b13312df7517f93d6caed82b801f7651ae482bf9566f2501863f5891"
+
+let make_call_v0 =
+  pinned_hash "governance.make-call"
+    "930cf869936a5c8d385e0e444eb331e343e37f9712eb4740d733f40aa717032f"
+
+let debug_inspect_v0 =
+  pinned_hash "debug.inspect" "5a620819e5f501da9a9959118176b547419c4bb0033d8b48ede4f9bd30cc2580"
+
+let governance_call_v0 =
+  pinned_hash "governance-call" "20824137b34985dabf9e6bb0c20cf9987c1ca93b5cdd8d1da60cbc69550efc27"
+
+let result_type_v0 =
+  pinned_hash "result type" "5552731cc63f81199617f3ecf4e4a8c14748c303d6ce78ce5b0f05f3026ad8db"
+
+let outcome_summary_v0 =
+  pinned_hash "governance-outcome-summary"
+    "7a564b18a2535d29933ec1db4003776b9b9db65130d4dd4dc31c7db88f064aee"
+
+let secret_type_v0 =
+  pinned_hash "secret type" "0994b74f0147062152d3620195f694484e2751d27129217f4385ac3d0fd1b54e"
+
+let lookup store meta ~kind name =
   match Store.lookup_kind store name kind with
   | Some entry -> Ok entry.Resolve.hash
   | None ->
       Error
-        (Diag.error ~code:"E1400"
+        (diagnostic meta "E1400"
            (Printf.sprintf "governance verifier requires the exact `%s` prelude identity" name))
 
-let resolve_vocabulary store =
+let lookup_pinned store meta ~kind name expected =
+  match lookup store meta ~kind name with
+  | Ok actual when Hash.equal actual expected -> Ok actual
+  | Ok actual ->
+      Error
+        (diagnostic meta "E1400"
+           (Printf.sprintf
+              "governance verifier name `%s` resolves to #%s instead of pinned identity #%s" name
+              (hex actual) (hex expected)))
+  | Error diagnostic -> Error diagnostic
+
+let lookup_canonical_effect store meta name =
+  match lookup store meta ~kind:Resolve.KEffect name with
+  | Ok actual -> (
+      match Effect_registry.find_canonical actual with
+      | Some metadata when String.equal metadata.Effect_registry.index_name name -> Ok actual
+      | Some metadata ->
+          Error
+            (diagnostic meta "E1400"
+               (Printf.sprintf
+                  "governance verifier name `%s` resolves to canonical effect `%s`, not `%s`" name
+                  metadata.Effect_registry.index_name name))
+      | None ->
+          Error
+            (diagnostic meta "E1400"
+               (Printf.sprintf
+                  "governance verifier name `%s` does not resolve to its frozen effect identity"
+                  name)))
+  | Error diagnostic -> Error diagnostic
+
+let resolve_vocabulary store meta =
   let ( let* ) = Result.bind in
-  let* judge = lookup store ~kind:Resolve.KEffect "judge" in
-  let* governance_approval = lookup store ~kind:Resolve.KEffect "governance-approval-v1" in
-  let* audit = lookup store ~kind:Resolve.KEffect "audit" in
-  let* state = lookup store ~kind:Resolve.KEffect "state" in
-  let* eval = lookup store ~kind:Resolve.KEffect "eval" in
-  let* gate_live = lookup store ~kind:Resolve.KTerm "governance.gate-live" in
-  let* gate_dry = lookup store ~kind:Resolve.KTerm "governance.gate-dry" in
-  let* make_call = lookup store ~kind:Resolve.KTerm "governance.make-call" in
-  let* secret_type = lookup store ~kind:Resolve.KType "secret" in
-  let debug_inspect =
-    Option.map
-      (fun entry -> entry.Resolve.hash)
-      (Store.lookup_kind store "debug.inspect" Resolve.KTerm)
+  let* judge = lookup_canonical_effect store meta "judge" in
+  let* governance_approval = lookup_canonical_effect store meta "governance-approval-v1" in
+  let* audit = lookup_canonical_effect store meta "audit" in
+  let* state = lookup_canonical_effect store meta "state" in
+  let* eval = lookup_canonical_effect store meta "eval" in
+  let* gate_live =
+    lookup_pinned store meta ~kind:Resolve.KTerm "governance.gate-live" gate_live_v0
   in
+  let* gate_dry = lookup_pinned store meta ~kind:Resolve.KTerm "governance.gate-dry" gate_dry_v0 in
+  let* make_call =
+    lookup_pinned store meta ~kind:Resolve.KTerm "governance.make-call" make_call_v0
+  in
+  let* governance_call =
+    lookup_pinned store meta ~kind:Resolve.KType "governance-call" governance_call_v0
+  in
+  let* result_type = lookup_pinned store meta ~kind:Resolve.KType "result" result_type_v0 in
+  let* outcome_summary =
+    lookup_pinned store meta ~kind:Resolve.KType "governance-outcome-summary" outcome_summary_v0
+  in
+  let* secret_type = lookup_pinned store meta ~kind:Resolve.KType "secret" secret_type_v0 in
   Ok
     {
       judge;
@@ -147,7 +219,10 @@ let resolve_vocabulary store =
       gate_live;
       gate_dry;
       make_call;
-      debug_inspect;
+      debug_inspect = debug_inspect_v0;
+      result_type;
+      governance_call;
+      outcome_summary;
       secret_constructor = Canon.con_hash secret_type 0;
     }
 
@@ -208,10 +283,12 @@ let member_hashes declaration =
   | Error _ -> []
 
 let reachable_term_ref store ~start ~target =
-  let rec visit visited hash =
+  let visited = ref [] in
+  let rec visit hash =
     if Hash.equal hash target then true
-    else if List.exists (Hash.equal hash) visited then false
+    else if List.exists (Hash.equal hash) !visited then false
     else
+      let () = visited := hash :: !visited in
       match Store.locate_internal store hash with
       | Error _ -> false
       | Ok { Store.decl; role = Store.Member index; _ } -> (
@@ -220,15 +297,13 @@ let reachable_term_ref store ~start ~target =
               let group = member_hashes decl in
               let body = (List.nth bindings index).Kernel.value in
               let direct = expr_refs body in
-              List.exists
-                (fun (reference, kind) -> kind = Kernel.Term && visit (hash :: visited) reference)
-                direct
+              List.exists (fun (reference, kind) -> kind = Kernel.Term && visit reference) direct
               ||
               let rec group_refs expression =
                 match expression.Kernel.it with
                 | Kernel.GroupRef member -> (
                     match List.nth_opt group member with
-                    | Some reference -> visit (hash :: visited) reference
+                    | Some reference -> visit reference
                     | None -> false)
                 | Kernel.Lam (_, body) | Kernel.Ann (body, _) | Kernel.Unquote body ->
                     group_refs body
@@ -247,9 +322,43 @@ let reachable_term_ref store ~start ~target =
           | Kernel.DefType _ | Kernel.DefEffect _ -> false)
       | Ok _ -> false
   in
-  visit [] start
+  visit start
 
-let check_pure_term checker term =
+let row_is_closed_pure row =
+  let row = Types.repr_row row in
+  row.Types.effects = [] && row.Types.tail = Types.RClosed
+
+let rec type_has_only_closed_pure_arrows ty =
+  match Types.repr ty with
+  | Types.TCon (_, arguments) -> List.for_all type_has_only_closed_pure_arrows arguments
+  | Types.TTuple items -> List.for_all type_has_only_closed_pure_arrows items
+  | Types.TArrow (parameters, row, result) ->
+      row_is_closed_pure row
+      && List.for_all type_has_only_closed_pure_arrows parameters
+      && type_has_only_closed_pure_arrows result
+  | Types.TResume (parameter, row, result) ->
+      row_is_closed_pure row
+      && type_has_only_closed_pure_arrows parameter
+      && type_has_only_closed_pure_arrows result
+  | Types.TVariadicArrow (parameter, row, result) ->
+      row_is_closed_pure row
+      && type_has_only_closed_pure_arrows parameter
+      && type_has_only_closed_pure_arrows result
+  | Types.TVar _ | Types.TSkolem _ -> true
+
+let result_has_identity ~result_type ~expected ~allow_result = function
+  | Types.TArrow (_, _, result) | Types.TVariadicArrow (_, _, result) -> (
+      match Types.repr result with
+      | Types.TCon (actual, []) -> Hash.equal actual expected
+      | Types.TCon (actual, [ _error; success ]) when allow_result && Hash.equal actual result_type
+        -> (
+          match Types.repr success with
+          | Types.TCon (actual, []) -> Hash.equal actual expected
+          | _ -> false)
+      | _ -> false)
+  | _ -> false
+
+let check_pure_term checker ~result_type ~expected_result ~expected_name ~allow_result term =
   match Check.force_term checker term.hash with
   | Error diagnostics ->
       [
@@ -258,16 +367,20 @@ let check_pure_term checker term =
              (String.concat "; " (List.map Diag.to_string diagnostics)));
       ]
   | Ok scheme -> (
-      match Types.repr scheme.Types.ty with
-      | Types.TArrow (_, row, _) | Types.TVariadicArrow (_, row, _) ->
-          let row = Types.repr_row row in
-          if row.Types.effects = [] && row.Types.tail = Types.RClosed then []
-          else
-            [
-              diagnostic term.meta "E1405"
-                (Printf.sprintf "%s must have a closed pure outer arrow, found %s" term.label
-                   (Check.show_scheme checker scheme));
-            ]
+      let inferred = Types.repr scheme.Types.ty in
+      match inferred with
+      | (Types.TArrow _ | Types.TVariadicArrow _)
+        when type_has_only_closed_pure_arrows inferred
+             && result_has_identity ~result_type ~expected:expected_result ~allow_result inferred ->
+          []
+      | Types.TArrow _ | Types.TVariadicArrow _ ->
+          [
+            diagnostic term.meta "E1405"
+              (Printf.sprintf
+                 "%s must contain only closed pure arrows and return exact %s, found %s" term.label
+                 expected_name
+                 (Check.show_scheme checker scheme));
+          ]
       | _ ->
           [
             diagnostic term.meta "E1405"
@@ -337,14 +450,25 @@ let validate_flows vocabulary mode meta flows =
       in
       coverage @ List.concat_map (validate_flow vocabulary) flows
 
-let validate_lineage meta = function
+let validate_lineage (operation : operation) =
+  let meta = operation.meta in
+  match operation.lineage with
   | Original -> []
   | Unchanged_forward { previous_call_id; current_call_id } ->
-      if Hash.equal previous_call_id current_call_id then []
-      else [ diagnostic meta "E1411" "unchanged forwarding must retain the exact previous Call ID" ]
+      if
+        Hash.equal previous_call_id current_call_id
+        && Hash.equal current_call_id operation.call.carried
+      then []
+      else
+        [
+          diagnostic meta "E1411"
+            "unchanged forwarding must retain the previous Call ID as the operation's exact \
+             carried Call";
+        ]
   | Transformed_forward { previous_call_id; current_call_id; parent_call_id } ->
       if
         (not (Hash.equal previous_call_id current_call_id))
+        && Hash.equal current_call_id operation.call.carried
         &&
         match parent_call_id with
         | Some parent -> Hash.equal previous_call_id parent
@@ -353,7 +477,8 @@ let validate_lineage meta = function
       else
         [
           diagnostic meta "E1411"
-            "a transformed call must have a new Call ID and parent-call-id = Some(previous-call-id)";
+            "a transformed call must carry its new Call ID and parent-call-id = \
+             Some(previous-call-id)";
         ]
 
 let validate_proposal (operation : operation) =
@@ -519,8 +644,15 @@ let validate_operation store checker vocabulary (operations : operation list)
       ("assessment", operation.assessment);
       ("Proposal", operation.proposal.identity);
     ];
-  add (check_pure_term checker operation.normalizer);
-  add (check_pure_term checker operation.summarizer);
+  add
+    (check_pure_term checker ~result_type:vocabulary.result_type
+       ~expected_result:vocabulary.governance_call
+       ~expected_name:"GovernanceCall or Result _ GovernanceCall" ~allow_result:true
+       operation.normalizer);
+  add
+    (check_pure_term checker ~result_type:vocabulary.result_type
+       ~expected_result:vocabulary.outcome_summary ~expected_name:"GovernanceOutcomeSummary"
+       ~allow_result:false operation.summarizer);
   if not (reachable_term_ref store ~start:operation.normalizer.hash ~target:vocabulary.make_call)
   then
     add
@@ -528,43 +660,47 @@ let validate_operation store checker vocabulary (operations : operation list)
         diagnostic operation.normalizer.meta "E1406"
           (operation.normalizer.label ^ " must reach the canonical governance.make-call constructor");
       ];
-  (match vocabulary.debug_inspect with
-  | Some inspect when reachable_term_ref store ~start:operation.normalizer.hash ~target:inspect ->
-      add
-        [
-          diagnostic operation.normalizer.meta "E1409"
-            "call normalizers must not use generic debug.inspect";
-        ]
-  | Some inspect when reachable_term_ref store ~start:operation.summarizer.hash ~target:inspect ->
-      add
-        [
-          diagnostic operation.summarizer.meta "E1409"
-            "outcome summarizers must not use generic debug.inspect";
-        ]
-  | Some _ | None -> ());
+  if reachable_term_ref store ~start:operation.normalizer.hash ~target:vocabulary.debug_inspect then
+    add
+      [
+        diagnostic operation.normalizer.meta "E1409"
+          "call normalizers must not use generic debug.inspect";
+      ];
+  if reachable_term_ref store ~start:operation.summarizer.hash ~target:vocabulary.debug_inspect then
+    add
+      [
+        diagnostic operation.summarizer.meta "E1409"
+          "outcome summarizers must not use generic debug.inspect";
+      ];
   let serialized =
     operation.serialized_call_data @ operation.proposal.serialized
-    @ [ operation.call.canonical_subject; operation.proposal.identity.canonical_subject ]
+    @ [
+        operation.call.canonical_subject;
+        operation.bound_policy.canonical_subject;
+        operation.assessment.canonical_subject;
+        operation.proposal.identity.canonical_subject;
+      ]
   in
   if List.exists (form_contains_secret vocabulary.secret_constructor) serialized then
     add
       [
         diagnostic operation.meta "E1409"
-          "Call and Proposal data may serialize SecretRef values but never an opaque Secret value";
+          "governance review data may serialize SecretRef values but never an opaque Secret value";
       ];
   add (validate_authorities vocabulary operations operation);
   add (validate_proposal operation);
   add (validate_flows vocabulary `Live operation.meta operation.live_flows);
   add (validate_flows vocabulary `Dry operation.meta operation.dry_flows);
-  add (validate_lineage operation.meta operation.lineage);
+  add (validate_lineage operation);
   !diagnostics
 
 let verify store (contract : contract) =
   let environment =
-    match (resolve_vocabulary store, make_checker store) with
+    match (resolve_vocabulary store contract.meta, make_checker store) with
     | Ok vocabulary, Ok checker -> Ok (vocabulary, checker)
     | Error diagnostic, Ok _ -> Error [ diagnostic ]
-    | Ok _, Error diagnostics | Error _, Error diagnostics -> Error diagnostics
+    | Ok _, Error diagnostics -> Error diagnostics
+    | Error diagnostic, Error diagnostics -> Error (diagnostic :: diagnostics)
   in
   match environment with
   | Error diagnostics -> Error diagnostics

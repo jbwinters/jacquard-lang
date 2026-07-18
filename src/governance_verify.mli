@@ -107,10 +107,11 @@ val code_hash : Form.t -> Hash.t
 
 val verify : Store.t -> contract -> (report, Diag.t list) result
 (** [verify store contract] checks the complete membrane contract without evaluating it or mutating
-    [store]. It resolves canonical governance identities from [store], checks the real inferred
-    schemes of referenced terms, and accumulates deterministic E1400--E1412 diagnostics with source
-    spans. Missing verifier vocabulary, malformed evidence, lookup/type errors, or any violated
-    invariant return [Error]. *)
+    [store]. It rejects mutable-name aliases for canonical effects and frozen governance
+    terms/types, checks every arrow nested in the real inferred schemes of referenced terms, and
+    requires the exact normalizer/summarizer result shapes. It accumulates deterministic
+    E1400--E1412 diagnostics with source spans. Missing verifier vocabulary, malformed evidence,
+    lookup/type errors, or any violated invariant return [Error]. *)
 
 val diagnostic_codes : (string * string) list
 (** Stable governance-verifier diagnostic catalog. *)

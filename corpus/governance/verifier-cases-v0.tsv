@@ -1,17 +1,23 @@
 # Governed-membrane verifier adversarial corpus v0.
 # case<TAB>stable diagnostic<TAB>source line
 unsupported-version	E1400	1
+canonical-effect-rebind	E1400	1
+canonical-identity-rebind	E1400	1
 non-effect-facade	E1401	1
 non-once-facade	E1401	4
 missing-operation	E1402	1
+duplicate-operation	E1402	1
+missing-live-clause	E1402	20
 missing-dry-clause	E1402	20
 wrong-live-gate	E1403	91
 live-completion-order	E1403	93
 multiple-sequence-owners	E1404	96
 nested-sequence-owner	E1404	97
 wrong-layer-token	E1404	98
+empty-layer-tokens	E1404	106
 impure-normalizer	E1405	99
 impure-summarizer	E1405	100
+effect-hiding-nested-arrow	E1405	107
 noncanonical-call-constructor	E1406	101
 stale-call-id	E1406	102
 stale-policy-id	E1406	103
@@ -20,14 +26,20 @@ stale-proposal-id	E1406	105
 call-authority-mismatch	E1407	20
 proposal-authority-mismatch	E1407	20
 resource-configuration-mismatch	E1407	20
+resource-effect-entry	E1407	20
+resource-wrong-effect	E1407	20
 unknown-forward	E1407	20
 forward-cycle	E1407	20
 gate-control-in-action	E1408	20
 sequence-state-in-action	E1408	20
 serialized-secret	E1409	20
+secret-bound-policy	E1409	20
+secret-assessment	E1409	20
 generic-inspection	E1409	108
+dual-generic-inspection	E1409	112
 incomplete-ask	E1410	109
 changed-unchanged-forward	E1411	20
+unanchored-lineage	E1411	20
 transformed-without-parent	E1411	20
 transformed-with-old-id	E1411	20
 reachable-eval	E1412	1
