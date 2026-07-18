@@ -1,8 +1,9 @@
 (** Canonical metadata for the blessed effect taxonomy.
 
     Runtime classification is keyed only by a resolved [Hash.t]. Names in this module are
-    presentation metadata and never authorize or bless an effect. Reserved interfaces remain in
-    {!catalog} but cannot enter a registry until their first real declaration hash is frozen. *)
+    presentation metadata and never authorize or bless an effect. Reserved interfaces remain in the
+    versioned catalogs but cannot enter a registry until their first real declaration hash is
+    frozen. *)
 
 type tier = Control | Uncertainty | Meta | World | Model | Governance | Concurrency
 type risk = No_risk | Low | Medium | High | Special
@@ -39,11 +40,23 @@ val register : t -> metadata -> (t, registration_error) result
     attempt to retag their frozen names as released, plus any duplicate identity, blessed display
     name, or official index name, without changing [registry]. *)
 
+val catalog_v1 : metadata list
+(** The frozen v1 snapshot: all 26 original ratified entries. *)
+
+val catalog_v2 : metadata list
+(** The additive v2 snapshot: the exact v1 prefix followed by [GovernanceApprovalV1]. *)
+
 val catalog : metadata list
-(** All 26 ratified entries. Nine entries are [Reserved] and deliberately have no identity. *)
+(** The current taxonomy snapshot, presently {!catalog_v2}. *)
+
+val canonical_v1 : t
+(** The resolved identities from the frozen v1 snapshot. *)
+
+val canonical_v2 : t
+(** The resolved identities from the additive v2 snapshot. *)
 
 val canonical : t
-(** The canonical registry containing exactly the seventeen released blessed identities. *)
+(** The current canonical registry, presently {!canonical_v2}. *)
 
 val entries : t -> metadata list
 (** [entries registry] returns its entries in stable display-name order. *)
@@ -55,8 +68,14 @@ val find_canonical : Hash.t -> metadata option
 (** [find_canonical identity] is [find canonical identity]. *)
 
 val canonical_order : Hash.t -> int option
-(** [canonical_order identity] returns the zero-based position of a released identity in the frozen
-    taxonomy catalog. Reserved catalog rows retain their positions but never match. *)
+(** [canonical_order identity] is {!canonical_order_v2}. *)
+
+val canonical_order_v1 : Hash.t -> int option
+(** [canonical_order_v1 identity] returns its zero-based position in the frozen v1 snapshot. *)
+
+val canonical_order_v2 : Hash.t -> int option
+(** [canonical_order_v2 identity] returns its zero-based position in the additive v2 snapshot.
+    Reserved rows retain their positions but never match. *)
 
 type style = Plain | Ansi
 

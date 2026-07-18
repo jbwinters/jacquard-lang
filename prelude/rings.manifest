@@ -522,6 +522,18 @@ governance.with-sequence 3
 governance.run-dry-simulation 3
 governance.summarize-dry-result 3
 governance.gate-dry 3
+# --- 24/25-governance-approval + gate-live (GM.7 exact live consent boundary)
+governance-approval-v1 3
+governance-approval.ask 3
+governance.approval.validate-decision 3
+governance.approval.before-action 3
+governance.approval.scripted 3
+live-disposition 3
+execute-live 3
+refuse-live 3
+governance.run-live-preview 3
+governance.complete 3
+governance.gate-live 3
 # --- 23-workspace (GM.9 typed facade schemas and pure normalizers)
 path 3
 path-value 3

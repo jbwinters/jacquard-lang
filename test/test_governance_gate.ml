@@ -1,6 +1,6 @@
 open Jacquard
 
-(* GM.6: the dry gate returns a disposition and owns no Resume or live authority. *)
+(* GM.6/GM.7: gates return dispositions; facade clauses own Resume and live authority. *)
 
 let qtext value = "\"" ^ Printer.escape_text value ^ "\""
 let fixture_hash = String.make 64 'a'
@@ -114,6 +114,34 @@ let assessment risk confidence =
     "(app (var governance-assessment-v0) (var governance-v0) (var %s) (lit %s) (var nil) (quote \
      (evidence)))"
     risk confidence
+
+let wrap_live_fixture body =
+  Printf.sprintf
+    "(app (var throw.to-result) (lam ()\n\
+     (let nonrec (pvar fixture-hash)\n\
+     (match (app (var hash.parse) (lit %s))\n\
+     (clause (pcon ok (pvar value)) (var value))\n\
+     (clause (pcon err (pwild)) (app (var throw) (lit \"bad fixture hash\"))))\n\
+     (let nonrec (pvar authority)\n\
+     (app (var cons) (app (var governance-effect) (var fixture-hash))\n\
+     (app (var cons)\n\
+     (app (var governance-resource) (var fixture-hash) (lit \"bucket/a\")\n\
+     (var fixture-hash)) (var nil)))\n\
+     (let nonrec (pvar call)\n\
+     (match (app (var governance.make-call) (lit \"fs.write\")\n\
+     (quote (arguments (lit 7))) (var authority) (lit \"live write\")\n\
+     (quote (preconditions)) (var none))\n\
+     (clause (pcon ok (pvar value)) (var value))\n\
+     (clause (pcon err (pwild)) (app (var throw) (lit \"bad call\"))))\n\
+     (let nonrec (pvar policy)\n\
+     (match (app (var governance.make-live-policy) (var low) (var medium) (lit 0.5))\n\
+     (clause (pcon err (pwild)) (app (var throw) (lit \"bad policy\")))\n\
+     (clause (pcon ok (pvar value))\n\
+     (match (app (var governance.bind-live-policy) (var value))\n\
+     (clause (pcon ok (pvar bound)) (var bound))\n\
+     (clause (pcon err (pwild)) (app (var throw) (lit \"bad bound\"))))))\n\
+     %s))))))"
+    (qtext fixture_hash) body
 
 let simulator = function
   | `None -> "(var none)"
@@ -564,6 +592,296 @@ let test_verifier_preconditions_refuse_before_audit () =
     (run invalid_policy "(var invalid-subject) (var call)");
   assert_probe_counts live approval simulator summarizer (0, 0, 0, 0)
 
+type live_decision = Approve | Deny | Escalate | Stale
+
+type live_counts = {
+  approval : int ref;
+  simulator : int ref;
+  summarizer : int ref;
+  driver : int ref;
+}
+
+let gm7_probe_ctx () =
+  let store, ctx = Eval_support.make_prelude_ctx () in
+  let approval = ref 0 and simulator = ref 0 and summarizer = ref 0 and driver = ref 0 in
+  let eval_value source =
+    match Eval_support.eval_with ctx store source with
+    | Ok value -> value
+    | Error error -> Alcotest.fail (Runtime_err.to_string error)
+  in
+  register_probe store ctx "gm7.approval-probe" approval Value.unit_v;
+  register_probe store ctx "gm7.simulator-probe" simulator
+    (eval_value "(app (var ok) (lit \"preview-result\"))");
+  register_probe store ctx "gm7.summarizer-probe" summarizer
+    (eval_value
+       (Printf.sprintf
+          "(match (app (var hash.parse) (lit %s))\n\
+           (clause (pcon ok (pvar digest))\n\
+           (app (var governance-outcome-summary-v0) (var governance-v0)\n\
+           (lit \"success\") (var digest) (lit \"gm7 probe\")))\n\
+           (clause (pcon err (pwild))\n\
+           (app (var governance-outcome-summary-v0) (var governance-v0)\n\
+           (lit \"invalid\") (app (var code.hash) (quote (invalid))) (lit \"invalid\"))))"
+          (qtext fixture_hash)));
+  register_probe store ctx "gm7.driver-probe" driver
+    (eval_value "(app (var ok) (lit \"live-result\"))");
+  (store, ctx, { approval; simulator; summarizer; driver })
+
+let gm7_decision = function
+  | Approve ->
+      "(app (var approved) (app (var governance.proposal-id) (var proposal-value))\n\
+       (lit \"reviewer\") (quote (approval-evidence)))"
+  | Deny ->
+      "(app (var denied) (app (var governance.proposal-id) (var proposal-value))\n\
+       (lit \"reviewer\") (lit \"reviewer denied\"))"
+  | Escalate ->
+      "(app (var escalate) (app (var governance.proposal-id) (var proposal-value))\n\
+       (lit \"needs owner\"))"
+  | Stale ->
+      "(app (var approved) (var fixture-hash) (lit \"stale reviewer\")\n(quote (stale-evidence)))"
+
+let gm7_handled_gate ?(simulator = "(app (var some) (var gm7.simulator-probe))") decision =
+  Printf.sprintf
+    "(handle\n\
+     (app (var governance.gate-live) (var sequence) (var policy) (var call)\n\
+     %s (var gm7.summarizer-probe))\n\
+     (ret (pvar value) (var value))\n\
+     (opclause governance-approval.ask ((pvar proposal-value)) k\n\
+     (let nonrec (pwild) (app (var gm7.approval-probe))\n\
+     (app (var k) %s))))"
+    simulator (gm7_decision decision)
+
+let gm7_facade ?simulator decision =
+  Printf.sprintf
+    "(match %s\n\
+     (clause (pcon execute-live)\n\
+     (let nonrec (pvar result-value) (app (var gm7.driver-probe))\n\
+     (let nonrec (pvar outcome) (app (var gm7.summarizer-probe) (var result-value))\n\
+     (let nonrec (pwild)\n\
+     (app (var governance.complete) (var sequence) (var call)\n\
+     (lit \"executed\") (var outcome))\n\
+     (var result-value)))))\n\
+     (clause (pcon refuse-live (pvar error)) (app (var err) (var error))))"
+    (gm7_handled_gate ?simulator decision)
+
+let gm7_source ?simulator risk confidence decision =
+  wrap_live_fixture
+    (Printf.sprintf
+       "(app (var judge.fixed)\n\
+        (lam () (app (var audit.in-memory)\n\
+        (lam () (app (var governance.with-sequence)\n\
+        (lam ((pvar sequence)) %s))))) %s)"
+       (gm7_facade ?simulator decision) (assessment risk confidence))
+
+let gm7_with_proposal body =
+  wrap_live_fixture
+    (Printf.sprintf
+       "(let nonrec (pvar assessment-value) %s\n\
+        (match\n\
+        (app (var governance.make-proposal) (var call) (var policy)\n\
+        (var assessment-value) (app (var governance.call-code) (var call))\n\
+        (app (var governance.call-summary) (var call)) (var none))\n\
+        (clause (pcon err (pvar message)) (app (var throw) (var message)))\n\
+        (clause (pcon ok (pvar proposal-value)) %s)))"
+       (assessment "medium" "0.9") body)
+
+let assert_live_counts label counts ~(approval : int) ~(simulator : int) ~(summarizer : int)
+    ~(driver : int) =
+  Alcotest.(check int) (label ^ " approval calls") approval !(counts.approval);
+  Alcotest.(check int) (label ^ " simulator calls") simulator !(counts.simulator);
+  Alcotest.(check int) (label ^ " summarizer calls") summarizer !(counts.summarizer);
+  Alcotest.(check int) (label ^ " driver calls") driver !(counts.driver)
+
+let test_live_signature_and_versioned_identity () =
+  let store, _ctx = Eval_support.make_prelude_ctx () in
+  let actual = scheme store "governance.gate-live" in
+  Alcotest.(check string)
+    "exact closed gate-live row"
+    "forall a. (AuditSequence, BoundPolicy LivePolicy, GovernanceCall, Option (() ->{} Result \
+     ToolError a), (Result ToolError a) ->{} GovernanceOutcomeSummary) ->{Audit, \
+     GovernanceApprovalV1, State, Judge} LiveDisposition"
+    actual;
+  List.iter
+    (fun raw_effect ->
+      Alcotest.(check int)
+        (raw_effect ^ " raw authority absent from gate-control row")
+        0
+        (count_substring actual raw_effect))
+    [ "Fs"; "Net"; "Secret"; "Eval"; "Workspace"; "World" ];
+  let effect_hash name = Hash.to_hex (lookup store name Resolve.KEffect) in
+  Alcotest.(check string)
+    "frozen ET.6 Approval identity is unchanged"
+    "362425a29077a7efbcc37047182e579f46199a50473045eb4126a917dfc2a196" (effect_hash "approval");
+  Alcotest.(check string)
+    "GovernanceApprovalV1 identity"
+    "41b449689fb30e44180185007d845bbe246e5401fe3e8478f4fd02e556a3f2ed"
+    (effect_hash "governance-approval-v1")
+
+let test_live_branch_matrix_and_at_most_once_driver () =
+  let store, ctx, counts = gm7_probe_ctx () in
+  let cases =
+    [
+      ("allow", "low", "0.9", Approve, (0, 0, 1, 1), "ok(\"live-result\")", 1, 0, 1);
+      ("ask approved", "medium", "0.9", Approve, (1, 1, 2, 1), "ok(\"live-result\")", 1, 1, 1);
+      ("low confidence asks", "low", "0.1", Approve, (1, 1, 2, 1), "ok(\"live-result\")", 1, 1, 1);
+      ( "ask denied",
+        "medium",
+        "0.9",
+        Deny,
+        (1, 1, 1, 0),
+        "err(tool-denied(\"reviewer denied\"))",
+        1,
+        1,
+        0 );
+      ( "ask escalated",
+        "medium",
+        "0.9",
+        Escalate,
+        (1, 1, 1, 0),
+        "err(tool-escalated(\"needs owner\"))",
+        1,
+        1,
+        0 );
+      ("stale approval", "medium", "0.9", Stale, (1, 1, 1, 0), "err(stale-approval)", 1, 0, 0);
+      ( "blocked",
+        "high",
+        "0.9",
+        Approve,
+        (0, 0, 0, 0),
+        "err(tool-blocked(\"live policy blocked call\"))",
+        1,
+        0,
+        0 );
+    ]
+  in
+  List.iter
+    (fun ( label,
+           risk,
+           confidence,
+           decision,
+           expected_counts,
+           disposition,
+           evaluated,
+           consented,
+           completed ) ->
+      counts.approval := 0;
+      counts.simulator := 0;
+      counts.summarizer := 0;
+      counts.driver := 0;
+      let shown = eval_show ctx store (gm7_source risk confidence decision) in
+      let approval, simulator, summarizer, driver = expected_counts in
+      assert_live_counts label counts ~approval ~simulator ~summarizer ~driver;
+      Alcotest.(check int) (label ^ " disposition") 1 (count_substring shown disposition);
+      Alcotest.(check int)
+        (label ^ " Evaluated count") evaluated
+        (count_substring shown "evaluated(");
+      Alcotest.(check int)
+        (label ^ " Consented count") consented
+        (count_substring shown "consented(");
+      Alcotest.(check int)
+        (label ^ " Completed count") completed
+        (count_substring shown "completed("))
+    cases;
+  counts.approval := 0;
+  counts.simulator := 0;
+  counts.summarizer := 0;
+  counts.driver := 0;
+  let no_preview =
+    eval_show ctx store (gm7_source ~simulator:"(var none)" "medium" "0.9" Approve)
+  in
+  assert_live_counts "ask approved without preview" counts ~approval:1 ~simulator:0 ~summarizer:1
+    ~driver:1;
+  Alcotest.(check int)
+    "Ask without a simulator still consents and executes" 1
+    (count_substring no_preview "ok(\"live-result\")");
+  let direct decision =
+    gm7_with_proposal
+      (Printf.sprintf
+         "(app (var governance.approval.before-action) (var proposal-value) %s\n\
+          (var gm7.driver-probe))"
+         (gm7_decision decision))
+  in
+  List.iter
+    (fun (label, decision, expected, expected_driver) ->
+      counts.driver := 0;
+      let shown = eval_show ctx store (direct decision) in
+      Alcotest.(check string) (label ^ " direct helper result") expected shown;
+      Alcotest.(check int) (label ^ " direct helper action count") expected_driver !(counts.driver))
+    [
+      ("approved", Approve, "ok(ok(ok(\"live-result\")))", 1);
+      ("denied", Deny, "ok(err(tool-denied(\"reviewer denied\")))", 0);
+      ("escalated", Escalate, "ok(err(tool-escalated(\"needs owner\")))", 0);
+      ("stale", Stale, "ok(err(stale-approval))", 0);
+    ];
+  let exact = gm7_decision Approve in
+  let stale = gm7_decision Stale in
+  let scripted body decisions =
+    gm7_with_proposal
+      (Printf.sprintf "(app (var governance.approval.scripted) (lam () %s) %s)" body decisions)
+    |> eval_show ctx store
+  in
+  let ask = "(app (var governance-approval.ask) (var proposal-value))" in
+  let two_asks = Printf.sprintf "(tuple %s %s)" ask ask in
+  let two_exact = Printf.sprintf "(app (var cons) %s (app (var cons) %s (var nil)))" exact exact in
+  let replayed = scripted two_asks two_exact in
+  Alcotest.(check int)
+    "scripted handler consumes two explicit decisions in order" 2
+    (count_substring replayed "approved(");
+  Alcotest.(check string)
+    "scripted handler refuses exhaustion"
+    "err(\"governance.approval.scripted: out of scripted decisions\")" (scripted ask "(var nil)");
+  let exact_then_stale =
+    Printf.sprintf "(app (var cons) %s (app (var cons) %s (var nil)))" exact stale
+  in
+  let stale_second = scripted two_asks exact_then_stale in
+  Alcotest.(check bool)
+    "scripted handler refuses a stale second decision" true
+    (String.starts_with
+       ~prefix:
+         "err(\"stale Decision: embedded proposal hash does not match the exact \
+          GovernanceProposal\")"
+       stale_second)
+
+let gm7_fault_source risk confidence decision record_clause =
+  wrap_live_fixture
+    (Printf.sprintf
+       "(app (var judge.fixed)\n\
+        (lam () (app (var governance.with-sequence) (lam ((pvar sequence))\n\
+        (handle %s\n\
+        (ret (pvar value) (var value))\n\
+        (opclause record ((pvar entry)) k %s))))) %s)"
+       (gm7_facade decision) record_clause (assessment risk confidence))
+
+let test_live_audit_fail_closed_ordering () =
+  let run label risk decision record_clause expected shown_expected =
+    let store, ctx, counts = gm7_probe_ctx () in
+    let shown = eval_show ctx store (gm7_fault_source risk "0.9" decision record_clause) in
+    let approval, simulator, summarizer, driver = expected in
+    assert_live_counts label counts ~approval ~simulator ~summarizer ~driver;
+    Alcotest.(check string) label shown_expected shown
+  in
+  run "Evaluated refusal prevents approval, preview, and action" "medium" Approve
+    "(match (app (var get))\n\
+     (clause (ptuple (pwild) (pvar count))\n\
+     (tuple (lit \"evaluated-refused\") (var count))))"
+    (0, 0, 0, 0) "ok((\"evaluated-refused\", 0))";
+  run "Consented refusal prevents an approved action" "medium" Approve
+    "(match (app (var get))\n\
+     (clause (ptuple (pwild) (pvar count))\n\
+     (match (app (var eq) (var count) (lit 0))\n\
+     (clause (pcon true) (app (var k) (tuple)))\n\
+     (clause (pcon false)\n\
+     (tuple (lit \"consented-refused\") (var count))))))"
+    (1, 1, 1, 0) "ok((\"consented-refused\", 1))";
+  run "Completed refusal is surfaced after the external action" "low" Approve
+    "(match (app (var get))\n\
+     (clause (ptuple (pwild) (pvar count))\n\
+     (match (app (var eq) (var count) (lit 0))\n\
+     (clause (pcon true) (app (var k) (tuple)))\n\
+     (clause (pcon false)\n\
+     (tuple (lit \"completed-refused-after-action\") (var count))))))"
+    (0, 0, 1, 1) "ok((\"completed-refused-after-action\", 1))"
+
 let suite =
   [
     Alcotest.test_case "exact frozen row and local Resume" `Quick
@@ -578,4 +896,9 @@ let suite =
       test_completion_failure_precedes_disposition;
     Alcotest.test_case "verifier preconditions refuse before audit" `Quick
       test_verifier_preconditions_refuse_before_audit;
+    Alcotest.test_case "live signature and versioned identity" `Quick
+      test_live_signature_and_versioned_identity;
+    Alcotest.test_case "live branches and at-most-once driver" `Quick
+      test_live_branch_matrix_and_at_most_once_driver;
+    Alcotest.test_case "live audit fail-closed ordering" `Quick test_live_audit_fail_closed_ordering;
   ]
