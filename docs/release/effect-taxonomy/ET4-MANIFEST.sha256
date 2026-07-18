@@ -1,4 +1,4 @@
-# Effect-taxonomy ET.4-ET.8 + SC.0-SC.14 + SC.16 + GM.0-GM.6 + GM.9 + DX.5/DX.7 reconstructible integration overlay
+# Effect-taxonomy ET.4-ET.8 + SC.0-SC.14 + SC.16 + GM.0-GM.6 + GM.9 + DX.5/DX.6/DX.7 reconstructible integration overlay
 # Base commit: 950fab6
 # Attestation manifests exclude themselves (and successor manifests) to avoid self/cross-hashes.
 7af107b123f186462ddc1dac936fd31204ce41b2baad1034eea1dc63dd0b1a6d  README.md
@@ -37,7 +37,7 @@ e5f560711548689688b8bc748644783f1384e56a64c441c5c8a9f6a3dfcaeccd  demos/concurre
 c0660f146f6a627824bc63c575e9e351d2caa058d5abc7600e158f7789469c48  demos/concurrency/run.sh
 83c296aeb4280e020a7c82ec025b0eecb93895572d365ec7ed39f058b63a4801  demos/concurrency/task-schedules.jac
 bfd647f54fa06da203d734906a7213331c68346f9ba5f25da865c43b0cbf2f0c  demos/worlds/preflight.jac
-8ae0341e149ccc2e94d988f7df4790ec29bde70f3f24ed279f2dc33b17cf2c99  docs/README.md
+9c5e8d9e013c0ff3ea32ad36dfd84923b49fe26acc0bc23aed9b49586bf064a3  docs/README.md
 6d7472bd7dc7bc409085c0279ad2085bd454d83b22a37143761d0f8bd1a04b12  docs/SKILL.md
 a7ccae80ee604da6a1b4fe8125609c4283b65e6a112be897bf254b1fdff457bf  docs/ast.md
 cb5d6a1ae78b995aeb5b43deb48236deb55ca131ab308ba9ce5d842d1538d68d  docs/concurrency.md
@@ -53,6 +53,7 @@ f4b723f552243e875d19d60176383d2fae926e0d3a96e1b4f466b8fba1811246  docs/native-pa
 d4fea490203ee9e841e9f854eb4bd1807e69dddb0bbbc754ee35d21fb787a4ba  docs/release/0.1/EVIDENCE.md
 7cb96b50b283477a5dc46b880db0b295b6b30733000060e21b27f83a4fe4a347  docs/release/dx-jac-export/DECISION.md
 4a1c8689e2c47f6719fd8ae2a8fb47cdf61b48e6a957906d6d917914a53ea40a  docs/release/dx-jac-export/EVIDENCE.md
+45a699900bdbabe207b363a2de9808f43b851e74b0e330415ecbb42737bfaf0a  docs/release/dx-parser-performance/EVIDENCE.md
 44f8509fb2c90a13a64a4d70a29346e93b1d326c8a182bf609d57e93f7742ff1  docs/release/effect-linearity/EVIDENCE.md
 5f63e921eb581d4c83ea10f118b9e640d439614a96dad6a8cb6870eb489e5b62  docs/release/effect-taxonomy/ET4-EVIDENCE.md
 d36861cb68eb5c319030249c88e7b267d88f92485c3b5aa6fed9b1fd443c99b3  docs/release/effect-taxonomy/ET5-EVIDENCE.md
@@ -66,7 +67,7 @@ e9bcf7d8eaae1581027997ac757bbc287545c4d44a0b80e1bd8071bbfab2bd19  docs/release/g
 aaeb320c507266079ecc9c779bb33dfcf92463ac87b16d709eef0d977bed4071  docs/release/governed-membranes/GM5-EVIDENCE.md
 eb60e7b79f69f47009190a6e1677118dcff9974143987fe21392b71062a52f0f  docs/release/governed-membranes/GM6-EVIDENCE.md
 5ad914ee459f5da265e50cfec978e9b57967d25ebf2bb4797c30e2ed966c6f21  docs/release/governed-membranes/GM9-EVIDENCE.md
-7b61fbfe717ce1651aa3978dc3757a48f683c017d7cb67b32aa3f6f3bd3000e7  docs/release/structured-concurrency/EVIDENCE.md
+b755fa8578f9648565319d442e519053f4c14daf536015c03d6d075d88adc4af  docs/release/structured-concurrency/EVIDENCE.md
 2572a6e32f6a13b54222557e60f42f1511ae8b5e65bca13263ea71c0e68ba854  docs/release/structured-concurrency/LIMITS.md
 6ff15a1efe89903715196d5e3027d48e89600974343dafff65b9f3b04b02e029  docs/release/surface-syntax/DECISION.md
 a7106baeca9cf151e6d7bbb4ac5f5bc7771e52cebf2b6f9acc1385efeab66eda  docs/stdlib.md
@@ -98,6 +99,7 @@ edbbb8298afe0cfd3f5ec830df0fcd53798b43e212cef639914f232b793df355  runtime/test/t
 ad051c319cf63a52dd32c4f46cfe3ab52e4203b353aba11febd5cecb4942c0b3  runtime/test/test_runtime.c
 5f7745cfa949bef8e70663ada6248a33ad62e8fd94dc3c4b1d32a5a4bcda6733  scripts/native-diff.sh
 d489633133a51ae879015b02cb249bf975693e6e94895bd43059ada26fa10f74  scripts/native-parallel-evidence.sh
+1a65658640dff8f97d1eae9331e8c9d676c836d8809d6531a99116d91452c4e4  scripts/parser-depth-perf.sh
 d0b40d94343a06343f08dbcf2a11c7b11fcf8a465df4e3375b4bfd703b62a495  scripts/release/check-structured-concurrency-manifest.sh
 a38101fd43a84f2c7c106688c6293c1882e953cf4e21a8c2538bc726c39d42e6  spec/effect-taxonomy-v1.tsv
 367431e7ea82cd619194c8e191cf24a7bd2e33d42818bbb58fc731d85b615c5c  spec/jacquard-kernel-ast-m0.md
@@ -150,7 +152,7 @@ fa3f8d80f81e396340035ff48e799d7061e0c760ec42946a40a55ceb0d4b02c2  src/store.ml
 9629e6022145f6cf013c64460e7d5e9ead2e95b53528ee1501e4e58ceedb6da4  src/structured_scope.ml
 96a876d6e755f2a7db5a83a5a8c0336d136f2cb85ab63d6fd491c116d71b9d04  src/structured_scope.mli
 8649687d3f265925a14e676f92844cc62586fa10bb8e61657fb1e5b34a2c46e3  src/surface_ast.ml
-f850b98fabb5b75393f0ac112d5a5015929d373ab31fc4d33affc3b963b541fd  src/surface_parse.ml
+b8a266780dfd6947797f3df042f1bd8a026d1ddeb2fb9d4f6372bc6cec130919  src/surface_parse.ml
 50184d9a1621af7eee9c7cfb2f852d5807620ff89e9a8ca31c6a5ebdb62b725d  src/task_capability.ml
 34d7c6c4d676c880ed48c14ca8405fa175a7fe369613744bd4f15ceff7452e2a  src/task_capability.mli
 6e4a323f5f8cf971bbaec9c9efd5cac6f33b7b1e2ea3dffe7e62ea253036e514  src/task_handle.ml

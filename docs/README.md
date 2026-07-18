@@ -74,6 +74,8 @@ Read these together when judging whether the release candidate is credible:
   explicit deterministic bootstrap-export decision, guarantees, and non-goals.
 - `release/dx-jac-export/EVIDENCE.md`: successor-only inventory, filesystem
   adversarial coverage, native carrier parity, and reproduction commands.
+- `release/dx-parser-performance/EVIDENCE.md`: DX.6 root-cause profile,
+  before/after deep-input measurements, and the opt-in parser performance lane.
 
 ## Effect Linearity Evidence
 

@@ -747,7 +747,8 @@ prior 687-case inventory to 700. DX.5/DX.7 add six `depth-guards` cases, which
 produces the current total of 706. `effect-taxonomy/2` is the independently
 selectable SC.14 interface identity proof; `channel-contract/8` and `/9` replay
 the two frozen traces, and the eight groups above execute exactly once during
-the full gate.
+the full gate. DX.6 changes surface-parser trivia indexing without adding test,
+cram, or doctest entries, so the `706 / 40 / 27` inventory remains unchanged.
 
 Native scheduling remains outside the current backend. Differential coverage is
 therefore limited to the supported case: an Async operation discharged by an
@@ -757,9 +758,9 @@ grant was added.
 
 ## Reconstruction and verification
 
-The manifest is the complete SC.16 publication overlay on exact SC.12 commit
-`b82809959c085a51eb3e9f8ae7623692983acd65`. Reconstruct it under
-repository-local scratch space:
+The manifest is the complete SC.16 + DX.5/DX.6/DX.7 publication overlay on
+exact SC.12 commit `b82809959c085a51eb3e9f8ae7623692983acd65`.
+Reconstruct it under repository-local scratch space:
 
 ```sh
 set -eu
