@@ -1,6 +1,7 @@
 open Jacquard
 
 let taxonomy_file = "../spec/effect-taxonomy-v1.tsv"
+let taxonomy_v2_file = "../spec/effect-taxonomy-v2.tsv"
 let taxonomy_doc = "../docs/effect-taxonomy.md"
 let membrane_doc = "../docs/effect-membranes.md"
 let review_doc = "../docs/effect-review.md"
@@ -209,13 +210,15 @@ let parse_row line =
   | columns ->
       Alcotest.failf "taxonomy row has %d columns, expected 12: %s" (List.length columns) line
 
-let rows () =
-  Corpus_support.read_file taxonomy_file
-  |> String.split_on_char '\n'
+let rows_from path =
+  Corpus_support.read_file path |> String.split_on_char '\n'
   |> List.filter_map (fun line ->
       let line = String.trim line in
       if String.equal line "" || String.starts_with ~prefix:"#" line then None
       else Some (parse_row line))
+
+let rows () = rows_from taxonomy_file
+let rows_v2 () = rows_from taxonomy_v2_file
 
 let operation_names operations =
   String.split_on_char ';' operations
@@ -1861,11 +1864,11 @@ let registry_entry display_name =
 
 let test_typed_registry_matches_contract () =
   let rows = rows () in
-  let entries = Effect_registry.catalog in
+  let entries = Effect_registry.catalog_v1 in
   Alcotest.(check int) "catalog covers every blessed entry" 26 (List.length entries);
   Alcotest.(check int)
     "only live identities enter the canonical registry" 18
-    (List.length (Effect_registry.entries Effect_registry.canonical));
+    (List.length (Effect_registry.entries Effect_registry.canonical_v1));
   Alcotest.(check (list string))
     "catalog names exactly cover the TSV"
     (rows |> List.map (fun row -> row.effect_name) |> List.sort String.compare)
@@ -1994,14 +1997,14 @@ let test_unknown_identity_is_uncolored_and_unblessed () =
 
 let test_registry_order_is_stable () =
   let names =
-    Effect_registry.entries Effect_registry.canonical
+    Effect_registry.entries Effect_registry.canonical_v1
     |> List.map (fun (entry : Effect_registry.metadata) -> entry.display_name)
   in
   Alcotest.(check (list string)) "stable display ordering" (List.sort String.compare names) names;
   let contract = rows () in
   Alcotest.(check int)
     "catalog and TSV have the same positional extent" (List.length contract)
-    (List.length Effect_registry.catalog);
+    (List.length Effect_registry.catalog_v1);
   List.iteri
     (fun position (row, (entry : Effect_registry.metadata)) ->
       Alcotest.(check string)
@@ -2018,7 +2021,7 @@ let test_registry_order_is_stable () =
           Alcotest.(check (option int))
             (Printf.sprintf "catalog row %d canonical position" position)
             (Some position)
-            (Effect_registry.canonical_order hash)
+            (Effect_registry.canonical_order_v1 hash)
       | "reserved", Effect_registry.Reserved _ ->
           let expected_identity =
             if String.equal row.effect_name "Async" then Concurrency_contract.async_effect_hash
@@ -2029,10 +2032,79 @@ let test_registry_order_is_stable () =
             (Printf.sprintf "catalog row %d reserved identity" position)
             expected_identity row.interface_hash
       | _ -> Alcotest.failf "catalog row %d status/interface mismatch" position)
-    (List.combine contract Effect_registry.catalog);
+    (List.combine contract Effect_registry.catalog_v1);
   Alcotest.(check (option int))
     "unknown identity has no blessed position" None
-    (Effect_registry.canonical_order (Hash.of_string "unblessed ordering fallback"))
+    (Effect_registry.canonical_order_v1 (Hash.of_string "unblessed ordering fallback"))
+
+let test_taxonomy_v2_is_additive () =
+  let v1 = rows () and v2 = rows_v2 () in
+  let rec split_prefix prefix whole =
+    match (prefix, whole) with
+    | [], suffix -> suffix
+    | expected :: expected_rest, actual :: actual_rest ->
+        Alcotest.(check bool) "v2 preserves each v1 row byte-for-byte" true (expected = actual);
+        split_prefix expected_rest actual_rest
+    | _ :: _, [] -> Alcotest.fail "v2 is shorter than the frozen v1 snapshot"
+  in
+  let suffix = split_prefix v1 v2 in
+  Alcotest.(check int) "v1 remains 26 rows" 26 (List.length v1);
+  Alcotest.(check int) "v2 adds exactly one row" 27 (List.length v2);
+  let governance_row =
+    match suffix with
+    | [ row ] -> row
+    | rows -> Alcotest.failf "v2 has %d additive rows, expected one" (List.length rows)
+  in
+  Alcotest.(check string) "additive display name" "GovernanceApprovalV1" governance_row.effect_name;
+  Alcotest.(check string) "additive index name" "governance-approval-v1" governance_row.index_name;
+  Alcotest.(check string)
+    "additive operation" "governance-approval.ask:(GovernanceProposal)->Decision"
+    governance_row.operations;
+  let expected_hash = "41b449689fb30e44180185007d845bbe246e5401fe3e8478f4fd02e556a3f2ed" in
+  Alcotest.(check string) "additive interface hash" expected_hash governance_row.interface_hash;
+  Alcotest.(check string) "additive governance tier" "governance" governance_row.tier;
+  Alcotest.(check string) "additive special risk" "special" governance_row.risk;
+  Alcotest.(check bool)
+    "registry v2 preserves the exact v1 prefix" true
+    (split_prefix Effect_registry.catalog_v1 Effect_registry.catalog_v2
+    = [ List.nth Effect_registry.catalog_v2 26 ]);
+  let identity =
+    match Hash.of_hex expected_hash with
+    | Some hash -> hash
+    | None -> Alcotest.fail "frozen GovernanceApprovalV1 hash is malformed"
+  in
+  Alcotest.(check (option int))
+    "v1 does not reinterpret the new identity" None
+    (Effect_registry.canonical_order_v1 identity);
+  Alcotest.(check (option int))
+    "v2 appends the new identity" (Some 26)
+    (Effect_registry.canonical_order_v2 identity);
+  Alcotest.(check (option int))
+    "current ordering is v2" (Some 26)
+    (Effect_registry.canonical_order identity);
+  let metadata = List.nth Effect_registry.catalog_v2 26 in
+  Alcotest.(check string)
+    "typed additive governance tier" "governance"
+    (Effect_registry.tier_name metadata.tier);
+  Alcotest.(check string)
+    "typed additive special risk" "special"
+    (Effect_registry.risk_name metadata.default_risk);
+  let store = prelude_store () in
+  let entry =
+    match Store.lookup_kind store "governance-approval-v1" Resolve.KEffect with
+    | Some entry -> entry
+    | None -> Alcotest.fail "GovernanceApprovalV1 is absent from the prelude"
+  in
+  Alcotest.(check string)
+    "prelude implements the additive identity" expected_hash (Hash.to_hex entry.hash);
+  let expected_ops = resolved_taxonomy_effect store governance_row in
+  match Store.locate store entry.hash with
+  | Ok { decl = { Kernel.it = Kernel.DefEffect { ops; _ }; _ }; role = Store.Whole; _ } ->
+      Alcotest.(check bool)
+        "additive schema matches the prelude" true
+        (List.equal same_opspec expected_ops ops)
+  | Ok _ -> Alcotest.fail "GovernanceApprovalV1 identity is not an effect declaration"
+  | Error diagnostics -> Eval_support.fail_diags "locate GovernanceApprovalV1" diagnostics
 
 let test_governed_membrane_charter () =
   let doc = Corpus_support.read_file membrane_doc in
@@ -2046,7 +2118,22 @@ let test_governed_membrane_charter () =
     "no unresolved choice marker in membrane charter" false
     (contains_string (lowercase doc) "tbd");
   List.iter check_decision
-    [ "D61"; "D62"; "D63"; "D64"; "D65"; "D66"; "D67"; "D68"; "D69"; "D70"; "D71"; "D72"; "D73" ];
+    [
+      "D61";
+      "D62";
+      "D63";
+      "D64";
+      "D65";
+      "D66";
+      "D67";
+      "D68";
+      "D69";
+      "D70";
+      "D71";
+      "D72";
+      "D73";
+      "D74";
+    ];
   List.iter
     (check_contains "membrane contract" doc)
     [
@@ -2142,4 +2229,5 @@ let suite =
     Alcotest.test_case "unknown identity stays unblessed" `Quick
       test_unknown_identity_is_uncolored_and_unblessed;
     Alcotest.test_case "registry ordering stable" `Quick test_registry_order_is_stable;
+    Alcotest.test_case "taxonomy v2 is additive" `Quick test_taxonomy_v2_is_additive;
   ]

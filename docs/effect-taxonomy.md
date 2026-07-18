@@ -1,8 +1,7 @@
 # Blessed Effect Taxonomy v1
 
-Status: ET.8 release-frozen taxonomy (D56-D63), with Audit, Secret, Approval,
-Judge, and Workspace shipped and their canonical boundaries evidenced through
-ET.8, GM.5, and GM.9, July 2026.
+Status: v1 remains the ET.8 release-frozen taxonomy (D56-D63). GM.7 publishes
+the additive v2 successor with `GovernanceApprovalV1`, July 2026.
 
 This specification freezes the shared effect vocabulary used by signatures,
 authority manifests, package review, and future registry metadata. It is a
@@ -10,7 +9,24 @@ compatibility contract, not a claim that every reserved effect or handler is
 implemented. The machine-readable copy is
 [`../spec/effect-taxonomy-v1.tsv`](../spec/effect-taxonomy-v1.tsv); tests require
 the table below, that artifact, the executable schema fixture, and existing
-prelude declarations to agree.
+prelude declarations to agree. The current additive snapshot is
+[`../spec/effect-taxonomy-v2.tsv`](../spec/effect-taxonomy-v2.tsv).
+
+### Additive v2 successor
+
+Taxonomy v1 is immutable historical evidence. V2 preserves all 26 v1 rows in
+the same order and appends exactly one released governance boundary:
+
+| effect | index-name | namespace | tier | parameters | mode | risk | ring | status | interface-hash | operations | reviewer-meaning |
+|---|---|---|---|---|---|---|---:|---|---|---|---|
+| `GovernanceApprovalV1` | `governance-approval-v1` | `official` | `governance` | `-` | `once` | `special` | `3` | `implemented` | `41b449689fb30e44180185007d845bbe246e5401fe3e8478f4fd02e556a3f2ed` | `governance-approval.ask:(GovernanceProposal)->Decision` | request hash-bound consent for an exact GovernanceProposal |
+
+Catalog position is deterministic serialization metadata only. It conveys no
+privilege, risk priority, or reviewer precedence; the `risk` field and the
+effect-specific contract are authoritative. V2 does not alter `HASH_V0`, any
+released carrier, or any v1 interface. Governance gate-control effects remain
+outside raw authority envelopes, so existing Call and GovernanceProposal
+identities are unchanged.
 
 ## 1. Why names are load-bearing
 
@@ -417,7 +433,7 @@ and is breaking. Adding an operation is also breaking for the same reason;
 handlers silently remain exhaustive. Renames in the mutable name index and
 metadata-only changes retain identity.
 
-The seventeen implemented blessed effects keep their exact current declaration
+The eighteen implemented v1 blessed effects keep their exact current declaration
 hashes listed above. ET.0 does not rewrite those declarations. This preserves
 the historical absence encoding for `multi`, the reviewed `once` discriminator,
 and existing operation names—including `Eval.eval-code`. Each reserved effect's
@@ -427,24 +443,35 @@ edit after that point is a new interface, never an in-place revision.
 
 ### Registry realization
 
-`Effect_registry` is the executable copy used by review tooling. Its resolved
-registry contains exactly the seventeen implemented entries and is keyed only by
-their full `DefEffect` hashes. The complete 26-entry catalog is also typed, but
-the nine `reserved` entries carry no hash and name only the
+`Effect_registry` is the executable copy used by review tooling. It exposes
+explicit `catalog_v1`/`canonical_v1` and `catalog_v2`/`canonical_v2` snapshots;
+the unversioned aliases select v2. The v1 resolved registry contains exactly
+the eighteen released entries and is keyed only by their full `DefEffect`
+hashes. Its complete 26-entry catalog is also typed, but the eight `reserved`
+entries carry no hash and name only the
 `first-release` policy; registration rejects them until a real first interface is
 implemented and frozen. This keeps schema reservation distinct from resolved
-program identity. Audit, Secret, Approval, Judge, and Workspace are released
-governance interfaces. Their identities above are the shipped `DefEffect`
-hashes. The released operations are once
+program identity. V2 contains 27 rows and nineteen released identities: the
+exact v1 prefix plus `GovernanceApprovalV1`. Audit, Secret, Approval, Judge,
+Workspace, and GovernanceApprovalV1 are released governance interfaces. Their
+identities above are the shipped `DefEffect` hashes. The released operations are once
 `audit.record : (AuditEntry) -> ()`, once
 `secret.read : (SecretRef) -> Secret`, once
 `secret.expose : (Secret) -> Text`, once
-`approval.ask : (Proposal) -> Decision`, and once
+`approval.ask : (Proposal) -> Decision`, once
+`governance-approval.ask : (GovernanceProposal) -> Decision`, and once
 `judge.assess : (Call) -> Assessment`, plus once `workspace.read-file`,
 `workspace.write-file`, and `workspace.fetch`. The executable GM.5
 declaration uses the collision-safe GM.1 carrier names `GovernanceCall` and
 `GovernanceAssessment`; these are the versioned v0 spellings of the charter
 schemas shown here.
+
+`GovernanceApprovalV1` is gate-control metadata, not raw action authority. Its
+`governance` tier and `special` review risk do not add it to a
+`GovernanceCall` authority envelope, and its catalog position grants no
+privilege. The live facade handles this control effect separately while the
+action's `Fs`, `Net`, `Secret`, or other raw effects remain explicit in the
+facade row.
 
 Plain rendering is deterministic. Optional ANSI styling colors only the risk
 token of an identity-confirmed official entry. An unregistered effect with

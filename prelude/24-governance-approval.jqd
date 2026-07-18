@@ -1,0 +1,63 @@
+; GM.7 versioned consent boundary for the canonical GovernanceProposal. The
+; frozen ET.6 Approval/Proposal interface remains unchanged; both interfaces
+; return the released Decision carrier and share its proposal-id projection.
+
+(defeffect governance-approval-v1 ()
+  (op governance-approval.ask once ((tref governance-proposal)) (tref decision)))
+
+; Low-level alternative to the gate/disposition facade: validate one supplied
+; Decision and force one supplied action only for Approved. Do not wrap this
+; around a facade that already executes an ExecuteLive disposition.
+(defterm
+  ((binding governance.approval.validate-decision ()
+    (lam ((pvar proposal-value) (pvar decision-value))
+      (match (app (var governance.validate-proposal) (var proposal-value))
+        (clause (pcon err (pvar message)) (app (var err) (var message)))
+        (clause (pcon ok (pvar proposal-id))
+          (let nonrec (pvar returned)
+            (app (var approval.decision-proposal) (var decision-value))
+            (match
+              (app (var governance.hash-eq?) (var returned) (var proposal-id))
+              (clause (pcon true) (app (var ok) (var decision-value)))
+              (clause (pcon false)
+                (app (var err)
+                  (lit "stale Decision: embedded proposal hash does not match the exact GovernanceProposal")))))))))
+   (binding governance.approval.before-action ()
+    (lam ((pvar proposal-value) (pvar decision-value) (pvar action))
+      (match
+        (app (var governance.approval.validate-decision)
+          (var proposal-value) (var decision-value))
+        (clause (pcon ok (pvar exact-decision))
+          (match (var exact-decision)
+            (clause (pcon approved (pwild) (pwild) (pwild))
+              (app (var ok) (app (var action))))
+            (clause (pcon denied (pwild) (pwild) (pvar reason))
+              (app (var err) (app (var tool-denied) (var reason))))
+            (clause (pcon escalate (pwild) (pvar reason))
+              (app (var err) (app (var tool-escalated) (var reason))))))
+        (clause (pcon err (pwild)) (app (var err) (var stale-approval))))))))
+
+; Evidence/test handler only; production hosts must install an authenticated
+; consent handler with their replay policy. Scripted decisions are explicit
+; inputs and are never rebound or synthesized. Each decision must already name
+; the exact GovernanceProposal.
+(defterm ((binding governance.approval.scripted ()
+  (lam ((pvar thunk) (pvar decisions))
+    (app
+      (handle (app (var thunk))
+        (ret (pvar value) (lam ((pwild)) (var value)))
+        (opclause governance-approval.ask ((pvar proposal-value)) k
+          (lam ((pvar remaining))
+            (match (var remaining)
+              (clause (pcon nil)
+                (app (var throw)
+                  (lit "governance.approval.scripted: out of scripted decisions")))
+              (clause (pcon cons (pvar decision-value) (pvar more))
+                (match
+                  (app (var governance.approval.validate-decision)
+                    (var proposal-value) (var decision-value))
+                  (clause (pcon err (pvar message))
+                    (app (var throw) (var message)))
+                  (clause (pcon ok (pvar exact-decision))
+                    (app (app (var k) (var exact-decision)) (var more)))))))))
+      (var decisions))))))

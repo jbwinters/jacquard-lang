@@ -2,7 +2,7 @@
 
 Companion to the blessed effect taxonomy, effect linearity, the standard library, Warp, the surface syntax, and the package manager. This document expands the membrane pattern canonized by D60 into a complete semantic and library design: what crosses the boundary, what is trusted, how calls are identified, how live and simulated execution differ, how approvals and audits bind to immutable IDs, and what the type system can prove before the program runs.
 
-Status: normative v0 charter for G0-G4, July 2026. D61-D73 are frozen for
+Status: normative v0 charter for G0-G4, July 2026. D61-D74 are frozen for
 implementation. No kernel form, ambient authority, scheduler behavior, or
 general linear type is added. G5 posterior judgment remains a separate research
 phase and is not part of the v0 contract.
@@ -43,7 +43,7 @@ The raw world exists only outside the membrane. The untrusted computation’s ro
 ```text
 agent        : () ->{Workspace} Report
 workspace.live(agent)
-             : () ->{Judge, Approval, Audit, Fs, Net, Secret} Report
+             : () ->{Judge, GovernanceApprovalV1, Audit, Fs, Net, Secret} Report
 workspace.dry-run(agent)
              : () ->{Judge, Audit} Report
 ```
@@ -89,7 +89,7 @@ The v0 trusted boundary consists exactly of:
 
 * the canonical membrane implementation and its exact hash;
 * the call normalizers and deterministic renderers;
-* the chosen `Judge`, `Approval`, and `Audit` handlers;
+* the chosen `Judge`, `GovernanceApprovalV1`, and `Audit` handlers;
 * the live drivers that perform raw effects;
 * the runtime root handlers and their grant configuration.
 
@@ -262,7 +262,8 @@ effect. Dynamic selection among different facade operations in one action is
 not accepted in v0; each clause supplies one statically resolved action.
 
 The authority analysis isolates the live/forward action thunk from the gate.
-The v0 gate-control set is exactly `Judge`, `Approval`, and `Audit`; those
+The GM.7 live gate-control set is exactly `Judge`, `GovernanceApprovalV1`, and
+`Audit`; those
 effects and the continuation row `e` are outside the action and therefore do
 not enter its envelope. They are not silently subtracted if performed inside
 the action thunk: such an action is rejected. The private sequence `State` is
@@ -504,8 +505,29 @@ and the disposition is `RefuseDry(NoSimulation)`. A refused pre-action Audit
 write prevents the simulator and summarizer; a refused completion write
 prevents the disposition from returning. The facade clause remains the sole
 owner that consumes its local `Resume`. This implements D64-D66 without
-replacing the frozen representation below; the workspace facade and live gate
-remain later G2 work.
+replacing the frozen representation below; the workspace facade remains later
+G2 work.
+
+Implementation status (GM.7): `prelude/24-governance-approval.jqd` adds the
+versioned `GovernanceApprovalV1` boundary over the canonical
+`GovernanceProposal`, leaving ET.6 `Approval(Proposal)` hash-for-hash unchanged.
+`prelude/25-governance-gate-live.jqd` implements the closed live control gate.
+It records `Evaluated` before approval or action, records `Consented` after an
+exact decision and before action, and returns `ExecuteLive` only for Allow or an
+exact Approved decision. The facade still owns the affine `Resume`, raw action,
+outcome summarization, and `Completed` call. A refused completion write is
+surfaced after the external result exists; it is reconciliation evidence, not
+fictional rollback.
+
+`governance.approval.before-action` is a lower-level alternative for hosts that
+already possess an exact `GovernanceProposal` and `Decision`: it validates the
+pair and forces its supplied action only for `Approved`. It must not wrap the
+gate/facade flow, whose facade already owns execution of `ExecuteLive`; composing
+both execution APIs around one action would violate the at-most-once boundary.
+The helper deliberately reports malformed proposal artifacts and mismatched
+Decision hashes as `StaleApproval`. For incident diagnosis, hosts can call the
+pure `governance.approval.validate-decision` first to retain its more specific
+validation text, without executing an action.
 
 ## 7. One gate, two execution APIs
 
@@ -528,32 +550,33 @@ governance.gate-live :
   forall a.
   ( AuditSequence
   , BoundPolicy LivePolicy
-  , Call
+  , GovernanceCall
   , Option (() ->{} Result ToolError a)
   , (Result ToolError a) ->{} GovernanceOutcomeSummary
-  ) ->{State, Judge, Approval, Audit} LiveDisposition
+  ) ->{State, Judge, GovernanceApprovalV1, Audit} LiveDisposition
 
 governance.gate-dry :
   forall a.
   ( AuditSequence
   , BoundPolicy DryPolicy
-  , Call
+  , GovernanceCall
   , Option (() ->{} Result ToolError a)
   , (Result ToolError a) ->{} GovernanceOutcomeSummary
   ) ->{State, Judge, Audit} DryDisposition a
 
 governance.complete :
-  (AuditSequence, Call, Text, GovernanceOutcomeSummary) ->{State, Audit} ()
+  (AuditSequence, GovernanceCall, Text, GovernanceOutcomeSummary) ->{State, Audit} ()
 ```
 
 These are ordinary single-tail Jacquard types. `gate-live` and `gate-dry` have
 closed control rows; `with-sequence` is the only row-polymorphic owner and
 discharges only `State`. A live facade layer has one outward row
-`{State, Judge, Approval, Audit, raw-effects | e}`; a dry layer has
+`{State, Judge, GovernanceApprovalV1, Audit, raw-effects | e}`; a dry layer has
 `{State, Judge, Audit | e}`. Here the sole tail `e` is the governed body's
 remaining continuation row. The call-specific action is literal in the clause,
 so its fixed raw effects join that same ordinary clause row by inference rather
-than being represented by a second tail. Installing Judge, Approval, and Audit
+than being represented by a second tail. Installing Judge,
+GovernanceApprovalV1, and Audit
 handlers removes those effects normally; `with-sequence` removes State. No
 G0-G4 phase may replace this disposition-and-local-Resume representation.
 
@@ -746,14 +769,14 @@ workspace.live-layer :
   , BoundPolicy LivePolicy
   , WorkspaceSimulators
   , () ->{Workspace | e} a
-  ) ->{State, Judge, Approval, Audit, Fs, Net, Secret | e} a
+  ) ->{State, Judge, GovernanceApprovalV1, Audit, Fs, Net, Secret | e} a
 
 workspace.live :
   forall a | e.
   ( BoundPolicy LivePolicy
   , WorkspaceSimulators
   , () ->{Workspace | e} a
-  ) ->{Judge, Approval, Audit, Fs, Net, Secret | e} a
+  ) ->{Judge, GovernanceApprovalV1, Audit, Fs, Net, Secret | e} a
 ```
 
 The v0 dry layer likewise exposes `State` only to its owner:
@@ -1250,7 +1273,7 @@ A `jac governance check` pass, or an equivalent checker lane, verifies:
 
 * `Call.authority` and `Proposal.authority` equal the operation's frozen raw-authority envelope;
 * transitive expansion of the call-specific live/forward action produces that same envelope;
-* the gate-owned `Judge`, `Approval`, and `Audit` effects and the locally consumed continuation are outside the action projection; no effect inside the action is silently excluded;
+* the gate-owned `Judge`, `GovernanceApprovalV1`, and `Audit` effects and the locally consumed continuation are outside the action projection; no effect inside the action is silently excluded;
 * every facade operation has both a live clause and a dry-run clause;
 * every clause obtains a canonical disposition before invoking a driver; action and simulation paths record completion before consuming their local `Resume`, while refusal paths consume `Resume` after the pre-action `Evaluated` entry and do not fabricate a `Completed` entry;
 * one `with-sequence` owner surrounds every set of nested layers that publishes one audit stream, and every such layer receives the owner's exact token;
@@ -1390,7 +1413,7 @@ world-test, live driver, simulator driver, or audit orchestration.
 
 ### Fault and replay lanes
 
-`fault.all` explores audit-write failure, approval-service failure, simulator failure, driver failure, and completion-write failure at each call site. The record/replay lane pins the exact interaction sequence among `Judge`, `Audit`, `Approval`, and raw effects. Native and interpreter executions must remain byte-identical for all flagship cases.
+`fault.all` explores audit-write failure, approval-service failure, simulator failure, driver failure, and completion-write failure at each call site. The record/replay lane pins the exact interaction sequence among `Judge`, `Audit`, `GovernanceApprovalV1`, and raw effects. Native and interpreter executions must remain byte-identical for all flagship cases.
 
 The demo’s acceptance statement should be stronger than “the policy seems to work”:
 
@@ -1481,15 +1504,16 @@ silently change a v0 assessment or policy decision.
 | D62 | raw authority     | “host” is a role; membranes re-perform concrete blessed world effects, never an opaque `Host` effect                                                       |
 | D63 | Judge status      | bless `Judge` as a once governance effect with `assess : Call -> GovernanceAssessment`                                                                               |
 | D64 | refusal semantics | facade operations return `Result ToolError a`; the gate returns a disposition and the facade clause consumes its local `Resume` exactly once on ordinary paths                 |
-| D65 | execution modes   | separate live and dry-run policy types and entry points; dry-run accepts no live driver and carries no world, `Approval`, or `Secret` row                  |
+| D65 | execution modes   | separate live and dry-run policy types and entry points; dry-run accepts no live driver and carries no world, consent, or `Secret` row                  |
 | D66 | simulation        | simulator is explicit and pure at the gate; missing simulation refuses and never falls back live                                                           |
 | D67 | identity          | call ID binds resolved operation, arguments, transitive raw-authority envelope, preconditions, and optional parent call; proposal ID binds call, policy, assessment, the same envelope, preview, rendering, and summary |
-| D68 | authority claims  | each facade operation freezes a raw envelope; transitive expansion of its live/forward action must equal both authority lists; only gate-owned `Judge`/`Approval`/`Audit` and continuation `e` sit outside the action; resources are configured evidence, never row proofs |
+| D68 | authority claims  | each facade operation freezes a raw envelope; transitive expansion of its live/forward action must equal both authority lists; only gate-owned governance control effects and continuation `e` sit outside the action; resources are configured evidence, never row proofs |
 | D69 | audit ordering    | one `with-sequence` owner and `AuditSequence` token span every operation and nested layer in a published stream; the counter starts at zero and rejects duplicate, skipped, or decreasing values; `Evaluated` and `Consented` precede action and `Completed` follows it |
 | D70 | secret handling   | calls carry versioned `SecretRef` values, never secret material; resolution happens only inside an allowed live driver                                      |
 | D71 | composition       | unchanged re-performance preserves the Call and call ID; transformed calls bind `parent-call-id` and get a new ID; transitive envelopes make intermediate and leaf authority agree; nesting may only tighten |
 | D72 | uncertainty       | under-confidence never auto-allows; posterior risk is a later explicit phase, not hidden inside v0 policy                                                  |
 | D73 | eval boundary     | governed bodies carrying `Eval` are rejected until eval respects scoped or interposed authority                                                            |
+| D74 | approval evolution | released ET.6 `Approval(Proposal)` is immutable; GM.7 adds `GovernanceApprovalV1(GovernanceProposal)` and taxonomy v2, with no carrier or HASH_V0 reinterpretation |
 
 ## 19. What this document changes
 

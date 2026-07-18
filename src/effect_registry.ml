@@ -123,7 +123,7 @@ let reserved display_name index_name tier default_risk reviewer_meaning =
     interface = Reserved { first_version = "first-release" };
   }
 
-let catalog =
+let catalog_v1 =
   [
     released "Abort" "abort" Control No_risk
       "bfdfaeee39c6f5290ebea28e805bdeb92f448f1a1e0b9c47f3c70c53975b4375"
@@ -192,7 +192,15 @@ let catalog =
       "communicate typed values between structured tasks";
   ]
 
-let canonical =
+let governance_approval_v1 =
+  released "GovernanceApprovalV1" "governance-approval-v1" Governance Special
+    "41b449689fb30e44180185007d845bbe246e5401fe3e8478f4fd02e556a3f2ed"
+    "request hash-bound consent for an exact GovernanceProposal"
+
+let catalog_v2 = catalog_v1 @ [ governance_approval_v1 ]
+let catalog = catalog_v2
+
+let canonical_of_catalog catalog =
   List.fold_left
     (fun registry metadata ->
       match metadata.interface with
@@ -203,6 +211,9 @@ let canonical =
           | Error error -> invalid_arg (registration_error_to_string error)))
     empty catalog
 
+let canonical_v1 = canonical_of_catalog catalog_v1
+let canonical_v2 = canonical_of_catalog catalog_v2
+let canonical = canonical_v2
 let entries registry = List.sort (fun a b -> String.compare a.display_name b.display_name) registry
 
 let find registry identity =
@@ -215,7 +226,7 @@ let find registry identity =
 
 let find_canonical identity = find canonical identity
 
-let canonical_order identity =
+let canonical_order_in catalog identity =
   let rec find position = function
     | [] -> None
     | metadata :: rest -> (
@@ -224,6 +235,10 @@ let canonical_order identity =
         | Released _ | Reserved _ -> find (position + 1) rest)
   in
   find 0 catalog
+
+let canonical_order_v1 = canonical_order_in catalog_v1
+let canonical_order_v2 = canonical_order_in catalog_v2
+let canonical_order = canonical_order_v2
 
 type style = Plain | Ansi
 
