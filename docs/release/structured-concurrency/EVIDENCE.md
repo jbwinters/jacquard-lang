@@ -1,11 +1,13 @@
-# Structured Concurrency SC.11 Evidence
+# Structured Concurrency SC.12 Evidence
 
-Status: seeded randomized Warp schedules are implemented over SC.10 canonical
-schedule record and fail-closed strict replay. Replay validates creation before
-allocation and routed operations before world callbacks. This milestone adds no
-host scheduling, exhaustive scheduler, detached tasks, or native root scheduler.
+Status: budgeted exhaustive schedule enumeration is implemented over SC.11
+seeded scheduling and SC.10 canonical record, fail-closed strict replay, and
+explicit provenance-carrying forks. Enumeration explores every bounded runnable
+TaskId choice, retains exact counts and replayable traces, and refuses routed
+effects before world callbacks. This milestone adds no host scheduling,
+detached tasks, or native root scheduler.
 
-- Reconstruction base: `242a64121a530897075bea0c8eec11eee84001e0`
+- Reconstruction base: `404147e56a9e8b6bbec63e19748389d499d17673`
 - Evidence overlay: [MANIFEST.sha256](MANIFEST.sha256)
 - Authoritative contract: [concurrency.md](../../concurrency.md)
 
@@ -434,6 +436,37 @@ Scheduler cache identity now includes `schedule-format-v1` in addition to the
 program hash, scheduler identity, policy, and bounds. Cache payloads remain
 proof-only and every hit still executes a fresh evaluator run.
 
+## Budgeted exhaustive schedule enumeration
+
+`Exhaustive_schedule` makes each exact runnable TaskId queue one ordered
+multi-shot choice support. It explores every choice through SC.10 strict trace
+forks. Each fork starts from a fresh evaluator run, so the search never copies
+or consumes one affine Async resumption twice. The v0 search deliberately does
+no state hashing, schedule deduplication, or partial-order pruning.
+
+Reports contain the complete worlds, exact `explored` and `worlds_started`
+counts, and `Complete` or structured incomplete reasons. Task, decision, and
+world budgets are separately positive. A task- or decision-bounded prefix is
+not counted as a complete world, and any exhausted budget prevents a complete
+claim. The stopped prefix remains canonical and forkable, so earlier alternate
+choices are explored even when the FIFO seed exceeds a bound. Unhandled routed
+operations are recorded and refused before their root callback; the incomplete
+reason names the exact decision and operation hash. Program failures remain
+complete world results so a schedule-sensitive failure is visible rather than
+aborting enumeration.
+
+The hand-counted fixtures prove 2 schedules for one immediate child, 3 for one
+yielding child, and 8 for two immediate children. A Warp `test.run` fixture has
+exactly 2 schedules, produces the same passing report in both, and strictly
+replays every canonical trace byte-for-byte. A fail-fast fixture reaches two
+different first failures under its 8 schedules. Structured budget regressions
+pin incomplete results at all three axes. Two uneven-tree regressions begin
+with an over-budget FIFO seed yet retain exactly three shorter worlds: one at
+five decisions and one at three tasks. A hostile Console fixture proves the
+installed callback is never invoked. The multi-shot handler gauntlet and the
+eight-world two-child fixture prove no world reports E0906, each world creates
+exactly three tasks, and recursive affine-ownership metrics drain to zero.
+
 ## Seeded randomized Warp schedules
 
 `jacquard test --schedules N --seed S` reruns every hermetic Case under the
@@ -476,13 +509,14 @@ moved-path regression proves their replay command is rebuilt from the current
 source/prelude paths. WorldTests remain uncached and Props retain their separate
 data-generation modes.
 
-Host scheduling and exhaustive schedule exploration remain outside SC.11.
+SC.11 seeded scheduling remains part of this successor. Host scheduling remains
+outside SC.12.
 
 ## Compiled test discovery
 
 The lifecycle evidence is registered directly in the compiled Alcotest
 inventory rather than hidden inside the effect-taxonomy governance case. The
-six independently selectable groups and their case names are:
+seven independently selectable groups and their case names are:
 
 | group | compiled case |
 |---|---|
@@ -492,6 +526,7 @@ six independently selectable groups and their case names are:
 | `scope-policy` | `fail-fast and collect aggregation` |
 | `round-robin` | `real evaluator FIFO lifecycle` |
 | `schedule-trace` | `canonical codec and identity`; `legacy, unknown, and noncanonical refusal`; `impossible event refusal` |
+| `exhaustive-schedule` | hand counts; Warp/replay; schedule-sensitive failure; budgets and stopped-prefix alternatives; hermeticity; Once ownership |
 
 The exact discovery and focused execution commands are:
 
@@ -500,16 +535,16 @@ opam exec -- dune build test/test_jacquard.exe
 (
   cd _build/default/test
   ./test_jacquard.exe list --color=never 2>/dev/null |
-    grep -E '^(scheduler-core|structured-scope|cancellation|scope-policy|round-robin|schedule-trace) '
+    grep -E '^(scheduler-core|structured-scope|cancellation|scope-policy|round-robin|schedule-trace|exhaustive-schedule) '
   ./test_jacquard.exe test \
-    'scheduler-core|structured-scope|cancellation|scope-policy|round-robin|schedule-trace' \
+    'scheduler-core|structured-scope|cancellation|scope-policy|round-robin|schedule-trace|exhaustive-schedule' \
     --compact --color=never
 )
 ```
 
-The compiled inventory is exactly 677 cases and the source inventory is 39
+The compiled inventory is exactly 686 cases and the source inventory is 39
 cram transcripts. `effect-taxonomy/3` retains only taxonomy governance and hash
-checks, so the six scheduler/lifecycle suites execute exactly once during the
+checks, so the seven scheduler/lifecycle suites execute exactly once during the
 full gate.
 
 Native scheduling remains outside the current backend. Differential coverage is
@@ -520,14 +555,14 @@ grant was added.
 
 ## Reconstruction and verification
 
-The manifest is the complete SC.11 successor overlay on validated SC.10 commit
-`242a64121a530897075bea0c8eec11eee84001e0`. Reconstruct it under repository-local scratch
+The manifest is the complete SC.12 successor overlay on validated SC.11 commit
+`404147e56a9e8b6bbec63e19748389d499d17673`. Reconstruct it under repository-local scratch
 space:
 
 ```sh
 set -eu
-base=242a64121a530897075bea0c8eec11eee84001e0
-dest="$PWD/.scratch/sc11-evidence-copy"
+base=404147e56a9e8b6bbec63e19748389d499d17673
+dest="$PWD/.scratch/sc12-evidence-copy"
 manifest=docs/release/structured-concurrency/MANIFEST.sha256
 rm -rf "$dest"
 mkdir -p "$dest"
@@ -569,7 +604,7 @@ snapshot_source | cmp "$snapshot" -
 opam exec -- dune build @doc --root "$dest"
 ```
 
-Expected results are zero exits, 677 compiled Alcotest/QCheck cases, 39 cram
+Expected results are zero exits, 686 compiled Alcotest/QCheck cases, 39 cram
 transcripts, and 25 doctest examples across 8 documents.
 
 The default interpreted CLI, prelude-evaluation, and Warp Case paths use this
@@ -579,5 +614,6 @@ hashes remain unchanged. Raw `Eval.run_expr` remains a low-level unscheduled
 seam. SC.4 continues to supply the static child-effect law: a scope discharges
 only Async and retains child world effects. Native root scheduling remains
 future work; native parity evidence is labeled only for Async discharged by an
-in-language handler. SC.11 randomizes only this explicit interpreter decision
-seam and makes no host-scheduling or exhaustive-exploration claim.
+in-language handler. SC.11 randomizes this explicit interpreter decision seam,
+while SC.12 adds hermetic bounded exhaustive exploration. Neither claims host
+scheduling.

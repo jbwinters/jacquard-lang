@@ -37,9 +37,10 @@ project shape from file names alone.
   uncertainty wording, canonical boundaries, and explicit non-goals.
 - `effect-membranes.md`: GM.0 charter for typed governed facades, versioned
   decision artifacts, live/dry boundaries, and monotonic composition.
-- `concurrency.md`: SC.10 canonical schedule record, strict replay, and explicit
-  fork over SC.9 deterministic FIFO round-robin, including the fail-closed v1
-  schema and legacy-log policy; plus SC.8 fail-fast/collect, SC.7 cooperative
+- `concurrency.md`: SC.12 budgeted exhaustive schedule enumeration over the
+  SC.10 canonical record/replay and explicit-fork seam, including exact world
+  counts, structured incomplete results, hermetic refusal, and replayable
+  worlds; plus SC.9 deterministic FIFO, SC.8 fail-fast/collect, SC.7 cooperative
   cancellation, SC.6 structured-scope ownership, the SC.5 policy-independent
   lifecycle, the SC.4 generalized child-effect law, and D46-D50.
 - `warp-testing.md`: Warp test model, rows, handlers, cache, properties, and
@@ -111,11 +112,11 @@ Read these together when judging whether the release candidate is credible:
 
 ## Structured Concurrency Evidence
 
-- `release/structured-concurrency/EVIDENCE.md`: SC.10 versioned record/replay
-  and fork evidence over the validated SC.9 scheduler, with the prior
-  scope-policy, ownership, lifecycle, property, cache, and repeated-run evidence.
+- `release/structured-concurrency/EVIDENCE.md`: SC.12 budgeted exhaustive
+  schedule evidence over SC.11 seeded schedules and SC.10 versioned
+  record/replay, with the prior scheduler, scope, and lifecycle evidence.
 - `release/structured-concurrency/MANIFEST.sha256`: reconstructible complete
-  SC.10 overlay on approved SC.9 commit `f8af018`.
+  SC.12 overlay on approved SC.11 commit `404147e`.
 
 ## Governed Membranes Evidence
 
@@ -150,14 +151,6 @@ Read these together when judging whether the release candidate is credible:
   safe secret references, outcome summaries, and authority-order evidence.
 - `release/governed-membranes/GM9-MANIFEST.sha256`: reconstructible GM.9 overlay
   on the validated identity, Judge, and secret integration stack.
-
-## Structured Concurrency Evidence
-
-- `release/structured-concurrency/EVIDENCE.md`: SC.8 deterministic scope
-  policies plus cooperative cancellation, ownership, lifecycle, property, and
-  repeated-run transcript evidence over the validated SC.7 integration base.
-- `release/structured-concurrency/MANIFEST.sha256`: reconstructible complete
-  SC.8 overlay on approved SC.7 commit `85c25bc`.
 
 ## Maintenance Notes
 

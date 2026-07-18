@@ -266,6 +266,24 @@ let finish_decision controller =
       controller.current <- None;
       Ok ()
 
+let snapshot_prefix controller =
+  let events_rev =
+    match controller.current with
+    | None | Some { operation = None; _ } -> controller.events_rev
+    | Some current ->
+        Schedule_trace.Decide
+          {
+            sequence = current.sequence;
+            runnable = current.runnable;
+            chosen = current.chosen;
+            operation = Option.get current.operation;
+          }
+        :: controller.events_rev
+  in
+  Schedule_trace.make ~scheduler:controller.scheduler ~program:controller.program
+    ~policy:controller.policy ~max_tasks:controller.max_tasks
+    ~max_decisions:controller.max_decisions ?fork:controller.provenance (List.rev events_rev)
+
 let finish controller =
   let ( let* ) = Result.bind in
   let* () =

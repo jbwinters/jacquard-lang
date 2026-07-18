@@ -42,5 +42,12 @@ val observe_operation : t -> Schedule_trace.operation -> (unit, Diag.t list) res
 val finish_decision : t -> (unit, Diag.t list) result
 (** Commits the fully observed decision followed by any creation events produced by that step. *)
 
+val snapshot_prefix : t -> (Schedule_trace.t, Diag.t list) result
+(** [snapshot_prefix controller] returns the canonical replayable prefix observed so far without
+    requiring a complete run. If the current decision has observed its operation, the decision is
+    retained but any not-yet-committed creation records are omitted. This is the budget-refusal
+    seam: exhaustive search can fork the decision and every earlier choice without treating the
+    stopped prefix as a complete world. *)
+
 val finish : t -> (Schedule_trace.t, Diag.t list) result
 (** Refuses missing or extra replay events and returns the canonical fresh trace. *)

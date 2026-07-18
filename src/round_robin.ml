@@ -27,6 +27,24 @@ type outcome = {
 }
 
 type scheduled = { value : Value.t; outcome : outcome; schedule : Schedule_trace.t }
+type scheduled_outcome = { execution_outcome : outcome; execution_schedule : Schedule_trace.t }
+type schedule_budget = Task_limit | Decision_limit
+
+type scheduled_attempt =
+  | Finished of scheduled_outcome
+  | Stopped of {
+      budget : schedule_budget;
+      error : Runtime_err.t;
+      schedule_prefix : Schedule_trace.t;
+    }
+
+type run_failure =
+  | Run_error of Runtime_err.t
+  | Budget_error of {
+      budget : schedule_budget;
+      error : Runtime_err.t;
+      schedule_prefix : Schedule_trace.t;
+    }
 
 type recorded_call = {
   result : (Value.t, Runtime_err.t) result;
@@ -138,29 +156,31 @@ let control_configuration = function
   | Fork_schedule { trace; decision; chosen } ->
       Ok (scheduler_version, Schedule_control.Fork { trace; decision; chosen })
 
-let run_state_global ctx ~policy ~bounds ~program ~schedule_mode initial_state =
-  if bounds.max_tasks <= 0 then Error (Runtime_err.Scheduler_error "task bound must be positive")
+let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed initial_state =
+  if bounds.max_tasks <= 0 then
+    Error (Run_error (Runtime_err.Scheduler_error "task bound must be positive"))
   else if bounds.max_decisions <= 0 then
-    Error (Runtime_err.Scheduler_error "decision bound must be positive")
+    Error (Run_error (Runtime_err.Scheduler_error "decision bound must be positive"))
   else
     let ( let* ) = Result.bind in
     let* scheduler, control_mode =
-      control_configuration schedule_mode |> Result.map_error runtime_of_diagnostics
+      control_configuration schedule_mode
+      |> Result.map_error (fun diagnostics -> Run_error (runtime_of_diagnostics diagnostics))
     in
     let* schedule_control =
       Schedule_control.create ~scheduler ~program ~policy ~max_tasks:bounds.max_tasks
         ~max_decisions:bounds.max_decisions control_mode
-      |> Result.map_error runtime_of_diagnostics
+      |> Result.map_error (fun diagnostics -> Run_error (runtime_of_diagnostics diagnostics))
     in
     let root_id = Concurrency_contract.task_id ~scope_path:[ 0 ] ~spawn_index:0 in
     let* () =
       Schedule_control.creation schedule_control
         Schedule_trace.{ scope_path = [ 0 ]; task = root_id; parent = None }
-      |> Result.map_error runtime_of_diagnostics
+      |> Result.map_error (fun diagnostics -> Run_error (runtime_of_diagnostics diagnostics))
     in
     let* root_scope, root_body =
       Structured_scope.create ~body_resume:(Global_state initial_state)
-      |> Result.map_error runtime_of_diagnostics
+      |> Result.map_error (fun diagnostics -> Run_error (runtime_of_diagnostics diagnostics))
     in
     let make_scope_run scope body_handle parent scope_policy =
       let* policy_controller =
@@ -179,7 +199,10 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode initial_state =
           parent;
         }
     in
-    let* root_run = make_scope_run root_scope root_body None policy in
+    let* root_run =
+      make_scope_run root_scope root_body None policy
+      |> Result.map_error (fun error -> Run_error error)
+    in
     let queue = ref [ (root_run, root_body) ] in
     let all_scopes = ref [ root_run ] in
     let decisions = ref [] in
@@ -192,6 +215,7 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode initial_state =
     let live_count = ref 1 in
     let max_live = ref 1 in
     let fatal_diagnostics = ref [] in
+    let budget_refusal = ref None in
     let validate_creation creation =
       match Schedule_control.creation schedule_control creation with
       | Ok () -> Ok ()
@@ -220,6 +244,7 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode initial_state =
     let drop _resume = () in
     let allocate_task () =
       if !task_count >= bounds.max_tasks then (
+        budget_refusal := Some Task_limit;
         let diagnostics =
           [ Diag.error ~code:"E0908" (Printf.sprintf "task bound %d exceeded" bounds.max_tasks) ]
         in
@@ -641,6 +666,16 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode initial_state =
                       append [ (nested_run, nested_run.body_handle) ];
                       Ok ())
               | _ -> fail_task run handle (Runtime_err.Arity "async.scope expects one thunk"))
+          | Ok (Eval.OCOp { op; name; _ }) when not allow_routed ->
+              let* () =
+                Schedule_control.observe_operation schedule_control (Schedule_trace.Routed op)
+              in
+              fail_task run handle
+                (Runtime_err.Scheduler_error
+                   (Printf.sprintf
+                      "exhaustive scheduling requires a hermetic program; routed operation %s is \
+                       not allowed"
+                      name))
           | Ok (Eval.OCOp { op; name; args; resume }) ->
               let* () =
                 Schedule_control.observe_operation schedule_control (Schedule_trace.Routed op)
@@ -671,6 +706,7 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode initial_state =
       match !queue with
       | [] -> Ok ()
       | _ when !sequence >= bounds.max_decisions ->
+          budget_refusal := Some Decision_limit;
           Error [ Diag.error ~code:"E0908" "decision bound exceeded" ]
       | runnable ->
           let* runnable_ids = queue_ids [] runnable in
@@ -756,10 +792,18 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode initial_state =
     in
     let metrics_after_close = Structured_scope.metrics root_scope in
     if metrics_after_close <> zero_metrics then
-      Error (Runtime_err.Scheduler_error "scope cleanup left nonzero ownership metrics")
+      Error (Run_error (Runtime_err.Scheduler_error "scope cleanup left nonzero ownership metrics"))
     else
       match protected with
-      | Error diagnostics -> Error (runtime_of_diagnostics diagnostics)
+      | Error diagnostics -> (
+          let error = runtime_of_diagnostics diagnostics in
+          match !budget_refusal with
+          | None -> Error (Run_error error)
+          | Some budget -> (
+              match Schedule_control.snapshot_prefix schedule_control with
+              | Ok schedule_prefix -> Error (Budget_error { budget; error; schedule_prefix })
+              | Error snapshot_diagnostics ->
+                  Error (Run_error (runtime_of_diagnostics snapshot_diagnostics))))
       | Ok (body, root_error, aggregate, decisions, trace, task_count, max_live, schedule) ->
           Ok
             ( {
@@ -776,9 +820,10 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode initial_state =
 
 let run_state ctx ?(policy = Concurrency_contract.default_failure_policy) ?(bounds = default_bounds)
     initial_state =
-  Result.map fst
-    (run_state_global ctx ~policy ~bounds ~program:anonymous_program ~schedule_mode:Record_schedule
-       initial_state)
+  run_state_global ctx ~policy ~bounds ~program:anonymous_program ~schedule_mode:Record_schedule
+    ~allow_routed:true initial_state
+  |> Result.map fst
+  |> Result.map_error (function Run_error error | Budget_error { error; _ } -> error)
 
 let value_of_outcome = function
   | { root_error = Some error; _ } -> Error error
@@ -802,16 +847,33 @@ let value_of_outcome = function
 let run_expr ctx ?policy ?bounds expression =
   Result.bind (run_state ctx ?policy ?bounds (Eval.expr_state expression)) value_of_outcome
 
-let run_expr_scheduled ctx ?(policy = Concurrency_contract.default_failure_policy)
-    ?(bounds = default_bounds) ~mode expression =
+let run_expr_scheduled_attempt ctx ?(policy = Concurrency_contract.default_failure_policy)
+    ?(bounds = default_bounds) ?(allow_routed = true) ~mode expression =
   match Canon.hash_expr expression with
   | Error diagnostics -> Error (runtime_of_diagnostics diagnostics)
-  | Ok program ->
-      Result.bind
-        (run_state_global ctx ~policy ~bounds ~program ~schedule_mode:mode
-           (Eval.expr_state expression))
-        (fun (outcome, schedule) ->
-          Result.map (fun value -> { value; outcome; schedule }) (value_of_outcome outcome))
+  | Ok program -> (
+      match
+        run_state_global ctx ~policy ~bounds ~program ~schedule_mode:mode ~allow_routed
+          (Eval.expr_state expression)
+      with
+      | Ok (outcome, schedule) ->
+          Ok (Finished { execution_outcome = outcome; execution_schedule = schedule })
+      | Error (Run_error error) -> Error error
+      | Error (Budget_error { budget; error; schedule_prefix }) ->
+          Ok (Stopped { budget; error; schedule_prefix }))
+
+let run_expr_outcome_scheduled ctx ?policy ?bounds ?allow_routed ~mode expression =
+  Result.bind (run_expr_scheduled_attempt ctx ?policy ?bounds ?allow_routed ~mode expression)
+    (function
+    | Finished execution -> Ok execution
+    | Stopped { error; _ } -> Error error)
+
+let run_expr_scheduled ctx ?policy ?bounds ~mode expression =
+  Result.bind (run_expr_outcome_scheduled ctx ?policy ?bounds ~mode expression)
+    (fun ({ execution_outcome = outcome; execution_schedule = schedule } : scheduled_outcome) ->
+      Result.map
+        (fun value -> ({ value; outcome; schedule } : scheduled))
+        (value_of_outcome outcome))
 
 let run_call ctx ?policy ?bounds callable arguments =
   Result.bind
@@ -821,8 +883,9 @@ let run_call ctx ?policy ?bounds callable arguments =
 let run_call_scheduled ctx ?(policy = Concurrency_contract.default_failure_policy)
     ?(bounds = default_bounds) ~program ~mode callable arguments =
   Result.bind
-    (run_state_global ctx ~policy ~bounds ~program ~schedule_mode:mode
-       (Eval.apply_state ctx callable arguments))
+    (run_state_global ctx ~policy ~bounds ~program ~schedule_mode:mode ~allow_routed:true
+       (Eval.apply_state ctx callable arguments)
+    |> Result.map_error (function Run_error error | Budget_error { error; _ } -> error))
     (fun (outcome, schedule) ->
       Result.map (fun value -> { value; outcome; schedule }) (value_of_outcome outcome))
 
@@ -830,8 +893,9 @@ let run_call_recorded ctx ?(policy = Concurrency_contract.default_failure_policy
     ?(bounds = default_bounds) ~program ~mode callable arguments =
   Result.map
     (fun (outcome, schedule) -> { result = value_of_outcome outcome; outcome; schedule })
-    (run_state_global ctx ~policy ~bounds ~program ~schedule_mode:mode
-       (Eval.apply_state ctx callable arguments))
+    (run_state_global ctx ~policy ~bounds ~program ~schedule_mode:mode ~allow_routed:true
+       (Eval.apply_state ctx callable arguments)
+    |> Result.map_error (function Run_error error | Budget_error { error; _ } -> error))
 
 let policy_text = function Concurrency_contract.Fail_fast -> "fail-fast" | Collect -> "collect"
 
