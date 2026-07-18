@@ -92,6 +92,7 @@
   (source_tree ../corpus/surface)
   ../corpus/governance/malformed-operation-names.tsv
   ../corpus/governance/unresolved-operations.tsv
+  ../corpus/governance/verifier-cases-v0.tsv
   (glob_files_rec ../corpus/*.expect)
   (glob_files_rec ../corpus/*.golden)
   (glob_files_rec ../prelude/*.jqd)
@@ -119,6 +120,8 @@
   ../docs/release/governed-membranes/GM4-MANIFEST.sha256
   ../docs/release/governed-membranes/GM5-EVIDENCE.md
   ../docs/release/governed-membranes/GM5-MANIFEST.sha256
+  ../docs/release/governed-membranes/GM8-EVIDENCE.md
+  ../docs/release/governed-membranes/GM8-MANIFEST.sha256
   ../docs/release/governed-membranes/GM9-EVIDENCE.md
   ../docs/release/governed-membranes/GM9-MANIFEST.sha256
   ../docs/release/structured-concurrency/EVIDENCE.md

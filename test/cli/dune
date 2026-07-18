@@ -12,6 +12,7 @@
   (source_tree ../native-gauntlet)
   ../once_interpreter_probe.exe
   ../gen_once_hostile.exe
+  ../test_jacquard.exe
   ../scope_policy_trace.exe
   ../round_robin_trace.exe
   ../../demos/concurrency/concurrency_evidence.exe

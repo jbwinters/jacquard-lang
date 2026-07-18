@@ -27,7 +27,7 @@ native Channel, actor, or supervision claim.
 | C3 | Scoped typed channels run through deterministic FIFO, seeded, replay, exhaustive, and cached interpreter scheduling with exact run/scope ownership, rendezvous and buffering, close, cancellation, and deadlock behavior. | `channel-contract`, `round-robin`, and `exhaustive-schedule` suites; `test/cli/task-values.t`; `test/cli/schedule-replay.t`; and the frozen traces below |
 | C4 | Not claimed: host asynchronous I/O, actors, and supervision are absent. | [LIMITS.md](LIMITS.md) |
 
-The final inventory is exactly 710 compiled Alcotest/QCheck cases, 40 recursive
+The current successor inventory is exactly 724 compiled Alcotest/QCheck cases, 41 recursive
 cram transcript files, and 27 named doctest examples across 8 documents. The
 commands in [Reconstruction and verification](#reconstruction-and-verification)
 recompute those counts instead of trusting this paragraph.
@@ -738,17 +738,19 @@ opam exec -- dune build test/test_jacquard.exe
 
 The current inventory is mechanically checked against compiled discovery:
 
-- Alcotest/QCheck cases: `710`
-- Cram transcript files: `40`
+- Alcotest/QCheck cases: `724`
+- Cram transcript files: `41`
 
 The SC.14 baseline arithmetic remains exact: twelve compiled
 `channel-contract` cases plus the `store/9` Channel-private-hash case took the
 prior 687-case inventory to 700. DX.5/DX.7 add six `depth-guards` cases, which
-produces the current total of 710. `effect-taxonomy/2` is the independently
+produces the then-current total of 710. `effect-taxonomy/2` is the independently
 selectable SC.14 interface identity proof; `channel-contract/8` and `/9` replay
 the two frozen traces, and the eight groups above execute exactly once during
 the full gate. DX.6 changes surface-parser trivia indexing without adding test,
-cram, or doctest entries, so the `710 / 40 / 27` inventory remains unchanged.
+cram, or doctest entries. GM.8 later adds fourteen governance-verifier cases
+and one analysis-lane cram, producing the current `724 / 41 / 27` successor
+inventory without changing the frozen SC arithmetic.
 
 Native scheduling remains outside the current backend. Differential coverage is
 therefore limited to the supported case: an Async operation discharged by an
@@ -804,9 +806,9 @@ opam exec -- dune build @all --root "$dest"
 opam exec -- dune runtest --force --root "$dest"
 (
   cd "$dest/_build/default/test"
-  test "$(./test_jacquard.exe list --color=never 2>/dev/null | wc -l)" -eq 710
+  test "$(./test_jacquard.exe list --color=never 2>/dev/null | wc -l)" -eq 724
 )
-test "$(find "$dest/test" -name '*.t' | wc -l)" -eq 40
+test "$(find "$dest/test" -name '*.t' | wc -l)" -eq 41
 test "$(grep -h -E '^```jacquard doctest=' \
   "$dest/README.md" \
   "$dest/docs/effect-membranes.md" \

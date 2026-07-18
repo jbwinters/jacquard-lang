@@ -1293,6 +1293,18 @@ to both authority lists, and fails the build on disagreement. Resource entries
 remain configured evidence and are checked against configuration, never
 inferred from a row.
 
+Implementation status (GM.8): `Governance_verify` implements the versioned,
+fail-closed analysis boundary above. Trusted tooling supplies resolved evidence
+derived from checked artifacts; the evidence is not a serialized policy format,
+a user-authored proof, or an authority grant. The verifier reads actual stored
+term schemes, follows referenced group members, recomputes HASH_V0 identity
+claims, expands forwarded operation envelopes, and reports E1400--E1412 with
+source spans. It also enforces the §13 `Eval` prohibition even when a governed
+body attempts to handle `Eval` locally. Resource entries are compared with
+configured evidence only. This slice adds neither the `jac governance check`
+command nor an artifact extractor, membrane handler, simulator, live driver,
+or resource-scope type proof; those remain separate tooling and runtime work.
+
 ### 12.3 Review surfaces
 
 * `jac why-effect Fs` points to the leaf membrane driver that introduces it, not merely to the agent function that requested `Workspace`.

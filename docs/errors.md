@@ -237,6 +237,36 @@ every predecessor, digest, and exact sequence `0, 1, 2, ...` in order, then comp
 separately supplied published head. Malformed input returns diagnostics; it does
 not raise an exception.
 
+## Governance verifier (E14xx)
+
+| code | meaning | example |
+|------|---------|---------|
+| E1400 | verifier environment or analysis version is unsupported | a missing canonical gate identity or `governance-verifier-v1` input |
+| E1401 | facade effect or operation mode is invalid | a non-`once` facade operation |
+| E1402 | facade operation coverage is incomplete or duplicated | a frozen operation with no dry clause |
+| E1403 | gate identity, branch coverage, or post-gate ordering is invalid | consuming `Resume` before recording live completion |
+| E1404 | audit sequence ownership or token provenance is invalid | two `with-sequence` owners around one published stream |
+| E1405 | a normalizer or summarizer is not a closed pure arrow | a summarizer whose inferred row contains `Console` |
+| E1406 | a carried identity does not match its canonical subject | a `Call.call-id` copied from different arguments |
+| E1407 | action expansion disagrees with the frozen authority envelope | a forwarded operation that introduces undeclared `Net` authority |
+| E1408 | gate-owned control authority appears inside the action projection | listing `State` or `Audit` as raw action authority |
+| E1409 | a serialized call contains a `Secret` or uses generic inspection | embedding secret bytes instead of a `SecretRef` |
+| E1410 | an `Ask` proposal does not bind every exact review hash | omitting the assessment identity |
+| E1411 | forwarded-call lineage is inconsistent | transformed arguments with no parent call ID |
+| E1412 | governed code can reach `Eval` | handling `Eval` locally and then claiming it is absent |
+
+`Governance_verify.verify` consumes a versioned analysis IR produced by trusted
+tooling from resolved, typechecked artifacts. That IR is verifier evidence, not
+a user-authored proof or an authority grant. The verifier resolves the real
+stored terms, recomputes HASH_V0 identities, expands forwarded action envelopes,
+and returns all detected violations with source spans. Resource scopes remain
+configured evidence rather than row-type proofs. `Eval` is an absolute
+prohibition for governed code, including code that attempts to handle it
+locally.
+
+GM.8 provides this library analysis boundary. A later tooling slice may expose
+it as `jac governance check`; no such command is implied by these diagnostics.
+
 ## Appendix: the W5.3 audit (ten message rewrites)
 
 Before/after wording improvements applied during the audit:
