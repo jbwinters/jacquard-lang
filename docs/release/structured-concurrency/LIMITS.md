@@ -1,9 +1,9 @@
-# Structured Concurrency C0-C2 Limits
+# Structured Concurrency C0-C3 Limits
 
 Status: explicit SC.16 claim boundary at base
 `b82809959c085a51eb3e9f8ae7623692983acd65`.
 
-This document says what the C0-C2 evidence does not prove. A later milestone
+This document says what the C0-C3 evidence does not prove. A later milestone
 may add one of these features, but that later evidence must stand on its own;
 it cannot silently widen this gate.
 

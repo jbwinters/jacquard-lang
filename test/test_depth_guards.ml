@@ -188,6 +188,12 @@ let capture_entry exception_value =
   (status, Buffer.contents buffer)
 
 let test_variable_group_diagnostics_unchanged () =
+  check_variable_group_diagnostic "tforall malformed tvar container" ~wrong_form:"(tvar a)"
+    ~message:"the type variables in `tforall` must be a parenthesized group"
+    "(ann (lit 0) (tforall (tvar a) () (tref int)))";
+  check_variable_group_diagnostic "tforall malformed rvar container" ~wrong_form:"(rvar e)"
+    ~message:"the row variables in `tforall` must be a parenthesized group"
+    "(ann (lit 0) (tforall () (rvar e) (tref int)))";
   check_variable_group_diagnostic "tforall tvar" ~wrong_form:"(rvar a)"
     ~message:"type variables in `tforall` must be `tvar` forms"
     "(ann (lit 0) (tforall ((rvar a)) () (tvar a)))";

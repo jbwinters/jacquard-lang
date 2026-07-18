@@ -1,9 +1,8 @@
 # DX.6 Parser-depth performance evidence
 
-Status: opt-in release-hardening evidence based on prepared DX.5/DX.7 head
-`473942b`, which includes the SC.16 C0-C3 stack. After PR #36 lands, this
-prepared-head reference must be replaced by its merged `main` commit before
-DX.6 merges.
+Status: opt-in release-hardening evidence based on merged DX.5/DX.7 main commit
+`b75b7a951289745bc3c26633e5da4f6e139199a0`, which includes the SC.16 C0-C3
+stack.
 
 ## Finding
 

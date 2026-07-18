@@ -203,17 +203,17 @@ let guard_depth depth (f : Form.t) =
       max_nesting_depth
 
 (* DX.7: [tforall], [deftype], and [defeffect] use the same group-shape validator. [head]
-   parameterizes the only semantic difference while [variable_what] preserves the old diagnostics
-   byte-for-byte. *)
-let vars_group ~depth ~head ~what ~variable_what (f : Form.t) arg =
+   parameterizes the only semantic difference. [group_what] names a malformed container while
+   [element_what] and [variable_what] preserve the old element diagnostics byte-for-byte. *)
+let vars_group ~depth ~head ~group_what ~element_what ~variable_what (f : Form.t) arg =
   List.map
     (fun g ->
       guard_depth depth g;
       if g.Form.head <> head then
-        err ~meta:g.Form.meta ~code:"E0203" "%s must be `%s` forms" what head;
+        err ~meta:g.Form.meta ~code:"E0203" "%s must be `%s` forms" element_what head;
       expect_arity g 1;
       the_sym ~what:variable_what g (List.nth g.Form.args 0))
-    (the_group ~what f arg)
+    (the_group ~what:group_what f arg)
 
 let rec expr_of depth (f : Form.t) : expr =
   guard_depth depth f;
@@ -478,12 +478,14 @@ and ty_of depth (f : Form.t) : ty =
   | "tforall" ->
       expect_arity f 3;
       let tyvars =
-        vars_group ~depth:child_depth ~head:"tvar" ~what:"type variables in `tforall`"
-          ~variable_what:"the type variable" f (List.nth f.Form.args 0)
+        vars_group ~depth:child_depth ~head:"tvar" ~group_what:"the type variables"
+          ~element_what:"type variables in `tforall`" ~variable_what:"the type variable" f
+          (List.nth f.Form.args 0)
       in
       let rowvars =
-        vars_group ~depth:child_depth ~head:"rvar" ~what:"row variables in `tforall`"
-          ~variable_what:"the row variable" f (List.nth f.Form.args 1)
+        vars_group ~depth:child_depth ~head:"rvar" ~group_what:"the row variables"
+          ~element_what:"row variables in `tforall`" ~variable_what:"the row variable" f
+          (List.nth f.Form.args 1)
       in
       let body = ty_of child_depth (the_form ~what:"the body" f (List.nth f.Form.args 2)) in
       node (TForall (tyvars, rowvars, body))
@@ -603,8 +605,9 @@ let decl_of depth (f : Form.t) : decl =
       expect_min_arity f 3;
       let tname = the_sym ~what:"the type name" f (List.nth f.Form.args 0) in
       let tvars =
-        vars_group ~depth:child_depth ~head:"tvar" ~what:"the type parameters"
-          ~variable_what:"the type variable" f (List.nth f.Form.args 1)
+        vars_group ~depth:child_depth ~head:"tvar" ~group_what:"the type parameters"
+          ~element_what:"the type parameters" ~variable_what:"the type variable" f
+          (List.nth f.Form.args 1)
       in
       let cons =
         List.map
@@ -616,8 +619,9 @@ let decl_of depth (f : Form.t) : decl =
       expect_min_arity f 3;
       let ename = the_sym ~what:"the effect name" f (List.nth f.Form.args 0) in
       let evars =
-        vars_group ~depth:child_depth ~head:"tvar" ~what:"the effect parameters"
-          ~variable_what:"the type variable" f (List.nth f.Form.args 1)
+        vars_group ~depth:child_depth ~head:"tvar" ~group_what:"the effect parameters"
+          ~element_what:"the effect parameters" ~variable_what:"the type variable" f
+          (List.nth f.Form.args 1)
       in
       let ops =
         List.map
