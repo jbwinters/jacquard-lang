@@ -13,7 +13,9 @@ individually valid.
 
   $ sed 's/#c743dec7907499b28565512b4f2b1a2314b700503eb3ef26949c2cf0ebe98fc6/#0000000000000000000000000000000000000000000000000000000000000000/3' governance-run-bundle-v1.jqd > forged-run-bundle-v1.jqd
   $ jacquard governance verify-run forged-run-bundle-v1.jqd
-  error[E1501]: Proposal artifact 0 carries #0000000000000000000000000000000000000000000000000000000000000000 but canonical governance-proposal-v0 bytes hash to #c743dec7907499b28565512b4f2b1a2314b700503eb3ef26949c2cf0ebe98fc6
+  error[E1501]: A governance artifact is malformed or carries the wrong identity.
+    Cause: Proposal artifact 0 carries #0000000000000000000000000000000000000000000000000000000000000000 but canonical governance-proposal-v0 bytes hash to #c743dec7907499b28565512b4f2b1a2314b700503eb3ef26949c2cf0ebe98fc6
+    Next step: Restore the exact canonical artifact and its matching carried identity.
   [1]
 
 Bundle bytes are a canonical review artifact: exactly one compact form and a
@@ -22,5 +24,7 @@ the same evidence package.
 
   $ tr -d '\n' < governance-run-bundle-v1.jqd > no-lf-run-bundle-v1.jqd
   $ jacquard governance verify-run no-lf-run-bundle-v1.jqd
-  error[E1500]: no-lf-run-bundle-v1.jqd: governance run bundle must end with LF
+  error[E1500]: The governance run bundle is malformed, unsupported, or unsafe to read.
+    Cause: no-lf-run-bundle-v1.jqd: governance run bundle must end with LF
+    Next step: Regenerate one canonical governance-run-bundle-v1 from stable verified artifacts.
   [1]

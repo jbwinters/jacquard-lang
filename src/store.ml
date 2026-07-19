@@ -36,7 +36,42 @@ let object_path t h = Filename.concat (objects_dir t) (Hash.to_hex h ^ ".jqd")
    .jqd, so the identity self-check at open never sees them, and renames never touch
    them — the metadata law extended to the file system. *)
 let origin_path t h = Filename.concat (objects_dir t) (Hash.to_hex h ^ ".origin")
-let err ~code fmt = Printf.ksprintf (fun msg -> Error [ Diag.error ~code msg ]) fmt
+
+let diagnostic_spec = function
+  | "E0601" ->
+      ( "The content store does not contain the requested hash.",
+        "Add the referenced declaration to this store before using it." )
+  | "E0602" ->
+      ( "The content store does not contain the requested name.",
+        "Choose a name currently bound in this store." )
+  | "E0603" ->
+      ( "The content store contains corrupt data.",
+        "Restore the store from trusted canonical objects or rebuild it from source." )
+  | "E0604" ->
+      ("This store target cannot be named.", "Name an individual definition member instead.")
+  | "E0605" ->
+      ( "The requested store name is invalid.",
+        "Rewrite the name using the documented lowercase dotted-name grammar." )
+  | "E0606" ->
+      ( "A requested diff source or store does not exist.",
+        "Pass two existing source files or two existing store directories." )
+  | "E0607" ->
+      ( "This name is bound to more than one declaration kind.",
+        "Pass an explicit kind to select the intended binding." )
+  | "E0608" -> ("The requested store kind is invalid.", "Choose term, con, op, type, or effect.")
+  | "E0609" ->
+      ( "The diff operands are invalid or incompatible.",
+        "Pass two readable source files or two readable store directories of the same kind." )
+  | "E0610" ->
+      ( "A diff source contains a runnable top-level expression.",
+        "Compare declaration-only source artifacts or stores." )
+  | code -> raise (Diag.Bug_invalid_diagnostic ("unknown store diagnostic code " ^ code))
+
+let diagnostic ~code cause =
+  let summary, next_step = diagnostic_spec code in
+  Diag.error ~domain:Store ~code ~summary ~cause ~next_step ~contrast:None ()
+
+let err ~code fmt = Printf.ksprintf (fun cause -> Error [ diagnostic ~code cause ]) fmt
 
 let kind_sym = function
   | Resolve.KTerm -> "term"
@@ -54,9 +89,12 @@ let kind_of_sym = function
   | _ -> None
 
 let private_name_diagnostic name hash =
-  Diag.error ~code:Concurrency_contract.task_escape_code
-    ~hint:"Task and Channel handles are created only inside a structured scheduler scope"
-    (Printf.sprintf "name `%s` cannot expose scheduler-private hash %s" name (Hash.to_hex hash))
+  Diag.error ~domain:Concurrency ~code:Concurrency_contract.task_escape_code
+    ~summary:"A scheduler-private handle cannot be published through the store."
+    ~cause:
+      (Printf.sprintf "Name `%s` cannot expose scheduler-private hash %s." name (Hash.to_hex hash))
+    ~next_step:"Create and use Task and Channel handles only inside a structured scheduler scope."
+    ~contrast:None ()
 
 let scheduler_private_hash hash =
   Concurrency_contract.is_task_private_hash hash || Channel_contract.is_channel_private_hash hash
@@ -169,7 +207,7 @@ let open_store root : (t, Diag.t list) result =
         | file :: rest -> (
             let path = Filename.concat (objects_dir t) file in
             match load_object ~file:path (read_file path) with
-            | Error ds -> Error (Diag.error ~code:"E0603" ("corrupt object " ^ file) :: ds)
+            | Error ds -> Error (diagnostic ~code:"E0603" ("Corrupt object " ^ file ^ ".") :: ds)
             | Ok (decl, hs) ->
                 if Filename.remove_extension file <> Hash.to_hex hs.Canon.decl_hash then
                   err ~code:"E0603" "object %s does not hash to its file name" file

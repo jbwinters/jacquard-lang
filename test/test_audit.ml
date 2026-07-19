@@ -98,11 +98,11 @@ let test_opaque_constructor_direct_hash_is_sealed () =
   let opaque_hex = "d48426af83dd64417666d11346b732136f39950871f9c4708e947515f9eda3db" in
   let opaque = Option.get (Hash.of_hex opaque_hex) in
   (match Store.locate store opaque with
-  | Error [ { Diag.code = "E0601"; _ } ] -> ()
+  | Error [ diagnostic ] when Diag.code diagnostic = Some "E0601" -> ()
   | Error diagnostics -> Eval_support.fail_diags "opaque member lookup" diagnostics
   | Ok _ -> Alcotest.fail "opaque constructor remained addressable by its derived hash");
   (match Store.bind_name store "forged-hash" opaque with
-  | Error [ { Diag.code = "E0601"; _ } ] -> ()
+  | Error [ diagnostic ] when Diag.code diagnostic = Some "E0601" -> ()
   | Error diagnostics -> Eval_support.fail_diags "opaque member rebinding" diagnostics
   | Ok () -> Alcotest.fail "opaque constructor could be rebound to a public name");
   let reopened =
@@ -111,24 +111,25 @@ let test_opaque_constructor_direct_hash_is_sealed () =
     | Error diagnostics -> Eval_support.fail_diags "reopen opaque store" diagnostics
   in
   (match Store.locate reopened opaque with
-  | Error [ { Diag.code = "E0601"; _ } ] -> ()
+  | Error [ diagnostic ] when Diag.code diagnostic = Some "E0601" -> ()
   | Error diagnostics -> Eval_support.fail_diags "reopened opaque member lookup" diagnostics
   | Ok _ -> Alcotest.fail "reopen restored the opaque derived-hash index entry");
   Alcotest.(check bool)
     "reopen preserves hidden name" true
     (Store.lookup_kind reopened "hash-opaque" Resolve.KCon = None);
   (match check_expr (Printf.sprintf "(ref #%s con)" opaque_hex) with
-  | Error [ { Diag.code = "E0805"; message; _ } ] ->
+  | Error [ diagnostic ] when Diag.code diagnostic = Some "E0805" ->
       Alcotest.(check bool)
         "direct hash is diagnosed unknown" true
-        (String.starts_with ~prefix:"error[E0601]: unknown hash" message)
+        (String.starts_with ~prefix:"E0601:" (Diag.cause diagnostic)
+        && String.ends_with ~suffix:(opaque_hex ^ ")") (Diag.cause diagnostic))
   | Error diagnostics -> Eval_support.fail_diags "check opaque direct reference" diagnostics
   | Ok _ -> Alcotest.fail "opaque constructor direct reference typechecked");
   (match Eval_support.eval_with ctx store (Printf.sprintf "(ref #%s con)" opaque_hex) with
   | Error (Runtime_err.Unresolved message) ->
       Alcotest.(check bool)
         "unchecked evaluator also fails closed" true
-        (String.starts_with ~prefix:"error[E0601]: unknown hash" message)
+        (String.starts_with ~prefix:"E0601:" message)
   | Error error ->
       Alcotest.failf "opaque direct reference failed with the wrong runtime error: %s"
         (Runtime_err.to_string error)

@@ -20,7 +20,7 @@ create a bootstrap twin; explicit export is the evidence/debug boundary.
 The command and top-level help state the explicit workflow.
 
   $ jacquard --help=plain | grep '^       export '
-         export --output=OUT [--prelude=DIR] [--syntax=SYNTAX] [OPTION]…
+         export [OPTION]… INPUT.jac
   $ jacquard export --help=plain | grep 'atomically and never replaces'
          atomically and never replaces an existing path.
 
@@ -116,8 +116,12 @@ stdout, stderr, and exit rather than diverging or silently compiling one side.
   $ test "$surface_status" = "$bootstrap_status" && echo "native carrier refusal parity: preflight (exit $surface_status)"
   native carrier refusal parity: preflight (exit 1)
   $ cat preflight-surface.build.stderr
-  error[E1101]: not yet compilable in native v1: live-policy builtin `text.contains?` is not yet implemented natively
-  error[E1102]: run-plan uses eval, which requires the interpreter tier
+  error[E1101]: Program is outside the native v1 compilation subset
+    Cause: Not yet compilable in native v1: live-policy builtin `text.contains?` is not yet implemented natively
+    Next step: Run the program with the interpreter or rewrite the unsupported construct.
+  error[E1102]: Program requires the interpreter tier
+    Cause: run-plan uses eval, which requires the interpreter tier
+    Next step: Run this program with the interpreter.
 
 Comments, documentation, formatting, and their spans are intentionally erased;
 the exported structure retains the semantic hash rather than source fidelity.
@@ -142,7 +146,9 @@ An existing output is a stable collision and is never truncated.
 
   $ printf 'sentinel\n' > occupied.jqd
   $ jacquard export direct.jac -o occupied.jqd
-  error[E1301]: export output occupied.jqd already exists; choose a new path or remove it explicitly
+  error[E1301]: Export destination already exists
+    Cause: export output occupied.jqd already exists; choose a new path or remove it explicitly
+    Next step: Correct the export path or input and try again.
   [1]
   $ cat occupied.jqd
   sentinel
@@ -152,14 +158,17 @@ their spans and resolution retains suggestions.
 
   $ printf 'answer = @\n' > malformed.jac
   $ jacquard export malformed.jac -o malformed.jqd
-  malformed.jac:1:10-11: error[E1210]: unexpected surface character `@`
+  malformed.jac:1:10-11: error[E1210]: The source contains an unexpected surface character.
+    Cause: unexpected surface character `@`
+    Next step: Remove the character or replace it with valid surface syntax.
   [1]
   $ test ! -e malformed.jqd && echo no-partial-malformed
   no-partial-malformed
   $ printf 'ad(1, 2)\n' > unresolved.jac
-  $ jacquard export unresolved.jac -o unresolved.jqd > unresolved.err 2>&1; status=$?; grep -E 'error\[E0301\]|hint: did you mean' unresolved.err; echo "exit:$status"
-  unresolved.jac:1:1-3: error[E0301]: unknown name `ad`
-    hint: did you mean one of: add, ask, eq?
+  $ jacquard export unresolved.jac -o unresolved.jqd > unresolved.err 2>&1; status=$?; cat unresolved.err; echo "exit:$status"
+  unresolved.jac:1:1-3: error[E0301]: This reference names something that is not in scope.
+    Cause: No name named `ad` is in scope; nearby names are `add`, `ask`, `eq`.
+    Next step: Correct the reference to an in-scope name or declaration.
   exit:1
   $ test ! -e unresolved.jqd && echo no-partial-unresolved
   no-partial-unresolved
@@ -168,18 +177,24 @@ Stdin and non-seekable artifacts are refused before reading. Callers must
 materialize them so syntax and resolution have a named source boundary.
 
   $ printf '1\n' | jacquard export - -o stdin.jqd
-  error[E1302]: jacquard export requires a named regular input file; materialize stdin first
+  error[E1302]: Export input could not be read
+    Cause: jacquard export requires a named regular input file; materialize stdin first
+    Next step: Correct the export path or input and try again.
   [1]
   $ mkfifo source.fifo
   $ jacquard export source.fifo -o fifo.jqd
-  error[E1302]: export input source.fifo is not a regular seekable file; materialize the source first
+  error[E1302]: Export input could not be read
+    Cause: export input source.fifo is not a regular seekable file; materialize the source first
+    Next step: Correct the export path or input and try again.
   [1]
 
 An atomic-publication failure is actionable and leaves no destination or
 same-directory temporary artifact.
 
-  $ jacquard export direct.jac -o missing/out.jqd > atomic.err 2>&1; status=$?; grep 'error\[E1303\]: cannot publish export atomically' atomic.err | sed -E 's/tmp-[0-9]+-0/tmp-PID-0/'; echo "exit:$status"
-  error[E1303]: cannot publish export atomically: missing/out.jqd: No such file or directory (open, missing/.out.jqd.tmp-PID-0)
+  $ jacquard export direct.jac -o missing/out.jqd > atomic.err 2>&1; status=$?; sed -E 's/tmp-[0-9]+-0/tmp-PID-0/' atomic.err; echo "exit:$status"
+  error[E1303]: Export output could not be written
+    Cause: cannot publish export atomically: missing/out.jqd: No such file or directory (open, missing/.out.jqd.tmp-PID-0)
+    Next step: Correct the export path or input and try again.
   exit:1
   $ test ! -e missing/out.jqd && test -z "$(find . -maxdepth 1 -name '.out.jqd.tmp-*' -print)" && echo no-partial-atomic
   no-partial-atomic

@@ -34,7 +34,7 @@ let test_reader_parses_new_symbols () =
   | _ -> Alcotest.fail "dotted symbols should parse as single atoms");
   (* heads keep the strict grammar *)
   match Reader.parse_one ~file:"n.jqd" "(list.map (lit 1))" with
-  | Error [ d ] -> Alcotest.(check string) "dotted head rejected" "E0107" d.Diag.code
+  | Error [ d ] -> Alcotest.(check string) "dotted head rejected" "E0107" (Diag.code_or_uncoded d)
   | _ -> Alcotest.fail "a dotted head must be rejected"
 
 let test_printer_roundtrip_new_symbols () =
@@ -112,7 +112,7 @@ let test_value_precedence_and_warning () =
   in
   match Resolve.resolve_expr_w (Store.names_view store) e with
   | Ok ({ Kernel.it = Kernel.Ref (_, Kernel.Term); _ }, [ w ]) ->
-      Alcotest.(check string) "warning code" "W0301" w.Diag.code
+      Alcotest.(check string) "warning code" "W0301" (Diag.code_or_uncoded w)
   | Ok (_, ws) -> Alcotest.failf "expected term ref + 1 warning, got %d warnings" (List.length ws)
   | Error ds -> Eval_support.fail_diags "resolve" ds
 
@@ -121,7 +121,7 @@ let test_rename_ambiguous_needs_kind () =
   put store "(deftype any-t () (con any-v))";
   put store "(defeffect signal () (op signal () (tref any-t)))";
   (match Store.rename store ~old_name:"signal" ~new_name:"sig2" () with
-  | Error [ d ] -> Alcotest.(check string) "ambiguous" "E0607" d.Diag.code
+  | Error [ d ] -> Alcotest.(check string) "ambiguous" "E0607" (Diag.code_or_uncoded d)
   | _ -> Alcotest.fail "ambiguous rename must fail");
   (* with the kind it works and only moves that binding *)
   (match Store.rename store ~old_name:"signal" ~new_name:"sig-op" ~kind:Resolve.KOp () with

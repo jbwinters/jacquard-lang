@@ -221,7 +221,9 @@ Returning or storing a Task beyond its creating scope, using it after scope
 close, or using it in a different scope/run is the v0 dynamic defect:
 
 ```text
-error[E0907]: a Task may not escape, outlive, or be used outside the structured scope that created it
+error[E0907]: A scoped task or channel handle is invalid
+  Cause: a Task may not escape, outlive, or be used outside the structured scope that created it: Task 0#1 escaped its creating structured scope
+  Next step: Use the handle only inside the exact async.scope that created it.
 ```
 
 Rank-2 static scoping is future work, not a C1 claim.

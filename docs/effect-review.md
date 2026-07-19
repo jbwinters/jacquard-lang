@@ -65,15 +65,17 @@ handler, grant, or availability promise.
 For official Net, the manifest refusal uses identity-confirmed metadata:
 
 ```text
-error[E0814]: this program requires net [world/high] — reach a network endpoint through the granted handler, which is not granted (performed via `net.get`)
-  hint: grant it with --allow net, or handle the effect in the program
+error[E0814]: The program requires an effect that was not granted
+  Cause: This program requires net [world/high] — reach a network endpoint through the granted handler, which is not granted (performed via `net.get`).
+  Next step: grant it with --allow net, or handle the effect in the program
 ```
 
 A colliding user effect stays fully identified and unrated:
 
 ```text
-error[E0814]: this program requires unpackaged:a46cb801752d/net [unrated user effect #a46cb801752d15e51f6c46c91d0c4fa874b337d7186f8b3003230442baad74f1], which is not granted (performed via `package.fetch`)
-  hint: handle the effect in the program (unregistered user effects have no built-in --allow grant)
+error[E0814]: The program requires an effect that was not granted
+  Cause: This program requires unpackaged:a46cb801752d/net [unrated user effect #a46cb801752d15e51f6c46c91d0c4fa874b337d7186f8b3003230442baad74f1], which is not granted (performed via `package.fetch`).
+  Next step: handle the effect in the program (unregistered user effects have no built-in --allow grant)
 ```
 
 These exact outputs are executed by `test/cli/manifest.t`.

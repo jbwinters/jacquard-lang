@@ -485,7 +485,7 @@ let test_parallel_closed_rows () =
         Alcotest.(check bool)
           (label ^ " reports a type mismatch")
           true
-          (List.exists (fun (d : Diag.t) -> d.code = "E0801") ds)
+          (List.exists (fun (d : Diag.t) -> Diag.code_or_uncoded d = "E0801") ds)
   in
   rejects_effect "parallel.map"
     "(app (var parallel.map) (app (var cons) (lit 1) (var nil)) (lam ((pvar n)) (app (var emit) \

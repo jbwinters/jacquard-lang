@@ -48,12 +48,52 @@ exception Err of Diag.t
 (** Maximum active form nodes accepted by the bootstrap reader. *)
 let max_nesting_depth = 10_000
 
-let error st ~code ?hint msg ~start_pos =
+let diagnostic_summary = function
+  | "E0101" -> "The source contains an unexpected character."
+  | "E0102" -> "A text literal is not closed."
+  | "E0103" -> "A text literal contains an invalid escape."
+  | "E0104" -> "A hash literal is malformed."
+  | "E0105" -> "A numeric literal is malformed."
+  | "E0106" -> "The source ended before the form was complete."
+  | "E0107" -> "A bootstrap form has an invalid head."
+  | "E0108" -> "The source contains an unmatched closing parenthesis."
+  | "E0109" -> "An integer is outside Jacquard's supported range."
+  | "E0110" -> "A bootstrap group contains a non-form value."
+  | "E0111" -> "A quoted symbol is malformed."
+  | "E0112" -> "A bare symbol is malformed."
+  | "E0113" -> "A bootstrap file has a non-form top-level value."
+  | "E0114" -> "This entry point received more than one top-level form."
+  | "E0115" -> "Bootstrap form nesting exceeds the structural limit."
+  | code -> raise (Diag.Bug_invalid_diagnostic ("unknown reader diagnostic code " ^ code))
+
+let diagnostic_next_step = function
+  | "E0101" -> "Remove the character or replace it with valid bootstrap syntax."
+  | "E0102" -> "Close the text literal with a double quote before the end of the line or file."
+  | "E0103" -> "Replace the escape with one of the supported text escapes."
+  | "E0104" -> "Write a hash as the required number of lowercase hexadecimal digits."
+  | "E0105" -> "Rewrite the value as one valid integer or real literal."
+  | "E0106" -> "Complete the open form and its closing parenthesis."
+  | "E0107" -> "Use a lowercase kernel-form head."
+  | "E0108" -> "Remove the unmatched parenthesis or add its missing opening form."
+  | "E0109" -> "Choose an integer inside the documented 63-bit native range."
+  | "E0110" -> "Wrap each group element in a bootstrap form."
+  | "E0111" -> "Rewrite the quoted symbol using the documented symbol grammar."
+  | "E0112" -> "Rewrite the name using the documented bare-symbol grammar."
+  | "E0113" -> "Wrap the top-level value in a kernel form."
+  | "E0114" -> "Pass exactly one top-level form to this entry point."
+  | "E0115" -> "Reduce the nesting depth below the structural limit."
+  | code -> raise (Diag.Bug_invalid_diagnostic ("unknown reader diagnostic code " ^ code))
+
+let error st ~code ?next_step msg ~start_pos =
   let span =
     Span.make ~file:st.file ~start_pos
       ~end_pos:{ Span.line = st.line; col = st.col; offset = st.off }
   in
-  raise (Err (Diag.error ~span ?hint ~code msg))
+  raise
+    (Err
+       (Diag.error ~span ~domain:Reader ~code ~summary:(diagnostic_summary code) ~cause:msg
+          ~next_step:(Option.value next_step ~default:(diagnostic_next_step code))
+          ~contrast:None ()))
 
 let pos st = { Span.line = st.line; col = st.col; offset = st.off }
 let peek st = if st.off < String.length st.src then Some st.src.[st.off] else None
@@ -219,7 +259,7 @@ let classify_number st ~start_pos s =
   | LIntOverflow ->
       error st ~code:"E0109" ~start_pos
         (Printf.sprintf "integer literal %s does not fit in a native int" s)
-        ~hint:"Jacquard integers are 63-bit native ints (decision D2)"
+        ~next_step:"Choose a value representable as a Jacquard 63-bit native integer (decision D2)."
 
 let read_text st =
   let start_pos = pos st in
@@ -280,7 +320,7 @@ let read_text st =
         | Some c ->
             error st ~code:"E0103" ~start_pos:esc_start
               (Printf.sprintf "invalid escape sequence \\%c" c)
-              ~hint:"valid escapes: \\\\ \\\" \\n \\t \\r \\xHH")
+              ~next_step:"Use one of these escapes: \\\\ \\\" \\n \\t \\r \\xHH.")
     | Some c ->
         advance st;
         Buffer.add_char buf c;
@@ -321,7 +361,7 @@ and read_form_body st : Form.t =
   if not (valid_head head) then
     error st ~code:"E0107" ~start_pos
       (Printf.sprintf "invalid head symbol %S" head)
-      ~hint:"heads are lowercase: [a-z][a-z0-9-]*";
+      ~next_step:"Rewrite the head to match [a-z][a-z0-9-]*.";
   let rec args acc =
     skip_ws st;
     match peek st with
@@ -352,7 +392,7 @@ and read_form_body st : Form.t =
   let span = Span.make ~file:st.file ~start_pos ~end_pos:(pos st) in
   if head = "group" && not (List.for_all (function Form.F _ -> true | _ -> false) args) then
     error st ~code:"E0110" ~start_pos "group elements must be forms"
-      ~hint:"a bare ( ... ) argument list may only contain forms";
+      ~next_step:"Make every item in the bare argument list a form.";
   let meta = Meta.with_span span Meta.empty in
   let meta =
     match leading with
@@ -384,7 +424,9 @@ and read_arg st : Form.arg =
       | None ->
           error st ~code:"E0104" ~start_pos
             (Printf.sprintf "invalid hash literal #%s" s)
-            ~hint:(Printf.sprintf "a hash is %d lowercase hex characters" (2 * Hash.digest_size)))
+            ~next_step:
+              (Printf.sprintf "Write the hash as %d lowercase hexadecimal characters."
+                 (2 * Hash.digest_size)))
   | Some c when is_digit c || c = '+' || c = '-' -> (
       let s = read_atom st in
       match classify_number st ~start_pos s with
@@ -452,5 +494,17 @@ let parse_one ~file s : (Form.t, Diag.t list) result =
   match parse_string ~file s with
   | Error ds -> Error ds
   | Ok [ f ] -> Ok f
-  | Ok [] -> Error [ Diag.error ~code:"E0106" "expected a form, found end of input" ]
-  | Ok (_ :: _ :: _) -> Error [ Diag.error ~code:"E0114" "expected exactly one top-level form" ]
+  | Ok [] ->
+      Error
+        [
+          Diag.error ~domain:Reader ~code:"E0106" ~summary:(diagnostic_summary "E0106")
+            ~cause:"Expected a form, but found end of input."
+            ~next_step:(diagnostic_next_step "E0106") ~contrast:None ();
+        ]
+  | Ok (_ :: _ :: _) ->
+      Error
+        [
+          Diag.error ~domain:Reader ~code:"E0114" ~summary:(diagnostic_summary "E0114")
+            ~cause:"Expected exactly one top-level form." ~next_step:(diagnostic_next_step "E0114")
+            ~contrast:None ();
+        ]

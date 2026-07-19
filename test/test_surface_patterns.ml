@@ -30,12 +30,12 @@ let check_equivalent label surface jqd =
 let parse_codes source =
   match Surface_parse.parse_string ~file:"bad-patterns.jac" source with
   | Ok _ -> Alcotest.failf "expected %S to fail parsing" source
-  | Error diagnostics -> List.map (fun diagnostic -> diagnostic.Diag.code) diagnostics
+  | Error diagnostics -> List.map (fun diagnostic -> Diag.code_or_uncoded diagnostic) diagnostics
 
 let lower_codes source =
   match Surface_lower.lower_expr (parse_expr source) with
   | Ok _ -> Alcotest.failf "expected %S to fail lowering" source
-  | Error diagnostics -> List.map (fun diagnostic -> diagnostic.Diag.code) diagnostics
+  | Error diagnostics -> List.map (fun diagnostic -> Diag.code_or_uncoded diagnostic) diagnostics
 
 let resolve names expression =
   match Resolve.resolve_expr names expression with
@@ -141,7 +141,7 @@ let test_contextual_restrictions_and_duplicates () =
   | Error diagnostics ->
       Alcotest.(check (list string))
         "duplicate remains resolver-owned" [ "E0304" ]
-        (List.map (fun diagnostic -> diagnostic.Diag.code) diagnostics)
+        (List.map (fun diagnostic -> Diag.code_or_uncoded diagnostic) diagnostics)
   | Ok _ -> Alcotest.fail "resolver accepted a duplicate match binder"
 
 let test_resolved_hash_parity () =
@@ -194,7 +194,9 @@ let test_ambiguous_nested_recovery () =
   let recovered = Surface_parse.recover_string ~file:"recover-patterns.jac" block in
   Alcotest.(check bool)
     "damaged block reports missing structure" true
-    (List.exists (fun diagnostic -> diagnostic.Diag.code = "E1221") recovered.diagnostics);
+    (List.exists
+       (fun diagnostic -> Diag.code_or_uncoded diagnostic = "E1221")
+       recovered.diagnostics);
   let nested = "match x { | Bad -> match y { | Inner -> 1 | Later -> 9 }" in
   Alcotest.(check bool)
     "unterminated nested match retains outer Later" true (later_arm_survives nested);
@@ -217,7 +219,7 @@ let test_missing_match_before_definition () =
   let recovered = Surface_parse.recover_string ~file:"recover-patterns.jac" source in
   Alcotest.(check (list string))
     "ordered diagnostics" [ "E1221" ]
-    (List.map (fun diagnostic -> diagnostic.Diag.code) recovered.diagnostics);
+    (List.map (fun diagnostic -> Diag.code_or_uncoded diagnostic) recovered.diagnostics);
   match recovered.items with
   | [
    { it = TopExpr { it = Match (_, clauses); _ }; _ };

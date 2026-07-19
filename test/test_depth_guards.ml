@@ -31,7 +31,9 @@ let repeated_suffix prefix suffix count =
 
 let expect_code label code = function
   | Error diagnostics
-    when List.exists (fun diagnostic -> String.equal diagnostic.Diag.code code) diagnostics ->
+    when List.exists
+           (fun diagnostic -> String.equal (Diag.code_or_uncoded diagnostic) code)
+           diagnostics ->
       ()
   | Error diagnostics ->
       Alcotest.failf "%s: expected %s, got %s" label code
@@ -47,9 +49,10 @@ let expect_ok label = function
 let expect_exact_e1227 label diagnostics =
   match diagnostics with
   | [ diagnostic ] ->
-      Alcotest.(check string) (label ^ " code") "E1227" diagnostic.Diag.code;
+      Alcotest.(check string) (label ^ " code") "E1227" (Diag.code_or_uncoded diagnostic);
       Alcotest.(check string)
-        (label ^ " wording") "surface syntax nesting exceeds the limit of 10000" diagnostic.message
+        (label ^ " wording") "Surface syntax nesting exceeds the limit of 10000."
+        (Diag.cause diagnostic)
   | diagnostics ->
       Alcotest.failf "%s: expected exactly one diagnostic, got %s" label
         (String.concat "; " (List.map Diag.to_string diagnostics))
@@ -168,10 +171,10 @@ let kernel_diagnostic source =
 
 let check_variable_group_diagnostic label ~wrong_form ~message source =
   let diagnostic = kernel_diagnostic source in
-  Alcotest.(check string) (label ^ " code") "E0203" diagnostic.code;
-  Alcotest.(check string) (label ^ " wording") message diagnostic.message;
+  Alcotest.(check string) (label ^ " code") "E0203" (Diag.code_or_uncoded diagnostic);
+  Alcotest.(check string) (label ^ " wording") message (Diag.cause diagnostic);
   let expected_start = Str.search_forward (Str.regexp_string wrong_form) source 0 in
-  match diagnostic.span with
+  match Diag.span diagnostic with
   | Some span ->
       Alcotest.(check int) (label ^ " span start") expected_start span.Span.start_pos.offset;
       Alcotest.(check int)
@@ -180,10 +183,13 @@ let check_variable_group_diagnostic label ~wrong_form ~message source =
         span.Span.end_pos.offset
   | None -> Alcotest.failf "%s: diagnostic span is missing" label
 
-let capture_entry exception_value =
+let capture_entry ?render_diagnostic exception_value =
   let buffer = Buffer.create 128 in
   let formatter = Format.formatter_of_buffer buffer in
-  let status = Cli_entry.run ~program:"jacquard" ~err:formatter (fun () -> raise exception_value) in
+  let status =
+    Cli_entry.run ~program:"jacquard" ~err:formatter ?render_diagnostic (fun () ->
+        raise exception_value)
+  in
   Format.pp_print_flush formatter ();
   (status, Buffer.contents buffer)
 
@@ -209,7 +215,22 @@ let test_variable_group_diagnostics_unchanged () =
   Alcotest.(check int) "entry stack exit" 1 stack_status;
   Alcotest.(check string)
     "entry stack classification"
-    "error[E0003]: input exhausted the host stack before a structural nesting guard\n" stack_output;
+    "error[E0003]: Input exhausted the host stack before a structural nesting guard\n\
+    \  Cause: An unbounded internal traversal reached the host stack limit before Jacquard could \
+     report its local depth boundary.\n\
+    \  Next step: Reduce the input nesting and report the missing structural guard.\n"
+    stack_output;
+  let json_status, json_output =
+    capture_entry ~render_diagnostic:Diag.to_json_string Stack_overflow
+  in
+  Alcotest.(check int) "entry JSON stack exit" 1 json_status;
+  let json = Yojson.Safe.from_string json_output in
+  Alcotest.(check string)
+    "entry JSON domain" "process"
+    Yojson.Safe.Util.(json |> member "domain" |> to_string);
+  Alcotest.(check string)
+    "entry JSON code" "E0003"
+    Yojson.Safe.Util.(json |> member "code" |> to_string);
   let internal_status, internal_output = capture_entry (Failure "entry-probe") in
   Alcotest.(check int) "entry internal exit" 125 internal_status;
   Alcotest.(check bool)

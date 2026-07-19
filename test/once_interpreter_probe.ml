@@ -4,6 +4,8 @@ let fail_diags stage diagnostics =
   prerr_endline (stage ^ ": " ^ String.concat "; " (List.map Diag.to_string diagnostics));
   exit 1
 
+let print_runtime_error error = prerr_endline (Diag.to_string (Runtime_err.to_diag error))
+
 let rec remove_tree path =
   if Sys.file_exists path then
     if Sys.is_directory path then (
@@ -57,7 +59,7 @@ let () =
         prerr_endline ("capture unexpectedly returned " ^ Value.show value);
         exit 1
     | Error error ->
-        prerr_endline (Runtime_err.to_string error);
+        print_runtime_error error;
         exit 1
   in
   (match Eval.call ctx resume [ Value.VInt 11 ] with
@@ -66,14 +68,14 @@ let () =
       prerr_endline ("first resume returned " ^ Value.show value);
       exit 1
   | Error error ->
-      prerr_endline (Runtime_err.to_string error);
+      print_runtime_error error;
       exit 1);
   match Eval.call ctx resume [ Value.VInt 12 ] with
   | Error Runtime_err.Once_resumed_twice ->
-      prerr_endline (Runtime_err.to_string Runtime_err.Once_resumed_twice);
+      print_runtime_error Runtime_err.Once_resumed_twice;
       exit 2
   | Error error ->
-      prerr_endline (Runtime_err.to_string error);
+      print_runtime_error error;
       exit 1
   | Ok value ->
       prerr_endline ("second resume returned " ^ Value.show value);

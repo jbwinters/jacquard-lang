@@ -7,11 +7,14 @@ collision-free key derived from the safe SecretRef and never prints the value.
   >   (app (var secret-ref) (lit "fixture") (var none)))
   > JACQUARD
   $ jacquard run secret-read.jqd
-  error[E0814]: this program requires secret [governance/special] — resolve opaque confidential material or explicitly expose it, which is not granted (performed via `secret.read`)
-    hint: grant it with --allow secret, or handle the effect in the program
+  error[E0814]: The program requires an effect that was not granted
+    Cause: This program requires secret [governance/special] — resolve opaque confidential material or explicitly expose it, which is not granted (performed via `secret.read`).
+    Next step: grant it with --allow secret, or handle the effect in the program
   [3]
   $ jacquard run secret-read.jqd --allow secret
-  io error: secret reference not found: fixture
+  error: World-effect I/O failed
+    Cause: io error: secret reference not found: fixture
+    Next step: Correct the path, permissions, or external resource and try again.
   [2]
 
 The exact latest key for `fixture` is JACQUARD_SECRET_V0_ plus the UTF-8 bytes
@@ -45,7 +48,9 @@ retains the Secret grant while the transcript reveals only a boolean.
   $ if grep -F "$payload" version.out version.err >/dev/null; then echo LEAKED; else echo redacted; fi
   redacted
   $ jacquard run secret-version.jqd --allow secret
-  io error: secret version not found: fixture@v1
+  error: World-effect I/O failed
+    Cause: io error: secret version not found: fixture@v1
+    Next step: Correct the path, permissions, or external resource and try again.
   [2]
 
 Dry-run deliberately ignores live grants and installs no Secret resolver. Even
@@ -53,6 +58,7 @@ with `--allow secret` and a populated environment, manifest checking refuses
 before a lookup can occur.
 
   $ env "$key=$payload" jacquard run secret-read.jqd --dry-run --allow secret
-  error[E0814]: this program requires secret [governance/special] — resolve opaque confidential material or explicitly expose it, which is not granted (performed via `secret.read`)
-    hint: grant it with --allow secret, or handle the effect in the program
+  error[E0814]: The program requires an effect that was not granted
+    Cause: This program requires secret [governance/special] — resolve opaque confidential material or explicitly expose it, which is not granted (performed via `secret.read`).
+    Next step: grant it with --allow secret, or handle the effect in the program
   [3]

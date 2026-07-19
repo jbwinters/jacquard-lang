@@ -341,74 +341,71 @@ let test_cancellation_cleanup_survives_drop_failure () =
   close scope
 
 let test_exact_diagnostics () =
+  let policy_error detail =
+    Printf.sprintf
+      "error[E0908]: Structured-concurrency scope policy is invalid\n\
+      \  Cause: The scope policy state is inconsistent: %s\n\
+      \  Next step: Record each child terminal state once in scheduler decision order."
+      detail
+  in
+  let escape_error detail =
+    Printf.sprintf
+      "error[E0907]: This task handle is outside its structured scope.\n\
+      \  Cause: a Task may not escape, outlive, or be used outside the structured scope that \
+       created it: %s\n\
+      \  Next step: Use the handle only with async.await or async.cancel inside its creating \
+       structured scope."
+      detail
+  in
   let scope, _ = Structured_scope.create ~body_resume:0 |> ok in
   let child = Structured_scope.spawn scope ~resume:1 |> ok in
   Alcotest.(check string)
     "duplicate child"
-    "error[E0908]: invalid structured-concurrency scope policy: duplicate child 0#1\n\
-    \  hint: record each child terminal state once in scheduler decision order"
+    (policy_error "duplicate child 0#1")
     (Scope_policy.create scope ~children:[ child; child ] |> error_text);
   let policy = Scope_policy.create scope ~children:[ child ] |> ok in
   Alcotest.(check string)
     "negative decision"
-    "error[E0908]: invalid structured-concurrency scope policy: decision sequence must be \
-     non-negative\n\
-    \  hint: record each child terminal state once in scheduler decision order"
+    (policy_error "decision sequence must be non-negative")
     (Scope_policy.record_terminal policy ~decision:(-1) child ~drop:ignore |> error_text);
   Alcotest.(check string)
     "early finish"
-    "error[E0908]: invalid structured-concurrency scope policy: scope results requested before all \
-     children terminated\n\
-    \  hint: record each child terminal state once in scheduler decision order"
+    (policy_error "scope results requested before all children terminated")
     (Scope_policy.finish policy |> error_text);
   Alcotest.(check string)
     "nonterminal observation"
-    "error[E0908]: invalid structured-concurrency scope policy: child 0#1 is not terminal\n\
-    \  hint: record each child terminal state once in scheduler decision order"
+    (policy_error "child 0#1 is not terminal")
     (Scope_policy.record_terminal policy ~decision:0 child ~drop:ignore |> error_text);
   finish_done scope child 1;
   Scope_policy.record_terminal policy ~decision:2 child ~drop:ignore |> ok;
   Alcotest.(check string)
     "duplicate observation checks sequence first"
-    "error[E0908]: invalid structured-concurrency scope policy: terminal observation (2,0) does \
-     not follow (2,0)\n\
-    \  hint: record each child terminal state once in scheduler decision order"
+    (policy_error "terminal observation (2,0) does not follow (2,0)")
     (Scope_policy.record_terminal policy ~decision:2 child ~drop:ignore |> error_text);
   Alcotest.(check string)
     "decreasing decision"
-    "error[E0908]: invalid structured-concurrency scope policy: terminal observation (1,0) does \
-     not follow (2,0)\n\
-    \  hint: record each child terminal state once in scheduler decision order"
+    (policy_error "terminal observation (1,0) does not follow (2,0)")
     (Scope_policy.record_terminal policy ~decision:1 child ~drop:ignore |> error_text);
   Alcotest.(check string)
     "increasing duplicate terminal observation"
-    "error[E0908]: invalid structured-concurrency scope policy: child 0#1 was already observed \
-     terminal\n\
-    \  hint: record each child terminal state once in scheduler decision order"
+    (policy_error "child 0#1 was already observed terminal")
     (Scope_policy.record_terminal policy ~decision:3 child ~drop:ignore |> error_text);
   let unregistered = Structured_scope.spawn scope ~resume:2 |> ok in
   Alcotest.(check string)
     "unregistered same-scope child"
-    "error[E0908]: invalid structured-concurrency scope policy: task 0#2 is not a registered child\n\
-    \  hint: record each child terminal state once in scheduler decision order"
+    (policy_error "task 0#2 is not a registered child")
     (Scope_policy.record_terminal policy ~decision:4 unregistered ~drop:ignore |> error_text);
   let nested, _ = Structured_scope.nest scope ~body_resume:10 |> ok in
   let nested_child = Structured_scope.spawn nested ~resume:11 |> ok in
   Alcotest.(check string)
     "foreign-scope child"
-    "error[E0907]: a Task may not escape, outlive, or be used outside the structured scope that \
-     created it: the handle belongs to another structured scope\n\
-    \  hint: use the handle only with async.await or async.cancel inside its creating structured \
-     scope"
+    (escape_error "the handle belongs to another structured scope")
     (Scope_policy.record_terminal policy ~decision:4 nested_child ~drop:ignore |> error_text);
   let foreign, _ = Structured_scope.create ~body_resume:20 |> ok in
   let foreign_child = Structured_scope.spawn foreign ~resume:21 |> ok in
   Alcotest.(check string)
     "foreign-run child"
-    "error[E0907]: a Task may not escape, outlive, or be used outside the structured scope that \
-     created it: the handle belongs to another run\n\
-    \  hint: use the handle only with async.await or async.cancel inside its creating structured \
-     scope"
+    (escape_error "the handle belongs to another run")
     (Scope_policy.record_terminal policy ~decision:4 foreign_child ~drop:ignore |> error_text);
   close foreign;
   close scope

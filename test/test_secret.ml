@@ -68,7 +68,7 @@ let test_schema_and_sealed_marker () =
   | Ok { Store.decl = { Kernel.it = Kernel.DefType { cons = [ _ ]; _ }; _ }; decl_hash; _ } -> (
       let marker = Canon.con_hash decl_hash 0 in
       match Store.locate store marker with
-      | Error [ { Diag.code = "E0601"; _ } ] -> ()
+      | Error [ diagnostic ] when Diag.code diagnostic = Some "E0601" -> ()
       | Error diagnostics -> fail_diags "locate secret marker" diagnostics
       | Ok _ -> Alcotest.fail "opaque Secret constructor remained addressable")
   | Ok _ -> Alcotest.fail "Secret type has the wrong declaration shape"
@@ -106,12 +106,14 @@ let test_diagnostics_never_render_payload () =
       Alcotest.(check bool) "redaction marker present" true (contains rendered "<secret redacted>")
   | Ok value -> Alcotest.failf "text serializer accepted %s" (Value.show value));
   (match check source with
-  | Error [ { Diag.code = "E0819"; message; _ } ] ->
-      Alcotest.(check bool) "checker message contains no fixture" false (contains message fixture)
+  | Error [ diagnostic ] when Diag.code diagnostic = Some "E0819" ->
+      Alcotest.(check bool)
+        "checker message contains no fixture" false
+        (contains (Diag.cause diagnostic) fixture)
   | Error diagnostics -> fail_diags "Secret checker diagnostic" diagnostics
   | Ok _ -> Alcotest.fail "checker allowed Secret at a Text serialization boundary");
   (match check (Printf.sprintf "(app (var debug.inspect) %s)" read_secret) with
-  | Error [ { Diag.code = "E0819"; _ } ] -> ()
+  | Error [ diagnostic ] when Diag.code diagnostic = Some "E0819" -> ()
   | Error diagnostics -> fail_diags "Secret inspect diagnostic" diagnostics
   | Ok _ -> Alcotest.fail "checker allowed generic Secret inspection");
   let audit_source = Printf.sprintf "(app (var audit.entry-code) %s)" read_secret in
@@ -124,9 +126,10 @@ let test_diagnostics_never_render_payload () =
         (contains rendered "<secret redacted>")
   | Ok value -> Alcotest.failf "Audit encoder accepted %s" (Value.show value));
   match check audit_source with
-  | Error [ { Diag.code = "E0801"; message; _ } ] ->
+  | Error [ diagnostic ] when Diag.code diagnostic = Some "E0801" ->
       Alcotest.(check bool)
-        "Audit checker diagnostic contains no fixture" false (contains message fixture)
+        "Audit checker diagnostic contains no fixture" false
+        (contains (Diag.cause diagnostic) fixture)
   | Error diagnostics -> fail_diags "Secret Audit diagnostic" diagnostics
   | Ok _ -> Alcotest.fail "checker allowed Secret into Audit encoding"
 

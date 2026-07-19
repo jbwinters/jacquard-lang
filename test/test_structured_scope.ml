@@ -7,7 +7,7 @@ let ok = function
         (String.concat "\n" (List.map Diag.to_string diagnostics))
 
 let error_code = function
-  | Error ({ Diag.code; _ } :: _) -> code
+  | Error (diagnostic :: _) -> Diag.code_or_uncoded diagnostic
   | Error [] -> Alcotest.fail "structured scope returned an empty diagnostic list"
   | Ok _ -> Alcotest.fail "structured-scope operation unexpectedly succeeded"
 
@@ -98,7 +98,10 @@ let test_returned_stored_and_ancestor_handles () =
     (Structured_scope.close left ~reason:Structured_scope.Normal ~escaping:[ foreign ] ~drop:ignore
     |> error_code)
 
-let abort_diagnostic = Diag.error ~code:"E9998" "scope body aborted"
+let abort_diagnostic =
+  Diag.error ~domain:Concurrency ~code:"E9998" ~summary:"Scope body aborted"
+    ~cause:"The structured-scope test body aborted." ~next_step:"Cancel and drain the scope."
+    ~contrast:None ()
 
 let test_bracket_cleans_normal_abort_and_exception () =
   let normal, _ = Structured_scope.create ~body_resume:1 |> ok in

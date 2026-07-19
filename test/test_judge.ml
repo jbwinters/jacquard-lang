@@ -201,8 +201,8 @@ let test_assessment_field_types_are_checked () =
             true
             (List.exists
                (fun diagnostic ->
-                 String.equal diagnostic.Diag.code "E0801"
-                 || String.equal diagnostic.Diag.code "E0802")
+                 String.equal (Diag.code_or_uncoded diagnostic) "E0801"
+                 || String.equal (Diag.code_or_uncoded diagnostic) "E0802")
                diagnostics)
       | Ok _ -> Alcotest.failf "malformed Assessment %s field typechecked" label)
     variants
@@ -266,8 +266,12 @@ let test_raw_world_rule_is_rejected () =
   | Error diagnostics ->
       Alcotest.(check bool)
         "pure rules cannot hide Net" true
-        (List.exists (fun diagnostic -> String.equal diagnostic.Diag.code "E0802") diagnostics
-        || List.exists (fun diagnostic -> String.equal diagnostic.Diag.code "E0801") diagnostics)
+        (List.exists
+           (fun diagnostic -> String.equal (Diag.code_or_uncoded diagnostic) "E0802")
+           diagnostics
+        || List.exists
+             (fun diagnostic -> String.equal (Diag.code_or_uncoded diagnostic) "E0801")
+             diagnostics)
   | Ok _ -> Alcotest.fail "judge.rules accepted a raw-world rule behind its pure signature"
 
 let suite =

@@ -217,8 +217,12 @@ let with_scheduler_task_run _capability ctx ~run ~scope_path operation =
       ctx.task_scope_path <- previous_path)
     operation
 
-let task_message diagnostics =
-  String.concat "; " (List.map (fun diagnostic -> diagnostic.Diag.message) diagnostics)
+let task_message diagnostics = String.concat "; " (List.map Diag.cause diagnostics)
+
+let task_diagnostic ?(summary = "A scoped task or channel handle is invalid")
+    ?(next_step = "Use the handle only inside the exact async.scope that created it.") cause =
+  Diag.error ~domain:Concurrency ~code:Concurrency_contract.task_escape_code ~summary ~cause
+    ~next_step ~contrast:None ()
 
 let foreign_evaluator_context kind =
   Runtime_err.Invalid_task_handle (Printf.sprintf "%s belongs to another evaluator run" kind)
@@ -230,8 +234,9 @@ let validate_task_value ctx ~scope_path = function
   | _ ->
       Error
         [
-          Diag.error ~code:Concurrency_contract.task_escape_code
-            "expected an opaque scheduler-owned Task handle";
+          task_diagnostic ~summary:"Task operation received an invalid handle"
+            ~next_step:"Pass the Task handle returned by async.spawn in this async.scope."
+            "The operation expected an opaque scheduler-owned Task handle.";
         ]
 
 (** Structural carrier validation only: live-channel membership remains scheduler-owned and every
@@ -241,8 +246,9 @@ let validate_channel_value ctx ~scope_path = function
   | _ ->
       Error
         [
-          Diag.error ~code:Concurrency_contract.task_escape_code
-            "expected an opaque scheduler-owned ChannelHandle";
+          task_diagnostic ~summary:"Channel operation received an invalid handle"
+            ~next_step:"Pass the ChannelHandle returned by channel.open in this async.scope."
+            "The operation expected an opaque scheduler-owned ChannelHandle.";
         ]
 
 let rec scope_prefix prefix path =
@@ -269,8 +275,8 @@ let reject_task_escape ctx ~scope_path root =
     | Error task_diagnostics -> diagnostics := List.rev_append task_diagnostics !diagnostics
     | Ok id when scope_prefix scope_path id.scope_path ->
         diagnostics :=
-          Diag.error ~code:Concurrency_contract.task_escape_code
-            ~hint:"do not return or store a Task beyond its creating async.scope"
+          task_diagnostic ~summary:Concurrency_contract.task_escape_message
+            ~next_step:"Keep the Task inside the async.scope that created it."
             (Concurrency_contract.task_escape_message ^ ": Task "
             ^ Concurrency_contract.trace_task_id id
             ^ " escaped its creating structured scope")
@@ -282,9 +288,9 @@ let reject_task_escape ctx ~scope_path root =
     | Error channel_diagnostics -> diagnostics := List.rev_append channel_diagnostics !diagnostics
     | Ok id when scope_prefix scope_path id.scope_path ->
         diagnostics :=
-          Diag.error ~code:Concurrency_contract.task_escape_code
-            ~hint:"do not return or store a ChannelHandle beyond its creating async.scope"
-            ("a ChannelHandle may not escape its creating structured scope: Channel "
+          task_diagnostic ~summary:"A ChannelHandle escaped its structured scope"
+            ~next_step:"Keep the ChannelHandle inside the async.scope that created it."
+            ("A ChannelHandle may not escape its creating structured scope: Channel "
             ^ Channel_contract.trace_channel_id id
             ^ " escaped")
           :: !diagnostics
@@ -414,13 +420,13 @@ and match_pats vs ps env =
 let locate ctx ~trusted h =
   match if trusted then Store.locate_internal ctx.store h else Store.locate ctx.store h with
   | Ok l -> l
-  | Error ds -> rt (Runtime_err.Unresolved (String.concat "; " (List.map Diag.to_string ds)))
+  | Error ds -> rt (Runtime_err.Unresolved (String.concat "; " (List.map Diag.to_cause_string ds)))
 
 (* Source-order member hashes of a defterm decl, for GroupRef. *)
 let group_hashes (decl : Kernel.decl) : Hash.t array =
   match Canon.hash_decl decl with
   | Ok { Canon.named; _ } -> Array.of_list (List.map snd named)
-  | Error ds -> rt (Runtime_err.Unresolved (String.concat "; " (List.map Diag.to_string ds)))
+  | Error ds -> rt (Runtime_err.Unresolved (String.concat "; " (List.map Diag.to_cause_string ds)))
 
 let con_value ctx ~trusted h =
   if Concurrency_contract.is_task_private_hash h || Channel_contract.is_channel_private_hash h then
@@ -458,7 +464,8 @@ let rec live_splices ?(level = 0) (f : Form.t) : Kernel.expr list =
     | [ Form.F splice ] -> (
         match Kernel.expr_of_form splice with
         | Ok e -> [ e ]
-        | Error ds -> rt (Runtime_err.Unresolved (String.concat "; " (List.map Diag.to_string ds))))
+        | Error ds ->
+            rt (Runtime_err.Unresolved (String.concat "; " (List.map Diag.to_cause_string ds))))
     | _ -> rt_type "malformed unquote in quote payload"
   else
     let level =

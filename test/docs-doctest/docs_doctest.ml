@@ -417,14 +417,24 @@ let run_self_tests ~jacquard ~prelude =
       in
       assert_rejected "raw fallback" "(app (var add) (lit 1) (lit 2))\n"
         [
-          "11-14: error[E1220]: expected `,` or `)`, found ident(add)";
-          "21-22: error[E1220]: expected `,` or `)`, found int(1)";
-          "29-30: error[E1220]: expected `,` or `)`, found int(2)";
+          "11-14: error[E1220]: Surface syntax is invalid\n\
+          \  Cause: expected `,` or `)`, found ident(add)\n\
+          \  Next step: Correct the syntax at this location and parse the file again.";
+          "21-22: error[E1220]: Surface syntax is invalid\n\
+          \  Cause: expected `,` or `)`, found int(1)\n\
+          \  Next step: Correct the syntax at this location and parse the file again.";
+          "29-30: error[E1220]: Surface syntax is invalid\n\
+          \  Cause: expected `,` or `)`, found int(2)\n\
+          \  Next step: Correct the syntax at this location and parse the file again.";
         ];
       assert_rejected "recovery hole" "add(1,, 2)\n"
         [
-          "7-8: error[E1220]: expected an expression, found ,";
-          "9-10: error[E1220]: expected `,` or `)`, found int(2)";
+          "7-8: error[E1220]: Surface syntax is invalid\n\
+          \  Cause: expected an expression, found ,\n\
+          \  Next step: Correct the syntax at this location and parse the file again.";
+          "9-10: error[E1220]: Surface syntax is invalid\n\
+          \  Cause: expected `,` or `)`, found int(2)\n\
+          \  Next step: Correct the syntax at this location and parse the file again.";
         ]);
   with_test_dir "signature" (fun root fixtures ->
       let doc = Filename.concat root "doc.md" in

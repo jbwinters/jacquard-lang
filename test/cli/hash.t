@@ -20,12 +20,16 @@ Parse failures exit 1:
 
   $ printf '(' > bad.jqd
   $ jacquard hash bad.jqd
-  bad.jqd:1:1-2: error[E0106]: unexpected end of input inside a form
+  bad.jqd:1:1-2: error[E0106]: The source ended before the form was complete.
+    Cause: unexpected end of input inside a form
+    Next step: Complete the open form and its closing parenthesis.
   [1]
 
 Resolution failures exit 1 too:
 
   $ printf '(app (var zzz-missing))\n' > unresolved.jqd
   $ jacquard hash unresolved.jqd
-  unresolved.jqd:1:6-23: error[E0301]: unknown name `zzz-missing`
+  unresolved.jqd:1:6-23: error[E0301]: This reference names something that is not in scope.
+    Cause: No name named `zzz-missing` is in scope.
+    Next step: Correct the reference to an in-scope name or declaration.
   [1]

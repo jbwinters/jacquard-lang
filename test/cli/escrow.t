@@ -16,12 +16,15 @@ console covers println. Eval is absent.
   escrow.workflow : () ->{Console, Fs, Net} Int
   _ : Int
   $ jacquard run approved-run.jqd
-  error[E0814]: this program requires console [world/low] — talk to the process terminal, which is not granted (performed via `escrow.workflow`)
-    hint: grant it with --allow console, or handle the effect in the program
-  error[E0814]: this program requires fs [world/medium] — read or mutate the filesystem under the granted root handler, which is not granted (performed via `escrow.workflow`)
-    hint: grant it with --allow fs, or handle the effect in the program
-  error[E0814]: this program requires net [world/high] — reach a network endpoint through the granted handler, which is not granted (performed via `escrow.workflow`)
-    hint: grant it with --allow net, or handle the effect in the program
+  error[E0814]: The program requires an effect that was not granted
+    Cause: This program requires console [world/low] — talk to the process terminal, which is not granted (performed via `escrow.workflow`).
+    Next step: grant it with --allow console, or handle the effect in the program
+  error[E0814]: The program requires an effect that was not granted
+    Cause: This program requires fs [world/medium] — read or mutate the filesystem under the granted root handler, which is not granted (performed via `escrow.workflow`).
+    Next step: grant it with --allow fs, or handle the effect in the program
+  error[E0814]: The program requires an effect that was not granted
+    Cause: This program requires net [world/high] — reach a network endpoint through the granted handler, which is not granted (performed via `escrow.workflow`).
+    Next step: grant it with --allow net, or handle the effect in the program
   [3]
 
 Dry-run forwards reads but audits writes/fetches; no receipt file is created.
@@ -121,8 +124,9 @@ refuses it, and semantic diff localizes the escalation.
   $ jacquard check workflow-escalated.jqd --print-sigs
   escrow.workflow : () ->{Console, Fs, Eval, Net} Int
   $ jacquard check escalated-run.jqd --manifest fs,net,console
-  error[E0814]: this program requires eval [meta/high] — run code constructed or loaded at runtime, which is not granted (performed via `eval-code`)
-    hint: grant it with --allow eval, or handle the effect in the program
+  error[E0814]: The program requires an effect that was not granted
+    Cause: This program requires eval [meta/high] — run code constructed or loaded at runtime, which is not granted (performed via `eval-code`).
+    Next step: grant it with --allow eval, or handle the effect in the program
   [1]
   $ mkdir escalated
   $ for f in "$JACQUARD_PRELUDE"/*.jqd; do jacquard store add escalated "$f" >/dev/null; done

@@ -105,10 +105,11 @@ let test_two_coins_branch_count () =
       (model_state (store, ctx) "(app (var sample) (app (var bernoulli) (lit 0.5)))")
   with
   | Error [ diagnostic ] ->
-      Alcotest.(check string) "driver reports runtime capture failure" "E0902" diagnostic.Diag.code;
+      Alcotest.(check string)
+        "driver reports runtime capture failure" "E0902" (Diag.code_or_uncoded diagnostic);
       Alcotest.(check bool)
         "enumeration cannot duplicate a declared Once sample" true
-        (String.starts_with ~prefix:"error[E0906]" diagnostic.Diag.message)
+        (String.starts_with ~prefix:"a once continuation may be resumed" (Diag.cause diagnostic))
   | Error diagnostics ->
       Alcotest.failf "declared Once sample returned unexpected diagnostics: %s"
         (String.concat "; " (List.map Diag.to_string diagnostics))
@@ -135,7 +136,7 @@ let test_impossible_observation () =
   let _, ctx = h in
   match Infer_dist.enumerate ctx (model_state h impossible_src) with
   | Ok _ -> Alcotest.fail "impossible observation must not produce a posterior"
-  | Error [ d ] -> Alcotest.(check string) "empty posterior code" "E0901" d.Diag.code
+  | Error [ d ] -> Alcotest.(check string) "empty posterior code" "E0901" (Diag.code_or_uncoded d)
   | Error _ -> Alcotest.fail "expected one diagnostic"
 
 (* --- W4.3 likelihood weighting --- *)
@@ -228,10 +229,10 @@ let test_lw_validates_one_reusable_initial_state () =
   in
   (match Infer_dist.likelihood_weighting ctx ~seed:9 ~samples:5 marked_model with
   | Error [ diagnostic ] ->
-      Alcotest.(check string) "marked initial diagnostic" "E0902" diagnostic.Diag.code;
+      Alcotest.(check string) "marked initial diagnostic" "E0902" (Diag.code_or_uncoded diagnostic);
       Alcotest.(check bool)
         "marked initial preserves E1202" true
-        (String.starts_with ~prefix:"type error: E1202:" diagnostic.message)
+        (String.starts_with ~prefix:"type error: E1202:" (Diag.cause diagnostic))
   | Error diagnostics -> Eval_support.fail_diags "marked reusable model" diagnostics
   | Ok _ -> Alcotest.fail "marked initial model was accepted");
   Alcotest.(check int) "marked model factory called once" 1 !marked_factory_calls;
@@ -288,10 +289,10 @@ let test_lw_rejects_zero_argument_continuation_mutation () =
   in
   (match Infer_dist.likelihood_weighting ctx ~seed:17 ~samples:5 model with
   | Error [ diagnostic ] ->
-      Alcotest.(check string) "LW mutation diagnostic" "E0902" diagnostic.Diag.code;
+      Alcotest.(check string) "LW mutation diagnostic" "E0902" (Diag.code_or_uncoded diagnostic);
       Alcotest.(check bool)
         "LW mutation preserves E1202" true
-        (String.starts_with ~prefix:"type error: E1202:" diagnostic.message)
+        (String.starts_with ~prefix:"type error: E1202:" (Diag.cause diagnostic))
   | Error diagnostics -> Eval_support.fail_diags "LW continuation mutation" diagnostics
   | Ok _ -> Alcotest.fail "LW accepted a continuation mutation containing a recovery marker");
   Alcotest.(check int) "LW model factory called once" 1 !factory_calls;
@@ -454,7 +455,7 @@ let test_effectful_toplevel_blocked_in_infer () =
               | Ok e -> (
                   match Check.check_top cctx (Kernel.Expr e) with
                   | Ok _ -> Alcotest.fail "effectful top-level body must be rejected"
-                  | Error [ d ] -> Alcotest.(check string) "code" "E0815" d.Diag.code
+                  | Error [ d ] -> Alcotest.(check string) "code" "E0815" (Diag.code_or_uncoded d)
                   | Error _ -> Alcotest.fail "expected one diagnostic"))))
 
 let suite =

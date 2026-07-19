@@ -43,7 +43,9 @@ authority and cannot be dried.
 
   $ printf '(app (var eval-code) (quote (lit 1)))\n' > evil.jqd
   $ jacquard run evil.jqd --dry-run
-  error[E1002]: --dry-run cannot sandbox eval: eval'd code runs at root authority and bypasses the dry handlers
+  error[E1002]: Dry-run cannot sandbox eval
+    Cause: --dry-run cannot sandbox eval: eval'd code runs at root authority and bypasses the dry handlers
+    Next step: Run this program without --dry-run or remove eval from its authority row.
   [1]
 
 TL.3 counterfactual replay: record once, then scrub and fork the trajectory.
@@ -148,7 +150,7 @@ RESULT TYPES differ refuse before any probability is compared:
   support lost:   2
   $ printf '(match (app (var sample) (app (var bernoulli) (lit 0.5))) (clause (pcon true) (lit "yes")) (clause (pcon false) (lit "no")))\n' > texty.jqd
   $ jacquard dist-diff coins-a.jqd texty.jqd 2>&1 | head -1
-  error[E0801]: dist-diff: model result types differ (coins-a.jqd : Int, texty.jqd : Text); probabilities over different types are not comparable
+  error[E0801]: Compared model result types do not agree
 
 Enumerations cache by content hash: the second identical diff is a full hit,
 and a sweep value equal to the reference REUSES its cache entry (content
@@ -174,7 +176,9 @@ review story: "this change adds net, authored by agent X" — read first).
 TL.3: malformed --fork specs refuse instead of silently running the baseline.
 
   $ jacquard replay trace.jqd prog.jqd --fork 'garbage'
-  error[E0104]: invalid --fork "garbage" (expected N=FORM with a parseable form)
+  error[E0104]: Command argument contains an invalid bootstrap form or value
+    Cause: invalid --fork "garbage" (expected N=FORM with a parseable form)
+    Next step: Correct the command argument and try again.
   [1]
 
 ET.3: the writer verifies the currently published predecessor before appending,
@@ -185,13 +189,17 @@ reconstructs that exact head from canonical AuditEntry bytes.
   $ echo "$genesis"
   e30304e99930d8bf631a0b1f364b6d91f6dc798a14c7c0a554ff994ff14ab937
   $ jacquard audit append absent.audit missing-entry.jqd --previous "$genesis"
-  error[E1306]: cannot read Audit entry missing-entry.jqd: missing-entry.jqd: No such file or directory
+  error[E1306]: The Audit chain could not be read or updated safely.
+    Cause: cannot read Audit entry missing-entry.jqd: missing-entry.jqd: No such file or directory
+    Next step: Make the chain a stable readable regular file and retry the operation.
   [1]
   $ test ! -e absent.audit && echo no-write
   no-write
   $ truncate -s 1048577 oversized-entry.jqd
   $ jacquard audit append bounded.audit oversized-entry.jqd --previous "$genesis"
-  error[E1306]: cannot read Audit entry oversized-entry.jqd: exceeds the 1048576-byte limit
+  error[E1306]: The Audit chain could not be read or updated safely.
+    Cause: cannot read Audit entry oversized-entry.jqd: exceeds the 1048576-byte limit
+    Next step: Make the chain a stable readable regular file and retry the operation.
   [1]
   $ test ! -e bounded.audit && echo no-write
   no-write
@@ -214,10 +222,14 @@ reconstructs that exact head from canonical AuditEntry bytes.
   $ jacquard governance verify-log chain.audit --head "$head3"
   ok 7719453dca00408a09e360a3b70a4ef2ae6f742f45e03e1db49b8c6daa3d6e7e
   $ jacquard governance verify-log chain.audit --head beef
-  error[E1307]: --head must be exactly 64 lowercase hexadecimal HASH_V0 digits
+  error[E1307]: Audit operation could not complete
+    Cause: --head must be exactly 64 lowercase hexadecimal HASH_V0 digits
+    Next step: Correct the audit input or destination and try again.
   [1]
   $ jacquard governance verify-log missing.audit --head "$head3"
-  error[E1306]: cannot read Audit chain missing.audit: missing.audit: No such file or directory
+  error[E1306]: The Audit chain could not be read or updated safely.
+    Cause: cannot read Audit chain missing.audit: missing.audit: No such file or directory
+    Next step: Make the chain a stable readable regular file and retry the operation.
   [1]
 
 Removal, duplication, alteration, wrong versions, and malformed records all
@@ -226,21 +238,31 @@ published head is supplied independently.
 
   $ sed '$d' chain.audit > removed.audit
   $ jacquard governance verify-log removed.audit --head "$head3"
-  error[E1305]: published Audit head mismatch: expected #7719453dca00408a09e360a3b70a4ef2ae6f742f45e03e1db49b8c6daa3d6e7e, reconstructed #241f4d0d0c8bcdf104c25a51ab22398ddcb1dac9e1643794eeb4cebddf6cf50c
+  error[E1305]: The reconstructed Audit head differs from the published head.
+    Cause: published Audit head mismatch: expected #7719453dca00408a09e360a3b70a4ef2ae6f742f45e03e1db49b8c6daa3d6e7e, reconstructed #241f4d0d0c8bcdf104c25a51ab22398ddcb1dac9e1643794eeb4cebddf6cf50c
+    Next step: Verify against the independently published head for this exact chain.
   [1]
   $ sed -n '1p;1p;2,3p' chain.audit > duplicated.audit
   $ jacquard governance verify-log duplicated.audit --head "$head3"
-  error[E1303]: duplicated.audit:2: broken Audit predecessor: expected #41c700d5824d94358009d9f8ac319cfb861ea0f94b4f4212871f55806fbaac26, found #e30304e99930d8bf631a0b1f364b6d91f6dc798a14c7c0a554ff994ff14ab937
+  error[E1303]: An Audit record has the wrong predecessor.
+    Cause: duplicated.audit:2: broken Audit predecessor: expected #41c700d5824d94358009d9f8ac319cfb861ea0f94b4f4212871f55806fbaac26, found #e30304e99930d8bf631a0b1f364b6d91f6dc798a14c7c0a554ff994ff14ab937
+    Next step: Restore the records to their original predecessor-linked order.
   [1]
   $ sed '1s/rule matched/rule patched/' chain.audit > altered.audit
   $ jacquard governance verify-log altered.audit --head "$head3"
-  error[E1304]: altered.audit:1: Audit record digest mismatch: stored #41c700d5824d94358009d9f8ac319cfb861ea0f94b4f4212871f55806fbaac26, computed #b3883ea1079d8c65664b64d38c81cff2185c1c8fd34a497cecb83cdb7d43502f
+  error[E1304]: An Audit record digest does not match its contents.
+    Cause: altered.audit:1: Audit record digest mismatch: stored #41c700d5824d94358009d9f8ac319cfb861ea0f94b4f4212871f55806fbaac26, computed #b3883ea1079d8c65664b64d38c81cff2185c1c8fd34a497cecb83cdb7d43502f
+    Next step: Restore the original record or append a new canonical record instead of editing it.
   [1]
   $ sed '1s/audit-chain-v2/audit-chain-v3/' chain.audit > version.audit
   $ jacquard governance verify-log version.audit --head "$head3"
-  error[E1302]: version.audit:1: unsupported Audit chain version `audit-chain-v3`
+  error[E1302]: The Audit entry or chain version is unsupported.
+    Cause: version.audit:1: unsupported Audit chain version `audit-chain-v3`
+    Next step: Supply released audit-entry-v2 records inside an audit-chain-v2 carrier.
   [1]
   $ printf '@\n' > malformed.audit
   $ jacquard governance verify-log malformed.audit --head "$head3"
-  error[E1301]: malformed.audit:1: malformed Audit chain record: expected a form at top level, found "@"
+  error[E1301]: The Audit chain carrier is malformed or noncanonical.
+    Cause: malformed.audit:1: malformed Audit chain record: expected a form at top level, found "@"
+    Next step: Regenerate the chain using the canonical audit-chain-v2 writer.
   [1]

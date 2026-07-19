@@ -22,9 +22,11 @@ type 'value aggregate =
 let diagnostic message =
   Error
     [
-      Diag.error ~code:"E0908"
-        ~hint:"record each child terminal state once in scheduler decision order"
-        ("invalid structured-concurrency scope policy: " ^ message);
+      Diag.error ~domain:Concurrency ~code:"E0908"
+        ~summary:"Structured-concurrency scope policy is invalid"
+        ~cause:("The scope policy state is inconsistent: " ^ message)
+        ~next_step:"Record each child terminal state once in scheduler decision order."
+        ~contrast:None ();
     ]
 
 let child_name child = Concurrency_contract.trace_task_id child.id

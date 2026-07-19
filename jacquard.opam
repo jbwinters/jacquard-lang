@@ -17,6 +17,7 @@ depends: [
   "ocaml" {>= "5.1"}
   "dune" {>= "3.11"}
   "digestif"
+  "yojson"
   "menhir"
   "cmdliner" {>= "2.1.0" & < "2.2"}
   "alcotest" {with-test}

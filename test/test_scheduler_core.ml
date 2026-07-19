@@ -7,7 +7,7 @@ let ok = function
         (String.concat "\n" (List.map Diag.to_string diagnostics))
 
 let error_code = function
-  | Error ({ Diag.code; _ } :: _) -> code
+  | Error (diagnostic :: _) -> Diag.code_or_uncoded diagnostic
   | Error [] -> Alcotest.fail "scheduler returned an empty diagnostic list"
   | Ok _ -> Alcotest.fail "scheduler operation unexpectedly succeeded"
 

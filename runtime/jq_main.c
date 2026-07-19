@@ -39,8 +39,7 @@ int jq_run_main(jq_rt *rt, void (*body)(jq_rt *)) {
   if (pthread_attr_init(&attr) != 0 ||
       pthread_attr_setstacksize(&attr, mb * 1024 * 1024) != 0 ||
       pthread_create(&tid, &attr, trampoline, &r) != 0) {
-    fputs("jacquard runtime: could not start the program thread\n", stderr);
-    return 2;
+    jq_runtime_fail(JQ_ERROR_NATIVE, "jacquard runtime: could not start the program thread");
   }
   pthread_join(tid, NULL);
   /* the handler and frame stacks' backing arrays outlive every balanced

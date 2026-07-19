@@ -208,12 +208,13 @@ let fail_diags label diagnostics =
 
 let expect_error ?(indexed = true) label code result =
   match result with
-  | Error ({ Diag.code = actual; message; _ } :: _) ->
-      Alcotest.(check string) (label ^ " code") code actual;
+  | Error (diagnostic :: _) ->
+      Alcotest.(check string) (label ^ " code") code (Diag.code_or_uncoded diagnostic);
       if indexed then
         Alcotest.(check bool)
           (label ^ " has indexed detail") true
-          (String.contains message '0' || String.contains message '1')
+          (String.contains (Diag.cause diagnostic) '0'
+          || String.contains (Diag.cause diagnostic) '1')
   | Error [] -> Alcotest.failf "%s returned no diagnostics" label
   | Ok _ -> Alcotest.failf "%s unexpectedly verified" label
 

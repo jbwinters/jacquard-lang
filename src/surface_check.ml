@@ -163,40 +163,42 @@ module String_set = Set.Make (String)
 let warning_case (pattern : Surface_ast.pat) name =
   Diag.warning
     ?span:(Meta.span pattern.Surface_ast.meta)
-    ~code:"W1201"
-    ~hint:
+    ~domain:Surface ~code:"W1201"
+    ~summary:"Lowercase pattern binds instead of matching a constructor"
+    ~cause:
       (Printf.sprintf
-         "`%s` is an always-matching binder; use the PascalCase constructor spelling to match the \
-          constructor"
-         name)
-    (Printf.sprintf "binding pattern `%s` shadows an in-scope constructor that differs only in case"
-       name)
+         "Binding pattern `%s` shadows an in-scope constructor that differs only in case." name)
+    ~next_step:"Use the constructor's PascalCase spelling in this pattern."
+    ~contrast:
+      (Some
+         (Diag.contrast
+            ~mistaken:(Printf.sprintf "`%s` matches the constructor" name)
+            ~intended:"A lowercase pattern always binds a new name"))
+    ()
 
 let warning_wide (pattern : Surface_ast.pat) fields =
   Diag.warning
     ?span:(Meta.span pattern.Surface_ast.meta)
-    ~code:"W1202"
-    ~hint:
-      "D36 keeps labeled constructor patterns unavailable for now; keep positional matches to four \
-       fields or fewer"
-    (Printf.sprintf
-       "this positional constructor pattern has %d fields; labeled constructor patterns are the \
-        future fix"
-       fields)
+    ~domain:Surface ~code:"W1202" ~summary:"Constructor pattern is difficult to review"
+    ~cause:
+      (Printf.sprintf
+         "This positional constructor pattern has %d fields; labeled constructor patterns are not \
+          available in 0.1."
+         fields)
+    ~next_step:"Keep positional constructor patterns to four fields or fewer." ~contrast:None ()
 
 let large_match_scrutinee_lines = 4
 
 let warning_large_scrutinee (subject : Surface_ast.expr) lines =
   Diag.warning
     ?span:(Meta.span subject.Surface_ast.meta)
-    ~code:"W1203"
-    ~hint:
-      "introduce a `let` binding before the match and match on that name; formatting never hoists \
-       expressions automatically"
-    (Printf.sprintf
-       "this match scrutinee spans %d lines; scrutinees longer than %d lines are difficult to \
-        review"
-       lines large_match_scrutinee_lines)
+    ~domain:Surface ~code:"W1203" ~summary:"Match scrutinee is difficult to review"
+    ~cause:
+      (Printf.sprintf
+         "This match scrutinee spans %d lines; scrutinees longer than %d lines obscure the branch \
+          conditions."
+         lines large_match_scrutinee_lines)
+    ~next_step:"Bind the expression with `let`, then match on that name." ~contrast:None ()
 
 let span_line_count meta =
   Option.map (fun span -> span.Span.end_pos.line - span.Span.start_pos.line + 1) (Meta.span meta)
@@ -328,7 +330,7 @@ let definition_units tops =
   loop [] tops
 
 let diagnostic_offset diagnostic =
-  match diagnostic.Diag.span with Some span -> span.Span.start_pos.offset | None -> max_int
+  match Diag.span diagnostic with Some span -> span.Span.start_pos.offset | None -> max_int
 
 let sort_diagnostics diagnostics =
   List.stable_sort
@@ -336,7 +338,10 @@ let sort_diagnostics diagnostics =
     diagnostics
 
 let same_diagnostic left right =
-  left.Diag.code = right.Diag.code && left.span = right.span && left.message = right.message
+  Diag.code left = Diag.code right
+  && Diag.span left = Diag.span right
+  && String.equal (Diag.summary left) (Diag.summary right)
+  && String.equal (Diag.cause left) (Diag.cause right)
 
 let deduplicate diagnostics =
   List.fold_left

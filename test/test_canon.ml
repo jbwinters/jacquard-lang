@@ -422,13 +422,13 @@ let test_groupref_gated () =
     | Error _ -> Alcotest.fail "validation failed"
   in
   (match Canon.hash_top (top "(groupref 0)") with
-  | Error [ d ] -> Alcotest.(check string) "outside group" "E0503" d.Diag.code
+  | Error [ d ] -> Alcotest.(check string) "outside group" "E0503" (Diag.code_or_uncoded d)
   | _ -> Alcotest.fail "bare groupref must not hash");
   (match Canon.hash_top (top "(app (groupref 7) (lit 1))") with
-  | Error [ d ] -> Alcotest.(check string) "nested outside group" "E0503" d.Diag.code
+  | Error [ d ] -> Alcotest.(check string) "nested outside group" "E0503" (Diag.code_or_uncoded d)
   | _ -> Alcotest.fail "nested bare groupref must not hash");
   match Canon.hash_top (top "(defterm ((binding f () (groupref 5))))") with
-  | Error [ d ] -> Alcotest.(check string) "out of range" "E0503" d.Diag.code
+  | Error [ d ] -> Alcotest.(check string) "out of range" "E0503" (Diag.code_or_uncoded d)
   | _ -> Alcotest.fail "out-of-range groupref must not hash"
 
 let test_unresolved_rejected () =
@@ -438,10 +438,10 @@ let test_unresolved_rejected () =
     | Error _ -> Alcotest.fail "validation failed"
   in
   (match Canon.hash_top (top "(app (var free-name) (lit 1))") with
-  | Error [ d ] -> Alcotest.(check string) "free var" "E0502" d.Diag.code
+  | Error [ d ] -> Alcotest.(check string) "free var" "E0502" (Diag.code_or_uncoded d)
   | _ -> Alcotest.fail "unresolved var must be rejected");
   match Canon.hash_top (top "(match (lit 1) (clause (pcon true) (lit 0)))") with
-  | Error [ d ] -> Alcotest.(check string) "named con" "E0501" d.Diag.code
+  | Error [ d ] -> Alcotest.(check string) "named con" "E0501" (Diag.code_or_uncoded d)
   | _ -> Alcotest.fail "unresolved constructor must be rejected"
 
 let test_quoted_surface_marker_validation () =
@@ -468,7 +468,9 @@ let test_quoted_surface_marker_validation () =
           let expression = Kernel.{ it = Quote (wrap malformed_marker); meta = Meta.empty } in
           match Canon.hash_expr expression with
           | Error [ diagnostic ] ->
-              Alcotest.(check string) (position ^ " " ^ shape) expected_code diagnostic.Diag.code
+              Alcotest.(check string)
+                (position ^ " " ^ shape)
+                expected_code (Diag.code_or_uncoded diagnostic)
           | Error diagnostics ->
               Alcotest.failf "%s %s: unexpected diagnostics: %s" position shape
                 (String.concat "; " (List.map Diag.to_string diagnostics))

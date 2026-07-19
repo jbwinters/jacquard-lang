@@ -1054,8 +1054,11 @@ let pp_op_fragment context lookup fmt (clause : Kernel.opclause) =
 let fragment_error form =
   Error
     [
-      Diag.error ~code:"E1203"
-        (Printf.sprintf "`%s` is not a self-contained surface fragment" form.Form.head);
+      Diag.error ~domain:Surface ~code:"E1203"
+        ~summary:"Kernel form has no self-contained surface fragment"
+        ~cause:(Printf.sprintf "`%s` is not a self-contained surface fragment." form.Form.head)
+        ~next_step:"Render this form in its enclosing declaration or expression context."
+        ~contrast:None ();
     ]
 
 (** [print_fragment] renders a kernel form even when it is an interior pattern, type, row, or

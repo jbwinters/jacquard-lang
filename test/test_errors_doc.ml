@@ -1,4 +1,4 @@
-(* W5.3: every diagnostic code emitted anywhere in src/ or bin/ appears in docs/errors.md
+(* W5.3: every diagnostic code emitted anywhere in src/, bin/, or runtime/ appears in docs/errors.md
    (the catalog is the contract; this test is its teeth). *)
 
 let read_file path =
@@ -7,15 +7,18 @@ let read_file path =
   close_in ic;
   s
 
-let ml_files dir =
+let rec source_files dir =
   Sys.readdir dir |> Array.to_list
-  |> List.filter (fun f -> Filename.check_suffix f ".ml")
-  |> List.map (Filename.concat dir)
+  |> List.concat_map (fun entry ->
+      let path = Filename.concat dir entry in
+      if Sys.is_directory path then source_files path
+      else if List.exists (Filename.check_suffix path) [ ".ml"; ".c"; ".h" ] then [ path ]
+      else [])
 
 (* every string literal that looks like a diagnostic code passed to ~code: (or bound as an
    optional-parameter default, `?(x_code = "...")`) *)
 let emitted_codes () =
-  let re = Str.regexp {|code[: ]*=? *"\([EW][0-9][0-9][0-9][0-9]\)"|} in
+  let re = Str.regexp {|"\([EWI][0-9][0-9][0-9][0-9]\)"|} in
   let codes = Hashtbl.create 64 in
   List.iter
     (fun path ->
@@ -28,7 +31,7 @@ let emitted_codes () =
         | exception Not_found -> ()
       in
       scan 0)
-    (ml_files "../src" @ ml_files "../bin");
+    (source_files "../src" @ source_files "../bin" @ source_files "../runtime");
   List.sort compare (Hashtbl.fold (fun c () acc -> c :: acc) codes [])
 
 let test_all_codes_cataloged () =

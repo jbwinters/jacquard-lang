@@ -175,7 +175,9 @@ let test_malformed_and_hashless_rejected () =
   | Error diagnostics ->
       Alcotest.(check bool)
         "hashless proposal gets a checker diagnostic" true
-        (List.exists (fun diagnostic -> String.equal diagnostic.Diag.code "E0801") diagnostics)
+        (List.exists
+           (fun diagnostic -> String.equal (Diag.code_or_uncoded diagnostic) "E0801")
+           diagnostics)
   | Ok _ -> Alcotest.fail "hashless Proposal typechecked");
   ignore valid
 

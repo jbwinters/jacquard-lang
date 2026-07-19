@@ -107,7 +107,7 @@ let test_rename_only_names_file () =
 let test_rename_unknown () =
   let t = open_ok (fresh_root ()) in
   match Store.rename t ~old_name:"ghost" ~new_name:"g2" () with
-  | Error [ d ] -> Alcotest.(check string) "code" "E0602" d.Diag.code
+  | Error [ d ] -> Alcotest.(check string) "code" "E0602" (Diag.code_or_uncoded d)
   | _ -> Alcotest.fail "renaming an unknown name must fail"
 
 (* An invalid new name must be a clean diagnostic and must not damage names.jqd
@@ -121,7 +121,7 @@ let test_invalid_names_rejected_safely () =
   List.iter
     (fun bad ->
       match Store.rename t ~old_name:"bool" ~new_name:bad () with
-      | Error [ d ] -> Alcotest.(check string) (bad ^ " rejected") "E0605" d.Diag.code
+      | Error [ d ] -> Alcotest.(check string) (bad ^ " rejected") "E0605" (Diag.code_or_uncoded d)
       | _ -> Alcotest.failf "rename to %S must fail with E0605" bad)
     [ "Bad"; "a b"; ""; "9x" ];
   (* the index survived: still resolvable in memory and on disk *)
@@ -129,14 +129,14 @@ let test_invalid_names_rejected_safely () =
   let t2 = open_ok root in
   Alcotest.(check bool) "names.jqd intact" true (Store.lookup_name t2 "bool" <> None);
   match Store.bind_name t "Nope" hs.Canon.decl_hash with
-  | Error [ d ] -> Alcotest.(check string) "bind invalid name" "E0605" d.Diag.code
+  | Error [ d ] -> Alcotest.(check string) "bind invalid name" "E0605" (Diag.code_or_uncoded d)
   | _ -> Alcotest.fail "bind_name with invalid name must fail"
 
 let test_defterm_group_hash_not_nameable () =
   let t = open_ok (fresh_root ()) in
   let hs = put_ok t (decl_of ~names:Resolve.empty_names "(defterm ((binding one () (lit 1))))") in
   match Store.bind_name t "the-group" hs.Canon.decl_hash with
-  | Error [ d ] -> Alcotest.(check string) "code" "E0604" d.Diag.code
+  | Error [ d ] -> Alcotest.(check string) "code" "E0604" (Diag.code_or_uncoded d)
   | _ -> Alcotest.fail "naming a defterm group hash must fail"
 
 let test_task_private_hash_never_nameable () =
@@ -150,7 +150,8 @@ let test_task_private_hash_never_nameable () =
     "private constructor omitted" true
     (Store.lookup_kind store "task-opaque" Resolve.KCon = None);
   (match Store.bind_name store "leaked-task" private_hash with
-  | Error [ diagnostic ] -> Alcotest.(check string) "bind code" "E0907" diagnostic.Diag.code
+  | Error [ diagnostic ] ->
+      Alcotest.(check string) "bind code" "E0907" (Diag.code_or_uncoded diagnostic)
   | Error diagnostics ->
       Alcotest.failf "unexpected private bind diagnostics: %s"
         (String.concat "; " (List.map Diag.to_string diagnostics))
@@ -160,7 +161,8 @@ let test_task_private_hash_never_nameable () =
   Printf.fprintf output "(named persisted-task con #%s)\n" (Hash.to_hex private_hash);
   close_out output;
   match Store.open_store root with
-  | Error [ diagnostic ] -> Alcotest.(check string) "persisted code" "E0907" diagnostic.Diag.code
+  | Error [ diagnostic ] ->
+      Alcotest.(check string) "persisted code" "E0907" (Diag.code_or_uncoded diagnostic)
   | Error diagnostics ->
       Alcotest.failf "unexpected persisted private diagnostics: %s"
         (String.concat "; " (List.map Diag.to_string diagnostics))
@@ -181,7 +183,8 @@ let test_channel_private_hash_never_nameable () =
     "private constructor omitted" true
     (Store.lookup_kind store "channel-opaque" Resolve.KCon = None);
   (match Store.bind_name store "leaked-channel" private_hash with
-  | Error [ diagnostic ] -> Alcotest.(check string) "bind code" "E0907" diagnostic.Diag.code
+  | Error [ diagnostic ] ->
+      Alcotest.(check string) "bind code" "E0907" (Diag.code_or_uncoded diagnostic)
   | Error diagnostics ->
       Alcotest.failf "unexpected private bind diagnostics: %s"
         (String.concat "; " (List.map Diag.to_string diagnostics))
@@ -191,7 +194,8 @@ let test_channel_private_hash_never_nameable () =
   Printf.fprintf output "(named persisted-channel con #%s)\n" (Hash.to_hex private_hash);
   close_out output;
   match Store.open_store root with
-  | Error [ diagnostic ] -> Alcotest.(check string) "persisted code" "E0907" diagnostic.Diag.code
+  | Error [ diagnostic ] ->
+      Alcotest.(check string) "persisted code" "E0907" (Diag.code_or_uncoded diagnostic)
   | Error diagnostics ->
       Alcotest.failf "unexpected persisted private diagnostics: %s"
         (String.concat "; " (List.map Diag.to_string diagnostics))
@@ -318,7 +322,7 @@ and test_once_effect_survives_store_reopen () =
 let test_unknown_hash () =
   let t = open_ok (fresh_root ()) in
   match Store.get t (Hash.of_string "nothing") with
-  | Error [ d ] -> Alcotest.(check string) "code" "E0601" d.Diag.code
+  | Error [ d ] -> Alcotest.(check string) "code" "E0601" (Diag.code_or_uncoded d)
   | _ -> Alcotest.fail "unknown hash must fail"
 
 (* PV.1: origin sidecars — stamped, carried through reopen, never hash-relevant,

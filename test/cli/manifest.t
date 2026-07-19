@@ -22,8 +22,9 @@ Checking against a grant set that lacks net refuses at the type level, naming
 the effect and the call-chain endpoint:
 
   $ jacquard check hostile.jqd --manifest console
-  error[E0814]: this program requires net [world/high] — reach a network endpoint through the granted handler, which is not granted (performed via `net.get`)
-    hint: grant it with --allow net, or handle the effect in the program
+  error[E0814]: The program requires an effect that was not granted
+    Cause: This program requires net [world/high] — reach a network endpoint through the granted handler, which is not granted (performed via `net.get`).
+    Next step: grant it with --allow net, or handle the effect in the program
   [1]
 
 With the grant it passes, and the granted run succeeds against the stub
@@ -38,12 +39,14 @@ Running without the net grant is the capability refusal (exit 3), even when
 some other runtime handler is granted:
 
   $ jacquard run hostile.jqd --allow console
-  error[E0814]: this program requires net [world/high] — reach a network endpoint through the granted handler, which is not granted (performed via `summarize`)
-    hint: grant it with --allow net, or handle the effect in the program
+  error[E0814]: The program requires an effect that was not granted
+    Cause: This program requires net [world/high] — reach a network endpoint through the granted handler, which is not granted (performed via `summarize`).
+    Next step: grant it with --allow net, or handle the effect in the program
   [3]
   $ jacquard run hostile.jqd
-  error[E0814]: this program requires net [world/high] — reach a network endpoint through the granted handler, which is not granted (performed via `summarize`)
-    hint: grant it with --allow net, or handle the effect in the program
+  error[E0814]: The program requires an effect that was not granted
+    Cause: This program requires net [world/high] — reach a network endpoint through the granted handler, which is not granted (performed via `summarize`).
+    Next step: grant it with --allow net, or handle the effect in the program
   [3]
 
 Pure effects are never grantable, so the hint must not suggest a --allow flag
@@ -53,11 +56,14 @@ that would only bounce with E0703:
   > (app (var option.get!) (var none))
   > JACQUARD
   $ jacquard run pure.jqd
-  error[E0814]: this program requires abort [control/none] — stop a computation without an error payload, which is not granted (performed via `option.get!`)
-    hint: handle the effect in the program (this effect is pure and cannot be granted)
+  error[E0814]: The program requires an effect that was not granted
+    Cause: This program requires abort [control/none] — stop a computation without an error payload, which is not granted (performed via `option.get!`).
+    Next step: handle the effect in the program (this effect is pure and cannot be granted)
   [3]
   $ jacquard run pure.jqd --allow abort
-  error[E0703]: effect `abort` is not grantable
+  error[E0703]: Requested effect is not root-grantable
+    Cause: effect `abort` is not grantable
+    Next step: Handle this effect inside the program instead of granting it at the root.
   [1]
 
 SC.4 keeps a spawned child's public effects in the parent row even when
@@ -95,8 +101,9 @@ only Async, so the documented fetch-all shape needs Net but not Async.
   fetch-all : (List Text) ->{Net} TaskResult (List (TaskResult Text))
   _ : TaskResult (List (TaskResult Text))
   $ jacquard check fetch-all.jac --manifest console
-  error[E0814]: this program requires net [world/high] — reach a network endpoint through the granted handler, which is not granted (performed via `net.get`)
-    hint: grant it with --allow net, or handle the effect in the program
+  error[E0814]: The program requires an effect that was not granted
+    Cause: This program requires net [world/high] — reach a network endpoint through the granted handler, which is not granted (performed via `net.get`).
+    Next step: grant it with --allow net, or handle the effect in the program
   [1]
   $ jacquard check fetch-all.jac --manifest net
   ok
@@ -118,7 +125,9 @@ the equation diagnostic retains the propagated Net effect.
   > launder() = spawn-alias(fn () -> net.get("https://example.invalid"))
   > JACQUARD
   $ jacquard check alias-launder.jac
-  alias-launder.jac:11:1-69: error[E0804]: equation definition `launder` does not match its signature: expected () ->{async} task text, got () ->{async, net | e} task text (a closed effect row cannot absorb extra effects; a stored definition passed as a thunk can be eta-expanded at the use site: (lam () (app (var f))))
+  alias-launder.jac:11:1-69: error[E0804]: The value does not satisfy its annotation
+    Cause: equation definition `launder` does not match its signature: expected () ->{async} task text, got () ->{async, net | e} task text (a closed effect row cannot absorb extra effects; a stored definition passed as a thunk can be eta-expanded at the use site: (lam () (app (var f))))
+    Next step: Change the value or its annotation so the two types agree.
   [1]
 
 Adversarial polymorphic rows also fail at the async.spawn source instead of
@@ -138,8 +147,9 @@ solving a cyclic child/caller row.
   > cycle() = force-cycle(async.spawn)
   > JACQUARD
   $ jacquard check row-cycle.jac
-  row-cycle.jac:11:23-34: error[E0801]: argument: expected (() ->{async | e} a) ->{async, net | e} task a, got (() ->{async | e} a) ->{async | e} task a (occurs check: effect rows with the same tail differ)
-    hint: the expected side comes from the surrounding context; make both sides agree
+  row-cycle.jac:11:23-34: error[E0801]: Types do not agree
+    Cause: argument: expected (() ->{async | e} a) ->{async, net | e} task a, got (() ->{async | e} a) ->{async | e} task a (occurs check: effect rows with the same tail differ)
+    Next step: the expected side comes from the surrounding context; make both sides agree
   [1]
 
 World facade effects are also not root-grantable, but they are not pure. Their
@@ -149,11 +159,14 @@ diagnostic directs the caller to the required membrane handler:
   > (app (var workspace.read-file) (app (var path-value) (lit "README.md")))
   > JACQUARD
   $ jacquard run workspace.jqd
-  error[E0814]: this program requires workspace [world/high] — request mediated workspace reads, writes, or fetches without directly acquiring raw authority, which is not granted (performed via `workspace.read-file`)
-    hint: handle Workspace in the program (Workspace is a world facade and is not root-grantable)
+  error[E0814]: The program requires an effect that was not granted
+    Cause: This program requires workspace [world/high] — request mediated workspace reads, writes, or fetches without directly acquiring raw authority, which is not granted (performed via `workspace.read-file`).
+    Next step: handle Workspace in the program (Workspace is a world facade and is not root-grantable)
   [3]
   $ jacquard run workspace.jqd --allow workspace
-  error[E0703]: effect `workspace` is not grantable
+  error[E0703]: Requested effect is not root-grantable
+    Cause: effect `workspace` is not grantable
+    Next step: Handle this effect inside the program instead of granting it at the root.
   [1]
 
 A user effect that reuses an official short name does not inherit its risk or grant:
@@ -163,6 +176,7 @@ A user effect that reuses an official short name does not inherit its risk or gr
   > (app (var package.fetch))
   > JACQUARD
   $ jacquard check spoof.jqd --manifest console
-  error[E0814]: this program requires unpackaged:a46cb801752d/net [unrated user effect #a46cb801752d15e51f6c46c91d0c4fa874b337d7186f8b3003230442baad74f1], which is not granted (performed via `package.fetch`)
-    hint: handle the effect in the program (unregistered user effects have no built-in --allow grant)
+  error[E0814]: The program requires an effect that was not granted
+    Cause: This program requires unpackaged:a46cb801752d/net [unrated user effect #a46cb801752d15e51f6c46c91d0c4fa874b337d7186f8b3003230442baad74f1], which is not granted (performed via `package.fetch`).
+    Next step: handle the effect in the program (unregistered user effects have no built-in --allow grant)
   [1]

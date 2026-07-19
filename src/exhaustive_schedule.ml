@@ -113,7 +113,12 @@ let trace_of_path = function
 
 let validate_bounds bounds =
   let invalid field value =
-    Diag.error ~code:"E0908" (Printf.sprintf "exhaustive %s must be positive, found %d" field value)
+    Diag.error ~domain:Concurrency ~code:"E0908"
+      ~summary:"Exhaustive-schedule bound must be positive"
+      ~cause:
+        (Printf.sprintf "The %s is %d; exhaustive bounds must be greater than zero." field value)
+      ~next_step:(Printf.sprintf "Set the %s to a positive integer." field)
+      ~contrast:None ()
   in
   let diagnostics =
     [

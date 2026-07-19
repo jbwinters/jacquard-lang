@@ -7,8 +7,9 @@ The public M1 surface demos stay green through the actual jac alias.
   $ jac run ../../demos/basics/m1-choose.jac
   cons(1, cons(2, nil))
   $ jac run ../../demos/basics/m1-gated.jac
-  error[E0814]: this program requires eval [meta/high] — run code constructed or loaded at runtime, which is not granted (performed via `eval-code`)
-    hint: grant it with --allow eval, or handle the effect in the program
+  error[E0814]: The program requires an effect that was not granted
+    Cause: This program requires eval [meta/high] — run code constructed or loaded at runtime, which is not granted (performed via `eval-code`).
+    Next step: grant it with --allow eval, or handle the effect in the program
   [3]
   $ jac run ../../demos/basics/m1-gated.jac --allow eval
   42
@@ -31,8 +32,9 @@ The stdlib worked example (SL.9): word frequency, top 3, console-only manifest.
 Without the grant it refuses before reading anything:
 
   $ jac run ../../demos/tooling/word-count.jac
-  error[E0814]: this program requires console [world/low] — talk to the process terminal, which is not granted (performed via `main`)
-    hint: grant it with --allow console, or handle the effect in the program
+  error[E0814]: The program requires an effect that was not granted
+    Cause: This program requires console [world/low] — talk to the process terminal, which is not granted (performed via `main`).
+    Next step: grant it with --allow console, or handle the effect in the program
   [3]
 
 The probabilistic cookbook (PB.1): VOI, dream mode, self-consistency, drift

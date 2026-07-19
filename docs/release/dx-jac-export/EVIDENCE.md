@@ -6,8 +6,8 @@ artifacts and are not retroactively updated by DX.2.
 
 ## Current inventory
 
-- Alcotest/QCheck cases: `738`
-- Cram transcript files: `43`
+- Alcotest/QCheck cases: `742`
+- Cram transcript files: `44`
 - Doctest examples: `27` across 8 documents
 
 The test count includes six DX.2 filesystem-boundary cases and six DX.5/DX.7
@@ -17,6 +17,8 @@ transcripts added after the frozen release include `test/cli/export.t`,
 the GM.8 governance-verifier analysis lane. GM.14A adds five compiled
 run-bundle cases and one public verifier transcript. GM.14B adds five compiled
 action-reconciliation cases and one public reconciliation transcript.
+DX.4 adds four compiled diagnostic-contract cases and one public diagnostic
+format transcript.
 
 ## Proved behavior
 

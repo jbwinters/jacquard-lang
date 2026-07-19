@@ -4,10 +4,12 @@ type t = { run : run; scope_path : int list; spawn_index : int }
 let create_run = Concurrency_owner.create
 
 let diagnostic detail =
-  Diag.error ~code:Concurrency_contract.task_escape_code
-    ~hint:
-      "use the handle only with async.await or async.cancel inside its creating structured scope"
-    (Concurrency_contract.task_escape_message ^ ": " ^ detail)
+  Diag.error ~domain:Concurrency ~code:Concurrency_contract.task_escape_code
+    ~summary:"This task handle is outside its structured scope."
+    ~cause:(Concurrency_contract.task_escape_message ^ ": " ^ detail)
+    ~next_step:
+      "Use the handle only with async.await or async.cancel inside its creating structured scope."
+    ~contrast:None ()
 
 let checked_id scope_path spawn_index =
   match Concurrency_contract.task_id ~scope_path ~spawn_index with

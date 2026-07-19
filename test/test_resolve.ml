@@ -132,13 +132,14 @@ let test_pattern_binds_in_clause_body_only () =
   let _ = resolve_ok "(match (lit 1) (clause (pvar m) (var m)) (clause (pwild) (lit 0)))" in
   let ds = resolve_err "(match (lit 1) (clause (pvar m) (lit 0)) (clause (pwild) (var m)))" in
   match ds with
-  | [ d ] -> Alcotest.(check string) "unknown m" "E0301" d.Diag.code
+  | [ d ] -> Alcotest.(check string) "unknown m" "E0301" (Diag.code_or_uncoded d)
   | _ -> Alcotest.fail "expected one diagnostic"
 
 let test_let_nonrec_value_no_self () =
   let ds = resolve_err "(let nonrec (pvar x) (var x) (lit 1))" in
   match ds with
-  | [ d ] -> Alcotest.(check string) "nonrec value can't see binder" "E0301" d.Diag.code
+  | [ d ] ->
+      Alcotest.(check string) "nonrec value can't see binder" "E0301" (Diag.code_or_uncoded d)
   | _ -> Alcotest.fail "expected one diagnostic"
 
 let test_resume_bound_in_opclause () =
@@ -195,7 +196,9 @@ let test_group_mutual_references () =
 
 let test_duplicate_group_binding () =
   let ds = resolve_err "(defterm ((binding f () (lit 1)) (binding f () (lit 2))))" in
-  Alcotest.(check bool) "E0303 reported" true (List.exists (fun d -> d.Diag.code = "E0303") ds)
+  Alcotest.(check bool)
+    "E0303 reported" true
+    (List.exists (fun d -> Diag.code_or_uncoded d = "E0303") ds)
 
 (* --- unknown names and suggestions --- *)
 
@@ -208,8 +211,8 @@ let test_unknown_with_suggestion () =
   let ds = resolve_err "(app (var ad) (lit 1))" in
   match ds with
   | [ d ] ->
-      Alcotest.(check string) "code" "E0301" d.Diag.code;
-      let hint = Option.value ~default:"" d.Diag.hint in
+      Alcotest.(check string) "code" "E0301" (Diag.code_or_uncoded d);
+      let hint = Diag.cause d in
       Alcotest.(check bool)
         (Printf.sprintf "hint %S mentions add" hint)
         true (contains ~needle:"add" hint)
@@ -218,7 +221,8 @@ let test_unknown_with_suggestion () =
 let test_unknown_no_near_miss () =
   let ds = resolve_err "(app (var zzzzzzz) (lit 1))" in
   match ds with
-  | [ d ] -> Alcotest.(check (option string)) "no hint" None d.Diag.hint
+  | [ d ] ->
+      Alcotest.(check bool) "no contrastive hint" true (Option.is_none (Diag.contrastive_hint d))
   | _ -> Alcotest.fail "expected one diagnostic"
 
 let test_multiple_unknowns_all_reported () =
@@ -230,15 +234,15 @@ let test_multiple_unknowns_all_reported () =
 let test_kind_mismatch () =
   let ds = resolve_err "(app (var int) (lit 1))" in
   (match ds with
-  | [ d ] -> Alcotest.(check string) "type used as value" "E0302" d.Diag.code
+  | [ d ] -> Alcotest.(check string) "type used as value" "E0302" (Diag.code_or_uncoded d)
   | _ -> Alcotest.fail "expected one diagnostic");
   let ds = resolve_err "(match (lit 1) (clause (pcon add) (lit 0)))" in
   (match ds with
-  | [ d ] -> Alcotest.(check string) "term used as constructor" "E0302" d.Diag.code
+  | [ d ] -> Alcotest.(check string) "term used as constructor" "E0302" (Diag.code_or_uncoded d)
   | _ -> Alcotest.fail "expected one diagnostic");
   let ds = resolve_err "(ann (lit 1) (tref add))" in
   match ds with
-  | [ d ] -> Alcotest.(check string) "term used as type" "E0302" d.Diag.code
+  | [ d ] -> Alcotest.(check string) "term used as type" "E0302" (Diag.code_or_uncoded d)
   | _ -> Alcotest.fail "expected one diagnostic"
 
 let test_types_and_rows_resolve () =
@@ -277,19 +281,21 @@ let test_quote_payload_untouched_but_splices_resolve () =
 
 let test_duplicate_pattern_var () =
   let ds = resolve_err "(match (lit 1) (clause (ptuple (pvar x) (pvar x)) (var x)))" in
-  Alcotest.(check bool) "E0304 reported" true (List.exists (fun d -> d.Diag.code = "E0304") ds);
+  Alcotest.(check bool)
+    "E0304 reported" true
+    (List.exists (fun d -> Diag.code_or_uncoded d = "E0304") ds);
   (* duplicates across sibling binders of one construct are rejected too *)
   let ds = resolve_err "(lam ((pvar x) (pvar x)) (var x))" in
   Alcotest.(check bool)
     "duplicate lam params" true
-    (List.exists (fun d -> d.Diag.code = "E0304") ds);
+    (List.exists (fun d -> Diag.code_or_uncoded d = "E0304") ds);
   let ds =
     resolve_err
       "(handle (lit 1) (ret (pvar x) (var x)) (opclause abort ((pvar k)) k (app (var k))))"
   in
   Alcotest.(check bool)
     "resume duplicating a param" true
-    (List.exists (fun d -> d.Diag.code = "E0304") ds)
+    (List.exists (fun d -> Diag.code_or_uncoded d = "E0304") ds)
 
 let test_group_member_shadows_global () =
   (* `add` is a stub global term; a group member of the same name wins *)

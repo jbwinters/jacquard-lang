@@ -89,7 +89,9 @@ A file that does not resolve is an error, not a partial table:
   > (defterm ((binding boom () (app (var nowhere) (lit 1)))))
   > EOF_JQD
   $ jacquard tiers bad.jqd
-  bad.jqd:1:33-46: error[E0301]: unknown name `nowhere`
+  bad.jqd:1:33-46: error[E0301]: This reference names something that is not in scope.
+    Cause: No name named `nowhere` is in scope.
+    Next step: Correct the reference to an in-scope name or declaration.
   [1]
 
 So is a file that resolves but does not typecheck, with source positions:
@@ -98,6 +100,7 @@ So is a file that resolves but does not typecheck, with source positions:
   > (defterm ((binding bad () (app (lit 1) (lit 2)))))
   > EOF_JQD
   $ jacquard tiers bad-type.jqd
-  bad-type.jqd:1:27-48: error[E0802]: int is not a function
-    hint: only functions, constructors, effect operations, and resumptions apply
+  bad-type.jqd:1:27-48: error[E0802]: This value is not callable
+    Cause: int is not a function
+    Next step: Apply only a function, constructor, effect operation, or resumption.
   [1]

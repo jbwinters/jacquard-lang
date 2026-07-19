@@ -113,7 +113,17 @@ type vocabulary = {
 }
 
 let span meta = Meta.span meta
-let diagnostic ?hint meta code message = Diag.error ?span:(span meta) ?hint ~code message
+
+let diagnostic_summary code =
+  match List.assoc_opt code diagnostic_codes with
+  | Some meaning -> String.capitalize_ascii meaning
+  | None -> "Governance verification failed"
+
+let diagnostic meta code cause =
+  Diag.error ?span:(span meta) ~domain:Governance ~code ~summary:(diagnostic_summary code) ~cause
+    ~next_step:"Restore the canonical governed structure described by this diagnostic."
+    ~contrast:None ()
+
 let hex hash = Hash.to_hex hash
 
 let pinned_hash name spelling =
@@ -364,7 +374,7 @@ let check_pure_term checker ~result_type ~expected_result ~expected_name ~allow_
       [
         diagnostic term.meta "E1405"
           (Printf.sprintf "%s cannot be checked: %s" term.label
-             (String.concat "; " (List.map Diag.to_string diagnostics)));
+             (String.concat "; " (List.map Diag.to_cause_string diagnostics)));
       ]
   | Ok scheme -> (
       let inferred = Types.repr scheme.Types.ty in
@@ -516,7 +526,7 @@ let validate_facade store (contract : contract) =
       [
         diagnostic contract.meta "E1401"
           (Printf.sprintf "facade effect cannot be resolved: %s"
-             (String.concat "; " (List.map Diag.to_string diagnostics)));
+             (String.concat "; " (List.map Diag.to_cause_string diagnostics)));
       ]
   | Ok { Store.decl = { Kernel.it = Kernel.DefEffect { ops; _ }; _ }; role = Store.Whole; _ } ->
       let mode_errors =

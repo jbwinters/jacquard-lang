@@ -23,13 +23,11 @@ static void type_err1(const char *msg_prefix, uint16_t got_n, const jq_value *ar
     __attribute__((noreturn));
 static void type_err1(const char *msg_prefix, uint16_t got_n, const jq_value *args, uint16_t n) {
   (void)got_n;
-  fprintf(stderr, "type error: %s", msg_prefix);
-  for (uint16_t i = 0; i < n; i++) {
-    char *s = jq_show(args[i]);
-    fprintf(stderr, "%s%s", i ? ", " : "", s);
-  }
-  fputc('\n', stderr);
-  exit(2);
+  char *first = n > 0 ? jq_show(args[0]) : NULL;
+  char *second = n > 1 ? jq_show(args[1]) : NULL;
+  if (n > 1)
+    jq_runtime_failf(JQ_ERROR_TYPE, "%s%s, %s", msg_prefix, first, second);
+  jq_runtime_failf(JQ_ERROR_TYPE, "%s%s", msg_prefix, first ? first : "");
 }
 
 static bool is_text(jq_value v) {
@@ -89,8 +87,7 @@ jq_value jq_g_sleep(jq_rt *rt, const jq_value *args) {
 
 static void io_err(const char *path) __attribute__((noreturn));
 static void io_err(const char *path) {
-  fprintf(stderr, "io error: %s: %s\n", path, strerror(errno));
-  exit(2);
+  jq_runtime_failf(JQ_ERROR_IO, "%s: %s", path, strerror(errno));
 }
 
 /* the libc calls need a NUL-terminated copy of the path text */
@@ -192,8 +189,7 @@ jq_value jq_g_dist_sample(jq_rt *rt, const jq_value *args) {
   extern jq_value jq_g_dist_draw(jq_rt *, jq_value); /* jq_intrinsics.c */
   if (!jq_is_ptr(args[0]) || jq_block_of(args[0])->tag != JQ_CON) {
     char *s = jq_show(args[0]);
-    fprintf(stderr, "type error: %s is not a distribution value\n", s);
-    exit(2);
+    jq_runtime_failf(JQ_ERROR_TYPE, "%s is not a distribution value", s);
   }
   return jq_g_dist_draw(rt, args[0]);
 }
@@ -203,14 +199,12 @@ jq_value jq_g_dist_observe(jq_rt *rt, const jq_value *args) {
   /* run_cmd renders Observe_at_root as E0904; inside a weighted run the LW
      driver flattens it to an E0902 diagnostic first (both exit 2) */
   if (rt->lw)
-    fputs("arithmetic error: error[E0902]: observe reached the sampling root handler; "
-          "observation requires an inference driver (use jacquard infer)\n",
-          stderr);
-  else
-    fputs("error[E0904]: observe reached the sampling root handler; observation requires "
-          "an inference driver (use jacquard infer)\n",
-          stderr);
-  exit(2);
+    jq_diagnostic_fail(2, "E0902", "Probabilistic inference stopped on a runtime failure.",
+                       "observe reached the sampling root handler; observation requires an inference driver (use jacquard infer)",
+                       "Correct the reported model runtime failure and rerun inference.");
+  jq_diagnostic_fail(2, "E0904", "Observation is invalid at the sampling root",
+                     "observe reached the sampling root handler; observation requires an inference driver (use jacquard infer)",
+                     "Move the observation under an inference handler.");
 }
 
 /* infer (task 72): the stub completion grant, ported from install_infer.

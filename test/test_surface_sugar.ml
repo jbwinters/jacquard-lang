@@ -159,17 +159,20 @@ let test_wildcard_spelling () =
 let diagnostic_codes source =
   match Surface_parse.parse_string ~file:"bad-ss12.jac" source with
   | Ok _ -> []
-  | Error diagnostics -> List.map (fun diagnostic -> diagnostic.Diag.code) diagnostics
+  | Error diagnostics -> List.map (fun diagnostic -> Diag.code_or_uncoded diagnostic) diagnostics
 
 let diagnostic_strings source =
   match Surface_parse.parse_string ~file:"bad-ss12.jac" source with
   | Ok _ -> []
   | Error diagnostics -> List.map Diag.to_string diagnostics
 
+let expected_diagnostic span code summary cause next_step =
+  Printf.sprintf "%s: error[%s]: %s\n  Cause: %s\n  Next step: %s" span code summary cause next_step
+
 let lowering_codes source =
   match Surface_lower.lower_tops (parse source) with
   | Ok _ -> []
-  | Error diagnostics -> List.map (fun diagnostic -> diagnostic.Diag.code) diagnostics
+  | Error diagnostics -> List.map (fun diagnostic -> Diag.code_or_uncoded diagnostic) diagnostics
 
 let test_block_edges_and_diagnostics () =
   Alcotest.(check bool)
@@ -183,8 +186,9 @@ let test_block_edges_and_diagnostics () =
   Alcotest.(check (list string))
     "missing rec params text"
     [
-      "bad-ss12.jac:1:14-15: error[E1233]: `let rec` requires a lowercase name followed by a \
-       parameter list";
+      expected_diagnostic "bad-ss12.jac:1:14-15" "E1233" "A local recursive binding is malformed"
+        "`let rec` requires a lowercase name followed by a parameter list"
+        "Use a lowercase function name followed by its parameters.";
     ]
     (diagnostic_strings "{ let rec go = 1; go }");
   Alcotest.(check (list string))
@@ -323,7 +327,7 @@ let raw_error_code source =
   | Ok form -> (
       match Kernel.expr_of_form form with
       | Ok _ -> Alcotest.fail "invalid raw recursive let validated"
-      | Error [ diagnostic ] -> diagnostic.Diag.code
+      | Error [ diagnostic ] -> Diag.code_or_uncoded diagnostic
       | Error diagnostics -> fail_diags "raw rec validation" diagnostics)
 
 let test_raw_rec_validation_and_printer () =

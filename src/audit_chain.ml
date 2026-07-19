@@ -12,7 +12,34 @@ type record = { previous : Hash.t; digest : Hash.t; entry : Form.t }
 
 let domain = "jacquard-audit-chain-v2\000"
 let genesis = Hash.of_string "jacquard-audit-chain-v2-genesis\000"
-let error ~code fmt = Printf.ksprintf (fun message -> Error [ Diag.error ~code message ]) fmt
+
+let diagnostic_summary = function
+  | "E1301" -> "The Audit chain carrier is malformed or noncanonical."
+  | "E1302" -> "The Audit entry or chain version is unsupported."
+  | "E1303" -> "An Audit record has the wrong predecessor."
+  | "E1304" -> "An Audit record digest does not match its contents."
+  | "E1305" -> "The reconstructed Audit head differs from the published head."
+  | "E1306" -> "The Audit chain could not be read or updated safely."
+  | "E1307" -> "The supplied Audit head is malformed."
+  | "E1308" -> "The Audit entry sequence is not contiguous."
+  | code -> raise (Diag.Bug_invalid_diagnostic ("unknown Audit diagnostic code " ^ code))
+
+let diagnostic_next_step = function
+  | "E1301" -> "Regenerate the chain using the canonical audit-chain-v2 writer."
+  | "E1302" -> "Supply released audit-entry-v2 records inside an audit-chain-v2 carrier."
+  | "E1303" -> "Restore the records to their original predecessor-linked order."
+  | "E1304" -> "Restore the original record or append a new canonical record instead of editing it."
+  | "E1305" -> "Verify against the independently published head for this exact chain."
+  | "E1306" -> "Make the chain a stable readable regular file and retry the operation."
+  | "E1307" -> "Pass exactly 64 lowercase hexadecimal digits as the published head."
+  | "E1308" -> "Renumber entries as one non-negative contiguous sequence starting at zero."
+  | code -> raise (Diag.Bug_invalid_diagnostic ("unknown Audit diagnostic code " ^ code))
+
+let diagnostic ~code cause =
+  Diag.error ~domain:Audit ~code ~summary:(diagnostic_summary code) ~cause
+    ~next_step:(diagnostic_next_step code) ~contrast:None ()
+
+let error ~code fmt = Printf.ksprintf (fun cause -> Error [ diagnostic ~code cause ]) fmt
 let form0 names = function { Form.head; args = []; _ } -> List.mem head names | _ -> false
 let hash_form = function { Form.head = "hash"; args = [ Form.Hash _ ]; _ } -> true | _ -> false
 let lit_text = function { Form.head = "lit"; args = [ Form.Text _ ]; _ } -> true | _ -> false
@@ -189,7 +216,7 @@ let parse_record ~file ~line_number line =
   | Error diagnostics ->
       let detail =
         match diagnostics with
-        | diagnostic :: _ -> diagnostic.Diag.message
+        | diagnostic :: _ -> Diag.cause diagnostic
         | [] -> "unknown reader failure"
       in
       error ~code:"E1301" "%s:%d: malformed Audit chain record: %s" file line_number detail
@@ -242,11 +269,9 @@ let verify_string ~file ~expected_head source =
                     Error
                       (List.map
                          (fun diagnostic ->
-                           {
-                             diagnostic with
-                             Diag.message =
-                               Printf.sprintf "%s:%d: %s" file line_number diagnostic.Diag.message;
-                           })
+                           Diag.with_cause
+                             (Printf.sprintf "%s:%d: %s" file line_number (Diag.cause diagnostic))
+                             diagnostic)
                          diagnostics)
                 | Ok computed when not (Hash.equal computed record.digest) ->
                     error ~code:"E1304"
@@ -371,8 +396,8 @@ let append_file ~file ~previous entry =
                           Error
                             (Append_verify
                                [
-                                 Diag.error ~code:"E1308"
-                                   (Printf.sprintf "Audit sequence mismatch: expected %d"
+                                 diagnostic ~code:"E1308"
+                                   (Printf.sprintf "Audit sequence mismatch: expected %d."
                                       next_sequence);
                                ])
                         else

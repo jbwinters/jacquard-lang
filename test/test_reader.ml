@@ -109,50 +109,103 @@ let test_groups () =
   | [ Form.Sym "fact"; Form.F { Form.head = "group"; args = []; _ }; Form.F _ ] -> ()
   | _ -> Alcotest.fail "() should read as an empty group");
   let d = parse_err "(group 42)" in
-  Alcotest.(check string) "scalar group element rejected" "E0110" d.Diag.code
+  Alcotest.(check string) "scalar group element rejected" "E0110" (Diag.code_or_uncoded d)
 
 let test_parse_one_arity () =
   (match Reader.parse_one ~file:"t.jqd" "" with
-  | Error [ d ] -> Alcotest.(check string) "empty input" "E0106" d.Diag.code
+  | Error [ d ] -> Alcotest.(check string) "empty input" "E0106" (Diag.code_or_uncoded d)
   | _ -> Alcotest.fail "empty input should fail");
   match Reader.parse_one ~file:"t.jqd" "(lit 1) (lit 2)" with
-  | Error [ d ] -> Alcotest.(check string) "two forms" "E0114" d.Diag.code
+  | Error [ d ] -> Alcotest.(check string) "two forms" "E0114" (Diag.code_or_uncoded d)
   | _ -> Alcotest.fail "two forms should fail parse_one"
 
-(* --- golden parse errors (the exact rendering is the contract) --- *)
+(* --- golden parse errors (the structured wording is the contract; renderer order is pinned by
+   Test_diag and the CLI transcript suite) --- *)
 
 let golden_errors =
   [
-    ("unclosed", "(lit 1\n", "err.jqd:1:1-2:1: error[E0106]: unclosed form: expected `)`");
-    ("bad token", "(lit @)\n", "err.jqd:1:6-6: error[E0101]: unexpected character '@'");
-    ("unterminated text", "(lit \"abc\n", "err.jqd:1:6-2:1: error[E0102]: unterminated text literal");
+    ( "unclosed",
+      "(lit 1\n",
+      "E0106",
+      "The source ended before the form was complete.",
+      "unclosed form: expected `)`",
+      "Complete the open form and its closing parenthesis." );
+    ( "bad token",
+      "(lit @)\n",
+      "E0101",
+      "The source contains an unexpected character.",
+      "unexpected character '@'",
+      "Remove the character or replace it with valid bootstrap syntax." );
+    ( "unterminated text",
+      "(lit \"abc\n",
+      "E0102",
+      "A text literal is not closed.",
+      "unterminated text literal",
+      "Close the text literal with a double quote before the end of the line or file." );
     ( "bad hash",
       "(ref #deadbeef term)\n",
-      "err.jqd:1:6-15: error[E0104]: invalid hash literal #deadbeef\n\
-      \  hint: a hash is 64 lowercase hex characters" );
-    ("stray rparen", ")\n", "err.jqd:1:1-2: error[E0108]: unexpected `)` at top level");
-    ("bad head", "(42 x)\n", "err.jqd:1:2-2: error[E0107]: expected a form head symbol, found '4'");
+      "E0104",
+      "A hash literal is malformed.",
+      "invalid hash literal #deadbeef",
+      "Write the hash as 64 lowercase hexadecimal characters." );
+    ( "stray rparen",
+      ")\n",
+      "E0108",
+      "The source contains an unmatched closing parenthesis.",
+      "unexpected `)` at top level",
+      "Remove the unmatched parenthesis or add its missing opening form." );
+    ( "bad head",
+      "(42 x)\n",
+      "E0107",
+      "A bootstrap form has an invalid head.",
+      "expected a form head symbol, found '4'",
+      "Use a lowercase kernel-form head." );
     ( "big int",
       "(lit 123456789012345678901234567890)\n",
-      "err.jqd:1:6-36: error[E0109]: integer literal 123456789012345678901234567890 does not fit \
-       in a native int\n\
-      \  hint: Jacquard integers are 63-bit native ints (decision D2)" );
+      "E0109",
+      "An integer is outside Jacquard's supported range.",
+      "integer literal 123456789012345678901234567890 does not fit in a native int",
+      "Choose a value representable as a Jacquard 63-bit native integer (decision D2)." );
     ( "bad escape",
       "(lit \"a\\qb\")\n",
-      "err.jqd:1:8-9: error[E0103]: invalid escape sequence \\q\n\
-      \  hint: valid escapes: \\\\ \\\" \\n \\t \\r \\xHH" );
-    ("bad number", "(lit 1.2.3)\n", "err.jqd:1:6-11: error[E0105]: malformed number \"1.2.3\"");
-    ("bad quoted symbol", "(var 'Foo)\n", "err.jqd:1:6-10: error[E0111]: invalid quoted symbol 'Foo");
-    ("bad bare symbol", "(var a@b)\n", "err.jqd:1:6-9: error[E0112]: invalid symbol \"a@b\"");
+      "E0103",
+      "A text literal contains an invalid escape.",
+      "invalid escape sequence \\q",
+      "Use one of these escapes: \\\\ \\\" \\n \\t \\r \\xHH." );
+    ( "bad number",
+      "(lit 1.2.3)\n",
+      "E0105",
+      "A numeric literal is malformed.",
+      "malformed number \"1.2.3\"",
+      "Rewrite the value as one valid integer or real literal." );
+    ( "bad quoted symbol",
+      "(var 'Foo)\n",
+      "E0111",
+      "A quoted symbol is malformed.",
+      "invalid quoted symbol 'Foo",
+      "Rewrite the quoted symbol using the documented symbol grammar." );
+    ( "bad bare symbol",
+      "(var a@b)\n",
+      "E0112",
+      "A bare symbol is malformed.",
+      "invalid symbol \"a@b\"",
+      "Rewrite the name using the documented bare-symbol grammar." );
     ( "top-level scalar",
       "42\n",
-      "err.jqd:1:1-3: error[E0113]: expected a form at top level, found \"42\"" );
+      "E0113",
+      "A bootstrap file has a non-form top-level value.",
+      "expected a form at top level, found \"42\"",
+      "Wrap the top-level value in a kernel form." );
   ]
 
 let test_golden_errors () =
   List.iter
-    (fun (name, src, expected) ->
-      Alcotest.(check string) name expected (Diag.to_string (parse_err src)))
+    (fun (name, src, code, summary, cause, next_step) ->
+      let diagnostic = parse_err src in
+      Alcotest.(check string) (name ^ " code") code (Diag.code_or_uncoded diagnostic);
+      Alcotest.(check string) (name ^ " summary") summary (Diag.summary diagnostic);
+      Alcotest.(check string) (name ^ " cause") cause (Diag.cause diagnostic);
+      Alcotest.(check string) (name ^ " next step") next_step (Diag.next_step diagnostic))
     golden_errors
 
 let suite =

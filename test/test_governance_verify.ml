@@ -178,11 +178,13 @@ let expect_fixture_with verifier_store name contract =
   | Ok _ -> Alcotest.failf "expected %s" code
   | Error diagnostics -> (
       match
-        List.find_opt (fun diagnostic -> String.equal diagnostic.Diag.code code) diagnostics
+        List.find_opt
+          (fun diagnostic -> String.equal (Diag.code_or_uncoded diagnostic) code)
+          diagnostics
       with
       | None -> Alcotest.failf "missing %s in:\n%s" code (fail_diags diagnostics)
       | Some diagnostic ->
-          let line = Option.map (fun span -> span.Span.start_pos.line) diagnostic.Diag.span in
+          let line = Option.map (fun span -> span.Span.start_pos.line) (Diag.span diagnostic) in
           Alcotest.(check (option int)) (code ^ " source line") (Some expected_line) line)
 
 let expect_fixture name contract = expect_fixture_with store name contract
@@ -193,12 +195,14 @@ let expect_fixture_count name expected_count contract =
   | Ok _ -> Alcotest.failf "expected %s" code
   | Error diagnostics ->
       let matching =
-        List.filter (fun diagnostic -> String.equal diagnostic.Diag.code code) diagnostics
+        List.filter
+          (fun diagnostic -> String.equal (Diag.code_or_uncoded diagnostic) code)
+          diagnostics
       in
       Alcotest.(check int) (code ^ " diagnostic count") expected_count (List.length matching);
       let first_line =
         match matching with
-        | first :: _ -> Option.map (fun span -> span.Span.start_pos.line) first.Diag.span
+        | first :: _ -> Option.map (fun span -> span.Span.start_pos.line) (Diag.span first)
         | [] -> None
       in
       Alcotest.(check (option int)) (code ^ " first source line") (Some expected_line) first_line

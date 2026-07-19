@@ -535,12 +535,16 @@ let run_prop_exhaustive ctx ~budget (thunk : Value.t) : (verdict * string, Diag.
   match explore (Eval.apply_state ctx thunk []) 1.0 [] with
   | exception Budget site ->
       Error
-        (Diag.error ~code:"E0905"
-           (Printf.sprintf
-              "exhaustive verification exceeded its budget: %s; raise --budget or shrink the \
-               generators"
-              site))
-  | Error e -> Error (Diag.error ~code:"E0902" e)
+        (Diag.error ~domain:Warp ~code:"E0905"
+           ~summary:"Exhaustive verification exceeded its budget"
+           ~cause:(Printf.sprintf "Verification exhausted its budget at %s." site)
+           ~next_step:"Raise --budget or shrink the generators." ~contrast:None ())
+  | Error cause ->
+      Error
+        (Diag.error ~domain:Warp ~code:"E0902"
+           ~summary:"Property execution failed during exhaustive verification" ~cause
+           ~next_step:"Fix the reported runtime failure and run the property again." ~contrast:None
+           ())
   | Ok () -> (
       match !failure with
       | Some v -> Ok (v, "prop: falsified exhaustively")
@@ -933,7 +937,13 @@ let render_outcome (t : totals) (o : outcome) : string list =
         (match note with Some n -> " (" ^ n ^ ")" | None -> "")
         (if o.cached then " [cached]" else "")
       :: List.map (fun l -> "  - " ^ l) soft
-      @ match hard with Some h -> [ "  ! " ^ h ] | None -> [])
+      @
+      match hard with
+      | None -> []
+      | Some h -> (
+          match String.split_on_char '\n' h with
+          | [] -> []
+          | first :: rest -> ("  ! " ^ first) :: List.map (fun line -> "    " ^ line) rest))
   | None, Some note when String.length note >= 7 && String.sub note 0 7 = "refused" ->
       t.refused <- t.refused + 1;
       [ Printf.sprintf "REFUSED %s: %s" o.display (String.sub note 9 (String.length note - 9)) ]

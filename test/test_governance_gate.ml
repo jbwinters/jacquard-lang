@@ -211,11 +211,11 @@ let test_exact_world_free_signature_and_local_resume () =
           | None -> Alcotest.failf "trusted hidden marker %s is missing" name
         in
         (match Store.locate store hash with
-        | Error [ { Diag.code = "E0601"; _ } ] -> ()
+        | Error [ diagnostic ] when Diag.code diagnostic = Some "E0601" -> ()
         | Error diagnostics -> Eval_support.fail_diags (name ^ " public hash lookup") diagnostics
         | Ok _ -> Alcotest.failf "%s remained publicly hash-addressable" name);
         (match Store.bind_name store ("forged-" ^ name) hash with
-        | Error [ { Diag.code = "E0601"; _ } ] -> ()
+        | Error [ diagnostic ] when Diag.code diagnostic = Some "E0601" -> ()
         | Error diagnostics -> Eval_support.fail_diags (name ^ " public rebinding") diagnostics
         | Ok () -> Alcotest.failf "%s could be rebound publicly" name);
         (match check_program (Printf.sprintf "(app (var %s))" name) with
@@ -223,7 +223,7 @@ let test_exact_world_free_signature_and_local_resume () =
             Alcotest.(check bool)
               (name ^ " is unresolved") true
               (List.exists
-                 (fun diagnostic -> String.equal diagnostic.Diag.code "E0301")
+                 (fun diagnostic -> String.equal (Diag.code_or_uncoded diagnostic) "E0301")
                  diagnostics)
         | Ok () -> Alcotest.failf "%s unexpectedly type-checked" name);
         let hex = Hash.to_hex hash in
@@ -233,7 +233,7 @@ let test_exact_world_free_signature_and_local_resume () =
               (name ^ " direct hash is unknown")
               true
               (List.exists
-                 (fun diagnostic -> String.equal diagnostic.Diag.code "E0805")
+                 (fun diagnostic -> String.equal (Diag.code_or_uncoded diagnostic) "E0805")
                  diagnostics)
         | Ok () -> Alcotest.failf "%s direct hash unexpectedly type-checked" name);
         (match Eval_support.eval_with ctx store (Printf.sprintf "(ref #%s term)" hex) with
@@ -241,7 +241,7 @@ let test_exact_world_free_signature_and_local_resume () =
             Alcotest.(check bool)
               (name ^ " unchecked direct hash is unknown")
               true
-              (String.starts_with ~prefix:"error[E0601]: unknown hash" message)
+              (String.starts_with ~prefix:"E0601:" message)
         | Error error ->
             Alcotest.failf "%s direct hash failed with wrong runtime error: %s" name
               (Runtime_err.to_string error)
@@ -252,30 +252,34 @@ let test_exact_world_free_signature_and_local_resume () =
   let sequence_hex = "3e9b091027d525ea128d13df8033dc02a7494d82b2a529e9157e81ffeebf1900" in
   let sequence_hash = Option.get (Hash.of_hex sequence_hex) in
   (match Store.locate store sequence_hash with
-  | Error [ { Diag.code = "E0601"; _ } ] -> ()
+  | Error [ diagnostic ] when Diag.code diagnostic = Some "E0601" -> ()
   | Error diagnostics -> Eval_support.fail_diags "private sequence hash lookup" diagnostics
   | Ok _ -> Alcotest.fail "private AuditSequence constructor remained hash-addressable");
   (match Store.bind_name store "forged-audit-sequence" sequence_hash with
-  | Error [ { Diag.code = "E0601"; _ } ] -> ()
+  | Error [ diagnostic ] when Diag.code diagnostic = Some "E0601" -> ()
   | Error diagnostics -> Eval_support.fail_diags "private sequence hash rebinding" diagnostics
   | Ok () -> Alcotest.fail "private AuditSequence constructor could be rebound");
   (match check_program "(app (var audit-sequence-v0) (app (var code.hash) (quote (forged))))" with
   | Error diagnostics ->
       Alcotest.(check bool)
         "direct token fabrication is unresolved" true
-        (List.exists (fun diagnostic -> String.equal diagnostic.Diag.code "E0301") diagnostics)
+        (List.exists
+           (fun diagnostic -> String.equal (Diag.code_or_uncoded diagnostic) "E0301")
+           diagnostics)
   | Ok () -> Alcotest.fail "private AuditSequence constructor unexpectedly type-checked");
   (match check_program (Printf.sprintf "(ref #%s con)" sequence_hex) with
   | Error diagnostics ->
       Alcotest.(check bool)
         "derived-hash token fabrication is unknown" true
-        (List.exists (fun diagnostic -> String.equal diagnostic.Diag.code "E0805") diagnostics)
+        (List.exists
+           (fun diagnostic -> String.equal (Diag.code_or_uncoded diagnostic) "E0805")
+           diagnostics)
   | Ok () -> Alcotest.fail "private AuditSequence constructor hash unexpectedly type-checked");
   (match Eval_support.eval_with ctx store (Printf.sprintf "(ref #%s con)" sequence_hex) with
   | Error (Runtime_err.Unresolved message) ->
       Alcotest.(check bool)
         "unchecked derived-hash token fabrication is unknown" true
-        (String.starts_with ~prefix:"error[E0601]: unknown hash" message)
+        (String.starts_with ~prefix:"E0601:" message)
   | Error error ->
       Alcotest.failf "private hash failed with the wrong runtime error: %s"
         (Runtime_err.to_string error)
@@ -295,12 +299,12 @@ let test_exact_world_free_signature_and_local_resume () =
         true
         (Store.lookup_kind reopened name Resolve.KTerm = None);
       match Store.locate reopened hash with
-      | Error [ { Diag.code = "E0601"; _ } ] -> ()
+      | Error [ diagnostic ] when Diag.code diagnostic = Some "E0601" -> ()
       | Error diagnostics -> Eval_support.fail_diags ("reopened " ^ name) diagnostics
       | Ok _ -> Alcotest.failf "reopen exposed hidden marker %s" name)
     hidden_markers;
   (match Store.locate reopened sequence_hash with
-  | Error [ { Diag.code = "E0601"; _ } ] -> ()
+  | Error [ diagnostic ] when Diag.code diagnostic = Some "E0601" -> ()
   | Error diagnostics -> Eval_support.fail_diags "reopened private sequence hash" diagnostics
   | Ok _ -> Alcotest.fail "reopen restored the private sequence hash");
   let reopened_ctx = Eval.make_ctx reopened in
@@ -317,7 +321,7 @@ let test_exact_world_free_signature_and_local_resume () =
   | Error (Runtime_err.Unresolved message) ->
       Alcotest.(check bool)
         "reopened direct hash remains unknown" true
-        (String.starts_with ~prefix:"error[E0601]: unknown hash" message)
+        (String.starts_with ~prefix:"E0601:" message)
   | Error error ->
       Alcotest.failf "reopened private hash failed with the wrong runtime error: %s"
         (Runtime_err.to_string error)
@@ -362,7 +366,9 @@ let test_exact_world_free_signature_and_local_resume () =
   | Error diagnostics ->
       Alcotest.(check bool)
         "facade cannot consume Resume twice" true
-        (List.exists (fun diagnostic -> String.equal diagnostic.Diag.code "E0816") diagnostics)
+        (List.exists
+           (fun diagnostic -> String.equal (Diag.code_or_uncoded diagnostic) "E0816")
+           diagnostics)
   | Ok () -> Alcotest.fail "facade duplicate Resume unexpectedly type-checked"
 
 let test_risk_confidence_matrix_and_counters () =

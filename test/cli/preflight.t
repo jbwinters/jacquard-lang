@@ -33,8 +33,9 @@ the prior intact; sharp three-world evidence proves the cautious plan.
   _ : Text
   == without grants the pure prefix runs; the first posterior refuses ==
   3
-  error[E0814]: this program requires eval [meta/high] — run code constructed or loaded at runtime, which is not granted (performed via `posterior-weak`)
-    hint: grant it with --allow eval, or handle the effect in the program
+  error[E0814]: The program requires an effect that was not granted
+    Cause: This program requires eval [meta/high] — run code constructed or loaded at runtime, which is not granted (performed via `posterior-weak`).
+    Next step: grant it with --allow eval, or handle the effect in the program
   exit code: 3
   == with eval: posteriors and diffs; live policy still refuses without net ==
   3
@@ -42,6 +43,7 @@ the prior intact; sharp three-world evidence proves the cautious plan.
   cons(mk-pair("cautious", 1.0), nil)
   "at log/lam[1]/match[1]/clause[1]/match[2]/clause[1]: - (lit \"issue-refund\") + (match (app (var text.contains?) (var body) (lit \"refund\")) (clause (pcon true) (lit \"issue-refund\")) (clause (pcon false) (lit \"ask-more\")))"
   "at log/lam[1]/match[1]/clause[1]/match[2]/clause[1]: - (lit \"ask-more\") + (match (app (var text.contains?) (var body) (lit \"refund\")) (clause (pcon true) (lit \"issue-refund\")) (clause (pcon false) (lit \"ask-more\")))"
-  error[E0814]: this program requires net [world/high] — reach a network endpoint through the granted handler, which is not granted (performed via `live-policy`)
-    hint: grant it with --allow net, or handle the effect in the program
+  error[E0814]: The program requires an effect that was not granted
+    Cause: This program requires net [world/high] — reach a network endpoint through the granted handler, which is not granted (performed via `live-policy`).
+    Next step: grant it with --allow net, or handle the effect in the program
   exit code: 3

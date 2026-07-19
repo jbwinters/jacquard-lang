@@ -503,7 +503,7 @@ let test_grant_mapping () =
   | Ok () -> ()
   | Error _ -> Alcotest.fail "net has a stub grant");
   match Prelude.grant ctx "filesystem" ~out:ignore ~seed:0 ~infer_cache:None with
-  | Error [ d ] -> Alcotest.(check string) "ungrantable" "E0703" d.Diag.code
+  | Error [ d ] -> Alcotest.(check string) "ungrantable" "E0703" (Diag.code_or_uncoded d)
   | _ -> Alcotest.fail "unknown effect must not be grantable"
 
 (* a handler written in Jacquard can still intercept a granted effect (interposition) *)

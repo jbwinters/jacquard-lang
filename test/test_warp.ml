@@ -290,7 +290,7 @@ let test_schedule_seed_splitting_and_cache_identity () =
   | Error (Runtime_err.Scheduler_error message) ->
       Alcotest.(check bool)
         "wrong duplicate-label leaf strict replay is refused before execution" true
-        (String.starts_with ~prefix:"schedule replay drift: program identity expected" message)
+        (String.starts_with ~prefix:"Schedule replay drift: program identity expected" message)
   | Error error ->
       Alcotest.failf "wrong-leaf replay returned the wrong error: %s" (Runtime_err.to_string error)
   | Ok _ -> Alcotest.fail "wrong duplicate-label leaf replay unexpectedly succeeded");
@@ -311,7 +311,7 @@ let test_schedule_seed_splitting_and_cache_identity () =
         "bound refusal reports seed and rerun without claiming a complete log"
         "random schedule 1 of 1 refused before a complete trace (decision seed 77)\n\
          replay: jacquard test bounds.jac --schedules 1 --seed 42 --no-cache\n\
-         runtime error: error[E0908]: decision bound exceeded"
+         runtime error: decision bound exceeded"
         hard
   | _ -> Alcotest.fail "bounded seeded schedule did not return the expected hard failure"
 

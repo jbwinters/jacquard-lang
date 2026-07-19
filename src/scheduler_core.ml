@@ -59,8 +59,11 @@ type ('resume, 'value) prepared_channel_wake = {
 }
 
 let diagnostic message =
-  Diag.error ~code:"E0908" ~hint:"scheduler task state was not advanced"
-    ("invalid structured-concurrency scheduler state: " ^ message)
+  Diag.error ~domain:Concurrency ~code:"E0908"
+    ~summary:"The structured-concurrency scheduler state is invalid."
+    ~cause:("Invalid structured-concurrency scheduler state: " ^ message)
+    ~next_step:"Advance the scheduler task state according to the documented transition."
+    ~contrast:None ()
 
 let error message = Error [ diagnostic message ]
 let equal_id left right = Concurrency_contract.compare_task_id left right = 0
@@ -163,8 +166,15 @@ let task_handle _capability scheduler = function
   | _ ->
       Error
         [
-          Diag.error ~code:Concurrency_contract.task_escape_code
-            "Async operation expected an opaque Task handle";
+          Diag.error ~domain:Concurrency ~code:Concurrency_contract.task_escape_code
+            ~summary:"This Async operation did not receive a valid task handle."
+            ~cause:"The operation expected an opaque Task value."
+            ~next_step:"Pass the Task returned by async.spawn in the same structured scope."
+            ~contrast:
+              (Some
+                 (Diag.contrast ~mistaken:"an ordinary value"
+                    ~intended:"the opaque Task returned by async.spawn"))
+            ();
         ]
 
 let validate_run_handle scheduler handle = Task_handle.validate_run ~run:scheduler.run handle

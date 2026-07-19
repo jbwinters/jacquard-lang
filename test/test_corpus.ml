@@ -48,9 +48,9 @@ let test_invalid_corpus () =
                 (Corpus_support.stage_ext_name stage);
               Alcotest.(check bool)
                 (Printf.sprintf "%s reports %s (got: %s)" file expected_code
-                   (String.concat ", " (List.map (fun d -> d.Diag.code) diags)))
+                   (String.concat ", " (List.map (fun d -> Diag.code_or_uncoded d) diags)))
                 true
-                (List.exists (fun d -> d.Diag.code = expected_code) diags))
+                (List.exists (fun d -> Diag.code_or_uncoded d = expected_code) diags))
       | Some (expected_stage_name, expected_code) -> (
           (match Corpus_support.stage_of_name expected_stage_name with
           | Some _ -> ()
@@ -65,9 +65,9 @@ let test_invalid_corpus () =
                 expected_stage_name (Corpus_support.stage_name stage);
               Alcotest.(check bool)
                 (Printf.sprintf "%s reports %s (got: %s)" file expected_code
-                   (String.concat ", " (List.map (fun d -> d.Diag.code) diags)))
+                   (String.concat ", " (List.map (fun d -> Diag.code_or_uncoded d) diags)))
                 true
-                (List.exists (fun d -> d.Diag.code = expected_code) diags)))
+                (List.exists (fun d -> Diag.code_or_uncoded d = expected_code) diags)))
     files
 
 (* Sanity for the runner itself: a case that fails at the wrong stage or with the wrong code
@@ -79,7 +79,7 @@ let test_runner_catches_breakage () =
   | _ -> Alcotest.fail "expected a parse-stage failure");
   (* wrong code: E0106, not E0999 *)
   match Corpus_support.staged_pipeline ~file:"broken" "(lit 1" with
-  | Error (_, [ d ]) -> Alcotest.(check bool) "code differs" false (d.Diag.code = "E0999")
+  | Error (_, [ d ]) -> Alcotest.(check bool) "code differs" false (Diag.code_or_uncoded d = "E0999")
   | _ -> Alcotest.fail "expected one diagnostic"
 
 let suite =

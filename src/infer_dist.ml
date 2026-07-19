@@ -26,7 +26,20 @@ type weighted = { value : Value.t; weight : float }
 type posterior = { entries : (Value.t * float) list }
 (** normalized, sorted by probability descending then rendering for determinism *)
 
-let err ~code fmt = Printf.ksprintf (fun msg -> Error [ Diag.error ~code msg ]) fmt
+let diagnostic ~code cause =
+  let summary, next_step =
+    match code with
+    | "E0901" ->
+        ( "The posterior is empty.",
+          "Change the model or observations so at least one execution branch has nonzero weight." )
+    | "E0902" ->
+        ( "Probabilistic inference stopped on a runtime failure.",
+          "Correct the reported model runtime failure and rerun inference." )
+    | _ -> raise (Diag.Bug_invalid_diagnostic ("unknown inference diagnostic code " ^ code))
+  in
+  Diag.error ~domain:Inference ~code ~summary ~cause ~next_step ~contrast:None ()
+
+let err ~code fmt = Printf.ksprintf (fun cause -> Error [ diagnostic ~code cause ]) fmt
 
 (* --- distribution values --- *)
 
@@ -187,7 +200,7 @@ let enumerate (ctx : Eval.ctx) (model : Eval.state) : (posterior, Diag.t list) r
                (Printf.sprintf "enumerate: unexpected op %s/%d" name (List.length args)))
   in
   match explore model 1.0 with
-  | Error e -> Error [ Diag.error ~code:"E0902" (Runtime_err.to_string e) ]
+  | Error error -> Error [ diagnostic ~code:"E0902" (Runtime_err.to_string error) ]
   | Ok () ->
       let total = List.fold_left (fun acc { weight; _ } -> acc +. weight) 0.0 !leaves in
       if total <= 0.0 then
@@ -314,10 +327,10 @@ let likelihood_weighting (ctx : Eval.ctx) ~seed ~samples (model : unit -> Eval.s
       match one_run rng state 1.0 with Error e -> Error e | Ok () -> k_runs initial (i + 1)
   in
   match Eval.validate_state_once ctx initial with
-  | Error e -> Error [ Diag.error ~code:"E0902" (Runtime_err.to_string e) ]
+  | Error error -> Error [ diagnostic ~code:"E0902" (Runtime_err.to_string error) ]
   | Ok initial -> (
       match k_runs initial 0 with
-      | Error e -> Error [ Diag.error ~code:"E0902" (Runtime_err.to_string e) ]
+      | Error error -> Error [ diagnostic ~code:"E0902" (Runtime_err.to_string error) ]
       | Ok () ->
           let total = List.fold_left (fun acc { weight; _ } -> acc +. weight) 0.0 !runs in
           if total <= 0.0 then

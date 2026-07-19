@@ -109,7 +109,7 @@ let test_holes_stop_at_strict_boundary () =
   in
   Alcotest.(check bool) "hole detected" true (Surface_ast.has_holes_top top);
   match Surface_parse.strict recovered with
-  | Error [ { Diag.code = "E1202"; _ } ] -> ()
+  | Error [ diagnostic ] when Diag.code diagnostic = Some "E1202" -> ()
   | _ -> Alcotest.fail "strict parsing must reject holes before lowering or hashing"
 
 let test_entry_point_contract () =

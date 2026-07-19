@@ -127,9 +127,48 @@ exception Err of Diag.t
     below the host stack limit so untrusted forms fail with E0214 instead of [Stack_overflow]. *)
 let max_nesting_depth = 10_000
 
+let diagnostic_summary = function
+  | "E0201" -> "This value is not a kernel form in this position."
+  | "E0202" -> "A kernel form has the wrong number of arguments."
+  | "E0203" -> "A kernel form argument has the wrong sort."
+  | "E0204" -> "An unquote appears outside a quote."
+  | "E0205" -> "A lambda parameter uses a refutable pattern."
+  | "E0206" -> "A let binder uses a refutable pattern."
+  | "E0207" -> "A recursive let binder is not a variable."
+  | "E0208" -> "A recursive let value is not a lambda."
+  | "E0209" -> "A match expression has no clauses."
+  | "E0210" -> "A reference has an invalid kind."
+  | "E0211" -> "A let expression has an invalid recursion flag."
+  | "E0212" -> "A handler has the wrong number of return clauses."
+  | "E0213" -> "An effect operation has an invalid explicit mode."
+  | "E0214" -> "Kernel form nesting exceeds the structural limit."
+  | code -> raise (Diag.Bug_invalid_diagnostic ("unknown kernel diagnostic code " ^ code))
+
+let diagnostic_next_step = function
+  | "E0201" -> "Replace it with a kernel form valid for this grammar position."
+  | "E0202" -> "Supply exactly the arguments required by this kernel form."
+  | "E0203" -> "Replace the argument with the required form or scalar sort."
+  | "E0204" -> "Move the unquote inside a quote or remove the unquote wrapper."
+  | "E0205" -> "Use an irrefutable variable, wildcard, tuple, or as-pattern parameter."
+  | "E0206" -> "Use an irrefutable variable, wildcard, tuple, or as-pattern binder."
+  | "E0207" -> "Bind recursive let with one variable."
+  | "E0208" -> "Make the recursive let value a lambda."
+  | "E0209" -> "Add at least one exhaustive match clause."
+  | "E0210" -> "Use term, con, or op as the reference kind."
+  | "E0211" -> "Use rec or nonrec as the let recursion flag."
+  | "E0212" -> "Keep exactly one return clause in the handler."
+  | "E0213" -> "Write once explicitly or omit the mode for multi."
+  | "E0214" -> "Reduce the nesting depth below the structural limit."
+  | code -> raise (Diag.Bug_invalid_diagnostic ("unknown kernel diagnostic code " ^ code))
+
 let err ?meta ~code fmt =
   Printf.ksprintf
-    (fun msg -> raise (Err (Diag.error ?span:(Option.bind meta Meta.span) ~code msg)))
+    (fun cause ->
+      raise
+        (Err
+           (Diag.error ?span:(Option.bind meta Meta.span) ~domain:Kernel ~code
+              ~summary:(diagnostic_summary code) ~cause ~next_step:(diagnostic_next_step code)
+              ~contrast:None ())))
     fmt
 
 let expect_arity (f : Form.t) n =

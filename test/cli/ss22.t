@@ -40,14 +40,16 @@ Static diagnostics reject the first non-Text argument on both source routes.
   > text.join("ok", 1, "unreached")
   > EOF
   $ jacquard run bad.jac 2>&1 | sed 's/bad.jac:[0-9]*:[0-9]*-[0-9]*/bad.jac:LINE:SPAN/'
-  bad.jac:LINE:SPAN: error[E0801]: variadic argument: expected text, got int (type mismatch)
-    hint: the expected side comes from the surrounding context; make both sides agree
+  bad.jac:LINE:SPAN: error[E0801]: Types do not agree
+    Cause: variadic argument: expected text, got int (type mismatch)
+    Next step: the expected side comes from the surrounding context; make both sides agree
   $ cat > bad.jqd <<'EOF'
   > (app (var text.join) (lit "ok") (lit 1) (lit "unreached"))
   > EOF
   $ jacquard build bad.jqd -o bad-native 2>&1 | sed 's/bad.jqd:[0-9]*:[0-9]*-[0-9]*/bad.jqd:LINE:SPAN/'
-  bad.jqd:LINE:SPAN: error[E0801]: variadic argument: expected text, got int (type mismatch)
-    hint: the expected side comes from the surrounding context; make both sides agree
+  bad.jqd:LINE:SPAN: error[E0801]: Types do not agree
+    Cause: variadic argument: expected text, got int (type mismatch)
+    Next step: the expected side comes from the surrounding context; make both sides agree
 
 The D39 public rename preserves the five pre-SS.22 semantic identities. Direct
 hash references typecheck and execute in both engines even though the old names
@@ -124,7 +126,9 @@ evaluation; the interpreter continues to accept nine and more arguments.
   $ jacquard run join-nine.jqd
   "123456789"
   $ jacquard build join-nine.jqd -o join-nine-native 2>&1
-  error[E1101]: not yet compilable in native v1: top-level expression 0 applies more than 8 arguments (native v1 arity cap)
+  error[E1101]: Program is outside the native v1 compilation subset
+    Cause: Not yet compilable in native v1: top-level expression 0 applies more than 8 arguments (native v1 arity cap)
+    Next step: Run the program with the interpreter or rewrite the unsupported construct.
   [1]
 
 Large allocated text is byte-identical across engines without embedding its
@@ -148,7 +152,9 @@ same indexed error and exit in the interpreter and native backend.
   $ diff bad-eight-interpreter.out bad-eight-native.out && echo identical
   identical
   $ cat bad-eight-native.out
-  type error: text.join expects Text at argument 8, got 5
+  error: Runtime value has the wrong type
+    Cause: type error: text.join expects Text at argument 8, got 5
+    Next step: Pass a value of the type required by this operation.
 
 Fatal variadic validation owns every evaluated argument. ASAN and LeakSanitizer
 pin early, middle, and last bad positions plus the first-class jq_apply route;

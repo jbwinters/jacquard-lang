@@ -18,8 +18,7 @@
 
 jq_value jq_code_node(jq_value head_text, uint16_t argc) {
   if ((uint32_t)1 + 2 * (uint32_t)argc > UINT16_MAX) {
-    fputs("jacquard runtime: form arity exceeds the 32767 limit\n", stderr);
-    exit(2);
+    jq_runtime_error("jacquard runtime: form arity exceeds the 32767 limit");
   }
   jq_block *b = jq_alloc_block(JQ_CODE, 0, (uint16_t)(1 + 2 * argc));
   b->payload[0] = (uint64_t)head_text;
@@ -30,8 +29,7 @@ jq_value jq_code_splice_guard(jq_rt *rt, jq_value v) {
   (void)rt;
   if (jq_is_code(v)) return v;
   char *s = jq_show(v);
-  fprintf(stderr, "type error: unquote splice evaluated to %s, not code\n", s);
-  exit(2);
+  jq_runtime_failf(JQ_ERROR_TYPE, "unquote splice evaluated to %s, not code", s);
 }
 
 /* --- equal_ignoring_meta ------------------------------------------- */
@@ -88,10 +86,7 @@ static void dbuf_add(dbuf *b, const char *s) {
     b->cap = b->cap ? b->cap : 128;
     while (b->len + n + 1 > b->cap) b->cap *= 2;
     b->data = realloc(b->data, b->cap);
-    if (!b->data) {
-      fputs("jacquard runtime: out of memory\n", stderr);
-      exit(2);
-    }
+    if (!b->data) jq_runtime_error("jacquard runtime: out of memory");
   }
   memcpy(b->data + b->len, s, n);
   b->len += n;
@@ -131,10 +126,7 @@ static void divergences(dbuf *out, bool *first, const char *path, jq_value fa, j
   for (uint16_t i = 0; i < n; i++) {
     size_t plen = strlen(path) + jq_text_len(head) + 32;
     char *sub = malloc(plen);
-    if (!sub) {
-      fputs("jacquard runtime: out of memory\n", stderr);
-      exit(2);
-    }
+    if (!sub) jq_runtime_error("jacquard runtime: out of memory");
     snprintf(sub, plen, "%s/%.*s[%u]", path, (int)jq_text_len(head),
              (const char *)jq_text_bytes(head), (unsigned)i);
     uint64_t ka = jq_code_kind(fa, i), kb = jq_code_kind(fb, i);

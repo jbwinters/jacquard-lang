@@ -10,4 +10,4 @@
   Task_handle
   Channel_handle
   Schedule_control)
- (libraries digestif unix))
+ (libraries digestif unix yojson))

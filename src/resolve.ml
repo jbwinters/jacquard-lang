@@ -79,25 +79,44 @@ type state = { names : names; mutable diags : Diag.t list }
 let report st d = st.diags <- d :: st.diags
 let rec take n = function [] -> [] | x :: xs -> if n <= 0 then [] else x :: take (n - 1) xs
 
-let suggest st ~locals name =
-  let candidates =
-    List.sort_uniq String.compare (locals @ st.names.all_names ())
-    |> List.filter (fun c -> c <> name && edit_distance name c <= 2)
-  in
-  match candidates with
-  | [] -> None
-  | [ c ] -> Some (Printf.sprintf "did you mean `%s`?" c)
-  | cs -> Some (Printf.sprintf "did you mean one of: %s?" (String.concat ", " (take 3 cs)))
+let suggestions st ~locals name =
+  List.sort_uniq String.compare (locals @ st.names.all_names ())
+  |> List.filter (fun candidate -> candidate <> name && edit_distance name candidate <= 2)
+  |> take 3
 
 let unknown st ~meta ~locals ~what name =
+  let candidates = suggestions st ~locals name in
+  let contrast =
+    match candidates with
+    | [ candidate ] ->
+        Some
+          (Diag.contrast
+             ~mistaken:(Printf.sprintf "the unknown name `%s`" name)
+             ~intended:(Printf.sprintf "the in-scope name `%s`" candidate))
+    | [] | _ :: _ :: _ -> None
+  in
+  let cause =
+    match candidates with
+    | [] -> Printf.sprintf "No %s named `%s` is in scope." what name
+    | values ->
+        Printf.sprintf "No %s named `%s` is in scope; nearby names are %s." what name
+          (String.concat ", " (List.map (Printf.sprintf "`%s`") values))
+  in
   report st
-    (Diag.error ?span:(Meta.span meta) ?hint:(suggest st ~locals name) ~code:"E0301"
-       (Printf.sprintf "unknown %s `%s`" what name))
+    (Diag.error ?span:(Meta.span meta) ~domain:Resolution ~code:"E0301"
+       ~summary:"This reference names something that is not in scope." ~cause
+       ~next_step:"Correct the reference to an in-scope name or declaration." ~contrast ())
 
 let kind_mismatch st ~meta name ~expected ~got =
   report st
-    (Diag.error ?span:(Meta.span meta) ~code:"E0302"
-       (Printf.sprintf "`%s` is %s, but this position needs %s" name (kind_to_string got) expected))
+    (Diag.error ?span:(Meta.span meta) ~domain:Resolution ~code:"E0302"
+       ~summary:"This reference has the wrong kind for its position."
+       ~cause:
+         (Printf.sprintf "`%s` is %s, but this position needs %s." name (kind_to_string got)
+            expected)
+       ~next_step:"Reference a declaration of the required kind in this position."
+       ~contrast:(Some (Diag.contrast ~mistaken:(kind_to_string got) ~intended:expected))
+       ())
 
 (* Resolve a non-term reference position (pcon/opclause/tref/eref): kind-directed, so among
    all bindings of the name the one with the expected kind wins. *)
@@ -127,8 +146,10 @@ let pat_vars_seen st seen (p : Kernel.pat) : string list =
   let bind meta x =
     if Hashtbl.mem seen x then
       report st
-        (Diag.error ?span:(Meta.span meta) ~code:"E0304"
-           (Printf.sprintf "variable `%s` is bound more than once in this pattern" x))
+        (Diag.error ?span:(Meta.span meta) ~domain:Resolution ~code:"E0304"
+           ~summary:"A pattern binds the same variable more than once."
+           ~cause:(Printf.sprintf "Variable `%s` is bound more than once in this pattern." x)
+           ~next_step:"Rename or remove the duplicate pattern binding." ~contrast:None ())
     else begin
       Hashtbl.add seen x ();
       acc := x :: !acc
@@ -261,10 +282,19 @@ let rec resolve_expr_in st ~group ~locals (e : Kernel.expr) : Kernel.expr =
                 in
                 if hint = None && losers <> [] then
                   report st
-                    (Diag.warning ?span:(Meta.span e.Kernel.meta) ~code:"W0301"
-                       (Printf.sprintf
-                          "`%s` is bound as %s and also as %s; the %s wins in value position" x
-                          (kind_to_string kind) (String.concat " and " losers) (kind_to_string kind)));
+                    (Diag.warning ?span:(Meta.span e.Kernel.meta) ~domain:Resolution ~code:"W0301"
+                       ~summary:"This bare name is ambiguous across value kinds."
+                       ~cause:
+                         (Printf.sprintf
+                            "`%s` is bound as %s and also as %s; %s wins in value position." x
+                            (kind_to_string kind) (String.concat " and " losers)
+                            (kind_to_string kind))
+                       ~next_step:"Use a kind-tagged escaped name to select the intended binding."
+                       ~contrast:
+                         (Some
+                            (Diag.contrast ~mistaken:"an ambiguous bare value name"
+                               ~intended:"a kind-tagged escaped name"))
+                       ());
                 { Kernel.it = Kernel.Ref (hash, refkind); meta = Meta.with_name x e.Kernel.meta }
             | None -> (
                 match entries with
@@ -336,8 +366,13 @@ let rec resolve_expr_in st ~group ~locals (e : Kernel.expr) : Kernel.expr =
             let seen, bound = pats_vars st params in
             if Hashtbl.mem seen resume then
               report st
-                (Diag.error ?span:(Meta.span ometa) ~code:"E0304"
-                   (Printf.sprintf "resume name `%s` duplicates an op clause parameter" resume));
+                (Diag.error ?span:(Meta.span ometa) ~domain:Resolution ~code:"E0304"
+                   ~summary:"An operation clause binds the same variable twice."
+                   ~cause:
+                     (Printf.sprintf "Resume name `%s` duplicates an operation-clause parameter."
+                        resume)
+                   ~next_step:"Rename the resume binder or the duplicate operation parameter."
+                   ~contrast:None ());
             {
               Kernel.op;
               params = List.map (resolve_pat st ~locals) params;
@@ -401,9 +436,12 @@ let resolve_decl_in st (d : Kernel.decl) : Kernel.decl =
           (fun b ->
             if Hashtbl.mem seen b.Kernel.bname then
               report st
-                (Diag.error ?span:(Meta.span b.Kernel.bmeta) ~code:"E0303"
-                   (Printf.sprintf "binding `%s` appears more than once in this group"
-                      b.Kernel.bname))
+                (Diag.error ?span:(Meta.span b.Kernel.bmeta) ~domain:Resolution ~code:"E0303"
+                   ~summary:"A definition group contains a duplicate binding name."
+                   ~cause:
+                     (Printf.sprintf "Binding `%s` appears more than once in this group."
+                        b.Kernel.bname)
+                   ~next_step:"Rename or remove the duplicate definition binding." ~contrast:None ())
             else Hashtbl.add seen b.Kernel.bname ())
           bindings;
         Kernel.DefTerm (List.map (resolve_binding st ~group) bindings)
@@ -457,7 +495,7 @@ let resolve_decl_in st (d : Kernel.decl) : Kernel.decl =
 let run st f x =
   let v = f st x in
   let errors, warnings =
-    List.partition (fun d -> d.Diag.severity = Diag.Error) (List.rev st.diags)
+    List.partition (fun diagnostic -> Diag.severity diagnostic = Diag.Error) (List.rev st.diags)
   in
   match errors with [] -> Ok (v, warnings) | ds -> Error ds
 

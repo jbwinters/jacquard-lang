@@ -179,8 +179,8 @@ studied during planning; `docs/ast.md` records each debt in detail:
 The prototype is complete against its original core plan and has since added
 the public surface syntax, ringed standard library, Warp properties and cache,
 native compilation, packaged binaries, and product-scale case studies. The RC1
-semantic boundary remains historical; the current successor is pinned by 738
-Alcotest/QCheck cases, 43 cram transcripts, 27 documentation examples, native
+semantic boundary remains historical; the current successor is pinned by 742
+Alcotest/QCheck cases, 44 cram transcripts, 27 documentation examples, native
 sanitizer/leak/fuzz lanes, and fresh-clone evidence workflows. RC2 repaired
 binary-demo packaging; RC3 adds an explicit
 runtime/output license exception and packages the native runtime. The current
@@ -236,8 +236,9 @@ until you grant the rest:
 ```console
 $ jac run demos/tooling/repair.jac
 8
-error[E0814]: this program requires the `eval` effect, which is not granted (performed via `posterior-over-patches`)
-  hint: grant it with --allow eval, or handle the effect in the program
+error[E0814]: The program requires an effect that was not granted
+  Cause: This program requires eval [meta/high] — run code constructed or loaded at runtime, which is not granted (performed via `posterior-over-patches`).
+  Next step: grant it with --allow eval, or handle the effect in the program
 $ jac run demos/tooling/repair.jac --allow eval
 ```
 

@@ -65,8 +65,11 @@ compare_one test/native-parallel/success.jqd success
 compare_one test/native-parallel/fail-map.jqd fail-map
 compare_one test/native-parallel/fail-both.jqd fail-both
 
-test "$(cat "$work/fail-map.i.err")" = "arithmetic error: division by zero"
-test "$(cat "$work/fail-both.i.err")" = "arithmetic error: division by zero"
+expected_division_error='error: Arithmetic operation failed
+  Cause: arithmetic error: division by zero
+  Next step: Correct the arithmetic inputs and run the program again.'
+test "$(cat "$work/fail-map.i.err")" = "$expected_division_error"
+test "$(cat "$work/fail-both.i.err")" = "$expected_division_error"
 grep -q '(var mod)' test/native-parallel/fail-map.jqd
 grep -q '(var mod)' test/native-parallel/fail-both.jqd
 printf 'failure order: map first-of-two and both left-before-right select division before modulo\n'

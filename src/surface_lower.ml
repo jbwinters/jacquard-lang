@@ -5,8 +5,57 @@
 
 let ( let* ) = Result.bind
 
-let error ?meta ~code message =
-  Error [ Diag.error ?span:(Option.bind meta Meta.span) ~code message ]
+let diagnostic_spec = function
+  | "E0204" ->
+      ( Diag.Kernel,
+        "An unquote appears outside a quote.",
+        "Move the unquote inside a quote or remove the unquote wrapper." )
+  | "E0205" ->
+      ( Diag.Kernel,
+        "A lambda parameter uses a refutable pattern.",
+        "Use an irrefutable variable, wildcard, tuple, or as-pattern parameter." )
+  | "E0206" ->
+      ( Diag.Kernel,
+        "A let binder uses a refutable pattern.",
+        "Use an irrefutable variable, wildcard, tuple, or as-pattern binder." )
+  | "E0209" -> (Diag.Kernel, "A match expression has no clauses.", "Add at least one match clause.")
+  | "E1202" ->
+      ( Diag.Surface,
+        "Recovered syntax cannot be lowered.",
+        "Fix the reported syntax damage before lowering the source." )
+  | "E1230" ->
+      ( Diag.Surface,
+        "This surface node is outside the supported lowering boundary.",
+        "Rewrite the node using the currently supported surface forms." )
+  | "E1231" ->
+      (Diag.Surface, "An expression block is empty.", "Add a final expression to the block.")
+  | "E1232" ->
+      ( Diag.Surface,
+        "A local let is the final item in a block.",
+        "Add an expression after the local let to produce the block value." )
+  | "E1233" ->
+      ( Diag.Surface,
+        "A local recursive or function binding is malformed.",
+        "Rewrite the binding with one supported name, parameter list, and body." )
+  | "E1234" ->
+      ( Diag.Surface,
+        "A generated lowering node has no real source span.",
+        "Preserve source spans on every surface node passed to lowering." )
+  | "E1235" ->
+      ( Diag.Surface,
+        "A surface declaration is missing its required file context.",
+        "Lower the complete ordered top-level file instead of this isolated declaration." )
+  | "E1236" ->
+      ( Diag.Surface,
+        "An effect operation mode is missing or invalid.",
+        "Declare the operation explicitly as once or multi." )
+  | code -> raise (Diag.Bug_invalid_diagnostic ("unknown surface lowering code " ^ code))
+
+let diagnostic ?span ~code cause =
+  let domain, summary, next_step = diagnostic_spec code in
+  Diag.error ?span ~domain ~code ~summary ~cause ~next_step ~contrast:None ()
+
+let error ?meta ~code cause = Error [ diagnostic ?span:(Option.bind meta Meta.span) ~code cause ]
 
 let rec map_results f = function
   | [] -> Ok []
@@ -303,8 +352,8 @@ and lower_block ~quote_depth block_meta = function
       in
       Error
         [
-          Diag.error ?span ~code:"E1232"
-            "a block must end in an expression; a final local `let` has no value";
+          diagnostic ?span ~code:"E1232"
+            "A block must end in an expression; a final local `let` has no value.";
         ]
   | Surface_ast.Expr value :: rest ->
       let* value = lower_expr_node ~quote_depth value in
@@ -610,8 +659,12 @@ let duplicate_definition_diagnostics definitions =
       | Surface_ast.Definition { name; _ } ->
           if Hashtbl.mem seen name then
             Some
-              (Diag.error ?span:(Meta.span top.meta) ~code:"E0303"
-                 (Printf.sprintf "binding `%s` appears more than once in this definition run" name))
+              (Diag.error ?span:(Meta.span top.meta) ~domain:Resolution ~code:"E0303"
+                 ~summary:"A definition run contains a duplicate binding name."
+                 ~cause:
+                   (Printf.sprintf "Binding `%s` appears more than once in this definition run."
+                      name)
+                 ~next_step:"Rename or remove the duplicate definition binding." ~contrast:None ())
           else begin
             Hashtbl.add seen name ();
             None

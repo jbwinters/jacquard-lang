@@ -14,14 +14,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-static void fail(const char *fmt, ...) __attribute__((noreturn, format(printf, 1, 2)));
-static void fail(const char *fmt, ...) {
+static void fail(jq_error_kind kind, const char *fmt, ...)
+    __attribute__((noreturn, format(printf, 2, 3)));
+static void fail(jq_error_kind kind, const char *fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
-  vfprintf(stderr, fmt, ap);
-  va_end(ap);
-  fputc('\n', stderr);
-  exit(2);
+  jq_runtime_vfailf(kind, fmt, ap);
 }
 
 jq_value jq_apply(JQ_PARAMS) {
@@ -29,14 +27,14 @@ jq_value jq_apply(JQ_PARAMS) {
   uint16_t n = rt->apply_n;
   if (jq_is_int(fn)) {
     char *s = jq_show(fn);
-    fail("type error: %s is not applicable", s);
+    fail(JQ_ERROR_TYPE, "%s is not applicable", s);
   }
   jq_block *b = jq_block_of(fn);
   switch (b->tag) {
   case JQ_CLOSURE: {
     uint16_t arity = jq_closure_arity(fn);
     if (arity != n)
-      fail("arity mismatch: closure of %u parameter(s) applied to %u argument(s)",
+      fail(JQ_ERROR_ARITY, "closure of %u parameter(s) applied to %u argument(s)",
            arity, n);
     jq_fn code = (jq_fn)jq_closure_code(fn);
     JQ_TAIL_RETURN(code, rt, fn, a0, a1, a2, a3, a4, a5, a6, a7);
@@ -50,17 +48,17 @@ jq_value jq_apply(JQ_PARAMS) {
     if (info->arity == UINT32_MAX) {
       if (strcmp(info->name, "text.join-variadic-v1") == 0)
         return jq_i_text_join_variadic_v1(rt, args, n);
-      fail("unknown variadic builtin: %s", info->name);
+      fail(JQ_ERROR_NATIVE, "unknown variadic builtin: %s", info->name);
     }
     if (info->arity != n)
-      fail("arity mismatch: builtin %s expects %u argument(s), got %u",
+      fail(JQ_ERROR_ARITY, "builtin %s expects %u argument(s), got %u",
            info->name, info->arity, n);
     return info->fn(rt, args);
   }
   case JQ_CONSTRUCTOR: {
     const jq_con_info *info = (const jq_con_info *)b->payload[0];
     if (info->arity != n)
-      fail("arity mismatch: constructor %s expects %u argument(s), got %u",
+      fail(JQ_ERROR_ARITY, "constructor %s expects %u argument(s), got %u",
            info->name, info->arity, n);
     jq_value args[JQ_MAX_ARITY] = { a0, a1, a2, a3, a4, a5, a6, a7 };
     jq_drop(fn);
@@ -75,14 +73,15 @@ jq_value jq_apply(JQ_PARAMS) {
   }
   case JQ_RESUME: {
     /* interpreter: rt_arity "a resumption takes exactly one argument" */
-    if (n != 1) fail("arity mismatch: a resumption takes exactly one argument, got %u", n);
+    if (n != 1)
+      fail(JQ_ERROR_ARITY, "a resumption takes exactly one argument, got %u", n);
     jq_value r = jq_resume(rt, fn, a0);
     jq_drop(fn); /* the captured original is reusable: multi-shot */
     return r;
   }
   default: {
     char *s = jq_show(fn);
-    fail("type error: %s is not applicable", s);
+    fail(JQ_ERROR_TYPE, "%s is not applicable", s);
   }
   }
 }
@@ -90,5 +89,5 @@ jq_value jq_apply(JQ_PARAMS) {
 void jq_match_fail(jq_rt *rt, jq_value scrutinee) {
   (void)rt;
   char *s = jq_show(scrutinee);
-  fail("no clause matched the value %s", s);
+  fail(JQ_ERROR_MATCH, "%s", s);
 }

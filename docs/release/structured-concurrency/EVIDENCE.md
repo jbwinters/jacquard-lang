@@ -27,10 +27,10 @@ native Channel, actor, or supervision claim.
 | C3 | Scoped typed channels run through deterministic FIFO, seeded, replay, exhaustive, and cached interpreter scheduling with exact run/scope ownership, rendezvous and buffering, close, cancellation, and deadlock behavior. | `channel-contract`, `round-robin`, and `exhaustive-schedule` suites; `test/cli/task-values.t`; `test/cli/schedule-replay.t`; and the frozen traces below |
 | C4 | Not claimed: host asynchronous I/O, actors, and supervision are absent. | [LIMITS.md](LIMITS.md) |
 
-The current successor inventory is exactly 738 compiled Alcotest/QCheck cases, 43 recursive
+The current successor inventory is exactly 742 compiled Alcotest/QCheck cases, 44 recursive
 cram transcript files, and 27 named doctest examples across 8 documents. The
-commands in [Reconstruction and verification](#reconstruction-and-verification)
-recompute those counts instead of trusting this paragraph.
+repository release-law checks recompute those counts instead of trusting this
+paragraph.
 
 ## One program under four schedule handlers
 
@@ -738,8 +738,8 @@ opam exec -- dune build test/test_jacquard.exe
 
 The current inventory is mechanically checked against compiled discovery:
 
-- Alcotest/QCheck cases: `738`
-- Cram transcript files: `43`
+- Alcotest/QCheck cases: `742`
+- Cram transcript files: `44`
 
 The SC.14 baseline arithmetic remains exact: twelve compiled
 `channel-contract` cases plus the `store/9` Channel-private-hash case took the
@@ -754,6 +754,8 @@ inventory without changing the frozen SC arithmetic. GM.14A later adds five
 run-bundle cases and one public CLI transcript, producing `733 / 42 / 27`.
 GM.14B adds five action-reconciliation cases and one public CLI transcript,
 producing `738 / 43 / 27`.
+DX.4 then adds four diagnostic-contract cases and one public diagnostic-format
+transcript, producing the current `742 / 44 / 27` inventory.
 
 Native scheduling remains outside the current backend. Differential coverage is
 therefore limited to the supported case: an Async operation discharged by an

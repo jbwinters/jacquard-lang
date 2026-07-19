@@ -15,6 +15,9 @@ let token_names source =
 let shown source = lex source |> without_eof |> List.map Surface_lex.show
 let recover_lex source = Surface_lex.lex_recover ~file:"tokens.jac" source
 
+let expected_diagnostic span code summary cause next_step =
+  Printf.sprintf "%s: error[%s]: %s\n  Cause: %s\n  Next step: %s" span code summary cause next_step
+
 let recovered_token_names source =
   (recover_lex source).Surface_lex.tokens |> without_eof
   |> List.map (fun token -> Surface_lex.show_token token.Surface_lex.token)
@@ -167,7 +170,7 @@ let test_strict_group_indices () =
   List.iter
     (fun source ->
       match Surface_lex.lex ~file:"group.jac" source with
-      | Error [ { Diag.code = "E1217"; _ } ] -> ()
+      | Error [ diagnostic ] when Diag.code diagnostic = Some "E1217" -> ()
       | _ -> Alcotest.failf "%s: non-decimal group index was accepted" source)
     [ "#group[+12]"; "#group[0x10]"; "#group[1_2]"; "#group[]"; "#group[12" ]
 
@@ -195,8 +198,8 @@ let test_malformed_tokens () =
     (fun (source, code, expected_span) ->
       match Surface_lex.lex ~file:"bad.jac" source with
       | Error [ diagnostic ] -> (
-          Alcotest.(check string) (source ^ " code") code diagnostic.Diag.code;
-          match diagnostic.span with
+          Alcotest.(check string) (source ^ " code") code (Diag.code_or_uncoded diagnostic);
+          match Diag.span diagnostic with
           | Some span ->
               Alcotest.(check string) (source ^ " span") expected_span (Span.to_string span)
           | None -> Alcotest.failf "%s: missing diagnostic span" source)
@@ -208,7 +211,9 @@ let test_malformed_tokens () =
 let test_invalid_raw_utf8 () =
   let source = String.init 3 (function 0 | 2 -> '"' | _ -> Char.chr 0xff) in
   match Surface_lex.lex ~file:"utf8.jac" source with
-  | Error [ { Diag.code = "E1218"; span = Some span; _ } ] ->
+  | Error [ diagnostic ]
+    when Diag.code diagnostic = Some "E1218" && Option.is_some (Diag.span diagnostic) ->
+      let span = Option.get (Diag.span diagnostic) in
       Alcotest.(check string) "invalid byte span" "utf8.jac:1:2-3" (Span.to_string span)
   | _ -> Alcotest.fail "invalid raw UTF-8 byte was accepted"
 
@@ -230,10 +235,16 @@ let test_recovering_lexer_preserves_surrounding_tokens () =
     (recovered_token_names source);
   Alcotest.(check (list string))
     "recovery diagnostics"
-    [ "tokens.jac:2:1-2: error[E1210]: unexpected surface character `@`" ]
+    [
+      expected_diagnostic "tokens.jac:2:1-2" "E1210"
+        "The source contains an unexpected surface character." "unexpected surface character `@`"
+        "Remove the character or replace it with valid surface syntax.";
+    ]
     (List.map Diag.to_string recovered.diagnostics);
   match Surface_lex.lex ~file:"tokens.jac" source with
-  | Error [ { Diag.code = "E1210"; span = Some span; _ } ] ->
+  | Error [ diagnostic ]
+    when Diag.code diagnostic = Some "E1210" && Option.is_some (Diag.span diagnostic) ->
+      let span = Option.get (Diag.span diagnostic) in
       Alcotest.(check string) "strict span unchanged" "tokens.jac:2:1-2" (Span.to_string span)
   | _ -> Alcotest.fail "strict lexer no longer stops at its first lexical error"
 
@@ -246,7 +257,11 @@ let test_recovering_lexer_resynchronizes_strings () =
     |> List.map (fun token -> Surface_lex.show_token token.Surface_lex.token));
   Alcotest.(check (list string))
     "bounded truncated string diagnostic"
-    [ "tokens.jac:2:1-11: error[E1213]: unterminated string literal" ]
+    [
+      expected_diagnostic "tokens.jac:2:1-11" "E1213" "A surface string literal is not closed."
+        "unterminated string literal"
+        "Close the string with a double quote before the end of the line or file.";
+    ]
     (List.map Diag.to_string truncated.diagnostics);
   let malformed = recover_lex "before\n\"bad\\q\"\nafter\n" in
   Alcotest.(check (list string))
@@ -256,7 +271,10 @@ let test_recovering_lexer_resynchronizes_strings () =
     |> List.map (fun token -> Surface_lex.show_token token.Surface_lex.token));
   Alcotest.(check (list string))
     "malformed escape diagnostic"
-    [ "tokens.jac:2:5-6: error[E1214]: invalid string escape `\\q`" ]
+    [
+      expected_diagnostic "tokens.jac:2:5-6" "E1214" "A surface string contains an invalid escape."
+        "invalid string escape `\\q`" "Replace the escape with one supported by surface strings.";
+    ]
     (List.map Diag.to_string malformed.diagnostics);
   let multiline = recover_lex "before\n\"line one\nbad\\q\"\nafter\n" in
   Alcotest.(check (list string))
@@ -266,7 +284,10 @@ let test_recovering_lexer_resynchronizes_strings () =
     |> List.map (fun token -> Surface_lex.show_token token.Surface_lex.token));
   Alcotest.(check (list string))
     "multiline malformed escape diagnostic"
-    [ "tokens.jac:3:4-5: error[E1214]: invalid string escape `\\q`" ]
+    [
+      expected_diagnostic "tokens.jac:3:4-5" "E1214" "A surface string contains an invalid escape."
+        "invalid string escape `\\q`" "Replace the escape with one supported by surface strings.";
+    ]
     (List.map Diag.to_string multiline.diagnostics);
   let escaped_newline = recover_lex "\"bad\\\nafter\n" in
   Alcotest.(check (list string))
@@ -276,7 +297,11 @@ let test_recovering_lexer_resynchronizes_strings () =
     |> List.map (fun token -> Surface_lex.show_token token.Surface_lex.token));
   Alcotest.(check (list string))
     "escaped newline diagnostic"
-    [ "tokens.jac:1:5-6: error[E1214]: invalid string escape `\\\n`" ]
+    [
+      expected_diagnostic "tokens.jac:1:5-6" "E1214" "A surface string contains an invalid escape."
+        ("invalid string escape `\\\n" ^ String.make 9 ' ' ^ "`")
+        "Replace the escape with one supported by surface strings.";
+    ]
     (List.map Diag.to_string escaped_newline.diagnostics)
 
 let test_raw_bootstrap_candidates () =
