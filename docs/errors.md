@@ -290,6 +290,27 @@ that an external action ran, succeeded, or rolled back from an absent
 `Completed` entry. Receipt and idempotency reconciliation require a later typed
 action journal and are intentionally outside this command.
 
+## Governance action reconciliation (E151x)
+
+| code | meaning | example |
+|------|---------|---------|
+| E1510 | malformed, unsupported, noncanonical, unreadable, or concurrently changed reconciliation bundle | a nonregular input or missing final LF |
+| E1511 | action-journal predecessor, digest, sequence, or published head mismatch | reordering a valid journal record |
+| E1512 | Attempted or Receipt semantic identity mismatch | changing the carried attempt ID without changing its subject |
+| E1513 | duplicate Attempted identity or second Receipt for one attempt | copying an existing journal entry |
+| E1514 | Receipt does not follow an existing Attempted entry | placing a receipt first |
+| E1515 | policy/verdict, attempt authorization, Call occurrence, completion, branch, or outcome linkage contradicts the verified run | a Dry Allow, live completion after Block, repeated Call evaluation, or changed receipt outcome |
+| E1516 | evidence is structurally valid but operator reconciliation remains | a durable receipt has no matching `Completed` record |
+
+`jacquard governance reconcile BUNDLE` verifies a separate HASH_V0-chained
+action journal around one unchanged run bundle. An attempt names the exact
+allowing or approving Audit-record digest. A receipt names that attempt, the
+exact outcome summary, and an external-receipt digest. Only exact
+Call/branch/outcome agreement counts as reconciled. Every live completion is
+checked, including when no action-journal entry names it. Unknown attempts,
+missing receipts, and missing completions are nonzero reports, never rollback
+or safe-retry claims.
+
 ## Appendix: the W5.3 audit (ten message rewrites)
 
 Before/after wording improvements applied during the audit:

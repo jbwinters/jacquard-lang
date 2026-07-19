@@ -83,7 +83,7 @@
 (test
  (name test_jacquard)
  (modules
-  (:standard \ corpus_support gen_goldens gen_surface_twins gen_prelude_goldens gen_sig_goldens gen_diag_goldens gen_freeze_goldens gen_native_parity native_fuzz once_interpreter_probe gen_once_hostile scope_policy_trace round_robin_trace))
+  (:standard \ corpus_support gen_goldens gen_surface_twins gen_prelude_goldens gen_sig_goldens gen_freeze_goldens gen_diag_goldens gen_native_parity native_fuzz once_interpreter_probe gen_once_hostile scope_policy_trace round_robin_trace))
  (libraries jacquard corpus_support alcotest fmt qcheck-core qcheck-alcotest unix str)
  (deps
   (glob_files_rec ../corpus/*.jqd)

@@ -1498,6 +1498,40 @@ let governance_verify_run_cmd bundle_file prelude store_dir =
             report.proposals report.consents report.transformed_calls;
           ok)
 
+let governance_reconcile_cmd bundle_file prelude store_dir =
+  match open_ctx ~prelude ~store_dir with
+  | Error diagnostics -> print_diags diagnostics
+  | Ok (store, _ctx) -> (
+      match Governance_reconcile.verify_file ~store ~file:bundle_file with
+      | Error diagnostics -> print_diags diagnostics
+      | Ok report ->
+          Printf.printf
+            "%s audit=%s journal=%s no-action-legal=%d authorized-not-observed=%d unknown=%d \
+             receipt-gap=%d complete=%d completion-without-receipt=%d\n"
+            (if
+               report.authorized_not_observed = 0
+               && report.attempt_outcome_unknown = 0
+               && report.receipt_pending_completion = 0
+               && report.completion_without_receipt = 0
+             then "ok"
+             else "reconciliation-needed")
+            (Hash.to_hex report.audit_head) (Hash.to_hex report.journal_head) report.no_action_legal
+            report.authorized_not_observed report.attempt_outcome_unknown
+            report.receipt_pending_completion report.reconciled_completed
+            report.completion_without_receipt;
+          if
+            report.authorized_not_observed = 0
+            && report.attempt_outcome_unknown = 0
+            && report.receipt_pending_completion = 0
+            && report.completion_without_receipt = 0
+          then ok
+          else (
+            flush stdout;
+            prerr_endline
+              "error[E1516]: valid action evidence still requires operator reconciliation; no \
+               rollback or safe retry is implied";
+            exit_diags))
+
 (* --- cmdliner wiring --- *)
 
 open Cmdliner
@@ -1759,9 +1793,20 @@ let governance_t =
         $ Arg.(required & pos 0 (some string) None & info [] ~docv:"BUNDLE")
         $ prelude_arg $ store_dir_opt_arg)
   in
+  let reconcile =
+    Cmd.v
+      (Cmd.info "reconcile"
+         ~doc:
+           "Verify a governance-reconciliation-bundle-v1 and report action/receipt completion gaps \
+            without inferring rollback or safe retry.")
+      Term.(
+        const governance_reconcile_cmd
+        $ Arg.(required & pos 0 (some string) None & info [] ~docv:"BUNDLE")
+        $ prelude_arg $ store_dir_opt_arg)
+  in
   Cmd.group
     (Cmd.info "governance" ~doc:"Verify governance artifacts and review surfaces.")
-    [ verify_log; verify_run ]
+    [ verify_log; verify_run; reconcile ]
 
 let dist_diff_t =
   Cmd.v

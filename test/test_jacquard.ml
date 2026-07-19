@@ -42,6 +42,7 @@ let () =
       ("workspace-dry-run", Test_workspace_dry_run.suite);
       ("governance-verify", Test_governance_verify.suite);
       ("governance-run-bundle", Test_governance_run_bundle.suite);
+      ("governance-reconcile", Test_governance_reconcile.suite);
       ("types", Test_types.suite);
       ("check", Test_check.suite);
       ("tier", Test_tier.suite);
