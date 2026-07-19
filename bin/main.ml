@@ -1484,6 +1484,20 @@ let audit_verify_cmd log_file head_spelling =
           Printf.printf "ok %s\n" (Hash.to_hex head);
           ok)
 
+let governance_verify_run_cmd bundle_file prelude store_dir =
+  match open_ctx ~prelude ~store_dir with
+  | Error diagnostics -> print_diags diagnostics
+  | Ok (store, _ctx) -> (
+      match Governance_run_bundle.verify_file ~store ~file:bundle_file with
+      | Error diagnostics -> print_diags diagnostics
+      | Ok report ->
+          Printf.printf
+            "ok %s entries=%d calls=%d policies=%d assessments=%d proposals=%d consents=%d \
+             transformed=%d\n"
+            (Hash.to_hex report.head) report.entries report.calls report.policies report.assessments
+            report.proposals report.consents report.transformed_calls;
+          ok)
+
 (* --- cmdliner wiring --- *)
 
 open Cmdliner
@@ -1734,9 +1748,20 @@ let governance_t =
             & opt (some string) None
             & info [ "head" ] ~docv:"HASH" ~doc:"Expected published lowercase chain head."))
   in
+  let verify_run =
+    Cmd.v
+      (Cmd.info "verify-run"
+         ~doc:
+           "Verify one canonical governance-run-bundle-v1, including its unchanged Audit chain and \
+            exact Call, policy, assessment, Proposal, and parent-lineage links.")
+      Term.(
+        const governance_verify_run_cmd
+        $ Arg.(required & pos 0 (some string) None & info [] ~docv:"BUNDLE")
+        $ prelude_arg $ store_dir_opt_arg)
+  in
   Cmd.group
     (Cmd.info "governance" ~doc:"Verify governance artifacts and review surfaces.")
-    [ verify_log ]
+    [ verify_log; verify_run ]
 
 let dist_diff_t =
   Cmd.v
