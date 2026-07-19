@@ -587,3 +587,9 @@ workspace.write-simulation 3
 workspace.fetch-simulation 3
 workspace.dry-layer 3
 workspace.dry-run 3
+# --- 27-workspace-live (GM.11 governed raw facade membrane)
+workspace.driver-read 3
+workspace.driver-write 3
+workspace.driver-fetch 3
+workspace.live-layer 3
+workspace.live 3
