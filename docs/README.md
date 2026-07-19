@@ -156,6 +156,11 @@ Read these together when judging whether the release candidate is credible:
   exact audit sequencing, simulator/refusal matrix, and native parity evidence.
 - `release/governed-membranes/GM6-MANIFEST.sha256`: reconstructible GM.6 overlay
   on the validated GM.3 plus GM.5 integration stack.
+- `release/governed-membranes/GM8-EVIDENCE.md`: GM.8 cross-artifact verifier,
+  exact authority expansion, identity, sequencing, secret, lineage, and `Eval`
+  diagnostics, with one valid Workspace contract and adversarial rule coverage.
+- `release/governed-membranes/GM8-MANIFEST.sha256`: reconstructible GM.8 overlay
+  on exact integrated base `491e530`.
 - `release/governed-membranes/GM9-EVIDENCE.md`: GM.9 typed Workspace calls,
   safe secret references, outcome summaries, and authority-order evidence.
 - `release/governed-membranes/GM9-MANIFEST.sha256`: reconstructible GM.9 overlay

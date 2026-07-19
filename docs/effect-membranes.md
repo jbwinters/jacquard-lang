@@ -1277,11 +1277,11 @@ A `jac governance check` pass, or an equivalent checker lane, verifies:
 * every facade operation has both a live clause and a dry-run clause;
 * every clause obtains a canonical disposition before invoking a driver; action and simulation paths record completion before consuming their local `Resume`, while refusal paths consume `Resume` after the pre-action `Evaluated` entry and do not fabricate a `Completed` entry;
 * one `with-sequence` owner surrounds every set of nested layers that publishes one audit stream, and every such layer receives the owner's exact token;
-* summaries and outcome renderers are pure;
-* call normalizers are pure and hash-stable;
-* no call spec serializes `Secret` values rather than `SecretRef`;
+* summaries and outcome renderers have closed pure rows at every nested arrow and return the canonical outcome-summary type;
+* call normalizers have closed pure rows at every nested arrow, return the canonical Call result shape, and are hash-stable;
+* no call, bound-policy, assessment, or proposal subject serializes `Secret` values rather than `SecretRef`;
 * every `Ask` proposal includes call, policy, assessment, and authority hashes;
-* unchanged forwarding retains the exact call ID, while a transformed call has `parent-call-id = Some(previous-call-id)` and a new ID;
+* unchanged forwarding retains the exact carried call ID, while a transformed call carries its new ID and has `parent-call-id = Some(previous-call-id)`;
 * a `BoundPolicy` hash equals the canonical hash of its policy value;
 * a `Call.call-id` equals the canonical hash of its semantic call encoding;
 * a `Proposal.proposal-id` equals the canonical hash of its exact review encoding.
@@ -1292,6 +1292,19 @@ operations in the action through their frozen envelopes, compares the result
 to both authority lists, and fails the build on disagreement. Resource entries
 remain configured evidence and are checked against configuration, never
 inferred from a row.
+
+Implementation status (GM.8): `Governance_verify` implements the versioned,
+fail-closed analysis boundary above. Trusted tooling supplies resolved evidence
+derived from checked artifacts; the evidence is not a serialized policy format,
+a user-authored proof, or an authority grant. The verifier confirms frozen
+registry/hash identities rather than trusting mutable names, reads actual stored
+term schemes recursively, follows referenced group members, recomputes HASH_V0 identity
+claims, expands forwarded operation envelopes, and reports E1400--E1412 with
+source spans. It also enforces the §13 `Eval` prohibition even when a governed
+body attempts to handle `Eval` locally. Resource entries are compared with
+configured evidence only. This slice adds neither the `jac governance check`
+command nor an artifact extractor, membrane handler, simulator, live driver,
+or resource-scope type proof; those remain separate tooling and runtime work.
 
 ### 12.3 Review surfaces
 
