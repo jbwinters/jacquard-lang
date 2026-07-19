@@ -37,9 +37,41 @@
 (* Internal control flow only; never escapes this module. *)
 exception Err of Diag.t
 
+let diagnostic_spec = function
+  | "E0201" ->
+      ( Diag.Kernel,
+        "A value failed kernel validation before hashing.",
+        "Validate the kernel form successfully before canonicalization." )
+  | "E0501" ->
+      ( Diag.Canonicalization,
+        "An unresolved reference reached canonicalization.",
+        "Resolve every global reference before hashing the form." )
+  | "E0502" ->
+      ( Diag.Canonicalization,
+        "An unbound local reached canonicalization.",
+        "Bind or resolve the variable before hashing the form." )
+  | "E0503" ->
+      ( Diag.Canonicalization,
+        "A group reference is outside its valid definition group.",
+        "Keep every group reference inside its group and within the member range." )
+  | "E0504" ->
+      ( Diag.Canonicalization,
+        "A malformed unquote reached canonicalization.",
+        "Validate quote and unquote structure before hashing the form." )
+  | "E0505" ->
+      ( Diag.Canonicalization,
+        "A recursive definition group is too symmetric to order canonically.",
+        "Differentiate the recursive members structurally before hashing the group." )
+  | code -> raise (Diag.Bug_invalid_diagnostic ("unknown canonicalization code " ^ code))
+
 let err ?meta ~code fmt =
   Printf.ksprintf
-    (fun msg -> raise (Err (Diag.error ?span:(Option.bind meta Meta.span) ~code msg)))
+    (fun cause ->
+      let domain, summary, next_step = diagnostic_spec code in
+      raise
+        (Err
+           (Diag.error ?span:(Option.bind meta Meta.span) ~domain ~code ~summary ~cause ~next_step
+              ~contrast:None ())))
     fmt
 
 (* --- primitive encoders (spec/serialization.md) --- *)

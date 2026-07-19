@@ -31,7 +31,7 @@ let check_equivalent label surface jqd =
 let error_codes source =
   match Surface_parse.parse_string ~file:"bad.jac" source with
   | Ok _ -> Alcotest.failf "expected %S to fail surface parsing" source
-  | Error diagnostics -> List.map (fun diagnostic -> diagnostic.Diag.code) diagnostics
+  | Error diagnostics -> List.map (fun diagnostic -> Diag.code_or_uncoded diagnostic) diagnostics
 
 let lower_error source =
   let expression = parse_surface_expr source in
@@ -64,12 +64,14 @@ let test_functions_and_patterns () =
       Alcotest.(check bool)
         (source ^ " is rejected during lowering")
         true
-        (List.exists (fun diagnostic -> diagnostic.Diag.code = "E0205") (lower_error source)))
+        (List.exists
+           (fun diagnostic -> Diag.code_or_uncoded diagnostic = "E0205")
+           (lower_error source)))
     [ "fn (1) -> 2"; "fn (Some(x)) -> 2" ];
   Alcotest.(check bool)
     "refutable let is rejected during lowering" true
     (List.exists
-       (fun diagnostic -> diagnostic.Diag.code = "E0206")
+       (fun diagnostic -> Diag.code_or_uncoded diagnostic = "E0206")
        (lower_error "{ let 1 = 2; 3 }"));
   check_equivalent "irrefutable as parameter" "fn (x as whole) -> whole"
     "(lam ((pas whole (pvar x))) (var whole))"
@@ -116,8 +118,11 @@ let test_forall_row_var_requirement () =
     (fun source ->
       match Surface_parse.parse_string ~file:"forall.jac" source with
       | Error diagnostics -> (
-          match List.find_opt (fun diagnostic -> diagnostic.Diag.code = "E1220") diagnostics with
-          | Some { Diag.span = Some span; _ } ->
+          match
+            List.find_opt (fun diagnostic -> Diag.code_or_uncoded diagnostic = "E1220") diagnostics
+          with
+          | Some diagnostic when Option.is_some (Diag.span diagnostic) ->
+              let span = Option.get (Diag.span diagnostic) in
               let dot = String.index source '.' in
               Alcotest.(check int) (source ^ " diagnostic offset") dot span.Span.start_pos.offset
           | Some _ -> Alcotest.failf "%s: forall row-variable diagnostic has no span" source
@@ -156,15 +161,21 @@ let test_newline_and_separator_rules () =
 
 let test_block_lowering_errors () =
   (match lower_error "{}" with
-  | [ { Diag.code = "E1231"; span = Some span; _ } ] ->
+  | [ diagnostic ] when Diag.code diagnostic = Some "E1231" && Option.is_some (Diag.span diagnostic)
+    ->
+      let span = Option.get (Diag.span diagnostic) in
       Alcotest.(check string) "empty block span" "surface.jac:1:1-3" (Span.to_string span)
   | diagnostics -> fail_diags "empty block diagnostic" diagnostics);
   (match lower_error "{ let x = 1 }" with
-  | [ { Diag.code = "E1232"; span = Some span; _ } ] ->
+  | [ diagnostic ] when Diag.code diagnostic = Some "E1232" && Option.is_some (Diag.span diagnostic)
+    ->
+      let span = Option.get (Diag.span diagnostic) in
       Alcotest.(check string) "final let span" "surface.jac:1:3-12" (Span.to_string span)
   | diagnostics -> fail_diags "final let diagnostic" diagnostics);
   match lower_error "{ let rec (f, g)(x) = x; f }" with
-  | [ { Diag.code = "E1233"; span = Some _; _ } ] -> ()
+  | [ diagnostic ] when Diag.code diagnostic = Some "E1233" && Option.is_some (Diag.span diagnostic)
+    ->
+      ()
   | diagnostics -> fail_diags "recursive binder diagnostic" diagnostics
 
 let test_generated_spans_and_provenance () =
@@ -200,7 +211,9 @@ let test_recovery_preserves_later_expression () =
   let recovered = Surface_parse.recover_string ~file:"recover.jac" "f(,)\n42\n" in
   Alcotest.(check bool)
     "diagnostic survives" true
-    (List.exists (fun diagnostic -> diagnostic.Diag.code = "E1220") recovered.diagnostics);
+    (List.exists
+       (fun diagnostic -> Diag.code_or_uncoded diagnostic = "E1220")
+       recovered.diagnostics);
   match List.rev recovered.items with
   | { Surface_ast.it = TopExpr { it = Lit (LInt 42); _ }; _ } :: _ -> ()
   | _ -> Alcotest.fail "call recovery discarded the later valid top-level expression"
@@ -209,7 +222,7 @@ let test_nested_lexical_recovery () =
   let recovered = Surface_parse.recover_string ~file:"recover.jac" "f(1, @, 2)\n42\n" in
   Alcotest.(check (list string))
     "nested lexical diagnostic retained" [ "E1210" ]
-    (List.map (fun diagnostic -> diagnostic.Diag.code) recovered.diagnostics);
+    (List.map (fun diagnostic -> Diag.code_or_uncoded diagnostic) recovered.diagnostics);
   match List.rev recovered.items with
   | { Surface_ast.it = TopExpr { it = Lit (LInt 42); _ }; _ } :: _ -> ()
   | _ -> Alcotest.fail "nested lexical recovery discarded the later expression"

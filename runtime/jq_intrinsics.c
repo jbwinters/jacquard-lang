@@ -20,8 +20,7 @@ static void type_err2(const char *name, const char *kind, jq_value a, jq_value b
     __attribute__((noreturn));
 static void type_err2(const char *name, const char *kind, jq_value a, jq_value b) {
   char *sa = jq_show(a), *sb = jq_show(b);
-  fprintf(stderr, "type error: %s expects two %s, got %s, %s\n", name, kind, sa, sb);
-  exit(2);
+  jq_runtime_failf(JQ_ERROR_TYPE, "%s expects two %s, got %s, %s", name, kind, sa, sb);
 }
 
 static bool is_real(jq_value v) {
@@ -129,8 +128,7 @@ jq_value jq_i_text_length(jq_rt *rt, const jq_value *a) {
   (void)rt;
   if (!is_text(a[0])) {
     char *s = jq_show(a[0]);
-    fprintf(stderr, "type error: text.length got unexpected arguments %s\n", s);
-    exit(2);
+    jq_runtime_failf(JQ_ERROR_TYPE, "text.length got unexpected arguments %s", s);
   }
   jq_value r = jq_int((int64_t)jq_utf8_count(jq_text_bytes(a[0]), jq_text_len(a[0])));
   jq_drop(a[0]);
@@ -162,11 +160,9 @@ static void text_join_list_error(const jq_value *a, jq_value bad)
     __attribute__((noreturn));
 static void text_join_list_error(const jq_value *a, jq_value bad) {
   char *shown = jq_show(bad);
-  fprintf(stderr, "type error: text.join expects a list of texts, got %s\n", shown);
-  free(shown);
   jq_drop(a[0]);
   jq_drop(a[1]);
-  exit(2);
+  jq_runtime_failf(JQ_ERROR_TYPE, "text.join expects a list of texts, got %s", shown);
 }
 
 jq_value jq_i_text_join(jq_rt *rt, const jq_value *a) {
@@ -210,11 +206,9 @@ jq_value jq_i_text_join_variadic_v1(jq_rt *rt, const jq_value *a, uint16_t n) {
   for (uint16_t i = 0; i < n; i++) {
     if (!is_text(a[i])) {
       char *shown = jq_show(a[i]);
-      fprintf(stderr, "type error: text.join expects Text at argument %u, got %s\n",
-              (unsigned)(i + 1), shown);
-      free(shown);
       for (uint16_t j = 0; j < n; j++) jq_drop(a[j]);
-      exit(2);
+      jq_runtime_failf(JQ_ERROR_TYPE, "text.join expects Text at argument %u, got %s",
+                       (unsigned)(i + 1), shown);
     }
     total += jq_text_len(a[i]);
   }
@@ -258,15 +252,19 @@ jq_value jq_i_text_compare(jq_rt *rt, const jq_value *a) {
 static void type_err_args(const char *name, const jq_value *a, uint16_t n)
     __attribute__((noreturn));
 static void type_err_args(const char *name, const jq_value *a, uint16_t n) {
-  fprintf(stderr, "type error: %s got unexpected arguments ", name);
+  char *shown[JQ_MAX_ARITY] = {0};
+  size_t length = strlen(name) + strlen(" got unexpected arguments ") + 1;
   for (uint16_t i = 0; i < n; i++) {
-    char *s = jq_show(a[i]);
-    fprintf(stderr, "%s%s", i ? ", " : "", s);
-    free(s);
+    shown[i] = jq_show(a[i]);
+    length += strlen(shown[i]) + (i ? 2 : 0);
   }
-  fputc('\n', stderr);
+  char *message = malloc(length);
+  if (!message) jq_runtime_error("jacquard runtime: out of memory");
+  size_t at = (size_t)snprintf(message, length, "%s got unexpected arguments ", name);
+  for (uint16_t i = 0; i < n; i++)
+    at += (size_t)snprintf(message + at, length - at, "%s%s", i ? ", " : "", shown[i]);
   for (uint16_t i = 0; i < n; i++) jq_drop(a[i]);
-  exit(2);
+  jq_runtime_fail(JQ_ERROR_TYPE, message);
 }
 
 /* ASCII whitespace only in this draft, matching the interpreter (documented) */
@@ -372,12 +370,8 @@ static bool is_con_named(jq_value v, const char *name) {
 static void arith_err(const char *fmt, ...) __attribute__((noreturn, format(printf, 1, 2)));
 static void arith_err(const char *fmt, ...) {
   va_list ap;
-  fputs("arithmetic error: ", stderr);
   va_start(ap, fmt);
-  vfprintf(stderr, fmt, ap);
-  va_end(ap);
-  fputc('\n', stderr);
-  exit(2);
+  jq_runtime_vfailf(JQ_ERROR_ARITHMETIC, fmt, ap);
 }
 
 static jq_value pair2(jq_rt *rt, jq_value x, jq_value p) {
@@ -399,8 +393,7 @@ static void check_entries(jq_value entries) {
       }
     }
     char *s = jq_show(v);
-    fprintf(stderr, "type error: categorical expects a list of pairs, got %s\n", s);
-    exit(2);
+    jq_runtime_failf(JQ_ERROR_TYPE, "categorical expects a list of pairs, got %s", s);
   }
 }
 
@@ -426,8 +419,7 @@ static void check_dist(jq_value d) {
     return;
   }
   char *s = jq_show(d);
-  fprintf(stderr, "type error: %s is not a distribution value\n", s);
-  exit(2);
+  jq_runtime_failf(JQ_ERROR_TYPE, "%s is not a distribution value", s);
 }
 
 /* the support list, owned; the caller validated the dist. uniform-int is
@@ -714,8 +706,7 @@ jq_value jq_i_code_form(jq_rt *rt, const jq_value *a) {
   uint64_t hn = jq_text_len(a[0]);
   if (!code_head_ok(hs, hn)) {
     char *esc = ocaml_escaped(hs, hn);
-    fprintf(stderr, "type error: code.form: %s is not a valid form head\n", esc);
-    exit(2);
+    jq_runtime_failf(JQ_ERROR_TYPE, "code.form: %s is not a valid form head", esc);
   }
   /* walk the cons list twice: count, then fill (the interpreter errors on
      the first non-conforming node with its show) */
@@ -740,8 +731,7 @@ jq_value jq_i_code_form(jq_rt *rt, const jq_value *a) {
   }
   if (bad) {
     char *shown = jq_show(it);
-    fprintf(stderr, "type error: code.form expects a list of code, got %s\n", shown);
-    exit(2);
+    jq_runtime_failf(JQ_ERROR_TYPE, "code.form expects a list of code, got %s", shown);
   }
   if (count > (UINT16_MAX - 1) / 2)
     jq_runtime_error("jacquard runtime: form arity exceeds the 32767 limit");
@@ -911,8 +901,7 @@ jq_value jq_i_debug_inspect(jq_rt *rt, const jq_value *a) {
 jq_value jq_i_support(jq_rt *rt, const jq_value *a) {
   if (!jq_is_ptr(a[0]) || jq_block_of(a[0])->tag != JQ_CON) {
     char *s = jq_show(a[0]);
-    fprintf(stderr, "type error: %s is not a distribution value\n", s);
-    exit(2);
+    jq_runtime_failf(JQ_ERROR_TYPE, "%s is not a distribution value", s);
   }
   check_dist(a[0]);
   jq_value r = support_of(rt, a[0]);
@@ -926,8 +915,7 @@ jq_value jq_i_pmf(jq_rt *rt, const jq_value *a) {
   jq_value d = a[0], v = a[1];
   if (!jq_is_ptr(d) || jq_block_of(d)->tag != JQ_CON) {
     char *s = jq_show(d);
-    fprintf(stderr, "type error: %s is not a distribution value\n", s);
-    exit(2);
+    jq_runtime_failf(JQ_ERROR_TYPE, "%s is not a distribution value", s);
   }
   check_dist(d);
   double mass;
@@ -1031,8 +1019,7 @@ jq_value jq_lw_sample(jq_rt *rt, jq_value dv) {
   lw_state *st = (lw_state *)rt->lw;
   if (!jq_is_ptr(dv) || jq_block_of(dv)->tag != JQ_CON) {
     char *s = jq_show(dv);
-    fprintf(stderr, "type error: %s is not a distribution value\n", s);
-    exit(2);
+    jq_runtime_failf(JQ_ERROR_TYPE, "%s is not a distribution value", s);
   }
   check_dist(dv);
   jq_value x = draw_dist(rt, &st->rng, dv);
@@ -1044,8 +1031,7 @@ jq_value jq_lw_observe(jq_rt *rt, jq_value dv, jq_value v) {
   lw_state *st = (lw_state *)rt->lw;
   if (!jq_is_ptr(dv) || jq_block_of(dv)->tag != JQ_CON) {
     char *s = jq_show(dv);
-    fprintf(stderr, "type error: %s is not a distribution value\n", s);
-    exit(2);
+    jq_runtime_failf(JQ_ERROR_TYPE, "%s is not a distribution value", s);
   }
   check_dist(dv);
   st->weight *= pmf_mass(rt, dv, v);
@@ -1077,9 +1063,9 @@ jq_value jq_i_dist_sample_lw(jq_rt *rt, const jq_value *a) {
     char *s0 = jq_show(a[0]);
     char *s1 = jq_show(a[1]);
     char *s2 = jq_show(a[2]);
-    fprintf(stderr, "type error: dist.sample-lw expects a thunk and two ints, got %s, %s, %s\n",
-            s0, s1, s2);
-    exit(2);
+    jq_runtime_failf(JQ_ERROR_TYPE,
+                     "dist.sample-lw expects a thunk and two ints, got %s, %s, %s", s0, s1,
+                     s2);
   }
   int64_t samples = jq_int_val(a[1]);
   int64_t master = jq_int_val(a[2]);
@@ -1104,9 +1090,11 @@ jq_value jq_i_dist_sample_lw(jq_rt *rt, const jq_value *a) {
     rt->unhandled_effect_override = "(not handled during inference)";
     jq_dup(thunk);
     rt->apply_n = 0;
+    jq_runtime_inference_enter();
     jq_value v = jq_tc_drive(
         rt, jq_apply(rt, thunk, JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT,
                      JQ_UNIT, JQ_UNIT));
+    jq_runtime_inference_leave();
     rt->hs_floor = saved_floor;
     rt->lw = saved_lw;
     rt->unhandled_effect_override = saved_override;
@@ -1121,10 +1109,9 @@ jq_value jq_i_dist_sample_lw(jq_rt *rt, const jq_value *a) {
   double total = 0.0;
   for (int64_t i = samples - 1; i >= 0; i--) total += runs[i].weight;
   if (total <= 0.0) {
-    fputs("arithmetic error: error[E0901]: the posterior is empty: every run is "
-          "impossible under the observations\n",
-          stderr);
-    exit(2);
+    jq_diagnostic_fail(2, "E0901", "The posterior is empty.",
+                       "the posterior is empty: every run is impossible under the observations",
+                       "Change the model or observations so at least one execution branch has nonzero weight.");
   }
   /* merge on the rendering key, accumulating per key in the same reverse
      order */

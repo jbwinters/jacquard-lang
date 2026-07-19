@@ -1309,14 +1309,16 @@ let test_self_effect_hash_contract () =
   in
   (match Resolve.resolve_decl (Store.names_view store) malformed with
   | Error [ diagnostic ] ->
-      Alcotest.(check string) "type used as effect rejected by resolver" "E0302" diagnostic.code
+      Alcotest.(check string)
+        "type used as effect rejected by resolver" "E0302" (Diag.code_or_uncoded diagnostic)
   | Error diagnostics ->
       Eval_support.fail_diags "unexpected malformed-context diagnostics" diagnostics
   | Ok _ -> Alcotest.fail "type used as an effect unexpectedly resolved");
   (match Canon.hash_decl malformed with
   | Error [ diagnostic ] ->
       Alcotest.(check string)
-        "Named row outside enclosing effect rejected by canon" "E0501" diagnostic.code
+        "Named row outside enclosing effect rejected by canon" "E0501"
+        (Diag.code_or_uncoded diagnostic)
   | Error diagnostics -> Eval_support.fail_diags "unexpected malformed hash diagnostics" diagnostics
   | Ok _ -> Alcotest.fail "malformed Named effect unexpectedly hashed");
   let reopen_dir = Eval_support.fresh_dir () in

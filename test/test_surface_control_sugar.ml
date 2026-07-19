@@ -3,6 +3,13 @@ open Jacquard
 let fail_diags label diagnostics =
   Alcotest.failf "%s: %s" label (String.concat "; " (List.map Diag.to_string diagnostics))
 
+let expected_diagnostic span code summary cause next_step =
+  Printf.sprintf "%s: error[%s]: %s\n  Cause: %s\n  Next step: %s" span code summary cause next_step
+
+let e1220 span cause =
+  expected_diagnostic span "E1220" "Surface syntax is invalid" cause
+    "Correct the syntax at this location and parse the file again."
+
 let parse ?(file = "ss13.jac") source =
   match Surface_parse.parse_string ~file source with
   | Ok tops -> tops
@@ -249,11 +256,13 @@ let test_noncallable_pipe_reaches_checker () =
   in
   match Check.check_top context (Kernel.Expr expression) with
   | Error [ diagnostic ] ->
-      Alcotest.(check string) "normal not-callable diagnostic" "E0802" diagnostic.code
+      Alcotest.(check string)
+        "normal not-callable diagnostic" "E0802" (Diag.code_or_uncoded diagnostic)
   | Error diagnostics -> fail_diags "non-callable pipe checker" diagnostics
   | Ok _ -> Alcotest.fail "calling an integer unexpectedly type checked"
 
-let diagnostic_codes diagnostics = List.map (fun diagnostic -> diagnostic.Diag.code) diagnostics
+let diagnostic_codes diagnostics =
+  List.map (fun diagnostic -> Diag.code_or_uncoded diagnostic) diagnostics
 
 let test_resolution_diagnostics () =
   let check source resolver expected_names =
@@ -459,13 +468,13 @@ let test_malformed_and_recovery () =
   Alcotest.(check (list string))
     "exact malformed diagnostics"
     [
-      "bad-ss13.jac:1:4-5: error[E1220]: list literals do not permit a trailing comma";
-      "bad-ss13.jac:2:6-7: error[E1220]: unclosed `if`: expected `then` after the condition, found \
-       ident(a)\n\
-      \  hint: the `if` expression opened at bad-ss13.jac:2:1-3";
-      "bad-ss13.jac:3:13-14: error[E1220]: unclosed `if`: expected `else` after the then branch, \
-       found ident(b)\n\
-      \  hint: the `if` expression opened at bad-ss13.jac:3:1-3";
+      e1220 "bad-ss13.jac:1:4-5" "list literals do not permit a trailing comma";
+      e1220 "bad-ss13.jac:2:6-7"
+        "unclosed `if`: expected `then` after the condition, found ident(a) The `if` expression \
+         opened at bad-ss13.jac:2:1-3.";
+      e1220 "bad-ss13.jac:3:13-14"
+        "unclosed `if`: expected `else` after the then branch, found ident(b) The `if` expression \
+         opened at bad-ss13.jac:3:1-3.";
     ]
     (List.map Diag.to_string recovered.diagnostics);
   (match List.rev recovered.items with
@@ -474,7 +483,7 @@ let test_malformed_and_recovery () =
   let missing = Surface_parse.recover_string ~file:"missing-list.jac" "[1" in
   Alcotest.(check (list string))
     "missing bracket exact diagnostic"
-    [ "missing-list.jac:1:3-3: error[E1220]: expected `,` or `]`, found eof" ]
+    [ e1220 "missing-list.jac:1:3-3" "expected `,` or `]`, found eof" ]
     (List.map Diag.to_string missing.diagnostics)
 
 let test_top_level_recovery_boundaries () =
@@ -482,7 +491,7 @@ let test_top_level_recovery_boundaries () =
   let list_recovered = Surface_parse.recover_string ~file:"list-boundary.jac" list_source in
   Alcotest.(check (list string))
     "list boundary diagnostic"
-    [ "list-boundary.jac:2:1-6: error[E1220]: expected `,` or `]` before the next top-level item" ]
+    [ e1220 "list-boundary.jac:2:1-6" "expected `,` or `]` before the next top-level item" ]
     (List.map Diag.to_string list_recovered.diagnostics);
   (match list_recovered.items with
   | [
@@ -496,9 +505,9 @@ let test_top_level_recovery_boundaries () =
   Alcotest.(check (list string))
     "if boundary diagnostic"
     [
-      "if-boundary.jac:2:1-6: error[E1220]: unclosed `if`: expected `else` after the then branch \
-       before the next top-level item\n\
-      \  hint: the `if` expression opened at if-boundary.jac:1:1-3";
+      e1220 "if-boundary.jac:2:1-6"
+        "unclosed `if`: expected `else` after the then branch before the next top-level item The \
+         `if` expression opened at if-boundary.jac:1:1-3.";
     ]
     (List.map Diag.to_string if_recovered.diagnostics);
   match if_recovered.items with
@@ -532,15 +541,15 @@ let test_nested_recovery_boundaries () =
     [
       ( "nested-list-call.jac",
         "f([1\n)\nafter = 7\n",
-        "nested-list-call.jac:2:1-2: error[E1220]: expected `,` or `]`, found )" );
+        e1220 "nested-list-call.jac:2:1-2" "expected `,` or `]`, found )" );
       ( "nested-if-call.jac",
         "f(if c then a\n)\nafter = 7\n",
-        "nested-if-call.jac:2:1-2: error[E1220]: unclosed `if`: expected `else` after the then \
-         branch, found )\n\
-        \  hint: the `if` expression opened at nested-if-call.jac:1:3-5" );
+        e1220 "nested-if-call.jac:2:1-2"
+          "unclosed `if`: expected `else` after the then branch, found ) The `if` expression \
+           opened at nested-if-call.jac:1:3-5." );
       ( "nested-list-block.jac",
         "{\n[1\n}\nafter = 7\n",
-        "nested-list-block.jac:3:1-2: error[E1220]: expected `,` or `]`, found }" );
+        e1220 "nested-list-block.jac:3:1-2" "expected `,` or `]`, found }" );
     ]
   in
   List.iter

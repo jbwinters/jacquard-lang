@@ -10,7 +10,41 @@ type report = {
 }
 
 let ( let* ) = Result.bind
-let error ~code fmt = Printf.ksprintf (fun message -> Error [ Diag.error ~code message ]) fmt
+
+let diagnostic_spec = function
+  | "E1500" ->
+      ( "The governance run bundle is malformed, unsupported, or unsafe to read.",
+        "Regenerate one canonical governance-run-bundle-v1 from stable verified artifacts." )
+  | "E1501" ->
+      ( "A governance artifact is malformed or carries the wrong identity.",
+        "Restore the exact canonical artifact and its matching carried identity." )
+  | "E1502" ->
+      ( "A governance artifact identity appears more than once.",
+        "Keep exactly one artifact for each semantic identity." )
+  | "E1503" ->
+      ( "An Audit entry references an artifact missing from the run bundle.",
+        "Add the exact referenced artifact to the fixed bundle section." )
+  | "E1504" ->
+      ( "Governance Audit ordering or artifact linkage is inconsistent.",
+        "Restore the unique earlier linked evaluation, proposal, or completion record." )
+  | "E1505" ->
+      ( "A Proposal disagrees with one of its linked governance artifacts.",
+        "Regenerate the Proposal from the exact linked Call, policy, assessment, and authority." )
+  | "E1506" ->
+      ( "Transformed Call lineage is missing or cyclic.",
+        "Supply an acyclic parent chain rooted in a bundled Call." )
+  | "E1507" ->
+      ( "A bundled governance artifact is not used by the Audit chain.",
+        "Remove the unrelated artifact or link the exact required artifact from the Audit chain." )
+  | code -> raise (Diag.Bug_invalid_diagnostic ("unknown run-bundle code " ^ code))
+
+let error ~code fmt =
+  Printf.ksprintf
+    (fun cause ->
+      let summary, next_step = diagnostic_spec code in
+      Error [ Diag.error ~domain:Governance ~code ~summary ~cause ~next_step ~contrast:None () ])
+    fmt
+
 let hash_code value = Form.form "hash" [ Form.Hash value ]
 let code_hash value = Hash.of_string (Printer.print_compact value)
 let version = function { Form.head = "governance-v0"; args = []; _ } -> true | _ -> false
@@ -861,7 +895,7 @@ let verify_string ~store ~file source =
       | Error diagnostics ->
           let detail =
             match diagnostics with
-            | diagnostic :: _ -> diagnostic.Diag.message
+            | diagnostic :: _ -> Diag.cause diagnostic
             | [] -> "unknown reader failure"
           in
           error ~code:"E1500" "%s: malformed governance run bundle: %s" file detail

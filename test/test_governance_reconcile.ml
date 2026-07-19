@@ -280,7 +280,7 @@ let fail_diags label diagnostics =
 
 let expect_error label code result =
   match result with
-  | Error ({ Diag.code = actual; _ } :: _) -> Alcotest.(check string) label code actual
+  | Error (diagnostic :: _) -> Alcotest.(check string) label code (Diag.code_or_uncoded diagnostic)
   | Error [] -> Alcotest.failf "%s returned no diagnostics" label
   | Ok _ -> Alcotest.failf "%s unexpectedly verified" label
 

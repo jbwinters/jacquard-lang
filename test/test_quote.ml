@@ -61,7 +61,9 @@ let test_surface_unquote_staging_depth () =
   (match Surface_parse.parse_string ~file:"surface-quote.jac" "unquote(x)" with
   | Ok [ { Surface_ast.it = TopExpr expression; _ } ] -> (
       match Surface_lower.lower_expr expression with
-      | Error [ { Diag.code = "E0204"; span = Some _; _ } ] -> ()
+      | Error [ diagnostic ]
+        when Diag.code diagnostic = Some "E0204" && Option.is_some (Diag.span diagnostic) ->
+          ()
       | Error diagnostics -> Eval_support.fail_diags "top-level unquote" diagnostics
       | Ok _ -> Alcotest.fail "top-level surface unquote reached the kernel")
   | Ok _ -> Alcotest.fail "top-level unquote did not parse as one expression"

@@ -10,7 +10,39 @@ type report = {
 }
 
 let ( let* ) = Result.bind
-let error ~code fmt = Printf.ksprintf (fun message -> Error [ Diag.error ~code message ]) fmt
+
+let diagnostic_spec = function
+  | "E1510" ->
+      ( "The governance reconciliation bundle is malformed, unsupported, or unsafe to read.",
+        "Regenerate one canonical governance-reconciliation-bundle-v1 from stable evidence." )
+  | "E1511" ->
+      ( "The action journal chain or published head is inconsistent.",
+        "Restore the original predecessor-linked journal and its independently published head." )
+  | "E1512" ->
+      ( "An action attempt or receipt carries the wrong semantic identity.",
+        "Recompute the identity from the exact unchanged attempt or receipt subject." )
+  | "E1513" ->
+      ( "The action journal repeats an attempt or receipt identity.",
+        "Keep one Attempted entry and at most one Receipt for each attempt identity." )
+  | "E1514" ->
+      ( "An action receipt appears before its attempt.",
+        "Place each Receipt after its matching Attempted journal entry." )
+  | "E1515" ->
+      ( "The action evidence contradicts the verified governance run.",
+        "Restore exact Call, branch, authorization, completion, and outcome agreement." )
+  | "E1516" ->
+      ( "Valid action evidence still requires operator reconciliation.",
+        "Reconcile the reported missing receipt or completion before retrying or closing the run."
+      )
+  | code -> raise (Diag.Bug_invalid_diagnostic ("unknown reconciliation code " ^ code))
+
+let error ~code fmt =
+  Printf.ksprintf
+    (fun cause ->
+      let summary, next_step = diagnostic_spec code in
+      Error [ Diag.error ~domain:Governance ~code ~summary ~cause ~next_step ~contrast:None () ])
+    fmt
+
 let journal_domain = "jacquard-governance-action-journal-v1\000"
 let journal_genesis = Hash.of_string "jacquard-governance-action-journal-v1-genesis\000"
 let form head values = Form.form head (List.map (fun value -> Form.F value) values)
@@ -638,7 +670,7 @@ let verify_string ~store ~file source =
       | Error diagnostics ->
           let detail =
             match diagnostics with
-            | diagnostic :: _ -> diagnostic.Diag.message
+            | diagnostic :: _ -> Diag.cause diagnostic
             | [] -> "unknown reader failure"
           in
           error ~code:"E1510" "%s: malformed governance reconciliation bundle: %s" file detail

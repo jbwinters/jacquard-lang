@@ -39,8 +39,9 @@ type t = {
 let error message =
   Error
     [
-      Diag.error ~code:"E0908" ~hint:"record a fresh canonical v1 schedule trace"
-        ("invalid schedule trace: " ^ message);
+      Diag.error ~domain:Concurrency ~code:"E0908" ~summary:"The schedule trace is invalid."
+        ~cause:("Invalid schedule trace: " ^ message)
+        ~next_step:"Record a fresh canonical v1 schedule trace." ~contrast:None ();
     ]
 
 let id_text = Concurrency_contract.trace_task_id

@@ -3,9 +3,16 @@ open Jacquard
 let recover source = Surface_parse.recover_string ~file:"recover.jac" source
 
 let diagnostic_codes recovered =
-  List.map (fun diagnostic -> diagnostic.Diag.code) recovered.Surface_ast.diagnostics
+  List.map (fun diagnostic -> Diag.code_or_uncoded diagnostic) recovered.Surface_ast.diagnostics
 
 let rendered_diagnostics recovered = List.map Diag.to_string recovered.Surface_ast.diagnostics
+
+let expected_diagnostic span code summary cause next_step =
+  Printf.sprintf "%s: error[%s]: %s\n  Cause: %s\n  Next step: %s" span code summary cause next_step
+
+let e1220 span cause =
+  expected_diagnostic span "E1220" "Surface syntax is invalid" cause
+    "Correct the syntax at this location and parse the file again."
 
 let metadata_golden id meta =
   let span = Option.fold ~none:"<missing>" ~some:Span.to_string (Meta.span meta) in
@@ -18,8 +25,8 @@ let test_recovery_golden () =
   Alcotest.(check (list string))
     "all parser diagnostics"
     [
-      "recover.jac:3:1-2: error[E1220]: stray `|` at top level";
-      "recover.jac:5:1-5: error[E1220]: expected an expression, found keyword(then)";
+      e1220 "recover.jac:3:1-2" "stray `|` at top level";
+      e1220 "recover.jac:5:1-5" "expected an expression, found keyword(then)";
     ]
     (rendered_diagnostics recovered);
   (match recovered.items with
@@ -114,7 +121,7 @@ let test_empty_and_malformed_inputs_do_not_raise () =
       | Error diagnostics ->
           Alcotest.(check (list string))
             (label ^ " strict") expected_codes
-            (List.map (fun diagnostic -> diagnostic.Diag.code) diagnostics)
+            (List.map (fun diagnostic -> Diag.code_or_uncoded diagnostic) diagnostics)
       | Ok _ -> Alcotest.failf "%s: strict parsing accepted malformed input" label)
     malformed
 
@@ -132,8 +139,10 @@ let test_mixed_lexical_and_parser_recovery () =
   Alcotest.(check (list string))
     "mixed diagnostics"
     [
-      "recover.jac:2:1-2: error[E1210]: unexpected surface character `@`";
-      "recover.jac:3:1-2: error[E1220]: unmatched `}` at top level";
+      expected_diagnostic "recover.jac:2:1-2" "E1210"
+        "The source contains an unexpected surface character." "unexpected surface character `@`"
+        "Remove the character or replace it with valid surface syntax.";
+      e1220 "recover.jac:3:1-2" "unmatched `}` at top level";
     ]
     (rendered_diagnostics recovered);
   (match recovered.items with
@@ -152,7 +161,7 @@ let test_mixed_lexical_and_parser_recovery () =
   | Error diagnostics ->
       Alcotest.(check (list string))
         "strict mixed diagnostics" [ "E1210"; "E1220" ]
-        (List.map (fun diagnostic -> diagnostic.Diag.code) diagnostics)
+        (List.map (fun diagnostic -> Diag.code_or_uncoded diagnostic) diagnostics)
   | Ok _ -> Alcotest.fail "strict parsing accepted a mixed-damage partial tree"
 
 let test_mixed_lexical_recovery_inside_block () =
@@ -236,7 +245,7 @@ let test_unterminated_list_recovery_holes () =
   let recovered = recover "[1\nafter = 7\n" in
   Alcotest.(check (list string))
     "top-level diagnostics"
-    [ "recover.jac:2:1-6: error[E1220]: expected `,` or `]` before the next top-level item" ]
+    [ e1220 "recover.jac:2:1-6" "expected `,` or `]` before the next top-level item" ]
     (rendered_diagnostics recovered);
   (match recovered.items with
   | [
@@ -257,7 +266,7 @@ let test_unterminated_list_recovery_holes () =
   | _ -> Alcotest.fail "unterminated list lost its item, hole, or following definition");
   let without_diagnostics = { recovered with Surface_ast.diagnostics = [] } in
   match Surface_parse.strict_file without_diagnostics with
-  | Error [ { Diag.code = "E1202"; _ } ] -> ()
+  | Error [ diagnostic ] when Diag.code diagnostic = Some "E1202" -> ()
   | Error diagnostics ->
       Alcotest.failf "strict_file returned unexpected diagnostics:\n%s"
         (String.concat "\n" (List.map Diag.to_string diagnostics))
@@ -267,7 +276,7 @@ let test_list_holes_at_container_boundaries () =
   let call = recover "f([1)\n" in
   Alcotest.(check (list string))
     "call diagnostics"
-    [ "recover.jac:1:5-6: error[E1220]: expected `,` or `]`, found )" ]
+    [ e1220 "recover.jac:1:5-6" "expected `,` or `]`, found )" ]
     (rendered_diagnostics call);
   (match call.items with
   | [
@@ -290,7 +299,7 @@ let test_list_holes_at_container_boundaries () =
   let block = recover "{ [1 }\n" in
   Alcotest.(check (list string))
     "block diagnostics"
-    [ "recover.jac:1:6-7: error[E1220]: expected `,` or `]`, found }" ]
+    [ e1220 "recover.jac:1:6-7" "expected `,` or `]`, found }" ]
     (rendered_diagnostics block);
   (match block.items with
   | [
@@ -310,7 +319,7 @@ let test_list_holes_at_container_boundaries () =
   let arm = recover "match x { | Bad -> [1 | Later -> 9 }\n" in
   Alcotest.(check (list string))
     "arm diagnostics"
-    [ "recover.jac:1:23-24: error[E1220]: expected `,` or `]`, found |" ]
+    [ e1220 "recover.jac:1:23-24" "expected `,` or `]`, found |" ]
     (rendered_diagnostics arm);
   (match arm.items with
   | [
@@ -343,7 +352,7 @@ let test_list_holes_at_container_boundaries () =
   let closing_arm = recover "match x { | Bad -> [1 }\n" in
   Alcotest.(check (list string))
     "closing-arm diagnostics"
-    [ "recover.jac:1:23-24: error[E1220]: expected `,` or `]`, found }" ]
+    [ e1220 "recover.jac:1:23-24" "expected `,` or `]`, found }" ]
     (rendered_diagnostics closing_arm);
   match closing_arm.items with
   | [

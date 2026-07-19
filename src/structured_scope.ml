@@ -39,9 +39,10 @@ type ('resume, 'value) t = {
 }
 
 let escape_diagnostic detail =
-  Diag.error ~code:Concurrency_contract.task_escape_code
-    ~hint:"do not return or store a Task beyond its creating async.scope"
-    (Concurrency_contract.task_escape_message ^ ": " ^ detail)
+  Diag.error ~domain:Concurrency ~code:Concurrency_contract.task_escape_code
+    ~summary:Concurrency_contract.task_escape_message
+    ~cause:(Concurrency_contract.task_escape_message ^ ": " ^ detail)
+    ~next_step:"Keep the handle inside the async.scope that created it." ~contrast:None ()
 
 let closed_error () = Error [ escape_diagnostic "the handle's structured scope is already closed" ]
 let ensure_open scope operation = if scope.closed then closed_error () else operation ()
@@ -112,8 +113,11 @@ let channel_open scope ~capacity =
         | exception Channel_contract.Bug_invalid_channel_id detail ->
             Error
               [
-                Diag.error ~code:"E0908" ~hint:"channel state was not allocated"
-                  ("invalid structured-concurrency scheduler state: " ^ detail);
+                Diag.error ~domain:Concurrency ~code:"E0908"
+                  ~summary:"Structured-concurrency scheduler state is invalid"
+                  ~cause:("The channel state could not be allocated: " ^ detail)
+                  ~next_step:"Recreate the async scope and open the channel again." ~contrast:None
+                  ();
               ])
 
 let same_channel_id left right = Channel_contract.compare_channel_id left right = 0
@@ -141,8 +145,11 @@ let channel_handle _capability scope = function
   | _ ->
       Error
         [
-          Diag.error ~code:Concurrency_contract.task_escape_code
-            "Channel operation expected an opaque ChannelHandle";
+          Diag.error ~domain:Concurrency ~code:Concurrency_contract.task_escape_code
+            ~summary:"Channel operation received an invalid handle"
+            ~cause:"The channel operation expected an opaque ChannelHandle value."
+            ~next_step:"Pass the ChannelHandle returned by channel.open within this async.scope."
+            ~contrast:None ();
         ]
 
 let prepare_channel_wake scope channel_id task_id result ~map_resume =

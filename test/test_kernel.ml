@@ -19,7 +19,7 @@ let accepts what s =
 let rejects what code s =
   match Kernel.of_form (parse s) with
   | Ok _ -> Alcotest.failf "%s: expected %S to be rejected with %s" what s code
-  | Error [ d ] -> Alcotest.(check string) (what ^ ": code") code d.Diag.code
+  | Error [ d ] -> Alcotest.(check string) (what ^ ": code") code (Diag.code_or_uncoded d)
   | Error _ -> Alcotest.failf "%s: expected exactly one diagnostic" what
 
 (* Every kernel form: >= 1 accepting, >= 2 rejecting (wrong arity, wrong sort).

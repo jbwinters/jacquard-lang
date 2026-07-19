@@ -1,8 +1,37 @@
 # Jacquard diagnostic codes
 
-Every diagnostic the toolchain can emit, with an example that triggers it. Codes are
-stable: never reused, never renumbered. A test enforces that every code emitted anywhere
-in `src/` and `bin/` appears in this catalog.
+Every diagnostic the toolchain can emit, with an example that triggers it. Domain-qualified
+identities are stable: a `(domain, code)` pair is never reused or renumbered. A test enforces that
+every code emitted anywhere in `src/`, `bin/`, or the native runtime appears in this catalog.
+
+## Diagnostic structure and rendering
+
+A diagnostic is structured data, not a preformatted message. Every diagnostic has a domain,
+severity, plain-language summary, technical cause, and exactly one primary next step. A source
+span and stable code may be absent only where the historical boundary has neither; optional
+contrast is reserved for one concrete, plausible confusion and records separate `mistaken` and
+`intended` descriptions.
+
+The default text renderer presents the author-facing fields in this order:
+
+1. source span, when available, on the severity/code header;
+2. plain-language summary;
+3. `Cause:` with the technical reason;
+4. one `Next step:`;
+5. `Contrast:`, only when a specific mistaken/intended distinction applies.
+
+Commands accept `--diagnostic-format=text|json-v1`; `text` remains the default. `json-v1` writes
+one compact JSON object per diagnostic to stderr, preserving emission order and exit status. Its
+schema name is `jacquard-diagnostic-v1`, with `domain`, nullable `code`, `severity`, nullable
+`span`, `summary`, `cause`, and `next_step` fields. A span contains `file`, `start`, and `end`; each
+position contains one-based `line` and `column` plus a zero-based byte `offset`. The `contrast`
+object is omitted when it does not apply. Machine consumers should key stable identities by the
+pair `(domain, code)`, not by code alone, and should tolerate `code: null` for deliberately
+code-less runtime failures. Span ends are exclusive, and columns count UTF-8 bytes rather than
+Unicode scalar values. Treat `cause` as opaque author-facing text: when one diagnostic explains
+another, the child is projected into that text rather than exposed as a second nested JSON schema.
+The JSON encoding is always valid UTF-8: well-formed input is preserved byte-for-byte, while each
+malformed source, path, or host-message byte in a string field is replaced with U+FFFD.
 
 ## Process safety (E00xx)
 
@@ -131,16 +160,17 @@ also emits E0817; consuming the captured resumption twice emits E0816.
 
 ## Runtime and probabilistic inference (E09xx)
 
-| code | meaning | example |
-|------|---------|---------|
-| E0901 | empty posterior (impossible observations) | `observe (bernoulli 0.0) true` |
-| E0902 | runtime failure inside inference | a model dividing by zero |
-| E0903 | model file has no expression | a decls-only file passed to `jacquard infer` |
-| E0904 | observe at the sampling root | `observe` under `jacquard run --allow dist` (D7 default: defect) |
-| E0905 | exhaustive verification budget exceeded | a property over `uniform-int(1, 1000000)` under `jacquard test --exhaustive` |
-| E0906 | a once continuation was resumed more than once | applying the same once resumption twice |
-| E0907 | a Task or ChannelHandle carrier is private, malformed, foreign to the run, escaped, stale, or outside its exact structured scope | returning/storing a Task or ChannelHandle beyond `async.scope`, constructing its private carrier by hash, reusing it after its creating scope closes or in another run, or using a parent/descendant/foreign handle |
-| E0908 | a deterministic scheduler, schedule trace, trace I/O, or same-scope policy operation is illegal for its lifecycle, decision order, registration, continuation ownership, configured positive/transport bound, or strict-replay contract | checking out a suspended task, exceeding a task/decision/input bound, observing or scheduling a terminal child twice, reading/writing an unavailable trace path, parsing an unversioned/malformed trace, or replaying a missing, extra, reordered, impossible, queue-drifted, or operation-drifted event |
+| domain | code | meaning | example |
+|--------|------|---------|---------|
+| inference | E0901 | empty posterior (impossible observations) | `observe (bernoulli 0.0) true` |
+| inference | E0902 | runtime failure inside inference | a model dividing by zero |
+| warp | E0902 | runtime failure during exhaustive property execution | an exhaustive property body dividing by zero |
+| inference | E0903 | model file has no expression | a decls-only file passed to `jacquard infer` |
+| runtime | E0904 | observe at the sampling root | `observe` under `jacquard run --allow dist` (D7 default: defect) |
+| warp | E0905 | exhaustive verification budget exceeded | a property over `uniform-int(1, 1000000)` under `jacquard test --exhaustive` |
+| runtime | E0906 | a once continuation was resumed more than once | applying the same once resumption twice |
+| concurrency | E0907 | a Task or ChannelHandle carrier is private, malformed, foreign to the run, escaped, stale, or outside its exact structured scope | returning/storing a Task or ChannelHandle beyond `async.scope`, constructing its private carrier by hash, reusing it after its creating scope closes or in another run, or using a parent/descendant/foreign handle |
+| concurrency | E0908 | a deterministic scheduler, schedule trace, trace I/O, or same-scope policy operation is illegal for its lifecycle, decision order, registration, continuation ownership, configured positive/transport bound, or strict-replay contract | checking out a suspended task, exceeding a task/decision/input bound, observing or scheduling a terminal child twice, reading/writing an unavailable trace path, parsing an unversioned/malformed trace, or replaying a missing, extra, reordered, impossible, queue-drifted, or operation-drifted event |
 
 ## Warp (E10xx)
 
@@ -148,6 +178,14 @@ also emits E0817; consuming the captured resumption twice emits E0816.
 |------|---------|---------|
 | E1001 | expression at top level of a test file | `jacquard test file.jqd` where the file ends with `(app (var main))` |
 | E1002 | eval under --dry-run | a program whose row includes `eval` run with `--dry-run` |
+
+## Native compilation (E11xx)
+
+| code | meaning | example |
+|------|---------|---------|
+| E1101 | program construct is outside the native v1 compilation subset | compiling a call with more than eight arguments |
+| E1102 | program requires the interpreter tier | compiling a program that uses `eval` |
+| E1103 | native toolchain, grant, or build configuration cannot produce the executable | building with an unsupported `net` grant or unavailable compiler |
 
 ## Surface syntax (E12xx)
 

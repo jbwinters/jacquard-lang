@@ -843,8 +843,8 @@ let emit_fn st (f : fn) : unit =
         (List.rev fr.rps);
       line buf "default:;";
       line buf "}";
-      line buf "fputs(\"jacquard runtime: unknown resume point (internal)\\n\", stderr);";
-      line buf "exit(2);";
+      line buf
+        "jq_runtime_fail(JQ_ERROR_NATIVE, \"jacquard runtime: unknown resume point (internal)\");";
       buf.indent <- buf.indent - 1;
       line buf "}"
     end;
@@ -1091,8 +1091,8 @@ let main_source (prog : program) ~precise ~(v_true : Hash.t) ~(v_false : Hash.t)
       (* a capture always resolves inside its expression (any capturing handler is
          within it); a sentinel here is an internal bug, never a semantic outcome *)
       line st.ub
-        "if (_v == JQ_SUSPEND) { fputs(\"jacquard runtime: a capture escaped its expression \
-         (internal)\\n\", stderr); exit(2); }";
+        "if (_v == JQ_SUSPEND) jq_runtime_fail(JQ_ERROR_NATIVE, \"jacquard runtime: a capture \
+         escaped its expression (internal)\");";
       (* the flush is parity: the interpreter's per-expression print is OCaml's
          print_endline, which flushes stdout — without it a later expression's
          stderr (warning or refusal) would overtake THIS value in a merged
@@ -1124,9 +1124,9 @@ let main_source (prog : program) ~precise ~(v_true : Hash.t) ~(v_false : Hash.t)
   line st.ub "if (strncmp(argv[i], \"--infer-cache\", 13) == 0) {";
   st.ub.indent <- st.ub.indent + 1;
   line st.ub
-    "fputs(\"error[E1103]: native binaries do not cache completions yet (the cache entry format \
-     needs task 73's reader); rerun without --infer-cache\\n\", stderr);";
-  line st.ub "return 1;";
+    "jq_diagnostic_fail(1, \"E1103\", \"Native build could not complete\", \"Native binaries do \
+     not cache completions yet because the cache entry format needs the native reader.\", \"Run \
+     without --infer-cache.\");";
   st.ub.indent <- st.ub.indent - 1;
   line st.ub "}";
   line st.ub "const char *nm = NULL;";
@@ -1156,9 +1156,9 @@ let main_source (prog : program) ~precise ~(v_true : Hash.t) ~(v_false : Hash.t)
       line st.ub "}")
     implemented;
   line st.ub
-    "fprintf(stderr, \"error[E1103]: native binaries implement only the console, clock, fs, dist, \
-     and infer grants so far (task 72); cannot grant `%%s`\\n\", nm);";
-  line st.ub "return 1;";
+    "jq_diagnostic_failf(1, \"E1103\", \"Native build could not complete\", \"Use a supported \
+     native grant or run the program with the interpreter.\", \"Native binaries implement only the \
+     console, clock, fs, dist, and infer grants; cannot grant `%%s`.\", nm);";
   st.ub.indent <- st.ub.indent - 1;
   line st.ub "}";
   line st.ub "return jq_run_main(&rt0, jq_program);";

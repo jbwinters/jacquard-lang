@@ -468,13 +468,17 @@ let test_malformed_rows_and_recovery () =
       let recovered = Surface_parse.recover_string ~file:"types.jac" source in
       Alcotest.(check bool)
         (label ^ " reports E1220") true
-        (List.exists (fun diagnostic -> diagnostic.Diag.code = "E1220") recovered.diagnostics))
+        (List.exists
+           (fun diagnostic -> Diag.code_or_uncoded diagnostic = "E1220")
+           recovered.diagnostics))
     cases;
   let legacy = "f : () ->{e} Text\nf = 0\n" in
   let legacy_recovered = Surface_parse.recover_string ~file:"types.jac" legacy in
   Alcotest.(check bool)
     "legacy tail-only row rejected" true
-    (List.exists (fun diagnostic -> diagnostic.Diag.code = "E1220") legacy_recovered.diagnostics);
+    (List.exists
+       (fun diagnostic -> Diag.code_or_uncoded diagnostic = "E1220")
+       legacy_recovered.diagnostics);
   Alcotest.(check string) "legacy tail-only exact recovery" legacy (print_recovered legacy);
   let recovered =
     Surface_parse.recover_string ~file:"types.jac" "broken : () ->{Net\nlater = 42\n"
@@ -482,8 +486,12 @@ let test_malformed_rows_and_recovery () =
   Alcotest.(check (list string))
     "missing brace diagnostic"
     [
-      "types.jac:2:1-6: error[E1220]: expected `}` before the next top-level item";
-      "types.jac:2:1-6: error[E1224]: signature for `broken` cannot attach to definition `later`";
+      "types.jac:2:1-6: error[E1220]: Surface syntax is invalid\n\
+      \  Cause: expected `}` before the next top-level item\n\
+      \  Next step: Correct the syntax at this location and parse the file again.";
+      "types.jac:2:1-6: error[E1224]: A signature is detached from its definition\n\
+      \  Cause: signature for `broken` cannot attach to definition `later`\n\
+      \  Next step: Place the matching definition immediately after its signature.";
     ]
     (List.map Diag.to_string recovered.diagnostics);
   match List.rev recovered.items with
@@ -515,7 +523,9 @@ let test_forall_newline_recovery_and_owners () =
       let recovered = Surface_parse.recover_string ~file:"types.jac" source in
       Alcotest.(check bool)
         (label ^ " rejected") true
-        (List.exists (fun diagnostic -> diagnostic.Diag.code = "E1220") recovered.diagnostics);
+        (List.exists
+           (fun diagnostic -> Diag.code_or_uncoded diagnostic = "E1220")
+           recovered.diagnostics);
       Alcotest.(check string) (label ^ " exact recovery") source (print_recovered source);
       match recovered.items with
       | { Surface_ast.it = Signature (_, annotation); _ } :: _ ->

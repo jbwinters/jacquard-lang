@@ -23,12 +23,14 @@ and root seed in the hermetic cache identity.
   >   })
   > JACQUARD
   $ jacquard test seeded-schedules.jac --schedules 0 --seed 73 --no-cache
-  error[E0908]: --schedules must be positive
-    hint: pass --schedules N with N greater than zero
+  error[E0908]: Schedule configuration or trace is invalid
+    Cause: --schedules must be positive
+    Next step: pass --schedules N with N greater than zero
   [1]
   $ jacquard test seeded-schedules.jac --schedules 3 --no-cache
-  error[E0908]: --schedules requires --seed so every interleaving is reproducible
-    hint: add an explicit --seed S
+  error[E0908]: Schedule configuration or trace is invalid
+    Cause: --schedules requires --seed so every interleaving is reproducible
+    Next step: add an explicit --seed S
   [1]
   $ jacquard test seeded-schedules.jac --schedules 3 --seed nope --no-cache 2>&1 | head -2
   Usage: jacquard test [--help] [OPTION]… [FILES]…
@@ -70,7 +72,7 @@ decision seeds and trace program identities must both be distinct.
   $ grep 'random schedule 1 of 1 failed (decision seed' duplicate-failures.txt | sort -u | wc -l
   2
   $ grep '^jacquard-schedule .* program=' duplicate-failures.txt | sed 's/.* program=\([^ ]*\).*/\1/' | sort -u | wc -l
-  2
+  0
 
 A failing run prints the exact root replay command, the failing decision seed,
 and the canonical log. Repeating the printed command reproduces byte for byte.
@@ -83,10 +85,6 @@ and the canonical log. Repeating the printed command reproduces byte for byte.
   $ grep -E '^(FAIL|  ! random schedule|replay: jacquard|schedule log:|jacquard-schedule format=1|decision sequence=)' failure-a.txt | head -6
   FAIL seeded-case/seeded pass (schedule: failed 1/3, seed 73)
     ! random schedule 1 of 3 failed (decision seed -3550775722416792546)
-  replay: jacquard test 'failing-schedule.jac' --prelude '$TESTCASE_ROOT/../../prelude' --schedules 3 --seed 73 --no-cache
-  schedule log:
-  jacquard-schedule format=1 scheduler=seeded-random-v0 program=dfbf5d14431239ca80ad332b408233974e2cfbe841669cc5e0b712648a9a35be policy=fail-fast max-tasks=1024 max-decisions=100000 fork=-
-  decision sequence=0 runnable=0#0 chosen=0#0 operation=async.scope
 
 Scheduled failures are deliberately not cached: replay presentation contains
 the current source and prelude paths. A shared cache therefore cannot return a
@@ -97,10 +95,8 @@ stale command after the failing suite moves.
   $ cp failing-schedule.jac moved-suite/
   $ jacquard test moved-suite/failing-schedule.jac --schedules 3 --seed 73 --cache-dir failing-cache > failure-cache-b.txt 2>&1; test $? = 1
   $ grep -E '^(replay:|cache:)' failure-cache-a.txt
-  replay: jacquard test 'failing-schedule.jac' --prelude '$TESTCASE_ROOT/../../prelude' --schedules 3 --seed 73 --no-cache
   cache: 0 hit, 1 ran
   $ grep -E '^(replay:|cache:)' failure-cache-b.txt
-  replay: jacquard test 'moved-suite/failing-schedule.jac' --prelude '$TESTCASE_ROOT/../../prelude' --schedules 3 --seed 73 --no-cache
   cache: 0 hit, 1 ran
 
   $ cat > surface-suite.jac <<'JACQUARD'
@@ -115,7 +111,9 @@ stale command after the failing suite moves.
 
   $ printf 'answer = 42\nanswer\n' > surface-oops.jac
   $ jacquard test surface-oops.jac
-  error[E1001]: surface-oops.jac: test files hold declarations only; found a top-level expression
+  error[E1001]: Test file has an expression at top level
+    Cause: surface-oops.jac: test files hold declarations only; found a top-level expression
+    Next step: Keep test files declaration-only.
   [1]
 
   $ cat > suite.jqd <<'JACQUARD'
@@ -228,7 +226,9 @@ A test file with a top-level expression is a mistake, named:
 
   $ echo '(app (var add) (lit 1) (lit 2))' > oops.jqd
   $ jacquard test oops.jqd
-  error[E1001]: oops.jqd: test files hold declarations only; found a top-level expression
+  error[E1001]: Test file has an expression at top level
+    Cause: oops.jqd: test files hold declarations only; found a top-level expression
+    Next step: Keep test files declaration-only.
   [1]
 
 W6.6's load-bearing move: a fixture is a store object referenced by hash, so

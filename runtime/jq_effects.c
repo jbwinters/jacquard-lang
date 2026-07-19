@@ -101,15 +101,13 @@ jq_value jq_perform(jq_rt *rt, uint32_t op_ord, uint16_t n, const jq_value *args
      exit 2) — task 72's run_until_op contract. */
   const jq_op_info *info = op_ord < rt->n_ops ? rt->op_meta[op_ord] : NULL;
   if (rt->lw) {
-    fprintf(stderr,
-            "arithmetic error: error[E0902]: unhandled effect %s: operation `%s` reached "
-            "the root without a handler\n",
-            rt->unhandled_effect_override ? rt->unhandled_effect_override : "?",
-            info ? info->op_name : "?");
-    exit(2);
+    jq_diagnostic_failf(
+        2, "E0902", "Probabilistic inference stopped on a runtime failure.",
+        "Correct the reported model runtime failure and rerun inference.",
+        "unhandled effect %s: operation `%s` reached the root without a handler",
+        rt->unhandled_effect_override ? rt->unhandled_effect_override : "?",
+        info ? info->op_name : "?");
   }
-  fprintf(stderr,
-          "unhandled effect %s: operation `%s` reached the root without a handler\n",
-          info ? info->effect_name : "?", info ? info->op_name : "?");
-  exit(3);
+  jq_runtime_failf(JQ_ERROR_UNHANDLED, "%s: operation `%s` reached the root without a handler",
+                   info ? info->effect_name : "?", info ? info->op_name : "?");
 }

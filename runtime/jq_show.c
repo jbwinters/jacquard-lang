@@ -152,9 +152,8 @@ static bool symbol_ok(const uint8_t *s, uint64_t n) {
    unreachable from checked programs (quote payloads parsed, code.form heads
    validated), so the native rendering of the crash is a plain fatal. */
 static void unprintable(const char *what, const uint8_t *s, uint64_t n) {
-  fprintf(stderr, "jacquard runtime: %s %.*s is not printable\n", what, (int)n,
-          (const char *)s);
-  exit(2);
+  jq_runtime_failf(JQ_ERROR_NATIVE, "jacquard runtime: %s %.*s is not printable", what, (int)n,
+                   (const char *)s);
 }
 
 static void scalar_into(jq_buf *b, uint64_t kind, jq_value datum) {

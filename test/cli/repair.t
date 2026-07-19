@@ -35,8 +35,9 @@ posterior itself needs eval, which Warp's closed {check} row cannot grant.
   _ : Text
   == without the grant the pure prefix runs; the first posterior refuses ==
   8
-  error[E0814]: this program requires eval [meta/high] — run code constructed or loaded at runtime, which is not granted (performed via `posterior-over-patches`)
-    hint: grant it with --allow eval, or handle the effect in the program
+  error[E0814]: The program requires an effect that was not granted
+    Cause: This program requires eval [meta/high] — run code constructed or loaded at runtime, which is not granted (performed via `posterior-over-patches`).
+    Next step: grant it with --allow eval, or handle the effect in the program
   exit code: 3
   == the granted run: mutant count, posteriors, and the MAP patch ==
   8

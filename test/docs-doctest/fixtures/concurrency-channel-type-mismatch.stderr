@@ -1,1 +1,3 @@
-fixtures/concurrency-channel-type-mismatch.jac:12:1-59: error[E0804]: equation definition `send-text-to-int` does not match its signature: expected (channel-handle int) ->{channel} result channel-error (), got (channel-handle text) ->{channel | e} result channel-error () (type mismatch)
+fixtures/concurrency-channel-type-mismatch.jac:12:1-59: error[E0804]: The value does not satisfy its annotation
+  Cause: equation definition `send-text-to-int` does not match its signature: expected (channel-handle int) ->{channel} result channel-error (), got (channel-handle text) ->{channel | e} result channel-error () (type mismatch)
+  Next step: Change the value or its annotation so the two types agree.

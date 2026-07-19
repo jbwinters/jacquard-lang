@@ -39,7 +39,9 @@ gate. The exact current evidence is E0301 and exit 1; the durable acceptance tar
   > pair.left(Pair(1, 2))
   > EOF
   $ jac run no-generated-accessor.jac > accessor.out 2>&1; status=$?; cat accessor.out; echo "exit:$status"
-  no-generated-accessor.jac:2:1-10: error[E0301]: unknown name `pair.left`
+  no-generated-accessor.jac:2:1-10: error[E0301]: This reference names something that is not in scope.
+    Cause: No name named `pair.left` is in scope.
+    Next step: Correct the reference to an in-scope name or declaration.
   exit:1
 
 The surface formatter preserves trivia, applies B1/B5, and is idempotent.
@@ -79,7 +81,7 @@ manual hoist. The warning is emitted on stderr and formatting remains successful
   > EOF
   $ jac fmt large.jac > large-formatted.jac 2> large.err
   $ grep 'warning\[W1203\]' large.err
-  large.jac:1:7-5:2: warning[W1203]: this match scrutinee spans 5 lines; scrutinees longer than 4 lines are difficult to review
+  large.jac:1:7-5:2: warning[W1203]: Match scrutinee is difficult to review
   $ head -1 large-formatted.jac
   match add(1, 2, 3) {
 
@@ -100,14 +102,17 @@ retain the later valid declaration before exiting nonzero.
   $ cp ../../corpus/surface/dx3/malformed/missing-quote.jac dx3/missing-quote.jac
   $ jac fmt dx3/missing-quote.jac > dx3/malformed.out 2> dx3/malformed.err; status=$?; wc -c < dx3/malformed.out; cat dx3/malformed.err; echo "exit:$status"
   0
-  dx3/missing-quote.jac:6:1-10: error[E1221]: unclosed `quote`: expected `}` before ident(later-bad)
-    hint: the `quote` expression opened at dx3/missing-quote.jac:1:10-15
+  dx3/missing-quote.jac:6:1-10: error[E1221]: A delimited construct is not closed
+    Cause: unclosed `quote`: expected `}` before ident(later-bad) The `quote` expression opened at dx3/missing-quote.jac:1:10-15.
+    Next step: Close the construct with the expected delimiter.
   exit:1
   $ jac check dx3/missing-quote.jac --print-sigs > dx3/check.out 2>&1; status=$?; cat dx3/check.out; echo "exit:$status"
-  dx3/missing-quote.jac:6:1-10: error[E1221]: unclosed `quote`: expected `}` before ident(later-bad)
-    hint: the `quote` expression opened at dx3/missing-quote.jac:1:10-15
-  dx3/missing-quote.jac:6:16-17: error[E0801]: if condition: expected int, got bool (type mismatch)
-    hint: the expected side comes from the surrounding context; make both sides agree
+  dx3/missing-quote.jac:6:1-10: error[E1221]: A delimited construct is not closed
+    Cause: unclosed `quote`: expected `}` before ident(later-bad) The `quote` expression opened at dx3/missing-quote.jac:1:10-15.
+    Next step: Close the construct with the expected delimiter.
+  dx3/missing-quote.jac:6:16-17: error[E0801]: Types do not agree
+    Cause: if condition: expected int, got bool (type mismatch)
+    Next step: the expected side comes from the surrounding context; make both sides agree
   broken : forall a. a
   later-good : Int
   exit:1
@@ -180,10 +185,14 @@ Malformed source and file/store operand mistakes produce diagnostics with exit 1
   exit:1
   $ mkdir one-store
   $ jac diff old.jac one-store > mixed.out 2>&1; status=$?; cat mixed.out; echo "exit:$status"
-  error[E0609]: cannot compare a source file with a store directory; pass two files or two stores
+  error[E0609]: Semantic diff input could not be read
+    Cause: cannot compare a source file with a store directory; pass two files or two stores
+    Next step: Pass readable, valid semantic-diff inputs.
   exit:1
   $ jac diff missing.jac old.jac > missing.out 2>&1; status=$?; cat missing.out; echo "exit:$status"
-  error[E0606]: diff operand missing.jac does not exist
+  error[E0606]: Requested store is unavailable
+    Cause: diff operand missing.jac does not exist
+    Next step: Pass the path to an existing Jacquard store.
   exit:1
 
 Store diff keeps its established bootstrap default and offers explicit surface rendering.

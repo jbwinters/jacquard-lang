@@ -6,65 +6,78 @@ let read kind name = Corpus_support.read_file (fixture kind name)
 let recover name = Surface_parse.recover_string ~file:name (read "malformed" name)
 let rendered recovered = List.map Diag.to_string recovered.Surface_ast.diagnostics
 
+let expected_diagnostic span code summary cause next_step =
+  Printf.sprintf "%s: error[%s]: %s\n  Cause: %s\n  Next step: %s" span code summary cause next_step
+
+let e1220 span cause =
+  expected_diagnostic span "E1220" "Surface syntax is invalid" cause
+    "Correct the syntax at this location and parse the file again."
+
+let e1221 span cause =
+  expected_diagnostic span "E1221" "A delimited construct is not closed" cause
+    "Close the construct with the expected delimiter."
+
 let malformed_goldens =
   [
     ( "missing-quote.jac",
       [
-        "missing-quote.jac:6:1-10: error[E1221]: unclosed `quote`: expected `}` before \
-         ident(later-bad)\n\
-        \  hint: the `quote` expression opened at missing-quote.jac:1:10-15";
+        e1221 "missing-quote.jac:6:1-10"
+          "unclosed `quote`: expected `}` before ident(later-bad) The `quote` expression opened at \
+           missing-quote.jac:1:10-15.";
       ] );
     ( "missing-match.jac",
       [
-        "missing-match.jac:4:1-10: error[E1221]: unclosed `match`: expected `}` before the next \
-         top-level item\n\
-        \  hint: the `match` expression opened at missing-match.jac:1:10-15";
+        e1221 "missing-match.jac:4:1-10"
+          "unclosed `match`: expected `}` before the next top-level item The `match` expression \
+           opened at missing-match.jac:1:10-15.";
       ] );
     ( "missing-handler.jac",
       [
-        "missing-handler.jac:4:1-10: error[E1221]: unclosed `handle`: expected `}` before the next \
-         top-level item\n\
-        \  hint: the `handle` expression opened at missing-handler.jac:1:16-22";
+        e1221 "missing-handler.jac:4:1-10"
+          "unclosed `handle`: expected `}` before the next top-level item The `handle` expression \
+           opened at missing-handler.jac:1:16-22.";
       ] );
     ( "missing-block.jac",
       [
-        "missing-block.jac:4:1-10: error[E1221]: unclosed block: expected `}` before the next \
-         top-level item\n\
-        \  hint: the block opened at missing-block.jac:1:10-11";
+        e1221 "missing-block.jac:4:1-10"
+          "unclosed block: expected `}` before the next top-level item The block opened at \
+           missing-block.jac:1:10-11.";
       ] );
-    ( "extra-delimiter.jac",
-      [ "extra-delimiter.jac:2:1-2: error[E1220]: unmatched `}` at top level" ] );
+    ("extra-delimiter.jac", [ e1220 "extra-delimiter.jac:2:1-2" "unmatched `}` at top level" ]);
     ( "eof-nested.jac",
       [
-        "eof-nested.jac:5:1-1: error[E1221]: unclosed `quote`: expected `}` after the quoted \
-         expression\n\
-        \  hint: the `quote` expression opened at eof-nested.jac:1:17-22";
+        e1221 "eof-nested.jac:5:1-1"
+          "unclosed `quote`: expected `}` after the quoted expression The `quote` expression \
+           opened at eof-nested.jac:1:17-22.";
       ] );
     ( "missing-if-keyword.jac",
       [
-        "missing-if-keyword.jac:1:18-19: error[E1220]: unclosed `if`: expected `then` after the \
-         condition, found int(1)\n\
-        \  hint: the `if` expression opened at missing-if-keyword.jac:1:10-12";
+        e1220 "missing-if-keyword.jac:1:18-19"
+          "unclosed `if`: expected `then` after the condition, found int(1) The `if` expression \
+           opened at missing-if-keyword.jac:1:10-12.";
       ] );
     ( "mismatched-quote.jac",
       [
-        "mismatched-quote.jac:1:28-29: error[E1221]: unclosed `quote`: expected `}`, found ]\n\
-        \  hint: the `quote` expression opened at mismatched-quote.jac:1:15-20";
+        e1221 "mismatched-quote.jac:1:28-29"
+          "unclosed `quote`: expected `}`, found ] The `quote` expression opened at \
+           mismatched-quote.jac:1:15-20.";
       ] );
     ( "mismatched-match.jac",
       [
-        "mismatched-match.jac:3:1-2: error[E1221]: unclosed `match`: expected `}`, found ]\n\
-        \  hint: the `match` expression opened at mismatched-match.jac:1:15-20";
+        e1221 "mismatched-match.jac:3:1-2"
+          "unclosed `match`: expected `}`, found ] The `match` expression opened at \
+           mismatched-match.jac:1:15-20.";
       ] );
     ( "mismatched-handler.jac",
       [
-        "mismatched-handler.jac:3:1-2: error[E1221]: unclosed `handle`: expected `}`, found ]\n\
-        \  hint: the `handle` expression opened at mismatched-handler.jac:1:21-27";
+        e1221 "mismatched-handler.jac:3:1-2"
+          "unclosed `handle`: expected `}`, found ] The `handle` expression opened at \
+           mismatched-handler.jac:1:21-27.";
       ] );
     ( "mismatched-block.jac",
       [
-        "mismatched-block.jac:3:1-2: error[E1221]: unclosed block: expected `}`, found ]\n\
-        \  hint: the block opened at mismatched-block.jac:1:15-16";
+        e1221 "mismatched-block.jac:3:1-2"
+          "unclosed block: expected `}`, found ] The block opened at mismatched-block.jac:1:15-16.";
       ] );
   ]
 
@@ -81,7 +94,7 @@ let test_exact_construct_goldens_and_strictness () =
       | Error _ -> (
           let marker_only = { recovered with Surface_ast.diagnostics = [] } in
           match Surface_parse.strict_file marker_only with
-          | Error [ { Diag.code = "E1202"; _ } ] -> ()
+          | Error [ diagnostic ] when Diag.code diagnostic = Some "E1202" -> ()
           | Error diagnostics ->
               Eval_support.fail_diags (name ^ " marker-only strict boundary") diagnostics
           | Ok _ -> Alcotest.failf "%s marker was accepted after diagnostics were removed" name)
@@ -117,7 +130,7 @@ let test_later_top_level_checking_is_bounded () =
     (fun name ->
       let store, context = make_check_context () in
       let report = Surface_check.analyze ~names:(Store.names_view store) context (recover name) in
-      let codes = List.map (fun diagnostic -> diagnostic.Diag.code) report.diagnostics in
+      let codes = List.map (fun diagnostic -> Diag.code_or_uncoded diagnostic) report.diagnostics in
       Alcotest.(check int)
         (name ^ " has one primary syntax diagnostic")
         1

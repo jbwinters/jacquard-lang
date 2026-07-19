@@ -1,2 +1,3 @@
-fixtures/tutorial-nonexhaustive.jac:1:17-18: error[E0813]: this match is not exhaustive: it misses false
-  hint: add a clause matching the witness, or a (pwild) default
+fixtures/tutorial-nonexhaustive.jac:1:17-18: error[E0813]: This match is not exhaustive
+  Cause: this match is not exhaustive: it misses false
+  Next step: Add a clause matching the witness or a wildcard default.

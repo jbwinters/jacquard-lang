@@ -78,8 +78,36 @@ exception Bug_lex_error of Diag.t
 let pos state = { Span.line = state.line; col = state.col; offset = state.off }
 let span state start_pos = Span.make ~file:state.file ~start_pos ~end_pos:(pos state)
 
-let fail state start_pos code message =
-  raise (Bug_lex_error (Diag.error ~span:(span state start_pos) ~code message))
+let diagnostic_summary = function
+  | "E1210" -> "The source contains an unexpected surface character."
+  | "E1211" -> "A surface identifier is malformed."
+  | "E1212" -> "A surface numeric literal is malformed or too large."
+  | "E1213" -> "A surface string literal is not closed."
+  | "E1214" -> "A surface string contains an invalid escape."
+  | "E1215" -> "A kind-tagged escaped name is malformed."
+  | "E1216" -> "A kind-tagged hash reference is malformed."
+  | "E1217" -> "An internal group reference is malformed."
+  | "E1218" -> "A surface string contains invalid UTF-8."
+  | code -> raise (Diag.Bug_invalid_diagnostic ("unknown surface lexer code " ^ code))
+
+let diagnostic_next_step = function
+  | "E1210" -> "Remove the character or replace it with valid surface syntax."
+  | "E1211" -> "Rewrite the identifier using the surface name grammar or a kind-tagged escape."
+  | "E1212" -> "Rewrite the value as one valid supported integer or real literal."
+  | "E1213" -> "Close the string with a double quote before the end of the line or file."
+  | "E1214" -> "Replace the escape with one supported by surface strings."
+  | "E1215" -> "Use a valid term, con, or op kind tag and close the escaped name."
+  | "E1216" -> "Write a full lowercase hash followed by a valid reference-kind suffix."
+  | "E1217" -> "Write the internal reference as #group followed by a non-negative index."
+  | "E1218" -> "Replace the invalid bytes with valid UTF-8 text."
+  | code -> raise (Diag.Bug_invalid_diagnostic ("unknown surface lexer code " ^ code))
+
+let fail state start_pos code cause =
+  raise
+    (Bug_lex_error
+       (Diag.error ~span:(span state start_pos) ~domain:Surface ~code
+          ~summary:(diagnostic_summary code) ~cause ~next_step:(diagnostic_next_step code)
+          ~contrast:None ()))
 
 let peek state = if state.off < String.length state.src then Some state.src.[state.off] else None
 
@@ -540,14 +568,15 @@ let recover_after_error state start_pos start_char diagnostic =
   match start_char with
   | Some '"' ->
       let after_offset =
-        if diagnostic.Diag.code = "E1213" then start_pos.Span.offset
+        if Diag.code diagnostic = Some "E1213" then start_pos.Span.offset
         else
-          match diagnostic.span with
+          match Diag.span diagnostic with
           | Some error_span -> error_span.Span.end_pos.offset
           | None -> state.off
       in
       resynchronize_string state start_pos ~after_offset;
-      if diagnostic.Diag.code = "E1213" then { diagnostic with span = Some (span state start_pos) }
+      if Diag.code diagnostic = Some "E1213" then
+        Diag.with_span (Some (span state start_pos)) diagnostic
       else diagnostic
   | _ ->
       (if state.off = start_pos.Span.offset then
@@ -570,7 +599,7 @@ let lex_recover ~file src : recovery =
     | token -> loop (token :: tokens) diagnostics
     | exception Bug_lex_error diagnostic ->
         let diagnostic = recover_after_error state start_pos start_char diagnostic in
-        let invalid_span = Option.value diagnostic.Diag.span ~default:(span state start_pos) in
+        let invalid_span = Option.value (Diag.span diagnostic) ~default:(span state start_pos) in
         let invalid = { token = Invalid diagnostic; span = invalid_span } in
         ignore (update_context state invalid);
         loop (invalid :: tokens) (diagnostic :: diagnostics)
@@ -607,7 +636,7 @@ let show_token = function
   | Semi -> ";"
   | Newline -> "newline"
   | RawCandidate { closed; _ } -> if closed then "raw-candidate" else "raw-candidate(unclosed)"
-  | Invalid diagnostic -> "invalid(" ^ diagnostic.Diag.code ^ ")"
+  | Invalid diagnostic -> "invalid(" ^ Option.value ~default:"uncoded" (Diag.code diagnostic) ^ ")"
   | Eof -> "eof"
 
 let show located = Printf.sprintf "%s %s" (Span.to_string located.span) (show_token located.token)

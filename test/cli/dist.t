@@ -17,8 +17,9 @@ value; the seed makes runs reproducible.
 Without the grant, the manifest refuses to start (exit 3):
 
   $ jacquard run die.jqd
-  error[E0814]: this program requires dist [uncertainty/none] — denote and condition finite possibilities, which is not granted (performed via `sample`)
-    hint: grant it with --allow dist, or handle the effect in the program
+  error[E0814]: The program requires an effect that was not granted
+    Cause: This program requires dist [uncertainty/none] — denote and condition finite possibilities, which is not granted (performed via `sample`).
+    Next step: grant it with --allow dist, or handle the effect in the program
   [3]
 
 Observe reaching the sampling root is a defect (decision D7's default): jacquard
@@ -29,7 +30,9 @@ run cannot condition, only jacquard infer can.
   > JACQUARD
 
   $ jacquard run obs.jqd --allow dist --seed 1
-  error[E0904]: observe reached the sampling root handler; observation requires an inference driver (use jacquard infer)
+  error[E0904]: Observation is invalid at the sampling root
+    Cause: observe reached the sampling root handler; observation requires an inference driver (use jacquard infer)
+    Next step: Move the observation under an inference handler.
   [2]
 
 The die model runs unchanged under exact enumeration — same program, different

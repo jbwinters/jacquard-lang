@@ -23,5 +23,7 @@ Example 10 (content addressing):
 Diffing a store that does not exist is an error, not an empty result:
 
   $ jacquard diff lib-v1 nowhere
-  error[E0606]: store nowhere does not exist
+  error[E0606]: Requested store is unavailable
+    Cause: store nowhere does not exist
+    Next step: Pass the path to an existing Jacquard store.
   [1]

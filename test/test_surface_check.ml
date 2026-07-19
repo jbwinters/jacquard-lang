@@ -25,10 +25,12 @@ let analyze_with ?(file = "surface-check.jac") ~names context source =
   Surface_check.analyze ~names context (Surface_parse.recover_string ~file source)
 
 let codes report =
-  List.map (fun diagnostic -> diagnostic.Diag.code) report.Surface_check.diagnostics
+  List.map (fun diagnostic -> Diag.code_or_uncoded diagnostic) report.Surface_check.diagnostics
 
 let diagnostics code report =
-  List.filter (fun diagnostic -> diagnostic.Diag.code = code) report.Surface_check.diagnostics
+  List.filter
+    (fun diagnostic -> Diag.code_or_uncoded diagnostic = code)
+    report.Surface_check.diagnostics
 
 let contains needle text =
   let rec loop index =
@@ -41,54 +43,58 @@ let signature_names report = List.map fst report.Surface_check.signatures
 
 let diagnostic_golden diagnostic =
   let severity =
-    match diagnostic.Diag.severity with Error -> "error" | Warning -> "warning" | Info -> "info"
+    match Diag.severity diagnostic with Error -> "error" | Warning -> "warning" | Info -> "info"
   in
-  Printf.sprintf "%s|%s|%s|%s|%s" severity diagnostic.code
-    (Option.fold ~none:"<none>" ~some:Span.to_string diagnostic.span)
-    diagnostic.message
-    (Option.value ~default:"<none>" diagnostic.hint)
+  Printf.sprintf "%s|%s|%s|%s|%s|%s" severity (Diag.code_or_uncoded diagnostic)
+    (Option.fold ~none:"<none>" ~some:Span.to_string (Diag.span diagnostic))
+    (Diag.summary diagnostic) (Diag.cause diagnostic) (Diag.next_step diagnostic)
 
 let report_golden report = List.map diagnostic_golden report.Surface_check.diagnostics
+
+let expected_golden severity code span summary cause next_step =
+  String.concat "|" [ severity; code; span; summary; cause; next_step ]
+
+let e1210 span cause =
+  expected_golden "error" "E1210" span "The source contains an unexpected surface character." cause
+    "Remove the character or replace it with valid surface syntax."
+
+let e1220 span cause =
+  expected_golden "error" "E1220" span "Surface syntax is invalid" cause
+    "Correct the syntax at this location and parse the file again."
 
 let test_hole_kinds_and_independent_islands () =
   let cases =
     [
       ( "expression",
         "broken = @\nlater = 42\n",
-        [ "error|E1210|expression.jac:1:10-11|unexpected surface character `@`|<none>" ] );
+        [ e1210 "expression.jac:1:10-11" "unexpected surface character `@`" ] );
       ( "pattern",
         "broken = match True { | @ -> 0 | _ -> 1 }\nlater = 42\n",
-        [ "error|E1210|pattern.jac:1:25-26|unexpected surface character `@`|<none>" ] );
+        [ e1210 "pattern.jac:1:25-26" "unexpected surface character `@`" ] );
       ( "type",
         "broken : @\nbroken = 1\nlater = 42\n",
         [
-          "error|E1210|type.jac:1:10-11|unexpected surface character `@`|<none>";
-          "error|E1220|type.jac:1:10-11|expected a type, found invalid(E1210)|<none>";
+          e1210 "type.jac:1:10-11" "unexpected surface character `@`";
+          e1220 "type.jac:1:10-11" "expected a type, found invalid(E1210)";
         ] );
-      ( "top",
-        "@\nlater = 42\n",
-        [ "error|E1210|top.jac:1:1-2|unexpected surface character `@`|<none>" ] );
+      ("top", "@\nlater = 42\n", [ e1210 "top.jac:1:1-2" "unexpected surface character `@`" ]);
       ( "nested",
         "broken = [1, if @ then 2 else 3]\nlater = 42\n",
-        [ "error|E1210|nested.jac:1:17-18|unexpected surface character `@`|<none>" ] );
+        [ e1210 "nested.jac:1:17-18" "unexpected surface character `@`" ] );
       ( "structural",
         "broken = match True {}\nlater = 42\n",
         [
-          "error|E0209|structural.jac:1:10-23|`match` requires at least one clause|<none>";
-          "error|E1220|structural.jac:1:22-23|a `match` requires at least one arm|<none>";
+          expected_golden "error" "E0209" "structural.jac:1:10-23"
+            "A match expression has no clauses." "`match` requires at least one clause"
+            "Add at least one match clause.";
+          e1220 "structural.jac:1:22-23" "a `match` requires at least one arm";
         ] );
       ( "row-missing-tail",
         "broken : () ->{|} Int\nbroken() = 1\nlater = 42\n",
-        [
-          "error|E1220|row-missing-tail.jac:1:17-18|expected a lowercase row variable after \
-           `|`|<none>";
-        ] );
+        [ e1220 "row-missing-tail.jac:1:17-18" "expected a lowercase row variable after `|`" ] );
       ( "row-trailing-comma",
         "broken : () ->{Net,} Int\nbroken() = 1\nlater = 42\n",
-        [
-          "error|E1220|row-trailing-comma.jac:1:20-21|effect rows do not permit a trailing \
-           comma|<none>";
-        ] );
+        [ e1220 "row-trailing-comma.jac:1:20-21" "effect rows do not permit a trailing comma" ] );
     ]
   in
   List.iter
@@ -110,7 +116,7 @@ let test_malformed_row_checks_as_any_row () =
   in
   Alcotest.(check (list string))
     "only the primary malformed-row diagnostic"
-    [ "error|E1220|row-any.jac:1:20-21|effect rows do not permit a trailing comma|<none>" ]
+    [ e1220 "row-any.jac:1:20-21" "effect rows do not permit a trailing comma" ]
     (report_golden report);
   Alcotest.(check (list string))
     "surrounding declarations still check" [ "takes"; "quiet"; "_" ] (signature_names report)
@@ -120,9 +126,10 @@ let test_primary_plus_later_type_error () =
   Alcotest.(check (list string))
     "exact primary plus independent follow-on"
     [
-      "error|E1210|bounded.jac:1:10-11|unexpected surface character `@`|<none>";
-      "error|E0801|bounded.jac:2:4-5|if condition: expected int, got bool (type mismatch)|the \
-       expected side comes from the surrounding context; make both sides agree";
+      e1210 "bounded.jac:1:10-11" "unexpected surface character `@`";
+      expected_golden "error" "E0801" "bounded.jac:2:4-5" "Types do not agree"
+        "if condition: expected int, got bool (type mismatch)"
+        "the expected side comes from the surrounding context; make both sides agree";
     ]
     (report_golden report);
   Alcotest.(check bool) "later good island checked" true (List.mem "good" (signature_names report))
@@ -209,12 +216,11 @@ let test_handler_row_annotation_conflict_recipe () =
   in
   match diagnostics "E0804" bad with
   | [ diagnostic ] ->
-      Alcotest.(check (option string))
+      Alcotest.(check string)
         "handler conflict gives a compiling row recipe"
-        (Some
-           "include the handled effect on the callback row, for example `() ->{Abort | e} a`; the \
-            handler removes it from the outer row")
-        diagnostic.Diag.hint
+        "include the handled effect on the callback row, for example `() ->{Abort | e} a`; the \
+         handler removes it from the outer row"
+        (Diag.next_step diagnostic)
   | diagnostics ->
       Alcotest.failf "expected one E0804, got %d: %s" (List.length diagnostics)
         (String.concat "; " (List.map Diag.to_string bad.diagnostics))
@@ -273,20 +279,26 @@ let test_surface_wording_and_spans () =
     [
       ( "if",
         "if 1 then 2 else 3\n",
-        "error|E0801|wording.jac:1:4-5|if condition: expected int, got bool (type mismatch)|the \
-         expected side comes from the surrounding context; make both sides agree" );
+        expected_golden "error" "E0801" "wording.jac:1:4-5" "Types do not agree"
+          "if condition: expected int, got bool (type mismatch)"
+          "the expected side comes from the surrounding context; make both sides agree" );
       ( "list",
         "[1, \"x\"]\n",
-        "error|E0801|wording.jac:1:1-9|list elements: expected list int, got list text (type \
-         mismatch)|the expected side comes from the surrounding context; make both sides agree" );
+        expected_golden "error" "E0801" "wording.jac:1:1-9" "Types do not agree"
+          "list elements: expected list int, got list text (type mismatch)"
+          "the expected side comes from the surrounding context; make both sides agree" );
       ( "pipe",
         "1 |> 2\n",
-        "error|E0802|wording.jac:1:6-7|the `|>` right-hand side has type int, which is not a \
-         function|the right-hand side of `|>` must be callable" );
+        expected_golden "error" "E0802" "wording.jac:1:6-7" "This value is not callable"
+          "the `|>` right-hand side has type int, which is not a function"
+          "Make the right-hand side of `|>` callable." );
       ( "equation",
         "identity : (Int) ->{} Text\nidentity(value) = value\n",
-        "error|E0804|wording.jac:2:1-24|equation definition `identity` does not match its \
-         signature: expected (int) ->{} text, got (int) ->{} int (type mismatch)|<none>" );
+        expected_golden "error" "E0804" "wording.jac:2:1-24"
+          "The value does not satisfy its annotation"
+          "equation definition `identity` does not match its signature: expected (int) ->{} text, \
+           got (int) ->{} int (type mismatch)"
+          "Change the value or its annotation so the two types agree." );
     ]
   in
   List.iter
@@ -299,10 +311,12 @@ let test_surface_wording_and_spans () =
 let test_eta_guidance_matrix () =
   let positive_source = "condition = True\nbool.and-then(True, condition)\n" in
   let positive = one_error "E0807" positive_source in
-  Alcotest.(check bool) "targeted wording" true (contains "wrap it in `fn () ->" positive.message);
+  Alcotest.(check bool)
+    "targeted wording" true
+    (contains "wrap it in `fn () ->" (Diag.cause positive));
   Alcotest.(check (option string))
     "bare reference span" (Some "wording.jac:2:21-30")
-    (Option.map Span.to_string positive.span);
+    (Option.map Span.to_string (Diag.span positive));
   let thunked = analyze "bool.and-then(True, fn () -> bool.not(True))\n" in
   Alcotest.(check bool) "already thunked does not fire" false (List.mem "E0807" (codes thunked));
   let arbitrary = analyze "bool.and(True, bool.not)\n" in
@@ -338,9 +352,11 @@ let test_eta_exact_positive_and_negatives () =
   Alcotest.(check (list string))
     "positive golden"
     [
-      "error|E0807|eta-positive.jac:2:21-30|this position expects a thunk, but `condition` is a \
-       bare reference; wrap it in `fn () -> ...`|wrap the reference in `fn () -> ...` so the \
-       computation is delayed";
+      expected_golden "error" "E0807" "eta-positive.jac:2:21-30"
+        "A computation was used where a thunk is required"
+        "this position expects a thunk, but `condition` is a bare reference; wrap it in `fn () -> \
+         ...`"
+        "Wrap the reference in `fn () -> ...` so the computation is delayed.";
     ]
     (report_golden positive);
   let store, context = make () in
@@ -400,9 +416,11 @@ let test_eta_exact_positive_and_negatives () =
   Alcotest.(check (list string))
     "effectful expected thunk diagnostic"
     [
-      "error|E0807|effectful-eta.jac:4:7-16|this position expects a thunk, but `condition` is a \
-       bare reference; wrap it in `fn () -> ...`|wrap the reference in `fn () -> ...` so the \
-       computation is delayed";
+      expected_golden "error" "E0807" "effectful-eta.jac:4:7-16"
+        "A computation was used where a thunk is required"
+        "this position expects a thunk, but `condition` is a bare reference; wrap it in `fn () -> \
+         ...`"
+        "Wrap the reference in `fn () -> ...` so the computation is delayed.";
     ]
     (report_golden effectful_expected);
   let repaired =
@@ -429,7 +447,8 @@ let test_raw_jqd_eta_stability () =
             | Ok expression -> Check.check_top context (Kernel.Expr expression)))
   in
   match result with
-  | Error [ diagnostic ] -> Alcotest.(check string) "raw code unchanged" "E0801" diagnostic.code
+  | Error [ diagnostic ] ->
+      Alcotest.(check string) "raw code unchanged" "E0801" (Diag.code_or_uncoded diagnostic)
   | Error diagnostics -> fail_diags "raw eta check" diagnostics
   | Ok _ -> Alcotest.fail "raw eta mismatch unexpectedly checked"
 
@@ -470,15 +489,11 @@ let test_wide_pattern_boundary_and_coexistence () =
   let wide = analyze "match 1 { | Five(a, b, c, d, e) -> 0 | _ -> 1 }\n" in
   (match diagnostics "W1202" wide with
   | [ warning ] ->
-      Alcotest.(check bool) "wide is warning" true (warning.severity = Diag.Warning);
+      Alcotest.(check bool) "wide is warning" true (Diag.severity warning = Diag.Warning);
       Alcotest.(check bool)
         "bounded guidance" true
-        (Option.fold ~none:false
-           ~some:(fun hint ->
-             contains "D36" hint
-             && contains "labeled constructor patterns unavailable" hint
-             && contains "four fields or fewer" hint)
-           warning.hint)
+        (contains "labeled constructor patterns are not available" (Diag.cause warning)
+        && contains "four fields or fewer" (Diag.next_step warning))
   | found -> Alcotest.failf "expected one wide warning, got %d" (List.length found));
   let boundary = analyze "match 1 { | Four(a, b, c, d) -> 0 | _ -> 1 }\n" in
   Alcotest.(check int) "four is allowed" 0 (List.length (diagnostics "W1202" boundary));
@@ -486,7 +501,7 @@ let test_wide_pattern_boundary_and_coexistence () =
   Alcotest.(check bool)
     "warning survives errors" true
     (List.mem "W1202" (codes both)
-    && List.exists (fun d -> d.Diag.severity = Diag.Error) both.diagnostics)
+    && List.exists (fun d -> Diag.severity d = Diag.Error) both.diagnostics)
 
 let test_large_match_scrutinee_lint_boundary () =
   let lint source =
@@ -498,24 +513,22 @@ let test_large_match_scrutinee_lint_boundary () =
   let boundary = "match f(\n  1,\n  2\n) { | _ -> 0 }\n" in
   Alcotest.(check int)
     "exact four-line boundary is inclusive" 0
-    (List.length (List.filter (fun d -> d.Diag.code = "W1203") (lint boundary)));
+    (List.length (List.filter (fun d -> Diag.code_or_uncoded d = "W1203") (lint boundary)));
   let large = "match f(\n  1,\n  2,\n  3\n) { | _ -> 0 }\n" in
-  match List.filter (fun d -> d.Diag.code = "W1203") (lint large) with
+  match List.filter (fun d -> Diag.code_or_uncoded d = "W1203") (lint large) with
   | [ warning ] ->
-      Alcotest.(check bool) "large is warning" true (warning.severity = Diag.Warning);
+      Alcotest.(check bool) "large is warning" true (Diag.severity warning = Diag.Warning);
       Alcotest.(check string)
         "first warning reports five source lines"
-        "this match scrutinee spans 5 lines; scrutinees longer than 4 lines are difficult to review"
-        warning.message;
+        "This match scrutinee spans 5 lines; scrutinees longer than 4 lines obscure the branch \
+         conditions."
+        (Diag.cause warning);
       Alcotest.(check (option string))
         "scrutinee span" (Some "scrutinee.jac:1:7-5:2")
-        (Option.map Span.to_string warning.span);
+        (Option.map Span.to_string (Diag.span warning));
       Alcotest.(check bool)
         "manual-only guidance" true
-        (Option.fold ~none:false
-           ~some:(fun hint ->
-             contains "introduce a `let` binding" hint && contains "never hoists" hint)
-           warning.hint)
+        (contains "Bind the expression with `let`" (Diag.next_step warning))
   | found -> Alcotest.failf "expected one scrutinee warning, got %d" (List.length found)
 
 let test_warning_exact_order_nested_raw_and_redundancy () =
@@ -533,14 +546,21 @@ let test_warning_exact_order_nested_raw_and_redundancy () =
   Alcotest.(check (list string))
     "exact warning/error golden"
     [
-      "warning|W0801|warnings.jac:1:23-31|this clause is redundant: earlier clauses match \
-       everything it does|<none>";
-      "error|E0301|warnings.jac:2:16-44|unknown constructor `missing`|<none>";
-      "warning|W1202|warnings.jac:2:24-43|this positional constructor pattern has 5 fields; \
-       labeled constructor patterns are the future fix|D36 keeps labeled constructor patterns \
-       unavailable for now; keep positional matches to four fields or fewer";
-      "error|E0802|warnings.jac:3:6-7|the `|>` right-hand side has type int, which is not a \
-       function|the right-hand side of `|>` must be callable";
+      expected_golden "warning" "W0801" "warnings.jac:1:23-31" "This match clause is redundant"
+        "Earlier clauses match every value this clause can match."
+        "Remove the redundant clause or narrow an earlier pattern.";
+      expected_golden "error" "E0301" "warnings.jac:2:16-44"
+        "This reference names something that is not in scope."
+        "No constructor named `missing` is in scope."
+        "Correct the reference to an in-scope name or declaration.";
+      expected_golden "warning" "W1202" "warnings.jac:2:24-43"
+        "Constructor pattern is difficult to review"
+        "This positional constructor pattern has 5 fields; labeled constructor patterns are not \
+         available in 0.1."
+        "Keep positional constructor patterns to four fields or fewer.";
+      expected_golden "error" "E0802" "warnings.jac:3:6-7" "This value is not callable"
+        "the `|>` right-hand side has type int, which is not a function"
+        "Make the right-hand side of `|>` callable.";
     ]
     rendered;
   let nested = analyze "match 1 { | Outer(Five(a, b, c, d, e)) -> 0 | _ -> 1 }\n" in
@@ -575,7 +595,8 @@ let test_analysis_isolation_repeatability_and_concurrency () =
   let synthetic = Hash.of_string "surface-recovery-member:0:0:a" in
   let forged = Kernel.{ it = Ref (synthetic, Term); meta = Meta.empty } in
   (match Check.check_top context (Kernel.Expr forged) with
-  | Error [ diagnostic ] -> Alcotest.(check string) "forged synthetic ref" "E0805" diagnostic.code
+  | Error [ diagnostic ] ->
+      Alcotest.(check string) "forged synthetic ref" "E0805" (Diag.code_or_uncoded diagnostic)
   | Error diagnostics -> fail_diags "forged synthetic ref" diagnostics
   | Ok _ -> Alcotest.fail "forged synthetic ref reached the caller cache");
   let strict = Kernel.{ it = Lit (LInt 1); meta = Meta.empty } in
@@ -604,7 +625,8 @@ let test_semantic_boundaries_reject_nested_markers () =
   let _, checker = make () in
   let store = Check.store checker in
   let expect_e1202 label = function
-    | Error [ diagnostic ] -> Alcotest.(check string) label "E1202" diagnostic.Diag.code
+    | Error [ diagnostic ] ->
+        Alcotest.(check string) label "E1202" (Diag.code_or_uncoded diagnostic)
     | Error diagnostics -> fail_diags label diagnostics
     | Ok _ -> Alcotest.failf "%s accepted a recovery marker" label
   in
@@ -657,13 +679,14 @@ let test_strict_boundaries_reject_recovery () =
   | Error diagnostics ->
       Alcotest.(check bool)
         "strict reports syntax" true
-        (List.exists (fun diagnostic -> diagnostic.Diag.severity = Diag.Error) diagnostics)
+        (List.exists (fun diagnostic -> Diag.severity diagnostic = Diag.Error) diagnostics)
   | Ok _ -> Alcotest.fail "strict parser accepted a recovered hole");
   let meta = Meta.empty |> Meta.with_surface_hole "manual" in
   let sentinel = Kernel.{ it = Lit (LInt 0); meta } in
   let _, context = make () in
   match Check.check_top context (Kernel.Expr sentinel) with
-  | Error [ diagnostic ] -> Alcotest.(check string) "strict checker guard" "E1202" diagnostic.code
+  | Error [ diagnostic ] ->
+      Alcotest.(check string) "strict checker guard" "E1202" (Diag.code_or_uncoded diagnostic)
   | Error diagnostics -> fail_diags "strict checker sentinel" diagnostics
   | Ok _ -> Alcotest.fail "strict checker accepted an analysis sentinel"
 

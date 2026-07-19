@@ -18,6 +18,6 @@ demos/worlds/agent-dream.jqd|builtin `text.contains?` is not yet implemented nat
 #
 # companion files: decl-dependent on their sibling demo, not standalone
 # (the interpreter refuses them identically at check time):
-demos/tooling/repair-warp-tests.jqd|error[E0301]: unknown name
-demos/tooling/showcase-warp-tests.jqd|error[E0301]: unknown name
-demos/worlds/escrow/main.jqd|error[E0301]: unknown name `escrow.workflow`
+demos/tooling/repair-warp-tests.jqd|error[E0301]: This reference names something that is not in scope.
+demos/tooling/showcase-warp-tests.jqd|error[E0301]: This reference names something that is not in scope.
+demos/worlds/escrow/main.jqd|error[E0301]: This reference names something that is not in scope.

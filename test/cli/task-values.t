@@ -25,8 +25,9 @@ checker path.
   > (ref #9b4eaa5e872fa3f768c71fc4cba4d3262a9ebf8a719f0cfb78f22fa9eade4310 con)
   > EOF
   $ jacquard run private-task.jqd 2>&1 | sed 's/private-task.jqd:[0-9]*:[0-9]*-[0-9]*/private-task.jqd:LINE:SPAN/'
-  private-task.jqd:LINE:SPAN: error[E0907]: the opaque scoped-handle carrier is scheduler-private and cannot be constructed by Jacquard code
-    hint: opaque scoped handles are created only by their trusted scheduler operations
+  private-task.jqd:LINE:SPAN: error[E0907]: A scoped task or channel handle is invalid
+    Cause: the opaque scoped-handle carrier is scheduler-private and cannot be constructed by Jacquard code
+    Next step: Use the trusted scheduler operation that creates this opaque scoped handle.
 
 SC.14 applies the same sealed boundary to ChannelHandle.
 
@@ -34,8 +35,9 @@ SC.14 applies the same sealed boundary to ChannelHandle.
   > (ref #dc7a12f5fc0476b674d52535e9895220edf41f2a017b1dd97fc078950a3dbb36 con)
   > EOF
   $ jacquard run private-channel.jqd 2>&1 | sed 's/private-channel.jqd:[0-9]*:[0-9]*-[0-9]*/private-channel.jqd:LINE:SPAN/'
-  private-channel.jqd:LINE:SPAN: error[E0907]: the opaque scoped-handle carrier is scheduler-private and cannot be constructed by Jacquard code
-    hint: opaque scoped handles are created only by their trusted scheduler operations
+  private-channel.jqd:LINE:SPAN: error[E0907]: A scoped task or channel handle is invalid
+    Cause: the opaque scoped-handle carrier is scheduler-private and cannot be constructed by Jacquard code
+    Next step: Use the trusted scheduler operation that creates this opaque scoped handle.
 
 The default interpreted path now routes Async through that scheduler. This
 does not grant world authority and does not add native root scheduling.
@@ -68,6 +70,7 @@ runtime.
   native: compiled 1 unit(s)
   exit 0
   $ ./channel-native 2>&1; echo "exit $?"
-  error[E0814]: this program requires channel [concurrency/none] — communicate typed values between structured tasks, which is not granted (performed via `channel.open`)
-    hint: handle the effect in the program (this effect is pure and cannot be granted)
+  error[E0814]: The program requires an effect that was not granted
+    Cause: This program requires channel [concurrency/none] — communicate typed values between structured tasks, which is not granted (performed via `channel.open`).
+    Next step: handle the effect in the program (this effect is pure and cannot be granted)
   exit 3

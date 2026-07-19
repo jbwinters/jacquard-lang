@@ -19,8 +19,7 @@
 #include <string.h>
 
 static void oom(void) {
-  fputs("jacquard runtime: out of memory\n", stderr);
-  exit(2);
+  jq_runtime_error("jacquard runtime: out of memory");
 }
 
 /* the header's n is uint16: arity limits are a representation invariant, and
@@ -28,8 +27,7 @@ static void oom(void) {
    block was the failure mode this guards) */
 static void arity_guard(uint64_t needed, const char *what) {
   if (needed > UINT16_MAX) {
-    fprintf(stderr, "jacquard runtime: %s exceeds the 65535 limit\n", what);
-    exit(2);
+    jq_runtime_failf(JQ_ERROR_NATIVE, "jacquard runtime: %s exceeds the 65535 limit", what);
   }
 }
 

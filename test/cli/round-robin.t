@@ -77,7 +77,9 @@ Task values still cannot cross the scope boundary.
   > (app (var async.spawn) (lam () (lit 1)))
   > EOF_JQD
   $ jacquard run escape.jqd 2>&1
-  error[E0907]: a Task may not escape, outlive, or be used outside the structured scope that created it: Task 0#1 escaped its creating structured scope
+  error[E0907]: A scoped task or channel handle is invalid
+    Cause: a Task may not escape, outlive, or be used outside the structured scope that created it: Task 0#1 escaped its creating structured scope
+    Next step: Use the handle only inside the exact async.scope that created it.
   [2]
 
 Warp's Case lane reaches the same scheduler through `async.scope`; the Case
@@ -181,8 +183,9 @@ authority after `async.scope` removes only `Async`.
   >     })
   > EOF_JAC
   $ jacquard check async-child-row.jac --manifest console
-  async-child-row.jac:2:27-9:6: error[E0801]: argument: expected () ->{check} (), got () ->{net, check | e} () (a closed effect row cannot absorb extra effects; a stored definition passed as a thunk can be eta-expanded at the use site: (lam () (app (var f))))
-    hint: the expected side comes from the surrounding context; make both sides agree
+  async-child-row.jac:2:27-9:6: error[E0801]: Types do not agree
+    Cause: argument: expected () ->{check} (), got () ->{net, check | e} () (a closed effect row cannot absorb extra effects; a stored definition passed as a thunk can be eta-expanded at the use site: (lam () (app (var f))))
+    Next step: the expected side comes from the surrounding context; make both sides agree
   [1]
 
 The native backend has no root scheduler. It supports Async only when the

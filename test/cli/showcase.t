@@ -14,7 +14,7 @@ renormalized prior; one more test proves the correct program at probability 1.
   > posterior-over-programs(sharp-spec())
   > JACQUARD
   $ jac run syn.jac 2>&1 | head -1
-  error[E0814]: this program requires eval [meta/high] — run code constructed or loaded at runtime, which is not granted (performed via `posterior-over-programs`)
+  error[E0814]: The program requires an effect that was not granted
   $ jac run syn.jac --allow eval
   cons(mk-pair((quote (lam ((pvar x)) (app (var add) (var x) (lit 1)))), 0.8), cons(mk-pair((quote (lam ((pvar x)) (app (var add) (var x) (lit 2)))), 0.0), cons(mk-pair((quote (lam ((pvar x)) (app (var sub) (var x) (lit 1)))), 0.0), cons(mk-pair((quote (lam ((pvar x)) (lit 1))), 0.2), nil))))
   cons(mk-pair((quote (lam ((pvar x)) (app (var add) (var x) (lit 1)))), 1.0), cons(mk-pair((quote (lam ((pvar x)) (app (var add) (var x) (lit 2)))), 0.0), cons(mk-pair((quote (lam ((pvar x)) (app (var sub) (var x) (lit 1)))), 0.0), cons(mk-pair((quote (lam ((pvar x)) (lit 1))), 0.0), nil))))

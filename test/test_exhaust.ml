@@ -19,8 +19,8 @@ let contains ~needle haystack =
 let test_bool_missing_false () =
   let h = make () in
   let d = err_of h "(lam ((pvar b)) (match (var b) (clause (pcon true) (lit 1))))" in
-  Alcotest.(check string) "code" "E0813" d.Diag.code;
-  Alcotest.(check bool) "witness prints false" true (contains ~needle:"false" d.Diag.message)
+  Alcotest.(check string) "code" "E0813" (Diag.code_or_uncoded d);
+  Alcotest.(check bool) "witness prints false" true (contains ~needle:"false" (Diag.cause d))
 
 (* the plan's nested witness: Option (Option Bool) missing Some (Some False) *)
 let test_nested_witness () =
@@ -30,11 +30,11 @@ let test_nested_witness () =
       "(lam ((pvar o)) (match (var o) (clause (pcon none) (lit 0)) (clause (pcon some (pcon none)) \
        (lit 1)) (clause (pcon some (pcon some (pcon true))) (lit 2))))"
   in
-  Alcotest.(check string) "code" "E0813" d.Diag.code;
+  Alcotest.(check string) "code" "E0813" (Diag.code_or_uncoded d);
   Alcotest.(check bool)
-    (Printf.sprintf "witness is some(some(false)) (got: %s)" d.Diag.message)
+    (Printf.sprintf "witness is some(some(false)) (got: %s)" (Diag.cause d))
     true
-    (contains ~needle:"some(some(false))" d.Diag.message)
+    (contains ~needle:"some(some(false))" (Diag.cause d))
 
 let test_redundant_clause_warns () =
   let h = make () in
@@ -43,8 +43,8 @@ let test_redundant_clause_warns () =
       "(lam ((pvar b)) (match (var b) (clause (pwild) (lit 0)) (clause (pcon true) (lit 1))))"
   with
   | Ok { Check.warnings = [ w ]; _ } ->
-      Alcotest.(check string) "warning code" "W0801" w.Diag.code;
-      Alcotest.(check bool) "is a warning" true (w.Diag.severity = Diag.Warning)
+      Alcotest.(check string) "warning code" "W0801" (Diag.code_or_uncoded w);
+      Alcotest.(check bool) "is a warning" true (Diag.severity w = Diag.Warning)
   | Ok { Check.warnings; _ } -> Alcotest.failf "expected one warning, got %d" (List.length warnings)
   | Error ds -> Eval_support.fail_diags "should check (warning only)" ds
 
@@ -56,7 +56,8 @@ let test_redundancy_in_later_columns () =
       "(lam ((pvar p)) (match (var p) (clause (ptuple (pwild) (pcon true)) (lit 0)) (clause \
        (ptuple (pwild) (pcon true)) (lit 1)) (clause (pwild) (lit 2))))"
   with
-  | Ok { Check.warnings = [ w ]; _ } -> Alcotest.(check string) "code" "W0801" w.Diag.code
+  | Ok { Check.warnings = [ w ]; _ } ->
+      Alcotest.(check string) "code" "W0801" (Diag.code_or_uncoded w)
   | Ok { Check.warnings; _ } -> Alcotest.failf "expected one warning, got %d" (List.length warnings)
   | Error ds -> Eval_support.fail_diags "later-column redundancy" ds
 
@@ -64,7 +65,7 @@ let test_plit_scrutinee_needs_catch_all () =
   let h = make () in
   (* literals over an infinite type: rejected without a default *)
   let d = err_of h "(match (lit 5) (clause (plit 0) (lit 1)) (clause (plit 1) (lit 2)))" in
-  Alcotest.(check string) "code" "E0813" d.Diag.code;
+  Alcotest.(check string) "code" "E0813" (Diag.code_or_uncoded d);
   (* accepted with a variable default *)
   match
     check_src h "(match (lit 5) (clause (plit 0) (lit 1)) (clause (pvar other) (var other)))"
@@ -84,8 +85,8 @@ let test_tuple_patterns () =
   let d =
     err_of h "(match (tuple (lit 1) (var true)) (clause (ptuple (pvar a) (pcon true)) (var a)))"
   in
-  Alcotest.(check string) "code" "E0813" d.Diag.code;
-  Alcotest.(check bool) "tuple witness" true (contains ~needle:"(_, false)" d.Diag.message)
+  Alcotest.(check string) "code" "E0813" (Diag.code_or_uncoded d);
+  Alcotest.(check bool) "tuple witness" true (contains ~needle:"(_, false)" (Diag.cause d))
 
 let test_recursive_list () =
   let h = make () in
@@ -103,11 +104,11 @@ let test_recursive_list () =
       "(lam ((pvar xs)) (match (ann (var xs) (tapp (tref list) (tref int))) (clause (pcon nil) \
        (lit 0))))"
   in
-  Alcotest.(check string) "code" "E0813" d.Diag.code;
+  Alcotest.(check string) "code" "E0813" (Diag.code_or_uncoded d);
   Alcotest.(check bool)
-    (Printf.sprintf "witness names cons (got: %s)" d.Diag.message)
+    (Printf.sprintf "witness names cons (got: %s)" (Diag.cause d))
     true
-    (contains ~needle:"cons(_, _)" d.Diag.message)
+    (contains ~needle:"cons(_, _)" (Diag.cause d))
 
 let test_as_patterns_transparent () =
   let h = make () in

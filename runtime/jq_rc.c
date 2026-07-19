@@ -29,10 +29,7 @@ static void wl_push(worklist *w, jq_block *b) {
   if (w->len == w->cap) {
     w->cap = w->cap ? w->cap * 2 : 64;
     w->items = realloc(w->items, w->cap * sizeof(jq_block *));
-    if (!w->items) {
-      fputs("jacquard runtime: out of memory\n", stderr);
-      exit(2);
-    }
+    if (!w->items) jq_runtime_error("jacquard runtime: out of memory");
   }
   w->items[w->len++] = b;
 }
@@ -88,8 +85,7 @@ void jq_free_walk(jq_block *root) {
     default:
       /* CODE arrives with task 73 and extends this walk; static-only tags
          cannot be freed */
-      fprintf(stderr, "jacquard runtime: free walk hit tag %d\n", b->tag);
-      exit(2);
+      jq_runtime_failf(JQ_ERROR_NATIVE, "jacquard runtime: free walk hit tag %d", b->tag);
     }
     jq_block_free(b);
   }

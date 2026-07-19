@@ -165,7 +165,9 @@ pass posing as a proof:
   $ jacquard test small.jqd --exhaustive --budget 100 --no-cache
   PASS coin-ok/boolean coin (verified exhaustively (2 cases))
   FAIL needle-too/needs branches (prop: exhaustive refusal)
-    ! error[E0905]: exhaustive verification exceeded its budget: 101 explorations (cap 100), last at a 1000-way sample site; raise --budget or shrink the generators
+    ! error[E0905]: Exhaustive verification exceeded its budget
+        Cause: Verification exhausted its budget at 101 explorations (cap 100), last at a 1000-way sample site.
+        Next step: Raise --budget or shrink the generators.
   1 passed, 1 failed, 0 skipped, 0 refused
   [1]
 

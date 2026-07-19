@@ -91,9 +91,61 @@ let empty_env = { vars = SMap.empty; restricted = SSet.empty; group = [||] }
 (* Internal control flow only; never escapes this module. *)
 exception Err of Diag.t
 
-let err ?meta ?hint ~code fmt =
+let diagnostic_summary = function
+  | "E0801" -> "Types do not agree"
+  | "E0802" -> "This value is not callable"
+  | "E0803" -> "Call arity does not agree"
+  | "E0804" -> "The value does not satisfy its annotation"
+  | "E0805" -> "A referenced declaration has the wrong kind or is unavailable"
+  | "E0806" -> "Constructor pattern arity does not agree"
+  | "E0807" -> "A computation was used where a thunk is required"
+  | "E0810" -> "Type constructor arity does not agree"
+  | "E0811" -> "A type, effect, or row name is unresolved"
+  | "E0812" -> "An effect operation signature contains an unbound variable"
+  | "E0813" -> "This match is not exhaustive"
+  | "E0814" -> "The program requires an effect that was not granted"
+  | "E0815" -> "A top-level definition performs effects"
+  | "E0816" -> "A once resumption may be consumed more than once"
+  | "E0817" -> "A once resumption escapes its handler clause"
+  | "E0818" -> "A non-value binding cannot be reused polymorphically"
+  | "E0819" -> "An opaque Secret was used by generic inspection"
+  | "E0907" -> "A scoped task or channel handle is invalid"
+  | code -> "Checker rejected the program (" ^ code ^ ")"
+
+let diagnostic_next_step = function
+  | "E0801" -> "Make the actual type agree with the type required by its context."
+  | "E0802" -> "Call only a function, constructor, effect operation, or resumption."
+  | "E0803" -> "Pass exactly the number of arguments declared by the callable."
+  | "E0804" -> "Change the value or its annotation so the two types agree."
+  | "E0805" -> "Use an available declaration of the required kind."
+  | "E0806" -> "Match every field declared by the constructor."
+  | "E0807" -> "Wrap the computation in `fn () -> ...` to delay it."
+  | "E0810" -> "Apply the type constructor to exactly its declared parameters."
+  | "E0811" -> "Declare or resolve this name before using it."
+  | "E0812" -> "Bind the variable in the effect declaration's parameter list."
+  | "E0813" -> "Add a clause for the missing witness or a wildcard default."
+  | "E0814" -> "Grant the effect at the root or handle it inside the program."
+  | "E0815" -> "Move the effect behind a function or handle it in the definition."
+  | "E0816" -> "Consume the once resumption on at most one possible path."
+  | "E0817" -> "Consume the once resumption directly inside its handler clause."
+  | "E0818" -> "Eta-expand the binding or give each use its own binding."
+  | "E0819" -> "Keep the value opaque or expose it explicitly with `secret.expose`."
+  | "E0907" -> "Use the handle only inside the exact async.scope that created it."
+  | _ -> "Correct the rejected checker input and try again."
+
+let err ?meta ?next_step ?(contrast = None) ~code fmt =
   Printf.ksprintf
-    (fun msg -> raise (Err (Diag.error ?span:(Option.bind meta Meta.span) ?hint ~code msg)))
+    (fun cause ->
+      let domain =
+        if String.equal code Concurrency_contract.task_escape_code then Diag.Concurrency
+        else Diag.Checker
+      in
+      raise
+        (Err
+           (Diag.error ?span:(Option.bind meta Meta.span) ~domain ~code
+              ~summary:(diagnostic_summary code) ~cause
+              ~next_step:(Option.value next_step ~default:(diagnostic_next_step code))
+              ~contrast ())))
     fmt
 
 (* Stored declarations have already crossed the public resolver/checker boundary. Their resolved
@@ -160,12 +212,12 @@ let eta_expansion_candidate ctx expected actual =
       Types.unifiable expected (TArrow ([], open_row ctx.level [], actual))
   | _ -> false
 
-let unify_or ctx ?meta ?hint ~what expected actual =
+let unify_or ctx ?meta ?next_step ~what expected actual =
   try Types.unify expected actual
   with Unify_error detail ->
     err ?meta
-      ~hint:
-        (Option.value hint
+      ~next_step:
+        (Option.value next_step
            ~default:"the expected side comes from the surrounding context; make both sides agree")
       ~code:"E0801" "%s: expected %s, got %s (%s)" what (show_ty ctx expected) (show_ty ctx actual)
       detail
@@ -174,7 +226,7 @@ let unify_join_or ctx ?meta ~what expected actual =
   try Types.join_into ~level:ctx.level expected actual
   with Unify_error detail ->
     err ?meta
-      ~hint:"the expected side comes from the surrounding context; make both sides agree"
+      ~next_step:"the expected side comes from the surrounding context; make both sides agree"
       ~code:"E0801" "%s: expected %s, got %s (%s)" what (show_ty ctx expected) (show_ty ctx actual)
       detail
 
@@ -189,7 +241,7 @@ let type_arity ctx ?meta (h : Hash.t) : int =
   | Ok { Store.decl = { Kernel.it = Kernel.DefType { tvars; _ }; _ }; role = Store.Whole; _ } ->
       List.length tvars
   | Ok _ -> err ?meta ~code:"E0805" "hash %s is not a type" (Hash.to_hex h)
-  | Error ds -> err ?meta ~code:"E0805" "%s" (String.concat "; " (List.map Diag.to_string ds))
+  | Error ds -> err ?meta ~code:"E0805" "%s" (String.concat "; " (List.map Diag.to_cause_string ds))
 
 (* ------------------------------------------------------------------ *)
 (* Annotation conversion                                               *)
@@ -278,7 +330,7 @@ and conv_row ctx cenv ~effectself (r : Kernel.row) : row =
 let rec con_scheme ctx ?meta (h : Hash.t) : scheme =
   if Concurrency_contract.is_task_private_hash h || Channel_contract.is_channel_private_hash h then
     err ?meta ~code:Concurrency_contract.task_escape_code
-      ~hint:"opaque scoped handles are created only by their trusted scheduler operations"
+      ~next_step:"Use the trusted scheduler operation that creates this opaque scoped handle."
       "the opaque scoped-handle carrier is scheduler-private and cannot be constructed by Jacquard \
        code";
   match locate ctx h with
@@ -301,7 +353,7 @@ let rec con_scheme ctx ?meta (h : Hash.t) : scheme =
       let ty = match fields with [] -> result | fields -> TArrow (fields, empty_row, result) in
       { ty; gen_level = ctx.level }
   | Ok _ -> err ?meta ~code:"E0805" "hash %s is not a constructor" (Hash.to_hex h)
-  | Error ds -> err ?meta ~code:"E0805" "%s" (String.concat "; " (List.map Diag.to_string ds))
+  | Error ds -> err ?meta ~code:"E0805" "%s" (String.concat "; " (List.map Diag.to_cause_string ds))
 
 (* Does a declaration type mention [name] as a (tref name)? Drives the self-in-argument
    case below without disturbing free-variable freshening elsewhere. *)
@@ -327,7 +379,7 @@ and conv_decl_ty ctx cenv ?(unbound_code = "E0811") ?(effectself = None) ~self (
       match List.assoc_opt a cenv.tvs with
       | Some v -> v
       | None ->
-          err ~meta ~hint:"declare it in the parameter list of the enclosing declaration"
+          err ~meta ~next_step:"Declare it in the parameter list of the enclosing declaration."
             ~code:unbound_code "unbound type variable `%s` in declaration" a)
   | Kernel.TApp ({ Kernel.it = Kernel.TRef (Kernel.Named n); _ }, args) when n = self_name -> (
       (* recursive application must match the declared parameters *)
@@ -455,7 +507,7 @@ let op_scheme ctx ?meta (h : Hash.t) : scheme =
       in
       { ty = TArrow (params, operation_row, result); gen_level = ctx.level }
   | Ok _ -> err ?meta ~code:"E0805" "hash %s is not an operation" (Hash.to_hex h)
-  | Error ds -> err ?meta ~code:"E0805" "%s" (String.concat "; " (List.map Diag.to_string ds))
+  | Error ds -> err ?meta ~code:"E0805" "%s" (String.concat "; " (List.map Diag.to_cause_string ds))
 
 (** [operation_mode ctx h] returns the identity-bearing multiplicity declared for operation [h]. It
     reports E0805 if [h] does not locate an operation, so callers never silently treat malformed
@@ -466,7 +518,7 @@ let operation_mode ctx ?meta (h : Hash.t) : Kernel.op_mode =
     ->
       (List.nth ops i).Kernel.op_mode
   | Ok _ -> err ?meta ~code:"E0805" "hash %s is not an operation" (Hash.to_hex h)
-  | Error ds -> err ?meta ~code:"E0805" "%s" (String.concat "; " (List.map Diag.to_string ds))
+  | Error ds -> err ?meta ~code:"E0805" "%s" (String.concat "; " (List.map Diag.to_cause_string ds))
 
 (** [contains_group_ref expression] reports whether [expression] can recur through its definition
     group. The affine-resumption checker uses it to reject transfers into helpers whose number of
@@ -601,7 +653,7 @@ let rec infer_pat ctx (p : Kernel.pat) : ty * (string * ty) list =
       match (repr con_ty, ps) with
       | TArrow (fields, _, result), ps ->
           if List.length fields <> List.length ps then
-            err ~meta ~hint:"constructor patterns bind every declared field" ~code:"E0806"
+            err ~meta ~next_step:"Bind every field declared by the constructor." ~code:"E0806"
               "constructor %s expects %d argument(s) in this pattern, got %d" (name_of ctx h)
               (List.length fields) (List.length ps);
           let bindings =
@@ -675,7 +727,7 @@ let rec term_scheme ctx ?meta (h : Hash.t) : scheme =
           match Store.locate ctx.store h with
           | Ok _ -> ()
           | Error ds ->
-              err ?meta ~code:"E0805" "%s" (String.concat "; " (List.map Diag.to_string ds))
+              err ?meta ~code:"E0805" "%s" (String.concat "; " (List.map Diag.to_cause_string ds))
       in
       match Hashtbl.find_opt ctx.builtin_sigs h with
       | Some s -> s
@@ -692,7 +744,7 @@ let rec term_scheme ctx ?meta (h : Hash.t) : scheme =
               end
           | Ok _ -> err ?meta ~code:"E0805" "hash %s is not a term" (Hash.to_hex h)
           | Error ds ->
-              err ?meta ~code:"E0805" "%s" (String.concat "; " (List.map Diag.to_string ds))))
+              err ?meta ~code:"E0805" "%s" (String.concat "; " (List.map Diag.to_cause_string ds))))
 
 and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(required : Hash.t list)
     (e : Kernel.expr) : ty =
@@ -751,7 +803,7 @@ and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(requir
       match repr fn_ty with
       | TArrow (params, frow, result) ->
           if List.length params <> List.length args then
-            err ~meta ~hint:"Jacquard calls are uncurried: pass exactly the declared arguments"
+            err ~meta ~next_step:"Pass exactly the declared arguments in this uncurried call."
               ~code:"E0803" "this function expects %d argument(s), got %d" (List.length params)
               (List.length args);
           (let kind =
@@ -783,7 +835,7 @@ and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(requir
                    || Option.equal String.equal (Meta.name fn.meta) (Some "debug.inspect"))
               then
                 err ~meta:diagnostic_meta ~code:"E0819"
-                  ~hint:
+                  ~next_step:
                     "keep the value opaque; only `secret.expose` converts Secret to Text, and that \
                      operation remains in the Secret effect row"
                   "Secret has no Show or serialization instance and generic inspection is redacted";
@@ -792,20 +844,21 @@ and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(requir
                 match restricted_callee with
                 | Some name ->
                     err ~meta:fn.meta ~code:"E0818"
-                      ~hint:
+                      ~next_step:
                         "eta-expand the binding to a lambda value, or give each use its own binding"
                       "local binding `%s` comes from a non-value and remains monomorphic under the \
                        value restriction"
                       name
                 | None when eta ->
                     err ~meta:arg.meta ~code:"E0807"
-                      ~hint:"wrap the reference in `fn () -> ...` so the computation is delayed"
+                      ~next_step:
+                        "Wrap the reference in `fn () -> ...` so the computation is delayed."
                       "this position expects a thunk, but `%s` is a bare reference; wrap it in `fn \
                        () -> ...`"
                       (Option.value ~default:"this value" (Meta.name arg.meta))
                 | None ->
                     err ~meta:diagnostic_meta
-                      ~hint:
+                      ~next_step:
                         "the expected side comes from the surrounding context; make both sides \
                          agree"
                       ~code:"E0801" "%s: expected %s, got %s (%s)" what (show_ty ctx expected)
@@ -829,7 +882,7 @@ and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(requir
           result
       | TResume (param, frow, result) ->
           if List.length args <> 1 then
-            err ~meta ~hint:"a resumption accepts exactly the operation's result value"
+            err ~meta ~next_step:"Pass exactly the operation's result value to the resumption."
               ~code:"E0803" "this resumption expects 1 argument, got %d" (List.length args);
           ctx.tier_apps <- (frow, Tier.KFn) :: ctx.tier_apps;
           let arg = List.hd args and actual = List.hd arg_tys in
@@ -854,10 +907,11 @@ and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(requir
       | t ->
           if surface_form_is meta [ "pipe" ] then
             let rhs_meta = Meta.surface_container "pipe-rhs" meta in
-            err ~meta:rhs_meta ~hint:"the right-hand side of `|>` must be callable" ~code:"E0802"
+            err ~meta:rhs_meta ~next_step:"Make the right-hand side of `|>` callable." ~code:"E0802"
               "the `|>` right-hand side has type %s, which is not a function" (show_ty ctx t)
           else
-            err ~meta ~hint:"only functions, constructors, effect operations, and resumptions apply"
+            err ~meta
+              ~next_step:"Apply only a function, constructor, effect operation, or resumption."
               ~code:"E0802" "%s is not a function" (show_ty ctx t))
   | Kernel.Let { isrec = false; binder; value; body } -> (
       match binder.Kernel.it with
@@ -1069,7 +1123,7 @@ and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(requir
       (try Types.unify expected actual
        with Unify_error detail ->
          err ~meta
-           ~hint:
+           ~next_step:
              (Option.value
                 ~default:"the annotation is the contract: change the body or the annotation"
                 (handler_mismatch_hint subject detail))
@@ -1133,7 +1187,8 @@ and check_group ?recovery_group ctx (decl : Kernel.decl) : unit =
         | None -> (
             match Canon.hash_decl decl with
             | Ok { Canon.decl_hash; named } -> (decl_hash, List.map snd named)
-            | Error ds -> err ~code:"E0805" "%s" (String.concat "; " (List.map Diag.to_string ds)))
+            | Error ds ->
+                err ~code:"E0805" "%s" (String.concat "; " (List.map Diag.to_cause_string ds)))
       in
       let decl_hash, member_hashes = hashes in
       ctx.checking <- decl_hash :: ctx.checking;
@@ -1167,7 +1222,7 @@ and check_group ?recovery_group ctx (decl : Kernel.decl) : unit =
               | [] -> ()
               | h :: _ ->
                   err ~meta:b.Kernel.bmeta ~code:"E0815"
-                    ~hint:"wrap the body in a lambda and perform the effect when called"
+                    ~next_step:"Wrap the body in a lambda and perform the effect when called."
                     "top-level definition `%s` performs the `%s` effect while being defined"
                     b.Kernel.bname (name_of ctx h));
               match b.Kernel.annot with
@@ -1179,12 +1234,12 @@ and check_group ?recovery_group ctx (decl : Kernel.decl) : unit =
                   with Unify_error detail ->
                     let hint = handler_mismatch_hint b.Kernel.value detail in
                     if surface_form_is b.Kernel.bmeta [ "equation-definition" ] then
-                      err ?hint ~meta:b.Kernel.value.meta ~code:"E0804"
+                      err ?next_step:hint ~meta:b.Kernel.value.meta ~code:"E0804"
                         "equation definition `%s` does not match its signature: expected %s, got \
                          %s (%s)"
                         b.Kernel.bname (show_ty ctx rigid) (show_ty ctx vty) detail
                     else
-                      err ?hint ~meta:b.Kernel.bmeta ~code:"E0804"
+                      err ?next_step:hint ~meta:b.Kernel.bmeta ~code:"E0804"
                         "binding %s does not match its annotation: expected %s, got %s (%s)"
                         b.Kernel.bname (show_ty ctx rigid) (show_ty ctx vty) detail)
               | None ->
@@ -1362,10 +1417,10 @@ let rec check_matches ctx : Diag.t list =
       let matrix = List.map (fun (c : Kernel.clause) -> [ c.Kernel.cpat ]) arms in
       (match useful ctx [ scrutinee_ty ] matrix with
       | Some [ w ] ->
-          err ~meta:site_meta ~hint:"add a clause matching the witness, or a (pwild) default"
+          err ~meta:site_meta ~next_step:"Add a clause matching the witness or a wildcard default."
             ~code:"E0813" "this match is not exhaustive: it misses %s" (show_witness w)
       | Some _ ->
-          err ~meta:site_meta ~hint:"add a (pwild) default clause" ~code:"E0813"
+          err ~meta:site_meta ~next_step:"Add a wildcard default clause." ~code:"E0813"
             "this match is not exhaustive"
       | None -> ());
       (* redundancy: clause i is useless if rows 0..i-1 already cover its pattern *)
@@ -1388,8 +1443,11 @@ let rec check_matches ctx : Diag.t list =
             in
             if covers then
               warnings :=
-                Diag.warning ?span:(Meta.span c.Kernel.cmeta) ~code:"W0801"
-                  "this clause is redundant: earlier clauses match everything it does"
+                Diag.warning ?span:(Meta.span c.Kernel.cmeta) ~domain:Checker ~code:"W0801"
+                  ~summary:"This match clause is redundant"
+                  ~cause:"Earlier clauses match every value this clause can match."
+                  ~next_step:"Remove the redundant clause or narrow an earlier pattern."
+                  ~contrast:None ()
                 :: !warnings)
         arms)
     (List.rev ctx.sites);
@@ -1526,7 +1584,15 @@ let make_ctx (store : Store.t) : (ctx, Diag.t list) result =
   let lookup name =
     match Store.lookup_kind store name Resolve.KType with
     | Some { Resolve.hash; _ } -> Ok hash
-    | None -> Error [ Diag.error ~code:"E0805" (Printf.sprintf "primitive type `%s` missing" name) ]
+    | None ->
+        Error
+          [
+            Diag.error ~domain:Checker ~code:"E0805"
+              ~summary:"A required primitive type is unavailable"
+              ~cause:(Printf.sprintf "Primitive type `%s` is missing from the store." name)
+              ~next_step:"Load the complete prelude before creating the checker context."
+              ~contrast:None ();
+          ]
   in
   match
     (lookup "int", lookup "real", lookup "text", lookup "code", lookup "hash", lookup "secret")
@@ -1779,8 +1845,11 @@ let manifest_errors ctx ?(grantable = []) ~(granted : Hash.t list) (row : row) :
                --allow grant)"
         in
         Some
-          (Diag.error ~code:"E0814" ~hint
-             (Printf.sprintf "this program requires %s, which is not granted%s" requirement via)))
+          (Diag.error ~domain:Checker ~code:"E0814"
+             ~summary:"The program requires an effect that was not granted"
+             ~cause:
+               (Printf.sprintf "This program requires %s, which is not granted%s." requirement via)
+             ~next_step:hint ~contrast:None ()))
     row.effects
 
 (** Registry of every diagnostic code the checker can emit (W3.7's coverage check keys on this list;

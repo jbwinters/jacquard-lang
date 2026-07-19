@@ -38,15 +38,29 @@ expect_fatal() {
   [ "$msg" = "$want" ] || { echo "FAIL: $mode said '$msg', want '$want'"; exit 1; }
   echo "ok fatal $mode"
 }
-expect_fatal div0 2 "arithmetic error: division by zero"
-expect_fatal mod0 2 "arithmetic error: modulo by zero"
-expect_fatal arity-overflow 2 "jacquard runtime: constructor arity exceeds the 65535 limit"
+expect_fatal div0 2 "error: Arithmetic operation failed
+  Cause: arithmetic error: division by zero
+  Next step: Correct the arithmetic inputs and run the program again."
+expect_fatal mod0 2 "error: Arithmetic operation failed
+  Cause: arithmetic error: modulo by zero
+  Next step: Correct the arithmetic inputs and run the program again."
+expect_fatal arity-overflow 2 "error: Native runtime could not continue
+  Cause: jacquard runtime: constructor arity exceeds the 65535 limit
+  Next step: Report this native runtime failure with the program and command."
 expect_fatal secret-code-of-text 2 \
-  "type error: code.of-text got unexpected arguments <secret redacted>"
-expect_fatal unhandled-op 3 'unhandled effect console: operation `print` reached the root without a handler'
-expect_fatal match-fail 2 "no clause matched the value 5"
+  "error: Runtime value has the wrong type
+  Cause: type error: code.of-text got unexpected arguments <secret redacted>
+  Next step: Pass a value of the type required by this operation."
+expect_fatal unhandled-op 3 'error: An effect reached the root without a handler
+  Cause: unhandled effect console: operation `print` reached the root without a handler
+  Next step: Grant the effect at the root or handle it inside the program.'
+expect_fatal match-fail 2 "error: No match clause accepted the value
+  Cause: no clause matched the value 5
+  Next step: Add a clause for this value or a wildcard default."
 expect_fatal once-resume-twice 2 \
-  "error[E0906]: a once continuation may be resumed at most once per captured instance"
+  "error[E0906]: A once continuation was resumed more than once
+  Cause: a once continuation may be resumed at most once per captured instance
+  Next step: Resume each captured once continuation at most once."
 
 # 4. parity kit (task 66): the C ports must reproduce the OCaml goldens
 #    byte-for-byte. Goldens regenerate via `dune exec test/gen_native_parity.exe`.

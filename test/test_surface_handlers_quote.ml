@@ -31,12 +31,12 @@ let check_equivalent label surface jqd =
        (Kernel.expr_to_form (lower surface)))
 
 let diagnostic_codes recovered =
-  List.map (fun diagnostic -> diagnostic.Diag.code) recovered.Surface_ast.diagnostics
+  List.map (fun diagnostic -> Diag.code_or_uncoded diagnostic) recovered.Surface_ast.diagnostics
 
 let parse_error_codes source =
   match Surface_parse.parse_string ~file:"bad-handler.jac" source with
   | Ok _ -> Alcotest.failf "expected %S to fail parsing" source
-  | Error diagnostics -> List.map (fun diagnostic -> diagnostic.Diag.code) diagnostics
+  | Error diagnostics -> List.map (fun diagnostic -> Diag.code_or_uncoded diagnostic) diagnostics
 
 let test_handler_equivalence_and_clause_shapes () =
   check_equivalent "return-only handler" "handle body { | return Some(x) -> x }"
@@ -112,18 +112,21 @@ let find_following_definition recovered =
 
 let count_code code recovered =
   List.fold_left
-    (fun count diagnostic -> if String.equal diagnostic.Diag.code code then count + 1 else count)
+    (fun count diagnostic ->
+      if String.equal (Diag.code_or_uncoded diagnostic) code then count + 1 else count)
     0 recovered.Surface_ast.diagnostics
 
 let count_diagnostic code diagnostics =
   List.fold_left
-    (fun count diagnostic -> if String.equal diagnostic.Diag.code code then count + 1 else count)
+    (fun count diagnostic ->
+      if String.equal (Diag.code_or_uncoded diagnostic) code then count + 1 else count)
     0 diagnostics
 
 let count_reader_diagnostics diagnostics =
   List.fold_left
     (fun count diagnostic ->
-      if String.starts_with ~prefix:"E01" diagnostic.Diag.code then count + 1 else count)
+      if String.starts_with ~prefix:"E01" (Diag.code_or_uncoded diagnostic) then count + 1
+      else count)
     0 diagnostics
 
 let raw_top_ints recovered =
@@ -201,9 +204,12 @@ let test_missing_quote_brace_recovery () =
       true
       (find_following_definition recovered);
     (match
-       List.find_opt (fun diagnostic -> diagnostic.Diag.code = "E1221") recovered.diagnostics
+       List.find_opt
+         (fun diagnostic -> Diag.code_or_uncoded diagnostic = "E1221")
+         recovered.diagnostics
      with
-    | Some { span = Some span; _ } ->
+    | Some diagnostic when Option.is_some (Diag.span diagnostic) ->
+        let span = Option.get (Diag.span diagnostic) in
         Alcotest.(check string)
           (label ^ " boundary span") "missing-quote.jac:2:1-6" (Span.to_string span)
     | _ -> Alcotest.failf "%s did not retain the E1221 span" label);
@@ -235,7 +241,8 @@ let test_missing_quote_brace_recovery () =
     "commented boundary preserves the following definition" true
     (find_following_definition commented);
   (match commented.diagnostics with
-  | [ { span = Some span; _ } ] ->
+  | [ diagnostic ] when Option.is_some (Diag.span diagnostic) ->
+      let span = Option.get (Diag.span diagnostic) in
       Alcotest.(check string)
         "commented boundary span" "missing-commented-quote.jac:3:1-6" (Span.to_string span)
   | _ -> Alcotest.fail "commented quote recovery produced an unexpected diagnostic shape");
@@ -348,10 +355,11 @@ after = 7
     (count_code "E0114" raw_reader_damage);
   (match
      List.find_opt
-       (fun diagnostic -> String.equal diagnostic.Diag.code "E0114")
+       (fun diagnostic -> String.equal (Diag.code_or_uncoded diagnostic) "E0114")
        raw_reader_damage.diagnostics
    with
-  | Some { span = Some span; _ } ->
+  | Some diagnostic when Option.is_some (Diag.span diagnostic) ->
+      let span = Option.get (Diag.span diagnostic) in
       Alcotest.(check string)
         "raw Reader diagnostic maps to the surface raw region" "recover-handler.jac:2:29-48"
         (Span.to_string span)
@@ -418,7 +426,9 @@ let test_quote_unquote_and_resolution () =
     "quoted name stays unresolved and live splice resolves" true
     (Form.equal_ignoring_meta expected (payload resolved));
   match Surface_lower.lower_expr (parse_expr "unquote(x)") with
-  | Error [ { Diag.code = "E0204"; span = Some _; _ } ] -> ()
+  | Error [ diagnostic ]
+    when Diag.code diagnostic = Some "E0204" && Option.is_some (Diag.span diagnostic) ->
+      ()
   | Error diagnostics -> fail_diags "unquote outside quote" diagnostics
   | Ok _ -> Alcotest.fail "unquote outside quote reached the kernel"
 
@@ -756,12 +766,13 @@ let test_quoted_namespace_depth_and_raw_markers () =
   List.iter
     (fun (label, source, expected_code) ->
       match Kernel.expr_of_form (parse_form source) with
-      | Error [ diagnostic ] -> Alcotest.(check string) label expected_code diagnostic.Diag.code
+      | Error [ diagnostic ] ->
+          Alcotest.(check string) label expected_code (Diag.code_or_uncoded diagnostic)
       | Error diagnostics -> fail_diags label diagnostics
       | Ok _ -> Alcotest.failf "%s marker was accepted" label)
     malformed;
   match Surface_lower.lower_expr (parse_expr "quote { jqd { (surface-ref-v0 invalid same) } }") with
-  | Error [ { Diag.code = "E0210"; _ } ] -> ()
+  | Error [ diagnostic ] when Diag.code diagnostic = Some "E0210" -> ()
   | Error diagnostics -> fail_diags "malformed quoted raw marker" diagnostics
   | Ok _ -> Alcotest.fail "malformed marker survived quote validation"
 
@@ -794,7 +805,9 @@ let test_raw_jqd_inversion_and_round_trips () =
   (match
      Surface_lower.lower_expr (parse_expr ~file:"bad-raw.jac" "quote { jqd { (unquote (lit)) } }")
    with
-  | Error [ { Diag.code = "E0202"; span = Some span; _ } ] ->
+  | Error [ diagnostic ]
+    when Diag.code diagnostic = Some "E0202" && Option.is_some (Diag.span diagnostic) ->
+      let span = Option.get (Diag.span diagnostic) in
       Alcotest.(check string) "raw validation span" "bad-raw.jac:1:24-29" (Span.to_string span)
   | Error diagnostics -> fail_diags "raw validation" diagnostics
   | Ok _ -> Alcotest.fail "malformed live raw unquote was accepted");
@@ -841,10 +854,11 @@ let test_raw_recovery_and_illegal_context () =
   let bad_reader = check_one "E0101" "quote { jqd { (lit @) } }\nafter = 7\n" in
   (match
      List.find_opt
-       (fun diagnostic -> String.equal diagnostic.Diag.code "E0101")
+       (fun diagnostic -> String.equal (Diag.code_or_uncoded diagnostic) "E0101")
        bad_reader.diagnostics
    with
-  | Some { span = Some span; _ } ->
+  | Some diagnostic when Option.is_some (Diag.span diagnostic) ->
+      let span = Option.get (Diag.span diagnostic) in
       Alcotest.(check string)
         "Reader error span remaps into surface source" "malformed-raw.jac:1:20-20"
         (Span.to_string span)
@@ -866,7 +880,9 @@ let test_raw_recovery_and_illegal_context () =
        (parse_expr ~file:"nested-malformed-raw.jac"
           "quote { quote { jqd { (unquote (unquote (lit))) } } }")
    with
-  | Error [ { Diag.code = "E0202"; span = Some span; _ } ] ->
+  | Error [ diagnostic ]
+    when Diag.code diagnostic = Some "E0202" && Option.is_some (Diag.span diagnostic) ->
+      let span = Option.get (Diag.span diagnostic) in
       Alcotest.(check string)
         "nested raw validation remaps the live splice span" "nested-malformed-raw.jac:1:41-46"
         (Span.to_string span)
@@ -966,8 +982,11 @@ let test_raw_candidate_eof_fallback () =
   Alcotest.(check int) "top fallback does not report E1221" 0 (count_code "E1221" top);
   Alcotest.(check bool)
     "top fallback preserves the following definition" true (find_following_definition top);
-  (match List.find_opt (fun diagnostic -> diagnostic.Diag.code = "E0106") top.diagnostics with
-  | Some { span = Some span; _ } ->
+  (match
+     List.find_opt (fun diagnostic -> Diag.code_or_uncoded diagnostic = "E0106") top.diagnostics
+   with
+  | Some diagnostic when Option.is_some (Diag.span diagnostic) ->
+      let span = Option.get (Diag.span diagnostic) in
       Alcotest.(check string)
         "top fallback maps the Reader span" "raw-fallback.jac:1:7-14" (Span.to_string span)
   | _ -> Alcotest.fail "top fallback Reader diagnostic had no mapped span");
@@ -1054,9 +1073,12 @@ after = 7
   in
   let reproduction = check_balanced_string_fallback "balanced brace string" {|"}"|} in
   (match
-     List.find_opt (fun diagnostic -> diagnostic.Diag.code = "E0106") reproduction.diagnostics
+     List.find_opt
+       (fun diagnostic -> Diag.code_or_uncoded diagnostic = "E0106")
+       reproduction.diagnostics
    with
-  | Some { span = Some span; _ } ->
+  | Some diagnostic when Option.is_some (Diag.span diagnostic) ->
+      let span = Option.get (Diag.span diagnostic) in
       Alcotest.(check string)
         "balanced brace string maps the Reader span" "raw-fallback.jac:1:7-26" (Span.to_string span)
   | _ -> Alcotest.fail "balanced brace string Reader diagnostic had no mapped span");
@@ -1091,7 +1113,7 @@ let test_unclosed_raw_always_reports_missing_brace () =
     let offsets =
       List.map
         (fun diagnostic ->
-          match diagnostic.Diag.span with
+          match Diag.span diagnostic with
           | Some span -> span.Span.start_pos.offset
           | None -> max_int)
         diagnostics
@@ -1112,7 +1134,7 @@ let test_unclosed_raw_always_reports_missing_brace () =
       | Error diagnostics ->
           Alcotest.(check (list string))
             (label ^ " strict codes") expected
-            (List.map (fun diagnostic -> diagnostic.Diag.code) diagnostics);
+            (List.map (fun diagnostic -> Diag.code_or_uncoded diagnostic) diagnostics);
           Alcotest.(check int)
             (label ^ " strict exactly one missing brace")
             1

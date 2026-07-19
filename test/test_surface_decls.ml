@@ -62,9 +62,24 @@ let binding_names groups = List.map (List.map (fun binding -> binding.Kernel.bna
 let error_codes source =
   match Surface_parse.parse_string ~file:"bad-decls.jac" source with
   | Ok _ -> Alcotest.failf "expected this source to fail:\n%s" source
-  | Error diagnostics -> List.map (fun diagnostic -> diagnostic.Diag.code) diagnostics
+  | Error diagnostics -> List.map (fun diagnostic -> Diag.code_or_uncoded diagnostic) diagnostics
 
 let has_code code source = Alcotest.(check bool) source true (List.mem code (error_codes source))
+
+let expected_diagnostic span code summary cause next_step =
+  Printf.sprintf "%s: error[%s]: %s\n  Cause: %s\n  Next step: %s" span code summary cause next_step
+
+let e1221 span cause =
+  expected_diagnostic span "E1221" "A delimited construct is not closed" cause
+    "Close the construct with the expected delimiter."
+
+let e1225 span cause =
+  expected_diagnostic span "E1225" "A type or effect declaration is incomplete" cause
+    "Complete the declaration structure shown at this location."
+
+let e1236 span cause =
+  expected_diagnostic span "E1236" "An effect operation mode is invalid" cause
+    "Give each operation exactly one compatible `once` or `multi` mode."
 
 let lower_errors source =
   match Surface_lower.lower_tops (parse source) with
@@ -194,7 +209,9 @@ let test_duplicate_definition_names () =
   List.iter
     (fun source ->
       match lower_errors source with
-      | [ { Diag.code = "E0303"; span = Some span; _ } ] ->
+      | [ diagnostic ]
+        when Diag.code diagnostic = Some "E0303" && Option.is_some (Diag.span diagnostic) ->
+          let span = Option.get (Diag.span diagnostic) in
           Alcotest.(check int)
             (source ^ " duplicate starts at second definition")
             (String.index source ';' + 1)
@@ -308,18 +325,20 @@ let test_effect_declarations () =
   Alcotest.(check (list string))
     "mode diagnostics and spans"
     [
-      "bad-modes.jac:1:24-26: error[E1236]: surface effect operation `op` requires an explicit \
-       `once` or `multi` mode; during migration, choose `once` unless its handler deliberately \
-       searches, captures, or reuses continuations";
-      "bad-modes.jac:4:3-9: error[E1236]: surface effect operation `second` requires an explicit \
-       `once` or `multi` mode; during migration, choose `once` unless its handler deliberately \
-       searches, captures, or reuses continuations";
-      "bad-modes.jac:6:31-35: error[E1236]: `once` is already supplied by the effect-level \
-       shorthand; remove the operation-level mode";
-      "bad-modes.jac:7:30-35: error[E1236]: operation mode `multi` conflicts with the effect-level \
-       `once` shorthand";
-      "bad-modes.jac:8:30-34: error[E1236]: operation mode `once` is duplicated";
-      "bad-modes.jac:9:6-11: error[E1236]: effect-level mode `multi` conflicts with `once`";
+      e1236 "bad-modes.jac:1:24-26"
+        "surface effect operation `op` requires an explicit `once` or `multi` mode; during \
+         migration, choose `once` unless its handler deliberately searches, captures, or reuses \
+         continuations";
+      e1236 "bad-modes.jac:4:3-9"
+        "surface effect operation `second` requires an explicit `once` or `multi` mode; during \
+         migration, choose `once` unless its handler deliberately searches, captures, or reuses \
+         continuations";
+      e1236 "bad-modes.jac:6:31-35"
+        "`once` is already supplied by the effect-level shorthand; remove the operation-level mode";
+      e1236 "bad-modes.jac:7:30-35"
+        "operation mode `multi` conflicts with the effect-level `once` shorthand";
+      e1236 "bad-modes.jac:8:30-34" "operation mode `once` is duplicated";
+      e1236 "bad-modes.jac:9:6-11" "effect-level mode `multi` conflicts with `once`";
     ]
     rendered;
   let format source =
@@ -372,27 +391,24 @@ let test_declaration_recovery () =
       ( "type without constructor",
         "type Bad = |\nlater = 1\n",
         `Type,
-        [
-          "recover-decls.jac:2:1-6: error[E1225]: a type declaration requires a constructor after \
-           `|`";
-        ] );
+        [ e1225 "recover-decls.jac:2:1-6" "a type declaration requires a constructor after `|`" ] );
       ( "effect without operation or close",
         "once effect Bad where {\nlater = 1\n",
         `Effect,
-        [ "recover-decls.jac:2:1-6: error[E1221]: expected `}` before the next top-level item" ] );
+        [ e1221 "recover-decls.jac:2:1-6" "expected `}` before the next top-level item" ] );
       ( "field without type or close",
         "type Bad = | MkBad(field:\nlater = 1\n",
         `Type,
         [
-          "recover-decls.jac:2:1-6: error[E1225]: expected a field type in constructor `mk-bad` \
-           before the next top-level item";
+          e1225 "recover-decls.jac:2:1-6"
+            "expected a field type in constructor `mk-bad` before the next top-level item";
         ] );
       ( "parsed field type without close",
         "type Bad = | MkBad(field: (List T)\nlater = 1\n",
         `Type,
         [
-          "recover-decls.jac:2:1-6: error[E1225]: expected `)` to close constructor `mk-bad` \
-           before the next top-level item";
+          e1225 "recover-decls.jac:2:1-6"
+            "expected `)` to close constructor `mk-bad` before the next top-level item";
         ] );
     ]
   in

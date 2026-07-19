@@ -2,10 +2,13 @@ type run = Concurrency_owner.t
 type t = { run : run; id : Channel_contract.channel_id }
 
 let diagnostic detail =
-  Diag.error ~code:Concurrency_contract.task_escape_code
-    ~hint:"use the channel only inside the exact async.scope and evaluator run that opened it"
-    ("a ChannelHandle may not escape, outlive, or be used outside the structured scope that opened \
-      it: " ^ detail)
+  Diag.error ~domain:Concurrency ~code:Concurrency_contract.task_escape_code
+    ~summary:"This channel handle is outside its structured scope."
+    ~cause:
+      ("A ChannelHandle may not escape, outlive, or be used outside the structured scope that "
+     ^ "opened it: " ^ detail)
+    ~next_step:"Use the channel only inside the exact async.scope and evaluator run that opened it."
+    ~contrast:None ()
 
 let create ~run ~id = { run; id }
 

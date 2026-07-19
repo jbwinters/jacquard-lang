@@ -87,8 +87,7 @@ let test_once_second_resume_traps () =
   match apply_runtime_resume h resume 2 with
   | Error Runtime_err.Once_resumed_twice ->
       Alcotest.(check string)
-        "stable E0906 rendering"
-        "error[E0906]: a once continuation may be resumed at most once per captured instance"
+        "stable E0906 cause" "a once continuation may be resumed at most once per captured instance"
         (Runtime_err.to_string Runtime_err.Once_resumed_twice)
   | Error error ->
       Alcotest.failf "expected E0906 once-resumption defect, got %s" (Runtime_err.to_string error)

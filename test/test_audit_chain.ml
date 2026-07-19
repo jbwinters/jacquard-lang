@@ -57,7 +57,7 @@ let chain entries =
 let golden_bytes, golden_head = chain entries
 
 let expect_error label code = function
-  | Error ({ Diag.code = actual; _ } :: _) -> Alcotest.(check string) label code actual
+  | Error (diagnostic :: _) -> Alcotest.(check string) label code (Diag.code_or_uncoded diagnostic)
   | Error [] -> Alcotest.failf "%s returned an empty diagnostic list" label
   | Ok hash -> Alcotest.failf "%s accepted chain with head #%s" label (Hash.to_hex hash)
 
@@ -335,9 +335,12 @@ let test_concurrent_truncation_is_total () =
       let classified = ref 0 in
       (match Audit_chain.verify_file ~file ~expected_head:Audit_chain.genesis with
       | Ok _ -> Alcotest.fail "held invalid audit snapshot was accepted"
-      | Error ({ Diag.code = "E1301" | "E1306"; _ } :: _) -> ()
-      | Error ({ Diag.code; _ } :: _) ->
-          Alcotest.failf "held invalid audit snapshot returned unexpected %s" code
+      | Error (diagnostic :: _) when List.mem (Diag.code_or_uncoded diagnostic) [ "E1301"; "E1306" ]
+        ->
+          ()
+      | Error (diagnostic :: _) ->
+          Alcotest.failf "held invalid audit snapshot returned unexpected %s"
+            (Diag.code_or_uncoded diagnostic)
       | Error [] -> Alcotest.fail "concurrent read returned an empty diagnostic list"
       | exception exception_ ->
           Alcotest.failf "concurrent truncate escaped %s" (Printexc.to_string exception_));
@@ -347,9 +350,12 @@ let test_concurrent_truncation_is_total () =
       for _ = 1 to 64 do
         match Audit_chain.verify_file ~file ~expected_head:Audit_chain.genesis with
         | Ok _ -> incr classified
-        | Error ({ Diag.code = "E1301" | "E1306"; _ } :: _) -> incr classified
-        | Error ({ Diag.code; _ } :: _) ->
-            Alcotest.failf "concurrent truncate returned unexpected %s" code
+        | Error (diagnostic :: _)
+          when List.mem (Diag.code_or_uncoded diagnostic) [ "E1301"; "E1306" ] ->
+            incr classified
+        | Error (diagnostic :: _) ->
+            Alcotest.failf "concurrent truncate returned unexpected %s"
+              (Diag.code_or_uncoded diagnostic)
         | Error [] -> Alcotest.fail "concurrent read returned an empty diagnostic list"
         | exception exception_ ->
             Alcotest.failf "concurrent truncate escaped %s" (Printexc.to_string exception_)

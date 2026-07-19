@@ -93,11 +93,29 @@ let span_text meta =
   | None -> "an unknown source location"
 
 let span_text_in env meta = span_text (diagnostic_meta env meta)
-let reject ?hint ~code ~meta message = Error (Diag.error ?span:(Meta.span meta) ?hint ~code message)
+
+let reject ?next_step ~code ~meta cause =
+  let summary =
+    match code with
+    | "E0816" -> "A once resumption may be consumed twice on one execution path."
+    | "E0817" -> "A once resumption escapes its handler clause."
+    | _ -> raise (Diag.Bug_invalid_diagnostic ("unknown affine diagnostic code " ^ code))
+  in
+  let next_step =
+    Option.value next_step
+      ~default:
+        (match code with
+        | "E0816" -> "Make every possible execution path consume the resumption at most once."
+        | "E0817" -> "Consume, drop, or transfer the resumption within its affine clause boundary."
+        | _ -> assert false)
+  in
+  Error
+    (Diag.error ?span:(Meta.span meta) ~domain:Checker ~code ~summary ~cause ~next_step
+       ~contrast:None ())
 
 let reject_double first second =
   reject ~code:"E0816" ~meta:second.meta
-    ~hint:
+    ~next_step:
       "a once resumption may be dropped or moved, but it may be consumed at most once on each \
        possible execution path"
     (Printf.sprintf
@@ -120,7 +138,7 @@ let escape_message binder = function
 
 let reject_escape env ~binder ~meta context =
   reject ~code:"E0817" ~meta:(diagnostic_meta env meta)
-    ~hint:
+    ~next_step:
       "call the resumption once, drop it, or move it to a local parameter that is checked as \
        Resume-typed"
     (escape_message binder context)
@@ -458,7 +476,8 @@ let rec analyze ?(result_is_immediately_eliminated = false) (env : env) ~(contex
       match free_alias capture_env body with
       | Some (binder, occurrence) ->
           reject ~code:"E0817" ~meta:(diagnostic_meta env expr.meta)
-            ~hint:"pass the once resumption as a Resume-typed parameter instead of capturing it"
+            ~next_step:
+              "Pass the once resumption as a Resume-typed parameter instead of capturing it."
             (Printf.sprintf
                "once resumption `%s` escapes into a closure captured here (free use at %s)" binder
                (span_text_in env occurrence))
@@ -473,7 +492,7 @@ let rec analyze ?(result_is_immediately_eliminated = false) (env : env) ~(contex
             && not (env.state.defer_out_of_range_transfer && List.length args <> 1)
           then
             reject ~code:"E0817" ~meta:(diagnostic_meta env expr.meta)
-              ~hint:
+              ~next_step:
                 "immediately apply the resumption result exactly once as the function child of a \
                  nested application whose arguments are syntactic values"
               (Printf.sprintf
@@ -559,7 +578,7 @@ let rec analyze ?(result_is_immediately_eliminated = false) (env : env) ~(contex
       | None -> Ok zero
       | Some (binder, occurrence) ->
           reject ~code:"E0817" ~meta:(diagnostic_meta env expr.meta)
-            ~hint:"a once resumption cannot cross a quote boundary"
+            ~next_step:"Keep the once resumption outside quoted code."
             (Printf.sprintf
                "once resumption `%s` escapes into quoted code captured here (splice at %s)" binder
                (span_text_in env occurrence)))
@@ -615,7 +634,7 @@ and check_clause_capture env meta bound clause_body =
   | None -> Ok ()
   | Some (binder, occurrence) ->
       reject ~code:"E0817" ~meta:(diagnostic_meta env meta)
-        ~hint:"do not capture an outer once resumption in a nested handler clause"
+        ~next_step:"Do not capture an outer once resumption in a nested handler clause."
         (Printf.sprintf
            "once resumption `%s` escapes into a nested handler clause captured here (free use at \
             %s)"
@@ -636,7 +655,8 @@ and check_transfer callable index ~binder ~transfer_meta =
   match List.nth_opt callable.params index with
   | Some _ when callable.recursive ->
       reject ~code:"E0817" ~meta:transfer_meta
-        ~hint:"move the resumption only to a non-recursive local helper with a visibly affine body"
+        ~next_step:
+          "Move the resumption only to a non-recursive local helper with a visibly affine body."
         (Printf.sprintf
            "once resumption `%s` cannot be transferred to a recursive parameter because its call \
             count is not locally bounded"
@@ -686,15 +706,16 @@ and check_transfer callable index ~binder ~transfer_meta =
                anchored at this author-visible transfer, while its message may identify a durable
                logical helper occurrence. E0816 deliberately keeps its two distinct normalized
                helper witnesses. *)
-          if diagnostic.Diag.code = "E0817" then
-            Error { diagnostic with Diag.span = Meta.span transfer_meta }
+          if Diag.code diagnostic = Some "E0817" then
+            Error (Diag.with_span (Meta.span transfer_meta) diagnostic)
           else Error diagnostic
       | Error diagnostic -> Error diagnostic)
   | Some parameter ->
       let meta =
         match callable.diagnostic_source with Some _ -> transfer_meta | None -> parameter.meta
       in
-      reject ~code:"E0817" ~meta ~hint:"bind the transferred resumption to one variable or `_`"
+      reject ~code:"E0817" ~meta
+        ~next_step:"Bind the transferred resumption to one variable or `_`."
         (Printf.sprintf
            "once resumption `%s` cannot be transferred through a destructuring parameter" binder)
   | None ->

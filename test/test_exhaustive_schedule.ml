@@ -219,7 +219,9 @@ let test_budgets_are_structured_incomplete_results () =
       Alcotest.(check int) "all non-positive budgets are diagnosed" 3 (List.length diagnostics);
       Alcotest.(check bool)
         "budget validation uses the scheduler diagnostic family" true
-        (List.for_all (fun diagnostic -> String.equal diagnostic.Diag.code "E0908") diagnostics)
+        (List.for_all
+           (fun diagnostic -> String.equal (Diag.code_or_uncoded diagnostic) "E0908")
+           diagnostics)
   | Ok _ -> Alcotest.fail "non-positive exhaustive budgets were accepted"
 
 let test_decision_budget_keeps_short_alternative_worlds () =

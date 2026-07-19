@@ -33,6 +33,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdarg.h>
 
 _Static_assert(sizeof(void *) == 8, "the jacquard runtime is 64-bit only");
 
@@ -115,8 +116,38 @@ static inline jq_value jq_int_mod(jq_value a, jq_value b) {
   return jq_int(jq_int_val(a) % jq_int_val(b));
 }
 
-/* Fatal runtime error: message to stderr, exit 2 — the interpreter's
-   runtime-failure contract (jq_error.c). */
+/* Canonical native runtime diagnostics. The category fixes the same summary,
+   cause prefix, next step, and exit used by Runtime_err.to_diag. */
+typedef enum {
+  JQ_ERROR_MATCH,
+  JQ_ERROR_UNHANDLED,
+  JQ_ERROR_ARITY,
+  JQ_ERROR_ARITHMETIC,
+  JQ_ERROR_IO,
+  JQ_ERROR_TYPE,
+  JQ_ERROR_UNRESOLVED,
+  JQ_ERROR_EVAL,
+  JQ_ERROR_NATIVE
+} jq_error_kind;
+
+void jq_runtime_fail(jq_error_kind kind, const char *detail) __attribute__((noreturn));
+void jq_runtime_failf(jq_error_kind kind, const char *fmt, ...)
+    __attribute__((noreturn, format(printf, 2, 3)));
+void jq_runtime_vfailf(jq_error_kind kind, const char *fmt, va_list ap)
+    __attribute__((noreturn));
+/* Mark the dynamic extent of one likelihood-weighting model execution so an
+   ordinary runtime failure is reported through the driver's E0902 contract. */
+void jq_runtime_inference_enter(void);
+void jq_runtime_inference_leave(void);
+void jq_diagnostic_fail(int status, const char *code, const char *summary,
+                        const char *cause, const char *next_step)
+    __attribute__((noreturn));
+void jq_diagnostic_failf(int status, const char *code, const char *summary,
+                         const char *next_step, const char *cause_format, ...)
+    __attribute__((noreturn, format(printf, 5, 6)));
+
+/* Compatibility entry point for runtime sites that already carry a fully
+   categorized Runtime_err.to_string-style message. */
 void jq_runtime_error(const char *msg) __attribute__((noreturn));
 jq_value jq_int_div_checked(jq_value a, jq_value b);
 jq_value jq_int_mod_checked(jq_value a, jq_value b);

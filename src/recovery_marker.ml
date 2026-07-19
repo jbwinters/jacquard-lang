@@ -86,4 +86,8 @@ let top = function
   | Kernel.Decl declaration -> decl declaration
 
 let diagnostic boundary =
-  Diag.error ~code:"E1202" (Printf.sprintf "recovery holes are not valid input to %s" boundary)
+  Diag.error ~domain:Surface ~code:"E1202"
+    ~summary:"Recovered syntax cannot cross this semantic boundary."
+    ~cause:(Printf.sprintf "Recovery holes are not valid input to %s." boundary)
+    ~next_step:"Fix the reported syntax damage before checking, hashing, storing, or running it."
+    ~contrast:None ()

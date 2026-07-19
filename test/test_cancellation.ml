@@ -63,7 +63,11 @@ let test_routed_effect_preemption_and_fault_result () =
   Alcotest.(check (list int)) "preempted continuation destroyed" [ 30 ] !drops;
   let fault_scope, faulting = Structured_scope.create ~body_resume:1 |> ok in
   ignore (Structured_scope.checkout fault_scope faulting |> ok);
-  let injected = Diag.error ~code:"E9997" "injected routed-effect fault" in
+  let injected =
+    Diag.error ~domain:Runtime ~code:"E9997" ~summary:"Injected routed-effect fault"
+      ~cause:"The cancellation test injected a routed-effect failure."
+      ~next_step:"Propagate the injected diagnostic unchanged." ~contrast:None ()
+  in
   (match
      Structured_scope.route_effect fault_scope ~task:faulting ~resume:31 ~drop:ignore
        ~action:(fun () ->
@@ -73,7 +77,7 @@ let test_routed_effect_preemption_and_fault_result () =
    with
   | Structured_scope.Effect_routed { resume; result = Error [ diagnostic ] } ->
       Alcotest.(check int) "fault returns continuation" 31 resume;
-      Alcotest.(check string) "fault preserved" "E9997" diagnostic.code
+      Alcotest.(check string) "fault preserved" "E9997" (Diag.code_or_uncoded diagnostic)
   | Structured_scope.Effect_routed _ -> Alcotest.fail "wrong routed fault shape"
   | Structured_scope.Effect_cancelled _ -> Alcotest.fail "uncancelled routed action was preempted");
   Alcotest.(check int) "faulting action ran once" 1 !calls;

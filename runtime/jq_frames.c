@@ -67,8 +67,7 @@ static jq_value jq_hf_marker(jq_rt *rt, jq_block *f, jq_value v) {
   (void)rt;
   (void)f;
   (void)v;
-  fputs("jacquard runtime: handler frame re-entered as code (internal)\n", stderr);
-  exit(2);
+  jq_runtime_error("jacquard runtime: handler frame re-entered as code (internal)");
 }
 
 static bool is_hf(jq_block *f) { return jq_frame_code(f) == (jq_frame_fn)jq_hf_marker; }

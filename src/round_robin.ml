@@ -142,12 +142,12 @@ let invalid_capacity_value requested =
        { con = invalid_capacity_hash; name = "invalid-capacity"; args = [ Value.VInt requested ] })
 
 let runtime_of_diagnostics diagnostics =
-  let message =
-    String.concat "; " (List.map (fun diagnostic -> diagnostic.Diag.message) diagnostics)
-  in
+  let message = String.concat "; " (List.map Diag.cause diagnostics) in
   if
     List.exists
-      (fun diagnostic -> String.equal diagnostic.Diag.code Concurrency_contract.task_escape_code)
+      (fun diagnostic ->
+        Option.equal String.equal (Diag.code diagnostic)
+          (Some Concurrency_contract.task_escape_code))
       diagnostics
   then Runtime_err.Invalid_task_handle message
   else Runtime_err.Scheduler_error message
@@ -162,11 +162,15 @@ let result_text = function
 let zero_metrics =
   Structured_scope.{ open_scopes = 0; live_tasks = 0; runnable_tasks = 0; owned_resumes = 0 }
 
+let scheduler_diagnostic ?(summary = "Deterministic scheduler state is invalid")
+    ?(next_step = "Restart the schedule from a valid recorded or seeded state.") cause =
+  Diag.error ~domain:Concurrency ~code:"E0908" ~summary ~cause ~next_step ~contrast:None ()
+
 let seeded_chooser seed =
   let rng = Infer_dist.Rng.make seed in
   fun ~sequence:_ ~runnable ->
     match runnable with
-    | [] -> Error [ Diag.error ~code:"E0908" "seeded scheduler cannot choose from an empty queue" ]
+    | [] -> Error [ scheduler_diagnostic "seeded scheduler cannot choose from an empty queue" ]
     | _ -> Ok (List.nth runnable (Infer_dist.Rng.bounded_int rng (List.length runnable)))
 
 let control_configuration = function
@@ -180,7 +184,7 @@ let control_configuration = function
   | Replay_schedule trace ->
       Error
         [
-          Diag.error ~code:"E0908"
+          scheduler_diagnostic
             (Printf.sprintf "unsupported schedule scheduler identity %s" trace.scheduler);
         ]
   | Fork_schedule { trace; decision; chosen } ->
@@ -276,7 +280,7 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed i
       if !task_count >= bounds.max_tasks then (
         budget_refusal := Some Task_limit;
         let diagnostics =
-          [ Diag.error ~code:"E0908" (Printf.sprintf "task bound %d exceeded" bounds.max_tasks) ]
+          [ scheduler_diagnostic (Printf.sprintf "task bound %d exceeded" bounds.max_tasks) ]
         in
         fatal_diagnostics := diagnostics;
         Error diagnostics)
@@ -298,8 +302,7 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed i
       else
         Error
           [
-            Diag.error ~code:"E0908"
-              ("round-robin queue drifted from frozen " ^ relation ^ " relation");
+            scheduler_diagnostic ("round-robin queue drifted from frozen " ^ relation ^ " relation");
           ]
     in
     let append_after_suspend run handle =
@@ -458,13 +461,13 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed i
           let* result =
             match view.result with
             | Some result -> Ok result
-            | None -> Error [ Diag.error ~code:"E0908" "awakened await target is not terminal" ]
+            | None -> Error [ scheduler_diagnostic "awakened await target is not terminal" ]
           in
           Ok (Eval.apply_state ctx continuation [ task_result_value result ])
       | Global_nested_wait _ ->
-          Error [ Diag.error ~code:"E0908" "nested scope parent woke before scope completion" ]
+          Error [ scheduler_diagnostic "nested scope parent woke before scope completion" ]
       | Global_channel _ ->
-          Error [ Diag.error ~code:"E0908" "channel waiter woke without an operation result" ]
+          Error [ scheduler_diagnostic "channel waiter woke without an operation result" ]
     in
     let fail_task run handle error =
       task_errors := (run, handle, error) :: !task_errors;
@@ -786,7 +789,7 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed i
                         make_scope_run nested_scope nested_body parent
                           Concurrency_contract.Fail_fast
                         |> Result.map_error (fun error ->
-                            [ Diag.error ~code:"E0908" (Runtime_err.to_string error) ])
+                            [ scheduler_diagnostic (Runtime_err.to_string error) ])
                       in
                       run.next_nested <- run.next_nested + 1;
                       all_scopes := nested_run :: !all_scopes;
@@ -837,7 +840,7 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed i
                   | Ok value -> Ok value
                   | Error error ->
                       routed_error := Some error;
-                      Error [ Diag.error ~code:"E0908" (Runtime_err.to_string error) ])
+                      Error [ scheduler_diagnostic (Runtime_err.to_string error) ])
                 ~continue:(fun owned value ->
                   let continuation =
                     match owned with
@@ -852,13 +855,13 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed i
       | [] when Structured_scope.channel_deadlocked root_scope ->
           Error
             [
-              Diag.error ~code:"E0908"
+              scheduler_diagnostic
                 "async deadlock: all remaining live tasks are blocked on channels";
             ]
       | [] -> Ok ()
       | _ when !sequence >= bounds.max_decisions ->
           budget_refusal := Some Decision_limit;
-          Error [ Diag.error ~code:"E0908" "decision bound exceeded" ]
+          Error [ scheduler_diagnostic "decision bound exceeded" ]
       | runnable ->
           let* runnable_ids = queue_ids [] runnable in
           let* chosen_id =
@@ -870,7 +873,7 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed i
               { sequence = !sequence; runnable = runnable_ids; chosen = chosen_id }
           in
           let rec take_chosen acc = function
-            | [] -> Error [ Diag.error ~code:"E0908" "chosen replay task is not runnable" ]
+            | [] -> Error [ scheduler_diagnostic "chosen replay task is not runnable" ]
             | ((run, handle) as task) :: rest ->
                 let* task_id = id run handle in
                 if Concurrency_contract.compare_task_id task_id decision.chosen = 0 then
@@ -916,12 +919,12 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed i
           let* body =
             match body_view.result with
             | Some body -> Ok body
-            | None -> Error [ Diag.error ~code:"E0908" "root scope body did not terminate" ]
+            | None -> Error [ scheduler_diagnostic "root scope body did not terminate" ]
           in
           let* aggregate =
             match root_run.aggregate with
             | Some aggregate -> Ok aggregate
-            | None -> Error [ Diag.error ~code:"E0908" "root scope did not drain" ]
+            | None -> Error [ scheduler_diagnostic "root scope did not drain" ]
           in
           let* () = reject_results root_run body aggregate in
           let* schedule = Schedule_control.finish schedule_control in

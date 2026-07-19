@@ -72,9 +72,13 @@ validated Hash boundary.
   > (ref #d48426af83dd64417666d11346b732136f39950871f9c4708e947515f9eda3db con)
   > EOF_JQD
   $ jacquard check opaque-hash-ref.jqd 2>&1 | sed 's/opaque-hash-ref.jqd:[0-9]*:[0-9]*-[0-9]*/opaque-hash-ref.jqd:LINE:SPAN/'
-  opaque-hash-ref.jqd:LINE:SPAN: error[E0805]: error[E0601]: unknown hash d48426af83dd64417666d11346b732136f39950871f9c4708e947515f9eda3db
+  opaque-hash-ref.jqd:LINE:SPAN: error[E0805]: A referenced declaration has the wrong kind or is unavailable
+    Cause: E0601: The content store does not contain the requested hash. (unknown hash d48426af83dd64417666d11346b732136f39950871f9c4708e947515f9eda3db)
+    Next step: Use an available declaration of the required kind.
   $ jacquard build opaque-hash-ref.jqd -o opaque-native 2>&1 | sed 's/opaque-hash-ref.jqd:[0-9]*:[0-9]*-[0-9]*/opaque-hash-ref.jqd:LINE:SPAN/'
-  opaque-hash-ref.jqd:LINE:SPAN: error[E0805]: error[E0601]: unknown hash d48426af83dd64417666d11346b732136f39950871f9c4708e947515f9eda3db
+  opaque-hash-ref.jqd:LINE:SPAN: error[E0805]: A referenced declaration has the wrong kind or is unavailable
+    Cause: E0601: The content store does not contain the requested hash. (unknown hash d48426af83dd64417666d11346b732136f39950871f9c4708e947515f9eda3db)
+    Next step: Use an available declaration of the required kind.
 
 The flagship outputs, pinned so a both-engines regression cannot slip through
 the diff-only loop above:
@@ -162,7 +166,9 @@ gated-eval leg a pinned refusal.
   $ diff i.out n.out && echo identical
   identical
   $ jacquard build ../../demos/basics/m1-gated.jqd -o nope
-  error[E1102]: top-level expression 0 uses eval, which requires the interpreter tier
+  error[E1102]: Program requires the interpreter tier
+    Cause: top-level expression 0 uses eval, which requires the interpreter tier
+    Next step: Run this program with the interpreter.
   [1]
 
 Dist parity (task 72). The likelihood-weighting driver reproduces the
@@ -185,19 +191,28 @@ list (docs/native-plan.md records the boundary). The LW error legs:
   > EOF_JQD
   $ jacquard build lw-zero.jqd -o lw-zero > /dev/null
   $ ./lw-zero
-  arithmetic error: dist.sample-lw needs a positive sample count
+  error: Arithmetic operation failed
+    Cause: arithmetic error: dist.sample-lw needs a positive sample count
+    Next step: Correct the arithmetic inputs and run the program again.
   [2]
   $ cat > lw-empty.jqd <<'EOF_JQD'
   > (app (var dist.sample-lw) (lam () (let nonrec (pwild) (app (var observe) (app (var bernoulli) (lit 1.0)) (var false)) (lit 1))) (lit 5) (lit 42))
   > EOF_JQD
   $ jacquard build lw-empty.jqd -o lw-empty > /dev/null
-  $ ./lw-empty
-  arithmetic error: error[E0901]: the posterior is empty: every run is impossible under the observations
-  [2]
+  $ jacquard run lw-empty.jqd > lw-empty-i.out 2>&1; echo "interpreter exit $?"
+  interpreter exit 2
+  $ ./lw-empty > lw-empty-n.out 2>&1; echo "native exit $?"
+  native exit 2
+  $ diff lw-empty-i.out lw-empty-n.out && echo identical
+  identical
+  $ cat lw-empty-n.out
+  error[E0901]: The posterior is empty.
+    Cause: the posterior is empty: every run is impossible under the observations
+    Next step: Change the model or observations so at least one execution branch has nonzero weight.
 
 A model op that only an OUTER handler could cover is hidden by the run's
-isolation on both engines, and the failure flattens through the driver's
-diagnostics (E0902, exit 2) with the pseudo-effect named:
+isolation on both engines. The driver preserves E0902 as the primary diagnostic
+(exit 2) with the pseudo-effect named:
 
   $ cat > lw-outer-op.jqd <<'EOF_JQD'
   > (defeffect e-x ((tvar a)) (op xop () (tref int)))
@@ -207,9 +222,112 @@ diagnostics (E0902, exit 2) with the pseudo-effect named:
   >   (opclause xop () k (app (var k) (lit 1))))
   > EOF_JQD
   $ jacquard build lw-outer-op.jqd -o lw-outer-op > /dev/null
-  $ ./lw-outer-op
-  arithmetic error: error[E0902]: unhandled effect (not handled during inference): operation `xop` reached the root without a handler
-  [2]
+  $ jacquard run lw-outer-op.jqd > lw-outer-i.out 2>&1; echo "interpreter exit $?"
+  interpreter exit 2
+  $ ./lw-outer-op > lw-outer-n.out 2>&1; echo "native exit $?"
+  native exit 2
+  $ diff lw-outer-i.out lw-outer-n.out && echo identical
+  identical
+  $ cat lw-outer-n.out
+  error[E0902]: Probabilistic inference stopped on a runtime failure.
+    Cause: unhandled effect (not handled during inference): operation `xop` reached the root without a handler
+    Next step: Correct the reported model runtime failure and rerun inference.
+
+Ordinary runtime failures inside the model cross the same driver boundary;
+they do not escape as code-less native runtime diagnostics:
+
+  $ cat > lw-runtime-error.jqd <<'EOF_JQD'
+  > (app (var dist.sample-lw) (lam () (app (var div) (lit 1) (lit 0))) (lit 3) (lit 42))
+  > EOF_JQD
+  $ jacquard build lw-runtime-error.jqd -o lw-runtime-error > /dev/null
+  $ jacquard run lw-runtime-error.jqd > lw-runtime-i.out 2>&1; echo "interpreter exit $?"
+  interpreter exit 2
+  $ ./lw-runtime-error > lw-runtime-n.out 2>&1; echo "native exit $?"
+  native exit 2
+  $ diff lw-runtime-i.out lw-runtime-n.out && echo identical
+  identical
+  $ cat lw-runtime-n.out
+  error[E0902]: Probabilistic inference stopped on a runtime failure.
+    Cause: arithmetic error: division by zero
+    Next step: Correct the reported model runtime failure and rerun inference.
+
+An ordinary failure inside a nested driver contributes one E0902 layer per
+active likelihood-weighting boundary:
+
+  $ cat > lw-nested-runtime-error.jqd <<'EOF_JQD'
+  > (app (var dist.sample-lw)
+  >   (lam ()
+  >     (app (var dist.sample-lw)
+  >       (lam () (app (var div) (lit 1) (lit 0)))
+  >       (lit 2) (lit 11)))
+  >   (lit 2) (lit 42))
+  > EOF_JQD
+  $ jacquard build lw-nested-runtime-error.jqd -o lw-nested-runtime-error > /dev/null
+  $ jacquard run lw-nested-runtime-error.jqd > lw-nested-runtime-i.out 2>&1; echo "interpreter exit $?"
+  interpreter exit 2
+  $ ./lw-nested-runtime-error > lw-nested-runtime-n.out 2>&1; echo "native exit $?"
+  native exit 2
+  $ diff lw-nested-runtime-i.out lw-nested-runtime-n.out && echo identical
+  identical
+  $ cat lw-nested-runtime-n.out
+  error[E0902]: Probabilistic inference stopped on a runtime failure.
+    Cause: E0902: Probabilistic inference stopped on a runtime failure. (arithmetic error: division by zero)
+    Next step: Correct the reported model runtime failure and rerun inference.
+
+Nested drivers retain their dynamic boundary too: an inner typed E0901 becomes
+the outer model's compact E0902 cause on both engines.
+
+  $ cat > lw-nested-error.jqd <<'EOF_JQD'
+  > (app (var dist.sample-lw)
+  >   (lam ()
+  >     (app (var dist.sample-lw)
+  >       (lam ()
+  >         (let nonrec (pwild)
+  >           (app (var observe) (app (var bernoulli) (lit 1.0)) (var false))
+  >           (lit 1)))
+  >       (lit 2) (lit 11)))
+  >   (lit 2) (lit 42))
+  > EOF_JQD
+  $ jacquard build lw-nested-error.jqd -o lw-nested-error > /dev/null
+  $ jacquard run lw-nested-error.jqd > lw-nested-i.out 2>&1; echo "interpreter exit $?"
+  interpreter exit 2
+  $ ./lw-nested-error > lw-nested-n.out 2>&1; echo "native exit $?"
+  native exit 2
+  $ diff lw-nested-i.out lw-nested-n.out && echo identical
+  identical
+  $ cat lw-nested-n.out
+  error[E0902]: Probabilistic inference stopped on a runtime failure.
+    Cause: E0901: The posterior is empty. (the posterior is empty: every run is impossible under the observations)
+    Next step: Correct the reported model runtime failure and rerun inference.
+
+Three nested drivers add both required outer wrappers around the innermost
+E0901 projection:
+
+  $ cat > lw-triple-empty.jqd <<'EOF_JQD'
+  > (app (var dist.sample-lw)
+  >   (lam ()
+  >     (app (var dist.sample-lw)
+  >       (lam ()
+  >         (app (var dist.sample-lw)
+  >           (lam ()
+  >             (let nonrec (pwild)
+  >               (app (var observe) (app (var bernoulli) (lit 1.0)) (var false))
+  >               (lit 1)))
+  >           (lit 2) (lit 7)))
+  >       (lit 2) (lit 11)))
+  >   (lit 2) (lit 42))
+  > EOF_JQD
+  $ jacquard build lw-triple-empty.jqd -o lw-triple-empty > /dev/null
+  $ jacquard run lw-triple-empty.jqd > lw-triple-i.out 2>&1; echo "interpreter exit $?"
+  interpreter exit 2
+  $ ./lw-triple-empty > lw-triple-n.out 2>&1; echo "native exit $?"
+  native exit 2
+  $ diff lw-triple-i.out lw-triple-n.out && echo identical
+  identical
+  $ cat lw-triple-n.out
+  error[E0902]: Probabilistic inference stopped on a runtime failure.
+    Cause: E0902: Probabilistic inference stopped on a runtime failure. (E0901: The posterior is empty. (the posterior is empty: every run is impossible under the observations))
+    Next step: Correct the reported model runtime failure and rerun inference.
 
 The root sampling grant: --allow dist with --seed draws the interpreter's
 exact stream; observe at the root is the interpreter's E0904 defect:
@@ -229,7 +347,9 @@ exact stream; observe at the root is the interpreter's E0904 defect:
   > EOF_JQD
   $ jacquard build obs.jqd -o obs > /dev/null
   $ ./obs --allow dist
-  error[E0904]: observe reached the sampling root handler; observation requires an inference driver (use jacquard infer)
+  error[E0904]: Observation is invalid at the sampling root
+    Cause: observe reached the sampling root handler; observation requires an inference driver (use jacquard infer)
+    Next step: Move the observation under an inference handler.
   [2]
 
 Row erasure can also smuggle a wrongly-typed value into a GRANT (the op
@@ -259,13 +379,17 @@ interpreter-only until task 73's reader port, loudly:
   $ ./haiku --allow infer
   "<stub completion for: write a haiku>"
   $ ./haiku --allow infer --infer-cache cache-dir
-  error[E1103]: native binaries do not cache completions yet (the cache entry format needs task 73's reader); rerun without --infer-cache
+  error[E1103]: Native build could not complete
+    Cause: Native binaries do not cache completions yet because the cache entry format needs the native reader.
+    Next step: Run without --infer-cache.
   [1]
 
 --dry-run is an interpreter run; build rejects it up front:
 
   $ jacquard build die.jqd -o nope --dry-run
-  error[E1103]: jacquard build does not support --dry-run; the consent sheet is an interpreter run (use jacquard run --dry-run)
+  error[E1103]: Native build could not complete
+    Cause: jacquard build does not support --dry-run; the consent sheet is an interpreter run.
+    Next step: Correct the native toolchain or build input and try again.
   [1]
 
 An effectful top-level definition is refused by the checker before either
@@ -278,9 +402,10 @@ reachable from the surface:
   >   (let nonrec (pwild) (app (var tick)) (lit 7)))))
   > (var poked)
   > EOF_JQD
-  $ jacquard build iso.jqd -o nope 2>&1 | tail -2
-  iso.jqd:2:11-3:49: error[E0815]: top-level definition `poked` performs the `ticker` effect while being defined
-    hint: wrap the body in a lambda and perform the effect when called
+  $ jacquard build iso.jqd -o nope 2>&1 | tail -3
+  iso.jqd:2:11-3:49: error[E0815]: A top-level definition performs effects
+    Cause: top-level definition `poked` performs the `ticker` effect while being defined
+    Next step: Wrap the body in a lambda and perform the effect when called.
 
 EL.0's dynamic once backstop is tested below the future mode-syntax layer. Both probes capture a
 real non-empty continuation, resume it once, then attempt the same captured instance again. The C
@@ -295,7 +420,9 @@ probe goes through jq_handle2/jq_perform/jq_dispatch rather than fabricating an 
   $ diff -u once-interpreter.out once-native.out && echo identical
   identical
   $ cat once-interpreter.out
-  error[E0906]: a once continuation may be resumed at most once per captured instance
+  error[E0906]: A once continuation was resumed more than once
+    Cause: a once continuation may be resumed at most once per captured instance
+    Next step: Resume each captured once continuation at most once.
 
 EL.2 rejects a statically visible duplicate before either engine runs. EL.0's probes above remain
 the dynamic backstop for unchecked or host-driven paths, while this declared Once clause names both
@@ -316,8 +443,9 @@ source spans at the ordinary check/build boundary.
   $ diff -u declared-run.out declared-build.out && echo identical
   identical
   $ cat declared-run.out
-  declared-once.jqd:6:7-28: error[E0816]: once resumption `k` may be consumed twice on one possible execution path; first consumption at declared-once.jqd:5:25-46, second consumption at declared-once.jqd:6:7-28
-    hint: a once resumption may be dropped or moved, but it may be consumed at most once on each possible execution path
+  declared-once.jqd:6:7-28: error[E0816]: A once resumption may be consumed twice on one execution path.
+    Cause: once resumption `k` may be consumed twice on one possible execution path; first consumption at declared-once.jqd:5:25-46, second consumption at declared-once.jqd:6:7-28
+    Next step: a once resumption may be dropped or moved, but it may be consumed at most once on each possible execution path
 
 A Multi branch outside code that enters a Once handler is legal: each branch enters the handler
 afresh and captures its own Once continuation. Moving the Multi perform into the already-captured
@@ -370,7 +498,9 @@ parity.
   $ ./illegal-native > illegal-n.out 2>&1; echo "native exit $?"
   native exit 2
   $ diff -u illegal-i.out illegal-n.out && cat illegal-i.out
-  error[E0906]: a once continuation may be resumed at most once per captured instance
+  error[E0906]: A once continuation was resumed more than once
+    Cause: a once continuation may be resumed at most once per captured instance
+    Next step: Resume each captured once continuation at most once.
 EL.3 generates one statically hostile handler for every reviewed Once operation in the shipped
 prelude. Each program is a lambda, so polymorphic operation parameters need no fabricated values;
 the handler recursively performs the same operation to obtain a correctly typed resume value, then

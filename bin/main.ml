@@ -16,8 +16,88 @@ let exit_diags = 1
 let exit_runtime = 2
 let exit_unhandled = 3
 
+type diagnostic_format = Text | Json_v1
+
+let selected_diagnostic_format = ref Text
+
+let print_diagnostic diagnostic =
+  prerr_endline
+    (match !selected_diagnostic_format with
+    | Text -> Diag.to_string diagnostic
+    | Json_v1 -> Diag.to_json_string diagnostic)
+
+let print_runtime_error error = print_diagnostic (Runtime_err.to_diag error)
+
+let diagnostic_domain code =
+  if String.starts_with ~prefix:"E01" code then Diag.Reader
+  else if String.starts_with ~prefix:"E06" code then Diag.Store
+  else if String.starts_with ~prefix:"E07" code then Diag.Prelude
+  else if String.starts_with ~prefix:"E08" code then Diag.Checker
+  else if String.equal code "E0908" then Diag.Concurrency
+  else if String.equal code "E0903" then Diag.Inference
+  else if String.starts_with ~prefix:"E09" code then Diag.Runtime
+  else if String.starts_with ~prefix:"E10" code then Diag.Warp
+  else if String.starts_with ~prefix:"E11" code then Diag.Native
+  else if List.mem code [ "E1301"; "E1302"; "E1303" ] then Diag.Export
+  else if String.starts_with ~prefix:"E13" code then Diag.Audit
+  else if String.starts_with ~prefix:"E14" code || String.starts_with ~prefix:"E15" code then
+    Diag.Governance
+  else Diag.Cli
+
+let diagnostic_summary = function
+  | "E0104" -> "Command argument contains an invalid bootstrap form or value"
+  | "E0606" -> "Requested store is unavailable"
+  | "E0608" -> "Store operation could not complete"
+  | "E0609" -> "Semantic diff input could not be read"
+  | "E0610" -> "Semantic diff input is invalid"
+  | "E0702" -> "Required prelude contents are unavailable"
+  | "E0704" -> "Store add accepts declarations only"
+  | "E0801" -> "Compared model result types do not agree"
+  | "E0903" -> "Model file has no expression"
+  | "E0904" -> "Observation is invalid at the sampling root"
+  | "E0908" -> "Schedule configuration or trace is invalid"
+  | "E1001" -> "Test file has an expression at top level"
+  | "E1002" -> "Dry-run cannot sandbox eval"
+  | "E1101" -> "Program is outside the native v1 compilation subset"
+  | "E1102" -> "Program requires the interpreter tier"
+  | "E1103" -> "Native build could not complete"
+  | "E1301" -> "Export destination already exists"
+  | "E1302" -> "Export input could not be read"
+  | "E1303" -> "Export output could not be written"
+  | "E1307" -> "Audit operation could not complete"
+  | "E1516" -> "Action evidence still requires operator reconciliation"
+  | code -> "Command failed (" ^ code ^ ")"
+
+let diagnostic_next_step = function
+  | "E0104" -> "Correct the command argument and try again."
+  | "E0606" -> "Pass the path to an existing Jacquard store."
+  | "E0608" -> "Correct the store state described here and try again."
+  | "E0609" | "E0610" -> "Pass readable, valid semantic-diff inputs."
+  | "E0702" -> "Load the complete prelude and try again."
+  | "E0704" -> "Pass declarations to `store add`, not a top-level expression."
+  | "E0801" -> "Compare models whose result types agree."
+  | "E0903" -> "Add one model expression to the file."
+  | "E0904" -> "Move the observation under an inference handler."
+  | "E0908" -> "Correct the schedule option or trace described here."
+  | "E1001" -> "Keep test files declaration-only."
+  | "E1002" -> "Run this program without --dry-run or remove eval from its authority row."
+  | "E1101" -> "Run the program with the interpreter or rewrite the unsupported construct."
+  | "E1102" -> "Run this program with the interpreter."
+  | "E1103" -> "Correct the native toolchain or build input and try again."
+  | "E1301" | "E1302" | "E1303" -> "Correct the export path or input and try again."
+  | "E1307" -> "Correct the audit input or destination and try again."
+  | "E1516" -> "Reconcile the remaining action evidence before retrying or rolling back."
+  | _ -> "Correct the command input and try again."
+
+let cli_diagnostic ?hint ?summary ~code cause =
+  Diag.error ~domain:(diagnostic_domain code) ~code
+    ~summary:(Option.value summary ~default:(diagnostic_summary code))
+    ~cause
+    ~next_step:(Option.value hint ~default:(diagnostic_next_step code))
+    ~contrast:None ()
+
 let print_diags ds =
-  List.iter (fun d -> prerr_endline (Diag.to_string d)) ds;
+  List.iter print_diagnostic ds;
   exit_diags
 
 let read_file path =
@@ -75,8 +155,7 @@ let validate_parsed_top = function
   | Bootstrap_form form -> Kernel.of_form form
   | Surface_top top -> Ok top
 
-let print_warnings warnings =
-  List.iter (fun warning -> prerr_endline (Diag.to_string warning)) warnings
+let print_warnings warnings = List.iter print_diagnostic warnings
 
 (** [resolve_source_tops] parses, surface-lowers when selected, validates, and resolves a whole
     source artifact in order. Declarations are installed in [store] as they are encountered so later
@@ -193,7 +272,8 @@ let schedule_file_error action path message =
     else message
   in
   [
-    Diag.error ~code:"E0908" (Printf.sprintf "cannot %s schedule trace %s: %s" action path message);
+    cli_diagnostic ~code:"E0908"
+      (Printf.sprintf "cannot %s schedule trace %s: %s" action path message);
   ]
 
 let load_schedule path =
@@ -206,7 +286,8 @@ let load_schedule path =
 
 let parse_schedule_fork spec =
   match String.index_opt spec '=' with
-  | None -> Error [ Diag.error ~code:"E0908" "invalid --schedule-fork (expected DECISION=TASK)" ]
+  | None ->
+      Error [ cli_diagnostic ~code:"E0908" "invalid --schedule-fork (expected DECISION=TASK)" ]
   | Some index ->
       let decision = String.sub spec 0 index in
       let task = String.sub spec (index + 1) (String.length spec - index - 1) in
@@ -214,14 +295,15 @@ let parse_schedule_fork spec =
         (match int_of_string_opt decision with
         | Some decision when decision >= 0 -> Ok decision
         | Some _ | None ->
-            Error [ Diag.error ~code:"E0908" "schedule fork decision must be non-negative" ])
+            Error [ cli_diagnostic ~code:"E0908" "schedule fork decision must be non-negative" ])
         (fun decision ->
           Result.map (fun chosen -> (decision, chosen)) (Schedule_trace.task_id_of_string task))
 
 let schedule_mode replay_file fork_spec =
   match (replay_file, fork_spec) with
   | None, None -> Ok None
-  | None, Some _ -> Error [ Diag.error ~code:"E0908" "--schedule-fork requires --schedule-replay" ]
+  | None, Some _ ->
+      Error [ cli_diagnostic ~code:"E0908" "--schedule-fork requires --schedule-replay" ]
   | Some path, None ->
       Result.map (fun trace -> Some (Round_robin.Replay_schedule trace)) (load_schedule path)
   | Some path, Some spec ->
@@ -269,7 +351,7 @@ let run_cmd file allows prelude store_dir seed infer_cache origin dry_run schedu
                       else
                         Error
                           [
-                            Diag.error ~code:"E0908"
+                            cli_diagnostic ~code:"E0908"
                               (Printf.sprintf
                                  "schedule record/replay requires exactly one top-level \
                                   expression, found %d"
@@ -326,15 +408,15 @@ let run_cmd file allows prelude store_dir seed infer_cache origin dry_run schedu
                         match Check.check_top cctx (Kernel.Expr e) with
                         | Error ds -> Error ds
                         | Ok { Check.row; warnings; _ } -> (
-                            List.iter (fun w -> prerr_endline (Diag.to_string w)) warnings;
+                            List.iter print_diagnostic warnings;
                             (if dry_run then
                                let r = Types.repr_row (Option.value row ~default:Types.empty_row) in
                                match eval_hash with
                                | Some eh when List.exists (Hash.equal eh) r.Types.effects ->
                                    raise
                                      (Invalid_argument
-                                        "error[E1002]: --dry-run cannot sandbox eval: eval'd code \
-                                         runs at root authority and bypasses the dry handlers")
+                                        "--dry-run cannot sandbox eval: eval'd code runs at root \
+                                         authority and bypasses the dry handlers")
                                | _ -> ());
                             match
                               Check.manifest_errors cctx ~grantable:Prelude.grantable_names ~granted
@@ -371,9 +453,8 @@ let run_cmd file allows prelude store_dir seed infer_cache origin dry_run schedu
                       in
                       match process_forms ?origin ~syntax store ~file source ~on_expr with
                       | exception Invalid_argument msg
-                        when String.length msg > 6 && String.sub msg 0 5 = "error" ->
-                          prerr_endline msg;
-                          exit_diags
+                        when String.starts_with ~prefix:"--dry-run cannot sandbox eval" msg ->
+                          print_diags [ cli_diagnostic ~code:"E1002" msg ]
                       | Ok () -> (
                           let write_result =
                             match (schedule_record, !completed_schedule) with
@@ -382,7 +463,8 @@ let run_cmd file allows prelude store_dir seed infer_cache origin dry_run schedu
                             | Some _, None ->
                                 Error
                                   [
-                                    Diag.error ~code:"E0908" "scheduled execution produced no trace";
+                                    cli_diagnostic ~code:"E0908"
+                                      "scheduled execution produced no trace";
                                   ]
                           in
                           match write_result with
@@ -403,19 +485,17 @@ let run_cmd file allows prelude store_dir seed infer_cache origin dry_run schedu
                       | Error _ when !runtime_failure <> None -> (
                           match Option.get !runtime_failure with
                           | Runtime_err.Unhandled _ as e ->
-                              prerr_endline (Runtime_err.to_string e);
+                              print_runtime_error e;
                               exit_unhandled
                           | Runtime_err.Observe_at_root as e ->
-                              prerr_endline
-                                (Diag.to_string
-                                   (Diag.error ~code:"E0904" (Runtime_err.to_string e)));
+                              print_runtime_error e;
                               exit_runtime
                           | e ->
-                              prerr_endline (Runtime_err.to_string e);
+                              print_runtime_error e;
                               exit_runtime)
                       | Error ds when !refused ->
                           (* the capability refusal keeps its own exit code, now at the type level *)
-                          List.iter (fun d -> prerr_endline (Diag.to_string d)) ds;
+                          List.iter print_diagnostic ds;
                           exit_unhandled
                       | Error ds -> print_diags ds)))))
 
@@ -441,7 +521,7 @@ let check_cmd file prelude print_sigs manifest origin syntax =
             match Check.check_top cctx top with
             | Error ds -> Error ds
             | Ok { Check.names; warnings; row } -> (
-                List.iter (fun w -> prerr_endline (Diag.to_string w)) warnings;
+                List.iter print_diagnostic warnings;
                 if print_sigs then
                   List.iter
                     (fun (n, s) ->
@@ -504,7 +584,7 @@ let check_cmd file prelude print_sigs manifest origin syntax =
                             match Resolve.resolve_w (Store.names_view store) top with
                             | Error ds -> print_diags ds
                             | Ok (resolved, warns) -> (
-                                List.iter (fun w -> prerr_endline (Diag.to_string w)) warns;
+                                List.iter print_diagnostic warns;
                                 match on_top resolved with
                                 | Error ds -> print_diags ds
                                 | Ok () -> (
@@ -563,7 +643,7 @@ let load_model store ~syntax ~file =
         | [] -> (
             match last with
             | Some e -> Ok e
-            | None -> Error [ Diag.error ~code:"E0903" "the model file has no expression" ])
+            | None -> Error [ cli_diagnostic ~code:"E0903" "the model file has no expression" ])
         | parsed :: rest -> (
             match validate_parsed_top parsed with
             | Error ds -> Error ds
@@ -797,7 +877,8 @@ let dist_diff_cmd model_a model_b tolerance cache_dir no_cache sweep prelude =
               | [] -> (
                   match last with
                   | Some e -> Ok e
-                  | None -> Error [ Diag.error ~code:"E0903" (file ^ " has no model expression") ])
+                  | None ->
+                      Error [ cli_diagnostic ~code:"E0903" (file ^ " has no model expression") ])
               | f :: rest -> (
                   match Kernel.of_form f with
                   | Error ds -> Error ds
@@ -832,7 +913,8 @@ let dist_diff_cmd model_a model_b tolerance cache_dir no_cache sweep prelude =
                       match last with
                       | Some t -> Ok t
                       | None ->
-                          Error [ Diag.error ~code:"E0903" (file ^ " has no model expression") ])
+                          Error [ cli_diagnostic ~code:"E0903" (file ^ " has no model expression") ]
+                      )
                   | f :: rest -> (
                       match Kernel.of_form f with
                       | Error ds -> Error ds
@@ -887,7 +969,7 @@ let dist_diff_cmd model_a model_b tolerance cache_dir no_cache sweep prelude =
         | Ok ta, Ok tb when ta <> tb ->
             Some
               [
-                Diag.error ~code:"E0801"
+                cli_diagnostic ~code:"E0801"
                   (Printf.sprintf
                      "dist-diff: model result types differ (%s : %s, %s : %s); probabilities over \
                       different types are not comparable"
@@ -924,7 +1006,7 @@ let log_entries_of_file file =
   | Ok f ->
       Error
         [
-          Diag.error ~code:"E0104"
+          cli_diagnostic ~code:"E0104"
             (Printf.sprintf "%s is not a log payload (head %s)" file f.Form.head);
         ]
 
@@ -965,7 +1047,7 @@ let replay_cmd log_file program forks to_n compare prelude =
             print_diags
               (List.map
                  (fun spec ->
-                   Diag.error ~code:"E0104"
+                   cli_diagnostic ~code:"E0104"
                      (Printf.sprintf "invalid --fork %S (expected N=FORM with a parseable form)"
                         spec))
                  bad)
@@ -1056,7 +1138,7 @@ let replay_cmd log_file program forks to_n compare prelude =
                   print_endline (Value.show v);
                   Ok ()
               | Error err ->
-                  prerr_endline (Runtime_err.to_string err);
+                  print_runtime_error err;
                   Error []
             in
             match
@@ -1103,13 +1185,13 @@ let test_cmd files allows prelude cache_dir no_cache coverage seed samples exhau
     | Some count, _ when count <= 0 ->
         Error
           [
-            Diag.error ~code:"E0908" ~hint:"pass --schedules N with N greater than zero"
+            cli_diagnostic ~code:"E0908" ~hint:"pass --schedules N with N greater than zero"
               "--schedules must be positive";
           ]
     | Some _, None ->
         Error
           [
-            Diag.error ~code:"E0908" ~hint:"add an explicit --seed S"
+            cli_diagnostic ~code:"E0908" ~hint:"add an explicit --seed S"
               "--schedules requires --seed so every interleaving is reproducible";
           ]
     | Some schedules, Some seed ->
@@ -1173,7 +1255,7 @@ let test_cmd files allows prelude cache_dir no_cache coverage seed samples exhau
                           | Ok (Kernel.Expr _) ->
                               Error
                                 [
-                                  Diag.error ~code:"E1001"
+                                  cli_diagnostic ~code:"E1001"
                                     (Printf.sprintf
                                        "%s: test files hold declarations only; found a top-level \
                                         expression"
@@ -1209,7 +1291,7 @@ let test_cmd files allows prelude cache_dir no_cache coverage seed samples exhau
                             match Check.check_top cctx (Kernel.Decl d) with
                             | Error ds -> Error ds
                             | Ok { Check.warnings; _ } ->
-                                List.iter (fun w -> prerr_endline (Diag.to_string w)) warnings;
+                                List.iter print_diagnostic warnings;
                                 check_loaded rest)
                       in
                       match check_loaded (List.rev !loaded) with
@@ -1217,11 +1299,11 @@ let test_cmd files allows prelude cache_dir no_cache coverage seed samples exhau
                       | Ok () -> (
                           match Store.lookup_kind store "test.run" Resolve.KTerm with
                           | None ->
-                              print_diags [ Diag.error ~code:"E0702" "prelude has no test.run" ]
+                              print_diags [ cli_diagnostic ~code:"E0702" "prelude has no test.run" ]
                           | Some { Resolve.hash = tr; _ } -> (
                               match Warp.value_of ctx tr with
                               | Error e ->
-                                  prerr_endline (Runtime_err.to_string e);
+                                  print_runtime_error e;
                                   exit_runtime
                               | Ok test_run -> (
                                   let discovered = Warp.discover store cctx in
@@ -1267,7 +1349,8 @@ let test_cmd files allows prelude cache_dir no_cache coverage seed samples exhau
                                   in
                                   match go discovered with
                                   | Error e ->
-                                      prerr_endline ("test runner error: " ^ e);
+                                      print_runtime_error
+                                        (Runtime_err.Type_error ("test runner error: " ^ e));
                                       exit_runtime
                                   | Ok () ->
                                       Printf.printf "%d passed, %d failed, %d skipped, %d refused\n"
@@ -1301,17 +1384,21 @@ let read_diff_source file =
   try Ok (read_file file)
   with Sys_error message ->
     Error
-      [ Diag.error ~code:"E0609" (Printf.sprintf "cannot read diff source %s: %s" file message) ]
+      [
+        cli_diagnostic ~code:"E0609" (Printf.sprintf "cannot read diff source %s: %s" file message);
+      ]
 
 let open_diff_store dir =
   try Store.open_store dir with
   | Sys_error message ->
       Error
-        [ Diag.error ~code:"E0609" (Printf.sprintf "cannot read diff store %s: %s" dir message) ]
+        [
+          cli_diagnostic ~code:"E0609" (Printf.sprintf "cannot read diff store %s: %s" dir message);
+        ]
   | Unix.Unix_error (error, operation, path) ->
       Error
         [
-          Diag.error ~code:"E0609"
+          cli_diagnostic ~code:"E0609"
             (Printf.sprintf "cannot read diff store %s: %s (%s, %s)" dir (Unix.error_message error)
                operation path);
         ]
@@ -1331,7 +1418,7 @@ let load_diff_source ~prelude ~syntax file =
                ~on_expr:(fun _ ->
                  Error
                    [
-                     Diag.error ~code:"E0610"
+                     cli_diagnostic ~code:"E0610"
                        (Printf.sprintf
                           "%s: diff source files must contain declarations only; found a top-level \
                            expression"
@@ -1350,25 +1437,27 @@ let render_diff ~syntax ~old_side ~new_side =
 let diff_cmd operand_a operand_b syntax prelude =
   match (classify_diff_operand operand_a, classify_diff_operand operand_b) with
   | Missing, Store_dir ->
-      print_diags [ Diag.error ~code:"E0606" (Printf.sprintf "store %s does not exist" operand_a) ]
+      print_diags
+        [ cli_diagnostic ~code:"E0606" (Printf.sprintf "store %s does not exist" operand_a) ]
   | Store_dir, Missing ->
-      print_diags [ Diag.error ~code:"E0606" (Printf.sprintf "store %s does not exist" operand_b) ]
+      print_diags
+        [ cli_diagnostic ~code:"E0606" (Printf.sprintf "store %s does not exist" operand_b) ]
   | Missing, _ ->
       print_diags
-        [ Diag.error ~code:"E0606" (Printf.sprintf "diff operand %s does not exist" operand_a) ]
+        [ cli_diagnostic ~code:"E0606" (Printf.sprintf "diff operand %s does not exist" operand_a) ]
   | _, Missing ->
       print_diags
-        [ Diag.error ~code:"E0606" (Printf.sprintf "diff operand %s does not exist" operand_b) ]
+        [ cli_diagnostic ~code:"E0606" (Printf.sprintf "diff operand %s does not exist" operand_b) ]
   | Unsupported, _ | _, Unsupported ->
       print_diags
         [
-          Diag.error ~code:"E0609"
+          cli_diagnostic ~code:"E0609"
             "diff operands must both be regular source files or both be store directories";
         ]
   | Source_file, Store_dir | Store_dir, Source_file ->
       print_diags
         [
-          Diag.error ~code:"E0609"
+          cli_diagnostic ~code:"E0609"
             "cannot compare a source file with a store directory; pass two files or two stores";
         ]
   | Store_dir, Store_dir -> (
@@ -1408,7 +1497,7 @@ let store_add_cmd store_dir file origin =
   with_store store_dir (fun store ->
       match
         process_forms ?origin ~syntax:Bootstrap store ~file (read_file file) ~on_expr:(fun _ ->
-            Error [ Diag.error ~code:"E0704" "store add expects declarations only" ])
+            Error [ cli_diagnostic ~code:"E0704" "store add expects declarations only" ])
       with
       | Ok () ->
           print_endline "ok";
@@ -1418,7 +1507,7 @@ let store_add_cmd store_dir file origin =
 let store_name_cmd store_dir name hex =
   with_store store_dir (fun store ->
       match Hash.of_hex hex with
-      | None -> print_diags [ Diag.error ~code:"E0104" "invalid hash" ]
+      | None -> print_diags [ cli_diagnostic ~code:"E0104" "invalid hash" ]
       | Some h -> (
           match Store.bind_name store name h with Ok () -> ok | Error ds -> print_diags ds))
 
@@ -1437,7 +1526,7 @@ let store_rename_cmd store_dir old_name new_name kind =
       | Error other ->
           print_diags
             [
-              Diag.error ~code:"E0608"
+              cli_diagnostic ~code:"E0608"
                 (Printf.sprintf "unknown kind %S (expected term, con, op, type, or effect)" other);
             ]
       | Ok kind -> (
@@ -1453,7 +1542,7 @@ let audit_head_arg label spelling =
   | None ->
       Error
         [
-          Diag.error ~code:"E1307"
+          cli_diagnostic ~code:"E1307"
             (Printf.sprintf "%s must be exactly 64 lowercase hexadecimal HASH_V0 digits" label);
         ]
 
@@ -1527,16 +1616,31 @@ let governance_reconcile_cmd bundle_file prelude store_dir =
           then ok
           else (
             flush stdout;
-            prerr_endline
-              "error[E1516]: valid action evidence still requires operator reconciliation; no \
-               rollback or safe retry is implied";
-            exit_diags))
+            print_diags
+              [
+                cli_diagnostic ~code:"E1516"
+                  "Valid action evidence still requires operator reconciliation; no rollback or \
+                   safe retry is implied.";
+              ]))
 
 (* --- cmdliner wiring --- *)
 
 open Cmdliner
 
 let file_arg = Arg.(required & pos 0 (some file) None & info [] ~docv:"FILE")
+
+let diagnostic_format_arg =
+  Arg.(
+    value
+    & opt (enum [ ("text", Text); ("json-v1", Json_v1) ]) Text
+    & info [ "diagnostic-format" ] ~docv:"FORMAT"
+        ~doc:
+          "Diagnostic rendering contract: text (default) or json-v1 (one canonical JSON object per \
+           line on the existing diagnostic stream).")
+
+let configure_diagnostics command format =
+  selected_diagnostic_format := format;
+  command
 
 let syntax_arg =
   Arg.(
@@ -1637,7 +1741,8 @@ let run_t =
   Cmd.v
     (Cmd.info "run" ~doc:"Run a .jac surface or .jqd bootstrap file in top-level order.")
     Term.(
-      const run_cmd $ file_arg $ allows_arg $ prelude_arg $ store_dir_opt_arg $ seed_arg
+      const (configure_diagnostics run_cmd)
+      $ diagnostic_format_arg $ file_arg $ allows_arg $ prelude_arg $ store_dir_opt_arg $ seed_arg
       $ infer_cache_arg $ origin_arg $ dry_run_arg $ schedule_record_arg $ schedule_replay_arg
       $ schedule_fork_arg $ syntax_arg)
 
@@ -1657,32 +1762,40 @@ let check_t =
   Cmd.v
     (Cmd.info "check" ~doc:"Parse, validate, resolve, and typecheck a .jac or .jqd file.")
     Term.(
-      const check_cmd $ file_arg $ prelude_arg $ print_sigs_arg $ manifest_arg $ origin_arg
+      const (configure_diagnostics check_cmd)
+      $ diagnostic_format_arg $ file_arg $ prelude_arg $ print_sigs_arg $ manifest_arg $ origin_arg
       $ syntax_arg)
 
 let hash_t =
   Cmd.v
     (Cmd.info "hash" ~doc:"Print the canonical HASH_V0 hashes of each top-level form.")
-    Term.(const hash_cmd $ file_arg $ prelude_arg $ syntax_arg)
+    Term.(
+      const (configure_diagnostics hash_cmd)
+      $ diagnostic_format_arg $ file_arg $ prelude_arg $ syntax_arg)
 
 let write_arg = Arg.(value & flag & info [ "write"; "w" ] ~doc:"Rewrite the file in place.")
 
 let fmt_t =
   Cmd.v
     (Cmd.info "fmt" ~doc:"Format a .jac or .jqd file canonically, preserving comments.")
-    Term.(const fmt_cmd $ file_arg $ write_arg $ syntax_arg)
+    Term.(
+      const (configure_diagnostics fmt_cmd)
+      $ diagnostic_format_arg $ file_arg $ write_arg $ syntax_arg)
 
 let infer_t =
   let enumerate =
     Cmd.v
       (Cmd.info "enumerate" ~doc:"Exact posterior by multi-shot enumeration.")
-      Term.(const infer_enumerate_cmd $ file_arg $ prelude_arg $ syntax_arg)
+      Term.(
+        const (configure_diagnostics infer_enumerate_cmd)
+        $ diagnostic_format_arg $ file_arg $ prelude_arg $ syntax_arg)
   in
   let lw =
     Cmd.v
       (Cmd.info "lw" ~doc:"Approximate posterior by likelihood weighting.")
       Term.(
-        const infer_lw_cmd $ file_arg $ prelude_arg
+        const (configure_diagnostics infer_lw_cmd)
+        $ diagnostic_format_arg $ file_arg $ prelude_arg
         $ Arg.(
             required
             & opt (some int) None
@@ -1701,7 +1814,8 @@ let diff_t =
          "Semantically compare two source files or two stores: renames are renames, reformatting \
           is nothing, and real edits localize to the smallest changed subtrees.")
     Term.(
-      const diff_cmd
+      const (configure_diagnostics diff_cmd)
+      $ diagnostic_format_arg
       $ Arg.(required & pos 0 (some string) None & info [] ~docv:"FILE_OR_STORE_A")
       $ Arg.(required & pos 1 (some string) None & info [] ~docv:"FILE_OR_STORE_B")
       $ syntax_arg $ prelude_arg)
@@ -1713,7 +1827,8 @@ let store_t =
     Cmd.v
       (Cmd.info "add" ~doc:"Add the file's declarations to a persistent store.")
       Term.(
-        const store_add_cmd $ store_pos_dir
+        const (configure_diagnostics store_add_cmd)
+        $ diagnostic_format_arg $ store_pos_dir
         $ Arg.(required & pos 1 (some file) None & info [] ~docv:"FILE")
         $ origin_arg)
   in
@@ -1721,7 +1836,8 @@ let store_t =
     Cmd.v
       (Cmd.info "name" ~doc:"Bind NAME to a hash already in the store.")
       Term.(
-        const store_name_cmd $ store_pos_dir
+        const (configure_diagnostics store_name_cmd)
+        $ diagnostic_format_arg $ store_pos_dir
         $ Arg.(required & pos 1 (some string) None & info [] ~docv:"NAME")
         $ Arg.(required & pos 2 (some string) None & info [] ~docv:"HASH"))
   in
@@ -1729,7 +1845,8 @@ let store_t =
     Cmd.v
       (Cmd.info "rename" ~doc:"Rebind OLD to NEW; object files are untouched.")
       Term.(
-        const store_rename_cmd $ store_pos_dir
+        const (configure_diagnostics store_rename_cmd)
+        $ diagnostic_format_arg $ store_pos_dir
         $ Arg.(required & pos 1 (some string) None & info [] ~docv:"OLD")
         $ Arg.(required & pos 2 (some string) None & info [] ~docv:"NEW")
         $ Arg.(
@@ -1746,7 +1863,7 @@ let audit_t =
   let genesis =
     Cmd.v
       (Cmd.info "genesis" ~doc:"Print the fixed predecessor/head of an empty Audit v1 chain.")
-      Term.(const audit_genesis_cmd $ const ())
+      Term.(const (configure_diagnostics audit_genesis_cmd) $ diagnostic_format_arg $ const ())
   in
   let append =
     Cmd.v
@@ -1755,7 +1872,8 @@ let audit_t =
            "Verify LOG against its published predecessor, append one canonical AuditEntry, and \
             print the new publishable head.")
       Term.(
-        const audit_append_cmd
+        const (configure_diagnostics audit_append_cmd)
+        $ diagnostic_format_arg
         $ Arg.(required & pos 0 (some string) None & info [] ~docv:"LOG")
         $ Arg.(required & pos 1 (some string) None & info [] ~docv:"AUDIT_ENTRY")
         $ Arg.(
@@ -1775,7 +1893,8 @@ let governance_t =
       (Cmd.info "verify-log"
          ~doc:"Strictly verify a canonical Audit v1 chain against an independently published head.")
       Term.(
-        const audit_verify_cmd
+        const (configure_diagnostics audit_verify_cmd)
+        $ diagnostic_format_arg
         $ Arg.(required & pos 0 (some string) None & info [] ~docv:"LOG")
         $ Arg.(
             required
@@ -1789,7 +1908,8 @@ let governance_t =
            "Verify one canonical governance-run-bundle-v1, including its unchanged Audit chain and \
             exact Call, policy, assessment, Proposal, and parent-lineage links.")
       Term.(
-        const governance_verify_run_cmd
+        const (configure_diagnostics governance_verify_run_cmd)
+        $ diagnostic_format_arg
         $ Arg.(required & pos 0 (some string) None & info [] ~docv:"BUNDLE")
         $ prelude_arg $ store_dir_opt_arg)
   in
@@ -1800,7 +1920,8 @@ let governance_t =
            "Verify a governance-reconciliation-bundle-v1 and report action/receipt completion gaps \
             without inferring rollback or safe retry.")
       Term.(
-        const governance_reconcile_cmd
+        const (configure_diagnostics governance_reconcile_cmd)
+        $ diagnostic_format_arg
         $ Arg.(required & pos 0 (some string) None & info [] ~docv:"BUNDLE")
         $ prelude_arg $ store_dir_opt_arg)
   in
@@ -1815,7 +1936,8 @@ let dist_diff_t =
          "Posterior divergence between two model versions (TL.1): per-outcome deltas over \
           tolerance, support gains/losses called out, enumerations cached by content hash.")
     Term.(
-      const dist_diff_cmd
+      const (configure_diagnostics dist_diff_cmd)
+      $ diagnostic_format_arg
       $ Arg.(required & pos 0 (some file) None & info [] ~docv:"MODEL_A")
       $ Arg.(required & pos 1 (some file) None & info [] ~docv:"MODEL_B")
       $ Arg.(value & opt float 1e-9 & info [ "tolerance" ] ~docv:"T")
@@ -1831,7 +1953,8 @@ let replay_t =
          "Counterfactual debugging (TL.3): serve world ops from a recorded log, scrub with --to, \
           fork with --fork N=FORM; forked futures run under the dry handlers.")
     Term.(
-      const replay_cmd
+      const (configure_diagnostics replay_cmd)
+      $ diagnostic_format_arg
       $ Arg.(required & pos 0 (some file) None & info [] ~docv:"LOG")
       $ Arg.(required & pos 1 (some file) None & info [] ~docv:"PROGRAM")
       $ Arg.(value & opt_all string [] & info [ "fork" ] ~docv:"N=FORM")
@@ -1889,8 +2012,10 @@ let test_t =
          "Discover tests by checked type (decision D12) and run them: the hermetic lane under \
           test.run, the world lane behind --allow grants.")
     Term.(
-      const test_cmd $ test_files_arg $ allows_arg $ prelude_arg $ cache_dir_arg $ no_cache_arg
-      $ coverage_arg $ seed_arg $ samples_arg $ exhaustive_arg $ budget_arg $ schedules_arg)
+      const (configure_diagnostics test_cmd)
+      $ diagnostic_format_arg $ test_files_arg $ allows_arg $ prelude_arg $ cache_dir_arg
+      $ no_cache_arg $ coverage_arg $ seed_arg $ samples_arg $ exhaustive_arg $ budget_arg
+      $ schedules_arg)
 
 (* --- tiers (PF.2 phase 1) --- *)
 
@@ -2086,19 +2211,22 @@ let read_export_source file =
   | Error Export.Stdin ->
       Error
         [
-          Diag.error ~code:"E1302"
+          cli_diagnostic ~code:"E1302"
             "jacquard export requires a named regular input file; materialize stdin first";
         ]
   | Error Export.Not_regular ->
       Error
         [
-          Diag.error ~code:"E1302"
+          cli_diagnostic ~code:"E1302"
             (Printf.sprintf
                "export input %s is not a regular seekable file; materialize the source first" file);
         ]
   | Error (Export.Read_failure message) ->
       Error
-        [ Diag.error ~code:"E1302" (Printf.sprintf "cannot read export input %s: %s" file message) ]
+        [
+          cli_diagnostic ~code:"E1302"
+            (Printf.sprintf "cannot read export input %s: %s" file message);
+        ]
 
 let export_cmd file out prelude syntax =
   match read_export_source file with
@@ -2127,7 +2255,7 @@ let export_cmd file out prelude syntax =
                   | Error Export.Collision ->
                       print_diags
                         [
-                          Diag.error ~code:"E1301"
+                          cli_diagnostic ~code:"E1301"
                             (Printf.sprintf
                                "export output %s already exists; choose a new path or remove it \
                                 explicitly"
@@ -2136,7 +2264,7 @@ let export_cmd file out prelude syntax =
                   | Error (Export.Atomic_failure message) ->
                       print_diags
                         [
-                          Diag.error ~code:"E1303"
+                          cli_diagnostic ~code:"E1303"
                             (Printf.sprintf "cannot publish export atomically: %s" message);
                         ]))))
 
@@ -2146,10 +2274,11 @@ let build_cmd file out prelude dry_run syntax =
   if dry_run then begin
     (* the consent sheet is an interpreter run: the dry handlers wrap live
        evaluation, and a compiled binary has nothing to wrap after the fact *)
-    prerr_endline
-      "error[E1103]: jacquard build does not support --dry-run; the consent sheet is an \
-       interpreter run (use jacquard run --dry-run)";
-    exit_diags
+    print_diags
+      [
+        cli_diagnostic ~code:"E1103"
+          "jacquard build does not support --dry-run; the consent sheet is an interpreter run.";
+      ]
   end
   else
     match open_ctx ~prelude ~store_dir:None with
@@ -2213,9 +2342,11 @@ let build_cmd file out prelude dry_run syntax =
                     in
                     match baked with
                     | None ->
-                        prerr_endline
-                          "error[E1103]: internal: the manifest pass diverged from the load pass";
-                        exit_diags
+                        print_diags
+                          [
+                            cli_diagnostic ~code:"E1103"
+                              "The native manifest pass diverged from the load pass.";
+                          ]
                     | Some rev_baked -> (
                         match
                           Jacquard_native.Build.build ~store ~tops:(List.rev rev_baked)
@@ -2240,18 +2371,18 @@ let build_cmd file out prelude dry_run syntax =
                                   in
                                   go 0
                                 in
-                                if is_eval then
-                                  Printf.eprintf "error[E1102]: %s %s\n"
-                                    r.Jacquard_native.Compile.where what
-                                else
-                                  Printf.eprintf
-                                    "error[E1101]: not yet compilable in native v1: %s %s\n"
-                                    r.Jacquard_native.Compile.where what)
+                                let code = if is_eval then "E1102" else "E1101" in
+                                let cause =
+                                  if is_eval then r.Jacquard_native.Compile.where ^ " " ^ what
+                                  else
+                                    "Not yet compilable in native v1: "
+                                    ^ r.Jacquard_native.Compile.where ^ " " ^ what
+                                in
+                                print_diagnostic (cli_diagnostic ~code cause))
                               rs;
                             exit_diags
-                        | Error (`Toolchain m) ->
-                            Printf.eprintf "error[E1103]: %s\n" m;
-                            exit_diags)))))
+                        | Error (`Toolchain m) -> print_diags [ cli_diagnostic ~code:"E1103" m ]))))
+        )
 
 let out_arg =
   Arg.(required & opt (some string) None & info [ "o"; "output" ] ~docv:"OUT" ~doc:"Output path.")
@@ -2264,7 +2395,9 @@ let export_t =
        ~doc:
          "Export a .jac source artifact as deterministic canonical .jqd for conformance or \
           debugging; the output is created atomically and never replaces an existing path.")
-    Term.(const export_cmd $ export_file_arg $ out_arg $ prelude_arg $ syntax_arg)
+    Term.(
+      const (configure_diagnostics export_cmd)
+      $ diagnostic_format_arg $ export_file_arg $ out_arg $ prelude_arg $ syntax_arg)
 
 let build_t =
   Cmd.v
@@ -2272,7 +2405,9 @@ let build_t =
        ~doc:
          "Compile a .jac surface or .jqd bootstrap file and its reachable declarations to a \
           standalone native executable without generating an intermediate twin.")
-    Term.(const build_cmd $ file_arg $ out_arg $ prelude_arg $ dry_run_arg $ syntax_arg)
+    Term.(
+      const (configure_diagnostics build_cmd)
+      $ diagnostic_format_arg $ file_arg $ out_arg $ prelude_arg $ dry_run_arg $ syntax_arg)
 
 let tiers_t =
   Cmd.v
@@ -2280,7 +2415,8 @@ let tiers_t =
        ~doc:
          "Tier statistics for the native route (PF.2 phase 1): declarations and call sites by \
           effect row, handler clauses by resume discipline; stamps tier sidecars.")
-    Term.(const tiers_cmd $ test_files_arg $ prelude_arg)
+    Term.(
+      const (configure_diagnostics tiers_cmd) $ diagnostic_format_arg $ test_files_arg $ prelude_arg)
 
 let main =
   Cmd.group
@@ -2303,4 +2439,12 @@ let main =
       build_t;
     ]
 
-let () = exit (Cli_entry.run ~program:"jacquard" (fun () -> Cmd.eval' ~catch:false main))
+let render_selected_diagnostic diagnostic =
+  match !selected_diagnostic_format with
+  | Text -> Diag.to_string diagnostic
+  | Json_v1 -> Diag.to_json_string diagnostic
+
+let () =
+  exit
+    (Cli_entry.run ~program:"jacquard" ~render_diagnostic:render_selected_diagnostic (fun () ->
+         Cmd.eval' ~catch:false main))

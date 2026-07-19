@@ -79,7 +79,7 @@ let test_legacy_unknown_and_noncanonical_refused () =
   let legacy = diagnostic (Schedule_trace.parse "decision=0 runnable=[0#0] chosen=0#0\n") in
   Alcotest.(check bool)
     "unversioned refusal" true
-    (contains "unversioned schedule traces" legacy.message);
+    (contains "unversioned schedule traces" (Diag.cause legacy));
   let bytes = Schedule_trace.serialize (valid valid_events) in
   let replace_once source needle replacement =
     let index =
@@ -103,13 +103,13 @@ let test_legacy_unknown_and_noncanonical_refused () =
   in
   Alcotest.(check bool)
     "unknown version refusal" true
-    (contains "unsupported format version 2" unknown_version.message);
+    (contains "unsupported format version 2" (Diag.cause unknown_version));
   let noncanonical = diagnostic (Schedule_trace.parse (" " ^ bytes)) in
   Alcotest.(check bool)
     "whitespace refusal" true
-    (contains "unversioned schedule traces" noncanonical.message);
+    (contains "unversioned schedule traces" (Diag.cause noncanonical));
   let no_lf = diagnostic (Schedule_trace.parse (String.sub bytes 0 (String.length bytes - 1))) in
-  Alcotest.(check bool) "trailing LF required" true (contains "must end with LF" no_lf.message)
+  Alcotest.(check bool) "trailing LF required" true (contains "must end with LF" (Diag.cause no_lf))
 
 let test_impossible_events_refused () =
   let expect_with_bounds ~max_tasks ~max_decisions message events =
@@ -118,7 +118,7 @@ let test_impossible_events_refused () =
         ~policy:Concurrency_contract.Fail_fast ~max_tasks ~max_decisions events
       |> diagnostic
     in
-    Alcotest.(check bool) message true (contains message diagnostic.message)
+    Alcotest.(check bool) message true (contains message (Diag.cause diagnostic))
   in
   let expect = expect_with_bounds ~max_tasks:16 ~max_decisions:64 in
   expect "first event" (List.tl valid_events);
@@ -148,7 +148,7 @@ let test_impossible_events_refused () =
   in
   Alcotest.(check bool)
     "fork provenance matches branch" true
-    (contains "fork provenance chooses" diagnostic.message);
+    (contains "fork provenance chooses" (Diag.cause diagnostic));
   let impossible_creation =
     [
       Schedule_trace.Create { scope_path = [ 0 ]; task = root; parent = None };

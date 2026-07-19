@@ -49,9 +49,60 @@ let diagnostic_token state token =
   | Some limit, Surface_lex.Eof when state.index >= limit -> state.tokens.(limit)
   | (Some _ | None), _ -> token
 
+let diagnostic_contract code =
+  match code with
+  | "E0212" ->
+      ( Diag.Kernel,
+        "Handler return clauses are invalid",
+        "Keep exactly one return clause in the handler." )
+  | "E1202" ->
+      ( Diag.Surface,
+        "Recovered syntax cannot be compiled",
+        "Fix every syntax error before checking or hashing the file." )
+  | "E1221" ->
+      ( Diag.Surface,
+        "A delimited construct is not closed",
+        "Close the construct with the expected delimiter." )
+  | "E1223" ->
+      ( Diag.Surface,
+        "Block items need a separator",
+        "Insert a newline or `;` between the block items." )
+  | "E1224" ->
+      ( Diag.Surface,
+        "A signature is detached from its definition",
+        "Place the matching definition immediately after its signature." )
+  | "E1225" ->
+      ( Diag.Surface,
+        "A type or effect declaration is incomplete",
+        "Complete the declaration structure shown at this location." )
+  | "E1226" ->
+      ( Diag.Surface,
+        "Handler or staging syntax is invalid",
+        "Rewrite this construct using the required handler or staging form." )
+  | "E1227" ->
+      ( Diag.Surface,
+        "Surface syntax nesting is too deep",
+        "Reduce the nesting before parsing the file again." )
+  | "E1233" ->
+      ( Diag.Surface,
+        "A local recursive binding is malformed",
+        "Use a lowercase function name followed by its parameters." )
+  | "E1236" ->
+      ( Diag.Surface,
+        "An effect operation mode is invalid",
+        "Give each operation exactly one compatible `once` or `multi` mode." )
+  | "E1220" | _ ->
+      ( Diag.Surface,
+        "Surface syntax is invalid",
+        "Correct the syntax at this location and parse the file again." )
+
 let report_code state token code message =
   let token = diagnostic_token state token in
-  state.diagnostics <- Diag.error ~span:token.Surface_lex.span ~code message :: state.diagnostics
+  let domain, summary, next_step = diagnostic_contract code in
+  state.diagnostics <-
+    Diag.error ~span:token.Surface_lex.span ~domain ~code ~summary ~cause:message ~next_step
+      ~contrast:None ()
+    :: state.diagnostics
 
 let report state token message = report_code state token "E1220" message
 
@@ -65,19 +116,25 @@ let with_nesting state f =
     let token = diagnostic_token state (current state) in
     raise
       (Nesting_limit
-         (Diag.error ~span:token.Surface_lex.span ~code:"E1227"
-            (Printf.sprintf "surface syntax nesting exceeds the limit of %d" max_nesting_depth)))
+         (Diag.error ~span:token.Surface_lex.span ~code:"E1227" ~domain:Surface
+            ~summary:"Surface syntax nesting is too deep"
+            ~cause:
+              (Printf.sprintf "Surface syntax nesting exceeds the limit of %d." max_nesting_depth)
+            ~next_step:"Reduce the nesting before parsing the file again." ~contrast:None ()))
   end;
   state.nesting_depth <- state.nesting_depth + 1;
   Fun.protect ~finally:(fun () -> state.nesting_depth <- state.nesting_depth - 1) f
 
 let report_construct_code state ~opening ~failure ~code ~construct message =
   let failure = diagnostic_token state failure in
-  let hint =
-    Printf.sprintf "the %s opened at %s" construct (Span.to_string opening.Surface_lex.span)
+  let opening_context =
+    Printf.sprintf " The %s opened at %s." construct (Span.to_string opening.Surface_lex.span)
   in
+  let domain, summary, next_step = diagnostic_contract code in
   state.diagnostics <-
-    Diag.error ~span:failure.Surface_lex.span ~hint ~code message :: state.diagnostics
+    Diag.error ~span:failure.Surface_lex.span ~domain ~code ~summary
+      ~cause:(message ^ opening_context) ~next_step ~contrast:None ()
+    :: state.diagnostics
 
 let report_unclosed state ~opening ~failure ~construct message =
   report_construct_code state ~opening ~failure ~code:"E1221" ~construct message
@@ -221,11 +278,11 @@ let shift_raw_span content_span span =
 
 let shift_raw_diagnostic raw content_span (diagnostic : Diag.t) =
   let span =
-    match diagnostic.span with
+    match Diag.span diagnostic with
     | Some span -> Some (shift_raw_span content_span span)
     | None -> Some raw.Surface_lex.span
   in
-  { diagnostic with Diag.span }
+  Diag.with_span span diagnostic
 
 let rec shift_raw_form content_span (form : Form.t) =
   let meta =
@@ -248,7 +305,9 @@ let parse_raw_candidate state raw (candidate : Surface_lex.raw_candidate) =
         Span.make ~file:candidate.content_span.file ~start_pos:position ~end_pos:position
       in
       state.diagnostics <-
-        Diag.error ~span ~code:"E1221" "expected `}` before end of raw `jqd` form"
+        Diag.error ~span ~domain:Surface ~code:"E1221" ~summary:"A raw `jqd` form is not closed"
+          ~cause:"Expected `}` before the end of the raw `jqd` form."
+          ~next_step:"Add `}` to close the raw `jqd` form." ~contrast:None ()
         :: state.diagnostics
   in
   match Reader.parse_one ~file:candidate.content_span.Span.file candidate.source with
@@ -1868,7 +1927,7 @@ and parse_forall state ~allow_newlines keyword =
         own_indexed "forall-rvar" (List.length !rowvars) token;
         rowvars := name :: !rowvars;
         ignore (advance state)
-    | Surface_lex.Invalid { Diag.code = "E1211"; _ } -> (
+    | Surface_lex.Invalid diagnostic when Diag.code diagnostic = Some "E1211" -> (
         match forall_name_before_dot state token with
         | Some name ->
             if !in_rows then begin
@@ -3230,8 +3289,12 @@ let parse_tokens ~source tokens =
         | None -> top
         | Some span ->
             let diagnostic =
-              Diag.error ?span ~code:"E1227"
-                (Printf.sprintf "surface syntax nesting exceeds the limit of %d" max_nesting_depth)
+              Diag.error ?span ~domain:Surface ~code:"E1227"
+                ~summary:"Surface syntax nesting is too deep"
+                ~cause:
+                  (Printf.sprintf "Surface syntax nesting exceeds the limit of %d."
+                     max_nesting_depth)
+                ~next_step:"Reduce the nesting before parsing the file again." ~contrast:None ()
             in
             state.diagnostics <- diagnostic :: state.diagnostics;
             quarantine_overdeep_top state span top)
@@ -3245,7 +3308,7 @@ let recover_string ~file src : Surface_ast.recovered =
   let recovered = Surface_lex.lex_recover ~file src in
   let parsed = parse_tokens ~source:src recovered.tokens in
   let diagnostic_offset diagnostic =
-    match diagnostic.Diag.span with Some span -> span.Span.start_pos.offset | None -> max_int
+    match Diag.span diagnostic with Some span -> span.Span.start_pos.offset | None -> max_int
   in
   let diagnostics =
     List.stable_sort
@@ -3258,14 +3321,15 @@ let recover_string ~file src : Surface_ast.recovered =
     is the boundary that prevents holes from reaching lowering, canonicalization, or execution. *)
 let strict (recovered : Surface_ast.recovered) : (Surface_ast.top list, Diag.t list) result =
   let errors =
-    List.filter (fun d -> d.Diag.severity = Diag.Error) recovered.Surface_ast.diagnostics
+    List.filter (fun d -> Diag.severity d = Diag.Error) recovered.Surface_ast.diagnostics
   in
   if errors <> [] then Error recovered.diagnostics
   else if List.exists Surface_ast.has_holes_top recovered.items then
     Error
       [
-        Diag.error ~code:"E1202"
-          "surface parser recovery left holes; fix the syntax before checking or hashing";
+        Diag.error ~domain:Surface ~code:"E1202" ~summary:"Recovered syntax cannot be compiled"
+          ~cause:"Surface parser recovery left holes in the syntax tree."
+          ~next_step:"Fix every syntax error before checking or hashing the file." ~contrast:None ();
       ]
   else Ok recovered.items
 

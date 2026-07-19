@@ -56,13 +56,13 @@ docs/native-parallel-decision.md.
   $ export JACQUARD=jacquard
   $ JACQUARD_PARALLEL_EVIDENCE_ITERATIONS=3 sh ../../scripts/native-parallel-evidence.sh
   success: exit 0, stdout 9450378b42e682c1897c3028a48e3c6696a4fb654f52f21c16eb5bda47c39936, stderr e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
-  fail-map: exit 2, stdout e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855, stderr ab8672cea2e1a058029d6365bb8421c4a941d82dd9988dd038bff7b44cb589dc
-  fail-both: exit 2, stdout e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855, stderr ab8672cea2e1a058029d6365bb8421c4a941d82dd9988dd038bff7b44cb589dc
+  fail-map: exit 2, stdout e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855, stderr 87d9578b0dcda7ab269e025efa1aa17ea7d1777a789220804a06bce527374f3a
+  fail-both: exit 2, stdout e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855, stderr 87d9578b0dcda7ab269e025efa1aa17ea7d1777a789220804a06bce527374f3a
   failure order: map first-of-two and both left-before-right select division before modulo
   stress: 3 identical native runs
   asan-success: exit 0, stdout 9450378b42e682c1897c3028a48e3c6696a4fb654f52f21c16eb5bda47c39936, stderr e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
-  asan-fail-map: exit 2, stdout e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855, stderr ab8672cea2e1a058029d6365bb8421c4a941d82dd9988dd038bff7b44cb589dc
-  asan-fail-both: exit 2, stdout e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855, stderr ab8672cea2e1a058029d6365bb8421c4a941d82dd9988dd038bff7b44cb589dc
+  asan-fail-map: exit 2, stdout e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855, stderr 87d9578b0dcda7ab269e025efa1aa17ea7d1777a789220804a06bce527374f3a
+  asan-fail-both: exit 2, stdout e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855, stderr 87d9578b0dcda7ab269e025efa1aa17ea7d1777a789220804a06bce527374f3a
   tsan: skipped (set JACQUARD_PARALLEL_TSAN=1 where available)
   benchmark: skipped (set JACQUARD_PARALLEL_BENCH=1)
 
@@ -154,7 +154,9 @@ expressions, not the whole file.)
   $ ./multishot
   2
   $ jacquard build ../../corpus/valid/eval-gated.jqd -o nope
-  error[E1102]: top-level expression 0 uses eval, which requires the interpreter tier
+  error[E1102]: Program requires the interpreter tier
+    Cause: top-level expression 0 uses eval, which requires the interpreter tier
+    Next step: Run this program with the interpreter.
   [1]
 
 Quotes compile since task 73 — Value.show of a code value is the ported
@@ -223,8 +225,9 @@ keeps its manifest and grant slots keyed by the resolved declaration hash:
   $ diff i.out n.out && echo identical
   identical
   $ cat n.out
-  error[E0814]: this program requires unpackaged:5c34b2aa7fe3/console [unrated user effect #5c34b2aa7fe357ee14e3be78853839546a63f40fe47b597176620e00d8ec58f0], which is not granted (performed via `print`)
-    hint: handle the effect in the program (unregistered user effects have no built-in --allow grant)
+  error[E0814]: The program requires an effect that was not granted
+    Cause: This program requires unpackaged:5c34b2aa7fe3/console [unrated user effect #5c34b2aa7fe357ee14e3be78853839546a63f40fe47b597176620e00d8ec58f0], which is not granted (performed via `print`).
+    Next step: handle the effect in the program (unregistered user effects have no built-in --allow grant)
   $ jacquard run spoof-console.jqd --allow console > i.out 2>&1; echo "exit $?"
   exit 3
   $ ./spoof-console --allow console > n.out 2>&1; echo "exit $?"
@@ -232,8 +235,9 @@ keeps its manifest and grant slots keyed by the resolved declaration hash:
   $ diff i.out n.out && echo identical
   identical
   $ cat n.out
-  error[E0814]: this program requires unpackaged:5c34b2aa7fe3/console [unrated user effect #5c34b2aa7fe357ee14e3be78853839546a63f40fe47b597176620e00d8ec58f0], which is not granted (performed via `print`)
-    hint: handle the effect in the program (unregistered user effects have no built-in --allow grant)
+  error[E0814]: The program requires an effect that was not granted
+    Cause: This program requires unpackaged:5c34b2aa7fe3/console [unrated user effect #5c34b2aa7fe357ee14e3be78853839546a63f40fe47b597176620e00d8ec58f0], which is not granted (performed via `print`).
+    Next step: handle the effect in the program (unregistered user effects have no built-in --allow grant)
 
 The official and user-defined `console` identities can coexist in one row.
 Without a grant both are reported distinctly; granting the blessed identity
@@ -252,10 +256,12 @@ removes only that requirement and leaves the user effect refused:
   $ diff i.out n.out && echo identical
   identical
   $ cat n.out
-  error[E0814]: this program requires unpackaged:5c34b2aa7fe3/console [unrated user effect #5c34b2aa7fe357ee14e3be78853839546a63f40fe47b597176620e00d8ec58f0], which is not granted (performed via `print`)
-    hint: handle the effect in the program (unregistered user effects have no built-in --allow grant)
-  error[E0814]: this program requires console [world/low] — talk to the process terminal, which is not granted (performed via `println`)
-    hint: grant it with --allow console, or handle the effect in the program
+  error[E0814]: The program requires an effect that was not granted
+    Cause: This program requires unpackaged:5c34b2aa7fe3/console [unrated user effect #5c34b2aa7fe357ee14e3be78853839546a63f40fe47b597176620e00d8ec58f0], which is not granted (performed via `print`).
+    Next step: handle the effect in the program (unregistered user effects have no built-in --allow grant)
+  error[E0814]: The program requires an effect that was not granted
+    Cause: This program requires console [world/low] — talk to the process terminal, which is not granted (performed via `println`).
+    Next step: grant it with --allow console, or handle the effect in the program
   $ jacquard run two-consoles.jqd --allow console > i.out 2>&1; echo "exit $?"
   exit 3
   $ ./two-consoles --allow console > n.out 2>&1; echo "exit $?"
@@ -263,8 +269,9 @@ removes only that requirement and leaves the user effect refused:
   $ diff i.out n.out && echo identical
   identical
   $ cat n.out
-  error[E0814]: this program requires unpackaged:5c34b2aa7fe3/console [unrated user effect #5c34b2aa7fe357ee14e3be78853839546a63f40fe47b597176620e00d8ec58f0], which is not granted (performed via `print`)
-    hint: handle the effect in the program (unregistered user effects have no built-in --allow grant)
+  error[E0814]: The program requires an effect that was not granted
+    Cause: This program requires unpackaged:5c34b2aa7fe3/console [unrated user effect #5c34b2aa7fe357ee14e3be78853839546a63f40fe47b597176620e00d8ec58f0], which is not granted (performed via `print`).
+    Next step: handle the effect in the program (unregistered user effects have no built-in --allow grant)
 
 A later expression's refusal happens at ITS turn: the first expression's
 value has already printed and flushed on both engines, so it precedes the
@@ -281,8 +288,9 @@ error even in a merged capture:
   exit 3
   $ cat n.out
   1
-  error[E0814]: this program requires console [world/low] — talk to the process terminal, which is not granted (performed via `println`)
-    hint: grant it with --allow console, or handle the effect in the program
+  error[E0814]: The program requires an effect that was not granted
+    Cause: This program requires console [world/low] — talk to the process terminal, which is not granted (performed via `println`).
+    Next step: grant it with --allow console, or handle the effect in the program
   $ diff i.out n.out && echo identical
   identical
 
@@ -314,10 +322,12 @@ spelling of --allow works like cmdliner's:
   $ ./two-eff > n.out 2>&1; echo "exit $?"
   exit 3
   $ cat n.out
-  error[E0814]: this program requires console [world/low] — talk to the process terminal, which is not granted (performed via `println`)
-    hint: grant it with --allow console, or handle the effect in the program
-  error[E0814]: this program requires clock [world/low] — observe wall-clock milliseconds or wait, which is not granted (performed via `now`)
-    hint: grant it with --allow clock, or handle the effect in the program
+  error[E0814]: The program requires an effect that was not granted
+    Cause: This program requires console [world/low] — talk to the process terminal, which is not granted (performed via `println`).
+    Next step: grant it with --allow console, or handle the effect in the program
+  error[E0814]: The program requires an effect that was not granted
+    Cause: This program requires clock [world/low] — observe wall-clock milliseconds or wait, which is not granted (performed via `now`).
+    Next step: grant it with --allow clock, or handle the effect in the program
   $ diff i.out n.out && echo identical
   identical
   $ jacquard run hello.jqd --allow=console > i.out 2>&1
@@ -385,12 +395,30 @@ for a missing file:
   $ ./fsmiss --allow fs > n.out 2>&1; echo "exit $?"
   exit 2
   $ cat n.out
-  io error: no-such-file.txt: No such file or directory
+  error: World-effect I/O failed
+    Cause: io error: no-such-file.txt: No such file or directory
+    Next step: Correct the path, permissions, or external resource and try again.
   $ diff i.out n.out && echo identical
   identical
 
 An unimplemented grant is an up-front error, not a silent no-op:
 
   $ ./fsmiss --allow net
-  error[E1103]: native binaries implement only the console, clock, fs, dist, and infer grants so far (task 72); cannot grant `net`
+  error[E1103]: Native build could not complete
+    Cause: Native binaries implement only the console, clock, fs, dist, and infer grants; cannot grant `net`.
+    Next step: Use a supported native grant or run the program with the interpreter.
   [1]
+
+The generated diagnostic formats long user-controlled grant names without a fixed-buffer truncation
+boundary:
+
+  $ long_grant=$(python3 -c 'print("x" * 400)')
+  $ ./fsmiss --allow "$long_grant" 2> long-grant.err; echo "exit:$?"
+  exit:1
+  $ python3 - long-grant.err <<'PY'
+  > import sys
+  > cause = open(sys.argv[1], encoding="utf-8").read().splitlines()[1]
+  > shown = cause.split("`")[1]
+  > print(len(shown), shown == "x" * 400)
+  > PY
+  400 True

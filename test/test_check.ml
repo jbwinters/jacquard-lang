@@ -137,22 +137,22 @@ let test_value_restriction () =
   with
   | Ok _ -> Alcotest.fail "non-value must not generalize"
   | Error [ d ] ->
-      Alcotest.(check string) "focused code" "E0818" d.Diag.code;
-      Alcotest.(check (option string))
+      Alcotest.(check string) "focused code" "E0818" (Diag.code_or_uncoded d);
+      Alcotest.(check string)
         "actionable value-restriction hint"
-        (Some "eta-expand the binding to a lambda value, or give each use its own binding")
-        d.Diag.hint
+        "eta-expand the binding to a lambda value, or give each use its own binding"
+        (Diag.next_step d)
   | Error _ -> Alcotest.fail "expected one diagnostic"
 
 let test_ann_mismatch_elaborated () =
   let h = make_cctx () in
   let d = err_of h "(ann (lit 1) (tref text))" in
-  Alcotest.(check string) "code" "E0804" d.Diag.code;
+  Alcotest.(check string) "code" "E0804" (Diag.code_or_uncoded d);
   Alcotest.(check bool)
     "both types printed" true
     (let has needle =
-       let n = String.length needle and m = String.length d.Diag.message in
-       let rec go i = i + n <= m && (String.sub d.Diag.message i n = needle || go (i + 1)) in
+       let n = String.length needle and m = String.length (Diag.cause d) in
+       let rec go i = i + n <= m && (String.sub (Diag.cause d) i n = needle || go (i + 1)) in
        go 0
      in
      has "text" && has "int")
@@ -164,23 +164,23 @@ let test_ann_skolem_escape () =
     err_of h
       "(ann (lam ((pvar x)) (lit 1)) (tforall ((tvar a)) () (tarrow ((tvar a)) (row) (tvar a))))"
   in
-  Alcotest.(check string) "code" "E0804" d.Diag.code
+  Alcotest.(check string) "code" "E0804" (Diag.code_or_uncoded d)
 
 let test_effect_row_mismatch () =
   let h = make_cctx () in
   (* annotation says pure, body prints *)
   let d = err_of h "(ann (lam () (app (var print) (lit \"x\"))) (tarrow () (row) (ttuple)))" in
-  Alcotest.(check string) "code" "E0804" d.Diag.code
+  Alcotest.(check string) "code" "E0804" (Diag.code_or_uncoded d)
 
 let test_application_arity () =
   let h = make_cctx () in
   let d = err_of h "(app (lam ((pvar x)) (var x)) (lit 1) (lit 2))" in
-  Alcotest.(check string) "code" "E0803" d.Diag.code
+  Alcotest.(check string) "code" "E0803" (Diag.code_or_uncoded d)
 
 let test_not_a_function () =
   let h = make_cctx () in
   let d = err_of h "(app (lit 3) (lit 1))" in
-  Alcotest.(check string) "code" "E0802" d.Diag.code
+  Alcotest.(check string) "code" "E0802" (Diag.code_or_uncoded d)
 
 let test_handler_removes_effect () =
   let h = make_cctx () in
@@ -214,7 +214,7 @@ let test_resume_type_enforced () =
       "(handle (app (var abort)) (ret (pvar x) (var x)) (opclause abort () k (app (var k) (lit 1) \
        (lit 2))))"
   in
-  Alcotest.(check string) "code" "E0803" d.Diag.code
+  Alcotest.(check string) "code" "E0803" (Diag.code_or_uncoded d)
 
 let test_resume_wrong_typed_argument () =
   let h = make_cctx () in
@@ -224,7 +224,7 @@ let test_resume_wrong_typed_argument () =
       "(handle (app (var print) (lit \"x\")) (ret (pvar x) (var x)) (opclause print ((pvar t)) k \
        (app (var k) (lit 1))))"
   in
-  Alcotest.(check string) "code" "E0801" d.Diag.code
+  Alcotest.(check string) "code" "E0801" (Diag.code_or_uncoded d)
 
 let test_op_clause_arity () =
   let h = make_cctx () in
@@ -234,7 +234,7 @@ let test_op_clause_arity () =
       "(handle (app (var print) (lit \"x\")) (ret (pvar x) (var x)) (opclause print ((pvar a) \
        (pvar b)) k (app (var k) (tuple))))"
   in
-  Alcotest.(check string) "code" "E0803" d.Diag.code
+  Alcotest.(check string) "code" "E0803" (Diag.code_or_uncoded d)
 
 (* --- EL.2: built-in affine Resume for Once clauses --- *)
 
@@ -284,10 +284,12 @@ let test_once_resume_immediate_transformer () =
           (app (var later) (var unit)))))")
   in
   Alcotest.(check string)
-    "a bound answer cannot launder a later Once token" "E0817" laundered_later.code;
+    "a bound answer cannot launder a later Once token" "E0817"
+    (Diag.code_or_uncoded laundered_later);
   Alcotest.(check bool)
     "later-token laundering has a pointed explanation" true
-    (contains laundered_later.message "may produce a transformer carrying a later once resumption");
+    (contains (Diag.cause laundered_later)
+       "may produce a transformer carrying a later once resumption");
   let intervening_multi =
     err_of (make_cctx ())
       (successive_once
@@ -297,7 +299,7 @@ let test_once_resume_immediate_transformer () =
   in
   Alcotest.(check string)
     "a Multi effect cannot run while a later Once transformer is live" "E0817"
-    intervening_multi.code;
+    (Diag.code_or_uncoded intervening_multi);
   let duplicated_current =
     err_of (make_cctx ())
       (successive_once
@@ -307,7 +309,7 @@ let test_once_resume_immediate_transformer () =
   in
   Alcotest.(check string)
     "direct duplication in a successive Once transformer remains affine" "E0816"
-    duplicated_current.code;
+    (Diag.code_or_uncoded duplicated_current);
   let direct body args =
     with_once_transformer (Printf.sprintf "(app %s %s)" (once_transformer_handle body) args)
   in
@@ -326,8 +328,8 @@ let test_once_resume_immediate_transformer () =
     (with_once_transformer (Printf.sprintf "(app %s (quote (lit 1)))" polymorphic_handle));
   let expect_escape what source =
     let diagnostic = err_of (make_cctx ()) source in
-    Alcotest.(check string) (what ^ " code") "E0817" diagnostic.code;
-    Alcotest.(check bool) (what ^ " has a source span") true (Option.is_some diagnostic.span)
+    Alcotest.(check string) (what ^ " code") "E0817" (Diag.code_or_uncoded diagnostic);
+    Alcotest.(check bool) (what ^ " has a source span") true (Option.is_some (Diag.span diagnostic))
   in
   let bare = once_transformer_handle good_body in
   let annotated = Printf.sprintf "(ann %s (tarrow ((ttuple)) (row) (tref int)))" bare in
@@ -380,19 +382,23 @@ let test_once_resume_immediate_transformer () =
           (var k) (lit 2)) (var unit))))"
          "(tuple)")
   in
-  Alcotest.(check string) "double resume in transformer" "E0816" doubled.code;
+  Alcotest.(check string) "double resume in transformer" "E0816" (Diag.code_or_uncoded doubled);
   Alcotest.(check bool)
     "double transformer resume retains both witnesses" true
-    (contains doubled.message "first consumption at c.jqd:"
-    && contains doubled.message "second consumption at c.jqd:");
+    (contains (Diag.cause doubled) "first consumption at c.jqd:"
+    && contains (Diag.cause doubled) "second consumption at c.jqd:");
   let outer_arity = err_of (make_cctx ()) (direct good_body "(tuple) (tuple)") in
   Alcotest.(check string)
-    "outer malformed application keeps arity precedence" "E0803" outer_arity.code;
+    "outer malformed application keeps arity precedence" "E0803"
+    (Diag.code_or_uncoded outer_arity);
   let resume_arity = err_of (make_cctx ()) (direct "(lam ((pvar unit)) (app (var k)))" "(tuple)") in
-  Alcotest.(check string) "inner malformed resume keeps arity precedence" "E0803" resume_arity.code;
+  Alcotest.(check string)
+    "inner malformed resume keeps arity precedence" "E0803"
+    (Diag.code_or_uncoded resume_arity);
   let argument_type = err_of (make_cctx ()) (direct good_body "(lit 1)") in
   Alcotest.(check string)
-    "value argument still receives ordinary type checking" "E0801" argument_type.code;
+    "value argument still receives ordinary type checking" "E0801"
+    (Diag.code_or_uncoded argument_type);
   check_ok (make_cctx ()) "ordinary State remains accepted"
     "(app (var state.run) (lam () (app (var get))) (lit 41))";
   check_ok (make_cctx ()) "ordinary Check remains accepted"
@@ -442,7 +448,8 @@ let test_once_resume_branch_flow_is_bounded () =
        \        some (pvar value)) (lit 0)) (clause (pcon none) (app (var k) (lit 2)))))");
   let correlated_overlap = err_of (make_cctx ()) (correlated "(app (var k) (lit 2))" "(lit 0)") in
   Alcotest.(check string)
-    "a feasible repeated arm still consumes twice" "E0816" correlated_overlap.code;
+    "a feasible repeated arm still consumes twice" "E0816"
+    (Diag.code_or_uncoded correlated_overlap);
   let shadowed =
     err_of (make_cctx ())
       "(defeffect linear () (op signal once () (tref int)))\n\
@@ -451,7 +458,8 @@ let test_once_resume_branch_flow_is_bounded () =
        (pcon false) (lit 0))) (let nonrec (pvar flag) (var false) (match (var flag) (clause (pcon \
        true) (lit 0)) (clause (pcon false) (app (var k) (lit 2)))))))))"
   in
-  Alcotest.(check string) "a shadowed name cannot forge scrutinee correlation" "E0816" shadowed.code;
+  Alcotest.(check string)
+    "a shadowed name cannot forge scrutinee correlation" "E0816" (Diag.code_or_uncoded shadowed);
   let unstable =
     err_of (make_cctx ())
       (once_handler
@@ -460,7 +468,8 @@ let test_once_resume_branch_flow_is_bounded () =
           \"second\"))\n\
          \          (clause (pcon true) (lit 0)) (clause (pcon false) (app (var k) (lit 2)))))")
   in
-  Alcotest.(check string) "unstable scrutinees remain conservative" "E0816" unstable.code;
+  Alcotest.(check string)
+    "unstable scrutinees remain conservative" "E0816" (Diag.code_or_uncoded unstable);
   let no_use_match =
     "(match (var true) (clause (pcon true) (lit 0)) (clause (pcon false) (lit 1)))"
   in
@@ -504,12 +513,14 @@ let test_once_resume_double_consumption_spans () =
     err_of (make_cctx ())
       (once_handler "(let nonrec (pwild) (app (var k) (lit 1)) (app (var k) (lit 2)))")
   in
-  Alcotest.(check string) "affine duplication code" "E0816" d.Diag.code;
+  Alcotest.(check string) "affine duplication code" "E0816" (Diag.code_or_uncoded d);
   Alcotest.(check bool)
     "both consumption spans are named" true
-    (contains d.message "first consumption at c.jqd:"
-    && contains d.message "second consumption at c.jqd:");
-  Alcotest.(check bool) "the second consumption is the primary span" true (Option.is_some d.span);
+    (contains (Diag.cause d) "first consumption at c.jqd:"
+    && contains (Diag.cause d) "second consumption at c.jqd:");
+  Alcotest.(check bool)
+    "the second consumption is the primary span" true
+    (Option.is_some (Diag.span d));
   let branch_then_later =
     err_of (make_cctx ())
       (once_handler
@@ -517,14 +528,16 @@ let test_once_resume_double_consumption_spans () =
           (pcon false) (lit 0))) (app (var k) (lit 2)))")
   in
   Alcotest.(check string)
-    "a prior branch and a later call overlap on one possible path" "E0816" branch_then_later.code;
+    "a prior branch and a later call overlap on one possible path" "E0816"
+    (Diag.code_or_uncoded branch_then_later);
   let bad_gate =
     err_of (make_cctx ())
       (once_handler
          "(let nonrec (pvar gate) (lam ((pvar next)) (let nonrec (pwild) (app (var next) (lit 1)) \
           (app (var next) (lit 2)))) (app (var gate) (var k)))")
   in
-  Alcotest.(check string) "the receiving parameter is checked affinely" "E0816" bad_gate.code
+  Alcotest.(check string)
+    "the receiving parameter is checked affinely" "E0816" (Diag.code_or_uncoded bad_gate)
 
 let test_once_resume_type_errors_precede_duplication () =
   let unary_gate call =
@@ -533,13 +546,15 @@ let test_once_resume_type_errors_precede_duplication () =
          call)
   in
   let too_few = err_of (make_cctx ()) (unary_gate "(app (var gate))") in
-  Alcotest.(check string) "too-few helper arity wins" "E0803" too_few.code;
+  Alcotest.(check string) "too-few helper arity wins" "E0803" (Diag.code_or_uncoded too_few);
   let valid_slot_too_many = err_of (make_cctx ()) (unary_gate "(app (var gate) (var k) (lit 0))") in
   Alcotest.(check string)
-    "valid Resume slot does not hide too-many helper arity" "E0803" valid_slot_too_many.code;
+    "valid Resume slot does not hide too-many helper arity" "E0803"
+    (Diag.code_or_uncoded valid_slot_too_many);
   let local_out_of_range = err_of (make_cctx ()) (unary_gate "(app (var gate) (lit 0) (var k))") in
   Alcotest.(check string)
-    "out-of-range local-helper transfer defers to arity" "E0803" local_out_of_range.code;
+    "out-of-range local-helper transfer defers to arity" "E0803"
+    (Diag.code_or_uncoded local_out_of_range);
   let stored_out_of_range =
     err_of (make_cctx ())
       ("(defeffect linear () (op signal once () (tref int)))\n"
@@ -548,7 +563,8 @@ let test_once_resume_type_errors_precede_duplication () =
      ^ "(opclause signal () k (app (var gate) (lit 0) (var k))))")
   in
   Alcotest.(check string)
-    "out-of-range stored-helper transfer defers to arity" "E0803" stored_out_of_range.code;
+    "out-of-range stored-helper transfer defers to arity" "E0803"
+    (Diag.code_or_uncoded stored_out_of_range);
   let local_recursive_gate call =
     once_handler
       (Printf.sprintf
@@ -567,55 +583,60 @@ let test_once_resume_type_errors_precede_duplication () =
     err_of (make_cctx ()) (local_recursive_gate "(app (var gate) (lit 0))")
   in
   Alcotest.(check string)
-    "too-few local recursive helper stays arity" "E0803" local_recursive_too_few.code;
+    "too-few local recursive helper stays arity" "E0803"
+    (Diag.code_or_uncoded local_recursive_too_few);
   let stored_recursive_too_few =
     err_of (make_cctx ()) (stored_recursive_gate "(app (var gate) (lit 0))")
   in
   Alcotest.(check string)
-    "too-few stored recursive helper stays arity" "E0803" stored_recursive_too_few.code;
+    "too-few stored recursive helper stays arity" "E0803"
+    (Diag.code_or_uncoded stored_recursive_too_few);
   let local_recursive_in_range =
     err_of (make_cctx ()) (local_recursive_gate "(app (var gate) (var k) (lit 0))")
   in
   Alcotest.(check string)
-    "in-range local recursive transfer stays escape" "E0817" local_recursive_in_range.code;
+    "in-range local recursive transfer stays escape" "E0817"
+    (Diag.code_or_uncoded local_recursive_in_range);
   let stored_recursive_in_range =
     err_of (make_cctx ()) (stored_recursive_gate "(app (var gate) (var k) (lit 0))")
   in
   Alcotest.(check string)
-    "in-range stored recursive transfer stays escape" "E0817" stored_recursive_in_range.code;
+    "in-range stored recursive transfer stays escape" "E0817"
+    (Diag.code_or_uncoded stored_recursive_in_range);
   let local_recursive_valid_slot_too_many =
     err_of (make_cctx ()) (local_recursive_gate "(app (var gate) (lit 0) (var k) (lit 0))")
   in
   Alcotest.(check string)
     "valid local recursive slot outranks too-many arity" "E0817"
-    local_recursive_valid_slot_too_many.code;
+    (Diag.code_or_uncoded local_recursive_valid_slot_too_many);
   let stored_recursive_valid_slot_too_many =
     err_of (make_cctx ()) (stored_recursive_gate "(app (var gate) (lit 0) (var k) (lit 0))")
   in
   Alcotest.(check string)
     "valid stored recursive slot outranks too-many arity" "E0817"
-    stored_recursive_valid_slot_too_many.code;
+    (Diag.code_or_uncoded stored_recursive_valid_slot_too_many);
   let local_recursive_index_two =
     err_of (make_cctx ()) (local_recursive_gate "(app (var gate) (lit 0) (lit 0) (var k))")
   in
   Alcotest.(check string)
     "out-of-range local recursive binary index two defers to arity" "E0803"
-    local_recursive_index_two.code;
+    (Diag.code_or_uncoded local_recursive_index_two);
   let stored_recursive_index_two =
     err_of (make_cctx ()) (stored_recursive_gate "(app (var gate) (lit 0) (lit 0) (var k))")
   in
   Alcotest.(check string)
     "out-of-range stored recursive binary index two defers to arity" "E0803"
-    stored_recursive_index_two.code;
+    (Diag.code_or_uncoded stored_recursive_index_two);
   let arity =
     err_of (make_cctx ()) (once_handler "(let nonrec (pwild) (app (var k)) (app (var k) (lit 1)))")
   in
-  Alcotest.(check string) "malformed resume arity wins" "E0803" arity.code;
+  Alcotest.(check string) "malformed resume arity wins" "E0803" (Diag.code_or_uncoded arity);
   let argument =
     err_of (make_cctx ())
       (once_handler "(let nonrec (pwild) (app (var k) (lit \"not-an-int\")) (app (var k) (lit 1)))")
   in
-  Alcotest.(check string) "malformed resume argument type wins" "E0801" argument.code;
+  Alcotest.(check string)
+    "malformed resume argument type wins" "E0801" (Diag.code_or_uncoded argument);
   let binary_duplication =
     err_of (make_cctx ())
       (once_handler
@@ -623,7 +644,8 @@ let test_once_resume_type_errors_precede_duplication () =
           left) (lit 1)) (app (var right) (lit 2)))) (app (var gate) (var k) (var k)))")
   in
   Alcotest.(check string)
-    "two valid helper slots still share one affine budget" "E0816" binary_duplication.code;
+    "two valid helper slots still share one affine budget" "E0816"
+    (Diag.code_or_uncoded binary_duplication);
   let standalone_body =
     match
       Reader.parse_string ~file:"standalone.jqd"
@@ -638,7 +660,8 @@ let test_once_resume_type_errors_precede_duplication () =
     | Error ds -> Eval_support.fail_diags "standalone affine fixture parse" ds
   in
   (match Affine_resume.check_clause ~resume:"k" standalone_body with
-  | Error [ d ] -> Alcotest.(check string) "standalone safety fallback" "E0817" d.code
+  | Error [ d ] ->
+      Alcotest.(check string) "standalone safety fallback" "E0817" (Diag.code_or_uncoded d)
   | Error ds -> Alcotest.failf "standalone safety expected one diagnostic, got %d" (List.length ds)
   | Ok () -> Alcotest.fail "standalone affine checking must reject an out-of-range transfer");
   let standalone_recursive_body =
@@ -655,7 +678,9 @@ let test_once_resume_type_errors_precede_duplication () =
     | Error ds -> Eval_support.fail_diags "standalone recursive affine fixture parse" ds
   in
   match Affine_resume.check_clause ~resume:"k" standalone_recursive_body with
-  | Error [ d ] -> Alcotest.(check string) "standalone recursive safety fallback" "E0817" d.code
+  | Error [ d ] ->
+      Alcotest.(check string)
+        "standalone recursive safety fallback" "E0817" (Diag.code_or_uncoded d)
   | Error ds ->
       Alcotest.failf "standalone recursive safety expected one diagnostic, got %d" (List.length ds)
   | Ok () ->
@@ -669,16 +694,16 @@ let test_once_resume_aliases_share_one_budget () =
          "(let nonrec (pvar k2) (var k) (let nonrec (pwild) (app (var k) (lit 1)) (app (var k2) \
           (lit 2))))")
   in
-  Alcotest.(check string) "duplicate alias code" "E0816" d.code;
+  Alcotest.(check string) "duplicate alias code" "E0816" (Diag.code_or_uncoded d);
   check_ok (make_cctx ()) "a single moved alias remains affine"
     (once_handler "(let nonrec (pvar k2) (var k) (app (var k2) (lit 1)))")
 
 let check_escape what body expected_fragment =
   let d = err_of (make_cctx ()) (once_handler body) in
-  Alcotest.(check string) (what ^ " code") "E0817" d.code;
+  Alcotest.(check string) (what ^ " code") "E0817" (Diag.code_or_uncoded d);
   Alcotest.(check bool)
     (what ^ " wording") true
-    (contains d.message expected_fragment && Option.is_some d.span)
+    (contains (Diag.cause d) expected_fragment && Option.is_some (Diag.span d))
 
 let test_once_resume_escape_goldens () =
   check_escape "lambda capture" "(let nonrec (pvar f) (lam () (app (var k) (lit 1))) (lit 0))"
@@ -699,10 +724,10 @@ let test_once_resume_escape_goldens () =
     err_of (make_cctx ())
       (once_handler "(let nonrec (pvar escaped) (app (var add) (var k) (lit 1)) (lit 0))")
   in
-  Alcotest.(check string) "unknown call escape code" "E0817" d.code;
+  Alcotest.(check string) "unknown call escape code" "E0817" (Diag.code_or_uncoded d);
   Alcotest.(check bool)
     "unknown call escape wording" true
-    (contains d.message "parameter that is not known to be Resume-typed")
+    (contains (Diag.cause d) "parameter that is not known to be Resume-typed")
 
 let test_once_resume_stored_helper_escape_uses_author_span () =
   let d =
@@ -712,8 +737,8 @@ let test_once_resume_stored_helper_escape_uses_author_span () =
      ^ "(handle (app (var signal)) (ret (pvar x) (var x)) "
      ^ "(opclause signal () k (app (var bad-gate) (var k))))")
   in
-  Alcotest.(check string) "stored helper escape code" "E0817" d.code;
-  (match d.span with
+  Alcotest.(check string) "stored helper escape code" "E0817" (Diag.code_or_uncoded d);
+  (match Diag.span d with
   | Some span -> Alcotest.(check string) "primary span is the author input" "c.jqd" span.Span.file
   | None -> Alcotest.fail "stored helper escape must retain an author source span");
   Alcotest.(check bool)
@@ -728,7 +753,7 @@ let test_once_resume_stored_helper_has_distinct_logical_witnesses () =
         1)) (app (var next) (lit 2)))))))\n" ^ "(handle (app (var signal)) (ret (pvar x) (var x)) "
      ^ "(opclause signal () k (app (var bad-gate) (var k))))")
   in
-  Alcotest.(check string) "stored helper duplication code" "E0816" d.code;
+  Alcotest.(check string) "stored helper duplication code" "E0816" (Diag.code_or_uncoded d);
   let rendered = Diag.to_string d in
   Alcotest.(check bool)
     "stored helper witnesses use an honest stable logical source" true
@@ -742,16 +767,19 @@ let test_once_resume_stored_helper_has_distinct_logical_witnesses () =
     in
     go start
   in
-  match (find_from d.message first_marker 0, find_from d.message second_marker 0) with
+  match (find_from (Diag.cause d) first_marker 0, find_from (Diag.cause d) second_marker 0) with
   | Some first_start, Some second_start ->
       let first_start = first_start + String.length first_marker in
       let second_start = second_start + String.length second_marker in
       let first =
-        String.sub d.message first_start (second_start - String.length second_marker - first_start)
+        String.sub (Diag.cause d) first_start
+          (second_start - String.length second_marker - first_start)
       in
-      let second = String.sub d.message second_start (String.length d.message - second_start) in
+      let second =
+        String.sub (Diag.cause d) second_start (String.length (Diag.cause d) - second_start)
+      in
       Alcotest.(check bool) "stored helper consumption spans are distinct" true (first <> second)
-  | _ -> Alcotest.failf "missing two stored-helper witnesses in: %s" d.message
+  | _ -> Alcotest.failf "missing two stored-helper witnesses in: %s" (Diag.cause d)
 
 let test_multi_resume_remains_ordinary_function () =
   test_once_resume_stored_helper_escape_uses_author_span ();
@@ -769,15 +797,15 @@ let test_declaration_kind_checks () =
   (match
      check_src h "(deftype bad ((tvar a)) (con mk (field (tapp (tref option) (tvar a) (tvar a)))))"
    with
-  | Error [ d ] -> Alcotest.(check string) "arity" "E0810" d.Diag.code
+  | Error [ d ] -> Alcotest.(check string) "arity" "E0810" (Diag.code_or_uncoded d)
   | _ -> Alcotest.fail "expected E0810");
   (* unbound tyvar in a field *)
   (match check_src h "(deftype bad2 () (con mk (field (tvar zz))))" with
-  | Error [ d ] -> Alcotest.(check string) "unbound" "E0811" d.Diag.code
+  | Error [ d ] -> Alcotest.(check string) "unbound" "E0811" (Diag.code_or_uncoded d)
   | _ -> Alcotest.fail "expected E0811");
   (* op returning an unbound var: its own code, distinct from type-decl unbound *)
   match check_src h "(defeffect bade () (op o () (tvar zz)))" with
-  | Error [ d ] -> Alcotest.(check string) "op unbound" "E0812" d.Diag.code
+  | Error [ d ] -> Alcotest.(check string) "op unbound" "E0812" (Diag.code_or_uncoded d)
   | _ -> Alcotest.fail "expected E0812"
 
 let test_group_annotations () =
@@ -802,7 +830,7 @@ let test_group_annotations () =
       "(defterm ((binding liar ((tarrow ((tref int)) (row) (tref text))) (lam ((pvar n)) (var \
        n)))))"
   with
-  | Error [ d ] -> Alcotest.(check string) "annotation mismatch" "E0804" d.Diag.code
+  | Error [ d ] -> Alcotest.(check string) "annotation mismatch" "E0804" (Diag.code_or_uncoded d)
   | _ -> Alcotest.fail "expected E0804"
 
 let manifest_text (_, ctx) row =
@@ -858,10 +886,11 @@ let test_manifest_renders_blessed_risk () =
   | Ok { Check.row = Some row; _ } ->
       Alcotest.(check string)
         "Workspace is a handled facade, not a pure or root-grantable effect"
-        "error[E0814]: this program requires workspace [world/high] — request mediated workspace \
-         reads, writes, or fetches without directly acquiring raw authority, which is not granted \
-         (performed via `workspace.read-file`)\n\
-        \  hint: handle Workspace in the program (Workspace is a world facade and is not \
+        "error[E0814]: The program requires an effect that was not granted\n\
+        \  Cause: This program requires workspace [world/high] — request mediated workspace reads, \
+         writes, or fetches without directly acquiring raw authority, which is not granted \
+         (performed via `workspace.read-file`).\n\
+        \  Next step: handle Workspace in the program (Workspace is a world facade and is not \
          root-grantable)"
         (manifest_text workspace row)
   | Ok _ -> Alcotest.fail "Workspace expression had no manifest"

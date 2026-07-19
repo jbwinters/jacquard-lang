@@ -48,8 +48,9 @@ Console prints only under its grant (exit 3 = unhandled effect):
   hello jacquard
   ()
   $ jacquard run hello.jqd
-  error[E0814]: this program requires console [world/low] — talk to the process terminal, which is not granted (performed via `print`)
-    hint: grant it with --allow console, or handle the effect in the program
+  error[E0814]: The program requires an effect that was not granted
+    Cause: This program requires console [world/low] — talk to the process terminal, which is not granted (performed via `print`).
+    Next step: grant it with --allow console, or handle the effect in the program
   [3]
 
 Runtime errors exit 2:
@@ -58,7 +59,9 @@ Runtime errors exit 2:
   > (app (var div) (lit 1) (lit 0))
   > EOF
   $ jacquard run crash.jqd
-  arithmetic error: division by zero
+  error: Arithmetic operation failed
+    Cause: arithmetic error: division by zero
+    Next step: Correct the arithmetic inputs and run the program again.
   [2]
 
 Diagnostics exit 1:
@@ -67,5 +70,7 @@ Diagnostics exit 1:
   > (lit 1
   > EOF
   $ jacquard run broken.jqd
-  broken.jqd:1:1-2:1: error[E0106]: unclosed form: expected `)`
+  broken.jqd:1:1-2:1: error[E0106]: The source ended before the form was complete.
+    Cause: unclosed form: expected `)`
+    Next step: Complete the open form and its closing parenthesis.
   [1]

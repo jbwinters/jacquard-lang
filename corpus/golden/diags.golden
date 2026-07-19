@@ -1,56 +1,93 @@
-type-mismatch | type-mismatch.jqd:1:1-34: error[E0801]: argument: expected int, got text (type mismatch)
-  hint: the expected side comes from the surrounding context; make both sides agree
-branch-mismatch | branch-mismatch.jqd:1:48-79: error[E0801]: match clause result: expected int, got text (type mismatch)
-  hint: the expected side comes from the surrounding context; make both sides agree
-not-a-function | not-a-function.jqd:1:1-22: error[E0802]: int is not a function
-  hint: only functions, constructors, effect operations, and resumptions apply
-app-arity | app-arity.jqd:1:1-47: error[E0803]: this function expects 1 argument(s), got 2
-  hint: Jacquard calls are uncurried: pass exactly the declared arguments
-op-clause-arity | op-clause-arity.jqd:1:60-120: error[E0803]: op clause for print expects 1 parameter(s), got 2
-resume-arity | resume-arity.jqd:1:71-100: error[E0803]: this resumption expects 1 argument, got 2
-  hint: a resumption accepts exactly the operation's result value
-resume-wrong-type | resume-wrong-type.jqd:1:102-109: error[E0801]: resumption argument: expected (), got int (type mismatch)
-  hint: the expected side comes from the surrounding context; make both sides agree
-ann-mismatch | ann-mismatch.jqd:1:1-26: error[E0804]: annotation mismatch: expected text, got int (type mismatch)
-  hint: the annotation is the contract: change the body or the annotation
-ann-pure-but-prints | ann-pure-but-prints.jqd:1:1-70: error[E0804]: annotation mismatch: expected () ->{} (), got () ->{console | e} () (a closed effect row cannot absorb extra effects; a stored definition passed as a thunk can be eta-expanded at the use site: (lam () (app (var f))))
-  hint: the annotation is the contract: change the body or the annotation
-ann-rigid-escape | ann-rigid-escape.jqd:1:1-90: error[E0804]: annotation mismatch: expected (a) ->{} a, got (a) ->{} int (type mismatch)
-  hint: the annotation is the contract: change the body or the annotation
-group-annotation-lies | group-annotation-lies.jqd:1:11-92: error[E0804]: binding liar does not match its annotation: expected (int) ->{} text, got (int) ->{} int (type mismatch)
-groupref-outside | groupref-outside.jqd:1:1-13: error[E0805]: groupref 5 outside its group
-pcon-pattern-arity | pcon-pattern-arity.jqd:1:41-52: error[E0806]: constructor some expects 1 argument(s) in this pattern, got 0
-  hint: constructor patterns bind every declared field
-deftype-arity | deftype-arity.jqd:1:41-79: error[E0810]: type option expects 1 argument(s), got 2
-unbound-tyvar | unbound-tyvar.jqd:1:33-42: error[E0811]: unbound type variable `zz` in declaration
-  hint: declare it in the parameter list of the enclosing declaration
-op-unbound-var | op-unbound-var.jqd:1:29-38: error[E0812]: unbound type variable `zz` in declaration
-  hint: declare it in the parameter list of the enclosing declaration
-nonexhaustive-bool | nonexhaustive-bool.jqd:1:24-31: error[E0813]: this match is not exhaustive: it misses false
-  hint: add a clause matching the witness, or a (pwild) default
-nonexhaustive-nested | nonexhaustive-nested.jqd:1:24-31: error[E0813]: this match is not exhaustive: it misses some(some(false))
-  hint: add a clause matching the witness, or a (pwild) default
-ungranted-effect | error[E0814]: this program requires console [world/low] — talk to the process terminal, which is not granted (performed via `print`)
-  hint: grant it with --allow console, or handle the effect in the program
-effectful-toplevel-body | effectful-toplevel-body.jqd:1:11-78: error[E0815]: top-level definition `sneaky` performs the `net` effect while being defined
-  hint: wrap the body in a lambda and perform the effect when called
-value-restriction | value-restriction.jqd:1:112-119: error[E0818]: local binding `i` comes from a non-value and remains monomorphic under the value restriction
-  hint: eta-expand the binding to a lambda value, or give each use its own binding
-once-double-call | once-double-call.jqd:2:129-150: error[E0816]: once resumption `k` may be consumed twice on one possible execution path; first consumption at once-double-call.jqd:2:107-128, second consumption at once-double-call.jqd:2:129-150
-  hint: a once resumption may be dropped or moved, but it may be consumed at most once on each possible execution path
-once-alias-duplication | once-alias-duplication.jqd:2:157-179: error[E0816]: once resumption `k2` may be consumed twice on one possible execution path; first consumption at once-alias-duplication.jqd:2:135-156, second consumption at once-alias-duplication.jqd:2:157-179
-  hint: a once resumption may be dropped or moved, but it may be consumed at most once on each possible execution path
-once-lambda-capture | once-lambda-capture.jqd:2:108-138: error[E0817]: once resumption `k` escapes into a closure captured here (free use at once-lambda-capture.jqd:2:121-128)
-  hint: pass the once resumption as a Resume-typed parameter instead of capturing it
-once-quote-capture | once-quote-capture.jqd:2:106-131: error[E0817]: once resumption `k` escapes into quoted code captured here (splice at once-quote-capture.jqd:2:122-129)
-  hint: a once resumption cannot cross a quote boundary
-once-constructor-storage | once-constructor-storage.jqd:2:130-137: error[E0817]: once resumption `k` cannot be stored in data
-  hint: call the resumption once, drop it, or move it to a local parameter that is checked as Resume-typed
-once-return | once-return.jqd:2:87-94: error[E0817]: once resumption `k` escapes by being returned from its handler clause
-  hint: call the resumption once, drop it, or move it to a local parameter that is checked as Resume-typed
-secret-generic-inspection | secret-generic-inspection.jqd:1:1-100: error[E0819]: Secret has no Show or serialization instance and generic inspection is redacted
-  hint: keep the value opaque; only `secret.expose` converts Secret to Text, and that operation remains in the Secret effect row
-redundant-clause | redundant-clause.jqd:1:57-85: warning[W0801]: this clause is redundant: earlier clauses match everything it does
-eta-positive | eta-positive.jac:2:21-30: error[E0807]: this position expects a thunk, but `condition` is a bare reference; wrap it in `fn () -> ...`
-  hint: wrap the reference in `fn () -> ...` so the computation is delayed
-strict-recovery | error[E1202]: recovery holes are not valid input to the strict type checker
+type-mismatch | type-mismatch.jqd:1:1-34: error[E0801]: Types do not agree
+  Cause: argument: expected int, got text (type mismatch)
+  Next step: the expected side comes from the surrounding context; make both sides agree
+branch-mismatch | branch-mismatch.jqd:1:48-79: error[E0801]: Types do not agree
+  Cause: match clause result: expected int, got text (type mismatch)
+  Next step: the expected side comes from the surrounding context; make both sides agree
+not-a-function | not-a-function.jqd:1:1-22: error[E0802]: This value is not callable
+  Cause: int is not a function
+  Next step: Apply only a function, constructor, effect operation, or resumption.
+app-arity | app-arity.jqd:1:1-47: error[E0803]: Call arity does not agree
+  Cause: this function expects 1 argument(s), got 2
+  Next step: Pass exactly the declared arguments in this uncurried call.
+op-clause-arity | op-clause-arity.jqd:1:60-120: error[E0803]: Call arity does not agree
+  Cause: op clause for print expects 1 parameter(s), got 2
+  Next step: Pass exactly the number of arguments declared by the callable.
+resume-arity | resume-arity.jqd:1:71-100: error[E0803]: Call arity does not agree
+  Cause: this resumption expects 1 argument, got 2
+  Next step: Pass exactly the operation's result value to the resumption.
+resume-wrong-type | resume-wrong-type.jqd:1:102-109: error[E0801]: Types do not agree
+  Cause: resumption argument: expected (), got int (type mismatch)
+  Next step: the expected side comes from the surrounding context; make both sides agree
+ann-mismatch | ann-mismatch.jqd:1:1-26: error[E0804]: The value does not satisfy its annotation
+  Cause: annotation mismatch: expected text, got int (type mismatch)
+  Next step: the annotation is the contract: change the body or the annotation
+ann-pure-but-prints | ann-pure-but-prints.jqd:1:1-70: error[E0804]: The value does not satisfy its annotation
+  Cause: annotation mismatch: expected () ->{} (), got () ->{console | e} () (a closed effect row cannot absorb extra effects; a stored definition passed as a thunk can be eta-expanded at the use site: (lam () (app (var f))))
+  Next step: the annotation is the contract: change the body or the annotation
+ann-rigid-escape | ann-rigid-escape.jqd:1:1-90: error[E0804]: The value does not satisfy its annotation
+  Cause: annotation mismatch: expected (a) ->{} a, got (a) ->{} int (type mismatch)
+  Next step: the annotation is the contract: change the body or the annotation
+group-annotation-lies | group-annotation-lies.jqd:1:11-92: error[E0804]: The value does not satisfy its annotation
+  Cause: binding liar does not match its annotation: expected (int) ->{} text, got (int) ->{} int (type mismatch)
+  Next step: Change the value or its annotation so the two types agree.
+groupref-outside | groupref-outside.jqd:1:1-13: error[E0805]: A referenced declaration has the wrong kind or is unavailable
+  Cause: groupref 5 outside its group
+  Next step: Use an available declaration of the required kind.
+pcon-pattern-arity | pcon-pattern-arity.jqd:1:41-52: error[E0806]: Constructor pattern arity does not agree
+  Cause: constructor some expects 1 argument(s) in this pattern, got 0
+  Next step: Bind every field declared by the constructor.
+deftype-arity | deftype-arity.jqd:1:41-79: error[E0810]: Type constructor arity does not agree
+  Cause: type option expects 1 argument(s), got 2
+  Next step: Apply the type constructor to exactly its declared parameters.
+unbound-tyvar | unbound-tyvar.jqd:1:33-42: error[E0811]: A type, effect, or row name is unresolved
+  Cause: unbound type variable `zz` in declaration
+  Next step: Declare it in the parameter list of the enclosing declaration.
+op-unbound-var | op-unbound-var.jqd:1:29-38: error[E0812]: An effect operation signature contains an unbound variable
+  Cause: unbound type variable `zz` in declaration
+  Next step: Declare it in the parameter list of the enclosing declaration.
+nonexhaustive-bool | nonexhaustive-bool.jqd:1:24-31: error[E0813]: This match is not exhaustive
+  Cause: this match is not exhaustive: it misses false
+  Next step: Add a clause matching the witness or a wildcard default.
+nonexhaustive-nested | nonexhaustive-nested.jqd:1:24-31: error[E0813]: This match is not exhaustive
+  Cause: this match is not exhaustive: it misses some(some(false))
+  Next step: Add a clause matching the witness or a wildcard default.
+ungranted-effect | error[E0814]: The program requires an effect that was not granted
+  Cause: This program requires console [world/low] — talk to the process terminal, which is not granted (performed via `print`).
+  Next step: grant it with --allow console, or handle the effect in the program
+effectful-toplevel-body | effectful-toplevel-body.jqd:1:11-78: error[E0815]: A top-level definition performs effects
+  Cause: top-level definition `sneaky` performs the `net` effect while being defined
+  Next step: Wrap the body in a lambda and perform the effect when called.
+value-restriction | value-restriction.jqd:1:112-119: error[E0818]: A non-value binding cannot be reused polymorphically
+  Cause: local binding `i` comes from a non-value and remains monomorphic under the value restriction
+  Next step: eta-expand the binding to a lambda value, or give each use its own binding
+once-double-call | once-double-call.jqd:2:129-150: error[E0816]: A once resumption may be consumed twice on one execution path.
+  Cause: once resumption `k` may be consumed twice on one possible execution path; first consumption at once-double-call.jqd:2:107-128, second consumption at once-double-call.jqd:2:129-150
+  Next step: a once resumption may be dropped or moved, but it may be consumed at most once on each possible execution path
+once-alias-duplication | once-alias-duplication.jqd:2:157-179: error[E0816]: A once resumption may be consumed twice on one execution path.
+  Cause: once resumption `k2` may be consumed twice on one possible execution path; first consumption at once-alias-duplication.jqd:2:135-156, second consumption at once-alias-duplication.jqd:2:157-179
+  Next step: a once resumption may be dropped or moved, but it may be consumed at most once on each possible execution path
+once-lambda-capture | once-lambda-capture.jqd:2:108-138: error[E0817]: A once resumption escapes its handler clause.
+  Cause: once resumption `k` escapes into a closure captured here (free use at once-lambda-capture.jqd:2:121-128)
+  Next step: Pass the once resumption as a Resume-typed parameter instead of capturing it.
+once-quote-capture | once-quote-capture.jqd:2:106-131: error[E0817]: A once resumption escapes its handler clause.
+  Cause: once resumption `k` escapes into quoted code captured here (splice at once-quote-capture.jqd:2:122-129)
+  Next step: Keep the once resumption outside quoted code.
+once-constructor-storage | once-constructor-storage.jqd:2:130-137: error[E0817]: A once resumption escapes its handler clause.
+  Cause: once resumption `k` cannot be stored in data
+  Next step: call the resumption once, drop it, or move it to a local parameter that is checked as Resume-typed
+once-return | once-return.jqd:2:87-94: error[E0817]: A once resumption escapes its handler clause.
+  Cause: once resumption `k` escapes by being returned from its handler clause
+  Next step: call the resumption once, drop it, or move it to a local parameter that is checked as Resume-typed
+secret-generic-inspection | secret-generic-inspection.jqd:1:1-100: error[E0819]: An opaque Secret was used by generic inspection
+  Cause: Secret has no Show or serialization instance and generic inspection is redacted
+  Next step: keep the value opaque; only `secret.expose` converts Secret to Text, and that operation remains in the Secret effect row
+redundant-clause | redundant-clause.jqd:1:57-85: warning[W0801]: This match clause is redundant
+  Cause: Earlier clauses match every value this clause can match.
+  Next step: Remove the redundant clause or narrow an earlier pattern.
+eta-positive | eta-positive.jac:2:21-30: error[E0807]: A computation was used where a thunk is required
+  Cause: this position expects a thunk, but `condition` is a bare reference; wrap it in `fn () -> ...`
+  Next step: Wrap the reference in `fn () -> ...` so the computation is delayed.
+strict-recovery | error[E1202]: Recovered syntax cannot cross this semantic boundary.
+  Cause: Recovery holes are not valid input to the strict type checker.
+  Next step: Fix the reported syntax damage before checking, hashing, storing, or running it.

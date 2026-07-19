@@ -44,8 +44,10 @@ type t = {
 let error message =
   Error
     [
-      Diag.error ~code:"E0908" ~hint:"re-record the schedule or use an explicit valid fork"
-        ("schedule replay drift: " ^ message);
+      Diag.error ~domain:Concurrency ~code:"E0908"
+        ~summary:"The requested schedule replay step is invalid."
+        ~cause:("Schedule replay drift: " ^ message)
+        ~next_step:"Re-record the schedule or use an explicit valid fork." ~contrast:None ();
     ]
 
 let equal_id left right = Concurrency_contract.compare_task_id left right = 0

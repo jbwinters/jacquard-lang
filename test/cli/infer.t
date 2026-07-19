@@ -52,6 +52,7 @@ An ungranted effect inside a model still refuses (dist itself is implicit):
   >   (app (var sample) (app (var bernoulli) (lit 0.5))))
   > EOF_JQD
   $ jac infer enumerate naughty.jqd
-  error[E0814]: this program requires console [world/low] — talk to the process terminal, which is not granted (performed via `print`)
-    hint: grant it with --allow console, or handle the effect in the program
+  error[E0814]: The program requires an effect that was not granted
+    Cause: This program requires console [world/low] — talk to the process terminal, which is not granted (performed via `print`).
+    Next step: grant it with --allow console, or handle the effect in the program
   [1]

@@ -13,7 +13,27 @@
     case-insensitive effect name from the CLI to the matching installer. Pure effects (abort etc.)
     deliberately has no root handler: an unhandled [abort] is supposed to die. *)
 
-let err ~code fmt = Printf.ksprintf (fun msg -> Error [ Diag.error ~code msg ]) fmt
+let diagnostic_summary = function
+  | "E0701" -> "Prelude directory is unavailable"
+  | "E0702" -> "Prelude contents are incomplete or have the wrong kind"
+  | "E0703" -> "Requested effect is not root-grantable"
+  | code -> "Prelude loading failed (" ^ code ^ ")"
+
+let diagnostic_next_step = function
+  | "E0701" -> "Pass --prelude with the path to a complete prelude directory."
+  | "E0702" -> "Restore the named declaration with the required prelude kind."
+  | "E0703" -> "Handle this effect inside the program instead of granting it at the root."
+  | _ -> "Correct the prelude configuration and try again."
+
+let err ~code fmt =
+  Printf.ksprintf
+    (fun cause ->
+      Error
+        [
+          Diag.error ~domain:Prelude ~code ~summary:(diagnostic_summary code) ~cause
+            ~next_step:(diagnostic_next_step code) ~contrast:None ();
+        ])
+    fmt
 
 let read_file path =
   let ic = open_in_bin path in
@@ -643,10 +663,22 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
               Infer_dist.likelihood_weighting ctx ~seed ~samples (fun () ->
                   Eval.apply_state ctx thunk [])
             with
-            | Error ds ->
-                (* E0901/E0902 flatten to a runtime error here; the diagnostic text (with
-                   its code) rides in the message *)
-                Error (Runtime_err.Arithmetic (String.concat "; " (List.map Diag.to_string ds)))
+            | Error [ diagnostic ] -> Error (Runtime_err.Diagnostic diagnostic)
+            | Error diagnostics ->
+                (* Inference currently returns exactly one diagnostic. Keep this boundary total if
+                   that API later reports several failures, while retaining a structured primary
+                   inference identity instead of misclassifying them as arithmetic. *)
+                let cause =
+                  match diagnostics with
+                  | [] -> "the inference driver failed without reporting a cause"
+                  | diagnostics -> String.concat "; " (List.map Diag.to_cause_string diagnostics)
+                in
+                Error
+                  (Runtime_err.Diagnostic
+                     (Diag.error ~domain:Inference ~code:"E0902"
+                        ~summary:"Probabilistic inference stopped on a runtime failure." ~cause
+                        ~next_step:"Correct the reported model runtime failure and rerun inference."
+                        ~contrast:None ()))
             | Ok p -> (
                 match
                   ( Store.lookup_kind store "mk-pair" Resolve.KCon,
@@ -1043,7 +1075,7 @@ let install_eval (ctx : Eval.ctx) : (unit, Diag.t list) result =
       Eval.register_root_handler ctx eval_op (fun args ->
           match args with
           | [ Value.VCode payload ] -> (
-              let diags_msg ds = String.concat "; " (List.map Diag.to_string ds) in
+              let diags_msg ds = String.concat "; " (List.map Diag.to_cause_string ds) in
               match Kernel.expr_of_form payload with
               | Error ds -> Error (Runtime_err.Eval_error (diags_msg ds))
               | Ok e -> (
@@ -1241,7 +1273,15 @@ let builtin_signatures (store : Store.t) : ((Hash.t * Types.scheme) list, Diag.t
             ])
     | Error _, _, _ -> Ok base
     | Ok _, (None | Some _), (None | Some _) ->
-        Error [ Diag.error ~code:"E0908" "invalid frozen Async scope identities" ]
+        Error
+          [
+            Diag.error ~domain:Concurrency ~code:"E0908"
+              ~summary:"Frozen Async scope identities are invalid"
+              ~cause:
+                "The prelude's frozen Async declarations do not have their expected identities."
+              ~next_step:"Rebuild the complete, version-matched prelude and try again."
+              ~contrast:None ();
+          ]
   in
   (* int-compare ships with ring 0; its ordering result type lives in 02-data *)
   let* base =
