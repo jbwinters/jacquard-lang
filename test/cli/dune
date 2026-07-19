@@ -18,4 +18,5 @@
   ../../demos/concurrency/concurrency_evidence.exe
   (source_tree ../native-parallel)
   (source_tree ../../scripts)
-  governance-gate-dry-laws.jqd))
+  governance-gate-dry-laws.jqd
+  workspace-dry-run-laws.jqd))

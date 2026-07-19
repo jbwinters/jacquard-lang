@@ -221,3 +221,13 @@ ordered audit records and exactly one Resume on every ordinary path.
   $ jacquard test governance-gate-dry-laws.jqd --exhaustive --budget 1000 --no-cache
   PASS governance-gate-dry-matrix/world-free dry gate matrix (verified exhaustively (300 cases))
   1 passed, 0 failed, 0 skipped, 0 refused
+
+GM.10 runs the real Workspace membrane across all three facade operations,
+four risks, and missing/success/failing simulators. Its separate fault.all case
+proves both one-site paths are collapsed to a pure simulator result before the
+governance gate runs.
+
+  $ jacquard test workspace-dry-run-laws.jqd --exhaustive --budget 1000 --no-cache
+  PASS workspace-dry-run-fault-all/fault.all is discharged before gate-dry (1 check)
+  PASS workspace-dry-run-matrix/Workspace dry membrane matrix (verified exhaustively (36 cases))
+  2 passed, 0 failed, 0 skipped, 0 refused

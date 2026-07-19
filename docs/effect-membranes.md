@@ -505,8 +505,21 @@ and the disposition is `RefuseDry(NoSimulation)`. A refused pre-action Audit
 write prevents the simulator and summarizer; a refused completion write
 prevents the disposition from returning. The facade clause remains the sole
 owner that consumes its local `Resume`. This implements D64-D66 without
-replacing the frozen representation below; the workspace facade remains later
-G2 work.
+replacing the frozen representation below.
+
+Implementation status (GM.10): `prelude/26-workspace-dry-run.jqd` ships the
+world-free half of the Workspace facade. `WorkspaceSimulators` stores only
+closed pure callbacks; explicit State, Fault, and Dist adapters discharge those
+helper effects before a callback crosses the boundary. `workspace.dry-layer`
+normalizes each typed Workspace operation through the GM.9 Call builders,
+routes it through the GM.6 dry gate, and consumes the clause-local affine
+continuation exactly once. `workspace.dry-run` owns and discharges the shared
+audit sequence. The unchanged agent body therefore derives `Workspace`, while
+the handled dry run derives only `{Judge, Audit | e}`. Executable tests cover
+all three operations, all four risks, missing/success/failing simulators,
+hostile typed failures, exhaustive Fault exploration, exact audit positions,
+and zero raw-world authority. The live facade and raw drivers remain later G2
+work.
 
 Implementation status (GM.7): `prelude/24-governance-approval.jqd` adds the
 versioned `GovernanceApprovalV1` boundary over the canonical
@@ -597,11 +610,15 @@ This is why facade operations return `Result ToolError a`. If an operation promi
 
 ## 8. A complete membrane, in surface syntax
 
-A workspace facade illustrates the pattern. The code is intentionally literal; the shared gate holds the policy mechanics, while each clause keeps normalization and raw authority local and reviewable.
+A workspace facade illustrates the pattern. The code is intentionally literal;
+the shared gate holds the policy mechanics, while each clause keeps
+normalization and raw authority local and reviewable.
 
-This is exact representation pseudocode: the current surface has no record
-syntax for `simulators`, but G2 must implement this disposition API and may not
-reintroduce a second action-row tail or export `Resume`.
+The dry half is now executable in the prelude. Because the current surface has
+no record syntax, GM.10 represents `simulators` with the nominal
+`WorkspaceSimulators` carrier and the `workspace.simulators` smart constructor.
+The live half below remains exact design pseudocode for later G2 work. It may
+not reintroduce a second action-row tail or export `Resume`.
 
 ```text
 once effect Workspace where
@@ -751,8 +768,8 @@ workspace.dry-run(policy, simulators, body) =
 The live fetch action deliberately resolves the ratified `SecretRef` and
 performs both `secret.read` and `secret.expose` before `net.fetch`. The
 provider-neutral match sequences those effects without specifying how any
-particular network provider consumes exposed text; G2 must supply that detail
-at its typed driver boundary. The action therefore derives `{Net, Secret}` and
+particular network provider consumes exposed text; the future live facade must
+supply that detail at its typed driver boundary. The action therefore derives `{Net, Secret}` and
 matches the frozen `Workspace.fetch` envelope carried by both `Call.authority`
 and `Proposal.authority`. Dry simulators continue to receive only safe request
 data, never `Secret` material, and the pure outcome summarizer receives only
@@ -760,7 +777,7 @@ the typed fetch result.
 
 The important omission from `workspace.dry-run` is the live driver. There is no dead branch containing `fs.write` and no closure whose row mentions `Fs`. The checker, not the policy author’s discipline, proves the rehearsal cannot touch the filesystem or network.
 
-The v0 live layer and its run-level owner have these signatures:
+The future v0 live layer and its run-level owner retain these target signatures:
 
 ```text
 workspace.live-layer :
@@ -779,7 +796,7 @@ workspace.live :
   ) ->{Judge, GovernanceApprovalV1, Audit, Fs, Net, Secret | e} a
 ```
 
-The v0 dry layer likewise exposes `State` only to its owner:
+The shipped v0 dry layer exposes `State` only to its owner:
 
 ```text
 workspace.dry-layer :
@@ -804,14 +821,14 @@ Composition code that publishes one audit stream instead calls
 `AuditSequence` token through them. After wrapping `Judge` and `Audit` with
 pure/scripted handlers, the dry-run is empty-row and cacheable by Warp.
 
-The checked `governed-membrane-signatures` fixture below is the executable
-surface contract for the run-level sequence owner, layer APIs, `agent`,
-`workspace.live`, and `workspace.dry-run`. It uses small carrier declarations
-and literal handler clauses only to make the checker elaborate these rows; the
-disposition gate representation above is already frozen for G2.
-The fixture proves effect-row elaboration and `State` discharge only. It does
-not execute disposition branches or prove audit-entry positions; the G2/G3
-gate acceptance suites must pin those behaviors.
+The checked `governed-membrane-signatures` fixture below remains the executable
+surface contract for the run-level sequence owner, layer APIs, `agent`, and the
+future `workspace.live` shape. It uses small carrier declarations and literal
+handler clauses to make the checker elaborate those rows. GM.10 separately
+checks and executes the actual `workspace.dry-layer` and `workspace.dry-run`
+definitions: its compiled suite pins exact rows, direct normalizer, summarizer,
+and gate dependencies, audit positions, and zero world counters, while its Warp
+fixture exhaustively crosses 36 operation/risk/simulator cases.
 
 ```jacquard doctest=governed-membrane-signatures mode=check fixture=governed-membrane-signatures.jac stdout=governed-membrane-signatures.stdout stderr=empty exit=0
 type GovernanceVersion = | GovernanceV0

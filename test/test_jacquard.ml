@@ -39,6 +39,7 @@ let () =
       ("judge", Test_judge.suite);
       ("governance-gate", Test_governance_gate.suite);
       ("workspace", Test_workspace.suite);
+      ("workspace-dry-run", Test_workspace_dry_run.suite);
       ("governance-verify", Test_governance_verify.suite);
       ("types", Test_types.suite);
       ("check", Test_check.suite);

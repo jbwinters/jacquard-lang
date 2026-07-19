@@ -165,6 +165,11 @@ Read these together when judging whether the release candidate is credible:
   safe secret references, outcome summaries, and authority-order evidence.
 - `release/governed-membranes/GM9-MANIFEST.sha256`: reconstructible GM.9 overlay
   on the validated identity, Judge, and secret integration stack.
+- `release/governed-membranes/GM10-EVIDENCE.md`: GM.10 world-free Workspace
+  membrane, closed simulator boundary, exact rows, audit order, zero-world
+  counters, and exhaustive Warp evidence.
+- `release/governed-membranes/GM10-MANIFEST.sha256`: reconstructible GM.10
+  overlay on exact integrated GM.8/GM.9 base `df37a15`.
 
 ## Maintenance Notes
 
