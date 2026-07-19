@@ -15,6 +15,25 @@ let hash_code value = Form.form "hash" [ Form.Hash value ]
 let code_hash value = Hash.of_string (Printer.print_compact value)
 let version = function { Form.head = "governance-v0"; args = []; _ } -> true | _ -> false
 
+module Hash_table = Hashtbl.Make (struct
+  type t = Hash.t
+
+  let equal = Hash.equal
+  let hash value = Hashtbl.hash (Hash.to_raw value)
+end)
+
+module Evaluation_table = Hashtbl.Make (struct
+  type t = Hash.t * Hash.t * Hash.t
+
+  let equal (left_call, left_policy, left_assessment) (right_call, right_policy, right_assessment) =
+    Hash.equal left_call right_call
+    && Hash.equal left_policy right_policy
+    && Hash.equal left_assessment right_assessment
+
+  let hash (call, policy, assessment) =
+    Hashtbl.hash (Hash.to_raw call, Hash.to_raw policy, Hash.to_raw assessment)
+end)
+
 let hash_value = function
   | { Form.head = "hash"; args = [ Form.Hash value ]; _ } -> Some value
   | _ -> None
@@ -110,7 +129,8 @@ let parse_authority ~kind ~index = function
                 parse (position + 1) (parsed :: reversed) rest
           in
           let* parsed = parse 0 [] values in
-          let rec validate seen previous = function
+          let seen = Hash_table.create (max 16 (List.length parsed)) in
+          let rec validate previous = function
             | [] -> Ok (form, parsed)
             | entry :: rest -> (
                 if
@@ -125,15 +145,17 @@ let parse_authority ~kind ~index = function
                     match entry with Effect id | Resource { effect_id = id; _ } -> id
                   in
                   match entry with
-                  | Effect _ when List.exists (Hash.equal effect_id) seen ->
+                  | Effect _ when Hash_table.mem seen effect_id ->
                       error ~code:"E1501" "%s artifact %d repeats an Effect authority" kind index
-                  | Effect _ -> validate (effect_id :: seen) (Some entry) rest
-                  | Resource _ when not (List.exists (Hash.equal effect_id) seen) ->
+                  | Effect _ ->
+                      Hash_table.add seen effect_id ();
+                      validate (Some entry) rest
+                  | Resource _ when not (Hash_table.mem seen effect_id) ->
                       error ~code:"E1501"
                         "%s artifact %d has a Resource without its preceding Effect" kind index
-                  | Resource _ -> validate seen (Some entry) rest)
+                  | Resource _ -> validate (Some entry) rest)
           in
-          validate [] None parsed)
+          validate None parsed)
   | _ -> error ~code:"E1500" "%s artifact %d has a malformed authority carrier" kind index
 
 let risk_rank = function
@@ -223,7 +245,7 @@ let parse_parent ~index = function
       Ok (Some parent)
   | _ -> error ~code:"E1500" "Call artifact %d has a malformed parent-call-id" index
 
-let parse_call ~store index = function
+let parse_call ~resolve_operation index = function
   | {
       Form.head = "governance-call-artifact-v1";
       args =
@@ -254,7 +276,7 @@ let parse_call ~store index = function
         if not (valid_operation_name operation_name) then
           error ~code:"E1501" "Call artifact %d has a noncanonical operation name" index
         else
-          let* resolved_operation_id = resolve_operation_id store ~index operation_name in
+          let* resolved_operation_id = resolve_operation ~index operation_name in
           if not (Hash.equal operation_id resolved_operation_id) then
             error ~code:"E1501" "Call artifact %d operation hash does not match resolved `%s`" index
               operation_name
@@ -538,64 +560,54 @@ let parse_indexed parse values =
   in
   loop 0 [] values
 
-let ensure_unique ~kind id index seen =
-  match List.find_opt (fun (known, _) -> Hash.equal id known) seen with
-  | None -> Ok ((id, index) :: seen)
-  | Some (_, previous) ->
-      error ~code:"E1502" "%s artifact %d duplicates identity from artifact %d" kind index previous
-
-let validate_unique ~kind ~identity ~index values =
-  let rec loop seen = function
-    | [] -> Ok ()
-    | value :: rest ->
-        let* seen = ensure_unique ~kind (identity value) (index value) seen in
-        loop seen rest
+let build_index ~kind ~identity ~index values =
+  let table = Hash_table.create (max 16 (List.length values * 2)) in
+  let rec loop = function
+    | [] -> Ok table
+    | value :: rest -> (
+        let id = identity value in
+        let artifact_index = index value in
+        match Hash_table.find_opt table id with
+        | Some previous ->
+            error ~code:"E1502" "%s artifact %d duplicates identity from artifact %d" kind
+              artifact_index (index previous)
+        | None ->
+            Hash_table.add table id value;
+            loop rest)
   in
-  loop [] values
+  loop values
 
-let find_by id identity values = List.find_opt (fun value -> Hash.equal id (identity value)) values
-
-let require_by ~kind ~entry_index id identity values =
-  match find_by id identity values with
+let require_by ~kind ~entry_index id table =
+  match Hash_table.find_opt table id with
   | Some value -> Ok value
   | None ->
       error ~code:"E1503" "Audit entry %d references missing %s #%s" entry_index kind
         (Hash.to_hex id)
 
-type evaluation = {
-  evaluation_entry : int;
-  evaluation_call : Hash.t;
-  evaluation_policy : Hash.t;
-  evaluation_assessment : Hash.t;
-  evaluation_verdict : verdict;
-  mutable consented : bool;
-}
+type evaluation = { evaluation_entry : int }
 
-let mark reference index = if not (List.mem index !reference) then reference := index :: !reference
-
-let verify_links calls policies assessments proposals events =
-  let used_calls = ref []
-  and used_policies = ref []
-  and used_assessments = ref []
-  and used_proposals = ref [] in
-  let evaluations = ref [] and consents = ref 0 in
+let verify_links ~calls_by_id ~policies_by_id ~assessments_by_id ~proposals_by_id calls policies
+    assessments proposals events =
+  let used_calls = Array.make (List.length calls) false
+  and used_policies = Array.make (List.length policies) false
+  and used_assessments = Array.make (List.length assessments) false
+  and used_proposals = Array.make (List.length proposals) false in
+  let evaluated_calls = Hash_table.create (max 16 (List.length calls * 2)) in
+  let unmatched_asks = Evaluation_table.create (max 16 (List.length events * 2)) in
+  let consents = ref 0 in
+  let mark used index = used.(index) <- true in
   let rec loop = function
     | [] -> Ok ()
     | Evaluated event :: rest ->
         let* call =
-          require_by ~kind:"Call" ~entry_index:event.entry_index event.call_id
-            (fun value -> value.call_id)
-            calls
+          require_by ~kind:"Call" ~entry_index:event.entry_index event.call_id calls_by_id
         in
         let* policy =
-          require_by ~kind:"Policy" ~entry_index:event.entry_index event.policy_id
-            (fun value -> value.policy_id)
-            policies
+          require_by ~kind:"Policy" ~entry_index:event.entry_index event.policy_id policies_by_id
         in
         let* assessment =
           require_by ~kind:"Assessment" ~entry_index:event.entry_index event.assessment_id
-            (fun value -> value.assessment_id)
-            assessments
+            assessments_by_id
         in
         if not (Form.equal_ignoring_meta event.assessment assessment.assessment) then
           error ~code:"E1504" "Audit entry %d Assessment bytes disagree with artifact %d"
@@ -604,16 +616,14 @@ let verify_links calls policies assessments proposals events =
           mark used_calls call.call_index;
           mark used_policies policy.policy_index;
           mark used_assessments assessment.assessment_index;
-          evaluations :=
-            {
-              evaluation_entry = event.entry_index;
-              evaluation_call = event.call_id;
-              evaluation_policy = event.policy_id;
-              evaluation_assessment = event.assessment_id;
-              evaluation_verdict = event.verdict;
-              consented = false;
-            }
-            :: !evaluations;
+          Hash_table.replace evaluated_calls event.call_id ();
+          (if event.verdict = Ask then
+             let key = (event.call_id, event.policy_id, event.assessment_id) in
+             let earlier =
+               Option.value ~default:[] (Evaluation_table.find_opt unmatched_asks key)
+             in
+             Evaluation_table.replace unmatched_asks key
+               ({ evaluation_entry = event.entry_index } :: earlier));
           loop rest)
     | Consented event :: rest -> (
         if not (Hash.equal event.proposal_id event.decision_proposal_id) then
@@ -624,14 +634,11 @@ let verify_links calls policies assessments proposals events =
             (Hash.to_hex event.proposal_id)
         else
           let* call =
-            require_by ~kind:"Call" ~entry_index:event.entry_index event.call_id
-              (fun value -> value.call_id)
-              calls
+            require_by ~kind:"Call" ~entry_index:event.entry_index event.call_id calls_by_id
           in
           let* proposal =
             require_by ~kind:"Proposal" ~entry_index:event.entry_index event.proposal_id
-              (fun value -> value.proposal_id)
-              proposals
+              proposals_by_id
           in
           if not (Hash.equal proposal.proposal_call_id event.call_id) then
             error ~code:"E1505" "Proposal artifact %d names a different Call than audit entry %d"
@@ -639,14 +646,11 @@ let verify_links calls policies assessments proposals events =
           else
             let* policy =
               require_by ~kind:"Policy" ~entry_index:event.entry_index proposal.proposal_policy_id
-                (fun value -> value.policy_id)
-                policies
+                policies_by_id
             in
             let* assessment =
               require_by ~kind:"Assessment" ~entry_index:event.entry_index
-                proposal.proposal_assessment_id
-                (fun value -> value.assessment_id)
-                assessments
+                proposal.proposal_assessment_id assessments_by_id
             in
             if policy.policy_kind <> Live then
               error ~code:"E1505" "Proposal artifact %d binds a dry policy" proposal.proposal_index
@@ -655,31 +659,25 @@ let verify_links calls policies assessments proposals events =
               error ~code:"E1505" "Proposal artifact %d authority disagrees with Call artifact %d"
                 proposal.proposal_index call.call_index
             else
-              let candidates =
-                List.filter
-                  (fun evaluation ->
-                    (not evaluation.consented)
-                    && evaluation.evaluation_verdict = Ask
-                    && Hash.equal evaluation.evaluation_call event.call_id
-                    && Hash.equal evaluation.evaluation_policy proposal.proposal_policy_id
-                    && Hash.equal evaluation.evaluation_assessment proposal.proposal_assessment_id)
-                  !evaluations
+              let key =
+                (event.call_id, proposal.proposal_policy_id, proposal.proposal_assessment_id)
               in
+              let candidates = Evaluation_table.find_opt unmatched_asks key in
               match candidates with
-              | [ evaluation ] ->
-                  evaluation.consented <- true;
+              | Some [ _evaluation ] ->
+                  Evaluation_table.remove unmatched_asks key;
                   incr consents;
                   mark used_calls call.call_index;
                   mark used_policies policy.policy_index;
                   mark used_assessments assessment.assessment_index;
                   mark used_proposals proposal.proposal_index;
                   loop rest
-              | [] ->
+              | None | Some [] ->
                   error ~code:"E1504"
                     "Audit entry %d has no earlier unconsented Ask evaluation for proposal \
                      artifact %d"
                     event.entry_index proposal.proposal_index
-              | _ ->
+              | Some candidates ->
                   error ~code:"E1504"
                     "Audit entry %d ambiguously matches earlier Ask evaluations at entries %s"
                     event.entry_index
@@ -689,16 +687,9 @@ let verify_links calls policies assessments proposals events =
                           candidates)))
     | Completed event :: rest ->
         let* call =
-          require_by ~kind:"Call" ~entry_index:event.entry_index event.call_id
-            (fun value -> value.call_id)
-            calls
+          require_by ~kind:"Call" ~entry_index:event.entry_index event.call_id calls_by_id
         in
-        if
-          not
-            (List.exists
-               (fun evaluation -> Hash.equal evaluation.evaluation_call event.call_id)
-               !evaluations)
-        then
+        if not (Hash_table.mem evaluated_calls event.call_id) then
           error ~code:"E1504" "Audit entry %d Completed has no earlier Evaluated entry"
             event.entry_index
         else (
@@ -707,7 +698,7 @@ let verify_links calls policies assessments proposals events =
   in
   let* () = loop events in
   let unused kind index values used =
-    match List.find_opt (fun value -> not (List.mem (index value) !used)) values with
+    match List.find_opt (fun value -> not used.(index value)) values with
     | None -> Ok ()
     | Some value ->
         error ~code:"E1507" "%s artifact %d is not linked from the Audit chain" kind (index value)
@@ -720,26 +711,36 @@ let verify_links calls policies assessments proposals events =
   let* () = unused "Proposal" (fun value -> value.proposal_index) proposals used_proposals in
   Ok !consents
 
-let verify_lineage calls =
-  let rec visit origin path call =
-    if List.exists (Hash.equal call.call_id) path then
-      error ~code:"E1506" "Call artifact %d participates in a parent-call cycle" origin.call_index
-    else
-      match call.parent_call_id with
-      | None -> Ok ()
-      | Some parent when Hash.equal parent call.call_id ->
-          error ~code:"E1506" "Call artifact %d names itself as parent" call.call_index
-      | Some parent -> (
-          match find_by parent (fun value -> value.call_id) calls with
-          | None ->
-              error ~code:"E1506" "Call artifact %d references missing parent Call #%s"
-                call.call_index (Hash.to_hex parent)
-          | Some parent_call -> visit origin (call.call_id :: path) parent_call)
+type lineage_state = Visiting | Done
+
+let verify_lineage calls_by_id calls =
+  let states = Hash_table.create (max 16 (List.length calls * 2)) in
+  let rec visit call =
+    match Hash_table.find_opt states call.call_id with
+    | Some Done -> Ok ()
+    | Some Visiting ->
+        error ~code:"E1506" "Call artifact %d participates in a parent-call cycle" call.call_index
+    | None ->
+        Hash_table.add states call.call_id Visiting;
+        let* () =
+          match call.parent_call_id with
+          | None -> Ok ()
+          | Some parent when Hash.equal parent call.call_id ->
+              error ~code:"E1506" "Call artifact %d names itself as parent" call.call_index
+          | Some parent -> (
+              match Hash_table.find_opt calls_by_id parent with
+              | None ->
+                  error ~code:"E1506" "Call artifact %d references missing parent Call #%s"
+                    call.call_index (Hash.to_hex parent)
+              | Some parent_call -> visit parent_call)
+        in
+        Hash_table.replace states call.call_id Done;
+        Ok ()
   in
   let rec loop = function
     | [] -> Ok ()
     | call :: rest ->
-        let* () = visit call [] call in
+        let* () = visit call in
         loop rest
   in
   loop calls
@@ -787,36 +788,48 @@ let verify_form ~store ~file = function
       let* head = Audit_chain.verify_string ~file:(file ^ ":audit") ~expected_head log in
       let* entries = parse_indexed extract_entry records in
       let* events = parse_indexed parse_event entries in
-      let* calls = parse_indexed (parse_call ~store) call_forms in
+      let operation_ids = Hashtbl.create 16 in
+      let resolve_operation ~index name =
+        match Hashtbl.find_opt operation_ids name with
+        | Some operation_id -> Ok operation_id
+        | None ->
+            let* operation_id = resolve_operation_id store ~index name in
+            Hashtbl.add operation_ids name operation_id;
+            Ok operation_id
+      in
+      let* calls = parse_indexed (parse_call ~resolve_operation) call_forms in
       let* policies = parse_indexed parse_policy policy_forms in
       let* assessments = parse_indexed parse_assessment assessment_forms in
       let* proposals = parse_indexed parse_proposal proposal_forms in
-      let* () =
-        validate_unique ~kind:"Call"
+      let* calls_by_id =
+        build_index ~kind:"Call"
           ~identity:(fun value -> value.call_id)
           ~index:(fun value -> value.call_index)
           calls
       in
-      let* () =
-        validate_unique ~kind:"Policy"
+      let* policies_by_id =
+        build_index ~kind:"Policy"
           ~identity:(fun value -> value.policy_id)
           ~index:(fun value -> value.policy_index)
           policies
       in
-      let* () =
-        validate_unique ~kind:"Assessment"
+      let* assessments_by_id =
+        build_index ~kind:"Assessment"
           ~identity:(fun value -> value.assessment_id)
           ~index:(fun value -> value.assessment_index)
           assessments
       in
-      let* () =
-        validate_unique ~kind:"Proposal"
+      let* proposals_by_id =
+        build_index ~kind:"Proposal"
           ~identity:(fun value -> value.proposal_id)
           ~index:(fun value -> value.proposal_index)
           proposals
       in
-      let* () = verify_lineage calls in
-      let* consents = verify_links calls policies assessments proposals events in
+      let* () = verify_lineage calls_by_id calls in
+      let* consents =
+        verify_links ~calls_by_id ~policies_by_id ~assessments_by_id ~proposals_by_id calls policies
+          assessments proposals events
+      in
       Ok
         {
           head;
@@ -876,7 +889,7 @@ let io_exception = function
 let read_file file =
   match
     try
-      let descriptor = Unix.openfile file [ Unix.O_RDONLY ] 0 in
+      let descriptor = Unix.openfile file [ Unix.O_RDONLY; Unix.O_NONBLOCK ] 0 in
       Fun.protect
         ~finally:(fun () -> Unix.close descriptor)
         (fun () ->
@@ -884,7 +897,8 @@ let read_file file =
           if before.st_kind <> Unix.S_REG then Error "is not a regular file"
           else if before.st_size > max_bundle_bytes then
             Error (Printf.sprintf "exceeds the %d-byte limit" max_bundle_bytes)
-          else
+          else (
+            Unix.clear_nonblock descriptor;
             let buffer = Buffer.create before.st_size in
             let chunk = Bytes.create 65536 in
             let rec loop total =
@@ -902,7 +916,7 @@ let read_file file =
             let path_after = Unix.stat file in
             if changed before after || changed after path_after || total <> before.st_size then
               Error "changed while it was being read"
-            else Ok (Buffer.contents buffer))
+            else Ok (Buffer.contents buffer)))
     with exception_ -> (
       match io_exception exception_ with Some message -> Error message | None -> raise exception_)
   with

@@ -65,7 +65,10 @@ embedded Audit failures retain their stable E13xx code.
 The focused unit suite covers a valid four-entry run with one transformed
 Call, canonical byte refusal, forged identities, a resolved-operation
 mismatch, duplicate and missing artifacts, Audit digest mutation, Proposal
-authority disagreement, missing ancestry, and unused artifacts. The cram
+authority disagreement, missing ancestry, unused artifacts, nonblocking
+refusal of FIFO and character-device input, the 16 MiB file boundary, and a
+valid 3,000-Call parent chain. Artifact linkage uses hash-keyed indexes and
+usage arrays; the parent walk is a memoized three-color traversal. The cram
 transcript exercises the public command on a committed canonical fixture and
 pins both forged-Proposal and missing-LF failures.
 
@@ -96,5 +99,5 @@ scripts/release/reproduce-0.1.sh
 sha256sum -c docs/release/governed-membranes/GM14-MANIFEST.sha256
 ```
 
-The integrated GM.14A checkout contains 731 compiled Alcotest/QCheck cases,
+The integrated GM.14A checkout contains 733 compiled Alcotest/QCheck cases,
 42 cram transcript files, and 27 documentation examples across 8 documents.

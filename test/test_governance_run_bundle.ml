@@ -217,6 +217,12 @@ let expect_error ?(indexed = true) label code result =
   | Error [] -> Alcotest.failf "%s returned no diagnostics" label
   | Ok _ -> Alcotest.failf "%s unexpectedly verified" label
 
+let with_temp_path prefix suffix body =
+  let path = Filename.temp_file prefix suffix in
+  Fun.protect
+    ~finally:(fun () -> try Unix.unlink path with Unix.Unix_error (Unix.ENOENT, _, _) -> ())
+    (fun () -> body path)
+
 let test_valid_bundle_and_canonical_file () =
   let fixture = fixture () in
   (match verify fixture.bundle with
@@ -237,6 +243,19 @@ let test_valid_bundle_and_canonical_file () =
   expect_error ~indexed:false "missing final LF" "E1500"
     (Governance_run_bundle.verify_string ~store ~file:"no-lf.bundle"
        (Printer.print_compact fixture.bundle))
+
+let test_file_boundary_rejects_without_blocking () =
+  with_temp_path "governance-run-bundle-" ".fifo" (fun fifo ->
+      Unix.unlink fifo;
+      Unix.mkfifo fifo 0o600;
+      expect_error ~indexed:false "FIFO input" "E1500"
+        (Governance_run_bundle.verify_file ~store ~file:fifo));
+  expect_error ~indexed:false "character device input" "E1500"
+    (Governance_run_bundle.verify_file ~store ~file:"/dev/null");
+  with_temp_path "governance-run-bundle-" ".oversized" (fun oversized ->
+      Unix.truncate oversized ((16 * 1024 * 1024) + 1);
+      expect_error ~indexed:false "oversized input" "E1500"
+        (Governance_run_bundle.verify_file ~store ~file:oversized))
 
 let replace_carried replacement = function
   | { Form.head = "governance-call-artifact-v1"; args = first :: _ :: rest; meta } ->
@@ -338,11 +357,39 @@ let test_proposal_linkage_lineage_and_unused_artifacts () =
           ~policies:[ fixture.policy.artifact ] ~assessments:[ fixture.assessment.artifact ]
           ~proposals:[ fixture.proposal.artifact; extra.artifact ]))
 
+let test_long_valid_parent_chain_remains_bounded () =
+  let policy = make_policy () in
+  let assessment = make_assessment () in
+  let rec make index parent calls entries =
+    if index = 3_000 then (List.rev calls, List.rev entries)
+    else
+      let call = make_call ?parent (Printf.sprintf "chain-%04d" index) in
+      make (index + 1) (Some call.id) (call.artifact :: calls)
+        (evaluated index call policy assessment "block" :: entries)
+  in
+  let calls, entries = make 0 None [] [] in
+  let records, head = chain entries in
+  let value =
+    bundle ~head ~records ~calls ~policies:[ policy.artifact ] ~assessments:[ assessment.artifact ]
+      ~proposals:[]
+  in
+  let bytes = Printer.print_compact value ^ "\n" in
+  match Governance_run_bundle.verify_string ~store ~file:"long-chain.bundle" bytes with
+  | Ok report ->
+      Alcotest.(check int) "long-chain Calls" 3_000 report.calls;
+      Alcotest.(check int) "long-chain entries" 3_000 report.entries;
+      Alcotest.(check int) "long-chain transformed Calls" 2_999 report.transformed_calls
+  | Error diagnostics -> fail_diags "long valid governance parent chain" diagnostics
+
 let suite =
   [
     Alcotest.test_case "valid bundle and canonical file" `Quick test_valid_bundle_and_canonical_file;
+    Alcotest.test_case "file boundary rejects without blocking" `Quick
+      test_file_boundary_rejects_without_blocking;
     Alcotest.test_case "identity, duplicate, missing, and chain failures" `Quick
       test_identity_duplicate_missing_and_chain_failures;
     Alcotest.test_case "Proposal linkage, lineage, and unused artifacts" `Quick
       test_proposal_linkage_lineage_and_unused_artifacts;
+    Alcotest.test_case "long valid parent chain remains bounded" `Quick
+      test_long_valid_parent_chain_remains_bounded;
   ]

@@ -27,7 +27,7 @@ native Channel, actor, or supervision claim.
 | C3 | Scoped typed channels run through deterministic FIFO, seeded, replay, exhaustive, and cached interpreter scheduling with exact run/scope ownership, rendezvous and buffering, close, cancellation, and deadlock behavior. | `channel-contract`, `round-robin`, and `exhaustive-schedule` suites; `test/cli/task-values.t`; `test/cli/schedule-replay.t`; and the frozen traces below |
 | C4 | Not claimed: host asynchronous I/O, actors, and supervision are absent. | [LIMITS.md](LIMITS.md) |
 
-The current successor inventory is exactly 731 compiled Alcotest/QCheck cases, 42 recursive
+The current successor inventory is exactly 733 compiled Alcotest/QCheck cases, 42 recursive
 cram transcript files, and 27 named doctest examples across 8 documents. The
 commands in [Reconstruction and verification](#reconstruction-and-verification)
 recompute those counts instead of trusting this paragraph.
@@ -738,7 +738,7 @@ opam exec -- dune build test/test_jacquard.exe
 
 The current inventory is mechanically checked against compiled discovery:
 
-- Alcotest/QCheck cases: `731`
+- Alcotest/QCheck cases: `733`
 - Cram transcript files: `42`
 
 The SC.14 baseline arithmetic remains exact: twelve compiled
@@ -750,8 +750,8 @@ the two frozen traces, and the eight groups above execute exactly once during
 the full gate. DX.6 changes surface-parser trivia indexing without adding test,
 cram, or doctest entries. GM.8 later adds fourteen governance-verifier cases
 and one analysis-lane cram, producing the then-current `728 / 41 / 27` successor
-inventory without changing the frozen SC arithmetic. GM.14A later adds three
-run-bundle cases and one public CLI transcript, producing `731 / 42 / 27`.
+inventory without changing the frozen SC arithmetic. GM.14A later adds five
+run-bundle cases and one public CLI transcript, producing `733 / 42 / 27`.
 
 Native scheduling remains outside the current backend. Differential coverage is
 therefore limited to the supported case: an Async operation discharged by an
@@ -807,7 +807,7 @@ opam exec -- dune build @all --root "$dest"
 opam exec -- dune runtest --force --root "$dest"
 (
   cd "$dest/_build/default/test"
-  test "$(./test_jacquard.exe list --color=never 2>/dev/null | wc -l)" -eq 731
+  test "$(./test_jacquard.exe list --color=never 2>/dev/null | wc -l)" -eq 733
 )
 test "$(find "$dest/test" -name '*.t' | wc -l)" -eq 42
 test "$(grep -h -E '^```jacquard doctest=' \
