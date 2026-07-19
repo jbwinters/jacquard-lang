@@ -1511,6 +1511,31 @@ world-test, live driver, simulator driver, or audit orchestration.
 * Nested membranes are monotone over every pair of finite policies.
 * Re-performing in a clause reaches the outer membrane exactly once.
 
+Implementation status (GM.13A): `Governance_approval_queue` now provides the
+explicit OCaml host-storage core for queue-backed single-use decisions. It
+keeps the released GovernanceProposal and Decision Code identities unchanged,
+stores sorted unique allowed principals outside Proposal identity, binds an
+authenticated host actor to every Decision, and delivers Approved, Denied, or
+Escalate exactly once by committing Consume before returning. Each logical
+transition uses a canonical HASH_V0-linked record line followed by a separate
+commit line, with sync after each phase. Every successful existing-file
+mutating-API result other than Busy also establishes a file-and-parent-directory
+durability barrier, including exact retries and stale or pending observations;
+missing-file recovery simply returns the fixed empty genesis. Restart may
+discard only a recognized physically uncommitted suffix after the last valid
+commit; committed corruption fails closed. Inspection retains stale historical
+evidence without making it deliverable again.
+
+This is the GM.13A host core, not the production
+`GovernanceApprovalV1` handler. Authentication is supplied by the host; the
+queue checks the resulting principal against its durable authorization
+metadata. GM.13B still has to connect that narrow host boundary to the live
+gate and Audit sequence and prove ordering in the hostile/replay lane. The
+core assumes a trusted stable parent directory because pathname checks retain
+an inherent final TOCTOU window against hostile concurrent renames. It makes no
+exactly-once outside-world action, hostile-directory, distributed-filesystem,
+rollback, or safe-retry claim.
+
 ### Fault and replay lanes
 
 `fault.all` explores audit-write failure, approval-service failure, simulator failure, driver failure, and completion-write failure at each call site. The record/replay lane pins the exact interaction sequence among `Judge`, `Audit`, `GovernanceApprovalV1`, and raw effects. Native and interpreter executions must remain byte-identical for all flagship cases.

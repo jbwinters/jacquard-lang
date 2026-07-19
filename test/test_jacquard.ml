@@ -43,6 +43,7 @@ let () =
       ("governance-verify", Test_governance_verify.suite);
       ("governance-run-bundle", Test_governance_run_bundle.suite);
       ("governance-reconcile", Test_governance_reconcile.suite);
+      ("governance-approval-queue", Test_governance_approval_queue.suite);
       ("types", Test_types.suite);
       ("check", Test_check.suite);
       ("tier", Test_tier.suite);

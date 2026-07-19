@@ -168,6 +168,12 @@ Read these together when judging whether the release candidate is credible:
 - `release/governed-membranes/GM10-EVIDENCE.md`: GM.10 world-free Workspace
   membrane, closed simulator boundary, exact rows, audit order, zero-world
   counters, and exhaustive Warp evidence.
+- `release/governed-membranes/GM13A-EVIDENCE.md`: crash-safe single-use
+  approval queue host core, canonical record/commit framing, authenticated
+  actor rules, restart recovery, race evidence, and the explicit GM.13B bridge
+  boundary.
+- `release/governed-membranes/GM13A-MANIFEST.sha256`: reconstructible GM.13A
+  overlay on exact base `e20ebcf`.
 - `release/governed-membranes/GM14-EVIDENCE.md`: GM.14A canonical run bundles
   plus GM.14B action-journal reconciliation, unchanged artifact identities,
   exact receipt/completion linkage, honest recovery gaps, and explicit
