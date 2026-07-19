@@ -128,6 +128,8 @@
   ../docs/release/governed-membranes/GM14-MANIFEST.sha256
   ../docs/release/governed-membranes/GM13A-EVIDENCE.md
   ../docs/release/governed-membranes/GM13A-MANIFEST.sha256
+  ../docs/release/governed-membranes/GM13B-EVIDENCE.md
+  ../docs/release/governed-membranes/GM13B-MANIFEST.sha256
   ../docs/release/structured-concurrency/EVIDENCE.md
   ../docs/release/structured-concurrency/LIMITS.md
   ../docs/release/structured-concurrency/MANIFEST.sha256

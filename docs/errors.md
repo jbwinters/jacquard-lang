@@ -360,6 +360,7 @@ or safe-retry claims.
 | E1524 | malformed or stale Decision, or invalid authenticated actor binding | an Approved Decision whose approver differs from the host actor |
 | E1525 | requested transition conflicts with durable queue state | deciding one proposal differently after a Decision is committed |
 | E1526 | unsafe path, bounded-read, lock-adjacent, write, sync, or visibility failure | replacing the locked pathname while a transaction is appended |
+| E1527 | queue-backed bridge schema or single-rendezvous workflow mismatch | rebinding a frozen approval identity or performing a second sequential approval Ask |
 
 `Governance_approval_queue` is an explicit OCaml host adapter, not a new
 Jacquard effect or ambient file API. It verifies canonical two-line
