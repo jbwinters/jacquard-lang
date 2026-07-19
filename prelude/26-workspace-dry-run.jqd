@@ -1,0 +1,202 @@
+; GM.10 world-free Workspace membrane. The simulator bundle contains only
+; closed, pure callbacks. A caller may build those callbacks with the explicit
+; discharge helpers below, but State, Fault, and Dist must be handled before a
+; callback is stored or passed to governance.gate-dry.
+
+(deftype workspace-simulators ()
+  (con workspace-simulators-v0
+    (field read-file
+      (tapp (tref option)
+        (tarrow ((tref path)) (row)
+          (tapp (tref result) (tref tool-error) (tref text)))))
+    (field write-file
+      (tapp (tref option)
+        (tarrow ((tref path) (tref text)) (row)
+          (tapp (tref result) (tref tool-error) (ttuple)))))
+    (field fetch
+      (tapp (tref option)
+        (tarrow ((tref request)) (row)
+          (tapp (tref result) (tref tool-error) (tref response)))))))
+
+; Public smart constructor. Its closed row prevents an effectful simulator
+; from being hidden inside the bundle.
+(defterm ((binding workspace.simulators
+  ((tarrow
+    ((tapp (tref option)
+       (tarrow ((tref path)) (row)
+         (tapp (tref result) (tref tool-error) (tref text))))
+     (tapp (tref option)
+       (tarrow ((tref path) (tref text)) (row)
+         (tapp (tref result) (tref tool-error) (ttuple))))
+     (tapp (tref option)
+       (tarrow ((tref request)) (row)
+         (tapp (tref result) (tref tool-error) (tref response)))))
+    (row) (tref workspace-simulators)))
+  (lam ((pvar read-file) (pvar write-file) (pvar fetch))
+    (app (var workspace-simulators-v0)
+      (var read-file) (var write-file) (var fetch))))))
+
+; These adapters make the discharge boundary reviewable. Each accepts a
+; closed thunk for exactly one helper effect and exposes a pure outer arrow.
+; Failures are values chosen by the simulator; no helper can fall through to a
+; root handler.
+(defterm
+  ((binding workspace.discharge-state
+    ((tforall ((tvar a) (tvar s)) ()
+      (tarrow
+        ((tarrow () (row (eref state)) (tvar a)) (tvar s))
+        (row) (tvar a))))
+    (lam ((pvar simulator) (pvar initial-state))
+      (app (var state.eval) (var simulator) (var initial-state))))
+   (binding workspace.discharge-fault
+    ((tforall ((tvar a)) ()
+      (tarrow
+        ((tarrow () (row (eref fault)) (tvar a)))
+        (row) (tvar a))))
+    (lam ((pvar simulator))
+      (app (var fault.none) (var simulator))))
+   (binding workspace.discharge-dist
+    ((tforall ((tvar a) (tvar b)) ()
+      (tarrow
+        ((tarrow () (row (eref dist)) (tvar a))
+         (tarrow
+           ((tapp (tref list)
+             (tapp (tref pair) (tvar a) (tref real))))
+           (row) (tvar b)))
+        (row) (tvar b))))
+    (lam ((pvar simulator) (pvar choose))
+      (app (var choose) (app (var dist.enumerate) (var simulator)))))))
+
+; The following projections construct the exact closed thunk accepted by the
+; dry gate. Simulator invocation is delayed until gate-dry chooses Simulate.
+(defterm
+  ((binding workspace.read-simulation
+    ((tarrow
+      ((tref workspace-simulators) (tref path))
+      (row)
+      (tapp (tref option)
+        (tarrow () (row)
+          (tapp (tref result) (tref tool-error) (tref text))))))
+    (lam ((pvar simulators) (pvar path))
+      (match (var simulators)
+        (clause
+          (pcon workspace-simulators-v0 (pvar read-file) (pwild) (pwild))
+          (match (var read-file)
+            (clause (pcon none) (var none))
+            (clause (pcon some (pvar simulator))
+              (app (var some)
+                (lam () (app (var simulator) (var path))))))))))
+   (binding workspace.write-simulation
+    ((tarrow
+      ((tref workspace-simulators) (tref path) (tref text))
+      (row)
+      (tapp (tref option)
+        (tarrow () (row)
+          (tapp (tref result) (tref tool-error) (ttuple))))))
+    (lam ((pvar simulators) (pvar path) (pvar text))
+      (match (var simulators)
+        (clause
+          (pcon workspace-simulators-v0 (pwild) (pvar write-file) (pwild))
+          (match (var write-file)
+            (clause (pcon none) (var none))
+            (clause (pcon some (pvar simulator))
+              (app (var some)
+                (lam () (app (var simulator) (var path) (var text))))))))))
+   (binding workspace.fetch-simulation
+    ((tarrow
+      ((tref workspace-simulators) (tref request))
+      (row)
+      (tapp (tref option)
+        (tarrow () (row)
+          (tapp (tref result) (tref tool-error) (tref response))))))
+    (lam ((pvar simulators) (pvar request))
+      (match (var simulators)
+        (clause
+          (pcon workspace-simulators-v0 (pwild) (pwild) (pvar fetch))
+          (match (var fetch)
+            (clause (pcon none) (var none))
+            (clause (pcon some (pvar simulator))
+              (app (var some)
+                (lam () (app (var simulator) (var request))))))))))))
+
+; Handle an unchanged Workspace body. Each ordinary branch normalizes the
+; typed operation, calls the frozen dry gate, and consumes the clause-local
+; affine Resume exactly once. A defensive normalizer failure returns
+; InvalidDecision without inventing an unverified Call to audit.
+(defterm ((binding workspace.dry-layer
+  ((tforall ((tvar a)) ((rvar e))
+    (tarrow
+      ((tref audit-sequence)
+       (tapp (tref bound-policy) (tref dry-policy))
+       (tref workspace-simulators)
+       (tarrow () (row (eref workspace) e) (tvar a)))
+      (row (eref state) (eref judge) (eref audit) e)
+      (tvar a))))
+  (lam ((pvar sequence) (pvar policy) (pvar simulators) (pvar body))
+    (handle (app (var body))
+      (ret (pvar value) (var value))
+      (opclause #632071e3399c913a672c4bea7d4a8b394e64a9a517552eb296db824222fe2da1
+        ((pvar path)) k
+        (match (app (var workspace.call-read) (var path))
+          (clause (pcon ok (pvar call))
+            (match
+              (app (var governance.gate-dry)
+                (var sequence) (var policy) (var call)
+                (app (var workspace.read-simulation)
+                  (var simulators) (var path))
+                (var workspace.summarize-read))
+              (clause (pcon simulated (pvar result))
+                (app (var k) (var result)))
+              (clause (pcon refuse-dry (pvar error))
+                (app (var k) (app (var err) (var error))))))
+          (clause (pwild)
+            (app (var k) (app (var err) (var invalid-decision))))))
+      (opclause #73140dde8e33c268fa589d9bfaeb28b156af2da52b22779257b2d3e9b696b03c
+        ((pvar path) (pvar text)) k
+        (match (app (var workspace.call-write) (var path) (var text))
+          (clause (pcon ok (pvar call))
+            (match
+              (app (var governance.gate-dry)
+                (var sequence) (var policy) (var call)
+                (app (var workspace.write-simulation)
+                  (var simulators) (var path) (var text))
+                (var workspace.summarize-write))
+              (clause (pcon simulated (pvar result))
+                (app (var k) (var result)))
+              (clause (pcon refuse-dry (pvar error))
+                (app (var k) (app (var err) (var error))))))
+          (clause (pwild)
+            (app (var k) (app (var err) (var invalid-decision))))))
+      (opclause #f6536683575508ddcc2d5a6509df832e92897cbef2caf34219f993a110079b01
+        ((pvar request)) k
+        (match (app (var workspace.call-fetch) (var request))
+          (clause (pcon ok (pvar call))
+            (match
+              (app (var governance.gate-dry)
+                (var sequence) (var policy) (var call)
+                (app (var workspace.fetch-simulation)
+                  (var simulators) (var request))
+                (var workspace.summarize-fetch))
+              (clause (pcon simulated (pvar result))
+                (app (var k) (var result)))
+              (clause (pcon refuse-dry (pvar error))
+                (app (var k) (app (var err) (var error))))))
+          (clause (pwild)
+            (app (var k) (app (var err) (var invalid-decision)))))))))))
+
+; Run-level owner. This is the public dry execution surface: it discharges the
+; shared audit-sequence State while leaving only Judge, Audit, and the body's
+; continuation row. It contains no dead live branch or raw-effect closure.
+(defterm ((binding workspace.dry-run
+  ((tforall ((tvar a)) ((rvar e))
+    (tarrow
+      ((tapp (tref bound-policy) (tref dry-policy))
+       (tref workspace-simulators)
+       (tarrow () (row (eref workspace) e) (tvar a)))
+      (row (eref judge) (eref audit) e)
+      (tvar a))))
+  (lam ((pvar policy) (pvar simulators) (pvar body))
+    (app (var governance.with-sequence)
+      (lam ((pvar sequence))
+        (app (var workspace.dry-layer)
+          (var sequence) (var policy) (var simulators) (var body))))))))

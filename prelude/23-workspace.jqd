@@ -38,27 +38,40 @@
       (clause (pcon workspace-fetch) (lit "workspace.fetch")))))))
 
 ; Frozen raw effect interface identities from effect-taxonomy-v1. Authority is
-; in that taxonomy's blessed order, so fetch is exactly Net then Secret.
+; in that taxonomy's blessed order, so fetch is exactly Net then Secret. The
+; literal parse failures recurse without producing an authority value: these
+; branches are unreachable for the frozen spellings, fail closed if a source
+; edit corrupts one, and keep the public constants pure and total to the
+; checker.
+(defterm ((binding workspace.fs-authority-hash-v0 ()
+  (match
+    (app (var hash.parse)
+      (lit "8ec13169c7181851364e55353232af8e3c7f5ee4a010fa3067fcf2058dd5ed84"))
+    (clause (pcon ok (pvar value)) (var value))
+    (clause (pwild) (var workspace.fs-authority-hash-v0))))))
+
 (defterm ((binding workspace.fs-authority ()
-  (app (var governance-effect)
-    (match
-      (app (var hash.parse)
-        (lit "8ec13169c7181851364e55353232af8e3c7f5ee4a010fa3067fcf2058dd5ed84"))
-      (clause (pcon ok (pvar value)) (var value)))))))
+  (app (var governance-effect) (var workspace.fs-authority-hash-v0)))))
+
+(defterm ((binding workspace.net-authority-hash-v0 ()
+  (match
+    (app (var hash.parse)
+      (lit "be1aad7345c6215f227e63df6c7d05874a464f207599d4f5b85de8b0a6675b45"))
+    (clause (pcon ok (pvar value)) (var value))
+    (clause (pwild) (var workspace.net-authority-hash-v0))))))
 
 (defterm ((binding workspace.net-authority ()
-  (app (var governance-effect)
-    (match
-      (app (var hash.parse)
-        (lit "be1aad7345c6215f227e63df6c7d05874a464f207599d4f5b85de8b0a6675b45"))
-      (clause (pcon ok (pvar value)) (var value)))))))
+  (app (var governance-effect) (var workspace.net-authority-hash-v0)))))
+
+(defterm ((binding workspace.secret-authority-hash-v0 ()
+  (match
+    (app (var hash.parse)
+      (lit "6d092eccc3c9858a2a95120da5a011964cbb3ad76968e11c1cbb062c119fbb31"))
+    (clause (pcon ok (pvar value)) (var value))
+    (clause (pwild) (var workspace.secret-authority-hash-v0))))))
 
 (defterm ((binding workspace.secret-authority ()
-  (app (var governance-effect)
-    (match
-      (app (var hash.parse)
-        (lit "6d092eccc3c9858a2a95120da5a011964cbb3ad76968e11c1cbb062c119fbb31"))
-      (clause (pcon ok (pvar value)) (var value)))))))
+  (app (var governance-effect) (var workspace.secret-authority-hash-v0)))))
 
 (defterm ((binding workspace.secret-reference ()
   (app (var secret-ref) (lit "workspace") (var none)))))

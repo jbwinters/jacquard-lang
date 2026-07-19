@@ -114,6 +114,6 @@ sha256sum -c docs/release/governed-membranes/GM8-MANIFEST.sha256
 
 The GM.8 overlay contains the public verifier contract and implementation, its
 focused Workspace and adversarial suite, the stable diagnostic catalog, and
-this evidence. The integrated successor inventory is 724 compiled
+this evidence. The integrated successor inventory is 728 compiled
 Alcotest/QCheck cases, 41 cram transcript files, and 27 documentation examples
 across 8 documents. The exact manifest excludes itself to avoid a self-hash.

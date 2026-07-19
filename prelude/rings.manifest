@@ -550,8 +550,11 @@ workspace-fetch 3
 workspace-operation-spec 3
 workspace-operation-spec-v0 3
 workspace.operation-name 3
+workspace.fs-authority-hash-v0 3
 workspace.fs-authority 3
+workspace.net-authority-hash-v0 3
 workspace.net-authority 3
+workspace.secret-authority-hash-v0 3
 workspace.secret-authority 3
 workspace.secret-reference 3
 workspace.authority 3
@@ -572,3 +575,15 @@ workspace.error-summary 3
 workspace.summarize-read 3
 workspace.summarize-write 3
 workspace.summarize-fetch 3
+# --- 26-workspace-dry-run (GM.10 world-free facade membrane)
+workspace-simulators 3
+workspace-simulators-v0 3
+workspace.simulators 3
+workspace.discharge-state 3
+workspace.discharge-fault 3
+workspace.discharge-dist 3
+workspace.read-simulation 3
+workspace.write-simulation 3
+workspace.fetch-simulation 3
+workspace.dry-layer 3
+workspace.dry-run 3
