@@ -1349,6 +1349,50 @@ idempotency key. Those claims require the later authenticated queue and typed
 action-journal work; this package deliberately contains no receipt-shaped
 field that could imply them early.
 
+GM.14B adds that action journal as a separate evidence stream rather than
+changing Audit v2. A `governance-reconciliation-bundle-v1` embeds one unchanged
+run bundle, an independently carried action-journal head, and ordered
+`governance-action-chain-v1` records. Each record commits its predecessor and
+exact entry bytes under a new domain separator.
+
+The journal has two entry types. The producer contract requires
+`action-attempted-v1` to be durably written before the driver boundary. Its
+semantic ID binds the Call, exact allowing `Evaluated` or approving `Consented`
+Audit-record digest, selected branch, driver identity, and idempotency-key
+digest. The offline verifier proves that the entry exists and links correctly;
+it cannot prove when or how durably the producer wrote it. The entry proves
+recorded intent, not that the outside-world effect happened.
+`action-receipt-v1` follows exactly one attempt and binds that attempt to an
+exact `GovernanceOutcomeSummary` plus the digest of the external receipt. Raw
+receipt bytes stay outside the review package, but a digest can still disclose
+equality or permit offline guessing when its source is low entropy. Producers
+must not treat hashing alone as secret protection.
+
+`jacquard governance reconcile BUNDLE` first applies GM.14A unchanged, then
+checks both journal identities, contiguous journal sequence, hash linkage, the
+released Live/Dry verdict matrix, authorization, every `Completed` record, and
+one-attempt/one-receipt use. Live permits `Allow`, `Ask`, or `Block`; Dry permits
+`Simulate` or `Block`. Only a live `Allow` or approved `Ask` authorizes an
+attempt, and its branch must be `live`. Dry `Block` completes as `blocked`;
+Dry `Simulate` completes as `no-simulation`, `simulated`, or
+`simulation-failed`, matching the shipped dry gate. A receipt is reconciled with `Completed`
+only when Call, branch, and the compact canonical outcome agree exactly. The
+report distinguishes no-action-legal decisions,
+authorized-but-unobserved actions, attempts with unknown outcomes, receipts
+awaiting Audit completion, exact completed matches, and completion without a
+receipt, whether or not an Attempted record was available to join it. Any gap
+exits nonzero with E1516 but remains a reportable state rather than malformed
+evidence. An incompatible policy/verdict pair, unauthorized live completion,
+or ambiguous repeated evaluation/completion for one Call is E1515.
+
+The two chains establish order within their own streams. They do not provide a
+trusted clock between streams, authenticate the provider or publisher, prove
+receipt truth, schedule a retry, repair Audit, compensate an action, or imply
+rollback. V1 rejects a second attempt under one authorization instead of
+claiming it is safe; retry policy requires a later runtime-enforced idempotent
+driver contract. It also rejects a second evaluation for one Call ID because
+the frozen Call identity has no occurrence discriminator.
+
 ### 12.4 Review surfaces
 
 * `jac why-effect Fs` points to the leaf membrane driver that introduces it, not merely to the agent function that requested `Workspace`.

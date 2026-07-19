@@ -1,7 +1,7 @@
-# Governed Membranes GM.14A Evidence
+# Governed Membranes GM.14A/GM.14B Evidence
 
-Status: additive GM.14A overlay on exact integrated GM.10 base
-`814cada8731a7bc23e893d8a1af2811754ce7e6a`.
+Status: additive GM.14B overlay on exact integrated GM.14A base
+`23949d0934840e6ad9542023ce9ba2dda4a9f2e6`.
 
 ## Context
 
@@ -79,11 +79,76 @@ Splitting them would publish either an accepted bundle with incomplete checks
 or a verifier with no complete public evidence path. It remains one semantic
 contract and does not cross into execution.
 
-GM.14A does not authenticate a publisher, create or consume an approval queue,
-record driver attempts or receipts, prove an external action occurred, infer
-rollback from a missing completion, or reconcile idempotency keys. Those are
-separate successor contracts. In particular, the existing outcome detail in
-the fixture is inert test data, not a verified receipt claim.
+GM.14A alone does not authenticate a publisher, record driver attempts or
+receipts, prove an external action occurred, infer rollback from a missing
+completion, or reconcile idempotency keys. In particular, the existing outcome
+detail in its fixture remains inert test data, not a verified receipt claim.
+
+## GM.14B action reconciliation
+
+GM.14B adds one package around the unchanged run bundle:
+
+```text
+(governance-reconciliation-bundle-v1
+  (governance-run-bundle-v1 ...)
+  (published-action-journal-head-v1 #H)
+  (governance-action-journal-v1 RECORD...))
+```
+
+Each `governance-action-chain-v1` record commits the previous action-journal
+head and exact entry bytes. Sequence starts at zero and is contiguous. The
+fixed genesis and chain digest have their own domain strings; they reuse
+HASH_V0 without changing any existing identity.
+
+`action-attempted-v1` carries a recomputed semantic ID over the Call ID, exact
+authorizing Audit-record digest, branch text, driver identity, and
+idempotency-key digest. Only `Evaluated Allow` and `Consented Approved` records
+under a verified LivePolicy are authorizations. The producer contract requires
+the attempt to be durable before the driver boundary; this offline verifier
+proves linkage, not producer timing or durability, and the entry is not proof
+that the external effect happened. An action attempt must select `live`.
+
+`action-receipt-v1` follows exactly one attempt and carries a recomputed ID over
+that attempt, the exact canonical `GovernanceOutcomeSummary`, and an external
+receipt digest. Raw provider receipt bytes remain outside the evidence package,
+but low-entropy digest inputs remain vulnerable to equality disclosure and
+offline guessing. A receipt reconciles with exactly one
+`Completed` only when Call, branch, and canonical outcome all agree.
+
+The verifier enforces the released policy matrix before deriving authority:
+Live accepts `Allow`, `Ask`, or `Block`, while Dry accepts `Simulate` or
+`Block`. Every live completion must follow one unique executable authorization.
+V1 rejects repeated evaluation or live completion for one Call ID because the
+frozen identity has no occurrence discriminator. Dry `Block` accepts only the
+shipped `blocked` completion branch. Dry `Simulate` accepts `no-simulation`,
+`simulated`, or `simulation-failed`. These remain legal no-action evidence;
+unauthorized live completions are E1515 rather than silently omitted.
+
+The public command reports six stable counts: no action legal, authorized but
+not observed, attempted with unknown outcome, receipt pending completion,
+reconciled completion, and completion without receipt. Every non-clean state
+returns E1516 after printing the report. It never says that an absent receipt
+means no effect, that a missing completion means rollback, or that retry is
+safe. A second attempt under one authorization is a structural E1515 refusal.
+The completion-without-receipt count includes every uniquely authorized live
+completion lacking a receipt, even when no Attempted entry is available.
+
+The focused suite covers all report states, exact Attempted and Receipt
+identity, every invalid policy/verdict pair, unauthorized and repeated
+attempts, receipt-before-attempt, wrong branch, unexplained and ambiguous live
+completions, wrong head, skipped journal sequence, mismatched outcome,
+canonical bytes, nonblocking FIFO and character-device refusal, the 16 MiB
+bound, and a valid 1,000-action linear journal containing attempts, receipts,
+and completions. Completion joins use hash indexes rather than pairwise scans.
+The CLI transcript pins a clean package, an E1516 package with both a missing
+attempt and completion receipt, journal-byte mutation, and missing LF.
+
+This verifier proves internal integrity and linkage. It does not authenticate
+the publisher, provider, or receipt; establish a trusted clock between the
+Audit and action streams; invoke a driver; query a provider; schedule a retry;
+repair Audit; compensate an action; consume an approval queue; or claim
+rollback. Runtime-enforced fail-closed action-journal writes and idempotent
+driver retry remain separate contracts.
 
 ## Reproduction
 
@@ -99,5 +164,5 @@ scripts/release/reproduce-0.1.sh
 sha256sum -c docs/release/governed-membranes/GM14-MANIFEST.sha256
 ```
 
-The integrated GM.14A checkout contains 733 compiled Alcotest/QCheck cases,
-42 cram transcript files, and 27 documentation examples across 8 documents.
+The integrated GM.14B checkout contains 738 compiled Alcotest/QCheck cases,
+43 cram transcript files, and 27 documentation examples across 8 documents.

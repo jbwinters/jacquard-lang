@@ -612,6 +612,32 @@ malformed or noncanonical records with diagnostics. Because a chain cannot by
 itself reveal removal of a valid suffix, the independently published head is a
 required part of the verification contract.
 
+`jacquard governance verify-run BUNDLE` verifies a portable
+`governance-run-bundle-v1`: the published Audit head and records plus the exact
+Call, policy, assessment, and Proposal artifacts named by those records. It
+recomputes their unchanged identities, resolves operation names through the
+selected prelude/store, and checks evaluation, consent, completion, and parent
+Call relationships. This is an offline review boundary; it does not execute a
+driver or prove that an external action occurred.
+
+`jacquard governance reconcile BUNDLE` verifies a
+`governance-reconciliation-bundle-v1` around that unchanged run bundle. Its
+separate HASH_V0-chained action journal records durable attempts and
+receipt digests, then classifies each authorization as unobserved, attempted
+with an unknown outcome, waiting for an Audit completion, or fully reconciled.
+An exact receipt matches a completion only when its Call, execution branch,
+and canonical outcome agree. It enforces the Live/Dry verdict matrix, requires
+every live completion to have one unique earlier executable authorization,
+accepts the dry gate's `blocked`, `no-simulation`, `simulated`, and
+`simulation-failed` completion branches only for their matching dry verdict,
+and reports a live completion missing its receipt even when no attempt was
+published. Any unresolved state returns E1516; absence of a receipt never
+proves that an effect did not occur, and the command never
+retries, repairs, compensates, or claims rollback. The Audit and action streams
+also have no trusted cross-stream clock. Provider receipt bytes remain outside
+the package, but their digests can still reveal equality or permit guesses for
+low-entropy inputs and are not a secret-protection mechanism.
+
 ### Versioned governance membrane values
 
 GM.1 ships the ordinary ring-3 values consumed by later governed facade
