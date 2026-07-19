@@ -1511,7 +1511,7 @@ world-test, live driver, simulator driver, or audit orchestration.
 * Nested membranes are monotone over every pair of finite policies.
 * Re-performing in a clause reaches the outer membrane exactly once.
 
-Implementation status (GM.13A): `Governance_approval_queue` now provides the
+Implementation status (GM.13A/GM.13B): `Governance_approval_queue` provides the
 explicit OCaml host-storage core for queue-backed single-use decisions. It
 keeps the released GovernanceProposal and Decision Code identities unchanged,
 stores sorted unique allowed principals outside Proposal identity, binds an
@@ -1526,15 +1526,27 @@ discard only a recognized physically uncommitted suffix after the last valid
 commit; committed corruption fails closed. Inspection retains stale historical
 evidence without making it deliverable again.
 
-This is the GM.13A host core, not the production
-`GovernanceApprovalV1` handler. Authentication is supplied by the host; the
-queue checks the resulting principal against its durable authorization
-metadata. GM.13B still has to connect that narrow host boundary to the live
-gate and Audit sequence and prove ordering in the hostile/replay lane. The
-core assumes a trusted stable parent directory because pathname checks retain
-an inherent final TOCTOU window against hostile concurrent renames. It makes no
-exactly-once outside-world action, hostile-directory, distributed-filesystem,
-rollback, or safe-retry claim.
+`Governance_approval_bridge` now connects that host core to the exact released
+`GovernanceApprovalV1` operation through a guarded routed evaluator. It pins
+the released effect, operation, owning-type, and constructor hashes before
+execution. The first complete run durably submits and returns
+`Awaiting_approval` without attempting Consume or resuming, even under a racing
+reviewer; after the host authenticates and records a Decision, a later complete
+rerun consumes before resuming once. Compiled gate evidence pins `Evaluated` before
+Submit or Consume, `Consented` after delivery and before action, at-most-once
+delivery under concurrent consumers, and zero action on denial, escalation,
+Audit failure, configuration drift, or replay. One driver invocation supports
+one approval rendezvous; no evaluator continuation is persisted.
+
+Authentication is supplied by the host, and GM.13B intentionally exposes no
+operator CLI or generic handler callback. The core still assumes a trusted
+stable parent directory because pathname checks retain an inherent final
+TOCTOU window against hostile concurrent renames. It makes no exactly-once
+outside-world action, Audit/queue transaction, hostile-directory,
+distributed-filesystem, rollback, multi-approval checkpoint, or safe-retry
+claim. Detecting an invalid second approval Ask does not roll back root effects
+already acknowledged after the first approval; hosts admit only one-rendezvous
+computations at this boundary.
 
 ### Fault and replay lanes
 

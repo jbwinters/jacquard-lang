@@ -174,6 +174,12 @@ Read these together when judging whether the release candidate is credible:
   boundary.
 - `release/governed-membranes/GM13A-MANIFEST.sha256`: reconstructible GM.13A
   overlay on exact base `e20ebcf`.
+- `release/governed-membranes/GM13B-EVIDENCE.md`: guarded two-run approval
+  bridge, frozen Store identities, exact Proposal/Decision codecs, pre-action
+  Audit ordering, reviewer-race/replay/concurrency evidence, and explicit
+  single-rendezvous and host-auth limits.
+- `release/governed-membranes/GM13B-MANIFEST.sha256`: reconstructible GM.13B
+  overlay on exact GM.13A base `bb3f5ea`.
 - `release/governed-membranes/GM14-EVIDENCE.md`: GM.14A canonical run bundles
   plus GM.14B action-journal reconciliation, unchanged artifact identities,
   exact receipt/completion linkage, honest recovery gaps, and explicit
