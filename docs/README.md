@@ -168,6 +168,11 @@ Read these together when judging whether the release candidate is credible:
 - `release/governed-membranes/GM10-EVIDENCE.md`: GM.10 world-free Workspace
   membrane, closed simulator boundary, exact rows, audit order, zero-world
   counters, and exhaustive Warp evidence.
+- `release/governed-membranes/GM14-EVIDENCE.md`: GM.14A canonical run bundle,
+  unchanged artifact identities, Audit-to-artifact linkage, transformed-Call
+  ancestry, stable refusal diagnostics, and explicit execution exclusions.
+- `release/governed-membranes/GM14-MANIFEST.sha256`: reconstructible GM.14A
+  overlay on exact integrated GM.10 base `814cada`.
 - `release/governed-membranes/GM10-MANIFEST.sha256`: reconstructible GM.10
   overlay on exact integrated GM.8/GM.9 base `df37a15`.
 

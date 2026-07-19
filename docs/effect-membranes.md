@@ -1323,7 +1323,33 @@ configured evidence only. This slice adds neither the `jac governance check`
 command nor an artifact extractor, membrane handler, simulator, live driver,
 or resource-scope type proof; those remain separate tooling and runtime work.
 
-### 12.3 Review surfaces
+### 12.3 Offline run-bundle verification
+
+GM.14A adds `governance-run-bundle-v1`, an additive review package around the
+unchanged Audit v2 records and Governance v0 identities. The fixed sections
+carry an independently published head, the ordered `audit-chain-v2` records,
+and complete Call, BoundPolicy, Assessment, and Proposal artifacts. The file is
+one canonical compact form followed by LF, so one evidence package has one
+reviewable byte representation.
+
+`jacquard governance verify-run BUNDLE` resolves every Call's qualified
+operation name and operation hash against the selected prelude/store, then
+recomputes the existing Call, policy, assessment, and Proposal subject hashes.
+It reconstructs the embedded Audit chain, requires each entry reference to
+resolve uniquely, binds consent to one earlier unconsented `Ask` with the same
+Call/policy/assessment tuple, checks Proposal authority against the Call, walks
+explicit parent-Call ancestry, and rejects every supplied artifact that the
+chain does not use. The command is additive; `verify-log` and every frozen v0
+or v2 encoding remain unchanged.
+
+This verifier proves package integrity and linkage, not external execution. It
+does not authenticate who published the package, infer that a missing
+`Completed` means rollback, or reconcile a completion with a driver receipt or
+idempotency key. Those claims require the later authenticated queue and typed
+action-journal work; this package deliberately contains no receipt-shaped
+field that could imply them early.
+
+### 12.4 Review surfaces
 
 * `jac why-effect Fs` points to the leaf membrane driver that introduces it, not merely to the agent function that requested `Workspace`.
 * `jac governance explain <proposal-id>` renders the call, assessment, policy rule, approval, driver hash, and audit entries as one decision chain.

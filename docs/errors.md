@@ -267,6 +267,29 @@ locally.
 GM.8 provides this library analysis boundary. A later tooling slice may expose
 it as `jac governance check`; no such command is implied by these diagnostics.
 
+## Governance run bundle (E15xx)
+
+| code | meaning | example |
+|------|---------|---------|
+| E1500 | malformed, unsupported, noncanonical, unreadable, or concurrently changed run bundle | a bundle without its final LF or fixed artifact sections |
+| E1501 | an artifact is malformed or its carried identity disagrees with its unchanged canonical v0 subject | a Call wrapper carrying the hash of different arguments |
+| E1502 | one artifact identity occurs more than once | two Call wrappers carrying the same Call ID |
+| E1503 | an Audit entry references an artifact absent from the bundle | `Consented` names a Proposal that was not supplied |
+| E1504 | Audit ordering or entry-to-artifact linkage is missing, inconsistent, or ambiguous | consent has no unique earlier matching `Ask` evaluation |
+| E1505 | a Proposal's Call, policy, assessment, or authority disagrees with its linked artifacts | a Proposal repeats a different authority envelope |
+| E1506 | transformed Call lineage is missing, self-referential, or cyclic | `parent-call-id` names an absent Call |
+| E1507 | a bundled artifact is not used by the Audit chain | an unrelated valid Proposal is appended to the bundle |
+
+`jacquard governance verify-run BUNDLE` is additive to `verify-log`. The bundle
+contains unchanged `audit-chain-v2` record forms plus full versioned artifacts.
+The verifier resolves qualified operation names and hashes through the selected
+prelude/store, reconstructs the published head, recomputes the existing v0
+Call, BoundPolicy, Assessment, and Proposal identities, checks proposal and
+decision links, and verifies explicit parent-Call lineage. It does not infer
+that an external action ran, succeeded, or rolled back from an absent
+`Completed` entry. Receipt and idempotency reconciliation require a later typed
+action journal and are intentionally outside this command.
+
 ## Appendix: the W5.3 audit (ten message rewrites)
 
 Before/after wording improvements applied during the audit:
