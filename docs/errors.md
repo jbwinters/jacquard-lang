@@ -349,6 +349,27 @@ checked, including when no action-journal entry names it. Unknown attempts,
 missing receipts, and missing completions are nonzero reports, never rollback
 or safe-retry claims.
 
+## Governance approval queue (E152x)
+
+| code | meaning | example |
+|------|---------|---------|
+| E1520 | malformed, noncanonical, or unrecognized physical journal framing | an arbitrary non-LF suffix rather than the exact record-envelope prefix |
+| E1521 | unsupported queue record, commit, or event version | replacing a v1 record envelope with a different carrier head |
+| E1522 | record predecessor, carried identity, or commit identity mismatch | editing a committed Decision without updating its record identity |
+| E1523 | malformed GovernanceProposal or noncanonical allowed-approver metadata | submitting duplicate or unsorted principals |
+| E1524 | malformed or stale Decision, or invalid authenticated actor binding | an Approved Decision whose approver differs from the host actor |
+| E1525 | requested transition conflicts with durable queue state | deciding one proposal differently after a Decision is committed |
+| E1526 | unsafe path, bounded-read, lock-adjacent, write, sync, or visibility failure | replacing the locked pathname while a transaction is appended |
+
+`Governance_approval_queue` is an explicit OCaml host adapter, not a new
+Jacquard effect or ambient file API. It verifies canonical two-line
+record/commit transactions under a process-local guard and one nonblocking
+whole-file lock. A recognized uncommitted suffix may be reported or durably
+truncated to the last commit boundary; committed corruption always fails
+closed. The module consumes a proposal ID atomically: under the lock it resolves
+the immutable Decision, commits the exact Decision ID, and only then returns
+the exact Decision and ID.
+
 ## Appendix: the W5.3 audit (ten message rewrites)
 
 Before/after wording improvements applied during the audit:

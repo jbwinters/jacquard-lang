@@ -6,7 +6,7 @@ artifacts and are not retroactively updated by DX.2.
 
 ## Current inventory
 
-- Alcotest/QCheck cases: `742`
+- Alcotest/QCheck cases: `755`
 - Cram transcript files: `44`
 - Doctest examples: `27` across 8 documents
 
@@ -19,6 +19,8 @@ run-bundle cases and one public verifier transcript. GM.14B adds five compiled
 action-reconciliation cases and one public reconciliation transcript.
 DX.4 adds four compiled diagnostic-contract cases and one public diagnostic
 format transcript.
+GM.13A adds thirteen compiled approval-queue cases covering durable framing,
+restart recovery, authorization, and process/Domain consumption races.
 
 ## Proved behavior
 
