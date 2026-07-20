@@ -115,3 +115,70 @@ val verify : Store.t -> contract -> (report, Diag.t list) result
 
 val diagnostic_codes : (string * string) list
 (** Stable governance-verifier diagnostic catalog. *)
+
+module V1 : sig
+  (** Additive layer-aware analysis IR for nested live membranes. V0 remains available above for
+      released single-layer evidence. V1 qualifies every facade operation by its membrane layer so
+      re-performing the same operation into the next outer layer is not mistaken for recursion. *)
+
+  type operation_key = { layer_id : int; operation_id : Hash.t }
+
+  type action_atom =
+    | Raw of { effect_id : Hash.t; resources : authority list }
+    | Forward of operation_key
+
+  type operation = {
+    operation_id : Hash.t;
+    frozen_authority : authority list;
+    call_authority : authority list;
+    proposal_authority : authority list;
+    call : identity_claim;
+    bound_policy : identity_claim;
+    assessment : identity_claim;
+    proposal : proposal_binding;
+    serialized_call_data : Form.t list;
+    normalizer : term_ref;
+    summarizer : term_ref;
+    action : action_atom list;
+    live_flows : flow list option;
+    lineage : lineage;
+    meta : Meta.t;
+  }
+
+  type layer = {
+    layer_id : int;
+    outer_layer_id : int option;
+    operations : operation list;
+    meta : Meta.t;
+  }
+
+  type contract = {
+    version : string;
+    facade_effect : Hash.t;
+    layers : layer list;
+    governed_reachable_effects : Hash.t list;
+    sequence : sequence_contract;
+    meta : Meta.t;
+  }
+
+  type operation_report = {
+    layer_id : int;
+    operation_id : Hash.t;
+    authority : authority list;
+    call_id : Hash.t;
+    proposal_id : Hash.t;
+  }
+
+  type report = { version : string; facade_effect : Hash.t; operations : operation_report list }
+
+  val version : string
+  (** Exact layer-aware IR version accepted by {!verify}. *)
+
+  val verify : Store.t -> contract -> (report, Diag.t list) result
+  (** [verify store contract] verifies one linear inner-to-outer live membrane chain. Every layer
+      must cover the complete facade; non-leaf actions must forward the identical operation to the
+      declared next outer layer; the sole leaf must terminate in raw effects. Direct call lineage,
+      transitive authority, canonical gates, one sequence owner/token, pure artifacts, secret
+      exclusion, and the absolute Eval prohibition fail closed with the stable E1400--E1412 catalog.
+  *)
+end

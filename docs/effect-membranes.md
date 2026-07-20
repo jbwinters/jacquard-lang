@@ -1345,6 +1345,21 @@ configured evidence only. This slice adds neither the `jac governance check`
 command nor an artifact extractor, membrane handler, simulator, live driver,
 or resource-scope type proof; those remain separate tooling and runtime work.
 
+Implementation status (GM.12A): the released `governance-verifier-v0` API and
+meaning remain unchanged. The additive `Governance_verify.V1` analysis IR uses
+`governance-verifier-v1` and qualifies each facade operation by both membrane
+layer ID and operation ID. It verifies one complete linear inner-to-outer live
+chain: every layer covers the whole once-mode facade, every non-leaf forwards
+the identical operation exactly once to its declared immediate outer layer,
+and the sole outer leaf terminates in nonempty raw actions. Authority expansion
+now follows the layer-qualified graph, so re-performing the same Workspace
+operation at the next layer is valid while cycles, skipped layers, branching,
+unknown targets, incomplete coverage, and raw actions above the leaf fail
+closed. Adjacent layers must carry direct unchanged or transformed Call
+lineage, and the single sequence-token inventory must contain exactly one use
+per layer. V1 currently describes live chains only; the reusable forwarding
+handler and its runtime monotonicity evidence remain GM.12B work.
+
 ### 12.3 Offline run-bundle verification
 
 GM.14A adds `governance-run-bundle-v1`, an additive review package around the
@@ -1520,9 +1535,10 @@ retained in the source tree.
 ### Handler and world properties
 
 GM.4 deliberately added no handler, world-test, live driver, simulator driver,
-or audit orchestration. GM.6, GM.7, GM.10, GM.11, and GM.13 now provide the
-gate, dry/live Workspace, and approval evidence for the applicable properties;
-nested forwarding remains GM.12 work.
+or audit orchestration. GM.6, GM.7, GM.10, GM.11, GM.12A, and GM.13 now provide
+the gate, dry/live Workspace, layer-aware static verifier, and approval evidence
+for the applicable properties; the nested forwarding runtime remains GM.12B
+work.
 
 * `Allow` invokes the live driver exactly once and resumes exactly once.
 * `Block`, `Denied`, `Escalate`, and `NoSimulation` invoke it zero times.
