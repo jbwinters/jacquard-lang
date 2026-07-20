@@ -1,0 +1,10 @@
+# GM.15 canonical healthy interaction shapes. Columns are label and comma-separated
+# site/operation/subject/result events; tokens are deliberately payload-free.
+live-allow	J/assess/call/ok,E/record/call/allow,D/workspace.read/call/ok,C/record/call/ok
+live-approved	J/assess/call/ok,E/record/call/ask,S/simulate/call/ok,A/ask/proposal/approved,K/record/proposal/approved,D/workspace.read/call/ok,C/record/call/ok
+live-denied	J/assess/call/ok,E/record/call/ask,S/simulate/call/ok,A/ask/proposal/denied,K/record/proposal/denied
+live-escalate	J/assess/call/ok,E/record/call/ask,S/simulate/call/ok,A/ask/proposal/escalate,K/record/proposal/escalate
+live-stale	J/assess/call/ok,E/record/call/ask,S/simulate/call/ok,A/ask/proposal/stale
+live-block	J/assess/call/ok,E/record/call/block
+dry-simulate	J/assess/call/ok,E/record/call/simulate,S/simulate/call/ok,C/record/call/ok
+dry-block	J/assess/call/ok,E/record/call/block,C/record/call/ok

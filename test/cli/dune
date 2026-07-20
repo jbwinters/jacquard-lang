@@ -6,6 +6,7 @@
   governance-run-bundle-v1.jqd
   governance-reconciliation-v1.jqd
   governance-reconciliation-gap-v1.jqd
+  governance-fault-laws.jqd
   (source_tree ../../prelude)
   (source_tree ../../demos)
   (source_tree ../../corpus)

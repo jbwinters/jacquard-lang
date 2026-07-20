@@ -1,0 +1,25 @@
+; GM.15 native twin: the immutable failure choice is an ordinary argument to
+; a fresh closed Once handler. A failed J/E/D/C site does not resume, so later sites
+; (including the raw D action and the C completion) are absent from the trace.
+(defeffect gm15-native () (op visit once ((tref text)) (ttuple)))
+
+(defterm ((binding gm15-native.run ()
+  (lam ((pvar fail-at))
+    (handle
+      (let nonrec (pwild) (app (var visit) (lit "J"))
+        (let nonrec (pwild) (app (var visit) (lit "E"))
+          (let nonrec (pwild) (app (var visit) (lit "D"))
+            (let nonrec (pwild) (app (var visit) (lit "C"))
+              (tuple)))))
+      (ret (pwild) (var nil))
+      (opclause visit ((pvar site)) k
+        (match (app (var text.eq?) (var site) (var fail-at))
+          (clause (pcon true) (app (var cons) (var site) (var nil)))
+          (clause (pcon false)
+            (app (var cons) (var site) (app (var k) (tuple)))))))))))
+
+(tuple
+  (app (var gm15-native.run) (lit "none"))
+  (app (var gm15-native.run) (lit "E"))
+  (app (var gm15-native.run) (lit "D"))
+  (app (var gm15-native.run) (lit "C")))

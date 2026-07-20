@@ -48,6 +48,7 @@ let () =
       ("governance-reconcile", Test_governance_reconcile.suite);
       ("governance-approval-queue", Test_governance_approval_queue.suite);
       ("governance-approval-bridge", Test_governance_approval_bridge.suite);
+      ("governance-faults", Test_governance_faults.suite);
       ("types", Test_types.suite);
       ("check", Test_check.suite);
       ("tier", Test_tier.suite);
