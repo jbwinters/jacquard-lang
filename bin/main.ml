@@ -17,6 +17,7 @@ let exit_runtime = 2
 let exit_unhandled = 3
 
 type diagnostic_format = Text | Json_v1
+type output_format = Output_text | Output_json_v1
 
 let selected_diagnostic_format = ref Text
 
@@ -65,6 +66,7 @@ let diagnostic_summary = function
   | "E1302" -> "Export input could not be read"
   | "E1303" -> "Export output could not be written"
   | "E1307" -> "Audit operation could not complete"
+  | "E1413" -> "Canonical Workspace source contract is unavailable"
   | "E1516" -> "Action evidence still requires operator reconciliation"
   | code -> "Command failed (" ^ code ^ ")"
 
@@ -86,6 +88,9 @@ let diagnostic_next_step = function
   | "E1103" -> "Correct the native toolchain or build input and try again."
   | "E1301" | "E1302" | "E1303" -> "Correct the export path or input and try again."
   | "E1307" -> "Correct the audit input or destination and try again."
+  | "E1413" ->
+      "Use a closed direct workspace.live or workspace.dry-run call, or an exact with-sequence, \
+       live-layer, and forward-layer composition with distinct policy binders."
   | "E1516" -> "Reconcile the remaining action evidence before retrying or rolling back."
   | _ -> "Correct the command input and try again."
 
@@ -101,10 +106,12 @@ let print_diags ds =
   exit_diags
 
 let read_file path =
-  let ic = open_in_bin path in
-  let s = really_input_string ic (in_channel_length ic) in
-  close_in ic;
-  s
+  let channel = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr channel)
+    (fun () -> really_input_string channel (in_channel_length channel))
+
+let read_governance_file path = In_channel.with_open_bin path In_channel.input_all
 
 let rec rm_rf path =
   if Sys.is_directory path then begin
@@ -121,6 +128,20 @@ let fresh_tmp_dir () =
          (int_of_float (Unix.gettimeofday () *. 1000.) mod 100000))
   in
   at_exit (fun () -> try rm_rf dir with Sys_error _ -> ());
+  dir
+
+(* Governance analysis gets a securely created private directory rather than the historical
+   predictable run-store path. Cleanup is constrained to this exact 0700 directory. *)
+let fresh_governance_analysis_dir () =
+  let dir = Filename.temp_dir ~perms:0o700 "jacquard-governance-" ".analysis" in
+  let rec unlink_tree path =
+    match (Unix.lstat path).Unix.st_kind with
+    | Unix.S_DIR ->
+        Array.iter (fun name -> unlink_tree (Filename.concat path name)) (Sys.readdir path);
+        Unix.rmdir path
+    | _ -> Unix.unlink path
+  in
+  at_exit (fun () -> try unlink_tree dir with Unix.Unix_error _ | Sys_error _ -> ());
   dir
 
 let prelude_dir_of = function
@@ -1587,6 +1608,81 @@ let governance_verify_run_cmd bundle_file prelude store_dir =
             report.proposals report.consents report.transformed_calls;
           ok)
 
+let governance_check_cmd file prelude syntax output_format =
+  try
+    let root = fresh_governance_analysis_dir () in
+    match Store.open_store root with
+    | Error diagnostics -> print_diags diagnostics
+    | Ok store -> (
+        match Prelude.load ~dir:(prelude_dir_of prelude) store with
+        | Error diagnostics -> print_diags diagnostics
+        | Ok _ -> (
+            match make_checker store with
+            | Error diagnostics -> print_diags diagnostics
+            | Ok checker -> (
+                match resolve_source_tops ~syntax store ~file (read_governance_file file) with
+                | Error diagnostics -> print_diags diagnostics
+                | Ok (tops, source_warnings) -> (
+                    let declarations, expressions =
+                      List.fold_left
+                        (fun (declarations, expressions) -> function
+                          | Kernel.Decl declaration -> (declaration :: declarations, expressions)
+                          | Kernel.Expr expression -> (declarations, expression :: expressions))
+                        ([], []) tops
+                    in
+                    if expressions <> [] then
+                      print_diags
+                        [
+                          cli_diagnostic ~code:"E1413"
+                            "governance check accepts declaration-only source and never evaluates \
+                             a top-level expression";
+                        ]
+                    else
+                      let rec check_declarations warnings = function
+                        | [] -> Ok (List.rev warnings)
+                        | declaration :: rest -> (
+                            match Check.check_top checker (Kernel.Decl declaration) with
+                            | Error diagnostics -> Error diagnostics
+                            | Ok result ->
+                                check_declarations
+                                  (List.rev_append result.Check.warnings warnings)
+                                  rest)
+                      in
+                      let declarations = List.rev declarations in
+                      match check_declarations [] declarations with
+                      | Error diagnostics -> print_diags diagnostics
+                      | Ok checker_warnings -> (
+                          match Governance_source_check.verify store checker declarations with
+                          | Error diagnostics ->
+                              print_diags (Governance_source_check.sort_diagnostics diagnostics)
+                          | Ok report ->
+                              print_warnings
+                                (Governance_source_check.sort_diagnostics
+                                   (source_warnings @ checker_warnings));
+                              print_string
+                                (match output_format with
+                                | Output_text -> Governance_source_check.render_text report
+                                | Output_json_v1 ->
+                                    Governance_source_check.render_json_v1 report ^ "\n");
+                              ok)))))
+  with
+  | End_of_file ->
+      print_diags
+        [
+          cli_diagnostic ~code:"E1413"
+            "governance source changed while it was being read; retry with a stable regular file";
+        ]
+  | Sys_error _ ->
+      print_diags
+        [ cli_diagnostic ~code:"E1413" "governance analysis storage or source read failed" ]
+  | Unix.Unix_error (error, call, _) ->
+      print_diags
+        [
+          cli_diagnostic ~code:"E1413"
+            (Printf.sprintf "governance analysis storage or source read failed: %s: %s" call
+               (Unix.error_message error));
+        ]
+
 let governance_reconcile_cmd bundle_file prelude store_dir =
   match open_ctx ~prelude ~store_dir with
   | Error diagnostics -> print_diags diagnostics
@@ -1637,6 +1733,14 @@ let diagnostic_format_arg =
         ~doc:
           "Diagnostic rendering contract: text (default) or json-v1 (one canonical JSON object per \
            line on the existing diagnostic stream).")
+
+let output_format_arg =
+  Arg.(
+    value
+    & opt (enum [ ("text", Output_text); ("json-v1", Output_json_v1) ]) Output_text
+    & info [ "output-format" ] ~docv:"FORMAT"
+        ~doc:
+          "Successful governance report: text (default) or json-v1 (one compact canonical object).")
 
 let configure_diagnostics command format =
   selected_diagnostic_format := format;
@@ -1888,6 +1992,16 @@ let audit_t =
     [ genesis; append ]
 
 let governance_t =
+  let check =
+    Cmd.v
+      (Cmd.info "check"
+         ~doc:
+           "Statically verify one canonical workspace-v0 governed source contract without running \
+            code or installing world handlers.")
+      Term.(
+        const (configure_diagnostics governance_check_cmd)
+        $ diagnostic_format_arg $ file_arg $ prelude_arg $ syntax_arg $ output_format_arg)
+  in
   let verify_log =
     Cmd.v
       (Cmd.info "verify-log"
@@ -1927,7 +2041,7 @@ let governance_t =
   in
   Cmd.group
     (Cmd.info "governance" ~doc:"Verify governance artifacts and review surfaces.")
-    [ verify_log; verify_run; reconcile ]
+    [ check; verify_log; verify_run; reconcile ]
 
 let dist_diff_t =
   Cmd.v

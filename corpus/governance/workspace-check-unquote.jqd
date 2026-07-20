@@ -1,0 +1,8 @@
+(defterm
+  ((binding governance-check-unquote ()
+    (lam ((pvar policy) (pvar simulators))
+      (app (var workspace.live)
+        (var policy) (var simulators)
+        (lam ()
+          (quote
+            (unquote (app (var eval-code) (quote (lit "forbidden")))))))))))

@@ -1,0 +1,5 @@
+(defterm
+  ((binding governance-check-inert-reference ()
+    (lam ((pvar policy) (pvar simulators))
+      (let nonrec (pwild) (var workspace.live)
+        (lit "not-a-governed-root"))))))

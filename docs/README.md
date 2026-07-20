@@ -200,6 +200,11 @@ Read these together when judging whether the release candidate is credible:
   replay shapes, adversarial drift refusal, and closed native parity.
 - `release/governed-membranes/GM15-MANIFEST.sha256`: reconstructible
   evidence-only GM.15 overlay on exact integrated base `bed0adb`.
+- `release/governed-membranes/GM16-EVIDENCE.md`: GM.16 isolated static
+  `workspace-v0` source gate, exact recursive composition grammar, deterministic
+  report contract, and hostile no-evaluation evidence.
+- `release/governed-membranes/GM16-MANIFEST.sha256`: reconstructible GM.16
+  implementation overlay on exact GM.15 successor base `3f01622`.
 - `release/governed-membranes/GM10-MANIFEST.sha256`: reconstructible GM.10
   overlay on exact integrated GM.8/GM.9 base `df37a15`.
 - `release/governed-membranes/GM11-MANIFEST.sha256`: reconstructible GM.11

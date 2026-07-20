@@ -179,8 +179,8 @@ studied during planning; `docs/ast.md` records each debt in detail:
 The prototype is complete against its original core plan and has since added
 the public surface syntax, ringed standard library, Warp properties and cache,
 native compilation, packaged binaries, and product-scale case studies. The RC1
-semantic boundary remains historical; the current successor is pinned by 783
-Alcotest/QCheck cases, 45 cram transcripts, 27 documentation examples, native
+semantic boundary remains historical; the current successor is pinned by 786
+Alcotest/QCheck cases, 46 cram transcripts, 27 documentation examples, native
 sanitizer/leak/fuzz lanes, and fresh-clone evidence workflows. RC2 repaired
 binary-demo packaging; RC3 adds an explicit
 runtime/output license exception and packages the native runtime. The current
@@ -380,6 +380,7 @@ jac replay TRACE.jqd PROGRAM.jqd [--fork '1=(response 500 "down")']
 jac test TESTS.jac [TESTS.jqd ...] [--exhaustive] [--schedules N --seed S] [--cache-dir CACHE]
 jac build FILE.jac -o PROG
 jac export FILE.jac -o FILE.jqd
+jac governance check FILE.jac [--output-format text|json-v1]
 ```
 
 `.jac` is the source format people and agents write. `.jqd` is the lower-level

@@ -1255,7 +1255,7 @@ can still group attempts by call ID.
 
 This is the same two-level identity move the package manager uses for implementation and interface hashes: one identity for meaning, one for the review surface that was actually shown.
 
-`BoundPolicy` and `Call` constructors are used only inside the canonical governance module and trusted facade normalizers. Since Jacquard does not yet provide module-level constructor privacy, `jac governance check` verifies that the carried hash matches the canonical encoding of the value. Supplying an arbitrary hash is a build failure, not an accepted convention.
+`BoundPolicy` and `Call` constructors are used only inside the canonical governance module and trusted facade normalizers. Jacquard does not yet provide module-level constructor privacy. `jac governance check` pins the source-side policy binders, normalizers, summarizers, facade, and membrane composition; it does not claim to know runtime value identities. `jac governance verify-run BUNDLE` separately recomputes each carried `BoundPolicy`, `Call`, assessment, and Proposal identity from canonical bytes. Supplying an arbitrary carried hash fails that runtime-artifact verification; source inspection alone is not accepted as proof.
 
 ## 11. Membranes compose by forwarding
 
@@ -1396,11 +1396,28 @@ public smart constructors, auto-approves only the exact Proposal ID, and proves
 that the hermetic leaf succeeds exactly when both layer verdicts are Allow or
 Ask across all 50,000 finite combinations.
 
-This is not yet automatic end-to-end source verification. `Governance_verify.V1`
-consumes trusted analysis IR; there is no artifact extractor or
-`jac governance check` command tying `prelude/28-workspace-forward.jqd` to a V1
-contract. That extractor/CLI integration remains a release gate before the
-project markets production governance as automatically verified.
+Implementation status (GM.16): `jac governance check FILE` now provides a
+fail-closed source-verification gate for the canonical `workspace-v0` profile.
+It parses and typechecks declaration-only `.jac` or `.jqd` source in a private
+ephemeral store, pins the exact facade, operation, policy-binder, gate,
+normalizer, summarizer, driver, simulator, world-effect, `Eval`, and forwarding
+identities, and accepts one closed direct live/dry root or one exact recursive
+live-layer/forward-layer composition. It follows source dependencies, recursive
+group members, handler operation identities, and live unquote splices. Reachable
+`Eval`, raw `Fs`/`Net`/`Secret`, generic inspection, open rows, inert references,
+ambiguous roots, miswired binders, and any closed residual outward authority
+outside the profile's exact live or dry row fail closed.
+
+The successful report records introduced rows rather than claiming reusable
+terms have closed full rows; the forwarding record includes its governance
+control effects as well as `Workspace`. It deliberately reports runtime
+identities as dynamic and hands those values to `jac governance verify-run BUNDLE`. GM.16
+does not evaluate the source, install handlers, grant world authority, execute
+a driver or simulator, mutate a persistent store, prove resource scopes, or
+turn static source verification into proof that an external action occurred.
+`Governance_verify.V1` remains the layer-topology analysis contract; GM.16 is
+the production source gate for the exact shipped composition, not a new public
+policy or artifact serialization.
 
 ### 12.3 Offline run-bundle verification
 

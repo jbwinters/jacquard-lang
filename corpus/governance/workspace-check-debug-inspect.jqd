@@ -1,0 +1,6 @@
+(defterm
+  ((binding governance-check-debug-inspect ()
+    (lam ((pvar policy) (pvar simulators))
+      (app (var workspace.live)
+        (var policy) (var simulators)
+        (lam () (app (var debug.inspect) (quote (lit "forbidden")))))))))

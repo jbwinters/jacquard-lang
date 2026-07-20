@@ -1,0 +1,8 @@
+(defterm
+  ((binding governance-check-groupref-helper ()
+    (lam () (app (var eval-code) (quote (lit "forbidden")))))
+   (binding governance-check-groupref-root ()
+    (lam ((pvar policy) (pvar simulators))
+      (app (var workspace.live)
+        (var policy) (var simulators)
+        (lam () (app (var governance-check-groupref-helper))))))))

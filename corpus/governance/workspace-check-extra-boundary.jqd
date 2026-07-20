@@ -1,0 +1,9 @@
+(defterm
+  ((binding governance-check-extra-boundary ()
+    (lam ((pvar policy) (pvar simulators))
+      (app (var workspace.live)
+        (var policy) (var simulators)
+        (lam ()
+          (app (var workspace.live)
+            (var policy) (var simulators)
+            (lam () (lit "unreported-nested-boundary")))))))))

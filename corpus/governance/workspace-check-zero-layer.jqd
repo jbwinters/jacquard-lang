@@ -1,0 +1,5 @@
+(defterm
+  ((binding governance-check-workspace-zero-layer ()
+    (lam ((pvar policy) (pvar simulators))
+      (app (var workspace.live)
+        (var policy) (var simulators) (lam () (lit "verified")))))))
