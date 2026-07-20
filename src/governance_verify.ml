@@ -754,3 +754,478 @@ let verify store (contract : contract) =
                     })
                   contract.operations;
             })
+
+module V1 = struct
+  type operation_key = { layer_id : int; operation_id : Hash.t }
+
+  type action_atom =
+    | Raw of { effect_id : Hash.t; resources : authority list }
+    | Forward of operation_key
+
+  type operation = {
+    operation_id : Hash.t;
+    frozen_authority : authority list;
+    call_authority : authority list;
+    proposal_authority : authority list;
+    call : identity_claim;
+    bound_policy : identity_claim;
+    assessment : identity_claim;
+    proposal : proposal_binding;
+    serialized_call_data : Form.t list;
+    normalizer : term_ref;
+    summarizer : term_ref;
+    action : action_atom list;
+    live_flows : flow list option;
+    lineage : lineage;
+    meta : Meta.t;
+  }
+
+  type layer = {
+    layer_id : int;
+    outer_layer_id : int option;
+    operations : operation list;
+    meta : Meta.t;
+  }
+
+  type contract = {
+    version : string;
+    facade_effect : Hash.t;
+    layers : layer list;
+    governed_reachable_effects : Hash.t list;
+    sequence : sequence_contract;
+    meta : Meta.t;
+  }
+
+  type operation_report = {
+    layer_id : int;
+    operation_id : Hash.t;
+    authority : authority list;
+    call_id : Hash.t;
+    proposal_id : Hash.t;
+  }
+
+  type report = { version : string; facade_effect : Hash.t; operations : operation_report list }
+
+  let version = "governance-verifier-v1"
+
+  let key_equal (left : operation_key) (right : operation_key) =
+    left.layer_id = right.layer_id && Hash.equal left.operation_id right.operation_id
+
+  let find_layer layers layer_id =
+    List.find_opt (fun (layer : layer) -> layer.layer_id = layer_id) layers
+
+  let find_operation layers (key : operation_key) =
+    match find_layer layers key.layer_id with
+    | None -> None
+    | Some layer ->
+        List.find_opt
+          (fun (operation : operation) -> Hash.equal operation.operation_id key.operation_id)
+          layer.operations
+
+  let validate_facade store (contract : contract) =
+    match Store.locate store contract.facade_effect with
+    | Error diagnostics ->
+        [
+          diagnostic contract.meta "E1401"
+            (Printf.sprintf "facade effect cannot be resolved: %s"
+               (String.concat "; " (List.map Diag.to_cause_string diagnostics)));
+        ]
+    | Ok { Store.decl = { Kernel.it = Kernel.DefEffect { ops; _ }; _ }; role = Store.Whole; _ } ->
+        let mode_errors =
+          List.filter_map
+            (fun operation ->
+              if operation.Kernel.op_mode = Kernel.Once then None
+              else
+                Some
+                  (diagnostic operation.Kernel.smeta "E1401"
+                     (Printf.sprintf "facade operation `%s` must use once mode" operation.op_name)))
+            ops
+        in
+        let expected =
+          List.mapi (fun ordinal _ -> Canon.op_hash contract.facade_effect ordinal) ops
+        in
+        let layer_errors =
+          List.concat_map
+            (fun (layer : layer) ->
+              let actual =
+                List.map (fun (operation : operation) -> operation.operation_id) layer.operations
+              in
+              let unique = List.sort_uniq Hash.compare actual in
+              let coverage_ok =
+                List.length actual = List.length unique
+                && List.length expected = List.length actual
+                && List.for_all (fun hash -> List.exists (Hash.equal hash) actual) expected
+              in
+              if coverage_ok then []
+              else
+                [
+                  diagnostic layer.meta "E1402"
+                    (Printf.sprintf
+                       "layer %d operation inventory must cover every facade operation exactly once"
+                       layer.layer_id);
+                ])
+            contract.layers
+        in
+        mode_errors @ layer_errors
+    | Ok _ ->
+        [ diagnostic contract.meta "E1401" "facade identity is not a whole effect declaration" ]
+
+  let validate_topology (contract : contract) =
+    let diagnostics = ref [] in
+    let add meta cause = diagnostics := !diagnostics @ [ diagnostic meta "E1407" cause ] in
+    if contract.layers = [] then
+      add contract.meta "layer-aware verifier requires at least one layer";
+    let ids = List.map (fun (layer : layer) -> layer.layer_id) contract.layers in
+    let unique = List.sort_uniq Int.compare ids in
+    if List.length ids <> List.length unique then
+      add contract.meta "membrane layer IDs must be unique";
+    List.iter
+      (fun (layer : layer) ->
+        match layer.outer_layer_id with
+        | Some outer when outer = layer.layer_id ->
+            add layer.meta (Printf.sprintf "layer %d cannot forward to itself" layer.layer_id)
+        | Some outer when Option.is_none (find_layer contract.layers outer) ->
+            add layer.meta
+              (Printf.sprintf "layer %d names unknown outer layer %d" layer.layer_id outer)
+        | Some _ | None -> ())
+      contract.layers;
+    let incoming layer_id =
+      List.filter
+        (fun (candidate : layer) -> candidate.outer_layer_id = Some layer_id)
+        contract.layers
+    in
+    let roots = List.filter (fun (layer : layer) -> incoming layer.layer_id = []) contract.layers in
+    let leaves =
+      List.filter (fun (layer : layer) -> Option.is_none layer.outer_layer_id) contract.layers
+    in
+    if List.length roots <> 1 then
+      add contract.meta "membrane layers must form one chain with exactly one inner root";
+    if List.length leaves <> 1 then
+      add contract.meta "membrane layers must form one chain with exactly one raw outer leaf";
+    List.iter
+      (fun (layer : layer) ->
+        let count = List.length (incoming layer.layer_id) in
+        if count > 1 then
+          add layer.meta
+            (Printf.sprintf "layer %d has %d inner predecessors; membrane topology must be linear"
+               layer.layer_id count))
+      contract.layers;
+    (match roots with
+    | [ root ] ->
+        let rec walk visited (layer : layer) =
+          if List.mem layer.layer_id visited then
+            add layer.meta (Printf.sprintf "membrane layer cycle reaches layer %d" layer.layer_id)
+          else
+            match layer.outer_layer_id with
+            | None ->
+                let visited = layer.layer_id :: visited in
+                if List.length visited <> List.length contract.layers then
+                  add contract.meta "every membrane layer must be reachable from the inner root"
+            | Some outer -> (
+                match find_layer contract.layers outer with
+                | Some next -> walk (layer.layer_id :: visited) next
+                | None -> ())
+        in
+        walk [] root
+    | _ -> ());
+    !diagnostics
+
+  let source_layer layers target_id =
+    List.find_opt (fun (layer : layer) -> layer.outer_layer_id = Some target_id) layers
+
+  let validate_action_shape facade_effect (layer : layer) (operation : operation) =
+    match layer.outer_layer_id with
+    | Some outer -> (
+        match operation.action with
+        | [ Forward target ]
+          when target.layer_id = outer && Hash.equal target.operation_id operation.operation_id ->
+            []
+        | _ ->
+            [
+              diagnostic operation.meta "E1407"
+                (Printf.sprintf
+                   "non-leaf layer %d must forward this exact facade operation once to declared \
+                    outer layer %d"
+                   layer.layer_id outer);
+            ])
+    | None ->
+        if
+          operation.action <> []
+          && List.for_all (function Raw _ -> true | Forward _ -> false) operation.action
+          && not
+               (List.exists
+                  (function
+                    | Raw { effect_id; _ } -> Hash.equal effect_id facade_effect
+                    | Forward _ -> false)
+                  operation.action)
+        then []
+        else
+          [
+            diagnostic operation.meta "E1407"
+              (Printf.sprintf
+                 "outer leaf layer %d must terminate in nonempty raw actions outside the facade \
+                  effect"
+                 layer.layer_id);
+          ]
+
+  let validate_lineage layers (layer : layer) (operation : operation) =
+    match source_layer layers layer.layer_id with
+    | None -> (
+        match operation.lineage with
+        | Original -> []
+        | Unchanged_forward _ | Transformed_forward _ ->
+            [ diagnostic operation.meta "E1411" "the inner root layer must carry Original lineage" ]
+        )
+    | Some source -> (
+        match
+          List.find_opt
+            (fun (candidate : operation) ->
+              Hash.equal candidate.operation_id operation.operation_id)
+            source.operations
+        with
+        | None ->
+            [
+              diagnostic operation.meta "E1411"
+                "forwarded call lineage has no matching operation in the immediate inner layer";
+            ]
+        | Some previous -> (
+            let previous_id = previous.call.carried in
+            let current_id = operation.call.carried in
+            if Hash.equal previous_id current_id then
+              match operation.lineage with
+              | Unchanged_forward { previous_call_id; current_call_id }
+                when Hash.equal previous_call_id previous_id
+                     && Hash.equal current_call_id current_id ->
+                  []
+              | Original | Unchanged_forward _ | Transformed_forward _ ->
+                  [
+                    diagnostic operation.meta "E1411"
+                      "unchanged forwarding must directly bind the immediate inner Call ID to the \
+                       identical current Call ID";
+                  ]
+            else
+              match operation.lineage with
+              | Transformed_forward { previous_call_id; current_call_id; parent_call_id }
+                when Hash.equal previous_call_id previous_id
+                     && Hash.equal current_call_id current_id
+                     &&
+                     match parent_call_id with
+                     | Some parent -> Hash.equal previous_id parent
+                     | None -> false ->
+                  []
+              | Original | Unchanged_forward _ | Transformed_forward _ ->
+                  [
+                    diagnostic operation.meta "E1411"
+                      "transformed forwarding must directly bind the immediate inner Call ID as \
+                       parent of the current Call ID";
+                  ]))
+
+  let validate_proposal (operation : operation) =
+    let proposal = operation.proposal in
+    let complete =
+      match (proposal.call_id, proposal.policy_id, proposal.assessment_id, proposal.authority) with
+      | Some call_id, Some policy_id, Some assessment_id, Some authority ->
+          Hash.equal call_id operation.call.carried
+          && Hash.equal policy_id operation.bound_policy.carried
+          && Hash.equal assessment_id operation.assessment.carried
+          && authority_lists_equal authority operation.frozen_authority
+      | _ -> false
+    in
+    if complete then []
+    else
+      [
+        diagnostic proposal.meta "E1410"
+          "Ask proposal must bind the exact Call, BoundPolicy, assessment, and frozen authority";
+      ]
+
+  let validate_authorities vocabulary layers (layer : layer) (operation : operation) =
+    let controls =
+      [ vocabulary.state; vocabulary.judge; vocabulary.governance_approval; vocabulary.audit ]
+    in
+    let diagnostics = ref [] in
+    let add code cause = diagnostics := !diagnostics @ [ diagnostic operation.meta code cause ] in
+    let rec expand visiting = function
+      | [] -> []
+      | Raw { effect_id; resources } :: rest ->
+          if List.exists (Hash.equal effect_id) controls then
+            add "E1408"
+              (Printf.sprintf "gate-control effect #%s occurs inside the action" (hex effect_id));
+          if Hash.equal effect_id vocabulary.eval then
+            add "E1412" "Eval is prohibited inside a governed action";
+          List.iter
+            (function
+              | Resource resource when not (Hash.equal resource.effect_id effect_id) ->
+                  add "E1407" "configured Resource evidence must refine its action Effect identity"
+              | Effect _ ->
+                  add "E1407"
+                    "raw action resources may contain only Resource evidence, not another Effect"
+              | Resource _ -> ())
+            resources;
+          (Effect effect_id :: resources) @ expand visiting rest
+      | Forward target :: rest -> (
+          if List.exists (key_equal target) visiting then (
+            add "E1407"
+              (Printf.sprintf "action forwarding cycle reaches layer %d facade operation #%s"
+                 target.layer_id (hex target.operation_id));
+            expand visiting rest)
+          else
+            match find_operation layers target with
+            | Some target_operation ->
+                expand (target :: visiting) target_operation.action @ expand visiting rest
+            | None ->
+                add "E1407"
+                  (Printf.sprintf "action forwards through unknown layer %d facade operation #%s"
+                     target.layer_id (hex target.operation_id));
+                expand visiting rest)
+    in
+    let start = { layer_id = layer.layer_id; operation_id = operation.operation_id } in
+    let projected = expand [ start ] operation.action in
+    let compare label actual =
+      if not (authority_lists_equal operation.frozen_authority actual) then
+        add "E1407"
+          (Printf.sprintf "%s authority %s does not equal frozen envelope %s" label
+             (show_authorities actual)
+             (show_authorities operation.frozen_authority))
+    in
+    compare "Call" operation.call_authority;
+    compare "Proposal" operation.proposal_authority;
+    compare "transitive action" projected;
+    !diagnostics
+
+  let validate_operation store checker vocabulary facade_effect layers (layer : layer)
+      (operation : operation) =
+    let diagnostics = ref [] in
+    let add values = diagnostics := !diagnostics @ values in
+    List.iter
+      (fun (label, claim) ->
+        match identity_diagnostic label claim with None -> () | Some value -> add [ value ])
+      [
+        ("Call", operation.call);
+        ("BoundPolicy", operation.bound_policy);
+        ("assessment", operation.assessment);
+        ("Proposal", operation.proposal.identity);
+      ];
+    add
+      (check_pure_term checker ~result_type:vocabulary.result_type
+         ~expected_result:vocabulary.governance_call
+         ~expected_name:"GovernanceCall or Result _ GovernanceCall" ~allow_result:true
+         operation.normalizer);
+    add
+      (check_pure_term checker ~result_type:vocabulary.result_type
+         ~expected_result:vocabulary.outcome_summary ~expected_name:"GovernanceOutcomeSummary"
+         ~allow_result:false operation.summarizer);
+    if not (reachable_term_ref store ~start:operation.normalizer.hash ~target:vocabulary.make_call)
+    then
+      add
+        [
+          diagnostic operation.normalizer.meta "E1406"
+            (operation.normalizer.label
+           ^ " must reach the canonical governance.make-call constructor");
+        ];
+    if reachable_term_ref store ~start:operation.normalizer.hash ~target:vocabulary.debug_inspect
+    then
+      add
+        [
+          diagnostic operation.normalizer.meta "E1409"
+            "call normalizers must not use generic debug.inspect";
+        ];
+    if reachable_term_ref store ~start:operation.summarizer.hash ~target:vocabulary.debug_inspect
+    then
+      add
+        [
+          diagnostic operation.summarizer.meta "E1409"
+            "outcome summarizers must not use generic debug.inspect";
+        ];
+    let serialized =
+      operation.serialized_call_data @ operation.proposal.serialized
+      @ [
+          operation.call.canonical_subject;
+          operation.bound_policy.canonical_subject;
+          operation.assessment.canonical_subject;
+          operation.proposal.identity.canonical_subject;
+        ]
+    in
+    if List.exists (form_contains_secret vocabulary.secret_constructor) serialized then
+      add
+        [
+          diagnostic operation.meta "E1409"
+            "governance review data may serialize SecretRef values but never an opaque Secret value";
+        ];
+    add (validate_action_shape facade_effect layer operation);
+    add (validate_authorities vocabulary layers layer operation);
+    add (validate_proposal operation);
+    add (validate_flows vocabulary `Live operation.meta operation.live_flows);
+    add (validate_lineage layers layer operation);
+    !diagnostics
+
+  let validate_sequence layers sequence =
+    let base = validate_sequence sequence in
+    if List.length sequence.layer_tokens = List.length layers then base
+    else
+      base
+      @ [
+          diagnostic sequence.meta "E1404"
+            "the sequence token inventory must contain exactly one token use per membrane layer";
+        ]
+
+  let verify store (contract : contract) =
+    let environment =
+      match (resolve_vocabulary store contract.meta, make_checker store) with
+      | Ok vocabulary, Ok checker -> Ok (vocabulary, checker)
+      | Error diagnostic, Ok _ -> Error [ diagnostic ]
+      | Ok _, Error diagnostics -> Error diagnostics
+      | Error diagnostic, Error diagnostics -> Error (diagnostic :: diagnostics)
+    in
+    match environment with
+    | Error diagnostics -> Error diagnostics
+    | Ok (vocabulary, checker) -> (
+        let diagnostics = ref [] in
+        let add values = diagnostics := !diagnostics @ values in
+        if not (String.equal contract.version version) then
+          add
+            [
+              diagnostic contract.meta "E1400"
+                (Printf.sprintf "unsupported governance verifier IR `%s`; expected `%s`"
+                   contract.version version);
+            ];
+        add (validate_facade store contract);
+        add (validate_topology contract);
+        add (validate_sequence contract.layers contract.sequence);
+        if List.exists (Hash.equal vocabulary.eval) contract.governed_reachable_effects then
+          add
+            [
+              diagnostic contract.meta "E1412"
+                "governed body reaches Eval, including effects discharged by an inner handler";
+            ];
+        List.iter
+          (fun (layer : layer) ->
+            List.iter
+              (fun operation ->
+                add
+                  (validate_operation store checker vocabulary contract.facade_effect
+                     contract.layers layer operation))
+              layer.operations)
+          contract.layers;
+        match !diagnostics with
+        | _ :: _ as diagnostics -> Error diagnostics
+        | [] ->
+            Ok
+              {
+                version = contract.version;
+                facade_effect = contract.facade_effect;
+                operations =
+                  List.concat_map
+                    (fun (layer : layer) ->
+                      List.map
+                        (fun (operation : operation) ->
+                          {
+                            layer_id = layer.layer_id;
+                            operation_id = operation.operation_id;
+                            authority = operation.frozen_authority;
+                            call_id = operation.call.carried;
+                            proposal_id = operation.proposal.identity.carried;
+                          })
+                        layer.operations)
+                    contract.layers;
+              })
+end

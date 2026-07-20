@@ -99,7 +99,7 @@ real evaluator root handlers. It pins:
 - refusal of `Completed` is surfaced after the raw action and makes no rollback
   claim.
 
-The current successor inventory is 767 compiled Alcotest/QCheck cases, 44 cram
+The current successor inventory is 775 compiled Alcotest/QCheck cases, 44 cram
 transcripts, and 27 documentation examples across 8 documents.
 
 ## Exclusions

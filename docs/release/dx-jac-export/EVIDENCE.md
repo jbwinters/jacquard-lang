@@ -6,7 +6,7 @@ artifacts and are not retroactively updated by DX.2.
 
 ## Current inventory
 
-- Alcotest/QCheck cases: `767`
+- Alcotest/QCheck cases: `775`
 - Cram transcript files: `44`
 - Doctest examples: `27` across 8 documents
 
@@ -24,6 +24,8 @@ restart recovery, authorization, and process/Domain consumption races.
 GM.13B adds eight compiled approval-bridge cases covering frozen Store
 identities, guarded routing, exact runtime/Code conversion, Audit order,
 reviewer races, replay, and concurrent at-most-once resumption.
+GM.12A adds eight compiled layer-aware governance-verifier cases covering
+qualified same-operation forwarding, topology, lineage, authority, and tokens.
 
 ## Proved behavior
 
