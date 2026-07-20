@@ -62,6 +62,8 @@ assertion, exit codes included.
   identical: g36-audit-code-render (exit 0)
   identical: g37-approval-binding (exit 0)
   identical: g38-governance-authority (exit 0)
+  identical: g39-once-clause-forward (exit 0)
+  identical: g40-once-deep-reenter (exit 0)
 
 Opaque host values are the exception to the public direct-member carrier: their
 marker identity is absent from the store's derived-hash index, so the checker and

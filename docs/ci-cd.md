@@ -29,6 +29,30 @@ _build/default/bin/main.exe --version
 The `dune fmt` plus `git diff --exit-code` pair is deliberate: if formatting
 auto-promotes anything, CI fails and prints the diff.
 
+## GM.12B Exhaustive Forwarding Evidence
+
+The reusable Workspace forwarding membrane has a separate required check:
+
+- `CI / GM12B exhaustive forwarding evidence`
+
+It runs the full 50,000-case grid through two real forwarding handlers and a
+hermetic leaf, then byte-compares the result with the checked-in transcript.
+The proof is kept out of ordinary `dune runtest` because its exhaustive runtime
+would make the development loop unresponsive; it remains mandatory and cannot
+silently degrade into a sampled test. The job retains the actual transcript as
+an artifact and has a 120-minute fail-closed timeout. Pull requests outside its
+semantic dependency closure take a successful no-op path; pushes to `main` and
+`release/**` always rerun the proof.
+
+Local equivalent:
+
+```sh
+eval "$(opam env)"
+mkdir -p "$PWD/.scratch/tmp"
+export TMPDIR="$PWD/.scratch/tmp"
+opam exec -- dune build @test/cli/gm12b-evidence --force
+```
+
 ## Release Evidence
 
 Workflow: `.github/workflows/release-evidence.yml`
@@ -108,12 +132,14 @@ For `main`:
 
 - require pull requests before merging
 - require `CI / Development gate`
+- require `CI / GM12B exhaustive forwarding evidence`
 - require branches to be up to date before merging
 - dismiss stale approvals when new commits are pushed
 
 For `release/**`:
 
 - require `CI / Development gate`
+- require `CI / GM12B exhaustive forwarding evidence`
 - require `Release Evidence / Reproduce 0.1 evidence`
 - restrict changes to correctness, reproducibility, documentation, and demos
 
@@ -132,6 +158,7 @@ Before opening an ordinary PR:
 eval "$(opam env)"
 opam exec -- dune build @all
 opam exec -- dune runtest
+opam exec -- dune build @test/cli/gm12b-evidence --force
 opam exec -- dune fmt
 git diff --exit-code
 ```

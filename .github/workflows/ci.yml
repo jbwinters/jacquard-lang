@@ -70,6 +70,65 @@ jobs:
           test -f docs/release/0.1/RELEASE-NOTES.md
           test -x scripts/release/smoke-installer.sh
 
+  gm12b-exhaustive:
+    name: GM12B exhaustive forwarding evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Determine evidence scope
+        id: scope
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" != "pull_request" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD | grep -Eq \
+            '^(src/|bin/|prelude/|\.github/workflows/ci\.yml$|\.tool-versions$|dune-project$|dune-workspace[^/]*$|[^/]+\.opam$|test/dune$|test/cli/dune$|test/cli/workspace-forward-laws\.(jqd|expected)$|scripts/release/check-gm12b-exhaustive\.sh$|docs/release/governed-membranes/GM12B-(EVIDENCE\.md|MANIFEST\.sha256)$)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Report unrelated change
+        if: steps.scope.outputs.run != 'true'
+        run: echo "GM.12B semantic dependency closure is unchanged; exhaustive evidence remains valid."
+
+      - name: Prepare temporary storage
+        if: steps.scope.outputs.run == 'true'
+        run: |
+          mkdir -p "$TMPDIR"
+          scripts/check-temp-policy.sh
+
+      - name: Set up OCaml
+        if: steps.scope.outputs.run == 'true'
+        uses: ocaml/setup-ocaml@v3.6.1
+        with:
+          ocaml-compiler: ${{ env.OCAML_COMPILER }}
+
+      - name: Install dependencies
+        if: steps.scope.outputs.run == 'true'
+        run: opam install --deps-only . --with-test -y
+
+      - name: Verify exhaustive forwarding evidence
+        if: steps.scope.outputs.run == 'true'
+        run: |
+          GM12B_EVIDENCE_OUT="$PWD/.scratch/evidence/gm12b/workspace-forward-laws.actual" \
+            opam exec -- dune build @test/cli/gm12b-evidence --force
+
+      - name: Upload exhaustive transcript
+        if: always() && steps.scope.outputs.run == 'true'
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: gm12b-exhaustive-${{ github.run_number }}
+          if-no-files-found: warn
+          include-hidden-files: true
+          path: .scratch/evidence/gm12b/workspace-forward-laws.actual
+
   native-parity:
     name: Native parity (${{ matrix.cc }})
     runs-on: ubuntu-latest

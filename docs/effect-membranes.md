@@ -541,6 +541,19 @@ hidden driver setting would not be bound to reviewer consent. Raw Fs/Net/Secret
 handler failures also remain runtime failures because those released
 operations do not return `Result`.
 
+Implementation status (GM.12B): `prelude/28-workspace-forward.jqd` ships the
+reusable non-leaf live membrane. `workspace.forward-layer` has no raw driver
+dependency: after its gate authorizes an operation, it re-performs the exact
+same Workspace operation with unchanged arguments into the next outer handler,
+records a `"forwarded"` completion, and consumes its affine continuation once.
+Every nested layer receives the same `AuditSequence`; only the outer
+`workspace.live-layer` terminates the chain in `Fs`, `Net`, and `Secret`.
+Compiled tests pin exact dependency boundaries, all three operations,
+attenuating refusal and approval behavior, completion-failure honesty, and
+contiguous shared sequencing. Warp also executes two real forwarding layers
+for every combination in the frozen finite GM.4 policy grid: 50,000 terminal
+cases.
+
 Implementation status (GM.7): `prelude/24-governance-approval.jqd` adds the
 versioned `GovernanceApprovalV1` boundary over the canonical
 `GovernanceProposal`, leaving ET.6 `Approval(Proposal)` hash-for-hash unchanged.
@@ -816,6 +829,14 @@ workspace.live :
   , WorkspaceSimulators
   , () ->{Workspace | e} a
   ) ->{Judge, GovernanceApprovalV1, Audit, Fs, Net, Secret | e} a
+
+workspace.forward-layer :
+  forall a | e.
+  ( AuditSequence
+  , BoundPolicy LivePolicy
+  , WorkspaceSimulators
+  , () ->{Workspace | e} a
+  ) ->{State, Judge, GovernanceApprovalV1, Audit, Workspace | e} a
 ```
 
 The shipped v0 dry layer exposes `State` only to its owner:
@@ -1240,10 +1261,19 @@ This is the same two-level identity move the package manager uses for implementa
 
 Jacquard’s handler semantics make layered governance unusually clean. An operation-clause body runs outside the handler that caught the operation. Therefore re-performing the same facade operation from the clause forwards it to the next outer membrane rather than recursing into the current one.
 
-An inner project policy can allow a call and forward it to an outer company policy:
+An inner project policy can allow a call and forward it to an outer company
+policy. The shipped composition has one sequence owner and one raw leaf:
 
-This is a partial forwarding equation; it intentionally omits carrier and gate
-definitions and is not a standalone surface program.
+```text
+governance.with-sequence(fn sequence ->
+  workspace.live-layer(sequence, host-policy, simulators, fn () ->
+    workspace.forward-layer(sequence, company-policy, simulators, fn () ->
+      workspace.forward-layer(sequence, project-policy, simulators, body))))
+```
+
+The implementation of each forwarding clause follows this equation. It is
+shown as pseudocode because the complete bootstrap carrier spelling lives in
+`prelude/28-workspace-forward.jqd`.
 
 ```text
 project-layer(sequence, policy, body) =
@@ -1268,9 +1298,6 @@ project-layer(sequence, policy, body) =
       }
   }
 
-governance.with-sequence(fn (sequence) ->
-  company-layer(sequence, company-policy, fn () ->
-    project-layer(sequence, project-policy, body)))
 ```
 
 The `workspace.write-file(...)` action forwards because it executes in the
@@ -1287,11 +1314,13 @@ This gives four properties without a separate policy-composition engine:
 * **Replaceable organizations.** Project, tenant, company, and host policies are ordinary nested handlers, not one global ruleset.
 
 Unchanged forwarding reconstructs the exact same `Call`, including authority
-and `parent-call-id`, so its call ID is stable across layers. A layer that
-rewrites arguments is not merely a policy layer: it creates a new `Call`, sets
-`parent-call-id = Some(previous-call-id)`, and recomputes the ID. The call
-artifact and audit evidence thereby carry explicit lineage. Silent mutation or
-changing the authority envelope while retaining the old call ID is forbidden.
+and `parent-call-id`, so its call ID is stable across layers. GM.12B deliberately
+does not accept an argument transformer. A future layer that rewrites arguments
+would need a new `Call`, a recomputed ID, and
+`parent-call-id = Some(previous-call-id)`. The current Workspace normalizers
+cannot produce that lineage honestly, so transformed forwarding remains
+deferred. Silent mutation or changing the authority envelope while retaining
+the old call ID is forbidden.
 
 ## 12. Static verification and tooling
 
@@ -1308,7 +1337,7 @@ The type checker proves the broad boundary; a governance verifier checks the cro
 
 ### 12.2 Governance verifier
 
-A `jac governance check` pass, or an equivalent checker lane, verifies:
+The versioned governance verifier analysis checks:
 
 * `Call.authority` and `Proposal.authority` equal the operation's frozen raw-authority envelope;
 * transitive expansion of the call-specific live/forward action produces that same envelope;
@@ -1358,7 +1387,20 @@ unknown targets, incomplete coverage, and raw actions above the leaf fail
 closed. Adjacent layers must carry direct unchanged or transformed Call
 lineage, and the single sequence-token inventory must contain exactly one use
 per layer. V1 currently describes live chains only; the reusable forwarding
-handler and its runtime monotonicity evidence remain GM.12B work.
+handler and runtime monotonicity evidence are supplied by GM.12B.
+
+Implementation status (GM.12B): the runtime layer realizes V1's unchanged
+same-operation topology and has no raw, live-leaf, or private sequence-owner
+dependency. Its exhaustive law constructs and binds both policies through the
+public smart constructors, auto-approves only the exact Proposal ID, and proves
+that the hermetic leaf succeeds exactly when both layer verdicts are Allow or
+Ask across all 50,000 finite combinations.
+
+This is not yet automatic end-to-end source verification. `Governance_verify.V1`
+consumes trusted analysis IR; there is no artifact extractor or
+`jac governance check` command tying `prelude/28-workspace-forward.jqd` to a V1
+contract. That extractor/CLI integration remains a release gate before the
+project markets production governance as automatically verified.
 
 ### 12.3 Offline run-bundle verification
 
@@ -1535,10 +1577,10 @@ retained in the source tree.
 ### Handler and world properties
 
 GM.4 deliberately added no handler, world-test, live driver, simulator driver,
-or audit orchestration. GM.6, GM.7, GM.10, GM.11, GM.12A, and GM.13 now provide
-the gate, dry/live Workspace, layer-aware static verifier, and approval evidence
-for the applicable properties; the nested forwarding runtime remains GM.12B
-work.
+or audit orchestration. GM.6, GM.7, GM.10, GM.11, GM.12A, GM.12B, and GM.13 now
+provide the gate, dry/live Workspace, nested unchanged forwarding,
+layer-aware static verifier, and approval evidence for the applicable
+properties.
 
 * `Allow` invokes the live driver exactly once and resumes exactly once.
 * `Block`, `Denied`, `Escalate`, and `NoSimulation` invoke it zero times.

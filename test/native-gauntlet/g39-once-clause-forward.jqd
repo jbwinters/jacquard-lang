@@ -1,0 +1,12 @@
+; GM.12B twin: a clause-body perform of the same Once operation escapes to
+; the outer handler; both dynamically captured resumptions are consumed once.
+(defeffect linear () (op signal once () (tref int)))
+
+(handle
+  (handle (app (var signal))
+    (ret (pvar x) (var x))
+    (opclause signal () inner-k
+      (app (var inner-k) (app (var signal)))))
+  (ret (pvar x) (var x))
+  (opclause signal () outer-k
+    (app (var outer-k) (lit 17))))

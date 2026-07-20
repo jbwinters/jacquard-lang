@@ -343,6 +343,14 @@ same handler. The operation-clause body itself runs outside that handler, so
 performing the same operation directly in its own clause forwards outward.
 The return clause also runs outside the completed handled region.
 
+For governed Workspace code, use the shipped
+`workspace.forward-layer(sequence, policy, simulators, body)` for that pattern.
+It forwards only the exact same once-mode Workspace operation and unchanged
+arguments, shares the caller's `AuditSequence`, and retains `Workspace` rather
+than introducing raw authority. Put one `workspace.live-layer` outside the
+forwarding chain to terminate it in real drivers. Do not create another
+sequence owner inside a layer or infer support for argument transforms.
+
 Use `resume _` when a clause deliberately never resumes:
 
 ```jacquard

@@ -41,6 +41,7 @@ let () =
       ("workspace", Test_workspace.suite);
       ("workspace-dry-run", Test_workspace_dry_run.suite);
       ("workspace-live", Test_workspace_live.suite);
+      ("workspace-forward", Test_workspace_forward.suite);
       ("governance-verify", Test_governance_verify.suite);
       ("governance-verify-v1", Test_governance_verify_v1.suite);
       ("governance-run-bundle", Test_governance_run_bundle.suite);

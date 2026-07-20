@@ -1,0 +1,15 @@
+; GM.12B twin: resuming the first forwarded Once request reinstalls the deep
+; inner handler, so the second sequential request is a fresh affine capture.
+(defeffect linear () (op signal once () (tref int)))
+
+(app (var emit.collect)
+  (lam ()
+    (handle
+      (handle (tuple (app (var signal)) (app (var signal)))
+        (ret (pvar x) (var x))
+        (opclause signal () inner-k
+          (app (var inner-k) (app (var signal)))))
+      (ret (pvar x) (var x))
+      (opclause signal () outer-k
+        (let nonrec (pwild) (app (var emit) (lit 1))
+          (app (var outer-k) (lit 7)))))))

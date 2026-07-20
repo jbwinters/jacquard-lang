@@ -174,6 +174,9 @@ Read these together when judging whether the release candidate is credible:
 - `release/governed-membranes/GM12A-EVIDENCE.md`: additive layer-aware
   governance verifier, same-operation forwarding across qualified membrane
   layers, direct Call lineage, linear topology, and fail-closed authority evidence.
+- `release/governed-membranes/GM12B-EVIDENCE.md`: reusable unchanged-argument
+  Workspace forwarding membrane, shared audit sequencing, affine same-op
+  handler evidence, native twins, and the exhaustive 50,000-case attenuation law.
 - `release/governed-membranes/GM13A-EVIDENCE.md`: crash-safe single-use
   approval queue host core, canonical record/commit framing, authenticated
   actor rules, restart recovery, race evidence, and the explicit GM.13B bridge
@@ -198,6 +201,8 @@ Read these together when judging whether the release candidate is credible:
   overlay on exact integrated base `ec92748`.
 - `release/governed-membranes/GM12A-MANIFEST.sha256`: reconstructible GM.12A
   verifier foundation on exact GM.11 base `79645e9`.
+- `release/governed-membranes/GM12B-MANIFEST.sha256`: reconstructible GM.12B
+  runtime overlay on exact GM.12A base `a1b4015`.
 
 ## Maintenance Notes
 

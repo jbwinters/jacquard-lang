@@ -1,0 +1,2 @@
+PASS workspace-forward-attenuation/nested Workspace policies only attenuate (verified exhaustively (50000 cases))
+1 passed, 0 failed, 0 skipped, 0 refused
