@@ -1343,7 +1343,7 @@ The versioned governance verifier analysis checks:
 * transitive expansion of the call-specific live/forward action produces that same envelope;
 * the gate-owned `Judge`, `GovernanceApprovalV1`, and `Audit` effects and the locally consumed continuation are outside the action projection; no effect inside the action is silently excluded;
 * every facade operation has both a live clause and a dry-run clause;
-* every clause obtains a canonical disposition before invoking a driver; action and simulation paths record completion before consuming their local `Resume`, while refusal paths consume `Resume` after the pre-action `Evaluated` entry and do not fabricate a `Completed` entry;
+* every clause obtains a canonical disposition before invoking a driver; action and simulation paths record completion before consuming their local `Resume`; dry Block and missing-simulation refusals record a no-action `Completed` entry before consuming `Resume`, while live refusals consume it after the pre-action `Evaluated` entry without fabricating `Completed`;
 * one `with-sequence` owner surrounds every set of nested layers that publishes one audit stream, and every such layer receives the owner's exact token;
 * summaries and outcome renderers have closed pure rows at every nested arrow and return the canonical outcome-summary type;
 * call normalizers have closed pure rows at every nested arrow, return the canonical Call result shape, and are hash-stable;
@@ -1632,7 +1632,17 @@ computations at this boundary.
 
 ### Fault and replay lanes
 
-`fault.all` explores audit-write failure, approval-service failure, simulator failure, driver failure, and completion-write failure at each call site. The record/replay lane pins the exact interaction sequence among `Judge`, `Audit`, `GovernanceApprovalV1`, and raw effects. Native and interpreter executions must remain byte-identical for all flagship cases.
+`fault.all` explores audit-write failure, approval-service failure, typed simulator error, driver failure, and completion-write failure at each call site. The record/replay lane pins the exact interaction sequence among `Judge`, `Audit`, `GovernanceApprovalV1`, and raw effects. Native and interpreter executions must remain byte-identical for all flagship cases.
+
+Implementation status (GM.15): the closed Warp lane covers 349 reachable sites
+with healthy/hostile plans for 698 exact paths. `S-Err` is the frozen typed
+simulator result and continues; only J/E/A/K/D/C failures stop. Compiled
+evidence separately injects real interpreter host failures and strictly replays
+eight healthy shapes while refusing drift before raw work.
+`g41-governance-fault-plan.jqd` pins closed J/E/D/C native parity. GM.15 factors
+secret non-disclosure through GM.11's non-vacuous driver proof. It adds no
+production fault seam, retry, compensation, rollback, `ToolError`, carrier,
+operation, pure-simulator `Runtime_err`, or native-host claim.
 
 The demo’s acceptance statement should be stronger than “the policy seems to work”:
 
@@ -1727,7 +1737,7 @@ silently change a v0 assessment or policy decision.
 | D66 | simulation        | simulator is explicit and pure at the gate; missing simulation refuses and never falls back live                                                           |
 | D67 | identity          | call ID binds resolved operation, arguments, transitive raw-authority envelope, preconditions, and optional parent call; proposal ID binds call, policy, assessment, the same envelope, preview, rendering, and summary |
 | D68 | authority claims  | each facade operation freezes a raw envelope; transitive expansion of its live/forward action must equal both authority lists; only gate-owned governance control effects and continuation `e` sit outside the action; resources are configured evidence, never row proofs |
-| D69 | audit ordering    | one `with-sequence` owner and `AuditSequence` token span every operation and nested layer in a published stream; the counter starts at zero and rejects duplicate, skipped, or decreasing values; `Evaluated` and `Consented` precede action and `Completed` follows it |
+| D69 | audit ordering    | one `with-sequence` owner and `AuditSequence` token span every operation and nested layer in a published stream; the counter starts at zero and rejects duplicate, skipped, or decreasing values; `Evaluated` precedes any action or simulation, `Consented` records exact approval decisions and precedes an Approved action, and `Completed` records each live action or dry outcome, including a no-action dry refusal |
 | D70 | secret handling   | calls carry versioned `SecretRef` values, never secret material; resolution happens only inside an allowed live driver                                      |
 | D71 | composition       | unchanged re-performance preserves the Call and call ID; transformed calls bind `parent-call-id` and get a new ID; transitive envelopes make intermediate and leaf authority agree; nesting may only tighten |
 | D72 | uncertainty       | under-confidence never auto-allows; posterior risk is a later explicit phase, not hidden inside v0 policy                                                  |

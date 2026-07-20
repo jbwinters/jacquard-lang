@@ -6,8 +6,8 @@ artifacts and are not retroactively updated by DX.2.
 
 ## Current inventory
 
-- Alcotest/QCheck cases: `781`
-- Cram transcript files: `44`
+- Alcotest/QCheck cases: `783`
+- Cram transcript files: `45`
 - Doctest examples: `27` across 8 documents
 
 The test count includes six DX.2 filesystem-boundary cases and six DX.5/DX.7
@@ -29,6 +29,8 @@ qualified same-operation forwarding, topology, lineage, authority, and tokens.
 GM.12B adds four compiled Workspace-forwarding cases and two Once same-op
 handler cases. The native differential loop also gains two standalone twins;
 the existing cram transcript count is unchanged.
+GM.15 adds two hostile-boundary/replay cases and one exhaustive 698-path
+transcript; its native differential twin is closed and deterministic.
 
 ## Proved behavior
 

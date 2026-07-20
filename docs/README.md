@@ -195,6 +195,11 @@ Read these together when judging whether the release candidate is credible:
   execution and rollback exclusions.
 - `release/governed-membranes/GM14-MANIFEST.sha256`: reconstructible GM.14B
   overlay on exact integrated GM.14A base `23949d0`.
+- `release/governed-membranes/GM15-EVIDENCE.md`: GM.15 immutable 698-path
+  hostile-world matrix, real interpreter boundary failures, strict healthy
+  replay shapes, adversarial drift refusal, and closed native parity.
+- `release/governed-membranes/GM15-MANIFEST.sha256`: reconstructible
+  evidence-only GM.15 overlay on exact integrated base `bed0adb`.
 - `release/governed-membranes/GM10-MANIFEST.sha256`: reconstructible GM.10
   overlay on exact integrated GM.8/GM.9 base `df37a15`.
 - `release/governed-membranes/GM11-MANIFEST.sha256`: reconstructible GM.11

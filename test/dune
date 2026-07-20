@@ -93,6 +93,7 @@
   ../corpus/governance/malformed-operation-names.tsv
   ../corpus/governance/unresolved-operations.tsv
   ../corpus/governance/verifier-cases-v0.tsv
+  ../corpus/governance/gm15-healthy-traces-v0.tsv
   (glob_files_rec ../corpus/*.expect)
   (glob_files_rec ../corpus/*.golden)
   (glob_files_rec ../prelude/*.jqd)
@@ -132,6 +133,8 @@
   ../docs/release/governed-membranes/GM12B-MANIFEST.sha256
   ../docs/release/governed-membranes/GM14-EVIDENCE.md
   ../docs/release/governed-membranes/GM14-MANIFEST.sha256
+  ../docs/release/governed-membranes/GM15-EVIDENCE.md
+  ../docs/release/governed-membranes/GM15-MANIFEST.sha256
   ../docs/release/governed-membranes/GM13A-EVIDENCE.md
   ../docs/release/governed-membranes/GM13A-MANIFEST.sha256
   ../docs/release/governed-membranes/GM13B-EVIDENCE.md
