@@ -519,7 +519,27 @@ the handled dry run derives only `{Judge, Audit | e}`. Executable tests cover
 all three operations, all four risks, missing/success/failing simulators,
 hostile typed failures, exhaustive Fault exploration, exact audit positions,
 and zero raw-world authority. The live facade and raw drivers remain later G2
-work.
+work in the historical GM.10 slice.
+
+Implementation status (GM.11): `prelude/27-workspace-live.jqd` ships the
+identity-preserving live half of the Workspace facade. Its three raw helpers
+have exact rows `{Fs}`, `{Fs}`, and `{Net, Secret}`. `workspace.live-layer`
+normalizes each typed request, obtains a GM.7 disposition, executes no raw
+operation unless it receives `ExecuteLive`, records `Completed`, and consumes
+the clause-local affine continuation once. `workspace.live` owns the one shared
+audit sequence. The unchanged body therefore derives `Workspace`, while the
+public live wrapper derives exactly
+`{Judge, GovernanceApprovalV1, Audit, Fs, Net, Secret | e}`. Fetch resolves and
+exposes the frozen `SecretRef` only inside its allowed raw driver immediately
+before `Net.fetch`; secret bytes never enter review or audit artifacts.
+
+GM.11 preserves GM.9's frozen empty `quote {()}` preconditions and Call
+goldens. It consequently makes no expected-hash/version freshness claim.
+Honest external-state protection requires a later versioned Call/Proposal that
+carries the expected value and an atomic compare-and-act host operation; a
+hidden driver setting would not be bound to reviewer consent. Raw Fs/Net/Secret
+handler failures also remain runtime failures because those released
+operations do not return `Result`.
 
 Implementation status (GM.7): `prelude/24-governance-approval.jqd` adds the
 versioned `GovernanceApprovalV1` boundary over the canonical
@@ -617,8 +637,9 @@ normalization and raw authority local and reviewable.
 The dry half is now executable in the prelude. Because the current surface has
 no record syntax, GM.10 represents `simulators` with the nominal
 `WorkspaceSimulators` carrier and the `workspace.simulators` smart constructor.
-The live half below remains exact design pseudocode for later G2 work. It may
-not reintroduce a second action-row tail or export `Resume`.
+The live half below is the design pseudocode implemented by GM.11. The shipped
+bootstrap definition retains the same disposition flow and may not reintroduce
+a second action-row tail or export `Resume`.
 
 ```text
 once effect Workspace where
@@ -768,8 +789,9 @@ workspace.dry-run(policy, simulators, body) =
 The live fetch action deliberately resolves the ratified `SecretRef` and
 performs both `secret.read` and `secret.expose` before `net.fetch`. The
 provider-neutral match sequences those effects without specifying how any
-particular network provider consumes exposed text; the future live facade must
-supply that detail at its typed driver boundary. The action therefore derives `{Net, Secret}` and
+particular network provider consumes exposed text; the shipped provider-neutral
+live facade deliberately sequences exposure immediately before the typed
+network driver without adding secret material to `Request`. The action therefore derives `{Net, Secret}` and
 matches the frozen `Workspace.fetch` envelope carried by both `Call.authority`
 and `Proposal.authority`. Dry simulators continue to receive only safe request
 data, never `Secret` material, and the pure outcome summarizer receives only
@@ -777,7 +799,7 @@ the typed fetch result.
 
 The important omission from `workspace.dry-run` is the live driver. There is no dead branch containing `fs.write` and no closure whose row mentions `Fs`. The checker, not the policy author’s discipline, proves the rehearsal cannot touch the filesystem or network.
 
-The future v0 live layer and its run-level owner retain these target signatures:
+The shipped v0 live layer and its run-level owner have these signatures:
 
 ```text
 workspace.live-layer :
@@ -1497,8 +1519,10 @@ retained in the source tree.
 
 ### Handler and world properties
 
-These remain future gate/driver work. GM.4 deliberately adds no handler,
-world-test, live driver, simulator driver, or audit orchestration.
+GM.4 deliberately added no handler, world-test, live driver, simulator driver,
+or audit orchestration. GM.6, GM.7, GM.10, GM.11, and GM.13 now provide the
+gate, dry/live Workspace, and approval evidence for the applicable properties;
+nested forwarding remains GM.12 work.
 
 * `Allow` invokes the live driver exactly once and resumes exactly once.
 * `Block`, `Denied`, `Escalate`, and `NoSimulation` invoke it zero times.

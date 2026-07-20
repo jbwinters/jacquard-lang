@@ -1,0 +1,156 @@
+; GM.11 live Workspace membrane. The governed body keeps only Workspace;
+; these trusted drivers introduce the exact raw authority frozen by GM.9.
+; Raw host failures remain runtime failures because the released Fs, Net, and
+; Secret operations do not return Result values.
+
+(defterm
+  ((binding workspace.driver-read
+    ((tarrow
+      ((tref path))
+      (row (eref fs))
+      (tapp (tref result) (tref tool-error) (tref text))))
+    (lam ((pvar path))
+      (match (var path)
+        (clause (pcon path-value (pvar raw))
+          (app (var ok)
+            (app (ref #e930f76cfb749fcd57ecc7280b92560c5e919ece08c744e1602d2c1b1e9202d5 op)
+              (var raw)))))))
+   (binding workspace.driver-write
+    ((tarrow
+      ((tref path) (tref text))
+      (row (eref fs))
+      (tapp (tref result) (tref tool-error) (ttuple))))
+    (lam ((pvar path) (pvar text))
+      (match (var path)
+        (clause (pcon path-value (pvar raw))
+          (let nonrec (pwild) (app (var write) (var raw) (var text))
+            (app (var ok) (tuple)))))))
+   (binding workspace.driver-fetch
+    ((tarrow
+      ((tref request))
+      (row (eref net) (eref secret))
+      (tapp (tref result) (tref tool-error) (tref response))))
+    (lam ((pvar request))
+      (let nonrec (pvar secret-value)
+        (app (ref #2214b83a1c0d6285b15e4fbaca23dfd3803557ed9a0a2653c58dcea6cea4b911 op)
+          (var workspace.secret-reference))
+        (let nonrec (pvar exposed)
+          (app (ref #2e0a5f0ed6edf237726d7e1a4f73c855e0e7e31514a8992df839bc8f8c87d504 op)
+            (var secret-value))
+          (match (var exposed)
+            (clause (pwild)
+              (app (var ok)
+                (app (ref #b75b2bfdb3ce099fdf87cc77c1fe0c38eb3544f0a95ab65d048b331e18fb97df op)
+                  (var request)))))))))))
+
+; Handle an unchanged Workspace body. The gate owns governance control only;
+; each clause owns its raw driver, Completed record, and affine Resume.
+(defterm ((binding workspace.live-layer
+  ((tforall ((tvar a)) ((rvar e))
+    (tarrow
+      ((tref audit-sequence)
+       (tapp (tref bound-policy) (tref live-policy))
+       (tref workspace-simulators)
+       (tarrow () (row (eref workspace) e) (tvar a)))
+      (row
+        (eref state)
+        (eref judge)
+        (eref governance-approval-v1)
+        (eref audit)
+        (eref fs)
+        (eref net)
+        (eref secret)
+        e)
+      (tvar a))))
+  (lam ((pvar sequence) (pvar policy) (pvar simulators) (pvar body))
+    (handle (app (var body))
+      (ret (pvar value) (var value))
+      (opclause #632071e3399c913a672c4bea7d4a8b394e64a9a517552eb296db824222fe2da1
+        ((pvar path)) k
+        (match (app (var workspace.call-read) (var path))
+          (clause (pcon ok (pvar call))
+            (match
+              (app (var governance.gate-live)
+                (var sequence) (var policy) (var call)
+                (app (var workspace.read-simulation)
+                  (var simulators) (var path))
+                (var workspace.summarize-read))
+              (clause (pcon execute-live)
+                (let nonrec (pvar result)
+                  (app (var workspace.driver-read) (var path))
+                  (let nonrec (pwild)
+                    (app (var governance.complete)
+                      (var sequence) (var call) (lit "live")
+                      (app (var workspace.summarize-read) (var result)))
+                    (app (var k) (var result)))))
+              (clause (pcon refuse-live (pvar error))
+                (app (var k) (app (var err) (var error))))))
+          (clause (pwild)
+            (app (var k) (app (var err) (var invalid-decision))))))
+      (opclause #73140dde8e33c268fa589d9bfaeb28b156af2da52b22779257b2d3e9b696b03c
+        ((pvar path) (pvar text)) k
+        (match (app (var workspace.call-write) (var path) (var text))
+          (clause (pcon ok (pvar call))
+            (match
+              (app (var governance.gate-live)
+                (var sequence) (var policy) (var call)
+                (app (var workspace.write-simulation)
+                  (var simulators) (var path) (var text))
+                (var workspace.summarize-write))
+              (clause (pcon execute-live)
+                (let nonrec (pvar result)
+                  (app (var workspace.driver-write) (var path) (var text))
+                  (let nonrec (pwild)
+                    (app (var governance.complete)
+                      (var sequence) (var call) (lit "live")
+                      (app (var workspace.summarize-write) (var result)))
+                    (app (var k) (var result)))))
+              (clause (pcon refuse-live (pvar error))
+                (app (var k) (app (var err) (var error))))))
+          (clause (pwild)
+            (app (var k) (app (var err) (var invalid-decision))))))
+      (opclause #f6536683575508ddcc2d5a6509df832e92897cbef2caf34219f993a110079b01
+        ((pvar request)) k
+        (match (app (var workspace.call-fetch) (var request))
+          (clause (pcon ok (pvar call))
+            (match
+              (app (var governance.gate-live)
+                (var sequence) (var policy) (var call)
+                (app (var workspace.fetch-simulation)
+                  (var simulators) (var request))
+                (var workspace.summarize-fetch))
+              (clause (pcon execute-live)
+                (let nonrec (pvar result)
+                  (app (var workspace.driver-fetch) (var request))
+                  (let nonrec (pwild)
+                    (app (var governance.complete)
+                      (var sequence) (var call) (lit "live")
+                      (app (var workspace.summarize-fetch) (var result)))
+                    (app (var k) (var result)))))
+              (clause (pcon refuse-live (pvar error))
+                (app (var k) (app (var err) (var error))))))
+          (clause (pwild)
+            (app (var k) (app (var err) (var invalid-decision)))))))))))
+
+; Run-level owner. State is private to the one shared AuditSequence; all live
+; governance and raw driver authority remains visible to callers.
+(defterm ((binding workspace.live
+  ((tforall ((tvar a)) ((rvar e))
+    (tarrow
+      ((tapp (tref bound-policy) (tref live-policy))
+       (tref workspace-simulators)
+       (tarrow () (row (eref workspace) e) (tvar a)))
+      (row
+        (eref judge)
+        (eref governance-approval-v1)
+        (eref audit)
+        (eref fs)
+        (eref net)
+        (eref secret)
+        e)
+      (tvar a))))
+  (lam ((pvar policy) (pvar simulators) (pvar body))
+    (app (var governance.with-sequence)
+      (lam ((pvar sequence))
+        (app (var workspace.live-layer)
+          (var sequence) (var policy) (var simulators) (var body))))))))

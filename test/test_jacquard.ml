@@ -40,6 +40,7 @@ let () =
       ("governance-gate", Test_governance_gate.suite);
       ("workspace", Test_workspace.suite);
       ("workspace-dry-run", Test_workspace_dry_run.suite);
+      ("workspace-live", Test_workspace_live.suite);
       ("governance-verify", Test_governance_verify.suite);
       ("governance-run-bundle", Test_governance_run_bundle.suite);
       ("governance-reconcile", Test_governance_reconcile.suite);
