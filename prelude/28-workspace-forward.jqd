@@ -1,0 +1,96 @@
+; GM.12B reusable Workspace forwarding membrane. The governed body and this
+; layer both retain only Workspace authority: an executable call is
+; re-performed with byte-for-byte identical arguments into the next outer
+; handler. One surrounding governance.with-sequence owner supplies the shared
+; AuditSequence to every nested layer.
+
+(defterm ((binding workspace.forward-layer
+  ((tforall ((tvar a)) ((rvar e))
+    (tarrow
+      ((tref audit-sequence)
+       (tapp (tref bound-policy) (tref live-policy))
+       (tref workspace-simulators)
+       (tarrow () (row (eref workspace) e) (tvar a)))
+      (row
+        (eref state)
+        (eref judge)
+        (eref governance-approval-v1)
+        (eref audit)
+        (eref workspace)
+        e)
+      (tvar a))))
+  (lam ((pvar sequence) (pvar policy) (pvar simulators) (pvar body))
+    (handle (app (var body))
+      (ret (pvar value) (var value))
+      (opclause #632071e3399c913a672c4bea7d4a8b394e64a9a517552eb296db824222fe2da1
+        ((pvar path)) k
+        (match (app (var workspace.call-read) (var path))
+          (clause (pcon ok (pvar call))
+            (match
+              (app (var governance.gate-live)
+                (var sequence) (var policy) (var call)
+                (app (var workspace.read-simulation)
+                  (var simulators) (var path))
+                (var workspace.summarize-read))
+              (clause (pcon execute-live)
+                (let nonrec (pvar result)
+                  (app
+                    (ref #632071e3399c913a672c4bea7d4a8b394e64a9a517552eb296db824222fe2da1 op)
+                    (var path))
+                  (let nonrec (pwild)
+                    (app (var governance.complete)
+                      (var sequence) (var call) (lit "forwarded")
+                      (app (var workspace.summarize-read) (var result)))
+                    (app (var k) (var result)))))
+              (clause (pcon refuse-live (pvar error))
+                (app (var k) (app (var err) (var error))))))
+          (clause (pwild)
+            (app (var k) (app (var err) (var invalid-decision))))))
+      (opclause #73140dde8e33c268fa589d9bfaeb28b156af2da52b22779257b2d3e9b696b03c
+        ((pvar path) (pvar text)) k
+        (match (app (var workspace.call-write) (var path) (var text))
+          (clause (pcon ok (pvar call))
+            (match
+              (app (var governance.gate-live)
+                (var sequence) (var policy) (var call)
+                (app (var workspace.write-simulation)
+                  (var simulators) (var path) (var text))
+                (var workspace.summarize-write))
+              (clause (pcon execute-live)
+                (let nonrec (pvar result)
+                  (app
+                    (ref #73140dde8e33c268fa589d9bfaeb28b156af2da52b22779257b2d3e9b696b03c op)
+                    (var path) (var text))
+                  (let nonrec (pwild)
+                    (app (var governance.complete)
+                      (var sequence) (var call) (lit "forwarded")
+                      (app (var workspace.summarize-write) (var result)))
+                    (app (var k) (var result)))))
+              (clause (pcon refuse-live (pvar error))
+                (app (var k) (app (var err) (var error))))))
+          (clause (pwild)
+            (app (var k) (app (var err) (var invalid-decision))))))
+      (opclause #f6536683575508ddcc2d5a6509df832e92897cbef2caf34219f993a110079b01
+        ((pvar request)) k
+        (match (app (var workspace.call-fetch) (var request))
+          (clause (pcon ok (pvar call))
+            (match
+              (app (var governance.gate-live)
+                (var sequence) (var policy) (var call)
+                (app (var workspace.fetch-simulation)
+                  (var simulators) (var request))
+                (var workspace.summarize-fetch))
+              (clause (pcon execute-live)
+                (let nonrec (pvar result)
+                  (app
+                    (ref #f6536683575508ddcc2d5a6509df832e92897cbef2caf34219f993a110079b01 op)
+                    (var request))
+                  (let nonrec (pwild)
+                    (app (var governance.complete)
+                      (var sequence) (var call) (lit "forwarded")
+                      (app (var workspace.summarize-fetch) (var result)))
+                    (app (var k) (var result)))))
+              (clause (pcon refuse-live (pvar error))
+                (app (var k) (app (var err) (var error))))))
+          (clause (pwild)
+            (app (var k) (app (var err) (var invalid-decision)))))))))))

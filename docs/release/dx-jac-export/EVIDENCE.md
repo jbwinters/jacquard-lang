@@ -6,7 +6,7 @@ artifacts and are not retroactively updated by DX.2.
 
 ## Current inventory
 
-- Alcotest/QCheck cases: `775`
+- Alcotest/QCheck cases: `781`
 - Cram transcript files: `44`
 - Doctest examples: `27` across 8 documents
 
@@ -26,6 +26,9 @@ identities, guarded routing, exact runtime/Code conversion, Audit order,
 reviewer races, replay, and concurrent at-most-once resumption.
 GM.12A adds eight compiled layer-aware governance-verifier cases covering
 qualified same-operation forwarding, topology, lineage, authority, and tokens.
+GM.12B adds four compiled Workspace-forwarding cases and two Once same-op
+handler cases. The native differential loop also gains two standalone twins;
+the existing cram transcript count is unchanged.
 
 ## Proved behavior
 

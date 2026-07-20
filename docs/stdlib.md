@@ -550,6 +550,26 @@ codepoint count, completion label, or HTTP status. Error summaries use the
 closed `ToolError` label and omit driver detail. They never use
 `debug.inspect` or a generic renderer.
 
+`workspace.dry-layer` and `workspace.live-layer` are the world-free and raw
+leaf membranes. `workspace.forward-layer` is the reusable non-leaf membrane:
+
+```text
+workspace.forward-layer :
+  forall a | e.
+  (AuditSequence, BoundPolicy LivePolicy, WorkspaceSimulators,
+   () ->{Workspace | e} a)
+  ->{State, Judge, GovernanceApprovalV1, Audit, Workspace | e} a
+```
+
+It gates each request, re-performs the identical Workspace operation with
+unchanged arguments, records `Completed(..., "forwarded", ...)`, and resumes
+once. It introduces no `Fs`, `Net`, `Secret`, raw driver, live leaf, or sequence
+owner. Compose any number of forwarding layers inside one
+`governance.with-sequence`, with exactly one outer `workspace.live-layer` when
+real authority is desired. Argument-changing forwarding is not part of this
+API because the current Call builders cannot yet attach truthful parent-call
+lineage.
+
 `Defect`, the pending owner decision D7 from the exhaustiveness discussion, would
 live in this ring as the visible-but-auto-granted channel for invariant violations.
 This document assumes it exists for exactly two library uses so far: `observe` at

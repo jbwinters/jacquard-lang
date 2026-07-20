@@ -38,6 +38,30 @@ let test_nested_same_op_handler_shadows_outer () =
            (opclause choose () k (app (var k) (lit 2)))) (app (var choose))) (ret (pvar x) (var \
            x)) (opclause choose () k (app (var k) (lit 1))))"))
 
+let test_once_clause_same_op_perform_escapes_outward () =
+  let h = Test_handlers.make () in
+  let source =
+    "(handle (handle (app (var signal)) (ret (pvar x) (var x)) "
+    ^ "(opclause signal () inner-k (app (var inner-k) (app (var signal))))) "
+    ^ "(ret (pvar x) (var x)) (opclause signal () outer-k " ^ "(app (var outer-k) (lit 17))))"
+  in
+  Alcotest.(check string)
+    "outer handler catches the inner Once clause perform" "17"
+    (Value.show (Eval_support.eval_ok h source))
+
+let test_once_resumed_continuation_reinstalls_deep_handler () =
+  let h = Test_handlers.make () in
+  let source =
+    "(handle (handle (tuple (app (var signal)) (app (var signal))) "
+    ^ "(ret (pvar x) (var x)) (opclause signal () inner-k "
+    ^ "(app (var inner-k) (app (var signal))))) (ret (pvar x) (var x)) "
+    ^ "(opclause signal () outer-k (app (var outer-k) (app (var bump)))))"
+  in
+  Alcotest.(check string)
+    "each forwarded Once request has an independent affine budget" "(1, 2)"
+    (Value.show (Eval_support.eval_ok h source));
+  Alcotest.(check int) "outer handler sees two dynamic requests" 2 !(h.bumps)
+
 let test_return_clause_is_outside_handled_region () =
   let h = Test_handlers.make () in
   match
@@ -108,6 +132,10 @@ let suite =
       test_resumed_same_op_gives_four_leaves;
     Alcotest.test_case "nested same-op handler shadows outer" `Quick
       test_nested_same_op_handler_shadows_outer;
+    Alcotest.test_case "Once clause same-op perform escapes outward" `Quick
+      test_once_clause_same_op_perform_escapes_outward;
+    Alcotest.test_case "Once resumed continuation reinstalls deep handler" `Quick
+      test_once_resumed_continuation_reinstalls_deep_handler;
     Alcotest.test_case "return clause is outside handled region" `Quick
       test_return_clause_is_outside_handled_region;
     Alcotest.test_case "abort skips pending argument evaluation" `Quick
