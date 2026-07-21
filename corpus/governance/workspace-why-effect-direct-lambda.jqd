@@ -1,0 +1,10 @@
+(defterm
+  ((binding workspace-why-effect-direct-lambda ()
+    (lam ((pvar policy) (pvar simulators))
+      (app (var workspace.live)
+        (var policy) (var simulators)
+        (lam ()
+          (app
+            (lam ()
+              (app (var workspace.read-file)
+                (app (var path-value) (lit "README.md")))))))))))

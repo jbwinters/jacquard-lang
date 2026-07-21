@@ -1,0 +1,15 @@
+(defterm
+  ((binding workspace-why-effect-direct ()
+    (lam ((pvar policy) (pvar simulators))
+      (app (var workspace.live)
+        (var policy) (var simulators)
+        (lam ()
+          (tuple
+            (app (var workspace.read-file)
+              (app (var path-value) (lit "README.md")))
+            (app (var workspace.read-file)
+              (app (var path-value) (lit "README.md")))
+            (app (var workspace.write-file)
+              (app (var path-value) (lit "review.txt")) (lit "reviewed"))
+            (app (var workspace.fetch)
+              (app (var mk-request) (lit "https://example.invalid") (lit ""))))))))))

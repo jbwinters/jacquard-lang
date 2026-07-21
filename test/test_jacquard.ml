@@ -45,6 +45,7 @@ let () =
       ("governance-verify", Test_governance_verify.suite);
       ("governance-verify-v1", Test_governance_verify_v1.suite);
       ("governance-source-check", Test_governance_source_check.suite);
+      ("governance-why-effect", Test_governance_why_effect.suite);
       ("governance-run-bundle", Test_governance_run_bundle.suite);
       ("governance-reconcile", Test_governance_reconcile.suite);
       ("governance-explain", Test_governance_explain.suite);

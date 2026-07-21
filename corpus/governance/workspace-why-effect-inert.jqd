@@ -1,0 +1,23 @@
+(defterm
+  ((binding workspace-why-effect-inert-helper ()
+    (lam ()
+      (app (var workspace.read-file)
+        (app (var path-value) (lit "ref-is-inert")))))
+   (binding workspace-why-effect-inert ()
+    (lam ((pvar policy) (pvar simulators))
+      (app (var workspace.live)
+        (var policy) (var simulators)
+        (lam ()
+          (tuple
+            (var workspace-why-effect-inert-helper)
+            (lam ()
+              (app (var workspace.write-file)
+                (app (var path-value) (lit "lambda-is-inert")) (lit "inert")))
+            (quote
+              (app (var workspace.fetch)
+                (app (var mk-request) (lit "quote-is-inert") (lit ""))))
+            (quote
+              (quote
+                (unquote
+                  (app (var workspace.read-file)
+                    (app (var path-value) (lit "nested-quote-is-inert")))))))))))))

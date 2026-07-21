@@ -1,0 +1,8 @@
+(defterm
+  ((binding workspace-why-effect-dry-ambiguous ()
+    (lam ((pvar policy) (pvar simulators))
+      (app (var workspace.dry-run)
+        (var policy) (var simulators)
+        (lam ()
+          (let nonrec (pvar callable) (lam () (lit "simulated"))
+            (app (var callable)))))))))

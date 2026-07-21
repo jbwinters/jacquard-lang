@@ -1,0 +1,16 @@
+(defterm
+  ((binding workspace-why-effect-ref-leaf ()
+    (lam ()
+      (app (var workspace.read-file)
+        (app (var path-value) (lit "README.md")))))))
+
+(defterm
+  ((binding workspace-why-effect-ref-middle ()
+    (lam () (app (var workspace-why-effect-ref-leaf))))))
+
+(defterm
+  ((binding workspace-why-effect-ref-root ()
+    (lam ((pvar policy) (pvar simulators))
+      (app (var workspace.live)
+        (var policy) (var simulators)
+        (lam () (app (var workspace-why-effect-ref-middle))))))))

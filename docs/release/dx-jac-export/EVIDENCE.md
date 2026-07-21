@@ -6,8 +6,8 @@ artifacts and are not retroactively updated by DX.2.
 
 ## Current inventory
 
-- Alcotest/QCheck cases: `790`
-- Cram transcript files: `47`
+- Alcotest/QCheck cases: `794`
+- Cram transcript files: `48`
 - Doctest examples: `27` across 8 documents
 
 The test count includes six DX.2 filesystem-boundary cases and six DX.5/DX.7
@@ -32,7 +32,9 @@ the existing cram transcript count is unchanged.
 GM.15 adds two hostile-boundary/replay cases and one exhaustive 698-path
 transcript; its native differential twin is closed and deterministic.
 GM.16 adds three canonical Workspace source-verification cases and one public
-governance-check transcript.
+governance-check transcript. GM.17A adds four governance-explanation cases and
+one public explanation transcript. GM.17B adds four static effect-attribution
+cases and one public why-effect transcript.
 
 ## Proved behavior
 

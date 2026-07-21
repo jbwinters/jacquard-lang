@@ -1,0 +1,17 @@
+(defeffect fs ()
+  (op touch once () (ttuple)))
+
+(defterm
+  ((binding workspace-why-effect-same-name ()
+    (lam ((pvar policy) (pvar simulators))
+      (app (var workspace.live)
+        (var policy) (var simulators)
+        (lam ()
+          (handle
+            (tuple
+              (app (var workspace.read-file)
+                (app (var path-value) (lit "README.md")))
+              (app (var touch)))
+            (ret (pvar value) (var value))
+            (opclause touch () continue
+              (tuple (app (var ok) (lit "handled")) (tuple))))))))))

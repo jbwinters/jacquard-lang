@@ -1491,7 +1491,24 @@ the frozen Call identity has no occurrence discriminator.
 
 ### 12.4 Review surfaces
 
-* `jac why-effect Fs` points to the leaf membrane driver that introduces it, not merely to the agent function that requested `Workspace`.
+* `jac why-effect Fs --source FILE` fully applies the GM.16 source gate, then
+  points from exact source-member identities through each reachable Workspace
+  application and ordered forwarding/live membrane identities to the frozen
+  leaf driver and raw effect. It uses application structure rather than an
+  elaborated-row provenance hint, follows only exact source refs, GroupRefs,
+  and direct lambdas, treats nested quote data and uninvoked refs/lambdas as
+  inert, and scans level-zero unquote splices. Each chain identifies the exact
+  source member and a zero-based, carrier-independent preorder application
+  ordinal; this preserves two identical calls as two review sites. Variable,
+  returned, open external, or callable-transport paths and relevant local
+  handlers fail closed. `chains=[]` is an attribution result, never runtime
+  absence proof.
+  Text and `json-v1` expose the same static facts; the nested
+  `jacquard-governance-review-facts-v1` object carries the Workspace facade and
+  operation set, exact authority envelopes, normalizer/summarizer/simulator,
+  ordered membrane layers, canonical driver, and driver-introduced raw row for
+  later review classification. The command never executes source and makes no
+  execution-provenance claim.
 * `jac governance explain <proposal-id> --bundle <reconciliation-bundle>` first
   verifies the entire canonical GM.14 package, then renders the exact Proposal,
   Call, raw authority, BoundPolicy, assessment, recomputed stable live-policy

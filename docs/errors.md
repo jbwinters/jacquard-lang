@@ -383,6 +383,11 @@ the exact Decision and ID.
 | E1531 | one linked Proposal and its exact explanation records cannot be selected | the requested ID is absent or its matching Evaluated record is ambiguous |
 | E1532 | the recorded verdict disagrees with the recomputed stable live-policy rule | an `ask` record is paired with `live.at-or-below-auto` |
 | E1533 | Workspace action evidence cannot support the explanation | an attempt commits a noncanonical leaf driver, or a completion has no unique attempt |
+| E1534 | the requested why-effect authority is unsupported | `fs` rather than exact `Fs`, or a user effect hash |
+| E1535 | a reachable callable cannot be attributed without guessing | a variable, returned function, open external callable, or callable transport |
+| E1536 | a reachable local handler invalidates the claimed membrane path | handling Workspace before its verified live boundary |
+| E1537 | a reachable source group reference or live splice is malformed | an out-of-range `GroupRef` or invalid live unquote expression |
+| E1538 | the bounded source-attribution traversal is exhausted | a reachable graph larger than the fixed analysis budget |
 
 `jac governance explain PROPOSAL_ID --bundle RECONCILIATION_BUNDLE` accepts
 exactly 64 lowercase hexadecimal digits and fully applies reconciliation-bundle
@@ -392,6 +397,23 @@ canonical leaf driver for that operation. Denied, escalated, and unattempted
 approved decisions render `not-attempted`; they never acquire a driver by
 guessing. Structurally valid reconciliation gaps remain distinct from evidence
 that contradicts the selected explanation.
+
+`jac why-effect EFFECT --source FILE` accepts only the exact GM.16
+`workspace-v0` source profile. `EFFECT` is exactly `Fs`, `Net`, `Secret`, or
+the released hash of one of those effects; mutable effect-name lookup is never
+used. After full source verification, the analysis follows exact source-owned
+term identities, valid source-group references, direct lambdas, and live
+unquote splices. It evaluates application arguments before attributing the
+callee and refuses the entire report when higher-order flow, a relevant local
+handler, malformed staging data, or the traversal bound prevents a sound
+answer. Empty chains mean only that no matching attributable Workspace
+application was found; they are not proof of runtime absence.
+Every reported chain includes an application site: the exact source-member
+identity plus a zero-based preorder ordinal over reachable resolved-kernel
+applications in that member. Direct invocations and live splices count; inert
+quotes and lambda values do not. E1537 is a defensive fallback for malformed
+retained data after verification, not a claim that normal public verified input
+can construct such data.
 
 ## Appendix: the W5.3 audit (ten message rewrites)
 

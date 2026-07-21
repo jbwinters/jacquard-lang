@@ -211,6 +211,11 @@ Read these together when judging whether the release candidate is credible:
   evidence.
 - `release/governed-membranes/GM17A-MANIFEST.sha256`: reconstructible GM.17A
   implementation overlay on exact integrated base `58c8027`.
+- `release/governed-membranes/GM17B-EVIDENCE.md`: GM.17B conservative,
+  identity-based Workspace-to-raw-effect source attribution, deterministic
+  review facts, and fail-closed higher-order/handler evidence.
+- `release/governed-membranes/GM17B-MANIFEST.sha256`: reconstructible GM.17B
+  implementation overlay on exact integrated base `4b0670f`.
 - `release/governed-membranes/GM10-MANIFEST.sha256`: reconstructible GM.10
   overlay on exact integrated GM.8/GM.9 base `df37a15`.
 - `release/governed-membranes/GM11-MANIFEST.sha256`: reconstructible GM.11

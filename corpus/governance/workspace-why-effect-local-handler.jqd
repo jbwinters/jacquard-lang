@@ -1,0 +1,12 @@
+(defterm
+  ((binding workspace-why-effect-local-handler ()
+    (lam ((pvar policy) (pvar simulators))
+      (app (var workspace.live)
+        (var policy) (var simulators)
+        (lam ()
+          (handle
+            (app (var workspace.read-file)
+              (app (var path-value) (lit "README.md")))
+            (ret (pvar value) (var value))
+            (opclause workspace.read-file ((pvar path)) continue
+              (app (var continue) (app (var ok) (lit "handled")))))))))))

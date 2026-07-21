@@ -24,6 +24,25 @@ type report = {
   operations : operation list;
 }
 
+type topology =
+  | Live
+  | Dry
+  | Forwarded_live of int
+      (** The exact verified root topology. [Forwarded_live n] contains [n] forwarding layers before
+          the canonical live leaf. *)
+
+type verified_member = {
+  member_name : string;
+  member_hash : Hash.t;
+  member_body : Kernel.expr;
+  member_group : Hash.t list;
+}
+(** A source-owned term member and the source-order identity group used to resolve [GroupRef]. *)
+
+type verified_source
+(** An abstract, fully GM16-verified source handoff. Values retain the isolated store/checker,
+    canonical root and payload thunk, exact topology, and source-owned member index. *)
+
 val version : string
 (** The exact source-check report version. *)
 
@@ -45,6 +64,33 @@ val verify : Store.t -> Check.ctx -> Kernel.decl list -> (report, Diag.t list) r
     must exactly match the fixed live or dry profile because the v1 report has no residual-authority
     field. Malformed profile facts return their existing E1400--E1412 meanings. The function does
     not mutate [store]. *)
+
+val verify_detailed :
+  Store.t -> Check.ctx -> Kernel.decl list -> (verified_source, Diag.t list) result
+(** [verify_detailed] performs the same verification as [verify] and returns the trusted source
+    handoff required by additive static analyses. It has exactly the same diagnostics and does not
+    evaluate source expressions. *)
+
+val verified_report : verified_source -> report
+(** Recover the frozen GM16 report. [verify] maps this accessor over [verify_detailed]. *)
+
+val verified_root : verified_source -> string * Hash.t
+(** Return the canonical source root's declared name and HASH_V0 identity. *)
+
+val verified_topology : verified_source -> topology
+(** Return the exact verified live, dry, or forwarding topology. *)
+
+val verified_payload : verified_source -> Kernel.expr
+(** Return the body of the root boundary's zero-argument payload thunk. *)
+
+val verified_members : verified_source -> verified_member list
+(** Return all source-owned members and their exact source-order group mappings. *)
+
+val verified_store : verified_source -> Store.t
+(** Return the isolated, pinned analysis store used for verification. *)
+
+val verified_checker : verified_source -> Check.ctx
+(** Return the checker paired with the isolated analysis store. *)
 
 val render_text : report -> string
 (** Render the deterministic human report, including the runtime-artifact verification handoff. *)
