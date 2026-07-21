@@ -375,6 +375,24 @@ closed. The module consumes a proposal ID atomically: under the lock it resolves
 the immutable Decision, commits the exact Decision ID, and only then returns
 the exact Decision and ID.
 
+## Governance explanation (E153x)
+
+| code | meaning | example |
+|------|---------|---------|
+| E1530 | the requested Proposal ID is not exact canonical HASH_V0 text | uppercase hex or fewer than 64 digits |
+| E1531 | one linked Proposal and its exact explanation records cannot be selected | the requested ID is absent or its matching Evaluated record is ambiguous |
+| E1532 | the recorded verdict disagrees with the recomputed stable live-policy rule | an `ask` record is paired with `live.at-or-below-auto` |
+| E1533 | Workspace action evidence cannot support the explanation | an attempt commits a noncanonical leaf driver, or a completion has no unique attempt |
+
+`jac governance explain PROPOSAL_ID --bundle RECONCILIATION_BUNDLE` accepts
+exactly 64 lowercase hexadecimal digits and fully applies reconciliation-bundle
+verification before selecting or writing a success report. It recognizes only
+the frozen Workspace v0 operations and binds an attempted action to the exact
+canonical leaf driver for that operation. Denied, escalated, and unattempted
+approved decisions render `not-attempted`; they never acquire a driver by
+guessing. Structurally valid reconciliation gaps remain distinct from evidence
+that contradicts the selected explanation.
+
 ## Appendix: the W5.3 audit (ten message rewrites)
 
 Before/after wording improvements applied during the audit:

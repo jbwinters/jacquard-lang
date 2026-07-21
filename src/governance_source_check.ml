@@ -116,6 +116,19 @@ let drivers =
       "f8587c5325ebfd2e4879a991cb78552b80182f907b89a42cdc912fe33be1c0c6";
   ]
 
+let canonical_workspace_driver ~operation =
+  let operations = [ read_file; write_file; fetch ] in
+  let rec find operations drivers =
+    match (operations, drivers) with
+    | (operation_name, operation_id) :: _, (driver_name, driver_id) :: _
+      when Hash.equal operation operation_id ->
+        Some (operation_name, driver_name, driver_id)
+    | _ :: operations, _ :: drivers -> find operations drivers
+    | [], [] -> None
+    | _ -> invalid_arg "Bug_governance Workspace operation/driver pin cardinality mismatch"
+  in
+  find operations drivers
+
 let simulators =
   [
     pinned "workspace.read-simulation"

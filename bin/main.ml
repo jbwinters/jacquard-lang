@@ -1719,6 +1719,22 @@ let governance_reconcile_cmd bundle_file prelude store_dir =
                    safe retry is implied.";
               ]))
 
+let governance_explain_cmd proposal_spelling bundle_file prelude store_dir output_format =
+  match Governance_explain.proposal_id_of_string proposal_spelling with
+  | Error diagnostics -> print_diags diagnostics
+  | Ok proposal_id -> (
+      match open_ctx ~prelude ~store_dir with
+      | Error diagnostics -> print_diags diagnostics
+      | Ok (store, _ctx) -> (
+          match Governance_explain.verify_file ~store ~file:bundle_file ~proposal_id with
+          | Error diagnostics -> print_diags diagnostics
+          | Ok report ->
+              print_string
+                (match output_format with
+                | Output_text -> Governance_explain.render_text report
+                | Output_json_v1 -> Governance_explain.render_json_v1 report ^ "\n");
+              ok))
+
 (* --- cmdliner wiring --- *)
 
 open Cmdliner
@@ -2039,9 +2055,28 @@ let governance_t =
         $ Arg.(required & pos 0 (some string) None & info [] ~docv:"BUNDLE")
         $ prelude_arg $ store_dir_opt_arg)
   in
+  let explain =
+    Cmd.v
+      (Cmd.info "explain"
+         ~doc:
+           "Verify one reconciliation package completely, then explain one exact Proposal through \
+            its Call, policy rule, Decision, Audit evidence, and committed Workspace driver.")
+      Term.(
+        const (configure_diagnostics governance_explain_cmd)
+        $ diagnostic_format_arg
+        $ Arg.(required & pos 0 (some string) None & info [] ~docv:"PROPOSAL_ID")
+        $ Arg.(
+            required
+            & opt (some file) None
+            & info [ "bundle" ] ~docv:"RECONCILIATION_BUNDLE"
+                ~doc:
+                  "Canonical governance-reconciliation-bundle-v1 containing the selected Proposal \
+                   and action journal.")
+        $ prelude_arg $ store_dir_opt_arg $ output_format_arg)
+  in
   Cmd.group
     (Cmd.info "governance" ~doc:"Verify governance artifacts and review surfaces.")
-    [ check; verify_log; verify_run; reconcile ]
+    [ check; verify_log; verify_run; reconcile; explain ]
 
 let dist_diff_t =
   Cmd.v

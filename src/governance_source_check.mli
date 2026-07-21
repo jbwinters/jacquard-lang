@@ -30,6 +30,12 @@ val version : string
 val schema : string
 (** The exact JSON success-report schema. *)
 
+val canonical_workspace_driver : operation:Hash.t -> (string * string * Hash.t) option
+(** [canonical_workspace_driver ~operation] returns the exact released Workspace v0 leaf-driver
+    operation name, driver name, and driver identity for one of the three pinned facade operations.
+    It compares [operation] by HASH_V0 identity and never resolves a mutable name; non-Workspace
+    identities return [None]. *)
+
 val verify : Store.t -> Check.ctx -> Kernel.decl list -> (report, Diag.t list) result
 (** [verify store checker declarations] verifies one unambiguous canonical Workspace source root and
     the complete shipped profile behind it. [declarations] must already have been resolved, stored,

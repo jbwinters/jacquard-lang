@@ -1492,7 +1492,16 @@ the frozen Call identity has no occurrence discriminator.
 ### 12.4 Review surfaces
 
 * `jac why-effect Fs` points to the leaf membrane driver that introduces it, not merely to the agent function that requested `Workspace`.
-* `jac governance explain <proposal-id>` renders the call, assessment, policy rule, approval, driver hash, and audit entries as one decision chain.
+* `jac governance explain <proposal-id> --bundle <reconciliation-bundle>` first
+  verifies the entire canonical GM.14 package, then renders the exact Proposal,
+  Call, raw authority, BoundPolicy, assessment, recomputed stable live-policy
+  rule, matching verdict, Decision, ordered relevant Audit records, and action,
+  canonical Workspace driver, and receipt state as one decision chain. Text and
+  `json-v1` are deterministic projections of the same typed report; diagnostics
+  select their format independently. A denied or escalated Decision is always
+  `not-attempted`, while an approved completion without a unique matching
+  attempt fails closed. The report identifies committed evidence; it does not
+  claim that the driver ran or that an external receipt is true.
 * `jac governance verify-log <head>` verifies the hash chain offline.
 * Package upgrade plans classify new facade operations, widened raw driver rows, policy changes, and simulator changes separately.
 * The playground renders the pipeline as `request -> assessment -> verdict -> consent -> action/simulation -> outcome`, with every box linked to its hash.

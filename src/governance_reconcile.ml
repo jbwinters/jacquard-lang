@@ -9,6 +9,10 @@ type report = {
   completion_without_receipt : int;
 }
 
+type verified = { report : report; bundle : Form.t }
+
+let verified_report value = value.report
+let verified_bundle value = value.bundle
 let ( let* ) = Result.bind
 
 let diagnostic_spec = function
@@ -627,7 +631,7 @@ let reconcile authorizations authorization_by_call completions no_action attempt
       completion_without_receipt = !completion_without_receipt;
     }
 
-let verify_form ~store ~file = function
+let verify_detailed_form ~store ~file = function
   | {
       Form.head = "governance-reconciliation-bundle-v1";
       args =
@@ -638,7 +642,7 @@ let verify_form ~store ~file = function
           Form.F { Form.head = "governance-action-journal-v1"; args = journal_args; _ };
         ];
       _;
-    } ->
+    } as bundle ->
       let* run_report = Governance_run_bundle.verify_form ~store ~file run_bundle in
       let* records, policies, proposals = extract_run run_bundle in
       let* authorizations, authorization_by_call, completions, no_action =
@@ -650,13 +654,19 @@ let verify_form ~store ~file = function
         | None -> error ~code:"E1510" "governance-action-journal-v1 contains a scalar record"
       in
       let* attempts, receipts = verify_journal ~expected_head:journal_head journal_records in
-      reconcile authorizations authorization_by_call completions no_action attempts receipts
-        run_report.head journal_head
+      let* report =
+        reconcile authorizations authorization_by_call completions no_action attempts receipts
+          run_report.head journal_head
+      in
+      Ok { report; bundle }
   | { Form.head; _ } when not (String.equal head "governance-reconciliation-bundle-v1") ->
       error ~code:"E1510" "unsupported governance reconciliation bundle version `%s`" head
   | _ -> error ~code:"E1510" "malformed governance-reconciliation-bundle-v1"
 
-let verify_string ~store ~file source =
+let verify_form ~store ~file bundle =
+  Result.map verified_report (verify_detailed_form ~store ~file bundle)
+
+let verify_detailed_string ~store ~file source =
   let length = String.length source in
   if length = 0 || source.[length - 1] <> '\n' then
     error ~code:"E1510" "%s: governance reconciliation bundle must end with LF" file
@@ -676,7 +686,10 @@ let verify_string ~store ~file source =
           error ~code:"E1510" "%s: malformed governance reconciliation bundle: %s" file detail
       | Ok form when not (String.equal (compact form) body) ->
           error ~code:"E1510" "%s: governance reconciliation bundle is not canonical" file
-      | Ok form -> verify_form ~store ~file form
+      | Ok form -> verify_detailed_form ~store ~file form
+
+let verify_string ~store ~file source =
+  Result.map verified_report (verify_detailed_string ~store ~file source)
 
 let max_bundle_bytes = 16 * 1024 * 1024
 
@@ -732,6 +745,8 @@ let read_file file =
   | Error message ->
       error ~code:"E1510" "cannot read governance reconciliation bundle %s: %s" file message
 
-let verify_file ~store ~file =
+let verify_detailed_file ~store ~file =
   let* source = read_file file in
-  verify_string ~store ~file source
+  verify_detailed_string ~store ~file source
+
+let verify_file ~store ~file = Result.map verified_report (verify_detailed_file ~store ~file)

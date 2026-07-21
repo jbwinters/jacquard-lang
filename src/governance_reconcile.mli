@@ -15,6 +15,18 @@ type report = {
     work, not claims of rollback or safe retry. [completion_without_receipt] includes a uniquely
     authorized live completion even when no Attempted entry names it. *)
 
+type verified
+(** An abstract reconciliation package that has passed the complete run-bundle, Audit-chain,
+    action-journal, authorization, completion, and receipt verifier. *)
+
+val verified_report : verified -> report
+(** Returns the stable reconciliation summary proven for [verified]. *)
+
+val verified_bundle : verified -> Form.t
+(** Returns the exact in-memory reconciliation form whose complete linkage [verified] proves.
+    Consumers may project committed or recomputed facts from this form, but it is not proof of
+    execution, receipt truth, rollback, or safe retry. *)
+
 val journal_genesis : Hash.t
 (** The fixed empty predecessor for [governance-action-journal-v1]. *)
 
@@ -42,9 +54,22 @@ val verify_form : store:Store.t -> file:string -> Form.t -> (report, Diag.t list
     Structural contradictions return E1510--E1515. Honest recovery gaps remain in [report]; the
     public command reports those as E1516. *)
 
+val verify_detailed_form : store:Store.t -> file:string -> Form.t -> (verified, Diag.t list) result
+(** Applies the same complete verifier as {!verify_form} and retains the exact verified form for a
+    trusted projection. It never relaxes the existing carrier or linkage rules. *)
+
 val verify_string : store:Store.t -> file:string -> string -> (report, Diag.t list) result
 (** Accepts exactly one compact canonical reconciliation form followed by LF. *)
+
+val verify_detailed_string :
+  store:Store.t -> file:string -> string -> (verified, Diag.t list) result
+(** Canonically parses and completely verifies one reconciliation string exactly once, retaining its
+    verified form for a later projection. *)
 
 val verify_file : store:Store.t -> file:string -> (report, Diag.t list) result
 (** Performs a bounded, race-detecting regular-file read before verification. Expected I/O failures
     return E1510 and no exception escapes. *)
+
+val verify_detailed_file : store:Store.t -> file:string -> (verified, Diag.t list) result
+(** Performs the same bounded, race-detecting read and complete verification as {!verify_file},
+    retaining the exact verified form. Expected failures return E1510 and no exception escapes. *)
