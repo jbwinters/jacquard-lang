@@ -216,6 +216,12 @@ Read these together when judging whether the release candidate is credible:
   review facts, and fail-closed higher-order/handler evidence.
 - `release/governed-membranes/GM17B-MANIFEST.sha256`: reconstructible GM.17B
   implementation overlay on exact integrated base `4b0670f`.
+- `release/governed-membranes/GM17C-EVIDENCE.md`: GM.17C pure, typed machine-review
+  classification over separate GM.17A dynamic and GM.17B static facts, including
+  source-root/attribution-chain changes, deterministic partial detail, and strict
+  rendering-only boundaries.
+- `release/governed-membranes/GM17C-MANIFEST.sha256`: reconstructible GM.17C
+  implementation overlay on exact integrated base `b17c429`.
 - `release/governed-membranes/GM10-MANIFEST.sha256`: reconstructible GM.10
   overlay on exact integrated GM.8/GM.9 base `df37a15`.
 - `release/governed-membranes/GM11-MANIFEST.sha256`: reconstructible GM.11

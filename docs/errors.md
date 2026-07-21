@@ -388,6 +388,9 @@ the exact Decision and ID.
 | E1536 | a reachable local handler invalidates the claimed membrane path | handling Workspace before its verified live boundary |
 | E1537 | a reachable source group reference or live splice is malformed | an out-of-range `GroupRef` or invalid live unquote expression |
 | E1538 | the bounded source-attribution traversal is exhausted | a reachable graph larger than the fixed analysis budget |
+| E1539 | governance review fact families, profiles, queries, or exact cross-family links are incompatible | comparing `Fs` static facts with `Net` facts, or pairing an attempted driver with another operation's static driver |
+| E1540 | two governance review facts conflict for one exact identity | duplicate operation facts carry different driver identities or labels |
+| E1541 | typed governance review facts violate an internal comparison invariant | a reached operation is absent from the complete facade operation set |
 
 `jac governance explain PROPOSAL_ID --bundle RECONCILIATION_BUNDLE` accepts
 exactly 64 lowercase hexadecimal digits and fully applies reconciliation-bundle
@@ -414,6 +417,21 @@ applications in that member. Direct invocations and live splices count; inert
 quotes and lambda values do not. E1537 is a defensive fallback for malformed
 retained data after verification, not a claim that normal public verified input
 can construct such data.
+
+`Governance_review_diff` is a pure OCaml handoff for later package tooling; it
+adds no command and accepts no untrusted JSON. It compares typed GM.17A and
+GM.17B projections without treating their shared schema label as family
+equivalence. Static projection preserves the GM.17B source root and attribution
+chains; exact hashes and the application ordinal establish chain identity, not
+display names or collection order. Dynamic Decision comparison ignores only
+the endpoint proposal hash in the first exact released proposal carrier and
+never rewrites Approved evidence or denial/escalation reasons. E1539 rejects
+incompatible endpoints or exact operation/driver linkage, E1540 rejects
+conflicting facts for one identity across all retained chain fields, and E1541
+guards producer invariants. A missing query-scoped operation detail is instead the
+stable `operation-not-reached` availability fact and makes the report partial.
+The report grants no authority, proves no execution or runtime absence, and
+assigns no safety verdict.
 
 ## Appendix: the W5.3 audit (ten message rewrites)
 
