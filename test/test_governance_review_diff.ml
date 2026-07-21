@@ -5,8 +5,33 @@ module W = Governance_why_effect
 let hash value = Hash.of_string value
 let identity name = { W.name; hash = hash name }
 let form name = Form.form name []
+let code_form head children = Form.form head (List.map (fun child -> Form.F child) children)
+let hash_code value = Form.form "hash" [ Form.Hash value ]
+let lit value = Form.form "lit" [ Form.Text value ]
+
+let approved ?(evidence = code_form "approval-proof-v1" []) proposal_id =
+  code_form "approved-v1" [ hash_code proposal_id; lit "reviewer"; evidence ]
+
+let denied proposal_id =
+  code_form "denied-v1" [ hash_code proposal_id; lit "reviewer"; lit "policy denied" ]
+
+let escalated proposal_id = code_form "escalate-v1" [ hash_code proposal_id; lit "needs owner" ]
 let operation ?(name = "workspace.write-file") () = { W.name; hash = hash (name ^ ".identity") }
 let authority name = identity name
+
+let chain ?(source_path = [ identity "source-root" ]) ?(member = identity "source-member")
+    ?(ordinal = 0) ?(operation = operation ()) ?(forwarding_layers = [ identity "forward" ])
+    ?(live_leaf = identity "live-leaf") ?(driver = identity "driver") ?(raw_effect = identity "Fs")
+    () : W.chain =
+  {
+    source_path;
+    application_site = { member; ordinal };
+    operation;
+    forwarding_layers;
+    live_leaf;
+    driver;
+    raw_effect;
+  }
 
 let operation_fact ?(operation = operation ()) ?(raw_authority = [ authority "Fs" ])
     ?(normalizer = identity "normalizer") ?(summarizer = identity "summarizer")
@@ -22,18 +47,11 @@ let operation_fact ?(operation = operation ()) ?(raw_authority = [ authority "Fs
     driver_introduced_raw_row = row;
   }
 
-let static_report ?(requested_effect = identity "Fs") ?(topology = "direct-live")
-    ?(facade = identity "Workspace") ?(facade_operations = [ operation () ])
-    ?(reached_operations = [ operation_fact () ]) () : W.report =
-  {
-    requested_effect;
-    source_root = identity "source-root";
-    topology;
-    facade;
-    facade_operations;
-    reached_operations;
-    chains = [];
-  }
+let static_report ?(requested_effect = identity "Fs") ?(source_root = identity "source-root")
+    ?(topology = "direct-live") ?(facade = identity "Workspace")
+    ?(facade_operations = [ operation () ]) ?(reached_operations = [ operation_fact () ])
+    ?(chains = []) () : W.report =
+  { requested_effect; source_root; topology; facade; facade_operations; reached_operations; chains }
 
 let dynamic_report ?(proposal_id = hash "proposal") ?(rendering = form "rendering")
     ?(summary = "summary") ?(call_id = hash "call") ?(operation = operation ())
@@ -42,10 +60,7 @@ let dynamic_report ?(proposal_id = hash "proposal") ?(rendering = form "renderin
     ?(preview = form "preview") ?(policy_rule = "live.at-or-below-ask") ?(recorded_verdict = "ask")
     ?(decision_kind = "approved") ?decision ?(attempt = Governance_explain.Not_attempted) () :
     Governance_explain.report =
-  let decision =
-    Option.value decision
-      ~default:(Form.form "approved-v1" [ Form.Hash proposal_id; Form.Text "reviewer" ])
-  in
+  let decision = Option.value decision ~default:(approved proposal_id) in
   {
     proposal_id;
     proposal = form "proposal";
@@ -163,11 +178,25 @@ let test_semantic_and_rendering_categories () =
   let proposal_id = hash "rendered-proposal" in
   let new_dynamic =
     dynamic_report ~proposal_id ~rendering:(form "new-rendering") ~summary:"new summary"
-      ~decision:(Form.form "approved-v1" [ Form.Hash proposal_id; Form.Text "reviewer" ])
-      ()
+      ~decision:(approved proposal_id) ()
   in
   check_kinds "proposal rendering only" [ D.Proposal_rendering_only ]
     (classify_dynamic old_dynamic new_dynamic);
+  let check_non_action_rendering_only label decision_kind make_decision =
+    let old_id = hash (label ^ "-old") in
+    let new_id = hash (label ^ "-new") in
+    let old_ =
+      dynamic_report ~proposal_id:old_id ~decision_kind ~decision:(make_decision old_id) ()
+    in
+    let new_ =
+      dynamic_report ~proposal_id:new_id ~decision_kind ~decision:(make_decision new_id)
+        ~rendering:(form (decision_kind ^ "-rendering"))
+        ()
+    in
+    check_kinds label [ D.Proposal_rendering_only ] (classify_dynamic old_ new_)
+  in
+  check_non_action_rendering_only "denied released carrier" "denied" denied;
+  check_non_action_rendering_only "escalated released carrier" "escalated" escalated;
   let policy = dynamic_report ~policy_id:(hash "new-policy") ~policy:(form "new-policy") () in
   check_kinds "policy" [ D.Policy_changed ] (classify_dynamic old_dynamic policy);
   let attempted =
@@ -184,11 +213,27 @@ let test_semantic_and_rendering_categories () =
   let attempted_old = dynamic_report ~attempt:attempted () in
   let attempted_new =
     dynamic_report ~attempt:attempted ~proposal_id ~rendering:(form "new-rendering")
-      ~decision:(Form.form "approved-v1" [ Form.Hash proposal_id; Form.Text "reviewer" ])
-      ()
+      ~decision:(approved proposal_id) ()
   in
   check_kinds "attempt evidence blocks rendering-only" [ D.Proposal_rendering_changed ]
-    (classify_dynamic attempted_old attempted_new)
+    (classify_dynamic attempted_old attempted_new);
+  let old_with_proposal_like_evidence =
+    dynamic_report
+      ~decision:
+        (approved
+           ~evidence:(code_form "approval-proof-v1" [ hash_code (hash "proposal") ])
+           (hash "proposal"))
+      ()
+  in
+  let new_with_proposal_like_evidence =
+    dynamic_report ~proposal_id ~rendering:(form "new-rendering") ~summary:"new summary"
+      ~decision:
+        (approved ~evidence:(code_form "approval-proof-v1" [ hash_code proposal_id ]) proposal_id)
+      ()
+  in
+  check_kinds "proposal-like evidence is semantic"
+    [ D.Decision_changed; D.Proposal_rendering_changed ]
+    (classify_dynamic old_with_proposal_like_evidence new_with_proposal_like_evidence)
 
 let test_labels_partial_and_no_change () =
   let renamed_operation = { W.name = "write-label-only"; hash = (operation ()).hash } in
@@ -199,6 +244,35 @@ let test_labels_partial_and_no_change () =
   in
   check_kinds "name is label, not add/remove" [ D.Label_changed ]
     (classify_static (static_report ()) renamed);
+  let first_chain = chain () in
+  let second_site = chain ~ordinal:1 () in
+  let with_first = static_report ~chains:[ first_chain ] () in
+  check_kinds "attribution added" [ D.Attribution_changed ]
+    (classify_static (static_report ()) with_first);
+  check_kinds "attribution removed" [ D.Attribution_changed ]
+    (classify_static with_first (static_report ()));
+  check_kinds "application ordinal is semantic" [ D.Attribution_changed ]
+    (classify_static with_first (static_report ~chains:[ second_site ] ()));
+  check_kinds "one and two application sites differ" [ D.Attribution_changed ]
+    (classify_static with_first (static_report ~chains:[ second_site; first_chain ] ()));
+  check_kinds "application member is semantic" [ D.Attribution_changed ]
+    (classify_static with_first
+       (static_report ~chains:[ chain ~member:(identity "other-member") () ] ()));
+  check_kinds "source path is semantic" [ D.Attribution_changed ]
+    (classify_static with_first
+       (static_report ~chains:[ chain ~source_path:[ identity "other-path" ] () ] ()));
+  check_kinds "forwarding path is semantic" [ D.Attribution_changed ]
+    (classify_static with_first
+       (static_report ~chains:[ chain ~forwarding_layers:[ identity "other-forward" ] () ] ()));
+  check_kinds "source root identity" [ D.Source_root_changed ]
+    (classify_static (static_report ())
+       (static_report ~source_root:(identity "other-source-root") ()));
+  let renamed_root = { W.name = "source-root-label"; hash = (identity "source-root").hash } in
+  check_kinds "source root name is non-semantic" [ D.Label_changed ]
+    (classify_static (static_report ()) (static_report ~source_root:renamed_root ()));
+  let renamed_member = { W.name = "source-member-label"; hash = (identity "source-member").hash } in
+  check_kinds "attribution names are non-semantic" [ D.Label_changed ]
+    (classify_static with_first (static_report ~chains:[ chain ~member:renamed_member () ] ()));
   let absent = static_report ~reached_operations:[] () in
   let unavailable = classify_static (static_report ()) absent in
   Alcotest.(check int) "one unavailable operation" 1 (List.length unavailable.unavailable);
@@ -254,6 +328,15 @@ let test_linkage_duplicates_and_invariants () =
   in
   expect_code "conflicting identity labels" "E1540"
     (D.make_snapshot ~dynamic:None ~static:(Some duplicate));
+  let conflicting_root_in_chain =
+    { W.name = "conflicting-root-label"; hash = (identity "source-root").hash }
+  in
+  let duplicate_chain_label =
+    static_report ~chains:[ chain ~source_path:[ conflicting_root_in_chain ] () ] ()
+    |> D.static_facts_of_why_effect
+  in
+  expect_code "chain cross-field identity labels" "E1540"
+    (D.make_snapshot ~dynamic:None ~static:(Some duplicate_chain_label));
   let conflicting_detail =
     static_report
       ~reached_operations:
@@ -284,36 +367,50 @@ let test_linkage_duplicates_and_invariants () =
 let test_shuffled_determinism_and_renderers () =
   let read = { W.name = "workspace.read-file"; hash = hash "read-operation" } in
   let write = operation () in
+  let listed = operation ~name:"workspace.list-directory" () in
+  let first_chain = chain ~ordinal:0 () in
+  let second_chain = chain ~ordinal:1 () in
+  check_kinds "chain collection order is non-semantic" []
+    (classify_static
+       (static_report ~chains:[ first_chain; second_chain ] ())
+       (static_report ~chains:[ second_chain; first_chain ] ()));
   let old_report =
-    static_report ~facade_operations:[ read; write ]
+    static_report ~facade_operations:[ listed; read; write ]
       ~reached_operations:
         [
           operation_fact ~operation:read ~row:[ authority "Net"; authority "Fs" ] ();
           operation_fact ~operation:write ();
         ]
-      ()
+      ~chains:[ second_chain; first_chain ] ()
   in
   let new_report =
-    static_report ~facade_operations:[ write; read ]
+    static_report ~facade_operations:[ write; listed; read ]
       ~reached_operations:
         [
           operation_fact ~operation:write ~driver:(identity "new-driver") ();
           operation_fact ~operation:read ~row:[ authority "Secret"; authority "Fs" ] ();
         ]
-      ()
+      ~chains:[ first_chain; second_chain ] ()
   in
-  let snapshot report =
-    D.make_snapshot ~dynamic:None ~static:(Some (D.static_facts_of_why_effect report))
+  let old_dynamic = D.dynamic_facts_of_explain (dynamic_report ()) in
+  let new_dynamic =
+    D.dynamic_facts_of_explain
+      (dynamic_report ~policy_id:(hash "new-policy") ~policy:(form "new-policy") ())
+  in
+  let snapshot dynamic report =
+    D.make_snapshot ~dynamic:(Some dynamic) ~static:(Some (D.static_facts_of_why_effect report))
     |> expect_ok "determinism snapshot"
   in
   let first =
-    D.compare ~old_:(snapshot old_report) ~new_:(snapshot new_report) |> expect_ok "first"
+    D.compare ~old_:(snapshot old_dynamic old_report) ~new_:(snapshot new_dynamic new_report)
+    |> expect_ok "first"
   in
   let shuffled_old =
     {
       old_report with
       facade_operations = List.rev old_report.facade_operations;
       reached_operations = List.rev old_report.reached_operations;
+      chains = List.rev old_report.chains;
     }
   in
   let shuffled_new =
@@ -321,10 +418,12 @@ let test_shuffled_determinism_and_renderers () =
       new_report with
       facade_operations = List.rev new_report.facade_operations;
       reached_operations = List.rev new_report.reached_operations;
+      chains = List.rev new_report.chains;
     }
   in
   let second =
-    D.compare ~old_:(snapshot shuffled_old) ~new_:(snapshot shuffled_new) |> expect_ok "second"
+    D.compare ~old_:(snapshot old_dynamic shuffled_old) ~new_:(snapshot new_dynamic shuffled_new)
+    |> expect_ok "second"
   in
   let text = D.render_text first in
   let json = D.render_json_v1 first in
@@ -345,6 +444,72 @@ let test_shuffled_determinism_and_renderers () =
   Alcotest.(check int)
     "unavailable count parity" (List.length first.unavailable)
     (parsed |> member "unavailable" |> to_list |> List.length);
+  let text_lines = String.split_on_char '\n' text in
+  let shown_identity = function
+    | None -> "none"
+    | Some value -> Printf.sprintf "%s #%s" value.D.name (Hash.to_hex value.hash)
+  in
+  List.iter
+    (fun (change : D.change) ->
+      let expected =
+        Printf.sprintf "change kind=%s subject=%s #%s old=%s new=%s"
+          (D.change_kind_to_string change.kind)
+          change.subject.name (Hash.to_hex change.subject.hash)
+          (shown_identity change.old_identity)
+          (shown_identity change.new_identity)
+      in
+      Alcotest.(check bool) "text change field parity" true (List.mem expected text_lines))
+    first.changes;
+  List.iter
+    (fun (value : D.unavailable) ->
+      let side = match value.side with D.Old -> "old" | D.New -> "new" | D.Both -> "both" in
+      let expected =
+        Printf.sprintf "unavailable subject=%s #%s side=%s reason=%s" value.subject.name
+          (Hash.to_hex value.subject.hash) side value.reason
+      in
+      Alcotest.(check bool) "text unavailable field parity" true (List.mem expected text_lines))
+    first.unavailable;
+  let check_json_identity label expected value =
+    Alcotest.(check string) (label ^ " name") expected.D.name (value |> member "name" |> to_string);
+    Alcotest.(check string)
+      (label ^ " identity") (Hash.to_hex expected.hash)
+      (value |> member "identity" |> to_string)
+  in
+  let check_optional_identity label expected value =
+    match expected with
+    | None -> Alcotest.(check bool) (label ^ " null") true (value = `Null)
+    | Some expected -> check_json_identity label expected value
+  in
+  List.iter2
+    (fun (change : D.change) value ->
+      Alcotest.(check string)
+        "JSON change kind"
+        (D.change_kind_to_string change.kind)
+        (value |> member "kind" |> to_string);
+      check_json_identity "JSON change subject" change.subject (value |> member "subject");
+      check_optional_identity "JSON change old" change.old_identity (value |> member "old");
+      check_optional_identity "JSON change new" change.new_identity (value |> member "new"))
+    first.changes
+    (parsed |> member "changes" |> to_list);
+  List.iter2
+    (fun (unavailable : D.unavailable) value ->
+      let side = match unavailable.side with D.Old -> "old" | D.New -> "new" | D.Both -> "both" in
+      check_json_identity "JSON unavailable subject" unavailable.subject (value |> member "subject");
+      Alcotest.(check string) "JSON unavailable side" side (value |> member "side" |> to_string);
+      Alcotest.(check string)
+        "JSON unavailable reason" unavailable.reason
+        (value |> member "reason" |> to_string))
+    first.unavailable
+    (parsed |> member "unavailable" |> to_list);
+  Alcotest.(check (list string))
+    "JSON evidence fields" first.evidence_limits
+    (parsed |> member "evidence_limits" |> to_list |> List.map to_string);
+  List.iter
+    (fun limit ->
+      Alcotest.(check bool)
+        "text evidence field parity" true
+        (List.mem ("evidence-limit " ^ limit) text_lines))
+    first.evidence_limits;
   Alcotest.(check bool)
     "report assigns no safety" true
     (List.mem "does-not-assign-safety-verdict" first.evidence_limits)

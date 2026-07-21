@@ -1527,11 +1527,16 @@ the frozen Call identity has no occurrence discriminator.
   preserves their disjoint fact families, and emits
   `jacquard-governance-diff-report-v1`. Exact facade-operation identities drive
   additions/removals; normalized raw-row sets distinguish widening, narrowing,
-  and incomparable change. Policy, simulator, normalizer, driver, authority,
-  label, and other semantic changes remain explicit. Operation rendering-only
+  and incomparable change. GM.17B source-root identity and complete attribution
+  chains remain typed inputs: ordered source paths, exact application-member
+  identity and ordinal, ordered forwarding layers, live leaf, driver, and raw
+  effect are semantic, while chain collection order and display names are not.
+  Policy, simulator, normalizer, driver, authority, attribution, label, and
+  other semantic changes remain explicit. Operation rendering-only
   requires only the summarizer identity to change. Proposal rendering-only
-  requires all supplied semantic proposal facts to agree and is forbidden by
-  any attempted-action evidence. Missing query-scoped reached detail is
+  ignores only the first exact released Decision proposal carrier; approver,
+  reason, and Approved evidence remain exact semantic fields, and any attempted
+  action evidence forbids the rendering-only result. Missing query-scoped reached detail is
   `operation-not-reached` and makes the report partial; it is not a diagnostic
   or runtime-absence claim.
 * The playground renders the pipeline as `request -> assessment -> verdict -> consent -> action/simulation -> outcome`, with every box linked to its hash.

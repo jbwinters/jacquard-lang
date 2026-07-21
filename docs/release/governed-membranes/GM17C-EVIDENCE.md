@@ -19,6 +19,11 @@ interchangeable. A validated snapshot may contain either or both families; if
 both are present, exact operation identity and any jointly available attempted
 driver identity must agree.
 
+The static projection retains the complete GM.17B source-root identity and
+attribution chains. The public classification and report records are private:
+callers may inspect fields but cannot forge schema, completeness, sort order,
+or evidence-limit invariants.
+
 ## Classification contract
 
 Static facade membership and collections normalize by exact HASH_V0 identity.
@@ -30,11 +35,25 @@ is `driver-row-narrowed`, and incomparable sets are `driver-row-changed`.
 Policy, simulator, normalizer, driver, authority, label, summarizer, and other
 semantic changes remain review-visible.
 
+Source-root hash changes are `source-root-changed`. Attribution chains
+canonicalize by ordered source-path identities, exact application member and
+ordinal, operation identity, ordered forwarding layers, live leaf, driver, and
+raw effect. Chain collection order is non-semantic; adding or removing a chain,
+one versus two distinct application sites, or changing a path, ordinal, or
+forwarding layer is `attribution-changed`. Display names never establish chain
+identity. All retained chain identities participate in cross-field duplicate
+label validation, and cross-endpoint name drift remains `label-changed`.
+
 `operation-rendering-only` requires only the summarizer identity to change
 while the facade operation, authority, normalizer, simulator, driver, row, and
 labels agree. `proposal-rendering-only` requires semantic equality of Call,
-authority, bound policy, assessment, preview, evaluation, and normalized
-Decision kind/content; both endpoints must have no attempted action evidence.
+authority, bound policy, assessment, preview, evaluation, and Decision
+kind/content; both endpoints must have no attempted action evidence. Decision
+comparison recognizes only exact released `approved-v1`, `denied-v1`, and
+`escalate-v1` shapes and ignores only the endpoint-specific hash in the first
+carried `(hash #...)` Proposal slot. It compares every approver, reason, and
+Approved evidence field exactly; arbitrary nested proposal-like hashes are
+never rewritten.
 Rendering-only is exclusive and review-required, not a harmlessness claim.
 
 GM.17B reached detail is query-scoped even though `facade_operations` is
@@ -62,12 +81,16 @@ Five focused compiled Alcotest cases cover:
 
 - facade addition and removal plus widened, narrowed, and incomparable rows;
 - policy, simulator, normalizer, driver, positive operation/proposal
-  rendering-only, and negative rendering-only classifications;
-- name-only drift, partial unavailable detail, and fully available no-change;
+  rendering-only over exact released Decision carriers, and negative
+  attempted/nested-evidence rendering-only classifications;
+- source-root and attribution additions/removals, distinct application sites,
+  paths, forwarding layers, chain-order invariance, name-only drift, partial
+  unavailable detail, and fully available no-change;
 - exact dynamic/static operation and attempted-driver linkage, mismatches,
   conflicting duplicates, malformed reached detail, and family mismatch; and
-- identity-set input shuffling, fixed ordering, renderer parity, evidence
-  limits, and repeated text/JSON bytes.
+- identity-set and attribution-chain input shuffling, fixed ordering, combined
+  dynamic/static field-level text/JSON parity, evidence limits, and repeated
+  renderer bytes.
 
 The overlay raises the compiled inventory from 794 to 799 cases. The 48 cram
 transcripts and 27 executable documentation examples are unchanged.

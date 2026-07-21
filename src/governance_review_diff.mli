@@ -17,6 +17,7 @@ type change_kind =
   | Facade_added
   | Facade_removed
   | Facade_changed
+  | Source_root_changed
   | Driver_row_widened
   | Driver_row_narrowed
   | Driver_row_changed
@@ -25,6 +26,7 @@ type change_kind =
   | Normalizer_changed
   | Driver_changed
   | Authority_changed
+  | Attribution_changed
   | Operation_rendering_only
   | Proposal_rendering_only
   | Label_changed
@@ -52,12 +54,12 @@ type availability_side = Old | New | Both
 type unavailable = { subject : identity; side : availability_side; reason : string }
 (** Missing query-scoped detail. [reason] is currently exactly [operation-not-reached]. *)
 
-type classification = { changes : change list; unavailable : unavailable list }
+type classification = private { changes : change list; unavailable : unavailable list }
 (** A deterministically sorted family-local classification. *)
 
 type completeness = Complete | Partial | No_change
 
-type report = {
+type report = private {
   schema : string;
   completeness : completeness;
   changes : change list;
@@ -74,8 +76,9 @@ val dynamic_facts_of_explain : Governance_explain.report -> dynamic_facts
 (** Projects the dynamic review-facts family without changing or reparsing GM.17A output. *)
 
 val static_facts_of_why_effect : Governance_why_effect.report -> static_facts
-(** Projects the static review-facts family without changing or reparsing GM.17B output. Empty
-    attribution chains remain unrelated to runtime absence. *)
+(** Projects the complete typed static review-facts family without changing or reparsing GM.17B
+    output, including source-root identity and attribution chains. Empty attribution chains remain
+    unrelated to runtime absence. *)
 
 val make_snapshot :
   dynamic:dynamic_facts option -> static:static_facts option -> (snapshot, Diag.t list) result
@@ -92,6 +95,8 @@ val classify_dynamic :
 
 val classify_static : old_:static_facts -> new_:static_facts -> (classification, Diag.t list) result
 (** Classifies one old/new GM.17B pair. Facade membership and rows compare exact identity sets.
+    Source root and attribution paths, application member/ordinal, forwarding layers, live leaf,
+    driver, and raw effect remain review-visible; chain collection order and names are non-semantic.
     Common facade operations missing reached detail produce [operation-not-reached], not a
     diagnostic. Incompatible requested-effect queries return E1539. *)
 

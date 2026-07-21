@@ -25,10 +25,12 @@ type dynamic_facts = {
 type static_facts = {
   profile : string;
   requested_effect : identity;
+  source_root : identity;
   topology : string;
   facade : identity;
   facade_operations : identity list;
   reached_operations : Governance_why_effect.operation_fact list;
+  chains : Governance_why_effect.chain list;
 }
 
 type snapshot = { dynamic : dynamic_facts option; static : static_facts option }
@@ -37,6 +39,7 @@ type change_kind =
   | Facade_added
   | Facade_removed
   | Facade_changed
+  | Source_root_changed
   | Driver_row_widened
   | Driver_row_narrowed
   | Driver_row_changed
@@ -45,6 +48,7 @@ type change_kind =
   | Normalizer_changed
   | Driver_changed
   | Authority_changed
+  | Attribution_changed
   | Operation_rendering_only
   | Proposal_rendering_only
   | Label_changed
@@ -140,10 +144,12 @@ let static_facts_of_why_effect (report : Governance_why_effect.report) =
   {
     profile;
     requested_effect = identity_of_why report.requested_effect;
+    source_root = identity_of_why report.source_root;
     topology = report.topology;
     facade = identity_of_why report.facade;
     facade_operations = List.map identity_of_why report.facade_operations;
     reached_operations = report.reached_operations;
+    chains = report.chains;
   }
 
 let compact = Printer.print_compact
@@ -169,6 +175,7 @@ let change_kind_to_string = function
   | Facade_added -> "facade-added"
   | Facade_removed -> "facade-removed"
   | Facade_changed -> "facade-changed"
+  | Source_root_changed -> "source-root-changed"
   | Driver_row_widened -> "driver-row-widened"
   | Driver_row_narrowed -> "driver-row-narrowed"
   | Driver_row_changed -> "driver-row-changed"
@@ -177,6 +184,7 @@ let change_kind_to_string = function
   | Normalizer_changed -> "normalizer-changed"
   | Driver_changed -> "driver-changed"
   | Authority_changed -> "authority-changed"
+  | Attribution_changed -> "attribution-changed"
   | Operation_rendering_only -> "operation-rendering-only"
   | Proposal_rendering_only -> "proposal-rendering-only"
   | Label_changed -> "label-changed"
@@ -194,26 +202,28 @@ let change_rank = function
   | Facade_added -> 0
   | Facade_removed -> 1
   | Facade_changed -> 2
-  | Driver_row_widened -> 3
-  | Driver_row_narrowed -> 4
-  | Driver_row_changed -> 5
-  | Policy_changed -> 6
-  | Simulator_changed -> 7
-  | Normalizer_changed -> 8
-  | Driver_changed -> 9
-  | Authority_changed -> 10
-  | Operation_rendering_only -> 11
-  | Proposal_rendering_only -> 12
-  | Label_changed -> 13
-  | Call_changed -> 14
-  | Assessment_changed -> 15
-  | Preview_changed -> 16
-  | Evaluation_changed -> 17
-  | Decision_changed -> 18
-  | Attempt_changed -> 19
-  | Summarizer_changed -> 20
-  | Proposal_rendering_changed -> 21
-  | Other_semantic_change -> 22
+  | Source_root_changed -> 3
+  | Driver_row_widened -> 4
+  | Driver_row_narrowed -> 5
+  | Driver_row_changed -> 6
+  | Policy_changed -> 7
+  | Simulator_changed -> 8
+  | Normalizer_changed -> 9
+  | Driver_changed -> 10
+  | Authority_changed -> 11
+  | Attribution_changed -> 12
+  | Operation_rendering_only -> 13
+  | Proposal_rendering_only -> 14
+  | Label_changed -> 15
+  | Call_changed -> 16
+  | Assessment_changed -> 17
+  | Preview_changed -> 18
+  | Evaluation_changed -> 19
+  | Decision_changed -> 20
+  | Attempt_changed -> 21
+  | Summarizer_changed -> 22
+  | Proposal_rendering_changed -> 23
+  | Other_semantic_change -> 24
 
 let compare_change left right =
   let by_kind = Int.compare (change_rank left.kind) (change_rank right.kind) in
@@ -342,10 +352,123 @@ let normalize_operations ~facade facts =
   in
   dedupe [] sorted
 
+type normalized_chain = {
+  chain_identity : identity;
+  source_path : identity list;
+  application_member : identity;
+  application_ordinal : int;
+  operation : identity;
+  forwarding_layers : identity list;
+  live_leaf : identity;
+  driver : identity;
+  raw_effect : identity;
+}
+
+let encode_hashes label values =
+  String.concat "\000"
+    (label
+    :: string_of_int (List.length values)
+    :: List.map (fun value -> Hash.to_hex value.hash) values)
+
+let attribution_identity ~source_path ~application_member ~application_ordinal ~operation
+    ~forwarding_layers ~live_leaf ~driver ~raw_effect =
+  let bytes =
+    String.concat "\000"
+      [
+        "governance-review-attribution-chain-v1";
+        encode_hashes "source-path" source_path;
+        "application-member";
+        Hash.to_hex application_member.hash;
+        "application-ordinal";
+        string_of_int application_ordinal;
+        "operation";
+        Hash.to_hex operation.hash;
+        encode_hashes "forwarding-layers" forwarding_layers;
+        "live-leaf";
+        Hash.to_hex live_leaf.hash;
+        "driver";
+        Hash.to_hex driver.hash;
+        "raw-effect";
+        Hash.to_hex raw_effect.hash;
+      ]
+  in
+  { name = "attribution-chain"; hash = Hash.of_string bytes }
+
+let normalize_chain (chain : Governance_why_effect.chain) =
+  if chain.application_site.ordinal < 0 then
+    error ~code:"E1541" "attribution application ordinal %d is negative"
+      chain.application_site.ordinal
+  else
+    let source_path = List.map identity_of_why chain.source_path in
+    let application_member = identity_of_why chain.application_site.member in
+    let application_ordinal = chain.application_site.ordinal in
+    let operation = identity_of_why chain.operation in
+    let forwarding_layers = List.map identity_of_why chain.forwarding_layers in
+    let live_leaf = identity_of_why chain.live_leaf in
+    let driver = identity_of_why chain.driver in
+    let raw_effect = identity_of_why chain.raw_effect in
+    let chain_identity =
+      attribution_identity ~source_path ~application_member ~application_ordinal ~operation
+        ~forwarding_layers ~live_leaf ~driver ~raw_effect
+    in
+    Ok
+      {
+        chain_identity;
+        source_path;
+        application_member;
+        application_ordinal;
+        operation;
+        forwarding_layers;
+        live_leaf;
+        driver;
+        raw_effect;
+      }
+
+let normalized_chain_semantic_equal left right =
+  hash_list_equal left.source_path right.source_path
+  && identity_equal left.application_member right.application_member
+  && Int.equal left.application_ordinal right.application_ordinal
+  && identity_equal left.operation right.operation
+  && hash_list_equal left.forwarding_layers right.forwarding_layers
+  && identity_equal left.live_leaf right.live_leaf
+  && identity_equal left.driver right.driver
+  && identity_equal left.raw_effect right.raw_effect
+
+let chain_identities value =
+  value.application_member :: value.operation :: value.live_leaf :: value.driver :: value.raw_effect
+  :: (value.source_path @ value.forwarding_layers)
+
+let normalize_chains chains =
+  let rec collect reversed = function
+    | [] -> Ok reversed
+    | chain :: rest ->
+        let* value = normalize_chain chain in
+        collect (value :: reversed) rest
+  in
+  let* values = collect [] chains in
+  Ok
+    (List.sort (fun left right -> compare_identity left.chain_identity right.chain_identity) values)
+
+let dedupe_chains values =
+  let rec loop reversed = function
+    | [] -> Ok (List.rev reversed)
+    | [ value ] -> Ok (List.rev (value :: reversed))
+    | left :: (right :: _ as rest) ->
+        if identity_equal left.chain_identity right.chain_identity then
+          if normalized_chain_semantic_equal left right then loop reversed rest
+          else
+            error ~code:"E1540" "attribution chain #%s has conflicting semantic facts"
+              (Hash.to_hex left.chain_identity.hash)
+        else loop (left :: reversed) rest
+  in
+  loop [] values
+
 type normalized_static = {
   facts : static_facts;
   facade_operations : identity list;
   reached_operations : normalized_operation list;
+  chains : normalized_chain list;
+  attribution_labels : identity list;
 }
 
 let normalize_static facts =
@@ -358,19 +481,28 @@ let normalize_static facts =
     let* reached_operations =
       normalize_operations ~facade:facade_operations facts.reached_operations
     in
-    let operation_identities value =
+    let* chains = normalize_chains facts.chains in
+    let operation_identities (value : normalized_operation) =
       value.operation :: value.normalizer :: value.summarizer :: value.simulator :: value.driver
       :: (value.raw_authority @ value.row)
     in
+    let raw_attribution_labels = List.concat_map chain_identities chains in
     let* _all_identities =
       normalize_identities ~context:"static identity facts"
-        ((facts.requested_effect :: facts.facade :: facade_operations)
-        @ List.concat_map operation_identities reached_operations)
+        ((facts.requested_effect :: facts.source_root :: facts.facade :: facade_operations)
+        @ List.concat_map operation_identities reached_operations
+        @ raw_attribution_labels)
     in
-    Ok { facts; facade_operations; reached_operations }
+    let* attribution_labels =
+      normalize_identities ~context:"attribution identity facts" raw_attribution_labels
+    in
+    let* chains = dedupe_chains chains in
+    Ok { facts; facade_operations; reached_operations; chains; attribution_labels }
 
-let find_operation operation values =
-  List.find_opt (fun value -> identity_equal operation value.operation) values
+let find_operation operation (values : normalized_operation list) =
+  List.find_opt
+    (fun (value : normalized_operation) -> identity_equal operation value.operation)
+    values
 
 let attempted_driver = function
   | Governance_explain.Not_attempted -> None
@@ -431,26 +563,36 @@ let attempt_identity = function
 
 let no_attempt = function Governance_explain.Not_attempted -> true | Attempted _ -> false
 
-let normalize_proposal_reference proposal_id form =
-  let replacement = Hash.of_string "governance-review-diff-proposal-reference-v1" in
-  let rec rewrite value =
-    let args =
-      List.map
-        (function
-          | Form.F child -> Form.F (rewrite child)
-          | Form.Hash hash when Hash.equal hash proposal_id -> Form.Hash replacement
-          | scalar -> scalar)
-        value.Form.args
-    in
-    { value with Form.args }
-  in
-  rewrite form
+let proposal_hash_carrier = function
+  | { Form.head = "hash"; args = [ Form.Hash proposal_id ]; _ } -> Some proposal_id
+  | _ -> None
+
+let released_decision_parts = function
+  | {
+      Form.head = ("approved-v1" | "denied-v1") as head;
+      args = [ Form.F proposal; Form.F actor; Form.F evidence ];
+      _;
+    } ->
+      Option.map
+        (fun proposal_id -> (head, proposal_id, [ actor; evidence ]))
+        (proposal_hash_carrier proposal)
+  | { Form.head = "escalate-v1" as head; args = [ Form.F proposal; Form.F reason ]; _ } ->
+      Option.map
+        (fun proposal_id -> (head, proposal_id, [ reason ]))
+        (proposal_hash_carrier proposal)
+  | _ -> None
 
 let decision_equal old_ new_ =
   String.equal old_.decision_kind new_.decision_kind
-  && form_equal
-       (normalize_proposal_reference old_.proposal_id old_.decision)
-       (normalize_proposal_reference new_.proposal_id new_.decision)
+  &&
+  match (released_decision_parts old_.decision, released_decision_parts new_.decision) with
+  | Some (old_head, old_proposal, old_fields), Some (new_head, new_proposal, new_fields) ->
+      Hash.equal old_proposal old_.proposal_id
+      && Hash.equal new_proposal new_.proposal_id
+      && String.equal old_head new_head
+      && List.length old_fields = List.length new_fields
+      && List.for_all2 form_equal old_fields new_fields
+  | _ -> form_equal old_.decision new_.decision
 
 let classify_dynamic ~(old_ : dynamic_facts) ~(new_ : dynamic_facts) =
   let subject = old_.operation in
@@ -533,7 +675,7 @@ let classify_dynamic ~(old_ : dynamic_facts) ~(new_ : dynamic_facts) =
       { name = "proposal"; hash = new_.proposal_id };
   Ok { changes = sort_uniq_changes !changes; unavailable = [] }
 
-let labels_for_operation old_ new_ =
+let labels_for_operation (old_ : normalized_operation) (new_ : normalized_operation) =
   let subject = old_.operation in
   label_change ~subject old_.operation new_.operation
   @ label_change ~subject old_.normalizer new_.normalizer
@@ -553,7 +695,15 @@ let labels_for_operation old_ new_ =
         | Some new_identity -> label_change ~subject old_identity new_identity)
       old_.row
 
-let compare_operation old_ new_ =
+let labels_for_identity_sets old_ new_ =
+  List.concat_map
+    (fun old_identity ->
+      match List.find_opt (identity_equal old_identity) new_ with
+      | None -> []
+      | Some new_identity -> label_change ~subject:old_identity old_identity new_identity)
+    old_
+
+let compare_operation (old_ : normalized_operation) (new_ : normalized_operation) =
   let subject = old_.operation in
   let labels = labels_for_operation old_ new_ in
   let authority_equal = hash_list_equal old_.raw_authority new_.raw_authority in
@@ -600,6 +750,14 @@ let classify_static ~(old_ : static_facts) ~(new_ : static_facts) =
     let changes = ref [] in
     let unavailable = ref [] in
     let facade_subject = old_.facts.facade in
+    changes :=
+      label_change ~subject:old_.facts.source_root old_.facts.source_root new_.facts.source_root
+      @ !changes;
+    if not (identity_equal old_.facts.source_root new_.facts.source_root) then
+      changes :=
+        make_change Source_root_changed old_.facts.source_root (Some old_.facts.source_root)
+          (Some new_.facts.source_root)
+        :: !changes;
     changes := label_change ~subject:facade_subject old_.facts.facade new_.facts.facade @ !changes;
     if not (identity_equal old_.facts.facade new_.facts.facade) then
       changes :=
@@ -647,6 +805,15 @@ let classify_static ~(old_ : static_facts) ~(new_ : static_facts) =
                   { subject = old_operation; side = New; reason = unavailable_reason }
                   :: !unavailable))
       old_.facade_operations;
+    changes := labels_for_identity_sets old_.attribution_labels new_.attribution_labels @ !changes;
+    let old_chains = List.map (fun value -> value.chain_identity) old_.chains in
+    let new_chains = List.map (fun value -> value.chain_identity) new_.chains in
+    if not (hash_list_equal old_chains new_chains) then
+      changes :=
+        make_change Attribution_changed old_.facts.requested_effect
+          (Some (set_identity "attribution-chains" old_chains))
+          (Some (set_identity "attribution-chains" new_chains))
+        :: !changes;
     if not (String.equal old_.facts.topology new_.facts.topology) then
       changes :=
         make_change Other_semantic_change facade_subject

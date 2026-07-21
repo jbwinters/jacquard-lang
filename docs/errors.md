@@ -421,9 +421,14 @@ can construct such data.
 `Governance_review_diff` is a pure OCaml handoff for later package tooling; it
 adds no command and accepts no untrusted JSON. It compares typed GM.17A and
 GM.17B projections without treating their shared schema label as family
-equivalence. E1539 rejects incompatible endpoints or exact operation/driver
-linkage, E1540 rejects conflicting facts for one identity, and E1541 guards
-producer invariants. A missing query-scoped operation detail is instead the
+equivalence. Static projection preserves the GM.17B source root and attribution
+chains; exact hashes and the application ordinal establish chain identity, not
+display names or collection order. Dynamic Decision comparison ignores only
+the endpoint proposal hash in the first exact released proposal carrier and
+never rewrites Approved evidence or denial/escalation reasons. E1539 rejects
+incompatible endpoints or exact operation/driver linkage, E1540 rejects
+conflicting facts for one identity across all retained chain fields, and E1541
+guards producer invariants. A missing query-scoped operation detail is instead the
 stable `operation-not-reached` availability fact and makes the report partial.
 The report grants no authority, proves no execution or runtime absence, and
 assigns no safety verdict.
