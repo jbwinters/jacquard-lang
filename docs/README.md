@@ -205,6 +205,12 @@ Read these together when judging whether the release candidate is credible:
   report contract, and hostile no-evaluation evidence.
 - `release/governed-membranes/GM16-MANIFEST.sha256`: reconstructible GM.16
   implementation overlay on exact GM.15 successor base `3f01622`.
+- `release/governed-membranes/GM17A-EVIDENCE.md`: GM.17A fully verified,
+  proposal-scoped governance explanation; exact live-rule and Workspace-driver
+  binding; deterministic text/JSON review facts; and fail-closed hostile
+  evidence.
+- `release/governed-membranes/GM17A-MANIFEST.sha256`: reconstructible GM.17A
+  implementation overlay on exact integrated base `58c8027`.
 - `release/governed-membranes/GM10-MANIFEST.sha256`: reconstructible GM.10
   overlay on exact integrated GM.8/GM.9 base `df37a15`.
 - `release/governed-membranes/GM11-MANIFEST.sha256`: reconstructible GM.11
