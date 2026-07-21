@@ -64,6 +64,10 @@ let proposal_id = function
   | Value.VCon { name = "governance-proposal-v0"; args = _ :: Value.VHash id :: _; _ } -> id
   | value -> failwith ("expected canonical GovernanceProposal, got " ^ Value.show value)
 
+let bound_policy_id = function
+  | Value.VCon { name = "bound-policy-v0"; args = _ :: Value.VHash id :: _; _ } -> id
+  | value -> failwith ("expected released BoundPolicy, got " ^ Value.show value)
+
 let fresh_ctx store =
   let ctx = Eval.make_ctx store in
   (match Prelude.wire_builtins ctx with Ok () -> () | Error ds -> fail ds);
@@ -110,7 +114,8 @@ let install_world store ctx counters =
     | [ Value.VCon { name = "mk-request"; args = [ Value.VText url; Value.VText body ]; _ } ]
       when String.equal url deployment_url && String.equal body deployment_body ->
         (* This exact typed request is the request used to construct [deployment-proposal].
-           Validate it before incrementing the Net counter or entering the raw driver. *)
+           Validate it before incrementing the deployment Net counter or entering the
+           deployment provider boundary. Earlier live Fs/Secret work has already occurred. *)
         counters.net_fetch <- counters.net_fetch + 1;
         event "net.fetch";
         Ok deployed
@@ -286,6 +291,15 @@ let run_queue store counters =
 let run_live store counters =
   let canonical = deployment_boundary store in
   let ctx = make_ctx store counters in
+  let agent_id = lookup store "governed-deploy-agent" Resolve.KTerm in
+  let strict_policy_id =
+    bound_policy_id (eval ctx store "(app (var bind-live-policy) (var low) (var low))")
+  in
+  let permissive_policy_id =
+    bound_policy_id (eval ctx store "(app (var bind-live-policy) (var medium) (var high))")
+  in
+  if Hash.equal strict_policy_id permissive_policy_id then
+    failwith "GM.18 semantic policies unexpectedly share one identity";
   let (strict_result, strict_audits), strict_events = run store ctx counters "low" "low" in
   print_row "strict-outer" strict_result strict_audits counters;
   if strict_events <> [] then failwith "strict outer policy reached a raw driver";
@@ -305,7 +319,17 @@ let run_live store counters =
   in
   if events <> expected then failwith ("unexpected live driver order: " ^ String.concat "," events);
   Printf.printf "live-driver-order %s\n" (String.concat ">" events);
-  Printf.printf "live-deploy-boundary proposal-id %s validated-before-net\n" (Hash.to_hex canonical)
+  Printf.printf "live-deploy-boundary proposal-id %s validated-before-deployment-net\n"
+    (Hash.to_hex canonical);
+  (match (strict_result, live_result) with
+  | `Refused, `Allowed 202 -> ()
+  | _ -> failwith "GM.18 policy-only outcome pair drifted");
+  Printf.printf
+    "(\"semantic-policy-diff\", \"agent-id\", \"%s\", \"strict-policy-id\", \"%s\", \
+     \"permissive-policy-id\", \"%s\", \"strict\", \"refused\", \"permissive\", \"allowed:202\", \
+     \"agent-changed\", false)\n"
+    (Hash.to_hex agent_id) (Hash.to_hex strict_policy_id)
+    (Hash.to_hex permissive_policy_id)
 
 let () =
   if Array.length Sys.argv <> 5 then failwith "usage: live_evidence PRELUDE AGENT STORY MODE";

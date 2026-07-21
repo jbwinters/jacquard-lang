@@ -13,14 +13,27 @@ The launcher shows:
 - a nested live membrane where an inner `Allow` forwards the exact call to a
   stricter outer `Block`, plus a policy-only change that permits the same agent
   through the real `workspace.live-layer` raw-driver leaf. The host reports
-  exact `Fs`, `Net`, `Secret`, and driver-order counters;
+  exact `Fs`, `Net`, `Secret`, and driver-order counters, and derives both
+  policy IDs beside the unchanged agent ID and outcomes;
 - a proposal-only preflight through the real `Governance_approval_bridge` and
   durable `Governance_approval_queue`. The queue consumes a `Denied` decision
   bound to the canonical deployment proposal before live authority is entered,
   so every raw counter remains zero;
-- the existing GM.15 Warp fixture executing all 349 hostile sites and 698
-  typed-error/fail-stop paths; and
+- a bounded agent-specific `fault.all` world. It chooses all four immutable
+  fault bits before installing the Workspace Once handler, then runs the exact
+  unchanged agent across all 16 assignments. The resulting facade-call
+  prefixes prove that failures stop later calls, earlier failures never reach
+  deployment, and deployment occurs at most once; and
 - a reconstructed v2 audit chain whose independently supplied head verifies.
+
+The existing GM.15 349-site/698-path lane remains supporting infrastructure
+evidence; it is not presented as the agent's fourth world. Fault-world counters
+describe Workspace facade prefixes, not raw live-driver calls. Only the live
+host rows make raw `Fs`/`Net`/`Secret` claims. Its exact request check occurs at
+the deployment Net/provider boundary after earlier live file, artifact, and
+secret work; request drift proves zero deployment-provider calls, not zero
+Secret access. Strict refusal and queue denial separately demonstrate zero
+Secret access.
 
 `run.sh` is intentionally checkout-only developer evidence. The queue bridge
 and GM.15 fixture are bounded test/review seams, not new CLI or language

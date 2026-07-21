@@ -46,10 +46,19 @@ worlds in one deterministic narrative:
    remain zero. This avoids replaying prior live effects and does not wrap the
    Workspace gate with `governance.approval.before-action`. No approved host
    orchestration path is claimed by GM.18.
-4. The launcher invokes the unchanged
-   `test/cli/governance-fault-laws.jqd --exhaustive` lane. It executes all 349
-   immutable fault sites and verifies the released 698 typed-error/fail-stop
-   paths; GM.18 does not copy or weaken that matrix.
+4. The bounded agent-specific fault world calls the exact unchanged
+   `governed-deploy-agent`. `fault.all` chooses a four-bit immutable plan before
+   the Workspace Once handler is installed, then explores all 16 assignments.
+   The checked prefixes are eight manifest-read failures, four artifact-fetch
+   failures, two configuration-write failures, one deployment-fetch failure,
+   and one healthy result. Every failure stops later facade calls, every earlier
+   failure has zero deployment calls, and deployment is attempted at most once.
+   These are facade-prefix counters, not a substitute for the raw live-driver
+   counters in world 2.
+
+The launcher also runs the unchanged GM.15 349-site/698-path exhaustive lane as
+supporting generic fault infrastructure. It is not counted as the fourth agent
+world, copied, or weakened by GM.18.
 
 The deployment review row is derived at runtime from released constructors:
 
@@ -59,12 +68,30 @@ policy-id   fc90806170e9d902775c96263539a673c1f440259d178c24dd42058a8ca75ec1
 proposal-id 90d9ca81e7e55d61d8176476589f15fb14a907ce67175f745552db2dc65bba38
 ```
 
+The semantic-policy-diff row also derives both live policy IDs at runtime and
+binds them to the fixed agent identity and observed outcomes:
+
+```text
+agent-id             fab711efd085966134e843f93e201de04b8aeb966a54313ef414ff5997951e77
+strict-policy-id     0940c2e81b1c82048f3b13c67e681c42eeafe288dc059d17cf8c493fd3dd63e1
+permissive-policy-id fc90806170e9d902775c96263539a673c1f440259d178c24dd42058a8ca75ec1
+strict outcome       refused
+permissive outcome   allowed:202
+agent-changed        false
+```
+
 Before the host installs the raw live adapter, it reconstructs that proposal
 from the exact typed deployment request, Medium/High policy, and fixture
-assessment and requires the same proposal ID. The adapter then matches both
-deployment URL and generated body before incrementing the Net counter; request
-or proposal drift fails closed before the deployment driver boundary. This is
-an exact preauthorization boundary, not blanket deployment permission.
+assessment and requires the same proposal ID. Proposal drift therefore fails
+before any live world is installed. During an allowed live run, the adapter
+matches both deployment URL and generated body immediately before incrementing
+the deployment Net counter and entering the provider boundary. At that point
+the earlier manifest read, artifact fetch, configuration write, and two late
+Secret resolutions have already occurred. Request drift proves zero deployment
+Net/provider calls, not zero Secret access. Strict outer refusal and durable
+queue denial separately prove zero Secret access. This is an exact deployment
+preauthorization boundary, not blanket permission or a claim that all raw work
+is delayed until the final request.
 
 The three committed `corpus/governance/gm18-*.jqd` files are explicit audit
 evidence fixtures, not a twin of the `.jac` agent. `jac audit append` verifies each predecessor while
@@ -74,16 +101,18 @@ constructing the exact inner-Allow, outer-Block, forwarded-refusal stream;
 
 ## Warp and transcript evidence
 
-`tests.jac` contributes three examples and one two-world property. Sampled
+`tests.jac` contributes four examples and one two-world property. Sampled
 execution runs 100 seeded policy worlds; exhaustive execution covers both
 strict and permissive outer policies. The laws pin dry result/audit shape,
-inner-pass/outer-refusal ordering, exact proposal-bound denial, policy-only
-outcome change, and zero-versus-four action counts.
+inner-pass/outer-refusal ordering, exact proposal-bound denial, all 16 bounded
+agent fault assignments and their five prefixes, distinct runtime-derived
+policy IDs, one fixed agent binding, policy-only outcome change, and
+zero-versus-four facade action counts.
 
 `test/cli/governed-workspace.t` runs the public launcher and pins every row,
-identity, real live counters/order, queue result, verified head, Warp summary,
-and the GM.15 executable summary. The compiled Alcotest inventory remains 799
-cases. The overlay raises
+identity, semantic-policy-diff row, real live counters/order, agent fault row,
+queue result, verified head, Warp summary, and the supporting GM.15 executable
+summary. The compiled Alcotest inventory remains 799 cases. The overlay raises
 the cram transcript inventory from 48 to 49; executable documentation remains
 27 examples.
 

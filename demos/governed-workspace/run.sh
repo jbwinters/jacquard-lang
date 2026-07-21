@@ -47,7 +47,7 @@ echo "== unchanged Workspace-only agent =="
 echo "== inferred dry/live authority =="
 "$jac" check "$story" --print-sigs | grep -E '^(dry-world|live-world) '
 
-echo "== deterministic world-free dry run =="
+echo "== deterministic world-free dry and agent fault worlds =="
 "$jac" run "$story"
 
 echo "== deterministic nested live drivers =="
@@ -71,8 +71,8 @@ done
 echo "== Warp: sampled demo laws =="
 "$jac" test "$suite" --seed 42 --no-cache
 
-echo "== Warp: exhaustive strict/permissive policy worlds =="
+echo "== Warp: exhaustive policy and agent fault worlds =="
 "$jac" test "$suite" --seed 42 --no-cache --exhaustive
 
-echo "== GM.15 hostile fault space (existing executable lane) =="
+echo "== GM.15 supporting hostile infrastructure =="
 "$jac" test "$checkout/test/cli/governance-fault-laws.jqd" --exhaustive --no-cache

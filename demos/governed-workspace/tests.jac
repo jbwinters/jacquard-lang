@@ -40,18 +40,63 @@ governed-workspace-suite =
              }
              | _ -> check.true(False, "exact denial was not accepted")
            }}),
+     Case("fault.all covers every governed agent failure prefix",
+       fn () ->
+         match agent-fault-world() {
+           | Ok(traces) -> {
+             let all-valid =
+               list.fold(traces, True,
+                 fn (valid, trace) -> bool.and(valid, agent-fault-trace-valid?(trace)))
+             let prefixes =
+               list.fold(traces, (0, 0, 0, 0, 0),
+                 fn (counts, trace) ->
+                   match (counts, trace) {
+                     | ((manifest, artifact, write, deployment, healthy),
+                        (AgentFaultPlan(True, _, _, _), _, _, _, _, _)) ->
+                       (add(manifest, 1), artifact, write, deployment, healthy)
+                     | ((manifest, artifact, write, deployment, healthy),
+                        (AgentFaultPlan(False, True, _, _), _, _, _, _, _)) ->
+                       (manifest, add(artifact, 1), write, deployment, healthy)
+                     | ((manifest, artifact, write, deployment, healthy),
+                        (AgentFaultPlan(False, False, True, _), _, _, _, _, _)) ->
+                       (manifest, artifact, add(write, 1), deployment, healthy)
+                     | ((manifest, artifact, write, deployment, healthy),
+                        (AgentFaultPlan(False, False, False, True), _, _, _, _, _)) ->
+                       (manifest, artifact, write, add(deployment, 1), healthy)
+                     | ((manifest, artifact, write, deployment, healthy),
+                        (AgentFaultPlan(False, False, False, False), _, _, _, _, _)) ->
+                       (manifest, artifact, write, deployment, add(healthy, 1))})
+             check.eq(list.length(traces), 16, int.eq, int.show, "2^4 immutable plans")
+             check.true(all-valid,
+               "failure halts the exact prefix, earlier failures skip deployment, deployment <= 1")
+             match prefixes {
+               | (8, 4, 2, 1, 1) ->
+                 check.true(True, "manifest/artifact/write/deployment/healthy prefixes")
+               | _ -> check.true(False, "fault prefix coverage drifted")
+             }
+           }
+           | Err(_) -> check.true(False, "fault.all refused bounded four-site world")}),
      Prop("changing only the outer policy changes the outcome",
        fn () ->
          {
            let strict = sample(Bernoulli(0.5))
-           let result =
-             match strict {
-               | True -> nested-refusal-world()
-               | False -> nested-allowed-world()}
-           match (strict, result) {
-             | (True, Ok(((Err(ToolBlocked(_)), 0), _))) ->
-               check.true(True, "strict policy refuses before action")
-             | (False, Ok(((Ok(MkResponse(202, "live deployment accepted")), 4), _))) ->
-               check.true(True, "permissive policy reaches four typed actions")
-             | _ -> check.true(False, "policy-only outcome drift")
+           match policy-diff-worlds() {
+             | Ok((strict-policy-id, permissive-policy-id, strict-result, permissive-result,
+                   agent-changed)) -> {
+               check.true(bool.not(governance.hash-eq?(strict-policy-id, permissive-policy-id)),
+                 "semantic policy IDs differ")
+               check.true(bool.not(agent-changed),
+                 "one unchanged agent binding serves both policy worlds")
+               let result = match strict {
+                              | True -> strict-result
+                              | False -> permissive-result}
+               match (strict, result) {
+                 | (True, Ok(((Err(ToolBlocked(_)), 0), _))) ->
+                   check.true(True, "strict policy refuses before action")
+                 | (False, Ok(((Ok(MkResponse(202, "live deployment accepted")), 4), _))) ->
+                   check.true(True, "permissive policy reaches four typed actions")
+                 | _ -> check.true(False, "policy-only outcome drift")
+               }
+             }
+             | _ -> check.true(False, "policy identity or fixed-agent evidence drifted")
            }})])

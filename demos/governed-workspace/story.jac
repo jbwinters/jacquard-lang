@@ -1,4 +1,8 @@
 -- Deterministic interpreters for the unchanged agent in agent.jac.
+type AgentFaultPlan =
+  | AgentFaultPlan(manifest-read-fails: Bool, artifact-fetch-fails: Bool, config-write-fails: Bool,
+                   deployment-fetch-fails: Bool)
+
 demo-assessment =
   GovernanceAssessmentV0(GovernanceV0, Medium, 0.9, ["flagship fixture"],
     quote { flagship-assessment })
@@ -42,6 +46,128 @@ dry-world() =
               workspace.dry-run(bind-dry-policy(), demo-simulators,
                 fn () -> governed-deploy-agent())), demo-assessment))
 
+-- The immutable plan is selected by fault.all before this Workspace Once
+-- handler is installed. Each failure returns without resuming, so the tuple is
+-- the exact facade-call prefix reached by the unchanged agent.
+run-agent-fault-plan(plan) =
+  match plan {
+    | AgentFaultPlan(manifest-fails, artifact-fails, write-fails, deployment-fails) ->
+      (handle governed-deploy-agent() {
+         | return result ->
+           fn (reads, artifact-fetches, writes, deployment-fetches) ->
+             (plan, result, reads, artifact-fetches, writes, deployment-fetches)
+         | workspace.read-file(PathValue("deploy/manifest.json")) resume continue ->
+           fn (reads, artifact-fetches, writes, deployment-fetches) ->
+             match manifest-fails {
+               | True -> {
+                 let failure = Err(DriverFailed("manifest read injected"))
+                 let next = add(reads, 1)
+                 (plan, failure, next, artifact-fetches, writes, deployment-fetches)
+               }
+               | False -> {
+                 let next = add(reads, 1)
+                 continue(Ok("release=v18"))(next, artifact-fetches, writes, deployment-fetches)
+               }}
+         | workspace.write-file(PathValue("generated/deploy.conf"),
+           "artifact=sha256:artifact-v18") resume continue ->
+           fn (reads, artifact-fetches, writes, deployment-fetches) ->
+             match write-fails {
+               | True ->
+                 (plan, Err(DriverFailed("config write injected")), reads, artifact-fetches,
+                  add(writes, 1), deployment-fetches)
+               | False -> {
+                 let next = add(writes, 1)
+                 continue(Ok(()))(reads, artifact-fetches, next, deployment-fetches)
+               }}
+         | workspace.fetch(request) resume continue ->
+           fn (reads, artifact-fetches, writes, deployment-fetches) ->
+             match request {
+               | MkRequest("https://artifacts.example/release", "release=v18") ->
+                 match artifact-fails {
+                   | True ->
+                     (plan, Err(DriverFailed("artifact fetch injected")), reads,
+                      add(artifact-fetches, 1), writes, deployment-fetches)
+                   | False -> {
+                     let next = add(artifact-fetches, 1)
+                     continue(Ok(MkResponse(200, "sha256:artifact-v18")))(reads, next, writes,
+                       deployment-fetches)
+                   }}
+               | MkRequest("https://deploy.example/apply", "artifact=sha256:artifact-v18") ->
+                 match deployment-fails {
+                   | True ->
+                     (plan, Err(DriverFailed("deployment fetch injected")), reads,
+                      artifact-fetches, writes, add(deployment-fetches, 1))
+                   | False -> {
+                     let next = add(deployment-fetches, 1)
+                     continue(Ok(MkResponse(202, "live deployment accepted")))(reads,
+                       artifact-fetches, writes, next)
+                   }}
+               | _ ->
+                 (plan, Err(DriverFailed("unexpected fault-world request")), reads,
+                  artifact-fetches, writes, deployment-fetches)}})(0, 0, 0, 0)}
+
+agent-fault-world() =
+  throw.to-result(
+    fn () ->
+      fault.all(
+        fn () ->
+          {
+            let plan =
+              AgentFaultPlan(flaky("manifest.read"), flaky("artifact.fetch"),
+                flaky("config.write"), flaky("deployment.fetch"))
+            run-agent-fault-plan(plan)}, 32))
+
+agent-fault-trace-valid?(trace) =
+  match trace {
+    | (AgentFaultPlan(True, _, _, _), Err(DriverFailed("manifest read injected")), 1, 0, 0, 0) ->
+      True
+    | (AgentFaultPlan(False, True, _, _), Err(DriverFailed("artifact fetch injected")), 1, 1, 0, 0) ->
+      True
+    | (AgentFaultPlan(False, False, True, _), Err(DriverFailed("config write injected")), 1, 1, 1,
+       0) -> True
+    | (AgentFaultPlan(False, False, False, True), Err(DriverFailed("deployment fetch injected")),
+       1, 1, 1, 1) -> True
+    | (AgentFaultPlan(False, False, False, False), Ok(MkResponse(202, "live deployment accepted")),
+       1, 1, 1, 1) -> True
+    | _ -> False}
+
+agent-fault-healthy?(trace) =
+  match trace {
+    | (AgentFaultPlan(False, False, False, False), Ok(MkResponse(202, _)), 1, 1, 1, 1) -> True
+    | _ -> False}
+
+agent-fault-row() =
+  {
+    let report =
+      test.run(
+        fn () ->
+          match agent-fault-world() {
+            | Ok(traces) -> {
+              let all-valid =
+                list.fold(traces, True,
+                  fn (valid, trace) -> bool.and(valid, agent-fault-trace-valid?(trace)))
+              let healthy =
+                list.fold(traces, 0,
+                  fn (count, trace) ->
+                    match agent-fault-healthy?(trace) {
+                      | True -> add(count, 1)
+                      | False -> count})
+              check.true(
+                match (all-valid, list.length(traces), healthy) {
+                  | (True, 16, 1) -> True
+                  | _ -> False}, "gm18-agent-fault-prefixes")
+            }
+            | Err(_) -> check.true(False, "gm18-agent-fault-prefixes")})
+    match report {
+      | MkReport(Cons(("gm18-agent-fault-prefixes", True), Nil), None) ->
+        ("agent/fault-all", "all-prefixes-valid", "paths", 16, "prefixes",
+         "manifest:8/artifact:4/write:2/deployment:1/healthy:1", "healthy", 1, "failing", 15,
+         "deployment-max", 1)
+      | _ ->
+        ("agent/fault-all", "unexpected", "paths", 0, "prefixes", "unexpected", "healthy", 0,
+         "failing", 0, "deployment-max", 0)
+    }}
+
 -- This counter is outside the governed body and counts only a raw Workspace
 -- action that survives every nested policy. The stricter outer policy blocks
 -- the very first call, so the handler is never reached.
@@ -80,7 +206,7 @@ with-unexpected-approval-denied(body) =
         Denied(governance.proposal-id(proposal-value), "demo-invariant",
           "unexpected approval request"))}
 
-nested-world(outer-auto-up-to, outer-ask-up-to) =
+nested-world-with(agent, outer-auto-up-to, outer-ask-up-to) =
   throw.to-result(
     fn () ->
       judge.fixed(
@@ -97,12 +223,24 @@ nested-world(outer-auto-up-to, outer-ask-up-to) =
                             bind-live-policy(outer-auto-up-to, outer-ask-up-to), demo-simulators,
                             fn () ->
                               workspace.forward-layer(sequence, bind-live-policy(Medium, High),
-                                demo-simulators, fn () -> governed-deploy-agent())))))),
-        demo-assessment))
+                                demo-simulators, fn () -> agent())))))), demo-assessment))
+
+nested-world(outer-auto-up-to, outer-ask-up-to) =
+  nested-world-with(fn () -> governed-deploy-agent(), outer-auto-up-to, outer-ask-up-to)
 
 nested-refusal-world() = nested-world(Low, Low)
 
 nested-allowed-world() = nested-world(Medium, High)
+
+policy-diff-worlds() =
+  throw.to-result(
+    fn () ->
+      {
+        let agent = fn () -> governed-deploy-agent()
+        let strict-policy = bind-live-policy(Low, Low)
+        let permissive-policy = bind-live-policy(Medium, High)
+        (governance.bound-policy-id(strict-policy), governance.bound-policy-id(permissive-policy),
+         nested-world-with(agent, Low, Low), nested-world-with(agent, Medium, High), False)})
 
 -- Actual live composition: the inner membrane retains only Workspace and
 -- forwards into the released raw-driver leaf. The remaining Fs/Net/Secret row
@@ -204,3 +342,5 @@ nested-row(label, run) =
 dry-row()
 
 ("call-id/policy-id/proposal-id", throw.to-result(fn () -> identity-row()))
+
+agent-fault-row()
