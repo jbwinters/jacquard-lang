@@ -1,0 +1,1 @@
+(audit-entry-v2 (completed-v2 (governance-v0) (lit 2) (hash #c06c174f7cb5c7fc2e7c675f82c9fb76d287361bb700a16dc93701e426996bbe) (lit "forwarded") (governance-outcome-summary-v0 (governance-v0) (lit "error") (hash #67e03c6aebea5ba237d6b8b4b20c76ef87df10cfbbe06d3332e16c51a5620ce0) (lit "read-file: Blocked"))))

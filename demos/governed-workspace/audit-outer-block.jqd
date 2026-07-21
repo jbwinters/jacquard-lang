@@ -1,0 +1,1 @@
+(audit-entry-v2 (evaluated-v2 (governance-v0) (lit 1) (hash #c06c174f7cb5c7fc2e7c675f82c9fb76d287361bb700a16dc93701e426996bbe) (hash #0940c2e81b1c82048f3b13c67e681c42eeafe288dc059d17cf8c493fd3dd63e1) (governance-assessment-v0 (governance-v0) (medium) (lit 0.9) (text-list-v1 (lit "flagship fixture")) (var flagship-assessment)) (block)))
