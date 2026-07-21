@@ -1,0 +1,16 @@
+(defterm
+  ((binding workspace-why-effect-selected-callable ()
+    (lam ((pvar policy) (pvar simulators))
+      (app (var workspace.live)
+        (var policy) (var simulators)
+        (lam ()
+          (app
+            (match (var true)
+              (clause (pcon true)
+                (lam ()
+                  (app (var workspace.read-file)
+                    (app (var path-value) (lit "README.md")))))
+              (clause (pcon false)
+                (lam ()
+                  (app (var workspace.read-file)
+                    (app (var path-value) (lit "unreachable")))))))))))))

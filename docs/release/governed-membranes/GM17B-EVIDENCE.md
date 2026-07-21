@@ -58,8 +58,8 @@ follows only:
 - valid source-order `GroupRef` members, including guarded SCCs;
 - syntactically direct lambdas; and
 - closed first-order external leaves whose parameter/result types transport no
-  callable and whose closed row contains neither Workspace nor the requested
-  raw effect.
+  callable or unresolved type variable and whose closed row contains neither
+  Workspace nor the requested raw effect.
 
 Uninvoked references and lambda values are inert. Quote data, including nested
 quotes, is inert; only valid level-zero unquote splices are traversed. Cycles
@@ -67,15 +67,25 @@ stop on the active source-member stack and a fixed 100,000-node budget fails
 closed. Variable, returned, selected, tuple-carried, open external, and other
 higher-order callees fail E1535. Reachable local Workspace or requested-effect
 handlers fail E1536; unrelated handlers are conservatively inspected.
-Malformed GroupRefs/splices fail E1537 and budget exhaustion fails E1538.
+E1537 and E1538 are defensive verifier-invariant fallbacks: the public command
+first requires GM.16 verification, which normally rejects malformed GroupRefs
+or staging before attribution, while unexpectedly retained malformed data
+still fails E1537 and a traversal beyond 100,000 inspected nodes fails E1538.
+The evidence does not claim ordinary verified source can reach E1537.
 
 Direct dry roots produce zero chains. A verified live source with no matching
 attributable Workspace application also succeeds with `chains=[]`; that is not
 proof the effect is absent at runtime. Each nonempty chain records the root and
-source-member path, exact Workspace operation, ordered forwarding layers,
-truthful direct-live or live-layer leaf, canonical operation-specific driver,
-and exact raw effect. Fs selects every reached read/write chain; Net and Secret
-select reached fetch chains. Identity keys determine ordering and deduplication.
+source-member path, its public `application_site`, exact Workspace operation,
+ordered forwarding layers, truthful direct-live or live-layer leaf, canonical
+operation-specific driver, and exact raw effect. Fs selects every reached
+read/write chain; Net and Secret select reached fetch chains. An application
+site combines the exact source-member identity with a zero-based preorder
+ordinal over reachable resolved-kernel applications in that member. Directly
+invoked lambda bodies and live splices participate; inert quotes and lambda
+values do not. The member-local numbering is carrier-independent and
+distinguishes identical repeated calls. Identity and site keys determine
+ordering and deduplication.
 
 ## Static review facts and claim boundary
 
@@ -96,19 +106,22 @@ or turn an empty static result into runtime absence.
 ## Evidence matrix
 
 Four compiled Alcotest cases cover direct read/write/fetch authority, exact
-display/hash selection, deterministic zero/dry reports, source-owned Ref and
-GroupRef paths, an SCC cycle guard, live unquote, inert ref/lambda/quote data,
-forward layer order, variable and local-handler refusal, same-name and driver
-pinning, both schemas, and explicit claim limits.
+display/hash selection, distinct deterministic repeated-call sites, zero/dry
+reports including an ambiguous dry payload, source-owned Ref and GroupRef paths,
+an SCC cycle guard, live unquote, directly invoked lambdas, inert
+ref/lambda/nested-quote data, two-forward-layer order,
+variable/selected/polymorphic-transport and local-handler refusal, same-name and
+driver pinning, both schemas, and explicit claim limits.
 
 `test/cli/why-effect.t` pins the top-level command, direct and forwarded text,
 deterministic JSON, repeated-byte equality, `.jac`/`.jqd` parity, display/hash
-equivalence, Fs/Net/Secret selection, zero/dry output, inter-group and SCC path
-depth, live/inert staging, independent formats, empty failure stdout, user-hash
-E1534, higher-order E1535, local-handler E1536, and inherited E1400 collision
-and driver-drift refusal. The overlay therefore raises the successor inventory
-from 790 to 794 compiled cases and from 47 to 48 cram transcripts; the 27
-documentation examples are unchanged.
+equivalence, Fs/Net/Secret selection, distinct application ordinals, zero/dry
+output, inter-group and SCC path depth, direct-lambda and live/inert staging,
+independent formats, empty failure stdout, user-hash E1534, higher-order and
+unresolved-polymorphic transport E1535, local-handler E1536, and inherited
+E1400 collision and driver-drift refusal. The overlay therefore raises the
+successor inventory from 790 to 794 compiled cases and from 47 to 48 cram
+transcripts; the 27 documentation examples are unchanged.
 
 ## Reproduction
 

@@ -1497,9 +1497,12 @@ the frozen Call identity has no occurrence discriminator.
   leaf driver and raw effect. It uses application structure rather than an
   elaborated-row provenance hint, follows only exact source refs, GroupRefs,
   and direct lambdas, treats nested quote data and uninvoked refs/lambdas as
-  inert, and scans level-zero unquote splices. Variable, returned, open
-  external, or callable-transport paths and relevant local handlers fail
-  closed. `chains=[]` is an attribution result, never runtime absence proof.
+  inert, and scans level-zero unquote splices. Each chain identifies the exact
+  source member and a zero-based, carrier-independent preorder application
+  ordinal; this preserves two identical calls as two review sites. Variable,
+  returned, open external, or callable-transport paths and relevant local
+  handlers fail closed. `chains=[]` is an attribution result, never runtime
+  absence proof.
   Text and `json-v1` expose the same static facts; the nested
   `jacquard-governance-review-facts-v1` object carries the Workspace facade and
   operation set, exact authority envelopes, normalizer/summarizer/simulator,

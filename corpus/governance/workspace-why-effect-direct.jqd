@@ -7,6 +7,8 @@
           (tuple
             (app (var workspace.read-file)
               (app (var path-value) (lit "README.md")))
+            (app (var workspace.read-file)
+              (app (var path-value) (lit "README.md")))
             (app (var workspace.write-file)
               (app (var path-value) (lit "review.txt")) (lit "reviewed"))
             (app (var workspace.fetch)

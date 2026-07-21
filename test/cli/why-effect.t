@@ -8,11 +8,20 @@ deterministic and never claims execution provenance.
   $ jac why-effect Fs --source ../../corpus/governance/workspace-why-effect-direct.jqd --output-format json-v1 > fs.json
   $ grep -o '"operation":{"name":"workspace\.[^"]*"' fs.json
   "operation":{"name":"workspace.read-file"
-  "operation":{"name":"workspace.write-file"
   "operation":{"name":"workspace.read-file"
   "operation":{"name":"workspace.write-file"
   "operation":{"name":"workspace.read-file"
   "operation":{"name":"workspace.write-file"
+  "operation":{"name":"workspace.read-file"
+  "operation":{"name":"workspace.read-file"
+  "operation":{"name":"workspace.write-file"
+  $ grep -o '"application_site":{"member":{[^}]*},"ordinal":[0-9]*}' fs.json | sed 's/.*"ordinal"://; s/}//'
+  0
+  2
+  4
+  0
+  2
+  4
   $ grep -o '"schema":"jacquard-[^"]*"' fs.json
   "schema":"jacquard-why-effect-report-v1"
   "schema":"jacquard-governance-review-facts-v1"
@@ -39,13 +48,16 @@ dry roots are also zero-chain.
   $ jac why-effect Fs --source ../../corpus/governance/workspace-why-effect-wrapper.jqd | sed -n '2p'
   facade Workspace #d5831f495fdb26e05d53d886786f07230f7bb808ac4933ab32e0a9238c89f9d0 operations=workspace.read-file #632071e3399c913a672c4bea7d4a8b394e64a9a517552eb296db824222fe2da1,workspace.write-file #73140dde8e33c268fa589d9bfaeb28b156af2da52b22779257b2d3e9b696b03c,workspace.fetch #f6536683575508ddcc2d5a6509df832e92897cbef2caf34219f993a110079b01
   $ jac why-effect Fs --source ../../corpus/governance/workspace-why-effect-wrapper.jqd | grep '^chain ' | grep 'workspace-why-effect-wrapper' | grep 'workspace-why-effect-helper' >/dev/null
-  $ for source in workspace-check-zero-layer.jqd workspace-check-dry.jqd; do jac why-effect Fs --source ../../corpus/governance/$source --output-format json-v1 | grep -o '"chains":\[\]' | wc -l | tr -d ' '; done
+  $ for source in workspace-check-zero-layer.jqd workspace-check-dry.jqd workspace-why-effect-dry-ambiguous.jqd; do jac why-effect Fs --source ../../corpus/governance/$source --output-format json-v1 | grep -o '"chains":\[\]' | wc -l | tr -d ' '; done
+  1
   1
   1
   $ jac why-effect Fs --source ../../corpus/governance/workspace-why-effect-forwarded.jqd | grep '^chain ' | grep -o 'layer=workspace[^ ]*\|live=workspace[^ ]*'
   layer=workspace.forward-layer
+  layer=workspace.forward-layer
   live=workspace.live-layer
-  $ for source in workspace-why-effect-unquote.jqd workspace-why-effect-inert.jqd; do jac why-effect Fs --source ../../corpus/governance/$source --output-format json-v1 | grep -o '"operation":{"name":"workspace.read-file"' | wc -l | tr -d ' '; done
+  $ for source in workspace-why-effect-unquote.jqd workspace-why-effect-direct-lambda.jqd workspace-why-effect-inert.jqd; do jac why-effect Fs --source ../../corpus/governance/$source --output-format json-v1 | grep -o '"operation":{"name":"workspace.read-file"' | wc -l | tr -d ' '; done
+  3
   3
   0
   $ for source in workspace-why-effect-ref-chain.jqd workspace-why-effect-scc.jqd; do jac why-effect Fs --source ../../corpus/governance/$source | grep '^chain ' | sed 's/ operation=.*//' | awk -F' -> ' '{ print NF }'; done
@@ -57,8 +69,10 @@ refuse the entire report. Diagnostic and success formats remain independent.
 
   $ jac why-effect fs --source ../../corpus/governance/workspace-check-zero-layer.jqd --output-format json-v1 --diagnostic-format json-v1 > refused.out 2> refused.err; printf 'exit=%s stdout=%s code=%s\n' "$?" "$(wc -c < refused.out)" "$(grep -o '"code":"E1534"' refused.err | wc -l | tr -d ' ')"
   exit=1 stdout=0 code=1
-  $ for source in workspace-why-effect-variable.jqd workspace-why-effect-local-handler.jqd; do jac why-effect Fs --source ../../corpus/governance/$source --output-format json-v1 --diagnostic-format json-v1 > refused.out 2> refused.err; printf '%s exit=%s stdout=%s code=%s\n' "$source" "$?" "$(wc -c < refused.out)" "$(grep -o '"code":"E153[56]"' refused.err | wc -l | tr -d ' ')"; done
+  $ for source in workspace-why-effect-variable.jqd workspace-why-effect-selected-callable.jqd workspace-why-effect-polymorphic-transport.jqd workspace-why-effect-local-handler.jqd; do jac why-effect Fs --source ../../corpus/governance/$source --output-format json-v1 --diagnostic-format json-v1 > refused.out 2> refused.err; printf '%s exit=%s stdout=%s code=%s\n' "$source" "$?" "$(wc -c < refused.out)" "$(grep -o '"code":"E153[56]"' refused.err | wc -l | tr -d ' ')"; done
   workspace-why-effect-variable.jqd exit=1 stdout=0 code=1
+  workspace-why-effect-selected-callable.jqd exit=1 stdout=0 code=1
+  workspace-why-effect-polymorphic-transport.jqd exit=1 stdout=0 code=1
   workspace-why-effect-local-handler.jqd exit=1 stdout=0 code=1
   $ jac why-effect fs --source ../../corpus/governance/workspace-check-zero-layer.jqd --output-format json-v1 > refused.out 2> refused.text; printf 'stdout=%s text-E1534=%s\n' "$(wc -c < refused.out)" "$(grep -o 'error\[E1534\]' refused.text | wc -l | tr -d ' ')"
   stdout=0 text-E1534=1

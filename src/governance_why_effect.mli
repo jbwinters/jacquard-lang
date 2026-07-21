@@ -3,8 +3,14 @@
 
 type identity = { name : string; hash : Hash.t }
 
+type application_site = { member : identity; ordinal : int }
+(** A stable application node within one source member. [ordinal] is zero-based preorder over
+    reachable resolved-kernel application nodes in that member. Live splices and directly invoked
+    lambda bodies participate; inert quotes and lambda values do not. *)
+
 type chain = {
   source_path : identity list;
+  application_site : application_site;
   operation : identity;
   forwarding_layers : identity list;
   live_leaf : identity;

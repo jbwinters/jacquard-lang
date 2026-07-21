@@ -1,0 +1,8 @@
+(defterm
+  ((binding workspace-why-effect-polymorphic-transport ()
+    (lam ((pvar policy) (pvar simulators))
+      (app (var workspace.live)
+        (var policy) (var simulators)
+        (lam ()
+          (app (var support)
+            (app (var bernoulli) (lit 0.5)))))))))

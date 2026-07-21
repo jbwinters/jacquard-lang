@@ -40,10 +40,18 @@ let expect_source_code path code =
 let test_direct_authority () =
   Alcotest.(check (list string))
     "Fs reaches both file operations"
-    [ "workspace.read-file"; "workspace.write-file" ]
+    [ "workspace.read-file"; "workspace.read-file"; "workspace.write-file" ]
     (List.map
        (fun (chain : W.chain) -> chain.operation.name)
        (expect_ok "workspace-why-effect-direct.jqd" "Fs").chains);
+  let direct = expect_ok "workspace-why-effect-direct.jqd" "Fs" in
+  Alcotest.(check (list int))
+    "identical applications retain distinct stable sites" [ 0; 2; 4 ]
+    (List.map (fun (chain : W.chain) -> chain.application_site.ordinal) direct.chains);
+  Alcotest.(check (list string))
+    "application sites identify their source member"
+    [ "workspace-why-effect-direct"; "workspace-why-effect-direct"; "workspace-why-effect-direct" ]
+    (List.map (fun (chain : W.chain) -> chain.application_site.member.name) direct.chains);
   Alcotest.(check (list string))
     "Net reaches fetch" [ "workspace.fetch" ]
     (List.map
@@ -70,6 +78,9 @@ let test_identity_and_zero () =
   Alcotest.(check int)
     "dry roots are always zero-chain" 0
     (List.length (expect_ok "workspace-check-dry.jqd" "Secret").chains);
+  Alcotest.(check int)
+    "dry roots stay zero despite an ambiguous payload call" 0
+    (List.length (expect_ok "workspace-why-effect-dry-ambiguous.jqd" "Fs").chains);
   expect_code "workspace-check-zero-layer.jqd" "fs" "E1534";
   expect_code "workspace-check-zero-layer.jqd"
     "49648e594a9e79b0bf6e0b73f860c43fc5d816393022eca5f263c2eb6c00dec2" "E1534";
@@ -104,16 +115,21 @@ let test_source_graph_and_refusals () =
   Alcotest.(check int)
     "refs, lambda values, and quote data stay inert" 0
     (List.length (expect_ok "workspace-why-effect-inert.jqd" "Fs").chains);
+  Alcotest.(check int)
+    "a directly invoked lambda body is reachable" 1
+    (List.length (expect_ok "workspace-why-effect-direct-lambda.jqd" "Fs").chains);
   let forwarded =
     expect_ok "workspace-why-effect-forwarded.jqd" "Fs" |> fun report -> List.hd report.chains
   in
   Alcotest.(check (list string))
     "forward layers precede the live leaf"
-    [ "workspace.forward-layer"; "workspace.live-layer" ]
+    [ "workspace.forward-layer"; "workspace.forward-layer"; "workspace.live-layer" ]
     (List.map
        (fun (identity : W.identity) -> identity.name)
        (forwarded.forwarding_layers @ [ forwarded.live_leaf ]));
   expect_code "workspace-why-effect-variable.jqd" "Fs" "E1535";
+  expect_code "workspace-why-effect-selected-callable.jqd" "Fs" "E1535";
+  expect_code "workspace-why-effect-polymorphic-transport.jqd" "Fs" "E1535";
   expect_code "workspace-why-effect-local-handler.jqd" "Fs" "E1536"
 
 let test_report_contract () =
@@ -127,7 +143,7 @@ let test_report_contract () =
     "nested facts schema" "jacquard-governance-review-facts-v1"
     (json |> member "review_facts" |> member "schema" |> to_string);
   Alcotest.(check int)
-    "nested facts retain attribution layer order" 2
+    "nested facts retain every distinct application site" 3
     (json |> member "review_facts" |> member "attribution_chains" |> to_list |> List.length);
   Alcotest.(check bool)
     "not execution provenance" false

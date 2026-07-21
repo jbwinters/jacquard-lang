@@ -408,6 +408,12 @@ callee and refuses the entire report when higher-order flow, a relevant local
 handler, malformed staging data, or the traversal bound prevents a sound
 answer. Empty chains mean only that no matching attributable Workspace
 application was found; they are not proof of runtime absence.
+Every reported chain includes an application site: the exact source-member
+identity plus a zero-based preorder ordinal over reachable resolved-kernel
+applications in that member. Direct invocations and live splices count; inert
+quotes and lambda values do not. E1537 is a defensive fallback for malformed
+retained data after verification, not a claim that normal public verified input
+can construct such data.
 
 ## Appendix: the W5.3 audit (ten message rewrites)
 

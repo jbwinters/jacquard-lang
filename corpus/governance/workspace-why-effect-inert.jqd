@@ -15,4 +15,9 @@
                 (app (var path-value) (lit "lambda-is-inert")) (lit "inert")))
             (quote
               (app (var workspace.fetch)
-                (app (var mk-request) (lit "quote-is-inert") (lit "")))))))))))
+                (app (var mk-request) (lit "quote-is-inert") (lit ""))))
+            (quote
+              (quote
+                (unquote
+                  (app (var workspace.read-file)
+                    (app (var path-value) (lit "nested-quote-is-inert")))))))))))))

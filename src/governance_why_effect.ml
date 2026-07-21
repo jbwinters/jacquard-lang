@@ -1,9 +1,11 @@
 (** See {!Governance_why_effect}. *)
 
 type identity = { name : string; hash : Hash.t }
+type application_site = { member : identity; ordinal : int }
 
 type chain = {
   source_path : identity list;
+  application_site : application_site;
   operation : identity;
   forwarding_layers : identity list;
   live_leaf : identity;
@@ -142,7 +144,7 @@ let rec contains_callable ty =
   match Types.repr ty with
   | Types.TArrow _ | Types.TResume _ | Types.TVariadicArrow _ -> true
   | Types.TCon (_, arguments) | Types.TTuple arguments -> List.exists contains_callable arguments
-  | Types.TVar _ | Types.TSkolem _ -> false
+  | Types.TVar _ | Types.TSkolem _ -> true
 
 let safe_external_leaf checker ~requested hash =
   match Check.force_term checker hash with
@@ -165,10 +167,13 @@ let safe_external_leaf checker ~requested hash =
 
 let chain_key chain =
   let identities =
-    chain.source_path @ [ chain.operation ] @ chain.forwarding_layers
+    chain.source_path
+    @ [ chain.application_site.member; chain.operation ]
+    @ chain.forwarding_layers
     @ [ chain.live_leaf; chain.driver; chain.raw_effect ]
   in
   String.concat ":" (List.map (fun identity -> Hash.to_hex identity.hash) identities)
+  ^ Printf.sprintf ":%010d" chain.application_site.ordinal
 
 let compare_chain a b = String.compare (chain_key a) (chain_key b)
 
@@ -223,27 +228,32 @@ let analyze ~effect_name source =
             else Ok ()
           in
           let ( let* ) result fn = Result.bind result fn in
-          let rec scan_list path group stack = function
+          let rec scan_list owner next_application path group stack = function
             | [] -> Ok ()
             | expression :: rest ->
-                let* () = scan_eval path group stack expression in
-                scan_list path group stack rest
-          and scan_eval path group stack expression =
+                let* () = scan_eval owner next_application path group stack expression in
+                scan_list owner next_application path group stack rest
+          and scan_eval owner next_application path group stack expression =
             let* () = consume ?span:(Meta.span expression.Kernel.meta) () in
             match expression.Kernel.it with
             | Kernel.Lit _ | Kernel.Var _ | Kernel.Ref _ | Kernel.GroupRef _ | Kernel.Lam _ -> Ok ()
-            | Kernel.Ann (body, _) | Kernel.Unquote body -> scan_eval path group stack body
-            | Kernel.Tuple expressions -> scan_list path group stack expressions
+            | Kernel.Ann (body, _) | Kernel.Unquote body ->
+                scan_eval owner next_application path group stack body
+            | Kernel.Tuple expressions ->
+                scan_list owner next_application path group stack expressions
             | Kernel.Let { value; body; _ } ->
-                let* () = scan_eval path group stack value in
-                scan_eval path group stack body
+                let* () = scan_eval owner next_application path group stack value in
+                scan_eval owner next_application path group stack body
             | Kernel.Match (subject, clauses) ->
-                let* () = scan_eval path group stack subject in
-                scan_list path group stack (List.map (fun clause -> clause.Kernel.cbody) clauses)
+                let* () = scan_eval owner next_application path group stack subject in
+                scan_list owner next_application path group stack
+                  (List.map (fun clause -> clause.Kernel.cbody) clauses)
             | Kernel.App (callee, arguments) ->
-                let* () = scan_eval path group stack callee in
-                let* () = scan_list path group stack arguments in
-                invoke path group stack callee
+                let application_site = { member = owner; ordinal = !next_application } in
+                incr next_application;
+                let* () = scan_eval owner next_application path group stack callee in
+                let* () = scan_list owner next_application path group stack arguments in
+                invoke owner next_application path group stack application_site callee
             | Kernel.Handle { body; ret; ops } ->
                 let rec check_handlers = function
                   | [] -> Ok ()
@@ -271,17 +281,18 @@ let analyze ~effect_name source =
                           | _ -> check_handlers rest))
                 in
                 let* () = check_handlers ops in
-                let* () = scan_eval path group stack body in
-                let* () = scan_eval path group stack ret.Kernel.rbody in
-                scan_list path group stack (List.map (fun clause -> clause.Kernel.obody) ops)
-            | Kernel.Quote form -> scan_quote path group stack 0 form
-          and scan_quote path group stack level form =
+                let* () = scan_eval owner next_application path group stack body in
+                let* () = scan_eval owner next_application path group stack ret.Kernel.rbody in
+                scan_list owner next_application path group stack
+                  (List.map (fun clause -> clause.Kernel.obody) ops)
+            | Kernel.Quote form -> scan_quote owner next_application path group stack 0 form
+          and scan_quote owner next_application path group stack level form =
             let* () = consume ?span:(Meta.span form.Form.meta) () in
             if String.equal form.Form.head "unquote" && level = 0 then
               match form.Form.args with
               | [ Form.F splice ] -> (
                   match Kernel.expr_of_form splice with
-                  | Ok expression -> scan_eval path group stack expression
+                  | Ok expression -> scan_eval owner next_application path group stack expression
                   | Error diagnostics ->
                       Error
                         [
@@ -307,22 +318,23 @@ let analyze ~effect_name source =
               let rec scan_children = function
                 | [] -> Ok ()
                 | child :: rest ->
-                    let* () = scan_quote path group stack next_level child in
+                    let* () = scan_quote owner next_application path group stack next_level child in
                     scan_children rest
               in
               scan_children children
-          and invoke path group stack callee =
+          and invoke owner next_application path group stack application_site callee =
             let* () = consume ?span:(Meta.span callee.Kernel.meta) () in
             match callee.Kernel.it with
-            | Kernel.Ann (callee, _) -> invoke path group stack callee
-            | Kernel.Lam (_, body) -> scan_eval path group stack body
+            | Kernel.Ann (callee, _) ->
+                invoke owner next_application path group stack application_site callee
+            | Kernel.Lam (_, body) -> scan_eval owner next_application path group stack body
             | Kernel.Ref (_, Kernel.Con) -> Ok ()
             | Kernel.Ref (hash, Kernel.Op) when Hash.equal hash read_file.hash ->
-                record_chain path read_file
+                record_chain path application_site read_file
             | Kernel.Ref (hash, Kernel.Op) when Hash.equal hash write_file.hash ->
-                record_chain path write_file
+                record_chain path application_site write_file
             | Kernel.Ref (hash, Kernel.Op) when Hash.equal hash fetch.hash ->
-                record_chain path fetch
+                record_chain path application_site fetch
             | Kernel.Ref (hash, Kernel.Term) -> (
                 match member_by_hash members hash with
                 | Some _ -> invoke_member path stack hash
@@ -382,7 +394,8 @@ let analyze ~effect_name source =
                   let path = path @ [ identity ] in
                   let stack = member.member_hash :: stack in
                   match member.member_body.Kernel.it with
-                  | Kernel.Lam (_, body) -> scan_eval path member.member_group stack body
+                  | Kernel.Lam (_, body) ->
+                      scan_eval identity (ref 0) path member.member_group stack body
                   | _ ->
                       Error
                         [
@@ -392,7 +405,7 @@ let analyze ~effect_name source =
                             (Printf.sprintf "source-owned callable %s is not a direct lambda"
                                member.member_name);
                         ])
-          and record_chain path operation =
+          and record_chain path application_site operation =
             let applicable =
               if Hash.equal requested.hash fs.hash then
                 Hash.equal operation.hash read_file.hash
@@ -422,6 +435,7 @@ let analyze ~effect_name source =
                   chains :=
                     {
                       source_path = path;
+                      application_site;
                       operation;
                       forwarding_layers;
                       live_leaf;
@@ -432,7 +446,7 @@ let analyze ~effect_name source =
                   Ok ()
           in
           let* () =
-            scan_eval [ source_root ]
+            scan_eval source_root (ref 0) [ source_root ]
               (match member_by_hash members root_hash with
               | Some member -> member.member_group
               | None -> [])
@@ -509,10 +523,12 @@ let render_text report =
           report.facade_operations));
   List.iter
     (fun chain ->
-      Printf.bprintf buffer "chain source=%s operation=%s %s"
+      Printf.bprintf buffer "chain source=%s site=%s %s:%d operation=%s %s"
         (String.concat " -> "
            (List.map (fun identity -> identity.name ^ " " ^ hex identity.hash) chain.source_path))
-        chain.operation.name (hex chain.operation.hash);
+        chain.application_site.member.name
+        (hex chain.application_site.member.hash)
+        chain.application_site.ordinal chain.operation.name (hex chain.operation.hash);
       List.iter
         (fun layer -> Printf.bprintf buffer " layer=%s %s" layer.name (hex layer.hash))
         chain.forwarding_layers;
@@ -554,6 +570,12 @@ let render_json_v1 report =
     `Assoc
       [
         ("source_path", `List (List.map identity_json chain.source_path));
+        ( "application_site",
+          `Assoc
+            [
+              ("member", identity_json chain.application_site.member);
+              ("ordinal", `Int chain.application_site.ordinal);
+            ] );
         ("operation", identity_json chain.operation);
         ("forwarding_layers", `List (List.map identity_json chain.forwarding_layers));
         ("live_leaf", identity_json chain.live_leaf);
