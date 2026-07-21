@@ -66,8 +66,8 @@ deployment URL and generated body before incrementing the Net counter; request
 or proposal drift fails closed before the deployment driver boundary. This is
 an exact preauthorization boundary, not blanket deployment permission.
 
-The three committed `.jqd` files are explicit audit evidence fixtures, not a
-twin of the `.jac` agent. `jac audit append` verifies each predecessor while
+The three committed `corpus/governance/gm18-*.jqd` files are explicit audit
+evidence fixtures, not a twin of the `.jac` agent. `jac audit append` verifies each predecessor while
 constructing the exact inner-Allow, outer-Block, forwarded-refusal stream;
 `jac governance verify-log` then verifies independently supplied head
 `96b9bef50b9eaf21ffa1ed26bfc35eb37f433d1474892d3512c43205f1d4913a`.

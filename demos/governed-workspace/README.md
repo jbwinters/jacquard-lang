@@ -34,5 +34,5 @@ sh demos/governed-workspace/run.sh
 The script builds its checkout evidence host and CLI dependencies. `agent.jac`
 is the readable public application. `story.jac` contains deterministic
 interpreters and the proposal-only approval request, `tests.jac` contains
-sampled and exhaustive Warp laws, and the three `.jqd` files are audit-chain
-evidence fixtures—not hand-maintained program twins.
+sampled and exhaustive Warp laws, and the three `corpus/governance/gm18-*.jqd`
+files are audit-chain data fixtures—not hand-maintained program twins.

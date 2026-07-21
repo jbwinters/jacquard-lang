@@ -3,6 +3,7 @@ set -eu
 
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 checkout=$(CDPATH= cd -- "$here/../.." && pwd)
+audit_fixtures="$checkout/corpus/governance"
 
 if [ -f "$checkout/dune-project" ]; then
   jac="$checkout/_build/default/bin/main.exe"
@@ -62,8 +63,8 @@ TMPDIR="$bridge_tmp" "$live_host" "$checkout/prelude" "$here/agent.jac" "$here/s
 echo "== verified audit chain for inner pass then outer refusal =="
 chain="$run_tmp/nested-refusal.audit"
 head=$("$jac" audit genesis | awk '{ print $2 }')
-for entry in audit-inner-allow.jqd audit-outer-block.jqd audit-forwarded-refusal.jqd; do
-  head=$("$jac" audit append "$chain" "$here/$entry" --previous "$head" | awk '{ print $2 }')
+for entry in gm18-audit-inner-allow.jqd gm18-audit-outer-block.jqd gm18-audit-forwarded-refusal.jqd; do
+  head=$("$jac" audit append "$chain" "$audit_fixtures/$entry" --previous "$head" | awk '{ print $2 }')
 done
 "$jac" governance verify-log "$chain" --head "$head"
 
