@@ -78,13 +78,24 @@
    (setenv JACQUARD_PRELUDE ../prelude
     (setenv JACQUARD_RUNTIME ../runtime
      (setenv CC clang
-      (run ./native_fuzz.exe 1000)))))))
+     (run ./native_fuzz.exe 1000)))))))
+
+(library
+ (name governance_review_diff_test_support)
+ (wrapped false)
+ (modules test_governance_review_diff)
+ (libraries jacquard alcotest yojson))
+
+(executable
+ (name governance_review_diff_focused)
+ (modules governance_review_diff_focused)
+ (libraries governance_review_diff_test_support alcotest))
 
 (test
  (name test_jacquard)
  (modules
-  (:standard \ corpus_support gen_goldens gen_surface_twins gen_prelude_goldens gen_sig_goldens gen_freeze_goldens gen_diag_goldens gen_native_parity native_fuzz once_interpreter_probe gen_once_hostile scope_policy_trace round_robin_trace))
- (libraries jacquard corpus_support alcotest fmt qcheck-core qcheck-alcotest unix str yojson)
+  (:standard \ corpus_support gen_goldens gen_surface_twins gen_prelude_goldens gen_sig_goldens gen_freeze_goldens gen_diag_goldens gen_native_parity native_fuzz once_interpreter_probe gen_once_hostile scope_policy_trace round_robin_trace test_governance_review_diff governance_review_diff_focused))
+ (libraries jacquard governance_review_diff_test_support corpus_support alcotest fmt qcheck-core qcheck-alcotest unix str yojson)
  (deps
   (glob_files_rec ../corpus/*.jqd)
   (glob_files_rec ../corpus/*.jac)
@@ -141,6 +152,8 @@
   ../docs/release/governed-membranes/GM17A-MANIFEST.sha256
   ../docs/release/governed-membranes/GM17B-EVIDENCE.md
   ../docs/release/governed-membranes/GM17B-MANIFEST.sha256
+  ../docs/release/governed-membranes/GM17C-EVIDENCE.md
+  ../docs/release/governed-membranes/GM17C-MANIFEST.sha256
   ../docs/release/governed-membranes/GM13A-EVIDENCE.md
   ../docs/release/governed-membranes/GM13A-MANIFEST.sha256
   ../docs/release/governed-membranes/GM13B-EVIDENCE.md

@@ -1521,6 +1521,19 @@ the frozen Call identity has no occurrence discriminator.
   claim that the driver ran or that an external receipt is true.
 * `jac governance verify-log <head>` verifies the hash chain offline.
 * Package upgrade plans classify new facade operations, widened raw driver rows, policy changes, and simulator changes separately.
+  GM.17C implements that handoff as the pure public OCaml module
+  `Governance_review_diff`, not as package management or a new command. It
+  consumes only typed projections of the two existing producer reports,
+  preserves their disjoint fact families, and emits
+  `jacquard-governance-diff-report-v1`. Exact facade-operation identities drive
+  additions/removals; normalized raw-row sets distinguish widening, narrowing,
+  and incomparable change. Policy, simulator, normalizer, driver, authority,
+  label, and other semantic changes remain explicit. Operation rendering-only
+  requires only the summarizer identity to change. Proposal rendering-only
+  requires all supplied semantic proposal facts to agree and is forbidden by
+  any attempted-action evidence. Missing query-scoped reached detail is
+  `operation-not-reached` and makes the report partial; it is not a diagnostic
+  or runtime-absence claim.
 * The playground renders the pipeline as `request -> assessment -> verdict -> consent -> action/simulation -> outcome`, with every box linked to its hash.
 * Semantic diff treats a policy threshold change as code, because it is code.
 

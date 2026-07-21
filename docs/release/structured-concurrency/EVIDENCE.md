@@ -27,7 +27,7 @@ native Channel, actor, or supervision claim.
 | C3 | Scoped typed channels run through deterministic FIFO, seeded, replay, exhaustive, and cached interpreter scheduling with exact run/scope ownership, rendezvous and buffering, close, cancellation, and deadlock behavior. | `channel-contract`, `round-robin`, and `exhaustive-schedule` suites; `test/cli/task-values.t`; `test/cli/schedule-replay.t`; and the frozen traces below |
 | C4 | Not claimed: host asynchronous I/O, actors, and supervision are absent. | [LIMITS.md](LIMITS.md) |
 
-The current successor inventory is exactly 794 compiled Alcotest/QCheck cases, 48 recursive
+The current successor inventory is exactly 799 compiled Alcotest/QCheck cases, 48 recursive
 cram transcript files, and 27 named doctest examples across 8 documents. The
 repository release-law checks recompute those counts instead of trusting this
 paragraph.
@@ -738,7 +738,7 @@ opam exec -- dune build test/test_jacquard.exe
 
 The current inventory is mechanically checked against compiled discovery:
 
-- Alcotest/QCheck cases: `794`
+- Alcotest/QCheck cases: `799`
 - Cram transcript files: `48`
 
 The SC.14 baseline arithmetic remains exact: twelve compiled
@@ -769,7 +769,8 @@ cases and one public CLI transcript, producing the then-current
 `786 / 46 / 27` inventory. GM.17A adds four governance-explanation cases and
 one public CLI transcript, producing the then-current `790 / 47 / 27`
 inventory. GM.17B adds four static effect-attribution cases and one public CLI
-transcript, producing the current `794 / 48 / 27` inventory.
+transcript, and GM.17C adds five pure machine review-diff cases, producing the
+current `799 / 48 / 27` inventory.
 
 Native scheduling remains outside the current backend. Differential coverage is
 therefore limited to the supported case: an Async operation discharged by an
