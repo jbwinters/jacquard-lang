@@ -43,6 +43,8 @@ one versus two distinct application sites, or changing a path, ordinal, or
 forwarding layer is `attribution-changed`. Display names never establish chain
 identity. All retained chain identities participate in cross-field duplicate
 label validation, and cross-endpoint name drift remains `label-changed`.
+Compatible requested-effect hash comparisons likewise retain name drift as
+`label-changed`.
 
 `operation-rendering-only` requires only the summarizer identity to change
 while the facade operation, authority, normalizer, simulator, driver, row, and
@@ -66,6 +68,9 @@ proof of runtime absence.
 The deterministic `jacquard-governance-diff-report-v1` shape is `schema`,
 `completeness`, sorted `changes`, sorted `unavailable`, and fixed evidence
 limits. Kind rank, subject identity, and old/new identities determine ordering.
+Synthetic comparison fingerprints use framed, versioned, semantic domains;
+equal member vectors in authority, driver-row, and attribution aggregates do
+not share a fingerprint. Producer-supplied HASH_V0 identities are unchanged.
 Text and compact JSON render the same typed report. The report grants no
 authority, proves no external execution, proves no runtime absence, and assigns
 no safety verdict.

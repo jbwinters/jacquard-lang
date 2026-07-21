@@ -137,7 +137,36 @@ let test_facade_and_row_categories () =
   check_kinds "strict row subset" [ D.Driver_row_narrowed ] (classify_static widened base);
   let secret = authority "Secret" in
   let changed = static_report ~reached_operations:[ operation_fact ~row:[ secret ] () ] () in
-  check_kinds "incomparable row" [ D.Driver_row_changed ] (classify_static widened changed)
+  check_kinds "incomparable row" [ D.Driver_row_changed ] (classify_static widened changed);
+  let same_old_members = [ authority "Fs" ] in
+  let same_new_members = [ authority "Net" ] in
+  let separated =
+    classify_static
+      (static_report
+         ~reached_operations:
+           [ operation_fact ~raw_authority:same_old_members ~row:same_old_members () ]
+         ())
+      (static_report
+         ~reached_operations:
+           [ operation_fact ~raw_authority:same_new_members ~row:same_new_members () ]
+         ())
+  in
+  check_kinds "aggregate category changes" [ D.Driver_row_changed; D.Authority_changed ] separated;
+  let change kind = List.find (fun (change : D.change) -> change.kind = kind) separated.changes in
+  let required_identity label = function
+    | Some value -> value
+    | None -> Alcotest.failf "%s unexpectedly omitted its aggregate fingerprint" label
+  in
+  let authority_change = change D.Authority_changed in
+  let row_change = change D.Driver_row_changed in
+  Alcotest.(check bool)
+    "old equal member vectors are domain-separated" false
+    (Hash.equal (required_identity "old authority" authority_change.old_identity).hash
+       (required_identity "old driver row" row_change.old_identity).hash);
+  Alcotest.(check bool)
+    "new equal member vectors are domain-separated" false
+    (Hash.equal (required_identity "new authority" authority_change.new_identity).hash
+       (required_identity "new driver row" row_change.new_identity).hash)
 
 let test_semantic_and_rendering_categories () =
   let base = static_report () in
@@ -270,6 +299,12 @@ let test_labels_partial_and_no_change () =
   let renamed_root = { W.name = "source-root-label"; hash = (identity "source-root").hash } in
   check_kinds "source root name is non-semantic" [ D.Label_changed ]
     (classify_static (static_report ()) (static_report ~source_root:renamed_root ()));
+  let requested_effect = identity "QueryEffect" in
+  let renamed_requested_effect = { W.name = "query-effect-label"; hash = requested_effect.hash } in
+  check_kinds "requested effect name is non-semantic" [ D.Label_changed ]
+    (classify_static
+       (static_report ~requested_effect ())
+       (static_report ~requested_effect:renamed_requested_effect ()));
   let renamed_member = { W.name = "source-member-label"; hash = (identity "source-member").hash } in
   check_kinds "attribution names are non-semantic" [ D.Label_changed ]
     (classify_static with_first (static_report ~chains:[ chain ~member:renamed_member () ] ()));

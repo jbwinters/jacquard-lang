@@ -168,8 +168,26 @@ let option_compare compare left right =
   | Some _, None -> 1
   | Some left, Some right -> compare left right
 
-let identity_of_form name value = { name; hash = Hash.of_string (compact value) }
-let identity_of_string name value = { name; hash = Hash.of_string value }
+let synthetic_hash ~domain ~name fields =
+  let buffer = Buffer.create 256 in
+  let add_framed value =
+    Buffer.add_string buffer (string_of_int (String.length value));
+    Buffer.add_char buffer ':';
+    Buffer.add_string buffer value
+  in
+  List.iter add_framed
+    ("jacquard-governance-review-diff-fingerprint-v1" :: domain :: name
+    :: string_of_int (List.length fields)
+    :: fields);
+  Hash.of_string (Buffer.contents buffer)
+
+let identity_of_form name value =
+  { name; hash = synthetic_hash ~domain:"form" ~name [ compact value ] }
+
+let identity_of_strings name values =
+  { name; hash = synthetic_hash ~domain:"string-fields" ~name values }
+
+let identity_of_string name value = identity_of_strings name [ value ]
 
 let change_kind_to_string = function
   | Facade_added -> "facade-added"
@@ -279,8 +297,8 @@ let hash_list_equal left right =
 let subset left right = List.for_all (fun item -> List.exists (identity_equal item) right) left
 
 let set_identity name values =
-  let bytes = String.concat "\000" (List.map (fun value -> Hash.to_hex value.hash) values) in
-  { name; hash = Hash.of_string bytes }
+  let members = List.map (fun value -> Hash.to_hex value.hash) values in
+  { name; hash = synthetic_hash ~domain:"identity-set" ~name members }
 
 type normalized_operation = {
   operation : identity;
@@ -365,25 +383,24 @@ type normalized_chain = {
 }
 
 let encode_hashes label values =
-  String.concat "\000"
-    (label
-    :: string_of_int (List.length values)
-    :: List.map (fun value -> Hash.to_hex value.hash) values)
+  label
+  :: string_of_int (List.length values)
+  :: List.map (fun value -> Hash.to_hex value.hash) values
 
 let attribution_identity ~source_path ~application_member ~application_ordinal ~operation
     ~forwarding_layers ~live_leaf ~driver ~raw_effect =
-  let bytes =
-    String.concat "\000"
-      [
-        "governance-review-attribution-chain-v1";
-        encode_hashes "source-path" source_path;
+  let fields =
+    encode_hashes "source-path" source_path
+    @ [
         "application-member";
         Hash.to_hex application_member.hash;
         "application-ordinal";
         string_of_int application_ordinal;
         "operation";
         Hash.to_hex operation.hash;
-        encode_hashes "forwarding-layers" forwarding_layers;
+      ]
+    @ encode_hashes "forwarding-layers" forwarding_layers
+    @ [
         "live-leaf";
         Hash.to_hex live_leaf.hash;
         "driver";
@@ -392,7 +409,8 @@ let attribution_identity ~source_path ~application_member ~application_ordinal ~
         Hash.to_hex raw_effect.hash;
       ]
   in
-  { name = "attribution-chain"; hash = Hash.of_string bytes }
+  let name = "attribution-chain" in
+  { name; hash = synthetic_hash ~domain:"attribution-chain" ~name fields }
 
 let normalize_chain (chain : Governance_why_effect.chain) =
   if chain.application_site.ordinal < 0 then
@@ -550,16 +568,21 @@ let attempt_equal left right =
 let attempt_identity = function
   | Governance_explain.Not_attempted -> identity_of_string "action" "not-attempted"
   | Governance_explain.Attempted value ->
-      let optional_hash = Option.fold ~none:"none" ~some:Hash.to_hex in
-      identity_of_string "action"
-        (String.concat "\000"
-           [
-             value.state;
-             Hash.to_hex value.attempt_id;
-             Hash.to_hex value.driver_id;
-             optional_hash value.receipt_id;
-             optional_hash value.external_receipt_digest;
-           ])
+      let optional_hash label = function
+        | None -> [ label; "none" ]
+        | Some value -> [ label; "some"; Hash.to_hex value ]
+      in
+      identity_of_strings "action"
+        ([
+           "state";
+           value.state;
+           "attempt-id";
+           Hash.to_hex value.attempt_id;
+           "driver-id";
+           Hash.to_hex value.driver_id;
+         ]
+        @ optional_hash "receipt-id" value.receipt_id
+        @ optional_hash "external-receipt-digest" value.external_receipt_digest)
 
 let no_attempt = function Governance_explain.Not_attempted -> true | Attempted _ -> false
 
@@ -638,8 +661,10 @@ let classify_dynamic ~(old_ : dynamic_facts) ~(new_ : dynamic_facts) =
   in
   if not evaluation_equal then
     add Evaluation_changed
-      (identity_of_string "evaluation" (old_.policy_rule ^ "\000" ^ old_.recorded_verdict))
-      (identity_of_string "evaluation" (new_.policy_rule ^ "\000" ^ new_.recorded_verdict));
+      (identity_of_strings "evaluation"
+         [ "policy-rule"; old_.policy_rule; "recorded-verdict"; old_.recorded_verdict ])
+      (identity_of_strings "evaluation"
+         [ "policy-rule"; new_.policy_rule; "recorded-verdict"; new_.recorded_verdict ]);
   let decision_equal = decision_equal old_ new_ in
   if not decision_equal then
     add Decision_changed
@@ -750,6 +775,10 @@ let classify_static ~(old_ : static_facts) ~(new_ : static_facts) =
     let changes = ref [] in
     let unavailable = ref [] in
     let facade_subject = old_.facts.facade in
+    changes :=
+      label_change ~subject:old_.facts.requested_effect old_.facts.requested_effect
+        new_.facts.requested_effect
+      @ !changes;
     changes :=
       label_change ~subject:old_.facts.source_root old_.facts.source_root new_.facts.source_root
       @ !changes;
