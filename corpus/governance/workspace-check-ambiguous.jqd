@@ -1,0 +1,11 @@
+(defterm
+  ((binding governance-check-live-root ()
+    (lam ((pvar policy) (pvar simulators))
+      (app (var workspace.live)
+        (var policy) (var simulators) (lam () (lit "live")))))))
+
+(defterm
+  ((binding governance-check-dry-root ()
+    (lam ((pvar policy) (pvar simulators))
+      (app (var workspace.dry-run)
+        (var policy) (var simulators) (lam () (lit "dry")))))))

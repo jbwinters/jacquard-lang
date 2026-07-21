@@ -292,6 +292,7 @@ not raise an exception.
 | E1410 | an `Ask` proposal does not bind every exact review hash | omitting the assessment identity |
 | E1411 | forwarded-call lineage is inconsistent or not anchored to the carried Call | unrelated previous/current IDs that agree only with each other |
 | E1412 | governed code can reach `Eval` | handling `Eval` locally and then claiming it is absent |
+| E1413 | canonical Workspace source contract is missing, ambiguous, open, carries unreported residual authority, or is structurally unsupported | an inert `workspace.live` reference or a live root whose closed outward row also contains `Console` |
 
 `Governance_verify.verify` consumes a versioned analysis IR produced by trusted
 tooling from resolved, typechecked artifacts. That IR is verifier evidence, not
@@ -302,8 +303,11 @@ configured evidence rather than row-type proofs. `Eval` is an absolute
 prohibition for governed code, including code that attempts to handle it
 locally.
 
-GM.8 provides this library analysis boundary. A later tooling slice may expose
-it as `jac governance check`; no such command is implied by these diagnostics.
+GM.8 provides the library analysis boundary. GM.16 additionally exposes
+`jac governance check FILE` for the exact `workspace-v0` source contract.
+E1400--E1412 retain their existing meanings; E1413 is the command's additive
+fail-closed source-shape diagnostic. A successful source report does not replace
+`jac governance verify-run BUNDLE` for dynamic artifact identities.
 
 ## Governance run bundle (E15xx)
 

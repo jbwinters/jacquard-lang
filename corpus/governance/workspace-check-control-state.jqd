@@ -1,0 +1,10 @@
+(defterm
+  ((binding governance-check-control-state ()
+    (lam ((pvar policy) (pvar simulators))
+      (app (var workspace.live)
+        (var policy) (var simulators)
+        (lam ()
+          (handle (lit "body")
+            (ret (pvar value) (var value))
+            (opclause get () resume (app (var resume) (lit "state")))
+            (opclause put ((pvar value)) resume (app (var resume) (tuple))))))))))

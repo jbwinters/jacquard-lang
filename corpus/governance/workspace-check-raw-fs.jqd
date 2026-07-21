@@ -1,0 +1,6 @@
+(defterm
+  ((binding governance-check-raw-fs ()
+    (lam ((pvar policy) (pvar simulators))
+      (app (var workspace.live)
+        (var policy) (var simulators)
+        (lam () (app (var read) (lit "/forbidden"))))))))

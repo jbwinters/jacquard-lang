@@ -1,0 +1,5 @@
+(defterm
+  ((binding governance-check-workspace-dry ()
+    (lam ((pvar policy) (pvar simulators))
+      (app (var workspace.dry-run)
+        (var policy) (var simulators) (lam () (lit "verified")))))))

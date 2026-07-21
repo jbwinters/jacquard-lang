@@ -1,0 +1,11 @@
+(defterm
+  ((binding governance-check-workspace-eval ()
+    (lam ((pvar policy) (pvar simulators))
+      (app (var workspace.live)
+        (var policy) (var simulators)
+        (lam ()
+          (handle
+            (app (var eval-code) (quote (lit "forbidden")))
+            (ret (pvar value) (var value))
+            (opclause eval-code ((pvar code)) resume
+              (app (var resume) (lit "handled"))))))))))

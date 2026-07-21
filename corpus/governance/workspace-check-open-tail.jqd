@@ -1,0 +1,3 @@
+(defterm
+  ((binding governance-check-workspace-open-tail ()
+    (var workspace.live))))

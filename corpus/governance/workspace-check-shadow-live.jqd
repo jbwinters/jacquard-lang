@@ -1,0 +1,10 @@
+(defterm
+  ((binding workspace.live ()
+    (lam ((pvar policy) (pvar simulators) (pvar body)) (lit "shadowed")))))
+
+(defterm
+  ((binding governance-check-shadow-live-root ()
+    (lam ((pvar policy) (pvar simulators))
+      (app
+        (ref #804dfb7bc41dbdcd69e4ae88cb26254603f0c20e6788cc5965515dd51c2e82c6 term)
+        (var policy) (var simulators) (lam () (lit "exact-hash-root")))))))

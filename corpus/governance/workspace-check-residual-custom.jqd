@@ -1,0 +1,9 @@
+(defeffect governance-check-residual ()
+  (op governance-check-residual.perform once () (ttuple)))
+
+(defterm
+  ((binding governance-check-residual-custom ()
+    (lam ((pvar policy) (pvar simulators))
+      (app (var workspace.live)
+        (var policy) (var simulators)
+        (lam () (app (var governance-check-residual.perform))))))))

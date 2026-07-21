@@ -1,0 +1,11 @@
+(defterm
+  ((binding governance-check-wrong-binder ()
+    (lam ((pvar outer-policy) (pvar inner-policy) (pvar simulators))
+      (app (var governance.with-sequence)
+        (lam ((pvar sequence))
+          (app (var workspace.live-layer)
+            (var sequence) (var inner-policy) (var simulators)
+            (lam ()
+              (app (var workspace.forward-layer)
+                (var sequence) (var outer-policy) (var simulators)
+                (lam () (lit "miswired")))))))))))
