@@ -104,6 +104,32 @@ nested-refusal-world() = nested-world(Low, Low)
 
 nested-allowed-world() = nested-world(Medium, High)
 
+-- Actual live composition: the inner membrane retains only Workspace and
+-- forwards into the released raw-driver leaf. The remaining Fs/Net/Secret row
+-- is deliberately visible and is installed by the checkout evidence host.
+-- Judge also stays visible here so a durable approval host can assess the
+-- exact released Call without changing the agent or membrane composition.
+live-approval-world(outer-auto-up-to, outer-ask-up-to) =
+  throw.to-result(
+    fn () ->
+      audit.in-memory(
+        fn () ->
+          governance.with-sequence(
+            fn (sequence) ->
+              workspace.live-layer(sequence, bind-live-policy(outer-auto-up-to, outer-ask-up-to),
+                demo-simulators,
+                fn () ->
+                  workspace.forward-layer(sequence, bind-live-policy(Medium, High),
+                    demo-simulators, fn () -> governed-deploy-agent())))))
+
+live-world(outer-auto-up-to, outer-ask-up-to) =
+  with-unexpected-approval-denied(
+    fn () ->
+      throw.catch(
+        fn () ->
+          judge.fixed(fn () -> live-approval-world(outer-auto-up-to, outer-ask-up-to),
+            demo-assessment), fn (message) -> Err(message)))
+
 identity-row-of(call, policy, proposal-value) =
   (hash.to-text(governance.call-id(call)), hash.to-text(governance.bound-policy-id(policy)),
    hash.to-text(governance.proposal-id(proposal-value)))
@@ -117,7 +143,7 @@ identity-row() =
       match workspace.call-fetch(request) {
         | Err(message) -> throw(message)
         | Ok(value) -> value}
-    let policy = bind-live-policy(Low, High)
+    let policy = bind-live-policy(Medium, High)
     let proposal-result =
       governance.make-proposal(call, policy, demo-assessment, governance.call-code(call),
         governance.call-summary(call), None)
@@ -127,14 +153,13 @@ identity-row() =
         | Ok(value) -> value}
     identity-row-of(call, policy, proposal-value)}
 
-deployment-proposal() =
+deployment-proposal-for(request) =
   {
-    let request = MkRequest("https://deploy.example/apply", "artifact=sha256:artifact-v18")
     let call =
       match workspace.call-fetch(request) {
         | Err(message) -> throw(message)
         | Ok(value) -> value}
-    let policy = bind-live-policy(Low, High)
+    let policy = bind-live-policy(Medium, High)
     let proposal-result =
       governance.make-proposal(call, policy, demo-assessment, governance.call-code(call),
         governance.call-summary(call), None)
@@ -142,6 +167,24 @@ deployment-proposal() =
       | Err(message) -> throw(message)
       | Ok(proposal-value) -> proposal-value
     }}
+
+deployment-proposal() =
+  deployment-proposal-for(
+    MkRequest("https://deploy.example/apply", "artifact=sha256:artifact-v18"))
+
+-- Durable approval is a proposal-only preflight boundary. The trusted host may
+-- separately orchestrate a live phase after Approved; this expression never
+-- enters live-world, so bridge reruns cannot replay Fs, Net, or Secret work.
+deployment-approval-request() =
+  throw.catch(
+    fn () ->
+      {
+        let proposal-value = deployment-proposal()
+        let decision = governance-approval.ask(proposal-value)
+        match governance.approval.validate-decision(proposal-value, decision) {
+          | Ok(exact-decision) -> Ok(exact-decision)
+          | Err(message) -> Err(DriverFailed(message))
+        }}, fn (message) -> Err(DriverFailed(message)))
 
 dry-row() =
   match dry-world() {
@@ -159,9 +202,5 @@ nested-row(label, run) =
 
 -- --- demo driver ---
 dry-row()
-
-nested-row("agent/live-nested/strict-outer", fn () -> nested-refusal-world())
-
-nested-row("agent/live-nested/permissive-outer", fn () -> nested-allowed-world())
 
 ("call-id/policy-id/proposal-id", throw.to-result(fn () -> identity-row()))

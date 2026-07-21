@@ -27,18 +27,25 @@ worlds in one deterministic narrative:
 1. The no-grant dry world uses the real `workspace.dry-run` with closed pure
    simulators. Four facade calls yield eight ordered audit entries, HTTP 202,
    and zero raw actions. The fully handled `dry-world` row is empty.
-2. Two `workspace.forward-layer` calls share one audit sequence. A permissive
-   inner policy records `Allow` and forwards the same call identity unchanged;
-   the stricter outer policy records `Block`. The result is refused after three
-   audit entries and zero raw actions. Changing only the outer semantic policy
-   allows the same agent and reaches four typed actions.
-3. The denial beat executes existing compiled case 4 of
-   `governance-approval-bridge`. That case calls the real
-   `Governance_approval_bridge` and durable `Governance_approval_queue`, writes
-   a `Denied` decision carrying the queue's exact proposal ID, reruns the gate,
-   and asserts the driver counter remains zero. The launcher labels this
-   honestly as host-bridge evidence; the surface story does not substitute
-   `governance.approval.scripted`.
+2. The actual live composition places an inner `workspace.forward-layer`
+   inside the released `workspace.live-layer` leaf and shares one audit
+   sequence. A permissive inner policy records `Allow` and forwards the exact
+   call unchanged; the stricter outer policy records `Block`. The refused run
+   has three audit entries and zero `Fs`, `Net`, or `Secret` calls. Changing
+   only the outer policy permits the unchanged agent: the host records one
+   read, one write, two fetches, two secret reads, and two secret exposures in
+   the exact raw-driver order printed by the transcript. The inferred live row
+   is `{Secret, Fs, Net}`; the dry row remains empty.
+3. The denial beat evaluates the demo's proposal-only
+   `deployment-approval-request()` through the real
+   `Governance_approval_bridge` and durable `Governance_approval_queue`. The
+   first run durably submits the canonical Medium/High deployment proposal
+   without entering a live world. After the host records `Denied`, a complete
+   rerun consumes that exact Decision and returns it. The three durable records
+   are Submit, Decision, and Consume; `Fs`, `Net`, and `Secret` counters all
+   remain zero. This avoids replaying prior live effects and does not wrap the
+   Workspace gate with `governance.approval.before-action`. No approved host
+   orchestration path is claimed by GM.18.
 4. The launcher invokes the unchanged
    `test/cli/governance-fault-laws.jqd --exhaustive` lane. It executes all 349
    immutable fault sites and verifies the released 698 typed-error/fail-stop
@@ -48,9 +55,16 @@ The deployment review row is derived at runtime from released constructors:
 
 ```text
 call-id     e73e16e6f1659873b45eafdeb84f161180cd72d9e8e790369f44683bd63ab672
-policy-id   94542d3681b9b6f6530545f93c391276bbca4813854c9f75e4d6f26407e1da6e
-proposal-id 0057b000967a9ee86a0fc792a31dfefeab06af5b1606f76c16fba311374ebf16
+policy-id   fc90806170e9d902775c96263539a673c1f440259d178c24dd42058a8ca75ec1
+proposal-id 90d9ca81e7e55d61d8176476589f15fb14a907ce67175f745552db2dc65bba38
 ```
+
+Before the host installs the raw live adapter, it reconstructs that proposal
+from the exact typed deployment request, Medium/High policy, and fixture
+assessment and requires the same proposal ID. The adapter then matches both
+deployment URL and generated body before incrementing the Net counter; request
+or proposal drift fails closed before the deployment driver boundary. This is
+an exact preauthorization boundary, not blanket deployment permission.
 
 The three committed `.jqd` files are explicit audit evidence fixtures, not a
 twin of the `.jac` agent. `jac audit append` verifies each predecessor while
@@ -67,8 +81,9 @@ inner-pass/outer-refusal ordering, exact proposal-bound denial, policy-only
 outcome change, and zero-versus-four action counts.
 
 `test/cli/governed-workspace.t` runs the public launcher and pins every row,
-identity, queue result, verified head, Warp summary, and the GM.15 executable
-summary. The compiled Alcotest inventory remains 799 cases. The overlay raises
+identity, real live counters/order, queue result, verified head, Warp summary,
+and the GM.15 executable summary. The compiled Alcotest inventory remains 799
+cases. The overlay raises
 the cram transcript inventory from 48 to 49; executable documentation remains
 27 examples.
 
@@ -87,6 +102,5 @@ opam exec -- dune build --root "$PWD" @doc
 sha256sum -c docs/release/governed-membranes/GM18-MANIFEST.sha256
 ```
 
-Use a newly created empty TMPDIR: the pre-existing compiled harness derives
-temporary store names from process IDs and can collide with stale stores after
-PID reuse. The public launcher creates a bounded fresh subtree for the bridge.
+Use a newly created empty TMPDIR. The public launcher creates bounded fresh
+subtrees for the live host and durable bridge queue.

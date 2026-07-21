@@ -22,6 +22,7 @@
   ../scope_policy_trace.exe
   ../round_robin_trace.exe
   ../../demos/concurrency/concurrency_evidence.exe
+  ../../demos/governed-workspace/live_evidence.exe
   (source_tree ../native-parallel)
   (source_tree ../../scripts)
   governance-gate-dry-laws.jqd

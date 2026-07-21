@@ -1,0 +1,3 @@
+(executable
+ (name live_evidence)
+ (libraries jacquard unix))

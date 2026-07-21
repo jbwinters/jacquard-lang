@@ -7,13 +7,19 @@ audit chain, demo-specific Warp laws, and GM.15's existing hostile matrix.
   == unchanged Workspace-only agent ==
   governed-deploy-agent : () ->{Workspace} Result ToolError Response
   agent-id fab711efd085966134e843f93e201de04b8aeb966a54313ef414ff5997951e77
-  == deterministic dry and nested live worlds ==
+  == inferred dry/live authority ==
+  dry-world : forall a. () ->{} Result a (Result ToolError Response, List AuditEntry)
+  live-world : forall a. (Risk, Risk) ->{Secret, Fs, Net} Result a (Result ToolError Response, List AuditEntry)
+  == deterministic world-free dry run ==
   ("agent/dry", "simulated", 202, 8, "raw-actions", 0)
-  ("agent/live-nested/strict-outer", "refused", 3, "raw-actions", 0)
-  ("agent/live-nested/permissive-outer", "allowed", 16, "raw-actions", 4)
-  ("call-id/policy-id/proposal-id", ok(("e73e16e6f1659873b45eafdeb84f161180cd72d9e8e790369f44683bd63ab672", "94542d3681b9b6f6530545f93c391276bbca4813854c9f75e4d6f26407e1da6e", "0057b000967a9ee86a0fc792a31dfefeab06af5b1606f76c16fba311374ebf16")))
+  ("call-id/policy-id/proposal-id", ok(("e73e16e6f1659873b45eafdeb84f161180cd72d9e8e790369f44683bd63ab672", "fc90806170e9d902775c96263539a673c1f440259d178c24dd42058a8ca75ec1", "90d9ca81e7e55d61d8176476589f15fb14a907ce67175f745552db2dc65bba38")))
+  == deterministic nested live drivers ==
+  ("agent/live-nested/strict-outer", "refused", "audit", 3, "fs.read", 0, "fs.write", 0, "net.fetch", 0, "secret.read", 0, "secret.expose", 0)
+  ("agent/live-nested/permissive-outer", "allowed:202", "audit", 16, "fs.read", 1, "fs.write", 1, "net.fetch", 2, "secret.read", 2, "secret.expose", 2)
+  live-driver-order fs.read>secret.read>secret.expose>net.fetch>fs.write>secret.read>secret.expose>net.fetch
+  live-deploy-boundary proposal-id 90d9ca81e7e55d61d8176476589f15fb14a907ce67175f745552db2dc65bba38 validated-before-net
   == durable approval queue host bridge ==
-  ("agent/queue-denial", "Governance_approval_bridge", "durable exact proposal", "Denied", "raw-actions", 0)
+  ("agent/queue-denial", "proposal-id", "90d9ca81e7e55d61d8176476589f15fb14a907ce67175f745552db2dc65bba38", "Denied", "queue-records", 3, "fs.read", 0, "fs.write", 0, "net.fetch", 0, "secret.read", 0, "secret.expose", 0)
   == verified audit chain for inner pass then outer refusal ==
   ok 96b9bef50b9eaf21ffa1ed26bfc35eb37f433d1474892d3512c43205f1d4913a
   == Warp: sampled demo laws ==

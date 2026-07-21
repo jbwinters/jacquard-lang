@@ -6,14 +6,15 @@ checkout=$(CDPATH= cd -- "$here/../.." && pwd)
 
 if [ -f "$checkout/dune-project" ]; then
   jac="$checkout/_build/default/bin/main.exe"
-  bridge="$checkout/_build/default/test/test_jacquard.exe"
+  live_host="$checkout/_build/default/demos/governed-workspace/live_evidence.exe"
 else
   # Dune's cram sandbox mirrors the checkout under _build/default.
   jac="$checkout/bin/main.exe"
-  bridge="$checkout/test/test_jacquard.exe"
+  live_host="$checkout/demos/governed-workspace/live_evidence.exe"
 fi
 
-if [ ! -f "$checkout/dune-project" ] && { [ ! -x "$jac" ] || [ ! -x "$bridge" ]; }; then
+if [ ! -f "$checkout/dune-project" ] &&
+  { [ ! -x "$jac" ] || [ ! -x "$live_host" ]; }; then
   echo "governed-workspace is checkout-only developer evidence" >&2
   echo "run it from a Jacquard source checkout with the local opam switch" >&2
   exit 1
@@ -25,8 +26,8 @@ mkdir -p "$TMPDIR"
 run_tmp=$(mktemp -d "$TMPDIR/jacquard-governed-workspace.XXXXXX")
 trap 'rm -rf "$run_tmp"' EXIT HUP INT TERM
 
-if [ ! -x "$jac" ] || [ ! -x "$bridge" ]; then
-  dune build --root "$checkout" bin/main.exe test/test_jacquard.exe
+if [ ! -x "$jac" ] || [ ! -x "$live_host" ]; then
+  dune build --root "$checkout" bin/main.exe demos/governed-workspace/live_evidence.exe
 fi
 export JACQUARD_PRELUDE="$checkout/prelude"
 
@@ -42,18 +43,21 @@ echo "== unchanged Workspace-only agent =="
 "$jac" check "$here/agent.jac" --print-sigs | grep '^governed-deploy-agent '
 "$jac" hash "$here/agent.jac" | awk -F' ' '/:governed-deploy-agent / { print "agent-id " $2 }'
 
-echo "== deterministic dry and nested live worlds =="
+echo "== inferred dry/live authority =="
+"$jac" check "$story" --print-sigs | grep -E '^(dry-world|live-world) '
+
+echo "== deterministic world-free dry run =="
 "$jac" run "$story"
+
+echo "== deterministic nested live drivers =="
+host_tmp="$run_tmp/live-host-tmp"
+mkdir -p "$host_tmp"
+TMPDIR="$host_tmp" "$live_host" "$checkout/prelude" "$here/agent.jac" "$here/story.jac" live
 
 echo "== durable approval queue host bridge =="
 bridge_tmp="$run_tmp/bridge-tmp"
 mkdir -p "$bridge_tmp"
-if ! (cd "$checkout/test" && TMPDIR="$bridge_tmp" "$bridge" test governance-approval-bridge 4 --compact --color=never) >"$run_tmp/bridge.out" 2>"$run_tmp/bridge.err"; then
-  cat "$run_tmp/bridge.out"
-  cat "$run_tmp/bridge.err" >&2
-  exit 1
-fi
-echo '("agent/queue-denial", "Governance_approval_bridge", "durable exact proposal", "Denied", "raw-actions", 0)'
+TMPDIR="$bridge_tmp" "$live_host" "$checkout/prelude" "$here/agent.jac" "$here/story.jac" queue
 
 echo "== verified audit chain for inner pass then outer refusal =="
 chain="$run_tmp/nested-refusal.audit"
