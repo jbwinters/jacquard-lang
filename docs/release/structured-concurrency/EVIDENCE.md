@@ -738,8 +738,8 @@ opam exec -- dune build test/test_jacquard.exe
 
 The current inventory is mechanically checked against compiled discovery:
 
-- Alcotest/QCheck cases: `790`
-- Cram transcript files: `47`
+- Alcotest/QCheck cases: `794`
+- Cram transcript files: `48`
 
 The SC.14 baseline arithmetic remains exact: twelve compiled
 `channel-contract` cases plus the `store/9` Channel-private-hash case took the
@@ -767,7 +767,9 @@ cases and one exhaustive fault-matrix transcript, producing the then-current
 `783 / 45 / 27` inventory. GM.16 adds three canonical Workspace source-check
 cases and one public CLI transcript, producing the then-current
 `786 / 46 / 27` inventory. GM.17A adds four governance-explanation cases and
-one public CLI transcript, producing the current `790 / 47 / 27` inventory.
+one public CLI transcript, producing the then-current `790 / 47 / 27`
+inventory. GM.17B adds four static effect-attribution cases and one public CLI
+transcript, producing the current `794 / 48 / 27` inventory.
 
 Native scheduling remains outside the current backend. Differential coverage is
 therefore limited to the supported case: an Async operation discharged by an

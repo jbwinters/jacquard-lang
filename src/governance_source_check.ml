@@ -254,7 +254,7 @@ let refs_of_expr ?(group = []) expression =
   in
   List.rev (visit [] expression)
 
-type source_member = { hash : Hash.t; body : Kernel.expr; group : Hash.t list }
+type source_member = { name : string; hash : Hash.t; body : Kernel.expr; group : Hash.t list }
 
 let source_members declarations =
   List.concat_map
@@ -266,7 +266,8 @@ let source_members declarations =
           List.filter_map
             (fun binding ->
               match List.assoc_opt binding.Kernel.bname hashes with
-              | Some hash -> Some { hash; body = binding.Kernel.value; group }
+              | Some hash ->
+                  Some { name = binding.Kernel.bname; hash; body = binding.Kernel.value; group }
               | None -> None)
             bindings
       | Kernel.DefType _ | Kernel.DefEffect _ -> [])
@@ -289,6 +290,7 @@ let variables_equal expected expressions =
   && List.for_all2 (fun expected expression -> var expression = Some expected) expected expressions
 
 type root_shape = Live_root | Dry_root | Forwarded_live_root of int
+type root_match = { shape : root_shape; payload : Kernel.expr }
 
 let classify_root (member : source_member) =
   match member.body.Kernel.it with
@@ -305,12 +307,14 @@ let classify_root (member : source_member) =
               | [ policy ], Kernel.App (fn, [ policy_arg; simulators_arg; thunk ])
                 when ref_term expected fn
                      && variables_equal [ policy; simulators ] [ policy_arg; simulators_arg ] -> (
-                  match thunk.Kernel.it with Kernel.Lam ([], _) -> Some shape | _ -> None)
+                  match thunk.Kernel.it with
+                  | Kernel.Lam ([], payload) -> Some { shape; payload }
+                  | _ -> None)
               | _ -> None
             in
             let rec forward_chain sequence simulators policies thunk =
               match (policies, thunk.Kernel.it) with
-              | [], Kernel.Lam ([], _) -> true
+              | [], Kernel.Lam ([], payload) -> Some payload
               | policy :: rest, Kernel.Lam ([], application) -> (
                   match application.Kernel.it with
                   | Kernel.App (forward, [ sequence_arg; policy_arg; simulators_arg; next_thunk ])
@@ -318,8 +322,8 @@ let classify_root (member : source_member) =
                          && variables_equal [ sequence; policy; simulators ]
                               [ sequence_arg; policy_arg; simulators_arg ] ->
                       forward_chain sequence simulators rest next_thunk
-                  | _ -> false)
-              | _ -> false
+                  | _ -> None)
+              | _ -> None
             in
             match simple (snd live) Live_root with
             | Some _ as result -> result
@@ -342,10 +346,19 @@ let classify_root (member : source_member) =
                                   when ref_term (snd live_layer) leaf
                                        && variables_equal
                                             [ sequence; outer_policy; simulators ]
-                                            [ sequence_arg; policy_arg; simulators_arg ]
-                                       && forward_chain sequence simulators forward_policies
-                                            forward_thunk ->
-                                    Some (Forwarded_live_root (List.length forward_policies))
+                                            [ sequence_arg; policy_arg; simulators_arg ] -> (
+                                    match
+                                      forward_chain sequence simulators forward_policies
+                                        forward_thunk
+                                    with
+                                    | Some payload ->
+                                        Some
+                                          {
+                                            shape =
+                                              Forwarded_live_root (List.length forward_policies);
+                                            payload;
+                                          }
+                                    | None -> None)
                                 | _ -> None))
                         | _ -> None)
                     | _ -> None)))
@@ -535,7 +548,36 @@ let validate_schemes checker =
             Some (diagnostic "E1405" (Printf.sprintf "%s has noncanonical scheme %s" name actual)))
     expected
 
-let verify store checker declarations =
+type topology = Live | Dry | Forwarded_live of int
+
+type verified_member = {
+  member_name : string;
+  member_hash : Hash.t;
+  member_body : Kernel.expr;
+  member_group : Hash.t list;
+}
+
+type verified_source = {
+  verified_report_value : report;
+  verified_store_value : Store.t;
+  verified_checker_value : Check.ctx;
+  verified_root_value : source_member;
+  verified_topology_value : topology;
+  verified_payload_value : Kernel.expr;
+  verified_members_value : verified_member list;
+}
+
+exception Bug_verified_root
+
+let verified_report source = source.verified_report_value
+let verified_root source = (source.verified_root_value.name, source.verified_root_value.hash)
+let verified_topology source = source.verified_topology_value
+let verified_payload source = source.verified_payload_value
+let verified_members source = source.verified_members_value
+let verified_store source = source.verified_store_value
+let verified_checker source = source.verified_checker_value
+
+let verify_detailed store checker declarations =
   let environment_pins =
     [
       (Resolve.KEffect, workspace);
@@ -573,15 +615,15 @@ let verify store checker declarations =
   let members = source_members declarations in
   let roots =
     List.filter_map
-      (fun member -> Option.map (fun shape -> (member, shape)) (classify_root member))
+      (fun member -> Option.map (fun root_match -> (member, root_match)) (classify_root member))
       members
   in
   let diagnostics =
     match roots with
-    | [ (root, shape) ] ->
+    | [ (root, root_match) ] ->
         diagnostics
-        @ validate_root_shape checker root shape
-        @ validate_reachable store members root shape
+        @ validate_root_shape checker root root_match.shape
+        @ validate_reachable store members root root_match.shape
     | [] ->
         diagnostics
         @ [
@@ -612,7 +654,7 @@ let verify store checker declarations =
       in
       let layers =
         match roots with
-        | [ (_, Forwarded_live_root count) ] ->
+        | [ (_, { shape = Forwarded_live_root count; _ }) ] ->
             List.init count (fun _ ->
                 {
                   name = fst forward_layer;
@@ -630,7 +672,7 @@ let verify store checker declarations =
               ]
         | _ -> []
       in
-      Ok
+      let report =
         {
           facade = { name = "Workspace"; hash = snd workspace; introduced_row = [ "Workspace" ] };
           live =
@@ -650,6 +692,36 @@ let verify store checker declarations =
               operation fetch [ "Net"; "Secret" ] (List.nth normalizers 2) (List.nth summarizers 2);
             ];
         }
+      in
+      let root, root_match = match roots with [ root ] -> root | _ -> raise Bug_verified_root in
+      let topology =
+        match root_match.shape with
+        | Live_root -> Live
+        | Dry_root -> Dry
+        | Forwarded_live_root count -> Forwarded_live count
+      in
+      Ok
+        {
+          verified_report_value = report;
+          verified_store_value = store;
+          verified_checker_value = checker;
+          verified_root_value = root;
+          verified_topology_value = topology;
+          verified_payload_value = root_match.payload;
+          verified_members_value =
+            List.map
+              (fun member ->
+                {
+                  member_name = member.name;
+                  member_hash = member.hash;
+                  member_body = member.body;
+                  member_group = member.group;
+                })
+              members;
+        }
+
+let verify store checker declarations =
+  Result.map verified_report (verify_detailed store checker declarations)
 
 let show_row values = "{" ^ String.concat ", " values ^ "}"
 let show_authority values = "[" ^ String.concat ", " values ^ "]"
@@ -679,7 +751,7 @@ let render_text report =
         (show_row layer.introduced_row))
     report.layers;
   List.iter
-    (fun operation ->
+    (fun (operation : operation) ->
       line "operation %s %s authority=%s normalizer=%s summarizer=%s" operation.name
         (hex operation.hash)
         (show_authority operation.authority)
@@ -697,7 +769,7 @@ let identity_json (identity : identity) =
     ]
 
 let render_json_v1 report =
-  let operation_json operation =
+  let operation_json (operation : operation) =
     `Assoc
       [
         ("name", `String operation.name);

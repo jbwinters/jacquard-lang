@@ -1,0 +1,16 @@
+(defterm
+  ((binding workspace-why-effect-scc-a ()
+    (lam () (app (var workspace-why-effect-scc-b))))
+   (binding workspace-why-effect-scc-b ()
+    (lam ()
+      (let nonrec (pwild)
+        (app (var workspace.read-file)
+          (app (var path-value) (lit "README.md")))
+        (app (var workspace-why-effect-scc-a)))))))
+
+(defterm
+  ((binding workspace-why-effect-scc-root ()
+    (lam ((pvar policy) (pvar simulators))
+      (app (var workspace.live)
+        (var policy) (var simulators)
+        (lam () (app (var workspace-why-effect-scc-a))))))))

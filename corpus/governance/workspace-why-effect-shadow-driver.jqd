@@ -1,0 +1,14 @@
+(defterm
+  ((binding workspace.driver-read ()
+    (lam ((pvar path)) (app (var err) (lit "shadowed"))))))
+
+(defterm
+  ((binding workspace-why-effect-shadow-driver ()
+    (lam ((pvar policy) (pvar simulators))
+      (app
+        (ref #804dfb7bc41dbdcd69e4ae88cb26254603f0c20e6788cc5965515dd51c2e82c6 term)
+        (var policy) (var simulators)
+        (lam ()
+          (app
+            (ref #632071e3399c913a672c4bea7d4a8b394e64a9a517552eb296db824222fe2da1 op)
+            (app (var path-value) (lit "README.md")))))))))

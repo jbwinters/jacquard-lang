@@ -1683,6 +1683,87 @@ let governance_check_cmd file prelude syntax output_format =
                (Unix.error_message error));
         ]
 
+let why_effect_cmd effect_name file prelude syntax output_format =
+  try
+    let root = fresh_governance_analysis_dir () in
+    match Store.open_store root with
+    | Error diagnostics -> print_diags diagnostics
+    | Ok store -> (
+        match Prelude.load ~dir:(prelude_dir_of prelude) store with
+        | Error diagnostics -> print_diags diagnostics
+        | Ok _ -> (
+            match make_checker store with
+            | Error diagnostics -> print_diags diagnostics
+            | Ok checker -> (
+                match resolve_source_tops ~syntax store ~file (read_governance_file file) with
+                | Error diagnostics -> print_diags diagnostics
+                | Ok (tops, source_warnings) -> (
+                    let declarations, expressions =
+                      List.fold_left
+                        (fun (declarations, expressions) -> function
+                          | Kernel.Decl declaration -> (declaration :: declarations, expressions)
+                          | Kernel.Expr expression -> (declarations, expression :: expressions))
+                        ([], []) tops
+                    in
+                    if expressions <> [] then
+                      print_diags
+                        [
+                          cli_diagnostic ~code:"E1413"
+                            "why-effect accepts declaration-only source and never evaluates a \
+                             top-level expression";
+                        ]
+                    else
+                      let rec check_declarations warnings = function
+                        | [] -> Ok (List.rev warnings)
+                        | declaration :: rest -> (
+                            match Check.check_top checker (Kernel.Decl declaration) with
+                            | Error diagnostics -> Error diagnostics
+                            | Ok result ->
+                                check_declarations
+                                  (List.rev_append result.Check.warnings warnings)
+                                  rest)
+                      in
+                      let declarations = List.rev declarations in
+                      match check_declarations [] declarations with
+                      | Error diagnostics -> print_diags diagnostics
+                      | Ok checker_warnings -> (
+                          match
+                            Governance_source_check.verify_detailed store checker declarations
+                          with
+                          | Error diagnostics ->
+                              print_diags (Governance_source_check.sort_diagnostics diagnostics)
+                          | Ok verified -> (
+                              match Governance_why_effect.analyze ~effect_name verified with
+                              | Error diagnostics ->
+                                  print_diags (Governance_why_effect.sort_diagnostics diagnostics)
+                              | Ok report ->
+                                  print_warnings
+                                    (Governance_why_effect.sort_diagnostics
+                                       (source_warnings @ checker_warnings));
+                                  print_string
+                                    (match output_format with
+                                    | Output_text -> Governance_why_effect.render_text report
+                                    | Output_json_v1 ->
+                                        Governance_why_effect.render_json_v1 report ^ "\n");
+                                  ok))))))
+  with
+  | End_of_file ->
+      print_diags
+        [
+          cli_diagnostic ~code:"E1413"
+            "why-effect source changed while it was being read; retry with a stable regular file";
+        ]
+  | Sys_error _ ->
+      print_diags
+        [ cli_diagnostic ~code:"E1413" "why-effect analysis storage or source read failed" ]
+  | Unix.Unix_error (error, call, _) ->
+      print_diags
+        [
+          cli_diagnostic ~code:"E1413"
+            (Printf.sprintf "why-effect analysis storage or source read failed: %s: %s" call
+               (Unix.error_message error));
+        ]
+
 let governance_reconcile_cmd bundle_file prelude store_dir =
   match open_ctx ~prelude ~store_dir with
   | Error diagnostics -> print_diags diagnostics
@@ -1740,6 +1821,10 @@ let governance_explain_cmd proposal_spelling bundle_file prelude store_dir outpu
 open Cmdliner
 
 let file_arg = Arg.(required & pos 0 (some file) None & info [] ~docv:"FILE")
+
+let source_arg =
+  Arg.(
+    required & opt (some file) None & info [ "source" ] ~docv:"FILE" ~doc:"Governed source file.")
 
 let diagnostic_format_arg =
   Arg.(
@@ -2077,6 +2162,18 @@ let governance_t =
   Cmd.group
     (Cmd.info "governance" ~doc:"Verify governance artifacts and review surfaces.")
     [ check; verify_log; verify_run; reconcile; explain ]
+
+let why_effect_t =
+  Cmd.v
+    (Cmd.info "why-effect"
+       ~doc:
+         "Conservatively attribute a released raw effect to exact reachable Workspace operations \
+          in fully verified workspace-v0 source; this does not run the program.")
+    Term.(
+      const (configure_diagnostics why_effect_cmd)
+      $ diagnostic_format_arg
+      $ Arg.(required & pos 0 (some string) None & info [] ~docv:"EFFECT")
+      $ source_arg $ prelude_arg $ syntax_arg $ output_format_arg)
 
 let dist_diff_t =
   Cmd.v
@@ -2580,6 +2677,7 @@ let main =
       store_t;
       audit_t;
       governance_t;
+      why_effect_t;
       test_t;
       replay_t;
       dist_diff_t;

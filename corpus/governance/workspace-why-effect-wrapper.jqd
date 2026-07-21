@@ -1,0 +1,10 @@
+(defterm
+  ((binding workspace-why-effect-helper ()
+    (lam ()
+      (app (var workspace.read-file)
+        (app (var path-value) (lit "README.md")))))
+   (binding workspace-why-effect-wrapper ()
+    (lam ((pvar policy) (pvar simulators))
+      (app (var workspace.live)
+        (var policy) (var simulators)
+        (lam () (app (var workspace-why-effect-helper))))))))
