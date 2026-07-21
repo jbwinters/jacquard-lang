@@ -4,7 +4,16 @@ set -eu
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 checkout=$(CDPATH= cd -- "$here/../.." && pwd)
 
-if [ ! -f "$checkout/dune-project" ]; then
+if [ -f "$checkout/dune-project" ]; then
+  jac="$checkout/_build/default/bin/main.exe"
+  bridge="$checkout/_build/default/test/test_jacquard.exe"
+else
+  # Dune's cram sandbox mirrors the checkout under _build/default.
+  jac="$checkout/bin/main.exe"
+  bridge="$checkout/test/test_jacquard.exe"
+fi
+
+if [ ! -f "$checkout/dune-project" ] && { [ ! -x "$jac" ] || [ ! -x "$bridge" ]; }; then
   echo "governed-workspace is checkout-only developer evidence" >&2
   echo "run it from a Jacquard source checkout with the local opam switch" >&2
   exit 1
@@ -16,9 +25,9 @@ mkdir -p "$TMPDIR"
 run_tmp=$(mktemp -d "$TMPDIR/jacquard-governed-workspace.XXXXXX")
 trap 'rm -rf "$run_tmp"' EXIT HUP INT TERM
 
-dune build --root "$checkout" bin/main.exe test/test_jacquard.exe
-jac="$checkout/_build/default/bin/main.exe"
-bridge="$checkout/_build/default/test/test_jacquard.exe"
+if [ ! -x "$jac" ] || [ ! -x "$bridge" ]; then
+  dune build --root "$checkout" bin/main.exe test/test_jacquard.exe
+fi
 export JACQUARD_PRELUDE="$checkout/prelude"
 
 story="$run_tmp/story.jac"

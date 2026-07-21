@@ -222,6 +222,12 @@ Read these together when judging whether the release candidate is credible:
   rendering-only boundaries.
 - `release/governed-membranes/GM17C-MANIFEST.sha256`: reconstructible GM.17C
   implementation overlay on exact integrated base `b17c429`.
+- `release/governed-membranes/GM18-EVIDENCE.md`: GM.18 flagship Workspace
+  cookbook with one unchanged agent, grant-free dry simulation, nested live
+  attenuation, real durable queue denial, verified audit head, demo Warp laws,
+  and execution of GM.15's existing 698-path hostile lane.
+- `release/governed-membranes/GM18-MANIFEST.sha256`: reconstructible
+  evidence/demo overlay on exact integrated base `dcdd384`.
 - `release/governed-membranes/GM10-MANIFEST.sha256`: reconstructible GM.10
   overlay on exact integrated GM.8/GM.9 base `df37a15`.
 - `release/governed-membranes/GM11-MANIFEST.sha256`: reconstructible GM.11
