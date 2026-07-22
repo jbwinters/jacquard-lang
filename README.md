@@ -531,6 +531,13 @@ Key release docs:
   and proving tests
 - `docs/release/structured-concurrency/LIMITS.md`: structured-concurrency
   caveats and explicit C4 non-claims
+- `docs/release/governed-membranes/DECISION.md`: bounded decision to advertise
+  deterministic governance for the frozen typed Workspace v0 facade as an
+  evidence-backed research reference implementation
+- `docs/release/governed-membranes/CLAIMS.md`: D61-D73 claims mapped to exact
+  executable evidence and adjacent negative boundaries
+- `docs/release/governed-membranes/LIMITS.md`: trusted-host, authority,
+  recovery, simulation, secret, Audit, and production-readiness limits
 
 ## Repository Map
 
@@ -663,6 +670,11 @@ typed staging, language package management, self-hosting, and formal soundness
 proofs also do not ship. World grants remain coarse. See
 `docs/release/0.1/LIMITS.md` for the historical Core 0.1 boundary and
 `docs/release/structured-concurrency/LIMITS.md` for the successor C0-C3 boundary.
+The deterministic Workspace v0 governance boundary is separately advertised
+as an evidence-backed research reference implementation, not as a sandbox or
+production security system; its exact claim and trusted-host limits are in
+`docs/release/governed-membranes/DECISION.md` and
+`docs/release/governed-membranes/LIMITS.md`.
 
 ## Troubleshooting
 

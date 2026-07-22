@@ -129,6 +129,19 @@ Read these together when judging whether the release candidate is credible:
 
 ## Governed Membranes Evidence
 
+- `release/governed-membranes/DECISION.md`: GM.22 bounded decision to advertise
+  deterministic governance for the frozen typed Workspace v0 facade as an
+  evidence-backed research reference implementation, independently of G5.
+- `release/governed-membranes/CLAIMS.md`: D61-D73 claim matrix with exact
+  identities, executable positive evidence, and adjacent negative boundaries.
+- `release/governed-membranes/EVIDENCE.md`: final trusted-base inventory,
+  release-level proving lanes, hash semantics, and evidence counts.
+- `release/governed-membranes/LIMITS.md`: security, host, recovery, simulation,
+  secret, Audit, native, and product non-claims that bound the public label.
+- `release/governed-membranes/REPRO.md`: fresh-clone build, governance,
+  flagship, exhaustive, differential, gauntlet, and manifest commands.
+- `release/governed-membranes/MANIFEST.sha256`: reconstructible GM.22
+  publication overlay on exact integrated GM.18 successor base `c362d5d`.
 - `release/governed-membranes/GM1-EVIDENCE.md`: GM.1 versioned ring-3 values,
   canonical identities, pure refusal boundaries, and compatibility evidence.
 - `release/governed-membranes/GM1-MANIFEST.sha256`: reconstructible GM.1 overlay
