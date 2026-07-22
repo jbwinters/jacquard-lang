@@ -37,9 +37,16 @@ in one program.
 - `case-studies/release-risk/`: one release policy under concrete and
   probabilistic telemetry handlers, with a conditioned risk posterior and a
   Warp safety proof over all 18 worlds.
+- `governed-workspace/`: one unchanged Workspace-only deployment agent under
+  pure dry simulation, nested live policies, a durable approval-queue denial,
+  a verified audit chain, and the existing exhaustive hostile fault space.
 
 Each directory contains `model.jac`, `tests.jac`, a short README, and a `run.sh`
 that executes the narrative plus sampled and exhaustive Warp lanes.
+
+`governed-workspace/` is a checkout-only developer evidence cookbook because
+its real approval bridge and hostile lane deliberately reuse bounded host/test
+seams. It adds no CLI or runtime surface.
 
 ## Basics
 
