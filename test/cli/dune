@@ -13,6 +13,13 @@
   (source_tree ../../demos)
   (source_tree ../../corpus)
   (source_tree ../../runtime)
+  ../../README.md
+  ../../docs/README.md
+  ../../docs/release/dx-jac-export/EVIDENCE.md
+  ../../docs/release/structured-concurrency/EVIDENCE.md
+  dune
+  governed-membranes-release.t
+  (source_tree ../../docs/release/governed-membranes)
   (source_tree ../../bench)
   (source_tree ../native-asan)
   (source_tree ../native-gauntlet)
