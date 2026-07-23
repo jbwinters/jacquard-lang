@@ -15,6 +15,10 @@ Required check for protected branches:
 
 - `CI / Development gate`
 
+The required development gate waits for the separate
+`CI / Governance playground` job. That dependency prevents the protected
+check from becoming green while the local review surface is failing.
+
 The gate runs:
 
 ```sh
@@ -28,6 +32,38 @@ _build/default/bin/main.exe --version
 
 The `dune fmt` plus `git diff --exit-code` pair is deliberate: if formatting
 auto-promotes anything, CI fails and prints the diff.
+
+## Governance Playground
+
+The source-checkout-only Workspace v0 decision-chain viewer has its own CI
+job. It uses the exact Node and pnpm versions pinned in
+`playground/governance/package.json`, installs the committed lockfile without
+updating it, and runs:
+
+```sh
+pnpm install --frozen-lockfile
+pnpm run lint
+pnpm run typecheck
+pnpm run test
+pnpm run build
+pnpm exec playwright install --with-deps chromium firefox webkit
+pnpm run test:e2e
+```
+
+Playwright covers Chromium, Firefox, and WebKit. Its tests pin keyboard
+navigation, focus behavior, reduced-motion and forced-color presentation, and
+the absence of non-loopback application requests. CI retains the static
+`dist/` build as an artifact but does not deploy it.
+
+The OCaml suite independently regenerates every checked-in viewer fixture in
+memory and byte-compares it with the file consumed by the client. Regenerate
+fixtures after a deliberate projection change with:
+
+```sh
+eval "$(opam env)"
+JACQUARD_GOVERNANCE_PLAYGROUND_FIXTURES_OUT="$PWD/playground/governance/fixtures/generated" \
+  opam exec -- dune exec test/gen_governance_playground_fixtures.exe
+```
 
 ## GM.12B Exhaustive Forwarding Evidence
 
@@ -161,6 +197,16 @@ opam exec -- dune runtest
 opam exec -- dune build @test/cli/gm12b-evidence --force
 opam exec -- dune fmt
 git diff --exit-code
+(
+  cd playground/governance
+  corepack enable
+  pnpm install --frozen-lockfile
+  pnpm run lint
+  pnpm run typecheck
+  pnpm run test
+  pnpm run build
+  pnpm run test:e2e
+)
 ```
 
 Before asking for a release-candidate review:

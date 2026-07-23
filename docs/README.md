@@ -40,6 +40,9 @@ project shape from file names alone.
   uncertainty wording, canonical boundaries, and explicit non-goals.
 - `effect-membranes.md`: GM.0 charter for typed governed facades, versioned
   decision artifacts, live/dry boundaries, and monotonic composition.
+- `client-playground.md`: local-only Workspace v0 governance decision-chain
+  viewer, normalized projection, trust boundary, evidence language,
+  accessibility contract, and explicit product non-claims.
 - `concurrency.md`: SC.14 ships the exact scoped typed Channel contract frozen
   by SC.13 through deterministic, seeded, replay, exhaustive, and cached
   interpreted scheduling. It publishes exact identities, capacity/backpressure,
@@ -241,6 +244,11 @@ Read these together when judging whether the release candidate is credible:
   and execution of GM.15's existing 698-path hostile lane.
 - `release/governed-membranes/GM18-MANIFEST.sha256`: reconstructible
   evidence/demo overlay on exact integrated base `dcdd384`.
+- `release/governed-membranes/GM19-EVIDENCE.md`: GM.19 normalized
+  decision-chain projection, typed illustrative fixtures, local offline
+  viewer, accessible evidence language, and explicit product non-claims.
+- `release/governed-membranes/GM19-MANIFEST.sha256`: reconstructible GM.19
+  product-surface overlay on exact integrated base `28a79de`.
 - `release/governed-membranes/GM10-MANIFEST.sha256`: reconstructible GM.10
   overlay on exact integrated GM.8/GM.9 base `df37a15`.
 - `release/governed-membranes/GM11-MANIFEST.sha256`: reconstructible GM.11

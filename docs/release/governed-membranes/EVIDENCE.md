@@ -22,7 +22,8 @@ The reviewed system is the exact composition of:
 - the GM.14 run-bundle and action-reconciliation verifiers;
 - the GM.16 source gate and GM.17 explanation, effect-attribution, and typed
   review-diff implementations; and
-- the GM.18 governed Workspace cookbook, transcript, and audit fixtures.
+- the GM.18 governed Workspace cookbook, transcript, and audit fixtures; and
+- the GM.19 normalized decision-chain projection plus local offline viewer.
 
 The exact overlay file set and byte hashes are in
 [MANIFEST.sha256](MANIFEST.sha256). Predecessor GM.1-GM.18 manifests remain
@@ -45,7 +46,7 @@ positive claim, is [CLAIMS.md](CLAIMS.md). The release-level proving lanes are:
 | Audit and reconciliation | `test_audit_chain.ml`, GM.14 run-bundle/reconciliation suites, the two governance CLI transcripts, and GM.17A explanation cover ordering, published-head consistency, canonical linkage, tamper refusal, and explicit recovery-state classes. | Missing completion is not rollback; a hash-linked stream is not publisher/provider authenticity, a trusted clock, or a queue/Audit transaction. |
 | Secret boundary | Workspace normalizer/summarizer cases and GM.11's non-vacuous fixed-secret run prove that review and Audit artifacts omit secret bytes; GM.18 pins live resolution order and zero access on strict refusal and queue denial. | Opaque `Secret` ends at explicit exposure. The language has no taint tracking or post-exposure exfiltration guarantee. |
 | Failure and replay | GM.15 covers 349 reachable sites and 698 healthy/hostile paths, real interpreter boundary failures, eight exact healthy replay shapes, field-level drift refusal, and closed interpreter/native control parity. | It adds no production chaos seam, retry, compensation, provider-fault model, or broader native host integration. |
-| Review surfaces | GM.16 emits deterministic source reports; GM.17A verifies and explains one exact Proposal; GM.17B derives conservative raw-effect chains; GM.17C classifies typed dynamic/static review facts with deterministic partial detail. | Empty static attribution is not proof of runtime absence. GM.17C is a library seam, not a persisted package workflow or public package command. |
+| Review surfaces | GM.16 emits deterministic source reports; GM.17A verifies and explains one exact Proposal; GM.17B derives conservative raw-effect chains; GM.17C classifies typed dynamic/static review facts with deterministic partial detail; GM.19 projects typed verified reports into one closed presentation schema and exercises six backend-generated decision-chain examples in an accessible local viewer. | Empty static attribution is not proof of runtime absence. GM.17C is a library seam, not a persisted package workflow or public package command. GM.19 fixtures are visibly illustrative; the browser does not verify bundles, recompute hashes or policy, authenticate reviewers, grant consent, execute actions, or establish provider truth. |
 | Flagship | GM.18 runs one unchanged Workspace-only agent through no-grant dry simulation, nested strict refusal and permissive live execution, durable exact-proposal denial, 16 agent fault assignments, policy-only outcome change, verified Audit head, and supporting GM.15 evidence. | The demo is checkout-only. Its denial path is proposal-only and does not claim a complete approved operator workflow. Facade-prefix counters and raw-driver counters remain distinct evidence. |
 
 ## Trusted computing base
@@ -69,8 +70,10 @@ reviewed host configuration:
 7. the GM.16 source gate, including its exact environment, facade, handler,
    operation, and driver identity pins;
 8. the GM.17 Proposal verifier, explanation and why-effect derivations,
-   review-diff classifier, and deterministic renderers; and
-9. the native compiler, generated C runtime, operating system, filesystem,
+   review-diff classifier, and deterministic renderers;
+9. the GM.19 OCaml presentation projection and, for presentation accuracy
+   only, the pinned client validator and renderer; and
+10. the native compiler, generated C runtime, operating system, filesystem,
    OCaml runtime, C toolchain, and deployment configuration when a conclusion
    relies on native evidence.
 
@@ -86,6 +89,8 @@ At this overlay the expected inventory is:
 - 799 compiled Alcotest/QCheck cases;
 - 50 cram transcript files, including the GM.22 manifest check;
 - 27 executable documentation examples across 8 documents;
+- 19 client unit/accessibility tests and 9 browser tests across Chromium,
+  Firefox, and WebKit;
 - the dedicated GM.12B 50,000-case exhaustive attenuation lane; and
 - the GM.15 349-site/698-path hostile lane plus selected native differential
   twins.

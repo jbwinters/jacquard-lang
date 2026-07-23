@@ -103,7 +103,14 @@ or provider, or freshness.
 - GM.17C provides a typed library seam for review classification. It is not a
   public package command, signed persisted snapshot, or package policy
   workflow.
-- The playground decision-chain view does not ship.
+- The playground decision-chain view is a local, offline, read-only
+  source-checkout surface. It is not publicly hosted, included in the 0.1
+  installer, authenticated, durable, or authorized to approve or execute
+  anything.
+- Browser validation establishes only that input matches the normalized
+  presentation schema and its closed state relationships. It does not verify
+  raw governance bundles, canonical forms, policies, authority, hashes, Audit
+  truth, or provider truth.
 - The flagship is a source-checkout evidence demo, not an installed production
   service.
 - Selected closed programs have interpreter/native byte parity. The approval

@@ -39,6 +39,11 @@
  (libraries jacquard unix))
 
 (executable
+ (name gen_governance_playground_fixtures)
+ (modules gen_governance_playground_fixtures)
+ (libraries jacquard unix))
+
+(executable
  (name native_fuzz)
  (modules native_fuzz)
  (libraries unix))
@@ -94,7 +99,7 @@
 (test
  (name test_jacquard)
  (modules
-  (:standard \ corpus_support gen_goldens gen_surface_twins gen_prelude_goldens gen_sig_goldens gen_freeze_goldens gen_diag_goldens gen_native_parity native_fuzz once_interpreter_probe gen_once_hostile scope_policy_trace round_robin_trace test_governance_review_diff governance_review_diff_focused))
+  (:standard \ corpus_support gen_goldens gen_surface_twins gen_prelude_goldens gen_sig_goldens gen_freeze_goldens gen_diag_goldens gen_native_parity gen_governance_playground_fixtures native_fuzz once_interpreter_probe gen_once_hostile scope_policy_trace round_robin_trace test_governance_review_diff governance_review_diff_focused))
  (libraries jacquard governance_review_diff_test_support corpus_support alcotest fmt qcheck-core qcheck-alcotest unix str yojson)
  (deps
   (glob_files_rec ../corpus/*.jqd)
@@ -116,6 +121,7 @@
   ../docs/errors.md
   ../docs/effect-review.md
   ../docs/effect-membranes.md
+  ../docs/client-playground.md
   ../docs/effect-taxonomy.md
   ../docs/concurrency.md
   ../docs/README.md
@@ -156,6 +162,7 @@
   ../docs/release/governed-membranes/GM17C-MANIFEST.sha256
   ../docs/release/governed-membranes/GM18-EVIDENCE.md
   ../docs/release/governed-membranes/GM18-MANIFEST.sha256
+  (glob_files ../playground/governance/fixtures/generated/*.json)
   ../docs/release/governed-membranes/GM13A-EVIDENCE.md
   ../docs/release/governed-membranes/GM13A-MANIFEST.sha256
   ../docs/release/governed-membranes/GM13B-EVIDENCE.md
