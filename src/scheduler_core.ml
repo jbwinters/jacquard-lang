@@ -5,6 +5,7 @@ type suspension =
   | Awaiting of Concurrency_contract.task_id
   | Channel_sending of Channel_contract.channel_id
   | Channel_receiving of Channel_contract.channel_id
+  | Host_readiness of int
 
 type ('resume, 'value) entry = {
   handle : handle;
@@ -56,6 +57,13 @@ type ('resume, 'value) prepared_channel_wake = {
   wake_entry : ('resume, 'value) entry;
   wake_resume : 'resume;
   mutable wake_committed : bool;
+}
+
+type ('resume, 'value) prepared_host_suspend = {
+  host_suspend_entry : ('resume, 'value) entry;
+  host_suspend_registration : int;
+  host_suspend_resume : 'resume;
+  mutable host_suspend_committed : bool;
 }
 
 let diagnostic message =
@@ -303,6 +311,38 @@ let commit_channel_wake _capability prepared =
   prepared.wake_entry.lifecycle <- Concurrency_contract.Runnable;
   prepared.wake_entry.suspension <- None
 
+let prepare_host_suspend _capability scheduler handle ~registration ~resume =
+  if registration < 0 then error "host readiness registration must be non-negative"
+  else
+    Result.bind (validate scheduler handle) (fun (entry : (_, _) entry) ->
+        Result.map
+          (fun () ->
+            {
+              host_suspend_entry = entry;
+              host_suspend_registration = registration;
+              host_suspend_resume = resume;
+              host_suspend_committed = false;
+            })
+          (ensure_checked_out entry))
+
+let commit_host_suspend _capability prepared =
+  if prepared.host_suspend_committed then
+    failwith "Bug_scheduler_core: prepared host readiness suspension committed twice";
+  prepared.host_suspend_committed <- true;
+  prepared.host_suspend_entry.resume <- Some prepared.host_suspend_resume;
+  prepared.host_suspend_entry.lifecycle <- Concurrency_contract.Suspended;
+  prepared.host_suspend_entry.suspension <- Some (Host_readiness prepared.host_suspend_registration)
+
+let wake_host_readiness _capability scheduler handle ~registration =
+  Result.bind (validate scheduler handle) (fun (entry : (_, _) entry) ->
+      match (entry.lifecycle, entry.suspension, entry.resume) with
+      | Concurrency_contract.Suspended, Some (Host_readiness waiting), Some _
+        when waiting = registration ->
+          entry.lifecycle <- Concurrency_contract.Runnable;
+          entry.suspension <- None;
+          Ok ()
+      | _ -> error "only a task suspended on the exact host readiness registration can be woken")
+
 let wake_channel_with scheduler handle ~channel ~map_resume =
   Result.map
     (fun prepared -> commit_channel_wake Task_capability.runtime prepared)
@@ -330,7 +370,8 @@ let wake_waiters scheduler (entry : (_, _) entry) =
              &&
              match waiter.suspension with
              | Some (Awaiting target) -> equal_id target entry.id
-             | Some (Yielded | Channel_sending _ | Channel_receiving _) | None -> false ->
+             | Some (Yielded | Channel_sending _ | Channel_receiving _ | Host_readiness _) | None ->
+                 false ->
           waiter.lifecycle <- Concurrency_contract.Runnable;
           waiter.suspension <- None;
           Some waiter.handle

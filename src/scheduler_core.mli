@@ -12,7 +12,7 @@ type suspension =
   | Awaiting of Concurrency_contract.task_id
   | Channel_sending of Channel_contract.channel_id
   | Channel_receiving of Channel_contract.channel_id
-      (** Why a task is suspended. A task has at most one live await edge. *)
+  | Host_readiness of int  (** Why a task is suspended. A task has at most one live await edge. *)
 
 type ('resume, 'value) t
 (** Scheduler state for one structured scope. Resume tokens and task values remain opaque to the
@@ -23,6 +23,10 @@ type ('resume, 'value) prepared_channel_suspend
 
 type ('resume, 'value) prepared_channel_wake
 (** Runtime-private proof containing a successfully mapped resume for one exact channel waiter. *)
+
+type ('resume, 'value) prepared_host_suspend
+(** Runtime-private proof that a checked-out task can be suspended on one internal readiness
+    registration. *)
 
 type 'value task_view = {
   id : Concurrency_contract.task_id;
@@ -155,6 +159,29 @@ val prepare_channel_wake :
 
 val commit_channel_wake : Task_capability.t -> ('resume, 'value) prepared_channel_wake -> unit
 (** [commit_channel_wake] makes one previously prepared waiter runnable without further failure. *)
+
+val prepare_host_suspend :
+  Task_capability.t ->
+  ('resume, 'value) t ->
+  handle ->
+  registration:int ->
+  resume:'resume ->
+  (('resume, 'value) prepared_host_suspend, Diag.t list) result
+(** [prepare_host_suspend] validates a runtime-private host-readiness suspension without changing
+    task state. Negative registration identities and invalid lifecycle state return E0908. *)
+
+val commit_host_suspend : Task_capability.t -> ('resume, 'value) prepared_host_suspend -> unit
+(** [commit_host_suspend] applies one prepared host-readiness suspension. Calling it twice is an
+    internal invariant failure. *)
+
+val wake_host_readiness :
+  Task_capability.t ->
+  ('resume, 'value) t ->
+  handle ->
+  registration:int ->
+  (unit, Diag.t list) result
+(** [wake_host_readiness] makes exactly the task suspended on [registration] runnable. A stale,
+    cancelled, or mismatched registration returns E0908 without changing task state. *)
 
 val suspend_channel :
   ('resume, 'value) t ->
