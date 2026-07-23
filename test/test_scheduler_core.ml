@@ -394,6 +394,7 @@ let run () =
   test_foreign_handle_diagnostic ();
   QCheck.Test.check_exn prop_transition_table;
   QCheck.Test.check_exn prop_public_transitions_match_contract;
-  QCheck.Test.check_exn prop_cycle_wakeups_are_live
+  QCheck.Test.check_exn prop_cycle_wakeups_are_live;
+  Test_host_readiness.run ()
 
 let suite = [ Alcotest.test_case "lifecycle, waits, cycles, and ownership" `Quick run ]

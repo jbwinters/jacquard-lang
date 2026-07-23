@@ -396,7 +396,8 @@ let cancel scope ~caller ~target ~resume ~drop =
                       match suspension with
                       | Scheduler_core.Yielded -> Concurrency_contract.Yield
                       | Scheduler_core.Awaiting _ -> Concurrency_contract.Await
-                      | Scheduler_core.Channel_sending _ | Scheduler_core.Channel_receiving _ ->
+                      | Scheduler_core.Channel_sending _ | Scheduler_core.Channel_receiving _
+                      | Scheduler_core.Host_readiness _ ->
                           Concurrency_contract.Routed_effect
                     in
                     Result.map
@@ -521,7 +522,11 @@ let channel_deadlocked scope =
                 match view.suspension with
                 | Some (Scheduler_core.Channel_sending _ | Scheduler_core.Channel_receiving _) ->
                     true
-                | Some (Scheduler_core.Yielded | Scheduler_core.Awaiting _) | None -> false
+                | Some
+                    ( Scheduler_core.Yielded | Scheduler_core.Awaiting _
+                    | Scheduler_core.Host_readiness _ )
+                | None ->
+                    false
               in
               (all_suspended && suspended, has_channel || channel_wait, live_count + 1))
         (all_suspended, has_channel, live_count)
