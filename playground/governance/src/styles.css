@@ -1,0 +1,29 @@
+:root { font-family: ui-sans-serif, system-ui, sans-serif; color: #17212b; background: #f5f7fa; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+main { max-width: 1000px; margin: 0 auto; padding: 1.5rem; }
+.loader, .chain { background: Canvas; border: 1px solid #667085; border-radius: .5rem; padding: 1.25rem; margin-bottom: 1.5rem; }
+label, textarea { display: block; width: 100%; }
+textarea { margin: .5rem 0; font: .85rem ui-monospace, monospace; }
+.controls { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; }
+button, .file-button { border: 2px solid #1a4a7a; background: #fff; color: #102a43; padding: .45rem .7rem; cursor: pointer; font: inherit; }
+button:hover, .file-button:hover { background: #dceeff; }
+button:focus-visible, .file-button:focus-within, textarea:focus-visible, .stage:focus-visible, .evidence:focus-visible, .error:focus-visible { outline: 3px solid #d46800; outline-offset: 3px; }
+.file-button { position: relative; }
+.file-button input { position: absolute; inline-size: 1px; block-size: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.eyebrow { font-weight: 700; letter-spacing: .03em; }
+.fixture-notice, .verified-notice { border: 2px solid currentColor; padding: .5rem; font-weight: 700; }
+.chain > ol { padding-left: 1.5rem; }
+.stage { margin: 1rem 0; padding: .75rem; border-inline-start: .4rem solid #1a4a7a; background: #f7fbff; }
+.stage h2 { margin-top: 0; font-size: 1.1rem; }
+.status { text-decoration: underline; text-decoration-thickness: .15em; }
+.warning { border-left: .35rem solid #a44700; padding-left: .5rem; }
+.evidence { display: inline-flex; max-width: 100%; gap: .35rem; align-items: center; margin: .3rem .45rem .3rem 0; flex-wrap: wrap; }
+.evidence-label { font-weight: 700; }
+code { overflow-wrap: anywhere; }
+.evidence code { font-size: .78rem; }
+.evidence button { padding: .15rem .35rem; font-size: .8rem; }
+.error { margin-top: 1rem; border: 2px solid #9d1c1c; padding: .75rem; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; } }
+@media (forced-colors: active) { .loader, .chain, .stage, .error, .fixture-notice, .verified-notice { border: 2px solid CanvasText; } .stage { border-inline-start-width: .45rem; } .status { text-decoration: underline solid CanvasText .2em; } }
+@media (max-width: 600px) { main { padding: .75rem; } .evidence { display: flex; } }

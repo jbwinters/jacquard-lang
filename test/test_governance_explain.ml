@@ -175,7 +175,8 @@ let test_non_action_decisions_never_guess_driver () =
           Alcotest.(check bool)
             "JSON driver is null" true
             Yojson.Safe.Util.(json |> member "attempt" |> member "driver" = `Null))
-    [ ("denied-v1", "denied"); ("escalate-v1", "escalated") ]
+    [ ("denied-v1", "denied"); ("escalate-v1", "escalated") ];
+  Test_governance_decision_chain.run ()
 
 let inconsistent_rule_package () =
   let root = R.make_call "rule-root" in

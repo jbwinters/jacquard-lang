@@ -391,6 +391,7 @@ the exact Decision and ID.
 | E1539 | governance review fact families, profiles, queries, or exact cross-family links are incompatible | comparing `Fs` static facts with `Net` facts, or pairing an attempted driver with another operation's static driver |
 | E1540 | two governance review facts conflict for one exact identity | duplicate operation facts carry different driver identities or labels |
 | E1541 | typed governance review facts violate an internal comparison invariant | a reached operation is absent from the complete facade operation set |
+| E1542 | a governance decision-chain presentation cannot be derived safely from the typed explanation | completion evidence disagrees with the verified action state, or a non-Ask verdict carries consent evidence |
 
 `jac governance explain PROPOSAL_ID --bundle RECONCILIATION_BUNDLE` accepts
 exactly 64 lowercase hexadecimal digits and fully applies reconciliation-bundle
@@ -432,6 +433,14 @@ guards producer invariants. A missing query-scoped operation detail is instead t
 stable `operation-not-reached` availability fact and makes the report partial.
 The report grants no authority, proves no execution or runtime absence, and
 assigns no safety verdict.
+
+`Governance_decision_chain` is an additive, presentation-only OCaml adapter for
+the local Workspace v0 playground. It accepts only an existing typed
+`Governance_explain.report`, rechecks its cross-artifact relationships, and
+emits six ordered stages without evaluating policy, deriving authority, or
+accepting client JSON. E1542 fails closed when the typed report cannot support
+that exact presentation. The browser receives no report on this failure and
+cannot replace or reinterpret the diagnostic.
 
 ## Appendix: the W5.3 audit (ten message rewrites)
 

@@ -27,7 +27,7 @@ case "$DIST" in
   *) DIST_DIR=$ROOT/$DIST ;;
 esac
 
-opam exec -- dune build @install
+opam exec -- dune build --root "$ROOT" @install
 VERSION=$(_build/default/bin/main.exe --version)
 
 BIN="_build/install/default/bin/jacquard"

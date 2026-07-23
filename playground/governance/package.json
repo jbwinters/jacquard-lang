@@ -1,0 +1,57 @@
+{
+  "name": "jacquard-governance-viewer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Offline-only viewer for normalized Jacquard governance decision chains",
+  "type": "module",
+  "packageManager": "pnpm@10.17.1",
+  "engines": {
+    "node": "24.18.0",
+    "pnpm": "10.17.1"
+  },
+  "volta": {
+    "node": "24.18.0",
+    "pnpm": "10.17.1"
+  },
+  "pnpm": {
+    "overrides": {
+      "esbuild": "0.28.1"
+    }
+  },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "preview": "vite preview --host 127.0.0.1",
+    "lint": "eslint . --max-warnings 0",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "build": "tsc -b && vite build",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "5.0.2",
+    "react": "19.1.1",
+    "react-dom": "19.1.1",
+    "vite": "7.3.5"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@playwright/test": "1.61.1",
+    "@testing-library/jest-dom": "6.8.0",
+    "@testing-library/react": "16.3.0",
+    "@testing-library/user-event": "14.6.1",
+    "@types/node": "24.3.1",
+    "@types/jest-axe": "3.5.9",
+    "@types/react": "19.1.13",
+    "@types/react-dom": "19.1.9",
+    "eslint": "10.7.0",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "eslint-plugin-react-refresh": "0.5.3",
+    "globals": "17.7.0",
+    "jsdom": "26.1.0",
+    "jest-axe": "10.0.0",
+    "typescript": "5.9.2",
+    "typescript-eslint": "8.65.0",
+    "vitest": "3.2.4"
+  }
+}

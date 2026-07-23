@@ -15,8 +15,27 @@
   (source_tree ../../runtime)
   ../../README.md
   ../../docs/README.md
+  ../../docs/ci-cd.md
+  ../../docs/client-playground.md
+  ../../docs/effect-membranes.md
+  ../../docs/errors.md
   ../../docs/release/dx-jac-export/EVIDENCE.md
   ../../docs/release/structured-concurrency/EVIDENCE.md
+  (source_tree ../../playground/governance)
+  ../../src/governance_decision_chain.ml
+  ../../src/governance_decision_chain.mli
+  ../../src/host_readiness.ml
+  ../../src/host_readiness.mli
+  ../../src/scheduler_core.ml
+  ../../src/scheduler_core.mli
+  ../../src/scope_policy.ml
+  ../../src/structured_scope.ml
+  ../dune
+  ../gen_governance_playground_fixtures.ml
+  ../test_governance_decision_chain.ml
+  ../test_governance_explain.ml
+  ../test_host_readiness.ml
+  ../test_scheduler_core.ml
   dune
   governed-membranes-release.t
   (source_tree ../../docs/release/governed-membranes)

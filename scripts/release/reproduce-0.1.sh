@@ -35,16 +35,18 @@ git rev-parse --short HEAD | tee "$OUT/commit.txt"
 
 capture deps opam install --deps-only . --with-test --with-dev-setup --with-doc -y
 
-capture build opam exec -- dune build @all
+capture build opam exec -- dune build --root "$ROOT" @all
 
-capture runtest opam exec -- dune runtest
+capture runtest opam exec -- dune runtest --root "$ROOT"
 
 capture runtime-memory runtime/check.sh
-capture native-diff env CC=clang opam exec -- sh scripts/native-diff.sh
-capture native-leak env CC=clang opam exec -- sh scripts/native-leak-check.sh
-capture native-fuzz env CC=clang opam exec -- dune build @native-fuzz
+capture native-diff env CC=clang JACQUARD="$ROOT/_build/default/bin/main.exe" \
+  opam exec -- sh scripts/native-diff.sh
+capture native-leak env CC=clang JACQUARD="$ROOT/_build/default/bin/main.exe" \
+  opam exec -- sh scripts/native-leak-check.sh
+capture native-fuzz env CC=clang opam exec -- dune build --root "$ROOT" @native-fuzz
 
-capture fmt opam exec -- dune fmt
+capture fmt opam exec -- dune fmt --root "$ROOT"
 
 capture version _build/default/bin/main.exe --version
 
@@ -62,7 +64,7 @@ capture escrow env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/worlds
 capture release-risk env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/case-studies/release-risk/run.sh
 capture stormglass env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/case-studies/stormglass/run.sh
 
-capture cli-and-gauntlet opam exec -- dune runtest \
+capture cli-and-gauntlet opam exec -- dune runtest --root "$ROOT" \
   test/cli/demos.t \
   test/cli/case-studies.t \
   test/cli/diff.t \
@@ -79,7 +81,7 @@ capture cli-and-gauntlet opam exec -- dune runtest \
   test/cli/world.t \
   test/gauntlet
 
-capture gauntlet-build opam exec -- dune build test/test_jacquard.exe
+capture gauntlet-build opam exec -- dune build --root "$ROOT" test/test_jacquard.exe
 capture gauntlet-alcotest sh -c \
   'cd _build/default/test && ./test_jacquard.exe test '"'"'gauntlet-.*'"'"' --compact --color=never'
 

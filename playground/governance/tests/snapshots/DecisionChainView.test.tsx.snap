@@ -1,0 +1,423 @@
+<div>
+  <article
+    aria-labelledby="chain-title"
+    class="chain"
+  >
+    <header>
+      <p
+        class="eyebrow"
+      >
+        Normalized offline artifact ·
+        workspace-v0
+      </p>
+      <h1
+        id="chain-title"
+      >
+        Governance decision chain
+      </h1>
+      <p
+        class="fixture-notice"
+      >
+        Illustrative fixture — not verified evidence
+      </p>
+      <span
+        class="evidence"
+        tabindex="-1"
+      >
+        <span
+          class="evidence-label"
+        >
+          Call
+        </span>
+        <code>
+          governance-call-v0:d682cb82a54ee43e1e6d78ddfc754d524f44ab84790c4442404f765882230a30
+        </code>
+        <code
+          aria-label="Call full hash"
+        >
+          d682cb82a54ee43e1e6d78ddfc754d524f44ab84790c4442404f765882230a30
+        </code>
+        <button
+          aria-label="Copy Call full hash"
+          type="button"
+        >
+          Copy hash
+        </button>
+      </span>
+    </header>
+    <ol
+      aria-label="Six-stage governance decision chain"
+    >
+      <li
+        class="stage"
+        tabindex="0"
+      >
+        <h2>
+          1. Request and authority evidence
+        </h2>
+        <p>
+          Operation:
+          <code>
+            workspace.write-file
+          </code>
+        </p>
+        <span
+          class="evidence"
+          tabindex="-1"
+        >
+          <span
+            class="evidence-label"
+          >
+            Operation
+          </span>
+          <code>
+            operation:57b80710f0494405a3c3e8cb00c66f3522bebc598ce904475f54f7cc5655ee53
+          </code>
+          <code
+            aria-label="Operation full hash"
+          >
+            57b80710f0494405a3c3e8cb00c66f3522bebc598ce904475f54f7cc5655ee53
+          </code>
+          <button
+            aria-label="Copy Operation full hash"
+            type="button"
+          >
+            Copy hash
+          </button>
+        </span>
+        <p>
+          <strong>
+            Type-proven effect authority
+          </strong>
+        </p>
+        <ul>
+          <li>
+            <span
+              class="evidence"
+              tabindex="-1"
+            >
+              <span
+                class="evidence-label"
+              >
+                Effect
+              </span>
+              <code>
+                effect:26e2771ce452877352a28d2e4cdd026a7c1f0f2704aa4e38c8d4f2e95697af8d
+              </code>
+              <code
+                aria-label="Effect full hash"
+              >
+                26e2771ce452877352a28d2e4cdd026a7c1f0f2704aa4e38c8d4f2e95697af8d
+              </code>
+              <button
+                aria-label="Copy Effect full hash"
+                type="button"
+              >
+                Copy hash
+              </button>
+            </span>
+          </li>
+        </ul>
+        <p>
+          <strong>
+            Configured resource evidence — not type-proven
+          </strong>
+        </p>
+        <ul>
+          <li>
+            <span>
+              resource:23f9b1d0cfeb415a9e63283fd51923ffef87c67c7f2f5a91024619c426e6b668
+            </span>
+
+            <span
+              class="evidence"
+              tabindex="-1"
+            >
+              <span
+                class="evidence-label"
+              >
+                Effect
+              </span>
+              <code>
+                effect:26e2771ce452877352a28d2e4cdd026a7c1f0f2704aa4e38c8d4f2e95697af8d
+              </code>
+              <code
+                aria-label="Effect full hash"
+              >
+                26e2771ce452877352a28d2e4cdd026a7c1f0f2704aa4e38c8d4f2e95697af8d
+              </code>
+              <button
+                aria-label="Copy Effect full hash"
+                type="button"
+              >
+                Copy hash
+              </button>
+            </span>
+
+            <span
+              class="evidence"
+              tabindex="-1"
+            >
+              <span
+                class="evidence-label"
+              >
+                Configuration
+              </span>
+              <code>
+                configuration:66a1838806dbed9d0093247ad1aef6a62a4c2f6153a9ade6cf2500512d611607
+              </code>
+              <code
+                aria-label="Configuration full hash"
+              >
+                66a1838806dbed9d0093247ad1aef6a62a4c2f6153a9ade6cf2500512d611607
+              </code>
+              <button
+                aria-label="Copy Configuration full hash"
+                type="button"
+              >
+                Copy hash
+              </button>
+            </span>
+          </li>
+        </ul>
+        <p>
+          <strong>
+            Transformed request — new call identity
+          </strong>
+
+          <a
+            href="#evidence-ac15bd3f78d083b9bf035678c6fe69cb8c85e7601d9fc93cbb73d3d9514162c5"
+          >
+            View parent call evidence
+          </a>
+
+          <span
+            class="evidence"
+            id="evidence-ac15bd3f78d083b9bf035678c6fe69cb8c85e7601d9fc93cbb73d3d9514162c5"
+            tabindex="-1"
+          >
+            <span
+              class="evidence-label"
+            >
+              Parent call
+            </span>
+            <code>
+              governance-call-v0:ac15bd3f78d083b9bf035678c6fe69cb8c85e7601d9fc93cbb73d3d9514162c5
+            </code>
+            <code
+              aria-label="Parent call full hash"
+            >
+              ac15bd3f78d083b9bf035678c6fe69cb8c85e7601d9fc93cbb73d3d9514162c5
+            </code>
+            <button
+              aria-label="Copy Parent call full hash"
+              type="button"
+            >
+              Copy hash
+            </button>
+          </span>
+        </p>
+      </li>
+      <li
+        class="stage"
+        tabindex="0"
+      >
+        <h2>
+          2. Assessment
+        </h2>
+        <span
+          class="evidence"
+          tabindex="-1"
+        >
+          <span
+            class="evidence-label"
+          >
+            Assessment
+          </span>
+          <code>
+            governance-assessment-v0:4b09210aaf0c28a99c5035d1e8b6222724b5398bc5bab51cf3a3e75f3ee9fe85
+          </code>
+          <code
+            aria-label="Assessment full hash"
+          >
+            4b09210aaf0c28a99c5035d1e8b6222724b5398bc5bab51cf3a3e75f3ee9fe85
+          </code>
+          <button
+            aria-label="Copy Assessment full hash"
+            type="button"
+          >
+            Copy hash
+          </button>
+        </span>
+      </li>
+      <li
+        class="stage"
+        tabindex="0"
+      >
+        <h2>
+          3. Verdict
+        </h2>
+        <p>
+          Verdict:
+          <strong
+            class="status"
+          >
+            Ask
+          </strong>
+        </p>
+        <span
+          class="evidence"
+          tabindex="-1"
+        >
+          <span
+            class="evidence-label"
+          >
+            Policy
+          </span>
+          <code>
+            bound-policy-v0:3666c734b2e3d24a3051fa58816ae433fe229eb7d6564a98e9501e32737e2a56
+          </code>
+          <code
+            aria-label="Policy full hash"
+          >
+            3666c734b2e3d24a3051fa58816ae433fe229eb7d6564a98e9501e32737e2a56
+          </code>
+          <button
+            aria-label="Copy Policy full hash"
+            type="button"
+          >
+            Copy hash
+          </button>
+        </span>
+        <p>
+          fixture.ask
+        </p>
+      </li>
+      <li
+        class="stage"
+        tabindex="0"
+      >
+        <h2>
+          4. Consent
+        </h2>
+        <p>
+          Consent:
+          <strong
+            class="status"
+          >
+            Approved
+          </strong>
+        </p>
+        <p>
+          <strong>
+            Approval bound to proposal
+          </strong>
+        </p>
+        <span
+          class="evidence"
+          tabindex="-1"
+        >
+          <span
+            class="evidence-label"
+          >
+            Proposal
+          </span>
+          <code>
+            governance-proposal-v0:39cc297cb1f4b6a228842274beb41f390054c855a8d2c7a30ecb306a1622409b
+          </code>
+          <code
+            aria-label="Proposal full hash"
+          >
+            39cc297cb1f4b6a228842274beb41f390054c855a8d2c7a30ecb306a1622409b
+          </code>
+          <button
+            aria-label="Copy Proposal full hash"
+            type="button"
+          >
+            Copy hash
+          </button>
+        </span>
+        <span
+          class="evidence"
+          tabindex="-1"
+        >
+          <span
+            class="evidence-label"
+          >
+            Audit
+          </span>
+          <code>
+            audit:858df18ec2c1bb326d62dd54687d073e9e6b35d2156cd12327b87a28726aae62
+          </code>
+          <code
+            aria-label="Audit full hash"
+          >
+            858df18ec2c1bb326d62dd54687d073e9e6b35d2156cd12327b87a28726aae62
+          </code>
+          <button
+            aria-label="Copy Audit full hash"
+            type="button"
+          >
+            Copy hash
+          </button>
+        </span>
+        <span
+          class="evidence"
+          tabindex="-1"
+        >
+          <span
+            class="evidence-label"
+          >
+            Audit
+          </span>
+          <code>
+            audit:882366956edb3c33bb4beb6dd1ecc6a1b5a4083509fec25c07d139dd8ffbd30b
+          </code>
+          <code
+            aria-label="Audit full hash"
+          >
+            882366956edb3c33bb4beb6dd1ecc6a1b5a4083509fec25c07d139dd8ffbd30b
+          </code>
+          <button
+            aria-label="Copy Audit full hash"
+            type="button"
+          >
+            Copy hash
+          </button>
+        </span>
+      </li>
+      <li
+        class="stage"
+        tabindex="0"
+      >
+        <h2>
+          5. Action or simulation
+        </h2>
+        <p>
+          <strong>
+            No action attempted
+          </strong>
+        </p>
+        <p>
+          No committed artifact
+        </p>
+      </li>
+      <li
+        class="stage"
+        tabindex="0"
+      >
+        <h2>
+          6. Outcome
+        </h2>
+        <p>
+          <strong>
+            No action attempted
+          </strong>
+        </p>
+        <p>
+          No committed artifact
+        </p>
+      </li>
+    </ol>
+  </article>
+</div>

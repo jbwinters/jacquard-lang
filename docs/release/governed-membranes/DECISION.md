@@ -21,8 +21,10 @@ Do not advertise this work as a production-ready security system, an
 operating-system sandbox, a general agent-governance platform, an exactly-once
 workflow engine, or an uncertainty-aware safety system. Do not say that every
 G0-G4 product surface is complete. The package-level persisted review workflow
-and playground decision-chain view do not ship, and the flagship remains a
-checkout-only evidence demo.
+does not ship. The decision-chain playground ships only as a local, offline,
+read-only source-checkout review surface; it is not hosted and is not an
+approval or operator console. The flagship remains a checkout-only evidence
+demo.
 
 ## Public claim
 
@@ -40,6 +42,13 @@ This is a bounded claim about the exact shipped Workspace implementation and
 evidence lanes. It is not a claim about arbitrary facades, arbitrary handlers,
 provider truth, reviewer identity, simulator fidelity, external-state
 freshness, or isolation from a hostile host.
+
+The local playground is a presentation of that bounded evidence. Its OCaml
+projection verifies typed explanation invariants before emitting a normalized
+schema. The browser validates and renders that schema but does not evaluate
+policy, derive authority, calculate canonical hashes, join artifacts, or
+execute an action. Backend-generated examples are visibly illustrative and do
+not claim verifier provenance.
 
 ## Why this boundary
 

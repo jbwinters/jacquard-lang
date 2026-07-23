@@ -1539,7 +1539,13 @@ the frozen Call identity has no occurrence discriminator.
   action evidence forbids the rendering-only result. Missing query-scoped reached detail is
   `operation-not-reached` and makes the report partial; it is not a diagnostic
   or runtime-absence claim.
-* The playground renders the pipeline as `request -> assessment -> verdict -> consent -> action/simulation -> outcome`, with every box linked to its hash.
+* The local-only playground renders the pipeline as `request -> assessment ->
+  verdict -> consent -> action/simulation -> outcome` from the normalized
+  `jacquard-governance-decision-chain-v1` backend projection. Every committed
+  artifact exposes its full backend-supplied hash; absent artifacts are stated
+  explicitly. [The client contract](client-playground.md) freezes its
+  presentation vocabulary, offline boundary, accessibility obligations, and
+  product non-claims.
 * Semantic diff treats a policy threshold change as code, because it is code.
 
 ## 13. Threat model and honest limits

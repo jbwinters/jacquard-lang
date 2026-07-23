@@ -34,6 +34,18 @@ opam exec -- dune build @fmt
 git diff --exit-code
 opam exec -- dune build @doc
 
+(
+  cd playground/governance
+  corepack enable
+  pnpm install --frozen-lockfile
+  pnpm run lint
+  pnpm run typecheck
+  pnpm run test
+  pnpm run build
+  pnpm exec playwright install chromium firefox webkit
+  pnpm run test:e2e
+)
+
 sh demos/governed-workspace/run.sh
 opam exec -- dune runtest test/cli/governed-workspace.t --force
 
@@ -59,6 +71,11 @@ The Core 0.1 reproduction is retained because GM.22 is a successor overlay. It
 proves that the full historical build, runtime memory checks, clang native
 differential/leak/fuzz lanes, public demos, and adversarial gauntlets remain
 green; it does not reinterpret the historical Core 0.1 claims.
+
+The playground commands use the exact Node active-LTS and pnpm versions pinned
+in `playground/governance/package.json`. Browser installation may download the
+pinned Playwright engines; the application itself remains loopback-only and
+the browser lane fails if it observes a non-loopback application request.
 
 ## Focused governance diagnosis
 
