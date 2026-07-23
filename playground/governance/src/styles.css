@@ -1,8 +1,8 @@
-:root { font-family: ui-sans-serif, system-ui, sans-serif; color: #17212b; background: #f5f7fa; }
+:root { color-scheme: light; font-family: ui-sans-serif, system-ui, sans-serif; color: #17212b; background: #f5f7fa; }
 * { box-sizing: border-box; }
 body { margin: 0; }
 main { max-width: 1000px; margin: 0 auto; padding: 1.5rem; }
-.loader, .chain { background: Canvas; border: 1px solid #667085; border-radius: .5rem; padding: 1.25rem; margin-bottom: 1.5rem; }
+.loader, .chain { background: #fff; border: 1px solid #667085; border-radius: .5rem; padding: 1.25rem; margin-bottom: 1.5rem; }
 label, textarea { display: block; width: 100%; }
 textarea { margin: .5rem 0; font: .85rem ui-monospace, monospace; }
 .controls { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; }

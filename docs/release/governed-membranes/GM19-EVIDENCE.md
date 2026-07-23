@@ -77,7 +77,8 @@ persistence.
 
 The validator rejects unknown versions, profiles, keys, artifact kinds,
 states, malformed hashes, provenance mismatch, changed evidence limits,
-inconsistent verdict/consent/action relationships, explicit fields outside the
+inconsistent verdict/consent/action relationships (including attempted action
+for any decision other than an approved `Ask`), explicit fields outside the
 schema, and documents over 256 KiB. It validates presentation structure only;
 it never authenticates the document-supplied source marker, detects secret
 content inside allowed text, evaluates policy, calculates hashes, derives
@@ -93,8 +94,9 @@ completion claims distinct.
 Vitest and Testing Library cover all fixtures, snapshots, axe checks, hostile
 text escaping, semantic non-confusion, input bounds, reset/rejection focus, and
 keyboard order. Playwright runs Chromium, Firefox, and WebKit and covers
-keyboard traversal, visible focus, reduced motion, forced colors, and absence
-of non-loopback application requests.
+the exact static build, keyboard traversal, visible focus, reduced motion,
+forced colors, dark-preference contrast, and absence of non-loopback
+application requests.
 
 ## Honest product boundary
 

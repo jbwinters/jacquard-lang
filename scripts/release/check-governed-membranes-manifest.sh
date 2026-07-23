@@ -38,6 +38,11 @@ done
 cd "$repo_root"
 mkdir -p "$repo_root/.scratch/tmp"
 
+case "$repo_root" in
+  */_build/.sandbox/*/default) dune_cram_sandbox=1 ;;
+  *) dune_cram_sandbox=0 ;;
+esac
+
 verify_sandbox_manifest() {
   checked_manifest=$1
   label=$2
@@ -48,9 +53,13 @@ verify_sandbox_manifest() {
     if [ ! -f "$file_path" ]; then
       case "$file_path" in
         .github/workflows/ci.yml)
-          # Dune deliberately excludes dot-directories from cram sandboxes.
-          # A real source checkout verifies this path in the Git-aware branch below.
-          continue
+          if [ "$dune_cram_sandbox" -eq 1 ]; then
+            # Dune deliberately excludes dot-directories from cram sandboxes.
+            # Real and extracted source trees remain strict.
+            continue
+          fi
+          echo "$file_path: missing attested $label file" >&2
+          exit 1
           ;;
         *)
           echo "$file_path: missing attested $label file" >&2

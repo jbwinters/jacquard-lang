@@ -76,6 +76,14 @@ function EvidenceLink({ target, children }: { target: string; children: React.Re
 export function DecisionChainView({ artifact }: { artifact: DecisionChain }) {
   const [request, assessment, verdict, consent, activity, outcome] = artifact.stages;
   const parentCall = request.parent_call_id;
+  const proposalBindingLabel =
+    consent.kind === "Approved"
+      ? "Approval bound to proposal"
+      : consent.kind === "Denied"
+        ? "Denial bound to proposal"
+        : consent.kind === "Escalated"
+          ? "Escalation bound to proposal"
+          : "Consent evidence bound to proposal";
   const isSimulation =
     activity.activity.kind === "simulation" && outcome.outcome.simulation_not_consent;
   const noSimulator = activity.activity.kind === "no-simulator";
@@ -155,7 +163,7 @@ export function DecisionChainView({ artifact }: { artifact: DecisionChain }) {
         {consent.proposal ? (
           <>
             <p>
-              <strong>Approval bound to proposal</strong>
+              <strong>{proposalBindingLabel}</strong>
             </p>
             <Evidence identity={consent.proposal} label="Proposal" />
           </>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MAX_INPUT_BYTES, validateDecisionChain } from "../src/schema";
-import { sampleDecision } from "../src/fixtures";
+import { fixtures, sampleDecision } from "../src/fixtures";
 
 const source = () => JSON.stringify(sampleDecision);
 
@@ -62,4 +62,29 @@ describe("normalized v1 decision-chain validation", () => {
       expect(validateDecisionChain(JSON.stringify(value)).ok).toBe(false);
     }
   });
+  it.each(["Allow", "Block", "Simulate", "Denied", "Escalated", "Stale", "Missing"] as const)(
+    "rejects attempted action for %s",
+    (state) => {
+      const value = structuredClone(fixtures.attemptMissingCompletion) as any;
+      if (state === "Allow" || state === "Block" || state === "Simulate") {
+        value.stages[2].kind = state;
+        value.stages[3].kind = "Not required";
+        value.stages[3].proposal = null;
+        value.stages[3].audit = value.stages[3].audit.slice(0, 1);
+      } else {
+        value.stages[3].kind = state;
+        if (state === "Stale" || state === "Missing") {
+          value.stages[3].proposal = null;
+          value.stages[3].audit = value.stages[3].audit.slice(0, 1);
+        }
+      }
+      const result = validateDecisionChain(JSON.stringify(value));
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.errors).toContain(
+          "Only an approved Ask decision may carry attempted action evidence."
+        );
+      }
+    }
+  );
 });

@@ -13,7 +13,7 @@ describe("DecisionChainView", () => {
     expect(screen.getByText("Approval bound to proposal")).toBeVisible();
     expect(screen.getByText("Transformed request — new call identity")).toBeVisible();
     expect(screen.getByText("Illustrative fixture — not verified evidence")).toBeVisible();
-    const snapshot = prettyDOM(container, undefined, { highlight: false })?.replace(
+    const snapshot = (prettyDOM(container, undefined, { highlight: false }) || "").replace(
       /[ \t]+$/gm,
       ""
     );
@@ -33,6 +33,16 @@ describe("DecisionChainView", () => {
     expect(screen.getByText("Simulation — not consent")).toBeVisible();
     expect(screen.queryByText("Approval bound to proposal")).not.toBeInTheDocument();
     expect(screen.getByText("Configured resource evidence — not type-proven")).toBeVisible();
+  });
+  it.each([
+    ["Denied", "Denial bound to proposal"],
+    ["Escalated", "Escalation bound to proposal"]
+  ] as const)("labels %s proposal evidence without implying approval", (kind, label) => {
+    const artifact = structuredClone(sampleDecision);
+    artifact.stages[3].kind = kind;
+    render(<DecisionChainView artifact={artifact} />);
+    expect(screen.getByText(label)).toBeVisible();
+    expect(screen.queryByText("Approval bound to proposal")).not.toBeInTheDocument();
   });
   it("distinguishes an attempt, receipt, completion, and missing outcome", () => {
     const attempted = structuredClone(fixtures.attemptMissingCompletion);

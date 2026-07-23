@@ -466,6 +466,14 @@ export function validateDecisionChain(input: string): Validation {
     errors.push("Activity and outcome states disagree.");
   }
   if (
+    verdictKind !== undefined &&
+    consentKind !== undefined &&
+    activityKind === "attempted" &&
+    !(verdictKind === "Ask" && consentKind === "Approved")
+  ) {
+    errors.push("Only an approved Ask decision may carry attempted action evidence.");
+  }
+  if (
     simulationNotConsent !== undefined &&
     (simulationNotConsent !== (activityKind === "simulation" && verdictKind === "Simulate"))
   ) {

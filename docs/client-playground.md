@@ -116,6 +116,8 @@ interchangeable:
 - `Configured resource evidence — not type-proven`
 - `Simulation — not consent`
 - `Approval bound to proposal`
+- `Denial bound to proposal`
+- `Escalation bound to proposal`
 - `Consent rejected — stale approval`
 - `No action attempted`
 - `Attempt recorded — execution not proven`

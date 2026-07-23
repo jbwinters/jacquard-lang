@@ -1,5 +1,26 @@
 import { expect, test } from "@playwright/test";
 
+function channelToLinear(channel: number): number {
+  const value = channel / 255;
+  return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+}
+
+function luminance(cssColor: string): number {
+  const channels = cssColor.match(/\d+(?:\.\d+)?/g)?.slice(0, 3).map(Number);
+  if (!channels || channels.length !== 3) throw new Error(`Unsupported color: ${cssColor}`);
+  return (
+    0.2126 * channelToLinear(channels[0]) +
+    0.7152 * channelToLinear(channels[1]) +
+    0.0722 * channelToLinear(channels[2])
+  );
+}
+
+function contrastRatio(foreground: string, background: string): number {
+  const lighter = Math.max(luminance(foreground), luminance(background));
+  const darker = Math.min(luminance(foreground), luminance(background));
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
 test("renders locally and makes no non-loopback network request", async ({ page }) => {
   const nonLoopback: string[] = [];
   page.on("request", (request) => {
@@ -37,4 +58,16 @@ test("exposes visible focus in reduced-motion and forced-color modes", async ({ 
   expect(await page.evaluate(() => matchMedia("(prefers-reduced-motion: reduce)").matches)).toBe(true);
   expect(await page.evaluate(() => matchMedia("(forced-colors: active)").matches)).toBe(true);
   expect(await firstStage.evaluate((element) => getComputedStyle(element).outlineStyle)).not.toBe("none");
+});
+
+test("keeps text readable when the browser prefers a dark color scheme", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.goto("/");
+  for (const selector of [".loader", ".chain", ".stage", "button"]) {
+    const colors = await page.locator(selector).first().evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { foreground: style.color, background: style.backgroundColor };
+    });
+    expect(contrastRatio(colors.foreground, colors.background)).toBeGreaterThanOrEqual(4.5);
+  }
 });
