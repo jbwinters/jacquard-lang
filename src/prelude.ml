@@ -80,7 +80,7 @@ let load ~dir store : ((string * Canon.decl_hashes list) list, Diag.t list) resu
               match Store.lookup_kind store name Resolve.KCon with
               | Some { Resolve.hash; _ } -> Store.hide_derived store hash
               | None -> ())
-            [ "hash-opaque"; "secret-opaque" ];
+            [ "hash-opaque"; "secret-opaque"; "posterior-exact-result-v1" ];
           (match Store.lookup_kind store "audit-sequence-v0" Resolve.KCon with
           | Some { Resolve.hash; _ } -> Store.hide_derived store hash
           | None -> ());
@@ -176,6 +176,13 @@ let utf8_boundaries s =
       go (i :: acc) (i + width)
   in
   go [] 0
+
+(* [builtin_signatures] is defined below the grant installers. Posterior model checking happens
+   while a trusted builtin is running, so this hook is initialized at module startup once the
+   complete definition is available. *)
+let posterior_builtin_signatures :
+    (Store.t -> ((Hash.t * Types.scheme) list, Diag.t list) result) ref =
+  ref (fun _ -> Ok [])
 
 (** [wire_builtins ctx] registers the native implementations for the prelude's builtin marker terms.
     Call after {!load}. Integer semantics per decision D2: OCaml native 63-bit ints; add/sub/mul
@@ -745,6 +752,31 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
             (Runtime_err.Type_error
                (Printf.sprintf "support expects a distribution, got %s"
                   (String.concat ", " (List.map Value.show args)))));
+  let with_posterior_signatures name implementation args =
+    match !posterior_builtin_signatures store with
+    | Ok signatures -> implementation ctx ~builtin_signatures:signatures args
+    | Error diagnostics ->
+        let cause =
+          match diagnostics with
+          | [] -> "the builtin signature registry failed without reporting a cause"
+          | diagnostics -> String.concat "; " (List.map Diag.to_cause_string diagnostics)
+        in
+        Error
+          (Runtime_err.Diagnostic
+             (Diag.error ~domain:Inference ~code:"E0915"
+                ~summary:"The posterior model checker could not initialize." ~cause
+                ~next_step:
+                  "Load the complete, version-matched prelude before running posterior inference."
+                ~contrast:
+                  (Some
+                     (Diag.contrast ~mistaken:name ~intended:"a complete, version-matched prelude"))
+                ()))
+  in
+  optional "posterior.run-exact-v1"
+    (with_posterior_signatures "posterior.run-exact-v1" Posterior_risk.run_exact_builtin);
+  optional "posterior.project-exact-v1" (Posterior_risk.project_exact_builtin ctx);
+  optional "posterior.sample-evidence-v1"
+    (with_posterior_signatures "posterior.sample-evidence-v1" Posterior_risk.sample_evidence_builtin);
   Ok ()
 
 (** [install_console ctx ~out] grants the [console] effect: [print] writes its text through [out]
@@ -1356,6 +1388,67 @@ let builtin_signatures (store : Store.t) : ((Hash.t * Types.scheme) list, Diag.t
         Ok (base @ code_sigs @ governance_sigs)
     | _ -> Ok base
   in
+  (* GM.21 posterior-risk builtins are all-or-nothing and optional for reduced test preludes.
+     Exact and approximate evidence have deliberately distinct result types, so seeded output has
+     no checker-visible path into the decision-bearing projector. *)
+  let* base =
+    match
+      ( lookup_hash store ~kind:Resolve.KType "text",
+        lookup_hash store ~kind:Resolve.KType "hash",
+        lookup_hash store ~kind:Resolve.KType "code",
+        lookup_hash store ~kind:Resolve.KType "result",
+        lookup_hash store ~kind:Resolve.KType "governance-call",
+        lookup_hash store ~kind:Resolve.KType "governance-assessment",
+        lookup_hash store ~kind:Resolve.KType "posterior-risk-model-ref-v1",
+        lookup_hash store ~kind:Resolve.KType "posterior-exact-config-v1",
+        lookup_hash store ~kind:Resolve.KType "posterior-approximate-config-v1",
+        lookup_hash store ~kind:Resolve.KType "posterior-exact-result-v1",
+        lookup_hash store ~kind:Resolve.KType "posterior-rule-v1",
+        lookup_hash store ~kind:Resolve.KType "posterior-projected-assessment-v1",
+        lookup_hash store ~kind:Resolve.KType "non-authorizing-approximate-risk-evidence-v1" )
+    with
+    | ( Ok text_h,
+        Ok _hash_h,
+        Ok code_h,
+        Ok result_h,
+        Ok call_h,
+        Ok assessment_h,
+        Ok model_ref_h,
+        Ok exact_config_h,
+        Ok approximate_config_h,
+        Ok exact_result_h,
+        Ok rule_h,
+        Ok projected_h,
+        Ok approximate_evidence_h ) ->
+        let ty hash = Types.TCon (hash, []) in
+        let result error value = Types.TCon (result_h, [ error; value ]) in
+        let fn parameters value = Types.mono (Types.TArrow (parameters, Types.empty_row, value)) in
+        let optional_signature name signature =
+          match lookup_hash store ~kind:Resolve.KTerm name with
+          | Ok hash -> [ (hash, signature) ]
+          | Error _ -> []
+        in
+        let text = ty text_h in
+        let code = ty code_h in
+        let call = ty call_h in
+        let assessment = ty assessment_h in
+        let model_ref = ty model_ref_h in
+        let exact_config = ty exact_config_h in
+        let approximate_config = ty approximate_config_h in
+        let exact_result = ty exact_result_h in
+        let rule = ty rule_h in
+        Ok
+          (base
+          @ optional_signature "posterior.run-exact-v1"
+              (fn [ model_ref; exact_config; code; call ] (result text exact_result))
+          @ optional_signature "posterior.project-exact-v1"
+              (fn [ call; assessment; exact_result; rule ] (result text (ty projected_h)))
+          @ optional_signature "posterior.sample-evidence-v1"
+              (fn
+                 [ model_ref; approximate_config; code; call ]
+                 (result text (ty approximate_evidence_h))))
+    | _ -> Ok base
+  in
   (* the SL.5 text layer (all-or-nothing: 11-text.jqd declares every marker) *)
   let* base =
     match
@@ -1508,4 +1601,6 @@ let builtin_signatures (store : Store.t) : ((Hash.t * Types.scheme) list, Diag.t
       | _ -> Ok base)
   | _ -> Ok base
 
-let () = eval_builtin_signatures := builtin_signatures
+let () =
+  eval_builtin_signatures := builtin_signatures;
+  posterior_builtin_signatures := builtin_signatures

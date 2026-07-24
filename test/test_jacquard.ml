@@ -61,6 +61,8 @@ let () =
       ("diags", Test_diags.suite);
       ("diff", Test_diff.suite);
       ("infer", Test_infer.suite);
+      ("posterior-risk", Test_posterior_risk.suite);
+      ("posterior-risk-verify", Test_posterior_risk_verify.suite);
       ("gauntlet-handlers", Test_gauntlet_handlers.suite);
       ("gauntlet-hashing", Test_gauntlet_hashing.suite);
       ("gauntlet-dist", Test_gauntlet_dist.suite);

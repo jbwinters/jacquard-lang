@@ -19,6 +19,8 @@
   ../../docs/client-playground.md
   ../../docs/effect-membranes.md
   ../../docs/errors.md
+  ../../docs/SKILL.md
+  ../../docs/stdlib.md
   ../../docs/release/dx-jac-export/EVIDENCE.md
   ../../docs/release/structured-concurrency/EVIDENCE.md
   (source_tree ../../playground/governance)
@@ -26,6 +28,12 @@
   ../../src/governance_decision_chain.mli
   ../../src/host_readiness.ml
   ../../src/host_readiness.mli
+  ../../src/infer_dist.ml
+  ../../src/posterior_risk.ml
+  ../../src/posterior_risk.mli
+  ../../src/posterior_risk_verify.ml
+  ../../src/posterior_risk_verify.mli
+  ../../src/prelude.ml
   ../../src/scheduler_core.ml
   ../../src/scheduler_core.mli
   ../../src/scope_policy.ml
@@ -34,11 +42,18 @@
   ../gen_governance_playground_fixtures.ml
   ../test_governance_decision_chain.ml
   ../test_governance_explain.ml
+  ../test_effect_taxonomy.ml
   ../test_host_readiness.ml
+  ../test_infer.ml
+  ../test_jacquard.ml
+  ../test_posterior_risk.ml
+  ../test_posterior_risk_verify.ml
   ../test_scheduler_core.ml
   ../gm12b/dune
   dune
+  gm21-posterior.t
   governed-membranes-release.t
+  tiers.t
   (source_tree ../../docs/release/governed-membranes)
   (source_tree ../../bench)
   (source_tree ../native-asan)

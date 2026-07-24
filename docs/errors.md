@@ -171,6 +171,13 @@ also emits E0817; consuming the captured resumption twice emits E0816.
 | runtime | E0906 | a once continuation was resumed more than once | applying the same once resumption twice |
 | concurrency | E0907 | a Task or ChannelHandle carrier is private, malformed, foreign to the run, escaped, stale, or outside its exact structured scope | returning/storing a Task or ChannelHandle beyond `async.scope`, constructing its private carrier by hash, reusing it after its creating scope closes or in another run, or using a parent/descendant/foreign handle |
 | concurrency | E0908 | a deterministic scheduler, schedule trace, trace I/O, or same-scope policy operation is illegal for its lifecycle, decision order, registration, continuation ownership, configured positive/transport bound, or strict-replay contract | checking out a suspended task, exceeding a task/decision/input bound, observing or scheduling a terminal child twice, reading/writing an unavailable trace path, parsing an unversioned/malformed trace, or replaying a missing, extra, reordered, impossible, queue-drifted, or operation-drifted event |
+| inference | E0910 | exact risk enumeration has no positive terminal-branch budget | calling the trusted exact runner with `max-branches = 0` |
+| inference | E0911 | an exact risk model supplied an invalid finite distribution or non-comparable observation value | a categorical support with a negative, NaN, or infinite weight, or an `observe` over closures or opaque values |
+| inference | E0912 | exact risk enumeration exhausted its terminal-branch budget | a four-leaf model under `max-branches = 3` |
+| inference | E0913 | an exact risk model returned something other than a released `Risk` | returning `Option Risk` or a forged constructor identity |
+| inference | E0914 | an exact risk model performed an effect other than released `Dist.sample` or `Dist.observe` | throwing from a model declared for the exact boundary |
+| inference | E0915 | exact risk enumeration could not initialize or the model failed at runtime | division by zero in a reached model branch |
+| inference | E0916 | exact risk path or accumulation arithmetic became non-finite | multiplying finite path factors into an overflowing weight |
 
 ## Warp (E10xx)
 
@@ -392,6 +399,13 @@ the exact Decision and ID.
 | E1540 | two governance review facts conflict for one exact identity | duplicate operation facts carry different driver identities or labels |
 | E1541 | typed governance review facts violate an internal comparison invariant | a reached operation is absent from the complete facade operation set |
 | E1542 | a governance decision-chain presentation cannot be derived safely from the typed explanation | completion evidence disagrees with the verified action state, or a non-Ask verdict carries consent evidence |
+| E1543 | a posterior-risk model cannot be resolved by exact hash or does not have the closed `(GovernanceCall) ->{Dist} Risk` signature | selecting a pure function or a model with an additional effect |
+| E1544 | exact posterior configuration is invalid or bounded exhaustive inference fails | exhausting `max-branches` before the next terminal path |
+| E1545 | exact posterior evidence, weights, normalization, support, or branch accounting is invalid | four zero weights or underflow that erases theoretically positive support |
+| E1546 | exact projection cannot validate its Call, baseline, carried identities, rule, or conservative result | substituting a different Call, handler descriptor, source evidence, or nested posterior wrapper |
+| E1547 | non-authorizing approximate evidence cannot be constructed safely | a nonpositive sample count, model failure, or non-`Risk` sampled result |
+| E1548 | posterior-aware offline verification cannot select one supported committed decision | no matching `Evaluated` entry, ambiguous linkage, malformed replay artifacts, or a dry policy whose simulator availability is not bound by the bundle |
+| E1549 | exact posterior replay disagrees with the committed assessment or unchanged live-policy verdict | changing the model evidence or exact budget, substituting the effective assessment, or committing a different verdict |
 
 `jac governance explain PROPOSAL_ID --bundle RECONCILIATION_BUNDLE` accepts
 exactly 64 lowercase hexadecimal digits and fully applies reconciliation-bundle
@@ -433,6 +447,25 @@ guards producer invariants. A missing query-scoped operation detail is instead t
 stable `operation-not-reached` availability fact and makes the report partial.
 The report grants no authority, proves no execution or runtime absence, and
 assigns no safety verdict.
+
+`posterior.run-exact-v1` and `judge.posterior-exact-v1` are the only
+decision-bearing GM.21 inference path. They resolve the model by exact stored
+term hash, require its closed `Dist`-only signature, enforce a positive
+terminal-branch budget, preserve theoretically positive support, and return no
+partial posterior on failure. `posterior.project-exact-v1` revalidates the
+carried identities and can only join the selected risk upward with an
+independently validated baseline assessment. The distinct
+`non-authorizing-approximate-risk-evidence-v1` carrier produced by seeded
+likelihood weighting has no assessment projector or Judge adapter.
+
+`Posterior_risk_verify.verify_form` is a separate offline verifier layered on
+the unchanged Governance v0 run-bundle verifier. It first requires the whole
+v0 bundle to verify, reruns exact posterior inference from typed artifacts,
+requires exactly one matching `Evaluated` entry, compares the replayed
+effective assessment byte for byte, and recomputes its unchanged live-policy
+verdict. It rejects dry policies because a run bundle does not bind their
+simulator-availability input. The existing v0 verifier does not make these
+posterior-replay claims.
 
 `Governance_decision_chain` is an additive, presentation-only OCaml adapter for
 the local Workspace v0 playground. It accepts only an existing typed

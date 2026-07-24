@@ -26,6 +26,35 @@ type weighted = { value : Value.t; weight : float }
 type posterior = { entries : (Value.t * float) list }
 (** normalized, sorted by probability descending then rendering for determinism *)
 
+type risk_weights = { low : float; medium : float; high : float; forbidden : float }
+(** Raw, unnormalized binary64 weights in the released risk order. Exact risk enumeration
+    accumulates duplicate terminal leaves into these four fields without projecting or normalizing
+    them. *)
+
+type risk_positive_support = { low : bool; medium : bool; high : bool; forbidden : bool }
+(** Theoretical positive reachability in the released risk order. A field is [true] when at least
+    one terminal path to that risk has only strictly positive support factors, even if multiplying
+    those factors underflows to binary64 zero. *)
+
+type risk_branch_accounting = {
+  completed : int;
+  positive : int;
+  zero_weight : int;
+  underflowed : int;
+}
+(** Terminal-path accounting for one bounded exact risk enumeration. [positive] counts paths with
+    theoretical positive support, [zero_weight] counts paths containing an explicit zero support
+    factor, and [underflowed] is the subset of [positive] whose binary64 path weight became zero. *)
+
+type exact_risk_enumeration = {
+  weights : risk_weights;
+  positive_support : risk_positive_support;
+  branches : risk_branch_accounting;
+}
+(** Decision-neutral evidence from bounded exact enumeration. The record contains raw weights,
+    theoretical support, and branch accounting only; normalization and policy projection are
+    deliberately separate contracts. *)
+
 let diagnostic ~code cause =
   let summary, next_step =
     match code with
@@ -35,6 +64,29 @@ let diagnostic ~code cause =
     | "E0902" ->
         ( "Probabilistic inference stopped on a runtime failure.",
           "Correct the reported model runtime failure and rerun inference." )
+    | "E0910" ->
+        ( "The exact risk-enumeration configuration is invalid.",
+          "Supply a strictly positive max_branches budget." )
+    | "E0911" ->
+        ( "The exact risk model contains an invalid finite distribution.",
+          "Use only finite discrete supports whose every weight is finite and nonnegative." )
+    | "E0912" ->
+        ( "Exact risk enumeration exceeded its branch budget.",
+          "Raise max_branches only after reviewing the model's finite support size." )
+    | "E0913" ->
+        ( "The exact risk model returned a non-Risk value.",
+          "Return one released Risk constructor: low, medium, high, or forbidden." )
+    | "E0914" ->
+        ( "The exact risk model performed an unexpected effect.",
+          "Keep the exact model closed except for the released Dist sample and observe operations."
+        )
+    | "E0915" ->
+        ( "Exact risk enumeration stopped on a runtime failure.",
+          "Correct the reported model runtime failure and rerun exact risk enumeration." )
+    | "E0916" ->
+        ( "Exact risk enumeration produced a non-finite raw weight.",
+          "Rescale the finite model weights so path multiplication and risk accumulation stay \
+           finite." )
     | _ -> raise (Diag.Bug_invalid_diagnostic ("unknown inference diagnostic code " ^ code))
   in
   Diag.error ~domain:Inference ~code ~summary ~cause ~next_step ~contrast:None ()
@@ -131,23 +183,28 @@ let pmf ctx (d : dist_v) (v : Value.t) : (float, Runtime_err.t) result =
 (* Run a state to either a terminal value or the first root-reaching dist op. *)
 type outcome =
   | Done of Value.t
-  | Op of { name : string; args : Value.t list; resume : Eval.captured_kont }
+  | Op of { op : Hash.t; name : string; args : Value.t list; resume : Eval.captured_kont }
 
 type validated_outcome =
   | Validated_done of Value.t
-  | Validated_op of { name : string; args : Value.t list; resume : Eval.validated_captured_kont }
+  | Validated_op of {
+      op : Hash.t;
+      name : string;
+      args : Value.t list;
+      resume : Eval.validated_captured_kont;
+    }
 
 let run_until_op (ctx : Eval.ctx) (state : Eval.state) : (outcome, Runtime_err.t) result =
   match Eval.run_state_capturing ctx state with
   | Ok (Eval.CValue v) -> Ok (Done v)
-  | Ok (Eval.COp { name; args; kont; _ }) -> Ok (Op { name; args; resume = kont })
+  | Ok (Eval.COp { op; name; args; kont }) -> Ok (Op { op; name; args; resume = kont })
   | Error e -> Error e
 
 let run_until_op_validated (ctx : Eval.ctx) (state : Eval.validated_state) :
     (validated_outcome, Runtime_err.t) result =
   match Eval.run_validated_state_capturing ctx state with
   | Ok (Eval.VCValue value) -> Ok (Validated_done value)
-  | Ok (Eval.VCOp { name; args; kont; _ }) -> Ok (Validated_op { name; args; resume = kont })
+  | Ok (Eval.VCOp { op; name; args; kont }) -> Ok (Validated_op { op; name; args; resume = kont })
   | Error e -> Error e
 
 (* --- enumeration (W4.2) --- *)
@@ -173,7 +230,7 @@ let enumerate (ctx : Eval.ctx) (model : Eval.state) : (posterior, Diag.t list) r
           incr branch_counter;
           leaves := { value = v; weight } :: !leaves;
           Ok ()
-      | Ok (Op { name = "sample"; args = [ dv ]; resume }) -> (
+      | Ok (Op { name = "sample"; args = [ dv ]; resume; _ }) -> (
           match Result.bind (dist_of_value ctx dv) (support ctx) with
           | Error e -> Error e
           | Ok entries ->
@@ -188,7 +245,7 @@ let enumerate (ctx : Eval.ctx) (model : Eval.state) : (posterior, Diag.t list) r
                         | Ok () -> branches rest))
               in
               branches entries)
-      | Ok (Op { name = "observe"; args = [ dv; v ]; resume }) -> (
+      | Ok (Op { name = "observe"; args = [ dv; v ]; resume; _ }) -> (
           match Result.bind (dist_of_value ctx dv) (fun d -> pmf ctx d v) with
           | Error e -> Error e
           | Ok p ->
@@ -225,6 +282,287 @@ let enumerate (ctx : Eval.ctx) (model : Eval.state) : (posterior, Diag.t list) r
 
 (** Branches explored by the last {!enumerate} (instrumentation for the no-duplicate test). *)
 let last_branch_count () = !branch_counter
+
+(* --- bounded exact risk enumeration (GM.21 core) --- *)
+
+(** [enumerate_risk_exact ctx ~max_branches model] depth-first enumerates one finite discrete Dist
+    model and returns raw weights for the four released Risk constructors. Every categorical support
+    weight is validated before its continuation is resumed. [max_branches] is a strictly positive
+    terminal-path budget; attempting the next terminal path fails with E0912 rather than returning
+    partial evidence.
+
+    The driver accepts only the released [sample] and [observe] operation identities and only
+    terminal [low], [medium], [high], or [forbidden] constructor identities. It continues paths
+    after binary64 weight underflow and records their theoretical positive support separately.
+    Runtime failures, malformed distributions, non-finite arithmetic, unexpected effects, and wrong
+    terminal values are diagnostics. This function does not normalize or project the raw result and
+    does not alter {!enumerate}. *)
+let enumerate_risk_exact (ctx : Eval.ctx) ~max_branches (model : Eval.state) :
+    (exact_risk_enumeration, Diag.t list) result =
+  if max_branches <= 0 then err ~code:"E0910" "max_branches must be positive, got %d" max_branches
+  else
+    let ( let* ) = Result.bind in
+    let lookup kind name =
+      match Store.lookup_kind (Eval.store ctx) name kind with
+      | Some { Resolve.hash; _ } -> Ok hash
+      | None ->
+          err ~code:"E0915" "the released `%s` identity is unavailable in the evaluator store" name
+    in
+    let* sample_op = lookup Resolve.KOp "sample" in
+    let* observe_op = lookup Resolve.KOp "observe" in
+    let* low_con = lookup Resolve.KCon "low" in
+    let* medium_con = lookup Resolve.KCon "medium" in
+    let* high_con = lookup Resolve.KCon "high" in
+    let* forbidden_con = lookup Resolve.KCon "forbidden" in
+    let finite_nonnegative value =
+      match classify_float value with
+      | FP_normal | FP_subnormal | FP_zero -> value >= 0.0
+      | FP_infinite | FP_nan -> false
+    in
+    let finite value =
+      match classify_float value with
+      | FP_normal | FP_subnormal | FP_zero -> true
+      | FP_infinite | FP_nan -> false
+    in
+    let canonical_zero value = if value = 0.0 then 0.0 else value in
+    let invalid_distribution fmt =
+      Printf.ksprintf (fun cause -> Error [ diagnostic ~code:"E0911" cause ]) fmt
+    in
+    let invalid_arithmetic fmt =
+      Printf.ksprintf (fun cause -> Error [ diagnostic ~code:"E0916" cause ]) fmt
+    in
+    let runtime_failure fmt =
+      Printf.ksprintf (fun cause -> Error [ diagnostic ~code:"E0915" cause ]) fmt
+    in
+    let decode_distribution value =
+      match dist_of_value ctx value with
+      | Ok distribution -> Ok distribution
+      | Error error -> invalid_distribution "%s" (Runtime_err.to_string error)
+    in
+    let validate_entries operation entries =
+      let rec validate index = function
+        | [] -> Ok entries
+        | (_, weight) :: rest ->
+            if finite_nonnegative weight then validate (index + 1) rest
+            else
+              invalid_distribution
+                "%s support weight %d is %g; every support weight must be finite and nonnegative"
+                operation index weight
+      in
+      validate 0 entries
+    in
+    let materialized_support operation distribution =
+      match support ctx distribution with
+      | Error error -> runtime_failure "%s" (Runtime_err.to_string error)
+      | Ok entries -> validate_entries operation entries
+    in
+    let uniform_probability lo hi =
+      let count = float_of_int hi -. float_of_int lo +. 1.0 in
+      let probability = 1.0 /. count in
+      if finite_nonnegative probability && probability > 0.0 then Ok probability
+      else
+        invalid_arithmetic "uniform-int %d..%d produced invalid support weight %g" lo hi probability
+    in
+    let rec comparable_value = function
+      | Value.VInt _ | VReal _ | VText _ | VHash _ -> Ok ()
+      | VTuple items -> comparable_values items
+      | VCon { args; _ } -> comparable_values args
+      | value ->
+          invalid_distribution
+            "exact observe requires transparent data support; opaque or executable value %s is not \
+             comparable"
+            (Value.show value)
+    and comparable_values = function
+      | [] -> Ok ()
+      | value :: rest ->
+          let* () = comparable_value value in
+          comparable_values rest
+    in
+    let rec same_comparable_value left right =
+      let* () = comparable_value left in
+      let* () = comparable_value right in
+      match (left, right) with
+      | Value.VInt a, VInt b -> Ok (Int.equal a b)
+      | VReal a, VReal b -> Ok (Float.equal a b)
+      | VText a, VText b -> Ok (String.equal a b)
+      | VHash a, VHash b -> Ok (Hash.equal a b)
+      | VTuple left_items, VTuple right_items -> same_comparable_values left_items right_items
+      | VCon left_con, VCon right_con ->
+          if Hash.equal left_con.con right_con.con then
+            same_comparable_values left_con.args right_con.args
+          else Ok false
+      | _ -> Ok false
+    and same_comparable_values left right =
+      match (left, right) with
+      | [], [] -> Ok true
+      | left_value :: left_rest, right_value :: right_rest ->
+          let* same = same_comparable_value left_value right_value in
+          if same then same_comparable_values left_rest right_rest else Ok false
+      | _ -> Ok false
+    in
+    let observation_mass distribution observed =
+      match distribution with
+      | UniformInt (lo, hi) ->
+          let* probability = uniform_probability lo hi in
+          Ok
+            (match observed with
+            | Value.VInt value when value >= lo && value <= hi -> (probability, true)
+            | _ -> (0.0, false))
+      | Bernoulli _ | Categorical _ ->
+          let* entries = materialized_support "observe" distribution in
+          let rec sum mass theoretically_positive = function
+            | [] -> Ok (canonical_zero mass, theoretically_positive)
+            | (value, weight) :: rest ->
+                let* same = same_comparable_value value observed in
+                if same then
+                  let next = mass +. weight in
+                  if finite next then sum next (theoretically_positive || weight > 0.0) rest
+                  else
+                    invalid_arithmetic
+                      "observe support accumulation overflowed for value %s in support order"
+                      (Value.show observed)
+                else sum mass theoretically_positive rest
+          in
+          sum 0.0 false entries
+    in
+    let multiply path_weight factor =
+      let product = path_weight *. factor in
+      if finite product then Ok (canonical_zero product)
+      else
+        invalid_arithmetic "path-weight multiplication produced %g from %g * %g" product path_weight
+          factor
+    in
+    let weights = ref ({ low = 0.0; medium = 0.0; high = 0.0; forbidden = 0.0 } : risk_weights) in
+    let positive_support =
+      ref ({ low = false; medium = false; high = false; forbidden = false } : risk_positive_support)
+    in
+    let completed = ref 0 in
+    let positive = ref 0 in
+    let zero_weight = ref 0 in
+    let underflowed = ref 0 in
+    let classify_risk = function
+      | VCon { con; args = []; _ } when Hash.equal con low_con -> Ok 0
+      | VCon { con; args = []; _ } when Hash.equal con medium_con -> Ok 1
+      | VCon { con; args = []; _ } when Hash.equal con high_con -> Ok 2
+      | VCon { con; args = []; _ } when Hash.equal con forbidden_con -> Ok 3
+      | value -> err ~code:"E0913" "expected a released Risk constructor, got %s" (Value.show value)
+    in
+    let add_terminal risk path_weight theoretically_positive =
+      let current = !weights in
+      let add prior =
+        let total = prior +. path_weight in
+        if finite total then Ok (canonical_zero total)
+        else
+          invalid_arithmetic
+            "raw risk-weight accumulation overflowed while adding terminal weight %g" path_weight
+      in
+      let* total =
+        match risk with
+        | 0 -> add current.low
+        | 1 -> add current.medium
+        | 2 -> add current.high
+        | 3 -> add current.forbidden
+        | _ -> assert false
+      in
+      (weights :=
+         match risk with
+         | 0 -> { current with low = total }
+         | 1 -> { current with medium = total }
+         | 2 -> { current with high = total }
+         | 3 -> { current with forbidden = total }
+         | _ -> assert false);
+      if theoretically_positive then begin
+        let support = !positive_support in
+        positive_support :=
+          match risk with
+          | 0 -> { support with low = true }
+          | 1 -> { support with medium = true }
+          | 2 -> { support with high = true }
+          | 3 -> { support with forbidden = true }
+          | _ -> assert false
+      end;
+      Ok ()
+    in
+    let resume continuation value =
+      match Eval.resume_captured_state ctx continuation value with
+      | Ok state -> Ok state
+      | Error error -> runtime_failure "%s" (Runtime_err.to_string error)
+    in
+    let rec explore state path_weight theoretically_positive =
+      match run_until_op ctx state with
+      | Error error -> runtime_failure "%s" (Runtime_err.to_string error)
+      | Ok (Done value) ->
+          if !completed >= max_branches then
+            err ~code:"E0912"
+              "max_branches=%d was exhausted after %d terminal paths; no partial result was \
+               returned"
+              max_branches !completed
+          else
+            let* risk = classify_risk value in
+            incr completed;
+            if theoretically_positive then begin
+              incr positive;
+              if path_weight = 0.0 then incr underflowed
+            end
+            else incr zero_weight;
+            add_terminal risk path_weight theoretically_positive
+      | Ok (Op { op; args; resume = continuation; _ }) when Hash.equal op sample_op -> (
+          match args with
+          | [ distribution_value ] -> (
+              let* distribution = decode_distribution distribution_value in
+              let visit value factor =
+                let* path_weight = multiply path_weight factor in
+                let* state = resume continuation value in
+                explore state path_weight (theoretically_positive && factor > 0.0)
+              in
+              match distribution with
+              | UniformInt (lo, hi) ->
+                  let* probability = uniform_probability lo hi in
+                  let rec visit_range value =
+                    let* () = visit (Value.VInt value) probability in
+                    if value = hi then Ok () else visit_range (value + 1)
+                  in
+                  visit_range lo
+              | Bernoulli _ | Categorical _ ->
+                  let* entries = materialized_support "sample" distribution in
+                  let rec visit_entries = function
+                    | [] -> Ok ()
+                    | (value, factor) :: rest ->
+                        let* () = visit value factor in
+                        visit_entries rest
+                  in
+                  visit_entries entries)
+          | _ ->
+              invalid_distribution "sample expects one distribution, got %d arguments"
+                (List.length args))
+      | Ok (Op { op; args; resume = continuation; _ }) when Hash.equal op observe_op -> (
+          match args with
+          | [ distribution_value; observed ] ->
+              let* distribution = decode_distribution distribution_value in
+              let* factor, factor_positive = observation_mass distribution observed in
+              let* path_weight = multiply path_weight factor in
+              let* state = resume continuation Value.unit_v in
+              explore state path_weight (theoretically_positive && factor_positive)
+          | _ ->
+              invalid_distribution "observe expects a distribution and a value, got %d arguments"
+                (List.length args))
+      | Ok (Op { op; name; args; _ }) ->
+          err ~code:"E0914" "unexpected operation %s/%d (%s)" name (List.length args)
+            (Hash.to_hex op)
+    in
+    let* () = explore model 1.0 true in
+    Ok
+      {
+        weights = !weights;
+        positive_support = !positive_support;
+        branches =
+          {
+            completed = !completed;
+            positive = !positive;
+            zero_weight = !zero_weight;
+            underflowed = !underflowed;
+          };
+      }
 
 (* --- likelihood weighting (W4.3) --- *)
 
@@ -301,13 +639,13 @@ let likelihood_weighting (ctx : Eval.ctx) ~seed ~samples (model : unit -> Eval.s
     | Ok (Validated_done v) ->
         runs := { value = v; weight } :: !runs;
         Ok ()
-    | Ok (Validated_op { name = "sample"; args = [ dv ]; resume }) -> (
+    | Ok (Validated_op { name = "sample"; args = [ dv ]; resume; _ }) -> (
         match Result.bind (dist_of_value ctx dv) (sample_dist ctx rng) with
         | Error e -> Error e
         | Ok x ->
             Result.bind (Eval.resume_validated_state ctx resume x) (fun state ->
                 one_run rng state weight))
-    | Ok (Validated_op { name = "observe"; args = [ dv; v ]; resume }) -> (
+    | Ok (Validated_op { name = "observe"; args = [ dv; v ]; resume; _ }) -> (
         match Result.bind (dist_of_value ctx dv) (fun d -> pmf ctx d v) with
         | Error e -> Error e
         | Ok p ->

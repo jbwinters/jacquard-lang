@@ -12,8 +12,11 @@ change the live gate.
   PASS gm20-monotone-join/posterior projection never lowers baseline risk (verified exhaustively (16 cases))
   3 passed, 0 failed, 0 skipped, 0 refused
 
-The GM.22 release pack is indexed, has one D61-D73 claim row each, retains the
-bounded product wording and hash caveats, and covers the complete source overlay.
+The GM.21 successor checker reconstructs the exact predecessor when Git is
+available, runs its immutable GM.19/GM.22 checker there, and then verifies the
+complete GM.21 overlay and pinned predecessor attestations.
 
-  $ ../../scripts/release/check-governed-membranes-manifest.sh
-  governed-membranes GM.22 release pack is complete and byte-consistent
+  $ ../../scripts/release/check-gm21-manifest.sh
+  note: historical reconstruction unavailable; verified retained GM.22 files and pinned attestations
+  GM.19/GM.22 predecessor attestations are preserved and byte-consistent
+  GM.21 successor release pack is complete and byte-consistent

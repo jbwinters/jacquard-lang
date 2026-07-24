@@ -1,0 +1,144 @@
+; GM.21 additive posterior-risk adapter. Exact finite inference may tighten one
+; independently produced GovernanceAssessmentV0. Seeded inference is exposed
+; only through a distinct evidence carrier and has no projection or Judge path.
+
+(deftype posterior-risk-model-ref-v1 ()
+  (con posterior-risk-model-ref-v1
+    (field model-id (tref hash))))
+
+(deftype posterior-risk-weights-v1 ()
+  (con posterior-risk-weights-v1
+    (field low-weight (tref real))
+    (field medium-weight (tref real))
+    (field high-weight (tref real))
+    (field forbidden-weight (tref real))))
+
+(deftype posterior-risk-belief-v1 ()
+  (con posterior-risk-belief-v1
+    (field low-probability (tref real))
+    (field medium-probability (tref real))
+    (field high-probability (tref real))
+    (field forbidden-probability (tref real))))
+
+(deftype posterior-risk-positive-support-v1 ()
+  (con posterior-risk-positive-support-v1
+    (field low-reachable (tref bool))
+    (field medium-reachable (tref bool))
+    (field high-reachable (tref bool))
+    (field forbidden-reachable (tref bool))))
+
+(deftype posterior-risk-branch-accounting-v1 ()
+  (con posterior-risk-branch-accounting-v1
+    (field completed (tref int))
+    (field positive (tref int))
+    (field zero-weight (tref int))
+    (field underflowed (tref int))))
+
+(deftype posterior-rule-v1 ()
+  (con posterior-worst-case-v1)
+  (con posterior-upper-tail-v1
+    (field max-mass (tref real))))
+
+(deftype posterior-exact-config-v1 ()
+  (con posterior-exact-config-v1
+    (field max-branches (tref int))))
+
+(deftype posterior-approximate-config-v1 ()
+  (con posterior-approximate-config-v1
+    (field samples (tref int))
+    (field seed (tref int))))
+
+(deftype posterior-exact-result-v1 ()
+  (con posterior-exact-result-v1
+    (field posterior-id (tref hash))
+    (field call-id (tref hash))
+    (field model-id (tref hash))
+    (field handler-semantics-id (tref hash))
+    (field handler-config (tref posterior-exact-config-v1))
+    (field handler-config-hash (tref hash))
+    (field source-evidence (tref code))
+    (field source-evidence-hash (tref hash))
+    (field raw-weights (tref posterior-risk-weights-v1))
+    (field normalized-belief (tref posterior-risk-belief-v1))
+    (field positive-support (tref posterior-risk-positive-support-v1))
+    (field branches (tref posterior-risk-branch-accounting-v1))))
+
+(deftype posterior-risk-projection-v1 ()
+  (con posterior-risk-projection-v1
+    (field projection-id (tref hash))
+    (field baseline-assessment-id (tref hash))
+    (field posterior-id (tref hash))
+    (field rule (tref posterior-rule-v1))
+    (field effective-risk (tref risk))))
+
+(deftype posterior-projected-assessment-v1 ()
+  (con posterior-projected-assessment-v1
+    (field assessment (tref governance-assessment))
+    (field projection (tref posterior-risk-projection-v1))))
+
+(deftype non-authorizing-approximate-risk-evidence-v1 ()
+  (con non-authorizing-approximate-risk-evidence-v1
+    (field evidence-id (tref hash))
+    (field call-id (tref hash))
+    (field model-id (tref hash))
+    (field handler-semantics-id (tref hash))
+    (field handler-config (tref posterior-approximate-config-v1))
+    (field handler-config-hash (tref hash))
+    (field source-evidence (tref code))
+    (field source-evidence-hash (tref hash))
+    (field empirical-belief (tref posterior-risk-belief-v1))))
+
+; These canonical descriptors name the complete reviewed handler semantics.
+; Their HASH_V0 identities are carried in every exact or approximate result.
+(defterm
+  ((binding posterior.exact-semantics-v1 ()
+    (quote
+      (posterior-risk-exact-semantics-v1
+        (lit "finite-discrete")
+        (lit "depth-first-support-order")
+        (lit "duplicate-support-entries-preserved")
+        (lit "observe-mass-summed-in-support-order")
+        (lit "observe-transparent-data-structural-equality")
+        (lit "opaque-observe-values-refused")
+        (lit "binary64-path-weight-multiplication")
+        (lit "risk-order-binary64-accumulation")
+        (lit "positive-support-preserved")
+        (lit "terminal-branch-budget-before-next-leaf")
+        (lit "gm20-normalization-v1"))))
+   (binding posterior.approximate-semantics-v1 ()
+    (quote
+      (non-authorizing-posterior-risk-likelihood-weighting-v1
+        (lit "splitmix64")
+        (lit "seed-and-sample-count-bound")
+        (lit "evidence-only"))))))
+
+(defterm
+  ((binding posterior.make-model-ref-v1 ()
+    (lam ((pvar model-id))
+      (app (var posterior-risk-model-ref-v1) (var model-id))))
+   (binding posterior.make-exact-config-v1 ()
+    (lam ((pvar max-branches))
+      (match (app (var lt) (lit 0) (var max-branches))
+        (clause (pcon true)
+          (app (var ok) (app (var posterior-exact-config-v1) (var max-branches))))
+        (clause (pcon false)
+          (app (var err) (lit "exact posterior max-branches must be positive"))))))
+   (binding posterior.make-approximate-config-v1 ()
+    (lam ((pvar samples) (pvar seed))
+      (match (app (var lt) (lit 0) (var samples))
+        (clause (pcon true)
+          (app (var ok)
+            (app (var posterior-approximate-config-v1) (var samples) (var seed))))
+        (clause (pcon false)
+          (app (var err) (lit "approximate posterior samples must be positive"))))))))
+
+; Trusted native boundaries. The exact runner resolves and checks the model
+; term by hash before running bounded exhaustive inference. The projector
+; validates every carried identity before producing an ordinary v0 assessment.
+(defterm
+  ((binding posterior.run-exact-v1 ()
+    (quote (builtin-marker posterior.run-exact-v1)))
+   (binding posterior.project-exact-v1 ()
+    (quote (builtin-marker posterior.project-exact-v1)))
+   (binding posterior.sample-evidence-v1 ()
+    (quote (builtin-marker posterior.sample-evidence-v1)))))
