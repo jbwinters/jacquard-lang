@@ -8,6 +8,7 @@ usage() {
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 checker="$repo_root/scripts/release/check-historical-manifests.sh"
+registry_path=scripts/release/historical-publications.tsv
 candidate_commit=
 
 if [ "$#" -eq 2 ] && [ "$1" = "--commit" ]; then
@@ -41,13 +42,13 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 git archive --format=tar --output="$temp_root/candidate.tar" "$candidate_oid"
-mkdir -p "$temp_root/el" "$temp_root/sc"
-tar -xf "$temp_root/candidate.tar" -C "$temp_root/el"
-tar -xf "$temp_root/candidate.tar" -C "$temp_root/sc"
+mkdir -p "$temp_root/candidate" "$temp_root/pristine"
+tar -xf "$temp_root/candidate.tar" -C "$temp_root/candidate"
+tar -xf "$temp_root/candidate.tar" -C "$temp_root/pristine"
 
 drift_first_digest() {
-  manifest=$1
-  replacement="$manifest.mutated"
+  manifest_file=$1
+  replacement_file="$manifest_file.mutated"
   awk '
     BEGIN { changed = 0 }
     !changed && $0 !~ /^#/ && NF == 2 {
@@ -60,22 +61,97 @@ drift_first_digest() {
       if (!changed)
         exit 1
     }
-  ' "$manifest" >"$replacement"
-  mv "$replacement" "$manifest"
+  ' "$manifest_file" >"$replacement_file"
+  mv "$replacement_file" "$manifest_file"
 }
 
 assert_rejected() {
-  label=$1
-  root=$2
-  if "$checker" --candidate-root "$root" --require-history >/dev/null 2>&1; then
-    echo "$label manifest drift was accepted" >&2
+  rejection_label=$1
+  expected_text=$2
+  output_file="$temp_root/rejection-output"
+  if "$checker" \
+    --candidate-root "$temp_root/candidate" \
+    --require-history >"$output_file" 2>&1; then
+    echo "$rejection_label mutation was accepted" >&2
     exit 1
   fi
-  echo "$label manifest drift rejected"
+  if ! grep -F "$expected_text" "$output_file" >/dev/null; then
+    echo "$rejection_label failed without naming $expected_text" >&2
+    sed -n '1,120p' "$output_file" >&2
+    exit 1
+  fi
+  echo "$rejection_label rejected"
 }
 
-drift_first_digest "$temp_root/el/docs/release/effect-linearity/MANIFEST.sha256"
-assert_rejected EL "$temp_root/el"
+restore_file() {
+  relative_path=$1
+  cp "$temp_root/pristine/$relative_path" "$temp_root/candidate/$relative_path"
+}
 
-drift_first_digest "$temp_root/sc/docs/release/structured-concurrency/MANIFEST.sha256"
-assert_rejected SC "$temp_root/sc"
+"$checker" --candidate-root "$temp_root/candidate" --require-history >/dev/null
+echo "clean candidate accepted"
+
+for relative_path in \
+  docs/release/effect-linearity/MANIFEST.sha256 \
+  docs/release/structured-concurrency/MANIFEST.sha256; do
+  drift_first_digest "$temp_root/candidate/$relative_path"
+  assert_rejected "$relative_path drift" "$relative_path"
+  restore_file "$relative_path"
+done
+
+awk -F '\t' '$1 == "ET" || $1 == "GM" { print $3 }' \
+  "$temp_root/candidate/$registry_path" |
+  while IFS= read -r relative_path; do
+    drift_first_digest "$temp_root/candidate/$relative_path"
+    assert_rejected "$relative_path drift" "$relative_path"
+    restore_file "$relative_path"
+  done
+
+extra_manifest=docs/release/effect-taxonomy/UNREGISTERED-MANIFEST.sha256
+printf '%064d  README.md\n' 0 >"$temp_root/candidate/$extra_manifest"
+assert_rejected "unregistered manifest" "historical manifest inventory does not match"
+rm "$temp_root/candidate/$extra_manifest"
+
+missing_manifest=docs/release/governed-membranes/GM1-MANIFEST.sha256
+mv \
+  "$temp_root/candidate/$missing_manifest" \
+  "$temp_root/missing-manifest"
+assert_rejected "missing registered manifest" "historical manifest inventory does not match"
+mv \
+  "$temp_root/missing-manifest" \
+  "$temp_root/candidate/$missing_manifest"
+
+coordinated_manifest=docs/release/effect-taxonomy/ET3-MANIFEST.sha256
+mv \
+  "$temp_root/candidate/$coordinated_manifest" \
+  "$temp_root/coordinated-manifest"
+awk -F '\t' -v removed="$coordinated_manifest" '$3 != removed { print }' \
+  "$temp_root/candidate/$registry_path" \
+  >"$temp_root/coordinated-registry"
+mv \
+  "$temp_root/coordinated-registry" \
+  "$temp_root/candidate/$registry_path"
+assert_rejected "coordinated manifest and row deletion" "historical registry floor rows drifted"
+restore_file "$registry_path"
+mv \
+  "$temp_root/coordinated-manifest" \
+  "$temp_root/candidate/$coordinated_manifest"
+
+specialized_manifest=docs/release/effect-linearity/MANIFEST.sha256
+awk -F '\t' -v weakened="$specialized_manifest" '
+  BEGIN { OFS = "\t" }
+  $3 == weakened {
+    $6 = "-"
+    $7 = "-"
+  }
+  { print }
+' "$temp_root/candidate/$registry_path" \
+  >"$temp_root/weakened-registry"
+mv \
+  "$temp_root/weakened-registry" \
+  "$temp_root/candidate/$registry_path"
+assert_rejected "specialized checker policy weakening" "historical registry floor rows drifted"
+restore_file "$registry_path"
+
+"$checker" --candidate-root "$temp_root/candidate" --require-history >/dev/null
+echo "restored candidate accepted"
