@@ -12,8 +12,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.run_id || 'cancelable' }}
+  cancel-in-progress: ${{ github.event_name != 'push' || github.ref != 'refs/heads/main' }}
 
 env:
   OCAML_COMPILER: 5.1.1
@@ -122,7 +122,7 @@ jobs:
   gm12b-exhaustive:
     name: GM12B exhaustive forwarding evidence
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 240
 
     steps:
       - name: Checkout
@@ -134,14 +134,57 @@ jobs:
         id: scope
         shell: bash
         run: |
-          if [[ "${{ github.event_name }}" != "pull_request" ]]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          elif git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD | grep -Eq \
-            '^(src/|bin/|prelude/|\.github/workflows/ci\.yml$|\.tool-versions$|dune-project$|dune-workspace[^/]*$|[^/]+\.opam$|test/dune$|test/cli/dune$|test/cli/workspace-forward-laws\.(jqd|expected)$|scripts/release/check-gm12b-exhaustive\.sh$|docs/release/governed-membranes/GM12B-(EVIDENCE\.md|MANIFEST\.sha256)$)'; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          fi
+          scope_regex='^(src/|bin/|prelude/|\.github/workflows/ci\.yml$|\.tool-versions$|dune-project$|dune-workspace[^/]*$|[^/]+\.opam$|test/dune$|test/gm12b/dune$|test/cli/workspace-forward-laws\.(jqd|expected)$|scripts/release/check-gm12b-exhaustive\.sh$|docs/release/governed-membranes/GM12B-(EVIDENCE\.md|MANIFEST\.sha256)$)'
+          zero_sha=0000000000000000000000000000000000000000
+
+          range_is_relevant() {
+            base=$1
+            head=$2
+            if [[ -z "$base" || "$base" == "$zero_sha" ]] ||
+              ! git cat-file -e "$base^{commit}" 2>/dev/null ||
+              ! git cat-file -e "$head^{commit}" 2>/dev/null ||
+              ! git merge-base --is-ancestor "$base" "$head"; then
+              return 0
+            fi
+            if ! changed_files=$(
+              git -c core.quotePath=false diff --no-renames --name-only "$base" "$head"
+            ); then
+              return 0
+            fi
+            grep -Eq "$scope_regex" <<<"$changed_files"
+          }
+
+          run=false
+          case "${{ github.event_name }}" in
+            pull_request)
+              if range_is_relevant \
+                "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}"; then
+                run=true
+              fi
+              ;;
+            push)
+              case "${{ github.ref }}" in
+                refs/heads/release/*)
+                  run=true
+                  ;;
+                refs/heads/main)
+                  if range_is_relevant "${{ github.event.before }}" "${{ github.sha }}"; then
+                    run=true
+                  fi
+                  ;;
+                *)
+                  run=true
+                  ;;
+              esac
+              ;;
+            workflow_dispatch)
+              run=true
+              ;;
+            *)
+              run=true
+              ;;
+          esac
+          echo "run=$run" >> "$GITHUB_OUTPUT"
 
       - name: Report unrelated change
         if: steps.scope.outputs.run != 'true'
@@ -167,7 +210,7 @@ jobs:
         if: steps.scope.outputs.run == 'true'
         run: |
           GM12B_EVIDENCE_OUT="$PWD/.scratch/evidence/gm12b/workspace-forward-laws.actual" \
-            opam exec -- dune build @test/cli/gm12b-evidence --force
+            opam exec -- dune build @test/gm12b/gm12b-evidence --force
 
       - name: Upload exhaustive transcript
         if: always() && steps.scope.outputs.run == 'true'

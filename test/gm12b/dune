@@ -1,0 +1,16 @@
+; The 50,000-case GM.12B proof is mandatory in its own CI lane, but intentionally
+; excluded from runtest so the ordinary development loop remains responsive.
+(rule
+ (alias gm12b-evidence)
+ (deps
+  %{bin:jac}
+  ../cli/workspace-forward-laws.jqd
+  ../cli/workspace-forward-laws.expected
+  ../../scripts/release/check-gm12b-exhaustive.sh
+  (source_tree ../../prelude))
+ (action
+  (run ../../scripts/release/check-gm12b-exhaustive.sh
+   %{bin:jac}
+   ../cli/workspace-forward-laws.jqd
+   ../cli/workspace-forward-laws.expected
+   ../../prelude)))

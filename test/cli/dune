@@ -36,9 +36,9 @@
   ../test_governance_explain.ml
   ../test_host_readiness.ml
   ../test_scheduler_core.ml
+  ../gm12b/dune
   dune
   governed-membranes-release.t
-  props.t
   (source_tree ../../docs/release/governed-membranes)
   (source_tree ../../bench)
   (source_tree ../native-asan)
@@ -55,19 +55,8 @@
   governance-gate-dry-laws.jqd
   workspace-dry-run-laws.jqd))
 
-; The 50,000-case GM.12B proof is mandatory in its own CI lane, but intentionally
-; excluded from runtest so the ordinary development loop remains responsive.
-(rule
- (alias gm12b-evidence)
- (deps
-  %{bin:jac}
-  workspace-forward-laws.jqd
-  workspace-forward-laws.expected
-  ../../scripts/release/check-gm12b-exhaustive.sh
-  (source_tree ../../prelude))
- (action
-  (run ../../scripts/release/check-gm12b-exhaustive.sh
-   %{bin:jac}
-   workspace-forward-laws.jqd
-   workspace-forward-laws.expected
-   ../../prelude)))
+; Keep exact historical evidence commands runnable while the proof implementation
+; remains isolated in test/gm12b/dune.
+(alias
+ (name gm12b-evidence)
+ (deps (alias ../gm12b/gm12b-evidence)))
