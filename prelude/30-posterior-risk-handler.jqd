@@ -1,0 +1,64 @@
+; GM.21 public replay and Judge adapter. These definitions intentionally follow
+; the trusted marker declarations in 29-posterior-risk.jqd so the prelude
+; checker sees their registered native signatures.
+
+; Replay recomputes exact inference and projection and accepts only the exact
+; effective assessment identity committed by the caller.
+(defterm ((binding posterior.replay-exact-v1 ()
+  (lam
+    ((pvar model-ref) (pvar config) (pvar source-evidence) (pvar call)
+      (pvar baseline) (pvar rule) (pvar expected))
+    (match
+      (app (var posterior.run-exact-v1) (var model-ref) (var config)
+        (var source-evidence) (var call))
+      (clause (pcon err (pvar message)) (app (var err) (var message)))
+      (clause (pcon ok (pvar exact))
+        (match
+          (app (var posterior.project-exact-v1) (var call) (var baseline)
+            (var exact) (var rule))
+          (clause (pcon err (pvar message)) (app (var err) (var message)))
+          (clause
+            (pcon ok
+              (pcon posterior-projected-assessment-v1 (pvar actual) (pwild)))
+            (match
+              (app (var governance.hash-eq?)
+                (app (var governance.assessment-id) (var actual))
+                (app (var governance.assessment-id) (var expected)))
+              (clause (pcon true) (app (var ok) (var actual)))
+              (clause (pcon false)
+                (app (var err)
+                  (lit "posterior replay assessment identity mismatch"))))))))))))
+
+; The inner Judge request is intercepted, then deliberately re-performed to
+; the next outer Judge for the independent deterministic baseline. Exact
+; failures throw before the affine continuation is resumed.
+(defterm ((binding judge.posterior-exact-v1
+  ((tforall ((tvar a)) ((rvar e))
+    (tarrow
+      ((tarrow () (row (eref judge) (eref throw) e) (tvar a))
+        (tref posterior-risk-model-ref-v1)
+        (tref posterior-exact-config-v1)
+        (tref code)
+        (tref posterior-rule-v1))
+      (row (eref judge) (eref throw) e) (tvar a))))
+  (lam ((pvar thunk) (pvar model-ref) (pvar config) (pvar source-evidence)
+    (pvar rule))
+    (handle (app (var thunk))
+      (ret (pvar value) (var value))
+      (opclause assess ((pvar call)) k
+        (let nonrec (pvar baseline) (app (var assess) (var call))
+          (match
+            (app (var posterior.run-exact-v1) (var model-ref) (var config)
+              (var source-evidence) (var call))
+            (clause (pcon err (pvar message)) (app (var throw) (var message)))
+            (clause (pcon ok (pvar exact))
+              (match
+                (app (var posterior.project-exact-v1) (var call)
+                  (var baseline) (var exact) (var rule))
+                (clause (pcon err (pvar message))
+                  (app (var throw) (var message)))
+                (clause
+                  (pcon ok
+                    (pcon posterior-projected-assessment-v1
+                      (pvar assessment) (pwild)))
+                  (app (var k) (var assessment)))))))))))))

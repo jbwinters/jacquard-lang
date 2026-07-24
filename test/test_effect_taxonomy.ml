@@ -2157,7 +2157,7 @@ let test_governed_membrane_charter () =
       "The action therefore derives `{Net, Secret}`";
       "Dry simulators continue to receive only safe request";
       "governed bodies carrying `Eval` are rejected";
-      "G5 may add posterior judgment";
+      "G5 adds posterior judgment only as the separately versioned GM.21 extension";
       "There is no `Tool` or `Host` effect in v0";
     ];
   List.iter

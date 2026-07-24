@@ -595,3 +595,29 @@ workspace.live-layer 3
 workspace.live 3
 # --- 28-workspace-forward (GM.12B unchanged-argument nested membrane)
 workspace.forward-layer 3
+# --- 29-posterior-risk (GM.21 exact posterior Judge adapter)
+posterior-risk-model-ref-v1 3
+posterior-risk-weights-v1 3
+posterior-risk-belief-v1 3
+posterior-risk-positive-support-v1 3
+posterior-risk-branch-accounting-v1 3
+posterior-rule-v1 3
+posterior-worst-case-v1 3
+posterior-upper-tail-v1 3
+posterior-exact-config-v1 3
+posterior-approximate-config-v1 3
+posterior-exact-result-v1 3
+posterior-risk-projection-v1 3
+posterior-projected-assessment-v1 3
+non-authorizing-approximate-risk-evidence-v1 3
+posterior.exact-semantics-v1 3
+posterior.approximate-semantics-v1 3
+posterior.make-model-ref-v1 3
+posterior.make-exact-config-v1 3
+posterior.make-approximate-config-v1 3
+posterior.run-exact-v1 3
+posterior.project-exact-v1 3
+posterior.sample-evidence-v1 3
+# --- 30-posterior-risk-handler (GM.21 exact replay and Judge adapter)
+posterior.replay-exact-v1 3
+judge.posterior-exact-v1 3

@@ -1,15 +1,16 @@
 # Governed Membranes Reproduction
 
-These commands reproduce the GM.22 publication evidence from a fresh checkout.
-Use the reviewed GM.22 commit or merge commit, not an unreviewed moving branch.
-Generated evidence stays under `.scratch/`.
+These commands reproduce the GM.22 publication evidence and the additive
+GM.21 successor overlay from a fresh checkout. Use the reviewed GM.21 commit or
+merge commit, not an unreviewed moving branch. Generated evidence stays under
+`.scratch/`.
 
 ## Fresh clone
 
 ```sh
 git clone https://github.com/jbwinters/jacquard-lang.git
 cd jacquard-lang
-git checkout <reviewed-gm22-commit>
+git checkout <reviewed-gm21-commit>
 
 asdf install opam 2.5.1
 asdf set opam 2.5.1
@@ -22,7 +23,7 @@ mkdir -p "$PWD/.scratch"
 export TMPDIR="$(mktemp -d -p "$PWD/.scratch" gm22-repro-tmp.XXXXXX)"
 ```
 
-`<reviewed-gm22-commit>` is intentionally supplied by the release or PR record:
+`<reviewed-gm21-commit>` is intentionally supplied by the release or PR record:
 embedding a moving branch name here would not select immutable evidence.
 
 ## Publication gate
@@ -56,8 +57,16 @@ CC=clang opam exec -- sh scripts/native-diff.sh
 JACQUARD_RELEASE_REF=HEAD JACQUARD_RELEASE_BASE=738dc8e \
   scripts/release/reproduce-0.1.sh
 
-scripts/release/check-governed-membranes-manifest.sh
+scripts/release/check-gm21-manifest.sh
 ```
+
+The GM.21 checker leaves the GM.19 and GM.22 manifests and checker immutable.
+In a full Git checkout it reconstructs exact predecessor
+`d3eaa9b92659fb595def64025a2434d6898e5274` under `.scratch/` and runs the
+historical checker there before validating the complete GM.21 overlay. In a
+source archive without Git history it can only pin-check those three
+predecessor attestation artifacts before validating GM.21, and reports that
+limitation.
 
 The ordinary full `runtest` executes every compiled governance, Workspace,
 Approval, Audit, Secret, run-bundle, reconciliation, source-gate, explanation,
@@ -112,9 +121,9 @@ find test/docs-doctest/fixtures -name '*.jac' | sort | wc -l
 git rev-parse HEAD
 ```
 
-Expected source inventory at GM.22 is 799 compiled cases, 50 cram transcript
+Expected source inventory at GM.21 is 825 compiled cases, 51 cram transcript
 files, and 27 executable documentation examples. The mandatory `dune runtest`
-above prints `Test Successful ... 799 tests run`; use that action-owned summary
+above prints `Test Successful ... 825 tests run`; use that action-owned summary
 rather than invoking the test binary outside Dune's staged prelude environment.
 The doctest runner remains the authority for the documented 27 examples across
 8 documents; the fixture file count is only a quick diagnostic.

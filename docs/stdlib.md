@@ -735,8 +735,40 @@ laundered behind `Judge`. `judge.fixed` repeats one validated value, while
 `judge.scripted` consumes assessments in operation order and throws
 `judge.scripted: out of assessments` without resuming when exhausted.
 `judge.model` is an explicit `Infer` adapter returning the same v0 point
-assessment. Posterior representations, `Dist`, and uncertainty policy belong
-to the separate G5 phase.
+assessment.
+
+GM.21 adds one separately versioned G5 adapter without changing those handlers
+or the v0 gate:
+
+```text
+judge.posterior-exact-v1 :
+  (() ->{Judge, Throw | e} a,
+   PosteriorRiskModelRefV1,
+   PosteriorExactConfigV1,
+   Code,
+   PosteriorRuleV1)
+  ->{Judge, Throw | e} a
+
+posterior.replay-exact-v1 :
+  (PosteriorRiskModelRefV1, PosteriorExactConfigV1, Code,
+   GovernanceCall, GovernanceAssessment, PosteriorRuleV1,
+   GovernanceAssessment)
+  ->{} Result Text GovernanceAssessment
+```
+
+The model reference selects an exact stored term with closed signature
+`(GovernanceCall) ->{Dist} Risk`. The handler forwards the intercepted
+`assess` to the next outer Judge for an independent baseline, runs bounded
+finite enumeration, and can only raise the baseline risk. It preserves
+confidence and reasons and throws before resumption on any failure. Exact
+`observe` compares transparent primitive, tuple, and constructor data
+structurally by runtime identity; opaque or executable observation values are
+rejected instead of compared through diagnostic rendering.
+
+`posterior.sample-evidence-v1` is the seeded likelihood-weighting companion.
+It returns only `NonAuthorizingApproximateRiskEvidenceV1`; that type has no
+assessment projector or Judge path. Reproducible approximate evidence is not
+authorization.
 
 ### Canonical governance proposals
 

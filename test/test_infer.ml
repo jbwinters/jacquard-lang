@@ -139,6 +139,153 @@ let test_impossible_observation () =
   | Error [ d ] -> Alcotest.(check string) "empty posterior code" "E0901" (Diag.code_or_uncoded d)
   | Error _ -> Alcotest.fail "expected one diagnostic"
 
+(* --- GM.21 bounded exact risk-enumeration core --- *)
+
+let expect_exact_risk_error code ctx ~max_branches state =
+  match Infer_dist.enumerate_risk_exact ctx ~max_branches state with
+  | Error [ diagnostic ] ->
+      Alcotest.(check string) "exact risk diagnostic" code (Diag.code_or_uncoded diagnostic)
+  | Error diagnostics ->
+      Alcotest.failf "expected one %s diagnostic, got: %s" code
+        (String.concat "; " (List.map Diag.to_string diagnostics))
+  | Ok _ -> Alcotest.failf "expected exact risk enumeration to fail with %s" code
+
+let duplicate_risk_observation_src =
+  "(let nonrec (pvar risk-value)\n\
+  \  (app (var sample)\n\
+  \    (app (var categorical)\n\
+  \      (app (var cons) (app (var mk-pair) (var low) (lit 0.2))\n\
+  \        (app (var cons) (app (var mk-pair) (var low) (lit 0.3))\n\
+  \          (app (var cons) (app (var mk-pair) (var high) (lit 0.5)) (var nil))))))\n\
+  \  (let nonrec (pwild)\n\
+  \    (app (var observe)\n\
+  \      (app (var categorical)\n\
+  \        (app (var cons) (app (var mk-pair) (var true) (lit 0.25))\n\
+  \          (app (var cons) (app (var mk-pair) (var true) (lit 0.5))\n\
+  \            (app (var cons) (app (var mk-pair) (var false) (lit 0.25)) (var nil)))))\n\
+  \      (var true))\n\
+  \    (var risk-value)))"
+
+let test_exact_risk_duplicate_leaves_and_observation () =
+  let harness = Eval_support.make_prelude_ctx () in
+  let _, ctx = harness in
+  match
+    Infer_dist.enumerate_risk_exact ctx ~max_branches:3
+      (model_state harness duplicate_risk_observation_src)
+  with
+  | Error diagnostics -> Eval_support.fail_diags "exact duplicate risk model" diagnostics
+  | Ok result ->
+      let weights : Infer_dist.risk_weights = result.weights in
+      let support : Infer_dist.risk_positive_support = result.positive_support in
+      let branches : Infer_dist.risk_branch_accounting = result.branches in
+      (* Duplicate low leaves add in support order: (0.2 * 0.75) + (0.3 * 0.75).
+         The duplicate observed true entries contribute 0.25 + 0.5 exactly once per path. *)
+      Alcotest.(check bool) "raw low weight" true (close weights.low 0.375);
+      Alcotest.(check bool) "raw medium weight" true (close weights.medium 0.0);
+      Alcotest.(check bool) "raw high weight" true (close weights.high 0.375);
+      Alcotest.(check bool) "raw forbidden weight" true (close weights.forbidden 0.0);
+      Alcotest.(check bool) "low has positive support" true support.low;
+      Alcotest.(check bool) "medium has no positive support" false support.medium;
+      Alcotest.(check bool) "high has positive support" true support.high;
+      Alcotest.(check bool) "forbidden has no positive support" false support.forbidden;
+      Alcotest.(check int) "three duplicate-preserving terminal paths" 3 branches.completed;
+      Alcotest.(check int) "all terminal paths theoretically positive" 3 branches.positive;
+      Alcotest.(check int) "no explicit-zero paths" 0 branches.zero_weight;
+      Alcotest.(check int) "no underflowed paths" 0 branches.underflowed
+
+let four_risk_branches_src =
+  "(let nonrec (pvar first) (app (var sample) (app (var bernoulli) (lit 0.5)))\n\
+  \  (let nonrec (pvar second) (app (var sample) (app (var bernoulli) (lit 0.5)))\n\
+  \    (var low)))"
+
+let test_exact_risk_branch_budget () =
+  let harness = Eval_support.make_prelude_ctx () in
+  let _, ctx = harness in
+  expect_exact_risk_error "E0910" ctx ~max_branches:0 (model_state harness four_risk_branches_src);
+  expect_exact_risk_error "E0912" ctx ~max_branches:3 (model_state harness four_risk_branches_src);
+  match
+    Infer_dist.enumerate_risk_exact ctx ~max_branches:4 (model_state harness four_risk_branches_src)
+  with
+  | Error diagnostics -> Eval_support.fail_diags "exact risk budget boundary" diagnostics
+  | Ok result ->
+      Alcotest.(check int) "budget equality accepts all branches" 4 result.branches.completed;
+      Alcotest.(check bool) "all low mass retained" true (close result.weights.low 1.0)
+
+let malformed_categorical_src weight =
+  Printf.sprintf
+    "(app (var sample)\n\
+    \  (app (var categorical)\n\
+    \    (app (var cons) (app (var mk-pair) (var low) (lit %s)) (var nil))))"
+    weight
+
+let test_exact_risk_rejects_malformed_categorical_weights () =
+  let harness = Eval_support.make_prelude_ctx () in
+  let _, ctx = harness in
+  List.iter
+    (fun weight ->
+      expect_exact_risk_error "E0911" ctx ~max_branches:1
+        (model_state harness (malformed_categorical_src weight)))
+    [ "-1.0"; "+nan.0"; "+inf.0" ]
+
+let closure_collision_observation_src =
+  "(let nonrec (pvar support-fn) (lam ((pvar x)) (var x))\n\
+  \  (let nonrec (pwild)\n\
+  \    (app (var observe)\n\
+  \      (app (var categorical)\n\
+  \        (app (var cons) (app (var mk-pair) (var support-fn) (lit 1.0)) (var nil)))\n\
+  \      (lam ((pvar x)) (app (var add) (var x) (lit 1))))\n\
+  \    (var low)))"
+
+let test_exact_risk_rejects_opaque_observation_values () =
+  let harness = Eval_support.make_prelude_ctx () in
+  let _, ctx = harness in
+  (* Both closures render as [<closure>]. Exact observe must reject them rather than treating
+     presentation equality as semantic equality and preserving an impossible branch. *)
+  expect_exact_risk_error "E0911" ctx ~max_branches:1
+    (model_state harness closure_collision_observation_src)
+
+let test_exact_risk_rejects_wrong_result_unexpected_effect_and_runtime_failure () =
+  let store, ctx = Eval_support.make_prelude_ctx () in
+  let forged_low =
+    match Store.lookup_kind store "none" Resolve.KCon with
+    | Some { Resolve.hash; _ } -> Value.VCon { con = hash; name = "low"; args = [] }
+    | None -> Alcotest.fail "prelude none constructor is unavailable"
+  in
+  expect_exact_risk_error "E0913" ctx ~max_branches:1 (Eval.SApply (forged_low, []));
+  expect_exact_risk_error "E0914" ctx ~max_branches:1
+    (model_state (store, ctx) "(app (var throw) (lit \"unexpected\"))");
+  expect_exact_risk_error "E0915" ctx ~max_branches:1
+    (model_state (store, ctx) "(app (var div) (lit 1) (lit 0))")
+
+let underflowed_high_risk_src =
+  "(let nonrec (pwild)\n\
+  \  (app (var sample)\n\
+  \    (app (var categorical)\n\
+  \      (app (var cons) (app (var mk-pair) (var true) (lit 1e-200)) (var nil))))\n\
+  \  (app (var sample)\n\
+  \    (app (var categorical)\n\
+  \      (app (var cons) (app (var mk-pair) (var high) (lit 1e-200)) (var nil)))))"
+
+let test_exact_risk_preserves_underflowed_positive_support () =
+  let harness = Eval_support.make_prelude_ctx () in
+  let _, ctx = harness in
+  match
+    Infer_dist.enumerate_risk_exact ctx ~max_branches:1
+      (model_state harness underflowed_high_risk_src)
+  with
+  | Error diagnostics -> Eval_support.fail_diags "underflowed exact risk" diagnostics
+  | Ok result ->
+      let weights : Infer_dist.risk_weights = result.weights in
+      let support : Infer_dist.risk_positive_support = result.positive_support in
+      let branches : Infer_dist.risk_branch_accounting = result.branches in
+      Alcotest.(check (float 0.0)) "binary64 raw high weight underflowed" 0.0 weights.high;
+      Alcotest.(check bool) "high remains theoretically reachable" true support.high;
+      Alcotest.(check bool) "forbidden remains unreachable" false support.forbidden;
+      Alcotest.(check int) "one completed path" 1 branches.completed;
+      Alcotest.(check int) "one theoretically positive path" 1 branches.positive;
+      Alcotest.(check int) "one underflowed positive path" 1 branches.underflowed;
+      Alcotest.(check int) "no explicit-zero path" 0 branches.zero_weight
+
 (* --- W4.3 likelihood weighting --- *)
 
 let test_lw_two_coins () =
@@ -465,6 +612,18 @@ let suite =
     Alcotest.test_case "two coins: exactly 4 branches" `Quick test_two_coins_branch_count;
     Alcotest.test_case "sprinkler exact (5/13)" `Quick test_sprinkler_exact;
     Alcotest.test_case "impossible observation" `Quick test_impossible_observation;
+    Alcotest.test_case "exact risk merges duplicate leaves and observation support" `Quick
+      test_exact_risk_duplicate_leaves_and_observation;
+    Alcotest.test_case "exact risk enforces a positive terminal branch budget" `Quick
+      test_exact_risk_branch_budget;
+    Alcotest.test_case "exact risk rejects malformed categorical weights" `Quick
+      test_exact_risk_rejects_malformed_categorical_weights;
+    Alcotest.test_case "exact risk rejects opaque observation values" `Quick
+      test_exact_risk_rejects_opaque_observation_values;
+    Alcotest.test_case "exact risk rejects wrong results, effects, and runtime failures" `Quick
+      test_exact_risk_rejects_wrong_result_unexpected_effect_and_runtime_failure;
+    Alcotest.test_case "exact risk records underflowed theoretical support" `Quick
+      test_exact_risk_preserves_underflowed_positive_support;
     Alcotest.test_case "lw two coins within 0.01" `Slow test_lw_two_coins;
     Alcotest.test_case "lw sprinkler within 0.01" `Slow test_lw_sprinkler;
     Alcotest.test_case "lw seed determinism" `Quick test_lw_determinism;

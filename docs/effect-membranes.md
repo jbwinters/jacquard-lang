@@ -4,8 +4,8 @@ Companion to the blessed effect taxonomy, effect linearity, the standard library
 
 Status: normative v0 charter for G0-G4, July 2026. D61-D74 are frozen for
 implementation. No kernel form, ambient authority, scheduler behavior, or
-general linear type is added. G5 posterior judgment remains a separate research
-phase and is not part of the v0 contract.
+general linear type is added. GM.21 ships G5 posterior judgment as a separate,
+additive v1 evidence adapter; it does not change the v0 authorization contract.
 
 Implementation note: GM.2 completes the §10 two-level identity core. The
 successor `GovernanceProposal` is intentionally separate from the frozen ET.6
@@ -1582,11 +1582,12 @@ Neither a live nor dry API may accept an eval-bearing body. The rule can change
 only in a new charter after eval inherits the current handler environment or
 uses an explicit scoped authority value.
 
-## 14. Uncertainty-aware judgment (G5 design frozen; not shipped)
+## 14. Uncertainty-aware judgment (G5 additive adapter shipped)
 
 GM.20 freezes the exact-posterior design in
-[GM20-DECISION.md](release/governed-membranes/GM20-DECISION.md). It remains
-outside G0-G4 and the deterministic GM.22 release claim.
+[GM20-DECISION.md](release/governed-membranes/GM20-DECISION.md). GM.21
+implements that decision as an additive v1 adapter. It remains outside G0-G4
+and the deterministic GM.22 release claim.
 
 The admitted v1 projection uses finite exhaustive inference and exactly one of
 `WorstCase` or `UpperTail(max-mass)`. It normalizes four finite nonnegative
@@ -1599,6 +1600,11 @@ effective-risk       = max(baseline-risk, posterior-risk)
 effective-confidence = baseline-confidence
 ```
 
+Exact observation uses identity-aware structural equality over transparent
+primitive, tuple, and constructor data. Closures and other opaque or executable
+values fail closed; their redacted diagnostic rendering is never an equality
+key.
+
 The unchanged v0 gate consumes that effective assessment. The join can only
 tighten its verdict.
 
@@ -1609,6 +1615,36 @@ reach `gate-live`. The effective assessment evidence transitively binds the
 exact model, inference-handler semantics, configuration, source evidence, raw
 and normalized posterior, rule, baseline assessment, and result for strict
 replay.
+
+The decision-bearing handler is `judge.posterior-exact-v1`. It intercepts one
+`Judge.assess`, deliberately re-performs that request to the next outer Judge
+for an independent v0 baseline, runs a hash-selected model with the closed
+signature `(GovernanceCall) ->{Dist} Risk`, applies a positive terminal-branch
+budget, and resumes exactly once with the conservative effective assessment.
+Any resolution, type, inference, normalization, identity, or projection failure
+throws before that continuation is resumed. There is no fallback assessment,
+gate invocation, approval request, Audit entry, or action from the failed
+posterior attempt.
+
+`posterior.replay-exact-v1` reruns the exact model and projection and requires
+the expected assessment identity. Existing v0 bundle verification retains its
+existing claim: it can establish linkage for the effective v0 assessment but
+does not claim posterior replay by itself.
+
+Seeded likelihood weighting is exposed only as
+`posterior.sample-evidence-v1`, which returns
+`NonAuthorizingApproximateRiskEvidenceV1`. Its seed and sample count are bound
+for byte-reproducible review, but the type has no exact projector, Judge
+handler, gate, consent, or action path. Reproducibility is not calibration or
+authorization.
+
+The trusted computing base now includes the exact enumerator, binary64
+normalizer, projector, model and evidence sources, evaluator, canonical
+serializer, and replay code. The branch budget bounds terminal leaves, not
+model evaluation time, recursion depth, memory, or support materialization.
+Models and evidence can still be wrong, poisoned, stale, or sensitive. GM.21
+adds no model-truth, calibration, sandboxing, external-state freshness,
+simulator-fidelity, rollback, or production-security theorem.
 
 ## 15. Verification plan
 
@@ -1762,7 +1798,7 @@ decision. The phase deliverables are:
 
 **G4 — Product surfaces (small).** Flagship demo, cookbook chapter, `governance explain`, `why-effect` call-chain rendering, package authority diffs, and playground decision-chain view.
 
-**G5 — Uncertainty judgment (research-sized).** Posterior risk beliefs, conservative uncertainty rules, model/inference-backed judges, and exact replay of assessment evidence. This phase is deliberately separate from the security-critical deterministic core.
+**G5 — Uncertainty judgment (GM.21 shipped as an additive research adapter).** Exact finite posterior risk beliefs, conservative uncertainty rules, one model-backed Judge adapter, non-authorizing seeded evidence, and exact assessment replay. This phase remains deliberately separate from the security-critical deterministic core.
 
 Dependencies: taxonomy T0/T1 before G1; linearity L1/L2 before G2; surface syntax is not semantically required but should land before the public demo so the membrane remains readable.
 
@@ -1784,8 +1820,9 @@ There are no unresolved normative choices in the G0-G4 boundary:
 * G4 renders the two distinct IDs and configured-resource evidence. It does
   not reinterpret a resource claim as proof from an elaborated effect row.
 
-G5 may add posterior judgment as a separately versioned extension. It cannot
-silently change a v0 assessment or policy decision.
+G5 adds posterior judgment only as the separately versioned GM.21 extension.
+It cannot silently change a v0 assessment or policy decision, and approximate
+evidence cannot enter the authorization path.
 
 ## 18. Decisions
 

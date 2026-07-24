@@ -597,6 +597,18 @@ Useful assertions include `check.true`, `check.eq`, `check.some`,
 A case that performs zero checks warns. In sampled property mode, `observe` is
 not conditioning; use `--exhaustive` when the property depends on observation.
 
+`check.posterior` and `check.same-dist` are testing laws, not governance
+authorization. GM.21's decision-bearing uncertainty path is
+`judge.posterior-exact-v1`: it resolves a stored
+`(GovernanceCall) ->{Dist} Risk` model by content hash, obtains an independent
+baseline from the next outer Judge, performs bounded exact enumeration, and
+only raises the baseline risk. `posterior.replay-exact-v1` reruns that exact
+evidence. Exact `observe` accepts transparent primitive, tuple, and constructor
+data; closures and opaque runtime values fail closed rather than comparing
+equal through their redacted rendering. Seeded `posterior.sample-evidence-v1` returns the distinct
+`NonAuthorizingApproximateRiskEvidenceV1` carrier and cannot project an
+assessment or reach the gate.
+
 Discharge world/control effects inside a `Case` with scripted handlers. If the
 resulting row is exactly `{Check}`, it is a hermetic test. `Eval` has no
 in-language hermetic discharger, so eval-dependent behavior belongs in a CLI
