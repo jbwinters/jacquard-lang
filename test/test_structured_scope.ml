@@ -355,6 +355,31 @@ let opened_channel scope capacity =
   | Structured_scope.Channel_invalid_capacity rejected ->
       Alcotest.failf "capacity %d unexpectedly rejected" rejected
 
+let test_channel_deadlock_accepts_mixed_suspensions () =
+  let scope, receiver = Structured_scope.create ~body_resume:10 |> ok in
+  let channel = opened_channel scope 0 in
+  (match
+     Structured_scope.with_checkout scope receiver (fun resume ->
+         Structured_scope.channel_recv scope ~task:receiver ~channel ~resume
+           ~map_resume:map_channel_resume)
+     |> ok
+   with
+  | Structured_scope.Channel_suspended -> ()
+  | Structured_scope.Channel_continues _ -> Alcotest.fail "rendezvous receiver did not suspend");
+  let yielded = Structured_scope.spawn scope ~resume:20 |> ok in
+  Structured_scope.with_checkout scope yielded (fun resume ->
+      Structured_scope.suspend_yield scope yielded ~resume)
+  |> ok;
+  Alcotest.(check bool)
+    "one channel wait plus another suspension is deadlocked" true
+    (Structured_scope.channel_deadlocked scope);
+  Structured_scope.wake_yielded scope yielded |> ok;
+  Alcotest.(check bool)
+    "a runnable task prevents deadlock" false
+    (Structured_scope.channel_deadlocked scope);
+  Structured_scope.close scope ~reason:Structured_scope.Normal ~escaping:[] ~drop:ignore |> ok;
+  check_zero_metrics "mixed channel deadlock close" scope
+
 let test_scoped_channel_ownership_and_cancellation () =
   let scope, body = Structured_scope.create ~body_resume:10 |> ok in
   (match Structured_scope.channel_open scope ~capacity:(-1) |> ok with
@@ -683,6 +708,7 @@ let run () =
   test_cleanup_exception_precedence ();
   test_checkout_bracket_restores_error_and_exception ();
   test_dynamic_escape_graph_scan ();
+  test_channel_deadlock_accepts_mixed_suspensions ();
   test_scoped_channel_ownership_and_cancellation ();
   test_closed_channel_remains_live_until_scope_teardown ();
   test_channel_transition_preflight_is_atomic ();

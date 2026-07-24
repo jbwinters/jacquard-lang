@@ -714,8 +714,10 @@ let test_scoped_channels_run_end_to_end_without_world_allowance () =
   (match Round_robin.run_expr ctx blocked with
   | Error (Runtime_err.Scheduler_error message) ->
       Alcotest.(check string)
-        "all-channel-blocked deadlock"
-        "async deadlock: all remaining live tasks are blocked on channels" message
+        "channel-including suspended deadlock"
+        "async deadlock: all remaining live tasks are suspended and at least one is blocked on a \
+         channel"
+        message
   | Error error -> Alcotest.failf "wrong channel deadlock error: %s" (Runtime_err.to_string error)
   | Ok value -> Alcotest.failf "channel deadlock returned %s" (Value.show value));
   let fail_fast_source =

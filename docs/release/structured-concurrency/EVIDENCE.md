@@ -698,8 +698,9 @@ idempotent drain-on-close. Cancellation is delivered before channel mutation
 and removes a blocked waiter without reordering survivors. Handles are exact
 run/scope capabilities and escape or parent/descendant use is E0907.
 Fail-fast removes channel-blocked siblings through cancellation; collect does
-not cancel or auto-close. Under either policy, an all-channel-blocked live set
-with no possible transition is E0908; fail-fast has no failure to prefer.
+not cancel or auto-close. Under either policy, if every live task is suspended
+and at least one is channel-blocked, the state is E0908; fail-fast has no
+failure to prefer.
 
 `corpus/channel/rendezvous-v1.trace` and
 `corpus/channel/buffered-v1.trace` pin exact abstract states, results, and wake
