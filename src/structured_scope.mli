@@ -95,10 +95,10 @@ val task_handle :
 
 val channel_open : ('resume, 'value) t -> capacity:int -> (channel_open_outcome, Diag.t list) result
 (** [channel_open] allocates the next zero-based successful-open identity in this exact open scope.
-    A negative capacity returns [Channel_invalid_capacity] before identity allocation. A closed
-    scope returns E0907 and native ChannelId exhaustion returns E0908 without allocation. Trusted
-    scheduler code must establish the routed cancellation boundary before calling this lower seam.
-*)
+    A closed scope returns E0907 before capacity validation. In an open scope, a negative capacity
+    returns [Channel_invalid_capacity] before identity allocation. Native ChannelId exhaustion
+    returns E0908 without allocation. Trusted scheduler code must establish the routed cancellation
+    boundary before calling this lower seam. *)
 
 val channel_value :
   Task_capability.t -> ('resume, 'value) t -> channel_handle -> (Value.t, Diag.t list) result

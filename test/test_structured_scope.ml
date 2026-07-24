@@ -638,7 +638,10 @@ let test_channel_open_refusal_domains () =
   Structured_scope.close exhausted ~reason:Structured_scope.Normal ~escaping:[] ~drop:ignore |> ok;
   Alcotest.(check string)
     "closed scope is not invalid capacity" "E0907"
-    (Structured_scope.channel_open exhausted ~capacity:1 |> error_code)
+    (Structured_scope.channel_open exhausted ~capacity:1 |> error_code);
+  Alcotest.(check string)
+    "closed scope liveness precedes negative capacity" "E0907"
+    (Structured_scope.channel_open exhausted ~capacity:(-1) |> error_code)
 
 let test_channel_closer_mapper_and_live_registry_preflight () =
   let scope, body = Structured_scope.create ~body_resume:1 |> ok in

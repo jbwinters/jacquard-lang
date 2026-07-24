@@ -851,8 +851,9 @@ this order before the transition table below:
 1. deliver a pending cancellation for the chosen task before inspecting
    capacity or handle state; the task becomes `Cancelled`, no Channel result is
    produced, and no Channel continuation or state is mutated;
-2. for `open`, reject negative capacity with the typed result above, then check
-   the native ChannelId bounds before allocation (E0908 on exhaustion);
+2. for `open`, require that the OCaml scope seam is still open (E0907 if it is
+   closed), reject negative capacity with the typed result above, then check the
+   native ChannelId bounds before allocation (E0908 on exhaustion);
 3. for `send`, `recv`, and `close`, validate the opaque carrier's evaluator run,
    exact current open scope, and live channel ownership recursively; failure is
    E0907 before consuming the Once continuation or inspecting closed/buffered
