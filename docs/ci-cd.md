@@ -76,9 +76,18 @@ hermetic leaf, then byte-compares the result with the checked-in transcript.
 The proof is kept out of ordinary `dune runtest` because its exhaustive runtime
 would make the development loop unresponsive; it remains mandatory and cannot
 silently degrade into a sampled test. The job retains the actual transcript as
-an artifact and has a 120-minute fail-closed timeout. Pull requests outside its
-semantic dependency closure take a successful no-op path; pushes to `main` and
-`release/**` always rerun the proof.
+an artifact and has a 240-minute fail-closed timeout. Pull requests and
+`main` pushes outside its semantic dependency closure take a successful no-op
+path. Unknown commit ranges fail closed by running the proof, and
+`release/**` pushes and manual dispatches always rerun it.
+Each `main` push has a unique, non-canceling workflow concurrency group so a
+later unrelated push cannot replace the run responsible for an earlier
+relevant range.
+
+The proof owns a dedicated Dune rule in `test/gm12b/dune`, so changes to
+unrelated cram dependencies do not enter its CI scope. Its conservative
+dependency closure still includes the implementation, prelude, toolchain,
+proof carrier and expected transcript, checker, workflow, and dedicated rule.
 
 Local equivalent:
 
@@ -86,7 +95,7 @@ Local equivalent:
 eval "$(opam env)"
 mkdir -p "$PWD/.scratch/tmp"
 export TMPDIR="$PWD/.scratch/tmp"
-opam exec -- dune build @test/cli/gm12b-evidence --force
+opam exec -- dune build @test/gm12b/gm12b-evidence --force
 ```
 
 ## Release Evidence
@@ -194,7 +203,7 @@ Before opening an ordinary PR:
 eval "$(opam env)"
 opam exec -- dune build @all
 opam exec -- dune runtest
-opam exec -- dune build @test/cli/gm12b-evidence --force
+opam exec -- dune build @test/gm12b/gm12b-evidence --force
 opam exec -- dune fmt
 git diff --exit-code
 (
