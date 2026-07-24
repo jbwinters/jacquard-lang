@@ -15,6 +15,8 @@ The default CLI, prelude-evaluation, and Warp Case paths drive real evaluator
 states and affine continuations through the Async and Channel scheduler.
 Native root scheduling, native Channel execution, host scheduling, host
 asynchronous I/O, and actors remain outside this gate and are deferred to C4.
+SC.17 corrects transitive cancellation of open nested runs without changing
+this public contract or any C-tier boundary.
 
 Structured concurrency is an effect interpreted by a scheduler handler. The
 same program can therefore run under deterministic, seeded-random, exhaustive,
@@ -283,6 +285,15 @@ The cancellation regression pins the full waiter handoff: each registered
 waiter becomes runnable in registration order, owns its resume again, and
 observes the same immutable `Cancelled` result when it awaits the target again.
 
+SC.17 applies that existing rule transitively at the round-robin composition
+boundary. A task suspended while its `async.scope` is open owns that nested
+run. If the owner terminalizes as `Cancelled`, the scheduler drains every
+owned descendant run depth-first, terminalizes each nonterminal body and child
+as `Cancelled`, and removes them from the shared FIFO before an enclosing
+scope may complete. Direct `async.cancel` and fail-fast sibling cancellation
+share this path. No descendant may receive another scheduler choice or invoke
+a routed world callback after delivery to the ancestor.
+
 ## 3. Scope APIs and failure shapes
 
 The general handler and homogeneous convenience APIs are frozen as:
@@ -389,6 +400,13 @@ it does raise, that exception propagates, but the task remains terminal and the
 scheduler does not re-own the transferred continuation. In particular, a
 second delivery of the same suspended-task cancellation neither transfers nor
 destroys that continuation again.
+
+When the cancelled target owns an open nested `async.scope`, delivery also
+cancels that run and all descendant runs before its enclosing scope can
+finish. This transitive drain removes every descendant from the runnable FIFO
+and prevents later routed world callbacks. It does not introduce preemption:
+a currently executing pure descendant still observes cancellation only at one
+of the three boundaries above.
 
 Dropping a continuation releases language/runtime memory; it does not release
 an external resource automatically. Acquire/release handlers (the bracket or
@@ -675,6 +693,9 @@ caveats are published in
 and
 [`release/structured-concurrency/LIMITS.md`](release/structured-concurrency/LIMITS.md).
 Those documents do not widen the runtime contract defined here.
+SC.17 then corrects the scheduler implementation of the already-published
+no-detached-task rule; its separate successor evidence is
+[`release/structured-concurrency/SC17-EVIDENCE.md`](release/structured-concurrency/SC17-EVIDENCE.md).
 
 | ID | decision | frozen result |
 |---|---|---|

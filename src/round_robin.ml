@@ -73,6 +73,7 @@ type global_scope_run = {
   mutable seen_terminal : Structured_scope.handle list;
   mutable aggregate : Value.t Scope_policy.aggregate option;
   mutable next_nested : int;
+  mutable cancellation_started : bool;
   parent : global_parent option;
 }
 
@@ -230,6 +231,7 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed i
           seen_terminal = [];
           aggregate = None;
           next_nested = 1;
+          cancellation_started = false;
           parent;
         }
     in
@@ -398,6 +400,71 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed i
                      (String.concat "/" (List.map string_of_int path))
                      (result_text result));
                 resume_parent run result)
+    and child_runs parent_run parent_task =
+      List.filter
+        (fun candidate ->
+          match candidate.parent with
+          | Some parent ->
+              parent.parent_run == parent_run
+              && same_handle parent_run parent.parent_task parent_task
+          | None -> false)
+        !all_scopes
+    and cancel_run run =
+      (* A task waiting on [async.scope] owns the complete nested run, not just its
+         suspended continuation. Drain nested runs depth-first so no descendant can
+         remain in the shared FIFO after that owning task becomes Cancelled. *)
+      if run.cancellation_started || Option.is_some run.aggregate then Ok ()
+      else (
+        run.cancellation_started <- true;
+        let rec cancel_descendants = function
+          | [] -> Ok ()
+          | child :: rest ->
+              let* () = cancel_run child in
+              cancel_descendants rest
+        in
+        let* () =
+          List.filter
+            (fun candidate ->
+              match candidate.parent with Some parent -> parent.parent_run == run | None -> false)
+            !all_scopes
+          |> cancel_descendants
+        in
+        let rec cancel_tasks = function
+          | [] -> Ok ()
+          | task :: rest ->
+              let* view = Structured_scope.inspect run.scope task in
+              let* () =
+                match view.result with
+                | Some _ -> Ok ()
+                | None ->
+                    let point =
+                      match view.suspension with
+                      | Some Scheduler_core.Yielded -> Concurrency_contract.Yield
+                      | Some (Scheduler_core.Awaiting _) -> Concurrency_contract.Await
+                      | Some
+                          ( Scheduler_core.Channel_sending _ | Scheduler_core.Channel_receiving _
+                          | Scheduler_core.Host_readiness _ )
+                      | None ->
+                          Concurrency_contract.Routed_effect
+                    in
+                    let* () = Structured_scope.request_cancel run.scope task in
+                    let* awakened = Structured_scope.deliver_cancel run.scope ~point task ~drop in
+                    remove_task run task;
+                    append (List.map (fun awakened -> (run, awakened)) awakened);
+                    Ok ()
+              in
+              let* () = observe_terminal run task in
+              cancel_tasks rest
+        in
+        cancel_tasks (run.body_handle :: run.children))
+    and cancel_nested_scopes parent_run parent_task =
+      let rec cancel = function
+        | [] -> Ok ()
+        | child :: rest ->
+            let* () = cancel_run child in
+            cancel rest
+      in
+      cancel (child_runs parent_run parent_task)
     and observe_terminal run handle =
       if has_seen run handle then maybe_finalize run
       else
@@ -405,6 +472,11 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed i
         match view.result with
         | None -> Ok ()
         | Some result ->
+            let* () =
+              match result with
+              | Concurrency_contract.Cancelled -> cancel_nested_scopes run handle
+              | Concurrency_contract.Done _ | Concurrency_contract.Failed _ -> Ok ()
+            in
             run.seen_terminal <- handle :: run.seen_terminal;
             decr live_count;
             let* task_id = id run handle in

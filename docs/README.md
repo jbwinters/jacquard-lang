@@ -28,7 +28,8 @@ project shape from file names alone.
 - `../spec/jacquard-kernel-ast-m0.md`: kernel AST source-of-truth spec.
 - `../spec/serialization.md`: canonical byte serialization and hashing.
 - `development-plan.md`: original task plan and milestone discipline.
-- `concurrency.md`: phase-zero pure parallel hints and the staged structured-concurrency design.
+- `concurrency.md`: phase-zero pure parallel hints, the staged
+  structured-concurrency design, and SC.17 transitive cancellation semantics.
 
 ## User-Facing Runtime
 
@@ -59,7 +60,10 @@ Read these together when judging whether the release candidate is credible:
 - `release/0.1/EVIDENCE.md`: built artifact, test inventory, commands, summary.
 - `release/0.1/CLAIMS.md`: claims mapped to proving tests/demos and caveats.
 - `release/structured-concurrency/EVIDENCE.md`: SC.14 scoped Channel runtime and
-  schedule-parity evidence over the complete SC.12 scheduler stack.
+  schedule-parity evidence over the complete SC.12 scheduler stack, with a
+  prominent pointer to the SC.17 cancellation correction.
+- `release/structured-concurrency/SC17-EVIDENCE.md`: successor evidence for
+  transitive cancellation of nested scope runs.
 - `release/0.1/REPRO.md`: fresh-clone reproduction.
 - `release/0.1/FREEZE.md`: frozen version/hash/store/trace/CLI/error surfaces.
 - `release/0.1/GAUNTLET.md`: adversarial tests present and omitted.
@@ -123,12 +127,17 @@ Read these together when judging whether the release candidate is credible:
 
 - `release/structured-concurrency/EVIDENCE.md`: final C0-C2 publication gate
   plus the shipped interpreted C3 typed-Channel runtime, exact identities,
-  schedule parity, counts, and claim-to-test links.
+  schedule parity, counts, claim-to-test links, and the SC.17 correction pointer.
+- `release/structured-concurrency/SC17-EVIDENCE.md`: correction evidence proving
+  direct and fail-fast cancellation cannot orphan nested scheduler work.
 - `release/structured-concurrency/LIMITS.md`: dynamic Task and Channel lifetime
   checks, cooperative cancellation, explicit bracket cleanup, interpreter-only
   scheduling, sequential C0 hints, and explicit C4 exclusions.
 - `release/structured-concurrency/MANIFEST.sha256`: reconstructible SC.16
-  publication overlay on exact SC.12 commit `b828099`.
+  publication overlay on exact SC.12 commit `b828099`, retained byte-for-byte
+  as historical evidence.
+- `release/structured-concurrency/SC17-MANIFEST.sha256`: reconstructible SC.17
+  correction overlay on its exact predecessor.
 
 ## Governed Membranes Evidence
 

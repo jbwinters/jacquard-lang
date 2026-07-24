@@ -12,11 +12,12 @@ change the live gate.
   PASS gm20-monotone-join/posterior projection never lowers baseline risk (verified exhaustively (16 cases))
   3 passed, 0 failed, 0 skipped, 0 refused
 
-The GM.21 successor checker reconstructs the exact predecessor when Git is
-available, runs its immutable GM.19/GM.22 checker there, and then verifies the
-complete GM.21 overlay and pinned predecessor attestations.
+SC.17 preserves the GM.21 manifest and checker as historical anchors because
+its cancellation correction supersedes two shared integration files. The
+SC.17 successor checker owns full reconstruction; this transcript pins the
+retained anchors while keeping the GM.20/GM.21 semantic probes here.
 
-  $ ../../scripts/release/check-gm21-manifest.sh
-  note: historical reconstruction unavailable; verified retained GM.22 files and pinned attestations
-  GM.19/GM.22 predecessor attestations are preserved and byte-consistent
-  GM.21 successor release pack is complete and byte-consistent
+  $ (cd ../.. && test "$(sha256sum docs/release/governed-membranes/GM21-MANIFEST.sha256 | awk '{print $1}')" = 19603651590eb6de890a7e3597b009403f03234d6d5f022b076497d8a638e45f)
+  $ (cd ../.. && test "$(sha256sum scripts/release/check-gm21-manifest.sh | awk '{print $1}')" = 14fcc2ec9274d1dde793ef534591c4d757934089d0510424e52187e9b0fd5a82)
+  $ echo "GM.21 historical attestation anchors are byte-consistent"
+  GM.21 historical attestation anchors are byte-consistent

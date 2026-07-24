@@ -17,12 +17,14 @@
   ../../docs/README.md
   ../../docs/ci-cd.md
   ../../docs/client-playground.md
+  ../../docs/concurrency.md
   ../../docs/effect-membranes.md
   ../../docs/errors.md
   ../../docs/SKILL.md
   ../../docs/stdlib.md
+  ../../docs/warp-testing.md
   ../../docs/release/dx-jac-export/EVIDENCE.md
-  ../../docs/release/structured-concurrency/EVIDENCE.md
+  (source_tree ../../docs/release/structured-concurrency)
   (source_tree ../../playground/governance)
   ../../src/governance_decision_chain.ml
   ../../src/governance_decision_chain.mli
@@ -34,6 +36,8 @@
   ../../src/posterior_risk_verify.ml
   ../../src/posterior_risk_verify.mli
   ../../src/prelude.ml
+  ../../src/round_robin.ml
+  ../../src/warp.ml
   ../../src/scheduler_core.ml
   ../../src/scheduler_core.mli
   ../../src/scope_policy.ml
@@ -46,9 +50,11 @@
   ../test_host_readiness.ml
   ../test_infer.ml
   ../test_jacquard.ml
+  ../test_cancellation.ml
   ../test_posterior_risk.ml
   ../test_posterior_risk_verify.ml
   ../test_scheduler_core.ml
+  ../test_warp.ml
   ../gm12b/dune
   dune
   gm21-posterior.t
@@ -63,6 +69,7 @@
   ../test_jacquard.exe
   ../scope_policy_trace.exe
   ../round_robin_trace.exe
+  concurrency-evidence.t
   ../../demos/concurrency/concurrency_evidence.exe
   ../../demos/governed-workspace/live_evidence.exe
   (source_tree ../native-parallel)

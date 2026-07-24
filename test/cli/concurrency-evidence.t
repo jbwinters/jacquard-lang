@@ -16,3 +16,13 @@ complete, unique, replayable schedules.
   exhaustive completeness=complete explored=8 worlds-started=8 unique-traces=8 all-zero=true
   replay source=round-robin result=0 byte-identical=true
   exhaustive-replay worlds=8 byte-identical=true
+
+SC.17 keeps the historical SC.16 attestation intact and adds a separately
+reconstructible correction pack for transitive cancellation of nested runs.
+The Dune sandbox has no standalone Git history, so the checker says exactly
+which reduced verification it performed.
+
+  $ ../../scripts/release/check-sc17-manifest.sh
+  note: historical reconstructions unavailable; verified pinned SC.16/GM.21 attestations and SC.17 overlay
+  SC.16 and GM.21 historical attestations are preserved and byte-consistent
+  SC.17 cancellation correction pack is complete and byte-consistent
