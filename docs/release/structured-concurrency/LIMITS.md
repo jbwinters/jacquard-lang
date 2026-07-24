@@ -1,7 +1,8 @@
 # Structured Concurrency C0-C3 Limits
 
 Status: explicit SC.16 claim boundary at base
-`b82809959c085a51eb3e9f8ae7623692983acd65`.
+`b82809959c085a51eb3e9f8ae7623692983acd65`, with the SC.17 transitive
+cancellation correction recorded in [SC17-EVIDENCE.md](SC17-EVIDENCE.md).
 
 This document says what the C0-C3 evidence does not prove. A later milestone
 may add one of these features, but that later evidence must stand on its own;
@@ -30,6 +31,15 @@ A requested cancellation is delivered only at `async.await`, `async.yield`, or
 an effect routed through the scheduler. Pure code that never reaches one of
 those boundaries can run forever and prevent fail-fast drain. There is no
 preemption, timeout, fairness theorem, or progress guarantee.
+
+Once cancellation is delivered to a task suspended on `async.scope`, it is
+transitive over the complete nested run owned by that task. Descendant runs
+drain depth-first; their nonterminal bodies and children become `Cancelled`
+and leave the shared FIFO before an ancestor or enclosing scope may complete.
+No descendant receives another scheduler decision or routed world callback
+after that delivery. This does not preempt a descendant that is already
+executing pure code: such code must still reach one of the three cooperative
+boundaries.
 
 ## Cleanup is an explicit bracket contract
 

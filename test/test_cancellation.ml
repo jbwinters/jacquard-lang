@@ -10,6 +10,36 @@ let view scope task = Structured_scope.inspect scope task |> ok
 let trace scope task = Structured_scope.id scope task |> ok |> Concurrency_contract.trace_task_id
 let is_cancelled scope task = (view scope task).result = Some Concurrency_contract.Cancelled
 
+let runtime_ok = function
+  | Ok value -> value
+  | Error error -> Alcotest.failf "unexpected scheduler error: %s" (Runtime_err.to_string error)
+
+let expression store source =
+  match Reader.parse_one ~file:"cancellation.jqd" source with
+  | Error diagnostics -> Eval_support.fail_diags "parse cancellation fixture" diagnostics
+  | Ok form -> (
+      match Kernel.expr_of_form form with
+      | Error diagnostics -> Eval_support.fail_diags "validate cancellation fixture" diagnostics
+      | Ok expression -> (
+          match Resolve.resolve_expr (Store.names_view store) expression with
+          | Ok expression -> expression
+          | Error diagnostics -> Eval_support.fail_diags "resolve cancellation fixture" diagnostics)
+      )
+
+let contains text ~substring =
+  let text_length = String.length text in
+  let substring_length = String.length substring in
+  let rec loop offset =
+    offset + substring_length <= text_length
+    && (String.sub text offset substring_length = substring || loop (offset + 1))
+  in
+  loop 0
+
+let print_hash store =
+  match Store.lookup_kind store "print" Resolve.KOp with
+  | Some entry -> entry.hash
+  | None -> Alcotest.fail "missing Console.print operation"
+
 let test_await_and_yield_deliver_before_suspension () =
   let scope, waiter = Structured_scope.create ~body_resume:0 |> ok in
   let target = Structured_scope.spawn scope ~resume:1 |> ok in
@@ -339,6 +369,80 @@ let test_bracket_cleanup_without_post_cancel_step () =
     !events;
   Structured_scope.close scope ~reason:Structured_scope.Normal ~escaping:[] ~drop:ignore |> ok
 
+let test_direct_cancel_closes_open_nested_scope_before_world_work () =
+  let store, ctx = Eval_support.make_prelude_ctx () in
+  let printed = Buffer.create 32 in
+  Eval.register_root_handler ctx (print_hash store) (function
+    | [ Value.VText text ] ->
+        Buffer.add_string printed text;
+        Ok Value.unit_v
+    | _ -> Error (Runtime_err.Arity "print expects one Text"));
+  let program =
+    expression store
+      "(let nonrec (pvar ancestor)\n\
+      \  (app (var async.spawn)\n\
+      \    (lam ()\n\
+      \      (app (var async.scope)\n\
+      \        (lam () (app (var print) (lit \"orphan-direct\"))))))\n\
+      \  (let nonrec (pwild) (app (var async.cancel) (var ancestor))\n\
+      \    (app (var async.await) (var ancestor))))"
+  in
+  let recorded =
+    Round_robin.run_expr_outcome_scheduled ctx ~policy:Concurrency_contract.Collect
+      ~mode:Round_robin.Record_schedule program
+    |> runtime_ok
+  in
+  let replayed =
+    Round_robin.run_expr_outcome_scheduled ctx ~policy:Concurrency_contract.Collect
+      ~mode:(Round_robin.Replay_schedule recorded.execution_schedule) program
+    |> runtime_ok
+  in
+  let outcome = recorded.execution_outcome in
+  Alcotest.(check string)
+    "nested Console effect never runs after ancestor cancellation" "" (Buffer.contents printed);
+  Alcotest.(check string)
+    "nested cancellation replay is byte-identical" outcome.trace replayed.execution_outcome.trace;
+  Alcotest.(check bool)
+    "nested body is cancelled without a later scheduler decision" false
+    (contains outcome.trace ~substring:"chosen=0/1#0");
+  Alcotest.(check bool)
+    "nested body reaches a terminal cancelled state" true
+    (contains outcome.trace ~substring:"terminal task=0/1#0 result=cancelled")
+
+let test_fail_fast_cancel_closes_nested_descendants_before_world_work () =
+  let store, ctx = Eval_support.make_prelude_ctx () in
+  let printed = Buffer.create 32 in
+  Eval.register_root_handler ctx (print_hash store) (function
+    | [ Value.VText text ] ->
+        Buffer.add_string printed text;
+        Ok Value.unit_v
+    | _ -> Error (Runtime_err.Arity "print expects one Text"));
+  let program =
+    expression store
+      "(let nonrec (pvar ancestor)\n\
+      \  (app (var async.spawn)\n\
+      \    (lam ()\n\
+      \      (app (var async.scope)\n\
+      \        (lam ()\n\
+      \          (app (var async.scope)\n\
+      \            (lam () (app (var print) (lit \"orphan-fail-fast\"))))))))\n\
+      \  (let nonrec (pvar failing)\n\
+      \    (app (var async.spawn) (lam () (app (lit 1))))\n\
+      \    (tuple (app (var async.await) (var ancestor))\n\
+      \      (app (var async.await) (var failing)))))"
+  in
+  let outcome = Round_robin.run_state ctx (Eval.expr_state program) |> runtime_ok in
+  Alcotest.(check string) "fail-fast nested Console effect never runs" "" (Buffer.contents printed);
+  Alcotest.(check bool)
+    "nested descendant receives no orphan scheduler decision" false
+    (contains outcome.trace ~substring:"chosen=0/1/1#0");
+  Alcotest.(check bool)
+    "nested scope body is terminal" true
+    (contains outcome.trace ~substring:"terminal task=0/1#0 result=cancelled");
+  Alcotest.(check bool)
+    "nested descendant is terminal" true
+    (contains outcome.trace ~substring:"terminal task=0/1/1#0 result=cancelled")
+
 let prop_duplicate_requests_deliver_once =
   QCheck.Test.make ~count:200 ~name:"duplicate requests destroy one continuation and cancel once"
     QCheck.nat_small (fun seed ->
@@ -374,6 +478,8 @@ let run () =
   test_duplicate_completed_and_self_cancel ();
   test_suspended_target_and_precancelled_caller ();
   test_bracket_cleanup_without_post_cancel_step ();
+  test_direct_cancel_closes_open_nested_scope_before_world_work ();
+  test_fail_fast_cancel_closes_nested_descendants_before_world_work ();
   QCheck.Test.check_exn prop_duplicate_requests_deliver_once
 
 let suite = [ Alcotest.test_case "cooperative boundary delivery" `Quick run ]

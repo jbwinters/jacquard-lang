@@ -16,7 +16,7 @@
     definition-level, from the hash discipline alone; cache entries record their coverage so a
     fully-cached run reports the same complement as a cold one. *)
 
-let version = "warp-v1"
+let version = "warp-v2"
 
 type verdict = Pass of int | Fail of { soft : string list; hard : string option } | NoChecks
 

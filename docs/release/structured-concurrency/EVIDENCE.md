@@ -1,6 +1,11 @@
 # Structured Concurrency C0-C3 Evidence
 
-Status: SC.16 closes the C0-C2 publication gate. C0 pure parallel hints, C1
+Status: SC.16 closes the C0-C2 publication gate. SC.17 is a safety correction
+to the implementation of transitive cancellation; its separate evidence and
+manifest preserve the historical SC.16 attestation anchors and reconstruct its
+publication commit before checking the correction. See
+[SC17-EVIDENCE.md](SC17-EVIDENCE.md) before relying on the cancellation and
+no-detached-task claims below. C0 pure parallel hints, C1
 structured task lifecycles, and C2 deterministic schedule tooling are shipped
 at the boundaries below. Budgeted exhaustive enumeration is implemented over
 SC.11 seeded scheduling and SC.10 canonical record, fail-closed strict replay,
@@ -14,6 +19,8 @@ native Channel, actor, or supervision claim.
 
 - Reconstruction base: `b82809959c085a51eb3e9f8ae7623692983acd65`
 - Evidence overlay: [MANIFEST.sha256](MANIFEST.sha256)
+- Cancellation correction: [SC17-EVIDENCE.md](SC17-EVIDENCE.md) and
+  [SC17-MANIFEST.sha256](SC17-MANIFEST.sha256)
 - Authoritative contract: [concurrency.md](../../concurrency.md)
 - Explicit caveats: [LIMITS.md](LIMITS.md)
 
@@ -27,7 +34,7 @@ native Channel, actor, or supervision claim.
 | C3 | Scoped typed channels run through deterministic FIFO, seeded, replay, exhaustive, and cached interpreter scheduling with exact run/scope ownership, rendezvous and buffering, close, cancellation, and deadlock behavior. | `channel-contract`, `round-robin`, and `exhaustive-schedule` suites; `test/cli/task-values.t`; `test/cli/schedule-replay.t`; and the frozen traces below |
 | C4 | Not claimed: host asynchronous I/O, actors, and supervision are absent. | [LIMITS.md](LIMITS.md) |
 
-The current successor inventory is exactly 826 compiled Alcotest/QCheck cases, 48 recursive
+The current successor inventory is exactly 826 compiled Alcotest/QCheck cases, 51 recursive
 cram transcript files, and 27 named doctest examples across 8 documents. The
 repository release-law checks recompute those counts instead of trusting this
 paragraph.
@@ -360,6 +367,18 @@ continuation destruction. The native ASAN/LSAN lane only stress-destroys 4,096
 nested continuation-shaped heap carriers; it does not exercise a native
 scheduler, cancellation route, or callback handoff. External resources still
 require explicit acquire/release handlers rather than language finalizers.
+
+SC.17 corrects the round-robin composition of these primitives. A task
+suspended on `async.scope` owns the nested scheduler run that holds its
+continuation. When that owner terminalizes as `Cancelled`, every nested run it
+owns is drained depth-first: nonterminal bodies and children are cancelled,
+removed from the shared FIFO, and observed terminal before the enclosing scope
+may complete. Direct cancellation and fail-fast sibling cancellation use the
+same terminal-observation path. Regression programs prove that no descendant
+receives another scheduler choice or invokes a granted Console callback after
+ancestor cancellation. The correction and its successor attestation are
+published in [SC17-EVIDENCE.md](SC17-EVIDENCE.md); the SC.16 manifest and
+checker remain unchanged as historical evidence.
 
 ## Deterministic scope policies
 

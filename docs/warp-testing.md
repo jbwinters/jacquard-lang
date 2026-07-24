@@ -235,9 +235,11 @@ recursively. So for a hermetic `Test`, one key says everything. The equations
 below define cache keys mathematically and are not Jacquard expressions.
 
 ```text
-memo key (Test)      = the test's own hash
-memo key (Prop)      = (hash, mode, samples, seed)
-memo key (scheduled Test) = (hash, scheduler-version, schedules, seed)
+memo key (Test)      = (driver-version, the test's own hash)
+memo key (Prop)      = (driver-version, hash, mode, samples, seed)
+memo key (scheduled Test) =
+  (driver-version, hash, scheduler-version, schedule-identity-version,
+   schedules, seed)
 WorldTest            = never cached
 ```
 
@@ -249,6 +251,12 @@ Test selection tools, dependency-tag hygiene, and "affected targets" computation
 dissolve into a lookup. A green CI run on a no-op change verifies in the time it
 takes to scan the index, and the cache is shareable across machines because keys
 are content, so one developer's local run warms the team's CI.
+
+The driver version covers native execution semantics that are not represented
+by a Jacquard definition hash. SC.17 advances it from `warp-v1` to `warp-v2`
+because nested-scope cancellation changed in the shared scheduler driver.
+Existing `warp-v1` files remain harmless in the result store but cannot satisfy
+a `warp-v2` lookup.
 
 Coverage gets the same semantic treatment: the interpreter records which
 definition hashes were evaluated under test, and `jacquard test --coverage` reports

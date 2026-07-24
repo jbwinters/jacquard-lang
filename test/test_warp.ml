@@ -126,7 +126,7 @@ let test_cache_entry_roundtrip () =
     ]
   in
   (* one multi-outcome entry (the group shape) round-trips verdicts, displays, coverage *)
-  let key = "warp-v1|case|deadbeef" in
+  let key = Warp.version ^ "|case|deadbeef" in
   let coverage = [ Hash.of_string "x"; Hash.of_string "y" ] in
   let outcomes =
     List.mapi
@@ -150,6 +150,33 @@ let test_cache_entry_roundtrip () =
               Alcotest.(check int) "coverage size" (List.length c) (List.length c'))
             outcomes back
       | None -> Alcotest.failf "entry did not round-trip:\n%s" printed)
+
+let test_cache_version_invalidates_pre_sc17_entries () =
+  Alcotest.(check string) "SC.17 driver cache epoch" "warp-v2" Warp.version;
+  let member = Hash.of_string "sc17-nested-cancellation" in
+  let old_key = Printf.sprintf "warp-v1|case|%s" (Hash.to_hex member) in
+  let current_key = Warp.cache_key_string (Warp.Hermetic ("display-only", member)) in
+  Alcotest.(check bool)
+    "corrected scheduler semantics re-key hermetic results" true
+    (not (String.equal old_key current_key));
+  let cache_dir = Filename.temp_dir ~perms:0o700 "jacquard-warp-sc17-" ".cache" in
+  Fun.protect
+    ~finally:(fun () ->
+      Array.iter (fun name -> Sys.remove (Filename.concat cache_dir name)) (Sys.readdir cache_dir);
+      Unix.rmdir cache_dir)
+    (fun () ->
+      let outcomes = [ ("old/result", Warp.Pass 1, None, []) ] in
+      Warp.cache_store ~cache_dir:(Some cache_dir) old_key outcomes;
+      Alcotest.(check bool)
+        "pre-SC.17 entry remains readable under its exact old key" true
+        (Option.is_some (Warp.cache_lookup ~cache_dir:(Some cache_dir) old_key));
+      Alcotest.(check bool)
+        "pre-SC.17 entry is not reused by the corrected driver" true
+        (Option.is_none (Warp.cache_lookup ~cache_dir:(Some cache_dir) current_key)))
+
+let test_cache_evidence () =
+  test_cache_entry_roundtrip ();
+  test_cache_version_invalidates_pre_sc17_entries ()
 
 (* --- W6.8: the memo trap — two tests sharing a dependency BOTH count it --- *)
 
@@ -330,6 +357,6 @@ let suite =
     Alcotest.test_case "check.throws both directions" `Quick test_check_throws_both_directions;
     Alcotest.test_case "check.eq renders both sides" `Quick test_check_eq_renders_both_sides;
     Alcotest.test_case "suite is pure (zero grants)" `Quick test_manifest_pure;
-    Alcotest.test_case "cache entry round-trip" `Quick test_cache_entry_roundtrip;
+    Alcotest.test_case "cache entry and SC.17 invalidation" `Quick test_cache_evidence;
     Alcotest.test_case "coverage counts memo hits" `Quick test_coverage_and_schedule_identity;
   ]
