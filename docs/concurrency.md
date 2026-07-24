@@ -968,11 +968,12 @@ results, or deadlock detection. Jacquard scopes select fail-fast:
 - Collect does not cancel siblings or implicitly close a channel when one child
   fails. Other children may continue to communicate and their results remain in
   creation order;
-- under either policy, if every remaining live task is channel-blocked and no
-  channel transition is possible, the scheduler reports deadlock E0908. In
-  particular, fail-fast has no failure to prefer in this state; Collect cannot
-  return a partial aggregate. Deadlock never implies an implicit close. Cleanup
-  removes waiters and destroys continuations;
+- under either policy, if every remaining live task is suspended and at least
+  one is channel-blocked, the scheduler reports deadlock E0908. The other
+  suspended tasks may be waiting for tasks or nested scopes. In particular,
+  fail-fast has no failure to prefer in this state; Collect cannot return a
+  partial aggregate. Deadlock never implies an implicit close. Cleanup removes
+  waiters and destroys continuations;
 - explicit close while the scope is active uses §8.3 regardless of policy;
 - final scope destruction closes owned channels in creation order, removes any
   waiter before destroying its Once continuation, and drops undrained buffered
@@ -999,8 +1000,9 @@ SC.14 is conforming only if all of the following remain true:
   double continuation consumption;
 - [x] exact run/scope ownership, recursive escape scans, hostile callback
   revalidation, and deterministic ChannelId creation;
-- [x] fail-fast cancellation, OCaml Collect non-interference, policy-independent
-  all-channel-blocked E0908 refusal, and exception-safe teardown;
+- [x] fail-fast cancellation, OCaml Collect non-interference, the
+  policy-independent all-suspended/at-least-one-channel-blocked E0908 refusal,
+  and exception-safe teardown;
 - [x] rendezvous and buffered contract traces plus positive/negative checker
   fixtures.
 

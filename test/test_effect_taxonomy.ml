@@ -1173,7 +1173,7 @@ let test_channel_interface_hash_contract () =
       "blocked-receiver cancellation and close";
       "blocked-sender cancellation, survivor order";
       "exact run/scope ownership";
-      "policy-independent all-channel-blocked E0908 refusal";
+      "policy-independent all-suspended/at-least-one-channel-blocked E0908 refusal";
       "actors, mailboxes, links, monitors, supervision";
     ]
 

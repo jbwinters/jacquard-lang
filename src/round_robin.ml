@@ -932,7 +932,8 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed i
           Error
             [
               scheduler_diagnostic
-                "async deadlock: all remaining live tasks are blocked on channels";
+                "async deadlock: all remaining live tasks are suspended and at least one is \
+                 blocked on a channel";
             ]
       | [] -> Ok ()
       | _ when !sequence >= bounds.max_decisions ->
