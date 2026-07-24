@@ -249,6 +249,9 @@ Read these together when judging whether the release candidate is credible:
   viewer, accessible evidence language, and explicit product non-claims.
 - `release/governed-membranes/GM19-MANIFEST.sha256`: reconstructible GM.19
   product-surface overlay on exact integrated base `28a79de`.
+- `release/governed-membranes/GM20-DECISION.md`: owner-approved, non-shipping
+  G5 contract for exact posterior-risk normalization, conservative projection,
+  identity/replay binding, and approximate-evidence refusal.
 - `release/governed-membranes/GM10-MANIFEST.sha256`: reconstructible GM.10
   overlay on exact integrated GM.8/GM.9 base `df37a15`.
 - `release/governed-membranes/GM11-MANIFEST.sha256`: reconstructible GM.11

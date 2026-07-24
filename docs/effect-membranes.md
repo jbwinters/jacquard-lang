@@ -1582,38 +1582,33 @@ Neither a live nor dry API may accept an eval-bearing body. The rule can change
 only in a new charter after eval inherits the current handler environment or
 uses an explicit scoped authority value.
 
-## 14. Uncertainty-aware judgment (deferred to G5)
+## 14. Uncertainty-aware judgment (G5 design frozen; not shipped)
 
-The v0 gate consumes one conservative `Risk` plus confidence. Posterior risk,
-belief distributions, model-backed judges, and uncertainty rules are not part
-of G0-G4 acceptance and make no v0 claim. They belong only to G5. Jacquard can
-go further without changing the membrane shape.
+GM.20 freezes the exact-posterior design in
+[GM20-DECISION.md](release/governed-membranes/GM20-DECISION.md). It remains
+outside G0-G4 and the deterministic GM.22 release claim.
 
-A posterior judge can define:
-
-```text
-risk : (Call) ->{Dist} Risk
-```
-
-and use exact enumeration or another inference handler to produce a finite belief over `Low | Medium | High | Forbidden`. The policy then chooses a conservative bound, for example the lowest class whose upper-tail mass is below a configured tolerance. With tolerance `0.0`, any possible higher-risk world raises the effective risk; with a nonzero tolerance, the policy states its accepted uncertainty numerically.
-
-This should land only with explicit semantics. A likely v1 vocabulary is:
-
-These are future schema sketches, not v0 declarations or a complete program.
+The admitted v1 projection uses finite exhaustive inference and exactly one of
+`WorstCase` or `UpperTail(max-mass)`. It normalizes four finite nonnegative
+binary64 weights in fixed risk order, rejects impossible or support-losing
+results, treats every positive `Forbidden` mass as non-discardable, and joins
+the projected risk with an independently computed v0 baseline:
 
 ```text
-type RiskBelief =
-  | RiskBelief(low: Real, medium: Real, high: Real, forbidden: Real)
-
-type UncertaintyRule =
-  | WorstCase
-  | UpperTail(max-mass: Real)
-  | AlwaysAskBelow(confidence: Real)
+effective-risk       = max(baseline-risk, posterior-risk)
+effective-confidence = baseline-confidence
 ```
 
-The important law is already fixed: uncertainty can tighten a verdict or escalate it; it never silently lowers risk. A point estimate with low confidence cannot auto-allow a call.
+The unchanged v0 gate consumes that effective assessment. The join can only
+tighten its verdict.
 
-This is the concrete bridge between permission review and uncertainty review: the same proposal says both what the program wants to do and how strongly the system believes the action belongs in each risk class. The audit record pins the inference handler, evidence, and posterior hash so that conclusion can be replayed.
+`AlwaysAskBelow` is rejected from this version because the unchanged gate
+cannot enforce an independent review threshold. Approximate inference is
+versioned, non-authorizing evidence only: it cannot produce an assessment or
+reach `gate-live`. The effective assessment evidence transitively binds the
+exact model, inference-handler semantics, configuration, source evidence, raw
+and normalized posterior, rule, baseline assessment, and result for strict
+replay.
 
 ## 15. Verification plan
 
