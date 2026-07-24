@@ -51,6 +51,50 @@ let contains needle haystack =
   in
   loop 0
 
+let expression store source =
+  match Reader.parse_one ~file:"schedule-prefix-replay.jqd" source with
+  | Error diagnostics -> Eval_support.fail_diags "parse schedule-prefix fixture" diagnostics
+  | Ok form -> (
+      match Kernel.expr_of_form form with
+      | Error diagnostics -> Eval_support.fail_diags "validate schedule-prefix fixture" diagnostics
+      | Ok expression -> (
+          match Resolve.resolve_expr (Store.names_view store) expression with
+          | Ok expression -> expression
+          | Error diagnostics ->
+              Eval_support.fail_diags "resolve schedule-prefix fixture" diagnostics))
+
+let task_stopped label = function
+  | Ok (Round_robin.Stopped { budget = Round_robin.Task_limit; error; schedule_prefix }) ->
+      (error, schedule_prefix)
+  | Ok (Round_robin.Stopped { budget = Round_robin.Decision_limit; _ }) ->
+      Alcotest.failf "%s stopped at the decision budget" label
+  | Ok (Round_robin.Finished _) -> Alcotest.failf "%s unexpectedly finished" label
+  | Error error -> Alcotest.failf "%s failed structurally: %s" label (Runtime_err.to_string error)
+
+let test_task_budget_prefix_strictly_replays () =
+  let store, ctx = Eval_support.make_prelude_ctx () in
+  let spawn =
+    expression store "(let nonrec (pwild) (app (var async.spawn) (lam () (lit 1))) (lit 0))"
+  in
+  let bounds = Round_robin.{ max_tasks = 1; max_decisions = 8 } in
+  let recorded_error, recorded_prefix =
+    Round_robin.run_expr_scheduled_attempt ctx ~bounds ~mode:Round_robin.Record_schedule spawn
+    |> task_stopped "record"
+  in
+  let replayed_error, replayed_prefix =
+    Round_robin.run_expr_scheduled_attempt ctx ~bounds
+      ~mode:(Round_robin.Replay_schedule recorded_prefix) spawn
+    |> task_stopped "strict replay"
+  in
+  Alcotest.(check string)
+    "strict replay reproduces the task-budget diagnostic"
+    (Runtime_err.to_string recorded_error)
+    (Runtime_err.to_string replayed_error);
+  Alcotest.(check string)
+    "strict replay reproduces byte-identical stopped prefix"
+    (Schedule_trace.serialize recorded_prefix)
+    (Schedule_trace.serialize replayed_prefix)
+
 let test_canonical_round_trip_and_identity () =
   let fork = Schedule_trace.{ decision = 2; chosen = root } in
   let trace = valid ~fork valid_events in
@@ -214,4 +258,6 @@ let suite =
     Alcotest.test_case "legacy, unknown, and noncanonical refusal" `Quick
       test_legacy_unknown_and_noncanonical_refused;
     Alcotest.test_case "impossible event refusal" `Quick test_impossible_events_refused;
+    Alcotest.test_case "task-budget prefix strictly replays" `Quick
+      test_task_budget_prefix_strictly_replays;
   ]
