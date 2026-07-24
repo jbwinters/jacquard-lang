@@ -85,6 +85,13 @@ jobs:
           mkdir -p "$TMPDIR"
           scripts/check-temp-policy.sh
 
+      - name: Verify historical release manifests
+        run: |
+          scripts/release/check-historical-manifests.sh \
+            --commit "$GITHUB_SHA" \
+            --require-history
+          scripts/release/test-historical-manifests.sh --commit "$GITHUB_SHA"
+
       - name: Set up OCaml
         uses: ocaml/setup-ocaml@v3.6.1
         with:
