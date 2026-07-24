@@ -248,23 +248,24 @@ let observe_operation controller operation =
       in
       Result.map (fun () -> current.operation <- Some operation) result
 
+let decision_event current =
+  Schedule_trace.Decide
+    {
+      sequence = current.sequence;
+      runnable = current.runnable;
+      chosen = current.chosen;
+      operation = Option.get current.operation;
+    }
+
+let chronological_events current = decision_event current :: List.rev current.creations_rev
+
 let finish_decision controller =
   match controller.current with
   | None -> error "no scheduler decision is active"
   | Some { operation = None; sequence; _ } ->
       error (Printf.sprintf "decision %d did not observe an operation" sequence)
   | Some current ->
-      let decision =
-        Schedule_trace.Decide
-          {
-            sequence = current.sequence;
-            runnable = current.runnable;
-            chosen = current.chosen;
-            operation = Option.get current.operation;
-          }
-      in
-      let chronological = decision :: List.rev current.creations_rev in
-      controller.events_rev <- List.rev_append chronological controller.events_rev;
+      controller.events_rev <- List.rev_append (chronological_events current) controller.events_rev;
       controller.current <- None;
       Ok ()
 
@@ -272,15 +273,7 @@ let snapshot_prefix controller =
   let events_rev =
     match controller.current with
     | None | Some { operation = None; _ } -> controller.events_rev
-    | Some current ->
-        Schedule_trace.Decide
-          {
-            sequence = current.sequence;
-            runnable = current.runnable;
-            chosen = current.chosen;
-            operation = Option.get current.operation;
-          }
-        :: controller.events_rev
+    | Some current -> List.rev_append (chronological_events current) controller.events_rev
   in
   Schedule_trace.make ~scheduler:controller.scheduler ~program:controller.program
     ~policy:controller.policy ~max_tasks:controller.max_tasks

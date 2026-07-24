@@ -278,7 +278,7 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed i
     let is_body run handle = same_handle run handle run.body_handle in
     let has_seen run handle = List.exists (same_handle run handle) run.seen_terminal in
     let drop _resume = () in
-    let allocate_task () =
+    let ensure_task_budget () =
       if !task_count >= bounds.max_tasks then (
         budget_refusal := Some Task_limit;
         let diagnostics =
@@ -286,11 +286,13 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed i
         in
         fatal_diagnostics := diagnostics;
         Error diagnostics)
-      else (
-        incr task_count;
-        incr live_count;
-        max_live := max !max_live !live_count;
-        Ok ())
+      else Ok ()
+    in
+    let allocate_task () =
+      incr task_count;
+      incr live_count;
+      max_live := max !max_live !live_count;
+      Ok ()
     in
     let rec queue_ids acc = function
       | [] -> Ok (List.rev acc)
@@ -600,6 +602,7 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed i
                           ~scope_path:(Structured_scope.scope_path run.scope)
                           ~spawn_index:(List.length run.children + 1)
                       in
+                      let* () = ensure_task_budget () in
                       let* () =
                         validate_creation
                           Schedule_trace.
@@ -842,6 +845,7 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed i
                       let nested_id =
                         Concurrency_contract.task_id ~scope_path:nested_path ~spawn_index:0
                       in
+                      let* () = ensure_task_budget () in
                       let* () =
                         validate_creation
                           Schedule_trace.

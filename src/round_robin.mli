@@ -130,7 +130,8 @@ val run_expr_scheduled_attempt :
 (** [run_expr_scheduled_attempt] is the bounded-search seam. Task and decision exhaustion return a
     [Stopped] canonical prefix after recursive cleanup; invalid inputs, lifecycle defects, and
     replay drift remain [Error]. The prefix contains no evaluator state, Task handle, or resumption.
-    Callers must never count [Stopped] as a complete world. *)
+    Strict replay of a task-budget prefix with the same bounds reproduces the same refusal and a
+    byte-identical prefix. Callers must never count [Stopped] as a complete world. *)
 
 val run_call :
   Eval.ctx ->
