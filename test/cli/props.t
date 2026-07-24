@@ -122,6 +122,18 @@ render explicitly as cached proofs.
   $ jac test governance-policy-laws.jqd --exhaustive --cache-dir gm4-cache | grep 'cached proof' | wc -l
   9
 
+GM.20 freezes only a pure exact-posterior reference calculation. The fixture
+proves the inclusive tail boundary, non-discardable Forbidden mass,
+conservative baseline join, numeric refusals, and the fact that approximate
+evidence cannot produce an assessment. It does not install a Judge handler or
+change the live gate.
+
+  $ jac test ../../docs/release/governed-membranes/GM20-FIXTURE.jqd --exhaustive --no-cache
+  PASS gm20-boundary-examples/exact projection boundaries (6 checks)
+  PASS gm20-invalid-and-nonauthorizing/invalid and approximate inputs fail closed (8 checks)
+  PASS gm20-monotone-join/posterior projection never lowers baseline risk (verified exhaustively (16 cases))
+  3 passed, 0 failed, 0 skipped, 0 refused
+
 Mutation evidence: invert only the first monotonic ordering operator in a
 scratch copy.  Warp finds a concrete policy/risk counterexample, including the
 canonical policy hash; the committed fixture is never modified.

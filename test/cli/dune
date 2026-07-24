@@ -38,6 +38,7 @@
   ../test_scheduler_core.ml
   dune
   governed-membranes-release.t
+  props.t
   (source_tree ../../docs/release/governed-membranes)
   (source_tree ../../bench)
   (source_tree ../native-asan)
