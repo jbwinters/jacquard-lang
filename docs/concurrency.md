@@ -3,13 +3,14 @@
 Status: SC.16 publishes the C0-C2 evidence and limits for SC.12 budgeted
 exhaustive schedule enumeration and SC.11 seeded randomized schedule testing
 over SC.10 versioned scheduler traces and strict replay, SC.9 deterministic
-round-robin, SC.8 fail-fast/collect scope policies, SC.7 cooperative
+round-robin, SC.8 fail-fast/Collect OCaml scope policies, SC.7 cooperative
 cancellation, SC.6 structured-scope ownership, the SC.5
 policy-independent lifecycle core, and the SC.4 generalized child-effect law
 (D46-D50), July 2026. This document is authoritative for C1's static
 non-laundering law, lifecycle and nested ownership, cancellation delivery, and
-homogeneous scope aggregation, plus C2's record/replay and seeded decision
-policies. SC.14 also ships the C3 scoped typed-Channel runtime through those
+fail-fast language scope plus the OCaml scope-policy seam, plus C2's
+record/replay and seeded decision policies. SC.14 also ships the C3 scoped
+typed-Channel runtime through those
 same deterministic, seeded, replay, exhaustive, and cached interpreter routes.
 The default CLI, prelude-evaluation, and Warp Case paths drive real evaluator
 states and affine continuations through the Async and Channel scheduler.
@@ -294,9 +295,9 @@ scope may complete. Direct `async.cancel` and fail-fast sibling cancellation
 share this path. No descendant may receive another scheduler choice or invoke
 a routed world callback after delivery to the ancestor.
 
-## 3. Scope APIs and failure shapes
+## 3. Shipped language scope and OCaml policy seam
 
-The general handler and homogeneous convenience APIs are frozen as:
+The scope contract records these three schemas:
 
 ```text
 async.scope : (() ->{Async | e} a) ->{| e} TaskResult a
@@ -304,27 +305,42 @@ async.scope-fail-fast : (List (() ->{Async | e} a)) ->{| e} TaskResult (List a)
 async.scope-collect : (List (() ->{Async | e} a)) ->{| e} List (TaskResult a)
 ```
 
-`async.scope` uses fail-fast by default. It discharges only `Async`; all child
-world effects remain in `e`. Its body may spawn, await, cancel, and yield
+Their reachability differs in Jacquard 0.1:
+
+| schema | 0.1 reachability |
+|---|---|
+| `async.scope` | shipped Jacquard term binding; always fail-fast |
+| `async.scope-fail-fast` | OCaml/library design schema; not a Jacquard term binding |
+| `async.scope-collect` | OCaml/library design schema; not a Jacquard term binding |
+
+Jacquard 0.1 binds only `async.scope`. The prelude, CLI, Warp, and nested
+scheduler do not expose a failure-policy selector. `async.scope-fail-fast` and
+`async.scope-collect` are contract schemas, not Jacquard term bindings. They
+name the two homogeneous result shapes implemented at the OCaml library seam;
+they must not be read as callable public-language helpers.
+
+The shipped `async.scope` term uses fail-fast. It discharges only `Async`; all
+child world effects remain in `e`. Its body may spawn, await, cancel, and yield
 directly. A successfully returned body value is `Done`; the first child
 non-success selected by scheduler decision order is its exact `Failed` or
 `Cancelled` result.
 
-`async.scope-fail-fast` is the homogeneous aggregate: `Done(values)` preserves
-input/creation order. The first scheduler-ordered `Failed` or `Cancelled`
-cancels unfinished siblings and returns no partial value list.
-`async.scope-collect` never cancels siblings merely because one failed and
-returns one `TaskResult` per input, in input/creation order. These separate
-shapes avoid pretending that
+At the OCaml policy seam, fail-fast homogeneous aggregation returns
+`Done(values)` in input/creation order. The first scheduler-ordered `Failed` or
+`Cancelled` cancels unfinished siblings and returns no partial value list.
+Collect is explicit only at the OCaml library seam. It never cancels siblings
+merely because one failed and returns one `TaskResult` per input, in
+input/creation order. These separate shapes avoid pretending that
 heterogeneously typed child values can inhabit one list. Within a general scope,
 programs obtain heterogeneous typed results explicitly with `async.await`.
 
-SC.8 implements these two policies in `Scope_policy`. A controller registers an
-ordered same-scope child list and consumes terminal observations carrying a
-strictly increasing lexicographic `(D46 decision, sub-observation ordinal)`
-pair. The ordinal is zero for the first terminal observed in a step and rises
-in stable scope-child order when one step terminalizes more children through
-fail-fast cancellation. Fail-fast is the default. Its
+SC.8 implements both policies for OCaml callers in `Scope_policy`. A controller
+registers an ordered same-scope child list and consumes terminal observations
+carrying a strictly increasing lexicographic
+`(D46 decision, sub-observation ordinal)` pair. The ordinal is zero for the
+first terminal observed in a step and rises in stable scope-child order when
+one step terminalizes more children through fail-fast cancellation. Fail-fast
+is the default and the only policy selected by a Jacquard scope. Its
 first observed `Failed(message)` or `Cancelled` freezes that exact non-success,
 requests cancellation of each unfinished sibling in input order, and
 immediately delivers already-suspended siblings through the SC.7 destruction
@@ -349,12 +365,14 @@ waiter-registration order. A scheduler drains them exactly once through
 `Scope_policy.take_awakened` before its next choice; the policy layer never
 silently discards or independently schedules them.
 
-Collect never requests sibling cancellation. It waits for every registered
-child and returns the immutable terminal results in input order, independently
-of terminal observation order. Zero children produce `Done([])` under
-fail-fast and `[]` under collect. These controllers consume scheduler decisions
-but do not create a runnable queue, choose a task, resume a continuation,
-consult host timing, or install a root handler.
+The OCaml-only Collect policy never requests sibling cancellation. It waits for
+every registered child and returns the immutable terminal results in input
+order, independently of terminal observation order. Zero children produce
+`Done([])` under fail-fast and `[]` under Collect. These controllers consume
+scheduler decisions but do not create a runnable queue, choose a task, resume a
+continuation, consult host timing, or install a root handler. Scheduling policy
+(FIFO, seeded, replay, or exhaustive) is orthogonal to failure policy and does
+not make Collect reachable from Jacquard.
 
 ## 4. Cancellation and resources
 
@@ -468,9 +486,9 @@ its creating scope or is reused by a later scheduler invocation on the same
 evaluator. Routed root dispatch snapshots and rechecks the suspended affine
 resume together with the operation, arguments, and result, so a hostile root
 callback cannot mutate the continuation graph to smuggle a foreign Task.
-Positive task and decision bounds close and drain
-the scheduler on refusal. Fail-fast and collect reuse the D50 result shapes,
-and all results remain in task-creation order. Cache identity is the canonical
+Positive task and decision bounds close and drain the scheduler on refusal. The
+OCaml fail-fast and Collect policies reuse the D50 result shapes, and all
+results remain in task-creation order. Cache identity is the canonical
 program hash plus scheduler version, failure policy, and both bounds. Entries
 contain trace/decision proof only; they never retain evaluator closures,
 continuations, results, or Task handles, and a hit is checked against a fresh
@@ -489,8 +507,9 @@ jacquard-schedule format=1 scheduler=S program=HASH policy=P max-tasks=N max-dec
 
 `S` is `fifo-round-robin-v0`; `HASH` is the 64-lowercase-hex `HASH_V0` identity
 of the single scheduled expression; `P` is `fail-fast` or `collect`; both
-bounds are positive decimal integers; and `F` is `-` or `K:TASK`. Remaining
-lines use one of two closed records:
+bounds are positive decimal integers; and `F` is `-` or `K:TASK`. Jacquard CLI
+and Warp traces use `fail-fast`; `collect` identifies an explicit OCaml library
+run. Remaining lines use one of two closed records:
 
 ```text
 create scope=PATH task=TASK parent=-|TASK
@@ -560,8 +579,9 @@ run/scope-local Task carrier in both runtime representations. SC.5 adds the
 policy-independent lifecycle engine, SC.6 adds same-run nested scope ownership,
 recursive cleanup, and complete runtime-value escape scans, and SC.7 adds
 cooperative delivery at await, yield, and routed-effect boundaries. SC.8 adds
-deterministic fail-fast and collect aggregation over explicit terminal decision
-events. SC.9 adds the default deterministic queue and real evaluator-state Async
+deterministic fail-fast and Collect aggregation over explicit terminal decision
+events at the OCaml policy seam; Jacquard scopes select fail-fast. SC.9 adds the
+default deterministic queue and real evaluator-state Async
 driver used by interpreted CLI and Warp Case execution. SC.10 adds canonical
 record, fail-closed replay, and provenance-preserving explicit fork over that
 same driver. Raw `Eval.run_expr` remains the low-level unscheduled evaluator
@@ -601,7 +621,8 @@ The public language has no `async.current-task` operation, so a checked
 Jacquard program cannot name its own handle and self-cancel. The scheduler
 lifecycle integration test therefore exercises self-cancel at the real
 `Structured_scope.cancel` route; the real-evaluator suite covers failing-child
-fail-fast/collect and same-step cancellation ordinals. Warp Case coverage is
+fail-fast behavior, the OCaml integration suite covers Collect, and both cover
+same-step cancellation ordinals. Warp Case coverage is
 limited to checker-representable programs (nested spawn/await/yield/cancel).
 Ill-typed child faults and direct self-handle injection remain hostile OCaml
 integration cases, not purported checked Warp programs. Warp Props still vary
@@ -678,7 +699,8 @@ fallback. The prerequisite audit, parity/sanitizer lane, and benchmark are in
 ## 7. Phases and indexed decisions
 
 C0 is pure parallel hints. C1 is Task lifecycle, Async, structured scopes,
-cooperative cancellation, fail-fast/collect, and the deterministic scheduler.
+cooperative cancellation, fail-fast Jacquard scopes, an OCaml-only Collect
+policy seam, and the deterministic scheduler.
 C2 adds schedule tooling. SC.10 implements versioned record/strict replay,
 SC.11 adds seeded randomized Warp schedules, and SC.12 implements budgeted
 exhaustive schedules. C3 adds typed channels: SC.13 freezes their interface and
@@ -703,7 +725,7 @@ no-detached-task rule; its separate successor evidence is
 | D47 | cancellation | cooperative at the three suspension classes above; bracket for cleanup; finalizers deferred |
 | D48 | task escape | E0907 dynamic defect in v0; rank-2 static scoping is future work |
 | D49 | channels and actors | SC.13 freezes scoped typed channels for C3; SC.14 implements them; actors/supervision remain C4+ |
-| D50 | scope failure policy | fail-fast default; collect explicit, with the exact result shapes in §3 |
+| D50 | scope failure policy | Jacquard scopes are fail-fast; Collect is explicit only through the OCaml library seam, with the exact result shapes in §3 |
 
 ## 8. Typed channels (SC.13-SC.14 / C3 contract)
 
@@ -934,20 +956,21 @@ E0907 before continuation consumption or channel mutation. Nested scopes create
 their own channels; parent/descendant channel sharing is deliberately absent in
 v1.
 
-### 8.6 Scope policy, teardown, and deadlock
+### 8.6 OCaml scope policy, teardown, and deadlock
 
-Fail-fast and collect do not change FIFO, close results, or deadlock detection:
+At the OCaml policy seam, fail-fast and Collect do not change FIFO, close
+results, or deadlock detection. Jacquard scopes select fail-fast:
 
 - fail-fast selects the existing first decision-ordered non-success, requests
   sibling cancellation in creation order, removes channel-blocked siblings via
   §8.5, then closes owned channels in ChannelId order during scope teardown;
   cancelled operations yield Task `Cancelled`, not `Err(ChannelClosed)`;
-- collect does not cancel siblings or implicitly close a channel when one child
+- Collect does not cancel siblings or implicitly close a channel when one child
   fails. Other children may continue to communicate and their results remain in
   creation order;
 - under either policy, if every remaining live task is channel-blocked and no
   channel transition is possible, the scheduler reports deadlock E0908. In
-  particular, fail-fast has no failure to prefer in this state; collect cannot
+  particular, fail-fast has no failure to prefer in this state; Collect cannot
   return a partial aggregate. Deadlock never implies an implicit close. Cleanup
   removes waiters and destroys continuations;
 - explicit close while the scope is active uses §8.3 regardless of policy;
@@ -976,7 +999,7 @@ SC.14 is conforming only if all of the following remain true:
   double continuation consumption;
 - [x] exact run/scope ownership, recursive escape scans, hostile callback
   revalidation, and deterministic ChannelId creation;
-- [x] fail-fast cancellation, collect non-interference, policy-independent
+- [x] fail-fast cancellation, OCaml Collect non-interference, policy-independent
   all-channel-blocked E0908 refusal, and exception-safe teardown;
 - [x] rendezvous and buffered contract traces plus positive/negative checker
   fixtures.

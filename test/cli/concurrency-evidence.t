@@ -19,10 +19,21 @@ complete, unique, replayable schedules.
 
 SC.17 keeps the historical SC.16 attestation intact and adds a separately
 reconstructible correction pack for transitive cancellation of nested runs.
-The Dune sandbox has no standalone Git history, so the checker says exactly
-which reduced verification it performed.
+The Dune sandbox pins the retained manifest and checker bytes without applying
+their historical inventories to the moving source tree. The production
+history gate reconstructs and executes each checker at its registered
+publication commit.
 
-  $ ../../scripts/release/check-sc17-manifest.sh
-  note: historical reconstructions unavailable; verified pinned SC.16/GM.21 attestations and SC.17 overlay
-  SC.16 and GM.21 historical attestations are preserved and byte-consistent
-  SC.17 cancellation correction pack is complete and byte-consistent
+  $ sha256sum \
+  >   ../../docs/release/structured-concurrency/MANIFEST.sha256 \
+  >   ../../scripts/release/check-structured-concurrency-manifest.sh \
+  >   ../../docs/release/governed-membranes/GM21-MANIFEST.sha256 \
+  >   ../../scripts/release/check-gm21-manifest.sh \
+  >   ../../docs/release/structured-concurrency/SC17-MANIFEST.sha256 \
+  >   ../../scripts/release/check-sc17-manifest.sh
+  3ca69edb0121713deb211042dfe2099bbd425c05292789d46a5db00e4d52ffd9  ../../docs/release/structured-concurrency/MANIFEST.sha256
+  d0b40d94343a06343f08dbcf2a11c7b11fcf8a465df4e3375b4bfd703b62a495  ../../scripts/release/check-structured-concurrency-manifest.sh
+  19603651590eb6de890a7e3597b009403f03234d6d5f022b076497d8a638e45f  ../../docs/release/governed-membranes/GM21-MANIFEST.sha256
+  14fcc2ec9274d1dde793ef534591c4d757934089d0510424e52187e9b0fd5a82  ../../scripts/release/check-gm21-manifest.sh
+  dd597d01e8d806fa8d962db419ca23ecb16031989526dd3ee01b130567eb6c50  ../../docs/release/structured-concurrency/SC17-MANIFEST.sha256
+  4e35e42c06b251d9caefb34970f7d66cd5aca58c4f4caaa342efb20045e036ae  ../../scripts/release/check-sc17-manifest.sh

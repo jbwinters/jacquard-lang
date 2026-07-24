@@ -1675,6 +1675,29 @@ let test_governance_and_links () =
     "documented root boundaries exactly match grantable names"
     (List.sort String.compare Prelude.grantable_names)
     root_grants;
+  Alcotest.(check bool)
+    "async.scope is the only shipped Jacquard scope term" true
+    (Store.lookup_kind store "async.scope" Resolve.KTerm <> None);
+  List.iter
+    (fun name ->
+      Alcotest.(check bool)
+        (name ^ " remains an unbound OCaml contract schema")
+        true
+        (Store.lookup_kind store name Resolve.KTerm = None))
+    [ "async.scope-fail-fast"; "async.scope-collect" ];
+  let concurrency = normalize_whitespace concurrency in
+  List.iter
+    (fun phrase ->
+      Alcotest.(check bool)
+        ("scope reachability contract: " ^ phrase)
+        true
+        (contains_string concurrency phrase))
+    [
+      "Jacquard 0.1 binds only `async.scope`";
+      "`async.scope-fail-fast` and `async.scope-collect` are contract schemas, not Jacquard term \
+       bindings";
+      "Collect is explicit only at the OCaml library seam";
+    ];
   let reserved =
     rows ()
     |> List.filter (fun row -> String.equal row.status "reserved")

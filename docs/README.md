@@ -44,11 +44,13 @@ project shape from file names alone.
 - `client-playground.md`: local-only Workspace v0 governance decision-chain
   viewer, normalized projection, trust boundary, evidence language,
   accessibility contract, and explicit product non-claims.
-- `concurrency.md`: SC.14 ships the exact scoped typed Channel contract frozen
-  by SC.13 through deterministic, seeded, replay, exhaustive, and cached
-  interpreted scheduling. It publishes exact identities, capacity/backpressure,
-  close, cancellation, fan-in, ownership, and policy interaction. Native
-  Channel execution, host I/O readiness, and actors remain deferred to C4+.
+- `concurrency.md`: SC.14 ships fail-fast Jacquard scopes, an explicit
+  OCaml-only Collect policy seam, and the exact scoped typed Channel contract
+  frozen by SC.13 through deterministic, seeded, replay, exhaustive, and
+  cached interpreted scheduling. It publishes exact identities,
+  capacity/backpressure, close, cancellation, fan-in, ownership, and policy
+  interaction. Native Channel execution, host I/O readiness, and actors remain
+  deferred to C4+.
 - `warp-testing.md`: Warp test model, rows, handlers, cache, properties, and
   world lanes.
 - `errors.md`: diagnostic code catalog.
@@ -130,6 +132,9 @@ Read these together when judging whether the release candidate is credible:
   schedule parity, counts, claim-to-test links, and the SC.17 correction pointer.
 - `release/structured-concurrency/SC17-EVIDENCE.md`: correction evidence proving
   direct and fail-fast cancellation cannot orphan nested scheduler work.
+- `release/structured-concurrency/COLLECT-SURFACE.md`: current-contract
+  clarification that Jacquard 0.1 exposes fail-fast `async.scope`, while
+  Collect is available only to explicit OCaml library callers.
 - `release/structured-concurrency/LIMITS.md`: dynamic Task and Channel lifetime
   checks, cooperative cancellation, explicit bracket cleanup, interpreter-only
   scheduling, sequential C0 hints, and explicit C4 exclusions.

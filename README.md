@@ -658,7 +658,8 @@ surface is implemented and supported but remains an evolving v0 projection
 onto the permanent 27-form kernel. Native AOT compilation and C-toolchain
 optimization ship. `parallel.map` and `parallel.both` remain pure, sequential
 optimization hints. The interpreted runtime now supports opaque scoped Tasks,
-cooperative cancellation, fail-fast/collect, FIFO and seeded scheduling,
+cooperative cancellation, fail-fast language scopes, an OCaml-only Collect
+policy seam, FIFO and seeded scheduling,
 versioned strict replay, bounded exhaustive schedule enumeration, and scoped
 typed channels with rendezvous and buffered FIFO behavior, close, cancellation,
 and exact run/scope ownership. It does not provide native root scheduling or

@@ -110,7 +110,10 @@ val detect_wait_cycle : wait_edge list -> task_id list option
 
 type failure_policy =
   | Fail_fast
-  | Collect  (** Scope sibling-failure policy. [Fail_fast] is the default. *)
+  | Collect
+      (** Scope sibling-failure policy for OCaml scheduler/library callers. [Fail_fast] is the
+          default and the only policy selected by the shipped Jacquard [async.scope] term. [Collect]
+          must be requested explicitly through the OCaml API. *)
 
 type 'a fail_fast_result = 'a list task_result
 (** Homogeneous fail-fast aggregation: [Done values] preserves creation/input order; the first
@@ -128,14 +131,17 @@ type schemas = {
   scope_fail_fast : string;
   scope_collect : string;
 }
-(** Exact whitespace-normalized surface schemas frozen by SC.0. They are data for conformance
-    checks, not a substitute for the checker's resolved structural typing rule. *)
+(** Exact whitespace-normalized contract schemas frozen by SC.0. Only [scope] names a shipped
+    Jacquard term binding in 0.1. [scope_fail_fast] and [scope_collect] describe homogeneous
+    OCaml/library design shapes; they are not callable Jacquard helpers. The schemas are data for
+    conformance checks, not a substitute for the checker's resolved structural typing rule. *)
 
 val schemas : schemas
 (** [schemas] returns the exact Task/Async/scope spellings indexed in [docs/concurrency.md]. *)
 
 val default_failure_policy : failure_policy
-(** [default_failure_policy] is [Fail_fast] (D50). *)
+(** [default_failure_policy] is [Fail_fast] (D50). Jacquard and nested language scopes always use
+    this policy; an OCaml caller must explicitly request [Collect]. *)
 
 type cancellation_point =
   | Await
