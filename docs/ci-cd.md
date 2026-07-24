@@ -22,6 +22,10 @@ check from becoming green while the local review surface is failing.
 The gate runs:
 
 ```sh
+scripts/release/check-historical-manifests.sh \
+  --commit "$(git rev-parse HEAD)" \
+  --require-history
+scripts/release/test-historical-manifests.sh --commit "$(git rev-parse HEAD)"
 opam install --deps-only . --with-test --with-doc --with-dev-setup -y
 opam exec -- dune build @all
 opam exec -- dune runtest
@@ -32,6 +36,29 @@ _build/default/bin/main.exe --version
 
 The `dune fmt` plus `git diff --exit-code` pair is deliberate: if formatting
 auto-promotes anything, CI fails and prints the diff.
+
+The historical-manifest gate attests the immutable commit named by
+`GITHUB_SHA`, not the mutable runner worktree. The candidate commit must retain
+the exact published effect-linearity, structured-concurrency, and SC.17
+correction-pack manifest and checker bytes. The gate reconstructs each pinned
+publication commit and runs that publication's checker inside the reconstructed
+tree. Generated and untracked runner files are outside this evidence contract;
+the separate formatting cleanliness check still rejects tracked worktree
+changes.
+
+The mutation test works only in disposable copies under `.scratch/tmp`. It
+changes one retained digest in each legacy manifest and proves that the gate
+rejects both candidates. A no-Git source archive cannot satisfy this
+history-backed gate: full history is required so CI cannot confuse an
+anchor-only diagnostic with publication reconstruction. The legacy EL and SC
+manifests describe historical publication overlays, not today's checkout; run
+their legacy checkers only in the corresponding reconstructed publication
+trees. This was not merely a theoretical distinction when the gate was added:
+at base commit `7cd3054652674eeaae4bfae8483c909819589f66`, direct current-tree
+checks reported 123 EL mismatches and 60 legacy SC mismatches because later
+successor work had legitimately changed listed files. Those observed counts
+explain the choice of tree semantics; they are diagnostic history, not a
+permanent gate contract.
 
 ## Governance Playground
 
