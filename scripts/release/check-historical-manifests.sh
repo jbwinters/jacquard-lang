@@ -1,10 +1,10 @@
 #!/bin/sh
 set -eu
 
-# CI attests an immutable commit object, not the mutable runner worktree. The
-# candidate must retain the exact published EL and SC manifest/checker bytes;
-# their legacy checkers are then executed inside their pinned publication
-# trees. --candidate-root is a test-only seam for disposable mutation copies.
+# CI attests immutable publication objects, not the mutable runner worktree.
+# The candidate supplies an owner-reviewed, append-only registry and must retain
+# every registered manifest/checker byte. Each manifest is then checked inside
+# its exact publication tree. --candidate-root is a mutation-test seam only.
 
 usage() {
   cat >&2 <<'EOF'
@@ -19,6 +19,10 @@ repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 candidate_commit=
 candidate_root=
 require_history=false
+registry_path=scripts/release/historical-publications.tsv
+# Append "<evidence-pack commit> <SHA-256 of its complete registry-row subset>";
+# never remove or replace a floor.
+registry_floor_records='4c92482ca0e5a513c3e3cdf873fb78d51131ded9 c36a9a52b9fd33f8c7e3b91d69b6da2cc6169529f52755f3d5664824994abbca'
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -66,16 +70,16 @@ if [ "$git_top" != "$repo_root" ]; then
 fi
 
 resolve_commit() {
-  commit=$1
-  git rev-parse --verify "$commit^{commit}" 2>/dev/null
+  requested_commit=$1
+  git rev-parse --verify "$requested_commit^{commit}" 2>/dev/null
 }
 
 archive_commit() {
-  commit=$1
+  requested_commit=$1
   destination=$2
   archive=$3
   mkdir -p "$destination"
-  git archive --format=tar --output="$archive" "$commit"
+  git archive --format=tar --output="$archive" "$requested_commit"
   tar -xf "$archive" -C "$destination"
 }
 
@@ -103,84 +107,260 @@ else
   }
 fi
 
-check_retained_file() {
-  label=$1
-  expected=$2
-  relative_path=$3
-  file="$candidate_root/$relative_path"
-  if [ ! -f "$file" ] || [ -L "$file" ]; then
-    echo "$label retained file is missing or not regular: $relative_path" >&2
+registry_file="$candidate_root/$registry_path"
+if [ ! -f "$registry_file" ] || [ -L "$registry_file" ]; then
+  echo "historical publication registry is missing or not regular: $registry_path" >&2
+  exit 1
+fi
+
+# Validate the candidate's policy surface before reconstructing any history.
+LC_ALL=C awk -F '\t' '
+  function fail(message) {
+    print "invalid historical publication registry at line " NR ": " message > "/dev/stderr"
+    exit 1
+  }
+  NF != 7 { fail("expected seven tab-separated fields") }
+  $1 !~ /^(EL|ET|GM|SC)$/ { fail("unknown family " $1) }
+  $2 !~ /^[A-Z][A-Z0-9]*$/ { fail("unsafe or empty label " $2) }
+  length($4) != 40 || $4 !~ /^[0-9a-f]+$/ { fail("malformed publication commit") }
+  length($5) != 64 || $5 !~ /^[0-9a-f]+$/ { fail("malformed manifest hash") }
+  $3 !~ /^docs\/release\/[a-z0-9-]+\/[A-Z0-9-]+\.sha256$/ {
+    fail("unsafe manifest path " $3)
+  }
+  $1 == "EL" && $3 !~ /^docs\/release\/effect-linearity\// {
+    fail("EL path is outside effect-linearity")
+  }
+  $1 == "ET" && $3 !~ /^docs\/release\/effect-taxonomy\// {
+    fail("ET path is outside effect-taxonomy")
+  }
+  $1 == "GM" && $3 !~ /^docs\/release\/governed-membranes\// {
+    fail("GM path is outside governed-membranes")
+  }
+  $1 == "SC" && $3 !~ /^docs\/release\/structured-concurrency\// {
+    fail("SC path is outside structured-concurrency")
+  }
+  ($6 == "-") != ($7 == "-") { fail("checker path and hash must be paired") }
+  $6 != "-" && $6 !~ /^scripts\/release\/check-[a-z0-9-]+\.sh$/ {
+    fail("unsafe checker path " $6)
+  }
+  $7 != "-" && (length($7) != 64 || $7 !~ /^[0-9a-f]+$/) {
+    fail("malformed checker hash")
+  }
+  seen_label[$1 SUBSEP $2]++ { fail("duplicate family/label " $1 "/" $2) }
+  seen_manifest[$3]++ { fail("duplicate manifest path " $3) }
+  previous != "" && $3 <= previous { fail("manifest paths are not strictly sorted") }
+  { previous = $3 }
+  END { if (NR == 0) fail("registry is empty") }
+' "$registry_file"
+
+cut -f3 "$registry_file" | LC_ALL=C sort >"$temp_root/registered-manifests"
+{
+  find \
+    "$candidate_root/docs/release/effect-linearity" \
+    -mindepth 1 -maxdepth 1 -name '*.sha256' \
+    -printf 'docs/release/effect-linearity/%f\n'
+  find \
+    "$candidate_root/docs/release/effect-taxonomy" \
+    -mindepth 1 -maxdepth 1 -name '*.sha256' \
+    -printf 'docs/release/effect-taxonomy/%f\n'
+  find \
+    "$candidate_root/docs/release/governed-membranes" \
+    -mindepth 1 -maxdepth 1 -name '*.sha256' \
+    -printf 'docs/release/governed-membranes/%f\n'
+  find \
+    "$candidate_root/docs/release/structured-concurrency" \
+    -mindepth 1 -maxdepth 1 -name '*.sha256' \
+    -printf 'docs/release/structured-concurrency/%f\n'
+} | LC_ALL=C sort >"$temp_root/candidate-manifests"
+if ! cmp -s "$temp_root/registered-manifests" "$temp_root/candidate-manifests"; then
+  echo "historical manifest inventory does not match the registry" >&2
+  diff -u "$temp_root/registered-manifests" "$temp_root/candidate-manifests" >&2 || true
+  exit 1
+fi
+
+: >"$temp_root/floor-manifest-hashes-raw"
+previous_floor_oid=
+printf '%s\n' "$registry_floor_records" >"$temp_root/registry-floor-records"
+while IFS=' ' read -r registry_floor_commit expected_floor_rows_sha floor_extra; do
+  if [ -n "$floor_extra" ] ||
+    [ "${#expected_floor_rows_sha}" -ne 64 ] ||
+    ! printf '%s\n' "$expected_floor_rows_sha" | grep -Eq '^[0-9a-f]+$'; then
+    echo "historical registry floor record is malformed" >&2
     exit 1
   fi
-  actual=$(sha256sum "$file" | awk '{print $1}')
-  if [ "$actual" != "$expected" ]; then
-    echo "$label retained file drifted: $relative_path" >&2
-    echo "expected $expected" >&2
-    echo "actual   $actual" >&2
+  registry_floor_oid=$(resolve_commit "$registry_floor_commit") || {
+    echo "historical registry floor commit is unavailable: $registry_floor_commit" >&2
+    exit 1
+  }
+  if [ -n "$previous_floor_oid" ] &&
+    ! git merge-base --is-ancestor "$previous_floor_oid" "$registry_floor_oid"; then
+    echo "historical registry floors are not an ancestor chain" >&2
+    exit 1
+  fi
+  if [ -n "$candidate_commit" ] &&
+    ! git merge-base --is-ancestor "$registry_floor_oid" "$candidate_oid"; then
+    echo "historical registry floor $registry_floor_oid is not an ancestor of candidate $candidate_oid" >&2
+    exit 1
+  fi
+
+  git ls-tree -r --name-only \
+    "$registry_floor_oid" \
+    docs/release/effect-linearity \
+    docs/release/effect-taxonomy \
+    docs/release/governed-membranes \
+    docs/release/structured-concurrency \
+    >"$temp_root/floor-tree"
+  LC_ALL=C awk -F / 'NF == 4 && $4 ~ /\.sha256$/ { print }' \
+    "$temp_root/floor-tree" \
+    >"$temp_root/floor-manifests-unsorted"
+  LC_ALL=C sort \
+    "$temp_root/floor-manifests-unsorted" \
+    >"$temp_root/floor-manifests"
+  while IFS= read -r floor_manifest; do
+    floor_sha=$(
+      git show "$registry_floor_oid:$floor_manifest" |
+      sha256sum |
+      awk '{print $1}'
+    )
+    printf '%s\t%s\n' "$floor_manifest" "$floor_sha"
+  done <"$temp_root/floor-manifests" >>"$temp_root/floor-manifest-hashes-raw"
+
+  LC_ALL=C awk -F '\t' '
+    NR == FNR {
+      floor_path[$1] = 1
+      next
+    }
+    $3 in floor_path { print }
+  ' "$temp_root/floor-manifests" "$registry_file" \
+    >"$temp_root/floor-registry-rows"
+  actual_floor_rows_sha=$(
+    sha256sum "$temp_root/floor-registry-rows" |
+    awk '{print $1}'
+  )
+  if [ "$actual_floor_rows_sha" != "$expected_floor_rows_sha" ]; then
+    echo "historical registry floor rows drifted for $registry_floor_oid" >&2
+    echo "expected $expected_floor_rows_sha" >&2
+    echo "actual   $actual_floor_rows_sha" >&2
+    exit 1
+  fi
+  previous_floor_oid=$registry_floor_oid
+done <"$temp_root/registry-floor-records"
+LC_ALL=C awk -F '\t' '
+  seen[$1] && retained_hash[$1] != $2 {
+    print "historical registry floors disagree for " $1 > "/dev/stderr"
+    failed = 1
+  }
+  !seen[$1] { print }
+  {
+    seen[$1] = 1
+    retained_hash[$1] = $2
+  }
+  END { exit failed }
+' "$temp_root/floor-manifest-hashes-raw" >"$temp_root/floor-manifest-hashes-unique"
+LC_ALL=C sort \
+  "$temp_root/floor-manifest-hashes-unique" \
+  >"$temp_root/floor-manifest-hashes"
+LC_ALL=C awk -F '\t' '
+  NR == FNR {
+    registered_hash[$3] = $5
+    next
+  }
+  !($1 in registered_hash) {
+    print "historical registry floor manifest is no longer registered: " $1 > "/dev/stderr"
+    failed = 1
+    next
+  }
+  registered_hash[$1] != $2 {
+    print "historical registry floor hash drifted: " $1 > "/dev/stderr"
+    failed = 1
+  }
+  END { exit failed }
+' "$registry_file" "$temp_root/floor-manifest-hashes"
+
+check_retained_file() {
+  retained_label=$1
+  expected_sha=$2
+  relative_path=$3
+  retained_file="$candidate_root/$relative_path"
+  if [ ! -f "$retained_file" ] || [ -L "$retained_file" ]; then
+    echo "$retained_label retained file is missing or not regular: $relative_path" >&2
+    exit 1
+  fi
+  actual_sha=$(sha256sum "$retained_file" | awk '{print $1}')
+  if [ "$actual_sha" != "$expected_sha" ]; then
+    echo "$retained_label retained file drifted: $relative_path" >&2
+    echo "expected $expected_sha" >&2
+    echo "actual   $actual_sha" >&2
     exit 1
   fi
 }
 
-check_publication() {
-  label=$1
-  publication=$2
-  manifest_path=$3
-  manifest_sha=$4
-  checker_path=$5
-  checker_sha=$6
+# Complete all cheap candidate-byte checks before any publication archive work.
+while IFS="$(printf '\t')" read -r family label manifest_path publication manifest_sha checker_path checker_sha; do
+  check_retained_file "$label manifest" "$manifest_sha" "$manifest_path"
+  if [ "$checker_path" != "-" ]; then
+    check_retained_file "$label checker" "$checker_sha" "$checker_path"
+  fi
+done <"$registry_file"
 
+mkdir -p "$temp_root/publications" "$temp_root/archives"
+while IFS="$(printf '\t')" read -r family label manifest_path publication manifest_sha checker_path checker_sha; do
   publication_oid=$(resolve_commit "$publication") || {
     echo "$label publication commit is unavailable: $publication" >&2
     exit 1
   }
-  if [ -n "$candidate_commit" ] &&
-    ! git merge-base --is-ancestor "$publication_oid" "$candidate_oid"; then
-    echo "$label publication $publication_oid is not an ancestor of candidate $candidate_oid" >&2
-    exit 1
+  if [ -n "$candidate_commit" ]; then
+    if ! git merge-base --is-ancestor "$publication_oid" "$candidate_oid"; then
+      echo "$label publication $publication_oid is not an ancestor of candidate $candidate_oid" >&2
+      exit 1
+    fi
+    last_manifest_commit=$(git log -1 --format=%H "$candidate_oid" -- "$manifest_path")
+    if [ "$last_manifest_commit" != "$publication_oid" ]; then
+      echo "$label registry publication is not the last commit changing $manifest_path" >&2
+      echo "registered $publication_oid" >&2
+      echo "last       $last_manifest_commit" >&2
+      exit 1
+    fi
   fi
 
-  check_retained_file "$label" "$manifest_sha" "$manifest_path"
-  check_retained_file "$label" "$checker_sha" "$checker_path"
-
-  publication_root="$temp_root/publication-$label"
-  archive_commit \
-    "$publication_oid" "$publication_root" "$temp_root/publication-$label.tar"
-
-  publication_manifest_sha=$(sha256sum "$publication_root/$manifest_path" | awk '{print $1}')
-  publication_checker_sha=$(sha256sum "$publication_root/$checker_path" | awk '{print $1}')
-  if [ "$publication_manifest_sha" != "$manifest_sha" ] ||
-    [ "$publication_checker_sha" != "$checker_sha" ]; then
-    echo "$label publication anchors do not match the pinned byte identities" >&2
-    exit 1
+  publication_root="$temp_root/publications/$publication_oid"
+  if [ ! -d "$publication_root" ]; then
+    archive_commit \
+      "$publication_oid" \
+      "$publication_root" \
+      "$temp_root/archives/$publication_oid.tar"
   fi
 
+  publication_manifest="$publication_root/$manifest_path"
+  if [ ! -f "$publication_manifest" ] || [ -L "$publication_manifest" ]; then
+    echo "$label publication manifest is missing or not regular: $manifest_path" >&2
+    exit 1
+  fi
+  publication_manifest_sha=$(sha256sum "$publication_manifest" | awk '{print $1}')
+  if [ "$publication_manifest_sha" != "$manifest_sha" ]; then
+    echo "$label publication manifest does not match its pinned byte identity" >&2
+    exit 1
+  fi
   (
     cd "$publication_root"
-    GIT_DIR=/nonexistent "$checker_path" >/dev/null
+    sha256sum --check --strict "$manifest_path" >/dev/null
   )
+
+  if [ "$checker_path" != "-" ]; then
+    publication_checker="$publication_root/$checker_path"
+    if [ ! -f "$publication_checker" ] || [ -L "$publication_checker" ]; then
+      echo "$label publication checker is missing or not regular: $checker_path" >&2
+      exit 1
+    fi
+    publication_checker_sha=$(sha256sum "$publication_checker" | awk '{print $1}')
+    if [ "$publication_checker_sha" != "$checker_sha" ]; then
+      echo "$label publication checker does not match its pinned byte identity" >&2
+      exit 1
+    fi
+    (
+      cd "$publication_root"
+      GIT_DIR=/nonexistent "$checker_path" >/dev/null
+    )
+  fi
   echo "$label historical evidence verified at publication $publication_oid"
-}
-
-check_publication \
-  EL \
-  9f04e972cb990257a85331943f486c1623cb57b5 \
-  docs/release/effect-linearity/MANIFEST.sha256 \
-  c4b7fe35abefd2e77de124a57fe5baa8d7e844969eb778955f1c520161241d0b \
-  scripts/release/check-effect-linearity-manifest.sh \
-  c1c4fd476119732fae529b1100d5307f061d0a275bd28b3f3551bcf2b89cfdb2
-
-check_publication \
-  SC \
-  81c14506e0d099dabe04a40b00c1d4fc45b42d47 \
-  docs/release/structured-concurrency/MANIFEST.sha256 \
-  3ca69edb0121713deb211042dfe2099bbd425c05292789d46a5db00e4d52ffd9 \
-  scripts/release/check-structured-concurrency-manifest.sh \
-  d0b40d94343a06343f08dbcf2a11c7b11fcf8a465df4e3375b4bfd703b62a495
-
-check_publication \
-  SC17 \
-  7cd3054652674eeaae4bfae8483c909819589f66 \
-  docs/release/structured-concurrency/SC17-MANIFEST.sha256 \
-  dd597d01e8d806fa8d962db419ca23ecb16031989526dd3ee01b130567eb6c50 \
-  scripts/release/check-sc17-manifest.sh \
-  4e35e42c06b251d9caefb34970f7d66cd5aca58c4f4caaa342efb20045e036ae
+done <"$registry_file"

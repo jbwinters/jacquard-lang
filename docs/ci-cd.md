@@ -38,27 +38,63 @@ The `dune fmt` plus `git diff --exit-code` pair is deliberate: if formatting
 auto-promotes anything, CI fails and prints the diff.
 
 The historical-manifest gate attests the immutable commit named by
-`GITHUB_SHA`, not the mutable runner worktree. The candidate commit must retain
-the exact published effect-linearity, structured-concurrency, and SC.17
-correction-pack manifest and checker bytes. The gate reconstructs each pinned
-publication commit and runs that publication's checker inside the reconstructed
-tree. Generated and untracked runner files are outside this evidence contract;
-the separate formatting cleanliness check still rejects tracked worktree
-changes.
+`GITHUB_SHA`, not the mutable runner worktree. Its candidate-owned,
+owner-reviewed registry pins every publication commit and the byte identity of
+each retained manifest and specialized checker. This includes all seven
+effect-taxonomy manifests, all 25 governed-membranes manifests, and the
+effect-linearity and structured-concurrency anchors. The gate first validates
+the registry, requires its inventory to match the candidate exactly, and
+requires the complete registry rows associated with every pinned floor to
+remain byte-identical. Each floor also reconstructs its manifest paths and
+hashes from Git. That immutable row-set identity prevents both coordinated
+manifest-and-row deletion and removal of a specialized checker from weakening
+the evidence set. The gate then verifies every retained byte. Only after those
+cheap checks does it reconstruct each distinct publication commit and run each
+manifest from that historical tree. Publication archives are cached by commit
+within the gate. Generated and untracked runner files are outside this evidence
+contract; the separate formatting cleanliness check still rejects tracked
+worktree changes.
 
 The mutation test works only in disposable copies under `.scratch/tmp`. It
-changes one retained digest in each legacy manifest and proves that the gate
-rejects both candidates. A no-Git source archive cannot satisfy this
-history-backed gate: full history is required so CI cannot confuse an
-anchor-only diagnostic with publication reconstruction. The legacy EL and SC
-manifests describe historical publication overlays, not today's checkout; run
-their legacy checkers only in the corresponding reconstructed publication
-trees. This was not merely a theoretical distinction when the gate was added:
-at base commit `7cd3054652674eeaae4bfae8483c909819589f66`, direct current-tree
-checks reported 123 EL mismatches and 60 legacy SC mismatches because later
-successor work had legitimately changed listed files. Those observed counts
+changes a retained digest in every registered effect-taxonomy and
+governed-membranes manifest, retains the effect-linearity and
+structured-concurrency drift cases, and proves that missing or unregistered
+manifest files fail the inventory check. It also removes a manifest and its
+registry row together to prove that the immutable floor closes the coordinated
+deletion case, and removes a required checker from a row to prove checker policy
+cannot be weakened. Candidate-byte checks finish before history reconstruction,
+so every negative case stays cheap. A no-Git source archive cannot satisfy the
+production form of this history-backed gate: full history is required so CI
+cannot confuse an anchor-only diagnostic with publication reconstruction.
+These manifests describe historical publication overlays, not today's checkout;
+run specialized legacy checkers only in the corresponding reconstructed
+publication trees. This was not merely a theoretical distinction when the gate
+was added: at base commit
+`7cd3054652674eeaae4bfae8483c909819589f66`, direct current-tree checks reported
+123 EL mismatches and 60 legacy SC mismatches because later successor work had
+legitimately changed listed files. Those observed counts
 explain the choice of tree semantics; they are diagnostic history, not a
 permanent gate contract.
+
+`scripts/release/historical-publications.tsv` has seven tab-separated fields:
+family, label, manifest path, full publication commit, manifest SHA-256,
+checker path, and checker SHA-256. A `-` in both checker fields means the
+generic strict manifest check is sufficient. Existing rows and manifest
+filenames are immutable. A successor publication adds a new manifest filename
+and a new registry row; it does not replace a predecessor merely because its
+numeric label is later.
+
+A publication commit cannot pin its own not-yet-known commit ID. New
+publications therefore use an explicit two-stage process: publish the evidence
+pack in a commit whose identity will be preserved, then add its registry row in
+an owner-reviewed follow-up commit. That follow-up also appends the preserved
+evidence-pack commit and the SHA-256 of its complete registry-row subset to the
+registry-floor chain, after confirming that it contains every prior anchor.
+Existing floors are never removed or replaced; the gate rejects floors that
+disagree about a retained path's bytes. Do not infer or regenerate a registered
+publication ID from the latest commit touching a path. The gate independently
+requires every floor and pinned publication to be ancestors of the candidate
+and the publication to be the last commit that changed the immutable manifest.
 
 ## Governance Playground
 
