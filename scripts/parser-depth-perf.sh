@@ -1,8 +1,9 @@
 #!/bin/sh
 set -eu
 
-# DX.6 opt-in performance guard. This is deliberately outside Dune's default
-# test aliases because wall-clock assertions are unsuitable for shared CI hosts.
+# DX.6 scheduled/manual CI performance guard, opt-in for local runs. This is
+# deliberately outside Dune's default test aliases because wall-clock
+# assertions are unsuitable as per-change merge gates.
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 depth=${JACQUARD_PARSER_DEPTH:-100000}
