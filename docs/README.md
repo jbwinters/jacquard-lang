@@ -18,6 +18,8 @@ project shape from file names alone.
 - `research/readability-benchmark/PROTOCOL.md`: preregistered reviewer tasks,
   paired-carrier fixtures, scoring, privacy, and synthetic reproduction evidence
   for future syntax decisions.
+- `research/readability-benchmark/EXECUTION.md`: fail-closed UX.1 authority
+  boundary and deterministic human/model schedule commands.
 - `ci-cd.md`: GitHub gates, branch protection, and release evidence workflow.
 
 ## Core Design

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Deterministic UX.0 fixture verifier, assignment tool, scorer, and dry runner.
+"""Deterministic readability fixture verifier, planner, scorer, and dry runner.
 
 The tool uses only the Python standard library.  It never collects participants
-or calls a model; real-study orchestration belongs to the separately reviewed
-execution phase.  Invalid manifests, result rows, or fixture evidence fail with
-a concise message and a nonzero exit status.
+or calls a model.  Its UX.1 schedule commands emit de-identified execution
+plans, not consent or study authority.  Invalid manifests, result rows, or
+fixture evidence fail with a concise message and a nonzero exit status.
 """
 
 from __future__ import annotations
@@ -29,6 +29,11 @@ JOBS = ("seeded-bug", "predict-output", "authority-escalation")
 JOB_ORDERS = tuple(itertools.permutations(JOBS))
 FIXED_DRY_RUN_TIME = "2000-01-01T00:00:00Z"
 CONFIRMATORY_SEED = "jacquard-readability-v0"
+HUMAN_ENROLLMENT_COUNT = 480
+HUMAN_SCHEDULE_VERSION = "readability-human-schedule-v0"
+MODEL_SCHEDULE_VERSION = "readability-model-schedule-v0"
+HUMAN_SCHEDULE_SHA256 = "c6421e9fff78b5fd7397e8c2aaeadee434c58c01c1d1d85aec224c4e2ec1a9be"
+MODEL_SCHEDULE_SHA256 = "ba972dfcd0738a7f3360f54179c95dc02140e84d21320474a9e410380f8071b5"
 
 
 class ProtocolError(RuntimeError):
@@ -259,6 +264,84 @@ def assignment(seed: str, ordinal: int) -> dict[str, Any]:
         "job_order": list(order),
         "assignment_seed_sha256": digest_text(seed),
     }
+
+
+def human_schedule() -> list[dict[str, Any]]:
+    """Return the frozen de-identified 480-enrollment assignment plan.
+
+    The rows contain enrollment ordinals and presentation assignments only.
+    They never contain participant, consent, contact, or compensation data.
+    """
+
+    rows: list[dict[str, Any]] = []
+    for ordinal in range(HUMAN_ENROLLMENT_COUNT):
+        row = assignment(CONFIRMATORY_SEED, ordinal)
+        rows.append(
+            {
+                "schedule_schema_version": HUMAN_SCHEDULE_VERSION,
+                "protocol_version": PROTOCOL_VERSION,
+                **row,
+            }
+        )
+    return rows
+
+
+def model_schedule(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return the frozen model trial plan without starting model sessions.
+
+    Every carrier/job/repetition appears exactly once.  Dispatch order is the
+    lexicographic order of SHA-256 over the documented UTF-8/NUL-separated key.
+    Each row carries the reviewed fixture, prompt, and runtime pins needed to
+    detect drift before a result can enter confirmatory evidence.
+    """
+
+    pinned = manifest["model_condition"]
+    repetitions = pinned["repetitions_per_condition"]
+    fixtures = fixture_index(manifest)
+    trials: list[tuple[str, str, int, str]] = []
+    for carrier in CARRIERS:
+        for job in JOBS:
+            for repetition in range(1, repetitions + 1):
+                key = (
+                    f"{CONFIRMATORY_SEED}\0carrier={carrier}"
+                    f"\0job={job}\0repetition={repetition}"
+                )
+                trials.append((carrier, job, repetition, digest_text(key)))
+    trials.sort(key=lambda trial: trial[3])
+
+    seed_digest = digest_text(CONFIRMATORY_SEED)
+    return [
+        {
+            "schedule_schema_version": MODEL_SCHEDULE_VERSION,
+            "protocol_version": PROTOCOL_VERSION,
+            "ordinal": ordinal,
+            "condition_id": f"{carrier}/{job}",
+            "carrier": carrier,
+            "job": job,
+            "repetition": repetition,
+            "dispatch_key_sha256": dispatch_key,
+            "assignment_seed_sha256": seed_digest,
+            "fixture_sha256": fixtures[job]["sources"][carrier]["sha256"],
+            "provider": pinned["provider"],
+            "model": pinned["model"],
+            "client": pinned["client"],
+            "prompt_sha256": pinned["prompt_sha256"],
+            "temperature": pinned["temperature"],
+            "tools": pinned["tools"],
+            "session_memory": pinned["session_memory"],
+            "fresh_session_required": True,
+        }
+        for ordinal, (carrier, job, repetition, dispatch_key) in enumerate(trials)
+    ]
+
+
+def encode_jsonl(rows: Iterable[dict[str, Any]]) -> str:
+    """Encode evidence rows as stable UTF-8-compatible JSON Lines."""
+
+    return "".join(
+        json.dumps(row, sort_keys=True, separators=(",", ":"), ensure_ascii=True) + "\n"
+        for row in rows
+    )
 
 
 def score_answer(fixture: dict[str, Any], answer_id: str) -> tuple[bool, str | None]:
@@ -546,6 +629,61 @@ def self_test(
         if set(orders) != set(JOB_ORDERS):
             raise ProtocolError(f"assignment block does not counterbalance all job orders for {carrier}")
 
+    humans = human_schedule()
+    if len(humans) != HUMAN_ENROLLMENT_COUNT:
+        raise ProtocolError("human schedule must contain exactly 480 enrollment ordinals")
+    if [row["ordinal"] for row in humans] != list(range(HUMAN_ENROLLMENT_COUNT)):
+        raise ProtocolError("human schedule ordinals must be contiguous and zero-based")
+    human_carrier_counts = {
+        carrier: sum(row["carrier"] == carrier for row in humans) for carrier in CARRIERS
+    }
+    if human_carrier_counts != {carrier: 160 for carrier in CARRIERS}:
+        raise ProtocolError("human schedule must assign exactly 160 enrollments per carrier")
+    for row in humans:
+        expected = assignment(CONFIRMATORY_SEED, row["ordinal"])
+        if any(row[key] != value for key, value in expected.items()):
+            raise ProtocolError("human schedule drifted from frozen seeded assignment")
+
+    pinned = manifest["model_condition"]
+    models = model_schedule(manifest)
+    expected_model_count = len(CARRIERS) * len(JOBS) * pinned["repetitions_per_condition"]
+    if len(models) != expected_model_count:
+        raise ProtocolError("model schedule must contain exactly 270 fresh trials")
+    if models != model_schedule(manifest):
+        raise ProtocolError("model schedule generation is not deterministic")
+    if [row["ordinal"] for row in models] != list(range(expected_model_count)):
+        raise ProtocolError("model schedule ordinals must be contiguous and zero-based")
+    if [row["dispatch_key_sha256"] for row in models] != sorted(
+        row["dispatch_key_sha256"] for row in models
+    ):
+        raise ProtocolError("model schedule is not ordered by its SHA-256 dispatch key")
+    if len({row["dispatch_key_sha256"] for row in models}) != expected_model_count:
+        raise ProtocolError("model schedule dispatch keys must be unique")
+    for carrier in CARRIERS:
+        for job in JOBS:
+            repetitions = {
+                row["repetition"]
+                for row in models
+                if row["carrier"] == carrier and row["job"] == job
+            }
+            if repetitions != set(range(1, pinned["repetitions_per_condition"] + 1)):
+                raise ProtocolError(f"model schedule is incomplete for {carrier}/{job}")
+    for row in models:
+        if (
+            not row["fresh_session_required"]
+            or row["tools"] != "disabled"
+            or row["session_memory"] != "disabled"
+        ):
+            raise ProtocolError("model schedule weakened fresh-session isolation")
+    if encode_jsonl(humans) != encode_jsonl(human_schedule()):
+        raise ProtocolError("human schedule JSONL is not byte-deterministic")
+    if encode_jsonl(models) != encode_jsonl(model_schedule(manifest)):
+        raise ProtocolError("model schedule JSONL is not byte-deterministic")
+    if digest_text(encode_jsonl(humans)) != HUMAN_SCHEDULE_SHA256:
+        raise ProtocolError("human schedule bytes drifted from the reviewed plan")
+    if digest_text(encode_jsonl(models)) != MODEL_SCHEDULE_SHA256:
+        raise ProtocolError("model schedule bytes drifted from the reviewed plan")
+
     for fixture in fixture_index(manifest).values():
         if score_answer(fixture, fixture["correct_answer"]) != (True, None):
             raise ProtocolError(f"correct scoring failed for {fixture['id']}")
@@ -727,6 +865,17 @@ def parse_args(argv: Iterable[str]) -> argparse.Namespace:
     assign.add_argument("--seed", required=True)
     assign.add_argument("--ordinal", type=int, required=True)
 
+    commands.add_parser(
+        "human-schedule",
+        help="emit the frozen 480-enrollment de-identified assignment plan",
+    )
+
+    model_plan = commands.add_parser(
+        "model-schedule",
+        help="emit the frozen 270-trial model plan without calling a model",
+    )
+    model_plan.add_argument("--manifest", type=Path, required=True)
+
     present = commands.add_parser("present", help="render one accessible plain-text trial")
     present.add_argument("--manifest", type=Path, required=True)
     present.add_argument("--carrier", choices=CARRIERS, required=True)
@@ -740,9 +889,15 @@ def main(argv: Iterable[str]) -> int:
         if args.command == "assign":
             print(json.dumps(assignment(args.seed, args.ordinal), sort_keys=True))
             return 0
+        if args.command == "human-schedule":
+            sys.stdout.write(encode_jsonl(human_schedule()))
+            return 0
 
         manifest = load_json(args.manifest)
         verify_manifest(manifest, args.manifest)
+        if args.command == "model-schedule":
+            sys.stdout.write(encode_jsonl(model_schedule(manifest)))
+            return 0
         if args.command == "present":
             sys.stdout.write(render_trial(manifest, args.manifest, args.carrier, args.job))
             return 0
