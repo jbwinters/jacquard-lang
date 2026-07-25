@@ -234,6 +234,7 @@ also emits E0817; consuming the captured resumption twice emits E0816.
 | W1201 | lowercase binding pattern shadows an in-scope constructor differing only in case | `match Up { | up -> ... }` |
 | W1202 | positional constructor pattern has more than four fields | `Snapshot(_, _, _, _, _)` |
 | W1203 | match scrutinee spans more than four source lines | manually bind the expression with `let`, then match on its name |
+| W1204 | shortest legal type/effect declaration header exceeds the canonical formatter width | shorten the declaration name or type-variable list |
 
 ## Explicit bootstrap export (E13xx)
 

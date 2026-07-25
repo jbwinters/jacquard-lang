@@ -307,6 +307,44 @@ let max_line_length text =
   String.split_on_char '\n' text
   |> List.fold_left (fun longest line -> max longest (String.length line)) 0
 
+let test_declaration_header_width_exception () =
+  let type_name = "T" ^ String.make 94 'a' in
+  let type_source = Printf.sprintf "type %s = | Make\n" type_name in
+  let formatted_type = format_surface "wide-type-header.jac" type_source in
+  Alcotest.(check int)
+    "indivisible type header exceeds width by its exact requirement" 102
+    (max_line_length formatted_type);
+  Alcotest.(check bool)
+    "type header stays on its one legal logical line" true
+    (contains (Printf.sprintf "type %s =\n  | Make\n" type_name) formatted_type);
+  Alcotest.(check string)
+    "wide type header formatting is idempotent" formatted_type
+    (format_surface "wide-type-header.jac" formatted_type);
+  Alcotest.(check (list string))
+    "wide type header formatting preserves canonical identity"
+    (surface_hashes "wide-type-header.jac" type_source)
+    (surface_hashes "wide-type-header.jac" formatted_type);
+  let effect_name = "E" ^ String.make 79 'a' in
+  let effect_source =
+    Printf.sprintf "multi effect %s where {\n  operation : () -> ()\n}\n" effect_name
+  in
+  let formatted_effect = format_surface "wide-effect-header.jac" effect_source in
+  Alcotest.(check int)
+    "indivisible effect header exceeds width by its exact requirement" 101
+    (max_line_length formatted_effect);
+  Alcotest.(check bool)
+    "effect header stays on its one legal logical line" true
+    (contains
+       (Printf.sprintf "multi effect %s where {\n  operation : () -> ()\n}\n" effect_name)
+       formatted_effect);
+  Alcotest.(check string)
+    "wide effect header formatting is idempotent" formatted_effect
+    (format_surface "wide-effect-header.jac" formatted_effect);
+  Alcotest.(check (list string))
+    "wide effect header formatting preserves canonical identity"
+    (surface_hashes "wide-effect-header.jac" effect_source)
+    (surface_hashes "wide-effect-header.jac" formatted_effect)
+
 let test_comma_list_exact_width_boundaries () =
   let cases =
     [
@@ -1408,6 +1446,8 @@ let suite =
       test_surface_formatter_corpus_stability;
     Alcotest.test_case "constructor standard width boundary" `Quick
       test_constructor_standard_width_boundary;
+    Alcotest.test_case "declaration header width exception" `Quick
+      test_declaration_header_width_exception;
     Alcotest.test_case "plain-text formatter contract" `Quick test_plain_text_formatter_contract;
     Alcotest.test_case "multiline comma layout contract" `Quick test_multiline_comma_layout_contract;
     Alcotest.test_case "multiline comma contexts" `Quick test_multiline_comma_contexts;

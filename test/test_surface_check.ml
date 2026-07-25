@@ -528,6 +528,60 @@ let test_large_match_scrutinee_lint_boundary () =
         (contains "Bind the expression with `let`" (Diag.next_step warning))
   | found -> Alcotest.failf "expected one scrutinee warning, got %d" (List.length found)
 
+let test_declaration_header_width_lint_boundary () =
+  let lint source =
+    let recovered = Surface_parse.recover_string ~file:"declaration-width.jac" source in
+    match Surface_parse.strict recovered with
+    | Error diagnostics -> fail_diags "declaration width lint parse" diagnostics
+    | Ok tops -> Surface_check.lint ~names:Resolve.empty_names tops
+  in
+  let warnings source = List.filter (fun d -> Diag.code_or_uncoded d = "W1204") (lint source) in
+  let type_name_at_boundary = "T" ^ String.make 92 'a' in
+  let type_name_over_boundary = "T" ^ String.make 93 'a' in
+  Alcotest.(check int)
+    "100-column type header is allowed" 0
+    (List.length (warnings (Printf.sprintf "type %s = | Make\n" type_name_at_boundary)));
+  (match warnings (Printf.sprintf "type %s = | Make\n" type_name_over_boundary) with
+  | [ warning ] ->
+      Alcotest.(check bool) "type overflow is warning" true (Diag.severity warning = Diag.Warning);
+      Alcotest.(check string)
+        "type overflow reports exact length"
+        (Printf.sprintf
+           "The shortest legal header for `%s` is 101 columns, but the canonical formatter width \
+            is 100; `.jac` requires this header to remain on one logical line."
+           type_name_over_boundary)
+        (Diag.cause warning);
+      Alcotest.(check (option string))
+        "type warning selects only the declaration name" (Some "declaration-width.jac:1:6-100")
+        (Option.map Span.to_string (Diag.span warning));
+      Alcotest.(check string)
+        "type overflow gives an actionable repair"
+        "Shorten the declaration name or its type-variable list." (Diag.next_step warning)
+  | found -> Alcotest.failf "expected one type-header warning, got %d" (List.length found));
+  let effect_name_at_boundary = "E" ^ String.make 78 'a' in
+  let effect_name_over_boundary = "E" ^ String.make 79 'a' in
+  let effect_source name =
+    Printf.sprintf "multi effect %s where {\n  operation : () -> ()\n}\n" name
+  in
+  Alcotest.(check int)
+    "100-column effect header is allowed" 0
+    (List.length (warnings (effect_source effect_name_at_boundary)));
+  (match warnings (effect_source effect_name_over_boundary) with
+  | [ warning ] ->
+      Alcotest.(check bool) "effect overflow is warning" true (Diag.severity warning = Diag.Warning);
+      Alcotest.(check (option string))
+        "effect warning selects only the declaration name" (Some "declaration-width.jac:1:14-94")
+        (Option.map Span.to_string (Diag.span warning))
+  | found -> Alcotest.failf "expected one effect-header warning, got %d" (List.length found));
+  let long_var = "a" ^ String.make 91 'a' in
+  match warnings (Printf.sprintf "type T %s = | Make\n" long_var) with
+  | [ warning ] ->
+      Alcotest.(check (option string))
+        "type-variable overflow still selects the declaration name"
+        (Some "declaration-width.jac:1:6-7")
+        (Option.map Span.to_string (Diag.span warning))
+  | found -> Alcotest.failf "expected one type-variable warning, got %d" (List.length found)
+
 let test_warning_exact_order_nested_raw_and_redundancy () =
   let source =
     "match True { | _ -> 0 | _ -> 1 }\n\
@@ -711,6 +765,8 @@ let suite =
       test_wide_pattern_boundary_and_coexistence;
     Alcotest.test_case "large match scrutinee lint boundary" `Quick
       test_large_match_scrutinee_lint_boundary;
+    Alcotest.test_case "declaration header width lint boundary" `Quick
+      test_declaration_header_width_lint_boundary;
     Alcotest.test_case "warning exact order nested raw and redundancy" `Quick
       test_warning_exact_order_nested_raw_and_redundancy;
     Alcotest.test_case "cross-island terms" `Quick test_cross_island_terms;

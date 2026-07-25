@@ -9,7 +9,8 @@ type lookup = Surface_name.kind -> Hash.t -> string option
 (** The canonical formatter margin. A caller may request another rendering width for an editor or
     diagnostic view, but the command-line formatter and calls that omit [width] use exactly 100
     columns. Breakable structure stays within the margin and a group that fits exactly remains
-    compact. An indivisible UTF-8 token or preserved comment may exceed it. *)
+    compact. An indivisible UTF-8 token, preserved comment, or syntactically indivisible type/effect
+    declaration header may exceed it. *)
 let default_width = 100
 
 exception Bug_unsupported_surface_form

@@ -85,6 +85,19 @@ manual hoist. The warning is emitted on stderr and formatting remains successful
   $ head -1 large-formatted.jac
   match add(1, 2, 3) {
 
+Declaration headers have no legal continuation point before `=` or `where {`. The formatter keeps
+that grammar-valid line intact, and W1204 points at the declaration name when the shortest header
+must exceed the canonical width.
+
+  $ long_type_name=$(printf 'T%093d' 0 | tr '0' a)
+  $ printf 'type %s = | Make\n' "$long_type_name" > wide-declaration.jac
+  $ jac fmt wide-declaration.jac > wide-declaration-formatted.jac 2> wide-declaration.err
+  $ grep 'warning\[W1204\]' wide-declaration.err
+  wide-declaration.jac:1:6-100: warning[W1204]: Declaration header exceeds the canonical formatter width
+  $ head -1 wide-declaration-formatted.jac | awk '{ print length }'
+  101
+  $ jac fmt wide-declaration-formatted.jac 2> /dev/null | cmp wide-declaration-formatted.jac -
+
 DX.3 keeps realistic nested quotes, matches, handlers, conditionals, and blocks stable under
 formatting and canonical identity. Explicit operation namespace intent survives the formatter.
 

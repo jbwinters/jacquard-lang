@@ -200,6 +200,58 @@ let warning_large_scrutinee (subject : Surface_ast.expr) lines =
          lines large_match_scrutinee_lines)
     ~next_step:"Bind the expression with `let`, then match on that name." ~contrast:None ()
 
+let declaration_header_name_meta (top : Surface_ast.top) =
+  let name_meta = Meta.surface_container "declaration-name" top.meta in
+  if Meta.is_empty name_meta then top.meta else name_meta
+
+let rendered_names_length kind names =
+  List.fold_left
+    (fun length name -> length + 1 + String.length (Surface_name.render kind name))
+    0 names
+
+let type_header_length name vars =
+  String.length "type "
+  + String.length (Surface_name.render Surface_name.Type name)
+  + rendered_names_length Surface_name.Tvar vars
+  + String.length " ="
+
+let uniform_effect_mode (operations : Surface_ast.operation list) =
+  match operations with
+  | { Surface_ast.mode = Some mode; _ } :: rest
+    when List.for_all (fun operation -> operation.Surface_ast.mode = Some mode) rest ->
+      Some mode
+  | _ -> None
+
+let effect_header_length name vars operations =
+  let prefix =
+    match uniform_effect_mode operations with
+    | Some Kernel.Once -> "once effect "
+    | Some Kernel.Multi -> "multi effect "
+    | None -> "effect "
+  in
+  String.length prefix
+  + String.length (Surface_name.render Surface_name.Effect name)
+  + rendered_names_length Surface_name.Tvar vars
+  + String.length " where {"
+
+let warning_long_declaration_header (top : Surface_ast.top) kind name length =
+  let rendered_name = Surface_name.render kind name in
+  Diag.warning
+    ?span:(Meta.span (declaration_header_name_meta top))
+    ~domain:Surface ~code:"W1204"
+    ~summary:"Declaration header exceeds the canonical formatter width"
+    ~cause:
+      (Printf.sprintf
+         "The shortest legal header for `%s` is %d columns, but the canonical formatter width is \
+          %d; `.jac` requires this header to remain on one logical line."
+         rendered_name length Surface_print.default_width)
+    ~next_step:"Shorten the declaration name or its type-variable list." ~contrast:None ()
+
+let long_declaration_header_warning top kind name length =
+  if length > Surface_print.default_width then
+    [ warning_long_declaration_header top kind name length ]
+  else []
+
 let span_line_count meta =
   Option.map (fun span -> span.Span.end_pos.line - span.Span.start_pos.line + 1) (Meta.span meta)
 
@@ -278,9 +330,12 @@ let lint_top names constructors (top : Surface_ast.top) =
   | Surface_ast.Definition { params; value; _ } ->
       List.concat_map (lint_pat names constructors) params @ lint_expr names constructors value
   | Surface_ast.TopExpr expression -> lint_expr names constructors expression
-  | Surface_ast.Signature _ | Surface_ast.TypeDecl _ | Surface_ast.EffectDecl _
-  | Surface_ast.RawTop _ | Surface_ast.TopHole _ ->
-      []
+  | Surface_ast.TypeDecl { name; vars; _ } ->
+      long_declaration_header_warning top Surface_name.Type name (type_header_length name vars)
+  | Surface_ast.EffectDecl { name; vars; operations } ->
+      long_declaration_header_warning top Surface_name.Effect name
+        (effect_header_length name vars operations)
+  | Surface_ast.Signature _ | Surface_ast.RawTop _ | Surface_ast.TopHole _ -> []
 
 let lint_file names tops =
   let rec loop constructors diagnostics = function

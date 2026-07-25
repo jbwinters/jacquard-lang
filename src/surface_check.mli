@@ -11,7 +11,9 @@ val large_match_scrutinee_lines : int
 
 val lint : names:Resolve.names -> Surface_ast.top list -> Diag.t list
 (** [lint ~names tops] returns source-ordered surface review warnings without lowering, rewriting,
-    resolving, or typechecking. [names] is consulted only for namespace-aware pattern warnings. *)
+    resolving, or typechecking. [names] is consulted only for namespace-aware pattern warnings.
+    Declaration-header warnings use the canonical formatter width and the parser-retained
+    declaration-name span. *)
 
 val analyze : names:Resolve.names -> Check.ctx -> Surface_ast.recovered -> report
 (** [analyze ~names ctx recovered] checks a recovered surface tree for editor feedback. Parser holes
