@@ -57,7 +57,7 @@ let test_one_page_grammar_snapshot () =
   Alcotest.(check bool) "L7 grammar stays within 100 nonblank lines" true (List.length lines <= 100);
   Alcotest.(check string)
     "L7 grammar snapshot (review docs/surface-syntax.md before updating)"
-    "e564dd92d4b632d4cd8b724ba8bf830ba2489527387c74e93e722ac7b808ffc8"
+    "a813f6829812989a1da38508f7ffe0b30c347d021852f9156fedac11da08545b"
     (Hash.to_hex (Hash.of_string grammar))
 
 let format_surface ?width path source =
@@ -149,6 +149,152 @@ let test_plain_text_formatter_contract () =
     "formatting does not change canonical identity"
     (surface_hashes "plain-text.jac" source)
     (surface_hashes "plain-text.jac" once)
+
+let test_multiline_comma_layout_contract () =
+  let source =
+    {|
+("first-long-item", "second-long-item", "third-long-item",)
+(1, -- first item
+ 2,)
+f(first-long-argument, -- after-final-comma
+)
+(first-long-item, -- after-final-tuple-comma
+)
+[first-long-item, -- after-final-list-comma
+]
+|}
+  in
+  let compact = format_surface ~width:100 "comma-layout.jac" source in
+  let wrapped = format_surface ~width:24 "comma-layout.jac" source in
+  Alcotest.(check bool)
+    "compact multi-item tuple has no final comma" true
+    (contains {|("first-long-item", "second-long-item", "third-long-item")|} compact);
+  Alcotest.(check bool)
+    "wrapped tuple is one item per line with a final comma" true
+    (contains {|(
+  "first-long-item",
+  "second-long-item",
+  "third-long-item",
+)|} wrapped);
+  Alcotest.(check bool) "item comment survives" true (contains "-- first item" wrapped);
+  List.iter
+    (fun (label, expected) ->
+      Alcotest.(check bool)
+        (label ^ " keeps the close aligned after final-comma trivia")
+        true (contains expected wrapped))
+    [
+      ("call", {|f(
+  first-long-argument,
+  -- after-final-comma
+)|});
+      ("tuple", {|(
+  first-long-item,
+  -- after-final-tuple-comma
+)|});
+      ("list", {|[
+  first-long-item,
+  -- after-final-list-comma
+]|});
+    ];
+  Alcotest.(check string)
+    "multiline comma layout is idempotent" wrapped
+    (format_surface ~width:24 "comma-layout.jac" wrapped);
+  let identity_source = "(\"first-long-item\", \"second-long-item\", \"third-long-item\",)\n" in
+  let identity_formatted = format_surface ~width:24 "comma-identity.jac" identity_source in
+  Alcotest.(check (list string))
+    "accepted and emitted commas do not change identity"
+    (surface_hashes "comma-identity.jac" identity_source)
+    (surface_hashes "comma-identity.jac" identity_formatted)
+
+let test_multiline_comma_contexts () =
+  let source =
+    {|
+very-long-call-name(first-argument-with-a-very-long-name, second-argument-with-a-very-long-name, third-argument-with-a-very-long-name,)
+
+[first-list-item-with-a-very-long-name, second-list-item-with-a-very-long-name, third-list-item-with-a-very-long-name,]
+
+very-long-function-name(first-parameter-with-a-very-long-name, second-parameter-with-a-very-long-name, third-parameter-with-a-very-long-name, -- final function parameter
+) = first-parameter-with-a-very-long-name
+
+match subject {
+  | VeryLongConstructor(first-pattern-with-a-very-long-name, second-pattern-with-a-very-long-name, third-pattern-with-a-very-long-name, -- final pattern argument
+    ) -> first-pattern-with-a-very-long-name
+}
+
+type LongFields = | MakeLongFields(first-field-with-a-very-long-name: FirstFieldTypeWithAVeryLongName, second-field-with-a-very-long-name: SecondFieldTypeWithAVeryLongName, third-field-with-a-very-long-name: ThirdFieldTypeWithAVeryLongName, -- final labeled field
+)
+
+multi effect LongOperation where {
+  very-long-operation-name : (FirstParameterTypeWithAVeryLongName, SecondParameterTypeWithAVeryLongName, ThirdParameterTypeWithAVeryLongName, -- final operation parameter
+  ) -> ()
+}
+|}
+  in
+  let formatted = format_surface "comma-contexts.jac" source in
+  let expected_contexts =
+    [
+      ( "call arguments",
+        {|very-long-call-name(
+  first-argument-with-a-very-long-name,
+  second-argument-with-a-very-long-name,
+  third-argument-with-a-very-long-name,
+)|}
+      );
+      ( "list items",
+        {|
+[
+  first-list-item-with-a-very-long-name,
+  second-list-item-with-a-very-long-name,
+  third-list-item-with-a-very-long-name,
+]|}
+      );
+      ( "function parameters",
+        {|
+very-long-function-name(
+  first-parameter-with-a-very-long-name,
+  second-parameter-with-a-very-long-name,
+  third-parameter-with-a-very-long-name,
+  -- final function parameter
+) =|}
+      );
+      ( "constructor-pattern arguments",
+        {|
+  | VeryLongConstructor(
+      first-pattern-with-a-very-long-name,
+      second-pattern-with-a-very-long-name,
+      third-pattern-with-a-very-long-name,
+      -- final pattern argument
+    ) ->|}
+      );
+      ( "labeled constructor fields",
+        {|
+  | MakeLongFields(
+      first-field-with-a-very-long-name: FirstFieldTypeWithAVeryLongName,
+      second-field-with-a-very-long-name: SecondFieldTypeWithAVeryLongName,
+      third-field-with-a-very-long-name: ThirdFieldTypeWithAVeryLongName,
+      -- final labeled field
+    )|}
+      );
+      ( "effect-operation parameters",
+        {|
+    (
+      FirstParameterTypeWithAVeryLongName,
+      SecondParameterTypeWithAVeryLongName,
+      ThirdParameterTypeWithAVeryLongName,
+      -- final operation parameter
+    ) ->|}
+      );
+    ]
+  in
+  List.iter
+    (fun (label, expected) ->
+      Alcotest.(check bool)
+        (label ^ " uses vertical final-comma layout")
+        true (contains expected formatted))
+    expected_contexts;
+  Alcotest.(check string)
+    "all comma-list contexts are idempotent" formatted
+    (format_surface "comma-contexts.jac" formatted)
 
 let trim = String.trim
 
@@ -1142,6 +1288,8 @@ let suite =
     Alcotest.test_case "constructor standard width boundary" `Quick
       test_constructor_standard_width_boundary;
     Alcotest.test_case "plain-text formatter contract" `Quick test_plain_text_formatter_contract;
+    Alcotest.test_case "multiline comma layout contract" `Quick test_multiline_comma_layout_contract;
+    Alcotest.test_case "multiline comma contexts" `Quick test_multiline_comma_contexts;
     Alcotest.test_case "release tables stop before later subheadings" `Quick
       test_table_rows_stop_at_later_subheading;
     Alcotest.test_case "structured release decision" `Quick assert_release_valid;

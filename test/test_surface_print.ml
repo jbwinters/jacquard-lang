@@ -158,7 +158,8 @@ let test_wrapping_is_stable () =
     "very-long-function-name(\n\
     \  \"first-long-argument\",\n\
     \  \"second-long-argument\",\n\
-    \  \"third-long-argument\")"
+    \  \"third-long-argument\",\n\
+     )"
     once
 
 let test_patterns_and_match_arms () =
@@ -175,7 +176,7 @@ let test_patterns_and_match_arms () =
   | x -> x
   | "ok" -> 1
   | Some(value) -> value
-  | (only) -> only
+  | (only,) -> only
   | (left, _) -> left
   | (first, second) as whole -> whole
 }|}

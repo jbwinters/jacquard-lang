@@ -112,6 +112,45 @@ let pp_sep sep pp fmt items =
       pp fmt item)
     items
 
+(* In an [hv] box every break is taken together. The opening break therefore puts the first item
+   on its own line when the group does not fit, the separator breaks put every later item on its
+   own line, and the final custom break adds a comma only in that vertical rendering. When comments
+   follow the final comma, this helper owns their two breaks so the close still returns to the
+   delimiter's column without an empty line. Singleton tuples opt into a comma in both layouts
+   because the comma carries their arity. *)
+let pp_comma_list ?(singleton = false) ?(break_padding = "") ?(inner_metas = []) context pp fmt
+    items =
+  let inner_comments =
+    if context.trivia then List.concat_map (Meta.comment_texts Meta.key_trivia_inner) inner_metas
+    else []
+  in
+  if items <> [] then begin
+    Format.pp_print_custom_break fmt ~fits:("", 0, "") ~breaks:("", 0, break_padding);
+    let last = List.length items - 1 in
+    List.iteri
+      (fun index item ->
+        pp fmt item;
+        if index <> last then
+          Format.pp_print_custom_break fmt ~fits:(",", 1, "") ~breaks:(",", 0, break_padding))
+      items
+  end;
+  match inner_comments with
+  | [] ->
+      if items <> [] then
+        Format.pp_print_custom_break fmt
+          ~fits:((if singleton then "," else ""), 0, "")
+          ~breaks:(",", -2, break_padding)
+  | comments ->
+      if items <> [] then Format.pp_print_char fmt ',';
+      List.iter
+        (fun comment ->
+          Format.pp_print_break fmt 1000 0;
+          Format.pp_print_string fmt break_padding;
+          Format.pp_print_string fmt comment)
+        comments;
+      Format.pp_print_break fmt 1000 (-2);
+      Format.pp_print_string fmt break_padding
+
 let kind_of_refkind = function
   | Kernel.Term -> Surface_name.Term
   | Kernel.Con -> Surface_name.Con
@@ -167,23 +206,28 @@ let rec pp_pat context lookup fmt (pat : Kernel.pat) =
   | Kernel.PVar name -> pp_named Surface_name.Term fmt name
   | Kernel.PLit lit -> pp_lit fmt lit
   | Kernel.PCon (con, args) ->
+      Format.fprintf fmt "@[<hv 2>";
       pp_gref lookup Surface_name.Con pat.meta fmt con;
       if args <> [] then begin
-        Format.fprintf fmt "(@[<hov>%a" (pp_sep "," (pp_pat context lookup)) args;
-        pp_inner context pat.meta fmt;
-        Format.fprintf fmt "@])"
-      end
+        Format.fprintf fmt "(%a"
+          (pp_comma_list ~inner_metas:[ pat.meta ] context (pp_pat context lookup))
+          args;
+        Format.fprintf fmt ")"
+      end;
+      Format.fprintf fmt "@]"
   | Kernel.PTuple items -> (
       match items with
       | [] -> Format.pp_print_string fmt "()"
       | [ item ] ->
-          Format.fprintf fmt "(@[<hov>%a" (pp_pat context lookup) item;
-          pp_inner context pat.meta fmt;
-          Format.fprintf fmt "@])"
+          Format.fprintf fmt "@[<hv 2>(%a"
+            (pp_comma_list ~singleton:true ~inner_metas:[ pat.meta ] context (pp_pat context lookup))
+            [ item ];
+          Format.fprintf fmt ")@]"
       | _ ->
-          Format.fprintf fmt "(@[<hov>%a" (pp_sep "," (pp_pat context lookup)) items;
-          pp_inner context pat.meta fmt;
-          Format.fprintf fmt "@])")
+          Format.fprintf fmt "@[<hv 2>(%a"
+            (pp_comma_list ~inner_metas:[ pat.meta ] context (pp_pat context lookup))
+            items;
+          Format.fprintf fmt ")@]")
   | Kernel.PAs (name, inner) -> (
       match inner.it with
       | Kernel.PAs _ -> raise Bug_unsupported_surface_form
@@ -219,7 +263,16 @@ and pp_row context lookup fmt (row : Kernel.row) =
         if row.effects = [] then opening
         else indexed "row-effect" (List.length row.effects - 1) row.wmeta
       in
-      if row.effects <> [] && not (has_line_trailing context preceding) then Format.fprintf fmt "@ ";
+      if row.effects <> [] then begin
+        let trailing_comma = indexed "row-comma" (List.length row.effects - 1) row.wmeta in
+        if context.trivia && meta_has_comments trailing_comma then begin
+          pp_leading context trailing_comma fmt;
+          pp_inner context trailing_comma fmt;
+          pp_line_trailing context trailing_comma fmt;
+          if not (has_line_trailing context trailing_comma) then Format.fprintf fmt "@ "
+        end
+        else if not (has_line_trailing context preceding) then Format.fprintf fmt "@ "
+      end;
       let bar_meta = owned "row-bar" row.wmeta in
       pp_owned_token context bar_meta "|" fmt;
       if not (has_line_trailing context bar_meta) then Format.pp_print_char fmt ' ';
@@ -234,7 +287,20 @@ and pp_row context lookup fmt (row : Kernel.row) =
     | None when row.effects <> [] -> indexed "row-effect" (List.length row.effects - 1) row.wmeta
     | None -> opening
   in
-  if not (has_line_trailing context preceding) then Format.fprintf fmt "@;<0 -2>";
+  if not (has_line_trailing context preceding) then
+    begin match (row.effects, row.rvar) with
+    | _ :: _, None ->
+        let trailing_comma = indexed "row-comma" (List.length row.effects - 1) row.wmeta in
+        if context.trivia && meta_has_comments trailing_comma then begin
+          pp_leading context trailing_comma fmt;
+          pp_inner context trailing_comma fmt;
+          Format.pp_print_char fmt ',';
+          pp_trailing context trailing_comma fmt;
+          Format.pp_print_break fmt 1000 (-2)
+        end
+        else Format.pp_print_custom_break fmt ~fits:("", 0, "") ~breaks:(",", -2, "")
+    | _, _ -> Format.fprintf fmt "@;<0 -2>"
+    end;
   Format.fprintf fmt "@]";
   pp_owned_token context closing "}" fmt;
   pp_trailing context row.wmeta fmt
@@ -252,9 +318,10 @@ and pp_ty context lookup fmt (ty : Kernel.ty) =
       let params_meta = Meta.surface_container "params" ty.meta in
       Format.fprintf fmt "@[<hov 2>";
       pp_leading context params_meta fmt;
-      Format.fprintf fmt "(%a" (pp_sep "," (pp_ty context lookup)) params;
-      pp_inner context params_meta fmt;
-      Format.fprintf fmt ")";
+      Format.fprintf fmt "(@[<hv 1>%a"
+        (pp_comma_list ~inner_metas:[ params_meta ] context (pp_ty context lookup))
+        params;
+      Format.fprintf fmt "@])";
       pp_trailing context params_meta fmt;
       Format.fprintf fmt " %a" (pp_row context lookup) row;
       if not (has_line_trailing context (owned "row-close" row.wmeta)) then Format.fprintf fmt "@ ";
@@ -266,13 +333,15 @@ and pp_ty context lookup fmt (ty : Kernel.ty) =
           pp_inner context ty.meta fmt;
           Format.pp_print_char fmt ')'
       | [ item ] ->
-          Format.fprintf fmt "(@[<hov>%a," (pp_ty context lookup) item;
-          pp_inner context ty.meta fmt;
-          Format.fprintf fmt "@])"
+          Format.fprintf fmt "@[<hv 2>(%a"
+            (pp_comma_list ~singleton:true ~inner_metas:[ ty.meta ] context (pp_ty context lookup))
+            [ item ];
+          Format.fprintf fmt ")@]"
       | _ ->
-          Format.fprintf fmt "(@[<hov>%a" (pp_sep "," (pp_ty context lookup)) items;
-          pp_inner context ty.meta fmt;
-          Format.fprintf fmt "@])")
+          Format.fprintf fmt "@[<hv 2>(%a"
+            (pp_comma_list ~inner_metas:[ ty.meta ] context (pp_ty context lookup))
+            items;
+          Format.fprintf fmt ")@]")
   | Kernel.TForall (tvars, rvars, body) ->
       let forall_meta = Meta.surface_container "forall" ty.meta in
       pp_leading context forall_meta fmt;
@@ -443,31 +512,34 @@ and pp_kernel_expr context lookup fmt (expr : Kernel.expr) =
       | None -> Format.fprintf fmt "#group[%d]" index)
   | Kernel.Lam (params, body) ->
       let params_meta = Meta.surface_container "params" expr.meta in
-      Format.fprintf fmt "@[<hov 2>fn ";
+      Format.fprintf fmt "@[<hv 2>fn ";
       pp_leading context params_meta fmt;
-      Format.fprintf fmt "(%a" (pp_sep "," (pp_pat context lookup)) params;
-      pp_inner context params_meta fmt;
+      Format.fprintf fmt "(%a"
+        (pp_comma_list ~inner_metas:[ params_meta ] context (pp_pat context lookup))
+        params;
       Format.fprintf fmt ")";
       pp_trailing context params_meta fmt;
       Format.fprintf fmt " ->@ %a@]" (pp_expr context lookup) body
   | Kernel.App (fn, args) ->
-      Format.fprintf fmt "@[<hov 2>%a(@,%a" (pp_expr_atom context lookup) fn
-        (pp_sep "," (pp_expr context lookup))
+      Format.fprintf fmt "@[<hv 2>%a(%a" (pp_expr_atom context lookup) fn
+        (pp_comma_list ~inner_metas:[ expr.meta ] context (pp_expr context lookup))
         args;
-      pp_inner context expr.meta fmt;
       Format.fprintf fmt ")@]"
   | Kernel.Let _ -> pp_block context lookup fmt expr
   | Kernel.Tuple items -> (
       match items with
       | [] -> Format.pp_print_string fmt "()"
       | [ item ] ->
-          Format.fprintf fmt "(@[<hov>%a," (pp_expr context lookup) item;
-          pp_inner context expr.meta fmt;
-          Format.fprintf fmt "@])"
+          Format.fprintf fmt "@[<hv 2>(%a"
+            (pp_comma_list ~singleton:true ~inner_metas:[ expr.meta ] context
+               (pp_expr context lookup))
+            [ item ];
+          Format.fprintf fmt ")@]"
       | _ ->
-          Format.fprintf fmt "(@[<hov>%a" (pp_sep "," (pp_expr context lookup)) items;
-          pp_inner context expr.meta fmt;
-          Format.fprintf fmt "@])")
+          Format.fprintf fmt "@[<hv 2>(%a"
+            (pp_comma_list ~inner_metas:[ expr.meta ] context (pp_expr context lookup))
+            items;
+          Format.fprintf fmt ")@]")
   | Kernel.Ann (subject, ty) ->
       Format.fprintf fmt "@[<hov 2>(%a :@ %a" (pp_expr context lookup) subject
         (pp_ty context lookup) ty;
@@ -549,10 +621,10 @@ and list_items expr =
 and pp_list context lookup meta fmt items =
   let container_meta = Meta.surface_container "list" meta in
   pp_leading context container_meta fmt;
-  Format.fprintf fmt "[@[<hov>%a" (pp_sep "," (pp_expr context lookup)) items;
-  pp_inner context meta fmt;
-  pp_inner context container_meta fmt;
-  Format.fprintf fmt "@]]";
+  Format.fprintf fmt "@[<hv 2>[%a"
+    (pp_comma_list ~inner_metas:[ meta; container_meta ] context (pp_expr context lookup))
+    items;
+  Format.fprintf fmt "]@]";
   pp_trailing context container_meta fmt
 
 and pp_pipe context lookup meta fmt left fn args =
@@ -572,12 +644,10 @@ and pp_pipe context lookup meta fmt left fn args =
       pp_inner context meta fmt;
       Format.fprintf fmt "@]"
   | _ ->
-      Format.fprintf fmt "@[<hov 2>%a@ %a%a(@,%a" (pp_pipe_left context lookup) left pp_operator ()
+      Format.fprintf fmt "@[<hv 2>%a@ %a%a(%a" (pp_pipe_left context lookup) left pp_operator ()
         (pp_expr_atom context lookup) fn
-        (pp_sep "," (pp_expr context lookup))
+        (pp_comma_list ~inner_metas:[ rhs_meta; meta ] context (pp_expr context lookup))
         args;
-      pp_inner context rhs_meta fmt;
-      pp_inner context meta fmt;
       Format.fprintf fmt ")";
       pp_trailing context rhs_meta fmt;
       Format.fprintf fmt "@]"
@@ -632,10 +702,11 @@ and pp_sequence_item context lookup fmt (meta, isrec, binder, value) =
       pp_trailing context meta fmt
   | true, Kernel.PVar name, Kernel.Lam (params, body) ->
       let params_meta = Meta.surface_container "params" value.meta in
-      Format.fprintf fmt "@[<hov 2>let rec %a" (pp_named Surface_name.Term) name;
+      Format.fprintf fmt "@[<hv 2>let rec %a" (pp_named Surface_name.Term) name;
       pp_leading context params_meta fmt;
-      Format.fprintf fmt "(%a" (pp_sep "," (pp_pat context lookup)) params;
-      pp_inner context params_meta fmt;
+      Format.fprintf fmt "(%a"
+        (pp_comma_list ~inner_metas:[ params_meta ] context (pp_pat context lookup))
+        params;
       Format.fprintf fmt ")";
       pp_trailing context params_meta fmt;
       Format.fprintf fmt " =@ %a@]" (pp_expr context lookup) body;
@@ -714,10 +785,11 @@ and pp_handle context lookup meta fmt body ret ops =
   let pp_op fmt (clause : Kernel.opclause) =
     let params_meta = Meta.surface_container "params" clause.ometa in
     pp_leading context clause.ometa fmt;
-    Format.fprintf fmt "@[<hov 2>| %a" (pp_gref lookup Surface_name.Op clause.ometa) clause.op;
+    Format.fprintf fmt "@[<hv 2>| %a" (pp_gref lookup Surface_name.Op clause.ometa) clause.op;
     pp_leading context params_meta fmt;
-    Format.fprintf fmt "(%a" (pp_sep "," (pp_pat context lookup)) clause.params;
-    pp_inner context params_meta fmt;
+    Format.fprintf fmt "(%a"
+      (pp_comma_list ~inner_metas:[ params_meta ] context (pp_pat context lookup))
+      clause.params;
     Format.fprintf fmt ")";
     pp_trailing context params_meta fmt;
     Format.fprintf fmt " resume %a ->@ %a@]" pp_resume clause.resume (pp_arm_body context lookup)
@@ -814,10 +886,11 @@ let pp_binding context lookup fmt (binding : Kernel.binding) =
           if Meta.is_empty params_meta then Meta.surface_container "params" binding.value.meta
           else params_meta
         in
-        Format.fprintf fmt "@[<hov 2>%a" (pp_named Surface_name.Term) binding.bname;
+        Format.fprintf fmt "@[<hv 2>%a" (pp_named Surface_name.Term) binding.bname;
         pp_leading context params_meta fmt;
-        Format.fprintf fmt "(%a" (pp_sep "," (pp_pat context lookup)) params;
-        pp_inner context params_meta fmt;
+        Format.fprintf fmt "(%a"
+          (pp_comma_list ~inner_metas:[ params_meta ] context (pp_pat context lookup))
+          params;
         Format.fprintf fmt ")";
         pp_trailing context params_meta fmt;
         Format.fprintf fmt " =@ %a@]" (pp_expr context lookup) body
@@ -849,15 +922,16 @@ let pp_field context lookup fmt (field : Kernel.field) =
 
 let pp_constructor ?(leading = true) context lookup fmt (constructor : Kernel.conspec) =
   if leading then pp_leading context constructor.kmeta fmt;
-  Format.fprintf fmt "@[<hov>";
+  Format.fprintf fmt "@[<hv 2>";
   pp_named Surface_name.Con fmt constructor.con_name;
   if constructor.fields <> [] then
     if List.exists (fun field -> Option.is_some field.Kernel.label) constructor.fields then begin
       let params_meta = Meta.surface_container "params" constructor.kmeta in
       pp_leading context params_meta fmt;
-      Format.fprintf fmt "(@[<hov>%a" (pp_sep "," (pp_field context lookup)) constructor.fields;
-      pp_inner context params_meta fmt;
-      Format.fprintf fmt "@])"
+      Format.fprintf fmt "(%a"
+        (pp_comma_list ~inner_metas:[ params_meta ] context (pp_field context lookup))
+        constructor.fields;
+      Format.fprintf fmt ")"
     end
     else
       List.iter
@@ -875,10 +949,13 @@ let pp_operation ?inherited_mode context lookup fmt (operation : Kernel.opspec) 
   | Some mode when mode = operation.op_mode -> ()
   | Some _ -> raise Bug_unsupported_surface_form
   | None -> Format.fprintf fmt "%s " (mode_name operation.op_mode));
-  Format.fprintf fmt "@[<hov 2>%a :@ " (pp_named Surface_name.Op) operation.op_name;
+  Format.fprintf fmt "@[<hv 2>%a :@ " (pp_named Surface_name.Op) operation.op_name;
   pp_leading context params_meta fmt;
-  Format.fprintf fmt "(%a" (pp_sep "," (pp_ty context lookup)) operation.op_params;
-  pp_inner context params_meta fmt;
+  (* The signature box may already have broken after [:]. Padding the nested custom breaks keeps
+     parameter types two columns inside [(], while [)] returns to the opening delimiter's column. *)
+  Format.fprintf fmt "(%a"
+    (pp_comma_list ~break_padding:"  " ~inner_metas:[ params_meta ] context (pp_ty context lookup))
+    operation.op_params;
   Format.fprintf fmt ")";
   pp_trailing context params_meta fmt;
   Format.fprintf fmt " ->@ %a@]" (pp_ty context lookup) operation.op_result;
@@ -1049,10 +1126,10 @@ let pp_op_fragment context lookup fmt (clause : Kernel.opclause) =
     if String.equal name "_" then Format.pp_print_string fmt "_"
     else pp_named Surface_name.Term fmt name
   in
-  Format.fprintf fmt "@[<hov 2>| %a(%a) resume %a ->@ %a@]"
+  Format.fprintf fmt "@[<hv 2>| %a(%a) resume %a ->@ %a@]"
     (pp_gref lookup Surface_name.Op clause.ometa)
     clause.op
-    (pp_sep "," (pp_pat context lookup))
+    (pp_comma_list context (pp_pat context lookup))
     clause.params pp_resume clause.resume (pp_arm_body context lookup) clause.obody
 
 let fragment_error form =
