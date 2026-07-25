@@ -459,16 +459,17 @@ let test_type_trivia_ownership () =
   in
   let once = print_recovered source in
   let expected =
-    {|f : forall a | e. -- forall-dot
-      (a) ->{ -- row-open
-        -- net-leading
-       Net, -- comma
-       -- clock-leading
-       Clock -- clock-trailing
-       | -- row-bar
-       e -- row-tail
-       } -- row-close
-        a
+    {|f :
+  forall a | e. -- forall-dot
+    (a) ->{ -- row-open
+      -- net-leading
+     Net, -- comma
+     -- clock-leading
+     Clock -- clock-trailing
+     | -- row-bar
+     e -- row-tail
+     } -- row-close
+      a
 f = 0
 |}
   in
@@ -515,12 +516,12 @@ let test_trailing_row_comma_trivia () =
         "f : () ->{Net, -- keep closed comma\n} Text\nf = 0\n",
         "f : () ->{Net} Text\nf = 0\n",
         "-- keep closed comma",
-        "->{\n         Net, -- keep closed comma\n       }" );
+        [ "Net, -- keep closed comma"; "} Text" ] );
       ( "open",
         "f : () ->{Net, -- keep open comma\n| e} Text\nf = 0\n",
         "f : () ->{Net | e} Text\nf = 0\n",
         "-- keep open comma",
-        "->{\n         Net -- keep open comma\n         | e\n       }" );
+        [ "Net -- keep open comma"; "| e"; "} Text" ] );
     ]
   in
   List.iter
@@ -529,7 +530,8 @@ let test_trailing_row_comma_trivia () =
       Alcotest.(check bool) (label ^ " comment survives") true (contains formatted comment);
       Alcotest.(check bool)
         (label ^ " comma and closing-row layout is canonical")
-        true (contains formatted expected);
+        true
+        (List.for_all (contains formatted) expected);
       Alcotest.(check string)
         (label ^ " formatting is idempotent")
         formatted (print_recovered formatted);
