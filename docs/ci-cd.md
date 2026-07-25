@@ -161,6 +161,44 @@ export TMPDIR="$PWD/.scratch/tmp"
 opam exec -- dune build @test/gm12b/gm12b-evidence --force
 ```
 
+## Parser Depth Performance Evidence
+
+Workflow: `.github/workflows/parser-depth-performance.yml`
+
+The `Parser depth performance / DX.6 parser-depth performance guard` job runs
+every day at 06:37 UTC and can also be started manually for a branch or tag. It
+is recurring performance evidence, not a required merge check or a portable
+benchmark, so it does not run on pull requests or pushes.
+
+The job builds Jacquard and runs `scripts/parser-depth-perf.sh` with its
+canonical defaults. At depth 100,000, each carrier has a 10-second deadline:
+
+- surface `.jac` input must exit with exactly one E1227 diagnostic;
+- bootstrap `.jqd` input must exit with exactly one E0115 diagnostic;
+- a timeout, E0003, `Stack_overflow`, internal error, extra diagnostic, or
+  unexpected exit status fails the job.
+
+Scheduled runs cancel an older scheduled run if they overlap. Manual runs have
+unique concurrency groups so one attestation cannot replace another. Each run
+records the exact commit and results in its job summary and retains the small
+result/stdout/stderr evidence files for 30 days.
+
+Run the workflow manually after parser, trivia ownership, structural-depth
+guard, or OCaml toolchain changes, and before a release candidate. A timing
+failure on a shared runner may be rerun manually once to distinguish host
+noise. Do not increase the canonical deadline merely to restore a green run;
+investigate the parser or runner evidence first.
+
+Local equivalent:
+
+```sh
+eval "$(opam env)"
+mkdir -p "$PWD/.scratch/tmp"
+export TMPDIR="$PWD/.scratch/tmp"
+opam exec -- dune build @all
+scripts/parser-depth-perf.sh
+```
+
 ## Release Evidence
 
 Workflow: `.github/workflows/release-evidence.yml`

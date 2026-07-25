@@ -1,6 +1,7 @@
 # DX.6 Parser-depth performance evidence
 
-Status: opt-in release-hardening evidence based on merged DX.5/DX.7 main commit
+Status: scheduled/manual CI release-hardening evidence, opt-in locally. The
+historical measurements below are based on merged DX.5/DX.7 main commit
 `b75b7a951289745bc3c26633e5da4f6e139199a0`, which includes the SC.16 C0-C3
 stack.
 
@@ -59,7 +60,10 @@ The script generates both hostile sources under `.scratch/parser-depth-perf/`,
 runs `jacquard check` under a wall-clock deadline, and requires carrier-specific
 diagnostics. It rejects timeouts, the E0003 host-stack backstop, `Stack_overflow`,
 or an internal error. It is intentionally not part of `dune runtest`: wall-clock
-checks are opt-in performance evidence, not deterministic semantic tests.
+checks are recurring scheduled/manual performance evidence, not deterministic
+per-change semantic tests. `.github/workflows/parser-depth-performance.yml`
+runs the canonical check daily and on manual dispatch without adding pull
+request latency.
 
 Useful overrides:
 

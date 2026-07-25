@@ -1,0 +1,87 @@
+name: Parser depth performance
+
+on:
+  schedule:
+    - cron: "37 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: parser-depth-perf-${{ github.event_name == 'schedule' && 'scheduled' || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'schedule' }}
+
+env:
+  OCAML_COMPILER: 5.1.1
+  JACQUARD_PRELUDE: ${{ github.workspace }}/prelude
+  TMPDIR: ${{ github.workspace }}/.scratch/tmp
+
+jobs:
+  dx6-parser-depth:
+    name: DX.6 parser-depth performance guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.0
+
+      - name: Prepare temporary storage
+        run: |
+          mkdir -p "$TMPDIR"
+          scripts/check-temp-policy.sh
+
+      - name: Set up OCaml
+        uses: ocaml/setup-ocaml@v3.6.1
+        with:
+          ocaml-compiler: ${{ env.OCAML_COMPILER }}
+
+      - name: Install dependencies
+        run: opam install --deps-only . --with-test -y
+
+      - name: Build
+        run: opam exec -- dune build @all
+
+      - name: Run parser-depth performance guard
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p .scratch/evidence/parser-depth-perf
+          scripts/parser-depth-perf.sh 2>&1 |
+            tee .scratch/evidence/parser-depth-perf/result.txt
+
+      - name: Summarize attestation
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## DX.6 parser-depth performance guard"
+            echo
+            echo "- Commit: \`$GITHUB_SHA\`"
+            echo "- Canonical depth: \`100000\`"
+            echo "- Per-carrier deadline: \`10 seconds\`"
+            echo
+            if [[ -s .scratch/evidence/parser-depth-perf/result.txt ]]; then
+              while IFS= read -r line; do
+                printf -- '- `%s`\n' "$line"
+              done < .scratch/evidence/parser-depth-perf/result.txt
+            else
+              echo "- Guard produced no result transcript; inspect the failed setup or build step."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload parser-depth evidence
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: parser-depth-performance-${{ github.run_number }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 30
+          include-hidden-files: true
+          path: |
+            .scratch/evidence/parser-depth-perf/result.txt
+            .scratch/parser-depth-perf/surface.stdout
+            .scratch/parser-depth-perf/surface.stderr
+            .scratch/parser-depth-perf/bootstrap.stdout
+            .scratch/parser-depth-perf/bootstrap.stderr
