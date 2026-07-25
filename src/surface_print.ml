@@ -6,11 +6,12 @@
 
 type lookup = Surface_name.kind -> Hash.t -> string option
 
-(** The canonical formatter margin. A caller may request another rendering width for an editor or
-    diagnostic view, but the command-line formatter and calls that omit [width] use exactly 100
-    columns. Breakable structure stays within the margin and a group that fits exactly remains
-    compact. An indivisible UTF-8 token, preserved comment, type/effect declaration header, or
-    [forall] prefix may exceed it only when its shortest legal rendering cannot fit. *)
+(** The canonical formatter's byte-width target. A caller may request another width for an editor or
+    diagnostic view, but the command-line formatter and calls that omit [width] use exactly 100.
+    This is a layout target rather than a global physical-line postcondition: adjacent syntax
+    outside a measured group, preserved source text, or a raw [jqd] inversion may still exceed it. A
+    group that ends exactly at the target remains compact when the containing top-level unit's
+    preflight also fits; otherwise the whole unit is rendered at the requested target. *)
 let default_width = 100
 
 exception Bug_unsupported_surface_form

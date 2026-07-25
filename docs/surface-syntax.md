@@ -325,13 +325,19 @@ Each is a CI property, not a goal.
 
 ### Canonical formatter contract
 
-The canonical `.jac` formatter uses a 100-column margin. Omitting the printer's
-`width` argument is exactly the same as passing `width = 100`; the `jac fmt`
-command uses that default. Width is measured in UTF-8 bytes, matching source
-columns and the formatter's layout accounting. Breakable structure never
-exceeds the selected margin, and a complete group that fits exactly remains
-compact. Three forms may
-exceed it:
+The canonical `.jac` formatter uses a 100-byte layout target. Omitting the
+printer's `width` argument is exactly the same as passing `width = 100`; the
+`jac fmt` command uses that default. Width is measured in UTF-8 bytes, matching
+source columns and the formatter's layout accounting.
+
+The target is not a global physical-line postcondition. The formatter lays out
+each top-level unit as a whole. It first uses one extra internal byte so a group
+ending exactly at the target can remain compact, and keeps that rendering only
+when every line still fits. Otherwise it lays out the whole unit at the
+requested target. An exact-fit subgroup can therefore break when another line
+in the same unit forces that fallback.
+
+Known overflow cases include, but are not limited to:
 
 - a residual indivisible identifier, string, comment, or other UTF-8 token is
   never split after the formatter takes every legal break;
@@ -341,7 +347,11 @@ exceed it:
   margin by exactly the shortest-header length minus the margin;
 - a `forall` prefix whose shortest legal rendering exceeds the margin remains
   on one logical line because `.jac` has no continuation point between its
-  quantified variables or before `.`.
+  quantified variables or before `.`;
+- syntax emitted next to a measured breakable group can push the physical line
+  past the target, such as the arrow after a match-clause pattern;
+- an unsupported kernel form may use the raw `jqd { ... }` inversion escape,
+  whose preserved bootstrap form can be wider than the target.
 
 The surface checker reports W1204 on a declaration name when its shortest
 canonical header exceeds the default 100-byte width. Formatting remains
