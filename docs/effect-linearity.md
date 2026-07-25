@@ -166,17 +166,25 @@ each `DefEffect` declaration. The shipped assignments are:
 
 | mode | blessed operations |
 |------|--------------------|
-| `once` | `Eval.eval-code`; `Abort.abort`; `Throw.throw`; `Emit.emit`; `Console.print`, `Console.read-line`; `Clock.now`, `Clock.sleep`; `Net.fetch`; `Fs.read`, `Fs.write`, `Fs.list-dir`; `Infer.complete` |
+| `once` | `Eval.eval-code`; `Abort.abort`; `Throw.throw`; `Emit.emit`; `Console.print`, `Console.read-line`; `Clock.now`, `Clock.sleep`; `Net.fetch`; `Fs.read`, `Fs.write`, `Fs.list-dir`; `Infer.complete`; `Async.async.spawn`, `Async.async.await`, `Async.async.cancel`, `Async.async.yield`; `Channel.channel.open`, `Channel.channel.send`, `Channel.channel.recv`, `Channel.channel.close`; `Audit.record`; `Approval.ask`; `GovernanceApprovalV1.governance-approval.ask`; `Secret.read`, `Secret.expose`; `Judge.assess`; `Workspace.read-file`, `Workspace.write-file`, `Workspace.fetch` |
 | `multi` | `State.get`, `State.put`; `Dist.sample`, `Dist.observe`; `Check.check`, `Check.fail`; `Fault.flaky` |
 
 State and Check are deliberate Multi exceptions. Their shipped handlers use
 pure continuation capture: State implements its function-of-state transformer,
 and Check composes reporting across generated worlds. This does not grant world
 authority. `Fault` remains multi because its handlers deliberately explore
-alternate failure worlds. Choose and other search effects are likewise multi when added. Pg,
-Blob, Serve, Crypto, Log, Approval, Audit, Secret, and future Async and Channel
-operations must be once. No such effect is currently shipped in the bootstrap
-prelude, so they are a review rule rather than invented manifest rows.
+alternate failure worlds. Choose and other search effects are likewise multi
+when added.
+
+`Approval`, `Audit`, `Secret`, `Judge`, and `Channel` are shipped `once`
+effects. `Async` keeps its reserved taxonomy status while its interpreted
+scheduler is shipped; its four operations are also `once`. The declarations
+and the reviewed manifest agree on all of these modes.
+
+`Choose`, `Env`, `Pg`, `Blob`, `Serve`, `Crypto`, and `Log` remain reserved and
+unimplemented. Their taxonomy modes are compatibility promises for a future
+implementation, not invented executable prelude rows: `Choose` is `multi`,
+while the other six are `once`.
 
 Almost everything is `once`. Multi-shot is the rare, deliberate search
 mechanism, and the type system records that distinction.

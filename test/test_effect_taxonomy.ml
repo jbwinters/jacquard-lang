@@ -8,6 +8,8 @@ let review_doc = "../docs/effect-review.md"
 let stdlib_doc = "../docs/stdlib.md"
 let tutorial_doc = "../docs/tutorial.md"
 let concurrency_doc = "../docs/concurrency.md"
+let linearity_doc = "../docs/effect-linearity.md"
+let et8_evidence_doc = "../docs/release/effect-taxonomy/ET8-EVIDENCE.md"
 let schema_fixture = "docs-doctest/fixtures/effect-taxonomy-schemas.jac"
 let approval_fixture = "docs-doctest/fixtures/stdlib-handler-policy.jac"
 let channel_effect_hash = "bf9a334188ac13495eeb070fdc215d51763d9761b4775c98c61f44ebb1b03756"
@@ -2237,6 +2239,63 @@ let test_governance_contracts () =
   test_governance_and_links ();
   test_governed_membrane_charter ()
 
+let test_successor_status_docs () =
+  let linearity = Corpus_support.read_file linearity_doc |> normalize_whitespace in
+  let et8 = Corpus_support.read_file et8_evidence_doc |> normalize_whitespace in
+  List.iter
+    (fun phrase ->
+      Alcotest.(check bool)
+        ("effect-linearity successor status: " ^ phrase)
+        true
+        (contains_string linearity phrase))
+    [
+      "`Approval`, `Audit`, `Secret`, `Judge`, and `Channel` are shipped `once` effects";
+      "`Async` keeps its reserved taxonomy status while its interpreted scheduler is shipped";
+      "`Choose`, `Env`, `Pg`, `Blob`, `Serve`, `Crypto`, and `Log` remain reserved and \
+       unimplemented";
+      "`Audit.record`; `Approval.ask`";
+      "`Secret.read`, `Secret.expose`; `Judge.assess`";
+      "`Workspace.read-file`, `Workspace.write-file`, `Workspace.fetch`";
+    ];
+  Alcotest.(check bool)
+    "effect-linearity no longer claims every listed effect is unshipped" false
+    (contains_string linearity "No such effect is currently shipped in the bootstrap prelude");
+  List.iter
+    (fun stale ->
+      Alcotest.(check bool)
+        ("effect-linearity rejects double-qualified operation " ^ stale)
+        false (contains_string linearity stale))
+    [
+      "Audit.audit.record";
+      "Approval.approval.ask";
+      "Secret.secret.read";
+      "Secret.secret.expose";
+      "Judge.judge.assess";
+      "Workspace.workspace.read-file";
+      "Workspace.workspace.write-file";
+      "Workspace.workspace.fetch";
+    ];
+  List.iter
+    (fun phrase ->
+      Alcotest.(check bool) ("ET.8 successor status: " ^ phrase) true (contains_string et8 phrase))
+    [
+      "At the ET.8 publication point, the inventory contained 25 blessed names: 15 released \
+       identities and 10 reserved/unimplemented schemas";
+      "The current v1 successor has 18 implemented effects";
+      "`Workspace`, `Judge`, and `Channel` are implemented";
+      "`Async` remains taxonomy-reserved with a published identity and interpreted scheduler";
+      "The seven remaining reserved names—`Choose`, `Env`, `Pg`, `Blob`, `Serve`, `Crypto`, and \
+       `Log`—are unimplemented";
+      "At ET.8, the `effect-taxonomy` suite failed if any of these projections drifted";
+      "scripts/release/check-historical-manifests.sh \\ --commit \"$(git rev-parse HEAD)\" \\ \
+       --require-history";
+    ];
+  Alcotest.(check bool)
+    "ET.8 no longer presents its historical reserved set as current" false
+    (contains_string et8
+       "`Choose`, `Env`, `Pg`, `Blob`, `Serve`, `Crypto`, `Log`, `Judge`, `Async`, and `Channel` \
+        are reserved and unimplemented")
+
 let suite =
   [
     Alcotest.test_case "complete machine contract" `Quick test_complete_contract;
@@ -2255,4 +2314,5 @@ let suite =
       test_unknown_identity_is_uncolored_and_unblessed;
     Alcotest.test_case "registry ordering stable" `Quick test_registry_order_is_stable;
     Alcotest.test_case "taxonomy v2 is additive" `Quick test_taxonomy_v2_is_additive;
+    Alcotest.test_case "successor status docs" `Quick test_successor_status_docs;
   ]
