@@ -60,9 +60,9 @@ let test_one_page_grammar_snapshot () =
     "e564dd92d4b632d4cd8b724ba8bf830ba2489527387c74e93e722ac7b808ffc8"
     (Hash.to_hex (Hash.of_string grammar))
 
-let format_surface path source =
+let format_surface ?width path source =
   let recovered = Surface_parse.recover_string ~file:path source in
-  match Surface_print.print_recovered recovered with
+  match Surface_print.print_recovered ?width recovered with
   | Ok text -> text
   | Error diagnostics -> Eval_support.fail_diags (path ^ " format") diagnostics
 
@@ -101,12 +101,14 @@ let test_surface_formatter_corpus_stability () =
     files
 
 let test_constructor_standard_width_boundary () =
-  let render constructor_length =
+  let render ?width constructor_length =
     let constructor = "A" ^ String.make (constructor_length - 1) 'a' in
-    format_surface "constructors.jac" (Printf.sprintf "type T = | %s | B\n" constructor)
+    format_surface ?width "constructors.jac" (Printf.sprintf "type T = | %s | B\n" constructor)
   in
   let fits = render 85 in
   let breaks = render 86 in
+  Alcotest.(check int) "canonical formatter width" 100 Surface_print.default_width;
+  Alcotest.(check string) "omitted width is explicit width 100" fits (render ~width:100 85);
   Alcotest.(check int)
     "100-column declaration stays on one line" 100
     (String.length (String.trim fits));
@@ -118,6 +120,35 @@ let test_constructor_standard_width_boundary () =
     "one constructor per line after boundary" 2
     (String.split_on_char '\n' (String.trim breaks) |> List.tl |> List.length);
   Alcotest.(check bool) "second constructor has its own line" true (contains "\n  | B\n" breaks)
+
+let lowered_surface path source =
+  let recovered = Surface_parse.recover_string ~file:path source in
+  match Surface_parse.strict_file recovered with
+  | Error diagnostics -> Eval_support.fail_diags (path ^ " strict parse") diagnostics
+  | Ok parsed -> (
+      match Surface_lower.lower_file parsed with
+      | Ok lowered -> lowered.tops
+      | Error diagnostics -> Eval_support.fail_diags (path ^ " lower") diagnostics)
+
+let surface_hashes path source =
+  lowered_surface path source
+  |> List.map (fun top ->
+      match Canon.hash_top top with
+      | Ok hashes -> Hash.to_hex hashes.Canon.decl_hash
+      | Error diagnostics -> Eval_support.fail_diags (path ^ " hash") diagnostics)
+
+let test_plain_text_formatter_contract () =
+  let source = "-- café stays readable\n\"naïve 🚀\"\n" in
+  let once = format_surface "plain-text.jac" source in
+  let twice = format_surface "plain-text.jac" once in
+  Alcotest.(check string) "formatting twice is byte-identical" once twice;
+  Alcotest.(check bool) "UTF-8 comment survives" true (contains "-- café stays readable" once);
+  Alcotest.(check bool) "UTF-8 literal survives" true (contains "\"naïve 🚀\"" once);
+  Alcotest.(check bool) "canonical output has no ANSI escapes" false (contains "\027[" once);
+  Alcotest.(check (list string))
+    "formatting does not change canonical identity"
+    (surface_hashes "plain-text.jac" source)
+    (surface_hashes "plain-text.jac" once)
 
 let trim = String.trim
 
@@ -1110,6 +1141,7 @@ let suite =
       test_surface_formatter_corpus_stability;
     Alcotest.test_case "constructor standard width boundary" `Quick
       test_constructor_standard_width_boundary;
+    Alcotest.test_case "plain-text formatter contract" `Quick test_plain_text_formatter_contract;
     Alcotest.test_case "release tables stop before later subheadings" `Quick
       test_table_rows_stop_at_later_subheading;
     Alcotest.test_case "structured release decision" `Quick assert_release_valid;
