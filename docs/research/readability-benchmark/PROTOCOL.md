@@ -202,3 +202,8 @@ and makes no performance claim. Disposable assignments, renderings, logs, and
 execution stores remain under `.scratch/`. Protocol, fixture bytes, answer key,
 schema, model pin, exclusions, scoring, or threshold changes require a new
 version and review before further collection.
+
+The [execution gate](EXECUTION.md) records the authority required before UX.1
+collection and the deterministic commands for generating the frozen human and
+model schedules. Generating either schedule remains a planning operation, not
+consent or permission to collect outcomes.

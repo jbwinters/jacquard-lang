@@ -7,12 +7,22 @@
   model-prompt.txt
   (source_tree fixtures)
   ../../docs/research/readability-benchmark/PROTOCOL.md
+  ../../docs/research/readability-benchmark/EXECUTION.md
   (source_tree ../../prelude))
  (action
   (setenv TMPDIR .
-   (run %{bin:python3} readability_benchmark.py verify
-    --manifest fixture-manifest.json
-    --schema result.schema.json
-    --protocol ../../docs/research/readability-benchmark/PROTOCOL.md
-    --jacquard %{bin:jacquard}
-    --prelude ../../prelude))))
+   (progn
+    (run %{bin:python3} readability_benchmark.py verify
+     --manifest fixture-manifest.json
+     --schema result.schema.json
+     --protocol ../../docs/research/readability-benchmark/PROTOCOL.md
+     --jacquard %{bin:jacquard}
+     --prelude ../../prelude)
+    (with-stdout-to human-schedule.jsonl
+     (run %{bin:python3} readability_benchmark.py human-schedule))
+    (with-stdout-to model-schedule.jsonl
+     (run %{bin:python3} readability_benchmark.py model-schedule
+      --manifest fixture-manifest.json))
+    (run %{bin:python3} readability_benchmark.py verify-schedules
+     --human human-schedule.jsonl
+     --model model-schedule.jsonl)))))
