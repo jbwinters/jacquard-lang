@@ -41,10 +41,11 @@ python3 test/readability/readability_benchmark.py human-schedule \
 ```
 
 The command emits 480 zero-based enrollment ordinals. Each row contains only
-the frozen carrier and three-job presentation order; it contains no identity,
-contact, consent, compensation, or outcome data. The confirmatory seed assigns
-exactly 160 enrollments to each carrier. Every complete block of 18 ordinals
-contains all carrier and job-order cells once.
+assignment-planning metadata: the ordinal, block and position, carrier,
+three-job presentation order, schema and protocol versions, and seed digest.
+It contains no identity, contact, consent, compensation, or outcome data. The
+confirmatory seed assigns exactly 160 enrollments to each carrier. Every
+complete block of 18 ordinals contains all carrier and job-order cells once.
 
 The reviewed JSONL SHA-256 is
 `c6421e9fff78b5fd7397e8c2aaeadee434c58c01c1d1d85aec224c4e2ec1a9be`.

@@ -344,6 +344,24 @@ def encode_jsonl(rows: Iterable[dict[str, Any]]) -> str:
     )
 
 
+def verify_schedule_files(human_path: Path, model_path: Path) -> None:
+    """Fail unless CLI-generated schedule files match the reviewed byte plans."""
+
+    expected = (
+        ("human", human_path, HUMAN_SCHEDULE_SHA256),
+        ("model", model_path, MODEL_SCHEDULE_SHA256),
+    )
+    for label, path, expected_digest in expected:
+        try:
+            actual_digest = digest_bytes(path.read_bytes())
+        except OSError as error:
+            raise ProtocolError(f"cannot read {label} schedule {path}: {error}") from error
+        if actual_digest != expected_digest:
+            raise ProtocolError(
+                f"{label} schedule digest drift: expected {expected_digest}, got {actual_digest}"
+            )
+
+
 def score_answer(fixture: dict[str, Any], answer_id: str) -> tuple[bool, str | None]:
     options = {option["id"] for option in fixture["options"]}
     if answer_id == "__timeout__":
@@ -876,6 +894,13 @@ def parse_args(argv: Iterable[str]) -> argparse.Namespace:
     )
     model_plan.add_argument("--manifest", type=Path, required=True)
 
+    verify_plans = commands.add_parser(
+        "verify-schedules",
+        help="verify CLI-generated human and model schedule bytes",
+    )
+    verify_plans.add_argument("--human", type=Path, required=True)
+    verify_plans.add_argument("--model", type=Path, required=True)
+
     present = commands.add_parser("present", help="render one accessible plain-text trial")
     present.add_argument("--manifest", type=Path, required=True)
     present.add_argument("--carrier", choices=CARRIERS, required=True)
@@ -891,6 +916,10 @@ def main(argv: Iterable[str]) -> int:
             return 0
         if args.command == "human-schedule":
             sys.stdout.write(encode_jsonl(human_schedule()))
+            return 0
+        if args.command == "verify-schedules":
+            verify_schedule_files(args.human, args.model)
+            print("readability schedules: PASS (480 human assignments, 270 model trials)")
             return 0
 
         manifest = load_json(args.manifest)
