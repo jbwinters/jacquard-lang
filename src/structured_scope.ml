@@ -96,9 +96,9 @@ let task_handle capability scope value =
 let channel_run scope = Scheduler_core.task_run Task_capability.runtime scope.scheduler
 
 let channel_open scope ~capacity =
-  if capacity < 0 then Ok (Channel_invalid_capacity capacity)
-  else
-    ensure_open scope (fun () ->
+  ensure_open scope (fun () ->
+      if capacity < 0 then Ok (Channel_invalid_capacity capacity)
+      else
         let open_index = scope.next_channel in
         match
           Channel_contract.open_channel ~scope_path:(scope_path scope) ~open_index ~capacity
