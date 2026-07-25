@@ -148,7 +148,11 @@ let test_plain_text_formatter_contract () =
   Alcotest.(check (list string))
     "formatting does not change canonical identity"
     (surface_hashes "plain-text.jac" source)
-    (surface_hashes "plain-text.jac" once)
+    (surface_hashes "plain-text.jac" once);
+  let indivisible = "indivisible-identifier-that-exceeds-width\n" in
+  Alcotest.(check string)
+    "an indivisible token is preserved past a narrow margin" indivisible
+    (format_surface ~width:10 "indivisible.jac" indivisible)
 
 let test_multiline_comma_layout_contract () =
   let source =
@@ -169,6 +173,9 @@ f(first-long-argument, -- after-final-comma
   Alcotest.(check bool)
     "compact multi-item tuple has no final comma" true
     (contains {|("first-long-item", "second-long-item", "third-long-item")|} compact);
+  Alcotest.(check bool)
+    "a trailing item comment forces vertical layout even at a wide margin" true
+    (contains "(\n  1,\n  -- first item\n  2,\n)" compact);
   Alcotest.(check bool)
     "wrapped tuple is one item per line with a final comma" true
     (contains {|(
@@ -295,6 +302,120 @@ very-long-function-name(
   Alcotest.(check string)
     "all comma-list contexts are idempotent" formatted
     (format_surface "comma-contexts.jac" formatted)
+
+let max_line_length text =
+  String.split_on_char '\n' text
+  |> List.fold_left (fun longest line -> max longest (String.length line)) 0
+
+let test_comma_list_exact_width_boundaries () =
+  let cases =
+    [
+      ( "call arguments",
+        "call(first-argument, second-argument)\n",
+        "first-argument",
+        "second-argument",
+        true );
+      ("list items", "[first-item, second-item]\n", "first-item", "second-item", true);
+      ("expression tuple", "(first-value, second-value)\n", "first-value", "second-value", true);
+      ( "function parameters",
+        "function-name(first-parameter, second-parameter) = first-parameter\n",
+        "first-parameter",
+        "second-parameter",
+        true );
+      ( "labeled constructor fields",
+        "type Example = | MakeExample(first-field: FirstType, second-field: SecondType)\n",
+        "first-field: FirstType",
+        "second-field: SecondType",
+        true );
+      ( "operation parameters",
+        "multi effect Example where {\n  operation : (FirstType, SecondType) -> ResultType\n}\n",
+        "FirstType",
+        "SecondType",
+        true );
+      ( "constructor-pattern arguments",
+        "match subject {\n  | MakeExample(first-pattern, second-pattern) -> first-pattern\n}\n",
+        "first-pattern",
+        "second-pattern",
+        false );
+      ( "handler-clause parameters",
+        "handle body() {\n\
+        \  | return value -> value\n\
+        \  | operation(first-parameter, second-parameter) resume continuation -> first-parameter\n\
+         }\n",
+        "first-parameter",
+        "second-parameter",
+        false );
+    ]
+  in
+  List.iter
+    (fun (label, source, first_item, second_item, vertical_at_boundary) ->
+      let compact = format_surface ~width:1000 (label ^ ".jac") source in
+      let boundary = max_line_length compact in
+      let at_boundary = format_surface ~width:boundary (label ^ ".jac") source in
+      let above_boundary = format_surface ~width:(boundary + 1) (label ^ ".jac") source in
+      let below_boundary = format_surface ~width:(boundary - 1) (label ^ ".jac") source in
+      Alcotest.(check string) (label ^ " fits at its exact boundary") compact at_boundary;
+      Alcotest.(check string) (label ^ " fits one column above its boundary") compact above_boundary;
+      Alcotest.(check bool)
+        (label ^ " wraps one column below its boundary")
+        true
+        (not (String.equal compact below_boundary));
+      if vertical_at_boundary then begin
+        Alcotest.(check bool)
+          (label ^ " puts the first item on its own comma-terminated line")
+          true
+          (contains (first_item ^ ",\n") below_boundary);
+        Alcotest.(check bool)
+          (label ^ " puts the final item on its own comma-terminated line")
+          true
+          (contains (second_item ^ ",\n") below_boundary)
+      end;
+      Alcotest.(check bool)
+        (label ^ " wrapped lines stay within the requested width")
+        true
+        (max_line_length below_boundary <= boundary - 1);
+      Alcotest.(check string)
+        (label ^ " wrapped rendering is idempotent")
+        below_boundary
+        (format_surface ~width:(boundary - 1) (label ^ ".jac") below_boundary))
+    cases
+
+let remove_exact_line expected text =
+  let rec remove rev_prefix = function
+    | [] -> Alcotest.failf "expected formatter line %S" expected
+    | line :: rest when String.equal line expected -> List.rev_append rev_prefix rest
+    | line :: rest -> remove (line :: rev_prefix) rest
+  in
+  String.split_on_char '\n' text |> remove [] |> String.concat "\n"
+
+let test_vertical_append_remove_diff_stability () =
+  let three =
+    format_surface ~width:24 "append-remove.jac"
+      "call(first-long-item, second-long-item, third-long-item)\n"
+  in
+  let four =
+    format_surface ~width:24 "append-remove.jac"
+      "call(first-long-item, second-long-item, third-long-item, fourth-long-item)\n"
+  in
+  Alcotest.(check bool)
+    "three-item fixture is vertical" true
+    (contains "  third-long-item,\n" three);
+  Alcotest.(check bool)
+    "appended item has one canonical line" true
+    (contains "  fourth-long-item,\n" four);
+  Alcotest.(check string)
+    "appending changes only the appended item line" three
+    (remove_exact_line "  fourth-long-item," four);
+  Alcotest.(check string)
+    "removing restores the byte-identical three-item layout" four
+    (let lines = String.split_on_char '\n' three in
+     let rec insert rev_prefix = function
+       | [] -> Alcotest.fail "vertical call closing delimiter was absent"
+       | ")" :: rest ->
+           List.rev_append rev_prefix ("  fourth-long-item," :: ")" :: rest) |> String.concat "\n"
+       | line :: rest -> insert (line :: rev_prefix) rest
+     in
+     insert [] lines)
 
 let trim = String.trim
 
@@ -1290,6 +1411,10 @@ let suite =
     Alcotest.test_case "plain-text formatter contract" `Quick test_plain_text_formatter_contract;
     Alcotest.test_case "multiline comma layout contract" `Quick test_multiline_comma_layout_contract;
     Alcotest.test_case "multiline comma contexts" `Quick test_multiline_comma_contexts;
+    Alcotest.test_case "comma-list exact width boundaries" `Quick
+      test_comma_list_exact_width_boundaries;
+    Alcotest.test_case "vertical append/remove diff stability" `Quick
+      test_vertical_append_remove_diff_stability;
     Alcotest.test_case "release tables stop before later subheadings" `Quick
       test_table_rows_stop_at_later_subheading;
     Alcotest.test_case "structured release decision" `Quick assert_release_valid;

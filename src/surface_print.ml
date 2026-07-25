@@ -8,8 +8,8 @@ type lookup = Surface_name.kind -> Hash.t -> string option
 
 (** The canonical formatter margin. A caller may request another rendering width for an editor or
     diagnostic view, but the command-line formatter and calls that omit [width] use exactly 100
-    columns. The margin is a layout target rather than a promise to split indivisible UTF-8 tokens.
-*)
+    columns. Breakable structure stays within the margin and a group that fits exactly remains
+    compact. An indivisible UTF-8 token or preserved comment may exceed it. *)
 let default_width = 100
 
 exception Bug_unsupported_surface_form
@@ -595,7 +595,7 @@ and pp_if context lookup fmt condition yes no =
         | None -> Format.fprintf fmt "else %a" (pp_expr context lookup) expression)
     | _ -> Format.fprintf fmt "else %a" (pp_expr context lookup) expression
   in
-  Format.fprintf fmt "@[<hov 0>@[<hov 2>if %a" (pp_expr context lookup) condition;
+  Format.fprintf fmt "@[<hv 0>@[<hov 2>if %a" (pp_expr context lookup) condition;
   pp_following_keyword context fmt condition "then";
   Format.fprintf fmt "@ %a@]" (pp_expr context lookup) yes;
   if context.trivia && expression_has_trailing_comments yes then Format.pp_force_newline fmt ();
@@ -1099,13 +1099,45 @@ let has_decoded_surface_ref_top = function
 let is_raw_top top =
   match Meta.surface_form (top_meta top) with Some "raw-top" -> true | Some _ | None -> false
 
-let render ~width pp value =
+let render_at_margin ~margin pp value =
   let buffer = Buffer.create 128 in
   let fmt = Format.formatter_of_buffer buffer in
-  Format.pp_set_margin fmt width;
+  Format.pp_set_margin fmt margin;
   pp fmt value;
   Format.pp_print_flush fmt ();
   Buffer.contents buffer
+
+let max_line_length text =
+  String.split_on_char '\n' text
+  |> List.fold_left (fun longest line -> max longest (String.length line)) 0
+
+(* [Format] treats the end of an [hv] box conservatively: a flat box whose final visible column is
+   exactly the configured margin can break, while a nested [hov] box can retain a flat child that
+   pushes its complete line past the margin. Render the complete syntactic unit first, then select
+   the widest internal margin whose visible output honors the caller's width. The initial extra
+   column lets an exactly fitting flat candidate remain flat. If even the maximally broken rendering
+   exceeds the width, retain the requested-margin rendering: the remaining excess is an indivisible
+   token or preserved comment, which the formatter contract explicitly permits, and shrinking the
+   internal margin further would only discard useful indentation. *)
+let render ~width pp value =
+  let upper_margin = max 2 (width + 1) in
+  let upper = render_at_margin ~margin:upper_margin pp value in
+  let upper_length = max_line_length upper in
+  if upper_length <= width then upper
+  else
+    (* Box layout is not monotone at extremely narrow margins: once indentation itself no longer
+       fits, [Format] may keep an inner box flat. Descend from the widest candidate so the first
+       compliant rendering is the least aggressive layout. *)
+    let requested_margin = max 2 width in
+    let requested = render_at_margin ~margin:requested_margin pp value in
+    let rec widest_fitting margin =
+      if margin < 2 then requested
+      else
+        let rendered = render_at_margin ~margin pp value in
+        let length = max_line_length rendered in
+        if length <= width then rendered else widest_fitting (margin - 1)
+    in
+    if max_line_length requested <= width then requested else widest_fitting (requested_margin - 1)
 
 let pp_clause_fragment context lookup fmt (clause : Kernel.clause) =
   match clause.cbody.it with

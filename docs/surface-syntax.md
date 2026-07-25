@@ -327,9 +327,10 @@ Each is a CI property, not a goal.
 
 The canonical `.jac` formatter uses a 100-column margin. Omitting the printer's
 `width` argument is exactly the same as passing `width = 100`; the `jac fmt`
-command uses that default. The margin is where breakable groups choose between
-one line and multiple lines, not a promise to split an indivisible identifier,
-string, comment, or other UTF-8 token.
+command uses that default. Breakable structure never exceeds the selected
+margin, and a complete group that fits exactly remains compact. The formatter
+does not split an indivisible identifier, string, comment, or other UTF-8
+token, so one of those tokens may exceed the margin.
 
 Formatting emits deterministic plain UTF-8 text with no ANSI color or other
 terminal styling. It preserves comment and documentation text but normalizes
