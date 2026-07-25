@@ -98,6 +98,18 @@ must exceed the canonical width.
   101
   $ jac fmt wide-declaration-formatted.jac 2> /dev/null | cmp wide-declaration-formatted.jac -
 
+Quantified-variable prefixes have no legal continuation point in 0.1. W1205 makes a pathological
+prefix visible without rejecting or rewriting a valid program.
+
+  $ cat > wide-forall.jac <<'EOF'
+  > f : forall a0 b0 c0 d0 e0 f0 g0 h0 v00 v01 v02 v03 v04 v05 v06 v07 v08 v09 v10 v11 v12 v13 v14 v15 v16 v17 v18 v19 v20 v21 v22 v23 v24 v25 v26 v27 v28 v29 v30 v31. a0
+  > f = 0
+  > EOF
+  $ jac fmt wide-forall.jac > wide-forall-formatted.jac 2> wide-forall.err
+  $ grep 'warning\[W1205\]' wide-forall.err
+  wide-forall.jac:1:1-2: warning[W1205]: Quantifier prefix exceeds line width
+  $ jac fmt wide-forall-formatted.jac 2> /dev/null | cmp wide-forall-formatted.jac -
+
 DX.3 keeps realistic nested quotes, matches, handlers, conditionals, and blocks stable under
 formatting and canonical identity. Explicit operation namespace intent survives the formatter.
 

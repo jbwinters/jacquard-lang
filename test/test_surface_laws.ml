@@ -345,6 +345,79 @@ let test_declaration_header_width_exception () =
     (surface_hashes "wide-effect-header.jac" effect_source)
     (surface_hashes "wide-effect-header.jac" formatted_effect)
 
+let same_lowered source formatted =
+  List.for_all2
+    (fun before after -> Form.equal_ignoring_meta (Kernel.to_form before) (Kernel.to_form after))
+    (lowered_surface "colon-continuation.jac" source)
+    (lowered_surface "colon-continuation.jac" formatted)
+
+let test_colon_continuation_width_contract () =
+  let term_name = "f" ^ String.make 59 'a' in
+  let type_name = "T" ^ String.make 59 'a' in
+  let signature_source = Printf.sprintf "%s : %s\n%s = 0\n" term_name type_name term_name in
+  let signature = format_surface "wide-signature.jac" signature_source in
+  Alcotest.(check bool)
+    "123-column signature breaks after its colon" true
+    (contains (Printf.sprintf "%s :\n  %s\n" term_name type_name) signature);
+  Alcotest.(check bool)
+    "broken signature lines fit the canonical width" true
+    (max_line_length signature <= Surface_print.default_width);
+  Alcotest.(check string)
+    "broken signature is idempotent" signature
+    (format_surface "wide-signature.jac" signature);
+  Alcotest.(check bool)
+    "broken signature preserves its lowered form" true
+    (same_lowered signature_source signature);
+  let type_var = "a" ^ String.make 59 'a' in
+  let hashable_signature_source =
+    Printf.sprintf "%s : forall %s. %s\n%s = 0\n" term_name type_var type_var term_name
+  in
+  let hashable_signature = format_surface "hashable-wide-signature.jac" hashable_signature_source in
+  Alcotest.(check (list string))
+    "signature continuation preserves canonical identity"
+    (surface_hashes "hashable-wide-signature.jac" hashable_signature_source)
+    (surface_hashes "hashable-wide-signature.jac" hashable_signature);
+  let field_label = "field" ^ String.make 50 'a' in
+  let field_type = "Type" ^ String.make 51 'a' in
+  let field_source = Printf.sprintf "type Container = | Make(%s: %s)\n" field_label field_type in
+  let field = format_surface "wide-field.jac" field_source in
+  Alcotest.(check bool)
+    "119-column labeled field breaks after its colon" true
+    (contains (Printf.sprintf "%s:\n" field_label) field);
+  Alcotest.(check bool)
+    "broken labeled-field lines fit the canonical width" true
+    (max_line_length field <= Surface_print.default_width);
+  Alcotest.(check string)
+    "broken labeled field is idempotent" field
+    (format_surface "wide-field.jac" field);
+  Alcotest.(check bool)
+    "broken labeled field preserves its lowered form" true (same_lowered field_source field);
+  let hashable_field_source =
+    Printf.sprintf "type Container %s = | Make(%s: %s)\n" type_var field_label type_var
+  in
+  let hashable_field = format_surface "hashable-wide-field.jac" hashable_field_source in
+  Alcotest.(check (list string))
+    "labeled-field continuation preserves canonical identity"
+    (surface_hashes "hashable-wide-field.jac" hashable_field_source)
+    (surface_hashes "hashable-wide-field.jac" hashable_field);
+  List.iter
+    (fun (label, source) ->
+      let compact = format_surface ~width:1000 (label ^ ".jac") source in
+      let boundary = max_line_length compact in
+      Alcotest.(check string)
+        (label ^ " stays flat at N") compact
+        (format_surface ~width:boundary (label ^ ".jac") source);
+      Alcotest.(check string)
+        (label ^ " stays flat at N+1") compact
+        (format_surface ~width:(boundary + 1) (label ^ ".jac") source);
+      Alcotest.(check bool)
+        (label ^ " breaks at N-1") true
+        (not (String.equal compact (format_surface ~width:(boundary - 1) (label ^ ".jac") source))))
+    [
+      ("signature group", "function-name : ResultType\nfunction-name = 0\n");
+      ("labeled-field group", "type T = | Make(field-name: ResultType)\n");
+    ]
+
 let test_comma_list_exact_width_boundaries () =
   let cases =
     [
@@ -1448,6 +1521,8 @@ let suite =
       test_constructor_standard_width_boundary;
     Alcotest.test_case "declaration header width exception" `Quick
       test_declaration_header_width_exception;
+    Alcotest.test_case "colon continuation width contract" `Quick
+      test_colon_continuation_width_contract;
     Alcotest.test_case "plain-text formatter contract" `Quick test_plain_text_formatter_contract;
     Alcotest.test_case "multiline comma layout contract" `Quick test_multiline_comma_layout_contract;
     Alcotest.test_case "multiline comma contexts" `Quick test_multiline_comma_contexts;

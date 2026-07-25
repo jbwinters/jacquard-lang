@@ -328,20 +328,32 @@ Each is a CI property, not a goal.
 The canonical `.jac` formatter uses a 100-column margin. Omitting the printer's
 `width` argument is exactly the same as passing `width = 100`; the `jac fmt`
 command uses that default. Breakable structure never exceeds the selected
-margin, and a complete group that fits exactly remains compact. Two forms may
+margin, and a complete group that fits exactly remains compact. Three forms may
 exceed it:
 
-- an indivisible identifier, string, comment, or other UTF-8 token is never
-  split;
+- a residual indivisible identifier, string, comment, or other UTF-8 token is
+  never split after the formatter takes every legal break;
 - a type or effect declaration header whose shortest legal rendering exceeds
   the margin remains on one logical line, because `.jac` requires the name and
   `=` or `where` together. That line contains only the header and exceeds the
-  margin by exactly the shortest-header length minus the margin.
+  margin by exactly the shortest-header length minus the margin;
+- a `forall` prefix whose shortest legal rendering exceeds the margin remains
+  on one logical line because `.jac` has no continuation point between its
+  quantified variables or before `.`.
 
 The surface checker reports W1204 on a declaration name when its shortest
 canonical header exceeds the default 100-column width. Formatting remains
 total; the warning recommends shortening the declaration name or type-variable
-list rather than changing valid source into a different carrier.
+list rather than changing valid source into a different carrier. W1205 reports
+the same condition for a `forall` prefix and recommends splitting the
+declaration or reducing its quantified variables. Multiline declaration headers
+and quantified binders are one post-0.1 grammar-design question.
+
+Top-level signatures and labeled constructor fields use their existing legal
+continuation immediately after `:`. The name and colon stay together. When the
+flat group does not fit, the type starts on the next line two spaces inside the
+owning item; nested type layout continues from there. A labeled-field comma
+stays attached to the final line of its type.
 
 Formatting emits deterministic plain UTF-8 text with no ANSI color or other
 terminal styling. It preserves comment and documentation text but normalizes

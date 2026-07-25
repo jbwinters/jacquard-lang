@@ -574,13 +574,41 @@ let test_declaration_header_width_lint_boundary () =
         (Option.map Span.to_string (Diag.span warning))
   | found -> Alcotest.failf "expected one effect-header warning, got %d" (List.length found));
   let long_var = "a" ^ String.make 91 'a' in
-  match warnings (Printf.sprintf "type T %s = | Make\n" long_var) with
+  (match warnings (Printf.sprintf "type T %s = | Make\n" long_var) with
   | [ warning ] ->
       Alcotest.(check (option string))
         "type-variable overflow still selects the declaration name"
         (Some "declaration-width.jac:1:6-7")
         (Option.map Span.to_string (Diag.span warning))
-  | found -> Alcotest.failf "expected one type-variable warning, got %d" (List.length found)
+  | found -> Alcotest.failf "expected one type-variable warning, got %d" (List.length found));
+  let quantifier_warnings source =
+    List.filter (fun d -> Diag.code_or_uncoded d = "W1205") (lint source)
+  in
+  let exact_var = "a" ^ String.make 91 'a' in
+  Alcotest.(check int)
+    "100-column quantifier prefix is allowed" 0
+    (List.length
+       (quantifier_warnings (Printf.sprintf "f : forall %s. %s\nf = 0\n" exact_var exact_var)));
+  let short_vars =
+    List.init 8 (fun index -> Printf.sprintf "%c0" (Char.chr (Char.code 'a' + index)))
+    @ List.init 32 (fun index -> Printf.sprintf "v%02d" index)
+  in
+  let quantified = String.concat " " short_vars in
+  match quantifier_warnings (Printf.sprintf "f : forall %s. a0\nf = 0\n" quantified) with
+  | [ warning ] ->
+      Alcotest.(check string)
+        "quantifier warning reports exact prefix width"
+        "The shortest legal `forall` prefix in `f` is 159 columns, but the canonical formatter \
+         width is 100; `.jac` requires the quantified variables and `.` to remain on one logical \
+         line."
+        (Diag.cause warning);
+      Alcotest.(check (option string))
+        "quantifier warning selects the declaration name" (Some "declaration-width.jac:1:1-2")
+        (Option.map Span.to_string (Diag.span warning));
+      Alcotest.(check string)
+        "quantifier warning gives an actionable repair"
+        "Split the declaration or reduce its quantified variables." (Diag.next_step warning)
+  | found -> Alcotest.failf "expected one quantifier warning, got %d" (List.length found)
 
 let test_warning_exact_order_nested_raw_and_redundancy () =
   let source =

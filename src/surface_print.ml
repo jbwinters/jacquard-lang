@@ -9,8 +9,8 @@ type lookup = Surface_name.kind -> Hash.t -> string option
 (** The canonical formatter margin. A caller may request another rendering width for an editor or
     diagnostic view, but the command-line formatter and calls that omit [width] use exactly 100
     columns. Breakable structure stays within the margin and a group that fits exactly remains
-    compact. An indivisible UTF-8 token, preserved comment, or syntactically indivisible type/effect
-    declaration header may exceed it. *)
+    compact. An indivisible UTF-8 token, preserved comment, type/effect declaration header, or
+    [forall] prefix may exceed it only when its shortest legal rendering cannot fit. *)
 let default_width = 100
 
 exception Bug_unsupported_surface_form
@@ -906,7 +906,7 @@ let pp_binding context lookup fmt (binding : Kernel.binding) =
   | Some ty ->
       let signature_meta = Meta.signature binding.bmeta in
       pp_leading context signature_meta fmt;
-      Format.fprintf fmt "@[<v>%a : %a" (pp_named Surface_name.Term) binding.bname
+      Format.fprintf fmt "@[<v>@[<hov 2>%a :@ %a@]" (pp_named Surface_name.Term) binding.bname
         (pp_ty context lookup) ty;
       pp_trailing context signature_meta fmt;
       Format.fprintf fmt "@,%a@]" pp_definition ();
@@ -917,8 +917,8 @@ let pp_field context lookup fmt (field : Kernel.field) =
   (match field.label with
   | None -> pp_ty context lookup fmt field.fty
   | Some label ->
-      Format.fprintf fmt "%a: %a" (pp_named Surface_name.Term) label (pp_ty context lookup)
-        field.fty);
+      Format.fprintf fmt "@[<hov 2>%a:@ %a@]" (pp_named Surface_name.Term) label
+        (pp_ty context lookup) field.fty);
   pp_trailing context field.fmeta fmt
 
 let pp_constructor ?(leading = true) context lookup fmt (constructor : Kernel.conspec) =
