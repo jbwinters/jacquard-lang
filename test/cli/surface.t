@@ -107,7 +107,7 @@ prefix visible without rejecting or rewriting a valid program.
   > EOF
   $ jac fmt wide-forall.jac > wide-forall-formatted.jac 2> wide-forall.err
   $ grep 'warning\[W1205\]' wide-forall.err
-  wide-forall.jac:1:1-2: warning[W1205]: Quantifier prefix exceeds line width
+  wide-forall.jac:1:5-164: warning[W1205]: Quantifier prefix exceeds line width
   $ jac fmt wide-forall-formatted.jac 2> /dev/null | cmp wide-forall-formatted.jac -
 
 DX.3 keeps realistic nested quotes, matches, handlers, conditionals, and blocks stable under

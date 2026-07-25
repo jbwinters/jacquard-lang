@@ -392,6 +392,14 @@ let test_colon_continuation_width_contract () =
     (format_surface "wide-field.jac" field);
   Alcotest.(check bool)
     "broken labeled field preserves its lowered form" true (same_lowered field_source field);
+  let long_field_type = "Type" ^ String.make 88 'a' in
+  let indented_field =
+    format_surface "indented-field.jac"
+      (Printf.sprintf "type Container = | Make(field: %s)\n" long_field_type)
+  in
+  Alcotest.(check bool)
+    "labeled-field fallback preserves nested continuation indentation" true
+    (contains (Printf.sprintf "\n        %s,\n" long_field_type) indented_field);
   let hashable_field_source =
     Printf.sprintf "type Container %s = | Make(%s: %s)\n" type_var field_label type_var
   in
@@ -416,7 +424,17 @@ let test_colon_continuation_width_contract () =
     [
       ("signature group", "function-name : ResultType\nfunction-name = 0\n");
       ("labeled-field group", "type T = | Make(field-name: ResultType)\n");
-    ]
+    ];
+  List.iter
+    (fun prefix_width ->
+      let variable = "a" ^ String.make (prefix_width - 9) 'a' in
+      let source = Printf.sprintf "f : forall %s. a\nf = 0\n" variable in
+      let formatted = format_surface "quantifier-indent.jac" source in
+      Alcotest.(check bool)
+        (Printf.sprintf "%d-byte forall prefix keeps its two-space continuation" prefix_width)
+        true
+        (contains (Printf.sprintf "f :\n  forall %s.\n" variable) formatted))
+    [ 98; 99; 100; 101 ]
 
 let test_comma_list_exact_width_boundaries () =
   let cases =

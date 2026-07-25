@@ -547,8 +547,8 @@ let test_declaration_header_width_lint_boundary () =
       Alcotest.(check string)
         "type overflow reports exact length"
         (Printf.sprintf
-           "The shortest legal header for `%s` is 101 columns, but the canonical formatter width \
-            is 100; `.jac` requires this header to remain on one logical line."
+           "The shortest legal header for `%s` is 101 bytes, but the canonical formatter width is \
+            100 bytes; `.jac` requires this header to remain on one logical line."
            type_name_over_boundary)
         (Diag.cause warning);
       Alcotest.(check (option string))
@@ -589,26 +589,52 @@ let test_declaration_header_width_lint_boundary () =
     "100-column quantifier prefix is allowed" 0
     (List.length
        (quantifier_warnings (Printf.sprintf "f : forall %s. %s\nf = 0\n" exact_var exact_var)));
+  List.iter
+    (fun prefix_width ->
+      let variable = "a" ^ String.make (prefix_width - 9) 'a' in
+      Alcotest.(check int)
+        (Printf.sprintf "%d-byte quantifier warning boundary" prefix_width)
+        (if prefix_width > Surface_print.default_width then 1 else 0)
+        (List.length (quantifier_warnings (Printf.sprintf "f : forall %s. a\nf = 0\n" variable))))
+    [ 98; 99; 100; 101 ];
   let short_vars =
     List.init 8 (fun index -> Printf.sprintf "%c0" (Char.chr (Char.code 'a' + index)))
     @ List.init 32 (fun index -> Printf.sprintf "v%02d" index)
   in
   let quantified = String.concat " " short_vars in
-  match quantifier_warnings (Printf.sprintf "f : forall %s. a0\nf = 0\n" quantified) with
+  (match quantifier_warnings (Printf.sprintf "f : forall %s. a0\nf = 0\n" quantified) with
   | [ warning ] ->
       Alcotest.(check string)
         "quantifier warning reports exact prefix width"
-        "The shortest legal `forall` prefix in `f` is 159 columns, but the canonical formatter \
-         width is 100; `.jac` requires the quantified variables and `.` to remain on one logical \
-         line."
+        "The shortest legal `forall` prefix is 159 bytes, but the canonical formatter width is 100 \
+         bytes; `.jac` requires the quantified variables and `.` to remain on one logical line."
         (Diag.cause warning);
       Alcotest.(check (option string))
-        "quantifier warning selects the declaration name" (Some "declaration-width.jac:1:1-2")
+        "quantifier warning selects the forall prefix" (Some "declaration-width.jac:1:5-164")
         (Option.map Span.to_string (Diag.span warning));
       Alcotest.(check string)
         "quantifier warning gives an actionable repair"
         "Split the declaration or reduce its quantified variables." (Diag.next_step warning)
-  | found -> Alcotest.failf "expected one quantifier warning, got %d" (List.length found)
+  | found -> Alcotest.failf "expected one quantifier warning, got %d" (List.length found));
+  let annotated = Printf.sprintf "f = (fn (x) -> x : forall %s. (a0) ->{} a0)\n" quantified in
+  (match quantifier_warnings annotated with
+  | [ warning ] ->
+      Alcotest.(check bool)
+        "expression annotation warning selects its forall prefix" true
+        (match Diag.span warning with Some span -> span.Span.start_pos.col > 1 | None -> false)
+  | found -> Alcotest.failf "expected one expression-annotation warning, got %d" (List.length found));
+  let two_annotations =
+    Printf.sprintf "f = ((0 : forall %s. a0), (0 : forall %s. a0))\n" quantified quantified
+  in
+  match quantifier_warnings two_annotations with
+  | [ first; second ] ->
+      Alcotest.(check bool)
+        "multiple quantifier warnings retain source order" true
+        (match (Diag.span first, Diag.span second) with
+        | Some left, Some right -> left.Span.start_pos.offset < right.Span.start_pos.offset
+        | _ -> false)
+  | found ->
+      Alcotest.failf "expected two expression-annotation warnings, got %d" (List.length found)
 
 let test_warning_exact_order_nested_raw_and_redundancy () =
   let source =

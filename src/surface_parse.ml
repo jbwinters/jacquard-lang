@@ -1995,7 +1995,6 @@ let parse_signature state name_token name =
   skip_continuation state;
   let ty = parse_type state ~allow_newlines:false in
   let meta = meta_from_token_to_meta name_token ty.meta in
-  let meta = Meta.with_surface_container "declaration-name" (meta_with_span name_token.span) meta in
   Surface_ast.{ it = Signature (name, ty); meta }
 
 let parse_definition state name_token name equation =

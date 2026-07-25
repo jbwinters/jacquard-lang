@@ -327,8 +327,10 @@ Each is a CI property, not a goal.
 
 The canonical `.jac` formatter uses a 100-column margin. Omitting the printer's
 `width` argument is exactly the same as passing `width = 100`; the `jac fmt`
-command uses that default. Breakable structure never exceeds the selected
-margin, and a complete group that fits exactly remains compact. Three forms may
+command uses that default. Width is measured in UTF-8 bytes, matching source
+columns and the formatter's layout accounting. Breakable structure never
+exceeds the selected margin, and a complete group that fits exactly remains
+compact. Three forms may
 exceed it:
 
 - a residual indivisible identifier, string, comment, or other UTF-8 token is
@@ -342,12 +344,15 @@ exceed it:
   quantified variables or before `.`.
 
 The surface checker reports W1204 on a declaration name when its shortest
-canonical header exceeds the default 100-column width. Formatting remains
+canonical header exceeds the default 100-byte width. Formatting remains
 total; the warning recommends shortening the declaration name or type-variable
-list rather than changing valid source into a different carrier. W1205 reports
-the same condition for a `forall` prefix and recommends splitting the
-declaration or reducing its quantified variables. Multiline declaration headers
-and quantified binders are one post-0.1 grammar-design question.
+list rather than changing valid source into a different carrier. W1205 selects
+each offending `forall` prefix, including prefixes in nested expression
+annotations, and recommends splitting the declaration or reducing its
+quantified variables. These diagnostics fire only when a construct cannot fit
+at any indentation; they are necessary rather than exhaustive descriptions of
+over-wide physical lines. Multiline declaration headers and quantified binders
+are one post-0.1 grammar-design question.
 
 Top-level signatures and labeled constructor fields use their existing legal
 continuation immediately after `:`. The name and colon stay together. When the

@@ -1112,33 +1112,17 @@ let max_line_length text =
   String.split_on_char '\n' text
   |> List.fold_left (fun longest line -> max longest (String.length line)) 0
 
-(* [Format] treats the end of an [hv] box conservatively: a flat box whose final visible column is
-   exactly the configured margin can break, while a nested [hov] box can retain a flat child that
-   pushes its complete line past the margin. Render the complete syntactic unit first, then select
-   the widest internal margin whose visible output honors the caller's width. The initial extra
-   column lets an exactly fitting flat candidate remain flat. If even the maximally broken rendering
-   exceeds the width, retain the requested-margin rendering: the remaining excess is an indivisible
-   token or preserved comment, which the formatter contract explicitly permits, and shrinking the
-   internal margin further would only discard useful indentation. *)
+(* [Format] conservatively breaks a complete group whose last byte lands exactly at the margin, so
+   first try one internal byte beyond the requested width and retain that rendering only when its
+   physical lines still fit. Otherwise render at the requested margin. Never search narrower
+   margins: [Format] may satisfy them by clamping structural indentation, making a one-byte edit
+   move a type continuation back to column zero. Indivisible tokens, comments, declaration headers,
+   and quantified prefixes therefore retain their shortest valid rendering when they cannot fit. *)
 let render ~width pp value =
-  let upper_margin = max 2 (width + 1) in
-  let upper = render_at_margin ~margin:upper_margin pp value in
-  let upper_length = max_line_length upper in
-  if upper_length <= width then upper
-  else
-    (* Box layout is not monotone at extremely narrow margins: once indentation itself no longer
-       fits, [Format] may keep an inner box flat. Descend from the widest candidate so the first
-       compliant rendering is the least aggressive layout. *)
-    let requested_margin = max 2 width in
-    let requested = render_at_margin ~margin:requested_margin pp value in
-    let rec widest_fitting margin =
-      if margin < 2 then requested
-      else
-        let rendered = render_at_margin ~margin pp value in
-        let length = max_line_length rendered in
-        if length <= width then rendered else widest_fitting (margin - 1)
-    in
-    if max_line_length requested <= width then requested else widest_fitting (requested_margin - 1)
+  let requested_margin = max 2 width in
+  let upper = render_at_margin ~margin:(requested_margin + 1) pp value in
+  if max_line_length upper <= width then upper
+  else render_at_margin ~margin:requested_margin pp value
 
 let pp_clause_fragment context lookup fmt (clause : Kernel.clause) =
   match clause.cbody.it with

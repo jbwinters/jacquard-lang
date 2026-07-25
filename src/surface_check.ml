@@ -242,8 +242,8 @@ let warning_long_declaration_header (top : Surface_ast.top) kind name length =
     ~summary:"Declaration header exceeds the canonical formatter width"
     ~cause:
       (Printf.sprintf
-         "The shortest legal header for `%s` is %d columns, but the canonical formatter width is \
-          %d; `.jac` requires this header to remain on one logical line."
+         "The shortest legal header for `%s` is %d bytes, but the canonical formatter width is %d \
+          bytes; `.jac` requires this header to remain on one logical line."
          rendered_name length Surface_print.default_width)
     ~next_step:"Shorten the declaration name or its type-variable list." ~contrast:None ()
 
@@ -259,42 +259,37 @@ let quantifier_prefix_length type_vars row_vars =
   + rendered_names_length Surface_name.Rvar row_vars
   + String.length "."
 
-let rec longest_quantifier_prefix (annotation : Surface_ast.ty) =
-  let longest annotations =
-    List.fold_left
-      (fun found annotation -> max found (longest_quantifier_prefix annotation))
-      0 annotations
-  in
-  match annotation.it with
-  | Surface_ast.TyForall (type_vars, row_vars, body) ->
-      max (quantifier_prefix_length type_vars row_vars) (longest_quantifier_prefix body)
-  | Surface_ast.TyApp (head, args) -> max (longest_quantifier_prefix head) (longest args)
-  | Surface_ast.TyArrow (params, _, result) ->
-      max (longest params) (longest_quantifier_prefix result)
-  | Surface_ast.TyTuple items -> longest items
-  | Surface_ast.TyName _ | Surface_ast.TyVar _ | Surface_ast.TyHash _ | Surface_ast.TyHole _ -> 0
+let quantifier_prefix_meta (annotation : Surface_ast.ty) =
+  let prefix = Meta.surface_container "forall" annotation.meta in
+  if Meta.is_empty prefix then annotation.meta else prefix
 
-let warning_long_quantifier_prefix (top : Surface_ast.top) kind name length =
+let warning_long_quantifier_prefix (annotation : Surface_ast.ty) length =
   Diag.warning
-    ?span:(Meta.span (declaration_header_name_meta top))
+    ?span:(Meta.span (quantifier_prefix_meta annotation))
     ~domain:Surface ~code:"W1205" ~summary:"Quantifier prefix exceeds line width"
     ~cause:
       (Printf.sprintf
-         "The shortest legal `forall` prefix in `%s` is %d columns, but the canonical formatter \
-          width is %d; `.jac` requires the quantified variables and `.` to remain on one logical \
-          line."
-         (Surface_name.render kind name) length Surface_print.default_width)
+         "The shortest legal `forall` prefix is %d bytes, but the canonical formatter width is %d \
+          bytes; `.jac` requires the quantified variables and `.` to remain on one logical line."
+         length Surface_print.default_width)
     ~next_step:"Split the declaration or reduce its quantified variables." ~contrast:None ()
 
-let long_quantifier_prefix_warning top kind name annotations =
-  let length =
-    List.fold_left
-      (fun found annotation -> max found (longest_quantifier_prefix annotation))
-      0 annotations
-  in
-  if length > Surface_print.default_width then
-    [ warning_long_quantifier_prefix top kind name length ]
-  else []
+let rec long_quantifier_prefix_warnings (annotation : Surface_ast.ty) =
+  let annotations values = List.concat_map long_quantifier_prefix_warnings values in
+  match annotation.it with
+  | Surface_ast.TyForall (type_vars, row_vars, body) ->
+      let length = quantifier_prefix_length type_vars row_vars in
+      let here =
+        if length > Surface_print.default_width then
+          [ warning_long_quantifier_prefix annotation length ]
+        else []
+      in
+      here @ long_quantifier_prefix_warnings body
+  | Surface_ast.TyApp (head, args) -> long_quantifier_prefix_warnings head @ annotations args
+  | Surface_ast.TyArrow (params, _, result) ->
+      annotations params @ long_quantifier_prefix_warnings result
+  | Surface_ast.TyTuple items -> annotations items
+  | Surface_ast.TyName _ | Surface_ast.TyVar _ | Surface_ast.TyHash _ | Surface_ast.TyHole _ -> []
 
 let span_line_count meta =
   Option.map (fun span -> span.Span.end_pos.line - span.Span.start_pos.line + 1) (Meta.span meta)
@@ -360,7 +355,8 @@ let rec lint_expr names constructors (expression : Surface_ast.expr) =
   | Surface_ast.Quote (Surface_ast.Surface body) -> lint_expr names constructors body
   | Surface_ast.Quote (Surface_ast.Raw _) -> []
   | Surface_ast.Unquote body -> lint_expr names constructors body
-  | Surface_ast.Ann (subject, _) -> lint_expr names constructors subject
+  | Surface_ast.Ann (subject, annotation) ->
+      lint_expr names constructors subject @ long_quantifier_prefix_warnings annotation
 
 and lint_block_item names constructors = function
   | Surface_ast.Expr expression -> lint_expr names constructors expression
@@ -374,11 +370,10 @@ let lint_top names constructors (top : Surface_ast.top) =
   | Surface_ast.Definition { params; value; _ } ->
       List.concat_map (lint_pat names constructors) params @ lint_expr names constructors value
   | Surface_ast.TopExpr expression -> lint_expr names constructors expression
-  | Surface_ast.Signature (name, annotation) ->
-      long_quantifier_prefix_warning top Surface_name.Term name [ annotation ]
+  | Surface_ast.Signature (_, annotation) -> long_quantifier_prefix_warnings annotation
   | Surface_ast.TypeDecl { name; vars; constructors } ->
       long_declaration_header_warning top Surface_name.Type name (type_header_length name vars)
-      @ long_quantifier_prefix_warning top Surface_name.Type name
+      @ List.concat_map long_quantifier_prefix_warnings
           (List.concat_map
              (fun (constructor : Surface_ast.constructor) ->
                List.map (fun (field : Surface_ast.field) -> field.ty) constructor.fields)
@@ -386,9 +381,9 @@ let lint_top names constructors (top : Surface_ast.top) =
   | Surface_ast.EffectDecl { name; vars; operations } ->
       long_declaration_header_warning top Surface_name.Effect name
         (effect_header_length name vars operations)
-      @ long_quantifier_prefix_warning top Surface_name.Effect name
+      @ List.concat_map long_quantifier_prefix_warnings
           (List.concat_map
-             (fun (operation : Surface_ast.operation) -> operation.result :: operation.params)
+             (fun (operation : Surface_ast.operation) -> operation.params @ [ operation.result ])
              operations)
   | Surface_ast.RawTop _ | Surface_ast.TopHole _ -> []
 
