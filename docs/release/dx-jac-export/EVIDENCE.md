@@ -6,7 +6,7 @@ artifacts and are not retroactively updated by DX.2.
 
 ## Current inventory
 
-- Alcotest/QCheck cases: `828`
+- Alcotest/QCheck cases: `829`
 - Cram transcript files: `51`
 - Doctest examples: `27` across 8 documents
 
@@ -34,7 +34,8 @@ transcript; its native differential twin is closed and deterministic.
 GM.16 adds three canonical Workspace source-verification cases and one public
 governance-check transcript. GM.17A adds four governance-explanation cases and
 one public explanation transcript. GM.17B adds four static effect-attribution
-cases and one public why-effect transcript.
+cases and one public why-effect transcript. SX.25 adds one formatter-contract
+case for the canonical width, plain UTF-8 output, idempotence, and hash inertia.
 
 ## Proved behavior
 

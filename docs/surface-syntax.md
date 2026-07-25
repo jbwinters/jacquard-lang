@@ -323,6 +323,30 @@ Each is a CI property, not a goal.
   aspiration because grammar growth is the failure mode of every syntax
   project, and L7 is the tripwire.
 
+### Canonical formatter contract
+
+The canonical `.jac` formatter uses a 100-column margin. Omitting the printer's
+`width` argument is exactly the same as passing `width = 100`; the `jac fmt`
+command uses that default. The margin is where breakable groups choose between
+one line and multiple lines, not a promise to split an indivisible identifier,
+string, comment, or other UTF-8 token.
+
+Formatting emits deterministic plain UTF-8 text with no ANSI color or other
+terminal styling. It preserves comment and documentation text but normalizes
+layout as L6 describes. Formatting the result again is byte-identical, and
+formatting cannot change canonical hashes because layout and trivia remain
+metadata.
+
+Two existing readability choices are part of this bounded contract. Chained
+conditionals keep `else if` continuations flat. A match scrutinee spanning more
+than four source lines produces W1203 and asks the author to bind it with
+`let`; the formatter never invents that binding or rewrites the AST. This
+preserves L4 and semantic identity.
+
+This contract does not add trailing commas, change accepted grammar, or require
+every comma-separated construct to adopt a new multiline layout. Those broader
+formatter choices remain separate surface-language work.
+
 ## 4. Lexical ground rules
 
 Identifiers are kebab-case with optional `?` and `!` suffixes, matching the
