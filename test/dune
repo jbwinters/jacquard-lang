@@ -120,6 +120,7 @@
   ../README.md
   ../docs/errors.md
   ../docs/effect-review.md
+  ../docs/effect-linearity.md
   ../docs/effect-membranes.md
   ../docs/client-playground.md
   ../docs/effect-taxonomy.md
@@ -132,6 +133,7 @@
   ../docs/release/structured-concurrency/EVIDENCE.md
   ../docs/release/structured-concurrency/LIMITS.md
   ../docs/release/structured-concurrency/MANIFEST.sha256
+  ../docs/release/effect-taxonomy/ET8-EVIDENCE.md
   ../demos/README.md
   (source_tree ../demos/concurrency)
   ../docs/release/dx-jac-export/EVIDENCE.md

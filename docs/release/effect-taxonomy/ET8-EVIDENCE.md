@@ -1,16 +1,27 @@
 # Effect Taxonomy ET.8 Evidence
 
-Status: pre-commit ET.8 candidate overlay on integration commit `3591bc0`.
-The manifest makes the overlay reconstructible, but the final release
-reproduction is intentionally pending until the overlay has its own commit
-identity.
+Status: historical ET.8 publication record. Its retained manifest is immutable
+and is verified at the publication commit registered in
+`scripts/release/historical-publications.tsv`.
 
 ET.8 closes the taxonomy slice without changing a prelude declaration,
-operation schema, canonical interface hash, or runtime behavior. The frozen
-inventory contains 25 blessed names: 15 released identities and 10
-reserved/unimplemented schemas. The exact released hashes are recorded in
-`docs/effect-review.md` and checked against the taxonomy TSV, Markdown table,
-effect registry, and loaded prelude.
+operation schema, canonical interface hash, or runtime behavior. At the ET.8
+publication point, the inventory contained 25 blessed names: 15 released
+identities and 10 reserved/unimplemented schemas. The exact released hashes
+were recorded in `docs/effect-review.md` and checked against the taxonomy TSV,
+Markdown table, effect registry, and loaded prelude.
+
+## Current successor status
+
+The current v1 successor has 18 implemented effects. In particular,
+`Workspace`, `Judge`, and `Channel` are implemented. `Async` remains
+taxonomy-reserved with a published identity and interpreted scheduler. The
+seven remaining reserved names—`Choose`, `Env`, `Pg`, `Blob`, `Serve`,
+`Crypto`, and `Log`—are unimplemented.
+
+This successor status does not rewrite what ET.8 published. The historical
+manifest continues to attest the original bytes at its registered publication
+commit, while this prose tells readers what is true in the current tree.
 
 ## Review contract
 
@@ -23,22 +34,24 @@ effect registry, and loaded prelude.
   can provide the consent represented by that protocol.
 - Secret opacity is not taint tracking. `secret.expose` returns ordinary
   `Text`, which can subsequently be copied or leaked.
-- `Choose`, `Env`, `Pg`, `Blob`, `Serve`, `Crypto`, `Log`, `Judge`, `Async`,
-  and `Channel` are reserved and unimplemented. They have no released hash,
-  handler, root grant, product-availability claim, or roadmap commitment.
+- At the ET.8 publication point, `Choose`, `Env`, `Pg`, `Blob`, `Serve`,
+  `Crypto`, `Log`, `Judge`, `Async`, and `Channel` formed the ten-item
+  reserved/unimplemented set. That historical status made no handler, root
+  grant, product-availability claim, or roadmap commitment.
 
-The canonical handler inventory covers all 15 released effects. Executable
-checks require every named Jacquard handler to resolve in the loaded prelude
-and require the eight documented root boundaries to equal
+The ET.8 canonical handler inventory covered all 15 effects released at that
+publication point. Its executable checks required every named Jacquard handler
+to resolve in the loaded prelude and required the eight documented root
+boundaries to equal
 `Prelude.grantable_names`: Clock, Console, Dist, Eval, Fs, Infer, Net, and
 Secret. Approval, Audit, and Secret retain their separately evidenced boundary
 contracts; ET.8 does not add a membrane, object-capability sandbox, continuous
 distribution support, verified model truth, or automatic consent.
 
-## Machine and CLI evidence
+## Historical machine and CLI evidence
 
-The existing `effect-taxonomy` suite now fails if any of these projections
-drift:
+At ET.8, the `effect-taxonomy` suite failed if any of these projections
+drifted:
 
 - the TSV and Markdown name, tier, parameters, mode, risk, ring, status,
   operation, meaning, and exact released-hash fields;
@@ -48,7 +61,7 @@ drift:
   identities and requiring their deterministic canonical prelude names;
 - released declaration identities, type-parameter lists, operation names and
   modes, and rings;
-- the exact 15-item handler/boundary inventory and 10-item reserved set;
+- the then-exact 15-item handler/boundary inventory and 10-item reserved set;
 - the exact hash ledger and required risk, uncertainty, Secret, and non-goal
   wording in the review, taxonomy, stdlib, and tutorial documentation.
 
@@ -64,33 +77,25 @@ The focused stale-hash regression changes Net's TSV parameter schema from
 schema comparison rejects it. Coordinated TSV/Markdown drift can therefore no
 longer pass merely because it leaves a stale hash field untouched.
 
-ET.8 adds that regression to the existing `effect-taxonomy` suite without
-adding a cram file. The candidate inventory is 631 compiled Alcotest/QCheck
+ET.8 added that regression to the existing `effect-taxonomy` suite without
+adding a cram file. Its candidate inventory was 631 compiled Alcotest/QCheck
 cases and 35 cram transcript files.
 
 ## Reproduction
 
+From a current successor checkout, verify ET.8 and the other retained
+publication manifests with the historical-publication gate:
+
 ```sh
-eval "$(opam env)"
-mkdir -p "$PWD/.scratch/tmp"
-export TMPDIR="$PWD/.scratch/tmp"
-opam exec -- dune build @all
-opam exec -- dune runtest --force
-opam exec -- dune fmt
-opam exec -- dune build @doc
-ET8_COMMIT=$(git rev-parse HEAD)
-JACQUARD_RELEASE_REF="$ET8_COMMIT" \
-  JACQUARD_RELEASE_OUT="$PWD/.scratch/release/et8" \
-  scripts/release/reproduce-0.1.sh
-test "$(cat .scratch/release/et8/commit.txt)" = \
-  "$(git rev-parse --short "$ET8_COMMIT")"
-sha256sum -c docs/release/effect-taxonomy/ET8-MANIFEST.sha256
+scripts/release/check-historical-manifests.sh \
+  --commit "$(git rev-parse HEAD)" \
+  --require-history
 ```
 
-Run the release script only after committing the complete ET.8 overlay. A run
-whose `commit.txt` still records the base `3591bc0` validates the base plus a
-dirty working tree, not a release-addressable ET.8 artifact, and is not final
-ET.8 reproduction evidence.
+That gate reconstructs the registered publication tree before checking
+`ET8-MANIFEST.sha256`. Do not regenerate the retained manifest from current
+successor files: a direct `sha256sum -c` in today's checkout would compare
+different publication states.
 
 The ET.2 through ET.7 evidence packs remain historical and unchanged. The ET.8
-manifest attests only this documentation-and-checking overlay on `3591bc0`.
+manifest attests only its registered historical publication.
