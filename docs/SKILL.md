@@ -304,6 +304,12 @@ Labels document constructor fields but do not create record syntax, labeled
 patterns, or generated accessors. Construct values with `Canary(5)` and match
 positionally with `Canary(percent)`.
 
+Comma-separated surface groups accept an optional final comma. Compact
+formatting removes it, except for singleton tuples such as `(T,)`; when a
+group wraps, Jacquard prints one item per line and a comma after every item.
+The punctuation is erased before kernel validation and never changes hashes
+or `.jqd` behavior.
+
 ### Effects And Deep Mode-Aware Handlers
 
 Effects declare operations. Calling an operation looks like an ordinary call;

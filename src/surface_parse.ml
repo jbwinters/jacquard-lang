@@ -531,10 +531,8 @@ and parse_expr_list state =
         | Surface_lex.Comma ->
             ignore (advance state);
             skip_list_space state;
-            if (current state).Surface_lex.token = Surface_lex.RParen then begin
-              report state (current state) "calls do not permit a trailing comma";
+            if (current state).Surface_lex.token = Surface_lex.RParen then
               (List.rev (expression :: acc), advance state)
-            end
             else loop (expression :: acc)
         | Surface_lex.RParen -> (List.rev (expression :: acc), advance state)
         | _ ->
@@ -643,11 +641,8 @@ and parse_list_expr state opening =
                   | Surface_lex.Comma ->
                       ignore (advance state);
                       skip_list_space state;
-                      if (current state).Surface_lex.token = Surface_lex.RBracket then begin
-                        report state (current state) "list literals do not permit a trailing comma";
-                        let hole = expr_hole state (current state) in
-                        (List.rev (hole :: expression :: acc), advance state)
-                      end
+                      if (current state).Surface_lex.token = Surface_lex.RBracket then
+                        (List.rev (expression :: acc), advance state)
                       else loop (expression :: acc)
                   | Surface_lex.RBracket -> (List.rev (expression :: acc), advance state)
                   | _ ->
@@ -805,10 +800,8 @@ and parse_paren_expr state opening =
               | Surface_lex.Comma ->
                   ignore (advance state);
                   skip_list_space state;
-                  if (current state).Surface_lex.token = Surface_lex.RParen then begin
-                    report state (current state) "multi-item tuples do not permit a trailing comma";
+                  if (current state).Surface_lex.token = Surface_lex.RParen then
                     (List.rev (item :: acc), advance state)
-                  end
                   else items (item :: acc)
               | Surface_lex.RParen -> (List.rev (item :: acc), advance state)
               | _ ->
@@ -879,7 +872,6 @@ and parse_pattern_list state _opening =
             ignore (advance state);
             skip_list_space state;
             if (current state).Surface_lex.token = Surface_lex.RParen then begin
-              report state (current state) "pattern lists do not permit a trailing comma";
               let closing = advance state in
               (List.rev (pattern :: acc), closing)
             end
@@ -1688,11 +1680,8 @@ and parse_paren_type state ~allow_newlines:_ opening =
             | Surface_lex.Comma ->
                 ignore (advance state);
                 skip_list_space state;
-                if (current state).Surface_lex.token = Surface_lex.RParen then begin
-                  report state (current state)
-                    "multi-item type tuples do not permit a trailing comma";
+                if (current state).Surface_lex.token = Surface_lex.RParen then
                   (List.rev (item :: acc), advance state)
-                end
                 else items (item :: acc)
             | Surface_lex.RParen -> (List.rev (item :: acc), advance state)
             | _ ->
@@ -1853,8 +1842,7 @@ and parse_row_separator state ~effect_index row_owners =
               !row_owners;
           skip_continuation state;
           match (current state).Surface_lex.token with
-          | Surface_lex.RBrace | Surface_lex.Bar ->
-              report state (current state) "effect rows do not permit a trailing comma"
+          | Surface_lex.RBrace | Surface_lex.Bar -> ()
           | _ -> ())
       | Surface_lex.Bar | Surface_lex.RBrace -> ()
       | Surface_lex.Newline -> (
@@ -2126,9 +2114,7 @@ let parse_constructor_fields state constructor opening =
                 | Surface_lex.Comma ->
                     ignore (advance state);
                     skip_list_space state;
-                    if (current state).Surface_lex.token = Surface_lex.RParen then
-                      report_code state (current state) "E1225"
-                        "constructor field lists do not permit a trailing comma"
+                    ()
                 | Surface_lex.RParen -> ()
                 | _ ->
                     report_code state (current state) "E1225"
@@ -2233,8 +2219,6 @@ let parse_operation_types state =
               ignore (advance state);
               skip_list_space state;
               if (current state).Surface_lex.token = Surface_lex.RParen then begin
-                report_code state (current state) "E1225"
-                  "operation parameter lists do not permit a trailing comma";
                 let closing = advance state in
                 (List.rev (ty :: acc), closing)
               end
@@ -2682,7 +2666,7 @@ module Trivia_ownership = struct
   let row_slots (row : Surface_ast.row) =
     containers [ "row-open"; "row-bar"; "row-tail"; "row-close" ] row.row_meta
     @ indexed_containers "row-effect" (List.length row.effects) row.row_meta
-    @ indexed_containers "row-comma" (max 0 (List.length row.effects - 1)) row.row_meta
+    @ indexed_containers "row-comma" (List.length row.effects) row.row_meta
 
   let rec expr depth (node : Surface_ast.expr) =
     let children =
@@ -3050,7 +3034,7 @@ module Trivia_ownership = struct
     meta
     |> apply_containers additions [ "row-open"; "row-bar"; "row-tail"; "row-close" ]
     |> apply_indexed_containers additions "row-effect" effect_count
-    |> apply_indexed_containers additions "row-comma" (max 0 (effect_count - 1))
+    |> apply_indexed_containers additions "row-comma" effect_count
 
   let apply_owner additions role meta =
     meta |> apply additions role

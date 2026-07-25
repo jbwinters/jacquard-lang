@@ -115,11 +115,11 @@ type-app      := type-atom type-atom*
 type-atom     := type-name | type-var | "()" | "(" type ")"
 | "(" type "," ")" | "(" types ")"
 row           := "->{" cont effects? [cont "|" cont row-var] cont "}"
-patterns      := pattern ("," pattern)*
-fields        := field ("," field)*
-types         := type ("," type)*
-exprs         := expr ("," expr)*
-effects       := effect-name ("," cont effect-name)*
+patterns      := pattern ("," pattern)* [","]
+fields        := field ("," field)* [","]
+types         := type ("," type)* [","]
+exprs         := expr ("," expr)* [","]
+effects       := effect-name ("," cont effect-name)* [","]
 type-vars     := type-var+
 row-vars      := row-var+
 forall-vars   := type-vars ["|" row-vars] | "|" row-vars
@@ -343,9 +343,21 @@ than four source lines produces W1203 and asks the author to bind it with
 `let`; the formatter never invents that binding or rewrites the AST. This
 preserves L4 and semantic identity.
 
-This contract does not add trailing commas, change accepted grammar, or require
-every comma-separated construct to adopt a new multiline layout. Those broader
-formatter choices remain separate surface-language work.
+Calls, lists, expression and type tuples, function and handler parameter lists,
+arrow parameter lists, labeled constructor fields, operation parameter lists,
+constructor patterns, and effect lists accept one optional final comma. The
+comma is surface punctuation only: lowering erases it, so it cannot change
+kernel forms, evaluation order, hashes, or `.jqd` behavior. A final comma
+before an open row tail is accepted and normalized away because the tail still
+follows the effect list.
+
+Compact groups remain on one line without a final comma, except singleton
+tuples, whose comma carries their arity. When a comma group exceeds the
+selected width, its opening delimiter stays on the preceding line, every item
+gets its own indented line, every item ends in a comma, and the closing
+delimiter gets its own line. This all-or-nothing vertical layout makes an
+appended item a one-line diff. Comments may force the same vertical choice;
+their text, order, and ownership remain governed by L6.
 
 ## 4. Lexical ground rules
 
@@ -562,7 +574,9 @@ while the other kept chains flat, which is the printer's rule now.
 
 `(a, b)` and `()` are kernel tuples. `[1, 2, 3]` is sugar desugaring by name
 to `Cons(1, Cons(2, Cons(3, Nil)))`, resolved like any other names (D32), so
-the sugar carries no hard-coded hashes.
+the sugar carries no hard-coded hashes. An author may write `(a, b,)` or
+`[1, 2, 3,]`; both lower exactly like the compact spelling, and canonical
+formatting removes the comma unless the group wraps.
 
 ### Pipe
 
@@ -631,6 +645,9 @@ below.
 
 Row notation prints tight, with no interior spaces (`->{Net, Clock}`, never
 `-> { Net, Clock }`), and wraps one effect per line past that width.
+Closed multiline rows end every effect with a comma, including the final
+effect. Open rows do not print a comma immediately before `|`, because the row
+tail follows the effect list.
 `()` is the empty tuple type and `(T,)` is the singleton tuple type; the
 trailing comma preserves every legal kernel `TTuple` arity. Quantification
 prints `forall a b | e. T`, with type variables before `|` and row variables

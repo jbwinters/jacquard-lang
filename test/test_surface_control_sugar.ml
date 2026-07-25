@@ -126,6 +126,9 @@ let test_list_shapes_and_hashes () =
       ( "non-empty list",
         "[a, b, x]",
         "(app (var cons) (var a) (app (var cons) (var b) (app (var cons) (var x) (var nil))))" );
+      ( "trailing list comma",
+        "[a, b, x,]",
+        "(app (var cons) (var a) (app (var cons) (var b) (app (var cons) (var x) (var nil))))" );
       ( "nested lists",
         "[[a], [], [b, x]]",
         "(app (var cons) (app (var cons) (var a) (var nil)) (app (var cons) (var nil) (app (var \
@@ -468,7 +471,6 @@ let test_malformed_and_recovery () =
   Alcotest.(check (list string))
     "exact malformed diagnostics"
     [
-      e1220 "bad-ss13.jac:1:4-5" "list literals do not permit a trailing comma";
       e1220 "bad-ss13.jac:2:6-7"
         "unclosed `if`: expected `then` after the condition, found ident(a) The `if` expression \
          opened at bad-ss13.jac:2:1-3.";

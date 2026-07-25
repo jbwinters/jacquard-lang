@@ -211,6 +211,17 @@ let test_row_wrapping_threshold () =
     "wraps one effect per line"
     "->{\n  NetworkObservability,\n  FilesystemObservability,\n  DeterministicClock\n  | e\n}"
     (print_fragment ~width:(String.length compact - 1) row);
+  let closed_row =
+    "(row (eref network-observability) (eref filesystem-observability) (eref deterministic-clock))"
+  in
+  let closed_compact = "->{NetworkObservability, FilesystemObservability, DeterministicClock}" in
+  Alcotest.(check string)
+    "closed row fits without a final comma" closed_compact
+    (print_fragment ~width:(String.length closed_compact) closed_row);
+  Alcotest.(check string)
+    "closed row wraps with a final comma"
+    "->{\n  NetworkObservability,\n  FilesystemObservability,\n  DeterministicClock,\n}"
+    (print_fragment ~width:(String.length closed_compact - 2) closed_row);
   let top =
     bootstrap
       "(ann (var f) (tarrow () (row (eref network-observability) (eref filesystem-observability) \
@@ -448,13 +459,46 @@ f = 0
   Alcotest.(check string) "exact canonical placement" expected once;
   Alcotest.(check string) "type trivia idempotence" once (print_recovered once)
 
+let test_trailing_row_comma_trivia () =
+  let cases =
+    [
+      ( "closed",
+        "f : () ->{Net, -- keep closed comma\n} Text\nf = 0\n",
+        "f : () ->{Net} Text\nf = 0\n",
+        "-- keep closed comma",
+        "->{\n         Net, -- keep closed comma\n       }" );
+      ( "open",
+        "f : () ->{Net, -- keep open comma\n| e} Text\nf = 0\n",
+        "f : () ->{Net | e} Text\nf = 0\n",
+        "-- keep open comma",
+        "->{\n         Net -- keep open comma\n         | e\n       }" );
+    ]
+  in
+  List.iter
+    (fun (label, source, twin, comment, expected) ->
+      let formatted = print_recovered source in
+      Alcotest.(check bool) (label ^ " comment survives") true (contains formatted comment);
+      Alcotest.(check bool)
+        (label ^ " comma and closing-row layout is canonical")
+        true (contains formatted expected);
+      Alcotest.(check string)
+        (label ^ " formatting is idempotent")
+        formatted (print_recovered formatted);
+      match (lower source, lower twin) with
+      | [ source_top ], [ twin_top ] ->
+          Alcotest.(check bool)
+            (label ^ " trailing comma and comment are identity inert")
+            true
+            (Form.equal_ignoring_meta (form source_top) (form twin_top))
+      | _ -> Alcotest.failf "%s row fixture changed top count" label)
+    cases
+
 let test_malformed_rows_and_recovery () =
   let zero = String.make 64 '0' in
   let cases =
     [
       ("missing tail", "f : () ->{|} Text\nf = 0\n");
       ("duplicate tail", "f : () ->{Net | e | f} Text\nf = 0\n");
-      ("trailing comma", "f : () ->{Net,} Text\nf = 0\n");
       ("wrong namespace", Printf.sprintf "f : () ->{#%s:type} Text\nf = 0\n" zero);
       ("missing opening brace", "f : () ->Net Text\nf = 0\n");
       ("legacy tail-only", "f : () ->{e} Text\nf = 0\n");
@@ -563,6 +607,7 @@ let suite =
     Alcotest.test_case "resolved reference identity" `Quick test_resolved_reference_identity;
     Alcotest.test_case "checker surface signatures" `Quick test_checker_signatures_are_surface;
     Alcotest.test_case "type trivia ownership" `Quick test_type_trivia_ownership;
+    Alcotest.test_case "trailing row comma trivia" `Quick test_trailing_row_comma_trivia;
     Alcotest.test_case "malformed rows and recovery" `Quick test_malformed_rows_and_recovery;
     Alcotest.test_case "forall newline recovery" `Quick test_forall_newline_recovery_and_owners;
     Alcotest.test_case "raw and bootstrap fallback" `Quick test_raw_and_bootstrap_fallback;

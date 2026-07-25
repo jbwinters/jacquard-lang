@@ -223,6 +223,9 @@ let test_type_declarations () =
   let no_initial_bar = only_decl (lower "type Unitish = Unitish\n") in
   let positional = only_decl (lower "type Pair a b = | Pair a b\n") in
   let labeled = only_decl (lower "type Fleet = | MkFleet(inv: SvcMood, pay: SvcMood)\n") in
+  let labeled_trailing =
+    only_decl (lower "type Fleet = | MkFleet(inv: SvcMood, pay: SvcMood,)\n")
+  in
   let mixed = only_decl (lower "type Mixed = | MkMixed(left: SvcMood, SvcMood)\n") in
   let labels declaration =
     match declaration.Kernel.it with
@@ -234,6 +237,8 @@ let test_type_declarations () =
   Alcotest.(check (list (option string))) "positional labels" [ None; None ] (labels positional);
   Alcotest.(check (list (option string)))
     "labeled fields" [ Some "inv"; Some "pay" ] (labels labeled);
+  Alcotest.(check (list (option string)))
+    "labeled fields trailing comma" (labels labeled) (labels labeled_trailing);
   Alcotest.(check (list (option string))) "mixed fields" [ Some "left"; None ] (labels mixed);
   (match
      (only_decl (lower "type Wrapped a = | MkWrapped(value:\n  List\n    a\n)\n")).Kernel.it
@@ -259,12 +264,11 @@ let test_type_declarations () =
       } ->
       ()
   | _ -> Alcotest.fail "valid multiline labeled field type was weakened by recovery lookahead");
-  has_code "E1225" "type Bad a = | Some(a)\n";
-  has_code "E1225" "type Bad = | MkBad(field: Bad,)\n"
+  has_code "E1225" "type Bad a = | Some(a)\n"
 
 let test_effect_declarations () =
   let declaration =
-    only_decl (lower "multi effect Choice a where {\n  choose : (a, Text) -> Bool\n}\n")
+    only_decl (lower "multi effect Choice a where {\n  choose : (a, Text,) -> Bool\n}\n")
   in
   (match declaration.Kernel.it with
   | Kernel.DefEffect

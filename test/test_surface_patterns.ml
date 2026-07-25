@@ -48,9 +48,9 @@ let test_all_pattern_forms_and_literals () =
   | _ -> 0
   | binding -> binding
   | 1 -> 1
-  | Some(value) -> value
-  | (only) -> only
-  | Pair(left, right) as whole -> whole
+  | Some(value,) -> value
+  | (only,) -> only
+  | Pair(left, right,) as whole -> whole
 }|}
     {|(match (var subject)
   (clause (pwild) (lit 0))

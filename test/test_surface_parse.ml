@@ -52,12 +52,14 @@ let test_atoms () =
 let test_calls () =
   check_equivalent "zero arguments" "f()" "(app (var f))";
   check_equivalent "multiline arguments" "f(\n  1,\n  2\n)" "(app (var f) (lit 1) (lit 2))";
+  check_equivalent "trailing call comma" "f(1, 2,)" "(app (var f) (lit 1) (lit 2))";
   check_equivalent "postfix left associativity" "f()(1)(2, 3)"
     "(app (app (app (var f)) (lit 1)) (lit 2) (lit 3))"
 
 let test_functions_and_patterns () =
   check_equivalent "function and irrefutable patterns" "fn (_, (x, y)) -> x"
     "(lam ((pwild) (ptuple (pvar x) (pvar y))) (var x))";
+  check_equivalent "trailing parameter comma" "fn (x, y,) -> x" "(lam ((pvar x) (pvar y)) (var x))";
   check_equivalent "zero argument function" "fn () -> ()" "(lam () (tuple))";
   List.iter
     (fun source ->
@@ -80,7 +82,9 @@ let test_parentheses_and_tuples () =
   check_equivalent "grouping" "(1)" "(lit 1)";
   check_equivalent "unit" "()" "(tuple)";
   check_equivalent "singleton" "(1,)" "(tuple (lit 1))";
-  check_equivalent "multi" "(1, 2, f(3))" "(tuple (lit 1) (lit 2) (app (var f) (lit 3)))"
+  check_equivalent "multi" "(1, 2, f(3))" "(tuple (lit 1) (lit 2) (app (var f) (lit 3)))";
+  check_equivalent "multi trailing comma" "(1, 2, f(3),)"
+    "(tuple (lit 1) (lit 2) (app (var f) (lit 3)))"
 
 let test_annotations_and_complete_types () =
   let zeros = String.make 64 '0' in
@@ -102,9 +106,12 @@ let test_annotations_and_complete_types () =
     "(ann (var x) (tforall ((tvar a)) ((rvar e)) (tarrow ((tvar a)) (row (eref console) e) (tvar \
      a))))";
   check_equivalent "grouped type" "(x : (List a))" "(ann (var x) (tapp (tref list) (tvar a)))";
-  Alcotest.(check bool)
-    "row trailing comma rejected" true
-    (List.mem "E1220" (error_codes "(x : () ->{Console,} Unit)"))
+  check_equivalent "row trailing comma" "(x : () ->{Console,} Unit)"
+    "(ann (var x) (tarrow () (row (eref console)) (tref unit)))";
+  check_equivalent "type parameter and tuple trailing commas"
+    "(x : (List a, Text,) ->{} (a, Text,))"
+    "(ann (var x) (tarrow ((tapp (tref list) (tvar a)) (tref text)) (row) (ttuple (tvar a) (tref \
+     text))))"
 
 let test_forall_row_var_requirement () =
   check_equivalent "vacuous forall" "(x : forall . T)" "(ann (var x) (tforall () () (tref t)))";

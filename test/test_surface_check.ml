@@ -92,9 +92,6 @@ let test_hole_kinds_and_independent_islands () =
       ( "row-missing-tail",
         "broken : () ->{|} Int\nbroken() = 1\nlater = 42\n",
         [ e1220 "row-missing-tail.jac:1:17-18" "expected a lowercase row variable after `|`" ] );
-      ( "row-trailing-comma",
-        "broken : () ->{Net,} Int\nbroken() = 1\nlater = 42\n",
-        [ e1220 "row-trailing-comma.jac:1:20-21" "effect rows do not permit a trailing comma" ] );
     ]
   in
   List.iter
@@ -112,11 +109,11 @@ let test_hole_kinds_and_independent_islands () =
 let test_malformed_row_checks_as_any_row () =
   let report =
     analyze ~file:"row-any.jac"
-      "takes : (() ->{Net,} Int) ->{} Int\ntakes(thunk) = 1\nquiet() = 1\ntakes(quiet)\n"
+      "takes : (() ->{|} Int) ->{} Int\ntakes(thunk) = 1\nquiet() = 1\ntakes(quiet)\n"
   in
   Alcotest.(check (list string))
     "only the primary malformed-row diagnostic"
-    [ e1220 "row-any.jac:1:20-21" "effect rows do not permit a trailing comma" ]
+    [ e1220 "row-any.jac:1:17-18" "expected a lowercase row variable after `|`" ]
     (report_golden report);
   Alcotest.(check (list string))
     "surrounding declarations still check" [ "takes"; "quiet"; "_" ] (signature_names report)
