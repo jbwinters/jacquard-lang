@@ -325,11 +325,50 @@ Each is a CI property, not a goal.
 
 ### Canonical formatter contract
 
-The canonical `.jac` formatter uses a 100-column margin. Omitting the printer's
-`width` argument is exactly the same as passing `width = 100`; the `jac fmt`
-command uses that default. The margin is where breakable groups choose between
-one line and multiple lines, not a promise to split an indivisible identifier,
-string, comment, or other UTF-8 token.
+The canonical `.jac` formatter uses a 100-byte layout target. Omitting the
+printer's `width` argument is exactly the same as passing `width = 100`; the
+`jac fmt` command uses that default. Width is measured in UTF-8 bytes, matching
+source columns and the formatter's layout accounting.
+
+The target is not a global physical-line postcondition. The formatter lays out
+each top-level unit as a whole. It first uses one extra internal byte so a group
+ending exactly at the target can remain compact, and keeps that rendering only
+when every line still fits. Otherwise it lays out the whole unit at the
+requested target. An exact-fit subgroup can therefore break when another line
+in the same unit forces that fallback.
+
+Known overflow cases include, but are not limited to:
+
+- a residual indivisible identifier, string, comment, or other UTF-8 token is
+  never split after the formatter takes every legal break;
+- a type or effect declaration header whose shortest legal rendering exceeds
+  the margin remains on one logical line, because `.jac` requires the name and
+  `=` or `where` together. That line contains only the header and exceeds the
+  margin by exactly the shortest-header length minus the margin;
+- a `forall` prefix whose shortest legal rendering exceeds the margin remains
+  on one logical line because `.jac` has no continuation point between its
+  quantified variables or before `.`;
+- syntax emitted next to a measured breakable group can push the physical line
+  past the target, such as the arrow after a match-clause pattern;
+- an unsupported kernel form may use the raw `jqd { ... }` inversion escape,
+  whose preserved bootstrap form can be wider than the target.
+
+The surface checker reports W1204 on a declaration name when its shortest
+canonical header exceeds the default 100-byte width. Formatting remains
+total; the warning recommends shortening the declaration name or type-variable
+list rather than changing valid source into a different carrier. W1205 selects
+each offending `forall` prefix, including prefixes in nested expression
+annotations, and recommends splitting the declaration or reducing its
+quantified variables. These diagnostics fire only when a construct cannot fit
+at any indentation; they are necessary rather than exhaustive descriptions of
+over-wide physical lines. Multiline declaration headers and quantified binders
+are one post-0.1 grammar-design question.
+
+Top-level signatures and labeled constructor fields use their existing legal
+continuation immediately after `:`. The name and colon stay together. When the
+flat group does not fit, the type starts on the next line two spaces inside the
+owning item; nested type layout continues from there. A labeled-field comma
+stays attached to the final line of its type.
 
 Formatting emits deterministic plain UTF-8 text with no ANSI color or other
 terminal styling. It preserves comment and documentation text but normalizes

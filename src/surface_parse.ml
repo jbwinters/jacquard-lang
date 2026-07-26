@@ -1994,7 +1994,8 @@ let parse_signature state name_token name =
   ignore (expect state Surface_lex.Colon "`:` in the signature");
   skip_continuation state;
   let ty = parse_type state ~allow_newlines:false in
-  Surface_ast.{ it = Signature (name, ty); meta = meta_from_token_to_meta name_token ty.meta }
+  let meta = meta_from_token_to_meta name_token ty.meta in
+  Surface_ast.{ it = Signature (name, ty); meta }
 
 let parse_definition state name_token name equation =
   ignore (advance state);
@@ -2159,7 +2160,7 @@ let next_bar state =
   if (token_at state index).Surface_lex.token = Surface_lex.Bar then Some index else None
 
 let parse_type_decl state keyword =
-  let name, _ = parse_decl_name state "a type name" type_decl_name in
+  let name, name_token = parse_decl_name state "a type name" type_decl_name in
   let vars = parse_type_vars state (fun token -> token = Surface_lex.Equal) in
   ignore (expect state Surface_lex.Equal "`=` in the type declaration");
   let interrupted = ref false in
@@ -2199,6 +2200,7 @@ let parse_type_decl state keyword =
     | constructor :: _ -> meta_from_token_to_meta keyword constructor.Surface_ast.meta
     | [] -> meta_with_span keyword.Surface_lex.span
   in
+  let meta = Meta.with_surface_container "declaration-name" (meta_with_span name_token.span) meta in
   Surface_ast.{ it = TypeDecl { name; vars; constructors }; meta }
 
 let parse_operation_types state =
@@ -2322,7 +2324,7 @@ let operation_ahead state index =
       (token_at state next).Surface_lex.token = Surface_lex.Colon
 
 let parse_effect_decl state ~start ~effect_mode keyword =
-  let name, _ = parse_decl_name state "an effect name" effect_decl_name in
+  let name, name_token = parse_decl_name state "an effect name" effect_decl_name in
   let vars = parse_type_vars state (fun token -> token = Surface_lex.Keyword "where") in
   ignore (expect state (Surface_lex.Keyword "where") "`where` in the effect declaration");
   let opening = expect state Surface_lex.LBrace "`{` immediately after `where`" in
@@ -2394,7 +2396,9 @@ let parse_effect_decl state ~start ~effect_mode keyword =
   Surface_ast.
     {
       it = EffectDecl { name; vars; operations };
-      meta = meta_with_span (Span.merge start.Surface_lex.span end_span);
+      meta =
+        meta_with_span (Span.merge start.Surface_lex.span end_span)
+        |> Meta.with_surface_container "declaration-name" (meta_with_span name_token.span);
     }
 
 let parse_mode_effect_decl state first =

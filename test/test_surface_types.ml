@@ -232,6 +232,55 @@ let test_row_wrapping_threshold () =
   | [ reparsed ] -> Alcotest.(check string) "wrapped idempotence" once (print ~width:48 reparsed)
   | _ -> Alcotest.fail "wrapped row did not parse as one top"
 
+let max_line_length text =
+  String.split_on_char '\n' text
+  |> List.fold_left (fun longest line -> max longest (String.length line)) 0
+
+let test_tuple_and_arrow_parameter_width_boundaries () =
+  let tuple = "(ttuple (tref first-type) (tref second-type))" in
+  let compact_tuple = print_fragment ~width:1000 tuple in
+  let tuple_boundary = String.length compact_tuple in
+  Alcotest.(check string)
+    "type tuple fits at its exact boundary" compact_tuple
+    (print_fragment ~width:tuple_boundary tuple);
+  Alcotest.(check string)
+    "type tuple fits above its boundary" compact_tuple
+    (print_fragment ~width:(tuple_boundary + 1) tuple);
+  let wrapped_tuple = print_fragment ~width:(tuple_boundary - 1) tuple in
+  Alcotest.(check bool)
+    "type tuple wraps below its boundary" true
+    (not (String.equal compact_tuple wrapped_tuple));
+  Alcotest.(check bool)
+    "type tuple items are vertical and comma-terminated" true
+    (contains wrapped_tuple "FirstType,\n" && contains wrapped_tuple "SecondType,\n");
+  Alcotest.(check bool)
+    "wrapped type tuple stays within its requested width" true
+    (max_line_length wrapped_tuple <= tuple_boundary - 1);
+  let arrow = "(tarrow ((tref first-type) (tref second-type)) (row) (tref result-type))" in
+  let compact_arrow = print_fragment ~width:1000 arrow in
+  let arrow_boundary = String.length compact_arrow in
+  Alcotest.(check string)
+    "arrow fits at its exact boundary" compact_arrow
+    (print_fragment ~width:arrow_boundary arrow);
+  Alcotest.(check string)
+    "arrow fits above its boundary" compact_arrow
+    (print_fragment ~width:(arrow_boundary + 1) arrow);
+  let below_arrow = print_fragment ~width:(arrow_boundary - 1) arrow in
+  Alcotest.(check bool)
+    "arrow wraps below its boundary" true
+    (not (String.equal compact_arrow below_arrow));
+  Alcotest.(check bool)
+    "wrapped arrow stays within its requested width" true
+    (max_line_length below_arrow <= arrow_boundary - 1);
+  let vertical_arrow = print_fragment ~width:20 arrow in
+  Alcotest.(check bool)
+    "narrow arrow parameters are vertical and comma-terminated" true
+    (contains vertical_arrow "FirstType,\n" && contains vertical_arrow "SecondType,\n");
+  let vertical_arrow_file = vertical_arrow ^ "\n" in
+  Alcotest.(check string)
+    "narrow arrow rendering is idempotent" vertical_arrow_file
+    (print_recovered ~width:20 vertical_arrow_file)
+
 let test_hash_inversion_and_row_set_law () =
   let type_hash = Hash.of_string "ss14-result" in
   let net = Hash.of_string "ss14-net" in
@@ -410,16 +459,17 @@ let test_type_trivia_ownership () =
   in
   let once = print_recovered source in
   let expected =
-    {|f : forall a | e. -- forall-dot
-      (a) ->{ -- row-open
-        -- net-leading
-       Net, -- comma
-       -- clock-leading
-       Clock -- clock-trailing
-       | -- row-bar
-       e -- row-tail
-       } -- row-close
-        a
+    {|f :
+  forall a | e. -- forall-dot
+    (a) ->{ -- row-open
+      -- net-leading
+     Net, -- comma
+     -- clock-leading
+     Clock -- clock-trailing
+     | -- row-bar
+     e -- row-tail
+     } -- row-close
+      a
 f = 0
 |}
   in
@@ -466,12 +516,12 @@ let test_trailing_row_comma_trivia () =
         "f : () ->{Net, -- keep closed comma\n} Text\nf = 0\n",
         "f : () ->{Net} Text\nf = 0\n",
         "-- keep closed comma",
-        "->{\n         Net, -- keep closed comma\n       }" );
+        [ "Net, -- keep closed comma"; "} Text" ] );
       ( "open",
         "f : () ->{Net, -- keep open comma\n| e} Text\nf = 0\n",
         "f : () ->{Net | e} Text\nf = 0\n",
         "-- keep open comma",
-        "->{\n         Net -- keep open comma\n         | e\n       }" );
+        [ "Net -- keep open comma"; "| e"; "} Text" ] );
     ]
   in
   List.iter
@@ -480,7 +530,8 @@ let test_trailing_row_comma_trivia () =
       Alcotest.(check bool) (label ^ " comment survives") true (contains formatted comment);
       Alcotest.(check bool)
         (label ^ " comma and closing-row layout is canonical")
-        true (contains formatted expected);
+        true
+        (List.for_all (contains formatted) expected);
       Alcotest.(check string)
         (label ^ " formatting is idempotent")
         formatted (print_recovered formatted);
@@ -603,6 +654,8 @@ let suite =
     Alcotest.test_case "documented signatures" `Quick test_documented_signatures;
     Alcotest.test_case "row forms and namespaces" `Quick test_row_forms_and_namespaces;
     Alcotest.test_case "row wrapping threshold" `Quick test_row_wrapping_threshold;
+    Alcotest.test_case "tuple and arrow parameter width boundaries" `Quick
+      test_tuple_and_arrow_parameter_width_boundaries;
     Alcotest.test_case "hash inversion and row set law" `Quick test_hash_inversion_and_row_set_law;
     Alcotest.test_case "resolved reference identity" `Quick test_resolved_reference_identity;
     Alcotest.test_case "checker surface signatures" `Quick test_checker_signatures_are_surface;

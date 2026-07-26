@@ -6,10 +6,12 @@
 
 type lookup = Surface_name.kind -> Hash.t -> string option
 
-(** The canonical formatter margin. A caller may request another rendering width for an editor or
-    diagnostic view, but the command-line formatter and calls that omit [width] use exactly 100
-    columns. The margin is a layout target rather than a promise to split indivisible UTF-8 tokens.
-*)
+(** The canonical formatter's byte-width target. A caller may request another width for an editor or
+    diagnostic view, but the command-line formatter and calls that omit [width] use exactly 100.
+    This is a layout target rather than a global physical-line postcondition: adjacent syntax
+    outside a measured group, preserved source text, or a raw [jqd] inversion may still exceed it. A
+    group that ends exactly at the target remains compact when the containing top-level unit's
+    preflight also fits; otherwise the whole unit is rendered at the requested target. *)
 let default_width = 100
 
 exception Bug_unsupported_surface_form
@@ -595,7 +597,7 @@ and pp_if context lookup fmt condition yes no =
         | None -> Format.fprintf fmt "else %a" (pp_expr context lookup) expression)
     | _ -> Format.fprintf fmt "else %a" (pp_expr context lookup) expression
   in
-  Format.fprintf fmt "@[<hov 0>@[<hov 2>if %a" (pp_expr context lookup) condition;
+  Format.fprintf fmt "@[<hv 0>@[<hov 2>if %a" (pp_expr context lookup) condition;
   pp_following_keyword context fmt condition "then";
   Format.fprintf fmt "@ %a@]" (pp_expr context lookup) yes;
   if context.trivia && expression_has_trailing_comments yes then Format.pp_force_newline fmt ();
@@ -905,7 +907,7 @@ let pp_binding context lookup fmt (binding : Kernel.binding) =
   | Some ty ->
       let signature_meta = Meta.signature binding.bmeta in
       pp_leading context signature_meta fmt;
-      Format.fprintf fmt "@[<v>%a : %a" (pp_named Surface_name.Term) binding.bname
+      Format.fprintf fmt "@[<v>@[<hov 2>%a :@ %a@]" (pp_named Surface_name.Term) binding.bname
         (pp_ty context lookup) ty;
       pp_trailing context signature_meta fmt;
       Format.fprintf fmt "@,%a@]" pp_definition ();
@@ -916,8 +918,8 @@ let pp_field context lookup fmt (field : Kernel.field) =
   (match field.label with
   | None -> pp_ty context lookup fmt field.fty
   | Some label ->
-      Format.fprintf fmt "%a: %a" (pp_named Surface_name.Term) label (pp_ty context lookup)
-        field.fty);
+      Format.fprintf fmt "@[<hov 2>%a:@ %a@]" (pp_named Surface_name.Term) label
+        (pp_ty context lookup) field.fty);
   pp_trailing context field.fmeta fmt
 
 let pp_constructor ?(leading = true) context lookup fmt (constructor : Kernel.conspec) =
@@ -1099,13 +1101,29 @@ let has_decoded_surface_ref_top = function
 let is_raw_top top =
   match Meta.surface_form (top_meta top) with Some "raw-top" -> true | Some _ | None -> false
 
-let render ~width pp value =
+let render_at_margin ~margin pp value =
   let buffer = Buffer.create 128 in
   let fmt = Format.formatter_of_buffer buffer in
-  Format.pp_set_margin fmt width;
+  Format.pp_set_margin fmt margin;
   pp fmt value;
   Format.pp_print_flush fmt ();
   Buffer.contents buffer
+
+let max_line_length text =
+  String.split_on_char '\n' text
+  |> List.fold_left (fun longest line -> max longest (String.length line)) 0
+
+(* [Format] conservatively breaks a complete group whose last byte lands exactly at the margin, so
+   first try one internal byte beyond the requested width and retain that rendering only when its
+   physical lines still fit. Otherwise render at the requested margin. Never search narrower
+   margins: [Format] may satisfy them by clamping structural indentation, making a one-byte edit
+   move a type continuation back to column zero. Indivisible tokens, comments, declaration headers,
+   and quantified prefixes therefore retain their shortest valid rendering when they cannot fit. *)
+let render ~width pp value =
+  let requested_margin = max 2 width in
+  let upper = render_at_margin ~margin:(requested_margin + 1) pp value in
+  if max_line_length upper <= width then upper
+  else render_at_margin ~margin:requested_margin pp value
 
 let pp_clause_fragment context lookup fmt (clause : Kernel.clause) =
   match clause.cbody.it with

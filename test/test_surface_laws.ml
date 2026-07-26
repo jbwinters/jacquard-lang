@@ -148,7 +148,11 @@ let test_plain_text_formatter_contract () =
   Alcotest.(check (list string))
     "formatting does not change canonical identity"
     (surface_hashes "plain-text.jac" source)
-    (surface_hashes "plain-text.jac" once)
+    (surface_hashes "plain-text.jac" once);
+  let indivisible = "indivisible-identifier-that-exceeds-width\n" in
+  Alcotest.(check string)
+    "an indivisible token is preserved past a narrow margin" indivisible
+    (format_surface ~width:10 "indivisible.jac" indivisible)
 
 let test_multiline_comma_layout_contract () =
   let source =
@@ -169,6 +173,9 @@ f(first-long-argument, -- after-final-comma
   Alcotest.(check bool)
     "compact multi-item tuple has no final comma" true
     (contains {|("first-long-item", "second-long-item", "third-long-item")|} compact);
+  Alcotest.(check bool)
+    "a trailing item comment forces vertical layout even at a wide margin" true
+    (contains "(\n  1,\n  -- first item\n  2,\n)" compact);
   Alcotest.(check bool)
     "wrapped tuple is one item per line with a final comma" true
     (contains {|(
@@ -295,6 +302,249 @@ very-long-function-name(
   Alcotest.(check string)
     "all comma-list contexts are idempotent" formatted
     (format_surface "comma-contexts.jac" formatted)
+
+let max_line_length text =
+  String.split_on_char '\n' text
+  |> List.fold_left (fun longest line -> max longest (String.length line)) 0
+
+let test_declaration_header_width_exception () =
+  let type_name = "T" ^ String.make 94 'a' in
+  let type_source = Printf.sprintf "type %s = | Make\n" type_name in
+  let formatted_type = format_surface "wide-type-header.jac" type_source in
+  Alcotest.(check int)
+    "indivisible type header exceeds width by its exact requirement" 102
+    (max_line_length formatted_type);
+  Alcotest.(check bool)
+    "type header stays on its one legal logical line" true
+    (contains (Printf.sprintf "type %s =\n  | Make\n" type_name) formatted_type);
+  Alcotest.(check string)
+    "wide type header formatting is idempotent" formatted_type
+    (format_surface "wide-type-header.jac" formatted_type);
+  Alcotest.(check (list string))
+    "wide type header formatting preserves canonical identity"
+    (surface_hashes "wide-type-header.jac" type_source)
+    (surface_hashes "wide-type-header.jac" formatted_type);
+  let effect_name = "E" ^ String.make 79 'a' in
+  let effect_source =
+    Printf.sprintf "multi effect %s where {\n  operation : () -> ()\n}\n" effect_name
+  in
+  let formatted_effect = format_surface "wide-effect-header.jac" effect_source in
+  Alcotest.(check int)
+    "indivisible effect header exceeds width by its exact requirement" 101
+    (max_line_length formatted_effect);
+  Alcotest.(check bool)
+    "effect header stays on its one legal logical line" true
+    (contains
+       (Printf.sprintf "multi effect %s where {\n  operation : () -> ()\n}\n" effect_name)
+       formatted_effect);
+  Alcotest.(check string)
+    "wide effect header formatting is idempotent" formatted_effect
+    (format_surface "wide-effect-header.jac" formatted_effect);
+  Alcotest.(check (list string))
+    "wide effect header formatting preserves canonical identity"
+    (surface_hashes "wide-effect-header.jac" effect_source)
+    (surface_hashes "wide-effect-header.jac" formatted_effect)
+
+let same_lowered source formatted =
+  List.for_all2
+    (fun before after -> Form.equal_ignoring_meta (Kernel.to_form before) (Kernel.to_form after))
+    (lowered_surface "colon-continuation.jac" source)
+    (lowered_surface "colon-continuation.jac" formatted)
+
+let test_colon_continuation_width_contract () =
+  let term_name = "f" ^ String.make 59 'a' in
+  let type_name = "T" ^ String.make 59 'a' in
+  let signature_source = Printf.sprintf "%s : %s\n%s = 0\n" term_name type_name term_name in
+  let signature = format_surface "wide-signature.jac" signature_source in
+  Alcotest.(check bool)
+    "123-column signature breaks after its colon" true
+    (contains (Printf.sprintf "%s :\n  %s\n" term_name type_name) signature);
+  Alcotest.(check bool)
+    "broken signature lines fit the canonical width" true
+    (max_line_length signature <= Surface_print.default_width);
+  Alcotest.(check string)
+    "broken signature is idempotent" signature
+    (format_surface "wide-signature.jac" signature);
+  Alcotest.(check bool)
+    "broken signature preserves its lowered form" true
+    (same_lowered signature_source signature);
+  let type_var = "a" ^ String.make 59 'a' in
+  let hashable_signature_source =
+    Printf.sprintf "%s : forall %s. %s\n%s = 0\n" term_name type_var type_var term_name
+  in
+  let hashable_signature = format_surface "hashable-wide-signature.jac" hashable_signature_source in
+  Alcotest.(check (list string))
+    "signature continuation preserves canonical identity"
+    (surface_hashes "hashable-wide-signature.jac" hashable_signature_source)
+    (surface_hashes "hashable-wide-signature.jac" hashable_signature);
+  let field_label = "field" ^ String.make 50 'a' in
+  let field_type = "Type" ^ String.make 51 'a' in
+  let field_source = Printf.sprintf "type Container = | Make(%s: %s)\n" field_label field_type in
+  let field = format_surface "wide-field.jac" field_source in
+  Alcotest.(check bool)
+    "119-column labeled field breaks after its colon" true
+    (contains (Printf.sprintf "%s:\n" field_label) field);
+  Alcotest.(check bool)
+    "broken labeled-field lines fit the canonical width" true
+    (max_line_length field <= Surface_print.default_width);
+  Alcotest.(check string)
+    "broken labeled field is idempotent" field
+    (format_surface "wide-field.jac" field);
+  Alcotest.(check bool)
+    "broken labeled field preserves its lowered form" true (same_lowered field_source field);
+  let long_field_type = "Type" ^ String.make 88 'a' in
+  let indented_field =
+    format_surface "indented-field.jac"
+      (Printf.sprintf "type Container = | Make(field: %s)\n" long_field_type)
+  in
+  Alcotest.(check bool)
+    "labeled-field fallback preserves nested continuation indentation" true
+    (contains (Printf.sprintf "\n        %s,\n" long_field_type) indented_field);
+  let hashable_field_source =
+    Printf.sprintf "type Container %s = | Make(%s: %s)\n" type_var field_label type_var
+  in
+  let hashable_field = format_surface "hashable-wide-field.jac" hashable_field_source in
+  Alcotest.(check (list string))
+    "labeled-field continuation preserves canonical identity"
+    (surface_hashes "hashable-wide-field.jac" hashable_field_source)
+    (surface_hashes "hashable-wide-field.jac" hashable_field);
+  List.iter
+    (fun (label, source) ->
+      let compact = format_surface ~width:1000 (label ^ ".jac") source in
+      let boundary = max_line_length compact in
+      Alcotest.(check string)
+        (label ^ " stays flat at N") compact
+        (format_surface ~width:boundary (label ^ ".jac") source);
+      Alcotest.(check string)
+        (label ^ " stays flat at N+1") compact
+        (format_surface ~width:(boundary + 1) (label ^ ".jac") source);
+      Alcotest.(check bool)
+        (label ^ " breaks at N-1") true
+        (not (String.equal compact (format_surface ~width:(boundary - 1) (label ^ ".jac") source))))
+    [
+      ("signature group", "function-name : ResultType\nfunction-name = 0\n");
+      ("labeled-field group", "type T = | Make(field-name: ResultType)\n");
+    ];
+  List.iter
+    (fun prefix_width ->
+      let variable = "a" ^ String.make (prefix_width - 9) 'a' in
+      let source = Printf.sprintf "f : forall %s. a\nf = 0\n" variable in
+      let formatted = format_surface "quantifier-indent.jac" source in
+      Alcotest.(check bool)
+        (Printf.sprintf "%d-byte forall prefix keeps its two-space continuation" prefix_width)
+        true
+        (contains (Printf.sprintf "f :\n  forall %s.\n" variable) formatted))
+    [ 98; 99; 100; 101 ]
+
+let test_comma_list_exact_width_boundaries () =
+  let cases =
+    [
+      ( "call arguments",
+        "call(first-argument, second-argument)\n",
+        "first-argument",
+        "second-argument",
+        true );
+      ("list items", "[first-item, second-item]\n", "first-item", "second-item", true);
+      ("expression tuple", "(first-value, second-value)\n", "first-value", "second-value", true);
+      ( "function parameters",
+        "function-name(first-parameter, second-parameter) = first-parameter\n",
+        "first-parameter",
+        "second-parameter",
+        true );
+      ( "labeled constructor fields",
+        "type Example = | MakeExample(first-field: FirstType, second-field: SecondType)\n",
+        "first-field: FirstType",
+        "second-field: SecondType",
+        true );
+      ( "operation parameters",
+        "multi effect Example where {\n  operation : (FirstType, SecondType) -> ResultType\n}\n",
+        "FirstType",
+        "SecondType",
+        true );
+      ( "constructor-pattern arguments",
+        "match subject {\n  | MakeExample(first-pattern, second-pattern) -> first-pattern\n}\n",
+        "first-pattern",
+        "second-pattern",
+        false );
+      ( "handler-clause parameters",
+        "handle body() {\n\
+        \  | return value -> value\n\
+        \  | operation(first-parameter, second-parameter) resume continuation -> first-parameter\n\
+         }\n",
+        "first-parameter",
+        "second-parameter",
+        false );
+    ]
+  in
+  List.iter
+    (fun (label, source, first_item, second_item, vertical_at_boundary) ->
+      let compact = format_surface ~width:1000 (label ^ ".jac") source in
+      let boundary = max_line_length compact in
+      let at_boundary = format_surface ~width:boundary (label ^ ".jac") source in
+      let above_boundary = format_surface ~width:(boundary + 1) (label ^ ".jac") source in
+      let below_boundary = format_surface ~width:(boundary - 1) (label ^ ".jac") source in
+      Alcotest.(check string) (label ^ " fits at its exact boundary") compact at_boundary;
+      Alcotest.(check string) (label ^ " fits one column above its boundary") compact above_boundary;
+      Alcotest.(check bool)
+        (label ^ " wraps one column below its boundary")
+        true
+        (not (String.equal compact below_boundary));
+      if vertical_at_boundary then begin
+        Alcotest.(check bool)
+          (label ^ " puts the first item on its own comma-terminated line")
+          true
+          (contains (first_item ^ ",\n") below_boundary);
+        Alcotest.(check bool)
+          (label ^ " puts the final item on its own comma-terminated line")
+          true
+          (contains (second_item ^ ",\n") below_boundary)
+      end;
+      Alcotest.(check bool)
+        (label ^ " wrapped lines stay within the requested width")
+        true
+        (max_line_length below_boundary <= boundary - 1);
+      Alcotest.(check string)
+        (label ^ " wrapped rendering is idempotent")
+        below_boundary
+        (format_surface ~width:(boundary - 1) (label ^ ".jac") below_boundary))
+    cases
+
+let remove_exact_line expected text =
+  let rec remove rev_prefix = function
+    | [] -> Alcotest.failf "expected formatter line %S" expected
+    | line :: rest when String.equal line expected -> List.rev_append rev_prefix rest
+    | line :: rest -> remove (line :: rev_prefix) rest
+  in
+  String.split_on_char '\n' text |> remove [] |> String.concat "\n"
+
+let test_vertical_append_remove_diff_stability () =
+  let three =
+    format_surface ~width:24 "append-remove.jac"
+      "call(first-long-item, second-long-item, third-long-item)\n"
+  in
+  let four =
+    format_surface ~width:24 "append-remove.jac"
+      "call(first-long-item, second-long-item, third-long-item, fourth-long-item)\n"
+  in
+  Alcotest.(check bool)
+    "three-item fixture is vertical" true
+    (contains "  third-long-item,\n" three);
+  Alcotest.(check bool)
+    "appended item has one canonical line" true
+    (contains "  fourth-long-item,\n" four);
+  Alcotest.(check string)
+    "appending changes only the appended item line" three
+    (remove_exact_line "  fourth-long-item," four);
+  Alcotest.(check string)
+    "removing restores the byte-identical three-item layout" four
+    (let lines = String.split_on_char '\n' three in
+     let rec insert rev_prefix = function
+       | [] -> Alcotest.fail "vertical call closing delimiter was absent"
+       | ")" :: rest ->
+           List.rev_append rev_prefix ("  fourth-long-item," :: ")" :: rest) |> String.concat "\n"
+       | line :: rest -> insert (line :: rev_prefix) rest
+     in
+     insert [] lines)
 
 let trim = String.trim
 
@@ -1287,9 +1537,17 @@ let suite =
       test_surface_formatter_corpus_stability;
     Alcotest.test_case "constructor standard width boundary" `Quick
       test_constructor_standard_width_boundary;
+    Alcotest.test_case "declaration header width exception" `Quick
+      test_declaration_header_width_exception;
+    Alcotest.test_case "colon continuation width contract" `Quick
+      test_colon_continuation_width_contract;
     Alcotest.test_case "plain-text formatter contract" `Quick test_plain_text_formatter_contract;
     Alcotest.test_case "multiline comma layout contract" `Quick test_multiline_comma_layout_contract;
     Alcotest.test_case "multiline comma contexts" `Quick test_multiline_comma_contexts;
+    Alcotest.test_case "comma-list exact width boundaries" `Quick
+      test_comma_list_exact_width_boundaries;
+    Alcotest.test_case "vertical append/remove diff stability" `Quick
+      test_vertical_append_remove_diff_stability;
     Alcotest.test_case "release tables stop before later subheadings" `Quick
       test_table_rows_stop_at_later_subheading;
     Alcotest.test_case "structured release decision" `Quick assert_release_valid;
