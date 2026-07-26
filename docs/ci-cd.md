@@ -4,6 +4,42 @@ Jacquard's CI is intentionally a release discipline, not just a build bot. The
 project rule is that nothing merges unless the definition-of-done evidence is
 machine-checkable.
 
+## Workflow Topology and Retry Isolation
+
+Pull-request evidence is split into three workflows:
+
+- `.github/workflows/ci.yml` runs the OCaml development gate and the clang/GCC
+  native-parity matrix.
+- `.github/workflows/governance.yml` runs the governance playground's Node,
+  browser, keyboard, accessibility, and offline-network checks.
+- `.github/workflows/gm12b.yml` runs or explicitly carries forward the GM.12B
+  exhaustive forwarding evidence.
+
+The split changes scheduling and retry boundaries, not the definition of done.
+All three workflows run for pull requests, `main`, `release/**`, and manual
+dispatch. A transient failure in one workflow can be rerun without repeating
+the independent workflows. The core workflow keeps the established
+`Development gate`, `Native parity (clang)`, and `Native parity (gcc)` job
+names so the existing protected contexts do not disappear during migration.
+The new Governance and GM.12B contexts become required only after their exact
+names have reported on both a real pull request and the resulting `main` push;
+the rollout procedure is in Recommended Branch Protection below.
+
+OCaml dependency installation in these pull-request workflows goes through
+`scripts/ci/opam-install-deps.sh`. It retries only opam status 40, the
+documented repository/download synchronization failure, for at most three
+total attempts with a 15-second delay. Solver, metadata, configuration, and
+package-build failures retain their original status without a retry, so
+deterministic failures remain visible and cannot consume the whole job
+timeout. The wrapper re-runs the same resolution and neither pins nor freezes
+resolved dependencies. Its success, retry, argument-forwarding, validation,
+and exit-status behavior is pinned by
+`scripts/ci/test-opam-install-deps.sh`.
+
+The Development gate has a 60-minute timeout, each native-parity lane has a
+90-minute timeout, the governance workflow has a 30-minute timeout, and the
+GM.12B proof retains its 240-minute fail-closed timeout.
+
 ## Development Gate
 
 Workflow: `.github/workflows/ci.yml`
@@ -15,9 +51,10 @@ Required check for protected branches:
 
 - `CI / Development gate`
 
-The required development gate waits for the separate
-`CI / Governance playground` job. That dependency prevents the protected
-check from becoming green while the local review surface is failing.
+The gate is independent of governance and GM.12B so GitHub can schedule and
+rerun those evidence classes separately. Branch protection, rather than a
+cross-job `needs` edge, will require the complete evidence set once the staged
+rollout in Recommended Branch Protection completes.
 
 The gate runs:
 
@@ -26,7 +63,8 @@ scripts/release/check-historical-manifests.sh \
   --commit "$(git rev-parse HEAD)" \
   --require-history
 scripts/release/test-historical-manifests.sh --commit "$(git rev-parse HEAD)"
-opam install --deps-only . --with-test --with-doc --with-dev-setup -y
+scripts/ci/opam-install-deps.sh \
+  --deps-only . --with-test --with-doc --with-dev-setup -y
 opam exec -- dune build @all
 opam exec -- dune runtest
 opam exec -- dune fmt
@@ -98,8 +136,15 @@ and the publication to be the last commit that changed the immutable manifest.
 
 ## Governance Playground
 
+Workflow: `.github/workflows/governance.yml`
+
+Required check for protected branches after the staged rollout in Recommended
+Branch Protection:
+
+- `Governance / Governance playground`
+
 The source-checkout-only Workspace v0 decision-chain viewer has its own CI
-job. It uses the exact Node and pnpm versions pinned in
+workflow. It uses the exact Node and pnpm versions pinned in
 `playground/governance/package.json`, installs the committed lockfile without
 updating it, and runs:
 
@@ -130,9 +175,12 @@ JACQUARD_GOVERNANCE_PLAYGROUND_FIXTURES_OUT="$PWD/playground/governance/fixtures
 
 ## GM.12B Exhaustive Forwarding Evidence
 
-The reusable Workspace forwarding membrane has a separate required check:
+Workflow: `.github/workflows/gm12b.yml`
 
-- `CI / GM12B exhaustive forwarding evidence`
+The reusable Workspace forwarding membrane has a separate check, required
+after the staged rollout in Recommended Branch Protection:
+
+- `GM12B / GM12B exhaustive forwarding evidence`
 
 It runs the full 50,000-case grid through two real forwarding handlers and a
 hermetic leaf, then byte-compares the result with the checked-in transcript.
@@ -150,7 +198,8 @@ relevant range.
 The proof owns a dedicated Dune rule in `test/gm12b/dune`, so changes to
 unrelated cram dependencies do not enter its CI scope. Its conservative
 dependency closure still includes the implementation, prelude, toolchain,
-proof carrier and expected transcript, checker, workflow, and dedicated rule.
+proof carrier and expected transcript, checker, core and GM.12B workflows,
+dependency-install wrapper, and dedicated rule.
 
 Local equivalent:
 
@@ -278,14 +327,20 @@ For `main`:
 
 - require pull requests before merging
 - require `CI / Development gate`
-- require `CI / GM12B exhaustive forwarding evidence`
+- require `CI / Native parity (clang)`
+- require `CI / Native parity (gcc)`
+- require `Governance / Governance playground`
+- require `GM12B / GM12B exhaustive forwarding evidence`
 - require branches to be up to date before merging
 - dismiss stale approvals when new commits are pushed
 
 For `release/**`:
 
 - require `CI / Development gate`
-- require `CI / GM12B exhaustive forwarding evidence`
+- require `CI / Native parity (clang)`
+- require `CI / Native parity (gcc)`
+- require `Governance / Governance playground`
+- require `GM12B / GM12B exhaustive forwarding evidence`
 - require `Release Evidence / Reproduce 0.1 evidence`
 - restrict changes to correctness, reproducibility, documentation, and demos
 
@@ -295,6 +350,23 @@ For `jacquard-core-*` tags:
   commit being tagged
 - preserve the uploaded evidence artifact with the tag/release notes
 - require the release-binaries workflow to complete before announcing the tag
+
+When introducing, renaming, or moving an independent workflow:
+
+1. Keep every existing required context unchanged while the new workflow
+   reports on a real pull request.
+2. Merge that workflow change, confirm the new context on the resulting
+   `main` push, and add all new contexts to branch protection in one settings
+   edit.
+3. If a required context is ever replaced, keep a compatibility job reporting
+   the old context until the replacement is required. Remove the compatibility
+   job and retired context only in a follow-up change.
+
+This migration does not replace a live required context: `Development gate`
+and both native-parity names stay unchanged. Governance and GM.12B are added
+to protection only after their independent contexts have reported. Keeping
+that interval to one merge cycle prevents a missing context from deadlocking
+the migration while making the final evidence policy explicit.
 
 ## Local Equivalents
 

@@ -134,6 +134,12 @@ GitHub Actions mirrors the local definition of done:
 
 - `CI / Development gate` runs build, full tests, clean formatting, version
   smoke, and release-doc presence on PRs, `main`, and `release/**`.
+- `CI / Native parity (clang)` and `CI / Native parity (gcc)` run the runtime
+  memory, differential, leak, and seeded fuzz evidence.
+- `Governance / Governance playground` runs the source-checkout viewer's
+  lint, type, unit/accessibility, build, and browser checks.
+- `GM12B / GM12B exhaustive forwarding evidence` runs or explicitly carries
+  forward the scoped 50,000-case forwarding proof.
 - `Release Evidence / Reproduce 0.1 evidence` runs
   `scripts/release/reproduce-0.1.sh` on `release/**`, `jacquard-core-*` tags, and
   manual dispatch, then uploads the evidence transcripts.
