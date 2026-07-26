@@ -619,10 +619,17 @@ JACQUARD_RELEASE_REF=HEAD JACQUARD_RELEASE_BASE=738dc8e scripts/release/reproduc
 
 ## CI/CD
 
-GitHub Actions has three principal workflows:
+GitHub Actions separates independently retryable evidence:
 
 - `CI / Development gate`: build, full tests, clean formatting, version smoke,
   and release-doc presence on PRs, `main`, and `release/**`.
+- `CI / Native parity (clang|gcc)`: runtime memory, differential, leak, and
+  seeded fuzz evidence for both supported C compilers.
+- `Governance / Governance playground`: lint, types, unit/accessibility tests,
+  production build, and browser/keyboard/offline-network checks.
+- `GM12B / GM12B exhaustive forwarding evidence`: the scoped 50,000-case
+  forwarding proof, with a successful no-op result outside its dependency
+  closure.
 - `Release Evidence / Reproduce 0.1 evidence`: release branches, `jacquard-core-*`
   tags, and manual dispatch; runs `scripts/release/reproduce-0.1.sh` and uploads
   transcripts.

@@ -1,0 +1,126 @@
+name: GM12B
+
+on:
+  push:
+    branches:
+      - main
+      - "release/**"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gm12b-${{ github.ref }}-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.run_id || 'cancelable' }}
+  cancel-in-progress: ${{ github.event_name != 'push' || github.ref != 'refs/heads/main' }}
+
+env:
+  OCAML_COMPILER: 5.1.1
+  JACQUARD_PRELUDE: ${{ github.workspace }}/prelude
+  TMPDIR: ${{ github.workspace }}/.scratch/tmp
+
+jobs:
+  gm12b-exhaustive:
+    name: GM12B exhaustive forwarding evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Determine evidence scope
+        id: scope
+        shell: bash
+        run: |
+          scope_regex='^(src/|bin/|prelude/|\.github/workflows/(ci|gm12b)\.yml$|\.tool-versions$|dune-project$|dune-workspace[^/]*$|[^/]+\.opam$|test/dune$|test/gm12b/dune$|test/cli/workspace-forward-laws\.(jqd|expected)$|scripts/ci/opam-install-deps\.sh$|scripts/release/check-gm12b-exhaustive\.sh$|docs/release/governed-membranes/GM12B-(EVIDENCE\.md|MANIFEST\.sha256)$)'
+          zero_sha=0000000000000000000000000000000000000000
+
+          range_is_relevant() {
+            base=$1
+            head=$2
+            if [[ -z "$base" || "$base" == "$zero_sha" ]] ||
+              ! git cat-file -e "$base^{commit}" 2>/dev/null ||
+              ! git cat-file -e "$head^{commit}" 2>/dev/null ||
+              ! git merge-base --is-ancestor "$base" "$head"; then
+              return 0
+            fi
+            if ! changed_files=$(
+              git -c core.quotePath=false diff --no-renames --name-only "$base" "$head"
+            ); then
+              return 0
+            fi
+            grep -Eq "$scope_regex" <<<"$changed_files"
+          }
+
+          run=false
+          case "${{ github.event_name }}" in
+            pull_request)
+              if range_is_relevant \
+                "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}"; then
+                run=true
+              fi
+              ;;
+            push)
+              case "${{ github.ref }}" in
+                refs/heads/release/*)
+                  run=true
+                  ;;
+                refs/heads/main)
+                  if range_is_relevant "${{ github.event.before }}" "${{ github.sha }}"; then
+                    run=true
+                  fi
+                  ;;
+                *)
+                  run=true
+                  ;;
+              esac
+              ;;
+            workflow_dispatch)
+              run=true
+              ;;
+            *)
+              run=true
+              ;;
+          esac
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+
+      - name: Report unrelated change
+        if: steps.scope.outputs.run != 'true'
+        run: echo "GM.12B semantic dependency closure is unchanged; exhaustive evidence remains valid."
+
+      - name: Prepare temporary storage
+        if: steps.scope.outputs.run == 'true'
+        run: |
+          mkdir -p "$TMPDIR"
+          scripts/check-temp-policy.sh
+
+      - name: Set up OCaml
+        if: steps.scope.outputs.run == 'true'
+        uses: ocaml/setup-ocaml@v3.6.1
+        with:
+          ocaml-compiler: ${{ env.OCAML_COMPILER }}
+
+      - name: Install dependencies
+        if: steps.scope.outputs.run == 'true'
+        run: |
+          scripts/ci/opam-install-deps.sh \
+            --deps-only . --with-test -y
+
+      - name: Verify exhaustive forwarding evidence
+        if: steps.scope.outputs.run == 'true'
+        run: |
+          GM12B_EVIDENCE_OUT="$PWD/.scratch/evidence/gm12b/workspace-forward-laws.actual" \
+            opam exec -- dune build @test/gm12b/gm12b-evidence --force
+
+      - name: Upload exhaustive transcript
+        if: always() && steps.scope.outputs.run == 'true'
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: gm12b-exhaustive-${{ github.run_number }}
+          if-no-files-found: warn
+          include-hidden-files: true
+          path: .scratch/evidence/gm12b/workspace-forward-laws.actual
