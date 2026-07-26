@@ -57,7 +57,7 @@ let test_one_page_grammar_snapshot () =
   Alcotest.(check bool) "L7 grammar stays within 100 nonblank lines" true (List.length lines <= 100);
   Alcotest.(check string)
     "L7 grammar snapshot (review docs/surface-syntax.md before updating)"
-    "a813f6829812989a1da38508f7ffe0b30c347d021852f9156fedac11da08545b"
+    "bf77afeeb54671240dee71c3c6ef8ecc600094bf5c6bb24c96769fdd7e8fc46f"
     (Hash.to_hex (Hash.of_string grammar))
 
 let format_surface ?width path source =
@@ -133,9 +133,12 @@ let lowered_surface path source =
 let surface_hashes path source =
   lowered_surface path source
   |> List.map (fun top ->
-      match Canon.hash_top top with
-      | Ok hashes -> Hash.to_hex hashes.Canon.decl_hash
-      | Error diagnostics -> Eval_support.fail_diags (path ^ " hash") diagnostics)
+      match Resolve.resolve Corpus_support.stub_names top with
+      | Error diagnostics -> Eval_support.fail_diags (path ^ " resolve") diagnostics
+      | Ok resolved -> (
+          match Canon.hash_top resolved with
+          | Ok hashes -> Hash.to_hex hashes.Canon.decl_hash
+          | Error diagnostics -> Eval_support.fail_diags (path ^ " hash") diagnostics))
 
 let test_plain_text_formatter_contract () =
   let source = "-- café stays readable\n\"naïve 🚀\"\n" in
@@ -153,6 +156,37 @@ let test_plain_text_formatter_contract () =
   Alcotest.(check string)
     "an indivisible token is preserved past a narrow margin" indivisible
     (format_surface ~width:10 "indivisible.jac" indivisible)
+
+let test_interpolation_formatter_contract () =
+  let source = {|$"total: {text.from-int(count)} of {{limit}"|} ^ "\n" in
+  let once = format_surface "interpolation.jac" source in
+  let twice = format_surface "interpolation.jac" once in
+  Alcotest.(check string) "canonical marked form" source once;
+  Alcotest.(check string) "marked formatting is idempotent" once twice;
+  Alcotest.(check string)
+    "marked form remains one literal under a narrow width" source
+    (format_surface ~width:10 "interpolation.jac" source);
+  let block_source = {|$"value: { { let answer = "yes"; answer } }"|} ^ "\n" in
+  let block_once = format_surface "interpolation-block.jac" block_source in
+  Alcotest.(check bool)
+    "structurally multiline interpolation falls back to explicit text.join" true
+    (String.starts_with ~prefix:"text.join(" block_once && not (contains "$\"" block_once));
+  Alcotest.(check string)
+    "explicit fallback is idempotent" block_once
+    (format_surface "interpolation-block.jac" block_once);
+  let explicit = {|text.join("total: ", text.from-int(count), " of {limit}")|} ^ "\n" in
+  let surface_forms path text = lowered_surface path text |> List.map Kernel.to_form in
+  Alcotest.(check bool)
+    "interpolation and explicit text.join lower identically" true
+    (List.for_all2 Form.equal_ignoring_meta
+       (surface_forms "interpolation.jac" source)
+       (surface_forms "explicit-join.jac" explicit));
+  let marked_hash_source = {|render(value) = $"total: {value}"|} ^ "\n" in
+  let explicit_hash_source = {|render(value) = text.join("total: ", value)|} ^ "\n" in
+  Alcotest.(check (list string))
+    "interpolation and explicit text.join hash identically"
+    (surface_hashes "interpolation.jac" marked_hash_source)
+    (surface_hashes "explicit-join.jac" explicit_hash_source)
 
 let test_multiline_comma_layout_contract () =
   let source =
@@ -1064,7 +1098,8 @@ let validate_release_docs ~decision ~followups ~index =
          evidence](../../../test/cli/ss22.t), and [executable stdlib \
          documentation](../../stdlib.md). Deprecated migration-only `text.join-list` preserves the \
          pre-SS.22 list-plus-separator object hash-for-hash. Native v1 variadic parity is limited \
-         to 0-8 arguments; 9 is E1101 under its global ABI ceiling. Interpolation remains absent.";
+         to 0-8 arguments; 9 is E1101 under its global ABI ceiling. Successor SX.26 adds marked \
+         syntax as a local lowering to this unchanged object.";
         "none";
       ];
       [
@@ -1301,11 +1336,11 @@ let validate_release_docs ~decision ~followups ~index =
           [
             "cd _build/default/test && ./test_jacquard.exe test surface-twins --compact \
              --color=never";
-            "exit 0; exactly 5 selected cases pass over 24 twin pairs";
+            "exit 0; exactly 5 selected cases pass over 25 twin pairs";
           ];
           [
             "opam exec -- dune runtest test/docs-doctest --force";
-            "exit 0; exactly 27 named doctests pass";
+            "exit 0; exactly 28 named doctests pass";
           ];
           [
             "JACQUARD_PRELUDE=$PWD/prelude opam exec -- dune exec jac -- run \
@@ -1470,7 +1505,7 @@ let semantic_mutation_test (id, needle, replacement) =
 
 let test_wrong_count_fails =
   assert_mutation_fails ~needle:"twins count" ~mutate_followups:unchanged
-    ~mutate_decision:(replace_once ~needle:"| twins | 24 |" ~replacement:"| twins | 23 |")
+    ~mutate_decision:(replace_once ~needle:"| twins | 25 |" ~replacement:"| twins | 24 |")
 
 let test_wrong_status_fails =
   assert_mutation_fails ~needle:"disallowed status" ~mutate_followups:unchanged
@@ -1542,6 +1577,8 @@ let suite =
     Alcotest.test_case "colon continuation width contract" `Quick
       test_colon_continuation_width_contract;
     Alcotest.test_case "plain-text formatter contract" `Quick test_plain_text_formatter_contract;
+    Alcotest.test_case "interpolation formatter contract" `Quick
+      test_interpolation_formatter_contract;
     Alcotest.test_case "multiline comma layout contract" `Quick test_multiline_comma_layout_contract;
     Alcotest.test_case "multiline comma contexts" `Quick test_multiline_comma_contexts;
     Alcotest.test_case "comma-list exact width boundaries" `Quick

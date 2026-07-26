@@ -176,6 +176,17 @@ Application may chain, so `make-adder(1)(2)` is valid when the first call
 returns a function. Zero-argument functions are thunks and are called with
 `()`. Parentheses group expressions.
 
+Marked text interpolation keeps conversions explicit:
+
+```jacquard
+$"total: {text.from-int(count)} of {{limit}"
+```
+
+Each embedded expression must be `Text` and is evaluated exactly once from
+left to right. `{{` produces one literal opening brace. Keep the marked literal
+and its embedded expressions on one physical source line; use `\n` for a
+newline in the resulting text.
+
 ### Blocks, Let, And Recursion
 
 A block is one expression. Each `let` scopes over the rest of the block. A
@@ -429,8 +440,9 @@ effect-decl := "effect" Effect type-vars? "where" "{" op-signature* "}"
 
 expression  := call ("|>" call)*
 call        := primary ("(" expressions? ")")*
-primary     := literal | name | tuple | list | block | fn | match | if
+primary     := literal | marked-text | name | tuple | list | block | fn | match | if
              | handle | quote | unquote | annotation
+marked-text := '$"' ("{{" | "{" expression "}" | character-or-escape)* '"'
 block       := "{" (let-item | expression)* "}"
 let-item    := "let" ["rec"] pattern ["(" patterns? ")"] "=" expression
 fn          := "fn" "(" patterns? ")" "->" expression
@@ -728,7 +740,7 @@ Do not invent new kernel forms for surface sugar.
 - No ambient authority: missing grants are expected refusals, not runtime
   configuration bugs.
 - No null, records, modules/imports, guards, or-patterns, custom operators,
-  traits/typeclasses, string interpolation, or generated field accessors.
+  traits/typeclasses, or generated field accessors.
 - No concurrency or enforced effect membranes in the shipped language.
 - Probability is finite/discrete: no continuous distributions or gradients.
 - Quote/eval is untyped staging; there is no typed staging or macro expander.

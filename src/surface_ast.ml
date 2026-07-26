@@ -14,6 +14,7 @@ type expr = expr_node node
 
 and expr_node =
   | Lit of literal
+  | Interpolation of interpolation_part list
   | Name of name
   | HashRef of Hash.t * Kernel.refkind
   | GroupRef of int
@@ -30,6 +31,8 @@ and expr_node =
   | Unquote of expr
   | Ann of expr * ty
   | Hole of int
+
+and interpolation_part = IText of string * Meta.t | IExpr of expr
 
 and block_item =
   | Let of { recursive : bool; binder : pat; params : pat list; value : expr; meta : Meta.t }
@@ -135,6 +138,10 @@ and has_holes_expr (expr : expr) =
   ||
   match expr.it with
   | Lit _ | Name _ | HashRef _ | GroupRef _ -> false
+  | Interpolation parts ->
+      List.exists
+        (function IText _ -> false | IExpr expression -> has_holes_expr expression)
+        parts
   | Call (fn, args) -> has_holes_expr fn || List.exists has_holes_expr args
   | Fn (params, body) -> List.exists has_holes_pat params || has_holes_expr body
   | Tuple items | List items -> List.exists has_holes_expr items

@@ -101,6 +101,85 @@ let test_literals () =
     [ "tokens.jac:1:1-5 text(\"\xC3\xA9\")" ]
     (shown "\"\xC3\xA9\"")
 
+let test_marked_text_interpolation () =
+  Alcotest.(check (list string))
+    "marked text tokens preserve segments, expressions, escapes, and literal braces"
+    [
+      "$\"";
+      "interpolation-text(\"total: \")";
+      "interpolation-{";
+      "ident(text.from-int)";
+      "(";
+      "ident(n)";
+      ")";
+      "interpolation-}";
+      "interpolation-text(\" of {limit}\")";
+      "interpolation-\"";
+    ]
+    (token_names {|$"total: {text.from-int(n)} of {{limit}"|});
+  Alcotest.(check (list string))
+    "marked text keeps Unicode, escapes, bare closing braces, and following comments"
+    [
+      "$\"";
+      "interpolation-text(\"hé 🚀\\n bare }\")";
+      "interpolation-\"";
+      "comment( note)";
+      "newline";
+    ]
+    (token_names "$\"hé 🚀\\n bare }\" -- note\n");
+  Alcotest.(check (list string))
+    "plain strings retain their existing multiline behavior"
+    [ "text(\"line one\\nline two\")" ]
+    (token_names "\"line one\nline two\"");
+  let check_line_boundary label source =
+    let strict =
+      match Surface_lex.lex ~file:"tokens.jac" source with
+      | Ok _ -> Alcotest.failf "%s: strict lexing unexpectedly succeeded" label
+      | Error diagnostics -> diagnostics
+    in
+    Alcotest.(check (list string))
+      (label ^ ": strict path reports one E1219")
+      [ "E1219" ]
+      (List.map Diag.code_or_uncoded strict);
+    let recovered = recover_lex (source ^ "later = 1\n") in
+    Alcotest.(check (list string))
+      (label ^ ": recovery reports one E1219")
+      [ "E1219" ]
+      (List.map Diag.code_or_uncoded recovered.diagnostics);
+    Alcotest.(check bool)
+      (label ^ ": diagnostic begins at the marked opener")
+      true
+      (List.for_all
+         (fun diagnostic ->
+           match Diag.span diagnostic with
+           | Some span -> String.starts_with ~prefix:"tokens.jac:1:1-" (Span.to_string span)
+           | None -> false)
+         recovered.diagnostics);
+    Alcotest.(check bool)
+      (label ^ ": recovery preserves the next definition")
+      true
+      (List.mem "ident(later)"
+         (recovered.tokens |> without_eof
+         |> List.map (fun token -> Surface_lex.show_token token.Surface_lex.token)))
+  in
+  List.iter
+    (fun (label, source) -> check_line_boundary label source)
+    [
+      ("raw newline in text", "$\"value\n");
+      ("raw newline in expression", "$\"value: {name\n");
+      ("raw newline in nested braces", "$\"value: {f({ name\n");
+      ("CRLF in text", "$\"value\r\n");
+      ("CRLF in expression", "$\"value: {name\r\n");
+    ];
+  let nested = recover_lex {|$"outer {$"inner"}"|} in
+  Alcotest.(check bool)
+    "nested marked interpolation is rejected" true
+    (List.exists (fun diagnostic -> Diag.code_or_uncoded diagnostic = "E1219") nested.diagnostics);
+  let unclosed = recover_lex {|$"value: {x|} in
+  Alcotest.(check bool)
+    "unterminated interpolation is rejected" true
+    (List.exists (fun diagnostic -> Diag.code_or_uncoded diagnostic = "E1219") unclosed.diagnostics)
+
 let test_comments () =
   Alcotest.(check (list string))
     "comments leave newline tokens"
@@ -432,6 +511,7 @@ let suite =
     Alcotest.test_case "keywords and escapes" `Quick test_keywords_and_escapes;
     Alcotest.test_case "punctuation and newlines" `Quick test_punctuation_and_newlines;
     Alcotest.test_case "literals" `Quick test_literals;
+    Alcotest.test_case "marked text interpolation" `Quick test_marked_text_interpolation;
     Alcotest.test_case "comments" `Quick test_comments;
     Alcotest.test_case "hash and group refs" `Quick test_hash_and_group_references;
     Alcotest.test_case "namespace pun" `Quick test_namespace_pun_is_lexical;

@@ -83,7 +83,7 @@ raw-top       := "jqd" raw-bootstrap-form
 
 expr          := call (cont "|>" cont call)*
 call          := primary ("(" exprs? ")")*
-primary       := literal | value-name | internal-ref | paren | tuple | list | block | fn
+primary       := literal | marked-text | value-name | internal-ref | paren | tuple | list | block | fn
 | match | if | handle | quote | unquote | annotation
 paren         := "(" expr ")"
 tuple         := "()" | "(" expr "," exprs? ")"
@@ -158,6 +158,10 @@ unsigned-integer := [0-9]+
 real          := "-"? unsigned-integer ("." [0-9]* ([eE] [+-]? unsigned-integer)? | [eE] [+-]? unsigned-integer)
 special-real  := "+inf.0" | "-inf.0" | "+nan.0" | "-nan.0"
 string        := '"' (UTF-8-scalar | "\\" ["\\" | '"' | "n" | "t" | "r"] | "\\x" hex-digit hex-digit)* '"'
+marked-text   := '$"' marked-part* '"'
+marked-part   := marked-character | string-escape | "{{" | "{" expr "}"
+marked-character := UTF-8-scalar-except-'"'-"{"-newline
+string-escape := "\\" ["\\" | '"' | "n" | "t" | "r"] | "\\x" hex-digit hex-digit
 comment       := "--" characters-to-newline
 doc-comment   := "--|" characters-to-newline
 sep           := newline | ";"
@@ -755,6 +759,27 @@ original malformed source.
 
 `(e : T)` is kernel `Ann`.
 
+### Text interpolation
+
+`$"total: {text.from-int(count)}"` is local sugar for
+`text.join("total: ", text.from-int(count))`. The marked form is required:
+plain strings keep their existing meaning and hashes. Each embedded expression
+must have type `Text`. Jacquard evaluates the expressions exactly once, from
+left to right, so their effects remain visible in source order. Convert other
+values explicitly, for example with `text.from-int(n)`.
+
+Inside marked text, `{{` means one literal opening brace. A bare `}` is literal
+text. Existing string escapes apply to text segments, and interpolation uses
+one physical source line: use `\n` when the resulting text needs a newline, and
+bind a long embedded expression above the marked text instead of wrapping it
+across lines. Nested marked interpolation is rejected in 0.1; bind the inner
+text first. Canonical printing uses the marked form with no padding inside `{}`
+when every embedded form has a one-line rendering. If an embedded block,
+`match`, or `handle` requires structural line breaks, the formatter prints the
+equivalent explicit `text.join` call so its output remains valid and
+idempotent. Lowering adds no kernel form: the marked and explicit spellings
+produce the same resolved `text.join` application and HASH_V0 identity.
+
 That is the entire grammar. No precedence table exists because one infix
 operator needs none; expressions are literals, names, calls `f(a, b)`,
 parenthesized forms, and the constructs above. A recursive-descent parser
@@ -773,8 +798,6 @@ evidence that braces measurably hurt).
 
 Labeled constructor *patterns* (D36 defers them). Labeled declarations ship;
 generated accessors and label validation remain parked D36 follow-ups.
-Interpolation sugar for text (D38 ships a prelude-only `text.join` for now; a
-real syntax form is a separate design pass against L4).
 Predicate/comparison naming (D39: `?`-suffixed predicates beside bare
 dictionary names, `gte?/lte?/gt?/lt?`, the `real.*` rename); both of these
 are stdlib content, not grammar, and land in docs/stdlib.md rather than
@@ -899,8 +922,9 @@ in commit messages and task dependencies.)
 | D35 | handle delimiting | atomic body needs no wrapper; a non-atomic body takes an explicit `{ }` block; the clause list is always braced |
 | D36 | labeled fields | partial: `Ctor(field: Type, ...)` parsing, metadata, trivia, lowering, and printing ship; generated accessors and label validation have a separate follow-up gate; labeled patterns remain deferred |
 | D37 | namespace puns | blessed permanently: dotted names are one atomic token forever; a future field-access form will not use `.` |
-| D38 | text building | a variadic `text.join` ships in the prelude now; interpolation sugar is a separate design note, not v0 |
+| D38 | text building | variadic `text.join` is the ordinary lowering target and remains directly callable |
 | D39 | comparison naming | `?`-suffixed predicates beside bare dictionary names; prelude gains `gt? gte? lt? lte?`; the `add-real` family migrates to `real.*` |
 | D40 | top-level items | a bare expression is a legal top-level item, evaluated in document order (ratifies existing `jacquard run` behavior) |
 | D41 | operation-mode granularity | per-operation `once`/`multi`, with `once effect`/`multi effect` shorthand only for uniform effects |
 | D42 | operation-mode defaults | no surface default; every operation is explicit, while bootstrap legacy `multi` remains encoded by absence |
+| D75 | text interpolation | `$"text {expr}"` lowers locally to one resolved variadic `text.join`; expressions are explicitly `Text`, `{` is escaped as `{{`, and nested marked interpolation is rejected in 0.1 |

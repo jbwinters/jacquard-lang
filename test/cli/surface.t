@@ -247,3 +247,33 @@ Bootstrap formatting and execution remain byte-for-byte on the old route.
     (lit 22))
   $ jac run unchanged.jqd
   42
+
+SX.26 marked text interpolation lowers to variadic text.join, formats idempotently, preserves
+literal braces, and requires explicit Text conversion at the embedded expression span.
+
+  $ cat > interpolation.jac <<'EOF'
+  > $"total: {text.from-int(2)} of {{limit}"
+  > EOF
+  $ jac check interpolation.jac
+  ok
+  $ jac fmt interpolation.jac > interpolation-once.jac
+  $ jac fmt interpolation-once.jac > interpolation-twice.jac
+  $ cmp interpolation-once.jac interpolation-twice.jac && cat interpolation-once.jac
+  $"total: {text.from-int(2)} of {{limit}"
+  $ jac run interpolation.jac
+  "total: 2 of {limit}"
+  $ cat > interpolation-order.jac <<'EOF'
+  > next(label) = {
+  >   print($"[{label}]")
+  >   label
+  > }
+  > $"{next("first")}{next("second")}"
+  > EOF
+  $ jac run interpolation-order.jac --allow console
+  [first][second]"firstsecond"
+  $ printf '$"count: {1}"\n' > interpolation-invalid.jac
+  $ jac check interpolation-invalid.jac > interpolation-invalid.out 2>&1; status=$?; cat interpolation-invalid.out; echo "exit:$status"
+  interpolation-invalid.jac:1:11-12: error[E0801]: Types do not agree
+    Cause: interpolation expression: expected text, got int (type mismatch)
+    Next step: Convert the value to Text explicitly, for example with `text.from-int(n)`.
+  exit:1

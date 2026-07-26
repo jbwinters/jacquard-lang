@@ -196,6 +196,29 @@ and lower_expr_node ?(quote_depth = 0) (expr : Surface_ast.expr) : (Kernel.expr,
   let node it = Kernel.{ it; meta = expr.meta } in
   match expr.it with
   | Surface_ast.Lit literal -> Ok (node (Kernel.Lit literal))
+  | Surface_ast.Interpolation parts ->
+      let lower_part = function
+        | Surface_ast.IText (text, meta) ->
+            Ok
+              Kernel.
+                {
+                  it = Lit (LText text);
+                  meta = Meta.with_surface_generated "interpolation-text" meta;
+                }
+        | Surface_ast.IExpr expression -> lower_expr_node ~quote_depth expression
+      in
+      let* args = map_results lower_part parts in
+      let fn =
+        Kernel.
+          {
+            it = Var "text.join";
+            meta =
+              expr.meta |> Meta.without_trivia
+              |> Meta.with_surface_generated "interpolation-callee"
+              |> Meta.with_surface_reference;
+          }
+      in
+      Ok Kernel.{ it = App (fn, args); meta = Meta.with_surface_form "interpolation" expr.meta }
   | Surface_ast.Name name -> Ok (node (Kernel.Var name))
   | Surface_ast.HashRef (hash, kind) -> Ok (node (Kernel.Ref (hash, kind)))
   | Surface_ast.GroupRef index -> Ok (node (Kernel.GroupRef index))

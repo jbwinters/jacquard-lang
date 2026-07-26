@@ -211,6 +211,7 @@ also emits E0817; consuming the captured resumption twice emits E0816.
 | E1216 | malformed kind-tagged hash reference | `#abc:term` |
 | E1217 | malformed internal group reference | `#group[x]` |
 | E1218 | invalid raw UTF-8 scalar in a surface string | a raw `0xff` byte between quotes |
+| E1219 | malformed marked text interpolation | an unclosed `{expr}` or nested `$"..."` |
 | E1220 | unexpected token in the recovering surface parser | stray `|` at top level |
 | E1221 | unclosed braced construct during surface recovery, with opening and failure spans | a `quote`, `match`, `handle`, or block truncated before `}` or closed with `]`/`)` |
 | E1222 | reserved pre-SS.9 binding-pattern parser gate; refutable binders now use E0205/E0206 during lowering | `fn (Some) -> 1` |

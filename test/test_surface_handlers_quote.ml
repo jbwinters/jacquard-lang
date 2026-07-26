@@ -145,6 +145,8 @@ let has_raw_top recovered =
 let rec has_quote_expr expression =
   match expression.Surface_ast.it with
   | Quote _ -> true
+  | Interpolation parts ->
+      List.exists (function IText _ -> false | IExpr embedded -> has_quote_expr embedded) parts
   | Call (fn, args) -> has_quote_expr fn || List.exists has_quote_expr args
   | Fn (_, body) | Unquote body | Ann (body, _) -> has_quote_expr body
   | Tuple items | List items -> List.exists has_quote_expr items
@@ -403,6 +405,9 @@ let test_quote_unquote_and_resolution () =
   check_equivalent "quote depth survives tuple traversal"
     "quote { (unquote(a), quote { unquote(b) }) }"
     "(quote (tuple (unquote (var a)) (quote (unquote (var b)))))";
+  check_equivalent "marked interpolation survives quote and unquote traversal"
+    {|quote { $"value: {unquote(x)}" }|}
+    {|(quote (app (var text.join) (lit "value: ") (unquote (var x))))|};
   let f_hash = Hash.of_string "surface-quoted-f" in
   let x_hash = Hash.of_string "surface-live-x" in
   let names =
@@ -425,6 +430,20 @@ let test_quote_unquote_and_resolution () =
   Alcotest.(check bool)
     "quoted name stays unresolved and live splice resolves" true
     (Form.equal_ignoring_meta expected (payload resolved));
+  let resolved_interpolation =
+    match Resolve.resolve_expr names (lower {|quote { $"value: {unquote(x)}" }|}) with
+    | Ok expression -> expression
+    | Error diagnostics -> fail_diags "quoted interpolation resolution" diagnostics
+  in
+  let expected_interpolation =
+    Reader.parse_one ~file:"quote-interpolation-resolution.jqd"
+      (Printf.sprintf {|(app (var text.join) (lit "value: ") (unquote (ref #%s term)))|}
+         (Hash.to_hex x_hash))
+    |> Result.get_ok
+  in
+  Alcotest.(check bool)
+    "interpolation callee remains hygienic and live splice resolves" true
+    (Form.equal_ignoring_meta expected_interpolation (payload resolved_interpolation));
   match Surface_lower.lower_expr (parse_expr "unquote(x)") with
   | Error [ diagnostic ]
     when Diag.code diagnostic = Some "E0204" && Option.is_some (Diag.span diagnostic) ->

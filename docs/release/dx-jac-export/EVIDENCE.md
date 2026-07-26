@@ -6,9 +6,9 @@ artifacts and are not retroactively updated by DX.2.
 
 ## Current inventory
 
-- Alcotest/QCheck cases: `838`
+- Alcotest/QCheck cases: `843`
 - Cram transcript files: `51`
-- Doctest examples: `27` across 8 documents
+- Doctest examples: `28` across 8 documents
 
 The test count includes six DX.2 filesystem-boundary cases and six DX.5/DX.7
 structural-depth and diagnostic-compatibility cases. The successor cram
@@ -36,6 +36,8 @@ governance-check transcript. GM.17A adds four governance-explanation cases and
 one public explanation transcript. GM.17B adds four static effect-attribution
 cases and one public why-effect transcript. SX.25 adds one formatter-contract
 case for the canonical width, plain UTF-8 output, idempotence, and hash inertia.
+SX.26 adds five compiled marked-text interpolation cases, one documentation
+example, and one explicit lowering-parity twin.
 
 ## Proved behavior
 
