@@ -131,6 +131,45 @@ let test_primary_plus_later_type_error () =
     (report_golden report);
   Alcotest.(check bool) "later good island checked" true (List.mem "good" (signature_names report))
 
+let test_interpolation_requires_explicit_text () =
+  let invalid = analyze ~file:"interpolation.jac" {|$"count: {1}"|} in
+  Alcotest.(check (list string))
+    "non-Text interpolation has a local explicit-conversion diagnostic"
+    [
+      expected_golden "error" "E0801" "interpolation.jac:1:11-12" "Types do not agree"
+        "interpolation expression: expected text, got int (type mismatch)"
+        "Convert the value to Text explicitly, for example with `text.from-int(n)`.";
+    ]
+    (report_golden invalid);
+  let valid = analyze ~file:"interpolation-valid.jac" {|$"count: {text.from-int(1)}"|} in
+  Alcotest.(check (list string)) "explicit Text conversion checks" [] (codes valid)
+
+let test_interpolation_recovery_is_line_bounded () =
+  let report =
+    analyze ~file:"interpolation-recovery.jac" "broken = $\"value: {name\nlater = 42\n"
+  in
+  Alcotest.(check (list string))
+    "one primary interpolation diagnostic"
+    [
+      expected_golden "error" "E1219" "interpolation-recovery.jac:1:10-24"
+        "A marked text interpolation is malformed."
+        "interpolation expression cannot cross a line boundary"
+        "Close the interpolation expression and marked string, or move nested interpolation to a \
+         separate binding.";
+    ]
+    (report_golden report);
+  Alcotest.(check bool)
+    "later definition remains checkable" true
+    (List.mem "later" (signature_names report));
+  let empty = analyze ~file:"interpolation-empty.jac" "broken = $\"value: {}\"\nlater = 42\n" in
+  Alcotest.(check (list string))
+    "empty embedded expression has one local diagnostic"
+    [ e1220 "interpolation-empty.jac:1:20-21" "an interpolation expression cannot be empty" ]
+    (report_golden empty);
+  Alcotest.(check bool)
+    "empty expression preserves later definition" true
+    (List.mem "later" (signature_names empty))
+
 let test_higher_order_row_accumulation () =
   let source =
     "preflight : forall | e. ((Code) ->{| e} Bool) ->{Dist | e} Code\n\
@@ -800,6 +839,10 @@ let suite =
     Alcotest.test_case "hole kinds and independent islands" `Quick
       test_hole_kinds_and_independent_islands;
     Alcotest.test_case "primary plus later type error" `Quick test_primary_plus_later_type_error;
+    Alcotest.test_case "interpolation explicit Text" `Quick
+      test_interpolation_requires_explicit_text;
+    Alcotest.test_case "interpolation recovery is line bounded" `Quick
+      test_interpolation_recovery_is_line_bounded;
     Alcotest.test_case "higher-order row accumulation" `Quick test_higher_order_row_accumulation;
     Alcotest.test_case "handler subtraction through typed wrapper" `Quick
       test_handler_row_subtraction_through_wrapper;

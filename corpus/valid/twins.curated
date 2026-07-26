@@ -1,2 +1,4 @@
 # Sugar provenance cannot be recovered from bootstrap trees; keep this L3 twin hand-curated.
 pipe-transformation.jac
+# Marked interpolation provenance is intentionally absent from the explicit bootstrap twin.
+interpolation.jac

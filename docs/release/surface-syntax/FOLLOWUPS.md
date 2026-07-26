@@ -41,10 +41,11 @@ D38 completed in SS.22. The callable prelude builtin, focused tests, `.jac` and
 `.jqd` corpus twin, native differential cases through eight arguments, and
 executable documentation meet the contract below. The language/interpreter
 contract remains unbounded; native v1 refuses nine arguments with E1101 under
-its global ABI ceiling. Text interpolation remains absent and is still a
-separate grammar decision. The old list-plus-separator object is preserved
-hash-for-hash under deprecated migration-only `text.join-list`; variadic
-`text.join` is a new canonical object with marker `text.join-variadic-v1`.
+its global ABI ceiling. Successor SX.26 closes the separate grammar decision
+with marked text that lowers locally to the same `text.join` object. The old
+list-plus-separator object is preserved hash-for-hash under deprecated
+migration-only `text.join-list`; variadic `text.join` is a new canonical object
+with marker `text.join-variadic-v1`.
 
 **Acceptance contract:**
 

@@ -54,6 +54,13 @@ let rec project_expr (expression : Surface_ast.expr) =
     | (Surface_ast.Lit _ | Surface_ast.Name _ | Surface_ast.HashRef _ | Surface_ast.GroupRef _) as
       leaf ->
         leaf
+    | Surface_ast.Interpolation parts ->
+        Surface_ast.Interpolation
+          (List.map
+             (function
+               | Surface_ast.IText _ as text -> text
+               | Surface_ast.IExpr embedded -> Surface_ast.IExpr (project_expr embedded))
+             parts)
     | Surface_ast.Call (fn, args) -> Surface_ast.Call (project_expr fn, List.map project_expr args)
     | Surface_ast.Fn (params, body) ->
         Surface_ast.Fn (List.map project_pat params, project_expr body)
@@ -324,6 +331,12 @@ let rec lint_expr names constructors (expression : Surface_ast.expr) =
   | Surface_ast.Lit _ | Surface_ast.Name _ | Surface_ast.HashRef _ | Surface_ast.GroupRef _
   | Surface_ast.Hole _ ->
       []
+  | Surface_ast.Interpolation parts ->
+      List.concat_map
+        (function
+          | Surface_ast.IText _ -> []
+          | Surface_ast.IExpr embedded -> lint_expr names constructors embedded)
+        parts
   | Surface_ast.Call (fn, args) -> lint_expr names constructors fn @ exprs args
   | Surface_ast.Fn (params, body) -> pats params @ lint_expr names constructors body
   | Surface_ast.Tuple items | Surface_ast.List items -> exprs items

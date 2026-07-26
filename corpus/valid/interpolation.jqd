@@ -1,0 +1,7 @@
+(defterm
+  ((binding render-text ()
+    (lam ((pvar value))
+      (app (var text.join)
+        (lit "value: ")
+        (var value)
+        (lit " of {limit}"))))))

@@ -893,7 +893,12 @@ and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(requir
           ctx.tier_apps <- (frow, Tier.KFn) :: ctx.tier_apps;
           List.iter
             (fun ((arg : Kernel.expr), actual) ->
-              unify_or ctx ~meta:arg.meta ~what:"variadic argument" param actual)
+              if surface_form_is meta [ "interpolation" ] then
+                unify_or ctx ~meta:arg.meta ~what:"interpolation expression"
+                  ~next_step:
+                    "Convert the value to Text explicitly, for example with `text.from-int(n)`."
+                  param actual
+              else unify_or ctx ~meta:arg.meta ~what:"variadic argument" param actual)
             (List.combine args arg_tys);
           include_callee frow;
           result

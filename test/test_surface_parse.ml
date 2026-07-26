@@ -49,6 +49,19 @@ let test_atoms () =
   check_equivalent "hash ref" (Printf.sprintf "#%s:op" zeros) (Printf.sprintf "(ref #%s op)" zeros);
   check_equivalent "group ref" "#group[7]" "(groupref 7)"
 
+let test_interpolation_lowering () =
+  check_equivalent "empty marked text" {|$""|} "(app (var text.join))";
+  check_equivalent "literal-only marked text" {|$"hello"|} {|(app (var text.join) (lit "hello"))|};
+  check_equivalent "expression and literal brace" {|$"total: {text.from-int(count)} of {{limit}"|}
+    {|(app (var text.join) (lit "total: ") (app (var text.from-int) (var count)) (lit " of {limit}"))|};
+  check_equivalent "ordinary string inside interpolation" {|$"quoted: {text.concat("{", value)}"|}
+    {|(app (var text.join) (lit "quoted: ") (app (var text.concat) (lit "{") (var value)))|};
+  check_equivalent "quote remains an ordinary embedded expression" {|$"code: {quote { 1 }}"|}
+    {|(app (var text.join) (lit "code: ") (quote (lit 1)))|};
+  Alcotest.(check (list string))
+    "nested marked interpolation is rejected" [ "E1219" ]
+    (error_codes {|$"outer {$"inner"}"|})
+
 let test_calls () =
   check_equivalent "zero arguments" "f()" "(app (var f))";
   check_equivalent "multiline arguments" "f(\n  1,\n  2\n)" "(app (var f) (lit 1) (lit 2))";
@@ -198,6 +211,30 @@ let test_generated_spans_and_provenance () =
         (Option.map Span.to_string (Meta.span sequence.meta));
       Alcotest.(check bool) "body retains source span" true (Option.is_some (Meta.span body.meta))
   | _ -> Alcotest.fail "expected generated sequence let");
+  let interpolation = lower ~file:"span.jac" {|$"value: {text}"|} in
+  (match interpolation.Kernel.it with
+  | Kernel.App
+      ( { Kernel.it = Kernel.Var "text.join"; meta = callee_meta },
+        [
+          { Kernel.it = Kernel.Lit (Kernel.LText "value: "); meta = text_meta };
+          { Kernel.it = Kernel.Var "text"; _ };
+        ] ) ->
+      Alcotest.(check (option string))
+        "interpolation provenance" (Some "interpolation")
+        (Meta.surface_form interpolation.meta);
+      Alcotest.(check (option string))
+        "generated callee provenance" (Some "interpolation-callee")
+        (Meta.surface_generated callee_meta);
+      Alcotest.(check bool)
+        "generated callee is resolved like a surface reference" true
+        (Meta.is_surface_reference callee_meta);
+      Alcotest.(check (option string))
+        "generated text provenance" (Some "interpolation-text")
+        (Meta.surface_generated text_meta);
+      Alcotest.(check (option string))
+        "interpolation span" (Some "span.jac:1:1-17")
+        (Option.map Span.to_string (Meta.span interpolation.meta))
+  | _ -> Alcotest.fail "expected interpolation to lower to one text.join application");
   let recursive = lower ~file:"span.jac" "{\n  let rec f(x) = x\n  f(1)\n}" in
   match recursive.Kernel.it with
   | Kernel.Let { value = { Kernel.it = Kernel.Lam _; meta = lambda_meta }; _ } ->
@@ -329,6 +366,7 @@ let test_bootstrap_reader_unchanged () =
 let suite =
   [
     Alcotest.test_case "atoms" `Quick test_atoms;
+    Alcotest.test_case "interpolation lowering" `Quick test_interpolation_lowering;
     Alcotest.test_case "postfix calls" `Quick test_calls;
     Alcotest.test_case "functions and patterns" `Quick test_functions_and_patterns;
     Alcotest.test_case "grouping and tuples" `Quick test_parentheses_and_tuples;

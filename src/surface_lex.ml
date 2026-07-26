@@ -15,6 +15,11 @@ type token =
   | GroupRef of int
   | Keyword of string
   | Literal of Kernel.lit
+  | InterpolationStart
+  | InterpolationText of string
+  | InterpolationOpen
+  | InterpolationClose
+  | InterpolationEnd
   | Comment of string
   | DocComment of string
   | LParen
@@ -38,6 +43,7 @@ type token =
 
 type located = { token : token; span : Span.t }
 type recovery = { tokens : located list; diagnostics : Diag.t list }
+type interpolation_mode = Normal | Text of Span.pos | Expr of int * Span.pos
 
 let keywords =
   [
@@ -71,6 +77,7 @@ type state = {
   mutable col : int;
   mutable forall_pending : bool;
   mutable raw_pending : bool;
+  mutable interpolation_mode : interpolation_mode;
 }
 
 exception Bug_lex_error of Diag.t
@@ -88,6 +95,7 @@ let diagnostic_summary = function
   | "E1216" -> "A kind-tagged hash reference is malformed."
   | "E1217" -> "An internal group reference is malformed."
   | "E1218" -> "A surface string contains invalid UTF-8."
+  | "E1219" -> "A marked text interpolation is malformed."
   | code -> raise (Diag.Bug_invalid_diagnostic ("unknown surface lexer code " ^ code))
 
 let diagnostic_next_step = function
@@ -100,6 +108,9 @@ let diagnostic_next_step = function
   | "E1216" -> "Write a full lowercase hash followed by a valid reference-kind suffix."
   | "E1217" -> "Write the internal reference as #group followed by a non-negative index."
   | "E1218" -> "Replace the invalid bytes with valid UTF-8 text."
+  | "E1219" ->
+      "Close the interpolation expression and marked string, or move nested interpolation to a \
+       separate binding."
   | code -> raise (Diag.Bug_invalid_diagnostic ("unknown surface lexer code " ^ code))
 
 let fail state start_pos code cause =
@@ -257,6 +268,92 @@ let read_string state =
         loop ()
   in
   loop ()
+
+let start_interpolation state =
+  let start_pos = pos state in
+  ignore (advance state);
+  ignore (advance state);
+  state.interpolation_mode <- Text start_pos;
+  located state start_pos InterpolationStart
+
+let read_interpolation_text state opening =
+  let start_pos = pos state in
+  match peek state with
+  | None -> fail state opening "E1219" "unterminated marked text interpolation"
+  | Some '"' ->
+      ignore (advance state);
+      state.interpolation_mode <- Normal;
+      located state start_pos InterpolationEnd
+  | Some '{' when peek_at state 1 <> Some '{' ->
+      ignore (advance state);
+      state.interpolation_mode <- Expr (0, opening);
+      located state start_pos InterpolationOpen
+  | _ ->
+      let buffer = Buffer.create 32 in
+      let rec loop () =
+        match peek state with
+        | None ->
+            if Buffer.length buffer = 0 then
+              fail state opening "E1219" "unterminated marked text interpolation"
+            else located state start_pos (InterpolationText (Buffer.contents buffer))
+        | Some '"' -> located state start_pos (InterpolationText (Buffer.contents buffer))
+        | Some '{' when peek_at state 1 <> Some '{' ->
+            located state start_pos (InterpolationText (Buffer.contents buffer))
+        | Some ('\n' | '\r') ->
+            if Buffer.length buffer = 0 then
+              fail state opening "E1219" "marked text interpolation cannot cross a line boundary"
+            else located state start_pos (InterpolationText (Buffer.contents buffer))
+        | Some '{' ->
+            Buffer.add_char buffer '{';
+            ignore (advance state);
+            ignore (advance state);
+            loop ()
+        | Some '\\' ->
+            let escape_pos = pos state in
+            ignore (advance state);
+            (match peek state with
+            | None -> fail state opening "E1219" "unterminated marked string escape"
+            | Some (('\\' | '"') as char) ->
+                Buffer.add_char buffer char;
+                ignore (advance state)
+            | Some 'n' ->
+                Buffer.add_char buffer '\n';
+                ignore (advance state)
+            | Some 't' ->
+                Buffer.add_char buffer '\t';
+                ignore (advance state)
+            | Some 'r' ->
+                Buffer.add_char buffer '\r';
+                ignore (advance state)
+            | Some 'x' -> (
+                ignore (advance state);
+                match (peek state, peek_at state 1) with
+                | Some high, Some low when is_hex high && is_hex low ->
+                    Buffer.add_char buffer (Char.chr ((hex_value high * 16) + hex_value low));
+                    ignore (advance state);
+                    ignore (advance state)
+                | _ -> fail state escape_pos "E1214" "`\\x` must be followed by two hex digits")
+            | Some char ->
+                fail state escape_pos "E1214"
+                  (Printf.sprintf "invalid marked string escape `\\%c`" char));
+            loop ()
+        | Some char when Char.code char >= 0x80 -> (
+            let scalar_pos = pos state in
+            match utf8_width state.src state.off with
+            | None ->
+                ignore (advance state);
+                fail state scalar_pos "E1218" "invalid UTF-8 scalar in marked text"
+            | Some width ->
+                for _ = 1 to width do
+                  Buffer.add_char buffer (advance state)
+                done;
+                loop ())
+        | Some char ->
+            Buffer.add_char buffer char;
+            ignore (advance state);
+            loop ()
+      in
+      loop ()
 
 let read_escaped state =
   let start_pos = pos state in
@@ -493,6 +590,7 @@ let next_regular state =
       read_comment state ~doc:true
   | Some '-' when peek_at state 1 = Some '-' -> read_comment state ~doc:false
   | Some '"' -> read_string state
+  | Some '$' when peek_at state 1 = Some '"' -> start_interpolation state
   | Some '`' -> read_escaped state
   | Some '#' -> read_hash state
   | Some ('0' .. '9' | '+' | '-') -> read_number state
@@ -520,17 +618,54 @@ let update_context state ({ token; _ } as located) =
   located
 
 let next state =
-  skip_space state;
-  if state.raw_pending then
-    begin match peek state with
-    | Some '{' -> update_context state (read_raw_candidate state)
-    | Some '-' when peek_at state 1 = Some '-' -> update_context state (next_regular state)
-    | _ -> update_context state (next_regular state)
-    end
-  else update_context state (next_regular state)
+  match state.interpolation_mode with
+  | Text opening -> update_context state (read_interpolation_text state opening)
+  | Expr (depth, opening) ->
+      skip_space state;
+      let token =
+        match peek state with
+        | None -> fail state opening "E1219" "interpolation expression has no closing `}`"
+        | Some '\n' ->
+            fail state opening "E1219" "interpolation expression cannot cross a line boundary"
+        | Some '$' when peek_at state 1 = Some '"' ->
+            ignore (advance state);
+            ignore (advance state);
+            fail state opening "E1219" "nested marked interpolation is not supported in 0.1"
+        | Some '{' ->
+            state.interpolation_mode <- Expr (depth + 1, opening);
+            one state LBrace
+        | Some '}' when depth = 0 ->
+            let start_pos = pos state in
+            ignore (advance state);
+            state.interpolation_mode <- Text opening;
+            located state start_pos InterpolationClose
+        | Some '}' ->
+            state.interpolation_mode <- Expr (depth - 1, opening);
+            one state RBrace
+        | Some _ -> next_regular state
+      in
+      update_context state token
+  | Normal ->
+      skip_space state;
+      if state.raw_pending then
+        begin match peek state with
+        | Some '{' -> update_context state (read_raw_candidate state)
+        | Some '-' when peek_at state 1 = Some '-' -> update_context state (next_regular state)
+        | _ -> update_context state (next_regular state)
+        end
+      else update_context state (next_regular state)
 
 let initial_state ~file src =
-  { src; file; off = 0; line = 1; col = 1; forall_pending = false; raw_pending = false }
+  {
+    src;
+    file;
+    off = 0;
+    line = 1;
+    col = 1;
+    forall_pending = false;
+    raw_pending = false;
+    interpolation_mode = Normal;
+  }
 
 (** [lex ~file source] tokenizes a complete source string and appends one [Eof] token. It stops at
     the first malformed token and returns a span-bearing diagnostic. *)
@@ -564,24 +699,32 @@ let resynchronize_string state start_pos ~after_offset =
   in
   seek_closing_quote ()
 
-let recover_after_error state start_pos start_char diagnostic =
-  match start_char with
-  | Some '"' ->
-      let after_offset =
-        if Diag.code diagnostic = Some "E1213" then start_pos.Span.offset
-        else
-          match Diag.span diagnostic with
-          | Some error_span -> error_span.Span.end_pos.offset
-          | None -> state.off
-      in
-      resynchronize_string state start_pos ~after_offset;
-      if Diag.code diagnostic = Some "E1213" then
-        Diag.with_span (Some (span state start_pos)) diagnostic
-      else diagnostic
-  | _ ->
-      (if state.off = start_pos.Span.offset then
-         match peek state with Some _ -> ignore (advance state) | None -> ());
+let recover_after_error state start_pos start_char interpolation_mode diagnostic =
+  match interpolation_mode with
+  | Text _ | Expr _ ->
+      while match peek state with Some '\n' | None -> false | Some _ -> true do
+        ignore (advance state)
+      done;
+      state.interpolation_mode <- Normal;
       diagnostic
+  | Normal -> (
+      match start_char with
+      | Some '"' ->
+          let after_offset =
+            if Diag.code diagnostic = Some "E1213" then start_pos.Span.offset
+            else
+              match Diag.span diagnostic with
+              | Some error_span -> error_span.Span.end_pos.offset
+              | None -> state.off
+          in
+          resynchronize_string state start_pos ~after_offset;
+          if Diag.code diagnostic = Some "E1213" then
+            Diag.with_span (Some (span state start_pos)) diagnostic
+          else diagnostic
+      | _ ->
+          (if state.off = start_pos.Span.offset then
+             match peek state with Some _ -> ignore (advance state) | None -> ());
+          diagnostic)
 
 (** [lex_recover ~file source] tokenizes through lexical damage and appends [Eof]. Every malformed
     lexical unit becomes one in-order [Invalid] token carrying its diagnostic. String recovery stops
@@ -590,15 +733,18 @@ let recover_after_error state start_pos start_char diagnostic =
 let lex_recover ~file src : recovery =
   let state = initial_state ~file src in
   let rec loop tokens diagnostics =
-    skip_space state;
+    (match state.interpolation_mode with Text _ -> () | Normal | Expr _ -> skip_space state);
     let start_pos = pos state in
     let start_char = peek state in
+    let interpolation_mode = state.interpolation_mode in
     match next state with
     | { token = Eof; _ } as eof ->
         { tokens = List.rev (eof :: tokens); diagnostics = List.rev diagnostics }
     | token -> loop (token :: tokens) diagnostics
     | exception Bug_lex_error diagnostic ->
-        let diagnostic = recover_after_error state start_pos start_char diagnostic in
+        let diagnostic =
+          recover_after_error state start_pos start_char interpolation_mode diagnostic
+        in
         let invalid_span = Option.value (Diag.span diagnostic) ~default:(span state start_pos) in
         let invalid = { token = Invalid diagnostic; span = invalid_span } in
         ignore (update_context state invalid);
@@ -618,6 +764,12 @@ let show_token = function
   | Literal (Kernel.LInt value) -> "int(" ^ string_of_int value ^ ")"
   | Literal (Kernel.LReal value) -> "real(" ^ Printer.real_repr value ^ ")"
   | Literal (Kernel.LText value) -> Printf.sprintf "text(\"%s\")" (Printer.escape_text value)
+  | InterpolationStart -> "$\""
+  | InterpolationText value ->
+      Printf.sprintf "interpolation-text(\"%s\")" (Printer.escape_text value)
+  | InterpolationOpen -> "interpolation-{"
+  | InterpolationClose -> "interpolation-}"
+  | InterpolationEnd -> "interpolation-\""
   | Comment text -> "comment(" ^ text ^ ")"
   | DocComment text -> "doc-comment(" ^ text ^ ")"
   | LParen -> "("

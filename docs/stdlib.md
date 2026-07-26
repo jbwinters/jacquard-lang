@@ -346,14 +346,15 @@ honest middle ground, and the document says plainly that codepoints are not
 graphemes, so `text.length("👍🏽")` is 2. A grapheme-aware layer is future work
 (§9, D9), and nothing here will need renaming when it arrives.
 
-`text.join` is a callable variadic builtin, not interpolation syntax. Its
-contract is `text.join : (Text...) ->{} Text`: zero arguments return `""`, one
-argument returns that text unchanged, and multiple arguments are concatenated
-deterministically in call order. Every argument is evaluated strictly and must
-be `Text`; a non-text argument reports its one-based argument position. This
-language and interpreter contract is unbounded. Native v1 parity covers zero
-through eight arguments; a nine-argument application is refused with E1101 by
-the general application ceiling documented in `native-compilation.md`.
+`text.join` is a callable variadic builtin and the lowering target for marked
+text interpolation. Its contract is `text.join : (Text...) ->{} Text`: zero
+arguments return `""`, one argument returns that text unchanged, and multiple
+arguments are concatenated deterministically in call order. Every argument is
+evaluated strictly and must be `Text`; a non-text argument reports its one-based
+argument position. This language and interpreter contract is unbounded. Native
+v1 parity covers zero through eight arguments; a nine-argument application is
+refused with E1101 by the general application ceiling documented in
+`native-compilation.md`.
 
 `text.join-list : (List Text, Text) ->{} Text` is the deprecated migration-only
 compatibility binding. It retains the pre-SS.22 `text.join` marker and member
@@ -366,6 +367,12 @@ runtime meaning.
 
 ```jacquard doctest=stdlib-text-join mode=run fixture=stdlib-text-join.jac stdout=stdlib-text-join.stdout stderr=empty exit=0
 (text.join(), text.join("one"), text.join("Jac", "qu", "ard"))
+```
+
+Marked interpolation keeps conversions explicit and lowers to the same call:
+
+```jacquard doctest=stdlib-interpolation mode=run fixture=stdlib-interpolation.jac stdout=stdlib-interpolation.stdout stderr=empty exit=0
+$"total: {text.from-int(2)} of {{limit}"
 ```
 
 The remaining text block is an interface catalog with no function bodies, so

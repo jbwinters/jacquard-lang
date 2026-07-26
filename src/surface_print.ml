@@ -484,6 +484,10 @@ let rec pp_expr context lookup fmt (expr : Kernel.expr) =
   else begin
     (match expr.it with Kernel.Let _ -> () | _ -> pp_leading context expr.meta fmt);
     (match (Meta.surface_form expr.meta, expr.it) with
+    | Some "interpolation", Kernel.App (fn, args) -> (
+        match interpolation_text context lookup fn args with
+        | Some text -> Format.pp_print_string fmt text
+        | None -> pp_kernel_expr context lookup fmt expr)
     | Some "if", Kernel.Match (condition, clauses) -> (
         match if_branches clauses with
         | Some (yes, no) -> pp_if context lookup fmt condition yes no
@@ -500,6 +504,54 @@ let rec pp_expr context lookup fmt (expr : Kernel.expr) =
     | Some _, _ | None, _ -> pp_kernel_expr context lookup fmt expr);
     match expr.it with Kernel.Let _ -> () | _ -> pp_trailing context expr.meta fmt
   end
+
+and interpolation_text context lookup fn args =
+  let is_text_join =
+    match fn.Kernel.it with
+    | Kernel.Var name -> String.equal name "text.join"
+    | Kernel.Ref (hash, Kernel.Term) ->
+        Option.equal String.equal (Meta.name fn.meta) (Some "text.join")
+        || Option.equal String.equal
+             (Option.bind lookup (fun find -> find Surface_name.Term hash))
+             (Some "text.join")
+    | Kernel.Ref (_, (Kernel.Con | Kernel.Op))
+    | Kernel.GroupRef _ | Kernel.Lit _ | Kernel.Lam _ | Kernel.App _ | Kernel.Let _ | Kernel.Match _
+    | Kernel.Tuple _ | Kernel.Handle _ | Kernel.Quote _ | Kernel.Unquote _ | Kernel.Ann _ ->
+        false
+  in
+  let escape_text text =
+    let escaped = Printer.escape_text text in
+    let buffer = Buffer.create (String.length escaped) in
+    String.iter
+      (fun char ->
+        if char = '{' then Buffer.add_string buffer "{{" else Buffer.add_char buffer char)
+      escaped;
+    Buffer.contents buffer
+  in
+  let render_expr part =
+    let buffer = Buffer.create 64 in
+    let formatter = Format.formatter_of_buffer buffer in
+    Format.pp_set_margin formatter 1_000_000;
+    pp_expr context lookup formatter part;
+    Format.pp_print_flush formatter ();
+    let rendered = Buffer.contents buffer in
+    if String.contains rendered '\n' || String.contains rendered '\r' then None else Some rendered
+  in
+  let render_part (part : Kernel.expr) =
+    match (part.it, Meta.surface_generated part.meta) with
+    | Kernel.Lit (Kernel.LText text), Some "interpolation-text" -> Some (escape_text text)
+    | _ -> Option.map (fun expression -> "{" ^ expression ^ "}") (render_expr part)
+  in
+  if not is_text_join then None
+  else
+    let rec collect acc = function
+      | [] -> Some ("$\"" ^ String.concat "" (List.rev acc) ^ "\"")
+      | part :: rest -> (
+          match render_part part with
+          | Some rendered -> collect (rendered :: acc) rest
+          | None -> None)
+    in
+    collect [] args
 
 and pp_kernel_expr context lookup fmt (expr : Kernel.expr) =
   match expr.it with

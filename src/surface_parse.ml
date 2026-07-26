@@ -557,6 +557,7 @@ and parse_primary state ~allow_newlines =
   | Surface_lex.Literal literal ->
       ignore (advance state);
       Surface_ast.{ it = Lit literal; meta }
+  | Surface_lex.InterpolationStart -> parse_interpolation state (advance state)
   | Surface_lex.Ident "_" ->
       report state token "`_` is only valid in pattern position";
       ignore (advance state);
@@ -615,6 +616,76 @@ and parse_primary state ~allow_newlines =
         (Printf.sprintf "expected an expression, found %s" (token_description state token));
       if token.Surface_lex.token <> Surface_lex.Eof then ignore (advance state);
       expr_hole state token
+
+and parse_interpolation state opening =
+  let rec loop parts =
+    let token = current state in
+    match token.Surface_lex.token with
+    | Surface_lex.InterpolationText text ->
+        ignore (advance state);
+        loop (Surface_ast.IText (text, meta_with_span token.span) :: parts)
+    | Surface_lex.InterpolationOpen -> (
+        let open_token = advance state in
+        match (current state).Surface_lex.token with
+        | Surface_lex.InterpolationClose ->
+            let closing = advance state in
+            report state closing "an interpolation expression cannot be empty";
+            loop (Surface_ast.IExpr (expr_hole state closing) :: parts)
+        | _ -> (
+            let expression = parse_expr state ~allow_newlines:false in
+            skip_comments state;
+            match (current state).Surface_lex.token with
+            | Surface_lex.InterpolationClose ->
+                ignore (advance state);
+                loop (Surface_ast.IExpr expression :: parts)
+            | Surface_lex.Invalid _ ->
+                let invalid = advance state in
+                Surface_ast.
+                  {
+                    it = Interpolation (List.rev (IExpr (expr_hole state invalid) :: parts));
+                    meta = meta_with_span (span_between opening invalid);
+                  }
+            | Surface_lex.Eof when Surface_ast.has_holes_expr expression ->
+                Surface_ast.
+                  {
+                    it = Interpolation (List.rev (IExpr expression :: parts));
+                    meta = meta_with_span (span_between opening (current state));
+                  }
+            | _ ->
+                let found = current state in
+                report state found
+                  (Printf.sprintf "expected `}` to close interpolation opened at %s, found %s"
+                     (Span.to_string open_token.span) (token_description state found));
+                Surface_ast.
+                  {
+                    it = Interpolation (List.rev (IExpr expression :: parts));
+                    meta = meta_with_span (span_between opening found);
+                  }))
+    | Surface_lex.InterpolationEnd ->
+        let closing = advance state in
+        Surface_ast.
+          {
+            it = Interpolation (List.rev parts);
+            meta = meta_with_span (span_between opening closing);
+          }
+    | Surface_lex.Invalid _ ->
+        ignore (advance state);
+        Surface_ast.
+          {
+            it = Interpolation (List.rev (IExpr (expr_hole state token) :: parts));
+            meta = meta_with_span (span_between opening token);
+          }
+    | _ ->
+        report state token
+          (Printf.sprintf "expected marked text or `{`, found %s" (token_description state token));
+        if token.Surface_lex.token <> Surface_lex.Eof then ignore (advance state);
+        Surface_ast.
+          {
+            it = Interpolation (List.rev (IExpr (expr_hole state token) :: parts));
+            meta = meta_with_span (span_between opening token);
+          }
+  in
+  loop []
 
 and parse_list_expr state opening =
   let items, closing =
@@ -1118,14 +1189,17 @@ and parse_match_arm state start =
         next_top )
 
 and atomic_handle_start = function
-  | Surface_lex.Literal _ | Surface_lex.Ident _ | Surface_lex.GroupRef _ -> true
+  | Surface_lex.Literal _ | Surface_lex.InterpolationStart | Surface_lex.Ident _
+  | Surface_lex.GroupRef _ ->
+      true
   | Surface_lex.Escaped ((Surface_name.Term | Surface_name.Con | Surface_name.Op), _) -> true
   | Surface_lex.HashRef (_, (Surface_name.Term | Surface_name.Con | Surface_name.Op)) -> true
   | _ -> false
 
 and atomic_handle_body (expr : Surface_ast.expr) =
   match expr.it with
-  | Surface_ast.Lit _ | Surface_ast.Name _ | Surface_ast.HashRef _ -> true
+  | Surface_ast.Lit _ | Surface_ast.Interpolation _ | Surface_ast.Name _ | Surface_ast.HashRef _ ->
+      true
   | Surface_ast.Call (head, _) -> atomic_handle_call_head head
   | _ -> false
 
@@ -2521,6 +2595,12 @@ let structural_depth_violation (top : Surface_ast.top) =
           let child_depth = depth + 1 in
           begin match expression.it with
           | Lit _ | Name _ | HashRef _ | GroupRef _ | Hole _ -> ()
+          | Interpolation parts ->
+              List.iter
+                (function
+                  | Surface_ast.IText _ -> ()
+                  | Surface_ast.IExpr expression -> push_expr child_depth expression)
+                parts
           | Call (fn, args) ->
               push_expr child_depth fn;
               List.iter (push_expr child_depth) args
@@ -2676,6 +2756,12 @@ module Trivia_ownership = struct
     let children =
       match node.it with
       | Lit _ | Name _ | HashRef _ | GroupRef _ | Hole _ -> []
+      | Interpolation parts ->
+          List.concat_map
+            (function
+              | Surface_ast.IText (_, meta) -> slot Expr meta
+              | Surface_ast.IExpr expression -> expr (depth + 1) expression)
+            parts
       | Call (fn, args) -> expr (depth + 1) fn @ List.concat_map (expr (depth + 1)) args
       | Fn (params, body) -> List.concat_map (pat (depth + 1)) params @ expr (depth + 1) body
       | Tuple items | List items -> List.concat_map (expr (depth + 1)) items
@@ -3051,6 +3137,14 @@ module Trivia_ownership = struct
     let it =
       match expression.it with
       | (Lit _ | Name _ | HashRef _ | GroupRef _ | Hole _) as leaf -> leaf
+      | Interpolation parts ->
+          Interpolation
+            (List.map
+               (function
+                 | Surface_ast.IText (text, meta) ->
+                     Surface_ast.IText (text, apply additions Expr meta)
+                 | Surface_ast.IExpr expression -> Surface_ast.IExpr (map_expr additions expression))
+               parts)
       | Call (fn, args) -> Call (map_expr additions fn, List.map (map_expr additions) args)
       | Fn (params, body) -> Fn (List.map (map_pat additions) params, map_expr additions body)
       | Tuple items -> Tuple (List.map (map_expr additions) items)
