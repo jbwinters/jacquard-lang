@@ -149,7 +149,7 @@ Jacquard 0.1 ratifies explicit dictionaries instead of implicit traits. A
 dictionary is ordinary single-constructor data with labeled fields, and callers
 pass it as an ordinary argument. Ring 0 defines these executable shapes:
 
-```jacquard
+```text
 type Eq a = | MkEq(eq-fn: (a, a) ->{} Bool)
 type Ord a = | MkOrd(compare-fn: (a, a) ->{} Ordering)
 type Show a = | MkShow(show-fn: (a) ->{} Text)
@@ -169,7 +169,7 @@ derivations such as `ord.to-eq`, `eq.for-pair`, and `eq.for-list`. Container
 operations that need a capability take it visibly: `list.sort(xs, int.ord)`.
 Generic arithmetic has the same shape:
 
-```jacquard
+```text
 add-with(dictionary, left, right) =
   num.add(dictionary)(left, right)
 ```

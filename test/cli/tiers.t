@@ -7,14 +7,14 @@ tier land here on purpose, like the sigs goldens.
   $ export JACQUARD_PRELUDE=../../prelude
 
   $ jacquard tiers
-  == declarations: 373 named terms ==
-  pure                 252  67%
+  == declarations: 383 named terms ==
+  pure                 260  67%
   row-poly              44  11%
-  effectful             56  15%
-  data                  21   5%
+  effectful             56  14%
+  data                  23   6%
   
-  == call sites: 1478 applications ==
-  constructor          418  28%
+  == call sites: 1480 applications ==
+  constructor          420  28%
   op-perform            77   5%
   fn pure              740  50%
   fn row-poly          138   9%
@@ -83,7 +83,7 @@ tier land here on purpose, like the sigs goldens.
     write            once   multi-shot       materialized-resume        1
     write-file       once   tail-resumptive  materialized-resume        3
   
-  stamped 373 tier sidecars
+  stamped 383 tier sidecars
 
 A file that does not resolve is an error, not a partial table:
 
