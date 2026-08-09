@@ -1,9 +1,22 @@
 {
-  "schema_version": "readability-fixtures-v0",
-  "protocol_version": "readability-protocol-v0",
+  "schema_version": "readability-fixtures-v1",
+  "protocol_version": "readability-protocol-v1",
   "license": "Apache-2.0",
   "carriers": ["jac", "jqd", "python"],
-  "jobs": ["seeded-bug", "predict-output", "authority-escalation"],
+  "jobs": [
+    "seeded-bug",
+    "predict-output",
+    "authority-escalation",
+    "modify-behavior",
+    "diagnostic-recovery"
+  ],
+  "outcome_families": [
+    "comprehension",
+    "review",
+    "defect-detection",
+    "modification-debugging",
+    "diagnostic-recovery"
+  ],
   "presentation": {
     "media_type": "text/plain; charset=utf-8",
     "syntax_highlighting": false,
@@ -15,23 +28,14 @@
     "Python has no Jacquard HASH_V0 canonical identity or 27-form kernel projection.",
     "Python has no Jacquard row-polymorphic effect checker or capability-grant refusal boundary.",
     "Python evaluation, integer, recursion, tuple-printing, and dynamic-eval rules are its own runtime semantics.",
-    "Only the stated reviewer question and pinned stdout are matched across Python and Jacquard."
+    "Only the stated reviewer question and pinned stdout or diagnostic class are matched across Python and Jacquard."
   ],
-  "model_condition": {
-    "provider": "Anthropic",
-    "model": "claude-fable-5",
-    "client": "Claude Code 2.1.212",
-    "prompt": "model-prompt.txt",
-    "prompt_sha256": "7964459745c1a53cd98d3fc96af74d24bac1c9aa3d199ae6d3d355739b031295",
-    "temperature": 0.0,
-    "repetitions_per_condition": 30,
-    "tools": "disabled",
-    "session_memory": "disabled"
-  },
   "fixtures": [
     {
       "id": "seeded-bug",
       "job": "seeded-bug",
+      "outcome_family": "defect-detection",
+      "verification_kind": "success",
       "prompt": "The program is intended to compute factorial(5) as 120, but it produces 0. Which part contains the seeded bug?",
       "options": [
         {"id": "base-case", "label": "The base case returns 0."},
@@ -61,6 +65,8 @@
     {
       "id": "predict-output",
       "job": "predict-output",
+      "outcome_family": "comprehension",
+      "verification_kind": "success",
       "prompt": "Without running the program, what exact value does it print?",
       "options": [
         {"id": "five-five", "label": "(5, 5)"},
@@ -90,6 +96,8 @@
     {
       "id": "authority-escalation",
       "job": "authority-escalation",
+      "outcome_family": "review",
+      "verification_kind": "success",
       "prompt": "Which authority-sensitive operation does this program introduce?",
       "options": [
         {"id": "dynamic-eval", "label": "Dynamic code evaluation."},
@@ -113,6 +121,65 @@
         "jac": {"path": "fixtures/authority-escalation.jac", "sha256": "8db759ef46df543655dd7f9992d4bcf35b1b257100da450dfae4d807fc4dffe3"},
         "jqd": {"path": "fixtures/authority-escalation.jqd", "sha256": "5431fd720880c80a2eb2dadf32b52a49df91a9371c9ee1ce4e47980f2262ff6d"},
         "python": {"path": "fixtures/authority-escalation.py", "sha256": "7563d4ea0738d3a24f10865112cbba6de176d85fb88fc708203cd4e500bc1dfd"}
+      }
+    },
+    {
+      "id": "modify-behavior",
+      "job": "modify-behavior",
+      "outcome_family": "modification-debugging",
+      "verification_kind": "success",
+      "prompt": "The requirement changed: totals above 100 must receive a discount of 30, so this example should produce 90. Which single edit is required?",
+      "options": [
+        {"id": "discount-value", "label": "Change the subtracted discount from 20 to 30."},
+        {"id": "threshold", "label": "Change the threshold from 100 to 90."},
+        {"id": "example-input", "label": "Change the example input from 120 to 110."},
+        {"id": "branch-order", "label": "Swap the true and false branches."}
+      ],
+      "correct_answer": "discount-value",
+      "wrong_answer_errors": {
+        "threshold": "requirement-location",
+        "example-input": "test-mutation",
+        "branch-order": "branch-direction"
+      },
+      "expected_stdout": "100\n",
+      "jacquard_run_args": [],
+      "semantic_hash_lines": [
+        "0 1d562df2fbba4e7890f8c79e2f8e1a8a2b6d8d90ca89fb405a5deb1aab0ec6e2",
+        "0:discount 1cef64a207212b8ff08753a0fa1fd0487dad2011c5eda2c5af6ec5c7d67d0380",
+        "1 228f1df88a603967f17f8c9fbed3020e3bf56b8c5f28b8d1530904d4c0d4b8e8"
+      ],
+      "sources": {
+        "jac": {"path": "fixtures/modify-behavior.jac", "sha256": "d534b98ffcf127d14913549c45001293cb0041e6a884cf20b1b3a295aa3eb792"},
+        "jqd": {"path": "fixtures/modify-behavior.jqd", "sha256": "71848c435f71fdccec62e1f8688a7f2b35e72006203088672b767918dfabcaca"},
+        "python": {"path": "fixtures/modify-behavior.py", "sha256": "72f8f15ea7e76bc5af79cab8156675f75c777bd154c90521f731e78dc553dd5b"}
+      }
+    },
+    {
+      "id": "diagnostic-recovery",
+      "job": "diagnostic-recovery",
+      "outcome_family": "diagnostic-recovery",
+      "verification_kind": "diagnostic",
+      "prompt": "Checking this source reports that an integer is not callable. Which edit fixes that diagnostic and makes the program produce 3?",
+      "options": [
+        {"id": "use-addition", "label": "Replace the attempted call with addition of 1 and 2."},
+        {"id": "swap-values", "label": "Swap the values so 2 is called with 1."},
+        {"id": "grant-effect", "label": "Grant the program permission to perform effects."},
+        {"id": "quote-code", "label": "Quote the expression instead of evaluating it."}
+      ],
+      "correct_answer": "use-addition",
+      "wrong_answer_errors": {
+        "swap-values": "diagnostic-cause",
+        "grant-effect": "diagnostic-phase",
+        "quote-code": "recovery-behavior"
+      },
+      "expected_diagnostic": {
+        "jacquard_code": "E0802",
+        "python_exception": "TypeError"
+      },
+      "sources": {
+        "jac": {"path": "fixtures/diagnostic-recovery.jac", "sha256": "fa7c8681f50994001acf96b2e92df48347b7c6db7390435f898da37ad9f81473"},
+        "jqd": {"path": "fixtures/diagnostic-recovery.jqd", "sha256": "cd019a2d065a47cf3d82dc6ddcfbba8cc540a5efb8a49d84858c90bb6d0684b1"},
+        "python": {"path": "fixtures/diagnostic-recovery.py", "sha256": "2e37973d4f66a20bc69b6eae539dde0ca95e86bf8f080f7340e8285e6e0fa48e"}
       }
     }
   ]

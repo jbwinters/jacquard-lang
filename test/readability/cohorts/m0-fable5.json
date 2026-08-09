@@ -1,0 +1,38 @@
+{
+  "schema_version": "readability-model-cohort-v1",
+  "protocol_version": "readability-protocol-v1",
+  "cohort_id": "M0",
+  "role": "reference",
+  "access_status": "not-confirmed",
+  "provider": "Anthropic",
+  "model_id": "claude-fable-5",
+  "client": {
+    "name": "Claude Code",
+    "version": "2.1.226"
+  },
+  "control": {
+    "kind": "temperature",
+    "value": 0.0
+  },
+  "prompt": {
+    "path": "../model-prompt.txt",
+    "sha256": "b0d1b713fa9f2b37905d6d2c175861bf918870b8b1ea8a4cd94c884743fae0a3"
+  },
+  "repetitions_per_condition": 30,
+  "tools": "disabled",
+  "session_memory": "disabled",
+  "fresh_session_required": true,
+  "training_cutoff_attestation": {
+    "status": "pending",
+    "attested_by": null,
+    "attested_at": null,
+    "evidence_sha256": null
+  },
+  "quota_constraints": {
+    "status": "unconfirmed",
+    "maximum_sessions": null,
+    "rate_limit": null,
+    "notes": "Confirm access, quota, and rate limits before authorizing collection."
+  },
+  "collection_authorized": false
+}

@@ -1,7 +1,10 @@
 You are completing one code-review trial. Use only the plain-text prompt and
 source shown below. Do not call tools, execute code, or use outside material.
 
-Choose exactly one listed answer ID. Return one JSON object and no prose:
-{"answer_id":"<ID>","confidence":<integer from 0 through 100>}
+Choose exactly one listed answer ID. Then rate how easy the presented source
+was to read from 1 (very hard) through 7 (very easy). Return one JSON object and
+no prose:
+{"answer_id":"<ID>","confidence":<integer from 0 through 100>,"perceived_readability":<integer from 1 through 7>}
 
 Confidence means your estimated percent chance that the answer is correct.
+The readability rating is subjective and must not replace task correctness.

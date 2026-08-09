@@ -1,107 +1,129 @@
-# Readability benchmark execution gate
+# Readability protocol v1 execution gate
 
-Status: planning tools are implemented; collection is not authorized and no
-human or model outcomes have been collected.
+Status: deterministic planning and validation tools are implemented. Real
+collection is not authorized and no human or model outcomes exist.
 
-The frozen [protocol](PROTOCOL.md) defines what the study measures. This
-document defines the boundary between making a deterministic plan and starting
-the study. A generated schedule is evidence that the planned conditions are
-complete and balanced. It is not consent, ethics or privacy approval, a model
-attestation, or permission to collect data.
+The [protocol](PROTOCOL.md) defines the study. This document separates a
+reproducible plan from external authority. A generated schedule proves that
+planned cells are complete and balanced. It is not consent, ethics or privacy
+approval, funded compensation, a model attestation, quota, or permission to
+collect data.
 
-## Authority required before collection
+## Fail-closed authority boundary
 
-The study operator must record all of the following outside the result rows
-before enrolling a person or starting a model session:
+The operator must create a reviewed authority manifest outside the public
+result rows. It must record all nine approved areas in
+`authority-manifest.template.json`, identify the approving authority and date,
+pin an evidence digest, and set `collection_authorized` only after the evidence
+exists. Do not commit names, contact data, consent records, secrets, or private
+approval documents.
 
-1. the accountable study owner and operator;
-2. the applicable ethics and privacy route, decision, and decision date;
-3. approved information-sheet and consent-form versions;
-4. recruitment source, eligibility wording, and the no-tools agreement;
-5. compensation terms, funded budget, payment process, and withdrawal window;
-6. the data controller, access list, storage location, deletion date, and
-   incident contact;
-7. the de-identified publication license agreed to by participants;
-8. the accessible plain-text study host and a completed presentation check;
-9. for confirmatory model rows, an attestation from the provider or deployment
-   owner that the pinned model's training cutoff predates fixture publication.
+For model collection, the selected cohort manifest must also record available
+access, an attested pre-publication training cutoff, confirmed quota/rate
+limits, and explicit collection authorization. The checked M0 Fable 5 manifest
+has each of those states pending. The planning harness deliberately rejects
+every real human or model row, even if a caller edits those states. A separately
+reviewed result-admission gate must land before collection. Model availability
+never delays or substitutes for the primary human study.
 
-A required change to the protocol, fixtures, schema, answer key, exclusions,
-or consent/data terms must be versioned and reviewed before collection. Missing
-authority fails closed. Synthetic dry runs and generated schedules cannot fill
-in an approval or attestation.
+Do not weaken the gate to start a study. A required change to protocol,
+fixtures, schema, answer key, exclusions, presentation, consent, or data terms
+creates a new reviewed version before collection.
 
 ## Human assignment plan
 
-Generate the complete plan before recruitment:
+Generate the full plan before recruitment:
 
 ```text
 python3 test/readability/readability_benchmark.py human-schedule \
   > .scratch/readability/human-schedule.jsonl
 ```
 
-The command emits 480 zero-based enrollment ordinals. Each row contains only
-assignment-planning metadata: the ordinal, block and position, carrier,
-three-job presentation order, schema and protocol versions, and seed digest.
-It contains no identity, contact, consent, compensation, or outcome data. The
-confirmatory seed assigns exactly 160 enrollments to each carrier. Every
-complete block of 18 ordinals contains all carrier and job-order cells once.
+The output has 480 zero-based enrollment ordinals and no identity, contact,
+consent, compensation, or outcome data. The seed assigns 160 enrollments to
+each carrier. Every complete block of 30 contains three carriers by ten
+Williams job orders. Within each carrier, every job appears twice in every
+position and every ordered adjacent job pair appears twice.
 
-The reviewed JSONL SHA-256 is
-`c6421e9fff78b5fd7397e8c2aaeadee434c58c01c1d1d85aec224c4e2ec1a9be`.
+Reviewed JSONL SHA-256:
+`356f000ba5af0421ef6eaaf246bbb78527ff9ffb97f61d84f5f795d96b114178`.
 
-The operator allocates the next ordinal only after eligibility and consent.
-The operator may not skip an assignment after seeing it. Private enrollment,
-consent, contact, and compensation records must not be added to this schedule
-or to the published result rows.
+The operator allocates the next ordinal only after eligibility and consent and
+may not skip it after seeing the assignment. Private enrollment and payment
+records never enter the schedule or published results.
 
-## Model dispatch plan
+## Model cohort plan
 
-Generate the complete plan without calling a model:
+Generate a plan for exactly one reviewed cohort without contacting its
+provider:
 
 ```text
 python3 test/readability/readability_benchmark.py model-schedule \
   --manifest test/readability/fixture-manifest.json \
-  > .scratch/readability/model-schedule.jsonl
+  --cohort test/readability/cohorts/m0-fable5.json \
+  > .scratch/readability/model-schedule-m0.jsonl
 ```
 
-The command emits 270 trials: three carriers by three jobs by 30 repetitions.
-Every trial requires a fresh session with tools and session memory disabled.
-Each row pins the reviewed model, client, temperature, prompt digest, fixture
-digest, confirmatory seed digest, and isolation settings.
+M0 currently plans 450 trials: three carriers by five jobs by 30 repetitions.
+Each row pins the cohort-manifest digest, model/client/control, prompt and
+fixture digests, seed, isolation controls, attestation/quota status, and
+collection-authorization state. The pending states are visible in every row;
+the schedule is not executable study authority.
 
-Dispatch order is ascending SHA-256 of this exact UTF-8 byte sequence:
+Dispatch order is ascending SHA-256 of this exact UTF-8 sequence:
 
 ```text
-jacquard-readability-v0\0carrier=<carrier>\0job=<job>\0repetition=<1..30>
+jacquard-readability-v1\0cohort=M0\0carrier=<carrier>\0job=<job>\0repetition=<1..30>
 ```
 
-Here `\0` means one NUL byte, not the two printed characters backslash and
-zero. The schedule records that digest as `dispatch_key_sha256`. A dispatcher
-must use the rows in ordinal order and must not retry parse failures. Model or
-client drift, prompt drift, tool use, memory use, and missing training-cutoff
-attestation remain exclusions under the protocol.
+Here `\0` means one NUL byte. A real dispatcher uses ordinal order, a fresh
+session for each row, disabled tools and memory, and no retry after parse
+failure. The repository deliberately has no provider dispatcher, so local
+verification cannot silently spend quota or create unauthorized outcomes.
 
-The reviewed JSONL SHA-256 is
-`ba972dfcd0738a7f3360f54179c95dc02140e84d21320474a9e410380f8071b5`.
+Reviewed M0 JSONL SHA-256:
+`69178f914457cbe0cf6081f10fa6b018267ec0876175ddc7b44bc8f92c735e4e`.
 
-The repository deliberately does not include a command that contacts a model.
-That prevents a local verification command from silently spending quota,
-changing external state, or creating results without the required attestation.
+A Sol or other model run requires a different attested cohort ID and manifest.
+It is never substituted for M0 and its rows and analysis remain separate.
+
+## Result validation and preservation
+
+`validate-results` requires the exact fixture, cohort, authority, and schema
+manifests. Synthetic rows validate with the checked pending manifests because
+they are explicitly `dry-run`; this planning slice rejects every human or model
+row. The v1 schema reserves schedule ordinals and authority/cohort digests so
+the result-admission slice can prevent a later manifest edit from silently
+reclassifying evidence.
+
+Preserve, under the approved data controls:
+
+- de-identified result rows and enrollment/exclusion flow;
+- human and model schedules, public seeds, and every cohort manifest;
+- consent/publication authority digests, not private source documents;
+- presentation and model failures, including non-retried parse failures;
+- preregistered analysis code and generated tables; and
+- the blinded independent rescoring record.
+
+No human-identifying data, provider secrets, raw model conversations, or
+synthetic rows represented as outcomes may be committed.
 
 ## What the checked gate proves
 
 `dune build @readability-protocol` verifies:
 
-- all 480 human ordinals are present, contiguous, and balanced 160 per carrier;
-- every human row exactly matches the frozen seeded assignment function;
-- all 270 model carrier/job/repetition cells occur exactly once;
-- model dispatch keys are unique and in SHA-256 order;
-- every model row retains the reviewed fixture, prompt, model, client,
-  temperature, tool, memory, and fresh-session pins;
-- repeated schedule generation is byte-identical JSON Lines.
+- the five outcome families, answer keys, source digests, behavior, and stable
+  diagnostic pin;
+- all 480 human ordinals, 160-per-carrier balance, Williams positions, and
+  first-order carryover;
+- all 450 M0 carrier/job/repetition cells and cohort-specific dispatch keys;
+- exact prompt, client, control, fixture, cohort, isolation, attestation, and
+  quota pins;
+- v1 schema shape, canonical synthetic row IDs, invalid ratings/profiles, and
+  unconditional rejection of real rows in the planning harness; and
+- byte-identical schedule and dry-run generation.
 
-It does not prove that approvals exist, presentation was accessible in the live
-host, subjects followed instructions, the pinned model was uncontaminated, or
-the study results support a readability claim. Those require the separately
-reviewed execution and publication evidence required by Task UX.1.
+It does not prove that approvals exist, the live host is accessible,
+participants followed instructions, M0 is available or uncontaminated, quota
+exists, or any readability claim is true. Those require real external
+authority, collection, checked evidence, and reproducible analysis.

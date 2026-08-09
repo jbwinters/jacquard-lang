@@ -1,184 +1,224 @@
-# Surface-readability benchmark protocol v0
+# Human-first readability benchmark protocol v1
 
-Status: preregistered; no human or model outcomes collected. Protocol ID:
-`readability-protocol-v0`.
+Status: preregistered design; no human or model outcomes have been collected.
+Protocol ID: `readability-protocol-v1`.
 
-This benchmark replaces preference polling with review work. It asks whether a
-reviewer can find a seeded bug, predict observable output, and spot an authority
-escalation in canonical `.jac`, bootstrap `.jqd`, or a matched Python control.
-UX.0 freezes the method and synthetic evidence only. A separately reviewed
-execution phase may collect results.
+This protocol asks what readers can actually understand and change. It keeps a
+subjective perceived-readability rating separate from correctness, completion
+time, confidence, and diagnostic recovery. Human evidence is primary. Model
+evidence is supplementary, cohort-specific, and cannot support a readability
+claim by itself.
 
-## Questions and hypotheses
+## Questions and outcome families
 
-The three reviewer jobs are fixed:
+Each participant sees five fixed reviewer jobs in one source carrier:
 
-1. Find a seeded bug in a factorial program that returns zero.
-2. Predict observable output from a branching program.
-3. Spot an authority escalation caused by dynamic evaluation.
+1. **Comprehension:** predict observable output.
+2. **Review:** spot an authority escalation caused by dynamic evaluation.
+3. **Defect detection:** find a seeded bug in a factorial program.
+4. **Modification/debugging:** identify the edit required by a changed
+   behavioral requirement.
+5. **Diagnostic recovery:** choose the repair for a stable not-callable
+   diagnostic.
 
-The confirmatory comparison is `.jac` versus `.jqd`; its null is no change in
-correctness or completion time. Those measures are co-primary. Python is a
-descriptive calibration control. Confidence and the deterministic error
-taxonomy are secondary. A result about one job is not generalized to another.
+After each timed answer and before feedback, the participant rates perceived
+readability from 1 (very hard) through 7 (very easy). A rating measures
+preference or ease, not semantic transparency, debugging readability, or
+actual understandability. Those constructs are reported separately by outcome
+family. Confidence from 0 through 100 measures calibration and never replaces
+correctness.
 
-Python is a task-equivalent calibration control, not a semantic twin. It does
-not share Jacquard's HASH_V0 identity, 27-form kernel, effect rows, capability
-refusal, integer rules, evaluator, or runtime. Only the question and pinned
-stdout are matched. The `.jac` and `.jqd` carriers must retain byte-identical
-semantic-hash output and observable behavior before any trial.
+The confirmatory comparison is canonical `.jac` versus bootstrap `.jqd`.
+Correctness and completion time are co-primary within each outcome family.
+Perceived readability, confidence, calibration, and the frozen error taxonomy
+are secondary. Python is a descriptive task-equivalent control. A result for
+one family is not generalized to another.
 
-## Design and assignment
+Python does not share Jacquard's HASH_V0 identity, 27-form kernel, effect rows,
+capability refusal, integer rules, evaluator, or runtime. Valid `.jac` and
+`.jqd` fixtures must retain byte-identical semantic hashes and observable
+behavior. The diagnostic-recovery pair is intentionally invalid and instead
+pins the same stable Jacquard diagnostic code, `E0802`; its Python control pins
+the task-equivalent `TypeError` class.
 
-The human study is randomized, between-subject, and balanced. Each participant
-sees one carrier and all three jobs, so nobody sees the same semantic problem in
-two syntaxes. The six possible job orders are counterbalanced within every
-carrier. One block contains the 18 carrier/order cells exactly once.
+## Human design, assignment, and sample size
 
-After eligibility and consent, an operator assigns a monotonically increasing
-enrollment ordinal. The checked-in tool sorts each 18-cell block by SHA-256 of
-the public seed, block, carrier, and order. The confirmatory seed is
-`jacquard-readability-v0`. Operators may not skip an ordinal after learning its
-assignment or selectively replace excluded participants.
+The study is randomized, between-subject, and balanced. A participant sees one
+carrier and all five jobs, so nobody sees the same semantic problem in two
+syntaxes. Ten Williams sequences counterbalance the five jobs. Across one
+carrier's ten sequences, every job appears twice in every position and every
+ordered adjacent pair appears twice. One assignment block contains all 30
+carrier/sequence cells.
 
-The model study uses the same nine carrier/job conditions, but each trial runs
-in a fresh session. Dispatch order is SHA-256 ordered by condition and
-repetition under the same seed. Human and model results are reported and
-analyzed separately; model subjects do not substitute for human evidence.
+After eligibility and consent, the operator allocates the next monotonically
+increasing enrollment ordinal. The checked-in planner sorts each block by
+SHA-256 of the public seed, block, carrier, and order. The confirmatory seed is
+`jacquard-readability-v1`. Operators may not skip an ordinal after learning its
+assignment or selectively replace an excluded participant.
 
-## Fixtures and presentation
+Recruit 480 adults who self-attest that they can read small Python-like
+programs and have at least one year of programming or review experience. The
+plan assigns 160 enrollments to each carrier. There is no optional stopping.
+Fewer than 141 analyzable humans in either Jacquard carrier makes every
+confirmatory `.jac`/`.jqd` readability claim inconclusive.
 
-The reviewed answer key, source paths, SHA-256 digests, expected stdout, and
-Jacquard hashes live in `test/readability/fixture-manifest.json`. The paired
-`.jac`/`.jqd` files are conformance fixtures, not a requirement to publish
-bootstrap twins for ordinary programs. They are Apache-2.0 with the repository.
-Python's matching limits are part of the manifest and verifier.
+At two-sided alpha 0.025, 128 analyzable participants per Jacquard carrier give
+about 80% power for a standardized log-time effect of 0.386, approximately a
+20% time change at coefficient of variation 0.5. The target of 141 covers that
+calculation and the prior accuracy calculation; enrolling 160 allows about 10%
+exclusion. Python remains balanced but does not enter the confirmatory power
+claim.
 
-Every trial is accessible UTF-8 plain text (`text/plain`) with no syntax highlighting, ANSI styling,
-language-tagged fence, HTML span, hover aid, editor service, or automatic
-formatting. All carriers use the same font, size, contrast, line height,
-viewport, prompt placement, and controls. Line wrapping is off; horizontal
-scrolling is available. Screen-reader participants receive the same bytes and
-labels in reading order. Zoom and operating-system accessibility tools are
-allowed. Running code, search, assistants, external documentation, and editor
-tooling are prohibited.
-
-The answer key is never rendered. A five-minute practice explains the answer
-controls and call, match, quotation, and dynamic-evaluation notation using
-examples that are not fixtures. Practice outcomes are not recorded.
-
-## Human sample size and procedure
-
-Recruit 480 adults who self-attest that they can read small Python-like programs
-and have at least one year of programming or review experience. Jacquard
-experience is neither required nor screened. Assignment yields 160 enrolled
-participants per carrier before exclusions. There is no optional stopping.
-
-Split family-wise alpha 0.05 equally between the two co-primary outcome
-families. At two-sided alpha 0.025, 128 analyzable participants per Jacquard
-carrier provide about 80% power for a standardized log-time effect of 0.386—
-roughly a 20% time change at coefficient of variation 0.5. Holm correction of
-the three job-specific accuracy comparisons still needs fewer than 100 per
-carrier to distinguish 70% from 90% accuracy. The target of 141 analyzable per
-carrier covers both calculations; recruiting 160 allows about 10% exclusion.
-Fewer than 141 analyzable participants in either Jacquard carrier makes the
-confirmatory comparison inconclusive. Python sample size remains balanced but
-does not enter the confirmatory power claim.
+Before assignment, record only these de-identified reader covariates with the
+result rows: years of programming experience, years of code-review experience,
+prior Jacquard familiarity from 0 through 4, and functional-programming/domain
+familiarity from 0 through 4. Analysis must report these strata or include them
+as prespecified covariates. Names, contact details, IP addresses, free text, and
+compensation identifiers are prohibited in result rows.
 
 Procedure:
 
-1. Show the approved information sheet and record consent version outside the
-   answer dataset.
-2. Record eligibility, prior fixture exposure, duplicate enrollment, and the
-   no-tools agreement.
-3. Allocate the next ordinal and render its carrier/order.
-4. Start a monotonic timer when the prompt and complete source are visible.
-5. Accept one answer ID and confidence from 0 through 100; stop on submission.
-6. At 300,000 ms, record `__timeout__`, zero correctness, and the full timeout.
-7. Ask once about prior exposure and tool use, then apply only frozen exclusions.
+1. Show the approved information sheet and record its consent version outside
+   the answer data.
+2. Record eligibility, the de-identified expertise fields, prior fixture
+   exposure, duplicate enrollment, and the no-tools agreement.
+3. Allocate the next ordinal and render its carrier and Williams job order.
+4. Start a monotonic timer when the complete prompt and source are visible.
+5. Accept one answer ID and confidence; stop the task timer on submission.
+6. Ask the 1-7 perceived-readability rating before feedback or the next task.
+7. At 300,000 ms, record `__timeout__`, zero correctness, and the full timeout.
+8. Ask once about prior exposure and tool use, then apply only frozen
+   exclusions.
 
-## Model condition and contamination control
+## Fixtures and accessible presentation
 
-The manifest pins Anthropic `claude-fable-5`, Claude Code 2.1.212, temperature
-0.0, 30 fresh repetitions per condition, exact prompt digest, disabled tools,
-disabled session memory, and no implementation conversation. Output must be
-only the specified JSON object. A parse failure is not retried.
+The reviewed answer key, source paths, SHA-256 digests, expected behavior, and
+diagnostic pins live in `test/readability/fixture-manifest.json`. Paired
+`.jac`/`.jqd` files are conformance fixtures, not ordinary publishing twins.
+Fixtures and tooling are Apache-2.0; participant data is not automatically
+licensed under Apache-2.0.
 
-Before collection, the provider or deployment owner must attest that training
-cutoff predates fixture publication. Otherwise rows receive
-`model-training-contamination` and cannot support confirmatory claims. Returned
-model/client drift, prompt drift, temperature drift, tool use, or memory use is
-not interchangeable. Post-publication models are exploratory only and cannot
-repair missing human evidence.
+Every trial is accessible UTF-8 plain text with no syntax highlighting, ANSI
+styling, language-tagged fence, HTML span, hover aid, editor service, or
+automatic formatting. All carriers use the same font, size, contrast, line
+height, viewport, prompt placement, and controls. Line wrapping is off and
+horizontal scrolling is available. Screen-reader participants receive the
+same bytes and labels in reading order. Zoom and operating-system accessibility
+tools are allowed. Running code, search, assistants, external documentation,
+and editor tooling are prohibited.
 
-## Scoring, timing, and exclusions
+The answer key is never rendered. A five-minute practice explains controls and
+notation with examples that are not fixtures. Practice outcomes are not
+recorded.
+
+## Model-family neutral cohorts
+
+Each model cohort has its own checked versioned cohort manifest. It records the
+provider, exact model ID, client name and version, effort or temperature
+control, prompt digest, repetitions, access state, training-cutoff attestation,
+quota constraints, tool and memory controls, and collection authorization.
+Schedules and results carry the cohort manifest digest. Cohorts are never
+silently substituted, pooled, or used to repair missing human evidence.
+
+Fable 5 is reference cohort `M0` when access permits. Its checked manifest is
+deliberately pending: access, training-cutoff attestation, and quota are not yet
+confirmed, so it cannot produce accepted real rows. Sol xhigh may support
+non-evidentiary synthetic harness work under `.scratch/`, or later run as its
+own attested exploratory cohort. It must never be labeled as `M0` or pooled
+with Fable.
+
+Every model trial uses a fresh session with tools and session memory disabled.
+The exact prompt requests only an answer ID, confidence, and 1-7 rating. A
+parse failure is not retried. Provider/model/client/control/prompt drift is not
+interchangeable. A reference cohort uses `confirmatory`; an exploratory cohort
+uses `exploratory`. Human and model tables and inferences remain separate.
+
+## Authority, consent, privacy, and licensing
+
+No real collection starts until one authority manifest records approval for:
+
+- accountable owner and operator;
+- the applicable ethics and privacy route;
+- information sheet, consent flow, recruitment, and eligibility wording;
+- funded compensation, payment process, and withdrawal window;
+- accessibility review of the live plain-text host;
+- retention, access control, deletion, and incident response;
+- the de-identified publication license; and
+- data governance and publication authority.
+
+The checked `authority-manifest.template.json` is intentionally unapproved and
+the planning harness rejects every real result row. An approval-driven protocol,
+fixture, schema, answer-key, exclusion, or data-term change requires a new
+reviewed version before collection.
+
+Rows use salted pseudonymous subject IDs and carry only answers, timing,
+ratings, confidence, covariates, assignment/fixture/authority digests,
+exclusions, and cohort metadata. The salt and consent/contact/compensation data
+stay outside the results. Linkage is deleted after payment and withdrawal
+periods. Publication and retention must match the approved consent and
+publication license.
+
+## Scoring, exclusions, and missing data
 
 Answers are opaque option IDs. The manifest maps one correct ID and every wrong
 ID to an error category. Unknown IDs are `invalid-answer`; timeouts are
-`timeout`. Correctness and error code are computed, never operator-entered.
+`timeout`. Reserved IDs `__system_failure__` and `__parse_failure__` preserve
+excluded failures without storing raw content. Correctness and error code are
+computed, never operator-entered.
 Completion time is integer monotonic milliseconds capped at five minutes. No
 winsorization or post-hoc speed cutoff is allowed.
 
 Human exclusions are exactly: no consent, failed eligibility, prior frozen
 fixture exposure, prohibited tool use, duplicate enrollment, or more than one
-verified presentation/system failure. One system failure excludes that trial
-only and reruns it last. Incorrect answers, low confidence, timeouts, surprising
-results, and ordinary accessibility tools are not exclusions.
+verified presentation/system failure. One failure excludes that trial and
+reruns it last as `trial_attempt` 2; the excluded failure remains attempt 1.
+Incorrect answers, low ratings or confidence, timeouts,
+surprising results, and ordinary accessibility tools are not exclusions.
 
-Model exclusions are exactly: unverified pre-publication training cutoff,
-pinned model/client drift, prompt parse failure, or more than one system
-failure. Exclusion counts and reasons are published by carrier and cohort before
-outcomes are unblinded.
+Model exclusions are exactly: unverified training cutoff, pinned cohort drift,
+prompt parse failure, or more than one system failure. Enrollment, exclusion,
+analyzable, failure, missing-data, and timeout flow is published by carrier and
+cohort before outcomes are unblinded.
 
-## Data, consent, privacy, and licensing
+## Preregistered analysis and claim gate
 
-UX.0 collects no real data. Before UX.1, the information sheet, recruitment,
-compensation, retention, publication license, and consent flow require the
-applicable owner and ethics/privacy approval. A mandated change creates a new
-protocol version before collection.
+Produce separate deterministic tables for perceived ratings, comprehension,
+review, defect detection, modification/debugging, and diagnostic recovery.
+Within each job/carrier report accuracy with Wilson uncertainty, completion
+median and log-mean, rating and confidence distributions, calibration, error
+counts, exclusions, and missingness. Report effect sizes and intervals, not
+only p-values. Model presentation order, expertise, prior Jacquard/domain
+knowledge, and learning/familiarity effects. Explain Python's control-language
+limitations.
 
-Rows contain a salted pseudonymous ID, answer ID, timing, confidence, assignment
-and fixture digests, exclusions, and protocol/model metadata. They contain no
-name, email, IP, free text, raw model conversation, compensation ID, or salt.
-Contact/compensation data stays separate; linkage is deleted after payment and
-withdrawal periods. Consent records are separate and rows carry only the
-version. De-identified publication and licensing must match that consent;
-Apache-2.0 covers fixtures/tooling, not participant data automatically.
+Pairwise `.jac`/`.jqd` accuracy uses Newcombe-Wilson difference intervals with
+Holm correction across functional outcomes. Time uses each human's geometric
+mean and Welch intervals on log milliseconds, then reports the exponentiated
+ratio. Allocate family-wise alpha 0.025 to accuracy and 0.025 to time. Ratings
+are secondary and cannot establish task success.
 
-`test/readability/result.schema.json` is the machine-readable JSON Schema
-2020-12 contract. Results are JSONL. Canonical row IDs hash the row without
-`row_id`. Unknown fields, free-form notes, highlighting, inconsistent scoring,
-wrong fixture digests, and cohort drift are rejected.
+No measured readability claim may be published unless the approved protocol
+and consent flow exist, both Jacquard carriers have at least 141 analyzable
+humans, checked evidence validates, the preregistered analysis reproduces
+byte-for-byte modulo declared timestamps, and every cited model cohort is
+attested. Human evidence is always required.
 
-## Analysis and syntax-amendment rule
+- **Pass for a specific outcome claim:** the corrected interval supports the
+  stated direction and the paired co-primary measure shows no material harm
+  (accuracy lower bound above -5 points and completion-ratio upper bound below
+  1.10). State the exact job or aggregate; do not say “readable” in general.
+- **Fail:** fixture identity/behavior drift, authority/schema failure, an
+  adjusted accuracy upper bound below -5 points, or a completion-ratio lower
+  bound above 1.10.
+- **Inconclusive:** every other result, including mixed measures, insufficient
+  humans, protocol drift, contamination, or intervals crossing thresholds.
 
-Publish enrolled/excluded/analyzable/timeout flow first. Human and model tables
-stay separate. By job/carrier, report accuracy with Wilson interval, completion
-median and log-mean, confidence distribution, and error counts. Pairwise
-`.jac`/`.jqd` accuracy uses Newcombe-Wilson difference intervals with Holm
-correction across jobs. Time uses each participant's geometric mean across jobs,
-a Welch interval on log milliseconds, and the exponentiated ratio. Allocate
-alpha 0.025 to each co-primary family. Python is descriptive context, never
-semantic or confirmatory evidence.
+Dependency distance, referent tracking, ambiguity, nesting, identifier cueing,
+canonical-format stability, diff stability, and code surprisal/naturalness may
+explain results. Preference ratings, formula-like metrics, and surprisal are
+not standalone gates.
 
-A later syntax amendment uses new participants, identical assignment and
-presentation rules, a preregistered seed, and fixtures with the same bootstrap
-identity and behavior. Compare it directly with current `.jac`:
-
-- **Pass:** every adjusted lower accuracy-difference bound is above -5 points,
-  the authority-escalation bound is above -2 points, and the adjusted upper
-  pooled completion-time ratio is below 0.90 (at least 10% faster).
-- **Fail:** unintended identity/behavior drift; any adjusted upper accuracy
-  bound below -5 points; the authority bound below -2; or an adjusted lower
-  time-ratio bound above 1.10.
-- **Inconclusive:** every other result, including mixed benefits, insufficient
-  sample, protocol drift, contamination, or intervals crossing thresholds.
-
-Pass supports but does not automatically merge an amendment. Inconclusive
-authorizes neither acceptance nor rejection and cannot be relabeled after
-subgrouping.
-
-## Reproduction
+## Reproduction without collection
 
 From the repository root:
 
@@ -187,23 +227,20 @@ eval "$(opam env)"
 mkdir -p "$PWD/.scratch/tmp" "$PWD/.scratch/readability"
 export TMPDIR="$PWD/.scratch/tmp"
 opam exec -- dune build @readability-protocol
-python3 test/readability/readability_benchmark.py dry-run --seed ux0-review \
+python3 test/readability/readability_benchmark.py dry-run --seed ux1-review \
   --manifest test/readability/fixture-manifest.json \
   --schema test/readability/result.schema.json \
   > .scratch/readability/dry-run.jsonl
 python3 test/readability/readability_benchmark.py validate-results \
   --manifest test/readability/fixture-manifest.json \
   --schema test/readability/result.schema.json \
+  --cohort test/readability/cohorts/m0-fable5.json \
+  --authority test/readability/authority-manifest.template.json \
   --input .scratch/readability/dry-run.jsonl
 ```
 
-The dry run emits exactly one synthetic valid row for each of nine conditions
-and makes no performance claim. Disposable assignments, renderings, logs, and
-execution stores remain under `.scratch/`. Protocol, fixture bytes, answer key,
-schema, model pin, exclusions, scoring, or threshold changes require a new
-version and review before further collection.
-
-The [execution gate](EXECUTION.md) records the authority required before UX.1
-collection and the deterministic commands for generating the frozen human and
-model schedules. Generating either schedule remains a planning operation, not
-consent or permission to collect outcomes.
+The dry run emits one synthetic, non-citable row for each of 15 conditions and
+makes no readability or performance claim. Schedules, renderings, logs, and
+stores remain under `.scratch/`. Generating a schedule is planning evidence,
+not permission to collect outcomes. The [execution gate](EXECUTION.md) records
+the exact fail-closed boundary.

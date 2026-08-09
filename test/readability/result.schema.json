@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://jacquard.example/schema/readability-result-v0.json",
-  "title": "Jacquard readability benchmark result row v0",
+  "$id": "https://jacquard.example/schema/readability-result-v1.json",
+  "title": "Jacquard readability benchmark result row v1",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -13,13 +13,17 @@
     "subject_id",
     "carrier",
     "job",
+    "outcome_family",
     "fixture_id",
     "condition_id",
     "presentation_order",
+    "trial_attempt",
+    "schedule_ordinal",
     "answer_id",
     "correct",
     "completion_ms",
     "confidence",
+    "perceived_readability",
     "error_code",
     "excluded",
     "exclusion_codes",
@@ -28,37 +32,76 @@
     "plain_text",
     "syntax_highlighting",
     "consent_version",
+    "authority_manifest_sha256",
+    "programming_experience_years",
+    "code_review_experience_years",
+    "jacquard_familiarity",
+    "functional_programming_familiarity",
     "model",
     "recorded_at"
   ],
   "properties": {
-    "schema_version": {"const": "readability-result-v0"},
-    "protocol_version": {"const": "readability-protocol-v0"},
+    "schema_version": {"const": "readability-result-v1"},
+    "protocol_version": {"const": "readability-protocol-v1"},
     "row_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-    "run_kind": {"enum": ["confirmatory", "dry-run"]},
+    "run_kind": {"enum": ["confirmatory", "exploratory", "dry-run"]},
     "subject_kind": {"enum": ["human", "model", "synthetic"]},
     "subject_id": {"type": "string", "pattern": "^[0-9a-f]{16,64}$"},
     "carrier": {"enum": ["jac", "jqd", "python"]},
-    "job": {"enum": ["seeded-bug", "predict-output", "authority-escalation"]},
-    "fixture_id": {"enum": ["seeded-bug", "predict-output", "authority-escalation"]},
+    "job": {
+      "enum": [
+        "seeded-bug",
+        "predict-output",
+        "authority-escalation",
+        "modify-behavior",
+        "diagnostic-recovery"
+      ]
+    },
+    "outcome_family": {
+      "enum": [
+        "comprehension",
+        "review",
+        "defect-detection",
+        "modification-debugging",
+        "diagnostic-recovery"
+      ]
+    },
+    "fixture_id": {
+      "enum": [
+        "seeded-bug",
+        "predict-output",
+        "authority-escalation",
+        "modify-behavior",
+        "diagnostic-recovery"
+      ]
+    },
     "condition_id": {
       "enum": [
         "jac/seeded-bug",
         "jac/predict-output",
         "jac/authority-escalation",
+        "jac/modify-behavior",
+        "jac/diagnostic-recovery",
         "jqd/seeded-bug",
         "jqd/predict-output",
         "jqd/authority-escalation",
+        "jqd/modify-behavior",
+        "jqd/diagnostic-recovery",
         "python/seeded-bug",
         "python/predict-output",
-        "python/authority-escalation"
+        "python/authority-escalation",
+        "python/modify-behavior",
+        "python/diagnostic-recovery"
       ]
     },
-    "presentation_order": {"type": "integer", "minimum": 1, "maximum": 3},
+    "presentation_order": {"type": "integer", "minimum": 1, "maximum": 5},
+    "trial_attempt": {"type": "integer", "minimum": 1, "maximum": 2},
+    "schedule_ordinal": {"type": ["integer", "null"], "minimum": 0},
     "answer_id": {"type": "string", "minLength": 1, "maxLength": 64},
     "correct": {"type": "boolean"},
     "completion_ms": {"type": "integer", "minimum": 0, "maximum": 300000},
     "confidence": {"type": "integer", "minimum": 0, "maximum": 100},
+    "perceived_readability": {"type": "integer", "minimum": 1, "maximum": 7},
     "error_code": {
       "type": ["string", "null"],
       "enum": [
@@ -70,6 +113,13 @@
         "call-trace",
         "capability-kind",
         "capability-omission",
+        "requirement-location",
+        "test-mutation",
+        "diagnostic-cause",
+        "diagnostic-phase",
+        "recovery-behavior",
+        "system-failure",
+        "prompt-parse-failure",
         "timeout",
         "invalid-answer"
       ]
@@ -97,6 +147,30 @@
     "plain_text": {"const": true},
     "syntax_highlighting": {"const": false},
     "consent_version": {"type": ["string", "null"], "maxLength": 64},
+    "authority_manifest_sha256": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "programming_experience_years": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "maximum": 80
+    },
+    "code_review_experience_years": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "maximum": 80
+    },
+    "jacquard_familiarity": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "maximum": 4
+    },
+    "functional_programming_familiarity": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "maximum": 4
+    },
     "model": {
       "oneOf": [
         {"type": "null"},
@@ -104,21 +178,29 @@
           "type": "object",
           "additionalProperties": false,
           "required": [
+            "cohort_id",
+            "cohort_manifest_sha256",
             "provider",
-            "model",
-            "client",
+            "model_id",
+            "client_name",
+            "client_version",
+            "control_kind",
+            "control_value",
             "prompt_sha256",
-            "temperature",
             "repetition",
             "training_cutoff_attested"
           ],
           "properties": {
+            "cohort_id": {"type": "string", "pattern": "^[A-Z][A-Z0-9-]{1,31}$"},
+            "cohort_manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
             "provider": {"type": "string", "minLength": 1, "maxLength": 64},
-            "model": {"type": "string", "minLength": 1, "maxLength": 128},
-            "client": {"type": "string", "minLength": 1, "maxLength": 128},
+            "model_id": {"type": "string", "minLength": 1, "maxLength": 128},
+            "client_name": {"type": "string", "minLength": 1, "maxLength": 64},
+            "client_version": {"type": "string", "minLength": 1, "maxLength": 128},
+            "control_kind": {"enum": ["effort", "temperature"]},
+            "control_value": {"type": ["number", "string"]},
             "prompt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-            "temperature": {"type": "number", "minimum": 0, "maximum": 2},
-            "repetition": {"type": "integer", "minimum": 1, "maximum": 30},
+            "repetition": {"type": "integer", "minimum": 1, "maximum": 100},
             "training_cutoff_attested": {"type": "boolean"}
           }
         }
@@ -136,6 +218,12 @@
         "properties": {
           "run_kind": {"const": "confirmatory"},
           "consent_version": {"type": "string", "minLength": 1},
+          "authority_manifest_sha256": {"type": "string"},
+          "schedule_ordinal": {"type": "integer"},
+          "programming_experience_years": {"type": "integer"},
+          "code_review_experience_years": {"type": "integer"},
+          "jacquard_familiarity": {"type": "integer"},
+          "functional_programming_familiarity": {"type": "integer"},
           "model": {"type": "null"}
         }
       }
@@ -144,8 +232,13 @@
       "if": {"properties": {"subject_kind": {"const": "model"}}},
       "then": {
         "properties": {
-          "run_kind": {"const": "confirmatory"},
           "consent_version": {"type": "null"},
+          "authority_manifest_sha256": {"type": "string"},
+          "schedule_ordinal": {"type": "integer"},
+          "programming_experience_years": {"type": "null"},
+          "code_review_experience_years": {"type": "null"},
+          "jacquard_familiarity": {"type": "null"},
+          "functional_programming_familiarity": {"type": "null"},
           "model": {"type": "object"}
         }
       }
@@ -156,6 +249,12 @@
         "properties": {
           "run_kind": {"const": "dry-run"},
           "consent_version": {"type": "null"},
+          "authority_manifest_sha256": {"type": "null"},
+          "schedule_ordinal": {"type": "null"},
+          "programming_experience_years": {"type": "null"},
+          "code_review_experience_years": {"type": "null"},
+          "jacquard_familiarity": {"type": "null"},
+          "functional_programming_familiarity": {"type": "null"},
           "model": {"type": "null"}
         }
       }
@@ -163,6 +262,10 @@
     {
       "if": {"properties": {"run_kind": {"const": "dry-run"}}},
       "then": {"properties": {"subject_kind": {"const": "synthetic"}}}
+    },
+    {
+      "if": {"properties": {"run_kind": {"const": "exploratory"}}},
+      "then": {"properties": {"subject_kind": {"const": "model"}}}
     }
   ]
 }
