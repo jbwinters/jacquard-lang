@@ -552,7 +552,7 @@ num.add(int.num)(40, 2)
 `int.num` and `real.num` are the standard numeric dictionaries. Alternate
 instances are ordinary `MkNum` values and must be passed explicitly. The
 concrete integer family is `int.add`, `int.sub`, `int.mul`, and `int.div`; bare
-aliases remain for compatibility. There is no implicit instance search,
+names remain for compatibility. There is no implicit instance search,
 operator overloading, or numeric defaulting.
 
 Core data and common functions:
