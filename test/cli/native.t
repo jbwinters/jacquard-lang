@@ -26,6 +26,68 @@ Ten pure programs, interpreter vs native, byte-compared (stdout and exit):
   identical: even-odd
   identical: prelude-map
 
+Explicit dictionaries are ordinary values in both carriers. The selected
+instance is visible, an effectful user dictionary keeps Console in its method
+row, quotation preserves the ordinary names, and direct/exported native output
+matches the interpreter.
+
+  $ cat > explicit-dictionaries.jac <<'JACQUARD'
+  > type TracedNum a =
+  >   | MkTracedNum(add-fn: (a, a) ->{Console} a)
+  > traced-num-add(d, x, y) =
+  >   match d {
+  >     | MkTracedNum(add-fn) -> add-fn(x, y)
+  >   }
+  > traced-int = MkTracedNum(fn (x, y) -> {
+  >   print("method")
+  >   int.add(x, y)
+  > })
+  > alternate-int = MkNum(int.sub, int.add, int.div, int.mul)
+  > generic-add(d, x, y) = num.add(d)(x, y)
+  > (
+  >   int.add(20, 22),
+  >   generic-add(int.num, 40, 2),
+  >   generic-add(alternate-int, 9, 4),
+  >   code.eq?(
+  >     quote { num.add(int.num)(1, 2) },
+  >     quote { num.add(int.num)(1, 2) },
+  >   ),
+  >   traced-num-add(traced-int, 10, 3),
+  > )
+  > JACQUARD
+  $ jacquard check explicit-dictionaries.jac --print-sigs
+  traced-num-add : forall a. (TracedNum a, a, a) ->{Console} a
+  traced-int : TracedNum Int
+  alternate-int : Num Int
+  generic-add : forall a. (Num a, a, a) ->{} a
+  _ : (Int, Int, Int, Bool, Int)
+  $ jacquard export explicit-dictionaries.jac -o explicit-dictionaries.jqd
+  $ jacquard hash explicit-dictionaries.jac > dictionary-surface.hash
+  $ jacquard hash explicit-dictionaries.jqd > dictionary-bootstrap.hash
+  $ cmp dictionary-surface.hash dictionary-bootstrap.hash && echo identical-dictionary-hashes
+  identical-dictionary-hashes
+  $ jacquard run explicit-dictionaries.jac --allow console > dictionary-interpreter.out
+  $ jacquard build explicit-dictionaries.jac -o dictionary-surface-native > /dev/null
+  $ jacquard build explicit-dictionaries.jqd -o dictionary-bootstrap-native > /dev/null
+  $ ./dictionary-surface-native --allow console > dictionary-surface-native.out
+  $ ./dictionary-bootstrap-native --allow console > dictionary-bootstrap-native.out
+  $ cmp dictionary-interpreter.out dictionary-surface-native.out
+  $ cmp dictionary-interpreter.out dictionary-bootstrap-native.out
+  $ cat dictionary-interpreter.out
+  method(42, 42, 5, true, 13)
+
+Ordinary type errors stay ordinary; the checker does not invent an implicit
+missing-instance or ambiguity diagnostic.
+
+  $ cat > explicit-dictionary-type-error.jac <<'JACQUARD'
+  > num.add(int.num)(1.0, 2.0)
+  > JACQUARD
+  $ jacquard check explicit-dictionary-type-error.jac
+  explicit-dictionary-type-error.jac:1:18-21: error[E0801]: Types do not agree
+    Cause: argument: expected int, got real (type mismatch)
+    Next step: the expected side comes from the surrounding context; make both sides agree
+  [1]
+
 The phase-zero parallel hints are ordinary pure definitions. Their explicitly
 sequential interpreter result is byte-identical through the native backend;
 neither path introduces Async or a task runtime.

@@ -774,6 +774,48 @@ let release_inventory_errors () =
         concurrency_path channel_row;
     ]
 
+let test_explicit_dictionary_release_contract () =
+  let decision = read_source "docs/release/explicit-dictionaries/DECISION.md" in
+  let evidence = read_source "docs/release/explicit-dictionaries/EVIDENCE.md" in
+  let builtins = read_source "prelude/04-builtins.jqd" in
+  let ring0 = read_source "prelude/08-ring0.jqd" in
+  let stdlib = read_source "docs/stdlib.md" in
+  let surface = read_source "docs/surface-syntax.md" in
+  let require label needle source = Alcotest.(check bool) label true (contains needle source) in
+  List.iter
+    (fun (label, needle) -> require label needle decision)
+    [
+      ("ordinary value contract", "ordinary value of an ordinary declared type");
+      ("no hidden search", "There is no hidden search");
+      ("Rust alternative", "Rust-style global traits");
+      ("abilities alternative", "Abilities-like overloading");
+      ("scoped future direction", "Modular-implicit-style scoped elaboration");
+      ("future compatibility subject", "Existing 0.1 code must not");
+      ("future meaning preservation", "change meaning or instance choice");
+      ("operators excluded", "operator or precedence syntax");
+      ("defaulting excluded", "defaulting, custom operator");
+    ];
+  List.iter
+    (fun name -> require (name ^ " marker alias") ("binding " ^ name) builtins)
+    [ "int.add"; "int.sub"; "int.mul"; "int.div" ];
+  List.iter
+    (fun name -> require (name ^ " ring-0 declaration") name ring0)
+    [
+      "(deftype num";
+      "binding num.add";
+      "binding num.sub";
+      "binding num.mul";
+      "binding num.div";
+      "binding int.num";
+      "binding real.num";
+    ];
+  require "evidence inventory" "Alcotest/QCheck cases: `847`" evidence;
+  require "stdlib decision link" "release/explicit-dictionaries/DECISION.md" stdlib;
+  require "surface generic spelling" "num.add(dictionary)(k, 1)" surface;
+  Alcotest.(check bool)
+    "stale undecided wording is absent" false
+    (contains "until the trait decision lands" surface)
+
 let doctest_names () =
   [
     "README.md";
@@ -1588,6 +1630,8 @@ let suite =
     Alcotest.test_case "release tables stop before later subheadings" `Quick
       test_table_rows_stop_at_later_subheading;
     Alcotest.test_case "structured release decision" `Quick assert_release_valid;
+    Alcotest.test_case "explicit dictionary release contract" `Quick
+      test_explicit_dictionary_release_contract;
     Alcotest.test_case "mutation: wrong count" `Quick test_wrong_count_fails;
     Alcotest.test_case "mutation: wrong status" `Quick test_wrong_status_fails;
     Alcotest.test_case "mutation: wrong path" `Quick test_wrong_path_fails;

@@ -1,0 +1,30 @@
+; Explicit dictionaries are ordinary values. The generic Num helper stays
+; pure, while a user-defined dictionary exposes Console in its method row.
+(defterm ((binding explicit-num-add ()
+  (lam ((pvar dictionary) (pvar left) (pvar right))
+    (app (app (var num.add) (var dictionary)) (var left) (var right))))))
+
+(defterm ((binding alternate-int-num ()
+  (app (var mk-num) (var int.sub) (var int.add) (var int.div) (var int.mul)))))
+
+(deftype traced-num ((tvar a))
+  (con mk-traced-num
+    (field add-fn
+      (tarrow ((tvar a) (tvar a)) (row (eref console)) (tvar a)))))
+
+(defterm ((binding traced-num.add ()
+  (lam ((pvar dictionary))
+    (match (var dictionary)
+      (clause (pcon mk-traced-num (pvar add-fn)) (var add-fn)))))))
+
+(defterm ((binding traced-int-num ()
+  (app (var mk-traced-num)
+    (lam ((pvar left) (pvar right))
+      (let nonrec (pwild) (app (var print) (lit "method"))
+       (app (var int.add) (var left) (var right))))))))
+
+(defterm ((binding traced-num-add ()
+  (lam ((pvar dictionary) (pvar left) (pvar right))
+    (app (app (var traced-num.add) (var dictionary)) (var left) (var right))))))
+
+(quote (app (var num.add) (var int.num) (lit 1) (lit 2)))

@@ -75,3 +75,14 @@
 ; HASH_V0 of the canonical compact bytes of a typed Code value. Metadata is
 ; absent from those bytes, so spans/comments/provenance cannot perturb it.
 (defterm ((binding code.hash () (quote (builtin-marker code.hash)))))
+
+; Explicit-dictionary compatibility aliases. HASH_V0 erases the binding name
+; from a member's identity, so these identical marker bodies retain the four
+; existing integer builtin hashes while making the public family dotted.
+(defterm ((binding int.add () (quote (builtin-marker add)))))
+
+(defterm ((binding int.sub () (quote (builtin-marker sub)))))
+
+(defterm ((binding int.mul () (quote (builtin-marker mul)))))
+
+(defterm ((binding int.div () (quote (builtin-marker div)))))

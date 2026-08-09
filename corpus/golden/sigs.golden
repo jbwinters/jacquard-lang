@@ -36,3 +36,9 @@
 26-replay.jqd:hermetified : (Code) ->{Throw} Text
 26-replay.jqd:chaos-explored : (Int) ->{Check, Throw} List ()
 26-replay.jqd:hermetified-multi : (Code) ->{Throw} Text
+27-explicit-dictionaries.jqd:explicit-num-add : forall a. (Num a, a, a) ->{} a
+27-explicit-dictionaries.jqd:alternate-int-num : Num Int
+27-explicit-dictionaries.jqd:traced-num.add : forall a. (TracedNum a) ->{} (a, a) ->{Console} a
+27-explicit-dictionaries.jqd:traced-int-num : TracedNum Int
+27-explicit-dictionaries.jqd:traced-num-add : forall a. (TracedNum a, a, a) ->{Console} a
+27-explicit-dictionaries.jqd:_ : Code

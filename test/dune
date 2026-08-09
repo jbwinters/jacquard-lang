@@ -137,6 +137,8 @@
   ../demos/README.md
   (source_tree ../demos/concurrency)
   ../docs/release/dx-jac-export/EVIDENCE.md
+  ../docs/release/explicit-dictionaries/DECISION.md
+  ../docs/release/explicit-dictionaries/EVIDENCE.md
   ../docs/stdlib.md
   ../docs/surface-syntax.md
   ../docs/tutorial.md

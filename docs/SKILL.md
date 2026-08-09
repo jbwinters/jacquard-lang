@@ -267,7 +267,7 @@ lower to `Cons`/`Nil`.
 top-three(xs) =
   xs
   |> list.filter(fn (n) -> int.gt?(n, 0))
-  |> list.map(fn (n) -> mul(n, n))
+  |> list.map(fn (n) -> int.mul(n, n))
   |> list.sort(int.ord)
   |> list.take(3)
 
@@ -538,14 +538,22 @@ a diagnostic instead. An unhandled root `observe` is an error.
 
 ## Standard Prelude
 
-Jacquard uses explicit dictionaries instead of typeclasses. Operations that
-need equality, ordering, or rendering receive `Eq`, `Ord`, or `Show` values:
+Jacquard uses explicit dictionaries instead of implicit typeclasses. Operations
+that need equality, ordering, rendering, or generic arithmetic receive `Eq`,
+`Ord`, `Show`, or `Num` values:
 
 ```jacquard
 list.sort(numbers, int.ord)
 list.contains?(names, "alice", text.eq)
 check.eq(actual, expected, int.eq, int.show, "same value")
+num.add(int.num)(40, 2)
 ```
+
+`int.num` and `real.num` are the standard numeric dictionaries. Alternate
+instances are ordinary `MkNum` values and must be passed explicitly. The
+concrete integer family is `int.add`, `int.sub`, `int.mul`, and `int.div`; bare
+aliases remain for compatibility. There is no implicit instance search,
+operator overloading, or numeric defaulting.
 
 Core data and common functions:
 
@@ -557,8 +565,9 @@ Core data and common functions:
   `result.then`, `result.with-default`, `result.get!`
 - `List a`: `Nil`, `Cons`; `list.map`, `filter`, `fold`, `each`, `length`,
   `reverse`, `append`, `concat`, `range`, `zip`, `sort`, `find`, `take`
-- Numeric: `add`, `sub`, `mul`, `div`, `mod`, `eq`, `lt`; `int.*` and
-  `real.*` predicates/conversions; real arithmetic uses `real.add` etc.
+- Numeric: dotted `int.add`/`sub`/`mul`/`div` and `real.add`/`sub`/`mul`/`div`;
+  compatibility `add`/`sub`/`mul`/`div`; `mod`, `eq`, and `lt`; `int.*` and
+  `real.*` predicates/conversions; generic calls use an explicit `Num` value.
 - Text: `text.concat`, `text.join`, `text.split`, `text.contains?`,
   `text.length`, `text.from-int`, direct predicate `text.eq?`, dictionary
   `text.eq`, and ordering dictionary `text.ord`
@@ -740,7 +749,8 @@ Do not invent new kernel forms for surface sugar.
 - No ambient authority: missing grants are expected refusals, not runtime
   configuration bugs.
 - No null, records, modules/imports, guards, or-patterns, custom operators,
-  traits/typeclasses, or generated field accessors.
+  implicit traits/typeclasses, or generated field accessors. Explicit
+  dictionaries are ordinary values.
 - No concurrency or enforced effect membranes in the shipped language.
 - Probability is finite/discrete: no continuous distributions or gradients.
 - Quote/eval is untyped staging; there is no typed staging or macro expander.
