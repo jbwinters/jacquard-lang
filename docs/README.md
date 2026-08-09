@@ -90,6 +90,11 @@ Read these together when judging whether the release candidate is credible:
   adversarial coverage, native carrier parity, and reproduction commands.
 - `release/dx-parser-performance/EVIDENCE.md`: DX.6 root-cause profile,
   before/after deep-input measurements, and the opt-in parser performance lane.
+- `release/explicit-dictionaries/DECISION.md`: ratified explicit `Eq`, `Ord`,
+  `Show`, and `Num` value-passing contract, compatibility rules, rejected
+  implicit alternatives, and exclusions.
+- `release/explicit-dictionaries/EVIDENCE.md`: dictionary identity, effect-row,
+  store, evaluation-order, carrier, and interpreter/native evidence map.
 
 ## Effect Linearity Evidence
 

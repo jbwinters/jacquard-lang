@@ -386,9 +386,11 @@ risk: there is very little language to learn.
 
 ## 9. What M0 deliberately excludes
 
-Records with row types; guards and or-patterns; ad-hoc polymorphism (traits/classes);
-macros beyond quote/unquote/eval; typed staging; numeric tower; ownership (GC assumed);
-any performance story. Exclusion here means "not in the kernel grammar yet," not "never."
+Records with row types; guards and or-patterns; implicit ad-hoc-polymorphism
+resolution (traits/classes); macros beyond quote/unquote/eval; typed staging;
+numeric tower; ownership (GC assumed); any performance story. Explicit
+dictionaries are ordinary `DefType`/`DefTerm` values and need no kernel form.
+Exclusion here means "not in the kernel grammar yet," not "never."
 
 ## 10. Open questions and honest flags
 
@@ -398,9 +400,10 @@ any performance story. Exclusion here means "not in the kernel grammar yet," not
 2. **Uncurried could flip.** If early macro or pipeline ergonomics favor currying, the
    change is contained: `Lam`/`App`/`TArrow` arities and the row placement convention.
    Decide before M2 (the checker), cheap before then.
-3. **Ad-hoc polymorphism is the largest deferred design.** OCaml's biggest regret in the
-   survey (`+.` forever). Options when it lands: Rust-style traits, modular implicits,
-   or something abilities-flavored. It will touch `TForall` and `DefTerm` annotations.
+3. **Explicit dictionaries settle the 0.1 ad-hoc-polymorphism boundary.** Generic
+   functions visibly receive ordinary `Eq`, `Ord`, `Show`, or `Num` values.
+   Implicit search, operators, and defaulting remain deferred; any future sugar
+   must elaborate to the ratified values without changing existing code.
 4. **Typed staging.** `Code` is untyped in M0 and `eval` is dynamically checked at the
    boundary. Fine for a kernel; not fine forever if macros become central.
 5. **Capability granularity.** Effects-as-capabilities controls authority per handled

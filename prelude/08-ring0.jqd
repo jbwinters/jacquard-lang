@@ -1,6 +1,6 @@
 ; Ring 0 (stdlib SL.2): Result, the dictionaries, instances, and derivations.
-; Dictionaries are ordinary single-constructor data passed explicitly; every
-; trait mechanism compiles down to this, so nothing here changes shape later.
+; Dictionaries are ordinary single-constructor data passed explicitly. Any
+; future convenience syntax must elaborate to these values and arguments.
 (deftype result ((tvar e) (tvar a))
   (con err (field (tvar e)))
   (con ok (field (tvar a))))
@@ -81,3 +81,38 @@
     (lam ((pvar d))
       (app (var mk-eq)
         (lam ((pvar xs) (pvar ys)) (app (var list-eq-with) (var d) (var xs) (var ys))))))))
+
+; Explicit numeric dictionaries are appended so every pre-existing declaration
+; keeps its source ordinal as well as its semantic member hash.
+(deftype num ((tvar a))
+  (con mk-num
+    (field add-fn (tarrow ((tvar a) (tvar a)) (row) (tvar a)))
+    (field sub-fn (tarrow ((tvar a) (tvar a)) (row) (tvar a)))
+    (field mul-fn (tarrow ((tvar a) (tvar a)) (row) (tvar a)))
+    (field div-fn (tarrow ((tvar a) (tvar a)) (row) (tvar a)))))
+
+(defterm ((binding num.add ()
+  (lam ((pvar d))
+    (match (var d)
+      (clause (pcon mk-num (pvar add-fn) (pwild) (pwild) (pwild)) (var add-fn)))))))
+
+(defterm ((binding num.sub ()
+  (lam ((pvar d))
+    (match (var d)
+      (clause (pcon mk-num (pwild) (pvar sub-fn) (pwild) (pwild)) (var sub-fn)))))))
+
+(defterm ((binding num.mul ()
+  (lam ((pvar d))
+    (match (var d)
+      (clause (pcon mk-num (pwild) (pwild) (pvar mul-fn) (pwild)) (var mul-fn)))))))
+
+(defterm ((binding num.div ()
+  (lam ((pvar d))
+    (match (var d)
+      (clause (pcon mk-num (pwild) (pwild) (pwild) (pvar div-fn)) (var div-fn)))))))
+
+(defterm ((binding int.num ()
+  (app (var mk-num) (var int.add) (var int.sub) (var int.mul) (var int.div)))))
+
+(defterm ((binding real.num ()
+  (app (var mk-num) (var real.add) (var real.sub) (var real.mul) (var real.div)))))

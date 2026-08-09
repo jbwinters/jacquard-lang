@@ -143,31 +143,47 @@ type List a =
 `Unit` is the empty tuple `()`, native to the kernel. Pairs and wider products are
 kernel tuples. There is no `Char` in this draft (§9, D9).
 
-### Dictionaries: ad-hoc polymorphism, honestly deferred
+### Dictionaries: explicit and ordinary
 
-Jacquard has no traits yet (kernel spec §10.3), and the library refuses to fake them
-with builtin structural equality, which OCaml regrets, or compiler-magic
-`comparable`, which Elm regrets. Instead, capabilities like equality are ordinary
-values: single-constructor data with labeled fields, passed explicitly. The
-following catalog is pseudocode because record types remain unsupported; its
-field notation is a design sketch, not surface declaration syntax.
+Jacquard 0.1 ratifies explicit dictionaries instead of implicit traits. A
+dictionary is ordinary single-constructor data with labeled fields, and callers
+pass it as an ordinary argument. Ring 0 defines these executable shapes:
 
 ```text
-type Eq a   = MkEq   { eq      : (a, a) ->{} Bool }
-type Ord a  = MkOrd  { compare : (a, a) ->{} Ordering }
-type Show a = MkShow { show    : (a) ->{} Text }
+type Eq a = | MkEq(eq-fn: (a, a) ->{} Bool)
+type Ord a = | MkOrd(compare-fn: (a, a) ->{} Ordering)
+type Show a = | MkShow(show-fn: (a) ->{} Text)
+type Num a =
+  | MkNum(
+      add-fn: (a, a) ->{} a,
+      sub-fn: (a, a) ->{} a,
+      mul-fn: (a, a) ->{} a,
+      div-fn: (a, a) ->{} a,
+    )
 ```
 
-Ring 0 provides the instances (`int.eq`, `int.ord`, `text.ord`, `bool.eq`, ...) and
-the derivations (`ord.to-eq : (Ord a) ->{} Eq a`, `eq.for-pair`, `eq.for-list`, and
-so on). Container operations that need a capability take the dictionary as an
-argument: `list.sort(xs, int.ord)`.
+The prelude supplies handwritten accessors (`eq.fn`, `ord.fn`, `show.fn`, and
+`num.add`/`num.sub`/`num.mul`/`num.div`), canonical instances such as
+`int.eq`, `int.ord`, `int.num`, `real.num`, `text.ord`, and `bool.eq`, and
+derivations such as `ord.to-eq`, `eq.for-pair`, and `eq.for-list`. Container
+operations that need a capability take it visibly: `list.sort(xs, int.ord)`.
+Generic arithmetic has the same shape:
 
-This is the forward-compatible move, and the reason to be unbothered about the
-verbosity: every serious trait mechanism (Haskell classes, Rust traits, OCaml's
-proposed implicits) compiles down to dictionary passing anyway. When the deferred
-decision lands, it lands as sugar that auto-fills these exact arguments, and no
-signature in this library changes shape.
+```text
+add-with(dictionary, left, right) =
+  num.add(dictionary)(left, right)
+```
+
+An alternate implementation is another `MkNum` value selected by the caller.
+There is no global search, overlap/orphan rule, numeric defaulting, or hidden
+ambiguity. A user-defined dictionary can place effects in its method field
+types; for example, `(a, a) ->{Console} a` keeps `Console` visible in every
+generic caller.
+
+Any future convenience syntax must elaborate to these exact values and
+arguments so existing code keeps its meaning. The complete compatibility and
+alternatives record is
+[the explicit-dictionary decision](release/explicit-dictionaries/DECISION.md).
 
 ### The vocabulary grid
 
@@ -247,10 +263,9 @@ result.of-option  : (Option a, e) ->{} Result e a
 option.of-result  : (Result e a) ->{} Option a
 ```
 
-`then` is the sequencing verb (Elm's `andThen`, Rust's `and_then`); the word `bind`
-is avoided as jargon, and there is no monad abstraction to name because there is no
-mechanism to abstract it with yet. When traits land, `then` is the method they will
-collect.
+`then` is the sequencing verb (Elm's `andThen`, Rust's `and_then`); the word
+`bind` is avoided as jargon. No implicit abstraction collects these functions
+in 0.1.
 
 ### Bool, strictly
 
@@ -395,17 +410,20 @@ an explicit `Eq Text` dictionary, such as `list.contains?`, `dist.tally`, or
 
 ### Numeric operations and predicates
 
-Integer dictionary primitives retain the bare names `eq`, `lt`, and
-`int-compare` where existing dictionary construction uses them. Public numeric
-predicates are consistently subject-first and `?`-suffixed:
+Integer compatibility primitives retain the bare names `add`, `sub`, `mul`,
+`div`, `eq`, `lt`, and `int-compare`. The dotted integer arithmetic names
+`int.add`, `int.sub`, `int.mul`, and `int.div` share the four existing arithmetic
+hashes. Public numeric predicates are consistently subject-first and
+`?`-suffixed:
 
 ```text
 int.gt?  int.gte?  int.lt?  int.lte?   : (Int, Int) ->{} Bool
 real.gt? real.gte? real.lt? real.lte?  : (Real, Real) ->{} Bool
 ```
 
-The real arithmetic family is `real.add`, `real.sub`, `real.mul`, and
-`real.div`, each `(Real, Real) ->{} Real`. SS.22 removes the former
+`int.num` and `real.num` collect the four arithmetic operations into explicit
+`Num Int` and `Num Real` values. The real arithmetic family is `real.add`,
+`real.sub`, `real.mul`, and `real.div`, each `(Real, Real) ->{} Real`. SS.22 removes the former
 `add-real`/`sub-real`/`mul-real`/`div-real`/`lt-real` names rather than retaining
 aliases, so each operation has one canonical prelude identity. Real arithmetic
 and comparisons follow OCaml/C IEEE-754 behavior. The public rename changes

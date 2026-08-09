@@ -32,12 +32,17 @@ con greater
 type int
 int-compare : (Int, Int) ->{} Ordering
 con int-opaque
+int.add : (Int, Int) ->{} Int
+int.div : (Int, Int) ->{} Int
 int.eq : Eq Int
 int.gt? : (Int, Int) ->{} Bool
 int.gte? : (Int, Int) ->{} Bool
 int.lt? : (Int, Int) ->{} Bool
 int.lte? : (Int, Int) ->{} Bool
+int.mul : (Int, Int) ->{} Int
+int.num : Num Int
 int.ord : Ord Int
+int.sub : (Int, Int) ->{} Int
 con less
 type list
 list-eq-with : forall a. (Eq a, List a, List a) ->{} Bool
@@ -64,6 +69,7 @@ list.take : forall a. (List a, Int) ->{} List a
 list.zip : forall a b. (List a, List b) ->{} List (a, b)
 lt : (Int, Int) ->{} Bool
 con mk-eq
+con mk-num
 con mk-ord
 con mk-report
 con mk-show
@@ -71,6 +77,11 @@ mod : (Int, Int) ->{} Int
 mul : (Int, Int) ->{} Int
 con nil
 con none
+type num
+num.add : forall a. (Num a) ->{} (a, a) ->{} a
+num.div : forall a. (Num a) ->{} (a, a) ->{} a
+num.mul : forall a. (Num a) ->{} (a, a) ->{} a
+num.sub : forall a. (Num a) ->{} (a, a) ->{} a
 con ok
 type option
 option.each : forall a b | e. (Option a, (a) ->{| e} b) ->{| e} ()
@@ -99,6 +110,7 @@ real.gte? : (Real, Real) ->{} Bool
 real.lt? : (Real, Real) ->{} Bool
 real.lte? : (Real, Real) ->{} Bool
 real.mul : (Real, Real) ->{} Real
+real.num : Num Real
 real.sub : (Real, Real) ->{} Real
 type report
 type result

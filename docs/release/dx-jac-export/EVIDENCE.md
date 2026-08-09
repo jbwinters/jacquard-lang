@@ -6,7 +6,7 @@ artifacts and are not retroactively updated by DX.2.
 
 ## Current inventory
 
-- Alcotest/QCheck cases: `843`
+- Alcotest/QCheck cases: `847`
 - Cram transcript files: `51`
 - Doctest examples: `28` across 8 documents
 
@@ -38,6 +38,8 @@ cases and one public why-effect transcript. SX.25 adds one formatter-contract
 case for the canonical width, plain UTF-8 output, idempotence, and hash inertia.
 SX.26 adds five compiled marked-text interpolation cases, one documentation
 example, and one explicit lowering-parity twin.
+The explicit-dictionary successor adds four compiled contract cases and extends
+the existing native transcript without changing the cram or doctest counts.
 
 ## Proved behavior
 

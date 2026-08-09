@@ -53,6 +53,69 @@ let test_instances () =
     "bool.eq" "true"
     (show "(app (app (var eq.fn) (var bool.eq)) (var false) (var false))")
 
+let test_num_instances () =
+  let check label expected source = Alcotest.(check string) label expected (show source) in
+  check "int.num add" "42" "(app (app (var num.add) (var int.num)) (lit 40) (lit 2))";
+  check "int.num sub" "7" "(app (app (var num.sub) (var int.num)) (lit 10) (lit 3))";
+  check "int.num mul" "42" "(app (app (var num.mul) (var int.num)) (lit 6) (lit 7))";
+  check "int.num div" "6" "(app (app (var num.div) (var int.num)) (lit 42) (lit 7))";
+  check "real.num add" "3.5" "(app (app (var num.add) (var real.num)) (lit 1.25) (lit 2.25))";
+  check "real.num mul" "3.0" "(app (app (var num.mul) (var real.num)) (lit 1.5) (lit 2.0))";
+  check "explicit alternate instance" "5"
+    "(app (app (var num.add) (app (var mk-num) (var int.sub) (var int.add) (var int.div) (var \
+     int.mul))) (lit 9) (lit 4))"
+
+let lookup_hash store kind name =
+  match Store.lookup_kind store name kind with
+  | Some { Resolve.hash; _ } -> hash
+  | None -> Alcotest.failf "missing %s" name
+
+let test_num_identity_and_store_lookup () =
+  let aliases =
+    [
+      ("add", "int.add", "2c16b4f49e8261504cba9692cb27bbd26e767dd293785379041e95e1e0e61c4d");
+      ("sub", "int.sub", "e487565dcfd7ca43e957eaf644fa0691e9aa10bb2cd717b9ca53a0688b522174");
+      ("mul", "int.mul", "dc4f095e4e9e508c3644c04972a8e7a696e1875bb5206297a58997df46850a52");
+      ("div", "int.div", "e92672943a1fb61cf8154d5a22e4a410c72db2027232884e3c1b0d37df1d7d1f");
+    ]
+  in
+  List.iter
+    (fun (legacy, dotted, expected) ->
+      let legacy_hash = lookup_hash store Resolve.KTerm legacy in
+      let dotted_hash = lookup_hash store Resolve.KTerm dotted in
+      Alcotest.(check string) (legacy ^ " frozen hash") expected (Hash.to_hex legacy_hash);
+      let label = dotted ^ " is an identity alias" in
+      let equal = Hash.equal legacy_hash dotted_hash in
+      Alcotest.(check bool) label true equal)
+    aliases;
+  let second_store, _ = Eval_support.make_prelude_ctx () in
+  List.iter
+    (fun (kind, name) ->
+      let first = lookup_hash store kind name in
+      let second = lookup_hash second_store kind name in
+      Alcotest.(check bool) (name ^ " is stable across stores") true (Hash.equal first second))
+    [
+      (Resolve.KType, "num");
+      (Resolve.KCon, "mk-num");
+      (Resolve.KTerm, "num.add");
+      (Resolve.KTerm, "int.num");
+      (Resolve.KTerm, "real.num");
+    ]
+
+let test_num_argument_order () =
+  let program =
+    {|
+(app (var emit.collect)
+  (lam ()
+    (app (app (var num.sub) (var int.num))
+      (let nonrec (pwild) (app (var emit) (lit "left")) (lit 10))
+      (let nonrec (pwild) (app (var emit) (lit "right")) (lit 3)))))
+|}
+  in
+  Alcotest.(check string)
+    "Num calls retain source left-to-right argument evaluation"
+    "(7, cons(\"left\", cons(\"right\", nil)))" (show program)
+
 let prop_ord_to_eq_consistent =
   QCheck.Test.make ~count:80 ~name:"ord.to-eq agrees with int.eq"
     QCheck.(pair (int_range (-30) 30) (int_range (-30) 30))
@@ -555,6 +618,10 @@ let test_ring1_rows () =
 let suite =
   [
     Alcotest.test_case "dictionary instances" `Quick test_instances;
+    Alcotest.test_case "Num dictionary instances" `Quick test_num_instances;
+    Alcotest.test_case "Num identity and ordinary store lookup" `Quick
+      test_num_identity_and_store_lookup;
+    Alcotest.test_case "Num argument evaluation order" `Quick test_num_argument_order;
     prop_ord_to_eq_consistent |> QCheck_alcotest.to_alcotest;
     prop_ord_reverse |> QCheck_alcotest.to_alcotest;
     prop_eq_for_list |> QCheck_alcotest.to_alcotest;

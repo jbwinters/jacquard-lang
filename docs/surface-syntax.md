@@ -38,7 +38,8 @@ while `once` adds its reviewed discriminator. EL.4 spends the reserved grammar
 headroom on explicit surface modes without changing that kernel contract. D38
 and D39 completed in SS.22 as standard-library work without expanding the
 grammar. D36 generated accessors and D36 label validation remain separate
-follow-ups.
+follow-ups. The later explicit-dictionary decision ratifies ordinary `Eq`,
+`Ord`, `Show`, and `Num` values without adding syntax or changing lowering.
 
 There is one explicit compatibility reservation in the generic pre-resolution form layer:
 `(surface-ref-v0 con name)` and `(surface-ref-v0 op name)`. Surface lowering uses these forms to
@@ -464,14 +465,13 @@ than fight: the pun is blessed forever, and if record or module field access
 gets its own surface syntax later, it uses an operator other than `.`.
 
 The operator stance deserves its paragraph, because it is the most tempting
-thing to compromise on. `k + 1` requires either a monomorphic `+` bound to
-one numeric type (the exact OCaml `+.` regret the whitepaper catalogs) or
-type-directed operator resolution (which is ad-hoc polymorphism smuggled in
-before the trait decision, prejudging it). Both are worse than the pain they
-relieve. So v0 ships exactly one infix form, the pipe, and arithmetic stays
-dotted (`int.add(k, 1)`) until the trait decision lands, at which point
-operators arrive as method sugar on whatever that mechanism is. Dotted
-arithmetic is also, honestly, more reviewable: the type is in the name.
+thing to compromise on. `k + 1` requires either a monomorphic `+` bound to one
+numeric type (the exact OCaml `+.` regret the whitepaper catalogs) or hidden
+type-directed resolution. Jacquard 0.1 rejects both. It ships exactly one infix
+form, the pipe, and concrete arithmetic stays dotted (`int.add(k, 1)`). Generic
+arithmetic receives a visible dictionary and calls, for example,
+`num.add(dictionary)(k, 1)`. Any future operator proposal would have to
+elaborate to that exact value and argument; no such sugar is approved here.
 
 Reserved keywords, the complete list: `type effect once multi fn let rec match handle
 return resume quote unquote if then else as where forall jqd`. Comments are `--` to end
@@ -792,8 +792,8 @@ Records beyond labeled fields. Modules and imports (names are store-level
 objects; a `.jac` file's free names resolve against the store's index, and
 the file format needs no import statements, though an editor will want to
 display resolution). Do-notation and other monadic sugar (no mechanism to
-abstract over yet). Custom operators, forever contentious, deferred with the
-trait decision. Offside-rule layout (D27 alternative, revisit only with
+abstract over yet). Custom operators, forever contentious, remain excluded
+from 0.1. Offside-rule layout (D27 alternative, revisit only with
 evidence that braces measurably hurt).
 
 Labeled constructor *patterns* (D36 defers them). Labeled declarations ship;
@@ -806,10 +806,11 @@ here.
 Resource-scoped row display (`Fs(read: ./config)`) retains grammar headroom
 without being designed. Operation linearity modes now ship under D41-D42;
 resource scopes remain noted so a future row change does not have to fight an
-unstated assumption. Structured concurrency, scoped capabilities, traits, typed
-staging, formal row soundness, and a blessed effect-name taxonomy are
-recorded in the language-level backlog and are out of this document's scope
-entirely.
+unstated assumption. Structured concurrency, scoped capabilities, implicit
+traits, typed staging, formal row soundness, and a blessed effect-name taxonomy
+are recorded in the language-level backlog and are out of this document's
+scope entirely. Explicit dictionaries are ordinary values and are documented
+in `docs/release/explicit-dictionaries/DECISION.md`.
 
 ## 7. Diagnostics and tooling mechanics
 
@@ -912,7 +913,7 @@ in commit messages and task dependencies.)
 | ID | decision | default |
 |----|----------|---------|
 | D27 | layout discipline | delimiter-based and indentation-insensitive; newline or `;` separates block items; printer-canonical; offside rule rejected for v0 |
-| D28 | operators | none except `\|>`; arithmetic dotted until the trait decision |
+| D28 | operators | none except `\|>`; concrete arithmetic is dotted and generic arithmetic takes an explicit dictionary |
 | D29 | comments | `--` line, `--\|` doc |
 | D30 | definition form | equation style canonical, `fn` anonymous |
 | D31 | file extensions | surface `.jac`; bootstrap keeps `.jqd` so tasks 65 to 76 are untouched |
