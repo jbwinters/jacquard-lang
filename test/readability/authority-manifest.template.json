@@ -1,0 +1,20 @@
+{
+  "schema_version": "readability-authority-v1",
+  "protocol_version": "readability-protocol-v1",
+  "authority_id": "UNAPPROVED-TEMPLATE",
+  "collection_authorized": false,
+  "approvals": {
+    "accountable_owner_and_operator": "pending",
+    "ethics_and_privacy": "pending",
+    "information_sheet_and_consent": "pending",
+    "recruitment_and_eligibility": "pending",
+    "compensation_and_withdrawal": "pending",
+    "accessibility_review": "pending",
+    "retention_and_incident_response": "pending",
+    "publication_license": "pending",
+    "data_governance": "pending"
+  },
+  "approved_by": null,
+  "approved_at": null,
+  "evidence_sha256": null
+}

@@ -12,7 +12,6 @@ from __future__ import annotations
 import argparse
 import copy
 import hashlib
-import itertools
 import json
 import os
 from pathlib import Path
@@ -22,18 +21,42 @@ import sys
 from typing import Any, Iterable
 
 
-SCHEMA_VERSION = "readability-result-v0"
-PROTOCOL_VERSION = "readability-protocol-v0"
+SCHEMA_VERSION = "readability-result-v1"
+PROTOCOL_VERSION = "readability-protocol-v1"
 CARRIERS = ("jac", "jqd", "python")
-JOBS = ("seeded-bug", "predict-output", "authority-escalation")
-JOB_ORDERS = tuple(itertools.permutations(JOBS))
+JOBS = (
+    "seeded-bug",
+    "predict-output",
+    "authority-escalation",
+    "modify-behavior",
+    "diagnostic-recovery",
+)
+
+
+def balanced_job_orders() -> tuple[tuple[str, ...], ...]:
+    """Return the frozen ten-sequence Williams design for five jobs.
+
+    Every job occurs twice in every position, and every ordered adjacent pair
+    occurs twice.  That makes presentation order and first-order carryover
+    estimable without exposing one participant to multiple carriers.
+    """
+
+    base = (0, 1, 4, 2, 3)
+    orders: list[tuple[str, ...]] = []
+    for shift in range(len(JOBS)):
+        order = tuple(JOBS[(index + shift) % len(JOBS)] for index in base)
+        orders.extend((order, tuple(reversed(order))))
+    return tuple(orders)
+
+
+JOB_ORDERS = balanced_job_orders()
 FIXED_DRY_RUN_TIME = "2000-01-01T00:00:00Z"
-CONFIRMATORY_SEED = "jacquard-readability-v0"
+CONFIRMATORY_SEED = "jacquard-readability-v1"
 HUMAN_ENROLLMENT_COUNT = 480
-HUMAN_SCHEDULE_VERSION = "readability-human-schedule-v0"
-MODEL_SCHEDULE_VERSION = "readability-model-schedule-v0"
-HUMAN_SCHEDULE_SHA256 = "c6421e9fff78b5fd7397e8c2aaeadee434c58c01c1d1d85aec224c4e2ec1a9be"
-MODEL_SCHEDULE_SHA256 = "ba972dfcd0738a7f3360f54179c95dc02140e84d21320474a9e410380f8071b5"
+HUMAN_SCHEDULE_VERSION = "readability-human-schedule-v1"
+MODEL_SCHEDULE_VERSION = "readability-model-schedule-v1"
+HUMAN_SCHEDULE_SHA256 = "356f000ba5af0421ef6eaaf246bbb78527ff9ffb97f61d84f5f795d96b114178"
+MODEL_SCHEDULE_SHA256 = "69178f914457cbe0cf6081f10fa6b018267ec0876175ddc7b44bc8f92c735e4e"
 
 
 class ProtocolError(RuntimeError):
@@ -109,8 +132,8 @@ def verify_plain_text(path: Path, data: bytes) -> None:
             raise ProtocolError(f"fixture presentation is not plain text ({label}): {path}")
 
 
-def verify_manifest(manifest: dict[str, Any], manifest_path: Path) -> None:
-    if manifest.get("schema_version") != "readability-fixtures-v0":
+def verify_manifest(manifest: dict[str, Any]) -> None:
+    if manifest.get("schema_version") != "readability-fixtures-v1":
         raise ProtocolError("unexpected fixture manifest schema_version")
     if manifest.get("protocol_version") != PROTOCOL_VERSION:
         raise ProtocolError("fixture manifest protocol_version drift")
@@ -120,6 +143,15 @@ def verify_manifest(manifest: dict[str, Any], manifest_path: Path) -> None:
         raise ProtocolError("carrier inventory or order drift")
     if tuple(manifest.get("jobs", ())) != JOBS:
         raise ProtocolError("reviewer-job inventory or order drift")
+    outcome_families = {
+        "comprehension",
+        "review",
+        "defect-detection",
+        "modification-debugging",
+        "diagnostic-recovery",
+    }
+    if set(manifest.get("outcome_families", ())) != outcome_families:
+        raise ProtocolError("outcome-family inventory drift")
     presentation = manifest.get("presentation", {})
     if presentation != {
         "media_type": "text/plain; charset=utf-8",
@@ -131,37 +163,35 @@ def verify_manifest(manifest: dict[str, Any], manifest_path: Path) -> None:
 
     limitations = manifest.get("python_matching_limits", [])
     limitation_text = " ".join(limitations).lower() if isinstance(limitations, list) else ""
-    for required in ("task-equivalent", "hash_v0", "effect", "runtime", "stdout"):
+    for required in (
+        "task-equivalent",
+        "hash_v0",
+        "effect",
+        "runtime",
+        "stdout",
+        "diagnostic",
+    ):
         if required not in limitation_text:
             raise ProtocolError(f"Python matching limits must name {required}")
 
-    model = manifest.get("model_condition", {})
-    required_model = {
-        "provider": "Anthropic",
-        "model": "claude-fable-5",
-        "client": "Claude Code 2.1.212",
-        "temperature": 0.0,
-        "repetitions_per_condition": 30,
-        "tools": "disabled",
-        "session_memory": "disabled",
-    }
-    for key, expected in required_model.items():
-        if model.get(key) != expected:
-            raise ProtocolError(f"model condition {key} must be pinned to {expected!r}")
-    prompt_path = manifest_path.parent / model.get("prompt", "")
-    try:
-        prompt_digest = digest_bytes(prompt_path.read_bytes())
-    except OSError as error:
-        raise ProtocolError(f"cannot read model prompt {prompt_path}: {error}") from error
-    if prompt_digest != model.get("prompt_sha256"):
-        raise ProtocolError("model prompt digest drift")
+    if "model_condition" in manifest:
+        raise ProtocolError("model pins belong in a versioned cohort manifest")
 
     indexed = fixture_index(manifest)
     if tuple(indexed) != JOBS:
         raise ProtocolError("there must be exactly one fixture per reviewer job, in protocol order")
+    if {fixture.get("outcome_family") for fixture in indexed.values()} != outcome_families:
+        raise ProtocolError("every outcome family must have exactly one fixture")
     for fixture_id, fixture in indexed.items():
         if fixture.get("job") != fixture_id:
             raise ProtocolError(f"fixture/job mismatch: {fixture_id}")
+        if fixture.get("outcome_family") not in outcome_families:
+            raise ProtocolError(f"fixture {fixture_id} has an unknown outcome family")
+        verification_kind = fixture.get("verification_kind")
+        if verification_kind not in {"success", "diagnostic"}:
+            raise ProtocolError(f"fixture {fixture_id} has an unknown verification kind")
+        if (fixture_id == "diagnostic-recovery") != (verification_kind == "diagnostic"):
+            raise ProtocolError("only diagnostic-recovery may use diagnostic verification")
         options = fixture.get("options")
         if not isinstance(options, list) or len(options) < 2:
             raise ProtocolError(f"fixture {fixture_id} needs at least two answer options")
@@ -180,6 +210,229 @@ def verify_manifest(manifest: dict[str, Any], manifest_path: Path) -> None:
         sources = fixture.get("sources", {})
         if set(sources) != set(CARRIERS):
             raise ProtocolError(f"fixture {fixture_id} must have all three carriers")
+        if verification_kind == "success":
+            if not isinstance(fixture.get("semantic_hash_lines"), list):
+                raise ProtocolError(f"fixture {fixture_id} must pin semantic hashes")
+            if not isinstance(fixture.get("expected_stdout"), str):
+                raise ProtocolError(f"fixture {fixture_id} must pin stdout")
+        elif fixture.get("expected_diagnostic") != {
+            "jacquard_code": "E0802",
+            "python_exception": "TypeError",
+        }:
+            raise ProtocolError("diagnostic-recovery must pin E0802 and Python TypeError")
+
+
+def verify_cohort_manifest(
+    cohort: dict[str, Any], cohort_path: Path, *, require_collectible: bool = False
+) -> None:
+    """Validate one model cohort without treating it as collection authority."""
+
+    expected_keys = {
+        "schema_version",
+        "protocol_version",
+        "cohort_id",
+        "role",
+        "access_status",
+        "provider",
+        "model_id",
+        "client",
+        "control",
+        "prompt",
+        "repetitions_per_condition",
+        "tools",
+        "session_memory",
+        "fresh_session_required",
+        "training_cutoff_attestation",
+        "quota_constraints",
+        "collection_authorized",
+    }
+    if set(cohort) != expected_keys:
+        raise ProtocolError("model cohort manifest fields drifted")
+    if cohort["schema_version"] != "readability-model-cohort-v1":
+        raise ProtocolError("unexpected model cohort schema_version")
+    if cohort["protocol_version"] != PROTOCOL_VERSION:
+        raise ProtocolError("model cohort protocol_version drift")
+    if re.fullmatch(r"[A-Z][A-Z0-9-]{1,31}", cohort["cohort_id"] or "") is None:
+        raise ProtocolError("model cohort_id must be a stable public identifier")
+    if cohort["role"] not in {"reference", "exploratory"}:
+        raise ProtocolError("model cohort role must be reference or exploratory")
+    if cohort["access_status"] not in {"not-confirmed", "available"}:
+        raise ProtocolError("model cohort access status is invalid")
+    for name in ("provider", "model_id"):
+        if not isinstance(cohort[name], str) or not cohort[name]:
+            raise ProtocolError(f"model cohort {name} must be nonempty")
+
+    client = cohort["client"]
+    if not isinstance(client, dict) or set(client) != {"name", "version"}:
+        raise ProtocolError("model cohort client pin is malformed")
+    if not all(isinstance(client[name], str) and client[name] for name in client):
+        raise ProtocolError("model cohort client name/version must be nonempty")
+
+    control = cohort["control"]
+    if not isinstance(control, dict) or set(control) != {"kind", "value"}:
+        raise ProtocolError("model cohort control pin is malformed")
+    if control["kind"] not in {"effort", "temperature"}:
+        raise ProtocolError("model cohort must pin effort or temperature")
+    if not isinstance(control["value"], (str, int, float)) or isinstance(
+        control["value"], bool
+    ):
+        raise ProtocolError("model cohort control value is invalid")
+    if control["kind"] == "temperature" and (
+        not isinstance(control["value"], (int, float))
+        or not 0 <= control["value"] <= 2
+    ):
+        raise ProtocolError("model temperature must be numeric from 0 through 2")
+    if control["kind"] == "effort" and (
+        not isinstance(control["value"], str) or not control["value"]
+    ):
+        raise ProtocolError("model effort control must be a nonempty label")
+
+    prompt = cohort["prompt"]
+    if not isinstance(prompt, dict) or set(prompt) != {"path", "sha256"}:
+        raise ProtocolError("model cohort prompt pin is malformed")
+    prompt_path = (cohort_path.parent / prompt["path"]).resolve()
+    benchmark_root = cohort_path.parent.parent.resolve()
+    if not prompt_path.is_relative_to(benchmark_root):
+        raise ProtocolError("model cohort prompt must remain in test/readability")
+    try:
+        prompt_digest = digest_bytes(prompt_path.read_bytes())
+    except OSError as error:
+        raise ProtocolError(f"cannot read model prompt {prompt_path}: {error}") from error
+    if prompt_digest != prompt["sha256"]:
+        raise ProtocolError("model cohort prompt digest drift")
+
+    repetitions = cohort["repetitions_per_condition"]
+    if (
+        not isinstance(repetitions, int)
+        or isinstance(repetitions, bool)
+        or not 1 <= repetitions <= 100
+    ):
+        raise ProtocolError("model repetitions must be an integer from 1 through 100")
+    if (
+        cohort["tools"] != "disabled"
+        or cohort["session_memory"] != "disabled"
+        or cohort["fresh_session_required"] is not True
+    ):
+        raise ProtocolError("model cohort weakened fresh-session isolation")
+
+    attestation = cohort["training_cutoff_attestation"]
+    attestation_keys = {"status", "attested_by", "attested_at", "evidence_sha256"}
+    if not isinstance(attestation, dict) or set(attestation) != attestation_keys:
+        raise ProtocolError("training-cutoff attestation record is malformed")
+    if attestation["status"] not in {"pending", "attested"}:
+        raise ProtocolError("training-cutoff attestation status is invalid")
+    attested_values = (
+        attestation["attested_by"],
+        attestation["attested_at"],
+        attestation["evidence_sha256"],
+    )
+    if attestation["status"] == "pending" and any(value is not None for value in attested_values):
+        raise ProtocolError("pending training-cutoff attestation must not claim evidence")
+    if attestation["status"] == "attested":
+        if not all(isinstance(value, str) and value for value in attested_values):
+            raise ProtocolError("attested training cutoff must identify its evidence")
+        if re.fullmatch(r"[0-9a-f]{64}", attestation["evidence_sha256"]) is None:
+            raise ProtocolError("training-cutoff evidence digest is malformed")
+        if re.fullmatch(
+            r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z",
+            attestation["attested_at"],
+        ) is None:
+            raise ProtocolError("training-cutoff attestation time is malformed")
+
+    quota = cohort["quota_constraints"]
+    quota_keys = {"status", "maximum_sessions", "rate_limit", "notes"}
+    if not isinstance(quota, dict) or set(quota) != quota_keys:
+        raise ProtocolError("model quota record is malformed")
+    if quota["status"] not in {"unconfirmed", "confirmed"}:
+        raise ProtocolError("model quota status is invalid")
+    if not isinstance(quota["notes"], str) or not quota["notes"]:
+        raise ProtocolError("model quota record must explain its constraints")
+    if quota["status"] == "unconfirmed" and (
+        quota["maximum_sessions"] is not None or quota["rate_limit"] is not None
+    ):
+        raise ProtocolError("unconfirmed model quota must not claim limits")
+    if quota["status"] == "confirmed":
+        if not isinstance(quota["maximum_sessions"], int) or quota["maximum_sessions"] < 1:
+            raise ProtocolError("confirmed model quota must name a positive session limit")
+        if not isinstance(quota["rate_limit"], str) or not quota["rate_limit"]:
+            raise ProtocolError("confirmed model quota must name its rate limit")
+        required_sessions = len(CARRIERS) * len(JOBS) * repetitions
+        if quota["maximum_sessions"] < required_sessions:
+            raise ProtocolError("confirmed model quota cannot cover the reviewed schedule")
+
+    if cohort["collection_authorized"] is not False and cohort["collection_authorized"] is not True:
+        raise ProtocolError("model collection_authorized must be boolean")
+    collectible = (
+        cohort["collection_authorized"]
+        and cohort["access_status"] == "available"
+        and attestation["status"] == "attested"
+        and quota["status"] == "confirmed"
+    )
+    if cohort["collection_authorized"] and not collectible:
+        raise ProtocolError("model collection authorization lacks access, attestation, or quota")
+    if require_collectible and not collectible:
+        raise ProtocolError("model cohort is not authorized for collection")
+
+
+AUTHORITY_APPROVALS = {
+    "accountable_owner_and_operator",
+    "ethics_and_privacy",
+    "information_sheet_and_consent",
+    "recruitment_and_eligibility",
+    "compensation_and_withdrawal",
+    "accessibility_review",
+    "retention_and_incident_response",
+    "publication_license",
+    "data_governance",
+}
+
+
+def verify_authority_manifest(
+    authority: dict[str, Any], *, require_authorized: bool = False
+) -> None:
+    """Validate external study authority and fail closed when approval is required."""
+
+    expected_keys = {
+        "schema_version",
+        "protocol_version",
+        "authority_id",
+        "collection_authorized",
+        "approvals",
+        "approved_by",
+        "approved_at",
+        "evidence_sha256",
+    }
+    if set(authority) != expected_keys:
+        raise ProtocolError("study authority manifest fields drifted")
+    if authority["schema_version"] != "readability-authority-v1":
+        raise ProtocolError("unexpected study authority schema_version")
+    if authority["protocol_version"] != PROTOCOL_VERSION:
+        raise ProtocolError("study authority protocol_version drift")
+    if re.fullmatch(r"[A-Z][A-Z0-9-]{2,63}", authority["authority_id"] or "") is None:
+        raise ProtocolError("study authority_id must be a stable public identifier")
+    approvals = authority["approvals"]
+    if not isinstance(approvals, dict) or set(approvals) != AUTHORITY_APPROVALS:
+        raise ProtocolError("study authority approval inventory drift")
+    if any(status not in {"pending", "approved"} for status in approvals.values()):
+        raise ProtocolError("study authority approval status is invalid")
+    authorized = authority["collection_authorized"] is True
+    if authority["collection_authorized"] is not False and not authorized:
+        raise ProtocolError("study collection_authorized must be boolean")
+    evidence = (authority["approved_by"], authority["approved_at"], authority["evidence_sha256"])
+    complete = all(status == "approved" for status in approvals.values()) and all(
+        isinstance(value, str) and value for value in evidence
+    )
+    if complete and re.fullmatch(r"[0-9a-f]{64}", authority["evidence_sha256"]) is None:
+        raise ProtocolError("study authority evidence digest is malformed")
+    if complete and re.fullmatch(
+        r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z",
+        authority["approved_at"],
+    ) is None:
+        raise ProtocolError("study authority approval time is malformed")
+    if authorized and not complete:
+        raise ProtocolError("study collection authorization lacks required approvals")
+    if require_authorized and not (authorized and complete):
+        raise ProtocolError("real collection is not authorized")
 
 
 def verify_fixtures(
@@ -199,6 +452,26 @@ def verify_fixtures(
                 raise ProtocolError(f"source digest drift: {path}")
             verify_plain_text(path, data)
             paths[carrier] = path
+
+        if fixture["verification_kind"] == "diagnostic":
+            expected = fixture["expected_diagnostic"]
+            for carrier in ("jac", "jqd"):
+                checked = command_output(
+                    [str(jacquard), "check", str(paths[carrier])],
+                    prelude=prelude,
+                    expect_success=False,
+                )
+                marker = f"error[{expected['jacquard_code']}]"
+                if checked.returncode == 0 or marker not in checked.stderr:
+                    raise ProtocolError(
+                        f"pinned diagnostic drifted for {fixture_id}.{carrier}"
+                    )
+            python = command_output(
+                [sys.executable, str(paths["python"])], expect_success=False
+            )
+            if python.returncode == 0 or expected["python_exception"] not in python.stderr:
+                raise ProtocolError(f"task-equivalent Python diagnostic drifted for {fixture_id}")
+            continue
 
         expected_hash = "\n".join(fixture["semantic_hash_lines"]) + "\n"
         hash_outputs = []
@@ -238,7 +511,8 @@ def verify_fixtures(
                 )
                 if refused.returncode == 0 or f"error[{refusal_code}]" not in refused.stderr:
                     raise ProtocolError(
-                        f"{fixture_id}.{carrier} must fail closed with {refusal_code} without its grant"
+                        f"{fixture_id}.{carrier} must fail closed with {refusal_code} "
+                        "without its grant"
                     )
 
 
@@ -286,7 +560,9 @@ def human_schedule() -> list[dict[str, Any]]:
     return rows
 
 
-def model_schedule(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+def model_schedule(
+    manifest: dict[str, Any], cohort: dict[str, Any], cohort_sha256: str
+) -> list[dict[str, Any]]:
     """Return the frozen model trial plan without starting model sessions.
 
     Every carrier/job/repetition appears exactly once.  Dispatch order is the
@@ -295,15 +571,14 @@ def model_schedule(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     detect drift before a result can enter confirmatory evidence.
     """
 
-    pinned = manifest["model_condition"]
-    repetitions = pinned["repetitions_per_condition"]
+    repetitions = cohort["repetitions_per_condition"]
     fixtures = fixture_index(manifest)
     trials: list[tuple[str, str, int, str]] = []
     for carrier in CARRIERS:
         for job in JOBS:
             for repetition in range(1, repetitions + 1):
                 key = (
-                    f"{CONFIRMATORY_SEED}\0carrier={carrier}"
+                    f"{CONFIRMATORY_SEED}\0cohort={cohort['cohort_id']}\0carrier={carrier}"
                     f"\0job={job}\0repetition={repetition}"
                 )
                 trials.append((carrier, job, repetition, digest_text(key)))
@@ -322,14 +597,22 @@ def model_schedule(manifest: dict[str, Any]) -> list[dict[str, Any]]:
             "dispatch_key_sha256": dispatch_key,
             "assignment_seed_sha256": seed_digest,
             "fixture_sha256": fixtures[job]["sources"][carrier]["sha256"],
-            "provider": pinned["provider"],
-            "model": pinned["model"],
-            "client": pinned["client"],
-            "prompt_sha256": pinned["prompt_sha256"],
-            "temperature": pinned["temperature"],
-            "tools": pinned["tools"],
-            "session_memory": pinned["session_memory"],
-            "fresh_session_required": True,
+            "cohort_id": cohort["cohort_id"],
+            "cohort_manifest_sha256": cohort_sha256,
+            "cohort_role": cohort["role"],
+            "provider": cohort["provider"],
+            "model_id": cohort["model_id"],
+            "client_name": cohort["client"]["name"],
+            "client_version": cohort["client"]["version"],
+            "control_kind": cohort["control"]["kind"],
+            "control_value": cohort["control"]["value"],
+            "prompt_sha256": cohort["prompt"]["sha256"],
+            "tools": cohort["tools"],
+            "session_memory": cohort["session_memory"],
+            "fresh_session_required": cohort["fresh_session_required"],
+            "training_cutoff_attestation": cohort["training_cutoff_attestation"]["status"],
+            "quota_status": cohort["quota_constraints"]["status"],
+            "collection_authorized": cohort["collection_authorized"],
         }
         for ordinal, (carrier, job, repetition, dispatch_key) in enumerate(trials)
     ]
@@ -366,6 +649,10 @@ def score_answer(fixture: dict[str, Any], answer_id: str) -> tuple[bool, str | N
     options = {option["id"] for option in fixture["options"]}
     if answer_id == "__timeout__":
         return False, "timeout"
+    if answer_id == "__system_failure__":
+        return False, "system-failure"
+    if answer_id == "__parse_failure__":
+        return False, "prompt-parse-failure"
     if answer_id not in options:
         return False, "invalid-answer"
     if answer_id == fixture["correct_answer"]:
@@ -373,7 +660,7 @@ def score_answer(fixture: dict[str, Any], answer_id: str) -> tuple[bool, str | N
     return False, fixture["wrong_answer_errors"][answer_id]
 
 
-def exclusion_codes(subject_kind: str, facts: dict[str, Any], manifest: dict[str, Any]) -> list[str]:
+def exclusion_codes(subject_kind: str, facts: dict[str, Any], cohort: dict[str, Any]) -> list[str]:
     codes: list[str] = []
     if subject_kind == "human":
         checks = (
@@ -388,15 +675,16 @@ def exclusion_codes(subject_kind: str, facts: dict[str, Any], manifest: dict[str
             ),
         )
     elif subject_kind == "model":
-        pinned = manifest["model_condition"]
         checks = (
             (
                 not facts.get("training_cutoff_attested", False),
                 "model-training-contamination",
             ),
             (
-                facts.get("model") != pinned["model"]
-                or facts.get("client") != pinned["client"],
+                facts.get("provider") != cohort["provider"]
+                or facts.get("model_id") != cohort["model_id"]
+                or facts.get("client_name") != cohort["client"]["name"]
+                or facts.get("client_version") != cohort["client"]["version"],
                 "model-version-drift",
             ),
             (facts.get("prompt_parse_failure", False), "prompt-parse-failure"),
@@ -456,7 +744,8 @@ def validate_property(name: str, value: Any, rule: dict[str, Any]) -> None:
         if "pattern" in rule and re.fullmatch(rule["pattern"], value) is None:
             raise ProtocolError(f"result {name} does not match its pattern")
     if isinstance(value, list):
-        if rule.get("uniqueItems") and len({json.dumps(item, sort_keys=True) for item in value}) != len(value):
+        encoded_items = {json.dumps(item, sort_keys=True) for item in value}
+        if rule.get("uniqueItems") and len(encoded_items) != len(value):
             raise ProtocolError(f"result {name} must contain unique items")
         item_rule = rule.get("items")
         if item_rule:
@@ -470,7 +759,11 @@ def canonical_row_id(row: dict[str, Any]) -> str:
     return digest_text(encoded)
 
 
-def validate_row(row: dict[str, Any], manifest: dict[str, Any], schema: dict[str, Any]) -> None:
+def validate_row(
+    row: dict[str, Any],
+    manifest: dict[str, Any],
+    schema: dict[str, Any],
+) -> None:
     if not isinstance(row, dict):
         raise ProtocolError("each result row must be a JSON object")
     required = set(schema.get("required", []))
@@ -504,6 +797,8 @@ def validate_row(row: dict[str, Any], manifest: dict[str, Any], schema: dict[str
     if row["fixture_id"] != row["job"]:
         raise ProtocolError("fixture_id must identify the job's frozen fixture")
     fixture = fixture_index(manifest)[row["fixture_id"]]
+    if row["outcome_family"] != fixture["outcome_family"]:
+        raise ProtocolError("result outcome_family does not match the fixture")
     expected_correct, expected_error = score_answer(fixture, row["answer_id"])
     if (row["correct"], row["error_code"]) != (expected_correct, expected_error):
         raise ProtocolError("correct/error_code does not follow deterministic scoring")
@@ -513,39 +808,56 @@ def validate_row(row: dict[str, Any], manifest: dict[str, Any], schema: dict[str
         raise ProtocolError("result fixture digest does not match the manifest")
     if row["excluded"] != bool(row["exclusion_codes"]):
         raise ProtocolError("excluded must exactly reflect exclusion_codes")
+    failure_exclusions = {
+        "system-failure": "system-failure",
+        "prompt-parse-failure": "prompt-parse-failure",
+    }
+    if row["error_code"] in failure_exclusions:
+        required_exclusion = failure_exclusions[row["error_code"]]
+        if required_exclusion not in row["exclusion_codes"]:
+            raise ProtocolError("failure result is missing its required exclusion code")
     if row["row_id"] != canonical_row_id(row):
         raise ProtocolError("row_id is not the canonical SHA-256 of the result row")
-    if row["run_kind"] == "confirmatory" and row["assignment_seed_sha256"] != digest_text(
+    if row["run_kind"] != "dry-run" and row["assignment_seed_sha256"] != digest_text(
         CONFIRMATORY_SEED
     ):
-        raise ProtocolError("confirmatory row does not use the frozen assignment seed")
+        raise ProtocolError("real result row does not use the frozen assignment seed")
 
     subject_kind = row["subject_kind"]
-    if subject_kind == "human":
-        if row["run_kind"] != "confirmatory" or not row["consent_version"] or row["model"] is not None:
-            raise ProtocolError("human row consent/model contract violated")
-    elif subject_kind == "model":
-        pinned = manifest["model_condition"]
-        model = row["model"]
-        if row["run_kind"] != "confirmatory" or row["consent_version"] is not None or not isinstance(model, dict):
-            raise ProtocolError("model row consent/model contract violated")
-        for key in ("provider", "model", "client", "prompt_sha256", "temperature"):
-            if model[key] != pinned[key]:
-                raise ProtocolError(f"model result drifted from pinned {key}")
-        contaminated = not model["training_cutoff_attested"]
-        if contaminated != ("model-training-contamination" in row["exclusion_codes"]):
-            raise ProtocolError("model training-cutoff attestation/exclusion mismatch")
-    elif subject_kind == "synthetic":
-        if row["run_kind"] != "dry-run" or row["consent_version"] is not None or row["model"] is not None:
+    if subject_kind == "synthetic":
+        nullable_fields = (
+            "consent_version",
+            "model",
+            "schedule_ordinal",
+            "authority_manifest_sha256",
+            "programming_experience_years",
+            "code_review_experience_years",
+            "jacquard_familiarity",
+            "functional_programming_familiarity",
+        )
+        if row["run_kind"] != "dry-run" or any(row[name] is not None for name in nullable_fields):
             raise ProtocolError("synthetic rows are dry-run only and carry no consent/model record")
+        if row["exclusion_codes"]:
+            raise ProtocolError("synthetic rows cannot carry real-study exclusion codes")
+        if row["trial_attempt"] != 1:
+            raise ProtocolError("synthetic trials must be first attempts")
+    else:
+        raise ProtocolError(
+            "real result admission is not enabled by the planning harness; "
+            "collection remains closed"
+        )
 
 
-def make_dry_run_rows(seed: str, manifest: dict[str, Any], schema: dict[str, Any]) -> list[dict[str, Any]]:
+def make_dry_run_rows(
+    seed: str, manifest: dict[str, Any], schema: dict[str, Any]
+) -> list[dict[str, Any]]:
     indexed = fixture_index(manifest)
     seed_digest = digest_text(seed)
     rows: list[dict[str, Any]] = []
     for carrier in CARRIERS:
-        order = sorted(JOBS, key=lambda job: digest_text(f"{seed}\0{carrier}\0{job}"))
+        order = sorted(
+            JOBS, key=lambda job: digest_text(f"{seed}\0{carrier}\0{job}")
+        )
         subject_id = digest_text(f"synthetic\0{seed}\0{carrier}")[:24]
         for position, job in enumerate(order, start=1):
             fixture = indexed[job]
@@ -558,13 +870,17 @@ def make_dry_run_rows(seed: str, manifest: dict[str, Any], schema: dict[str, Any
                 "subject_id": subject_id,
                 "carrier": carrier,
                 "job": job,
+                "outcome_family": fixture["outcome_family"],
                 "fixture_id": fixture["id"],
                 "condition_id": f"{carrier}/{job}",
                 "presentation_order": position,
+                "trial_attempt": 1,
+                "schedule_ordinal": None,
                 "answer_id": fixture["correct_answer"],
                 "correct": True,
                 "completion_ms": 1000 + len(rows),
                 "confidence": 100,
+                "perceived_readability": 4,
                 "error_code": None,
                 "excluded": False,
                 "exclusion_codes": [],
@@ -573,6 +889,11 @@ def make_dry_run_rows(seed: str, manifest: dict[str, Any], schema: dict[str, Any
                 "plain_text": True,
                 "syntax_highlighting": False,
                 "consent_version": None,
+                "authority_manifest_sha256": None,
+                "programming_experience_years": None,
+                "code_review_experience_years": None,
+                "jacquard_familiarity": None,
+                "functional_programming_familiarity": None,
                 "model": None,
                 "recorded_at": FIXED_DRY_RUN_TIME,
             }
@@ -606,14 +927,26 @@ def verify_protocol_document(protocol_path: Path) -> None:
         "seeded bug",
         "predict observable output",
         "authority escalation",
+        "modification/debugging",
+        "diagnostic recovery",
+        "perceived readability",
         "between-subject",
-        "counterbalance",
+        "williams",
         "completion time",
         "confidence",
-        "human and model results",
+        "human evidence is primary",
+        "model-family neutral",
+        "cohort manifest",
+        "expertise",
+        "prior jacquard",
         "plain text",
         "sample size",
         "consent",
+        "compensation",
+        "accessibility",
+        "retention",
+        "publication license",
+        "data governance",
         "de-ident",
         "contamination",
         "pass",
@@ -627,25 +960,52 @@ def verify_protocol_document(protocol_path: Path) -> None:
 
 
 def self_test(
-    manifest: dict[str, Any], manifest_path: Path, schema: dict[str, Any], protocol_path: Path
+    manifest: dict[str, Any],
+    manifest_path: Path,
+    schema: dict[str, Any],
+    protocol_path: Path,
+    cohort: dict[str, Any],
+    cohort_path: Path,
+    authority: dict[str, Any],
 ) -> None:
-    verify_manifest(manifest, manifest_path)
+    verify_manifest(manifest)
+    verify_cohort_manifest(cohort, cohort_path)
+    verify_authority_manifest(authority)
     if schema.get("$schema") != "https://json-schema.org/draft/2020-12/schema":
         raise ProtocolError("result schema must pin JSON Schema draft 2020-12")
     if schema.get("additionalProperties") is not False:
         raise ProtocolError("result schema must reject unknown fields")
     verify_protocol_document(protocol_path)
 
-    first = assignment("ux0-self-test", 0)
-    if first != assignment("ux0-self-test", 0):
+    first = assignment("ux1-self-test", 0)
+    if first != assignment("ux1-self-test", 0):
         raise ProtocolError("assignment is not deterministic")
-    block = [assignment("ux0-self-test", ordinal) for ordinal in range(18)]
+    block_size = len(CARRIERS) * len(JOB_ORDERS)
+    block = [assignment("ux1-self-test", ordinal) for ordinal in range(block_size)]
     if {item["carrier"] for item in block} != set(CARRIERS):
         raise ProtocolError("assignment block omitted a carrier")
     for carrier in CARRIERS:
         orders = [tuple(item["job_order"]) for item in block if item["carrier"] == carrier]
         if set(orders) != set(JOB_ORDERS):
-            raise ProtocolError(f"assignment block does not counterbalance all job orders for {carrier}")
+            raise ProtocolError(
+                f"assignment block does not include every Williams order for {carrier}"
+            )
+    for position in range(len(JOBS)):
+        counts = {job: sum(order[position] == job for order in JOB_ORDERS) for job in JOBS}
+        if set(counts.values()) != {2}:
+            raise ProtocolError("Williams orders do not balance presentation positions")
+    pair_counts = {
+        (left, right): sum(
+            order[index : index + 2] == (left, right)
+            for order in JOB_ORDERS
+            for index in range(len(JOBS) - 1)
+        )
+        for left in JOBS
+        for right in JOBS
+        if left != right
+    }
+    if set(pair_counts.values()) != {2}:
+        raise ProtocolError("Williams orders do not balance first-order carryover")
 
     humans = human_schedule()
     if len(humans) != HUMAN_ENROLLMENT_COUNT:
@@ -662,12 +1022,12 @@ def self_test(
         if any(row[key] != value for key, value in expected.items()):
             raise ProtocolError("human schedule drifted from frozen seeded assignment")
 
-    pinned = manifest["model_condition"]
-    models = model_schedule(manifest)
-    expected_model_count = len(CARRIERS) * len(JOBS) * pinned["repetitions_per_condition"]
+    cohort_sha256 = digest_bytes(cohort_path.read_bytes())
+    models = model_schedule(manifest, cohort, cohort_sha256)
+    expected_model_count = len(CARRIERS) * len(JOBS) * cohort["repetitions_per_condition"]
     if len(models) != expected_model_count:
-        raise ProtocolError("model schedule must contain exactly 270 fresh trials")
-    if models != model_schedule(manifest):
+        raise ProtocolError("model schedule has the wrong number of fresh trials")
+    if models != model_schedule(manifest, cohort, cohort_sha256):
         raise ProtocolError("model schedule generation is not deterministic")
     if [row["ordinal"] for row in models] != list(range(expected_model_count)):
         raise ProtocolError("model schedule ordinals must be contiguous and zero-based")
@@ -684,18 +1044,19 @@ def self_test(
                 for row in models
                 if row["carrier"] == carrier and row["job"] == job
             }
-            if repetitions != set(range(1, pinned["repetitions_per_condition"] + 1)):
+            if repetitions != set(range(1, cohort["repetitions_per_condition"] + 1)):
                 raise ProtocolError(f"model schedule is incomplete for {carrier}/{job}")
     for row in models:
         if (
             not row["fresh_session_required"]
             or row["tools"] != "disabled"
             or row["session_memory"] != "disabled"
+            or row["cohort_manifest_sha256"] != cohort_sha256
         ):
-            raise ProtocolError("model schedule weakened fresh-session isolation")
+            raise ProtocolError("model schedule weakened cohort isolation")
     if encode_jsonl(humans) != encode_jsonl(human_schedule()):
         raise ProtocolError("human schedule JSONL is not byte-deterministic")
-    if encode_jsonl(models) != encode_jsonl(model_schedule(manifest)):
+    if encode_jsonl(models) != encode_jsonl(model_schedule(manifest, cohort, cohort_sha256)):
         raise ProtocolError("model schedule JSONL is not byte-deterministic")
     if digest_text(encode_jsonl(humans)) != HUMAN_SCHEDULE_SHA256:
         raise ProtocolError("human schedule bytes drifted from the reviewed plan")
@@ -712,6 +1073,10 @@ def self_test(
             raise ProtocolError("invalid-answer scoring failed")
         if score_answer(fixture, "__timeout__") != (False, "timeout"):
             raise ProtocolError("timeout scoring failed")
+        if score_answer(fixture, "__system_failure__") != (False, "system-failure"):
+            raise ProtocolError("system-failure scoring failed")
+        if score_answer(fixture, "__parse_failure__") != (False, "prompt-parse-failure"):
+            raise ProtocolError("prompt-parse-failure scoring failed")
 
     human_codes = exclusion_codes(
         "human",
@@ -723,7 +1088,7 @@ def self_test(
             "duplicate_enrollment": True,
             "system_failures": 2,
         },
-        manifest,
+        cohort,
     )
     expected_human_codes = {
         "no-consent",
@@ -735,61 +1100,43 @@ def self_test(
     }
     if set(human_codes) != expected_human_codes:
         raise ProtocolError("human exclusion rules are incomplete")
-    pinned = manifest["model_condition"]
     clean_model = {
         "training_cutoff_attested": True,
-        "model": pinned["model"],
-        "client": pinned["client"],
+        "provider": cohort["provider"],
+        "model_id": cohort["model_id"],
+        "client_name": cohort["client"]["name"],
+        "client_version": cohort["client"]["version"],
         "prompt_parse_failure": False,
         "system_failures": 0,
     }
-    if exclusion_codes("model", clean_model, manifest):
+    if exclusion_codes("model", clean_model, cohort):
         raise ProtocolError("eligible pinned model was excluded")
     contaminated = dict(clean_model, training_cutoff_attested=False)
-    if exclusion_codes("model", contaminated, manifest) != ["model-training-contamination"]:
+    if exclusion_codes("model", contaminated, cohort) != ["model-training-contamination"]:
         raise ProtocolError("model contamination exclusion failed")
 
-    rows = make_dry_run_rows("ux0-self-test", manifest, schema)
+    rows = make_dry_run_rows("ux1-self-test", manifest, schema)
     expected_conditions = {f"{carrier}/{job}" for carrier in CARRIERS for job in JOBS}
-    if len(rows) != 9 or {row["condition_id"] for row in rows} != expected_conditions:
+    if len(rows) != 15 or {row["condition_id"] for row in rows} != expected_conditions:
         raise ProtocolError("dry run must emit exactly one valid row per condition")
     if len({row["row_id"] for row in rows}) != len(rows):
         raise ProtocolError("dry-run row IDs must be unique")
 
-    human = copy.deepcopy(rows[0])
-    human.update(
+    real_row = copy.deepcopy(rows[0])
+    real_row.update(
         {
             "run_kind": "confirmatory",
             "subject_kind": "human",
-            "subject_id": digest_text("human-self-test")[:24],
             "assignment_seed_sha256": digest_text(CONFIRMATORY_SEED),
-            "consent_version": "consent-v0",
         }
     )
-    human["row_id"] = canonical_row_id(human)
-    validate_row(human, manifest, schema)
-
-    model = copy.deepcopy(rows[1])
-    pinned_model = manifest["model_condition"]
-    model.update(
-        {
-            "run_kind": "confirmatory",
-            "subject_kind": "model",
-            "subject_id": digest_text("model-self-test")[:24],
-            "assignment_seed_sha256": digest_text(CONFIRMATORY_SEED),
-            "model": {
-                "provider": pinned_model["provider"],
-                "model": pinned_model["model"],
-                "client": pinned_model["client"],
-                "prompt_sha256": pinned_model["prompt_sha256"],
-                "temperature": pinned_model["temperature"],
-                "repetition": 1,
-                "training_cutoff_attested": True,
-            },
-        }
-    )
-    model["row_id"] = canonical_row_id(model)
-    validate_row(model, manifest, schema)
+    real_row["row_id"] = canonical_row_id(real_row)
+    try:
+        validate_row(real_row, manifest, schema)
+    except ProtocolError:
+        pass
+    else:
+        raise ProtocolError("planning harness accepted a real result row")
 
     for carrier in CARRIERS:
         for job in JOBS:
@@ -797,15 +1144,21 @@ def self_test(
             if "\x1b" in rendered or "```" in rendered or "<span" in rendered:
                 raise ProtocolError("presentation added highlighting or markup")
 
-    mutation = copy.deepcopy(rows[0])
-    mutation["syntax_highlighting"] = True
-    mutation["row_id"] = canonical_row_id(mutation)
-    try:
-        validate_row(mutation, manifest, schema)
-    except ProtocolError:
-        pass
-    else:
-        raise ProtocolError("schema validator accepted syntax highlighting")
+    mutations = (
+        ("syntax highlighting", "syntax_highlighting", True),
+        ("readability scale", "perceived_readability", 0),
+        ("outcome family", "outcome_family", "review"),
+    )
+    for label, field, value in mutations:
+        mutation = copy.deepcopy(rows[0])
+        mutation[field] = value
+        mutation["row_id"] = canonical_row_id(mutation)
+        try:
+            validate_row(mutation, manifest, schema)
+        except ProtocolError:
+            pass
+        else:
+            raise ProtocolError(f"schema validator accepted invalid {label}")
     mutation = copy.deepcopy(rows[0])
     del mutation["confidence"]
     try:
@@ -814,28 +1167,24 @@ def self_test(
         pass
     else:
         raise ProtocolError("schema validator accepted a missing required field")
-    mutation = copy.deepcopy(human)
-    mutation["assignment_seed_sha256"] = digest_text("wrong-seed")
-    mutation["row_id"] = canonical_row_id(mutation)
     try:
-        validate_row(mutation, manifest, schema)
+        verify_authority_manifest(authority, require_authorized=True)
     except ProtocolError:
         pass
     else:
-        raise ProtocolError("schema validator accepted confirmatory assignment-seed drift")
-    mutation = copy.deepcopy(model)
-    mutation["model"]["client"] = "unreviewed-client"
-    mutation["row_id"] = canonical_row_id(mutation)
+        raise ProtocolError("unapproved authority template allowed collection")
     try:
-        validate_row(mutation, manifest, schema)
+        verify_cohort_manifest(cohort, cohort_path, require_collectible=True)
     except ProtocolError:
         pass
     else:
-        raise ProtocolError("schema validator accepted model-version drift")
+        raise ProtocolError("pending model cohort allowed collection")
 
 
 def validate_jsonl(
-    input_path: Path, manifest: dict[str, Any], schema: dict[str, Any]
+    input_path: Path,
+    manifest: dict[str, Any],
+    schema: dict[str, Any],
 ) -> tuple[int, set[str]]:
     count = 0
     conditions: set[str] = set()
@@ -870,14 +1219,21 @@ def parse_args(argv: Iterable[str]) -> argparse.Namespace:
     verify.add_argument("--protocol", type=Path, required=True)
     verify.add_argument("--jacquard", type=Path, required=True)
     verify.add_argument("--prelude", type=Path, required=True)
+    verify.add_argument("--cohort", type=Path, required=True)
+    verify.add_argument("--authority", type=Path, required=True)
 
     dry_run = commands.add_parser("dry-run", help="emit deterministic synthetic JSONL rows")
     add_common_paths(dry_run)
     dry_run.add_argument("--seed", required=True)
 
-    validate = commands.add_parser("validate-results", help="validate a JSONL result artifact")
+    validate = commands.add_parser(
+        "validate-results",
+        help="validate v1 synthetic JSONL; real-result admission remains closed",
+    )
     add_common_paths(validate)
     validate.add_argument("--input", type=Path, required=True)
+    validate.add_argument("--cohort", type=Path, required=True)
+    validate.add_argument("--authority", type=Path, required=True)
 
     assign = commands.add_parser("assign", help="print one seeded balanced assignment as JSON")
     assign.add_argument("--seed", required=True)
@@ -890,9 +1246,10 @@ def parse_args(argv: Iterable[str]) -> argparse.Namespace:
 
     model_plan = commands.add_parser(
         "model-schedule",
-        help="emit the frozen 270-trial model plan without calling a model",
+        help="emit one cohort-specific model plan without calling a model",
     )
     model_plan.add_argument("--manifest", type=Path, required=True)
+    model_plan.add_argument("--cohort", type=Path, required=True)
 
     verify_plans = commands.add_parser(
         "verify-schedules",
@@ -919,13 +1276,15 @@ def main(argv: Iterable[str]) -> int:
             return 0
         if args.command == "verify-schedules":
             verify_schedule_files(args.human, args.model)
-            print("readability schedules: PASS (480 human assignments, 270 model trials)")
+            print("readability schedules: PASS (480 human assignments, 450 M0 model trials)")
             return 0
-
         manifest = load_json(args.manifest)
-        verify_manifest(manifest, args.manifest)
+        verify_manifest(manifest)
         if args.command == "model-schedule":
-            sys.stdout.write(encode_jsonl(model_schedule(manifest)))
+            cohort = load_json(args.cohort)
+            verify_cohort_manifest(cohort, args.cohort)
+            cohort_sha256 = digest_bytes(args.cohort.read_bytes())
+            sys.stdout.write(encode_jsonl(model_schedule(manifest, cohort, cohort_sha256)))
             return 0
         if args.command == "present":
             sys.stdout.write(render_trial(manifest, args.manifest, args.carrier, args.job))
@@ -937,13 +1296,27 @@ def main(argv: Iterable[str]) -> int:
                 print(json.dumps(row, sort_keys=True, separators=(",", ":")))
             return 0
         if args.command == "validate-results":
+            cohort = load_json(args.cohort)
+            authority = load_json(args.authority)
+            verify_cohort_manifest(cohort, args.cohort)
+            verify_authority_manifest(authority)
             count, conditions = validate_jsonl(args.input, manifest, schema)
             print(f"validated {count} rows across {len(conditions)} conditions")
             return 0
         if args.command == "verify":
-            self_test(manifest, args.manifest, schema, args.protocol)
+            cohort = load_json(args.cohort)
+            authority = load_json(args.authority)
+            self_test(
+                manifest,
+                args.manifest,
+                schema,
+                args.protocol,
+                cohort,
+                args.cohort,
+                authority,
+            )
             verify_fixtures(manifest, args.manifest, args.jacquard, args.prelude)
-            print("readability protocol: PASS (3 jobs, 3 carriers, 9 dry-run conditions)")
+            print("readability protocol: PASS (5 jobs, 3 carriers, 15 dry-run conditions)")
             return 0
         raise ProtocolError(f"unknown command: {args.command}")
     except (OSError, ProtocolError) as error:

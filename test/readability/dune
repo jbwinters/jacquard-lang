@@ -5,6 +5,8 @@
   fixture-manifest.json
   result.schema.json
   model-prompt.txt
+  authority-manifest.template.json
+  cohorts/m0-fable5.json
   (source_tree fixtures)
   ../../docs/research/readability-benchmark/PROTOCOL.md
   ../../docs/research/readability-benchmark/EXECUTION.md
@@ -16,13 +18,16 @@
      --manifest fixture-manifest.json
      --schema result.schema.json
      --protocol ../../docs/research/readability-benchmark/PROTOCOL.md
+     --cohort cohorts/m0-fable5.json
+     --authority authority-manifest.template.json
      --jacquard %{bin:jacquard}
      --prelude ../../prelude)
     (with-stdout-to human-schedule.jsonl
      (run %{bin:python3} readability_benchmark.py human-schedule))
     (with-stdout-to model-schedule.jsonl
      (run %{bin:python3} readability_benchmark.py model-schedule
-      --manifest fixture-manifest.json))
+      --manifest fixture-manifest.json
+      --cohort cohorts/m0-fable5.json))
     (run %{bin:python3} readability_benchmark.py verify-schedules
      --human human-schedule.jsonl
      --model model-schedule.jsonl)))))

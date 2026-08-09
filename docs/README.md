@@ -15,9 +15,9 @@ project shape from file names alone.
 - `../demos/README.md`: demo catalog and what each demo proves.
 - `surface-syntax.md`: public `.jac` authoring syntax and its projection onto
   the retained `.jqd` kernel/debug carrier.
-- `research/readability-benchmark/PROTOCOL.md`: preregistered reviewer tasks,
-  paired-carrier fixtures, scoring, privacy, and synthetic reproduction evidence
-  for future syntax decisions.
+- `research/readability-benchmark/PROTOCOL.md`: human-first v1 reviewer tasks,
+  paired-carrier fixtures, model-family-neutral cohorts, scoring, privacy, and
+  synthetic reproduction evidence for future syntax decisions.
 - `research/readability-benchmark/EXECUTION.md`: fail-closed UX.1 authority
   boundary and deterministic human/model schedule commands.
 - `ci-cd.md`: GitHub gates, branch protection, and release evidence workflow.
