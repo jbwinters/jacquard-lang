@@ -78,8 +78,9 @@ compensation identifiers are prohibited in result rows.
 
 Procedure:
 
-1. Show the approved information sheet and record its consent version outside
-   the answer data.
+1. Show the approved information sheet and keep the consent decision, contact
+   record, and signed evidence outside the answer data. Each de-identified
+   result row carries only the reviewed `consent_version` identifier.
 2. Record eligibility, the de-identified expertise fields, prior fixture
    exposure, duplicate enrollment, and the no-tools agreement.
 3. Allocate the next ordinal and render its carrier and Williams job order.
@@ -147,16 +148,30 @@ No real collection starts until one authority manifest records approval for:
 - data governance and publication authority.
 
 The checked `authority-manifest.template.json` is intentionally unapproved and
-the planning harness rejects every real result row. An approval-driven protocol,
-fixture, schema, answer-key, exclusion, or data-term change requires a new
-reviewed version before collection.
+cannot admit a real result row. The validator accepts a real row only when the
+operator supplies a separately reviewed, fully approved authority manifest and
+the row carries the SHA-256 of those exact manifest bytes. A model row also
+requires an available, attested, quota-sufficient, collection-authorized cohort
+manifest and its exact digest. The repository creates neither approval. An
+approval-driven protocol, fixture, schema, answer-key, exclusion, presentation,
+or data-term change requires a new reviewed version before collection.
 
 Rows use salted pseudonymous subject IDs and carry only answers, timing,
 ratings, confidence, covariates, assignment/fixture/authority digests,
-exclusions, and cohort metadata. The salt and consent/contact/compensation data
-stay outside the results. Linkage is deleted after payment and withdrawal
-periods. Publication and retention must match the approved consent and
-publication license.
+schema digest, exclusions, and cohort metadata. The salt and
+consent/contact/compensation data stay outside the results. Linkage is deleted
+after payment and withdrawal periods. Publication and retention must match the
+approved consent and publication license.
+
+Final evidence stores are chronological JSONL and contain exactly one subject
+kind. Human stores follow all 480 frozen ordinals in order, with five ordered
+first attempts per participant and only the single preregistered final retry
+after one system failure. Model stores cover every reviewed cohort schedule
+cell in ordinal order and use a unique pseudonymous session ID per row. Empty,
+partial, mixed, duplicated, reordered, cross-cohort, or substituted stores are
+invalid. Excluded system, parse, contamination, and pinned-drift rows remain in
+the store; exclusion never permits a row to change its intended cohort or
+schedule cell.
 
 ## Scoring, exclusions, and missing data
 

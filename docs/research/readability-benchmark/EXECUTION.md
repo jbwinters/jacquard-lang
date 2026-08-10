@@ -1,7 +1,8 @@
 # Readability protocol v1 execution gate
 
-Status: deterministic planning and validation tools are implemented. Real
-collection is not authorized and no human or model outcomes exist.
+Status: deterministic planning and fail-closed result-admission tools are
+implemented. The checked manifests do not authorize real collection, and no
+human or model outcomes exist.
 
 The [protocol](PROTOCOL.md) defines the study. This document separates a
 reproducible plan from external authority. A generated schedule proves that
@@ -21,10 +22,27 @@ approval documents.
 For model collection, the selected cohort manifest must also record available
 access, an attested pre-publication training cutoff, confirmed quota/rate
 limits, and explicit collection authorization. The checked M0 Fable 5 manifest
-has each of those states pending. The planning harness deliberately rejects
-every real human or model row, even if a caller edits those states. A separately
-reviewed result-admission gate must land before collection. Model availability
-never delays or substitutes for the primary human study.
+has each of those states pending. `collection-gate` accepts only a separately
+reviewed authority manifest whose nine areas are approved; a model gate also
+requires available access, an attested cutoff, confirmed quota covering the
+whole schedule, and explicit cohort collection authorization. It reads and
+checks those files but cannot create an approval or contact a provider:
+
+```text
+python3 test/readability/readability_benchmark.py collection-gate \
+  --manifest test/readability/fixture-manifest.json \
+  --schema test/readability/result.schema.json \
+  --authority AUTHORITY.json
+python3 test/readability/readability_benchmark.py collection-gate \
+  --manifest test/readability/fixture-manifest.json \
+  --schema test/readability/result.schema.json \
+  --authority AUTHORITY.json --cohort COHORT.json
+```
+
+The gate prints the exact fixture-manifest, schema, authority, and optional
+cohort digests that admitted rows must carry. The pending checked templates
+fail these commands. Model availability never delays or substitutes for the
+primary human study.
 
 Do not weaken the gate to start a study. A required change to protocol,
 fixtures, schema, answer key, exclusions, presentation, consent, or data terms
@@ -51,6 +69,10 @@ Reviewed JSONL SHA-256:
 The operator allocates the next ordinal only after eligibility and consent and
 may not skip it after seeing the assignment. Private enrollment and payment
 records never enter the schedule or published results.
+
+The `assign --seed ... --ordinal ...` command is a debugging aid for inspecting
+the balancing algorithm. It is not an alternate schedule: every admitted real
+row is re-derived with the frozen `jacquard-readability-v1` seed.
 
 ## Model cohort plan
 
@@ -89,12 +111,45 @@ It is never substituted for M0 and its rows and analysis remain separate.
 
 ## Result validation and preservation
 
-`validate-results` requires the exact fixture, cohort, authority, and schema
-manifests. Synthetic rows validate with the checked pending manifests because
-they are explicitly `dry-run`; this planning slice rejects every human or model
-row. The v1 schema reserves schedule ordinals and authority/cohort digests so
-the result-admission slice can prevent a later manifest edit from silently
-reclassifying evidence.
+`validate-results` validates one complete single-kind JSONL store. Human stores
+require the exact fixture, schema, and approved authority manifest. Model stores
+also require their exact collectible cohort manifest. The digest written in a
+real row is SHA-256 over the exact supplied manifest bytes, so reformatting or
+editing a manifest cannot silently reclassify old evidence.
+
+```text
+python3 test/readability/readability_benchmark.py validate-results \
+  --manifest test/readability/fixture-manifest.json \
+  --schema test/readability/result.schema.json \
+  --authority AUTHORITY.json \
+  --input HUMAN-RESULTS.jsonl
+
+python3 test/readability/readability_benchmark.py validate-results \
+  --manifest test/readability/fixture-manifest.json \
+  --schema test/readability/result.schema.json \
+  --authority AUTHORITY.json --cohort COHORT.json \
+  --input MODEL-RESULTS.jsonl
+```
+
+Human JSONL is chronological: all 480 ordinals appear once in order, each with
+five first attempts in its frozen Williams order. Exactly one failed first
+attempt may have one final attempt-2 row for the same job; the failed row stays
+in the file. More than one first-attempt system failure excludes the subject
+and permits no retry. Model JSONL contains every cohort cell once in dispatch
+ordinal order, uses a unique pseudonymous session ID for every row, and never
+retries. An observed pinned-client/model/prompt drift may be preserved only as
+an excluded `model-version-drift` row under the intended cohort digest; another
+cohort ID or digest is rejected as substitution.
+
+The validator rejects empty, partial, mixed, duplicated, reordered, wrong-seed,
+wrong-fixture, wrong-authority, cross-cohort, and schedule-drifted stores. It
+evaluates the checked Draft 2020-12 `oneOf`, `allOf`, and `if`/`then` branches,
+then enforces cross-row rules. Synthetic stores remain allowed with the pending
+checked manifests only because they are `dry-run`, contain all 15 conditions,
+and carry no real-study metadata. `consent_version` is only the reviewed flow
+identifier; consent decisions and contact records remain outside result data.
+No-consent and failed-eligibility records stay in the separate enrollment flow
+and are rejected if placed in answer JSONL.
 
 Preserve, under the approved data controls:
 
@@ -119,8 +174,14 @@ synthetic rows represented as outcomes may be committed.
 - all 450 M0 carrier/job/repetition cells and cohort-specific dispatch keys;
 - exact prompt, client, control, fixture, cohort, isolation, attestation, and
   quota pins;
-- v1 schema shape, canonical synthetic row IDs, invalid ratings/profiles, and
-  unconditional rejection of real rows in the planning harness; and
+- the full v1 schema branches, canonical row IDs, reserved failure IDs, and
+  deterministic scoring;
+- authorized in-memory human/model admission fixtures plus adversarial
+  authority, digest, assignment, cohort, repetition, retry, completeness,
+  ordering, and fresh-session mutations; the fixtures are synthetic tests and
+  are not collection authority or outcomes;
+- unconditional rejection of real rows with the checked pending authority and
+  M0 cohort manifests; and
 - byte-identical schedule and dry-run generation.
 
 It does not prove that approvals exist, the live host is accessible,

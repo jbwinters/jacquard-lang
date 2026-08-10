@@ -28,7 +28,9 @@
     "excluded",
     "exclusion_codes",
     "assignment_seed_sha256",
+    "fixture_manifest_sha256",
     "fixture_sha256",
+    "schema_sha256",
     "plain_text",
     "syntax_highlighting",
     "consent_version",
@@ -143,10 +145,19 @@
       }
     },
     "assignment_seed_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "fixture_manifest_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
     "fixture_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "schema_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "plain_text": {"const": true},
     "syntax_highlighting": {"const": false},
-    "consent_version": {"type": ["string", "null"], "maxLength": 64},
+    "consent_version": {
+      "description": "Reviewed information-sheet/consent-flow version identifier only; consent and contact records stay outside result data.",
+      "type": ["string", "null"],
+      "maxLength": 64
+    },
     "authority_manifest_sha256": {
       "type": ["string", "null"],
       "pattern": "^[0-9a-f]{64}$"

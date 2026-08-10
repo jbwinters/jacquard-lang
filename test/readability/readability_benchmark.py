@@ -13,12 +13,13 @@ import argparse
 import copy
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
 import subprocess
 import sys
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 
 SCHEMA_VERSION = "readability-result-v1"
@@ -30,6 +31,40 @@ JOBS = (
     "authority-escalation",
     "modify-behavior",
     "diagnostic-recovery",
+)
+RESERVED_ANSWER_IDS = frozenset(
+    {"__timeout__", "__system_failure__", "__parse_failure__"}
+)
+HUMAN_PROFILE_FIELDS = (
+    "programming_experience_years",
+    "code_review_experience_years",
+    "jacquard_familiarity",
+    "functional_programming_familiarity",
+)
+SUPPORTED_SCHEMA_KEYS = frozenset(
+    {
+        "$schema",
+        "$id",
+        "title",
+        "description",
+        "type",
+        "additionalProperties",
+        "required",
+        "properties",
+        "const",
+        "enum",
+        "minimum",
+        "maximum",
+        "minLength",
+        "maxLength",
+        "pattern",
+        "oneOf",
+        "uniqueItems",
+        "items",
+        "allOf",
+        "if",
+        "then",
+    }
 )
 
 
@@ -63,6 +98,14 @@ class ProtocolError(RuntimeError):
     """Raised when reviewed protocol data or generated evidence is invalid."""
 
 
+class JsonDocument(dict[str, Any]):
+    """A loaded JSON object carrying the SHA-256 of its exact source bytes."""
+
+    def __init__(self, value: dict[str, Any], source_sha256: str) -> None:
+        super().__init__(value)
+        self.source_sha256 = source_sha256
+
+
 def digest_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -71,14 +114,45 @@ def digest_text(text: str) -> str:
     return digest_bytes(text.encode("utf-8"))
 
 
-def load_json(path: Path) -> dict[str, Any]:
+def unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Build one JSON object while rejecting parser-ambiguous duplicate keys."""
+
+    value: dict[str, Any] = {}
+    for name, item in pairs:
+        if name in value:
+            raise ProtocolError(f"JSON object contains duplicate field: {name}")
+        value[name] = item
+    return value
+
+
+def reject_json_constant(value: str) -> Any:
+    """Reject NaN and infinities, which are not JSON values."""
+
+    raise ProtocolError(f"JSON contains non-standard numeric constant: {value}")
+
+
+def load_json(path: Path) -> JsonDocument:
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
+        data = path.read_bytes()
+        value = json.loads(
+            data.decode("utf-8"),
+            object_pairs_hook=unique_json_object,
+            parse_constant=reject_json_constant,
+        )
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise ProtocolError(f"cannot load JSON {path}: {error}") from error
     if not isinstance(value, dict):
         raise ProtocolError(f"{path} must contain one JSON object")
-    return value
+    return JsonDocument(value, digest_bytes(data))
+
+
+def document_sha256(document: dict[str, Any], label: str) -> str:
+    """Return an exact source digest or reject an unbound in-memory document."""
+
+    digest = getattr(document, "source_sha256", None)
+    if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+        raise ProtocolError(f"{label} must be loaded from exact reviewed JSON bytes")
+    return digest
 
 
 def fixture_index(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -202,6 +276,11 @@ def verify_manifest(manifest: dict[str, Any]) -> None:
             or len(set(option_ids)) != len(option_ids)
         ):
             raise ProtocolError(f"fixture {fixture_id} answer IDs must be unique strings")
+        shadowed = RESERVED_ANSWER_IDS.intersection(option_ids)
+        if shadowed:
+            raise ProtocolError(
+                f"fixture {fixture_id} shadows reserved answer ID: {sorted(shadowed)[0]}"
+            )
         if fixture.get("correct_answer") not in option_ids:
             raise ProtocolError(f"fixture {fixture_id} correct answer is not an option")
         wrong = set(option_ids) - {fixture["correct_answer"]}
@@ -622,7 +701,14 @@ def encode_jsonl(rows: Iterable[dict[str, Any]]) -> str:
     """Encode evidence rows as stable UTF-8-compatible JSON Lines."""
 
     return "".join(
-        json.dumps(row, sort_keys=True, separators=(",", ":"), ensure_ascii=True) + "\n"
+        json.dumps(
+            row,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        )
+        + "\n"
         for row in rows
     )
 
@@ -712,7 +798,12 @@ def json_type_matches(value: Any, declared: str | list[str]) -> bool:
             return True
         if name == "integer" and isinstance(value, int) and not isinstance(value, bool):
             return True
-        if name == "number" and isinstance(value, (int, float)) and not isinstance(value, bool):
+        if (
+            name == "number"
+            and isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and (not isinstance(value, float) or math.isfinite(value))
+        ):
             return True
         if name == "string" and isinstance(value, str):
             return True
@@ -723,7 +814,26 @@ def json_type_matches(value: Any, declared: str | list[str]) -> bool:
     return False
 
 
-def validate_property(name: str, value: Any, rule: dict[str, Any]) -> None:
+def schema_matches(value: Any, rule: dict[str, Any]) -> bool:
+    """Return whether a value satisfies a schema branch without leaking errors."""
+
+    try:
+        validate_schema_value("conditional", value, rule)
+    except ProtocolError:
+        return False
+    return True
+
+
+def validate_schema_value(name: str, value: Any, rule: dict[str, Any]) -> None:
+    """Validate the Draft 2020-12 keywords used by the checked result schema.
+
+    This deliberately implements the repository's bounded schema vocabulary,
+    including nested object branches, oneOf, allOf, and if/then. The checked
+    schema is separately rejected if it uses an unsupported keyword.
+    """
+
+    if not isinstance(rule, dict):
+        raise ProtocolError(f"schema rule for {name} must be an object")
     declared_type = rule.get("type")
     if declared_type is not None and not json_type_matches(value, declared_type):
         raise ProtocolError(f"result {name} has the wrong JSON type")
@@ -741,7 +851,7 @@ def validate_property(name: str, value: Any, rule: dict[str, Any]) -> None:
             raise ProtocolError(f"result {name} is too short")
         if "maxLength" in rule and len(value) > rule["maxLength"]:
             raise ProtocolError(f"result {name} is too long")
-        if "pattern" in rule and re.fullmatch(rule["pattern"], value) is None:
+        if "pattern" in rule and re.search(rule["pattern"], value) is None:
             raise ProtocolError(f"result {name} does not match its pattern")
     if isinstance(value, list):
         encoded_items = {json.dumps(item, sort_keys=True) for item in value}
@@ -749,13 +859,132 @@ def validate_property(name: str, value: Any, rule: dict[str, Any]) -> None:
             raise ProtocolError(f"result {name} must contain unique items")
         item_rule = rule.get("items")
         if item_rule:
-            for item in value:
-                validate_property(f"{name}[]", item, item_rule)
+            for index, item in enumerate(value):
+                validate_schema_value(f"{name}[{index}]", item, item_rule)
+    if isinstance(value, dict):
+        required = set(rule.get("required", []))
+        missing = required - set(value)
+        if missing:
+            raise ProtocolError(
+                f"result {name} is missing fields: {', '.join(sorted(missing))}"
+            )
+        properties = rule.get("properties", {})
+        if not isinstance(properties, dict):
+            raise ProtocolError(f"schema properties for {name} must be an object")
+        if rule.get("additionalProperties") is False:
+            extra = set(value) - set(properties)
+            if extra:
+                raise ProtocolError(
+                    f"result {name} has unknown fields: {', '.join(sorted(extra))}"
+                )
+        for property_name, property_rule in properties.items():
+            if property_name in value:
+                validate_schema_value(
+                    f"{name}.{property_name}", value[property_name], property_rule
+                )
+    if "oneOf" in rule:
+        branches = rule["oneOf"]
+        if not isinstance(branches, list):
+            raise ProtocolError(f"schema oneOf for {name} must be an array")
+        matches = sum(schema_matches(value, branch) for branch in branches)
+        if matches != 1:
+            raise ProtocolError(f"result {name} must match exactly one schema branch")
+    for branch in rule.get("allOf", []):
+        validate_schema_value(name, value, branch)
+    if "if" in rule and schema_matches(value, rule["if"]):
+        if "then" in rule:
+            validate_schema_value(name, value, rule["then"])
+
+
+def verify_schema_rule(rule: Any, path: str) -> None:
+    """Reject schema syntax outside the validator's reviewed vocabulary."""
+
+    if not isinstance(rule, dict):
+        raise ProtocolError(f"result schema rule {path} must be an object")
+    unknown = set(rule) - SUPPORTED_SCHEMA_KEYS
+    if unknown:
+        raise ProtocolError(
+            f"result schema uses unsupported keyword at {path}: {sorted(unknown)[0]}"
+        )
+    required = rule.get("required")
+    if required is not None and (
+        not isinstance(required, list)
+        or not all(isinstance(name, str) for name in required)
+        or len(required) != len(set(required))
+    ):
+        raise ProtocolError(f"result schema required fields at {path} are malformed")
+    properties = rule.get("properties", {})
+    if not isinstance(properties, dict):
+        raise ProtocolError(f"result schema properties at {path} must be an object")
+    for name, child in properties.items():
+        verify_schema_rule(child, f"{path}.properties.{name}")
+    if "items" in rule:
+        verify_schema_rule(rule["items"], f"{path}.items")
+    for keyword in ("oneOf", "allOf"):
+        if keyword not in rule:
+            continue
+        branches = rule[keyword]
+        if not isinstance(branches, list) or not branches:
+            raise ProtocolError(f"result schema {keyword} at {path} must be nonempty")
+        for index, branch in enumerate(branches):
+            verify_schema_rule(branch, f"{path}.{keyword}[{index}]")
+    for keyword in ("if", "then"):
+        if keyword in rule:
+            verify_schema_rule(rule[keyword], f"{path}.{keyword}")
+
+
+def verify_result_schema(schema: dict[str, Any]) -> None:
+    """Validate the exact structural contract expected of result schema v1."""
+
+    verify_schema_rule(schema, "root")
+    if schema.get("$schema") != "https://json-schema.org/draft/2020-12/schema":
+        raise ProtocolError("result schema must pin JSON Schema draft 2020-12")
+    if schema.get("type") != "object" or schema.get("additionalProperties") is not False:
+        raise ProtocolError("result schema root must be a closed object")
+    properties = schema.get("properties")
+    required = schema.get("required")
+    if not isinstance(properties, dict):
+        raise ProtocolError("result schema properties are malformed")
+    if not isinstance(required, list):
+        raise ProtocolError("result schema required fields are malformed")
+    if set(required) != set(properties):
+        raise ProtocolError("every result property must remain required")
+    model_rule = properties.get("model", {})
+    if not isinstance(model_rule.get("oneOf"), list) or len(model_rule["oneOf"]) != 2:
+        raise ProtocolError("result schema must retain null/object model branches")
+    all_of = schema.get("allOf", [])
+    if not isinstance(all_of, list) or len(all_of) != 5:
+        raise ProtocolError("result schema must retain five conditional branches")
+    conditionals: set[tuple[str, str]] = set()
+    for branch in all_of:
+        if_rule = branch.get("if", {}).get("properties", {})
+        if len(if_rule) != 1:
+            raise ProtocolError("result schema conditional must test exactly one field")
+        field, field_rule = next(iter(if_rule.items()))
+        value = field_rule.get("const") if isinstance(field_rule, dict) else None
+        if not isinstance(value, str) or "then" not in branch:
+            raise ProtocolError("result schema conditional is malformed")
+        conditionals.add((field, value))
+    expected_conditionals = {
+        ("subject_kind", "human"),
+        ("subject_kind", "model"),
+        ("subject_kind", "synthetic"),
+        ("run_kind", "dry-run"),
+        ("run_kind", "exploratory"),
+    }
+    if conditionals != expected_conditionals:
+        raise ProtocolError("result schema conditional inventory drifted")
 
 
 def canonical_row_id(row: dict[str, Any]) -> str:
     body = {key: value for key, value in row.items() if key != "row_id"}
-    encoded = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    encoded = json.dumps(
+        body,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    )
     return digest_text(encoded)
 
 
@@ -763,34 +992,22 @@ def validate_row(
     row: dict[str, Any],
     manifest: dict[str, Any],
     schema: dict[str, Any],
+    *,
+    cohort: dict[str, Any] | None = None,
+    authority: dict[str, Any] | None = None,
 ) -> None:
+    """Validate one result against the schema and its exact admission context.
+
+    Synthetic rows need no external context. Real rows require a previously
+    loaded authority manifest and its exact file digest; model rows additionally
+    require a previously validated collectible cohort and its exact file digest.
+    Cross-row completeness and retry/session rules are enforced by
+    ``validate_result_store``.
+    """
+
     if not isinstance(row, dict):
         raise ProtocolError("each result row must be a JSON object")
-    required = set(schema.get("required", []))
-    properties = schema.get("properties", {})
-    missing = required - set(row)
-    extra = set(row) - set(properties)
-    if missing:
-        raise ProtocolError(f"result row is missing fields: {', '.join(sorted(missing))}")
-    if schema.get("additionalProperties") is False and extra:
-        raise ProtocolError(f"result row has unknown fields: {', '.join(sorted(extra))}")
-    for name, value in row.items():
-        rule = properties[name]
-        if "oneOf" in rule:
-            if value is None:
-                validate_property(name, value, rule["oneOf"][0])
-            elif isinstance(value, dict):
-                object_rule = rule["oneOf"][1]
-                if set(value) != set(object_rule["required"]):
-                    raise ProtocolError("result model fields do not match the pinned schema")
-                for model_name, model_value in value.items():
-                    validate_property(
-                        f"model.{model_name}", model_value, object_rule["properties"][model_name]
-                    )
-            else:
-                raise ProtocolError(f"result {name} matches no schema branch")
-        else:
-            validate_property(name, value, rule)
+    validate_schema_value("row", row, schema)
 
     if row["condition_id"] != f"{row['carrier']}/{row['job']}":
         raise ProtocolError("condition_id must be carrier/job")
@@ -822,9 +1039,128 @@ def validate_row(
         CONFIRMATORY_SEED
     ):
         raise ProtocolError("real result row does not use the frozen assignment seed")
+    if row["fixture_manifest_sha256"] != document_sha256(
+        manifest, "fixture manifest"
+    ):
+        raise ProtocolError("result fixture manifest digest drifted")
+    if row["schema_sha256"] != document_sha256(schema, "result schema"):
+        raise ProtocolError("result schema digest drifted")
 
     subject_kind = row["subject_kind"]
-    if subject_kind == "synthetic":
+    if subject_kind == "human":
+        allowed_exclusions = {
+            "no-consent",
+            "eligibility-failed",
+            "prior-fixture-exposure",
+            "prohibited-tools",
+            "duplicate-enrollment",
+            "system-failure",
+        }
+        if not set(row["exclusion_codes"]) <= allowed_exclusions:
+            raise ProtocolError("human row carries a non-human exclusion code")
+        pre_assignment = {"no-consent", "eligibility-failed"}.intersection(
+            row["exclusion_codes"]
+        )
+        if pre_assignment:
+            raise ProtocolError(
+                "pre-assignment consent/eligibility exclusions belong in enrollment flow"
+            )
+        if authority is None:
+            raise ProtocolError("human row lacks an authority admission context")
+        verify_authority_manifest(authority, require_authorized=True)
+        authority_sha256 = document_sha256(authority, "authority manifest")
+        if row["authority_manifest_sha256"] != authority_sha256:
+            raise ProtocolError("human row authority manifest digest drifted")
+        ordinal = row["schedule_ordinal"]
+        if not isinstance(ordinal, int) or isinstance(ordinal, bool) or not (
+            0 <= ordinal < HUMAN_ENROLLMENT_COUNT
+        ):
+            raise ProtocolError("human row schedule ordinal is invalid")
+        planned = assignment(CONFIRMATORY_SEED, ordinal)
+        if row["carrier"] != planned["carrier"]:
+            raise ProtocolError("human row carrier drifted from its assignment")
+        planned_job = planned["job_order"][row["presentation_order"] - 1]
+        if row["job"] != planned_job:
+            raise ProtocolError("human row job/order drifted from its assignment")
+        if any(row[name] is None for name in HUMAN_PROFILE_FIELDS):
+            raise ProtocolError("human row is missing the de-identified expertise profile")
+        if row["answer_id"] == "__parse_failure__":
+            raise ProtocolError("human rows cannot report a model prompt parse failure")
+    elif subject_kind == "model":
+        allowed_exclusions = {
+            "model-training-contamination",
+            "model-version-drift",
+            "prompt-parse-failure",
+            "system-failure",
+        }
+        if not set(row["exclusion_codes"]) <= allowed_exclusions:
+            raise ProtocolError("model row carries a non-model exclusion code")
+        if (
+            cohort is None
+            or authority is None
+        ):
+            raise ProtocolError("model row lacks cohort or authority admission context")
+        verify_authority_manifest(authority, require_authorized=True)
+        authority_sha256 = document_sha256(authority, "authority manifest")
+        if row["authority_manifest_sha256"] != authority_sha256:
+            raise ProtocolError("model row authority manifest digest drifted")
+        cohort_sha256 = document_sha256(cohort, "model cohort manifest")
+        collectible = (
+            cohort["collection_authorized"] is True
+            and cohort["access_status"] == "available"
+            and cohort["training_cutoff_attestation"]["status"] == "attested"
+            and cohort["quota_constraints"]["status"] == "confirmed"
+        )
+        if not collectible:
+            raise ProtocolError("model cohort is not authorized for collection")
+        expected_run_kind = "confirmatory" if cohort["role"] == "reference" else "exploratory"
+        if row["run_kind"] != expected_run_kind:
+            raise ProtocolError("model row run_kind does not match its cohort role")
+        model = row["model"]
+        if not isinstance(model, dict):
+            raise ProtocolError("model row lacks its pinned model record")
+        if (
+            model["cohort_id"] != cohort["cohort_id"]
+            or model["cohort_manifest_sha256"] != cohort_sha256
+        ):
+            raise ProtocolError("model row belongs to a substituted or cross-cohort trial")
+        expected_model = {
+            "provider": cohort["provider"],
+            "model_id": cohort["model_id"],
+            "client_name": cohort["client"]["name"],
+            "client_version": cohort["client"]["version"],
+            "control_kind": cohort["control"]["kind"],
+            "control_value": cohort["control"]["value"],
+            "prompt_sha256": cohort["prompt"]["sha256"],
+        }
+        pin_mismatch = any(model[name] != expected for name, expected in expected_model.items())
+        if pin_mismatch != ("model-version-drift" in row["exclusion_codes"]):
+            raise ProtocolError("model pin drift/exclusion mismatch")
+        ordinal = row["schedule_ordinal"]
+        if not isinstance(ordinal, int) or isinstance(ordinal, bool) or ordinal < 0:
+            raise ProtocolError("model row schedule ordinal is invalid")
+        planned_models = model_schedule(manifest, cohort, cohort_sha256)
+        if ordinal >= len(planned_models):
+            raise ProtocolError("model row schedule ordinal is outside its cohort plan")
+        planned = planned_models[ordinal]
+        planned_fields = {
+            "carrier": row["carrier"],
+            "job": row["job"],
+            "fixture_sha256": row["fixture_sha256"],
+            "repetition": model["repetition"],
+        }
+        if any(planned[name] != value for name, value in planned_fields.items()):
+            raise ProtocolError("model row drifted from its cohort schedule")
+        if row["presentation_order"] != 1:
+            raise ProtocolError("fresh model sessions must use presentation_order 1")
+        if any(row[name] is not None for name in HUMAN_PROFILE_FIELDS):
+            raise ProtocolError("model rows must not claim a human expertise profile")
+        if row["trial_attempt"] != 1:
+            raise ProtocolError("model trials are never retried")
+        contaminated = not model["training_cutoff_attested"]
+        if contaminated != ("model-training-contamination" in row["exclusion_codes"]):
+            raise ProtocolError("model training-cutoff attestation/exclusion mismatch")
+    elif subject_kind == "synthetic":
         nullable_fields = (
             "consent_version",
             "model",
@@ -842,10 +1178,7 @@ def validate_row(
         if row["trial_attempt"] != 1:
             raise ProtocolError("synthetic trials must be first attempts")
     else:
-        raise ProtocolError(
-            "real result admission is not enabled by the planning harness; "
-            "collection remains closed"
-        )
+        raise ProtocolError(f"unknown result subject kind: {subject_kind}")
 
 
 def make_dry_run_rows(
@@ -885,7 +1218,11 @@ def make_dry_run_rows(
                 "excluded": False,
                 "exclusion_codes": [],
                 "assignment_seed_sha256": seed_digest,
+                "fixture_manifest_sha256": document_sha256(
+                    manifest, "fixture manifest"
+                ),
                 "fixture_sha256": fixture["sources"][carrier]["sha256"],
+                "schema_sha256": document_sha256(schema, "result schema"),
                 "plain_text": True,
                 "syntax_highlighting": False,
                 "consent_version": None,
@@ -971,10 +1308,7 @@ def self_test(
     verify_manifest(manifest)
     verify_cohort_manifest(cohort, cohort_path)
     verify_authority_manifest(authority)
-    if schema.get("$schema") != "https://json-schema.org/draft/2020-12/schema":
-        raise ProtocolError("result schema must pin JSON Schema draft 2020-12")
-    if schema.get("additionalProperties") is not False:
-        raise ProtocolError("result schema must reject unknown fields")
+    verify_result_schema(schema)
     verify_protocol_document(protocol_path)
 
     first = assignment("ux1-self-test", 0)
@@ -1122,21 +1456,359 @@ def self_test(
     if len({row["row_id"] for row in rows}) != len(rows):
         raise ProtocolError("dry-run row IDs must be unique")
 
-    real_row = copy.deepcopy(rows[0])
-    real_row.update(
+    approved_authority = copy.deepcopy(dict(authority))
+    approved_authority.update(
         {
-            "run_kind": "confirmatory",
-            "subject_kind": "human",
-            "assignment_seed_sha256": digest_text(CONFIRMATORY_SEED),
+            "authority_id": "SELF-TEST-AUTHORITY",
+            "collection_authorized": True,
+            "approved_by": "self-test",
+            "approved_at": FIXED_DRY_RUN_TIME,
+            "evidence_sha256": digest_text("self-test-authority"),
         }
     )
-    real_row["row_id"] = canonical_row_id(real_row)
-    try:
-        validate_row(real_row, manifest, schema)
-    except ProtocolError:
-        pass
-    else:
-        raise ProtocolError("planning harness accepted a real result row")
+    approved_authority["approvals"] = {
+        name: "approved" for name in AUTHORITY_APPROVALS
+    }
+    authority_json = json.dumps(
+        approved_authority, sort_keys=True, separators=(",", ":")
+    )
+    approved_authority = JsonDocument(
+        approved_authority, digest_text(authority_json)
+    )
+    authority_sha256 = document_sha256(approved_authority, "self-test authority")
+
+    approved_cohort = copy.deepcopy(dict(cohort))
+    approved_cohort.update({"access_status": "available", "collection_authorized": True})
+    approved_cohort["training_cutoff_attestation"] = {
+        "status": "attested",
+        "attested_by": "self-test",
+        "attested_at": FIXED_DRY_RUN_TIME,
+        "evidence_sha256": digest_text("self-test-cutoff"),
+    }
+    approved_cohort["quota_constraints"] = {
+        "status": "confirmed",
+        "maximum_sessions": expected_model_count,
+        "rate_limit": "self-test",
+        "notes": "Synthetic validator fixture only.",
+    }
+    cohort_json = json.dumps(approved_cohort, sort_keys=True, separators=(",", ":"))
+    approved_cohort = JsonDocument(approved_cohort, digest_text(cohort_json))
+    verify_cohort_manifest(approved_cohort, cohort_path, require_collectible=True)
+    approved_cohort_sha256 = document_sha256(
+        approved_cohort, "self-test model cohort"
+    )
+    dry_by_condition = {row["condition_id"]: row for row in rows}
+
+    def test_human_result(
+        plan: dict[str, Any], position: int, job: str
+    ) -> dict[str, Any]:
+        result = copy.deepcopy(dry_by_condition[f"{plan['carrier']}/{job}"])
+        result.update(
+            {
+                "run_kind": "confirmatory",
+                "subject_kind": "human",
+                "subject_id": digest_text(f"human-self-test\0{plan['ordinal']}")[:24],
+                "schedule_ordinal": plan["ordinal"],
+                "presentation_order": position,
+                "assignment_seed_sha256": digest_text(CONFIRMATORY_SEED),
+                "consent_version": "consent-v1",
+                "authority_manifest_sha256": authority_sha256,
+                "programming_experience_years": 5,
+                "code_review_experience_years": 2,
+                "jacquard_familiarity": 0,
+                "functional_programming_familiarity": 2,
+            }
+        )
+        result["row_id"] = canonical_row_id(result)
+        return result
+
+    def test_model_result(plan: dict[str, Any]) -> dict[str, Any]:
+        result = copy.deepcopy(dry_by_condition[plan["condition_id"]])
+        result.update(
+            {
+                "run_kind": (
+                    "confirmatory" if approved_cohort["role"] == "reference" else "exploratory"
+                ),
+                "subject_kind": "model",
+                "subject_id": digest_text(f"model-self-test\0{plan['ordinal']}")[:24],
+                "schedule_ordinal": plan["ordinal"],
+                "presentation_order": 1,
+                "assignment_seed_sha256": digest_text(CONFIRMATORY_SEED),
+                "authority_manifest_sha256": authority_sha256,
+                "model": {
+                    "cohort_id": approved_cohort["cohort_id"],
+                    "cohort_manifest_sha256": approved_cohort_sha256,
+                    "provider": approved_cohort["provider"],
+                    "model_id": approved_cohort["model_id"],
+                    "client_name": approved_cohort["client"]["name"],
+                    "client_version": approved_cohort["client"]["version"],
+                    "control_kind": approved_cohort["control"]["kind"],
+                    "control_value": approved_cohort["control"]["value"],
+                    "prompt_sha256": approved_cohort["prompt"]["sha256"],
+                    "repetition": plan["repetition"],
+                    "training_cutoff_attested": True,
+                },
+            }
+        )
+        result["row_id"] = canonical_row_id(result)
+        return result
+
+    def validate_test_human(
+        result: dict[str, Any], authority_document: dict[str, Any] = approved_authority
+    ) -> None:
+        validate_row(result, manifest, schema, authority=authority_document)
+
+    def validate_test_model(
+        result: dict[str, Any], cohort_document: dict[str, Any] = approved_cohort
+    ) -> None:
+        validate_row(
+            result,
+            manifest,
+            schema,
+            cohort=cohort_document,
+            authority=approved_authority,
+        )
+
+    def validate_test_human_store(results: list[dict[str, Any]]) -> None:
+        validate_result_store(
+            results, manifest, schema, authority=approved_authority
+        )
+
+    def validate_test_model_store(results: list[dict[str, Any]]) -> None:
+        validate_result_store(
+            results,
+            manifest,
+            schema,
+            cohort=approved_cohort,
+            authority=approved_authority,
+        )
+
+    human_plan = humans[0]
+    human = test_human_result(human_plan, 1, human_plan["job_order"][0])
+    validate_test_human(human)
+
+    approved_model_plan = model_schedule(
+        manifest, approved_cohort, approved_cohort_sha256
+    )
+    model = test_model_result(approved_model_plan[0])
+    validate_test_model(model)
+
+    validate_result_store(rows, manifest, schema)
+    human_store = [
+        test_human_result(plan, position, job)
+        for plan in humans
+        for position, job in enumerate(plan["job_order"], start=1)
+    ]
+    validate_test_human_store(human_store)
+    model_store = [test_model_result(plan) for plan in approved_model_plan]
+    validate_test_model_store(model_store)
+
+    human_store_with_retry = copy.deepcopy(human_store)
+    failed = human_store_with_retry[0]
+    failed.update(
+        {
+            "answer_id": "__system_failure__",
+            "correct": False,
+            "error_code": "system-failure",
+            "excluded": True,
+            "exclusion_codes": ["system-failure"],
+        }
+    )
+    failed["row_id"] = canonical_row_id(failed)
+    retry = copy.deepcopy(human_store[0])
+    retry["trial_attempt"] = 2
+    retry["row_id"] = canonical_row_id(retry)
+    human_store_with_retry.insert(5, retry)
+    validate_test_human_store(human_store_with_retry)
+
+    def expect_rejection(label: str, operation: Callable[[], Any]) -> None:
+        try:
+            operation()
+        except ProtocolError:
+            return
+        raise ProtocolError(f"admission validator accepted {label}")
+
+    expect_rejection(
+        "duplicate JSON object fields",
+        lambda: json.loads(
+            '{"row_id":"a","row_id":"b"}',
+            object_pairs_hook=unique_json_object,
+        ),
+    )
+    expect_rejection(
+        "a non-standard NaN JSON value",
+        lambda: json.loads(
+            '{"control_value":NaN}', parse_constant=reject_json_constant
+        ),
+    )
+
+    drifted_model = copy.deepcopy(model)
+    drifted_model["model"]["client_version"] = "observed-unreviewed-client"
+    drifted_model.update(
+        {"excluded": True, "exclusion_codes": ["model-version-drift"]}
+    )
+    drifted_model["row_id"] = canonical_row_id(drifted_model)
+    validate_test_model(drifted_model)
+
+    wrong_run_kind = copy.deepcopy(model)
+    wrong_run_kind["run_kind"] = "exploratory"
+    wrong_run_kind["row_id"] = canonical_row_id(wrong_run_kind)
+    expect_rejection(
+        "a model run kind that disagrees with its cohort role",
+        lambda: validate_test_model(wrong_run_kind),
+    )
+    under_quota = copy.deepcopy(dict(approved_cohort))
+    under_quota["quota_constraints"]["maximum_sessions"] = expected_model_count - 1
+    expect_rejection(
+        "a model cohort whose quota cannot cover its frozen schedule",
+        lambda: verify_cohort_manifest(
+            under_quota, cohort_path, require_collectible=True
+        ),
+    )
+
+    wrong_authority = copy.deepcopy(human)
+    wrong_authority["authority_manifest_sha256"] = "0" * 64
+    wrong_authority["row_id"] = canonical_row_id(wrong_authority)
+    expect_rejection(
+        "a drifted authority digest",
+        lambda: validate_test_human(wrong_authority),
+    )
+    wrong_fixture_manifest = copy.deepcopy(human)
+    wrong_fixture_manifest["fixture_manifest_sha256"] = "0" * 64
+    wrong_fixture_manifest["row_id"] = canonical_row_id(wrong_fixture_manifest)
+    expect_rejection(
+        "a drifted fixture-manifest digest",
+        lambda: validate_test_human(wrong_fixture_manifest),
+    )
+    wrong_schema_digest = copy.deepcopy(human)
+    wrong_schema_digest["schema_sha256"] = "0" * 64
+    wrong_schema_digest["row_id"] = canonical_row_id(wrong_schema_digest)
+    expect_rejection(
+        "a drifted schema digest",
+        lambda: validate_test_human(wrong_schema_digest),
+    )
+    expect_rejection(
+        "the pending authority template",
+        lambda: validate_test_human(human, authority),
+    )
+    no_consent_result = copy.deepcopy(human)
+    no_consent_result.update(
+        {"excluded": True, "exclusion_codes": ["no-consent"]}
+    )
+    no_consent_result["row_id"] = canonical_row_id(no_consent_result)
+    expect_rejection(
+        "a pre-assignment no-consent record in answer data",
+        lambda: validate_test_human(no_consent_result),
+    )
+    wrong_human_carrier = copy.deepcopy(human)
+    wrong_human_carrier["carrier"] = next(
+        carrier for carrier in CARRIERS if carrier != human["carrier"]
+    )
+    wrong_human_carrier["condition_id"] = (
+        f"{wrong_human_carrier['carrier']}/{wrong_human_carrier['job']}"
+    )
+    wrong_human_carrier["fixture_sha256"] = fixture_index(manifest)[human["job"]][
+        "sources"
+    ][wrong_human_carrier["carrier"]]["sha256"]
+    wrong_human_carrier["row_id"] = canonical_row_id(wrong_human_carrier)
+    expect_rejection(
+        "a human carrier substituted for its frozen assignment",
+        lambda: validate_test_human(wrong_human_carrier),
+    )
+    wrong_schema_branch = copy.deepcopy(human)
+    wrong_schema_branch["model"] = copy.deepcopy(model["model"])
+    wrong_schema_branch["row_id"] = canonical_row_id(wrong_schema_branch)
+    expect_rejection(
+        "a human row that violates the Draft 2020-12 conditional branch",
+        lambda: validate_test_human(wrong_schema_branch),
+    )
+
+    cross_cohort = copy.deepcopy(model)
+    cross_cohort["model"]["cohort_id"] = "M1"
+    cross_cohort["row_id"] = canonical_row_id(cross_cohort)
+    expect_rejection(
+        "a cross-cohort model row",
+        lambda: validate_test_model(cross_cohort),
+    )
+    wrong_repetition = copy.deepcopy(model)
+    wrong_repetition["model"]["repetition"] = (
+        wrong_repetition["model"]["repetition"] % 100
+    ) + 1
+    wrong_repetition["row_id"] = canonical_row_id(wrong_repetition)
+    expect_rejection(
+        "a model repetition substituted for its schedule cell",
+        lambda: validate_test_model(wrong_repetition),
+    )
+    expect_rejection(
+        "the pending model cohort",
+        lambda: validate_test_model(model, cohort),
+    )
+
+    expect_rejection(
+        "an empty result store",
+        lambda: validate_result_store([], manifest, schema),
+    )
+    expect_rejection(
+        "an incomplete synthetic store",
+        lambda: validate_result_store(rows[:-1], manifest, schema),
+    )
+    expect_rejection(
+        "an incomplete human store",
+        lambda: validate_test_human_store(human_store[:-1]),
+    )
+    reordered_humans = human_store.copy()
+    reordered_humans[0], reordered_humans[1] = (
+        reordered_humans[1],
+        reordered_humans[0],
+    )
+    expect_rejection(
+        "reordered human trials",
+        lambda: validate_test_human_store(reordered_humans),
+    )
+    retry_without_failure = human_store.copy()
+    invalid_retry = copy.deepcopy(human_store[0])
+    invalid_retry["trial_attempt"] = 2
+    invalid_retry["row_id"] = canonical_row_id(invalid_retry)
+    retry_without_failure.insert(5, invalid_retry)
+    expect_rejection(
+        "a human retry without its preserved failed attempt",
+        lambda: validate_test_human_store(retry_without_failure),
+    )
+    expect_rejection(
+        "an incomplete model cohort store",
+        lambda: validate_test_model_store(model_store[:-1]),
+    )
+    reordered_models = model_store.copy()
+    reordered_models[0], reordered_models[1] = (
+        reordered_models[1],
+        reordered_models[0],
+    )
+    expect_rejection(
+        "reordered model schedule cells",
+        lambda: validate_test_model_store(reordered_models),
+    )
+    reused_session = model_store.copy()
+    reused_session[1] = copy.deepcopy(reused_session[1])
+    reused_session[1]["subject_id"] = reused_session[0]["subject_id"]
+    reused_session[1]["row_id"] = canonical_row_id(reused_session[1])
+    expect_rejection(
+        "a reused model session subject_id",
+        lambda: validate_test_model_store(reused_session),
+    )
+    duplicate_synthetic = rows + [copy.deepcopy(rows[0])]
+    expect_rejection(
+        "a duplicate synthetic row",
+        lambda: validate_result_store(duplicate_synthetic, manifest, schema),
+    )
+
+    sentinel_manifest = copy.deepcopy(dict(manifest))
+    sentinel_manifest["fixtures"][0]["options"].append(
+        {"id": "__timeout__", "label": "reserved self-test option"}
+    )
+    expect_rejection(
+        "a fixture option that shadows a reserved failure sentinel",
+        lambda: verify_manifest(sentinel_manifest),
+    )
 
     for carrier in CARRIERS:
         for job in JOBS:
@@ -1181,28 +1853,170 @@ def self_test(
         raise ProtocolError("pending model cohort allowed collection")
 
 
+def validate_human_store(rows: list[dict[str, Any]]) -> None:
+    """Require one ordered, complete five-job record for every frozen ordinal.
+
+    Rows are chronological JSONL evidence: ordinals are contiguous, each
+    participant's five first attempts appear in presentation order, and the
+    only optional sixth row is the single preregistered system-failure retry.
+    """
+
+    groups: list[list[dict[str, Any]]] = []
+    for row in rows:
+        if not groups or groups[-1][0]["schedule_ordinal"] != row["schedule_ordinal"]:
+            groups.append([])
+        groups[-1].append(row)
+    ordinals = [group[0]["schedule_ordinal"] for group in groups]
+    if ordinals != list(range(HUMAN_ENROLLMENT_COUNT)):
+        raise ProtocolError("human result store is incomplete or reordered")
+    subject_ids = [group[0]["subject_id"] for group in groups]
+    if len(set(subject_ids)) != HUMAN_ENROLLMENT_COUNT:
+        raise ProtocolError("human result store reuses a subject across enrollment ordinals")
+
+    shared_fields = (
+        "subject_id",
+        "schedule_ordinal",
+        "carrier",
+        "consent_version",
+        "authority_manifest_sha256",
+        *HUMAN_PROFILE_FIELDS,
+    )
+    for ordinal, group in enumerate(groups):
+        baseline = group[0]
+        for row in group:
+            if any(row[name] != baseline[name] for name in shared_fields):
+                raise ProtocolError(f"human profile drift at schedule ordinal {ordinal}")
+        first_attempts = [row for row in group if row["trial_attempt"] == 1]
+        retries = [row for row in group if row["trial_attempt"] == 2]
+        if (
+            len(first_attempts) != len(JOBS)
+            or [row["presentation_order"] for row in first_attempts] != list(range(1, 6))
+            or group[: len(JOBS)] != first_attempts
+        ):
+            raise ProtocolError(f"human first attempts are incomplete or reordered at {ordinal}")
+        if len({row["job"] for row in first_attempts}) != len(JOBS):
+            raise ProtocolError(f"human first attempts duplicate a job at {ordinal}")
+        stable_exclusions = [
+            set(row["exclusion_codes"]) - {"system-failure"} for row in group
+        ]
+        if any(codes != stable_exclusions[0] for codes in stable_exclusions[1:]):
+            raise ProtocolError(f"human subject-level exclusions drift at {ordinal}")
+        failed_firsts = [
+            row for row in first_attempts if row["error_code"] == "system-failure"
+        ]
+        if len(failed_firsts) == 1:
+            if (
+                len(retries) != 1
+                or group[-1] is not retries[0]
+                or retries[0]["job"] != failed_firsts[0]["job"]
+                or retries[0]["presentation_order"]
+                != failed_firsts[0]["presentation_order"]
+            ):
+                raise ProtocolError(f"human system failure lacks its one final retry at {ordinal}")
+        elif retries:
+            raise ProtocolError(f"human retry is not allowed after {len(failed_firsts)} failures")
+
+
+def validate_model_store(rows: list[dict[str, Any]], expected_count: int) -> None:
+    """Require one ordered fresh-session row for every cohort schedule cell."""
+
+    if len(rows) != expected_count:
+        raise ProtocolError("model result store is incomplete")
+    if [row["schedule_ordinal"] for row in rows] != list(range(expected_count)):
+        raise ProtocolError("model result store is duplicated or reordered")
+    subject_ids = [row["subject_id"] for row in rows]
+    if len(set(subject_ids)) != expected_count:
+        raise ProtocolError("model result store reuses a session subject_id")
+
+
+def validate_result_store(
+    rows: list[dict[str, Any]],
+    manifest: dict[str, Any],
+    schema: dict[str, Any],
+    *,
+    cohort: dict[str, Any] | None = None,
+    authority: dict[str, Any] | None = None,
+) -> tuple[int, set[str]]:
+    """Validate one complete, single-kind result store and all cross-row pins."""
+
+    verify_manifest(manifest)
+    verify_result_schema(schema)
+    if not rows:
+        raise ProtocolError("result store is empty")
+    kinds = {row.get("subject_kind") for row in rows if isinstance(row, dict)}
+    if len(kinds) != 1:
+        raise ProtocolError("human, model, and synthetic evidence must use separate stores")
+    row_ids: set[str] = set()
+    for row_number, row in enumerate(rows, start=1):
+        try:
+            validate_row(
+                row,
+                manifest,
+                schema,
+                cohort=cohort,
+                authority=authority,
+            )
+        except ProtocolError as error:
+            raise ProtocolError(f"row {row_number}: {error}") from error
+        if row["row_id"] in row_ids:
+            raise ProtocolError(f"row {row_number}: duplicate row_id")
+        row_ids.add(row["row_id"])
+
+    subject_kind = rows[0]["subject_kind"]
+    conditions = {row["condition_id"] for row in rows}
+    if subject_kind == "synthetic":
+        expected = {f"{carrier}/{job}" for carrier in CARRIERS for job in JOBS}
+        if len(rows) != len(expected) or conditions != expected:
+            raise ProtocolError("synthetic result store must cover all 15 conditions once")
+    elif subject_kind == "human":
+        validate_human_store(rows)
+    elif subject_kind == "model":
+        if cohort is None:
+            raise ProtocolError("model result store requires its exact cohort manifest")
+        validate_model_store(
+            rows, len(CARRIERS) * len(JOBS) * cohort["repetitions_per_condition"]
+        )
+    else:
+        raise ProtocolError(f"unknown result store subject kind: {subject_kind}")
+    return len(rows), conditions
+
+
 def validate_jsonl(
     input_path: Path,
     manifest: dict[str, Any],
     schema: dict[str, Any],
+    *,
+    cohort: dict[str, Any] | None = None,
+    authority: dict[str, Any] | None = None,
 ) -> tuple[int, set[str]]:
-    count = 0
-    conditions: set[str] = set()
-    row_ids: set[str] = set()
-    for line_number, raw in enumerate(input_path.read_text(encoding="utf-8").splitlines(), start=1):
+    """Load JSONL with line-local diagnostics, then validate the complete store."""
+
+    rows: list[dict[str, Any]] = []
+    input_lines = input_path.read_text(encoding="utf-8").splitlines()
+    for line_number, raw in enumerate(input_lines, start=1):
         if not raw.strip():
             continue
         try:
-            row = json.loads(raw)
-            validate_row(row, manifest, schema)
+            row = json.loads(
+                raw,
+                object_pairs_hook=unique_json_object,
+                parse_constant=reject_json_constant,
+            )
         except (json.JSONDecodeError, ProtocolError) as error:
             raise ProtocolError(f"{input_path}:{line_number}: {error}") from error
-        if row["row_id"] in row_ids:
-            raise ProtocolError(f"{input_path}:{line_number}: duplicate row_id")
-        row_ids.add(row["row_id"])
-        conditions.add(row["condition_id"])
-        count += 1
-    return count, conditions
+        if not isinstance(row, dict):
+            raise ProtocolError(f"{input_path}:{line_number}: result row must be an object")
+        rows.append(row)
+    try:
+        return validate_result_store(
+            rows,
+            manifest,
+            schema,
+            cohort=cohort,
+            authority=authority,
+        )
+    except ProtocolError as error:
+        raise ProtocolError(f"{input_path}: {error}") from error
 
 
 def add_common_paths(parser: argparse.ArgumentParser) -> None:
@@ -1228,15 +2042,17 @@ def parse_args(argv: Iterable[str]) -> argparse.Namespace:
 
     validate = commands.add_parser(
         "validate-results",
-        help="validate v1 synthetic JSONL; real-result admission remains closed",
+        help="validate one complete synthetic, human, or model result store",
     )
     add_common_paths(validate)
     validate.add_argument("--input", type=Path, required=True)
-    validate.add_argument("--cohort", type=Path, required=True)
+    validate.add_argument("--cohort", type=Path)
     validate.add_argument("--authority", type=Path, required=True)
 
-    assign = commands.add_parser("assign", help="print one seeded balanced assignment as JSON")
-    assign.add_argument("--seed", required=True)
+    assign = commands.add_parser(
+        "assign", help="debug one seeded assignment; admitted rows always use the frozen seed"
+    )
+    assign.add_argument("--seed", required=True, help="debug-only assignment seed")
     assign.add_argument("--ordinal", type=int, required=True)
 
     commands.add_parser(
@@ -1250,6 +2066,14 @@ def parse_args(argv: Iterable[str]) -> argparse.Namespace:
     )
     model_plan.add_argument("--manifest", type=Path, required=True)
     model_plan.add_argument("--cohort", type=Path, required=True)
+
+    collection_gate = commands.add_parser(
+        "collection-gate",
+        help="require approved study authority and an optional collectible model cohort",
+    )
+    add_common_paths(collection_gate)
+    collection_gate.add_argument("--authority", type=Path, required=True)
+    collection_gate.add_argument("--cohort", type=Path)
 
     verify_plans = commands.add_parser(
         "verify-schedules",
@@ -1278,12 +2102,32 @@ def main(argv: Iterable[str]) -> int:
             verify_schedule_files(args.human, args.model)
             print("readability schedules: PASS (480 human assignments, 450 M0 model trials)")
             return 0
+        if args.command == "collection-gate":
+            manifest = load_json(args.manifest)
+            verify_manifest(manifest)
+            schema = load_json(args.schema)
+            verify_result_schema(schema)
+            authority = load_json(args.authority)
+            verify_authority_manifest(authority, require_authorized=True)
+            subject = "human"
+            pins = [
+                f"fixtures={document_sha256(manifest, 'fixture manifest')}",
+                f"schema={document_sha256(schema, 'result schema')}",
+                f"authority={document_sha256(authority, 'authority manifest')}",
+            ]
+            if args.cohort is not None:
+                cohort = load_json(args.cohort)
+                verify_cohort_manifest(cohort, args.cohort, require_collectible=True)
+                subject = f"model cohort {cohort['cohort_id']}"
+                pins.append(f"cohort={document_sha256(cohort, 'model cohort manifest')}")
+            print(f"readability collection gate: PASS ({subject}; {'; '.join(pins)})")
+            return 0
         manifest = load_json(args.manifest)
         verify_manifest(manifest)
         if args.command == "model-schedule":
             cohort = load_json(args.cohort)
             verify_cohort_manifest(cohort, args.cohort)
-            cohort_sha256 = digest_bytes(args.cohort.read_bytes())
+            cohort_sha256 = document_sha256(cohort, "model cohort manifest")
             sys.stdout.write(encode_jsonl(model_schedule(manifest, cohort, cohort_sha256)))
             return 0
         if args.command == "present":
@@ -1291,16 +2135,29 @@ def main(argv: Iterable[str]) -> int:
             return 0
 
         schema = load_json(args.schema)
+        verify_result_schema(schema)
         if args.command == "dry-run":
             for row in make_dry_run_rows(args.seed, manifest, schema):
-                print(json.dumps(row, sort_keys=True, separators=(",", ":")))
+                print(
+                    json.dumps(
+                        row, sort_keys=True, separators=(",", ":"), allow_nan=False
+                    )
+                )
             return 0
         if args.command == "validate-results":
-            cohort = load_json(args.cohort)
             authority = load_json(args.authority)
-            verify_cohort_manifest(cohort, args.cohort)
             verify_authority_manifest(authority)
-            count, conditions = validate_jsonl(args.input, manifest, schema)
+            cohort = None
+            if args.cohort is not None:
+                cohort = load_json(args.cohort)
+                verify_cohort_manifest(cohort, args.cohort)
+            count, conditions = validate_jsonl(
+                args.input,
+                manifest,
+                schema,
+                cohort=cohort,
+                authority=authority,
+            )
             print(f"validated {count} rows across {len(conditions)} conditions")
             return 0
         if args.command == "verify":
