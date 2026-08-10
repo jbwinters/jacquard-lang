@@ -1,8 +1,8 @@
 # Readability protocol v1 execution gate
 
-Status: deterministic planning and fail-closed result-admission tools are
-implemented. The checked manifests do not authorize real collection, and no
-human or model outcomes exist.
+Status: deterministic planning, fail-closed result admission, analyzability,
+and descriptive-table tools are implemented. The checked manifests do not
+authorize real collection, and no human or model outcomes exist.
 
 The [protocol](PROTOCOL.md) defines the study. This document separates a
 reproducible plan from external authority. A generated schedule proves that
@@ -203,6 +203,53 @@ creates that flow nor authorizes collection. Synthetic output is explicitly
 non-citable; human and model output remains candidate evidence with no claim
 evaluated.
 
+## Deterministic descriptive tables
+
+Produce the first measured-outcome stage directly from the same validated
+store and admission context:
+
+```text
+python3 test/readability/readability_benchmark.py analyze-descriptive \
+  --manifest test/readability/fixture-manifest.json \
+  --schema test/readability/result.schema.json \
+  --authority AUTHORITY.json \
+  --input HUMAN-RESULTS.jsonl \
+  > .scratch/readability/human-descriptive.json
+
+python3 test/readability/readability_benchmark.py analyze-descriptive \
+  --manifest test/readability/fixture-manifest.json \
+  --schema test/readability/result.schema.json \
+  --authority AUTHORITY.json --cohort COHORT.json \
+  --input MODEL-RESULTS.jsonl \
+  > .scratch/readability/model-descriptive.json
+```
+
+The command repeats complete result-store validation, prepares the exact
+`readability-analysis-input-v1` selection in memory, and emits one canonical
+`readability-descriptive-v1` object. Its provenance binds the exact source
+JSONL, ordered source and effective row IDs, and SHA-256 of the canonical
+analysis-input bytes. Only effective rows contribute outcomes; failed or
+otherwise excluded rows remain visible through copied flow and per-condition
+source/effective/excluded counts.
+
+Perceived readability has its own table. Each of comprehension, review, defect
+detection, modification/debugging, and diagnostic recovery has a separate
+table with accuracy and 97.5% Wilson uncertainty, completion median and
+log/geometric mean, confidence distribution and exact-level calibration,
+error counts, and timeouts. Human output also reports presentation-order and
+the four frozen expertise/familiarity strata within each functional outcome.
+These are descriptive strata, not post-hoc subgroups or a fitted effect model.
+
+Every derived decimal is a fixed 12-place string. The object has no timestamp,
+raw subject identifier, free text, or checked-in output path. A zero-ms row is
+retained and reported but makes log/geometric mean null; it is never silently
+dropped or shifted. Running twice from byte-identical stores produces
+byte-identical output. Synthetic output exercises all table shapes but remains
+`synthetic-non-citable`; real human/model output remains candidate evidence
+with claim status `not-evaluated`. Pairwise effects, multiplicity correction,
+claim thresholds, blinded rescoring, and publication-number lineage are later
+gates and cannot be inferred from this file.
+
 ## What the checked gate proves
 
 `dune build @readability-protocol` verifies:
@@ -223,6 +270,9 @@ evaluated.
 - deterministic analyzability provenance for clean stores, a successful retry,
   a failed retry, multiple first-attempt failures, stable subject exclusions,
   and an excluded model session, including exact-source digest sensitivity;
+- deterministic descriptive tables for all six reporting families, exact
+  effective-row selection, human expertise/presentation-order strata, model
+  separation, timestamp omission, and byte-identical dual generation;
 - unconditional rejection of real rows with the checked pending authority and
   M0 cohort manifests; and
 - byte-identical schedule and dry-run generation.
