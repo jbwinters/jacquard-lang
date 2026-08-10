@@ -163,6 +163,46 @@ Preserve, under the approved data controls:
 No human-identifying data, provider secrets, raw model conversations, or
 synthetic rows represented as outcomes may be committed.
 
+## Deterministic analysis input
+
+After `validate-results` accepts a complete store, prepare its versioned row
+selection and provenance bundle with the same exact admission context:
+
+```text
+python3 test/readability/readability_benchmark.py prepare-analysis \
+  --manifest test/readability/fixture-manifest.json \
+  --schema test/readability/result.schema.json \
+  --authority AUTHORITY.json \
+  --input HUMAN-RESULTS.jsonl \
+  > .scratch/readability/human-analysis-input.json
+
+python3 test/readability/readability_benchmark.py prepare-analysis \
+  --manifest test/readability/fixture-manifest.json \
+  --schema test/readability/result.schema.json \
+  --authority AUTHORITY.json --cohort COHORT.json \
+  --input MODEL-RESULTS.jsonl \
+  > .scratch/readability/model-analysis-input.json
+```
+
+The command validates the complete store before emitting anything. Its
+canonical `readability-analysis-input-v1` JSON binds the exact source-file
+SHA-256, ordered row identity, reviewed pins, per-subject decisions, and total
+and per-carrier flow. A successful human retry replaces only its failed first
+attempt; successful here means the retry itself did not have a system failure,
+not that its answer was correct. More than one verified system failure,
+including a failed retry, or
+any stable non-system exclusion removes the whole human subject from effective
+rows. Model sessions remain row-local. Source, effective, and excluded row-ID
+lists partition the input so every count can be recomputed.
+
+The output deliberately omits timestamps and measured outcomes. Running the
+command twice on byte-identical input therefore produces byte-identical output.
+Human pre-assignment consent and eligibility flow is `external-required`
+because those approved records remain outside answer JSONL. This tool neither
+creates that flow nor authorizes collection. Synthetic output is explicitly
+non-citable; human and model output remains candidate evidence with no claim
+evaluated.
+
 ## What the checked gate proves
 
 `dune build @readability-protocol` verifies:
@@ -180,6 +220,9 @@ synthetic rows represented as outcomes may be committed.
   authority, digest, assignment, cohort, repetition, retry, completeness,
   ordering, and fresh-session mutations; the fixtures are synthetic tests and
   are not collection authority or outcomes;
+- deterministic analyzability provenance for clean stores, a successful retry,
+  a failed retry, multiple first-attempt failures, stable subject exclusions,
+  and an excluded model session, including exact-source digest sensitivity;
 - unconditional rejection of real rows with the checked pending authority and
   M0 cohort manifests; and
 - byte-identical schedule and dry-run generation.

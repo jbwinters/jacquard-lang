@@ -195,6 +195,29 @@ prompt parse failure, or more than one system failure. Enrollment, exclusion,
 analyzable, failure, missing-data, and timeout flow is published by carrier and
 cohort before outcomes are unblinded.
 
+Analysis starts only after the complete answer store passes result validation.
+The versioned `readability-analysis-input-v1` bundle binds the SHA-256 of the
+exact JSONL bytes, the ordered canonical row IDs, and the existing schema,
+fixture, authority, assignment, schedule, and cohort pins. It contains only
+pseudonymous subject IDs, row IDs, selection decisions, and flow counts; it has
+no timestamp or outcome statistic.
+
+For a human with no system failure, all five first attempts are effective. One
+failed first attempt remains excluded and its successful final retry replaces
+it. Here successful means the retry itself did not have a system failure; an
+incorrect answer or timeout remains an outcome. More than one verified system
+failure, including a failed retry, excludes
+the whole subject and makes none of that subject's rows effective. Any stable
+non-system human exclusion also excludes the whole subject. Each model session
+is effective exactly when its one admitted row is not excluded. Timeouts remain
+outcomes, not exclusions. Human, model, and synthetic stores always produce
+separate bundles; synthetic bundles are marked `synthetic-non-citable`, and
+real-store bundles are candidate evidence with claim status `not-evaluated`.
+
+Pre-assignment no-consent and eligibility counts remain in the separately
+approved enrollment flow. They are reported as `external-required`, not
+inferred or invented from answer rows.
+
 ## Preregistered analysis and claim gate
 
 Produce separate deterministic tables for perceived ratings, comprehension,
@@ -252,10 +275,17 @@ python3 test/readability/readability_benchmark.py validate-results \
   --cohort test/readability/cohorts/m0-fable5.json \
   --authority test/readability/authority-manifest.template.json \
   --input .scratch/readability/dry-run.jsonl
+python3 test/readability/readability_benchmark.py prepare-analysis \
+  --manifest test/readability/fixture-manifest.json \
+  --schema test/readability/result.schema.json \
+  --authority test/readability/authority-manifest.template.json \
+  --input .scratch/readability/dry-run.jsonl \
+  > .scratch/readability/analysis-input.json
 ```
 
 The dry run emits one synthetic, non-citable row for each of 15 conditions and
-makes no readability or performance claim. Schedules, renderings, logs, and
-stores remain under `.scratch/`. Generating a schedule is planning evidence,
-not permission to collect outcomes. The [execution gate](EXECUTION.md) records
-the exact fail-closed boundary.
+makes no readability or performance claim. The analysis-input file likewise
+contains no outcome analysis or claim. Schedules, renderings, logs, stores, and
+generated bundles remain under `.scratch/`. Generating a schedule is planning
+evidence, not permission to collect outcomes. The [execution gate](EXECUTION.md)
+records the exact fail-closed boundary.
