@@ -21,6 +21,12 @@ import subprocess
 import sys
 from typing import Any, Callable, Iterable
 
+from readability_analysis import (
+    AnalysisError,
+    encode_analysis_bundle,
+    prepare_analysis_bundle,
+)
+
 
 SCHEMA_VERSION = "readability-result-v1"
 PROTOCOL_VERSION = "readability-protocol-v1"
@@ -1062,10 +1068,13 @@ def validate_row(
         "system-failure": "system-failure",
         "prompt-parse-failure": "prompt-parse-failure",
     }
-    if row["error_code"] in failure_exclusions:
-        required_exclusion = failure_exclusions[row["error_code"]]
-        if required_exclusion not in row["exclusion_codes"]:
-            raise ProtocolError("failure result is missing its required exclusion code")
+    for error_code, exclusion_code in failure_exclusions.items():
+        if (row["error_code"] == error_code) != (
+            exclusion_code in row["exclusion_codes"]
+        ):
+            raise ProtocolError(
+                f"{error_code} result/exclusion code must appear together"
+            )
     if row["row_id"] != canonical_row_id(row):
         raise ProtocolError("row_id is not the canonical SHA-256 of the result row")
     if row["run_kind"] != "dry-run" and row["assignment_seed_sha256"] != digest_text(
@@ -1654,6 +1663,162 @@ def self_test(
     human_store_with_retry.insert(5, retry)
     validate_test_human_store(human_store_with_retry)
 
+    synthetic_jsonl = encode_jsonl(rows)
+    synthetic_digest = digest_text(synthetic_jsonl)
+    synthetic_analysis = prepare_analysis_bundle(rows, synthetic_digest)
+    if (
+        synthetic_analysis["evidence_class"] != "synthetic-non-citable"
+        or synthetic_analysis["claim_status"] != "not-evaluated"
+        or synthetic_analysis["source"]["input_jsonl_sha256"] != synthetic_digest
+        or synthetic_analysis["flow"]["overall"]["subjects"]
+        != {"analyzable": 3, "answer_store": 3, "excluded": 0}
+        or synthetic_analysis["flow"]["overall"]["trials"]["effective_rows"] != 15
+    ):
+        raise ProtocolError("synthetic analysis provenance or non-citable flow drifted")
+    if encode_analysis_bundle(synthetic_analysis) != encode_analysis_bundle(
+        prepare_analysis_bundle(rows, synthetic_digest)
+    ):
+        raise ProtocolError("analysis bundle bytes are not deterministic")
+    changed_source_analysis = prepare_analysis_bundle(
+        rows, digest_text(synthetic_jsonl + "\n")
+    )
+    if (
+        changed_source_analysis["source"]["input_jsonl_sha256"] == synthetic_digest
+        or encode_analysis_bundle(changed_source_analysis)
+        == encode_analysis_bundle(synthetic_analysis)
+    ):
+        raise ProtocolError("analysis bundle does not bind exact source JSONL bytes")
+
+    clean_human_analysis = prepare_analysis_bundle(
+        human_store, digest_text(encode_jsonl(human_store))
+    )
+    if (
+        clean_human_analysis["evidence_class"] != "human-candidate"
+        or clean_human_analysis["pre_assignment_flow"]["status"]
+        != "external-required"
+        or clean_human_analysis["flow"]["overall"]["subjects"]
+        != {"analyzable": 480, "answer_store": 480, "excluded": 0}
+        or clean_human_analysis["flow"]["overall"]["trials"]["effective_rows"]
+        != 2400
+        or clean_human_analysis["source"]["schedule"]
+        != {
+            "schema_version": HUMAN_SCHEDULE_VERSION,
+            "sha256": HUMAN_SCHEDULE_SHA256,
+        }
+    ):
+        raise ProtocolError("clean human analyzability flow drifted")
+
+    retry_analysis = prepare_analysis_bundle(
+        human_store_with_retry,
+        digest_text(encode_jsonl(human_store_with_retry)),
+    )
+    retry_subject = retry_analysis["subjects"][0]
+    retry_trials = retry_analysis["flow"]["overall"]["trials"]
+    if (
+        not retry_subject["analyzable"]
+        or retry_subject["system_failure_count"] != 1
+        or failed["row_id"] not in retry_subject["excluded_row_ids"]
+        or retry["row_id"] not in retry_subject["effective_row_ids"]
+        or retry_trials["source_rows"] != 2401
+        or retry_trials["effective_rows"] != 2400
+        or retry_trials["excluded_rows"] != 1
+        or retry_trials["effective_retry_rows"] != 1
+    ):
+        raise ProtocolError("successful human retry did not replace its failed first row")
+
+    failed_retry_store = copy.deepcopy(human_store_with_retry)
+    failed_retry = failed_retry_store[5]
+    failed_retry.update(
+        {
+            "answer_id": "__system_failure__",
+            "correct": False,
+            "error_code": "system-failure",
+            "excluded": True,
+            "exclusion_codes": ["system-failure"],
+        }
+    )
+    failed_retry["row_id"] = canonical_row_id(failed_retry)
+    validate_test_human_store(failed_retry_store)
+    failed_retry_analysis = prepare_analysis_bundle(
+        failed_retry_store, digest_text(encode_jsonl(failed_retry_store))
+    )
+    failed_retry_subject = failed_retry_analysis["subjects"][0]
+    if (
+        failed_retry_subject["analyzable"]
+        or failed_retry_subject["subject_exclusion_codes"] != ["system-failure"]
+        or failed_retry_subject["system_failure_count"] != 2
+        or failed_retry_subject["effective_row_ids"]
+        or failed_retry_analysis["flow"]["overall"]["subjects"]["excluded"] != 1
+        or failed_retry_analysis["flow"]["overall"]["trials"]["effective_rows"]
+        != 2395
+    ):
+        raise ProtocolError("failed retry did not exclude the complete human subject")
+
+    two_failure_store = copy.deepcopy(human_store)
+    for failure in two_failure_store[:2]:
+        failure.update(
+            {
+                "answer_id": "__system_failure__",
+                "correct": False,
+                "error_code": "system-failure",
+                "excluded": True,
+                "exclusion_codes": ["system-failure"],
+            }
+        )
+        failure["row_id"] = canonical_row_id(failure)
+    validate_test_human_store(two_failure_store)
+    two_failure_analysis = prepare_analysis_bundle(
+        two_failure_store, digest_text(encode_jsonl(two_failure_store))
+    )
+    if (
+        two_failure_analysis["subjects"][0]["subject_exclusion_codes"]
+        != ["system-failure"]
+        or two_failure_analysis["flow"]["overall"]["trials"]["effective_rows"]
+        != 2395
+    ):
+        raise ProtocolError("multiple first-attempt failures did not exclude the subject")
+
+    stable_exclusion_store = copy.deepcopy(human_store)
+    for excluded_row in stable_exclusion_store[:5]:
+        excluded_row.update(
+            {"excluded": True, "exclusion_codes": ["prohibited-tools"]}
+        )
+        excluded_row["row_id"] = canonical_row_id(excluded_row)
+    validate_test_human_store(stable_exclusion_store)
+    stable_exclusion_analysis = prepare_analysis_bundle(
+        stable_exclusion_store,
+        digest_text(encode_jsonl(stable_exclusion_store)),
+    )
+    if (
+        stable_exclusion_analysis["subjects"][0]["subject_exclusion_codes"]
+        != ["prohibited-tools"]
+        or stable_exclusion_analysis["subjects"][0]["effective_row_ids"]
+    ):
+        raise ProtocolError("stable human exclusion did not exclude the complete subject")
+
+    drift_store = copy.deepcopy(model_store)
+    drift_store[0]["model"]["client_version"] = "observed-unreviewed-client"
+    drift_store[0].update(
+        {"excluded": True, "exclusion_codes": ["model-version-drift"]}
+    )
+    drift_store[0]["row_id"] = canonical_row_id(drift_store[0])
+    validate_test_model_store(drift_store)
+    clean_model_analysis = prepare_analysis_bundle(
+        model_store, digest_text(encode_jsonl(model_store))
+    )
+    drift_model_analysis = prepare_analysis_bundle(
+        drift_store, digest_text(encode_jsonl(drift_store))
+    )
+    if (
+        clean_model_analysis["evidence_class"] != "model-candidate"
+        or clean_model_analysis["flow"]["overall"]["trials"]["effective_rows"]
+        != expected_model_count
+        or drift_model_analysis["flow"]["overall"]["subjects"]["excluded"] != 1
+        or drift_model_analysis["flow"]["overall"]["trials"]["effective_rows"]
+        != expected_model_count - 1
+    ):
+        raise ProtocolError("model session analyzability flow drifted")
+
     def expect_rejection(label: str, operation: Callable[[], Any]) -> None:
         try:
             operation()
@@ -1782,6 +1947,27 @@ def self_test(
     expect_rejection(
         "the pending model cohort",
         lambda: validate_test_model(model, cohort),
+    )
+
+    invented_human_failure = copy.deepcopy(human)
+    invented_human_failure.update(
+        {"excluded": True, "exclusion_codes": ["system-failure"]}
+    )
+    invented_human_failure["row_id"] = canonical_row_id(invented_human_failure)
+    expect_rejection(
+        "a successful human row mislabeled as a system failure",
+        lambda: validate_test_human(invented_human_failure),
+    )
+    invented_model_parse_failure = copy.deepcopy(model)
+    invented_model_parse_failure.update(
+        {"excluded": True, "exclusion_codes": ["prompt-parse-failure"]}
+    )
+    invented_model_parse_failure["row_id"] = canonical_row_id(
+        invented_model_parse_failure
+    )
+    expect_rejection(
+        "a parsed model row mislabeled as a prompt parse failure",
+        lambda: validate_test_model(invented_model_parse_failure),
     )
 
     expect_rejection(
@@ -2056,9 +2242,30 @@ def validate_jsonl(
 ) -> tuple[int, set[str]]:
     """Load JSONL with line-local diagnostics, then validate the complete store."""
 
+    _, _, count, conditions = load_validated_jsonl(
+        input_path,
+        manifest,
+        schema,
+        cohort=cohort,
+        authority=authority,
+    )
+    return count, conditions
+
+
+def load_jsonl_rows(input_path: Path) -> tuple[list[dict[str, Any]], str]:
+    """Load JSONL rows and bind them to the SHA-256 of their exact source bytes.
+
+    Duplicate fields, non-standard constants, invalid UTF-8, and non-object
+    rows fail before result-store validation or analysis can begin.
+    """
+
+    try:
+        source_bytes = input_path.read_bytes()
+        source_text = source_bytes.decode("utf-8")
+    except (OSError, UnicodeError) as error:
+        raise ProtocolError(f"cannot load result JSONL {input_path}: {error}") from error
     rows: list[dict[str, Any]] = []
-    input_lines = input_path.read_text(encoding="utf-8").splitlines()
-    for line_number, raw in enumerate(input_lines, start=1):
+    for line_number, raw in enumerate(source_text.splitlines(), start=1):
         if not raw.strip():
             continue
         try:
@@ -2072,8 +2279,27 @@ def validate_jsonl(
         if not isinstance(row, dict):
             raise ProtocolError(f"{input_path}:{line_number}: result row must be an object")
         rows.append(row)
+    return rows, digest_bytes(source_bytes)
+
+
+def load_validated_jsonl(
+    input_path: Path,
+    manifest: dict[str, Any],
+    schema: dict[str, Any],
+    *,
+    cohort: dict[str, Any] | None = None,
+    authority: dict[str, Any] | None = None,
+) -> tuple[list[dict[str, Any]], str, int, set[str]]:
+    """Load and validate a complete store before returning rows or provenance.
+
+    Store-level failures retain the input path in their diagnostic.  No caller
+    can prepare an analysis bundle from this helper unless the existing schema,
+    admission-context, completeness, ordering, and retry checks all pass.
+    """
+
+    rows, input_sha256 = load_jsonl_rows(input_path)
     try:
-        return validate_result_store(
+        count, conditions = validate_result_store(
             rows,
             manifest,
             schema,
@@ -2082,6 +2308,7 @@ def validate_jsonl(
         )
     except ProtocolError as error:
         raise ProtocolError(f"{input_path}: {error}") from error
+    return rows, input_sha256, count, conditions
 
 
 def add_common_paths(parser: argparse.ArgumentParser) -> None:
@@ -2113,6 +2340,15 @@ def parse_args(argv: Iterable[str]) -> argparse.Namespace:
     validate.add_argument("--input", type=Path, required=True)
     validate.add_argument("--cohort", type=Path)
     validate.add_argument("--authority", type=Path, required=True)
+
+    analysis = commands.add_parser(
+        "prepare-analysis",
+        help="validate a complete store and emit deterministic analyzability provenance",
+    )
+    add_common_paths(analysis)
+    analysis.add_argument("--input", type=Path, required=True)
+    analysis.add_argument("--cohort", type=Path)
+    analysis.add_argument("--authority", type=Path, required=True)
 
     assign = commands.add_parser(
         "assign", help="debug one seeded assignment; admitted rows always use the frozen seed"
@@ -2209,20 +2445,27 @@ def main(argv: Iterable[str]) -> int:
                     )
                 )
             return 0
-        if args.command == "validate-results":
+        if args.command in {"validate-results", "prepare-analysis"}:
             authority = load_json(args.authority)
             verify_authority_manifest(authority)
             cohort = None
             if args.cohort is not None:
                 cohort = load_json(args.cohort)
                 verify_cohort_manifest(cohort, args.cohort)
-            count, conditions = validate_jsonl(
+            rows, input_sha256, count, conditions = load_validated_jsonl(
                 args.input,
                 manifest,
                 schema,
                 cohort=cohort,
                 authority=authority,
             )
+            if args.command == "prepare-analysis":
+                sys.stdout.write(
+                    encode_analysis_bundle(
+                        prepare_analysis_bundle(rows, input_sha256)
+                    )
+                )
+                return 0
             print(f"validated {count} rows across {len(conditions)} conditions")
             return 0
         if args.command == "verify":
@@ -2241,7 +2484,7 @@ def main(argv: Iterable[str]) -> int:
             print("readability protocol: PASS (5 jobs, 3 carriers, 15 dry-run conditions)")
             return 0
         raise ProtocolError(f"unknown command: {args.command}")
-    except (OSError, ProtocolError) as error:
+    except (OSError, ProtocolError, AnalysisError) as error:
         print(f"readability protocol: FAIL: {error}", file=sys.stderr)
         return 1
 

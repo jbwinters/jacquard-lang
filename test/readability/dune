@@ -2,6 +2,7 @@
  (aliases readability-protocol runtest)
  (deps
   readability_benchmark.py
+  readability_analysis.py
   fixture-manifest.json
   result.schema.json
   model-prompt.txt
@@ -22,6 +23,30 @@
      --authority authority-manifest.template.json
      --jacquard %{bin:jacquard}
      --prelude ../../prelude)
+    (with-stdout-to dry-run.jsonl
+     (run %{bin:python3} readability_benchmark.py dry-run
+      --seed ux1-analysis-v1
+      --manifest fixture-manifest.json
+      --schema result.schema.json))
+    (with-stdout-to validated-results.txt
+     (run %{bin:python3} readability_benchmark.py validate-results
+      --manifest fixture-manifest.json
+      --schema result.schema.json
+      --authority authority-manifest.template.json
+      --input dry-run.jsonl))
+    (with-stdout-to analysis-input-1.json
+     (run %{bin:python3} readability_benchmark.py prepare-analysis
+      --manifest fixture-manifest.json
+      --schema result.schema.json
+      --authority authority-manifest.template.json
+      --input dry-run.jsonl))
+    (with-stdout-to analysis-input-2.json
+     (run %{bin:python3} readability_benchmark.py prepare-analysis
+      --manifest fixture-manifest.json
+      --schema result.schema.json
+      --authority authority-manifest.template.json
+      --input dry-run.jsonl))
+    (diff analysis-input-1.json analysis-input-2.json)
     (with-stdout-to human-schedule.jsonl
      (run %{bin:python3} readability_benchmark.py human-schedule))
     (with-stdout-to model-schedule.jsonl
