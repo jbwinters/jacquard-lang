@@ -133,7 +133,7 @@ python3 test/readability/readability_benchmark.py validate-results \
 
 Human JSONL is chronological: all 480 ordinals appear once in order, each with
 five first attempts in its frozen Williams order. Exactly one failed first
-attempt may have one final attempt-2 row for the same job; the failed row stays
+attempt must have one final attempt-2 row for the same job; the failed row stays
 in the file. More than one first-attempt system failure excludes the subject
 and permits no retry. Model JSONL contains every cohort cell once in dispatch
 ordinal order, uses a unique pseudonymous session ID for every row, and never

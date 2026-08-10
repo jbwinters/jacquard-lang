@@ -851,7 +851,7 @@ def validate_schema_value(name: str, value: Any, rule: dict[str, Any]) -> None:
             raise ProtocolError(f"result {name} is too short")
         if "maxLength" in rule and len(value) > rule["maxLength"]:
             raise ProtocolError(f"result {name} is too long")
-        if "pattern" in rule and re.search(rule["pattern"], value) is None:
+        if "pattern" in rule and re.fullmatch(rule["pattern"], value) is None:
             raise ProtocolError(f"result {name} does not match its pattern")
     if isinstance(value, list):
         encoded_items = {json.dumps(item, sort_keys=True) for item in value}
@@ -1721,6 +1721,13 @@ def self_test(
     expect_rejection(
         "a human row that violates the Draft 2020-12 conditional branch",
         lambda: validate_test_human(wrong_schema_branch),
+    )
+    newline_subject = copy.deepcopy(human)
+    newline_subject["subject_id"] += "\n"
+    newline_subject["row_id"] = canonical_row_id(newline_subject)
+    expect_rejection(
+        "a subject ID with a trailing line terminator",
+        lambda: validate_test_human(newline_subject),
     )
 
     cross_cohort = copy.deepcopy(model)
