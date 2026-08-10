@@ -814,6 +814,37 @@ def json_type_matches(value: Any, declared: str | list[str]) -> bool:
     return False
 
 
+def json_values_equal(left: Any, right: Any) -> bool:
+    """Compare JSON values without Python's boolean/integer aliasing.
+
+    Draft 2020-12 treats booleans as distinct from numbers, while numerically
+    equal integer and finite floating-point representations denote the same
+    JSON number. Arrays and objects apply that rule recursively.
+    """
+
+    if isinstance(left, bool) or isinstance(right, bool):
+        return (
+            isinstance(left, bool) and isinstance(right, bool) and left is right
+        )
+    if isinstance(left, (int, float)) and isinstance(right, (int, float)):
+        return left == right
+    if isinstance(left, list) or isinstance(right, list):
+        return (
+            isinstance(left, list)
+            and isinstance(right, list)
+            and len(left) == len(right)
+            and all(json_values_equal(a, b) for a, b in zip(left, right))
+        )
+    if isinstance(left, dict) or isinstance(right, dict):
+        return (
+            isinstance(left, dict)
+            and isinstance(right, dict)
+            and left.keys() == right.keys()
+            and all(json_values_equal(left[key], right[key]) for key in left)
+        )
+    return type(left) is type(right) and left == right
+
+
 def schema_matches(value: Any, rule: dict[str, Any]) -> bool:
     """Return whether a value satisfies a schema branch without leaking errors."""
 
@@ -837,9 +868,11 @@ def validate_schema_value(name: str, value: Any, rule: dict[str, Any]) -> None:
     declared_type = rule.get("type")
     if declared_type is not None and not json_type_matches(value, declared_type):
         raise ProtocolError(f"result {name} has the wrong JSON type")
-    if "const" in rule and value != rule["const"]:
+    if "const" in rule and not json_values_equal(value, rule["const"]):
         raise ProtocolError(f"result {name} must equal {rule['const']!r}")
-    if "enum" in rule and value not in rule["enum"]:
+    if "enum" in rule and not any(
+        json_values_equal(value, candidate) for candidate in rule["enum"]
+    ):
         raise ProtocolError(f"result {name} is outside its enum")
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         if "minimum" in rule and value < rule["minimum"]:
@@ -1807,6 +1840,20 @@ def self_test(
         "a duplicate synthetic row",
         lambda: validate_result_store(duplicate_synthetic, manifest, schema),
     )
+    mixed_subject_kinds = [
+        copy.deepcopy(human_store[0]),
+        copy.deepcopy(model_store[0]),
+    ]
+    expect_rejection(
+        "a mixed human/model result store",
+        lambda: validate_result_store(
+            mixed_subject_kinds,
+            manifest,
+            schema,
+            cohort=approved_cohort,
+            authority=approved_authority,
+        ),
+    )
 
     sentinel_manifest = copy.deepcopy(dict(manifest))
     sentinel_manifest["fixtures"][0]["options"].append(
@@ -1825,6 +1872,8 @@ def self_test(
 
     mutations = (
         ("syntax highlighting", "syntax_highlighting", True),
+        ("numeric plain-text boolean", "plain_text", 1),
+        ("numeric syntax-highlighting boolean", "syntax_highlighting", 0),
         ("readability scale", "perceived_readability", 0),
         ("outcome family", "outcome_family", "review"),
     )
@@ -1838,6 +1887,15 @@ def self_test(
             pass
         else:
             raise ProtocolError(f"schema validator accepted invalid {label}")
+    equality_cases = (
+        (1, 1.0, True),
+        (True, 1, False),
+        ([False], [0], False),
+        ({"flag": True}, {"flag": 1}, False),
+    )
+    for left, right, expected_equal in equality_cases:
+        if json_values_equal(left, right) is not expected_equal:
+            raise ProtocolError("JSON value equality drifted from Draft 2020-12")
     mutation = copy.deepcopy(rows[0])
     del mutation["confidence"]
     try:
