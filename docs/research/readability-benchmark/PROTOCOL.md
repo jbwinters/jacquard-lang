@@ -64,10 +64,15 @@ confirmatory `.jac`/`.jqd` readability claim inconclusive.
 
 At two-sided alpha 0.025, 128 analyzable participants per Jacquard carrier give
 about 80% power for a standardized log-time effect of 0.386, approximately a
-20% time change at coefficient of variation 0.5. The target of 141 covers that
-calculation and the prior accuracy calculation; enrolling 160 allows about 10%
-exclusion. Python remains balanced but does not enter the confirmatory power
-claim.
+20% time change at coefficient of variation 0.5. The accuracy planning premise
+is 80% power to distinguish 70% from 90% accuracy between two independent
+carriers. The original three-job Holm calculation required fewer than 100 per
+carrier. For this protocol's five functional outcomes, the conservative
+Bonferroni bound for Holm uses two-sided alpha `0.025 / 5 = 0.005`; the standard
+two-proportion normal approximation gives about 105 per carrier. The target of
+141 covers both accuracy premises and the 128-person time calculation;
+enrolling 160 allows about 10% exclusion. Python remains balanced but does not
+enter the confirmatory power claim.
 
 Before assignment, record only these de-identified reader covariates with the
 result rows: years of programming experience, years of code-review experience,
@@ -229,6 +234,17 @@ only p-values. Model presentation order, expertise, prior Jacquard/domain
 knowledge, and learning/familiarity effects. Explain Python's control-language
 limitations.
 
+The first analysis stage is `readability-descriptive-v1`. It consumes only a
+complete validated single-kind store and its exact
+`readability-analysis-input-v1` selection. It reports 97.5% Wilson intervals,
+completion median/log/geometric mean, exact confidence-level calibration,
+rating and error distributions, source/effective/excluded counts, and human
+presentation-order and expertise strata. Fixed 12-place decimal strings make
+equal inputs byte-identical; raw collection timestamps are omitted. A zero-ms
+observation is counted and leaves log/geometric means null rather than being
+dropped or adjusted. These descriptive tables remain `not-evaluated`; they do
+not perform the pairwise comparison or claim gate.
+
 Pairwise `.jac`/`.jqd` accuracy uses Newcombe-Wilson difference intervals with
 Holm correction across functional outcomes. Time uses each human's geometric
 mean and Welch intervals on log milliseconds, then reports the exponentiated
@@ -281,11 +297,18 @@ python3 test/readability/readability_benchmark.py prepare-analysis \
   --authority test/readability/authority-manifest.template.json \
   --input .scratch/readability/dry-run.jsonl \
   > .scratch/readability/analysis-input.json
+python3 test/readability/readability_benchmark.py analyze-descriptive \
+  --manifest test/readability/fixture-manifest.json \
+  --schema test/readability/result.schema.json \
+  --authority test/readability/authority-manifest.template.json \
+  --input .scratch/readability/dry-run.jsonl \
+  > .scratch/readability/descriptive.json
 ```
 
 The dry run emits one synthetic, non-citable row for each of 15 conditions and
-makes no readability or performance claim. The analysis-input file likewise
-contains no outcome analysis or claim. Schedules, renderings, logs, stores, and
-generated bundles remain under `.scratch/`. Generating a schedule is planning
-evidence, not permission to collect outcomes. The [execution gate](EXECUTION.md)
-records the exact fail-closed boundary.
+makes no readability or performance claim. The analysis-input file contains no
+outcome analysis or claim. The descriptive file exercises every table but is
+also synthetic, non-citable, and claim-free. Schedules, renderings, logs,
+stores, and generated bundles remain under `.scratch/`. Generating a schedule
+is planning evidence, not permission to collect outcomes. The
+[execution gate](EXECUTION.md) records the exact fail-closed boundary.

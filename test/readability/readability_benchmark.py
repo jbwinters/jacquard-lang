@@ -26,6 +26,11 @@ from readability_analysis import (
     encode_analysis_bundle,
     prepare_analysis_bundle,
 )
+from readability_descriptive import (
+    DescriptiveError,
+    encode_descriptive_bundle,
+    prepare_descriptive_bundle,
+)
 
 
 SCHEMA_VERSION = "readability-result-v1"
@@ -1320,6 +1325,11 @@ def verify_protocol_document(protocol_path: Path) -> None:
         "prior jacquard",
         "plain text",
         "sample size",
+        "70% from 90% accuracy",
+        "0.025 / 5 = 0.005",
+        "readability-descriptive-v1",
+        "97.5% wilson",
+        "exact confidence-level calibration",
         "consent",
         "compensation",
         "accessibility",
@@ -1689,6 +1699,102 @@ def self_test(
     ):
         raise ProtocolError("analysis bundle does not bind exact source JSONL bytes")
 
+    synthetic_descriptive = prepare_descriptive_bundle(
+        rows, synthetic_digest, synthetic_analysis
+    )
+    descriptive_tables = synthetic_descriptive["tables"]
+    expected_descriptive_tables = {
+        "perceived-readability",
+        "comprehension",
+        "review",
+        "defect-detection",
+        "modification-debugging",
+        "diagnostic-recovery",
+    }
+    jac_comprehension = next(
+        table
+        for table in descriptive_tables["comprehension"]
+        if table["carrier"] == "jac"
+    )
+    if (
+        synthetic_descriptive["evidence_class"] != "synthetic-non-citable"
+        or synthetic_descriptive["claim_status"] != "not-evaluated"
+        or synthetic_descriptive["source"]["input_jsonl_sha256"]
+        != synthetic_digest
+        or synthetic_descriptive["source"]["effective_row_count"] != 15
+        or set(descriptive_tables) != expected_descriptive_tables
+        or len(descriptive_tables["perceived-readability"]) != 15
+        or any(
+            len(descriptive_tables[name]) != 3
+            for name in expected_descriptive_tables - {"perceived-readability"}
+        )
+        or jac_comprehension["accuracy"]["correct"] != 1
+        or jac_comprehension["accuracy"]["estimate"] != "1.000000000000"
+        or jac_comprehension["accuracy"]["wilson"]
+        != {
+            "confidence_level": "0.975000000000",
+            "lower": "0.166005792424",
+            "upper": "1.000000000000",
+        }
+        or jac_comprehension["confidence"]["calibration"]
+        != [
+            {
+                "accuracy": "1.000000000000",
+                "confidence": 100,
+                "correct": 1,
+                "rows": 1,
+            }
+        ]
+    ):
+        raise ProtocolError("synthetic descriptive tables drifted")
+    synthetic_descriptive_bytes = encode_descriptive_bundle(synthetic_descriptive)
+    if (
+        synthetic_descriptive_bytes
+        != encode_descriptive_bundle(
+            prepare_descriptive_bundle(rows, synthetic_digest, synthetic_analysis)
+        )
+        or FIXED_DRY_RUN_TIME in synthetic_descriptive_bytes
+        or '"recorded_at"' in synthetic_descriptive_bytes
+    ):
+        raise ProtocolError("descriptive bundle bytes or timestamp exclusion drifted")
+    mismatched_analysis = copy.deepcopy(synthetic_analysis)
+    mismatched_analysis["source"]["input_jsonl_sha256"] = digest_text(
+        synthetic_jsonl + "\n"
+    )
+    try:
+        prepare_descriptive_bundle(rows, synthetic_digest, mismatched_analysis)
+    except DescriptiveError:
+        pass
+    else:
+        raise ProtocolError("descriptive analysis accepted mismatched provenance")
+    zero_time_store = copy.deepcopy(rows)
+    zero_time_store[0]["completion_ms"] = 0
+    zero_time_store[0]["row_id"] = canonical_row_id(zero_time_store[0])
+    validate_result_store(zero_time_store, manifest, schema)
+    zero_time_jsonl = encode_jsonl(zero_time_store)
+    zero_time_digest = digest_text(zero_time_jsonl)
+    zero_time_analysis = prepare_analysis_bundle(
+        zero_time_store, zero_time_digest
+    )
+    zero_time_descriptive = prepare_descriptive_bundle(
+        zero_time_store, zero_time_digest, zero_time_analysis
+    )
+    zero_time_row = zero_time_store[0]
+    zero_time_table = next(
+        table
+        for table in zero_time_descriptive["tables"][
+            zero_time_row["outcome_family"]
+        ]
+        if table["carrier"] == zero_time_row["carrier"]
+        and table["job"] == zero_time_row["job"]
+    )
+    if (
+        zero_time_table["completion_ms"]["nonpositive_rows"] != 1
+        or zero_time_table["completion_ms"]["log_mean"] is not None
+        or zero_time_table["completion_ms"]["geometric_mean_ms"] is not None
+    ):
+        raise ProtocolError("zero completion time was dropped or silently shifted")
+
     clean_human_analysis = prepare_analysis_bundle(
         human_store, digest_text(encode_jsonl(human_store))
     )
@@ -1707,6 +1813,32 @@ def self_test(
         }
     ):
         raise ProtocolError("clean human analyzability flow drifted")
+    clean_human_descriptive = prepare_descriptive_bundle(
+        human_store,
+        digest_text(encode_jsonl(human_store)),
+        clean_human_analysis,
+    )
+    human_expertise = clean_human_descriptive["strata"]["human_expertise"]
+    programming_strata = human_expertise["programming_experience_years"]
+    if (
+        clean_human_descriptive["evidence_class"] != "human-candidate"
+        or clean_human_descriptive["pre_assignment_flow"]["status"]
+        != "external-required"
+        or clean_human_descriptive["source"]["source_row_count"] != 2400
+        or clean_human_descriptive["source"]["effective_row_count"] != 2400
+        or programming_strata
+        != [
+            {"carrier": carrier, "subjects": 160, "value": 5}
+            for carrier in CARRIERS
+        ]
+        or len(clean_human_descriptive["strata"]["presentation_order"]) != 75
+        or any(
+            len(clean_human_descriptive["strata"]["human_profile_outcomes"][field])
+            != 15
+            for field in HUMAN_PROFILE_FIELDS
+        )
+    ):
+        raise ProtocolError("human descriptive expertise or learning strata drifted")
 
     retry_analysis = prepare_analysis_bundle(
         human_store_with_retry,
@@ -1725,6 +1857,18 @@ def self_test(
         or retry_trials["effective_retry_rows"] != 1
     ):
         raise ProtocolError("successful human retry did not replace its failed first row")
+    retry_descriptive = prepare_descriptive_bundle(
+        human_store_with_retry,
+        digest_text(encode_jsonl(human_store_with_retry)),
+        retry_analysis,
+    )
+    if (
+        retry_descriptive["source"]["source_row_count"] != 2401
+        or retry_descriptive["source"]["effective_row_count"] != 2400
+        or failed["row_id"] in retry_descriptive["source"]["effective_row_ids"]
+        or retry["row_id"] not in retry_descriptive["source"]["effective_row_ids"]
+    ):
+        raise ProtocolError("descriptive tables did not honor effective retry selection")
 
     failed_retry_store = copy.deepcopy(human_store_with_retry)
     failed_retry = failed_retry_store[5]
@@ -1818,6 +1962,19 @@ def self_test(
         != expected_model_count - 1
     ):
         raise ProtocolError("model session analyzability flow drifted")
+    clean_model_descriptive = prepare_descriptive_bundle(
+        model_store,
+        digest_text(encode_jsonl(model_store)),
+        clean_model_analysis,
+    )
+    if (
+        clean_model_descriptive["evidence_class"] != "model-candidate"
+        or clean_model_descriptive["subject_kind"] != "model"
+        or clean_model_descriptive["strata"]["human_expertise"] is not None
+        or clean_model_descriptive["source"]["effective_row_count"]
+        != expected_model_count
+    ):
+        raise ProtocolError("model descriptive tables were not kept cohort-separate")
 
     def expect_rejection(label: str, operation: Callable[[], Any]) -> None:
         try:
@@ -2350,6 +2507,15 @@ def parse_args(argv: Iterable[str]) -> argparse.Namespace:
     analysis.add_argument("--cohort", type=Path)
     analysis.add_argument("--authority", type=Path, required=True)
 
+    descriptive = commands.add_parser(
+        "analyze-descriptive",
+        help="validate a complete store and emit deterministic descriptive tables",
+    )
+    add_common_paths(descriptive)
+    descriptive.add_argument("--input", type=Path, required=True)
+    descriptive.add_argument("--cohort", type=Path)
+    descriptive.add_argument("--authority", type=Path, required=True)
+
     assign = commands.add_parser(
         "assign", help="debug one seeded assignment; admitted rows always use the frozen seed"
     )
@@ -2445,7 +2611,11 @@ def main(argv: Iterable[str]) -> int:
                     )
                 )
             return 0
-        if args.command in {"validate-results", "prepare-analysis"}:
+        if args.command in {
+            "validate-results",
+            "prepare-analysis",
+            "analyze-descriptive",
+        }:
             authority = load_json(args.authority)
             verify_authority_manifest(authority)
             cohort = None
@@ -2463,6 +2633,16 @@ def main(argv: Iterable[str]) -> int:
                 sys.stdout.write(
                     encode_analysis_bundle(
                         prepare_analysis_bundle(rows, input_sha256)
+                    )
+                )
+                return 0
+            if args.command == "analyze-descriptive":
+                analysis_input = prepare_analysis_bundle(rows, input_sha256)
+                sys.stdout.write(
+                    encode_descriptive_bundle(
+                        prepare_descriptive_bundle(
+                            rows, input_sha256, analysis_input
+                        )
                     )
                 )
                 return 0
@@ -2484,7 +2664,7 @@ def main(argv: Iterable[str]) -> int:
             print("readability protocol: PASS (5 jobs, 3 carriers, 15 dry-run conditions)")
             return 0
         raise ProtocolError(f"unknown command: {args.command}")
-    except (OSError, ProtocolError, AnalysisError) as error:
+    except (OSError, ProtocolError, AnalysisError, DescriptiveError) as error:
         print(f"readability protocol: FAIL: {error}", file=sys.stderr)
         return 1
 
