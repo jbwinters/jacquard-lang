@@ -26,6 +26,11 @@ from readability_analysis import (
     encode_analysis_bundle,
     prepare_analysis_bundle,
 )
+from readability_comparative import (
+    ComparativeError,
+    encode_comparative_bundle,
+    prepare_comparative_bundle,
+)
 from readability_descriptive import (
     DescriptiveError,
     encode_descriptive_bundle,
@@ -1328,8 +1333,13 @@ def verify_protocol_document(protocol_path: Path) -> None:
         "70% from 90% accuracy",
         "0.025 / 5 = 0.005",
         "readability-descriptive-v1",
+        "readability-comparative-v1",
         "97.5% wilson",
         "exact confidence-level calibration",
+        "nominal bonferroni",
+        "pooled two-proportion score",
+        "holm",
+        "no automatic product or release gate",
         "consent",
         "compensation",
         "accessibility",
@@ -1338,9 +1348,6 @@ def verify_protocol_document(protocol_path: Path) -> None:
         "data governance",
         "de-ident",
         "contamination",
-        "pass",
-        "fail",
-        "inconclusive",
         ".scratch",
     )
     for anchor in anchors:
@@ -1757,6 +1764,44 @@ def self_test(
         or '"recorded_at"' in synthetic_descriptive_bytes
     ):
         raise ProtocolError("descriptive bundle bytes or timestamp exclusion drifted")
+    synthetic_comparative = prepare_comparative_bundle(
+        rows, synthetic_digest, synthetic_analysis
+    )
+    synthetic_accuracy = synthetic_comparative["accuracy"]
+    if (
+        synthetic_comparative["comparative_version"]
+        != "readability-comparative-v1"
+        or synthetic_comparative["evidence_class"] != "synthetic-non-citable"
+        or synthetic_comparative["claim_status"] != "not-evaluated"
+        or synthetic_comparative["interpretation"]["automatic_product_gate"]
+        != "none"
+        or synthetic_comparative["interpretation"]["minimum_human_count"]
+        is not None
+        or len(synthetic_accuracy) != 5
+        or any(
+            summary["difference_jac_minus_jqd"] != "0.000000000000"
+            or summary["holm_adjusted_p"] != "1.000000000000"
+            for summary in synthetic_accuracy
+        )
+        or synthetic_comparative["completion_time"]["status"]
+        != "insufficient-subjects"
+        or synthetic_comparative["completion_time"]["carrier_subjects"]
+        != {"jac": 1, "jqd": 1}
+    ):
+        raise ProtocolError("synthetic comparative summaries drifted")
+    synthetic_comparative_bytes = encode_comparative_bundle(
+        synthetic_comparative
+    )
+    if (
+        synthetic_comparative_bytes
+        != encode_comparative_bundle(
+            prepare_comparative_bundle(rows, synthetic_digest, synthetic_analysis)
+        )
+        or FIXED_DRY_RUN_TIME in synthetic_comparative_bytes
+        or '"recorded_at"' in synthetic_comparative_bytes
+        or '"subject_id"' in synthetic_comparative_bytes
+    ):
+        raise ProtocolError("comparative bundle bytes or de-identification drifted")
     mismatched_analysis = copy.deepcopy(synthetic_analysis)
     mismatched_analysis["source"]["input_jsonl_sha256"] = digest_text(
         synthetic_jsonl + "\n"
@@ -1767,6 +1812,12 @@ def self_test(
         pass
     else:
         raise ProtocolError("descriptive analysis accepted mismatched provenance")
+    try:
+        prepare_comparative_bundle(rows, synthetic_digest, mismatched_analysis)
+    except ComparativeError:
+        pass
+    else:
+        raise ProtocolError("comparative analysis accepted mismatched provenance")
     zero_time_store = copy.deepcopy(rows)
     zero_time_store[0]["completion_ms"] = 0
     zero_time_store[0]["row_id"] = canonical_row_id(zero_time_store[0])
@@ -1794,6 +1845,18 @@ def self_test(
         or zero_time_table["completion_ms"]["geometric_mean_ms"] is not None
     ):
         raise ProtocolError("zero completion time was dropped or silently shifted")
+    zero_time_comparative = prepare_comparative_bundle(
+        zero_time_store, zero_time_digest, zero_time_analysis
+    )
+    if (
+        zero_time_comparative["completion_time"]["status"]
+        != "nonpositive-observation"
+        or zero_time_comparative["completion_time"]["ratio_jac_over_jqd"]
+        is not None
+        or zero_time_comparative["completion_time"]["nonpositive_rows"]
+        != {"jac": 1, "jqd": 0}
+    ):
+        raise ProtocolError("comparative time silently dropped or shifted zero ms")
 
     clean_human_analysis = prepare_analysis_bundle(
         human_store, digest_text(encode_jsonl(human_store))
@@ -1839,6 +1902,151 @@ def self_test(
         )
     ):
         raise ProtocolError("human descriptive expertise or learning strata drifted")
+
+    rank_by_ordinal: dict[int, int] = {}
+    next_carrier_rank = {carrier: 0 for carrier in CARRIERS}
+    for plan in humans:
+        carrier = plan["carrier"]
+        rank_by_ordinal[plan["ordinal"]] = next_carrier_rank[carrier]
+        next_carrier_rank[carrier] += 1
+    accuracy_targets = {
+        "jac": {
+            "seeded-bug": 128,
+            "predict-output": 144,
+            "authority-escalation": 136,
+            "modify-behavior": 120,
+            "diagnostic-recovery": 112,
+        },
+        "jqd": {
+            "seeded-bug": 120,
+            "predict-output": 128,
+            "authority-escalation": 120,
+            "modify-behavior": 112,
+            "diagnostic-recovery": 104,
+        },
+        "python": {job: 136 for job in JOBS},
+    }
+    carrier_time_offset = {"jac": 0, "jqd": 140, "python": 70}
+    job_index = {job: index for index, job in enumerate(JOBS)}
+    fixtures_by_job = fixture_index(manifest)
+    comparative_human_store = copy.deepcopy(human_store)
+    for result in comparative_human_store:
+        carrier = result["carrier"]
+        job = result["job"]
+        rank = rank_by_ordinal[result["schedule_ordinal"]]
+        correct = rank < accuracy_targets[carrier][job]
+        if correct:
+            result.update(
+                {
+                    "answer_id": fixtures_by_job[job]["correct_answer"],
+                    "correct": True,
+                    "error_code": None,
+                }
+            )
+        else:
+            wrong_answer = sorted(
+                fixtures_by_job[job]["wrong_answer_errors"]
+            )[0]
+            result.update(
+                {
+                    "answer_id": wrong_answer,
+                    "correct": False,
+                    "error_code": fixtures_by_job[job]["wrong_answer_errors"][
+                        wrong_answer
+                    ],
+                }
+            )
+        result["completion_ms"] = (
+            1000
+            + (7 * rank)
+            + (43 * job_index[job])
+            + carrier_time_offset[carrier]
+            + ((rank % 5) * (job_index[job] + 1))
+        )
+        result["confidence"] = 90 if correct else 60
+        result["perceived_readability"] = 5 if carrier == "jac" else 4
+        result["row_id"] = canonical_row_id(result)
+    validate_test_human_store(comparative_human_store)
+    comparative_human_jsonl = encode_jsonl(comparative_human_store)
+    comparative_human_digest = digest_text(comparative_human_jsonl)
+    comparative_human_analysis = prepare_analysis_bundle(
+        comparative_human_store, comparative_human_digest
+    )
+    comparative_human = prepare_comparative_bundle(
+        comparative_human_store,
+        comparative_human_digest,
+        comparative_human_analysis,
+    )
+    comprehension_effect = comparative_human["accuracy"][0]
+    time_effect = comparative_human["completion_time"]
+    if (
+        comparative_human["evidence_class"] != "human-candidate"
+        or comparative_human["subject_kind"] != "human"
+        or comparative_human["source"]["source_row_count"] != 2400
+        or comparative_human["source"]["effective_row_count"] != 2400
+        or comparative_human["methods"]["accuracy"]["per_outcome_alpha"]
+        != "0.005000000000"
+        or comprehension_effect
+        != {
+            "accuracy": {
+                "jac": {
+                    "correct": 144,
+                    "estimate": "0.900000000000",
+                    "rows": 160,
+                },
+                "jqd": {
+                    "correct": 128,
+                    "estimate": "0.800000000000",
+                    "rows": 160,
+                },
+            },
+            "difference_jac_minus_jqd": "0.100000000000",
+            "holm_adjusted_p": "0.061243500192",
+            "job": "predict-output",
+            "newcombe_interval": {
+                "confidence_level": "0.995000000000",
+                "lower": "-0.013591357053",
+                "upper": "0.212993178619",
+            },
+            "outcome_family": "comprehension",
+            "pooled_score_two_sided_p": "0.012248700038",
+        }
+        or time_effect
+        != {
+            "carrier_geometric_mean_ms": {
+                "jac": "1614.561858103575",
+                "jqd": "1757.361044573370",
+            },
+            "carrier_subjects": {"jac": 160, "jqd": 160},
+            "confidence_interval": {
+                "confidence_level": "0.975000000000",
+                "degrees_of_freedom": "315.665886838437",
+                "lower_ratio": "0.874806334541",
+                "standard_error_log": "0.021758408586",
+                "upper_ratio": "0.964884806357",
+            },
+            "log_difference_jac_minus_jqd": "-0.084749652747",
+            "log_summary_subjects": {"jac": 160, "jqd": 160},
+            "nonpositive_rows": {"jac": 0, "jqd": 0},
+            "ratio_jac_over_jqd": "0.918742260214",
+            "status": "available",
+        }
+    ):
+        raise ProtocolError("human comparative effect summaries drifted")
+    comparative_human_bytes = encode_comparative_bundle(comparative_human)
+    if (
+        comparative_human_bytes
+        != encode_comparative_bundle(
+            prepare_comparative_bundle(
+                comparative_human_store,
+                comparative_human_digest,
+                comparative_human_analysis,
+            )
+        )
+        or '"subject_id"' in comparative_human_bytes
+        or '"recorded_at"' in comparative_human_bytes
+    ):
+        raise ProtocolError("human comparative bytes or de-identification drifted")
 
     retry_analysis = prepare_analysis_bundle(
         human_store_with_retry,
@@ -1975,6 +2183,16 @@ def self_test(
         != expected_model_count
     ):
         raise ProtocolError("model descriptive tables were not kept cohort-separate")
+    try:
+        prepare_comparative_bundle(
+            model_store,
+            digest_text(encode_jsonl(model_store)),
+            clean_model_analysis,
+        )
+    except ComparativeError:
+        pass
+    else:
+        raise ProtocolError("model outcomes entered the human comparative analysis")
 
     def expect_rejection(label: str, operation: Callable[[], Any]) -> None:
         try:
@@ -2516,6 +2734,15 @@ def parse_args(argv: Iterable[str]) -> argparse.Namespace:
     descriptive.add_argument("--cohort", type=Path)
     descriptive.add_argument("--authority", type=Path, required=True)
 
+    comparative = commands.add_parser(
+        "analyze-comparative",
+        help="emit deterministic .jac/.jqd effect summaries without a product verdict",
+    )
+    add_common_paths(comparative)
+    comparative.add_argument("--input", type=Path, required=True)
+    comparative.add_argument("--cohort", type=Path)
+    comparative.add_argument("--authority", type=Path, required=True)
+
     assign = commands.add_parser(
         "assign", help="debug one seeded assignment; admitted rows always use the frozen seed"
     )
@@ -2615,6 +2842,7 @@ def main(argv: Iterable[str]) -> int:
             "validate-results",
             "prepare-analysis",
             "analyze-descriptive",
+            "analyze-comparative",
         }:
             authority = load_json(args.authority)
             verify_authority_manifest(authority)
@@ -2646,6 +2874,16 @@ def main(argv: Iterable[str]) -> int:
                     )
                 )
                 return 0
+            if args.command == "analyze-comparative":
+                analysis_input = prepare_analysis_bundle(rows, input_sha256)
+                sys.stdout.write(
+                    encode_comparative_bundle(
+                        prepare_comparative_bundle(
+                            rows, input_sha256, analysis_input
+                        )
+                    )
+                )
+                return 0
             print(f"validated {count} rows across {len(conditions)} conditions")
             return 0
         if args.command == "verify":
@@ -2664,7 +2902,13 @@ def main(argv: Iterable[str]) -> int:
             print("readability protocol: PASS (5 jobs, 3 carriers, 15 dry-run conditions)")
             return 0
         raise ProtocolError(f"unknown command: {args.command}")
-    except (OSError, ProtocolError, AnalysisError, DescriptiveError) as error:
+    except (
+        OSError,
+        ProtocolError,
+        AnalysisError,
+        ComparativeError,
+        DescriptiveError,
+    ) as error:
         print(f"readability protocol: FAIL: {error}", file=sys.stderr)
         return 1
 

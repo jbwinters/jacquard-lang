@@ -3,6 +3,7 @@
  (deps
   readability_benchmark.py
   readability_analysis.py
+  readability_comparative.py
   readability_descriptive.py
   fixture-manifest.json
   result.schema.json
@@ -61,6 +62,19 @@
       --authority authority-manifest.template.json
       --input dry-run.jsonl))
     (diff descriptive-1.json descriptive-2.json)
+    (with-stdout-to comparative-1.json
+     (run %{bin:python3} readability_benchmark.py analyze-comparative
+      --manifest fixture-manifest.json
+      --schema result.schema.json
+      --authority authority-manifest.template.json
+      --input dry-run.jsonl))
+    (with-stdout-to comparative-2.json
+     (run %{bin:python3} readability_benchmark.py analyze-comparative
+      --manifest fixture-manifest.json
+      --schema result.schema.json
+      --authority authority-manifest.template.json
+      --input dry-run.jsonl))
+    (diff comparative-1.json comparative-2.json)
     (with-stdout-to human-schedule.jsonl
      (run %{bin:python3} readability_benchmark.py human-schedule))
     (with-stdout-to model-schedule.jsonl
