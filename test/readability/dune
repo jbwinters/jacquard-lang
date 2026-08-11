@@ -5,6 +5,7 @@
   readability_analysis.py
   readability_comparative.py
   readability_descriptive.py
+  readability_evidence.py
   fixture-manifest.json
   result.schema.json
   model-prompt.txt
@@ -75,6 +76,23 @@
       --authority authority-manifest.template.json
       --input dry-run.jsonl))
     (diff comparative-1.json comparative-2.json)
+    (with-stdout-to rescore-packet-1.json
+     (run %{bin:python3} readability_benchmark.py prepare-rescore
+      --manifest fixture-manifest.json
+      --schema result.schema.json
+      --authority authority-manifest.template.json
+      --input dry-run.jsonl
+      --sample-seed ux1-rescore-v1
+      --sample-size 5))
+    (with-stdout-to rescore-packet-2.json
+     (run %{bin:python3} readability_benchmark.py prepare-rescore
+      --manifest fixture-manifest.json
+      --schema result.schema.json
+      --authority authority-manifest.template.json
+      --input dry-run.jsonl
+      --sample-seed ux1-rescore-v1
+      --sample-size 5))
+    (diff rescore-packet-1.json rescore-packet-2.json)
     (with-stdout-to human-schedule.jsonl
      (run %{bin:python3} readability_benchmark.py human-schedule))
     (with-stdout-to model-schedule.jsonl

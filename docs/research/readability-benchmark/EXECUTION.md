@@ -1,9 +1,9 @@
 # Readability protocol v1 execution gate
 
 Status: deterministic planning, fail-closed result admission, analyzability,
-descriptive tables, and `.jac`/`.jqd` comparison summaries are implemented.
-The checked manifests do not authorize real collection, and no human or model
-outcomes exist.
+descriptive and comparative analysis, blinded-rescore mechanics, and exact
+publication lineage are implemented. The checked manifests do not authorize
+real collection, and no human or model outcomes exist.
 
 The [protocol](PROTOCOL.md) defines the study. This document separates a
 reproducible plan from external authority. A generated schedule proves that
@@ -248,8 +248,9 @@ dropped or shifted. Running twice from byte-identical stores produces
 byte-identical output. Synthetic output exercises all table shapes but remains
 `synthetic-non-citable`; real human/model output remains candidate evidence
 with claim status `not-evaluated`. Pairwise effects are a separate evidence
-summary; neither file creates a product verdict. Blinded rescoring and any
-publication-number lineage still require real checked evidence.
+summary; neither file creates a product verdict. The mechanics for blinded
+rescoring and publication-number lineage are described below. Actual outcomes,
+an independent reviewer, and publication authority remain external.
 
 ## Deterministic `.jac`/`.jqd` comparison
 
@@ -287,6 +288,81 @@ remain reference planning artifacts, not prerequisites for language ideas.
 Any future claim about people must instead state the real sample, exclusions,
 effect estimates, uncertainty, deviations, and limitations.
 
+## Blinded rescore and exact evidence bundle
+
+Freeze the rescore sample seed and positive sample count in a reviewed study
+record before outcomes are unblinded. The tool does not choose either value and
+does not impose a minimum. After complete store admission, generate the packet:
+
+```text
+python3 test/readability/readability_benchmark.py prepare-rescore \
+  --manifest test/readability/fixture-manifest.json \
+  --schema test/readability/result.schema.json \
+  --authority AUTHORITY.json \
+  --input HUMAN-RESULTS.jsonl \
+  --sample-seed REVIEWED-SEED --sample-size REVIEWED-COUNT \
+  > .scratch/readability/human-rescore-packet.json
+```
+
+The command reproduces `readability-analysis-input-v1`, ranks effective rows by
+domain-separated SHA-256 of the reviewed seed and canonical row ID, and takes
+the requested prefix. It refuses zero, negative, or oversized samples rather
+than silently changing the count. Each packet trial contains only an opaque
+blind ID, fixture ID, and submitted answer ID. It omits carrier, subject and row
+identity, existing scores, timing, confidence, ratings, and outcome summaries.
+The packet records only a digest of the seed, so the reviewer need not receive
+the source store, analysis selection, or raw seed.
+
+The independent reviewer returns canonical JSON with this shape, preserving
+packet order:
+
+```json
+{
+  "assessment_version": "readability-rescore-assessment-v1",
+  "decisions": [
+    {"blind_id": "64-lowercase-hex", "correct": true, "error_code": null}
+  ],
+  "independence_attestation_sha256": "64-lowercase-hex",
+  "packet_sha256": "64-lowercase-hex"
+}
+```
+
+The attestation digest binds separately retained evidence about reviewer
+identity and independence; it does not place that private record in the result
+store. The verifier confirms only that the digest is present and that every
+ordered decision agrees with the frozen answer key. It cannot prove who
+performed the review or whether they were independent. Synthetic self-checks
+must use `null` for the attestation and remain `synthetic-non-citable`.
+
+Assemble the exact candidate artifact only after that independent action:
+
+```text
+python3 test/readability/readability_benchmark.py assemble-evidence \
+  --manifest test/readability/fixture-manifest.json \
+  --schema test/readability/result.schema.json \
+  --authority AUTHORITY.json \
+  --input HUMAN-RESULTS.jsonl \
+  --sample-seed REVIEWED-SEED --sample-size REVIEWED-COUNT \
+  --assessment INDEPENDENT-ASSESSMENT.json \
+  > .scratch/readability/human-evidence-bundle.json
+```
+
+`assemble-evidence` does not trust a caller-supplied packet. It revalidates the
+complete store and internally regenerates the analysis selection, blinded
+packet, descriptive tables, and human comparison before verifying the
+assessment. `readability-evidence-bundle-v1` embeds each exact object and its
+canonical SHA-256. Model evidence uses the same command with `--cohort` but
+embeds no `.jac`/`.jqd` comparison; model results remain cohort-specific and
+cannot substitute for people. The bundle has no timestamp, minimum count,
+automatic verdict, or publication claim. Its machine-verified number lineage
+covers only values inside that exact bundle. External prose must cite the exact
+bundle and JSON path or establish its own checked derivation.
+
+Actual participant collection, a real second reviewer, validation of that
+reviewer's identity and independence, approval to publish, and interpretation
+of the observed sample remain external requirements. Their absence prevents a
+measured human claim, not language design or release work.
+
 ## What the checked gate proves
 
 `dune build @readability-protocol` verifies:
@@ -314,6 +390,12 @@ effect estimates, uncertainty, deviations, and limitations.
   Newcombe/Bonferroni, pooled-score/Holm, and Welch calculations, exact
   provenance, nonpositive-time refusal, model separation, and byte-identical
   synthetic generation without an automatic verdict;
+- deterministic outcome-blinded effective-row sampling; strict refusal of
+  missing, reordered, substituted, wrongly scored, or cross-packet decisions;
+  explicit non-verification of reviewer identity/independence; and
+- byte-identical evidence assembly with exact embedded artifact digests,
+  internal packet regeneration, human/model separation, synthetic
+  non-citability, and no minimum-count or product gate;
 - unconditional rejection of real rows with the checked pending authority and
   M0 cohort manifests; and
 - byte-identical schedule and dry-run generation.
