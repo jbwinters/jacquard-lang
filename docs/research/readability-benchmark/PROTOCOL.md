@@ -56,23 +56,27 @@ SHA-256 of the public seed, block, carrier, and order. The confirmatory seed is
 `jacquard-readability-v1`. Operators may not skip an ordinal after learning its
 assignment or selectively replace an excluded participant.
 
-Recruit 480 adults who self-attest that they can read small Python-like
-programs and have at least one year of programming or review experience. The
-plan assigns 160 enrollments to each carrier. There is no optional stopping.
-Fewer than 141 analyzable humans in either Jacquard carrier makes every
-confirmatory `.jac`/`.jqd` readability claim inconclusive.
+The frozen full-scale reference plan contains 480 adults who self-attest that
+they can read small Python-like programs and have at least one year of
+programming or review experience. It assigns 160 enrollment ordinals to each
+carrier and has no optional-stopping rule. The schedule is a reproducibility
+and harness-completeness artifact, not a required recruitment target. No
+language idea, implementation task, or release decision waits for this study
+or for any minimum participant count. A smaller future collection requires a
+separately reviewed schedule/admission version and reports its actual sample
+size rather than borrowing the full-scale plan's power assumptions.
 
-At two-sided alpha 0.025, 128 analyzable participants per Jacquard carrier give
+The original power-planning calculation used two-sided alpha 0.025. It
+estimated that 128 analyzable participants per Jacquard carrier would give
 about 80% power for a standardized log-time effect of 0.386, approximately a
-20% time change at coefficient of variation 0.5. The accuracy planning premise
-is 80% power to distinguish 70% from 90% accuracy between two independent
-carriers. The original three-job Holm calculation required fewer than 100 per
-carrier. For this protocol's five functional outcomes, the conservative
-Bonferroni bound for Holm uses two-sided alpha `0.025 / 5 = 0.005`; the standard
-two-proportion normal approximation gives about 105 per carrier. The target of
-141 covers both accuracy premises and the 128-person time calculation;
-enrolling 160 allows about 10% exclusion. Python remains balanced but does not
-enter the confirmatory power claim.
+20% time change at coefficient of variation 0.5. The accuracy premise was 80%
+power to distinguish 70% from 90% accuracy between two independent carriers.
+For five functional outcomes, the conservative Bonferroni bound uses
+two-sided alpha `0.025 / 5 = 0.005`; the standard two-proportion normal
+approximation gives about 105 per carrier. The historical target of 141 covered
+those premises plus exclusion headroom. It is a power-planning reference, not
+a minimum, claim threshold, or product gate. Python remains balanced in the
+reference schedule but does not enter the `.jac`/`.jqd` comparison.
 
 Before assignment, record only these de-identified reader covariates with the
 result rows: years of programming experience, years of code-review experience,
@@ -223,7 +227,7 @@ Pre-assignment no-consent and eligibility counts remain in the separately
 approved enrollment flow. They are reported as `external-required`, not
 inferred or invented from answer rows.
 
-## Preregistered analysis and claim gate
+## Prespecified analysis and evidence interpretation
 
 Produce separate deterministic tables for perceived ratings, comprehension,
 review, defect detection, modification/debugging, and diagnostic recovery.
@@ -243,29 +247,36 @@ presentation-order and expertise strata. Fixed 12-place decimal strings make
 equal inputs byte-identical; raw collection timestamps are omitted. A zero-ms
 observation is counted and leaves log/geometric means null rather than being
 dropped or adjusted. These descriptive tables remain `not-evaluated`; they do
-not perform the pairwise comparison or claim gate.
+not perform the pairwise comparison.
 
-Pairwise `.jac`/`.jqd` accuracy uses Newcombe-Wilson difference intervals with
-Holm correction across functional outcomes. Time uses each human's geometric
-mean and Welch intervals on log milliseconds, then reports the exponentiated
-ratio. Allocate family-wise alpha 0.025 to accuracy and 0.025 to time. Ratings
-are secondary and cannot establish task success.
+The comparison stage is `readability-comparative-v1`. For each of the five
+functional outcomes it reports `.jac` minus `.jqd` accuracy, a Newcombe method
+10 Wilson-score difference interval without continuity correction, and a
+supplementary two-sided pooled two-proportion score p-value. Accuracy has
+family alpha 0.025. Each interval uses the conservative per-outcome alpha
+`0.025 / 5 = 0.005`, giving nominal Bonferroni family coverage; Newcombe's
+component interval is approximate, so the output does not call that coverage
+exact. P-values receive standard Holm adjustment across the five outcomes.
+Neither interval bounds nor adjusted p-values create an automatic verdict.
 
-No measured readability claim may be published unless the approved protocol
-and consent flow exist, both Jacquard carriers have at least 141 analyzable
-humans, checked evidence validates, the preregistered analysis reproduces
-byte-for-byte modulo declared timestamps, and every cited model cohort is
-attested. Human evidence is always required.
+Time uses each human's geometric mean across the five functional jobs. A
+two-sided Welch interval at alpha 0.025 compares the subject-level log
+milliseconds, then exponentiates the `.jac` minus `.jqd` difference into a
+`.jac`/`.jqd` ratio. Job-specific times remain descriptive. An effective
+nonpositive completion time makes aggregate time inference unavailable; it is
+never dropped or shifted. Python is descriptive context and model stores are
+not substituted into this human comparison. Synthetic output exercises the
+code as `synthetic-non-citable` and normally lacks enough subjects for a Welch
+interval.
 
-- **Pass for a specific outcome claim:** the corrected interval supports the
-  stated direction and the paired co-primary measure shows no material harm
-  (accuracy lower bound above -5 points and completion-ratio upper bound below
-  1.10). State the exact job or aggregate; do not say “readable” in general.
-- **Fail:** fixture identity/behavior drift, authority/schema failure, an
-  adjusted accuracy upper bound below -5 points, or a completion-ratio lower
-  bound above 1.10.
-- **Inconclusive:** every other result, including mixed measures, insufficient
-  humans, protocol drift, contamination, or intervals crossing thresholds.
+There is no automatic product or release gate and no minimum-human-count gate.
+Readability ideas may be proposed, implemented, and reviewed without running
+this study. Any future measured claim about people still requires real approved
+human evidence, checked de-identified rows, reproducible analysis, the actual
+sample and exclusion flow, effect estimates with uncertainty, deviations, and
+plain limitations on generalization. Small or absent samples are not
+population-level proof, but they do not become a blocker for language work.
+Model or synthetic observations alone never become human evidence.
 
 Dependency distance, referent tracking, ambiguity, nesting, identifier cueing,
 canonical-format stability, diff stability, and code surprisal/naturalness may
@@ -303,12 +314,22 @@ python3 test/readability/readability_benchmark.py analyze-descriptive \
   --authority test/readability/authority-manifest.template.json \
   --input .scratch/readability/dry-run.jsonl \
   > .scratch/readability/descriptive.json
+python3 test/readability/readability_benchmark.py analyze-comparative \
+  --manifest test/readability/fixture-manifest.json \
+  --schema test/readability/result.schema.json \
+  --authority test/readability/authority-manifest.template.json \
+  --input .scratch/readability/dry-run.jsonl \
+  > .scratch/readability/comparative.json
 ```
 
 The dry run emits one synthetic, non-citable row for each of 15 conditions and
 makes no readability or performance claim. The analysis-input file contains no
 outcome analysis or claim. The descriptive file exercises every table but is
-also synthetic, non-citable, and claim-free. Schedules, renderings, logs,
-stores, and generated bundles remain under `.scratch/`. Generating a schedule
-is planning evidence, not permission to collect outcomes. The
+also synthetic, non-citable, and claim-free. The comparative file exercises the
+five accuracy contrasts and aggregate-time availability rules, but its
+synthetic source cannot support a human claim and its single observation per
+carrier leaves aggregate time inference unavailable. It emits no automatic
+verdict. Schedules, renderings, logs, stores, and generated bundles remain under
+`.scratch/`. Generating a schedule is planning evidence, not permission to
+collect outcomes. The
 [execution gate](EXECUTION.md) records the exact fail-closed boundary.

@@ -1,8 +1,9 @@
 # Readability protocol v1 execution gate
 
 Status: deterministic planning, fail-closed result admission, analyzability,
-and descriptive-table tools are implemented. The checked manifests do not
-authorize real collection, and no human or model outcomes exist.
+descriptive tables, and `.jac`/`.jqd` comparison summaries are implemented.
+The checked manifests do not authorize real collection, and no human or model
+outcomes exist.
 
 The [protocol](PROTOCOL.md) defines the study. This document separates a
 reproducible plan from external authority. A generated schedule proves that
@@ -246,9 +247,45 @@ retained and reported but makes log/geometric mean null; it is never silently
 dropped or shifted. Running twice from byte-identical stores produces
 byte-identical output. Synthetic output exercises all table shapes but remains
 `synthetic-non-citable`; real human/model output remains candidate evidence
-with claim status `not-evaluated`. Pairwise effects, multiplicity correction,
-claim thresholds, blinded rescoring, and publication-number lineage are later
-gates and cannot be inferred from this file.
+with claim status `not-evaluated`. Pairwise effects are a separate evidence
+summary; neither file creates a product verdict. Blinded rescoring and any
+publication-number lineage still require real checked evidence.
+
+## Deterministic `.jac`/`.jqd` comparison
+
+Produce the pairwise evidence summary from the same validated store and exact
+analysis selection:
+
+```text
+python3 test/readability/readability_benchmark.py analyze-comparative \
+  --manifest test/readability/fixture-manifest.json \
+  --schema test/readability/result.schema.json \
+  --authority AUTHORITY.json \
+  --input HUMAN-RESULTS.jsonl \
+  > .scratch/readability/human-comparative.json
+```
+
+`readability-comparative-v1` compares only `.jac` and `.jqd`. For each of the
+five functional outcomes it emits the correct-proportion difference, a
+Newcombe method-10 interval at per-outcome alpha `0.005` with nominal
+Bonferroni family coverage, a pooled two-proportion score p-value, and its Holm
+adjustment. The one completion-time estimate uses each human's geometric mean
+across all five jobs, a Welch interval on subject log milliseconds at alpha
+`0.025`, and the exponentiated `.jac`/`.jqd` ratio. A nonpositive effective
+time makes that interval unavailable instead of disappearing from analysis.
+
+The command binds the source JSONL, exact analysis and descriptive bundle
+digests, and ordered source/effective row IDs. It emits no timestamp, subject
+identifier, automatic threshold, or pass/fail result. Human output remains
+candidate evidence. Synthetic dry-run output is byte-deterministic and
+`synthetic-non-citable`; it normally reports insufficient subjects for a
+Welch interval. Model stores are refused rather than pooled or substituted.
+
+There is no minimum participant count and no automatic product or release
+gate. The frozen 480-person schedule and historical 141-person power target
+remain reference planning artifacts, not prerequisites for language ideas.
+Any future claim about people must instead state the real sample, exclusions,
+effect estimates, uncertainty, deviations, and limitations.
 
 ## What the checked gate proves
 
@@ -273,11 +310,16 @@ gates and cannot be inferred from this file.
 - deterministic descriptive tables for all six reporting families, exact
   effective-row selection, human expertise/presentation-order strata, model
   separation, timestamp omission, and byte-identical dual generation;
+- deterministic comparative accuracy and aggregate-time summaries, pinned
+  Newcombe/Bonferroni, pooled-score/Holm, and Welch calculations, exact
+  provenance, nonpositive-time refusal, model separation, and byte-identical
+  synthetic generation without an automatic verdict;
 - unconditional rejection of real rows with the checked pending authority and
   M0 cohort manifests; and
 - byte-identical schedule and dry-run generation.
 
 It does not prove that approvals exist, the live host is accessible,
 participants followed instructions, M0 is available or uncontaminated, quota
-exists, or any readability claim is true. Those require real external
-authority, collection, checked evidence, and reproducible analysis.
+exists, or any readability claim is true. Claims about people require real
+external authority, collection, checked evidence, and reproducible analysis;
+their absence is not an implementation or release gate.
