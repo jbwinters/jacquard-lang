@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Deterministic readability fixture verifier, planner, scorer, and dry runner.
+"""Deterministic readability planner, scorer, analyzer, and evidence assembler.
 
 The tool uses only the Python standard library.  It never collects participants
-or calls a model.  Its UX.1 schedule commands emit de-identified execution
-plans, not consent or study authority.  Invalid manifests, result rows, or
-fixture evidence fail with a concise message and a nonzero exit status.
+or calls a model.  Its UX.1 schedules and evidence candidates do not create
+consent, study authority, reviewer independence, a readability verdict, or a
+publication claim.  Invalid manifests, rows, or provenance fail with a concise
+message and a nonzero exit status.
 """
 
 from __future__ import annotations
@@ -35,6 +36,20 @@ from readability_descriptive import (
     DescriptiveError,
     encode_descriptive_bundle,
     prepare_descriptive_bundle,
+)
+from readability_evidence import (
+    EVIDENCE_BUNDLE_VERSION,
+    RESCORE_ASSESSMENT_VERSION,
+    RESCORE_PACKET_VERSION,
+    RESCORE_RECORD_VERSION,
+    EvidenceError,
+    encode_evidence_bundle,
+    encode_rescore_packet,
+    encode_rescore_record,
+    prepare_evidence_bundle,
+    prepare_rescore_packet,
+    score_answer,
+    verify_rescore_assessment,
 )
 
 
@@ -745,21 +760,6 @@ def verify_schedule_files(human_path: Path, model_path: Path) -> None:
             raise ProtocolError(
                 f"{label} schedule digest drift: expected {expected_digest}, got {actual_digest}"
             )
-
-
-def score_answer(fixture: dict[str, Any], answer_id: str) -> tuple[bool, str | None]:
-    options = {option["id"] for option in fixture["options"]}
-    if answer_id == "__timeout__":
-        return False, "timeout"
-    if answer_id == "__system_failure__":
-        return False, "system-failure"
-    if answer_id == "__parse_failure__":
-        return False, "prompt-parse-failure"
-    if answer_id not in options:
-        return False, "invalid-answer"
-    if answer_id == fixture["correct_answer"]:
-        return True, None
-    return False, fixture["wrong_answer_errors"][answer_id]
 
 
 def exclusion_codes(subject_kind: str, facts: dict[str, Any], cohort: dict[str, Any]) -> list[str]:
@@ -1802,6 +1802,314 @@ def self_test(
         or '"subject_id"' in synthetic_comparative_bytes
     ):
         raise ProtocolError("comparative bundle bytes or de-identification drifted")
+
+    def rescore_assessment(
+        packet: dict[str, Any], attestation: str | None
+    ) -> dict[str, Any]:
+        indexed = fixture_index(manifest)
+        decisions = []
+        for trial in packet["trials"]:
+            correct, error_code = score_answer(
+                indexed[trial["fixture_id"]], trial["answer_id"]
+            )
+            decisions.append(
+                {
+                    "blind_id": trial["blind_id"],
+                    "correct": correct,
+                    "error_code": error_code,
+                }
+            )
+        return {
+            "assessment_version": RESCORE_ASSESSMENT_VERSION,
+            "decisions": decisions,
+            "independence_attestation_sha256": attestation,
+            "packet_sha256": digest_text(encode_rescore_packet(packet)),
+        }
+
+    def expect_evidence_rejection(
+        label: str, operation: Callable[[], Any]
+    ) -> None:
+        try:
+            operation()
+        except EvidenceError:
+            return
+        raise ProtocolError(f"evidence closure accepted {label}")
+
+    rescore_seed = "ux1-rescore-self-test"
+    synthetic_packet = prepare_rescore_packet(
+        rows,
+        synthetic_digest,
+        synthetic_analysis,
+        manifest,
+        rescore_seed,
+        5,
+    )
+    synthetic_packet_bytes = encode_rescore_packet(synthetic_packet)
+    forbidden_packet_fields = (
+        '"carrier"',
+        '"completion_ms"',
+        '"confidence"',
+        '"correct"',
+        '"error_code"',
+        '"outcome_family"',
+        '"perceived_readability"',
+        '"row_id"',
+        '"subject_id"',
+    )
+    if (
+        synthetic_packet["packet_version"] != RESCORE_PACKET_VERSION
+        or synthetic_packet["evidence_class"] != "synthetic-non-citable"
+        or synthetic_packet["claim_status"] != "not-evaluated"
+        or synthetic_packet["sample"]["requested_row_count"] != 5
+        or len(synthetic_packet["trials"]) != 5
+        or any(field in synthetic_packet_bytes for field in forbidden_packet_fields)
+        or synthetic_packet_bytes
+        != encode_rescore_packet(
+            prepare_rescore_packet(
+                rows,
+                synthetic_digest,
+                synthetic_analysis,
+                manifest,
+                rescore_seed,
+                5,
+            )
+        )
+    ):
+        raise ProtocolError("synthetic rescore packet or blinding contract drifted")
+    if synthetic_packet_bytes == encode_rescore_packet(
+        prepare_rescore_packet(
+            rows,
+            synthetic_digest,
+            synthetic_analysis,
+            manifest,
+            rescore_seed + "-changed",
+            5,
+        )
+    ):
+        raise ProtocolError("rescore packet does not bind its reviewed sample seed")
+
+    synthetic_assessment = rescore_assessment(synthetic_packet, None)
+    synthetic_record = verify_rescore_assessment(
+        synthetic_packet, synthetic_assessment, manifest
+    )
+    if (
+        synthetic_record["record_version"] != RESCORE_RECORD_VERSION
+        or synthetic_record["decision_count"] != 5
+        or synthetic_record["evidence_class"] != "synthetic-non-citable"
+        or synthetic_record["attestation"]["status"]
+        != "not-applicable-synthetic"
+        or synthetic_record["machine_verification"]
+        != "exact-answer-key-agreement"
+    ):
+        raise ProtocolError("synthetic rescore verification boundary drifted")
+
+    synthetic_evidence = prepare_evidence_bundle(
+        rows,
+        synthetic_digest,
+        synthetic_analysis,
+        manifest,
+        rescore_seed,
+        5,
+        synthetic_assessment,
+    )
+    synthetic_evidence_bytes = encode_evidence_bundle(synthetic_evidence)
+    if (
+        synthetic_evidence["bundle_version"] != EVIDENCE_BUNDLE_VERSION
+        or synthetic_evidence["evidence_class"] != "synthetic-non-citable"
+        or synthetic_evidence["claim_status"] != "not-evaluated"
+        or synthetic_evidence["interpretation"]["automatic_product_gate"]
+        != "none"
+        or synthetic_evidence["interpretation"]["minimum_human_count"] is not None
+        or synthetic_evidence_bytes
+        != encode_evidence_bundle(
+            prepare_evidence_bundle(
+                rows,
+                synthetic_digest,
+                synthetic_analysis,
+                manifest,
+                rescore_seed,
+                5,
+                synthetic_assessment,
+            )
+        )
+    ):
+        raise ProtocolError("synthetic evidence bundle determinism or boundary drifted")
+    artifact_encoders: dict[str, Callable[[dict[str, Any]], str]] = {
+        "analysis_input": encode_analysis_bundle,
+        "comparative": encode_comparative_bundle,
+        "descriptive": encode_descriptive_bundle,
+        "rescore_packet": encode_rescore_packet,
+        "rescore_record": encode_rescore_record,
+    }
+    for name, encoder in artifact_encoders.items():
+        artifact = synthetic_evidence["artifacts"][name]
+        if artifact is None or artifact["sha256"] != digest_text(
+            encoder(artifact["value"])
+        ):
+            raise ProtocolError(f"evidence artifact digest drifted: {name}")
+
+    changed_packet_digest = copy.deepcopy(synthetic_assessment)
+    changed_packet_digest["packet_sha256"] = "0" * 64
+    expect_evidence_rejection(
+        "an assessment bound to another packet",
+        lambda: verify_rescore_assessment(
+            synthetic_packet, changed_packet_digest, manifest
+        ),
+    )
+    missing_decision = copy.deepcopy(synthetic_assessment)
+    missing_decision["decisions"].pop()
+    expect_evidence_rejection(
+        "an incomplete blinded assessment",
+        lambda: verify_rescore_assessment(
+            synthetic_packet, missing_decision, manifest
+        ),
+    )
+    duplicate_decision = copy.deepcopy(synthetic_assessment)
+    duplicate_decision["decisions"][1] = copy.deepcopy(
+        duplicate_decision["decisions"][0]
+    )
+    expect_evidence_rejection(
+        "a duplicated blinded decision",
+        lambda: verify_rescore_assessment(
+            synthetic_packet, duplicate_decision, manifest
+        ),
+    )
+    substituted_decision = copy.deepcopy(synthetic_assessment)
+    substituted_decision["decisions"][0]["blind_id"] = "f" * 64
+    expect_evidence_rejection(
+        "a substituted blinded decision",
+        lambda: verify_rescore_assessment(
+            synthetic_packet, substituted_decision, manifest
+        ),
+    )
+    reordered_decisions = copy.deepcopy(synthetic_assessment)
+    reordered_decisions["decisions"][0], reordered_decisions["decisions"][1] = (
+        reordered_decisions["decisions"][1],
+        reordered_decisions["decisions"][0],
+    )
+    expect_evidence_rejection(
+        "reordered blinded decisions",
+        lambda: verify_rescore_assessment(
+            synthetic_packet, reordered_decisions, manifest
+        ),
+    )
+    wrong_score = copy.deepcopy(synthetic_assessment)
+    wrong_score["decisions"][0]["correct"] = not wrong_score["decisions"][0][
+        "correct"
+    ]
+    expect_evidence_rejection(
+        "a rescore that disagrees with the answer key",
+        lambda: verify_rescore_assessment(synthetic_packet, wrong_score, manifest),
+    )
+    false_synthetic_attestation = copy.deepcopy(synthetic_assessment)
+    false_synthetic_attestation["independence_attestation_sha256"] = digest_text(
+        "not-a-real-independent-review"
+    )
+    expect_evidence_rejection(
+        "a synthetic independence assertion",
+        lambda: verify_rescore_assessment(
+            synthetic_packet, false_synthetic_attestation, manifest
+        ),
+    )
+    malformed_packet = copy.deepcopy(synthetic_packet)
+    del malformed_packet["source"]["fixture_manifest_sha256"]
+    malformed_packet_assessment = rescore_assessment(malformed_packet, None)
+    expect_evidence_rejection(
+        "a packet with incomplete source provenance",
+        lambda: verify_rescore_assessment(
+            malformed_packet, malformed_packet_assessment, manifest
+        ),
+    )
+    expect_evidence_rejection(
+        "a zero-sized rescore sample",
+        lambda: prepare_rescore_packet(
+            rows,
+            synthetic_digest,
+            synthetic_analysis,
+            manifest,
+            rescore_seed,
+            0,
+        ),
+    )
+    expect_evidence_rejection(
+        "a rescore sample larger than the effective store",
+        lambda: prepare_rescore_packet(
+            rows,
+            synthetic_digest,
+            synthetic_analysis,
+            manifest,
+            rescore_seed,
+            16,
+        ),
+    )
+    expect_evidence_rejection(
+        "an evidence assessment reused under another sample seed",
+        lambda: prepare_evidence_bundle(
+            rows,
+            synthetic_digest,
+            synthetic_analysis,
+            manifest,
+            rescore_seed + "-changed",
+            5,
+            synthetic_assessment,
+        ),
+    )
+    expect_evidence_rejection(
+        "an evidence assessment reused under another sample count",
+        lambda: prepare_evidence_bundle(
+            rows,
+            synthetic_digest,
+            synthetic_analysis,
+            manifest,
+            rescore_seed,
+            4,
+            synthetic_assessment,
+        ),
+    )
+    expect_evidence_rejection(
+        "a rescore packet paired with a different source digest",
+        lambda: prepare_rescore_packet(
+            rows,
+            digest_text(synthetic_jsonl + "\n"),
+            synthetic_analysis,
+            manifest,
+            rescore_seed,
+            5,
+        ),
+    )
+
+    human_digest = digest_text(encode_jsonl(human_store))
+    human_analysis = prepare_analysis_bundle(human_store, human_digest)
+    human_packet = prepare_rescore_packet(
+        human_store,
+        human_digest,
+        human_analysis,
+        manifest,
+        rescore_seed,
+        5,
+    )
+    unattested_human_assessment = rescore_assessment(human_packet, None)
+    expect_evidence_rejection(
+        "real candidate rescoring without external independence evidence",
+        lambda: verify_rescore_assessment(
+            human_packet, unattested_human_assessment, manifest
+        ),
+    )
+    attested_human_assessment = rescore_assessment(
+        human_packet, digest_text("self-test-independent-review-attestation")
+    )
+    human_rescore_record = verify_rescore_assessment(
+        human_packet, attested_human_assessment, manifest
+    )
+    if (
+        human_rescore_record["evidence_class"] != "human-candidate"
+        or human_rescore_record["attestation"]["status"]
+        != "external-attestation-present-not-machine-verified"
+        or human_rescore_record["reviewer_independence"]
+        != "external-fact-not-machine-proven"
+    ):
+        raise ProtocolError("real rescore attestation boundary drifted")
+
     mismatched_analysis = copy.deepcopy(synthetic_analysis)
     mismatched_analysis["source"]["input_jsonl_sha256"] = digest_text(
         synthetic_jsonl + "\n"
@@ -2183,6 +2491,33 @@ def self_test(
         != expected_model_count
     ):
         raise ProtocolError("model descriptive tables were not kept cohort-separate")
+    model_digest = digest_text(encode_jsonl(model_store))
+    model_packet = prepare_rescore_packet(
+        model_store,
+        model_digest,
+        clean_model_analysis,
+        manifest,
+        rescore_seed,
+        5,
+    )
+    model_assessment = rescore_assessment(
+        model_packet, digest_text("self-test-model-independent-rescore")
+    )
+    model_evidence = prepare_evidence_bundle(
+        model_store,
+        model_digest,
+        clean_model_analysis,
+        manifest,
+        rescore_seed,
+        5,
+        model_assessment,
+    )
+    if (
+        model_evidence["evidence_class"] != "model-candidate"
+        or model_evidence["subject_kind"] != "model"
+        or model_evidence["artifacts"]["comparative"] is not None
+    ):
+        raise ProtocolError("model evidence entered the human comparison bundle")
     try:
         prepare_comparative_bundle(
             model_store,
@@ -2743,6 +3078,29 @@ def parse_args(argv: Iterable[str]) -> argparse.Namespace:
     comparative.add_argument("--cohort", type=Path)
     comparative.add_argument("--authority", type=Path, required=True)
 
+    rescore = commands.add_parser(
+        "prepare-rescore",
+        help="emit an outcome-blinded deterministic sample from effective rows",
+    )
+    add_common_paths(rescore)
+    rescore.add_argument("--input", type=Path, required=True)
+    rescore.add_argument("--cohort", type=Path)
+    rescore.add_argument("--authority", type=Path, required=True)
+    rescore.add_argument("--sample-seed", required=True)
+    rescore.add_argument("--sample-size", type=int, required=True)
+
+    evidence = commands.add_parser(
+        "assemble-evidence",
+        help="verify a blinded rescore and emit one checked evidence candidate",
+    )
+    add_common_paths(evidence)
+    evidence.add_argument("--input", type=Path, required=True)
+    evidence.add_argument("--cohort", type=Path)
+    evidence.add_argument("--authority", type=Path, required=True)
+    evidence.add_argument("--sample-seed", required=True)
+    evidence.add_argument("--sample-size", type=int, required=True)
+    evidence.add_argument("--assessment", type=Path, required=True)
+
     assign = commands.add_parser(
         "assign", help="debug one seeded assignment; admitted rows always use the frozen seed"
     )
@@ -2843,6 +3201,8 @@ def main(argv: Iterable[str]) -> int:
             "prepare-analysis",
             "analyze-descriptive",
             "analyze-comparative",
+            "prepare-rescore",
+            "assemble-evidence",
         }:
             authority = load_json(args.authority)
             verify_authority_manifest(authority)
@@ -2884,6 +3244,38 @@ def main(argv: Iterable[str]) -> int:
                     )
                 )
                 return 0
+            if args.command == "prepare-rescore":
+                analysis_input = prepare_analysis_bundle(rows, input_sha256)
+                sys.stdout.write(
+                    encode_rescore_packet(
+                        prepare_rescore_packet(
+                            rows,
+                            input_sha256,
+                            analysis_input,
+                            manifest,
+                            args.sample_seed,
+                            args.sample_size,
+                        )
+                    )
+                )
+                return 0
+            if args.command == "assemble-evidence":
+                analysis_input = prepare_analysis_bundle(rows, input_sha256)
+                assessment = load_json(args.assessment)
+                sys.stdout.write(
+                    encode_evidence_bundle(
+                        prepare_evidence_bundle(
+                            rows,
+                            input_sha256,
+                            analysis_input,
+                            manifest,
+                            args.sample_seed,
+                            args.sample_size,
+                            assessment,
+                        )
+                    )
+                )
+                return 0
             print(f"validated {count} rows across {len(conditions)} conditions")
             return 0
         if args.command == "verify":
@@ -2908,6 +3300,7 @@ def main(argv: Iterable[str]) -> int:
         AnalysisError,
         ComparativeError,
         DescriptiveError,
+        EvidenceError,
     ) as error:
         print(f"readability protocol: FAIL: {error}", file=sys.stderr)
         return 1

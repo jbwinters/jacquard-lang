@@ -1,6 +1,7 @@
 # Human-first readability benchmark protocol v1
 
-Status: preregistered design; no human or model outcomes have been collected.
+Status: preregistered design and deterministic evidence mechanics; no human or
+model outcomes have been collected.
 Protocol ID: `readability-protocol-v1`.
 
 This protocol asks what readers can actually understand and change. It keeps a
@@ -269,6 +270,32 @@ not substituted into this human comparison. Synthetic output exercises the
 code as `synthetic-non-citable` and normally lacks enough subjects for a Welch
 interval.
 
+Blinded independent rescoring uses `readability-rescore-packet-v1`. Before
+outcomes are unblinded, the study operator must freeze a reviewed sample seed
+and positive sample count. The tooling does not choose or bless either value,
+and there is no built-in minimum. It SHA-256-ranks only effective rows and
+emits opaque blind IDs with fixture and submitted answer IDs. The packet omits
+carrier, source/effective row IDs, subject IDs, original correctness and error
+fields, time, confidence, ratings, and outcome statistics. An independent
+reviewer returns one decision per blind ID in packet order. Real candidate
+evidence also binds a separately retained reviewer identity/independence
+attestation by SHA-256. The verifier proves exact agreement with the frozen
+answer key; it cannot prove that the reviewer is a particular person or is
+independent. Synthetic self-checks carry no such attestation and remain
+non-citable.
+
+`readability-evidence-bundle-v1` is the publication-lineage boundary. It
+revalidates the complete store, regenerates the exact analysis, descriptive,
+and applicable human comparison objects, regenerates the rescore packet from
+the reviewed seed and count, verifies the returned assessment, and embeds each
+canonical object with its SHA-256. A model bundle remains descriptive and has
+no human carrier comparison. Every number inside the exact bundle therefore
+has checked source-byte lineage. A number copied into a paper, issue, or other
+prose is outside that machine-verified boundary unless it cites the exact
+bundle digest and JSON path. The bundle remains `not-evaluated`; publication
+authority, the reviewer's real independence, and honest interpretation are
+external facts.
+
 There is no automatic product or release gate and no minimum-human-count gate.
 Readability ideas may be proposed, implemented, and reviewed without running
 this study. Any future measured claim about people still requires real approved
@@ -320,6 +347,13 @@ python3 test/readability/readability_benchmark.py analyze-comparative \
   --authority test/readability/authority-manifest.template.json \
   --input .scratch/readability/dry-run.jsonl \
   > .scratch/readability/comparative.json
+python3 test/readability/readability_benchmark.py prepare-rescore \
+  --manifest test/readability/fixture-manifest.json \
+  --schema test/readability/result.schema.json \
+  --authority test/readability/authority-manifest.template.json \
+  --input .scratch/readability/dry-run.jsonl \
+  --sample-seed ux1-rescore-v1 --sample-size 5 \
+  > .scratch/readability/rescore-packet.json
 ```
 
 The dry run emits one synthetic, non-citable row for each of 15 conditions and
@@ -329,7 +363,10 @@ also synthetic, non-citable, and claim-free. The comparative file exercises the
 five accuracy contrasts and aggregate-time availability rules, but its
 synthetic source cannot support a human claim and its single observation per
 carrier leaves aggregate time inference unavailable. It emits no automatic
-verdict. Schedules, renderings, logs, stores, and generated bundles remain under
-`.scratch/`. Generating a schedule is planning evidence, not permission to
-collect outcomes. The
+verdict. The rescore command exercises deterministic selection and the blinded
+packet shape; it does not perform an independent review. The checked protocol
+self-test assembles a synthetic evidence bundle and adversarially verifies its
+lineage, but that output remains non-citable. Schedules, renderings, logs,
+stores, and generated bundles remain under `.scratch/`. Generating a schedule
+is planning evidence, not permission to collect outcomes. The
 [execution gate](EXECUTION.md) records the exact fail-closed boundary.

@@ -18,8 +18,8 @@ project shape from file names alone.
 - `research/readability-benchmark/PROTOCOL.md`: human-first v1 reviewer tasks,
   paired-carrier fixtures, model-family-neutral cohorts, scoring, privacy, and
   synthetic reproduction evidence for future syntax decisions.
-- `research/readability-benchmark/EXECUTION.md`: fail-closed UX.1 authority
-  boundary and deterministic human/model schedule commands.
+- `research/readability-benchmark/EXECUTION.md`: fail-closed UX.1 authority,
+  analysis, blinded-rescore, and exact evidence-lineage boundary.
 - `ci-cd.md`: GitHub gates, branch protection, and release evidence workflow.
 
 ## Core Design
