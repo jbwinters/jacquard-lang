@@ -791,6 +791,7 @@ let install_console ?(read_line = fun () -> try Stdlib.read_line () with End_of_
       match args with
       | [ Value.VText s ] ->
           out s;
+          Eval.note_root_output ctx ~operation:print_op s;
           Ok Value.unit_v
       | args ->
           Error

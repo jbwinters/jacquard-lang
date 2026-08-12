@@ -68,6 +68,11 @@
  (modules round_robin_trace)
  (libraries jacquard))
 
+(executable
+ (name run_transcript_trace)
+ (modules run_transcript_trace)
+ (libraries jacquard unix))
+
 ; the fuzz lane (task 74): seeded random pure programs through both engines.
 ; Not in the default runtest — run `dune build @native-fuzz` (1000 cases) or
 ; the executable directly with a count for the 10k pre-merge sweep.
@@ -99,7 +104,7 @@
 (test
  (name test_jacquard)
  (modules
-  (:standard \ corpus_support gen_goldens gen_surface_twins gen_prelude_goldens gen_sig_goldens gen_freeze_goldens gen_diag_goldens gen_native_parity gen_governance_playground_fixtures native_fuzz once_interpreter_probe gen_once_hostile scope_policy_trace round_robin_trace test_governance_review_diff governance_review_diff_focused))
+  (:standard \ corpus_support gen_goldens gen_surface_twins gen_prelude_goldens gen_sig_goldens gen_freeze_goldens gen_diag_goldens gen_native_parity gen_governance_playground_fixtures native_fuzz once_interpreter_probe gen_once_hostile scope_policy_trace round_robin_trace run_transcript_trace test_governance_review_diff governance_review_diff_focused))
  (libraries jacquard governance_review_diff_test_support corpus_support alcotest fmt qcheck-core qcheck-alcotest unix str yojson)
  (deps
   (glob_files_rec ../corpus/*.jqd)
