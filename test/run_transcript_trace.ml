@@ -28,7 +28,7 @@ let expression store source =
           | Ok expression -> expression
           | Error diagnostics -> fail_diagnostics diagnostics))
 
-let () =
+let record () =
   let root = fresh_store_root () in
   let store =
     match Store.open_store root with
@@ -54,3 +54,42 @@ let () =
   match result with
   | Ok _ -> print_string (Run_transcript.serialize_recorder recorder)
   | Error error -> failwith (Runtime_err.to_string error)
+
+let parsed bytes =
+  match Run_transcript.parse bytes with
+  | Ok transcript -> transcript
+  | Error ds -> fail_diagnostics ds
+
+let console_print_hash = "28570e6bcdeb8646a90b31971204be7007f658bee65154b96e587c47a6585d5e"
+
+let transcript ~value ~operation ~output ~observations =
+  Printf.sprintf
+    "jacquard-run-transcript format=1 observations=%d\n\
+     observation index=0 value-bytes=2 trace-events=1\n\
+     %s\n\
+     trace index=0 operation=%s output-bytes=%d\n\
+     %s%s"
+    observations value operation (String.length output) output
+    (if observations = 2 then "observation index=1 value-bytes=2 trace-events=0\n0\n" else "")
+
+let render_one left right =
+  match Run_transcript.compare (parsed left) (parsed right) with
+  | Run_transcript.Equal -> failwith "render fixture unexpectedly compared equal"
+  | Run_transcript.Divergence divergence ->
+      print_endline (Run_transcript.divergence_kind_name divergence.kind);
+      print_endline (Run_transcript.render divergence)
+
+let render_divergences () =
+  let left = transcript ~value:"0" ~operation:console_print_hash ~output:"left\n" ~observations:2 in
+  render_one left
+    (transcript ~value:"1" ~operation:console_print_hash ~output:"left\n" ~observations:2);
+  render_one left
+    (transcript ~value:"0" ~operation:console_print_hash ~output:"right\t" ~observations:2);
+  render_one left
+    (transcript ~value:"0" ~operation:console_print_hash ~output:"left\n" ~observations:1)
+
+let () =
+  match Array.to_list Sys.argv with
+  | [ _ ] -> record ()
+  | [ _; "render-divergences" ] -> render_divergences ()
+  | _ -> failwith "usage: run_transcript_trace.exe [render-divergences]"
