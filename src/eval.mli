@@ -51,6 +51,21 @@ val register_root_handler :
     Its arguments, continuation mutation, and result are guarded at dispatch; callback failures are
     returned as runtime errors. *)
 
+val with_root_observer :
+  ctx -> on_operation:(Hash.t -> unit) -> on_output:(Hash.t -> string -> unit) -> (unit -> 'a) -> 'a
+(** [with_root_observer ctx ~on_operation ~on_output f] installs an observation hook only for the
+    dynamic extent of [f]. [on_operation] runs exactly when an operation has crossed every language
+    handler and reached the root; [on_output] is reserved for trusted root adapters and receives
+    their explicit operation hash. The prior observer is restored even if [f] raises. Observers do
+    not participate in handler selection or scheduling; exceptions from [f] or either callback
+    propagate unchanged. *)
+
+val note_root_output : ctx -> operation:Hash.t -> string -> unit
+(** [note_root_output ctx ~operation bytes] attaches bytes accepted by a trusted root adapter to its
+    explicit operation identity, if an observer is active. It must not be used by untrusted or
+    language-level handlers. It is a no-op without an observer; an observer callback exception
+    propagates unchanged. *)
+
 val set_coverage_tracking : ctx -> bool -> unit
 (** [set_coverage_tracking ctx enabled] enables or disables term-reference coverage bookkeeping. *)
 

@@ -116,6 +116,7 @@ type mutable_graph_snapshot = {
 type mutable_snapshot = { snapshot_root : Value.t; snapshot_graph : mutable_graph_snapshot }
 type native_snapshot_entry = { snapshot : mutable_snapshot; mutable last_used : int }
 type native_snapshot_lru = { entries : native_snapshot_entry option array; mutable clock : int }
+type root_observer = { on_operation : Hash.t -> unit; on_output : Hash.t -> string -> unit }
 
 type ctx = {
   store : Store.t;
@@ -141,6 +142,8 @@ type ctx = {
   root_handlers : (Hash.t, Value.t list -> (Value.t, Runtime_err.t) result) Hashtbl.t;
       (** op hash -> granted native handler; shallow (the op resumes exactly once with the native
           result), installed only by explicit grants *)
+  mutable root_observer : root_observer option;
+      (** disabled-by-default, dynamically scoped recorder seam for root-reaching operations *)
   mutable capture_ops : bool;
       (** when set (by {!run_state_capturing}), an op that reaches the root with no handler and no
           grant is CAPTURED — returned with its continuation — instead of dying [Unhandled]; this is
@@ -182,6 +185,7 @@ let make_ctx store =
     evaluator_mutable_snapshots = Hashtbl.create 64;
     native_mutable_snapshots = { entries = Array.make 64 None; clock = 0 };
     root_handlers = Hashtbl.create 8;
+    root_observer = None;
     capture_ops = false;
     capture_root_handlers = false;
     track_coverage = true;
@@ -330,6 +334,19 @@ let reject_task_escape ctx ~scope_path root =
 (** [register_root_handler ctx op handler] installs one explicitly granted root handler. Arguments,
     continuation state, callback mutation, and callback results are guarded at dispatch time. *)
 let register_root_handler ctx op handler = Hashtbl.replace ctx.root_handlers op handler
+
+(** [with_root_observer] scopes a root-operation observer to one caller-controlled evaluation
+    extent. The saved observer is restored even across an internal runtime exception. *)
+let with_root_observer ctx ~on_operation ~on_output operation =
+  let previous = ctx.root_observer in
+  ctx.root_observer <- Some { on_operation; on_output };
+  Fun.protect ~finally:(fun () -> ctx.root_observer <- previous) operation
+
+let note_root_output ctx ~operation bytes =
+  match ctx.root_observer with Some { on_output; _ } -> on_output operation bytes | None -> ()
+
+let notify_root_operation ctx operation =
+  match ctx.root_observer with None -> () | Some observer -> observer.on_operation operation
 
 (** [set_coverage_tracking ctx enabled] controls semantic term-reference collection. Disabling it
     avoids bookkeeping when callers will not inspect coverage. *)
@@ -939,6 +956,7 @@ let perform_unchecked ctx (op : Hash.t) ~name ~effect_ (args : Value.t list) (k 
         SEval ({ h.hscope with env }, obody, outer)
     | f :: outer -> split (f :: inner_rev) outer
     | [] -> (
+        notify_root_operation ctx op;
         match Hashtbl.find_opt ctx.root_handlers op with
         | Some native when not ctx.capture_root_handlers ->
             invoke_untrusted_native ctx (VOp { op; name; effect_ }) native args k
