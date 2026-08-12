@@ -72,6 +72,8 @@
   ../run_transcript_trace.exe
   concurrency-evidence.t
   run-transcript.t
+  relate.t
+  relate-divergence.t
   ../../demos/concurrency/concurrency_evidence.exe
   ../../demos/governed-workspace/live_evidence.exe
   (source_tree ../native-parallel)

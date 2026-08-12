@@ -51,6 +51,7 @@ let diagnostic_summary = function
   | "E0608" -> "Store operation could not complete"
   | "E0609" -> "Semantic diff input could not be read"
   | "E0610" -> "Semantic diff input is invalid"
+  | "E0611" -> "Relational constituent store could not be prepared"
   | "E0702" -> "Required prelude contents are unavailable"
   | "E0704" -> "Store add accepts declarations only"
   | "E0801" -> "Compared model result types do not agree"
@@ -59,6 +60,7 @@ let diagnostic_summary = function
   | "E0908" -> "Schedule configuration or trace is invalid"
   | "E1001" -> "Test file has an expression at top level"
   | "E1002" -> "Dry-run cannot sandbox eval"
+  | "E1003" -> "Relational runs diverged"
   | "E1101" -> "Program is outside the native v1 compilation subset"
   | "E1102" -> "Program requires the interpreter tier"
   | "E1103" -> "Native build could not complete"
@@ -75,6 +77,7 @@ let diagnostic_next_step = function
   | "E0606" -> "Pass the path to an existing Jacquard store."
   | "E0608" -> "Correct the store state described here and try again."
   | "E0609" | "E0610" -> "Pass readable, valid semantic-diff inputs."
+  | "E0611" -> "Choose a writable temporary directory and try again."
   | "E0702" -> "Load the complete prelude and try again."
   | "E0704" -> "Pass declarations to `store add`, not a top-level expression."
   | "E0801" -> "Compare models whose result types agree."
@@ -83,6 +86,7 @@ let diagnostic_next_step = function
   | "E0908" -> "Correct the schedule option or trace described here."
   | "E1001" -> "Keep test files declaration-only."
   | "E1002" -> "Run this program without --dry-run or remove eval from its authority row."
+  | "E1003" -> "Review the first divergence and make the result and routed effects invariant."
   | "E1101" -> "Run the program with the interpreter or rewrite the unsupported construct."
   | "E1102" -> "Run this program with the interpreter."
   | "E1103" -> "Correct the native toolchain or build input and try again."
@@ -143,6 +147,20 @@ let fresh_governance_analysis_dir () =
   in
   at_exit (fun () -> try unlink_tree dir with Unix.Unix_error _ | Sys_error _ -> ());
   dir
+
+(* Relational constituents need collision-free stores even when several begin in one millisecond.
+   Cleanup follows no links and remains confined to the exact private directory supplied here. *)
+let fresh_relate_store_dir () = Filename.temp_dir ~perms:0o700 "jacquard-relate-" ".store"
+
+let remove_relate_store_dir dir =
+  let rec unlink_tree path =
+    match (Unix.lstat path).Unix.st_kind with
+    | Unix.S_DIR ->
+        Array.iter (fun name -> unlink_tree (Filename.concat path name)) (Sys.readdir path);
+        Unix.rmdir path
+    | _ -> Unix.unlink path
+  in
+  try unlink_tree dir with Unix.Unix_error _ | Sys_error _ -> ()
 
 let prelude_dir_of = function
   | Some d -> d
@@ -224,11 +242,12 @@ let open_ctx ~prelude ~store_dir =
 
 (* Process a file's top-level forms in order: declarations go into the store; expressions
    are handed to [on_expr]. *)
-let process_forms ?origin ?(on_decl = fun _ _ -> ()) ~syntax store ~file src ~on_expr =
+let process_forms ?origin ?(on_decl = fun _ _ -> ()) ?(emit_warnings = true) ~syntax store ~file src
+    ~on_expr =
   match parse_tops ~syntax ~names:(Store.names_view store) ~file src with
   | Error ds -> Error ds
   | Ok (tops, warnings) ->
-      print_warnings warnings;
+      if emit_warnings then print_warnings warnings;
       let rec go = function
         | [] -> Ok ()
         | parsed :: rest -> (
@@ -519,6 +538,158 @@ let run_cmd file allows prelude store_dir seed infer_cache origin dry_run schedu
                           List.iter print_diagnostic ds;
                           exit_unhandled
                       | Error ds -> print_diags ds)))))
+
+(* --- relate --- *)
+
+type relate_failure =
+  | Relate_diagnostics of Diag.t list
+  | Relate_runtime of Runtime_err.t
+  | Relate_refused of Diag.t list
+
+let relate_store_failure action error =
+  Relate_diagnostics
+    [
+      cli_diagnostic ~code:"E0611"
+        (Printf.sprintf "relate could not %s its private constituent store: %s" action
+           (Printexc.to_string error));
+    ]
+
+let protect_relate_store_operation action operation =
+  try Ok (operation ())
+  with (Sys_error _ | Unix.Unix_error _) as error -> Error (relate_store_failure action error)
+
+let relate_constituent ~file ~source ~allows ~prelude ~root_seed ~schedule_seed ~syntax
+    ~console_read ~emit_warnings =
+  match protect_relate_store_operation "create" fresh_relate_store_dir with
+  | Error failure -> Error failure
+  | Ok store_dir ->
+      Fun.protect
+        ~finally:(fun () -> remove_relate_store_dir store_dir)
+        (fun () ->
+          match
+            protect_relate_store_operation "initialize" (fun () ->
+                open_ctx ~prelude ~store_dir:(Some store_dir))
+          with
+          | Error failure -> Error failure
+          | Ok (Error diagnostics) -> Error (Relate_diagnostics diagnostics)
+          | Ok (Ok (store, ctx)) -> (
+              Eval.set_coverage_tracking ctx false;
+              let rec grant_all = function
+                | [] -> Ok ()
+                | allow :: rest -> (
+                    match
+                      Prelude.grant ~console_read ctx allow ~infer_cache:None
+                        ~out:(fun _ -> ())
+                        ~seed:root_seed
+                    with
+                    | Ok () -> grant_all rest
+                    | Error diagnostics -> Error diagnostics)
+              in
+              match grant_all allows with
+              | Error diagnostics -> Error (Relate_diagnostics diagnostics)
+              | Ok () -> (
+                  match make_checker store with
+                  | Error diagnostics -> Error (Relate_diagnostics diagnostics)
+                  | Ok checker -> (
+                      let granted = granted_hashes store allows in
+                      let recorder = Run_transcript.create () in
+                      let refused = ref None in
+                      let runtime_failure = ref None in
+                      let on_expr expression =
+                        match Check.check_top checker (Kernel.Expr expression) with
+                        | Error diagnostics -> Error diagnostics
+                        | Ok { Check.row; warnings; _ } -> (
+                            if emit_warnings then List.iter print_diagnostic warnings;
+                            match
+                              Check.manifest_errors checker ~grantable:Prelude.grantable_names
+                                ~granted
+                                (Option.value row ~default:Types.empty_row)
+                            with
+                            | _ :: _ as diagnostics ->
+                                refused := Some diagnostics;
+                                Error diagnostics
+                            | [] -> (
+                                match
+                                  Run_transcript.record_expression recorder ctx (fun () ->
+                                      Result.map
+                                        (fun (scheduled : Round_robin.scheduled) -> scheduled.value)
+                                        (Round_robin.run_expr_scheduled ctx
+                                           ~mode:
+                                             (Round_robin.Seeded_schedule { seed = schedule_seed })
+                                           expression))
+                                with
+                                | Ok _ -> Ok ()
+                                | Error error ->
+                                    runtime_failure := Some error;
+                                    Error []))
+                      in
+                      match process_forms ~emit_warnings ~syntax store ~file source ~on_expr with
+                      | Ok () -> Ok (Run_transcript.transcript recorder)
+                      | Error _ when Option.is_some !runtime_failure ->
+                          Error (Relate_runtime (Option.get !runtime_failure))
+                      | Error _ when Option.is_some !refused ->
+                          Error (Relate_refused (Option.get !refused))
+                      | Error diagnostics -> Error (Relate_diagnostics diagnostics)))))
+
+let print_relate_failure = function
+  | Relate_diagnostics diagnostics -> print_diags diagnostics
+  | Relate_refused diagnostics ->
+      List.iter print_diagnostic diagnostics;
+      exit_unhandled
+  | Relate_runtime error -> (
+      print_runtime_error error;
+      match error with Runtime_err.Unhandled _ -> exit_unhandled | _ -> exit_runtime)
+
+let relate_cmd file runs seed allows prelude syntax =
+  let source = read_file file in
+  let schedule_seeds = Relate.schedule_seeds ~root_seed:seed ~count:runs in
+  let captured_console_input = ref None in
+  let rec compare_runs baseline run_index = function
+    | [] ->
+        Printf.printf "relate runs=%d seed=%d verdict=equal\n" runs seed;
+        ok
+    | schedule_seed :: rest -> (
+        let console_read, finish_console_input =
+          match !captured_console_input with
+          | None ->
+              let reversed = ref [] in
+              ( (fun () ->
+                  let line = try Stdlib.read_line () with End_of_file -> "" in
+                  reversed := line :: !reversed;
+                  line),
+                fun () -> captured_console_input := Some (List.rev !reversed) )
+          | Some captured ->
+              let remaining = ref captured in
+              ( (fun () ->
+                  match !remaining with
+                  | line :: rest ->
+                      remaining := rest;
+                      line
+                  | [] -> ""),
+                fun () -> () )
+        in
+        match
+          relate_constituent ~file ~source ~allows ~prelude ~root_seed:seed ~schedule_seed ~syntax
+            ~console_read ~emit_warnings:(run_index = 1)
+        with
+        | Error failure -> print_relate_failure failure
+        | Ok transcript -> (
+            finish_console_input ();
+            match baseline with
+            | None -> compare_runs (Some transcript) (run_index + 1) rest
+            | Some first -> (
+                match Run_transcript.compare first transcript with
+                | Run_transcript.Equal -> compare_runs baseline (run_index + 1) rest
+                | Run_transcript.Divergence divergence ->
+                    print_diags
+                      [
+                        cli_diagnostic ~code:"E1003"
+                          (Printf.sprintf "Runs 1 and %d diverged with %s:\n%s" run_index
+                             (Run_transcript.divergence_kind_name divergence.kind)
+                             (Run_transcript.render divergence));
+                      ])))
+  in
+  compare_runs None 1 schedule_seeds
 
 (* --- check --- *)
 
@@ -1908,6 +2079,44 @@ let seed_arg =
     & info [ "seed" ] ~docv:"SEED"
         ~doc:"Seed for the dist sampling handler (default: OS entropy); use for reproducible runs.")
 
+let required_seed_arg =
+  Arg.(
+    required
+    & opt (some int) None
+    & info [ "seed" ] ~docv:"SEED"
+        ~doc:"Required root seed for reproducible relational runs and Dist sampling.")
+
+let schedule_variation =
+  let expected () = Error (`Msg "expected schedule=N with N > 0") in
+  let parse value =
+    let prefix = "schedule=" in
+    if not (String.starts_with ~prefix value) then expected ()
+    else
+      let count =
+        String.sub value (String.length prefix) (String.length value - String.length prefix)
+      in
+      let rec decimal index =
+        index = String.length count
+        || match count.[index] with '0' .. '9' -> decimal (index + 1) | _ -> false
+      in
+      if String.equal count "" || not (decimal 0) then expected ()
+      else
+        match int_of_string_opt count with
+        | Some count when count > 0 -> Ok count
+        | _ -> expected ()
+  in
+  let print formatter count = Format.fprintf formatter "schedule=%d" count in
+  Arg.conv (parse, print)
+
+let vary_arg =
+  Arg.(
+    required
+    & opt (some schedule_variation) None
+    & info [ "vary" ] ~docv:"KIND"
+        ~doc:
+          "Required variation; RW.3 supports only schedule=N with N > 0. Run 1 uses the root seed; \
+           later runs use successive SplitMix64 outputs, skipping already accepted seeds.")
+
 let infer_cache_arg =
   Arg.(
     value
@@ -1950,6 +2159,18 @@ let run_t =
       $ diagnostic_format_arg $ file_arg $ allows_arg $ prelude_arg $ store_dir_opt_arg $ seed_arg
       $ infer_cache_arg $ origin_arg $ dry_run_arg $ schedule_record_arg $ schedule_replay_arg
       $ schedule_fork_arg $ syntax_arg)
+
+let relate_t =
+  Cmd.v
+    (Cmd.info "relate"
+       ~doc:
+         "Run a .jac surface or .jqd bootstrap file under distinct deterministic schedules and \
+          compare complete result and routed-root transcripts. Console input is captured in run 1 \
+          and replayed by ordinal in later runs.")
+    Term.(
+      const (configure_diagnostics relate_cmd)
+      $ diagnostic_format_arg $ file_arg $ vary_arg $ required_seed_arg $ allows_arg $ prelude_arg
+      $ syntax_arg)
 
 let print_sigs_arg =
   Arg.(
@@ -2669,6 +2890,7 @@ let main =
     (Cmd.info "jacquard" ~version:Version.version ~doc:"The Jacquard language toolchain")
     [
       run_t;
+      relate_t;
       check_t;
       hash_t;
       fmt_t;

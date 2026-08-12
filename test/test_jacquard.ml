@@ -30,6 +30,7 @@ let () =
       ("scope-policy", Test_scope_policy.suite);
       ("round-robin", Test_round_robin.suite);
       ("run-transcript", Test_run_transcript.suite);
+      ("relate", Test_relate.suite);
       ("exhaustive-schedule", Test_exhaustive_schedule.suite);
       ("schedule-trace", Test_schedule_trace.suite);
       ("audit", Test_audit.suite);
