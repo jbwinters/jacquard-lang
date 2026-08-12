@@ -6,7 +6,7 @@ artifacts and are not retroactively updated by DX.2.
 
 ## Current inventory
 
-- Alcotest/QCheck cases: `853`
+- Alcotest/QCheck cases: `858`
 - Cram transcript files: `52`
 - Doctest examples: `28` across 8 documents
 
@@ -40,6 +40,9 @@ SX.26 adds five compiled marked-text interpolation cases, one documentation
 example, and one explicit lowering-parity twin.
 The explicit-dictionary successor adds four compiled contract cases and extends
 the existing native transcript without changing the cram or doctest counts.
+Relational Warp transcript recording adds six compiled cases and one internal
+tooling transcript; strict transcript parsing and semantic comparison add five
+compiled cases while extending that existing transcript.
 
 ## Proved behavior
 
