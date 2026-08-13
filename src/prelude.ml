@@ -1236,13 +1236,18 @@ let install_dry (ctx : Eval.ctx) ~(audit : string list ref) : (unit, Diag.t list
     this so it never suggests granting a pure effect. *)
 let grantable_names = [ "clock"; "console"; "dist"; "eval"; "fs"; "infer"; "net"; "secret" ]
 
-(** [grant ctx name ~out ~seed] installs the root handler for effect [name] (case-insensitive:
-    "Eval" and "eval" both work); [seed] feeds the dist sampling handler only. Returns E0703 for
-    effects that exist but are not grantable (e.g. [abort]) and unknown effect names alike; keep the
+(** [grant ?console_read ctx name ~out ~seed] installs the root handler for effect [name]
+    (case-insensitive: "Eval" and "eval" both work); [seed] feeds the dist sampling handler only.
+    [console_read] replaces Console's default stdin reader when supplied, allowing multi-run tools
+    to capture and replay input without changing ordinary run behavior. Returns E0703 for effects
+    that exist but are not grantable (e.g. [abort]) and unknown effect names alike; keep the
     dispatch in sync with {!grantable_names}. *)
-let grant (ctx : Eval.ctx) name ~infer_cache ~out ~seed : (unit, Diag.t list) result =
+let grant ?console_read (ctx : Eval.ctx) name ~infer_cache ~out ~seed : (unit, Diag.t list) result =
   match String.lowercase_ascii name with
-  | "console" -> install_console ctx ~out
+  | "console" -> (
+      match console_read with
+      | None -> install_console ctx ~out
+      | Some read_line -> install_console ~read_line ctx ~out)
   | "eval" -> install_eval ctx
   | "net" -> install_net ctx
   | "dist" -> install_dist ctx ~seed

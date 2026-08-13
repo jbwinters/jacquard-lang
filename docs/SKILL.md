@@ -75,6 +75,10 @@ jac run PROGRAM.jac
 jac run PROGRAM.jac --allow console --allow net
 jac run PROGRAM.jac --dry-run
 
+# Compare complete results and routed root effects under distinct schedules.
+jac relate PROGRAM.jac --vary schedule=8 --seed 42
+jac relate PROGRAM.jac --vary schedule=8 --seed 42 --allow console
+
 # Format and identify code.
 jac fmt PROGRAM.jac
 jac fmt PROGRAM.jac --write
@@ -122,6 +126,12 @@ syntactically tail-resumptive clause.
 
 Use stderr for diagnostics and stdout for successful program output. Always
 provide an explicit seed for reproducible sampling and property tests.
+`relate` success stdout is one verdict line; constituent values and Console
+output are captured rather than printed. Console input is read from the process
+only during run 1, captured by call ordinal, and replayed from a fresh cursor in
+every later run; calls beyond the captured list receive EOF (`""`). A completed
+transcript difference is Warp diagnostic E1003 and status 1. Constituent
+diagnostic, runtime, and authority failures retain statuses 1, 2, and 3.
 
 ## Surface Syntax
 

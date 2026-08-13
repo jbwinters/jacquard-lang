@@ -6,8 +6,8 @@ artifacts and are not retroactively updated by DX.2.
 
 ## Current inventory
 
-- Alcotest/QCheck cases: `858`
-- Cram transcript files: `52`
+- Alcotest/QCheck cases: `859`
+- Cram transcript files: `54`
 - Doctest examples: `28` across 8 documents
 
 The test count includes six DX.2 filesystem-boundary cases and six DX.5/DX.7
@@ -43,6 +43,9 @@ the existing native transcript without changing the cram or doctest counts.
 Relational Warp transcript recording adds six compiled cases and one internal
 tooling transcript; strict transcript parsing and semantic comparison add five
 compiled cases while extending that existing transcript.
+The RW.3 schedule relation adds one compiled deterministic seed-law case and
+two CLI transcripts covering equality, exact divergence, and preserved
+constituent failure classes.
 
 ## Proved behavior
 

@@ -1,9 +1,10 @@
 # Relational Warp lanes: testable hyperproperties
 
-Status: **RW.0 frozen for v0 (2026-08-12).** This document fixes the
-observation and variation contract for implementation tasks RW.1 through RW.7.
-It does not claim that the `SameUnder` form or `jacquard relate` command has
-shipped.
+Status: **RW.0 frozen for v0 (2026-08-12); RW.1-RW.3 schedule tooling
+shipped.** This document fixes the observation and variation contract for
+implementation tasks RW.1 through RW.7. `run-transcript-v1`, its canonical
+comparator, and `jacquard relate FILE --vary schedule=N --seed S` now ship.
+`SameUnder` and the other variation kinds remain future work.
 
 Read this document with [Warp testing](warp-testing.md),
 [structured concurrency](concurrency.md), and the
@@ -152,14 +153,44 @@ authority or an unhandled effect into a misleading equivalence result.
 ### 6. CLI exit and diagnostic contract
 
 A relational divergence is diagnostic `E1003`, written to stderr, and exits
-with status 1. The row is added to `docs/errors.md` when `relate` ships; RW.0
-reserves the code but remains a one-document design freeze. Equality exits 0.
+with status 1. RW.0 reserved the code; RW.3 now ships its row in
+`docs/errors.md`. Equality exits 0.
 
 Existing classifications remain in force: invalid command syntax uses
 Cmdliner's status 124, evaluation/runtime failure uses status 2, and an
 unhandled effect or grant refusal uses status 3. A failed constituent run
 keeps its existing diagnostic and status. `E1003` reports only a successful
 pair or set of runs whose frozen observations differ.
+
+### RW.3 shipped schedule command
+
+The shipped layer-2 surface is:
+
+    jacquard relate FILE --vary schedule=N --seed S [--allow EFFECT ...]
+
+`FILE`, `--vary`, and `--seed` are required. RW.3 accepts only positive
+`schedule=N`; malformed, non-positive, and future variation spellings are
+Cmdliner usage errors. Run 1 uses scheduler seed `S`. Later scheduler seeds are
+successive distinct `Int64.to_int` outputs from the existing SplitMix64 stream
+rooted at `S`. Dist and every other input keep root seed `S`.
+
+Each constituent gets a fresh ephemeral store, evaluator, checker, recorder,
+and seeded scheduler. Declarations and all top-level expressions run in source
+order. Grants are forwarded unchanged, authority is checked before each
+expression, and only successful expressions commit observations. Surface and
+checker warnings are emitted only for run 1. Constituent values and Console
+output do not reach success stdout; equality prints exactly
+`relate runs=N seed=S verdict=equal`.
+
+Console input is made reproducible without changing ordinary `jacquard run`.
+Run 1 reads the process Console and captures each `read-line` result by ordinal.
+Every later run gets a fresh cursor over that exact list. A later call beyond
+the captured list returns EOF (`""`) and never consumes more process input.
+
+Runs 2 through N compare with run 1 in order and stop at the first difference.
+E1003 names one-based run indices and embeds the canonical zero-based RW.2
+first-divergence frame. A constituent failure retains its ordinary status and
+is never reclassified as E1003.
 
 ## Two layers
 
@@ -186,7 +217,8 @@ than reusing an ordinary-case entry.
 
 ### Layer 2: root-driven CLI variation
 
-The CLI can vary inputs and authority available only at the root:
+The CLI can vary inputs and authority available only at the root. Schedule
+variation ships in RW.3; the other two lines remain planned:
 
     jacquard relate FILE --vary schedule=N --seed S [--allow EFFECT ...]
     jacquard relate FILE --vary secret=NAME --seed S [--allow EFFECT ...]

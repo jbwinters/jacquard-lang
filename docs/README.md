@@ -55,6 +55,8 @@ project shape from file names alone.
   deferred to C4+.
 - `warp-testing.md`: Warp test model, rows, handlers, cache, properties, and
   world lanes.
+- `relational-warp.md`: relational observation contract, canonical run
+  transcripts, and the shipped deterministic schedule-variation CLI lane.
 - `errors.md`: diagnostic code catalog.
 
 ## Release 0.1 Evidence

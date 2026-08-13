@@ -117,6 +117,7 @@ malformed source, path, or host-message byte in a string field is replaced with 
 | E0608 | unknown --kind value | `jacquard store rename --kind bogus` |
 | E0609 | invalid, mismatched, or unreadable diff operands | diffing a file against a store |
 | E0610 | diff source contains a top-level expression | diffing a runnable script instead of declarations |
+| E0611 | relational constituent store cannot be created or initialized | running `jacquard relate` with an unusable temporary directory |
 
 ## Prelude and grants (E07xx)
 
@@ -185,6 +186,7 @@ also emits E0817; consuming the captured resumption twice emits E0816.
 |------|---------|---------|
 | E1001 | expression at top level of a test file | `jacquard test file.jqd` where the file ends with `(app (var main))` |
 | E1002 | eval under --dry-run | a program whose row includes `eval` run with `--dry-run` |
+| E1003 | completed relational runs have different result or routed-root transcripts | `jacquard relate program.jac --vary schedule=8 --seed 42` finds a schedule-dependent result |
 | E1004 | malformed, unsupported, or noncanonical run-transcript-v1 bytes | a transcript with a noncontiguous observation index or truncated payload |
 
 ## Native compilation (E11xx)
