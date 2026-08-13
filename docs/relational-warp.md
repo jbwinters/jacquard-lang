@@ -1,8 +1,9 @@
 # Relational Warp lanes: testable hyperproperties
 
 Status: **RW.0 frozen for v0 (2026-08-12); RW.1-RW.4 schedule and Secret tooling
-shipped.** This document fixes the observation and variation contract for
-implementation tasks RW.1 through RW.7. `run-transcript-v1`, its canonical
+shipped; the RW.5 grant-presence contract is frozen below pending
+implementation.** This document fixes the observation and variation contract
+for implementation tasks RW.1 through RW.7. `run-transcript-v1`, its canonical
 comparator, and `jacquard relate FILE --vary schedule=N|secret=NAME --seed S`
 now ship. `SameUnder` and the other variation kinds remain future work.
 
@@ -220,6 +221,53 @@ other transformations, and it does not observe arguments or return values of
 non-Console operations. Passing evidence remains scoped to the selected
 program, name, and seed.
 
+### RW.5 grant-presence decision
+
+The third layer-2 spelling is:
+
+    jacquard relate FILE --vary grant=EFFECT --seed S
+
+It executes exactly two isolated constituents. Run 1 is live and receives
+exactly the selected root grant. Run 2 installs the existing dry world. Both
+use scheduler seed `S`; the live Dist handler uses `S`, while the dry Dist
+handler retains its released seed-0 simulation. Additional `--allow` options
+are refused in this mode because they would obscure which authority changed.
+Schedule and Secret variation keep their existing repeatable grants.
+
+Grant variation compares only the ordered result-value bytes from successful
+top-level expressions. It deliberately projects away every routed trace event,
+Console-output payload, and dry audit entry. A pass therefore states only that
+the program's rendered answers are independent of the selected live versus dry
+handler. It does not claim equal calls, costs, latency, audit records, external
+state, or other consequences. The first constituent is genuinely live; this
+command is evidence, not a safety preview.
+
+Eligibility is decided for the whole effect row, not an operation spelling
+inside it. Names are matched case-insensitively:
+
+| Effect | Decision | Reason |
+|---|---|---|
+| `net` | accept | `fetch` has a non-forwarding dry response surrogate |
+| `infer` | accept | `complete` has a non-forwarding dry text surrogate |
+| `dist` | accept | successful root sampling has a consequence-free seed-0 dry surrogate; root `observe` fails in both modes |
+| `console` | refuse | dry-run forwards it unchanged and the row includes output |
+| `clock` | refuse | dry-run forwards it unchanged and the row includes waiting |
+| `fs` | refuse | one row mixes forwarded reads with audited mutation |
+| `eval` | refuse | dynamic root execution has no safe dry handler |
+| `secret` | refuse | the Secret contract deliberately installs no dry resolver |
+
+Unknown, unimplemented, and nongrantable effects are refused too. Every
+ineligible spelling is a Cmdliner usage error that names the reason and exits
+124; it is not a constituent failure. This prevents a unit-returning writer
+from producing a vacuous equality merely because both handlers returned `()`.
+
+Result differences reuse E1003 and the RW.2 first-divergence renderer. Only
+`value-divergence` and result-list `length-divergence` can arise from this
+projection; the live result is the minus side and the dry result is the plus
+side. Equality retains the shared success line
+`relate runs=2 seed=S verdict=equal`. Constituent diagnostics, runtime errors,
+and authority refusals retain the frozen statuses 1, 2, and 3.
+
 ## Two layers
 
 ### Layer 1: hermetic Warp cases
@@ -246,8 +294,8 @@ than reusing an ordinary-case entry.
 ### Layer 2: root-driven CLI variation
 
 The CLI can vary inputs and authority available only at the root. Schedule
-variation ships in RW.3 and Secret variation ships in RW.4; grant variation
-remains planned:
+variation ships in RW.3, Secret variation ships in RW.4, and RW.5 fixes the
+grant-presence contract above:
 
     jacquard relate FILE --vary schedule=N --seed S [--allow EFFECT ...]
     jacquard relate FILE --vary secret=NAME --seed S [--allow EFFECT ...]
@@ -256,10 +304,10 @@ remains planned:
 Schedule variation derives distinct schedule seeds and compares each complete
 run transcript with the first. Secret variation derives two distinct payloads
 for the named root secret, forwards the same grants to both runs, and compares
-their complete transcripts under the redaction rule. Grant variation requires
-an additional reviewed projection and effect-eligibility decision before it
-ships; RW.5 owns that addendum because live and dry write-shaped effects are
-not generally transcript-equivalent.
+their complete transcripts under the redaction rule. Grant variation compares
+only rendered answers and admits only the three answer-bearing effects with
+non-forwarding dry surrogates. Write-shaped, forwarded, and unsupported dry
+effects are refused before execution.
 
 ## Interactions and evidence
 
@@ -275,6 +323,10 @@ not generally transcript-equivalent.
   instrument from becoming vacuous.
 - A `VaryWorld` pair with unequal elaborated rows must be refused during
   checking; equal-row live and dry handlers can then be compared as values.
+- Grant-presence equality is intentionally narrower than schedule or Secret
+  equality: it projects away traces and audits. Use it to establish answer
+  independence, never to claim that a live call and its rehearsal had equal
+  consequences.
 
 ## Compatibility boundaries
 
