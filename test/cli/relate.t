@@ -6,10 +6,12 @@ run options.
   $ jacquard relate --help=plain
   NAME
          jacquard-relate - Run a .jac surface or .jqd bootstrap file under
-         deterministic schedule or secret variation and compare complete result
-         and routed-root transcripts. Console input is captured in run 1 and
-         replayed by ordinal in later runs; derived secret payloads are
-         redacted from diagnostics without weakening raw comparison.
+         deterministic schedule, secret, or grant variation. Schedule and
+         Secret compare complete result and routed-root transcripts; grant
+         variation compares rendered results only. Console input is captured in
+         run 1 and replayed by ordinal in later schedule/Secret runs; derived
+         secret payloads are redacted from diagnostics without weakening raw
+         comparison.
   
   SYNOPSIS
          jacquard relate [OPTION]… FILE
@@ -41,6 +43,9 @@ run options.
              thereafter. secret=NAME runs twice at the root schedule, injects
              two deterministic payloads for the named latest Secret, and
              redacts either payload from every diagnostic boundary.
+             grant=net|infer|dist compares only rendered results from one live
+             grant and its dry twin; grant=dist requires nonzero S and grant
+             mode accepts no --allow options.
   
   COMMON OPTIONS
          --help[=FMT] (default=auto)
@@ -119,15 +124,18 @@ the two supported forms.
 
   $ jacquard relate stable.jac --vary nope --seed 1
   Usage: jacquard relate [--help] [OPTION]… FILE
-  jacquard: option '--vary': expected schedule=N with N > 0 or secret=NAME
+  jacquard: option '--vary': expected schedule=N with N > 0, secret=NAME, or
+            grant=net|infer|dist
   [124]
   $ jacquard relate stable.jac --vary schedule=0 --seed 1
   Usage: jacquard relate [--help] [OPTION]… FILE
-  jacquard: option '--vary': expected schedule=N with N > 0 or secret=NAME
+  jacquard: option '--vary': expected schedule=N with N > 0, secret=NAME, or
+            grant=net|infer|dist
   [124]
   $ jacquard relate stable.jac --vary secret= --seed 1
   Usage: jacquard relate [--help] [OPTION]… FILE
-  jacquard: option '--vary': expected schedule=N with N > 0 or secret=NAME
+  jacquard: option '--vary': expected schedule=N with N > 0, secret=NAME, or
+            grant=net|infer|dist
   [124]
   $ jacquard relate stable.jac --seed 1
   Usage: jacquard relate [--help] [OPTION]… FILE

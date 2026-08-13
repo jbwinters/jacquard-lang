@@ -186,7 +186,7 @@ also emits E0817; consuming the captured resumption twice emits E0816.
 |------|---------|---------|
 | E1001 | expression at top level of a test file | `jacquard test file.jqd` where the file ends with `(app (var main))` |
 | E1002 | eval under --dry-run | a program whose row includes `eval` run with `--dry-run` |
-| E1003 | completed relational runs have different result or routed-root transcripts | schedule variation finds a race, or `--vary secret=token` finds payload-dependent Console output and renders both payloads redacted |
+| E1003 | completed relational runs differ under their selected observation projection | schedule variation finds a race, Secret variation finds redacted payload-dependent Console output, or grant variation finds different live/dry result values |
 | E1004 | malformed, unsupported, or noncanonical run-transcript-v1 bytes | a transcript with a noncontiguous observation index or truncated payload |
 
 ## Native compilation (E11xx)

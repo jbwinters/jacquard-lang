@@ -1,11 +1,11 @@
 # Relational Warp lanes: testable hyperproperties
 
-Status: **RW.0 frozen for v0 (2026-08-12); RW.1-RW.4 schedule and Secret tooling
-shipped; the RW.5 grant-presence contract is frozen below pending
-implementation.** This document fixes the observation and variation contract
-for implementation tasks RW.1 through RW.7. `run-transcript-v1`, its canonical
-comparator, and `jacquard relate FILE --vary schedule=N|secret=NAME --seed S`
-now ship. `SameUnder` and the other variation kinds remain future work.
+Status: **RW.0 frozen for v0 (2026-08-12); RW.1-RW.5 schedule, Secret, and
+grant-presence tooling shipped.** This document fixes the observation and
+variation contract for implementation tasks RW.1 through RW.7.
+`run-transcript-v1`, its canonical comparators, and all three root-driven
+`jacquard relate` variation modes now ship. `SameUnder` and the other variation
+kinds remain future work.
 
 Read this document with [Warp testing](warp-testing.md),
 [structured concurrency](concurrency.md), and the
@@ -221,7 +221,7 @@ other transformations, and it does not observe arguments or return values of
 non-Console operations. Passing evidence remains scoped to the selected
 program, name, and seed.
 
-### RW.5 grant-presence decision
+### RW.5 shipped grant-presence command
 
 The third layer-2 spelling is:
 
@@ -299,7 +299,7 @@ than reusing an ordinary-case entry.
 ### Layer 2: root-driven CLI variation
 
 The CLI can vary inputs and authority available only at the root. Schedule
-variation ships in RW.3, Secret variation ships in RW.4, and RW.5 fixes the
+variation ships in RW.3, Secret variation ships in RW.4, and RW.5 ships the
 grant-presence contract above:
 
     jacquard relate FILE --vary schedule=N --seed S [--allow EFFECT ...]

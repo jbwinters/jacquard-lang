@@ -70,6 +70,12 @@ val compare : transcript -> transcript -> verdict
     Within an event the operation identity precedes its output. It is pure and total, and returns
     [Equal] exactly when [serialize left] and [serialize right] are byte-equal. *)
 
+val compare_values : transcript -> transcript -> verdict
+(** [compare_values left right] compares only the ordered result-value bytes and ignores every
+    routed event and output byte. A strict-prefix divergence renders the present value against
+    [Missing_side], never an observation summary, so this projection cannot disclose trace counts or
+    operation identities. It is pure and total. *)
+
 val position_path : position -> string
 (** [position_path position] returns the stable [observation[I]]-style path used by the renderer. *)
 
