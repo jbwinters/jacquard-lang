@@ -200,6 +200,10 @@ let test_environment_and_vault_boundaries () =
     "environment key is collision-free and versioned" "JACQUARD_SECRET_V0_617069_VERSION_7632"
     (Prelude.secret_environment_key ~name:"api" ~version:(Some "v2"));
   Alcotest.(check string)
+    "latest environment key uses the recovered night-shift name"
+    "JACQUARD_SECRET_V0_6e696768742d73686966742d746f6b656e_LATEST"
+    (Prelude.secret_environment_key ~name:"night-shift-token" ~version:None);
+  Alcotest.(check string)
     "environment result stays opaque" "<secret redacted>"
     (Value.show (eval (read_ref "api" (Some "v2"))));
   Alcotest.(check (list string))

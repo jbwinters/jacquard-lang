@@ -75,9 +75,10 @@ jac run PROGRAM.jac
 jac run PROGRAM.jac --allow console --allow net
 jac run PROGRAM.jac --dry-run
 
-# Compare complete results and routed root effects under distinct schedules.
+# Compare complete results and routed root effects under controlled variation.
 jac relate PROGRAM.jac --vary schedule=8 --seed 42
 jac relate PROGRAM.jac --vary schedule=8 --seed 42 --allow console
+jac relate PROGRAM.jac --vary secret=deploy-token --seed 42 --allow secret
 
 # Format and identify code.
 jac fmt PROGRAM.jac
@@ -132,6 +133,11 @@ only during run 1, captured by call ordinal, and replayed from a fresh cursor in
 every later run; calls beyond the captured list receive EOF (`""`). A completed
 transcript difference is Warp diagnostic E1003 and status 1. Constituent
 diagnostic, runtime, and authority failures retain statuses 1, 2, and 3.
+Secret variation runs exactly twice with distinct deterministic latest-version
+payloads for the named Secret while holding the scheduler and Dist seed fixed.
+It compares the raw transcripts, then redacts either derived payload from all
+text, JSON, runtime, and unexpected-error output. This exact-byte scrubber is
+not taint tracking and does not detect transformed or fragmented payloads.
 
 ## Surface Syntax
 

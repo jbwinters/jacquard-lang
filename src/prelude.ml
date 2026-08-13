@@ -1236,13 +1236,16 @@ let install_dry (ctx : Eval.ctx) ~(audit : string list ref) : (unit, Diag.t list
     this so it never suggests granting a pure effect. *)
 let grantable_names = [ "clock"; "console"; "dist"; "eval"; "fs"; "infer"; "net"; "secret" ]
 
-(** [grant ?console_read ctx name ~out ~seed] installs the root handler for effect [name]
-    (case-insensitive: "Eval" and "eval" both work); [seed] feeds the dist sampling handler only.
-    [console_read] replaces Console's default stdin reader when supplied, allowing multi-run tools
-    to capture and replay input without changing ordinary run behavior. Returns E0703 for effects
-    that exist but are not grantable (e.g. [abort]) and unknown effect names alike; keep the
+(** [grant ?console_read ?secret_getenv ctx name ~out ~seed] installs the root handler for effect
+    [name] (case-insensitive: "Eval" and "eval" both work); [seed] feeds the dist sampling handler
+    only. [console_read] replaces Console's default stdin reader when supplied, allowing multi-run
+    tools to capture and replay input without changing ordinary run behavior. [secret_getenv]
+    replaces only the Secret environment adapter when supplied; embeddings can therefore provide an
+    isolated lookup overlay without mutating process-global environment state. Returns E0703 for
+    effects that exist but are not grantable (e.g. [abort]) and unknown effect names alike; keep the
     dispatch in sync with {!grantable_names}. *)
-let grant ?console_read (ctx : Eval.ctx) name ~infer_cache ~out ~seed : (unit, Diag.t list) result =
+let grant ?console_read ?secret_getenv (ctx : Eval.ctx) name ~infer_cache ~out ~seed :
+    (unit, Diag.t list) result =
   match String.lowercase_ascii name with
   | "console" -> (
       match console_read with
@@ -1254,7 +1257,7 @@ let grant ?console_read (ctx : Eval.ctx) name ~infer_cache ~out ~seed : (unit, D
   | "clock" -> install_clock ctx
   | "fs" -> install_fs ctx
   | "infer" -> install_infer ?cache_dir:infer_cache ctx
-  | "secret" -> install_secret_environment ctx
+  | "secret" -> install_secret_environment ?getenv:secret_getenv ctx
   | other -> err ~code:"E0703" "effect `%s` is not grantable" other
 
 (** Builtin type signatures for the checker (W3.2): the marker bodies would type as [code], so the

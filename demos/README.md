@@ -37,6 +37,10 @@ in one program.
 - `case-studies/release-risk/`: one release policy under concrete and
   probabilistic telemetry handlers, with a conditioned risk posterior and a
   Warp safety proof over all 18 worlds.
+- `case-studies/night-shift/`: one unattended maintenance shift spanning exact
+  risk, concurrent probes, approval-bound code, an opaque deploy token, and a
+  relational lane proving that two derived token payloads leave the complete
+  observable run unchanged without entering its transcript.
 - `governed-workspace/`: one unchanged Workspace-only deployment agent under
   pure dry simulation, nested live policies, a durable approval-queue denial,
   a verified audit chain, and the existing exhaustive hostile fault space.

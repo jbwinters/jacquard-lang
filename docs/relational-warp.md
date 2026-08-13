@@ -1,10 +1,10 @@
 # Relational Warp lanes: testable hyperproperties
 
-Status: **RW.0 frozen for v0 (2026-08-12); RW.1-RW.3 schedule tooling
+Status: **RW.0 frozen for v0 (2026-08-12); RW.1-RW.4 schedule and Secret tooling
 shipped.** This document fixes the observation and variation contract for
 implementation tasks RW.1 through RW.7. `run-transcript-v1`, its canonical
-comparator, and `jacquard relate FILE --vary schedule=N --seed S` now ship.
-`SameUnder` and the other variation kinds remain future work.
+comparator, and `jacquard relate FILE --vary schedule=N|secret=NAME --seed S`
+now ship. `SameUnder` and the other variation kinds remain future work.
 
 Read this document with [Warp testing](warp-testing.md),
 [structured concurrency](concurrency.md), and the
@@ -192,6 +192,34 @@ E1003 names one-based run indices and embeds the canonical zero-based RW.2
 first-divergence frame. A constituent failure retains its ordinary status and
 is never reclassified as E1003.
 
+### RW.4 shipped Secret command
+
+The second shipped layer-2 surface is:
+
+    jacquard relate FILE --vary secret=NAME --seed S [--allow EFFECT ...]
+
+It executes exactly two isolated constituents with scheduler and Dist seed
+`S`. The first two full-width SplitMix64 outputs rooted at `S` become printable
+payloads `rw-secret-v0-a-%016Lx` and `rw-secret-v0-b-%016Lx`. Only the canonical
+latest key `JACQUARD_SECRET_V0_<lowercase-name-byte-hex>_LATEST` is overridden;
+unrelated and versioned environment lookups retain their ordinary process
+values. The overlay is local to each fresh evaluator and never mutates the
+process environment.
+
+The command forwards grants unchanged and therefore still requires
+`--allow secret` when the program reaches Secret. It compares the complete raw
+transcripts before applying redaction, so two exposed payloads sent to Console
+remain a real trace divergence. Only presentation replaces every exact derived
+payload occurrence with `<secret redacted>`, searching raw bytes before string
+or JSON escaping. The same final boundary covers warnings, constituent
+diagnostics, runtime errors, and unexpected process reports.
+
+This is an exact-byte guarantee for the two derived payloads, not taint
+tracking. It does not claim detection of fragments, hashes, encodings, or
+other transformations, and it does not observe arguments or return values of
+non-Console operations. Passing evidence remains scoped to the selected
+program, name, and seed.
+
 ## Two layers
 
 ### Layer 1: hermetic Warp cases
@@ -218,7 +246,8 @@ than reusing an ordinary-case entry.
 ### Layer 2: root-driven CLI variation
 
 The CLI can vary inputs and authority available only at the root. Schedule
-variation ships in RW.3; the other two lines remain planned:
+variation ships in RW.3 and Secret variation ships in RW.4; grant variation
+remains planned:
 
     jacquard relate FILE --vary schedule=N --seed S [--allow EFFECT ...]
     jacquard relate FILE --vary secret=NAME --seed S [--allow EFFECT ...]

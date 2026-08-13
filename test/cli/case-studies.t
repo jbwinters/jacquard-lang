@@ -56,3 +56,14 @@ Stormglass compares naive and resilient checkout policies under the exact same
   PASS stormglass-suite/stormglass/no world drives resilient past its fetch budget (verified exhaustively (27 cases))
   PASS stormglass-suite/stormglass/payment down is never sold as a clear day (verified exhaustively (27 cases))
   5 passed, 0 failed, 0 skipped, 0 refused
+
+Night-shift runs the recovered flagship launcher end to end. This excerpt pins
+the relational lane after the existing granted execution: two distinct
+deploy-token payloads produce one equal observable shift and neither reaches
+the transcript.
+
+  $ JACQUARD=jac sh "$D/night-shift/run.sh" 2>&1 | sed -n '/^== relational:/,/^== Warp:/p'
+  == relational: two deploy tokens, one observable shift ==
+  relate runs=2 seed=42 verdict=equal
+  secret variation stayed redacted
+  == Warp: pinned schedules, stubbed lever, sampled properties ==

@@ -74,6 +74,8 @@
   run-transcript.t
   relate.t
   relate-divergence.t
+  relate-secret-no-leak.t
+  relate-secret-leak.t
   ../../demos/concurrency/concurrency_evidence.exe
   ../../demos/governed-workspace/live_evidence.exe
   (source_tree ../native-parallel)

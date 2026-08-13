@@ -6,9 +6,10 @@ run options.
   $ jacquard relate --help=plain
   NAME
          jacquard-relate - Run a .jac surface or .jqd bootstrap file under
-         distinct deterministic schedules and compare complete result and
-         routed-root transcripts. Console input is captured in run 1 and
-         replayed by ordinal in later runs.
+         deterministic schedule or secret variation and compare complete result
+         and routed-root transcripts. Console input is captured in run 1 and
+         replayed by ordinal in later runs; derived secret payloads are
+         redacted from diagnostics without weakening raw comparison.
   
   SYNOPSIS
          jacquard relate [OPTION]… FILE
@@ -35,9 +36,11 @@ run options.
              bootstrap/jqd.
   
          --vary=KIND (required)
-             Required variation; RW.3 supports only schedule=N with N > 0. Run
-             1 uses the root seed; later runs use successive SplitMix64
-             outputs, skipping already accepted seeds.
+             Required variation. schedule=N with N > 0 uses the root scheduler
+             seed for run 1 and successive distinct SplitMix64 outputs
+             thereafter. secret=NAME runs twice at the root schedule, injects
+             two deterministic payloads for the named latest Secret, and
+             redacts either payload from every diagnostic boundary.
   
   COMMON OPTIONS
          --help[=FMT] (default=auto)
@@ -111,20 +114,20 @@ of escaping through the CLI's unexpected-internal-error boundary.
   error[E0611]: Relational constituent store could not be prepared
   1
 
-Every malformed, non-positive, or unsupported variation is a Cmdliner usage
-error and names the only supported schedule=N form.
+Every malformed or non-positive variation is a Cmdliner usage error and names
+the two supported forms.
 
   $ jacquard relate stable.jac --vary nope --seed 1
   Usage: jacquard relate [--help] [OPTION]… FILE
-  jacquard: option '--vary': expected schedule=N with N > 0
+  jacquard: option '--vary': expected schedule=N with N > 0 or secret=NAME
   [124]
   $ jacquard relate stable.jac --vary schedule=0 --seed 1
   Usage: jacquard relate [--help] [OPTION]… FILE
-  jacquard: option '--vary': expected schedule=N with N > 0
+  jacquard: option '--vary': expected schedule=N with N > 0 or secret=NAME
   [124]
-  $ jacquard relate stable.jac --vary secret=name --seed 1
+  $ jacquard relate stable.jac --vary secret= --seed 1
   Usage: jacquard relate [--help] [OPTION]… FILE
-  jacquard: option '--vary': expected schedule=N with N > 0
+  jacquard: option '--vary': expected schedule=N with N > 0 or secret=NAME
   [124]
   $ jacquard relate stable.jac --seed 1
   Usage: jacquard relate [--help] [OPTION]… FILE
