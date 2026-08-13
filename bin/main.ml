@@ -544,8 +544,20 @@ let run_cmd file allows prelude store_dir seed infer_cache origin dry_run schedu
 
 (* --- relate --- *)
 
-type relate_variation = Schedule_variation of int | Secret_variation of string
-type relate_run = { schedule_seed : int; secret_getenv : (string -> string option) option }
+type relate_variation =
+  | Schedule_variation of int
+  | Secret_variation of string
+  | Grant_variation of string
+
+type relate_authority = Explicit_grants of string list | Dry_world
+
+type relate_run = {
+  schedule_seed : int;
+  secret_getenv : (string -> string option) option;
+  authority : relate_authority;
+}
+
+type relate_comparison = Complete_transcript | Result_values
 
 type relate_failure =
   | Relate_diagnostics of Diag.t list
@@ -564,7 +576,7 @@ let protect_relate_store_operation action operation =
   try Ok (operation ())
   with (Sys_error _ | Unix.Unix_error _) as error -> Error (relate_store_failure action error)
 
-let relate_constituent ~file ~source ~allows ~prelude ~root_seed ~schedule_seed ~secret_getenv
+let relate_constituent ~file ~source ~authority ~prelude ~root_seed ~schedule_seed ~secret_getenv
     ~syntax ~console_read ~emit_warnings =
   match protect_relate_store_operation "create" fresh_relate_store_dir with
   | Error failure -> Error failure
@@ -591,13 +603,20 @@ let relate_constituent ~file ~source ~allows ~prelude ~root_seed ~schedule_seed 
                     | Ok () -> grant_all rest
                     | Error diagnostics -> Error diagnostics)
               in
-              match grant_all allows with
+              let audit = ref [] in
+              let grants_result, granted =
+                match authority with
+                | Explicit_grants allows -> (grant_all allows, granted_hashes store allows)
+                | Dry_world ->
+                    ( Prelude.install_dry ctx ~audit,
+                      granted_hashes store [ "console"; "clock"; "fs"; "net"; "infer"; "dist" ] )
+              in
+              match grants_result with
               | Error diagnostics -> Error (Relate_diagnostics diagnostics)
               | Ok () -> (
                   match make_checker store with
                   | Error diagnostics -> Error (Relate_diagnostics diagnostics)
                   | Ok checker -> (
-                      let granted = granted_hashes store allows in
                       let recorder = Run_transcript.create () in
                       let refused = ref None in
                       let runtime_failure = ref None in
@@ -647,13 +666,15 @@ let print_relate_failure = function
       match error with Runtime_err.Unhandled _ -> exit_unhandled | _ -> exit_runtime)
 
 let relate_cmd file variation seed allows prelude syntax =
-  let runs, secrets, run_specs =
+  let runs, secrets, comparison, run_specs =
     match variation with
     | Schedule_variation count ->
         ( count,
           [],
+          Complete_transcript,
           List.map
-            (fun schedule_seed -> { schedule_seed; secret_getenv = None })
+            (fun schedule_seed ->
+              { schedule_seed; secret_getenv = None; authority = Explicit_grants allows })
             (Relate.schedule_seeds ~root_seed:seed ~count) )
     | Secret_variation name ->
         let first, second = Relate.secret_payloads ~root_seed:seed in
@@ -662,9 +683,25 @@ let relate_cmd file variation seed allows prelude syntax =
           let secret_getenv requested =
             if String.equal requested target_key then Some payload else Sys.getenv_opt requested
           in
-          { schedule_seed = seed; secret_getenv = Some secret_getenv }
+          {
+            schedule_seed = seed;
+            secret_getenv = Some secret_getenv;
+            authority = Explicit_grants allows;
+          }
         in
-        (2, [ first; second ], [ run first; run second ])
+        (2, [ first; second ], Complete_transcript, [ run first; run second ])
+    | Grant_variation grant_name ->
+        ( 2,
+          [],
+          Result_values,
+          [
+            {
+              schedule_seed = seed;
+              secret_getenv = None;
+              authority = Explicit_grants [ grant_name ];
+            };
+            { schedule_seed = seed; secret_getenv = None; authority = Dry_world };
+          ] )
   in
   selected_output_sanitizer := Relate.redact ~secrets;
   let source = read_file file in
@@ -673,7 +710,7 @@ let relate_cmd file variation seed allows prelude syntax =
     | [] ->
         Printf.printf "relate runs=%d seed=%d verdict=equal\n" runs seed;
         ok
-    | ({ schedule_seed; secret_getenv } : relate_run) :: rest -> (
+    | ({ schedule_seed; secret_getenv; authority } : relate_run) :: rest -> (
         let console_read, finish_console_input =
           match !captured_console_input with
           | None ->
@@ -694,7 +731,7 @@ let relate_cmd file variation seed allows prelude syntax =
                 fun () -> () )
         in
         match
-          relate_constituent ~file ~source ~allows ~prelude ~root_seed:seed ~schedule_seed
+          relate_constituent ~file ~source ~authority ~prelude ~root_seed:seed ~schedule_seed
             ~secret_getenv ~syntax ~console_read ~emit_warnings:(run_index = 1)
         with
         | Error failure -> print_relate_failure failure
@@ -703,12 +740,24 @@ let relate_cmd file variation seed allows prelude syntax =
             match baseline with
             | None -> compare_runs (Some transcript) (run_index + 1) rest
             | Some first -> (
-                match Run_transcript.compare first transcript with
+                let verdict =
+                  match comparison with
+                  | Complete_transcript -> Run_transcript.compare first transcript
+                  | Result_values -> Run_transcript.compare_values first transcript
+                in
+                match verdict with
                 | Run_transcript.Equal -> compare_runs baseline (run_index + 1) rest
                 | Run_transcript.Divergence divergence ->
+                    let hint =
+                      match comparison with
+                      | Complete_transcript -> diagnostic_next_step "E1003"
+                      | Result_values ->
+                          "Review the first divergence and make the rendered result values \
+                           invariant. Routed effects and audits are outside this comparison."
+                    in
                     print_diags
                       [
-                        cli_diagnostic ~code:"E1003"
+                        cli_diagnostic ~hint ~code:"E1003"
                           (Printf.sprintf "Runs 1 and %d diverged with %s:\n%s" run_index
                              (Run_transcript.divergence_kind_name divergence.kind)
                              (Run_transcript.render_redacted ~redact:(Relate.redact ~secrets)
@@ -2113,10 +2162,26 @@ let required_seed_arg =
         ~doc:"Required root seed for reproducible relational runs and Dist sampling.")
 
 let relate_variation =
-  let expected () = Error (`Msg "expected schedule=N with N > 0 or secret=NAME") in
+  let expected () =
+    Error (`Msg "expected schedule=N with N > 0, secret=NAME, or grant=net|infer|dist")
+  in
+  let grant value =
+    match String.lowercase_ascii value with
+    | ("net" | "infer" | "dist") as grant_name -> Ok (Grant_variation grant_name)
+    | "console" ->
+        Error
+          (`Msg "grant=console is refused: dry-run forwards Console and its row includes output")
+    | "clock" ->
+        Error (`Msg "grant=clock is refused: dry-run forwards Clock and its row includes waiting")
+    | "fs" -> Error (`Msg "grant=fs is refused: Fs mixes forwarded reads with audited mutation")
+    | "eval" -> Error (`Msg "grant=eval is refused: dynamic root execution has no safe dry handler")
+    | "secret" -> Error (`Msg "grant=secret is refused: Secret deliberately has no dry resolver")
+    | _ -> expected ()
+  in
   let parse value =
     let schedule_prefix = "schedule=" in
     let secret_prefix = "secret=" in
+    let grant_prefix = "grant=" in
     if String.starts_with ~prefix:schedule_prefix value then
       let count =
         String.sub value (String.length schedule_prefix)
@@ -2137,11 +2202,18 @@ let relate_variation =
           (String.length value - String.length secret_prefix)
       in
       if String.equal name "" then expected () else Ok (Secret_variation name)
+    else if String.starts_with ~prefix:grant_prefix value then
+      let grant_name =
+        String.sub value (String.length grant_prefix)
+          (String.length value - String.length grant_prefix)
+      in
+      grant grant_name
     else expected ()
   in
   let print formatter = function
     | Schedule_variation count -> Format.fprintf formatter "schedule=%d" count
     | Secret_variation name -> Format.fprintf formatter "secret=%s" name
+    | Grant_variation grant_name -> Format.fprintf formatter "grant=%s" grant_name
   in
   Arg.conv (parse, print)
 
@@ -2154,7 +2226,9 @@ let vary_arg =
           "Required variation. schedule=N with N > 0 uses the root scheduler seed for run 1 and \
            successive distinct SplitMix64 outputs thereafter. secret=NAME runs twice at the root \
            schedule, injects two deterministic payloads for the named latest Secret, and redacts \
-           either payload from every diagnostic boundary.")
+           either payload from every diagnostic boundary. grant=net|infer|dist compares only \
+           rendered results from one live grant and its dry twin; grant=dist requires nonzero S \
+           and grant mode accepts no --allow options.")
 
 let infer_cache_arg =
   Arg.(
@@ -2199,18 +2273,35 @@ let run_t =
       $ infer_cache_arg $ origin_arg $ dry_run_arg $ schedule_record_arg $ schedule_replay_arg
       $ schedule_fork_arg $ syntax_arg)
 
+let relate_term format file variation seed allows prelude syntax =
+  selected_diagnostic_format := format;
+  match variation with
+  | Grant_variation _ when allows <> [] ->
+      `Error
+        ( true,
+          "grant variation does not accept --allow; the selected grant is the only live root \
+           authority" )
+  | Grant_variation "dist" when seed = 0 ->
+      `Error
+        ( true,
+          "grant=dist requires a nonzero --seed so the live sampler differs from the dry seed-0 \
+           sampler" )
+  | Schedule_variation _ | Secret_variation _ | Grant_variation _ ->
+      `Ok (relate_cmd file variation seed allows prelude syntax)
+
 let relate_t =
   Cmd.v
     (Cmd.info "relate"
        ~doc:
-         "Run a .jac surface or .jqd bootstrap file under deterministic schedule or secret \
-          variation and compare complete result and routed-root transcripts. Console input is \
-          captured in run 1 and replayed by ordinal in later runs; derived secret payloads are \
-          redacted from diagnostics without weakening raw comparison.")
+         "Run a .jac surface or .jqd bootstrap file under deterministic schedule, secret, or grant \
+          variation. Schedule and Secret compare complete result and routed-root transcripts; \
+          grant variation compares rendered results only. Console input is captured in run 1 and \
+          replayed by ordinal in later schedule/Secret runs; derived secret payloads are redacted \
+          from diagnostics without weakening raw comparison.")
     Term.(
-      const (configure_diagnostics relate_cmd)
-      $ diagnostic_format_arg $ file_arg $ vary_arg $ required_seed_arg $ allows_arg $ prelude_arg
-      $ syntax_arg)
+      ret
+        (const relate_term $ diagnostic_format_arg $ file_arg $ vary_arg $ required_seed_arg
+       $ allows_arg $ prelude_arg $ syntax_arg))
 
 let print_sigs_arg =
   Arg.(

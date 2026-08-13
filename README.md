@@ -179,8 +179,8 @@ studied during planning; `docs/ast.md` records each debt in detail:
 The prototype is complete against its original core plan and has since added
 the public surface syntax, ringed standard library, Warp properties and cache,
 native compilation, packaged binaries, and product-scale case studies. The RC1
-semantic boundary remains historical; the current successor is pinned by 861
-Alcotest/QCheck cases, 56 cram transcripts, 28 documentation examples, native
+semantic boundary remains historical; the current successor is pinned by 862
+Alcotest/QCheck cases, 57 cram transcripts, 28 documentation examples, native
 sanitizer/leak/fuzz lanes, and fresh-clone evidence workflows. RC2 repaired
 binary-demo packaging; RC3 adds an explicit
 runtime/output license exception and packages the native runtime. The current
@@ -371,6 +371,7 @@ The main commands are:
 jac run FILE.jac [--allow fs] [--allow net] [--dry-run]
 jac relate FILE.jac --vary schedule=N --seed S [--allow EFFECT ...]
 jac relate FILE.jac --vary secret=NAME --seed S [--allow EFFECT ...]
+jac relate FILE.jac --vary grant=net|infer|dist --seed S
 jac check FILE.jac [--print-sigs] [--manifest fs,net,console]
 jac hash FILE.jac
 jac fmt FILE.jac

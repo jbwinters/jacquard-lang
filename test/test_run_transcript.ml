@@ -449,6 +449,69 @@ let test_equal_iff_canonical_bytes_equal () =
         transcripts)
     transcripts
 
+let test_compare_values_projects_away_traces () =
+  let left =
+    parse_ok "value projection left"
+      (canonical
+         [
+           observation ~value:"answer\n" [ event ~output:"left" () ];
+           observation ~index:1 ~value:"tail\n" [ event ~operation:one_hash () ];
+         ])
+  in
+  let trace_only_change =
+    parse_ok "value projection trace-only change"
+      (canonical
+         [
+           observation ~value:"answer\n" [ event ~output:"right" () ];
+           observation ~index:1 ~value:"tail\n" [];
+         ])
+  in
+  Alcotest.(check bool)
+    "different traces have equal result projection" true
+    (match Run_transcript.compare_values left trace_only_change with
+    | Run_transcript.Equal -> true
+    | Run_transcript.Divergence _ -> false);
+  let changed_value =
+    parse_ok "value projection changed value"
+      (canonical
+         [
+           observation ~value:"changed\n" [ event ~operation:one_hash () ];
+           observation ~index:1 ~value:"tail\n" [];
+         ])
+  in
+  expect_divergence "result projection value" ~kind:"value-divergence" ~path:"observation[0].value"
+    ~rendered:"  at observation[0].value:\n    - \"answer\\n\"\n    + \"changed\\n\""
+    (Run_transcript.compare_values left changed_value);
+  let prefix =
+    parse_ok "value projection prefix"
+      (canonical [ observation ~value:"answer\n" [ event ~operation:one_hash () ] ])
+  in
+  let expected = "  at observation[1]:\n    - \"tail\\n\"\n    + <missing>" in
+  match Run_transcript.compare_values left prefix with
+  | Run_transcript.Equal -> Alcotest.fail "result projection prefix unexpectedly compared equal"
+  | Run_transcript.Divergence divergence ->
+      Alcotest.(check string)
+        "result projection prefix kind" "length-divergence"
+        (Run_transcript.divergence_kind_name divergence.kind);
+      Alcotest.(check string)
+        "result projection prefix path" "observation[1]"
+        (Run_transcript.position_path divergence.position);
+      let rendered = Run_transcript.render divergence in
+      Alcotest.(check string) "result projection prefix rendering" expected rendered;
+      let contains needle haystack =
+        let needle_length = String.length needle in
+        let rec search index =
+          index + needle_length <= String.length haystack
+          && (String.sub haystack index needle_length = needle || search (index + 1))
+        in
+        search 0
+      in
+      Alcotest.(check bool)
+        "result projection prefix has no trace count" false
+        (contains "trace-events=" rendered);
+      Alcotest.(check bool)
+        "result projection prefix has no operation hash" false (contains one_hash rendered)
+
 type mutation = { base : string; changed : string; expected_path : string }
 
 let generated_mutation ~trace_mutation ~observation_count ~observation_choice ~trace_count
@@ -541,6 +604,8 @@ let suite =
     Alcotest.test_case "compare outcomes and exact rendering" `Quick
       test_compare_outcomes_and_exact_rendering;
     Alcotest.test_case "Equal iff canonical bytes equal" `Quick test_equal_iff_canonical_bytes_equal;
+    Alcotest.test_case "result comparison projects traces" `Quick
+      test_compare_values_projects_away_traces;
     Alcotest.test_case "seeded single mutation reports position" `Quick
       test_seeded_single_mutation_reports_position;
   ]

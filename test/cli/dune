@@ -73,6 +73,7 @@
   concurrency-evidence.t
   run-transcript.t
   relate.t
+  relate-grant.t
   relate-divergence.t
   relate-secret-no-leak.t
   relate-secret-leak.t

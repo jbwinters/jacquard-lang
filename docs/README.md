@@ -56,8 +56,8 @@ project shape from file names alone.
 - `warp-testing.md`: Warp test model, rows, handlers, cache, properties, and
   world lanes.
 - `relational-warp.md`: relational observation contract, canonical run
-  transcripts, and the shipped deterministic schedule- and secret-variation
-  CLI lanes.
+  transcripts, and the shipped deterministic schedule-, Secret-, and
+  grant-variation CLI lanes.
 - `errors.md`: diagnostic code catalog.
 
 ## Release 0.1 Evidence

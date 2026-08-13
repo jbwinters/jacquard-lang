@@ -342,6 +342,27 @@ let compare (Transcript left) (Transcript right) =
   in
   observations 0 left right
 
+(** [compare_values] walks only the frozen result projection. Trace events are deliberately not
+    inspected, and strict-prefix sides carry only the present value so rendering cannot reveal a
+    trace count or operation identity. *)
+let compare_values (Transcript left) (Transcript right) =
+  let rec observations index left right =
+    match (left, right) with
+    | [], [] -> Equal
+    | left_observation :: left_rest, right_observation :: right_rest ->
+        if not (String.equal left_observation.value right_observation.value) then
+          first_divergence (Value_position index) Value_divergence
+            (Value_side left_observation.value) (Value_side right_observation.value)
+        else observations (index + 1) left_rest right_rest
+    | left_observation :: _, [] ->
+        first_divergence (Observation_position index) Length_divergence
+          (Value_side left_observation.value) Missing_side
+    | [], right_observation :: _ ->
+        first_divergence (Observation_position index) Length_divergence Missing_side
+          (Value_side right_observation.value)
+  in
+  observations 0 left right
+
 let position_path = function
   | Observation_position index -> Printf.sprintf "observation[%d]" index
   | Value_position index -> Printf.sprintf "observation[%d].value" index

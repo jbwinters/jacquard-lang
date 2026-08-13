@@ -75,10 +75,12 @@ jac run PROGRAM.jac
 jac run PROGRAM.jac --allow console --allow net
 jac run PROGRAM.jac --dry-run
 
-# Compare complete results and routed root effects under controlled variation.
+# Compare complete transcripts under schedule/Secret variation, or only result
+# values under one live grant versus the dry world.
 jac relate PROGRAM.jac --vary schedule=8 --seed 42
 jac relate PROGRAM.jac --vary schedule=8 --seed 42 --allow console
 jac relate PROGRAM.jac --vary secret=deploy-token --seed 42 --allow secret
+jac relate PROGRAM.jac --vary grant=net --seed 42
 
 # Format and identify code.
 jac fmt PROGRAM.jac
@@ -138,6 +140,11 @@ payloads for the named Secret while holding the scheduler and Dist seed fixed.
 It compares the raw transcripts, then redacts either derived payload from all
 text, JSON, runtime, and unexpected-error output. This exact-byte scrubber is
 not taint tracking and does not detect transformed or fragmented payloads.
+Grant variation runs exactly twice with no extra `--allow`: one live
+`net`, `infer`, or nonzero-seeded `dist` grant, then the released dry world.
+It compares only ordered rendered result values, not routed events, Console
+output, audits, calls, costs, latency, or external consequences. Forwarded,
+mixed read/write, unsupported, and unknown effects are usage errors.
 
 ## Surface Syntax
 
