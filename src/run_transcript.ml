@@ -353,18 +353,24 @@ let divergence_kind_name = function
   | Trace_divergence -> "trace-divergence"
   | Length_divergence -> "length-divergence"
 
-let render_side = function
-  | Value_side value -> Printf.sprintf "%S" value
+let render_side ~redact = function
+  | Value_side value -> Printf.sprintf "%S" (redact value)
   | Trace_side event ->
-      Printf.sprintf "operation=%s output=%S" (Hash.to_hex event.operation) event.output
+      Printf.sprintf "operation=%s output=%S" (Hash.to_hex event.operation) (redact event.output)
   | Observation_side observation ->
-      Printf.sprintf "observation value=%S value-bytes=%d trace-events=%d" observation.value
-        (String.length observation.value) (List.length observation.trace)
+      Printf.sprintf "observation value=%S value-bytes=%d trace-events=%d"
+        (redact observation.value) (String.length observation.value) (List.length observation.trace)
   | Missing_side -> "<missing>"
 
-(** [render divergence] uses the same indented [at]/[-]/[+] frame as the repository semantic differ
-    while keeping classification and redaction-capable sides structured. *)
-let render divergence =
+(** [render_redacted ~redact divergence] applies [redact] to raw result and Console bytes before
+    escaping them into the canonical frame. Structural paths, hashes, and byte counts are not
+    rewritten. *)
+let render_redacted ~redact divergence =
   Printf.sprintf "  at %s:\n    - %s\n    + %s"
     (position_path divergence.position)
-    (render_side divergence.left) (render_side divergence.right)
+    (render_side ~redact divergence.left)
+    (render_side ~redact divergence.right)
+
+(** [render divergence] is the identity-redactor specialization retained for every ordinary caller.
+*)
+let render divergence = render_redacted ~redact:Fun.id divergence

@@ -9,11 +9,15 @@ let backtrace_lines exception_value backtrace =
   if String.equal rendered "" then Printexc.to_string exception_value
   else Printexc.to_string exception_value ^ "\n" ^ rendered
 
-(** [run ~program ~err ~render_diagnostic evaluate] evaluates the CLI with Cmdliner's exception
-    capture disabled so a missed structural [Stack_overflow] is classified as E0003. The supplied
-    renderer lets the process boundary honor the selected diagnostic format. Other uncaught
-    exceptions retain the conventional Cmdliner-style report and internal-error exit status 125. *)
-let run ~program ?(err = Format.err_formatter) ?(render_diagnostic = Diag.to_string) evaluate =
+(** [run ~program ~err ~render_diagnostic ~sanitize_output evaluate] evaluates the CLI with
+    Cmdliner's exception capture disabled so a missed structural [Stack_overflow] is classified as
+    E0003. The supplied renderer lets the process boundary honor the selected diagnostic format.
+    [sanitize_output] is the final byte boundary for a command that handles sensitive derived
+    inputs; it is applied to both structured and unexpected reports and defaults to identity. Other
+    uncaught exceptions retain the conventional Cmdliner-style report and internal-error exit status
+    125. *)
+let run ~program ?(err = Format.err_formatter) ?(render_diagnostic = Diag.to_string)
+    ?(sanitize_output = Fun.id) evaluate =
   match evaluate () with
   | status -> status
   | exception Stack_overflow ->
@@ -26,10 +30,10 @@ let run ~program ?(err = Format.err_formatter) ?(render_diagnostic = Diag.to_str
           ~next_step:"Reduce the input nesting and report the missing structural guard."
           ~contrast:None ()
       in
-      Format.fprintf err "%s@." (render_diagnostic diagnostic);
+      Format.fprintf err "%s@." (sanitize_output (render_diagnostic diagnostic));
       diagnostic_error
   | exception exception_value ->
       let backtrace = Printexc.get_raw_backtrace () in
       Format.fprintf err "%s: internal error, uncaught exception:@\n%s@." program
-        (backtrace_lines exception_value backtrace);
+        (sanitize_output (backtrace_lines exception_value backtrace));
       internal_error

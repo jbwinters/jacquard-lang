@@ -34,7 +34,7 @@ native Channel, actor, or supervision claim.
 | C3 | Scoped typed channels run through deterministic FIFO, seeded, replay, exhaustive, and cached interpreter scheduling with exact run/scope ownership, rendezvous and buffering, close, cancellation, and deadlock behavior. | `channel-contract`, `round-robin`, and `exhaustive-schedule` suites; `test/cli/task-values.t`; `test/cli/schedule-replay.t`; and the frozen traces below |
 | C4 | Not claimed: host asynchronous I/O, actors, and supervision are absent. | [LIMITS.md](LIMITS.md) |
 
-The current successor inventory is exactly 859 compiled Alcotest/QCheck cases, 54 recursive
+The current successor inventory is exactly 861 compiled Alcotest/QCheck cases, 56 recursive
 cram transcript files, and 28 named doctest examples across 8 documents. The
 repository release-law checks recompute those counts instead of trusting this
 paragraph.
@@ -759,8 +759,8 @@ opam exec -- dune build test/test_jacquard.exe
 
 The current inventory is mechanically checked against compiled discovery:
 
-- Alcotest/QCheck cases: `859`
-- Cram transcript files: `54`
+- Alcotest/QCheck cases: `861`
+- Cram transcript files: `56`
 
 The SC.14 baseline arithmetic remains exact: twelve compiled
 `channel-contract` cases plus the `store/9` Channel-private-hash case took the
@@ -802,8 +802,10 @@ inventory. Relational Warp transcript recording adds six compiled cases and one
 internal tooling transcript, producing `853 / 52 / 28`; strict transcript
 parsing and semantic comparison add five compiled cases without adding another
 cram file, producing `858 / 52 / 28`. RW.3 schedule relation adds one compiled
-seed-law case and two CLI transcripts, producing the current `859 / 54 / 28`
-inventory.
+seed-law case and two CLI transcripts, producing `859 / 54 / 28`. RW.4 Secret
+variation adds two compiled payload/redaction cases and two leak-scanning CLI
+transcripts, producing the current `861 / 56 / 28` inventory; its recovered
+night-shift flagship extends the existing case-study transcript.
 
 Native scheduling remains outside the current backend. Differential coverage is
 therefore limited to the supported case: an Async operation discharged by an

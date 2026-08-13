@@ -84,6 +84,12 @@ val render : divergence -> string
     rendering its trace. The function adds no diagnostic header, labels, ANSI escapes, or terminal
     LF. *)
 
+val render_redacted : redact:(string -> string) -> divergence -> string
+(** [render_redacted ~redact divergence] has the same canonical frame as {!render}, but applies the
+    caller's pure byte transformation to raw value and Console-output fields before escaping them.
+    Paths, operation hashes, original byte counts, classifications, and missing-side markers remain
+    unchanged. The callback must not raise; this function performs no persistence or logging. *)
+
 val serialize : transcript -> string
 (** [serialize transcript] emits the canonical byte-oriented [run-transcript-v1] encoding. *)
 

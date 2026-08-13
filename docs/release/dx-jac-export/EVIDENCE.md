@@ -6,8 +6,8 @@ artifacts and are not retroactively updated by DX.2.
 
 ## Current inventory
 
-- Alcotest/QCheck cases: `859`
-- Cram transcript files: `54`
+- Alcotest/QCheck cases: `861`
+- Cram transcript files: `56`
 - Doctest examples: `28` across 8 documents
 
 The test count includes six DX.2 filesystem-boundary cases and six DX.5/DX.7
@@ -46,6 +46,9 @@ compiled cases while extending that existing transcript.
 The RW.3 schedule relation adds one compiled deterministic seed-law case and
 two CLI transcripts covering equality, exact divergence, and preserved
 constituent failure classes.
+RW.4 adds two compiled secret-payload/redaction cases and two leak-scanning
+CLI transcripts. Its recovered night-shift flagship extends the existing
+case-study transcript without adding another cram file.
 
 ## Proved behavior
 

@@ -20,12 +20,15 @@ type diagnostic_format = Text | Json_v1
 type output_format = Output_text | Output_json_v1
 
 let selected_diagnostic_format = ref Text
+let selected_output_sanitizer = ref Fun.id
+let sanitize_output output = !selected_output_sanitizer output
 
 let print_diagnostic diagnostic =
   prerr_endline
-    (match !selected_diagnostic_format with
-    | Text -> Diag.to_string diagnostic
-    | Json_v1 -> Diag.to_json_string diagnostic)
+    (sanitize_output
+       (match !selected_diagnostic_format with
+       | Text -> Diag.to_string diagnostic
+       | Json_v1 -> Diag.to_json_string diagnostic))
 
 let print_runtime_error error = print_diagnostic (Runtime_err.to_diag error)
 
@@ -541,6 +544,9 @@ let run_cmd file allows prelude store_dir seed infer_cache origin dry_run schedu
 
 (* --- relate --- *)
 
+type relate_variation = Schedule_variation of int | Secret_variation of string
+type relate_run = { schedule_seed : int; secret_getenv : (string -> string option) option }
+
 type relate_failure =
   | Relate_diagnostics of Diag.t list
   | Relate_runtime of Runtime_err.t
@@ -558,8 +564,8 @@ let protect_relate_store_operation action operation =
   try Ok (operation ())
   with (Sys_error _ | Unix.Unix_error _) as error -> Error (relate_store_failure action error)
 
-let relate_constituent ~file ~source ~allows ~prelude ~root_seed ~schedule_seed ~syntax
-    ~console_read ~emit_warnings =
+let relate_constituent ~file ~source ~allows ~prelude ~root_seed ~schedule_seed ~secret_getenv
+    ~syntax ~console_read ~emit_warnings =
   match protect_relate_store_operation "create" fresh_relate_store_dir with
   | Error failure -> Error failure
   | Ok store_dir ->
@@ -578,7 +584,7 @@ let relate_constituent ~file ~source ~allows ~prelude ~root_seed ~schedule_seed 
                 | [] -> Ok ()
                 | allow :: rest -> (
                     match
-                      Prelude.grant ~console_read ctx allow ~infer_cache:None
+                      Prelude.grant ~console_read ?secret_getenv ctx allow ~infer_cache:None
                         ~out:(fun _ -> ())
                         ~seed:root_seed
                     with
@@ -640,15 +646,34 @@ let print_relate_failure = function
       print_runtime_error error;
       match error with Runtime_err.Unhandled _ -> exit_unhandled | _ -> exit_runtime)
 
-let relate_cmd file runs seed allows prelude syntax =
+let relate_cmd file variation seed allows prelude syntax =
+  let runs, secrets, run_specs =
+    match variation with
+    | Schedule_variation count ->
+        ( count,
+          [],
+          List.map
+            (fun schedule_seed -> { schedule_seed; secret_getenv = None })
+            (Relate.schedule_seeds ~root_seed:seed ~count) )
+    | Secret_variation name ->
+        let first, second = Relate.secret_payloads ~root_seed:seed in
+        let target_key = Prelude.secret_environment_key ~name ~version:None in
+        let run payload =
+          let secret_getenv requested =
+            if String.equal requested target_key then Some payload else Sys.getenv_opt requested
+          in
+          { schedule_seed = seed; secret_getenv = Some secret_getenv }
+        in
+        (2, [ first; second ], [ run first; run second ])
+  in
+  selected_output_sanitizer := Relate.redact ~secrets;
   let source = read_file file in
-  let schedule_seeds = Relate.schedule_seeds ~root_seed:seed ~count:runs in
   let captured_console_input = ref None in
   let rec compare_runs baseline run_index = function
     | [] ->
         Printf.printf "relate runs=%d seed=%d verdict=equal\n" runs seed;
         ok
-    | schedule_seed :: rest -> (
+    | ({ schedule_seed; secret_getenv } : relate_run) :: rest -> (
         let console_read, finish_console_input =
           match !captured_console_input with
           | None ->
@@ -669,8 +694,8 @@ let relate_cmd file runs seed allows prelude syntax =
                 fun () -> () )
         in
         match
-          relate_constituent ~file ~source ~allows ~prelude ~root_seed:seed ~schedule_seed ~syntax
-            ~console_read ~emit_warnings:(run_index = 1)
+          relate_constituent ~file ~source ~allows ~prelude ~root_seed:seed ~schedule_seed
+            ~secret_getenv ~syntax ~console_read ~emit_warnings:(run_index = 1)
         with
         | Error failure -> print_relate_failure failure
         | Ok transcript -> (
@@ -686,10 +711,11 @@ let relate_cmd file runs seed allows prelude syntax =
                         cli_diagnostic ~code:"E1003"
                           (Printf.sprintf "Runs 1 and %d diverged with %s:\n%s" run_index
                              (Run_transcript.divergence_kind_name divergence.kind)
-                             (Run_transcript.render divergence));
+                             (Run_transcript.render_redacted ~redact:(Relate.redact ~secrets)
+                                divergence));
                       ])))
   in
-  compare_runs None 1 schedule_seeds
+  compare_runs None 1 run_specs
 
 (* --- check --- *)
 
@@ -2086,14 +2112,15 @@ let required_seed_arg =
     & info [ "seed" ] ~docv:"SEED"
         ~doc:"Required root seed for reproducible relational runs and Dist sampling.")
 
-let schedule_variation =
-  let expected () = Error (`Msg "expected schedule=N with N > 0") in
+let relate_variation =
+  let expected () = Error (`Msg "expected schedule=N with N > 0 or secret=NAME") in
   let parse value =
-    let prefix = "schedule=" in
-    if not (String.starts_with ~prefix value) then expected ()
-    else
+    let schedule_prefix = "schedule=" in
+    let secret_prefix = "secret=" in
+    if String.starts_with ~prefix:schedule_prefix value then
       let count =
-        String.sub value (String.length prefix) (String.length value - String.length prefix)
+        String.sub value (String.length schedule_prefix)
+          (String.length value - String.length schedule_prefix)
       in
       let rec decimal index =
         index = String.length count
@@ -2102,20 +2129,32 @@ let schedule_variation =
       if String.equal count "" || not (decimal 0) then expected ()
       else
         match int_of_string_opt count with
-        | Some count when count > 0 -> Ok count
+        | Some count when count > 0 -> Ok (Schedule_variation count)
         | _ -> expected ()
+    else if String.starts_with ~prefix:secret_prefix value then
+      let name =
+        String.sub value (String.length secret_prefix)
+          (String.length value - String.length secret_prefix)
+      in
+      if String.equal name "" then expected () else Ok (Secret_variation name)
+    else expected ()
   in
-  let print formatter count = Format.fprintf formatter "schedule=%d" count in
+  let print formatter = function
+    | Schedule_variation count -> Format.fprintf formatter "schedule=%d" count
+    | Secret_variation name -> Format.fprintf formatter "secret=%s" name
+  in
   Arg.conv (parse, print)
 
 let vary_arg =
   Arg.(
     required
-    & opt (some schedule_variation) None
+    & opt (some relate_variation) None
     & info [ "vary" ] ~docv:"KIND"
         ~doc:
-          "Required variation; RW.3 supports only schedule=N with N > 0. Run 1 uses the root seed; \
-           later runs use successive SplitMix64 outputs, skipping already accepted seeds.")
+          "Required variation. schedule=N with N > 0 uses the root scheduler seed for run 1 and \
+           successive distinct SplitMix64 outputs thereafter. secret=NAME runs twice at the root \
+           schedule, injects two deterministic payloads for the named latest Secret, and redacts \
+           either payload from every diagnostic boundary.")
 
 let infer_cache_arg =
   Arg.(
@@ -2164,9 +2203,10 @@ let relate_t =
   Cmd.v
     (Cmd.info "relate"
        ~doc:
-         "Run a .jac surface or .jqd bootstrap file under distinct deterministic schedules and \
-          compare complete result and routed-root transcripts. Console input is captured in run 1 \
-          and replayed by ordinal in later runs.")
+         "Run a .jac surface or .jqd bootstrap file under deterministic schedule or secret \
+          variation and compare complete result and routed-root transcripts. Console input is \
+          captured in run 1 and replayed by ordinal in later runs; derived secret payloads are \
+          redacted from diagnostics without weakening raw comparison.")
     Term.(
       const (configure_diagnostics relate_cmd)
       $ diagnostic_format_arg $ file_arg $ vary_arg $ required_seed_arg $ allows_arg $ prelude_arg
@@ -2915,5 +2955,5 @@ let render_selected_diagnostic diagnostic =
 
 let () =
   exit
-    (Cli_entry.run ~program:"jacquard" ~render_diagnostic:render_selected_diagnostic (fun () ->
-         Cmd.eval' ~catch:false main))
+    (Cli_entry.run ~program:"jacquard" ~render_diagnostic:render_selected_diagnostic
+       ~sanitize_output (fun () -> Cmd.eval' ~catch:false main))
