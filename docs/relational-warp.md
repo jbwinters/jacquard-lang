@@ -230,9 +230,12 @@ The third layer-2 spelling is:
 It executes exactly two isolated constituents. Run 1 is live and receives
 exactly the selected root grant. Run 2 installs the existing dry world. Both
 use scheduler seed `S`; the live Dist handler uses `S`, while the dry Dist
-handler retains its released seed-0 simulation. Additional `--allow` options
-are refused in this mode because they would obscure which authority changed.
-Schedule and Secret variation keep their existing repeatable grants.
+handler retains its released seed-0 simulation. Consequently,
+`grant=dist --seed 0` is refused as a usage error: it would install identical
+samplers and fail to vary the selected dimension. Any `--allow` option is also
+refused in grant mode because it would obscure which authority changed,
+including a duplicate of the selected grant. Schedule and Secret variation
+keep their existing repeatable grants.
 
 Grant variation compares only the ordered result-value bytes from successful
 top-level expressions. It deliberately projects away every routed trace event,
@@ -249,7 +252,7 @@ inside it. Names are matched case-insensitively:
 |---|---|---|
 | `net` | accept | `fetch` has a non-forwarding dry response surrogate |
 | `infer` | accept | `complete` has a non-forwarding dry text surrogate |
-| `dist` | accept | successful root sampling has a consequence-free seed-0 dry surrogate; root `observe` fails in both modes |
+| `dist` | accept when `S` is nonzero | successful root sampling has a consequence-free seed-0 dry surrogate; root `observe` fails in both modes |
 | `console` | refuse | dry-run forwards it unchanged and the row includes output |
 | `clock` | refuse | dry-run forwards it unchanged and the row includes waiting |
 | `fs` | refuse | one row mixes forwarded reads with audited mutation |
@@ -261,10 +264,12 @@ ineligible spelling is a Cmdliner usage error that names the reason and exits
 124; it is not a constituent failure. This prevents a unit-returning writer
 from producing a vacuous equality merely because both handlers returned `()`.
 
-Result differences reuse E1003 and the RW.2 first-divergence renderer. Only
-`value-divergence` and result-list `length-divergence` can arise from this
-projection; the live result is the minus side and the dry result is the plus
-side. Equality retains the shared success line
+Result differences reuse E1003 and the RW.2 first-divergence renderer. A value
+difference is `value-divergence`; the result-only comparator also represents a
+strict result-list prefix as `length-divergence` without rendering a trace
+summary. Two successful CLI constituents execute the same source and normally
+have the same result-list length. The live result is the minus side and the dry
+result is the plus side. Equality retains the shared success line
 `relate runs=2 seed=S verdict=equal`. Constituent diagnostics, runtime errors,
 and authority refusals retain the frozen statuses 1, 2, and 3.
 
