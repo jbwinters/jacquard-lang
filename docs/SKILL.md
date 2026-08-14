@@ -139,7 +139,9 @@ Secret variation runs exactly twice with distinct deterministic latest-version
 payloads for the named Secret while holding the scheduler and Dist seed fixed.
 It compares the raw transcripts, then redacts either derived payload from all
 text, JSON, runtime, and unexpected-error output. This exact-byte scrubber is
-not taint tracking and does not detect transformed or fragmented payloads.
+not taint tracking and does not detect transformed or fragmented payloads. Use
+`jacquard relate FILE --vary secret=NAME --seed S --allow secret` only as
+bounded evidence for that selected program, name, and seed.
 Grant variation runs exactly twice with no extra `--allow`: one live
 `net`, `infer`, or nonzero-seeded `dist` grant, then the released dry world.
 It compares only ordered rendered result values, not routed events, Console

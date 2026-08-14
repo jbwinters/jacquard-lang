@@ -902,7 +902,9 @@ distinct opaque tags. Generic rendering, runtime errors, traces, and
 `debug.inspect` always use the fixed marker `<secret redacted>`. This is an
 opacity boundary, not taint tracking: after explicit exposure the result is
 ordinary Text and code can copy or leak it. Keep exposure late and typed Audit
-inputs separate from plaintext.
+inputs separate from plaintext. For a bounded runnable check over one program,
+name, and seed, use `jacquard relate FILE --vary secret=NAME --seed S --allow
+secret`; a pass is not a static taint or information-flow proof.
 
 ### debug.inspect
 

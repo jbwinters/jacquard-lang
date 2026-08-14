@@ -106,7 +106,9 @@ an authority label; only the resolved row position of a typed arrow does.
 - Root `Fs` and `Net` grants are effect-wide, not path/domain object
   capabilities. This runtime is not a production sandbox.
 - Secret opacity is not taint tracking. `secret.expose` returns ordinary `Text`,
-  which may then be copied or leaked.
+  which may then be copied or leaked. `jacquard relate FILE --vary secret=NAME
+  --seed S --allow secret` is the bounded runnable check for a selected program,
+  not a static information-flow proof.
 - Approval requires an exact hash-bound Decision. Model output, a posterior, or
   `Assessment.confidence` cannot fabricate consent.
 - The release implements finite discrete uncertainty only; it does not provide

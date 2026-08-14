@@ -6,7 +6,7 @@ artifacts and are not retroactively updated by DX.2.
 
 ## Current inventory
 
-- Alcotest/QCheck cases: `865`
+- Alcotest/QCheck cases: `868`
 - Cram transcript files: `58`
 - Doctest examples: `28` across 8 documents
 
@@ -56,6 +56,9 @@ RW.6 adds three compiled result-construction, evaluated-call scheduling, and
 cache-identity cases plus one relational Warp transcript covering all three
 typed variations, row refusal, deterministic sampling, exhaustive scheduling,
 canonical divergence, and cache invalidation.
+RW.7 adds three compiled cases for exact concurrency-demo transcript invariance
+and direct/fail-fast transitive-cancellation sentinel safety. It extends the
+existing concurrency transcript and adds no cram or doctest entry.
 
 ## Proved behavior
 

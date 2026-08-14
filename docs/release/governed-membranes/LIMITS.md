@@ -81,6 +81,9 @@ material. The evidence pins late resolution, safe summaries, and non-vacuous
 leak scans before exposure. Once a permitted live driver explicitly calls
 `secret.expose`, opacity ends. There is no taint tracking, downstream
 information-flow control, or protection against post-exposure exfiltration.
+The later shipped `jacquard relate FILE --vary secret=NAME --seed S --allow
+secret` lane provides bounded program-specific noninterference evidence; it
+does not strengthen this historical governed-membrane limit.
 
 ## Audit and hashes
 

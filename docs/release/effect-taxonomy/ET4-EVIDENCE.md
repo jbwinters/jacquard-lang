@@ -32,6 +32,9 @@ Its exact operations are once `secret.read : (SecretRef) -> Secret` and once
 This is non-derivability, not information-flow or taint tracking. After explicit
 exposure the result is ordinary Text; code can copy or leak it. The operational
 guidance is therefore to expose late and keep plaintext out of typed Audit data.
+The later shipped `jacquard relate FILE --vary secret=NAME --seed S --allow
+secret` lane supplies a bounded runnable check for one selected program; it
+does not strengthen the historical ET.4 opacity claim into taint tracking.
 
 ## Adversarial evidence
 

@@ -31,6 +31,7 @@ let () =
       ("round-robin", Test_round_robin.suite);
       ("run-transcript", Test_run_transcript.suite);
       ("relate", Test_relate.suite);
+      ("relational-regression-net", Test_relational_regression.suite);
       ("exhaustive-schedule", Test_exhaustive_schedule.suite);
       ("schedule-trace", Test_schedule_trace.suite);
       ("audit", Test_audit.suite);

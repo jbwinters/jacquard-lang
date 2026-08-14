@@ -56,8 +56,8 @@ project shape from file names alone.
 - `warp-testing.md`: Warp test model, rows, handlers, cache, properties, and
   world lanes.
 - `relational-warp.md`: relational observation contract, canonical run
-  transcripts, and the shipped deterministic schedule-, Secret-, and
-  grant-variation CLI lanes.
+  transcripts, the shipped deterministic schedule-, Secret-, and
+  grant-variation CLI lanes, and the RW.7 standing regression net.
 - `errors.md`: diagnostic code catalog.
 
 ## Release 0.1 Evidence
@@ -153,6 +153,15 @@ Read these together when judging whether the release candidate is credible:
   as historical evidence.
 - `release/structured-concurrency/SC17-MANIFEST.sha256`: reconstructible SC.17
   correction overlay on its exact predecessor.
+
+## Relational Warp Evidence
+
+- `release/relational-warp/EVIDENCE.md`: RW.7 public and compiled regression
+  lanes, bounded schedule inventory, Secret-limit reconciliation, mutation
+  proof, and preserved non-goals.
+- `release/relational-warp/RW7-MANIFEST.sha256`: reconstructible RW.7 successor
+  overlay on exact RW.6 commit `10e27f4`; all registered historical manifests
+  and checkers remain byte-identical.
 
 ## Governed Membranes Evidence
 

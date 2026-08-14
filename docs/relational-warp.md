@@ -1,10 +1,10 @@
 # Relational Warp lanes: testable hyperproperties
 
-Status: **RW.0 frozen for v0 (2026-08-12); RW.1-RW.6 transcript, comparison,
-root-driven variation, and hermetic relational-case tooling shipped; the RW.6
-Layer-1 carrier amendment was owner-ratified on 2026-08-14.** This document
-fixes the observation and variation contract for implementation tasks RW.1
-through RW.7.
+Status: **RW.0 frozen for v0 (2026-08-12); RW.1-RW.7 transcript, comparison,
+root-driven variation, hermetic relational-case tooling, and the standing
+regression net shipped; the RW.6 Layer-1 carrier amendment was owner-ratified
+on 2026-08-14.** This document records the shipped observation, variation, and
+regression contract.
 `run-transcript-v1`, its canonical comparators, and all three root-driven
 `jacquard relate` variation modes now ship. `SameUnder` and all three closed
 variation kinds ship through Warp's typed discovery and hermetic cache.
@@ -22,6 +22,8 @@ Several Jacquard properties compare two executions rather than inspect one:
 - Secret noninterference asks whether changing a secret payload changes an
   observable result or output. Secret opacity prevents ordinary rendering and
   conversion, but it is not taint tracking and does not prove this property.
+  `jacquard relate FILE --vary secret=NAME --seed S --allow secret` is the
+  bounded runnable check for one selected program, secret name, and seed.
 - Schedule independence asks whether changing scheduler choices changes an
   observable result or output. The scheduled Warp lane proves that checks pass
   under each selected schedule; it does not compare the answers.
@@ -362,8 +364,17 @@ effects are refused before execution.
   under several schedules. `VarySchedule` adds result agreement.
 - Distribution-valued programs that need approximate comparison continue to
   use `dist-diff`; `SameUnder` is exact.
-- A standing `VarySchedule` suite over the structured-concurrency corpus is
-  the regression net for schedule-sensitive result drift.
+- `demos/concurrency/relational-tests.jac` is the standing public
+  `VarySchedule` suite for two-child aggregation, fail-fast aggregation, and
+  nested scope completion. The concurrency launcher and cram transcript keep
+  that shipped path runnable at 32 schedules per case.
+- The registered `relational-regression-net` compiled suite compares complete
+  transcripts for the exact `demos/concurrency/task-schedules.jac` program
+  across 16 schedules. Two test-only, gate-controlled SC.17 fixtures then run
+  direct and fail-fast cancellation across 64 schedules apiece and refuse any
+  post-cancellation Console sentinel. The split is intentional: Layer 1
+  compares result values, while orphaned routed callbacks require a trusted
+  compiled observation buffer.
 - A secret fixture that prints `secret.expose` output must fail with `E1003`
   and a redacted trace difference. A fixture whose outputs do not depend on
   the payload must pass. These two cases prevent the noninterference
@@ -385,16 +396,18 @@ effects are refused before execution.
 - Result comparison uses the stable public `Value.show` rendering. It is an
   observational contract, not general semantic equality for runtime values.
 - The design changes no kernel form, `.jac` lowering, canonical program hash,
-  effect identity, store format, or release manifest.
+  effect identity, or store format. RW.7 preserves every historical release
+  manifest byte and records its moving-tree evidence in an additive successor
+  overlay.
 - The recorder is initially interpreter tooling. No native `relate` behavior
   is claimed until an implementation task adds and differentially tests it.
 
 ## Non-goals
 
 Static information-flow typing, taint labels, probabilistic relational logic,
-and unbounded k-run generalization are outside v0. Passing a relational lane
-is scoped evidence for the selected program, variation, seed, and bounded
-schedule set.
+approximate `VaryValue` distribution comparison, and unbounded k-run
+generalization are outside v0. Passing a relational lane is scoped evidence
+for the selected program, variation, seed, and bounded schedule set.
 
 ## Open questions (resolved for v0)
 
