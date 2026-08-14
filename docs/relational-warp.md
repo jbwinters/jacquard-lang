@@ -1,11 +1,12 @@
 # Relational Warp lanes: testable hyperproperties
 
 Status: **RW.0 frozen for v0 (2026-08-12); RW.1-RW.5 schedule, Secret, and
-grant-presence tooling shipped.** This document fixes the observation and
+grant-presence tooling shipped; the RW.6 Layer-1 carrier amendment was
+owner-ratified on 2026-08-14.** This document fixes the observation and
 variation contract for implementation tasks RW.1 through RW.7.
 `run-transcript-v1`, its canonical comparators, and all three root-driven
-`jacquard relate` variation modes now ship. `SameUnder` and the other variation
-kinds remain future work.
+`jacquard relate` variation modes now ship. `SameUnder` and its variation kinds
+have a ratified public contract below but do not ship until RW.6 is complete.
 
 Read this document with [Warp testing](warp-testing.md),
 [structured concurrency](concurrency.md), and the
@@ -131,10 +132,28 @@ payload may appear in stdout, stderr, or a persisted diagnostic.
 ### 4. User-facing names
 
 The Warp declaration is `SameUnder`, its closed variation carrier is
-`Variation`, and the CLI verb is `relate`:
+`Variation`, and the CLI verb is `relate`. “Closed” means that the constructor
+set is closed, not that the carrier is monomorphic. The sound rank-1 carrier
+ratified for RW.6 is:
 
-    SameUnder : (Text, Variation, () ->{| e} a) -> WarpDecl
+    type Variation body result input =
+      | VarySchedule(Int, () ->{} result)
+      | VaryWorld((body) ->{} result, (body) ->{} result, body)
+      | VaryValue(Distribution (input, input), (input) ->{} result)
+
+    type WarpDecl body result input =
+      | SameUnder(Text, Variation body result input)
+
     jacquard relate FILE --vary KIND --seed S
+
+The variants are self-contained. `VarySchedule` stores its thunk,
+`VaryWorld` stores both handlers and their shared subject, and `VaryValue`
+stores both the pair generator and compared function. `SameUnder` therefore
+has two fields rather than a third universal thunk. `body`, `result`, and
+`input` retain the heterogeneous payload types in the ordinary prelude type
+system; a parameter can be phantom for a constructor that does not use it.
+The carrier must not erase closures behind false field types or introduce
+existentials, GADTs, dynamic casts, or a kernel form.
 
 `SameUnder` states the assertion made by the case; `Variation` names the value
 that selects what changes; `relate` is the command form. These are typed
@@ -280,14 +299,16 @@ and authority refusals retain the frozen statuses 1, 2, and 3.
 `SameUnder` is a typed Warp declaration with a closed `Variation` carrier.
 The initial variants are:
 
-- `VarySchedule(n)`: run the thunk under `n` deterministically derived
-  schedules and require identical result renderings. This strengthens
+- `VarySchedule(n, thunk)`: run the stored thunk under `n` deterministically
+  derived schedules and require identical result renderings. This strengthens
   "checks pass under every schedule" to "the answer agrees under every
   selected schedule." An exhaustive lane covers the schedules within its
   declared bound.
-- `VaryWorld(handler_a, handler_b)`: run the thunk under two caller-supplied
-  discharging handlers with equal checked outward rows and require identical
-  result renderings.
+- `VaryWorld(handler_a, handler_b, thunk)`: give the same stored thunk to two
+  caller-supplied discharging handlers with equal checked outward rows and
+  require identical result renderings. The shared `body` type must itself be a
+  zero-argument thunk. Checking compares the handlers' fully elaborated body
+  and outward rows before ordinary unification can mask a mismatch.
 - `VaryValue(gen, fn)`: generate a pair, apply `fn` to each member, and require
   identical result renderings.
 
