@@ -34,7 +34,7 @@ native Channel, actor, or supervision claim.
 | C3 | Scoped typed channels run through deterministic FIFO, seeded, replay, exhaustive, and cached interpreter scheduling with exact run/scope ownership, rendezvous and buffering, close, cancellation, and deadlock behavior. | `channel-contract`, `round-robin`, and `exhaustive-schedule` suites; `test/cli/task-values.t`; `test/cli/schedule-replay.t`; and the frozen traces below |
 | C4 | Not claimed: host asynchronous I/O, actors, and supervision are absent. | [LIMITS.md](LIMITS.md) |
 
-The current successor inventory is exactly 862 compiled Alcotest/QCheck cases, 57 recursive
+The current successor inventory is exactly 865 compiled Alcotest/QCheck cases, 58 recursive
 cram transcript files, and 28 named doctest examples across 8 documents. The
 repository release-law checks recompute those counts instead of trusting this
 paragraph.
@@ -759,8 +759,8 @@ opam exec -- dune build test/test_jacquard.exe
 
 The current inventory is mechanically checked against compiled discovery:
 
-- Alcotest/QCheck cases: `862`
-- Cram transcript files: `57`
+- Alcotest/QCheck cases: `865`
+- Cram transcript files: `58`
 
 The SC.14 baseline arithmetic remains exact: twelve compiled
 `channel-contract` cases plus the `store/9` Channel-private-hash case took the
@@ -807,7 +807,9 @@ variation adds two compiled payload/redaction cases and two leak-scanning CLI
 transcripts, producing the then-current `861 / 56 / 28` inventory; its recovered
 night-shift flagship extends the existing case-study transcript. RW.5 grant
 variation adds one result-projection comparator case and one CLI transcript,
-producing the current `862 / 57 / 28` inventory.
+producing the then-current `862 / 57 / 28` inventory. RW.6 hermetic relational
+cases add three compiled seam/cache cases and one registered Warp transcript,
+producing the current `865 / 58 / 28` inventory.
 
 Native scheduling remains outside the current backend. Differential coverage is
 therefore limited to the supported case: an Async operation discharged by an

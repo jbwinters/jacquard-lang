@@ -1,16 +1,18 @@
 (** Warp, the testing layer (plan W6.1–W6.3, W6.8).
 
     Discovery is by CHECKED TYPE (decision D12): a store term whose elaborated type is [test] is a
-    hermetic test, [world-test] a world test; names are display only. The hermetic lane runs each
-    thunk under the in-language [test.run] handler through {!Round_robin.run_call}, so a scoped
-    Async lifecycle uses the same deterministic evaluator driver as the CLI; the world lane runs
-    only tests whose row the CLI's grants cover, refusing the rest by name.
+    hermetic test, [world-test] a world test, and [warp-decl] a hermetic relational case; names are
+    display only. The hermetic lane runs each thunk under the in-language [test.run] handler through
+    {!Round_robin.run_call}, so a scoped Async lifecycle uses the same deterministic evaluator
+    driver as the CLI; the world lane runs only tests whose row the CLI's grants cover, refusing the
+    rest by name.
 
     The result cache (W6.3) is an honest lookup table over the Merkle discipline: a Case's key is
     its member hash (which covers its transitive references), a Prop's key adds mode/samples/seed
-    from day one, WorldTests are never cached. Every key includes {!version} — native drivers live
-    in no hash, so the explicit tag re-keys the world when they change. Entries are canonical
-    printed forms; a corrupt entry is ignored and rerun.
+    from day one, and a relational key adds its variation controls and seed identity where
+    applicable. WorldTests are never cached. Every key includes {!version} — native drivers live in
+    no hash, so the explicit tag re-keys the world when they change. Entries are canonical printed
+    forms; a corrupt entry is ignored and rerun.
 
     Coverage (W6.8) is the complement of the union of per-test {!Eval.ctx} coverage sets —
     definition-level, from the hash discipline alone; cache entries record their coverage so a
@@ -28,7 +30,10 @@ type outcome = {
   cached : bool;
 }
 
-type discovered = Hermetic of string * Hash.t | World of string * Hash.t
+type discovered =
+  | Hermetic of string * Hash.t
+  | World of string * Hash.t
+  | Relational of string * Hash.t
 
 (** how the prop lane runs: seeded sampling with shrinking (W6.4) or exhaustive enumeration under a
     branch budget (W6.5) *)
@@ -50,19 +55,24 @@ let discover (store : Store.t) (cctx : Check.ctx) : discovered list =
     | Some { Resolve.hash; _ } -> Some hash
     | None -> None
   in
-  match (ty_hash "test", ty_hash "world-test") with
-  | Some test_h, Some world_h ->
-      List.filter_map
-        (fun (name, { Resolve.hash; kind }) ->
-          if kind <> Resolve.KTerm then None
-          else
-            match Types.repr (Check.term_scheme cctx hash).Types.ty with
-            | exception Check.Err _ -> None (* unschemable => not a test *)
-            | Types.TCon (h, []) when Hash.equal h test_h -> Some (Hermetic (name, hash))
-            | Types.TCon (h, []) when Hash.equal h world_h -> Some (World (name, hash))
-            | _ -> None)
-        (List.sort (fun (a, _) (b, _) -> String.compare a b) (Store.names store))
-  | _ -> []
+  let test_h = ty_hash "test" in
+  let world_h = ty_hash "world-test" in
+  let relational_h = ty_hash "warp-decl" in
+  let is_head expected actual =
+    match expected with Some expected -> Hash.equal actual expected | None -> false
+  in
+  List.filter_map
+    (fun (name, { Resolve.hash; kind }) ->
+      if kind <> Resolve.KTerm then None
+      else
+        match Types.repr (Check.term_scheme cctx hash).Types.ty with
+        | exception Check.Err _ -> None (* unschemable => not a test *)
+        | Types.TCon (h, []) when is_head test_h h -> Some (Hermetic (name, hash))
+        | Types.TCon (h, []) when is_head world_h h -> Some (World (name, hash))
+        | Types.TCon (h, [ _body; _result; _input ]) when is_head relational_h h ->
+            Some (Relational (name, hash))
+        | _ -> None)
+    (List.sort (fun (a, _) (b, _) -> String.compare a b) (Store.names store))
 
 (* --- running (W6.2) --- *)
 
@@ -554,10 +564,180 @@ let run_prop_exhaustive ctx ~budget (thunk : Value.t) : (verdict * string, Diag.
               Printf.sprintf "verified exhaustively (%d case%s)" !verified
                 (if !verified = 1 then "" else "s") ))
 
+(* --- relational cases (RW.6) --- *)
+
+let relational_failure detail = Fail { soft = []; hard = Some detail }
+
+(** [compare_relational_values ~baseline ~candidate left right] applies the frozen RW.2 result-only
+    projection and returns the canonical first-divergence frame. *)
+let compare_relational_values ~baseline ~candidate left right =
+  match
+    Run_transcript.compare_values
+      (Run_transcript.of_values [ left ])
+      (Run_transcript.of_values [ right ])
+  with
+  | Run_transcript.Equal -> None
+  | Run_transcript.Divergence divergence ->
+      Some
+        (Printf.sprintf "Runs %d and %d diverged with %s:\n%s" baseline candidate
+           (Run_transcript.divergence_kind_name divergence.kind)
+           (Run_transcript.render divergence))
+
+let run_vary_schedule_seeded ctx ~program ~suite_seed ~test_seed ~count thunk =
+  if count <= 0 then
+    ( relational_failure (Printf.sprintf "VarySchedule count must be positive; received %d" count),
+      Printf.sprintf "same under schedule: invalid count, seed %d" suite_seed )
+  else
+    let seeds = Relate.schedule_seeds ~root_seed:test_seed ~count in
+    let rec run index baseline = function
+      | [] ->
+          ( Pass 1,
+            Printf.sprintf "same under schedule: %d run%s, seed %d" count
+              (if count = 1 then "" else "s")
+              suite_seed )
+      | decision_seed :: rest -> (
+          match
+            Round_robin.run_call_recorded ctx ~program
+              ~mode:(Round_robin.Seeded_schedule { seed = decision_seed })
+              thunk []
+          with
+          | Error error ->
+              ( relational_failure
+                  (Printf.sprintf
+                     "Schedule run %d of %d was refused before a complete result (decision seed \
+                      %d): %s"
+                     index count decision_seed (Runtime_err.to_string error)),
+                Printf.sprintf "same under schedule: failed %d/%d, seed %d" index count suite_seed
+              )
+          | Ok { Round_robin.result = Error error; _ } ->
+              ( relational_failure
+                  (Printf.sprintf "Schedule run %d of %d failed (decision seed %d): %s" index count
+                     decision_seed (Runtime_err.to_string error)),
+                Printf.sprintf "same under schedule: failed %d/%d, seed %d" index count suite_seed
+              )
+          | Ok { Round_robin.result = Ok value; _ } -> (
+              match baseline with
+              | None -> run (index + 1) (Some value) rest
+              | Some first -> (
+                  match compare_relational_values ~baseline:1 ~candidate:index first value with
+                  | None -> run (index + 1) baseline rest
+                  | Some divergence ->
+                      ( relational_failure divergence,
+                        Printf.sprintf "same under schedule: diverged %d/%d, seed %d" index count
+                          suite_seed ))))
+    in
+    run 1 None seeds
+
+let run_vary_schedule_exhaustive ctx ~program ~suite_seed ~budget ~count thunk =
+  if count <= 0 then
+    ( relational_failure (Printf.sprintf "VarySchedule count must be positive; received %d" count),
+      Printf.sprintf "same under schedule: invalid count, seed %d" suite_seed )
+  else
+    let defaults = Exhaustive_schedule.default_bounds in
+    let bounds : Exhaustive_schedule.bounds = { defaults with max_worlds = min count budget } in
+    match Exhaustive_schedule.run_call ctx ~bounds ~program thunk [] with
+    | Error diagnostics ->
+        ( relational_failure (String.concat "\n" (List.map Diag.to_string diagnostics)),
+          Printf.sprintf "same under schedule: exhaustive refusal, seed %d" suite_seed )
+    | Ok { Exhaustive_schedule.worlds; explored; completeness; _ } -> (
+        match completeness with
+        | Exhaustive_schedule.Incomplete reasons ->
+            let reasons =
+              String.concat "; " (List.map Exhaustive_schedule.incomplete_reason_to_string reasons)
+            in
+            ( relational_failure
+                (Printf.sprintf "Exhaustive schedule search was incomplete after %d world%s: %s"
+                   explored
+                   (if explored = 1 then "" else "s")
+                   reasons),
+              Printf.sprintf "same under schedule: exhaustive incomplete, seed %d" suite_seed )
+        | Exhaustive_schedule.Complete ->
+            let rec compare index baseline = function
+              | [] ->
+                  ( Pass 1,
+                    Printf.sprintf "same under schedule: verified exhaustively (%d world%s)"
+                      explored
+                      (if explored = 1 then "" else "s") )
+              | { Exhaustive_schedule.result = Error error; _ } :: _ ->
+                  ( relational_failure
+                      (Printf.sprintf "Exhaustive schedule world %d failed: %s" index
+                         (Runtime_err.to_string error)),
+                    Printf.sprintf "same under schedule: exhaustive world %d failed" index )
+              | { Exhaustive_schedule.result = Ok value; _ } :: rest -> (
+                  match baseline with
+                  | None -> compare (index + 1) (Some value) rest
+                  | Some first -> (
+                      match compare_relational_values ~baseline:1 ~candidate:index first value with
+                      | None -> compare (index + 1) baseline rest
+                      | Some divergence ->
+                          ( relational_failure divergence,
+                            Printf.sprintf "same under schedule: exhaustive world %d diverged" index
+                          )))
+            in
+            compare 1 None worlds)
+
+let run_vary_world ctx left right subject =
+  let run index handler =
+    match Round_robin.run_call ctx handler [ subject ] with
+    | Ok value -> Ok value
+    | Error error ->
+        Error (Printf.sprintf "VaryWorld handler %d failed: %s" index (Runtime_err.to_string error))
+  in
+  match run 1 left with
+  | Error detail -> (relational_failure detail, "same under world: first handler failed")
+  | Ok first -> (
+      match run 2 right with
+      | Error detail -> (relational_failure detail, "same under world: second handler failed")
+      | Ok second -> (
+          match compare_relational_values ~baseline:1 ~candidate:2 first second with
+          | None -> (Pass 1, "same under world: 2 handlers")
+          | Some divergence -> (relational_failure divergence, "same under world: diverged")))
+
+let run_vary_value ctx ~sample_seed generator function_ =
+  match
+    Result.bind
+      (Infer_dist.dist_of_value ctx generator)
+      (Infer_dist.sample_dist ctx (Infer_dist.Rng.make sample_seed))
+  with
+  | Error error ->
+      ( relational_failure
+          (Printf.sprintf "VaryValue generator failed: %s" (Runtime_err.to_string error)),
+        Printf.sprintf "same under value: generator failed, seed %d" sample_seed )
+  | Ok (Value.VTuple [ left; right ]) -> (
+      let apply index value =
+        match Round_robin.run_call ctx function_ [ value ] with
+        | Ok result -> Ok result
+        | Error error ->
+            Error
+              (Printf.sprintf "VaryValue function run %d failed: %s" index
+                 (Runtime_err.to_string error))
+      in
+      match apply 1 left with
+      | Error detail ->
+          ( relational_failure detail,
+            Printf.sprintf "same under value: first run failed, seed %d" sample_seed )
+      | Ok first -> (
+          match apply 2 right with
+          | Error detail ->
+              ( relational_failure detail,
+                Printf.sprintf "same under value: second run failed, seed %d" sample_seed )
+          | Ok second -> (
+              match compare_relational_values ~baseline:1 ~candidate:2 first second with
+              | None -> (Pass 1, Printf.sprintf "same under value: seed %d" sample_seed)
+              | Some divergence ->
+                  ( relational_failure divergence,
+                    Printf.sprintf "same under value: diverged, seed %d" sample_seed ))))
+  | Ok value ->
+      ( relational_failure
+          (Printf.sprintf "VaryValue generator produced %s; expected a two-element tuple"
+             (Value.show value)),
+        Printf.sprintf "same under value: malformed pair, seed %d" sample_seed )
+
 (* --- the cache (W6.3) --- *)
 
 let cache_key_string = function
   | Hermetic (_, h) -> Printf.sprintf "%s|case|%s" version (Hash.to_hex h)
+  | Relational (_, h) -> Printf.sprintf "%s|relational|%s" version (Hash.to_hex h)
   | World _ -> invalid_arg "world tests are never cached"
 
 (* prop keys carry mode/samples/seed from day one so the format never migrates *)
@@ -568,6 +748,62 @@ let prop_key_string ~member ~mode ~samples ~seed =
 let schedule_key_string ~base ~schedules ~seed =
   Printf.sprintf "%s|scheduler=%s|schedule-identity=%s|schedules=%d|schedule-seed=%d" base
     Round_robin.seeded_scheduler_version schedule_identity_version schedules seed
+
+let relational_leaf_context ~suite_seed ~member ~label =
+  let relative_path = [ label ] and structural_path = [ 0 ] in
+  ( schedule_leaf_identity ~member ~relative_path ~structural_path,
+    schedule_test_seed ~seed:suite_seed ~member ~relative_path ~structural_path )
+
+(** [relational_key_string] names the complete first-release meaning of one RW.6 result. The member
+    hash covers every stored closure and distribution transitively; the explicit fields bind the
+    selected variant, its scalar controls, suite seed, applicable leaf-derived seed, execution mode,
+    and native scheduler/derivation versions. *)
+let relational_key_string ~member ~suite_seed ~prop_mode value =
+  match value with
+  | Value.VCon
+      {
+        name = "same-under";
+        args =
+          [
+            Value.VText label;
+            Value.VCon { name = "vary-schedule"; args = [ Value.VInt count; _ ]; _ };
+          ];
+        _;
+      } ->
+      let _, test_seed = relational_leaf_context ~suite_seed ~member ~label in
+      let mode =
+        match prop_mode with
+        | Sampling _ ->
+            Printf.sprintf "seeded|scheduler=%s|count=%d|leaf-seed=%d"
+              Round_robin.seeded_scheduler_version count test_seed
+        | Exhaustive { budget } ->
+            Printf.sprintf "exhaustive|scheduler=%s|count=%d|budget=%d|leaf-seed=%d"
+              Round_robin.scheduler_version count budget test_seed
+      in
+      Ok
+        (Printf.sprintf "%s|relational|%s|variation=schedule|seed-identity=%s|suite-seed=%d|%s"
+           version (Hash.to_hex member) schedule_identity_version suite_seed mode)
+  | Value.VCon
+      {
+        name = "same-under";
+        args = [ Value.VText _; Value.VCon { name = "vary-world"; args = [ _; _; _ ]; _ } ];
+        _;
+      } ->
+      Ok
+        (Printf.sprintf "%s|relational|%s|variation=world|suite-seed=%d" version
+           (Hash.to_hex member) suite_seed)
+  | Value.VCon
+      {
+        name = "same-under";
+        args = [ Value.VText label; Value.VCon { name = "vary-value"; args = [ _; _ ]; _ } ];
+        _;
+      } ->
+      let _, sample_seed = relational_leaf_context ~suite_seed ~member ~label in
+      Ok
+        (Printf.sprintf
+           "%s|relational|%s|variation=value|seed-identity=%s|suite-seed=%d|sample-seed=%d" version
+           (Hash.to_hex member) schedule_identity_version suite_seed sample_seed)
+  | value -> Error (Printf.sprintf "not a relational Warp value: %s" (Value.show value))
 
 let verdict_form (verdict : verdict) : Form.t =
   match verdict with
@@ -710,9 +946,31 @@ let rec value_has_prop (v : Value.t) : bool =
 let with_coverage ctx f = Eval.with_fresh_coverage ctx f
 
 (* walk one discovered test VALUE, recursing into groups *)
-let rec run_value ctx ~test_run ~prop_mode ~schedule_plan ~member ~schedule_path ~structural_path
-    ~display (v : Value.t) : (outcome list, string) result =
+let rec run_value ctx ~test_run ~prop_mode ~schedule_plan ~suite_seed ~member ~schedule_path
+    ~structural_path ~display (v : Value.t) : (outcome list, string) result =
   match v with
+  | Value.VCon { name = "same-under"; args = [ Value.VText label; variation ]; _ } ->
+      let display = display ^ "/" ^ label in
+      let program, test_seed = relational_leaf_context ~suite_seed ~member ~label in
+      let run () =
+        match variation with
+        | Value.VCon { name = "vary-schedule"; args = [ Value.VInt count; thunk ]; _ } -> (
+            match prop_mode with
+            | Sampling _ ->
+                run_vary_schedule_seeded ctx ~program ~suite_seed ~test_seed ~count thunk
+            | Exhaustive { budget } ->
+                run_vary_schedule_exhaustive ctx ~program ~suite_seed ~budget ~count thunk)
+        | Value.VCon { name = "vary-world"; args = [ left; right; subject ]; _ } ->
+            run_vary_world ctx left right subject
+        | Value.VCon { name = "vary-value"; args = [ generator; function_ ]; _ } ->
+            run_vary_value ctx ~sample_seed:test_seed generator function_
+        | malformed ->
+            ( relational_failure
+                (Printf.sprintf "Malformed relational variation: %s" (Value.show malformed)),
+              "same under: malformed variation" )
+      in
+      let (verdict, note), coverage = with_coverage ctx run in
+      Ok [ { display; verdict = Some verdict; note = Some note; coverage; cached = false } ]
   | Value.VCon { name = "case"; args = [ Value.VText label; thunk ]; _ } -> (
       let display = display ^ "/" ^ label in
       let schedule_path = schedule_path @ [ label ] in
@@ -770,7 +1028,7 @@ let rec run_value ctx ~test_run ~prop_mode ~schedule_plan ~member ~schedule_path
         | Value.VCon { name = "nil"; _ } -> Ok (List.concat (List.rev acc))
         | Value.VCon { name = "cons"; args = [ t; rest ]; _ } -> (
             match
-              run_value ctx ~test_run ~prop_mode ~schedule_plan ~member
+              run_value ctx ~test_run ~prop_mode ~schedule_plan ~suite_seed ~member
                 ~schedule_path:(schedule_path @ [ label ])
                 ~structural_path:(structural_path @ [ child_index ])
                 ~display:(display ^ "/" ^ label)
@@ -790,10 +1048,11 @@ let rec run_value ctx ~test_run ~prop_mode ~schedule_plan ~member ~schedule_path
       | Error e -> Error (Printf.sprintf "%s: %s" display e))
   | v -> Error (Printf.sprintf "not a test value: %s" (Value.show v))
 
-(** [run_discovered ctx ~test_run ~cache_dir ~granted d] executes one discovered test. Hermetic
-    Cases consult the cache by member hash; groups cache as a unit under the group's member hash
-    (its hash covers the members). World tests check grant coverage. *)
-let run_discovered ctx (cctx : Check.ctx) ~test_run ~prop_mode ~schedule_plan ~cache_dir
+(** [run_discovered ctx ~test_run ~suite_seed ~cache_dir ~granted d] executes one discovered test.
+    Hermetic Cases consult the cache by member hash; groups cache as a unit under the group's member
+    hash. Relational cases add their variation/mode and leaf-derived seeds. World tests check grant
+    coverage and remain uncached. *)
+let run_discovered ctx (cctx : Check.ctx) ~test_run ~prop_mode ~schedule_plan ~suite_seed ~cache_dir
     ~(granted : Hash.t list) (d : discovered) : (outcome list, string) result =
   match d with
   | Hermetic (name, h) -> (
@@ -849,8 +1108,8 @@ let run_discovered ctx (cctx : Check.ctx) ~test_run ~prop_mode ~schedule_plan ~c
                    stored)
           | None -> (
               match
-                run_value ctx ~test_run ~prop_mode ~schedule_plan ~member:h ~schedule_path:[]
-                  ~structural_path:[ 0 ] ~display:name v
+                run_value ctx ~test_run ~prop_mode ~schedule_plan ~suite_seed ~member:h
+                  ~schedule_path:[] ~structural_path:[ 0 ] ~display:name v
               with
               | Error e -> Error e
               | Ok outcomes ->
@@ -873,6 +1132,54 @@ let run_discovered ctx (cctx : Check.ctx) ~test_run ~prop_mode ~schedule_plan ~c
                          (fun o -> (o.display, Option.get o.verdict, o.note, o.coverage))
                          outcomes);
                   Ok outcomes)))
+  | Relational (name, h) -> (
+      match value_of ctx h with
+      | Error error -> Error (Printf.sprintf "%s: %s" name (Runtime_err.to_string error))
+      | Ok value -> (
+          match relational_key_string ~member:h ~suite_seed ~prop_mode value with
+          | Error error -> Error (Printf.sprintf "%s: %s" name error)
+          | Ok key -> (
+              match cache_lookup ~cache_dir key with
+              | Some stored ->
+                  let current_display stored_display =
+                    match String.index_opt stored_display '/' with
+                    | Some separator ->
+                        name
+                        ^ String.sub stored_display separator
+                            (String.length stored_display - separator)
+                    | None -> name
+                  in
+                  Ok
+                    (List.map
+                       (fun (display, verdict, note, coverage) ->
+                         {
+                           display = current_display display;
+                           verdict = Some verdict;
+                           note;
+                           coverage;
+                           cached = true;
+                         })
+                       stored)
+              | None -> (
+                  match
+                    run_value ctx ~test_run ~prop_mode ~schedule_plan:Default_schedule ~suite_seed
+                      ~member:h ~schedule_path:[] ~structural_path:[ 0 ] ~display:name value
+                  with
+                  | Error error -> Error error
+                  | Ok outcomes ->
+                      if
+                        outcomes <> []
+                        && List.for_all (fun outcome -> outcome.verdict <> None) outcomes
+                      then
+                        cache_store ~cache_dir key
+                          (List.map
+                             (fun outcome ->
+                               ( outcome.display,
+                                 Option.get outcome.verdict,
+                                 outcome.note,
+                                 outcome.coverage ))
+                             outcomes);
+                      Ok outcomes))))
   | World (name, h) ->
       let required = world_required cctx (Eval.store ctx) in
       let missing = List.filter (fun r -> not (List.exists (Hash.equal r) granted)) required in
@@ -900,7 +1207,7 @@ let run_discovered ctx (cctx : Check.ctx) ~test_run ~prop_mode ~schedule_plan ~c
         Result.bind
           (Result.map_error Runtime_err.to_string (value_of ctx h))
           (fun v ->
-            run_value ctx ~test_run ~prop_mode ~schedule_plan:Default_schedule ~member:h
+            run_value ctx ~test_run ~prop_mode ~schedule_plan:Default_schedule ~suite_seed ~member:h
               ~schedule_path:[] ~structural_path:[ 0 ] ~display:name v)
 
 (* --- rendering --- *)

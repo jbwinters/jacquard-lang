@@ -92,3 +92,25 @@
       (tarrow ()
         (row (eref check) (eref fs) (eref net) (eref clock) (eref console))
         (ttuple)))))
+
+; RW.6: self-contained hermetic relational cases. The three declared
+; parameters truthfully retain heterogeneous runtime payloads in rank-1 HM;
+; they may be phantom for constructors that do not use them. Handler calls,
+; scheduled thunks, and value functions all close at the outer boundary.
+(deftype variation ((tvar body) (tvar result) (tvar input))
+  (con vary-schedule
+    (field count (tref int))
+    (field thunk (tarrow () (row) (tvar result))))
+  (con vary-world
+    (field left (tarrow ((tvar body)) (row) (tvar result)))
+    (field right (tarrow ((tvar body)) (row) (tvar result)))
+    (field subject (tvar body)))
+  (con vary-value
+    (field generator
+      (tapp (tref distribution) (ttuple (tvar input) (tvar input))))
+    (field function (tarrow ((tvar input)) (row) (tvar result)))))
+
+(deftype warp-decl ((tvar body) (tvar result) (tvar input))
+  (con same-under
+    (field label (tref text))
+    (field variation (tapp (tref variation) (tvar body) (tvar result) (tvar input)))))

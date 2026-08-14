@@ -58,6 +58,11 @@ val transcript : recorder -> transcript
 val observations : transcript -> observation list
 (** [observations transcript] returns its observations in canonical order. *)
 
+val of_values : Value.t list -> transcript
+(** [of_values values] constructs one trace-free observation per runtime value, in order, using
+    exactly [Value.show value ^ "\n"]. It is the safe result-only construction seam for hermetic
+    relational callers and cannot forge routed events. *)
+
 val parse : string -> (transcript, Diag.t list) result
 (** [parse bytes] accepts exactly canonical [run-transcript-v1] bytes. It rejects unknown versions,
     misspelled or reordered fields, noncanonical unsigned decimals or hashes, noncontiguous indices,

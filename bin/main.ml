@@ -1576,7 +1576,11 @@ let test_cmd files allows prelude cache_dir no_cache coverage seed samples exhau
                                   let discovered = Warp.discover store cctx in
                                   let test_hashes =
                                     List.map
-                                      (function Warp.Hermetic (_, h) | Warp.World (_, h) -> h)
+                                      (function
+                                        | Warp.Hermetic (_, h)
+                                        | Warp.World (_, h)
+                                        | Warp.Relational (_, h) ->
+                                            h)
                                       discovered
                                   in
                                   let granted = granted_hashes store allows in
@@ -1600,7 +1604,7 @@ let test_cmd files allows prelude cache_dir no_cache coverage seed samples exhau
                                     | d :: rest -> (
                                         match
                                           Warp.run_discovered ctx cctx ~test_run ~prop_mode
-                                            ~schedule_plan ~cache_dir ~granted d
+                                            ~schedule_plan ~suite_seed:seed ~cache_dir ~granted d
                                         with
                                         | Error e -> Error e
                                         | Ok outcomes ->

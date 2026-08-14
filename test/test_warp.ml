@@ -178,6 +178,70 @@ let test_cache_evidence () =
   test_cache_entry_roundtrip ();
   test_cache_version_invalidates_pre_sc17_entries ()
 
+let test_relational_cache_identity () =
+  let constructor name args = Value.VCon { con = Hash.of_string name; name; args } in
+  let member = Hash.of_string "relational-member" in
+  let thunk =
+    Value.VClosure
+      {
+        scope = Value.empty_scope;
+        params = [];
+        body = { Kernel.it = Kernel.Tuple []; meta = Meta.empty };
+      }
+  in
+  let schedule count =
+    constructor "same-under"
+      [ Value.VText "schedule"; constructor "vary-schedule" [ Value.VInt count; thunk ] ]
+  in
+  let key ~seed ~count =
+    match
+      Warp.relational_key_string ~member ~suite_seed:seed
+        ~prop_mode:(Warp.Sampling { seed; samples = 100 })
+        (schedule count)
+    with
+    | Ok key -> key
+    | Error error -> Alcotest.fail error
+  in
+  let first = key ~seed:73 ~count:3 in
+  let first_fields = String.split_on_char '|' first in
+  Alcotest.(check bool)
+    "relational key names schedule variant" true
+    (List.mem "variation=schedule" first_fields);
+  Alcotest.(check bool) "relational key binds count" true (List.mem "count=3" first_fields);
+  Alcotest.(check bool)
+    "relational key binds seeded scheduler" true
+    (List.mem ("scheduler=" ^ Round_robin.seeded_scheduler_version) first_fields);
+  Alcotest.(check bool)
+    "changed count rekeys relational case" true
+    (not (String.equal first (key ~seed:73 ~count:4)));
+  Alcotest.(check bool)
+    "changed suite seed rekeys relational case" true
+    (not (String.equal first (key ~seed:74 ~count:3)));
+  let exhaustive =
+    match
+      Warp.relational_key_string ~member ~suite_seed:73
+        ~prop_mode:(Warp.Exhaustive { budget = 20 })
+        (schedule 3)
+    with
+    | Ok key -> key
+    | Error error -> Alcotest.fail error
+  in
+  Alcotest.(check bool)
+    "seeded and exhaustive results cannot collide" true
+    (not (String.equal first exhaustive));
+  let exhaustive_other_seed =
+    match
+      Warp.relational_key_string ~member ~suite_seed:74
+        ~prop_mode:(Warp.Exhaustive { budget = 20 })
+        (schedule 3)
+    with
+    | Ok key -> key
+    | Error error -> Alcotest.fail error
+  in
+  Alcotest.(check bool)
+    "suite seed rekeys exhaustive relational case" true
+    (not (String.equal exhaustive exhaustive_other_seed))
+
 (* --- W6.8: the memo trap — two tests sharing a dependency BOTH count it --- *)
 
 let test_coverage_memo_trap () =
@@ -358,5 +422,6 @@ let suite =
     Alcotest.test_case "check.eq renders both sides" `Quick test_check_eq_renders_both_sides;
     Alcotest.test_case "suite is pure (zero grants)" `Quick test_manifest_pure;
     Alcotest.test_case "cache entry and SC.17 invalidation" `Quick test_cache_evidence;
+    Alcotest.test_case "relational cache identity" `Quick test_relational_cache_identity;
     Alcotest.test_case "coverage counts memo hits" `Quick test_coverage_and_schedule_identity;
   ]

@@ -52,5 +52,17 @@ val run_expr :
     in-bound worlds remain in the report. Unhandled routed effects are recorded and refused without
     invoking a root callback. *)
 
+val run_call :
+  Eval.ctx ->
+  ?policy:Concurrency_contract.failure_policy ->
+  ?bounds:bounds ->
+  program:Hash.t ->
+  Value.t ->
+  Value.t list ->
+  (report, Diag.t list) result
+(** [run_call] gives an already evaluated callable the exact exploration contract of {!run_expr}.
+    Each branch starts from a fresh application state, and [program] is the stable identity carried
+    by recorded/forked schedules. *)
+
 val incomplete_reason_to_string : incomplete_reason -> string
 (** Stable human-readable rendering for evidence and test reports. *)

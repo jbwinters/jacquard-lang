@@ -4,6 +4,7 @@
  (private_modules
   Trusted_builtin
   Recovery_marker
+  Relational_contract
   Once_state
   Concurrency_owner
   Task_capability

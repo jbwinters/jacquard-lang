@@ -512,6 +512,22 @@ let test_compare_values_projects_away_traces () =
       Alcotest.(check bool)
         "result projection prefix has no operation hash" false (contains one_hash rendered)
 
+let test_of_values_uses_frozen_result_boundary () =
+  let transcript = Run_transcript.of_values [ Value.VInt 7; Value.VText "answer" ] in
+  Alcotest.(check string)
+    "trace-free values use canonical result bytes"
+    "jacquard-run-transcript format=1 observations=2\n\
+     observation index=0 value-bytes=2 trace-events=0\n\
+     7\n\
+     observation index=1 value-bytes=9 trace-events=0\n\
+     \"answer\"\n"
+    (Run_transcript.serialize transcript);
+  Alcotest.(check bool)
+    "safe constructor cannot invent routed events" true
+    (List.for_all
+       (fun (observation : Run_transcript.observation) -> observation.trace = [])
+       (Run_transcript.observations transcript))
+
 type mutation = { base : string; changed : string; expected_path : string }
 
 let generated_mutation ~trace_mutation ~observation_count ~observation_choice ~trace_count
@@ -606,6 +622,8 @@ let suite =
     Alcotest.test_case "Equal iff canonical bytes equal" `Quick test_equal_iff_canonical_bytes_equal;
     Alcotest.test_case "result comparison projects traces" `Quick
       test_compare_values_projects_away_traces;
+    Alcotest.test_case "result-only construction boundary" `Quick
+      test_of_values_uses_frozen_result_boundary;
     Alcotest.test_case "seeded single mutation reports position" `Quick
       test_seeded_single_mutation_reports_position;
   ]

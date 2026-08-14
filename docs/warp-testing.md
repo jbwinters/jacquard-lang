@@ -114,7 +114,7 @@ test.replay : (Log, () ->{E | e} a) ->{| e} a
 A `Log` is a list of (operation, arguments, result) triples as `Code`, stored
 content-addressed like everything else. That placement matters: a test referencing
 a fixture references its hash, so editing a fixture changes the test's hash and the
-cache (§6) invalidates itself with no bookkeeping. Replay has two modes. Strict
+cache (§7) invalidates itself with no bookkeeping. Replay has two modes. Strict
 mode fails when the live op sequence diverges from the log, which turns every
 recorded fixture into an interaction contract and makes behavior drift a test
 failure with a diff. Loose mode matches by operation and arguments, for tests that
@@ -198,7 +198,68 @@ only the EXHAUSTIVE driver scales and prunes branches by observation weight. A
 `--exhaustive`; under sampling the condition is silently inert. Rejection-style
 resampling for the sampling lane is future work.
 
-## 5. Fault simulation
+## 5. Relational cases
+
+Ordinary `Case` says that checks pass in one execution. A relational case says
+that the result is unchanged across a controlled variation. Warp discovers one
+by its checked `WarpDecl body result input` head, not by its source name:
+
+```text
+type Variation body result input =
+  | VarySchedule(Int, () ->{} result)
+  | VaryWorld((body) ->{} result, (body) ->{} result, body)
+  | VaryValue(Distribution (input, input), (input) ->{} result)
+
+type WarpDecl body result input =
+  | SameUnder(Text, Variation body result input)
+```
+
+The carrier is closed but parameterized: each variant stores everything it
+needs, while the type parameters preserve the real payload types. These are
+ordinary prelude types and constructors; they add no kernel form, erasure,
+existential, or cast.
+
+Choose the variation that names the dimension under test:
+
+- `VarySchedule(n, thunk)` runs a closed thunk under `n` distinct,
+  deterministically derived schedules. The derivation mixes the suite
+  `--seed` with the declaration's Merkle member hash and length-framed case
+  label, so the same declaration and seed repeat exactly. Results are compared
+  with run 1 in order. The case owns `n`; a global `--schedules` option does not
+  form a second cross-product. Under `--exhaustive`, Warp explores the callable's
+  schedule tree with a world cap of `min(n, --budget)` and passes only when that
+  bounded search is complete.
+- `VaryWorld(handler_a, handler_b, subject)` applies both handlers to the same
+  stored zero-argument thunk subject. Use it for a live-shaped handler and a
+  scripted or rehearsal twin. The checker requires equal fully elaborated
+  subject and outward rows before ordinary unification; different source
+  spellings are fine when their checked rows agree. That constraint travels
+  with the frozen constructor's checked type, including through aliases.
+- `VaryValue(generator, function)` samples one pair from the distribution with
+  a seed derived from the suite seed and case identity, then applies the closed
+  function to each member. Use it for configuration, secret-like inputs, or
+  other values whose influence should be absent from the result. It is exact
+  equality for the sampled pair, not a statistical distribution comparison.
+
+All three forms are hermetic. Scheduled thunks, handlers after discharging the
+subject row, and value functions close at `{}`; a Channel-using scheduled thunk
+therefore receives the same closed-row refusal as an ordinary `Case`. Completed
+results are rendered through `Value.show` plus LF and compared with the frozen
+RW.2 result-only comparator. A mismatch reports the first canonical
+`value-divergence`; a constituent runtime failure remains a hard case failure.
+
+Relational declarations use Warp's hermetic result cache. Their member hash
+covers the stored variation values transitively, and the cache key additionally
+binds the variation kind, suite and derived seeds, schedule count, and seeded or
+exhaustive mode and budget where applicable. Changing the declaration, `n`, or
+suite seed reruns the case; `--no-cache` bypasses both lookup and storage.
+
+`SameUnder` intentionally has no root authority. When the varied dimension is
+a root grant, process Console, or Secret resolver, use
+`jacquard relate` and the Layer-2 contract in
+[Relational Warp lanes](relational-warp.md) instead.
+
+## 6. Fault simulation
 
 One small effect turns the fixture handlers into a simulation rig:
 
@@ -228,7 +289,7 @@ deterministic simulation testing in the FoundationDB style, assembled from
 library parts, with the exponential budget capped by the same mechanism as
 `--exhaustive`.
 
-## 6. The cache, and what CI stops doing
+## 7. The cache, and what CI stops doing
 
 Hashing is Merkle-transitive: a definition's hash covers the hashes it references,
 recursively. So for a hermetic `Test`, one key says everything. The equations
@@ -240,6 +301,9 @@ memo key (Prop)      = (driver-version, hash, mode, samples, seed)
 memo key (scheduled Test) =
   (driver-version, hash, scheduler-version, schedule-identity-version,
    schedules, seed)
+memo key (SameUnder) =
+  (driver-version, hash, variation, suite-seed, derived-seed-if-applicable,
+   variation-specific controls)
 WorldTest            = never cached
 ```
 
@@ -264,7 +328,7 @@ the store's reachable-but-never-executed definitions. That answers "what code ha
 no test touching it" at the definition level with zero instrumentation of source
 text; line-level coverage via spans can layer on later.
 
-## 7. Testing probabilistic code
+## 8. Testing probabilistic code
 
 Inference code is code, and it finally gets real tests. For discrete models,
 enumeration makes assertions exact, so no statistics are involved. These are
@@ -284,7 +348,7 @@ documented caveat is that a seed-pinned tolerance can silently overfit its seed,
 so the guidance is enumeration wherever the support allows, and generous
 tolerances with large N where it does not.
 
-## 8. What a test file looks like
+## 9. What a test file looks like
 
 A minimal hermetic case uses the currently shipped constructor and assertion
 names and is checked by `dune runtest`:
@@ -339,14 +403,14 @@ closed rows.)
 `--exhaustive` upgrades the `Prop` to a 256-case proof, and the `WorldTest` runs in
 its own lane under whatever grants CI gives it. The signatures did the sorting.
 
-## 9. Deliberately absent
+## 10. Deliberately absent
 
 No mocking or spy framework (handlers, §3). No retries on hermetic tests (§1). No
 test ordering hooks or shared setup/teardown state, since fixtures are values and
 handlers compose instead. No tag taxonomy for selection, because hashes select. No
 per-type shrinkers (§4). No separate small-check tool (§4).
 
-## 10. Decisions and dev plan reconciliation
+## 11. Decisions and dev plan reconciliation
 
 New owner decisions, continuing the table: D12, discovery by checked type as
 designed here versus a meta marker (default: by type). D13, the `Codec` story

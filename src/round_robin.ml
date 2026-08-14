@@ -1093,6 +1093,18 @@ let run_expr_scheduled_attempt ctx ?(policy = Concurrency_contract.default_failu
       | Error (Budget_error { budget; error; schedule_prefix }) ->
           Ok (Stopped { budget; error; schedule_prefix }))
 
+let run_call_scheduled_attempt ctx ?(policy = Concurrency_contract.default_failure_policy)
+    ?(bounds = default_bounds) ?(allow_routed = true) ~program ~mode callable arguments =
+  match
+    run_state_global ctx ~policy ~bounds ~program ~schedule_mode:mode ~allow_routed
+      (Eval.apply_state ctx callable arguments)
+  with
+  | Ok (outcome, schedule) ->
+      Ok (Finished { execution_outcome = outcome; execution_schedule = schedule })
+  | Error (Run_error error) -> Error error
+  | Error (Budget_error { budget; error; schedule_prefix }) ->
+      Ok (Stopped { budget; error; schedule_prefix })
+
 let run_expr_outcome_scheduled ctx ?policy ?bounds ?allow_routed ~mode expression =
   Result.bind (run_expr_scheduled_attempt ctx ?policy ?bounds ?allow_routed ~mode expression)
     (function

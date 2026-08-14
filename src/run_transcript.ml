@@ -99,6 +99,12 @@ let transcript recorder =
 
 let observations (Transcript observations) = observations
 
+(** [of_values values] constructs the result-only projection used by hermetic relational Warp cases.
+    Every runtime value is rendered through the same frozen observation boundary as an ordinary
+    recorded expression, and no routed event is invented. *)
+let of_values values =
+  Transcript (List.map (fun value -> { value = Value.show value ^ "\n"; trace = [] }) values)
+
 let decimal value =
   if value < 0 then bug "negative canonical count or byte length";
   string_of_int value

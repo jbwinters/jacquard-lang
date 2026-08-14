@@ -6,8 +6,8 @@ artifacts and are not retroactively updated by DX.2.
 
 ## Current inventory
 
-- Alcotest/QCheck cases: `862`
-- Cram transcript files: `57`
+- Alcotest/QCheck cases: `865`
+- Cram transcript files: `58`
 - Doctest examples: `28` across 8 documents
 
 The test count includes six DX.2 filesystem-boundary cases and six DX.5/DX.7
@@ -52,6 +52,10 @@ case-study transcript without adding another cram file.
 RW.5 adds one compiled result-projection comparator case and one CLI transcript
 covering accepted live/dry grants, value equality and divergence, trace/audit
 projection, and fail-closed write-shaped and ambiguous usage.
+RW.6 adds three compiled result-construction, evaluated-call scheduling, and
+cache-identity cases plus one relational Warp transcript covering all three
+typed variations, row refusal, deterministic sampling, exhaustive scheduling,
+canonical divergence, and cache invalidation.
 
 ## Proved behavior
 

@@ -51,9 +51,10 @@ let classify_row (r : row) : arrow_tier =
   | effects, _ -> Effectful { effects; opened = true }
 
 (** [classify_ty t] is the tier of [t]'s outermost arrow row, [Data] for non-arrows. *)
-let classify_ty (t : ty) : arrow_tier =
+let rec classify_ty (t : ty) : arrow_tier =
   match repr t with
   | TArrow (_, row, _) | TResume (_, row, _) | TVariadicArrow (_, row, _) -> classify_row row
+  | TExactThunk inner -> classify_ty inner
   | _ -> Data
 
 (* ------------------------------------------------------------------ *)
