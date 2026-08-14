@@ -33,7 +33,9 @@ commit, while this prose tells readers what is true in the current tree.
   not verified facts or consent. Only an exact hash-bound `Approval` decision
   can provide the consent represented by that protocol.
 - Secret opacity is not taint tracking. `secret.expose` returns ordinary
-  `Text`, which can subsequently be copied or leaked.
+  `Text`, which can subsequently be copied or leaked. The later shipped
+  `jacquard relate FILE --vary secret=NAME --seed S --allow secret` lane checks
+  one selected program and seed without changing that historical boundary.
 - At the ET.8 publication point, `Choose`, `Env`, `Pg`, `Blob`, `Serve`,
   `Crypto`, `Log`, `Judge`, `Async`, and `Channel` formed the ten-item
   reserved/unimplemented set. That historical status made no handler, root

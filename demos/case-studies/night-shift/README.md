@@ -12,12 +12,13 @@ twice, discharged only through the granted `eval` capability.
 
 The launcher runs five lanes: the inferred authority signatures, an ungranted
 run that refuses with `E0814` after the authority-free forecast completes, the
-granted run with a leak check on the token, a `jacquard relate` noninterference
-check over two deterministically derived deploy-token payloads, and the Warp
-suite of deterministic cases plus two properties that `--exhaustive` turns
-into proofs over all 27 fleet worlds. The Warp cases stay hermetic by using
-the preflight's sequential twin and a stubbed `eval`; the concurrent channel
-schedule and the real evaluation are pinned by the granted lane's transcript.
+granted run with a leak check on the token, the flagship `jacquard relate
+--vary secret` noninterference check over two deterministically derived
+deploy-token payloads, and the Warp suite of deterministic cases plus two
+properties that `--exhaustive` turns into proofs over all 27 fleet worlds. The
+Warp cases stay hermetic by using the preflight's sequential twin and a stubbed
+`eval`; the concurrent channel schedule and the real evaluation are pinned by
+the granted lane's transcript.
 
 ```sh
 sh demos/case-studies/night-shift/run.sh

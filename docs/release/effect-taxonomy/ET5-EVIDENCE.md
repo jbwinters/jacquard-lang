@@ -27,7 +27,9 @@ interface and opaque runtime representation. It does not change the frozen
 
 These handlers preserve ET.4 non-derivability and fixed redaction. This remains
 an opacity boundary, not taint tracking: after `secret.expose`, ordinary Text
-may be copied or leaked.
+may be copied or leaked. The later shipped `jacquard relate FILE --vary
+secret=NAME --seed S --allow secret` lane is bounded program-specific evidence,
+not a revision of the historical ET.5 claim.
 
 ## Adversarial evidence
 

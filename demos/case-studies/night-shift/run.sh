@@ -37,7 +37,7 @@ else
   echo "token stayed redacted"
 fi
 
-echo "== relational: two deploy tokens, one observable shift =="
+echo "== relational: flagship Secret noninterference lane =="
 if jacquard_demo relate "$here/model.jac" --vary secret=night-shift-token --seed 42 \
     --allow eval --allow secret > "$relate_out" 2>&1; then
   :

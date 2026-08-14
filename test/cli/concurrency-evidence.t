@@ -16,6 +16,11 @@ complete, unique, replayable schedules.
   exhaustive completeness=complete explored=8 worlds-started=8 unique-traces=8 all-zero=true
   replay source=round-robin result=0 byte-identical=true
   exhaustive-replay worlds=8 byte-identical=true
+  == relational: schedule-invariant structured results ==
+  PASS fail-fast-invariance/fail-fast result is schedule invariant (same under schedule: 32 runs, seed 42)
+  PASS nested-invariance/nested scope result survives scheduling (same under schedule: 32 runs, seed 42)
+  PASS two-child-invariance/two-child results retain creation order (same under schedule: 32 runs, seed 42)
+  3 passed, 0 failed, 0 skipped, 0 refused
 
 SC.17 keeps the historical SC.16 attestation intact and adds a separately
 reconstructible correction pack for transitive cancellation of nested runs.

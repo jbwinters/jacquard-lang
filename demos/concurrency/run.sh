@@ -20,3 +20,6 @@ jacquard_demo check "$here/task-schedules.jac" --print-sigs |
 
 echo "== one task program, four scheduler handlers =="
 "$driver" "$jacquard_demo_checkout/prelude" "$here/task-schedules.jac"
+
+echo "== relational: schedule-invariant structured results =="
+jacquard_demo test "$here/relational-tests.jac" --seed 42 --no-cache

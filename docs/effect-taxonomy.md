@@ -231,7 +231,9 @@ name and direct derived hash, and the OCaml `Hash.t` representation is abstract.
 has no `Show` instance; generic inspection renders it redacted. `secret.expose`
 is the only standard conversion to `Text`, so deliberate exposure remains in
 the effect row. This is non-derivability, not information-flow tracking: after
-exposure a program can still leak the text.
+exposure a program can still leak the text. Use `jacquard relate FILE --vary
+secret=NAME --seed S --allow secret` as a bounded runnable noninterference
+check for one selected program; it does not turn opacity into taint tracking.
 
 ET.5 supplies three explicit handler boundaries without changing the interface
 identity or opaque value representation. `secret.fixed` is the deterministic
@@ -505,6 +507,9 @@ data and receive structural diffs, never an authority label.
   a universal host/tool effect.
 - Secret opacity is non-derivability, not taint tracking. After
   `secret.expose`, plaintext is ordinary `Text` and may be copied or leaked.
+  The runnable `jacquard relate FILE --vary secret=NAME --seed S --allow
+  secret` instrument checks one selected program and seed; it is not a static
+  information-flow proof.
 - Secret redaction does not promise process-memory scrubbing. The v0 OCaml and
   native carriers do not zero payload bytes when a Secret is released, so
   process memory and crash-dump protection remain embedding responsibilities.
@@ -554,7 +559,7 @@ receives a record intended for the verified inode.
 | ID | decision | ratified result |
 |---|---|---|
 | D56 | taxonomy freeze v1 | §3 and the TSV artifact; resolved identities govern, additions use new hashes |
-| D57 | Secret opacity | opaque, no `Show`, inspect redacts, explicit in-row `secret.expose`; taint deferred |
+| D57 | Secret opacity | opaque, no `Show`, inspect redacts, explicit in-row `secret.expose`; taint deferred, with bounded program-specific `relate --vary secret` evidence shipped |
 | D58 | audit chain | implemented `audit-chain-v1` carrier commits existing canonical entry bytes and predecessor HASH_V0; CLI append publishes a head and governance verification fails closed offline |
 | D59 | Proposal schema | implemented `proposal-v1` binds semantic call subject separately from exact review identity; policy, assessment, ordered authority, rendering, summary, and preview are mandatory hash inputs; decisions embed that exact proposal hash, and hash-less, forged, or mismatched carriers fail before action. GM.0 D67 supersedes the earlier `subject` field name with exact `call-id` and `proposal-id` schemas. |
 | D60 | membrane placement | GM.1 implements the versioned core data and policies in ring 3; GM.5 releases Judge handlers and GM.9 releases the typed Workspace facade, while cookbook and flagship demo work remain later phases |

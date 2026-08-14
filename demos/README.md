@@ -39,8 +39,8 @@ in one program.
   Warp safety proof over all 18 worlds.
 - `case-studies/night-shift/`: one unattended maintenance shift spanning exact
   risk, concurrent probes, approval-bound code, an opaque deploy token, and a
-  relational lane proving that two derived token payloads leave the complete
-  observable run unchanged without entering its transcript.
+  flagship Secret noninterference lane proving that two derived token payloads
+  leave the complete observable run unchanged without entering its transcript.
 - `governed-workspace/`: one unchanged Workspace-only deployment agent under
   pure dry simulation, nested live policies, a durable approval-queue denial,
   a verified audit chain, and the existing exhaustive hostile fault space.

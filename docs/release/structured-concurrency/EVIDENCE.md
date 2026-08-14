@@ -34,7 +34,7 @@ native Channel, actor, or supervision claim.
 | C3 | Scoped typed channels run through deterministic FIFO, seeded, replay, exhaustive, and cached interpreter scheduling with exact run/scope ownership, rendezvous and buffering, close, cancellation, and deadlock behavior. | `channel-contract`, `round-robin`, and `exhaustive-schedule` suites; `test/cli/task-values.t`; `test/cli/schedule-replay.t`; and the frozen traces below |
 | C4 | Not claimed: host asynchronous I/O, actors, and supervision are absent. | [LIMITS.md](LIMITS.md) |
 
-The current successor inventory is exactly 865 compiled Alcotest/QCheck cases, 58 recursive
+The current successor inventory is exactly 868 compiled Alcotest/QCheck cases, 58 recursive
 cram transcript files, and 28 named doctest examples across 8 documents. The
 repository release-law checks recompute those counts instead of trusting this
 paragraph.
@@ -740,6 +740,7 @@ eight independently selectable groups and their case counts are:
 | `cancellation` | 1 | cooperative boundary delivery |
 | `scope-policy` | 1 | fail-fast and collect aggregation |
 | `round-robin` | 1 | real evaluator FIFO lifecycle, including Channel seeded/replay/cache parity |
+| `relational-regression-net` | 3 | exact demo transcript invariance; direct- and fail-fast-cancellation sentinel safety |
 | `schedule-trace` | 4 | canonical identity; refusal compatibility; impossible-event refusal; task-budget prefix replay |
 | `exhaustive-schedule` | 8 | hand counts and Channel worlds; Warp/replay; failures; budgets; hermeticity; Once ownership |
 
@@ -750,16 +751,16 @@ opam exec -- dune build test/test_jacquard.exe
 (
   cd _build/default/test
   ./test_jacquard.exe list --color=never 2>/dev/null |
-    grep -E '^(scheduler-core|channel-contract|structured-scope|cancellation|scope-policy|round-robin|schedule-trace|exhaustive-schedule) '
+    grep -E '^(scheduler-core|channel-contract|structured-scope|cancellation|scope-policy|round-robin|relational-regression-net|schedule-trace|exhaustive-schedule) '
   ./test_jacquard.exe test \
-    'scheduler-core|channel-contract|structured-scope|cancellation|scope-policy|round-robin|schedule-trace|exhaustive-schedule' \
+    'scheduler-core|channel-contract|structured-scope|cancellation|scope-policy|round-robin|relational-regression-net|schedule-trace|exhaustive-schedule' \
     --compact --color=never
 )
 ```
 
 The current inventory is mechanically checked against compiled discovery:
 
-- Alcotest/QCheck cases: `865`
+- Alcotest/QCheck cases: `868`
 - Cram transcript files: `58`
 
 The SC.14 baseline arithmetic remains exact: twelve compiled
@@ -809,7 +810,9 @@ night-shift flagship extends the existing case-study transcript. RW.5 grant
 variation adds one result-projection comparator case and one CLI transcript,
 producing the then-current `862 / 57 / 28` inventory. RW.6 hermetic relational
 cases add three compiled seam/cache cases and one registered Warp transcript,
-producing the current `865 / 58 / 28` inventory.
+producing the then-current `865 / 58 / 28` inventory. RW.7 adds the three-case
+registered relational regression net without adding a cram file or doctest,
+producing the current `868 / 58 / 28` inventory.
 
 Native scheduling remains outside the current backend. Differential coverage is
 therefore limited to the supported case: an Async operation discharged by an

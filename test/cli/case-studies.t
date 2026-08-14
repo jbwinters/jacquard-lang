@@ -63,7 +63,7 @@ deploy-token payloads produce one equal observable shift and neither reaches
 the transcript.
 
   $ JACQUARD=jac sh "$D/night-shift/run.sh" 2>&1 | sed -n '/^== relational:/,/^== Warp:/p'
-  == relational: two deploy tokens, one observable shift ==
+  == relational: flagship Secret noninterference lane ==
   relate runs=2 seed=42 verdict=equal
   secret variation stayed redacted
   == Warp: pinned schedules, stubbed lever, sampled properties ==

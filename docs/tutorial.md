@@ -213,3 +213,6 @@ Two distinctions prevent common review mistakes:
 `Secret` is opaque before `secret.expose`, including under generic inspection,
 but Jacquard does not provide taint tracking. After exposure, the plaintext is
 ordinary `Text`; keep exposure late and do not place it in typed Audit data.
+Use `dune exec jacquard -- relate FILE --vary secret=NAME --seed S --allow
+secret` to run a bounded noninterference check for one program, name, and seed;
+it is evidence, not a language-wide information-flow guarantee.
