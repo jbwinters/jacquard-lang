@@ -28,6 +28,11 @@ type ty =
           arrow only at a call boundary; {!Check}'s affine pass still forbids copying or escape. *)
   | TVariadicArrow of ty * row * ty
       (** Homogeneous zero-or-more arguments for trusted builtins; ordinary arrows remain exact. *)
+  | TExactThunk of ty
+      (** Checker-internal residual constraint for RW.6's [VaryWorld] body parameter. The wrapped
+          type must elaborate to a zero-argument arrow, and every subsequent use must have the same
+          fixed effect set before flexible row tails are unified. Rendering erases the wrapper; it
+          never appears in source, kernel forms, canonical identity, or runtime values. *)
   | TVar of tvar ref
   | TSkolem of int * string  (** rigid annotation variable; the string is its source name *)
 
@@ -68,6 +73,7 @@ let rec repr (t : ty) : ty =
       let t'' = repr t' in
       r := Link t'';
       t''
+  | TExactThunk inner -> TExactThunk (repr inner)
   | t -> t
 
 (** Normalize a row: follow tail links, merge their effect sets, and compress the private tail link.
@@ -105,6 +111,7 @@ let rec occurs_adjust (id : int) (lvl : level) (t : ty) : unit =
       occurs_adjust id lvl param;
       row_occurs_adjust_ty id lvl row;
       occurs_adjust id lvl result
+  | TExactThunk inner -> occurs_adjust id lvl inner
 
 and row_occurs_adjust_ty id lvl row =
   (* type-var occurs never fails through a row, but nested arrows hide in effect args?
@@ -129,6 +136,7 @@ let rec row_occurs_adjust (id : int) (lvl : level) (t : ty) : unit =
       row_occurs_adjust id lvl param;
       row_occurs_in_row id lvl row;
       row_occurs_adjust id lvl result
+  | TExactThunk inner -> row_occurs_adjust id lvl inner
 
 and row_occurs_in_row id lvl row =
   let row = repr_row row in
@@ -157,6 +165,9 @@ let rec unify (a : ty) (b : ty) : unit =
             occurs_adjust id level t;
             row_var_levels level t;
             r := Link t)
+    | TExactThunk left, TExactThunk right -> unify_exact_thunks left right
+    | TExactThunk inner, candidate | candidate, TExactThunk inner ->
+        unify_exact_thunk inner candidate
     | TSkolem (i, _), TSkolem (j, _) when i = j -> ()
     | TCon (h1, args1), TCon (h2, args2) when Hash.equal h1 h2 ->
         if List.length args1 <> List.length args2 then
@@ -184,6 +195,39 @@ let rec unify (a : ty) (b : ty) : unit =
         unify_rows r1 r2;
         unify t1 t2
     | _ -> raise (Unify_error "type mismatch")
+
+(** [unify_exact_thunk inner candidate] preserves RW.6's residual body constraint through
+    constructor aliases and higher-order transport. The first concrete thunk anchors its fixed
+    effect set; later candidates may solve flexible tails but may not union a different fixed set.
+*)
+and unify_exact_thunk inner candidate =
+  match (repr inner, repr candidate) with
+  | TVar _, (TArrow ([], _, _) as candidate) -> unify inner candidate
+  | TArrow ([], left_row, left_result), TArrow ([], right_row, right_result) ->
+      let left_row = repr_row left_row and right_row = repr_row right_row in
+      if
+        List.length left_row.effects <> List.length right_row.effects
+        || not (List.for_all2 Hash.equal left_row.effects right_row.effects)
+      then raise (Unify_error "relational thunk effect rows have different fixed effects");
+      let tails_compatible =
+        match (left_row.tail, right_row.tail) with
+        | RClosed, RClosed -> true
+        | RSkolem (left, _), RSkolem (right, _) -> left = right
+        | RVar { contents = RUnbound _ }, _ | _, RVar { contents = RUnbound _ } -> true
+        | _ -> false
+      in
+      if not tails_compatible then
+        raise (Unify_error "relational thunk effect row tails are incompatible");
+      unify_rows left_row right_row;
+      unify left_result right_result
+  | _ -> raise (Unify_error "relational body must be a zero-argument thunk")
+
+and unify_exact_thunks left right =
+  match (repr left, repr right) with
+  | TVar _, TVar _ -> unify left right
+  | TVar _, right -> unify_exact_thunk left right
+  | left, TVar _ -> unify_exact_thunk right left
+  | left, right -> unify_exact_thunk left right
 
 (* when binding a type var at [level], row vars inside the bound type must not outlive it *)
 and row_var_levels level t =
@@ -215,6 +259,7 @@ and row_var_levels level t =
            r := RUnbound { id; level }
        | _ -> ());
       row_var_levels level result
+  | TExactThunk inner -> row_var_levels level inner
 
 (** Row unification (module doc): cancel the intersection, then case on the tails. *)
 and unify_rows (ra : row) (rb : row) : unit =
@@ -315,6 +360,7 @@ let rec copy_join_result ty =
       TResume (copy_join_result input, copy_join_row row, copy_join_result answer)
   | TVariadicArrow (param, row, result) ->
       TVariadicArrow (copy_join_result param, copy_join_row row, copy_join_result result)
+  | TExactThunk inner -> TExactThunk (copy_join_result inner)
 
 and copy_join_row row =
   let row = repr_row row in
@@ -418,6 +464,7 @@ let instantiate ~level (s : scheme) : ty =
     | TArrow (params, row, result) -> TArrow (List.map go params, go_row row, go result)
     | TResume (input, row, answer) -> TResume (go input, go_row row, go answer)
     | TVariadicArrow (param, row, result) -> TVariadicArrow (go param, go_row row, go result)
+    | TExactThunk inner -> TExactThunk (go inner)
   and go_row r =
     let r = repr_row r in
     match r.tail with
@@ -444,6 +491,7 @@ let clone_schemes (schemes : scheme list) : scheme list =
     | TArrow (params, row, result) -> TArrow (List.map go params, go_row row, go result)
     | TResume (input, row, answer) -> TResume (go input, go_row row, go answer)
     | TVariadicArrow (param, row, result) -> TVariadicArrow (go param, go_row row, go result)
+    | TExactThunk inner -> TExactThunk (go inner)
     | TSkolem (id, name) -> TSkolem (id, name)
     | TVar reference -> (
         match !reference with
@@ -535,6 +583,7 @@ let quantified (s : scheme) : int list * int list =
              end
          | _ -> ());
         go result
+    | TExactThunk inner -> go inner
   in
   go s.ty;
   (List.rev !tids, List.rev !rids)
@@ -613,6 +662,7 @@ let show ?(name_of = fun h -> String.sub (Hash.to_hex h) 0 8) ?effect_name_of ?(
             (go ~paren:false result)
         in
         if paren then "(" ^ s ^ ")" else s
+    | TExactThunk inner -> go ~paren inner
   in
   go ~paren:false t
 

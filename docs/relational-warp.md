@@ -1,12 +1,13 @@
 # Relational Warp lanes: testable hyperproperties
 
-Status: **RW.0 frozen for v0 (2026-08-12); RW.1-RW.5 schedule, Secret, and
-grant-presence tooling shipped; the RW.6 Layer-1 carrier amendment was
-owner-ratified on 2026-08-14.** This document fixes the observation and
-variation contract for implementation tasks RW.1 through RW.7.
+Status: **RW.0 frozen for v0 (2026-08-12); RW.1-RW.6 transcript, comparison,
+root-driven variation, and hermetic relational-case tooling shipped; the RW.6
+Layer-1 carrier amendment was owner-ratified on 2026-08-14.** This document
+fixes the observation and variation contract for implementation tasks RW.1
+through RW.7.
 `run-transcript-v1`, its canonical comparators, and all three root-driven
-`jacquard relate` variation modes now ship. `SameUnder` and its variation kinds
-have a ratified public contract below but do not ship until RW.6 is complete.
+`jacquard relate` variation modes now ship. `SameUnder` and all three closed
+variation kinds ship through Warp's typed discovery and hermetic cache.
 
 Read this document with [Warp testing](warp-testing.md),
 [structured concurrency](concurrency.md), and the
@@ -164,7 +165,9 @@ prelude and CLI surfaces. They do not add a kernel form.
 Both `VaryWorld` handlers must have equal fully elaborated outward effect
 rows. Equality is checked after normal row elaboration, not by comparing
 source spelling. A mismatch is a check-time refusal, not a relational test
-failure.
+failure. The frozen constructor carries this residual constraint in its
+checked type, so constructor aliases and higher-order transport cannot bypass
+the zero-argument-thunk or exact-fixed-row checks.
 
 This keeps the varied dimension to handler behavior. Allowing different rows
 would also vary the computation's available interface and could turn missing
@@ -296,26 +299,44 @@ and authority refusals retain the frozen statuses 1, 2, and 3.
 
 ### Layer 1: hermetic Warp cases
 
-`SameUnder` is a typed Warp declaration with a closed `Variation` carrier.
-The initial variants are:
+`SameUnder` is a shipped typed Warp declaration with a closed `Variation`
+carrier. Warp discovers definitions whose checked head is
+`WarpDecl body result input`; source names do not participate. The variants
+are:
 
 - `VarySchedule(n, thunk)`: run the stored thunk under `n` deterministically
   derived schedules and require identical result renderings. This strengthens
   "checks pass under every schedule" to "the answer agrees under every
-  selected schedule." An exhaustive lane covers the schedules within its
-  declared bound.
+  selected schedule." Seeded mode derives a stable leaf seed from the suite
+  seed, member hash, and length-framed label, then derives `n` distinct
+  scheduler seeds. `n` must be positive. The case owns this count; the global
+  `--schedules` option does not multiply it. With `--exhaustive`, the evaluated
+  callable is enumerated with a world cap of `min(n, budget)` and a pass is
+  reported only for a complete search.
 - `VaryWorld(handler_a, handler_b, thunk)`: give the same stored thunk to two
   caller-supplied discharging handlers with equal checked outward rows and
   require identical result renderings. The shared `body` type must itself be a
   zero-argument thunk. Checking compares the handlers' fully elaborated body
   and outward rows before ordinary unification can mask a mismatch.
-- `VaryValue(gen, fn)`: generate a pair, apply `fn` to each member, and require
-  identical result renderings.
+- `VaryValue(gen, fn)`: sample one pair using the same stable leaf-seed
+  derivation, apply `fn` to each member, and require identical result
+  renderings. The contract compares that pair exactly; it is not an
+  approximate distribution comparison.
 
 These cases close hermetically like ordinary Warp cases. They hold no root
 grants, are refused when their effect row cannot close, and participate in
-the hermetic cache. Cache identity includes the variation and seed rather
-than reusing an ordinary-case entry.
+the hermetic cache. Completed results use `Value.show` plus LF and the RW.2
+result-only comparator, with the first mismatch rendered as a canonical
+divergence. A constituent runtime failure remains a hard case failure rather
+than becoming relational divergence.
+
+Cache identity includes the transitive member hash, variation kind, suite seed,
+derived seed where applicable, and variation-specific controls rather than
+reusing an ordinary-case entry. Schedule keys additionally bind `n`, scheduler
+and seed identity versions, and seeded versus exhaustive mode and budget.
+Changing the suite seed therefore rekeys every relational case. `--no-cache`
+bypasses both lookup and storage exactly as it does for an ordinary hermetic
+case.
 
 ### Layer 2: root-driven CLI variation
 

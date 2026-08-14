@@ -148,6 +148,28 @@ let test_warp_case_exact_count_and_replay () =
             (Schedule_trace.serialize replayed.execution_schedule))
     report.worlds
 
+let test_evaluated_callable_seam_matches_expression_search () =
+  let callable =
+    match Eval.run_expr ctx (expression ("(lam () " ^ one_immediate ^ ")")) with
+    | Ok callable -> callable
+    | Error error -> Alcotest.failf "evaluate exhaustive callable: %s" (Runtime_err.to_string error)
+  in
+  let program = Hash.of_string "rw6-exhaustive-callable" in
+  let report =
+    match Exhaustive_schedule.run_call ctx ~program callable [] with
+    | Ok report -> report
+    | Error diagnostics -> Eval_support.fail_diags "enumerate evaluated callable" diagnostics
+  in
+  require_complete 2 report;
+  List.iter
+    (fun world ->
+      match world.Exhaustive_schedule.result with
+      | Ok (Value.VInt 0) -> ()
+      | Ok value -> Alcotest.failf "unexpected callable world value: %s" (Value.show value)
+      | Error error ->
+          Alcotest.failf "evaluated callable world failed: %s" (Runtime_err.to_string error))
+    report.worlds
+
 let test_schedule_sensitive_failure_is_found () =
   let source =
     "(let nonrec (pwild) (app (var async.spawn) (lam () (app (lit 1))))   (let nonrec (pwild)     \
@@ -341,6 +363,8 @@ let suite =
   [
     Alcotest.test_case "hand-counted schedule trees" `Quick test_hand_counted_schedule_trees;
     Alcotest.test_case "Warp exact count and replay" `Quick test_warp_case_exact_count_and_replay;
+    Alcotest.test_case "evaluated callable exhaustive seam" `Quick
+      test_evaluated_callable_seam_matches_expression_search;
     Alcotest.test_case "schedule-sensitive failure" `Quick test_schedule_sensitive_failure_is_found;
     Alcotest.test_case "structured incomplete budgets" `Quick
       test_budgets_are_structured_incomplete_results;

@@ -142,6 +142,20 @@ val run_call :
   (Value.t, Runtime_err.t) result
 (** [run_call] is the corresponding scheduled entry for an already evaluated callable. *)
 
+val run_call_scheduled_attempt :
+  Eval.ctx ->
+  ?policy:Concurrency_contract.failure_policy ->
+  ?bounds:bounds ->
+  ?allow_routed:bool ->
+  program:Hash.t ->
+  mode:schedule_mode ->
+  Value.t ->
+  Value.t list ->
+  (scheduled_attempt, Runtime_err.t) result
+(** [run_call_scheduled_attempt] is the bounded-search seam for an already evaluated callable. It
+    has the same complete-world, stopped-prefix, routing, and cleanup contract as
+    {!run_expr_scheduled_attempt}; [program] is the stable identity written into every trace. *)
+
 val run_call_scheduled :
   Eval.ctx ->
   ?policy:Concurrency_contract.failure_policy ->

@@ -354,6 +354,7 @@ let rec type_has_only_closed_pure_arrows ty =
       row_is_closed_pure row
       && type_has_only_closed_pure_arrows parameter
       && type_has_only_closed_pure_arrows result
+  | Types.TExactThunk inner -> type_has_only_closed_pure_arrows inner
   | Types.TVar _ | Types.TSkolem _ -> true
 
 let result_has_identity ~result_type ~expected ~allow_result = function

@@ -476,6 +476,7 @@ let rec has_only_closed_rows ty =
   | Types.TResume (parameter, row, result) | Types.TVariadicArrow (parameter, row, result) ->
       (Types.repr_row row).Types.tail = Types.RClosed
       && has_only_closed_rows parameter && has_only_closed_rows result
+  | Types.TExactThunk inner -> has_only_closed_rows inner
   | Types.TVar _ | Types.TSkolem _ -> true
 
 let expected_root_effects = function

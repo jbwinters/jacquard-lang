@@ -206,7 +206,10 @@ let surface_form_is meta forms =
   match Meta.surface_form meta with Some form -> List.mem form forms | None -> false
 
 let eta_expansion_candidate ctx expected actual =
-  match (repr expected, repr actual) with
+  let rec constraint_body ty =
+    match repr ty with TExactThunk inner -> constraint_body inner | ty -> ty
+  in
+  match (constraint_body expected, repr actual) with
   | TArrow ([], _, _), TArrow _ -> false
   | TArrow ([], _, _), actual ->
       Types.unifiable expected (TArrow ([], open_row ctx.level [], actual))
@@ -342,7 +345,16 @@ let rec con_scheme ctx ?meta (h : Hash.t) : scheme =
       } ->
       let c = List.nth cons i in
       let inner = ctx.level + 1 in
-      let vars = List.map (fun a -> (a, new_tvar inner)) tvars in
+      let exact_vary_world =
+        Relational_contract.is_vary_world_constructor ~type_hash:decl_hash ~constructor_hash:h
+      in
+      let vars =
+        List.map
+          (fun a ->
+            if exact_vary_world && String.equal a "body" then (a, TExactThunk (new_tvar inner))
+            else (a, new_tvar inner))
+          tvars
+      in
       let result = TCon (decl_hash, List.map snd vars) in
       let cenv = { mode = Flexible; tvs = vars; rvs = [] } in
       (* self-references — (tref tname) stayed Named — become the applied result type *)
@@ -475,6 +487,142 @@ let is_frozen_async_spawn ctx operation =
           spawn_is ename spawn && await_is await && cancel_is cancel && yield_is yield
       | _ -> false)
   | Ok _ | Error _ -> false
+
+(** [is_frozen_vary_world ctx constructor] recognizes the exact store identity and declaration
+    envelope that receives RW.6's direct-construction row check. The guard is deliberately
+    nominal/store-shaped: a same-named function or near-match datatype never acquires special
+    checking behavior. *)
+let is_frozen_vary_world ctx constructor =
+  let tvar_is expected (ty : Kernel.ty) =
+    match ty.it with Kernel.TVar actual -> String.equal expected actual | _ -> false
+  in
+  let ref_is expected (ty : Kernel.ty) =
+    match ty.it with Kernel.TRef (Kernel.Hashed actual) -> Hash.equal expected actual | _ -> false
+  in
+  let empty_row (row : Kernel.row) = row.effects = [] && row.rvar = None in
+  let arrow_is parameter_checks result_check (ty : Kernel.ty) =
+    match ty.it with
+    | Kernel.TArrow (parameters, row, result) ->
+        List.length parameters = List.length parameter_checks
+        && List.for_all2 (fun check parameter -> check parameter) parameter_checks parameters
+        && empty_row row && result_check result
+    | _ -> false
+  in
+  let field_is expected_label type_check (field : Kernel.field) =
+    field.label = Some expected_label && type_check field.fty
+  in
+  let constructor_is expected_name field_checks (con : Kernel.conspec) =
+    String.equal con.con_name expected_name
+    && List.length con.fields = List.length field_checks
+    && List.for_all2 (fun check field -> check field) field_checks con.fields
+  in
+  match
+    ( Store.lookup_kind ctx.store "variation" Resolve.KType,
+      Store.lookup_kind ctx.store "vary-world" Resolve.KCon,
+      Store.lookup_kind ctx.store "int" Resolve.KType,
+      Store.lookup_kind ctx.store "distribution" Resolve.KType,
+      Store.locate ctx.store constructor )
+  with
+  | ( Some { Resolve.hash = type_hash; _ },
+      Some { Resolve.hash = constructor_hash; _ },
+      Some { Resolve.hash = int_hash; _ },
+      Some { Resolve.hash = distribution_hash; _ },
+      Ok
+        {
+          Store.decl = { Kernel.it = Kernel.DefType { tname; tvars; cons }; _ };
+          decl_hash;
+          role = Store.Constructor 1;
+        } ) -> (
+      Relational_contract.is_vary_world_constructor ~type_hash:decl_hash
+        ~constructor_hash:constructor
+      && Hash.equal constructor constructor_hash
+      && Hash.equal decl_hash type_hash && String.equal tname "variation"
+      && tvars = [ "body"; "result"; "input" ]
+      &&
+      match cons with
+      | [ schedule; world; value ] ->
+          let result = tvar_is "result" and body = tvar_is "body" and input = tvar_is "input" in
+          let scheduled_thunk = arrow_is [] result in
+          let world_handler = arrow_is [ body ] result in
+          let value_function = arrow_is [ input ] result in
+          let value_pair (ty : Kernel.ty) =
+            match ty.it with
+            | Kernel.TTuple [ left; right ] -> input left && input right
+            | _ -> false
+          in
+          let generator (ty : Kernel.ty) =
+            match ty.it with
+            | Kernel.TApp (head, [ pair ]) -> ref_is distribution_hash head && value_pair pair
+            | _ -> false
+          in
+          constructor_is "vary-schedule"
+            [ field_is "count" (ref_is int_hash); field_is "thunk" scheduled_thunk ]
+            schedule
+          && constructor_is "vary-world"
+               [
+                 field_is "left" world_handler;
+                 field_is "right" world_handler;
+                 field_is "subject" body;
+               ]
+               world
+          && constructor_is "vary-value"
+               [ field_is "generator" generator; field_is "function" value_function ]
+               value
+      | _ -> false)
+  | _ -> false
+
+let equal_hashes left right =
+  List.length left = List.length right && List.for_all2 Hash.equal left right
+
+(* Flexible tails are unresolved variables rather than evidence of a difference. Fixed effect sets
+   are compared before normal constructor unification, which is the load-bearing part: unifying two
+   open rows with different fixed sets would otherwise build their union and hide which handler
+   admitted which effect. Rigid/closed tails must already agree. *)
+let rows_can_be_exactly_equal left right =
+  let left = repr_row left and right = repr_row right in
+  equal_hashes left.effects right.effects
+  &&
+  match (left.tail, right.tail) with
+  | RClosed, RClosed -> true
+  | RSkolem (left, _), RSkolem (right, _) -> left = right
+  | RVar { contents = RUnbound _ }, _ | _, RVar { contents = RUnbound _ } -> true
+  | _ -> false
+
+(** [check_vary_world_application] enforces the residual constraint that rank-1 datatype parameters
+    cannot express: both handlers must accept zero-argument thunks whose fully elaborated fixed
+    effect rows equal each other and the stored subject's row. It runs before ordinary constructor
+    unification and reports the normal E0801 check-time refusal. *)
+let check_vary_world_application ctx ~meta argument_types =
+  let handler_shape = function
+    | TArrow ([ body ], outward, _) -> (
+        match repr body with TArrow ([], body_row, _) -> Some (body_row, outward) | _ -> None)
+    | _ -> None
+  in
+  match List.map repr argument_types with
+  | [ left; right; (TArrow ([], subject_row, _) as subject) ] -> (
+      match (handler_shape left, handler_shape right) with
+      | Some (left_body_row, left_outward), Some (right_body_row, right_outward)
+        when rows_can_be_exactly_equal left_body_row right_body_row
+             && rows_can_be_exactly_equal left_body_row subject_row
+             && rows_can_be_exactly_equal left_outward right_outward ->
+          ()
+      | _ ->
+          err ~meta ~code:"E0801"
+            ~next_step:
+              "Give both VaryWorld handlers the same zero-argument thunk interface and discharge \
+               the same fully elaborated effect row."
+            "VaryWorld handlers and subject do not have equal checked thunk rows: left %s, right \
+             %s, subject %s"
+            (show_ty ctx left) (show_ty ctx right) (show_ty ctx subject))
+  | [ left; right; subject ] ->
+      err ~meta ~code:"E0801"
+        ~next_step:
+          "Pass a zero-argument thunk as VaryWorld's third field and handlers that accept that \
+           exact thunk type."
+        "VaryWorld requires two unary handlers and one zero-argument thunk: left %s, right %s, \
+         subject %s"
+        (show_ty ctx left) (show_ty ctx right) (show_ty ctx subject)
+  | _ -> ()
 
 (* Operation scheme: forall effect-vars (+free op vars). Ordinarily the callable row carries just
    the owning effect hash. Frozen [async.spawn] instead shares its thunk's exact [{Async | e}] row:
@@ -626,6 +774,7 @@ let close_lonely_rows ~gen_level (t : ty) : unit =
              Hashtbl.replace counts id (n + 1, r)
          | _ -> ());
         walk result
+    | TExactThunk inner -> walk inner
   in
   walk t;
   Hashtbl.iter (fun _ (n, r) -> if n = 1 then r := RLink { effects = []; tail = RClosed }) counts
@@ -784,6 +933,10 @@ and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(requir
         else infer ctx env ~ambient ~required fn
       in
       let arg_tys = List.map (infer ctx env ~ambient ~required) args in
+      (match fn.Kernel.it with
+      | Kernel.Ref (constructor, Kernel.Con) when is_frozen_vary_world ctx constructor ->
+          check_vary_world_application ctx ~meta arg_tys
+      | _ -> ());
       let restricted_callee =
         let rec local_name (e : Kernel.expr) =
           match e.it with
@@ -901,6 +1054,13 @@ and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(requir
               else unify_or ctx ~meta:arg.meta ~what:"variadic argument" param actual)
             (List.combine args arg_tys);
           include_callee frow;
+          result
+      | TExactThunk _ ->
+          let result = new_tvar ctx.level in
+          let frow = open_row ctx.level [] in
+          unify_or ctx ~meta ~what:"function position" fn_ty (TArrow (arg_tys, frow, result));
+          include_callee frow;
+          ctx.tier_apps <- (frow, Tier.KFn) :: ctx.tier_apps;
           result
       | TVar _ ->
           let result = new_tvar ctx.level in

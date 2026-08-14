@@ -90,6 +90,28 @@ let test_type_cases () =
             (TResume (t_int, closed_row [ ha ], t_text))
             (TArrow ([ t_int; t_int ], closed_row [ ha ], t_text))),
         false );
+      ( "exact thunk accepts and anchors a zero-argument thunk",
+        (fun () ->
+          let constrained = TExactThunk (new_tvar 0) in
+          unify constrained (TArrow ([], open_row 0 [ ha ], t_int));
+          unify constrained (TArrow ([], open_row 0 [ ha ], t_int))),
+        true );
+      ("exact thunk rejects data", (fun () -> unify (TExactThunk (new_tvar 0)) t_int), false);
+      ( "exact thunk rejects a unary arrow",
+        (fun () -> unify (TExactThunk (new_tvar 0)) (TArrow ([ t_int ], empty_row, t_int))),
+        false );
+      ( "exact thunk rejects different fixed effects after anchoring",
+        (fun () ->
+          let constrained = TExactThunk (new_tvar 0) in
+          unify constrained (TArrow ([], open_row 0 [ ha ], t_int));
+          unify constrained (TArrow ([], open_row 0 [ hb ], t_int))),
+        false );
+      ( "exact thunk survives a type-variable alias",
+        (fun () ->
+          let alias = new_tvar 0 in
+          unify alias (TExactThunk (new_tvar 0));
+          unify alias t_int),
+        false );
     ]
   in
   List.iter (fun (name, f, expected) -> Alcotest.(check bool) name expected (unifies f)) cases;

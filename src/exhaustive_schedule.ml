@@ -131,13 +131,9 @@ let validate_bounds bounds =
   in
   match diagnostics with [] -> Ok () | _ -> Error diagnostics
 
-let run_expr ctx ?(policy = Concurrency_contract.default_failure_policy) ?(bounds = default_bounds)
-    expression =
+let run ?(bounds = default_bounds) execute =
   let ( let* ) = Result.bind in
   let* () = validate_bounds bounds in
-  let scheduler_bounds : Round_robin.bounds =
-    { max_tasks = bounds.max_tasks; max_decisions = bounds.max_decisions }
-  in
   let worlds_rev = ref [] in
   let worlds_started = ref 0 in
   let reasons = ref [] in
@@ -147,10 +143,7 @@ let run_expr ctx ?(policy = Concurrency_contract.default_failure_policy) ?(bound
       None)
     else (
       incr worlds_started;
-      match
-        Round_robin.run_expr_scheduled_attempt ctx ~policy ~bounds:scheduler_bounds
-          ~allow_routed:false ~mode expression
-      with
+      match execute mode with
       | Ok (Round_robin.Finished execution) -> Some (World_execution execution)
       | Ok (Round_robin.Stopped { budget; schedule_prefix; _ }) ->
           add_reason reasons (reason_of_budget bounds budget);
@@ -203,3 +196,21 @@ let run_expr ctx ?(policy = Concurrency_contract.default_failure_policy) ?(bound
       worlds_started = !worlds_started;
       completeness = (match !reasons with [] -> Complete | reasons -> Incomplete reasons);
     }
+
+let run_expr ctx ?(policy = Concurrency_contract.default_failure_policy) ?(bounds = default_bounds)
+    expression =
+  let scheduler_bounds : Round_robin.bounds =
+    { max_tasks = bounds.max_tasks; max_decisions = bounds.max_decisions }
+  in
+  run ~bounds (fun mode ->
+      Round_robin.run_expr_scheduled_attempt ctx ~policy ~bounds:scheduler_bounds
+        ~allow_routed:false ~mode expression)
+
+let run_call ctx ?(policy = Concurrency_contract.default_failure_policy) ?(bounds = default_bounds)
+    ~program callable arguments =
+  let scheduler_bounds : Round_robin.bounds =
+    { max_tasks = bounds.max_tasks; max_decisions = bounds.max_decisions }
+  in
+  run ~bounds (fun mode ->
+      Round_robin.run_call_scheduled_attempt ctx ~policy ~bounds:scheduler_bounds
+        ~allow_routed:false ~program ~mode callable arguments)
