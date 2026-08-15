@@ -118,6 +118,6 @@ jobs:
             gh release create "$TAG" dist/* \
               --verify-tag \
               --title "$TAG" \
-              --notes-file docs/release/0.1/RELEASE-NOTES.md \
+              --notes-file docs/release/0.2/RELEASE-NOTES.md \
               $prerelease
           fi

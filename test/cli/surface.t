@@ -98,7 +98,7 @@ must exceed the canonical width.
   101
   $ jac fmt wide-declaration-formatted.jac 2> /dev/null | cmp wide-declaration-formatted.jac -
 
-Quantified-variable prefixes have no legal continuation point in 0.1. W1205 makes a pathological
+Quantified-variable prefixes have no legal continuation point in 0.2. W1205 makes a pathological
 prefix visible without rejecting or rewriting a valid program.
 
   $ cat > wide-forall.jac <<'EOF'

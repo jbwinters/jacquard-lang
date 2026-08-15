@@ -19,14 +19,15 @@ trap 'rm -rf "$work"' EXIT
 JACQUARD_DIST_DIR="$work/dist" scripts/release/package-binary.sh "$target" >/dev/null
 archive="$work/dist/jacquard-$target.tar.gz"
 prefix="$work/prefix"
+expected_version=$(_build/default/bin/main.exe --version)
 
 JACQUARD_INSTALL_TARGET="$target" \
 JACQUARD_INSTALL_URL="file://$archive" \
 JACQUARD_INSTALL_PREFIX="$prefix" \
   sh scripts/install.sh >/dev/null
 
-test "$("$prefix/bin/jacquard" --version)" = "0.1.0"
-test "$("$prefix/bin/jac" --version)" = "0.1.0"
+test "$("$prefix/bin/jacquard" --version)" = "$expected_version"
+test "$("$prefix/bin/jac" --version)" = "$expected_version"
 test "$("$prefix/bin/jac" run "$prefix/share/jacquard/demos/basics/m1-fact.jac")" = "120"
 scripts/release/smoke-packaged-demos.sh "$prefix"
 

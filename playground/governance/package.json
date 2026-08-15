@@ -1,6 +1,6 @@
 {
   "name": "jacquard-governance-viewer",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Offline-only viewer for normalized Jacquard governance decision chains",
   "type": "module",

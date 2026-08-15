@@ -77,10 +77,18 @@ jobs:
       - name: Release evidence files exist
         run: |
           test -x scripts/release/reproduce-0.1.sh
+          test -x scripts/release/reproduce-0.2.sh
+          test -x scripts/release/check-0.2-manifest.sh
           test -f docs/release/0.1/EVIDENCE.md
           test -f docs/release/0.1/CLAIMS.md
           test -f docs/release/0.1/REPRO.md
           test -f docs/release/0.1/RELEASE-NOTES.md
+          test -f docs/release/0.2/EVIDENCE.md
+          test -f docs/release/0.2/CLAIMS.md
+          test -f docs/release/0.2/REPRO.md
+          test -f docs/release/0.2/RELEASE-NOTES.md
+          test -f docs/release/0.2/LIMITS.md
+          test -f docs/release/0.2/MANIFEST.sha256
           test -x scripts/release/smoke-installer.sh
 
   native-parity:

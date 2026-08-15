@@ -258,21 +258,24 @@ Runs on:
 - tags named `jacquard-core-*`
 - manual dispatch with a chosen branch, tag, or commit
 
-Required check before tagging release candidates:
+Required check before tagging 0.2 release candidates:
 
-- `Release Evidence / Reproduce 0.1 evidence`
+- `Release Evidence / Reproduce 0.2 evidence`
 
 The workflow runs:
 
 ```sh
 JACQUARD_RELEASE_REF=HEAD \
-JACQUARD_RELEASE_BASE=738dc8e \
-scripts/release/reproduce-0.1.sh
+JACQUARD_RELEASE_BASE=c0f570501b751865c0c0584d9b15be08b6ec1cde \
+scripts/release/reproduce-0.2.sh
 ```
 
-It uploads the release docs and generated evidence from
-`.scratch/release/0.1/` as a GitHub Actions artifact. That artifact is the
-reproducible evidence pack for review.
+It uploads `docs/release/0.2/` and generated evidence from
+`.scratch/release/0.2/` as a GitHub Actions artifact. The script verifies the
+complete 0.2 diff manifest and every historical publication before running the
+build, test, parser-depth, GM.12B, dual-compiler native, packaging, demo, and
+gauntlet evidence. The historical 0.1 script and documentation remain retained
+for reproducing the older candidate, but are not the current release workflow.
 
 ## Release Binaries
 
@@ -317,9 +320,10 @@ eval "$(opam env)"
 scripts/release/package-binary.sh
 ```
 
-The public installer is `scripts/install.sh`; the current 0.1 RC copy defaults
-to the exact `jacquard-core-0.1-rc3` tag and installs into `~/.local`. Set
-`JACQUARD_INSTALL_VERSION` explicitly when testing another release.
+The public installer is `scripts/install.sh`; the 0.2 copy defaults to the
+exact final `jacquard-core-0.2.0` tag and installs into `~/.local`. Set
+`JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly while testing
+RC1 before final promotion.
 
 ## Recommended Branch Protection
 
@@ -341,7 +345,7 @@ For `release/**`:
 - require `CI / Native parity (gcc)`
 - require `Governance / Governance playground`
 - require `GM12B / GM12B exhaustive forwarding evidence`
-- require `Release Evidence / Reproduce 0.1 evidence`
+- require `Release Evidence / Reproduce 0.2 evidence`
 - restrict changes to correctness, reproducibility, documentation, and demos
 
 For `jacquard-core-*` tags:
@@ -394,5 +398,5 @@ git diff --exit-code
 Before asking for a release-candidate review:
 
 ```sh
-JACQUARD_RELEASE_REF=HEAD scripts/release/reproduce-0.1.sh
+JACQUARD_RELEASE_REF=HEAD scripts/release/reproduce-0.2.sh
 ```

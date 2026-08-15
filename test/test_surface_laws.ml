@@ -762,6 +762,10 @@ let release_inventory_errors () =
     [ ("- Alcotest/QCheck cases:", 554); ("- Cram transcript files:", 32) ]
   @ inventory_claim_errors ~path:"docs/release/0.1/DECISION.md"
       [ ("Test count:", 554); ("Cram count:", 32) ]
+  @ inventory_claim_errors ~path:"docs/release/0.2/EVIDENCE.md"
+      [ ("- Alcotest/QCheck cases:", actual_tests); ("- Cram transcript files:", actual_crams) ]
+  @ inventory_claim_errors ~path:"docs/release/0.2/DECISION.md"
+      [ ("Test count:", actual_tests); ("Cram count:", actual_crams) ]
   @ inventory_claim_errors ~path:"docs/release/dx-jac-export/EVIDENCE.md"
       [ ("- Alcotest/QCheck cases:", actual_tests); ("- Cram transcript files:", actual_crams) ]
   @ inventory_claim_errors ~path:concurrency_path

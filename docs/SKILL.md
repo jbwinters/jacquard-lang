@@ -30,7 +30,7 @@ prelude, demos, and the C runtime used by native builds. It does not require
 OCaml, opam, or Dune.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/jbwinters/jacquard-lang/jacquard-core-0.1-rc3/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/jbwinters/jacquard-lang/jacquard-core-0.2.0/scripts/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 jac --version
 jac run "$HOME/.local/share/jacquard/demos/basics/m1-fact.jac"

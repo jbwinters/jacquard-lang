@@ -190,7 +190,7 @@ let warning_wide (pattern : Surface_ast.pat) fields =
     ~cause:
       (Printf.sprintf
          "This positional constructor pattern has %d fields; labeled constructor patterns are not \
-          available in 0.1."
+          available in 0.2."
          fields)
     ~next_step:"Keep positional constructor patterns to four fields or fewer." ~contrast:None ()
 

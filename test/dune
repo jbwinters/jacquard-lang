@@ -84,11 +84,10 @@
   (source_tree ../prelude)
   (source_tree ../runtime))
  (action
-  (setenv JACQUARD %{bin:jacquard}
+ (setenv JACQUARD %{bin:jacquard}
    (setenv JACQUARD_PRELUDE ../prelude
     (setenv JACQUARD_RUNTIME ../runtime
-     (setenv CC clang
-     (run ./native_fuzz.exe 1000)))))))
+     (run ./native_fuzz.exe 1000))))))
 
 (library
  (name governance_review_diff_test_support)
@@ -131,6 +130,8 @@
   ../docs/effect-taxonomy.md
   ../docs/concurrency.md
   ../docs/README.md
+  ../docs/release/0.2/DECISION.md
+  ../docs/release/0.2/EVIDENCE.md
   ../docs/release/surface-syntax/DECISION.md
   ../docs/release/surface-syntax/FOLLOWUPS.md
   ../docs/release/surface-syntax/MANIFEST.sha256
