@@ -700,7 +700,7 @@ let test_warning_exact_order_nested_raw_and_redundancy () =
       expected_golden "warning" "W1202" "warnings.jac:2:24-43"
         "Constructor pattern is difficult to review"
         "This positional constructor pattern has 5 fields; labeled constructor patterns are not \
-         available in 0.1."
+         available in 0.2."
         "Keep positional constructor patterns to four fields or fewer.";
       expected_golden "error" "E0802" "warnings.jac:3:6-7" "This value is not callable"
         "the `|>` right-hand side has type int, which is not a function"

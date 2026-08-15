@@ -60,9 +60,30 @@ project shape from file names alone.
   grant-variation CLI lanes, and the RW.7 standing regression net.
 - `errors.md`: diagnostic code catalog.
 
-## Release 0.1 Evidence
+## Current Release 0.2 Evidence
 
-Read these together when judging whether the release candidate is credible:
+Read these together when judging the integrated 0.2 distribution:
+
+- `release/0.2/EVIDENCE.md`: artifact, inventory, evidence lineage, and gate.
+- `release/0.2/CLAIMS.md`: bounded integrated claims with adjacent caveats.
+- `release/0.2/LIMITS.md`: language, runtime, evidence, governance, and
+  distribution non-claims.
+- `release/0.2/REPRO.md`: fresh-clone reproduction and same-commit RC/final
+  promotion procedure.
+- `release/0.2/FREEZE.md`: distribution version and retained semantic
+  identities.
+- `release/0.2/GAUNTLET.md`: hostile evidence classes and deliberate omissions.
+- `release/0.2/DECISION.md`: conditional RC1 and final decision.
+- `release/0.2/RELEASE-NOTES.md`: public contents and binary install.
+- `release/0.2/MANIFEST.sha256`: complete hashed change inventory from the
+  frozen 0.2 lineage base, excluding only the manifest itself.
+
+The detailed successor packs indexed below remain the authority for each
+subsystem. The 0.2 pack rolls them up without editing their historical bytes.
+
+## Historical Release 0.1 Evidence
+
+Read these together when reviewing the historical 0.1 candidate boundary:
 
 - `release/0.1/EVIDENCE.md`: built artifact, test inventory, commands, summary.
 - `release/0.1/CLAIMS.md`: claims mapped to proving tests/demos and caveats.
@@ -324,7 +345,8 @@ For a future coding agent:
 
 For a release reviewer:
 
-1. `release/0.1/EVIDENCE.md`
-2. `release/0.1/CLAIMS.md`
-3. `release/0.1/REPRO.md`
-4. from the repository root, run `scripts/release/reproduce-0.1.sh`
+1. `release/0.2/EVIDENCE.md`
+2. `release/0.2/CLAIMS.md`
+3. `release/0.2/LIMITS.md`
+4. `release/0.2/REPRO.md`
+5. from the repository root, run `scripts/release/reproduce-0.2.sh`

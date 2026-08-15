@@ -15,14 +15,14 @@ can touch; the checker guarantees the signature is complete. The
 implementation is an OCaml checker and interpreter, a compiler that accepts
 public `.jac` or lower-level `.jqd` files and produces standalone native
 binaries by emitting C, the `jac` command-line tool, a standard library written
-in Jacquard itself, and a test framework called Warp. Version 0.1 works end to
+in Jacquard itself, and a test framework called Warp. Version 0.2 works end to
 end but is a research prototype, not a production language;
-`docs/release/0.1/LIMITS.md` is the honest boundary.
+`docs/release/0.2/LIMITS.md` is the honest boundary.
 
-Install the 0.1 release candidate without OCaml or opam:
+Install the 0.2 release without OCaml or opam:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jbwinters/jacquard-lang/jacquard-core-0.1-rc3/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/jbwinters/jacquard-lang/jacquard-core-0.2.0/scripts/install.sh | sh
 ~/.local/bin/jac run ~/.local/share/jacquard/demos/basics/m1-fact.jac
 ```
 
@@ -121,7 +121,7 @@ agent with no Jacquard in its training data can work from that one file.
 Operating rules are in `AGENTS.md`. What will save you time:
 
 - Behavior is pinned by evidence: cram transcripts under `test/cli/`, corpus
-  goldens, demo scripts, and `docs/release/0.1/CLAIMS.md`. If a pin fails,
+  goldens, demo scripts, and `docs/release/0.2/CLAIMS.md`. If a pin fails,
   treat it as information about your change, and never weaken a pin to make a
   diff pass.
 - The kernel is 27 forms (`docs/ast.md`); `.jac` is a projection onto those
@@ -249,10 +249,10 @@ diff: `- sub + add`. See `sh demos/tooling/repair.sh` for the full transcript.
 
 ## Install A Release Binary
 
-Most users do not need OCaml or opam. Install the reviewed 0.1 RC binary with:
+Most users do not need OCaml or opam. Install the reviewed 0.2 binary with:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jbwinters/jacquard-lang/jacquard-core-0.1-rc3/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/jbwinters/jacquard-lang/jacquard-core-0.2.0/scripts/install.sh | sh
 ```
 
 The installer detects your OS and CPU, downloads the matching archive and
@@ -288,7 +288,7 @@ it and assembles related files in isolated scratch space.
 To install under a different user-owned prefix:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jbwinters/jacquard-lang/jacquard-core-0.1-rc3/scripts/install.sh \
+curl -fsSL https://raw.githubusercontent.com/jbwinters/jacquard-lang/jacquard-core-0.2.0/scripts/install.sh \
   | JACQUARD_INSTALL_PREFIX="$HOME/.jacquard" sh
 ```
 
@@ -507,28 +507,32 @@ the larger applications.
 
 ## Release Evidence
 
-The release-candidate evidence pack lives in `docs/release/0.1/`.
+The current release evidence pack lives in `docs/release/0.2/`. Historical 0.1
+evidence remains byte-preserved under `docs/release/0.1/`.
 
 To reproduce the release evidence from this checkout:
 
 ```bash
-JACQUARD_RELEASE_REF=HEAD JACQUARD_RELEASE_BASE=738dc8e scripts/release/reproduce-0.1.sh
+JACQUARD_RELEASE_REF=HEAD JACQUARD_RELEASE_BASE=c0f570501b751865c0c0584d9b15be08b6ec1cde scripts/release/reproduce-0.2.sh
 ```
 
 The script installs dependencies, builds, runs the full test suite, checks
 formatting, runs public demos, runs gauntlet tests, records `jacquard --version`,
-and writes generated evidence under `.scratch/release/0.1/`.
+and writes generated evidence under `.scratch/release/0.2/`. It also checks
+the complete release-diff manifest, historical publications, parser-depth and
+GM.12B evidence, and native memory/differential/leak/fuzz lanes under both
+Clang and GCC.
 
 Key release docs:
 
-- `docs/release/0.1/EVIDENCE.md`: what was built and what passed
-- `docs/release/0.1/CLAIMS.md`: semantic claims mapped to tests and caveats
-- `docs/release/0.1/REPRO.md`: fresh-clone reproduction steps
-- `docs/release/0.1/FREEZE.md`: frozen version/hash/store/CLI surfaces
-- `docs/release/0.1/GAUNTLET.md`: adversarial tests present and omitted
-- `docs/release/0.1/LIMITS.md`: explicit non-goals and caveats
-- `docs/release/0.1/DECISION.md`: release-candidate decision memo
-- `docs/release/0.1/RELEASE-NOTES.md`: public RC contents and install command
+- `docs/release/0.2/EVIDENCE.md`: artifact, inventory, evidence lineage, and gate
+- `docs/release/0.2/CLAIMS.md`: integrated claims with adjacent caveats
+- `docs/release/0.2/REPRO.md`: fresh-clone reproduction and promotion steps
+- `docs/release/0.2/FREEZE.md`: distribution and retained semantic identities
+- `docs/release/0.2/GAUNTLET.md`: adversarial classes present and omitted
+- `docs/release/0.2/LIMITS.md`: explicit non-goals and trusted boundaries
+- `docs/release/0.2/DECISION.md`: RC1 and same-commit final decision
+- `docs/release/0.2/RELEASE-NOTES.md`: public contents and install command
 - `docs/release/structured-concurrency/EVIDENCE.md`: successor C0-C2 publication
   claims plus the shipped interpreted C3 Channel runtime, exact counts, demo,
   and proving tests
@@ -581,7 +585,7 @@ Read these in order if you are new:
 2. `docs/tutorial.md`: runnable user-facing examples.
 3. `demos/README.md`: demo catalog and what each demo proves.
 4. `docs/ci-cd.md`: GitHub checks and release evidence process.
-5. `docs/release/0.1/EVIDENCE.md`: release-candidate evidence overview.
+5. `docs/release/0.2/EVIDENCE.md`: current release evidence overview.
 
 Deeper design references:
 
@@ -617,7 +621,7 @@ opam exec -- dune exec test/gen_goldens.exe
 When touching release-facing demos, claims, CI, or semantics, also run:
 
 ```bash
-JACQUARD_RELEASE_REF=HEAD JACQUARD_RELEASE_BASE=738dc8e scripts/release/reproduce-0.1.sh
+JACQUARD_RELEASE_REF=HEAD JACQUARD_RELEASE_BASE=c0f570501b751865c0c0584d9b15be08b6ec1cde scripts/release/reproduce-0.2.sh
 ```
 
 ## CI/CD
@@ -633,8 +637,8 @@ GitHub Actions separates independently retryable evidence:
 - `GM12B / GM12B exhaustive forwarding evidence`: the scoped 50,000-case
   forwarding proof, with a successful no-op result outside its dependency
   closure.
-- `Release Evidence / Reproduce 0.1 evidence`: release branches, `jacquard-core-*`
-  tags, and manual dispatch; runs `scripts/release/reproduce-0.1.sh` and uploads
+- `Release Evidence / Reproduce 0.2 evidence`: release branches, `jacquard-core-*`
+  tags, and manual dispatch; runs `scripts/release/reproduce-0.2.sh` and uploads
   transcripts.
 - `Release Binaries`: `jacquard-core-*` tags and manual dispatch; builds
   Linux/macOS tarballs with `jacquard`, `jac`, the prelude, demos, and native
@@ -679,7 +683,8 @@ asynchronous host I/O at this evidence base. A VM/JIT, continuous
 distributions, gradients,
 typed staging, language package management, self-hosting, and formal soundness
 proofs also do not ship. World grants remain coarse. See
-`docs/release/0.1/LIMITS.md` for the historical Core 0.1 boundary and
+`docs/release/0.2/LIMITS.md` for the current integrated boundary,
+`docs/release/0.1/LIMITS.md` for the historical Core 0.1 boundary, and
 `docs/release/structured-concurrency/LIMITS.md` for the successor C0-C3 boundary.
 The deterministic Workspace v0 governance boundary is separately advertised
 as an evidence-backed research reference implementation, not as a sandbox or
@@ -698,5 +703,5 @@ production security system; its exact claim and trusted-host limits are in
   run through Dune from the repo root.
 - Formatting changed files: run `opam exec -- dune fmt`, inspect the diff, and
   commit the formatting changes if they are intended.
-- Release reproduction writes generated evidence under `.scratch/release/0.1/`
+- Release reproduction writes generated evidence under `.scratch/release/0.2/`
   by default. Set `JACQUARD_RELEASE_OUT` to use another disposable output path.

@@ -8,7 +8,7 @@ language project. Before editing code, read:
 2. `docs/README.md`
 3. `docs/development-plan.md`
 4. `docs/ast.md`
-5. `docs/release/0.1/EVIDENCE.md`
+5. `docs/release/0.2/EVIDENCE.md`
 
 The original development plan has been completed. Use Task Master only for
 local historical context unless the user explicitly asks for it.
@@ -90,7 +90,7 @@ When adding valid corpus files, regenerate the golden hashes with
 - Do not hand-maintain a `.jqd` twin for an ordinary `.jac` program or demo.
   Add paired carriers only when a conformance test explicitly requires hash or
   lowering parity; twins are evidence fixtures, not a publishing requirement.
-- During 0.1 release hardening, do not expand the native/performance scope or
+- During 0.2 release hardening, do not expand the native/performance scope or
   add macros beyond quote/unquote/gated eval, records, typed staging,
   continuous distributions, package management, self-hosting, or
   ownership/borrowing.
@@ -109,7 +109,8 @@ When adding valid corpus files, regenerate the golden hashes with
 - Runtime examples: `docs/tutorial.md`.
 - Demo catalog: `demos/README.md`.
 - CI and release process: `docs/ci-cd.md`.
-- Release evidence: `docs/release/0.1/`.
+- Current release evidence: `docs/release/0.2/`; historical 0.1 evidence stays
+  immutable under `docs/release/0.1/`.
 - Kernel and hashing rules: `docs/ast.md`, `spec/serialization.md`,
   `src/canon.ml`.
 - Effects and capabilities: `prelude/03-effects.jqd`, `src/check.ml`,
@@ -140,11 +141,11 @@ GitHub Actions mirrors the local definition of done:
   lint, type, unit/accessibility, build, and browser checks.
 - `GM12B / GM12B exhaustive forwarding evidence` runs or explicitly carries
   forward the scoped 50,000-case forwarding proof.
-- `Release Evidence / Reproduce 0.1 evidence` runs
-  `scripts/release/reproduce-0.1.sh` on `release/**`, `jacquard-core-*` tags, and
+- `Release Evidence / Reproduce 0.2 evidence` runs
+  `scripts/release/reproduce-0.2.sh` on `release/**`, `jacquard-core-*` tags, and
   manual dispatch, then uploads the evidence transcripts.
 
-Release-facing changes should keep `scripts/release/reproduce-0.1.sh` green and
+Release-facing changes should keep `scripts/release/reproduce-0.2.sh` green and
 should not add features outside the release hardening scope.
 
 ## Decisions To Preserve

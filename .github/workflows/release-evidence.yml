@@ -10,7 +10,7 @@ on:
       base:
         description: "Candidate base commit that must be an ancestor"
         required: false
-        default: "738dc8e"
+        default: "c0f570501b751865c0c0584d9b15be08b6ec1cde"
   push:
     branches:
       - "release/**"
@@ -31,8 +31,9 @@ env:
 
 jobs:
   reproduce:
-    name: Reproduce 0.1 evidence
+    name: Reproduce 0.2 evidence
     runs-on: ubuntu-latest
+    timeout-minutes: 360
 
     steps:
       - name: Checkout candidate
@@ -52,16 +53,16 @@ jobs:
       - name: Reproduce release evidence
         run: |
           JACQUARD_RELEASE_REF=HEAD \
-          JACQUARD_RELEASE_BASE="${{ github.event.inputs.base || '738dc8e' }}" \
-          scripts/release/reproduce-0.1.sh
+          JACQUARD_RELEASE_BASE="${{ github.event.inputs.base || 'c0f570501b751865c0c0584d9b15be08b6ec1cde' }}" \
+          scripts/release/reproduce-0.2.sh
 
       - name: Upload evidence transcripts
         if: always()
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: jacquard-release-0.1-evidence-${{ github.run_number }}
+          name: jacquard-release-0.2-evidence-${{ github.run_number }}
           if-no-files-found: error
           include-hidden-files: true
           path: |
-            docs/release/0.1/
-            .scratch/release/0.1/
+            docs/release/0.2/
+            .scratch/release/0.2/
