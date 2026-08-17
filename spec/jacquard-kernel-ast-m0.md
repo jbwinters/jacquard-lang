@@ -1,7 +1,9 @@
-# Jacquard Kernel AST — M0, Draft 0.1
+# Jacquard Kernel AST — Implemented M0/0.2 Specification
 
-Status: proposal for review. Everything here is arguable; the count accounting and open
-questions at the end mark where I expect the argument.
+Status: implemented. This is the source-of-truth grammar for Jacquard's
+27-form kernel and permanent `.jqd` carrier as shipped in 0.2. Historical
+design reasoning is retained, but settled decisions are labeled as such.
+Canonical byte details are normative in `serialization.md`.
 
 ---
 
@@ -16,9 +18,11 @@ separated:
 (head, meta, args)
 ```
 
-This is Elixir's `{form, meta, args}` generalized. It is what `quote` produces, what macros
-will eventually see, what gets serialized, and what gets content-addressed. There is exactly
-one shape. A model that learns it has learned the entire physical syntax of the language.
+This is Elixir's `{form, meta, args}` generalized. It is what `quote` produces,
+what quote/unquote and gated-eval tooling sees, what gets serialized, and what
+gets content-addressed. A future macro expander could consume the same shape,
+but no macro expander ships today. There is exactly one shape. A model that
+learns it has learned the entire physical syntax of the language.
 
 **Layer 2: the grammar.** An ASDL-style refinement over triples that says which heads exist
 and what their argument shapes must be. A triple that satisfies the grammar is a *kernel form*;
@@ -87,7 +91,7 @@ products (clause shapes, rows, specs) are structures, not forms, exactly as Pyth
 treats `arguments` and `keyword`.
 
 ```asdl
--- Jacquard kernel, M0 draft 0.1
+-- Jacquard kernel, implemented M0 contract
 -- Every constructor below is realized as a triple (head, meta, args)
 -- with head = the constructor name, lowercased.
 
@@ -130,7 +134,7 @@ module Jacquard
   opclause = (hash op, pat* params, name resume, expr body)
   binding  = (name id, type? annotation, expr value)
   conspec  = (name id, field* fields)
-  field    = (name? label, type ty)                        -- labels generate accessor fns
+  field    = (name? label, type ty)                        -- schema labels hash; no generated accessors today
   opmode   = Multi | Once
   opspec   = (name id, opmode mode, type* params, type result)
   row      = (hash* effects, name? var)                    -- effect set + optional row variable
@@ -214,11 +218,12 @@ with a receipt from the survey:
 
 Decisions within what remains:
 
-- **`Lam`/`App` are n-ary, not curried.** Judgment call, could flip. Uncurried gives a
-  clearer cost model, crisp arity errors, and one obvious place for the effect row on each
-  arrow. Unison is curried and makes it work; Koka is uncurried. Currying remains available
-  the ordinary way (a lambda returning a lambda). Zero-ary `Lam`/`App` doubles as
-  thunk/force, which a strict language needs (§7).
+- **`Lam`/`App` are n-ary, not curried.** Decision D5 is settled and shipped.
+  Uncurried calls give a clearer cost model, crisp arity errors, and one obvious
+  place for the effect row on each arrow. Unison is curried and makes it work;
+  Koka is uncurried. Currying remains available the ordinary way (a lambda
+  returning a lambda). Zero-ary `Lam`/`App` doubles as thunk/force, which a
+  strict language needs (§7).
 - **`Lam` params are patterns** (commitment: patterns everywhere), restricted to irrefutable
   ones; the checker enforces irrefutability, semantics is `Match`.
 - **`Let` carries a `rec` flag** rather than spending a second form. `rec` restricts the
@@ -265,9 +270,10 @@ is mandatory. Humans and models should rarely write rows; they should always be 
 *read* them, fully elaborated, in displayed signatures. Inference for writing, elaboration
 for reading.
 
-Records beyond labeled constructor fields (true row-typed records) are deferred; `field`
-labels on `DefType` constructors generate accessor functions at zero kernel cost, which
-covers the common case.
+Records beyond labeled constructor fields (true row-typed records) are deferred.
+The shipped `.jac` surface preserves labels as constructor schema: labels print
+and contribute to canonical identity, but do not generate accessor functions or
+labeled patterns. Those remain separately gated surface follow-ups.
 
 ### 5.4 Declarations
 
@@ -294,11 +300,10 @@ on hashes, and an edit invalidates exactly its dependents.
 ## 6. Content addressing: the canonicalization pipeline
 
 ```
-surface text
-  └─ parse ─────────▶ triple form (names, trivia, spans in meta)
-       └─ expand ───▶ triple form (macro-free; hygiene resolved via scope sets)
-            └─ resolve ─▶ kernel form (Var for locals, Ref(hash) for globals)
-                 └─ canonicalize ─▶ hash input
+.jac text ──▶ parse surface tree ──▶ lower
+.jqd text ──▶ read triple form ───▶ validate
+both carriers ──▶ pre-resolution kernel form ──▶ resolve
+resolved kernel form (Var for locals, Ref(hash) for globals) ──▶ canonicalize ──▶ hash input
 ```
 
 Canonicalization rules:
@@ -355,18 +360,20 @@ if c then a else b
 **The entire probabilistic layer, declared with no new forms:**
 
 ```
-type Distribution a = ...          -- library data: Bernoulli, Categorical, Normal, ...
+type Distribution a = ...          -- finite library data: Bernoulli, Categorical, UniformInt
 
-effect Dist where
-  sample  : Distribution a -> a
-  observe : Distribution a -> a -> ()
+multi effect Dist where
+  sample  : (Distribution a) -> a
+  observe : (Distribution a, a) -> ()
 ```
 
 which is one `DefType` and one `DefEffect`. A model is any expression whose row includes
-`Dist`. An inference algorithm is a `Handle`: the enumeration handler resumes per support
-element and weights; an SMC or gradient handler is a different `Handle` around the same
-untouched model. Your fields intuition lands here too: composing two models multiplies
-their weight functions, and the handler is where superposition becomes a posterior.
+`Dist`. An inference algorithm is a `Handle`: exact enumeration resumes per
+support element and weights, while likelihood weighting samples with a fixed
+seed. Both ship for finite discrete distributions. Continuous distributions,
+gradients, and SMC do not ship in 0.2. Your fields intuition lands here too:
+composing two models multiplies their weight functions, and the handler is
+where superposition becomes a posterior.
 
 **Homoiconicity check.** `sample (bernoulli 0.5)` as its quoted triple:
 
@@ -383,21 +390,23 @@ risk: there is very little language to learn.
 
 ## 9. What M0 deliberately excludes
 
-Records with row types; guards and or-patterns; ad-hoc polymorphism (traits/classes);
-macros beyond quote/unquote/eval; typed staging; numeric tower; ownership (GC assumed);
+Records with row types; guards and or-patterns; implicit ad-hoc-polymorphism
+resolution (traits/classes); a macro expander beyond quote/unquote/gated eval;
+typed staging; numeric tower; ownership (GC assumed);
 any performance story. Exclusion here means "not in the kernel grammar yet," not "never."
 
-## 10. Open questions and honest flags
+## 10. Settled decisions, open questions, and honest flags
 
-1. **The count is 27, not 25.** Cheapest cuts if the number matters: drop `PAs`
-   (ergonomics only) and `TTuple` (encode as `TApp` of built-in tuple constructors).
-   I'd keep both and let the target flex; forms should earn their place, and these do.
-2. **Uncurried could flip.** If early macro or pipeline ergonomics favor currying, the
-   change is contained: `Lam`/`App`/`TArrow` arities and the row placement convention.
-   Decide before M2 (the checker), cheap before then.
-3. **Ad-hoc polymorphism is the largest deferred design.** OCaml's biggest regret in the
-   survey (`+.` forever). Options when it lands: Rust-style traits, modular implicits,
-   or something abilities-flavored. It will touch `TForall` and `DefTerm` annotations.
+1. **The count is settled at 27.** The original target was roughly 25; `PAs`
+   and `TTuple` earned their places and now belong to the permanent kernel.
+2. **Uncurried is settled.** D5 selected n-ary, uncurried calls before the
+   checker shipped. Changing `Lam`/`App`/`TArrow` arities now would be a kernel
+   and compatibility change, not an open pre-M2 choice.
+3. **Explicit dictionaries settle the 0.1 ad-hoc-polymorphism boundary.**
+   Generic functions visibly receive ordinary `Eq`, `Ord`, `Show`, or `Num`
+   values. Implicit search, operators, and defaulting remain deferred; any
+   future sugar must elaborate to the ratified values without changing
+   existing code.
 4. **Typed staging.** `Code` is untyped in M0 and `eval` is dynamically checked at the
    boundary. Fine for a kernel; not fine forever if macros become central.
 5. **Capability granularity.** Effects-as-capabilities controls authority per handled

@@ -202,7 +202,7 @@ also emits E0817; consuming the captured resumption twice emits E0816.
 | code | meaning | example |
 |------|---------|---------|
 | E1200 | retired surface-parser scaffold diagnostic; reserved and no longer emitted | an older build rejecting every nonempty `.jac` file |
-| E1201 | canonical surface printer is not implemented at this scaffold boundary | calling the SS.1 printer placeholder |
+| E1201 | retired surface-printer scaffold diagnostic; reserved and no longer emitted | an older scaffold calling the pre-SS.1 printer placeholder |
 | E1202 | recovered surface tree still contains holes | checking malformed `.jac` after parser recovery |
 | E1203 | kernel subtree has no self-contained surface fragment | rendering an ambiguous raw `group` in a semantic diff |
 | E1210 | unexpected surface character | `@` outside a string |

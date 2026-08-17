@@ -51,9 +51,11 @@ Things you can do here that most languages cannot offer:
   explicitly granted with `--allow`, including effects performed by dynamic
   code. This is language-level enforcement in a research runtime, not a
   substitute for an operating-system sandbox.
-- Run one program against many worlds. The same code can run against the real
-  network, a scripted fake, a recording of last week's traffic, or a
-  probability model of how servers usually behave. A handler is the piece
+- Run one program against many worlds. The same code can run against the
+  shipped deterministic network stub, a scripted response list, a recorded
+  trace, or a probability model of how servers usually behave. A real network
+  adapter does not ship yet; a host integration can implement the same effect
+  boundary without changing the Jacquard program. A handler is the piece
   that answers a program's requests to the outside world; you swap the
   handler, and the code never changes. This can replace much conventional
   mocking at effect boundaries and makes "what would my agent do if the API
@@ -407,13 +409,13 @@ corpus and selected demos are evidence fixtures, not an authoring requirement.
 
 `jacquard build` accepts a public `.jac` program directly (or a retained kernel
 `.jqd` carrier) and compiles it and its reachable declarations to a
-standalone binary whose output is byte-identical to `jacquard run` —
-stdout, stderr, and exit codes, pinned by a differential harness in CI
-(`scripts/native-diff.sh`). The full effect language compiles, including
-capturing and multi-shot handlers, and code values compile since task
-73 — quotes, splices, and the structural code ops. `eval` alone stays
-on the interpreter tier (E1102 policy: dynamically loaded code runs
-where the authority model lives).
+standalone binary. Within the documented native subset, its output is
+byte-identical to `jacquard run` — stdout, stderr, and exit codes, pinned by a
+differential harness in CI (`scripts/native-diff.sh`). The effect-and-handler
+kernel compiles, including capturing and multi-shot handlers, and code values
+compile since task 73 — quotes, splices, and the structural code ops. Dynamic
+`Eval`, interpreted Task scheduling, and typed Channels stay on the interpreter
+tier.
 
 ```bash
 export JACQUARD_PRELUDE=$PWD/prelude
@@ -438,9 +440,11 @@ Requirements and knobs:
 - A C toolchain: clang (any recent) or gcc. Tail calls are O(1) stack on
   every toolchain: musttail on clang and gcc 15+, a trampoline below
   them (the emitted C is identical either way).
-- The binary parses `--allow EFFECT` (console, clock, fs, dist, infer so
-  far), `--seed N` for the sampling grant, and refuses `--infer-cache`
-  and `--dry-run` (interpreter tooling) with pointed errors.
+- The binary parses `--allow EFFECT` for its implemented root grants
+  (`console`, `clock`, `fs`, `dist`, and `infer`), plus `--seed N` for the
+  sampling grant. It rejects unsupported grants such as `net`, `eval`, and
+  `secret`, and refuses `--infer-cache` and `--dry-run` (interpreter tooling)
+  with pointed errors.
 - `JACQUARD_STACK_MB` sizes the program stack (default 1024): deep
   non-tail recursion is real C recursion in this backend.
 - Compiled units cache under `.jacquard-native/`, keyed by content, so
@@ -592,13 +596,13 @@ Deeper design references:
 - `docs/whitepaper.tex`: historical initial design thesis, motivation, risks,
   and related work; its roadmap and implementation-status sections are
   outdated.
-- `docs/ast.md`: kernel AST and metadata/hash contract.
-- `spec/jacquard-kernel-ast-m0.md`: kernel source-of-truth spec.
+- `docs/ast.md`: implemented kernel AST contract and retained design reasoning.
+- `spec/jacquard-kernel-ast-m0.md`: implemented kernel source-of-truth spec.
 - `spec/serialization.md`: canonical byte format.
 - `docs/stdlib.md`: prelude and ringed standard library.
 - `docs/warp-testing.md`: Warp testing model.
 - `docs/errors.md`: diagnostic catalog.
-- `docs/development-plan.md`: original implementation plan.
+- `docs/development-plan.md`: completed historical implementation plan.
 
 ## Development Workflow
 

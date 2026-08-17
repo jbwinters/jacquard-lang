@@ -1,4 +1,9 @@
-# Effect Linearity Modes — Design, Draft 0.1
+# Effect Linearity Modes — Design and Implemented Contract
+
+Status: the operation-mode encoding, explicit surface modes, affine `Resume`
+checks, runtime backstop, and reviewed prelude assignments described here ship
+in Jacquard 0.2. Historical task/phasing language is retained as the design
+record; sections explicitly labeled deferred remain future work.
 
 Companion to the kernel spec, the effects runtime (tasks 70/71), and the
 concurrency design. Origin: external review flagged that multi-shot
@@ -58,14 +63,15 @@ The exact bootstrap carriers are `(op fetch ((tref request)) (tref response))`
 for `Multi` and `(op fetch once ((tref request)) (tref response))` for `Once`.
 Explicit `multi` is rejected so absence remains the unique legacy encoding.
 In `HASH_V0`, `Multi` contributes no byte; `Once` appends byte `0x01` after the
-serialized result type. Until the surface-syntax phase lands, tools render a
-`Once` operation in bootstrap notation rather than erase its mode.
+serialized result type. Bootstrap tools render a `Once` operation explicitly
+rather than erase its mode. The shipped surface printer emits explicit
+`once`/`multi` syntax under D41-D42.
 
 Mode is part of the **interface hash**. Tightening an operation from `multi`
 to `once` changes what dependents' handlers are allowed to do, so it is a
-breaking interface change by construction, and `jac pkg diff` reports it in
-authority terms: "op `fetch`: multi -> once (handlers may no longer resume
-repeatedly)."
+breaking interface change by construction. A future package-aware authority
+differ could report it as: "op `fetch`: multi -> once (handlers may no longer
+resume repeatedly)." Jacquard 0.2 does not ship `jac pkg`.
 
 ## 4. Surface syntax
 
