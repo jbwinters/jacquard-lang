@@ -100,11 +100,22 @@
  (modules governance_review_diff_focused)
  (libraries governance_review_diff_test_support alcotest))
 
+(library
+ (name host_protocol_vectors_test_support)
+ (wrapped false)
+ (modules test_host_protocol_vectors)
+ (libraries alcotest yojson))
+
+(executable
+ (name host_protocol_vectors_focused)
+ (modules host_protocol_vectors_focused)
+ (libraries host_protocol_vectors_test_support alcotest))
+
 (test
  (name test_jacquard)
  (modules
-  (:standard \ corpus_support gen_goldens gen_surface_twins gen_prelude_goldens gen_sig_goldens gen_freeze_goldens gen_diag_goldens gen_native_parity gen_governance_playground_fixtures native_fuzz once_interpreter_probe gen_once_hostile scope_policy_trace round_robin_trace run_transcript_trace test_governance_review_diff governance_review_diff_focused))
- (libraries jacquard governance_review_diff_test_support corpus_support alcotest fmt qcheck-core qcheck-alcotest unix str yojson)
+  (:standard \ corpus_support gen_goldens gen_surface_twins gen_prelude_goldens gen_sig_goldens gen_freeze_goldens gen_diag_goldens gen_native_parity gen_governance_playground_fixtures native_fuzz once_interpreter_probe gen_once_hostile scope_policy_trace round_robin_trace run_transcript_trace test_governance_review_diff governance_review_diff_focused test_host_protocol_vectors host_protocol_vectors_focused))
+ (libraries jacquard governance_review_diff_test_support host_protocol_vectors_test_support corpus_support alcotest fmt qcheck-core qcheck-alcotest unix str yojson)
  (deps
   (glob_files_rec ../corpus/*.jqd)
   (glob_files_rec ../corpus/*.jac)
@@ -128,6 +139,9 @@
   ../docs/effect-membranes.md
   ../docs/client-playground.md
   ../docs/effect-taxonomy.md
+  ../spec/host-protocol-v0.md
+  ../spec/host-protocol-v0/README.md
+  ../spec/host-protocol-v0/vectors.json
   ../docs/concurrency.md
   ../docs/README.md
   ../docs/release/0.2/DECISION.md

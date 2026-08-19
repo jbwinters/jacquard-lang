@@ -199,7 +199,7 @@ studied during planning; `docs/ast.md` records each debt in detail:
 The prototype is complete against its original core plan and has since added
 the public surface syntax, ringed standard library, Warp properties and cache,
 native compilation, packaged binaries, and product-scale case studies. The RC1
-semantic boundary remains historical; the current successor is pinned by 877
+semantic boundary remains historical; the current successor is pinned by 882
 Alcotest/QCheck cases, 59 cram transcripts, 28 documentation examples, native
 sanitizer/leak/fuzz lanes, and fresh-clone evidence workflows. RC2 repaired
 binary-demo packaging; RC3 adds an explicit
@@ -580,7 +580,7 @@ Key release docs:
 - `docs/`: design docs, tutorial, CI/CD, Warp, stdlib, errors, release evidence.
 - `prelude/`: Jacquard standard library and effect declarations.
 - `scripts/release/`: reproducible release evidence script.
-- `spec/`: kernel AST and canonical serialization specs.
+- `spec/`: kernel AST, canonical serialization, and frozen host-protocol specs.
 - `src/`: OCaml implementation.
 - `test/`: Alcotest/QCheck suites plus cram CLI transcripts.
 - `jacquard.opam`, `dune-project`: package and build metadata.
@@ -619,6 +619,9 @@ Deeper design references:
 - `docs/ast.md`: implemented kernel AST contract and retained design reasoning.
 - `spec/jacquard-kernel-ast-m0.md`: implemented kernel source-of-truth spec.
 - `spec/serialization.md`: canonical byte format.
+- `docs/host-boundary.md`: host/Core ownership and trust boundary.
+- `spec/host-protocol-v0.md`: frozen experimental host envelopes, process
+  framing, limits, failures, and conformance-vector contract.
 - `docs/stdlib.md`: prelude and ringed standard library.
 - `docs/warp-testing.md`: Warp testing model.
 - `docs/errors.md`: diagnostic catalog.
@@ -710,9 +713,10 @@ proofs also do not ship. World grants remain coarse. See
 `docs/release/0.2/LIMITS.md` for the current integrated boundary,
 `docs/release/0.1/LIMITS.md` for the historical Core 0.1 boundary, and
 `docs/release/structured-concurrency/LIMITS.md` for the successor C0-C3 boundary.
-`docs/host-boundary.md` freezes the ownership and trust model for future
-language-neutral integration, but no host ABI, process protocol, adapter, or
-HTTP server ships in this repository today.
+`docs/host-boundary.md` freezes the ownership and trust model, and
+`spec/host-protocol-v0.md` freezes the experimental language-neutral envelopes,
+process framing, limits, and schema/state vectors. No executable host carrier,
+stable ABI, adapter, or HTTP server ships in this repository today.
 The deterministic Workspace v0 governance boundary is separately advertised
 as an evidence-backed research reference implementation, not as a sandbox or
 production security system; its exact claim and trusted-host limits are in

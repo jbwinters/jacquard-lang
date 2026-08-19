@@ -1,0 +1,775 @@
+{
+  "schema": "jacquard-host-vectors-v0",
+  "hard_limits": {
+    "max_arguments": 64,
+    "max_collection_items": 1024,
+    "max_diagnostic_bytes": 65536,
+    "max_diagnostics": 32,
+    "max_effect_requests": 1024,
+    "max_effects": 64,
+    "max_frame_bytes": 1048576,
+    "max_host_message_bytes": 4096,
+    "max_json_depth": 64,
+    "max_operations": 256,
+    "max_stderr_bytes": 65536,
+    "max_text_bytes": 262144,
+    "max_value_nodes": 4096
+  },
+  "templates": {
+    "core_hello": {
+      "direction": "core_to_host",
+      "message": {
+        "carrier": "stdio-u32-json-v0",
+        "kind": "core_hello",
+        "limits": {"$ref": "hard_limits"},
+        "versions": ["jacquard-host-v0"]
+      }
+    },
+    "host_select": {
+      "direction": "host_to_core",
+      "message": {
+        "kind": "host_select",
+        "limits": {"$ref": "hard_limits"},
+        "protocol": "jacquard-host-v0"
+      }
+    },
+    "pure_invoke": {
+      "direction": "host_to_core",
+      "message": {
+        "arguments": [],
+        "capabilities": {"effects": [], "operations": []},
+        "interface": {
+          "effects": [],
+          "parameters": [],
+          "result": {"items": [], "kind": "tuple"}
+        },
+        "invocation_id": "0000000000000000",
+        "kind": "invoke",
+        "protocol": "jacquard-host-v0",
+        "target": {
+          "callable": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "kind": "store-term-v0"
+        }
+      }
+    },
+    "pure_outcome": {
+      "direction": "core_to_host",
+      "message": {
+        "evidence": {
+          "core": {
+            "capabilities": {"effects": [], "operations": []},
+            "effect_requests": [],
+            "interface": {
+              "effects": [],
+              "parameters": [],
+              "result": {"items": [], "kind": "tuple"}
+            },
+            "invocation_id": "0000000000000000",
+            "schema": "jacquard-host-core-evidence-v0",
+            "target": {
+              "callable": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "kind": "store-term-v0"
+            },
+            "terminal": "ok"
+          },
+          "host_observations": {
+            "responses": [],
+            "schema": "jacquard-host-observations-v0"
+          }
+        },
+        "invocation_id": "0000000000000000",
+        "kind": "outcome",
+        "protocol": "jacquard-host-v0",
+        "result": {"kind": "ok", "value": {"items": [], "kind": "tuple"}}
+      }
+    },
+    "effect_invoke": {
+      "direction": "host_to_core",
+      "message": {
+        "arguments": [{"kind": "text", "value": "ping"}],
+        "capabilities": {
+          "effects": ["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
+          "operations": [
+            {
+              "effect": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "mode": "once",
+              "operation": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+            }
+          ]
+        },
+        "interface": {
+          "effects": ["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
+          "parameters": [
+            {
+              "arguments": [],
+              "identity": "1111111111111111111111111111111111111111111111111111111111111111",
+              "kind": "nominal"
+            }
+          ],
+          "result": {
+            "arguments": [],
+            "identity": "1111111111111111111111111111111111111111111111111111111111111111",
+            "kind": "nominal"
+          }
+        },
+        "invocation_id": "0000000000000000",
+        "kind": "invoke",
+        "protocol": "jacquard-host-v0",
+        "target": {
+          "callable": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "kind": "store-term-v0"
+        }
+      }
+    },
+    "effect_request": {
+      "direction": "core_to_host",
+      "message": {
+        "arguments": [{"kind": "text", "value": "ping"}],
+        "effect": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "invocation_id": "0000000000000000",
+        "kind": "effect_request",
+        "mode": "once",
+        "operation": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "protocol": "jacquard-host-v0",
+        "request_id": "0000000000000001"
+      }
+    },
+    "effect_ok": {
+      "direction": "host_to_core",
+      "message": {
+        "invocation_id": "0000000000000000",
+        "kind": "effect_ok",
+        "protocol": "jacquard-host-v0",
+        "request_id": "0000000000000001",
+        "value": {"kind": "text", "value": "pong"}
+      }
+    },
+    "effect_outcome": {
+      "direction": "core_to_host",
+      "message": {
+        "evidence": {
+          "core": {
+            "capabilities": {
+              "effects": ["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
+              "operations": [
+                {
+                  "effect": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "mode": "once",
+                  "operation": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                }
+              ]
+            },
+            "effect_requests": [
+              {
+                "effect": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "operation": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                "ordinal": 1
+              }
+            ],
+            "interface": {
+              "effects": ["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
+              "parameters": [
+                {
+                  "arguments": [],
+                  "identity": "1111111111111111111111111111111111111111111111111111111111111111",
+                  "kind": "nominal"
+                }
+              ],
+              "result": {
+                "arguments": [],
+                "identity": "1111111111111111111111111111111111111111111111111111111111111111",
+                "kind": "nominal"
+              }
+            },
+            "invocation_id": "0000000000000000",
+            "schema": "jacquard-host-core-evidence-v0",
+            "target": {
+              "callable": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+              "kind": "store-term-v0"
+            },
+            "terminal": "ok"
+          },
+          "host_observations": {
+            "responses": [{"category": "ok", "completion": "completed", "ordinal": 1}],
+            "schema": "jacquard-host-observations-v0"
+          }
+        },
+        "invocation_id": "0000000000000000",
+        "kind": "outcome",
+        "protocol": "jacquard-host-v0",
+        "result": {"kind": "ok", "value": {"kind": "text", "value": "pong"}}
+      }
+    },
+    "effect_refused": {
+      "direction": "host_to_core",
+      "message": {
+        "category": "refused_authority",
+        "completion": "not_started",
+        "invocation_id": "0000000000000000",
+        "kind": "effect_failure",
+        "message": "policy denied",
+        "protocol": "jacquard-host-v0",
+        "request_id": "0000000000000001"
+      }
+    },
+    "refused_outcome": {
+      "direction": "core_to_host",
+      "message": {
+        "evidence": {
+          "core": {
+            "capabilities": {
+              "effects": ["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
+              "operations": [
+                {
+                  "effect": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "mode": "once",
+                  "operation": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                }
+              ]
+            },
+            "effect_requests": [
+              {
+                "effect": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "operation": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                "ordinal": 1
+              }
+            ],
+            "interface": {
+              "effects": ["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
+              "parameters": [
+                {
+                  "arguments": [],
+                  "identity": "1111111111111111111111111111111111111111111111111111111111111111",
+                  "kind": "nominal"
+                }
+              ],
+              "result": {
+                "arguments": [],
+                "identity": "1111111111111111111111111111111111111111111111111111111111111111",
+                "kind": "nominal"
+              }
+            },
+            "invocation_id": "0000000000000000",
+            "schema": "jacquard-host-core-evidence-v0",
+            "target": {
+              "callable": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+              "kind": "store-term-v0"
+            },
+            "terminal": "host_failure"
+          },
+          "host_observations": {
+            "responses": [
+              {"category": "refused_authority", "completion": "not_started", "ordinal": 1}
+            ],
+            "schema": "jacquard-host-observations-v0"
+          }
+        },
+        "invocation_id": "0000000000000000",
+        "kind": "outcome",
+        "protocol": "jacquard-host-v0",
+        "result": {
+          "diagnostics": [
+            {
+              "schema": "jacquard-diagnostic-v1",
+              "domain": "process",
+              "code": "E1607",
+              "severity": "error",
+              "span": null,
+              "summary": "The host refused the requested authority.",
+              "cause": "The host refused operation cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc before starting an outside action: policy denied.",
+              "next_step": "Grant the required host authority or choose an invocation that does not request this operation."
+            }
+          ],
+          "kind": "error"
+        }
+      }
+    },
+    "timeout_unknown_cancel": {
+      "direction": "host_to_core",
+      "message": {
+        "completion": "unknown",
+        "invocation_id": "0000000000000000",
+        "kind": "cancel",
+        "protocol": "jacquard-host-v0",
+        "reason": "timeout",
+        "request_id": "0000000000000001"
+      }
+    },
+    "timeout_unknown_outcome": {
+      "direction": "core_to_host",
+      "message": {
+        "evidence": {
+          "core": {
+            "capabilities": {
+              "effects": ["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
+              "operations": [
+                {
+                  "effect": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "mode": "once",
+                  "operation": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                }
+              ]
+            },
+            "effect_requests": [
+              {
+                "effect": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "operation": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                "ordinal": 1
+              }
+            ],
+            "interface": {
+              "effects": ["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
+              "parameters": [
+                {
+                  "arguments": [],
+                  "identity": "1111111111111111111111111111111111111111111111111111111111111111",
+                  "kind": "nominal"
+                }
+              ],
+              "result": {
+                "arguments": [],
+                "identity": "1111111111111111111111111111111111111111111111111111111111111111",
+                "kind": "nominal"
+              }
+            },
+            "invocation_id": "0000000000000000",
+            "schema": "jacquard-host-core-evidence-v0",
+            "target": {
+              "callable": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+              "kind": "store-term-v0"
+            },
+            "terminal": "completion_unknown"
+          },
+          "host_observations": {
+            "responses": [{"category": "timeout", "completion": "unknown", "ordinal": 1}],
+            "schema": "jacquard-host-observations-v0"
+          }
+        },
+        "invocation_id": "0000000000000000",
+        "kind": "outcome",
+        "protocol": "jacquard-host-v0",
+        "result": {
+          "diagnostics": [
+            {
+              "schema": "jacquard-diagnostic-v1",
+              "domain": "process",
+              "code": "E1612",
+              "severity": "error",
+              "span": null,
+              "summary": "The outside action may have completed.",
+              "cause": "The host reported that operation cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc may have completed before its timeout cancellation was observed.",
+              "next_step": "Do not retry automatically; reconcile the outside system before deciding what to do next."
+            }
+          ],
+          "kind": "error"
+        }
+      }
+    },
+    "shutdown": {
+      "direction": "host_to_core",
+      "message": {"kind": "shutdown", "protocol": "jacquard-host-v0"}
+    },
+    "shutdown_ack": {
+      "direction": "core_to_host",
+      "message": {"kind": "shutdown_ack", "protocol": "jacquard-host-v0"}
+    },
+    "late_effect_ok": {
+      "direction": "host_to_core",
+      "message": {
+        "invocation_id": "0000000000000000",
+        "kind": "effect_ok",
+        "protocol": "jacquard-host-v0",
+        "request_id": "0000000000000001",
+        "value": {"kind": "text", "value": "late"}
+      }
+    }
+  },
+  "positive": [
+    {
+      "name": "pure-success",
+      "sequence": ["core_hello", "host_select", "pure_invoke", "pure_outcome"],
+      "terminal": "ok"
+    },
+    {
+      "name": "one-once-effect-success",
+      "sequence": [
+        "core_hello",
+        "host_select",
+        "effect_invoke",
+        "effect_request",
+        "effect_ok",
+        "effect_outcome"
+      ],
+      "terminal": "ok"
+    },
+    {
+      "name": "refused-authority",
+      "sequence": [
+        "core_hello",
+        "host_select",
+        "effect_invoke",
+        "effect_request",
+        "effect_refused",
+        "refused_outcome"
+      ],
+      "terminal": "host_failure"
+    },
+    {
+      "name": "timeout-with-unknown-completion",
+      "sequence": [
+        "core_hello",
+        "host_select",
+        "effect_invoke",
+        "effect_request",
+        "timeout_unknown_cancel",
+        "timeout_unknown_outcome"
+      ],
+      "terminal": "completion_unknown"
+    },
+    {
+      "name": "selected-shutdown",
+      "sequence": ["core_hello", "host_select", "shutdown", "shutdown_ack"],
+      "terminal": "shutdown"
+    }
+  ],
+  "terminal_mappings": [
+    {
+      "category": "unsupported_operation",
+      "completion": "not_started",
+      "kind": "effect_failure",
+      "primary_code": "E1606",
+      "terminal": "host_failure"
+    },
+    {
+      "category": "refused_authority",
+      "completion": "not_started",
+      "kind": "effect_failure",
+      "primary_code": "E1607",
+      "terminal": "host_failure"
+    },
+    {
+      "category": "outside_failure",
+      "completion": "failed",
+      "kind": "effect_failure",
+      "primary_code": "E1613",
+      "terminal": "host_failure"
+    },
+    {
+      "category": "completion_unknown",
+      "completion": "unknown",
+      "kind": "effect_failure",
+      "primary_code": "E1612",
+      "terminal": "completion_unknown"
+    },
+    {
+      "completion": "not_started",
+      "kind": "cancel",
+      "primary_code": "E1614",
+      "reason": "cancelled",
+      "terminal": "cancelled"
+    },
+    {
+      "completion": "failed",
+      "kind": "cancel",
+      "primary_code": "E1614",
+      "reason": "cancelled",
+      "terminal": "cancelled"
+    },
+    {
+      "completion": "unknown",
+      "kind": "cancel",
+      "primary_code": "E1612",
+      "reason": "cancelled",
+      "terminal": "completion_unknown"
+    },
+    {
+      "completion": "not_started",
+      "kind": "cancel",
+      "primary_code": "E1609",
+      "reason": "timeout",
+      "terminal": "cancelled"
+    },
+    {
+      "completion": "failed",
+      "kind": "cancel",
+      "primary_code": "E1609",
+      "reason": "timeout",
+      "terminal": "cancelled"
+    },
+    {
+      "completion": "unknown",
+      "kind": "cancel",
+      "primary_code": "E1612",
+      "reason": "timeout",
+      "terminal": "completion_unknown"
+    },
+    {
+      "completion": "not_started",
+      "kind": "cancel",
+      "primary_code": "E1610",
+      "reason": "host_shutdown",
+      "terminal": "cancelled"
+    },
+    {
+      "completion": "failed",
+      "kind": "cancel",
+      "primary_code": "E1610",
+      "reason": "host_shutdown",
+      "terminal": "cancelled"
+    },
+    {
+      "completion": "unknown",
+      "kind": "cancel",
+      "primary_code": "E1612",
+      "reason": "host_shutdown",
+      "terminal": "completion_unknown"
+    }
+  ],
+  "hostile": [
+    {
+      "base": "pure-success",
+      "expect": {
+        "code": "E1600",
+        "effect_requests_before_failure": 0,
+        "forbid_outside_action": true,
+        "terminal_frames_max": 1
+      },
+      "mutation": {
+        "frame": 1,
+        "op": "replace",
+        "path": "/protocol",
+        "value": "jacquard-host-v1"
+      },
+      "name": "unknown-version",
+      "phase": "host_select"
+    },
+    {
+      "base": "pure-success",
+      "expect": {
+        "code": "E1601",
+        "effect_requests_before_failure": 0,
+        "forbid_outside_action": true,
+        "terminal_frames_max": 1
+      },
+      "mutation": {
+        "frame": 2,
+        "op": "add",
+        "path": "/display_name",
+        "value": "mutable-name"
+      },
+      "name": "unknown-invoke-field",
+      "phase": "invoke"
+    },
+    {
+      "base": "pure-success",
+      "expect": {
+        "code": "E1601",
+        "effect_requests_before_failure": 0,
+        "forbid_outside_action": true,
+        "terminal_frames_max": 1
+      },
+      "mutation": {
+        "frame": 1,
+        "op": "raw_wire",
+        "wire_hex": "000000267b226b696e64223a22686f73745f73656c656374222c226b696e64223a22696e766f6b65227d"
+      },
+      "name": "duplicate-json-key",
+      "phase": "framing"
+    },
+    {
+      "base": "pure-success",
+      "expect": {
+        "code": "E1601",
+        "effect_requests_before_failure": 0,
+        "forbid_outside_action": true,
+        "terminal_frames_max": 1
+      },
+      "mutation": {"frame": 1, "op": "raw_wire", "wire_hex": "000000037bff7d"},
+      "name": "invalid-utf8",
+      "phase": "framing"
+    },
+    {
+      "base": "pure-success",
+      "expect": {
+        "code": "E1602",
+        "effect_requests_before_failure": 0,
+        "forbid_outside_action": true,
+        "terminal_frames_max": 1
+      },
+      "mutation": {"frame": 1, "op": "raw_wire", "wire_hex": "00100001"},
+      "name": "oversized-frame-prefix",
+      "phase": "framing"
+    },
+    {
+      "base": "pure-success",
+      "expect": {
+        "code": "E1602",
+        "effect_requests_before_failure": 0,
+        "forbid_outside_action": true,
+        "terminal_frames_max": 1
+      },
+      "mutation": {
+        "frame": 1,
+        "op": "replace",
+        "path": "/limits/max_frame_bytes",
+        "value": 0
+      },
+      "name": "nonpositive-selected-limit",
+      "phase": "host_select"
+    },
+    {
+      "base": "pure-success",
+      "expect": {
+        "code": "E1603",
+        "effect_requests_before_failure": 0,
+        "forbid_outside_action": true,
+        "terminal_frames_max": 1
+      },
+      "mutation": {
+        "frame": 2,
+        "op": "replace",
+        "path": "/target/callable",
+        "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "name": "noncanonical-target-hash",
+      "phase": "invoke"
+    },
+    {
+      "base": "one-once-effect-success",
+      "expect": {
+        "code": "E1603",
+        "effect_requests_before_failure": 0,
+        "forbid_outside_action": true,
+        "terminal_frames_max": 1
+      },
+      "mutation": {
+        "frame": 2,
+        "op": "replace",
+        "path": "/interface/parameters/0",
+        "value": {"items": [], "kind": "tuple"}
+      },
+      "name": "interface-mismatch",
+      "phase": "invoke"
+    },
+    {
+      "base": "one-once-effect-success",
+      "expect": {
+        "code": "E1604",
+        "effect_requests_before_failure": 0,
+        "forbid_outside_action": true,
+        "terminal_frames_max": 1
+      },
+      "mutation": {
+        "frame": 2,
+        "op": "replace",
+        "path": "/arguments/0",
+        "value": {"kind": "secret", "value": "must-not-cross"}
+      },
+      "name": "unsupported-secret-value",
+      "phase": "invoke"
+    },
+    {
+      "base": "one-once-effect-success",
+      "expect": {
+        "code": "E1605",
+        "effect_requests_before_failure": 0,
+        "forbid_outside_action": true,
+        "terminal_frames_max": 1
+      },
+      "mutation": {
+        "frame": 2,
+        "op": "add",
+        "path": "/capabilities/effects/1",
+        "value": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      "name": "extra-capability",
+      "phase": "invoke"
+    },
+    {
+      "base": "one-once-effect-success",
+      "expect": {
+        "code": "E1605",
+        "effect_requests_before_failure": 0,
+        "forbid_outside_action": true,
+        "terminal_frames_max": 1
+      },
+      "mutation": {
+        "frame": 2,
+        "op": "replace",
+        "path": "/capabilities/operations/0/mode",
+        "value": "multi"
+      },
+      "name": "multi-operation-registry-entry",
+      "phase": "invoke"
+    },
+    {
+      "base": "one-once-effect-success",
+      "expect": {
+        "code": "E1606",
+        "effect_requests_before_failure": 0,
+        "forbid_outside_action": true,
+        "terminal_frames_max": 1
+      },
+      "mutation": {
+        "frame": 2,
+        "op": "remove",
+        "path": "/capabilities/operations/0"
+      },
+      "name": "unconfigured-root-operation",
+      "phase": "evaluation"
+    },
+    {
+      "base": "one-once-effect-success",
+      "expect": {
+        "code": "E1608",
+        "effect_requests_before_failure": 1,
+        "forbid_outside_action": false,
+        "terminal_frames_max": 1
+      },
+      "mutation": {
+        "frame": 4,
+        "op": "replace",
+        "path": "/request_id",
+        "value": "0000000000000002"
+      },
+      "name": "wrong-response-id",
+      "phase": "effect_response"
+    },
+    {
+      "base": "one-once-effect-success",
+      "expect": {
+        "code": "E1608",
+        "effect_requests_before_failure": 1,
+        "forbid_outside_action": false,
+        "terminal_frames_max": 1
+      },
+      "mutation": {"op": "append", "template": "late_effect_ok"},
+      "name": "message-after-outcome",
+      "phase": "terminal"
+    },
+    {
+      "base": "pure-success",
+      "expect": {
+        "code": "E1611",
+        "effect_requests_before_failure": 0,
+        "forbid_outside_action": true,
+        "terminal_frames_max": 1
+      },
+      "mutation": {"frame": 1, "op": "raw_wire", "wire_hex": "0000"},
+      "name": "truncated-length-prefix",
+      "phase": "framing"
+    },
+    {
+      "base": "pure-success",
+      "expect": {
+        "code": "E1611",
+        "effect_requests_before_failure": 0,
+        "forbid_outside_action": true,
+        "terminal_frames_max": 1
+      },
+      "mutation": {"frame": 1, "op": "raw_wire", "wire_hex": "000000057b7d"},
+      "name": "truncated-frame-payload",
+      "phase": "framing"
+    }
+  ]
+}
