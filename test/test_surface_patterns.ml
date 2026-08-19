@@ -42,10 +42,25 @@ let resolve names expression =
   | Ok expression -> expression
   | Error diagnostics -> fail_diags "resolve" diagnostics
 
-let resolve_codes names source =
+let resolve_diagnostics names source =
   match Resolve.resolve_expr names (lower source) with
   | Ok _ -> Alcotest.failf "expected %S to fail resolution" source
-  | Error diagnostics -> List.map (fun diagnostic -> Diag.code_or_uncoded diagnostic) diagnostics
+  | Error diagnostics -> diagnostics
+
+let check_resolution_diagnostic names ~label ~source ~code ~excerpt =
+  match resolve_diagnostics names source with
+  | [ diagnostic ] ->
+      Alcotest.(check string) (label ^ " code") code (Diag.code_or_uncoded diagnostic);
+      let actual_excerpt =
+        match Diag.span diagnostic with
+        | None -> Alcotest.failf "%s: expected a source span" label
+        | Some span ->
+            String.sub source span.Span.start_pos.offset
+              (span.end_pos.offset - span.start_pos.offset)
+      in
+      Alcotest.(check string) (label ^ " exact span") excerpt actual_excerpt
+  | diagnostics ->
+      Alcotest.failf "%s: expected one diagnostic, got %d" label (List.length diagnostics)
 
 let test_all_pattern_forms_and_literals () =
   check_equivalent "six pattern forms and match"
@@ -181,6 +196,8 @@ let test_labeled_partial_patterns () =
   let snapshot_hash = Hash.of_string "labeled-pattern-snapshot" in
   let evolved_snapshot_hash = Hash.of_string "labeled-pattern-snapshot-evolved" in
   let some_hash = Hash.of_string "labeled-pattern-some" in
+  let outer_hash = Hash.of_string "labeled-pattern-outer" in
+  let inner_hash = Hash.of_string "labeled-pattern-inner" in
   let plain_hash = Hash.of_string "labeled-pattern-plain" in
   let ambiguous_hash = Hash.of_string "labeled-pattern-ambiguous" in
   let constructor_fields hash =
@@ -188,6 +205,8 @@ let test_labeled_partial_patterns () =
       Some [ Some "id"; Some "error"; None; Some "vendor"; Some "tail" ]
     else if Hash.equal hash evolved_snapshot_hash then
       Some [ Some "id"; None; Some "error"; Some "vendor"; Some "tail"; None ]
+    else if Hash.equal hash outer_hash then Some [ Some "inner"; Some "ignored" ]
+    else if Hash.equal hash inner_hash then Some [ Some "x"; Some "y" ]
     else if Hash.equal hash plain_hash then Some [ None ]
     else if Hash.equal hash ambiguous_hash then Some [ Some "value"; Some "value" ]
     else None
@@ -198,6 +217,8 @@ let test_labeled_partial_patterns () =
         ("value", { Resolve.hash = value_hash; kind = Resolve.KTerm });
         ("snapshot", { Resolve.hash = snapshot_hash; kind = Resolve.KCon });
         ("some", { Resolve.hash = some_hash; kind = Resolve.KCon });
+        ("outer", { Resolve.hash = outer_hash; kind = Resolve.KCon });
+        ("inner", { Resolve.hash = inner_hash; kind = Resolve.KCon });
         ("plain", { Resolve.hash = plain_hash; kind = Resolve.KCon });
         ("ambiguous", { Resolve.hash = ambiguous_hash; kind = Resolve.KCon });
       ]
@@ -242,6 +263,18 @@ let test_labeled_partial_patterns () =
     (Form.equal_ignoring_meta
        (Kernel.expr_to_form evolved_positional)
        (Kernel.expr_to_form evolved_labeled));
+  let nested_labeled =
+    resolve names
+      (lower "match value { | Outer(inner: Inner(y: right, x: left)) -> (left, right) }")
+  in
+  let nested_positional =
+    resolve names (lower "match value { | Outer(Inner(left, right), _) -> (left, right) }")
+  in
+  Alcotest.(check bool)
+    "nested labeled patterns expand independently" true
+    (Form.equal_ignoring_meta
+       (Kernel.expr_to_form nested_positional)
+       (Kernel.expr_to_form nested_labeled));
   let lookup _kind hash =
     if Hash.equal hash value_hash then Some "value"
     else if Hash.equal hash snapshot_hash then Some "snapshot"
@@ -283,18 +316,22 @@ let test_labeled_partial_patterns () =
         ] ) ->
       ()
   | _ -> Alcotest.fail "labeled pattern did not expand in declaration order");
+  check_resolution_diagnostic names ~label:"unknown field"
+    ~source:"match value { | Snapshot(missing: x) -> x }" ~code:"E0305" ~excerpt:"missing: x";
+  check_resolution_diagnostic names ~label:"duplicate selection"
+    ~source:"match value { | Snapshot(error: x, error: y) -> x }" ~code:"E0306" ~excerpt:"error: y";
+  check_resolution_diagnostic names ~label:"unlabeled constructor"
+    ~source:"match value { | Plain(value: x) -> x }" ~code:"E0307" ~excerpt:"Plain(value: x)";
+  check_resolution_diagnostic names ~label:"ambiguous declaration labels"
+    ~source:"match value { | Ambiguous(value: x) -> x }" ~code:"E0308"
+    ~excerpt:"Ambiguous(value: x)";
   Alcotest.(check (list string))
-    "unknown field" [ "E0305" ]
-    (resolve_codes names "match value { | Snapshot(missing: x) -> x }");
+    "quoted labeled pattern" [ "E1237" ]
+    (lower_codes "quote { match value { | Snapshot(error: problem) -> problem } }");
   Alcotest.(check (list string))
-    "duplicate selection" [ "E0306" ]
-    (resolve_codes names "match value { | Snapshot(error: x, error: y) -> x }");
-  Alcotest.(check (list string))
-    "unlabeled constructor" [ "E0307" ]
-    (resolve_codes names "match value { | Plain(value: x) -> x }");
-  Alcotest.(check (list string))
-    "ambiguous declaration labels" [ "E0308" ]
-    (resolve_codes names "match value { | Ambiguous(value: x) -> x }");
+    "constructor patterns remain refutable binders" [ "E0205" ]
+    (lower_codes "fn (Snapshot(error: problem)) -> problem");
+  ignore (lower "quote { match value { | Snapshot(_, problem) -> problem } }");
   ignore (resolve names (lower "match value { | Plain(field) -> field }"));
   List.iter
     (fun source -> Alcotest.(check bool) source true (List.mem "E1220" (parse_codes source)))

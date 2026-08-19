@@ -297,6 +297,11 @@ is free; resolution places fields in declaration order and treats omissions as
 `_`. Unknown or repeated selections fail, as do labeled patterns against an
 unlabeled or ambiguously labeled constructor. Nested and `as` patterns are
 valid after `:`. `Ctor(name)` remains an ordinary positional binder pattern.
+Labeled constructor patterns are refutable, just like positional constructor
+patterns, so they are not valid lambda parameters or `let` binders.
+Inside `quote { ... }`, constructor patterns must remain positional; labeled
+patterns there fail with E1237 because quoted code cannot carry their labels
+semantically.
 
 Use a braced block when an arm sequences work:
 

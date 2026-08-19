@@ -609,6 +609,11 @@ is still the existing positional binder pattern, never a label pun, and
 labels already participate in the constructor's content identity, so changing
 the declaration produces the same identity evolution as any other constructor
 schema change. Bootstrap `.jqd` patterns remain positional and unchanged.
+Like their positional twins, labeled constructor patterns are refutable and
+therefore remain invalid as lambda parameters or `let` binders.
+Because labels are surface-only elaboration data rather than quoted kernel
+data, a labeled constructor pattern inside `quote { ... }` is rejected with
+E1237; write the quoted pattern positionally instead.
 
 A positional match past four fields is the readability failure labeled
 patterns exist to fix (`Snapshot(_, error-rate, p95, _, db-lag, _, vendor, _)`

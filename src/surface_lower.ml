@@ -49,6 +49,11 @@ let diagnostic_spec = function
       ( Diag.Surface,
         "An effect operation mode is missing or invalid.",
         "Declare the operation explicitly as once or multi." )
+  | "E1237" ->
+      ( Diag.Surface,
+        "A labeled constructor pattern cannot be quoted.",
+        "Use an explicit positional pattern inside `quote`, or move the labeled match outside the \
+         quoted payload." )
   | code -> raise (Diag.Bug_invalid_diagnostic ("unknown surface lowering code " ^ code))
 
 let diagnostic ?span ~code cause =
@@ -90,35 +95,42 @@ let generated_constructor_meta ~form meta =
   let* meta = generated_single_meta ~form meta in
   Ok (meta |> Meta.with_surface_generated form |> Meta.with_surface_ref_kind "con")
 
-(** [lower_pat pat] lowers any complete surface pattern without resolving constructor names. *)
-let rec lower_pat (pat : Surface_ast.pat) : (Kernel.pat, Diag.t list) result =
+let rec lower_pat_at ~quote_depth (pat : Surface_ast.pat) : (Kernel.pat, Diag.t list) result =
   let node it = Kernel.{ it; meta = pat.meta } in
-  match pat.it with
-  | Surface_ast.PWild -> Ok (node Kernel.PWild)
-  | Surface_ast.PBind name -> Ok (node (Kernel.PVar name))
-  | Surface_ast.PLit literal -> Ok (node (Kernel.PLit literal))
-  | Surface_ast.PCon (constructor, args) ->
-      let* args = map_results lower_pat args in
-      Ok (node (Kernel.PCon (kernel_gref constructor, args)))
-  | Surface_ast.PTuple items ->
-      let* items = map_results lower_pat items in
-      Ok (node (Kernel.PTuple items))
-  | Surface_ast.PAs (inner, name) ->
-      let* inner = lower_pat inner in
-      Ok (node (Kernel.PAs (name, inner)))
-  | Surface_ast.PHole _ ->
-      error ~meta:pat.meta ~code:"E1202" "cannot lower a recovered surface pattern hole"
+  if quote_depth > 0 && Meta.surface_form pat.meta = Some "labeled-pattern" then
+    error ~meta:pat.meta ~code:"E1237"
+      "quoted code stores positional kernel patterns and cannot retain a surface field selection"
+  else
+    match pat.it with
+    | Surface_ast.PWild -> Ok (node Kernel.PWild)
+    | Surface_ast.PBind name -> Ok (node (Kernel.PVar name))
+    | Surface_ast.PLit literal -> Ok (node (Kernel.PLit literal))
+    | Surface_ast.PCon (constructor, args) ->
+        let* args = map_results (lower_pat_at ~quote_depth) args in
+        Ok (node (Kernel.PCon (kernel_gref constructor, args)))
+    | Surface_ast.PTuple items ->
+        let* items = map_results (lower_pat_at ~quote_depth) items in
+        Ok (node (Kernel.PTuple items))
+    | Surface_ast.PAs (inner, name) ->
+        let* inner = lower_pat_at ~quote_depth inner in
+        Ok (node (Kernel.PAs (name, inner)))
+    | Surface_ast.PHole _ ->
+        error ~meta:pat.meta ~code:"E1202" "cannot lower a recovered surface pattern hole"
+
+(** [lower_pat pat] lowers any complete surface pattern outside a quoted payload without resolving
+    constructor names. Recovery holes fail with E1202. *)
+let lower_pat pat = lower_pat_at ~quote_depth:0 pat
 
 let ensure_irrefutable ~code ~message (pat : Kernel.pat) =
   if Kernel.is_irrefutable pat then Ok pat else error ~meta:pat.meta ~code message
 
-let lower_irrefutable_pat ~code ~message pat =
-  let* pat = lower_pat pat in
+let lower_irrefutable_pat ?(quote_depth = 0) ~code ~message pat =
+  let* pat = lower_pat_at ~quote_depth pat in
   ensure_irrefutable ~code ~message pat
 
-let lower_lambda_params params =
+let lower_lambda_params ?(quote_depth = 0) params =
   map_results
-    (lower_irrefutable_pat ~code:"E0205"
+    (lower_irrefutable_pat ~quote_depth ~code:"E0205"
        ~message:
          "`lam` parameters must be irrefutable patterns (pwild, pvar, or ptuple/pas of those)")
     params
@@ -227,7 +239,7 @@ and lower_expr_node ?(quote_depth = 0) (expr : Surface_ast.expr) : (Kernel.expr,
       let* args = map_results (lower_expr_node ~quote_depth) args in
       Ok Kernel.{ it = App (fn, args); meta = Meta.with_surface_form "call" expr.meta }
   | Surface_ast.Fn (params, body) ->
-      let* params = lower_lambda_params params in
+      let* params = lower_lambda_params ~quote_depth params in
       let* body = lower_expr_node ~quote_depth body in
       Ok Kernel.{ it = Lam (params, body); meta = Meta.with_surface_form "fn" expr.meta }
   | Surface_ast.Tuple items ->
@@ -248,7 +260,7 @@ and lower_expr_node ?(quote_depth = 0) (expr : Surface_ast.expr) : (Kernel.expr,
       Ok { lowered with Kernel.meta }
   | Surface_ast.Match (subject, clauses) -> (
       let lower_clause (clause : Surface_ast.clause) =
-        let* cpat = lower_pat clause.cpattern in
+        let* cpat = lower_pat_at ~quote_depth clause.cpattern in
         let* cbody = lower_expr_node ~quote_depth clause.cbody in
         Ok Kernel.{ cpat; cbody; cmeta = clause.cmeta }
       in
@@ -332,14 +344,14 @@ and lower_expr_node ?(quote_depth = 0) (expr : Surface_ast.expr) : (Kernel.expr,
       Ok Kernel.{ it = App (fn, left :: args); meta = Meta.with_surface_form "pipe" meta }
   | Surface_ast.Handle (body, ret, ops) ->
       let lower_op (op : Surface_ast.op_clause) =
-        let* params = map_results lower_pat op.oparams in
+        let* params = map_results (lower_pat_at ~quote_depth) op.oparams in
         let* obody = lower_expr_node ~quote_depth op.obody in
         Ok
           Kernel.
             { op = kernel_gref op.operation; params; resume = op.oresume; obody; ometa = op.ometa }
       in
       let* body = lower_expr_node ~quote_depth body in
-      let* rbinder = lower_pat ret.rbinder in
+      let* rbinder = lower_pat_at ~quote_depth ret.rbinder in
       let* rbody = lower_expr_node ~quote_depth ret.rbody in
       let* ops = map_results lower_op ops in
       let ret = Kernel.{ rbinder; rbody; rmeta = ret.rmeta } in
@@ -393,8 +405,8 @@ and lower_block ~quote_depth block_meta = function
           "non-recursive local bindings cannot use function shorthand"
       else
         let* binder =
-          lower_irrefutable_pat ~code:"E0206" ~message:"`let` binders must be irrefutable patterns"
-            binder
+          lower_irrefutable_pat ~quote_depth ~code:"E0206"
+            ~message:"`let` binders must be irrefutable patterns" binder
         in
         let* value = lower_expr_node ~quote_depth value in
         let* meta = generated_meta ~form:"let" item_meta body.meta in
@@ -406,7 +418,7 @@ and lower_block ~quote_depth block_meta = function
 and lower_recursive_let ~quote_depth ~item_meta (binder : Surface_ast.pat) params value body =
   match binder.it with
   | Surface_ast.PBind name ->
-      let* params = lower_lambda_params params in
+      let* params = lower_lambda_params ~quote_depth params in
       let* value = lower_expr_node ~quote_depth value in
       let* lambda_meta = generated_meta ~form:"let-rec-fn" binder.meta value.meta in
       let lambda_meta =
@@ -425,9 +437,10 @@ and lower_recursive_let ~quote_depth ~item_meta (binder : Surface_ast.pat) param
 
 (** [lower_expr expr] locally lowers a surface expression to existing kernel forms without resolving
     store names. Handler operation intent and staged quote payloads are preserved; a top-level
-    unquote fails with E0204. It also returns span-bearing diagnostics for recovery holes,
-    unsupported later-slice forms, malformed recursive bindings, empty blocks, final local lets, or
-    missing spans needed by generated sequence nodes. *)
+    unquote fails with E0204, and a labeled pattern in quoted surface syntax fails with E1237. It
+    also returns span-bearing diagnostics for recovery holes, unsupported later-slice forms,
+    malformed recursive bindings, empty blocks, final local lets, or missing spans needed by
+    generated sequence nodes. *)
 let lower_expr expr = lower_expr_node expr
 
 module String_set = Set.Make (String)

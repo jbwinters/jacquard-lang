@@ -136,6 +136,16 @@ labels fail at the constructor-pattern boundary. Positional and labeled fields c
   error[E1220]
   exit:1
 
+Labels are surface elaboration metadata, so they cannot enter a quoted kernel payload. Positional
+constructor patterns remain available inside quotes.
+
+  $ cat > labeled-quoted.jac <<'EOF'
+  > quote { match packet { | Packet(right: value) -> value } }
+  > EOF
+  $ jac check labeled-quoted.jac > quoted.out 2>&1; status=$?; grep -o 'error\[E1237\]' quoted.out; echo "exit:$status"
+  error[E1237]
+  exit:1
+
 The surface formatter preserves trivia, applies B1/B5, and is idempotent.
 
   $ cat > format.jac <<'EOF'

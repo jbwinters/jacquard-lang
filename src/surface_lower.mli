@@ -20,9 +20,11 @@ val lower_expr : Surface_ast.expr -> (Kernel.expr, Diag.t list) result
     left operand as the first argument of a call. Blocks become local [Let] chains, with bare
     non-final expressions bound to [PWild], while [let rec] shorthand becomes a variable-bound
     [Lam]. Handlers preserve named/hashed operation intent and quote bodies become pre-resolution
-    kernel forms with depth-aware unquote splices. Unquote outside quote is E0204. Lambda parameters
-    and nonrecursive let binders retain E0205/E0206 irrefutability checks. Recovery holes, malformed
-    local bindings, and spanless generated nodes are diagnostics. *)
+    kernel forms with depth-aware unquote splices. Unquote outside quote is E0204, and labeled
+    patterns inside quoted surface syntax are E1237 because their labels have no semantic quoted
+    carrier. Lambda parameters and nonrecursive let binders retain E0205/E0206 irrefutability
+    checks. Recovery holes, malformed local bindings, and spanless generated nodes are diagnostics.
+*)
 
 val free_names : Kernel.expr -> String_set.t
 (** Return unresolved term names read by an expression, excluding pattern/let/lambda binders and
