@@ -1,14 +1,14 @@
 # Jacquard Surface Syntax — Design and Implemented Charter
 
-Companion to the kernel spec, stdlib design, testing framework, package manager
-CLI, and the native compilation plan. This document decides whether Jacquard
-gets a human-facing syntax, what it optimizes for, and what it looks like,
-form by form, with the desugaring of each.
+Companion to the kernel spec, stdlib design, testing framework, and native
+compilation plan. This document records why Jacquard has a human-facing syntax,
+what it optimizes for, and what it looks like, form by form, with the
+desugaring of each.
 
-Short version: yes, after task 74, printer-first, delimiter-based, and one
-infix operator total. Executable display examples migrate to this grammar and
-become doctests when it lands; deliberately schematic snippets stay labeled
-as pseudocode rather than being claimed as compilable source.
+Short version: the printer-first, delimiter-based surface with one infix
+operator ships. Executable display examples have migrated to this grammar;
+fences labeled as doctests run in CI, while deliberately schematic snippets
+stay labeled as pseudocode rather than being claimed as compilable source.
 
 Draft 0.2 folds in the first field feedback: two independent implementations
 translated an existing kernel-level program plus the full demo corpus, and
@@ -269,9 +269,10 @@ critical path; syntax work before 74 stabilizes would compete for the same
 attention.
 
 One compounding payoff worth naming: the display notation used throughout the
-stdlib, testing, and package manager docs is the starting point for the real
-grammar. Phase S3 migrates every executable example to its canonical spelling
-and makes it a doctest; non-executable type sketches are marked explicitly.
+stdlib, testing, and future package-management designs was the starting point
+for the real grammar. Phase S3 migrated executable examples to canonical
+spelling and made selected examples doctests; non-executable type sketches are
+marked explicitly.
 
 ## 2. The inversion that drives the design
 

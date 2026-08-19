@@ -8,9 +8,9 @@ project shape from file names alone.
 
 - `../README.md`: fresh-clone setup, common commands, demos, CI, and repo map.
 - `../AGENTS.md`: operating rules for future agents.
-- `SKILL.md`: the whole language in one file for coding agents — kernel forms,
-  rows and capabilities, Dist, code-as-data, Warp, CLI, style, and gotchas.
-  (Also discoverable as a project skill via `docs/SKILL.md`.)
+- `SKILL.md`: standalone language and tool guide for coding agents — kernel
+  forms, rows and capabilities, Dist, code-as-data, Warp, CLI, style, and
+  gotchas. (Also discoverable as a project skill via `docs/SKILL.md`.)
 - `tutorial.md`: runnable examples from literals through hashing and tooling.
 - `../demos/README.md`: demo catalog and what each demo proves.
 - `surface-syntax.md`: public `.jac` authoring syntax and its projection onto
@@ -26,10 +26,12 @@ project shape from file names alone.
 
 - `whitepaper.tex`: historical initial design thesis, motivation, risks, and
   related work; its roadmap and implementation-status sections are outdated.
-- `ast.md`: kernel AST draft and metadata/hash contract.
-- `../spec/jacquard-kernel-ast-m0.md`: kernel AST source-of-truth spec.
+- `ast.md`: implemented kernel AST contract with retained design reasoning.
+- `../spec/jacquard-kernel-ast-m0.md`: implemented kernel AST source-of-truth
+  specification.
 - `../spec/serialization.md`: canonical byte serialization and hashing.
-- `development-plan.md`: original task plan and milestone discipline.
+- `development-plan.md`: completed historical task plan and milestone
+  discipline; not the current backlog.
 - `concurrency.md`: phase-zero pure parallel hints, the staged
   structured-concurrency design, and SC.17 transitive cancellation semantics.
 

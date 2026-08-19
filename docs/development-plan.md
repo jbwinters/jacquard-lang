@@ -1,4 +1,10 @@
-# Jacquard Development Plan — M0 through M4
+# Jacquard Development Plan — M0 through M4 (Completed, Historical)
+
+> **Status:** This original implementation plan is complete and retained as a
+> design and sequencing record. Its unchecked boxes describe the acceptance
+> criteria as originally written; they are not the current task backlog. For
+> the shipped boundary, use `release/0.2/`; use Task Master only when the owner
+> explicitly activates it for current work.
 
 Version 0.1, July 2026. Companion to `jacquard-kernel-ast-m0.md` (the spec) and the whitepaper.
 Audience: a junior engineer implementing, plus the owner making the flagged decisions.
@@ -7,9 +13,10 @@ Sizes: S is a day or less, M is 2 to 4 days, L is 1 to 2 weeks. Estimates assume
 engineer, OCaml-competent but new to language implementation. Honest total: roughly
 60 to 80 working days, about four months solo, before the M4 demos.
 
-How to run this plan: work strictly in phase order, tasks within a phase in numbered
-order unless marked parallel-safe. Every milestone boundary is a review gate with a
-runnable demo. Nothing merges without its definition-of-done checklist passing in CI.
+The original execution rule was to work strictly in phase order, with tasks
+inside a phase completed in numbered order unless marked parallel-safe. Every
+milestone boundary was a review gate with a runnable demo, and nothing merged
+without its definition-of-done checklist passing in CI.
 
 ---
 

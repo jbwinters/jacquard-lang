@@ -1,10 +1,16 @@
-# Warp — The Jacquard Testing Framework, Design Draft 0.1
+# Warp — The Jacquard Testing Framework, Design and Implemented Reference
 
-Companion to the stdlib design; assumes its rings, conventions, and notation. "Warp"
-is the working title only (the warp is the fixed set of threads the jacquard weaves
-through, which is what a test suite is to a program). The library names themselves
-live under `test.*` and `check.*`, because the stdlib's first principle says
-predictable names beat clever ones, and that principle applies to its own tooling.
+Status: Warp ships in Jacquard 0.2 with typed discovery, hermetic/world lanes,
+seeded and exhaustive properties, schedule exploration, cache, coverage, and
+relational cases. Historical phasing in section 11 remains as the design
+record, and statements explicitly marked as future work remain non-claims.
+
+Companion to the stdlib design; assumes its rings, conventions, and notation.
+"Warp" is the shipped framework name (the warp is the fixed set of threads the
+jacquard weaves through, which is what a test suite is to a program). The
+library names themselves live under `test.*` and `check.*`, because the
+stdlib's first principle says predictable names beat clever ones, and that
+principle applies to its own tooling.
 
 The framework has three unfair advantages, all inherited rather than built. Rows
 prove hermeticity, so the checker sorts unit tests from integration tests and makes

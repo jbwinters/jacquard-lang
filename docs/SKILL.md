@@ -106,6 +106,16 @@ jac replay TRACE.jqd PROGRAM.jqd --to 12
 jac replay TRACE.jqd PROGRAM.jqd --fork '4=(response 503 "down")'
 jac tiers PROGRAM.jac
 
+# Audit-chain and governed Workspace review tools.
+jac audit genesis
+jac audit append AUDIT_LOG.audit AUDIT_ENTRY.jqd --previous HASH
+jac governance check WORKSPACE.jac --output-format json-v1
+jac governance verify-log AUDIT_LOG.audit --head HASH
+jac governance verify-run RUN_BUNDLE.jqd
+jac governance reconcile RECONCILIATION_BUNDLE.jqd
+jac governance explain PROPOSAL_ID --bundle RECONCILIATION_BUNDLE.jqd
+jac why-effect Net --source WORKSPACE.jac --output-format json-v1
+
 # Native AOT accepts public surface input directly.
 jac build PROGRAM.jac -o program
 jac export PROGRAM.jac -o PROGRAM.jqd  # explicit evidence/debug carrier only
@@ -147,6 +157,10 @@ Grant variation runs exactly twice with no extra `--allow`: one live
 It compares only ordered rendered result values, not routed events, Console
 output, audits, calls, costs, latency, or external consequences. Forwarded,
 mixed read/write, unsupported, and unknown effects are usage errors.
+The `audit` commands append canonical hash-chained entries and publish their
+heads. The `governance` and `why-effect` commands verify frozen Workspace v0
+artifacts or conservatively analyze declaration-only source; they do not
+execute that source or turn review evidence into host authorization.
 
 ## Surface Syntax
 
@@ -169,9 +183,9 @@ Names follow these rules:
 - Reals are floating point. Text is UTF-8 and indexed by codepoint, not
   grapheme cluster.
 
-Reserved words are `type`, `effect`, `fn`, `let`, `rec`, `match`, `handle`,
-`return`, `resume`, `quote`, `unquote`, `if`, `then`, `else`, `as`, `where`,
-`forall`, and `jqd`.
+Reserved words are `type`, `effect`, `once`, `multi`, `fn`, `let`, `rec`,
+`match`, `handle`, `return`, `resume`, `quote`, `unquote`, `if`, `then`,
+`else`, `as`, `where`, `forall`, and `jqd`.
 
 ### Values, Calls, And Definitions
 
@@ -461,7 +475,11 @@ top-item    := signature | definition | type-decl | effect-decl | expression
 signature   := name ":" type
 definition  := name ["(" patterns? ")"] "=" expression
 type-decl   := "type" Type type-vars? "=" ("|" constructor)+
-effect-decl := "effect" Effect type-vars? "where" "{" op-signature* "}"
+effect-decl := mode "effect" Effect type-vars? "where" "{" uniform-op-signature+ "}"
+| "effect" Effect type-vars? "where" "{" mode-op-signature+ "}"
+uniform-op-signature := name ":" "(" types? ")" "->" type
+mode-op-signature := mode name ":" "(" types? ")" "->" type
+mode        := "once" | "multi"
 
 expression  := call ("|>" call)*
 call        := primary ("(" expressions? ")")*
@@ -490,9 +508,13 @@ continuation rather than item separation.
 
 ## Capabilities And Root Authority
 
-World effects are `Console`, `Clock`, `Fs`, `Net`, `Eval`, and `Infer`.
-`Dist` is pure inference rather than world authority. Root handlers exist only
-when explicitly granted:
+The complete `--allow` vocabulary is `clock`, `console`, `dist`, `eval`, `fs`,
+`infer`, `net`, and `secret`. `Console`, `Clock`, `Fs`, and `Net` describe the
+ordinary external world; `Eval` is dynamic-code authority, `Infer` delegates to
+an unverified model boundary, `Secret` uses the environment adapter, and `Dist`
+installs seeded sampling. `Dist` is computationally pure rather than outside-
+world authority, but selecting its root sampling handler is still an explicit
+grant. These root handlers exist only when granted:
 
 ```sh
 jac check agent.jac --print-sigs
@@ -511,6 +533,8 @@ Rules to rely on:
   audits writes and network actions, and performs no audited world mutation.
 - `--allow fs` currently grants the whole filesystem. Authority is effect-level,
   not path- or domain-level object capability.
+- The interpreter's `--allow net` handler is a deterministic stub. Scripted and
+  recording handlers ship, but a real socket/HTTP adapter does not.
 - Evaluated code runs with root grants, not under an interposed attenuation
   handler. Audit its inferred requirements and grants accordingly.
 - Top-level rows are closed. When an API expects an open-row thunk, eta-expand
@@ -519,6 +543,11 @@ Rules to rely on:
 Never infer authority from a hand-written manifest or comment; use the checked
 row. Never add a grant merely to silence a refusal without reviewing why the
 row contains that effect.
+
+`Approval`, `Audit`, `Judge`, `Workspace`, and `Channel` have implemented
+language or embedding boundaries but are not ordinary `--allow` root names.
+In particular, a governance verdict is evidence consumed by trusted host code;
+it does not install ambient authority.
 
 ## Discrete Probability With Dist
 
@@ -699,8 +728,9 @@ diagnostics, not permissive fallbacks.
 kernel input. It uses the same parse/lower/resolution path as check and hash,
 emits C for the reachable program, links the Jacquard runtime, and asks clang
 or gcc to compile with optimization and LTO. It does not generate a persistent
-bootstrap twin. Native and interpreted behavior are expected to be
-byte-identical for stdout, stderr, and exit status.
+bootstrap twin. For programs within the documented native subset, native and
+interpreted behavior are expected to be byte-identical for stdout, stderr, and
+exit status.
 
 ```sh
 # Installed releases discover the runtime automatically. In a checkout only:
@@ -721,10 +751,12 @@ Materialize stdin or other non-seekable input before export.
 
 The backend supports deep handlers with both reusable `multi` continuations and
 affine `once` resumptions, including the E0906 repeated-resume backstop. It also
-supports Dist, quotes, splices, and structural Code operations. Dynamic `eval`
-is interpreter-only and reports
-E1102 when compiled. `--dry-run` and `--infer-cache` are interpreter tooling
-and compiled binaries refuse them. A C toolchain is required. Deep non-tail
+supports Dist, quotes, splices, and structural Code operations. Its implemented
+root grants are `console`, `clock`, `fs`, `dist`, and `infer`. Dynamic `eval`,
+interpreter root Task scheduling, and typed Channels do not compile as native
+execution features; `eval` reports E1102, while unsupported native grants are
+refused with E1103. `--dry-run` and `--infer-cache` are interpreter tooling and
+compiled binaries refuse them. A C toolchain is required. Deep non-tail
 recursion uses the configured program stack; set `JACQUARD_STACK_MB` if needed.
 Compiled units cache under `.jacquard-native/` by content hash.
 
@@ -776,7 +808,15 @@ Do not invent new kernel forms for surface sugar.
 - No null, records, modules/imports, guards, or-patterns, custom operators,
   implicit traits/typeclasses, or generated field accessors. Explicit
   dictionaries are ordinary values.
-- No concurrency or enforced effect membranes in the shipped language.
+- The interpreter ships deterministic structured Tasks, cooperative
+  cancellation, bounded schedule exploration/replay, and scoped typed
+  Channels. It does not ship preemption, host threads, asynchronous host I/O,
+  native Task scheduling, native Channels, select/timeouts, actors, or
+  supervision.
+- The frozen Workspace v0 governed membrane ships as an evidence-backed
+  research reference. It is not a general isolation mechanism, production
+  authorization system, or operating-system sandbox; trusted host code still
+  owns identity, persistence, live drivers, and final execution.
 - Probability is finite/discrete: no continuous distributions or gradients.
 - Quote/eval is untyped staging; there is no typed staging or macro expander.
 - No Jacquard package manager, dependency solver, registry trust model, or
