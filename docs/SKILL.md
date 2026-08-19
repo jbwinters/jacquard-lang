@@ -895,6 +895,11 @@ Do not invent new kernel forms for surface sugar.
   Channels. It does not ship preemption, host threads, asynchronous host I/O,
   native Task scheduling, native Channels, select/timeouts, actors, or
   supervision.
+- HB.0 documents a future language-neutral host ownership and trust boundary,
+  but no foreign-host ABI, process protocol, adapter, or HTTP server ships.
+  Internal evaluator-capture and host-readiness OCaml APIs are not supported
+  embedding contracts; consume only a future versioned protocol and its
+  conformance fixtures.
 - The frozen Workspace v0 governed membrane ships as an evidence-backed
   research reference. It is not a general isolation mechanism, production
   authorization system, or operating-system sandbox; trusted host code still

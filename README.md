@@ -710,6 +710,9 @@ proofs also do not ship. World grants remain coarse. See
 `docs/release/0.2/LIMITS.md` for the current integrated boundary,
 `docs/release/0.1/LIMITS.md` for the historical Core 0.1 boundary, and
 `docs/release/structured-concurrency/LIMITS.md` for the successor C0-C3 boundary.
+`docs/host-boundary.md` freezes the ownership and trust model for future
+language-neutral integration, but no host ABI, process protocol, adapter, or
+HTTP server ships in this repository today.
 The deterministic Workspace v0 governance boundary is separately advertised
 as an evidence-backed research reference implementation, not as a sandbox or
 production security system; its exact claim and trusted-host limits are in
