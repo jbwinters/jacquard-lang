@@ -92,7 +92,7 @@ malformed source, path, or host-message byte in a string field is replaced with 
 | E0308 | constructor declaration has ambiguous duplicate labels at labeled-pattern use | `Pair(left: x)` when `left` is declared twice |
 | E0309 | callee has no usable explicit named-call ABI | `local(value: 1)` for a local function, or `plain(value: 1)` for an unlabeled top-level term |
 | E0310 | named call selects an unknown label | `resize(image: img, size: 2)` when the declared label is `scale` |
-| E0311 | named call repeats or overlaps one argument slot | `choose(left: 1, left: 2)` or `resize(img, image: other)` |
+| E0311 | named call repeats or overlaps one argument slot | `choose(left: 1, left: 2)`, or `choose(1, left: 2)` when `choose(left: x, right: y)` declares `left` first |
 | E0312 | named call does not fill the exact arity | `choose(left: 1)` when both `left` and `right` are required |
 | E0313 | declaration has an invalid explicit named-call ABI | `bad(label: (x, y)) = x` or repeated parameter labels |
 | E0314 | constructor named-call schema is ambiguous or malformed | using labels on a constructor with duplicate labels or an unlabeled field after a labeled field |
