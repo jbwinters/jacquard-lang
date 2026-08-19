@@ -32,6 +32,9 @@ project shape from file names alone.
 - `../spec/serialization.md`: canonical byte serialization and hashing.
 - `development-plan.md`: completed historical task plan and milestone
   discipline; not the current backlog.
+- `host-boundary.md`: HB.0 transport-neutral ownership, trust, containment,
+  lifecycle, repository, and limitation contract for future integrations. No
+  foreign-host ABI or adapter ships from that design document.
 - `concurrency.md`: phase-zero pure parallel hints, the staged
   structured-concurrency design, and SC.17 transitive cancellation semantics.
 
