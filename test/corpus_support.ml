@@ -404,7 +404,14 @@ let diag_cases : (string * string * string list option) list =
       None );
   ]
 
-let diag_surface_cases = [ ("eta-positive", "condition = True\nbool.and-then(True, condition)\n") ]
+let diag_surface_cases =
+  [
+    ("eta-positive", "condition = True\nbool.and-then(True, condition)\n");
+    ("named-bool-warning", "choose-flag(flag: value) = value\nchoose-flag(True)\n");
+    ( "named-repeated-type-warning",
+      "sum-pair : (Int, Int) ->{} Int\nsum-pair(left: x, right: y) = add(x, y)\nsum-pair(1, 2)\n" );
+  ]
+
 let diag_strict_recovery_cases = [ ("strict-recovery", "fixture-hole") ]
 
 (** Render the golden diagnostic lines: [name | rendered-diagnostic]. *)
@@ -473,6 +480,7 @@ let diag_golden_lines ~prelude_dir : (string list, Diag.t list) result =
           let* resolved = Resolve.resolve (Store.names_view store) top in
           match Check.check_top ctx resolved with
           | Error ds -> Ok (render ds)
+          | Ok { Check.warnings = _ :: _ as warnings; _ } -> Ok (render warnings)
           | Ok _ -> (
               match resolved with
               | Kernel.Decl declaration ->

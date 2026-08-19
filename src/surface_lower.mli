@@ -21,7 +21,8 @@ val lower_expr : Surface_ast.expr -> (Kernel.expr, Diag.t list) result
     non-final expressions bound to [PWild], while [let rec] shorthand becomes a variable-bound
     [Lam]. Handlers preserve named/hashed operation intent and quote bodies become pre-resolution
     kernel forms with depth-aware unquote splices. Unquote outside quote is E0204, and labeled
-    patterns inside quoted surface syntax are E1237 because their labels have no semantic quoted
+    patterns inside quoted surface syntax are E1237, while named calls anywhere inside a surface
+    quote (including a live unquote) are E1238 because neither label kind has a durable quoted
     carrier. Lambda parameters and nonrecursive let binders retain E0205/E0206 irrefutability
     checks. Recovery holes, malformed local bindings, and spanless generated nodes are diagnostics.
 *)

@@ -518,30 +518,57 @@ and parse_call state ~allow_newlines =
     match (current state).Surface_lex.token with
     | Surface_lex.LParen ->
         let opening = advance state in
-        let args, closing = within_recovery_container state (fun () -> parse_expr_list state) in
+        let args, closing, labeled =
+          within_recovery_container state (fun () -> parse_call_argument_list state)
+        in
         let meta = meta_with_span (span_between opening closing) in
         let meta = merged_meta fn.Surface_ast.meta meta in
+        let meta = if labeled then Meta.with_surface_form "named-call" meta else meta in
         postfix Surface_ast.{ it = Call (fn, args); meta }
     | _ -> fn
   in
   postfix fn
 
-and parse_expr_list state =
+and parse_call_argument_list state =
   skip_list_space state;
   match (current state).Surface_lex.token with
-  | Surface_lex.RParen -> ([], advance state)
+  | Surface_lex.RParen -> ([], advance state, false)
   | _ ->
+      let saw_label = ref false in
+      let parse_argument () =
+        match pattern_label_ahead state with
+        | None ->
+            if !saw_label then
+              report state (current state)
+                "a positional call argument cannot follow a `label: expression` argument";
+            parse_expr state ~allow_newlines:true
+        | Some label ->
+            saw_label := true;
+            let label_token = advance state in
+            ignore (advance state);
+            skip_continuation state;
+            let expression : Surface_ast.expr = parse_expr state ~allow_newlines:true in
+            let field_meta = meta_from_token_to_meta label_token expression.Surface_ast.meta in
+            Surface_ast.
+              {
+                expression with
+                meta =
+                  expression.meta
+                  |> Meta.with_surface_call_label label
+                  |> Meta.with_surface_container "call-argument" field_meta;
+              }
+      in
       let rec loop acc =
-        let expression = parse_expr state ~allow_newlines:true in
+        let expression = parse_argument () in
         skip_list_space state;
         match (current state).Surface_lex.token with
         | Surface_lex.Comma ->
             ignore (advance state);
             skip_list_space state;
             if (current state).Surface_lex.token = Surface_lex.RParen then
-              (List.rev (expression :: acc), advance state)
+              (List.rev (expression :: acc), advance state, !saw_label)
             else loop (expression :: acc)
-        | Surface_lex.RParen -> (List.rev (expression :: acc), advance state)
+        | Surface_lex.RParen -> (List.rev (expression :: acc), advance state, !saw_label)
         | _ ->
             let token = current state in
             report state token
@@ -552,7 +579,7 @@ and parse_expr_list state =
               | Surface_lex.RParen -> advance state
               | _ -> current state
             in
-            (List.rev (expression :: acc), closing)
+            (List.rev (expression :: acc), closing, !saw_label)
       in
       loop []
 
@@ -935,15 +962,42 @@ and parse_fn state ~allow_newlines keyword =
   in
   Surface_ast.{ it = Fn (params, body); meta }
 
-and parse_pattern_list state _opening =
+and parse_pattern_list ?(callable = false) state _opening =
   skip_list_space state;
   match (current state).Surface_lex.token with
   | Surface_lex.RParen ->
       let closing = advance state in
       ([], closing)
   | _ ->
+      let saw_label = ref false in
+      let parse_item () =
+        if not callable then parse_pattern state ~allow_newlines:true
+        else
+          match pattern_label_ahead state with
+          | None ->
+              if !saw_label then
+                report state (current state)
+                  "an unlabeled callable parameter cannot follow an explicit `label: binder` \
+                   parameter";
+              parse_pattern state ~allow_newlines:true
+          | Some label ->
+              saw_label := true;
+              let label_token = advance state in
+              ignore (advance state);
+              skip_continuation state;
+              let pattern : Surface_ast.pat = parse_pattern state ~allow_newlines:true in
+              let field_meta = meta_from_token_to_meta label_token pattern.Surface_ast.meta in
+              Surface_ast.
+                {
+                  pattern with
+                  meta =
+                    pattern.meta
+                    |> Meta.with_surface_call_label label
+                    |> Meta.with_surface_container "call-parameter" field_meta;
+                }
+      in
       let rec loop acc =
-        let pattern = parse_pattern state ~allow_newlines:true in
+        let pattern = parse_item () in
         skip_list_space state;
         match (current state).Surface_lex.token with
         | Surface_lex.Comma ->
@@ -2153,7 +2207,7 @@ let parse_definition state name_token name equation =
     if equation then
       match expect state Surface_lex.LParen "`(` after the definition name" with
       | Some opening ->
-          let params, closing = parse_pattern_list state opening in
+          let params, closing = parse_pattern_list ~callable:true state opening in
           (params, Some (meta_with_span (span_between opening closing)))
       | None -> ([], None)
     else ([], None)
@@ -2363,8 +2417,33 @@ let parse_operation_types state =
         ([], Some (meta_with_span (span_between opening closing)))
       end
       else
+        let saw_label = ref false in
+        let parse_parameter () =
+          match pattern_label_ahead state with
+          | None ->
+              if !saw_label then
+                report state (current state)
+                  "an unlabeled operation parameter cannot follow an explicit `label: Type` \
+                   parameter";
+              parse_type state ~allow_newlines:true
+          | Some label ->
+              saw_label := true;
+              let label_token = advance state in
+              ignore (advance state);
+              skip_continuation state;
+              let ty : Surface_ast.ty = parse_type state ~allow_newlines:true in
+              let field_meta = meta_from_token_to_meta label_token ty.Surface_ast.meta in
+              Surface_ast.
+                {
+                  ty with
+                  meta =
+                    ty.meta
+                    |> Meta.with_surface_call_label label
+                    |> Meta.with_surface_container "call-parameter" field_meta;
+                }
+        in
         let rec loop acc =
-          let ty = parse_type state ~allow_newlines:true in
+          let ty = parse_parameter () in
           skip_list_space state;
           match (current state).Surface_lex.token with
           | Surface_lex.Comma ->
@@ -2856,7 +2935,9 @@ module Trivia_ownership = struct
       | Ann (subject, annotation) -> expr (depth + 1) subject @ ty (depth + 1) annotation
     in
     container "block" node.meta @ container "params" node.meta @ container "paren" node.meta
-    @ container "list" node.meta @ slot Expr node.meta @ children
+    @ container "list" node.meta
+    @ container "call-argument" node.meta
+    @ slot Expr node.meta @ children
 
   and block_item depth = function
     | Surface_ast.Expr expression -> expr depth expression
@@ -2884,7 +2965,9 @@ module Trivia_ownership = struct
       | PCon (_, args) | PTuple args -> List.concat_map (pat (depth + 1)) args
       | PAs (inner, _) -> pat (depth + 1) inner
     in
-    container "pattern-field" node.meta @ slot Pat node.meta @ children
+    container "pattern-field" node.meta
+    @ container "call-parameter" node.meta
+    @ slot Pat node.meta @ children
 
   and ty depth (node : Surface_ast.ty) =
     let children =
@@ -2898,7 +2981,9 @@ module Trivia_ownership = struct
       | TyTuple items -> List.concat_map (ty (depth + 1)) items
       | TyForall (tvars, rvars, body) -> forall_slots tvars rvars node.meta @ ty (depth + 1) body
     in
-    container "params" node.meta @ container "forall" node.meta @ slot Ty node.meta @ children
+    container "params" node.meta @ container "forall" node.meta
+    @ container "call-parameter" node.meta
+    @ slot Ty node.meta @ children
 
   let field depth (field : Surface_ast.field) = slot Field field.meta @ ty (depth + 1) field.ty
 
@@ -3043,7 +3128,8 @@ module Trivia_ownership = struct
   let is_structured_owner slot =
     match slot.role with
     | Container kind ->
-        String.equal kind "pattern-field"
+        String.equal kind "pattern-field" || String.equal kind "call-argument"
+        || String.equal kind "call-parameter"
         || String.starts_with ~prefix:"row-" kind
         || String.starts_with ~prefix:"forall-" kind
     | _ -> false
@@ -3209,6 +3295,8 @@ module Trivia_ownership = struct
     |> apply_container additions "params"
     |> apply_container additions "block" |> apply_container additions "paren"
     |> apply_container additions "list"
+    |> apply_container additions "call-argument"
+    |> apply_container additions "call-parameter"
     |> apply_container additions "forall"
 
   let rec map_expr additions (expression : Surface_ast.expr) =
@@ -3289,7 +3377,10 @@ module Trivia_ownership = struct
     Surface_ast.
       {
         it;
-        meta = pattern.meta |> apply additions Pat |> apply_container additions "pattern-field";
+        meta =
+          pattern.meta |> apply additions Pat
+          |> apply_container additions "pattern-field"
+          |> apply_container additions "call-parameter";
       }
 
   and map_ty additions (annotation : Surface_ast.ty) =

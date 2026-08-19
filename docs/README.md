@@ -104,9 +104,14 @@ Read these together when reviewing the historical 0.1 candidate boundary:
 ## Post-0.1 Surface Syntax Evidence
 
 - `release/surface-syntax/DECISION.md`: SS.21 advertise/not-advertise decision,
-  L1-L7 status, D34-D40 conformance, caveats, and reproduction commands.
+  L1-L7 status, D34-D42/D75-D76 conformance, caveats, and reproduction
+  commands.
 - `release/surface-syntax/FOLLOWUPS.md`: durable D36/D38/D39 and Tier-F
   follow-up scope outside the surface release gate.
+- `release/named-call-arguments/DECISION.md`: SX.23 direct named-call contract,
+  hash-bound companion ABI, compatibility boundary, and explicit non-claims.
+- `release/named-call-arguments/EVIDENCE.md`: parser/resolver/store/hash/native
+  evidence and the current test inventory for named calls.
 - `release/surface-syntax/MANIFEST.sha256`: historical surface-syntax evidence
   integrity set, validated by the surface manifest checker. Successor milestones
   publish separate reconstructible overlays rather than extending this set.

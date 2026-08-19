@@ -88,6 +88,12 @@ redundant-clause | redundant-clause.jqd:1:57-85: warning[W0801]: This match clau
 eta-positive | eta-positive.jac:2:21-30: error[E0807]: A computation was used where a thunk is required
   Cause: this position expects a thunk, but `condition` is a bare reference; wrap it in `fn () -> ...`
   Next step: Wrap the reference in `fn () -> ...` so the computation is delayed.
+named-bool-warning | named-bool-warning.jac:2:13-17: warning[W1206]: Positional boolean argument is difficult to review
+  Cause: Argument 1 is the Bool constructor `True`; the behavior it selects is not visible from its position.
+  Next step: Use the callable's explicit named argument, or replace a behavioral Bool with a sum type such as `type Mode = | Live | DryRun`.
+named-repeated-type-warning | named-repeated-type-warning.jac:3:1-15: warning[W1207]: Same-typed positional arguments are difficult to distinguish
+  Cause: Parameters 1 through 2 all have type int, so a reordered call can still typecheck.
+  Next step: Use the callable's explicit labels for the ambiguous suffix, or use a purpose-specific sum type such as `type Mode = | Live | DryRun`.
 strict-recovery | error[E1202]: Recovered syntax cannot cross this semantic boundary.
   Cause: Recovery holes are not valid input to the strict type checker.
   Next step: Fix the reported syntax damage before checking, hashing, storing, or running it.

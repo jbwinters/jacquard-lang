@@ -57,7 +57,7 @@ let test_one_page_grammar_snapshot () =
   Alcotest.(check bool) "L7 grammar stays within 100 nonblank lines" true (List.length lines <= 100);
   Alcotest.(check string)
     "L7 grammar snapshot (review docs/surface-syntax.md before updating)"
-    "e0793e772b31cf5c2840ab00391f540c4fae7b067904a2687abf0a7273aa6e2d"
+    "1c34c8e7768c18e7787a3caeb86be860bac98ab6eb88a22549d5c072e5e70aac"
     (Hash.to_hex (Hash.of_string grammar))
 
 let format_surface ?width path source =
@@ -1186,6 +1186,17 @@ let validate_release_docs ~decision ~followups ~index =
          `.jac`/`.jqd` hash parity while bootstrap absence remains legacy `Multi`.";
         "none";
       ];
+      [
+        "D76";
+        "shipped";
+        "[named-call cases](../../../test/test_surface_named_calls.ml) and the [CLI \
+         transcript](../../../test/cli/named-args.t) pin explicit labels for direct top-level \
+         terms, constructors, and operations; positional-prefix/labeled-suffix exact arity; \
+         source-order evaluation; positional kernel/hash parity; store reopen/rename/conflict \
+         behavior; quote refusal; diagnostics; formatting; native parity; and advisory review \
+         warnings.";
+        "[named-call decision](../named-call-arguments/DECISION.md)";
+      ];
     ]
     [ "shipped"; "partial"; "adjusted" ];
   (match section "## Evidence Inventories" decision with
@@ -1492,6 +1503,7 @@ let decision_status_mutations =
     ("D40", "shipped", "adjusted");
     ("D41", "shipped", "adjusted");
     ("D42", "shipped", "adjusted");
+    ("D76", "shipped", "adjusted");
   ]
 
 let status_mutation_test (id, expected, replacement) =
@@ -1523,6 +1535,9 @@ let decision_semantic_mutations =
     ( "D42",
       "reject omission, duplication, conflicts, and partially annotated mixed effects",
       "accept omission, duplication, conflicts, and partially annotated mixed effects" );
+    ( "D76",
+      "positional-prefix/labeled-suffix exact arity; source-order evaluation",
+      "arbitrary positional/named mixing; declaration-order evaluation" );
   ]
 
 let law_semantic_mutations =

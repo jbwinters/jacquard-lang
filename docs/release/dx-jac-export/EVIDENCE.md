@@ -6,8 +6,8 @@ artifacts and are not retroactively updated by DX.2.
 
 ## Current inventory
 
-- Alcotest/QCheck cases: `869`
-- Cram transcript files: `58`
+- Alcotest/QCheck cases: `877`
+- Cram transcript files: `59`
 - Doctest examples: `28` across 8 documents
 
 The test count includes six DX.2 filesystem-boundary cases and six DX.5/DX.7
@@ -59,6 +59,10 @@ canonical divergence, and cache invalidation.
 RW.7 adds three compiled cases for exact concurrency-demo transcript invariance
 and direct/fail-fast transitive-cancellation sentinel safety. It extends the
 existing concurrency transcript and adds no cram or doctest entry.
+Task 171 adds one labeled-pattern contract case. SX.23 then adds six compiled
+named-call cases, two D76 decision-mutation cases, and one CLI transcript,
+producing the current `877 / 59 / 28` successor inventory without changing the
+historical DX.2 publication.
 
 ## Proved behavior
 

@@ -254,6 +254,16 @@ and pp_labeled_pat context lookup fmt (pattern : Kernel.pat) =
         (pp_pat context lookup) pattern;
       pp_trailing context field_meta fmt
 
+and pp_callable_pat context lookup fmt (pattern : Kernel.pat) =
+  match Meta.surface_call_label pattern.meta with
+  | None -> pp_pat context lookup fmt pattern
+  | Some label ->
+      let field_meta = Meta.surface_container "call-parameter" pattern.meta in
+      pp_leading context field_meta fmt;
+      Format.fprintf fmt "@[<hov 2>%a:@ %a@]" (pp_named Surface_name.Term) label
+        (pp_pat context lookup) pattern;
+      pp_trailing context field_meta fmt
+
 and pp_row context lookup fmt (row : Kernel.row) =
   let opening = owned "row-open" row.wmeta in
   let closing = owned "row-close" row.wmeta in
@@ -402,6 +412,16 @@ and pp_ty_atom context lookup fmt ty =
       Format.fprintf fmt "(%a)" (pp_ty context lookup) ty
   | _ -> pp_ty context lookup fmt ty
 
+and pp_callable_ty context lookup fmt (ty : Kernel.ty) =
+  match Meta.surface_call_label ty.meta with
+  | None -> pp_ty context lookup fmt ty
+  | Some label ->
+      let field_meta = Meta.surface_container "call-parameter" ty.meta in
+      pp_leading context field_meta fmt;
+      Format.fprintf fmt "@[<hov 2>%a:@ %a@]" (pp_named Surface_name.Term) label
+        (pp_ty context lookup) ty;
+      pp_trailing context field_meta fmt
+
 let quote_marker_base payload =
   let rec symbols acc (form : Form.t) =
     List.fold_left
@@ -489,6 +509,12 @@ let surface_quote_expr payload =
     | Ok expr -> Some (restore_quote_splices !splices expr)
 
 let rec pp_expr context lookup fmt (expr : Kernel.expr) =
+  match reordered_named_call expr with
+  | Some (fn, source_arguments) ->
+      pp_reordered_named_call context lookup fmt expr fn source_arguments
+  | None -> pp_expr_regular context lookup fmt expr
+
+and pp_expr_regular context lookup fmt (expr : Kernel.expr) =
   let block_meta = Meta.surface_container "block" expr.meta in
   let paren_meta = Meta.surface_container "paren" expr.meta in
   if context.trivia && (not (Meta.is_empty paren_meta)) && meta_has_comments paren_meta then
@@ -520,6 +546,45 @@ let rec pp_expr context lookup fmt (expr : Kernel.expr) =
     | Some _, _ | None, _ -> pp_kernel_expr context lookup fmt expr);
     match expr.it with Kernel.Let _ -> () | _ -> pp_trailing context expr.meta fmt
   end
+
+and reordered_named_call (expr : Kernel.expr) =
+  if Meta.surface_generated expr.meta <> Some "named-call-reordered" then None
+  else
+    let rec collect bindings (current : Kernel.expr) =
+      match current.it with
+      | Kernel.Let { isrec = false; binder = { it = Kernel.PVar name; _ }; value; body }
+        when bindings = [] || Meta.surface_generated current.meta = Some "named-call-argument-let"
+        ->
+          collect ((name, value) :: bindings) body
+      | Kernel.App (fn, arguments)
+        when Meta.surface_generated current.meta = Some "named-call-positional-app" ->
+          let bindings = List.rev bindings in
+          let names = List.map fst bindings in
+          let referenced =
+            List.filter_map
+              (fun argument ->
+                match argument.Kernel.it with Kernel.Var name -> Some name | _ -> None)
+              arguments
+          in
+          if
+            List.length referenced = List.length arguments
+            && List.sort String.compare referenced = List.sort String.compare names
+          then Some (fn, List.map snd bindings)
+          else None
+      | _ -> None
+    in
+    collect [] expr
+
+and pp_reordered_named_call context lookup fmt (expr : Kernel.expr) fn source_arguments =
+  pp_leading context expr.meta fmt;
+  (match (Meta.surface_form expr.meta, source_arguments) with
+  | Some "pipe", left :: arguments -> pp_pipe context lookup expr.meta fmt left fn arguments
+  | (Some _ | None), _ ->
+      Format.fprintf fmt "@[<hv 2>%a(%a" (pp_expr_atom context lookup) fn
+        (pp_comma_list ~inner_metas:[ expr.meta ] context (pp_call_argument context lookup))
+        source_arguments;
+      Format.fprintf fmt ")@]");
+  pp_trailing context expr.meta fmt
 
 and interpolation_text context lookup fn args =
   let is_text_join =
@@ -592,7 +657,7 @@ and pp_kernel_expr context lookup fmt (expr : Kernel.expr) =
       Format.fprintf fmt " ->@ %a@]" (pp_expr context lookup) body
   | Kernel.App (fn, args) ->
       Format.fprintf fmt "@[<hv 2>%a(%a" (pp_expr_atom context lookup) fn
-        (pp_comma_list ~inner_metas:[ expr.meta ] context (pp_expr context lookup))
+        (pp_comma_list ~inner_metas:[ expr.meta ] context (pp_call_argument context lookup))
         args;
       Format.fprintf fmt ")@]"
   | Kernel.Let _ -> pp_block context lookup fmt expr
@@ -699,7 +764,11 @@ and pp_list context lookup meta fmt items =
 
 and pp_pipe context lookup meta fmt left fn args =
   let rhs_meta = Meta.surface_container "pipe-rhs" meta in
-  let explicit_call = Meta.surface_form rhs_meta = Some "pipe-call" in
+  let explicit_call =
+    match Meta.surface_form rhs_meta with
+    | Some ("pipe-call" | "pipe-named-call") -> true
+    | Some _ | None -> false
+  in
   let pp_operator fmt () =
     if context.trivia && expression_has_trailing_comments left then Format.pp_force_newline fmt ();
     Format.pp_print_string fmt "|> ";
@@ -716,11 +785,21 @@ and pp_pipe context lookup meta fmt left fn args =
   | _ ->
       Format.fprintf fmt "@[<hv 2>%a@ %a%a(%a" (pp_pipe_left context lookup) left pp_operator ()
         (pp_expr_atom context lookup) fn
-        (pp_comma_list ~inner_metas:[ rhs_meta; meta ] context (pp_expr context lookup))
+        (pp_comma_list ~inner_metas:[ rhs_meta; meta ] context (pp_call_argument context lookup))
         args;
       Format.fprintf fmt ")";
       pp_trailing context rhs_meta fmt;
       Format.fprintf fmt "@]"
+
+and pp_call_argument context lookup fmt (argument : Kernel.expr) =
+  match Meta.surface_call_label argument.meta with
+  | None -> pp_expr context lookup fmt argument
+  | Some label ->
+      let field_meta = Meta.surface_container "call-argument" argument.meta in
+      pp_leading context field_meta fmt;
+      Format.fprintf fmt "@[<hov 2>%a:@ %a@]" (pp_named Surface_name.Term) label
+        (pp_expr context lookup) argument;
+      pp_trailing context field_meta fmt
 
 and pp_pipe_left context lookup fmt expr = pp_expr_atom context lookup fmt expr
 
@@ -959,7 +1038,7 @@ let pp_binding context lookup fmt (binding : Kernel.binding) =
         Format.fprintf fmt "@[<hv 2>%a" (pp_named Surface_name.Term) binding.bname;
         pp_leading context params_meta fmt;
         Format.fprintf fmt "(%a"
-          (pp_comma_list ~inner_metas:[ params_meta ] context (pp_pat context lookup))
+          (pp_comma_list ~inner_metas:[ params_meta ] context (pp_callable_pat context lookup))
           params;
         Format.fprintf fmt ")";
         pp_trailing context params_meta fmt;
@@ -1024,7 +1103,8 @@ let pp_operation ?inherited_mode context lookup fmt (operation : Kernel.opspec) 
   (* The signature box may already have broken after [:]. Padding the nested custom breaks keeps
      parameter types two columns inside [(], while [)] returns to the opening delimiter's column. *)
   Format.fprintf fmt "(%a"
-    (pp_comma_list ~break_padding:"  " ~inner_metas:[ params_meta ] context (pp_ty context lookup))
+    (pp_comma_list ~break_padding:"  " ~inner_metas:[ params_meta ] context
+       (pp_callable_ty context lookup))
     operation.op_params;
   Format.fprintf fmt ")";
   pp_trailing context params_meta fmt;

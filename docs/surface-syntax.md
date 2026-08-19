@@ -6,7 +6,8 @@ what it optimizes for, and what it looks like, form by form, with the
 desugaring of each.
 
 Short version: the printer-first, delimiter-based surface with one infix
-operator ships. Executable display examples have migrated to this grammar;
+operator, labeled constructor patterns, explicit operation modes, marked text,
+and direct named calls ship. Executable display examples have migrated to this grammar;
 fences labeled as doctests run in CI, while deliberately schematic snippets
 stay labeled as pseudocode rather than being claimed as compilable source.
 
@@ -25,8 +26,8 @@ roughly 1,900 lines written by two different models.
 Draft 0.2 supplied the reviewed design for the completed SS.0-SS.22
 implementation arc. This document now records both that design and the exact
 shipped boundary; it is not a claim that the whole surface grammar is stable or
-frozen. Decisions D27-D42 in section 10 remain the design record, with D36
-formally partial as described below. Any later revision must record and review
+frozen. Decisions D27-D42, D75, and D76 in section 10 remain the surface design
+record, with D36 formally partial as described below. Any later revision must record and review
 its decision change rather than quietly choosing different syntax.
 
 This work is post-0.1 and follows the completed native differential harness
@@ -40,6 +41,9 @@ and D39 completed in SS.22 as standard-library work without expanding the
 grammar. D36 generated accessors and D36 label validation remain separate
 follow-ups. The later explicit-dictionary decision ratifies ordinary `Eq`,
 `Ord`, `Show`, and `Num` values without adding syntax or changing lowering.
+SX.23 adds D76 direct named calls as another projection: labels elaborate to
+the existing positional `App`/`Let` forms, while a versioned hash-bound store
+companion preserves the external term and operation ABI across name changes.
 
 There is one explicit compatibility reservation in the generic pre-resolution form layer:
 `(surface-ref-v0 con name)` and `(surface-ref-v0 op name)`. Surface lowering uses these forms to
@@ -70,19 +74,19 @@ and the L7 grammar-growth tripwire.
 file          := seps? [top-item (seps top-item)*] seps?
 top-item      := signature | definition | type-decl | effect-decl | expr | raw-top
 signature     := term-name ":" cont type
-definition    := term-name ["(" patterns? ")"] "=" cont expr
+definition    := term-name ["(" ([term-name ":" cont] pattern ("," [term-name ":" cont] pattern)*)? ")"] "=" cont expr
 type-decl     := "type" type-name type-vars? "=" cont "|"? constructor (seps? "|" cont constructor)*
 constructor   := con-name type-atom* | con-name "(" fields? ")"
 field         := [term-name ":" cont] type
 effect-decl   := mode "effect" effect-name type-vars? "where" "{" seps? uniform-op-signature (seps uniform-op-signature)* seps? "}"
 | "effect" effect-name type-vars? "where" "{" seps? mode-op-signature (seps mode-op-signature)* seps? "}"
-uniform-op-signature := op-name ":" cont "(" types? ")" "->" cont type
-mode-op-signature := mode op-name ":" cont "(" types? ")" "->" cont type
+uniform-op-signature := op-name ":" cont "(" ([term-name ":" cont] type ("," [term-name ":" cont] type)*)? ")" "->" cont type
+mode-op-signature := mode op-name ":" cont "(" ([term-name ":" cont] type ("," [term-name ":" cont] type)*)? ")" "->" cont type
 mode          := "once" | "multi"
 raw-top       := "jqd" raw-bootstrap-form
 
 expr          := call (cont "|>" cont call)*
-call          := primary ("(" exprs? ")")*
+call          := primary ("(" ([term-name ":" cont] expr ("," [term-name ":" cont] expr)*)? ")")*
 primary       := literal | marked-text | value-name | internal-ref | paren | tuple | list | block | fn
 | match | if | handle | quote | unquote | annotation
 paren         := "(" expr ")"
@@ -222,6 +226,10 @@ Effect parameters may be unused by an operation:
 ```jacquard
 multi effect Choice a where {
   choose : () -> Bool
+}
+
+once effect Sending where {
+  send : (path: Text, body: Text) -> Text
 }
 ```
 
@@ -541,6 +549,60 @@ blank lines may appear between them, and nothing else may. Field-exercise
 code routinely put a blank line there, so the grammar has to allow it
 explicitly rather than reject it by accident.
 
+### Calls and named arguments
+
+Calls are exact-arity and uncurried. Ordinary positional calls remain valid.
+For a public API where a swap would be hard to review, a top-level equation
+may declare an explicit external label before its local binder:
+
+```jacquard
+resize(image, scale: ratio) = (image, ratio)
+
+resize(photo, scale: 2)
+```
+
+The unlabeled parameters and arguments form one positional prefix. Every
+labeled parameter or argument follows that prefix, but labeled arguments may
+otherwise be written in any order. There are no defaults, label puns, partial
+calls, or positional arguments after the first label. Each slot must be filled
+exactly once. A declaration label and its binder are deliberately different
+things: `scale` is the API name above; `ratio` is an alpha-renamable local.
+
+Three direct callable forms expose labels. Top-level equation parameters use
+`label: binder`; operation parameter types use `label: Type`; constructors
+reuse their declared field labels. Same-SCC top-level calls are included.
+Local lambdas, values returned by higher-order code, patterned parameters,
+variadics, opaque hash references without a companion, and otherwise
+unlabeled callees remain positional-only. Resolution reports E0309 rather than
+guessing a label from a binder name. E0310-E0314 cover unknown labels,
+duplicate or overlapping slots, incomplete arity, invalid declarations, and
+ambiguous constructor schemas.
+
+Named arguments evaluate exactly once from left to right as authored. When
+their order differs from the declaration, resolution lowers them to generated
+left-to-right `Let` bindings followed by the existing declaration-order
+positional `App`. A declaration-order named call therefore has the same
+kernel form and hash as its positional twin; a reordered call has the same
+hash as the equivalent explicit-let positional program. Interpreter and native
+execution consume only those existing forms.
+
+Term and operation labels live in an additive, versioned `call-abi-v1`
+companion in `names.jqd`, keyed by the exact derived callable hash. The
+companion survives store reopen, public rename, and local-binder rename. A
+different label vector for that same hash is rejected with E0612 instead of
+silently changing the API. Constructor labels already participate in their
+schema identity. Explicit `jac export` output remains positional `.jqd` and
+does not carry this companion; it preserves the elaborated program's identity
+but is not a standalone source of labels for later `.jac` resolution.
+
+When a direct term or operation publishes a usable companion label for the hotspot, W1206
+advises against a direct positional `True`/`False` argument and W1207 marks a
+definite adjacent run of same-typed positional parameters where a swap could
+still typecheck. Named calls suppress both review warnings. For a behavioral
+boolean, a purpose-specific sum such as `type Mode = | Live | DryRun` is often
+clearer than either spelling. These warnings are advisory and make no measured
+human-readability claim.
+
 ### Blocks, let, sequencing
 
 ```
@@ -686,6 +748,10 @@ It did not generate accessor definitions, so `fleet.inv` remains unresolved
 unless declared explicitly. Both field exercises invented this exact
 `Ctor(field: Type, ...)` notation independently. SX.24 now reuses those labels
 for partial constructor patterns (§5, Match) without generating accessors.
+SX.23 separately reuses constructor labels for direct named construction and
+allows operations to declare external call labels as `label: Type`. Operation
+labels do not alter the operation's kernel type or identity; their exact vector
+is persisted by the hash-bound `call-abi-v1` companion described under Calls.
 
 Every operation has an explicit mode. A uniform effect uses the canonical
 `once effect` or `multi effect` shorthand; an effect containing both modes
@@ -780,6 +846,11 @@ markers, but `surface-ref-v0` is a reserved head: malformed arity, argument sort
 validation errors even when nested as quote data. The normative grammar and diagnostics are in
 `spec/jacquard-kernel-ast-m0.md` §4.1; byte-level compatibility is in `spec/serialization.md`.
 
+Named calls are E1238 anywhere inside a surface quote, including inside a live
+`unquote`: the quoted carrier has positional `App` but no durable representation
+for call labels. Write the quoted call positionally. Labeled constructor
+patterns have the parallel E1237 boundary.
+
 Delimiter recovery is construct-aware for `quote`, `match`, `if`, `handle`, and expression blocks.
 The primary diagnostic points at the token or EOF where closing became impossible and its hint
 points back to the construct's opening span. The recovery tree receives a synthetic, metadata-marked
@@ -830,7 +901,10 @@ evidence that braces measurably hurt).
 
 Generated constructor accessors and their cross-constructor declaration
 validation remain parked D36 follow-ups. Labeled declarations and partial
-label-selecting constructor patterns ship without record syntax.
+label-selecting constructor patterns ship without record syntax. Named calls
+ship only for the direct, explicit ABI boundary above; default arguments,
+label puns, named higher-order/local calls, and inference from binder names are
+excluded.
 Predicate/comparison naming (D39: `?`-suffixed predicates beside bare
 dictionary names, `gte?/lte?/gt?/lt?`, the `real.*` rename); both of these
 are stdlib content, not grammar, and land in docs/stdlib.md rather than
@@ -876,7 +950,7 @@ syntax follows each file extension and uses surface rendering when either source
 operands, malformed source, and top-level source expressions are diagnostics with exit status 1.
 Store/store comparison keeps its full-store, bootstrap-rendered default.
 
-Two diagnostics belong to this slice specifically. First, a bare reference
+The original surface slice added two diagnostics specifically. First, a bare reference
 passed where a thunk type is expected (`fn () -> naive-checkout()` is the
 correct form; a bare `naive-checkout` where a `() ->{| e} T` is wanted is not,
 since top-level definitions close their rows) should say so in surface
@@ -889,15 +963,23 @@ program meaning without raising an error: the pattern silently becomes an
 always-matching binder, so it warrants its own warning rather than reporting
 an unbound variable, or nothing at all.
 
+The named-call successor adds the E0309-E0314 resolution matrix, E0612 for a
+conflicting persistent ABI, and E1238 for quoted named syntax. Its W1206 and
+W1207 review warnings target direct positional booleans and definite
+same-typed parameter runs only when that term/operation API exposes an
+applicable companion label; they are advisory, do not fire for a named call, and are not evidence
+that named syntax is more readable to humans.
+
 ## 8. Migration
 
 Bootstrap s-expressions remain fully supported forever; they are the debug
 format, the quote-literal format, and the format of record for the kernel
 spec. The corpus gains a `.jac` twin for every `.jqd` program, and the
 differential harness compares hashes across the pair (L3). Stdlib and
-testing-doc examples migrate into doctest files. Nothing about the store,
-hashing, or the native backend changes at all, which is the projection
-thesis verified by construction.
+testing-doc examples migrate into doctest files. SX.23 adds only a versioned
+companion to the mutable store name index; kernel objects, `HASH_V0`, and the
+native backend remain unchanged, which is the projection thesis verified by
+construction.
 
 The corpus twins and doctests this phase produces should include, verbatim,
 the patterns the field exercise flagged as already working: a signature
@@ -962,3 +1044,4 @@ in commit messages and task dependencies.)
 | D41 | operation-mode granularity | per-operation `once`/`multi`, with `once effect`/`multi effect` shorthand only for uniform effects |
 | D42 | operation-mode defaults | no surface default; every operation is explicit, while bootstrap legacy `multi` remains encoded by absence |
 | D75 | text interpolation | `$"text {expr}"` lowers locally to one resolved variadic `text.join`; expressions are explicitly `Text`, `{` is escaped as `{{`, and nested marked interpolation is rejected in 0.1 |
+| D76 | named calls | explicit labels on direct top-level terms and operations, constructor field-label reuse, positional-prefix/labeled-suffix exact arity, source-order evaluation, and a versioned hash-bound companion ABI; locals/HOFs/defaults/puns and quoted named syntax are excluded |

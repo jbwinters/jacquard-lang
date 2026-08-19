@@ -54,6 +54,11 @@ let diagnostic_spec = function
         "A labeled constructor pattern cannot be quoted.",
         "Use an explicit positional pattern inside `quote`, or move the labeled match outside the \
          quoted payload." )
+  | "E1238" ->
+      ( Diag.Surface,
+        "A named call argument cannot be quoted.",
+        "Use positional arguments inside `quote`, or move the named call outside the quoted \
+         payload." )
   | code -> raise (Diag.Bug_invalid_diagnostic ("unknown surface lowering code " ^ code))
 
 let diagnostic ?span ~code cause =
@@ -94,6 +99,57 @@ let generated_single_meta ~form meta =
 let generated_constructor_meta ~form meta =
   let* meta = generated_single_meta ~form meta in
   Ok (meta |> Meta.with_surface_generated form |> Meta.with_surface_ref_kind "con")
+
+let has_call_labels expressions =
+  List.exists
+    (fun (expression : Surface_ast.expr) ->
+      Option.is_some (Meta.surface_call_label expression.meta))
+    expressions
+
+let rec first_named_call_meta (expression : Surface_ast.expr) =
+  let expressions values = List.find_map first_named_call_meta values in
+  match expression.it with
+  | Surface_ast.Call (_, arguments) when has_call_labels arguments -> Some expression.meta
+  | Surface_ast.Call (fn, arguments) -> (
+      match first_named_call_meta fn with Some _ as found -> found | None -> expressions arguments)
+  | Surface_ast.Interpolation parts ->
+      List.find_map
+        (function
+          | Surface_ast.IText _ -> None | Surface_ast.IExpr item -> first_named_call_meta item)
+        parts
+  | Surface_ast.Fn (_, body) | Surface_ast.Unquote body | Surface_ast.Ann (body, _) ->
+      first_named_call_meta body
+  | Surface_ast.Tuple items | Surface_ast.List items -> expressions items
+  | Surface_ast.Block items ->
+      List.find_map
+        (function
+          | Surface_ast.Expr item -> first_named_call_meta item
+          | Surface_ast.Let binding -> first_named_call_meta binding.value)
+        items
+  | Surface_ast.Match (subject, clauses) -> (
+      match first_named_call_meta subject with
+      | Some _ as found -> found
+      | None ->
+          List.find_map
+            (fun (clause : Surface_ast.clause) -> first_named_call_meta clause.cbody)
+            clauses)
+  | Surface_ast.If (condition, yes, no) -> expressions [ condition; yes; no ]
+  | Surface_ast.Pipe (left, right) -> expressions [ left; right ]
+  | Surface_ast.Handle (body, ret, operations) -> (
+      match first_named_call_meta body with
+      | Some _ as found -> found
+      | None -> (
+          match first_named_call_meta ret.Surface_ast.rbody with
+          | Some _ as found -> found
+          | None ->
+              List.find_map
+                (fun (operation : Surface_ast.op_clause) -> first_named_call_meta operation.obody)
+                operations))
+  | Surface_ast.Quote (Surface_ast.Surface body) -> first_named_call_meta body
+  | Surface_ast.Quote (Surface_ast.Raw _)
+  | Surface_ast.Lit _ | Surface_ast.Name _ | Surface_ast.HashRef _ | Surface_ast.GroupRef _
+  | Surface_ast.Hole _ ->
+      None
 
 let rec lower_pat_at ~quote_depth (pat : Surface_ast.pat) : (Kernel.pat, Diag.t list) result =
   let node it = Kernel.{ it; meta = pat.meta } in
@@ -235,9 +291,16 @@ and lower_expr_node ?(quote_depth = 0) (expr : Surface_ast.expr) : (Kernel.expr,
   | Surface_ast.HashRef (hash, kind) -> Ok (node (Kernel.Ref (hash, kind)))
   | Surface_ast.GroupRef index -> Ok (node (Kernel.GroupRef index))
   | Surface_ast.Call (fn, args) ->
-      let* fn = lower_expr_node ~quote_depth fn in
-      let* args = map_results (lower_expr_node ~quote_depth) args in
-      Ok Kernel.{ it = App (fn, args); meta = Meta.with_surface_form "call" expr.meta }
+      let named = has_call_labels args in
+      if quote_depth > 0 && named then
+        error ~meta:expr.meta ~code:"E1238"
+          "quoted code stores positional kernel applications and cannot retain named argument \
+           labels"
+      else
+        let* fn = lower_expr_node ~quote_depth fn in
+        let* args = map_results (lower_expr_node ~quote_depth) args in
+        let surface_form_name = if named then "named-call" else "call" in
+        Ok Kernel.{ it = App (fn, args); meta = Meta.with_surface_form surface_form_name expr.meta }
   | Surface_ast.Fn (params, body) ->
       let* params = lower_lambda_params ~quote_depth params in
       let* body = lower_expr_node ~quote_depth body in
@@ -330,9 +393,16 @@ and lower_expr_node ?(quote_depth = 0) (expr : Surface_ast.expr) : (Kernel.expr,
       let* fn, args, right_meta =
         match right.Surface_ast.it with
         | Surface_ast.Call (fn, args) ->
-            let* fn = lower_expr_node ~quote_depth fn in
-            let* args = map_results (lower_expr_node ~quote_depth) args in
-            Ok (fn, args, Meta.with_surface_form "pipe-call" right.meta)
+            let named = has_call_labels args in
+            if quote_depth > 0 && named then
+              error ~meta:right.meta ~code:"E1238"
+                "quoted code stores positional kernel applications and cannot retain named \
+                 argument labels"
+            else
+              let* fn = lower_expr_node ~quote_depth fn in
+              let* args = map_results (lower_expr_node ~quote_depth) args in
+              let form = if named then "pipe-named-call" else "pipe-call" in
+              Ok (fn, args, Meta.with_surface_form form right.meta)
         | _ ->
             let* right = lower_expr_node ~quote_depth right in
             Ok ({ right with Kernel.meta = Meta.without_trivia right.meta }, [], right.meta)
@@ -361,6 +431,14 @@ and lower_expr_node ?(quote_depth = 0) (expr : Surface_ast.expr) : (Kernel.expr,
         match quote_body with
         | Surface_ast.Raw payload -> Ok payload
         | Surface_ast.Surface body ->
+            let* () =
+              match first_named_call_meta body with
+              | None -> Ok ()
+              | Some meta ->
+                  error ~meta ~code:"E1238"
+                    "quoted code stores positional kernel applications and cannot retain named \
+                     argument labels"
+            in
             let* body = lower_expr_node ~quote_depth:(quote_depth + 1) body in
             Ok (encode_quote_refs (Kernel.expr_to_form body))
       in

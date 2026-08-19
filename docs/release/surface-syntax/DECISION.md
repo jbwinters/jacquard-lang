@@ -15,6 +15,10 @@ not prove every possible kernel tree or freeze future surface revisions.
 
 The SS.0-SS.22 implementation arc is complete at these evidence boundaries.
 The EL.4 successor overlay additionally ships D41-D42 operation-mode syntax.
+The SX.23 successor overlay additionally ships D76 direct named calls; its
+separate [decision](../named-call-arguments/DECISION.md) and
+[evidence](../named-call-arguments/EVIDENCE.md) are authoritative for that
+post-manifest boundary.
 That completion does not promote partial D36, resource-scoped rows, or the
 separately integrated affine-checker/stdlib work into this surface claim and
 does not establish a freeze for the entire surface syntax.
@@ -22,7 +26,9 @@ does not establish a freeze for the entire surface syntax.
 Bootstrap `.jqd` remains permanently supported as the kernel/debug format of
 record, quote-literal notation, and a test and tooling carrier. It is not
 deprecated. The surface gate does not change the 27-form kernel, `HASH_V0`,
-store format, evaluator, native semantics, or authority model. EL.1's
+historical store format, evaluator, native semantics, or authority model.
+SX.23 leaves stored kernel objects unchanged but additively extends the mutable
+name index with a versioned hash-bound call ABI companion. EL.1's
 hash-stable operation-mode extension is the kernel input to this overlay:
 legacy `Multi` remains absent and byte-identical, while explicit `Once` is
 interface-visible.
@@ -57,6 +63,7 @@ Allowed decision statuses at this gate are `shipped`, `partial`, and
 | D40 | shipped | [declaration tests](../../../test/test_surface_decls.ml) pin lowering order. [CLI evidence](../../../test/cli/surface.t) executes multiple bare expressions interleaved with declarations in document order and pins stdout `40\n41\n42\n` with exit 0. | none |
 | D41 | shipped | [declaration tests](../../../test/test_surface_decls.ml), [printing tests](../../../test/test_surface_print.ml), and [trivia tests](../../../test/test_surface_trivia.ml) pin per-operation `once`/`multi`, uniform effect-level shorthand, canonical emission, recovery, and formatter idempotence. | none |
 | D42 | shipped | [declaration diagnostics](../../../test/test_surface_decls.ml) reject omission, duplication, conflicts, and partially annotated mixed effects with E1236; the [operation-mode twin](../../../corpus/valid/operation-modes.jac) pins resolved `.jac`/`.jqd` hash parity while bootstrap absence remains legacy `Multi`. | none |
+| D76 | shipped | [named-call cases](../../../test/test_surface_named_calls.ml) and the [CLI transcript](../../../test/cli/named-args.t) pin explicit labels for direct top-level terms, constructors, and operations; positional-prefix/labeled-suffix exact arity; source-order evaluation; positional kernel/hash parity; store reopen/rename/conflict behavior; quote refusal; diagnostics; formatting; native parity; and advisory review warnings. | [named-call decision](../named-call-arguments/DECISION.md) |
 
 ### D39 Stable Identity
 
@@ -135,13 +142,21 @@ SS.21 and SS.22 timestamps and observed-command table below.
 - CLI auto-detection selects surface syntax only for `.jac`. Store add, replay,
   current Warp files, the prelude, and internal fixtures retain bootstrap
   routes.
+- Named calls remain limited to direct callables with an explicit ABI. There
+  are no defaults, puns, named local/HOF calls, or named syntax in quotes or
+  `.jqd`. `jac export` preserves the elaborated positional program and hashes,
+  but does not export the store companion needed by later named resolution.
+- SX.23's tests and protocol regression make no measured human-readability
+  claim; no named-argument cohort was added to the preregistered study.
 
 ## Deferred Scope
 
 D38 and D39 completed as SS.22 standard-library work without grammar changes.
 D36 generated accessors and label validation remain partial after SS.8 and the
 completed SS.0-SS.22 arc. D41-D42 operation modes now occupy their reviewed
-grammar headroom; resource-scoped row display remains unscheduled with no
+grammar headroom. SX.23 later spends the reviewed D76 call/parameter-label
+syntax without implementing D36 accessors or default/higher-order named calls;
+resource-scoped row display remains unscheduled with no
 syntax, semantics, or compatibility promise.
 Their separate acceptance gates are the
 [D36 accessor criteria](FOLLOWUPS.md#d36-generated-constructor-accessors),
@@ -216,4 +231,5 @@ Successor milestone **EL.4, explicit surface operation modes**, is complete at
 the D41-D42 evidence boundary. This updates the grammar and evidence; it does
 not freeze the surface or claim production stability. D36 accessor generation
 and label validation plus resource-scoped-row headroom retain their own later
-acceptance gates.
+acceptance gates. SX.23 is separately complete at the D76 named-call evidence
+boundary linked above.

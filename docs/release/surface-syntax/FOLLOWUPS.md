@@ -5,8 +5,10 @@ milestone **SS.22, prelude naming and text building**, completed D38 and D39
 without changing the surface grammar. The SS.0-SS.22 implementation arc is
 complete. SX.24 subsequently shipped labeled partial patterns, but D36 accessor
 generation and its broader declaration validation remain deliberately partial,
-and Tier-F remains parked. None of this ledger establishes stability or a
-freeze for the whole surface syntax.
+and Tier-F remains parked. SX.23 separately shipped direct named calls with
+explicit term/operation labels and constructor field-label reuse; it did not
+ship accessors, defaults, label puns, or named local/higher-order calls. None of
+this ledger establishes stability or a freeze for the whole surface syntax.
 
 ## D36 Generated Constructor Accessors
 

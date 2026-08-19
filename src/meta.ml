@@ -41,6 +41,7 @@ let key_surface_ref_kind = "surface-ref-kind"
 let key_surface_reference = "surface-reference"
 let key_surface_signature = "surface-signature"
 let key_surface_pattern_label = "surface-pattern-label"
+let key_surface_call_label = "surface-call-label"
 
 (** [surface_container_key kind] is the reserved key for one named delimiter container. *)
 let surface_container_key kind = "surface-container/" ^ kind
@@ -220,6 +221,15 @@ let surface_pattern_label t =
 (** [with_surface_pattern_label label t] records an explicit constructor-pattern field selection. It
     never infers a label from a [PVar] spelling. *)
 let with_surface_pattern_label label t = add key_surface_pattern_label (Sym label) t
+
+(** [surface_call_label t] is an explicitly authored external argument label on a callable
+    parameter, operation parameter, or call argument. It is surface ABI/elaboration data and is
+    never inferred from a binder spelling. *)
+let surface_call_label t =
+  match find key_surface_call_label t with Some (Sym n | Text n) -> Some n | _ -> None
+
+(** [with_surface_call_label label t] records one explicit callable ABI or call-site label. *)
+let with_surface_call_label label t = add key_surface_call_label (Sym label) t
 
 (** [is_surface_reference t] is true only for a bare reference authored in `.jac`. Recovery and
     diagnostics use this hash-excluded marker to distinguish source references from bootstrap
