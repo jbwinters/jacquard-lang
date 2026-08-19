@@ -20,7 +20,8 @@
     Diagnostics (accumulated; resolution visits the whole tree): E0301 unknown name (with near-miss
     suggestions at edit distance <= 2), E0302 kind mismatch, E0303 duplicate binding name in a
     [defterm] group, E0304 duplicate variable in one pattern, and E0305-E0308 labeled-pattern schema
-    failures. *)
+    failures. E0309-E0314 cover missing, invalid, incomplete, or ambiguous explicit named-call ABIs
+    and call sites. *)
 
 (** What a name in scope refers to. [KCon]/[KOp] hashes are the folded constructor/operation hashes
     (decl hash + ordinal, derived in W1.5). *)
@@ -28,29 +29,42 @@ type nkind = KTerm | KCon | KOp | KType | KEffect
 
 type entry = { hash : Hash.t; kind : nkind }
 
+type call_abi = string option list
+(** Declaration-order callable slots. [None] is positional-only; [Some label] is one explicit
+    external label. A usable ABI has one unlabeled prefix and one uniquely labeled suffix. *)
+
 type names = {
   lookup : string -> entry list;
   all_names : unit -> string list;
   constructor_fields : Hash.t -> string option list option;
+  callable_abi : Hash.t -> call_abi option;
 }
 (** The resolver's view of a store. [lookup] returns EVERY binding of a name — the index is (name,
     kind)-keyed (SL.1), so an effect and its operation may share a bare name; kind- directed
     positions pick their kind, and value positions use term > con > op precedence.
     [constructor_fields] returns the declaration-order field labels for a resolved constructor; it
-    is the elaboration seam for labeled partial patterns. *)
+    is the elaboration seam for labeled partial patterns and constructor calls. [callable_abi]
+    returns an explicit, hash-bound v1 parameter-label vector for a term or operation and never
+    derives labels from binder names. *)
 
 let empty_names =
-  { lookup = (fun _ -> []); all_names = (fun () -> []); constructor_fields = (fun _ -> None) }
+  {
+    lookup = (fun _ -> []);
+    all_names = (fun () -> []);
+    constructor_fields = (fun _ -> None);
+    callable_abi = (fun _ -> None);
+  }
 
 (** [of_alist entries] builds a stub index (duplicate names with distinct kinds allowed); the W1.6
     store exposes the real one. [constructor_fields] may provide a constructor's declaration-order
     field labels for labeled-pattern expansion. It defaults to no schema, so a labeled pattern then
     fails with a diagnostic instead of guessing from binder names. *)
-let of_alist ?(constructor_fields = fun _ -> None) alist =
+let of_alist ?(constructor_fields = fun _ -> None) ?(callable_abi = fun _ -> None) alist =
   {
     lookup = (fun n -> List.filter_map (fun (m, e) -> if m = n then Some e else None) alist);
     all_names = (fun () -> List.map fst alist);
     constructor_fields;
+    callable_abi;
   }
 
 let kind_to_string = function
@@ -207,6 +221,336 @@ let duplicate_labels labels =
     labels;
   List.sort_uniq String.compare !duplicates
 
+type group_entry = { group_name : string; group_index : int; group_abi : call_abi option }
+
+let named_call_diagnostic st ~meta ~code ~summary ~cause ~next_step =
+  report st
+    (Diag.error ?span:(Meta.span meta) ~domain:Resolution ~code ~summary ~cause ~next_step
+       ~contrast:None ())
+
+let call_argument_meta (argument : Kernel.expr) =
+  let field_meta = Meta.surface_container "call-argument" argument.meta in
+  if Meta.is_empty field_meta then argument.meta else field_meta
+
+let call_parameter_meta parameter =
+  let field_meta = Meta.surface_container "call-parameter" parameter.Kernel.meta in
+  if Meta.is_empty field_meta then parameter.Kernel.meta else field_meta
+
+(** [declared_call_abi st ~what ~simple parameters] validates and returns an explicitly authored
+    callable ABI. It reports E0313 and returns [None] for patterned parameters, duplicate labels, or
+    an unlabeled slot after the labeled suffix. Entirely unlabeled declarations also return [None]
+    without a diagnostic. *)
+let declared_call_abi st ~what ~simple parameters =
+  let slots =
+    List.map (fun parameter -> Meta.surface_call_label parameter.Kernel.meta) parameters
+  in
+  if List.for_all Option.is_none slots then None
+  else
+    let first_patterned = List.find_opt (fun parameter -> not (simple parameter)) parameters in
+    let rec unlabeled_after_named saw_named = function
+      | [] -> None
+      | parameter :: rest -> (
+          match Meta.surface_call_label parameter.Kernel.meta with
+          | Some _ -> unlabeled_after_named true rest
+          | None when saw_named -> Some parameter
+          | None -> unlabeled_after_named false rest)
+    in
+    let duplicates = duplicate_labels (List.filter_map Fun.id slots) in
+    match (first_patterned, unlabeled_after_named false parameters, duplicates) with
+    | Some parameter, _, _ ->
+        named_call_diagnostic st ~meta:(call_parameter_meta parameter) ~code:"E0313"
+          ~summary:"This declaration cannot expose a named-call ABI."
+          ~cause:(Printf.sprintf "%s has a destructuring or wildcard parameter." what)
+          ~next_step:
+            "Use simple variable parameters throughout the callable, then label only its suffix.";
+        None
+    | None, Some parameter, _ ->
+        named_call_diagnostic st ~meta:(call_parameter_meta parameter) ~code:"E0313"
+          ~summary:"This declaration cannot expose a named-call ABI."
+          ~cause:(Printf.sprintf "%s has an unlabeled parameter after a labeled parameter." what)
+          ~next_step:"Keep every unlabeled parameter in one prefix before the labeled suffix.";
+        None
+    | None, None, duplicate :: _ ->
+        let parameter =
+          Option.value ~default:(List.hd parameters)
+            (List.find_opt
+               (fun parameter ->
+                 Option.equal String.equal
+                   (Meta.surface_call_label parameter.Kernel.meta)
+                   (Some duplicate))
+               (List.rev parameters))
+        in
+        named_call_diagnostic st ~meta:(call_parameter_meta parameter) ~code:"E0313"
+          ~summary:"This declaration cannot expose a named-call ABI."
+          ~cause:(Printf.sprintf "%s repeats external label `%s`." what duplicate)
+          ~next_step:"Give each labeled parameter one unique external label.";
+        None
+    | None, None, [] -> Some slots
+
+(** [binding_call_abi st binding] exposes labels only for a direct top-level lambda. *)
+let binding_call_abi st (binding : Kernel.binding) =
+  match binding.value.it with
+  | Kernel.Lam (parameters, _) ->
+      declared_call_abi st
+        ~what:(Printf.sprintf "Term `%s`" binding.bname)
+        ~simple:(fun parameter ->
+          match parameter.Kernel.it with Kernel.PVar _ -> true | _ -> false)
+        parameters
+  | _ -> None
+
+(** [operation_call_abi st operation] validates the operation's explicit parameter labels. *)
+let operation_call_abi st (operation : Kernel.opspec) =
+  declared_call_abi st
+    ~what:(Printf.sprintf "Operation `%s`" operation.op_name)
+    ~simple:(fun _ -> true)
+    operation.op_params
+
+(** [named_call_schema st group fn] returns a schema only for a direct resolved constructor, term,
+    operation, or same-SCC group member. Locals, higher-order values, and computed callees fail
+    closed by returning [None]. *)
+let named_call_schema st group fn =
+  match fn.Kernel.it with
+  | Kernel.Ref (hash, Kernel.Con) -> st.names.constructor_fields hash
+  | Kernel.Ref (hash, (Kernel.Term | Kernel.Op)) -> st.names.callable_abi hash
+  | Kernel.GroupRef index ->
+      Option.bind
+        (List.find_opt (fun entry -> entry.group_index = index) group)
+        (fun entry -> entry.group_abi)
+  | Kernel.Lit _ | Kernel.Var _ | Kernel.Lam _ | Kernel.App _ | Kernel.Let _ | Kernel.Match _
+  | Kernel.Tuple _ | Kernel.Handle _ | Kernel.Quote _ | Kernel.Unquote _ | Kernel.Ann _ ->
+      None
+
+(** [fresh_named_argument_names ~locals ~group count] creates printable, collision-free local
+    temporaries for source-order evaluation. *)
+let fresh_named_argument_names ~locals ~group count =
+  let occupied = Hashtbl.create (List.length locals + List.length group + count) in
+  List.iter (fun name -> Hashtbl.replace occupied name ()) locals;
+  List.iter (fun entry -> Hashtbl.replace occupied entry.group_name ()) group;
+  let rec choose ordinal suffix =
+    let name =
+      if suffix = 0 then Printf.sprintf "named-call-arg-%d" ordinal
+      else Printf.sprintf "named-call-arg-%d-%d" ordinal suffix
+    in
+    if Hashtbl.mem occupied name then choose ordinal (suffix + 1)
+    else begin
+      Hashtbl.add occupied name ();
+      name
+    end
+  in
+  List.init count (fun ordinal -> choose ordinal 0)
+
+let generated_meta marker source =
+  source |> Meta.without_trivia |> Meta.with_surface_generated marker
+
+(** [lower_reordered_named_call] evaluates every argument once in source order, then applies the
+    callee positionally in declaration order. It is called only for a nonempty exact-arity call. *)
+let lower_reordered_named_call ~locals ~group (source : Kernel.expr) fn source_arguments
+    ordered_sources =
+  let names = fresh_named_argument_names ~locals ~group (List.length source_arguments) in
+  let variables =
+    Array.of_list
+      (List.map2
+         (fun name argument ->
+           Kernel.
+             {
+               it = Var name;
+               meta = generated_meta "named-call-argument-reference" argument.Kernel.meta;
+             })
+         names source_arguments)
+  in
+  let final_arguments = List.map (Array.get variables) ordered_sources in
+  let final =
+    Kernel.
+      {
+        it = App (fn, final_arguments);
+        meta = generated_meta "named-call-positional-app" source.meta;
+      }
+  in
+  List.fold_right2
+    (fun name value body ->
+      let binder =
+        Kernel.{ it = PVar name; meta = generated_meta "named-call-argument-binder" value.meta }
+      in
+      let meta =
+        if String.equal name (List.hd names) then
+          Meta.with_surface_generated "named-call-reordered" source.meta
+        else generated_meta "named-call-argument-let" value.meta
+      in
+      Kernel.{ it = Let { isrec = false; binder; value; body }; meta })
+    names source_arguments final
+
+(** [elaborate_named_call st ~group ~locals source fn arguments] validates explicit labels and
+    returns the existing positional [App] representation. Invalid or unsupported sites report one of
+    E0309-E0314 and retain a structurally valid application for accumulated resolution. *)
+let elaborate_named_call st ~group ~locals (source : Kernel.expr) fn arguments =
+  let labels = List.map (fun argument -> Meta.surface_call_label argument.Kernel.meta) arguments in
+  if List.for_all Option.is_none labels then Kernel.{ source with it = App (fn, arguments) }
+  else
+    match named_call_schema st group fn with
+    | None ->
+        named_call_diagnostic st ~meta:source.meta ~code:"E0309"
+          ~summary:"This callee has no usable named-call ABI."
+          ~cause:
+            "Named arguments require a direct constructor, operation, or top-level term with \
+             explicit labels."
+          ~next_step:
+            "Call this value positionally, or declare an explicit labeled ABI on an eligible \
+             direct callable.";
+        Kernel.{ source with it = App (fn, arguments) }
+    | Some schema -> (
+        let rec positional_prefix count = function
+          | None :: rest -> positional_prefix (count + 1) rest
+          | Some _ :: _ | [] -> count
+        in
+        let prefix = positional_prefix 0 labels in
+        let malformed_order =
+          List.mapi (fun index label -> (index, label)) labels
+          |> List.find_opt (fun (index, label) -> index >= prefix && Option.is_none label)
+        in
+        let duplicate_call_labels = duplicate_labels (List.filter_map Fun.id labels) in
+        let schema_labels = List.filter_map Fun.id schema in
+        let duplicate_schema_labels = duplicate_labels schema_labels in
+        let rec schema_has_unlabeled_after_named saw_named = function
+          | [] -> false
+          | Some _ :: rest -> schema_has_unlabeled_after_named true rest
+          | None :: _ when saw_named -> true
+          | None :: rest -> schema_has_unlabeled_after_named false rest
+        in
+        let malformed_schema_order = schema_has_unlabeled_after_named false schema in
+        let unknown =
+          List.find_opt
+            (fun argument ->
+              match Meta.surface_call_label argument.Kernel.meta with
+              | Some label -> not (List.exists (String.equal label) schema_labels)
+              | None -> false)
+            arguments
+        in
+        let slot_for_label label =
+          let rec find index = function
+            | [] -> None
+            | Some candidate :: _ when String.equal label candidate -> Some index
+            | _ :: rest -> find (index + 1) rest
+          in
+          find 0 schema
+        in
+        let overlap =
+          List.find_opt
+            (fun argument ->
+              match Option.bind (Meta.surface_call_label argument.Kernel.meta) slot_for_label with
+              | Some slot -> slot < prefix
+              | None -> false)
+            arguments
+        in
+        let report_argument code summary cause next_step argument =
+          named_call_diagnostic st ~meta:(call_argument_meta argument) ~code ~summary ~cause
+            ~next_step
+        in
+        if schema_labels = [] then begin
+          named_call_diagnostic st ~meta:source.meta ~code:"E0309"
+            ~summary:"This callee has no usable named-call ABI."
+            ~cause:"The callable exposes no explicit external argument labels."
+            ~next_step:
+              "Call it positionally, or add an explicit labeled suffix to an eligible declaration.";
+          Kernel.{ source with it = App (fn, arguments) }
+        end
+        else if duplicate_schema_labels <> [] then begin
+          named_call_diagnostic st ~meta:source.meta ~code:"E0314"
+            ~summary:"This callee's named-call ABI is ambiguous."
+            ~cause:
+              (Printf.sprintf "Its ABI repeats label(s) %s."
+                 (String.concat ", " (List.map (Printf.sprintf "`%s`") duplicate_schema_labels)))
+            ~next_step:"Repair the callable declaration or its stored ABI before using labels.";
+          Kernel.{ source with it = App (fn, arguments) }
+        end
+        else if malformed_schema_order then begin
+          named_call_diagnostic st ~meta:source.meta ~code:"E0314"
+            ~summary:"This callee's named-call ABI is ambiguous."
+            ~cause:"Its ABI has an unlabeled slot after a labeled slot."
+            ~next_step:
+              "Move every unlabeled constructor field into one prefix before the labeled suffix.";
+          Kernel.{ source with it = App (fn, arguments) }
+        end
+        else if prefix > List.length schema || List.length arguments <> List.length schema then begin
+          named_call_diagnostic st ~meta:source.meta ~code:"E0312"
+            ~summary:"This named call does not fill the callable's exact arity."
+            ~cause:
+              (Printf.sprintf "The call supplies %d argument(s), but the ABI requires %d."
+                 (List.length arguments) (List.length schema))
+            ~next_step:"Supply every required slot exactly once; named calls have no defaults.";
+          Kernel.{ source with it = App (fn, arguments) }
+        end
+        else
+          match (malformed_order, duplicate_call_labels, unknown, overlap) with
+          | Some (index, _), _, _, _ ->
+              let argument = List.nth arguments index in
+              report_argument "E0312" "A positional argument follows a named argument."
+                "Named-call arguments must be a positional prefix followed by labeled arguments."
+                "Move this positional argument before every `label: expression` argument." argument;
+              Kernel.{ source with it = App (fn, arguments) }
+          | None, duplicate :: _, _, _ ->
+              let argument =
+                Option.value ~default:(List.hd arguments)
+                  (List.find_opt
+                     (fun argument ->
+                       Option.equal String.equal
+                         (Meta.surface_call_label argument.Kernel.meta)
+                         (Some duplicate))
+                     (List.rev arguments))
+              in
+              report_argument "E0311" "This call supplies one named slot more than once."
+                (Printf.sprintf "Label `%s` appears more than once in this call." duplicate)
+                "Keep exactly one argument for each external label." argument;
+              Kernel.{ source with it = App (fn, arguments) }
+          | None, [], Some argument, _ ->
+              let label = Option.get (Meta.surface_call_label argument.Kernel.meta) in
+              report_argument "E0310" "This callable has no slot with the selected label."
+                (Printf.sprintf "Label `%s` is not present in the callable's explicit ABI." label)
+                "Use one of the callable's declared external labels." argument;
+              Kernel.{ source with it = App (fn, arguments) }
+          | None, [], None, Some argument ->
+              let label = Option.get (Meta.surface_call_label argument.Kernel.meta) in
+              report_argument "E0311" "This call fills one slot both positionally and by label."
+                (Printf.sprintf "Label `%s` selects a slot already filled by the positional prefix."
+                   label)
+                "Remove the duplicate argument or shorten the positional prefix." argument;
+              Kernel.{ source with it = App (fn, arguments) }
+          | None, [], None, None -> (
+              let ordered = Array.make (List.length schema) None in
+              List.iteri
+                (fun source_index argument ->
+                  if source_index < prefix then ordered.(source_index) <- Some source_index
+                  else
+                    match
+                      Option.bind (Meta.surface_call_label argument.Kernel.meta) slot_for_label
+                    with
+                    | Some slot -> ordered.(slot) <- Some source_index
+                    | None -> ())
+                arguments;
+              let missing =
+                Array.to_list ordered
+                |> List.mapi (fun index source -> (index, source))
+                |> List.find_opt (fun (_, source) -> Option.is_none source)
+              in
+              match missing with
+              | Some (index, _) ->
+                  let description =
+                    match List.nth schema index with
+                    | Some label -> Printf.sprintf "labeled slot `%s`" label
+                    | None -> Printf.sprintf "unlabeled slot %d" (index + 1)
+                  in
+                  named_call_diagnostic st ~meta:source.meta ~code:"E0312"
+                    ~summary:"This named call leaves one required slot unfilled."
+                    ~cause:(Printf.sprintf "The call does not provide %s." description)
+                    ~next_step:
+                      "Extend the positional prefix or supply every remaining declared label.";
+                  Kernel.{ source with it = App (fn, arguments) }
+              | None ->
+                  let ordered_sources = List.map Option.get (Array.to_list ordered) in
+                  if ordered_sources = List.init (List.length arguments) Fun.id then
+                    Kernel.{ source with it = App (fn, arguments) }
+                  else lower_reordered_named_call ~locals ~group source fn arguments ordered_sources
+              ))
+
 let expand_labeled_pattern st ~meta hash patterns =
   let selections =
     List.filter_map
@@ -351,7 +695,7 @@ and resolve_row st ~locals ~effectself (r : Kernel.row) : Kernel.row =
         r.Kernel.effects;
   }
 
-(* [group] maps defterm member names to their source-order index. *)
+(* [group] maps defterm member names to their source-order index and any explicit call ABI. *)
 let rec resolve_expr_in st ~group ~locals (e : Kernel.expr) : Kernel.expr =
   let mk it = { e with Kernel.it } in
   match e.Kernel.it with
@@ -366,8 +710,12 @@ let rec resolve_expr_in st ~group ~locals (e : Kernel.expr) : Kernel.expr =
       in
       if lexical && List.mem x locals then e
       else
-        match if lexical then List.assoc_opt x group else None with
-        | Some i -> { Kernel.it = Kernel.GroupRef i; meta = Meta.with_name x e.Kernel.meta }
+        match
+          if lexical then List.find_opt (fun entry -> String.equal entry.group_name x) group
+          else None
+        with
+        | Some entry ->
+            { Kernel.it = Kernel.GroupRef entry.group_index; meta = Meta.with_name x e.Kernel.meta }
         | None -> (
             let entries = st.names.lookup x in
             let value_entries =
@@ -426,7 +774,7 @@ let rec resolve_expr_in st ~group ~locals (e : Kernel.expr) : Kernel.expr =
                 | [] ->
                     (* sibling group members count as near-miss candidates too *)
                     unknown st ~meta:e.Kernel.meta
-                      ~locals:(List.map fst group @ locals)
+                      ~locals:(List.map (fun entry -> entry.group_name) group @ locals)
                       ~what:"name" x;
                     e)))
   | Kernel.Lam (params, body) ->
@@ -436,9 +784,9 @@ let rec resolve_expr_in st ~group ~locals (e : Kernel.expr) : Kernel.expr =
            ( List.map (resolve_pat st ~locals) params,
              resolve_expr_in st ~group ~locals:(bound @ locals) body ))
   | Kernel.App (fn, args) ->
-      mk
-        (Kernel.App
-           (resolve_expr_in st ~group ~locals fn, List.map (resolve_expr_in st ~group ~locals) args))
+      let fn = resolve_expr_in st ~group ~locals fn in
+      let args = List.map (resolve_expr_in st ~group ~locals) args in
+      elaborate_named_call st ~group ~locals e fn args
   | Kernel.Let { isrec; binder; value; body } ->
       let bound = pat_vars st binder in
       let value_locals = if isrec then bound @ locals else locals in
@@ -547,7 +895,16 @@ let resolve_decl_in st (d : Kernel.decl) : Kernel.decl =
   let it =
     match d.Kernel.it with
     | Kernel.DefTerm bindings ->
-        let group = List.mapi (fun i b -> (b.Kernel.bname, i)) bindings in
+        let group =
+          List.mapi
+            (fun index binding ->
+              {
+                group_name = binding.Kernel.bname;
+                group_index = index;
+                group_abi = binding_call_abi st binding;
+              })
+            bindings
+        in
         let seen = Hashtbl.create 8 in
         List.iter
           (fun b ->
@@ -586,6 +943,7 @@ let resolve_decl_in st (d : Kernel.decl) : Kernel.decl =
                 cons;
           }
     | Kernel.DefEffect { ename; evars; ops } ->
+        List.iter (fun operation -> ignore (operation_call_abi st operation)) ops;
         Kernel.DefEffect
           {
             ename;

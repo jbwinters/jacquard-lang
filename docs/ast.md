@@ -79,6 +79,7 @@ Reserved keys (all optional):
 | `span` | file, line/col range | diagnostics, Elm-grade errors |
 | `scopes` | scope-set for identifiers | hygiene, per Racket's sets-of-scopes (Flatt, POPL 2016) |
 | `name` | source name for a hash-resolved ref | human/model legibility of resolved trees |
+| `surface-call-label` | transient source label on a call argument or declared parameter | lets the surface resolver elaborate named syntax before canonical metadata erasure |
 | `trivia` | comments, exact whitespace | full-fidelity round-tripping (Roslyn lesson) without hash instability (Go's CommentMap lesson, learned in the negative) |
 | `origin` | provenance record: human id, model id, tool | agent-era requirement: who wrote this node, signable, and it rides outside identity |
 | `doc` | attached documentation | docs travel with code |
@@ -220,6 +221,11 @@ Decisions within what remains:
   Koka is uncurried. Currying remains available the ordinary way (a lambda
   returning a lambda). Zero-ary `Lam`/`App` doubles as thunk/force, which a
   strict language needs (§7).
+  Surface named calls add no kernel argument shape: direct labels resolve to
+  declaration-order positional `App`; an authored reordering becomes
+  left-to-right `Let` bindings followed by that `App`. Named calls are
+  therefore hash-identical to the corresponding positional or explicit-let
+  kernel program.
 - **`Lam` params are patterns** (commitment: patterns everywhere), restricted to irrefutable
   ones; the checker enforces irrefutability, semantics is `Match`.
 - **`Let` carries a `rec` flag** rather than spending a second form. `rec` restricts the
@@ -276,8 +282,9 @@ for reading.
 
 Records beyond labeled constructor fields (true row-typed records) are deferred.
 The shipped `.jac` surface preserves labels as constructor schema: labels print
-and contribute to canonical identity, but do not generate accessor functions or
-labeled patterns. Those remain separately gated surface follow-ups.
+and contribute to canonical identity, support direct named construction and
+partial labeled patterns, but do not generate accessor functions. True records
+and generated accessors remain separately gated follow-ups.
 
 ### 5.4 Declarations
 
@@ -296,8 +303,18 @@ Three forms, and the third is where two commitments become one mechanism:
   granted authorities. No ambient handlers, no ambient authority. Attenuation is handler
   interposition (wrap the child in a filtering handler). §10 flags the granularity caveat.
 
+Top-level term and operation call labels are intentionally not added to these
+kernel declarations. Surface publication derives an explicit label vector and
+stores it as a versioned `call-abi-v1` companion keyed by the exact derived
+term or operation hash. It is never inferred from local binder names. A rename
+or alpha-renaming therefore preserves the external ABI, while a conflicting
+relabel of the same identity is rejected. Constructor call labels instead come
+from `conspec` fields and already participate in identity.
+
 There is no module form. A codebase is a content-addressed map from hashes to declarations;
-names, namespaces, and renames are metadata operations that never touch identity. This is
+names, namespaces, and renames are index operations that never touch identity. Explicit
+external call labels are the narrow exception to treating every index attachment as mere
+display metadata: the hash-bound companion is API state and conflicts fail closed. This is
 the Unison move, and it is what makes agent loops cacheable: re-typecheck and re-test keyed
 on hashes, and an edit invalidates exactly its dependents.
 
@@ -325,7 +342,8 @@ Canonicalization rules:
 Consequences worth saying out loud: renames are free and history-preserving; formatting
 and comments never dirty a build; a semantic differ falls out of comparing trees rather
 than text; and provenance/signatures ride in `meta` at any granularity without forking
-identities.
+identities. Kernel hash/diff equality does not compare `call-abi-v1` companions; consumers
+that review a published surface API must inspect the store index as well as the object.
 
 ## 7. Semantic commitments the grammar assumes
 

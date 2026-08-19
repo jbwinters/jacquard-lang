@@ -7,7 +7,9 @@
     - [names.jqd] — the public index, the only mutable file. Named entries are
       [(named <name> <kind> #<hash>)] forms, kinds [term|con|op|type|effect], kept sorted;
       [(hidden #<derived-hash>)] entries persist opaque host-value members that must not be
-      reconstructed by direct hash after reopen.
+      reconstructed by direct hash after reopen; additive
+      [(call-abi-v1 #<derived-hash> (slot positional|named ...)...)] entries persist explicit
+      surface call labels for eligible term and operation identities.
 
     Derived hashes (defterm members, constructors, operations) have no object files of their own; an
     in-memory index from every known hash to its owning declaration is rebuilt by scanning
@@ -16,7 +18,7 @@
 
     Failure modes: E0601 unknown hash, E0602 unknown name, E0603 corrupt object file, E0604
     unnameable target (a defterm group's whole hash), E0605 invalid name, E0607 ambiguous name
-    needing a kind. *)
+    needing a kind, and E0612 conflicting hash-bound call ABI. *)
 
 type role = Whole | Member of int | Constructor of int | Operation of int
 type located = { decl : Kernel.decl; decl_hash : Hash.t; role : role }
@@ -25,6 +27,8 @@ type t = {
   root : string;
   mutable names : (string * Resolve.entry) list; (* sorted by name *)
   mutable hidden : Hash.t list; (* sorted derived hashes intentionally absent from public lookup *)
+  mutable call_abis : (Hash.t * Resolve.call_abi) list;
+      (* sorted, versioned surface-call ABI companions bound to derived hashes *)
   mutable index : (Hash.t * (Hash.t * role)) list; (* any hash -> owning decl hash + role *)
 }
 
@@ -65,6 +69,10 @@ let diagnostic_spec = function
   | "E0610" ->
       ( "A diff source contains a runnable top-level expression.",
         "Compare declaration-only source artifacts or stores." )
+  | "E0612" ->
+      ( "A callable hash already has a different named-call ABI.",
+        "Keep the published labels, or make a semantic code change that gives the callable a new \
+         hash." )
   | code -> raise (Diag.Bug_invalid_diagnostic ("unknown store diagnostic code " ^ code))
 
 let diagnostic ~code cause =
@@ -120,18 +128,28 @@ let sort_names ns =
       | c -> c)
     ns
 
-let render_names names hidden =
+(** [call_abi_slot_form slot] renders one validated v1 positional or named slot. *)
+let call_abi_slot_form = function
+  | None -> Form.form "slot" [ Form.Sym "positional" ]
+  | Some label -> Form.form "slot" [ Form.Sym "named"; Form.Sym label ]
+
+let render_names names hidden call_abis =
   Printer.print_all
     (List.map
        (fun (n, { Resolve.hash; kind }) ->
          Form.form "named" [ Form.Sym n; Form.Sym (kind_sym kind); Form.Hash hash ])
        names
-    @ List.map (fun hash -> Form.form "hidden" [ Form.Hash hash ]) hidden)
+    @ List.map (fun hash -> Form.form "hidden" [ Form.Hash hash ]) hidden
+    @ List.map
+        (fun (hash, slots) ->
+          Form.form "call-abi-v1"
+            (Form.Hash hash :: List.map (fun slot -> Form.F (call_abi_slot_form slot)) slots))
+        call_abis)
 
 let write_names t =
   (* render fully before opening: open_out_bin truncates, and a render failure after
      truncation would destroy the index *)
-  let rendered = render_names t.names t.hidden in
+  let rendered = render_names t.names t.hidden t.call_abis in
   let oc = open_out_bin (names_file t) in
   Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () -> output_string oc rendered)
 
@@ -139,17 +157,49 @@ let parse_names ~file src =
   match Reader.parse_string ~file src with
   | Error ds -> Error ds
   | Ok forms ->
-      let rec go names hidden = function
-        | [] -> Ok (List.rev names, List.sort_uniq Hash.compare hidden)
+      let parse_slot = function
+        | { Form.head = "slot"; args = [ Form.Sym "positional" ]; _ } -> Ok None
+        | { Form.head = "slot"; args = [ Form.Sym "named"; Form.Sym label ]; _ }
+          when Reader.valid_library_symbol label ->
+            Ok (Some label)
+        | _ -> err ~code:"E0603" "corrupt names.jqd: malformed call-abi-v1 slot"
+      in
+      let rec parse_slots acc = function
+        | [] -> Ok (List.rev acc)
+        | Form.F slot :: rest -> (
+            match parse_slot slot with
+            | Ok slot -> parse_slots (slot :: acc) rest
+            | Error _ as error -> error)
+        | _ :: _ -> err ~code:"E0603" "corrupt names.jqd: malformed call-abi-v1 argument"
+      in
+      let rec go names hidden call_abis = function
+        | [] ->
+            Ok
+              ( List.rev names,
+                List.sort_uniq Hash.compare hidden,
+                List.sort (fun (left, _) (right, _) -> Hash.compare left right) call_abis )
         | { Form.head = "named"; args = [ Form.Sym n; Form.Sym k; Form.Hash h ]; _ } :: rest -> (
             match kind_of_sym k with
             | Some _ when scheduler_private_hash h -> Error [ private_name_diagnostic n h ]
-            | Some kind -> go ((n, { Resolve.hash = h; kind }) :: names) hidden rest
+            | Some kind -> go ((n, { Resolve.hash = h; kind }) :: names) hidden call_abis rest
             | None -> err ~code:"E0603" "corrupt names.jqd: unknown kind `%s`" k)
-        | { Form.head = "hidden"; args = [ Form.Hash h ]; _ } :: rest -> go names (h :: hidden) rest
+        | { Form.head = "hidden"; args = [ Form.Hash h ]; _ } :: rest ->
+            go names (h :: hidden) call_abis rest
+        | { Form.head = "call-abi-v1"; args = Form.Hash hash :: slots; _ } :: rest -> (
+            match parse_slots [] slots with
+            | Error _ as error -> error
+            | Ok slots -> (
+                match List.assoc_opt hash call_abis with
+                | Some prior when prior <> slots ->
+                    err ~code:"E0603" "corrupt names.jqd: conflicting call ABI for %s"
+                      (Hash.to_hex hash)
+                | Some _ ->
+                    err ~code:"E0603" "corrupt names.jqd: duplicate call ABI for %s"
+                      (Hash.to_hex hash)
+                | None -> go names hidden ((hash, slots) :: call_abis) rest))
         | f :: _ -> err ~code:"E0603" "corrupt names.jqd: unexpected `%s` form" f.Form.head
       in
-      go [] [] forms
+      go [] [] [] forms
 
 (* --- objects --- *)
 
@@ -189,19 +239,20 @@ let index_entries (decl : Kernel.decl) (hs : Canon.decl_hashes) =
     from the object files. A persisted name exposing a scheduler-private hash is rejected with E0907
     before the index becomes observable. *)
 let open_store root : (t, Diag.t list) result =
-  let t = { root; names = []; hidden = []; index = [] } in
+  let t = { root; names = []; hidden = []; call_abis = []; index = [] } in
   if not (Sys.file_exists root) then Sys.mkdir root 0o755;
   if not (Sys.file_exists (objects_dir t)) then Sys.mkdir (objects_dir t) 0o755;
   let names_res =
     if Sys.file_exists (names_file t) then
       parse_names ~file:(names_file t) (read_file (names_file t))
-    else Ok ([], [])
+    else Ok ([], [], [])
   in
   match names_res with
   | Error ds -> Error ds
-  | Ok (names, hidden) -> (
+  | Ok (names, hidden, call_abis) -> (
       t.names <- names;
       t.hidden <- hidden;
+      t.call_abis <- call_abis;
       let rec scan acc = function
         | [] -> Ok acc
         | file :: rest -> (
@@ -226,7 +277,65 @@ let open_store root : (t, Diag.t list) result =
              store-backed library code can evaluate them. [locate] is the public boundary and
              rejects them; [locate_internal] is reserved for evaluating such stored code. *)
           t.index <- index;
-          Ok t)
+          let valid_slots slots =
+            let labels = List.filter_map Fun.id slots in
+            let rec suffix saw_named = function
+              | [] -> true
+              | Some _ :: rest -> suffix true rest
+              | None :: _ when saw_named -> false
+              | None :: rest -> suffix false rest
+            in
+            labels <> [] && suffix false slots
+            && List.length labels = List.length (List.sort_uniq String.compare labels)
+          in
+          let target_arity hash =
+            match List.find_opt (fun (known, _) -> Hash.equal known hash) index with
+            | None -> None
+            | Some (_, (decl_hash, role)) -> (
+                let path = object_path t decl_hash in
+                match load_object ~file:path (read_file path) with
+                | Error _ -> None
+                | Ok (decl, _) -> (
+                    match (decl.Kernel.it, role) with
+                    | Kernel.DefTerm bindings, Member member -> (
+                        match List.nth_opt bindings member with
+                        | Some { Kernel.value = { it = Kernel.Lam (params, _); _ }; _ }
+                          when List.for_all
+                                 (fun parameter ->
+                                   match parameter.Kernel.it with
+                                   | Kernel.PVar _ -> true
+                                   | Kernel.PWild | Kernel.PLit _ | Kernel.PCon _ | Kernel.PTuple _
+                                   | Kernel.PAs _ ->
+                                       false)
+                                 params ->
+                            Some (List.length params)
+                        | Some _ | None -> None)
+                    | Kernel.DefEffect { ops; _ }, Operation operation ->
+                        Option.map
+                          (fun op -> List.length op.Kernel.op_params)
+                          (List.nth_opt ops operation)
+                    | Kernel.DefTerm _, (Whole | Constructor _ | Operation _)
+                    | Kernel.DefType _, _
+                    | Kernel.DefEffect _, (Whole | Member _ | Constructor _) ->
+                        None))
+          in
+          let rec validate_abis = function
+            | [] -> Ok t
+            | (hash, slots) :: rest -> (
+                match target_arity hash with
+                | Some arity when arity = List.length slots && valid_slots slots ->
+                    validate_abis rest
+                | Some arity ->
+                    err ~code:"E0603"
+                      "corrupt names.jqd: call ABI for %s has %d slots for arity %d or invalid \
+                       labels"
+                      (Hash.to_hex hash) (List.length slots) arity
+                | None ->
+                    err ~code:"E0603"
+                      "corrupt names.jqd: call ABI target %s is not an eligible callable"
+                      (Hash.to_hex hash))
+          in
+          validate_abis call_abis)
 
 let entry_kind (decl : Kernel.decl) = function
   | Whole -> (
@@ -238,12 +347,55 @@ let entry_kind (decl : Kernel.decl) = function
   | Constructor _ -> Resolve.KCon
   | Operation _ -> Resolve.KOp
 
+(** [explicit_slots nodes] returns authored call labels, or [None] when every slot is positional. *)
+let explicit_slots nodes =
+  let slots = List.map (fun node -> Meta.surface_call_label node.Kernel.meta) nodes in
+  if List.for_all Option.is_none slots then None else Some slots
+
+(** [declaration_call_abis decl hashes] binds explicit term/operation labels to the corresponding
+    derived identities. Resolution already validated slot order, labels, and binder eligibility. *)
+let declaration_call_abis (decl : Kernel.decl) (hashes : Canon.decl_hashes) =
+  match decl.Kernel.it with
+  | Kernel.DefTerm bindings ->
+      List.map2
+        (fun binding (_, hash) ->
+          match binding.Kernel.value.it with
+          | Kernel.Lam (parameters, _) ->
+              Option.map (fun slots -> (hash, slots)) (explicit_slots parameters)
+          | _ -> None)
+        bindings hashes.Canon.named
+      |> List.filter_map Fun.id
+  | Kernel.DefEffect { ops; _ } ->
+      let operation_hashes = match hashes.Canon.named with [] -> [] | _effect :: rest -> rest in
+      List.map2
+        (fun operation (_, hash) ->
+          Option.map (fun slots -> (hash, slots)) (explicit_slots operation.Kernel.op_params))
+        ops operation_hashes
+      |> List.filter_map Fun.id
+  | Kernel.DefType _ -> []
+
+(** [merged_call_abis t proposed] adds identical or new companions and returns E0612 before any
+    store mutation when one hash is already bound to different labels. *)
+let merged_call_abis t proposed =
+  let rec merge current = function
+    | [] -> Ok (List.sort (fun (left, _) (right, _) -> Hash.compare left right) current)
+    | (hash, slots) :: rest -> (
+        match List.find_opt (fun (known, _) -> Hash.equal known hash) current with
+        | Some (_, prior) when prior = slots -> merge current rest
+        | Some _ ->
+            err ~code:"E0612" "callable %s is already bound to a different call-abi-v1 companion"
+              (Hash.to_hex hash)
+        | None -> merge ((hash, slots) :: current) rest)
+  in
+  merge t.call_abis proposed
+
 (** [put_decl t decl] canonicalizes, hashes, and stores a resolved declaration, then binds every
     public name it introduces (members, type + constructors, effect + operations) in the name index,
-    replacing existing bindings of the same names. The exact frozen Task opaque carrier is indexed
-    by hash for runtime validation but deliberately receives no public constructor name; any stale
-    private binding already in memory is evicted before [names.jqd] is rewritten. Idempotent on the
-    object file. *)
+    and installs any explicit term/operation [call-abi-v1] companion transactionally, replacing
+    existing bindings of the same names. The exact frozen Task opaque carrier is indexed by hash for
+    runtime validation but deliberately receives no public constructor name; any stale private
+    binding already in memory is evicted before [names.jqd] is rewritten. Idempotent on the object
+    file. *)
 let put_decl ?origin t (decl : Kernel.decl) : (Canon.decl_hashes, Diag.t list) result =
   let hashes =
     if Recovery_marker.decl decl then Error [ Recovery_marker.diagnostic "store insertion" ]
@@ -251,61 +403,66 @@ let put_decl ?origin t (decl : Kernel.decl) : (Canon.decl_hashes, Diag.t list) r
   in
   match hashes with
   | Error ds -> Error ds
-  | Ok hs ->
-      let path = object_path t hs.Canon.decl_hash in
-      if not (Sys.file_exists path) then begin
-        let oc = open_out_bin path in
-        output_string oc (Printer.print_all [ Kernel.decl_to_form decl ]);
-        close_out oc
-      end;
-      (match origin with
-      | Some tag -> (
-          (* first writer wins, matching the object's own immutability: content that
+  | Ok hs -> (
+      match merged_call_abis t (declaration_call_abis decl hs) with
+      | Error _ as error -> error
+      | Ok call_abis ->
+          let path = object_path t hs.Canon.decl_hash in
+          if not (Sys.file_exists path) then begin
+            let oc = open_out_bin path in
+            output_string oc (Printer.print_all [ Kernel.decl_to_form decl ]);
+            close_out oc
+          end;
+          (match origin with
+          | Some tag -> (
+              (* first writer wins, matching the object's own immutability: content that
              already carries provenance keeps it, and a differing re-stamp is noted *)
-          let opath = origin_path t hs.Canon.decl_hash in
-          if Sys.file_exists opath then
-            begin match read_file opath with
-            | existing when String.trim existing <> tag ->
-                Printf.eprintf "note: %s already stamped [%s]; keeping it\n%!"
-                  (String.sub (Hash.to_hex hs.Canon.decl_hash) 0 8)
-                  (String.trim existing)
-            | _ -> ()
-            | exception Sys_error _ -> ()
-            end
-          else
-            try
-              let oc = open_out_bin opath in
-              output_string oc (tag ^ "\n");
-              close_out oc
-            with Sys_error m -> Printf.eprintf "origin sidecar unwritable (%s)\n%!" m)
-      | None -> ());
-      let fresh = index_entries decl hs in
-      t.index <- fresh @ List.filter (fun (h, _) -> not (List.mem_assoc h fresh)) t.index;
-      let new_names =
-        List.filter_map
-          (fun (n, h) ->
-            match List.assoc_opt h fresh with
-            | Some (_, role)
-              when (not (List.exists (Hash.equal h) t.hidden)) && not (scheduler_private_hash h) ->
-                Some (n, { Resolve.hash = h; kind = entry_kind decl role })
-            | Some _ | None -> None)
-          hs.Canon.named
-      in
-      (* replacement is per (name, kind): a term named x does not evict a type named x *)
-      let evicted (n, (e : Resolve.entry)) =
-        List.exists
-          (fun (n', (e' : Resolve.entry)) -> n = n' && e.Resolve.kind = e'.Resolve.kind)
-          new_names
-      in
-      t.names <-
-        sort_names
-          (new_names
-          @ List.filter
-              (fun ((_, entry) as binding) ->
-                (not (scheduler_private_hash entry.Resolve.hash)) && not (evicted binding))
-              t.names);
-      write_names t;
-      Ok hs
+              let opath = origin_path t hs.Canon.decl_hash in
+              if Sys.file_exists opath then
+                begin match read_file opath with
+                | existing when String.trim existing <> tag ->
+                    Printf.eprintf "note: %s already stamped [%s]; keeping it\n%!"
+                      (String.sub (Hash.to_hex hs.Canon.decl_hash) 0 8)
+                      (String.trim existing)
+                | _ -> ()
+                | exception Sys_error _ -> ()
+                end
+              else
+                try
+                  let oc = open_out_bin opath in
+                  output_string oc (tag ^ "\n");
+                  close_out oc
+                with Sys_error m -> Printf.eprintf "origin sidecar unwritable (%s)\n%!" m)
+          | None -> ());
+          let fresh = index_entries decl hs in
+          t.index <- fresh @ List.filter (fun (h, _) -> not (List.mem_assoc h fresh)) t.index;
+          let new_names =
+            List.filter_map
+              (fun (n, h) ->
+                match List.assoc_opt h fresh with
+                | Some (_, role)
+                  when (not (List.exists (Hash.equal h) t.hidden)) && not (scheduler_private_hash h)
+                  ->
+                    Some (n, { Resolve.hash = h; kind = entry_kind decl role })
+                | Some _ | None -> None)
+              hs.Canon.named
+          in
+          (* replacement is per (name, kind): a term named x does not evict a type named x *)
+          let evicted (n, (e : Resolve.entry)) =
+            List.exists
+              (fun (n', (e' : Resolve.entry)) -> n = n' && e.Resolve.kind = e'.Resolve.kind)
+              new_names
+          in
+          t.names <-
+            sort_names
+              (new_names
+              @ List.filter
+                  (fun ((_, entry) as binding) ->
+                    (not (scheduler_private_hash entry.Resolve.hash)) && not (evicted binding))
+                  t.names);
+          t.call_abis <- call_abis;
+          write_names t;
+          Ok hs)
 
 (** [origin t h] reads the provenance sidecar of the declaration owning [h], if any. A
     present-but-unreadable or empty sidecar is ignored with a warning, never fatal. *)
@@ -432,8 +589,9 @@ let hide_derived t hash =
   | Some (_, (_, Whole)) | None -> ()
 
 (** [names_view t] is the resolver's view of this store (the W1.4 seam). Constructor-schema lookup
-    returns declaration-order field labels only for constructor identities present in [t]; missing,
-    malformed, and non-constructor identities return [None]. *)
+    returns declaration-order field labels only for constructor identities present in [t]; callable
+    ABI lookup returns validated hash-bound term/operation companions. Missing, malformed, and
+    ineligible identities return [None]. *)
 let names_view t : Resolve.names =
   let constructor_fields hash =
     match List.find_opt (fun (known, _) -> Hash.equal known hash) t.index with
@@ -451,6 +609,9 @@ let names_view t : Resolve.names =
     Resolve.lookup = (fun n -> lookup_all t n);
     all_names = (fun () -> List.map fst t.names);
     constructor_fields;
+    callable_abi =
+      (fun hash ->
+        Option.map snd (List.find_opt (fun (known, _) -> Hash.equal known hash) t.call_abis));
   }
 
 (** [bind_name t name hash] binds [name] to a hash already known to the store. Fails on an

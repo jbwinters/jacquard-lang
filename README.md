@@ -80,6 +80,22 @@ The bet behind all of this: when most code is written by machines, the humans
 reviewing it need the language itself to answer "what can this touch, and how
 sure are we" without reading every line.
 
+Jacquard also lets public call sites say what each argument means:
+
+```text
+resize(image, scale: ratio) = (image, ratio)
+
+resize(photo, scale: 2)
+```
+
+An unlabeled positional prefix may come first; labeled arguments may follow in
+any order and still run left to right as written. Labels are explicit API, not
+guesses from local binder names: top-level functions and effect operations
+declare them, while constructors reuse their declared field labels. Calls are
+still exact-arity and uncurried—there are no defaults, label puns, or named
+calls through local and higher-order values. The lower-level `.jqd` carrier
+remains positional.
+
 ## The Review Case In Miniature
 
 Suppose a model hands you this one-line change in Python:
@@ -154,7 +170,9 @@ For readers who speak programming languages:
   effect operations, and each inference algorithm is a handler.
 - Content-addressed definitions. Identity is a hash of canonical resolved
   structure with non-identity metadata erased, so formatting, comments, and
-  ordinary local or term renames change nothing downstream.
+  ordinary local or term renames change nothing downstream. Explicit external
+  call labels are a separately stored, hash-bound API contract; changing those
+  labels for the same callable identity is rejected.
 - Tooling that leans on the above: formatter, structure-aware differ, Warp
   tests with a content-addressed cache, record/replay, and a reproducible
   release evidence pack.
@@ -181,8 +199,8 @@ studied during planning; `docs/ast.md` records each debt in detail:
 The prototype is complete against its original core plan and has since added
 the public surface syntax, ringed standard library, Warp properties and cache,
 native compilation, packaged binaries, and product-scale case studies. The RC1
-semantic boundary remains historical; the current successor is pinned by 868
-Alcotest/QCheck cases, 58 cram transcripts, 28 documentation examples, native
+semantic boundary remains historical; the current successor is pinned by 877
+Alcotest/QCheck cases, 59 cram transcripts, 28 documentation examples, native
 sanitizer/leak/fuzz lanes, and fresh-clone evidence workflows. RC2 repaired
 binary-demo packaging; RC3 adds an explicit
 runtime/output license exception and packages the native runtime. The current
@@ -537,6 +555,8 @@ Key release docs:
 - `docs/release/0.2/LIMITS.md`: explicit non-goals and trusted boundaries
 - `docs/release/0.2/DECISION.md`: RC1 and same-commit final decision
 - `docs/release/0.2/RELEASE-NOTES.md`: public contents and install command
+- `docs/release/named-call-arguments/DECISION.md` and `EVIDENCE.md`: post-0.2
+  direct named-call contract, hash-bound ABI, proving tests, and non-claims
 - `docs/release/structured-concurrency/EVIDENCE.md`: successor C0-C2 publication
   claims plus the shipped interpreted C3 Channel runtime, exact counts, demo,
   and proving tests

@@ -197,13 +197,52 @@ limit = 100
 
 add-tax(amount, rate) = real.mul(amount, real.add(1.0, rate))
 
+resize(image, scale: ratio) = (image, ratio)
+
 increment = fn (n) -> add(n, 1)
 
 answer : () ->{} Int
 answer() = increment(41)
 
 answer()
+
+resize(photo, scale: 2)
 ```
+
+An eligible callable may declare an unlabeled positional prefix followed by an
+explicitly labeled suffix. At a call, positional arguments must likewise come
+first; labeled arguments may then appear in any order. Calls remain uncurried
+and exact-arity: every slot is supplied exactly once, with no defaults, label
+puns, partial application, or positional argument after a label. Arguments
+always evaluate once, left to right in source order; resolution inserts local
+`let` bindings when declaration-order application would otherwise reorder
+them.
+
+Named calls are deliberately direct and fail closed. A top-level equation
+parameter declares a label with `label: binder`, an effect operation declares
+one with `label: Type`, and a constructor reuses its field label. The label is
+external API and need not equal its binder. Locals, anonymous functions,
+higher-order callees, patterned parameters, and unlabeled declarations accept
+only positional calls; attempting a named call reports E0309. Unknown,
+duplicate/overlapping, missing, malformed-declaration, and ambiguous-schema
+cases report E0310-E0314.
+
+Term and operation labels are persisted as a versioned `call-abi-v1`
+companion keyed by the exact callable hash. Renaming the callable or its local
+binder leaves that companion intact. Publishing different labels for the same
+hash is E0612, so never infer labels from binder names or replace a stored ABI.
+Constructor labels already belong to the constructor schema and content
+identity. Named syntax lowers to ordinary positional `App`/`Let`, so a valid
+named call hashes and runs like its explicit positional twin.
+
+For review, when a direct term or operation publishes a usable companion label for the hotspot,
+the checker warns on two still-valid positional shapes: W1206 for a direct
+`True`/`False` argument, and W1207 for a definite adjacent run of same-typed
+parameters. Prefer the callable's explicit labels.
+If a boolean controls behavior rather than reporting a predicate, prefer a
+purpose-specific sum such as `type Mode = | Live | DryRun`. These are advisory
+warnings, not type errors, and the checker emits neither warning for a named
+call.
 
 Top-level `name = value` and `name(args) = body` create definitions. A
 signature immediately before the matching definition is optional. Bare
@@ -376,7 +415,8 @@ type Result e a =
 ```
 
 Labels do not create record construction or generated accessors. Construct
-values positionally with `Canary(5)`; match either positionally with
+values either positionally with `Canary(5)` or by label with
+`Canary(percent: 5)`; match either positionally with
 `Canary(percent)` or by selection with `Canary(percent: value)`.
 
 Comma-separated surface groups accept an optional final comma. Compact
@@ -397,6 +437,10 @@ multi effect Choice where {
 
 once effect Abort a where {
   abort : () -> a
+}
+
+once effect Sending where {
+  send : (path: Text, body: Text) -> Text
 }
 ```
 
@@ -485,6 +529,10 @@ Useful structural operations include:
 
 `unquote` outside `quote` is invalid. A splice must produce `Code`. Nested
 quote levels are significant. `(expression : Type)` is a type annotation.
+Named calls are rejected with E1238 anywhere inside a surface quote, including
+inside a live `unquote`, because labels have no durable quoted carrier. Use a
+positional call in quoted code. Labeled constructor patterns are independently
+rejected there with E1237.
 
 `jqd { (bootstrap form) }` is the surface escape for a kernel form that cannot
 be represented without preserving an internal grouping. It is not general
@@ -498,16 +546,16 @@ This practical grammar covers ordinary public source:
 file        := top-item*
 top-item    := signature | definition | type-decl | effect-decl | expression
 signature   := name ":" type
-definition  := name ["(" patterns? ")"] "=" expression
+definition  := name ["(" ([label ":"] pattern ("," [label ":"] pattern)*)? ")"] "=" expression
 type-decl   := "type" Type type-vars? "=" ("|" constructor)+
 effect-decl := mode "effect" Effect type-vars? "where" "{" uniform-op-signature+ "}"
 | "effect" Effect type-vars? "where" "{" mode-op-signature+ "}"
-uniform-op-signature := name ":" "(" types? ")" "->" type
-mode-op-signature := mode name ":" "(" types? ")" "->" type
+uniform-op-signature := name ":" "(" ([label ":"] type ("," [label ":"] type)*)? ")" "->" type
+mode-op-signature := mode name ":" "(" ([label ":"] type ("," [label ":"] type)*)? ")" "->" type
 mode        := "once" | "multi"
 
 expression  := call ("|>" call)*
-call        := primary ("(" expressions? ")")*
+call        := primary ("(" ([label ":"] expression ("," [label ":"] expression)*)? ")")*
 primary     := literal | marked-text | name | tuple | list | block | fn | match | if
              | handle | quote | unquote | annotation
 marked-text := '$"' ("{{" | "{" expression "}" | character-or-escape)* '"'
@@ -737,6 +785,9 @@ units. Consequently:
 - Reordering members of a recursive SCC is stable.
 - Renaming a top-level display name changes the name index, not its object.
 - Provenance can change without changing the approved content hash.
+- Explicit term/operation call labels are a versioned, hash-bound companion
+  ABI. Binder and callable renames preserve it; a conflicting relabel is
+  E0612 rather than an identity-silent API change.
 
 Use `jac fmt --write` for canonical layout. Use stores and `jac diff` when you
 need rename classification, changed canonical subtrees, or affected
@@ -771,6 +822,10 @@ reparse to the same semantic top/member hashes; quoted constructor and
 operation intent remains encoded with `surface-ref-v0`. Publication is atomic
 and refuses an existing destination. The canonical bootstrap output erases
 comments, formatting, spans, documentation, and provenance metadata by design.
+It also contains only positional kernel applications and carries no
+`call-abi-v1` companion, so an exported `.jqd` declaration cannot by itself
+teach another surface source file its labels. The store companion is the
+cross-file named-call boundary.
 Export validates parsing, resolution, and canonical identity, but does not
 typecheck; use `jac check`, `jac run`, or `jac build` for that guarantee.
 Materialize stdin or other non-seekable input before export.
@@ -807,7 +862,8 @@ source remain under Apache-2.0. See `RUNTIME-EXCEPTION.md`, `LICENSE`, and
 `.jqd` is the permanent kernel/debug carrier used by the prelude, replay,
 explicit export, and implementation fixtures. It is an s-expression encoding
 of 27 fixed kernel forms. Native build also accepts `.jqd`, but ordinary users
-should write and build `.jac` directly.
+should write and build `.jac` directly. Bootstrap calls are always positional;
+there is no named-argument grammar in `.jqd`.
 
 The expression heads are `lit`, `var`, `ref`, `lam`, `app`, `let`, `match`,
 `tuple`, `handle`, `quote`, `unquote`, and `ann`; pattern heads are `pwild`,

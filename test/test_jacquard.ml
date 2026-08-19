@@ -87,6 +87,7 @@ let () =
       ("surface-lex", Test_surface_lex.suite);
       ("surface-parse", Test_surface_parse.suite);
       ("surface-patterns", Test_surface_patterns.suite);
+      ("surface-named-calls", Test_surface_named_calls.suite);
       ("surface-parse-recovery", Test_surface_parse_recovery.suite);
       ("surface-decls", Test_surface_decls.suite);
       ("surface-handlers-quote", Test_surface_handlers_quote.suite);

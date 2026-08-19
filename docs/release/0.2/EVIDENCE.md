@@ -32,8 +32,8 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `869`
-- Cram transcript files: `58`
+- Alcotest/QCheck cases: `877`
+- Cram transcript files: `59`
 - Documentation examples: `28` named examples across `8` documents
 
 The development suite also includes corpus goldens, release-manifest checks,
@@ -49,6 +49,9 @@ slow handling of the canonical depth-100,000 inputs.
 - `../0.1/` retains the historical core candidate boundary;
 - `../surface-syntax/` and `../dx-jac-export/` cover public `.jac`, formatting,
   direct native build, export, and parser hardening;
+- `../named-call-arguments/` covers the post-release direct named-call
+  projection and its additive identity-bound store companion; it does not
+  retroactively put named syntax in the frozen 0.2 binary artifacts;
 - `../explicit-dictionaries/` covers explicit `Eq`, `Ord`, `Show`, and `Num`
   values;
 - `../effect-linearity/` and `../effect-taxonomy/` cover affine `once`

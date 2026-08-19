@@ -56,6 +56,8 @@ type ctx = {
   mutable sites : match_site list;
       (** match sites recorded for the exhaustiveness pass (W3.5), which runs after inference so
           scrutinee types are fully solved *)
+  mutable review_warnings : Diag.t list;
+      (** surface-only positional-call warnings collected during inference, newest first *)
   mutable origins : (Hash.t * string) list;
       (** effect hash -> a callee that introduced it (the manifest diagnostic's call-chain endpoint,
           W3.6) *)
@@ -204,6 +206,147 @@ let show_scheme ctx s =
 
 let surface_form_is meta forms =
   match Meta.surface_form meta with Some form -> List.mem form forms | None -> false
+
+let is_bool_ty ctx t =
+  match (Types.repr t, Store.lookup_kind ctx.store "bool" Resolve.KType) with
+  | TCon (identity, []), Some { Resolve.hash; _ } -> Hash.equal identity hash
+  | _ -> false
+
+let rec same_review_type left right =
+  match (Types.repr left, Types.repr right) with
+  | TVar left, TVar right -> left == right
+  | TSkolem (left, _), TSkolem (right, _) -> left = right
+  | TCon (left_hash, left_args), TCon (right_hash, right_args) ->
+      Hash.equal left_hash right_hash
+      && List.length left_args = List.length right_args
+      && List.for_all2 same_review_type left_args right_args
+  | TTuple left, TTuple right ->
+      List.length left = List.length right && List.for_all2 same_review_type left right
+  | TArrow (left_params, left_row, left_result), TArrow (right_params, right_row, right_result) ->
+      List.length left_params = List.length right_params
+      && List.for_all2 same_review_type left_params right_params
+      && same_review_row left_row right_row
+      && same_review_type left_result right_result
+  | TResume (left_input, left_row, left_answer), TResume (right_input, right_row, right_answer) ->
+      same_review_type left_input right_input
+      && same_review_row left_row right_row
+      && same_review_type left_answer right_answer
+  | ( TVariadicArrow (left_param, left_row, left_result),
+      TVariadicArrow (right_param, right_row, right_result) ) ->
+      same_review_type left_param right_param
+      && same_review_row left_row right_row
+      && same_review_type left_result right_result
+  | TExactThunk left, TExactThunk right -> same_review_type left right
+  | _ -> false
+
+and same_review_row left right =
+  let left = Types.repr_row left and right = Types.repr_row right in
+  List.length left.effects = List.length right.effects
+  && List.for_all2 Hash.equal left.effects right.effects
+  &&
+  match (left.tail, right.tail) with
+  | RClosed, RClosed -> true
+  | RSkolem (left, _), RSkolem (right, _) -> left = right
+  | RVar left, RVar right -> left == right
+  | _ -> false
+
+let first_labeled_repeated_parameter_run slots parameters =
+  let includes_labeled_slot start length =
+    List.mapi (fun index slot -> (index, slot)) slots
+    |> List.exists (fun (index, slot) ->
+        index >= start && index < start + length && Option.is_some slot)
+  in
+  let rec extend length previous = function
+    | next :: rest when same_review_type previous next -> extend (length + 1) next rest
+    | rest -> (length, rest)
+  in
+  let rec find start = function
+    | first :: second :: rest when same_review_type first second ->
+        let length, remaining = extend 2 second rest in
+        if includes_labeled_slot start length then Some (start, length, first)
+        else find (start + length) remaining
+    | _ :: rest -> find (start + 1) rest
+    | [] -> None
+  in
+  find 0 parameters
+
+let call_argument_meta (argument : Kernel.expr) =
+  let field_meta = Meta.surface_container "call-argument" argument.meta in
+  if Meta.is_empty field_meta then argument.meta else field_meta
+
+let usable_review_call_abi ctx (fn : Kernel.expr) =
+  let names = Store.names_view ctx.store in
+  let candidate =
+    match fn.it with
+    | Kernel.Ref (hash, (Kernel.Term | Kernel.Op)) -> names.Resolve.callable_abi hash
+    | _ -> None
+  in
+  let usable slots =
+    let rec labeled_suffix saw_label = function
+      | [] -> true
+      | Some _ :: rest -> labeled_suffix true rest
+      | None :: _ when saw_label -> false
+      | None :: rest -> labeled_suffix false rest
+    in
+    let labels = List.filter_map Fun.id slots in
+    labels <> [] && labeled_suffix false slots
+    && List.length labels = List.length (List.sort_uniq String.compare labels)
+  in
+  Option.bind candidate (fun slots -> if usable slots then Some slots else None)
+
+let positional_call_review_warning ctx ~fn ~meta ~params ~args ~arg_tys =
+  if
+    (not (surface_form_is meta [ "call"; "pipe" ]))
+    || List.exists
+         (fun (argument : Kernel.expr) -> Option.is_some (Meta.surface_call_label argument.meta))
+         args
+  then None
+  else
+    match usable_review_call_abi ctx fn with
+    | None -> None
+    | Some slots -> (
+        let behavioral_bool =
+          List.find_mapi
+            (fun index (((argument : Kernel.expr), actual), slot) ->
+              match (argument.it, slot) with
+              | Kernel.Ref (constructor, Kernel.Con), Some _ when is_bool_ty ctx actual ->
+                  Some (index, argument, constructor)
+              | _ -> None)
+            (List.combine (List.combine args arg_tys) slots)
+        in
+        match behavioral_bool with
+        | Some (index, argument, constructor) ->
+            let literal = Surface_name.render Surface_name.Con (name_of ctx constructor) in
+            Some
+              (Diag.warning
+                 ?span:(Meta.span (call_argument_meta argument))
+                 ~domain:Surface ~code:"W1206"
+                 ~summary:"Positional boolean argument is difficult to review"
+                 ~cause:
+                   (Printf.sprintf
+                      "Argument %d is the Bool constructor `%s`; the behavior it selects is not \
+                       visible from its position."
+                      (index + 1) literal)
+                 ~next_step:
+                   "Use the callable's explicit named argument, or replace a behavioral Bool with \
+                    a sum type such as `type Mode = | Live | DryRun`."
+                 ~contrast:None ())
+        | None -> (
+            match first_labeled_repeated_parameter_run slots params with
+            | Some (start, length, parameter) ->
+                Some
+                  (Diag.warning ?span:(Meta.span meta) ~domain:Surface ~code:"W1207"
+                     ~summary:"Same-typed positional arguments are difficult to distinguish"
+                     ~cause:
+                       (Printf.sprintf
+                          "Parameters %d through %d all have type %s, so a reordered call can \
+                           still typecheck."
+                          (start + 1) (start + length) (show_ty ctx parameter))
+                     ~next_step:
+                       "Use the callable's explicit labels for the ambiguous suffix, or use a \
+                        purpose-specific sum type such as `type Mode = | Live | DryRun`."
+                     ~contrast:None ())
+            | None -> None))
 
 let eta_expansion_candidate ctx expected actual =
   let rec constraint_body ty =
@@ -1017,6 +1160,12 @@ and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(requir
                       ~code:"E0801" "%s: expected %s, got %s (%s)" what (show_ty ctx expected)
                       (show_ty ctx actual) detail))
             (List.combine args (List.combine params arg_tys));
+          let review_warning =
+            positional_call_review_warning ctx ~fn ~meta ~params ~args ~arg_tys
+          in
+          Option.iter
+            (fun warning -> ctx.review_warnings <- warning :: ctx.review_warnings)
+            review_warning;
           (* record who introduced each effect, for the manifest diagnostic (W3.6) *)
           (let callee =
              match fn.Kernel.it with
@@ -1778,6 +1927,7 @@ let make_ctx (store : Store.t) : (ctx, Diag.t list) result =
           level = 0;
           checking = [];
           sites = [];
+          review_warnings = [];
           origins = [];
           tier_apps = [];
           tier_ops = [];
@@ -1806,6 +1956,7 @@ let recovery_hashes identity bindings =
 let check_top_with ?recovery_identity ~recovery ctx (top : Kernel.top) :
     (top_sig, Diag.t list) result =
   ctx.sites <- [];
+  ctx.review_warnings <- [];
   match
     let partial =
       match top with
@@ -1863,11 +2014,19 @@ let check_top_with ?recovery_identity ~recovery ctx (top : Kernel.top) :
           | _ -> { names = []; row = None; warnings = [] })
     in
     (* exhaustiveness runs after inference so scrutinee types are solved (W3.5) *)
-    let warnings =
+    let match_warnings =
       if recovery && Recovery_marker.top top then (
         ctx.sites <- [];
         [])
       else check_matches ctx
+    in
+    let warning_offset diagnostic =
+      match Diag.span diagnostic with Some span -> span.Span.start_pos.offset | None -> max_int
+    in
+    let warnings =
+      List.rev ctx.review_warnings @ match_warnings
+      |> List.stable_sort (fun left right ->
+          Int.compare (warning_offset left) (warning_offset right))
     in
     { partial with warnings }
   with
@@ -1921,6 +2080,7 @@ module Recovery = struct
       level = 0;
       checking = [];
       sites = [];
+      review_warnings = [];
       origins = [];
       tier_apps = [];
       tier_ops = [];
@@ -2039,5 +2199,7 @@ let checker_codes : (string * string) list =
     ("E0818", "polymorphic reuse of a non-value local binding (value restriction)");
     ("E0819", "opaque Secret used by generic inspection or serialization");
     ("W0801", "redundant match clause");
+    ("W1206", "labeled API called with a positional Bool constructor literal");
+    ("W1207", "labeled API called across a definite repeated-type positional parameter run");
     ("E1202", "recovery marker rejected by the strict checker");
   ]

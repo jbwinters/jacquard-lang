@@ -286,6 +286,15 @@ bool.or-else  : (Bool, () ->{| e} Bool) ->{| e} Bool
 A future surface `&&` desugars to `match`, costing nothing. Until then the library
 refuses to pretend strict application short-circuits.
 
+`Bool` is still the right result for predicates and ordinary boolean data. For
+an argument that selects behavior, prefer a purpose-specific sum such as
+`type Mode = | Live | DryRun`; its constructors make the call and later match
+auditable. When a direct term or operation publishes a usable companion label
+for the relevant slot, the checker reports advisory W1206 for a direct positional `True`/`False`
+argument and W1207 for a definite adjacent run of same-typed positional
+parameters. Explicit named arguments suppress those warnings. Neither warning changes typing or claims that a
+human readability study has measured an improvement.
+
 ## 4. Ring 1: control effects and their handlers
 
 Four effects cover pure control. Each is shown with its declaration and the handlers

@@ -135,6 +135,8 @@
   ../docs/release/surface-syntax/DECISION.md
   ../docs/release/surface-syntax/FOLLOWUPS.md
   ../docs/release/surface-syntax/MANIFEST.sha256
+  ../docs/release/named-call-arguments/DECISION.md
+  ../docs/release/named-call-arguments/EVIDENCE.md
   (glob_files ../playground/governance/fixtures/generated/*.json)
   ../docs/release/structured-concurrency/EVIDENCE.md
   ../docs/release/structured-concurrency/LIMITS.md

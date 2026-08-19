@@ -50,7 +50,9 @@ type top_sig = {
   row : Types.row option;
   warnings : Diag.t list;
 }
-(** Signatures, optional expression effect row, and non-fatal diagnostics from one checked top. *)
+(** Signatures, optional expression effect row, and non-fatal diagnostics from one checked top.
+    W0801 covers redundant clauses; surface-authored positional term/operation calls with an
+    applicable explicit companion label may additionally produce review warnings W1206-W1207. *)
 
 val check_top : ctx -> Kernel.top -> (top_sig, Diag.t list) result
 (** [check_top ctx top] strictly checks resolved kernel input. Recovery markers fail with E1202;

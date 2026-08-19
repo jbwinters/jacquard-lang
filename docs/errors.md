@@ -90,6 +90,12 @@ malformed source, path, or host-message byte in a string field is replaced with 
 | E0306 | labeled constructor pattern selects one field more than once | `Snapshot(error: x, error: y)` |
 | E0307 | constructor has no usable field-label schema for a labeled pattern | `Pair(left: x)` when `Pair` has only positional fields |
 | E0308 | constructor declaration has ambiguous duplicate labels at labeled-pattern use | `Pair(left: x)` when `left` is declared twice |
+| E0309 | callee has no usable explicit named-call ABI | `local(value: 1)` for a local function, or `plain(value: 1)` for an unlabeled top-level term |
+| E0310 | named call selects an unknown label | `resize(image: img, size: 2)` when the declared label is `scale` |
+| E0311 | named call repeats or overlaps one argument slot | `choose(left: 1, left: 2)` or `resize(img, image: other)` |
+| E0312 | named call does not fill the exact arity | `choose(left: 1)` when both `left` and `right` are required |
+| E0313 | declaration has an invalid explicit named-call ABI | `bad(label: (x, y)) = x` or repeated parameter labels |
+| E0314 | constructor named-call schema is ambiguous or malformed | using labels on a constructor with duplicate labels or an unlabeled field after a labeled field |
 
 ### Resolution warnings (W03xx)
 
@@ -122,6 +128,7 @@ malformed source, path, or host-message byte in a string field is replaced with 
 | E0609 | invalid, mismatched, or unreadable diff operands | diffing a file against a store |
 | E0610 | diff source contains a top-level expression | diffing a runnable script instead of declarations |
 | E0611 | relational constituent store cannot be created or initialized | running `jacquard relate` with an unusable temporary directory |
+| E0612 | a callable hash is already bound to a different `call-abi-v1` companion | publishing new external labels for an unchanged term or operation identity |
 
 ## Prelude and grants (E07xx)
 
@@ -235,6 +242,7 @@ also emits E0817; consuming the captured resumption twice emits E0816.
 | E1235 | a signature or definition was lowered without its required file context | calling `lower_top` on a signature |
 | E1236 | missing, duplicated, or conflicting surface operation mode; an omitted mode includes migration guidance | `effect E where { op : () -> T }` |
 | E1237 | labeled constructor pattern appears inside quoted surface syntax | `quote { match packet { \| Packet(right: value) -> value } }` |
+| E1238 | named call appears anywhere inside quoted surface syntax, including a live unquote | `quote { unquote(choose(left: 1)) }` |
 
 ### Surface warnings (W12xx)
 
@@ -245,6 +253,8 @@ also emits E0817; consuming the captured resumption twice emits E0816.
 | W1203 | match scrutinee spans more than four source lines | manually bind the expression with `let`, then match on its name |
 | W1204 | shortest legal type/effect declaration header exceeds the canonical formatter width | shorten the declaration name or type-variable list |
 | W1205 | shortest legal `forall` prefix exceeds the canonical formatter width | split the declaration or reduce its quantified variables |
+| W1206 | positional term/operation call passes a direct `Bool` constructor literal in a slot with an explicit companion label | use that label, or a purpose-specific sum such as `Mode = \| Live \| DryRun` |
+| W1207 | positional term/operation call fills a definite adjacent run of same-typed parameters with an applicable companion label | call the ambiguous suffix by label so swaps remain visible in review |
 
 ## Explicit bootstrap export (E13xx)
 

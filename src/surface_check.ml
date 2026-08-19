@@ -471,7 +471,7 @@ let deduplicate diagnostics =
       if List.exists (same_diagnostic diagnostic) unique then unique else unique @ [ diagnostic ])
     [] diagnostics
 
-let analysis_names base additions =
+let analysis_names base additions call_abis =
   let lookup name =
     let local =
       List.filter_map
@@ -488,6 +488,11 @@ let analysis_names base additions =
     Resolve.lookup;
     all_names = (fun () -> List.map fst !additions @ base.Resolve.all_names ());
     constructor_fields = base.Resolve.constructor_fields;
+    callable_abi =
+      (fun hash ->
+        match List.find_opt (fun (known, _) -> Hash.equal known hash) !call_abis with
+        | Some (_, abi) -> Some abi
+        | None -> base.Resolve.callable_abi hash);
   }
 
 let recovery_member_hashes identity bindings =
@@ -497,6 +502,15 @@ let recovery_member_hashes identity bindings =
         (Printf.sprintf "surface-recovery-member:%s:%d:%s" identity index binding.Kernel.bname))
     bindings
 
+let binding_call_abi (binding : Kernel.binding) =
+  match binding.value.it with
+  | Kernel.Lam (parameters, _) ->
+      let slots =
+        List.map (fun parameter -> Meta.surface_call_label parameter.Kernel.meta) parameters
+      in
+      if List.for_all Option.is_none slots then None else Some slots
+  | _ -> None
+
 (** [analyze ~names ctx recovered] returns parser diagnostics, surface lints, and at most one
     resolution/checking error per lowered top-level island, all in deterministic source order. Holes
     behave as fresh types and contribute no effects, allowing later independent definitions to be
@@ -505,7 +519,8 @@ let recovery_member_hashes identity bindings =
 let analyze ~names ctx (recovered : Surface_ast.recovered) : report =
   let recovery = Check.start_recovery ctx in
   let additions = ref [] in
-  let evolving_names = analysis_names names additions in
+  let call_abis = ref [] in
+  let evolving_names = analysis_names names additions call_abis in
   let island = ref 0 in
   let diagnostics = ref (recovered.diagnostics @ lint ~names recovered.items) in
   let signatures = ref [] in
@@ -536,7 +551,14 @@ let analyze ~names ctx (recovered : Surface_ast.recovered) : report =
                         (fun binding hash ->
                           (binding.Kernel.bname, { Resolve.hash; kind = Resolve.KTerm }))
                         bindings hashes
-                      @ !additions
+                      @ !additions;
+                    call_abis :=
+                      (List.map2
+                         (fun binding hash ->
+                           Option.map (fun abi -> (hash, abi)) (binding_call_abi binding))
+                         bindings hashes
+                      |> List.filter_map Fun.id)
+                      @ !call_abis
                 | Kernel.Decl { Kernel.it = Kernel.DefType _ | Kernel.DefEffect _; _ }
                 | Kernel.Expr _ ->
                     ())))
