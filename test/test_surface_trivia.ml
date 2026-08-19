@@ -473,6 +473,15 @@ let test_remaining_delimited_containers () =
       ( "constructor pattern",
         "f = match x { | Some(y\n-- constructor-pattern-inner\n) -> y }\n",
         "-- constructor-pattern-inner" );
+      ( "labeled constructor pattern",
+        "f = match x { | Snapshot(error:\n\
+         -- selected-pattern-leading\n\
+         problem,\n\
+         -- selected-field-leading\n\
+         vendor: vendor\n\
+         -- labeled-pattern-inner\n\
+         ) -> problem }\n",
+        "-- selected-pattern-leading" );
       ("type tuple", "f : (T, U\n-- type-tuple-inner\n)\nf = 1\n", "-- type-tuple-inner");
       ("empty call", "f = call(-- empty-call-inner\n)\n", "-- empty-call-inner");
       ("empty definition", "f(-- empty-definition-inner\n) = 1\n", "-- empty-definition-inner");
@@ -490,7 +499,26 @@ let test_remaining_delimited_containers () =
       let printed = print_recovered source in
       Alcotest.(check int) (label ^ " comment count") 1 (count_occurrences printed comment);
       Alcotest.(check string) (label ^ " idempotent") printed (print_recovered printed))
-    printable
+    printable;
+
+  let labeled =
+    print_recovered
+      "f = match x { | Snapshot(error:\n\
+       -- selected-pattern-leading\n\
+       problem,\n\
+       -- selected-field-leading\n\
+       vendor: vendor\n\
+       -- labeled-pattern-inner\n\
+       ) -> problem }\n"
+  in
+  List.iter
+    (fun comment ->
+      Alcotest.(check int)
+        ("labeled pattern unique " ^ comment)
+        1
+        (count_occurrences labeled comment))
+    [ "-- selected-pattern-leading"; "-- selected-field-leading"; "-- labeled-pattern-inner" ];
+  Alcotest.(check string) "labeled pattern idempotent" labeled (print_recovered labeled)
 
 let test_block_container_provenance () =
   let singleton =

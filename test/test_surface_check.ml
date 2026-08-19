@@ -528,7 +528,8 @@ let test_wide_pattern_boundary_and_coexistence () =
       Alcotest.(check bool) "wide is warning" true (Diag.severity warning = Diag.Warning);
       Alcotest.(check bool)
         "bounded guidance" true
-        (contains "labeled constructor patterns are not available" (Diag.cause warning)
+        (contains "field positions hard to track" (Diag.cause warning)
+        && contains "Constructor(label: pattern" (Diag.next_step warning)
         && contains "four fields or fewer" (Diag.next_step warning))
   | found -> Alcotest.failf "expected one wide warning, got %d" (List.length found));
   let boundary = analyze "match 1 { | Four(a, b, c, d) -> 0 | _ -> 1 }\n" in
@@ -699,9 +700,10 @@ let test_warning_exact_order_nested_raw_and_redundancy () =
         "Correct the reference to an in-scope name or declaration.";
       expected_golden "warning" "W1202" "warnings.jac:2:24-43"
         "Constructor pattern is difficult to review"
-        "This positional constructor pattern has 5 fields; labeled constructor patterns are not \
-         available in 0.2."
-        "Keep positional constructor patterns to four fields or fewer.";
+        "This positional constructor pattern has 5 fields, which makes field positions hard to \
+         track."
+        "Select the relevant fields with `Constructor(label: pattern, ...)`, or keep the \
+         positional pattern to four fields or fewer.";
       expected_golden "error" "E0802" "warnings.jac:3:6-7" "This value is not callable"
         "the `|>` right-hand side has type int, which is not a function"
         "Make the right-hand side of `|>` callable.";
@@ -709,6 +711,10 @@ let test_warning_exact_order_nested_raw_and_redundancy () =
     rendered;
   let nested = analyze "match 1 { | Outer(Five(a, b, c, d, e)) -> 0 | _ -> 1 }\n" in
   Alcotest.(check int) "nested wide warning" 1 (List.length (diagnostics "W1202" nested));
+  let labeled = analyze "match 1 { | Five(first: a, fifth: e) -> e | _ -> 0 }\n" in
+  Alcotest.(check int)
+    "labeled patterns are not wide positional patterns" 0
+    (List.length (diagnostics "W1202" labeled));
   let raw =
     analyze
       "jqd { (match (lit 1) (clause (pcon x (pvar a) (pvar b) (pvar c) (pvar d) (pvar e)) (lit \

@@ -44,6 +44,108 @@ gate. The exact current evidence is E0301 and exit 1; the durable acceptance tar
     Next step: Correct the reference to an in-scope name or declaration.
   exit:1
 
+SX.24 labeled constructor patterns select only the fields a branch needs. Selection order is free,
+omitted labeled and unlabeled fields become positional wildcards before checking, and the existing
+pattern machinery therefore proves exhaustiveness and runs the same code in both engines.
+
+  $ cat > labeled-pattern.jac <<'EOF'
+  > type Snapshot = | Snapshot(id: Int, error: Int, Text, vendor: Text, tail: Int)
+  > match Snapshot(1, 2, "opaque", "acme", 5) {
+  >   | Snapshot(vendor: vendor, error: problem) -> problem
+  > }
+  > EOF
+  $ jac check labeled-pattern.jac
+  ok
+  $ jac run labeled-pattern.jac
+  2
+  $ jac build labeled-pattern.jac -o labeled-pattern-native >/dev/null
+  $ ./labeled-pattern-native
+  2
+
+A one-constructor partial pattern is exhaustive because every omitted field is a wildcard. A later
+partial selection of the same constructor is consequently redundant.
+
+  $ cat > labeled-exhaustive.jac <<'EOF'
+  > type Packet = | Packet(left: Int, right: Int)
+  > match Packet(1, 2) { | Packet(left: _) -> 7 }
+  > EOF
+  $ jac check labeled-exhaustive.jac
+  ok
+  $ jac run labeled-exhaustive.jac
+  7
+  $ cat > labeled-redundant.jac <<'EOF'
+  > type Packet = | Packet(left: Int, right: Int)
+  > match Packet(1, 2) {
+  >   | Packet(left: _) -> 1
+  >   | Packet(right: _) -> 2
+  > }
+  > EOF
+  $ jac check labeled-redundant.jac 2>&1 | grep 'warning\[W0801\]'
+  labeled-redundant.jac:4:3-26: warning[W0801]: This match clause is redundant
+
+Resolution expands labels in declaration order. The resulting canonical object is exactly the
+same as an explicit positional pattern with wildcards.
+
+  $ cat > labeled-hash.jac <<'EOF'
+  > type Snapshot = | Snapshot(id: Int, error: Int, Text, vendor: Text, tail: Int)
+  > inspect(value) = match value {
+  >   | Snapshot(vendor: vendor, error: problem) -> (problem, vendor)
+  > }
+  > EOF
+  $ cat > positional-hash.jac <<'EOF'
+  > type Snapshot = | Snapshot(id: Int, error: Int, Text, vendor: Text, tail: Int)
+  > inspect(value) = match value {
+  >   | Snapshot(_, problem, _, vendor, _) -> (problem, vendor)
+  > }
+  > EOF
+  $ jac hash labeled-hash.jac > labeled.hash 2>/dev/null
+  $ jac hash positional-hash.jac > positional.hash 2>/dev/null
+  $ cmp labeled.hash positional.hash && echo identical
+  identical
+
+Unknown selections, duplicate selections, constructors without labels, and ambiguous declaration
+labels fail at the constructor-pattern boundary. Positional and labeled fields cannot be mixed.
+
+  $ cat > labeled-invalid.jac <<'EOF'
+  > type Snapshot = | Snapshot(id: Int, error: Int)
+  > match Snapshot(1, 2) { | Snapshot(missing: x) -> x }
+  > EOF
+  $ jac check labeled-invalid.jac > invalid.out 2>&1; status=$?; grep -o 'error\[E0305\]' invalid.out; echo "exit:$status"
+  error[E0305]
+  exit:1
+  $ sed 's/missing: x/error: x, error: y/' labeled-invalid.jac > labeled-duplicate.jac
+  $ jac check labeled-duplicate.jac > duplicate.out 2>&1; status=$?; grep -o 'error\[E0306\]' duplicate.out; echo "exit:$status"
+  error[E0306]
+  exit:1
+  $ cat > labeled-unlabeled.jac <<'EOF'
+  > type Plain = | Plain Int
+  > match Plain(1) { | Plain(value: x) -> x }
+  > EOF
+  $ jac check labeled-unlabeled.jac > unlabeled.out 2>&1; status=$?; grep -o 'error\[E0307\]' unlabeled.out; echo "exit:$status"
+  error[E0307]
+  exit:1
+  $ cat > labeled-ambiguous.jac <<'EOF'
+  > type Ambiguous = | Ambiguous(value: Int, value: Int)
+  > match Ambiguous(1, 2) { | Ambiguous(value: x) -> x }
+  > EOF
+  $ jac check labeled-ambiguous.jac > ambiguous.out 2>&1; status=$?; grep -o 'error\[E0308\]' ambiguous.out; echo "exit:$status"
+  error[E0308]
+  exit:1
+  $ sed 's/missing: x/x, error: y/' labeled-invalid.jac > labeled-mixed.jac
+  $ jac check labeled-mixed.jac > mixed.out 2>&1; status=$?; grep -o 'error\[E1220\]' mixed.out | head -1; echo "exit:$status"
+  error[E1220]
+  exit:1
+
+Labels are surface elaboration metadata, so they cannot enter a quoted kernel payload. Positional
+constructor patterns remain available inside quotes.
+
+  $ cat > labeled-quoted.jac <<'EOF'
+  > quote { match packet { | Packet(right: value) -> value } }
+  > EOF
+  $ jac check labeled-quoted.jac > quoted.out 2>&1; status=$?; grep -o 'error\[E1237\]' quoted.out; echo "exit:$status"
+  error[E1237]
+  exit:1
+
 The surface formatter preserves trivia, applies B1/B5, and is idempotent.
 
   $ cat > format.jac <<'EOF'

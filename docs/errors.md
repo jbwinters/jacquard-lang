@@ -86,6 +86,10 @@ malformed source, path, or host-message byte in a string field is replaced with 
 | E0302 | name kind mismatch | `(ann (lit 1) (tref add))` — a term used as a type |
 | E0303 | duplicate binding name in a defterm group or surface definition run | two bindings named `f` |
 | E0304 | variable bound more than once in one binder group | `(lam ((pvar x) (pvar x)) ...)` |
+| E0305 | labeled constructor pattern selects an unknown field | `Snapshot(missing: x)` |
+| E0306 | labeled constructor pattern selects one field more than once | `Snapshot(error: x, error: y)` |
+| E0307 | constructor has no usable field-label schema for a labeled pattern | `Pair(left: x)` when `Pair` has only positional fields |
+| E0308 | constructor declaration has ambiguous duplicate labels at labeled-pattern use | `Pair(left: x)` when `left` is declared twice |
 
 ### Resolution warnings (W03xx)
 
@@ -230,6 +234,7 @@ also emits E0817; consuming the captured resumption twice emits E0816.
 | E1234 | generated lowering node lacks a real source span | lowering a hand-built spanless block AST |
 | E1235 | a signature or definition was lowered without its required file context | calling `lower_top` on a signature |
 | E1236 | missing, duplicated, or conflicting surface operation mode; an omitted mode includes migration guidance | `effect E where { op : () -> T }` |
+| E1237 | labeled constructor pattern appears inside quoted surface syntax | `quote { match packet { \| Packet(right: value) -> value } }` |
 
 ### Surface warnings (W12xx)
 

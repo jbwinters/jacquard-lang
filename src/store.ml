@@ -431,9 +431,27 @@ let hide_derived t hash =
       write_names t
   | Some (_, (_, Whole)) | None -> ()
 
-(** [names_view t] is the resolver's view of this store (the W1.4 seam). *)
+(** [names_view t] is the resolver's view of this store (the W1.4 seam). Constructor-schema lookup
+    returns declaration-order field labels only for constructor identities present in [t]; missing,
+    malformed, and non-constructor identities return [None]. *)
 let names_view t : Resolve.names =
-  { Resolve.lookup = (fun n -> lookup_all t n); all_names = (fun () -> List.map fst t.names) }
+  let constructor_fields hash =
+    match List.find_opt (fun (known, _) -> Hash.equal known hash) t.index with
+    | Some (_, (decl_hash, Constructor index)) -> (
+        match get t decl_hash with
+        | Ok { Kernel.it = Kernel.DefType { cons; _ }; _ } ->
+            Option.map
+              (fun constructor ->
+                List.map (fun field -> field.Kernel.label) constructor.Kernel.fields)
+              (List.nth_opt cons index)
+        | Ok _ | Error _ -> None)
+    | Some (_, (_, (Whole | Member _ | Operation _))) | None -> None
+  in
+  {
+    Resolve.lookup = (fun n -> lookup_all t n);
+    all_names = (fun () -> List.map fst t.names);
+    constructor_fields;
+  }
 
 (** [bind_name t name hash] binds [name] to a hash already known to the store. Fails on an
     unprintable name (E0605) and on a [defterm] group's whole hash (E0604) — groups are addressed

@@ -278,6 +278,31 @@ head(xs) =
   }
 ```
 
+For constructors with labeled fields, a match may select only the fields it
+needs:
+
+```jacquard
+type Snapshot =
+  | Snapshot(id: Int, error: Int, vendor: Text)
+
+describe(snapshot) =
+  match snapshot {
+    | Snapshot(vendor: vendor, error: problem) -> (problem, vendor)
+  }
+```
+
+Write every selection as `label: pattern`. There are no label puns, and one
+constructor pattern cannot mix labeled and positional fields. Selection order
+is free; resolution places fields in declaration order and treats omissions as
+`_`. Unknown or repeated selections fail, as do labeled patterns against an
+unlabeled or ambiguously labeled constructor. Nested and `as` patterns are
+valid after `:`. `Ctor(name)` remains an ordinary positional binder pattern.
+Labeled constructor patterns are refutable, just like positional constructor
+patterns, so they are not valid lambda parameters or `let` binders.
+Inside `quote { ... }`, constructor patterns must remain positional; labeled
+patterns there fail with E1237 because quoted code cannot carry their labels
+semantically.
+
 Use a braced block when an arm sequences work:
 
 ```jacquard
@@ -350,9 +375,9 @@ type Result e a =
   | Ok a
 ```
 
-Labels document constructor fields but do not create record syntax, labeled
-patterns, or generated accessors. Construct values with `Canary(5)` and match
-positionally with `Canary(percent)`.
+Labels do not create record construction or generated accessors. Construct
+values positionally with `Canary(5)`; match either positionally with
+`Canary(percent)` or by selection with `Canary(percent: value)`.
 
 Comma-separated surface groups accept an optional final comma. Compact
 formatting removes it, except for singleton tuples such as `(T,)`; when a
@@ -496,8 +521,9 @@ quote       := "quote" "{" expression "}"
 unquote     := "unquote" "(" expression ")"
 annotation  := "(" expression ":" type ")"
 
-pattern     := "_" | name | literal | Constructor ["(" patterns? ")"]
+pattern     := "_" | name | literal | Constructor ["(" (patterns | labeled-patterns)? ")"]
              | "(" patterns? ")" | pattern "as" name
+labeled-patterns := label ":" pattern ("," label ":" pattern)* [","]
 type        := type-application | tuple-type | function-type | forall-type
 function-type := "(" types? ")" "->{" effects? ["|" row-var] "}" type
 ```

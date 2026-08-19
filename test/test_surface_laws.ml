@@ -57,7 +57,7 @@ let test_one_page_grammar_snapshot () =
   Alcotest.(check bool) "L7 grammar stays within 100 nonblank lines" true (List.length lines <= 100);
   Alcotest.(check string)
     "L7 grammar snapshot (review docs/surface-syntax.md before updating)"
-    "bf77afeeb54671240dee71c3c6ef8ecc600094bf5c6bb24c96769fdd7e8fc46f"
+    "e0793e772b31cf5c2840ab00391f540c4fae7b067904a2687abf0a7273aa6e2d"
     (Hash.to_hex (Hash.of_string grammar))
 
 let format_surface ?width path source =
@@ -1118,14 +1118,14 @@ let validate_release_docs ~decision ~followups ~index =
       [
         "D36";
         "partial";
-        "The labeled-field portion shipped in SS.8: [declaration \
-         tests](../../../test/test_surface_decls.ml), [trivia \
-         tests](../../../test/test_surface_trivia.ml), and [printing \
-         tests](../../../test/test_surface_print.ml) pin parsing, metadata, trivia, lowering, and \
-         rendering. [CLI evidence](../../../test/cli/surface.t) pins `pair.left` as absent with \
-         `E0301`; generated accessor definitions and label validation, including duplicate-label \
-         rejection, are deliberate follow-ups. Labeled patterns remain deferred.";
-        "[D36 acceptance criteria](FOLLOWUPS.md#d36-generated-constructor-accessors)";
+        "The labeled-field declaration portion shipped in SS.8. SX.24 now ships partial \
+         `Ctor(label: pattern, ...)` matching, with \
+         [pattern](../../../test/test_surface_patterns.ml), \
+         [trivia](../../../test/test_surface_trivia.ml), and [CLI](../../../test/cli/surface.t) \
+         evidence for positional lowering, identity, checking, and execution. `pair.left` remains \
+         absent with E0301; generated accessors and their broader cross-constructor declaration \
+         validation remain deliberate follow-ups.";
+        "[D36 accessor acceptance criteria](FOLLOWUPS.md#d36-generated-constructor-accessors)";
       ];
       [
         "D37";
@@ -1284,7 +1284,7 @@ let validate_release_docs ~decision ~followups ~index =
          inconsistent in type across constructors, or colliding with an explicit term" );
       ("diagnostics", "each validation failure has a dedicated diagnostic code and exact span tests");
       ("preservation", "bootstrap identity, full tests, doctests, twins, and demos remain green");
-      ("excluded", "labeled patterns remain outside this acceptance gate");
+      ("excluded", "shipped labeled partial patterns are independent of this accessor gate");
     ];
   acceptance_contract "## D38 Variadic Text Join"
     [
@@ -1506,9 +1506,9 @@ let decision_semantic_mutations =
     ("D34", "shared case projection and escapes", "separate case projection without escapes");
     ("D35", "mandatory blocks for non-atomic bodies", "optional blocks for non-atomic bodies");
     ( "D36",
-      "generated accessor definitions and label validation, including duplicate-label rejection, \
-       are deliberate follow-ups",
-      "generated accessor definitions and label validation are shipped" );
+      "generated accessors and their broader cross-constructor declaration validation remain \
+       deliberate follow-ups",
+      "generated accessors and their broader cross-constructor declaration validation ship" );
     ( "D37",
       "dotted names as atomic and preserve namespace puns",
       "dotted names as segmented and reject namespace puns" );

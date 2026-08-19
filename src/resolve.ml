@@ -19,7 +19,8 @@
 
     Diagnostics (accumulated; resolution visits the whole tree): E0301 unknown name (with near-miss
     suggestions at edit distance <= 2), E0302 kind mismatch, E0303 duplicate binding name in a
-    [defterm] group, E0304 duplicate variable in one pattern. *)
+    [defterm] group, E0304 duplicate variable in one pattern, and E0305-E0308 labeled-pattern schema
+    failures. *)
 
 (** What a name in scope refers to. [KCon]/[KOp] hashes are the folded constructor/operation hashes
     (decl hash + ordinal, derived in W1.5). *)
@@ -27,19 +28,29 @@ type nkind = KTerm | KCon | KOp | KType | KEffect
 
 type entry = { hash : Hash.t; kind : nkind }
 
-type names = { lookup : string -> entry list; all_names : unit -> string list }
+type names = {
+  lookup : string -> entry list;
+  all_names : unit -> string list;
+  constructor_fields : Hash.t -> string option list option;
+}
 (** The resolver's view of a store. [lookup] returns EVERY binding of a name — the index is (name,
     kind)-keyed (SL.1), so an effect and its operation may share a bare name; kind- directed
-    positions pick their kind, and value positions use term > con > op precedence. *)
+    positions pick their kind, and value positions use term > con > op precedence.
+    [constructor_fields] returns the declaration-order field labels for a resolved constructor; it
+    is the elaboration seam for labeled partial patterns. *)
 
-let empty_names = { lookup = (fun _ -> []); all_names = (fun () -> []) }
+let empty_names =
+  { lookup = (fun _ -> []); all_names = (fun () -> []); constructor_fields = (fun _ -> None) }
 
 (** [of_alist entries] builds a stub index (duplicate names with distinct kinds allowed); the W1.6
-    store exposes the real one. *)
-let of_alist alist =
+    store exposes the real one. [constructor_fields] may provide a constructor's declaration-order
+    field labels for labeled-pattern expansion. It defaults to no schema, so a labeled pattern then
+    fails with a diagnostic instead of guessing from binder names. *)
+let of_alist ?(constructor_fields = fun _ -> None) alist =
   {
     lookup = (fun n -> List.filter_map (fun (m, e) -> if m = n then Some e else None) alist);
     all_names = (fun () -> List.map fst alist);
+    constructor_fields;
   }
 
 let kind_to_string = function
@@ -173,6 +184,105 @@ let pats_vars st ps =
   let seen = Hashtbl.create 8 in
   (seen, List.concat_map (pat_vars_seen st seen) ps)
 
+let labeled_pattern_diagnostic st ~meta ~code ~summary ~cause ~next_step =
+  report st
+    (Diag.error ?span:(Meta.span meta) ~domain:Resolution ~code ~summary ~cause ~next_step
+       ~contrast:None ())
+
+let pattern_field_meta (pattern : Kernel.pat) =
+  let field_meta = Meta.surface_container "pattern-field" pattern.meta in
+  if Meta.is_empty field_meta then pattern.meta else field_meta
+
+let omission_meta pattern_meta =
+  let meta = Meta.with_surface_generated "labeled-pattern-omission" Meta.empty in
+  match Meta.span pattern_meta with Some span -> Meta.with_span span meta | None -> meta
+
+let duplicate_labels labels =
+  let seen = Hashtbl.create 8 in
+  let duplicates = ref [] in
+  List.iter
+    (fun label ->
+      if Hashtbl.mem seen label then duplicates := label :: !duplicates
+      else Hashtbl.add seen label ())
+    labels;
+  List.sort_uniq String.compare !duplicates
+
+let expand_labeled_pattern st ~meta hash patterns =
+  let selections =
+    List.filter_map
+      (fun (pattern : Kernel.pat) ->
+        Option.map (fun label -> (label, pattern)) (Meta.surface_pattern_label pattern.meta))
+      patterns
+  in
+  if List.length selections <> List.length patterns then
+    labeled_pattern_diagnostic st ~meta ~code:"E0307"
+      ~summary:"This labeled constructor pattern has no usable field schema."
+      ~cause:"A labeled pattern field reached resolution without an explicit `label:` marker."
+      ~next_step:"Write every selected field as `label: pattern` and do not mix positional fields.";
+  let selected_labels = List.map fst selections in
+  let selected_duplicates = duplicate_labels selected_labels in
+  List.iter
+    (fun duplicate ->
+      let duplicate_meta =
+        match
+          List.find_opt (fun (label, _) -> String.equal label duplicate) (List.rev selections)
+        with
+        | Some (_, pattern) -> pattern_field_meta pattern
+        | None -> meta
+      in
+      labeled_pattern_diagnostic st ~meta:duplicate_meta ~code:"E0306"
+        ~summary:"A labeled constructor pattern selects one field more than once."
+        ~cause:(Printf.sprintf "Field `%s` is selected more than once in this pattern." duplicate)
+        ~next_step:"Keep one `label: pattern` selection for each constructor field.")
+    selected_duplicates;
+  match st.names.constructor_fields hash with
+  | None ->
+      labeled_pattern_diagnostic st ~meta ~code:"E0307"
+        ~summary:"This labeled constructor pattern has no usable field schema."
+        ~cause:"The resolved constructor does not expose field-label metadata."
+        ~next_step:"Use a stored constructor with labeled fields, or write a positional pattern.";
+      patterns
+  | Some fields ->
+      let declaration_labels = List.filter_map Fun.id fields in
+      let declaration_duplicates = duplicate_labels declaration_labels in
+      if declaration_labels = [] then begin
+        labeled_pattern_diagnostic st ~meta ~code:"E0307"
+          ~summary:"This labeled constructor pattern has no usable field schema."
+          ~cause:"The constructor declares no labeled fields."
+          ~next_step:"Use a positional pattern for this constructor.";
+        patterns
+      end
+      else if declaration_duplicates <> [] then begin
+        labeled_pattern_diagnostic st ~meta ~code:"E0308"
+          ~summary:"This constructor's field labels are ambiguous in a pattern."
+          ~cause:
+            (Printf.sprintf "The constructor declares duplicate field label(s): %s."
+               (String.concat ", " (List.map (Printf.sprintf "`%s`") declaration_duplicates)))
+          ~next_step:
+            "Rename the duplicate declaration fields before selecting constructor fields by label.";
+        patterns
+      end
+      else begin
+        List.iter
+          (fun (label, pattern) ->
+            if not (List.exists (Option.equal String.equal (Some label)) fields) then
+              labeled_pattern_diagnostic st ~meta:(pattern_field_meta pattern) ~code:"E0305"
+                ~summary:"This constructor has no field with the selected label."
+                ~cause:(Printf.sprintf "Field `%s` is not declared by this constructor." label)
+                ~next_step:"Select one of the constructor's declared field labels.")
+          selections;
+        List.map
+          (function
+            | None -> Kernel.{ it = PWild; meta = omission_meta meta }
+            | Some label -> (
+                match
+                  List.find_opt (fun (selected, _) -> String.equal selected label) selections
+                with
+                | Some (_, pattern) -> pattern
+                | None -> Kernel.{ it = PWild; meta = omission_meta meta }))
+          fields
+      end
+
 let rec resolve_pat st ~locals (p : Kernel.pat) : Kernel.pat =
   let it =
     match p.Kernel.it with
@@ -182,7 +292,14 @@ let rec resolve_pat st ~locals (p : Kernel.pat) : Kernel.pat =
           resolve_gref st ~meta:p.Kernel.meta ~locals ~expected_kind:KCon
             ~expected_desc:"a constructor" ~what:"constructor" con
         in
-        Kernel.PCon (con, List.map (resolve_pat st ~locals) ps)
+        let ps = List.map (resolve_pat st ~locals) ps in
+        let ps =
+          match (Meta.surface_form p.Kernel.meta, con) with
+          | Some "labeled-pattern", Kernel.Hashed hash ->
+              expand_labeled_pattern st ~meta:p.meta hash ps
+          | Some "labeled-pattern", Kernel.Named _ | (Some _ | None), _ -> ps
+        in
+        Kernel.PCon (con, ps)
     | Kernel.PTuple ps -> Kernel.PTuple (List.map (resolve_pat st ~locals) ps)
     | Kernel.PAs (x, inner) -> Kernel.PAs (x, resolve_pat st ~locals inner)
   in

@@ -201,6 +201,9 @@ let pp_gref lookup kind meta fmt = function
   | Kernel.Named name -> pp_named kind fmt name
   | Kernel.Hashed hash -> Format.pp_print_string fmt (name_for_hash lookup meta kind hash)
 
+let labeled_pattern_omission (pattern : Kernel.pat) =
+  Meta.surface_generated pattern.meta = Some "labeled-pattern-omission"
+
 let rec pp_pat context lookup fmt (pat : Kernel.pat) =
   pp_leading context pat.meta fmt;
   (match pat.it with
@@ -211,9 +214,12 @@ let rec pp_pat context lookup fmt (pat : Kernel.pat) =
       Format.fprintf fmt "@[<hv 2>";
       pp_gref lookup Surface_name.Con pat.meta fmt con;
       if args <> [] then begin
-        Format.fprintf fmt "(%a"
-          (pp_comma_list ~inner_metas:[ pat.meta ] context (pp_pat context lookup))
-          args;
+        let labeled = Meta.surface_form pat.meta = Some "labeled-pattern" in
+        let args =
+          if labeled then List.filter (fun arg -> not (labeled_pattern_omission arg)) args else args
+        in
+        let pp_arg = if labeled then pp_labeled_pat context lookup else pp_pat context lookup in
+        Format.fprintf fmt "(%a" (pp_comma_list ~inner_metas:[ pat.meta ] context pp_arg) args;
         Format.fprintf fmt ")"
       end;
       Format.fprintf fmt "@]"
@@ -237,6 +243,16 @@ let rec pp_pat context lookup fmt (pat : Kernel.pat) =
           Format.fprintf fmt "@[<hov>%a as %a@]" (pp_pat context lookup) inner
             (pp_named Surface_name.Term) name));
   pp_trailing context pat.meta fmt
+
+and pp_labeled_pat context lookup fmt (pattern : Kernel.pat) =
+  match Meta.surface_pattern_label pattern.meta with
+  | None -> raise Bug_unsupported_surface_form
+  | Some label ->
+      let field_meta = Meta.surface_container "pattern-field" pattern.meta in
+      pp_leading context field_meta fmt;
+      Format.fprintf fmt "@[<hov 2>%a:@ %a@]" (pp_named Surface_name.Term) label
+        (pp_pat context lookup) pattern;
+      pp_trailing context field_meta fmt
 
 and pp_row context lookup fmt (row : Kernel.row) =
   let opening = owned "row-open" row.wmeta in
