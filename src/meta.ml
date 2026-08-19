@@ -40,6 +40,7 @@ let key_surface_hole = "surface-hole"
 let key_surface_ref_kind = "surface-ref-kind"
 let key_surface_reference = "surface-reference"
 let key_surface_signature = "surface-signature"
+let key_surface_pattern_label = "surface-pattern-label"
 
 (** [surface_container_key kind] is the reserved key for one named delimiter container. *)
 let surface_container_key kind = "surface-container/" ^ kind
@@ -209,6 +210,16 @@ let surface_ref_kind t =
 (** [with_surface_ref_kind kind t] records an explicit surface value-reference kind. Callers use
     ["term"], ["con"], or ["op"]; unknown values are ignored by resolution. *)
 let with_surface_ref_kind kind t = add key_surface_ref_kind (Sym kind) t
+
+(** [surface_pattern_label t] is the explicitly authored field label on one selected child of a
+    labeled constructor pattern. Resolution consumes it when expanding the partial pattern to the
+    existing positional kernel representation; printing retains it as hash-excluded provenance. *)
+let surface_pattern_label t =
+  match find key_surface_pattern_label t with Some (Sym n | Text n) -> Some n | _ -> None
+
+(** [with_surface_pattern_label label t] records an explicit constructor-pattern field selection. It
+    never infers a label from a [PVar] spelling. *)
+let with_surface_pattern_label label t = add key_surface_pattern_label (Sym label) t
 
 (** [is_surface_reference t] is true only for a bare reference authored in `.jac`. Recovery and
     diagnostics use this hash-excluded marker to distinguish source references from bootstrap

@@ -42,6 +42,11 @@ let resolve names expression =
   | Ok expression -> expression
   | Error diagnostics -> fail_diags "resolve" diagnostics
 
+let resolve_codes names source =
+  match Resolve.resolve_expr names (lower source) with
+  | Ok _ -> Alcotest.failf "expected %S to fail resolution" source
+  | Error diagnostics -> List.map (fun diagnostic -> Diag.code_or_uncoded diagnostic) diagnostics
+
 let test_all_pattern_forms_and_literals () =
   check_equivalent "six pattern forms and match"
     {|match subject {
@@ -171,6 +176,134 @@ let test_resolved_hash_parity () =
     "resolved surface/bootstrap hash" true
     (Hash.equal (hash "surface hash" surface) (hash "bootstrap hash" kernel))
 
+let test_labeled_partial_patterns () =
+  let value_hash = Hash.of_string "labeled-pattern-value" in
+  let snapshot_hash = Hash.of_string "labeled-pattern-snapshot" in
+  let evolved_snapshot_hash = Hash.of_string "labeled-pattern-snapshot-evolved" in
+  let some_hash = Hash.of_string "labeled-pattern-some" in
+  let plain_hash = Hash.of_string "labeled-pattern-plain" in
+  let ambiguous_hash = Hash.of_string "labeled-pattern-ambiguous" in
+  let constructor_fields hash =
+    if Hash.equal hash snapshot_hash then
+      Some [ Some "id"; Some "error"; None; Some "vendor"; Some "tail" ]
+    else if Hash.equal hash evolved_snapshot_hash then
+      Some [ Some "id"; None; Some "error"; Some "vendor"; Some "tail"; None ]
+    else if Hash.equal hash plain_hash then Some [ None ]
+    else if Hash.equal hash ambiguous_hash then Some [ Some "value"; Some "value" ]
+    else None
+  in
+  let names =
+    Resolve.of_alist ~constructor_fields
+      [
+        ("value", { Resolve.hash = value_hash; kind = Resolve.KTerm });
+        ("snapshot", { Resolve.hash = snapshot_hash; kind = Resolve.KCon });
+        ("some", { Resolve.hash = some_hash; kind = Resolve.KCon });
+        ("plain", { Resolve.hash = plain_hash; kind = Resolve.KCon });
+        ("ambiguous", { Resolve.hash = ambiguous_hash; kind = Resolve.KCon });
+      ]
+  in
+  let labeled =
+    resolve names
+      (lower "match value { | Snapshot(vendor: Some(name) as vendor, error: problem) -> vendor }")
+  in
+  let positional =
+    resolve names
+      (lower "match value { | Snapshot(_, problem, _, Some(name) as vendor, _) -> vendor }")
+  in
+  Alcotest.(check bool)
+    "labeled expansion equals positional wildcard twin" true
+    (Form.equal_ignoring_meta (Kernel.expr_to_form positional) (Kernel.expr_to_form labeled));
+  let hash label expression =
+    match Canon.hash_expr expression with
+    | Ok hash -> hash
+    | Error diagnostics -> fail_diags label diagnostics
+  in
+  Alcotest.(check bool)
+    "labeled and positional hashes" true
+    (Hash.equal (hash "labeled" labeled) (hash "positional" positional));
+  let evolved_names =
+    Resolve.of_alist ~constructor_fields
+      [
+        ("value", { Resolve.hash = value_hash; kind = Resolve.KTerm });
+        ("snapshot", { Resolve.hash = evolved_snapshot_hash; kind = Resolve.KCon });
+        ("some", { Resolve.hash = some_hash; kind = Resolve.KCon });
+      ]
+  in
+  let evolved_labeled =
+    resolve evolved_names
+      (lower "match value { | Snapshot(vendor: Some(name) as vendor, error: problem) -> vendor }")
+  in
+  let evolved_positional =
+    resolve evolved_names
+      (lower "match value { | Snapshot(_, _, problem, Some(name) as vendor, _, _) -> vendor }")
+  in
+  Alcotest.(check bool)
+    "changed constructor identity selects its changed declaration schema" true
+    (Form.equal_ignoring_meta
+       (Kernel.expr_to_form evolved_positional)
+       (Kernel.expr_to_form evolved_labeled));
+  let lookup _kind hash =
+    if Hash.equal hash value_hash then Some "value"
+    else if Hash.equal hash snapshot_hash then Some "snapshot"
+    else if Hash.equal hash some_hash then Some "some"
+    else None
+  in
+  let printed =
+    match Surface_print.print_top ~lookup (Kernel.Expr labeled) with
+    | Ok text -> text
+    | Error diagnostics -> fail_diags "print labeled pattern" diagnostics
+  in
+  Alcotest.(check string)
+    "canonical declaration order"
+    "match value {\n  | Snapshot(error: problem, vendor: Some(name) as vendor) -> vendor\n}" printed;
+  (match labeled.it with
+  | Kernel.Match
+      ( _,
+        [
+          {
+            cpat =
+              {
+                it =
+                  PCon
+                    ( _,
+                      [
+                        { it = PWild; _ };
+                        { it = PVar "problem"; _ };
+                        { it = PWild; _ };
+                        {
+                          it = PAs ("vendor", { it = PCon (_, [ { it = PVar "name"; _ } ]); _ });
+                          _;
+                        };
+                        { it = PWild; _ };
+                      ] );
+                _;
+              };
+            _;
+          };
+        ] ) ->
+      ()
+  | _ -> Alcotest.fail "labeled pattern did not expand in declaration order");
+  Alcotest.(check (list string))
+    "unknown field" [ "E0305" ]
+    (resolve_codes names "match value { | Snapshot(missing: x) -> x }");
+  Alcotest.(check (list string))
+    "duplicate selection" [ "E0306" ]
+    (resolve_codes names "match value { | Snapshot(error: x, error: y) -> x }");
+  Alcotest.(check (list string))
+    "unlabeled constructor" [ "E0307" ]
+    (resolve_codes names "match value { | Plain(value: x) -> x }");
+  Alcotest.(check (list string))
+    "ambiguous declaration labels" [ "E0308" ]
+    (resolve_codes names "match value { | Ambiguous(value: x) -> x }");
+  ignore (resolve names (lower "match value { | Plain(field) -> field }"));
+  List.iter
+    (fun source -> Alcotest.(check bool) source true (List.mem "E1220" (parse_codes source)))
+    [
+      "match value { | Snapshot(id, error: problem) -> problem }";
+      "match value { | Snapshot(error: problem, id) -> problem }";
+      "match value { | Snapshot(error:) -> 0 }";
+    ]
+
 let later_arm_survives source =
   let recovered = Surface_parse.recover_string ~file:"recover-patterns.jac" source in
   Alcotest.(check bool) (source ^ " reports damage") true (recovered.diagnostics <> []);
@@ -250,11 +383,22 @@ let test_match_recovery () =
       "match x { | Broken 0 | Later -> 9 }";
       "match x { | Broken -> | Later -> 9 }";
       "match x { | Broken(x -> 0 | Later -> 9 }";
+      "match x { | Broken(field:) -> 0 | Later -> 9 }";
       "match x { | Broken -> f(x | Later -> 9 }";
       "match x { | Broken -> (1, x | Later -> 9 }";
       "match x { | Broken as Later -> 0 | Later -> 9 }";
       "match x { | Broken -> 0 | Later -> 9";
     ];
+  let malformed_labeled = "match x { | Broken(field:) -> 0 | Later -> 9 }" in
+  let recovered = Surface_parse.recover_string ~file:"recover-patterns.jac" malformed_labeled in
+  let replayed =
+    match Surface_print.print_recovered recovered with
+    | Ok text -> text
+    | Error diagnostics -> fail_diags "print recovered labeled pattern" diagnostics
+  in
+  Alcotest.(check string)
+    "malformed labeled pattern replays without crossing its recovery boundary" malformed_labeled
+    replayed;
   List.iter
     (fun source -> Alcotest.(check bool) source true (List.mem "E1220" (parse_codes source)))
     [ "match x {}"; "match x | Broken -> 0" ]
@@ -267,6 +411,7 @@ let suite =
     Alcotest.test_case "context restrictions and duplicates" `Quick
       test_contextual_restrictions_and_duplicates;
     Alcotest.test_case "resolved hash parity" `Quick test_resolved_hash_parity;
+    Alcotest.test_case "labeled partial constructor patterns" `Quick test_labeled_partial_patterns;
     Alcotest.test_case "ambiguous nested recovery" `Quick test_ambiguous_nested_recovery;
     Alcotest.test_case "missing match before definition" `Quick test_missing_match_before_definition;
     Alcotest.test_case "match recovery" `Quick test_match_recovery;

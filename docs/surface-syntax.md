@@ -72,8 +72,7 @@ top-item      := signature | definition | type-decl | effect-decl | expr | raw-t
 signature     := term-name ":" cont type
 definition    := term-name ["(" patterns? ")"] "=" cont expr
 type-decl     := "type" type-name type-vars? "=" cont "|"? constructor (seps? "|" cont constructor)*
-constructor   := con-name type-atom*
-| con-name "(" fields? ")"
+constructor   := con-name type-atom* | con-name "(" fields? ")"
 field         := [term-name ":" cont] type
 effect-decl   := mode "effect" effect-name type-vars? "where" "{" seps? uniform-op-signature (seps uniform-op-signature)* seps? "}"
 | "effect" effect-name type-vars? "where" "{" seps? mode-op-signature (seps mode-op-signature)* seps? "}"
@@ -108,8 +107,9 @@ annotation    := "(" expr ":" cont type ")"
 arm-body      := expr | block
 
 pattern       := pattern-atom ["as" binding-name]
-pattern-atom  := "_" | binding-name | literal | con-name ["(" patterns? ")"]
+pattern-atom  := "_" | binding-name | literal | con-name ["(" (patterns | labeled-patterns)? ")"]
 | "(" patterns? ")"
+labeled-patterns := term-name ":" cont pattern ("," term-name ":" cont pattern)* [","]
 type          := type-app | "(" types? ")" row cont type
 | "forall" forall-vars? "." cont type
 type-app      := type-atom type-atom*
@@ -582,12 +582,38 @@ Literal patterns cover `Text` exactly as they cover `Int` and `Real` (`PLit`
 doesn't distinguish); `| "operator" -> 3.0` and `| "ok" -> 200` are ordinary
 literal patterns, nothing special.
 
-Constructor patterns stay positional in v0; a labeled pattern syntax
-(matching D36's labeled fields, below) is deferred. A positional match past
-four fields is exactly the readability failure labeled patterns exist to fix
-(`Snapshot(_, error-rate, p95, _, db-lag, _, vendor, _)` is the canonical bad
-case), so the checker lints it rather than letting it accumulate silently;
-see §7.
+Constructor patterns may be positional or label-selecting. A labeled partial
+pattern uses the declaration's field labels and names only the fields relevant
+to the arm:
+
+```jacquard
+match snapshot {
+  | Snapshot(error: problem, vendor: "acme") -> problem
+  | _ -> 0
+}
+```
+
+Every selected field is written `label: pattern`; there are no label puns and
+labeled and positional fields cannot be mixed in one constructor pattern.
+Labels may be authored in any order. Resolution expands them in declaration
+order, inserting `_` for every omitted labeled or unlabeled field before type,
+redundancy, and exhaustiveness checking. `_`, nested constructors, and `as`
+patterns are all valid to the right of `:`. Canonical resolved printing uses
+declaration order and leaves omissions implicit.
+
+An unknown or repeated selection is an error. A constructor with no labels, or
+with duplicate declaration labels that make lookup ambiguous, cannot be used
+in labeled form; ordinary positional matching remains available. `Ctor(field)`
+is still the existing positional binder pattern, never a label pun, and
+`Ctor()` is the ordinary zero-argument constructor pattern. Constructor field
+labels already participate in the constructor's content identity, so changing
+the declaration produces the same identity evolution as any other constructor
+schema change. Bootstrap `.jqd` patterns remain positional and unchanged.
+
+A positional match past four fields is the readability failure labeled
+patterns exist to fix (`Snapshot(_, error-rate, p95, _, db-lag, _, vendor, _)`
+is the canonical bad case), so the checker lints it and recommends a labeled
+selection; see §7.
 
 When the scrutinee itself is a large multi-line expression, the printer does
 not hoist it into a preceding `let` on the author's behalf; an automatic
@@ -653,8 +679,8 @@ labeled (D36): `field: Type` inside a constructor's parens. SS.8 shipped this
 syntax together with field metadata, trivia, lowering, and canonical printing.
 It did not generate accessor definitions, so `fleet.inv` remains unresolved
 unless declared explicitly. Both field exercises invented this exact
-`Ctor(field: Type, ...)` notation independently. Labeled patterns are deferred
-past v0 (§5, Match).
+`Ctor(field: Type, ...)` notation independently. SX.24 now reuses those labels
+for partial constructor patterns (§5, Match) without generating accessors.
 
 Every operation has an explicit mode. A uniform effect uses the canonical
 `once effect` or `multi effect` shorthand; an effect containing both modes
@@ -797,8 +823,9 @@ abstract over yet). Custom operators, forever contentious, remain excluded
 from 0.1. Offside-rule layout (D27 alternative, revisit only with
 evidence that braces measurably hurt).
 
-Labeled constructor *patterns* (D36 defers them). Labeled declarations ship;
-generated accessors and label validation remain parked D36 follow-ups.
+Generated constructor accessors and their cross-constructor declaration
+validation remain parked D36 follow-ups. Labeled declarations and partial
+label-selecting constructor patterns ship without record syntax.
 Predicate/comparison naming (D39: `?`-suffixed predicates beside bare
 dictionary names, `gte?/lte?/gt?/lt?`, the `real.*` rename); both of these
 are stdlib content, not grammar, and land in docs/stdlib.md rather than
@@ -922,7 +949,7 @@ in commit messages and task dependencies.)
 | D33 | quote body | surface syntax inside `quote { }`, captured pre-resolution |
 | D34 | case convention | PascalCase for types/constructors/effects, kebab-case for terms/operations; pattern-position capitals are constructors |
 | D35 | handle delimiting | atomic body needs no wrapper; a non-atomic body takes an explicit `{ }` block; the clause list is always braced |
-| D36 | labeled fields | partial: `Ctor(field: Type, ...)` parsing, metadata, trivia, lowering, and printing ship; generated accessors and label validation have a separate follow-up gate; labeled patterns remain deferred |
+| D36 | labeled fields | partial: labeled declarations and SX.24 partial patterns ship; pattern use validates unknown, repeated, absent, and ambiguous labels; generated accessors and their broader declaration validation remain a separate follow-up gate |
 | D37 | namespace puns | blessed permanently: dotted names are one atomic token forever; a future field-access form will not use `.` |
 | D38 | text building | variadic `text.join` is the ordinary lowering target and remains directly callable |
 | D39 | comparison naming | `?`-suffixed predicates beside bare dictionary names; prelude gains `gt? gte? lt? lte?`; the `add-real` family migrates to `real.*` |

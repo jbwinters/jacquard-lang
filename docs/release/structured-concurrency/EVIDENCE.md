@@ -34,7 +34,7 @@ native Channel, actor, or supervision claim.
 | C3 | Scoped typed channels run through deterministic FIFO, seeded, replay, exhaustive, and cached interpreter scheduling with exact run/scope ownership, rendezvous and buffering, close, cancellation, and deadlock behavior. | `channel-contract`, `round-robin`, and `exhaustive-schedule` suites; `test/cli/task-values.t`; `test/cli/schedule-replay.t`; and the frozen traces below |
 | C4 | Not claimed: host asynchronous I/O, actors, and supervision are absent. | [LIMITS.md](LIMITS.md) |
 
-The current successor inventory is exactly 868 compiled Alcotest/QCheck cases, 58 recursive
+The current successor inventory is exactly 869 compiled Alcotest/QCheck cases, 58 recursive
 cram transcript files, and 28 named doctest examples across 8 documents. The
 repository release-law checks recompute those counts instead of trusting this
 paragraph.
@@ -760,7 +760,7 @@ opam exec -- dune build test/test_jacquard.exe
 
 The current inventory is mechanically checked against compiled discovery:
 
-- Alcotest/QCheck cases: `868`
+- Alcotest/QCheck cases: `869`
 - Cram transcript files: `58`
 
 The SC.14 baseline arithmetic remains exact: twelve compiled
@@ -812,7 +812,8 @@ producing the then-current `862 / 57 / 28` inventory. RW.6 hermetic relational
 cases add three compiled seam/cache cases and one registered Warp transcript,
 producing the then-current `865 / 58 / 28` inventory. RW.7 adds the three-case
 registered relational regression net without adding a cram file or doctest,
-producing the current `868 / 58 / 28` inventory.
+producing the `868 / 58 / 28` inventory. Task 171 adds the labeled-pattern
+contract case, producing the current `869 / 58 / 28` inventory.
 
 Native scheduling remains outside the current backend. Differential coverage is
 therefore limited to the supported case: an Async operation discharged by an

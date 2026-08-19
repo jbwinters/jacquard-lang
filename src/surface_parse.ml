@@ -373,6 +373,13 @@ let term_name = function
   | Surface_lex.Escaped (Surface_name.Term, name) -> Some name
   | _ -> None
 
+let pattern_label_ahead state =
+  match term_name (current state).Surface_lex.token with
+  | None -> None
+  | Some name ->
+      let next = token_at state (state.index + 1) in
+      if next.Surface_lex.token = Surface_lex.Colon then Some name else None
+
 let equation_definition_ahead_at state start =
   match (token_at state (start + 1)).Surface_lex.token with
   | Surface_lex.LParen ->
@@ -967,6 +974,74 @@ and parse_pattern_list state _opening =
       in
       loop []
 
+and parse_constructor_pattern_list state _opening =
+  skip_list_space state;
+  match (current state).Surface_lex.token with
+  | Surface_lex.RParen ->
+      let closing = advance state in
+      ([], closing, false)
+  | _ ->
+      let mode = ref None in
+      let saw_label = ref false in
+      let parse_item () =
+        let label = pattern_label_ahead state in
+        let labeled = Option.is_some label in
+        (match !mode with
+        | None -> mode := Some labeled
+        | Some expected when expected <> labeled ->
+            report state (current state)
+              "constructor patterns cannot mix positional fields with `label: pattern` fields"
+        | Some _ -> ());
+        match label with
+        | None -> parse_pattern state ~allow_newlines:true
+        | Some label ->
+            saw_label := true;
+            let label_token = advance state in
+            ignore (advance state);
+            skip_continuation state;
+            let pattern = parse_pattern state ~allow_newlines:true in
+            let field_meta = meta_from_token_to_meta label_token pattern.Surface_ast.meta in
+            Surface_ast.
+              {
+                pattern with
+                meta =
+                  pattern.meta
+                  |> Meta.with_surface_pattern_label label
+                  |> Meta.with_surface_container "pattern-field" field_meta;
+              }
+      in
+      let rec loop acc =
+        let pattern = parse_item () in
+        skip_list_space state;
+        match (current state).Surface_lex.token with
+        | Surface_lex.Comma ->
+            ignore (advance state);
+            skip_list_space state;
+            if (current state).Surface_lex.token = Surface_lex.RParen then begin
+              let closing = advance state in
+              (List.rev (pattern :: acc), closing, !saw_label)
+            end
+            else loop (pattern :: acc)
+        | Surface_lex.RParen ->
+            let closing = advance state in
+            (List.rev (pattern :: acc), closing, !saw_label)
+        | Surface_lex.Bar | Surface_lex.RBrace | Surface_lex.Eof ->
+            let closing = current state in
+            report state closing "expected `)` to close the constructor pattern";
+            (List.rev (pattern :: acc), closing, !saw_label)
+        | _ ->
+            let token = current state in
+            report state token
+              (Printf.sprintf "expected `,` or `)`, found %s" (token_description state token));
+            synchronize_paren state;
+            let closing =
+              if (current state).Surface_lex.token = Surface_lex.RParen then advance state
+              else current state
+            in
+            (List.rev (pattern :: acc), closing, !saw_label)
+      in
+      loop []
+
 and parse_pattern state ~allow_newlines =
   with_nesting state (fun () ->
       if allow_newlines then skip_list_space state else skip_comments state;
@@ -1068,8 +1143,9 @@ and parse_constructor_pattern state name_token name_meta constructor =
   match (current state).Surface_lex.token with
   | Surface_lex.LParen ->
       let opening = advance state in
-      let args, closing = parse_pattern_list state opening in
+      let args, closing, labeled = parse_constructor_pattern_list state opening in
       let meta = meta_with_span (Span.merge name_token.Surface_lex.span closing.span) in
+      let meta = if labeled then Meta.with_surface_form "labeled-pattern" meta else meta in
       Surface_ast.{ it = PCon (constructor, args); meta }
   | _ -> Surface_ast.{ it = PCon (constructor, []); meta = name_meta }
 
@@ -2808,7 +2884,7 @@ module Trivia_ownership = struct
       | PCon (_, args) | PTuple args -> List.concat_map (pat (depth + 1)) args
       | PAs (inner, _) -> pat (depth + 1) inner
     in
-    slot Pat node.meta @ children
+    container "pattern-field" node.meta @ slot Pat node.meta @ children
 
   and ty depth (node : Surface_ast.ty) =
     let children =
@@ -2967,7 +3043,9 @@ module Trivia_ownership = struct
   let is_structured_owner slot =
     match slot.role with
     | Container kind ->
-        String.starts_with ~prefix:"row-" kind || String.starts_with ~prefix:"forall-" kind
+        String.equal kind "pattern-field"
+        || String.starts_with ~prefix:"row-" kind
+        || String.starts_with ~prefix:"forall-" kind
     | _ -> false
 
   let doc_suffix_before line items =
@@ -3208,7 +3286,11 @@ module Trivia_ownership = struct
       | PTuple args -> PTuple (List.map (map_pat additions) args)
       | PAs (inner, name) -> PAs (map_pat additions inner, name)
     in
-    Surface_ast.{ it; meta = apply additions Pat pattern.meta }
+    Surface_ast.
+      {
+        it;
+        meta = pattern.meta |> apply additions Pat |> apply_container additions "pattern-field";
+      }
 
   and map_ty additions (annotation : Surface_ast.ty) =
     let it =

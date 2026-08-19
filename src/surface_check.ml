@@ -189,10 +189,13 @@ let warning_wide (pattern : Surface_ast.pat) fields =
     ~domain:Surface ~code:"W1202" ~summary:"Constructor pattern is difficult to review"
     ~cause:
       (Printf.sprintf
-         "This positional constructor pattern has %d fields; labeled constructor patterns are not \
-          available in 0.2."
+         "This positional constructor pattern has %d fields, which makes field positions hard to \
+          track."
          fields)
-    ~next_step:"Keep positional constructor patterns to four fields or fewer." ~contrast:None ()
+    ~next_step:
+      "Select the relevant fields with `Constructor(label: pattern, ...)`, or keep the positional \
+       pattern to four fields or fewer."
+    ~contrast:None ()
 
 let large_match_scrutinee_lines = 4
 
@@ -318,7 +321,8 @@ let rec lint_pat names constructors (pattern : Surface_ast.pat) =
       when Meta.surface_ref_kind pattern.meta <> Some "term"
            && (String_set.mem name constructors || constructor_in_names names name) ->
         [ warning_case pattern name ]
-    | Surface_ast.PCon (_, args) when List.length args > 4 ->
+    | Surface_ast.PCon (_, args)
+      when Meta.surface_form pattern.meta <> Some "labeled-pattern" && List.length args > 4 ->
         [ warning_wide pattern (List.length args) ]
     | _ -> []
   in
@@ -480,7 +484,11 @@ let analysis_names base additions =
         (fun entry -> not (List.mem entry.Resolve.kind local_kinds))
         (base.Resolve.lookup name)
   in
-  { Resolve.lookup; all_names = (fun () -> List.map fst !additions @ base.Resolve.all_names ()) }
+  {
+    Resolve.lookup;
+    all_names = (fun () -> List.map fst !additions @ base.Resolve.all_names ());
+    constructor_fields = base.Resolve.constructor_fields;
+  }
 
 let recovery_member_hashes identity bindings =
   List.mapi

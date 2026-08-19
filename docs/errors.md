@@ -86,6 +86,10 @@ malformed source, path, or host-message byte in a string field is replaced with 
 | E0302 | name kind mismatch | `(ann (lit 1) (tref add))` — a term used as a type |
 | E0303 | duplicate binding name in a defterm group or surface definition run | two bindings named `f` |
 | E0304 | variable bound more than once in one binder group | `(lam ((pvar x) (pvar x)) ...)` |
+| E0305 | labeled constructor pattern selects an unknown field | `Snapshot(missing: x)` |
+| E0306 | labeled constructor pattern selects one field more than once | `Snapshot(error: x, error: y)` |
+| E0307 | constructor has no usable field-label schema for a labeled pattern | `Pair(left: x)` when `Pair` has only positional fields |
+| E0308 | constructor declaration has ambiguous duplicate labels at labeled-pattern use | `Pair(left: x)` when `left` is declared twice |
 
 ### Resolution warnings (W03xx)
 
