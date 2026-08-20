@@ -6,7 +6,7 @@ artifacts and are not retroactively updated by DX.2.
 
 ## Current inventory
 
-- Alcotest/QCheck cases: `877`
+- Alcotest/QCheck cases: `882`
 - Cram transcript files: `59`
 - Doctest examples: `28` across 8 documents
 
@@ -61,8 +61,9 @@ and direct/fail-fast transitive-cancellation sentinel safety. It extends the
 existing concurrency transcript and adds no cram or doctest entry.
 Task 171 adds one labeled-pattern contract case. SX.23 then adds six compiled
 named-call cases, two D76 decision-mutation cases, and one CLI transcript,
-producing the current `877 / 59 / 28` successor inventory without changing the
-historical DX.2 publication.
+producing `877 / 59 / 28`. HB.1 adds five host-protocol schema/vector contract
+cases, producing the current `882 / 59 / 28` successor inventory without
+changing the historical DX.2 publication.
 
 ## Proved behavior
 

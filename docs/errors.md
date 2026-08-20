@@ -496,6 +496,36 @@ accepting client JSON. E1542 fails closed when the typed report cannot support
 that exact presentation. The browser receives no report on this failure and
 cannot replace or reinterpret the diagnostic.
 
+## Host protocol v0 (E16xx)
+
+HB.1 freezes these `process` diagnostics for the experimental
+`jacquard-host-v0` contract. No executable carrier ships yet. Before invocation
+a trustworthy carrier may return them in `fatal`; after invocation they appear
+in the single error `outcome`. Carrier loss can prevent Core from emitting a
+diagnostic, in which case E1611 belongs to host/operator evidence rather than a
+fabricated Core result.
+
+| Code | Meaning | Example |
+|---|---|---|
+| E1600 | unsupported host protocol version or carrier | selecting `jacquard-host-v1` from a v0-only hello |
+| E1601 | malformed frame or envelope | duplicate JSON keys, invalid UTF-8, or an unknown field |
+| E1602 | host protocol limit exceeded | a 1,048,577-byte frame or a nonpositive selected limit |
+| E1603 | target or pinned interface is invalid | an unresolved callable hash or mismatched parameter type |
+| E1604 | type or value is unsupported at the v0 boundary | trying to transport a Secret, Task, closure, or open type |
+| E1605 | capability envelope is invalid | an extra effect, duplicate operation, or `multi` registry entry |
+| E1606 | root operation is not configured | evaluation reaches an operation absent from the closed host registry |
+| E1607 | host refused authority before action | the adapter rejects a requested resource without starting I/O |
+| E1608 | response/order/finish-once invariant is invalid | the wrong request ID or a message after outcome |
+| E1609 | host reported a non-ambiguous timeout | a deadline expires before an outside action starts |
+| E1610 | host reported non-ambiguous shutdown | shutdown cancels the current response slot before action |
+| E1611 | carrier was lost | EOF inside a frame or process death without a terminal message |
+| E1612 | outside completion is unknown | a timed-out write may have committed and must not be retried |
+| E1613 | outside action definitely failed | the adapter reports a completed failure with no successful value |
+| E1614 | host cancelled non-ambiguously | explicit cancellation before an outside action starts |
+
+See `spec/host-protocol-v0.md` and its checked vector corpus for exact schemas,
+ordering, limits, terminal mapping, and non-retry behavior.
+
 ## Appendix: the W5.3 audit (ten message rewrites)
 
 Before/after wording improvements applied during the audit:

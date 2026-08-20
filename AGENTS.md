@@ -117,9 +117,11 @@ When adding valid corpus files, regenerate the golden hashes with
   `src/prelude.ml`.
 - Handlers and evaluation: `src/eval.ml`, `test/test_handlers.ml`,
   `test/test_gauntlet_handlers.ml`.
-- Future host integration contract: `docs/host-boundary.md`. Existing evaluator
-  capture and host-readiness modules are internal seams, not a public ABI;
-  adapters and application servers belong outside this repository.
+- Host integration contracts: `docs/host-boundary.md` and
+  `spec/host-protocol-v0.md`. HB.1 freezes envelopes and schema/state vectors,
+  but no executable carrier ships yet. Existing evaluator capture and
+  host-readiness modules are internal seams, not a public ABI; adapters and
+  application servers belong outside this repository.
 - Dist and inference: `prelude/06-dist.jqd`, `prelude/13-dist-lib.jqd`,
   `src/infer_dist.ml`, `test/test_infer.ml`.
 - Warp: `prelude/15-warp.jqd`, `prelude/16-gen.jqd`, `src/warp.ml`,

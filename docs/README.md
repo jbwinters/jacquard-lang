@@ -30,11 +30,14 @@ project shape from file names alone.
 - `../spec/jacquard-kernel-ast-m0.md`: implemented kernel AST source-of-truth
   specification.
 - `../spec/serialization.md`: canonical byte serialization and hashing.
+- `../spec/host-protocol-v0.md`: frozen HB.1 transport-neutral envelopes,
+  provisional stdio framing, boundary values, limits, stable failures, and
+  positive/hostile vectors. It is a contract, not a shipped carrier.
 - `development-plan.md`: completed historical task plan and milestone
   discipline; not the current backlog.
 - `host-boundary.md`: HB.0 transport-neutral ownership, trust, containment,
-  lifecycle, repository, and limitation contract for future integrations. No
-  foreign-host ABI or adapter ships from that design document.
+  lifecycle, repository, and limitation contract for integrations. Read it
+  before the concrete HB.1 protocol spec; neither document ships an adapter.
 - `concurrency.md`: phase-zero pure parallel hints, the staged
   structured-concurrency design, and SC.17 transitive cancellation semantics.
 

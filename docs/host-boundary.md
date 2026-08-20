@@ -1,8 +1,10 @@
 # Language-neutral host boundary
 
 Status: HB.0 design contract, August 2026. This document freezes the roles,
-trust boundary, and compatibility rules for later host integration. It does
-not ship a foreign-host ABI, process protocol, adapter, HTTP server, or host
+trust boundary, and compatibility rules for host integration. HB.1's concrete
+envelopes and vectors are frozen in
+[`spec/host-protocol-v0.md`](../spec/host-protocol-v0.md). Neither document
+ships a foreign-host ABI, executable carrier, adapter, HTTP server, or host
 scheduler.
 
 Read alongside:
@@ -45,9 +47,10 @@ that a malicious host obeyed them.
 implemented in `jacquard-lang`.
 
 **Program artifact** is checked Jacquard code selected by exact canonical
-identity. HB.0 does not introduce modules or a package format. HB.1 must define
-how one checked source/store artifact and one callable entry point are selected
-without treating a mutable display name as identity.
+identity. HB.0 does not introduce modules or a package format. HB.1 selects one
+checked callable by exact stored term-member hash without treating a mutable
+display name as identity; it explicitly declines to invent a module or
+export-name identity.
 
 **Host** is the trusted application or process that invokes Core and owns
 operating-system resources. There is no `Host` effect. A host services exact
@@ -93,8 +96,9 @@ host -> Core: one typed response or refusal for the current request
 Core -> host: one successful value or one structured failure
 ```
 
-This sequence describes meaning, not bytes. HB.1 will freeze the concrete
-envelopes, framing, version negotiation, limits, and conformance vectors.
+This sequence describes meaning, not bytes. HB.1 freezes the concrete
+envelopes, framing, version negotiation, limits, and schema/state conformance
+vectors in [`spec/host-protocol-v0.md`](../spec/host-protocol-v0.md).
 
 The following invariants already apply:
 
@@ -169,11 +173,11 @@ actually happened.
 
 ## 6. Failure, cancellation, and retry
 
-Host failures do not become arbitrary successful Jacquard values. HB.1 must
-define structured categories for at least unsupported operation, refused
-authority, invalid response, timeout, host shutdown, carrier failure, and an
-outside action whose completion is unknown. Exact diagnostic codes and value
-schemas belong to that next contract.
+Host failures do not become arbitrary successful Jacquard values. HB.1 defines
+stable E16xx categories for unsupported operation, refused authority, invalid
+response, timeout, host shutdown, carrier failure, and an outside action whose
+completion is unknown. Their exact envelopes and boundary-value subset are in
+the protocol spec.
 
 Cancellation is cooperative:
 
@@ -214,10 +218,10 @@ more.
 
 Strict schedule replay and world-response replay are different claims. The
 existing deterministic scheduler can validate recorded runnable queues and
-choices; it does not reconstruct arbitrary external state. HB.1 must state
-which host observations a fixture supplies, and later C4 work must state which
-readiness events a host schedule records. Replay must never fall back to live
-I/O after drift.
+choices; it does not reconstruct arbitrary external state. HB.1's labeled
+evidence schema states which host observations a fixture supplies, and later
+C4 work must state which readiness events a host schedule records. Replay must
+never fall back to live I/O after drift.
 
 ## 8. Existing implementation seams are not the boundary
 
@@ -239,9 +243,9 @@ matrix.
 
 ## 9. Repository and product boundary
 
-`jacquard-lang` owns this contract, its carrier implementation inside Core,
-canonical fixtures, and language/runtime evidence. It may contain a tiny fake
-host used only to prove conformance.
+`jacquard-lang` owns this contract, the HB.1 schema/state vectors, its later
+carrier implementation inside Core, executable fixtures, and language/runtime
+evidence. It may contain a tiny fake host used only to prove conformance.
 
 The private `jacquard-host` repository owns real adapters, sockets,
 persistence, the minimal serial HTTP integration, and the requirements report
@@ -264,7 +268,7 @@ headers are not smuggled into HB.0.
 |---|---|---|
 | First-party programs | safety for hostile uploaded Jacquard code | separate-process or equivalent isolation design, hostile resource tests, and reviewed threat model |
 | Trusted adapter and OS | protection from a lying host or broader OS credentials | independently enforced isolation/authentication plus external security review |
-| No carrier yet | interoperability or embedding support | HB.1 schema, implementation, canonical fixtures, and evidence |
+| No carrier implementation yet | interoperability or embedding support | HB.2 implementation followed by HB.3 executable cross-language fixtures and evidence |
 | Experimental process carrier first | permanent ABI stability or low-overhead embedding | two independent adapters and one real integration pass the frozen fixtures before v1 |
 | One serial invocation | concurrent requests, streaming, or throughput | demonstrated need followed by the C4 scheduler contract and resource evidence |
 | No automatic side-effect retry | transparent recovery from ambiguous completion | per-operation idempotency, receipt, and crash/recovery contract |
@@ -281,8 +285,9 @@ exact reviewed change that removes one. Silence never widens the claim.
 HB.0 closes when this role/trust contract is reviewed. It authorizes no runtime
 code by itself.
 
-HB.1 freezes concrete values, envelopes, framing, version negotiation,
-resource ceilings, failure schemas, and canonical positive/hostile vectors.
+HB.1 is frozen by [`spec/host-protocol-v0.md`](../spec/host-protocol-v0.md):
+concrete values, envelopes, framing, version negotiation, resource ceilings,
+failure schemas, and canonical positive/hostile schema/state vectors.
 
 HB.2 implements the opt-in serial carrier and interpreter seam without HTTP,
 SQLite, concurrency, or a new kernel form.
