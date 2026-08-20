@@ -32,7 +32,7 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `882`
+- Alcotest/QCheck cases: `900`
 - Cram transcript files: `59`
 - Documentation examples: `28` named examples across `8` documents
 

@@ -32,7 +32,8 @@ project shape from file names alone.
 - `../spec/serialization.md`: canonical byte serialization and hashing.
 - `../spec/host-protocol-v0.md`: frozen HB.1 transport-neutral envelopes,
   provisional stdio framing, boundary values, limits, stable failures, and
-  positive/hostile vectors. It is a contract, not a shipped carrier.
+  positive/hostile vectors. HB.2a implements its strict library codec, but no
+  runnable carrier ships yet.
 - `development-plan.md`: completed historical task plan and milestone
   discipline; not the current backlog.
 - `host-boundary.md`: HB.0 transport-neutral ownership, trust, containment,
