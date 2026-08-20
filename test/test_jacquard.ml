@@ -24,6 +24,7 @@ let () =
       ("prelude", Test_prelude.suite);
       ("effect-taxonomy", Test_effect_taxonomy.suite);
       ("host-protocol-v0", Test_host_protocol_vectors.suite);
+      ("host-protocol-codec", Test_host_protocol_codec.suite);
       ("scheduler-core", Test_scheduler_core.suite);
       ("channel-contract", Test_channel_contract.suite);
       ("structured-scope", Test_structured_scope.suite);

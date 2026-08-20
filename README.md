@@ -199,7 +199,7 @@ studied during planning; `docs/ast.md` records each debt in detail:
 The prototype is complete against its original core plan and has since added
 the public surface syntax, ringed standard library, Warp properties and cache,
 native compilation, packaged binaries, and product-scale case studies. The RC1
-semantic boundary remains historical; the current successor is pinned by 882
+semantic boundary remains historical; the current successor is pinned by 900
 Alcotest/QCheck cases, 59 cram transcripts, 28 documentation examples, native
 sanitizer/leak/fuzz lanes, and fresh-clone evidence workflows. RC2 repaired
 binary-demo packaging; RC3 adds an explicit
@@ -600,6 +600,8 @@ Key release docs:
 - `src/infer_dist.ml`: exact enumeration and likelihood weighting.
 - `src/diff.ml`: canonical-structure diff over stores.
 - `src/warp.ml`: Warp test discovery, running, cache, and properties.
+- `src/host_protocol_v0.ml`: strict library-only framing, JSON, limit-selection,
+  and shutdown codec for the experimental host protocol; no worker entry point.
 
 ## Documentation Map
 

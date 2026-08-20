@@ -243,9 +243,10 @@ matrix.
 
 ## 9. Repository and product boundary
 
-`jacquard-lang` owns this contract, the HB.1 schema/state vectors, its later
-carrier implementation inside Core, executable fixtures, and language/runtime
-evidence. It may contain a tiny fake host used only to prove conformance.
+`jacquard-lang` owns this contract, the HB.1 schema/state vectors, the
+`Host_protocol_v0` strict framing/selection codec, its later runnable carrier
+inside Core, executable fixtures, and language/runtime evidence. It may
+contain a tiny fake host used only to prove conformance.
 
 The private `jacquard-host` repository owns real adapters, sockets,
 persistence, the minimal serial HTTP integration, and the requirements report
@@ -268,7 +269,7 @@ headers are not smuggled into HB.0.
 |---|---|---|
 | First-party programs | safety for hostile uploaded Jacquard code | separate-process or equivalent isolation design, hostile resource tests, and reviewed threat model |
 | Trusted adapter and OS | protection from a lying host or broader OS credentials | independently enforced isolation/authentication plus external security review |
-| No carrier implementation yet | interoperability or embedding support | HB.2 implementation followed by HB.3 executable cross-language fixtures and evidence |
+| No runnable carrier yet | interoperability or embedding support | completion of HB.2 descriptor/evaluator/lifecycle slices followed by HB.3 executable cross-language fixtures and evidence |
 | Experimental process carrier first | permanent ABI stability or low-overhead embedding | two independent adapters and one real integration pass the frozen fixtures before v1 |
 | One serial invocation | concurrent requests, streaming, or throughput | demonstrated need followed by the C4 scheduler contract and resource evidence |
 | No automatic side-effect retry | transparent recovery from ambiguous completion | per-operation idempotency, receipt, and crash/recovery contract |
