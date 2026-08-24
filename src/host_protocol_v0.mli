@@ -1,9 +1,9 @@
 (** Strict bounded codecs for the provisional [jacquard-host-v0] process carrier.
 
     This module implements transport framing, structural JSON checks, limit negotiation, the
-    selected shutdown envelope, and the frozen first-order type/value descriptors. It does not
-    select a store target, validate a callable interface, evaluate code, dispatch host operations,
-    or expose a runnable worker. *)
+    selected shutdown envelope, the frozen first-order type/value descriptors, and preflight for one
+    exact checked invocation. It does not evaluate code, dispatch host operations, or expose a
+    runnable worker. *)
 
 val protocol : string
 (** The one protocol version accepted by this codec. *)
@@ -67,6 +67,35 @@ val encode_boundary_value : budget:boundary_budget -> Value.t -> (Yojson.Safe.t,
 (** [encode_boundary_value ~budget value] emits the deterministic lossless descriptor for a
     boundary-safe Core value. Constructor display names never cross the wire. Opaque, callable, or
     run-owned values return E1604; malformed UTF-8 and exceeded limits retain E1601/E1602. *)
+
+type operation_binding = {
+  effect_identity : Hash.t;
+  operation : Hash.t;
+  parameters : Types.ty list;
+  result : Types.ty;
+}
+(** One exact, checked, once-mode operation admitted by an invocation's closed host registry. *)
+
+type invocation = {
+  invocation_id : string;
+  callable : Hash.t;
+  parameters : Types.ty list;
+  effects : Hash.t list;
+  result : Types.ty;
+  arguments : Value.t list;
+  operations : operation_binding list;
+}
+(** Immutable preflight output for the later serial worker. Types, effects, values, and operation
+    contracts come from the checked store rather than mutable display names. *)
+
+val parse_invoke :
+  limits:limits -> checker:Check.ctx -> Yojson.Safe.t -> (invocation, Diag.t list) result
+(** [parse_invoke ~limits ~checker json] validates the exact v0 invoke envelope, fixed invocation
+    ID, public stored term target and complete reachable closure, closed monomorphic first-order
+    arrow, structurally identical interface, typed positional values, exact effect grants, and
+    sorted unique once-operation registry. It returns E1600-E1605 according to the frozen fail-fast
+    order and never evaluates the target or calls an adapter. A registry may be partial or empty;
+    reaching an omitted operation is a later worker concern. *)
 
 val limits_to_yojson : limits -> Yojson.Safe.t
 (** [limits_to_yojson limits] emits every limit field once in deterministic lexical order. *)

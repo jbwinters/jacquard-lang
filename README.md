@@ -199,7 +199,7 @@ studied during planning; `docs/ast.md` records each debt in detail:
 The prototype is complete against its original core plan and has since added
 the public surface syntax, ringed standard library, Warp properties and cache,
 native compilation, packaged binaries, and product-scale case studies. The RC1
-semantic boundary remains historical; the current successor is pinned by 900
+semantic boundary remains historical; the current successor is pinned by 925
 Alcotest/QCheck cases, 59 cram transcripts, 28 documentation examples, native
 sanitizer/leak/fuzz lanes, and fresh-clone evidence workflows. RC2 repaired
 binary-demo packaging; RC3 adds an explicit
@@ -624,7 +624,10 @@ Deeper design references:
 - `spec/serialization.md`: canonical byte format.
 - `docs/host-boundary.md`: host/Core ownership and trust boundary.
 - `spec/host-protocol-v0.md`: frozen experimental host envelopes, process
-  framing, limits, failures, and conformance-vector contract.
+  framing, limits, failures, and conformance-vector contract. The library now
+  validates one exact checked invocation—including its store closure, pinned
+  interface, typed arguments, grants, and closed once-operation registry—but
+  does not yet run it or expose a process worker.
 - `docs/stdlib.md`: prelude and ringed standard library.
 - `docs/warp-testing.md`: Warp testing model.
 - `docs/errors.md`: diagnostic catalog.
@@ -718,7 +721,8 @@ proofs also do not ship. World grants remain coarse. See
 `docs/release/structured-concurrency/LIMITS.md` for the successor C0-C3 boundary.
 `docs/host-boundary.md` freezes the ownership and trust model, and
 `spec/host-protocol-v0.md` freezes the experimental language-neutral envelopes,
-process framing, limits, and schema/state vectors. No executable host carrier,
+process framing, limits, and schema/state vectors. Core can preflight one exact
+invoke envelope against a prepared checker, but no executable host carrier,
 stable ABI, adapter, or HTTP server ships in this repository today.
 The deterministic Workspace v0 governance boundary is separately advertised
 as an evidence-backed research reference implementation, not as a sandbox or

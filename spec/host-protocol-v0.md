@@ -596,8 +596,11 @@ scalar UTF-8, recursive duplicate-key checks, exact hard/selected limits, and
 the shutdown envelope. HB.2b1 adds exact nominal/tuple and lossless
 Int/Real/Text/Hash/tuple/saturated-constructor codecs, shared per-frame node
 accounting, selected descriptor limits, and constructor identity/arity
-resolution. It does not expose a runnable worker; target/interface/capability
-preflight, evaluation, and effect exchange remain later HB.2 slices.
+resolution. HB.2b2 adds exact invoke-envelope and fixed-ID checks, complete
+stored-target closure validation, structural checked-interface equality, typed
+arguments including constructor fields, exact grants, and the sorted unique
+public `once` operation registry. It does not expose a runnable worker;
+evaluation and effect exchange remain later HB.2 slices.
 
 A conforming implementation must:
 
