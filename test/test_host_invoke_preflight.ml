@@ -323,6 +323,26 @@ let missing_closure_case () =
   Sys.remove (Store.object_path store dependency.Canon.decl_hash);
   (checker, named "boundary.dependent" target, required_hash store "text" Resolve.KType)
 
+let hidden_closure_case () =
+  let store = expect_ok "open hidden-closure store" (Store.open_store (fresh_dir "hidden")) in
+  seed_primitives store;
+  let dependency =
+    put_src store
+      "(defterm ((binding boundary.hidden-dependency ((tarrow () (row) (tref text))) (lam () (lit \
+       \"dependency\")))))"
+  in
+  let target =
+    put_src store
+      "(defterm ((binding boundary.hidden-dependent ((tarrow () (row) (tref text))) (lam () (app \
+       (var boundary.hidden-dependency))))))"
+  in
+  Store.hide_derived store (named "boundary.hidden-dependency" dependency);
+  let checker = expect_ok "create hidden-closure checker" (Check.make_ctx store) in
+  ( store,
+    checker,
+    named "boundary.hidden-dependent" target,
+    required_hash store "text" Resolve.KType )
+
 let test_complete_reachable_store_closure_is_required () =
   let checker, target, text = missing_closure_case () in
   let json =
@@ -330,6 +350,17 @@ let test_complete_reachable_store_closure_is_required () =
       ~operations:[]
   in
   expect_code "missing reachable object" "E1603"
+    (Host.parse_invoke ~limits:Host.hard_limits ~checker json);
+  let store, checker, target, text = hidden_closure_case () in
+  let json =
+    invoke_json ~target ~parameters:[] ~effects:[] ~result:(nominal text []) ~arguments:[]
+      ~operations:[]
+  in
+  ignore
+    (expect_ok "hidden resolved dependency remains reachable"
+       (Host.parse_invoke ~limits:Host.hard_limits ~checker json));
+  Store.hide_derived store target;
+  expect_code "hidden root is not public" "E1603"
     (Host.parse_invoke ~limits:Host.hard_limits ~checker json)
 
 let test_interface_and_argument_count_must_equal_checked_arrow () =
@@ -418,8 +449,8 @@ let test_selected_argument_effect_operation_and_node_limits_are_aggregate () =
        ~limits:{ Host.hard_limits with max_operations = 1 }
        fixture
        (effectful_invoke ~operations:[ entry; entry ] fixture));
-  expect_code "shared type/value node budget" "E1602"
-    (parse ~limits:{ Host.hard_limits with max_value_nodes = 4 } fixture (pure_invoke fixture))
+  expect_code "type/value node budget is shared across interface and arguments" "E1602"
+    (parse ~limits:{ Host.hard_limits with max_value_nodes = 8 } fixture (pure_invoke fixture))
 
 let test_capabilities_and_registry_are_exact_closed_and_once () =
   let fixture = Lazy.force fixture in

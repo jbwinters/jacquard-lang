@@ -93,9 +93,9 @@ val parse_invoke :
 (** [parse_invoke ~limits ~checker json] validates the exact v0 invoke envelope, fixed invocation
     ID, public stored term target and complete reachable closure, closed monomorphic first-order
     arrow, structurally identical interface, typed positional values, exact effect grants, and
-    sorted unique once-operation registry. It returns E1600-E1605 according to the frozen fail-fast
-    order and never evaluates the target or calls an adapter. A registry may be partial or empty;
-    reaching an omitted operation is a later worker concern. *)
+    sorted unique once-operation registry. It returns E1600-E1605 or E1608 according to the frozen
+    fail-fast order and never evaluates the target or calls an adapter. A registry may be partial or
+    empty; reaching an omitted operation is a later worker concern. *)
 
 val limits_to_yojson : limits -> Yojson.Safe.t
 (** [limits_to_yojson limits] emits every limit field once in deterministic lexical order. *)
