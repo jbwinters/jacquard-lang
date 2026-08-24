@@ -601,7 +601,8 @@ Key release docs:
 - `src/diff.ml`: canonical-structure diff over stores.
 - `src/warp.ml`: Warp test discovery, running, cache, and properties.
 - `src/host_protocol_v0.ml`: strict library-only framing, JSON, limit-selection,
-  and shutdown codec for the experimental host protocol; no worker entry point.
+  shutdown, and bounded first-order type/value codecs for the experimental host
+  protocol; no worker entry point.
 
 ## Documentation Map
 

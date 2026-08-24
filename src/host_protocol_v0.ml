@@ -17,6 +17,8 @@ type limits = {
   max_stderr_bytes : int;
 }
 
+type boundary_budget = { limits : limits; mutable nodes : int }
+
 let hard_limits =
   {
     max_frame_bytes = 1_048_576;
@@ -34,6 +36,8 @@ let hard_limits =
     max_stderr_bytes = 65_536;
   }
 
+let create_boundary_budget limits = { limits; nodes = 0 }
+
 let diagnostic_spec = function
   | "E1600" ->
       ( "The host selected an unsupported protocol version.",
@@ -44,6 +48,9 @@ let diagnostic_spec = function
   | "E1602" ->
       ( "The host protocol limit was exceeded or cannot represent a mandatory result.",
         "Choose positive advertised limits and keep the frame within the selected ceilings." )
+  | "E1604" ->
+      ( "A Jacquard type or value is unsupported at the v0 host boundary.",
+        "Use only the frozen closed first-order type and lossless value descriptor subset." )
   | "E1608" ->
       ( "The host protocol message is invalid in the current state.",
         "Send only the next message permitted by the serial jacquard-host-v0 state machine." )
@@ -431,3 +438,270 @@ let parse_shutdown ~limits json =
             (exact_fields [ "kind"; "protocol" ] fields)
             (fun () -> Result.bind (parse_protocol fields) (fun () -> parse_kind "shutdown" fields))
       | _ -> error ~code:"E1601" "The shutdown message must be one JSON object.")
+
+let consume_boundary_node budget =
+  if budget.limits.max_value_nodes <= 0 || budget.nodes >= budget.limits.max_value_nodes then
+    error ~code:"E1602" "The frame exceeds max_value_nodes across its type and value descriptors."
+  else (
+    budget.nodes <- budget.nodes + 1;
+    Ok ())
+
+let boundary_kind fields =
+  match field "kind" fields with
+  | Some (`String kind) -> Ok kind
+  | Some _ | None -> error ~code:"E1601" "A boundary descriptor kind must be one string."
+
+let boundary_hash context = function
+  | `String spelling -> (
+      match Hash.of_canonical_hex spelling with
+      | Some hash -> Ok hash
+      | None ->
+          error ~code:"E1601"
+            (Printf.sprintf "The %s must be exactly 64 lowercase hexadecimal digits." context))
+  | _ -> error ~code:"E1601" (Printf.sprintf "The %s must be one HASH_V0 string." context)
+
+let validate_boundary_count ~budget ~context ~arguments count =
+  if budget.limits.max_collection_items <= 0 || count > budget.limits.max_collection_items then
+    error ~code:"E1602" (Printf.sprintf "The %s exceeds max_collection_items." context)
+  else if arguments && (budget.limits.max_arguments <= 0 || count > budget.limits.max_arguments)
+  then error ~code:"E1602" (Printf.sprintf "The %s exceeds max_arguments." context)
+  else Ok ()
+
+let boundary_list ~budget ~context ~arguments = function
+  | `List items ->
+      let* () = validate_boundary_count ~budget ~context ~arguments (List.length items) in
+      Ok items
+  | _ -> error ~code:"E1601" (Printf.sprintf "The %s must be one JSON array." context)
+
+let rec map_result f = function
+  | [] -> Ok []
+  | item :: rest ->
+      let* item = f item in
+      let* rest = map_result f rest in
+      Ok (item :: rest)
+
+let decode_boundary_type ~budget json =
+  let rec decode = function
+    | `Assoc fields ->
+        let* kind = boundary_kind fields in
+        let* () =
+          match kind with
+          | "nominal" -> exact_fields [ "arguments"; "identity"; "kind" ] fields
+          | "tuple" -> exact_fields [ "items"; "kind" ] fields
+          | _ ->
+              error ~code:"E1604"
+                (Printf.sprintf "Boundary type kind %S is not supported in jacquard-host-v0." kind)
+        in
+        let* () = consume_boundary_node budget in
+        if String.equal kind "nominal" then
+          let* identity =
+            match field "identity" fields with
+            | Some value -> boundary_hash "nominal type identity" value
+            | None -> error ~code:"E1601" "The nominal type identity is missing."
+          in
+          let* arguments =
+            match field "arguments" fields with
+            | Some value ->
+                boundary_list ~budget ~context:"nominal type arguments" ~arguments:false value
+            | None -> error ~code:"E1601" "The nominal type arguments are missing."
+          in
+          let* arguments = map_result decode arguments in
+          Ok (Types.TCon (identity, arguments))
+        else
+          let* items =
+            match field "items" fields with
+            | Some value -> boundary_list ~budget ~context:"tuple type items" ~arguments:false value
+            | None -> error ~code:"E1601" "The tuple type items are missing."
+          in
+          let* items = map_result decode items in
+          Ok (Types.TTuple items)
+    | _ -> error ~code:"E1601" "A boundary type must be one exact JSON object."
+  in
+  let* () = validate_json ~limits:budget.limits json in
+  decode json
+
+let encode_boundary_type ~budget ty =
+  let rec encode ty =
+    match Types.repr ty with
+    | Types.TCon (identity, arguments) ->
+        let* () = consume_boundary_node budget in
+        let* () =
+          validate_boundary_count ~budget ~context:"nominal type arguments" ~arguments:false
+            (List.length arguments)
+        in
+        let* arguments = map_result encode arguments in
+        Ok
+          (`Assoc
+             [
+               ("arguments", `List arguments);
+               ("identity", `String (Hash.to_hex identity));
+               ("kind", `String "nominal");
+             ])
+    | Types.TTuple items ->
+        let* () = consume_boundary_node budget in
+        let* () =
+          validate_boundary_count ~budget ~context:"tuple type items" ~arguments:false
+            (List.length items)
+        in
+        let* items = map_result encode items in
+        Ok (`Assoc [ ("items", `List items); ("kind", `String "tuple") ])
+    | Types.TArrow _ | Types.TResume _ | Types.TVariadicArrow _ | Types.TExactThunk _ | Types.TVar _
+    | Types.TSkolem _ ->
+        error ~code:"E1604"
+          "The Core type contains an arrow, resumption, exact thunk, or unresolved variable."
+  in
+  let* json = encode ty in
+  let* () = validate_json ~limits:budget.limits json in
+  Ok json
+
+let canonical_int = function
+  | `String spelling -> (
+      match int_of_string_opt spelling with
+      | Some value when String.equal spelling (string_of_int value) -> Ok value
+      | Some _ | None ->
+          error ~code:"E1601"
+            "A boundary Int must use canonical decimal text in the released OCaml 63-bit range.")
+  | _ -> error ~code:"E1601" "A boundary Int value must be one canonical decimal string."
+
+let lowercase_hex_16 spelling =
+  String.length spelling = 16
+  && String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false) spelling
+
+let real_of_bits = function
+  | `String spelling when lowercase_hex_16 spelling -> (
+      match Int64.of_string_opt ("0x" ^ spelling) with
+      | Some bits -> Ok (Int64.float_of_bits bits)
+      | None -> error ~code:"E1601" "A boundary Real bit string is not valid binary64 data.")
+  | `String _ ->
+      error ~code:"E1601" "A boundary Real must use exactly 16 lowercase hexadecimal digits."
+  | _ -> error ~code:"E1601" "A boundary Real bits field must be one string."
+
+let validate_boundary_text limits text =
+  if not (valid_utf8 text) then
+    error ~code:"E1601" "A boundary Text value is not Unicode scalar UTF-8."
+  else if limits.max_text_bytes <= 0 || String.length text > limits.max_text_bytes then
+    error ~code:"E1602" "A boundary Text value exceeds max_text_bytes."
+  else Ok text
+
+let decode_boundary_value ~budget ~constructor_info json =
+  let rec decode = function
+    | `Assoc fields -> (
+        let* kind = boundary_kind fields in
+        let* () =
+          match kind with
+          | "int" | "text" | "hash" -> exact_fields [ "kind"; "value" ] fields
+          | "real" -> exact_fields [ "bits"; "kind" ] fields
+          | "tuple" -> exact_fields [ "items"; "kind" ] fields
+          | "constructor" -> exact_fields [ "arguments"; "identity"; "kind" ] fields
+          | _ ->
+              error ~code:"E1604"
+                (Printf.sprintf "Boundary value kind %S is not supported in jacquard-host-v0." kind)
+        in
+        let* () = consume_boundary_node budget in
+        let field_or_missing name cause =
+          match field name fields with Some value -> Ok value | None -> error ~code:"E1601" cause
+        in
+        match kind with
+        | "int" ->
+            let* value = field_or_missing "value" "The boundary Int value is missing." in
+            let* value = canonical_int value in
+            Ok (Value.VInt value)
+        | "real" ->
+            let* bits = field_or_missing "bits" "The boundary Real bits are missing." in
+            let* value = real_of_bits bits in
+            Ok (Value.VReal value)
+        | "text" ->
+            let* value = field_or_missing "value" "The boundary Text value is missing." in
+            let* value =
+              match value with
+              | `String text -> validate_boundary_text budget.limits text
+              | _ -> error ~code:"E1601" "A boundary Text value must be one string."
+            in
+            Ok (Value.VText value)
+        | "hash" ->
+            let* value = field_or_missing "value" "The boundary Hash value is missing." in
+            let* value = boundary_hash "boundary Hash value" value in
+            Ok (Value.VHash value)
+        | "tuple" ->
+            let* items = field_or_missing "items" "The boundary tuple items are missing." in
+            let* items =
+              boundary_list ~budget ~context:"tuple value items" ~arguments:false items
+            in
+            let* items = map_result decode items in
+            Ok (Value.VTuple items)
+        | "constructor" ->
+            let* identity =
+              field_or_missing "identity" "The boundary constructor identity is missing."
+            in
+            let* identity = boundary_hash "constructor identity" identity in
+            let* arguments =
+              field_or_missing "arguments" "The boundary constructor arguments are missing."
+            in
+            let* arguments =
+              boundary_list ~budget ~context:"constructor arguments" ~arguments:true arguments
+            in
+            let* arguments = map_result decode arguments in
+            let* name, arity = constructor_info identity in
+            if arity <> List.length arguments then
+              error ~code:"E1604"
+                (Printf.sprintf
+                   "The constructor value has %d argument(s), but the resolved constructor \
+                    requires %d."
+                   (List.length arguments) arity)
+            else Ok (Value.VCon { con = identity; name; args = arguments })
+        | _ ->
+            error ~code:"E1604"
+              (Printf.sprintf "Boundary value kind %S is not supported in jacquard-host-v0." kind))
+    | _ -> error ~code:"E1601" "A boundary value must be one exact JSON object."
+  in
+  let* () = validate_json ~limits:budget.limits json in
+  decode json
+
+let encode_boundary_value ~budget value =
+  let rec encode value =
+    match value with
+    | Value.VInt value ->
+        let* () = consume_boundary_node budget in
+        Ok (`Assoc [ ("kind", `String "int"); ("value", `String (string_of_int value)) ])
+    | Value.VReal value ->
+        let* () = consume_boundary_node budget in
+        let bits = Printf.sprintf "%016Lx" (Int64.bits_of_float value) in
+        Ok (`Assoc [ ("bits", `String bits); ("kind", `String "real") ])
+    | Value.VText value ->
+        let* () = consume_boundary_node budget in
+        let* value = validate_boundary_text budget.limits value in
+        Ok (`Assoc [ ("kind", `String "text"); ("value", `String value) ])
+    | Value.VHash value ->
+        let* () = consume_boundary_node budget in
+        Ok (`Assoc [ ("kind", `String "hash"); ("value", `String (Hash.to_hex value)) ])
+    | Value.VTuple items ->
+        let* () = consume_boundary_node budget in
+        let* () =
+          validate_boundary_count ~budget ~context:"tuple value items" ~arguments:false
+            (List.length items)
+        in
+        let* items = map_result encode items in
+        Ok (`Assoc [ ("items", `List items); ("kind", `String "tuple") ])
+    | Value.VCon { con; args; _ } ->
+        let* () = consume_boundary_node budget in
+        let* () =
+          validate_boundary_count ~budget ~context:"constructor arguments" ~arguments:true
+            (List.length args)
+        in
+        let* arguments = map_result encode args in
+        Ok
+          (`Assoc
+             [
+               ("arguments", `List arguments);
+               ("identity", `String (Hash.to_hex con));
+               ("kind", `String "constructor");
+             ])
+    | Value.VSecret _ | Value.VConstructor _ | Value.VOp _ | Value.VClosure _ | Value.VBuiltin _
+    | Value.VTrustedBuiltin _ | Value.VCode _ | Value.VTask _ | Value.VChannel _ | Value.VResume _
+    | Value.VOnceResume _ ->
+        error ~code:"E1604"
+          "The Core value is opaque, callable, or owned by one evaluator run and cannot cross v0."
+  in
+  let* json = encode value in
+  let* () = validate_json ~limits:budget.limits json in
+  Ok json

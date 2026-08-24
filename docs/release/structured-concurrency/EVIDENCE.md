@@ -34,7 +34,7 @@ native Channel, actor, or supervision claim.
 | C3 | Scoped typed channels run through deterministic FIFO, seeded, replay, exhaustive, and cached interpreter scheduling with exact run/scope ownership, rendezvous and buffering, close, cancellation, and deadlock behavior. | `channel-contract`, `round-robin`, and `exhaustive-schedule` suites; `test/cli/task-values.t`; `test/cli/schedule-replay.t`; and the frozen traces below |
 | C4 | Not claimed: host asynchronous I/O, actors, and supervision are absent. | [LIMITS.md](LIMITS.md) |
 
-The current successor inventory is exactly 900 compiled Alcotest/QCheck cases, 59 recursive
+The current successor inventory is exactly 914 compiled Alcotest/QCheck cases, 59 recursive
 cram transcript files, and 28 named doctest examples across 8 documents. The
 repository release-law checks recompute those counts instead of trusting this
 paragraph.
@@ -760,7 +760,7 @@ opam exec -- dune build test/test_jacquard.exe
 
 The current inventory is mechanically checked against compiled discovery:
 
-- Alcotest/QCheck cases: `900`
+- Alcotest/QCheck cases: `914`
 - Cram transcript files: `59`
 
 The SC.14 baseline arithmetic remains exact: twelve compiled
@@ -817,7 +817,9 @@ contract case, producing `869 / 58 / 28`. SX.23 then adds six named-call cases,
 two D76 decision-mutation cases, and one transcript, producing
 `877 / 59 / 28`. HB.1 adds five host-protocol schema/vector contract cases,
 producing `882 / 59 / 28`. HB.2a adds eighteen bounded framing and selection
-codec cases, producing the current `900 / 59 / 28` inventory.
+codec cases, producing the then-current `900 / 59 / 28` inventory.
+HB.2b1 adds fourteen bounded first-order type/value codec cases, producing the
+current `914 / 59 / 28` inventory.
 
 Native scheduling remains outside the current backend. Differential coverage is
 therefore limited to the supported case: an Async operation discharged by an
