@@ -590,10 +590,13 @@ separation; they do not claim that a Core store contains those objects. HB.2
 adds the executable Core carrier fixtures. HB.3 packages the final executable
 fixtures for independent adapters and replaces no HB.1 expectation.
 
-Implementation status: HB.2a now provides the library-only strict framing and
+Implementation status: HB.2a provides the library-only strict framing and
 selection codec in `Host_protocol_v0`, including bounded u32 framing, Unicode
 scalar UTF-8, recursive duplicate-key checks, exact hard/selected limits, and
-the shutdown envelope. It does not expose a runnable worker; descriptor
+the shutdown envelope. HB.2b1 adds exact nominal/tuple and lossless
+Int/Real/Text/Hash/tuple/saturated-constructor codecs, shared per-frame node
+accounting, selected descriptor limits, and constructor identity/arity
+resolution. It does not expose a runnable worker; target/interface/capability
 preflight, evaluation, and effect exchange remain later HB.2 slices.
 
 A conforming implementation must:

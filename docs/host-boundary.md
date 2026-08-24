@@ -244,9 +244,10 @@ matrix.
 ## 9. Repository and product boundary
 
 `jacquard-lang` owns this contract, the HB.1 schema/state vectors, the
-`Host_protocol_v0` strict framing/selection codec, its later runnable carrier
-inside Core, executable fixtures, and language/runtime evidence. It may
-contain a tiny fake host used only to prove conformance.
+`Host_protocol_v0` strict framing/selection and first-order type/value codecs,
+its later runnable carrier inside Core, executable fixtures, and
+language/runtime evidence. It may contain a tiny fake host used only to prove
+conformance.
 
 The private `jacquard-host` repository owns real adapters, sockets,
 persistence, the minimal serial HTTP integration, and the requirements report

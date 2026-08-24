@@ -6,7 +6,7 @@ artifacts and are not retroactively updated by DX.2.
 
 ## Current inventory
 
-- Alcotest/QCheck cases: `900`
+- Alcotest/QCheck cases: `914`
 - Cram transcript files: `59`
 - Doctest examples: `28` across 8 documents
 
@@ -63,8 +63,10 @@ Task 171 adds one labeled-pattern contract case. SX.23 then adds six compiled
 named-call cases, two D76 decision-mutation cases, and one CLI transcript,
 producing `877 / 59 / 28`. HB.1 adds five host-protocol schema/vector contract
 cases, producing `882 / 59 / 28`. HB.2a adds eighteen bounded framing and
-selection codec cases, producing the current `900 / 59 / 28` successor
-inventory without changing the historical DX.2 publication.
+selection codec cases, producing the then-current `900 / 59 / 28` successor
+inventory. HB.2b1 adds fourteen bounded first-order type/value codec cases,
+producing the current `914 / 59 / 28` successor inventory without changing the
+historical DX.2 publication.
 
 ## Proved behavior
 

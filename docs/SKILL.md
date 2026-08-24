@@ -898,8 +898,10 @@ Do not invent new kernel forms for surface sugar.
 - HB.0 documents the language-neutral host ownership and trust boundary, and
   HB.1 freezes `jacquard-host-v0` envelopes, provisional process framing,
   limits, stable failures, and schema/state vectors. `Host_protocol_v0`
-  implements the strict framing/selection/shutdown codec for HB.2a; reuse it
-  instead of recreating JSON or u32 framing. No runnable worker, stable
+  implements the strict framing/selection/shutdown codec for HB.2a and the
+  shared-budget first-order type/value codecs for HB.2b1; reuse it instead of
+  recreating framing or value semantics. Store target, interface, capability,
+  and field-type preflight are not implemented yet. No runnable worker, stable
   foreign-host ABI, adapter, or HTTP server ships yet. Internal
   evaluator-capture and host-readiness OCaml APIs are not supported embedding
   contracts; future adapters must consume the versioned protocol and its
