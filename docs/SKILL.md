@@ -900,12 +900,14 @@ Do not invent new kernel forms for surface sugar.
   limits, stable failures, and schema/state vectors. `Host_protocol_v0`
   implements the strict framing/selection/shutdown codec for HB.2a and the
   shared-budget first-order type/value codecs for HB.2b1; reuse it instead of
-  recreating framing or value semantics. Store target, interface, capability,
-  and field-type preflight are not implemented yet. No runnable worker, stable
-  foreign-host ABI, adapter, or HTTP server ships yet. Internal
-  evaluator-capture and host-readiness OCaml APIs are not supported embedding
-  contracts; future adapters must consume the versioned protocol and its
-  executable conformance fixtures, not those OCaml seams.
+  recreating framing or value semantics. HB.2b2 also preflights one exact
+  public stored term closure, closed monomorphic interface, typed positional
+  arguments, exact effect grants, and sorted unique public `once` operation
+  registry. This returns a validated invocation but does not evaluate it. No
+  runnable worker, stable foreign-host ABI, adapter, or HTTP server ships yet.
+  Internal evaluator-capture and host-readiness OCaml APIs are not supported
+  embedding contracts; future adapters must consume the versioned protocol and
+  its executable conformance fixtures, not those OCaml seams.
 - The frozen Workspace v0 governed membrane ships as an evidence-backed
   research reference. It is not a general isolation mechanism, production
   authorization system, or operating-system sandbox; trusted host code still

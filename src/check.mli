@@ -14,6 +14,18 @@ val make_ctx : Store.t -> (ctx, Diag.t list) result
 val store : ctx -> Store.t
 (** [store ctx] returns the backing declaration store. *)
 
+type primitive_types = {
+  int_type : Hash.t;
+  real_type : Hash.t;
+  text_type : Hash.t;
+  hash_type : Hash.t;
+}
+(** Exact store identities for the scalar values that can cross a first-order host boundary. *)
+
+val primitive_types : ctx -> primitive_types
+(** [primitive_types ctx] returns the primitive identities captured when [ctx] was created. The
+    result is immutable and does not consult the mutable store name index. *)
+
 val register_builtin_signatures : ctx -> (Hash.t * Types.scheme) list -> unit
 (** [register_builtin_signatures ctx signatures] installs trusted native-term schemes, replacing
     entries at duplicate hashes. *)
@@ -73,6 +85,18 @@ val check_recovery_top :
 val force_term : ctx -> Hash.t -> (Types.scheme, Diag.t list) result
 (** [force_term ctx hash] computes a cached term scheme on demand, returning lookup/type failures.
 *)
+
+val force_constructor : ctx -> Hash.t -> (Types.scheme, Diag.t list) result
+(** [force_constructor ctx hash] returns the constructor scheme or a checker diagnostic when the
+    public hash is absent, has another role, or its declaration is malformed. *)
+
+type operation_contract = { effect_identity : Hash.t; mode : Kernel.op_mode; scheme : Types.scheme }
+(** Checked store metadata for one exact public operation identity. *)
+
+val force_operation : ctx -> Hash.t -> (operation_contract, Diag.t list) result
+(** [force_operation ctx hash] resolves the operation's owning effect, declared continuation mode,
+    and checked callable scheme. Missing, hidden, wrong-role, or malformed declarations return
+    checker diagnostics. *)
 
 val show_row : ctx -> Types.row -> string
 (** [show_row ctx row] renders every resolved identity in deterministic name/hash order. Distinct

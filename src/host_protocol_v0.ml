@@ -48,9 +48,16 @@ let diagnostic_spec = function
   | "E1602" ->
       ( "The host protocol limit was exceeded or cannot represent a mandatory result.",
         "Choose positive advertised limits and keep the frame within the selected ceilings." )
+  | "E1603" ->
+      ( "The selected Jacquard target or pinned interface is invalid.",
+        "Select one complete checked store-term closure and use its exact first-order interface." )
   | "E1604" ->
       ( "A Jacquard type or value is unsupported at the v0 host boundary.",
         "Use only the frozen closed first-order type and lossless value descriptor subset." )
+  | "E1605" ->
+      ( "The selected host capability or operation registry is invalid.",
+        "Use the exact checked effect set and a sorted unique registry of its public once \
+         operations." )
   | "E1608" ->
       ( "The host protocol message is invalid in the current state.",
         "Send only the next message permitted by the serial jacquard-host-v0 state machine." )
@@ -705,3 +712,391 @@ let encode_boundary_value ~budget value =
   let* json = encode value in
   let* () = validate_json ~limits:budget.limits json in
   Ok json
+
+type operation_binding = {
+  effect_identity : Hash.t;
+  operation : Hash.t;
+  parameters : Types.ty list;
+  result : Types.ty;
+}
+
+type invocation = {
+  invocation_id : string;
+  callable : Hash.t;
+  parameters : Types.ty list;
+  effects : Hash.t list;
+  result : Types.ty;
+  arguments : Value.t list;
+  operations : operation_binding list;
+}
+
+let equal_hashes left right =
+  List.length left = List.length right && List.for_all2 Hash.equal left right
+
+let rec equal_boundary_types left right =
+  match (Types.repr left, Types.repr right) with
+  | Types.TCon (left_identity, left_arguments), Types.TCon (right_identity, right_arguments) ->
+      Hash.equal left_identity right_identity
+      && List.length left_arguments = List.length right_arguments
+      && List.for_all2 equal_boundary_types left_arguments right_arguments
+  | Types.TTuple left_items, Types.TTuple right_items ->
+      List.length left_items = List.length right_items
+      && List.for_all2 equal_boundary_types left_items right_items
+  | _ -> false
+
+let boundary_type_supported ty =
+  let rec check = function
+    | Types.TCon (_, arguments) -> check_all arguments
+    | Types.TTuple items -> check_all items
+    | Types.TArrow _ | Types.TResume _ | Types.TVariadicArrow _ | Types.TExactThunk _ | Types.TVar _
+    | Types.TSkolem _ ->
+        error ~code:"E1604"
+          "A checked boundary contract contains a nested callable or unresolved type."
+  and check_all = function
+    | [] -> Ok ()
+    | ty :: rest ->
+        let* () = check (Types.repr ty) in
+        check_all rest
+  in
+  check (Types.repr ty)
+
+let map_error ~code cause = function Ok value -> Ok value | Error _ -> error ~code cause
+
+let validate_complete_closure store root =
+  let rec visit seen = function
+    | [] -> Ok ()
+    | hash :: rest when List.exists (Hash.equal hash) seen -> visit seen rest
+    | hash :: rest -> (
+        match Store.locate_internal store hash with
+        | Error _ ->
+            error ~code:"E1603"
+              "The selected target's reachable immutable store closure is incomplete or corrupt."
+        | Ok { Store.decl; _ } -> visit (hash :: seen) (Store.decl_refs decl @ rest))
+  in
+  visit [] [ root ]
+
+let validate_target checker callable =
+  let store = Check.store checker in
+  let* () =
+    match Store.locate store callable with
+    | Ok { Store.decl = { Kernel.it = Kernel.DefTerm _; _ }; role = Store.Member _; _ } -> Ok ()
+    | Ok _ | Error _ ->
+        error ~code:"E1603" "The invoke target is not one exact public stored term-member identity."
+  in
+  let* () = validate_complete_closure store callable in
+  let* scheme =
+    map_error ~code:"E1603" "The selected target closure does not pass strict checking."
+      (Check.force_term checker callable)
+  in
+  let quantified_types, quantified_rows = Types.quantified scheme in
+  if quantified_types <> [] || quantified_rows <> [] then
+    error ~code:"E1603" "The selected target is polymorphic rather than one closed invocation."
+  else
+    match Types.repr scheme.Types.ty with
+    | Types.TArrow (parameters, row, result) ->
+        let row = Types.repr_row row in
+        let* () =
+          match row.Types.tail with
+          | Types.RClosed -> Ok ()
+          | Types.RVar _ | Types.RSkolem _ ->
+              error ~code:"E1603" "The selected target has an open effect row."
+        in
+        let* () = map_result boundary_type_supported parameters |> Result.map (fun _ -> ()) in
+        let* () = boundary_type_supported result in
+        Ok (parameters, row.Types.effects, result)
+    | Types.TCon _ | Types.TTuple _ | Types.TResume _ | Types.TVariadicArrow _ | Types.TExactThunk _
+    | Types.TVar _ | Types.TSkolem _ ->
+        error ~code:"E1603" "The selected stored term is not one callable arrow."
+
+let parse_hash_list ~budget ~context ~maximum json =
+  let* items = boundary_list ~budget ~context ~arguments:false json in
+  if maximum <= 0 || List.length items > maximum then
+    error ~code:"E1602" (Printf.sprintf "The %s exceeds its selected protocol limit." context)
+  else map_result (boundary_hash context) items
+
+let parse_interface ~budget = function
+  | `Assoc fields ->
+      let* () = exact_fields [ "effects"; "parameters"; "result" ] fields in
+      let* parameters_json =
+        match field "parameters" fields with
+        | Some value -> boundary_list ~budget ~context:"interface parameters" ~arguments:true value
+        | None -> error ~code:"E1601" "The interface parameters are missing."
+      in
+      let* parameters = map_result (decode_boundary_type ~budget) parameters_json in
+      let* effects =
+        match field "effects" fields with
+        | Some value ->
+            parse_hash_list ~budget ~context:"interface effects" ~maximum:budget.limits.max_effects
+              value
+        | None -> error ~code:"E1601" "The interface effects are missing."
+      in
+      let* result =
+        match field "result" fields with
+        | Some value -> decode_boundary_type ~budget value
+        | None -> error ~code:"E1601" "The interface result is missing."
+      in
+      Ok (parameters, effects, result)
+  | _ -> error ~code:"E1601" "The interface must be one exact JSON object."
+
+let constructor_info checker identity =
+  let store = Check.store checker in
+  match Store.locate store identity with
+  | Ok
+      {
+        Store.decl = { Kernel.it = Kernel.DefType { cons; _ }; _ };
+        role = Store.Constructor index;
+        _;
+      } -> (
+      match List.nth_opt cons index with
+      | None -> error ~code:"E1603" "The constructor identity has invalid store metadata."
+      | Some constructor ->
+          let* _ =
+            map_error ~code:"E1603" "The constructor declaration does not pass strict checking."
+              (Check.force_constructor checker identity)
+          in
+          Ok (constructor.Kernel.con_name, List.length constructor.Kernel.fields))
+  | Ok _ | Error _ ->
+      error ~code:"E1603" "A boundary value names an absent or non-constructor store identity."
+
+let validate_argument_value checker ~expected value =
+  let primitives = Check.primitive_types checker in
+  let mismatch cause = error ~code:"E1603" cause in
+  let scalar identity expected cause =
+    if equal_boundary_types (Types.TCon (identity, [])) expected then Ok () else mismatch cause
+  in
+  let rec validate expected = function
+    | Value.VInt _ ->
+        scalar primitives.Check.int_type expected "An Int argument disagrees with its parameter."
+    | Value.VReal _ ->
+        scalar primitives.Check.real_type expected "A Real argument disagrees with its parameter."
+    | Value.VText _ ->
+        scalar primitives.Check.text_type expected "A Text argument disagrees with its parameter."
+    | Value.VHash _ ->
+        scalar primitives.Check.hash_type expected "A Hash argument disagrees with its parameter."
+    | Value.VTuple items -> (
+        match Types.repr expected with
+        | Types.TTuple item_types when List.length items = List.length item_types ->
+            validate_all item_types items
+        | Types.TTuple _ -> mismatch "A tuple argument has the wrong number of items."
+        | _ -> mismatch "A tuple argument disagrees with its parameter type.")
+    | Value.VCon { con; args; _ } ->
+        let* scheme =
+          map_error ~code:"E1603" "A constructor argument cannot be checked in this store."
+            (Check.force_constructor checker con)
+        in
+        let constructor_type = Types.instantiate ~level:0 scheme in
+        let fields, result =
+          match Types.repr constructor_type with
+          | Types.TArrow (fields, row, result)
+            when (Types.repr_row row).Types.effects = []
+                 && match (Types.repr_row row).Types.tail with Types.RClosed -> true | _ -> false ->
+              (fields, result)
+          | ty -> ([], ty)
+        in
+        if List.length fields <> List.length args then
+          error ~code:"E1604" "A constructor value is not saturated at the boundary."
+        else
+          let* () =
+            match Types.unify result expected with
+            | () -> Ok ()
+            | exception Types.Unify_error _ ->
+                mismatch "A constructor argument disagrees with its nominal parameter type."
+          in
+          let* () = map_result boundary_type_supported fields |> Result.map (fun _ -> ()) in
+          validate_all fields args
+    | Value.VSecret _ | Value.VConstructor _ | Value.VOp _ | Value.VClosure _ | Value.VBuiltin _
+    | Value.VTrustedBuiltin _ | Value.VCode _ | Value.VTask _ | Value.VChannel _ | Value.VResume _
+    | Value.VOnceResume _ ->
+        error ~code:"E1604" "A run-owned or callable value cannot be an invoke argument."
+  and validate_all expected values =
+    match (expected, values) with
+    | [], [] -> Ok ()
+    | expected :: expected_rest, value :: value_rest ->
+        let* () = validate expected value in
+        validate_all expected_rest value_rest
+    | _ -> mismatch "An aggregate argument has the wrong number of fields."
+  in
+  validate expected value
+
+type parsed_operation = { claimed_effect : Hash.t; claimed_operation : Hash.t }
+
+let parse_operation_entry = function
+  | `Assoc fields ->
+      let* () = exact_fields [ "effect"; "mode"; "operation" ] fields in
+      let* claimed_effect =
+        match field "effect" fields with
+        | Some value -> boundary_hash "operation registry effect" value
+        | None -> error ~code:"E1601" "The operation registry effect is missing."
+      in
+      let* claimed_operation =
+        match field "operation" fields with
+        | Some value -> boundary_hash "operation registry identity" value
+        | None -> error ~code:"E1601" "The operation registry identity is missing."
+      in
+      let* () =
+        match field "mode" fields with
+        | Some (`String "once") -> Ok ()
+        | Some (`String _) -> error ~code:"E1605" "A registry entry does not select mode once."
+        | Some _ | None -> error ~code:"E1601" "The operation registry mode must be one string."
+      in
+      Ok { claimed_effect; claimed_operation }
+  | _ -> error ~code:"E1601" "Each operation registry entry must be one exact JSON object."
+
+let operation_compare left right =
+  match Hash.compare left.claimed_effect right.claimed_effect with
+  | 0 -> Hash.compare left.claimed_operation right.claimed_operation
+  | order -> order
+
+let strictly_sorted ~compare ~code cause items =
+  let rec check = function
+    | left :: (right :: _ as rest) ->
+        if compare left right < 0 then check rest else error ~code cause
+    | [ _ ] | [] -> Ok ()
+  in
+  check items
+
+let validate_operation checker ~effects entry =
+  if not (List.exists (Hash.equal entry.claimed_effect) effects) then
+    error ~code:"E1605" "An operation registry entry introduces an ungranted effect."
+  else
+    let* contract =
+      map_error ~code:"E1605" "An operation registry identity is absent or is not an operation."
+        (Check.force_operation checker entry.claimed_operation)
+    in
+    if not (Hash.equal entry.claimed_effect contract.Check.effect_identity) then
+      error ~code:"E1605" "An operation registry entry names the wrong owning effect."
+    else if contract.Check.mode <> Kernel.Once then
+      error ~code:"E1605" "An operation registry entry names a non-once operation."
+    else
+      let quantified_types, quantified_rows = Types.quantified contract.Check.scheme in
+      if quantified_types <> [] || quantified_rows <> [] then
+        error ~code:"E1604" "A configured operation has a polymorphic boundary signature."
+      else
+        match Types.repr contract.Check.scheme.Types.ty with
+        | Types.TArrow (parameters, _, result) ->
+            let* () = map_result boundary_type_supported parameters |> Result.map (fun _ -> ()) in
+            let* () = boundary_type_supported result in
+            Ok
+              {
+                effect_identity = contract.Check.effect_identity;
+                operation = entry.claimed_operation;
+                parameters;
+                result;
+              }
+        | Types.TCon _ | Types.TTuple _ | Types.TResume _ | Types.TVariadicArrow _
+        | Types.TExactThunk _ | Types.TVar _ | Types.TSkolem _ ->
+            error ~code:"E1604" "A configured operation does not have one first-order arrow."
+
+let parse_capabilities ~budget checker ~interface_effects = function
+  | `Assoc fields ->
+      let* () = exact_fields [ "effects"; "operations" ] fields in
+      let* effects =
+        match field "effects" fields with
+        | Some value ->
+            parse_hash_list ~budget ~context:"capability effects" ~maximum:budget.limits.max_effects
+              value
+        | None -> error ~code:"E1601" "The capability effects are missing."
+      in
+      let* () =
+        strictly_sorted ~compare:Hash.compare ~code:"E1605"
+          "Capability effects must be strictly sorted and unique." effects
+      in
+      if not (equal_hashes effects interface_effects) then
+        error ~code:"E1605" "Capability effects do not exactly equal the pinned interface row."
+      else
+        let* operation_json =
+          match field "operations" fields with
+          | Some value ->
+              boundary_list ~budget ~context:"capability operations" ~arguments:false value
+          | None -> error ~code:"E1601" "The capability operations are missing."
+        in
+        if
+          budget.limits.max_operations <= 0
+          || List.length operation_json > budget.limits.max_operations
+        then error ~code:"E1602" "The operation registry exceeds max_operations."
+        else
+          let* parsed = map_result parse_operation_entry operation_json in
+          let* () =
+            strictly_sorted ~compare:operation_compare ~code:"E1605"
+              "Operation registry entries must be strictly sorted and unique." parsed
+          in
+          map_result (validate_operation checker ~effects) parsed
+  | _ -> error ~code:"E1601" "The capabilities field must be one exact JSON object."
+
+let parse_invoke ~limits ~checker json =
+  let* () = validate_json ~limits json in
+  match json with
+  | `Assoc fields ->
+      let* () =
+        exact_fields
+          [
+            "arguments"; "capabilities"; "interface"; "invocation_id"; "kind"; "protocol"; "target";
+          ]
+          fields
+      in
+      let* () = parse_protocol fields in
+      let* () = parse_kind "invoke" fields in
+      let* invocation_id =
+        match field "invocation_id" fields with
+        | Some (`String "0000000000000000") -> Ok "0000000000000000"
+        | Some (`String _) -> error ~code:"E1608" "The invoke ID is not the fixed v0 invocation ID."
+        | Some _ | None -> error ~code:"E1601" "The invocation ID must be one string."
+      in
+      let* callable =
+        match field "target" fields with
+        | Some (`Assoc target_fields) -> (
+            let* () = exact_fields [ "callable"; "kind" ] target_fields in
+            let* () =
+              match field "kind" target_fields with
+              | Some (`String "store-term-v0") -> Ok ()
+              | Some (`String _) -> error ~code:"E1603" "The target is not a store-term-v0 target."
+              | Some _ | None -> error ~code:"E1601" "The target kind must be one string."
+            in
+            match field "callable" target_fields with
+            | Some value -> boundary_hash "target callable identity" value
+            | None -> error ~code:"E1601" "The target callable identity is missing.")
+        | Some _ | None -> error ~code:"E1601" "The target must be one exact JSON object."
+      in
+      let* parameters, effects, result = validate_target checker callable in
+      let budget = create_boundary_budget limits in
+      let* interface_parameters, interface_effects, interface_result =
+        match field "interface" fields with
+        | Some value -> parse_interface ~budget value
+        | None -> error ~code:"E1601" "The interface is missing."
+      in
+      if
+        List.length parameters <> List.length interface_parameters
+        || (not (List.for_all2 equal_boundary_types parameters interface_parameters))
+        || (not (equal_hashes effects interface_effects))
+        || not (equal_boundary_types result interface_result)
+      then error ~code:"E1603" "The pinned interface disagrees with the checked target arrow."
+      else
+        let* argument_json =
+          match field "arguments" fields with
+          | Some value -> boundary_list ~budget ~context:"invoke arguments" ~arguments:true value
+          | None -> error ~code:"E1601" "The invoke arguments are missing."
+        in
+        if List.length argument_json <> List.length parameters then
+          error ~code:"E1603" "The invoke argument count disagrees with the checked target arrow."
+        else
+          let* arguments =
+            map_result
+              (decode_boundary_value ~budget ~constructor_info:(constructor_info checker))
+              argument_json
+          in
+          let rec validate_arguments expected values =
+            match (expected, values) with
+            | [], [] -> Ok ()
+            | expected :: expected_rest, value :: value_rest ->
+                let* () = validate_argument_value checker ~expected value in
+                validate_arguments expected_rest value_rest
+            | _ -> error ~code:"E1603" "The invoke argument count changed during preflight."
+          in
+          let* () = validate_arguments parameters arguments in
+          let* operations =
+            match field "capabilities" fields with
+            | Some value -> parse_capabilities ~budget checker ~interface_effects value
+            | None -> error ~code:"E1601" "The capabilities field is missing."
+          in
+          Ok { invocation_id; callable; parameters; effects; result; arguments; operations }
+  | _ -> error ~code:"E1601" "The invoke message must be one JSON object."

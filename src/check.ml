@@ -74,6 +74,17 @@ and match_site = { scrutinee_ty : Types.ty; arms : Kernel.clause list; site_meta
 (** [store ctx] returns the declaration store used by the checker. *)
 let store ctx = ctx.store
 
+type primitive_types = {
+  int_type : Hash.t;
+  real_type : Hash.t;
+  text_type : Hash.t;
+  hash_type : Hash.t;
+}
+
+(** [primitive_types ctx] returns immutable identities rather than repeating mutable name lookup. *)
+let primitive_types ctx =
+  { int_type = ctx.p_int; real_type = ctx.p_real; text_type = ctx.p_text; hash_type = ctx.p_hash }
+
 (** [register_builtin_signatures ctx signatures] installs trusted native-term schemes. Existing
     entries at the same hashes are replaced. *)
 let register_builtin_signatures ctx signatures =
@@ -2107,6 +2118,38 @@ let check_recovery_top ~identity (Recovery_session ctx) top = Recovery.check_top
     sweep the tier statistics need (PF.2 phase 1). *)
 let force_term ctx (h : Hash.t) : (scheme, Diag.t list) result =
   match term_scheme ctx h with s -> Ok s | exception Err d -> Error [ d ]
+
+(** [force_constructor ctx h] is the result-returning public form of {!con_scheme}. *)
+let force_constructor ctx (h : Hash.t) : (scheme, Diag.t list) result =
+  match con_scheme ctx h with s -> Ok s | exception Err d -> Error [ d ]
+
+type operation_contract = { effect_identity : Hash.t; mode : Kernel.op_mode; scheme : scheme }
+
+(** [force_operation ctx h] keeps operation identity, owner, mode, and scheme in one checked lookup
+    so host adapters cannot reconstruct part of the contract from display names. *)
+let force_operation ctx (h : Hash.t) : (operation_contract, Diag.t list) result =
+  let checked thunk =
+    match thunk () with value -> Ok value | exception Err diagnostic -> Error [ diagnostic ]
+  in
+  match Store.locate ctx.store h with
+  | Ok
+      {
+        Store.decl = { Kernel.it = Kernel.DefEffect { ops; _ }; _ };
+        decl_hash;
+        role = Store.Operation index;
+      } -> (
+      match List.nth_opt ops index with
+      | Some operation ->
+          checked (fun () ->
+              let scheme = op_scheme ctx h in
+              { effect_identity = decl_hash; mode = operation.Kernel.op_mode; scheme })
+      | None ->
+          checked (fun () ->
+              err ~code:"E0805" "operation hash %s has invalid store metadata" (Hash.to_hex h)))
+  | Ok _ -> checked (fun () -> err ~code:"E0805" "hash %s is not an operation" (Hash.to_hex h))
+  | Error diagnostics ->
+      checked (fun () ->
+          err ~code:"E0805" "%s" (String.concat "; " (List.map Diag.to_cause_string diagnostics)))
 
 (** Render an effect row for manifests and signatures. *)
 let show_row ctx (r : row) : string =
