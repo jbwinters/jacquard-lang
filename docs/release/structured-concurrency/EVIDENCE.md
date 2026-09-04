@@ -34,7 +34,7 @@ native Channel, actor, or supervision claim.
 | C3 | Scoped typed channels run through deterministic FIFO, seeded, replay, exhaustive, and cached interpreter scheduling with exact run/scope ownership, rendezvous and buffering, close, cancellation, and deadlock behavior. | `channel-contract`, `round-robin`, and `exhaustive-schedule` suites; `test/cli/task-values.t`; `test/cli/schedule-replay.t`; and the frozen traces below |
 | C4 | Not claimed: host asynchronous I/O, actors, and supervision are absent. | [LIMITS.md](LIMITS.md) |
 
-The current successor inventory is exactly 925 compiled Alcotest/QCheck cases, 59 recursive
+The current successor inventory is exactly 963 compiled Alcotest/QCheck cases, 60 recursive
 cram transcript files, and 28 named doctest examples across 8 documents. The
 repository release-law checks recompute those counts instead of trusting this
 paragraph.
@@ -760,8 +760,8 @@ opam exec -- dune build test/test_jacquard.exe
 
 The current inventory is mechanically checked against compiled discovery:
 
-- Alcotest/QCheck cases: `925`
-- Cram transcript files: `59`
+- Alcotest/QCheck cases: `963`
+- Cram transcript files: `60`
 
 The SC.14 baseline arithmetic remains exact: twelve compiled
 `channel-contract` cases plus the `store/9` Channel-private-hash case took the
@@ -820,7 +820,7 @@ producing `882 / 59 / 28`. HB.2a adds eighteen bounded framing and selection
 codec cases, producing the then-current `900 / 59 / 28` inventory.
 HB.2b1 adds fourteen bounded first-order type/value codec cases, producing the
 then-current `914 / 59 / 28` inventory. HB.2b2 adds eleven checked
-invoke-preflight cases, producing the current `925 / 59 / 28` inventory.
+invoke-preflight cases, producing the then-current `925 / 59 / 28` inventory.
 
 Native scheduling remains outside the current backend. Differential coverage is
 therefore limited to the supported case: an Async operation discharged by an
@@ -917,3 +917,9 @@ scheduling.
 SC.13 added the Channel contract, published identity, checker fixtures, and
 acceptance traces. SC.14 supplies the exact interpreted route and executable
 SC.10-SC.12 seeded, replay, exhaustive, and cache parity described above.
+
+The checked effect-payload successor adds 37 handler/transport cases and one
+unifier isolation case, plus one CLI transcript, bringing the live inventory to
+`963 / 60 / 28`. See [the containment contract](../../effect-payload-containment.md).
+The historical publication manifests and their recorded source evidence remain
+unchanged; these inventory numbers describe the current source checkout.

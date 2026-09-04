@@ -25,7 +25,8 @@ let test_classify_ty () =
     (Tier.classify_ty (Types.TArrow ([ int_ty ], Types.empty_row, int_ty)));
   Alcotest.check tier "open empty row is row-poly" Tier.RowPoly
     (Tier.classify_ty
-       (Types.TArrow ([ int_ty ], { Types.effects = []; tail = Types.new_rvar 1 }, int_ty)));
+       (Types.TArrow
+          ([ int_ty ], { Types.effects = []; payloads = []; tail = Types.new_rvar 1 }, int_ty)));
   Alcotest.check tier "closed effects"
     (Tier.Effectful { effects = [ h ]; opened = false })
     (Tier.classify_ty (Types.TArrow ([ int_ty ], Types.closed_row [ h ], int_ty)));

@@ -8,4 +8,4 @@
             (app (var eval-code) (quote (lit "forbidden")))
             (ret (pvar value) (var value))
             (opclause eval-code ((pvar code)) resume
-              (app (var resume) (lit "handled"))))))))))
+              (lit "handled")))))))))

@@ -193,13 +193,13 @@ let test_loads_with_zero_diagnostics () =
     [
       ("infer.scripted", "forall a | e. (() ->{Infer | e} a, List Text) ->{Throw | e} a");
       ("net.record", "forall a | e. (() ->{Net | e} a) ->{Net | e} (a, Code)");
-      ("test.replay", "forall a. (Code, () ->{Net} a) ->{Throw} a");
+      ("test.replay", "forall a | e. (Code, () ->{Net | e} a) ->{Throw | e} a");
       ("net.scripted", "forall a | e. (() ->{Net | e} a, List Response) ->{Throw | e} a");
       ("console.scripted", "forall a | e. (() ->{Console | e} a, List Text) ->{Throw | e} a");
       ( "fs.in-memory",
         "forall a | e. (() ->{Fs | e} a, `type:map.t` Text Text) ->{Throw | e} (a, `type:map.t` \
          Text Text)" );
-      ("test.replay-loose", "forall a. (Code, () ->{Net} a) ->{Check, Throw} a");
+      ("test.replay-loose", "forall a | e. (Code, () ->{Net | e} a) ->{Check, Throw | e} a");
       ("audit.in-memory", "forall a | e. (() ->{Audit | e} a) ->{| e} (a, List AuditEntry)");
       ( "audit.line-log",
         "forall a | e. (() ->{Audit | e} a, (Text) ->{| e} Result Text ()) ->{| e} Result Text a" );

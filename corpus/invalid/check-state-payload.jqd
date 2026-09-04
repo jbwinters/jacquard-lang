@@ -1,0 +1,6 @@
+(defterm ((binding bad
+  ((tarrow () (row) (ttuple (tref text) (tref int))))
+  (lam ()
+    (app (var state.run)
+      (lam () (let nonrec (pwild) (app (var put) (lit "hi")) (app (var get))))
+      (lit 0))))))

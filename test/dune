@@ -49,6 +49,11 @@
  (libraries unix))
 
 (executable
+ (name effect_payload_runtime_probe)
+ (modules effect_payload_runtime_probe)
+ (libraries jacquard jacquard_native unix))
+
+(executable
  (name once_interpreter_probe)
  (modules once_interpreter_probe)
  (libraries jacquard unix))
@@ -147,7 +152,7 @@
 (test
  (name test_jacquard)
  (modules
-  (:standard \ corpus_support gen_goldens gen_surface_twins gen_prelude_goldens gen_sig_goldens gen_freeze_goldens gen_diag_goldens gen_native_parity gen_governance_playground_fixtures native_fuzz once_interpreter_probe gen_once_hostile scope_policy_trace round_robin_trace run_transcript_trace test_governance_review_diff governance_review_diff_focused test_host_protocol_vectors host_protocol_vectors_focused test_host_protocol_codec host_protocol_codec_focused test_host_boundary_codec host_boundary_codec_focused test_host_invoke_preflight host_invoke_preflight_focused))
+  (:standard \ corpus_support gen_goldens gen_surface_twins gen_prelude_goldens gen_sig_goldens gen_freeze_goldens gen_diag_goldens gen_native_parity gen_governance_playground_fixtures native_fuzz effect_payload_runtime_probe once_interpreter_probe gen_once_hostile scope_policy_trace round_robin_trace run_transcript_trace test_governance_review_diff governance_review_diff_focused test_host_protocol_vectors host_protocol_vectors_focused test_host_protocol_codec host_protocol_codec_focused test_host_boundary_codec host_boundary_codec_focused test_host_invoke_preflight host_invoke_preflight_focused))
  (libraries jacquard governance_review_diff_test_support host_protocol_vectors_test_support host_protocol_codec_test_support host_boundary_codec_test_support host_invoke_preflight_test_support corpus_support alcotest fmt qcheck-core qcheck-alcotest unix str yojson)
  (deps
   (glob_files_rec ../corpus/*.jqd)

@@ -141,12 +141,13 @@ output in the transcript.
   $ diff join-large-interpreter.out join-large-native.out && wc -c < join-large-native.out | tr -d ' '
   131075
 
-The runtime-erasure gauntlet reaches a non-Text eighth argument and pins the
-same indexed error and exit in the interpreter and native backend.
+The checker rejects the former erasure gauntlet before either engine starts.
+The test-only probe verifies that rejection, then exercises the non-Text eighth
+argument directly to preserve the indexed runtime diagnostic and allocation checks.
 
-  $ jacquard run ../native-gauntlet/e07-erasure-text-join.jqd > bad-eight-interpreter.out 2>&1; echo "exit $?"
+  $ ../effect_payload_runtime_probe.exe run ../native-gauntlet/e07-erasure-text-join.jqd > bad-eight-interpreter.out 2>&1; echo "exit $?"
   exit 2
-  $ jacquard build ../native-gauntlet/e07-erasure-text-join.jqd -o bad-eight-native > /dev/null
+  $ ../effect_payload_runtime_probe.exe build ../native-gauntlet/e07-erasure-text-join.jqd bad-eight-native > /dev/null
   $ ./bad-eight-native > bad-eight-native.out 2>&1; echo "exit $?"
   exit 2
   $ diff bad-eight-interpreter.out bad-eight-native.out && echo identical
@@ -163,7 +164,7 @@ all cases use allocated text on both sides of the bad value.
   $ export JACQUARD_NATIVE_CFLAGS="-fsanitize=address -O1 -g"
   $ for f in ../../test/native-asan/join-bad-*.jqd; do
   >   n=$(basename "$f" .jqd)
-  >   jacquard build "$f" -o "asan-$n" > /dev/null
+  >   ../effect_payload_runtime_probe.exe build "$f" "asan-$n" > /dev/null
   >   ASAN_OPTIONS=detect_leaks=1 "./asan-$n" > "asan-$n.out" 2>&1; status=$?
   >   if [ "$status" = 2 ] && ! grep -q Sanitizer "asan-$n.out"; then
   >     echo "asan-clean: $n"

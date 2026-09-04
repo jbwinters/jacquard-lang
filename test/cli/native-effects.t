@@ -2,7 +2,9 @@ Effects II (docs/native-plan.md, task 71): capturing and multi-shot handlers
 compile; every handler-gauntlet semantic case runs natively byte-identical to
 the interpreter. The twins and their mapping to the OCaml suites live in
 test/native-gauntlet/ (MAPPING.md); the byte comparison here IS each case's
-assertion, exit codes included.
+assertion, exit codes included. The erasure fixtures now fail static checking
+identically through run and build. A test-only probe requires that refusal before
+passing them directly to each engine to retain defensive runtime coverage.
 
   $ export JACQUARD_PRELUDE=../../prelude
   $ export JACQUARD_RUNTIME=../../runtime
@@ -10,8 +12,17 @@ assertion, exit codes included.
 
   $ for f in ../../test/native-gauntlet/[eg]*.jqd; do
   >   n=$(basename $f .jqd)
-  >   jacquard run $f > i.out 2>&1; ie=$?
-  >   jacquard build $f -o prog > /dev/null 2>&1 || { echo "REFUSED: $n"; continue; }
+  >   case "$n" in
+  >     e*-erasure-*)
+  >       jacquard run "$f" > refused-i.out 2>&1; ri=$?
+  >       jacquard build "$f" -o rejected > refused-n.out 2>&1; rn=$?
+  >       if [ "$ri" != 1 ] || [ "$rn" != 1 ] || ! grep -q 'error\[E0801\]' refused-i.out || ! diff -q refused-i.out refused-n.out > /dev/null; then echo "STATIC REFUSAL FAILED: $n"; exit 1; fi
+  >       ../effect_payload_runtime_probe.exe run "$f" > i.out 2>&1; ie=$?
+  >       ../effect_payload_runtime_probe.exe build "$f" prog > /dev/null 2>&1 || { echo "PROBE REFUSED: $n"; continue; } ;;
+  >     *)
+  >       jacquard run "$f" > i.out 2>&1; ie=$?
+  >       jacquard build "$f" -o prog > /dev/null 2>&1 || { echo "REFUSED: $n"; continue; } ;;
+  >   esac
   >   ./prog > n.out 2>&1; ne=$?
   >   if diff -q i.out n.out > /dev/null && [ "$ie" = "$ne" ]
   >   then echo "identical: $n (exit $ie)"
@@ -364,8 +375,8 @@ error is live parity surface too:
   >   (ret (pvar x) (var x))
   >   (opclause get () k (app (var k) (lit 5))))
   > EOF_JQD
-  $ jacquard build erasure-grant.jqd -o erasure-grant > /dev/null
-  $ jacquard run erasure-grant.jqd --allow console > i.out 2>&1; echo "exit $?"
+  $ ../effect_payload_runtime_probe.exe build erasure-grant.jqd erasure-grant > /dev/null
+  $ ../effect_payload_runtime_probe.exe run-console erasure-grant.jqd > i.out 2>&1; echo "exit $?"
   exit 2
   $ ./erasure-grant --allow console > n.out 2>&1; echo "exit $?"
   exit 2

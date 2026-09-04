@@ -9,8 +9,8 @@ laws. GM.15's existing hostile matrix remains supporting infrastructure.
   governed-deploy-agent : () ->{Workspace} Result ToolError Response
   agent-id fab711efd085966134e843f93e201de04b8aeb966a54313ef414ff5997951e77
   == inferred dry/live authority ==
-  dry-world : forall a. () ->{} Result a (Result ToolError Response, List AuditEntry)
-  live-world : forall a. (Risk, Risk) ->{Secret, Fs, Net} Result a (Result ToolError Response, List AuditEntry)
+  dry-world : () ->{} Result Text (Result ToolError Response, List AuditEntry)
+  live-world : (Risk, Risk) ->{Secret, Fs, Net} Result Text (Result ToolError Response, List AuditEntry)
   == deterministic world-free dry and agent fault worlds ==
   ("agent/dry", "simulated", 202, 8, "raw-actions", 0)
   ("call-id/policy-id/proposal-id", ok(("e73e16e6f1659873b45eafdeb84f161180cd72d9e8e790369f44683bd63ab672", "fc90806170e9d902775c96263539a673c1f440259d178c24dd42058a8ca75ec1", "90d9ca81e7e55d61d8176476589f15fb14a907ce67175f745552db2dc65bba38")))
