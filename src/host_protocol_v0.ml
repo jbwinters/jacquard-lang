@@ -58,12 +58,33 @@ let diagnostic_spec = function
       ( "The selected host capability or operation registry is invalid.",
         "Use the exact checked effect set and a sorted unique registry of its public once \
          operations." )
+  | "E1606" ->
+      ( "The root operation has no configured host implementation.",
+        "Configure the exact operation before starting a new invocation." )
+  | "E1607" ->
+      ( "The host refused authority before starting the outside action.",
+        "Review the host's authority policy before starting a new invocation." )
   | "E1608" ->
       ( "The host protocol message is invalid in the current state.",
         "Send only the next message permitted by the serial jacquard-host-v0 state machine." )
+  | "E1609" ->
+      ( "The host reported a timeout with known completion.",
+        "Inspect the host's completion evidence before deciding on any later invocation." )
+  | "E1610" ->
+      ( "The host requested shutdown with known completion.",
+        "Release invocation resources and close the worker." )
   | "E1611" ->
       ( "The host carrier was lost before a trustworthy frame completed.",
         "Treat the missing terminal exchange as host-owned carrier-failure evidence." )
+  | "E1612" ->
+      ( "The outside action's completion is unknown.",
+        "Reconcile host-owned evidence; do not automatically retry the action or invocation." )
+  | "E1613" ->
+      ( "The host reported that the outside action failed.",
+        "Inspect the host's failure evidence before deciding on any later invocation." )
+  | "E1614" ->
+      ( "The host cancelled the invocation with known completion.",
+        "Release invocation resources without resuming the cancelled continuation." )
   | code -> raise (Diag.Bug_invalid_diagnostic ("unknown host protocol diagnostic code " ^ code))
 
 let diagnostic ~code cause =
@@ -1100,3 +1121,374 @@ let parse_invoke ~limits ~checker json =
           in
           Ok { invocation_id; callable; parameters; effects; result; arguments; operations }
   | _ -> error ~code:"E1601" "The invoke message must be one JSON object."
+
+module Session = struct
+  type phase = Running | Waiting of operation_binding * int | Closed
+
+  type t = {
+    limits : limits;
+    checker : Check.ctx;
+    invocation : invocation;
+    mutable phase : phase;
+    mutable requests : Yojson.Safe.t list;
+    mutable observations : Yojson.Safe.t list;
+  }
+
+  type action = Request of Yojson.Safe.t | Resume of Value.t | Finished of Yojson.Safe.t
+
+  let hash_json hash = `String (Hash.to_hex hash)
+  let request_id ordinal = Printf.sprintf "%016x" ordinal
+
+  let observation ordinal category completion =
+    `Assoc
+      [
+        ("category", `String category); ("completion", `String completion); ("ordinal", `Int ordinal);
+      ]
+
+  let checked_frame limits json =
+    let* _ = encode_frame_bytes ~limits json in
+    Ok json
+
+  let diagnostic_json limits diagnostics =
+    let json = List.map Diag.to_yojson diagnostics in
+    if
+      diagnostics = []
+      || List.length diagnostics > limits.max_diagnostics
+      || json_string_bytes (`List json) > limits.max_diagnostic_bytes
+    then error ~code:"E1602" "The terminal diagnostics exceed the selected count or byte limit."
+    else Ok (`List json)
+
+  let fatal ~limits diagnostics =
+    let encode diagnostics =
+      let* diagnostics = diagnostic_json limits diagnostics in
+      checked_frame limits
+        (`Assoc
+           [
+             ("diagnostics", diagnostics); ("kind", `String "fatal"); ("protocol", `String protocol);
+           ])
+    in
+    match encode diagnostics with Ok json -> Ok json | Error _ -> encode [ capacity_diagnostic ]
+
+  let evidence session budget ~requests ~observations ~terminal =
+    let invocation = session.invocation in
+    let* parameters = map_result (encode_boundary_type ~budget) invocation.parameters in
+    let* result = encode_boundary_type ~budget invocation.result in
+    let effects = `List (List.map hash_json invocation.effects) in
+    let operations =
+      List.map
+        (fun (binding : operation_binding) ->
+          `Assoc
+            [
+              ("effect", hash_json binding.effect_identity);
+              ("mode", `String "once");
+              ("operation", hash_json binding.operation);
+            ])
+        invocation.operations
+    in
+    Ok
+      (`Assoc
+         [
+           ( "core",
+             `Assoc
+               [
+                 ("capabilities", `Assoc [ ("effects", effects); ("operations", `List operations) ]);
+                 ("effect_requests", `List (List.rev requests));
+                 ( "interface",
+                   `Assoc
+                     [ ("effects", effects); ("parameters", `List parameters); ("result", result) ]
+                 );
+                 ("invocation_id", `String invocation.invocation_id);
+                 ("schema", `String "jacquard-host-core-evidence-v0");
+                 ( "target",
+                   `Assoc
+                     [
+                       ("callable", hash_json invocation.callable); ("kind", `String "store-term-v0");
+                     ] );
+                 ("terminal", `String terminal);
+               ] );
+           ( "host_observations",
+             `Assoc
+               [
+                 ("responses", `List (List.rev observations));
+                 ("schema", `String "jacquard-host-observations-v0");
+               ] );
+         ])
+
+  let outcome session ~requests ~observations ~terminal result =
+    let budget = create_boundary_budget session.limits in
+    let* evidence = evidence session budget ~requests ~observations ~terminal in
+    let* result =
+      match result with
+      | Ok value ->
+          let* value = encode_boundary_value ~budget value in
+          Ok (`Assoc [ ("kind", `String "ok"); ("value", value) ])
+      | Error diagnostics ->
+          let* diagnostics = diagnostic_json session.limits diagnostics in
+          Ok (`Assoc [ ("diagnostics", diagnostics); ("kind", `String "error") ])
+    in
+    checked_frame session.limits
+      (`Assoc
+         [
+           ("evidence", evidence);
+           ("invocation_id", `String session.invocation.invocation_id);
+           ("kind", `String "outcome");
+           ("protocol", `String protocol);
+           ("result", result);
+         ])
+
+  let reserve session ~requests ~observations =
+    outcome session ~requests ~observations ~terminal:"completion_unknown"
+      (Error [ capacity_diagnostic ])
+    |> Result.map (fun _ -> ())
+
+  let start ~limits ~checker json =
+    (* Revalidate the public record so callers cannot create uncapped sessions. *)
+    let* limits =
+      parse_host_select
+        (`Assoc
+           [
+             ("kind", `String "host_select");
+             ("limits", limits_to_yojson limits);
+             ("protocol", `String protocol);
+           ])
+    in
+    let* _ = checked_frame limits json in
+    let* invocation = parse_invoke ~limits ~checker json in
+    let session =
+      { limits; checker; invocation; phase = Running; requests = []; observations = [] }
+    in
+    let* () = reserve session ~requests:[] ~observations:[] in
+    Ok session
+
+  let call session = (session.invocation.callable, session.invocation.arguments)
+  let closed () = error ~code:"E1608" "The invocation already produced its terminal action."
+
+  let finish_error session ~terminal diagnostics =
+    match session.phase with
+    | Closed -> closed ()
+    | Running | Waiting _ ->
+        session.phase <- Closed;
+        let encode diagnostics =
+          outcome session ~requests:session.requests ~observations:session.observations ~terminal
+            (Error diagnostics)
+        in
+        let result =
+          match encode diagnostics with
+          | Ok json -> Ok json
+          | Error _ -> encode [ capacity_diagnostic ]
+        in
+        Result.map (fun json -> Finished json) result
+
+  let violation session =
+    finish_error session ~terminal:"diagnostic"
+      [ diagnostic ~code:"E1608" "The action is invalid in the current invocation state." ]
+
+  let abort session diagnostics = finish_error session ~terminal:"diagnostic" diagnostics
+
+  let finish session value =
+    match session.phase with
+    | Closed -> closed ()
+    | Waiting _ -> violation session
+    | Running -> (
+        let encoded =
+          let* json =
+            outcome session ~requests:session.requests ~observations:session.observations
+              ~terminal:"ok" (Ok value)
+          in
+          let* () =
+            validate_argument_value session.checker ~expected:session.invocation.result value
+          in
+          Ok json
+        in
+        match encoded with
+        | Error diagnostics -> abort session diagnostics
+        | Ok json ->
+            session.phase <- Closed;
+            Ok (Finished json))
+
+  let request session ~operation ~arguments =
+    match session.phase with
+    | Closed -> closed ()
+    | Waiting _ -> violation session
+    | Running -> (
+        let prepared =
+          let* binding =
+            match
+              List.find_opt
+                (fun (binding : operation_binding) -> Hash.equal binding.operation operation)
+                session.invocation.operations
+            with
+            | Some binding -> Ok binding
+            | None ->
+                error ~code:"E1606" "The root operation is absent from the configured registry."
+          in
+          let ordinal = List.length session.requests + 1 in
+          if ordinal > session.limits.max_effect_requests then
+            error ~code:"E1602" "The invocation exceeds max_effect_requests."
+          else if List.length arguments <> List.length binding.parameters then
+            error ~code:"E1603" "The root operation arguments disagree with its checked arity."
+          else
+            let budget = create_boundary_budget session.limits in
+            let* () =
+              validate_boundary_count ~budget ~context:"operation arguments" ~arguments:true
+                (List.length arguments)
+            in
+            let* arguments =
+              map_result
+                (fun (expected, value) ->
+                  let* json = encode_boundary_value ~budget value in
+                  let* () = validate_argument_value session.checker ~expected value in
+                  Ok json)
+                (List.combine binding.parameters arguments)
+            in
+            let* frame =
+              checked_frame session.limits
+                (`Assoc
+                   [
+                     ("arguments", `List arguments);
+                     ("effect", hash_json binding.effect_identity);
+                     ("invocation_id", `String session.invocation.invocation_id);
+                     ("kind", `String "effect_request");
+                     ("mode", `String "once");
+                     ("operation", hash_json operation);
+                     ("protocol", `String protocol);
+                     ("request_id", `String (request_id ordinal));
+                   ])
+            in
+            let requests =
+              `Assoc
+                [
+                  ("effect", hash_json binding.effect_identity);
+                  ("operation", hash_json operation);
+                  ("ordinal", `Int ordinal);
+                ]
+              :: session.requests
+            in
+            (* Longest permitted observation strings and terminal label reserve
+               every response's bounded fallback before an outside action. *)
+            let observations =
+              observation ordinal "unsupported_operation" "not_started" :: session.observations
+            in
+            let* () = reserve session ~requests ~observations in
+            Ok (binding, ordinal, requests, frame)
+        in
+        match prepared with
+        | Error diagnostics -> abort session diagnostics
+        | Ok (binding, ordinal, requests, frame) ->
+            session.requests <- requests;
+            session.phase <- Waiting (binding, ordinal);
+            Ok (Request frame))
+
+  type response = Success of Value.t | Stop of string * string * string * Diag.t
+
+  let parse_response session (binding : operation_binding) ordinal json =
+    let* _ = checked_frame session.limits json in
+    let* fields =
+      match json with
+      | `Assoc fields -> Ok fields
+      | _ -> error ~code:"E1608" "A response must be an object."
+    in
+    let string name =
+      match field name fields with
+      | Some (`String value) -> Ok value
+      | _ -> error ~code:"E1608" "A response string field is missing or malformed."
+    in
+    let* version = string "protocol" in
+    let* invocation_id = string "invocation_id" in
+    let* id = string "request_id" in
+    if
+      version <> protocol
+      || invocation_id <> session.invocation.invocation_id
+      || id <> request_id ordinal
+    then error ~code:"E1608" "The response protocol or invocation/request identity does not match."
+    else
+      let* kind = string "kind" in
+      let common = [ "invocation_id"; "kind"; "protocol"; "request_id" ] in
+      match kind with
+      | "effect_ok" ->
+          let* () = exact_fields ("value" :: common) fields in
+          let* value =
+            match field "value" fields with
+            | Some value -> Ok value
+            | None -> error ~code:"E1608" "The response value is missing."
+          in
+          let* value =
+            decode_boundary_value
+              ~budget:(create_boundary_budget session.limits)
+              ~constructor_info:(constructor_info session.checker)
+              value
+          in
+          let* () = validate_argument_value session.checker ~expected:binding.result value in
+          Ok (Success value)
+      | "effect_failure" ->
+          let* () = exact_fields ([ "category"; "completion"; "message" ] @ common) fields in
+          let* category = string "category" in
+          let* completion = string "completion" in
+          let* message = string "message" in
+          if String.length message > session.limits.max_host_message_bytes then
+            error ~code:"E1602" "The host message exceeds max_host_message_bytes."
+          else
+            let* code, terminal =
+              match (category, completion) with
+              | "unsupported_operation", "not_started" -> Ok ("E1606", "host_failure")
+              | "refused_authority", "not_started" -> Ok ("E1607", "host_failure")
+              | "outside_failure", "failed" -> Ok ("E1613", "host_failure")
+              | "completion_unknown", "unknown" -> Ok ("E1612", "completion_unknown")
+              | _ -> error ~code:"E1608" "The host failure category/completion pair is invalid."
+            in
+            Ok
+              (Stop
+                 ( category,
+                   completion,
+                   terminal,
+                   diagnostic ~code ("The host reported an outside failure. Host detail: " ^ message)
+                 ))
+      | "cancel" ->
+          let* () = exact_fields ([ "reason"; "completion" ] @ common) fields in
+          let* reason = string "reason" in
+          let* completion = string "completion" in
+          let* code =
+            match reason with
+            | "cancelled" -> Ok "E1614"
+            | "timeout" -> Ok "E1609"
+            | "host_shutdown" -> Ok "E1610"
+            | _ -> error ~code:"E1608" "The cancellation reason is invalid."
+          in
+          let* code, terminal =
+            match completion with
+            | "unknown" -> Ok ("E1612", "completion_unknown")
+            | "not_started" | "failed" -> Ok (code, "cancelled")
+            | _ -> error ~code:"E1608" "The cancellation completion is invalid."
+          in
+          Ok
+            (Stop
+               ( reason,
+                 completion,
+                 terminal,
+                 diagnostic ~code "The host ended the response slot without a successful value." ))
+      | _ -> error ~code:"E1608" "The message is not a response or cancellation."
+
+  let respond session json =
+    match session.phase with
+    | Closed -> closed ()
+    | Running -> violation session
+    | Waiting (binding, ordinal) -> (
+        match parse_response session binding ordinal json with
+        | Error diagnostics ->
+            let diagnostics =
+              if List.exists (fun d -> Diag.code d = Some "E1602") diagnostics then diagnostics
+              else
+                [
+                  diagnostic ~code:"E1608"
+                    "The host response is malformed or disagrees with its checked result type.";
+                ]
+            in
+            abort session diagnostics
+        | Ok (Success value) ->
+            session.observations <- observation ordinal "ok" "completed" :: session.observations;
+            session.phase <- Running;
+            Ok (Resume value)
+        | Ok (Stop (category, completion, terminal, diagnostic)) ->
+            session.observations <- observation ordinal category completion :: session.observations;
+            finish_error session ~terminal [ diagnostic ])
+end

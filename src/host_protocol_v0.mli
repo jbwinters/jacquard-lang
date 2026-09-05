@@ -2,8 +2,8 @@
 
     This module implements transport framing, structural JSON checks, limit negotiation, the
     selected shutdown envelope, the frozen first-order type/value descriptors, and preflight for one
-    exact checked invocation. It does not evaluate code, dispatch host operations, or expose a
-    runnable worker. *)
+    exact checked invocation. Session implements serial request/response and terminal accounting.
+    The module does not evaluate code, dispatch host operations, or expose a runnable worker. *)
 
 val protocol : string
 (** The one protocol version accepted by this codec. *)
@@ -135,3 +135,52 @@ val read_frame : limits:limits -> in_channel -> (Yojson.Safe.t, Diag.t list) res
 val write_frame : limits:limits -> out_channel -> Yojson.Safe.t -> (unit, Diag.t list) result
 (** [write_frame ~limits output json] writes and flushes one complete frame. Encoding failures
     retain E1601/E1602; an output or flush failure returns E1611. *)
+
+(** Serial invocation accounting without evaluator continuations or carrier I/O. Keep the
+    checker/store stable for a session's lifetime. The caller owns writes, flushes, continuation
+    resume/drop, descriptor release, and carrier loss. Actions are committed when returned and must
+    never be retried. *)
+module Session : sig
+  type t
+  type action = Request of Yojson.Safe.t | Resume of Value.t | Finished of Yojson.Safe.t
+
+  val start : limits:limits -> checker:Check.ctx -> Yojson.Safe.t -> (t, Diag.t list) result
+  (** Validate selected limits and full invoke preflight, then reserve a bounded error outcome
+      before accepting the invocation. Returns the preflight diagnostics or E1602 if terminal
+      evidence cannot fit; never evaluates. *)
+
+  val call : t -> Hash.t * Value.t list
+  (** The checked target and positional arguments for the caller's isolated evaluator. *)
+
+  val request : t -> operation:Hash.t -> arguments:Value.t list -> (action, Diag.t list) result
+  (** In the running state, validate the configured operation and actual values, reserve terminal
+      capacity, and return one [Request]. Missing operations finish with E1606, mismatched values
+      with E1603/E1604, limits with E1602. A second request while waiting finishes with E1608. No
+      refused request enters evidence. The caller retains exactly one continuation. *)
+
+  val respond : t -> Yojson.Safe.t -> (action, Diag.t list) result
+  (** Consume one matching response slot. [Resume] carries a type-checked value exactly once; the
+      caller may then resume its captured continuation. Failure/cancellation returns [Finished] with
+      the frozen terminal mapping; the caller must drop the continuation. Rejected messages finish
+      with E1608 (E1602 for a selected limit) and are not accepted observations. *)
+
+  val finish : t -> Value.t -> (action, Diag.t list) result
+  (** Validate the actual invocation result and return one bounded [Finished]. Wrong
+      types/unsupported values yield E1603/E1604, capacity failures E1602, and attempting to finish
+      while waiting E1608. Result and evidence share the frame's boundary-node budget. *)
+
+  val abort : t -> Diag.t list -> (action, Diag.t list) result
+  (** End a live invocation with its structured runtime diagnostics. Empty or oversized diagnostics
+      become the fixed E1602 fallback. Carrier loss can prevent writing this action; do not
+      fabricate a delivered terminal. *)
+
+  val fatal : limits:limits -> Diag.t list -> (Yojson.Safe.t, Diag.t list) result
+  (** Encode a pre-invocation fatal with bounded diagnostics. Oversized or empty diagnostics become
+      E1602; returns Error if even the fallback cannot fit. Use negotiated limits after selection
+      and hard limits before selection. *)
+
+  (** All state-changing calls after [Finished] return Error E1608, never a second terminal. Every
+      returned frame obeys selected structural and byte limits. If full diagnostics cannot fit, a
+      fixed E1602 diagnostic replaces them while retaining accepted observations and terminal
+      classification. *)
+end

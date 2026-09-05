@@ -35,7 +35,8 @@ project shape from file names alone.
   positive/hostile vectors. HB.2a implements strict framing/selection and
   HB.2b1 implements bounded first-order type/value codecs. HB.2b2 additionally
   preflights exact stored targets, interfaces, typed arguments, effect grants,
-  and closed once-operation registries, but no runnable carrier ships yet.
+  and closed once-operation registries. The [session layer](host-session-v0.md)
+  accounts for serial responses and terminal evidence; no runnable carrier ships yet.
 - `development-plan.md`: completed historical task plan and milestone
   discipline; not the current backlog.
 - `host-boundary.md`: HB.0 transport-neutral ownership, trust, containment,

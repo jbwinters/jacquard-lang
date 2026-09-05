@@ -6,7 +6,7 @@ artifacts and are not retroactively updated by DX.2.
 
 ## Current inventory
 
-- Alcotest/QCheck cases: `969`
+- Alcotest/QCheck cases: `984`
 - Cram transcript files: `60`
 - Doctest examples: `28` across 8 documents
 
@@ -107,3 +107,8 @@ unifier isolation case, plus one CLI transcript, bringing the live inventory to
 `969 / 60 / 28`. See [the containment contract](../../effect-payload-containment.md).
 The historical publication manifests and their recorded source evidence remain
 unchanged; these inventory numbers describe the current source checkout.
+
+The serial host-session library adds 15 cases, bringing the current source
+inventory to `984 / 60 / 28`. It covers typed responses, terminal mappings,
+finish-once accounting, and bounded evidence; the process worker remains
+unimplemented. See [the session contract](../../host-session-v0.md).

@@ -34,7 +34,7 @@ native Channel, actor, or supervision claim.
 | C3 | Scoped typed channels run through deterministic FIFO, seeded, replay, exhaustive, and cached interpreter scheduling with exact run/scope ownership, rendezvous and buffering, close, cancellation, and deadlock behavior. | `channel-contract`, `round-robin`, and `exhaustive-schedule` suites; `test/cli/task-values.t`; `test/cli/schedule-replay.t`; and the frozen traces below |
 | C4 | Not claimed: host asynchronous I/O, actors, and supervision are absent. | [LIMITS.md](LIMITS.md) |
 
-The current successor inventory is exactly 969 compiled Alcotest/QCheck cases, 60 recursive
+The current successor inventory is exactly 984 compiled Alcotest/QCheck cases, 60 recursive
 cram transcript files, and 28 named doctest examples across 8 documents. The
 repository release-law checks recompute those counts instead of trusting this
 paragraph.
@@ -760,7 +760,7 @@ opam exec -- dune build test/test_jacquard.exe
 
 The current inventory is mechanically checked against compiled discovery:
 
-- Alcotest/QCheck cases: `969`
+- Alcotest/QCheck cases: `984`
 - Cram transcript files: `60`
 
 The SC.14 baseline arithmetic remains exact: twelve compiled
@@ -923,3 +923,8 @@ unifier isolation case, plus one CLI transcript, bringing the live inventory to
 `969 / 60 / 28`. See [the containment contract](../../effect-payload-containment.md).
 The historical publication manifests and their recorded source evidence remain
 unchanged; these inventory numbers describe the current source checkout.
+
+The serial host-session library adds 15 cases, bringing the current source
+inventory to `984 / 60 / 28`. It covers typed responses, terminal mappings,
+finish-once accounting, and bounded evidence; the process worker remains
+unimplemented. See [the session contract](../../host-session-v0.md).
