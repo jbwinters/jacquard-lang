@@ -6,7 +6,7 @@ artifacts and are not retroactively updated by DX.2.
 
 ## Current inventory
 
-- Alcotest/QCheck cases: `963`
+- Alcotest/QCheck cases: `969`
 - Cram transcript files: `60`
 - Doctest examples: `28` across 8 documents
 
@@ -104,6 +104,6 @@ The exact fixture commands and stdout/stderr/exit comparisons are pinned in
 
 The checked effect-payload successor adds 37 handler/transport cases and one
 unifier isolation case, plus one CLI transcript, bringing the live inventory to
-`963 / 60 / 28`. See [the containment contract](../../effect-payload-containment.md).
+`969 / 60 / 28`. See [the containment contract](../../effect-payload-containment.md).
 The historical publication manifests and their recorded source evidence remain
 unchanged; these inventory numbers describe the current source checkout.

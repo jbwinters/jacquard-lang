@@ -3,7 +3,7 @@
 Status: candidate is ready for RC1 only after the exact candidate reproduction
 and required GitHub checks are green.
 
-Test count: `963`
+Test count: `969`
 
 Cram count: `60`
 
@@ -45,6 +45,6 @@ runtime, or general continuous probabilistic language.
 
 The checked effect-payload successor adds 37 handler/transport cases and one
 unifier isolation case, plus one CLI transcript, bringing the live inventory to
-`963 / 60 / 28`. See [the containment contract](../../effect-payload-containment.md).
+`969 / 60 / 28`. See [the containment contract](../../effect-payload-containment.md).
 The historical publication manifests and their recorded source evidence remain
 unchanged; these inventory numbers describe the current source checkout.

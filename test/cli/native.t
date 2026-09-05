@@ -208,7 +208,8 @@ expressions, not the whole file.)
   >   (ret (pvar x) (var x))
   >   (opclause get () k
   >     (let nonrec (pvar a) (app (var k) (lit 1))
-  >       (app (var k) (lit 2)))))
+  >       (app (var k) (lit 2))))
+  >   (opclause put ((pwild)) k (app (var k) (tuple))))
   > EOF_JQD
   $ jacquard run multishot.jqd
   2
@@ -241,7 +242,8 @@ discharging its effect in-language needs no grant:
   $ cat > get42.jqd <<'EOF_JQD'
   > (handle (app (var add) (app (var get)) (lit 1))
   >   (ret (pvar x) (var x))
-  >   (opclause get () k (app (var k) (lit 41))))
+  >   (opclause get () k (app (var k) (lit 41)))
+  >   (opclause put ((pwild)) k (app (var k) (tuple))))
   > EOF_JQD
   $ jacquard run get42.jqd > i.out 2>&1
   $ jacquard build get42.jqd -o get42 > /dev/null

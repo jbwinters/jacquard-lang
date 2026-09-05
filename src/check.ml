@@ -1510,21 +1510,45 @@ and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(requir
       result
   | Kernel.Tuple items -> TTuple (List.map (infer ctx env ~ambient ~required) items)
   | Kernel.Handle { body; ret = { rbinder; rbody; rmeta }; ops } ->
-      let handled =
+      let handled_operations =
         List.filter_map
           (fun (oc : Kernel.opclause) ->
             match oc.Kernel.op with
             | Kernel.Hashed h -> (
                 match locate ctx h with
-                | Ok { Store.decl_hash; role = Store.Operation _; _ } -> Some decl_hash
+                | Ok { Store.decl_hash; role = Store.Operation _; _ } -> Some (decl_hash, h)
                 | _ -> err ~meta:oc.Kernel.ometa ~code:"E0805" "op clause is not an operation")
             | Kernel.Named n -> err ~meta:oc.Kernel.ometa ~code:"E0811" "unresolved op `%s`" n)
           ops
       in
+      let handled = List.map fst handled_operations in
       (* The body starts with an independent tail. Calls inside it specialize flexible computation
          rows with exactly the handled labels; after solving, subtraction joins only the body's
          unhandled remainder into the surrounding ambient. *)
       let handled_payloads = fresh_payloads ctx handled in
+      (* Rows identify effects, not individual operations. Subtracting a partial payload handler
+         would hide the relationship between omitted operations and their outer region. *)
+      List.iter
+        (fun (effect_hash, _) ->
+          let covered =
+            List.filter_map
+              (fun (owner, operation) ->
+                if Hash.equal owner effect_hash then Some operation else None)
+              handled_operations
+            |> List.sort_uniq Hash.compare
+          in
+          match locate ctx effect_hash with
+          | Ok { Store.decl = { Kernel.it = Kernel.DefEffect { ops = declared; _ }; _ }; _ }
+            when List.length covered = List.length declared ->
+              ()
+          | _ ->
+              err ~meta ~code:"E0801"
+                ~next_step:
+                  "Add a clause for every operation of this effect, or use its complete handler."
+                "partial handler for %s cannot retain the payload type of operations forwarded to \
+                 an outer handler"
+                (name_of ctx effect_hash))
+        handled_payloads;
       let body_ambient = ref (open_row ~payloads:handled_payloads ctx.level handled) in
       let body_required =
         closed_row

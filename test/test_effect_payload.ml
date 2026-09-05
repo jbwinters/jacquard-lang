@@ -50,6 +50,38 @@ state.run(fn () -> { write("hi"); get() }, 0)|}
     );
     ( "State: nested handlers check their own payload",
       {|state.run(fn () -> state.run(fn () -> { put("hi"); get() }, 0), "outer")|} );
+    ( "State: partial get handler cannot detach forwarded put",
+      {|bad : () ->{} (Text, Int)
+bad() = state.run(fn () -> handle { put("hi"); get() } {
+| return value -> value
+| get() resume k -> k("inner")
+}, 0)
+bad()|}
+    );
+    ( "State: partial put handler cannot detach forwarded get",
+      {|bad : () ->{} (Text, Int)
+bad() = state.run(fn () -> handle { put("hi"); get() } {
+| return value -> value
+| put(value) resume k -> k(())
+}, 0)
+bad()|}
+    );
+    ( "State: even a homogeneous partial handler is conservatively refused",
+      {|handle { get() } { | return value -> value | get() resume k -> k(1) }|} );
+    ( "User effects: partial payload handler refusal is identity based",
+      {|once effect Cell a where { cell-read : () -> a; cell-write : (a) -> () }
+handle { cell-read() } {
+| return value -> value
+| cell-read() resume k -> k(1)
+}|}
+    );
+    ( "State: complete forwarding handler retains the outer payload",
+      {|state.run(fn () -> handle { put("hi"); get() } {
+| return value -> value
+| get() resume k -> k("inner")
+| put(value) resume k -> { put(value); k(()) }
+}, 0)|}
+    );
     ( "Throw: result error matches thrown payload",
       {|(throw.to-result(fn () -> throw("hi")) : Result Int Int)|} );
     ( "Throw: catch callback matches thrown payload",
@@ -125,6 +157,13 @@ state.run(fn () -> { match writer { | Writer(write) -> write("hi") }; get() }, "
     );
     ( "State: nested independent payload types",
       {|state.run(fn () -> { state.run(fn () -> { put(42); get() }, 0); get() }, "outer")|} );
+    ( "State: complete forwarding handler keeps matching payloads",
+      {|state.run(fn () -> handle { put(42); get() } {
+| return value -> value
+| get() resume k -> k(7)
+| put(value) resume k -> { put(value); k(()) }
+}, 0)|}
+    );
     ( "Throw: matching callback",
       {|throw.catch(fn () -> throw("hi"), fn (message) -> text.length(message))|} );
     ( "Throw: independent error types",

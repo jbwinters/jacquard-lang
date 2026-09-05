@@ -107,6 +107,7 @@ Handler payload checking refuses a non-Code resumption before execution.
   > handle { quote { f(unquote(get())) } } {
   >   | return x -> x
   >   | get() resume k -> k(5)
+  >   | put(value) resume k -> k(())
   > }
   > EOF_JAC
   $ jacquard run non-code-splice.jac > static.out 2>&1; status=$?; if test "$status" = 1 && grep -q 'error\[E0801\]' static.out; then echo 'static payload refusal'; else cat static.out; exit 1; fi

@@ -32,7 +32,7 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `963`
+- Alcotest/QCheck cases: `969`
 - Cram transcript files: `60`
 - Documentation examples: `28` named examples across `8` documents
 
@@ -90,6 +90,6 @@ canonical hash equality means arbitrary behavioral equivalence. Read
 
 The checked effect-payload successor adds 37 handler/transport cases and one
 unifier isolation case, plus one CLI transcript, bringing the live inventory to
-`963 / 60 / 28`. See [the containment contract](../../effect-payload-containment.md).
+`969 / 60 / 28`. See [the containment contract](../../effect-payload-containment.md).
 The historical publication manifests and their recorded source evidence remain
 unchanged; these inventory numbers describe the current source checkout.

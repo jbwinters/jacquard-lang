@@ -1109,7 +1109,10 @@ aliases, higher-order calls, and annotations. Printed effect rows remain name-se
 their hidden payload constraints are retained during inference. Nominal callback
 fields that cannot retain those constraints are refused; use a declared parameter
 for the complete callback type. Independent handler calls and complete nested
-handlers may use different payload types. The migration contract and regression
+handlers may use different payload types. Handlers for effects with shared payload
+parameters must cover every operation: partial handlers are conservatively refused
+because the row cannot retain the payload relationship of an omitted operation
+forwarding outward. The migration contract and regression
 evidence are described in [effect payload containment](effect-payload-containment.md).
 
 **Dynamic Eval retains an unchecked result boundary.** `eval-code : (Code) ->{Eval} a`

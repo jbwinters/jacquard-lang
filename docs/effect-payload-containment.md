@@ -45,6 +45,14 @@ callback field must not hide a payload parameter that its declared type cannot
 represent. Generic type parameters that carry the complete inferred callback
 type continue to retain its constraints.
 
+A handler for an effect with shared payload parameters must cover every declared
+operation. A partial State handler, for example, could intercept `get` while an
+omitted `put` reaches an outer state region. The current effect rows cannot retain
+that per-operation forwarding relationship, so these partial handlers are refused
+even when a particular body uses only the covered operation. Complete nested
+handlers still establish independent regions. This restriction does not apply to
+effects without shared payload parameters.
+
 Acceptance requires the normal checker and CLI regressions for State, Throw,
 Emit, aliases, higher-order transport, annotations, nested handlers, and nominal
 callback storage; positive same-type and independent-instantiation cases;
@@ -56,6 +64,9 @@ Migration from the predecessor checker:
 
 - Keep each State region at one state type, including `get`, `put`, initial state,
   and final state. Use independent or nested complete handlers for different types.
+  A custom State handler needs both `get` and `put` clauses. Define the intended
+  behavior of each operation explicitly; forwarding a clause's operation outward
+  retains the outer region's payload constraint.
 - Convert errors to one declared error type before throwing them through one
   handler, and keep an Emit region homogeneous. A sum type can represent deliberate
   alternatives.
