@@ -6,8 +6,8 @@ artifacts and are not retroactively updated by DX.2.
 
 ## Current inventory
 
-- Alcotest/QCheck cases: `925`
-- Cram transcript files: `59`
+- Alcotest/QCheck cases: `969`
+- Cram transcript files: `60`
 - Doctest examples: `28` across 8 documents
 
 The test count includes six DX.2 filesystem-boundary cases and six DX.5/DX.7
@@ -66,7 +66,7 @@ cases, producing `882 / 59 / 28`. HB.2a adds eighteen bounded framing and
 selection codec cases, producing the then-current `900 / 59 / 28` successor
 inventory. HB.2b1 adds fourteen bounded first-order type/value codec cases,
 producing the then-current `914 / 59 / 28` successor inventory. HB.2b2 adds
-eleven checked invoke-preflight cases, producing the current `925 / 59 / 28`
+eleven checked invoke-preflight cases, producing the then-current `925 / 59 / 28`
 successor inventory without changing the historical DX.2 publication.
 
 ## Proved behavior
@@ -101,3 +101,9 @@ scripts/release/check-surface-syntax-manifest.sh
 
 The exact fixture commands and stdout/stderr/exit comparisons are pinned in
 `test/cli/export.t`; filesystem fault injection is in `test/test_export.ml`.
+
+The checked effect-payload successor adds 37 handler/transport cases and one
+unifier isolation case, plus one CLI transcript, bringing the live inventory to
+`969 / 60 / 28`. See [the containment contract](../../effect-payload-containment.md).
+The historical publication manifests and their recorded source evidence remain
+unchanged; these inventory numbers describe the current source checkout.

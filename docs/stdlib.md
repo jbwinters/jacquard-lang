@@ -14,8 +14,10 @@ output): `name : (args) ->{row} result`. An empty row `->{}` means pure. An open
 `->{Abort | e}` means Abort plus whatever `e` turns out to be. Tail-only rows now use the
 canonical `->{| e}` surface spelling; bootstrap s-expressions remain supported as the kernel
 format. Rows are name-sets: an effect declaration may have type parameters, but a row contains
-only the effect name. Those type parameters are erased from the row, so payload types remain
-independent type variables in the surrounding arguments, result, and `forall` binders.
+only the effect name. The checker also retains internal payload constraints that are absent
+from that printed carrier: State values, thrown errors, and emitted elements must agree within
+a handled region. See [checked effect payload containment](effect-payload-containment.md) for
+these constraints and migration from the older erased typing behavior.
 
 Unless a fence is labeled `jacquard doctest=...`, blocks in this design document
 are signature catalogs, algebraic laws, or pseudocode fragments rather than complete
@@ -328,7 +330,7 @@ abort.to-option : forall a | e. (() ->{Abort | e} a) ->{| e} Option a
 abort.or        : forall a | e. (() ->{Abort | e} a, a) ->{| e} a
 throw.to-result : forall a b | e. (() ->{Throw | e} b) ->{| e} Result a b
 throw.catch     : forall a b | e. (() ->{Throw | e} a, (b) ->{| e} a) ->{| e} a
-state.run       : forall a b | e. (() ->{State | e} a, b) ->{| e} (a, b)
+state.run : forall a b | e. (() ->{State | e} a, b) ->{| e} (a, b)
 state.eval      : forall a b | e. (() ->{State | e} a, b) ->{| e} a
 emit.collect    : forall a b | e. (() ->{Emit | e} a) ->{| e} (a, List b)
 emit.pipe       : forall a b | e. (() ->{Emit | e} a, (b) ->{| e} ()) ->{| e} a
@@ -1098,15 +1100,27 @@ Collected divergences between this document and the shipped implementation, so t
 and the code agree in writing. None of these change the design's shape; each is either a
 documented approximation or a deliberate narrowing.
 
-**Row erasure generalizes handler payload types.** Effect rows are name-sets: effect
-ARGUMENTS are erased, so a payload type does not flow from a perform site to its handler.
-This makes the shipped ring-1 handlers looser than their ideal signatures — e.g.
-`state.run : forall a b | e. (() ->{State | e} a, b) ->{| e} (a, b)` ties the state type only
-to the initial value, so `state.run(fn () -> { put("hi"); get() }, 0)` elaborates as
-`(a, Int)` but returns `("hi", "hi")` at runtime. The same holds for `throw.to-result`'s
-error type and `emit.collect`'s element type, and it is the long-standing shape of
-`eval-code : (Code) -> a`. The future fix direction is parameterized effect instances; until
-then the approximation is documented at the checker's `op_scheme`.
+**Checked payload constraints supersede the older row-erasure approximation.** The
+predecessor checker accepted `state.run(fn () -> { put("hi"); get() }, 0)` with an
+`Int` final-state type even though execution returned `("hi", "hi")`. The successor
+checker rejects this mismatch before interpreter execution or native compilation.
+It also ties Throw errors and Emit elements to their handlers, including through
+aliases, higher-order calls, and annotations. Printed effect rows remain name-sets;
+their hidden payload constraints are retained during inference. Nominal callback
+fields that cannot retain those constraints are refused; use a declared parameter
+for the complete callback type. Independent handler calls and complete nested
+handlers may use different payload types. Handlers for effects with shared payload
+parameters must cover every operation: partial handlers are conservatively refused
+because the row cannot retain the payload relationship of an omitted operation
+forwarding outward. The migration contract and regression
+evidence are described in [effect payload containment](effect-payload-containment.md).
+
+**Dynamic Eval retains an unchecked result boundary.** `eval-code : (Code) ->{Eval} a`
+checks its quoted expression at execution time, but does not prove that the resulting
+value matches the outer expected `a`. It is separate from the checked State/Throw/Emit
+repair. An interposed Jacquard handler for a result-polymorphic operation must work
+for every result type; it cannot resume with an arbitrary concrete value. Historical
+release manifests describe the predecessor and remain unchanged.
 
 **`dist.enumerate` has no error channel.** When every branch is impossible (total mass 0),
 the in-language enumerate returns `+nan.0` weights — Jacquard code cannot signal E0901. The

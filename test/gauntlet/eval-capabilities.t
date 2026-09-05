@@ -101,16 +101,26 @@ The operation runs only when both authorities are explicit.
   AUTHORITY LEAK
   ()
 
-The runtime splice guard is deterministic even when handler typing erases the
-non-Code value. This is a language diagnostic, not an OCaml exception.
+Handler payload checking refuses a non-Code resumption before execution.
 
   $ cat > non-code-splice.jac <<'EOF_JAC'
   > handle { quote { f(unquote(get())) } } {
   >   | return x -> x
   >   | get() resume k -> k(5)
+  >   | put(value) resume k -> k(())
   > }
   > EOF_JAC
-  $ jacquard run non-code-splice.jac
+  $ jacquard run non-code-splice.jac > static.out 2>&1; status=$?; if test "$status" = 1 && grep -q 'error\[E0801\]' static.out; then echo 'static payload refusal'; else cat static.out; exit 1; fi
+  static payload refusal
+
+Dynamic Eval checks the quoted expression, but its result is not tied to the
+outer expected type. The runtime splice guard still reports that separate
+boundary as a language diagnostic.
+
+  $ cat > dynamic-non-code-splice.jac <<'EOF_JAC'
+  > quote { f(unquote(eval-code(quote { 5 }))) }
+  > EOF_JAC
+  $ jacquard run dynamic-non-code-splice.jac --allow eval
   error: Runtime value has the wrong type
     Cause: type error: unquote splice evaluated to 5, not code
     Next step: Pass a value of the type required by this operation.

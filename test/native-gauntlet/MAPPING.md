@@ -9,6 +9,13 @@ byte-compares stdout, stderr, and exit codes, so the byte comparison IS the
 assertion. Counts become printed values via in-language collectors
 (emit.collect), per docs/native-plan.md task 71 direction 6.
 
+The `e*-erasure-*` fixtures preserve predecessor exploit programs. Checked `run`
+and `build` now reject them identically. `effect_payload_runtime_probe.exe` first
+requires that static rejection, then deliberately passes each fixture to the
+interpreter or native builder to retain defensive runtime error coverage. Their
+historical comments and the runtime guarantees below describe that unchecked
+probe path, not acceptance by the public CLI.
+
 | OCaml case | twin | printed guarantee |
 | --- | --- | --- |
 | test_multishot_choose | g01-choose-tuple.jqd | resume twice, both branches collected in order |

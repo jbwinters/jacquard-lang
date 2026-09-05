@@ -7,6 +7,8 @@
     - Every application includes the callee's row in the ambient row. Under a handler, an open
       callee row is specialized with the handled labels before inclusion; shared row variables carry
       that requirement through typed wrappers without copying unrelated ambient effects.
+    - Input-bearing effect parameters travel as hidden row payload constraints. A handler shares
+      them with its body; operation-polymorphic parameters are rigid in clauses and cannot escape.
     - [Lam] starts a fresh open ambient row that lands on its arrow.
     - Generalization at [Let] obeys the value restriction (only syntactic values), and closes
       generalizable row tails that occur exactly once in the scheme, so an unconstrained function
@@ -96,10 +98,15 @@ let tier_applications ctx = ctx.tier_apps
 (** [tier_operations ctx] returns the operation disciplines recorded by strict checks. *)
 let tier_operations ctx = ctx.tier_ops
 
-type env = { vars : scheme SMap.t; restricted : SSet.t; group : (string * ty) array }
+type env = {
+  vars : scheme SMap.t;
+  restricted : SSet.t;
+  group : (string * ty) array;
+  group_schemes : scheme option array;
+}
 (** [group]: during a defterm group check, member index -> (name, mono or annotated type). *)
 
-let empty_env = { vars = SMap.empty; restricted = SSet.empty; group = [||] }
+let empty_env = { vars = SMap.empty; restricted = SSet.empty; group = [||]; group_schemes = [||] }
 
 (* Internal control flow only; never escapes this module. *)
 exception Err of Diag.t
@@ -160,6 +167,15 @@ let err ?meta ?next_step ?(contrast = None) ~code fmt =
               ~next_step:(Option.value next_step ~default:(diagnostic_next_step code))
               ~contrast ())))
     fmt
+
+(** Normalizing a linked row may discover a deferred payload conflict outside a local unification
+    wrapper. Result-returning checker entry points still report it as an ordinary type diagnostic.
+*)
+let payload_conflict ?meta detail =
+  Diag.error ?span:(Option.bind meta Meta.span) ~domain:Diag.Checker ~code:"E0801"
+    ~summary:(diagnostic_summary "E0801")
+    ~cause:("effect payload mismatch (" ^ detail ^ ")")
+    ~next_step:(diagnostic_next_step "E0801") ~contrast:None ()
 
 (* Stored declarations have already crossed the public resolver/checker boundary. Their resolved
    bodies may use a hidden prelude capability hash, while source expressions must use public
@@ -426,6 +442,44 @@ let conv_fresh_rv ctx cenv name =
   cenv.rvs <- (name, v) :: cenv.rvs;
   v
 
+(** [payload_parameters ctx hash] selects input-bearing declaration parameters shared by a handled
+    region. An unavailable/non-effect hash has no known payload parameters. Variables used only in
+    operation results remain operation-polymorphic (notably abort and throw's answer). The frozen
+    scheduler operations instead anchor their type parameter in opaque runtime handles. *)
+let payload_parameters ctx hash =
+  let identity = Hash.to_hex hash in
+  if
+    String.equal identity Concurrency_contract.async_effect_hash
+    || String.equal identity Channel_contract.channel_effect_hash
+  then []
+  else
+    let rec occurs name (ty : Kernel.ty) =
+      match ty.it with
+      | Kernel.TVar var -> String.equal name var
+      | Kernel.TApp (head, args) -> occurs name head || List.exists (occurs name) args
+      | Kernel.TArrow (params, _, result) -> List.exists (occurs name) params || occurs name result
+      | Kernel.TTuple items -> List.exists (occurs name) items
+      | Kernel.TForall (vars, _, body) -> (not (List.mem name vars)) && occurs name body
+      | Kernel.TRef _ -> false
+    in
+    match locate ctx hash with
+    | Ok { Store.decl = { Kernel.it = Kernel.DefEffect { evars; ops; _ }; _ }; _ } ->
+        List.filter
+          (fun var ->
+            List.exists (fun (op : Kernel.opspec) -> List.exists (occurs var) op.op_params) ops)
+          evars
+    | _ -> []
+
+(** [fresh_payloads ctx effects] allocates fresh constraints for the known payload parameters of
+    each distinct effect. The caller owns the resulting unification variables. *)
+let fresh_payloads ctx effects =
+  List.filter_map
+    (fun hash ->
+      match payload_parameters ctx hash with
+      | [] -> None
+      | vars -> Some (hash, List.map (fun _ -> new_tvar ctx.level) vars))
+    (List.sort_uniq Hash.compare effects)
+
 (* Convert a resolved surface type (an annotation) to an internal type. Free type/row
    variables are implicitly quantified at the annotation: first use introduces them. *)
 let rec conv_ty ctx cenv (t : Kernel.ty) : ty =
@@ -476,11 +530,119 @@ and conv_row ctx cenv ~effectself (r : Kernel.row) : row =
     | Some v -> (
         match List.assoc_opt v cenv.rvs with Some t -> t | None -> conv_fresh_rv ctx cenv v)
   in
-  { effects = List.sort_uniq Hash.compare effects; tail }
+  { effects = List.sort_uniq Hash.compare effects; payloads = fresh_payloads ctx effects; tail }
 
 (* ------------------------------------------------------------------ *)
 (* Declaration schemes: constructors, ops, terms                       *)
 (* ------------------------------------------------------------------ *)
+
+(** [definition_components bindings] returns recursive components in dependency order. A
+    content-addressed group may contain several actual recursive components. Check dependencies
+    first and generalize only completed components, so an independent recursive helper can be used
+    polymorphically by a handler without giving polymorphic recursion to a true cycle. This changes
+    inference order, never the stored group, references, or canonical hashes. *)
+let definition_components bindings =
+  let count = List.length bindings in
+  let dependencies =
+    Array.of_list
+      (List.map
+         (fun (binding : Kernel.binding) ->
+           let found = ref [] in
+           let pending = ref [ Kernel.to_form (Kernel.Expr binding.value) ] in
+           while !pending <> [] do
+             let form = List.hd !pending in
+             pending := List.tl !pending;
+             (match (form.Form.head, form.args) with
+             | "groupref", [ Form.Int index ] when index >= 0 && index < count ->
+                 found := index :: !found
+             | _ -> ());
+             List.iter (function Form.F child -> pending := child :: !pending | _ -> ()) form.args
+           done;
+           List.sort_uniq Int.compare !found)
+         bindings)
+  in
+  let reachable =
+    Array.init count (fun start ->
+        let seen = Array.make count false in
+        let pending = ref [ start ] in
+        while !pending <> [] do
+          let index = List.hd !pending in
+          pending := List.tl !pending;
+          if not seen.(index) then begin
+            seen.(index) <- true;
+            pending := dependencies.(index) @ !pending
+          end
+        done;
+        seen)
+  in
+  let owners = Array.make count (-1) in
+  let components = ref [] in
+  for index = 0 to count - 1 do
+    if owners.(index) = -1 then begin
+      let component = ref [] in
+      let owner = List.length !components in
+      for other = 0 to count - 1 do
+        if reachable.(index).(other) && reachable.(other).(index) then begin
+          owners.(other) <- owner;
+          component := other :: !component
+        end
+      done;
+      components := !components @ [ List.rev !component ]
+    end
+  done;
+  let components = Array.of_list !components in
+  let visited = Array.make (Array.length components) false in
+  let ordered = ref [] in
+  let rec visit owner =
+    if not visited.(owner) then begin
+      visited.(owner) <- true;
+      List.iter
+        (fun index -> List.iter (fun dependency -> visit owners.(dependency)) dependencies.(index))
+        components.(owner);
+      ordered := components.(owner) :: !ordered
+    end
+  in
+  Array.iteri (fun owner _ -> visit owner) components;
+  List.rev !ordered
+
+(** [check_decl_payload_storage] rejects nominal fields that would erase hidden payload constraints
+    or row variables, using the checker's internal [Err] diagnostic. A complete inferred callback
+    carried by a header type parameter is safe: its structure remains in the applied nominal type.
+    Inspect converted types as well as direct arrows, since a callback can occur under an ordinary
+    container application. *)
+let check_decl_payload_storage ?meta ?(effectself = None) ~parameters ty =
+  let trusted_scheduler_row =
+    match effectself with
+    | Some (_, hash) -> String.equal (Hash.to_hex hash) Concurrency_contract.async_effect_hash
+    | None -> false
+  in
+  let rec walk ty =
+    (* Pattern checking substitutes concrete header arguments, which still transport their
+       complete type. Do not treat that substituted structure as a fixed declaration field. *)
+    if List.exists (fun parameter -> parameter == ty) parameters then ()
+    else
+      match ty with
+      | TVar _ | TSkolem _ -> ()
+      | TCon (_, args) | TTuple args -> List.iter walk args
+      | TArrow (params, row, result) ->
+          List.iter walk params;
+          check_row row;
+          walk result
+      | TResume (input, row, answer) | TVariadicArrow (input, row, answer) ->
+          walk input;
+          check_row row;
+          walk answer
+      | TExactThunk inner -> walk inner
+  and check_row row =
+    let row = repr_row row in
+    if row.payloads <> [] || (row.tail <> RClosed && not trusted_scheduler_row) then
+      err ?meta ~code:"E0801"
+        ~next_step:
+          "Pass the complete callback type through a declared type parameter, or handle its \
+           payload effects before storing it."
+        "this declaration would erase a callback's effect payload constraints"
+  in
+  walk ty
 
 (* Constructor scheme: forall vars. (fields) ->{} T vars  (nullary: T vars). Field types are
    declaration types: tyvars come from the decl header, self-references are the decl. *)
@@ -539,42 +701,57 @@ and conv_decl_ty ctx cenv ?(unbound_code = "E0811") ?(effectself = None) ~self (
     =
   let self_name, self_ty = self in
   let meta = t.Kernel.meta in
-  match t.Kernel.it with
-  | Kernel.TRef (Kernel.Named n) when n = self_name -> self_ty
-  | Kernel.TVar a -> (
-      match List.assoc_opt a cenv.tvs with
-      | Some v -> v
-      | None ->
-          err ~meta ~next_step:"Declare it in the parameter list of the enclosing declaration."
-            ~code:unbound_code "unbound type variable `%s` in declaration" a)
-  | Kernel.TApp ({ Kernel.it = Kernel.TRef (Kernel.Named n); _ }, args) when n = self_name -> (
-      (* recursive application must match the declared parameters *)
-      let args = List.map (conv_decl_ty ctx cenv ~unbound_code ~effectself ~self) args in
-      match repr self_ty with
-      | TCon (h, params) ->
-          if List.length args <> List.length params then
-            err ~meta ~code:"E0810" "recursive use of %s has wrong arity" self_name;
-          List.iter2 (unify_or ctx ~meta ~what:"recursive type argument") params args;
-          TCon (h, params)
-      | _ -> self_ty)
-  | Kernel.TApp ({ Kernel.it = Kernel.TRef (Kernel.Hashed h); _ }, args)
-    when List.exists (ty_mentions self_name) args ->
-      (* a non-self head whose ARGUMENTS contain the self-reference —
+  let converted =
+    match t.Kernel.it with
+    | Kernel.TRef (Kernel.Named n) when n = self_name -> self_ty
+    | Kernel.TVar a -> (
+        match List.assoc_opt a cenv.tvs with
+        | Some v -> v
+        | None ->
+            err ~meta ~next_step:"Declare it in the parameter list of the enclosing declaration."
+              ~code:unbound_code "unbound type variable `%s` in declaration" a)
+    | Kernel.TApp ({ Kernel.it = Kernel.TRef (Kernel.Named n); _ }, args) when n = self_name -> (
+        (* recursive application must match the declared parameters *)
+        let args = List.map (conv_decl_ty ctx cenv ~unbound_code ~effectself ~self) args in
+        match repr self_ty with
+        | TCon (h, params) ->
+            if List.length args <> List.length params then
+              err ~meta ~code:"E0810" "recursive use of %s has wrong arity" self_name;
+            List.iter2 (unify_or ctx ~meta ~what:"recursive type argument") params args;
+            TCon (h, params)
+        | _ -> self_ty)
+    | Kernel.TApp ({ Kernel.it = Kernel.TRef (Kernel.Hashed h); _ }, args)
+      when Option.is_none effectself || List.exists (ty_mentions self_name) args ->
+        (* a non-self head whose ARGUMENTS contain the self-reference —
          (tapp (tref list) (tref test)) inside test's own declaration (W6.2). Guarded so
-         self-free applications keep conv_ty's implicit freshening of free op vars. *)
-      let arity = type_arity ctx ~meta h in
-      if arity <> List.length args then
-        err ~meta ~code:"E0810" "type %s expects %d argument(s), got %d" (name_of ctx h) arity
-          (List.length args);
-      TCon (h, List.map (conv_decl_ty ctx cenv ~unbound_code ~effectself ~self) args)
-  | Kernel.TArrow (params, row, result) ->
-      TArrow
-        ( List.map (conv_decl_ty ctx cenv ~unbound_code ~effectself ~self) params,
-          conv_row ctx cenv ~effectself row,
-          conv_decl_ty ctx cenv ~unbound_code ~effectself ~self result )
-  | Kernel.TTuple items ->
-      TTuple (List.map (conv_decl_ty ctx cenv ~unbound_code ~effectself ~self) items)
-  | _ -> conv_ty ctx cenv t
+         effect operation applications keep conv_ty's implicit freshening of free op vars.
+         Nominal type fields must bind all variables in their header to retain their types. *)
+        let arity = type_arity ctx ~meta h in
+        if arity <> List.length args then
+          err ~meta ~code:"E0810" "type %s expects %d argument(s), got %d" (name_of ctx h) arity
+            (List.length args);
+        TCon (h, List.map (conv_decl_ty ctx cenv ~unbound_code ~effectself ~self) args)
+    | Kernel.TArrow (params, row, result) ->
+        let converted_row = conv_row ctx cenv ~effectself row in
+        TArrow
+          ( List.map (conv_decl_ty ctx cenv ~unbound_code ~effectself ~self) params,
+            converted_row,
+            conv_decl_ty ctx cenv ~unbound_code ~effectself ~self result )
+    | Kernel.TTuple items ->
+        TTuple (List.map (conv_decl_ty ctx cenv ~unbound_code ~effectself ~self) items)
+    | Kernel.TForall (tvs, rvs, body) ->
+        if Option.is_none effectself && (tvs <> [] || rvs <> []) then
+          err ~meta ~code:"E0801"
+            ~next_step:
+              "Move the field's quantified variables into the type declaration's parameter list."
+            "this nominal field would erase its quantified type constraints";
+        List.iter (fun name -> ignore (conv_fresh_tv ctx cenv name)) tvs;
+        List.iter (fun name -> ignore (conv_fresh_rv ctx cenv name)) rvs;
+        conv_decl_ty ctx cenv ~unbound_code ~effectself ~self body
+    | _ -> conv_ty ctx cenv t
+  in
+  check_decl_payload_storage ~meta ~effectself ~parameters:(List.map snd cenv.tvs) converted;
+  converted
 
 (** [is_frozen_async_spawn ctx operation] recognizes only the exact Async declaration that receives
     the identity-guarded SC.4 dependent typing rule. The check is store-shaped rather than
@@ -782,7 +959,7 @@ let check_vary_world_application ctx ~meta argument_types =
    the owning effect hash. Frozen [async.spawn] instead shares its thunk's exact [{Async | e}] row:
    this is the SC.4 non-laundering law in the type itself, so it survives every ordinary higher-order
    transport and instantiation rather than depending on direct-call syntax. *)
-let op_scheme ctx ?meta (h : Hash.t) : scheme =
+let op_scheme ctx ?meta ?(clause = false) (h : Hash.t) : scheme =
   match locate ctx h with
   | Ok
       {
@@ -792,8 +969,16 @@ let op_scheme ctx ?meta (h : Hash.t) : scheme =
       } ->
       let o = List.nth ops i in
       let inner = ctx.level + 1 in
-      let vars = List.map (fun a -> (a, new_tvar inner)) evars in
-      let cenv = { mode = Flexible; tvs = vars; rvs = [] } in
+      let scoped = payload_parameters ctx decl_hash in
+      let vars =
+        List.map
+          (fun a ->
+            ( a,
+              if clause && not (List.mem a scoped) then TSkolem (fresh_id (), a) else new_tvar inner
+            ))
+          evars
+      in
+      let cenv = { mode = (if clause then Rigid else Flexible); tvs = vars; rvs = [] } in
       let self = (ename, TCon (decl_hash, List.map snd vars)) in
       let effectself = Some (ename, decl_hash) in
       let params = List.map (conv_decl_ty ctx cenv ~effectself ~self) o.Kernel.op_params in
@@ -805,7 +990,12 @@ let op_scheme ctx ?meta (h : Hash.t) : scheme =
           | _ ->
               err ?meta ~code:"E0805"
                 "frozen async.spawn identity resolved to an invalid converted parameter shape"
-        else closed_row [ decl_hash ]
+        else
+          let payloads =
+            if scoped = [] then []
+            else [ (decl_hash, List.map (fun name -> List.assoc name vars) scoped) ]
+          in
+          closed_row ~payloads [ decl_hash ]
       in
       { ty = TArrow (params, operation_row, result); gen_level = ctx.level }
   | Ok _ -> err ?meta ~code:"E0805" "hash %s is not an operation" (Hash.to_hex h)
@@ -903,6 +1093,7 @@ let close_lonely_rows ~gen_level (t : ty) : unit =
     | TArrow (params, row, result) ->
         List.iter walk params;
         (let row = repr_row row in
+         List.iter (fun (_, args) -> List.iter walk args) row.payloads;
          match row.tail with
          | RVar ({ contents = RUnbound { id; level } } as r) when level > gen_level ->
              let n = match Hashtbl.find_opt counts id with Some (n, _) -> n | None -> 0 in
@@ -912,6 +1103,7 @@ let close_lonely_rows ~gen_level (t : ty) : unit =
     | TResume (input, row, answer) ->
         walk input;
         (let row = repr_row row in
+         List.iter (fun (_, args) -> List.iter walk args) row.payloads;
          match row.tail with
          | RVar ({ contents = RUnbound { id; level } } as rv) when level > gen_level -> (
              match Hashtbl.find_opt counts id with
@@ -922,6 +1114,7 @@ let close_lonely_rows ~gen_level (t : ty) : unit =
     | TVariadicArrow (param, row, result) ->
         walk param;
         (let row = repr_row row in
+         List.iter (fun (_, args) -> List.iter walk args) row.payloads;
          match row.tail with
          | RVar ({ contents = RUnbound { id; level } } as r) when level > gen_level ->
              let n = match Hashtbl.find_opt counts id with Some (n, _) -> n | None -> 0 in
@@ -931,7 +1124,7 @@ let close_lonely_rows ~gen_level (t : ty) : unit =
     | TExactThunk inner -> walk inner
   in
   walk t;
-  Hashtbl.iter (fun _ (n, r) -> if n = 1 then r := RLink { effects = []; tail = RClosed }) counts
+  Hashtbl.iter (fun _ (n, r) -> if n = 1 then r := RLink empty_row) counts
 
 (* ------------------------------------------------------------------ *)
 (* Patterns                                                            *)
@@ -1049,7 +1242,7 @@ let rec term_scheme ctx ?meta (h : Hash.t) : scheme =
           | Error ds ->
               err ?meta ~code:"E0805" "%s" (String.concat "; " (List.map Diag.to_cause_string ds))))
 
-and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(required : Hash.t list)
+and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(required : row)
     (e : Kernel.expr) : ty =
   let meta = e.Kernel.meta in
   match e.Kernel.it with
@@ -1062,7 +1255,10 @@ and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(requir
       | Some s -> instantiate ~level:ctx.level s
       | None -> err ~meta ~code:"E0811" "unbound variable `%s` reached the checker" x)
   | Kernel.GroupRef i ->
-      if i >= 0 && i < Array.length env.group then snd env.group.(i)
+      if i >= 0 && i < Array.length env.group then
+        match env.group_schemes.(i) with
+        | Some scheme -> instantiate ~level:ctx.level scheme
+        | None -> snd env.group.(i)
       else err ~meta ~code:"E0805" "groupref %d outside its group" i
   | Kernel.Ref (h, Kernel.Term) -> instantiate ~level:ctx.level (term_scheme ctx ~meta h)
   | Kernel.Ref (h, Kernel.Con) -> instantiate ~level:ctx.level (con_scheme ctx ~meta h)
@@ -1072,7 +1268,7 @@ and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(requir
       let param_tys = List.map fst params_tys_bs in
       let env' = bind_all (List.concat_map snd params_tys_bs) env in
       let lam_ambient = ref (open_row ctx.level []) in
-      let body_ty = infer ctx env' ~ambient:lam_ambient ~required:[] body in
+      let body_ty = infer ctx env' ~ambient:lam_ambient ~required:empty_row body in
       TArrow (param_tys, !lam_ambient, body_ty)
   | Kernel.App (fn, args) -> (
       let fn_ty =
@@ -1102,7 +1298,7 @@ and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(requir
       in
       let include_callee frow =
         try
-          Types.require_effects ~level:ctx.level required frow;
+          Types.require_effects ~payloads:required.payloads ~level:ctx.level required.effects frow;
           ambient := Types.include_rows ~sub:frow ~into:!ambient
         with Unify_error detail ->
           err ~meta ~code:"E0801" "effect row mismatch at this application (%s)" detail
@@ -1314,28 +1510,60 @@ and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(requir
       result
   | Kernel.Tuple items -> TTuple (List.map (infer ctx env ~ambient ~required) items)
   | Kernel.Handle { body; ret = { rbinder; rbody; rmeta }; ops } ->
-      let handled =
+      let handled_operations =
         List.filter_map
           (fun (oc : Kernel.opclause) ->
             match oc.Kernel.op with
             | Kernel.Hashed h -> (
                 match locate ctx h with
-                | Ok { Store.decl_hash; role = Store.Operation _; _ } -> Some decl_hash
+                | Ok { Store.decl_hash; role = Store.Operation _; _ } -> Some (decl_hash, h)
                 | _ -> err ~meta:oc.Kernel.ometa ~code:"E0805" "op clause is not an operation")
             | Kernel.Named n -> err ~meta:oc.Kernel.ometa ~code:"E0811" "unresolved op `%s`" n)
           ops
       in
+      let handled = List.map fst handled_operations in
       (* The body starts with an independent tail. Calls inside it specialize flexible computation
          rows with exactly the handled labels; after solving, subtraction joins only the body's
          unhandled remainder into the surrounding ambient. *)
-      let body_ambient = ref (open_row ctx.level handled) in
-      let body_required = List.sort_uniq Hash.compare (handled @ required) in
+      let handled_payloads = fresh_payloads ctx handled in
+      (* Rows identify effects, not individual operations. Subtracting a partial payload handler
+         would hide the relationship between omitted operations and their outer region. *)
+      List.iter
+        (fun (effect_hash, _) ->
+          let covered =
+            List.filter_map
+              (fun (owner, operation) ->
+                if Hash.equal owner effect_hash then Some operation else None)
+              handled_operations
+            |> List.sort_uniq Hash.compare
+          in
+          match locate ctx effect_hash with
+          | Ok { Store.decl = { Kernel.it = Kernel.DefEffect { ops = declared; _ }; _ }; _ }
+            when List.length covered = List.length declared ->
+              ()
+          | _ ->
+              err ~meta ~code:"E0801"
+                ~next_step:
+                  "Add a clause for every operation of this effect, or use its complete handler."
+                "partial handler for %s cannot retain the payload type of operations forwarded to \
+                 an outer handler"
+                (name_of ctx effect_hash))
+        handled_payloads;
+      let body_ambient = ref (open_row ~payloads:handled_payloads ctx.level handled) in
+      let body_required =
+        closed_row
+          ~payloads:
+            (handled_payloads
+            @ List.filter (fun (hash, _) -> not (List.mem hash handled)) required.payloads)
+          (handled @ required.effects)
+      in
       let body_ty = infer ctx env ~ambient:body_ambient ~required:body_required body in
       let solved_body = repr_row !body_ambient in
       let continuation_row =
         {
           effects =
             List.filter (fun eff -> not (List.exists (Hash.equal eff) handled)) solved_body.effects;
+          payloads = List.filter (fun (hash, _) -> not (List.mem hash handled)) solved_body.payloads;
           tail = solved_body.tail;
         }
       in
@@ -1346,12 +1574,22 @@ and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(requir
       let rty = infer ctx (bind_all rbindings env) ~ambient ~required rbody in
       unify_join_or ctx ~meta:rmeta ~what:"return clause result" answer rty;
       (* op clauses *)
+      let clause_skolems = ref [] in
       List.iter
         (fun (oc : Kernel.opclause) ->
           let oh = match oc.Kernel.op with Kernel.Hashed h -> h | _ -> assert false in
-          let os = instantiate ~level:ctx.level (op_scheme ctx ~meta:oc.Kernel.ometa oh) in
+          let os =
+            instantiate ~level:ctx.level (op_scheme ctx ~meta:oc.Kernel.ometa ~clause:true oh)
+          in
+          clause_skolems := Types.skolems os @ !clause_skolems;
           let op_params, op_result =
-            match repr os with TArrow (ps, _, r) -> (ps, r) | t -> ([], t)
+            match repr os with
+            | TArrow (ps, row, r) ->
+                (try ignore (Types.merge_payloads handled_payloads row.payloads)
+                 with Unify_error detail ->
+                   err ~meta:oc.ometa ~code:"E0801" "handler payload mismatch (%s)" detail);
+                (ps, r)
+            | t -> ([], t)
             (* nullary op values do not occur: ops always have arrow types *)
           in
           if List.length op_params <> List.length oc.Kernel.params then
@@ -1418,6 +1656,18 @@ and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(requir
       (try ambient := Types.include_rows ~sub:continuation_row ~into:!ambient
        with Unify_error detail ->
          err ~meta ~code:"E0801" "effect row mismatch leaving this handler (%s)" detail);
+      let escapes ty = List.exists (fun id -> List.mem id !clause_skolems) (Types.skolems ty) in
+      if
+        escapes answer
+        || escapes (TArrow ([], !ambient, TTuple []))
+        || SMap.exists (fun _ scheme -> escapes scheme.ty) env.vars
+        || Array.exists (fun (_, ty) -> escapes ty) env.group
+      then
+        err ~meta ~code:"E0801"
+          ~next_step:
+            "Keep the operation's polymorphic parameter inside its clause; do not return it or fix \
+             the caller's type to it."
+          "an operation-polymorphic handler type escapes its clause";
       answer
   | Kernel.Quote payload ->
       (* the payload is data; live splices evaluate at quote time, so they must produce
@@ -1487,7 +1737,11 @@ and check_type_decl ctx (d : Kernel.decl) : unit =
       | None -> ());
       let inner = ctx.level + 1 in
       let vars = List.map (fun a -> (a, new_tvar inner)) evars in
-      let placeholder = Hash.of_string "self-placeholder" in
+      let placeholder =
+        match Canon.hash_decl d with
+        | Ok hashes -> hashes.Canon.decl_hash
+        | Error diagnostics -> raise (Err (List.hd diagnostics))
+      in
       let self = (ename, TCon (placeholder, List.map snd vars)) in
       let effectself = Some (ename, placeholder) in
       List.iter
@@ -1535,47 +1789,66 @@ and check_group ?recovery_group ctx (decl : Kernel.decl) : unit =
               bindings
           in
           let group = Array.of_list member_tys in
-          let env = { empty_env with group } in
-          List.iteri
-            (fun i (b : Kernel.binding) ->
-              let ambient = ref (open_row ctx.level []) in
-              let vty = infer ctx env ~ambient ~required:[] b.Kernel.value in
-              (* the binding BODY itself must be effect-free (its value's effects live on
+          let group_schemes = Array.make (Array.length group) None in
+          let env = { empty_env with group; group_schemes } in
+          let binding_array = Array.of_list bindings in
+          List.iter
+            (fun component ->
+              List.iter
+                (fun i ->
+                  let b = binding_array.(i) in
+                  let ambient = ref (open_row ctx.level []) in
+                  let vty = infer ctx env ~ambient ~required:empty_row b.Kernel.value in
+                  (* the binding BODY itself must be effect-free (its value's effects live on
                  arrows): a non-lambda effectful body would otherwise type as pure and give
                  `check --manifest` a false pass (review finding) *)
-              (match (repr_row !ambient).effects with
-              | [] -> ()
-              | h :: _ ->
-                  err ~meta:b.Kernel.bmeta ~code:"E0815"
-                    ~next_step:"Wrap the body in a lambda and perform the effect when called."
-                    "top-level definition `%s` performs the `%s` effect while being defined"
-                    b.Kernel.bname (name_of ctx h));
-              match b.Kernel.annot with
-              | Some ann -> (
-                  (* the body must check against the RIGID annotation *)
-                  let cenv = { mode = Rigid; tvs = []; rvs = [] } in
-                  let rigid = conv_ty ctx cenv ann in
-                  try Types.unify rigid vty
-                  with Unify_error detail ->
-                    let hint = handler_mismatch_hint b.Kernel.value detail in
-                    if surface_form_is b.Kernel.bmeta [ "equation-definition" ] then
-                      err ?next_step:hint ~meta:b.Kernel.value.meta ~code:"E0804"
-                        "equation definition `%s` does not match its signature: expected %s, got \
-                         %s (%s)"
-                        b.Kernel.bname (show_ty ctx rigid) (show_ty ctx vty) detail
-                    else
-                      err ?next_step:hint ~meta:b.Kernel.bmeta ~code:"E0804"
-                        "binding %s does not match its annotation: expected %s, got %s (%s)"
-                        b.Kernel.bname (show_ty ctx rigid) (show_ty ctx vty) detail)
-              | None ->
-                  unify_join_or ctx ~meta:b.Kernel.bmeta
-                    ~what:
-                      (if surface_form_is b.Kernel.bmeta [ "equation-definition" ] then
-                         "equation definition"
-                       else "group member")
-                    (snd group.(i))
-                    vty)
-            bindings;
+                  (match (repr_row !ambient).effects with
+                  | [] -> ()
+                  | h :: _ ->
+                      err ~meta:b.Kernel.bmeta ~code:"E0815"
+                        ~next_step:"Wrap the body in a lambda and perform the effect when called."
+                        "top-level definition `%s` performs the `%s` effect while being defined"
+                        b.Kernel.bname (name_of ctx h));
+                  match b.Kernel.annot with
+                  | Some ann -> (
+                      (* Check the declared polymorphism on a fresh instance, then retain the inferred
+                     payload relationships in the flexible exported signature. The source row
+                     spelling alone cannot express those relationships. *)
+                      let cenv = { mode = Rigid; tvs = []; rvs = [] } in
+                      let rigid = conv_ty ctx cenv ann in
+                      let proof =
+                        instantiate ~level:ctx.level { ty = vty; gen_level = saved_level }
+                      in
+                      try
+                        Types.unify rigid proof;
+                        Types.unify (snd group.(i)) vty
+                      with Unify_error detail ->
+                        let hint = handler_mismatch_hint b.Kernel.value detail in
+                        if surface_form_is b.Kernel.bmeta [ "equation-definition" ] then
+                          err ?next_step:hint ~meta:b.Kernel.value.meta ~code:"E0804"
+                            "equation definition `%s` does not match its signature: expected %s, \
+                             got %s (%s)"
+                            b.Kernel.bname (show_ty ctx rigid) (show_ty ctx proof) detail
+                        else
+                          err ?next_step:hint ~meta:b.Kernel.bmeta ~code:"E0804"
+                            "binding %s does not match its annotation: expected %s, got %s (%s)"
+                            b.Kernel.bname (show_ty ctx rigid) (show_ty ctx proof) detail)
+                  | None ->
+                      unify_join_or ctx ~meta:b.Kernel.bmeta
+                        ~what:
+                          (if surface_form_is b.Kernel.bmeta [ "equation-definition" ] then
+                             "equation definition"
+                           else "group member")
+                        (snd group.(i))
+                        vty)
+                component;
+              List.iter
+                (fun i ->
+                  let ty = snd group.(i) in
+                  close_lonely_rows ~gen_level:saved_level ty;
+                  group_schemes.(i) <- Some { ty; gen_level = saved_level })
+                component)
+            (definition_components bindings);
           ctx.level <- ctx.level - 1;
           List.iteri
             (fun i (_, t) ->
@@ -1979,7 +2252,7 @@ let check_top_with ?recovery_identity ~recovery ctx (top : Kernel.top) :
               ~finally:(fun () -> ctx.level <- saved)
               (fun () ->
                 ctx.level <- ctx.level + 1;
-                infer ctx empty_env ~ambient ~required:[] e)
+                infer ctx empty_env ~ambient ~required:empty_row e)
           in
           close_lonely_rows ~gen_level:ctx.level ty;
           {
@@ -2043,6 +2316,13 @@ let check_top_with ?recovery_identity ~recovery ctx (top : Kernel.top) :
   with
   | s -> Ok s
   | exception Err d -> Error [ d ]
+  | exception Unify_error detail ->
+      let meta =
+        match top with
+        | Kernel.Expr expression -> expression.meta
+        | Kernel.Decl declaration -> declaration.meta
+      in
+      Error [ payload_conflict ~meta detail ]
 
 (** [check_top ctx top] is the strict semantic checker. It rejects analysis sentinels (E1202), and
     declarations may be canonically hashed as part of scheme caching. Recovered surface trees must
@@ -2117,11 +2397,17 @@ let check_recovery_top ~identity (Recovery_session ctx) top = Recovery.check_top
 (** [force_term ctx h] computes [h]'s scheme, checking its declaration on demand — the whole-store
     sweep the tier statistics need (PF.2 phase 1). *)
 let force_term ctx (h : Hash.t) : (scheme, Diag.t list) result =
-  match term_scheme ctx h with s -> Ok s | exception Err d -> Error [ d ]
+  match term_scheme ctx h with
+  | s -> Ok s
+  | exception Err d -> Error [ d ]
+  | exception Unify_error detail -> Error [ payload_conflict detail ]
 
 (** [force_constructor ctx h] is the result-returning public form of {!con_scheme}. *)
 let force_constructor ctx (h : Hash.t) : (scheme, Diag.t list) result =
-  match con_scheme ctx h with s -> Ok s | exception Err d -> Error [ d ]
+  match con_scheme ctx h with
+  | s -> Ok s
+  | exception Err d -> Error [ d ]
+  | exception Unify_error detail -> Error [ payload_conflict detail ]
 
 type operation_contract = { effect_identity : Hash.t; mode : Kernel.op_mode; scheme : scheme }
 
@@ -2129,7 +2415,10 @@ type operation_contract = { effect_identity : Hash.t; mode : Kernel.op_mode; sch
     so host adapters cannot reconstruct part of the contract from display names. *)
 let force_operation ctx (h : Hash.t) : (operation_contract, Diag.t list) result =
   let checked thunk =
-    match thunk () with value -> Ok value | exception Err diagnostic -> Error [ diagnostic ]
+    match thunk () with
+    | value -> Ok value
+    | exception Err diagnostic -> Error [ diagnostic ]
+    | exception Unify_error detail -> Error [ payload_conflict detail ]
   in
   match Store.locate ctx.store h with
   | Ok

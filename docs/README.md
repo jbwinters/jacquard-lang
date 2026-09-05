@@ -48,6 +48,7 @@ project shape from file names alone.
 
 - `tutorial.md`: worked CLI examples.
 - `stdlib.md`: prelude, rings, library effects, and standard handlers.
+- `effect-payload-containment.md`: checked State/Throw/Emit payload constraints and successor migration.
 - `effect-taxonomy.md`: ratified blessed effect names, schemas, risks, rings,
   interface compatibility, and user-effect governance.
 - `effect-review.md`: identity-first manifest and authority-diff review,

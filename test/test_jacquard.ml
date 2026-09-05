@@ -62,6 +62,7 @@ let () =
       ("governance-faults", Test_governance_faults.suite);
       ("types", Test_types.suite);
       ("check", Test_check.suite);
+      ("effect-payload", Test_effect_payload.suite);
       ("tier", Test_tier.suite);
       ("exhaust", Test_exhaust.suite);
       ("fmt", Test_fmt.suite);

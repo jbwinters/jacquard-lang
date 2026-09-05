@@ -146,12 +146,16 @@ let test_row_cases () =
       ( "same tail same sets",
         (fun () ->
           let tail = new_rvar 0 in
-          unify_rows { effects = [ ha ]; tail } { effects = [ ha ]; tail }),
+          unify_rows
+            { effects = [ ha ]; payloads = []; tail }
+            { effects = [ ha ]; payloads = []; tail }),
         true );
       ( "same tail different sets occurs",
         (fun () ->
           let tail = new_rvar 0 in
-          unify_rows { effects = [ ha ]; tail } { effects = [ hb ]; tail }),
+          unify_rows
+            { effects = [ ha ]; payloads = []; tail }
+            { effects = [ hb ]; payloads = []; tail }),
         false );
       ( "spawn-dependent child/caller row cannot hide an extra effect",
         (fun () ->
@@ -168,15 +172,22 @@ let test_row_cases () =
       ( "row skolem reflexive",
         (fun () ->
           let sk = RSkolem (fresh_id (), "e") in
-          unify_rows { effects = [ ha ]; tail = sk } { effects = [ ha ]; tail = sk }),
+          unify_rows
+            { effects = [ ha ]; payloads = []; tail = sk }
+            { effects = [ ha ]; payloads = []; tail = sk }),
         true );
       ( "row skolem vs closed",
-        (fun () -> unify_rows { effects = []; tail = RSkolem (fresh_id (), "e") } (closed_row [])),
+        (fun () ->
+          unify_rows
+            { effects = []; payloads = []; tail = RSkolem (fresh_id (), "e") }
+            (closed_row [])),
         false );
       ( "open var absorbs skolem side",
         (fun () ->
           let sk = RSkolem (fresh_id (), "e") in
-          unify_rows { effects = [ ha ]; tail = sk } { effects = []; tail = new_rvar 0 }),
+          unify_rows
+            { effects = [ ha ]; payloads = []; tail = sk }
+            { effects = []; payloads = []; tail = new_rvar 0 }),
         true );
     ]
   in
@@ -209,7 +220,8 @@ let assert_constructive_join label wrap unwrap =
   List.iter
     (fun reverse ->
       let tail = new_rvar 1 in
-      let callback_row = { effects = []; tail } and effectful_row = { effects = [ hb ]; tail } in
+      let callback_row = { effects = []; payloads = []; tail }
+      and effectful_row = { effects = [ hb ]; payloads = []; tail } in
       let callback = TArrow ([], callback_row, t_int)
       and effectful = TArrow ([], effectful_row, t_int) in
       let left, right = if reverse then (effectful, callback) else (callback, effectful) in
@@ -245,8 +257,8 @@ let test_join_constructs_non_aliasing_results () =
       | TCon (head, [ ty ]) when Hash.equal head hc -> ty
       | ty -> Alcotest.failf "expected constructor wrapper, got %s" (show ty));
   let rigid = RSkolem (fresh_id (), "e") in
-  let rigid_left = { effects = [ ha ]; tail = rigid }
-  and rigid_right = { effects = [ hb ]; tail = rigid } in
+  let rigid_left = { effects = [ ha ]; payloads = []; tail = rigid }
+  and rigid_right = { effects = [ hb ]; payloads = []; tail = rigid } in
   Alcotest.(check bool)
     "rigid annotation rows remain exact" false
     (unifies (fun () ->
@@ -324,7 +336,7 @@ let materialize (t : tpl) =
     | PTuple ts -> TTuple (List.map go ts)
     | PArrow (ps, rvi, la, r) ->
         let tail = match rvi with None -> RClosed | Some i -> rv i in
-        TArrow (List.map go ps, { effects = (if la then [ ha ] else []); tail }, go r)
+        TArrow (List.map go ps, { effects = (if la then [ ha ] else []); payloads = []; tail }, go r)
   in
   go t
 
@@ -376,8 +388,48 @@ let prop_row_inclusion_keeps_fixed_effects_directional =
       && List.exists (Hash.equal ha) ambient.effects = ambient_has_a
       && List.exists (Hash.equal hb) ambient.effects = later_has_b)
 
+let test_payload_constraints () =
+  let payload_row ty = closed_row ~payloads:[ (ha, [ ty ]) ] [ ha ] in
+  let refuses name thunk = Alcotest.(check bool) name false (unifies thunk) in
+  let payload = new_tvar 2 in
+  let deferred = open_row 1 [] in
+  unify_rows deferred (payload_row payload);
+  ignore (include_rows ~sub:deferred ~into:(payload_row t_int));
+  refuses "tail payload constraint survives inclusion" (fun () -> unify payload t_text);
+  let joined = join_rows (payload_row t_int) (closed_row [ hb ]) in
+  refuses "branch union preserves payloads" (fun () ->
+      unify_rows joined (closed_row ~payloads:[ (ha, [ t_text ]) ] [ ha; hb ]));
+  refuses "payload erasure is rejected" (fun () ->
+      unify_rows (payload_row t_int) (closed_row [ ha ]));
+  refuses "type occurs check traverses payloads" (fun () ->
+      let ty = new_tvar 1 in
+      unify ty (TArrow ([], payload_row ty, t_int)));
+  refuses "row occurs check traverses payloads" (fun () ->
+      let row = open_row 1 [] in
+      unify_rows row (payload_row (TArrow ([], row, t_int))));
+  let payload = new_tvar 2 in
+  let body = TArrow ([ payload ], payload_row payload, TTuple []) in
+  let first = instantiate ~level:1 { ty = body; gen_level = 1 } in
+  let second = instantiate ~level:1 { ty = body; gen_level = 1 } in
+  unify first (TArrow ([ t_int ], payload_row t_int, TTuple []));
+  unify second (TArrow ([ t_text ], payload_row t_text, TTuple []));
+  refuses "instantiation retains visible/hidden sharing" (fun () ->
+      unify first (TArrow ([ t_int ], payload_row t_text, TTuple [])));
+  let shared = new_tvar 1 in
+  let hidden = mono (TArrow ([], payload_row shared, TTuple [])) in
+  match clone_schemes [ hidden; mono shared ] with
+  | [ hidden_copy; visible_copy ] ->
+      unify visible_copy.ty t_int;
+      refuses "recovery clone retains cross-scheme payload sharing" (fun () ->
+          unify hidden_copy.ty (TArrow ([], payload_row t_text, TTuple [])));
+      unify shared t_text;
+      unify hidden.ty (TArrow ([], payload_row t_text, TTuple []))
+  | _ -> Alcotest.fail "clone changed the scheme count"
+
 let suite =
   [
+    Alcotest.test_case "effect payload constraints survive transport and isolation" `Quick
+      test_payload_constraints;
     Alcotest.test_case "type unification cases" `Quick test_type_cases;
     Alcotest.test_case "row unification cases" `Quick test_row_cases;
     Alcotest.test_case "chained unification" `Quick test_chains;

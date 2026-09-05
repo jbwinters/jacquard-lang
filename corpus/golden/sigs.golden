@@ -24,7 +24,7 @@
 21-state.jqd:run-state : forall a b | e. (() ->{State | e} a, b) ->{| e} (a, b)
 22-hostile-net.jqd:fetch-title : (Text) ->{Net} Text
 22-hostile-net.jqd:summarize : (Text) ->{Net} Text
-23-ring1.jqd:tally : forall a b. (List b) ->{} ((), List a)
+23-ring1.jqd:tally : forall a. (List a) ->{} ((), List a)
 23-ring1.jqd:label-with-index : forall a. (List a) ->{} (List (Int, a), Int)
 24-ring2.jqd:csv-swap : (Text) ->{} Text
 24-ring2.jqd:index-of-names : (List Text) ->{} `type:map.t` Text Int

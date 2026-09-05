@@ -64,6 +64,7 @@
   (source_tree ../../bench)
   (source_tree ../native-asan)
   (source_tree ../native-gauntlet)
+  ../effect_payload_runtime_probe.exe
   ../once_interpreter_probe.exe
   ../gen_once_hostile.exe
   ../test_jacquard.exe

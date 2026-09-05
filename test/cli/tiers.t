@@ -8,16 +8,16 @@ tier land here on purpose, like the sigs goldens.
 
   $ jacquard tiers
   == declarations: 383 named terms ==
-  pure                 260  67%
-  row-poly              44  11%
+  pure                 258  67%
+  row-poly              46  12%
   effectful             56  14%
   data                  23   6%
   
   == call sites: 1480 applications ==
   constructor          420  28%
   op-perform            77   5%
-  fn pure              740  50%
-  fn row-poly          138   9%
+  fn pure              730  49%
+  fn row-poly          148  10%
   fn effectful         105   7%
     abort                2
     approval             4
