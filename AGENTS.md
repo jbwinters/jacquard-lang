@@ -121,7 +121,9 @@ When adding valid corpus files, regenerate the golden hashes with
   `spec/host-protocol-v0.md`; strict framing, selection, first-order type/value
   codecs, and checked invoke preflight: `src/host_protocol_v0.ml`,
   `test/test_host_protocol_codec.ml`, `test/test_host_boundary_codec.ml`,
-  `test/test_host_invoke_preflight.ml`. No runnable worker ships yet. Existing
+  `test/test_host_invoke_preflight.ml`. Serial session actions and terminal
+  accounting: `Host_protocol_v0.Session`, `test/test_host_session.ml`, and
+  `docs/host-session-v0.md`. No runnable worker ships yet. Existing
   evaluator capture and host-readiness modules are internal seams, not a public
   ABI; adapters and application servers belong outside this repository.
 - Dist and inference: `prelude/06-dist.jqd`, `prelude/13-dist-lib.jqd`,

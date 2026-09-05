@@ -905,6 +905,9 @@ Do not invent new kernel forms for surface sugar.
   arguments, exact effect grants, and sorted unique public `once` operation
   registry. This returns a validated invocation but does not evaluate it. No
   runnable worker, stable foreign-host ABI, adapter, or HTTP server ships yet.
+  `Host_protocol_v0.Session` now validates serial responses, accounts for
+  bounded evidence, and returns request/resume/terminal actions. See
+  `host-session-v0.md` for the caller-owned continuation and I/O obligations.
   Internal evaluator-capture and host-readiness OCaml APIs are not supported
   embedding contracts; future adapters must consume the versioned protocol and
   its executable conformance fixtures, not those OCaml seams.
