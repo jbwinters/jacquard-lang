@@ -227,6 +227,7 @@
   ../spec/host-protocol-v0.md
   ../spec/host-protocol-v0/README.md
   ../spec/host-protocol-v0/vectors.json
+  (source_tree ../spec/host-protocol-v0/kit)
   ../docs/concurrency.md
   ../docs/README.md
   ../docs/release/0.2/DECISION.md
