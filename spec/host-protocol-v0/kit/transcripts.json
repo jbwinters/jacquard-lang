@@ -1,0 +1,3066 @@
+[
+  {
+    "name": "pure-success",
+    "kind": "positive",
+    "base": null,
+    "phase": null,
+    "sequence": [
+      "core_hello", "host_select", "pure_invoke", "pure_outcome"
+    ],
+    "expect": { "terminal": "ok" },
+    "host_input": [
+      { "step": 0, "direction": "core_to_host", "template": "core_hello" },
+      {
+        "step": 1,
+        "direction": "host_to_core",
+        "template": "host_select",
+        "frame": {
+          "kind": "host_select",
+          "limits": {
+            "max_arguments": 64,
+            "max_collection_items": 1024,
+            "max_diagnostic_bytes": 65536,
+            "max_diagnostics": 32,
+            "max_effect_requests": 1024,
+            "max_effects": 64,
+            "max_frame_bytes": 1048576,
+            "max_host_message_bytes": 4096,
+            "max_json_depth": 64,
+            "max_operations": 256,
+            "max_stderr_bytes": 65536,
+            "max_text_bytes": 262144,
+            "max_value_nodes": 4096
+          },
+          "protocol": "jacquard-host-v0"
+        }
+      },
+      {
+        "step": 2,
+        "direction": "host_to_core",
+        "template": "pure_invoke",
+        "frame": {
+          "arguments": [],
+          "capabilities": { "effects": [], "operations": [] },
+          "interface": {
+            "effects": [],
+            "parameters": [],
+            "result": { "items": [], "kind": "tuple" }
+          },
+          "invocation_id": "0000000000000000",
+          "kind": "invoke",
+          "protocol": "jacquard-host-v0",
+          "target": {
+            "callable": "2af2f2e66770cf0597374a97b4c3988dc0c3f9b42d87f6f430be53525ce6a7ec",
+            "kind": "store-term-v0"
+          }
+        }
+      },
+      { "step": 3, "direction": "core_to_host", "template": "pure_outcome" }
+    ],
+    "core_output": [
+      {
+        "carrier": "stdio-u32-json-v0",
+        "kind": "core_hello",
+        "limits": {
+          "max_arguments": 64,
+          "max_collection_items": 1024,
+          "max_diagnostic_bytes": 65536,
+          "max_diagnostics": 32,
+          "max_effect_requests": 1024,
+          "max_effects": 64,
+          "max_frame_bytes": 1048576,
+          "max_host_message_bytes": 4096,
+          "max_json_depth": 64,
+          "max_operations": 256,
+          "max_stderr_bytes": 65536,
+          "max_text_bytes": 262144,
+          "max_value_nodes": 4096
+        },
+        "versions": [ "jacquard-host-v0" ]
+      },
+      {
+        "evidence": {
+          "core": {
+            "capabilities": { "effects": [], "operations": [] },
+            "effect_requests": [],
+            "interface": {
+              "effects": [],
+              "parameters": [],
+              "result": { "items": [], "kind": "tuple" }
+            },
+            "invocation_id": "0000000000000000",
+            "schema": "jacquard-host-core-evidence-v0",
+            "target": {
+              "callable": "2af2f2e66770cf0597374a97b4c3988dc0c3f9b42d87f6f430be53525ce6a7ec",
+              "kind": "store-term-v0"
+            },
+            "terminal": "ok"
+          },
+          "host_observations": {
+            "responses": [],
+            "schema": "jacquard-host-observations-v0"
+          }
+        },
+        "invocation_id": "0000000000000000",
+        "kind": "outcome",
+        "protocol": "jacquard-host-v0",
+        "result": { "kind": "ok", "value": { "items": [], "kind": "tuple" } }
+      }
+    ],
+    "exit_status": 0,
+    "observed": {
+      "terminal_kind": "outcome",
+      "primary_code": null,
+      "terminal": "ok",
+      "effect_requests": 0,
+      "terminal_frames": 1,
+      "host_local_refusal": null,
+      "host_inputs_skipped_after_terminal": 0
+    },
+    "prose_drift": [],
+    "status": "conforms"
+  },
+  {
+    "name": "one-once-effect-success",
+    "kind": "positive",
+    "base": null,
+    "phase": null,
+    "sequence": [
+      "core_hello", "host_select", "effect_invoke", "effect_request",
+      "effect_ok", "effect_outcome"
+    ],
+    "expect": { "terminal": "ok" },
+    "host_input": [
+      { "step": 0, "direction": "core_to_host", "template": "core_hello" },
+      {
+        "step": 1,
+        "direction": "host_to_core",
+        "template": "host_select",
+        "frame": {
+          "kind": "host_select",
+          "limits": {
+            "max_arguments": 64,
+            "max_collection_items": 1024,
+            "max_diagnostic_bytes": 65536,
+            "max_diagnostics": 32,
+            "max_effect_requests": 1024,
+            "max_effects": 64,
+            "max_frame_bytes": 1048576,
+            "max_host_message_bytes": 4096,
+            "max_json_depth": 64,
+            "max_operations": 256,
+            "max_stderr_bytes": 65536,
+            "max_text_bytes": 262144,
+            "max_value_nodes": 4096
+          },
+          "protocol": "jacquard-host-v0"
+        }
+      },
+      {
+        "step": 2,
+        "direction": "host_to_core",
+        "template": "effect_invoke",
+        "frame": {
+          "arguments": [ { "kind": "text", "value": "ping" } ],
+          "capabilities": {
+            "effects": [
+              "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0"
+            ],
+            "operations": [
+              {
+                "effect": "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0",
+                "mode": "once",
+                "operation": "3120a126f44773feba44f437ef0d2514e5e55764e1c0667f6434561f430c5722"
+              }
+            ]
+          },
+          "interface": {
+            "effects": [
+              "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0"
+            ],
+            "parameters": [
+              {
+                "arguments": [],
+                "identity": "ca456459bd7fbe8c9694388e1246c4333221817248d24707f05b7423828516e3",
+                "kind": "nominal"
+              }
+            ],
+            "result": {
+              "arguments": [],
+              "identity": "ca456459bd7fbe8c9694388e1246c4333221817248d24707f05b7423828516e3",
+              "kind": "nominal"
+            }
+          },
+          "invocation_id": "0000000000000000",
+          "kind": "invoke",
+          "protocol": "jacquard-host-v0",
+          "target": {
+            "callable": "91d93eb6a5a3390035a17eb4d4ce24cf8e18369e458d0382f17328fd9df303d2",
+            "kind": "store-term-v0"
+          }
+        }
+      },
+      {
+        "step": 3,
+        "direction": "core_to_host",
+        "template": "effect_request"
+      },
+      {
+        "step": 4,
+        "direction": "host_to_core",
+        "template": "effect_ok",
+        "frame": {
+          "invocation_id": "0000000000000000",
+          "kind": "effect_ok",
+          "protocol": "jacquard-host-v0",
+          "request_id": "0000000000000001",
+          "value": { "kind": "text", "value": "pong" }
+        }
+      },
+      {
+        "step": 5,
+        "direction": "core_to_host",
+        "template": "effect_outcome"
+      }
+    ],
+    "core_output": [
+      {
+        "carrier": "stdio-u32-json-v0",
+        "kind": "core_hello",
+        "limits": {
+          "max_arguments": 64,
+          "max_collection_items": 1024,
+          "max_diagnostic_bytes": 65536,
+          "max_diagnostics": 32,
+          "max_effect_requests": 1024,
+          "max_effects": 64,
+          "max_frame_bytes": 1048576,
+          "max_host_message_bytes": 4096,
+          "max_json_depth": 64,
+          "max_operations": 256,
+          "max_stderr_bytes": 65536,
+          "max_text_bytes": 262144,
+          "max_value_nodes": 4096
+        },
+        "versions": [ "jacquard-host-v0" ]
+      },
+      {
+        "arguments": [ { "kind": "text", "value": "ping" } ],
+        "effect": "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0",
+        "invocation_id": "0000000000000000",
+        "kind": "effect_request",
+        "mode": "once",
+        "operation": "3120a126f44773feba44f437ef0d2514e5e55764e1c0667f6434561f430c5722",
+        "protocol": "jacquard-host-v0",
+        "request_id": "0000000000000001"
+      },
+      {
+        "evidence": {
+          "core": {
+            "capabilities": {
+              "effects": [
+                "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0"
+              ],
+              "operations": [
+                {
+                  "effect": "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0",
+                  "mode": "once",
+                  "operation": "3120a126f44773feba44f437ef0d2514e5e55764e1c0667f6434561f430c5722"
+                }
+              ]
+            },
+            "effect_requests": [
+              {
+                "effect": "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0",
+                "operation": "3120a126f44773feba44f437ef0d2514e5e55764e1c0667f6434561f430c5722",
+                "ordinal": 1
+              }
+            ],
+            "interface": {
+              "effects": [
+                "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0"
+              ],
+              "parameters": [
+                {
+                  "arguments": [],
+                  "identity": "ca456459bd7fbe8c9694388e1246c4333221817248d24707f05b7423828516e3",
+                  "kind": "nominal"
+                }
+              ],
+              "result": {
+                "arguments": [],
+                "identity": "ca456459bd7fbe8c9694388e1246c4333221817248d24707f05b7423828516e3",
+                "kind": "nominal"
+              }
+            },
+            "invocation_id": "0000000000000000",
+            "schema": "jacquard-host-core-evidence-v0",
+            "target": {
+              "callable": "91d93eb6a5a3390035a17eb4d4ce24cf8e18369e458d0382f17328fd9df303d2",
+              "kind": "store-term-v0"
+            },
+            "terminal": "ok"
+          },
+          "host_observations": {
+            "responses": [
+              { "category": "ok", "completion": "completed", "ordinal": 1 }
+            ],
+            "schema": "jacquard-host-observations-v0"
+          }
+        },
+        "invocation_id": "0000000000000000",
+        "kind": "outcome",
+        "protocol": "jacquard-host-v0",
+        "result": {
+          "kind": "ok",
+          "value": { "kind": "text", "value": "pong" }
+        }
+      }
+    ],
+    "exit_status": 0,
+    "observed": {
+      "terminal_kind": "outcome",
+      "primary_code": null,
+      "terminal": "ok",
+      "effect_requests": 1,
+      "terminal_frames": 1,
+      "host_local_refusal": null,
+      "host_inputs_skipped_after_terminal": 0
+    },
+    "prose_drift": [],
+    "status": "conforms"
+  },
+  {
+    "name": "refused-authority",
+    "kind": "positive",
+    "base": null,
+    "phase": null,
+    "sequence": [
+      "core_hello", "host_select", "effect_invoke", "effect_request",
+      "effect_refused", "refused_outcome"
+    ],
+    "expect": { "terminal": "host_failure" },
+    "host_input": [
+      { "step": 0, "direction": "core_to_host", "template": "core_hello" },
+      {
+        "step": 1,
+        "direction": "host_to_core",
+        "template": "host_select",
+        "frame": {
+          "kind": "host_select",
+          "limits": {
+            "max_arguments": 64,
+            "max_collection_items": 1024,
+            "max_diagnostic_bytes": 65536,
+            "max_diagnostics": 32,
+            "max_effect_requests": 1024,
+            "max_effects": 64,
+            "max_frame_bytes": 1048576,
+            "max_host_message_bytes": 4096,
+            "max_json_depth": 64,
+            "max_operations": 256,
+            "max_stderr_bytes": 65536,
+            "max_text_bytes": 262144,
+            "max_value_nodes": 4096
+          },
+          "protocol": "jacquard-host-v0"
+        }
+      },
+      {
+        "step": 2,
+        "direction": "host_to_core",
+        "template": "effect_invoke",
+        "frame": {
+          "arguments": [ { "kind": "text", "value": "ping" } ],
+          "capabilities": {
+            "effects": [
+              "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0"
+            ],
+            "operations": [
+              {
+                "effect": "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0",
+                "mode": "once",
+                "operation": "3120a126f44773feba44f437ef0d2514e5e55764e1c0667f6434561f430c5722"
+              }
+            ]
+          },
+          "interface": {
+            "effects": [
+              "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0"
+            ],
+            "parameters": [
+              {
+                "arguments": [],
+                "identity": "ca456459bd7fbe8c9694388e1246c4333221817248d24707f05b7423828516e3",
+                "kind": "nominal"
+              }
+            ],
+            "result": {
+              "arguments": [],
+              "identity": "ca456459bd7fbe8c9694388e1246c4333221817248d24707f05b7423828516e3",
+              "kind": "nominal"
+            }
+          },
+          "invocation_id": "0000000000000000",
+          "kind": "invoke",
+          "protocol": "jacquard-host-v0",
+          "target": {
+            "callable": "91d93eb6a5a3390035a17eb4d4ce24cf8e18369e458d0382f17328fd9df303d2",
+            "kind": "store-term-v0"
+          }
+        }
+      },
+      {
+        "step": 3,
+        "direction": "core_to_host",
+        "template": "effect_request"
+      },
+      {
+        "step": 4,
+        "direction": "host_to_core",
+        "template": "effect_refused",
+        "frame": {
+          "category": "refused_authority",
+          "completion": "not_started",
+          "invocation_id": "0000000000000000",
+          "kind": "effect_failure",
+          "message": "policy denied",
+          "protocol": "jacquard-host-v0",
+          "request_id": "0000000000000001"
+        }
+      },
+      {
+        "step": 5,
+        "direction": "core_to_host",
+        "template": "refused_outcome"
+      }
+    ],
+    "core_output": [
+      {
+        "carrier": "stdio-u32-json-v0",
+        "kind": "core_hello",
+        "limits": {
+          "max_arguments": 64,
+          "max_collection_items": 1024,
+          "max_diagnostic_bytes": 65536,
+          "max_diagnostics": 32,
+          "max_effect_requests": 1024,
+          "max_effects": 64,
+          "max_frame_bytes": 1048576,
+          "max_host_message_bytes": 4096,
+          "max_json_depth": 64,
+          "max_operations": 256,
+          "max_stderr_bytes": 65536,
+          "max_text_bytes": 262144,
+          "max_value_nodes": 4096
+        },
+        "versions": [ "jacquard-host-v0" ]
+      },
+      {
+        "arguments": [ { "kind": "text", "value": "ping" } ],
+        "effect": "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0",
+        "invocation_id": "0000000000000000",
+        "kind": "effect_request",
+        "mode": "once",
+        "operation": "3120a126f44773feba44f437ef0d2514e5e55764e1c0667f6434561f430c5722",
+        "protocol": "jacquard-host-v0",
+        "request_id": "0000000000000001"
+      },
+      {
+        "evidence": {
+          "core": {
+            "capabilities": {
+              "effects": [
+                "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0"
+              ],
+              "operations": [
+                {
+                  "effect": "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0",
+                  "mode": "once",
+                  "operation": "3120a126f44773feba44f437ef0d2514e5e55764e1c0667f6434561f430c5722"
+                }
+              ]
+            },
+            "effect_requests": [
+              {
+                "effect": "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0",
+                "operation": "3120a126f44773feba44f437ef0d2514e5e55764e1c0667f6434561f430c5722",
+                "ordinal": 1
+              }
+            ],
+            "interface": {
+              "effects": [
+                "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0"
+              ],
+              "parameters": [
+                {
+                  "arguments": [],
+                  "identity": "ca456459bd7fbe8c9694388e1246c4333221817248d24707f05b7423828516e3",
+                  "kind": "nominal"
+                }
+              ],
+              "result": {
+                "arguments": [],
+                "identity": "ca456459bd7fbe8c9694388e1246c4333221817248d24707f05b7423828516e3",
+                "kind": "nominal"
+              }
+            },
+            "invocation_id": "0000000000000000",
+            "schema": "jacquard-host-core-evidence-v0",
+            "target": {
+              "callable": "91d93eb6a5a3390035a17eb4d4ce24cf8e18369e458d0382f17328fd9df303d2",
+              "kind": "store-term-v0"
+            },
+            "terminal": "host_failure"
+          },
+          "host_observations": {
+            "responses": [
+              {
+                "category": "refused_authority",
+                "completion": "not_started",
+                "ordinal": 1
+              }
+            ],
+            "schema": "jacquard-host-observations-v0"
+          }
+        },
+        "invocation_id": "0000000000000000",
+        "kind": "outcome",
+        "protocol": "jacquard-host-v0",
+        "result": {
+          "diagnostics": [
+            {
+              "cause": "The host reported an outside failure. Host detail: policy denied",
+              "code": "E1607",
+              "domain": "process",
+              "next_step": "Review the host's authority policy before starting a new invocation.",
+              "schema": "jacquard-diagnostic-v1",
+              "severity": "error",
+              "span": null,
+              "summary": "The host refused authority before starting the outside action."
+            }
+          ],
+          "kind": "error"
+        }
+      }
+    ],
+    "exit_status": 0,
+    "observed": {
+      "terminal_kind": "outcome",
+      "primary_code": "E1607",
+      "terminal": "host_failure",
+      "effect_requests": 1,
+      "terminal_frames": 1,
+      "host_local_refusal": null,
+      "host_inputs_skipped_after_terminal": 0
+    },
+    "prose_drift": [
+      "refused_outcome/result/diagnostics/0/summary",
+      "refused_outcome/result/diagnostics/0/cause",
+      "refused_outcome/result/diagnostics/0/next_step"
+    ],
+    "status": "conforms"
+  },
+  {
+    "name": "timeout-with-unknown-completion",
+    "kind": "positive",
+    "base": null,
+    "phase": null,
+    "sequence": [
+      "core_hello", "host_select", "effect_invoke", "effect_request",
+      "timeout_unknown_cancel", "timeout_unknown_outcome"
+    ],
+    "expect": { "terminal": "completion_unknown" },
+    "host_input": [
+      { "step": 0, "direction": "core_to_host", "template": "core_hello" },
+      {
+        "step": 1,
+        "direction": "host_to_core",
+        "template": "host_select",
+        "frame": {
+          "kind": "host_select",
+          "limits": {
+            "max_arguments": 64,
+            "max_collection_items": 1024,
+            "max_diagnostic_bytes": 65536,
+            "max_diagnostics": 32,
+            "max_effect_requests": 1024,
+            "max_effects": 64,
+            "max_frame_bytes": 1048576,
+            "max_host_message_bytes": 4096,
+            "max_json_depth": 64,
+            "max_operations": 256,
+            "max_stderr_bytes": 65536,
+            "max_text_bytes": 262144,
+            "max_value_nodes": 4096
+          },
+          "protocol": "jacquard-host-v0"
+        }
+      },
+      {
+        "step": 2,
+        "direction": "host_to_core",
+        "template": "effect_invoke",
+        "frame": {
+          "arguments": [ { "kind": "text", "value": "ping" } ],
+          "capabilities": {
+            "effects": [
+              "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0"
+            ],
+            "operations": [
+              {
+                "effect": "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0",
+                "mode": "once",
+                "operation": "3120a126f44773feba44f437ef0d2514e5e55764e1c0667f6434561f430c5722"
+              }
+            ]
+          },
+          "interface": {
+            "effects": [
+              "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0"
+            ],
+            "parameters": [
+              {
+                "arguments": [],
+                "identity": "ca456459bd7fbe8c9694388e1246c4333221817248d24707f05b7423828516e3",
+                "kind": "nominal"
+              }
+            ],
+            "result": {
+              "arguments": [],
+              "identity": "ca456459bd7fbe8c9694388e1246c4333221817248d24707f05b7423828516e3",
+              "kind": "nominal"
+            }
+          },
+          "invocation_id": "0000000000000000",
+          "kind": "invoke",
+          "protocol": "jacquard-host-v0",
+          "target": {
+            "callable": "91d93eb6a5a3390035a17eb4d4ce24cf8e18369e458d0382f17328fd9df303d2",
+            "kind": "store-term-v0"
+          }
+        }
+      },
+      {
+        "step": 3,
+        "direction": "core_to_host",
+        "template": "effect_request"
+      },
+      {
+        "step": 4,
+        "direction": "host_to_core",
+        "template": "timeout_unknown_cancel",
+        "frame": {
+          "completion": "unknown",
+          "invocation_id": "0000000000000000",
+          "kind": "cancel",
+          "protocol": "jacquard-host-v0",
+          "reason": "timeout",
+          "request_id": "0000000000000001"
+        }
+      },
+      {
+        "step": 5,
+        "direction": "core_to_host",
+        "template": "timeout_unknown_outcome"
+      }
+    ],
+    "core_output": [
+      {
+        "carrier": "stdio-u32-json-v0",
+        "kind": "core_hello",
+        "limits": {
+          "max_arguments": 64,
+          "max_collection_items": 1024,
+          "max_diagnostic_bytes": 65536,
+          "max_diagnostics": 32,
+          "max_effect_requests": 1024,
+          "max_effects": 64,
+          "max_frame_bytes": 1048576,
+          "max_host_message_bytes": 4096,
+          "max_json_depth": 64,
+          "max_operations": 256,
+          "max_stderr_bytes": 65536,
+          "max_text_bytes": 262144,
+          "max_value_nodes": 4096
+        },
+        "versions": [ "jacquard-host-v0" ]
+      },
+      {
+        "arguments": [ { "kind": "text", "value": "ping" } ],
+        "effect": "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0",
+        "invocation_id": "0000000000000000",
+        "kind": "effect_request",
+        "mode": "once",
+        "operation": "3120a126f44773feba44f437ef0d2514e5e55764e1c0667f6434561f430c5722",
+        "protocol": "jacquard-host-v0",
+        "request_id": "0000000000000001"
+      },
+      {
+        "evidence": {
+          "core": {
+            "capabilities": {
+              "effects": [
+                "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0"
+              ],
+              "operations": [
+                {
+                  "effect": "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0",
+                  "mode": "once",
+                  "operation": "3120a126f44773feba44f437ef0d2514e5e55764e1c0667f6434561f430c5722"
+                }
+              ]
+            },
+            "effect_requests": [
+              {
+                "effect": "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0",
+                "operation": "3120a126f44773feba44f437ef0d2514e5e55764e1c0667f6434561f430c5722",
+                "ordinal": 1
+              }
+            ],
+            "interface": {
+              "effects": [
+                "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0"
+              ],
+              "parameters": [
+                {
+                  "arguments": [],
+                  "identity": "ca456459bd7fbe8c9694388e1246c4333221817248d24707f05b7423828516e3",
+                  "kind": "nominal"
+                }
+              ],
+              "result": {
+                "arguments": [],
+                "identity": "ca456459bd7fbe8c9694388e1246c4333221817248d24707f05b7423828516e3",
+                "kind": "nominal"
+              }
+            },
+            "invocation_id": "0000000000000000",
+            "schema": "jacquard-host-core-evidence-v0",
+            "target": {
+              "callable": "91d93eb6a5a3390035a17eb4d4ce24cf8e18369e458d0382f17328fd9df303d2",
+              "kind": "store-term-v0"
+            },
+            "terminal": "completion_unknown"
+          },
+          "host_observations": {
+            "responses": [
+              {
+                "category": "timeout",
+                "completion": "unknown",
+                "ordinal": 1
+              }
+            ],
+            "schema": "jacquard-host-observations-v0"
+          }
+        },
+        "invocation_id": "0000000000000000",
+        "kind": "outcome",
+        "protocol": "jacquard-host-v0",
+        "result": {
+          "diagnostics": [
+            {
+              "cause": "The host ended the response slot without a successful value.",
+              "code": "E1612",
+              "domain": "process",
+              "next_step": "Reconcile host-owned evidence; do not automatically retry the action or invocation.",
+              "schema": "jacquard-diagnostic-v1",
+              "severity": "error",
+              "span": null,
+              "summary": "The outside action's completion is unknown."
+            }
+          ],
+          "kind": "error"
+        }
+      }
+    ],
+    "exit_status": 0,
+    "observed": {
+      "terminal_kind": "outcome",
+      "primary_code": "E1612",
+      "terminal": "completion_unknown",
+      "effect_requests": 1,
+      "terminal_frames": 1,
+      "host_local_refusal": null,
+      "host_inputs_skipped_after_terminal": 0
+    },
+    "prose_drift": [
+      "timeout_unknown_outcome/result/diagnostics/0/summary",
+      "timeout_unknown_outcome/result/diagnostics/0/cause",
+      "timeout_unknown_outcome/result/diagnostics/0/next_step"
+    ],
+    "status": "conforms"
+  },
+  {
+    "name": "selected-shutdown",
+    "kind": "positive",
+    "base": null,
+    "phase": null,
+    "sequence": [ "core_hello", "host_select", "shutdown", "shutdown_ack" ],
+    "expect": { "terminal": "shutdown" },
+    "host_input": [
+      { "step": 0, "direction": "core_to_host", "template": "core_hello" },
+      {
+        "step": 1,
+        "direction": "host_to_core",
+        "template": "host_select",
+        "frame": {
+          "kind": "host_select",
+          "limits": {
+            "max_arguments": 64,
+            "max_collection_items": 1024,
+            "max_diagnostic_bytes": 65536,
+            "max_diagnostics": 32,
+            "max_effect_requests": 1024,
+            "max_effects": 64,
+            "max_frame_bytes": 1048576,
+            "max_host_message_bytes": 4096,
+            "max_json_depth": 64,
+            "max_operations": 256,
+            "max_stderr_bytes": 65536,
+            "max_text_bytes": 262144,
+            "max_value_nodes": 4096
+          },
+          "protocol": "jacquard-host-v0"
+        }
+      },
+      {
+        "step": 2,
+        "direction": "host_to_core",
+        "template": "shutdown",
+        "frame": { "kind": "shutdown", "protocol": "jacquard-host-v0" }
+      },
+      { "step": 3, "direction": "core_to_host", "template": "shutdown_ack" }
+    ],
+    "core_output": [
+      {
+        "carrier": "stdio-u32-json-v0",
+        "kind": "core_hello",
+        "limits": {
+          "max_arguments": 64,
+          "max_collection_items": 1024,
+          "max_diagnostic_bytes": 65536,
+          "max_diagnostics": 32,
+          "max_effect_requests": 1024,
+          "max_effects": 64,
+          "max_frame_bytes": 1048576,
+          "max_host_message_bytes": 4096,
+          "max_json_depth": 64,
+          "max_operations": 256,
+          "max_stderr_bytes": 65536,
+          "max_text_bytes": 262144,
+          "max_value_nodes": 4096
+        },
+        "versions": [ "jacquard-host-v0" ]
+      },
+      { "kind": "shutdown_ack", "protocol": "jacquard-host-v0" }
+    ],
+    "exit_status": 0,
+    "observed": {
+      "terminal_kind": "shutdown_ack",
+      "primary_code": null,
+      "terminal": "shutdown",
+      "effect_requests": 0,
+      "terminal_frames": 1,
+      "host_local_refusal": null,
+      "host_inputs_skipped_after_terminal": 0
+    },
+    "prose_drift": [],
+    "status": "conforms"
+  },
+  {
+    "name": "unknown-version",
+    "kind": "hostile",
+    "base": "pure-success",
+    "phase": "host_select",
+    "sequence": [
+      "core_hello", "host_select", "pure_invoke", "pure_outcome"
+    ],
+    "expect": {
+      "code": "E1600",
+      "effect_requests_before_failure": 0,
+      "forbid_outside_action": true,
+      "terminal_frames_max": 1
+    },
+    "host_input": [
+      { "step": 0, "direction": "core_to_host", "template": "core_hello" },
+      {
+        "step": 1,
+        "direction": "host_to_core",
+        "template": "host_select",
+        "frame": {
+          "kind": "host_select",
+          "limits": {
+            "max_arguments": 64,
+            "max_collection_items": 1024,
+            "max_diagnostic_bytes": 65536,
+            "max_diagnostics": 32,
+            "max_effect_requests": 1024,
+            "max_effects": 64,
+            "max_frame_bytes": 1048576,
+            "max_host_message_bytes": 4096,
+            "max_json_depth": 64,
+            "max_operations": 256,
+            "max_stderr_bytes": 65536,
+            "max_text_bytes": 262144,
+            "max_value_nodes": 4096
+          },
+          "protocol": "jacquard-host-v1"
+        }
+      },
+      {
+        "step": 2,
+        "direction": "host_to_core",
+        "template": "pure_invoke",
+        "frame": {
+          "arguments": [],
+          "capabilities": { "effects": [], "operations": [] },
+          "interface": {
+            "effects": [],
+            "parameters": [],
+            "result": { "items": [], "kind": "tuple" }
+          },
+          "invocation_id": "0000000000000000",
+          "kind": "invoke",
+          "protocol": "jacquard-host-v0",
+          "target": {
+            "callable": "2af2f2e66770cf0597374a97b4c3988dc0c3f9b42d87f6f430be53525ce6a7ec",
+            "kind": "store-term-v0"
+          }
+        }
+      },
+      { "step": 3, "direction": "core_to_host", "template": "pure_outcome" }
+    ],
+    "core_output": [
+      {
+        "carrier": "stdio-u32-json-v0",
+        "kind": "core_hello",
+        "limits": {
+          "max_arguments": 64,
+          "max_collection_items": 1024,
+          "max_diagnostic_bytes": 65536,
+          "max_diagnostics": 32,
+          "max_effect_requests": 1024,
+          "max_effects": 64,
+          "max_frame_bytes": 1048576,
+          "max_host_message_bytes": 4096,
+          "max_json_depth": 64,
+          "max_operations": 256,
+          "max_stderr_bytes": 65536,
+          "max_text_bytes": 262144,
+          "max_value_nodes": 4096
+        },
+        "versions": [ "jacquard-host-v0" ]
+      },
+      {
+        "diagnostics": [
+          {
+            "cause": "The selected protocol version is not advertised.",
+            "code": "E1600",
+            "domain": "process",
+            "next_step": "Select jacquard-host-v0 with the advertised stdio-u32-json-v0 carrier.",
+            "schema": "jacquard-diagnostic-v1",
+            "severity": "error",
+            "span": null,
+            "summary": "The host selected an unsupported protocol version."
+          }
+        ],
+        "kind": "fatal",
+        "protocol": "jacquard-host-v0"
+      }
+    ],
+    "exit_status": 0,
+    "observed": {
+      "terminal_kind": "fatal",
+      "primary_code": "E1600",
+      "terminal": "fatal",
+      "effect_requests": 0,
+      "terminal_frames": 1,
+      "host_local_refusal": null,
+      "host_inputs_skipped_after_terminal": 0
+    },
+    "prose_drift": [],
+    "status": "conforms"
+  },
+  {
+    "name": "unknown-invoke-field",
+    "kind": "hostile",
+    "base": "pure-success",
+    "phase": "invoke",
+    "sequence": [
+      "core_hello", "host_select", "pure_invoke", "pure_outcome"
+    ],
+    "expect": {
+      "code": "E1601",
+      "effect_requests_before_failure": 0,
+      "forbid_outside_action": true,
+      "terminal_frames_max": 1
+    },
+    "host_input": [
+      { "step": 0, "direction": "core_to_host", "template": "core_hello" },
+      {
+        "step": 1,
+        "direction": "host_to_core",
+        "template": "host_select",
+        "frame": {
+          "kind": "host_select",
+          "limits": {
+            "max_arguments": 64,
+            "max_collection_items": 1024,
+            "max_diagnostic_bytes": 65536,
+            "max_diagnostics": 32,
+            "max_effect_requests": 1024,
+            "max_effects": 64,
+            "max_frame_bytes": 1048576,
+            "max_host_message_bytes": 4096,
+            "max_json_depth": 64,
+            "max_operations": 256,
+            "max_stderr_bytes": 65536,
+            "max_text_bytes": 262144,
+            "max_value_nodes": 4096
+          },
+          "protocol": "jacquard-host-v0"
+        }
+      },
+      {
+        "step": 2,
+        "direction": "host_to_core",
+        "template": "pure_invoke",
+        "frame": {
+          "arguments": [],
+          "capabilities": { "effects": [], "operations": [] },
+          "display_name": "mutable-name",
+          "interface": {
+            "effects": [],
+            "parameters": [],
+            "result": { "items": [], "kind": "tuple" }
+          },
+          "invocation_id": "0000000000000000",
+          "kind": "invoke",
+          "protocol": "jacquard-host-v0",
+          "target": {
+            "callable": "2af2f2e66770cf0597374a97b4c3988dc0c3f9b42d87f6f430be53525ce6a7ec",
+            "kind": "store-term-v0"
+          }
+        }
+      },
+      { "step": 3, "direction": "core_to_host", "template": "pure_outcome" }
+    ],
+    "core_output": [
+      {
+        "carrier": "stdio-u32-json-v0",
+        "kind": "core_hello",
+        "limits": {
+          "max_arguments": 64,
+          "max_collection_items": 1024,
+          "max_diagnostic_bytes": 65536,
+          "max_diagnostics": 32,
+          "max_effect_requests": 1024,
+          "max_effects": 64,
+          "max_frame_bytes": 1048576,
+          "max_host_message_bytes": 4096,
+          "max_json_depth": 64,
+          "max_operations": 256,
+          "max_stderr_bytes": 65536,
+          "max_text_bytes": 262144,
+          "max_value_nodes": 4096
+        },
+        "versions": [ "jacquard-host-v0" ]
+      },
+      {
+        "diagnostics": [
+          {
+            "cause": "The protocol envelope has a missing or unknown field.",
+            "code": "E1601",
+            "domain": "process",
+            "next_step": "Send one exact UTF-8 JSON object using the frozen jacquard-host-v0 envelope.",
+            "schema": "jacquard-diagnostic-v1",
+            "severity": "error",
+            "span": null,
+            "summary": "The host protocol frame is malformed."
+          }
+        ],
+        "kind": "fatal",
+        "protocol": "jacquard-host-v0"
+      }
+    ],
+    "exit_status": 0,
+    "observed": {
+      "terminal_kind": "fatal",
+      "primary_code": "E1601",
+      "terminal": "fatal",
+      "effect_requests": 0,
+      "terminal_frames": 1,
+      "host_local_refusal": null,
+      "host_inputs_skipped_after_terminal": 0
+    },
+    "prose_drift": [],
+    "status": "conforms"
+  },
+  {
+    "name": "duplicate-json-key",
+    "kind": "hostile",
+    "base": "pure-success",
+    "phase": "framing",
+    "sequence": [
+      "core_hello", "host_select", "pure_invoke", "pure_outcome"
+    ],
+    "expect": {
+      "code": "E1601",
+      "effect_requests_before_failure": 0,
+      "forbid_outside_action": true,
+      "terminal_frames_max": 1
+    },
+    "host_input": [
+      { "step": 0, "direction": "core_to_host", "template": "core_hello" },
+      {
+        "step": 1,
+        "direction": "host_to_core",
+        "raw_hex": "000000267b226b696e64223a22686f73745f73656c656374222c226b696e64223a22696e766f6b65227d"
+      },
+      {
+        "step": 2,
+        "direction": "host_to_core",
+        "template": "pure_invoke",
+        "frame": {
+          "arguments": [],
+          "capabilities": { "effects": [], "operations": [] },
+          "interface": {
+            "effects": [],
+            "parameters": [],
+            "result": { "items": [], "kind": "tuple" }
+          },
+          "invocation_id": "0000000000000000",
+          "kind": "invoke",
+          "protocol": "jacquard-host-v0",
+          "target": {
+            "callable": "2af2f2e66770cf0597374a97b4c3988dc0c3f9b42d87f6f430be53525ce6a7ec",
+            "kind": "store-term-v0"
+          }
+        }
+      },
+      { "step": 3, "direction": "core_to_host", "template": "pure_outcome" }
+    ],
+    "core_output": [
+      {
+        "carrier": "stdio-u32-json-v0",
+        "kind": "core_hello",
+        "limits": {
+          "max_arguments": 64,
+          "max_collection_items": 1024,
+          "max_diagnostic_bytes": 65536,
+          "max_diagnostics": 32,
+          "max_effect_requests": 1024,
+          "max_effects": 64,
+          "max_frame_bytes": 1048576,
+          "max_host_message_bytes": 4096,
+          "max_json_depth": 64,
+          "max_operations": 256,
+          "max_stderr_bytes": 65536,
+          "max_text_bytes": 262144,
+          "max_value_nodes": 4096
+        },
+        "versions": [ "jacquard-host-v0" ]
+      },
+      {
+        "diagnostics": [
+          {
+            "cause": "A JSON object contains a duplicate field name.",
+            "code": "E1601",
+            "domain": "process",
+            "next_step": "Send one exact UTF-8 JSON object using the frozen jacquard-host-v0 envelope.",
+            "schema": "jacquard-diagnostic-v1",
+            "severity": "error",
+            "span": null,
+            "summary": "The host protocol frame is malformed."
+          }
+        ],
+        "kind": "fatal",
+        "protocol": "jacquard-host-v0"
+      }
+    ],
+    "exit_status": 0,
+    "observed": {
+      "terminal_kind": "fatal",
+      "primary_code": "E1601",
+      "terminal": "fatal",
+      "effect_requests": 0,
+      "terminal_frames": 1,
+      "host_local_refusal": null,
+      "host_inputs_skipped_after_terminal": 0
+    },
+    "prose_drift": [],
+    "status": "conforms"
+  },
+  {
+    "name": "invalid-utf8",
+    "kind": "hostile",
+    "base": "pure-success",
+    "phase": "framing",
+    "sequence": [
+      "core_hello", "host_select", "pure_invoke", "pure_outcome"
+    ],
+    "expect": {
+      "code": "E1601",
+      "effect_requests_before_failure": 0,
+      "forbid_outside_action": true,
+      "terminal_frames_max": 1
+    },
+    "host_input": [
+      { "step": 0, "direction": "core_to_host", "template": "core_hello" },
+      { "step": 1, "direction": "host_to_core", "raw_hex": "000000037bff7d" },
+      {
+        "step": 2,
+        "direction": "host_to_core",
+        "template": "pure_invoke",
+        "frame": {
+          "arguments": [],
+          "capabilities": { "effects": [], "operations": [] },
+          "interface": {
+            "effects": [],
+            "parameters": [],
+            "result": { "items": [], "kind": "tuple" }
+          },
+          "invocation_id": "0000000000000000",
+          "kind": "invoke",
+          "protocol": "jacquard-host-v0",
+          "target": {
+            "callable": "2af2f2e66770cf0597374a97b4c3988dc0c3f9b42d87f6f430be53525ce6a7ec",
+            "kind": "store-term-v0"
+          }
+        }
+      },
+      { "step": 3, "direction": "core_to_host", "template": "pure_outcome" }
+    ],
+    "core_output": [
+      {
+        "carrier": "stdio-u32-json-v0",
+        "kind": "core_hello",
+        "limits": {
+          "max_arguments": 64,
+          "max_collection_items": 1024,
+          "max_diagnostic_bytes": 65536,
+          "max_diagnostics": 32,
+          "max_effect_requests": 1024,
+          "max_effects": 64,
+          "max_frame_bytes": 1048576,
+          "max_host_message_bytes": 4096,
+          "max_json_depth": 64,
+          "max_operations": 256,
+          "max_stderr_bytes": 65536,
+          "max_text_bytes": 262144,
+          "max_value_nodes": 4096
+        },
+        "versions": [ "jacquard-host-v0" ]
+      },
+      {
+        "diagnostics": [
+          {
+            "cause": "The frame payload is not valid Unicode scalar UTF-8.",
+            "code": "E1601",
+            "domain": "process",
+            "next_step": "Send one exact UTF-8 JSON object using the frozen jacquard-host-v0 envelope.",
+            "schema": "jacquard-diagnostic-v1",
+            "severity": "error",
+            "span": null,
+            "summary": "The host protocol frame is malformed."
+          }
+        ],
+        "kind": "fatal",
+        "protocol": "jacquard-host-v0"
+      }
+    ],
+    "exit_status": 0,
+    "observed": {
+      "terminal_kind": "fatal",
+      "primary_code": "E1601",
+      "terminal": "fatal",
+      "effect_requests": 0,
+      "terminal_frames": 1,
+      "host_local_refusal": null,
+      "host_inputs_skipped_after_terminal": 0
+    },
+    "prose_drift": [],
+    "status": "conforms"
+  },
+  {
+    "name": "oversized-frame-prefix",
+    "kind": "hostile",
+    "base": "pure-success",
+    "phase": "framing",
+    "sequence": [
+      "core_hello", "host_select", "pure_invoke", "pure_outcome"
+    ],
+    "expect": {
+      "code": "E1602",
+      "effect_requests_before_failure": 0,
+      "forbid_outside_action": true,
+      "terminal_frames_max": 1
+    },
+    "host_input": [
+      { "step": 0, "direction": "core_to_host", "template": "core_hello" },
+      { "step": 1, "direction": "host_to_core", "raw_hex": "00100001" },
+      {
+        "step": 2,
+        "direction": "host_to_core",
+        "template": "pure_invoke",
+        "frame": {
+          "arguments": [],
+          "capabilities": { "effects": [], "operations": [] },
+          "interface": {
+            "effects": [],
+            "parameters": [],
+            "result": { "items": [], "kind": "tuple" }
+          },
+          "invocation_id": "0000000000000000",
+          "kind": "invoke",
+          "protocol": "jacquard-host-v0",
+          "target": {
+            "callable": "2af2f2e66770cf0597374a97b4c3988dc0c3f9b42d87f6f430be53525ce6a7ec",
+            "kind": "store-term-v0"
+          }
+        }
+      },
+      { "step": 3, "direction": "core_to_host", "template": "pure_outcome" }
+    ],
+    "core_output": [
+      {
+        "carrier": "stdio-u32-json-v0",
+        "kind": "core_hello",
+        "limits": {
+          "max_arguments": 64,
+          "max_collection_items": 1024,
+          "max_diagnostic_bytes": 65536,
+          "max_diagnostics": 32,
+          "max_effect_requests": 1024,
+          "max_effects": 64,
+          "max_frame_bytes": 1048576,
+          "max_host_message_bytes": 4096,
+          "max_json_depth": 64,
+          "max_operations": 256,
+          "max_stderr_bytes": 65536,
+          "max_text_bytes": 262144,
+          "max_value_nodes": 4096
+        },
+        "versions": [ "jacquard-host-v0" ]
+      },
+      {
+        "diagnostics": [
+          {
+            "cause": "The frame payload length exceeds max_frame_bytes.",
+            "code": "E1602",
+            "domain": "process",
+            "next_step": "Choose positive advertised limits and keep the frame within the selected ceilings.",
+            "schema": "jacquard-diagnostic-v1",
+            "severity": "error",
+            "span": null,
+            "summary": "The host protocol limit was exceeded or cannot represent a mandatory result."
+          }
+        ],
+        "kind": "fatal",
+        "protocol": "jacquard-host-v0"
+      }
+    ],
+    "exit_status": 0,
+    "observed": {
+      "terminal_kind": "fatal",
+      "primary_code": "E1602",
+      "terminal": "fatal",
+      "effect_requests": 0,
+      "terminal_frames": 1,
+      "host_local_refusal": null,
+      "host_inputs_skipped_after_terminal": 0
+    },
+    "prose_drift": [],
+    "status": "conforms"
+  },
+  {
+    "name": "nonpositive-selected-limit",
+    "kind": "hostile",
+    "base": "pure-success",
+    "phase": "host_select",
+    "sequence": [
+      "core_hello", "host_select", "pure_invoke", "pure_outcome"
+    ],
+    "expect": {
+      "code": "E1602",
+      "effect_requests_before_failure": 0,
+      "forbid_outside_action": true,
+      "terminal_frames_max": 1
+    },
+    "host_input": [
+      { "step": 0, "direction": "core_to_host", "template": "core_hello" },
+      {
+        "step": 1,
+        "direction": "host_to_core",
+        "template": "host_select",
+        "frame": {
+          "kind": "host_select",
+          "limits": {
+            "max_arguments": 64,
+            "max_collection_items": 1024,
+            "max_diagnostic_bytes": 65536,
+            "max_diagnostics": 32,
+            "max_effect_requests": 1024,
+            "max_effects": 64,
+            "max_frame_bytes": 0,
+            "max_host_message_bytes": 4096,
+            "max_json_depth": 64,
+            "max_operations": 256,
+            "max_stderr_bytes": 65536,
+            "max_text_bytes": 262144,
+            "max_value_nodes": 4096
+          },
+          "protocol": "jacquard-host-v0"
+        }
+      },
+      {
+        "step": 2,
+        "direction": "host_to_core",
+        "template": "pure_invoke",
+        "frame": {
+          "arguments": [],
+          "capabilities": { "effects": [], "operations": [] },
+          "interface": {
+            "effects": [],
+            "parameters": [],
+            "result": { "items": [], "kind": "tuple" }
+          },
+          "invocation_id": "0000000000000000",
+          "kind": "invoke",
+          "protocol": "jacquard-host-v0",
+          "target": {
+            "callable": "2af2f2e66770cf0597374a97b4c3988dc0c3f9b42d87f6f430be53525ce6a7ec",
+            "kind": "store-term-v0"
+          }
+        }
+      },
+      { "step": 3, "direction": "core_to_host", "template": "pure_outcome" }
+    ],
+    "core_output": [
+      {
+        "carrier": "stdio-u32-json-v0",
+        "kind": "core_hello",
+        "limits": {
+          "max_arguments": 64,
+          "max_collection_items": 1024,
+          "max_diagnostic_bytes": 65536,
+          "max_diagnostics": 32,
+          "max_effect_requests": 1024,
+          "max_effects": 64,
+          "max_frame_bytes": 1048576,
+          "max_host_message_bytes": 4096,
+          "max_json_depth": 64,
+          "max_operations": 256,
+          "max_stderr_bytes": 65536,
+          "max_text_bytes": 262144,
+          "max_value_nodes": 4096
+        },
+        "versions": [ "jacquard-host-v0" ]
+      },
+      {
+        "diagnostics": [
+          {
+            "cause": "The selected max_frame_bytes is not positive and advertised.",
+            "code": "E1602",
+            "domain": "process",
+            "next_step": "Choose positive advertised limits and keep the frame within the selected ceilings.",
+            "schema": "jacquard-diagnostic-v1",
+            "severity": "error",
+            "span": null,
+            "summary": "The host protocol limit was exceeded or cannot represent a mandatory result."
+          }
+        ],
+        "kind": "fatal",
+        "protocol": "jacquard-host-v0"
+      }
+    ],
+    "exit_status": 0,
+    "observed": {
+      "terminal_kind": "fatal",
+      "primary_code": "E1602",
+      "terminal": "fatal",
+      "effect_requests": 0,
+      "terminal_frames": 1,
+      "host_local_refusal": null,
+      "host_inputs_skipped_after_terminal": 0
+    },
+    "prose_drift": [],
+    "status": "conforms"
+  },
+  {
+    "name": "noncanonical-target-hash",
+    "kind": "hostile",
+    "base": "pure-success",
+    "phase": "invoke",
+    "sequence": [
+      "core_hello", "host_select", "pure_invoke", "pure_outcome"
+    ],
+    "expect": {
+      "code": "E1603",
+      "effect_requests_before_failure": 0,
+      "forbid_outside_action": true,
+      "terminal_frames_max": 1
+    },
+    "host_input": [
+      { "step": 0, "direction": "core_to_host", "template": "core_hello" },
+      {
+        "step": 1,
+        "direction": "host_to_core",
+        "template": "host_select",
+        "frame": {
+          "kind": "host_select",
+          "limits": {
+            "max_arguments": 64,
+            "max_collection_items": 1024,
+            "max_diagnostic_bytes": 65536,
+            "max_diagnostics": 32,
+            "max_effect_requests": 1024,
+            "max_effects": 64,
+            "max_frame_bytes": 1048576,
+            "max_host_message_bytes": 4096,
+            "max_json_depth": 64,
+            "max_operations": 256,
+            "max_stderr_bytes": 65536,
+            "max_text_bytes": 262144,
+            "max_value_nodes": 4096
+          },
+          "protocol": "jacquard-host-v0"
+        }
+      },
+      {
+        "step": 2,
+        "direction": "host_to_core",
+        "template": "pure_invoke",
+        "frame": {
+          "arguments": [],
+          "capabilities": { "effects": [], "operations": [] },
+          "interface": {
+            "effects": [],
+            "parameters": [],
+            "result": { "items": [], "kind": "tuple" }
+          },
+          "invocation_id": "0000000000000000",
+          "kind": "invoke",
+          "protocol": "jacquard-host-v0",
+          "target": {
+            "callable": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "kind": "store-term-v0"
+          }
+        }
+      },
+      { "step": 3, "direction": "core_to_host", "template": "pure_outcome" }
+    ],
+    "core_output": [
+      {
+        "carrier": "stdio-u32-json-v0",
+        "kind": "core_hello",
+        "limits": {
+          "max_arguments": 64,
+          "max_collection_items": 1024,
+          "max_diagnostic_bytes": 65536,
+          "max_diagnostics": 32,
+          "max_effect_requests": 1024,
+          "max_effects": 64,
+          "max_frame_bytes": 1048576,
+          "max_host_message_bytes": 4096,
+          "max_json_depth": 64,
+          "max_operations": 256,
+          "max_stderr_bytes": 65536,
+          "max_text_bytes": 262144,
+          "max_value_nodes": 4096
+        },
+        "versions": [ "jacquard-host-v0" ]
+      },
+      {
+        "diagnostics": [
+          {
+            "cause": "The target callable identity must be exactly 64 lowercase hexadecimal digits.",
+            "code": "E1601",
+            "domain": "process",
+            "next_step": "Send one exact UTF-8 JSON object using the frozen jacquard-host-v0 envelope.",
+            "schema": "jacquard-diagnostic-v1",
+            "severity": "error",
+            "span": null,
+            "summary": "The host protocol frame is malformed."
+          }
+        ],
+        "kind": "fatal",
+        "protocol": "jacquard-host-v0"
+      }
+    ],
+    "exit_status": 0,
+    "observed": {
+      "terminal_kind": "fatal",
+      "primary_code": "E1601",
+      "terminal": "fatal",
+      "effect_requests": 0,
+      "terminal_frames": 1,
+      "host_local_refusal": null,
+      "host_inputs_skipped_after_terminal": 0
+    },
+    "prose_drift": [],
+    "status": "diverges"
+  },
+  {
+    "name": "interface-mismatch",
+    "kind": "hostile",
+    "base": "one-once-effect-success",
+    "phase": "invoke",
+    "sequence": [
+      "core_hello", "host_select", "effect_invoke", "effect_request",
+      "effect_ok", "effect_outcome"
+    ],
+    "expect": {
+      "code": "E1603",
+      "effect_requests_before_failure": 0,
+      "forbid_outside_action": true,
+      "terminal_frames_max": 1
+    },
+    "host_input": [
+      { "step": 0, "direction": "core_to_host", "template": "core_hello" },
+      {
+        "step": 1,
+        "direction": "host_to_core",
+        "template": "host_select",
+        "frame": {
+          "kind": "host_select",
+          "limits": {
+            "max_arguments": 64,
+            "max_collection_items": 1024,
+            "max_diagnostic_bytes": 65536,
+            "max_diagnostics": 32,
+            "max_effect_requests": 1024,
+            "max_effects": 64,
+            "max_frame_bytes": 1048576,
+            "max_host_message_bytes": 4096,
+            "max_json_depth": 64,
+            "max_operations": 256,
+            "max_stderr_bytes": 65536,
+            "max_text_bytes": 262144,
+            "max_value_nodes": 4096
+          },
+          "protocol": "jacquard-host-v0"
+        }
+      },
+      {
+        "step": 2,
+        "direction": "host_to_core",
+        "template": "effect_invoke",
+        "frame": {
+          "arguments": [ { "kind": "text", "value": "ping" } ],
+          "capabilities": {
+            "effects": [
+              "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0"
+            ],
+            "operations": [
+              {
+                "effect": "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0",
+                "mode": "once",
+                "operation": "3120a126f44773feba44f437ef0d2514e5e55764e1c0667f6434561f430c5722"
+              }
+            ]
+          },
+          "interface": {
+            "effects": [
+              "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0"
+            ],
+            "parameters": [ { "items": [], "kind": "tuple" } ],
+            "result": {
+              "arguments": [],
+              "identity": "ca456459bd7fbe8c9694388e1246c4333221817248d24707f05b7423828516e3",
+              "kind": "nominal"
+            }
+          },
+          "invocation_id": "0000000000000000",
+          "kind": "invoke",
+          "protocol": "jacquard-host-v0",
+          "target": {
+            "callable": "91d93eb6a5a3390035a17eb4d4ce24cf8e18369e458d0382f17328fd9df303d2",
+            "kind": "store-term-v0"
+          }
+        }
+      },
+      {
+        "step": 3,
+        "direction": "core_to_host",
+        "template": "effect_request"
+      },
+      {
+        "step": 4,
+        "direction": "host_to_core",
+        "template": "effect_ok",
+        "frame": {
+          "invocation_id": "0000000000000000",
+          "kind": "effect_ok",
+          "protocol": "jacquard-host-v0",
+          "request_id": "0000000000000001",
+          "value": { "kind": "text", "value": "pong" }
+        }
+      },
+      {
+        "step": 5,
+        "direction": "core_to_host",
+        "template": "effect_outcome"
+      }
+    ],
+    "core_output": [
+      {
+        "carrier": "stdio-u32-json-v0",
+        "kind": "core_hello",
+        "limits": {
+          "max_arguments": 64,
+          "max_collection_items": 1024,
+          "max_diagnostic_bytes": 65536,
+          "max_diagnostics": 32,
+          "max_effect_requests": 1024,
+          "max_effects": 64,
+          "max_frame_bytes": 1048576,
+          "max_host_message_bytes": 4096,
+          "max_json_depth": 64,
+          "max_operations": 256,
+          "max_stderr_bytes": 65536,
+          "max_text_bytes": 262144,
+          "max_value_nodes": 4096
+        },
+        "versions": [ "jacquard-host-v0" ]
+      },
+      {
+        "diagnostics": [
+          {
+            "cause": "The pinned interface disagrees with the checked target arrow.",
+            "code": "E1603",
+            "domain": "process",
+            "next_step": "Select one complete checked store-term closure and use its exact first-order interface.",
+            "schema": "jacquard-diagnostic-v1",
+            "severity": "error",
+            "span": null,
+            "summary": "The selected Jacquard target or pinned interface is invalid."
+          }
+        ],
+        "kind": "fatal",
+        "protocol": "jacquard-host-v0"
+      }
+    ],
+    "exit_status": 0,
+    "observed": {
+      "terminal_kind": "fatal",
+      "primary_code": "E1603",
+      "terminal": "fatal",
+      "effect_requests": 0,
+      "terminal_frames": 1,
+      "host_local_refusal": null,
+      "host_inputs_skipped_after_terminal": 1
+    },
+    "prose_drift": [],
+    "status": "conforms"
+  },
+  {
+    "name": "unsupported-secret-value",
+    "kind": "hostile",
+    "base": "one-once-effect-success",
+    "phase": "invoke",
+    "sequence": [
+      "core_hello", "host_select", "effect_invoke", "effect_request",
+      "effect_ok", "effect_outcome"
+    ],
+    "expect": {
+      "code": "E1604",
+      "effect_requests_before_failure": 0,
+      "forbid_outside_action": true,
+      "terminal_frames_max": 1
+    },
+    "host_input": [
+      { "step": 0, "direction": "core_to_host", "template": "core_hello" },
+      {
+        "step": 1,
+        "direction": "host_to_core",
+        "template": "host_select",
+        "frame": {
+          "kind": "host_select",
+          "limits": {
+            "max_arguments": 64,
+            "max_collection_items": 1024,
+            "max_diagnostic_bytes": 65536,
+            "max_diagnostics": 32,
+            "max_effect_requests": 1024,
+            "max_effects": 64,
+            "max_frame_bytes": 1048576,
+            "max_host_message_bytes": 4096,
+            "max_json_depth": 64,
+            "max_operations": 256,
+            "max_stderr_bytes": 65536,
+            "max_text_bytes": 262144,
+            "max_value_nodes": 4096
+          },
+          "protocol": "jacquard-host-v0"
+        }
+      },
+      {
+        "step": 2,
+        "direction": "host_to_core",
+        "template": "effect_invoke",
+        "frame": {
+          "arguments": [ { "kind": "secret", "value": "must-not-cross" } ],
+          "capabilities": {
+            "effects": [
+              "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0"
+            ],
+            "operations": [
+              {
+                "effect": "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0",
+                "mode": "once",
+                "operation": "3120a126f44773feba44f437ef0d2514e5e55764e1c0667f6434561f430c5722"
+              }
+            ]
+          },
+          "interface": {
+            "effects": [
+              "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0"
+            ],
+            "parameters": [
+              {
+                "arguments": [],
+                "identity": "ca456459bd7fbe8c9694388e1246c4333221817248d24707f05b7423828516e3",
+                "kind": "nominal"
+              }
+            ],
+            "result": {
+              "arguments": [],
+              "identity": "ca456459bd7fbe8c9694388e1246c4333221817248d24707f05b7423828516e3",
+              "kind": "nominal"
+            }
+          },
+          "invocation_id": "0000000000000000",
+          "kind": "invoke",
+          "protocol": "jacquard-host-v0",
+          "target": {
+            "callable": "91d93eb6a5a3390035a17eb4d4ce24cf8e18369e458d0382f17328fd9df303d2",
+            "kind": "store-term-v0"
+          }
+        }
+      },
+      {
+        "step": 3,
+        "direction": "core_to_host",
+        "template": "effect_request"
+      },
+      {
+        "step": 4,
+        "direction": "host_to_core",
+        "template": "effect_ok",
+        "frame": {
+          "invocation_id": "0000000000000000",
+          "kind": "effect_ok",
+          "protocol": "jacquard-host-v0",
+          "request_id": "0000000000000001",
+          "value": { "kind": "text", "value": "pong" }
+        }
+      },
+      {
+        "step": 5,
+        "direction": "core_to_host",
+        "template": "effect_outcome"
+      }
+    ],
+    "core_output": [
+      {
+        "carrier": "stdio-u32-json-v0",
+        "kind": "core_hello",
+        "limits": {
+          "max_arguments": 64,
+          "max_collection_items": 1024,
+          "max_diagnostic_bytes": 65536,
+          "max_diagnostics": 32,
+          "max_effect_requests": 1024,
+          "max_effects": 64,
+          "max_frame_bytes": 1048576,
+          "max_host_message_bytes": 4096,
+          "max_json_depth": 64,
+          "max_operations": 256,
+          "max_stderr_bytes": 65536,
+          "max_text_bytes": 262144,
+          "max_value_nodes": 4096
+        },
+        "versions": [ "jacquard-host-v0" ]
+      },
+      {
+        "diagnostics": [
+          {
+            "cause": "Boundary value kind \"secret\" is not supported in jacquard-host-v0.",
+            "code": "E1604",
+            "domain": "process",
+            "next_step": "Use only the frozen closed first-order type and lossless value descriptor subset.",
+            "schema": "jacquard-diagnostic-v1",
+            "severity": "error",
+            "span": null,
+            "summary": "A Jacquard type or value is unsupported at the v0 host boundary."
+          }
+        ],
+        "kind": "fatal",
+        "protocol": "jacquard-host-v0"
+      }
+    ],
+    "exit_status": 0,
+    "observed": {
+      "terminal_kind": "fatal",
+      "primary_code": "E1604",
+      "terminal": "fatal",
+      "effect_requests": 0,
+      "terminal_frames": 1,
+      "host_local_refusal": null,
+      "host_inputs_skipped_after_terminal": 1
+    },
+    "prose_drift": [],
+    "status": "conforms"
+  },
+  {
+    "name": "extra-capability",
+    "kind": "hostile",
+    "base": "one-once-effect-success",
+    "phase": "invoke",
+    "sequence": [
+      "core_hello", "host_select", "effect_invoke", "effect_request",
+      "effect_ok", "effect_outcome"
+    ],
+    "expect": {
+      "code": "E1605",
+      "effect_requests_before_failure": 0,
+      "forbid_outside_action": true,
+      "terminal_frames_max": 1
+    },
+    "host_input": [
+      { "step": 0, "direction": "core_to_host", "template": "core_hello" },
+      {
+        "step": 1,
+        "direction": "host_to_core",
+        "template": "host_select",
+        "frame": {
+          "kind": "host_select",
+          "limits": {
+            "max_arguments": 64,
+            "max_collection_items": 1024,
+            "max_diagnostic_bytes": 65536,
+            "max_diagnostics": 32,
+            "max_effect_requests": 1024,
+            "max_effects": 64,
+            "max_frame_bytes": 1048576,
+            "max_host_message_bytes": 4096,
+            "max_json_depth": 64,
+            "max_operations": 256,
+            "max_stderr_bytes": 65536,
+            "max_text_bytes": 262144,
+            "max_value_nodes": 4096
+          },
+          "protocol": "jacquard-host-v0"
+        }
+      },
+      {
+        "step": 2,
+        "direction": "host_to_core",
+        "template": "effect_invoke",
+        "frame": {
+          "arguments": [ { "kind": "text", "value": "ping" } ],
+          "capabilities": {
+            "effects": [
+              "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0",
+              "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+            ],
+            "operations": [
+              {
+                "effect": "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0",
+                "mode": "once",
+                "operation": "3120a126f44773feba44f437ef0d2514e5e55764e1c0667f6434561f430c5722"
+              }
+            ]
+          },
+          "interface": {
+            "effects": [
+              "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0"
+            ],
+            "parameters": [
+              {
+                "arguments": [],
+                "identity": "ca456459bd7fbe8c9694388e1246c4333221817248d24707f05b7423828516e3",
+                "kind": "nominal"
+              }
+            ],
+            "result": {
+              "arguments": [],
+              "identity": "ca456459bd7fbe8c9694388e1246c4333221817248d24707f05b7423828516e3",
+              "kind": "nominal"
+            }
+          },
+          "invocation_id": "0000000000000000",
+          "kind": "invoke",
+          "protocol": "jacquard-host-v0",
+          "target": {
+            "callable": "91d93eb6a5a3390035a17eb4d4ce24cf8e18369e458d0382f17328fd9df303d2",
+            "kind": "store-term-v0"
+          }
+        }
+      },
+      {
+        "step": 3,
+        "direction": "core_to_host",
+        "template": "effect_request"
+      },
+      {
+        "step": 4,
+        "direction": "host_to_core",
+        "template": "effect_ok",
+        "frame": {
+          "invocation_id": "0000000000000000",
+          "kind": "effect_ok",
+          "protocol": "jacquard-host-v0",
+          "request_id": "0000000000000001",
+          "value": { "kind": "text", "value": "pong" }
+        }
+      },
+      {
+        "step": 5,
+        "direction": "core_to_host",
+        "template": "effect_outcome"
+      }
+    ],
+    "core_output": [
+      {
+        "carrier": "stdio-u32-json-v0",
+        "kind": "core_hello",
+        "limits": {
+          "max_arguments": 64,
+          "max_collection_items": 1024,
+          "max_diagnostic_bytes": 65536,
+          "max_diagnostics": 32,
+          "max_effect_requests": 1024,
+          "max_effects": 64,
+          "max_frame_bytes": 1048576,
+          "max_host_message_bytes": 4096,
+          "max_json_depth": 64,
+          "max_operations": 256,
+          "max_stderr_bytes": 65536,
+          "max_text_bytes": 262144,
+          "max_value_nodes": 4096
+        },
+        "versions": [ "jacquard-host-v0" ]
+      },
+      {
+        "diagnostics": [
+          {
+            "cause": "Capability effects do not exactly equal the pinned interface row.",
+            "code": "E1605",
+            "domain": "process",
+            "next_step": "Use the exact checked effect set and a sorted unique registry of its public once operations.",
+            "schema": "jacquard-diagnostic-v1",
+            "severity": "error",
+            "span": null,
+            "summary": "The selected host capability or operation registry is invalid."
+          }
+        ],
+        "kind": "fatal",
+        "protocol": "jacquard-host-v0"
+      }
+    ],
+    "exit_status": 0,
+    "observed": {
+      "terminal_kind": "fatal",
+      "primary_code": "E1605",
+      "terminal": "fatal",
+      "effect_requests": 0,
+      "terminal_frames": 1,
+      "host_local_refusal": null,
+      "host_inputs_skipped_after_terminal": 1
+    },
+    "prose_drift": [],
+    "status": "conforms"
+  },
+  {
+    "name": "multi-operation-registry-entry",
+    "kind": "hostile",
+    "base": "one-once-effect-success",
+    "phase": "invoke",
+    "sequence": [
+      "core_hello", "host_select", "effect_invoke", "effect_request",
+      "effect_ok", "effect_outcome"
+    ],
+    "expect": {
+      "code": "E1605",
+      "effect_requests_before_failure": 0,
+      "forbid_outside_action": true,
+      "terminal_frames_max": 1
+    },
+    "host_input": [
+      { "step": 0, "direction": "core_to_host", "template": "core_hello" },
+      {
+        "step": 1,
+        "direction": "host_to_core",
+        "template": "host_select",
+        "frame": {
+          "kind": "host_select",
+          "limits": {
+            "max_arguments": 64,
+            "max_collection_items": 1024,
+            "max_diagnostic_bytes": 65536,
+            "max_diagnostics": 32,
+            "max_effect_requests": 1024,
+            "max_effects": 64,
+            "max_frame_bytes": 1048576,
+            "max_host_message_bytes": 4096,
+            "max_json_depth": 64,
+            "max_operations": 256,
+            "max_stderr_bytes": 65536,
+            "max_text_bytes": 262144,
+            "max_value_nodes": 4096
+          },
+          "protocol": "jacquard-host-v0"
+        }
+      },
+      {
+        "step": 2,
+        "direction": "host_to_core",
+        "template": "effect_invoke",
+        "frame": {
+          "arguments": [ { "kind": "text", "value": "ping" } ],
+          "capabilities": {
+            "effects": [
+              "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0"
+            ],
+            "operations": [
+              {
+                "effect": "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0",
+                "mode": "multi",
+                "operation": "3120a126f44773feba44f437ef0d2514e5e55764e1c0667f6434561f430c5722"
+              }
+            ]
+          },
+          "interface": {
+            "effects": [
+              "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0"
+            ],
+            "parameters": [
+              {
+                "arguments": [],
+                "identity": "ca456459bd7fbe8c9694388e1246c4333221817248d24707f05b7423828516e3",
+                "kind": "nominal"
+              }
+            ],
+            "result": {
+              "arguments": [],
+              "identity": "ca456459bd7fbe8c9694388e1246c4333221817248d24707f05b7423828516e3",
+              "kind": "nominal"
+            }
+          },
+          "invocation_id": "0000000000000000",
+          "kind": "invoke",
+          "protocol": "jacquard-host-v0",
+          "target": {
+            "callable": "91d93eb6a5a3390035a17eb4d4ce24cf8e18369e458d0382f17328fd9df303d2",
+            "kind": "store-term-v0"
+          }
+        }
+      },
+      {
+        "step": 3,
+        "direction": "core_to_host",
+        "template": "effect_request"
+      },
+      {
+        "step": 4,
+        "direction": "host_to_core",
+        "template": "effect_ok",
+        "frame": {
+          "invocation_id": "0000000000000000",
+          "kind": "effect_ok",
+          "protocol": "jacquard-host-v0",
+          "request_id": "0000000000000001",
+          "value": { "kind": "text", "value": "pong" }
+        }
+      },
+      {
+        "step": 5,
+        "direction": "core_to_host",
+        "template": "effect_outcome"
+      }
+    ],
+    "core_output": [
+      {
+        "carrier": "stdio-u32-json-v0",
+        "kind": "core_hello",
+        "limits": {
+          "max_arguments": 64,
+          "max_collection_items": 1024,
+          "max_diagnostic_bytes": 65536,
+          "max_diagnostics": 32,
+          "max_effect_requests": 1024,
+          "max_effects": 64,
+          "max_frame_bytes": 1048576,
+          "max_host_message_bytes": 4096,
+          "max_json_depth": 64,
+          "max_operations": 256,
+          "max_stderr_bytes": 65536,
+          "max_text_bytes": 262144,
+          "max_value_nodes": 4096
+        },
+        "versions": [ "jacquard-host-v0" ]
+      },
+      {
+        "diagnostics": [
+          {
+            "cause": "A registry entry does not select mode once.",
+            "code": "E1605",
+            "domain": "process",
+            "next_step": "Use the exact checked effect set and a sorted unique registry of its public once operations.",
+            "schema": "jacquard-diagnostic-v1",
+            "severity": "error",
+            "span": null,
+            "summary": "The selected host capability or operation registry is invalid."
+          }
+        ],
+        "kind": "fatal",
+        "protocol": "jacquard-host-v0"
+      }
+    ],
+    "exit_status": 0,
+    "observed": {
+      "terminal_kind": "fatal",
+      "primary_code": "E1605",
+      "terminal": "fatal",
+      "effect_requests": 0,
+      "terminal_frames": 1,
+      "host_local_refusal": null,
+      "host_inputs_skipped_after_terminal": 1
+    },
+    "prose_drift": [],
+    "status": "conforms"
+  },
+  {
+    "name": "unconfigured-root-operation",
+    "kind": "hostile",
+    "base": "one-once-effect-success",
+    "phase": "evaluation",
+    "sequence": [
+      "core_hello", "host_select", "effect_invoke", "effect_request",
+      "effect_ok", "effect_outcome"
+    ],
+    "expect": {
+      "code": "E1606",
+      "effect_requests_before_failure": 0,
+      "forbid_outside_action": true,
+      "terminal_frames_max": 1
+    },
+    "host_input": [
+      { "step": 0, "direction": "core_to_host", "template": "core_hello" },
+      {
+        "step": 1,
+        "direction": "host_to_core",
+        "template": "host_select",
+        "frame": {
+          "kind": "host_select",
+          "limits": {
+            "max_arguments": 64,
+            "max_collection_items": 1024,
+            "max_diagnostic_bytes": 65536,
+            "max_diagnostics": 32,
+            "max_effect_requests": 1024,
+            "max_effects": 64,
+            "max_frame_bytes": 1048576,
+            "max_host_message_bytes": 4096,
+            "max_json_depth": 64,
+            "max_operations": 256,
+            "max_stderr_bytes": 65536,
+            "max_text_bytes": 262144,
+            "max_value_nodes": 4096
+          },
+          "protocol": "jacquard-host-v0"
+        }
+      },
+      {
+        "step": 2,
+        "direction": "host_to_core",
+        "template": "effect_invoke",
+        "frame": {
+          "arguments": [ { "kind": "text", "value": "ping" } ],
+          "capabilities": {
+            "effects": [
+              "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0"
+            ],
+            "operations": []
+          },
+          "interface": {
+            "effects": [
+              "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0"
+            ],
+            "parameters": [
+              {
+                "arguments": [],
+                "identity": "ca456459bd7fbe8c9694388e1246c4333221817248d24707f05b7423828516e3",
+                "kind": "nominal"
+              }
+            ],
+            "result": {
+              "arguments": [],
+              "identity": "ca456459bd7fbe8c9694388e1246c4333221817248d24707f05b7423828516e3",
+              "kind": "nominal"
+            }
+          },
+          "invocation_id": "0000000000000000",
+          "kind": "invoke",
+          "protocol": "jacquard-host-v0",
+          "target": {
+            "callable": "91d93eb6a5a3390035a17eb4d4ce24cf8e18369e458d0382f17328fd9df303d2",
+            "kind": "store-term-v0"
+          }
+        }
+      },
+      {
+        "step": 3,
+        "direction": "core_to_host",
+        "template": "effect_request"
+      },
+      {
+        "step": 4,
+        "direction": "host_to_core",
+        "template": "effect_ok",
+        "frame": {
+          "invocation_id": "0000000000000000",
+          "kind": "effect_ok",
+          "protocol": "jacquard-host-v0",
+          "request_id": "0000000000000001",
+          "value": { "kind": "text", "value": "pong" }
+        }
+      },
+      {
+        "step": 5,
+        "direction": "core_to_host",
+        "template": "effect_outcome"
+      }
+    ],
+    "core_output": [
+      {
+        "carrier": "stdio-u32-json-v0",
+        "kind": "core_hello",
+        "limits": {
+          "max_arguments": 64,
+          "max_collection_items": 1024,
+          "max_diagnostic_bytes": 65536,
+          "max_diagnostics": 32,
+          "max_effect_requests": 1024,
+          "max_effects": 64,
+          "max_frame_bytes": 1048576,
+          "max_host_message_bytes": 4096,
+          "max_json_depth": 64,
+          "max_operations": 256,
+          "max_stderr_bytes": 65536,
+          "max_text_bytes": 262144,
+          "max_value_nodes": 4096
+        },
+        "versions": [ "jacquard-host-v0" ]
+      },
+      {
+        "evidence": {
+          "core": {
+            "capabilities": {
+              "effects": [
+                "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0"
+              ],
+              "operations": []
+            },
+            "effect_requests": [],
+            "interface": {
+              "effects": [
+                "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0"
+              ],
+              "parameters": [
+                {
+                  "arguments": [],
+                  "identity": "ca456459bd7fbe8c9694388e1246c4333221817248d24707f05b7423828516e3",
+                  "kind": "nominal"
+                }
+              ],
+              "result": {
+                "arguments": [],
+                "identity": "ca456459bd7fbe8c9694388e1246c4333221817248d24707f05b7423828516e3",
+                "kind": "nominal"
+              }
+            },
+            "invocation_id": "0000000000000000",
+            "schema": "jacquard-host-core-evidence-v0",
+            "target": {
+              "callable": "91d93eb6a5a3390035a17eb4d4ce24cf8e18369e458d0382f17328fd9df303d2",
+              "kind": "store-term-v0"
+            },
+            "terminal": "diagnostic"
+          },
+          "host_observations": {
+            "responses": [],
+            "schema": "jacquard-host-observations-v0"
+          }
+        },
+        "invocation_id": "0000000000000000",
+        "kind": "outcome",
+        "protocol": "jacquard-host-v0",
+        "result": {
+          "diagnostics": [
+            {
+              "cause": "The root operation is absent from the configured registry.",
+              "code": "E1606",
+              "domain": "process",
+              "next_step": "Configure the exact operation before starting a new invocation.",
+              "schema": "jacquard-diagnostic-v1",
+              "severity": "error",
+              "span": null,
+              "summary": "The root operation has no configured host implementation."
+            }
+          ],
+          "kind": "error"
+        }
+      }
+    ],
+    "exit_status": 0,
+    "observed": {
+      "terminal_kind": "outcome",
+      "primary_code": "E1606",
+      "terminal": "diagnostic",
+      "effect_requests": 0,
+      "terminal_frames": 1,
+      "host_local_refusal": null,
+      "host_inputs_skipped_after_terminal": 1
+    },
+    "prose_drift": [],
+    "status": "conforms"
+  },
+  {
+    "name": "wrong-response-id",
+    "kind": "hostile",
+    "base": "one-once-effect-success",
+    "phase": "effect_response",
+    "sequence": [
+      "core_hello", "host_select", "effect_invoke", "effect_request",
+      "effect_ok", "effect_outcome"
+    ],
+    "expect": {
+      "code": "E1608",
+      "effect_requests_before_failure": 1,
+      "forbid_outside_action": false,
+      "terminal_frames_max": 1
+    },
+    "host_input": [
+      { "step": 0, "direction": "core_to_host", "template": "core_hello" },
+      {
+        "step": 1,
+        "direction": "host_to_core",
+        "template": "host_select",
+        "frame": {
+          "kind": "host_select",
+          "limits": {
+            "max_arguments": 64,
+            "max_collection_items": 1024,
+            "max_diagnostic_bytes": 65536,
+            "max_diagnostics": 32,
+            "max_effect_requests": 1024,
+            "max_effects": 64,
+            "max_frame_bytes": 1048576,
+            "max_host_message_bytes": 4096,
+            "max_json_depth": 64,
+            "max_operations": 256,
+            "max_stderr_bytes": 65536,
+            "max_text_bytes": 262144,
+            "max_value_nodes": 4096
+          },
+          "protocol": "jacquard-host-v0"
+        }
+      },
+      {
+        "step": 2,
+        "direction": "host_to_core",
+        "template": "effect_invoke",
+        "frame": {
+          "arguments": [ { "kind": "text", "value": "ping" } ],
+          "capabilities": {
+            "effects": [
+              "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0"
+            ],
+            "operations": [
+              {
+                "effect": "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0",
+                "mode": "once",
+                "operation": "3120a126f44773feba44f437ef0d2514e5e55764e1c0667f6434561f430c5722"
+              }
+            ]
+          },
+          "interface": {
+            "effects": [
+              "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0"
+            ],
+            "parameters": [
+              {
+                "arguments": [],
+                "identity": "ca456459bd7fbe8c9694388e1246c4333221817248d24707f05b7423828516e3",
+                "kind": "nominal"
+              }
+            ],
+            "result": {
+              "arguments": [],
+              "identity": "ca456459bd7fbe8c9694388e1246c4333221817248d24707f05b7423828516e3",
+              "kind": "nominal"
+            }
+          },
+          "invocation_id": "0000000000000000",
+          "kind": "invoke",
+          "protocol": "jacquard-host-v0",
+          "target": {
+            "callable": "91d93eb6a5a3390035a17eb4d4ce24cf8e18369e458d0382f17328fd9df303d2",
+            "kind": "store-term-v0"
+          }
+        }
+      },
+      {
+        "step": 3,
+        "direction": "core_to_host",
+        "template": "effect_request"
+      },
+      {
+        "step": 4,
+        "direction": "host_to_core",
+        "template": "effect_ok",
+        "frame": {
+          "invocation_id": "0000000000000000",
+          "kind": "effect_ok",
+          "protocol": "jacquard-host-v0",
+          "request_id": "0000000000000002",
+          "value": { "kind": "text", "value": "pong" }
+        }
+      },
+      {
+        "step": 5,
+        "direction": "core_to_host",
+        "template": "effect_outcome"
+      }
+    ],
+    "core_output": [
+      {
+        "carrier": "stdio-u32-json-v0",
+        "kind": "core_hello",
+        "limits": {
+          "max_arguments": 64,
+          "max_collection_items": 1024,
+          "max_diagnostic_bytes": 65536,
+          "max_diagnostics": 32,
+          "max_effect_requests": 1024,
+          "max_effects": 64,
+          "max_frame_bytes": 1048576,
+          "max_host_message_bytes": 4096,
+          "max_json_depth": 64,
+          "max_operations": 256,
+          "max_stderr_bytes": 65536,
+          "max_text_bytes": 262144,
+          "max_value_nodes": 4096
+        },
+        "versions": [ "jacquard-host-v0" ]
+      },
+      {
+        "arguments": [ { "kind": "text", "value": "ping" } ],
+        "effect": "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0",
+        "invocation_id": "0000000000000000",
+        "kind": "effect_request",
+        "mode": "once",
+        "operation": "3120a126f44773feba44f437ef0d2514e5e55764e1c0667f6434561f430c5722",
+        "protocol": "jacquard-host-v0",
+        "request_id": "0000000000000001"
+      },
+      {
+        "evidence": {
+          "core": {
+            "capabilities": {
+              "effects": [
+                "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0"
+              ],
+              "operations": [
+                {
+                  "effect": "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0",
+                  "mode": "once",
+                  "operation": "3120a126f44773feba44f437ef0d2514e5e55764e1c0667f6434561f430c5722"
+                }
+              ]
+            },
+            "effect_requests": [
+              {
+                "effect": "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0",
+                "operation": "3120a126f44773feba44f437ef0d2514e5e55764e1c0667f6434561f430c5722",
+                "ordinal": 1
+              }
+            ],
+            "interface": {
+              "effects": [
+                "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0"
+              ],
+              "parameters": [
+                {
+                  "arguments": [],
+                  "identity": "ca456459bd7fbe8c9694388e1246c4333221817248d24707f05b7423828516e3",
+                  "kind": "nominal"
+                }
+              ],
+              "result": {
+                "arguments": [],
+                "identity": "ca456459bd7fbe8c9694388e1246c4333221817248d24707f05b7423828516e3",
+                "kind": "nominal"
+              }
+            },
+            "invocation_id": "0000000000000000",
+            "schema": "jacquard-host-core-evidence-v0",
+            "target": {
+              "callable": "91d93eb6a5a3390035a17eb4d4ce24cf8e18369e458d0382f17328fd9df303d2",
+              "kind": "store-term-v0"
+            },
+            "terminal": "diagnostic"
+          },
+          "host_observations": {
+            "responses": [],
+            "schema": "jacquard-host-observations-v0"
+          }
+        },
+        "invocation_id": "0000000000000000",
+        "kind": "outcome",
+        "protocol": "jacquard-host-v0",
+        "result": {
+          "diagnostics": [
+            {
+              "cause": "The host response is malformed or disagrees with its checked result type.",
+              "code": "E1608",
+              "domain": "process",
+              "next_step": "Send only the next message permitted by the serial jacquard-host-v0 state machine.",
+              "schema": "jacquard-diagnostic-v1",
+              "severity": "error",
+              "span": null,
+              "summary": "The host protocol message is invalid in the current state."
+            }
+          ],
+          "kind": "error"
+        }
+      }
+    ],
+    "exit_status": 0,
+    "observed": {
+      "terminal_kind": "outcome",
+      "primary_code": "E1608",
+      "terminal": "diagnostic",
+      "effect_requests": 1,
+      "terminal_frames": 1,
+      "host_local_refusal": null,
+      "host_inputs_skipped_after_terminal": 0
+    },
+    "prose_drift": [],
+    "status": "conforms"
+  },
+  {
+    "name": "message-after-outcome",
+    "kind": "hostile",
+    "base": "one-once-effect-success",
+    "phase": "terminal",
+    "sequence": [
+      "core_hello", "host_select", "effect_invoke", "effect_request",
+      "effect_ok", "effect_outcome"
+    ],
+    "expect": {
+      "code": "E1608",
+      "effect_requests_before_failure": 1,
+      "forbid_outside_action": false,
+      "terminal_frames_max": 1
+    },
+    "host_input": [
+      { "step": 0, "direction": "core_to_host", "template": "core_hello" },
+      {
+        "step": 1,
+        "direction": "host_to_core",
+        "template": "host_select",
+        "frame": {
+          "kind": "host_select",
+          "limits": {
+            "max_arguments": 64,
+            "max_collection_items": 1024,
+            "max_diagnostic_bytes": 65536,
+            "max_diagnostics": 32,
+            "max_effect_requests": 1024,
+            "max_effects": 64,
+            "max_frame_bytes": 1048576,
+            "max_host_message_bytes": 4096,
+            "max_json_depth": 64,
+            "max_operations": 256,
+            "max_stderr_bytes": 65536,
+            "max_text_bytes": 262144,
+            "max_value_nodes": 4096
+          },
+          "protocol": "jacquard-host-v0"
+        }
+      },
+      {
+        "step": 2,
+        "direction": "host_to_core",
+        "template": "effect_invoke",
+        "frame": {
+          "arguments": [ { "kind": "text", "value": "ping" } ],
+          "capabilities": {
+            "effects": [
+              "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0"
+            ],
+            "operations": [
+              {
+                "effect": "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0",
+                "mode": "once",
+                "operation": "3120a126f44773feba44f437ef0d2514e5e55764e1c0667f6434561f430c5722"
+              }
+            ]
+          },
+          "interface": {
+            "effects": [
+              "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0"
+            ],
+            "parameters": [
+              {
+                "arguments": [],
+                "identity": "ca456459bd7fbe8c9694388e1246c4333221817248d24707f05b7423828516e3",
+                "kind": "nominal"
+              }
+            ],
+            "result": {
+              "arguments": [],
+              "identity": "ca456459bd7fbe8c9694388e1246c4333221817248d24707f05b7423828516e3",
+              "kind": "nominal"
+            }
+          },
+          "invocation_id": "0000000000000000",
+          "kind": "invoke",
+          "protocol": "jacquard-host-v0",
+          "target": {
+            "callable": "91d93eb6a5a3390035a17eb4d4ce24cf8e18369e458d0382f17328fd9df303d2",
+            "kind": "store-term-v0"
+          }
+        }
+      },
+      {
+        "step": 3,
+        "direction": "core_to_host",
+        "template": "effect_request"
+      },
+      {
+        "step": 4,
+        "direction": "host_to_core",
+        "template": "effect_ok",
+        "frame": {
+          "invocation_id": "0000000000000000",
+          "kind": "effect_ok",
+          "protocol": "jacquard-host-v0",
+          "request_id": "0000000000000001",
+          "value": { "kind": "text", "value": "pong" }
+        }
+      },
+      {
+        "step": 5,
+        "direction": "core_to_host",
+        "template": "effect_outcome"
+      },
+      {
+        "step": 6,
+        "direction": "host_to_core",
+        "template": "late_effect_ok",
+        "frame": {
+          "invocation_id": "0000000000000000",
+          "kind": "effect_ok",
+          "protocol": "jacquard-host-v0",
+          "request_id": "0000000000000001",
+          "value": { "kind": "text", "value": "late" }
+        },
+        "after_terminal": true
+      }
+    ],
+    "core_output": [
+      {
+        "carrier": "stdio-u32-json-v0",
+        "kind": "core_hello",
+        "limits": {
+          "max_arguments": 64,
+          "max_collection_items": 1024,
+          "max_diagnostic_bytes": 65536,
+          "max_diagnostics": 32,
+          "max_effect_requests": 1024,
+          "max_effects": 64,
+          "max_frame_bytes": 1048576,
+          "max_host_message_bytes": 4096,
+          "max_json_depth": 64,
+          "max_operations": 256,
+          "max_stderr_bytes": 65536,
+          "max_text_bytes": 262144,
+          "max_value_nodes": 4096
+        },
+        "versions": [ "jacquard-host-v0" ]
+      },
+      {
+        "arguments": [ { "kind": "text", "value": "ping" } ],
+        "effect": "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0",
+        "invocation_id": "0000000000000000",
+        "kind": "effect_request",
+        "mode": "once",
+        "operation": "3120a126f44773feba44f437ef0d2514e5e55764e1c0667f6434561f430c5722",
+        "protocol": "jacquard-host-v0",
+        "request_id": "0000000000000001"
+      },
+      {
+        "evidence": {
+          "core": {
+            "capabilities": {
+              "effects": [
+                "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0"
+              ],
+              "operations": [
+                {
+                  "effect": "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0",
+                  "mode": "once",
+                  "operation": "3120a126f44773feba44f437ef0d2514e5e55764e1c0667f6434561f430c5722"
+                }
+              ]
+            },
+            "effect_requests": [
+              {
+                "effect": "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0",
+                "operation": "3120a126f44773feba44f437ef0d2514e5e55764e1c0667f6434561f430c5722",
+                "ordinal": 1
+              }
+            ],
+            "interface": {
+              "effects": [
+                "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0"
+              ],
+              "parameters": [
+                {
+                  "arguments": [],
+                  "identity": "ca456459bd7fbe8c9694388e1246c4333221817248d24707f05b7423828516e3",
+                  "kind": "nominal"
+                }
+              ],
+              "result": {
+                "arguments": [],
+                "identity": "ca456459bd7fbe8c9694388e1246c4333221817248d24707f05b7423828516e3",
+                "kind": "nominal"
+              }
+            },
+            "invocation_id": "0000000000000000",
+            "schema": "jacquard-host-core-evidence-v0",
+            "target": {
+              "callable": "91d93eb6a5a3390035a17eb4d4ce24cf8e18369e458d0382f17328fd9df303d2",
+              "kind": "store-term-v0"
+            },
+            "terminal": "ok"
+          },
+          "host_observations": {
+            "responses": [
+              { "category": "ok", "completion": "completed", "ordinal": 1 }
+            ],
+            "schema": "jacquard-host-observations-v0"
+          }
+        },
+        "invocation_id": "0000000000000000",
+        "kind": "outcome",
+        "protocol": "jacquard-host-v0",
+        "result": {
+          "kind": "ok",
+          "value": { "kind": "text", "value": "pong" }
+        }
+      }
+    ],
+    "exit_status": 0,
+    "observed": {
+      "terminal_kind": "outcome",
+      "primary_code": null,
+      "terminal": "ok",
+      "effect_requests": 1,
+      "terminal_frames": 1,
+      "host_local_refusal": "E1608",
+      "host_inputs_skipped_after_terminal": 0
+    },
+    "prose_drift": [],
+    "status": "conforms"
+  },
+  {
+    "name": "truncated-length-prefix",
+    "kind": "hostile",
+    "base": "pure-success",
+    "phase": "framing",
+    "sequence": [
+      "core_hello", "host_select", "pure_invoke", "pure_outcome"
+    ],
+    "expect": {
+      "code": "E1611",
+      "effect_requests_before_failure": 0,
+      "forbid_outside_action": true,
+      "terminal_frames_max": 1
+    },
+    "host_input": [
+      { "step": 0, "direction": "core_to_host", "template": "core_hello" },
+      { "step": 1, "direction": "host_to_core", "raw_hex": "0000" },
+      {
+        "step": 2,
+        "direction": "host_to_core",
+        "template": "pure_invoke",
+        "frame": {
+          "arguments": [],
+          "capabilities": { "effects": [], "operations": [] },
+          "interface": {
+            "effects": [],
+            "parameters": [],
+            "result": { "items": [], "kind": "tuple" }
+          },
+          "invocation_id": "0000000000000000",
+          "kind": "invoke",
+          "protocol": "jacquard-host-v0",
+          "target": {
+            "callable": "2af2f2e66770cf0597374a97b4c3988dc0c3f9b42d87f6f430be53525ce6a7ec",
+            "kind": "store-term-v0"
+          }
+        }
+      },
+      { "step": 3, "direction": "core_to_host", "template": "pure_outcome" }
+    ],
+    "core_output": [
+      {
+        "carrier": "stdio-u32-json-v0",
+        "kind": "core_hello",
+        "limits": {
+          "max_arguments": 64,
+          "max_collection_items": 1024,
+          "max_diagnostic_bytes": 65536,
+          "max_diagnostics": 32,
+          "max_effect_requests": 1024,
+          "max_effects": 64,
+          "max_frame_bytes": 1048576,
+          "max_host_message_bytes": 4096,
+          "max_json_depth": 64,
+          "max_operations": 256,
+          "max_stderr_bytes": 65536,
+          "max_text_bytes": 262144,
+          "max_value_nodes": 4096
+        },
+        "versions": [ "jacquard-host-v0" ]
+      },
+      {
+        "diagnostics": [
+          {
+            "cause": "The carrier ended before the declared frame completed.",
+            "code": "E1611",
+            "domain": "process",
+            "next_step": "Treat the missing terminal exchange as host-owned carrier-failure evidence.",
+            "schema": "jacquard-diagnostic-v1",
+            "severity": "error",
+            "span": null,
+            "summary": "The host carrier was lost before a trustworthy frame completed."
+          }
+        ],
+        "kind": "fatal",
+        "protocol": "jacquard-host-v0"
+      }
+    ],
+    "exit_status": 74,
+    "observed": {
+      "terminal_kind": "fatal",
+      "primary_code": "E1611",
+      "terminal": "fatal",
+      "effect_requests": 0,
+      "terminal_frames": 1,
+      "host_local_refusal": null,
+      "host_inputs_skipped_after_terminal": 0
+    },
+    "prose_drift": [],
+    "status": "conforms"
+  },
+  {
+    "name": "truncated-frame-payload",
+    "kind": "hostile",
+    "base": "pure-success",
+    "phase": "framing",
+    "sequence": [
+      "core_hello", "host_select", "pure_invoke", "pure_outcome"
+    ],
+    "expect": {
+      "code": "E1611",
+      "effect_requests_before_failure": 0,
+      "forbid_outside_action": true,
+      "terminal_frames_max": 1
+    },
+    "host_input": [
+      { "step": 0, "direction": "core_to_host", "template": "core_hello" },
+      { "step": 1, "direction": "host_to_core", "raw_hex": "000000057b7d" },
+      {
+        "step": 2,
+        "direction": "host_to_core",
+        "template": "pure_invoke",
+        "frame": {
+          "arguments": [],
+          "capabilities": { "effects": [], "operations": [] },
+          "interface": {
+            "effects": [],
+            "parameters": [],
+            "result": { "items": [], "kind": "tuple" }
+          },
+          "invocation_id": "0000000000000000",
+          "kind": "invoke",
+          "protocol": "jacquard-host-v0",
+          "target": {
+            "callable": "2af2f2e66770cf0597374a97b4c3988dc0c3f9b42d87f6f430be53525ce6a7ec",
+            "kind": "store-term-v0"
+          }
+        }
+      },
+      { "step": 3, "direction": "core_to_host", "template": "pure_outcome" }
+    ],
+    "core_output": [
+      {
+        "carrier": "stdio-u32-json-v0",
+        "kind": "core_hello",
+        "limits": {
+          "max_arguments": 64,
+          "max_collection_items": 1024,
+          "max_diagnostic_bytes": 65536,
+          "max_diagnostics": 32,
+          "max_effect_requests": 1024,
+          "max_effects": 64,
+          "max_frame_bytes": 1048576,
+          "max_host_message_bytes": 4096,
+          "max_json_depth": 64,
+          "max_operations": 256,
+          "max_stderr_bytes": 65536,
+          "max_text_bytes": 262144,
+          "max_value_nodes": 4096
+        },
+        "versions": [ "jacquard-host-v0" ]
+      },
+      {
+        "diagnostics": [
+          {
+            "cause": "The carrier ended before the declared frame completed.",
+            "code": "E1611",
+            "domain": "process",
+            "next_step": "Treat the missing terminal exchange as host-owned carrier-failure evidence.",
+            "schema": "jacquard-diagnostic-v1",
+            "severity": "error",
+            "span": null,
+            "summary": "The host carrier was lost before a trustworthy frame completed."
+          }
+        ],
+        "kind": "fatal",
+        "protocol": "jacquard-host-v0"
+      }
+    ],
+    "exit_status": 74,
+    "observed": {
+      "terminal_kind": "fatal",
+      "primary_code": "E1611",
+      "terminal": "fatal",
+      "effect_requests": 0,
+      "terminal_frames": 1,
+      "host_local_refusal": null,
+      "host_inputs_skipped_after_terminal": 0
+    },
+    "prose_drift": [],
+    "status": "conforms"
+  }
+]

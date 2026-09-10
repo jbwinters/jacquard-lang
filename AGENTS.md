@@ -125,7 +125,10 @@ When adding valid corpus files, regenerate the golden hashes with
   accounting: `Host_protocol_v0.Session`, `test/test_host_session.ml`, and
   `docs/host-session-v0.md`. The opt-in serial carrier `jac host worker`:
   `src/host_worker.ml`, `test/test_host_worker.ml`, `test/cli/host-worker.t`,
-  and `docs/host-worker-v0.md`. Existing evaluator capture and host-readiness
+  and `docs/host-worker-v0.md`. The executable conformance kit and its fake
+  host: `spec/host-protocol-v0/kit/`, `test/host_kit.ml`,
+  `test/test_host_kit.ml`, regenerated with `dune exec test/gen_host_kit.exe`.
+  Existing evaluator capture and host-readiness
   modules are internal seams, not a public ABI; adapters and application
   servers belong outside this repository.
 - Dist and inference: `prelude/06-dist.jqd`, `prelude/13-dist-lib.jqd`,

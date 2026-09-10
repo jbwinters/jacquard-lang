@@ -32,7 +32,7 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1007`
+- Alcotest/QCheck cases: `1014`
 - Cram transcript files: `61`
 - Documentation examples: `28` named examples across `8` documents
 
@@ -104,5 +104,13 @@ the current source inventory to `1007 / 61 / 28`. It covers the full
 `stdio-u32-json-v0` lifetime against a reopened store: pure and effectful
 invocations, every frozen host-failure and cancellation mapping, preflight
 fatals, stale and malformed responses, carrier loss, the selected stderr
-ceiling, descriptor ownership, and exit statuses. No cross-language conformance
-kit is published until HB.3. See [the worker contract](../../host-worker-v0.md).
+ceiling, descriptor ownership, and exit statuses. See
+[the worker contract](../../host-worker-v0.md).
+
+The HB.3 conformance kit adds 7 cases, bringing the current source inventory
+to `1014 / 61 / 28`. It installs the kit fixtures with the published recipe,
+binds every synthetic HB.1 vector identity to a real store member, replays all
+21 vector transcripts and all 13 terminal mappings through the installed
+worker with a deterministic fake host, and fails on any divergence that is not
+an explicitly recorded pending decision. See
+[the kit README](../../../spec/host-protocol-v0/kit/README.md).
