@@ -352,9 +352,16 @@ and lower_expr_node ?(quote_depth = 0) (expr : Surface_ast.expr) : (Kernel.expr,
       Ok Kernel.{ it = Match (condition, clauses); meta = Meta.with_surface_form "if" expr.meta }
   | Surface_ast.List items -> (
       let* items = map_results (lower_expr_node ~quote_depth) items in
+      (* Generated interior nodes descend from the list expression's metadata, but a call-site
+         label or argument container belongs only to the whole list: an interior `cons` or `nil`
+         must never present the enclosing argument's label to the list constructor's own ABI. *)
       let internal_meta ~form meta =
         let* meta = generated_single_meta ~form meta in
-        Ok (Meta.without_surface_container "list" meta)
+        Ok
+          (meta
+          |> Meta.without_surface_container "list"
+          |> Meta.without_surface_container "call-argument"
+          |> Meta.without_surface_call_label)
       in
       let* nil_meta = internal_meta ~form:"list-nil" expr.meta in
       let nil_meta =

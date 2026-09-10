@@ -231,6 +231,11 @@ let surface_call_label t =
 (** [with_surface_call_label label t] records one explicit callable ABI or call-site label. *)
 let with_surface_call_label label t = add key_surface_call_label (Sym label) t
 
+(** [without_surface_call_label t] removes a call-site label. Lowering uses it when it derives the
+    metadata of a generated child node from a labeled argument, so the label stays on the argument
+    itself and never selects a slot of the generated callee. *)
+let without_surface_call_label t = remove key_surface_call_label t
+
 (** [is_surface_reference t] is true only for a bare reference authored in `.jac`. Recovery and
     diagnostics use this hash-excluded marker to distinguish source references from bootstrap
     [(var ...)] nodes without changing resolution or identity. *)

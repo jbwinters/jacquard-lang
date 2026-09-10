@@ -124,3 +124,35 @@ Named calls and purpose-specific sum types avoid these review warnings.
   $ jac check warning-free.jac > warning-free.out 2>&1
   $ grep -c 'warning\[W120[67]\]' warning-free.out || true
   0
+
+List literals are ordinary labeled arguments. The label stays on the whole list and never on the
+generated `cons`/`nil` nodes, so constructors, functions, nesting, reordering, and empty lists
+resolve; a labeled call keeps the positional call's identity and behavior in both engines.
+
+  $ cat > named-lists.jac <<'EOF'
+  > type ListBucket = | ListBucket(values: List Int)
+  > both(count: n, items: xs) = (n, xs)
+  > (
+  >   ListBucket(values: [1, 2]),
+  >   both(items: [{ print("I"); 1 }], count: { print("C"); 2 }),
+  >   both(count: 0, items: []),
+  >   both(count: 3, items: [[1], [2, 3]]),
+  > )
+  > EOF
+  $ jac run named-lists.jac --allow console > lists-interpreted.out
+  $ jac build named-lists.jac -o named-lists-native > /dev/null
+  $ ./named-lists-native --allow console > lists-native.out
+  $ cmp lists-interpreted.out lists-native.out && echo identical
+  identical
+  $ cat lists-interpreted.out
+  IC(list-bucket(cons(1, cons(2, nil))), (2, cons(1, nil)), (0, nil), (3, cons(cons(1, nil), cons(cons(2, cons(3, nil)), nil))))
+  $ jac fmt named-lists.jac > named-lists-formatted.jac
+  $ jac fmt named-lists-formatted.jac > named-lists-twice.jac
+  $ cmp named-lists-formatted.jac named-lists-twice.jac && grep -c 'items:' named-lists-formatted.jac
+  4
+  $ printf 'type ListBucket = | ListBucket(values: List Int)\nListBucket([1, 2])\n' > positional-list.jac
+  $ printf 'type ListBucket = | ListBucket(values: List Int)\nListBucket(values: [1, 2])\n' > labeled-list.jac
+  $ jac hash positional-list.jac > positional-list.hash
+  $ jac hash labeled-list.jac > labeled-list.hash
+  $ cmp positional-list.hash labeled-list.hash && echo hash-identical
+  hash-identical
