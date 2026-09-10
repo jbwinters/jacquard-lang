@@ -684,6 +684,10 @@ and lower_app ctx env ~tail (f : Kernel.expr) (args : Kernel.expr list) (k : ato
   in
   if List.length args > 8 && not variadic_intrinsic then
     refuse ctx "applies more than 8 arguments (native v1 arity cap)";
+  (* The variadic count travels as a uint16_t in the runtime signature; publish that width
+     as a refusal instead of letting the generated C truncate it. *)
+  if variadic_intrinsic && List.length args > 65535 then
+    refuse ctx "applies more than 65535 variadic arguments (native v1 count width)";
   let with_args k' = lower_list ctx env args k' in
   let bind_call bound =
     let r = fresh ctx "r" in

@@ -101,6 +101,14 @@ finish-once accounting, and bounded evidence. See
 
 
 
+The opt-in serial host worker adds 23 cases and one CLI transcript, bringing
+the current source inventory to `1007 / 61 / 28`. It covers the full
+`stdio-u32-json-v0` lifetime against a reopened store: pure and effectful
+invocations, every frozen host-failure and cancellation mapping, preflight
+fatals, stale and malformed responses, carrier loss, the selected stderr
+ceiling, descriptor ownership, and exit statuses. No cross-language conformance
+kit is published until HB.3. See [the worker contract](../../host-worker-v0.md).
+
 The native backend's eight-argument cap now applies only to the fixed calling
 convention: a variadic intrinsic applied directly, which is what marked
 interpolation lowers to, receives an array and a count, so an ordinary report
@@ -157,3 +165,4 @@ build. Pinned by the gauntlet twin `g42-text-literal-patterns.jqd`, which
 the leak lane (`scripts/native-leak-check.sh`) builds and runs under gcc, and
 by the text-pattern block of `test/cli/native.t` (clang); the inventory is
 unchanged.
+
