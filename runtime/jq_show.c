@@ -82,6 +82,16 @@ static void add_real_repr(jq_buf *b, double r) {
   if (!strpbrk(cand, ".eE")) buf_adds(b, ".0");
 }
 
+/* text.from-real: the same spelling as Value.show / Printer.real_repr, as a
+ * fresh TEXT block (from-real/to-real round-trips bit-exactly). */
+jq_value jq_text_of_real(double r) {
+  jq_buf b = { 0 };
+  add_real_repr(&b, r);
+  jq_value t = jq_text((const uint8_t *)(b.data ? b.data : ""), (uint64_t)b.len);
+  free(b.data);
+  return t;
+}
+
 /* Printer.escape_text: quote, backslash, \n \t \r, \xNN for other control
  * bytes and 0x7f; everything else (including non-ASCII bytes) verbatim. */
 static void add_escaped_text(jq_buf *b, const uint8_t *s, uint64_t n) {

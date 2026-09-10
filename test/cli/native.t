@@ -579,3 +579,53 @@ time instead of being truncated, and no binary is written:
   refused
   $ test -e wide-join || echo no-binary
   no-binary
+
+The everyday Text conversions and queries (APP.5): to-int/to-real follow the
+reader's numeric atom grammar (63-bit overflow is `none`), contains? accepts an
+empty needle, slice is codepoint-indexed and clamped, and from-real uses the
+printer's spelling; the kernel twin g44-text-primitives.jqd pins the full edge
+set under both compilers:
+
+  $ cat > textprim.jqd <<'EOF_JQD'
+  > (tuple
+  >   (app (var text.to-int) (lit "4611686018427387904"))
+  >   (app (var text.to-int) (lit "-007"))
+  >   (app (var text.to-real) (lit "1e3"))
+  >   (app (var text.contains?) (lit "日本語") (lit ""))
+  >   (app (var text.slice) (lit "héllo") (lit 1) (lit 99))
+  >   (app (var text.from-real) (lit 1e21)))
+  > EOF_JQD
+  $ jacquard build textprim.jqd -o textprim > /dev/null
+  $ jacquard run textprim.jqd > i.out 2>&1; echo "exit $?"
+  exit 0
+  $ ./textprim > n.out 2>&1; echo "exit $?"
+  exit 0
+  $ cat n.out
+  (none, some(-7), some(1000.0), true, "éllo", "1e+21")
+  $ diff i.out n.out && echo identical
+  identical
+
+Ordinary numeric input needs no application parser: a surface program reads
+stdin lines and converts them with the library's own `text.to-int` and
+`text.to-real`, natively and under the interpreter alike.
+
+  $ cat > numeric-input.jac <<'JACQUARD'
+  > parse(line) = match text.to-int(text.trim(line)) {
+  >   | Some(n) -> $"{text.from-int(add(n, 1))}"
+  >   | None -> match text.to-real(text.trim(line)) {
+  >     | Some(r) -> text.from-real(real.mul(r, 2.0))
+  >     | None -> $"not a number: {line}"
+  >   }
+  > }
+  > (parse(read-line()), parse(read-line()), parse(read-line()), parse(read-line()))
+  > JACQUARD
+  $ printf ' 41\n-2.5e-1\n4611686018427387904\nabc\n' > numeric-input.txt
+  $ jacquard run numeric-input.jac --allow console < numeric-input.txt > numin-i.out 2>&1; echo "exit $?"
+  exit 0
+  $ jacquard build numeric-input.jac -o numeric-input > /dev/null
+  $ ./numeric-input --allow console < numeric-input.txt > numin-n.out 2>&1; echo "exit $?"
+  exit 0
+  $ cat numin-n.out
+  ("42", "-0.5", "not a number: 4611686018427387904", "not a number: abc")
+  $ diff numin-i.out numin-n.out && echo identical
+  identical

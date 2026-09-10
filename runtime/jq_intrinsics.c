@@ -11,6 +11,7 @@
 
 #include "jq_value.h"
 
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -138,6 +139,7 @@ jq_value jq_i_text_length(jq_rt *rt, const jq_value *a) {
 static void type_err_args(const char *name, const jq_value *a, uint16_t n)
     __attribute__((noreturn));
 static bool is_con_named(jq_value v, const char *name);
+static jq_value vsome(jq_rt *rt, jq_value v);
 
 jq_value jq_i_text_concat(jq_rt *rt, const jq_value *a) {
   (void)rt;
@@ -338,6 +340,140 @@ jq_value jq_i_text_split(jq_rt *rt, const jq_value *a) {
   jq_drop(a[0]);
   jq_drop(a[1]);
   return list;
+}
+
+/* --- APP.5 (task 242): the everyday Text conversions and queries the four
+ * applications reach, ported exactly from Prelude (src/prelude.ml). --- */
+
+/* Reader.classify_literal: the unquoted numeric atom grammar. Returns 0 for
+ * "not a number", 1 for an int in the 63-bit range, 2 for a real, 3 for an
+ * int spelling that overflows OCaml's 63-bit range. */
+static int classify_number(const uint8_t *s, uint64_t n, int64_t *out_i, double *out_d) {
+  if (n == 6 && memcmp(s, "+inf.0", 6) == 0) { *out_d = INFINITY; return 2; }
+  if (n == 6 && memcmp(s, "-inf.0", 6) == 0) { *out_d = -INFINITY; return 2; }
+  if (n == 6 && (memcmp(s, "+nan.0", 6) == 0 || memcmp(s, "-nan.0", 6) == 0)) {
+    *out_d = NAN;
+    return 2;
+  }
+  if (n == 0) return 0;
+  uint64_t start = (s[0] == '+' || s[0] == '-') ? 1 : 0;
+  if (start == n) return 0;
+  bool is_real = false;
+  for (uint64_t k = start; k < n; k++)
+    if (s[k] == '.' || s[k] == 'e' || s[k] == 'E') is_real = true;
+  /* shape: digits [ '.' digits* ] [ ('e'|'E') ['+'|'-'] digits+ ] */
+  uint64_t i = start;
+  uint64_t d0 = i;
+  while (i < n && s[i] >= '0' && s[i] <= '9') i++;
+  bool ok = i > d0;
+  if (ok && i < n && s[i] == '.') {
+    i++;
+    while (i < n && s[i] >= '0' && s[i] <= '9') i++;
+  }
+  if (ok && i < n && (s[i] == 'e' || s[i] == 'E')) {
+    i++;
+    if (i < n && (s[i] == '+' || s[i] == '-')) i++;
+    uint64_t e0 = i;
+    while (i < n && s[i] >= '0' && s[i] <= '9') i++;
+    ok = i > e0;
+  }
+  if (!ok || i != n) return 0;
+  if (is_real) {
+    char *copy = malloc(n + 1);
+    if (!copy) jq_runtime_error("jacquard runtime: out of memory");
+    memcpy(copy, s, n);
+    copy[n] = 0;
+    char *end = NULL;
+    double d = strtod(copy, &end);
+    bool whole = end == copy + n;
+    free(copy);
+    if (!whole) return 0;
+    *out_d = d;
+    return 2;
+  }
+  /* decimal int with optional sign, checked against OCaml's 63-bit range:
+     int_of_string accepts up to 4611686018427387903 and down to -4611686018427387904 */
+  bool negative = s[0] == '-';
+  uint64_t magnitude = 0;
+  const uint64_t limit = negative ? 4611686018427387904ULL : 4611686018427387903ULL;
+  for (uint64_t k = start; k < n; k++) {
+    uint64_t digit = (uint64_t)(s[k] - '0');
+    if (magnitude > (limit - digit) / 10) return 3;
+    magnitude = magnitude * 10 + digit;
+  }
+  *out_i = negative ? -(int64_t)magnitude : (int64_t)magnitude;
+  return 1;
+}
+
+jq_value jq_i_text_to_int(jq_rt *rt, const jq_value *a) {
+  if (!is_text(a[0])) type_err_args("text.to-int", a, 1);
+  int64_t i = 0;
+  double d = 0;
+  int kind = classify_number(jq_text_bytes(a[0]), jq_text_len(a[0]), &i, &d);
+  jq_drop(a[0]);
+  return kind == 1 ? vsome(rt, jq_int(i)) : rt->v_none;
+}
+
+jq_value jq_i_text_to_real(jq_rt *rt, const jq_value *a) {
+  if (!is_text(a[0])) type_err_args("text.to-real", a, 1);
+  int64_t i = 0;
+  double d = 0;
+  int kind = classify_number(jq_text_bytes(a[0]), jq_text_len(a[0]), &i, &d);
+  jq_drop(a[0]);
+  if (kind == 2) return vsome(rt, jq_real(d));
+  if (kind == 1) return vsome(rt, jq_real((double)i));
+  return rt->v_none;
+}
+
+jq_value jq_i_text_from_real(jq_rt *rt, const jq_value *a) {
+  (void)rt;
+  if (!is_real(a[0])) type_err_args("text.from-real", a, 1);
+  jq_value r = jq_text_of_real(jq_real_val(a[0]));
+  jq_drop(a[0]);
+  return r;
+}
+
+/* text.contains?: naive left-to-right substring scan; an empty needle is
+ * always contained (Prelude's `sub = "" || go 0`). */
+jq_value jq_i_text_contains_q(jq_rt *rt, const jq_value *a) {
+  if (!is_text(a[0]) || !is_text(a[1])) type_err_args("text.contains?", a, 2);
+  const uint8_t *s = jq_text_bytes(a[0]);
+  uint64_t n = jq_text_len(a[0]);
+  const uint8_t *sub = jq_text_bytes(a[1]);
+  uint64_t m = jq_text_len(a[1]);
+  bool found = m == 0;
+  for (uint64_t i = 0; !found && m <= n && i <= n - m; i++)
+    if (memcmp(s + i, sub, m) == 0) found = true;
+  jq_drop(a[0]);
+  jq_drop(a[1]);
+  return vbool(rt, found);
+}
+
+/* text.slice: codepoint-indexed [a, b) clamped to [0, length]; a >= b is "". */
+jq_value jq_i_text_slice(jq_rt *rt, const jq_value *a) {
+  (void)rt;
+  if (!is_text(a[0]) || !jq_is_int(a[1]) || !jq_is_int(a[2])) type_err_args("text.slice", a, 3);
+  const uint8_t *s = jq_text_bytes(a[0]);
+  uint64_t n = jq_text_len(a[0]);
+  int64_t len = (int64_t)jq_utf8_count(s, n);
+  int64_t lo = jq_int_val(a[1]), hi = jq_int_val(a[2]);
+  if (lo < 0) lo = 0;
+  if (lo > len) lo = len;
+  if (hi < 0) hi = 0;
+  if (hi > len) hi = len;
+  jq_value r;
+  if (lo >= hi) r = jq_text((const uint8_t *)"", 0);
+  else {
+    uint64_t offset = 0, start = 0, stop = 0;
+    for (int64_t cp = 0; cp < hi; cp++) {
+      if (cp == lo) start = offset;
+      offset += jq_utf8_width(s, n, offset);
+    }
+    stop = offset;
+    r = jq_text(s + start, stop - start);
+  }
+  jq_drop(a[0]);
+  return r;
 }
 
 jq_value jq_i_text_empty_q(jq_rt *rt, const jq_value *a) {

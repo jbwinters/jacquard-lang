@@ -158,3 +158,17 @@ evaluated once in order, and the original rota report line); the inventory is
 unchanged. Applying such a builtin as a value remains capped, and a direct
 variadic application of more than 65535 arguments, beyond the runtime's 16-bit
 count, is refused at build time with E1101 rather than truncated.
+
+The native text primitives repair (APP.5) adds one kernel gauntlet twin and one
+CLI transcript block, leaving the OCaml case count unchanged. `text.to-int`,
+`text.to-real`, `text.from-real`, `text.contains?`, and `text.slice` now compile
+natively with the interpreter's contracts: the reader's numeric atom grammar
+(optional sign, leading zeros, `digits[.digits][e[+-]digits]`, the Scheme
+non-finite spellings, 63-bit overflow to `none`), an always-contained empty
+needle, codepoint-indexed clamped slices, and the printer's shortest round-trip
+real spelling. The twin prints byte-identically under the interpreter, `clang`,
+and `gcc`; see [the support matrix](../../native-intrinsics.md). The
+`test/cli/native.t` block also reads numbers from real stdin in a surface
+program without an application parser. One pinned refusal changed on purpose:
+`test/cli/export.t`'s Preflight fixture is still refused by both carriers, now
+for dynamic eval alone (E1102), because its `text.contains?` call compiles.

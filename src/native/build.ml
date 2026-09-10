@@ -45,6 +45,11 @@ let intrinsics : (string * int) list =
     ("text.split", 2);
     ("text.empty?", 1);
     ("text.from-int", 1);
+    ("text.to-int", 1);
+    ("text.to-real", 1);
+    ("text.from-real", 1);
+    ("text.contains?", 2);
+    ("text.slice", 3);
     ("support", 1);
     ("pmf", 2);
     ("dist.sample-lw", 3);

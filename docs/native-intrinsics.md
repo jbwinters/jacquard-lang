@@ -29,13 +29,13 @@ public name index changes.
 | text.join marker (`text.join-list`) | 2 | yes | deprecated pre-SS.22 `(List Text, Text)` compatibility object; historical hash and marker retained |
 | text.join-variadic-v1 marker (`text.join`) | 0-8 | yes | distinct homogeneous variadic Text concatenation object; native v1 application cap |
 | text-compare | 2 | yes | bytewise + length tiebreak |
-| text.slice | 3 | not yet | needs boundary walk; next slice batch |
+| text.slice | 3 | yes | APP.5; codepoint-indexed `[a, b)` clamped to the text, walked with jq_utf8_width |
 | text.trim, text.split | 1/2 | yes | task 70 (word-count reaches them); ASCII trim, empty pieces kept |
-| text.contains? | 2 | not yet | |
+| text.contains? | 2 | yes | APP.5; byte substring scan, empty needle always contained |
 | text.empty? | 1 | yes | task 70 |
 | text.from-int | 1 | yes | task 70; plain text result |
 | code.eq? | 2 | yes | task 73; metadata-erased equality, OCaml real compare (nan = nan) |
-| text.to-int, text.to-real, text.from-real | 1 | not yet | option results |
+| text.to-int, text.to-real, text.from-real | 1 | yes | APP.5; the reader's numeric atom grammar ported (`Reader.classify_literal`: optional sign, `digits[.digits][e[+-]digits]`, Scheme `+inf.0`/`-inf.0`/`+nan.0`), 63-bit overflow → `none`, ints accepted by `to-real`; `from-real` shares `jq_show`'s real spelling |
 | code.form, code.un-form, code.of-int, code.of-real, code.to-int | 2/1/1/1/1 | yes | task 73 plus ET.2 real-form support; head grammar validated, un-form splits all-form args only; runtime-built forms cap at 32767 args (uint16 representation, clean abort) |
 | code.of-text, code.of-hash, code.to-text, code.render, code.diff | 1/1/1/1/2 | yes | ET.2 adds typed scalar construction and the deterministic compact renderer; diff renders smallest disagreeing subtrees over the same ported inline printer |
 | code.hash | 1 | yes | ET.6 applies HASH_V0 to the same metadata-erased canonical compact Code bytes as `code.render`; interpreter/native parity is pinned by g37 |
