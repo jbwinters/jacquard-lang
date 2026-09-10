@@ -2986,6 +2986,24 @@ let build_cmd file out prelude dry_run syntax =
                         | Error (`Toolchain m) -> print_diags [ cli_diagnostic ~code:"E1103" m ]))))
         )
 
+(* --- host worker (HB.2c) --- *)
+
+let host_worker_cmd store_dir =
+  if not (Sys.file_exists store_dir && Sys.is_directory store_dir) then
+    print_diags
+      [ cli_diagnostic ~code:"E0606" (Printf.sprintf "store %s does not exist" store_dir) ]
+  else
+    match Store.open_store store_dir with
+    | Error ds -> print_diags ds
+    | Ok store -> (
+        match Host_worker.prepare store with
+        | Error ds -> print_diags ds
+        | Ok prepared ->
+            set_binary_mode_in stdin true;
+            set_binary_mode_out stdout true;
+            Host_worker.exit_code
+              (Host_worker.serve prepared ~input:stdin ~output:stdout ~operator:stderr))
+
 let out_arg =
   Arg.(required & opt (some string) None & info [ "o"; "output" ] ~docv:"OUT" ~doc:"Output path.")
 
@@ -3020,6 +3038,29 @@ let tiers_t =
     Term.(
       const (configure_diagnostics tiers_cmd) $ diagnostic_format_arg $ test_files_arg $ prelude_arg)
 
+let host_t =
+  let worker =
+    Cmd.v
+      (Cmd.info "worker"
+         ~doc:
+           "Serve one opt-in jacquard-host-v0 invocation over the stdio-u32-json-v0 carrier \
+            against a host-selected store. Frames use stdin/stdout; stderr is bounded operator \
+            text. Ordinary run, check, and build never use this protocol.")
+      Term.(
+        const (configure_diagnostics host_worker_cmd)
+        $ diagnostic_format_arg
+        $ Arg.(
+            required
+            & opt (some string) None
+            & info [ "store" ] ~docv:"DIR"
+                ~doc:
+                  "Existing local store holding the target and its complete closure. The prelude \
+                   is not reloaded."))
+  in
+  Cmd.group
+    (Cmd.info "host" ~doc:"Opt-in host carriers for invoking checked Jacquard from another process.")
+    [ worker ]
+
 let main =
   Cmd.group
     (Cmd.info "jacquard" ~version:Version.version ~doc:"The Jacquard language toolchain")
@@ -3041,6 +3082,7 @@ let main =
       tiers_t;
       export_t;
       build_t;
+      host_t;
     ]
 
 let render_selected_diagnostic diagnostic =

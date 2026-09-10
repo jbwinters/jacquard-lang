@@ -3,7 +3,8 @@
 `Host_protocol_v0.Session` implements the invocation state machine in the
 [frozen v0 protocol](../spec/host-protocol-v0.md). It builds on checked invoke
 preflight and the bounded type/value codecs. It is an OCaml library layer;
-the opt-in process worker and evaluator loop remain to be implemented.
+the opt-in process worker and evaluator loop that drive it are
+[`Host_worker`](host-worker-v0.md), exposed as `jacquard host worker`.
 
 A session starts only after the exact stored callable, complete reachable
 closure, pinned interface, arguments, grants, and operation registry pass
@@ -63,5 +64,6 @@ sections. Rejected responses are never recorded as accepted observations.
 `test/test_host_session.ml` covers both directions of typed nominal values,
 all four host-failure and nine cancellation mappings, state violations,
 strict response validation, growing evidence, and exact capacity boundaries.
-The worker's pipe, EOF, cancellation cleanup, descriptor, and ordinary-command
-compatibility evidence belongs to the remaining integration work.
+The worker's carrier loss, cancellation cleanup, descriptor ownership, exit
+statuses, and CLI transcript evidence live in `test/test_host_worker.ml` and
+`test/cli/host-worker.t`.

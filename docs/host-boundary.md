@@ -237,7 +237,10 @@ Core already contains useful internal pieces:
 
 These are implementation evidence, not a supported embedding surface. Their
 OCaml types may inform HB.1, but an adapter must not publish them as the
-language-neutral contract. In particular, `Host_readiness` installs no effect,
+language-neutral contract. The HB.2c [serial worker](host-worker-v0.md) is
+built on the same seams; its `jacquard host worker` command is the supported
+way to run the protocol, while `Host_worker.serve` itself remains an OCaml
+implementation detail rather than an embedding ABI. In particular, `Host_readiness` installs no effect,
 does not run a host scheduler, authenticates no trace, and promises no platform
 matrix.
 
@@ -270,7 +273,7 @@ headers are not smuggled into HB.0.
 |---|---|---|
 | First-party programs | safety for hostile uploaded Jacquard code | separate-process or equivalent isolation design, hostile resource tests, and reviewed threat model |
 | Trusted adapter and OS | protection from a lying host or broader OS credentials | independently enforced isolation/authentication plus external security review |
-| No runnable carrier yet | interoperability or embedding support | completion of the remaining HB.2 evaluator/lifecycle slices followed by HB.3 executable cross-language fixtures and evidence |
+| Experimental serial carrier without a published kit | interoperability or embedding support | HB.3 executable cross-language fixtures and evidence pinned by at least one independent adapter |
 | Experimental process carrier first | permanent ABI stability or low-overhead embedding | two independent adapters and one real integration pass the frozen fixtures before v1 |
 | One serial invocation | concurrent requests, streaming, or throughput | demonstrated need followed by the C4 scheduler contract and resource evidence |
 | No automatic side-effect retry | transparent recovery from ambiguous completion | per-operation idempotency, receipt, and crash/recovery contract |
@@ -292,7 +295,9 @@ concrete values, envelopes, framing, version negotiation, resource ceilings,
 failure schemas, and canonical positive/hostile schema/state vectors.
 
 HB.2 implements the opt-in serial carrier and interpreter seam without HTTP,
-SQLite, concurrency, or a new kernel form.
+SQLite, concurrency, or a new kernel form. HB.2a through HB.2c ship the
+codecs, the session accounting, and the `jacquard host worker` carrier
+described in [`host-worker-v0.md`](host-worker-v0.md).
 
 HB.3 publishes the language-neutral conformance kit and Core evidence. Only
 then does the external adapter start against a released pin.

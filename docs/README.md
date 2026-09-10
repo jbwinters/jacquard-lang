@@ -36,7 +36,9 @@ project shape from file names alone.
   HB.2b1 implements bounded first-order type/value codecs. HB.2b2 additionally
   preflights exact stored targets, interfaces, typed arguments, effect grants,
   and closed once-operation registries. The [session layer](host-session-v0.md)
-  accounts for serial responses and terminal evidence; no runnable carrier ships yet.
+  accounts for serial responses and terminal evidence, and the
+  [HB.2c worker](host-worker-v0.md) is the opt-in `jacquard host worker`
+  process carrier. No cross-language conformance kit ships until HB.3.
 - `development-plan.md`: completed historical task plan and milestone
   discipline; not the current backlog.
 - `host-boundary.md`: HB.0 transport-neutral ownership, trust, containment,
