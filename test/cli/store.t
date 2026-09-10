@@ -105,3 +105,34 @@ through a persisted names index.
     Cause: Name `persisted-task` cannot expose scheduler-private hash 9b4eaa5e872fa3f768c71fc4cba4d3262a9ebf8a719f0cfb78f22fa9eade4310.
     Next step: Create and use Task and Channel handles only inside a structured scheduler scope.
   [1]
+
+A store populated with the public prelude reopens with the same prelude (APP.4). Installing a
+surface model with `run --store`, then running separate entry points against that store, keeps
+the name index byte-stable; `store add` selects the parser by extension, so a `.jac` file installs
+without a bootstrap twin and still refuses top-level expressions.
+
+  $ export JACQUARD_PRELUDE=../../prelude
+  $ printf 'double : (Int) ->{} Int\ndouble(n) = mul(n, 2)\n' > model.jac
+  $ printf 'double(21)\n' > entry.jac
+  $ jacquard run model.jac --store appstore
+  $ cp appstore/names.jqd names-after-install.jqd
+  $ jacquard run entry.jac --store appstore
+  42
+  $ jacquard run entry.jac --store appstore
+  42
+  $ cmp names-after-install.jqd appstore/names.jqd && echo index-stable
+  index-stable
+  $ printf 'quadruple(n) = double(double(n))\n' > more.jac
+  $ jacquard store add appstore more.jac
+  ok
+  $ printf 'quadruple(5)\n' > entry2.jac
+  $ jacquard run entry2.jac --store appstore
+  20
+  $ printf 'double(1)\n' > expr.jac
+  $ jacquard store add appstore expr.jac
+  error[E0704]: Store add accepts declarations only
+    Cause: store add expects declarations only
+    Next step: Pass declarations to `store add`, not a top-level expression.
+  [1]
+  $ grep -c 'hidden' appstore/names.jqd
+  6

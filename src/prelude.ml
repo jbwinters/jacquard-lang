@@ -64,7 +64,9 @@ let load ~dir store : ((string * Canon.decl_hashes list) list, Diag.t list) resu
                 match Kernel.decl_of_form f with
                 | Error ds -> Error ds
                 | Ok d -> (
-                    match Resolve.resolve_decl (Store.names_view store) d with
+                    (* the prelude is first-party: its later files may name derived members that an
+                   earlier load already hid, so reloading a populated store stays idempotent *)
+                    match Resolve.resolve_decl (Store.trusted_names_view store) d with
                     | Error ds -> Error ds
                     | Ok d -> (
                         match Store.put_decl store d with

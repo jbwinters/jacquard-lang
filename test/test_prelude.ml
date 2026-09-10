@@ -522,8 +522,65 @@ let test_handler_overrides_grant () =
   | Error e -> Alcotest.failf "interposed run failed: %s" (Runtime_err.to_string e));
   Alcotest.(check string) "handler swallowed the print" "" (Buffer.contents buf)
 
+(* APP.4: loading the prelude into a store that already holds it is idempotent, hidden derived
+   members stay hidden from the public resolver view, and only the trusted loading view can name
+   them. *)
+let read_bytes path =
+  let channel = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr channel)
+    (fun () -> really_input_string channel (in_channel_length channel))
+
+let test_reload_is_idempotent () =
+  let root =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "jacquard-prelude-reload-%d" (Unix.getpid ()))
+  in
+  let load () =
+    match Store.open_store root with
+    | Error diagnostics ->
+        Alcotest.failf "open store: %s" (String.concat "; " (List.map Diag.to_string diagnostics))
+    | Ok store -> (
+        match Prelude.load ~dir:"../prelude" store with
+        | Ok _ -> store
+        | Error diagnostics ->
+            Alcotest.failf "prelude load: %s"
+              (String.concat "; " (List.map Diag.to_string diagnostics)))
+  in
+  let objects () = Array.length (Sys.readdir (Filename.concat root "objects")) in
+  let names_path = Filename.concat root "names.jqd" in
+  ignore (load ());
+  let first_names = read_bytes names_path and first_objects = objects () in
+  let store = load () in
+  Alcotest.(check string)
+    "name index unchanged by a second load" first_names (read_bytes names_path);
+  Alcotest.(check int) "object count unchanged by a second load" first_objects (objects ());
+  List.iter
+    (fun (name, kind) ->
+      Alcotest.(check bool)
+        (name ^ " stays hidden from the public view")
+        true
+        (Store.lookup_kind store name kind = None
+        && (Store.names_view store).Resolve.lookup name = []);
+      Alcotest.(check bool)
+        (name ^ " resolves through the trusted loading view")
+        true
+        (List.exists
+           (fun (entry : Resolve.entry) -> entry.Resolve.kind = kind)
+           ((Store.trusted_names_view store).Resolve.lookup name)))
+    [
+      ("governance.fresh-audit-run-id", Resolve.KTerm);
+      ("governance.require-audit-run-id", Resolve.KTerm);
+      ("audit-sequence-v0", Resolve.KCon);
+    ];
+  Alcotest.(check bool)
+    "public names are identical in both views" true
+    ((Store.names_view store).Resolve.lookup "mul"
+    = (Store.trusted_names_view store).Resolve.lookup "mul")
+
 let suite =
   [
+    Alcotest.test_case "prelude reload is idempotent" `Quick test_reload_is_idempotent;
     Alcotest.test_case "prelude loads with zero diagnostics" `Quick test_loads_with_zero_diagnostics;
     Alcotest.test_case "prelude hashes golden-pinned" `Quick test_prelude_hashes_golden;
     Alcotest.test_case "builtins work" `Quick test_builtins_work;

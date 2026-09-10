@@ -32,7 +32,7 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1014`
+- Alcotest/QCheck cases: `1015`
 - Cram transcript files: `61`
 - Documentation examples: `28` named examples across `8` documents
 
@@ -98,6 +98,14 @@ The serial host-session library adds 15 cases, bringing the current source
 inventory to `984 / 60 / 28`. It covers typed responses, terminal mappings,
 finish-once accounting, and bounded evidence. See
 [the session contract](../../host-session-v0.md).
+
+Reopening a persistent store with the public prelude is idempotent: the loader
+resolves the prelude's own later files through a trusted view that can still
+name the derived members an earlier load hid, while user programs keep the
+public view. `jac store add` selects the parser by file extension, so the
+advertised `.jac` installation command works. Pinned by the reload case in
+`test/test_prelude.ml` (one more case, `1008`) and the reopen block of
+`test/cli/store.t`.
 
 The opt-in serial host worker adds 23 cases and one CLI transcript, bringing
 the current source inventory to `1007 / 61 / 28`. It covers the full

@@ -98,7 +98,11 @@ jac test TESTS.jac --seed 42 --exhaustive --budget 10000
 jac test TESTS.jac --cache-dir .jacquard-test-cache
 jac test TESTS.jac --allow fs --allow net --allow clock --allow console
 
-# Content store, canonical-structure diff, traces, and tiers.
+# Content store, canonical-structure diff, traces, and tiers. A store keeps the
+# prelude and every installed declaration; reopening it with the same prelude
+# is idempotent, so separate entry points can run against one installed model.
+jac run MODEL.jac --store STORE
+jac run ENTRY.jac --store STORE
 jac store add STORE PROGRAM.jac
 jac store rename STORE old-name new-name
 jac diff STORE_A STORE_B

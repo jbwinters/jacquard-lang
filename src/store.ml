@@ -614,6 +614,22 @@ let names_view t : Resolve.names =
         Option.map snd (List.find_opt (fun (known, _) -> Hash.equal known hash) t.call_abis));
   }
 
+(** [trusted_names_view t] is [names_view t] whose [lookup] also resolves hidden derived prelude
+    members by their immutable declaration names. It exists so that reloading the first-party
+    prelude into a store that already hides those members remains idempotent; language resolution of
+    user programs must keep using [names_view], which never exposes hidden members. *)
+let trusted_names_view t : Resolve.names =
+  let public = names_view t in
+  let hidden_entries name =
+    List.filter_map
+      (fun kind ->
+        match lookup_kind t name kind with
+        | Some _ -> None
+        | None -> lookup_internal_kind t name kind)
+      [ Resolve.KTerm; Resolve.KCon; Resolve.KOp; Resolve.KType; Resolve.KEffect ]
+  in
+  { public with Resolve.lookup = (fun name -> public.Resolve.lookup name @ hidden_entries name) }
+
 (** [bind_name t name hash] binds [name] to a hash already known to the store. Fails on an
     unprintable name (E0605) and on a [defterm] group's whole hash (E0604) — groups are addressed
     through their members. Scheduler-private hashes fail with E0907 even when their object is

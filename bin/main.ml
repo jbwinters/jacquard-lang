@@ -1764,10 +1764,10 @@ let diff_cmd operand_a operand_b syntax prelude =
 let with_store store_dir f =
   match Store.open_store store_dir with Error ds -> print_diags ds | Ok store -> f store
 
-let store_add_cmd store_dir file origin =
+let store_add_cmd store_dir file origin syntax =
   with_store store_dir (fun store ->
       match
-        process_forms ?origin ~syntax:Bootstrap store ~file (read_file file) ~on_expr:(fun _ ->
+        process_forms ?origin ~syntax store ~file (read_file file) ~on_expr:(fun _ ->
             Error [ cli_diagnostic ~code:"E0704" "store add expects declarations only" ])
       with
       | Ok () ->
@@ -2391,7 +2391,7 @@ let store_t =
         const (configure_diagnostics store_add_cmd)
         $ diagnostic_format_arg $ store_pos_dir
         $ Arg.(required & pos 1 (some file) None & info [] ~docv:"FILE")
-        $ origin_arg)
+        $ origin_arg $ syntax_arg)
   in
   let name =
     Cmd.v
