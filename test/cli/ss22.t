@@ -1,6 +1,6 @@
 SS.22 standard-library names and variadic text building are source-level
 features shared by bootstrap and surface programs. Native v1 parity is pinned
-through its global eight-argument application ceiling.
+at and beyond its eight-slot calling convention.
 
   $ export JACQUARD_PRELUDE=../../prelude
   $ export JACQUARD_RUNTIME=../../runtime
@@ -93,9 +93,10 @@ and semantics in the checker, interpreter, and native compiler.
   <builtin text.join>
   "a-b"
 
-Native v1 accepts at most eight application arguments. Direct and first-class
-eight-argument joins match the interpreter, including strict left-to-right
-evaluation; the interpreter continues to accept nine and more arguments.
+Native v1's eight-slot calling convention caps ordinary applications, but a
+directly applied variadic join is emitted with an array and a count, so nine
+and more arguments compile and match the interpreter too; direct and
+first-class eight-argument joins keep strict left-to-right evaluation.
 
   $ cat > join-eight.jqd <<'EOF'
   > (defterm ((binding tap ()
@@ -123,13 +124,13 @@ evaluation; the interpreter continues to accept nine and more arguments.
   > (app (var text.join) (lit "1") (lit "2") (lit "3") (lit "4") (lit "5")
   >   (lit "6") (lit "7") (lit "8") (lit "9"))
   > EOF
-  $ jacquard run join-nine.jqd
+  $ jacquard run join-nine.jqd > join-nine-interpreter.out 2>&1
+  $ jacquard build join-nine.jqd -o join-nine-native > /dev/null
+  $ ./join-nine-native > join-nine-native.out 2>&1
+  $ diff join-nine-interpreter.out join-nine-native.out && echo identical
+  identical
+  $ cat join-nine-native.out
   "123456789"
-  $ jacquard build join-nine.jqd -o join-nine-native 2>&1
-  error[E1101]: Program is outside the native v1 compilation subset
-    Cause: Not yet compilable in native v1: top-level expression 0 applies more than 8 arguments (native v1 arity cap)
-    Next step: Run the program with the interpreter or rewrite the unsupported construct.
-  [1]
 
 Large allocated text is byte-identical across engines without embedding its
 output in the transcript.

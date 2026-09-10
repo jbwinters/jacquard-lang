@@ -6,7 +6,10 @@ status. A program that reaches an unimplemented builtin is refused at build
 time with the builtin's name (E1101). Implementations live in
 runtime/jq_intrinsics.c and must reproduce the interpreter's behavior and
 error texts exactly within native v1's global eight-argument application
-ceiling; the differential harness is the check. The five renamed real
+ceiling; the differential harness is the check. That ceiling belongs to the
+fixed calling convention: a variadic intrinsic applied directly, such as the
+`text.join` behind marked interpolation, receives an array and a count and is
+not capped, while applying the same builtin as a value still is. The five renamed real
 operations retain their historical marker IDs so their semantic hashes remain
 stable while only the public name index changes.
 

@@ -1,0 +1,16 @@
+; APP.3 repair twin (no OCaml suite case): a directly applied variadic text.join
+; with more than eight arguments compiles natively. Marked interpolation lowers
+; to exactly this application, so an ordinary long report line stops being
+; refused by the eight-slot calling-convention cap; segments include the empty
+; text, an escaped quote, and multibyte UTF-8, and the printed value is the
+; guarantee (the interpreter and both toolchains must agree byte-for-byte).
+(defterm ((binding report ()
+  (lam ((pvar a) (pvar b) (pvar c))
+    (app (var text.join)
+      (lit "a=") (var a) (lit " b=") (var b) (lit " c=") (var c)
+      (lit "") (lit " q=\"") (lit "日本") (lit "\" end"))))))
+
+(tuple
+  (app (var report) (lit "1") (lit "2") (lit "3"))
+  (app (var text.join) (lit "1") (lit "2") (lit "3") (lit "4") (lit "5") (lit "6") (lit "7") (lit "8"))
+  (app (var text.join) (lit "1") (lit "2") (lit "3") (lit "4") (lit "5") (lit "6") (lit "7") (lit "8") (lit "9")))
