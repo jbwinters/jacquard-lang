@@ -136,3 +136,28 @@ without a bootstrap twin and still refuses top-level expressions.
   [1]
   $ grep -c 'hidden' appstore/names.jqd
   6
+
+The store records the prelude it was loaded with. Reopening with an edited prelude is refused
+before any change, and a `store add` that contains an expression installs nothing.
+
+  $ mkdir prelude-edited && for f in ../../prelude/*.jqd; do cat "$f" > "prelude-edited/$(basename "$f")"; done
+  $ printf '\n; edited\n' >> prelude-edited/02-data.jqd
+  $ cp appstore/names.jqd names-before-mismatch.jqd
+  $ jacquard run entry.jac --store appstore --prelude prelude-edited
+  error[E0705]: Prelude does not match the store's recorded prelude
+    Cause: prelude directory prelude-edited differs from the store's recorded prelude (changed: 02-data.jqd)
+    Next step: Reopen the store with the prelude it was created with, or create a new store for this prelude.
+  [1]
+  $ cmp names-before-mismatch.jqd appstore/names.jqd && echo unchanged-after-mismatch
+  unchanged-after-mismatch
+  $ ls appstore/objects | wc -l | tr -d ' ' > objects-before.txt
+  $ printf 'quint(n) = mul(n, 5)\nquint(1)\n' > mixed.jac
+  $ jacquard store add appstore mixed.jac
+  error[E0704]: Store add accepts declarations only
+    Cause: store add expects declarations only
+    Next step: Pass declarations to `store add`, not a top-level expression.
+  [1]
+  $ ls appstore/objects | wc -l | tr -d ' ' | cmp - objects-before.txt && echo objects-unchanged
+  objects-unchanged
+  $ grep -c quint appstore/names.jqd || true
+  0

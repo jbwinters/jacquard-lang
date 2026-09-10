@@ -99,13 +99,16 @@ inventory to `984 / 60 / 28`. It covers typed responses, terminal mappings,
 finish-once accounting, and bounded evidence. See
 [the session contract](../../host-session-v0.md).
 
-Reopening a persistent store with the public prelude is idempotent: the loader
-resolves the prelude's own later files through a trusted view that can still
-name the derived members an earlier load hid, while user programs keep the
-public view. `jac store add` selects the parser by file extension, so the
-advertised `.jac` installation command works. Pinned by the reload case in
-`test/test_prelude.ml` (one more case, `1008`) and the reopen block of
-`test/cli/store.t`.
+Reopening a persistent store with the public prelude is idempotent: a store
+records the prelude files it was loaded with, an identical prelude reloads as
+a no-op, a different prelude is refused with E0705 before any change, and a
+store made before manifests were recorded loads its prelude through a trusted
+view in which hidden derived members outrank any same-named user binding while
+user programs keep the public view. `jac store add` selects the parser by file
+extension, so the advertised `.jac` installation command works, and refuses a
+file with a top-level expression before installing anything. Pinned by the
+reload case in `test/test_prelude.ml` (one more case, `1008`) and the reopen
+block of `test/cli/store.t`.
 
 The opt-in serial host worker adds 23 cases and one CLI transcript, bringing
 the current source inventory to `1007 / 61 / 28`. It covers the full

@@ -99,8 +99,10 @@ jac test TESTS.jac --cache-dir .jacquard-test-cache
 jac test TESTS.jac --allow fs --allow net --allow clock --allow console
 
 # Content store, canonical-structure diff, traces, and tiers. A store keeps the
-# prelude and every installed declaration; reopening it with the same prelude
-# is idempotent, so separate entry points can run against one installed model.
+# prelude and every installed declaration and records which prelude files
+# (names and bytes) it was created with: reopening with that prelude is a
+# no-op, so separate entry points can run against one installed model, and
+# reopening with a different prelude is refused (E0705) without changes.
 jac run MODEL.jac --store STORE
 jac run ENTRY.jac --store STORE
 jac store add STORE PROGRAM.jac

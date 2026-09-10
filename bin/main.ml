@@ -1766,14 +1766,34 @@ let with_store store_dir f =
 
 let store_add_cmd store_dir file origin syntax =
   with_store store_dir (fun store ->
-      match
-        process_forms ?origin ~syntax store ~file (read_file file) ~on_expr:(fun _ ->
-            Error [ cli_diagnostic ~code:"E0704" "store add expects declarations only" ])
-      with
-      | Ok () ->
-          print_endline "ok";
-          ok
-      | Error ds -> print_diags ds)
+      let source = read_file file in
+      let expression_refusal = cli_diagnostic ~code:"E0704" "store add expects declarations only" in
+      (* refuse before installing anything: a file with a top-level expression must leave the
+         store exactly as it was *)
+      let declarations_only =
+        Result.bind
+          (parse_tops ~syntax ~names:(Store.names_view store) ~file source)
+          (fun (tops, _warnings) ->
+            let rec check = function
+              | [] -> Ok ()
+              | parsed :: rest ->
+                  Result.bind (validate_parsed_top parsed) (function
+                    | Kernel.Expr _ -> Error [ expression_refusal ]
+                    | Kernel.Decl _ -> check rest)
+            in
+            check tops)
+      in
+      match declarations_only with
+      | Error ds -> print_diags ds
+      | Ok () -> (
+          match
+            process_forms ?origin ~syntax store ~file source ~on_expr:(fun _ ->
+                Error [ expression_refusal ])
+          with
+          | Ok () ->
+              print_endline "ok";
+              ok
+          | Error ds -> print_diags ds))
 
 let store_name_cmd store_dir name hex =
   with_store store_dir (fun store ->
