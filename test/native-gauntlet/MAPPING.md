@@ -66,3 +66,4 @@ probe path, not acceptance by the public CLI.
 | test_once_clause_same_op_perform_escapes_outward | g39-once-clause-forward.jqd | an inner clause-body perform of the same Once op reaches the outer handler and both resumptions are consumed once |
 | test_once_resumed_continuation_reinstalls_deep_handler | g40-once-deep-reenter.jqd | the resumed body performs again, the deep inner handler is reinstalled, and both dynamic Once captures have independent affine budgets |
 | GM.15 closed immutable fault-plan parity | g41-governance-fault-plan.jqd | fresh closed Once handlers emit canonical healthy and J/E/D/C fail-stop prefixes; typed simulator `Err` and host faults remain separately evidenced |
+| (APP.2 repair, no OCaml case) | g49-text-literal-patterns.jqd | literal Text clauses (empty, escaped quote, newline, multibyte), a tuple pattern beside a literal, the same closure mapped over eight subjects, and case-sensitive misses build and agree in both engines |

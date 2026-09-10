@@ -1,0 +1,38 @@
+; APP.2 repair twin (no OCaml suite case): literal Text patterns compile natively.
+; The emitted C calls jq_text_eq for every literal Text clause; before the repair
+; the runtime defined it without declaring it, so any such program failed to
+; build. Direct clauses cover the empty string, an escaped quote, a newline, and
+; multibyte UTF-8; a nested tuple pattern binds beside a literal; the list maps
+; the same closure over several subjects, and the tail pair checks equal/unequal
+; subjects and a case-sensitive miss -> the printed tuple is the guarantee.
+(defterm ((binding classify ()
+  (lam ((pvar s))
+    (match (var s)
+      (clause (plit "yes") (lit 1))
+      (clause (plit "no") (lit 0))
+      (clause (plit "") (lit 3))
+      (clause (plit "a\"b") (lit 4))
+      (clause (plit "line\nbreak") (lit 5))
+      (clause (plit "日本") (lit 6))
+      (clause (pwild) (lit 2)))))))
+
+(defterm ((binding classify-pair ()
+  (lam ((pvar p))
+    (match (var p)
+      (clause (ptuple (plit "yes") (pvar n)) (var n))
+      (clause (ptuple (pwild) (pvar n)) (app (var sub) (lit 0) (var n))))))))
+
+(tuple
+  (app (var list.map)
+    (app (var cons) (lit "yes")
+      (app (var cons) (lit "no")
+        (app (var cons) (lit "")
+          (app (var cons) (lit "a\"b")
+            (app (var cons) (lit "line\nbreak")
+              (app (var cons) (lit "日本")
+                (app (var cons) (lit "YES")
+                  (app (var cons) (lit "yes ") (var nil)))))))))
+    (var classify))
+  (app (var classify-pair) (tuple (lit "yes") (lit 7)))
+  (app (var classify-pair) (tuple (lit "nope") (lit 7)))
+  (app (var classify) (lit "yes")))

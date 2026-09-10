@@ -99,6 +99,12 @@ inventory to `984 / 60 / 28`. It covers typed responses, terminal mappings,
 finish-once accounting, and bounded evidence. See
 [the session contract](../../host-session-v0.md).
 
+The native runtime header now declares `jq_text_eq`, which emitted units call
+for every literal Text pattern; before this repair any such program failed to
+build. Pinned by the gauntlet twin `g49-text-literal-patterns.jqd` (both
+engines, both toolchains through the differential and leak lanes) and the
+text-pattern block of `test/cli/native.t`; the inventory is unchanged.
+
 The opt-in serial host worker adds 23 cases and one CLI transcript, bringing
 the current source inventory to `1007 / 61 / 28`. It covers the full
 `stdio-u32-json-v0` lifetime against a reopened store: pure and effectful
