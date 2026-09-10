@@ -59,5 +59,6 @@ let () =
   Host_kit.write_file
     (Filename.concat kit "transcripts.json")
     (Yojson.Safe.pretty_to_string (`List transcripts) ^ "\n");
+  Host_kit.remove_tree store;
   Printf.printf "host kit: %d transcripts, %d diverging\n" (List.length transcripts)
     (List.length pending)

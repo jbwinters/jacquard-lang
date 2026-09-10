@@ -84,6 +84,14 @@ let write_file path contents =
   let channel = open_out_bin path in
   Fun.protect ~finally:(fun () -> close_out channel) (fun () -> output_string channel contents)
 
+let rec remove_tree path =
+  match Unix.lstat path with
+  | { Unix.st_kind = Unix.S_DIR; _ } ->
+      Array.iter (fun entry -> remove_tree (Filename.concat path entry)) (Sys.readdir path);
+      Unix.rmdir path
+  | _ -> Sys.remove path
+  | exception Unix.Unix_error _ -> ()
+
 let bytes_of_hex hex =
   String.init
     (String.length hex / 2)
@@ -482,21 +490,37 @@ let play ~binary ~store case =
       ()
     done
   in
+  let reaped = ref None in
+  let reap () =
+    match !reaped with
+    | Some status -> status
+    | None ->
+        let status = snd (Unix.waitpid [] pid) in
+        reaped := Some status;
+        status
+  in
   let status =
     Fun.protect
       ~finally:(fun () ->
         close_input ();
         close_in_noerr output;
-        Sys.set_signal Sys.sigpipe previous)
+        Sys.set_signal Sys.sigpipe previous;
+        (* any other failure must still reap the worker and drop its operator file *)
+        (if Option.is_none !reaped then
+           try
+             Unix.kill pid Sys.sigkill;
+             ignore (reap ())
+           with Unix.Unix_error _ -> ());
+        ())
       (fun () ->
         (try with_deadline 30 run
          with Timeout ->
            Unix.kill pid Sys.sigkill;
            frames := `Assoc [ ("kind", `String "fake-host-timeout") ] :: !frames);
-        snd (Unix.waitpid [] pid))
+        reap ())
   in
-  let stderr = read_file stderr_path in
-  Sys.remove stderr_path;
+  let stderr = if Sys.file_exists stderr_path then read_file stderr_path else "" in
+  if Sys.file_exists stderr_path then Sys.remove stderr_path;
   {
     core_frames = List.rev !frames;
     exit_code = (match status with Unix.WEXITED code -> Some code | _ -> None);

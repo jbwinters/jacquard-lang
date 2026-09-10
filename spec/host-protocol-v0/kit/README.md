@@ -45,9 +45,15 @@ case exists to prove that Core rejects it.
    and `transcripts.json` in the adapter's compatibility record.
 2. Build the store with the recipe and check that the identities in
    `kit.json` resolve, so the adapter is talking to the same fixtures.
-3. For each transcript, start one worker, send the recorded host input in
-   lockstep (one host frame after each expected Core frame), and compare the
-   Core frames, exit status, and observed summary with the transcript.
+3. For each transcript, start one worker and play the recorded steps in
+   order: read one Core frame for each `core_to_host` step and write one host
+   frame (or the raw bytes) for each `host_to_core` step. The two negotiation
+   frames, `host_select` and `invoke`, are consecutive host steps. Never write
+   after a terminal frame has been read: a recorded host step that follows
+   the terminal is counted under `host_inputs_skipped_after_terminal`, and the
+   `after_terminal` step of the terminal-phase case must be refused locally
+   as E1608. Compare the Core frames, exit status, and observed summary with
+   the transcript.
 4. Compare semantic JSON: key order and insignificant whitespace do not
    matter. Diagnostic prose (`summary`, `cause`, `next_step`, `contrast`) is
    Core-authored human text and is not normative; the schema, domain, code,

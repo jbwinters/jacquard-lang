@@ -34,6 +34,7 @@ let make_fixture () =
   let doc = K.load_vectors (Filename.concat (Filename.dirname (K.kit_dir ())) "vectors.json") in
   let kit = Yojson.Safe.from_file (kit_path "kit.json") in
   let transcripts = K.items (Yojson.Safe.from_file (kit_path "transcripts.json")) in
+  at_exit (fun () -> K.remove_tree store);
   { store; ids; doc; kit; transcripts }
 
 let fixture = lazy (make_fixture ())
