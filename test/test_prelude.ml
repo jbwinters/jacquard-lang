@@ -653,6 +653,14 @@ let test_reload_is_idempotent () =
   Alcotest.(check bool)
     "manifest restored by the legacy reload" true
     (Sys.file_exists (Store.prelude_manifest_file store));
+  (* the builtin-wiring seam must also prefer the hidden member, or the user's binding would be
+     wired to the audit-run-id builtin on reopen *)
+  Alcotest.(check bool)
+    "internal lookup prefers the hidden member over the user binding" true
+    (match Store.lookup_internal_kind store "governance.fresh-audit-run-id" Resolve.KTerm with
+    | Some { Resolve.hash; _ } ->
+        List.exists (Hash.equal hash) store.Store.hidden && not (Hash.equal hash shadow)
+    | None -> false);
   let rec remove_tree path =
     match Unix.lstat path with
     | { Unix.st_kind = Unix.S_DIR; _ } ->

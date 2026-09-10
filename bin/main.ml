@@ -1786,6 +1786,28 @@ let store_add_cmd store_dir file origin syntax =
       match declarations_only with
       | Error ds -> print_diags ds
       | Ok () -> (
+          (* a failure part-way through a file must leave the store as it was: snapshot the
+             index and object set, and restore them if any declaration is refused *)
+          let names_path = Filename.concat store_dir "names.jqd" in
+          let objects_dir = Filename.concat store_dir "objects" in
+          let names_before =
+            if Sys.file_exists names_path then Some (read_file names_path) else None
+          in
+          let objects_before = Sys.readdir objects_dir |> Array.to_list in
+          let restore () =
+            (match names_before with
+            | Some bytes ->
+                let channel = open_out_bin names_path in
+                Fun.protect
+                  ~finally:(fun () -> close_out channel)
+                  (fun () -> output_string channel bytes)
+            | None -> if Sys.file_exists names_path then Sys.remove names_path);
+            Array.iter
+              (fun entry ->
+                if not (List.mem entry objects_before) then
+                  Sys.remove (Filename.concat objects_dir entry))
+              (Sys.readdir objects_dir)
+          in
           match
             process_forms ?origin ~syntax store ~file source ~on_expr:(fun _ ->
                 Error [ expression_refusal ])
@@ -1793,7 +1815,9 @@ let store_add_cmd store_dir file origin syntax =
           | Ok () ->
               print_endline "ok";
               ok
-          | Error ds -> print_diags ds))
+          | Error ds ->
+              restore ();
+              print_diags ds))
 
 let store_name_cmd store_dir name hex =
   with_store store_dir (fun store ->

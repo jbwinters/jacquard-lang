@@ -563,12 +563,14 @@ let lookup_hidden_kind t name kind =
   in
   List.find_map hidden_name t.hidden
 
-(** [lookup_internal_kind t name kind] resolves a public binding first and otherwise a hidden
-    derived prelude member; see {!lookup_hidden_kind} for the hidden-only scan. *)
+(** [lookup_internal_kind t name kind] resolves a hidden derived prelude member first and otherwise
+    a public binding. Hidden members win so that trusted wiring of private builtin markers can never
+    land on a same-named binding a user installed later; see {!lookup_hidden_kind} for the
+    hidden-only scan. *)
 let lookup_internal_kind t name kind =
-  match lookup_kind t name kind with
-  | Some _ as public -> public
-  | None -> lookup_hidden_kind t name kind
+  match lookup_hidden_kind t name kind with
+  | Some _ as hidden -> hidden
+  | None -> lookup_kind t name kind
 
 (** First binding of [n] by kind rank; prefer {!lookup_kind} when the kind is known. *)
 let lookup_name t n = match lookup_all t n with [] -> None | e :: _ -> Some e
@@ -655,8 +657,10 @@ let write_prelude_manifest t entries =
   let path = prelude_manifest_file t in
   let temporary = path ^ ".tmp" in
   let channel = open_out_bin temporary in
-  List.iter (fun (file, digest) -> Printf.fprintf channel "%s %s\n" digest file) entries;
-  close_out channel;
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr channel)
+    (fun () ->
+      List.iter (fun (file, digest) -> Printf.fprintf channel "%s %s\n" digest file) entries);
   Sys.rename temporary path
 
 (** [bind_name t name hash] binds [name] to a hash already known to the store. Fails on an

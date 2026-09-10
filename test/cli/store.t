@@ -161,3 +161,31 @@ before any change, and a `store add` that contains an expression installs nothin
   objects-unchanged
   $ grep -c quint appstore/names.jqd || true
   0
+
+A user binding that reuses a hidden prelude member's name keeps its own meaning across
+reopen on both the manifest path and a legacy store without a manifest; it is never wired to
+the withheld builtin. A `store add` that fails part-way (an unresolved name in a later
+declaration) installs nothing.
+
+  $ printf 'governance.fresh-audit-run-id(n) = 7\n' > shadow.jac
+  $ jacquard run shadow.jac --store appstore
+  $ printf 'governance.fresh-audit-run-id(1)\n' > use-shadow.jac
+  $ jacquard run use-shadow.jac --store appstore
+  7
+  $ rm appstore/prelude.manifest
+  $ jacquard run use-shadow.jac --store appstore
+  7
+  $ ls appstore/prelude.manifest
+  appstore/prelude.manifest
+  $ cp appstore/names.jqd names-before-partial.jqd
+  $ ls appstore/objects | wc -l | tr -d ' ' > objects-before-partial.txt
+  $ printf 'aa(n) = mul(n, 2)\nbb(n) = nope(n)\n' > partial.jac
+  $ jacquard store add appstore partial.jac
+  partial.jac:2:9-13: error[E0301]: This reference names something that is not in scope.
+    Cause: No name named `nope` is in scope; nearby names are `code`, `done`, `none`.
+    Next step: Correct the reference to an in-scope name or declaration.
+  [1]
+  $ cmp names-before-partial.jqd appstore/names.jqd && echo index-unchanged
+  index-unchanged
+  $ ls appstore/objects | wc -l | tr -d ' ' | cmp - objects-before-partial.txt && echo objects-unchanged
+  objects-unchanged
