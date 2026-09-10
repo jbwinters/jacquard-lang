@@ -542,6 +542,11 @@ malformed or rejected `invoke`: no checked invocation began. Once preflight
 succeeds and evaluation starts, a violation uses the single error `outcome`.
 Carrier loss may make either frame impossible; E1611 then belongs in
 host/operator evidence and must not be pretended to have come from Core.
+When Core itself observes input loss while its output remains writable, it
+may flush one best-effort frame carrying E1611 as its only terminal; that
+frame is genuine Core evidence of the unanswered exchange, never a verdict on
+the host's outstanding outside action, and the exit status still reports
+carrier loss.
 
 The pre-invocation terminal frame has exactly
 `{"diagnostics":[DIAGNOSTIC...],"kind":"fatal","protocol":"jacquard-host-v0"}`.
@@ -599,8 +604,13 @@ accounting, selected descriptor limits, and constructor identity/arity
 resolution. HB.2b2 adds exact invoke-envelope and fixed-ID checks, complete
 stored-target closure validation, structural checked-interface equality, typed
 arguments including constructor fields, exact grants, and the sorted unique
-public `once` operation registry. It does not expose a runnable worker;
-evaluation and effect exchange remain later HB.2 slices.
+public `once` operation registry. HB.2c adds the opt-in `jacquard host worker`
+process carrier in `Host_worker`: it evaluates the preflighted target without
+root handlers, exchanges configured once operations through the session
+layer, flushes exactly one terminal frame, bounds operator output, and reports
+the exit statuses of section 3. Its ownership and lifecycle table is
+[`docs/host-worker-v0.md`](../docs/host-worker-v0.md). No cross-language
+conformance kit is published until HB.3.
 
 A conforming implementation must:
 

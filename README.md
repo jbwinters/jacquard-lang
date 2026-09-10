@@ -408,7 +408,13 @@ jac governance verify-run RUN_BUNDLE.jqd
 jac governance reconcile RECONCILIATION_BUNDLE.jqd
 jac governance explain PROPOSAL_ID --bundle RECONCILIATION_BUNDLE.jqd [--output-format text|json-v1]
 jac why-effect EFFECT --source FILE.jac [--output-format text|json-v1]
+jac host worker --store DIR
 ```
+
+`jac host worker` is the opt-in serial carrier for the experimental
+`jacquard-host-v0` protocol: a trusted host process invokes one checked stored
+term and answers its typed root operations over length-prefixed JSON frames on
+stdin/stdout (`docs/host-worker-v0.md`). Ordinary commands never use it.
 
 `.jac` is the source format people and agents write. `.jqd` is the lower-level
 format that `.jac` files reduce to — a small fixed grammar of 27 forms, called
@@ -600,9 +606,11 @@ Key release docs:
 - `src/infer_dist.ml`: exact enumeration and likelihood weighting.
 - `src/diff.ml`: canonical-structure diff over stores.
 - `src/warp.ml`: Warp test discovery, running, cache, and properties.
-- `src/host_protocol_v0.ml`: strict library-only framing, JSON, limit-selection,
-  shutdown, and bounded first-order type/value codecs for the experimental host
-  protocol; no worker entry point.
+- `src/host_protocol_v0.ml`: strict framing, JSON, limit-selection, shutdown,
+  bounded first-order type/value codecs, invoke preflight, and serial session
+  accounting for the experimental host protocol.
+- `src/host_worker.ml`: the opt-in `jac host worker` process carrier that
+  evaluates one preflighted invocation over stdin/stdout frames.
 
 ## Documentation Map
 
@@ -721,9 +729,9 @@ proofs also do not ship. World grants remain coarse. See
 `docs/release/structured-concurrency/LIMITS.md` for the successor C0-C3 boundary.
 `docs/host-boundary.md` freezes the ownership and trust model, and
 `spec/host-protocol-v0.md` freezes the experimental language-neutral envelopes,
-process framing, limits, and schema/state vectors. Core can preflight one exact
-invoke envelope against a prepared checker, but no executable host carrier,
-stable ABI, adapter, or HTTP server ships in this repository today.
+process framing, limits, and schema/state vectors. `jac host worker` is the
+experimental serial carrier for that protocol; no stable ABI, adapter,
+cross-language conformance kit, or HTTP server ships in this repository today.
 The deterministic Workspace v0 governance boundary is separately advertised
 as an evidence-backed research reference implementation, not as a sandbox or
 production security system; its exact claim and trusted-host limits are in

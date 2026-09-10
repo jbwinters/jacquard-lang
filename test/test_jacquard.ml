@@ -28,6 +28,7 @@ let () =
       ("host-boundary-codec", Test_host_boundary_codec.suite);
       ("host-invoke-preflight", Test_host_invoke_preflight.suite);
       ("host-session", Test_host_session.suite);
+      ("host-worker", Test_host_worker.suite);
       ("scheduler-core", Test_scheduler_core.suite);
       ("channel-contract", Test_channel_contract.suite);
       ("structured-scope", Test_structured_scope.suite);

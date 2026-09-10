@@ -114,6 +114,7 @@ jac governance verify-log AUDIT_LOG.audit --head HASH
 jac governance verify-run RUN_BUNDLE.jqd
 jac governance reconcile RECONCILIATION_BUNDLE.jqd
 jac governance explain PROPOSAL_ID --bundle RECONCILIATION_BUNDLE.jqd
+jac host worker --store DIR
 jac why-effect Net --source WORKSPACE.jac --output-format json-v1
 
 # Native AOT accepts public surface input directly.
@@ -903,11 +904,12 @@ Do not invent new kernel forms for surface sugar.
   recreating framing or value semantics. HB.2b2 also preflights one exact
   public stored term closure, closed monomorphic interface, typed positional
   arguments, exact effect grants, and sorted unique public `once` operation
-  registry. This returns a validated invocation but does not evaluate it. No
-  runnable worker, stable foreign-host ABI, adapter, or HTTP server ships yet.
-  `Host_protocol_v0.Session` now validates serial responses, accounts for
-  bounded evidence, and returns request/resume/terminal actions. See
-  `host-session-v0.md` for the caller-owned continuation and I/O obligations.
+  registry. `Host_protocol_v0.Session` validates serial responses, accounts
+  for bounded evidence, and returns request/resume/terminal actions
+  (`host-session-v0.md`). HB.2c ships `jac host worker --store DIR`, the
+  opt-in serial process carrier that evaluates one preflighted invocation over
+  stdin/stdout frames (`host-worker-v0.md`). No stable foreign-host ABI,
+  adapter, cross-language conformance kit, or HTTP server ships yet.
   Internal evaluator-capture and host-readiness OCaml APIs are not supported
   embedding contracts; future adapters must consume the versioned protocol and
   its executable conformance fixtures, not those OCaml seams.

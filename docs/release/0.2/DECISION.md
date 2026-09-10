@@ -3,9 +3,9 @@
 Status: candidate is ready for RC1 only after the exact candidate reproduction
 and required GitHub checks are green.
 
-Test count: `984`
+Test count: `1007`
 
-Cram count: `60`
+Cram count: `61`
 
 Documentation example count: `28` across `8` documents
 
@@ -51,5 +51,13 @@ unchanged; these inventory numbers describe the current source checkout.
 
 The serial host-session library adds 15 cases, bringing the current source
 inventory to `984 / 60 / 28`. It covers typed responses, terminal mappings,
-finish-once accounting, and bounded evidence; the process worker remains
-unimplemented. See [the session contract](../../host-session-v0.md).
+finish-once accounting, and bounded evidence. See
+[the session contract](../../host-session-v0.md).
+
+The opt-in serial host worker adds 23 cases and one CLI transcript, bringing
+the current source inventory to `1007 / 61 / 28`. It covers the full
+`stdio-u32-json-v0` lifetime against a reopened store: pure and effectful
+invocations, every frozen host-failure and cancellation mapping, preflight
+fatals, stale and malformed responses, carrier loss, the selected stderr
+ceiling, descriptor ownership, and exit statuses. No cross-language conformance
+kit is published until HB.3. See [the worker contract](../../host-worker-v0.md).

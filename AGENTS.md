@@ -123,9 +123,11 @@ When adding valid corpus files, regenerate the golden hashes with
   `test/test_host_protocol_codec.ml`, `test/test_host_boundary_codec.ml`,
   `test/test_host_invoke_preflight.ml`. Serial session actions and terminal
   accounting: `Host_protocol_v0.Session`, `test/test_host_session.ml`, and
-  `docs/host-session-v0.md`. No runnable worker ships yet. Existing
-  evaluator capture and host-readiness modules are internal seams, not a public
-  ABI; adapters and application servers belong outside this repository.
+  `docs/host-session-v0.md`. The opt-in serial carrier `jac host worker`:
+  `src/host_worker.ml`, `test/test_host_worker.ml`, `test/cli/host-worker.t`,
+  and `docs/host-worker-v0.md`. Existing evaluator capture and host-readiness
+  modules are internal seams, not a public ABI; adapters and application
+  servers belong outside this repository.
 - Dist and inference: `prelude/06-dist.jqd`, `prelude/13-dist-lib.jqd`,
   `src/infer_dist.ml`, `test/test_infer.ml`.
 - Warp: `prelude/15-warp.jqd`, `prelude/16-gen.jqd`, `src/warp.ml`,
