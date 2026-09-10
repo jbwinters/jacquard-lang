@@ -41,6 +41,7 @@ let put_src store source =
 let named name hashes = List.assoc name hashes.Canon.named
 
 type fixture = {
+  store_dir : string;
   prepared : Host_worker.prepared;
   int_type : Hash.t;
   text_type : Hash.t;
@@ -86,6 +87,7 @@ let make_fixture () =
   let checker = expect_ok "fixture checker" (Check.make_ctx reopened) in
   let primitives = Check.primitive_types checker in
   {
+    store_dir = dir;
     prepared;
     int_type = primitives.Check.int_type;
     text_type = primitives.Check.text_type;
@@ -683,6 +685,97 @@ let test_descriptors_and_channels () =
     "operator channel still owned by the caller" "tail" (read_file operator_path);
   List.iter Sys.remove [ input_path; output_path; operator_path ]
 
+(* The host closes its read end before Core writes: SIGPIPE must not kill the worker, and the
+   failed frame must not be retried. *)
+let test_output_pipe_closed_in_process () =
+  let f = fixture () in
+  let read_end, write_end = Unix.pipe ~cloexec:true () in
+  Unix.close read_end;
+  let base = fresh_path "epipe" in
+  let input_path = base ^ ".in" and operator_path = base ^ ".err" in
+  write_file input_path (script [ select (); double_invoke f 2 ]);
+  let input = open_in_bin input_path in
+  let output = Unix.out_channel_of_descr write_end in
+  let operator = open_out_bin operator_path in
+  (* keep SIGPIPE ignored around the whole exchange: closing the channel below retries the
+     buffered write, and this test process must not die from the resulting EPIPE *)
+  let previous = Sys.signal Sys.sigpipe Sys.Signal_ignore in
+  let status = Host_worker.serve f.prepared ~input ~output ~operator in
+  Alcotest.(check bool)
+    "SIGPIPE disposition restored to the caller's setting" true
+    (Sys.signal Sys.sigpipe Sys.Signal_ignore == Sys.Signal_ignore);
+  close_in input;
+  close_out_noerr output;
+  close_out operator;
+  Sys.set_signal Sys.sigpipe previous;
+  check_status "exit" Host_worker.Carrier_lost status;
+  let note = read_file operator_path in
+  Alcotest.(check bool)
+    "operator note names the lost hello" true
+    (String.length note > 0
+    && Str.string_match (Str.regexp ".*core_hello could not be written (E1611)") note 0);
+  List.iter Sys.remove [ input_path; operator_path ]
+
+(* Drive the installed binary with a dead standard output. Both cases must exit 74 with one
+   operator note and without any exit-time retry or uncaught exception. *)
+let worker_binary () =
+  match Sys.getenv_opt "JACQUARD" with
+  | Some binary -> binary
+  | None ->
+      let fallback = "../bin/main.exe" in
+      if Sys.file_exists fallback then fallback
+      else Alcotest.fail "set JACQUARD to the built jacquard binary"
+
+let spawn_worker ~store_dir ~stdin_path ~stdout_fd =
+  let binary = worker_binary () in
+  let base = fresh_path "spawn" in
+  let stderr_path = base ^ ".err" in
+  let stdin_fd = Unix.openfile stdin_path [ Unix.O_RDONLY ] 0 in
+  let stderr_fd = Unix.openfile stderr_path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC ] 0o600 in
+  let pid =
+    Unix.create_process binary
+      [| binary; "host"; "worker"; "--store"; store_dir |]
+      stdin_fd stdout_fd stderr_fd
+  in
+  Unix.close stdin_fd;
+  Unix.close stderr_fd;
+  let _, status = Unix.waitpid [] pid in
+  let stderr_text = read_file stderr_path in
+  Sys.remove stderr_path;
+  (status, stderr_text)
+
+let check_spawned_loss label (status, stderr_text) =
+  (match status with
+  | Unix.WEXITED code -> Alcotest.(check int) (label ^ " exit status") 74 code
+  | Unix.WSIGNALED signal -> Alcotest.failf "%s died from signal %d" label signal
+  | Unix.WSTOPPED _ -> Alcotest.failf "%s stopped" label);
+  Alcotest.(check bool)
+    (label ^ " operator note present")
+    true
+    (Str.string_match (Str.regexp ".*could not be written (E1611)") stderr_text 0);
+  Alcotest.(check bool)
+    (label ^ " no uncaught exception")
+    false
+    (Str.string_match (Str.regexp ".*\\(Fatal error\\|internal error\\)") stderr_text 0)
+
+let test_binary_output_lost () =
+  let f = fixture () in
+  let base = fresh_path "binary" in
+  let stdin_path = base ^ ".in" in
+  write_file stdin_path (script [ select (); double_invoke f 3 ]);
+  (* a pipe whose reader is already gone: every write fails with EPIPE *)
+  let read_end, write_end = Unix.pipe ~cloexec:true () in
+  Unix.close read_end;
+  let pipe_result = spawn_worker ~store_dir:f.store_dir ~stdin_path ~stdout_fd:write_end in
+  Unix.close write_end;
+  check_spawned_loss "closed pipe" pipe_result;
+  (* a descriptor that cannot be written at all *)
+  let unwritable = Unix.openfile Filename.null [ Unix.O_RDONLY ] 0 in
+  let descriptor_result = spawn_worker ~store_dir:f.store_dir ~stdin_path ~stdout_fd:unwritable in
+  Unix.close unwritable;
+  check_spawned_loss "unwritable descriptor" descriptor_result;
+  Sys.remove stdin_path
+
 let test_prepare_requires_prelude () =
   let store = expect_ok "open empty store" (Store.open_store (fresh_path "empty")) in
   match Host_worker.prepare store with
@@ -733,6 +826,10 @@ let suite =
       test_stderr_bound;
     Alcotest.test_case "worker leaks no descriptor and closes no caller channel" `Quick
       test_descriptors_and_channels;
+    Alcotest.test_case "closed output pipe yields carrier loss without a signal" `Quick
+      test_output_pipe_closed_in_process;
+    Alcotest.test_case "installed binary exits 74 on a dead standard output" `Quick
+      test_binary_output_lost;
     Alcotest.test_case "prepare fails closed without a prelude" `Quick test_prepare_requires_prelude;
     QCheck_alcotest.to_alcotest prop_double_round_trip;
   ]

@@ -36,5 +36,9 @@ val serve :
     bounded human diagnostics limited to the hard and then the selected [max_stderr_bytes]; it is
     never a protocol or evidence channel. The function closes none of the three channels and retains
     no continuation, session, or descriptor after it returns. Every terminal action is committed
-    when written and is never retried. Exceptions are contained and reported as [Internal_failure]
-    except a stack overflow inside evaluation, which becomes a bounded E0003 outcome. *)
+    when written and is never retried. [SIGPIPE] is ignored for the dynamic extent of the call so a
+    host that closes its read end yields [Carrier_lost] instead of a fatal signal; the previous
+    disposition is restored afterwards. Bytes that could not be written stay in the caller's channel
+    buffer, so a process boundary must discard them rather than flush them at exit. Exceptions are
+    contained and reported as [Internal_failure] except a stack overflow inside evaluation, which
+    becomes a bounded E0003 outcome. *)

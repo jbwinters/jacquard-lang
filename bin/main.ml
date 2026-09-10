@@ -2988,6 +2988,16 @@ let build_cmd file out prelude dry_run syntax =
 
 (* --- host worker (HB.2c) --- *)
 
+let discard_standard_output () =
+  match Unix.openfile Filename.null [ Unix.O_WRONLY ] 0 with
+  | null when null = Unix.stdout ->
+      (* descriptor 1 was closed and the null device now occupies it: keep it *)
+      ()
+  | null -> (
+      (try Unix.dup2 null Unix.stdout with Unix.Unix_error _ -> ());
+      try Unix.close null with Unix.Unix_error _ -> ())
+  | exception Unix.Unix_error _ -> ()
+
 let host_worker_cmd store_dir =
   if not (Sys.file_exists store_dir && Sys.is_directory store_dir) then
     print_diags
@@ -3001,8 +3011,17 @@ let host_worker_cmd store_dir =
         | Ok prepared ->
             set_binary_mode_in stdin true;
             set_binary_mode_out stdout true;
-            Host_worker.exit_code
-              (Host_worker.serve prepared ~input:stdin ~output:stdout ~operator:stderr))
+            let status = Host_worker.serve prepared ~input:stdin ~output:stdout ~operator:stderr in
+            (match status with
+            | Host_worker.Carrier_lost ->
+                (* A frame that failed to reach the host must never be resent: point the process's
+                   standard output at the null device so exit-time flushes discard the bytes still
+                   buffered in the channel instead of retrying the carrier. *)
+                discard_standard_output ()
+            | Host_worker.Terminal_written | Host_worker.Protocol_failure
+            | Host_worker.Internal_failure ->
+                ());
+            Host_worker.exit_code status)
 
 let out_arg =
   Arg.(required & opt (some string) None & info [ "o"; "output" ] ~docv:"OUT" ~doc:"Output path.")

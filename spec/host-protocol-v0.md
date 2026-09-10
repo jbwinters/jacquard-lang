@@ -542,6 +542,11 @@ malformed or rejected `invoke`: no checked invocation began. Once preflight
 succeeds and evaluation starts, a violation uses the single error `outcome`.
 Carrier loss may make either frame impossible; E1611 then belongs in
 host/operator evidence and must not be pretended to have come from Core.
+When Core itself observes input loss while its output remains writable, it
+may flush one best-effort frame carrying E1611 as its only terminal; that
+frame is genuine Core evidence of the unanswered exchange, never a verdict on
+the host's outstanding outside action, and the exit status still reports
+carrier loss.
 
 The pre-invocation terminal frame has exactly
 `{"diagnostics":[DIAGNOSTIC...],"kind":"fatal","protocol":"jacquard-host-v0"}`.

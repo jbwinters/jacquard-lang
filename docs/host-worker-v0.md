@@ -63,6 +63,12 @@ conforming host rejects that send locally as E1608.
 | 70 | an internal Core invariant failed |
 | 74 | standard input or output was lost |
 
+The worker ignores `SIGPIPE` for its lifetime, so a host that closes its
+read end produces a structured carrier-loss result rather than a fatal
+signal. A frame that could not be written is never resent: before exiting
+74 the command points its standard output at the null device so exit-time
+channel flushes discard the buffered bytes instead of retrying the carrier.
+
 Carrier loss on standard input is reported as exit 74 even when standard
 output remained writable long enough to flush a best-effort frame. Before an
 invocation that frame is a `fatal` carrying E1611. While a response is
@@ -110,8 +116,9 @@ four host-failure and nine cancellation mappings, pre-invocation shutdown,
 preflight fatals for E1600 through E1605, unconfigured operations, stale and
 malformed responses, buffered post-terminal frames, runtime failures, raw
 framing defects, carrier loss before and during an invocation, the selected
-stderr ceiling, descriptor and channel ownership, prelude-less stores, and a
-property that doubling round-trips every bounded integer. `test/cli/host-worker.t`
+stderr ceiling, descriptor and channel ownership, prelude-less stores, a
+closed output pipe and a closed output descriptor through the installed
+binary, and a property that doubling round-trips every bounded integer. `test/cli/host-worker.t`
 pins the same exchanges through the installed `jacquard` binary, including the
 exit statuses. The HB.1 vector corpus remains the schema/state contract; its
 `noncanonical-target-hash` case names E1603 while the shipped preflight

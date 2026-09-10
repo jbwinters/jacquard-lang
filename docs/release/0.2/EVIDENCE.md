@@ -32,7 +32,7 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1005`
+- Alcotest/QCheck cases: `1007`
 - Cram transcript files: `61`
 - Documentation examples: `28` named examples across `8` documents
 
@@ -99,8 +99,8 @@ inventory to `984 / 60 / 28`. It covers typed responses, terminal mappings,
 finish-once accounting, and bounded evidence. See
 [the session contract](../../host-session-v0.md).
 
-The opt-in serial host worker adds 21 cases and one CLI transcript, bringing
-the current source inventory to `1005 / 61 / 28`. It covers the full
+The opt-in serial host worker adds 23 cases and one CLI transcript, bringing
+the current source inventory to `1007 / 61 / 28`. It covers the full
 `stdio-u32-json-v0` lifetime against a reopened store: pure and effectful
 invocations, every frozen host-failure and cancellation mapping, preflight
 fatals, stale and malformed responses, carrier loss, the selected stderr

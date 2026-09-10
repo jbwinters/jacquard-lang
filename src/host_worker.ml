@@ -94,11 +94,16 @@ let stack_exhausted =
 
 (* --- frame delivery --- *)
 
+let first_code diagnostics =
+  match diagnostics with diagnostic :: _ -> Diag.code_or_uncoded diagnostic | [] -> "E1611"
+
 let deliver operator ~limits output json =
   match Host.write_frame ~limits output json with
   | Ok () -> Terminal_written
-  | Error _ ->
-      note operator "jacquard host worker: the terminal frame could not be written (E1611)";
+  | Error diagnostics ->
+      note operator
+        (Printf.sprintf "jacquard host worker: the terminal frame could not be written (%s)"
+           (first_code diagnostics));
       Carrier_lost
 
 let fatal operator ~limits output diagnostics =
@@ -152,8 +157,10 @@ let invoke prepared operator ~limits ~input ~output session =
         | other -> terminal other)
   and exchange request resume =
     match Host.write_frame ~limits output request with
-    | Error _ ->
-        note operator "jacquard host worker: an effect request could not be written (E1611)";
+    | Error diagnostics ->
+        note operator
+          (Printf.sprintf "jacquard host worker: an effect request could not be written (%s)"
+             (first_code diagnostics));
         Carrier_lost
     | Ok () -> (
         match Host.read_frame ~limits input with
@@ -178,14 +185,24 @@ let invoke prepared operator ~limits ~input ~output session =
 
 (* --- one worker lifetime --- *)
 
+(* A host that closes its read end must produce a structured carrier-loss result, not a fatal
+   signal. The previous disposition is restored when the lifetime ends. *)
+let with_sigpipe_ignored run =
+  match Sys.signal Sys.sigpipe Sys.Signal_ignore with
+  | previous -> Fun.protect ~finally:(fun () -> Sys.set_signal Sys.sigpipe previous) run
+  | exception Invalid_argument _ -> run ()
+
 let serve prepared ~input ~output ~operator =
   let operator =
     { channel = operator; remaining = Host.hard_limits.max_stderr_bytes; truncated = false }
   in
+  with_sigpipe_ignored @@ fun () ->
   try
     match Host.write_frame ~limits:Host.hard_limits output (Host.core_hello ()) with
-    | Error _ ->
-        note operator "jacquard host worker: core_hello could not be written (E1611)";
+    | Error diagnostics ->
+        note operator
+          (Printf.sprintf "jacquard host worker: core_hello could not be written (%s)"
+             (first_code diagnostics));
         Carrier_lost
     | Ok () -> (
         match Host.read_frame ~limits:Host.hard_limits input with

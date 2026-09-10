@@ -3,7 +3,7 @@
 Status: candidate is ready for RC1 only after the exact candidate reproduction
 and required GitHub checks are green.
 
-Test count: `1005`
+Test count: `1007`
 
 Cram count: `61`
 
@@ -54,8 +54,8 @@ inventory to `984 / 60 / 28`. It covers typed responses, terminal mappings,
 finish-once accounting, and bounded evidence. See
 [the session contract](../../host-session-v0.md).
 
-The opt-in serial host worker adds 21 cases and one CLI transcript, bringing
-the current source inventory to `1005 / 61 / 28`. It covers the full
+The opt-in serial host worker adds 23 cases and one CLI transcript, bringing
+the current source inventory to `1007 / 61 / 28`. It covers the full
 `stdio-u32-json-v0` lifetime against a reopened store: pure and effectful
 invocations, every frozen host-failure and cancellation mapping, preflight
 fatals, stale and malformed responses, carrier loss, the selected stderr
