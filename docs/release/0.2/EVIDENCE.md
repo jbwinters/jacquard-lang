@@ -32,7 +32,7 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1015`
+- Alcotest/QCheck cases: `1016`
 - Cram transcript files: `61`
 - Documentation examples: `28` named examples across `8` documents
 
@@ -128,3 +128,11 @@ so a failed installation leaves the store exactly as it was. Pinned by the
 reload case in `test/test_prelude.ml` (one more case, bringing the inventory
 to `1015 / 61 / 28`) and the reopen, mismatch, and rollback blocks of
 `test/cli/store.t`.
+
+Named call arguments over list literals (APP.1) keep the call label on the
+whole list argument and off the generated `cons`/`nil` nodes, so labeled
+constructor and function calls with list literals resolve, reorder, nest, and
+hash identically to their positional twins. Pinned by one more case in
+`test/test_surface_named_calls.ml` (bringing the current source inventory to
+`1016 / 61 / 28`) and the list block of `test/cli/named-args.t`, including a
+repeated label over list arguments reported once as E0311.
