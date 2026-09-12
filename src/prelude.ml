@@ -51,8 +51,10 @@ let read_file path =
 
     A store records the identity of the prelude it was loaded with (file names and byte digests).
     Loading the identical prelude again is a no-op that returns [Ok []] without touching the store;
-    loading a different prelude is refused with E0705 before any mutation. A store created before
-    manifests were recorded is loaded through the trusted view and then gains a manifest. *)
+    loading a different prelude is refused with E0705 before any mutation. Every load resolves
+    prelude references through the trusted view, in which hidden derived members outrank any
+    same-named user binding; a store created before manifests were recorded gains its manifest on
+    the first load. *)
 let load ~dir store : ((string * Canon.decl_hashes list) list, Diag.t list) result =
   if not (Sys.file_exists dir && Sys.is_directory dir) then
     err ~code:"E0701" "prelude directory %s does not exist" dir

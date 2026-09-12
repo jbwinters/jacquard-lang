@@ -99,17 +99,6 @@ inventory to `984 / 60 / 28`. It covers typed responses, terminal mappings,
 finish-once accounting, and bounded evidence. See
 [the session contract](../../host-session-v0.md).
 
-Reopening a persistent store with the public prelude is idempotent: a store
-records the prelude files it was loaded with, an identical prelude reloads as
-a no-op, a different prelude is refused with E0705 before any change, and a
-store made before manifests were recorded loads its prelude through a trusted
-view in which hidden derived members outrank any same-named user binding while
-user programs keep the public view. `jac store add` selects the parser by file
-extension, so the advertised `.jac` installation command works, and refuses a
-file with a top-level expression before installing anything. Pinned by the
-reload case in `test/test_prelude.ml` (one more case, `1008`) and the reopen
-block of `test/cli/store.t`.
-
 The opt-in serial host worker adds 23 cases and one CLI transcript, bringing
 the current source inventory to `1007 / 61 / 28`. It covers the full
 `stdio-u32-json-v0` lifetime against a reopened store: pure and effectful
@@ -125,3 +114,17 @@ binds every synthetic HB.1 vector identity to a real store member, replays all
 worker with a deterministic fake host, and fails on any divergence that is not
 an explicitly recorded pending decision. See
 [the kit README](../../../spec/host-protocol-v0/kit/README.md).
+
+Reopening a persistent store with the public prelude is idempotent: a store
+records the prelude files it was loaded with, an identical prelude reloads as
+a no-op, a different prelude is refused with E0705 before any change, and a
+store made before manifests were recorded loads its prelude through a trusted
+view in which hidden derived members outrank any same-named user binding while
+user programs keep the public view. `jac store add` selects the parser by file
+extension, so the advertised `.jac` installation command works, refuses a
+file with a top-level expression before installing anything, and restores the
+index and object set if any declaration is refused part-way through a file,
+so a failed installation leaves the store exactly as it was. Pinned by the
+reload case in `test/test_prelude.ml` (one more case, bringing the inventory
+to `1015 / 61 / 28`) and the reopen, mismatch, and rollback blocks of
+`test/cli/store.t`.

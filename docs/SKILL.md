@@ -102,7 +102,8 @@ jac test TESTS.jac --allow fs --allow net --allow clock --allow console
 # prelude and every installed declaration and records which prelude files
 # (names and bytes) it was created with: reopening with that prelude is a
 # no-op, so separate entry points can run against one installed model, and
-# reopening with a different prelude is refused (E0705) without changes.
+# reopening with a different prelude is refused (E0705) without changes. A
+# `store add` that refuses any declaration leaves the store exactly as it was.
 jac run MODEL.jac --store STORE
 jac run ENTRY.jac --store STORE
 jac store add STORE PROGRAM.jac

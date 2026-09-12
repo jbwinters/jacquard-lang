@@ -1809,8 +1809,13 @@ let store_add_cmd store_dir file origin syntax =
               (Sys.readdir objects_dir)
           in
           match
-            process_forms ?origin ~syntax store ~file source ~on_expr:(fun _ ->
-                Error [ expression_refusal ])
+            (* an exception part-way through is a refusal too: roll back, then re-raise *)
+            try
+              process_forms ?origin ~syntax store ~file source ~on_expr:(fun _ ->
+                  Error [ expression_refusal ])
+            with exn ->
+              restore ();
+              raise exn
           with
           | Ok () ->
               print_endline "ok";
