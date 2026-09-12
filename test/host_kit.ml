@@ -499,6 +499,7 @@ let play ~binary ~store case =
         reaped := Some status;
         status
   in
+  let stderr = ref "" in
   let status =
     Fun.protect
       ~finally:(fun () ->
@@ -511,7 +512,10 @@ let play ~binary ~store case =
              Unix.kill pid Sys.sigkill;
              ignore (reap ())
            with Unix.Unix_error _ -> ());
-        ())
+        if Sys.file_exists stderr_path then begin
+          (try stderr := read_file stderr_path with Sys_error _ -> ());
+          try Sys.remove stderr_path with Sys_error _ -> ()
+        end)
       (fun () ->
         (try with_deadline 30 run
          with Timeout ->
@@ -519,8 +523,7 @@ let play ~binary ~store case =
            frames := `Assoc [ ("kind", `String "fake-host-timeout") ] :: !frames);
         reap ())
   in
-  let stderr = if Sys.file_exists stderr_path then read_file stderr_path else "" in
-  if Sys.file_exists stderr_path then Sys.remove stderr_path;
+  let stderr = !stderr in
   {
     core_frames = List.rev !frames;
     exit_code = (match status with Unix.WEXITED code -> Some code | _ -> None);

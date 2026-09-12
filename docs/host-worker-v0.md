@@ -104,8 +104,10 @@ messages.
 - One worker serves one invocation. Reusing a process for a second invocation
   is a protocol error; hosts start a fresh worker instead.
 - The carrier is provisional v0 evidence (D79). No stable foreign-host ABI,
-  adapter, HTTP server, or cross-language conformance kit ships here; HB.3
-  publishes the executable fixtures that external adapters pin.
+  adapter, or HTTP server ships here; the HB.3 kit under
+  `spec/host-protocol-v0/kit/` is what external adapters pin, and
+  `docs/release/host-boundary/` records its evidence, limits, and pending
+  decisions.
 
 ## Evidence
 

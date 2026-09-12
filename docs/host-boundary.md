@@ -273,7 +273,7 @@ headers are not smuggled into HB.0.
 |---|---|---|
 | First-party programs | safety for hostile uploaded Jacquard code | separate-process or equivalent isolation design, hostile resource tests, and reviewed threat model |
 | Trusted adapter and OS | protection from a lying host or broader OS credentials | independently enforced isolation/authentication plus external security review |
-| Experimental serial carrier without a published kit | interoperability or embedding support | HB.3 executable cross-language fixtures and evidence pinned by at least one independent adapter |
+| Experimental serial carrier with a published kit pinned by one adapter | interoperability beyond one language, or embedding support | a second independent adapter passes the same fixtures (see `release/host-boundary/LIMITS.md`) |
 | Experimental process carrier first | permanent ABI stability or low-overhead embedding | two independent adapters and one real integration pass the frozen fixtures before v1 |
 | One serial invocation | concurrent requests, streaming, or throughput | demonstrated need followed by the C4 scheduler contract and resource evidence |
 | No automatic side-effect retry | transparent recovery from ambiguous completion | per-operation idempotency, receipt, and crash/recovery contract |
@@ -299,8 +299,12 @@ SQLite, concurrency, or a new kernel form. HB.2a through HB.2c ship the
 codecs, the session accounting, and the `jacquard host worker` carrier
 described in [`host-worker-v0.md`](host-worker-v0.md).
 
-HB.3 publishes the language-neutral conformance kit and Core evidence. Only
-then does the external adapter start against a released pin.
+HB.3 published the language-neutral conformance kit
+([`spec/host-protocol-v0/kit/`](../spec/host-protocol-v0/kit/README.md)) and
+its evidence pack ([`release/host-boundary/`](release/host-boundary/EVIDENCE.md)).
+The first external adapter, jacquard-host, pinned that kit, replayed it in
+full, and returned its authority inventory and a versioned requirements
+report; those are the inputs to the gates below.
 
 The external serial HTTP integration reports concrete authority needs back to
 Core. That report gates resource attenuation. Measured concurrency need gates

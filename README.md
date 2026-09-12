@@ -730,8 +730,10 @@ proofs also do not ship. World grants remain coarse. See
 `docs/host-boundary.md` freezes the ownership and trust model, and
 `spec/host-protocol-v0.md` freezes the experimental language-neutral envelopes,
 process framing, limits, and schema/state vectors. `jac host worker` is the
-experimental serial carrier for that protocol; no stable ABI, adapter,
-cross-language conformance kit, or HTTP server ships in this repository today.
+experimental serial carrier for that protocol, and
+`spec/host-protocol-v0/kit/` is the executable conformance kit external
+adapters pin, with its evidence and limits in `docs/release/host-boundary/`;
+no stable ABI, adapter, or HTTP server ships in this repository.
 The deterministic Workspace v0 governance boundary is separately advertised
 as an evidence-backed research reference implementation, not as a sandbox or
 production security system; its exact claim and trusted-host limits are in
