@@ -38,7 +38,8 @@ project shape from file names alone.
   and closed once-operation registries. The [session layer](host-session-v0.md)
   accounts for serial responses and terminal evidence, and the
   [HB.2c worker](host-worker-v0.md) is the opt-in `jacquard host worker`
-  process carrier. No cross-language conformance kit ships until HB.3.
+  process carrier. The [HB.3 kit](../spec/host-protocol-v0/kit/README.md)
+  binds the vectors to real fixtures and replays them through the worker.
 - `development-plan.md`: completed historical task plan and milestone
   discipline; not the current backlog.
 - `host-boundary.md`: HB.0 transport-neutral ownership, trust, containment,

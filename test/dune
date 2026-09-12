@@ -171,11 +171,33 @@
  (modules host_worker_focused)
  (libraries host_worker_test_support alcotest))
 
+(library
+ (name host_kit_support)
+ (wrapped false)
+ (modules host_kit)
+ (libraries jacquard unix str yojson))
+
+(executable
+ (name gen_host_kit)
+ (modules gen_host_kit)
+ (libraries jacquard host_kit_support yojson))
+
+(library
+ (name host_kit_test_support)
+ (wrapped false)
+ (modules test_host_kit)
+ (libraries jacquard host_kit_support alcotest unix yojson))
+
+(executable
+ (name host_kit_focused)
+ (modules host_kit_focused)
+ (libraries host_kit_test_support alcotest))
+
 (test
  (name test_jacquard)
  (modules
-  (:standard \ corpus_support gen_goldens gen_surface_twins gen_prelude_goldens gen_sig_goldens gen_freeze_goldens gen_diag_goldens gen_native_parity gen_governance_playground_fixtures native_fuzz effect_payload_runtime_probe once_interpreter_probe gen_once_hostile scope_policy_trace round_robin_trace run_transcript_trace test_governance_review_diff governance_review_diff_focused test_host_protocol_vectors host_protocol_vectors_focused test_host_protocol_codec host_protocol_codec_focused test_host_boundary_codec host_boundary_codec_focused test_host_invoke_preflight host_invoke_preflight_focused test_host_session host_session_focused test_host_worker host_worker_focused))
- (libraries jacquard governance_review_diff_test_support host_protocol_vectors_test_support host_protocol_codec_test_support host_boundary_codec_test_support host_invoke_preflight_test_support host_session_test_support host_worker_test_support corpus_support alcotest fmt qcheck-core qcheck-alcotest unix str yojson)
+  (:standard \ corpus_support gen_goldens gen_surface_twins gen_prelude_goldens gen_sig_goldens gen_freeze_goldens gen_diag_goldens gen_native_parity gen_governance_playground_fixtures native_fuzz effect_payload_runtime_probe once_interpreter_probe gen_once_hostile scope_policy_trace round_robin_trace run_transcript_trace test_governance_review_diff governance_review_diff_focused test_host_protocol_vectors host_protocol_vectors_focused test_host_protocol_codec host_protocol_codec_focused test_host_boundary_codec host_boundary_codec_focused test_host_invoke_preflight host_invoke_preflight_focused test_host_session host_session_focused test_host_worker host_worker_focused host_kit gen_host_kit test_host_kit host_kit_focused))
+ (libraries jacquard governance_review_diff_test_support host_protocol_vectors_test_support host_protocol_codec_test_support host_boundary_codec_test_support host_invoke_preflight_test_support host_session_test_support host_worker_test_support host_kit_test_support corpus_support alcotest fmt qcheck-core qcheck-alcotest unix str yojson)
  (action
   (setenv JACQUARD %{bin:jacquard} (run %{test})))
  (deps
@@ -205,6 +227,7 @@
   ../spec/host-protocol-v0.md
   ../spec/host-protocol-v0/README.md
   ../spec/host-protocol-v0/vectors.json
+  (source_tree ../spec/host-protocol-v0/kit)
   ../docs/concurrency.md
   ../docs/README.md
   ../docs/release/0.2/DECISION.md

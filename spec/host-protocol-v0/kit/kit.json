@@ -1,0 +1,106 @@
+{
+  "bindings": {
+    "1111111111111111111111111111111111111111111111111111111111111111": {
+      "identity": "ca456459bd7fbe8c9694388e1246c4333221817248d24707f05b7423828516e3",
+      "member": "text"
+    },
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": {
+      "identity": "2af2f2e66770cf0597374a97b4c3988dc0c3f9b42d87f6f430be53525ce6a7ec",
+      "member": "kit-ready"
+    },
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": {
+      "identity": "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0",
+      "member": "kit-world"
+    },
+    "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc": {
+      "identity": "3120a126f44773feba44f437ef0d2514e5e55764e1c0667f6434561f430c5722",
+      "member": "send"
+    },
+    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd": {
+      "identity": "91d93eb6a5a3390035a17eb4d4ce24cf8e18369e458d0382f17328fd9df303d2",
+      "member": "kit-echo"
+    }
+  },
+  "carrier": "stdio-u32-json-v0",
+  "core_version": "0.2.0",
+  "diagnostic_prose": {
+    "cause_suffix_rule": "an effect_failure message must end the first diagnostic's cause",
+    "compared": [ "schema", "domain", "code", "severity", "span" ],
+    "drift": [
+      {
+        "path": "refused_outcome/result/diagnostics/0/summary",
+        "transcript": "refused-authority"
+      },
+      {
+        "path": "refused_outcome/result/diagnostics/0/cause",
+        "transcript": "refused-authority"
+      },
+      {
+        "path": "refused_outcome/result/diagnostics/0/next_step",
+        "transcript": "refused-authority"
+      },
+      {
+        "path": "timeout_unknown_outcome/result/diagnostics/0/summary",
+        "transcript": "timeout-with-unknown-completion"
+      },
+      {
+        "path": "timeout_unknown_outcome/result/diagnostics/0/cause",
+        "transcript": "timeout-with-unknown-completion"
+      },
+      {
+        "path": "timeout_unknown_outcome/result/diagnostics/0/next_step",
+        "transcript": "timeout-with-unknown-completion"
+      }
+    ],
+    "normative": false
+  },
+  "hard_limits": {
+    "max_arguments": 64,
+    "max_collection_items": 1024,
+    "max_diagnostic_bytes": 65536,
+    "max_diagnostics": 32,
+    "max_effect_requests": 1024,
+    "max_effects": 64,
+    "max_frame_bytes": 1048576,
+    "max_host_message_bytes": 4096,
+    "max_json_depth": 64,
+    "max_operations": 256,
+    "max_stderr_bytes": 65536,
+    "max_text_bytes": 262144,
+    "max_value_nodes": 4096
+  },
+  "host_owned": [
+    "operator text on the worker's standard error",
+    "the exact moment a carrier loss is observed",
+    "any run identifier, timestamp, peer identity, or receipt an adapter records outside the Core frames"
+  ],
+  "identities": {
+    "int": "907085f5670ab5835e5356feb10ae729496e3816b863ddbb21cfe289e7d34f0d",
+    "kit-double": "1e5b4939f0d7b13b0502fbb04d75659a7e01ee4927ad8a5f1c64637c90357c8f",
+    "kit-echo": "91d93eb6a5a3390035a17eb4d4ce24cf8e18369e458d0382f17328fd9df303d2",
+    "kit-fail": "d337c5d51261e63407923b4aaaf6c411bee7185711358523e9c77626d9152a36",
+    "kit-ready": "2af2f2e66770cf0597374a97b4c3988dc0c3f9b42d87f6f430be53525ce6a7ec",
+    "kit-twice": "2451609ed1af76f59a8ec47a9f3bd792e1e888e0ffaa6518e3f097a66339cd23",
+    "kit-world": "44b60d80136d8f1366f32889d56ced087381a1ef31646d7ff173d5c36bbe4db0",
+    "send": "3120a126f44773feba44f437ef0d2514e5e55764e1c0667f6434561f430c5722",
+    "text": "ca456459bd7fbe8c9694388e1246c4333221817248d24707f05b7423828516e3"
+  },
+  "pending_decisions": [
+    {
+      "expected": "E1603",
+      "name": "noncanonical-target-hash",
+      "observed": "E1601"
+    }
+  ],
+  "protocol": "jacquard-host-v0",
+  "recipe": {
+    "command": "jacquard run fixtures.jac --store DIR",
+    "fixtures": "fixtures.jac",
+    "prelude": "the prelude shipped with the same Core release",
+    "worker": "jacquard host worker --store DIR"
+  },
+  "schema": "jacquard-host-kit-v0",
+  "transcript_count": 21,
+  "transcripts": "transcripts.json",
+  "vectors": "../vectors.json"
+}

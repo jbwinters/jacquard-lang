@@ -609,8 +609,11 @@ process carrier in `Host_worker`: it evaluates the preflighted target without
 root handlers, exchanges configured once operations through the session
 layer, flushes exactly one terminal frame, bounds operator output, and reports
 the exit statuses of section 3. Its ownership and lifecycle table is
-[`docs/host-worker-v0.md`](../docs/host-worker-v0.md). No cross-language
-conformance kit is published until HB.3.
+[`docs/host-worker-v0.md`](../docs/host-worker-v0.md). HB.3 publishes the
+executable kit under [`host-protocol-v0/kit/`](host-protocol-v0/kit/README.md):
+fixture declarations, a manifest binding every synthetic vector identity to a
+real store member, and one replayable transcript per vector, produced and
+checked by a deterministic fake host against the installed worker.
 
 A conforming implementation must:
 

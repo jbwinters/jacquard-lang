@@ -122,5 +122,5 @@ binary, and a property that doubling round-trips every bounded integer. `test/cl
 pins the same exchanges through the installed `jacquard` binary, including the
 exit statuses. The HB.1 vector corpus remains the schema/state contract; its
 `noncanonical-target-hash` case names E1603 while the shipped preflight
-classifies an uppercase hash as a malformed scalar (E1601), a discrepancy to
-resolve when HB.3 packages the executable fixtures.
+classifies an uppercase hash as a malformed scalar (E1601); the kit records
+this under its pending decisions for a reviewed resolution.

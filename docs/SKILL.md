@@ -908,8 +908,9 @@ Do not invent new kernel forms for surface sugar.
   for bounded evidence, and returns request/resume/terminal actions
   (`host-session-v0.md`). HB.2c ships `jac host worker --store DIR`, the
   opt-in serial process carrier that evaluates one preflighted invocation over
-  stdin/stdout frames (`host-worker-v0.md`). No stable foreign-host ABI,
-  adapter, cross-language conformance kit, or HTTP server ships yet.
+  stdin/stdout frames (`host-worker-v0.md`). HB.3a publishes the executable
+  conformance kit under `spec/host-protocol-v0/kit/`. No stable foreign-host
+  ABI, adapter, or HTTP server ships yet.
   Internal evaluator-capture and host-readiness OCaml APIs are not supported
   embedding contracts; future adapters must consume the versioned protocol and
   its executable conformance fixtures, not those OCaml seams.
