@@ -156,3 +156,11 @@ resolve; a labeled call keeps the positional call's identity and behavior in bot
   $ jac hash labeled-list.jac > labeled-list.hash
   $ cmp positional-list.hash labeled-list.hash && echo hash-identical
   hash-identical
+
+A repeated label whose arguments are list literals is the ordinary duplicate-label error, reported
+once for the call and never for the generated list nodes:
+
+  $ printf 'both(count: n, items: xs) = (n, xs)\nboth(items: [1], items: [2])\n' > duplicate-list.jac
+  $ jac check duplicate-list.jac > duplicate-list.out 2>&1; status=$?; grep -c 'error\[E0311\]' duplicate-list.out; echo "exit:$status"
+  1
+  exit:1

@@ -304,8 +304,10 @@ let rec call_labels acc (expression : Kernel.expr) =
   | Kernel.Tuple items -> List.fold_left call_labels acc items
   | _ -> acc
 
-(* Generated interior list nodes (`list-cons-constructor`, `list-tail`, `list-nil`) that carry a
-   call label would be elaborated against `cons`'s ABI; collect any such node's label. *)
+(* Generated interior list nodes that carry a call label would be elaborated against `cons`'s
+   ABI. This walk keys on `surface_generated`, which marks the `list-cons-constructor` and
+   `list-nil` nodes; `list-tail` nodes carry no generated marker and are covered by the
+   `call_labels` walk above. *)
 let rec labeled_generated_list_nodes acc (expression : Kernel.expr) =
   let acc =
     match (Meta.surface_generated expression.meta, Meta.surface_call_label expression.meta) with
