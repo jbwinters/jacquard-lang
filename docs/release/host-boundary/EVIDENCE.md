@@ -49,7 +49,8 @@ checkout reproduces every identity in `kit.json`.
   `diagnostic_prose.drift` in `kit.json`; see DECISION.md.
 - All 13 terminal mappings execute with the frozen primary code and terminal
   classification.
-- Worker evidence: 23 cases in `test/test_host_worker.ml` and
+- Worker evidence: 23 cases (22 Alcotest cases and one QCheck property) in
+  `test/test_host_worker.ml` and
   `test/cli/host-worker.t`, including dead-output and carrier-loss exit
   statuses; kit evidence: 7 cases in `test/test_host_kit.ml`.
 - Source inventory at publication: `1014 / 61 / 28` Alcotest-QCheck cases,
@@ -78,15 +79,16 @@ registry bindings by operation hash only; the pending
 `noncanonical-target-hash` decision; no frozen pair for a completed but
 unrepresentable result; no host-side handler deadline in the protocol
 (recorded as a host limit); and this evidence pack itself. None of them
-blocked the adapter; each names the Core change that would remove a
-workaround.
+blocked the adapter; nine name the Core change that would remove a
+workaround and the tenth confirms HP0.8 needs nothing.
 
 ## Gates
 
 Required contexts on each PR above: Development gate, Native parity (clang),
 Native parity (gcc), Governance playground, GM12B exhaustive forwarding
 evidence. Independent review: #114 review 1 BLOCK (standard-output carrier
-loss) fixed in the same PR, review 2 PASS; #115 review PASS.
+loss) fixed in the same PR, review 2 PASS; #115 review 1 aborted without a
+verdict, reviews 2 and 3 PASS.
 
 ## Reproduction
 
@@ -96,3 +98,5 @@ opam exec -- dune build @all
 NO_COLOR=1 opam exec -- dune runtest
 opam exec -- dune exec test/gen_host_kit.exe && git diff --exit-code spec/host-protocol-v0/kit
 ```
+
+In a nested worktree add `--root .` to each dune command.

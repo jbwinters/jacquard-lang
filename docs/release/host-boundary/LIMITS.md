@@ -11,6 +11,7 @@ Each names the condition for its removal. Silence never widens a claim.
 | One independent adapter (jacquard-host, Python) | interoperability beyond one language | a second independent adapter (jacquard-host's Rust track) passes the same kit before any v1 claim |
 | One serial invocation, one outstanding request | concurrency, streaming, callbacks, throughput | demonstrated need, then the C4 scheduler contract and resource evidence |
 | No automatic side-effect retry (D83) | transparent recovery from ambiguous completion | per-operation idempotency, receipts, and a crash/recovery contract |
+| Controlled replay fixtures (D84) | production traffic replay | explicit privacy, retention, redaction, and evidence-store authority |
 | Coarse Core 0.2 grants | domain, path, port, or database-row containment | the host authority report, then Task 202's reviewed attenuation algebra |
 | No deadline or memory ceiling in the worker | protection from a runaway target | host process limits (jacquard-host) and Core fuel/allocation limits |
 | Startup configuration failures exit 1 | a protocol status for a missing or unpopulated store | a later protocol version or a documented host-side classification |
