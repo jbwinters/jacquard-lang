@@ -6,6 +6,8 @@ let () =
   let kit = Host_kit.kit_dir () in
   let binary = Host_kit.default_binary () in
   let store = Host_kit.fresh_path "store" in
+  (* the store is scratch on every exit path, including a failed recipe *)
+  at_exit (fun () -> if Sys.file_exists store then Host_kit.remove_tree store);
   (match
      Host_kit.build_store ~binary
        ~fixtures:(Filename.concat kit "fixtures.jac")
@@ -59,6 +61,5 @@ let () =
   Host_kit.write_file
     (Filename.concat kit "transcripts.json")
     (Yojson.Safe.pretty_to_string (`List transcripts) ^ "\n");
-  Host_kit.remove_tree store;
   Printf.printf "host kit: %d transcripts, %d diverging\n" (List.length transcripts)
     (List.length pending)

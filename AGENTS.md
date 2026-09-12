@@ -127,7 +127,8 @@ When adding valid corpus files, regenerate the golden hashes with
   `src/host_worker.ml`, `test/test_host_worker.ml`, `test/cli/host-worker.t`,
   and `docs/host-worker-v0.md`. The executable conformance kit and its fake
   host: `spec/host-protocol-v0/kit/`, `test/host_kit.ml`,
-  `test/test_host_kit.ml`, regenerated with `dune exec test/gen_host_kit.exe`.
+  `test/test_host_kit.ml`, regenerated with `dune exec test/gen_host_kit.exe`;
+  the HB.3 evidence pack is `docs/release/host-boundary/`.
   Existing evaluator capture and host-readiness
   modules are internal seams, not a public ABI; adapters and application
   servers belong outside this repository.

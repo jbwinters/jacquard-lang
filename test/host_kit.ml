@@ -84,13 +84,15 @@ let write_file path contents =
   let channel = open_out_bin path in
   Fun.protect ~finally:(fun () -> close_out channel) (fun () -> output_string channel contents)
 
+(* best effort on every step: scratch removal must never raise, least of all from at_exit *)
 let rec remove_tree path =
-  match Unix.lstat path with
-  | { Unix.st_kind = Unix.S_DIR; _ } ->
-      Array.iter (fun entry -> remove_tree (Filename.concat path entry)) (Sys.readdir path);
-      Unix.rmdir path
-  | _ -> Sys.remove path
-  | exception Unix.Unix_error _ -> ()
+  try
+    match Unix.lstat path with
+    | { Unix.st_kind = Unix.S_DIR; _ } ->
+        Array.iter (fun entry -> remove_tree (Filename.concat path entry)) (Sys.readdir path);
+        Unix.rmdir path
+    | _ -> Sys.remove path
+  with Unix.Unix_error _ | Sys_error _ -> ()
 
 let bytes_of_hex hex =
   String.init
@@ -499,19 +501,23 @@ let play ~binary ~store case =
         reaped := Some status;
         status
   in
+  let stderr = ref "" in
   let status =
     Fun.protect
       ~finally:(fun () ->
         close_input ();
         close_in_noerr output;
         Sys.set_signal Sys.sigpipe previous;
-        (* any other failure must still reap the worker and drop its operator file *)
-        (if Option.is_none !reaped then
-           try
-             Unix.kill pid Sys.sigkill;
-             ignore (reap ())
-           with Unix.Unix_error _ -> ());
-        ())
+        (* any other failure must still reap the worker and drop its operator file; a kill
+           that fails (the child already exited) must not skip the reap *)
+        if Option.is_none !reaped then begin
+          (try Unix.kill pid Sys.sigkill with Unix.Unix_error _ -> ());
+          try ignore (reap ()) with Unix.Unix_error _ -> ()
+        end;
+        if Sys.file_exists stderr_path then begin
+          (try stderr := read_file stderr_path with Sys_error _ -> ());
+          try Sys.remove stderr_path with Sys_error _ -> ()
+        end)
       (fun () ->
         (try with_deadline 30 run
          with Timeout ->
@@ -519,8 +525,7 @@ let play ~binary ~store case =
            frames := `Assoc [ ("kind", `String "fake-host-timeout") ] :: !frames);
         reap ())
   in
-  let stderr = if Sys.file_exists stderr_path then read_file stderr_path else "" in
-  if Sys.file_exists stderr_path then Sys.remove stderr_path;
+  let stderr = !stderr in
   {
     core_frames = List.rev !frames;
     exit_code = (match status with Unix.WEXITED code -> Some code | _ -> None);
