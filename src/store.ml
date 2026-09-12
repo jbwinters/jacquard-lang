@@ -538,33 +538,39 @@ let lookup_all t n = List.filter_map (fun (m, e) -> if m = n then Some e else No
 (** The binding of [n] with kind [k], if any. *)
 let lookup_kind t n k = List.find_opt (fun e -> e.Resolve.kind = k) (lookup_all t n)
 
-(** [lookup_internal_kind t name kind] resolves a public binding or a hidden derived prelude member
-    by its immutable declaration metadata. This is a trusted host-only seam for wiring private
-    builtin markers after reopen; language resolution must continue to use [names_view]. *)
+(** [lookup_hidden_kind t name kind] resolves a hidden derived prelude member by its immutable
+    declaration metadata, ignoring public bindings. This is a trusted host-only seam for wiring
+    private builtin markers after reopen; language resolution must continue to use [names_view]. *)
+let lookup_hidden_kind t name kind =
+  let hidden_name hash =
+    match locate_internal t hash with
+    | Error _ -> None
+    | Ok { decl; role; _ } ->
+        let candidate =
+          match (decl.Kernel.it, role) with
+          | Kernel.DefTerm bindings, Member index ->
+              Option.map (fun binding -> binding.Kernel.bname) (List.nth_opt bindings index)
+          | Kernel.DefType { cons; _ }, Constructor index ->
+              Option.map (fun con -> con.Kernel.con_name) (List.nth_opt cons index)
+          | Kernel.DefEffect { ops; _ }, Operation index ->
+              Option.map (fun op -> op.Kernel.op_name) (List.nth_opt ops index)
+          | _ -> None
+        in
+        Option.bind candidate (fun candidate_name ->
+            if String.equal candidate_name name && entry_kind decl role = kind then
+              Some { Resolve.hash; kind }
+            else None)
+  in
+  List.find_map hidden_name t.hidden
+
+(** [lookup_internal_kind t name kind] resolves a hidden derived prelude member first and otherwise
+    a public binding. Hidden members win so that trusted wiring of private builtin markers can never
+    land on a same-named binding a user installed later; see {!lookup_hidden_kind} for the
+    hidden-only scan. *)
 let lookup_internal_kind t name kind =
-  match lookup_kind t name kind with
-  | Some _ as public -> public
-  | None ->
-      let hidden_name hash =
-        match locate_internal t hash with
-        | Error _ -> None
-        | Ok { decl; role; _ } ->
-            let candidate =
-              match (decl.Kernel.it, role) with
-              | Kernel.DefTerm bindings, Member index ->
-                  Option.map (fun binding -> binding.Kernel.bname) (List.nth_opt bindings index)
-              | Kernel.DefType { cons; _ }, Constructor index ->
-                  Option.map (fun con -> con.Kernel.con_name) (List.nth_opt cons index)
-              | Kernel.DefEffect { ops; _ }, Operation index ->
-                  Option.map (fun op -> op.Kernel.op_name) (List.nth_opt ops index)
-              | _ -> None
-            in
-            Option.bind candidate (fun candidate_name ->
-                if String.equal candidate_name name && entry_kind decl role = kind then
-                  Some { Resolve.hash; kind }
-                else None)
-      in
-      List.find_map hidden_name t.hidden
+  match lookup_hidden_kind t name kind with
+  | Some _ as hidden -> hidden
+  | None -> lookup_kind t name kind
 
 (** First binding of [n] by kind rank; prefer {!lookup_kind} when the kind is known. *)
 let lookup_name t n = match lookup_all t n with [] -> None | e :: _ -> Some e
@@ -613,6 +619,49 @@ let names_view t : Resolve.names =
       (fun hash ->
         Option.map snd (List.find_opt (fun (known, _) -> Hash.equal known hash) t.call_abis));
   }
+
+(** [trusted_names_view t] is [names_view t] whose [lookup] also resolves hidden derived prelude
+    members by their immutable declaration names. It exists so that reloading the first-party
+    prelude into a store that already hides those members remains idempotent; language resolution of
+    user programs must keep using [names_view], which never exposes hidden members. *)
+let trusted_names_view t : Resolve.names =
+  let public = names_view t in
+  let hidden_entries name =
+    List.filter_map
+      (fun kind -> lookup_hidden_kind t name kind)
+      [ Resolve.KTerm; Resolve.KCon; Resolve.KOp; Resolve.KType; Resolve.KEffect ]
+  in
+  (* hidden members come first: a user binding that happens to reuse a derived member's name
+     must never be substituted into the prelude's own declarations during a reload *)
+  { public with Resolve.lookup = (fun name -> hidden_entries name @ public.Resolve.lookup name) }
+
+let prelude_manifest_file t = Filename.concat t.root "prelude.manifest"
+
+(** [prelude_manifest t] is the identity of the prelude the store was loaded with: one
+    [(file, digest)] pair per prelude file in load order, or [None] when the store predates
+    manifests or holds no prelude yet. *)
+let prelude_manifest t : (string * string) list option =
+  let path = prelude_manifest_file t in
+  if not (Sys.file_exists path) then None
+  else
+    read_file path |> String.split_on_char '\n'
+    |> List.filter_map (fun line ->
+        match String.index_opt line ' ' with
+        | Some i when i > 0 ->
+            Some (String.sub line (i + 1) (String.length line - i - 1), String.sub line 0 i)
+        | _ -> None)
+    |> Option.some
+
+(** [write_prelude_manifest t entries] records the loaded prelude's identity atomically. *)
+let write_prelude_manifest t entries =
+  let path = prelude_manifest_file t in
+  let temporary = path ^ ".tmp" in
+  let channel = open_out_bin temporary in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr channel)
+    (fun () ->
+      List.iter (fun (file, digest) -> Printf.fprintf channel "%s %s\n" digest file) entries);
+  Sys.rename temporary path
 
 (** [bind_name t name hash] binds [name] to a hash already known to the store. Fails on an
     unprintable name (E0605) and on a [defterm] group's whole hash (E0604) — groups are addressed

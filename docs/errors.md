@@ -138,6 +138,7 @@ malformed source, path, or host-message byte in a string field is replaced with 
 | E0702 | prelude name missing or wrong kind | truncated prelude |
 | E0703 | effect not grantable | `--allow filesystem` |
 | E0704 | store add expects declarations only | an expression in `jacquard store add` |
+| E0705 | prelude differs from the store's recorded prelude | reopening a store with an edited prelude directory |
 
 ## Type and effect checker (E08xx, W08xx)
 

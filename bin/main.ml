@@ -1764,16 +1764,65 @@ let diff_cmd operand_a operand_b syntax prelude =
 let with_store store_dir f =
   match Store.open_store store_dir with Error ds -> print_diags ds | Ok store -> f store
 
-let store_add_cmd store_dir file origin =
+let store_add_cmd store_dir file origin syntax =
   with_store store_dir (fun store ->
-      match
-        process_forms ?origin ~syntax:Bootstrap store ~file (read_file file) ~on_expr:(fun _ ->
-            Error [ cli_diagnostic ~code:"E0704" "store add expects declarations only" ])
-      with
-      | Ok () ->
-          print_endline "ok";
-          ok
-      | Error ds -> print_diags ds)
+      let source = read_file file in
+      let expression_refusal = cli_diagnostic ~code:"E0704" "store add expects declarations only" in
+      (* refuse before installing anything: a file with a top-level expression must leave the
+         store exactly as it was *)
+      let declarations_only =
+        Result.bind
+          (parse_tops ~syntax ~names:(Store.names_view store) ~file source)
+          (fun (tops, _warnings) ->
+            let rec check = function
+              | [] -> Ok ()
+              | parsed :: rest ->
+                  Result.bind (validate_parsed_top parsed) (function
+                    | Kernel.Expr _ -> Error [ expression_refusal ]
+                    | Kernel.Decl _ -> check rest)
+            in
+            check tops)
+      in
+      match declarations_only with
+      | Error ds -> print_diags ds
+      | Ok () -> (
+          (* a failure part-way through a file must leave the store as it was: snapshot the
+             index and object set, and restore them if any declaration is refused *)
+          let names_path = Filename.concat store_dir "names.jqd" in
+          let objects_dir = Filename.concat store_dir "objects" in
+          let names_before =
+            if Sys.file_exists names_path then Some (read_file names_path) else None
+          in
+          let objects_before = Sys.readdir objects_dir |> Array.to_list in
+          let restore () =
+            (match names_before with
+            | Some bytes ->
+                let channel = open_out_bin names_path in
+                Fun.protect
+                  ~finally:(fun () -> close_out channel)
+                  (fun () -> output_string channel bytes)
+            | None -> if Sys.file_exists names_path then Sys.remove names_path);
+            Array.iter
+              (fun entry ->
+                if not (List.mem entry objects_before) then
+                  Sys.remove (Filename.concat objects_dir entry))
+              (Sys.readdir objects_dir)
+          in
+          match
+            (* an exception part-way through is a refusal too: roll back, then re-raise *)
+            try
+              process_forms ?origin ~syntax store ~file source ~on_expr:(fun _ ->
+                  Error [ expression_refusal ])
+            with exn ->
+              restore ();
+              raise exn
+          with
+          | Ok () ->
+              print_endline "ok";
+              ok
+          | Error ds ->
+              restore ();
+              print_diags ds))
 
 let store_name_cmd store_dir name hex =
   with_store store_dir (fun store ->
@@ -2391,7 +2440,7 @@ let store_t =
         const (configure_diagnostics store_add_cmd)
         $ diagnostic_format_arg $ store_pos_dir
         $ Arg.(required & pos 1 (some file) None & info [] ~docv:"FILE")
-        $ origin_arg)
+        $ origin_arg $ syntax_arg)
   in
   let name =
     Cmd.v

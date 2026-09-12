@@ -522,8 +522,159 @@ let test_handler_overrides_grant () =
   | Error e -> Alcotest.failf "interposed run failed: %s" (Runtime_err.to_string e));
   Alcotest.(check string) "handler swallowed the print" "" (Buffer.contents buf)
 
+(* APP.4: loading the prelude into a store that already holds it is idempotent, hidden derived
+   members stay hidden from the public resolver view, and only the trusted loading view can name
+   them. *)
+let read_bytes path =
+  let channel = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr channel)
+    (fun () -> really_input_string channel (in_channel_length channel))
+
+let test_reload_is_idempotent () =
+  let root =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "jacquard-prelude-reload-%d" (Unix.getpid ()))
+  in
+  let load () =
+    match Store.open_store root with
+    | Error diagnostics ->
+        Alcotest.failf "open store: %s" (String.concat "; " (List.map Diag.to_string diagnostics))
+    | Ok store -> (
+        match Prelude.load ~dir:"../prelude" store with
+        | Ok _ -> store
+        | Error diagnostics ->
+            Alcotest.failf "prelude load: %s"
+              (String.concat "; " (List.map Diag.to_string diagnostics)))
+  in
+  let objects () = Array.length (Sys.readdir (Filename.concat root "objects")) in
+  let names_path = Filename.concat root "names.jqd" in
+  ignore (load ());
+  let first_names = read_bytes names_path and first_objects = objects () in
+  let store = load () in
+  Alcotest.(check string)
+    "name index unchanged by a second load" first_names (read_bytes names_path);
+  Alcotest.(check int) "object count unchanged by a second load" first_objects (objects ());
+  List.iter
+    (fun (name, kind) ->
+      Alcotest.(check bool)
+        (name ^ " stays hidden from the public view")
+        true
+        (Store.lookup_kind store name kind = None
+        && (Store.names_view store).Resolve.lookup name = []);
+      Alcotest.(check bool)
+        (name ^ " resolves through the trusted loading view")
+        true
+        (List.exists
+           (fun (entry : Resolve.entry) -> entry.Resolve.kind = kind)
+           ((Store.trusted_names_view store).Resolve.lookup name)))
+    [
+      ("governance.fresh-audit-run-id", Resolve.KTerm);
+      ("governance.require-audit-run-id", Resolve.KTerm);
+      ("audit-sequence-v0", Resolve.KCon);
+    ];
+  Alcotest.(check bool)
+    "public names are identical in both views" true
+    ((Store.names_view store).Resolve.lookup "mul"
+    = (Store.trusted_names_view store).Resolve.lookup "mul");
+  (* the identical prelude reloads as a manifest no-op *)
+  (match Prelude.load ~dir:"../prelude" store with
+  | Ok [] -> ()
+  | Ok _ -> Alcotest.fail "an identical prelude must reload without installing anything"
+  | Error diagnostics ->
+      Alcotest.failf "reload: %s" (String.concat "; " (List.map Diag.to_string diagnostics)));
+  (* a different prelude is refused before any mutation *)
+  let edited = root ^ "-prelude" in
+  Sys.mkdir edited 0o755;
+  Array.iter
+    (fun file ->
+      if Filename.check_suffix file ".jqd" then begin
+        let bytes = read_bytes (Filename.concat "../prelude" file) in
+        let channel = open_out_bin (Filename.concat edited file) in
+        output_string channel bytes;
+        if String.equal file "02-data.jqd" then output_string channel "\n; edited\n";
+        close_out channel
+      end)
+    (Sys.readdir "../prelude");
+  (match Prelude.load ~dir:edited store with
+  | Error (diagnostic :: _) ->
+      Alcotest.(check string) "mismatch diagnostic" "E0705" (Diag.code_or_uncoded diagnostic);
+      Alcotest.(check bool)
+        "mismatch names the changed file" true
+        (Str.string_match (Str.regexp ".*changed: 02-data.jqd") (Diag.cause diagnostic) 0)
+  | Error [] -> Alcotest.fail "mismatch produced no diagnostic"
+  | Ok _ -> Alcotest.fail "a different prelude must be refused");
+  Alcotest.(check string)
+    "name index unchanged by a refused load" first_names (read_bytes names_path);
+  Alcotest.(check int) "object count unchanged by a refused load" first_objects (objects ());
+  (* a user binding that reuses a hidden member's name never displaces the prelude's identity,
+     neither on the manifest fast path nor on a legacy store without a manifest *)
+  let fail_diags label diagnostics =
+    Alcotest.failf "%s: %s" label (String.concat "; " (List.map Diag.to_string diagnostics))
+  in
+  let shadow =
+    match
+      Reader.parse_one ~file:"shadow.jqd"
+        "(defterm ((binding governance.fresh-audit-run-id () (lit 7))))"
+    with
+    | Error diagnostics -> fail_diags "parse shadow" diagnostics
+    | Ok form -> (
+        match Kernel.decl_of_form form with
+        | Error diagnostics -> fail_diags "shadow declaration" diagnostics
+        | Ok declaration -> (
+            match Resolve.resolve_decl (Store.names_view store) declaration with
+            | Error diagnostics -> fail_diags "resolve shadow" diagnostics
+            | Ok declaration -> (
+                match Store.put_decl store declaration with
+                | Error diagnostics -> fail_diags "put shadow" diagnostics
+                | Ok hashes -> List.assoc "governance.fresh-audit-run-id" hashes.Canon.named)))
+  in
+  let objects_with_shadow = objects () and hidden_before = store.Store.hidden in
+  (match Prelude.load ~dir:"../prelude" store with
+  | Ok [] -> ()
+  | _ -> Alcotest.fail "fast path must still apply after a user install");
+  Alcotest.(check bool)
+    "fast path keeps the user's public binding" true
+    (match Store.lookup_kind store "governance.fresh-audit-run-id" Resolve.KTerm with
+    | Some { Resolve.hash; _ } -> Hash.equal hash shadow
+    | None -> false);
+  Sys.remove (Store.prelude_manifest_file store);
+  let store = load () in
+  Alcotest.(check int)
+    "legacy reload installs no substituted objects" objects_with_shadow (objects ());
+  Alcotest.(check bool)
+    "legacy reload hides the same derived members" true
+    (List.equal Hash.equal hidden_before store.Store.hidden);
+  Alcotest.(check bool)
+    "trusted view prefers the hidden member over the user binding" true
+    (match (Store.trusted_names_view store).Resolve.lookup "governance.fresh-audit-run-id" with
+    | { Resolve.hash; _ } :: _ -> List.exists (Hash.equal hash) store.Store.hidden
+    | [] -> false);
+  Alcotest.(check bool)
+    "manifest restored by the legacy reload" true
+    (Sys.file_exists (Store.prelude_manifest_file store));
+  (* the builtin-wiring seam must also prefer the hidden member, or the user's binding would be
+     wired to the audit-run-id builtin on reopen *)
+  Alcotest.(check bool)
+    "internal lookup prefers the hidden member over the user binding" true
+    (match Store.lookup_internal_kind store "governance.fresh-audit-run-id" Resolve.KTerm with
+    | Some { Resolve.hash; _ } ->
+        List.exists (Hash.equal hash) store.Store.hidden && not (Hash.equal hash shadow)
+    | None -> false);
+  let rec remove_tree path =
+    match Unix.lstat path with
+    | { Unix.st_kind = Unix.S_DIR; _ } ->
+        Array.iter (fun entry -> remove_tree (Filename.concat path entry)) (Sys.readdir path);
+        Unix.rmdir path
+    | _ -> Sys.remove path
+    | exception Unix.Unix_error _ -> ()
+  in
+  remove_tree root;
+  remove_tree edited
+
 let suite =
   [
+    Alcotest.test_case "prelude reload is idempotent" `Quick test_reload_is_idempotent;
     Alcotest.test_case "prelude loads with zero diagnostics" `Quick test_loads_with_zero_diagnostics;
     Alcotest.test_case "prelude hashes golden-pinned" `Quick test_prelude_hashes_golden;
     Alcotest.test_case "builtins work" `Quick test_builtins_work;

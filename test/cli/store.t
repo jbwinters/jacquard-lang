@@ -105,3 +105,87 @@ through a persisted names index.
     Cause: Name `persisted-task` cannot expose scheduler-private hash 9b4eaa5e872fa3f768c71fc4cba4d3262a9ebf8a719f0cfb78f22fa9eade4310.
     Next step: Create and use Task and Channel handles only inside a structured scheduler scope.
   [1]
+
+A store populated with the public prelude reopens with the same prelude (APP.4). Installing a
+surface model with `run --store`, then running separate entry points against that store, keeps
+the name index byte-stable; `store add` selects the parser by extension, so a `.jac` file installs
+without a bootstrap twin and still refuses top-level expressions.
+
+  $ export JACQUARD_PRELUDE=../../prelude
+  $ printf 'double : (Int) ->{} Int\ndouble(n) = mul(n, 2)\n' > model.jac
+  $ printf 'double(21)\n' > entry.jac
+  $ jacquard run model.jac --store appstore
+  $ cp appstore/names.jqd names-after-install.jqd
+  $ jacquard run entry.jac --store appstore
+  42
+  $ jacquard run entry.jac --store appstore
+  42
+  $ cmp names-after-install.jqd appstore/names.jqd && echo index-stable
+  index-stable
+  $ printf 'quadruple(n) = double(double(n))\n' > more.jac
+  $ jacquard store add appstore more.jac
+  ok
+  $ printf 'quadruple(5)\n' > entry2.jac
+  $ jacquard run entry2.jac --store appstore
+  20
+  $ printf 'double(1)\n' > expr.jac
+  $ jacquard store add appstore expr.jac
+  error[E0704]: Store add accepts declarations only
+    Cause: store add expects declarations only
+    Next step: Pass declarations to `store add`, not a top-level expression.
+  [1]
+  $ grep -c 'hidden' appstore/names.jqd
+  6
+
+The store records the prelude it was loaded with. Reopening with an edited prelude is refused
+before any change, and a `store add` that contains an expression installs nothing.
+
+  $ mkdir prelude-edited && for f in ../../prelude/*.jqd; do cat "$f" > "prelude-edited/$(basename "$f")"; done
+  $ printf '\n; edited\n' >> prelude-edited/02-data.jqd
+  $ cp appstore/names.jqd names-before-mismatch.jqd
+  $ jacquard run entry.jac --store appstore --prelude prelude-edited
+  error[E0705]: Prelude does not match the store's recorded prelude
+    Cause: prelude directory prelude-edited differs from the store's recorded prelude (changed: 02-data.jqd)
+    Next step: Reopen the store with the prelude it was created with, or create a new store for this prelude.
+  [1]
+  $ cmp names-before-mismatch.jqd appstore/names.jqd && echo unchanged-after-mismatch
+  unchanged-after-mismatch
+  $ ls appstore/objects | wc -l | tr -d ' ' > objects-before.txt
+  $ printf 'quint(n) = mul(n, 5)\nquint(1)\n' > mixed.jac
+  $ jacquard store add appstore mixed.jac
+  error[E0704]: Store add accepts declarations only
+    Cause: store add expects declarations only
+    Next step: Pass declarations to `store add`, not a top-level expression.
+  [1]
+  $ ls appstore/objects | wc -l | tr -d ' ' | cmp - objects-before.txt && echo objects-unchanged
+  objects-unchanged
+  $ grep -c quint appstore/names.jqd || true
+  0
+
+A user binding that reuses a hidden prelude member's name keeps its own meaning across
+reopen on both the manifest path and a legacy store without a manifest; it is never wired to
+the withheld builtin. A `store add` that fails part-way (an unresolved name in a later
+declaration) installs nothing.
+
+  $ printf 'governance.fresh-audit-run-id(n) = 7\n' > shadow.jac
+  $ jacquard run shadow.jac --store appstore
+  $ printf 'governance.fresh-audit-run-id(1)\n' > use-shadow.jac
+  $ jacquard run use-shadow.jac --store appstore
+  7
+  $ rm appstore/prelude.manifest
+  $ jacquard run use-shadow.jac --store appstore
+  7
+  $ ls appstore/prelude.manifest
+  appstore/prelude.manifest
+  $ cp appstore/names.jqd names-before-partial.jqd
+  $ ls appstore/objects | wc -l | tr -d ' ' > objects-before-partial.txt
+  $ printf 'aa(n) = mul(n, 2)\nbb(n) = nope(n)\n' > partial.jac
+  $ jacquard store add appstore partial.jac
+  partial.jac:2:9-13: error[E0301]: This reference names something that is not in scope.
+    Cause: No name named `nope` is in scope; nearby names are `code`, `done`, `none`.
+    Next step: Correct the reference to an in-scope name or declaration.
+  [1]
+  $ cmp names-before-partial.jqd appstore/names.jqd && echo index-unchanged
+  index-unchanged
+  $ ls appstore/objects | wc -l | tr -d ' ' | cmp - objects-before-partial.txt && echo objects-unchanged
+  objects-unchanged

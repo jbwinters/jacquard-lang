@@ -17,12 +17,16 @@ let diagnostic_summary = function
   | "E0701" -> "Prelude directory is unavailable"
   | "E0702" -> "Prelude contents are incomplete or have the wrong kind"
   | "E0703" -> "Requested effect is not root-grantable"
+  | "E0705" -> "Prelude does not match the store's recorded prelude"
   | code -> "Prelude loading failed (" ^ code ^ ")"
 
 let diagnostic_next_step = function
   | "E0701" -> "Pass --prelude with the path to a complete prelude directory."
   | "E0702" -> "Restore the named declaration with the required prelude kind."
   | "E0703" -> "Handle this effect inside the program instead of granting it at the root."
+  | "E0705" ->
+      "Reopen the store with the prelude it was created with, or create a new store for this \
+       prelude."
   | _ -> "Correct the prelude configuration and try again."
 
 let err ~code fmt =
@@ -43,7 +47,14 @@ let read_file path =
 
 (** [load ~dir store] loads the prelude sources into [store]. Returns
     [(relative file name, hashes of each declaration in file order)] per file, in load order. Fails
-    with the first diagnostic batch (E0701 wraps IO problems). *)
+    with the first diagnostic batch (E0701 wraps IO problems).
+
+    A store records the identity of the prelude it was loaded with (file names and byte digests).
+    Loading the identical prelude again is a no-op that returns [Ok []] without touching the store;
+    loading a different prelude is refused with E0705 before any mutation. Every load resolves
+    prelude references through the trusted view, in which hidden derived members outrank any
+    same-named user binding; a store created before manifests were recorded gains its manifest on
+    the first load. *)
 let load ~dir store : ((string * Canon.decl_hashes list) list, Diag.t list) result =
   if not (Sys.file_exists dir && Sys.is_directory dir) then
     err ~code:"E0701" "prelude directory %s does not exist" dir
@@ -53,6 +64,39 @@ let load ~dir store : ((string * Canon.decl_hashes list) list, Diag.t list) resu
       |> List.filter (fun f -> Filename.check_suffix f ".jqd")
       |> List.sort String.compare
     in
+    let manifest =
+      List.map
+        (fun file ->
+          (file, Digestif.SHA256.(to_hex (digest_string (read_file (Filename.concat dir file))))))
+        files
+    in
+    let manifest_verdict =
+      match Store.prelude_manifest store with
+      | None -> `Load
+      | Some recorded when recorded = manifest -> `Skip
+      | Some recorded ->
+          let names entries = List.map fst entries in
+          let missing = List.filter (fun f -> not (List.mem f files)) (names recorded) in
+          let added = List.filter (fun f -> not (List.mem_assoc f recorded)) files in
+          let changed =
+            List.filter
+              (fun (file, digest) ->
+                match List.assoc_opt file recorded with
+                | Some previous -> not (String.equal previous digest)
+                | None -> false)
+              manifest
+            |> List.map fst
+          in
+          let describe label = function
+            | [] -> None
+            | items -> Some (Printf.sprintf "%s: %s" label (String.concat ", " items))
+          in
+          `Refuse
+            (String.concat "; "
+               (List.filter_map Fun.id
+                  [ describe "changed" changed; describe "missing" missing; describe "added" added ]))
+    in
+    let installed : (string * Hash.t) list ref = ref [] in
     let load_file file =
       let path = Filename.concat dir file in
       match Reader.parse_string ~file:path (read_file path) with
@@ -64,32 +108,40 @@ let load ~dir store : ((string * Canon.decl_hashes list) list, Diag.t list) resu
                 match Kernel.decl_of_form f with
                 | Error ds -> Error ds
                 | Ok d -> (
-                    match Resolve.resolve_decl (Store.names_view store) d with
+                    (* the prelude is first-party: its later files may name derived members that an
+                   earlier load already hid, so reloading a populated store stays idempotent *)
+                    match Resolve.resolve_decl (Store.trusted_names_view store) d with
                     | Error ds -> Error ds
                     | Ok d -> (
                         match Store.put_decl store d with
                         | Error ds -> Error ds
-                        | Ok hs -> go (hs :: acc) rest)))
+                        | Ok hs ->
+                            installed := !installed @ hs.Canon.named;
+                            go (hs :: acc) rest)))
           in
           go [] forms
     in
     let rec go acc = function
       | [] ->
-          List.iter
-            (fun name ->
-              match Store.lookup_kind store name Resolve.KCon with
-              | Some { Resolve.hash; _ } -> Store.hide_derived store hash
-              | None -> ())
-            [ "hash-opaque"; "secret-opaque"; "posterior-exact-result-v1" ];
-          (match Store.lookup_kind store "audit-sequence-v0" Resolve.KCon with
-          | Some { Resolve.hash; _ } -> Store.hide_derived store hash
-          | None -> ());
-          List.iter
-            (fun name ->
-              match Store.lookup_kind store name Resolve.KTerm with
-              | Some { Resolve.hash; _ } -> Store.hide_derived store hash
-              | None -> ())
-            [ "governance.fresh-audit-run-id"; "governance.require-audit-run-id" ];
+          (* hide by the hashes this load installed, never by a public name lookup: a user
+             binding that reuses a derived member's name must not be the one hidden *)
+          let hide name =
+            (* a derived name can also label its own type or group hash, which hide_derived
+               ignores; hide every installed hash carrying the name *)
+            List.iter
+              (fun (installed_name, hash) ->
+                if String.equal installed_name name then Store.hide_derived store hash)
+              !installed
+          in
+          List.iter hide
+            [
+              "hash-opaque";
+              "secret-opaque";
+              "posterior-exact-result-v1";
+              "audit-sequence-v0";
+              "governance.fresh-audit-run-id";
+              "governance.require-audit-run-id";
+            ];
           let bind_operation_alias effect_name operation_name alias =
             match Store.lookup_kind store effect_name Resolve.KEffect with
             | None -> err ~code:"E0702" "prelude effect `%s` is missing" effect_name
@@ -122,13 +174,19 @@ let load ~dir store : ((string * Canon.decl_hashes list) list, Diag.t list) resu
           let* () = bind_operation_alias "workspace" "write-file" "workspace.write-file" in
           let* () = bind_operation_alias "workspace" "fetch" "workspace.fetch" in
           let* () = bind_operation_alias "net" "fetch" "fetch" in
+          Store.write_prelude_manifest store manifest;
           Ok (List.rev acc)
       | file :: rest -> (
           match load_file file with
           | Error ds -> Error ds
           | Ok hashes -> go ((file, hashes) :: acc) rest)
     in
-    go [] files
+    match manifest_verdict with
+    | `Skip -> Ok []
+    | `Refuse detail ->
+        err ~code:"E0705" "prelude directory %s differs from the store's recorded prelude (%s)" dir
+          detail
+    | `Load -> go [] files
 
 let lookup_hash store ~kind name : (Hash.t, Diag.t list) result =
   match Store.lookup_kind store name kind with

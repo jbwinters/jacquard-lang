@@ -32,7 +32,7 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1014`
+- Alcotest/QCheck cases: `1015`
 - Cram transcript files: `61`
 - Documentation examples: `28` named examples across `8` documents
 
@@ -114,3 +114,17 @@ binds every synthetic HB.1 vector identity to a real store member, replays all
 worker with a deterministic fake host, and fails on any divergence that is not
 an explicitly recorded pending decision. See
 [the kit README](../../../spec/host-protocol-v0/kit/README.md).
+
+Reopening a persistent store with the public prelude is idempotent: a store
+records the prelude files it was loaded with, an identical prelude reloads as
+a no-op, a different prelude is refused with E0705 before any change, and a
+store made before manifests were recorded loads its prelude through a trusted
+view in which hidden derived members outrank any same-named user binding while
+user programs keep the public view. `jac store add` selects the parser by file
+extension, so the advertised `.jac` installation command works, refuses a
+file with a top-level expression before installing anything, and restores the
+index and object set if any declaration is refused part-way through a file,
+so a failed installation leaves the store exactly as it was. Pinned by the
+reload case in `test/test_prelude.ml` (one more case, bringing the inventory
+to `1015 / 61 / 28`) and the reopen, mismatch, and rollback blocks of
+`test/cli/store.t`.
