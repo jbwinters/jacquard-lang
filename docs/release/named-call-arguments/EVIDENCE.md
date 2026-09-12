@@ -56,6 +56,20 @@ schedule checks. Their passing status is regression evidence only. No SX.23
 participant data, readability score, blinded rescore, or study conclusion is
 claimed or invented.
 
+## Repairs After Publication
+
+- 2026-09-10, list literals as labeled arguments. `take(items: [1, 2])` and
+  `ListBucket(values: [1, 2])` reported E0310 although the labels existed.
+  The list-literal lowering derived the generated `nil` node's metadata from
+  the whole list expression, so the interior `cons` application inherited the
+  argument's call label and was elaborated against `cons`'s own `head`/`tail`
+  ABI; only a label spelled `tail` happened to pass. Lowering now strips the
+  call label and argument container from generated interior nodes. Pinned by
+  `test_list_literal_arguments` in `test/test_surface_named_calls.ml` and the
+  list block of `test/cli/named-args.t` (interpreter/native parity, formatter
+  stability, and positional/labeled hash identity). No kernel form, hash, or
+  envelope changed.
+
 ## Limits
 
 This is bounded executable evidence, not a proof over every surface tree, a

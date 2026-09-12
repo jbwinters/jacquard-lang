@@ -291,6 +291,83 @@ let test_fail_closed_diagnostics () =
   ignore (install store "type MixedFields a = | MixedFields(left: a, a)\n");
   only_diagnostic store "MixedFields(left: 1, other: 2)" "E0314" "MixedFields(left: 1, other: 2)"
 
+(* APP.1: a list literal is an ordinary labeled argument. The label belongs to the whole list; the
+   generated interior `cons`/`nil` nodes must never carry it, or the list constructor's own ABI
+   would be consulted for the enclosing call's label. *)
+let rec call_labels acc (expression : Kernel.expr) =
+  let acc =
+    match Meta.surface_call_label expression.meta with Some label -> label :: acc | None -> acc
+  in
+  match expression.it with
+  | Kernel.App (fn, arguments) -> List.fold_left call_labels (call_labels acc fn) arguments
+  | Kernel.Let { value; body; _ } -> call_labels (call_labels acc value) body
+  | Kernel.Tuple items -> List.fold_left call_labels acc items
+  | _ -> acc
+
+(* Generated interior list nodes that carry a call label would be elaborated against `cons`'s
+   ABI. This walk keys on `surface_generated`, which marks the `list-cons-constructor` and
+   `list-nil` nodes; `list-tail` nodes carry no generated marker and are covered by the
+   `call_labels` walk above. *)
+let rec labeled_generated_list_nodes acc (expression : Kernel.expr) =
+  let acc =
+    match (Meta.surface_generated expression.meta, Meta.surface_call_label expression.meta) with
+    | Some form, Some label when String.starts_with ~prefix:"list-" form ->
+        (form ^ ":" ^ label) :: acc
+    | _ -> acc
+  in
+  match expression.it with
+  | Kernel.App (fn, arguments) ->
+      List.fold_left labeled_generated_list_nodes (labeled_generated_list_nodes acc fn) arguments
+  | Kernel.Let { value; body; _ } ->
+      labeled_generated_list_nodes (labeled_generated_list_nodes acc value) body
+  | Kernel.Tuple items -> List.fold_left labeled_generated_list_nodes acc items
+  | _ -> acc
+
+let test_list_literal_arguments () =
+  let store, checker = make_prelude_checker () in
+  ignore
+    (install store
+       "type ListBucket = | ListBucket(values: List Int)\n\
+        type Pair = | Pair(left: List Int, right: Int)\n\
+        take(items: xs) = xs\n\
+        both(count: n, items: xs) = (n, xs)\n");
+  let labeled = resolve_expression store "ListBucket(values: [1, 2])" in
+  let positional = resolve_expression store "ListBucket([1, 2])" in
+  Alcotest.(check string)
+    "labeled list constructor prints" "ListBucket(values: [1, 2])" (print_expression labeled);
+  Alcotest.(check bool)
+    "labeled and positional list literals share identity" true
+    (Hash.equal (expression_hash labeled) (expression_hash positional));
+  Alcotest.(check (list string))
+    "only the whole list carries the label" [ "values" ] (call_labels [] labeled);
+  List.iter
+    (fun source -> ignore (check_expression checker store source))
+    [
+      "take(items: [1, 2])";
+      "take(items: [])";
+      "take(items: [[1], [2, 3]])";
+      "take(items: [add(1, 1), 3])";
+      "Pair(left: [1], right: 2)";
+      "Pair(right: 2, left: [1])";
+      "both(items: [1], count: 2)";
+      "both(count: 2, items: [1, 2, 3])";
+    ];
+  List.iter
+    (fun source ->
+      Alcotest.(check (list string))
+        (source ^ ": generated list nodes carry no call label")
+        []
+        (labeled_generated_list_nodes [] (resolve_expression store source)))
+    [
+      "ListBucket(values: [1, 2])";
+      "both(items: [1], count: 2)";
+      "take(items: [[1], [2, 3]])";
+      "Pair(right: 2, left: [add(1, 1)])";
+    ];
+  only_diagnostic store "take(itemz: [1])" "E0310" "itemz: [1]";
+  only_diagnostic store "Pair(left: [1], right: 2, extra: [3])" "E0312"
+    "Pair(left: [1], right: 2, extra: [3])"
+
 let resolved_declaration store source =
   match lower source with
   | [ Kernel.Decl declaration ] -> (
@@ -424,6 +501,7 @@ let suite =
       test_direct_calls_hashes_and_source_order;
     Alcotest.test_case "constructors and operations" `Quick test_constructor_and_operation_calls;
     Alcotest.test_case "fail-closed diagnostics" `Quick test_fail_closed_diagnostics;
+    Alcotest.test_case "list literals as labeled arguments" `Quick test_list_literal_arguments;
     Alcotest.test_case "store identity reopen conflict" `Quick
       test_store_identity_reopen_and_conflict;
     Alcotest.test_case "checker warnings and recovery names" `Quick
