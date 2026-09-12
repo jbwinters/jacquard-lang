@@ -196,12 +196,30 @@ let lookup_hash store ~kind name : (Hash.t, Diag.t list) result =
       | Some _ -> err ~code:"E0702" "prelude name `%s` has an unexpected kind" name
       | None -> err ~code:"E0702" "prelude name `%s` is not in the store" name)
 
+(* APP.6 helpers *)
+
 (** Byte offsets where codepoints start, plus the terminal offset (SL.5, D9 semantics: the
     hand-rolled UTF-8 decoder the text builtins share). The second-byte range checks follow the
     Unicode well-formedness table, so overlongs (E0 80-9F, F0 80-8F), surrogates (ED A0-BF), and
     beyond-U+10FFFF (F4 90-BF) are malformed and count one codepoint PER BYTE, same as truncated
     sequences. Module-level so the native parity kit goldens generate from the same decoder
     (docs/native-plan.md, task 66). *)
+let fixed_repr r precision =
+  if Float.is_nan r || r = infinity || r = neg_infinity then Printer.real_repr r
+  else
+    let s = Printf.sprintf "%.*f" precision r in
+    let s = String.map (fun c -> if c = ',' then '.' else c) s in
+    let zero = String.for_all (fun c -> c = '-' || c = '0' || c = '.') s in
+    if zero && String.length s > 0 && s.[0] = '-' then String.sub s 1 (String.length s - 1) else s
+
+let codepoint_of_text s =
+  if s = "" then None
+  else
+    let d = String.get_utf_8_uchar s 0 in
+    if Uchar.utf_decode_is_valid d && Uchar.utf_decode_length d = String.length s then
+      Some (Uchar.to_int (Uchar.utf_decode_uchar d))
+    else None
+
 let utf8_boundaries s =
   let n = String.length s in
   let byte j = if j < n then Char.code s.[j] else -1 in
@@ -420,6 +438,34 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
       match args with
       | [ Value.VReal r ] -> Ok (Value.VText (Printer.real_repr r))
       | args -> type_err "text.from-real" args);
+  (* APP.6: fixed-decimal presentation. Non-finite values keep the printer's spellings; otherwise
+     the exact binary value rounds to [precision] digits (C's %f: nearest, ties to even on the
+     exact expansion), always with '.' and no grouping, and a result that rounds to zero drops
+     its sign so "-0.000" never appears. The round-trip text.from-real contract is untouched. *)
+  optional "text.from-real-fixed" (fun args ->
+      match args with
+      | [ Value.VReal r; Value.VInt precision ] ->
+          if precision < 0 || precision > 20 then
+            Error
+              (Runtime_err.Arithmetic
+                 (Printf.sprintf "text.from-real-fixed expects a precision between 0 and 20, got %d"
+                    precision))
+          else Ok (Value.VText (fixed_repr r precision))
+      | args -> type_err "text.from-real-fixed" args);
+  optional "real.from-int" (fun args ->
+      match args with
+      | [ Value.VInt i ] -> Ok (Value.VReal (float_of_int i))
+      | args -> type_err "real.from-int" args);
+  (* APP.6: ASCII classification of singleton-codepoint texts; anything else is False *)
+  let ascii1 predicate s = String.length s = 1 && predicate s.[0] in
+  optional "text.ascii-digit?"
+    (text1 "text.ascii-digit?" (fun s -> Ok (vbool (ascii1 (fun c -> c >= '0' && c <= '9') s))));
+  optional "text.ascii-letter?"
+    (text1 "text.ascii-letter?" (fun s ->
+         Ok (vbool (ascii1 (fun c -> (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) s))));
+  optional "text.ascii-space?"
+    (text1 "text.ascii-space?" (fun s ->
+         Ok (vbool (ascii1 (fun c -> c = ' ' || c = '\t' || c = '\n' || c = '\r') s))));
   (match
      (lookup_hash store ~kind:Resolve.KCon "nil", lookup_hash store ~kind:Resolve.KCon "cons")
    with
@@ -510,7 +556,17 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
              match Reader.classify_literal s with
              | Some (Form.Real r) -> Ok (vsome (Value.VReal r))
              | Some (Form.Int i) -> Ok (vsome (Value.VReal (float_of_int i)))
-             | _ -> Ok vnone))
+             | _ -> Ok vnone));
+      (* APP.6: the digit's value for exactly one ASCII digit; the scalar value for exactly one
+         well-formed UTF-8 codepoint (malformed bytes are not scalars, so they yield none) *)
+      optional "text.ascii-digit-value"
+        (text1 "text.ascii-digit-value" (fun s ->
+             if String.length s = 1 && s.[0] >= '0' && s.[0] <= '9' then
+               Ok (vsome (Value.VInt (Char.code s.[0] - Char.code '0')))
+             else Ok vnone));
+      optional "text.codepoint"
+        (text1 "text.codepoint" (fun s ->
+             match codepoint_of_text s with Some n -> Ok (vsome (Value.VInt n)) | None -> Ok vnone))
   | _ -> ());
   (* --- W6.6 code reflection: quote payloads built and destructured from Jacquard.
      of-int/of-text wrap scalars as (lit ...) forms; form/un-form build and split
@@ -1556,6 +1612,22 @@ let builtin_signatures (store : Store.t) : ((Hash.t * Types.scheme) list, Diag.t
               ("text.to-real", fn [ text ] (opt real));
               ("text-compare", fn [ text; text ] (Types.TCon (ord_h, [])));
             ]
+        in
+        (* APP.6 additions ride the optional lane: older text layers may lack them *)
+        let optional_text name signature =
+          match lookup_hash store ~kind:Resolve.KTerm name with
+          | Ok h -> [ (h, signature) ]
+          | Error _ -> []
+        in
+        let text_sigs =
+          text_sigs
+          @ optional_text "text.from-real-fixed" (fn [ real; int_ty ] text)
+          @ optional_text "text.ascii-digit?" (fn [ text ] bool_ty)
+          @ optional_text "text.ascii-letter?" (fn [ text ] bool_ty)
+          @ optional_text "text.ascii-space?" (fn [ text ] bool_ty)
+          @ optional_text "text.ascii-digit-value" (fn [ text ] (opt int_ty))
+          @ optional_text "text.codepoint" (fn [ text ] (opt int_ty))
+          @ optional_text "real.from-int" (fn [ int_ty ] real)
         in
         let* base =
           match lookup_hash store ~kind:Resolve.KTerm "debug.inspect" with

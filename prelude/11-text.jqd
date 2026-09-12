@@ -63,3 +63,18 @@
               (app (var list.map) (var xs) (app (var show.fn) (var d)))
               (lit ", "))
             (lit "]")))))))))
+
+; APP.6: fixed-decimal presentation and ASCII/codepoint classification for
+; parsers. Singleton-codepoint texts stand in for characters (D9): there is
+; still no Char type.
+(defterm ((binding text.from-real-fixed () (quote (builtin-marker text.from-real-fixed)))))
+
+(defterm ((binding text.ascii-digit? () (quote (builtin-marker text.ascii-digit?)))))
+
+(defterm ((binding text.ascii-letter? () (quote (builtin-marker text.ascii-letter?)))))
+
+(defterm ((binding text.ascii-space? () (quote (builtin-marker text.ascii-space?)))))
+
+(defterm ((binding text.ascii-digit-value () (quote (builtin-marker text.ascii-digit-value)))))
+
+(defterm ((binding text.codepoint () (quote (builtin-marker text.codepoint)))))

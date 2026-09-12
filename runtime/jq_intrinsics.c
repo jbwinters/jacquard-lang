@@ -139,6 +139,7 @@ jq_value jq_i_text_length(jq_rt *rt, const jq_value *a) {
 static void type_err_args(const char *name, const jq_value *a, uint16_t n)
     __attribute__((noreturn));
 static bool is_con_named(jq_value v, const char *name);
+static void arith_err(const char *fmt, ...) __attribute__((noreturn, format(printf, 1, 2)));
 static jq_value vsome(jq_rt *rt, jq_value v);
 
 jq_value jq_i_text_concat(jq_rt *rt, const jq_value *a) {
@@ -474,6 +475,92 @@ jq_value jq_i_text_slice(jq_rt *rt, const jq_value *a) {
   }
   jq_drop(a[0]);
   return r;
+}
+
+/* --- APP.6 (task 243): numeric presentation and ASCII/codepoint classification,
+ * ported exactly from Prelude (src/prelude.ml). --- */
+
+jq_value jq_i_real_from_int(jq_rt *rt, const jq_value *a) {
+  (void)rt;
+  if (!jq_is_int(a[0])) type_err_args("real.from-int", a, 1);
+  return jq_real((double)jq_int_val(a[0]));
+}
+
+/* Prelude.fixed_repr: non-finite keeps the printer spelling; otherwise C's %f on the exact
+ * binary value, '.' always, and a result that rounds to zero drops its sign. */
+jq_value jq_i_text_from_real_fixed(jq_rt *rt, const jq_value *a) {
+  (void)rt;
+  if (!is_real(a[0]) || !jq_is_int(a[1])) type_err_args("text.from-real-fixed", a, 2);
+  double r = jq_real_val(a[0]);
+  int64_t precision = jq_int_val(a[1]);
+  jq_drop(a[0]);
+  if (precision < 0 || precision > 20)
+    arith_err("text.from-real-fixed expects a precision between 0 and 20, got %lld",
+              (long long)precision);
+  if (isnan(r)) return jq_text((const uint8_t *)"+nan.0", 6);
+  if (isinf(r)) return jq_text((const uint8_t *)(r > 0 ? "+inf.0" : "-inf.0"), 6);
+  int n = snprintf(NULL, 0, "%.*f", (int)precision, r);
+  char *buf = malloc((size_t)n + 1);
+  if (!buf) jq_runtime_error("jacquard runtime: out of memory");
+  snprintf(buf, (size_t)n + 1, "%.*f", (int)precision, r);
+  bool zero = true;
+  for (int i = 0; i < n; i++) {
+    if (buf[i] == ',') buf[i] = '.';
+    if (buf[i] != '-' && buf[i] != '0' && buf[i] != '.') zero = false;
+  }
+  const char *start = (zero && n > 0 && buf[0] == '-') ? buf + 1 : buf;
+  jq_value t = jq_text((const uint8_t *)start, (uint64_t)(n - (start - buf)));
+  free(buf);
+  return t;
+}
+
+static jq_value ascii_class(jq_rt *rt, const jq_value *a, const char *name, bool (*test)(uint8_t)) {
+  if (!is_text(a[0])) type_err_args(name, a, 1);
+  bool ok = jq_text_len(a[0]) == 1 && test(jq_text_bytes(a[0])[0]);
+  jq_drop(a[0]);
+  return vbool(rt, ok);
+}
+
+static bool ascii_digit(uint8_t c) { return c >= '0' && c <= '9'; }
+static bool ascii_letter(uint8_t c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
+static bool ascii_space(uint8_t c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
+
+jq_value jq_i_text_ascii_digit_q(jq_rt *rt, const jq_value *a) {
+  return ascii_class(rt, a, "text.ascii-digit?", ascii_digit);
+}
+
+jq_value jq_i_text_ascii_letter_q(jq_rt *rt, const jq_value *a) {
+  return ascii_class(rt, a, "text.ascii-letter?", ascii_letter);
+}
+
+jq_value jq_i_text_ascii_space_q(jq_rt *rt, const jq_value *a) {
+  return ascii_class(rt, a, "text.ascii-space?", ascii_space);
+}
+
+jq_value jq_i_text_ascii_digit_value(jq_rt *rt, const jq_value *a) {
+  if (!is_text(a[0])) type_err_args("text.ascii-digit-value", a, 1);
+  const uint8_t *s = jq_text_bytes(a[0]);
+  bool ok = jq_text_len(a[0]) == 1 && ascii_digit(s[0]);
+  int64_t value = ok ? (int64_t)(s[0] - '0') : 0;
+  jq_drop(a[0]);
+  return ok ? vsome(rt, jq_int(value)) : rt->v_none;
+}
+
+/* exactly one well-formed scalar: the D9 width table already rejects overlongs, surrogates,
+ * and beyond-U+10FFFF (those count one codepoint per byte and never equal the whole text) */
+jq_value jq_i_text_codepoint(jq_rt *rt, const jq_value *a) {
+  if (!is_text(a[0])) type_err_args("text.codepoint", a, 1);
+  const uint8_t *s = jq_text_bytes(a[0]);
+  uint64_t n = jq_text_len(a[0]);
+  int64_t value = -1;
+  if (n >= 1 && n <= 4 && jq_utf8_width(s, n, 0) == n && (n > 1 || s[0] < 0x80)) {
+    if (n == 1) value = s[0];
+    else if (n == 2) value = ((int64_t)(s[0] & 0x1f) << 6) | (s[1] & 0x3f);
+    else if (n == 3) value = ((int64_t)(s[0] & 0x0f) << 12) | ((int64_t)(s[1] & 0x3f) << 6) | (s[2] & 0x3f);
+    else value = ((int64_t)(s[0] & 0x07) << 18) | ((int64_t)(s[1] & 0x3f) << 12) | ((int64_t)(s[2] & 0x3f) << 6) | (s[3] & 0x3f);
+  }
+  jq_drop(a[0]);
+  return value >= 0 ? vsome(rt, jq_int(value)) : rt->v_none;
 }
 
 jq_value jq_i_text_empty_q(jq_rt *rt, const jq_value *a) {

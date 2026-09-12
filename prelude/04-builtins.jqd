@@ -86,3 +86,6 @@
 (defterm ((binding int.mul () (quote (builtin-marker mul)))))
 
 (defterm ((binding int.div () (quote (builtin-marker div)))))
+
+; APP.6: direct Int-to-Real conversion (the nearest binary64, ties to even).
+(defterm ((binding real.from-int () (quote (builtin-marker real.from-int)))))

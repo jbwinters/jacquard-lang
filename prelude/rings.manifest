@@ -220,6 +220,12 @@ text.to-real 2
 text.ord 2
 text.eq 2
 text.eq? 2
+text.from-real-fixed 2
+text.ascii-digit? 2
+text.ascii-letter? 2
+text.ascii-space? 2
+text.ascii-digit-value 2
+text.codepoint 2
 int.show 2
 bool.show 2
 text.show 2
@@ -300,6 +306,7 @@ gen.list 2
 prop.for 2
 real.abs 2
 real.close? 2
+real.from-int 2
 dist.mass-of 2
 dist.support-of 2
 dist.check-tables 2

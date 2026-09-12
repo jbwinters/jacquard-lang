@@ -50,6 +50,13 @@ let intrinsics : (string * int) list =
     ("text.from-real", 1);
     ("text.contains?", 2);
     ("text.slice", 3);
+    ("text.from-real-fixed", 2);
+    ("text.ascii-digit?", 1);
+    ("text.ascii-letter?", 1);
+    ("text.ascii-space?", 1);
+    ("text.ascii-digit-value", 1);
+    ("text.codepoint", 1);
+    ("real.from-int", 1);
     ("support", 1);
     ("pmf", 2);
     ("dist.sample-lw", 3);
