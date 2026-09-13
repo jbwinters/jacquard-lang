@@ -100,26 +100,6 @@ finish-once accounting, and bounded evidence. See
 [the session contract](../../host-session-v0.md).
 
 
-
-The opt-in serial host worker adds 23 cases and one CLI transcript, bringing
-the current source inventory to `1007 / 61 / 28`. It covers the full
-`stdio-u32-json-v0` lifetime against a reopened store: pure and effectful
-invocations, every frozen host-failure and cancellation mapping, preflight
-fatals, stale and malformed responses, carrier loss, the selected stderr
-ceiling, descriptor ownership, and exit statuses. No cross-language conformance
-kit is published until HB.3. See [the worker contract](../../host-worker-v0.md).
-
-The native backend's eight-argument cap now applies only to the fixed calling
-convention: a variadic intrinsic applied directly, which is what marked
-interpolation lowers to, receives an array and a count, so an ordinary report
-line with many segments compiles natively without changing the canonical
-expansion or any hash. Pinned by the gauntlet twin `g43-variadic-join.jqd`
-(both engines; the leak lane covers gcc) and the interpolation block of
-`test/cli/native.t` (segments below, at, and above eight, the explicit
-`text.join` twin's identical hash, empty/escaped/multibyte segments, effects
-evaluated once in order, and the original rota report line); the inventory is
-unchanged. Applying such a builtin as a value remains capped.
-
 The opt-in serial host worker adds 23 cases and one CLI transcript, bringing
 the current source inventory to `1007 / 61 / 28`. It covers the full
 `stdio-u32-json-v0` lifetime against a reopened store: pure and effectful
@@ -166,3 +146,15 @@ the leak lane (`scripts/native-leak-check.sh`) builds and runs under gcc, and
 by the text-pattern block of `test/cli/native.t` (clang); the inventory is
 unchanged.
 
+The native backend's eight-argument cap now applies only to the fixed calling
+convention: a variadic intrinsic applied directly, which is what marked
+interpolation lowers to, receives an array and a count, so an ordinary report
+line with many segments compiles natively without changing the canonical
+expansion or any hash. Pinned by the gauntlet twin `g43-variadic-join.jqd`
+(both engines; the leak lane covers gcc) and the interpolation block of
+`test/cli/native.t` (segments below, at, and above eight, the explicit
+`text.join` twin's identical hash, empty/escaped/multibyte segments, effects
+evaluated once in order, and the original rota report line); the inventory is
+unchanged. Applying such a builtin as a value remains capped, and a direct
+variadic application of more than 65535 arguments, beyond the runtime's 16-bit
+count, is refused at build time with E1101 rather than truncated.

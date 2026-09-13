@@ -526,6 +526,7 @@ multibyte text, fallbacks, and repeated matches agree byte-for-byte with the int
   identical
   $ cat text-i.out
   (cons(digit(2), cons(sign("-"), cons(sign("+"), cons(other("empty"), cons(other("quote"), cons(other("multibyte"), cons(other("x"), cons(other("10"), nil)))))))), cons(2, cons(-1, cons(1, cons(100, cons(0, cons(0, nil)))))))
+
 Marked interpolation lowers to one variadic `text.join`; the eight-slot cap belongs to the fixed
 calling convention, so a report line with many segments compiles natively. Segments below, at,
 and above eight, the explicit `text.join` twin, empty/escaped/multibyte segments, and effects in
@@ -567,3 +568,14 @@ interpolation keeps its hash identity with the explicit twin.
   $ jacquard hash interp-twin-b.jac > twin-b.hash
   $ cmp twin-a.hash twin-b.hash && echo hash-identical
   hash-identical
+
+A direct variadic application wider than the runtime's 16-bit argument count is refused at build
+time instead of being truncated, and no binary is written:
+
+  $ python3 -c 'print("(app (var text.join)" + " (lit \"a\")" * 65536 + ")")' > wide-join.jqd
+  $ jacquard build wide-join.jqd -o wide-join > wide-join.out 2>&1; echo "exit $?"
+  exit 1
+  $ grep -q 'applies more than 65535 variadic arguments (native v1 count width)' wide-join.out && echo refused
+  refused
+  $ test -e wide-join || echo no-binary
+  no-binary
