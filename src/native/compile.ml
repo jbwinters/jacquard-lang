@@ -670,69 +670,91 @@ and contains_tail_self (e : expr) : bool =
   | Match (_, clauses) -> List.exists (fun (_, b) -> contains_tail_self b) clauses
 
 and lower_app ctx env ~tail (f : Kernel.expr) (args : Kernel.expr list) (k : atom -> expr) : expr =
-  if List.length args > 8 then refuse ctx "applies more than 8 arguments (native v1 arity cap)";
+  let head =
+    match f.Kernel.it with
+    | Kernel.Ref (h, Kernel.Term) -> Some (classify_member_head ctx h)
+    | _ -> None
+  in
+  (* The eight-slot cap belongs to the fixed JQ_PARAMS calling convention. A variadic intrinsic
+     applied directly (the resolved `text.join` behind marked interpolation) receives a C array
+     and a count instead, so an ordinary interpolation with many segments compiles unchanged;
+     the cap still applies when such a builtin is applied as a value. *)
+  let variadic_intrinsic =
+    match head with Some (HIntrinsic (_, arity)) -> arity < 0 | Some _ | None -> false
+  in
+  if List.length args > 8 && not variadic_intrinsic then
+    refuse ctx "applies more than 8 arguments (native v1 arity cap)";
+  (* The variadic count travels as a uint16_t in the runtime signature; publish that width
+     as a refusal instead of letting the generated C truncate it. *)
+  if variadic_intrinsic && List.length args > 65535 then
+    refuse ctx "applies more than 65535 variadic arguments (native v1 count width)";
   let with_args k' = lower_list ctx env args k' in
   let bind_call bound =
     let r = fresh ctx "r" in
     Let (r, bound, k (AVar r))
   in
-  match f.Kernel.it with
-  | Kernel.Ref (h, Kernel.Term) -> (
-      match classify_member_head ctx h with
-      | HIntrinsic (name, arity) ->
-          if not (intrinsic_accepts arity (List.length args)) then
-            refuse ctx (Printf.sprintf "builtin `%s` applied with the wrong arity" name)
-          else with_args (fun atoms -> bind_call (BIntrinsic (name, atoms)))
-      | HKnown (h, arity) when List.length args = arity ->
-          if tail then
-            if ctx.self = Some h then with_args (fun atoms -> TailSelf (atoms, []))
-            else with_args (fun atoms -> TailKnown ((h, 0), atoms, []))
-          else with_args (fun atoms -> bind_call (BCallKnown ((h, 0), atoms)))
-      | HKnown (h, _) | HValue (AGlobal h) ->
-          let a = member_value_atom ctx h in
-          if tail then with_args (fun atoms -> TailUnknown (a, atoms, []))
-          else with_args (fun atoms -> bind_call (BCallUnknown (a, atoms)))
-      | HValue a ->
-          if tail then with_args (fun atoms -> TailUnknown (a, atoms, []))
-          else with_args (fun atoms -> bind_call (BCallUnknown (a, atoms))))
-  | Kernel.Ref (h, Kernel.Con) ->
-      if Concurrency_contract.is_task_private_hash h || Channel_contract.is_channel_private_hash h
-      then refuse ctx "the opaque scoped-handle carrier is scheduler-private";
-      note_con ctx h;
-      let arity = con_arity ctx h in
-      if List.length args <> arity then
-        refuse ctx "constructor applied with the wrong arity (unreachable for checked code)"
-      else with_args (fun atoms -> bind_call (BAllocCon (h, atoms)))
-  | Kernel.Ref (h, Kernel.Op) ->
-      refuse_eval_op ctx h;
-      note_op ctx h;
-      with_args (fun atoms -> bind_call (BPerform (h, atoms)))
-  | Kernel.GroupRef i -> (
-      match Store.locate ctx.store ctx.member with
-      | Ok { Store.decl; _ } -> (
-          match Canon.hash_decl decl with
-          | Ok { Canon.named; _ } -> (
-              match List.nth_opt named i with
-              | Some (_, h) ->
-                  lower_app ctx env ~tail { f with Kernel.it = Kernel.Ref (h, Kernel.Term) } args k
-              | None -> refuse ctx "groupref outside its group")
-          | Error _ -> refuse ctx "group hashing failed (corrupt store)")
-      | Error _ -> refuse ctx "group member does not resolve (corrupt store)")
-  | Kernel.Var x when SMap.find_opt x env = Some (AResume ()) -> (
-      if
-        (* a tail-resumptive clause's resume: the clause's return IS the resumption, so in
+  match head with
+  | Some (HIntrinsic (name, arity)) ->
+      if not (intrinsic_accepts arity (List.length args)) then
+        refuse ctx (Printf.sprintf "builtin `%s` applied with the wrong arity" name)
+      else with_args (fun atoms -> bind_call (BIntrinsic (name, atoms)))
+  | Some (HKnown (h, arity)) when List.length args = arity ->
+      if tail then
+        if ctx.self = Some h then with_args (fun atoms -> TailSelf (atoms, []))
+        else with_args (fun atoms -> TailKnown ((h, 0), atoms, []))
+      else with_args (fun atoms -> bind_call (BCallKnown ((h, 0), atoms)))
+  | Some (HKnown (h, _) | HValue (AGlobal h)) ->
+      let a = member_value_atom ctx h in
+      if tail then with_args (fun atoms -> TailUnknown (a, atoms, []))
+      else with_args (fun atoms -> bind_call (BCallUnknown (a, atoms)))
+  | Some (HValue a) ->
+      if tail then with_args (fun atoms -> TailUnknown (a, atoms, []))
+      else with_args (fun atoms -> bind_call (BCallUnknown (a, atoms)))
+  | None -> (
+      match f.Kernel.it with
+      | Kernel.Ref (_, Kernel.Term) -> assert false
+      | Kernel.Ref (h, Kernel.Con) ->
+          if
+            Concurrency_contract.is_task_private_hash h
+            || Channel_contract.is_channel_private_hash h
+          then refuse ctx "the opaque scoped-handle carrier is scheduler-private";
+          note_con ctx h;
+          let arity = con_arity ctx h in
+          if List.length args <> arity then
+            refuse ctx "constructor applied with the wrong arity (unreachable for checked code)"
+          else with_args (fun atoms -> bind_call (BAllocCon (h, atoms)))
+      | Kernel.Ref (h, Kernel.Op) ->
+          refuse_eval_op ctx h;
+          note_op ctx h;
+          with_args (fun atoms -> bind_call (BPerform (h, atoms)))
+      | Kernel.GroupRef i -> (
+          match Store.locate ctx.store ctx.member with
+          | Ok { Store.decl; _ } -> (
+              match Canon.hash_decl decl with
+              | Ok { Canon.named; _ } -> (
+                  match List.nth_opt named i with
+                  | Some (_, h) ->
+                      lower_app ctx env ~tail
+                        { f with Kernel.it = Kernel.Ref (h, Kernel.Term) }
+                        args k
+                  | None -> refuse ctx "groupref outside its group")
+              | Error _ -> refuse ctx "group hashing failed (corrupt store)")
+          | Error _ -> refuse ctx "group member does not resolve (corrupt store)")
+      | Kernel.Var x when SMap.find_opt x env = Some (AResume ()) -> (
+          if
+            (* a tail-resumptive clause's resume: the clause's return IS the resumption, so in
          tail position the argument is simply the result. The discipline classifier
          guarantees tail-only single use; anything else here is an internal error. *)
-        not tail
-      then refuse ctx "internal: tail-resumptive clause used resume off tail (classifier bug)"
-      else
-        match args with
-        | [ arg ] -> lower ctx env arg (fun a -> Ret a)
-        | _ -> refuse ctx "a resumption takes exactly one argument")
-  | _ ->
-      lower ctx env f (fun fa ->
-          if tail then with_args (fun atoms -> TailUnknown (fa, atoms, []))
-          else with_args (fun atoms -> bind_call (BCallUnknown (fa, atoms))))
+            not tail
+          then refuse ctx "internal: tail-resumptive clause used resume off tail (classifier bug)"
+          else
+            match args with
+            | [ arg ] -> lower ctx env arg (fun a -> Ret a)
+            | _ -> refuse ctx "a resumption takes exactly one argument")
+      | _ ->
+          lower ctx env f (fun fa ->
+              if tail then with_args (fun atoms -> TailUnknown (fa, atoms, []))
+              else with_args (fun atoms -> bind_call (BCallUnknown (fa, atoms)))))
 
 (* ------------------------------------------------------------------ *)
 (* Member lowering                                                     *)

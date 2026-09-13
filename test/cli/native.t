@@ -526,3 +526,56 @@ multibyte text, fallbacks, and repeated matches agree byte-for-byte with the int
   identical
   $ cat text-i.out
   (cons(digit(2), cons(sign("-"), cons(sign("+"), cons(other("empty"), cons(other("quote"), cons(other("multibyte"), cons(other("x"), cons(other("10"), nil)))))))), cons(2, cons(-1, cons(1, cons(100, cons(0, cons(0, nil)))))))
+
+Marked interpolation lowers to one variadic `text.join`; the eight-slot cap belongs to the fixed
+calling convention, so a report line with many segments compiles natively. Segments below, at,
+and above eight, the explicit `text.join` twin, empty/escaped/multibyte segments, and effects in
+segments (evaluated once, left to right) agree byte-for-byte with the interpreter, and the
+interpolation keeps its hash identity with the explicit twin.
+
+  $ cat > interpolation.jac <<'JACQUARD'
+  > seven(a, b, c) = $"{a}-{b}-{c}"
+  > eight(a, b, c, d) = $"{a}-{b}-{c}-{d}"
+  > nine(a, b, c, d) = $"{a}-{b}-{c}-{d}!"
+  > twenty(a) = $"{a}1{a}2{a}3{a}4{a}5{a}6{a}7{a}8{a}9{a}0"
+  > segments(x) = $"[{x}]{""}q=\"{x}\" 日本 {x}"
+  > gap(bound, score) = $"Optimality gap is at most {text.from-int(sub(bound, score))} points; optimality has NOT been proved."
+  > step(label, value) = { print(label); value }
+  > effects() = $"{step("1", "one")},{step("2", "two")},{step("3", "three")},{step("4", "four")},{step("5", "five")}"
+  > (
+  >   seven("a", "b", "c"),
+  >   eight("a", "b", "c", "d"),
+  >   nine("a", "b", "c", "d"),
+  >   twenty("x"),
+  >   segments("s"),
+  >   gap(20, 17),
+  >   effects(),
+  > )
+  > JACQUARD
+  $ jacquard run interpolation.jac --allow console > interp-i.out 2>&1; echo "exit:$?"
+  exit:0
+  $ jacquard build interpolation.jac -o interpolation > /dev/null 2>&1; echo "build:$?"
+  build:0
+  $ ./interpolation --allow console > interp-n.out 2>&1; echo "exit:$?"
+  exit:0
+  $ cmp interp-i.out interp-n.out && echo identical
+  identical
+  $ cat interp-i.out
+  12345("a-b-c", "a-b-c-d", "a-b-c-d!", "x1x2x3x4x5x6x7x8x9x0", "[s]q=\"s\" 日本 s", "Optimality gap is at most 3 points; optimality has NOT been proved.", "one,two,three,four,five")
+  $ printf 'nine(a, b, c, d) = $"{a}-{b}-{c}-{d}!"\n' > interp-twin-a.jac
+  $ printf 'nine(a, b, c, d) = text.join(a, "-", b, "-", c, "-", d, "!")\n' > interp-twin-b.jac
+  $ jacquard hash interp-twin-a.jac > twin-a.hash
+  $ jacquard hash interp-twin-b.jac > twin-b.hash
+  $ cmp twin-a.hash twin-b.hash && echo hash-identical
+  hash-identical
+
+A direct variadic application wider than the runtime's 16-bit argument count is refused at build
+time instead of being truncated, and no binary is written:
+
+  $ python3 -c 'print("(app (var text.join)" + " (lit \"a\")" * 65536 + ")")' > wide-join.jqd
+  $ jacquard build wide-join.jqd -o wide-join > wide-join.out 2>&1; echo "exit $?"
+  exit 1
+  $ grep -q 'applies more than 65535 variadic arguments (native v1 count width)' wide-join.out && echo refused
+  refused
+  $ test -e wide-join || echo no-binary
+  no-binary
