@@ -612,6 +612,9 @@ static inline uint64_t jq_text_len(jq_value v) {
 static inline const uint8_t *jq_text_bytes(jq_value v) {
   return (const uint8_t *)&jq_block_of(v)->payload[1];
 }
+/* Byte equality of two TEXT blocks (jq_text.c). Emitted units call it for
+ * literal Text patterns, so it must be declared here, not only defined. */
+bool jq_text_eq(jq_value a, jq_value b);
 static inline const uint8_t *jq_hash_bytes(jq_value v) {
   return (const uint8_t *)&jq_block_of(v)->payload[0];
 }

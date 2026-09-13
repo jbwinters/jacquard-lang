@@ -76,6 +76,7 @@ passing them directly to each engine to retain defensive runtime coverage.
   identical: g39-once-clause-forward (exit 0)
   identical: g40-once-deep-reenter (exit 0)
   identical: g41-governance-fault-plan (exit 0)
+  identical: g42-text-literal-patterns (exit 0)
 
 Opaque host values are the exception to the public direct-member carrier: their
 marker identity is absent from the store's derived-hash index, so the checker and

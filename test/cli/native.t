@@ -486,3 +486,43 @@ boundary:
   > print(len(shown), shown == "x" * 400)
   > PY
   400 True
+
+Literal Text patterns compile: the emitted C compares with the runtime's `jq_text_eq`, which
+the header now declares. The rota-shaped digit table, nested constructor patterns, escapes,
+multibyte text, fallbacks, and repeated matches agree byte-for-byte with the interpreter.
+
+  $ cat > text-patterns.jac <<'JACQUARD'
+  > type Token = | Digit Int | Sign Text | Other Text
+  > digit(s) = match s {
+  >   | "0" -> Digit(0)
+  >   | "1" -> Digit(1)
+  >   | "2" -> Digit(2)
+  >   | "-" -> Sign("-")
+  >   | "+" -> Sign("+")
+  >   | "" -> Other("empty")
+  >   | "a\"b" -> Other("quote")
+  >   | "日" -> Other("multibyte")
+  >   | rest -> Other(rest)
+  > }
+  > weight(t) = match t {
+  >   | Digit(n) -> n
+  >   | Sign("-") -> sub(0, 1)
+  >   | Sign(_) -> 1
+  >   | Other("empty") -> 100
+  >   | Other(_) -> 0
+  > }
+  > (
+  >   list.map(["2", "-", "+", "", "a\"b", "日", "x", "10"], digit),
+  >   list.map(["2", "-", "+", "", "x", "日"], fn (s) -> weight(digit(s))),
+  > )
+  > JACQUARD
+  $ jacquard run text-patterns.jac > text-i.out 2>&1; echo "exit:$?"
+  exit:0
+  $ jacquard build text-patterns.jac -o text-patterns > /dev/null 2>&1; echo "build:$?"
+  build:0
+  $ ./text-patterns > text-n.out 2>&1; echo "exit:$?"
+  exit:0
+  $ cmp text-i.out text-n.out && echo identical
+  identical
+  $ cat text-i.out
+  (cons(digit(2), cons(sign("-"), cons(sign("+"), cons(other("empty"), cons(other("quote"), cons(other("multibyte"), cons(other("x"), cons(other("10"), nil)))))))), cons(2, cons(-1, cons(1, cons(100, cons(0, cons(0, nil)))))))

@@ -99,6 +99,7 @@ inventory to `984 / 60 / 28`. It covers typed responses, terminal mappings,
 finish-once accounting, and bounded evidence. See
 [the session contract](../../host-session-v0.md).
 
+
 The opt-in serial host worker adds 23 cases and one CLI transcript, bringing
 the current source inventory to `1007 / 61 / 28`. It covers the full
 `stdio-u32-json-v0` lifetime against a reopened store: pure and effectful
@@ -136,3 +137,11 @@ hash identically to their positional twins. Pinned by one more case in
 `test/test_surface_named_calls.ml` (bringing the current source inventory to
 `1016 / 61 / 28`) and the list block of `test/cli/named-args.t`, including a
 repeated label over list arguments reported once as E0311.
+
+The native runtime header now declares `jq_text_eq`, which emitted units call
+for every literal Text pattern; before this repair any such program failed to
+build. Pinned by the gauntlet twin `g42-text-literal-patterns.jqd`, which
+`test/cli/native-effects.t` compares against the interpreter under clang and
+the leak lane (`scripts/native-leak-check.sh`) builds and runs under gcc, and
+by the text-pattern block of `test/cli/native.t` (clang); the inventory is
+unchanged.
