@@ -592,7 +592,8 @@ continuation rather than item separation.
 
 The complete `--allow` vocabulary is `clock`, `console`, `dist`, `eval`, `fs`,
 `infer`, `net`, and `secret`. `Console`, `Clock`, `Fs`, and `Net` describe the
-ordinary external world; `Eval` is dynamic-code authority, `Infer` delegates to
+ordinary external world (`console` also grants `ConsoleInput`, whose `next-line`
+returns `Option Text` and reports end of input as `None`, unlike `read-line`); `Eval` is dynamic-code authority, `Infer` delegates to
 an unverified model boundary, `Secret` uses the environment adapter, and `Dist`
 installs seeded sampling. `Dist` is computationally pure rather than outside-
 world authority, but selecting its root sampling handler is still an explicit
@@ -721,7 +722,8 @@ Control effects and handlers:
 - `Fault`: `fault.none`, `fault.random`, `fault.all`
 
 World fixtures include `net.scripted`, `net.record`, replay handlers,
-`fs.in-memory`, `fs.read-only`, `clock.fixed`, and `console.scripted`. These
+`fs.in-memory`, `fs.read-only`, `clock.fixed`, `console.scripted`, and
+`console.scripted-input` (one shared line list for both input operations). These
 handlers discharge or interpose on effects; they are the testing seam usually
 filled by mocks in other systems.
 

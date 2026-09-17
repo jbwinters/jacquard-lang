@@ -41,6 +41,47 @@ let test_console_read_line_injected () =
     "two reads in order" "(\"first\", \"second\")"
     (show h "(tuple (app (var read-line)) (app (var read-line)))")
 
+(* APP.7: next-line distinguishes an empty line from end of input, the end is sticky (the source
+   is not consulted again), and the legacy read-line over the same source keeps reading "" *)
+let test_console_next_line_injected () =
+  let ((_, ctx) as h) = fresh_ctx () in
+  let script = ref [ Some "first"; Some ""; Some "  "; None; Some "after-end" ] in
+  let reads = ref 0 in
+  let next_line () =
+    incr reads;
+    match !script with
+    | x :: rest ->
+        script := rest;
+        x
+    | [] -> None
+  in
+  (match Prelude.install_console ~next_line ctx ~out:ignore with
+  | Ok () -> ()
+  | Error ds -> Eval_support.fail_diags "install_console" ds);
+  Alcotest.(check string)
+    "lines, an empty line, whitespace, then a sticky end"
+    "(some(\"first\"), some(\"\"), some(\"  \"), none, none, none)"
+    (show h
+       "(tuple (app (var next-line)) (app (var next-line)) (app (var next-line)) (app (var \
+        next-line)) (app (var next-line)) (app (var next-line)))");
+  Alcotest.(check int) "the source is not read again after the end" 4 !reads;
+  Alcotest.(check string)
+    "read-line keeps its own contract over the same source" "\"after-end\""
+    (show h "(app (var read-line))");
+  Alcotest.(check string)
+    "read-line reads end of input as empty text" "\"\"" (show h "(app (var read-line))")
+
+let test_console_scripted_input () =
+  let h = fresh_ctx () in
+  Alcotest.(check string)
+    "one shared list: next-line yields some then none for good; read-line reads \"\" at the end"
+    "(some(\"a\"), \"\", some(\"c\"), none, \"\", none)"
+    (show h
+       "(app (var console.scripted-input) (lam () (tuple (app (var next-line)) (app (var \
+        read-line)) (app (var next-line)) (app (var next-line)) (app (var read-line)) (app (var \
+        next-line)))) (app (var cons) (lit \"a\") (app (var cons) (lit \"\") (app (var cons) (lit \
+        \"c\") (var nil)))))")
+
 let with_tmpdir f =
   let dir = Filename.temp_file "jacquard-fs" "" in
   Sys.remove dir;
@@ -171,6 +212,8 @@ let suite =
   [
     Alcotest.test_case "clock with injected primitives" `Quick test_clock_injected;
     Alcotest.test_case "console read-line injected" `Quick test_console_read_line_injected;
+    Alcotest.test_case "console next-line injected" `Quick test_console_next_line_injected;
+    Alcotest.test_case "console.scripted-input" `Quick test_console_scripted_input;
     Alcotest.test_case "fs roundtrip and read-only interposition" `Quick
       test_fs_roundtrip_and_readonly;
     Alcotest.test_case "read-only without grant still refuses" `Quick

@@ -629,3 +629,38 @@ stdin lines and converts them with the library's own `text.to-int` and
   ("42", "-0.5", "not a number: 4611686018427387904", "not a number: abc")
   $ diff numin-i.out numin-n.out && echo identical
   identical
+
+End-of-input-aware input (APP.7): the console grant also installs `next-line` in native binaries.
+Immediate end of input, an empty line, whitespace, a final line without a newline, the sticky end,
+an early quit that leaves input unread, and the legacy `read-line` agree byte-for-byte with the
+interpreter; without the grant both engines refuse both effects.
+
+  $ cat > entries.jac <<'JACQUARD'
+  > loop(count) = match next-line() {
+  >   | None -> { println($"end of input after {text.from-int(count)} entries"); count }
+  >   | Some(line) -> match text.trim(line) {
+  >     | "" -> loop(count)
+  >     | "quit" -> { println("bye"); count }
+  >     | entry -> { println($"entry: {entry}"); loop(add(count, 1)) }
+  >   }
+  > }
+  > (loop(0), next-line(), next-line(), read-line())
+  > JACQUARD
+  $ jacquard build entries.jac -o entries > /dev/null
+  $ for input in '' '\n' 'a\n\n   \nb' 'a\nquit\nrest\n' 'quit\nrest'; do
+  >   printf "$input" > entries.in
+  >   jacquard run entries.jac --allow console < entries.in > entries-i.out 2>&1; interpreter_status=$?
+  >   ./entries --allow console < entries.in > entries-n.out 2>&1; native_status=$?
+  >   cmp entries-i.out entries-n.out && test "$interpreter_status" = "$native_status" && tail -1 entries-n.out
+  > done
+  (0, none, none, "")
+  (0, none, none, "")
+  (2, none, none, "")
+  (1, some("rest"), none, "")
+  (0, some("rest"), none, "")
+  $ jacquard run entries.jac < /dev/null > refuse-i.out 2>&1; echo "exit $?"
+  exit 3
+  $ ./entries < /dev/null > refuse-n.out 2>&1; echo "exit $?"
+  exit 3
+  $ cmp refuse-i.out refuse-n.out && grep -c 'grant it with --allow console' refuse-n.out
+  2

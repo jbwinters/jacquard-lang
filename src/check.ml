@@ -2489,9 +2489,9 @@ let manifest_errors ctx ?(grantable = []) ~(granted : Hash.t list) (row : row) :
         let hint =
           match metadata with
           | Some metadata
-            when grantable = [] || List.mem metadata.Effect_registry.index_name grantable ->
+            when grantable = [] || List.mem (Effect_registry.root_grant_name metadata) grantable ->
               Printf.sprintf "grant it with --allow %s, or handle the effect in the program"
-                metadata.index_name
+                (Effect_registry.root_grant_name metadata)
           | Some metadata when metadata.tier = Effect_registry.World ->
               Printf.sprintf
                 "handle %s in the program (%s is a world facade and is not root-grantable)"

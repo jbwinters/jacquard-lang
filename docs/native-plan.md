@@ -356,7 +356,8 @@ widened to grant-only and tail-resumptive programs.
    remains a 0-arity thunk so the push/pop stays structured around one call.
    Root
    grants are runtime C functions with the same shape, ported byte-for-byte
-   from Prelude.grant: console (print → fwrite, read-line with EOF as ""),
+   from Prelude.grant: console (print → fwrite, read-line with EOF as "",
+   and since APP.7 the ConsoleInput next-line → some(line) or a sticky none),
    clock (now → ms since epoch, sleep → nanosleep), fs (read/write/list-dir
    via stdio + dirent, io failures rendered as Runtime_err.Io over
    Sys_error's "<path>: <strerror>"). net stays refused in v1 binaries —

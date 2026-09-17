@@ -46,8 +46,16 @@ val catalog_v1 : metadata list
 val catalog_v2 : metadata list
 (** The additive v2 snapshot: the exact v1 prefix followed by [GovernanceApprovalV1]. *)
 
+val catalog_v3 : metadata list
+(** The additive v3 snapshot: the exact v2 prefix followed by [ConsoleInput]. *)
+
+val root_grant_name : metadata -> string
+(** [root_grant_name metadata] is the [--allow] spelling whose root grant covers this effect: its
+    own index name, except that [ConsoleInput] is covered by the [console] grant. It does not say
+    whether that name is grantable at all. *)
+
 val catalog : metadata list
-(** The current taxonomy snapshot, presently {!catalog_v2}. *)
+(** The current taxonomy snapshot, presently {!catalog_v3}. *)
 
 val canonical_v1 : t
 (** The resolved identities from the frozen v1 snapshot. *)
@@ -55,8 +63,11 @@ val canonical_v1 : t
 val canonical_v2 : t
 (** The resolved identities from the additive v2 snapshot. *)
 
+val canonical_v3 : t
+(** The resolved identities from the additive v3 snapshot. *)
+
 val canonical : t
-(** The current canonical registry, presently {!canonical_v2}. *)
+(** The current canonical registry, presently {!canonical_v3}. *)
 
 val entries : t -> metadata list
 (** [entries registry] returns its entries in stable display-name order. *)
@@ -68,7 +79,7 @@ val find_canonical : Hash.t -> metadata option
 (** [find_canonical identity] is [find canonical identity]. *)
 
 val canonical_order : Hash.t -> int option
-(** [canonical_order identity] is {!canonical_order_v2}. *)
+(** [canonical_order identity] is {!canonical_order_v3}. *)
 
 val canonical_order_v1 : Hash.t -> int option
 (** [canonical_order_v1 identity] returns its zero-based position in the frozen v1 snapshot. *)
@@ -76,6 +87,10 @@ val canonical_order_v1 : Hash.t -> int option
 val canonical_order_v2 : Hash.t -> int option
 (** [canonical_order_v2 identity] returns its zero-based position in the additive v2 snapshot.
     Reserved rows retain their positions but never match. *)
+
+val canonical_order_v3 : Hash.t -> int option
+(** [canonical_order_v3 identity] returns its zero-based position in the additive v3 snapshot. Every
+    v2 position is unchanged; [ConsoleInput] is appended at 27. *)
 
 type style = Plain | Ansi
 

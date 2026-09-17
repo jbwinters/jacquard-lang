@@ -2,6 +2,7 @@ open Jacquard
 
 let taxonomy_file = "../spec/effect-taxonomy-v1.tsv"
 let taxonomy_v2_file = "../spec/effect-taxonomy-v2.tsv"
+let taxonomy_v3_file = "../spec/effect-taxonomy-v3.tsv"
 let taxonomy_doc = "../docs/effect-taxonomy.md"
 let membrane_doc = "../docs/effect-membranes.md"
 let review_doc = "../docs/effect-review.md"
@@ -221,6 +222,7 @@ let rows_from path =
 
 let rows () = rows_from taxonomy_file
 let rows_v2 () = rows_from taxonomy_v2_file
+let rows_v3 () = rows_from taxonomy_v3_file
 
 let operation_names operations =
   String.split_on_char ';' operations
@@ -2133,6 +2135,73 @@ let test_taxonomy_v2_is_additive () =
   | Ok _ -> Alcotest.fail "GovernanceApprovalV1 identity is not an effect declaration"
   | Error diagnostics -> Eval_support.fail_diags "locate GovernanceApprovalV1" diagnostics
 
+let test_taxonomy_v3_is_additive () =
+  let v2 = rows_v2 () and v3 = rows_v3 () in
+  let rec split_prefix prefix whole =
+    match (prefix, whole) with
+    | [], suffix -> suffix
+    | expected :: expected_rest, actual :: actual_rest ->
+        Alcotest.(check bool) "v3 preserves each v2 row byte-for-byte" true (expected = actual);
+        split_prefix expected_rest actual_rest
+    | _ :: _, [] -> Alcotest.fail "v3 is shorter than the v2 snapshot"
+  in
+  let suffix = split_prefix v2 v3 in
+  Alcotest.(check int) "v2 remains 27 rows" 27 (List.length v2);
+  Alcotest.(check int) "v3 adds exactly one row" 28 (List.length v3);
+  let input_row =
+    match suffix with
+    | [ row ] -> row
+    | rows -> Alcotest.failf "v3 has %d additive rows, expected one" (List.length rows)
+  in
+  Alcotest.(check string) "additive display name" "ConsoleInput" input_row.effect_name;
+  Alcotest.(check string) "additive index name" "console-input" input_row.index_name;
+  Alcotest.(check string) "additive operation" "next-line:()->Option Text" input_row.operations;
+  let expected_hash = "dea2b2ac31dd86c9f384a877eccad9ab09d2f49833e890719835326ae36787f5" in
+  Alcotest.(check string) "additive interface hash" expected_hash input_row.interface_hash;
+  Alcotest.(check string) "additive world tier" "world" input_row.tier;
+  Alcotest.(check string) "additive low risk" "low" input_row.risk;
+  Alcotest.(check bool)
+    "registry v3 preserves the exact v2 prefix" true
+    (split_prefix Effect_registry.catalog_v2 Effect_registry.catalog_v3
+    = [ List.nth Effect_registry.catalog_v3 27 ]);
+  let identity =
+    match Hash.of_hex expected_hash with
+    | Some hash -> hash
+    | None -> Alcotest.fail "ConsoleInput hash is malformed"
+  in
+  Alcotest.(check (option int))
+    "v2 does not reinterpret the new identity" None
+    (Effect_registry.canonical_order_v2 identity);
+  Alcotest.(check (option int))
+    "v3 appends the new identity" (Some 27)
+    (Effect_registry.canonical_order_v3 identity);
+  Alcotest.(check (option int))
+    "current ordering is v3" (Some 27)
+    (Effect_registry.canonical_order identity);
+  let metadata = List.nth Effect_registry.catalog_v3 27 in
+  Alcotest.(check string)
+    "the console grant covers ConsoleInput" "console"
+    (Effect_registry.root_grant_name metadata);
+  let store = prelude_store () in
+  let console_hash name =
+    match Store.lookup_kind store name Resolve.KEffect with
+    | Some entry -> Hash.to_hex entry.hash
+    | None -> Alcotest.failf "%s is absent from the prelude" name
+  in
+  Alcotest.(check string)
+    "Console keeps its released identity"
+    "73e8a208eb7fadc43e3bd7aef1474884cf99ce86f8108ddf0e3baff0a74b3fc9" (console_hash "console");
+  Alcotest.(check string)
+    "prelude implements the additive identity" expected_hash (console_hash "console-input");
+  let expected_ops = resolved_taxonomy_effect store input_row in
+  match Store.locate store identity with
+  | Ok { decl = { Kernel.it = Kernel.DefEffect { ops; _ }; _ }; role = Store.Whole; _ } ->
+      Alcotest.(check bool)
+        "additive schema matches the prelude" true
+        (List.equal same_opspec expected_ops ops)
+  | Ok _ -> Alcotest.fail "ConsoleInput identity is not an effect declaration"
+  | Error diagnostics -> Eval_support.fail_diags "locate ConsoleInput" diagnostics
+
 let test_governed_membrane_charter () =
   let doc = Corpus_support.read_file membrane_doc in
   let fixture = Corpus_support.read_file membrane_fixture in
@@ -2314,5 +2383,6 @@ let suite =
       test_unknown_identity_is_uncolored_and_unblessed;
     Alcotest.test_case "registry ordering stable" `Quick test_registry_order_is_stable;
     Alcotest.test_case "taxonomy v2 is additive" `Quick test_taxonomy_v2_is_additive;
+    Alcotest.test_case "taxonomy v3 is additive" `Quick test_taxonomy_v3_is_additive;
     Alcotest.test_case "successor status docs" `Quick test_successor_status_docs;
   ]

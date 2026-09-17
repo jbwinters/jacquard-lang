@@ -56,6 +56,8 @@ prompt 3
 mk-prompt 3
 infer 3
 complete 3
+console-input 3
+next-line 3
 # --- 03-concurrency (ring 2; declarations only, no scheduler/root handler)
 task 2
 task-result 2
@@ -336,6 +338,7 @@ replay.take-match 3
 test.replay-loose 3
 net.scripted 3
 console.scripted 3
+console.scripted-input 3
 clock.fixed 3
 fs.in-memory 3
 fault 1
