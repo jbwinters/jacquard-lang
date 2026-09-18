@@ -52,6 +52,17 @@ that executes the narrative plus sampled and exhaustive Warp lanes.
 its real approval bridge and hostile lane deliberately reuse bounded host/test
 seams. It adds no CLI or runtime surface.
 
+## Applications
+
+- `applications/`: the four everyday applications from the 0.2 application
+  journals (dice coach, picnic planner, rota optimizer, formula notebook),
+  imported by `scripts/applications/import.sh` with a SHA-256 provenance
+  manifest and kept as acceptance fixtures. `applications/run.sh APP
+  demo|interactive|check|test|build OUT` assembles each entry point the way
+  the applications document; `test/cli/applications.t` is the routine lane and
+  `dune build @applications-exhaustive` the exhaustive one. See
+  `applications/README.md`.
+
 ## Basics
 
 Directory: `basics/`

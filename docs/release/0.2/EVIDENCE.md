@@ -33,7 +33,7 @@ The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
 - Alcotest/QCheck cases: `1023`
-- Cram transcript files: `61`
+- Cram transcript files: `62`
 - Documentation examples: `34` named examples across `8` documents
 
 The development suite also includes corpus goldens, release-manifest checks,
@@ -251,3 +251,22 @@ the once-resumption restriction as an explicit negative example
 non-copyable. The harness self-test covers the new modes and their rejections.
 The documentation-example inventory is `34` across `8` documents; the Alcotest
 and cram counts are unchanged.
+
+The four everyday applications are acceptance fixtures (APP.11).
+`demos/applications` holds byte-identical copies of the dice coach, picnic
+planner, rota optimizer, and formula notebook sources, imported by
+`scripts/applications/import.sh` with a SHA-256 provenance manifest; the
+originals are untouched. The baseline is pinned before any workaround is
+retired: `test/cli/applications.t` (the routine lane, one more cram file)
+verifies the manifest, the `console`-only demo manifests, every recorded
+`EXAMPLE.txt` transcript under the interpreter and the native binary (the
+hand-calculated picnic scores, the dice policy at pot 19, the rota week
+proven optimal at 73 in 705 nodes, the notebook what-if), real interactive
+sessions over standard input with interpreter/native parity, and the three
+Warp suites with sampled properties (25, 17, and 18 tests); `dune build
+@applications-exhaustive` (workflow `applications.yml`, path-scoped, not
+required) reruns the suites with `--exhaustive` and the native parity. All
+eight entry points now build natively; the dice coach and picnic planner had
+never done so before the APP.5 and APP.6 repairs. Warp suites remain
+interpreter-only, and the applications' own workarounds are kept as recorded.
+The current source inventory is `1023 / 62 / 34`.

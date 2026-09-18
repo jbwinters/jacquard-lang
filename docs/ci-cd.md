@@ -173,6 +173,19 @@ JACQUARD_GOVERNANCE_PLAYGROUND_FIXTURES_OUT="$PWD/playground/governance/fixtures
   opam exec -- dune exec test/gen_governance_playground_fixtures.exe
 ```
 
+## Applications Exhaustive Lane
+
+Workflow: `.github/workflows/applications.yml`
+
+The four everyday applications kept under `demos/applications` have two lanes.
+`test/cli/applications.t` is the routine lane inside `dune runtest`:
+provenance, manifests, demo transcripts under both engines, real interactive
+sessions, and the Warp suites with sampled properties. The workflow runs
+`dune build @test/applications/applications-exhaustive` on pushes and pull
+requests that touch the language, runtime, prelude, or the fixtures, and on
+demand: every suite with `--exhaustive` and native parity of every demo. It is
+not a required check.
+
 ## GM.12B Exhaustive Forwarding Evidence
 
 Workflow: `.github/workflows/gm12b.yml`

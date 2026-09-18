@@ -1,0 +1,98 @@
+nb> set tickets = 80
+edit accepted
+tickets: <unset> -> 80
+recalculation: 0 hits, 1 recomputations
+nb> set price = 15
+edit accepted
+price: <unset> -> 15
+recalculation: 1 hits, 1 recomputations
+nb> set revenue = tickets * price
+edit accepted
+revenue: <unset> -> 1200
+recalculation: 4 hits, 1 recomputations
+nb> set venue = 300
+edit accepted
+venue: <unset> -> 300
+recalculation: 3 hits, 1 recomputations
+nb> set catering = tickets * 4
+edit accepted
+catering: <unset> -> 320
+recalculation: 5 hits, 1 recomputations
+nb> set surplus = revenue - venue - catering
+edit accepted
+surplus: <unset> -> 580
+recalculation: 8 hits, 1 recomputations
+nb> show
+tickets = 80    [80]
+price = 15    [15]
+revenue = 1200    [tickets * price]
+venue = 300    [300]
+catering = 320    [tickets * 4]
+surplus = 580    [revenue - venue - catering]
+cache totals: 21 hits, 6 recomputations
+nb> why surplus
+surplus = 580    [revenue - venue - catering]
+direct dependencies: revenue, venue, catering
+dependency values (transitive):
+revenue = 1200
+venue = 300
+catering = 320
+tickets = 80
+price = 15
+nb> whatif tickets = 100
+preview (live state unchanged):
+tickets: 80 -> 100
+revenue: 1200 -> 1500
+catering: 320 -> 400
+surplus: 580 -> 800
+recalculation: 8 hits, 4 recomputations
+nb> show surplus
+surplus = 580    [revenue - venue - catering]
+nb> set tickets = 100
+edit accepted
+tickets: 80 -> 100
+revenue: 1200 -> 1500
+catering: 320 -> 400
+surplus: 580 -> 800
+recalculation: 8 hits, 4 recomputations
+nb> undo
+undone
+tickets: 100 -> 80
+revenue: 1500 -> 1200
+catering: 400 -> 320
+surplus: 800 -> 580
+cache totals: 21 hits, 6 recomputations
+nb> redo
+redone
+tickets: 80 -> 100
+revenue: 1200 -> 1500
+catering: 320 -> 400
+surplus: 580 -> 800
+cache totals: 29 hits, 10 recomputations
+nb> unset price
+edit accepted
+revenue: 1500 -> ERROR [price]: undefined cell
+surplus: 800 -> ERROR [price]: undefined cell
+price: 15 -> <unset>
+recalculation: 7 hits, 3 recomputations
+nb> set price = 18
+edit accepted
+revenue: ERROR [price]: undefined cell -> 1800
+surplus: ERROR [price]: undefined cell -> 1100
+price: <unset> -> 18
+recalculation: 8 hits, 3 recomputations
+nb> set tickets = surplus
+rejected: cycle: tickets -> surplus -> revenue -> tickets
+nb> set price = (18 + )
+rejected: column 7: expected a number, name, or parenthesis
+nb> show
+tickets = 100    [100]
+revenue = 1800    [tickets * price]
+venue = 300    [300]
+catering = 400    [tickets * 4]
+surplus = 1100    [revenue - venue - catering]
+price = 18    [18]
+cache totals: 44 hits, 16 recomputations
+nb> quit
+bye
+()

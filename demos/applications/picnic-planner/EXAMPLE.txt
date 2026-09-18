@@ -1,0 +1,43 @@
+PICNIC DECISION PLANNER
+Synthetic scenarios, net enjoyment points, expected-enjoyment objective.
+Attendance depends on the same weather used to score every venue.
+All finite paths are enumerated; displayed values are rounded to three decimals.
+Rain chance 30%; forecast accuracy 80%; forecast cost 1 points
+  park: expected enjoyment = 51.855; chance of negative enjoyment = 30.000%
+  covered pavilion: expected enjoyment = 64.520; chance of negative enjoyment = 0.000%
+  indoors: expected enjoyment = 53.930; chance of negative enjoyment = 0.000%
+Without more information: choose covered pavilion.
+  dry forecast: probability 62.000%; choose park.
+  wet forecast: probability 38.000%; choose indoors.
+Forecast information is worth 3.275 enjoyment points before its cost.
+Recommendation: buy the forecast, then choose the indicated venue.
+
+Sensitivity: almost dry, then very wet, then an uninformative forecast.
+Rain chance 5%; forecast accuracy 80%; forecast cost 1 points
+  park: expected enjoyment = 80.643; chance of negative enjoyment = 5.000%
+  covered pavilion: expected enjoyment = 74.170; chance of negative enjoyment = 0.000%
+  indoors: expected enjoyment = 52.655; chance of negative enjoyment = 0.000%
+Without more information: choose park.
+  dry forecast: probability 77.000%; choose park.
+  wet forecast: probability 23.000%; choose covered pavilion.
+Forecast information is worth 0.693 enjoyment points before its cost.
+Recommendation: skip the forecast and choose the venue above.
+Rain chance 90%; forecast accuracy 80%; forecast cost 1 points
+  park: expected enjoyment = -17.235; chance of negative enjoyment = 90.000%
+  covered pavilion: expected enjoyment = 41.360; chance of negative enjoyment = 0.000%
+  indoors: expected enjoyment = 56.990; chance of negative enjoyment = 0.000%
+Without more information: choose indoors.
+  dry forecast: probability 26.000%; choose indoors.
+  wet forecast: probability 74.000%; choose indoors.
+Forecast information is worth 0.000 enjoyment points before its cost.
+Recommendation: skip the forecast and choose the venue above.
+Rain chance 30%; forecast accuracy 50%; forecast cost 0 points
+  park: expected enjoyment = 51.855; chance of negative enjoyment = 30.000%
+  covered pavilion: expected enjoyment = 64.520; chance of negative enjoyment = 0.000%
+  indoors: expected enjoyment = 53.930; chance of negative enjoyment = 0.000%
+Without more information: choose covered pavilion.
+  dry forecast: probability 50.000%; choose covered pavilion.
+  wet forecast: probability 50.000%; choose covered pavilion.
+Forecast information is worth 0.000 enjoyment points before its cost.
+Recommendation: skip the forecast and choose the venue above.
+()

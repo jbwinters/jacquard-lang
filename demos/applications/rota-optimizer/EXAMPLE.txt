@@ -1,0 +1,91 @@
+STAFF ROTA OPTIMIZER
+One person per eight-hour shift. Preferences compete with workload balance.
+
+Eight staff across fourteen shifts:
+Staff 8, shifts 14, minimum rest 12h, node budget 2000
+PROVEN OPTIMAL
+Expanded 705 search nodes; 516 pruning decisions.
+Score 73 = preferences 125 - workload penalty 52
+Penalty = 2 * sum(each person's shift count squared).
+  Mon AM [hours 8..16, general]: Bo; preference 10
+  Mon PM [hours 16..24, lead]: Cleo; preference 10
+  Tue AM [hours 32..40, general]: Dev; preference 10
+  Tue PM [hours 40..48, lead]: Gus; preference 6
+  Wed AM [hours 56..64, general]: Finn; preference 10
+  Wed PM [hours 64..72, lead]: Gus; preference 10
+  Thu AM [hours 80..88, general]: Hana; preference 10
+  Thu PM [hours 88..96, lead]: Ada; preference 10
+  Fri AM [hours 104..112, general]: Cleo; preference 7
+  Fri PM [hours 112..120, lead]: Ada; preference 6
+  Sat AM [hours 128..136, general]: Dev; preference 10
+  Sat PM [hours 136..144, lead]: Emi; preference 10
+  Sun AM [hours 152..160, general]: Finn; preference 10
+  Sun PM [hours 160..168, lead]: Emi; preference 6
+Workloads:
+  Ada: 2/3 shifts; 16 hours
+  Bo: 1/3 shifts; 8 hours
+  Cleo: 2/3 shifts; 16 hours
+  Dev: 2/3 shifts; 16 hours
+  Emi: 2/3 shifts; 16 hours
+  Finn: 2/3 shifts; 16 hours
+  Gus: 2/3 shifts; 16 hours
+  Hana: 1/3 shifts; 8 hours
+Complete schedule independently rechecked: availability, skills, capacity, coverage, and rest all satisfied.
+
+Small problem: preference-only objective, then balanced workloads:
+Staff 2, shifts 4, minimum rest 8h, node budget 200
+PROVEN OPTIMAL
+Expanded 5 search nodes; 0 pruning decisions.
+Score 40 = preferences 40 - workload penalty 0
+Penalty = 0 * sum(each person's shift count squared).
+  Day 1 [hours 0..8, general]: Alex; preference 10
+  Day 2 [hours 24..32, general]: Alex; preference 10
+  Day 3 [hours 48..56, general]: Alex; preference 10
+  Day 4 [hours 72..80, general]: Alex; preference 10
+Workloads:
+  Alex: 4/4 shifts; 32 hours
+  Blair: 0/4 shifts; 0 hours
+Complete schedule independently rechecked: availability, skills, capacity, coverage, and rest all satisfied.
+Staff 2, shifts 4, minimum rest 8h, node budget 200
+PROVEN OPTIMAL
+Expanded 19 search nodes; 4 pruning decisions.
+Score 20 = preferences 36 - workload penalty 16
+Penalty = 2 * sum(each person's shift count squared).
+  Day 1 [hours 0..8, general]: Alex; preference 10
+  Day 2 [hours 24..32, general]: Blair; preference 8
+  Day 3 [hours 48..56, general]: Alex; preference 10
+  Day 4 [hours 72..80, general]: Blair; preference 8
+Workloads:
+  Alex: 2/4 shifts; 16 hours
+  Blair: 2/4 shifts; 16 hours
+Complete schedule independently rechecked: availability, skills, capacity, coverage, and rest all satisfied.
+
+A rest conflict requiring a joint feasibility check:
+Staff 2, shifts 2, minimum rest 8h, node budget 200
+PROVEN INFEASIBLE
+Expanded 2 search nodes; 1 pruning decisions.
+  Only lead is the only candidate for First lead shift and Second lead shift. Those intervals do not leave the required 8 hours of rest.
+
+A short search with a usable incumbent but no optimality proof:
+Staff 2, shifts 4, minimum rest 8h, node budget 5
+BUDGET EXHAUSTED
+Expanded 5 search nodes; 0 pruning decisions.
+Score 20 = preferences 36 - workload penalty 16
+Penalty = 2 * sum(each person's shift count squared).
+  Day 1 [hours 0..8, general]: Alex; preference 10
+  Day 2 [hours 24..32, general]: Blair; preference 8
+  Day 3 [hours 48..56, general]: Alex; preference 10
+  Day 4 [hours 72..80, general]: Blair; preference 8
+Workloads:
+  Alex: 2/4 shifts; 16 hours
+  Blair: 2/4 shifts; 16 hours
+Complete schedule independently rechecked: availability, skills, capacity, coverage, and rest all satisfied.
+Best found score 20; global relaxation upper bound 24.
+Optimality gap is at most 4 points; optimality has NOT been proved.
+
+Zero search budget must not claim infeasibility:
+Staff 8, shifts 14, minimum rest 12h, node budget 0
+BUDGET EXHAUSTED
+Expanded 0 search nodes; 0 pruning decisions.
+No complete schedule found yet. Feasibility is UNKNOWN; this is not evidence of impossibility.
+()
