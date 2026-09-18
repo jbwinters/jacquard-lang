@@ -132,6 +132,58 @@ let unknown st ~meta ~locals ~what name =
        ~summary:"This reference names something that is not in scope." ~cause
        ~next_step:"Correct the reference to an in-scope name or declaration." ~contrast ())
 
+(** [reference_of diagnostic] recovers, from an E0301 produced by {!unknown}, an E0302 produced by
+    {!kind_mismatch}, or an E0309 for a named call to an unresolved callee, the name the reference
+    used and the kinds that would have satisfied its position, so editor recovery can tell a
+    reference to a malformed declaration from an independent error. *)
+let reference_of (diagnostic : Diag.t) : (string * nkind list) option =
+  let cause = Diag.cause diagnostic in
+  let kinds_of = function
+    | "a value" | "name" -> [ KTerm; KCon; KOp ]
+    | "a term" | "term" -> [ KTerm ]
+    | "a constructor" | "constructor" -> [ KCon ]
+    | "a type" | "type" -> [ KType ]
+    | "an effect" | "effect" -> [ KEffect ]
+    | "an effect operation" | "operation" -> [ KOp ]
+    | _ -> [ KTerm; KCon; KOp; KType; KEffect ]
+  in
+  (* the text between the first occurrence of [left] and the next [right] after it *)
+  let between text left right =
+    let ll = String.length left in
+    let rec find index =
+      if index + ll > String.length text then None
+      else if String.equal (String.sub text index ll) left then
+        let from = index + ll in
+        match String.index_from_opt text from right with
+        | Some stop -> Some (String.sub text from (stop - from))
+        | None -> None
+      else find (index + 1)
+    in
+    find 0
+  in
+  match Diag.code_or_uncoded diagnostic with
+  | "E0302" -> (
+      (* "`name` is a type, but this position needs a value." *)
+      match (between cause "`" '`', between cause "needs " '.') with
+      | Some name, Some expected -> Some (name, kinds_of expected)
+      | Some name, None -> Some (name, kinds_of "")
+      | None, _ -> None)
+  | "E0309" -> (
+      (* "... explicit labels. (callee `name`)" *)
+      match between cause "(callee `" '`' with
+      | Some name -> Some (name, [ KTerm; KCon; KOp ])
+      | None -> None)
+  | "E0301" -> (
+      (* "No constructor named `name` is in scope..." *)
+      match (between cause "No " ' ', between cause " named `" '`') with
+      | Some what, Some name -> Some (name, kinds_of what)
+      | None, Some name -> Some (name, kinds_of "")
+      | _, None -> None)
+  | _ -> None
+
+(** [unknown_name_of diagnostic] is the name half of {!reference_of}. *)
+let unknown_name_of diagnostic = Option.map fst (reference_of diagnostic)
+
 let kind_mismatch st ~meta name ~expected ~got =
   report st
     (Diag.error ?span:(Meta.span meta) ~domain:Resolution ~code:"E0302"
@@ -388,11 +440,27 @@ let elaborate_named_call st ~group ~locals (source : Kernel.expr) fn arguments =
   else
     match named_call_schema st group fn with
     | None ->
+        (* an unresolved callee keeps its name, so editor recovery can tell a call into a
+           malformed declaration from an independent named-call mistake *)
+        let callee =
+          match fn.Kernel.it with
+          | Kernel.Var name
+            when not
+                   (List.mem name locals
+                   &&
+                   match hinted_value_kind fn.Kernel.meta with
+                   | None | Some (KTerm, _) -> true
+                   | Some _ -> false) ->
+              (* a lexical local shadows only an untagged or term-tagged reference; a
+                 constructor reference beside a same-spelled local is still the constructor *)
+              Printf.sprintf " (callee `%s`)" name
+          | _ -> ""
+        in
         named_call_diagnostic st ~meta:source.meta ~code:"E0309"
           ~summary:"This callee has no usable named-call ABI."
           ~cause:
-            "Named arguments require a direct constructor, operation, or top-level term with \
-             explicit labels."
+            ("Named arguments require a direct constructor, operation, or top-level term with \
+              explicit labels." ^ callee)
           ~next_step:
             "Call this value positionally, or declare an explicit labeled ABI on an eligible \
              direct callable.";
@@ -773,9 +841,18 @@ let rec resolve_expr_in st ~group ~locals (e : Kernel.expr) : Kernel.expr =
                     e
                 | [] ->
                     (* sibling group members count as near-miss candidates too *)
+                    (* a kind-tagged escape (`term:x`) names its kind so editor recovery does not
+                       mistake the reference for one a constructor or operation could satisfy *)
+                    let what =
+                      match hint with
+                      | Some (KTerm, _) -> "term"
+                      | Some (KCon, _) -> "constructor"
+                      | Some (KOp, _) -> "operation"
+                      | Some ((KType | KEffect), _) | None -> "name"
+                    in
                     unknown st ~meta:e.Kernel.meta
                       ~locals:(List.map (fun entry -> entry.group_name) group @ locals)
-                      ~what:"name" x;
+                      ~what x;
                     e)))
   | Kernel.Lam (params, body) ->
       let _, bound = pats_vars st params in

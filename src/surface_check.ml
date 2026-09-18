@@ -168,18 +168,26 @@ let project_top (top : Surface_ast.top) =
 module String_set = Set.Make (String)
 
 let warning_case (pattern : Surface_ast.pat) name =
+  let constructor =
+    match Surface_name.to_pascal name with Some spelling -> spelling | None -> name
+  in
   Diag.warning
     ?span:(Meta.span pattern.Surface_ast.meta)
     ~domain:Surface ~code:"W1201"
     ~summary:"Lowercase pattern binds instead of matching a constructor"
     ~cause:
       (Printf.sprintf
-         "Binding pattern `%s` shadows an in-scope constructor that differs only in case." name)
-    ~next_step:"Use the constructor's PascalCase spelling in this pattern."
+         "Binding pattern `%s` binds a new name; it does not match the in-scope constructor `%s`, \
+          which differs only in case."
+         name constructor)
+    ~next_step:
+      (Printf.sprintf
+         "Write `%s` to match the constructor, or rename the binding if it is meant to bind."
+         constructor)
     ~contrast:
       (Some
          (Diag.contrast
-            ~mistaken:(Printf.sprintf "`%s` matches the constructor" name)
+            ~mistaken:(Printf.sprintf "`%s` matches the constructor `%s`" name constructor)
             ~intended:"A lowercase pattern always binds a new name"))
     ()
 
@@ -471,7 +479,14 @@ let deduplicate diagnostics =
       if List.exists (same_diagnostic diagnostic) unique then unique else unique @ [ diagnostic ])
     [] diagnostics
 
-let analysis_names base additions call_abis =
+(* [poisoned] (name, kind) pairs are those a malformed or failed declaration of the analyzed file
+   would have bound. A file's own declaration shadows a same-kind prelude binding in strict
+   checking, so a poisoned pair must not fall through to that binding (`print`, `record`, `Some`,
+   ...): it resolves to nothing, and the resulting E0301 is a consequence rather than a finding.
+   Other kinds of the same name (a prelude term beside a poisoned constructor) stay visible, as in
+   strict checking. *)
+let analysis_names ?(recovery_fields = fun _ -> None) ?(poisoned = ref []) base additions call_abis
+    =
   let lookup name =
     let local =
       List.filter_map
@@ -481,13 +496,19 @@ let analysis_names base additions call_abis =
     let local_kinds = List.map (fun entry -> entry.Resolve.kind) local in
     local
     @ List.filter
-        (fun entry -> not (List.mem entry.Resolve.kind local_kinds))
+        (fun entry ->
+          (not (List.mem entry.Resolve.kind local_kinds))
+          && not (List.mem (name, entry.Resolve.kind) !poisoned))
         (base.Resolve.lookup name)
   in
   {
     Resolve.lookup;
     all_names = (fun () -> List.map fst !additions @ base.Resolve.all_names ());
-    constructor_fields = base.Resolve.constructor_fields;
+    constructor_fields =
+      (fun hash ->
+        match recovery_fields hash with
+        | Some fields -> Some fields
+        | None -> base.Resolve.constructor_fields hash);
     callable_abi =
       (fun hash ->
         match List.find_opt (fun (known, _) -> Hash.equal known hash) !call_abis with
@@ -511,6 +532,25 @@ let binding_call_abi (binding : Kernel.binding) =
       if List.for_all Option.is_none slots then None else Some slots
   | _ -> None
 
+(** [declared_names top] lists the kernel spellings a top-level item would bind: the definition
+    name, or the type/effect name with its constructors/operations. It works on damaged items too,
+    which is what lets a malformed declaration poison exactly the references that depend on it. *)
+let declared_names (top : Surface_ast.top) =
+  let kernel name = match Surface_name.of_pascal name with Some kernel -> kernel | None -> name in
+  match top.it with
+  | Surface_ast.Definition { name; _ } -> [ (name, Resolve.KTerm) ]
+  | Surface_ast.TypeDecl { name; constructors; _ } ->
+      (kernel name, Resolve.KType)
+      :: List.map
+           (fun (c : Surface_ast.constructor) -> (kernel c.Surface_ast.name, Resolve.KCon))
+           constructors
+  | Surface_ast.EffectDecl { name; operations; _ } ->
+      (kernel name, Resolve.KEffect)
+      :: List.map (fun (o : Surface_ast.operation) -> (o.Surface_ast.name, Resolve.KOp)) operations
+  | Surface_ast.Signature _ | Surface_ast.TopExpr _ | Surface_ast.RawTop _ | Surface_ast.TopHole _
+    ->
+      []
+
 (** [analyze ~names ctx recovered] returns parser diagnostics, surface lints, and at most one
     resolution/checking error per lowered top-level island, all in deterministic source order. Holes
     behave as fresh types and contribute no effects, allowing later independent definitions to be
@@ -520,30 +560,123 @@ let analyze ~names ctx (recovered : Surface_ast.recovered) : report =
   let recovery = Check.start_recovery ctx in
   let additions = ref [] in
   let call_abis = ref [] in
-  let evolving_names = analysis_names names additions call_abis in
+  (* Names bound by a malformed declaration, or by a declaration that could not be analyzed only
+     because it referenced such a name. A reference to one of them is a consequence of the
+     originating error, not a finding of its own, so the checker reports the originating error once
+     and keeps independent later errors (APP.8). *)
+  let poisoned = ref [] in
+  let evolving_names =
+    analysis_names
+      ~recovery_fields:(Check.recovery_constructor_fields recovery)
+      ~poisoned names additions call_abis
+  in
   let island = ref 0 in
   let diagnostics = ref (recovered.diagnostics @ lint ~names recovered.items) in
   let signatures = ref [] in
+  (* a failed or malformed redeclaration supersedes an earlier recovered binding of the same
+     (name, kind), as a later declaration would in strict checking *)
+  let poison_pairs pairs =
+    poisoned := pairs @ !poisoned;
+    additions :=
+      List.filter
+        (fun (name, entry) ->
+          not (List.exists (fun (n, k) -> String.equal n name && k = entry.Resolve.kind) pairs))
+        !additions
+  in
+  let poison tops = List.iter (fun top -> poison_pairs (declared_names top)) tops in
+  (* a reference is a consequence only when a poisoned pair of the same name could have satisfied
+     the position; a poisoned constructor used where a type is required is a genuine mistake *)
+  let is_consequence error =
+    match Resolve.reference_of error with
+    | Some (name, kinds) ->
+        List.exists
+          (fun (poisoned_name, kind) -> String.equal poisoned_name name && List.mem kind kinds)
+          !poisoned
+    | None -> false
+  in
+  (* the diagnostics of one item minus its consequences, so a genuine mistake beside a poisoned
+     reference is the one reported and an item with consequences alone is silent *)
+  let findings errors = List.filter (fun error -> not (is_consequence error)) errors in
   let add_one_error errors =
     match sort_diagnostics errors with
     | first :: _ -> diagnostics := !diagnostics @ [ first ]
     | [] -> ()
   in
+  let kernel_names (top : Kernel.top) =
+    match top with
+    | Kernel.Decl { Kernel.it = Kernel.DefTerm bindings; _ } ->
+        List.map (fun binding -> (binding.Kernel.bname, Resolve.KTerm)) bindings
+    | Kernel.Decl { Kernel.it = Kernel.DefType { tname; cons; _ }; _ } ->
+        (tname, Resolve.KType)
+        :: List.map (fun (c : Kernel.conspec) -> (c.Kernel.con_name, Resolve.KCon)) cons
+    | Kernel.Decl { Kernel.it = Kernel.DefEffect { ename; ops; _ }; _ } ->
+        (ename, Resolve.KEffect)
+        :: List.map (fun (o : Kernel.opspec) -> (o.Kernel.op_name, Resolve.KOp)) ops
+    | Kernel.Expr _ -> []
+  in
+  (* a resolution failure caused only by poisoned names poisons the item's own names in turn
+     instead of being reported *)
   let check_lowered tops =
     List.iter
       (fun top ->
         let identity = string_of_int !island in
         incr island;
+        (* whichever way an item fails, the names it would have bound are consequences of that
+           failure for every later reference, so they never produce a second finding *)
+        let failed errors =
+          add_one_error (findings errors);
+          poison_pairs (kernel_names top)
+        in
         match Resolve.resolve_w evolving_names top with
-        | Error errors -> add_one_error errors
+        | Error errors -> failed errors
+        | Ok ((Kernel.Decl { Kernel.it = Kernel.DefType _ | Kernel.DefEffect _; _ } as resolved), _)
+          when Recovery_marker.top resolved ->
+            (* the parser already reported the damage; checking or hashing a damaged declaration
+               would only add a span-less consequence, so its names are poisoned instead *)
+            poison_pairs (kernel_names resolved)
         | Ok (resolved, resolve_warnings) -> (
             diagnostics := !diagnostics @ resolve_warnings;
             match Check.check_recovery_top ~identity recovery resolved with
-            | Error errors -> add_one_error errors
+            | Error errors -> failed errors
             | Ok checked -> (
                 diagnostics := !diagnostics @ checked.Check.warnings;
                 signatures := List.rev_append checked.names !signatures;
                 match resolved with
+                | Kernel.Decl ({ Kernel.it = Kernel.DefType _ | Kernel.DefEffect _; _ } as decl)
+                  -> (
+                    match Check.register_recovery_decl recovery decl with
+                    | Ok (entries, abis) -> (
+                        let conflict =
+                          List.find_opt
+                            (fun (hash, slots) ->
+                              match List.assoc_opt hash !call_abis with
+                              | Some known -> known <> slots
+                              | None -> false)
+                            abis
+                        in
+                        match conflict with
+                        | Some (hash, _) ->
+                            (* the store refuses a second companion for the same callable
+                               hash (E0612); recovery must not silently pick one *)
+                            failed
+                              [
+                                Diag.error ?span:(Meta.span decl.Kernel.meta) ~domain:Store
+                                  ~code:"E0612"
+                                  ~summary:"A callable hash already has a different named-call ABI."
+                                  ~cause:
+                                    (Printf.sprintf
+                                       "callable %s is already bound to a different call-abi-v1 \
+                                        companion"
+                                       (Hash.to_hex hash))
+                                  ~next_step:
+                                    "Keep the published labels, or make a semantic code change \
+                                     that gives the callable a new hash."
+                                  ~contrast:None ();
+                              ]
+                        | None ->
+                            additions := entries @ !additions;
+                            call_abis := abis @ !call_abis)
+                    | Error errors -> failed errors)
                 | Kernel.Decl { Kernel.it = Kernel.DefTerm bindings; _ } ->
                     let hashes = recovery_member_hashes identity bindings in
                     additions :=
@@ -559,9 +692,7 @@ let analyze ~names ctx (recovered : Surface_ast.recovered) : report =
                          bindings hashes
                       |> List.filter_map Fun.id)
                       @ !call_abis
-                | Kernel.Decl { Kernel.it = Kernel.DefType _ | Kernel.DefEffect _; _ }
-                | Kernel.Expr _ ->
-                    ())))
+                | Kernel.Expr _ -> ())))
       tops
   in
   List.iter
@@ -573,9 +704,13 @@ let analyze ~names ctx (recovered : Surface_ast.recovered) : report =
             (fun unit ->
               match Surface_lower.lower_tops unit with
               | Ok tops -> check_lowered tops
-              | Error errors -> add_one_error errors)
+              | Error errors ->
+                  poison unit;
+                  add_one_error errors)
             (definition_units chunk)
-      | Error errors -> add_one_error errors)
+      | Error errors ->
+          poison chunk;
+          add_one_error errors)
     (chunks recovered.items);
   {
     diagnostics = !diagnostics |> deduplicate |> sort_diagnostics;

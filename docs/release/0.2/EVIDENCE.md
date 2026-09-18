@@ -32,7 +32,7 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1022`
+- Alcotest/QCheck cases: `1023`
 - Cram transcript files: `61`
 - Documentation examples: `29` named examples across `8` documents
 
@@ -199,3 +199,20 @@ line, whitespace, final line without newline, repeated end, quit, refusal
 parity), and the `stdlib-console-input` documentation example, bringing the
 current source inventory to `1022 / 61 / 29`. The APP.5 evidence note above
 says one `native.t` block; that repair added two.
+
+Declaration-error cascades are suppressed (APP.8). The `check` command's
+recovery report now keeps every cleanly lowered type and effect declaration of
+the file resolvable for later islands (constructors and operations included,
+through a checker overlay that installs nothing in the store), and the names a
+malformed declaration or a failed definition would have bound are treated as
+consequences: a later reference to one of them is silent instead of a second
+E0301 (and, as in strict checking, such a name shadows a same-named prelude
+binding rather than resolving to it), while an independent error is still
+reported in source order with exit status 1. The parenthesised-positional constructor diagnostic (E1225) names the
+surface spelling and both accepted field syntaxes, the constructor-shadow
+warning (W1201) names the constructor and both remedies, and recovery trees are
+still refused by `fmt`, `hash`, and `run`. Pinned by the cascade blocks of
+`test/cli/diagnostics.t` and two `test/test_surface_check.ml` cases (the former
+"cross-island type dependency is explicitly unsupported" case is replaced by
+its supported counterpart), bringing the current source inventory to
+`1023 / 61 / 29`.
