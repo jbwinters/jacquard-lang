@@ -34,7 +34,7 @@ tree, not estimated from task history:
 
 - Alcotest/QCheck cases: `1023`
 - Cram transcript files: `61`
-- Documentation examples: `29` named examples across `8` documents
+- Documentation examples: `34` named examples across `8` documents
 
 The development suite also includes corpus goldens, release-manifest checks,
 native interpreter/compiler differential cases, leak and memory checks,
@@ -231,3 +231,23 @@ report interpolation, the twelve/thirteen boundary, and a nested match on one
 line and on four) and the B3 block of `test/cli/surface.t` (no warning for the
 expanded call; a nested match warns under `fmt` and `check`, formatting is
 stable, and the hash is unchanged); the inventory is unchanged.
+
+Public documentation examples run through the supported toolchain (APP.10). The
+existing doctest harness (`test/docs-doctest`) gains three things rather than a
+second harness: `stdin=NAME.stdin` for interactive examples, `mode=build` (the
+fixture is compiled with `jacquard build` into the predictable scratch
+directory and the binary runs with the same grants), and `mode=commands` (a
+copyable `sh` snippet runs under `sh -e` in a fresh directory with `jacquard`
+on the PATH and the repository prelude selected, so setup instructions and
+stale commands are caught by docs CI). The summary line records the
+`jacquard --version` and prelude the examples ran against. New examples pin
+the public Console/State capture pattern (already in `stdlib-console-input`),
+the once-resumption restriction as an explicit negative example
+(`stdlib-once-resumed-twice`), constructor fields and named arguments
+(`stdlib-labeled-fields`), numeric input from real standard input
+(`stdlib-numeric-input`), the same interactive loop built natively
+(`stdlib-console-input-native`), and the multi-file store recipe in the README
+(`readme-multi-file-store`); bootstrap `.jqd` patterns are documented as
+non-copyable. The harness self-test covers the new modes and their rejections.
+The documentation-example inventory is `34` across `8` documents; the Alcotest
+and cram counts are unchanged.

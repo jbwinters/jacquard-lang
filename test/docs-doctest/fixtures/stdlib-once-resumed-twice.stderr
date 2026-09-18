@@ -1,0 +1,3 @@
+fixtures/stdlib-once-resumed-twice.jac:3:50-66: error[E0816]: A once resumption may be consumed twice on one execution path.
+  Cause: once resumption `k` may be consumed twice on one possible execution path; first consumption at fixtures/stdlib-once-resumed-twice.jac:3:41-48, second consumption at fixtures/stdlib-once-resumed-twice.jac:3:50-66
+  Next step: a once resumption may be dropped or moved, but it may be consumed at most once on each possible execution path

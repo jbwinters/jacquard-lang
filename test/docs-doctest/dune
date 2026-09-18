@@ -10,6 +10,7 @@
   %{bin:jacquard}
   (source_tree fixtures)
   (source_tree ../../prelude)
+  (source_tree ../../runtime)
   ../../README.md
   ../../docs/effect-membranes.md
   ../../docs/effect-taxonomy.md
