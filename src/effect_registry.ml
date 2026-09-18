@@ -198,7 +198,19 @@ let governance_approval_v1 =
     "request hash-bound consent for an exact GovernanceProposal"
 
 let catalog_v2 = catalog_v1 @ [ governance_approval_v1 ]
-let catalog = catalog_v2
+
+let console_input =
+  released "ConsoleInput" "console-input" World Low
+    "dea2b2ac31dd86c9f384a877eccad9ab09d2f49833e890719835326ae36787f5"
+    "read process terminal input with an explicit end-of-input result"
+
+let catalog_v3 = catalog_v2 @ [ console_input ]
+
+let root_grant_name metadata =
+  if String.equal metadata.index_name console_input.index_name then "console"
+  else metadata.index_name
+
+let catalog = catalog_v3
 
 let canonical_of_catalog catalog =
   List.fold_left
@@ -213,7 +225,8 @@ let canonical_of_catalog catalog =
 
 let canonical_v1 = canonical_of_catalog catalog_v1
 let canonical_v2 = canonical_of_catalog catalog_v2
-let canonical = canonical_v2
+let canonical_v3 = canonical_of_catalog catalog_v3
+let canonical = canonical_v3
 let entries registry = List.sort (fun a b -> String.compare a.display_name b.display_name) registry
 
 let find registry identity =
@@ -238,7 +251,8 @@ let canonical_order_in catalog identity =
 
 let canonical_order_v1 = canonical_order_in catalog_v1
 let canonical_order_v2 = canonical_order_in catalog_v2
-let canonical_order = canonical_order_v2
+let canonical_order_v3 = canonical_order_in catalog_v3
+let canonical_order = canonical_order_v3
 
 type style = Plain | Ansi
 

@@ -43,3 +43,9 @@
   (con mk-prompt (field text (tref text)) (field model (tapp (tref option) (tref text)))))
 
 (defeffect infer () (op complete once ((tref prompt)) (tref text)))
+
+; APP.7: end-of-input-aware terminal input, declared separately so `console`,
+; `print`, and `read-line` keep their identities. `next-line` resumes with
+; `some line`, or `none` once standard input has ended (and on every later
+; call); `--allow console` grants it together with `console`.
+(defeffect console-input () (op next-line once () (tapp (tref option) (tref text))))

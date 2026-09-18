@@ -59,6 +59,104 @@ console gains read-line; console.ask pipes cleanly:
   hello, josh
   ()
 
+End-of-input-aware input (APP.7): `next-line` is a separately declared
+`ConsoleInput` operation covered by the same `--allow console` grant. It resumes
+with `some(line)`, or `none` once standard input has ended, so a loop can skip
+blank lines and still stop at the end. The end is sticky, a final line without a
+newline is still delivered, and `read-line` keeps reading end of input as "".
+
+  $ cat > entries.jac <<'JACQUARD'
+  > loop(count) = match next-line() {
+  >   | None -> { println($"end of input after {text.from-int(count)} entries"); count }
+  >   | Some(line) -> match text.trim(line) {
+  >     | "" -> loop(count)
+  >     | "quit" -> { println("bye"); count }
+  >     | entry -> { println($"entry: {entry}"); loop(add(count, 1)) }
+  >   }
+  > }
+  > (loop(0), next-line(), next-line(), read-line())
+  > JACQUARD
+  $ jacquard run entries.jac --allow console < /dev/null
+  end of input after 0 entries
+  (0, none, none, "")
+  $ printf '\n' | jacquard run entries.jac --allow console
+  end of input after 0 entries
+  (0, none, none, "")
+  $ printf 'a\n\n   \nb' | jacquard run entries.jac --allow console
+  entry: a
+  entry: b
+  end of input after 2 entries
+  (2, none, none, "")
+  $ printf 'a\nquit\nrest\n' | jacquard run entries.jac --allow console
+  entry: a
+  bye
+  (1, some("rest"), none, "")
+
+The legacy operation is unchanged: an empty line and end of input both read as
+"", and its identity and Console's are the released ones.
+
+  $ cat > legacy.jac <<'JACQUARD'
+  > (read-line(), read-line(), read-line())
+  > JACQUARD
+  $ printf 'x\n\n' | jacquard run legacy.jac --allow console
+  ("x", "", "")
+  $ jacquard hash ../../prelude/03-effects.jqd | grep -E ':(console|print|read-line) '
+  5:console 73e8a208eb7fadc43e3bd7aef1474884cf99ce86f8108ddf0e3baff0a74b3fc9
+  5:print 28570e6bcdeb8646a90b31971204be7007f658bee65154b96e587c47a6585d5e
+  5:read-line cb5c1dabdfcf64756fdda61747f5e4c067e7f50923648b4e820b09048f8a952d
+
+Without the grant the manifest check refuses both effects and names the one
+grant that covers them; a handler written in the public syntax discharges
+ConsoleInput with no grant at all, and `console.scripted-input` is the library's
+scripted boundary (one shared line list, as real standard input is):
+
+  $ jacquard run entries.jac < /dev/null 2>&1 | grep -E 'Cause|Next step'
+    Cause: This program requires console [world/low] — talk to the process terminal, which is not granted (performed via `loop`).
+    Next step: grant it with --allow console, or handle the effect in the program
+    Cause: This program requires console-input [world/low] — read process terminal input with an explicit end-of-input result, which is not granted (performed via `loop`).
+    Next step: grant it with --allow console, or handle the effect in the program
+  $ cat > handled.jac <<'JACQUARD'
+  > echo-lines() = match next-line() {
+  >   | None -> println("<end>")
+  >   | Some(line) -> { println($"[{line}]"); echo-lines() }
+  > }
+  > capture(thunk, inputs) =
+  >   state.run(
+  >     fn () ->
+  >       handle thunk() {
+  >         | return _ -> ()
+  >         | print(message) resume k -> {
+  >           let (remaining, output) = get()
+  >           put((remaining, Cons(message, output)))
+  >           k(())
+  >         }
+  >         | next-line() resume k -> {
+  >           let (remaining, output) = get()
+  >           match remaining {
+  >             | Cons(line, more) -> { put((more, output)); k(Some(line)) }
+  >             | Nil -> k(None)
+  >           }
+  >         }
+  >       },
+  >     (inputs, Nil),
+  >   )
+  > (capture(echo-lines, ["a", "", "b"]), console.scripted-input(fn () -> (next-line(), read-line(), next-line(), next-line(), read-line()), ["a", ""]))
+  > JACQUARD
+  $ jacquard run handled.jac
+  (((), (nil, cons("<end>\n", cons("[b]\n", cons("[]\n", cons("[a]\n", nil)))))), (some("a"), "", none, none, ""))
+
+Resuming a `next-line` continuation twice is refused like any other `once`
+operation:
+
+  $ cat > twice.jac <<'JACQUARD'
+  > handle next-line() {
+  >   | return line -> [line]
+  >   | next-line() resume k -> list.append(k(None), k(Some("again")))
+  > }
+  > JACQUARD
+  $ jacquard run twice.jac 2>&1 | head -1
+  twice.jac:3:50-66: error[E0816]: A once resumption may be consumed twice on one execution path.
+
 The infer effect (SL.10): stub completions behind the grant; ungranted refuses:
 
   $ cat > agent.jqd <<'JACQUARD'

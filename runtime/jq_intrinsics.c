@@ -775,13 +775,14 @@ jq_value jq_i_hash_to_text(jq_rt *rt, const jq_value *a) {
   return jq_text(spelling, 64);
 }
 
-/* The additive effect-taxonomy-v2 row order, including NULL slots for reserved
- * rows. Its first 26 entries are the frozen v1 snapshot. This mirrors
+/* The additive effect-taxonomy-v3 row order, including NULL slots for reserved
+ * rows. Its first 26 entries are the frozen v1 snapshot, the 27th is v2's
+ * GovernanceApprovalV1, and the 28th is v3's ConsoleInput. This mirrors
  * Effect_registry.catalog: released identities compare by
  * their catalog position, while every unknown identity sorts afterwards by
  * its canonical lowercase HASH_V0 spelling. The intrinsic's [_v0] suffix
  * names that stable carrier/key algorithm, not the selected catalog snapshot. */
-static const char *const effect_catalog_v2[27] = {
+static const char *const effect_catalog_v3[28] = {
   "bfdfaeee39c6f5290ebea28e805bdeb92f448f1a1e0b9c47f3c70c53975b4375",
   "f236e77750a9c066fdff9220b81ab1ba6b6a5dd5226ab63dfd112f4b14aa504e",
   "44a2946788e38fb6a734449880cce3d499aa5e2f876c5d9119773533b3d621a9",
@@ -808,7 +809,8 @@ static const char *const effect_catalog_v2[27] = {
   "9b677b5e2c3ec8521c5d5dfac321ae361a959565e1cbf082fec4512199977354",
   NULL,
   NULL,
-  "41b449689fb30e44180185007d845bbe246e5401fe3e8478f4fd02e556a3f2ed"
+  "41b449689fb30e44180185007d845bbe246e5401fe3e8478f4fd02e556a3f2ed",
+  "dea2b2ac31dd86c9f384a877eccad9ab09d2f49833e890719835326ae36787f5"
 };
 
 jq_value jq_i_governance_effect_order_key_v0(jq_rt *rt, const jq_value *a) {
@@ -823,8 +825,8 @@ jq_value jq_i_governance_effect_order_key_v0(jq_rt *rt, const jq_value *a) {
   }
   hex[64] = '\0';
   int position = -1;
-  for (int i = 0; i < 27; i++) {
-    if (effect_catalog_v2[i] != NULL && strcmp(hex, effect_catalog_v2[i]) == 0) {
+  for (int i = 0; i < 28; i++) {
+    if (effect_catalog_v3[i] != NULL && strcmp(hex, effect_catalog_v3[i]) == 0) {
       position = i;
       break;
     }

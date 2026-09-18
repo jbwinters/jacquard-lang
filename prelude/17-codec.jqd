@@ -280,3 +280,26 @@
               (let nonrec (pwild)
                 (app (var check) (var true) (lit "test.replay-loose: leftover log entries (warning)"))
                 (var x))))))))))
+
+; APP.7: one shared line list serves both input operations, as real standard
+; input does. `next-line` yields `some line` and then `none` for good;
+; `read-line` yields the next line, or "" once the list is exhausted (its
+; legacy end-of-input reading), so no Throw is needed. Output is discarded.
+(defterm ((binding console.scripted-input ()
+  (lam ((pvar thunk) (pvar inputs))
+    (app
+      (handle (app (var thunk))
+        (ret (pvar x) (lam ((pwild)) (var x)))
+        (opclause print ((pwild)) k (lam ((pvar ins)) (app (app (var k) (tuple)) (var ins))))
+        (opclause read-line () k
+          (lam ((pvar ins))
+            (match (var ins)
+              (clause (pcon cons (pvar line) (pvar more)) (app (app (var k) (var line)) (var more)))
+              (clause (pcon nil) (app (app (var k) (lit "")) (var nil))))))
+        (opclause next-line () k
+          (lam ((pvar ins))
+            (match (var ins)
+              (clause (pcon cons (pvar line) (pvar more))
+                (app (app (var k) (app (var some) (var line))) (var more)))
+              (clause (pcon nil) (app (app (var k) (var none)) (var nil)))))))
+      (var inputs))))))

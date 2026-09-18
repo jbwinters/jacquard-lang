@@ -1,7 +1,8 @@
 # Blessed Effect Taxonomy v1
 
 Status: v1 remains the ET.8 release-frozen taxonomy (D56-D63). GM.7 publishes
-the additive v2 successor with `GovernanceApprovalV1`, July 2026.
+the additive v2 successor with `GovernanceApprovalV1`, July 2026; APP.7 publishes
+the additive v3 successor with `ConsoleInput`, September 2026.
 
 This specification freezes the shared effect vocabulary used by signatures,
 authority manifests, package review, and future registry metadata. It is a
@@ -9,8 +10,9 @@ compatibility contract, not a claim that every reserved effect or handler is
 implemented. The machine-readable copy is
 [`../spec/effect-taxonomy-v1.tsv`](../spec/effect-taxonomy-v1.tsv); tests require
 the table below, that artifact, the executable schema fixture, and existing
-prelude declarations to agree. The current additive snapshot is
-[`../spec/effect-taxonomy-v2.tsv`](../spec/effect-taxonomy-v2.tsv).
+prelude declarations to agree. The additive snapshots are
+[`../spec/effect-taxonomy-v2.tsv`](../spec/effect-taxonomy-v2.tsv) and the
+current [`../spec/effect-taxonomy-v3.tsv`](../spec/effect-taxonomy-v3.tsv).
 
 ### Additive v2 successor
 
@@ -125,6 +127,7 @@ plaintext must not become an ordinary prelude value before explicit exposure.
 | `Fault` | `fault.none`, `fault.random`, `fault.all` |
 | `Eval` | explicit root grant only |
 | `Console` | `console.scripted`, explicit root grant |
+| `ConsoleInput` (v3) | `console.scripted-input`, the `console` root grant |
 | `Clock` | `clock.fixed`, explicit root grant |
 | `Fs` | `fs.in-memory`, `fs.read-only`, explicit root grant |
 | `Net` | `net.scripted`, `net.record`, explicit root grant |
@@ -443,18 +446,31 @@ first shipped `DefEffect` must match this schema; its resulting full hash is
 then added to the table and frozen. A mode, operation, order, or referenced-type
 edit after that point is a new interface, never an in-place revision.
 
+### Additive v3 successor
+
+V3 preserves all 27 v2 rows in the same order and appends exactly one released
+world boundary. `Console` itself is untouched: an effect's identity covers its
+operation count, so end-of-input-aware input is a separate declaration whose
+`next-line` resumes with `Some(line)` or, once standard input has ended, `None`.
+The `console` root grant covers both effects.
+
+| effect | index-name | namespace | tier | parameters | mode | risk | ring | status | interface-hash | operations | reviewer-meaning |
+|---|---|---|---|---|---|---|---:|---|---|---|---|
+| `ConsoleInput` | `console-input` | `official` | `world` | `-` | `once` | `low` | `3` | `implemented` | `dea2b2ac31dd86c9f384a877eccad9ab09d2f49833e890719835326ae36787f5` | `next-line:()->Option Text` | read process terminal input with an explicit end-of-input result |
+
 ### Registry realization
 
 `Effect_registry` is the executable copy used by review tooling. It exposes
-explicit `catalog_v1`/`canonical_v1` and `catalog_v2`/`canonical_v2` snapshots;
-the unversioned aliases select v2. The v1 resolved registry contains exactly
+explicit `catalog_v1`/`canonical_v1`, `catalog_v2`/`canonical_v2`, and
+`catalog_v3`/`canonical_v3` snapshots; the unversioned aliases select v3. The v1 resolved registry contains exactly
 the eighteen released entries and is keyed only by their full `DefEffect`
 hashes. Its complete 26-entry catalog is also typed, but the eight `reserved`
 entries carry no hash and name only the
 `first-release` policy; registration rejects them until a real first interface is
 implemented and frozen. This keeps schema reservation distinct from resolved
 program identity. V2 contains 27 rows and nineteen released identities: the
-exact v1 prefix plus `GovernanceApprovalV1`. Audit, Secret, Approval, Judge,
+exact v1 prefix plus `GovernanceApprovalV1`; v3 contains 28 rows and twenty
+released identities, the exact v2 prefix plus `ConsoleInput`. Audit, Secret, Approval, Judge,
 Workspace, and GovernanceApprovalV1 are released governance interfaces. Their
 identities above are the shipped `DefEffect` hashes. The released operations are once
 `audit.record : (AuditEntry) -> ()`, once

@@ -60,6 +60,29 @@ jq_value jq_g_read_line(jq_rt *rt, const jq_value *args) {
   return r;
 }
 
+/* console-input: next-line resumes with some(line), or none once stdin has
+ * ended. The end is sticky: after the first none no further read is attempted,
+ * so repeated calls agree on a terminal too. read-line above is unchanged. */
+static bool jq_stdin_ended = false;
+
+jq_value jq_g_next_line(jq_rt *rt, const jq_value *args) {
+  (void)args;
+  if (jq_stdin_ended) return rt->v_none;
+  char *line = NULL;
+  size_t cap = 0;
+  ssize_t got = getline(&line, &cap, stdin);
+  if (got < 0) {
+    free(line);
+    jq_stdin_ended = true;
+    return rt->v_none;
+  }
+  if (got > 0 && line[got - 1] == '\n') got--;
+  jq_value text = jq_text((const uint8_t *)line, (uint64_t)got);
+  free(line);
+  jq_value fields[1] = { text };
+  return jq_con(rt->ci_some, fields);
+}
+
 /* clock: now is milliseconds since the epoch; sleep blocks that long */
 jq_value jq_g_now(jq_rt *rt, const jq_value *args) {
   (void)rt;

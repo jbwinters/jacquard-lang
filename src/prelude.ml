@@ -893,12 +893,23 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
     (with_posterior_signatures "posterior.sample-evidence-v1" Posterior_risk.sample_evidence_builtin);
   Ok ()
 
-(** [install_console ctx ~out] grants the [console] effect: [print] writes its text through [out]
-    and resumes with unit; [read-line] resumes with one line from [read_line] (stdin by default;
-    injectable for tests, EOF reads as ""). *)
-let install_console ?(read_line = fun () -> try Stdlib.read_line () with End_of_file -> "")
+(** [install_console ctx ~out] grants the terminal: the [console] effect and, when the store
+    declares it, the separately versioned [console-input] effect (APP.7). [print] writes its text
+    through [out] and resumes with unit. [next_line] is the one line source (stdin by default;
+    injectable for tests and replay): it returns [None] at end of input. [read-line] resumes with
+    one line from [read_line], which defaults to [next_line] with end of input read as [""] (its
+    shipped contract). [next-line] resumes with [some line], or [none] once [next_line] has returned
+    [None]; that end is sticky, so later calls resume with [none] without reading again. A reduced
+    prelude without [console-input] (or without [Option]) installs [console] alone. *)
+let install_console
+    ?(next_line = fun () -> try Some (Stdlib.read_line ()) with End_of_file -> None) ?read_line
     (ctx : Eval.ctx) ~(out : string -> unit) : (unit, Diag.t list) result =
   let ( let* ) = Result.bind in
+  let read_line =
+    match read_line with
+    | Some read_line -> read_line
+    | None -> fun () -> Option.value (next_line ()) ~default:""
+  in
   let* print_op = lookup_hash (Eval.store ctx) ~kind:Resolve.KOp "print" in
   let* read_op = lookup_hash (Eval.store ctx) ~kind:Resolve.KOp "read-line" in
   Eval.register_root_handler ctx print_op (fun args ->
@@ -920,6 +931,31 @@ let install_console ?(read_line = fun () -> try Stdlib.read_line () with End_of_
             (Runtime_err.Type_error
                (Printf.sprintf "read-line expects no arguments, got %s"
                   (String.concat ", " (List.map Value.show args)))));
+  (match
+     ( lookup_hash (Eval.store ctx) ~kind:Resolve.KOp "next-line",
+       lookup_hash (Eval.store ctx) ~kind:Resolve.KCon "some",
+       lookup_hash (Eval.store ctx) ~kind:Resolve.KCon "none" )
+   with
+  | Ok next_op, Ok some_h, Ok none_h ->
+      let ended = ref false in
+      let vnone = Value.VCon { con = none_h; name = "none"; args = [] } in
+      Eval.register_root_handler ctx next_op (fun args ->
+          match args with
+          | [] -> (
+              if !ended then Ok vnone
+              else
+                match next_line () with
+                | Some line ->
+                    Ok (Value.VCon { con = some_h; name = "some"; args = [ Value.VText line ] })
+                | None ->
+                    ended := true;
+                    Ok vnone)
+          | args ->
+              Error
+                (Runtime_err.Type_error
+                   (Printf.sprintf "next-line expects no arguments, got %s"
+                      (String.concat ", " (List.map Value.show args)))))
+  | _ -> ());
   Ok ()
 
 (** [install_clock ctx] grants [clock]: [now] is milliseconds since the epoch, [sleep] blocks for
@@ -1352,19 +1388,19 @@ let grantable_names = [ "clock"; "console"; "dist"; "eval"; "fs"; "infer"; "net"
 
 (** [grant ?console_read ?secret_getenv ctx name ~out ~seed] installs the root handler for effect
     [name] (case-insensitive: "Eval" and "eval" both work); [seed] feeds the dist sampling handler
-    only. [console_read] replaces Console's default stdin reader when supplied, allowing multi-run
-    tools to capture and replay input without changing ordinary run behavior. [secret_getenv]
-    replaces only the Secret environment adapter when supplied; embeddings can therefore provide an
-    isolated lookup overlay without mutating process-global environment state. Returns E0703 for
-    effects that exist but are not grantable (e.g. [abort]) and unknown effect names alike; keep the
-    dispatch in sync with {!grantable_names}. *)
+    only. [console_read] replaces the terminal's default stdin line source when supplied ([None] is
+    end of input), allowing multi-run tools to capture and replay input without changing ordinary
+    run behavior. [secret_getenv] replaces only the Secret environment adapter when supplied;
+    embeddings can therefore provide an isolated lookup overlay without mutating process-global
+    environment state. Returns E0703 for effects that exist but are not grantable (e.g. [abort]) and
+    unknown effect names alike; keep the dispatch in sync with {!grantable_names}. *)
 let grant ?console_read ?secret_getenv (ctx : Eval.ctx) name ~infer_cache ~out ~seed :
     (unit, Diag.t list) result =
   match String.lowercase_ascii name with
   | "console" -> (
       match console_read with
       | None -> install_console ctx ~out
-      | Some read_line -> install_console ~read_line ctx ~out)
+      | Some next_line -> install_console ~next_line ctx ~out)
   | "eval" -> install_eval ctx
   | "net" -> install_net ctx
   | "dist" -> install_dist ctx ~seed

@@ -32,9 +32,9 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1019`
+- Alcotest/QCheck cases: `1022`
 - Cram transcript files: `61`
-- Documentation examples: `28` named examples across `8` documents
+- Documentation examples: `29` named examples across `8` documents
 
 The development suite also includes corpus goldens, release-manifest checks,
 native interpreter/compiler differential cases, leak and memory checks,
@@ -182,3 +182,20 @@ zero), the singleton ASCII classes, `text.ascii-digit-value`, and
 print identically under clang and gcc, bringing the current source inventory
 to `1019 / 61 / 28`. Ring 2 gains seven names; the ring-0 freeze is
 untouched.
+
+End-of-input-aware terminal input (APP.7) is additive: `read-line` still reads an
+empty line and end of input alike as `""`, and `Console`, `print`, and
+`read-line` keep their released identities (`test/cli/world.t` pins them). The
+new `ConsoleInput` effect's `next-line : () -> Option Text` resumes with
+`Some(line)` or, once standard input has ended, a sticky `None`; the `console`
+root grant installs both effects' handlers in the interpreter, dry runs, relate
+replays, and native binaries, and the manifest lists both. It is blessed as the
+additive taxonomy v3 row (`spec/effect-taxonomy-v3.tsv`; v1 and v2 unchanged;
+the native order-key table gains position 27). `console.scripted-input` is the
+library's scripted boundary. Pinned by three Alcotest cases (`test/test_world.ml`
+injected source and scripted handler, `test/test_effect_taxonomy.ml` v3
+additivity), the world.t and native.t transcript blocks (immediate end, empty
+line, whitespace, final line without newline, repeated end, quit, refusal
+parity), and the `stdlib-console-input` documentation example, bringing the
+current source inventory to `1022 / 61 / 29`. The APP.5 evidence note above
+says one `native.t` block; that repair added two.

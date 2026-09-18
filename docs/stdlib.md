@@ -547,6 +547,7 @@ they read it:
 | effect | risk | canonical boundary | reviewing it means |
 |--------|------|--------------------|--------------------|
 | `Console` | low | `console.scripted` or explicit root grant | terminal observation or interaction |
+| `ConsoleInput` | low | `console.scripted-input` or the `console` root grant | terminal input that reports its own end |
 | `Clock` | low | `clock.fixed` or explicit root grant | wall-clock observation or waiting |
 | `Fs` | medium | `fs.in-memory`, `fs.read-only`, or explicit root grant | filesystem access; the root grant is not path-scoped |
 | `Net` | high | `net.scripted`, `net.record`, or explicit root grant (deterministic stub in 0.2) | network-shaped requests; live socket/HTTP access requires a host adapter that does not ship |
@@ -565,6 +566,52 @@ Convenience functions build on the ops in ordinary code: `println`, `console.ask
 needs no library support beyond `Handle` itself, though ring 3 ships worked examples:
 `fs.read-only`, a handler that forwards `read` and turns `write` into a `Throw`, is
 twelve lines and doubles as the tutorial on interposition.
+
+### End of input
+
+`read-line : () ->{Console} Text` resumes with `""` both for an empty line and at
+end of input; that reading is shipped behaviour and stays. A program that must
+tell the two apart performs `next-line : () ->{ConsoleInput} Option Text`, a
+separately declared effect so that `Console`, `print`, and `read-line` keep their
+identities. It resumes with `Some(line)` (a final line without a newline included),
+or `None` once standard input has ended; the end is sticky, so every later
+`next-line` resumes with `None` without reading again. Both operations are `once`.
+`--allow console` grants `ConsoleInput` together with `Console`: it is the same
+terminal authority, and the manifest lists both. `console.scripted-input` is the
+scripted boundary: one shared line list, `next-line` yields each line and then
+`None`, `read-line` yields each line and then `""`, output is discarded. A handler
+in public syntax discharges the effect with no grant at all:
+
+```jacquard doctest=stdlib-console-input mode=run fixture=stdlib-console-input.jac stdout=stdlib-console-input.stdout stderr=empty exit=0
+echo-lines() = match next-line() {
+  | None -> println("<end>")
+  | Some(line) -> { println($"[{line}]"); echo-lines() }
+}
+capture(thunk, inputs) =
+  state.run(
+    fn () ->
+      handle thunk() {
+        | return _ -> ()
+        | print(message) resume k -> {
+          let (remaining, output) = get()
+          put((remaining, Cons(message, output)))
+          k(())
+        }
+        | next-line() resume k -> {
+          let (remaining, output) = get()
+          match remaining {
+            | Cons(line, more) -> { put((more, output)); k(Some(line)) }
+            | Nil -> k(None)
+          }
+        }
+      },
+    (inputs, Nil),
+  )
+(capture(echo-lines, ["a", "", "b"]), console.scripted-input(fn () -> (next-line(), read-line(), next-line()), ["x"]))
+```
+
+A blank-line-tolerant loop that still exits at the end is then ordinary code:
+`match next-line() { | None -> finish() | Some(line) -> match text.trim(line) { | "" -> loop() | entry -> handle(entry) } }`.
 
 ### Workspace facade schemas and calls
 

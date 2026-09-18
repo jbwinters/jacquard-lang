@@ -44,9 +44,17 @@ public name index changes.
 | code.of-text, code.of-hash, code.to-text, code.render, code.diff | 1/1/1/1/2 | yes | ET.2 adds typed scalar construction and the deterministic compact renderer; diff renders smallest disagreeing subtrees over the same ported inline printer |
 | code.hash | 1 | yes | ET.6 applies HASH_V0 to the same metadata-erased canonical compact Code bytes as `code.render`; interpreter/native parity is pinned by g37 |
 | hash.parse, hash.to-text | 1/1 | yes | ET.2 opaque HASH_V0 boundary; parsing accepts only 64 lowercase hexadecimal digits and native values use the existing 32-byte `JQ_HASH` carrier |
-| governance.effect-order-key marker (`governance.effect-order-key-v0`) | 1 | yes | GM.9 pure frozen-taxonomy ordering; all 26 catalog positions, including reserved gaps, match `Effect_registry.catalog`; unknown hashes sort deterministically afterwards; g38 reaches authority validation on both engines |
+| governance.effect-order-key marker (`governance.effect-order-key-v0`) | 1 | yes | GM.9 pure frozen-taxonomy ordering; all 28 catalog positions of taxonomy v3 (26 v1 rows, GovernanceApprovalV1, ConsoleInput), including reserved gaps, match `Effect_registry.catalog`; unknown hashes sort deterministically afterwards; g38 reaches authority validation on both engines |
 | eval-code | - | refused for good | interpreter tier only |
 | debug.inspect | 1 | yes | `jq_show` parity; `JQ_SECRET` always yields the fixed `<secret redacted>` marker |
 | pmf, support | 2/1 | yes | task 71 (the enum handler reaches them); name-recognized dist cons, show-based pmf equality, interpreter's exact error texts |
 | dist.sample-lw | 3 | yes | task 72; exact seeded stream (split per run, one draw per sample), merge/normalize/sort on the rendering key, E0901 on an empty posterior |
 | obsolete hyphenated real family public names | | no | removed in SS.22; historical IDs are internal and create no duplicate objects |
+
+Every Text and numeric builtin the interpreter ships is in the table above with
+native status `yes`: the text/numeric remainder is empty as of APP.5 (repairs of
+shipped operations) and APP.6 (the additive presentation and classification
+names). End-of-input-aware terminal input is a grant (`next-line`, APP.7), not a
+builtin marker, and is listed with the native grants in `docs/native-plan.md`.
+Not in this table: the `async.scope-v0`, `governance.*-v0`, and
+`posterior.*-v1` markers, which are documented with their own subsystems.

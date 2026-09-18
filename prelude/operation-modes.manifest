@@ -37,3 +37,4 @@ dist.observe multi
 check.check multi
 check.fail multi
 fault.flaky multi
+console-input.next-line once

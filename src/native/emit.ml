@@ -952,6 +952,8 @@ let main_source (prog : program) ~precise ~(v_true : Hash.t) ~(v_false : Hash.t)
       ( "console",
         canonical_effect_hash "console",
         [ ("print", "jq_g_print"); ("read-line", "jq_g_read_line") ] );
+      (* APP.7: the console grant also covers the separately declared ConsoleInput *)
+      ("console", canonical_effect_hash "console-input", [ ("next-line", "jq_g_next_line") ]);
       ("clock", canonical_effect_hash "clock", [ ("now", "jq_g_now"); ("sleep", "jq_g_sleep") ]);
       ( "fs",
         canonical_effect_hash "fs",
@@ -1138,23 +1140,33 @@ let main_source (prog : program) ~precise ~(v_true : Hash.t) ~(v_false : Hash.t)
     "for (; nm[li] && li < 63; li++) low[li] = nm[li] >= 'A' && nm[li] <= 'Z' ? nm[li] + 32 : \
      nm[li];";
   line st.ub "low[li] = 0;";
-  (* implemented grants: install natives for the ops this program actually reaches *)
+  (* implemented grants: install natives for the ops this program actually reaches; one grant
+     name may cover several effect identities *)
+  let grant_names =
+    List.fold_left
+      (fun names (eff, _, _) -> if List.mem eff names then names else names @ [ eff ])
+      [] implemented
+  in
   List.iter
-    (fun (eff, identity, natives) ->
-      line st.ub "if (strcmp(low, %s) == 0) {" (c_string eff);
+    (fun grant ->
+      line st.ub "if (strcmp(low, %s) == 0) {" (c_string grant);
       st.ub.indent <- st.ub.indent + 1;
-      line st.ub "%s = true;" (effect_flag identity);
-      Hashtbl.iter
-        (fun _ o ->
-          if Hash.equal o.oeffect_hash identity then
-            match List.assoc_opt o.oname natives with
-            | Some native -> line st.ub "jq_grant_tbl[%d] = %s;" o.oord native
-            | None -> ())
-        prog.ops;
+      List.iter
+        (fun (eff, identity, natives) ->
+          if String.equal eff grant then (
+            line st.ub "%s = true;" (effect_flag identity);
+            Hashtbl.iter
+              (fun _ o ->
+                if Hash.equal o.oeffect_hash identity then
+                  match List.assoc_opt o.oname natives with
+                  | Some native -> line st.ub "jq_grant_tbl[%d] = %s;" o.oord native
+                  | None -> ())
+              prog.ops))
+        implemented;
       line st.ub "continue;";
       st.ub.indent <- st.ub.indent - 1;
       line st.ub "}")
-    implemented;
+    grant_names;
   line st.ub
     "jq_diagnostic_failf(1, \"E1103\", \"Native build could not complete\", \"Use a supported \
      native grant or run the program with the interpreter.\", \"Native binaries implement only the \

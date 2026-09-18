@@ -296,7 +296,16 @@ let granted_hashes store allows =
         exact_scheduler_effect "channel" Channel_contract.channel_effect_hash;
       ]
   in
-  explicit @ scheduler_infrastructure
+  (* APP.7: the console grant is the terminal authority, so it also covers the separately
+     declared ConsoleInput effect (Prelude.install_console installs both root handlers) *)
+  let console_input =
+    if List.exists (fun name -> String.lowercase_ascii name = "console") allows then
+      match Store.lookup_kind store "console-input" Resolve.KEffect with
+      | Some { Resolve.hash; _ } -> [ hash ]
+      | None -> []
+    else []
+  in
+  explicit @ console_input @ scheduler_infrastructure
 
 let make_checker store =
   match Check.make_ctx store with
@@ -716,7 +725,7 @@ let relate_cmd file variation seed allows prelude syntax =
           | None ->
               let reversed = ref [] in
               ( (fun () ->
-                  let line = try Stdlib.read_line () with End_of_file -> "" in
+                  let line = try Some (Stdlib.read_line ()) with End_of_file -> None in
                   reversed := line :: !reversed;
                   line),
                 fun () -> captured_console_input := Some (List.rev !reversed) )
@@ -727,7 +736,7 @@ let relate_cmd file variation seed allows prelude syntax =
                   | line :: rest ->
                       remaining := rest;
                       line
-                  | [] -> ""),
+                  | [] -> None),
                 fun () -> () )
         in
         match

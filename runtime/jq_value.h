@@ -482,6 +482,7 @@ jq_value jq_resume(jq_rt *rt, jq_value resume, jq_value v);
    according to the binary's --allow flags */
 jq_value jq_g_print(jq_rt *rt, const jq_value *args);
 jq_value jq_g_read_line(jq_rt *rt, const jq_value *args);
+jq_value jq_g_next_line(jq_rt *rt, const jq_value *args);
 jq_value jq_g_now(jq_rt *rt, const jq_value *args);
 jq_value jq_g_sleep(jq_rt *rt, const jq_value *args);
 jq_value jq_g_fs_read(jq_rt *rt, const jq_value *args);

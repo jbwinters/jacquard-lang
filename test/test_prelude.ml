@@ -125,7 +125,7 @@ let test_reviewed_operation_modes store =
   in
   let declared = prelude_source_modes () |> List.map row |> List.sort String.compare in
   let frozen = reviewed |> List.map row |> List.sort String.compare in
-  Alcotest.(check int) "current prelude operation inventory size" 37 (List.length declared);
+  Alcotest.(check int) "current prelude operation inventory size" 38 (List.length declared);
   Alcotest.(check (list string))
     "every operation from every prelude DefEffect has an exact reviewed mode" declared frozen;
   test_retained_multi_hashes store;
@@ -196,6 +196,8 @@ let test_loads_with_zero_diagnostics () =
       ("test.replay", "forall a | e. (Code, () ->{Net | e} a) ->{Throw | e} a");
       ("net.scripted", "forall a | e. (() ->{Net | e} a, List Response) ->{Throw | e} a");
       ("console.scripted", "forall a | e. (() ->{Console | e} a, List Text) ->{Throw | e} a");
+      ( "console.scripted-input",
+        "forall a | e. (() ->{Console, ConsoleInput | e} a, List Text) ->{| e} a" );
       ( "fs.in-memory",
         "forall a | e. (() ->{Fs | e} a, `type:map.t` Text Text) ->{Throw | e} (a, `type:map.t` \
          Text Text)" );
