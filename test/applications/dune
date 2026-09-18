@@ -1,0 +1,19 @@
+; The exhaustive application lane reruns each application's Warp suite with
+; --exhaustive (327 dice/picnic cases, the rota oracle and budget properties,
+; the notebook's 1024 fresh-evaluator comparisons) and re-checks native parity.
+; It is mandatory in its own CI lane but excluded from runtest so the ordinary
+; development loop stays responsive; test/cli/applications.t is the routine lane.
+(rule
+ (alias applications-exhaustive)
+ (deps
+  %{bin:jac}
+  ../../scripts/applications/exhaustive.sh
+  ../../demos/lib/demo-env.sh
+  (source_tree ../../demos/applications)
+  (source_tree ../../prelude)
+  (source_tree ../../runtime))
+ (action
+  (setenv
+   JACQUARD
+   %{bin:jac}
+   (run ../../scripts/applications/exhaustive.sh ../../demos/applications ../../prelude))))

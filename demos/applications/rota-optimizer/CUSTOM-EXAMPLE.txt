@@ -1,0 +1,12 @@
+Staff 2, shifts 2, minimum rest 12h, node budget 200
+PROVEN OPTIMAL
+Expanded 3 search nodes; 0 pruning decisions.
+Score 18 = preferences 20 - workload penalty 2
+Penalty = 1 * sum(each person's shift count squared).
+  Mon AM [hours 8..16, general]: Sam; preference 10
+  Tue AM [hours 32..40, general]: Rae; preference 10
+Workloads:
+  Sam: 1/2 shifts; 8 hours
+  Rae: 1/2 shifts; 8 hours
+Complete schedule independently rechecked: availability, skills, capacity, coverage, and rest all satisfied.
+()

@@ -1,0 +1,84 @@
+name: Applications
+
+# The exhaustive application lane: the four everyday applications' Warp suites
+# with --exhaustive plus interpreter/native parity of every demo transcript.
+# Kept out of `dune runtest` (test/cli/applications.t is the routine lane) and
+# path-scoped, since only language, runtime, prelude, or fixture changes can
+# change its verdict. It is not a required check.
+
+on:
+  push:
+    branches:
+      - main
+      - "release/**"
+    paths:
+      - "src/**"
+      - "bin/**"
+      - "prelude/**"
+      - "runtime/**"
+      - "demos/applications/**"
+      - "demos/lib/**"
+      - "scripts/applications/**"
+      - "test/applications/**"
+      - ".github/workflows/applications.yml"
+      - ".tool-versions"
+      - "dune-project"
+      - "*.opam"
+  pull_request:
+    paths:
+      - "src/**"
+      - "bin/**"
+      - "prelude/**"
+      - "runtime/**"
+      - "demos/applications/**"
+      - "demos/lib/**"
+      - "scripts/applications/**"
+      - "test/applications/**"
+      - ".github/workflows/applications.yml"
+      - ".tool-versions"
+      - "dune-project"
+      - "*.opam"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: applications-${{ github.ref }}-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.run_id || 'cancelable' }}
+  cancel-in-progress: ${{ github.event_name != 'push' || github.ref != 'refs/heads/main' }}
+
+env:
+  OCAML_COMPILER: 5.1.1
+  JACQUARD_PRELUDE: ${{ github.workspace }}/prelude
+  TMPDIR: ${{ github.workspace }}/.scratch/tmp
+
+jobs:
+  applications-exhaustive:
+    name: Applications exhaustive lane
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.0
+
+      - name: Prepare temporary storage
+        run: |
+          mkdir -p "$TMPDIR"
+          scripts/check-temp-policy.sh
+
+      - name: Set up OCaml
+        uses: ocaml/setup-ocaml@v3.6.1
+        with:
+          ocaml-compiler: ${{ env.OCAML_COMPILER }}
+
+      - name: Install dependencies
+        run: |
+          scripts/ci/opam-install-deps.sh \
+            --deps-only . --with-test -y
+
+      - name: Verify fixture provenance
+        run: (cd demos/applications && sha256sum -c MANIFEST.sha256)
+
+      - name: Exhaustive suites and native parity
+        run: opam exec -- dune build @test/applications/applications-exhaustive --force

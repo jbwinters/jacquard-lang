@@ -1,0 +1,49 @@
+PUSH-YOUR-LUCK DICE COACH
+Fair d6: 1 loses the unbanked pot; 2..6 add points. Bank after the final roll.
+Optimal means maximum expected points, not minimum chance of losing.
+All finite paths are enumerated; displayed values are rounded to three decimals.
+Pot 0, at most 3 more rolls: ROLL
+  cautious (bank at 12): ROLL
+    expected banked points = 6.907; bust probability = 41.667%
+  bold (bank at 24): ROLL
+    expected banked points = 6.944; bust probability = 42.130%
+  optimal expected score: ROLL
+    expected banked points = 6.944; bust probability = 42.130%
+Pot 10, at most 3 more rolls: ROLL
+  cautious (bank at 12): ROLL
+    expected banked points = 11.667; bust probability = 16.667%
+  bold (bank at 24): ROLL
+    expected banked points = 12.731; bust probability = 42.130%
+  optimal expected score: ROLL
+    expected banked points = 12.750; bust probability = 39.352%
+Pot 19, at most 3 more rolls: ROLL
+  cautious (bank at 12): BANK
+    expected banked points = 19.000; bust probability = 0.000%
+  bold (bank at 24): ROLL
+    expected banked points = 18.986; bust probability = 25.463%
+  optimal expected score: ROLL
+    expected banked points = 19.167; bust probability = 16.667%
+Pot 20, at most 3 more rolls: BANK
+  cautious (bank at 12): BANK
+    expected banked points = 20.000; bust probability = 0.000%
+  bold (bank at 24): ROLL
+    expected banked points = 19.861; bust probability = 22.222%
+  optimal expected score: BANK
+    expected banked points = 20.000; bust probability = 0.000%
+Pot 24, at most 3 more rolls: BANK
+  cautious (bank at 12): BANK
+    expected banked points = 24.000; bust probability = 0.000%
+  bold (bank at 24): BANK
+    expected banked points = 24.000; bust probability = 0.000%
+  optimal expected score: BANK
+    expected banked points = 24.000; bust probability = 0.000%
+Pot 30, at most 3 more rolls: BANK
+  cautious (bank at 12): BANK
+    expected banked points = 30.000; bust probability = 0.000%
+  bold (bank at 24): BANK
+    expected banked points = 30.000; bust probability = 0.000%
+  optimal expected score: BANK
+    expected banked points = 30.000; bust probability = 0.000%
+With one roll left, rolling is worth (5 * pot + 20) / 6.
+At pot 20 this equals banking; the coach banks on ties.
+()
