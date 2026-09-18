@@ -1,0 +1,55 @@
+; APP.6 twin (no OCaml suite case): the numeric presentation and character
+; classification builtins compile natively with the interpreter's exact
+; contracts: real.from-int (exact and inexact ints), text.from-real-fixed
+; (ties on the exact binary value, negative zero suppressed, non-finite
+; spellings, precision 0 and 20), the ASCII predicates on singleton,
+; multi-codepoint, empty, and multibyte texts, ascii-digit-value, and
+; text.codepoint on ASCII, multibyte, empty, two-codepoint, and malformed
+; input. The printed tuple is the guarantee.
+(tuple
+  (app (var list.map)
+    (app (var cons) (lit 0)
+      (app (var cons) (lit -7)
+        (app (var cons) (lit 9007199254740993)
+          (app (var cons) (lit 4611686018427387903) (var nil)))))
+    (var real.from-int))
+  (tuple
+    (app (var text.from-real-fixed) (lit 3.14159265358979) (lit 3))
+    (app (var text.from-real-fixed) (lit 2.5) (lit 0))
+    (app (var text.from-real-fixed) (lit 3.5) (lit 0))
+    (app (var text.from-real-fixed) (lit 2.675) (lit 2))
+    (app (var text.from-real-fixed) (lit 0.125) (lit 2))
+    (app (var text.from-real-fixed) (lit -0.0004) (lit 3))
+    (app (var text.from-real-fixed) (lit -0.0) (lit 1))
+    (app (var text.from-real-fixed) (lit -1.5) (lit 0)))
+  (tuple
+    (app (var text.from-real-fixed) (lit 1e21) (lit 2))
+    (app (var text.from-real-fixed) (lit 0.1) (lit 20))
+    (app (var text.from-real-fixed) (lit 51.855) (lit 3))
+    (app (var text.from-real-fixed) (lit 3.275) (lit 3))
+    (app (var text.from-real-fixed) (lit +inf.0) (lit 4))
+    (app (var text.from-real-fixed) (lit -inf.0) (lit 4))
+    (app (var text.from-real-fixed) (lit +nan.0) (lit 4)))
+  (app (var list.map)
+    (app (var cons) (lit "7")
+      (app (var cons) (lit "a")
+        (app (var cons) (lit "Z")
+          (app (var cons) (lit " ")
+            (app (var cons) (lit "\t")
+              (app (var cons) (lit "")
+                (app (var cons) (lit "77")
+                  (app (var cons) (lit "é")
+                    (app (var cons) (lit "٣") (var nil))))))))))
+    (lam ((pvar c))
+      (tuple
+        (app (var text.ascii-digit?) (var c))
+        (app (var text.ascii-letter?) (var c))
+        (app (var text.ascii-space?) (var c))
+        (app (var text.ascii-digit-value) (var c))
+        (app (var text.codepoint) (var c)))))
+  (tuple
+    (app (var text.codepoint) (lit "日"))
+    (app (var text.codepoint) (lit "😀"))
+    (app (var text.codepoint) (lit "ab"))
+    (app (var text.codepoint) (lit "\x7f"))
+    (app (var text.codepoint) (lit "\xff"))))

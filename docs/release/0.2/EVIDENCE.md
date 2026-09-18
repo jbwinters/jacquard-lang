@@ -32,7 +32,7 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1016`
+- Alcotest/QCheck cases: `1019`
 - Cram transcript files: `61`
 - Documentation examples: `28` named examples across `8` documents
 
@@ -172,3 +172,13 @@ and `gcc`; see [the support matrix](../../native-intrinsics.md). The
 program without an application parser. One pinned refusal changed on purpose:
 `test/cli/export.t`'s Preflight fixture is still refused by both carriers, now
 for dynamic eval alone (E1102), because its `text.contains?` call compiles.
+
+The numeric presentation and character-class additions (APP.6) add three
+cases to `test/test_text.ml` and one gauntlet twin: `real.from-int`,
+`text.from-real-fixed` (a fixed-decimal presentation separate from the
+round-trip `text.from-real`, ties on the exact binary value, no negative
+zero), the singleton ASCII classes, `text.ascii-digit-value`, and
+`text.codepoint`, each with an interpreter and a native implementation that
+print identically under clang and gcc, bringing the current source inventory
+to `1019 / 61 / 28`. Ring 2 gains seven names; the ring-0 freeze is
+untouched.

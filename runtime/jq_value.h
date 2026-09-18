@@ -529,6 +529,13 @@ jq_value jq_i_text_from_real(jq_rt *rt, const jq_value *a);
 jq_value jq_i_text_contains_q(jq_rt *rt, const jq_value *a);
 jq_value jq_i_text_slice(jq_rt *rt, const jq_value *a);
 jq_value jq_text_of_real(double r); /* jq_show.c: Printer.real_repr as a TEXT block */
+jq_value jq_i_text_from_real_fixed(jq_rt *rt, const jq_value *a);
+jq_value jq_i_text_ascii_digit_q(jq_rt *rt, const jq_value *a);
+jq_value jq_i_text_ascii_letter_q(jq_rt *rt, const jq_value *a);
+jq_value jq_i_text_ascii_space_q(jq_rt *rt, const jq_value *a);
+jq_value jq_i_text_ascii_digit_value(jq_rt *rt, const jq_value *a);
+jq_value jq_i_text_codepoint(jq_rt *rt, const jq_value *a);
+jq_value jq_i_real_from_int(jq_rt *rt, const jq_value *a);
 jq_value jq_i_text_split(jq_rt *rt, const jq_value *a);
 jq_value jq_i_text_empty_q(jq_rt *rt, const jq_value *a);
 jq_value jq_i_text_from_int(jq_rt *rt, const jq_value *a);

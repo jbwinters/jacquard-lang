@@ -418,7 +418,23 @@ text.contains?: (Text, Text) ->{} Bool          text.empty?  : (Text) ->{} Bool
 text.eq?      : (Text, Text) ->{} Bool          text.eq      : Eq Text
 text.from-int : (Int) ->{} Text                 text.to-int  : (Text) ->{} Option Int
 text.from-real: (Real) ->{} Text                text.to-real : (Text) ->{} Option Real
+text.from-real-fixed : (Real, Int) ->{} Text    -- fixed decimals, separate from from-real
+text.ascii-digit?  : (Text) ->{} Bool           text.ascii-letter? : (Text) ->{} Bool
+text.ascii-space?  : (Text) ->{} Bool           text.ascii-digit-value : (Text) ->{} Option Int
+text.codepoint     : (Text) ->{} Option Int
 ```
+
+`text.from-real-fixed(x, n)` renders `x` with exactly `n` decimals (`0 <= n <=
+20`, otherwise a runtime arithmetic error): the exact binary value rounds to
+nearest with ties to even on its exact expansion, the decimal point is always
+`.` with no grouping, a result that rounds to zero drops its sign, and the
+non-finite values keep their `+inf.0`/`-inf.0`/`+nan.0` spellings. It is a
+presentation operation; `text.from-real` remains the bit-exact round-trip
+spelling. The ASCII predicates are true only for a text of exactly one
+ASCII codepoint of the class (`ascii-space?` is the set `text.trim` strips);
+`ascii-digit-value` gives `0..9` for exactly one ASCII digit; `codepoint`
+gives the scalar value of exactly one well-formed codepoint and `none` for
+empty, longer, or malformed texts. Characters remain singleton texts (D9).
 
 Use `text.eq?` for a direct comparison and pass `text.eq` to APIs that require
 an explicit `Eq Text` dictionary, such as `list.contains?`, `dist.tally`, or
@@ -436,6 +452,10 @@ hashes. Public numeric predicates are consistently subject-first and
 int.gt?  int.gte?  int.lt?  int.lte?   : (Int, Int) ->{} Bool
 real.gt? real.gte? real.lt? real.lte?  : (Real, Real) ->{} Bool
 ```
+
+`real.from-int : (Int) ->{} Real` is the direct conversion: exact up to
+2^53 in magnitude, otherwise the nearest binary64 with ties to even, the same
+value `text.to-real(text.from-int(n))` produced by the textual detour.
 
 `int.num` and `real.num` collect the four arithmetic operations into explicit
 `Num Int` and `Num Real` values. The real arithmetic family is `real.add`,

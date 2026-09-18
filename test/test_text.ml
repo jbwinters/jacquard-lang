@@ -110,6 +110,91 @@ let test_conversions () =
     "to-real rejects" "none"
     (show (Printf.sprintf "(app (var text.to-real) %s)" (lit "1.2.3")))
 
+(* APP.6: fixed-decimal presentation is separate from the round-trip spelling *)
+let test_fixed () =
+  List.iter
+    (fun (r, precision, want) ->
+      Alcotest.(check string)
+        (Printf.sprintf "fixed %s %d" r precision)
+        (Value.show (Value.VText want))
+        (show (Printf.sprintf "(app (var text.from-real-fixed) (lit %s) (lit %d))" r precision)))
+    [
+      ("3.14159265358979", 3, "3.142");
+      ("2.5", 0, "2") (* ties to even on the exact binary value *);
+      ("3.5", 0, "4");
+      ("2.675", 2, "2.67") (* the double is just below the tie *);
+      ("0.125", 2, "0.12");
+      ("-0.0004", 3, "0.000") (* a zero result drops its sign *);
+      ("-0.0", 1, "0.0");
+      ("-1.5", 0, "-2");
+      ("1e21", 2, "1000000000000000000000.00");
+      ("51.855", 3, "51.855");
+      ("+inf.0", 4, "+inf.0");
+      ("-inf.0", 4, "-inf.0");
+      ("+nan.0", 4, "+nan.0");
+      ("0.1", 20, "0.10000000000000000555");
+    ];
+  Alcotest.(check string)
+    "from-real is untouched" "\"0.1\""
+    (show "(app (var text.from-real) (lit 0.1))");
+  List.iter
+    (fun precision ->
+      match
+        Eval_support.eval_with ctx store
+          (Printf.sprintf "(app (var text.from-real-fixed) (lit 1.5) (lit %d))" precision)
+      with
+      | Error (Runtime_err.Arithmetic message) ->
+          Alcotest.(check bool)
+            "precision message" true
+            (String.length message > 0
+            && String.starts_with
+                 ~prefix:"text.from-real-fixed expects a precision between 0 and 20" message)
+      | Error other -> Alcotest.failf "unexpected error %s" (Runtime_err.to_string other)
+      | Ok v -> Alcotest.failf "precision %d accepted: %s" precision (Value.show v))
+    [ -1; 21 ]
+
+let test_real_from_int () =
+  List.iter
+    (fun (i, want) ->
+      Alcotest.(check string)
+        ("real.from-int " ^ i) want
+        (show (Printf.sprintf "(app (var real.from-int) (lit %s))" i)))
+    [
+      ("0", "0.0");
+      ("-7", "-7.0");
+      ("9007199254740993", "9007199254740992.0") (* inexact: nearest even *);
+      ("4611686018427387903", "4.611686018427388e+18");
+    ]
+
+(* APP.6: ASCII/codepoint classification of singleton texts; no Char type *)
+let test_character_classes () =
+  List.iter
+    (fun (c, digit, letter, space, value, code) ->
+      let call name = show (Printf.sprintf "(app (var %s) %s)" name (lit c)) in
+      Alcotest.(check string) (c ^ " digit?") digit (call "text.ascii-digit?");
+      Alcotest.(check string) (c ^ " letter?") letter (call "text.ascii-letter?");
+      Alcotest.(check string) (c ^ " space?") space (call "text.ascii-space?");
+      Alcotest.(check string) (c ^ " digit-value") value (call "text.ascii-digit-value");
+      Alcotest.(check string) (c ^ " codepoint") code (call "text.codepoint"))
+    [
+      ("7", "true", "false", "false", "some(7)", "some(55)");
+      ("a", "false", "true", "false", "none", "some(97)");
+      ("Z", "false", "true", "false", "none", "some(90)");
+      (" ", "false", "false", "true", "none", "some(32)");
+      ("\t", "false", "false", "true", "none", "some(9)");
+      ("", "false", "false", "false", "none", "none");
+      ("77", "false", "false", "false", "none", "none");
+      ("\u{00e9}", "false", "false", "false", "none", "some(233)");
+      ("\u{0663}", "false", "false", "false", "none", "some(1635)")
+      (* Arabic-Indic three is not an ASCII digit *);
+      ("\u{65e5}", "false", "false", "false", "none", "some(26085)");
+      ("\u{1F600}", "false", "false", "false", "none", "some(128512)");
+      ("\x7f", "false", "false", "false", "none", "some(127)");
+      ("\xff", "false", "false", "false", "none", "none") (* a malformed byte is not a scalar *);
+      ("\xed\xa0\x80", "false", "false", "false", "none", "none")
+      (* an encoded surrogate is not a scalar *);
+    ]
+
 let prop_int_roundtrip =
   QCheck.Test.make ~count:200 ~name:"to-int (from-int n) = some n" QCheck.int (fun n ->
       show (Printf.sprintf "(app (var text.to-int) (app (var text.from-int) (lit %d)))" n)
@@ -237,6 +322,9 @@ let suite =
     Alcotest.test_case "split and join" `Quick test_split_join_units;
     Alcotest.test_case "trim, contains?, empty?" `Quick test_trim_contains_empty;
     Alcotest.test_case "conversions follow the reader grammar" `Quick test_conversions;
+    Alcotest.test_case "fixed-decimal presentation" `Quick test_fixed;
+    Alcotest.test_case "real.from-int" `Quick test_real_from_int;
+    Alcotest.test_case "ASCII and codepoint classes" `Quick test_character_classes;
     QCheck_alcotest.to_alcotest prop_int_roundtrip;
     QCheck_alcotest.to_alcotest prop_real_roundtrip;
     QCheck_alcotest.to_alcotest prop_split_join_inverse;

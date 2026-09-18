@@ -705,8 +705,11 @@ Core data and common functions:
   compatibility `add`/`sub`/`mul`/`div`; `mod`, `eq`, and `lt`; `int.*` and
   `real.*` predicates/conversions; generic calls use an explicit `Num` value.
 - Text: `text.concat`, `text.join`, `text.split`, `text.contains?`,
-  `text.length`, `text.from-int`, direct predicate `text.eq?`, dictionary
-  `text.eq`, and ordering dictionary `text.ord`
+  `text.length`, `text.from-int`, `text.from-real-fixed(x, decimals)`,
+  the singleton-codepoint classes `text.ascii-digit?`/`ascii-letter?`/
+  `ascii-space?`, `text.ascii-digit-value`, `text.codepoint`, direct
+  predicate `text.eq?`, dictionary `text.eq`, and ordering dictionary
+  `text.ord`; `real.from-int` converts directly
 - Maps and sets carry their comparison dictionary in the value.
 
 Control effects and handlers:

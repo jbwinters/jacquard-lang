@@ -34,6 +34,10 @@ public name index changes.
 | text.contains? | 2 | yes | APP.5; byte substring scan, empty needle always contained |
 | text.empty? | 1 | yes | task 70 |
 | text.from-int | 1 | yes | task 70; plain text result |
+| text.from-real-fixed | 2 | yes | APP.6; C `%.*f` on the exact binary value, sign dropped on a zero result, non-finite spellings, precision 0..20 else the interpreter's arithmetic error |
+| text.ascii-digit?, text.ascii-letter?, text.ascii-space? | 1 | yes | APP.6; exactly one ASCII byte of the class |
+| text.ascii-digit-value, text.codepoint | 1 | yes | APP.6; option results; codepoint uses the D9 width table so malformed bytes yield none |
+| real.from-int | 1 | yes | APP.6; C `(double)` cast, nearest even like `float_of_int` |
 | code.eq? | 2 | yes | task 73; metadata-erased equality, OCaml real compare (nan = nan) |
 | text.to-int, text.to-real, text.from-real | 1 | yes | APP.5; the reader's numeric atom grammar ported (`Reader.classify_literal`: optional sign, `digits[.digits][e[+-]digits]`, Scheme `+inf.0`/`-inf.0`/`+nan.0`), 63-bit overflow → `none`, ints accepted by `to-real`; `from-real` shares `jq_show`'s real spelling |
 | code.form, code.un-form, code.of-int, code.of-real, code.to-int | 2/1/1/1/1 | yes | task 73 plus ET.2 real-form support; head grammar validated, un-form splits all-form args only; runtime-built forms cap at 32767 args (uint16 representation, clean abort) |
