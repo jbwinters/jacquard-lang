@@ -547,22 +547,101 @@ let test_large_match_scrutinee_lint_boundary () =
     | Error diagnostics -> fail_diags "scrutinee lint parse" diagnostics
     | Ok tops -> Surface_check.lint ~names:Resolve.empty_names tops
   in
-  let boundary = "match f(\n  1,\n  2\n) { | _ -> 0 }\n" in
+  let warnings source = List.filter (fun d -> Diag.code_or_uncoded d = "W1203") (lint source) in
+  (* APP.9: layout is not complexity. A plain call the formatter spread over five lines, and the
+     picnic planner's expanded input tuple, are as easy to review as their one-line spellings. *)
   Alcotest.(check int)
-    "exact four-line boundary is inclusive" 0
-    (List.length (List.filter (fun d -> Diag.code_or_uncoded d = "W1203") (lint boundary)));
-  let large = "match f(\n  1,\n  2,\n  3\n) { | _ -> 0 }\n" in
-  match List.filter (fun d -> Diag.code_or_uncoded d = "W1203") (lint large) with
+    "formatter-expanded call is not a warning" 0
+    (List.length (warnings "match f(\n  1,\n  2,\n  3\n) { | _ -> 0 }\n"));
+  Alcotest.(check int)
+    "formatter-expanded data tuple is not a warning" 0
+    (List.length
+       (warnings
+          "match (\n\
+          \  text.to-int(text.trim(rain-text)),\n\
+          \  text.to-int(text.trim(accuracy-text)),\n\
+          \  text.to-int(text.trim(cost-text)),\n\
+           ) {\n\
+          \  | (Some(rain), Some(accuracy), Some(cost)) -> rain\n\
+          \  | _ -> 0\n\
+           }\n"));
+  Alcotest.(check int)
+    "a wide labeled data constructor is not a warning" 0
+    (List.length
+       (warnings
+          "match Snapshot(\n\
+          \  cells: cells,\n\
+          \  order: order,\n\
+          \  history: history,\n\
+          \  cache: cache,\n\
+          \  revision: add(revision, 1),\n\
+           ) {\n\
+          \  | Snapshot(revision: r) -> r\n\
+           }\n"));
+  Alcotest.(check int)
+    "an ordinary report expression is not a warning" 0
+    (List.length
+       (warnings
+          "match $\"Optimality gap is at most {text.from-int(sub(bound, score))} points; \
+           {status}\" {\n\
+          \  | line -> line\n\
+           }\n"));
+  Alcotest.(check int)
+    "a function-literal argument is a value, not nesting" 0
+    (List.length
+       (warnings
+          "match async.scope(fn () -> {\n\
+          \  let x = 1\n\
+          \  match x { | 1 -> True | _ -> False }\n\
+           }) { | True -> 1 | False -> 0 }\n"));
+  (* `fmt` drops the braces of a single-expression block, so the lint sees through them: the
+     verdict cannot depend on whether the author wrote them *)
+  Alcotest.(check int)
+    "single-expression braces are transparent" 0
+    (List.length (warnings "match { add(x, 1) } { | 1 -> \"one\" | _ -> \"other\" }\n"));
+  Alcotest.(check int)
+    "a braced nested match still warns" 1
+    (List.length (warnings "match { match x { | A -> 1 | B -> 2 } } { | _ -> 0 }\n"));
+  Alcotest.(check int)
+    "a braced call chain in a function-literal body is weighed" 1
+    (List.length
+       (warnings
+          "match list.map(xs, fn (x) -> { f(g(h(i(j(k(l(m(n(o(p(q(r(x))))))))))))) }) { | _ -> 1 }\n"));
+  (* the formatter rewrites a raw quote into surface syntax; quoted code is data, so the
+     scrutinee rule stays quiet inside quotes either way *)
+  Alcotest.(check int)
+    "a nested match inside a quote is not a scrutinee warning" 0
+    (List.length (warnings "quote { match (match x { | A -> 1 }) { | _ -> 3 } }\n"));
+  Alcotest.(check int)
+    "twelve calls and constructions are allowed" 0
+    (List.length
+       (warnings
+          "match (f(a), f(b), f(c), f(d), f(e), f(g), f(h), f(i), f(j), f(k), f(l)) { | _ -> 0 }\n"));
+  (match
+     warnings
+       "match (f(a), f(b), f(c), f(d), f(e), f(g), f(h), f(i), f(j), f(k), f(l), f(m)) { | _ -> 0 }\n"
+   with
+  | [ warning ] ->
+      Alcotest.(check string)
+        "thirteen calls and constructions warn"
+        "This match scrutinee combines 13 calls and constructions; more than 12 obscure the branch \
+         conditions."
+        (Diag.cause warning)
+  | found -> Alcotest.failf "expected one wide-scrutinee warning, got %d" (List.length found));
+  let large = "match (match x {\n  | A -> 1\n  | B -> 2\n}) { | _ -> 0 }\n" in
+  match warnings large with
   | [ warning ] ->
       Alcotest.(check bool) "large is warning" true (Diag.severity warning = Diag.Warning);
       Alcotest.(check string)
-        "first warning reports five source lines"
-        "This match scrutinee spans 5 lines; scrutinees longer than 4 lines obscure the branch \
-         conditions."
+        "nested control is reported by construct, on one line or many"
+        "This match scrutinee contains a nested `match`, which obscures the branch conditions."
         (Diag.cause warning);
       Alcotest.(check (option string))
-        "scrutinee span" (Some "scrutinee.jac:1:7-5:2")
+        "scrutinee span" (Some "scrutinee.jac:1:7-4:3")
         (Option.map Span.to_string (Diag.span warning));
+      Alcotest.(check int)
+        "the same nested match on one line warns too" 1
+        (List.length (warnings "match (match x { | A -> 1 | B -> 2 }) { | _ -> 0 }\n"));
       Alcotest.(check bool)
         "manual-only guidance" true
         (contains "Bind the expression with `let`" (Diag.next_step warning))

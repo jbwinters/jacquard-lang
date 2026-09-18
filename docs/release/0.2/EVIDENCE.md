@@ -216,3 +216,18 @@ still refused by `fmt`, `hash`, and `run`. Pinned by the cascade blocks of
 "cross-island type dependency is explicitly unsupported" case is replaced by
 its supported counterpart), bringing the current source inventory to
 `1023 / 61 / 29`.
+
+The match-scrutinee readability warning (APP.9) no longer counts the lines the
+canonical formatter chose: W1203 now reports a scrutinee that contains a nested
+`match`, `handle`, `if`, or block outside a function-literal argument, or that
+combines more than twelve calls and constructions, on one line or many (a
+function literal's body is weighed but is a value of its own, so ordinary
+`async.scope(fn () -> ...)` and fold scrutinees stay quiet; single-expression
+braces are transparent, exactly as they are to the formatter), so `fmt` never introduces
+or removes it and `check` agrees before and after formatting. Pinned by the
+scrutinee cases of `test/test_surface_check.ml` (a formatter-expanded call, the
+picnic planner's expanded input tuple, a wide labeled constructor, an ordinary
+report interpolation, the twelve/thirteen boundary, and a nested match on one
+line and on four) and the B3 block of `test/cli/surface.t` (no warning for the
+expanded call; a nested match warns under `fmt` and `check`, formatting is
+stable, and the hash is unchanged); the inventory is unchanged.

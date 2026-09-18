@@ -251,7 +251,7 @@ also emits E0817; consuming the captured resumption twice emits E0816.
 |------|---------|---------|
 | W1201 | lowercase binding pattern binds a new name instead of matching an in-scope constructor differing only in case; the warning names the constructor and both remedies | `match Up { | up -> ... }` |
 | W1202 | positional constructor pattern has more than four fields | `Snapshot(_, _, _, _, _)` |
-| W1203 | match scrutinee spans more than four source lines | manually bind the expression with `let`, then match on its name |
+| W1203 | match scrutinee contains a nested control construct or more than twelve calls and constructions (layout is not counted) | manually bind the expression with `let`, then match on its name |
 | W1204 | shortest legal type/effect declaration header exceeds the canonical formatter width | shorten the declaration name or type-variable list |
 | W1205 | shortest legal `forall` prefix exceeds the canonical formatter width | split the declaration or reduce its quantified variables |
 | W1206 | positional term/operation call passes a direct `Bool` constructor literal in a slot with an explicit companion label | use that label, or a purpose-specific sum such as `Mode = \| Live \| DryRun` |

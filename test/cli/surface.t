@@ -171,8 +171,11 @@ The surface formatter preserves trivia, applies B1/B5, and is idempotent.
   $ grep '| False' once.jac
       | False ->
 
-B3 is lint-only: the formatter leaves the first over-boundary scrutinee in place and recommends a
-manual hoist. The warning is emitted on stderr and formatting remains successful.
+B3 is lint-only: the formatter leaves a complex scrutinee in place and recommends a manual hoist.
+The warning is emitted on stderr and formatting remains successful. Since APP.9 the judgement is
+about what the scrutinee contains, not how many lines the formatter gave it: a plain call spread
+over five lines is not reported, a nested `match` is, however it is laid out, and `fmt` followed
+by `check` gives the same verdict as `check` on the original.
 
   $ cat > large.jac <<'EOF'
   > match add(
@@ -182,10 +185,27 @@ manual hoist. The warning is emitted on stderr and formatting remains successful
   > ) { | _ -> 0 }
   > EOF
   $ jac fmt large.jac > large-formatted.jac 2> large.err
-  $ grep 'warning\[W1203\]' large.err
-  large.jac:1:7-5:2: warning[W1203]: Match scrutinee is difficult to review
+  $ grep -c 'warning\[W1203\]' large.err
+  0
+  [1]
   $ head -1 large-formatted.jac
   match add(1, 2, 3) {
+  $ cat > nested.jac <<'EOF'
+  > match (match True { | True -> 1 | False -> 2 }) { | 1 -> "one" | _ -> "more" }
+  > EOF
+  $ jac fmt nested.jac > nested-formatted.jac 2> nested.err
+  $ grep 'warning\[W1203\]' nested.err
+  nested.jac:1:7-48: warning[W1203]: Match scrutinee is difficult to review
+  $ jac check nested.jac 2>&1 | grep -c 'W1203'
+  1
+  $ jac check nested-formatted.jac 2>&1 | grep -c 'W1203'
+  1
+  $ jac fmt nested-formatted.jac 2> /dev/null | diff - nested-formatted.jac && echo stable
+  stable
+  $ jac hash nested.jac > nested.hash 2> /dev/null
+  $ jac hash nested-formatted.jac > nested-formatted.hash 2> /dev/null
+  $ diff nested.hash nested-formatted.hash && echo same-hash
+  same-hash
 
 Declaration headers have no legal continuation point before `=` or `where {`. The formatter keeps
 that grammar-valid line intact, and W1204 points at the declaration name when the shortest header

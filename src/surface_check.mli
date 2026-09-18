@@ -6,8 +6,12 @@ type report = {
       (** Successfully checked names from independent analysis islands, in analysis order. *)
 }
 
-val large_match_scrutinee_lines : int
-(** The maximum inclusive source-line count for a match scrutinee before [lint] emits [W1203]. *)
+val large_match_scrutinee_weight : int
+(** The maximum inclusive number of calls and constructions (applications, tuples, lists,
+    interpolations, pipes, including those inside function-literal arguments) a match scrutinee may
+    combine before [lint] emits [W1203]. A scrutinee containing a nested [match], [handle], [if], or
+    block outside any function literal is reported regardless of weight; the number of source lines
+    the formatter gave it is never a reason (APP.9). *)
 
 val lint : names:Resolve.names -> Surface_ast.top list -> Diag.t list
 (** [lint ~names tops] returns source-ordered surface review warnings without lowering, rewriting,
