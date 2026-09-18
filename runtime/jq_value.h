@@ -523,6 +523,12 @@ jq_value jq_i_text_join_variadic_v1(jq_rt *rt, const jq_value *a, uint16_t n);
 jq_value jq_i_int_compare(jq_rt *rt, const jq_value *a);
 jq_value jq_i_text_compare(jq_rt *rt, const jq_value *a);
 jq_value jq_i_text_trim(jq_rt *rt, const jq_value *a);
+jq_value jq_i_text_to_int(jq_rt *rt, const jq_value *a);
+jq_value jq_i_text_to_real(jq_rt *rt, const jq_value *a);
+jq_value jq_i_text_from_real(jq_rt *rt, const jq_value *a);
+jq_value jq_i_text_contains_q(jq_rt *rt, const jq_value *a);
+jq_value jq_i_text_slice(jq_rt *rt, const jq_value *a);
+jq_value jq_text_of_real(double r); /* jq_show.c: Printer.real_repr as a TEXT block */
 jq_value jq_i_text_split(jq_rt *rt, const jq_value *a);
 jq_value jq_i_text_empty_q(jq_rt *rt, const jq_value *a);
 jq_value jq_i_text_from_int(jq_rt *rt, const jq_value *a);

@@ -106,8 +106,9 @@ checks each carrier against the interpreter.
   native-diff: PASS
 
 The product Preflight fixture is currently outside native-v1 eligibility
-(`text.contains?` and dynamic eval). Both carriers refuse byte-identically on
-stdout, stderr, and exit rather than diverging or silently compiling one side.
+(dynamic eval; `text.contains?` compiles natively since APP.5, so that refusal
+is gone). Both carriers refuse byte-identically on stdout, stderr, and exit
+rather than diverging or silently compiling one side.
 
   $ jacquard build ../../demos/worlds/preflight.jac -o preflight-surface-native > preflight-surface.build.stdout 2> preflight-surface.build.stderr; surface_status=$?
   $ jacquard build preflight-a.jqd -o preflight-bootstrap-native > preflight-bootstrap.build.stdout 2> preflight-bootstrap.build.stderr; bootstrap_status=$?
@@ -116,9 +117,6 @@ stdout, stderr, and exit rather than diverging or silently compiling one side.
   $ test "$surface_status" = "$bootstrap_status" && echo "native carrier refusal parity: preflight (exit $surface_status)"
   native carrier refusal parity: preflight (exit 1)
   $ cat preflight-surface.build.stderr
-  error[E1101]: Program is outside the native v1 compilation subset
-    Cause: Not yet compilable in native v1: live-policy builtin `text.contains?` is not yet implemented natively
-    Next step: Run the program with the interpreter or rewrite the unsupported construct.
   error[E1102]: Program requires the interpreter tier
     Cause: run-plan uses eval, which requires the interpreter tier
     Next step: Run this program with the interpreter.
