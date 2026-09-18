@@ -297,6 +297,18 @@ argument and W1207 for a definite adjacent run of same-typed positional
 parameters. Explicit named arguments suppress those warnings. Neither warning changes typing or claims that a
 human readability study has measured an improvement.
 
+Labeled constructor fields and named arguments are ordinary public syntax, and a
+labeled call may reorder its arguments; positional and labeled spellings hash
+identically:
+
+```jacquard doctest=stdlib-labeled-fields mode=run fixture=stdlib-labeled-fields.jac stdout=stdlib-labeled-fields.stdout stderr=empty exit=0
+type Shift = | Shift(day: Text, start: Int, hours: Int)
+span(s) = match s {
+  | Shift(start: from, hours: h) -> (from, add(from, h))
+}
+(span(Shift(hours: 8, day: "mon", start: 9)), span(Shift("tue", 14, 4)))
+```
+
 ## 4. Ring 1: control effects and their handlers
 
 Four effects cover pure control. Each is shown with its declaration and the handlers
@@ -422,6 +434,22 @@ text.from-real-fixed : (Real, Int) ->{} Text    -- fixed decimals, separate from
 text.ascii-digit?  : (Text) ->{} Bool           text.ascii-letter? : (Text) ->{} Bool
 text.ascii-space?  : (Text) ->{} Bool           text.ascii-digit-value : (Text) ->{} Option Int
 text.codepoint     : (Text) ->{} Option Int
+```
+
+Reading numbers from standard input needs no application parser: `text.to-int`
+and `text.to-real` accept exactly the reader's literal spellings and answer
+`None` for anything else, including overflow. The example below is executed
+with the documented `console` grant and the input `41`, ` 2.5`, and `x`:
+
+```jacquard doctest=stdlib-numeric-input mode=run fixture=stdlib-numeric-input.jac stdin=stdlib-numeric-input.stdin stdout=stdlib-numeric-input.stdout stderr=empty exit=0 grants=console
+parse(line) = match text.to-int(text.trim(line)) {
+  | Some(n) -> $"int {text.from-int(add(n, 1))}"
+  | None -> match text.to-real(text.trim(line)) {
+    | Some(r) -> $"real {text.from-real(real.mul(r, 2.0))}"
+    | None -> $"not a number: {line}"
+  }
+}
+(parse(read-line()), parse(read-line()), parse(read-line()))
 ```
 
 `text.from-real-fixed(x, n)` renders `x` with exactly `n` decimals (`0 <= n <=
@@ -610,8 +638,33 @@ capture(thunk, inputs) =
 (capture(echo-lines, ["a", "", "b"]), console.scripted-input(fn () -> (next-line(), read-line(), next-line()), ["x"]))
 ```
 
-A blank-line-tolerant loop that still exits at the end is then ordinary code:
-`match next-line() { | None -> finish() | Some(line) -> match text.trim(line) { | "" -> loop() | entry -> handle(entry) } }`.
+A blank-line-tolerant loop that still exits at the end is then ordinary code,
+and it builds natively with the same grant. This example is compiled with
+`jacquard build` and run with `--allow console` on the input `a`, a blank line,
+`b`, and `quit`:
+
+```jacquard doctest=stdlib-console-input-native mode=build fixture=stdlib-console-input-native.jac stdin=stdlib-console-input-native.stdin stdout=stdlib-console-input-native.stdout stderr=empty exit=0 grants=console
+loop(count) = match next-line() {
+  | None -> { println($"end of input after {text.from-int(count)} entries"); count }
+  | Some(line) -> match text.trim(line) {
+    | "" -> loop(count)
+    | "quit" -> { println("bye"); count }
+    | entry -> { println($"entry: {entry}"); loop(add(count, 1)) }
+  }
+}
+loop(0)
+```
+
+Every terminal operation is `once`: a handler that resumes the same
+continuation twice is refused by the checker before anything runs, so this
+negative example pins the diagnostic rather than an output:
+
+```jacquard doctest=stdlib-once-resumed-twice mode=check fixture=stdlib-once-resumed-twice.jac stdout=empty stderr=stdlib-once-resumed-twice.stderr exit=1
+handle next-line() {
+  | return line -> [line]
+  | next-line() resume k -> list.append(k(None), k(Some("again")))
+}
+```
 
 ### Workspace facade schemas and calls
 

@@ -424,6 +424,21 @@ quote notation, and format of record. `run`, `check`, `hash`, `fmt`, `diff`,
 either format without writing an intermediate twin; replay programs, the
 prelude, and many internal fixtures continue to use `.jqd`.
 
+A multi-file program installs its model into a store once, and separate entry
+points run against it; nothing is concatenated. The commands below are
+executable documentation: `dune runtest` runs them in a fresh directory against
+the current toolchain, with `jacquard` on the PATH and the repository prelude
+selected.
+
+```sh doctest=readme-multi-file-store mode=commands fixture=readme-multi-file-store.sh stdout=readme-multi-file-store.stdout stderr=empty exit=0
+printf 'type Tier = | Bronze | Gold\nrank(t) = match t { | Bronze -> 1 | Gold -> 2 }\n' > model.jac
+printf 'rank(Gold)\n' > entry.jac
+printf 'add(rank(Bronze), rank(Gold))\n' > other-entry.jac
+jacquard store add model-store model.jac
+jacquard run entry.jac --store model-store
+jacquard run other-entry.jac --store model-store
+```
+
 Ordinary programs and demos need only a `.jac` source file. Do not hand-author
 a `.jqd` twin unless a conformance test specifically needs to prove that both
 formats lower to the same kernel and hash. The paired files retained in the

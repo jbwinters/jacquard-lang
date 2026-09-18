@@ -835,8 +835,10 @@ let doctest_names () =
       read_source path |> String.split_on_char '\n'
       |> List.filter_map (fun line ->
           match
-            if String.starts_with ~prefix:"```jacquard " line then
-              Str.search_forward (Str.regexp_string "doctest=") line 0
+            if
+              String.starts_with ~prefix:"```jacquard " line
+              || String.starts_with ~prefix:"```sh doctest=" line
+            then Str.search_forward (Str.regexp_string "doctest=") line 0
             else raise Not_found
           with
           | exception Not_found -> None
