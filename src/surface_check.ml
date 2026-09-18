@@ -205,17 +205,85 @@ let warning_wide (pattern : Surface_ast.pat) fields =
        pattern to four fields or fewer."
     ~contrast:None ()
 
-let large_match_scrutinee_lines = 4
+(** A match scrutinee is judged by what it contains, never by how many source lines the canonical
+    formatter chose to spread it over (APP.9): a plain data expression that the formatter expanded
+    is not harder to review than its one-line spelling, while a nested control construct or a large
+    tree of calls is, however it is laid out. Function literals are values: their bodies add weight
+    but are not nesting. *)
+let large_match_scrutinee_weight = 12
 
-let warning_large_scrutinee (subject : Surface_ast.expr) lines =
+type scrutinee_shape = Nested of string | Wide of int
+
+let rec scrutinee_weight (expression : Surface_ast.expr) =
+  let sum items = List.fold_left (fun total item -> total + scrutinee_weight item) 0 items in
+  match expression.it with
+  | Surface_ast.Lit _ | Surface_ast.Name _ | Surface_ast.HashRef _ | Surface_ast.GroupRef _
+  | Surface_ast.Hole _ | Surface_ast.Quote _ ->
+      0
+  | Surface_ast.Interpolation parts ->
+      1
+      + List.fold_left
+          (fun total part ->
+            match part with
+            | Surface_ast.IText _ -> total
+            | Surface_ast.IExpr embedded -> total + scrutinee_weight embedded)
+          0 parts
+  | Surface_ast.Call (fn, args) -> 1 + scrutinee_weight fn + sum args
+  | Surface_ast.Tuple items | Surface_ast.List items -> 1 + sum items
+  | Surface_ast.Pipe (left, right) -> 1 + scrutinee_weight left + scrutinee_weight right
+  | Surface_ast.Ann (inner, _) | Surface_ast.Unquote inner -> scrutinee_weight inner
+  | Surface_ast.Fn (_, body) -> scrutinee_weight body
+  (* the canonical printer drops the braces of a single-expression block, so the lint must see
+     through them too or formatting could change the verdict *)
+  | Surface_ast.Block [ Surface_ast.Expr inner ] -> scrutinee_weight inner
+  | Surface_ast.Block _ | Surface_ast.Match _ | Surface_ast.If _ | Surface_ast.Handle _ -> 1
+
+let rec scrutinee_nesting (expression : Surface_ast.expr) =
+  let first items = List.find_map scrutinee_nesting items in
+  match expression.it with
+  | Surface_ast.Match _ -> Some "a nested `match`"
+  | Surface_ast.Handle _ -> Some "a nested `handle`"
+  | Surface_ast.If _ -> Some "a nested `if`"
+  | Surface_ast.Block [ Surface_ast.Expr inner ] -> scrutinee_nesting inner
+  | Surface_ast.Block _ -> Some "a block"
+  (* a function literal passed to a call is a value with its own scope (`async.scope(fn () ->
+     ...)`, `list.fold(xs, seed, fn (acc, x) -> ...)`); its body is not the scrutinee's branch
+     condition, so it is weighed but not reported as nesting *)
+  | Surface_ast.Fn _ -> None
+  | Surface_ast.Call (fn, args) -> first (fn :: args)
+  | Surface_ast.Tuple items | Surface_ast.List items -> first items
+  | Surface_ast.Pipe (left, right) -> first [ left; right ]
+  | Surface_ast.Ann (inner, _) | Surface_ast.Unquote inner -> scrutinee_nesting inner
+  | Surface_ast.Interpolation parts ->
+      List.find_map
+        (function Surface_ast.IText _ -> None | Surface_ast.IExpr e -> scrutinee_nesting e)
+        parts
+  | Surface_ast.Lit _ | Surface_ast.Name _ | Surface_ast.HashRef _ | Surface_ast.GroupRef _
+  | Surface_ast.Hole _ | Surface_ast.Quote _ ->
+      None
+
+let scrutinee_shape (subject : Surface_ast.expr) =
+  match scrutinee_nesting subject with
+  | Some construct -> Some (Nested construct)
+  | None ->
+      let weight = scrutinee_weight subject in
+      if weight > large_match_scrutinee_weight then Some (Wide weight) else None
+
+let warning_large_scrutinee (subject : Surface_ast.expr) shape =
+  let cause =
+    match shape with
+    | Nested construct ->
+        Printf.sprintf "This match scrutinee contains %s, which obscures the branch conditions."
+          construct
+    | Wide weight ->
+        Printf.sprintf
+          "This match scrutinee combines %d calls and constructions; more than %d obscure the \
+           branch conditions."
+          weight large_match_scrutinee_weight
+  in
   Diag.warning
     ?span:(Meta.span subject.Surface_ast.meta)
-    ~domain:Surface ~code:"W1203" ~summary:"Match scrutinee is difficult to review"
-    ~cause:
-      (Printf.sprintf
-         "This match scrutinee spans %d lines; scrutinees longer than %d lines obscure the branch \
-          conditions."
-         lines large_match_scrutinee_lines)
+    ~domain:Surface ~code:"W1203" ~summary:"Match scrutinee is difficult to review" ~cause
     ~next_step:"Bind the expression with `let`, then match on that name." ~contrast:None ()
 
 let declaration_header_name_meta (top : Surface_ast.top) =
@@ -309,9 +377,6 @@ let rec long_quantifier_prefix_warnings (annotation : Surface_ast.ty) =
   | Surface_ast.TyTuple items -> annotations items
   | Surface_ast.TyName _ | Surface_ast.TyVar _ | Surface_ast.TyHash _ | Surface_ast.TyHole _ -> []
 
-let span_line_count meta =
-  Option.map (fun span -> span.Span.end_pos.line - span.Span.start_pos.line + 1) (Meta.span meta)
-
 let constructor_in_names names name =
   List.exists (fun entry -> entry.Resolve.kind = Resolve.KCon) (names.Resolve.lookup name)
 
@@ -355,10 +420,9 @@ let rec lint_expr names constructors (expression : Surface_ast.expr) =
   | Surface_ast.Block items -> List.concat_map (lint_block_item names constructors) items
   | Surface_ast.Match (subject, clauses) ->
       let large_scrutinee =
-        match span_line_count subject.meta with
-        | Some lines when lines > large_match_scrutinee_lines ->
-            [ warning_large_scrutinee subject lines ]
-        | Some _ | None -> []
+        match scrutinee_shape subject with
+        | None -> []
+        | Some shape -> [ warning_large_scrutinee subject shape ]
       in
       large_scrutinee
       @ lint_expr names constructors subject
@@ -377,7 +441,13 @@ let rec lint_expr names constructors (expression : Surface_ast.expr) =
           (fun (operation : Surface_ast.op_clause) ->
             pats operation.Surface_ast.oparams @ lint_expr names constructors operation.obody)
           operations
-  | Surface_ast.Quote (Surface_ast.Surface body) -> lint_expr names constructors body
+  | Surface_ast.Quote (Surface_ast.Surface body) ->
+      (* quoted code is data: the formatter rewrites a raw `jqd { ... }` quote into surface
+         syntax, so a scrutinee warning inside a quote would appear only after formatting;
+         pattern lints still apply to quoted surface syntax as before *)
+      List.filter
+        (fun warning -> Diag.code_or_uncoded warning <> "W1203")
+        (lint_expr names constructors body)
   | Surface_ast.Quote (Surface_ast.Raw _) -> []
   | Surface_ast.Unquote body -> lint_expr names constructors body
   | Surface_ast.Ann (subject, annotation) ->

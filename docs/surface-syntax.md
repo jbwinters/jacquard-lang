@@ -391,10 +391,17 @@ formatting cannot change canonical hashes because layout and trivia remain
 metadata.
 
 Two existing readability choices are part of this bounded contract. Chained
-conditionals keep `else if` continuations flat. A match scrutinee spanning more
-than four source lines produces W1203 and asks the author to bind it with
-`let`; the formatter never invents that binding or rewrites the AST. This
-preserves L4 and semantic identity.
+conditionals keep `else if` continuations flat. A match scrutinee that contains
+a nested `match`, `handle`, `if`, or multi-statement block (outside a function
+literal, whose body is a value of its own: a single-expression body adds its
+calls to the count, a block body counts as one), or that combines more than
+twelve calls and constructions, produces W1203 and asks the author to bind it
+with `let`; single-expression braces are transparent, as they are to `fmt`, and
+quoted code is data (no scrutinee warning inside a `quote`); the
+number of lines the formatter gave the scrutinee is not a reason to warn, so
+formatting a file never introduces or removes the warning.
+The formatter never invents that binding or rewrites the AST. This preserves L4
+and semantic identity.
 
 Calls, lists, expression and type tuples, function and handler parameter lists,
 arrow parameter lists, labeled constructor fields, operation parameter lists,
@@ -685,8 +692,9 @@ selection; see §7.
 When the scrutinee itself is a large multi-line expression, the printer does
 not hoist it into a preceding `let` on the author's behalf; an automatic
 hoist would be exactly the whole-program-shaped rewrite this design avoids
-everywhere else (L4). v0's answer is a lint past a line-count threshold that
-recommends the author hoist by hand, not an automatic transform.
+everywhere else (L4). The answer is a lint on the scrutinee's shape (a nested
+control construct, or more than twelve calls and constructions; never its line
+count) that recommends the author hoist by hand, not an automatic transform.
 
 ### If
 
