@@ -728,10 +728,191 @@ let test_cross_island_terms () =
     "dependency-ordered signatures" [ "a"; "b"; "id"; "c" ] (signature_names report);
   Alcotest.(check (list string)) "dependency-ordered diagnostics" [] (codes report)
 
-let test_cross_island_type_dependency_is_explicitly_unsupported () =
-  let report = analyze "type Local = | Local\nvalue = Local\nlater = 1\n" in
-  Alcotest.(check (list string)) "type dependency diagnostic" [ "E0301" ] (codes report);
-  Alcotest.(check (list string)) "later term still checks" [ "later" ] (signature_names report)
+(* APP.8: a valid type declared in the analyzed file stays known to later islands (its constructors
+   included), so the recovery report matches what the strict checker would say *)
+let test_cross_island_type_dependency_is_supported () =
+  let report =
+    analyze
+      "type Local = | Local | Pair(left: Int, right: Int)\n\
+       value = Local\n\
+       sum(p) = match p { | Pair(right: r, left: l) -> add(l, r) | Local -> 0 }\n\
+       later = sum(Pair(left: 1, right: 2))\n"
+  in
+  Alcotest.(check (list string)) "no type dependency diagnostic" [] (codes report);
+  Alcotest.(check (list string))
+    "every term checks" [ "value"; "sum"; "later" ] (signature_names report);
+  let effects =
+    analyze "once effect Ping where {\n  ping : (Int) -> Int\n}\ncall(n) = ping(n)\nlater = 1\n"
+  in
+  Alcotest.(check (list string)) "effect dependency resolves" [] (codes effects);
+  Alcotest.(check (list string))
+    "operation user checks" [ "call"; "later" ] (signature_names effects)
+
+(* APP.8: one malformed declaration is reported once; the definitions that only depend on it (and
+   on each other) are silent consequences, while an independent error and unrelated valid code are
+   still reported and checked *)
+let test_malformed_declaration_poisons_only_its_dependents () =
+  let report =
+    analyze ~file:"cascade.jac"
+      "type Shape = | Circle Int\n\
+       area(s) = match s { | Circle(r) -> mul(r, r) }\n\
+       type World = | World(Int, Text)\n\
+       describe(w) = match w { | World(n, t) -> t }\n\
+       total(a, b) = add(area(a), area(b))\n\
+       oops(x) = add(x, missing-name)\n\
+       later = total(Circle(1), Circle(2))\n"
+  in
+  Alcotest.(check (list string))
+    "originating error, then the independent one" [ "E1225"; "E0301" ] (codes report);
+  Alcotest.(check bool)
+    "the independent error is the unrelated missing name" true
+    (List.exists
+       (fun diagnostic ->
+         Diag.code_or_uncoded diagnostic = "E0301"
+         && Resolve.unknown_name_of diagnostic = Some "missing-name")
+       report.Surface_check.diagnostics);
+  (* the parenthesised positional declaration is a syntax error with an unambiguous meaning, so
+     recovery keeps its constructor for `describe` rather than manufacturing a second error *)
+  Alcotest.(check (list string))
+    "declarations around the malformed one still check"
+    [ "area"; "describe"; "total"; "later" ]
+    (signature_names report);
+  (* a damaged effect declaration is reported by the parser alone; its operation is poisoned, so
+     the dependents are silent, and even though `record` is also a prelude name (`audit.record`)
+     the poisoned local spelling does not fall through to that binding *)
+  let damaged =
+    analyze ~file:"damaged.jac"
+      "once effect Log where {\n\
+      \  record : (Text) ->\n\
+       }\n\
+       note(t) = record(t)\n\
+       twice(t) = { note(t); note(t) }\n\
+       later = 1\n"
+  in
+  Alcotest.(check (list string))
+    "a declaration with holes is reported by the parser alone" [ "E1220"; "E1221" ] (codes damaged);
+  Alcotest.(check (list string)) "its dependents are silent" [ "later" ] (signature_names damaged);
+  let unrelated_name =
+    analyze ~file:"damaged2.jac"
+      "once effect Log where {\n  jot : (Text) ->\n}\nnote(t) = jot(t)\nlater = 1\n"
+  in
+  Alcotest.(check (list string))
+    "the same with a name the prelude does not know" [ "E1220"; "E1221" ] (codes unrelated_name);
+  Alcotest.(check (list string)) "and the same silence" [ "later" ] (signature_names unrelated_name);
+  let prelude_collision =
+    analyze ~file:"collision.jac"
+      "once effect Out where {\n  print : (Int) ->\n}\nshow(n) = print(n)\nshow(1)\n"
+  in
+  Alcotest.(check (list string))
+    "a poisoned name that shadows a prelude binding yields no spurious type error"
+    [ "E1220"; "E1221" ] (codes prelude_collision);
+  (* poisoning is by (name, kind): a poisoned constructor `Add` must not hide the prelude term
+     `add`, so a definition using `add` is still checked and its genuine error still reported *)
+  let cross_kind =
+    analyze ~file:"cross-kind.jac"
+      "type Expr = | Num(n: Int) | Add(l: Expr, r: Expr) | Mul(l: Expr, r:\n\
+       double(x) = add(x, x)\n\
+       broken(x) = add(x, \"text\")\n\
+       total = double(broken(1))\n"
+  in
+  Alcotest.(check bool)
+    "the genuine type error beside a poisoned constructor is reported" true
+    (List.mem "E0801" (codes cross_kind));
+  Alcotest.(check bool)
+    "the definition over the prelude term still checks" true
+    (List.mem "double" (signature_names cross_kind));
+  (* a consequence must match the position's kind: a poisoned constructor used where a type is
+     required is a genuine mistake and stays reported *)
+  let type_position =
+    analyze ~file:"type-position.jac"
+      "type Broken = | Ghost(field:\nboundary = 1\nx : Ghost\nx = 1\n"
+  in
+  Alcotest.(check (list string))
+    "a poisoned constructor in type position is still an error" [ "E1225"; "E0301" ]
+    (codes type_position);
+  (* a recovered effect keeps its operations' call labels *)
+  let labeled_operation =
+    analyze ~file:"labeled-op.jac"
+      "once effect Ping where {\n\
+      \  ping : (value: Int) -> Int\n\
+       }\n\
+       call(n) = ping(value: n)\n\
+       type Bad = | Bad(Int)\n"
+  in
+  Alcotest.(check (list string))
+    "a labeled call of a recovered operation resolves" [ "E1225" ] (codes labeled_operation);
+  Alcotest.(check (list string))
+    "and the caller checks" [ "call" ]
+    (signature_names labeled_operation);
+  (* an escaped term reference names its kind, so a poisoned constructor cannot satisfy it *)
+  Alcotest.(check (list string))
+    "an escaped term reference to a poisoned constructor stays an error" [ "E1225"; "E0301" ]
+    (codes
+       (analyze ~file:"escaped.jac" "type Broken = | Ghost(field:\nboundary = 1\nx = `term:ghost`\n"));
+  (* a redeclared operation with different call labels is the store's E0612, not a silent pick *)
+  Alcotest.(check (list string))
+    "conflicting recovered call labels are refused" [ "E0612"; "E1225" ]
+    (codes
+       (analyze ~file:"abi.jac"
+          "once effect Ping where { ping : (value: Int) -> Int }\n\
+           once effect Ping where { ping : (other: Int) -> Int }\n\
+           type Bad = | Bad(Int)\n"));
+  (* a named call into a poisoned declaration is a consequence too, so the independent missing
+     name beside it is the one reported *)
+  Alcotest.(check (list string))
+    "a named call to a poisoned constructor does not hide an independent error" [ "E1225"; "E0301" ]
+    (codes
+       (analyze ~file:"named-call.jac"
+          "type Broken = | Ghost(field:\n\
+           boundary = 1\n\
+           x = (Ghost(field: 1), missing)\n\
+           y = Ghost(field: 2)\n"));
+  (* a lexically bound local that shares a poisoned name is not the poisoned declaration: its own
+     named-call mistake stays reported *)
+  Alcotest.(check (list string))
+    "a local parameter sharing a poisoned name keeps its genuine E0309"
+    [ "E1225"; "W1201"; "E0309" ]
+    (codes
+       (analyze ~file:"local-callee.jac"
+          "type Broken = | Ghost(field:\nboundary = 1\nf(ghost) = ghost(field: 1)\n"));
+  (* a constructor reference is not shadowed by a same-spelled local, so it stays a consequence *)
+  Alcotest.(check (list string))
+    "a constructor call beside a same-spelled local is still a consequence" [ "E1225"; "W1201" ]
+    (codes
+       (analyze ~file:"con-beside-local.jac"
+          "type Broken = | Ghost(field:\nboundary = 1\nf(ghost) = Ghost(field: 1)\n"));
+  (* a failed redeclaration supersedes the earlier recovered binding *)
+  Alcotest.(check (list string))
+    "a failed redeclaration hides the earlier recovered signature" [ "E1220"; "E1221" ]
+    (codes
+       (analyze ~file:"redecl.jac"
+          "once effect Out where { print : (Text) -> Int }\n\
+           once effect Out where { print : (Int) ->\n\
+           }\n\
+           show(n) = print(n)\n\
+           show(1)\n"));
+  (* a genuine mistake beside a poisoned reference is the finding that gets reported, even when
+     the poisoned reference comes first in the source *)
+  let mixed =
+    analyze ~file:"mixed.jac"
+      "type World = | World(Int Text\n\
+       describe(w) = match w { | World(n, t) -> t }\n\
+       combo(w) = add(text.length(describe(w)), nope)\n\
+       later = 1\n"
+  in
+  Alcotest.(check bool)
+    "the genuine missing name is reported" true
+    (List.exists
+       (fun diagnostic -> Resolve.unknown_name_of diagnostic = Some "nope")
+       mixed.Surface_check.diagnostics);
+  Alcotest.(check bool)
+    "no consequence of the malformed declaration is reported" false
+    (List.exists
+       (fun diagnostic ->
+         match Resolve.unknown_name_of diagnostic with
+         | Some ("world" | "describe") -> true
+         | _ -> false)
+       mixed.Surface_check.diagnostics)
 
 let test_analysis_isolation_repeatability_and_concurrency () =
   let store, context = make () in
@@ -873,8 +1054,10 @@ let suite =
     Alcotest.test_case "warning exact order nested raw and redundancy" `Quick
       test_warning_exact_order_nested_raw_and_redundancy;
     Alcotest.test_case "cross-island terms" `Quick test_cross_island_terms;
-    Alcotest.test_case "cross-island type dependency is explicitly unsupported" `Quick
-      test_cross_island_type_dependency_is_explicitly_unsupported;
+    Alcotest.test_case "cross-island type dependency is supported" `Quick
+      test_cross_island_type_dependency_is_supported;
+    Alcotest.test_case "malformed declaration poisons only its dependents" `Quick
+      test_malformed_declaration_poisons_only_its_dependents;
     Alcotest.test_case "analysis isolation repeatability and concurrency" `Quick
       test_analysis_isolation_repeatability_and_concurrency;
     Alcotest.test_case "semantic boundaries reject nested markers" `Quick

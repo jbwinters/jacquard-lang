@@ -405,14 +405,14 @@ let test_declaration_recovery () =
         `Type,
         [
           e1225 "recover-decls.jac:2:1-6"
-            "expected a field type in constructor `mk-bad` before the next top-level item";
+            "expected a field type in constructor `MkBad` before the next top-level item";
         ] );
       ( "parsed field type without close",
         "type Bad = | MkBad(field: (List T)\nlater = 1\n",
         `Type,
         [
           e1225 "recover-decls.jac:2:1-6"
-            "expected `)` to close constructor `mk-bad` before the next top-level item";
+            "expected `)` to close constructor `MkBad` before the next top-level item";
         ] );
     ]
   in

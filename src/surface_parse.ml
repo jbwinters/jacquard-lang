@@ -2261,6 +2261,9 @@ let field_label_ahead state =
       if next.Surface_lex.token = Surface_lex.Colon then Some name else None
 
 let parse_constructor_fields state constructor opening =
+  let spelling =
+    match Surface_name.to_pascal constructor with Some surface -> surface | None -> constructor
+  in
   let fields = ref [] in
   let has_label = ref false in
   let closing = ref opening in
@@ -2290,8 +2293,7 @@ let parse_constructor_fields state constructor opening =
         | Some next_top ->
             report_code state next_top "E1225"
               (Printf.sprintf
-                 "expected a field type in constructor `%s` before the next top-level item"
-                 constructor);
+                 "expected a field type in constructor `%s` before the next top-level item" spelling);
             let ty = ty_hole state next_top in
             fields :=
               Surface_ast.{ label; ty; meta = meta_from_token_to_meta start ty.meta } :: !fields;
@@ -2311,7 +2313,7 @@ let parse_constructor_fields state constructor opening =
                 report_code state next_top "E1225"
                   (Printf.sprintf
                      "expected `)` to close constructor `%s` before the next top-level item"
-                     constructor);
+                     spelling);
                 finished := true
             | Some _ | None -> (
                 skip_list_space state;
@@ -2323,16 +2325,37 @@ let parse_constructor_fields state constructor opening =
                 | Surface_lex.RParen -> ()
                 | _ ->
                     report_code state (current state) "E1225"
-                      (Printf.sprintf "expected `,` or `)` in constructor `%s`, found %s"
-                         constructor
+                      (Printf.sprintf "expected `,` or `)` in constructor `%s`, found %s" spelling
                          (token_description state (current state)));
                     synchronize_paren state)))
   done;
-  if not !has_label then
+  if not !has_label then begin
+    let placeholders =
+      List.mapi (fun index _ -> Printf.sprintf "T%d" (index + 1)) (List.rev !fields)
+    in
+    let labels = [ "a"; "b"; "c"; "d"; "e"; "f"; "g"; "h" ] in
+    let labeled =
+      List.mapi
+        (fun index placeholder ->
+          Printf.sprintf "%s: %s"
+            (match List.nth_opt labels index with
+            | Some l -> l
+            | None -> "field" ^ string_of_int index)
+            placeholder)
+        placeholders
+    in
     report_code state opening "E1225"
-      (Printf.sprintf
-         "constructor `%s` uses positional fields without parentheses; write `%s T`, not `%s(T)`"
-         constructor constructor constructor);
+      (if placeholders = [] then
+         Printf.sprintf
+           "constructor `%s` has empty parentheses; write `%s` alone for a constructor without \
+            fields"
+           spelling spelling
+       else
+         Printf.sprintf
+           "constructor `%s` uses parentheses around positional field types; write `%s %s` \
+            (space-separated types), or label the fields: `%s(%s)`"
+           spelling spelling (String.concat " " placeholders) spelling (String.concat ", " labeled))
+  end;
   (List.rev !fields, !closing)
 
 let parse_constructor state =

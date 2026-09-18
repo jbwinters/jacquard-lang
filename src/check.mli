@@ -77,6 +77,20 @@ val start_recovery : ctx -> recovery_session
 (** [start_recovery base] clones mutable checker state and all schemes. Later recovery checks cannot
     mutate [base] or install declarations in its store. *)
 
+val register_recovery_decl :
+  recovery_session ->
+  Kernel.decl ->
+  ((string * Resolve.entry) list * (Hash.t * Resolve.call_abi) list, Diag.t list) result
+(** [register_recovery_decl session decl] makes a cleanly lowered type or effect declaration of the
+    analyzed file resolvable inside [session] (its constructors and operations included) without
+    installing it in any store, and returns the name entries and the operations' call-label
+    companions to expose for it. Term declarations contribute nothing here; their members are named
+    by recovery hashes. *)
+
+val recovery_constructor_fields : recovery_session -> Hash.t -> string option list option
+(** [recovery_constructor_fields session hash] is the field-label vector of a constructor registered
+    by {!register_recovery_decl}, or [None]. *)
+
 val check_recovery_top :
   identity:string -> recovery_session -> Kernel.top -> (top_sig, Diag.t list) result
 (** [check_recovery_top ~identity session top] checks one projected recovery island. [identity] must

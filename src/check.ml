@@ -69,6 +69,10 @@ type ctx = {
           context's whole lifetime, so one ctx measures a whole program. *)
   mutable tier_ops : (Hash.t * Tier.discipline) list;
       (** op hash -> one handler clause's syntactic resume discipline (PF.2 phase 1) *)
+  mutable recovery_decls : (Hash.t * Store.located) list;
+      (** editor-recovery overlay: type and effect declarations of the analyzed file that lowered
+          cleanly, indexed by every hash they produce, so later islands resolve their constructors
+          and operations without installing anything in the store (APP.8) *)
 }
 
 and match_site = { scrutinee_ty : Types.ty; arms : Kernel.clause list; site_meta : Meta.t }
@@ -181,8 +185,11 @@ let payload_conflict ?meta detail =
    bodies may use a hidden prelude capability hash, while source expressions must use public
    lookup and therefore fail closed on the same explicit hash. *)
 let locate ctx hash =
-  if ctx.trusted_store_refs then Store.locate_internal ctx.store hash
-  else Store.locate ctx.store hash
+  match List.assoc_opt hash ctx.recovery_decls with
+  | Some located -> Ok located
+  | None ->
+      if ctx.trusted_store_refs then Store.locate_internal ctx.store hash
+      else Store.locate ctx.store hash
 
 let with_trusted_store_refs ctx f =
   let saved = ctx.trusted_store_refs in
@@ -2215,6 +2222,7 @@ let make_ctx (store : Store.t) : (ctx, Diag.t list) result =
           origins = [];
           tier_apps = [];
           tier_ops = [];
+          recovery_decls = [];
         }
   | Error ds, _, _, _, _, _
   | _, Error ds, _, _, _, _
@@ -2375,7 +2383,52 @@ module Recovery = struct
       origins = [];
       tier_apps = [];
       tier_ops = [];
+      recovery_decls = [];
     }
+
+  (** [register_decl ctx decl] adds a cleanly lowered type or effect declaration of the analyzed
+      file to the session's overlay and returns the (name, entry) pairs a names view should expose
+      for it, exactly as a store index would. Nothing is written to the store. *)
+  let register_decl ctx (decl : Kernel.decl) :
+      ((string * Resolve.entry) list * (Hash.t * Resolve.call_abi) list, Diag.t list) result =
+    match decl.Kernel.it with
+    | Kernel.DefTerm _ -> Ok ([], [])
+    | Kernel.DefType _ | Kernel.DefEffect _ -> (
+        match Canon.hash_decl decl with
+        | Error _ as error -> error
+        | Ok hashes ->
+            let located =
+              List.map
+                (fun (hash, (decl_hash, role)) -> (hash, { Store.decl; decl_hash; role }))
+                (Store.index_entries decl hashes)
+            in
+            ctx.recovery_decls <- located @ ctx.recovery_decls;
+            let kind index =
+              match decl.Kernel.it with
+              | Kernel.DefType _ -> if index = 0 then Resolve.KType else Resolve.KCon
+              | Kernel.DefEffect _ -> if index = 0 then Resolve.KEffect else Resolve.KOp
+              | Kernel.DefTerm _ -> Resolve.KTerm
+            in
+            Ok
+              ( List.mapi
+                  (fun index (name, hash) -> (name, { Resolve.hash; kind = kind index }))
+                  hashes.Canon.named,
+                Store.declaration_call_abis decl hashes ))
+
+  (** [constructor_fields ctx hash] is the overlay's copy of [Store.names_view]'s field-label lookup
+      for a recovered constructor. *)
+  let constructor_fields ctx hash =
+    match List.assoc_opt hash ctx.recovery_decls with
+    | Some
+        {
+          Store.decl = { Kernel.it = Kernel.DefType { cons; _ }; _ };
+          role = Store.Constructor i;
+          _;
+        } ->
+        Option.map
+          (fun constructor -> List.map (fun field -> field.Kernel.label) constructor.Kernel.fields)
+          (List.nth_opt cons i)
+    | Some _ | None -> None
 
   (** Recovery checking is an internal service for [Surface_check]. [identity] need only be unique
       within one isolated context; it is never persisted or returned. *)
@@ -2393,6 +2446,9 @@ let start_recovery base = Recovery_session (Recovery.isolated_ctx base)
     isolated session. Results may feed later islands in the same session, but no recovered term is
     installed in a store or admitted to the strict checker. *)
 let check_recovery_top ~identity (Recovery_session ctx) top = Recovery.check_top ~identity ctx top
+
+let register_recovery_decl (Recovery_session ctx) decl = Recovery.register_decl ctx decl
+let recovery_constructor_fields (Recovery_session ctx) hash = Recovery.constructor_fields ctx hash
 
 (** [force_term ctx h] computes [h]'s scheme, checking its declaration on demand — the whole-store
     sweep the tier statistics need (PF.2 phase 1). *)
