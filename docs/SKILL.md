@@ -422,8 +422,11 @@ type Result e a =
   | Ok a
 ```
 
-Labels do not create record construction or generated accessors. Construct
-values either positionally with `Canary(5)` or by label with
+Labels do not create records. A label that every constructor carries
+generates an accessor named after the type: `type Pair = | Pair(left: Int,
+right: Int)` gives `pair.left` and `pair.right`, so `pair.left(Pair(1, 2))` is
+`1`. A label on only some constructors has no accessor; select it with a
+pattern. Construct values either positionally with `Canary(5)` or by label with
 `Canary(percent: 5)`; match either positionally with
 `Canary(percent)` or by selection with `Canary(percent: value)`.
 
@@ -901,7 +904,8 @@ Do not invent new kernel forms for surface sugar.
 - No ambient authority: missing grants are expected refusals, not runtime
   configuration bugs.
 - No null, records, modules/imports, guards, or-patterns, custom operators,
-  implicit traits/typeclasses, or generated field accessors. Explicit
+  or implicit traits/typeclasses (constructor field accessors are generated
+  only for labels every constructor carries). Explicit
   dictionaries are ordinary values.
 - The interpreter ships deterministic structured Tasks, cooperative
   cancellation, bounded schedule exploration/replay, and scoped typed

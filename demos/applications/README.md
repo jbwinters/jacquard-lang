@@ -91,6 +91,10 @@ text-primitive and numeric-presentation repairs landed. What is not native:
   empty-line handling of end of input, source concatenation). They are kept
   as recorded so the baseline is the applications as delivered; migrating
   them is separate work that will move fixtures one repair at a time.
+- Hand-written field selectors such as `rota.staff-id` and `nb.cells` are
+  now covered by generated D36 accessors (`rota-staff.id`, `nb-snapshot.cells`;
+  SX.27). The routine lane pins that the two agree on the applications' own
+  models; the sources keep their selectors as delivered.
 
 `smoke.jac`, `custom-example.jac`, `CUSTOM-EXAMPLE.txt`, and the shared
 `display-tests.jac` are imported for completeness; the routine lane does not

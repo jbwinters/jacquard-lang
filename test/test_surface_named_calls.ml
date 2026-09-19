@@ -286,7 +286,22 @@ let test_fail_closed_diagnostics () =
   only_diagnostic store "bad(label: (x, y)) = x" "E0313" "label: (x, y)";
   only_diagnostic store "bad(value: x, value: y) = x" "E0313" "value: y";
   only_diagnostic store "{ let f = fn (x) -> x; f(value: 1) }" "E0309" "f(value: 1)";
-  ignore (install store "type Ambiguous a = | Ambiguous(value: a, value: a)\n");
+  (* a surface declaration repeating a label is refused when it is lowered (E1239); a bootstrap
+     declaration still reaches the named-construction check *)
+  (match
+     Reader.parse_string ~file:"named-calls.jqd"
+       "(deftype ambiguous ((tvar a)) (con ambiguous (field value (tvar a)) (field value (tvar a))))"
+   with
+  | Ok [ form ] -> (
+      match Kernel.of_form form with
+      | Ok (Kernel.Decl declaration) -> (
+          match Resolve.resolve_decl (Store.names_view store) declaration with
+          | Ok declaration -> ignore (Store.put_decl store declaration)
+          | Error diagnostics -> fail_diags "resolve bootstrap declaration" diagnostics)
+      | Ok (Kernel.Expr _) -> Alcotest.fail "bootstrap fixture is not a declaration"
+      | Error diagnostics -> fail_diags "validate bootstrap declaration" diagnostics)
+  | Ok _ -> Alcotest.fail "bootstrap fixture is not one form"
+  | Error diagnostics -> fail_diags "parse bootstrap declaration" diagnostics);
   only_diagnostic store "Ambiguous(value: 1, value: 2)" "E0314" "Ambiguous(value: 1, value: 2)";
   ignore (install store "type MixedFields a = | MixedFields(left: a, a)\n");
   only_diagnostic store "MixedFields(left: 1, other: 2)" "E0314" "MixedFields(left: 1, other: 2)"

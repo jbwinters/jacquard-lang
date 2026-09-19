@@ -433,7 +433,8 @@ let test_parameter_container_ownership () =
                 "handler container owns inner" [ comment ]
                 (comments Meta.key_trivia_inner (Meta.surface_container "params" operation.ometa))
           | _ -> Alcotest.fail "handler fixture shape")
-      | "constructor", [ Kernel.Decl { Kernel.it = DefType { cons = [ constructor ]; _ }; _ } ] ->
+      (* a labeled constructor is followed by its generated D36 accessors *)
+      | "constructor", Kernel.Decl { Kernel.it = DefType { cons = [ constructor ]; _ }; _ } :: _ ->
           Alcotest.(check (list string))
             "constructor container owns inner" [ comment ]
             (comments Meta.key_trivia_inner (Meta.surface_container "params" constructor.kmeta))
