@@ -171,6 +171,7 @@ module Checked = struct
     | Prelude_changed
     | Missing_dependency of Hash.t
     | Missing_declaration of Hash.t
+    | Hidden of Hash.t
     | Rebound of { name : string; expected : Hash.t; found : Hash.t option }
     | Call_abi_changed of Hash.t
     | Unreadable_store of string
@@ -227,6 +228,13 @@ module Checked = struct
                     Some (Missing_declaration decl_hash)
                 | _ -> None)
               t.tops);
+          (* every member published at check time, superseded ones included, must stay visible *)
+          (fun () ->
+            List.find_map
+              (fun (_, hash) ->
+                if List.exists (Hash.equal hash) store.Store.hidden then Some (Hidden hash)
+                else None)
+              (List.concat t.published));
           (fun () ->
             List.find_map
               (fun ((name, kind), expected) ->

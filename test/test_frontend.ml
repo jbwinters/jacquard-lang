@@ -207,6 +207,7 @@ let expect_stale label expected = function
         | Frontend.Checked.Prelude_changed -> "prelude"
         | Missing_dependency _ -> "dependency"
         | Missing_declaration _ -> "declaration"
+        | Hidden _ -> "hidden"
         | Rebound { name; _ } -> "rebound:" ^ name
         | Call_abi_changed _ -> "call-abi"
         | Unreadable_store _ -> "unreadable"
@@ -296,7 +297,15 @@ let test_verify_is_exact () =
   (match Store.lookup_kind store "f" Resolve.KTerm with
   | Some { Resolve.hash; _ } -> Store.hide_derived store hash
   | None -> Alcotest.fail "f was not installed");
-  expect_stale "hidden after checking" "rebound:f" (Frontend.Checked.verify hidden store);
+  expect_stale "hidden after checking" "hidden" (Frontend.Checked.verify hidden store);
+  (* hiding a superseded member breaks the expression checked against it *)
+  let root, superseded = checked "f(n) = add(n, 1)\nf(1)\nf(n) = add(n, 2)\n" in
+  let store = expect_ok "reopen" (Store.open_store root) in
+  (match Frontend.Checked.tops superseded with
+  | { Frontend.Checked.identity = Some { Canon.named = [ (_, first) ]; _ }; _ } :: _ ->
+      Store.hide_derived store first
+  | _ -> Alcotest.fail "first f has no member identity");
+  expect_stale "superseded member hidden" "hidden" (Frontend.Checked.verify superseded store);
   (* an unreadable store is a result, not an exception *)
   let root, unreadable = checked declarations in
   let store = expect_ok "reopen" (Store.open_store root) in

@@ -156,6 +156,8 @@ module Checked : sig
     | Missing_dependency of Hash.t  (** A referenced identity is absent from the store. *)
     | Missing_declaration of Hash.t
         (** A declaration of the source, possibly superseded later in it, is absent. *)
+    | Hidden of Hash.t
+        (** A member the store published at check time, possibly superseded, is now hidden. *)
     | Rebound of { name : string; expected : Hash.t; found : Hash.t option }
         (** A name the source introduced does not resolve, for its kind, to the checked identity. *)
     | Call_abi_changed of Hash.t
@@ -167,15 +169,16 @@ module Checked : sig
   val verify : t -> Store.t -> (unit, stale) result
   (** [verify artifact store] succeeds only when the artifact's facts hold in [store]: the same
       prelude identity, every dependency and every declaration of the source (superseded ones
-      included) present, each (name, kind) the source bound last still bound to the checked
-      identity, and each introduced callable carrying exactly the checked call-label companion. Only
-      bindings the store published when the source was checked are expected, so members it never
-      names (scheduler-private carriers, members the prelude already hides) are exempt, while a
-      published binding hidden later no longer counts. [verify] never creates a store: a missing
-      root is [Unreadable_store]. [verify] reopens the store's root and judges its persisted state,
-      so a handle that missed another handle's writes cannot vouch for an artifact. The first
-      failure in that order is returned. A consumer must verify before trusting an artifact against
-      any store, since stores outlive the session that checked the source. *)
+      included) present, every member published at check time still visible, each (name, kind) the
+      source bound last still bound to the checked identity, and each introduced callable carrying
+      exactly the checked call-label companion. Only bindings the store published when the source
+      was checked are expected, so members it never names (scheduler-private carriers, members the
+      prelude already hides) are exempt, while a published binding hidden later no longer counts.
+      [verify] never creates a store: a missing root is [Unreadable_store]. [verify] reopens the
+      store's root and judges its persisted state, so a handle that missed another handle's writes
+      cannot vouch for an artifact. The first failure in that order is returned. A consumer must
+      verify before trusting an artifact against any store, since stores outlive the session that
+      checked the source. *)
 end
 
 type recovery = {
