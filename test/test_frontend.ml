@@ -266,7 +266,23 @@ let test_verify_is_exact () =
   expect_ok "rebind through the second handle"
     (Frontend.install_declarations ~expression_refusal:refusal ~syntax:Frontend.Auto writer
        ~file:"lib.jac" "safe-div(n, d) = div(n, d)\n");
-  expect_stale "stale handle" "rebound:safe-div" (Frontend.Checked.verify artifact stale_handle)
+  expect_stale "stale handle" "rebound:safe-div" (Frontend.Checked.verify artifact stale_handle);
+  (* a declaration hidden after checking no longer resolves publicly *)
+  let root, hidden = checked "f(n) = add(n, 1)\nf(1)\n" in
+  let store = expect_ok "reopen" (Store.open_store root) in
+  (match Store.lookup_kind store "f" Resolve.KTerm with
+  | Some { Resolve.hash; _ } -> Store.hide_derived store hash
+  | None -> Alcotest.fail "f was not installed");
+  expect_stale "hidden after checking" "rebound:f" (Frontend.Checked.verify hidden store);
+  (* an unreadable store is a result, not an exception *)
+  let root, unreadable = checked declarations in
+  let store = expect_ok "reopen" (Store.open_store root) in
+  let names = Filename.concat root "names.jqd" in
+  Unix.chmod names 0o000;
+  let result = Frontend.Checked.verify unreadable store in
+  Unix.chmod names 0o644;
+  (* root reads files regardless of mode; the refusal is only observable unprivileged *)
+  if Unix.getuid () <> 0 then expect_stale "unreadable store" "unreadable" result
 
 (* a scheme with more than 26 type variables renders instead of crashing the checker *)
 let test_wide_schemes_render () =

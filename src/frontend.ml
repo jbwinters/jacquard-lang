@@ -171,7 +171,7 @@ module Checked = struct
     | Missing_declaration of Hash.t
     | Rebound of { name : string; expected : Hash.t; found : Hash.t option }
     | Call_abi_changed of Hash.t
-    | Unreadable_store of Diag.t list
+    | Unreadable_store of string
 
   (* The (name, kind) pairs a declaration binds, in [Canon.decl_hashes.named] order: a type or
      effect names itself first, then its constructors or operations. *)
@@ -233,13 +233,9 @@ module Checked = struct
                   | None -> false
                 in
                 let found = Store.lookup_kind store name kind in
-                (* the store never publishes a scheduler-private hash, and hidden derived members
-                   are deliberately absent from public lookup *)
-                if
-                  bound found
-                  || Store.scheduler_private_hash expected
-                  || bound (Store.lookup_hidden_kind store name kind)
-                then None
+                (* the store never publishes a scheduler-private hash; any other binding must be
+                   publicly resolvable, since a later check resolves the source's names publicly *)
+                if bound found || Store.scheduler_private_hash expected then None
                 else
                   Some
                     (Rebound
@@ -265,8 +261,11 @@ module Checked = struct
   let verify t store =
     (* judge the persisted store, not this handle's possibly stale in-memory index *)
     match Store.open_store store.Store.root with
-    | Error diagnostics -> Error (Unreadable_store diagnostics)
-    | Ok current -> verify_current t current
+    | exception Sys_error message -> Error (Unreadable_store message)
+    | Error diagnostics ->
+        Error (Unreadable_store (String.concat "\n" (List.map Diag.to_string diagnostics)))
+    | Ok current -> (
+        try verify_current t current with Sys_error message -> Error (Unreadable_store message))
 end
 
 type recovery = { diagnostics : Diag.t list; signatures : (string * string) list }

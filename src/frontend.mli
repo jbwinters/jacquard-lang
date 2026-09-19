@@ -161,18 +161,20 @@ module Checked : sig
     | Call_abi_changed of Hash.t
         (** A callable's call-label companion differs from (or is absent beside) the checked one;
             labels are not part of identity, so equal hashes can carry different labels. *)
-    | Unreadable_store of Diag.t list  (** The store's persisted state cannot be reopened. *)
+    | Unreadable_store of string
+        (** The store's persisted state cannot be read; the rendered reason. *)
 
   val verify : t -> Store.t -> (unit, stale) result
   (** [verify artifact store] succeeds only when the artifact's facts hold in [store]: the same
       prelude identity, every dependency and every declaration of the source (superseded ones
       included) present, each (name, kind) the source bound last still bound to the checked
       identity, and each introduced callable carrying exactly the checked call-label companion.
-      Scheduler-private members count as bound through their hidden binding. [verify] reopens the
-      store's root and judges its persisted state, so a handle that missed another handle's writes
-      cannot vouch for an artifact. The first failure in that order is returned. A consumer must
-      verify before trusting an artifact against any store, since stores outlive the session that
-      checked the source. *)
+      Scheduler-private members, which the store never names, are exempt; every other binding must
+      resolve publicly (a hidden binding does not count). [verify] reopens the store's root and
+      judges its persisted state, so a handle that missed another handle's writes cannot vouch for
+      an artifact. The first failure in that order is returned. A consumer must verify before
+      trusting an artifact against any store, since stores outlive the session that checked the
+      source. *)
 end
 
 type recovery = {
