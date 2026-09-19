@@ -838,6 +838,45 @@ let lower_definition_run definitions =
 
 let surface_spelling kernel = Option.value (Surface_name.to_pascal kernel) ~default:kernel
 
+(* Field types are compared before names resolve, so only a difference that resolution cannot
+   erase is refused: effect rows compare as sets, and a type mentioning a hash reference is left to
+   the checker, which still types the accessor's clauses against each other. *)
+let rec mentions_hash (ty : Kernel.ty) =
+  match ty.it with
+  | Kernel.TRef (Kernel.Hashed _) -> true
+  | Kernel.TRef (Kernel.Named _) | Kernel.TVar _ -> false
+  | Kernel.TApp (fn, args) -> mentions_hash fn || List.exists mentions_hash args
+  | Kernel.TArrow (params, row, result) ->
+      List.exists mentions_hash params
+      || List.exists (function Kernel.Hashed _ -> true | Kernel.Named _ -> false) row.effects
+      || mentions_hash result
+  | Kernel.TTuple items -> List.exists mentions_hash items
+  | Kernel.TForall (_, _, body) -> mentions_hash body
+
+let rec with_sorted_rows (ty : Kernel.ty) : Kernel.ty =
+  let gref_key = function Kernel.Named name -> name | Kernel.Hashed hash -> Hash.to_hex hash in
+  let it =
+    match ty.it with
+    | Kernel.TRef _ | Kernel.TVar _ -> ty.it
+    | Kernel.TApp (fn, args) -> Kernel.TApp (with_sorted_rows fn, List.map with_sorted_rows args)
+    | Kernel.TArrow (params, row, result) ->
+        let effects =
+          List.sort (fun left right -> String.compare (gref_key left) (gref_key right)) row.effects
+        in
+        Kernel.TArrow
+          (List.map with_sorted_rows params, { row with effects }, with_sorted_rows result)
+    | Kernel.TTuple items -> Kernel.TTuple (List.map with_sorted_rows items)
+    | Kernel.TForall (tvars, rvars, body) -> Kernel.TForall (tvars, rvars, with_sorted_rows body)
+  in
+  { ty with it }
+
+let field_types_differ (left : Kernel.ty) (right : Kernel.ty) =
+  (not (mentions_hash left || mentions_hash right))
+  && not
+       (Form.equal_ignoring_meta
+          (Kernel.ty_to_form (with_sorted_rows left))
+          (Kernel.ty_to_form (with_sorted_rows right)))
+
 (** [field_label_errors ~type_name constructors] rejects a label declared twice by one constructor
     (E1239) and a label whose field type differs between constructors (E1240), at the later field. A
     label that only some constructors carry is valid; it simply has no generated accessor. *)
@@ -858,10 +897,7 @@ let field_label_errors ~type_name (constructors : Kernel.conspec list) =
                        (surface_spelling type_name) label)
               | Some label -> (
                   match List.assoc_opt label seen with
-                  | Some (first_constructor, first_ty)
-                    when not
-                           (Form.equal_ignoring_meta (Kernel.ty_to_form first_ty)
-                              (Kernel.ty_to_form field.fty)) ->
+                  | Some (first_constructor, first_ty) when field_types_differ first_ty field.fty ->
                       error ~meta:field.fmeta ~code:"E1240"
                         (Printf.sprintf
                            "field label `%s` of type `%s` has one type in constructor `%s` and a \
@@ -891,21 +927,24 @@ let is_generated_accessor = function
 (** [accessor_name ~type_name label] is the D36 accessor name [<type-kebab>.<label>]. *)
 let accessor_name ~type_name label = type_name ^ "." ^ label
 
-(** [eligible_labels constructors] are the labels of the first constructor that every constructor
-    carries, in declaration order. Only these have a pure, total accessor; E1239 and E1240 have
-    already made each such label unique within its constructor and uniformly typed. *)
-let eligible_labels (constructors : Kernel.conspec list) =
+(** [eligible_labels ~type_name constructors] are the labels of the first constructor that every
+    constructor carries, in declaration order, whose accessor name is a valid symbol (an escaped
+    type name ending in [?] or [!] has no dotted namespace). Only these have a pure, total accessor;
+    E1239 and E1240 have already made each such label unique within its constructor and uniformly
+    typed. *)
+let eligible_labels ~type_name (constructors : Kernel.conspec list) =
   match constructors with
   | [] -> []
   | first :: rest ->
       List.filter_map (fun (field : Kernel.field) -> field.label) first.fields
       |> List.filter (fun label ->
-          List.for_all
-            (fun (constructor : Kernel.conspec) ->
-              List.exists
-                (fun (field : Kernel.field) -> field.label = Some label)
-                constructor.fields)
-            rest)
+          Reader.valid_symbol (accessor_name ~type_name label)
+          && List.for_all
+               (fun (constructor : Kernel.conspec) ->
+                 List.exists
+                   (fun (field : Kernel.field) -> field.label = Some label)
+                   constructor.fields)
+               rest)
 
 (** [generated_accessor ~type_name constructors label] is the ordinary pure definition
     [<type>.<label>(value) = match value { | C(label: field) -> field ... }], one clause per
@@ -964,7 +1003,7 @@ let generated_accessors ~explicit_terms ~type_name (constructors : Kernel.conspe
               explicit term `%s` defined in this file"
              name label (surface_spelling type_name) name)
       else Ok (generated_accessor ~type_name constructors label))
-    (eligible_labels constructors)
+    (eligible_labels ~type_name constructors)
 
 let lower_nonterm_top (top : Surface_ast.top) =
   match top.it with
@@ -1036,18 +1075,47 @@ let lower_top top =
       | _ -> raise (Bug_scc_schedule "a singleton definition run did not produce one component"))
   | _ -> lower_nonterm_top top
 
+(** [accessor_names top] computes the eligible accessor names from surface labels alone. *)
+let accessor_names (top : Surface_ast.top) =
+  match top.it with
+  | Surface_ast.TypeDecl { name; constructors; _ } -> (
+      let type_name = Option.value (Surface_name.of_pascal name) ~default:name in
+      let labels (constructor : Surface_ast.constructor) =
+        List.filter_map (fun (field : Surface_ast.field) -> field.label) constructor.fields
+      in
+      match constructors with
+      | [] -> []
+      | first :: rest ->
+          labels first
+          |> List.filter (fun label -> List.for_all (fun c -> List.mem label (labels c)) rest)
+          |> List.map (accessor_name ~type_name)
+          |> List.filter Reader.valid_symbol)
+  | _ -> []
+
+(** [explicit_term_names tops] are the term names the file's own definitions bind, including raw
+    bootstrap [defterm] tops, which generated accessors must not collide with (E1241). *)
+let explicit_term_names tops =
+  List.concat_map
+    (fun (top : Surface_ast.top) ->
+      match top.it with
+      | Surface_ast.Definition { name; _ } -> [ name ]
+      | Surface_ast.RawTop form -> (
+          match Kernel.of_form form with
+          | Ok (Kernel.Decl { it = Kernel.DefTerm bindings; _ }) ->
+              List.map (fun (binding : Kernel.binding) -> binding.bname) bindings
+          | Ok _ | Error _ -> [])
+      | _ -> [])
+    tops
+
 (** [lower_tops tops] lowers a complete strictly parsed file. It attaches each signature to its
     adjacent same-name definition, partitions uninterrupted definition runs into exact SCCs, and
     emits SCC declarations dependency-first with source-stable ties. Bare expressions and type,
     effect, or raw declarations retain document order and break definition runs. Each surface type
     declaration is followed by its generated D36 field accessors ({!generated_accessors}); an
     accessor whose name an explicit definition of the file also defines fails with E1241. *)
-let lower_tops tops =
+let lower_tops ?explicit_terms tops =
   let explicit_terms =
-    List.filter_map
-      (fun (top : Surface_ast.top) ->
-        match top.it with Surface_ast.Definition { name; _ } -> Some name | _ -> None)
-      tops
+    match explicit_terms with Some names -> names | None -> explicit_term_names tops
   in
   let flush acc run =
     match run with

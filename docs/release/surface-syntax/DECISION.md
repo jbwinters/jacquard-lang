@@ -160,7 +160,7 @@ syntax without implementing D36 accessors or default/higher-order named calls;
 resource-scoped row display remains unscheduled with no
 syntax, semantics, or compatibility promise.
 Their separate acceptance gates are the
-[D36 accessor criteria] (met by SX.27)(FOLLOWUPS.md#d36-generated-constructor-accessors),
+[D36 accessor criteria](FOLLOWUPS.md#d36-generated-constructor-accessors) (met by SX.27),
 [Tier-F linearity criteria](FOLLOWUPS.md#tier-f-linearity-modes) and
 [Tier-F resource-row criteria](FOLLOWUPS.md#tier-f-resource-scoped-rows).
 

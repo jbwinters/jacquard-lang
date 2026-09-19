@@ -92,6 +92,16 @@ explicit term of the same file also defines (E1241) are refused at the label.
     Next step: Rename the explicit term or the field label; the accessor is generated from the label.
   [1]
 
+The editor recovery report of a damaged file applies the same rules: a collision is still E1241,
+and a use of an accessor whose declaration failed is a silent consequence, not a second E0301.
+
+  $ printf 'type Pair = | Pair(left: Int, right: Int)\npair.left(p) = 0\nx = (\n' > damaged-collision.jac
+  $ jac check damaged-collision.jac 2>&1 | grep -o 'error\[E1241\]\|error\[E0301\]'
+  error[E1241]
+  $ printf 'type Pair = | Pair(left: Int, left: Int)\nuse = pair.left(Pair(1, 2))\nx = (\n' > damaged-duplicate.jac
+  $ jac check damaged-duplicate.jac 2>&1 | grep -o 'error\[E1239\]\|error\[E0301\]'
+  error[E1239]
+
 SX.24 labeled constructor patterns select only the fields a branch needs. Selection order is free,
 omitted labeled and unlabeled fields become positional wildcards before checking, and the existing
 pattern machinery therefore proves exhaustiveness and runs the same code in both engines.

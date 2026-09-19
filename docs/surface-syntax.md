@@ -670,9 +670,10 @@ redundancy, and exhaustiveness checking. `_`, nested constructors, and `as`
 patterns are all valid to the right of `:`. Canonical resolved printing uses
 declaration order and leaves omissions implicit.
 
-An unknown or repeated selection is an error. A constructor with no labels, or
-with duplicate declaration labels that make lookup ambiguous, cannot be used
-in labeled form; ordinary positional matching remains available. `Ctor(field)`
+An unknown or repeated selection is an error. A constructor with no labels
+cannot be used in labeled form; ordinary positional matching remains
+available. A surface declaration cannot repeat a label (E1239); a bootstrap
+declaration that does is still refused at labeled use (E0308). `Ctor(field)`
 is still the existing positional binder pattern, never a label pun, and
 `Ctor()` is the ordinary zero-argument constructor pattern. Constructor field
 labels already participate in the constructor's content identity, so changing
@@ -755,7 +756,7 @@ syntax together with field metadata, trivia, lowering, and canonical printing,
 and SX.27 generates the accessor definitions, so `fleet.inv` resolves without
 being declared. Both field exercises invented this exact
 `Ctor(field: Type, ...)` notation independently. SX.24 now reuses those labels
-for partial constructor patterns (§5, Match) without generating accessors.
+for partial constructor patterns (§5, Match).
 SX.23 separately reuses constructor labels for direct named construction and
 allows operations to declare external call labels as `label: Type`. Operation
 labels do not alter the operation's kernel type or identity; their exact vector

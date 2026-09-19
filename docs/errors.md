@@ -89,7 +89,7 @@ malformed source, path, or host-message byte in a string field is replaced with 
 | E0305 | labeled constructor pattern selects an unknown field | `Snapshot(missing: x)` |
 | E0306 | labeled constructor pattern selects one field more than once | `Snapshot(error: x, error: y)` |
 | E0307 | constructor has no usable field-label schema for a labeled pattern | `Pair(left: x)` when `Pair` has only positional fields |
-| E0308 | constructor declaration has ambiguous duplicate labels at labeled-pattern use | `Pair(left: x)` when `left` is declared twice |
+| E0308 | constructor declaration has ambiguous duplicate labels at labeled-pattern use; surface declarations now refuse the duplicate itself (E1239), so this reaches only bootstrap declarations | `Pair(left: x)` when `left` is declared twice in `.jqd` |
 | E0309 | callee has no usable explicit named-call ABI | `local(value: 1)` for a local function, or `plain(value: 1)` for an unlabeled top-level term |
 | E0310 | named call selects an unknown label | `resize(image: img, size: 2)` when the declared label is `scale` |
 | E0311 | named call repeats or overlaps one argument slot | `choose(left: 1, left: 2)`, or `choose(1, left: 2)` when `choose(left: x, right: y)` declares `left` first |

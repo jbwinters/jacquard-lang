@@ -593,6 +593,8 @@ let test_ineligible_labels_generate_nothing () =
       ("positional fields", "type Pair a b = | Pair a b\n");
       ("label on some constructors", "type Reply = | Accepted(value: Int) | Refused(reason: Text)\n");
       ("label missing from one constructor", "type Tagged = | Tag(id: Int) | Untagged\n");
+      (* an escaped type name ending in `?` has no dotted namespace for an accessor *)
+      ("type name without a namespace", "type `type:ok?` = | Mk(x: Int)\n");
     ];
   (* generated accessors never reach the surface printer's output *)
   match lower "type Pair = | Pair(left: Int, right: Int)\n" with
@@ -626,6 +628,20 @@ let test_label_validation () =
     "pair.left(p) = 0\ntype Pair = | Pair(left: Int, right: Int)\n";
   expect_lowering_error "collision with a later explicit term" ~code:"E1241" ~span:"right: Int"
     "type Pair = | Pair(left: Int, right: Int)\npair.right(p) = 0\n";
+  expect_lowering_error "collision with a raw bootstrap term" ~code:"E1241" ~span:"left: Int"
+    "type Pair = | Pair(left: Int)\n\
+     jqd { (defterm ((binding pair.left () (lam ((pvar p)) (lit 0))))) }\n";
+  (* types are compared before resolution only where resolution cannot make them equal *)
+  List.iter
+    (fun (label, source) ->
+      Alcotest.(check (list string)) label [ "same.f" ] (accessor_names (lower source)))
+    [
+      ( "effect rows compare as sets",
+        "type Same = | A(f: (Int) ->{Console, Abort} Int) | B(f: (Int) ->{Abort, Console} Int)\n" );
+      ( "hash references are left to the checker",
+        "type Same = | A(f: Int) | B(f: \
+         #907085f5670ab5835e5356feb10ae729496e3816b863ddbb21cfe289e7d34f0d:type)\n" );
+    ];
   (* a same-typed label on some constructors only is valid and has no accessor *)
   Alcotest.(check (list string))
     "consistent partial label" []

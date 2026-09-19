@@ -47,6 +47,18 @@ when a labeled pattern used the ambiguous label, E0308) is now refused where
 it is declared. A file that hand-writes a selector under the generated name is
 refused with E1241 and drops the hand-written copy: the only maintained case,
 the night-shift case study's `reading.ms`, was exactly the generated accessor.
+A raw bootstrap `defterm` in the file counts as an explicit term; a definition
+in another file or already in the store rebinds the name as ordinary
+shadowing does. An escaped type name that cannot prefix a dotted name (one
+ending in `?` or `!`) generates no accessors.
+
+Accessors are ordinary store terms. Only presentation hides them (the printer,
+`fmt`, and `--print-sigs`); `hash` lists their identities after the type,
+`diff` reports a renamed label as a removed and an added accessor (a real
+change of the type's API), and `test --coverage` counts them like any term.
+E1240 compares field types before names resolve: effect rows compare as sets,
+and a field type that mentions a hash reference is left to the checker, which
+types the accessor's clauses against each other.
 
 **Acceptance contract:**
 
