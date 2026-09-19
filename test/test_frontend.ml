@@ -9,12 +9,24 @@ let expect_ok label = function
   | Ok value -> value
   | Error diagnostics -> Alcotest.failf "%s failed:\n%s" label (fail_diagnostics diagnostics)
 
+let rec remove_tree path =
+  match (Unix.lstat path).Unix.st_kind with
+  | Unix.S_DIR ->
+      Array.iter (fun name -> remove_tree (Filename.concat path name)) (Sys.readdir path);
+      Unix.rmdir path
+  | _ -> Unix.unlink path
+
+(* Each root is removed when the test process exits. *)
 let fresh_root =
   let serial = ref 0 in
   fun label ->
     incr serial;
-    Filename.concat (Filename.get_temp_dir_name ())
-      (Printf.sprintf "jacquard-frontend-%s-%d-%d" label (Unix.getpid ()) !serial)
+    let root =
+      Filename.concat (Filename.get_temp_dir_name ())
+        (Printf.sprintf "jacquard-frontend-%s-%d-%d" label (Unix.getpid ()) !serial)
+    in
+    at_exit (fun () -> try remove_tree root with Unix.Unix_error _ | Sys_error _ -> ());
+    root
 
 let program =
   "safe-div(n, d) = if eq(d, 0) then abort() else div(n, d)\n\
@@ -248,6 +260,17 @@ let test_verify_is_exact () =
     "the same declarations verify" true
     (verify_elsewhere "type Widget = | Widget\nwidget = 1\n" "type Widget = | Widget\nwidget = 1\n"
     = Ok ());
+  (* a constructor the prelude already hides is never published, so it is not expected *)
+  let root, hidden_prelude = checked "type Hash = | HashOpaque\n" in
+  Alcotest.(check bool)
+    "prelude-hidden members verify" true
+    (Frontend.Checked.verify hidden_prelude (expect_ok "reopen" (Store.open_store root)) = Ok ());
+  (* verification never creates a store *)
+  let missing = fresh_root "missing" in
+  expect_stale "missing root" "unreadable"
+    (Frontend.Checked.verify hidden_prelude
+       { (expect_ok "reopen" (Store.open_store root)) with Store.root = missing });
+  Alcotest.(check bool) "missing root not created" false (Sys.file_exists missing);
   (* the frozen scheduler carrier's constructor is bound only privately *)
   let root, carrier = checked "type ChannelHandle a = | ChannelOpaque\n" in
   Alcotest.(check bool)

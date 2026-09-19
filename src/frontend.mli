@@ -168,13 +168,14 @@ module Checked : sig
   (** [verify artifact store] succeeds only when the artifact's facts hold in [store]: the same
       prelude identity, every dependency and every declaration of the source (superseded ones
       included) present, each (name, kind) the source bound last still bound to the checked
-      identity, and each introduced callable carrying exactly the checked call-label companion.
-      Scheduler-private members, which the store never names, are exempt; every other binding must
-      resolve publicly (a hidden binding does not count). [verify] reopens the store's root and
-      judges its persisted state, so a handle that missed another handle's writes cannot vouch for
-      an artifact. The first failure in that order is returned. A consumer must verify before
-      trusting an artifact against any store, since stores outlive the session that checked the
-      source. *)
+      identity, and each introduced callable carrying exactly the checked call-label companion. Only
+      bindings the store published when the source was checked are expected, so members it never
+      names (scheduler-private carriers, members the prelude already hides) are exempt, while a
+      published binding hidden later no longer counts. [verify] never creates a store: a missing
+      root is [Unreadable_store]. [verify] reopens the store's root and judges its persisted state,
+      so a handle that missed another handle's writes cannot vouch for an artifact. The first
+      failure in that order is returned. A consumer must verify before trusting an artifact against
+      any store, since stores outlive the session that checked the source. *)
 end
 
 type recovery = {

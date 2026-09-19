@@ -134,6 +134,8 @@ module Checked = struct
     prelude : (string * string) list option;
     tops : top list;
     dependencies : Hash.t list;
+    published : ((string * Resolve.nkind) * Hash.t) list list;
+        (* per top, the (name, kind) bindings the store actually published when it was installed *)
   }
 
   let file t = t.file
@@ -142,7 +144,7 @@ module Checked = struct
   let tops t = t.tops
   let dependencies t = t.dependencies
 
-  let seal ~file ~source ~prelude tops =
+  let seal ~file ~source ~prelude ~published tops =
     let introduced =
       List.concat_map
         (fun top ->
@@ -163,7 +165,7 @@ module Checked = struct
       List.sort_uniq Hash.compare references
       |> List.filter (fun hash -> not (List.exists (Hash.equal hash) introduced))
     in
-    { file; source_digest = Hash.of_string source; prelude; tops; dependencies }
+    { file; source_digest = Hash.of_string source; prelude; tops; dependencies; published }
 
   type stale =
     | Prelude_changed
@@ -190,13 +192,14 @@ module Checked = struct
           named
     | _ -> []
 
-  (* The identity each (name, kind) was last bound to by the source; the store rebinds per kind. *)
+  (* The identity each published (name, kind) was last bound to by the source; the store rebinds per
+     kind. Bindings the store never published (scheduler-private or already hidden members) are not
+     facts of the artifact, so they are neither expected nor allowed to supersede. *)
   let final_bindings t =
     List.fold_left
-      (fun final top ->
-        let introduced = bindings top in
-        List.filter (fun (key, _) -> not (List.mem_assoc key introduced)) final @ introduced)
-      [] t.tops
+      (fun final published ->
+        List.filter (fun (key, _) -> not (List.mem_assoc key published)) final @ published)
+      [] t.published
 
   let first_error checks = List.find_map (fun check -> check ()) checks
 
@@ -233,9 +236,8 @@ module Checked = struct
                   | None -> false
                 in
                 let found = Store.lookup_kind store name kind in
-                (* the store never publishes a scheduler-private hash; any other binding must be
-                   publicly resolvable, since a later check resolves the source's names publicly *)
-                if bound found || Store.scheduler_private_hash expected then None
+                (* published at check time, so it must still resolve publicly *)
+                if bound found then None
                 else
                   Some
                     (Rebound
@@ -260,12 +262,17 @@ module Checked = struct
 
   let verify t store =
     (* judge the persisted store, not this handle's possibly stale in-memory index *)
-    match Store.open_store store.Store.root with
-    | exception Sys_error message -> Error (Unreadable_store message)
-    | Error diagnostics ->
-        Error (Unreadable_store (String.concat "\n" (List.map Diag.to_string diagnostics)))
-    | Ok current -> (
-        try verify_current t current with Sys_error message -> Error (Unreadable_store message))
+    let root = store.Store.root in
+    (* never create a store here: a missing root or object set is itself the answer *)
+    if not (Sys.file_exists (Filename.concat root "objects")) then
+      Error (Unreadable_store ("no store at " ^ root))
+    else
+      match Store.open_store root with
+      | exception Sys_error message -> Error (Unreadable_store message)
+      | Error diagnostics ->
+          Error (Unreadable_store (String.concat "\n" (List.map Diag.to_string diagnostics)))
+      | Ok current -> (
+          try verify_current t current with Sys_error message -> Error (Unreadable_store message))
 end
 
 type recovery = { diagnostics : Diag.t list; signatures : (string * string) list }
@@ -294,7 +301,7 @@ let check ?origin ?(on_parsed = ignore) ?(on_resolved = fun _ _ -> ())
       in
       Ok (Recovered { diagnostics; signatures })
   | None ->
-      let checked = ref [] and awaiting_installation = ref None in
+      let checked = ref [] and published = ref [] and awaiting_installation = ref None in
       let on_resolved top resolver_warnings =
         on_resolved top resolver_warnings;
         let* ({ Check.names; row; warnings } as signature) = Check.check_top checker top in
@@ -311,7 +318,9 @@ let check ?origin ?(on_parsed = ignore) ?(on_resolved = fun _ _ -> ())
         in
         let* () = on_checked checker top signature in
         (match top with
-        | Kernel.Expr _ -> checked := entry :: !checked
+        | Kernel.Expr _ ->
+            checked := entry :: !checked;
+            published := [] :: !published
         | Kernel.Decl _ -> awaiting_installation := Some entry);
         Ok ()
       in
@@ -320,16 +329,27 @@ let check ?origin ?(on_parsed = ignore) ?(on_resolved = fun _ _ -> ())
         | None -> assert false (* walk installs a declaration only after on_resolved accepts it *)
         | Some entry ->
             awaiting_installation := None;
-            checked :=
+            let entry =
               {
                 entry with
                 Checked.identity = Some hashes;
                 call_abis = Store.declaration_call_abis declaration hashes;
               }
-              :: !checked;
+            in
+            let published_now =
+              List.filter
+                (fun ((name, kind), hash) ->
+                  match Store.lookup_kind store name kind with
+                  | Some { Resolve.hash = bound; _ } -> Hash.equal bound hash
+                  | None -> false)
+                (Checked.bindings entry)
+            in
+            checked := entry :: !checked;
+            published := published_now :: !published;
             Ok ()
       in
       let* () = walk ?origin ~on_parsed ~on_resolved ~on_installed ~syntax ~file store source in
       Ok
         (Checked
-           (Checked.seal ~file ~source ~prelude:(Store.prelude_manifest store) (List.rev !checked)))
+           (Checked.seal ~file ~source ~prelude:(Store.prelude_manifest store)
+              ~published:(List.rev !published) (List.rev !checked)))

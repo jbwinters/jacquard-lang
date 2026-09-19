@@ -289,6 +289,6 @@ runs and keeps them after a later failure, as before. The host worker prepares
 its checker through the same service. Output, diagnostics, exit codes, hashes,
 and grants are unchanged. Because the artifact renders every scheme, the scheme
 printer's quantifier names past `z` now continue as `a1`, `a2`, ... like the
-body instead of raising (a declaration with more than 26 type variables used to
-crash `check --print-sigs`). The ten `test/test_frontend.ml` cases bring the
+body (27 or more type variables used to print the characters after `z` in the
+quantifier, and 160 or more crashed `check --print-sigs`). The ten `test/test_frontend.ml` cases bring the
 current source inventory to `1033 / 62 / 34`.
