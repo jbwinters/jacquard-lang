@@ -86,3 +86,27 @@ with its fresh-evaluator comparisons and cache/history invariants.
   17 passed, 0 failed, 0 skipped, 0 refused
   $ JACQUARD=jac sh "$A/run.sh" formula-notebook test 2>&1 | tail -1
   18 passed, 0 failed, 0 skipped, 0 refused
+
+Generated D36 field accessors (SX.27) answer the questions the applications' hand-written
+selectors answer. The selectors stay as authored, since the baseline is the applications as
+delivered; these blocks pin that the generated accessors could replace them.
+
+  $ cat "$A/rota-optimizer/model.jac" > rota-accessors.jac
+  $ cat >> rota-accessors.jac <<'JAC'
+  > ada = RotaStaff(7, "Ada", [], [], 2, [])
+  > (rota-staff.id(ada), rota.staff-id(ada))
+  > (rota-staff.name(ada), rota.staff-name(ada))
+  > (rota-staff.limit(ada), rota.staff-limit(ada))
+  > JAC
+  $ jac run rota-accessors.jac
+  (7, 7)
+  ("Ada", "Ada")
+  (2, 2)
+  $ cat "$A/formula-notebook/syntax.jac" "$A/formula-notebook/model.jac" > notebook-accessors.jac
+  $ cat >> notebook-accessors.jac <<'JAC'
+  > (nb-snapshot.cells(nb.empty-snapshot()), nb.cells(nb.empty-snapshot()))
+  > (nb-snapshot.hits(nb.empty-snapshot()), nb-book.undo(nb.empty()))
+  > JAC
+  $ jac run notebook-accessors.jac
+  (nil, nil)
+  (0, nil)

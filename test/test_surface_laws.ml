@@ -132,6 +132,12 @@ let lowered_surface path source =
 
 let surface_hashes path source =
   lowered_surface path source
+  (* D36 accessors derive from their type, whose identity is compared; they resolve only after
+     the type is installed, which these stub names do not model *)
+  |> List.filter (function
+    | Kernel.Decl declaration ->
+        Meta.surface_generated declaration.meta <> Some "constructor-accessor"
+    | Kernel.Expr _ -> true)
   |> List.map (fun top ->
       match Resolve.resolve Corpus_support.stub_names top with
       | Error diagnostics -> Eval_support.fail_diags (path ^ " resolve") diagnostics
@@ -1119,14 +1125,16 @@ let validate_release_docs ~decision ~followups ~index =
       ];
       [
         "D36";
-        "partial";
-        "The labeled-field declaration portion shipped in SS.8. SX.24 now ships partial \
-         `Ctor(label: pattern, ...)` matching, with \
+        "shipped";
+        "Labeled-field declarations shipped in SS.8, partial `Ctor(label: pattern, ...)` matching \
+         in SX.24, and generated accessors with declaration-time label validation in SX.27, with \
+         [declaration](../../../test/test_surface_decls.ml), \
          [pattern](../../../test/test_surface_patterns.ml), \
          [trivia](../../../test/test_surface_trivia.ml), and [CLI](../../../test/cli/surface.t) \
-         evidence for positional lowering, identity, checking, and execution. `pair.left` remains \
-         absent with E0301; generated accessors and their broader cross-constructor declaration \
-         validation remain deliberate follow-ups.";
+         evidence for lowering, identity, checking, execution, and native parity. SX.27 generates \
+         one pure accessor per label that every constructor carries, so `pair.left(Pair(1, 2))` \
+         prints `1`; a label carried by only some constructors keeps its pattern and construction \
+         uses without an accessor.";
         "[D36 accessor acceptance criteria](FOLLOWUPS.md#d36-generated-constructor-accessors)";
       ];
       [
@@ -1293,8 +1301,9 @@ let validate_release_docs ~decision ~followups ~index =
         "the printer emits the owning labeled type exactly once and suppresses generated accessor \
          bodies" );
       ( "validation",
-        "reject a label missing from any constructor, duplicated within a constructor, \
-         inconsistent in type across constructors, or colliding with an explicit term" );
+        "reject a label duplicated within a constructor, inconsistent in type across constructors, \
+         or colliding with an explicit term; a label missing from some constructor is accepted \
+         without an accessor" );
       ("diagnostics", "each validation failure has a dedicated diagnostic code and exact span tests");
       ("preservation", "bootstrap identity, full tests, doctests, twins, and demos remain green");
       ("excluded", "shipped labeled partial patterns are independent of this accessor gate");
@@ -1378,8 +1387,9 @@ let validate_release_docs ~decision ~followups ~index =
          grammar change" );
     ];
   require
-    (contains "E0301" followups && contains "pair.left" followups)
-    "D36 follow-up lacks direct E0301 non-generation evidence";
+    (contains "pair.left" followups && contains "E1239" followups && contains "E1240" followups
+   && contains "E1241" followups)
+    "D36 follow-up lacks accessor execution and label-validation evidence";
   (match section "## Reproduction Context" decision with
   | None -> add "missing reproduction context"
   | Some body ->
@@ -1498,7 +1508,7 @@ let decision_status_mutations =
   [
     ("D34", "shipped", "partial");
     ("D35", "shipped", "adjusted");
-    ("D36", "partial", "shipped");
+    ("D36", "shipped", "partial");
     ("D37", "shipped", "partial");
     ("D38", "shipped", "adjusted");
     ("D39", "shipped", "adjusted");
@@ -1520,9 +1530,8 @@ let decision_semantic_mutations =
     ("D34", "shared case projection and escapes", "separate case projection without escapes");
     ("D35", "mandatory blocks for non-atomic bodies", "optional blocks for non-atomic bodies");
     ( "D36",
-      "generated accessors and their broader cross-constructor declaration validation remain \
-       deliberate follow-ups",
-      "generated accessors and their broader cross-constructor declaration validation ship" );
+      "SX.27 generates one pure accessor per label that every constructor carries",
+      "SX.27 generates no accessor" );
     ( "D37",
       "dotted names as atomic and preserve namespace puns",
       "dotted names as segmented and reject namespace puns" );
@@ -1599,8 +1608,9 @@ let followup_mutations =
     ( "D36 missing validation",
       followup_mutation_test ~heading:"## D36 Generated Constructor Accessors" ~field:"validation"
         ~needle:
-          "reject a label missing from any constructor, duplicated within a constructor, \
-           inconsistent in type across constructors, or colliding with an explicit term"
+          "reject a label duplicated within a constructor, inconsistent in type across \
+           constructors, or colliding with an explicit term; a label missing from some constructor \
+           is accepted without an accessor"
         ~replacement:"reject duplicated labels" );
     ( "D38 wrong name",
       followup_mutation_test ~heading:"## D38 Variadic Text Join" ~field:"export"

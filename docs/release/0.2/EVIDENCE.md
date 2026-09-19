@@ -32,7 +32,7 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1033`
+- Alcotest/QCheck cases: `1036`
 - Cram transcript files: `62`
 - Documentation examples: `34` named examples across `8` documents
 
@@ -292,3 +292,20 @@ printer's quantifier names past `z` now continue as `a1`, `a2`, ... like the
 body (27 or more type variables used to print the characters after `z` in the
 quantifier, and 160 or more crashed `check --print-sigs`). The ten `test/test_frontend.ml` cases bring the
 current source inventory to `1033 / 62 / 34`.
+
+Labeled constructor fields generate accessors (SX.27, D36). Surface lowering
+follows each labeled type declaration with one ordinary pure definition
+`<type-kebab>.<label>` per label that every constructor carries, marked
+`surface-generated` so the printer, `fmt`, and `check --print-sigs` show only
+the owning type; a label
+that only some constructors carry keeps its pattern and named-construction uses
+without an accessor. Declarations now refuse a label repeated within a
+constructor (E1239), a label whose field type differs between constructors
+(E1240), and an accessor name an explicit definition of the same file also
+defines (E1241). `test/cli/surface.t` pins `pair.left(Pair(1, 2))` printing `1`
+under the interpreter and natively plus the three exact diagnostics,
+`test/cli/applications.t` pins generated accessors agreeing with the
+applications' hand-written selectors, the night-shift case study drops its
+hand-written `reading.ms` (now generated, and otherwise refused as E1241), and three `test/test_surface_decls.ml`
+cases pin kernel-twin identity, eligibility, and validation, bringing the
+current source inventory to `1036 / 62 / 34`.

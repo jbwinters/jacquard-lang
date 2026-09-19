@@ -36,10 +36,29 @@ val lower_top : Surface_ast.top -> (Kernel.top, Diag.t list) result
 (** Lower one non-signature top. A definition is a singleton SCC; a signature requires [lower_tops].
 *)
 
-val lower_tops : Surface_ast.top list -> (Kernel.top list, Diag.t list) result
+val lower_tops :
+  ?explicit_terms:string list -> Surface_ast.top list -> (Kernel.top list, Diag.t list) result
 (** Lower a strictly parsed file, attaching signatures and partitioning uninterrupted definition
     runs into exact dependency-first SCCs. Duplicate names fail with E0303 before graph
-    construction; malformed signature context and recovery holes are diagnostics. *)
+    construction; malformed signature context and recovery holes are diagnostics. Each surface type
+    declaration is followed by one generated D36 accessor [<type-kebab>.<label>] per label that
+    every constructor carries. Labels are validated at the declaration: E1239 (repeated within a
+    constructor), E1240 (differently typed across constructors), E1241 (accessor name also defined
+    explicitly in the file). [explicit_terms] replaces the file's own definition names
+    ({!explicit_term_names}) when only part of a file is lowered, as recovery analysis does. *)
+
+val explicit_term_names : Surface_ast.top list -> string list
+(** [explicit_term_names tops] are the term names the tops' definitions and raw bootstrap [defterm]
+    items bind; generated accessors must not collide with them. *)
+
+val accessor_names : Surface_ast.top -> string list
+(** [accessor_names top] are the kernel names of the accessors a surface type declaration would
+    generate, computed from its surface labels so that recovery can poison them when the declaration
+    fails. *)
+
+val is_generated_accessor : Kernel.top -> bool
+(** [is_generated_accessor top] holds for a declaration {!lower_tops} generated from a field label.
+    Signature listings omit these, as the printer does, so generated boilerplate is never shown. *)
 
 type file = { tops : Kernel.top list; meta : Meta.t }
 

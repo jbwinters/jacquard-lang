@@ -710,11 +710,12 @@ let check_cmd file prelude print_sigs manifest origin syntax =
             hashes)
       manifest
   in
-  let on_checked cctx _top { Check.names; warnings; row } =
+  let on_checked cctx top { Check.names; warnings; row } =
     let store = Check.store cctx in
     let granted = granted_in store in
     List.iter print_diagnostic warnings;
-    if print_sigs then
+    (* generated D36 accessors are boilerplate: listed nowhere, like the printer *)
+    if print_sigs && not (Surface_lower.is_generated_accessor top) then
       List.iter
         (fun (n, s) ->
           let tag =

@@ -19,9 +19,10 @@ The SX.23 successor overlay additionally ships D76 direct named calls; its
 separate [decision](../named-call-arguments/DECISION.md) and
 [evidence](../named-call-arguments/EVIDENCE.md) are authoritative for that
 post-manifest boundary.
-That completion does not promote partial D36, resource-scoped rows, or the
-separately integrated affine-checker/stdlib work into this surface claim and
-does not establish a freeze for the entire surface syntax.
+That completion does not promote resource-scoped rows or the separately
+integrated affine-checker/stdlib work into this surface claim and does not
+establish a freeze for the entire surface syntax. D36 completed separately in
+SX.27, at its own acceptance gate.
 
 Bootstrap `.jqd` remains permanently supported as the kernel/debug format of
 record, quote-literal notation, and a test and tooling carrier. It is not
@@ -56,7 +57,7 @@ Allowed decision statuses at this gate are `shipped`, `partial`, and
 |---|---|---|---|
 | D34 | shipped | [scaffold](../../../test/test_surface_scaffold.ml), [patterns](../../../test/test_surface_patterns.ml), and [twins](../../../test/test_surface_twins.ml) pin shared case projection and escapes. | none |
 | D35 | shipped | [handlers and quote](../../../test/test_surface_handlers_quote.ml) and [printing](../../../test/test_surface_print.ml) pin atomic handler bodies and mandatory blocks for non-atomic bodies. | none |
-| D36 | partial | The labeled-field declaration portion shipped in SS.8. SX.24 now ships partial `Ctor(label: pattern, ...)` matching, with [pattern](../../../test/test_surface_patterns.ml), [trivia](../../../test/test_surface_trivia.ml), and [CLI](../../../test/cli/surface.t) evidence for positional lowering, identity, checking, and execution. `pair.left` remains absent with E0301; generated accessors and their broader cross-constructor declaration validation remain deliberate follow-ups. | [D36 accessor acceptance criteria](FOLLOWUPS.md#d36-generated-constructor-accessors) |
+| D36 | shipped | Labeled-field declarations shipped in SS.8, partial `Ctor(label: pattern, ...)` matching in SX.24, and generated accessors with declaration-time label validation in SX.27, with [declaration](../../../test/test_surface_decls.ml), [pattern](../../../test/test_surface_patterns.ml), [trivia](../../../test/test_surface_trivia.ml), and [CLI](../../../test/cli/surface.t) evidence for lowering, identity, checking, execution, and native parity. SX.27 generates one pure accessor per label that every constructor carries, so `pair.left(Pair(1, 2))` prints `1`; a label carried by only some constructors keeps its pattern and construction uses without an accessor. | [D36 accessor acceptance criteria](FOLLOWUPS.md#d36-generated-constructor-accessors) |
 | D37 | shipped | [lexer tests](../../../test/test_surface_lex.ml) and [parser tests](../../../test/test_surface_parse.ml) pin dotted names as atomic and preserve namespace puns. | none |
 | D38 | shipped | SS.22 ships a new callable variadic `text.join` object with an unbounded language/interpreter contract and strict argument evidence in [prelude tests](../../../test/test_prelude.ml), [CLI/native/ASAN boundary evidence](../../../test/cli/ss22.t), and [executable stdlib documentation](../../stdlib.md). Deprecated migration-only `text.join-list` preserves the pre-SS.22 list-plus-separator object hash-for-hash. Native v1 variadic parity is limited to 0-8 arguments; 9 is E1101 under its global ABI ceiling. Successor SX.26 adds marked syntax as a local lowering to this unchanged object. | none |
 | D39 | shipped | SS.22 ships all four `int.*` and `real.*` predicates plus dotted real arithmetic, with NaN and boundary parity in [the native gauntlet](../../../test/native-gauntlet/g35-stdlib-ss22.jqd). The obsolete hyphenated public names are removed without aliases, while the five historical marker IDs and semantic hashes remain stable; the [identity map](../../../test/test_prelude.ml) and [hash-reference CLI/native test](../../../test/cli/ss22.t) prove old references still load, typecheck, interpret, and native-compile. | none |
@@ -152,14 +153,14 @@ SS.21 and SS.22 timestamps and observed-command table below.
 ## Deferred Scope
 
 D38 and D39 completed as SS.22 standard-library work without grammar changes.
-D36 generated accessors and label validation remain partial after SS.8 and the
-completed SS.0-SS.22 arc. D41-D42 operation modes now occupy their reviewed
+D36 generated accessors and declaration-time label validation completed in
+SX.27, after SS.8 and the SS.0-SS.22 arc. D41-D42 operation modes now occupy their reviewed
 grammar headroom. SX.23 later spends the reviewed D76 call/parameter-label
 syntax without implementing D36 accessors or default/higher-order named calls;
 resource-scoped row display remains unscheduled with no
 syntax, semantics, or compatibility promise.
 Their separate acceptance gates are the
-[D36 accessor criteria](FOLLOWUPS.md#d36-generated-constructor-accessors),
+[D36 accessor criteria](FOLLOWUPS.md#d36-generated-constructor-accessors) (met by SX.27),
 [Tier-F linearity criteria](FOLLOWUPS.md#tier-f-linearity-modes) and
 [Tier-F resource-row criteria](FOLLOWUPS.md#tier-f-resource-scoped-rows).
 
@@ -229,7 +230,7 @@ claim.
 
 Successor milestone **EL.4, explicit surface operation modes**, is complete at
 the D41-D42 evidence boundary. This updates the grammar and evidence; it does
-not freeze the surface or claim production stability. D36 accessor generation
-and label validation plus resource-scoped-row headroom retain their own later
-acceptance gates. SX.23 is separately complete at the D76 named-call evidence
+not freeze the surface or claim production stability. Resource-scoped-row headroom
+retains its own later acceptance gate; D36 accessor generation and label
+validation completed in SX.27. SX.23 is separately complete at the D76 named-call evidence
 boundary linked above.

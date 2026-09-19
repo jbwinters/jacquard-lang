@@ -167,7 +167,7 @@ module Jacquard
   opclause = (hash op, pat* params, name resume, expr body)
   binding  = (name id, type? annotation, expr value)
   conspec  = (name id, field* fields)
-  field    = (name? label, type ty)                        -- schema labels hash; no generated accessors today
+  field    = (name? label, type ty)                        -- schema labels hash; surface lowering generates accessors
   opmode   = Multi | Once
   opspec   = (name id, opmode mode, type* params, type result)
   row      = (hash* effects, name? var)                    -- effect set + optional row variable
@@ -283,8 +283,10 @@ for reading.
 Records beyond labeled constructor fields (true row-typed records) are deferred.
 The shipped `.jac` surface preserves labels as constructor schema: labels print
 and contribute to canonical identity, support direct named construction and
-partial labeled patterns, but do not generate accessor functions. True records
-and generated accessors remain separately gated follow-ups.
+partial labeled patterns, and (SX.27) generate an ordinary pure `DefTerm`
+accessor `<type-kebab>.<label>` for each label every constructor carries. The
+accessors are ordinary kernel declarations, so the kernel itself is unchanged;
+true row-typed records remain a separately gated follow-up.
 
 ### 5.4 Declarations
 

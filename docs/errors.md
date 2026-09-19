@@ -89,7 +89,7 @@ malformed source, path, or host-message byte in a string field is replaced with 
 | E0305 | labeled constructor pattern selects an unknown field | `Snapshot(missing: x)` |
 | E0306 | labeled constructor pattern selects one field more than once | `Snapshot(error: x, error: y)` |
 | E0307 | constructor has no usable field-label schema for a labeled pattern | `Pair(left: x)` when `Pair` has only positional fields |
-| E0308 | constructor declaration has ambiguous duplicate labels at labeled-pattern use | `Pair(left: x)` when `left` is declared twice |
+| E0308 | constructor declaration has ambiguous duplicate labels at labeled-pattern use; surface declarations now refuse the duplicate itself (E1239), so this reaches only bootstrap declarations | `Pair(left: x)` when `left` is declared twice in `.jqd` |
 | E0309 | callee has no usable explicit named-call ABI | `local(value: 1)` for a local function, or `plain(value: 1)` for an unlabeled top-level term |
 | E0310 | named call selects an unknown label | `resize(image: img, size: 2)` when the declared label is `scale` |
 | E0311 | named call repeats or overlaps one argument slot | `choose(left: 1, left: 2)`, or `choose(1, left: 2)` when `choose(left: x, right: y)` declares `left` first |
@@ -244,6 +244,9 @@ also emits E0817; consuming the captured resumption twice emits E0816.
 | E1236 | missing, duplicated, or conflicting surface operation mode; an omitted mode includes migration guidance | `effect E where { op : () -> T }` |
 | E1237 | labeled constructor pattern appears inside quoted surface syntax | `quote { match packet { \| Packet(right: value) -> value } }` |
 | E1238 | named call appears anywhere inside quoted surface syntax, including a live unquote | `quote { unquote(choose(left: 1)) }` |
+| E1239 | a constructor declares the same field label twice | `type Pair = \| Pair(left: Int, left: Text)` |
+| E1240 | a field label has different types in different constructors of one type | `type Key = \| Numbered(id: Int) \| Named(id: Text)` |
+| E1241 | a generated field accessor `<type>.<label>` collides with a term or effect operation the same file declares | `type Pair = \| Pair(left: Int)` beside `pair.left(p) = 0` |
 
 ### Surface warnings (W12xx)
 

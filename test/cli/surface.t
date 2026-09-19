@@ -31,18 +31,76 @@ and after expressions remain available to the following items. Stdout and exit a
   42
   exit:0
 
-D36 labeled fields retain syntax and printing, but accessor definitions are not generated at this
-gate. The exact current evidence is E0301 and exit 1; the durable acceptance target is in FOLLOWUPS.
+D36 labeled fields generate one ordinary pure accessor, `<type-kebab>.<label>`, for each label that
+every constructor of the type carries (SX.27). The accessor runs in both engines, while formatting
+and signature listings show only the owning type, never the generated boilerplate.
 
-  $ cat > no-generated-accessor.jac <<'EOF'
+  $ cat > generated-accessor.jac <<'EOF'
   > type Pair = | Pair(left: Int, right: Int)
   > pair.left(Pair(1, 2))
+  > pair.right(Pair(1, 2))
   > EOF
-  $ jac run no-generated-accessor.jac > accessor.out 2>&1; status=$?; cat accessor.out; echo "exit:$status"
-  no-generated-accessor.jac:2:1-10: error[E0301]: This reference names something that is not in scope.
-    Cause: No name named `pair.left` is in scope.
-    Next step: Correct the reference to an in-scope name or declaration.
+  $ jac run generated-accessor.jac > accessor.out 2>&1; status=$?; cat accessor.out; echo "exit:$status"
+  1
+  2
+  exit:0
+  $ jac check --print-sigs generated-accessor.jac
+  _ : Int
+  _ : Int
+  $ jac build generated-accessor.jac -o generated-accessor-native >/dev/null
+  $ ./generated-accessor-native
+  1
+  2
+  $ jac fmt generated-accessor.jac
+  type Pair = | Pair(left: Int, right: Int)
+  
+  pair.left(Pair(1, 2))
+  
+  pair.right(Pair(1, 2))
+
+A label that only some constructors carry keeps its pattern and construction uses but has no
+accessor, since a pure accessor must answer for every constructor.
+
+  $ cat > partial-label.jac <<'EOF'
+  > type Reply = | Accepted(value: Int) | Refused(reason: Text)
+  > reply.value(Accepted(1))
+  > EOF
+  $ jac check partial-label.jac > partial.out 2>&1; status=$?; grep -o 'error\[E0301\]' partial.out; echo "exit:$status"
+  error[E0301]
   exit:1
+
+Declarations are validated when they are lowered: a label repeated within one constructor (E1239),
+a label with different field types across constructors (E1240), and an accessor name the file also
+declares as a term or an operation (E1241) are refused at the label.
+
+  $ printf 'type Pair = | Pair(left: Int, left: Text)\n' > duplicate-label.jac
+  $ jac check duplicate-label.jac
+  duplicate-label.jac:1:31-41: error[E1239]: A constructor declares the same field label twice.
+    Cause: constructor `Pair` of type `Pair` declares the field label `left` twice
+    Next step: Give each field of the constructor a distinct label.
+  [1]
+  $ printf 'type Key = | Numbered(id: Int) | Named(id: Text)\n' > inconsistent-label.jac
+  $ jac check inconsistent-label.jac
+  inconsistent-label.jac:1:40-48: error[E1240]: A field label has different types in different constructors of one type.
+    Cause: field label `id` of type `Key` has one type in constructor `Numbered` and a different type in constructor `Named`
+    Next step: Use one field type for the label across the type's constructors, or rename one of the labels.
+  [1]
+  $ printf 'type Pair = | Pair(left: Int, right: Int)\npair.left(pair) = 0\n' > colliding-label.jac
+  $ jac check colliding-label.jac
+  colliding-label.jac:1:20-29: error[E1241]: A generated field accessor collides with a name this file declares.
+    Cause: the accessor `pair.left` generated for field label `left` of type `Pair` collides with `pair.left`, which this file declares explicitly
+    Next step: Rename that declaration or the field label; the accessor is generated from the label.
+  [1]
+
+The editor recovery report of a damaged file applies the same rules: a collision is still E1241,
+and a use of an accessor whose declaration failed is a silent consequence, not a second E0301.
+
+  $ printf 'type Pair = | Pair(left: Int, right: Int)\npair.left(p) = 0\nx = (\n' > damaged-collision.jac
+  $ jac check damaged-collision.jac 2>&1 | grep -o 'error\[E1241\]\|error\[E0301\]'
+  error[E1241]
+  $ printf 'type Pair = | Pair(left: Int, left: Int)\nuse = pair.left(Pair(1, 2))\nx = (\n' > damaged-duplicate.jac
+  $ jac check damaged-duplicate.jac 2>&1 | grep -o 'error\[E1239\]\|error\[E0301\]'
+  error[E1239]
 
 SX.24 labeled constructor patterns select only the fields a branch needs. Selection order is free,
 omitted labeled and unlabeled fields become positional wildcards before checking, and the existing
@@ -103,8 +161,9 @@ same as an explicit positional pattern with wildcards.
   $ cmp labeled.hash positional.hash && echo identical
   identical
 
-Unknown selections, duplicate selections, constructors without labels, and ambiguous declaration
-labels fail at the constructor-pattern boundary. Positional and labeled fields cannot be mixed.
+Unknown selections, duplicate selections, and constructors without labels fail at the
+constructor-pattern boundary; a surface declaration with an ambiguous label is already refused where
+it is declared (E1239). Positional and labeled fields cannot be mixed.
 
   $ cat > labeled-invalid.jac <<'EOF'
   > type Snapshot = | Snapshot(id: Int, error: Int)
@@ -128,8 +187,8 @@ labels fail at the constructor-pattern boundary. Positional and labeled fields c
   > type Ambiguous = | Ambiguous(value: Int, value: Int)
   > match Ambiguous(1, 2) { | Ambiguous(value: x) -> x }
   > EOF
-  $ jac check labeled-ambiguous.jac > ambiguous.out 2>&1; status=$?; grep -o 'error\[E0308\]' ambiguous.out; echo "exit:$status"
-  error[E0308]
+  $ jac check labeled-ambiguous.jac > ambiguous.out 2>&1; status=$?; grep -o 'error\[E1239\]' ambiguous.out; echo "exit:$status"
+  error[E1239]
   exit:1
   $ sed 's/missing: x/x, error: y/' labeled-invalid.jac > labeled-mixed.jac
   $ jac check labeled-mixed.jac > mixed.out 2>&1; status=$?; grep -o 'error\[E1220\]' mixed.out | head -1; echo "exit:$status"

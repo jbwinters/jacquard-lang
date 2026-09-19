@@ -3,29 +3,66 @@
 This tracked ledger records scope deliberately excluded from SS.21. Successor
 milestone **SS.22, prelude naming and text building**, completed D38 and D39
 without changing the surface grammar. The SS.0-SS.22 implementation arc is
-complete. SX.24 subsequently shipped labeled partial patterns, but D36 accessor
-generation and its broader declaration validation remain deliberately partial,
-and Tier-F remains parked. SX.23 separately shipped direct named calls with
+complete. SX.24 subsequently shipped labeled partial patterns, and SX.27
+completed D36 with generated accessors and declaration-time label validation;
+Tier-F remains parked. SX.23 separately shipped direct named calls with
 explicit term/operation labels and constructor field-label reuse; it did not
 ship accessors, defaults, label puns, or named local/higher-order calls. None of
 this ledger establishes stability or a freeze for the whole surface syntax.
 
 ## D36 Generated Constructor Accessors
 
-D36 is partial. Labeled constructor field syntax, field metadata and trivia,
-lowering, and canonical printing shipped in SS.8. SX.24 later shipped partial
-labeled patterns and rejects duplicate declaration labels when their ambiguity
-is exercised by such a pattern; it does not turn that use-site check into a
-global declaration rule. Surface lowering still does not emit generated
-accessor `DefTerm` declarations. Duplicate labels remain accepted at
-declaration time, and the draft's cross-constructor label consistency and
-explicit-term collision rules are not enforced. These omissions are the
-reviewed partial boundary, not accidental claims that accessors shipped.
+D36 completed in SX.27. Labeled constructor field syntax, field metadata and
+trivia, lowering, and canonical printing shipped in SS.8, and SX.24 shipped
+partial labeled patterns. SX.27 adds the rest: surface lowering follows each
+labeled type declaration with one ordinary pure `DefTerm` accessor
+`<type-kebab>.<label>` per label that every constructor carries, and it
+validates labels when the type is declared. A label repeated within one
+constructor is E1239, a label whose field type differs between constructors is
+E1240, and an accessor whose name an explicit term of the same file defines is
+E1241, each reported at the label.
 
-Current non-generation evidence is pinned in `test/cli/surface.t`: declaring
-`type Pair = | Pair(left: Int, right: Int)` and evaluating
-`pair.left(Pair(1, 2))` exits 1 with E0301 naming the unknown `pair.left` term.
-This is evidence of the missing feature, not its implementation contract.
+Eligibility decision (SX.27). The draft rule rejected a label missing from any
+constructor. SX.27 instead accepts such a label and generates no accessor for
+it: a pure accessor must answer for every constructor, and seventeen accepted
+sum types in the maintained applications, case studies, and documentation
+fixtures deliberately label only some constructors (for example the release-risk
+case study's `Decision`, whose `Canary(percent: Int)` and `Hold(reason: Text)`
+sit beside a bare `Ship`). Those labels keep their partial-pattern and named-construction
+uses. Duplicate and type-inconsistent labels, which no maintained source
+declares, are rejected outright. Calling `<type>.<label>` for an ineligible
+label remains the ordinary E0301 unknown name.
+
+Evidence: `test/cli/surface.t` runs `pair.left(Pair(1, 2))` and prints `1` in
+the interpreter and the native binary, and pins the exact E1239, E1240, and
+E1241 spans. `test/test_surface_decls.ml` shows that generated accessors equal
+explicit kernel twins in resolved form and canonical identity, and that
+ineligible labels generate nothing. The surface printer suppresses accessor
+declarations and `check --print-sigs` omits their signatures, so `fmt`,
+rendered output, and signature listings show only the owning type.
+
+Migration. Existing labeled declarations keep their meaning; they gain
+accessors. A surface declaration that repeats a label (formerly refused only
+when a labeled pattern used the ambiguous label, E0308) is now refused where
+it is declared. A file that hand-writes a selector under the generated name is
+refused with E1241 and drops the hand-written copy: the only maintained case,
+the night-shift case study's `reading.ms`, was exactly the generated accessor.
+A raw bootstrap `defterm`, and an effect operation the file declares, both
+count as explicit; a definition in another file or already in the store is
+shadowed by the accessor exactly as a hand-written definition of that name
+would shadow it, and is not refused. Only a surface `type` declaration
+generates accessors: a raw bootstrap `deftype` inside a `.jac` file keeps
+the bootstrap carrier's meaning, with neither generation nor the label
+rules. An escaped type name that cannot prefix a dotted name (one ending in
+`?` or `!`) generates no accessors.
+
+Accessors are ordinary store terms. Only presentation hides them (the printer,
+`fmt`, and `--print-sigs`); `hash` lists their identities after the type,
+`diff` reports a renamed label as a removed and an added accessor (a real
+change of the type's API), and `test --coverage` counts them like any term.
+E1240 compares field types before names resolve: effect rows compare as sets,
+and a field type that mentions a hash reference is left to the checker, which
+types the accessor's clauses against each other.
 
 **Acceptance contract:**
 
@@ -36,7 +73,7 @@ This is evidence of the missing feature, not its implementation contract.
 | provenance | each accessor is marked `surface-generated` |
 | execution | `pair.left(Pair(1, 2))` prints exactly `1` and exits 0 instead of E0301/exit 1 |
 | display | the printer emits the owning labeled type exactly once and suppresses generated accessor bodies |
-| validation | reject a label missing from any constructor, duplicated within a constructor, inconsistent in type across constructors, or colliding with an explicit term |
+| validation | reject a label duplicated within a constructor, inconsistent in type across constructors, or colliding with an explicit term; a label missing from some constructor is accepted without an accessor |
 | diagnostics | each validation failure has a dedicated diagnostic code and exact span tests |
 | preservation | bootstrap identity, full tests, doctests, twins, and demos remain green |
 | excluded | shipped labeled partial patterns are independent of this accessor gate |

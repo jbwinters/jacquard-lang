@@ -35,7 +35,15 @@ let hash top =
   | Error diagnostics -> fail_diags "hash" diagnostics
 
 let check_equivalent label ?(names = Resolve.empty_names) surface_source bootstrap_source =
-  let actual = List.map (resolve names) (lower surface_source) in
+  (* generated D36 accessors have their own kernel-twin test; these twins omit them *)
+  let actual =
+    lower surface_source
+    |> List.filter (function
+      | Kernel.Decl declaration ->
+          Meta.surface_generated declaration.meta <> Some "constructor-accessor"
+      | Kernel.Expr _ -> true)
+    |> List.map (resolve names)
+  in
   let expected = List.map (resolve names) (bootstrap bootstrap_source) in
   Alcotest.(check int) (label ^ " top count") (List.length expected) (List.length actual);
   List.iter2
@@ -49,6 +57,18 @@ let check_equivalent label ?(names = Resolve.empty_names) surface_source bootstr
 let only_decl = function
   | [ Kernel.Decl declaration ] -> declaration
   | tops -> Alcotest.failf "expected one declaration, got %d tops" (List.length tops)
+
+let is_generated_accessor = function
+  | Kernel.Decl declaration -> Meta.surface_generated declaration.meta = Some "constructor-accessor"
+  | Kernel.Expr _ -> false
+
+(* A labeled type lowers to its declaration followed by its generated D36 accessors (SX.27). *)
+let declared_type = function
+  | Kernel.Decl declaration :: accessors when List.for_all is_generated_accessor accessors ->
+      declaration
+  | tops ->
+      Alcotest.failf "expected one type declaration and its accessors, got %d tops"
+        (List.length tops)
 
 let term_groups tops =
   List.map
@@ -222,11 +242,11 @@ let test_duplicate_definition_names () =
 let test_type_declarations () =
   let no_initial_bar = only_decl (lower "type Unitish = Unitish\n") in
   let positional = only_decl (lower "type Pair a b = | Pair a b\n") in
-  let labeled = only_decl (lower "type Fleet = | MkFleet(inv: SvcMood, pay: SvcMood)\n") in
+  let labeled = declared_type (lower "type Fleet = | MkFleet(inv: SvcMood, pay: SvcMood)\n") in
   let labeled_trailing =
-    only_decl (lower "type Fleet = | MkFleet(inv: SvcMood, pay: SvcMood,)\n")
+    declared_type (lower "type Fleet = | MkFleet(inv: SvcMood, pay: SvcMood,)\n")
   in
-  let mixed = only_decl (lower "type Mixed = | MkMixed(left: SvcMood, SvcMood)\n") in
+  let mixed = declared_type (lower "type Mixed = | MkMixed(left: SvcMood, SvcMood)\n") in
   let labels declaration =
     match declaration.Kernel.it with
     | Kernel.DefType { cons = [ { fields; _ } ]; _ } ->
@@ -241,7 +261,7 @@ let test_type_declarations () =
     "labeled fields trailing comma" (labels labeled) (labels labeled_trailing);
   Alcotest.(check (list (option string))) "mixed fields" [ Some "left"; None ] (labels mixed);
   (match
-     (only_decl (lower "type Wrapped a = | MkWrapped(value:\n  List\n    a\n)\n")).Kernel.it
+     (declared_type (lower "type Wrapped a = | MkWrapped(value:\n  List\n    a\n)\n")).Kernel.it
    with
   | Kernel.DefType
       {
@@ -447,7 +467,7 @@ let test_spans () =
         (source_slice source declaration.meta)
   | _ -> Alcotest.fail "span fixture was not one term declaration");
   let type_source = "type Fleet = | MkFleet(inv: SvcMood, SvcMood)\n" in
-  let type_decl = only_decl (lower type_source) in
+  let type_decl = declared_type (lower type_source) in
   (match type_decl.Kernel.it with
   | Kernel.DefType { cons = [ { fields = [ labeled; positional ]; _ } ]; _ } ->
       Alcotest.(check string)
@@ -498,8 +518,149 @@ let test_bootstrap_reader_unchanged () =
       | _ -> Alcotest.fail "bootstrap declaration validation changed")
   | Error diagnostics -> fail_diags "bootstrap reader regression" diagnostics
 
+(* --- SX.27: D36 generated accessors and declaration-time label validation --- *)
+
+let accessor_names tops =
+  List.filter_map
+    (function
+      | Kernel.Decl { Kernel.it = Kernel.DefTerm [ binding ]; _ } as top
+        when is_generated_accessor top ->
+          Some binding.Kernel.bname
+      | _ -> None)
+    tops
+
+(* Resolve and install tops in order in a fresh store, returning each top's canonical hash. *)
+let installed_hashes tops =
+  let root = Filename.temp_dir "jacquard-accessor-" ".store" in
+  match Store.open_store root with
+  | Error diagnostics -> fail_diags "open store" diagnostics
+  | Ok store ->
+      List.map
+        (fun top ->
+          let resolved = resolve (Store.names_view store) top in
+          (match resolved with
+          | Kernel.Decl declaration -> (
+              match Store.put_decl store declaration with
+              | Ok _ -> ()
+              | Error diagnostics -> fail_diags "install" diagnostics)
+          | Kernel.Expr _ -> ());
+          (resolved, hash resolved))
+        tops
+
+let test_generated_accessors_match_kernel_twins () =
+  let surface = lower "type Pair a b = | Pair(left: a, right: b)\n" in
+  Alcotest.(check (list string))
+    "one accessor per label" [ "pair.left"; "pair.right" ] (accessor_names surface);
+  let twin =
+    bootstrap
+      "(deftype pair ((tvar a) (tvar b)) (con pair (field left (tvar a)) (field right (tvar b))))\n\
+       (defterm ((binding pair.left () (lam ((pvar value)) (match (var value) (clause (pcon pair \
+       (pvar field) (pwild)) (var field)))))))\n\
+       (defterm ((binding pair.right () (lam ((pvar value)) (match (var value) (clause (pcon pair \
+       (pwild) (pvar field)) (var field)))))))\n"
+  in
+  List.iter2
+    (fun (actual, actual_hash) (expected, expected_hash) ->
+      Alcotest.(check bool)
+        "resolved accessor AST" true
+        (Form.equal_ignoring_meta (Kernel.to_form expected) (Kernel.to_form actual));
+      Alcotest.(check string)
+        "canonical identity" (Hash.to_hex expected_hash) (Hash.to_hex actual_hash))
+    (installed_hashes surface) (installed_hashes twin);
+  (* every constructor gets a clause, so the accessor is total over a sum type *)
+  let shapes = lower "type Shape = | Circle(id: Int, radius: Int) | Square(side: Int, id: Int)\n" in
+  Alcotest.(check (list string))
+    "only uniformly carried labels" [ "shape.id" ] (accessor_names shapes);
+  match List.rev shapes with
+  | Kernel.Decl { Kernel.it = Kernel.DefTerm [ { value; _ } ]; _ } :: _ -> (
+      match value.Kernel.it with
+      | Kernel.Lam (_, { Kernel.it = Kernel.Match (_, [ circle; square ]); _ }) -> (
+          match (circle.Kernel.cpat.it, square.Kernel.cpat.it) with
+          | ( Kernel.PCon
+                (_, [ { Kernel.it = Kernel.PVar "field"; _ }; { Kernel.it = Kernel.PWild; _ } ]),
+              Kernel.PCon
+                (_, [ { Kernel.it = Kernel.PWild; _ }; { Kernel.it = Kernel.PVar "field"; _ } ]) )
+            ->
+              ()
+          | _ -> Alcotest.fail "accessor clauses select the wrong positions")
+      | _ -> Alcotest.fail "accessor is not a one-parameter match")
+  | _ -> Alcotest.fail "the accessor does not follow its type"
+
+let test_ineligible_labels_generate_nothing () =
+  List.iter
+    (fun (label, source) -> Alcotest.(check (list string)) label [] (accessor_names (lower source)))
+    [
+      ("positional fields", "type Pair a b = | Pair a b\n");
+      ("label on some constructors", "type Reply = | Accepted(value: Int) | Refused(reason: Text)\n");
+      ("label missing from one constructor", "type Tagged = | Tag(id: Int) | Untagged\n");
+      (* an escaped type name ending in `?` has no dotted namespace for an accessor *)
+      ("type name without a namespace", "type `type:ok?` = | Mk(x: Int)\n");
+    ];
+  (* generated accessors never reach the surface printer's output *)
+  match lower "type Pair = | Pair(left: Int, right: Int)\n" with
+  | _ :: accessor :: _ -> (
+      match Surface_print.print_top accessor with
+      | Ok printed -> Alcotest.(check string) "accessor prints nothing" "" printed
+      | Error diagnostics -> fail_diags "print accessor" diagnostics)
+  | _ -> Alcotest.fail "no accessor was generated"
+
+let expect_lowering_error label ~code ~span source =
+  match Surface_lower.lower_tops (parse source) with
+  | Ok _ -> Alcotest.failf "%s: lowering accepted the declaration" label
+  | Error [ diagnostic ] ->
+      Alcotest.(check string) (label ^ " code") code (Diag.code_or_uncoded diagnostic);
+      let rendered =
+        match Diag.span diagnostic with
+        | Some span ->
+            String.sub source span.Span.start_pos.offset
+              (span.end_pos.offset - span.start_pos.offset)
+        | None -> "<no span>"
+      in
+      Alcotest.(check string) (label ^ " span") span rendered
+  | Error diagnostics -> fail_diags (label ^ ": expected one diagnostic") diagnostics
+
+let test_label_validation () =
+  expect_lowering_error "duplicate label" ~code:"E1239" ~span:"left: Text"
+    "type Pair = | Pair(left: Int, left: Text)\n";
+  expect_lowering_error "inconsistent label type" ~code:"E1240" ~span:"id: Text"
+    "type Key = | Numbered(id: Int) | Named(id: Text)\n";
+  expect_lowering_error "collision with an explicit term" ~code:"E1241" ~span:"left: Int"
+    "pair.left(p) = 0\ntype Pair = | Pair(left: Int, right: Int)\n";
+  expect_lowering_error "collision with a later explicit term" ~code:"E1241" ~span:"right: Int"
+    "type Pair = | Pair(left: Int, right: Int)\npair.right(p) = 0\n";
+  expect_lowering_error "collision with a raw bootstrap term" ~code:"E1241" ~span:"left: Int"
+    "type Pair = | Pair(left: Int)\n\
+     jqd { (defterm ((binding pair.left () (lam ((pvar p)) (lit 0))))) }\n";
+  expect_lowering_error "collision with an operation of the file" ~code:"E1241" ~span:"left: Int"
+    "type Pair = | Pair(left: Int)\nonce effect Store where { pair.left : (Int) -> Int }\n";
+  (* a raw bootstrap declaration keeps the bootstrap carrier's meaning: no accessors, and the
+     label rules that generation depends on are not applied to it *)
+  Alcotest.(check (list string))
+    "raw bootstrap type" []
+    (accessor_names (lower "jqd { (deftype pair () (con pair (field left (tref int)))) }\n"));
+  (* types are compared before resolution only where resolution cannot make them equal *)
+  List.iter
+    (fun (label, source) ->
+      Alcotest.(check (list string)) label [ "same.f" ] (accessor_names (lower source)))
+    [
+      ( "effect rows compare as sets",
+        "type Same = | A(f: (Int) ->{Console, Abort} Int) | B(f: (Int) ->{Abort, Console} Int)\n" );
+      ( "hash references are left to the checker",
+        "type Same = | A(f: Int) | B(f: \
+         #907085f5670ab5835e5356feb10ae729496e3816b863ddbb21cfe289e7d34f0d:type)\n" );
+    ];
+  (* a same-typed label on some constructors only is valid and has no accessor *)
+  Alcotest.(check (list string))
+    "consistent partial label" []
+    (accessor_names (lower "type Key = | Numbered(id: Int, n: Int) | Other(id: Int) | Blank\n"))
+
 let suite =
   [
+    Alcotest.test_case "generated accessors match kernel twins" `Quick
+      test_generated_accessors_match_kernel_twins;
+    Alcotest.test_case "ineligible labels generate no accessor" `Quick
+      test_ineligible_labels_generate_nothing;
+    Alcotest.test_case "declaration-time label validation" `Quick test_label_validation;
     Alcotest.test_case "definition forms" `Quick test_definition_forms;
     Alcotest.test_case "signature adjacency" `Quick test_signature_adjacency;
     Alcotest.test_case "SCC grouping and resolution" `Quick test_scc_grouping_and_resolution;

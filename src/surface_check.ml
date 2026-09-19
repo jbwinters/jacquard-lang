@@ -614,6 +614,8 @@ let declared_names (top : Surface_ast.top) =
       :: List.map
            (fun (c : Surface_ast.constructor) -> (kernel c.Surface_ast.name, Resolve.KCon))
            constructors
+      (* D36 accessors fail with their declaration *)
+      @ List.map (fun accessor -> (accessor, Resolve.KTerm)) (Surface_lower.accessor_names top)
   | Surface_ast.EffectDecl { name; operations; _ } ->
       (kernel name, Resolve.KEffect)
       :: List.map (fun (o : Surface_ast.operation) -> (o.Surface_ast.name, Resolve.KOp)) operations
@@ -710,7 +712,8 @@ let analyze ~names ctx (recovered : Surface_ast.recovered) : report =
             | Error errors -> failed errors
             | Ok checked -> (
                 diagnostics := !diagnostics @ checked.Check.warnings;
-                signatures := List.rev_append checked.names !signatures;
+                if not (Surface_lower.is_generated_accessor resolved) then
+                  signatures := List.rev_append checked.names !signatures;
                 match resolved with
                 | Kernel.Decl ({ Kernel.it = Kernel.DefType _ | Kernel.DefEffect _; _ } as decl)
                   -> (
@@ -765,14 +768,16 @@ let analyze ~names ctx (recovered : Surface_ast.recovered) : report =
                 | Kernel.Expr _ -> ())))
       tops
   in
+  (* accessor collisions (E1241) are judged against the whole file, not one chunk *)
+  let explicit_terms = Surface_lower.explicit_term_names recovered.items in
   List.iter
     (fun chunk ->
-      match Surface_lower.lower_tops chunk with
+      match Surface_lower.lower_tops ~explicit_terms chunk with
       | Ok tops -> check_lowered tops
       | Error _ when List.length chunk > 1 ->
           List.iter
             (fun unit ->
-              match Surface_lower.lower_tops unit with
+              match Surface_lower.lower_tops ~explicit_terms unit with
               | Ok tops -> check_lowered tops
               | Error errors ->
                   poison unit;
