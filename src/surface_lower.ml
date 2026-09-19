@@ -70,8 +70,8 @@ let diagnostic_spec = function
          labels." )
   | "E1241" ->
       ( Diag.Surface,
-        "A generated field accessor collides with an explicit term.",
-        "Rename the explicit term or the field label; the accessor is generated from the label." )
+        "A generated field accessor collides with a name this file declares.",
+        "Rename that declaration or the field label; the accessor is generated from the label." )
   | code -> raise (Diag.Bug_invalid_diagnostic ("unknown surface lowering code " ^ code))
 
 let diagnostic ?span ~code cause =

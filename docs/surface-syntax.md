@@ -789,7 +789,8 @@ carry `surface-generated` provenance, which canonical identity excludes;
 type, never the generated definitions. The accessors are ordinary terms
 otherwise: `hash` lists their identities after the type (so a label change
 shifts the indices of later tops), `diff` reports a renamed label as a removed
-and an added accessor, and coverage counts them. An accessor shadows a
+and an added accessor (and as a change to the type's other accessors, whose
+bodies match the re-hashed constructor), and coverage counts them. An accessor shadows a
 same-named prelude or store term just as a hand-written definition would. Code
 that already defines `<type>.<label>` by hand must drop that definition
 (E1241). The acceptance gate and the

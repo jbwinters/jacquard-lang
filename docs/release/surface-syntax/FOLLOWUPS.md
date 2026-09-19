@@ -51,9 +51,10 @@ A raw bootstrap `defterm`, and an effect operation the file declares, both
 count as explicit; a definition in another file or already in the store is
 shadowed by the accessor exactly as a hand-written definition of that name
 would shadow it, and is not refused. Only a surface `type` declaration
-generates accessors: a raw bootstrap `deftype` inside a `.jac` file keeps the
-bootstrap carrier's meaning, with neither generation nor the label rules. An escaped type name that cannot prefix a dotted name (one
-ending in `?` or `!`) generates no accessors.
+generates accessors: a raw bootstrap `deftype` inside a `.jac` file keeps
+the bootstrap carrier's meaning, with neither generation nor the label
+rules. An escaped type name that cannot prefix a dotted name (one ending in
+`?` or `!`) generates no accessors.
 
 Accessors are ordinary store terms. Only presentation hides them (the printer,
 `fmt`, and `--print-sigs`); `hash` lists their identities after the type,
