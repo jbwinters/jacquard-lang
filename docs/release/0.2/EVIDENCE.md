@@ -32,7 +32,7 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1023`
+- Alcotest/QCheck cases: `1033`
 - Cram transcript files: `62`
 - Documentation examples: `34` named examples across `8` documents
 
@@ -270,3 +270,25 @@ eight entry points now build natively; the dice coach and picnic planner had
 never done so before the APP.5 and APP.6 repairs. Warp suites remain
 interpreter-only, and the applications' own workarounds are kept as recorded.
 The current source inventory is `1023 / 62 / 34`.
+
+Program preparation is one shared frontend service (RF.1). `src/frontend.mli`
+now owns the parse, validate, resolve, and install walk that `check`, `hash`,
+`run`, `test`, `infer`, `dist-diff`, `tiers`, `export`, `build`, `diff`,
+`replay`, `store add`, and the governance commands used to repeat, each command keeping its
+documented order (for example `build` resolves the whole file before checking,
+and `test` refuses an expression before resolving it). `check` runs in a fresh
+scratch session and returns a sealed checked artifact binding the source digest,
+the prelude identity, each top's resolved form, identities, rendered schemes,
+effects, and call-label companions, and the identities the source depends on;
+a damaged surface file yields only the recovery report, and an artifact must
+verify against a store's persisted state (same prelude, dependencies and every
+declaration present, each name bound per kind to the checked identity, and the
+same call-label companions) before it is trusted there. `store add` installs as
+one store transaction; `run --store` still installs declarations as the program
+runs and keeps them after a later failure, as before. The host worker prepares
+its checker through the same service. Output, diagnostics, exit codes, hashes,
+and grants are unchanged. Because the artifact renders every scheme, the scheme
+printer's quantifier names past `z` now continue as `a1`, `a2`, ... like the
+body (27 or more type variables used to print the characters after `z` in the
+quantifier, and 160 or more crashed `check --print-sigs`). The ten `test/test_frontend.ml` cases bring the
+current source inventory to `1033 / 62 / 34`.

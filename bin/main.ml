@@ -137,6 +137,13 @@ let fresh_tmp_dir () =
   at_exit (fun () -> try rm_rf dir with Sys_error _ -> ());
   dir
 
+(* A read-only check owns a securely created, empty scratch store (Frontend.check refuses any
+   root already in use); cleanup is confined to this exact directory. *)
+let fresh_check_root () =
+  let dir = Filename.temp_dir ~perms:0o700 "jacquard-check-" ".store" in
+  at_exit (fun () -> try rm_rf dir with Sys_error _ -> ());
+  dir
+
 (* Governance analysis gets a securely created private directory rather than the historical
    predictable run-store path. Cleanup is constrained to this exact 0700 directory. *)
 let fresh_governance_analysis_dir () =
@@ -169,108 +176,26 @@ let prelude_dir_of = function
   | Some d -> d
   | None -> ( match Sys.getenv_opt "JACQUARD_PRELUDE" with Some d -> d | None -> "prelude")
 
-type syntax = Auto | Bootstrap | Surface
-type parsed_top = Bootstrap_form of Form.t | Surface_top of Kernel.top
-
-let syntax_for_file syntax file =
-  match syntax with
-  | Auto when Filename.check_suffix file ".jac" -> Surface
-  | Auto | Bootstrap -> Bootstrap
-  | Surface -> Surface
-
-let parse_tops ~syntax ~names ~file src =
-  match syntax_for_file syntax file with
-  | Auto -> assert false
-  | Bootstrap ->
-      Result.map
-        (fun forms -> (List.map (fun form -> Bootstrap_form form) forms, []))
-        (Reader.parse_string ~file src)
-  | Surface ->
-      let recovered = Surface_parse.recover_string ~file src in
-      Result.bind (Surface_parse.strict recovered) (fun parsed ->
-          let warnings = Surface_check.lint ~names parsed in
-          Result.map
-            (fun tops -> (List.map (fun top -> Surface_top top) tops, warnings))
-            (Surface_lower.lower_tops parsed))
-
-let validate_parsed_top = function
-  | Bootstrap_form form -> Kernel.of_form form
-  | Surface_top top -> Ok top
+type syntax = Frontend.syntax = Auto | Bootstrap | Surface
 
 let print_warnings warnings = List.iter print_diagnostic warnings
-
-(** [resolve_source_tops] parses, surface-lowers when selected, validates, and resolves a whole
-    source artifact in order. Declarations are installed in [store] as they are encountered so later
-    tops see exactly the same name context as [check] and [hash]. Parse, validation, resolution, and
-    store failures are returned without producing a partial result. *)
-let resolve_source_tops ~syntax store ~file src =
-  match parse_tops ~syntax ~names:(Store.names_view store) ~file src with
-  | Error _ as error -> error
-  | Ok (parsed, surface_warnings) ->
-      let rec go resolved warnings = function
-        | [] -> Ok (List.rev resolved, surface_warnings @ List.rev warnings)
-        | parsed_top :: rest -> (
-            match validate_parsed_top parsed_top with
-            | Error _ as error -> error
-            | Ok top -> (
-                match Resolve.resolve_w (Store.names_view store) top with
-                | Error _ as error -> error
-                | Ok (resolved_top, resolver_warnings) -> (
-                    match resolved_top with
-                    | Kernel.Expr _ ->
-                        go (resolved_top :: resolved)
-                          (List.rev_append resolver_warnings warnings)
-                          rest
-                    | Kernel.Decl declaration -> (
-                        match Store.put_decl store declaration with
-                        | Error _ as error -> error
-                        | Ok _ ->
-                            go (resolved_top :: resolved)
-                              (List.rev_append resolver_warnings warnings)
-                              rest))))
-      in
-      go [] [] parsed
 
 (* Open a store (persistent dir or fresh temp) and seed the prelude into it. *)
 let open_ctx ~prelude ~store_dir =
   let root = match store_dir with Some d -> d | None -> fresh_tmp_dir () in
-  match Store.open_store root with
-  | Error ds -> Error ds
-  | Ok store -> (
-      match Prelude.load ~dir:(prelude_dir_of prelude) store with
-      | Error ds -> Error ds
-      | Ok _ -> (
-          let ctx = Eval.make_ctx store in
-          match Prelude.wire_builtins ctx with Error ds -> Error ds | Ok () -> Ok (store, ctx)))
+  Frontend.open_session ~prelude_dir:(prelude_dir_of prelude) ~root
 
 (* Process a file's top-level forms in order: declarations go into the store; expressions
    are handed to [on_expr]. *)
 let process_forms ?origin ?(on_decl = fun _ _ -> ()) ?(emit_warnings = true) ~syntax store ~file src
     ~on_expr =
-  match parse_tops ~syntax ~names:(Store.names_view store) ~file src with
-  | Error ds -> Error ds
-  | Ok (tops, warnings) ->
-      if emit_warnings then print_warnings warnings;
-      let rec go = function
-        | [] -> Ok ()
-        | parsed :: rest -> (
-            match validate_parsed_top parsed with
-            | Error ds -> Error ds
-            | Ok (Kernel.Decl d) -> (
-                match Resolve.resolve_decl (Store.names_view store) d with
-                | Error ds -> Error ds
-                | Ok d -> (
-                    match Store.put_decl ?origin store d with
-                    | Error ds -> Error ds
-                    | Ok hashes ->
-                        on_decl d hashes;
-                        go rest))
-            | Ok (Kernel.Expr e) -> (
-                match Resolve.resolve_expr (Store.names_view store) e with
-                | Error ds -> Error ds
-                | Ok e -> ( match on_expr e with Ok () -> go rest | Error _ as err -> err)))
-      in
-      go tops
+  Frontend.walk ?origin ~syntax ~file store src
+    ~on_parsed:(fun warnings -> if emit_warnings then print_warnings warnings)
+    ~on_resolved:(fun top _resolver_warnings ->
+      match top with Kernel.Expr e -> on_expr e | Kernel.Decl _ -> Ok ())
+    ~on_installed:(fun d hashes ->
+      on_decl d hashes;
+      Ok ())
 
 (* --- run --- *)
 
@@ -306,15 +231,6 @@ let granted_hashes store allows =
     else []
   in
   explicit @ console_input @ scheduler_infrastructure
-
-let make_checker store =
-  match Check.make_ctx store with
-  | Error ds -> Error ds
-  | Ok cctx ->
-      (match Prelude.builtin_signatures store with
-      | Ok sigs -> Check.register_builtin_signatures cctx sigs
-      | Error _ -> ());
-      Ok cctx
 
 let schedule_file_error action path message =
   let prefix = path ^ ": " in
@@ -389,12 +305,12 @@ let run_cmd file allows prelude store_dir seed infer_cache origin dry_run schedu
             if not trace_enabled then Ok ()
             else
               Result.bind
-                (parse_tops ~syntax ~names:(Store.names_view store) ~file source)
+                (Frontend.parse_tops ~syntax ~names:(Store.names_view store) ~file source)
                 (fun (tops, _warnings) ->
                   let rec count_expressions count = function
                     | [] -> Ok count
                     | parsed :: rest ->
-                        Result.bind (validate_parsed_top parsed) (function
+                        Result.bind (Frontend.validate_parsed_top parsed) (function
                           | Kernel.Expr _ -> count_expressions (count + 1) rest
                           | Kernel.Decl _ -> count_expressions count rest)
                   in
@@ -437,7 +353,7 @@ let run_cmd file allows prelude store_dir seed infer_cache origin dry_run schedu
               match grants_result with
               | Error ds -> print_diags ds
               | Ok () -> (
-                  match make_checker store with
+                  match Frontend.make_checker store with
                   | Error ds -> print_diags ds
                   | Ok cctx -> (
                       let granted =
@@ -623,7 +539,7 @@ let relate_constituent ~file ~source ~authority ~prelude ~root_seed ~schedule_se
               match grants_result with
               | Error diagnostics -> Error (Relate_diagnostics diagnostics)
               | Ok () -> (
-                  match make_checker store with
+                  match Frontend.make_checker store with
                   | Error diagnostics -> Error (Relate_diagnostics diagnostics)
                   | Ok checker -> (
                       let recorder = Run_transcript.create () in
@@ -778,100 +694,65 @@ let relate_cmd file variation seed allows prelude syntax =
 (* --- check --- *)
 
 let check_cmd file prelude print_sigs manifest origin syntax =
-  match open_ctx ~prelude ~store_dir:None with
+  (* grants name prelude effects: they are looked up once, at the first checked top and so
+     before any of the file's declarations is installed *)
+  let granted = ref None in
+  let granted_in store =
+    Option.map
+      (fun names ->
+        match !granted with
+        | Some hashes -> hashes
+        | None ->
+            let hashes =
+              granted_hashes store (List.map String.trim (String.split_on_char ',' names))
+            in
+            granted := Some hashes;
+            hashes)
+      manifest
+  in
+  let on_checked cctx _top { Check.names; warnings; row } =
+    let store = Check.store cctx in
+    let granted = granted_in store in
+    List.iter print_diagnostic warnings;
+    if print_sigs then
+      List.iter
+        (fun (n, s) ->
+          let tag =
+            match origin with
+            | Some t -> " [" ^ t ^ "]" (* the decls being checked ARE stamped by us *)
+            | None -> (
+                match
+                  Option.bind (Store.lookup_name store n) (fun e ->
+                      Store.origin store e.Resolve.hash)
+                with
+                | Some t -> " [" ^ t ^ "]"
+                | None -> "")
+          in
+          Printf.printf "%s : %s%s\n" n (Check.show_scheme cctx s) tag)
+        names;
+    match (granted, row) with
+    | Some g, Some r -> (
+        match Check.manifest_errors cctx ~grantable:Prelude.grantable_names ~granted:g r with
+        | [] -> Ok ()
+        | ds -> Error ds)
+    | _ -> Ok ()
+  in
+  (* a read-only check in a fresh scratch session: decls go into that store so later forms
+     resolve; a damaged surface file gets the recovery report instead *)
+  match
+    Frontend.check ?origin ~prelude_dir:(prelude_dir_of prelude) ~root:(fresh_check_root ()) ~syntax
+      ~file (read_file file) ~on_parsed:print_warnings
+      ~on_resolved:(fun _top warnings -> List.iter print_diagnostic warnings)
+      ~on_checked
+  with
   | Error ds -> print_diags ds
-  | Ok (store, _ctx) -> (
-      match Check.make_ctx store with
-      | Error ds -> print_diags ds
-      | Ok cctx -> (
-          (match Prelude.builtin_signatures store with
-          | Ok sigs -> Check.register_builtin_signatures cctx sigs
-          | Error _ -> () (* prelude without builtins: marker bodies type as code *));
-          let granted =
-            match manifest with
-            | None -> None
-            | Some names ->
-                Some (granted_hashes store (List.map String.trim (String.split_on_char ',' names)))
-          in
-          let on_top top =
-            match Check.check_top cctx top with
-            | Error ds -> Error ds
-            | Ok { Check.names; warnings; row } -> (
-                List.iter print_diagnostic warnings;
-                if print_sigs then
-                  List.iter
-                    (fun (n, s) ->
-                      let tag =
-                        match origin with
-                        | Some t -> " [" ^ t ^ "]" (* the decls being checked ARE stamped by us *)
-                        | None -> (
-                            match
-                              Option.bind (Store.lookup_name store n) (fun e ->
-                                  Store.origin store e.Resolve.hash)
-                            with
-                            | Some t -> " [" ^ t ^ "]"
-                            | None -> "")
-                      in
-                      Printf.printf "%s : %s%s\n" n (Check.show_scheme cctx s) tag)
-                    names;
-                match (granted, row) with
-                | Some g, Some r -> (
-                    match
-                      Check.manifest_errors cctx ~grantable:Prelude.grantable_names ~granted:g r
-                    with
-                    | [] -> Ok ()
-                    | ds -> Error ds)
-                | _ -> Ok ())
-          in
-          let source = read_file file in
-          let malformed_surface_report =
-            match syntax_for_file syntax file with
-            | Surface -> (
-                let recovered = Surface_parse.recover_string ~file source in
-                match Surface_parse.strict recovered with
-                | Ok _ -> None
-                | Error _ ->
-                    Some (Surface_check.analyze ~names:(Store.names_view store) cctx recovered))
-            | Auto -> assert false
-            | Bootstrap -> None
-          in
-          (* process: decls also go into the store so later forms resolve *)
-          match malformed_surface_report with
-          | Some report ->
-              if print_sigs then
-                List.iter
-                  (fun (name, scheme) ->
-                    Printf.printf "%s : %s\n" name (Check.show_scheme cctx scheme))
-                  report.Surface_check.signatures;
-              print_diags report.diagnostics
-          | None -> (
-              match parse_tops ~syntax ~names:(Store.names_view store) ~file source with
-              | Error ds -> print_diags ds
-              | Ok (tops, surface_warnings) ->
-                  print_warnings surface_warnings;
-                  let rec go = function
-                    | [] ->
-                        if not print_sigs then print_endline "ok";
-                        ok
-                    | parsed :: rest -> (
-                        match validate_parsed_top parsed with
-                        | Error ds -> print_diags ds
-                        | Ok top -> (
-                            match Resolve.resolve_w (Store.names_view store) top with
-                            | Error ds -> print_diags ds
-                            | Ok (resolved, warns) -> (
-                                List.iter print_diagnostic warns;
-                                match on_top resolved with
-                                | Error ds -> print_diags ds
-                                | Ok () -> (
-                                    match resolved with
-                                    | Kernel.Decl d -> (
-                                        match Store.put_decl ?origin store d with
-                                        | Ok _ -> go rest
-                                        | Error ds -> print_diags ds)
-                                    | Kernel.Expr _ -> go rest))))
-                  in
-                  go tops)))
+  | Ok (Frontend.Recovered { diagnostics; signatures }) ->
+      if print_sigs then
+        List.iter (fun (name, scheme) -> Printf.printf "%s : %s\n" name scheme) signatures;
+      print_diags diagnostics
+  | Ok (Frontend.Checked _) ->
+      if not print_sigs then print_endline "ok";
+      ok
 
 (* --- hash --- *)
 
@@ -879,66 +760,46 @@ let hash_cmd file prelude syntax =
   match open_ctx ~prelude ~store_dir:None with
   | Error ds -> print_diags ds
   | Ok (store, _ctx) -> (
-      match parse_tops ~syntax ~names:(Store.names_view store) ~file (read_file file) with
+      let index = ref 0 in
+      let on_resolved resolved _warnings =
+        match Canon.hash_top resolved with
+        | Error ds -> Error ds
+        | Ok { Canon.decl_hash; named } ->
+            let idx = !index in
+            Printf.printf "%d %s\n" idx (Hash.to_hex decl_hash);
+            List.iter (fun (n, h) -> Printf.printf "%d:%s %s\n" idx n (Hash.to_hex h)) named;
+            incr index;
+            Ok ()
+      in
+      (* keep later forms resolvable against earlier decls; a refused install is skipped *)
+      match
+        Frontend.walk ~install:Frontend.Install_best_effort ~on_parsed:print_warnings ~on_resolved
+          ~syntax ~file store (read_file file)
+      with
       | Error ds -> print_diags ds
-      | Ok (tops, surface_warnings) ->
-          print_warnings surface_warnings;
-          let rec go idx = function
-            | [] -> ok
-            | parsed :: rest -> (
-                match validate_parsed_top parsed with
-                | Error ds -> print_diags ds
-                | Ok top -> (
-                    match Resolve.resolve (Store.names_view store) top with
-                    | Error ds -> print_diags ds
-                    | Ok resolved -> (
-                        match Canon.hash_top resolved with
-                        | Error ds -> print_diags ds
-                        | Ok { Canon.decl_hash; named } ->
-                            Printf.printf "%d %s\n" idx (Hash.to_hex decl_hash);
-                            List.iter
-                              (fun (n, h) -> Printf.printf "%d:%s %s\n" idx n (Hash.to_hex h))
-                              named;
-                            (* keep later forms resolvable against earlier decls *)
-                            (match resolved with
-                            | Kernel.Decl d -> ignore (Store.put_decl store d)
-                            | Kernel.Expr _ -> ());
-                            go (idx + 1) rest)))
-          in
-          go 0 tops)
+      | Ok () -> ok)
 
 (* --- infer (M3) --- *)
 
 (* Shared: load the file, put decls, return the resolved final expression (the model). *)
 let load_model store ~syntax ~file =
-  match parse_tops ~syntax ~names:(Store.names_view store) ~file (read_file file) with
+  let last = ref None in
+  match
+    Frontend.walk ~on_parsed:print_warnings ~syntax ~file store (read_file file)
+      ~on_resolved:(fun top _warnings ->
+        (match top with Kernel.Expr e -> last := Some e | Kernel.Decl _ -> ());
+        Ok ())
+  with
   | Error ds -> Error ds
-  | Ok (forms, warnings) ->
-      print_warnings warnings;
-      let rec go last = function
-        | [] -> (
-            match last with
-            | Some e -> Ok e
-            | None -> Error [ cli_diagnostic ~code:"E0903" "the model file has no expression" ])
-        | parsed :: rest -> (
-            match validate_parsed_top parsed with
-            | Error ds -> Error ds
-            | Ok (Kernel.Decl d) -> (
-                match Resolve.resolve_decl (Store.names_view store) d with
-                | Error ds -> Error ds
-                | Ok d -> (
-                    match Store.put_decl store d with Error ds -> Error ds | Ok _ -> go last rest))
-            | Ok (Kernel.Expr e) -> (
-                match Resolve.resolve_expr (Store.names_view store) e with
-                | Error ds -> Error ds
-                | Ok e -> go (Some e) rest))
-      in
-      go None forms
+  | Ok () -> (
+      match !last with
+      | Some e -> Ok e
+      | None -> Error [ cli_diagnostic ~code:"E0903" "the model file has no expression" ])
 
 let infer_check store model =
   (* the model must typecheck; its row may include dist (granted by this command) but
      nothing else ungranted *)
-  match make_checker store with
+  match Frontend.make_checker store with
   | Error ds -> Error ds
   | Ok cctx -> (
       match Check.check_top cctx (Kernel.Expr model) with
@@ -995,7 +856,7 @@ let infer_lw_cmd file prelude seed samples syntax =
 let fmt_cmd file write syntax =
   let src = read_file file in
   let formatted =
-    match syntax_for_file syntax file with
+    match Frontend.syntax_for_file syntax file with
     | Auto -> assert false
     | Bootstrap -> Result.map Printer.format_all (Reader.parse_string ~file src)
     | Surface ->
@@ -1145,74 +1006,44 @@ let dist_diff_cmd model_a model_b tolerance cache_dir no_cache sweep prelude =
       let posterior_of ?(label = None) file src_override =
         let src = match src_override with Some s -> s | None -> read_file file in
         ignore label;
-        match Reader.parse_string ~file src with
+        (* load decls, take the last expr as the model *)
+        let last = ref None in
+        match
+          Frontend.walk ~syntax:Bootstrap ~file store src ~on_resolved:(fun top _warnings ->
+              (match top with Kernel.Expr e -> last := Some e | Kernel.Decl _ -> ());
+              Ok ())
+        with
         | Error ds -> Error ds
-        | Ok forms -> (
-            (* load decls, take the last expr as the model *)
-            let rec go last = function
-              | [] -> (
-                  match last with
-                  | Some e -> Ok e
-                  | None ->
-                      Error [ cli_diagnostic ~code:"E0903" (file ^ " has no model expression") ])
-              | f :: rest -> (
-                  match Kernel.of_form f with
-                  | Error ds -> Error ds
-                  | Ok (Kernel.Decl d) -> (
-                      match Resolve.resolve_decl (Store.names_view store) d with
-                      | Error ds -> Error ds
-                      | Ok d -> (
-                          match Store.put_decl store d with
-                          | Error ds -> Error ds
-                          | Ok _ -> go last rest))
-                  | Ok (Kernel.Expr e) -> (
-                      match Resolve.resolve_expr (Store.names_view store) e with
-                      | Error ds -> Error ds
-                      | Ok e -> go (Some e) rest))
-            in
-            match go None forms with
-            | Error ds -> Error ds
-            | Ok e -> enumerate_rendered ctx store ~cache_dir e)
+        | Ok () -> (
+            match !last with
+            | None -> Error [ cli_diagnostic ~code:"E0903" (file ^ " has no model expression") ]
+            | Some e -> enumerate_rendered ctx store ~cache_dir e)
       in
       (* result types must AGREE before probabilities are comparable: check both
          models and compare their elaborated value types *)
       let model_type file src_override =
         let src = match src_override with Some s -> s | None -> read_file file in
-        match Reader.parse_string ~file src with
+        match Frontend.make_checker store with
         | Error ds -> Error ds
-        | Ok forms -> (
-            match make_checker store with
+        | Ok cctx -> (
+            (* the model's own declarations land so later forms (and the enumeration pass)
+               resolve them; the last expression's scheme is the model type *)
+            let last = ref None in
+            match
+              Frontend.walk ~syntax:Bootstrap ~file store src ~on_resolved:(fun top _warnings ->
+                  match Check.check_top cctx top with
+                  | Error ds -> Error ds
+                  | Ok { Check.names = [ ("_", sc) ]; _ } ->
+                      last := Some (Check.show_scheme cctx sc);
+                      Ok ()
+                  | Ok _ -> Ok ())
+            with
             | Error ds -> Error ds
-            | Ok cctx ->
-                let rec go last = function
-                  | [] -> (
-                      match last with
-                      | Some t -> Ok t
-                      | None ->
-                          Error [ cli_diagnostic ~code:"E0903" (file ^ " has no model expression") ]
-                      )
-                  | f :: rest -> (
-                      match Kernel.of_form f with
-                      | Error ds -> Error ds
-                      | Ok top -> (
-                          match Resolve.resolve (Store.names_view store) top with
-                          | Error ds -> Error ds
-                          | Ok resolved -> (
-                              match Check.check_top cctx resolved with
-                              | Error ds -> Error ds
-                              | Ok { Check.names = [ ("_", sc) ]; _ } ->
-                                  go (Some (Check.show_scheme cctx sc)) rest
-                              | Ok _ -> (
-                                  (* the model's own declarations must land so later
-                                     forms (and the enumeration pass) resolve them *)
-                                  match resolved with
-                                  | Kernel.Decl d -> (
-                                      match Store.put_decl store d with
-                                      | Error ds -> Error ds
-                                      | Ok _ -> go last rest)
-                                  | Kernel.Expr _ -> go last rest))))
-                in
-                go None forms)
+            | Ok () -> (
+                match !last with
+                | Some t -> Ok t
+                | None -> Error [ cli_diagnostic ~code:"E0903" (file ^ " has no model expression") ]
+                ))
       in
       let render_diff label pa pb =
         let mass table k = Option.value (List.assoc_opt k table) ~default:0.0 in
@@ -1517,37 +1348,21 @@ let test_cmd files allows prelude cache_dir no_cache coverage seed samples exhau
               (* test files are declarations only: a top-level expression is a mistake *)
               let loaded = ref [] in
               let load_file file =
-                match
-                  parse_tops ~syntax:Auto ~names:(Store.names_view store) ~file (read_file file)
-                with
-                | Error ds -> Error ds
-                | Ok (tops, warnings) ->
-                    print_warnings warnings;
-                    let rec go = function
-                      | [] -> Ok ()
-                      | parsed :: rest -> (
-                          match validate_parsed_top parsed with
-                          | Error ds -> Error ds
-                          | Ok (Kernel.Expr _) ->
-                              Error
-                                [
-                                  cli_diagnostic ~code:"E1001"
-                                    (Printf.sprintf
-                                       "%s: test files hold declarations only; found a top-level \
-                                        expression"
-                                       file);
-                                ]
-                          | Ok (Kernel.Decl d) -> (
-                              match Resolve.resolve_decl (Store.names_view store) d with
-                              | Error ds -> Error ds
-                              | Ok d -> (
-                                  match Store.put_decl store d with
-                                  | Error ds -> Error ds
-                                  | Ok _ ->
-                                      loaded := d :: !loaded;
-                                      go rest)))
-                    in
-                    go tops
+                Frontend.walk ~on_parsed:print_warnings ~syntax:Auto ~file store (read_file file)
+                  ~before_resolve:(function
+                    | Kernel.Expr _ ->
+                        Error
+                          [
+                            cli_diagnostic ~code:"E1001"
+                              (Printf.sprintf
+                                 "%s: test files hold declarations only; found a top-level \
+                                  expression"
+                                 file);
+                          ]
+                    | Kernel.Decl _ -> Ok ())
+                  ~on_installed:(fun d _hashes ->
+                    loaded := d :: !loaded;
+                    Ok ())
               in
               let rec load_all = function
                 | [] -> Ok ()
@@ -1556,7 +1371,7 @@ let test_cmd files allows prelude cache_dir no_cache coverage seed samples exhau
               match load_all files with
               | Error ds -> print_diags ds
               | Ok () -> (
-                  match make_checker store with
+                  match Frontend.make_checker store with
                   | Error ds -> print_diags ds
                   | Ok cctx -> (
                       (* an ill-typed test must FAIL the run, not silently vanish from
@@ -1761,8 +1576,8 @@ let diff_cmd operand_a operand_b syntax prelude =
             | Bootstrap -> Diff.Bootstrap
             | Auto ->
                 if
-                  syntax_for_file Auto operand_a = Surface
-                  || syntax_for_file Auto operand_b = Surface
+                  Frontend.syntax_for_file Auto operand_a = Surface
+                  || Frontend.syntax_for_file Auto operand_b = Surface
                 then Diff.Surface
                 else Diff.Bootstrap
           in
@@ -1775,63 +1590,16 @@ let with_store store_dir f =
 
 let store_add_cmd store_dir file origin syntax =
   with_store store_dir (fun store ->
-      let source = read_file file in
       let expression_refusal = cli_diagnostic ~code:"E0704" "store add expects declarations only" in
-      (* refuse before installing anything: a file with a top-level expression must leave the
-         store exactly as it was *)
-      let declarations_only =
-        Result.bind
-          (parse_tops ~syntax ~names:(Store.names_view store) ~file source)
-          (fun (tops, _warnings) ->
-            let rec check = function
-              | [] -> Ok ()
-              | parsed :: rest ->
-                  Result.bind (validate_parsed_top parsed) (function
-                    | Kernel.Expr _ -> Error [ expression_refusal ]
-                    | Kernel.Decl _ -> check rest)
-            in
-            check tops)
-      in
-      match declarations_only with
-      | Error ds -> print_diags ds
-      | Ok () -> (
-          (* a failure part-way through a file must leave the store as it was: snapshot the
-             index and object set, and restore them if any declaration is refused *)
-          let names_path = Filename.concat store_dir "names.jqd" in
-          let objects_dir = Filename.concat store_dir "objects" in
-          let names_before =
-            if Sys.file_exists names_path then Some (read_file names_path) else None
-          in
-          let objects_before = Sys.readdir objects_dir |> Array.to_list in
-          let restore () =
-            (match names_before with
-            | Some bytes ->
-                let channel = open_out_bin names_path in
-                Fun.protect
-                  ~finally:(fun () -> close_out channel)
-                  (fun () -> output_string channel bytes)
-            | None -> if Sys.file_exists names_path then Sys.remove names_path);
-            Array.iter
-              (fun entry ->
-                if not (List.mem entry objects_before) then
-                  Sys.remove (Filename.concat objects_dir entry))
-              (Sys.readdir objects_dir)
-          in
-          match
-            (* an exception part-way through is a refusal too: roll back, then re-raise *)
-            try
-              process_forms ?origin ~syntax store ~file source ~on_expr:(fun _ ->
-                  Error [ expression_refusal ])
-            with exn ->
-              restore ();
-              raise exn
-          with
-          | Ok () ->
-              print_endline "ok";
-              ok
-          | Error ds ->
-              restore ();
-              print_diags ds))
+      (* one transaction: a refused file leaves the store exactly as it was *)
+      match
+        Frontend.install_declarations ?origin ~on_parsed:print_warnings ~expression_refusal ~syntax
+          store ~file (read_file file)
+      with
+      | Ok () ->
+          print_endline "ok";
+          ok
+      | Error ds -> print_diags ds)
 
 let store_name_cmd store_dir name hex =
   with_store store_dir (fun store ->
@@ -1925,10 +1693,12 @@ let governance_check_cmd file prelude syntax output_format =
         match Prelude.load ~dir:(prelude_dir_of prelude) store with
         | Error diagnostics -> print_diags diagnostics
         | Ok _ -> (
-            match make_checker store with
+            match Frontend.make_checker store with
             | Error diagnostics -> print_diags diagnostics
             | Ok checker -> (
-                match resolve_source_tops ~syntax store ~file (read_governance_file file) with
+                match
+                  Frontend.resolve_source_tops ~syntax store ~file (read_governance_file file)
+                with
                 | Error diagnostics -> print_diags diagnostics
                 | Ok (tops, source_warnings) -> (
                     let declarations, expressions =
@@ -2000,10 +1770,12 @@ let why_effect_cmd effect_name file prelude syntax output_format =
         match Prelude.load ~dir:(prelude_dir_of prelude) store with
         | Error diagnostics -> print_diags diagnostics
         | Ok _ -> (
-            match make_checker store with
+            match Frontend.make_checker store with
             | Error diagnostics -> print_diags diagnostics
             | Ok checker -> (
-                match resolve_source_tops ~syntax store ~file (read_governance_file file) with
+                match
+                  Frontend.resolve_source_tops ~syntax store ~file (read_governance_file file)
+                with
                 | Error diagnostics -> print_diags diagnostics
                 | Ok (tops, source_warnings) -> (
                     let declarations, expressions =
@@ -2685,35 +2457,20 @@ let tiers_cmd files prelude =
   match open_ctx ~prelude ~store_dir:None with
   | Error ds -> print_diags ds
   | Ok (store, _ctx) -> (
-      match Check.make_ctx store with
+      match Frontend.make_checker store with
       | Error ds -> print_diags ds
       | Ok cctx -> (
-          (match Prelude.builtin_signatures store with
-          | Ok sigs -> Check.register_builtin_signatures cctx sigs
-          | Error _ -> ());
-          (* decls are checked at load, so type errors carry source positions and fail the
-             command outright — an error is an error, never a partial table *)
-          let rec load_forms = function
-            | [] -> Ok ()
-            | top :: rest -> (
+          (* decls are checked at load (after installation), so type errors carry source
+             positions and fail the command outright — an error is an error, never a partial
+             table *)
+          let load_forms tops =
+            Frontend.walk_tops store tops
+              ~on_resolved:(fun top _warnings ->
                 match top with
-                | Kernel.Decl d -> (
-                    match Resolve.resolve_decl (Store.names_view store) d with
-                    | Error ds -> Error ds
-                    | Ok d -> (
-                        match Store.put_decl store d with
-                        | Error ds -> Error ds
-                        | Ok _ -> (
-                            match Check.check_top cctx (Kernel.Decl d) with
-                            | Error ds -> Error ds
-                            | Ok _ -> load_forms rest)))
-                | Kernel.Expr e -> (
-                    match Resolve.resolve_expr (Store.names_view store) e with
-                    | Error ds -> Error ds
-                    | Ok e -> (
-                        match Check.check_top cctx (Kernel.Expr e) with
-                        | Error ds -> Error ds
-                        | Ok _ -> load_forms rest)))
+                | Kernel.Expr e -> Result.map ignore (Check.check_top cctx (Kernel.Expr e))
+                | Kernel.Decl _ -> Ok ())
+              ~on_installed:(fun d _hashes ->
+                Result.map ignore (Check.check_top cctx (Kernel.Decl d)))
           in
           let load_file f =
             match Reader.parse_string ~file:f (read_file f) with
@@ -2895,7 +2652,7 @@ let export_cmd file out prelude syntax =
       match open_ctx ~prelude ~store_dir:None with
       | Error ds -> print_diags ds
       | Ok (store, _ctx) -> (
-          match resolve_source_tops ~syntax store ~file source with
+          match Frontend.resolve_source_tops ~syntax store ~file source with
           | Error ds -> print_diags ds
           | Ok (tops, warnings) -> (
               print_warnings warnings;
@@ -2944,7 +2701,7 @@ let build_cmd file out prelude dry_run syntax =
     match open_ctx ~prelude ~store_dir:None with
     | Error ds -> print_diags ds
     | Ok (store, _ctx) -> (
-        match make_checker store with
+        match Frontend.make_checker store with
         | Error ds -> print_diags ds
         | Ok cctx -> (
             let tops = ref [] in
@@ -2963,7 +2720,7 @@ let build_cmd file out prelude dry_run syntax =
                           tops := e :: !tops;
                           check_forms rest))
             in
-            match resolve_source_tops ~syntax store ~file (read_file file) with
+            match Frontend.resolve_source_tops ~syntax store ~file (read_file file) with
             | Error ds -> print_diags ds
             | Ok (resolved_tops, warnings) -> (
                 print_warnings warnings;
@@ -2976,7 +2733,7 @@ let build_cmd file out prelude dry_run syntax =
                          than run_cmd's lazy checking, and the E0814 origins
                          (`performed via ...`) must match run byte-for-byte *)
                     let baked =
-                      match make_checker store with
+                      match Frontend.make_checker store with
                       | Error _ -> None
                       | Ok cctx2 ->
                           List.fold_left

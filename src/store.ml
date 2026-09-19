@@ -821,3 +821,61 @@ let dependents t h : (Hash.t list, Diag.t list) result =
         | Ok ds' -> go (if List.exists (Hash.equal h) ds' then dh :: acc else acc) rest)
   in
   go [] (all_decl_hashes t)
+
+(* --- transactions (RF.1) --- *)
+
+type snapshot = {
+  snapshot_names : (string * Resolve.entry) list;
+  snapshot_hidden : Hash.t list;
+  snapshot_call_abis : (Hash.t * Resolve.call_abi) list;
+  snapshot_index : (Hash.t * (Hash.t * role)) list;
+  snapshot_names_file : string option;
+  snapshot_objects : string list;
+}
+(** The in-memory index, the exact [names.jqd] bytes, and the object-directory listing. *)
+
+(** [snapshot t] captures what {!restore} needs to undo later installations into [t]. *)
+let snapshot t =
+  {
+    snapshot_names = t.names;
+    snapshot_hidden = t.hidden;
+    snapshot_call_abis = t.call_abis;
+    snapshot_index = t.index;
+    snapshot_names_file =
+      (if Sys.file_exists (names_file t) then Some (read_file (names_file t)) else None);
+    snapshot_objects = Sys.readdir (objects_dir t) |> Array.to_list;
+  }
+
+(** [restore t s] returns [t] to [s]: the in-memory index, the name index file (removed when [s] had
+    none), and the object set (entries added since [s], including origin and tier sidecars, are
+    removed). Sidecars rewritten in place for objects that already existed are not restored. *)
+let restore t s =
+  t.names <- s.snapshot_names;
+  t.hidden <- s.snapshot_hidden;
+  t.call_abis <- s.snapshot_call_abis;
+  t.index <- s.snapshot_index;
+  (match s.snapshot_names_file with
+  | Some bytes ->
+      let channel = open_out_bin (names_file t) in
+      Fun.protect ~finally:(fun () -> close_out channel) (fun () -> output_string channel bytes)
+  | None -> if Sys.file_exists (names_file t) then Sys.remove (names_file t));
+  let before = Hashtbl.create (List.length s.snapshot_objects) in
+  List.iter (fun entry -> Hashtbl.replace before entry ()) s.snapshot_objects;
+  Array.iter
+    (fun entry ->
+      if not (Hashtbl.mem before entry) then Sys.remove (Filename.concat (objects_dir t) entry))
+    (Sys.readdir (objects_dir t))
+
+(** [transaction t f] runs [f ()] and keeps its installations only when it returns [Ok]. On [Error],
+    or when [f] raises (the exception is re-raised), [t] is {!restore}d to its state before [f] ran,
+    so a refused installation leaves the store exactly as it was. *)
+let transaction t f =
+  let before = snapshot t in
+  match f () with
+  | Ok _ as ok -> ok
+  | Error _ as error ->
+      restore t before;
+      error
+  | exception exn ->
+      restore t before;
+      raise exn

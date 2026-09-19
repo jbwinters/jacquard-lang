@@ -806,7 +806,14 @@ let show_scheme ?name_of ?effect_name_of ?(surface = false) (s : scheme) : strin
      traversal; reconstruct the quantifier prefix from counts *)
   if tids = [] && rids = [] then body
   else
-    let tnames = List.mapi (fun i _ -> String.make 1 (Char.chr (Char.code 'a' + i))) tids in
+    let tnames =
+      List.mapi
+        (fun i _ ->
+          (* the same names [show] assigns: a..z, then a1, a2, ... *)
+          if i < 26 then String.make 1 (Char.chr (Char.code 'a' + i))
+          else Printf.sprintf "a%d" (i - 25))
+        tids
+    in
     let rnames = List.mapi (fun i _ -> if i = 0 then "e" else Printf.sprintf "e%d" i) rids in
     let quantified =
       if (not surface) || rnames = [] then String.concat " " (tnames @ rnames)

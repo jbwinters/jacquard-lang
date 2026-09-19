@@ -132,6 +132,10 @@ When adding valid corpus files, regenerate the golden hashes with
   Existing evaluator capture and host-readiness
   modules are internal seams, not a public ABI; adapters and application
   servers belong outside this repository.
+- Program preparation shared by the commands and the host worker (parse,
+  resolve, install, read-only check, sealed checked artifact, transactional
+  store installation): `src/frontend.mli`, `test/test_frontend.ml`. Internal
+  seam, not a public embedding ABI.
 - Dist and inference: `prelude/06-dist.jqd`, `prelude/13-dist-lib.jqd`,
   `src/infer_dist.ml`, `test/test_infer.ml`.
 - Warp: `prelude/15-warp.jqd`, `prelude/16-gen.jqd`, `src/warp.ml`,
