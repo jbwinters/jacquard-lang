@@ -137,6 +137,13 @@ let fresh_tmp_dir () =
   at_exit (fun () -> try rm_rf dir with Sys_error _ -> ());
   dir
 
+(* A read-only check owns a securely created, empty scratch store (Frontend.check refuses any
+   root already in use); cleanup is confined to this exact directory. *)
+let fresh_check_root () =
+  let dir = Filename.temp_dir ~perms:0o700 "jacquard-check-" ".store" in
+  at_exit (fun () -> try rm_rf dir with Sys_error _ -> ());
+  dir
+
 (* Governance analysis gets a securely created private directory rather than the historical
    predictable run-store path. Cleanup is constrained to this exact 0700 directory. *)
 let fresh_governance_analysis_dir () =
@@ -733,7 +740,7 @@ let check_cmd file prelude print_sigs manifest origin syntax =
   (* a read-only check in a fresh scratch session: decls go into that store so later forms
      resolve; a damaged surface file gets the recovery report instead *)
   match
-    Frontend.check ?origin ~prelude_dir:(prelude_dir_of prelude) ~root:(fresh_tmp_dir ()) ~syntax
+    Frontend.check ?origin ~prelude_dir:(prelude_dir_of prelude) ~root:(fresh_check_root ()) ~syntax
       ~file (read_file file) ~on_parsed:print_warnings
       ~on_resolved:(fun _top warnings -> List.iter print_diagnostic warnings)
       ~on_checked
@@ -999,74 +1006,44 @@ let dist_diff_cmd model_a model_b tolerance cache_dir no_cache sweep prelude =
       let posterior_of ?(label = None) file src_override =
         let src = match src_override with Some s -> s | None -> read_file file in
         ignore label;
-        match Reader.parse_string ~file src with
+        (* load decls, take the last expr as the model *)
+        let last = ref None in
+        match
+          Frontend.walk ~syntax:Bootstrap ~file store src ~on_resolved:(fun top _warnings ->
+              (match top with Kernel.Expr e -> last := Some e | Kernel.Decl _ -> ());
+              Ok ())
+        with
         | Error ds -> Error ds
-        | Ok forms -> (
-            (* load decls, take the last expr as the model *)
-            let rec go last = function
-              | [] -> (
-                  match last with
-                  | Some e -> Ok e
-                  | None ->
-                      Error [ cli_diagnostic ~code:"E0903" (file ^ " has no model expression") ])
-              | f :: rest -> (
-                  match Kernel.of_form f with
-                  | Error ds -> Error ds
-                  | Ok (Kernel.Decl d) -> (
-                      match Resolve.resolve_decl (Store.names_view store) d with
-                      | Error ds -> Error ds
-                      | Ok d -> (
-                          match Store.put_decl store d with
-                          | Error ds -> Error ds
-                          | Ok _ -> go last rest))
-                  | Ok (Kernel.Expr e) -> (
-                      match Resolve.resolve_expr (Store.names_view store) e with
-                      | Error ds -> Error ds
-                      | Ok e -> go (Some e) rest))
-            in
-            match go None forms with
-            | Error ds -> Error ds
-            | Ok e -> enumerate_rendered ctx store ~cache_dir e)
+        | Ok () -> (
+            match !last with
+            | None -> Error [ cli_diagnostic ~code:"E0903" (file ^ " has no model expression") ]
+            | Some e -> enumerate_rendered ctx store ~cache_dir e)
       in
       (* result types must AGREE before probabilities are comparable: check both
          models and compare their elaborated value types *)
       let model_type file src_override =
         let src = match src_override with Some s -> s | None -> read_file file in
-        match Reader.parse_string ~file src with
+        match Frontend.make_checker store with
         | Error ds -> Error ds
-        | Ok forms -> (
-            match Frontend.make_checker store with
+        | Ok cctx -> (
+            (* the model's own declarations land so later forms (and the enumeration pass)
+               resolve them; the last expression's scheme is the model type *)
+            let last = ref None in
+            match
+              Frontend.walk ~syntax:Bootstrap ~file store src ~on_resolved:(fun top _warnings ->
+                  match Check.check_top cctx top with
+                  | Error ds -> Error ds
+                  | Ok { Check.names = [ ("_", sc) ]; _ } ->
+                      last := Some (Check.show_scheme cctx sc);
+                      Ok ()
+                  | Ok _ -> Ok ())
+            with
             | Error ds -> Error ds
-            | Ok cctx ->
-                let rec go last = function
-                  | [] -> (
-                      match last with
-                      | Some t -> Ok t
-                      | None ->
-                          Error [ cli_diagnostic ~code:"E0903" (file ^ " has no model expression") ]
-                      )
-                  | f :: rest -> (
-                      match Kernel.of_form f with
-                      | Error ds -> Error ds
-                      | Ok top -> (
-                          match Resolve.resolve (Store.names_view store) top with
-                          | Error ds -> Error ds
-                          | Ok resolved -> (
-                              match Check.check_top cctx resolved with
-                              | Error ds -> Error ds
-                              | Ok { Check.names = [ ("_", sc) ]; _ } ->
-                                  go (Some (Check.show_scheme cctx sc)) rest
-                              | Ok _ -> (
-                                  (* the model's own declarations must land so later
-                                     forms (and the enumeration pass) resolve them *)
-                                  match resolved with
-                                  | Kernel.Decl d -> (
-                                      match Store.put_decl store d with
-                                      | Error ds -> Error ds
-                                      | Ok _ -> go last rest)
-                                  | Kernel.Expr _ -> go last rest))))
-                in
-                go None forms)
+            | Ok () -> (
+                match !last with
+                | Some t -> Ok t
+                | None -> Error [ cli_diagnostic ~code:"E0903" (file ^ " has no model expression") ]
+                ))
       in
       let render_diff label pa pb =
         let mass table k = Option.value (List.assoc_opt k table) ~default:0.0 in

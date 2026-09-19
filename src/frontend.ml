@@ -168,44 +168,105 @@ module Checked = struct
   type stale =
     | Prelude_changed
     | Missing_dependency of Hash.t
+    | Missing_declaration of Hash.t
     | Rebound of { name : string; expected : Hash.t; found : Hash.t option }
+    | Call_abi_changed of Hash.t
+    | Unreadable_store of Diag.t list
 
-  (* The identities each name was last bound to by the source: a later declaration introducing a
-     name supersedes every binding an earlier one gave it, as the store's own rebinding does. *)
+  (* The (name, kind) pairs a declaration binds, in [Canon.decl_hashes.named] order: a type or
+     effect names itself first, then its constructors or operations. *)
+  let bindings (top : top) =
+    match (top.resolved, top.identity) with
+    | Kernel.Decl declaration, Some { Canon.named; _ } ->
+        List.mapi
+          (fun index (name, hash) ->
+            let kind =
+              match declaration.Kernel.it with
+              | Kernel.DefTerm _ -> Resolve.KTerm
+              | Kernel.DefType _ -> if index = 0 then Resolve.KType else Resolve.KCon
+              | Kernel.DefEffect _ -> if index = 0 then Resolve.KEffect else Resolve.KOp
+            in
+            ((name, kind), hash))
+          named
+    | _ -> []
+
+  (* The identity each (name, kind) was last bound to by the source; the store rebinds per kind. *)
   let final_bindings t =
     List.fold_left
-      (fun bindings top ->
-        match top.identity with
-        | None -> bindings
-        | Some { Canon.named; _ } ->
-            let names = List.sort_uniq String.compare (List.map fst named) in
-            List.filter (fun (name, _) -> not (List.mem name names)) bindings @ named)
+      (fun final top ->
+        let introduced = bindings top in
+        List.filter (fun (key, _) -> not (List.mem_assoc key introduced)) final @ introduced)
       [] t.tops
 
+  let first_error checks = List.find_map (fun check -> check ()) checks
+
+  let verify_current t store =
+    let absent hash = Result.is_error (Store.locate store hash) in
+    let call_abi hash abis =
+      List.find_map (fun (bound, slots) -> if Hash.equal bound hash then Some slots else None) abis
+    in
+    let introduced = List.concat_map bindings t.tops in
+    match
+      first_error
+        [
+          (fun () ->
+            if Store.prelude_manifest store <> t.prelude then Some Prelude_changed else None);
+          (fun () ->
+            List.find_map
+              (fun hash -> if absent hash then Some (Missing_dependency hash) else None)
+              t.dependencies);
+          (* superseded declarations too: an earlier expression may still reference them *)
+          (fun () ->
+            List.find_map
+              (fun top ->
+                match top.identity with
+                | Some { Canon.decl_hash; _ } when absent decl_hash ->
+                    Some (Missing_declaration decl_hash)
+                | _ -> None)
+              t.tops);
+          (fun () ->
+            List.find_map
+              (fun ((name, kind), expected) ->
+                let bound entry =
+                  match entry with
+                  | Some { Resolve.hash; _ } -> Hash.equal hash expected
+                  | None -> false
+                in
+                let found = Store.lookup_kind store name kind in
+                (* the store never publishes a scheduler-private hash, and hidden derived members
+                   are deliberately absent from public lookup *)
+                if
+                  bound found
+                  || Store.scheduler_private_hash expected
+                  || bound (Store.lookup_hidden_kind store name kind)
+                then None
+                else
+                  Some
+                    (Rebound
+                       {
+                         name;
+                         expected;
+                         found = Option.map (fun entry -> entry.Resolve.hash) found;
+                       }))
+              (final_bindings t));
+          (* labels are not part of identity, so equal hashes can carry different call ABIs *)
+          (fun () ->
+            List.find_map
+              (fun (_, hash) ->
+                let expected = List.find_map (fun top -> call_abi hash top.call_abis) t.tops in
+                if expected = call_abi hash store.Store.call_abis then None
+                else Some (Call_abi_changed hash))
+              introduced);
+        ]
+    with
+    | Some stale -> Error stale
+    | None -> Ok ()
+
   let verify t store =
-    if Store.prelude_manifest store <> t.prelude then Error Prelude_changed
-    else
-      match
-        List.find_opt (fun hash -> Result.is_error (Store.locate store hash)) t.dependencies
-      with
-      | Some hash -> Error (Missing_dependency hash)
-      | None -> (
-          let rebound (name, expected) =
-            let entries = Store.lookup_all store name in
-            if List.exists (fun entry -> Hash.equal entry.Resolve.hash expected) entries then None
-            else
-              Some
-                (Rebound
-                   {
-                     name;
-                     expected;
-                     found =
-                       (match entries with [] -> None | entry :: _ -> Some entry.Resolve.hash);
-                   })
-          in
-          match List.find_map rebound (final_bindings t) with
-          | Some stale -> Error stale
-          | None -> Ok ())
+    (* judge the persisted store, not this handle's possibly stale in-memory index *)
+    match Store.open_store store.Store.root with
+    | Error diagnostics -> Error (Unreadable_store diagnostics)
+    | Ok current -> verify_current t current
 end
 
 type recovery = { diagnostics : Diag.t list; signatures : (string * string) list }

@@ -194,7 +194,10 @@ let expect_stale label expected = function
         match stale with
         | Frontend.Checked.Prelude_changed -> "prelude"
         | Missing_dependency _ -> "dependency"
+        | Missing_declaration _ -> "declaration"
         | Rebound { name; _ } -> "rebound:" ^ name
+        | Call_abi_changed _ -> "call-abi"
+        | Unreadable_store _ -> "unreadable"
       in
       Alcotest.(check string) label expected kind
 
@@ -213,14 +216,74 @@ let test_stale_artifacts_are_refused () =
   expect_stale "same session, rebound" "rebound:safe-div" (Frontend.Checked.verify artifact own);
   (* another session: facts must be established there, not assumed *)
   let other, _ctx = session "other" in
-  expect_stale "other session, not installed" "rebound:safe-div"
-    (Frontend.Checked.verify artifact other);
+  expect_stale "other session, not installed" "declaration" (Frontend.Checked.verify artifact other);
   install other declarations;
   Alcotest.(check bool)
     "identities agree across sessions" true
     (Frontend.Checked.verify artifact other = Ok ());
   let bare = expect_ok "store without prelude" (Store.open_store (fresh_root "bare")) in
   expect_stale "different prelude" "prelude" (Frontend.Checked.verify artifact bare)
+
+(* Each artifact is checked, then verified against a fresh session holding [installed]. *)
+let verify_elsewhere source installed =
+  let _root, artifact = checked source in
+  let other, _ctx = session "elsewhere" in
+  expect_ok "install elsewhere"
+    (Frontend.install_declarations ~expression_refusal:refusal ~syntax:Frontend.Auto other
+       ~file:"elsewhere.jac" installed);
+  Frontend.Checked.verify artifact other
+
+let test_verify_is_exact () =
+  (* labels are not identity: equal hashes with different call-label companions *)
+  expect_stale "call labels" "call-abi"
+    (verify_elsewhere "pair(left: x, right: y) = (x, y)\n" "pair(right: x, left: y) = (x, y)\n");
+  (* an expression checked against a declaration the source later superseded *)
+  expect_stale "superseded declaration" "declaration"
+    (verify_elsewhere "f(n) = add(n, 1)\nf(1)\nf(n) = add(n, 2)\n" "f(n) = add(n, 2)\n");
+  (* a type and a term share a name: each kind is verified separately *)
+  expect_stale "per-kind binding" "rebound:widget"
+    (verify_elsewhere "type Widget = | Widget\nwidget = 1\n"
+       "type Widget = | Widget\nwidget = 1\ntype Widget = | Gadget\n");
+  Alcotest.(check bool)
+    "the same declarations verify" true
+    (verify_elsewhere "type Widget = | Widget\nwidget = 1\n" "type Widget = | Widget\nwidget = 1\n"
+    = Ok ());
+  (* the frozen scheduler carrier's constructor is bound only privately *)
+  let root, carrier = checked "type ChannelHandle a = | ChannelOpaque\n" in
+  Alcotest.(check bool)
+    "private members verify" true
+    (Frontend.Checked.verify carrier (expect_ok "reopen" (Store.open_store root)) = Ok ());
+  (* the artifact seals call-label companions *)
+  let _root, labeled = checked "pair(left: x, right: y) = (x, y)\n" in
+  (match Frontend.Checked.tops labeled with
+  | [ { Frontend.Checked.call_abis = [ (_, slots) ]; _ } ] ->
+      Alcotest.(check (list (option string))) "sealed labels" [ Some "left"; Some "right" ] slots
+  | _ -> Alcotest.fail "labeled declaration sealed no call-label companion");
+  (* a handle that missed another handle's write cannot vouch for the artifact *)
+  let root, artifact = checked declarations in
+  let stale_handle = expect_ok "first handle" (Store.open_store root) in
+  let writer = expect_ok "second handle" (Store.open_store root) in
+  expect_ok "rebind through the second handle"
+    (Frontend.install_declarations ~expression_refusal:refusal ~syntax:Frontend.Auto writer
+       ~file:"lib.jac" "safe-div(n, d) = div(n, d)\n");
+  expect_stale "stale handle" "rebound:safe-div" (Frontend.Checked.verify artifact stale_handle)
+
+(* a scheme with more than 26 type variables renders instead of crashing the checker *)
+let test_wide_schemes_render () =
+  let parameters = List.init 40 (Printf.sprintf "x%d") in
+  let source = Printf.sprintf "wide(%s) = 0\n" (String.concat ", " parameters) in
+  let _root, artifact = checked source in
+  match Frontend.Checked.tops artifact with
+  | [ { Frontend.Checked.signatures = [ ("wide", scheme) ]; _ } ] ->
+      let contains needle =
+        let n = String.length needle in
+        let rec scan i =
+          i + n <= String.length scheme && (String.sub scheme i n = needle || scan (i + 1))
+        in
+        scan 0
+      in
+      Alcotest.(check bool) "late names follow a..z" true (contains "a14" && contains "z")
+  | _ -> Alcotest.fail "wide declaration did not seal one signature"
 
 let test_walk_hook_order () =
   let store, _ctx = session "walk" in
@@ -248,10 +311,21 @@ let test_walk_hook_order () =
     "hook order"
     [ "before"; "resolved"; "installed" ]
     (List.rev !events);
+  (* the same callable with other call labels is refused by the store (E0612) *)
+  expect_ok "labeled declaration"
+    (Frontend.walk ~syntax:Frontend.Auto ~file:"labels.jac" store
+       "pair(left: x, right: y) = (x, y)\n");
+  let conflicting = "pair(right: x, left: y) = (x, y)\n1\n" in
+  (match Frontend.walk ~syntax:Frontend.Auto ~file:"labels.jac" store conflicting with
+  | Error diagnostics ->
+      Alcotest.(check (list string))
+        "strict installation refuses" [ "E0612" ]
+        (List.map Diag.code_or_uncoded diagnostics)
+  | Ok () -> Alcotest.fail "a conflicting call-label companion installed");
   let seen = ref 0 in
-  expect_ok "best effort continues"
-    (Frontend.walk ~install:Frontend.Install_best_effort ~syntax:Frontend.Auto ~file:"again.jac"
-       store "two(n) = n\ntwo(1)\n" ~on_resolved:(fun _ _ ->
+  expect_ok "best effort continues past the refusal"
+    (Frontend.walk ~install:Frontend.Install_best_effort ~syntax:Frontend.Auto ~file:"labels.jac"
+       store conflicting ~on_resolved:(fun _ _ ->
          incr seen;
          Ok ()));
   Alcotest.(check int) "every top visited" 2 !seen
@@ -268,6 +342,9 @@ let suite =
     Alcotest.test_case "check refuses a store root in use" `Quick test_check_refuses_used_root;
     Alcotest.test_case "a refused installation leaves the store unchanged" `Quick
       test_failed_install_leaves_store_unchanged;
+    Alcotest.test_case "verify compares labels, superseded declarations, and kinds" `Quick
+      test_verify_is_exact;
+    Alcotest.test_case "schemes wider than the alphabet render" `Quick test_wide_schemes_render;
     Alcotest.test_case "stale and cross-session artifacts are refused" `Quick
       test_stale_artifacts_are_refused;
     Alcotest.test_case "walk hooks run in pipeline order" `Quick test_walk_hook_order;
