@@ -839,8 +839,8 @@ let lower_definition_run definitions =
 let surface_spelling kernel = Option.value (Surface_name.to_pascal kernel) ~default:kernel
 
 (** [field_label_errors ~type_name constructors] rejects a label declared twice by one constructor
-    (E1239) and a label whose field type differs between constructors (E1240), at the later field.
-    A label that only some constructors carry is valid; it simply has no generated accessor. *)
+    (E1239) and a label whose field type differs between constructors (E1240), at the later field. A
+    label that only some constructors carry is valid; it simply has no generated accessor. *)
 let field_label_errors ~type_name (constructors : Kernel.conspec list) =
   let rec check_constructors seen = function
     | [] -> Ok ()
@@ -852,8 +852,10 @@ let field_label_errors ~type_name (constructors : Kernel.conspec list) =
               | None -> check_fields own seen fields
               | Some label when List.mem label own ->
                   error ~meta:field.fmeta ~code:"E1239"
-                    (Printf.sprintf "constructor `%s` of type `%s` declares the field label `%s` twice"
-                       (surface_spelling constructor.con_name) (surface_spelling type_name) label)
+                    (Printf.sprintf
+                       "constructor `%s` of type `%s` declares the field label `%s` twice"
+                       (surface_spelling constructor.con_name)
+                       (surface_spelling type_name) label)
               | Some label -> (
                   match List.assoc_opt label seen with
                   | Some (first_constructor, first_ty)
@@ -864,7 +866,8 @@ let field_label_errors ~type_name (constructors : Kernel.conspec list) =
                         (Printf.sprintf
                            "field label `%s` of type `%s` has one type in constructor `%s` and a \
                             different type in constructor `%s`"
-                           label (surface_spelling type_name) (surface_spelling first_constructor)
+                           label (surface_spelling type_name)
+                           (surface_spelling first_constructor)
                            (surface_spelling constructor.con_name))
                   | Some _ -> check_fields (label :: own) seen fields
                   | None ->
@@ -875,6 +878,15 @@ let field_label_errors ~type_name (constructors : Kernel.conspec list) =
         check_fields [] seen constructor.fields
   in
   check_constructors [] constructors
+
+(** [accessor_marker] is the [surface-generated] provenance of a D36 accessor declaration. *)
+let accessor_marker = "constructor-accessor"
+
+(** [is_generated_accessor top] holds for a declaration generated from a labeled field. Signature
+    listings omit these, as the printer does, so generated boilerplate is never shown. *)
+let is_generated_accessor = function
+  | Kernel.Decl declaration -> Meta.surface_generated declaration.meta = Some accessor_marker
+  | Kernel.Expr _ -> false
 
 (** [accessor_name ~type_name label] is the D36 accessor name [<type-kebab>.<label>]. *)
 let accessor_name ~type_name label = type_name ^ "." ^ label
@@ -890,7 +902,9 @@ let eligible_labels (constructors : Kernel.conspec list) =
       |> List.filter (fun label ->
           List.for_all
             (fun (constructor : Kernel.conspec) ->
-              List.exists (fun (field : Kernel.field) -> field.label = Some label) constructor.fields)
+              List.exists
+                (fun (field : Kernel.field) -> field.label = Some label)
+                constructor.fields)
             rest)
 
 (** [generated_accessor ~type_name constructors label] is the ordinary pure definition
@@ -903,9 +917,7 @@ let generated_accessor ~type_name (constructors : Kernel.conspec list) label =
       (fun (field : Kernel.field) -> field.label = Some label)
       (List.hd constructors).Kernel.fields
   in
-  let meta =
-    origin.fmeta |> Meta.without_trivia |> Meta.with_surface_generated "constructor-accessor"
-  in
+  let meta = origin.fmeta |> Meta.without_trivia |> Meta.with_surface_generated accessor_marker in
   let node it = Kernel.{ it; meta } in
   let clause (constructor : Kernel.conspec) =
     let arguments =
@@ -929,9 +941,7 @@ let generated_accessor ~type_name (constructors : Kernel.conspec list) label =
   in
   Kernel.Decl
     {
-      it =
-        DefTerm
-          [ { bname = accessor_name ~type_name label; annot = None; value; bmeta = meta } ];
+      it = DefTerm [ { bname = accessor_name ~type_name label; annot = None; value; bmeta = meta } ];
       meta;
     }
 

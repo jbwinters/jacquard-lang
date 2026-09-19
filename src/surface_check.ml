@@ -710,7 +710,8 @@ let analyze ~names ctx (recovered : Surface_ast.recovered) : report =
             | Error errors -> failed errors
             | Ok checked -> (
                 diagnostics := !diagnostics @ checked.Check.warnings;
-                signatures := List.rev_append checked.names !signatures;
+                if not (Surface_lower.is_generated_accessor resolved) then
+                  signatures := List.rev_append checked.names !signatures;
                 match resolved with
                 | Kernel.Decl ({ Kernel.it = Kernel.DefType _ | Kernel.DefEffect _; _ } as decl)
                   -> (

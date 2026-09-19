@@ -135,7 +135,8 @@ let surface_hashes path source =
   (* D36 accessors derive from their type, whose identity is compared; they resolve only after
      the type is installed, which these stub names do not model *)
   |> List.filter (function
-    | Kernel.Decl declaration -> Meta.surface_generated declaration.meta <> Some "constructor-accessor"
+    | Kernel.Decl declaration ->
+        Meta.surface_generated declaration.meta <> Some "constructor-accessor"
     | Kernel.Expr _ -> true)
   |> List.map (fun top ->
       match Resolve.resolve Corpus_support.stub_names top with
@@ -1300,9 +1301,9 @@ let validate_release_docs ~decision ~followups ~index =
         "the printer emits the owning labeled type exactly once and suppresses generated accessor \
          bodies" );
       ( "validation",
-        "reject a label duplicated within a constructor, inconsistent in type across \
-         constructors, or colliding with an explicit term; a label missing from some constructor \
-         is accepted without an accessor" );
+        "reject a label duplicated within a constructor, inconsistent in type across constructors, \
+         or colliding with an explicit term; a label missing from some constructor is accepted \
+         without an accessor" );
       ("diagnostics", "each validation failure has a dedicated diagnostic code and exact span tests");
       ("preservation", "bootstrap identity, full tests, doctests, twins, and demos remain green");
       ("excluded", "shipped labeled partial patterns are independent of this accessor gate");
@@ -1387,7 +1388,7 @@ let validate_release_docs ~decision ~followups ~index =
     ];
   require
     (contains "pair.left" followups && contains "E1239" followups && contains "E1240" followups
-    && contains "E1241" followups)
+   && contains "E1241" followups)
     "D36 follow-up lacks accessor execution and label-validation evidence";
   (match section "## Reproduction Context" decision with
   | None -> add "missing reproduction context"
@@ -1608,8 +1609,8 @@ let followup_mutations =
       followup_mutation_test ~heading:"## D36 Generated Constructor Accessors" ~field:"validation"
         ~needle:
           "reject a label duplicated within a constructor, inconsistent in type across \
-           constructors, or colliding with an explicit term; a label missing from some \
-           constructor is accepted without an accessor"
+           constructors, or colliding with an explicit term; a label missing from some constructor \
+           is accepted without an accessor"
         ~replacement:"reject duplicated labels" );
     ( "D38 wrong name",
       followup_mutation_test ~heading:"## D38 Variadic Text Join" ~field:"export"

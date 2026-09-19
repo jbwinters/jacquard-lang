@@ -139,7 +139,7 @@ preflight(f) = {
 }
 
 reading.ok?(r) = match r { | MkReading(_, healthy, _) -> healthy }
-reading.ms(r) = match r { | MkReading(_, _, ms) -> ms }
+-- reading.ms is generated from the `ms` field label (D36)
 
 --| green means every service answered and the whole preflight fit the budget
 preflight.green?(readings) = {

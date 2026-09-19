@@ -32,8 +32,8 @@ and after expressions remain available to the following items. Stdout and exit a
   exit:0
 
 D36 labeled fields generate one ordinary pure accessor, `<type-kebab>.<label>`, for each label that
-every constructor of the type carries (SX.27). The accessor runs in both engines, and formatting
-still shows only the owning type.
+every constructor of the type carries (SX.27). The accessor runs in both engines, while formatting
+and signature listings show only the owning type, never the generated boilerplate.
 
   $ cat > generated-accessor.jac <<'EOF'
   > type Pair = | Pair(left: Int, right: Int)
@@ -45,8 +45,6 @@ still shows only the owning type.
   2
   exit:0
   $ jac check --print-sigs generated-accessor.jac
-  pair.left : (Pair) ->{} Int
-  pair.right : (Pair) ->{} Int
   _ : Int
   _ : Int
   $ jac build generated-accessor.jac -o generated-accessor-native >/dev/null

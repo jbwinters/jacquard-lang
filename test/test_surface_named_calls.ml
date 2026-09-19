@@ -290,7 +290,8 @@ let test_fail_closed_diagnostics () =
      declaration still reaches the named-construction check *)
   (match
      Reader.parse_string ~file:"named-calls.jqd"
-       "(deftype ambiguous ((tvar a)) (con ambiguous (field value (tvar a)) (field value (tvar a))))"
+       "(deftype ambiguous ((tvar a)) (con ambiguous (field value (tvar a)) (field value (tvar \
+        a))))"
    with
   | Ok [ form ] -> (
       match Kernel.of_form form with

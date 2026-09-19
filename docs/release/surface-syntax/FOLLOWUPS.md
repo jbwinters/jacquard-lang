@@ -38,7 +38,15 @@ the interpreter and the native binary, and pins the exact E1239, E1240, and
 E1241 spans. `test/test_surface_decls.ml` shows that generated accessors equal
 explicit kernel twins in resolved form and canonical identity, and that
 ineligible labels generate nothing. The surface printer suppresses accessor
-declarations, so `fmt` and rendered output show only the owning type.
+declarations and `check --print-sigs` omits their signatures, so `fmt`,
+rendered output, and signature listings show only the owning type.
+
+Migration. Existing labeled declarations keep their meaning; they gain
+accessors. A surface declaration that repeats a label (formerly refused only
+when a labeled pattern used the ambiguous label, E0308) is now refused where
+it is declared. A file that hand-writes a selector under the generated name is
+refused with E1241 and drops the hand-written copy: the only maintained case,
+the night-shift case study's `reading.ms`, was exactly the generated accessor.
 
 **Acceptance contract:**
 

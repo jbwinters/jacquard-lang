@@ -296,7 +296,8 @@ current source inventory to `1033 / 62 / 34`.
 Labeled constructor fields generate accessors (SX.27, D36). Surface lowering
 follows each labeled type declaration with one ordinary pure definition
 `<type-kebab>.<label>` per label that every constructor carries, marked
-`surface-generated` so the printer and `fmt` show only the owning type; a label
+`surface-generated` so the printer, `fmt`, and `check --print-sigs` show only
+the owning type; a label
 that only some constructors carry keeps its pattern and named-construction uses
 without an accessor. Declarations now refuse a label repeated within a
 constructor (E1239), a label whose field type differs between constructors
@@ -304,6 +305,7 @@ constructor (E1239), a label whose field type differs between constructors
 defines (E1241). `test/cli/surface.t` pins `pair.left(Pair(1, 2))` printing `1`
 under the interpreter and natively plus the three exact diagnostics,
 `test/cli/applications.t` pins generated accessors agreeing with the
-applications' hand-written selectors, and three `test/test_surface_decls.ml`
+applications' hand-written selectors, the night-shift case study drops its
+hand-written `reading.ms` (now generated, and otherwise refused as E1241), and three `test/test_surface_decls.ml`
 cases pin kernel-twin identity, eligibility, and validation, bringing the
 current source inventory to `1036 / 62 / 34`.

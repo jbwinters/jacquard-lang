@@ -784,8 +784,8 @@ type is declared: a label repeated within one constructor is E1239, a label
 whose field type differs between constructors is E1240, and an accessor name
 that an explicit definition of the same file also defines is E1241. Accessors
 carry `surface-generated` provenance, which canonical identity excludes;
-`fmt` and the surface printer show only the owning type, while `check
---print-sigs` lists the accessors' signatures. The acceptance gate and the
+`fmt`, the surface printer, and `check --print-sigs` show only the owning
+type, never the generated definitions. The acceptance gate and the
 eligibility decision are recorded in `docs/release/surface-syntax/FOLLOWUPS.md`.
 
 `Choice`'s `a` is a phantom parameter: it never appears in `choose`'s

@@ -66,7 +66,9 @@ let is_generated_accessor = function
 let declared_type = function
   | Kernel.Decl declaration :: accessors when List.for_all is_generated_accessor accessors ->
       declaration
-  | tops -> Alcotest.failf "expected one type declaration and its accessors, got %d tops" (List.length tops)
+  | tops ->
+      Alcotest.failf "expected one type declaration and its accessors, got %d tops"
+        (List.length tops)
 
 let term_groups tops =
   List.map
@@ -547,8 +549,8 @@ let installed_hashes tops =
 
 let test_generated_accessors_match_kernel_twins () =
   let surface = lower "type Pair a b = | Pair(left: a, right: b)\n" in
-  Alcotest.(check (list string)) "one accessor per label" [ "pair.left"; "pair.right" ]
-    (accessor_names surface);
+  Alcotest.(check (list string))
+    "one accessor per label" [ "pair.left"; "pair.right" ] (accessor_names surface);
   let twin =
     bootstrap
       "(deftype pair ((tvar a) (tvar b)) (con pair (field left (tvar a)) (field right (tvar b))))\n\
@@ -562,19 +564,23 @@ let test_generated_accessors_match_kernel_twins () =
       Alcotest.(check bool)
         "resolved accessor AST" true
         (Form.equal_ignoring_meta (Kernel.to_form expected) (Kernel.to_form actual));
-      Alcotest.(check string) "canonical identity" (Hash.to_hex expected_hash) (Hash.to_hex actual_hash))
+      Alcotest.(check string)
+        "canonical identity" (Hash.to_hex expected_hash) (Hash.to_hex actual_hash))
     (installed_hashes surface) (installed_hashes twin);
   (* every constructor gets a clause, so the accessor is total over a sum type *)
   let shapes = lower "type Shape = | Circle(id: Int, radius: Int) | Square(side: Int, id: Int)\n" in
-  Alcotest.(check (list string)) "only uniformly carried labels" [ "shape.id" ] (accessor_names shapes);
+  Alcotest.(check (list string))
+    "only uniformly carried labels" [ "shape.id" ] (accessor_names shapes);
   match List.rev shapes with
   | Kernel.Decl { Kernel.it = Kernel.DefTerm [ { value; _ } ]; _ } :: _ -> (
       match value.Kernel.it with
       | Kernel.Lam (_, { Kernel.it = Kernel.Match (_, [ circle; square ]); _ }) -> (
           match (circle.Kernel.cpat.it, square.Kernel.cpat.it) with
-          | ( Kernel.PCon (_, [ { Kernel.it = Kernel.PVar "field"; _ }; { Kernel.it = Kernel.PWild; _ } ]),
-              Kernel.PCon (_, [ { Kernel.it = Kernel.PWild; _ }; { Kernel.it = Kernel.PVar "field"; _ } ])
-            ) ->
+          | ( Kernel.PCon
+                (_, [ { Kernel.it = Kernel.PVar "field"; _ }; { Kernel.it = Kernel.PWild; _ } ]),
+              Kernel.PCon
+                (_, [ { Kernel.it = Kernel.PWild; _ }; { Kernel.it = Kernel.PVar "field"; _ } ]) )
+            ->
               ()
           | _ -> Alcotest.fail "accessor clauses select the wrong positions")
       | _ -> Alcotest.fail "accessor is not a one-parameter match")
@@ -582,8 +588,7 @@ let test_generated_accessors_match_kernel_twins () =
 
 let test_ineligible_labels_generate_nothing () =
   List.iter
-    (fun (label, source) ->
-      Alcotest.(check (list string)) label [] (accessor_names (lower source)))
+    (fun (label, source) -> Alcotest.(check (list string)) label [] (accessor_names (lower source)))
     [
       ("positional fields", "type Pair a b = | Pair a b\n");
       ("label on some constructors", "type Reply = | Accepted(value: Int) | Refused(reason: Text)\n");
