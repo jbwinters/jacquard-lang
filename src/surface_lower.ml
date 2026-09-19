@@ -999,8 +999,8 @@ let generated_accessors ~explicit_terms ~type_name (constructors : Kernel.conspe
         in
         error ~meta:origin.fmeta ~code:"E1241"
           (Printf.sprintf
-             "the accessor `%s` generated for field label `%s` of type `%s` collides with the \
-              explicit term `%s` defined in this file"
+             "the accessor `%s` generated for field label `%s` of type `%s` collides with `%s`, \
+              which this file declares explicitly"
              name label (surface_spelling type_name) name)
       else Ok (generated_accessor ~type_name constructors label))
     (eligible_labels ~type_name constructors)
@@ -1092,13 +1092,15 @@ let accessor_names (top : Surface_ast.top) =
           |> List.filter Reader.valid_symbol)
   | _ -> []
 
-(** [explicit_term_names tops] are the term names the file's own definitions bind, including raw
-    bootstrap [defterm] tops, which generated accessors must not collide with (E1241). *)
+(** [explicit_term_names tops] are the names the file's own definitions, effect operations, and raw
+    bootstrap [defterm] tops bind, which generated accessors must not collide with (E1241). *)
 let explicit_term_names tops =
   List.concat_map
     (fun (top : Surface_ast.top) ->
       match top.it with
       | Surface_ast.Definition { name; _ } -> [ name ]
+      | Surface_ast.EffectDecl { operations; _ } ->
+          List.map (fun (operation : Surface_ast.operation) -> operation.name) operations
       | Surface_ast.RawTop form -> (
           match Kernel.of_form form with
           | Ok (Kernel.Decl { it = Kernel.DefTerm bindings; _ }) ->
@@ -1138,12 +1140,14 @@ let lower_tops ?explicit_terms tops =
           "a signature must be immediately followed by a definition of the same name"
     | ({ Surface_ast.it = Surface_ast.Definition _; _ } as definition) :: rest ->
         loop acc ((definition, None) :: run) rest
-    | top :: rest -> (
+    | source :: rest -> (
         let* acc = flush acc run in
-        let* top = lower_nonterm_top top in
+        let* top = lower_nonterm_top source in
         match top with
-        | Kernel.Decl { it = DefType { tname; cons; _ }; _ } ->
-            (* D36: the type's accessors follow it, so they resolve its constructors *)
+        (* D36: only a surface type declaration generates accessors, since only it is validated
+           here; a raw bootstrap declaration keeps the bootstrap carrier's meaning *)
+        | Kernel.Decl { it = DefType { tname; cons; _ }; _ }
+          when match source.Surface_ast.it with Surface_ast.TypeDecl _ -> true | _ -> false ->
             let* accessors = generated_accessors ~explicit_terms ~type_name:tname cons in
             loop (List.rev_append accessors (top :: acc)) [] rest
         | _ -> loop (top :: acc) [] rest)

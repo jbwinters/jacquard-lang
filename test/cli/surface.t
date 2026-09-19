@@ -88,7 +88,7 @@ explicit term of the same file also defines (E1241) are refused at the label.
   $ printf 'type Pair = | Pair(left: Int, right: Int)\npair.left(pair) = 0\n' > colliding-label.jac
   $ jac check colliding-label.jac
   colliding-label.jac:1:20-29: error[E1241]: A generated field accessor collides with an explicit term.
-    Cause: the accessor `pair.left` generated for field label `left` of type `Pair` collides with the explicit term `pair.left` defined in this file
+    Cause: the accessor `pair.left` generated for field label `left` of type `Pair` collides with `pair.left`, which this file declares explicitly
     Next step: Rename the explicit term or the field label; the accessor is generated from the label.
   [1]
 

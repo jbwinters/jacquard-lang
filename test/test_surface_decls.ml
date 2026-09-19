@@ -631,6 +631,13 @@ let test_label_validation () =
   expect_lowering_error "collision with a raw bootstrap term" ~code:"E1241" ~span:"left: Int"
     "type Pair = | Pair(left: Int)\n\
      jqd { (defterm ((binding pair.left () (lam ((pvar p)) (lit 0))))) }\n";
+  expect_lowering_error "collision with an operation of the file" ~code:"E1241" ~span:"left: Int"
+    "type Pair = | Pair(left: Int)\nonce effect Store where { pair.left : (Int) -> Int }\n";
+  (* a raw bootstrap declaration keeps the bootstrap carrier's meaning: no accessors, and the
+     label rules that generation depends on are not applied to it *)
+  Alcotest.(check (list string))
+    "raw bootstrap type" []
+    (accessor_names (lower "jqd { (deftype pair () (con pair (field left (tref int)))) }\n"));
   (* types are compared before resolution only where resolution cannot make them equal *)
   List.iter
     (fun (label, source) ->

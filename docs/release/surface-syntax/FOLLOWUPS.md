@@ -47,9 +47,12 @@ when a labeled pattern used the ambiguous label, E0308) is now refused where
 it is declared. A file that hand-writes a selector under the generated name is
 refused with E1241 and drops the hand-written copy: the only maintained case,
 the night-shift case study's `reading.ms`, was exactly the generated accessor.
-A raw bootstrap `defterm` in the file counts as an explicit term; a definition
-in another file or already in the store rebinds the name as ordinary
-shadowing does. An escaped type name that cannot prefix a dotted name (one
+A raw bootstrap `defterm`, and an effect operation the file declares, both
+count as explicit; a definition in another file or already in the store is
+shadowed by the accessor exactly as a hand-written definition of that name
+would shadow it, and is not refused. Only a surface `type` declaration
+generates accessors: a raw bootstrap `deftype` inside a `.jac` file keeps the
+bootstrap carrier's meaning, with neither generation nor the label rules. An escaped type name that cannot prefix a dotted name (one
 ending in `?` or `!`) generates no accessors.
 
 Accessors are ordinary store terms. Only presentation hides them (the printer,

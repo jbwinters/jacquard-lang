@@ -786,7 +786,13 @@ whose field type differs between constructors is E1240, and an accessor name
 that an explicit definition of the same file also defines is E1241. Accessors
 carry `surface-generated` provenance, which canonical identity excludes;
 `fmt`, the surface printer, and `check --print-sigs` show only the owning
-type, never the generated definitions. The acceptance gate and the
+type, never the generated definitions. The accessors are ordinary terms
+otherwise: `hash` lists their identities after the type (so a label change
+shifts the indices of later tops), `diff` reports a renamed label as a removed
+and an added accessor, and coverage counts them. An accessor shadows a
+same-named prelude or store term just as a hand-written definition would. Code
+that already defines `<type>.<label>` by hand must drop that definition
+(E1241). The acceptance gate and the
 eligibility decision are recorded in `docs/release/surface-syntax/FOLLOWUPS.md`.
 
 `Choice`'s `a` is a phantom parameter: it never appears in `choose`'s
