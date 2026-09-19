@@ -29,6 +29,7 @@ let () =
       ("host-invoke-preflight", Test_host_invoke_preflight.suite);
       ("host-session", Test_host_session.suite);
       ("host-worker", Test_host_worker.suite);
+      ("frontend", Test_frontend.suite);
       ("host-kit", Test_host_kit.suite);
       ("scheduler-core", Test_scheduler_core.suite);
       ("channel-contract", Test_channel_contract.suite);

@@ -18,9 +18,7 @@ let prepare store =
   let ctx = Eval.make_ctx store in
   let* () = Prelude.wire_builtins ctx in
   Eval.set_coverage_tracking ctx false;
-  let* checker = Check.make_ctx store in
-  let* signatures = Prelude.builtin_signatures store in
-  Check.register_builtin_signatures checker signatures;
+  let* checker = Frontend.make_checker ~require_builtins:true store in
   Ok { ctx; checker }
 
 (* --- bounded operator output --- *)
