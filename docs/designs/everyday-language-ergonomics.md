@@ -138,15 +138,23 @@ rota-staff.with-available(value, field) = match value {
 ```
 
 with `surface-generated` provenance (hidden by the printer, `fmt`, and
-`--print-sigs`, exactly like accessors), a `call-abi-v1` companion
-`(positional, named value)` so `rota-staff.with-available(person, value: Nil)`
-reads at the call site, and E1241 extended to the `with-` names. The
+`--print-sigs`, exactly like accessors), and E1241 extended to the `with-`
+names. The setter's second parameter carries the field's own label as its
+call label, so `rota-staff.with-available(person, available: Nil)` reads at
+the call site, reusing D76's constructor-label reuse rule. Lowering attaches
+that label as the parameter's `surface-call-label` metadata, which is exactly
+what an explicitly labeled definition carries, so the store derives the
+`call-abi-v1` companion `(positional, named available)` through the existing
+`declaration_call_abis` path; no generated declaration carries a companion
+today (accessors have none), but no new store or `names.jqd` machinery is
+needed, only the metadata on the generated parameter. The
 signature is whatever the twin infers: for a parametric type the updated
 field's parameter is fresh, `pair.with-left : forall a b c. (Pair a b, c) ->{}
 Pair c b`, so `pair.with-left(MkPair(1, "a"), 2.5)` is `Pair Real Text` — a
 type-changing update falls out of the twin without a rule.
 
-Scenario 1 becomes `rota-staff.with-available(person, Nil)`. Scenario 2 becomes
+Scenario 1 becomes `rota-staff.with-available(person, available: Nil)` (or
+positionally, `rota-staff.with-available(person, Nil)`). Scenario 2 becomes
 `nb-snapshot.with-hits(snapshot, add(nb-snapshot.hits(snapshot), 1))`. Scenario
 3 chains three setters; each argument is evaluated once, in source order,
 because each is an ordinary call:
@@ -171,14 +179,20 @@ NbSnapshot(snapshot with cells: cells, reverse: reverse, cache: cache)
 
 elaborating to `let s = snapshot; let u1 = cells; let u2 = reverse; let u3 =
 cache; match s { | NbSnapshot(cells: _, reverse: _, cache: _, hits: h,
-computed: c) -> NbSnapshot(u1, u2, u3, h, c) }`, that is, the same twin as the
-setter chain with the intermediate values elided. It hashes as its twin, as
-named calls do (D76). Its printer needs a `field-update` provenance to
-round-trip, and `with` must become a reserved word (§11).
+computed: c) -> NbSnapshot(u1, u2, u3, h, c) }`. It hashes as that explicit
+let-and-match twin (not as the nested setter calls, which are a different
+kernel tree with the same value), as named calls hash as their positional
+twins (D76). Grammar: inside a constructor call's parentheses, exactly one
+expression (any expression; the reserved word terminates it, so `x |> f with
+a: 1` updates the pipe's result) precedes `with`, and one or more `label:
+expr` items follow it; a second positional expression on either side, or zero
+labels, is the ordinary E1220 syntax error. Its printer needs a
+`field-update` provenance to round-trip, and `with` must become a reserved
+word before Phase 2, not before Phase 1 (§11).
 
 Why this order: Phase 1 is the elaboration target and removes every
-reconstruction site in the applications with zero new syntax, no parser,
-printer, formatter, or keyword work, and no new diagnostic codes; it reuses
+reconstruction site in the applications with no new syntax, parser, printer,
+formatter, or keyword work and no new diagnostic codes; it reuses
 SX.27's generation, provenance, hiding, and collision rules; the setters are
 ordinary exports that appear in `interface-v1` manifests and can be named in
 calls. Phase 2 then has a single, already-tested meaning to elaborate to, and
@@ -229,16 +243,18 @@ boolean conjunction as one. Two library additions, no syntax:
   `text.join` does not apply), plus `list.all? : (List a, (a) ->{e} Bool)
   ->{e} Bool` and `list.any?`.
 - `int.between? : (Int, Int, Int) ->{} Bool` and `real.between?`, closed
-  intervals, arguments `(value, low, high)` with a `call-abi-v1` companion
-  `(positional, named low, named high)`.
+  intervals, arguments `(value, low, high)`, positional: the prelude is
+  bootstrap `.jqd`, which D76 keeps label-free, so a named spelling would
+  need a separate decision on companions for prelude terms (§11) and is not
+  proposed here.
 
 Scenario 4 becomes
 
 ```jacquard
 bool.all([
-  int.between?(id, low: 0, high: 99),
+  int.between?(id, 0, 99),
   bool.not(text.empty?(text.trim(name))),
-  int.between?(limit, low: 0, high: 14),
+  int.between?(limit, 0, 14),
   rota.distinct?(available),
   rota.distinct?(preference-ids),
   list.all?(available, fn (key) -> rota.member?(key, shift-ids)),
@@ -259,10 +275,17 @@ precedence and a formatter policy, and the journals do not ask for it.
 
 The design decision for task 217 that this document takes: a **namespace is a
 lowering-time name prefix, never a kernel or identity concept.** A source unit
-declares `namespace rota` once; every top-level name it introduces is bound as
-`rota.<name>` in the store, exactly as the applications spell by hand today,
-so identities, `names.jqd`, and D37 are untouched and existing prefixed
-sources keep working. A project file lists source units, entry points, pinned
+declares `namespace rota` once; every kebab-case top-level name it introduces
+(terms, operations) is bound as `rota.<name>` in the store, and every
+PascalCase name (types, constructors, effects) is bound with the prefix folded
+in, `Staff` as `RotaStaff`, exactly as the applications spell by hand today
+(D34 keeps a lowercase dotted head a term, so `rota.Staff` is not a type
+name). Generated accessors and setters derive from the folded type name
+(`rota-staff.id`), so no name gains a second dot. References inside the unit
+resolve against the unit's own prefix before the store index; that resolution
+rule is PKG.1's to specify, and the direction asked of the owner in §11 is
+only that prefixing stays a lowering-time naming rule. Identities,
+`names.jqd`, and D37 are untouched and existing prefixed sources keep working. A project file lists source units, entry points, pinned
 dependencies (by `interface-v1` identity), and exports (by name); resolution
 is deterministic in unit order, and a name bound by two units with the same
 prefix is a project diagnostic, not a silent shadow. `cat` disappears from
@@ -311,10 +334,14 @@ model.jac:12:20-25: error[E0301]: This reference names something that is not in 
 
 ```
 model.jac:40:3-52: error[E0813]: This match is not exhaustive.
-  Cause: `Refused(_)` is not covered.
-  Hint: `Reply(r with value: 1)` updates one constructor; use `reply.with-value`
-        for a total update or match the other constructors.
+  Cause: `Square(_, _)` is not covered.
+  Hint: `Circle(s with id: 2)` updates one constructor of `Shape`; use
+        `shape.with-id(s, id: 2)` for a total update or match `Square` too.
 ```
+
+(where `type Shape = | Circle(id: Int, radius: Int) | Square(id: Int, side:
+Int)` carries `id` on every constructor, so the setter exists while the
+constructor-named form does not cover `Square`).
 
 The two demos the task names show the same shape at smaller scale.
 Release-risk (`demos/case-studies/release-risk/model.jac:100-101`) reads one
@@ -366,11 +393,14 @@ migrated by SX.27).
 
 1. Approve the `Ctor(value with label: expr, ...)` spelling for Phase 2 (the
    sequencing, setters first, is decided here).
-2. Reserve `with` as a keyword now (recommended: cheap while no source uses
-   it) rather than at Phase 2.
+2. Reserve `with` as a keyword when Phase 2 starts; Phase 1 does not need it,
+   and no source uses it as a bare identifier, so deferring costs nothing.
 3. Accept list-based `bool.all`/`bool.any` and closed-interval `between?`
    as prelude additions (they change no existing identity).
-4. Confirm "namespace = lowering-time prefix" as the PKG.1 contract.
+4. Confirm "namespace = lowering-time prefix, folded into PascalCase names" as
+   the direction for PKG.1, which specifies in-unit resolution.
+5. Whether prelude (`.jqd`) terms may ever carry `call-abi-v1` companions; until
+   then prelude additions such as `between?` stay positional.
 
 ## 12. Follow-Up Backlog
 
@@ -379,7 +409,7 @@ Repository-qualified IDs; created tasks are marked *new*.
 | id | title | reuse / change | deps | priority |
 |---|---|---|---|---|
 | jacquard-lang:220 | SX.28 immutable constructor-field updates | refine: Phase 1 generated `with-` setters, then Phase 2 `Ctor(value with …)` syntax elaborating to the same twin (this document §5) | 219, 237 | high |
-| jacquard-lang:251 *new* | SX.30 predicate helpers: `bool.all`/`bool.any`, `list.all?`/`list.any?`, `int.between?`/`real.between?` | §6 | 175 | medium |
+| jacquard-lang:251 *new* | SX.30 predicate helpers: `bool.all`/`bool.any`, `list.all?`/`list.any?`, `int.between?`/`real.between?` (positional) | §6 | 175 | medium |
 | jacquard-lang:252 *new* | DX.4 near-miss hints for ineligible accessor and setter names | §8 | 219 | low |
 | jacquard-lang:217 | PKG.1 project manifests | refine acceptance: namespace-as-prefix contract, `interface-v1` pins, `cat` removed from every application README | 212, 216 | high |
 | jacquard-lang:227 | DX.1 language server | refine: generated-name hover | 212, 216 | high |
