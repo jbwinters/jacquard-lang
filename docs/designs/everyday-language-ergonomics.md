@@ -328,8 +328,9 @@ assessment.decision(assessment)                                     -- SX.27
 
 Clarifying-question (`demos/inference/clarifying-question.jac:21`) branches on
 `match real.lt?(a, b) { | True -> x | False -> y }`; `if real.lt?(a, b) then x
-else y` already exists and is the spelling `fmt` should be allowed to suggest
-(W12xx lint, DX.4 scope). No data is rebuilt in either demo.
+else y` already exists and is the shorter spelling. A lint suggesting it is a
+possible later readability warning, not a slice this document proposes. No
+data is rebuilt in either demo.
 
 Migration for the applications (APP.12, task 249): generated accessors and
 setters coexist with the hand-written selectors because their names differ
