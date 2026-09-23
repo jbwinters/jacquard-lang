@@ -42,12 +42,12 @@ journals' sources by manifest.
 one-clause selector functions (`rota.staff-id`, `staff-name`, `staff-limit`,
 `shift-id`, `shift-label`, `people`, `shifts`, `rest`, `weight`,
 `solution-score`, `solution-assignments`); formula-notebook `model.jac:25-68`
-defines 14 (`nb.cell-name`, `cell-source`, `cell-expr`, `cell-deps`, `cells`,
+defines 15 (`nb.cell-name`, `cell-source`, `cell-expr`, `cell-deps`, `cells`,
 `edges`, `cache`, `hits`, `computed`, `current`, `undo-list`, `redo-list`,
 `outcome-book`, `accepted?`, `outcome-message`). Every one is a two-line
 `match` that SX.27 now generates (`rota-staff.id`, `nb-snapshot.cells`, …);
 `test/cli/applications.t` pins that the generated and hand-written versions
-agree. Twenty-five definitions, roughly fifty lines, exist only to read a
+agree. Twenty-six definitions, roughly fifty lines, exist only to read a
 field.
 
 **Whole values rebuilt to change one field.** `NbSnapshot` has five fields.
@@ -56,6 +56,11 @@ five to change `cache` and `computed`; `:295` rebuilds all five to replace
 three. `NbBook` (three fields) is rebuilt at `:361`, `:375`, `:387`.
 `RotaStaff` has six fields; `fixtures.jac:159-175` matches all six and rebuilds
 all six to change `available`, and `tests.jac:153-160` rebuilds positionally.
+Burden compared: the notebook carries 15 selectors (30 lines) and six
+rebuild sites of five to seven lines each; the rota carries 11 selectors (22
+lines) and two rebuild sites of 17 and 8 lines. The notebook's burden is
+spread over many small sites, the rota's concentrated in wide ones; both
+disappear under the same two generated forms.
 The journals name this directly: "reading and rebuilding staff records needed
 many small selector functions and constructor matches" (rota
 `DEVELOPMENT.md:134-136`); "accessor functions and rebuilding five-field
@@ -65,7 +70,7 @@ expands that code a lot" (notebook `DEVELOPMENT.md:72-73`).
 **Predicate chains.** rota `model.jac:279-290` validates a staff record with a
 right-nested `bool.and(bool.and(int.gte?(id, 0), int.lte?(id, 99)),
 bool.and(…))` seven levels deep. The model uses `bool.and` on 33 lines and
-`int.gte?`/`int.lte?` 25 times. The journal does not complain about prefix
+`int.gte?`/`int.lte?` 29 times. The journal does not complain about prefix
 arithmetic itself (it praises exact integers, `DEVELOPMENT.md:125`) and reports
 one wrap-around bug in a subtraction (`:84-86`), which is a numerics question,
 not a syntax one.
@@ -100,7 +105,7 @@ spelling and editor diagnostics are not where the evidence points.
 2. **Record a cache hit.** Take an `NbSnapshot`, produce it with `hits + 1`
    and everything else unchanged, without listing the other four fields.
 3. **Recalculate after an edit.** Produce a snapshot with new `cells`,
-   `edges`, and `cache` while keeping `hits` and `computed`, and be certain
+   `reverse`, and `cache` while keeping `hits` and `computed`, and be certain
    each new value is evaluated exactly once, in source order, before the
    value is built.
 4. **Validate a record.** State "id in 0..99, name non-blank, limit in 0..14,
@@ -120,7 +125,7 @@ spelling and editor diagnostics are not where the evidence points.
 accessor under SX.27, lowering also generates one ordinary pure `DefTerm`
 
 ```
-<type-kebab>.with-<label> : (T, FieldType) ->{} T
+<type-kebab>.with-<label>   -- (T, FieldType) ->{} T for a monomorphic T
 ```
 
 whose body is the explicit twin
@@ -135,10 +140,11 @@ rota-staff.with-available(value, field) = match value {
 with `surface-generated` provenance (hidden by the printer, `fmt`, and
 `--print-sigs`, exactly like accessors), a `call-abi-v1` companion
 `(positional, named value)` so `rota-staff.with-available(person, value: Nil)`
-reads at the call site, and E1241 extended to the `with-` names. Type
-parameters are re-generalized by the elaboration, so
-`pair.with-left(MkPair(1, "a"), 2.5)` is `Pair Real Text` — a type-changing
-update falls out of the twin without a rule.
+reads at the call site, and E1241 extended to the `with-` names. The
+signature is whatever the twin infers: for a parametric type the updated
+field's parameter is fresh, `pair.with-left : forall a b c. (Pair a b, c) ->{}
+Pair c b`, so `pair.with-left(MkPair(1, "a"), 2.5)` is `Pair Real Text` — a
+type-changing update falls out of the twin without a rule.
 
 Scenario 1 becomes `rota-staff.with-available(person, Nil)`. Scenario 2 becomes
 `nb-snapshot.with-hits(snapshot, add(nb-snapshot.hits(snapshot), 1))`. Scenario
@@ -147,32 +153,37 @@ because each is an ordinary call:
 
 ```jacquard
 nb-snapshot.with-cache(
-  nb-snapshot.with-edges(nb-snapshot.with-cells(snapshot, cells), edges),
+  nb-snapshot.with-reverse(nb-snapshot.with-cells(snapshot, cells), reverse),
   cache,
 )
 ```
 
-**Phase 2 (SX.28b): the `with` form**, gated on evidence that chained setters
-are still a burden after the applications migrate:
+**Phase 2 (SX.28b): the `with` form.** The decision is that both phases are
+task 220's scope, in this order; Phase 2 is not gated on further evidence.
+Two of the six notebook rebuild sites already change two or three fields
+(`model.jac:225`, `:295`), and a three-deep setter chain reads its updates
+inside-out, against this document's own clarity measure, so the syntax is
+justified today:
 
 ```jacquard
-NbSnapshot(snapshot with cells: cells, edges: edges, cache: cache)
+NbSnapshot(snapshot with cells: cells, reverse: reverse, cache: cache)
 ```
 
-elaborating to `let s = snapshot; let u1 = cells; let u2 = edges; let u3 =
-cache; match s { | NbSnapshot(cells: _, edges: _, cache: _, hits: h,
+elaborating to `let s = snapshot; let u1 = cells; let u2 = reverse; let u3 =
+cache; match s { | NbSnapshot(cells: _, reverse: _, cache: _, hits: h,
 computed: c) -> NbSnapshot(u1, u2, u3, h, c) }`, that is, the same twin as the
 setter chain with the intermediate values elided. It hashes as its twin, as
 named calls do (D76). Its printer needs a `field-update` provenance to
 round-trip, and `with` must become a reserved word (§11).
 
-Why this order: Phase 1 removes every reconstruction site in the applications
-with zero new syntax, no parser, printer, formatter, or keyword work, and no
-new diagnostic codes; it reuses SX.27's generation, provenance, hiding, and
-collision rules; the setters are ordinary exports that appear in `interface-v1`
-manifests and can be named in calls. Phase 2 is a readability refinement whose
-cost (a reserved word, four new provenance paths, a new failure code) is only
-justified if the setters leave measurable burden.
+Why this order: Phase 1 is the elaboration target and removes every
+reconstruction site in the applications with zero new syntax, no parser,
+printer, formatter, or keyword work, and no new diagnostic codes; it reuses
+SX.27's generation, provenance, hiding, and collision rules; the setters are
+ordinary exports that appear in `interface-v1` manifests and can be named in
+calls. Phase 2 then has a single, already-tested meaning to elaborate to, and
+its acceptance is stated against the same sites (§13). Single-field updates
+may keep using the setter; the formatter does not rewrite one into the other.
 
 ### A.2 Eligibility and refusal (both phases)
 
@@ -236,8 +247,9 @@ bool.all([
 
 Depth 7 becomes depth 1; every condition is one list item; short-circuit
 semantics are *not* implied (all items are evaluated, as they are today in the
-nested form, since `bool.and` is a function). A short-circuiting form would be
-`if`, which exists. Identities: new prelude objects with new hashes; nothing
+nested form, since `bool.and` is a function). The short-circuiting forms
+`bool.and-then`/`bool.or-else` (thunked second argument) and `if` already
+exist and stay the spelling when evaluation must stop early. Identities: new prelude objects with new hashes; nothing
 existing changes.
 
 Alternative rejected: infix `&&`/`||`/`+`/`<`. It reopens D28, needs
@@ -298,11 +310,35 @@ model.jac:12:20-25: error[E0301]: This reference names something that is not in 
 ```
 
 ```
-model.jac:40:3-52: error[E0210]: A match is not exhaustive.
-  Cause: `Refused` is not covered.
+model.jac:40:3-52: error[E0813]: This match is not exhaustive.
+  Cause: `Refused(_)` is not covered.
   Hint: `Reply(r with value: 1)` updates one constructor; use `reply.with-value`
         for a total update or match the other constructors.
 ```
+
+The two demos the task names show the same shape at smaller scale.
+Release-risk (`demos/case-studies/release-risk/model.jac:100-101`) reads one
+field of a four-field `Assessment` with a positional wildcard pattern; the
+generated accessor already replaces it:
+
+```jacquard
+match assessment { | Assessment(_, _, _, decision) -> decision }   -- today
+assessment.decision(assessment)                                     -- SX.27
+```
+
+Clarifying-question (`demos/inference/clarifying-question.jac:21`) branches on
+`match real.lt?(a, b) { | True -> x | False -> y }`; `if real.lt?(a, b) then x
+else y` already exists and is the spelling `fmt` should be allowed to suggest
+(W12xx lint, DX.4 scope). No data is rebuilt in either demo.
+
+Migration for the applications (APP.12, task 249): generated accessors and
+setters coexist with the hand-written selectors because their names differ
+(`rota.staff-id` beside `rota-staff.id`); each hand-written selector and
+rebuild site is replaced one at a time with the demo transcript as the oracle,
+and the hand-written definition is deleted when its last use is gone. E1241
+bites only when a hand-written name equals a generated one, which the
+applications never do (the one repository case, night-shift `reading.ms`, was
+migrated by SX.27).
 
 ## 10. Compatibility, Identity, Failure
 
@@ -317,9 +353,9 @@ model.jac:40:3-52: error[E0210]: A match is not exhaustive.
   `option.with-default`; no maintained source declares such a type, and the
   applications define no `with-` names of their own.
 - Reserving `with` (A2) breaks any program using `with` as a bare identifier.
-  None exists: the word appears only inside dotted names such as
-  `list.merge-with`, which D37 keeps as single atomic tokens, so the keyword
-  cannot clash with them.
+  None exists: outside comments and text literals the word appears only
+  inside dotted names such as `list.merge-with`, which D37 keeps as single
+  atomic tokens, so the keyword cannot clash with them.
 - New prelude objects (B) have new identities; nothing is renamed.
 - Failure: setters and predicates fail like any call (arity E0803, type
   E0801); `with` on an ineligible type fails at lowering or exhaustiveness
@@ -327,10 +363,10 @@ model.jac:40:3-52: error[E0210]: A match is not exhaustive.
 
 ## 11. Decisions Requiring Owner Direction
 
-1. Ship Phase 1 setters before any update syntax (recommended), or go
-   straight to `with`.
-2. Reserve `with` as a keyword now (cheap while no source uses it) or only if
-   Phase 2 proceeds.
+1. Approve the `Ctor(value with label: expr, ...)` spelling for Phase 2 (the
+   sequencing, setters first, is decided here).
+2. Reserve `with` as a keyword now (recommended: cheap while no source uses
+   it) rather than at Phase 2.
 3. Accept list-based `bool.all`/`bool.any` and closed-interval `between?`
    as prelude additions (they change no existing identity).
 4. Confirm "namespace = lowering-time prefix" as the PKG.1 contract.
@@ -341,27 +377,33 @@ Repository-qualified IDs; created tasks are marked *new*.
 
 | id | title | reuse / change | deps | priority |
 |---|---|---|---|---|
-| jacquard-lang:220 | SX.28 immutable constructor-field updates | refine: Phase 1 generated `with-` setters (this document §5); Phase 2 `with` syntax only after Phase 1 evidence | 219, 237 | high |
+| jacquard-lang:220 | SX.28 immutable constructor-field updates | refine: Phase 1 generated `with-` setters, then Phase 2 `Ctor(value with …)` syntax elaborating to the same twin (this document §5) | 219, 237 | high |
 | jacquard-lang:251 *new* | SX.30 predicate helpers: `bool.all`/`bool.any`, `list.all?`/`list.any?`, `int.between?`/`real.between?` | §6 | 175 | medium |
 | jacquard-lang:252 *new* | DX.4 near-miss hints for ineligible accessor and setter names | §8 | 219 | low |
 | jacquard-lang:217 | PKG.1 project manifests | refine acceptance: namespace-as-prefix contract, `interface-v1` pins, `cat` removed from every application README | 212, 216 | high |
 | jacquard-lang:227 | DX.1 language server | refine: generated-name hover | 212, 216 | high |
 | jacquard-lang:221 | SX.29 Result propagation | unchanged; reconciled as orthogonal (it elaborates control flow, not data) | 209 | medium |
-| jacquard-lang:249 | APP.12 retire application workarounds | consumes 220 Phase 1 and 251 | 217, 219, 220, 238–248 | — |
+| jacquard-lang:249 | APP.12 retire application workarounds | consumes 220 and 251; migration steps in §9 | 217, 219, 220, 238–248 | — |
+| jacquard-lang:250 | APP.13 documentation-only onboarding | unchanged; its clean-checkout exercise is the first external measurement of §13 | 217, 247, 248 | — |
+| jacquard-lang:238–248 | APP.1–APP.11 application repairs | all done; they fixed named list arguments, text primitives, numeric presentation, console end of input, declaration cascades, the scrutinee lint, doctest modes, and the fixtures this document counts on | — | — |
+| jacquard-lang:168 / 169 | UX.0 readability protocol (done) / UX.1 benchmark run (deferred) | reused as the measurement instrument if a Phase 2 cohort is ever added; this document adds no cohort and must not disturb the protocol gate | — | — |
+| jacquard-lang:174 / 175 | TR.0 / TR.1 explicit dictionaries (done) | upheld: §6 adds predicates as ordinary prelude terms and no operators | — | — |
 
 Acceptance criteria and test strategy for the new tasks are recorded in Task
 Master; the measurable criteria below apply to 220 Phase 1 and 251.
 
 ## 13. Validation And Measurable Acceptance
 
-- The 25 hand-written selectors and the 8 reconstruction sites in the two
-  models are replaceable by generated accessors and setters with byte-identical
+- The 26 hand-written selectors and the 8 reconstruction sites (six in the
+  notebook model, two in the rota fixtures and tests) are replaceable by generated accessors and setters with byte-identical
   demo transcripts and interpreter/native parity (`applications.t`).
 - Each rewritten update site evaluates its source value and each new field
   exactly once, in source order: pinned with effect counters in the SX.28
   suite, as D76 pins named-call order.
 - `jac fmt` is idempotent on the rewritten models; `hash` of a setter equals
-  the hash of its hand-written twin.
+  the hash of its hand-written twin; after Phase 2, `hash` of a `with` form
+  equals the hash of its explicit let-and-match twin, and the two multi-field
+  notebook sites (`model.jac:225`, `:295`) read as one `with` form each.
 - The rota validation predicate's nesting depth drops from 7 to 1 with the
   same truth table on the existing fixtures.
 - The readability protocol regression gate is unchanged (no cohort is added;
