@@ -128,6 +128,10 @@ Read these together when reviewing the historical 0.1 candidate boundary:
   hash-bound companion ABI, compatibility boundary, and explicit non-claims.
 - `release/named-call-arguments/EVIDENCE.md`: parser/resolver/store/hash/native
   evidence and the current test inventory for named calls.
+- `designs/everyday-language-ergonomics.md`: DES.4 design proposal (not a
+  contract): evidence from the four applications, generated field setters
+  before any update syntax, list-based predicates instead of operators,
+  namespace-as-prefix for PKG.1, editor hints, and the follow-up backlog.
 - `release/surface-syntax/MANIFEST.sha256`: historical surface-syntax evidence
   integrity set, validated by the surface manifest checker. Successor milestones
   publish separate reconstructible overlays rather than extending this set.
