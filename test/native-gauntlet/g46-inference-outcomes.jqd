@@ -1,0 +1,30 @@
+; INF.1: the typed outcomes of dist.enumerate-v1 and dist.sample-lw-v1 — a
+; posterior, impossible evidence (an exact zero observation, a zero-mass
+; categorical draw), an underflowed product, a negative weight, and an
+; exhausted budget — byte-identical natively; the sampled cases pin the
+; C driver's surviving-run filter against the interpreter's.
+(let nonrec (pvar zero-cat)
+  (lam () (app (var sample) (app (var categorical) (app (var cons) (app (var mk-pair) (lit 1) (lit 0.0)) (app (var cons) (app (var mk-pair) (lit 2) (lit 0.0)) (var nil))))))
+(let nonrec (pvar tiny)
+  (lam () (let nonrec (pwild) (app (var observe) (app (var categorical) (app (var cons) (app (var mk-pair) (lit 1) (lit 1e-200)) (var nil))) (lit 1))
+      (let nonrec (pwild) (app (var observe) (app (var categorical) (app (var cons) (app (var mk-pair) (lit 1) (lit 1e-200)) (var nil))) (lit 1)) (lit 1))))
+(let nonrec (pvar soft)
+  (lam () (let nonrec (pvar c) (app (var sample) (app (var bernoulli) (lit 0.5)))
+      (let nonrec (pwild) (app (var observe) (app (var bernoulli) (lit 0.7)) (var c))
+        (match (var c) (clause (pcon true) (lit 1)) (clause (pcon false) (lit 0))))))
+(let nonrec (pvar half)
+  (lam () (let nonrec (pvar c) (app (var sample) (app (var bernoulli) (lit 0.5)))
+      (let nonrec (pwild) (app (var observe) (app (var bernoulli) (lit 1.0)) (var c))
+        (match (var c) (clause (pcon true) (lit 1)) (clause (pcon false) (lit 0))))))
+(let nonrec (pvar negative)
+  (lam () (app (var sample) (app (var categorical) (app (var cons) (app (var mk-pair) (lit 1) (lit -0.5)) (var nil)))))
+(app (var cons) (app (var dist.enumerate-v1) (var soft) (lit 8))
+  (app (var cons) (app (var dist.enumerate-v1) (var soft) (lit 1))
+  (app (var cons) (app (var dist.enumerate-v1) (var zero-cat) (lit 8))
+  (app (var cons) (app (var dist.enumerate-v1) (var tiny) (lit 8))
+  (app (var cons) (app (var dist.enumerate-v1) (var negative) (lit 8))
+  (app (var cons) (app (var dist.sample-lw-v1) (var soft) (lit 8) (lit 42))
+  (app (var cons) (app (var dist.sample-lw-v1) (var half) (lit 8) (lit 42))
+  (app (var cons) (app (var dist.sample-lw-v1) (var zero-cat) (lit 8) (lit 42))
+  (app (var cons) (app (var dist.sample-lw-v1) (var tiny) (lit 8) (lit 42))
+  (var nil)))))))))))))))

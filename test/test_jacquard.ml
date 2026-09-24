@@ -87,6 +87,7 @@ let () =
       ("text", Test_text.suite);
       ("map", Test_map.suite);
       ("dist-lib", Test_dist_lib.suite);
+      ("inference-outcomes", Test_inference_outcomes.suite);
       ("world", Test_world.suite);
       ("rings", Test_rings.suite);
       ("warp", Test_warp.suite);

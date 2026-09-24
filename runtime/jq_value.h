@@ -543,6 +543,7 @@ jq_value jq_i_text_from_int(jq_rt *rt, const jq_value *a);
 jq_value jq_i_support(jq_rt *rt, const jq_value *a);
 jq_value jq_i_pmf(jq_rt *rt, const jq_value *a);
 jq_value jq_i_dist_sample_lw(jq_rt *rt, const jq_value *a);
+jq_value jq_i_dist_sample_lw_weights_v1(jq_rt *rt, const jq_value *a);
 jq_value jq_i_code_of_int(jq_rt *rt, const jq_value *a);
 jq_value jq_i_code_of_real(jq_rt *rt, const jq_value *a);
 jq_value jq_i_code_of_hash(jq_rt *rt, const jq_value *a);

@@ -1236,6 +1236,7 @@ static jq_value draw_dist(jq_rt *rt, int64_t *rng, jq_value d) {
 typedef struct lw_state {
   int64_t rng;
   double weight;
+  int possible; /* no exact zero observation factor yet (INF.1) */
 } lw_state;
 
 /* jq_perform's root interception during a weighted run (after grants —
@@ -1247,6 +1248,15 @@ jq_value jq_lw_sample(jq_rt *rt, jq_value dv) {
     jq_runtime_failf(JQ_ERROR_TYPE, "%s is not a distribution value", s);
   }
   check_dist(dv);
+  if (is_con_named(dv, "categorical")) {
+    /* a support with no mass is an impossible draw (INF.1; the legacy driver ignores it) */
+    jq_value entries = support_of(rt, dv);
+    double total = 0.0;
+    for (jq_value it = entries; is_con_named(it, "cons"); it = jq_con_fields(it)[1])
+      total += jq_real_val(jq_con_fields(jq_con_fields(it)[0])[1]);
+    jq_drop(entries);
+    if (total == 0.0) st->possible = 0;
+  }
   jq_value x = draw_dist(rt, &st->rng, dv);
   jq_drop(dv);
   return x; /* the resume: sample is ancestral, one value per op */
@@ -1259,7 +1269,9 @@ jq_value jq_lw_observe(jq_rt *rt, jq_value dv, jq_value v) {
     jq_runtime_failf(JQ_ERROR_TYPE, "%s is not a distribution value", s);
   }
   check_dist(dv);
-  st->weight *= pmf_mass(rt, dv, v);
+  double mass = pmf_mass(rt, dv, v);
+  if (mass == 0.0) st->possible = 0;
+  st->weight *= mass;
   jq_drop(dv);
   jq_drop(v);
   return JQ_UNIT;
@@ -1296,7 +1308,7 @@ jq_value jq_i_dist_sample_lw(jq_rt *rt, const jq_value *a) {
   int64_t master = jq_int_val(a[2]);
   if (samples <= 0)
     jq_runtime_error("arithmetic error: dist.sample-lw needs a positive sample count");
-  lw_state st = { 0, 1.0 };
+  lw_state st = { 0, 1.0, 1 };
   lw_run *runs = malloc((size_t)samples * sizeof(lw_run));
   if (!runs) jq_runtime_error("jacquard runtime: out of memory");
   /* each run is the interpreter's fresh state machine: outer in-language
@@ -1365,6 +1377,71 @@ jq_value jq_i_dist_sample_lw(jq_rt *rt, const jq_value *a) {
     free(entries[i].key);
   }
   free(entries);
+  free(runs);
+  jq_drop(thunk);
+  return list;
+}
+
+/* --- dist.sample-lw-weights-v1 (INF.1): the same seeded runs, unclassified ---
+ *
+ * Runs exactly as jq_i_dist_sample_lw (same stream, same run isolation) and
+ * returns the possible runs (no exact zero observation factor, no draw from a
+ * zero-mass categorical support), oldest first,
+ * as (value, unnormalized weight) pairs; the prelude's dist.sample-lw-v1
+ * classifies them. Matches Infer_dist.lw_surviving_runs. */
+jq_value jq_i_dist_sample_lw_weights_v1(jq_rt *rt, const jq_value *a) {
+  jq_value thunk = a[0];
+  if (!jq_is_int(a[1]) || !jq_is_int(a[2])) {
+    char *s0 = jq_show(a[0]);
+    char *s1 = jq_show(a[1]);
+    char *s2 = jq_show(a[2]);
+    jq_runtime_failf(JQ_ERROR_TYPE,
+                     "dist.sample-lw-weights-v1 expects a thunk and two ints, got %s, %s, %s",
+                     s0, s1, s2);
+  }
+  int64_t samples = jq_int_val(a[1]);
+  int64_t master = jq_int_val(a[2]);
+  if (samples <= 0)
+    jq_runtime_error(
+        "arithmetic error: dist.sample-lw-weights-v1 needs a positive sample count");
+  lw_state st = { 0, 1.0, 1 };
+  lw_run *runs = malloc((size_t)samples * sizeof(lw_run));
+  if (!runs) jq_runtime_error("jacquard runtime: out of memory");
+  int64_t kept = 0;
+  uint32_t saved_floor = rt->hs_floor;
+  void *saved_lw = rt->lw;
+  const char *saved_override = rt->unhandled_effect_override;
+  for (int64_t i = 0; i < samples; i++) {
+    st.rng = jq_rng_split(&master);
+    st.weight = 1.0;
+    st.possible = 1;
+    rt->hs_floor = rt->hs_len;
+    rt->lw = &st;
+    rt->unhandled_effect_override = "(not handled during inference)";
+    jq_dup(thunk);
+    rt->apply_n = 0;
+    jq_runtime_inference_enter();
+    jq_value v = jq_tc_drive(
+        rt, jq_apply(rt, thunk, JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT, JQ_UNIT,
+                     JQ_UNIT, JQ_UNIT));
+    jq_runtime_inference_leave();
+    rt->hs_floor = saved_floor;
+    rt->lw = saved_lw;
+    rt->unhandled_effect_override = saved_override;
+    if (st.possible) {
+      runs[kept].value = v;
+      runs[kept].weight = st.weight;
+      runs[kept].key = NULL;
+      kept++;
+    } else {
+      jq_drop(v);
+    }
+  }
+  jq_value list = rt->v_nil;
+  for (int64_t i = kept - 1; i >= 0; i--) {
+    jq_value pr = jq_con(rt->ci_pair, (jq_value[]){ runs[i].value, jq_real(runs[i].weight) });
+    list = jq_con(rt->ci_cons, (jq_value[]){ pr, list });
+  }
   free(runs);
   jq_drop(thunk);
   return list;

@@ -650,3 +650,30 @@ posterior.sample-evidence-v1 3
 # --- 30-posterior-risk-handler (GM.21 exact replay and Judge adapter)
 posterior.replay-exact-v1 3
 judge.posterior-exact-v1 3
+# --- 31-inference-outcome (INF.1 typed inference outcomes)
+inference-method-v1 2
+inference-exact-enumeration-v1 2
+inference-likelihood-weighting-v1 2
+inference-metadata-v1 2
+inference-numeric-v1 2
+inference-underflow-v1 2
+inference-non-finite-v1 2
+inference-negative-mass-v1 2
+inference-failure-v1 2
+inference-impossible-v1 2
+inference-exhausted-v1 2
+inference-numeric-failure-v1 2
+inference-posterior-v1 2
+dist.finite-v1? 2
+dist.zero-v1? 2
+dist.any-weight-v1? 2
+dist.divide-weights-v1 2
+dist.classify-v1 2
+dist.enum-v1-path 2
+dist.enum-v1-factor 2
+dist.enum-v1-branches 2
+dist.enum-v1-run 2
+dist.enum-v1-exhausted 2
+dist.enumerate-v1 2
+dist.sample-lw-weights-v1 2
+dist.sample-lw-v1 2

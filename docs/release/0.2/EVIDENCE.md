@@ -32,8 +32,8 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1060`
-- Cram transcript files: `63`
+- Alcotest/QCheck cases: `1068`
+- Cram transcript files: `64`
 - Documentation examples: `34` named examples across `8` documents
 
 The development suite also includes corpus goldens, release-manifest checks,
@@ -358,3 +358,15 @@ startup note is best-effort, so a broken standard error cannot change the exit
 (`test/cli/host-worker.t`, `docs/host-worker-v0.md`). The five
 `test/test_invocation.ml` cases bring the current source inventory to
 `1060 / 63 / 34`.
+
+Inference outcomes are typed (INF.1,
+`docs/release/inference-outcomes/DECISION.md`). `dist.enumerate-v1` and
+`dist.sample-lw-v1` return a `result` that separates a normalized posterior
+from impossible evidence, an exhausted terminal-path budget, and numerical
+failure (underflow, non-finite, or negative mass), with method, completeness,
+seed, bound, and explored-count metadata; `jacquard infer` applies the same
+classification (E0901, new E0917 and E0918, `--max-branches`, `--metadata`).
+The released `dist.enumerate` and `dist.sample-lw` identities are unchanged.
+The eight `test/test_inference_outcomes.ml` cases, `test/cli/inference-outcomes.t`,
+and the native gauntlet case g46 bring the current source inventory to
+`1068 / 64 / 34`.

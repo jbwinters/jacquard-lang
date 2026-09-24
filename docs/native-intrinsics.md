@@ -49,6 +49,7 @@ public name index changes.
 | debug.inspect | 1 | yes | `jq_show` parity; `JQ_SECRET` always yields the fixed `<secret redacted>` marker |
 | pmf, support | 2/1 | yes | task 71 (the enum handler reaches them); name-recognized dist cons, show-based pmf equality, interpreter's exact error texts |
 | dist.sample-lw | 3 | yes | task 72; exact seeded stream (split per run, one draw per sample), merge/normalize/sort on the rendering key, E0901 on an empty posterior |
+| dist.sample-lw-weights-v1 | 3 | yes | INF.1; the same seeded runs as dist.sample-lw, returned oldest first and unnormalized, without the impossible runs (an exact zero observation factor, or a draw from a zero-mass categorical); `dist.sample-lw-v1` classifies them in the prelude |
 | obsolete hyphenated real family public names | | no | removed in SS.22; historical IDs are internal and create no duplicate objects |
 
 Every Text and numeric builtin the interpreter ships is in the table above with

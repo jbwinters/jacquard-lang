@@ -130,6 +130,9 @@ Read these together when reviewing the historical 0.1 candidate boundary:
   identities, name-independent signatures, call labels, hidden members),
   their identity and compatibility rules, import validation, and the
   export/quotation boundary.
+- `release/inference-outcomes/DECISION.md`: INF.1 typed inference outcomes
+  (posterior, impossible, exhausted, numerical failure) with run metadata, the
+  shared library/CLI classification, and migration from the released drivers.
 - `release/named-call-arguments/EVIDENCE.md`: parser/resolver/store/hash/native
   evidence and the current test inventory for named calls.
 - `designs/everyday-language-ergonomics.md`: DES.4 design proposal (not a
