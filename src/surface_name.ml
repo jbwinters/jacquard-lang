@@ -38,6 +38,7 @@ let reserved =
     "where";
     "forall";
     "jqd";
+    "try";
   ]
 
 let is_reserved s = List.mem s reserved

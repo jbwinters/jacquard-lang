@@ -145,6 +145,10 @@ When adding valid corpus files, regenerate the golden hashes with
   scopes grants, observers, coverage, and teardown to one evaluation over a
   reusable `Eval.ctx` (Once ownership stays evaluator-lifetime);
   `test/test_invocation.ml`.
+- Result propagation (SX.29, D77): `try` block items in `src/surface_parse.ml`,
+  `src/surface_lower.ml` (`lower_block`), and `src/surface_print.ml`
+  (`try_item`); `test/test_surface_try.ml`, `test/cli/surface-try.t`,
+  `demos/request-validation/`.
 - Dist and inference: `prelude/06-dist.jqd`, `prelude/13-dist-lib.jqd`,
   `src/infer_dist.ml`, `test/test_infer.ml`.
 - Warp: `prelude/15-warp.jqd`, `prelude/16-gen.jqd`, `src/warp.ml`,

@@ -91,6 +91,15 @@ let diagnostic_contract code =
       ( Diag.Surface,
         "An effect operation mode is invalid",
         "Give each operation exactly one compatible `once` or `multi` mode." )
+  | "E1242" ->
+      ( Diag.Surface,
+        "`try` is used outside a block item",
+        "Bind the Result in a block with `let x = try e`, or write `try e` on its own line." )
+  | "E1244" ->
+      ( Diag.Surface,
+        "A recursive local binding uses `try`",
+        "Bind the local function with `let rec`, then propagate its Result with a separate `let x \
+         = try f(...)`." )
   | "E1220" | _ ->
       ( Diag.Surface,
         "Surface syntax is invalid",
@@ -642,6 +651,12 @@ and parse_primary state ~allow_newlines =
   | Surface_lex.Keyword "unquote" ->
       let keyword = advance state in
       within_recovery_container state (fun () -> parse_unquote state keyword)
+  | Surface_lex.Keyword "try" ->
+      report_code state token "E1242"
+        "`try` is a block item: write `let x = try e` or `try e` on its own line of a block, so \
+         the scope an `Err` leaves is the enclosing block";
+      ignore (advance state);
+      parse_expr state ~allow_newlines
   | Surface_lex.Invalid _ ->
       ignore (advance state);
       expr_hole state token
@@ -1716,6 +1731,12 @@ and parse_block state opening =
         | Surface_lex.Keyword "let" ->
             items := parse_let_item state (advance state) :: !items;
             finish_block_item state ~opening ~recovered_close items closing finished
+        | Surface_lex.Keyword "try" ->
+            let keyword = advance state in
+            let value = parse_expr state ~allow_newlines:false in
+            let meta = meta_from_token_to_meta keyword value.meta in
+            items := Surface_ast.Try { binder = None; value; meta } :: !items;
+            finish_block_item state ~opening ~recovered_close items closing finished
         | _ ->
             let expression = parse_expr state ~allow_newlines:false in
             items := Surface_ast.Expr expression :: !items;
@@ -1777,14 +1798,28 @@ and parse_let_item state keyword =
   in
   ignore (expect state Surface_lex.Equal "`=` in the local binding");
   skip_continuation state;
-  let value = parse_expr state ~allow_newlines:false in
-  let meta = meta_from_token_to_meta keyword value.meta in
-  let meta =
-    match params_meta with
-    | Some params_meta -> Meta.with_surface_container "params" params_meta meta
-    | None -> meta
-  in
-  Surface_ast.Let { recursive; binder; params; value; meta }
+  match (current state).Surface_lex.token with
+  | Surface_lex.Keyword "try" when not recursive ->
+      ignore (advance state);
+      let value = parse_expr state ~allow_newlines:false in
+      let meta = meta_from_token_to_meta keyword value.meta in
+      Surface_ast.Try { binder = Some binder; value; meta }
+  | Surface_lex.Keyword "try" ->
+      report_code state (current state) "E1244"
+        "`let rec` binds a local function and cannot propagate a Result with `try`";
+      ignore (advance state);
+      let value = parse_expr state ~allow_newlines:false in
+      let meta = meta_from_token_to_meta keyword value.meta in
+      Surface_ast.Let { recursive; binder; params; value; meta }
+  | _ ->
+      let value = parse_expr state ~allow_newlines:false in
+      let meta = meta_from_token_to_meta keyword value.meta in
+      let meta =
+        match params_meta with
+        | Some params_meta -> Meta.with_surface_container "params" params_meta meta
+        | None -> meta
+      in
+      Surface_ast.Let { recursive; binder; params; value; meta }
 
 and parse_type state ~allow_newlines =
   with_nesting state (fun () ->
@@ -2793,6 +2828,9 @@ let structural_depth_violation (top : Surface_ast.top) =
                   | Let { binder; params; value; _ } ->
                       push_pat child_depth binder;
                       List.iter (push_pat child_depth) params;
+                      push_expr child_depth value
+                  | Try { binder; value; _ } ->
+                      Option.iter (push_pat child_depth) binder;
                       push_expr child_depth value)
                 items
           | Match (subject, clauses) ->
@@ -2964,6 +3002,10 @@ module Trivia_ownership = struct
 
   and block_item depth = function
     | Surface_ast.Expr expression -> expr depth expression
+    | Try { binder; value; meta } ->
+        slot Item meta
+        @ (match binder with Some binder -> pat (depth + 1) binder | None -> [])
+        @ expr (depth + 1) value
     | Let { binder; params; value; meta; _ } ->
         container "params" meta @ slot Item meta
         @ pat (depth + 1) binder
@@ -3363,6 +3405,13 @@ module Trivia_ownership = struct
             params = List.map (map_pat additions) item.params;
             value = map_expr additions item.value;
             meta = apply_owner additions Item item.meta;
+          }
+    | Try { binder; value; meta } ->
+        Try
+          {
+            binder = Option.map (map_pat additions) binder;
+            value = map_expr additions value;
+            meta = apply_owner additions Item meta;
           }
 
   and map_clause additions (clause : Surface_ast.clause) =

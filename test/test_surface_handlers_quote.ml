@@ -153,7 +153,8 @@ let rec has_quote_expr expression =
   | Block items ->
       List.exists
         (function
-          | Let { value; _ } -> has_quote_expr value | Expr expression -> has_quote_expr expression)
+          | Let { value; _ } | Try { value; _ } -> has_quote_expr value
+          | Expr expression -> has_quote_expr expression)
         items
   | Match (subject, clauses) ->
       has_quote_expr subject || List.exists (fun clause -> has_quote_expr clause.cbody) clauses

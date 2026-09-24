@@ -67,6 +67,7 @@ let keywords =
     "where";
     "forall";
     "jqd";
+    "try";
   ]
 
 type state = {

@@ -490,7 +490,7 @@ arithmetic receives a visible dictionary and calls, for example,
 elaborate to that exact value and argument; no such sugar is approved here.
 
 Reserved keywords, the complete list: `type effect once multi fn let rec match handle
-return resume quote unquote if then else as where forall jqd`. Comments are `--` to end
+return resume quote unquote if then else as where forall jqd try`. Comments are `--` to end
 of line; `--|` is a doc comment attaching to the next declaration's `doc`
 metadata. Strings are `"..."` with the usual escapes, UTF-8 per D3. Numbers
 are `Int` and `Real` literals. Blocks separate items by newline or `;`,
@@ -909,6 +909,71 @@ operator needs none; expressions are literals, names, calls `f(a, b)`,
 parenthesized forms, and the constructs above. A recursive-descent parser
 for this is a short week including recovery, which is L7 holding.
 
+### Result propagation (D77)
+
+`try` propagates the `Err` of a `Result` out of the enclosing block and
+otherwise continues with the `Ok` payload. It is a block item, in one of two
+forms:
+
+```text
+let p = try e        -- bind the Ok payload with an irrefutable pattern p
+try e                -- require Ok, discard the payload
+```
+
+The rest of the block, from the item after the `try` to the block's final
+expression, runs only when `e` is `Ok`. When `e` is `Err(x)`, the whole block
+evaluates to `Err(x)`. The construct is local sugar with no new kernel form.
+
+```text
+{ let p = try e          match e {
+  rest… }           ==     | Ok(p) -> { rest… }
+                             | Err(error) -> Err(error)
+                           }
+```
+
+The elaboration fixes these properties:
+
+- **Scope.** The scope is the innermost enclosing `{ … }` block. A `try` inside
+  a nested block, an `fn` body, a handler clause, or a match arm ends only that
+  block. It never returns from an outer function or escapes a handler: the
+  caller receives the inner block's `Result` as an ordinary value. Loops are
+  recursion, so a `try` in a recursive function ends that call's block and the
+  caller decides what to do with the `Err`.
+- **Error type.** The error type is preserved exactly. Every propagating
+  `try` and the block's final expression must agree on `Result E _` for one
+  `E`. There is no implicit conversion, instance search, or `From`-style
+  mapping: a different error type is an ordinary type mismatch (E0801).
+- **Order and evaluation.** Evaluation is left to right. `e` is evaluated
+  once, before any later item. After an `Err`, nothing later in the block is
+  evaluated, including the effects it would have performed.
+- **Effects and resumptions.** The elaboration is a `match`. It adds no
+  effect, handler, or `Throw` operation, so effect rows are exactly those of
+  the written code. A `once` resumption is used as often as in the explicit
+  match, and each `multi` resumption propagates independently.
+- **Identity.** The hash of a `try` block equals the hash of the hand-written
+  `match` with the binder `error`. The formatter prints the `try` spelling
+  back. `jacquard export` writes the elaborated `match` to `.jqd`, and a quoted
+  `try` stores its elaboration.
+
+**Constructor names.** Like `if` (`True`/`False`) and list literals
+(`Cons`/`Nil`), the elaboration names the prelude constructors `Ok` and `Err`
+by name. A file that declares its own constructors spelled `Ok` or `Err`
+rebinds them for `try` too: `try` then matches that file's constructors. That
+is a type error unless they are shaped like `Result`, and it is how a custom
+two-constructor type becomes propagatable. `try` is therefore not restricted
+to the prelude `Result` by identity. Protecting all three sugars by
+constructor identity is follow-up work (jacquard-lang:269).
+
+`try` is a reserved word. It is refused in any other position:
+
+| code | position |
+|---|---|
+| E1242 | inside an expression, for example `f(try x)` |
+| E1243 | as the final item of a block; the final expression is already the block's Result |
+| E1244 | on `let rec` |
+
+A refutable binder is refused as for `let` (E0206).
+
 ## 6. Excluded from v0
 
 Operators beyond pipe (argued above). Guards, or-patterns (kernel-excluded).
@@ -1066,3 +1131,4 @@ in commit messages and task dependencies.)
 | D42 | operation-mode defaults | no surface default; every operation is explicit, while bootstrap legacy `multi` remains encoded by absence |
 | D75 | text interpolation | `$"text {expr}"` lowers locally to one resolved variadic `text.join`; expressions are explicitly `Text`, `{` is escaped as `{{`, and nested marked interpolation is rejected in 0.1 |
 | D76 | named calls | explicit labels on direct top-level terms and operations, constructor field-label reuse, positional-prefix/labeled-suffix exact arity, source-order evaluation, and a versioned hash-bound companion ABI; locals/HOFs/defaults/puns and quoted named syntax are excluded |
+| D77 | Result propagation | block items `let p = try e` and `try e` elaborate to a two-armed `Ok`/`Err` match over the rest of the innermost block; the error type is preserved exactly with no conversion; evaluation is left to right with nothing after the first `Err`; no kernel form, effect, or Throw; hashes equal the hand-written match; `try` is reserved and refused elsewhere (E1242–E1244) |

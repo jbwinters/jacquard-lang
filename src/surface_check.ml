@@ -117,6 +117,9 @@ and project_block_item = function
           params = List.map project_pat binding.params;
           value = project_expr binding.value;
         }
+  | Surface_ast.Try item ->
+      Surface_ast.Try
+        { item with binder = Option.map project_pat item.binder; value = project_expr item.value }
 
 let project_top (top : Surface_ast.top) =
   let it =
@@ -459,6 +462,9 @@ and lint_block_item names constructors = function
       lint_pat names constructors binding.binder
       @ List.concat_map (lint_pat names constructors) binding.params
       @ lint_expr names constructors binding.value
+  | Surface_ast.Try item ->
+      Option.fold ~none:[] ~some:(lint_pat names constructors) item.binder
+      @ lint_expr names constructors item.value
 
 let lint_top names constructors (top : Surface_ast.top) =
   match top.it with

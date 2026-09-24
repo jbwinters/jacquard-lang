@@ -32,8 +32,8 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1068`
-- Cram transcript files: `64`
+- Alcotest/QCheck cases: `1075`
+- Cram transcript files: `65`
 - Documentation examples: `34` named examples across `8` documents
 
 The development suite also includes corpus goldens, release-manifest checks,
@@ -370,3 +370,14 @@ The released `dist.enumerate` and `dist.sample-lw` identities are unchanged.
 The eight `test/test_inference_outcomes.ml` cases, `test/cli/inference-outcomes.t`,
 and the native gauntlet case g46 bring the current source inventory to
 `1068 / 64 / 34`.
+
+Result propagation is surface sugar (SX.29, D77 in `docs/surface-syntax.md`).
+The block items `let p = try e` and `try e` elaborate to a two-armed `Ok`/`Err`
+match over the rest of the innermost block. The error type is preserved
+exactly, evaluation is left to right with nothing after the first `Err`, and
+no kernel form, effect or Throw is added. A `try` block hashes identically to
+its hand-written match, the formatter keeps the spelling, and interpreter and
+native output agree. `demos/request-validation/validate.jac` validates a
+request in several fallible steps. The seven `test/test_surface_try.ml` cases
+and `test/cli/surface-try.t` bring the current source inventory to
+`1075 / 65 / 34`.
