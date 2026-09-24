@@ -190,9 +190,9 @@ operation and its own handler.
    the two-store program above with instance labels while the runtime still
    serves `get-at(count)` at the nearest `State` handler returns the `Text`
    store where an `Int` was promised. Generated search finds such programs
-   (10 in the pinned run). Instance typing therefore *requires* instance
+   (2 in the pinned run). Instance typing therefore *requires* instance
    dispatch; the two cannot be adopted separately.
-2. **Escape through the result, a closure, a list, or a resumption result** —
+2. **Escape through the result, a closure, a list, a resumption result, or an outward effect payload** —
    `state.scoped(0, fn (c) -> c)`, `… -> fn () -> state.get-at(c)`,
    `amb(… c …)` — is rejected by the rigid-label check; the same programs run
    under a permissive checker and hit a stale capability.
