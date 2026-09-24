@@ -132,6 +132,10 @@ Read these together when reviewing the historical 0.1 candidate boundary:
   contract): evidence from the four applications, generated field setters
   before any update syntax, list-based predicates instead of operators,
   namespace-as-prefix for PKG.1, editor hints, and the follow-up backlog.
+- `designs/execution-exploration.md`: DES.0 design proposal (not a contract)
+  for recording an execution, forking one typed observation or named random
+  choice under models, comparing the two executions, and exporting a hermetic
+  Warp regression case; with the EXP.1–EXP.5 and EXP.7 follow-up backlog and its reconciliation with existing tasks.
 - `designs/scoped-effect-instances.md`: TS.1 design for opt-in scoped,
   parameterized effect instances beside TS.0's ambient operations, with its
   executable model and the slices for TS.2.
