@@ -136,6 +136,11 @@ When adding valid corpus files, regenerate the golden hashes with
   resolve, install, read-only check, sealed checked artifact, transactional
   store installation): `src/frontend.mli`, `test/test_frontend.ml`. Internal
   seam, not a public embedding ABI.
+- Public-interface identities (API.1): `src/interface.mli` (interface-v1
+  manifests: exports with exact identities, name-independent signatures, call
+  labels, hidden members; identity, verification, API diff),
+  `docs/release/api-identities/DECISION.md`, `test/test_interface.ml`,
+  `test/cli/interface.t`. `jacquard interface emit|verify|diff`.
 - Dist and inference: `prelude/06-dist.jqd`, `prelude/13-dist-lib.jqd`,
   `src/infer_dist.ml`, `test/test_infer.ml`.
 - Warp: `prelude/15-warp.jqd`, `prelude/16-gen.jqd`, `src/warp.ml`,

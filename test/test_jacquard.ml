@@ -31,6 +31,7 @@ let () =
       ("host-worker", Test_host_worker.suite);
       ("frontend", Test_frontend.suite);
       ("scoped-instances", Test_scoped_instances_model.suite);
+      ("interface", Test_interface.suite);
       ("host-kit", Test_host_kit.suite);
       ("scheduler-core", Test_scheduler_core.suite);
       ("channel-contract", Test_channel_contract.suite);

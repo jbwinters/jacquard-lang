@@ -151,6 +151,11 @@ module Checked : sig
   val dependencies : t -> Hash.t list
   (** Sorted identities the source references but does not itself introduce. *)
 
+  val interface : t -> Interface.t
+  (** The public interface the source introduces: its final (name, kind) bindings with exact
+      identities, name-independent checked signatures, call labels, and hidden members
+      ({!Interface}). Consumers pin, compare, and validate imports through it. *)
+
   type stale =
     | Prelude_changed  (** The store's prelude identity differs from the artifact's. *)
     | Missing_dependency of Hash.t  (** A referenced identity is absent from the store. *)

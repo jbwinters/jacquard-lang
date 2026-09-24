@@ -2896,6 +2896,133 @@ let host_t =
     (Cmd.info "host" ~doc:"Opt-in host carriers for invoking checked Jacquard from another process.")
     [ worker ]
 
+(* --- interface (API.1: portable public-interface identities) --- *)
+
+let write_output ~what ~out contents =
+  match Export.write_atomic_exclusive ~path:out contents with
+  | Ok () -> ok
+  | Error Export.Collision ->
+      print_diags
+        [
+          cli_diagnostic ~code:"E1301"
+            (Printf.sprintf "%s output %s already exists; choose a new path or remove it explicitly"
+               what out);
+        ]
+  | Error (Export.Atomic_failure message) ->
+      print_diags
+        [
+          cli_diagnostic ~code:"E1303"
+            (Printf.sprintf "cannot publish %s atomically: %s" what message);
+        ]
+
+let interface_emit_cmd file out prelude syntax =
+  match
+    Frontend.check ~prelude_dir:(prelude_dir_of prelude) ~root:(fresh_check_root ()) ~syntax ~file
+      (read_file file) ~on_parsed:print_warnings
+      ~on_resolved:(fun _top warnings -> List.iter print_diagnostic warnings)
+      ~on_checked:(fun _cctx _top { Check.warnings; _ } ->
+        List.iter print_diagnostic warnings;
+        Ok ())
+  with
+  | Error ds -> print_diags ds
+  | Ok (Frontend.Recovered { diagnostics; _ }) -> print_diags diagnostics
+  | Ok (Frontend.Checked artifact) -> (
+      let manifest = Interface.serialize (Frontend.Checked.interface artifact) in
+      match out with
+      | None ->
+          print_string manifest;
+          ok
+      | Some out -> write_output ~what:"interface" ~out manifest)
+
+let read_manifest path =
+  match read_file path with
+  | exception Sys_error message ->
+      Error
+        [ Interface.diagnostic ~code:"E0613" (Printf.sprintf "cannot read %s: %s" path message) ]
+  | text -> Interface.parse ~file:path text
+
+let interface_verify_cmd manifest_path store_dir =
+  match read_manifest manifest_path with
+  | Error ds -> print_diags ds
+  | Ok manifest -> (
+      if
+        (* judge only an existing store: opening would create one, and a mistyped path must not
+         masquerade as a store that binds nothing *)
+        not (Sys.file_exists (Filename.concat store_dir "objects"))
+      then
+        print_diags
+          [ cli_diagnostic ~code:"E0606" (Printf.sprintf "store %s does not exist" store_dir) ]
+      else
+        match open_diff_store store_dir with
+        | Error ds -> print_diags ds
+        | Ok store -> (
+            match Interface.verify manifest store with
+            | Ok () ->
+                print_endline "ok";
+                ok
+            | Error mismatches ->
+                print_diags
+                  (List.map
+                     (fun mismatch ->
+                       Interface.diagnostic ~code:"E0614"
+                         (Printf.sprintf "%s: %s" store_dir (Interface.describe_mismatch mismatch)))
+                     mismatches)))
+
+let interface_diff_cmd old_path new_path =
+  match (read_manifest old_path, read_manifest new_path) with
+  | Error ds, _ | _, Error ds -> print_diags ds
+  | Ok old, Ok new_ -> (
+      let report = Interface.diff ~old ~new_ in
+      match Interface.render_report report with
+      | None ->
+          print_endline "identical";
+          ok
+      | Some text ->
+          print_endline text;
+          if report.Interface.compatible then ok else exit_diags)
+
+let interface_t =
+  let emit =
+    Cmd.v
+      (Cmd.info "emit"
+         ~doc:
+           "Check a source and print (or write, atomically and never replacing an existing path) \
+            its interface-v1 manifest: every export with its exact identity, name-independent \
+            signature, call labels, and hidden members.")
+      Term.(
+        const (configure_diagnostics interface_emit_cmd)
+        $ diagnostic_format_arg $ file_arg
+        $ Arg.(
+            value & opt (some string) None & info [ "o"; "output" ] ~docv:"OUT" ~doc:"Output path.")
+        $ prelude_arg $ syntax_arg)
+  in
+  let verify =
+    Cmd.v
+      (Cmd.info "verify"
+         ~doc:
+           "Verify that a store provides exactly the interface a manifest describes: bindings, \
+            identities, call-label companions, signatures, and hidden members.")
+      Term.(
+        const (configure_diagnostics interface_verify_cmd)
+        $ diagnostic_format_arg
+        $ Arg.(required & pos 0 (some file) None & info [] ~docv:"MANIFEST")
+        $ Arg.(required & pos 1 (some string) None & info [] ~docv:"STORE"))
+  in
+  let diff =
+    Cmd.v
+      (Cmd.info "diff"
+         ~doc:"Compare two manifests as public APIs; exits 1 when a change is not purely additive.")
+      Term.(
+        const (configure_diagnostics interface_diff_cmd)
+        $ diagnostic_format_arg
+        $ Arg.(required & pos 0 (some file) None & info [] ~docv:"OLD")
+        $ Arg.(required & pos 1 (some file) None & info [] ~docv:"NEW"))
+  in
+  Cmd.group
+    (Cmd.info "interface"
+       ~doc:"Produce, verify, and compare portable public-interface manifests (API.1).")
+    [ emit; verify; diff ]
+
 let main =
   Cmd.group
     (Cmd.info "jacquard" ~version:Version.version ~doc:"The Jacquard language toolchain")
@@ -2917,6 +3044,7 @@ let main =
       tiers_t;
       export_t;
       build_t;
+      interface_t;
       host_t;
     ]
 

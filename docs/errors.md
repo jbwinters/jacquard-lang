@@ -129,6 +129,8 @@ malformed source, path, or host-message byte in a string field is replaced with 
 | E0610 | diff source contains a top-level expression | diffing a runnable script instead of declarations |
 | E0611 | relational constituent store cannot be created or initialized | running `jacquard relate` with an unusable temporary directory |
 | E0612 | a callable hash is already bound to a different `call-abi-v1` companion | publishing new external labels for an unchanged term or operation identity |
+| E0613 | interface manifest is malformed, unreadable, or not `interface-v1`/`HASH_V0` | `jacquard interface diff notes.txt lib.jqi` |
+| E0614 | a store does not provide the interface a manifest describes (unbound or rebound export, missing or different `call-abi-v1` companion, a declaration whose owner, mode, arity, or field labels differ from the recorded ones, exposed hidden member) | `jacquard interface verify lib.jqi store` after relabeling `resize` |
 
 ## Prelude and grants (E07xx)
 
