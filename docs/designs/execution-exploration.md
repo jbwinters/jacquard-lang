@@ -47,6 +47,25 @@ is ever undone or re-executed.
 | checked identities | `interface-v1`, `Frontend.Checked` (API.1, RF.1) | the program identity a saved scenario can bind to | — |
 | source spans | kernel `Meta.span` | exact source positions at check time | not carried into runtime traces. `run-transcript-v1` names operations by hash only |
 
+## 2a. Evidence From The Four Applications
+
+The four maintained applications (`demos/applications/`, pinned by
+`test/cli/applications.t`) each hand-build a piece of this workflow. Those
+fixtures pass unchanged on this design's base. Each row records what the
+application does today and the decision this design makes about it. The
+authors' timings in the research journals are expert timings. They are not
+novice usability evidence, and §9 does not use them as such.
+
+| application | what it builds by hand | design decision |
+|---|---|---|
+| dice coach (`dice-coach/model.jac`) | a Bellman comparison of "bank now" against all six next-roll outcomes, with expected score and bust probability per alternative | **Kept in the model.** Comparing a model's own alternatives is decision analysis, the subject of DES.2 (task 235). The explorer answers a different question: what *this recorded run* would have done had one input differed. `explore enumerate` (§3 step 5) covers the dice case of forcing one roll outcome and nothing more |
+| picnic planner (`picnic-planner/EXAMPLE.txt`) | the venue comparison, the value of a forecast, and a sensitivity sweep, written as reruns with different constants (rain 5 %, 30 %, 90 %) | **A model edit, not a fork.** A fork changes a recorded observation or choice, never a program constant. The rerun-with-constants workaround stays until DES.2 and MODEL.1 (task 230) provide named assumptions. The explorer's refusal to fork constants and `observe` (§4.3) keeps the two apart |
+| rota optimizer (`rota-optimizer/report.jac`, `interaction-tests.jac`) | three hand-written statuses: `PROVEN OPTIMAL`, `PROVEN INFEASIBLE` and `BUDGET EXHAUSTED`, with a test that "budget is not infeasibility" | **Adopted as the status contract.** Every exploration status separates complete, exhausted and impossible exactly this way, through INF.1's typed outcomes (§4.4, §4.5). The workaround goes away for search questions routed through `explore enumerate`. The rota's own solver statuses remain application data |
+| formula notebook (`formula-notebook/commands.jac`, `interaction-tests.jac`) | `preview` ("live state unchanged") and `why b` ("direct dependencies: a") | **Adopted as semantics.** A fork is a nonmutating preview: it never alters the recording or anything the original run produced (§4.3). The "depended on" list in §3 step 1 follows the notebook's direct-dependency explanation. It lists only the recorded inputs read along the executed path, not a static dependency analysis |
+
+The design preserves checked effects (forks run the checked program unchanged
+under models), typed outcomes (§4.4) and reproducible regression export (§4.6).
+
 ## 3. Walkthrough: The Delivery Planner
 
 The walkthrough uses a proposed example. No delivery planner exists in the
@@ -124,6 +143,10 @@ entry per root-reaching operation:
 
 - It generalizes `net.record` from `net` to every world effect with a codec (D13
   already requires codecs for ring 3 world effects), and to Dist choices.
+- The log is a projection over RF.3's typed observation boundary
+  (jacquard-lang:224). What it may contain is governed by an OBS.1 observation
+  policy (jacquard-lang:225), whose identity the log names. That policy decides
+  redaction, equality and truncation, and exploration does not invent its own.
 - Positions come from kernel `Meta.span` at the perform site. The evaluator
   must carry the span of an operation's perform node into the trace. This is
   EXP.1's runtime change; values and hashes are unaffected because spans are
@@ -220,8 +243,8 @@ views of it:
   (claims explanation-only))
 ```
 
-- Values are compared with `run-transcript-v1` value encoding, reusing
-  relational Warp's equality.
+- Values are compared under the log's OBS.1 comparison policy. The default
+  policy is `run-transcript-v1` value equality, reusing relational Warp's.
 - Step lists are aligned by `(op, args)` or choice address. The first
   divergence is the first unaligned step, or the first differing result.
 - Effects the alternative *would have* performed are listed as modeled, never
@@ -232,7 +255,9 @@ views of it:
 
 ### 4.6 Saved scenarios and regression export
 
-A scenario is `scenario-v1`. Its hash, the scenario identity, binds:
+A scenario is `scenario-v1`: a MODEL.1 result/dependency artifact
+(jacquard-lang:230) plus the fork list. It adds no second identity scheme. Its
+hash, the scenario identity, binds:
 
 - the program's checked-artifact hash and entry term hash (API.1)
 - the recording's content hash
@@ -261,6 +286,44 @@ planner.explored =
   It is strict: an unmodeled or misaligned step fails the test with the
   differ's report. Rerunning the export is therefore deterministic and needs no
   network.
+
+### 4.7 Bounded first release
+
+The first release is EXP.1 through EXP.5 and EXP.7 in §11:
+
+- recording of `net`, `clock`, `fs` reads and Dist choices
+- a single typed fork or several independent forks
+- complete, exhausted, unmodeled and failed statuses
+- text and JSON reports
+- export to one Warp `Case`
+
+Search over many interventions belongs to DEBUG.1 (task 229), comparison of two
+program versions to RW.8 (task 228), and the interactive presentation to Host
+APP.4 (jacquard-host task 14). All three reuse the first release's fork engine
+and report rather than adding their own.
+
+### 4.8 Alternatives considered
+
+| alternative | why not now |
+|---|---|
+| Resume a captured continuation at the fork point instead of replaying from the start | Faster, but it must copy handler frames, and it interacts with once resumptions and scheduler state. Replay from the start is sound by construction (§10 item 2) |
+| Record everything by default | Makes secrets and personal data ambient in logs. Recording stays opt-in, under an OBS.1 policy |
+| One universal trace format for exploration, relational lanes and audit | RF.3 (task 224) explicitly keeps these trust domains and byte contracts separate. `exploration-log-v1` is one more projection over the shared observation boundary |
+| Address choices by source position | Positions shift under every edit. Names (§4.2) survive refactoring, and positions are kept only for display |
+| Let a fork change `observe` or program constants | That is editing the model. It is left to the model and to DES.2/MODEL.1 (§2a) |
+
+### 4.9 Non-goals
+
+- Undoing or re-executing any real external action (§5).
+- Causal inference about the world (§5).
+- Editing program semantics during exploration. A fork never changes code,
+  constants or observations.
+- Searching for minimal changes. That is DEBUG.1, which reuses this engine.
+- Comparing two program versions. That is RW.8.
+- Exploring scheduler interleavings. The schedule-trace tools and relational
+  `schedule` lane already cover it.
+- Native-engine recording in v1.
+- A general time-travel debugger, or stepping through evaluation.
 
 ## 5. Explanation, Causation, And Undo
 
@@ -341,7 +404,7 @@ The exercise passes when all of the following hold:
 
 Record the time, every command, every point of confusion and whether each
 criterion held. Any failed criterion is a design bug to fix before the Host
-presentation work (EXP.6) begins.
+presentation work (jacquard-host:14) consumes the reports.
 
 ## 10. Decisions Requiring Owner Direction
 
@@ -355,20 +418,39 @@ presentation work (EXP.6) begins.
 3. **Refusing to fork `observe`** (§4.3). Changing evidence is left to editing
    the model.
 4. **Interpreter-only recording in v1** (§7).
+5. **Host gate for APP.4.** Add jacquard-lang:256 and jacquard-lang:257 to
+   jacquard-host:14's cross-repository gate, making APP.4 the one Host
+   presentation for both exploration and DEBUG.1. This is recommended but not
+   done here, because the Host plan belongs to that repository.
 
-## 11. Follow-Up Backlog
+## 11. Follow-Up Backlog And Reconciliation
 
-Created as tracked follow-up tasks (EXP.1–EXP.7):
+### Existing tasks reused or refined
 
-| id | title | layer | depends on |
-|---|---|---|---|
-| EXP.1 | Span-carrying traces and `exploration-log-v1` recording for world effects with codecs | Core | — |
-| EXP.2 | `dist.named` addressable random choices, recorded by name | Core | EXP.1 |
-| EXP.3 | Typed fork engine: legality checks, replay-from-start, modeled continuation, `unmodeled` stop, bounds | Core | EXP.1, EXP.2 |
-| EXP.4 | `exploration-report-v1` comparison, text and JSON, first divergence, effect alignment, `explore enumerate` over INF.1 outcomes | Core | EXP.3, INF.1 |
-| EXP.5 | `scenario-v1` identity and `explore export` to a strict `explore.replay` Warp test | Core | EXP.3, API.1 |
-| EXP.6 | Host source-linked explorer over the JSON reports | Host | EXP.4, EXP.5 |
-| EXP.7 | Delivery-planner demo, walkthrough transcript, and the §9 usability exercise | Docs | EXP.5 |
+| task | relationship |
+|---|---|
+| jacquard-lang:224 RF.3 typed observation boundary | **Reused.** `exploration-log-v1` is a projection over it. EXP.1 depends on it |
+| jacquard-lang:225 OBS.1 observation and comparison policies | **Reused.** Redaction, equality and truncation in the log and report come from an OBS.1 policy. EXP.1 and EXP.4 depend on it |
+| jacquard-lang:228 RW.8 compare two program versions | **Separate.** Version comparison, not a forked input. Shares the report conventions of EXP.4 |
+| jacquard-lang:229 DEBUG.1 counterfactual search | **Refined.** DEBUG.1 searches over interventions that the EXP.3 fork engine executes, and now depends on jacquard-lang:255. Exploration performs the single chosen intervention; DEBUG.1 searches for and minimizes them |
+| jacquard-lang:230 MODEL.1 dependency artifacts | **Reused.** `scenario-v1` is a MODEL.1 artifact plus forks. EXP.5 depends on it |
+| jacquard-host:13 APP.3 decision documents | **Separate** Host consumer of MODEL.1. It uses exploration only through saved scenarios |
+| jacquard-host:14 APP.4 counterfactual debugger | **Reused as the Host presentation.** No separate Host explorer task is created: APP.4 presents exploration reports alongside DEBUG.1 witnesses. Its cross-repository gate should add jacquard-lang:256 and jacquard-lang:257 when it is next unblocked (§10 item 5). This design does not edit the Host repository's plan |
+
+### New tasks (jacquard-lang master tag)
+
+| id | title | layer | depends on | priority |
+|---|---|---|---|---|
+| jacquard-lang:253 EXP.1 | Span-carrying traces and `exploration-log-v1` recording over the RF.3 boundary under an OBS.1 policy | Core | 233, 224, 225 | medium |
+| jacquard-lang:254 EXP.2 | `dist.named` addressable random choices | Core | 253 | medium |
+| jacquard-lang:255 EXP.3 | Typed fork engine: legality, replay from start, modeled continuation, `unmodeled` stop, bounds | Core | 253, 254 | medium |
+| jacquard-lang:256 EXP.4 | `exploration-report-v1` comparison (text and JSON) and `explore enumerate` over INF.1 outcomes | Core | 255, 223, 225 | medium |
+| jacquard-lang:257 EXP.5 | `scenario-v1` over MODEL.1 artifacts and `explore export` to a strict Warp case | Core | 255, 216, 230 | medium |
+| jacquard-lang:259 EXP.7 | Delivery-planner demo, walkthrough cram and the §9 usability exercise | Docs | 257 | medium |
+
+Each task's details carry its acceptance criteria and test strategy, taken from
+§4, §8 and §12. `task-master validate-dependencies` reports no invalid edges or
+cycles after these changes.
 
 ## 12. Validation And Measurable Acceptance
 
