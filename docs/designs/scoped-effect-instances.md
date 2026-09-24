@@ -218,7 +218,7 @@ resumption affinity.
 
 ## 5. The Executable Model
 
-`test/scoped_instances_model.ml` is a calculus of about 400 lines,
+`test/scoped_instances_model.ml` is a calculus of about 430 lines plus a 180-line type-directed generator,
 independent of the implementation. It has integers, booleans, text, lists,
 annotated lambdas, `let`, `if`, one parameterized effect (State with
 `scoped`/`get`/`put`), one payload-carrying effect whose values leave through
