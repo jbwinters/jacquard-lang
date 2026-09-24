@@ -36,6 +36,9 @@ and interpolation_part = IText of string * Meta.t | IExpr of expr
 
 and block_item =
   | Let of { recursive : bool; binder : pat; params : pat list; value : expr; meta : Meta.t }
+  | Try of { binder : pat option; value : expr; meta : Meta.t }
+      (** Result propagation (SX.29, D77): [let binder = try value] or a bare [try value]. The rest
+          of the enclosing block runs with the [Ok] payload; an [Err] becomes the block's value. *)
   | Expr of expr
 
 and clause = { cpattern : pat; cbody : expr; cmeta : Meta.t }
@@ -165,6 +168,8 @@ and has_holes_expr (expr : expr) =
 and has_holes_block_item = function
   | Let { binder; params; value; _ } ->
       has_holes_pat binder || List.exists has_holes_pat params || has_holes_expr value
+  | Try { binder; value; _ } ->
+      Option.fold ~none:false ~some:has_holes_pat binder || has_holes_expr value
   | Expr expr -> has_holes_expr expr
 
 and has_holes_pat (pat : pat) =

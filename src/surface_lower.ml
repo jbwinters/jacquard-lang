@@ -72,6 +72,10 @@ let diagnostic_spec = function
       ( Diag.Surface,
         "A generated field accessor collides with a name this file declares.",
         "Rename that declaration or the field label; the accessor is generated from the label." )
+  | "E1243" ->
+      ( Diag.Surface,
+        "A block ends in `try`.",
+        "Write the final expression itself; its Result is already the block's value." )
   | code -> raise (Diag.Bug_invalid_diagnostic ("unknown surface lowering code " ^ code))
 
 let diagnostic ?span ~code cause =
@@ -137,7 +141,8 @@ let rec first_named_call_meta (expression : Surface_ast.expr) =
       List.find_map
         (function
           | Surface_ast.Expr item -> first_named_call_meta item
-          | Surface_ast.Let binding -> first_named_call_meta binding.value)
+          | Surface_ast.Let binding -> first_named_call_meta binding.value
+          | Surface_ast.Try item -> first_named_call_meta item.value)
         items
   | Surface_ast.Match (subject, clauses) -> (
       match first_named_call_meta subject with
@@ -488,6 +493,68 @@ and lower_block ~quote_depth block_meta = function
           diagnostic ?span ~code:"E1232"
             "A block must end in an expression; a final local `let` has no value.";
         ]
+  | [ Surface_ast.Try { meta = item_meta; _ } ] ->
+      error ~meta:item_meta ~code:"E1243"
+        "A block cannot end in `try`: the value of the final item is already the block's Result; \
+         write the expression itself."
+  | Surface_ast.Try { binder; value; meta = item_meta } :: rest ->
+      (* SX.29 (D77): the rest of the block becomes the Ok arm; an Err is re-wrapped unchanged as
+         the block's value. Plain kernel `match`; the hash equals the hand-written match. *)
+      let* body = lower_block ~quote_depth block_meta rest in
+      let* value = lower_expr_node ~quote_depth value in
+      let* payload =
+        match binder with
+        | Some binder ->
+            lower_irrefutable_pat ~quote_depth ~code:"E0206"
+              ~message:"`let … = try` binders must be irrefutable patterns" binder
+        | None ->
+            let* meta = generated_single_meta ~form:"try-discard" value.Kernel.meta in
+            Ok Kernel.{ it = PWild; meta }
+      in
+      let* ok_meta = generated_single_meta ~form:"try-ok" value.Kernel.meta in
+      let* err_meta = generated_single_meta ~form:"try-err" value.Kernel.meta in
+      let* err_binder_meta = generated_single_meta ~form:"try-err-binder" value.Kernel.meta in
+      let* err_value_meta = generated_single_meta ~form:"try-err-value" value.Kernel.meta in
+      let* err_constructor_meta =
+        generated_constructor_meta ~form:"try-err-constructor" value.Kernel.meta
+      in
+      let* rewrap_meta = generated_single_meta ~form:"try-err-rewrap" value.Kernel.meta in
+      let* ok_clause_meta = generated_single_meta ~form:"try-ok-clause" item_meta in
+      let* err_clause_meta = generated_single_meta ~form:"try-err-clause" item_meta in
+      let error_name = "error" in
+      let clauses =
+        [
+          Kernel.
+            {
+              cpat = { it = PCon (Named "ok", [ payload ]); meta = ok_meta };
+              cbody = body;
+              cmeta = ok_clause_meta;
+            };
+          Kernel.
+            {
+              cpat =
+                {
+                  it = PCon (Named "err", [ { it = PVar error_name; meta = err_binder_meta } ]);
+                  meta = err_meta;
+                };
+              cbody =
+                {
+                  it =
+                    App
+                      ( { it = Var "err"; meta = err_constructor_meta },
+                        [ { it = Var error_name; meta = err_value_meta } ] );
+                  meta = rewrap_meta;
+                };
+              cmeta = err_clause_meta;
+            };
+        ]
+      in
+      let form = match binder with Some _ -> "try" | None -> "try-bare" in
+      let* meta = generated_meta ~form item_meta body.meta in
+      let span = Meta.span meta in
+      let meta = Meta.merge_trivia item_meta meta in
+      let meta = match span with Some span -> Meta.with_span span meta | None -> meta in
+      Ok Kernel.{ it = Match (value, clauses); meta }
   | Surface_ast.Expr value :: rest ->
       let* value = lower_expr_node ~quote_depth value in
       let* body = lower_block ~quote_depth block_meta rest in

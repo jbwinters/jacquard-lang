@@ -514,18 +514,74 @@ let rec pp_expr context lookup fmt (expr : Kernel.expr) =
       pp_reordered_named_call context lookup fmt expr fn source_arguments
   | None -> pp_expr_regular context lookup fmt expr
 
+(* SX.29 (D77): a `try` block item lowers to a two-armed match tagged `try`/`try-bare` whose Ok arm
+   is the rest of the block; the printer folds it back into the block it came from. *)
+and try_item (expr : Kernel.expr) =
+  (* Re-sugar only the exact expansion the lowering produces. Every generated node carries its own
+     tag (clauses, both patterns, the Err binder, the constructor reference with constructor kind,
+     the re-wrapped value), the payload is irrefutable (a wildcard for the bare form), and the Err
+     arm re-wraps its own binder. Anything else carrying a `try` tag prints as the explicit match. *)
+  let tagged form meta = Meta.surface_form meta = Some form in
+  match (Meta.surface_form expr.meta, expr.it) with
+  | ( Some (("try" | "try-bare") as form),
+      Kernel.Match
+        ( subject,
+          [
+            {
+              cpat = { it = Kernel.PCon (Kernel.Named "ok", [ payload ]); meta = ok_meta };
+              cbody;
+              cmeta = ok_clause_meta;
+            };
+            {
+              cpat =
+                {
+                  it =
+                    Kernel.PCon
+                      (Kernel.Named "err", [ { it = Kernel.PVar bound; meta = binder_meta } ]);
+                  meta = err_meta;
+                };
+              cbody =
+                {
+                  it =
+                    Kernel.App
+                      ( { it = Kernel.Var "err"; meta = constructor_meta },
+                        [ { it = Kernel.Var used; meta = value_meta } ] );
+                  meta = rewrap_meta;
+                };
+              cmeta = err_clause_meta;
+            };
+          ] ) )
+    when String.equal bound used
+         && tagged "try-ok-clause" ok_clause_meta
+         && tagged "try-err-clause" err_clause_meta
+         && tagged "try-ok" ok_meta && tagged "try-err" err_meta
+         && tagged "try-err-binder" binder_meta
+         && tagged "try-err-constructor" constructor_meta
+         && Meta.surface_ref_kind constructor_meta = Some "con"
+         && tagged "try-err-value" value_meta
+         && tagged "try-err-rewrap" rewrap_meta
+         &&
+         if form = "try" then Kernel.is_irrefutable payload
+         else payload.Kernel.it = Kernel.PWild && tagged "try-discard" payload.Kernel.meta ->
+      Some (form, payload, subject, cbody)
+  | _ -> None
+
+and is_block_expr (expr : Kernel.expr) =
+  match expr.it with Kernel.Let _ -> true | _ -> Option.is_some (try_item expr)
+
 and pp_expr_regular context lookup fmt (expr : Kernel.expr) =
   let block_meta = Meta.surface_container "block" expr.meta in
   let paren_meta = Meta.surface_container "paren" expr.meta in
   if context.trivia && (not (Meta.is_empty paren_meta)) && meta_has_comments paren_meta then
     pp_grouped context lookup paren_meta fmt expr
   else if context.trivia && (not (Meta.is_empty block_meta)) && meta_has_comments block_meta then
-    match expr.it with
-    | Kernel.Let _ -> pp_block context lookup fmt expr
-    | _ -> pp_singleton_block context lookup block_meta fmt expr
+    if is_block_expr expr then pp_block context lookup fmt expr
+    else pp_singleton_block context lookup block_meta fmt expr
   else begin
-    (match expr.it with Kernel.Let _ -> () | _ -> pp_leading context expr.meta fmt);
+    if not (is_block_expr expr) then pp_leading context expr.meta fmt;
     (match (Meta.surface_form expr.meta, expr.it) with
+    | Some ("try" | "try-bare"), Kernel.Match _ when is_block_expr expr ->
+        pp_block context lookup fmt expr
     | Some "interpolation", Kernel.App (fn, args) -> (
         match interpolation_text context lookup fn args with
         | Some text -> Format.pp_print_string fmt text
@@ -544,7 +600,7 @@ and pp_expr_regular context lookup fmt (expr : Kernel.expr) =
     | Some "pipe", Kernel.App (fn, left :: args) ->
         pp_pipe context lookup expr.meta fmt left fn args
     | Some _, _ | None, _ -> pp_kernel_expr context lookup fmt expr);
-    match expr.it with Kernel.Let _ -> () | _ -> pp_trailing context expr.meta fmt
+    if not (is_block_expr expr) then pp_trailing context expr.meta fmt
   end
 
 and reordered_named_call (expr : Kernel.expr) =
@@ -845,6 +901,13 @@ and pp_expr_atom context lookup fmt expr =
 and pp_sequence_item context lookup fmt (meta, isrec, binder, value) =
   pp_leading context meta fmt;
   match (isrec, binder.Kernel.it, value.Kernel.it) with
+  | _ when Meta.surface_form meta = Some "try-bare" ->
+      Format.fprintf fmt "@[<hov 2>try %a@]" (pp_expr context lookup) value;
+      pp_trailing context meta fmt
+  | _ when Meta.surface_form meta = Some "try" ->
+      Format.fprintf fmt "@[<hov 2>let %a =@ try %a@]" (pp_pat context lookup) binder
+        (pp_expr context lookup) value;
+      pp_trailing context meta fmt
   | false, Kernel.PWild, _
     when not (Option.equal String.equal (Meta.surface_form meta) (Some "let")) ->
       pp_expr context lookup fmt value;
@@ -868,9 +931,11 @@ and pp_sequence_item context lookup fmt (meta, isrec, binder, value) =
 
 and pp_block context lookup fmt expr =
   let rec collect acc current =
-    match current.Kernel.it with
-    | Kernel.Let { isrec; binder; value; body } ->
+    match (current.Kernel.it, try_item current) with
+    | Kernel.Let { isrec; binder; value; body }, _ ->
         collect ((current.Kernel.meta, isrec, binder, value) :: acc) body
+    | _, Some (_, payload, subject, rest) ->
+        collect ((current.Kernel.meta, false, payload, subject) :: acc) rest
     | _ -> (List.rev acc, current)
   in
   let lets, result = collect [] expr in
@@ -888,7 +953,7 @@ and pp_match context lookup meta fmt subject clauses =
   let pp_clause fmt (clause : Kernel.clause) =
     pp_leading context clause.cmeta fmt;
     match clause.cbody.it with
-    | Kernel.Let _ ->
+    | _ when is_block_expr clause.cbody ->
         Format.fprintf fmt "@[<v 2>| %a -> {@,%a@]@,}" (pp_pat context lookup) clause.cpat
           (pp_sequence_contents context lookup)
           clause.cbody;
@@ -904,15 +969,15 @@ and pp_match context lookup meta fmt subject clauses =
   Format.fprintf fmt "@]@,}"
 
 and pp_arm_body context lookup fmt body =
-  match body.Kernel.it with
-  | Kernel.Let _ -> pp_block context lookup fmt body
-  | _ -> pp_expr context lookup fmt body
+  if is_block_expr body then pp_block context lookup fmt body else pp_expr context lookup fmt body
 
 and pp_sequence_contents context lookup fmt expr =
   let rec collect acc current =
-    match current.Kernel.it with
-    | Kernel.Let { isrec; binder; value; body } ->
+    match (current.Kernel.it, try_item current) with
+    | Kernel.Let { isrec; binder; value; body }, _ ->
         collect ((current.Kernel.meta, isrec, binder, value) :: acc) body
+    | _, Some (_, payload, subject, rest) ->
+        collect ((current.Kernel.meta, false, payload, subject) :: acc) rest
     | _ -> (List.rev acc, current)
   in
   let lets, result = collect [] expr in
@@ -949,7 +1014,7 @@ and pp_handle context lookup meta fmt body ret ops =
   (if is_atomic body then Format.fprintf fmt " %a {" (pp_expr context lookup) body
    else
      match body.Kernel.it with
-     | Kernel.Let _ ->
+     | _ when is_block_expr body ->
          Format.fprintf fmt " {@,%a@;<0 -2>} {" (pp_sequence_contents context lookup) body
      | _ -> Format.fprintf fmt " {@,%a@;<0 -2>} {" (pp_expr context lookup) body);
   Format.fprintf fmt "@,%a" pp_ret ret;

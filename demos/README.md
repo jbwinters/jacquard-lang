@@ -74,6 +74,14 @@ Directory: `basics/`
 - `surface-fact.jac` and `surface-expression.jac`: early surface-syntax
   carriers retained as parser evidence.
 
+## Request Validation
+
+Directory: `request-validation/`
+
+- `validate.jac`: validates a request in several fallible steps with `let … =
+  try` (Result propagation, D77), each step declaring its `Result Invalid _`
+  type. `test/cli/surface-try.t` runs it under the interpreter and natively.
+
 ## Inference And Decisions
 
 Directory: `inference/`
