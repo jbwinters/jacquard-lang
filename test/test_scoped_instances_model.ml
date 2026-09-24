@@ -116,7 +116,7 @@ let test_higher_order () =
           ( "twice",
             Lam
               ( "f",
-                TArr (TUnit, [ "c" ], TUnit),
+                TArr (TUnit, [ Label "c" ], TUnit),
                 Let ("_", App (Var "f", Unit), App (Var "f", Unit)) ),
             Let
               ( "_",
@@ -135,7 +135,7 @@ let test_higher_order () =
             Int 0,
             Let
               ( "run-b",
-                Lam ("f", TArr (TUnit, [ "b" ], TUnit), App (Var "f", Unit)),
+                Lam ("f", TArr (TUnit, [ Label "b" ], TUnit), App (Var "f", Unit)),
                 App (Var "run-b", Lam ("_", TUnit, Put (Var "a", Int 1))) ) ) )
   in
   rejects "a thunk over a is not a thunk over b" Instances crossed
@@ -201,41 +201,51 @@ let soundness mode dispatch programs =
 
 let rec size = function
   | Int _ | Bool _ | Unit | Text _ | Var _ | Flip -> 1
-  | Lam (_, _, e) | Get e | Amb e | Detach e -> 1 + size e
-  | App (a, b) | Let (_, a, b) | Add (a, b) | Put (a, b) | Scoped (_, a, b) -> 1 + size a + size b
+  | Lam (_, _, e) | Get e | Amb e | Emit e | Collect e | Detach e -> 1 + size e
+  | App (a, b) | Let (_, a, b) | Add (a, b) | Put (a, b) | Scoped (_, a, b) | Head (a, b) ->
+      1 + size a + size b
   | If (a, b, c) -> 1 + size a + size b + size c
 
 (* feature counts over a program: nested scopes, a scope under amb, closures over capabilities *)
 let rec count_scopes = function
   | Scoped (_, a, b) -> 1 + count_scopes a + count_scopes b
-  | Lam (_, _, e) | Get e | Amb e | Detach e -> count_scopes e
-  | App (a, b) | Let (_, a, b) | Add (a, b) | Put (a, b) -> count_scopes a + count_scopes b
+  | Lam (_, _, e) | Get e | Amb e | Emit e | Collect e | Detach e -> count_scopes e
+  | App (a, b) | Let (_, a, b) | Add (a, b) | Put (a, b) | Head (a, b) ->
+      count_scopes a + count_scopes b
   | If (a, b, c) -> count_scopes a + count_scopes b + count_scopes c
   | Int _ | Bool _ | Unit | Text _ | Var _ | Flip -> 0
 
 let rec scope_under_amb = function
   | Amb e -> count_scopes e > 0 || scope_under_amb e
-  | Scoped (_, a, b) | App (a, b) | Let (_, a, b) | Add (a, b) | Put (a, b) ->
+  | Scoped (_, a, b) | App (a, b) | Let (_, a, b) | Add (a, b) | Put (a, b) | Head (a, b) ->
       scope_under_amb a || scope_under_amb b
-  | Lam (_, _, e) | Get e | Detach e -> scope_under_amb e
+  | Lam (_, _, e) | Get e | Emit e | Collect e | Detach e -> scope_under_amb e
   | If (a, b, c) -> scope_under_amb a || scope_under_amb b || scope_under_amb c
   | Int _ | Bool _ | Unit | Text _ | Var _ | Flip -> false
 
 let rec contains_operation = function
   | Get _ | Put _ -> true
-  | Lam (_, _, e) | Amb e | Detach e -> contains_operation e
-  | Scoped (_, a, b) | App (a, b) | Let (_, a, b) | Add (a, b) ->
+  | Lam (_, _, e) | Amb e | Emit e | Collect e | Detach e -> contains_operation e
+  | Scoped (_, a, b) | App (a, b) | Let (_, a, b) | Add (a, b) | Head (a, b) ->
       contains_operation a || contains_operation b
   | If (a, b, c) -> contains_operation a || contains_operation b || contains_operation c
   | Int _ | Bool _ | Unit | Text _ | Var _ | Flip -> false
 
 let rec closure_over_capability = function
   | Lam (_, _, body) -> contains_operation body || closure_over_capability body
-  | Scoped (_, a, b) | App (a, b) | Let (_, a, b) | Add (a, b) | Put (a, b) ->
+  | Scoped (_, a, b) | App (a, b) | Let (_, a, b) | Add (a, b) | Put (a, b) | Head (a, b) ->
       closure_over_capability a || closure_over_capability b
-  | Get e | Amb e | Detach e -> closure_over_capability e
+  | Get e | Amb e | Emit e | Collect e | Detach e -> closure_over_capability e
   | If (a, b, c) ->
       closure_over_capability a || closure_over_capability b || closure_over_capability c
+  | Int _ | Bool _ | Unit | Text _ | Var _ | Flip -> false
+
+let rec contains_collect = function
+  | Collect _ -> true
+  | Lam (_, _, e) | Get e | Amb e | Emit e | Detach e -> contains_collect e
+  | Scoped (_, a, b) | App (a, b) | Let (_, a, b) | Add (a, b) | Put (a, b) | Head (a, b) ->
+      contains_collect a || contains_collect b
+  | If (a, b, c) -> contains_collect a || contains_collect b || contains_collect c
   | Int _ | Bool _ | Unit | Text _ | Var _ | Flip -> false
 
 let test_instances_sound () =
@@ -244,16 +254,19 @@ let test_instances_sound () =
   let count predicate = List.length (List.filter predicate typed_programs) in
   let nested = count (fun e -> count_scopes e >= 2)
   and under_amb = count scope_under_amb
-  and closures = count closure_over_capability in
+  and closures = count closure_over_capability
+  and collects = count contains_collect in
   Printf.printf
-    "well-typed features: nested scopes %d, scope under amb %d, closure over a capability %d\n"
-    nested under_amb closures;
+    "well-typed features: nested scopes %d, scope under amb %d, closure over a capability %d, \
+     collect %d\n"
+    nested under_amb closures collects;
   List.iter
     (fun (label, n) -> Alcotest.(check bool) (Printf.sprintf "%s %d" label n) true (n >= 200))
     [
       ("nested scopes", nested);
       ("scope under amb", under_amb);
       ("closures over capabilities", closures);
+      ("collects", collects);
     ];
   let sizes = List.map size programs in
   Printf.printf "generated %d programs, mean size %.1f, max %d\n" samples
@@ -277,6 +290,52 @@ let test_mono_sound () =
 
 (* The escape check does real work: run the programs it rejects anyway (a permissive checker),
    and count those that then reach a stale capability. *)
+(* An effect that leaves the scope may not carry the capability either: emitting it to an outer
+   collector hands it out after its handler has gone. *)
+let emitted_escape =
+  Scoped ("outer", Int 7, Get (Head (Collect (Scoped ("c", Int 0, Emit (Var "c"))), Var "outer")))
+
+let test_escape_through_effect () =
+  rejects "instances reject a capability in an outward effect payload" Instances emitted_escape;
+  (match run By_instance emitted_escape with
+  | Stuck message when String.ends_with ~suffix:"stale capability" message -> ()
+  | _ -> Alcotest.fail "the emitted capability should be stale when used");
+  (* an effect whose payload does not mention the instance still leaves the scope *)
+  let fine = Collect (Scoped ("c", Int 0, Emit (Get (Var "c")))) in
+  accepts "a payload read from the capability may leave" Instances fine;
+  match value By_instance fine with
+  | VList [ VInt 0 ] -> ()
+  | _ -> Alcotest.fail "collected the read value"
+
+(* Mono payloads are structural: two different function payloads never share a row entry, and a
+   row entry cannot be forged from a string. (A string encoding let this program type-check and
+   then read a Bool-taking function as an Int-taking one.) *)
+let test_mono_payloads_are_structural () =
+  let ascribe t e = App (Lam ("v", t, Var "v"), e) in
+  let a = TArr (TBool, [ Carrying (mono_state, TUnit) ], TInt) in
+  let b = TArr (TInt, [], TInt) in
+  let c = TArr (TBool, [], TInt) in
+  let p = TArr (TUnit, [ Carrying (mono_state, c) ], TInt) in
+  let q = TArr (TUnit, [ Carrying (mono_state, a); Carrying (mono_state, b) ], TInt) in
+  let program =
+    Let
+      ( "b",
+        Scoped ("b", Lam ("n", TInt, Var "n"), Var "b"),
+        Let
+          ( "p",
+            Scoped ("p", ascribe p (Lam ("_", TUnit, Int 0)), Var "p"),
+            Let
+              ( "f",
+                Scoped ("q", ascribe q (Lam ("_", TUnit, App (Get (Var "b"), Int 0))), Get (Var "p")),
+                Scoped
+                  ( "c",
+                    ascribe c (Lam ("flag", TBool, If (Var "flag", Int 1, Int 2))),
+                    App (Var "f", Unit) ) ) ) )
+  in
+  rejects "mono rejects the confused payloads" Mono program;
+  rejects "a forged row label is not a payload" Mono
+    (Lam ("f", TArr (TUnit, [ Label "state:Unit" ], TUnit), Unit))
+
 let test_escape_check_is_load_bearing () =
   let stale =
     List.filter
@@ -297,7 +356,21 @@ let test_escape_check_is_load_bearing () =
   Alcotest.(check bool)
     (Printf.sprintf "%d stale" (List.length stale))
     true
-    (List.length stale >= 100)
+    (List.length stale >= 100);
+  let through_effect =
+    List.filter
+      (fun e ->
+        match check Instances e with
+        | Error message -> String.starts_with ~prefix:"instance escapes through the effect" message
+        | Ok _ -> false)
+      (generated ())
+  in
+  Printf.printf "rejected for an escape through an outward effect: %d\n"
+    (List.length through_effect);
+  Alcotest.(check bool)
+    (Printf.sprintf "%d effect escapes" (List.length through_effect))
+    true
+    (List.length through_effect >= 100)
 
 let test_instance_typing_needs_instance_dispatch () =
   (* instance typing over operation-identity dispatch is unsound: the generator finds cases *)
@@ -319,6 +392,9 @@ let suite =
     Alcotest.test_case "each instance keeps its own payload" `Quick test_mixed_payloads;
     Alcotest.test_case "spawned work may not perform a scoped instance" `Quick test_spawned_work;
     Alcotest.test_case "capabilities do not escape their scope" `Quick test_escape;
+    Alcotest.test_case "capabilities do not escape through outward effects" `Quick
+      test_escape_through_effect;
+    Alcotest.test_case "mono payloads are structural" `Quick test_mono_payloads_are_structural;
     Alcotest.test_case "higher-order transport keeps the instance" `Quick test_higher_order;
     Alcotest.test_case "multi-shot resumptions copy or share state by scope" `Quick test_multi_shot;
     Alcotest.test_case "instance typing with instance dispatch is sound (generated)" `Quick

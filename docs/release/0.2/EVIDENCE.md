@@ -32,7 +32,7 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1047`
+- Alcotest/QCheck cases: `1049`
 - Cram transcript files: `62`
 - Documentation examples: `34` named examples across `8` documents
 
@@ -313,10 +313,11 @@ current source inventory to `1036 / 62 / 34`.
 Scoped effect instances are designed and modelled (TS.1,
 `docs/designs/scoped-effect-instances.md`). The design keeps TS.0's ambient
 operations unchanged and adds opt-in instance capabilities with rigid instance
-labels, non-escape, and dispatch by instance. The executable model
+labels, non-escape (through results and outward effect payloads), and dispatch
+by instance. The executable model
 (`test/scoped_instances_model.ml`) finds, by bounded seeded testing over 20,000
 type-directed programs, no stuck well-typed program for instance typing with
 instance dispatch or for TS.0's rule with nearest dispatch, and finds
-counterexamples for instance typing over nearest dispatch. The eleven
+counterexamples for instance typing over nearest dispatch. The thirteen
 `test/test_scoped_instances_model.ml` cases bring the current source inventory
-to `1047 / 62 / 34`.
+to `1049 / 62 / 34`.

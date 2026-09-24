@@ -87,8 +87,16 @@ instance effect as `State<i>` for readability; it is the separate
 
 - `state.scoped(init, fn (c) -> body)`: with `init : s`, check `body` with
   `c : StateRef<i> s` for a fresh rigid label `i`. The body's row may contain
-  `State<i>`; the result row removes it. **Non-escape:** the result type must
-  not mention `i` (in a capability, an arrow's latent row, or any component).
+  `State<i>`; the result row removes it. **Non-escape:** neither the result
+  type nor the payload type of any effect left in the body's row may mention
+  `i` (in a capability, an arrow's latent row, or any component). The second
+  half closes the route through an outer handler: in
+  `emit.collect(fn () -> state.scoped(0, fn (c) -> emit(c)))` or
+  `throw.to-result(fn () -> state.scoped(0, fn (c) -> { throw(c); () }))` the
+  result is `()`, yet the outward `Emit`/`Throw` payload carries
+  `StateRef<i> Int` to a handler that returns it after the scope has ended.
+  The same holds for payload constraints the body's row propagates to the
+  surrounding environment: an instance label may not appear in any of them.
 - `state.get-at(c) : s ! {State<i>}` and `state.put-at(c, v : s) : () !
   {State<i>}` for `c : StateRef<i> s`.
 - Rows are sets of labels. Function types carry latent rows; a function whose
@@ -213,37 +221,41 @@ resumption affinity.
 `test/scoped_instances_model.ml` is a calculus of about 400 lines,
 independent of the implementation. It has integers, booleans, text, lists,
 annotated lambdas, `let`, `if`, one parameterized effect (State with
-`scoped`/`get`/`put`), and one multi-shot effect (`amb`/`flip`, whose
+`scoped`/`get`/`put`), one payload-carrying effect whose values leave through
+an outer handler (`emit`, gathered by `collect`), and one multi-shot effect (`amb`/`flip`, whose
 continuation is resumed twice and whose results are collected). It provides
 two checkers (`Instances`: rigid labels and non-escape; `Mono`: TS.0's rule
-with the payload carried in the label) and a frame machine with two dispatch
+with the payload carried as a structured row entry) and a frame machine with two dispatch
 rules (`By_instance`, `Nearest`). Frames are immutable, so a multi-shot
 resumption copies inner handler frames exactly as the design specifies.
 
 What a run establishes (seed 210, 20,000 type-directed programs, sizes 2–12,
-mean program size 22.9 nodes, maximum 185; a run takes about 0.3 s). These are
+mean program size 23.9 nodes, maximum 204; a run takes about 0.6 s). These are
 bounded, seeded tests, not proofs:
 
 | property | result |
 |---|---|
-| `Instances` + `By_instance`: every well-typed program runs without getting stuck, and its value has the checked type | 7,382 well-typed programs, 0 stuck, 0 out of fuel |
-| `Mono` + `Nearest` (TS.0 today): same property | 7,400 well-typed programs, 0 stuck |
-| the escape and spawn checks are load-bearing: programs they reject, run anyway | 6,421 reach a stale capability |
+| `Instances` + `By_instance`: every well-typed program runs without getting stuck, and its value has the checked type | 7,192 well-typed programs, 0 stuck, 0 out of fuel |
+| `Mono` + `Nearest` (TS.0 today): same property | 7,137 well-typed programs, 0 stuck |
+| the escape and spawn checks are load-bearing: programs they reject, run anyway | 6,405 reach a stale capability; 135 are rejected for an escape through an outward `emit` payload alone |
 | `Instances` + `Nearest`: unsound | counterexamples found (at least one in the pinned run, plus the hand-written two-store case) |
-| coverage among well-typed programs | 418 with nested scopes, 231 with a scope under `amb`, 343 with a closure over a capability; the generator also produces capability- and thunk-typed parameters, payload mismatches, and spawned work |
+| coverage among well-typed programs | 388 with nested scopes, 235 with a scope under `amb`, 316 with a closure over a capability, 909 with a `collect`; the generator also produces capability- and thunk-typed parameters, payload mismatches, and spawned work |
 
 Targeted cases pin the two stores, same-typed instance blindness, mixed
 payloads (each instance keeps its own), spawned work, each escape route,
-higher-order transport and crossed thunks, and branch-local versus shared state
+escape through an outward effect payload, structural Mono payloads (a
+string encoding of payload types in labels was not injective and let a
+confused program type-check), higher-order transport and crossed thunks, and branch-local versus shared state
 under multi-shot resumption.
 
 Limits: bounded random testing, not a proof. The model has one parameterized
 effect, no row variables (rows are closed sets with subsumption), monomorphic
 lambdas (no let-generalization of instance labels, and annotations name
 instances explicitly where the language would infer them), no `once` effects,
-and no Throw/Emit. It models TS.0's unnamed operations through capabilities
-whose label carries the payload, which is equivalent for typing because TS.0
-keeps one payload per effect label per region. One divergence: the model's
+and `emit` as its only outward payload effect (Throw is argued from it, not
+modelled). It models TS.0's unnamed operations through capabilities whose row
+entry carries the payload, which is equivalent for typing because TS.0 keeps
+one payload per effect label per region. One divergence: the model's
 Mono mode also refuses spawned work with a non-empty row, whereas shipped TS.0
 charges the ambient effects of spawned work to the caller under SC.4; the
 spawn rule this design adds concerns instance labels only. Generalization, row
