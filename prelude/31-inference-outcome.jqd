@@ -1,0 +1,207 @@
+; INF.1 typed inference outcomes. dist.enumerate and dist.sample-lw keep their
+; released identities and behaviour; the -v1 drivers below return a result that
+; separates a normalized posterior from impossible evidence, an exhausted
+; exploration budget, and numerical failure, each carrying run metadata. Both
+; drivers share one classification (dist.classify-v1); the CLI's
+; `jacquard infer` applies the same contract (docs/release/inference-outcomes).
+
+(deftype inference-method-v1 ()
+  (con inference-exact-enumeration-v1)
+  (con inference-likelihood-weighting-v1))
+
+; complete: true only when every terminal path was explored (never for sampling).
+; seed: the sampling seed, none for enumeration. bound: the terminal-path budget
+; or the sample count. explored: terminal paths reached or runs executed.
+(deftype inference-metadata-v1 ()
+  (con inference-metadata-v1
+    (field method (tref inference-method-v1))
+    (field complete (tref bool))
+    (field seed (tapp (tref option) (tref int)))
+    (field bound (tref int))
+    (field explored (tref int))))
+
+(deftype inference-numeric-v1 ()
+  (con inference-underflow-v1)
+  (con inference-non-finite-v1)
+  (con inference-negative-mass-v1))
+
+(deftype inference-failure-v1 ()
+  (con inference-impossible-v1 (field metadata (tref inference-metadata-v1)))
+  (con inference-exhausted-v1 (field metadata (tref inference-metadata-v1)))
+  (con inference-numeric-failure-v1
+    (field reason (tref inference-numeric-v1))
+    (field metadata (tref inference-metadata-v1))))
+
+; entries are weighted leaves (one per surviving path or run), normalized to sum
+; to one; merge equal values with dist.tally
+(deftype inference-posterior-v1 ((tvar a))
+  (con inference-posterior-v1
+    (field entries (tapp (tref list) (tapp (tref pair) (tvar a) (tref real))))
+    (field metadata (tref inference-metadata-v1))))
+
+; exact float predicates: NaN fails every comparison, and x - x is NaN for an
+; infinity, so finite? holds exactly for finite reals
+(defterm
+  ((binding dist.finite-v1? ()
+    (lam ((pvar x)) (app (var real.gte?) (app (var real.sub) (var x) (var x)) (lit 0.0))))
+   (binding dist.zero-v1? ()
+    (lam ((pvar x))
+      (match (app (var real.lte?) (var x) (lit 0.0))
+        (clause (pcon true) (app (var real.gte?) (var x) (lit 0.0)))
+        (clause (pcon false) (var false)))))))
+
+(defterm
+  ((binding dist.any-weight-v1? ()
+    (lam ((pvar test) (pvar entries))
+      (match (var entries)
+        (clause (pcon nil) (var false))
+        (clause (pcon cons (pcon mk-pair (pwild) (pvar p)) (pvar rest))
+          (match (app (var test) (var p))
+            (clause (pcon true) (var true))
+            (clause (pcon false) (app (var dist.any-weight-v1?) (var test) (var rest))))))))))
+
+(defterm
+  ((binding dist.divide-weights-v1 ()
+    (lam ((pvar total) (pvar entries))
+      (match (var entries)
+        (clause (pcon nil) (var nil))
+        (clause (pcon cons (pcon mk-pair (pvar x) (pvar p)) (pvar rest))
+          (app (var cons)
+            (app (var mk-pair) (var x) (app (var real.div) (var p) (var total)))
+            (app (var dist.divide-weights-v1) (var total) (var rest)))))))))
+
+; the shared classification over surviving weighted leaves, in order: a
+; non-finite leaf, a negative leaf, no surviving leaf (every path had an exact
+; zero factor: impossible), a non-finite total, a zero total (every surviving
+; path underflowed), else the normalized posterior
+(defterm
+  ((binding dist.classify-v1 ()
+    (lam ((pvar leaves) (pvar metadata))
+      (match (app (var dist.any-weight-v1?)
+               (lam ((pvar p)) (app (var bool.not) (app (var dist.finite-v1?) (var p))))
+               (var leaves))
+        (clause (pcon true)
+          (app (var err) (app (var inference-numeric-failure-v1) (var inference-non-finite-v1) (var metadata))))
+        (clause (pcon false)
+          (match (app (var dist.any-weight-v1?)
+                   (lam ((pvar p)) (app (var real.lt?) (var p) (lit 0.0)))
+                   (var leaves))
+            (clause (pcon true)
+              (app (var err)
+                (app (var inference-numeric-failure-v1) (var inference-negative-mass-v1) (var metadata))))
+            (clause (pcon false)
+              (match (var leaves)
+                (clause (pcon nil) (app (var err) (app (var inference-impossible-v1) (var metadata))))
+                (clause (pwild)
+                  (let nonrec (pvar total) (app (var sum-weights) (var leaves))
+                    (match (app (var dist.finite-v1?) (var total))
+                      (clause (pcon false)
+                        (app (var err)
+                          (app (var inference-numeric-failure-v1) (var inference-non-finite-v1)
+                            (var metadata))))
+                      (clause (pcon true)
+                        (match (app (var dist.zero-v1?) (var total))
+                          (clause (pcon true)
+                            (app (var err)
+                              (app (var inference-numeric-failure-v1) (var inference-underflow-v1)
+                                (var metadata))))
+                          (clause (pcon false)
+                            (app (var ok)
+                              (app (var inference-posterior-v1)
+                                (app (var dist.divide-weights-v1) (var total) (var leaves))
+                                (var metadata))))))))))))))))))
+
+; budgeted enumeration in parameter-passing style: the handled model denotes a
+; function of the remaining terminal-path budget and the path weight so far, and
+; a step is (surviving leaves, remaining budget), the remaining budget -1 once a
+; path beyond the budget was attempted. The weight is multiplied forward, factor
+; by factor in model order, exactly as the CLI driver does, so both see the same
+; binary64 path weight. A path with an exact zero factor is pruned (it consumes
+; budget and leaves nothing, and its continuation is not resumed); a path whose
+; weight merely underflows survives.
+(defterm
+  ((binding dist.enum-v1-path ()
+    (lam ((pvar leaves) (pvar left))
+      (match (app (var lt) (lit 0) (var left))
+        (clause (pcon true) (app (var mk-pair) (var leaves) (app (var sub) (var left) (lit 1))))
+        (clause (pcon false) (app (var mk-pair) (var nil) (app (var sub) (lit 0) (lit 1)))))))))
+
+(defterm
+  ((binding dist.enum-v1-factor ()
+    (lam ((pvar p) (pvar k) (pvar x) (pvar left) (pvar w))
+      (match (app (var dist.zero-v1?) (var p))
+        (clause (pcon true) (app (var dist.enum-v1-path) (var nil) (var left)))
+        (clause (pcon false)
+          (app (app (var k) (var x)) (var left) (app (var real.mul) (var w) (var p)))))))
+   (binding dist.enum-v1-branches ()
+    (lam ((pvar k) (pvar entries) (pvar left) (pvar w))
+      (match (var entries)
+        (clause (pcon nil) (app (var mk-pair) (var nil) (var left)))
+        (clause (pcon cons (pcon mk-pair (pvar x) (pvar p)) (pvar rest))
+          (match (app (var dist.enum-v1-factor) (var p) (var k) (var x) (var left) (var w))
+            (clause (pcon mk-pair (pvar here) (pvar after))
+              (match (app (var lt) (var after) (lit 0))
+                (clause (pcon true) (app (var mk-pair) (var nil) (var after)))
+                (clause (pcon false)
+                  (match (app (var dist.enum-v1-branches) (var k) (var rest) (var after) (var w))
+                    (clause (pcon mk-pair (pvar there) (pvar final))
+                      (app (var mk-pair) (app (var enum.append) (var here) (var there))
+                        (var final))))))))))))))
+
+(defterm
+  ((binding dist.enum-v1-run ()
+    (lam ((pvar model) (pvar budget))
+      (app
+        (handle (app (var model))
+          (ret (pvar x)
+            (lam ((pvar left) (pvar w))
+              (app (var dist.enum-v1-path)
+                (app (var cons) (app (var mk-pair) (var x) (var w)) (var nil))
+                (var left))))
+          (opclause sample ((pvar d)) k
+            (lam ((pvar left) (pvar w))
+              (app (var dist.enum-v1-branches) (var k) (app (var support) (var d)) (var left) (var w))))
+          (opclause observe ((pvar d) (pvar v)) k
+            (lam ((pvar left) (pvar w))
+              (app (var dist.enum-v1-factor) (app (var pmf) (var d) (var v)) (var k) (tuple) (var left)
+                (var w)))))
+        (var budget) (lit 1.0))))))
+
+; dist.enumerate-v1(model, max-paths): exact enumeration of at most max-paths
+; terminal paths. Exceeding the budget is inference-exhausted-v1, never a
+; partial posterior; a non-positive budget is exhausted before the model runs.
+(defterm
+  ((binding dist.enum-v1-exhausted ()
+    (lam ((pvar budget) (pvar explored))
+      (app (var err)
+        (app (var inference-exhausted-v1)
+          (app (var inference-metadata-v1) (var inference-exact-enumeration-v1) (var false)
+            (var none) (var budget) (var explored))))))
+   (binding dist.enumerate-v1 ()
+    (lam ((pvar model) (pvar budget))
+      (match (app (var lt) (lit 0) (var budget))
+        (clause (pcon false) (app (var dist.enum-v1-exhausted) (var budget) (lit 0)))
+        (clause (pcon true)
+          (match (app (var dist.enum-v1-run) (var model) (var budget))
+            (clause (pcon mk-pair (pvar leaves) (pvar left))
+              (match (app (var lt) (var left) (lit 0))
+                (clause (pcon true) (app (var dist.enum-v1-exhausted) (var budget) (var budget)))
+                (clause (pcon false)
+                  (app (var dist.classify-v1) (var leaves)
+                    (app (var inference-metadata-v1) (var inference-exact-enumeration-v1) (var true)
+                      (var none) (var budget) (app (var sub) (var budget) (var left))))))))))))))
+
+; the native seeded driver's surviving runs, in run order and unnormalized: a
+; run with an exact zero observation factor, or a draw from a categorical whose
+; support has no mass, is impossible and is dropped
+(defterm ((binding dist.sample-lw-weights-v1 () (quote (builtin-marker dist.sample-lw-weights-v1)))))
+
+; dist.sample-lw-v1(model, samples, seed): seeded likelihood weighting. The
+; posterior is never marked complete; its entries are one per surviving run.
+(defterm
+  ((binding dist.sample-lw-v1 ()
+    (lam ((pvar model) (pvar samples) (pvar seed))
+      (app (var dist.classify-v1)
+        (app (var dist.sample-lw-weights-v1) (var model) (var samples) (var seed))
+        (app (var inference-metadata-v1) (var inference-likelihood-weighting-v1) (var false)
+          (app (var some) (var seed)) (var samples) (var samples)))))))

@@ -831,6 +831,52 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
             (Runtime_err.Type_error
                (Printf.sprintf "dist.sample-lw expects a thunk and two ints, got %s"
                   (String.concat ", " (List.map Value.show args)))));
+  (* INF.1: the surviving runs of the same seeded driver, oldest first and unnormalized; the
+     prelude's dist.sample-lw-v1 classifies them *)
+  optional "dist.sample-lw-weights-v1" (fun args ->
+      match args with
+      | [ thunk; Value.VInt samples; Value.VInt seed ] -> (
+          if samples <= 0 then
+            Error (Runtime_err.Arithmetic "dist.sample-lw-weights-v1 needs a positive sample count")
+          else
+            match
+              Infer_dist.lw_surviving_runs ctx ~seed ~samples (fun () ->
+                  Eval.apply_state ctx thunk [])
+            with
+            | Error (diagnostic :: _) -> Error (Runtime_err.Diagnostic diagnostic)
+            | Error [] ->
+                Error (Runtime_err.Arithmetic "the inference driver failed without a cause")
+            | Ok runs -> (
+                match
+                  ( Store.lookup_kind store "mk-pair" Resolve.KCon,
+                    Store.lookup_kind store "cons" Resolve.KCon,
+                    Store.lookup_kind store "nil" Resolve.KCon )
+                with
+                | ( Some { Resolve.hash = ph; _ },
+                    Some { Resolve.hash = ch; _ },
+                    Some { Resolve.hash = nh; _ } ) ->
+                    Ok
+                      (List.fold_right
+                         (fun (v, w) acc ->
+                           Value.VCon
+                             {
+                               con = ch;
+                               name = "cons";
+                               args =
+                                 [
+                                   Value.VCon
+                                     { con = ph; name = "mk-pair"; args = [ v; Value.VReal w ] };
+                                   acc;
+                                 ];
+                             })
+                         runs
+                         (Value.VCon { con = nh; name = "nil"; args = [] }))
+                | _ -> Error (Runtime_err.Unresolved "prelude list constructors")))
+      | args ->
+          Error
+            (Runtime_err.Type_error
+               (Printf.sprintf "dist.sample-lw-weights-v1 expects a thunk and two ints, got %s"
+                  (String.concat ", " (List.map Value.show args)))));
   optional "support" (fun args ->
       match args with
       | [ dv ] ->
@@ -1741,7 +1787,13 @@ let builtin_signatures (store : Store.t) : ((Hash.t * Types.scheme) list, Diag.t
       with
       | Ok ar, Ok mr, Ok dr, Ok pm, Ok su ->
           let lw =
-            match (sample_lw_sig, lookup_hash store ~kind:Resolve.KTerm "dist.sample-lw") with
+            (match (sample_lw_sig, lookup_hash store ~kind:Resolve.KTerm "dist.sample-lw") with
+              | Some s, Ok h -> [ (h, s) ]
+              | _ -> [])
+            @
+            match
+              (sample_lw_sig, lookup_hash store ~kind:Resolve.KTerm "dist.sample-lw-weights-v1")
+            with
             | Some s, Ok h -> [ (h, s) ]
             | _ -> []
           in

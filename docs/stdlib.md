@@ -542,6 +542,41 @@ dist.tally      : (List (a, Real), Eq a) ->{} List (a, Real)   -- merge equal ou
 dist.sample-lw  : (() ->{Dist | e} a, Int, Int) ->{| e} List (a, Real)  -- seed, count
 ```
 
+The `-v1` drivers return a typed outcome instead of a bare list. The two drivers
+use one classification, and `jacquard infer` applies it too:
+
+```text
+dist.enumerate-v1 : (() ->{Dist | e} a, Int) ->{| e}
+                      Result InferenceFailureV1 (InferencePosteriorV1 a)   -- max terminal paths
+dist.sample-lw-v1 : (() ->{Dist | e} a, Int, Int) ->{| e}
+                      Result InferenceFailureV1 (InferencePosteriorV1 a)   -- count, seed
+
+InferencePosteriorV1 a = InferencePosteriorV1(entries: List (a, Real), metadata: InferenceMetadataV1)
+InferenceFailureV1     = InferenceImpossibleV1(InferenceMetadataV1)
+                       | InferenceExhaustedV1(InferenceMetadataV1)
+                       | InferenceNumericFailureV1(InferenceNumericV1, InferenceMetadataV1)
+InferenceNumericV1     = InferenceUnderflowV1 | InferenceNonFiniteV1 | InferenceNegativeMassV1
+InferenceMetadataV1    = InferenceMetadataV1(method, complete: Bool, seed: Option Int,
+                                             bound: Int, explored: Int)
+```
+
+The classification applies these checks in order, and the first that matches decides:
+
+1. any weight non-finite → `InferenceNonFiniteV1`
+2. any weight negative → `InferenceNegativeMassV1`
+3. no surviving path or run → `InferenceImpossibleV1`
+4. the total non-finite → `InferenceNonFiniteV1`
+5. the total zero → `InferenceUnderflowV1`
+6. otherwise, the normalized posterior
+
+A path survives unless one of its factors is exactly zero; a run survives unless an observation factor is exactly zero or it draws from a categorical with no mass. Underflow is therefore separate from impossibility.
+
+When `dist.enumerate-v1` tries a terminal path beyond its budget, the result is
+`InferenceExhaustedV1`, never a partial posterior. Sampled posteriors are
+never marked complete. Entries are one per surviving path or run; merge them
+with `dist.tally`. `docs/release/inference-outcomes/DECISION.md` records the
+contract and the migration from the unversioned drivers, which are unchanged.
+
 Enumeration returns an unmerged weighted list so that it needs no equality; merging
 is a separate step that asks for its `Eq` honestly. There is no separate random
 number library. `sample(UniformInt(1, 6))` under the sampling handler is the die
@@ -1243,8 +1278,10 @@ for every result type; it cannot resume with an arbitrary concrete value. Histor
 release manifests describe the predecessor and remain unchanged.
 
 **`dist.enumerate` has no error channel.** When every branch is impossible (total mass 0),
-the in-language enumerate returns `+nan.0` weights — Jacquard code cannot signal E0901. The
-OCaml driver (`jacquard infer enumerate`) reports E0901 for the same model.
+the released in-language enumerate returns `+nan.0` weights. Its identity is unchanged.
+`dist.enumerate-v1` (INF.1) returns `InferenceImpossibleV1` for the same model, as
+`jacquard infer enumerate` reports E0901. Underflow, non-finite, and negative
+mass are E0917 and `InferenceNumericFailureV1` in both.
 
 **`Map k v` displays as `map.t k v`.** Elaborated signatures print the store name of the
 wrapper type; the doc's display-syntax `Map k v` is the same type.

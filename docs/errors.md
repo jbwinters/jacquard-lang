@@ -193,6 +193,8 @@ also emits E0817; consuming the captured resumption twice emits E0816.
 | inference | E0914 | an exact risk model performed an effect other than released `Dist.sample` or `Dist.observe` | throwing from a model declared for the exact boundary |
 | inference | E0915 | exact risk enumeration could not initialize or the model failed at runtime | division by zero in a reached model branch |
 | inference | E0916 | exact risk path or accumulation arithmetic became non-finite | multiplying finite path factors into an overflowing weight |
+| inference | E0917 | inference failed numerically: every possible path or run underflowed to zero weight, or a weight or the total is non-finite or negative | two `observe` factors of `1e-200` under `jacquard infer enumerate` |
+| inference | E0918 | exact enumeration exceeded its `--max-branches` terminal-path budget | a two-branch coin model under `jacquard infer enumerate --max-branches 1` |
 
 ## Warp (E10xx)
 

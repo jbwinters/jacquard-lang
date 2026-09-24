@@ -6,9 +6,10 @@
 
     - {!enumerate}: exact inference. On [sample d], resume once per support element (the multi-shot
       machinery doing its job), weighting each branch by [pmf d x]; on [observe d v], multiply the
-      branch weight by [pmf d v]; collect (value, weight) leaves; normalize. Branches whose weight
-      underflows to exactly 0.0 are pruned. An impossible observation set (total mass 0) reports
-      E0901 rather than dividing by zero.
+      branch weight by [pmf d v]; collect (value, weight) leaves; normalize. A branch with an exact
+      zero factor is pruned; one whose weight merely underflows survives. The outcome is typed
+      (INF.1, {!enumerate_v1}): an impossible observation set reports E0901, underflow or non-finite
+      or negative mass E0917, and an exhausted branch budget E0918.
     - {!likelihood_weighting}: approximate inference. Run K independent executions; [sample] draws
       ancestrally from the seeded splittable PRNG (single resume); [observe] multiplies the run's
       weight; report the normalized empirical posterior.
@@ -83,6 +84,14 @@ let diagnostic ~code cause =
     | "E0915" ->
         ( "Exact risk enumeration stopped on a runtime failure.",
           "Correct the reported model runtime failure and rerun exact risk enumeration." )
+    | "E0917" ->
+        ( "Inference failed numerically.",
+          "Rescale the model's weights so every path weight and the total stay finite, \
+           nonnegative, and representable." )
+    | "E0918" ->
+        ( "Exact enumeration exceeded its terminal-path budget.",
+          "Raise --max-branches after reviewing the model's finite support size, or use likelihood \
+           weighting." )
     | "E0916" ->
         ( "Exact risk enumeration produced a non-finite raw weight.",
           "Rescale the finite model weights so path multiplication and risk accumulation stay \
@@ -210,75 +219,6 @@ let run_until_op_validated (ctx : Eval.ctx) (state : Eval.validated_state) :
 (* --- enumeration (W4.2) --- *)
 
 let branch_counter = ref 0
-
-(** [enumerate ctx state] runs exact enumeration of a model state (build one with {!Eval.expr_state}
-    or {!Eval.apply_state}). *)
-let enumerate (ctx : Eval.ctx) (model : Eval.state) : (posterior, Diag.t list) result =
-  branch_counter := 0;
-  let leaves : weighted list ref = ref [] in
-  let rec explore (state : Eval.state) (weight : float) : (unit, Runtime_err.t) result =
-    if weight = 0.0 then begin
-      (* pruned: still a complete path for the branch counter (the two-coins model must
-         count exactly 4, proving no duplicate resumption) *)
-      incr branch_counter;
-      Ok ()
-    end
-    else
-      match run_until_op ctx state with
-      | Error e -> Error e
-      | Ok (Done v) ->
-          incr branch_counter;
-          leaves := { value = v; weight } :: !leaves;
-          Ok ()
-      | Ok (Op { name = "sample"; args = [ dv ]; resume; _ }) -> (
-          match Result.bind (dist_of_value ctx dv) (support ctx) with
-          | Error e -> Error e
-          | Ok entries ->
-              let rec branches = function
-                | [] -> Ok ()
-                | (x, p) :: rest -> (
-                    match Eval.resume_captured_state ctx resume x with
-                    | Error e -> Error e
-                    | Ok state -> (
-                        match explore state (weight *. p) with
-                        | Error e -> Error e
-                        | Ok () -> branches rest))
-              in
-              branches entries)
-      | Ok (Op { name = "observe"; args = [ dv; v ]; resume; _ }) -> (
-          match Result.bind (dist_of_value ctx dv) (fun d -> pmf ctx d v) with
-          | Error e -> Error e
-          | Ok p ->
-              Result.bind (Eval.resume_captured_state ctx resume Value.unit_v) (fun state ->
-                  explore state (weight *. p)))
-      | Ok (Op { name; args; _ }) ->
-          Error
-            (Runtime_err.Type_error
-               (Printf.sprintf "enumerate: unexpected op %s/%d" name (List.length args)))
-  in
-  match explore model 1.0 with
-  | Error error -> Error [ diagnostic ~code:"E0902" (Runtime_err.to_string error) ]
-  | Ok () ->
-      let total = List.fold_left (fun acc { weight; _ } -> acc +. weight) 0.0 !leaves in
-      if total <= 0.0 then
-        err ~code:"E0901"
-          "the posterior is empty: every branch is impossible under the observations"
-      else
-        (* merge equal values, normalize, sort by probability then rendering *)
-        let tbl : (string, Value.t * float ref) Hashtbl.t = Hashtbl.create 16 in
-        List.iter
-          (fun { value; weight } ->
-            let key = Value.show value in
-            match Hashtbl.find_opt tbl key with
-            | Some (_, w) -> w := !w +. weight
-            | None -> Hashtbl.add tbl key (value, ref weight))
-          !leaves;
-        let entries =
-          Hashtbl.fold (fun _ (v, w) acc -> (v, !w /. total) :: acc) tbl []
-          |> List.sort (fun (va, pa) (vb, pb) ->
-              match compare pb pa with 0 -> compare (Value.show va) (Value.show vb) | c -> c)
-        in
-        Ok { entries }
 
 (** Branches explored by the last {!enumerate} (instrumentation for the no-duplicate test). *)
 let last_branch_count () = !branch_counter
@@ -689,6 +629,232 @@ let likelihood_weighting (ctx : Eval.ctx) ~seed ~samples (model : unit -> Eval.s
                   match compare pb pa with 0 -> compare (Value.show va) (Value.show vb) | c -> c)
             in
             Ok { entries })
+
+(* --- typed outcomes (INF.1) --- *)
+
+type numeric = Underflow | Non_finite | Negative_mass
+type failure = Impossible | Exhausted | Numeric of numeric
+
+type metadata = {
+  exact : bool;  (** exact enumeration, else likelihood weighting *)
+  complete : bool;  (** every terminal path explored; never for sampling *)
+  seed : int option;
+  bound : int option;  (** terminal-path budget or sample count; [None] for unbounded *)
+  explored : int;  (** terminal paths reached or runs executed *)
+}
+
+type classified = { result : (posterior, failure) result; metadata : metadata }
+
+let merge_normalize total leaves =
+  let tbl : (string, Value.t * float ref) Hashtbl.t = Hashtbl.create 16 in
+  List.iter
+    (fun { value; weight } ->
+      let key = Value.show value in
+      match Hashtbl.find_opt tbl key with
+      | Some (_, w) -> w := !w +. weight
+      | None -> Hashtbl.add tbl key (value, ref weight))
+    leaves;
+  let entries =
+    Hashtbl.fold (fun _ (v, w) acc -> (v, !w /. total) :: acc) tbl []
+    |> List.sort (fun (va, pa) (vb, pb) ->
+        match compare pb pa with 0 -> compare (Value.show va) (Value.show vb) | c -> c)
+  in
+  { entries }
+
+(** [classify leaves] is the shared outcome contract, mirrored by the prelude's [dist.classify-v1]:
+    a non-finite leaf, then a negative leaf, then no surviving leaf (impossible), then a non-finite
+    total, then a zero total (every surviving path underflowed), else the merged, normalized
+    posterior. [leaves] are the surviving paths or runs, most recent first. *)
+let classify (leaves : weighted list) : (posterior, failure) result =
+  let finite w = Float.is_finite w in
+  if List.exists (fun { weight; _ } -> not (finite weight)) leaves then Error (Numeric Non_finite)
+  else if List.exists (fun { weight; _ } -> weight < 0.0) leaves then Error (Numeric Negative_mass)
+  else if leaves = [] then Error Impossible
+  else
+    let total = List.fold_left (fun acc { weight; _ } -> acc +. weight) 0.0 leaves in
+    if not (finite total) then Error (Numeric Non_finite)
+    else if total = 0.0 then Error (Numeric Underflow)
+    else Ok (merge_normalize total leaves)
+
+let failure_diagnostics ~sampled = function
+  | Impossible ->
+      err ~code:"E0901" "the posterior is empty: every %s is impossible under the observations"
+        (if sampled then "run" else "branch")
+  | Exhausted ->
+      err ~code:"E0918"
+        "exploration stopped at the terminal-path budget before every path was reached"
+  | Numeric Underflow ->
+      err ~code:"E0917"
+        "every possible %s's weight underflowed to zero; the posterior is not representable"
+        (if sampled then "run" else "path")
+  | Numeric Non_finite -> err ~code:"E0917" "a path weight or the total mass is not finite"
+  | Numeric Negative_mass -> err ~code:"E0917" "a path weight is negative"
+
+(** [enumerate_v1 ?max_branches ctx model] is exact enumeration with the typed outcome. A path with
+    an exact zero factor is pruned (it counts as a terminal path and leaves nothing); a path whose
+    product merely underflows survives, so underflow is distinguished from impossibility. With
+    [max_branches], attempting a terminal path beyond the budget stops exploration: the outcome is
+    [Exhausted], never a partial posterior. Runtime failures are E0902 diagnostics. *)
+let enumerate_v1 ?max_branches (ctx : Eval.ctx) (model : Eval.state) :
+    (classified, Diag.t list) result =
+  branch_counter := 0;
+  (* a non-positive budget is exhausted before the model runs *)
+  let exhausted = ref (match max_branches with Some budget -> budget <= 0 | None -> false) in
+  let leaves : weighted list ref = ref [] in
+  let terminal () =
+    match max_branches with
+    | Some budget when !branch_counter >= budget ->
+        exhausted := true;
+        false
+    | _ ->
+        incr branch_counter;
+        true
+  in
+  let factor p resume explore_next =
+    if !exhausted then Ok ()
+    else if p = 0.0 then (
+      ignore (terminal ());
+      Ok ())
+    else Result.bind (resume ()) explore_next
+  in
+  let rec explore (state : Eval.state) (weight : float) : (unit, Runtime_err.t) result =
+    if !exhausted then Ok ()
+    else
+      match run_until_op ctx state with
+      | Error e -> Error e
+      | Ok (Done v) ->
+          if terminal () then leaves := { value = v; weight } :: !leaves;
+          Ok ()
+      | Ok (Op { name = "sample"; args = [ dv ]; resume; _ }) -> (
+          match Result.bind (dist_of_value ctx dv) (support ctx) with
+          | Error e -> Error e
+          | Ok entries ->
+              let rec branches = function
+                | [] -> Ok ()
+                | (x, p) :: rest ->
+                    Result.bind
+                      (factor p
+                         (fun () -> Eval.resume_captured_state ctx resume x)
+                         (fun state -> explore state (weight *. p)))
+                      (fun () -> branches rest)
+              in
+              branches entries)
+      | Ok (Op { name = "observe"; args = [ dv; v ]; resume; _ }) -> (
+          match Result.bind (dist_of_value ctx dv) (fun d -> pmf ctx d v) with
+          | Error e -> Error e
+          | Ok p ->
+              factor p
+                (fun () -> Eval.resume_captured_state ctx resume Value.unit_v)
+                (fun state -> explore state (weight *. p)))
+      | Ok (Op { name; args; _ }) ->
+          Error
+            (Runtime_err.Type_error
+               (Printf.sprintf "enumerate: unexpected op %s/%d" name (List.length args)))
+  in
+  match explore model 1.0 with
+  | Error error -> Error [ diagnostic ~code:"E0902" (Runtime_err.to_string error) ]
+  | Ok () ->
+      let metadata =
+        {
+          exact = true;
+          complete = not !exhausted;
+          seed = None;
+          bound = max_branches;
+          explored = !branch_counter;
+        }
+      in
+      let result = if !exhausted then Error Exhausted else classify !leaves in
+      Ok { result; metadata }
+
+(** [lw_surviving_runs ctx ~seed ~samples model] runs [samples] seeded likelihood-weighting
+    executions exactly as {!likelihood_weighting} does (the same draws) and returns the runs that
+    are possible, oldest first, with their unnormalized weights. A run is impossible when an
+    observation has an exact zero factor or a categorical draw's support has zero total mass. *)
+let lw_surviving_runs (ctx : Eval.ctx) ~seed ~samples (model : unit -> Eval.state) :
+    ((Value.t * float) list, Diag.t list) result =
+  let master = Rng.make seed in
+  let runs : weighted list ref = ref [] in
+  let rec one_run rng (state : Eval.validated_state) (weight : float) (possible : bool) :
+      (unit, Runtime_err.t) result =
+    match run_until_op_validated ctx state with
+    | Error e -> Error e
+    | Ok (Validated_done v) ->
+        if possible then runs := { value = v; weight } :: !runs;
+        Ok ()
+    | Ok (Validated_op { name = "sample"; args = [ dv ]; resume; _ }) -> (
+        match dist_of_value ctx dv with
+        | Error e -> Error e
+        | Ok d -> (
+            (* a categorical whose support has no mass is an impossible draw, not a value *)
+            let empty =
+              match d with
+              | Categorical entries -> List.fold_left (fun acc (_, p) -> acc +. p) 0.0 entries = 0.0
+              | Bernoulli _ | UniformInt _ -> false
+            in
+            match sample_dist ctx rng d with
+            | Error e -> Error e
+            | Ok x ->
+                Result.bind (Eval.resume_validated_state ctx resume x) (fun state ->
+                    one_run rng state weight (possible && not empty))))
+    | Ok (Validated_op { name = "observe"; args = [ dv; v ]; resume; _ }) -> (
+        match Result.bind (dist_of_value ctx dv) (fun d -> pmf ctx d v) with
+        | Error e -> Error e
+        | Ok p ->
+            Result.bind (Eval.resume_validated_state ctx resume Value.unit_v) (fun state ->
+                one_run rng state (weight *. p) (possible && p <> 0.0)))
+    | Ok (Validated_op { name; _ }) ->
+        Error (Runtime_err.Unhandled { effect_ = "(not handled during inference)"; op = name })
+  in
+  let initial = model () in
+  let rec k_runs initial i =
+    if i >= samples then Ok ()
+    else
+      let rng = Rng.split master in
+      let state = Eval.fresh_validated_state ctx initial in
+      match one_run rng state 1.0 true with Error e -> Error e | Ok () -> k_runs initial (i + 1)
+  in
+  match Eval.validate_state_once ctx initial with
+  | Error error -> Error [ diagnostic ~code:"E0902" (Runtime_err.to_string error) ]
+  | Ok initial -> (
+      match k_runs initial 0 with
+      | Error error -> Error [ diagnostic ~code:"E0902" (Runtime_err.to_string error) ]
+      | Ok () -> Ok (List.rev_map (fun { value; weight } -> (value, weight)) !runs))
+
+(** [likelihood_weighting_v1] is seeded likelihood weighting with the typed outcome; for a
+    classifiable model its posterior equals {!likelihood_weighting}'s. *)
+let likelihood_weighting_v1 (ctx : Eval.ctx) ~seed ~samples (model : unit -> Eval.state) :
+    (classified, Diag.t list) result =
+  Result.map
+    (fun runs ->
+      {
+        result = classify (List.rev_map (fun (value, weight) -> { value; weight }) runs);
+        metadata =
+          {
+            exact = false;
+            complete = false;
+            seed = Some seed;
+            bound = Some samples;
+            explored = samples;
+          };
+      })
+    (lw_surviving_runs ctx ~seed ~samples model)
+
+(** The legacy success-or-diagnostic view of a classified outcome. *)
+let classified_to_result ~sampled (c : classified) : (posterior, Diag.t list) result =
+  match c.result with Ok p -> Ok p | Error f -> failure_diagnostics ~sampled f
+
+(** [enumerate ctx state] runs exact enumeration of a model state (build one with {!Eval.expr_state}
+    or {!Eval.apply_state}): {!enumerate_v1} without a budget, failures as diagnostics. *)
+let enumerate (ctx : Eval.ctx) (model : Eval.state) : (posterior, Diag.t list) result =
+  Result.bind (enumerate_v1 ctx model) (classified_to_result ~sampled:false)
+
+let show_metadata (m : metadata) : string =
+  Printf.sprintf "method=%s complete=%b seed=%s bound=%s explored=%d"
+    (if m.exact then "exact-enumeration" else "likelihood-weighting")
+    m.complete
+    (match m.seed with Some s -> string_of_int s | None -> "none")
+    (match m.bound with Some b -> string_of_int b | None -> "unbounded")
+    m.explored
 
 (** Render a posterior table, one row per value, probabilities to 6 places. *)
 let show_posterior (p : posterior) : string =

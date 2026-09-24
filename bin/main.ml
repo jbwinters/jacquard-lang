@@ -820,7 +820,16 @@ let infer_check store model =
           | [] -> Ok ()
           | ds -> Error ds))
 
-let infer_enumerate_cmd file prelude syntax =
+(* INF.1: print the typed outcome; failures are diagnostics, the metadata line is opt-in *)
+let print_classified ~sampled ~metadata (c : Infer_dist.classified) =
+  match Infer_dist.classified_to_result ~sampled c with
+  | Error ds -> print_diags ds
+  | Ok posterior ->
+      print_endline (Infer_dist.show_posterior posterior);
+      if metadata then print_endline ("# " ^ Infer_dist.show_metadata c.metadata);
+      ok
+
+let infer_enumerate_cmd file prelude max_branches metadata syntax =
   match open_ctx ~prelude ~store_dir:None with
   | Error ds -> print_diags ds
   | Ok (store, ctx) -> (
@@ -831,13 +840,11 @@ let infer_enumerate_cmd file prelude syntax =
           match infer_check store model with
           | Error ds -> print_diags ds
           | Ok () -> (
-              match Infer_dist.enumerate ctx (Eval.expr_state model) with
+              match Infer_dist.enumerate_v1 ?max_branches ctx (Eval.expr_state model) with
               | Error ds -> print_diags ds
-              | Ok posterior ->
-                  print_endline (Infer_dist.show_posterior posterior);
-                  ok)))
+              | Ok classified -> print_classified ~sampled:false ~metadata classified)))
 
-let infer_lw_cmd file prelude seed samples syntax =
+let infer_lw_cmd file prelude seed samples metadata syntax =
   match open_ctx ~prelude ~store_dir:None with
   | Error ds -> print_diags ds
   | Ok (store, ctx) -> (
@@ -849,12 +856,11 @@ let infer_lw_cmd file prelude seed samples syntax =
           | Error ds -> print_diags ds
           | Ok () -> (
               match
-                Infer_dist.likelihood_weighting ctx ~seed ~samples (fun () -> Eval.expr_state model)
+                Infer_dist.likelihood_weighting_v1 ctx ~seed ~samples (fun () ->
+                    Eval.expr_state model)
               with
               | Error ds -> print_diags ds
-              | Ok posterior ->
-                  print_endline (Infer_dist.show_posterior posterior);
-                  ok)))
+              | Ok classified -> print_classified ~sampled:true ~metadata classified)))
 
 (* --- fmt --- *)
 
@@ -2183,13 +2189,37 @@ let fmt_t =
       const (configure_diagnostics fmt_cmd)
       $ diagnostic_format_arg $ file_arg $ write_arg $ syntax_arg)
 
+let positive_int =
+  let parse s =
+    match int_of_string_opt s with
+    | Some n when n > 0 -> Ok n
+    | _ -> Error (`Msg (Printf.sprintf "expected a positive integer, got %S" s))
+  in
+  Arg.conv (parse, Format.pp_print_int)
+
+let infer_metadata_arg =
+  Arg.(
+    value & flag
+    & info [ "metadata" ]
+        ~doc:
+          "After the posterior, print one line: method, completeness, seed, bound, and terminal \
+           paths or runs explored.")
+
 let infer_t =
   let enumerate =
     Cmd.v
       (Cmd.info "enumerate" ~doc:"Exact posterior by multi-shot enumeration.")
       Term.(
         const (configure_diagnostics infer_enumerate_cmd)
-        $ diagnostic_format_arg $ file_arg $ prelude_arg $ syntax_arg)
+        $ diagnostic_format_arg $ file_arg $ prelude_arg
+        $ Arg.(
+            value
+            & opt (some positive_int) None
+            & info [ "max-branches" ] ~docv:"N"
+                ~doc:
+                  "Stop with E0918 instead of exploring more than $(docv) terminal paths (default: \
+                   unbounded).")
+        $ infer_metadata_arg $ syntax_arg)
   in
   let lw =
     Cmd.v
@@ -2201,8 +2231,8 @@ let infer_t =
             required
             & opt (some int) None
             & info [ "seed" ] ~docv:"N" ~doc:"PRNG seed (required, D4).")
-        $ Arg.(value & opt int 10000 & info [ "samples" ] ~docv:"K" ~doc:"Number of runs.")
-        $ syntax_arg)
+        $ Arg.(value & opt positive_int 10000 & info [ "samples" ] ~docv:"K" ~doc:"Number of runs.")
+        $ infer_metadata_arg $ syntax_arg)
   in
   Cmd.group
     (Cmd.info "infer" ~doc:"Probabilistic inference: handlers over an unchanged model.")

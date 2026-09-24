@@ -60,6 +60,7 @@ let intrinsics : (string * int) list =
     ("support", 1);
     ("pmf", 2);
     ("dist.sample-lw", 3);
+    ("dist.sample-lw-weights-v1", 3);
     ("code.of-int", 1);
     ("code.of-real", 1);
     ("code.of-hash", 1);
