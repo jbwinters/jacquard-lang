@@ -141,6 +141,10 @@ When adding valid corpus files, regenerate the golden hashes with
   labels, hidden members; identity, verification, API diff),
   `docs/release/api-identities/DECISION.md`, `test/test_interface.ml`,
   `test/cli/interface.t`. `jacquard interface emit|verify|diff`.
+- Evaluation lifetimes (RF.2): `Eval.with_invocation` in `src/eval.mli`
+  scopes grants, observers, coverage, and teardown to one evaluation over a
+  reusable `Eval.ctx` (Once ownership stays evaluator-lifetime);
+  `test/test_invocation.ml`.
 - Dist and inference: `prelude/06-dist.jqd`, `prelude/13-dist-lib.jqd`,
   `src/infer_dist.ml`, `test/test_infer.ml`.
 - Warp: `prelude/15-warp.jqd`, `prelude/16-gen.jqd`, `src/warp.ml`,

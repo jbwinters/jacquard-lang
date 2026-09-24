@@ -121,7 +121,10 @@ type root_observer = { on_operation : Hash.t -> unit; on_output : Hash.t -> stri
 type ctx = {
   store : Store.t;
   task_run : Task_handle.run;
-      (** evaluator-lifetime owner for affine Once resumptions; scheduler Task runs are distinct *)
+      (** evaluator-lifetime owner for affine Once resumptions; scheduler Task runs are distinct.
+          Deliberately not per invocation: memoized program values and validated states outlive an
+          invocation and may hold resumptions, so rotating the owner would both let trusted caches
+          resume stale tokens and make reusable closures fail spuriously *)
   mutable scheduler_task_run : Task_handle.run option;
       (** fresh run owner dynamically installed only by the private scheduler bridge *)
   mutable task_scope_path : int list;
@@ -167,6 +170,12 @@ type ctx = {
           this cache. *)
   audit_context_id : int;
   mutable next_audit_run_id : int;
+  mutable invocation : invocation option;  (** the active invocation, if any; never nested *)
+}
+
+and invocation = {
+  mutable active : bool;
+  mutable teardown : (unit -> unit) list;  (** most recent first *)
 }
 
 let next_audit_context_id = Atomic.make 0
@@ -194,6 +203,7 @@ let make_ctx store =
     recovery_static_clean = Physical_cache.create 128;
     audit_context_id = Atomic.fetch_and_add next_audit_context_id 1;
     next_audit_run_id = 0;
+    invocation = None;
   }
 
 (** [store ctx] returns the immutable store handle used for name and declaration lookup. *)
@@ -347,6 +357,53 @@ let note_root_output ctx ~operation bytes =
 
 let notify_root_operation ctx operation =
   match ctx.root_observer with None -> () | Some observer -> observer.on_operation operation
+
+(* --- invocations (RF.2) --- *)
+
+let on_teardown invocation callback =
+  if not invocation.active then invalid_arg "Eval.on_teardown: the invocation has already ended"
+  else invocation.teardown <- callback :: invocation.teardown
+
+let invocation_active ctx = Option.is_some ctx.invocation
+
+let with_invocation ?coverage ctx body =
+  if Option.is_some ctx.invocation then
+    invalid_arg "Eval.with_invocation: an invocation is already active on this evaluator";
+  let saved_coverage = ctx.track_coverage
+  and saved_observer = ctx.root_observer
+  and saved_handlers = Hashtbl.copy ctx.root_handlers in
+  let invocation = { active = true; teardown = [] } in
+  Option.iter (fun enabled -> ctx.track_coverage <- enabled) coverage;
+  ctx.invocation <- Some invocation;
+  (* runs every callback exactly once, most recent first, then restores the configuration the
+     invocation borrowed; returns the first callback exception *)
+  let finish () =
+    invocation.active <- false;
+    let callbacks = invocation.teardown in
+    invocation.teardown <- [];
+    let first = ref None in
+    List.iter
+      (fun callback ->
+        try callback ()
+        with exn ->
+          if Option.is_none !first then first := Some (exn, Printexc.get_raw_backtrace ()))
+      callbacks;
+    Hashtbl.reset ctx.root_handlers;
+    Hashtbl.iter (Hashtbl.replace ctx.root_handlers) saved_handlers;
+    ctx.root_observer <- saved_observer;
+    ctx.track_coverage <- saved_coverage;
+    ctx.invocation <- None;
+    !first
+  in
+  match body invocation with
+  | result -> (
+      match finish () with
+      | None -> result
+      | Some (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace)
+  | exception exn ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      ignore (finish ());
+      Printexc.raise_with_backtrace exn backtrace
 
 (** [set_coverage_tracking ctx enabled] controls semantic term-reference collection. Disabling it
     avoids bookkeeping when callers will not inspect coverage. *)

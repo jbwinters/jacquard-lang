@@ -66,6 +66,49 @@ val note_root_output : ctx -> operation:Hash.t -> string -> unit
     language-level handlers. It is a no-op without an observer; an observer callback exception
     propagates unchanged. *)
 
+(** {1 Invocations (RF.2)}
+
+    A [ctx] is reusable program configuration: the store, wired builtins, the memo and validation
+    caches, and the owner of affine Once resumptions, all of which stay valid across evaluations of
+    the same program (memoized values may hold resumptions, so their owner is evaluator-lifetime; a
+    resumption from another evaluator is refused with E0907, and a caller that needs fresh ownership
+    uses a fresh [ctx], as [relate] and the host worker do). Everything one evaluation owns belongs
+    to an {e invocation}: the granted root handlers (and the sinks, RNG, and caches their closures
+    hold), the root observer, the coverage flag, and teardown work. Scheduler runs, structured
+    scopes, and schedule traces are already created and closed per scheduled run by the drivers
+    (stale Task and Channel handles are refused per run); future resource budgets belong to the
+    invocation.
+
+    Inventory of the remaining mutable driver state and its lifetime:
+    - [Scheduler_core] task entries (lifecycle, suspension, result, waiters, cancellation request,
+      retained resumption): created per scheduled run, discarded when that run closes.
+    - [Schedule_control] recording and replay cursors (remaining events, fork flag, current
+      operation, recorded creations and events): one per scheduled run's trace.
+    - [Infer_dist]: each driver call keeps its leaves, runs, weights, and per-run RNG in locals; the
+      module-level [branch_counter] is instrumentation reset at the start of every enumeration and
+      describes only the most recent call.
+    - [Host_worker]: the protocol session, request ordinals, and the one retained continuation live
+      for one worker process, which serves exactly one invocation. *)
+
+type invocation
+(** One evaluation extent over a [ctx]. Abstract: it grants nothing and exposes no continuation. *)
+
+val with_invocation : ?coverage:bool -> ctx -> (invocation -> 'a) -> 'a
+(** [with_invocation ctx body] runs [body] as one invocation: grants installed during [body] scoped
+    to it, the coverage flag set to [coverage] when given, and the coverage flag and root handlers
+    restored on every exit (the root observer is restored too, defensively: the public API only sets
+    it through the self-restoring {!with_root_observer}). Teardown callbacks run exactly once, most
+    recent first, after [body] returns or raises. [body]'s exception wins and is re-raised with its
+    backtrace; otherwise the first teardown exception is re-raised after every callback has run.
+    Invocations do not nest: [Invalid_argument] if one is active. *)
+
+val on_teardown : invocation -> (unit -> unit) -> unit
+(** [on_teardown invocation callback] registers exactly-once cleanup. [Invalid_argument] after the
+    invocation has ended. *)
+
+val invocation_active : ctx -> bool
+(** [invocation_active ctx] holds while a {!with_invocation} body runs on [ctx]. *)
+
 val set_coverage_tracking : ctx -> bool -> unit
 (** [set_coverage_tracking ctx enabled] enables or disables term-reference coverage bookkeeping. *)
 

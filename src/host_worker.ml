@@ -225,7 +225,11 @@ let serve prepared ~input ~output ~operator =
                     | _ -> (
                         match Session.start ~limits ~checker:prepared.checker json with
                         | Error diagnostics -> fatal operator ~limits output diagnostics
-                        | Ok session -> invoke prepared operator ~limits ~input ~output session)))))
+                        | Ok session ->
+                            (* the worker serves one invocation; it owns the Once resumption the
+                               host exchange retains *)
+                            Eval.with_invocation prepared.ctx (fun _invocation ->
+                                invoke prepared operator ~limits ~input ~output session))))))
   with exn ->
     note operator
       (Printf.sprintf "jacquard host worker: internal invariant failed (%s)"

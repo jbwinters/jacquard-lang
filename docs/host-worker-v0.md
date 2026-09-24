@@ -26,6 +26,22 @@ Standard input carries host frames, standard output carries Core frames, and
 standard error carries bounded operator text. The worker owns none of the
 three descriptors and closes none of them.
 
+Before anything else the worker checks the three descriptors. A closed one is
+pointed at the null device, so no later open (the store's objects) can be
+handed descriptor 0, 1, or 2. A closed standard input or output means there is
+no carrier: the worker writes one line naming it to standard error (discarded
+if that is closed too), opens nothing, and exits 74. A closed standard error
+alone only discards operator output.
+
+The note is best-effort: a broken or unwritable standard error cannot change
+the exit, and a closed descriptor that cannot be pointed at the null device
+also stops the worker with exit 74 before the store is opened.
+
+Each worker serves one invocation (`Eval.with_invocation`) on its own
+evaluator: grants, observers, and teardown are scoped to the invocation, and
+the evaluator (which owns the retained Once continuation) ends with the
+process.
+
 ## Lifecycle
 
 | State | Event | Action | Next state |

@@ -329,8 +329,10 @@ let run_cmd file allows prelude store_dir seed infer_cache origin dry_run schedu
           match expression_count with
           | Error diagnostics -> print_diags diagnostics
           | Ok () -> (
-              (* run never reads coverage; skip the per-reference bookkeeping (PF.2 phase 2) *)
-              Eval.set_coverage_tracking ctx false;
+              (* one invocation owns this run's grants and Once resumptions; run never reads
+                 coverage, so it skips the per-reference bookkeeping (PF.2 phase 2) *)
+              Eval.with_invocation ~coverage:false ctx
+              @@ fun _invocation ->
               let seed =
                 (* OS-entropy seeded unless pinned; --seed makes sampling runs reproducible (SL.7) *)
                 match seed with
@@ -516,7 +518,7 @@ let relate_constituent ~file ~source ~authority ~prelude ~root_seed ~schedule_se
           | Error failure -> Error failure
           | Ok (Error diagnostics) -> Error (Relate_diagnostics diagnostics)
           | Ok (Ok (store, ctx)) -> (
-              Eval.set_coverage_tracking ctx false;
+              Eval.with_invocation ~coverage:false ctx @@ fun _invocation ->
               let rec grant_all = function
                 | [] -> Ok ()
                 | allow :: rest -> (
@@ -822,6 +824,7 @@ let infer_enumerate_cmd file prelude syntax =
   match open_ctx ~prelude ~store_dir:None with
   | Error ds -> print_diags ds
   | Ok (store, ctx) -> (
+      Eval.with_invocation ctx @@ fun _invocation ->
       match load_model store ~syntax ~file with
       | Error ds -> print_diags ds
       | Ok model -> (
@@ -838,6 +841,7 @@ let infer_lw_cmd file prelude seed samples syntax =
   match open_ctx ~prelude ~store_dir:None with
   | Error ds -> print_diags ds
   | Ok (store, ctx) -> (
+      Eval.with_invocation ctx @@ fun _invocation ->
       match load_model store ~syntax ~file with
       | Error ds -> print_diags ds
       | Ok model -> (
@@ -973,6 +977,7 @@ let dist_diff_cmd model_a model_b tolerance cache_dir no_cache sweep prelude =
   match open_ctx ~prelude ~store_dir:None with
   | Error ds -> print_diags ds
   | Ok (store, ctx) -> (
+      Eval.with_invocation ctx @@ fun _invocation ->
       let cache_dir =
         if no_cache then None else Some (Option.value cache_dir ~default:"dist-cache")
       in
@@ -1128,6 +1133,7 @@ let replay_cmd log_file program forks to_n compare prelude =
   match open_ctx ~prelude ~store_dir:None with
   | Error ds -> print_diags ds
   | Ok (store, ctx) -> (
+      Eval.with_invocation ctx @@ fun _invocation ->
       match log_entries_of_file log_file with
       | Error ds -> print_diags ds
       | Ok entries -> (
@@ -1333,6 +1339,9 @@ let test_cmd files allows prelude cache_dir no_cache coverage seed samples exhau
       match open_ctx ~prelude ~store_dir:None with
       | Error ds -> print_diags ds
       | Ok (store, ctx) -> (
+          (* the whole suite is one invocation: grants, coverage, and Once resumptions *)
+          Eval.with_invocation ctx
+          @@ fun _invocation ->
           let prop_mode =
             if exhaustive then Warp.Exhaustive { budget } else Warp.Sampling { seed; samples }
           in
@@ -2814,30 +2823,76 @@ let discard_standard_output () =
       try Unix.close null with Unix.Unix_error _ -> ())
   | exception Unix.Unix_error _ -> ()
 
+(* Point each closed standard descriptor at the null device, so that no later open (the store's
+   object files) can be handed descriptor 0, 1, or 2, and report which were closed. *)
+let reopen_closed_standard_descriptors () =
+  List.filter_map
+    (fun (descriptor, name, flags) ->
+      match Unix.fstat descriptor with
+      | _ -> None
+      | exception Unix.Unix_error (Unix.EBADF, _, _) ->
+          let null = Unix.openfile "/dev/null" flags 0 in
+          if null <> descriptor then begin
+            Unix.dup2 null descriptor;
+            Unix.close null
+          end;
+          Some name)
+    [
+      (Unix.stdin, "standard input", [ Unix.O_RDONLY ]);
+      (Unix.stdout, "standard output", [ Unix.O_WRONLY ]);
+      (Unix.stderr, "standard error", [ Unix.O_WRONLY ]);
+    ]
+
+(* A best-effort operator note: a broken or unwritable standard error must not change the exit. *)
+let best_effort_note text =
+  let previous = Sys.signal Sys.sigpipe Sys.Signal_ignore in
+  Fun.protect
+    ~finally:(fun () -> Sys.set_signal Sys.sigpipe previous)
+    (fun () ->
+      (* unbuffered: a buffered channel would retry the failed bytes at exit and fail there *)
+      let line = text ^ "\n" in
+      try ignore (Unix.write_substring Unix.stderr line 0 (String.length line))
+      with Unix.Unix_error _ -> ())
+
 let host_worker_cmd store_dir =
-  if not (Sys.file_exists store_dir && Sys.is_directory store_dir) then
-    print_diags
-      [ cli_diagnostic ~code:"E0606" (Printf.sprintf "store %s does not exist" store_dir) ]
-  else
-    match Store.open_store store_dir with
-    | Error ds -> print_diags ds
-    | Ok store -> (
-        match Host_worker.prepare store with
+  match reopen_closed_standard_descriptors () with
+  | exception Unix.Unix_error _ ->
+      (* a closed descriptor could not be neutralized, so opening the store could hand it out:
+         stop before touching anything *)
+      best_effort_note "jacquard host worker: a closed standard descriptor could not be reopened";
+      Host_worker.exit_code Host_worker.Carrier_lost
+  | closed when List.mem "standard input" closed || List.mem "standard output" closed ->
+      (* no carrier: nothing can be read from or written to the host, so stop before touching the
+         store; a closed standard error is only operator output and is discarded *)
+      best_effort_note
+        ("jacquard host worker: " ^ String.concat " and " closed ^ " closed at startup; no carrier");
+      Host_worker.exit_code Host_worker.Carrier_lost
+  | _ -> (
+      if not (Sys.file_exists store_dir && Sys.is_directory store_dir) then
+        print_diags
+          [ cli_diagnostic ~code:"E0606" (Printf.sprintf "store %s does not exist" store_dir) ]
+      else
+        match Store.open_store store_dir with
         | Error ds -> print_diags ds
-        | Ok prepared ->
-            set_binary_mode_in stdin true;
-            set_binary_mode_out stdout true;
-            let status = Host_worker.serve prepared ~input:stdin ~output:stdout ~operator:stderr in
-            (match status with
-            | Host_worker.Carrier_lost ->
-                (* A frame that failed to reach the host must never be resent: point the process's
+        | Ok store -> (
+            match Host_worker.prepare store with
+            | Error ds -> print_diags ds
+            | Ok prepared ->
+                set_binary_mode_in stdin true;
+                set_binary_mode_out stdout true;
+                let status =
+                  Host_worker.serve prepared ~input:stdin ~output:stdout ~operator:stderr
+                in
+                (match status with
+                | Host_worker.Carrier_lost ->
+                    (* A frame that failed to reach the host must never be resent: point the process's
                    standard output at the null device so exit-time flushes discard the bytes still
                    buffered in the channel instead of retrying the carrier. *)
-                discard_standard_output ()
-            | Host_worker.Terminal_written | Host_worker.Protocol_failure
-            | Host_worker.Internal_failure ->
-                ());
-            Host_worker.exit_code status)
+                    discard_standard_output ()
+                | Host_worker.Terminal_written | Host_worker.Protocol_failure
+                | Host_worker.Internal_failure ->
+                    ());
+                Host_worker.exit_code status))
 
 let out_arg =
   Arg.(required & opt (some string) None & info [ "o"; "output" ] ~docv:"OUT" ~doc:"Output path.")
