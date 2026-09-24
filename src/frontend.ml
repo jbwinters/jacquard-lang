@@ -134,6 +134,7 @@ module Checked = struct
     prelude : (string * string) list option;
     tops : top list;
     dependencies : Hash.t list;
+    interface : Interface.t;
     published : ((string * Resolve.nkind) * Hash.t) list list;
         (* per top, the (name, kind) bindings the store actually published when it was installed *)
   }
@@ -143,8 +144,9 @@ module Checked = struct
   let prelude t = t.prelude
   let tops t = t.tops
   let dependencies t = t.dependencies
+  let interface t = t.interface
 
-  let seal ~file ~source ~prelude ~published tops =
+  let seal ~file ~source ~prelude ~published ~interface tops =
     let introduced =
       List.concat_map
         (fun top ->
@@ -165,7 +167,15 @@ module Checked = struct
       List.sort_uniq Hash.compare references
       |> List.filter (fun hash -> not (List.exists (Hash.equal hash) introduced))
     in
-    { file; source_digest = Hash.of_string source; prelude; tops; dependencies; published }
+    {
+      file;
+      source_digest = Hash.of_string source;
+      prelude;
+      tops;
+      dependencies;
+      interface;
+      published;
+    }
 
   type stale =
     | Prelude_changed
@@ -357,7 +367,21 @@ let check ?origin ?(on_parsed = ignore) ?(on_resolved = fun _ _ -> ())
             Ok ()
       in
       let* () = walk ?origin ~on_parsed ~on_resolved ~on_installed ~syntax ~file store source in
+      let tops = List.rev !checked in
+      (* the public interface: the final bindings the source introduced, as the store exposes them *)
+      let declarations =
+        List.filter_map
+          (fun (top : Checked.top) ->
+            match (top.resolved, top.identity) with
+            | Kernel.Decl declaration, Some hashes -> Some (declaration, hashes)
+            | _ -> None)
+          tops
+      in
+      let* interface =
+        Interface.of_side ~source:(Hash.of_string source) checker
+          (Diff.source_side store declarations)
+      in
       Ok
         (Checked
            (Checked.seal ~file ~source ~prelude:(Store.prelude_manifest store)
-              ~published:(List.rev !published) (List.rev !checked)))
+              ~published:(List.rev !published) ~interface tops))

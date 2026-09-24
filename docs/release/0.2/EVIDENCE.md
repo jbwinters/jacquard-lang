@@ -32,8 +32,8 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1049`
-- Cram transcript files: `62`
+- Alcotest/QCheck cases: `1055`
+- Cram transcript files: `63`
 - Documentation examples: `34` named examples across `8` documents
 
 The development suite also includes corpus goldens, release-manifest checks,
@@ -321,3 +321,19 @@ instance dispatch or for TS.0's rule with nearest dispatch, and finds
 counterexamples for instance typing over nearest dispatch. The thirteen
 `test/test_scoped_instances_model.ml` cases bring the current source inventory
 to `1049 / 62 / 34`.
+
+Public interfaces are portable artifacts (API.1). `src/interface.mli` defines
+the `interface-v1` manifest that every checked artifact now seals
+(`Frontend.Checked.interface`) and that `jacquard interface emit` writes: each
+export with its exact identity, owning declaration, name-independent checked
+signature, call labels (a term's or operation's `call-abi-v1` companion, a
+constructor's field labels), mode and arity, plus the hidden members of exported
+declarations. The interface identity covers exports and hidden members only, so
+reformatting or renaming binders keeps it; `jacquard interface diff` classifies
+a change as compatible only when it is purely additive; `jacquard interface
+verify` accepts a store only when it binds every export to its identity with an
+equal companion and exposes no hidden member, so a positional export is refused
+for its missing companions rather than having labels inferred. `HASH_V0`,
+export, and `.jqd` are unchanged (`docs/release/api-identities/DECISION.md`).
+The six `test/test_interface.ml` cases and `test/cli/interface.t` bring the
+current source inventory to `1055 / 63 / 34`.

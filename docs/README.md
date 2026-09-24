@@ -126,6 +126,10 @@ Read these together when reviewing the historical 0.1 candidate boundary:
   follow-up scope outside the surface release gate.
 - `release/named-call-arguments/DECISION.md`: SX.23 direct named-call contract,
   hash-bound companion ABI, compatibility boundary, and explicit non-claims.
+- `release/api-identities/DECISION.md`: API.1 interface-v1 manifests (exact
+  identities, name-independent signatures, call labels, hidden members),
+  their identity and compatibility rules, import validation, and the
+  export/quotation boundary.
 - `release/named-call-arguments/EVIDENCE.md`: parser/resolver/store/hash/native
   evidence and the current test inventory for named calls.
 - `designs/everyday-language-ergonomics.md`: DES.4 design proposal (not a
