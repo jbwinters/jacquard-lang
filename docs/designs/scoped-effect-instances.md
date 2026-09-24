@@ -130,13 +130,18 @@ under its own name, so the authority manifest remains a set of names.
   with". An annotation cannot name a particular instance; inference does, which
   is how a thunk over one instance is refused where a thunk over another is
   expected (the model's crossed-thunk case uses explicit labels only because
-  the model has no inference).
+  the model has no inference). In a row annotation the effect name covers every instance
+  determined by the function's capability parameters.
 - **Row determinacy.** An instance label enters a row only through a value of
   capability type, so every instance variable in a row is determined by the
   type of some capability in scope. Row unification therefore never has to
   choose between `State<α>` and `State<β>` against `State<i>`: `α` and `β` are
   already unified with the labels of the capabilities that introduced them. A
-  row containing an instance variable not determined this way is refused.
+  row containing an instance variable not determined this way is refused. A
+  consequence, recorded as a limit: a function that takes only a thunk over an
+  instance, with no capability parameter, is refused; pass the capability
+  too. Aliasing a `*.scoped` combinator (`my-scoped = state.scoped`) is refused
+  like a forwarding wrapper.
 - **Generalization.** A let-bound function's instance variables are
   generalized like row variables when they are not free in the environment
   (`bump : forall i. (StateRef<i> Int) ->{state-instance<i>} ()`), under the
@@ -238,7 +243,10 @@ lambdas (no let-generalization of instance labels, and annotations name
 instances explicitly where the language would infer them), no `once` effects,
 and no Throw/Emit. It models TS.0's unnamed operations through capabilities
 whose label carries the payload, which is equivalent for typing because TS.0
-keeps one payload per effect label per region. Generalization, row
+keeps one payload per effect label per region. One divergence: the model's
+Mono mode also refuses spawned work with a non-empty row, whereas shipped TS.0
+charges the ambient effects of spawned work to the caller under SC.4; the
+spawn rule this design adds concerns instance labels only. Generalization, row
 determinacy, the wrapper refusal, and once-affinity are argued in §4, not
 exercised by the model.
 

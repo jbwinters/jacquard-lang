@@ -75,7 +75,9 @@ let test_spawned_work () =
   (* async.spawn's child runs under the scheduler, outside the instance's handler *)
   let spawn_over_instance = Scoped ("c", Int 0, Detach (Put (Var "c", Int 1))) in
   rejects "spawned work may not perform a scoped instance" Instances spawn_over_instance;
-  rejects "nor under TS.0's rule" Mono spawn_over_instance;
+  (* the model's Mono mode also refuses it; shipped TS.0 instead charges ambient effects of
+     spawned work to the caller under SC.4, a divergence recorded in the design's limits *)
+  rejects "nor under the model's mono rule" Mono spawn_over_instance;
   (match run By_instance spawn_over_instance with
   | Stuck _ -> ()
   | _ -> Alcotest.fail "the detached put should reach a stale capability");
@@ -281,16 +283,21 @@ let test_escape_check_is_load_bearing () =
       (fun e ->
         match check Instances e with
         | Ok _ -> false
-        | Error message ->
-            (String.length message >= 16 && String.sub message 0 16 = "instance escapes"
-            || String.length message >= 13 && String.sub message 0 13 = "detached work")
-            && (match run By_instance e with
-               | Stuck message -> String.length message >= 3 && (String.sub message (String.length message - 16) 16 = "stale capability")
-               | _ -> false))
+        | Error message -> (
+            (String.starts_with ~prefix:"instance escapes" message
+            || String.starts_with ~prefix:"detached work" message)
+            &&
+            match run By_instance e with
+            | Stuck message -> String.ends_with ~suffix:"stale capability" message
+            | _ -> false))
       (generated ())
   in
-  Printf.printf "escape-rejected programs that reach a stale capability when run: %d\n" (List.length stale);
-  Alcotest.(check bool) (Printf.sprintf "%d stale" (List.length stale)) true (List.length stale >= 100)
+  Printf.printf "escape-rejected programs that reach a stale capability when run: %d\n"
+    (List.length stale);
+  Alcotest.(check bool)
+    (Printf.sprintf "%d stale" (List.length stale))
+    true
+    (List.length stale >= 100)
 
 let test_instance_typing_needs_instance_dispatch () =
   (* instance typing over operation-identity dispatch is unsound: the generator finds cases *)
