@@ -172,6 +172,29 @@ let test_restoration_on_exception () =
   (* the grant made before the exception is gone *)
   let code = Eval.with_invocation ctx (fun _ -> failure (Eval.run_expr ctx greet)) in
   Alcotest.(check string) "grant withdrawn" "unhandled" code;
+  (* one outer observer stays in effect across an invocation that raises (even after a nested
+     observer raised inside it) and still observes the next invocation in the same extent *)
+  let seen = ref 0 in
+  Eval.with_root_observer ctx
+    ~on_operation:(fun _ -> incr seen)
+    ~on_output:(fun _ _ -> ())
+    (fun () ->
+      (match
+         Eval.with_invocation ctx (fun _ ->
+             grant_console ctx sink;
+             ignore (Eval.run_expr ctx greet);
+             Eval.with_root_observer ctx
+               ~on_operation:(fun _ -> ())
+               ~on_output:(fun _ _ -> ())
+               (fun () -> raise Boom))
+       with
+      | () -> Alcotest.fail "no exception"
+      | exception Boom -> ());
+      Alcotest.(check int) "the outer observer saw the raising invocation's operation" 1 !seen;
+      Eval.with_invocation ctx (fun _ ->
+          grant_console ctx sink;
+          ignore (Eval.run_expr ctx greet)));
+  Alcotest.(check int) "the same outer observer is back in effect afterwards" 2 !seen;
   (* coverage tracking is back on: a term reference is recorded again *)
   let _, covered =
     Eval.with_fresh_coverage ctx (fun () ->
@@ -243,7 +266,7 @@ let suite =
     Alcotest.test_case "grants are scoped to one invocation" `Quick test_grants_are_scoped;
     Alcotest.test_case "once resumptions are evaluator-owned and refused elsewhere" `Quick
       test_stale_once_resumption;
-    Alcotest.test_case "grants and coverage are restored on exceptions" `Quick
+    Alcotest.test_case "grants, observers, and coverage are restored on exceptions" `Quick
       test_restoration_on_exception;
     Alcotest.test_case "teardown runs exactly once, most recent first" `Quick
       test_teardown_exactly_once;

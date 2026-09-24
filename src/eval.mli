@@ -77,7 +77,18 @@ val note_root_output : ctx -> operation:Hash.t -> string -> unit
     hold), the root observer, the coverage flag, and teardown work. Scheduler runs, structured
     scopes, and schedule traces are already created and closed per scheduled run by the drivers
     (stale Task and Channel handles are refused per run); future resource budgets belong to the
-    invocation. *)
+    invocation.
+
+    Inventory of the remaining mutable driver state and its lifetime:
+    - [Scheduler_core] task entries (lifecycle, suspension, result, waiters, cancellation request,
+      retained resumption): created per scheduled run, discarded when that run closes.
+    - [Schedule_control] recording and replay cursors (remaining events, fork flag, current
+      operation, recorded creations and events): one per scheduled run's trace.
+    - [Infer_dist]: each driver call keeps its leaves, runs, weights, and per-run RNG in locals; the
+      module-level [branch_counter] is instrumentation reset at the start of every enumeration and
+      describes only the most recent call.
+    - [Host_worker]: the protocol session, request ordinals, and the one retained continuation live
+      for one worker process, which serves exactly one invocation. *)
 
 type invocation
 (** One evaluation extent over a [ctx]. Abstract: it grants nothing and exposes no continuation. *)
