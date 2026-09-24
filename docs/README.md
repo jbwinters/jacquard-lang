@@ -135,6 +135,11 @@ Read these together when reviewing the historical 0.1 candidate boundary:
   shared library/CLI classification, and migration from the released drivers.
 - `release/named-call-arguments/EVIDENCE.md`: parser/resolver/store/hash/native
   evidence and the current test inventory for named calls.
+- `designs/behavioral-change-review.md`: DES.1 design proposal (not a
+  contract) for reviewing two compatible checked versions over declared inputs
+  and worlds: observation policy, status taxonomy, condition grouping,
+  deterministic witnesses, probability comparison, replay and export, over the
+  RW.8 engine; REV.1–REV.3 follow-up backlog.
 - `designs/everyday-language-ergonomics.md`: DES.4 design proposal (not a
   contract): evidence from the four applications, generated field setters
   before any update syntax, list-based predicates instead of operators,
