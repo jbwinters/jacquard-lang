@@ -92,7 +92,7 @@ Secret *values* never reach an attenuation record, because combinators judge
 names only. The existing rule that an opaque Secret value is never rendered,
 compared, or serialized (E0819) is unchanged.
 
-### D-CAP0.3 The order is trusted Core code, exposed to the prelude (owner sign-off required)
+### D-CAP0.3 The order is trusted Core code, exposed to the prelude (owner acknowledgment gates CAP.1)
 
 **This departs from the draft's recommendation and from the task's wording
 ("the Jacquard prelude-ring order"); CAP.1 must not start on it without the
