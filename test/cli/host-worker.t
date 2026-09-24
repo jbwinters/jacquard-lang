@@ -95,12 +95,25 @@ exits 74.
   {"carrier":"stdio-u32-json-v0","kind":"core_hello","limits":{"max_arguments":64,"max_collection_items":1024,"max_diagnostic_bytes":65536,"max_diagnostics":32,"max_effect_requests":1024,"max_effects":64,"max_frame_bytes":1048576,"max_host_message_bytes":4096,"max_json_depth":64,"max_operations":256,"max_stderr_bytes":65536,"max_text_bytes":262144,"max_value_nodes":4096},"versions":["jacquard-host-v0"]}
   {"diagnostics":[{"schema":"jacquard-diagnostic-v1","domain":"process","code":"E1611","severity":"error","span":null,"summary":"The host carrier was lost before a trustworthy frame completed.","cause":"The carrier ended before the declared frame completed.","next_step":"Treat the missing terminal exchange as host-owned carrier-failure evidence."}],"kind":"fatal","protocol":"jacquard-host-v0"}
 
-A standard output that cannot be written is carrier loss: one operator note,
-no retry of the failed frame, exit 74.
+A standard input or output that is closed at startup is carrier loss before
+anything is opened: the descriptor is pointed at the null device so the
+store's objects can never be handed descriptor 0 or 1, one operator note names
+it, and the worker exits 74 without touching the store. A closed standard
+error alone only discards operator output.
 
+  $ ls store/objects | wc -l > objects.before
   $ jacquard host worker --store store < pure.in >&-
-  jacquard host worker: core_hello could not be written (E1611)
+  jacquard host worker: standard output closed at startup; no carrier
   [74]
+  $ jacquard host worker --store store <&-
+  jacquard host worker: standard input closed at startup; no carrier
+  [74]
+  $ ls store/objects | wc -l | cmp - objects.before && echo store-untouched
+  store-untouched
+  $ jacquard host worker --store store < shutdown.in 2>&- > closed-stderr.out; echo "exit:$?"
+  exit:0
+  $ cmp closed-stderr.out shutdown.out && echo same-frames
+  same-frames
 
 Startup configuration failures happen before any frame is written.
 

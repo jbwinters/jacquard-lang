@@ -32,7 +32,7 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1055`
+- Alcotest/QCheck cases: `1060`
 - Cram transcript files: `63`
 - Documentation examples: `34` named examples across `8` documents
 
@@ -337,3 +337,24 @@ for its missing companions rather than having labels inferred. `HASH_V0`,
 export, and `.jqd` are unchanged (`docs/release/api-identities/DECISION.md`).
 The six `test/test_interface.ml` cases and `test/cli/interface.t` bring the
 current source inventory to `1055 / 63 / 34`.
+
+Evaluation state has an explicit owner (RF.2). An `Eval.ctx` is now reusable
+program configuration (store, wired builtins, memo and validation caches, and
+the owner of affine Once resumptions, which stays evaluator-lifetime because
+memoized values may hold resumptions; a resumption from another evaluator is
+refused with E0907 before its budget is consumed), and `Eval.with_invocation`
+scopes everything one evaluation owns: the granted root handlers and the sinks,
+RNG, and caches their closures hold, the root observer, and the coverage flag,
+all restored on every exit including host exceptions; teardown callbacks
+run exactly once, most recent first, with the body's exception taking
+precedence. `run`, `relate`, `test`, `replay`, `infer`, `dist-diff`, and the
+host worker each run their single evaluation extent as one invocation, so their output and exit
+codes are unchanged; scheduler runs and schedule traces keep their existing
+per-run ownership, and deterministic scheduling and serial host dispatch stay
+separate. The host worker now checks its standard descriptors before opening
+anything: a closed standard input or output is carrier loss (exit 74) with the
+store untouched, a closed standard error only discards operator output, and the
+startup note is best-effort, so a broken standard error cannot change the exit
+(`test/cli/host-worker.t`, `docs/host-worker-v0.md`). The five
+`test/test_invocation.ml` cases bring the current source inventory to
+`1060 / 63 / 34`.
