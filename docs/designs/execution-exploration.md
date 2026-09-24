@@ -5,10 +5,14 @@
   contract.
 - Date: 2026-09-24
 - Base: `main` after these changes:
-  - API.1: interface manifests and sealed checked identities.
+  - RF.1: sealed `Frontend.Checked` artifacts.
   - Scoped effect instances (TS.1).
   - Typed inference outcomes, INF.1. This is PR #134 and has not merged yet.
     §4.6 depends on it.
+  - Two pending changes are planning inputs, not part of the base:
+    - API.1 `interface-v1` manifests (jacquard-lang:216, PR #130, not merged
+      when this was written).
+    - INF.1, listed above.
 - The owner decisions required before dependent implementation are listed in §10.
 
 ## 1. Question
@@ -44,7 +48,7 @@ is ever undone or re-executed.
 | relational lanes, `run-transcript-v1` | `docs/relational-warp.md` | a strict, length-framed observation encoding and first-divergence rendering. Variation of `secret`, `schedule` and `grant` | compares whole runs under a named variation, not a selected observation |
 | choice logs and shrinking | `docs/warp-testing.md` §4 | a log of (distribution, outcome) per sample site, replayed with the logged choices forced | positional. Internal to the property driver and never shown to users |
 | exact enumeration with a budget, typed outcomes | `dist.enumerate-v1` (INF.1) | posterior versus impossible, exhausted or numerical failure, plus completeness metadata | not connected to a selected choice |
-| checked identities | `interface-v1`, `Frontend.Checked` (API.1, RF.1) | the program identity a saved scenario can bind to | — |
+| checked identities | `Frontend.Checked` (RF.1, shipped). `interface-v1` (API.1) is pending in PR #130 | the program identity a saved scenario can bind to | the portable interface identity is not yet on `main`, so EXP.5 depends on jacquard-lang:216 |
 | source spans | kernel `Meta.span` | exact source positions at check time | not carried into runtime traces. `run-transcript-v1` names operations by hash only |
 
 ## 2a. Evidence From The Four Applications
@@ -60,7 +64,7 @@ novice usability evidence, and §9 does not use them as such.
 |---|---|---|
 | dice coach (`dice-coach/model.jac`) | a Bellman comparison of "bank now" against all six next-roll outcomes, with expected score and bust probability per alternative | **Kept in the model.** Comparing a model's own alternatives is decision analysis, the subject of DES.2 (task 235). The explorer answers a different question: what *this recorded run* would have done had one input differed. `explore enumerate` (§3 step 5) covers the dice case of forcing one roll outcome and nothing more |
 | picnic planner (`picnic-planner/EXAMPLE.txt`) | the venue comparison, the value of a forecast, and a sensitivity sweep, written as reruns with different constants (rain 5 %, 30 %, 90 %) | **A model edit, not a fork.** A fork changes a recorded observation or choice, never a program constant. The rerun-with-constants workaround stays until DES.2 and MODEL.1 (task 230) provide named assumptions. The explorer's refusal to fork constants and `observe` (§4.3) keeps the two apart |
-| rota optimizer (`rota-optimizer/report.jac`, `interaction-tests.jac`) | three hand-written statuses: `PROVEN OPTIMAL`, `PROVEN INFEASIBLE` and `BUDGET EXHAUSTED`, with a test that "budget is not infeasibility" | **Adopted as the status contract.** Every exploration status separates complete, exhausted and impossible exactly this way, through INF.1's typed outcomes (§4.4, §4.5). The workaround goes away for search questions routed through `explore enumerate`. The rota's own solver statuses remain application data |
+| rota optimizer (`rota-optimizer/report.jac`, `interaction-tests.jac`) | three hand-written statuses (`PROVEN OPTIMAL`, `PROVEN INFEASIBLE` and `BUDGET EXHAUSTED`), with a test that "budget is not infeasibility"; and a hand-written objective explanation ("Score 20 = preferences 36 - workload penalty 16", test "objective explained") | **Adopted as the status contract.** Every exploration status separates complete, exhausted and impossible exactly this way, through INF.1's typed outcomes (§4.4, §4.5). The workaround goes away for search questions routed through `explore enumerate`. The rota's own solver statuses remain application data. **Objective explanations stay in the application.** Decomposing a score is domain knowledge the program already renders as a value. A fork shows the alternative's decomposition next to the original's, because both are result values compared field by field in the report (§4.5). A generic "why this score" engine is a non-goal (§4.9) |
 | formula notebook (`formula-notebook/commands.jac`, `interaction-tests.jac`) | `preview` ("live state unchanged") and `why b` ("direct dependencies: a") | **Adopted as semantics.** A fork is a nonmutating preview: it never alters the recording or anything the original run produced (§4.3). The "depended on" list in §3 step 1 follows the notebook's direct-dependency explanation. It lists only the recorded inputs read along the executed path, not a static dependency analysis |
 
 The design preserves checked effects (forks run the checked program unchanged
@@ -323,6 +327,8 @@ and report rather than adding their own.
 - Exploring scheduler interleavings. The schedule-trace tools and relational
   `schedule` lane already cover it.
 - Native-engine recording in v1.
+- Generic explanations of objective or score composition. Applications render
+  their own decompositions as values, as the rota optimizer does (§2a).
 - A general time-travel debugger, or stepping through evaluation.
 
 ## 5. Explanation, Causation, And Undo
