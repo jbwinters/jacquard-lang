@@ -79,7 +79,9 @@ only one store is live at a time.
 Existing unnamed operations (`get()`, `put(x)`, `throw(e)`, `emit(w)`) keep
 their current meaning exactly: TS.0's per-region rule and nearest-handler
 dispatch. They form the *ambient* instance of their effect. Instance
-capabilities are opt-in and live beside them.
+capabilities are opt-in and live beside them. (The sketches below write the
+instance effect as `State<i>` for readability; it is the separate
+`state-instance` declaration described under "Which effect".)
 
 ### Typing rules (the model's `Instances` mode)
 
@@ -96,9 +98,64 @@ capabilities are opt-in and live beside them.
   like row variables (`bump : forall i. (StateRef<i> Int) ->{State<i>} ()`);
   inside `state.scoped` the new label is rigid, never generalized, which is
   what enforces non-escape (the runST argument).
-- Display: an instance label is shown as its effect name (`State`), so the
+- Display: an instance label is shown as its effect name (`state-instance`), so the
   authority manifest stays a name set. Checker diagnostics may name the
   capability binder when two instances disagree.
+
+### Which effect the instance operations belong to
+
+The instance operations are a **new effect declaration**, `state-instance`
+(and `throw-instance`, `emit-instance`), not new operations on `State`:
+adding operations to `(defeffect state …)` would change State's hash and every
+identity built on it. The ambient `State` declaration and its hash are
+untouched. The new effects are private in the sense scheduler carriers are:
+user `handle` blocks cannot name their operations (resolution refuses them), so
+only the blessed `*.scoped` combinators handle them. Without that rule a user
+handler between an operation and its instance handler would capture an
+operation on a capability it does not own, with its own payload type, breaking
+both lexical selection and payload agreement. In rows the new effect displays
+under its own name, so the authority manifest remains a set of names.
+
+### Annotations, polymorphism, and the scoped form
+
+- `state.scoped(init, fn (c) -> body)` is a **checker form** recognized at a
+  direct call whose second argument is a literal lambda, like the frozen
+  `async.spawn` rule; it is not an ordinary rank-1 function. A wrapper that
+  forwards its callback (`with-counter(f) = state.scoped(0, f)`) is refused
+  with a diagnostic naming the rule; this is the price of non-escape without
+  rank-2 types, and it is recorded rather than inferred.
+- In source annotations `StateRef s` stands for a fresh instance variable per
+  occurrence, and an instance effect in a row annotation is written by effect
+  name only, meaning "the instance of the capability parameter it is unified
+  with". An annotation cannot name a particular instance; inference does, which
+  is how a thunk over one instance is refused where a thunk over another is
+  expected (the model's crossed-thunk case uses explicit labels only because
+  the model has no inference).
+- **Row determinacy.** An instance label enters a row only through a value of
+  capability type, so every instance variable in a row is determined by the
+  type of some capability in scope. Row unification therefore never has to
+  choose between `State<α>` and `State<β>` against `State<i>`: `α` and `β` are
+  already unified with the labels of the capabilities that introduced them. A
+  row containing an instance variable not determined this way is refused.
+- **Generalization.** A let-bound function's instance variables are
+  generalized like row variables when they are not free in the environment
+  (`bump : forall i. (StateRef<i> Int) ->{state-instance<i>} ()`), under the
+  existing value restriction (E0818); inside `state.scoped` the new label is
+  rigid and is never generalized.
+- Stored signatures keep instance variables quantified, so a separately
+  loaded function taking a capability remains usable; a rigid label cannot
+  appear in any stored signature because it cannot escape its scope.
+
+### Spawned work (Async non-laundering)
+
+`async.spawn`'s child runs under the scheduler, outside every handler that was
+in scope where it was spawned. A spawned thunk whose row contains an instance
+label would therefore perform the operation after, or outside, the instance's
+handler. The rule extends SC.4: **the row of a spawned thunk may not contain an
+instance label**; the spawn is refused at check time. Values read from an
+instance may be handed to spawned work; capabilities may not. The model checks
+this with `detach`, which runs its body after the whole program with no
+handler in scope.
 
 ### Dispatch rule
 
@@ -107,7 +164,12 @@ An instance handler serves exactly the operations on its own capability. Each
 the handler's clauses compare the token: a matching operation is served, any
 other is re-performed outward (forwarding). An operation whose instance has no
 live handler cannot occur in a well-typed program; the runtime still traps it
-as a stale capability, defence in depth like E0906.
+as a stale capability, defence in depth like E0906. The instance handler holds
+its store the way `state.run` does, as the state threaded through its clauses;
+a forwarding clause re-performs the operation outward with the same arguments
+and resumes its continuation once with the result, leaving its own store
+untouched. Dispatch costs one comparison per instance handler between an
+operation and its own handler.
 
 ### Rejected counterexamples (all pinned by the model)
 
@@ -154,32 +216,39 @@ rules (`By_instance`, `Nearest`). Frames are immutable, so a multi-shot
 resumption copies inner handler frames exactly as the design specifies.
 
 What a run establishes (seed 210, 20,000 type-directed programs, sizes 2–12,
-mean program size 14.4 nodes, maximum 139; a run takes about 0.2 s):
+mean program size 22.9 nodes, maximum 185; a run takes about 0.3 s). These are
+bounded, seeded tests, not proofs:
 
 | property | result |
 |---|---|
-| `Instances` + `By_instance`: every well-typed program runs without getting stuck, and its value has the checked type | 8,980 well-typed programs, 0 stuck, 0 out of fuel |
-| `Mono` + `Nearest` (TS.0 today): same property | 10,871 well-typed programs, 0 stuck |
-| `Instances` + `Nearest`: unsound | counterexamples found (10 in the pinned run) |
-| coverage among well-typed programs | 899 with nested scopes, 420 with a scope under `amb`, 657 with a closure over a capability |
+| `Instances` + `By_instance`: every well-typed program runs without getting stuck, and its value has the checked type | 7,382 well-typed programs, 0 stuck, 0 out of fuel |
+| `Mono` + `Nearest` (TS.0 today): same property | 7,400 well-typed programs, 0 stuck |
+| the escape and spawn checks are load-bearing: programs they reject, run anyway | 6,421 reach a stale capability |
+| `Instances` + `Nearest`: unsound | counterexamples found (at least one in the pinned run, plus the hand-written two-store case) |
+| coverage among well-typed programs | 418 with nested scopes, 231 with a scope under `amb`, 343 with a closure over a capability; the generator also produces capability- and thunk-typed parameters, payload mismatches, and spawned work |
 
-Targeted cases pin the two stores, same-typed instance blindness, each escape
-route, higher-order transport and crossed thunks, and branch-local versus
-shared state under multi-shot resumption.
+Targeted cases pin the two stores, same-typed instance blindness, mixed
+payloads (each instance keeps its own), spawned work, each escape route,
+higher-order transport and crossed thunks, and branch-local versus shared state
+under multi-shot resumption.
 
 Limits: bounded random testing, not a proof. The model has one parameterized
 effect, no row variables (rows are closed sets with subsumption), monomorphic
-lambdas (no let-generalization of instance labels), no `once` effects, and no
-Throw/Emit. Generalization and once-affinity are argued in §4, not exercised by
-the model.
+lambdas (no let-generalization of instance labels, and annotations name
+instances explicitly where the language would infer them), no `once` effects,
+and no Throw/Emit. It models TS.0's unnamed operations through capabilities
+whose label carries the payload, which is equivalent for typing because TS.0
+keeps one payload per effect label per region. Generalization, row
+determinacy, the wrapper refusal, and once-affinity are argued in §4, not
+exercised by the model.
 
 ## 6. Compatibility Freeze
 
 | surface | change |
 |---|---|
 | kernel | none: 27 forms unchanged; instance labels are checker-internal |
-| `HASH_V0` and existing identities | unchanged; new prelude objects get new hashes |
-| `.jac` syntax | none required: the API is prelude combinators (`state.scoped`, `state.get-at`, `state.put-at`, and Throw/Emit counterparts) |
+| `HASH_V0` and existing identities | unchanged: the instance operations live in new effect declarations (`state-instance`, …), so `State`, `Throw`, `Emit`, and everything built on them keep their hashes |
+| `.jac` syntax | none: the API is prelude combinators (`state.scoped`, `state.get-at`, `state.put-at`, and Throw/Emit counterparts); `*.scoped` is a checker form at a direct call with a literal lambda, and forwarding wrappers are refused |
 | type annotations | `StateRef s` is written without an instance; the checker generalizes instance labels |
 | store and `names.jqd` | none |
 | displayed signatures and manifests | instance labels erased to effect names |
@@ -201,8 +270,9 @@ No existing program changes meaning, and nothing is deprecated.
 
 1. **Checker**: row entries keyed by (effect, instance) with the ambient
    instance as today; rigid-label introduction for the blessed `*.scoped`
-   combinators (a checker rule like the frozen `async.spawn` special case);
-   non-escape; instance generalization; display erasure. Regression: every
+   combinators (a checker rule like the frozen `async.spawn` special case) and
+   the wrapper refusal; non-escape; row determinacy; instance generalization;
+   the spawn rule; refusal of user clauses for the instance effects. Regression: every
    TS.0 case and the model's rejected counterexamples as checker tests.
 2. **Runtime and prelude**: an instance-token builtin, forwarding instance
    handlers for State, Throw, and Emit, and the stale-capability trap.

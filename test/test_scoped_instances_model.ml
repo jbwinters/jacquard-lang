@@ -62,6 +62,28 @@ let test_same_type_instances () =
   Alcotest.(check int)
     "nearest: the put to outer landed on inner" 11 (int_value Nearest observe_inner)
 
+let test_mixed_payloads () =
+  (* each instance's operations must agree with its own payload *)
+  rejects "a Text into the Int store" Instances
+    (Scoped ("count", Int 0, Scoped ("log", Text "", Put (Var "count", Text "x"))));
+  rejects "an Int into the Text store" Instances
+    (Scoped ("count", Int 0, Scoped ("log", Text "", Put (Var "log", Int 1))));
+  rejects "adding the Text store's value" Instances
+    (Scoped ("count", Int 0, Scoped ("log", Text "", Add (Get (Var "log"), Int 1))))
+
+let test_spawned_work () =
+  (* async.spawn's child runs under the scheduler, outside the instance's handler *)
+  let spawn_over_instance = Scoped ("c", Int 0, Detach (Put (Var "c", Int 1))) in
+  rejects "spawned work may not perform a scoped instance" Instances spawn_over_instance;
+  rejects "nor under TS.0's rule" Mono spawn_over_instance;
+  (match run By_instance spawn_over_instance with
+  | Stuck _ -> ()
+  | _ -> Alcotest.fail "the detached put should reach a stale capability");
+  accepts "capability-free spawned work" Instances (Scoped ("c", Int 0, Detach Unit));
+  (* a value read in scope may be handed to spawned work: only the capability may not *)
+  accepts "a value, not a capability" Instances
+    (Scoped ("c", Int 7, Let ("v", Get (Var "c"), Detach (Let ("_", Add (Var "v", Int 1), Unit)))))
+
 let test_escape () =
   rejects "returning the capability" Instances (Scoped ("c", Int 0, Var "c"));
   rejects "returning a closure over it" Instances
@@ -177,14 +199,14 @@ let soundness mode dispatch programs =
 
 let rec size = function
   | Int _ | Bool _ | Unit | Text _ | Var _ | Flip -> 1
-  | Lam (_, _, e) | Get e | Amb e -> 1 + size e
+  | Lam (_, _, e) | Get e | Amb e | Detach e -> 1 + size e
   | App (a, b) | Let (_, a, b) | Add (a, b) | Put (a, b) | Scoped (_, a, b) -> 1 + size a + size b
   | If (a, b, c) -> 1 + size a + size b + size c
 
 (* feature counts over a program: nested scopes, a scope under amb, closures over capabilities *)
 let rec count_scopes = function
   | Scoped (_, a, b) -> 1 + count_scopes a + count_scopes b
-  | Lam (_, _, e) | Get e | Amb e -> count_scopes e
+  | Lam (_, _, e) | Get e | Amb e | Detach e -> count_scopes e
   | App (a, b) | Let (_, a, b) | Add (a, b) | Put (a, b) -> count_scopes a + count_scopes b
   | If (a, b, c) -> count_scopes a + count_scopes b + count_scopes c
   | Int _ | Bool _ | Unit | Text _ | Var _ | Flip -> 0
@@ -193,13 +215,13 @@ let rec scope_under_amb = function
   | Amb e -> count_scopes e > 0 || scope_under_amb e
   | Scoped (_, a, b) | App (a, b) | Let (_, a, b) | Add (a, b) | Put (a, b) ->
       scope_under_amb a || scope_under_amb b
-  | Lam (_, _, e) | Get e -> scope_under_amb e
+  | Lam (_, _, e) | Get e | Detach e -> scope_under_amb e
   | If (a, b, c) -> scope_under_amb a || scope_under_amb b || scope_under_amb c
   | Int _ | Bool _ | Unit | Text _ | Var _ | Flip -> false
 
 let rec contains_operation = function
   | Get _ | Put _ -> true
-  | Lam (_, _, e) | Amb e -> contains_operation e
+  | Lam (_, _, e) | Amb e | Detach e -> contains_operation e
   | Scoped (_, a, b) | App (a, b) | Let (_, a, b) | Add (a, b) ->
       contains_operation a || contains_operation b
   | If (a, b, c) -> contains_operation a || contains_operation b || contains_operation c
@@ -209,7 +231,7 @@ let rec closure_over_capability = function
   | Lam (_, _, body) -> contains_operation body || closure_over_capability body
   | Scoped (_, a, b) | App (a, b) | Let (_, a, b) | Add (a, b) | Put (a, b) ->
       closure_over_capability a || closure_over_capability b
-  | Get e | Amb e -> closure_over_capability e
+  | Get e | Amb e | Detach e -> closure_over_capability e
   | If (a, b, c) ->
       closure_over_capability a || closure_over_capability b || closure_over_capability c
   | Int _ | Bool _ | Unit | Text _ | Var _ | Flip -> false
@@ -251,6 +273,25 @@ let test_mono_sound () =
   Printf.printf "mono: typed %d, rejected %d, ran %d\n" tally.typed tally.rejected tally.ran;
   Alcotest.(check bool) (Printf.sprintf "typed %d" tally.typed) true (tally.typed > samples / 10)
 
+(* The escape check does real work: run the programs it rejects anyway (a permissive checker),
+   and count those that then reach a stale capability. *)
+let test_escape_check_is_load_bearing () =
+  let stale =
+    List.filter
+      (fun e ->
+        match check Instances e with
+        | Ok _ -> false
+        | Error message ->
+            (String.length message >= 16 && String.sub message 0 16 = "instance escapes"
+            || String.length message >= 13 && String.sub message 0 13 = "detached work")
+            && (match run By_instance e with
+               | Stuck message -> String.length message >= 3 && (String.sub message (String.length message - 16) 16 = "stale capability")
+               | _ -> false))
+      (generated ())
+  in
+  Printf.printf "escape-rejected programs that reach a stale capability when run: %d\n" (List.length stale);
+  Alcotest.(check bool) (Printf.sprintf "%d stale" (List.length stale)) true (List.length stale >= 100)
+
 let test_instance_typing_needs_instance_dispatch () =
   (* instance typing over operation-identity dispatch is unsound: the generator finds cases *)
   let unsound =
@@ -268,6 +309,8 @@ let suite =
     Alcotest.test_case "two stores of different payload types" `Quick test_two_stores;
     Alcotest.test_case "same-typed instances: mono is type-safe but instance-blind" `Quick
       test_same_type_instances;
+    Alcotest.test_case "each instance keeps its own payload" `Quick test_mixed_payloads;
+    Alcotest.test_case "spawned work may not perform a scoped instance" `Quick test_spawned_work;
     Alcotest.test_case "capabilities do not escape their scope" `Quick test_escape;
     Alcotest.test_case "higher-order transport keeps the instance" `Quick test_higher_order;
     Alcotest.test_case "multi-shot resumptions copy or share state by scope" `Quick test_multi_shot;
@@ -275,6 +318,8 @@ let suite =
       test_instances_sound;
     Alcotest.test_case "TS.0 mono typing with nearest dispatch is sound (generated)" `Quick
       test_mono_sound;
+    Alcotest.test_case "rejected escapes would reach stale capabilities (generated)" `Quick
+      test_escape_check_is_load_bearing;
     Alcotest.test_case "instance typing requires instance dispatch (generated)" `Quick
       test_instance_typing_needs_instance_dispatch;
   ]

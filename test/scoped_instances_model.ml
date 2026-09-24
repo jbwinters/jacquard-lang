@@ -48,6 +48,9 @@ type expr =
   | Scoped of string * expr * expr
   | Flip
   | Amb of expr
+  | Detach of expr
+      (** spawned work: runs after the whole program, outside every handler, as [async.spawn]'s
+          child runs under the scheduler *)
 
 (* --- typing --- *)
 
@@ -192,6 +195,13 @@ let rec infer mode env e : ty * label list =
   | Amb body ->
       let tb, rb = infer mode env body in
       (TList tb, without amb_label rb)
+  | Detach body -> (
+      (* SC.4 extended: detached work runs outside every scoped handler, so its row must be empty;
+         an instance in it would be served after its scope has ended *)
+      let _, rb = infer mode env body in
+      match rb with
+      | [] -> (TUnit, [])
+      | row -> ill "detached work performs scoped effects %s" (String.concat "," row))
 
 let check mode e =
   match infer mode { vars = []; instances = []; fresh = ref 0 } e with
@@ -223,6 +233,7 @@ type frame =
   | FScopedInit of string * expr * (string * value) list
   | FScoped of int * value  (** handler frame of instance [n] holding its state *)
   | FAmb of { pending : (frame list * value) list; acc : value list }
+  | FDetached
 
 type dispatch = By_instance | Nearest
 type outcome = Value of value | Stuck of string | Out_of_fuel
@@ -247,6 +258,7 @@ let state_frame dispatch cap = function
 let run ?(fuel = 2000) dispatch e =
   let fresh = ref 0 in
   let fuel = ref fuel in
+  let detached = ref [] in
   (* [eval] starts an expression; [return] delivers a value to the frame stack *)
   let rec eval e env frames =
     decr fuel;
@@ -273,6 +285,9 @@ let run ?(fuel = 2000) dispatch e =
               (inner @ (FAmb { pending = (inner, VBool false) :: pending; acc } :: outer))
         | _ -> stuck "flip is unhandled")
     | Amb body -> eval body env (FAmb { pending = []; acc = [] } :: frames)
+    | Detach body ->
+        detached := (body, env) :: !detached;
+        return VUnit frames
   and return v frames =
     decr fuel;
     if !fuel <= 0 then raise Exit;
@@ -309,13 +324,28 @@ let run ?(fuel = 2000) dispatch e =
         let n = !fresh in
         eval body ((x, VCap n) :: env) (FScoped (n, v) :: rest)
     | FScoped _ :: rest -> return v rest
+    | FDetached :: _ -> v
     | FAmb { pending; acc } :: rest -> (
         let acc = v :: acc in
         match pending with
         | (inner, b) :: more -> return b (inner @ (FAmb { pending = more; acc } :: rest))
         | [] -> return (VList (List.rev acc)) rest)
   in
-  match eval e [] [] with
+  (* the program's value, then every detached body in spawn order with no handler in scope *)
+  let run_all () =
+    let v = eval e [] [] in
+    let rec drain () =
+      match List.rev !detached with
+      | [] -> ()
+      | (body, env) :: later ->
+          detached := List.rev later;
+          ignore (eval body env [ FDetached ]);
+          drain ()
+    in
+    drain ();
+    v
+  in
+  match run_all () with
   | v -> Value v
   | exception Stuck_at message -> Stuck message
   | exception Exit -> Out_of_fuel
@@ -328,6 +358,8 @@ let rec value_has_type v t =
   | VClo _, TArr _ -> true
   | VCap _, TCap _ -> true
   | _ -> false
+(* closures and capabilities are checked by constructor only; generated result types are base types
+   and lists of them, where the check is exact *)
 
 (* --- type-directed generation --- *)
 
@@ -378,13 +410,17 @@ let gen_expr : expr QCheck.Gen.t =
             let c = name "c" in
             gen payload vars caps smaller >>= fun init ->
             gen ty vars ((c, payload) :: caps) (size - 1) >|= fun body -> Scoped (c, init, body) );
-          ( 1,
-            (* an escape attempt: the body returns its own capability or a closure over it *)
+          ( 2,
+            (* an escape attempt: a closure over the capability leaves its scope and is then
+               called; under a permissive checker this reaches a stale capability *)
             oneof_list base_types >>= fun payload ->
-            let c = name "c" in
+            let c = name "c" and k = name "k" in
             gen payload vars caps smaller >>= fun init ->
-            oneof_list [ Var c; Lam ("_", TUnit, Get (Var c)) ] >|= fun body ->
-            Scoped (c, init, body) );
+            gen ty vars caps smaller >|= fun rest ->
+            Let
+              ( k,
+                Scoped (c, init, Lam ("_", TUnit, Get (Var c))),
+                Let (name "e", App (Var k, Unit), rest) ) );
           ( 2,
             gen TBool vars caps smaller >>= fun c ->
             gen ty vars caps smaller >>= fun a ->
@@ -414,6 +450,37 @@ let gen_expr : expr QCheck.Gen.t =
         @ (match ty with
           | TList t -> [ (3, gen t vars caps (size - 1) >|= fun body -> Amb body) ]
           | _ -> [])
+        @ (if ty = TUnit then
+             (* spawned work: capability-free bodies are accepted, bodies over a capability are
+                rejected by the detach rule *)
+             [ (2, gen TUnit vars caps smaller >|= fun body -> Detach body) ]
+           else [])
+        @ (match caps with
+          | [] -> []
+          | _ ->
+              [
+                (* a payload mismatch: put a value of another type (rejected) *)
+                ( 1,
+                  oneof_list caps >>= fun (c, payload) ->
+                  oneof_list (List.filter (fun t -> t <> payload) base_types) >>= fun wrong ->
+                  gen wrong vars caps smaller >>= fun v ->
+                  gen ty vars caps smaller >|= fun rest -> Let (name "m", Put (Var c, v), rest) );
+                (* a function taking the capability as a parameter, applied to it *)
+                ( 2,
+                  oneof_list caps >>= fun (c, payload) ->
+                  let p = name "p" in
+                  gen ty vars ((p, payload) :: caps) smaller >|= fun body ->
+                  App (Lam (p, TCap (c, payload), body), Var c) );
+                (* a function taking a thunk over the capability, applied to one *)
+                ( 1,
+                  oneof_list caps >>= fun (c, payload) ->
+                  let k = name "k" in
+                  gen payload vars caps smaller >>= fun v ->
+                  gen ty vars caps smaller >|= fun rest ->
+                  App
+                    ( Lam (k, TArr (TUnit, [ c ], TUnit), Let (name "u", App (Var k, Unit), rest)),
+                      Lam ("_", TUnit, Put (Var c, v)) ) );
+              ])
         @
         (* a thunk that writes a capability, bound and applied later: higher-order transport *)
         match caps with
