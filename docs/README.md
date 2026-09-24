@@ -146,6 +146,10 @@ Read these together when reviewing the historical 0.1 candidate boundary:
 - `designs/scoped-effect-instances.md`: TS.1 design for opt-in scoped,
   parameterized effect instances beside TS.0's ambient operations, with its
   executable model and the slices for TS.2.
+- `designs/understandable-uncertainty.md`: DES.2 design proposal (not a
+  contract) for world-record uncertainty models, expected utility and downside,
+  value of information, and sensitivity over explicit assumptions, with
+  readable reports on INF.1 outcomes; UNC.1–UNC.5 follow-up backlog.
 - `release/surface-syntax/MANIFEST.sha256`: historical surface-syntax evidence
   integrity set, validated by the surface manifest checker. Successor milestones
   publish separate reconstructible overlays rather than extending this set.
