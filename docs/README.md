@@ -160,6 +160,11 @@ Read these together when reviewing the historical 0.1 candidate boundary:
   contract) for world-record uncertainty models, expected utility and downside,
   value of information, and sensitivity over explicit assumptions, with
   readable reports on INF.1 outcomes; UNC.1–UNC.5 follow-up backlog.
+- `release/authority-requirements/DECISION.md`: CAP.0 intake of the host
+  requirements report and the resolved attenuation decisions (host-only Net,
+  audited redacted refusals, trusted order exposed to the prelude) that make
+  CAP.1 implementation-ready.
+- `authority-attenuation.md`: the attenuation design those decisions resolve.
 - `release/surface-syntax/MANIFEST.sha256`: historical surface-syntax evidence
   integrity set, validated by the surface manifest checker. Successor milestones
   publish separate reconstructible overlays rather than extending this set.
