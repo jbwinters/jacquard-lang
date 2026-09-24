@@ -228,7 +228,7 @@ may keep using the setter; the formatter does not rewrite one into the other.
   names as atoms; the accessor `pair.left(p)` is the sanctioned spelling.
 - **`with` first, no setters**: every update still needs the parser, printer,
   formatter, keyword, and provenance work before one line of application code
-  improves; setters deliver the same twin with none of that.
+  improves; setters deliver the same meaning (a different kernel tree from the `with` form's let-and-match twin) with none of that.
 - **Lenses or a generic `update` function**: needs higher-order label
   reflection the kernel does not have, and hides evaluation order.
 
@@ -408,7 +408,7 @@ Repository-qualified IDs; created tasks are marked *new*.
 
 | id | title | reuse / change | deps | priority |
 |---|---|---|---|---|
-| jacquard-lang:220 | SX.28 immutable constructor-field updates | refine: Phase 1 generated `with-` setters, then Phase 2 `Ctor(value with …)` syntax elaborating to the same twin (this document §5) | 219, 237 | high |
+| jacquard-lang:220 | SX.28 immutable constructor-field updates | refine: Phase 1 generated `with-` setters, then Phase 2 `Ctor(value with …)` syntax with the same meaning, hashing as its own let-and-match twin (this document §5) | 219, 237 | high |
 | jacquard-lang:251 *new* | SX.30 predicate helpers: `bool.all`/`bool.any`, `list.all?`/`list.any?`, `int.between?`/`real.between?` (positional) | §6 | 175 | medium |
 | jacquard-lang:252 *new* | DX.4 near-miss hints for ineligible accessor and setter names | §8 | 219 | low |
 | jacquard-lang:217 | PKG.1 project manifests | refine acceptance: namespace-as-prefix contract, `interface-v1` pins, `cat` removed from every application README | 212, 216 | high |
