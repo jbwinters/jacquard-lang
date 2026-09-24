@@ -32,7 +32,7 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1036`
+- Alcotest/QCheck cases: `1044`
 - Cram transcript files: `62`
 - Documentation examples: `34` named examples across `8` documents
 
@@ -309,3 +309,13 @@ applications' hand-written selectors, the night-shift case study drops its
 hand-written `reading.ms` (now generated, and otherwise refused as E1241), and three `test/test_surface_decls.ml`
 cases pin kernel-twin identity, eligibility, and validation, bringing the
 current source inventory to `1036 / 62 / 34`.
+
+Scoped effect instances are designed and modelled (TS.1,
+`docs/designs/scoped-effect-instances.md`). The design keeps TS.0's ambient
+operations unchanged and adds opt-in instance capabilities with rigid instance
+labels, non-escape, and dispatch by instance. The executable model
+(`test/scoped_instances_model.ml`) checks, over 20,000 seeded type-directed
+programs, that instance typing with instance dispatch and TS.0's rule with
+nearest dispatch are both sound, and that instance typing over nearest dispatch
+is not. The eight `test/test_scoped_instances_model.ml` cases bring the current
+source inventory to `1044 / 62 / 34`.

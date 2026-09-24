@@ -132,6 +132,9 @@ Read these together when reviewing the historical 0.1 candidate boundary:
   contract): evidence from the four applications, generated field setters
   before any update syntax, list-based predicates instead of operators,
   namespace-as-prefix for PKG.1, editor hints, and the follow-up backlog.
+- `designs/scoped-effect-instances.md`: TS.1 design for opt-in scoped,
+  parameterized effect instances beside TS.0's ambient operations, with its
+  executable model and the slices for TS.2.
 - `release/surface-syntax/MANIFEST.sha256`: historical surface-syntax evidence
   integrity set, validated by the surface manifest checker. Successor milestones
   publish separate reconstructible overlays rather than extending this set.
