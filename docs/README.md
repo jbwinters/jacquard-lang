@@ -148,6 +148,11 @@ Read these together when reviewing the historical 0.1 candidate boundary:
   for recording an execution, forking one typed observation or named random
   choice under models, comparing the two executions, and exporting a hermetic
   Warp regression case; with the EXP.1–EXP.5 and EXP.7 follow-up backlog and its reconciliation with existing tasks.
+- `designs/single-function-embedding.md`: DES.3 design proposal (not a
+  contract) for calling one typed Jacquard function from Python: install to
+  first call, generated bindings over the v0 protocol, data conversion,
+  operation registration, errors, lifecycle, simulation, inspection, and the
+  first-success target; EMB.1 (Core) and EMB.H1–H2 (Host) backlog.
 - `designs/scoped-effect-instances.md`: TS.1 design for opt-in scoped,
   parameterized effect instances beside TS.0's ambient operations, with its
   executable model and the slices for TS.2.
