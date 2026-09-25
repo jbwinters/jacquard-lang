@@ -1,7 +1,7 @@
 # PKG.0 Local Project Structure
 
 - Status: design for task 217 (PKG.1), revised after an independent
-  architecture review. Nothing here is implemented. The owner decisions are
+  architecture review and a second review. Nothing here is implemented. The owner decisions are
   listed in §17.
 - Date: 2026-09-25
 - Base: `main` with API.1 (`interface-v1`), RF.2 (invocations), INF.1 and SX.29.
@@ -54,6 +54,11 @@ wrong.
 | `interface-v1` records the exact identities and owner hashes of exports, and its `diff` classifies an identity change as breaking | `src/interface.mli`, `docs/release/api-identities/DECISION.md` | For a static closure, the interface identity already pins the implementation (§8) |
 | Quoted names are data, and `eval-code` resolves against the live store's names | `src/resolve.ml`, `src/prelude.ml` | Closures are not closed under `eval`; v1 restricts it (§9) |
 | Objects are written in place, `names.jqd` is rewritten, and rollback deletes unexpected files | `src/store.ml` | Stores are not safe to share between concurrent writers (§11) |
+| `put_decl` keeps the first object's bytes for a hash-equal declaration but indexes member locations from the incoming declaration's order | `src/store.ml` (`put_decl`) | Indexes must be derived from persisted objects; this is a prerequisite fix (§11) |
+| `interface-v1` identity covers exports, their labels, and hidden `(member, owner)` pairs, but not private call-ABI companions and not the prelude | `src/interface.ml` (`identity`) | One interface pin cannot commit to composition state; the pin is a separate context identity (§8) |
+| A store names every member of a declaration it installs, so a provider exporting only type `ABox` still names `ABox`'s constructor, and `Interface.verify` rejects it as publicly bound | `src/store.ml` (`put_decl`), `src/interface.ml` (`verify`) | Verification uses an export projection, not the provider's store names (§5) |
+| Canon normalizes signed zero and NaN, including inside quoted code, while `code.render` and `code.hash` observe the printed carrier; a quoted `-0.0` and a quoted `0.0` are hash-equal but render differently | `src/canon.ml`, `src/prelude.ml` (`code.render`) | Equal identities do not yet guarantee identical behaviour for quoted real payloads; a prerequisite normalization fix (§8) |
+| The parser rejects a signature detached from its definition (E1224) per file; `Span.merge` assumes one file | `src/surface_parse.ml`, `src/span.ml` | Composition needs a composition parse mode and multi-origin spans (§6) |
 
 ## 3. The Manifest: `project.jqd`
 
@@ -80,7 +85,7 @@ a strict schema, and never evaluated.
 | field | meaning |
 |---|---|
 | `name` | display text. Not identity, not resolution |
-| `requires` | the Core version range this project needs, checked against `jacquard --version` before anything runs. Exact prelude identities live in pins and bundles (§8, §9) |
+| `requires` | `(core "MAJOR.MINOR")`: this Core release series or a later minor release in the same major, checked before anything runs. Exact prelude and Core identities are committed in context identities and bundles (§8, §9) |
 | `namespace` | optional. The prefix contract of §4 |
 | `units` | library units, in composition order, **declarations only** (§6) |
 | `exports` | the public surface, as explicit `(kind store-name)` selectors, with kinds `term`, `con`, `op`, `type` and `effect`. Store spellings are used (`rota-problem` is the store name of `RotaProblem`), so the bootstrap reader can read every entry |
@@ -106,6 +111,15 @@ a strict schema, and never evaluated.
   misreading it.
 - `jacquard project fmt` prints the one canonical spelling. Field order is
   free on input.
+- **Two digests.**
+  - The **semantic projection** is the manifest with `metadata` removed,
+    `name` removed, and `deps`, `exports` and `entries` sorted by key. It is
+    encoded canonically and hashed with `HASH_V0`, domain-tagged
+    `project-manifest-v1`. It changes only when semantics do.
+  - The **document digest** hashes the full canonical manifest, for
+    provenance.
+  - A future semantic tag is part of the projection by definition, so adding
+    one always changes it.
 
 **Budgets (checked before and during parsing):**
 
@@ -134,38 +148,47 @@ Because nominal names hash (§2), a namespace that rewrote `Staff` into
 hidden context. v1 therefore **rewrites nothing**. `(namespace rota)` is a
 contract checked against the names the source already spells:
 
-| store kind | required spelling | source spelling |
+| store kind | required spelling | example |
 |---|---|---|
 | `term`, `op` | `rota.<rest>` | `rota.solve` |
-| `type`, `con`, `effect` | `rota-<rest>` | `RotaStaff` (store `rota-staff`) |
-| generated accessors | follow their type | `rota-staff.id` |
+| `type`, `effect` | `rota-<rest>` | `RotaStaff` (store `rota-staff`) |
+| generated accessors | follow their type, `<type-kebab>.<label>` | `rota-staff.id` |
+| `con` | **exempt**; a constructor is owned by its type | `GeneralSkill` of `RotaSkill` |
 
 The rules:
 
-- Every name that the library units bind must satisfy the contract (E1706).
-  This includes generated accessors and setters.
-- Entry units are exempt, because their names are never visible outside the
-  entry.
-- The boundary is exact: a `.` or `-` immediately follows the namespace, so
+- **Constructors are exempt because they are owned.** The applications'
+  constructors are unprefixed (`GeneralSkill`, `Bold`, `Sunny`, `ProvenOptimal`)
+  and renaming them would change their types' hashes. A constructor is
+  therefore governed by its owning type:
+  - it is exported exactly when its type is exported with constructors, and
+    stays hidden when the type is exported abstractly
+  - it is never checked against the prefix
+- **Visible constructors must not collide.** Constructor names that become
+  visible together (local, dependency exports, prelude) are checked
+  explicitly. Two with the same name from different owners is E1731, naming
+  both owning types and projects. This keeps resolution unambiguous without
+  renaming anything.
+- The contract applies to library units only (E1706); entry units are exempt.
+- The boundary is exact: `.` or `-` immediately follows the namespace, so
   `rotation.x` does not satisfy `rota`.
-- **Namespace disjointness.** No two projects in one dependency graph may have
-  namespaces where one is a boundary-prefix of the other (`rota` and
-  `rota-staff`), and no two may share a namespace (E1707). This makes every
-  exported name unambiguous by construction, without inferring provenance
-  from spellings.
-- A project without `namespace` has no contract. That is allowed for leaf
-  applications, but a project used as a dependency must declare one (E1708).
+- **Namespace disjointness.** After projects are deduplicated by context
+  identity (§8), no two distinct projects in a graph may share a namespace, and
+  none may be a boundary-prefix of another (`rota` and `rota-staff`) (E1707).
+  E1707 is checked before E1714.
+- A project without `namespace` has no contract. That is allowed only for a
+  project nothing depends on (E1708).
 
 **Consequences:**
 
-- Source is self-describing: every file states its full names, editors show
-  the true spelling, and a file's meaning does not change with its project
-  (§14).
-- Identities are exactly today's. The four applications already follow the
-  contract, so migrating them changes no hash (§13).
-- The ergonomic step from DES.4, writing `solve` and getting `rota.solve`, is
-  **deferred** to a later version (§16 decision 2). If it arrives, it will be
-  a surface-level local alias, with its identity effect stated and tested.
+- Source is self-describing: every file states its full names, and editors
+  show the true spelling (§14).
+- Identities are exactly today's. The applications satisfy the contract
+  after the constructor exemption. A second review checked this for `rota`,
+  `nb` and `display`, and PKG.1 confirms `dice` and `picnic` in its manifests
+  (§13).
+- The DES.4 ergonomic step, writing `solve` to get `rota.solve`, is deferred
+  (§17 decision 2).
 
 ## 5. Visibility: Language Access for Client Code
 
@@ -194,13 +217,24 @@ This single rule applies to **names and to explicit identities**:
   Visibility restricts what *new client code* may reference. It does not
   re-check a dependency's internals, which legitimately reference their own
   private objects.
+- **Dynamic code goes through the same gate.** Code reaching `eval-code` is
+  checked like new client source: names **and** explicit identities must be
+  visible in the running entry's project view. Ordinary quoted references are
+  data until executed. Live `unquote` splices are checked immediately, like
+  any client expression.
 - **Visibility is relative, never global.** It is a property of a
   (consumer, provider) pair computed by the project frontend (§6). The store's
   existing `hidden` flag keeps its current meaning (opaque prelude and host
-  members) and is not reused for project privacy. Each provider is verified
-  against **its own** interface in **its own** store (§11). This avoids
-  `Interface.verify`'s global-exposure check confusing one package's export
-  with another's private member.
+  members) and is not reused for project privacy.
+- **Each provider has two views:**
+  - an internal view, which its own checked bodies use
+  - an **export projection**, containing only its `exports` and the
+    constructors of types exported with constructors
+
+  A provider is verified against its export projection, never against its
+  store's full name index. That index names every declaration member, so an
+  abstract type's constructor would otherwise be reported as publicly bound
+  (§2).
 - If two direct dependencies both export the same identity (for example, both
   re-export a shared type in a later version), that identity is visible once.
   The rule depends on identities, not on installation order.
@@ -215,45 +249,58 @@ low-level commands. The design says so in diagnostics and docs.
 One internal service, `Project_frontend`, is the only way project commands
 prepare code. It is built beside `Frontend` and reuses its checking.
 
-1. **Compose.** Read the manifest and pinned dependency interfaces. Parse
-   every library unit, then concatenate their **parsed top-level items** in
-   unit order, keeping each item's source span and file. Lower that composed
-   file once. Grouping, SCC ordering, signature adjacency and cross-file
-   recursion are therefore exactly what concatenation gives today (§2).
-2. **Library rules:**
+1. **Compose the library.**
+   - Parse every library `.jac` unit in a **composition parse mode**. This
+     mode defers file-boundary checks, such as a signature detached from its
+     definition (E1224), until after composition.
+   - Concatenate the parsed top-level items in unit order and lower them
+     **once**. Grouping, SCC order, signature adjacency and cross-file
+     recursion are then what concatenation gives today.
+   - A `.jqd` unit contributes its kernel top-level forms, in place, at its
+     unit position. It is already lowered, so it takes part in ordering but
+     not in surface grouping.
+2. **Multi-origin spans.**
+   - Every item keeps its own file and span.
+   - A generated node spanning items from different files, such as a recursive
+     group's merged span, records the list of origins rather than one merged
+     span, because `Span.merge` assumes a single file.
+   - Diagnostics print every origin.
+3. **Library rules.**
    - Library units are declarations only; a top-level expression is E1715.
    - A name defined twice across units is E1716, naming both files. Generated
-     accessors count as definitions, so an accessor colliding with an
-     explicit term in another unit is caught.
-3. **Resolve with a composed view.** It builds a full `Resolve.names` value
-   that populates every callback, not only lookup:
+     accessors count as definitions.
+4. **Resolve with a composed view.** Build a full `Resolve.names` value from
+   the local bindings, the visible dependency export projections (§5), and
+   the prelude, populating every callback:
    - lookup
    - suggestions
    - constructor schemas
    - callable call-ABIs
 
-   It is built from the local bindings plus the visible dependency exports
-   plus the prelude, and it replaces `Store.names_view` for project code.
    Explicit identities are checked against the same visibility (§5).
-4. **Freeze the library, then overlay each entry.** The checked library
-   environment is immutable. Each entry composes its own units over it the
-   same way (parsed items after the library), with top-level expressions
-   allowed in `run` entries and evaluated in source order.
-5. **Feed every consumer from the project context:**
-   - **Native compilation** discovers callable bodies by reachability from the
-     entry's roots by hash, not by iterating `store.names`. Two libraries with
-     private `helper`s of different bodies then cannot shadow each other.
-   - **Warp discovers only the tests an entry owns**: the test declarations
-     bound by that entry's own units. It never scans the whole store.
-   - **Checked artifacts** record the project context (manifest digest and
-     pins), not an assumed global index.
+5. **Freeze the library.** Once checked, the library is immutable.
+   - Each entry's units are composed and lowered **separately** over the
+     frozen library.
+   - Entry definitions may reference library names, but cannot take part in a
+     library recursive group; an entry name that the library references is
+     E1732.
+   - `run` entries may contain top-level expressions.
+
+   This matches today's `run.sh`, where library files precede entry files and
+   the library never calls entry code.
+6. **Feed every consumer from the project context:**
+   - **Native compilation** discovers bodies by reachability from roots by
+     hash, never by iterating `store.names`.
+   - **Warp discovers only the tests an entry owns.**
+   - **Checked artifacts** record the project context identity (§8), not an
+     assumed global index.
 
 ## 7. Entries, Grants and the CLI
 
 | entry | semantics |
 |---|---|
 | `(run NAME (units …) [(grants …)] [(native)])` | evaluate the entry units' top-level expressions in order; `(native)` makes it buildable |
-| `(test NAME (units …))` | run the Warp declarations bound by these units, with the existing `--samples`, `--exhaustive`, `--budget`, `--seed` and cache flags |
+| `(test NAME (units …) [(grants …)])` | run the Warp declarations bound by these units, with the existing `--samples`, `--exhaustive`, `--budget`, `--seed` and cache flags |
 
 - Entry units see the library and the visible dependencies, and nothing
   outside the entry sees them.
@@ -265,6 +312,11 @@ prepare code. It is built beside `Frontend` and reuses its checking.
   - `project run` still requires `--allow` on the command line, and native
     binaries keep their runtime grant enforcement.
   - A manifest can never grant authority.
+  - Test entries may also declare `(grants …)`. It is compared with the
+    authority that Warp requires for the entry's world tests, using Warp's
+    existing world-test authority check.
+  - Under `--strict-grants`, a mismatch is the error E1730 rather than the
+    warning W1700.
 
 The CLI is a new group. Existing commands do not change.
 
@@ -289,113 +341,146 @@ directory. The design states this explicitly so that it is not surprising.
 
 ## 8. Dependencies and Pins
 
-A dependency is `(dep (as ALIAS) (path P) (pin #I))`, where **`#I` is the
-dependency's exact `interface-v1` identity**.
+A dependency is `(dep (as ALIAS) SOURCE (pin #C))`, where `SOURCE` is
+`(path P)` or `(bundle B)` (§9). `#C` is the dependency's **project context
+identity**.
 
-- **What the pin covers.** `interface-v1` records the exact identities of the
-  exports and their owners. For a static closure, those identities
-  transitively commit to every reachable implementation object. So one exact
-  pin covers behaviour, labels and visibility. The first draft's separate
-  "implementation hash" was redundant for static closures and is dropped. The
-  `eval` path, which the static closure does not cover, is restricted in §9.
-- **Builds never resolve.** `check`, `run`, `test` and `build` recompute
-  each dependency's interface identity from its source and compare it with the
-  pin. A mismatch is E1710. It reports:
-  - the `interface diff` against the **previous interface artifact**, if
-    `.jacquard/interfaces/<identity>.jqd` still holds it
-  - otherwise, an honest "the previous interface is unavailable in this
-    checkout"
-- **The authoring state.** A dependency without `(pin …)` is accepted only by
-  `project pin`. Every other command refuses it (E1711).
-- **The `project pin` workflow:**
-  - `--dry-run` prints the plan: each dependency's old and new identity and
-    the diff classification.
-  - Without it, `pin` writes the new manifest **atomically**: a temporary file
-    in the same directory, fsync, then rename.
-  - `--dep ALIAS` updates selected dependencies only.
-  - It saves each pinned interface under `.jacquard/interfaces/` so future
-    diffs have their baseline.
-  - It never edits a dependency's own manifest.
-- **Transitive pins.** A dependency's own pins must verify (E1712). The
-  diagnostic reports the chain of aliases. The root cannot override them.
-- **Compatibility classification** ("drop-in", "additive") is **deferred.**
-  `interface-v1` identities are exact, and `diff` rightly treats an identity
-  change as breaking. A future, separately versioned compatibility projection,
-  signatures only, can provide drop-in classification without changing
-  API.1's meaning.
+**`project-context-v1`.** It is `HASH_V0` over the canonical encoding of the
+record below, domain-tagged `project-context-v1`, with every collection
+sorted:
+
+```text
+(project-context-v1
+  (interface <interface-v1 identity>)          -- exports, labels, hidden members, unchanged API.1 meaning
+  (companions (<callable hash> <call-abi-v1>)…) -- every call-ABI companion in the export closure, private ones included
+  (prelude <prelude identity>) (core "<version>")
+  (deps (<alias> <context identity>)…))        -- the dependency's own pins
+```
+
+Why this record: API.1's interface identity is exact about exports, but omits
+private companions and the prelude (§2). A private label change leaves the
+interface identity unchanged, yet can make two otherwise identical callables
+conflict (E0612). The context identity commits to both, and **`interface-v1`
+keeps its meaning.** Projects are deduplicated by context identity, so two
+projects with empty interfaces but different contents are distinct.
+
+**What a matching pin guarantees:**
+
+- It guarantees exact identities of every reachable object, and the exact
+  composition state (labels, prelude, dependencies).
+- It does **not yet** guarantee identical behaviour where quoted real payloads
+  differ only in signed zero or NaN bits. Those are hash-equal but observable
+  through `code.render` (§2).
+- Normalizing quoted reals in the printed carrier is a **prerequisite
+  conformance fix**, and PKG.1's bundle and pin tests include that case.
+
+**Builds never resolve.** `check`, `run`, `test` and `build` recompute each
+dependency's context identity and compare it with the pin. A mismatch is
+E1710. The report carries:
+
+- the `interface diff` against the stored previous interface, if
+  `.jacquard/interfaces/<identity>.jqd` holds it
+- otherwise, an honest "previous interface unavailable"
+- which record components changed (interface, companions, prelude, or
+  dependencies)
+
+**Pin workflow:**
+
+- A dependency without `(pin …)` is accepted only by `project pin` (E1711).
+- `pin --dry-run` prints the plan: old and new context identity, changed
+  components, and the interface diff.
+- `pin` first computes every identity from a **snapshot**. It reads each
+  unit's bytes once, records their `HASH_V0` source digests, and rechecks
+  those digests immediately before writing. If a file changed during pinning,
+  it aborts with E1733.
+- It then writes the manifest atomically: a temporary file in the same
+  directory, fsync, rename.
+- `--dep ALIAS` selects dependencies. `pin` stores the pinned interfaces for
+  future diffs, and never edits a dependency's manifest.
+- **Transitive pins** are verified (E1712) and reported with their alias
+  chain. The root cannot override them.
+- **Compatibility classification** ("drop-in", "additive") is deferred to a
+  future, separately versioned, signatures-only projection.
 
 **Graph identity:**
 
 | concept | used for |
 |---|---|
-| source location | `(path "../shared")`, as written |
-| filesystem identity | the canonical real path after resolving symlinks; used to walk the graph and detect cycles (E1713) |
-| artifact identity | the pin; used to deduplicate dependencies |
-| package identity | reserved for the registry (publisher and name) |
+| source location | as written |
+| filesystem identity | the canonical real path; used to walk the graph and detect cycles (E1713) |
+| artifact identity | the context identity; used to deduplicate |
+| package identity | reserved for the registry |
 
-When one namespace appears in the graph at two artifact identities, the
-project is refused (E1714). This is a **deliberate v1 restriction**, stricter
-than the package draft, which permits private version skew. It is recorded so
-it can be relaxed later.
+One namespace at two context identities is refused (E1714). This is a
+deliberate v1 restriction, stricter than the package draft.
 
 ## 9. Bundles: The Second Checkout
 
-A bundle is the runnable, verifiable form of a project. It is produced by
-`jacquard project bundle -o app.bundle` and written atomically: built in a
-sibling temporary directory, then renamed into place.
+A bundle is the runnable, verifiable, importable form of a project. It is
+produced by `jacquard project bundle -o app.bundle` and published atomically:
+built in a sibling temporary directory, then renamed into place.
 
 ```text
 app.bundle/
-  bundle-v1.jqd       -- root record (below)
+  bundle-v1.jqd       -- the root record
   project.jqd         -- the manifest, canonical spelling
-  interfaces/         -- the project's and each dependency's interface-v1 manifest
-  objects/<hash>.jqd  -- canonically re-printed objects (not copied cache bytes)
+  interfaces/         -- interface-v1 manifests: the project's and each dependency's
+  companions.jqd      -- every call-ABI companion in the closure
+  objects/<hash>.jqd  -- objects, serialized from their authoritative stored bytes (§11)
 ```
 
-Entries become **generated entry declarations**, so each is a hashed object:
+**Generated entry declarations.**
 
-- A `run` entry's ordered top-level expressions become one generated term,
-  `entry/<name>`: a thunk that evaluates them in order. It is recorded with
-  its declared grants.
-- A `test` entry becomes the list of its owned Warp declaration identities.
+- A `run` entry `demo` becomes the term `entry.demo`. That is a valid dotted
+  store name; `/` is not a valid bootstrap symbol.
+- The term's value is the **ordered list of the entry's top-level expression
+  thunks**. `project run` evaluates and prints each in order, exactly as
+  `jacquard run` prints every top-level value today.
+- A `test` entry becomes an ordered list of typed test-root records, each
+  holding its kind (`test`, `world-test` or `warp-decl`), display name and
+  identity, which is what Warp needs for discovery and reporting.
 
-The root record `bundle-v1` binds these fields:
+**`bundle-v1` grammar** (canonical `.jqd`, sorted where marked):
 
-- the manifest digest
-- the project interface identity
-- each dependency pin
-- the prelude identity checked against
-- the Core version
-- each entry: its kind, name, root identity and grants
-- the object count
+```text
+(bundle-v1
+  (manifest <semantic-projection digest>) (document <full-manifest digest>)
+  (context <project-context identity>)
+  (prelude <identity>) (core "<version>")
+  (entries (run <name> <entry-term hash> (grants …))…   -- sorted by (kind, name)
+           (test <name> (root <kind> "<display>" <hash>)… (grants …))…)
+  (objects <count>) (companions <count>))
+```
 
-The **bundle identity** is `HASH_V0` of the canonical encoding of that record,
-under a domain tag `bundle-v1`. It is distinct from any interface identity.
+The **bundle identity** is `HASH_V0` of this record's canonical bytes,
+domain-tagged `bundle-v1`.
 
-`jacquard project run app.bundle ENTRY` verifies the bundle before running
-anything:
+**Import and run.** `jacquard project run app.bundle ENTRY` builds a fresh
+store in temporary space and **publishes it only after verification**. The
+checks, in order:
 
-1. **Budgets:** the byte, object-count and depth budgets.
-2. **Integrity:** every object's hash and ownership.
-3. **Closure:** every root's closure is complete.
-4. **Identities:** each interface's recomputed identity equals its record,
-   and the root digest matches.
-5. **Prelude:** the prelude identity matches the running Core; otherwise E1720,
-   showing both identities.
-6. **Re-check.** Loading an object only validates its shape, so the whole
-   closure is **type-checked on import**.
+1. budgets: bytes, objects and depth
+2. every object's hash and member ownership
+3. closure completeness from every root, including test roots
+4. **type-checks the whole closure.** Loading an object only validates its
+   shape
+5. **derives each interface** from the checked objects: signatures, labels,
+   and companions restored from `companions.jqd`. Each is compared with
+   `interfaces/`, and the context identity is compared with the record
+6. prelude and Core match the running tool (E1720)
 
-Only then does it run the entry, in a fresh temporary store under
-`.scratch`-style temp space.
+Only then are the objects trusted for identity traversal.
 
-The round-trip test of task 217 does not stop at "run a bundled entry". It
-also **checks a new source file that imports an exported callable** from the
-bundle, using the bundle's interface labels and constructor schemas.
+**Bundles as dependencies.** `(dep (as ALIAS) (bundle "path/app.bundle") (pin
+#C))` lets new source in another checkout **import and call an exported
+callable**, with labels and constructor schemas from the bundle's verified
+interface. That is task 217's second-checkout test. It is not merely running
+an entry.
 
-**`eval` in v1.** An entry whose checked authority includes `Eval` cannot be
-bundled (E1721). Within a checkout, `eval-code` in a project resolves against
-the entry's frozen composed view (§6), never the ambient store. Pinned dynamic
-code is deferred.
+**Dynamic code in v1.** A bundle is refused (E1721) if any root's checked
+authority includes `Eval`. That covers every `run` entry, every test root,
+and **every exported callable**. Within a checkout, `eval-code` goes through
+the project access gate (§5). Pinned dynamic code is deferred.
 
 ## 10. Filesystem Policy
 
@@ -414,32 +499,48 @@ code is deferred.
 
 ## 11. Stores, Caches and Native Builds
 
-- **Isolated writable stores.** Each project gets its own store at
-  `<project>/.jacquard/store/`, overridable with `--store` or
-  `JACQUARD_PROJECT_STORE`, and one writer holds a lock file. **Stores are not
-  shared between projects in v1.** Sharing needs atomic object publication,
-  writer coordination and ownership-aware rollback, which the store does not
-  provide today (§2).
-- **Semantic metadata.** Call-ABI companions and visibility are part of the
-  project's semantic state. They are recomputed from the pinned inputs and
-  never trusted from a cache.
-- **Caches.**
-  - Warp test caches go under `.jacquard/test-cache/`.
-  - Native builds go under `.jacquard/build/<entry>/`, with the existing
-    native cache moved beneath it.
-  - Every cache and artifact root is passed explicitly through the APIs; none
-    is working-directory-relative.
-  - `project check` warns (W1701) if `.jacquard/` is tracked by version
-    control.
-- **Native build recipe.** A native build records:
-  - Core version and emitter version
-  - runtime source digest
-  - compiler and its version
-  - target triple
-  - flags and optimization level
+- **Store ownership.** The consumer owns all writable state. Each project
+  command uses a store under the **consumer's** cache root,
+  `<consumer>/.jacquard/`, overridable with `--store` or
+  `JACQUARD_PROJECT_STORE`:
+  - the root project's store: `.jacquard/store/`
+  - each dependency's checking store: `.jacquard/deps/<context identity>/`
 
-  The build is *semantically* reproducible from the pins. A byte-identical
-  binary is claimed only when the recipe matches.
+  Dependency directories stay read-only (§10), so checking a dependency from a
+  read-only checkout works. One writer holds a lock per store, and stores are
+  never shared between consumers in v1.
+- **Indexes from persisted objects** (prerequisite fix). `put_decl` must
+  derive member locations from the **persisted** object bytes, not from the
+  incoming declaration. Otherwise a permuted, hash-equal group can index the
+  wrong member (§2). PKG.1 fixes this first, with a regression test.
+- **The authoritative representation.** Bundles serialize the persisted
+  object bytes. They are canonical kernel forms, including binder names that
+  hashing erases, and are deterministic for a given store history. Stores are
+  built fresh for bundling, so bundle bytes do not depend on unrelated cache
+  history.
+- **Bounded reads.** Every read of a manifest, unit, object or bundle goes
+  through a size-capped, descriptor-based regular-file read. This extends the
+  existing `Export` checks with byte ceilings.
+- **Semantic metadata.** Companions and visibility are recomputed from pinned
+  inputs and never trusted from a cache.
+- **Caches.**
+  - Warp test caches: `.jacquard/test-cache/`.
+  - Native builds run in a **fresh per-build directory**, renamed into
+    `.jacquard/build/<entry>/` on success. Concurrent builds of the same
+    entry cannot share `prog_main` or object paths.
+  - Every root is passed explicitly through the APIs.
+  - W1701 warns if `.jacquard/` is tracked by version control.
+- **Native reproducibility.** v1 promises **semantic** reproducibility only:
+  identical pins give identical checked programs. A build records its recipe
+  for diagnosis:
+  - Core and emitter
+  - runtime digest
+  - compiler
+  - target
+  - flags
+
+  Byte-identical binaries need a complete toolchain and environment contract
+  (linker, system libraries, paths) and are out of scope.
 
 ## 12. Growth Path
 
@@ -448,7 +549,7 @@ code is deferred.
 | package draft | project-v1 | later |
 |---|---|---|
 | name, exports | `name`, `exports` | unchanged |
-| deps (impl, iface) | `(pin #I)`: the exact interface identity, which covers the static implementation | a signature-only compatibility projection (§8) |
+| deps (impl, iface) | `(pin #C)`: the `project-context-v1` identity, covering the exact interface, companions, prelude and dependency pins | a signature-only compatibility projection (§8) |
 | hint, intent, index, added | — | tagged `(registry …)` sources beside `(path …)` |
 | publisher, signature | — | a signed root over a package manifest that commits to dependencies, companions, tests and migrations, in a new head |
 | migrations, `outdated`, `upgrade` | `project pin` with a plan | `add` and `upgrade` with migrations |
@@ -456,45 +557,36 @@ code is deferred.
 
 ## 13. The Four Applications (Acceptance)
 
-The manifests are sketched here and finalised by PKG.1 against the actual test
-ownership:
+These manifests are illustrative; PKG.1 commits the complete ones, and the
+cram in §16 checks them against `run.sh` output. All four are hash-preserving
+under §4, because constructors are exempt and every other name already
+carries its prefix.
 
-```text
-applications/shared/project.jqd          namespace display; units display.jac
-                                         exports the display helpers the apps use
-                                         test display (units display-tests.jac)
-applications/dice-coach/project.jqd      namespace dice; deps display;
-                                         run demo/interactive (native); test suite (units tests.jac)
-applications/picnic-planner/project.jqd  namespace picnic; deps display; same shape
-applications/rota-optimizer/project.jqd  namespace rota; units model, fixtures, report;
-                                         run demo/interactive (native); test suite
-applications/formula-notebook/project.jqd namespace nb; units syntax, model, commands, application;
-                                         run demo (units workbook.jac demo.jac) (native);
-                                         run interactive (native);
-                                         test suite (units workbook.jac parser-tests.jac
-                                                     model-tests.jac interaction-tests.jac)
-applications/suite/project.jqd           no namespace (leaf); deps dice, picnic, display;
-                                         test interaction (units interaction-tests.jac)   -- moved here from shared/
-```
+| project | namespace | depends on | library units | entries |
+|---|---|---|---|---|
+| `applications/shared` | `display` | — | `display.jac` | test `display` (`display-tests.jac`) |
+| `applications/dice-coach` | `dice` | display | `model.jac` | run `demo`, run `interactive` (both native); test `suite` (`tests.jac`) |
+| `applications/picnic-planner` | `picnic` | display | `model.jac` | same shape as dice-coach |
+| `applications/rota-optimizer` | `rota` | — | `model.jac`, `fixtures.jac`, `report.jac` | run `demo` and `interactive` (native); test `suite` (`tests.jac`, `interaction-tests.jac`) |
+| `applications/formula-notebook` | `nb` | — | `syntax.jac`, `model.jac`, `commands.jac`, `application.jac` | run `demo` (`workbook.jac`, `demo.jac`), run `interactive` (native); test `suite` (`workbook.jac`, `parser-tests.jac`, `model-tests.jac`, `interaction-tests.jac`) |
+| `applications/suite` | none (a leaf) | dice, picnic, display | — | test `interaction` (`interaction-tests.jac`, moved here from `shared/`) |
 
-The routine and exhaustive lanes stay as today's flags, passed through `project
-test`.
+The routine and exhaustive lanes stay as today's Warp flags passed through
+`project test`.
 
-Tests that exercise private names stay in their owning project's test entry.
-Cross-application interaction tests move into `suite/` and use exports only.
-Any test that needs a private name is either moved to its owner or makes the
-name an export, with the choice recorded.
+A test that needs a private name stays in its owning project's test entry,
+or the name becomes an export. Each such choice is recorded in the PKG.1
+evidence.
 
 **Migration proofs:**
 
-1. **Identity preservation.** For every entry, the declaration hashes from
-   `project` composition equal those of today's `run.sh` concatenation. A cram
-   compares both; this holds because v1 rewrites no names.
-2. **Behaviour.** `run.sh` becomes a thin wrapper over `jacquard project …`.
-   `test/cli/applications.t` output is unchanged, including native builds.
+1. **Identity preservation.** For every entry, project composition yields
+   the same declaration hashes as `run.sh` concatenation, compared by a cram.
+2. **Behaviour.** `test/cli/applications.t` output is unchanged, including
+   native builds. `run.sh` becomes a wrapper over `jacquard project`.
 3. **`cat` disappears** from every README and from `run.sh`.
-4. **Privacy.** An application referencing a non-exported `display.` helper,
-   by name or by hash, is refused (E1705 or E1709). Negative crams pin this.
+4. **Privacy.** Referencing a non-exported `display.` helper by name, by hash,
+   or through `eval` is refused (E1705 or E1709).
 
 ## 14. Editor And Documentation Integration
 
@@ -513,78 +605,119 @@ name an export, with the choice recorded.
 
 ## 15. Diagnostics
 
-The project range is E1700–E1739, with warnings W1700–W1709. Every
-diagnostic carries its span, the project path, and, for dependency failures,
-the alias chain. Exit status is 1 for diagnostics and 124 for usage errors,
-as today.
+Project errors use E1700–E1739 and warnings W1700–W1709. Every diagnostic
+carries its span, or its list of origins (§6), the project path, and, for
+dependency failures, the alias chain. Filesystem and imported-object failures
+without a source span report the file path and byte offset. Exit status is 1
+for diagnostics and 124 for usage errors.
 
 | code | condition |
 |---|---|
-| E1700–E1704 | manifest: malformed form, unknown field, duplicate field or entry or export, budget exceeded, `requires` not satisfied |
-| E1705 | a name is not visible (private or undeclared) |
+| E1700 | malformed manifest form |
+| E1701 | unknown manifest field |
+| E1702 | duplicate field, entry key, or export selector |
+| E1703 | manifest budget exceeded |
+| E1704 | `requires` not satisfied by the running Core |
+| E1705 | a name is not visible |
 | E1706 | a name violates the namespace contract |
-| E1707 | namespaces clash or one is a boundary-prefix of another |
-| E1708 | a dependency project has no namespace |
+| E1707 | namespaces clash or one is a boundary-prefix of another (checked before E1714) |
+| E1708 | a depended-on project has no namespace |
 | E1709 | an explicit identity is not visible |
 | E1710 | a pin does not match |
 | E1711 | a dependency is unpinned |
 | E1712 | a transitive pin fails |
 | E1713 | a dependency cycle |
-| E1714 | one namespace appears at two artifact identities |
-| E1715 | an expression in a library or test unit |
+| E1714 | one namespace appears at two context identities |
+| E1715 | an expression in a library unit |
 | E1716 | a name is defined twice across units |
 | E1717 | an export selector names nothing |
-| E1718 | an entry kind or name is unknown |
-| E1719 | a call-ABI companion conflicts across the graph (E0612 in project context), detected before any store mutation |
+| E1718 | unknown entry |
+| E1719 | a call-ABI companion conflicts across the graph, detected before any store mutation |
 | E1720 | the bundle's prelude or Core does not match |
-| E1721 | an entry that needs `Eval` cannot be bundled |
-| E1722–E1725 | path containment, non-regular file, case collision, output overlap |
-| E1726–E1729 | bundle integrity: hash, ownership, closure, root digest |
-| W1700 | declared grants differ from the checked authority |
+| E1721 | a bundle root requires `Eval` |
+| E1722 | a unit path escapes the project |
+| E1723 | a unit is not a regular file |
+| E1724 | two units' paths differ only by case |
+| E1725 | an output overlaps an input |
+| E1726 | a bundle object's hash does not match |
+| E1727 | a bundle object's member ownership does not match |
+| E1728 | a bundle closure is incomplete |
+| E1729 | a derived interface or context does not match the bundle record |
+| E1730 | declared grants differ from checked authority (`--strict-grants`) |
+| E1731 | visible constructor names collide |
+| E1732 | the library references an entry's name |
+| E1733 | a source file changed during pinning |
+| W1700 | declared grants differ from checked authority |
 | W1701 | `.jacquard/` is tracked by version control |
 
 ## 16. Validation For Task 217
 
+**Prerequisite fixes, each with a regression test:**
+
+- `put_decl` indexes member locations from persisted objects (§11)
+- quoted-real carrier normalization (§8), or an explicit decision to defer
+  it, with the documented behaviour exception
+- a composition parse mode, and multi-origin spans (§6)
+
+**Project behaviour:**
+
 - **Refusals.** Every diagnostic in §15 has a negative test with its exact
   text.
-- **Fuzzing.** Manifest fuzzing covers random forms, oversized input,
-  duplicates, and path forms: every input is accepted or refused with a code,
-  never with a crash.
+- **Fuzzing.** Manifest fuzzing: every input is accepted or refused with a
+  code, never with a crash.
 - **Determinism:**
-  - identical inputs give byte-identical interfaces and bundles
+  - identical inputs give byte-identical interfaces, context identities and
+    bundles
   - reordering `deps` or `exports` changes nothing
-  - reordering `units` changes only what concatenation order would change
-- **Pin lifecycle:**
-  - a private edit reachable from an export gives E1710
-  - `pin --dry-run` shows the plan and diff
+  - metadata edits change the document digest, but not the semantic
+    projection or context identity
+- **Composition equivalence.** A detached signature across two units, and a
+  recursive group across two units, behave as their concatenation does, with
+  diagnostics naming both files.
+- **Pins:**
+  - a reachable private edit gives E1710 (interface component)
+  - a private label edit gives E1710 (companions component)
   - an interrupted pin leaves the old manifest intact
-  - unpinned, transitive, cycle and diamond cases each have a test
-- **Fresh checkout.** `HOME` points at an empty directory, and a clean clone
-  followed by `project test` passes without touching any global store.
-- **Bundle round trip.** Run a bundle from another directory. Check a new file
-  that imports a bundled export using its labels. Tampered-object,
-  wrong-prelude and `Eval` refusals each have a test.
-- **Two-library example.** Two libraries with private `helper`s of different
-  bodies, and an application using both. It checks, both helpers stay
-  private, and native builds pick the right body for each.
-- **The four applications** meet §13.
+  - a concurrent source edit during pinning gives E1733
+  - unpinned, transitive, cycle, diamond and namespace-clash cases each have
+    a test
+- **Visibility:**
+  - a private name, a private hash, a private hash inside `eval` payloads,
+    and a private constructor of an abstract exported type are all refused
+  - a provider exporting an abstract type verifies against its export
+    projection
+- **Fresh checkout.** With an empty `HOME`, a clean clone followed by
+  `project test` passes.
+- **Bundles:**
+  - run an entry from another directory
+  - a new project that depends on the bundle imports and calls an exported
+    callable using its labels
+  - tampered object, mismatched interface, wrong prelude, and an `Eval`
+    exported callable are each refused
+- **Two-library example.** Two libraries with private `helper`s of
+  different bodies, and an application using both. It checks, both helpers
+  stay private, and native builds reach the right bodies.
+- **The applications** meet §13.
 
 ## 17. Decisions Requiring Owner Direction
 
-1. **Scope.** Treat PKG.1 as authorised post-0.2 feature work despite
-   `AGENTS.md`'s hardening note (recommended; implied by the owner's
-   direction).
-2. **Namespaces in v1 are a checked prefix contract with no rewriting**
-   (recommended). The alternative, DES.4's automatic prefixing, changes
-   nominal identities and hides meaning from source. It is deferred to a later
-   version as an explicit local-alias design.
-3. **A single exact pin** (the `interface-v1` identity), with drop-in
-   compatibility classification deferred (recommended).
-4. **Bundles refuse `Eval` entries in v1** (recommended).
-5. **Refuse one namespace at two artifact identities in v1.** This is stricter
-   than the package draft; recommended as a deliberate restriction.
+1. **Scope.** PKG.1 is authorised post-0.2 feature work despite `AGENTS.md`'s
+   hardening note (implied by the owner's direction).
+2. **Namespaces in v1 are a checked prefix contract with no rewriting.**
+   Constructors are exempt and owned by their types (recommended). DES.4's
+   automatic prefixing is deferred to a later, explicit local-alias design.
+3. **The pin is a `project-context-v1` identity.** It covers the exact
+   interface, all companions, the prelude and Core, and dependency pins.
+   `interface-v1` is unchanged, and drop-in compatibility classification is
+   deferred (recommended).
+4. **Bundles refuse any root requiring `Eval`**, including exported callables
+   (recommended).
+5. **Refuse one namespace at two context identities in v1.** Stricter than
+   the package draft; recommended as a deliberate restriction.
 6. **The manifest carrier.** `project.jqd`, a bootstrap data value, with a
    non-semantic `metadata` container (recommended).
-7. **Track the package drafts.** `docs/jacquard-package-cli.md` and
-   `docs/jacquard-registry-server.md` are untracked. This design cites the
-   first. Should they become tracked design history?
+7. **Quoted-real normalization.** Fix the printed carrier before PKG.1
+   (recommended), or ship PKG.1 with the documented behaviour exception.
+8. **Track the package drafts.** Should `docs/jacquard-package-cli.md` and
+   `docs/jacquard-registry-server.md` become tracked design history?
+
