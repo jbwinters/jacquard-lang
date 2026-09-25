@@ -153,6 +153,10 @@ Read these together when reviewing the historical 0.1 candidate boundary:
   first call, generated bindings over the v0 protocol, data conversion,
   operation registration, errors, lifecycle, simulation, inspection, and the
   first-success target; EMB.1 (Core) and EMB.H1–H2 (Host) backlog.
+- `designs/project-structure.md`: PKG.0 design for local projects (task
+  217): the `project.jqd` manifest, a no-rewrite namespace contract,
+  consumer-relative visibility for names and identities, composed units,
+  `project-context-v1` pins, verified bundles, and filesystem/store policy.
 - `designs/scoped-effect-instances.md`: TS.1 design for opt-in scoped,
   parameterized effect instances beside TS.0's ambient operations, with its
   executable model and the slices for TS.2.
