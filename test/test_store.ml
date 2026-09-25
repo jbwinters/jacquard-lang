@@ -65,6 +65,31 @@ let test_get_by_derived_hash () =
   | Ok _ -> Alcotest.fail "expected Constructor 1 role"
   | Error ds -> Alcotest.failf "locate failed: %s" (String.concat "; " (List.map Diag.to_string ds))
 
+(* A definition group hashes independently of member order, so a permuted group is the same object.
+   The first writer's bytes are kept; member positions must come from those bytes, or [locate] of
+   one member returns another member's body. *)
+let test_permuted_group_indexes_persisted_order () =
+  let t = open_ok (fresh_root ()) in
+  let put src = put_ok t (decl_of ~names:Resolve.empty_names src) in
+  let first = put "(defterm ((binding f-one () (lit 1)) (binding g-two () (lit 2))))" in
+  let second = put "(defterm ((binding g-two () (lit 2)) (binding f-one () (lit 1))))" in
+  Alcotest.(check bool)
+    "permuted groups are one object" true
+    (Hash.equal first.Canon.decl_hash second.Canon.decl_hash);
+  List.iter
+    (fun name ->
+      let hash = List.assoc name second.Canon.named in
+      match Store.locate t hash with
+      | Ok { Store.role = Store.Member i; decl = { Kernel.it = Kernel.DefTerm bindings; _ }; _ } ->
+          Alcotest.(check string)
+            (name ^ " locates its own binding")
+            name (List.nth bindings i).Kernel.bname
+      | Ok _ -> Alcotest.failf "%s: expected a term member" name
+      | Error ds ->
+          Alcotest.failf "%s: locate failed: %s" name
+            (String.concat "; " (List.map Diag.to_string ds)))
+    [ "f-one"; "g-two" ]
+
 let test_names_registered_and_resolvable () =
   let t = open_ok (fresh_root ()) in
   ignore (put_ok t (decl_of ~names:Resolve.empty_names "(deftype bool () (con false) (con true))"));
@@ -366,6 +391,8 @@ let test_origin_roundtrip () =
 
 let suite =
   [
+    Alcotest.test_case "permuted hash-equal groups index the persisted order" `Quick
+      test_permuted_group_indexes_persisted_order;
     Alcotest.test_case "put/get round trip preserves hash" `Quick test_put_get_roundtrip;
     Alcotest.test_case "origin sidecar roundtrip" `Quick test_origin_roundtrip;
     Alcotest.test_case "get by derived hash" `Quick test_get_by_derived_hash;

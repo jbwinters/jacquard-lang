@@ -406,63 +406,75 @@ let put_decl ?origin t (decl : Kernel.decl) : (Canon.decl_hashes, Diag.t list) r
   | Ok hs -> (
       match merged_call_abis t (declaration_call_abis decl hs) with
       | Error _ as error -> error
-      | Ok call_abis ->
+      | Ok call_abis -> (
           let path = object_path t hs.Canon.decl_hash in
-          if not (Sys.file_exists path) then begin
-            let oc = open_out_bin path in
-            output_string oc (Printer.print_all [ Kernel.decl_to_form decl ]);
-            close_out oc
-          end;
-          (match origin with
-          | Some tag -> (
-              (* first writer wins, matching the object's own immutability: content that
+          (* The object file is immutable, so a hash-equal declaration keeps the first writer's
+             bytes. Member positions must be indexed from those persisted bytes: a permuted,
+             hash-equal definition group lists its members in a different order, and indexing
+             the incoming order would make [locate] return another member's body. *)
+          let persisted =
+            if Sys.file_exists path then load_object ~file:path (read_file path)
+            else begin
+              let oc = open_out_bin path in
+              output_string oc (Printer.print_all [ Kernel.decl_to_form decl ]);
+              close_out oc;
+              Ok (decl, hs)
+            end
+          in
+          match persisted with
+          | Error _ as error -> error
+          | Ok persisted ->
+              (match origin with
+              | Some tag -> (
+                  (* first writer wins, matching the object's own immutability: content that
              already carries provenance keeps it, and a differing re-stamp is noted *)
-              let opath = origin_path t hs.Canon.decl_hash in
-              if Sys.file_exists opath then
-                begin match read_file opath with
-                | existing when String.trim existing <> tag ->
-                    Printf.eprintf "note: %s already stamped [%s]; keeping it\n%!"
-                      (String.sub (Hash.to_hex hs.Canon.decl_hash) 0 8)
-                      (String.trim existing)
-                | _ -> ()
-                | exception Sys_error _ -> ()
-                end
-              else
-                try
-                  let oc = open_out_bin opath in
-                  output_string oc (tag ^ "\n");
-                  close_out oc
-                with Sys_error m -> Printf.eprintf "origin sidecar unwritable (%s)\n%!" m)
-          | None -> ());
-          let fresh = index_entries decl hs in
-          t.index <- fresh @ List.filter (fun (h, _) -> not (List.mem_assoc h fresh)) t.index;
-          let new_names =
-            List.filter_map
-              (fun (n, h) ->
-                match List.assoc_opt h fresh with
-                | Some (_, role)
-                  when (not (List.exists (Hash.equal h) t.hidden)) && not (scheduler_private_hash h)
-                  ->
-                    Some (n, { Resolve.hash = h; kind = entry_kind decl role })
-                | Some _ | None -> None)
-              hs.Canon.named
-          in
-          (* replacement is per (name, kind): a term named x does not evict a type named x *)
-          let evicted (n, (e : Resolve.entry)) =
-            List.exists
-              (fun (n', (e' : Resolve.entry)) -> n = n' && e.Resolve.kind = e'.Resolve.kind)
-              new_names
-          in
-          t.names <-
-            sort_names
-              (new_names
-              @ List.filter
-                  (fun ((_, entry) as binding) ->
-                    (not (scheduler_private_hash entry.Resolve.hash)) && not (evicted binding))
-                  t.names);
-          t.call_abis <- call_abis;
-          write_names t;
-          Ok hs)
+                  let opath = origin_path t hs.Canon.decl_hash in
+                  if Sys.file_exists opath then
+                    begin match read_file opath with
+                    | existing when String.trim existing <> tag ->
+                        Printf.eprintf "note: %s already stamped [%s]; keeping it\n%!"
+                          (String.sub (Hash.to_hex hs.Canon.decl_hash) 0 8)
+                          (String.trim existing)
+                    | _ -> ()
+                    | exception Sys_error _ -> ()
+                    end
+                  else
+                    try
+                      let oc = open_out_bin opath in
+                      output_string oc (tag ^ "\n");
+                      close_out oc
+                    with Sys_error m -> Printf.eprintf "origin sidecar unwritable (%s)\n%!" m)
+              | None -> ());
+              let stored_decl, stored_hashes = persisted in
+              let fresh = index_entries stored_decl stored_hashes in
+              t.index <- fresh @ List.filter (fun (h, _) -> not (List.mem_assoc h fresh)) t.index;
+              let new_names =
+                List.filter_map
+                  (fun (n, h) ->
+                    match List.assoc_opt h fresh with
+                    | Some (_, role)
+                      when (not (List.exists (Hash.equal h) t.hidden))
+                           && not (scheduler_private_hash h) ->
+                        Some (n, { Resolve.hash = h; kind = entry_kind decl role })
+                    | Some _ | None -> None)
+                  hs.Canon.named
+              in
+              (* replacement is per (name, kind): a term named x does not evict a type named x *)
+              let evicted (n, (e : Resolve.entry)) =
+                List.exists
+                  (fun (n', (e' : Resolve.entry)) -> n = n' && e.Resolve.kind = e'.Resolve.kind)
+                  new_names
+              in
+              t.names <-
+                sort_names
+                  (new_names
+                  @ List.filter
+                      (fun ((_, entry) as binding) ->
+                        (not (scheduler_private_hash entry.Resolve.hash)) && not (evicted binding))
+                      t.names);
+              t.call_abis <- call_abis;
+              write_names t;
+              Ok hs))
 
 (** [origin t h] reads the provenance sidecar of the declaration owning [h], if any. A
     present-but-unreadable or empty sidecar is ignored with a warning, never fatal. *)

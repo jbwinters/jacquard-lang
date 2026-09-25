@@ -1,0 +1,9 @@
+; Real literals denote their HASH_V0-normalized value (spec/serialization.md):
+; -0.0 is +0.0 in expressions, literal patterns, and quoted code, so hash-equal
+; programs run the same numbers in both engines. A computed negative zero
+; keeps its sign.
+(tuple
+  (app (var code.render) (quote (lit -0.0)))
+  (app (var real.div) (lit 1.0) (lit -0.0))
+  (match (lit 0.0) (clause (plit -0.0) (lit "matched")) (clause (pwild) (lit "missed")))
+  (app (var real.div) (lit 1.0) (app (var real.mul) (lit -1.0) (lit 0.0))))
