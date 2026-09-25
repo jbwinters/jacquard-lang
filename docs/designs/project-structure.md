@@ -132,7 +132,8 @@ a strict schema, and never evaluated.
 | exports | 1024 |
 | direct dependencies | 64 |
 | whole dependency graph | at most 256 projects and depth 32 |
-| bundles | a configurable byte budget (§9) |
+| a single object | 4 MiB |
+| bundles | 256 MiB and 100,000 objects by default; configurable (§9) |
 
 **Why a bootstrap data file:**
 
@@ -351,18 +352,40 @@ sorted:
 
 ```text
 (project-context-v1
-  (interface <interface-v1 identity>)          -- exports, labels, hidden members, unchanged API.1 meaning
-  (companions (<callable hash> <call-abi-v1>)…) -- every call-ABI companion in the export closure, private ones included
-  (prelude <prelude identity>) (core "<version>")
-  (deps (<alias> <context identity>)…))        -- the dependency's own pins
+  (interface #<interface-v1 identity>)
+  (companions (call-abi-v1 #<callable> (slot positional|named <label>)…)…)
+  (prelude <prelude identity form>) (core "<version>")
+  (deps (dep <alias> #<context identity>)…))
 ```
+
+The record's parts:
+
+- `interface`: exports, labels and hidden members, with API.1's meaning
+  unchanged.
+- `companions`: every call-ABI companion in the **export closure**, private
+  ones included, using the store's existing `call-abi-v1` form.
+- `deps`: the dependency's own pins.
+
+Companion records and `deps` are sorted by hash and by alias; the **slots
+inside a companion keep their ABI order**. The identity is `HASH_V0` of the
+canonical `.jqd` bytes of this form. Its head, `project-context-v1`, is the
+domain tag.
 
 Why this record: API.1's interface identity is exact about exports, but omits
 private companions and the prelude (§2). A private label change leaves the
 interface identity unchanged, yet can make two otherwise identical callables
 conflict (E0612). The context identity commits to both, and **`interface-v1`
-keeps its meaning.** Projects are deduplicated by context identity, so two
-projects with empty interfaces but different contents are distinct.
+keeps its meaning.**
+
+The context identity commits to **what a dependent can reach**. Two
+dependency projects with equal records are interchangeable for every
+consumer, so deduplicating them by context identity is correct. A private
+body unreachable from any export is invisible to consumers and is not
+committed. A project's own entries are committed separately, by the bundle
+identity (§9).
+
+Companion conflicts are checked across the whole composed graph before any
+store mutation (E1719), not only within one export closure.
 
 **What a matching pin guarantees:**
 
@@ -389,10 +412,10 @@ E1710. The report carries:
 - A dependency without `(pin …)` is accepted only by `project pin` (E1711).
 - `pin --dry-run` prints the plan: old and new context identity, changed
   components, and the interface diff.
-- `pin` first computes every identity from a **snapshot**. It reads each
-  unit's bytes once, records their `HASH_V0` source digests, and rechecks
-  those digests immediately before writing. If a file changed during pinning,
-  it aborts with E1733.
+- `pin` first computes every identity from a **snapshot**. It reads each unit
+  and **every manifest in the graph** (root and dependencies) once, records
+  their `HASH_V0` digests, and rechecks all of them immediately before
+  writing. If any file changed during pinning, it aborts with E1733.
 - It then writes the manifest atomically: a temporary file in the same
   directory, fsync, rename.
 - `--dep ALIAS` selects dependencies. `pin` stores the pinned interfaces for
@@ -425,7 +448,9 @@ app.bundle/
   bundle-v1.jqd       -- the root record
   project.jqd         -- the manifest, canonical spelling
   interfaces/         -- interface-v1 manifests: the project's and each dependency's
+  contexts/           -- the canonical project-context-v1 record of the project and every transitive dependency
   companions.jqd      -- every call-ABI companion in the closure
+  provenance.jqd      -- full-document manifest digest, tool version, build time; NOT part of any identity
   objects/<hash>.jqd  -- objects, serialized from their authoritative stored bytes (§11)
 ```
 
@@ -433,9 +458,14 @@ app.bundle/
 
 - A `run` entry `demo` becomes the term `entry.demo`. That is a valid dotted
   store name; `/` is not a valid bootstrap symbol.
-- The term's value is the **ordered list of the entry's top-level expression
-  thunks**. `project run` evaluates and prints each in order, exactly as
-  `jacquard run` prints every top-level value today.
+- The entry is an **ordered sequence of independently checked thunks**.
+  Each top-level expression becomes its own generated term, `entry.demo.1`,
+  `entry.demo.2` and so on, each with its own type. A single list could not
+  hold them: `1` followed by `"two"` is an ordinary program, but a list of
+  both is a type error.
+- The bundle record lists the sequence in order. `project run` evaluates and
+  prints each value in order, exactly as `jacquard run` prints every top-level
+  value today.
 - A `test` entry becomes an ordered list of typed test-root records, each
   holding its kind (`test`, `world-test` or `warp-decl`), display name and
   identity, which is what Warp needs for discovery and reporting.
@@ -444,16 +474,18 @@ app.bundle/
 
 ```text
 (bundle-v1
-  (manifest <semantic-projection digest>) (document <full-manifest digest>)
-  (context <project-context identity>)
-  (prelude <identity>) (core "<version>")
-  (entries (run <name> <entry-term hash> (grants …))…   -- sorted by (kind, name)
-           (test <name> (root <kind> "<display>" <hash>)… (grants …))…)
+  (manifest #<semantic-projection digest>)
+  (context #<project-context identity>)
+  (prelude <identity form>) (core "<version>")
+  (entries (run <name> (steps #<thunk>…) (grants …))…    -- entries sorted by (kind, name); steps in source order
+           (test <name> (root <kind> "<display>" #<hash>)… (grants …))…)
   (objects <count>) (companions <count>))
 ```
 
-The **bundle identity** is `HASH_V0` of this record's canonical bytes,
-domain-tagged `bundle-v1`.
+The **bundle identity** is `HASH_V0` of this record's canonical bytes; the
+head is the domain tag. It contains the **semantic** manifest projection only.
+The full-document digest lives in `provenance.jqd`, so editing `metadata`
+never changes a bundle's identity.
 
 **Import and run.** `jacquard project run app.bundle ENTRY` builds a fresh
 store in temporary space and **publishes it only after verification**. The
@@ -466,8 +498,13 @@ checks, in order:
    shape
 5. **derives each interface** from the checked objects: signatures, labels,
    and companions restored from `companions.jqd`. Each is compared with
-   `interfaces/`, and the context identity is compared with the record
-6. prelude and Core match the running tool (E1720)
+   `interfaces/`.
+6. **recomputes every context bottom-up**, from `contexts/`: each dependency
+   before its consumers, checking each record's interface and companions
+   against what was derived and its dependency edges against its providers'
+   verified contexts. The last check is the project's own context against
+   `bundle-v1`
+7. prelude and Core match the running tool (E1720)
 
 Only then are the objects trusted for identity traversal.
 
@@ -477,9 +514,18 @@ callable**, with labels and constructor schemas from the bundle's verified
 interface. That is task 217's second-checkout test. It is not merely running
 an entry.
 
-**Dynamic code in v1.** A bundle is refused (E1721) if any root's checked
-authority includes `Eval`. That covers every `run` entry, every test root,
-and **every exported callable**. Within a checkout, `eval-code` goes through
+**Dynamic code in v1.** A bundle is refused (E1721) if dynamic evaluation is
+**executably reachable** from any root: any run step, test root, or exported
+callable. Checking the root's outer authority is not enough. A function can
+return a closure whose own arrow carries `Eval`
+(`() ->{} () ->{Eval} a`), and exported data can contain such functions.
+
+The refusal is therefore a closure scan:
+
+- If any object reachable from a root, excluding pure quoted data, refers to
+  the `Eval` operation or the `eval-code` builtin, the bundle is refused.
+- Code inside `quote` is data and is not scanned. Live `unquote` splices are
+  code and are scanned. Within a checkout, `eval-code` goes through
 the project access gate (§5). Pinned dynamic code is deferred.
 
 ## 10. Filesystem Policy
@@ -487,7 +533,8 @@ the project access gate (§5). Pinned dynamic code is deferred.
 - **Units are contained.** After resolving symlinks, every unit path must lie
   inside the project directory (E1722). Units must be regular files (E1723).
   Two units whose canonical paths differ only in case are refused (E1724), so
-  behaviour matches on case-insensitive filesystems.
+  behaviour matches on case-insensitive filesystems. So are two unit entries
+  that resolve to the same canonical file (E1734).
 - **Dependencies may be external.** A `(path …)` may use `..`, but it is
   canonicalized, must contain a `project.jqd`, and is read-only to the
   consumer.
@@ -574,6 +621,21 @@ carries its prefix.
 The routine and exhaustive lanes stay as today's Warp flags passed through
 `project test`.
 
+**The combined dice and picnic suite.** Today, `run.sh dice-coach test` and
+`run.sh picnic-planner test` both run one combined suite: the display tests,
+both models' tests, and the shared interaction tests. The wrapper reproduces
+it by running four test entries in order:
+
+1. `shared` `display`
+2. `dice-coach` `suite`
+3. `picnic-planner` `suite`
+4. `suite` `interaction`
+
+Coverage is the same, and each test now runs in its owning project.
+
+PKG.1 commits the complete manifests, including exact export lists. The cram
+proves hash and output preservation against today's `run.sh`.
+
 A test that needs a private name stays in its owning project's test entry,
 or the name becomes an export. Each such choice is recorded in the PKG.1
 evidence.
@@ -646,7 +708,8 @@ for diagnostics and 124 for usage errors.
 | E1730 | declared grants differ from checked authority (`--strict-grants`) |
 | E1731 | visible constructor names collide |
 | E1732 | the library references an entry's name |
-| E1733 | a source file changed during pinning |
+| E1733 | a source or manifest file changed during pinning |
+| E1734 | two unit entries resolve to the same file |
 | W1700 | declared grants differ from checked authority |
 | W1701 | `.jacquard/` is tracked by version control |
 
