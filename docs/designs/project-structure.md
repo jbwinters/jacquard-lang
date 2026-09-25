@@ -12,7 +12,9 @@
   - task 217's acceptance criteria
   - DES.4 §7
   - the owner's long-range package draft (`docs/jacquard-package-cli.md`, draft
-    0.1, untracked in the owner's checkout)
+    0.1) and its companion registry draft (`docs/jacquard-registry-server.md`).
+    Both are untracked in the owner's checkout; this design depends only on
+    the first.
   - a code-grounded review of the first draft of this document
 
 ## 1. Question
@@ -74,12 +76,18 @@ a strict schema, and never evaluated.
   (units "model.jac" "fixtures.jac" "report.jac")
   (exports (term rota.solve) (term rota.render-report)
            (type rota-problem) (type rota-solution) (type rota-status))
-  (deps (dep (as display) (path "../shared") (pin #9c07…)))
   (entries
     (run demo (units "demo.jac") (grants console) (native))
     (run interactive (units "interactive.jac") (grants console) (native))
     (test suite (units "tests.jac" "interaction-tests.jac")))
   (metadata (description "Shift rota optimizer") (license "Apache-2.0")))
+```
+
+The rota optimizer has no dependencies. A project that has one, such as
+`dice-coach` on the shared display library (§13), adds:
+
+```text
+  (deps (dep (as display) (path "../shared") (pin #9c07…)))
 ```
 
 | field | meaning |
@@ -88,16 +96,19 @@ a strict schema, and never evaluated.
 | `requires` | `(core "MAJOR.MINOR")`: this Core release series or a later minor release in the same major, checked before anything runs. Exact prelude and Core identities are committed in context identities and bundles (§8, §9) |
 | `namespace` | optional. The prefix contract of §4 |
 | `units` | library units, in composition order, **declarations only** (§6) |
-| `exports` | the public surface, as explicit `(kind store-name)` selectors, with kinds `term`, `con`, `op`, `type` and `effect`. Store spellings are used (`rota-problem` is the store name of `RotaProblem`), so the bootstrap reader can read every entry |
+| `exports` | the public surface, as explicit `(kind store-name)` selectors, with kinds `term`, `con`, `op`, `type` and `effect`. A selector that names nothing after elaboration is E1717. Store spellings are used (`rota-problem` is the store name of `RotaProblem`), so the bootstrap reader can read every entry |
 | `deps` | direct dependencies: an alias (a diagnostic label only in v1), a source (`(path P)` in v1), and one exact pin (§8) |
 | `entries` | entries keyed by `(kind, name)`. `run` entries may be marked `(native)` for `project build` |
 | `metadata` | a preserved, explicitly **non-semantic** container (description, license, authors, homepage). Tools may display it; it never affects checking, identity or pins |
 
 **Strictness and evolution:**
 
-- Unknown fields outside `metadata` are refused, never ignored. So are
-  duplicate fields, duplicate `(kind, name)` entries, and duplicate export
-  selectors.
+- A form that is not a well-formed `project-v1` value is refused (E1700).
+- Unknown fields outside `metadata` are refused, never ignored (E1701).
+- Duplicate fields, duplicate `(kind, name)` entries and duplicate export
+  selectors are refused (E1702).
+- Exceeding a budget below is refused (E1703), and so is an unsatisfied
+  `requires` (E1704).
 - The head `project-v1` is the format version. There is no second version
   field.
 - **Newer tools must keep accepting `project-v1` forever.** New semantics
@@ -332,6 +343,8 @@ jacquard project bundle    [--project DIR] -o BUNDLE
 jacquard project fmt       [--project DIR]
 ```
 
+An entry name that the manifest does not declare is E1718.
+
 **Discovery.** Without `--project`, the CLI uses the nearest `project.jqd`
 found by searching upward from the working directory. The search stops at the
 first directory containing `.git` or at the user's home directory, whichever
@@ -492,8 +505,8 @@ store in temporary space and **publishes it only after verification**. The
 checks, in order:
 
 1. budgets: bytes, objects and depth
-2. every object's hash and member ownership
-3. closure completeness from every root, including test roots
+2. every object's hash (E1726) and member ownership (E1727)
+3. closure completeness from every root, including test roots (E1728)
 4. **type-checks the whole closure.** Loading an object only validates its
    shape
 5. **derives each interface** from the checked objects: signatures, labels,
@@ -503,7 +516,7 @@ checks, in order:
    before its consumers, checking each record's interface and companions
    against what was derived and its dependency edges against its providers'
    verified contexts. The last check is the project's own context against
-   `bundle-v1`
+   `bundle-v1`. Any mismatch in steps 5–6 is E1729
 7. prelude and Core match the running tool (E1720)
 
 Only then are the objects trusted for identity traversal.
@@ -751,6 +764,10 @@ for diagnostics and 124 for usage errors.
     projection
 - **Fresh checkout.** With an empty `HOME`, a clean clone followed by
   `project test` passes.
+- **Location independence.** Run `project run`, `test` and `build` from
+  three different working directories (the project, a parent, and an
+  unrelated directory). They produce identical results, and store, cache and
+  artifact files appear only under the chosen roots.
 - **Bundles:**
   - run an entry from another directory
   - a new project that depends on the bundle imports and calls an exported
