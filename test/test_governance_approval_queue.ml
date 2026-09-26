@@ -409,18 +409,25 @@ let test_concurrent_consumers_exactly_one_delivery () =
       Alcotest.(check (list int)) "one delivery and one stale observation" [ 10; 20 ] exits;
       Alcotest.(check int) "one durable Consume" 3 (inspect file).records)
 
+(* Busy means the other Domain holds the queue guard. Retry until a wall-clock deadline, yielding
+   the processor between attempts: a spin-count bound measured CPU speed rather than time, so on a
+   loaded or single-core runner the holder could stay descheduled for the whole budget and the
+   waiter would report Busy although the guard behaved correctly. The deadline is generous; the
+   common case retries a handful of times. *)
 let consume_with_retry file proposal_id =
-  let rec retry attempts =
+  let deadline = Unix.gettimeofday () +. 60.0 in
+  let rec retry () =
     match Governance_approval_queue.consume_file ~file ~proposal_id with
     | Ok (Governance_approval_queue.Delivered _) -> `Delivered
     | Ok Governance_approval_queue.Stale_delivery -> `Stale
-    | Ok Governance_approval_queue.Busy_delivery when attempts > 0 ->
+    | Ok Governance_approval_queue.Busy_delivery when Unix.gettimeofday () < deadline ->
         Domain.cpu_relax ();
-        retry (attempts - 1)
+        Unix.sleepf 0.0002;
+        retry ()
     | Ok Governance_approval_queue.Busy_delivery -> `Busy
     | Ok Governance_approval_queue.Pending_delivery | Error _ -> `Other
   in
-  retry 1_000_000
+  retry ()
 
 let test_domain_consumers_exactly_one_delivery () =
   with_file (fun file ->
