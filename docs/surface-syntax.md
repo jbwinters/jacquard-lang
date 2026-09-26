@@ -796,6 +796,23 @@ that already defines `<type>.<label>` by hand must drop that definition
 (E1241). The acceptance gate and the
 eligibility decision are recorded in `docs/release/surface-syntax/FOLLOWUPS.md`.
 
+SX.28 (DES.4 Phase 1) adds the matching update. Every label that earns an
+accessor also earns a pure setter `<type-kebab>.with-<label>(value, <label>:
+field)`, generated after the accessors. Each clause matches one constructor and
+rebuilds that same constructor with the one field replaced, so the setter is
+total over a sum type, and a parametric field's update may change the type
+(`pair.with-left(Pair(1, "a"), 2.5)` is a `Pair Real Text`). The second
+parameter carries the field label as its call label, so the store derives the
+`call-abi-v1` companion (positional, named label), and
+`rota-staff.with-available(person, available: Nil)` reads at the call site; the
+positional spelling also works. A setter is its hand-written twin: binder names
+and provenance are not identity, so its hash is that of the match a programmer
+would write. It has the accessors' provenance, hiding and collision rule: a
+setter name that an explicit definition of the file defines, or that one of
+the type's own accessors already binds (a label spelled `with-x` beside a
+label `x`), is E1241. The `with` update form (Phase 2) is not part of the
+language yet.
+
 `Choice`'s `a` is a phantom parameter: it never appears in `choose`'s
 signature, and that is legal: an effect's type parameters scope over every
 operation's signature whether or not a given operation happens to use them.
@@ -1122,7 +1139,7 @@ in commit messages and task dependencies.)
 | D33 | quote body | surface syntax inside `quote { }`, captured pre-resolution |
 | D34 | case convention | PascalCase for types/constructors/effects, kebab-case for terms/operations; pattern-position capitals are constructors |
 | D35 | handle delimiting | atomic body needs no wrapper; a non-atomic body takes an explicit `{ }` block; the clause list is always braced |
-| D36 | labeled fields | shipped: labeled declarations, SX.24 partial patterns, and SX.27 generated accessors ship; pattern use validates unknown, repeated, absent, and ambiguous labels; declarations reject repeated (E1239), type-inconsistent (E1240), and colliding (E1241) labels; a label only some constructors carry has no accessor |
+| D36 | labeled fields | shipped: labeled declarations, SX.24 partial patterns, SX.27 generated accessors, and SX.28 generated setters `<type>.with-<label>` ship; pattern use validates unknown, repeated, absent, and ambiguous labels; declarations reject repeated (E1239), type-inconsistent (E1240), and colliding (E1241) labels; a label only some constructors carry has no accessor |
 | D37 | namespace puns | blessed permanently: dotted names are one atomic token forever; a future field-access form will not use `.` |
 | D38 | text building | variadic `text.join` is the ordinary lowering target and remains directly callable |
 | D39 | comparison naming | `?`-suffixed predicates beside bare dictionary names; prelude gains `gt? gte? lt? lte?`; the `add-real` family migrates to `real.*` |

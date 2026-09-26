@@ -32,7 +32,7 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1085`
+- Alcotest/QCheck cases: `1087`
 - Cram transcript files: `65`
 - Documentation examples: `34` named examples across `8` documents
 
@@ -404,5 +404,12 @@ Two store and identity repairs precede local projects:
   refused. `Span.merge` never combines offsets from different
   files (`test/test_surface_compose.ml`).
 
-The three new store cases and the seven composition cases bring the current
-source inventory to `1085 / 65 / 34`.
+The three new store cases and the seven composition cases bring the source
+inventory to `1085 / 65 / 34`.
+
+Labeled fields now have generated setters as well as accessors (SX.28, DES.4
+Phase 1). A type's labels generate `<type>.with-<label>` setters, total over sum types
+and type-changing on parametric fields. Each setter hashes as its hand-written
+twin and carries the field label as its call label. E1241 guards setter
+collisions as it guards accessors. Two `test/test_surface_decls.ml` cases bring
+the current source inventory to `1087 / 65 / 34`.

@@ -35,12 +35,15 @@ let hash top =
   | Error diagnostics -> fail_diags "hash" diagnostics
 
 let check_equivalent label ?(names = Resolve.empty_names) surface_source bootstrap_source =
-  (* generated D36 accessors have their own kernel-twin test; these twins omit them *)
+  (* generated D36 accessors and SX.28 setters have their own kernel-twin tests; these twins omit
+     them *)
   let actual =
     lower surface_source
     |> List.filter (function
-      | Kernel.Decl declaration ->
-          Meta.surface_generated declaration.meta <> Some "constructor-accessor"
+      | Kernel.Decl declaration -> (
+          match Meta.surface_generated declaration.meta with
+          | Some ("constructor-accessor" | "constructor-setter") -> false
+          | _ -> true)
       | Kernel.Expr _ -> true)
     |> List.map (resolve names)
   in
@@ -58,11 +61,15 @@ let only_decl = function
   | [ Kernel.Decl declaration ] -> declaration
   | tops -> Alcotest.failf "expected one declaration, got %d tops" (List.length tops)
 
-let is_generated_accessor = function
-  | Kernel.Decl declaration -> Meta.surface_generated declaration.meta = Some "constructor-accessor"
+let generated_as marker = function
+  | Kernel.Decl declaration -> Meta.surface_generated declaration.meta = Some marker
   | Kernel.Expr _ -> false
 
-(* A labeled type lowers to its declaration followed by its generated D36 accessors (SX.27). *)
+let is_generated_accessor top =
+  generated_as "constructor-accessor" top || generated_as "constructor-setter" top
+
+(* A labeled type lowers to its declaration followed by its generated D36 accessors (SX.27) and
+   SX.28 setters. *)
 let declared_type = function
   | Kernel.Decl declaration :: accessors when List.for_all is_generated_accessor accessors ->
       declaration
@@ -520,14 +527,17 @@ let test_bootstrap_reader_unchanged () =
 
 (* --- SX.27: D36 generated accessors and declaration-time label validation --- *)
 
-let accessor_names tops =
+let generated_names marker tops =
   List.filter_map
     (function
       | Kernel.Decl { Kernel.it = Kernel.DefTerm [ binding ]; _ } as top
-        when is_generated_accessor top ->
+        when generated_as marker top ->
           Some binding.Kernel.bname
       | _ -> None)
     tops
+
+let accessor_names = generated_names "constructor-accessor"
+let setter_names = generated_names "constructor-setter"
 
 (* Resolve and install tops in order in a fresh store, returning each top's canonical hash. *)
 let installed_hashes tops =
@@ -566,12 +576,14 @@ let test_generated_accessors_match_kernel_twins () =
         (Form.equal_ignoring_meta (Kernel.to_form expected) (Kernel.to_form actual));
       Alcotest.(check string)
         "canonical identity" (Hash.to_hex expected_hash) (Hash.to_hex actual_hash))
-    (installed_hashes surface) (installed_hashes twin);
+    (installed_hashes
+       (List.filter (fun top -> not (generated_as "constructor-setter" top)) surface))
+    (installed_hashes twin);
   (* every constructor gets a clause, so the accessor is total over a sum type *)
   let shapes = lower "type Shape = | Circle(id: Int, radius: Int) | Square(side: Int, id: Int)\n" in
   Alcotest.(check (list string))
     "only uniformly carried labels" [ "shape.id" ] (accessor_names shapes);
-  match List.rev shapes with
+  match List.rev (List.filter (generated_as "constructor-accessor") shapes) with
   | Kernel.Decl { Kernel.it = Kernel.DefTerm [ { value; _ } ]; _ } :: _ -> (
       match value.Kernel.it with
       | Kernel.Lam (_, { Kernel.it = Kernel.Match (_, [ circle; square ]); _ }) -> (
@@ -603,6 +615,92 @@ let test_ineligible_labels_generate_nothing () =
       | Ok printed -> Alcotest.(check string) "accessor prints nothing" "" printed
       | Error diagnostics -> fail_diags "print accessor" diagnostics)
   | _ -> Alcotest.fail "no accessor was generated"
+
+let expect_setter_error label source =
+  match Surface_lower.lower_tops (parse source) with
+  | Ok _ -> Alcotest.failf "%s: lowering accepted the declaration" label
+  | Error diagnostics ->
+      Alcotest.(check (list string))
+        (label ^ " code") [ "E1241" ]
+        (List.map Diag.code_or_uncoded diagnostics)
+
+(* --- SX.28 (DES.4 Phase 1): generated setters --- *)
+
+let test_generated_setters_match_kernel_twins () =
+  let surface = lower "type Pair a b = | Pair(left: a, right: b)\n" in
+  Alcotest.(check (list string))
+    "one setter per label"
+    [ "pair.with-left"; "pair.with-right" ]
+    (setter_names surface);
+  (* the twin a programmer would write; binder names and provenance are not identity *)
+  let twin =
+    bootstrap
+      "(deftype pair ((tvar a) (tvar b)) (con pair (field left (tvar a)) (field right (tvar b))))\n\
+       (defterm ((binding pair.left () (lam ((pvar value)) (match (var value) (clause (pcon pair \
+       (pvar field) (pwild)) (var field)))))))\n\
+       (defterm ((binding pair.right () (lam ((pvar value)) (match (var value) (clause (pcon pair \
+       (pwild) (pvar field)) (var field)))))))\n\
+       (defterm ((binding pair.with-left () (lam ((pvar v) (pvar new)) (match (var v) (clause \
+       (pcon pair (pwild) (pvar b)) (app (var pair) (var new) (var b))))))))\n\
+       (defterm ((binding pair.with-right () (lam ((pvar v) (pvar new)) (match (var v) (clause \
+       (pcon pair (pvar a) (pwild)) (app (var pair) (var a) (var new))))))))\n"
+  in
+  let installed = installed_hashes surface in
+  List.iter2
+    (fun (_, actual_hash) (_, expected_hash) ->
+      Alcotest.(check string)
+        "canonical identity" (Hash.to_hex expected_hash) (Hash.to_hex actual_hash))
+    installed (installed_hashes twin);
+  (* the setter's second parameter carries the field label, so the store derives its companion *)
+  (match List.filter (generated_as "constructor-setter") (List.map fst installed) with
+  | Kernel.Decl ({ Kernel.it = Kernel.DefTerm [ binding ]; _ } as declaration) :: _ -> (
+      match Canon.hash_top (Kernel.Decl declaration) with
+      | Ok hashes -> (
+          match Store.declaration_call_abis declaration hashes with
+          | [ (_, [ None; Some "left" ]) ] -> ()
+          | _ -> Alcotest.failf "%s has no (positional, named left) companion" binding.bname)
+      | Error diagnostics -> fail_diags "hash setter" diagnostics)
+  | _ -> Alcotest.fail "no setter was generated");
+  (* a sum type gets a total setter: every constructor rebuilds itself *)
+  let shapes = lower "type Shape = | Circle(id: Int, radius: Int) | Square(side: Int, id: Int)\n" in
+  Alcotest.(check (list string))
+    "only uniformly carried labels" [ "shape.with-id" ] (setter_names shapes);
+  match List.filter (generated_as "constructor-setter") shapes with
+  | [ Kernel.Decl { Kernel.it = Kernel.DefTerm [ { value; _ } ]; _ } ] -> (
+      match value.Kernel.it with
+      | Kernel.Lam ([ _; _ ], { Kernel.it = Kernel.Match (_, [ circle; square ]); _ }) -> (
+          match (circle.Kernel.cbody.it, square.Kernel.cbody.it) with
+          | ( Kernel.App
+                ( { Kernel.it = Kernel.Var "circle"; _ },
+                  [ { Kernel.it = Kernel.Var "field"; _ }; _ ] ),
+              Kernel.App
+                ( { Kernel.it = Kernel.Var "square"; _ },
+                  [ _; { Kernel.it = Kernel.Var "field"; _ } ] ) ) ->
+              ()
+          | _ -> Alcotest.fail "setter clauses rebuild the wrong positions")
+      | _ -> Alcotest.fail "setter is not a two-parameter match")
+  | _ -> Alcotest.fail "expected exactly one setter"
+
+let test_setter_rules () =
+  List.iter
+    (fun (label, source) -> Alcotest.(check (list string)) label [] (setter_names (lower source)))
+    [
+      ("positional fields", "type Pair a b = | Pair a b\n");
+      ("label on some constructors", "type Reply = | Accepted(value: Int) | Refused(reason: Text)\n");
+    ];
+  expect_setter_error "collision with an explicit term"
+    "pair.with-left(p, x) = p\ntype Pair = | Pair(left: Int)\n";
+  (* a label spelled `with-x` makes an accessor that is the setter of label `x` *)
+  expect_setter_error "collision with the type's own accessor"
+    "type Odd = | Odd(x: Int, with-x: Int)\n";
+  match lower "type Pair = | Pair(left: Int, right: Int)\n" with
+  | tops -> (
+      match List.filter (generated_as "constructor-setter") tops with
+      | setter :: _ -> (
+          match Surface_print.print_top setter with
+          | Ok printed -> Alcotest.(check string) "setter prints nothing" "" printed
+          | Error diagnostics -> fail_diags "print setter" diagnostics)
+      | [] -> Alcotest.fail "no setter was generated")
 
 let expect_lowering_error label ~code ~span source =
   match Surface_lower.lower_tops (parse source) with
@@ -661,6 +759,9 @@ let suite =
     Alcotest.test_case "ineligible labels generate no accessor" `Quick
       test_ineligible_labels_generate_nothing;
     Alcotest.test_case "declaration-time label validation" `Quick test_label_validation;
+    Alcotest.test_case "generated setters match kernel twins" `Quick
+      test_generated_setters_match_kernel_twins;
+    Alcotest.test_case "setter eligibility, collisions, and printing" `Quick test_setter_rules;
     Alcotest.test_case "definition forms" `Quick test_definition_forms;
     Alcotest.test_case "signature adjacency" `Quick test_signature_adjacency;
     Alcotest.test_case "SCC grouping and resolution" `Quick test_scc_grouping_and_resolution;
