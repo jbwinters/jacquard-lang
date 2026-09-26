@@ -1308,7 +1308,12 @@ let install_eval (ctx : Eval.ctx) : (unit, Diag.t list) result =
               match Kernel.expr_of_form payload with
               | Error ds -> Error (Runtime_err.Eval_error (diags_msg ds))
               | Ok e -> (
-                  match Resolve.resolve_expr (Store.names_view (Eval.store ctx)) e with
+                  let resolved =
+                    match Eval.code_resolver ctx with
+                    | Some resolve -> resolve e
+                    | None -> Resolve.resolve_expr (Store.names_view (Eval.store ctx)) e
+                  in
+                  match resolved with
                   | Error ds -> Error (Runtime_err.Eval_error (diags_msg ds))
                   | Ok e -> (
                       match Check.make_ctx (Eval.store ctx) with

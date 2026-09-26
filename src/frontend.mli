@@ -84,13 +84,16 @@ val walk :
 val walk_tops :
   ?origin:string ->
   ?install:installation ->
+  ?names:Resolve.names ->
   ?before_resolve:(Kernel.top -> (unit, Diag.t list) result) ->
   ?on_resolved:(Kernel.top -> Diag.t list -> (unit, Diag.t list) result) ->
   ?on_installed:(Kernel.decl -> Canon.decl_hashes -> (unit, Diag.t list) result) ->
   Store.t ->
   Kernel.top list ->
   (unit, Diag.t list) result
-(** [walk_tops store tops] is {!walk} over already validated tops. *)
+(** [walk_tops store tops] is {!walk} over already validated tops. With [names], every top resolves
+    against that view instead of the store's current public names; the view must read the store live
+    if later tops are to see earlier installations. *)
 
 val resolve_source_tops :
   syntax:syntax ->
@@ -215,3 +218,10 @@ val check :
     to [on_checked] with the session's checker, which is borrowed for the duration of the callback;
     declarations are installed in the scratch store only after [on_checked] accepts them. A damaged
     surface source returns the recovery report instead. The first failure is returned. *)
+
+(** {1 Authority} *)
+
+val granted_effects : Store.t -> string list -> Hash.t list
+(** [granted_effects store allows] is the effect identities that the root grants [allows] (the
+    [--allow] names) discharge: each named effect, [ConsoleInput] with [console], and the scheduler
+    infrastructure effects, which are always discharged by the runtime. *)
