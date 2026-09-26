@@ -12,6 +12,13 @@ val make_ctx : Store.t -> ctx
 val store : ctx -> Store.t
 (** [store ctx] returns the backing store used for declaration and name lookup. *)
 
+val code_resolver : ctx -> (Kernel.expr -> (Kernel.expr, Diag.t list) result) option
+
+val set_code_resolver : ctx -> (Kernel.expr -> (Kernel.expr, Diag.t list) result) -> unit
+(** [set_code_resolver ctx resolve] makes [eval-code] resolve every payload with [resolve] instead
+    of the store's public names, so a caller that restricts what client code may name (a project's
+    visibility) applies the same restriction to dynamic code. *)
+
 val fresh_audit_run_id : ctx -> Hash.t
 (** [fresh_audit_run_id ctx] mints a deterministic identity in [ctx]'s private Audit owner
     namespace. It is exposed only to trusted prelude wiring. *)

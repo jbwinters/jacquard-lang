@@ -32,8 +32,8 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1090`
-- Cram transcript files: `67`
+- Alcotest/QCheck cases: `1092`
+- Cram transcript files: `68`
 - Documentation examples: `34` named examples across `8` documents
 
 The development suite also includes corpus goldens, release-manifest checks,
@@ -434,5 +434,17 @@ composed separately over the frozen library, and only the tests an entry's own
 units bind are discovered. Declared grants are compared with checked authority
 (W1700, or E1730 under `--strict-grants`) and never granted. Unit paths are
 contained, regular, bounded and listed once. `test/cli/project-local.t` covers
-each refusal and location independence, bringing the current source inventory
-to `1090 / 67 / 34`.
+each refusal and location independence, bringing the source inventory to
+`1090 / 67 / 34`.
+
+Projects then depend on one another. Each library in the graph is composed
+dependency-first into one store and resolved in its own view: its bindings,
+its direct dependencies' export projections, and the prelude. Private names
+(E1705) and private identities (E1709) are refused, in client code and in
+`eval-code` payloads alike. A dependency is pinned by its `project-context-v1`
+identity. `jacquard project pin` writes the pins atomically after rechecking
+every file it read (E1733), and every build compares them (E1710, transitive
+E1712). `test/cli/project-deps.t` covers two libraries with private helpers,
+pins and their change reports, and each graph refusal.
+`test/test_project_frontend.ml` covers pin stability and the concurrent-edit
+refusal. Together they bring the current source inventory to `1092 / 68 / 34`.

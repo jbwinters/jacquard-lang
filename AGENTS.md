@@ -151,9 +151,10 @@ When adding valid corpus files, regenerate the golden hashes with
   `demos/request-validation/`.
 - Local projects (PKG.1, design `docs/designs/project-structure.md`): the
   `project.jqd` reader and validator `src/project_manifest.mli`, the composing
-  frontend `src/project_frontend.mli`, `jacquard project check|run|test|fmt`;
-  `test/test_project_manifest.ml`, `test/cli/project-manifest.t`,
-  `test/cli/project-local.t`.
+  frontend `src/project_frontend.mli`, `jacquard project check|run|test|pin|interface|fmt`;
+  `test/test_project_manifest.ml`, `test/test_project_frontend.ml`,
+  `test/cli/project-manifest.t`, `test/cli/project-local.t`,
+  `test/cli/project-deps.t`.
 - Dist and inference: `prelude/06-dist.jqd`, `prelude/13-dist-lib.jqd`,
   `src/infer_dist.ml`, `test/test_infer.ml`.
 - Warp: `prelude/15-warp.jqd`, `prelude/16-gen.jqd`, `src/warp.ml`,

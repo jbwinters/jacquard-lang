@@ -3189,7 +3189,7 @@ let project_run_cmd project prelude entry_name allows seed =
                   run_program ~store ~ctx:(Project_frontend.eval_ctx session)
                     ~allows ~seed ~infer_cache:None ~dry_run:false ~schedule_record:None
                     ~requested_mode:None ~walk:(fun ~on_expr ->
-                      Frontend.walk_tops store tops ~on_resolved:(fun top _warnings ->
+                      Project_frontend.walk_entry session tops ~on_resolved:(fun top _warnings ->
                           match top with Kernel.Expr e -> on_expr e | Kernel.Decl _ -> Ok ())))))
 
 let project_test_cmd project prelude entry_name allows seed samples exhaustive budget cache_dir
@@ -3250,6 +3250,44 @@ let project_test_cmd project prelude entry_name allows seed samples exhaustive b
               let code = run_entry entry in
               if status = ok then code else status)
             ok entries)
+
+let project_pin_cmd project prelude only dry_run =
+  with_project project (fun path _manifest ->
+      match
+        Project_frontend.open_graph ~pinning:true ~prelude_dir:(prelude_dir_of prelude)
+          ~root:(fresh_check_root ()) path
+      with
+      | Error ds -> print_diags ds
+      | Ok (session, graph) -> (
+          match Project_frontend.plan_pins session graph ~only with
+          | Error ds -> print_diags ds
+          | Ok plans -> (
+              List.iter
+                (fun (plan : Project_frontend.pin_plan) ->
+                  let old =
+                    match plan.old_pin with Some h -> Hash.to_hex h | None -> "unpinned"
+                  in
+                  if plan.old_pin = Some plan.new_pin then
+                    Printf.printf "%s: %s (unchanged)\n%!" plan.alias old
+                  else
+                    Printf.printf "%s: %s -> %s%s\n%!" plan.alias old (Hash.to_hex plan.new_pin)
+                      (match plan.changes with Some c -> " (" ^ c ^ ")" | None -> ""))
+                plans;
+              if dry_run then ok
+              else
+                match Project_frontend.write_pins session graph plans with
+                | Error ds -> print_diags ds
+                | Ok () -> ok)))
+
+let project_interface_cmd project prelude =
+  with_loaded_project project (fun loaded ->
+      match open_project_library ~prelude loaded with
+      | Error ds -> print_diags ds
+      | Ok session ->
+          Printf.printf "context %s\n%s%!"
+            (Hash.to_hex (Project_frontend.context_identity session))
+            (Interface.serialize (Project_frontend.interface session));
+          ok)
 
 let project_fmt_cmd project write =
   with_project project (fun path manifest ->
@@ -3316,10 +3354,32 @@ let project_t =
                   "Hermetic result cache directory (default: .jacquard/test-cache in the project).")
         $ no_cache_arg)
   in
+  let pin =
+    Cmd.v
+      (Cmd.info "pin"
+         ~doc:
+           "Compute each direct dependency's context identity and write it as the dependency's \
+            (pin ...), atomically. Dependency manifests are never edited.")
+      Term.(
+        const (configure_diagnostics project_pin_cmd)
+        $ diagnostic_format_arg $ project_arg $ prelude_arg
+        $ Arg.(
+            value & opt_all string []
+            & info [ "dep" ] ~docv:"ALIAS" ~doc:"Pin only this dependency (repeatable).")
+        $ Arg.(value & flag & info [ "dry-run" ] ~doc:"Print the plan without writing anything."))
+  in
+  let interface =
+    Cmd.v
+      (Cmd.info "interface"
+         ~doc:"Print the project's context identity and the interface-v1 of its exports.")
+      Term.(
+        const (configure_diagnostics project_interface_cmd)
+        $ diagnostic_format_arg $ project_arg $ prelude_arg)
+  in
   Cmd.group
     (Cmd.info "project"
        ~doc:"Local multi-file projects (project.jqd; docs/designs/project-structure.md).")
-    [ check; run; test; fmt ]
+    [ check; run; test; pin; interface; fmt ]
 
 let main =
   Cmd.group
