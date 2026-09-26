@@ -152,8 +152,8 @@ Quoted code stores the elaboration:
   $ jacquard run quoted.jac
   "(match (app (surface-ref-v0 con ok) (lit 1)) (clause (pcon ok (pvar x)) (app (surface-ref-v0 con ok) (var x))) (clause (pcon err (pvar error)) (app (surface-ref-v0 con err) (var error))))"
 
-Like `if` and list literals, `try` names the constructors `Ok` and `Err`, so a
-file that declares its own `Err` rebinds them (D77):
+Like `if` and list literals, `try` binds the prelude's `Ok` and `Err` by
+identity (SX.31), so a file that declares its own `Err` cannot capture it:
 
   $ cat > shadow.jac <<'J'
   > good() = Ok(1)
@@ -164,9 +164,8 @@ file that declares its own `Err` rebinds them (D77):
   > }
   > f()
   > J
-  $ jacquard run shadow.jac 2>&1 | grep -o "error\[E0801\].*\|Cause: .*"
-  error[E0801]: Types do not agree
-  Cause: match pattern: expected result a int, got other (type mismatch)
+  $ jacquard run shadow.jac
+  ok(1)
 
 `try` is only a block item, never the last one, and never on `let rec`:
 
