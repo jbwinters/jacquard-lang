@@ -80,6 +80,10 @@ let test_refusals () =
   check "wrong head" [ "E1700" ] "(project-v2 (name \"p\") (requires (core \"0.2\")))";
   check "missing requires" [ "E1700" ] "(project-v1 (name \"p\"))";
   check "bad core version" [ "E1700" ] "(project-v1 (name \"p\") (requires (core \"0.2.1\")))";
+  check "an unknown requirement beside a valid one is itemized" [ "E1701" ]
+    "(project-v1 (name \"p\") (requires (core \"0.2\") (python \"3\")))";
+  check "duplicate core requirement" [ "E1702" ]
+    "(project-v1 (name \"p\") (requires (core \"0.2\") (core \"0.3\")))";
   check "unknown field" [ "E1701" ] (with_fields "(license \"MIT\")");
   check "unknown dependency field" [ "E1701" ]
     (with_fields "(deps (dep (as d) (path \"../d\") (version \"1\")))");
@@ -101,6 +105,8 @@ let test_refusals () =
   check "oversized manifest" [ "E1703" ] (String.make (Project_manifest.max_bytes + 1) ' ');
   check "oversized text" [ "E1703" ]
     (Printf.sprintf "(project-v1 (name %S) (requires (core \"0.2\")))" (String.make 2000 'x'));
+  check "oversized metadata key" [ "E1703" ]
+    (with_fields (Printf.sprintf "(metadata (%s \"v\"))" (String.make 2000 'k')));
   check "too many units" [ "E1703" ]
     (with_fields
        (Printf.sprintf "(units %s)"

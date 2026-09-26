@@ -172,8 +172,15 @@ let parse_core acc (owner : Form.t) args =
         | _ -> None)
     | _ -> None
   in
-  match subforms acc ~owner "(requires ...)" args with
-  | [ ({ Form.head = "core"; args = [ v ]; _ } as core) ] -> (
+  let forms = subforms acc ~owner "(requires ...)" args in
+  List.iter
+    (fun (f : Form.t) ->
+      if f.head <> "core" then
+        report acc ?span:(span_of f) "E1701"
+          "unknown requirement (%s ...); v1 knows only (core ...)" f.head)
+    forms;
+  match List.filter (fun (f : Form.t) -> f.head = "core") forms with
+  | [ ({ Form.args = [ v ]; _ } as core) ] -> (
       match text acc ~owner:core "the Core requirement" v with
       | Some s -> (
           match parse_version s with
@@ -183,13 +190,14 @@ let parse_core acc (owner : Form.t) args =
                 s;
               None)
       | None -> None)
-  | [ ({ Form.head; _ } as f) ] when head <> "core" ->
-      report acc ?span:(span_of f) "E1701" "unknown requirement (%s ...); v1 knows only (core ...)"
-        head;
+  | [ core ] ->
+      report acc ?span:(span_of core) "E1700" "(core ...) takes one text version, \"MAJOR.MINOR\"";
       None
-  | _ ->
-      report acc ?span:(span_of owner) "E1700"
-        "(requires ...) must be exactly (requires (core \"MAJOR.MINOR\"))";
+  | [] ->
+      report acc ?span:(span_of owner) "E1700" "(requires ...) must contain (core \"MAJOR.MINOR\")";
+      None
+  | _ :: duplicate :: _ ->
+      report acc ?span:(span_of duplicate) "E1702" "(core ...) appears more than once";
       None
 
 let parse_exports acc (owner : Form.t) args =
@@ -313,6 +321,9 @@ let parse_metadata acc (owner : Form.t) args =
     List.filter_map
       (fun (f : Form.t) ->
         match f.args with
+        | [ _ ] when String.length f.head > max_text ->
+            report acc ?span:(span_of f) "E1703" "a metadata key is longer than %d bytes" max_text;
+            None
         | [ v ] -> Option.map (fun v -> (f.head, v)) (text acc ~owner:f "a metadata value" v)
         | _ ->
             report acc ?span:(span_of f) "E1700" "metadata (%s ...) takes one text value" f.head;
@@ -517,7 +528,8 @@ let locate ?project ~cwd ?home () =
       up cwd
 
 let read path =
-  match Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 with
+  (* non-blocking, so opening a FIFO cannot wait for a writer; the kind is checked before reading *)
+  match Unix.openfile path [ Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC ] 0 with
   | exception Unix.Unix_error (e, _, _) ->
       Error [ diag "E1735" (Printf.sprintf "cannot open %s: %s" path (Unix.error_message e)) ]
   | fd ->
@@ -526,6 +538,7 @@ let read path =
         (fun () ->
           match (Unix.fstat fd).Unix.st_kind with
           | Unix.S_REG ->
+              Unix.clear_nonblock fd;
               let buffer = Bytes.create (max_bytes + 1) in
               let rec fill off =
                 if off > max_bytes then off
@@ -562,7 +575,14 @@ let write_canonical path t =
         in
         out 0;
         Unix.fsync fd);
-    Unix.rename temp path
+    Unix.rename temp path;
+    (* make the rename itself durable; a directory that cannot be synced is not an error *)
+    match Unix.openfile dir [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 with
+    | exception Unix.Unix_error _ -> ()
+    | dfd ->
+        Fun.protect
+          ~finally:(fun () -> Unix.close dfd)
+          (fun () -> try Unix.fsync dfd with Unix.Unix_error _ -> ())
   with
   | () -> Ok ()
   | exception Unix.Unix_error (e, _, _) ->
