@@ -1,9 +1,10 @@
 The four everyday applications (dice coach, picnic planner, rota optimizer,
 formula notebook) are maintained under demos/applications as acceptance
 fixtures for compiler and library work. Their sources are synthetic, their
-provenance is a SHA-256 manifest, and the launcher assembles each entry point
-the way the applications' own instructions do. This routine lane pins the
-baseline: every demo transcript equals the recorded EXAMPLE.txt under the
+provenance is a SHA-256 manifest, and each is a local project (project.jqd)
+that the launcher drives through `jacquard project`. They run from a
+dereferenced copy, since a project's units must resolve inside its directory.
+This routine lane pins the baseline: every demo transcript equals the recorded EXAMPLE.txt under the
 interpreter and natively, real interactive sessions agree between engines, the
 demo manifests need only Console, and each Warp suite passes with sampled
 properties. The exhaustive property lane is `dune build @applications-exhaustive`.
@@ -11,7 +12,8 @@ properties. The exhaustive property lane is `dune build @applications-exhaustive
   $ export JACQUARD_PRELUDE=$PWD/../../prelude
   $ export TMPDIR=$PWD/.scratch/tmp
   $ mkdir -p "$TMPDIR" native
-  $ A=../../demos/applications
+  $ mkdir demos && cp -RL ../../demos/applications ../../demos/lib demos/ && chmod -R u+w demos
+  $ A=$PWD/demos/applications
   $ (cd "$A" && sha256sum -c MANIFEST.sha256 | grep -vc ': OK$')
   0
   [1]
@@ -110,3 +112,45 @@ delivered; these blocks pin that the generated accessors could replace them.
   $ jac run notebook-accessors.jac
   (nil, nil)
   (0, nil)
+
+Project composition preserves every identity: each entry's bindings, with its
+dependencies', hash exactly as the concatenation the applications used to be
+assembled from:
+
+  $ same() { # project entry files...
+  >   p=$1; e=$2; shift 2; cat "$@" > assembled.jac
+  >   jac hash assembled.jac | grep ':' | sed 's/^[0-9]*://' | sort -u > concatenated.txt
+  >   { jac project hash --project "$A/$p" $e; [ -f "$A/$p/model.jac" ] && [ "$p" != rota-optimizer ] \
+  >       && [ "$p" != formula-notebook ] && jac project hash --project "$A/shared"; } \
+  >     | cut -d' ' -f2- | sort -u > composed.txt
+  >   cmp -s concatenated.txt composed.txt && echo "identical: $p $e ($(wc -l < composed.txt) bindings)"; }
+  $ same dice-coach demo "$A/shared/display.jac" "$A/dice-coach/model.jac" "$A/dice-coach/demo.jac"
+  identical: dice-coach demo (33 bindings)
+  $ same picnic-planner suite "$A/shared/display.jac" "$A/picnic-planner/model.jac" "$A/picnic-planner/tests.jac"
+  identical: picnic-planner suite (49 bindings)
+  $ R="$A/rota-optimizer"; same rota-optimizer suite "$R/model.jac" "$R/fixtures.jac" "$R/report.jac" "$R/tests.jac" "$R/interaction-tests.jac"
+  identical: rota-optimizer suite (114 bindings)
+  $ N="$A/formula-notebook"; same formula-notebook demo "$N/syntax.jac" "$N/model.jac" "$N/commands.jac" "$N/application.jac" "$N/workbook.jac" "$N/demo.jac"
+  identical: formula-notebook demo (170 bindings)
+
+The display helpers the applications do not use stay private to `display`:
+by name, by hash, and through eval:
+
+  $ cp "$A/dice-coach/demo.jac" demo.bak
+  $ echo 'display.real(1.5)' > "$A/dice-coach/demo.jac"
+  $ jac project run --project "$A/dice-coach" demo 2>&1 | grep -o 'error\[E1705\].*' | head -1
+  error[E1705]: A name is not visible in this project.
+  $ H=$(jac project hash --project "$A/shared" | grep ' display.floor-between ' | cut -d' ' -f3)
+  $ printf '#%s:term(1, 2, 3)\n' "$H" > "$A/dice-coach/demo.jac"
+  $ jac project run --project "$A/dice-coach" demo 2>&1 | grep -o 'error\[E1709\]' | head -1
+  error[E1709]
+  $ echo '`op:eval-code`(quote { display.real(1.5) })' > "$A/dice-coach/demo.jac"
+  $ jac project run --project "$A/dice-coach" demo --allow eval 2>&1 | grep -o 'E1705' | head -1
+  E1705
+  $ cp demo.bak "$A/dice-coach/demo.jac"
+
+Nothing is assembled with cat any more:
+
+  $ grep -c '\bcat\b' "$A/run.sh" "$A/README.md" | cut -d: -f2
+  0
+  0

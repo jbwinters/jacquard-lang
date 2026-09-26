@@ -1452,3 +1452,10 @@ let bundle_entry session (entry : Project_manifest.entry) =
             | Error _ as error -> error)
       in
       install [] steps
+
+let library_bindings s =
+  List.sort compare
+    (Hashtbl.fold
+       (fun name entries acc ->
+         List.map (fun (e : Resolve.entry) -> ((name, e.kind), e.hash)) entries @ acc)
+       (root_composed s).local [])

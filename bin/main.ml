@@ -2682,6 +2682,67 @@ let export_cmd file out prelude syntax =
 
 (* --- build (native compilation, docs/native-plan.md task 67) --- *)
 
+(* The native back half shared by build and project build: bake each checked top expression's
+   warnings and manifest with a run-alike checker, then compile and link. *)
+let native_build ~store ~prelude ~cache_root ~out tops =
+  let baked =
+    match Frontend.make_checker store with
+    | Error _ -> None
+    | Ok cctx2 ->
+        List.fold_left
+          (fun acc e ->
+            Option.bind acc (fun acc ->
+                match Check.check_top cctx2 (Kernel.Expr e) with
+                | Error _ -> None
+                | Ok { Check.warnings; row; _ } ->
+                    let r = Types.repr_row (Option.value row ~default:Types.empty_row) in
+                    let msgs =
+                      Check.manifest_errors cctx2 ~grantable:Prelude.grantable_names ~granted:[] r
+                    in
+                    let manifest =
+                      List.map2 (fun h d -> (h, Diag.to_string d)) r.Types.effects msgs
+                    in
+                    Some ((e, List.map Diag.to_string warnings, manifest) :: acc)))
+          (Some []) tops
+  in
+  match baked with
+  | None ->
+      print_diags
+        [ cli_diagnostic ~code:"E1103" "The native manifest pass diverged from the load pass." ]
+  | Some rev_baked -> (
+      match
+        Jacquard_native.Build.build ~store ~tops:(List.rev rev_baked) ~cache_root
+          ~prelude_dir:(prelude_dir_of prelude) ~out
+      with
+      | Ok n ->
+          Printf.printf "native: compiled %d unit(s)\n" n;
+          ok
+      | Error (`Refused rs) ->
+          List.iter
+            (fun (r : Jacquard_native.Compile.refusal) ->
+              (* eval is policy (E1102): dynamically loaded code runs at
+                                       the interpreter tier; everything else is E1101, a
+                                       not-yet-compiled surface *)
+              let what = r.Jacquard_native.Compile.what in
+              let sub = "requires the interpreter tier" in
+              let is_eval =
+                let n = String.length sub in
+                let rec go i =
+                  i + n <= String.length what && (String.sub what i n = sub || go (i + 1))
+                in
+                go 0
+              in
+              let code = if is_eval then "E1102" else "E1101" in
+              let cause =
+                if is_eval then r.Jacquard_native.Compile.where ^ " " ^ what
+                else
+                  "Not yet compilable in native v1: " ^ r.Jacquard_native.Compile.where ^ " " ^ what
+              in
+              print_diagnostic (cli_diagnostic ~code cause))
+            rs;
+          exit_diags
+      | Error (`Toolchain m) -> print_diags [ cli_diagnostic ~code:"E1103" m ])
+
 let build_cmd file out prelude dry_run syntax =
   if dry_run then begin
     (* the consent sheet is an interpreter run: the dry handlers wrap live
@@ -2721,80 +2782,14 @@ let build_cmd file out prelude dry_run syntax =
                 print_warnings warnings;
                 match check_forms resolved_tops with
                 | Error ds -> print_diags ds
-                | Ok () -> (
+                | Ok () ->
                     (* warnings and manifests are harvested from a SECOND, run-alike
                          checker context that checks only the top expressions: the loader's
                          eager decl checking seeds Check's origin map in a different order
                          than run_cmd's lazy checking, and the E0814 origins
                          (`performed via ...`) must match run byte-for-byte *)
-                    let baked =
-                      match Frontend.make_checker store with
-                      | Error _ -> None
-                      | Ok cctx2 ->
-                          List.fold_left
-                            (fun acc e ->
-                              Option.bind acc (fun acc ->
-                                  match Check.check_top cctx2 (Kernel.Expr e) with
-                                  | Error _ -> None
-                                  | Ok { Check.warnings; row; _ } ->
-                                      let r =
-                                        Types.repr_row (Option.value row ~default:Types.empty_row)
-                                      in
-                                      let msgs =
-                                        Check.manifest_errors cctx2
-                                          ~grantable:Prelude.grantable_names ~granted:[] r
-                                      in
-                                      let manifest =
-                                        List.map2
-                                          (fun h d -> (h, Diag.to_string d))
-                                          r.Types.effects msgs
-                                      in
-                                      Some ((e, List.map Diag.to_string warnings, manifest) :: acc)))
-                            (Some []) (List.rev !tops)
-                    in
-                    match baked with
-                    | None ->
-                        print_diags
-                          [
-                            cli_diagnostic ~code:"E1103"
-                              "The native manifest pass diverged from the load pass.";
-                          ]
-                    | Some rev_baked -> (
-                        match
-                          Jacquard_native.Build.build ~store ~tops:(List.rev rev_baked)
-                            ~prelude_dir:(prelude_dir_of prelude) ~out
-                        with
-                        | Ok n ->
-                            Printf.printf "native: compiled %d unit(s)\n" n;
-                            ok
-                        | Error (`Refused rs) ->
-                            List.iter
-                              (fun (r : Jacquard_native.Compile.refusal) ->
-                                (* eval is policy (E1102): dynamically loaded code runs at
-                                       the interpreter tier; everything else is E1101, a
-                                       not-yet-compiled surface *)
-                                let what = r.Jacquard_native.Compile.what in
-                                let sub = "requires the interpreter tier" in
-                                let is_eval =
-                                  let n = String.length sub in
-                                  let rec go i =
-                                    i + n <= String.length what
-                                    && (String.sub what i n = sub || go (i + 1))
-                                  in
-                                  go 0
-                                in
-                                let code = if is_eval then "E1102" else "E1101" in
-                                let cause =
-                                  if is_eval then r.Jacquard_native.Compile.where ^ " " ^ what
-                                  else
-                                    "Not yet compilable in native v1: "
-                                    ^ r.Jacquard_native.Compile.where ^ " " ^ what
-                                in
-                                print_diagnostic (cli_diagnostic ~code cause))
-                              rs;
-                            exit_diags
-                        | Error (`Toolchain m) -> print_diags [ cli_diagnostic ~code:"E1103" m ]))))
-        )
+                    native_build ~store ~prelude ~cache_root:".jacquard-native" ~out
+                      (List.rev !tops))))
 
 (* --- host worker (HB.2c) --- *)
 
@@ -3363,6 +3358,110 @@ let project_test_cmd project prelude bundle entry_name allows seed samples exhau
       project_test_source project prelude entry_name allows seed samples exhaustive budget cache_dir
         no_cache
 
+(* project build: a native binary for a (native) run entry. Each build compiles in a fresh
+   directory under the project's .jacquard/build/, renamed over the entry's previous build only on
+   success, so concurrent builds never share object or prog_main paths. *)
+let project_build_cmd project prelude entry_name out =
+  with_loaded_project project (fun loaded ->
+      match Project_frontend.find_entry_of_kind loaded entry_name Project_manifest.Run with
+      | Error ds -> print_diags ds
+      | Ok { Project_manifest.native = false; _ } ->
+          print_diags
+            [
+              cli_diagnostic ~code:"E1718" ~hint:"add (native) to the entry in project.jqd"
+                (Printf.sprintf "run entry `%s` is not declared (native)" entry_name);
+            ]
+      | Ok entry -> (
+          match open_project_library ~on_lint:print_diagnostic ~prelude loaded with
+          | Error ds -> print_diags ds
+          | Ok session -> (
+              let store = Project_frontend.store session
+              and checker = Project_frontend.checker session in
+              let expressions = ref [] in
+              let walked =
+                Result.bind (Project_frontend.entry_tops ~on_lint:print_diagnostic session entry)
+                  (fun tops ->
+                    Project_frontend.walk_entry session tops ~on_resolved:(fun top _ ->
+                        Result.map
+                          (fun _ ->
+                            match top with
+                            | Kernel.Expr e -> expressions := e :: !expressions
+                            | Kernel.Decl _ -> ())
+                          (Check.check_top checker top)))
+              in
+              match walked with
+              | Error ds -> print_diags ds
+              | Ok () ->
+                  let builds = Filename.concat (Filename.concat loaded.dir ".jacquard") "build" in
+                  let final = Filename.concat builds entry.ename in
+                  let fresh =
+                    Filename.concat builds
+                      (Printf.sprintf ".%s.%d.tmp" entry.ename (Unix.getpid ()))
+                  in
+                  let rec mkdir_p dir =
+                    if not (Sys.file_exists dir) then begin
+                      mkdir_p (Filename.dirname dir);
+                      try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+                    end
+                  in
+                  mkdir_p fresh;
+                  let status =
+                    native_build ~store ~prelude ~cache_root:fresh ~out (List.rev !expressions)
+                  in
+                  (if status = ok then begin
+                     Out_channel.with_open_bin (Filename.concat fresh "recipe.jqd") (fun oc ->
+                         Printf.fprintf oc
+                           "(build-recipe (core %S) (cc %S) (cflags %S) (entry %s))\n"
+                           Version.version
+                           (Option.value (Sys.getenv_opt "CC") ~default:"cc")
+                           (Option.value (Sys.getenv_opt "JACQUARD_NATIVE_CFLAGS") ~default:"")
+                           entry.ename);
+                     (try rm_rf final with Sys_error _ -> ());
+                     Unix.rename fresh final
+                   end
+                   else try rm_rf fresh with Sys_error _ -> ());
+                  status)))
+
+(* project hash: the identity of every binding the library (and, with ENTRY, that entry)
+   introduces, one "KIND NAME HASH" line each, sorted *)
+let project_hash_cmd project prelude entry_name =
+  with_loaded_project project (fun loaded ->
+      match open_project_library ~prelude loaded with
+      | Error ds -> print_diags ds
+      | Ok session -> (
+          let kind_word = function
+            | Resolve.KTerm -> "term"
+            | Resolve.KCon -> "con"
+            | Resolve.KOp -> "op"
+            | Resolve.KType -> "type"
+            | Resolve.KEffect -> "effect"
+          in
+          let entry_bindings =
+            match entry_name with
+            | None -> Ok []
+            | Some name ->
+                Result.bind (Project_frontend.find_entry loaded name) (fun entry ->
+                    Result.bind (Project_frontend.entry_tops session entry) (fun tops ->
+                        let acc = ref [] in
+                        Result.map
+                          (fun () -> !acc)
+                          (Project_frontend.walk_entry session tops
+                             ~on_installed:(fun decl hashes ->
+                               acc :=
+                                 (Diff.source_side (Project_frontend.store session)
+                                    [ (decl, hashes) ])
+                                   .Diff.bindings @ !acc;
+                               Ok ()))))
+          in
+          match entry_bindings with
+          | Error ds -> print_diags ds
+          | Ok extra ->
+              List.iter
+                (fun ((name, kind), hash) ->
+                  Printf.printf "%s %s %s\n" (kind_word kind) name (Hash.to_hex hash))
+                (List.sort_uniq compare (Project_frontend.library_bindings session @ extra));
+              ok))
+
 let project_pin_cmd project prelude only dry_run =
   with_project project (fun path _manifest ->
       match
@@ -3502,6 +3601,28 @@ let project_t =
             & info [ "dep" ] ~docv:"ALIAS" ~doc:"Pin only this dependency (repeatable).")
         $ Arg.(value & flag & info [ "dry-run" ] ~doc:"Print the plan without writing anything."))
   in
+  let build =
+    Cmd.v
+      (Cmd.info "build"
+         ~doc:
+           "Compile a (native) run entry to a standalone binary. Each build compiles in a fresh \
+            directory, kept as .jacquard/build/ENTRY only when it succeeds.")
+      Term.(
+        const (configure_diagnostics project_build_cmd)
+        $ diagnostic_format_arg $ project_arg $ prelude_arg $ entry_pos
+        $ Arg.(required & opt (some string) None & info [ "o"; "output" ] ~docv:"OUT"))
+  in
+  let hash =
+    Cmd.v
+      (Cmd.info "hash"
+         ~doc:
+           "Print the identity of every binding the library introduces (with ENTRY, that entry's \
+            too), one KIND NAME HASH line each.")
+      Term.(
+        const (configure_diagnostics project_hash_cmd)
+        $ diagnostic_format_arg $ project_arg $ prelude_arg
+        $ Arg.(value & pos 0 (some string) None & info [] ~docv:"ENTRY"))
+  in
   let bundle =
     Cmd.v
       (Cmd.info "bundle"
@@ -3524,7 +3645,7 @@ let project_t =
   Cmd.group
     (Cmd.info "project"
        ~doc:"Local multi-file projects (project.jqd; docs/designs/project-structure.md).")
-    [ check; run; test; pin; interface; bundle; fmt ]
+    [ check; run; test; build; hash; pin; interface; bundle; fmt ]
 
 let main =
   Cmd.group

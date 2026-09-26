@@ -1,0 +1,7 @@
+(project-v1
+  (name "display")
+  (requires (core "0.2"))
+  (namespace display)
+  (units "display.jac")
+  (exports (term display.fixed3) (term display.percent))
+  (entries (test display (units "display-tests.jac"))))
