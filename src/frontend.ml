@@ -385,3 +385,37 @@ let check ?origin ?(on_parsed = ignore) ?(on_resolved = fun _ _ -> ())
         (Checked
            (Checked.seal ~file ~source ~prelude:(Store.prelude_manifest store)
               ~published:(List.rev !published) ~interface tops))
+
+(* --- authority --- *)
+
+let granted_effects store allows =
+  let explicit =
+    List.filter_map
+      (fun name ->
+        match Store.lookup_kind store (String.lowercase_ascii name) Resolve.KEffect with
+        | Some { Resolve.hash; _ } -> Some hash
+        | _ -> None)
+      allows
+  in
+  let exact_scheduler_effect name expected =
+    match Store.lookup_kind store name Resolve.KEffect with
+    | Some { Resolve.hash; _ } when String.equal (Hash.to_hex hash) expected -> Some hash
+    | Some _ | None -> None
+  in
+  let scheduler_infrastructure =
+    List.filter_map Fun.id
+      [
+        exact_scheduler_effect "async" Concurrency_contract.async_effect_hash;
+        exact_scheduler_effect "channel" Channel_contract.channel_effect_hash;
+      ]
+  in
+  (* APP.7: the console grant is the terminal authority, so it also covers the separately
+     declared ConsoleInput effect (Prelude.install_console installs both root handlers) *)
+  let console_input =
+    if List.exists (fun name -> String.lowercase_ascii name = "console") allows then
+      match Store.lookup_kind store "console-input" Resolve.KEffect with
+      | Some { Resolve.hash; _ } -> [ hash ]
+      | None -> []
+    else []
+  in
+  explicit @ console_input @ scheduler_infrastructure

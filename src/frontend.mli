@@ -215,3 +215,10 @@ val check :
     to [on_checked] with the session's checker, which is borrowed for the duration of the callback;
     declarations are installed in the scratch store only after [on_checked] accepts them. A damaged
     surface source returns the recovery report instead. The first failure is returned. *)
+
+(** {1 Authority} *)
+
+val granted_effects : Store.t -> string list -> Hash.t list
+(** [granted_effects store allows] is the effect identities that the root grants [allows] (the
+    [--allow] names) discharge: each named effect, [ConsoleInput] with [console], and the scheduler
+    infrastructure effects, which are always discharged by the runtime. *)
