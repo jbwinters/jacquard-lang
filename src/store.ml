@@ -413,7 +413,13 @@ let put_decl ?origin t (decl : Kernel.decl) : (Canon.decl_hashes, Diag.t list) r
              hash-equal definition group lists its members in a different order, and indexing
              the incoming order would make [locate] return another member's body. *)
           let persisted =
-            if Sys.file_exists path then load_object ~file:path (read_file path)
+            if Sys.file_exists path then
+              match load_object ~file:path (read_file path) with
+              | Ok _ as loaded -> loaded
+              | Error ds ->
+                  Error
+                    (diagnostic ~code:"E0603" ("Corrupt object " ^ Filename.basename path ^ ".")
+                    :: ds)
             else begin
               let oc = open_out_bin path in
               output_string oc (Printer.print_all [ Kernel.decl_to_form decl ]);

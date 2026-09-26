@@ -32,7 +32,7 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1081`
+- Alcotest/QCheck cases: `1082`
 - Cram transcript files: `65`
 - Documentation examples: `34` named examples across `8` documents
 
@@ -386,8 +386,9 @@ Two store and identity repairs precede local projects:
 
 - **Member indexing.** `Store.put_decl` now indexes a declaration's members
   from the persisted object bytes. A permuted, hash-equal definition group
-  therefore locates each member's own body instead of the incoming order's
-  (`test/test_store.ml`).
+  therefore locates each member's own body instead of the incoming order's.
+  Re-adding over a damaged object reports the store's corrupt-object error
+  (E0603) (`test/test_store.ml`).
 - **Real literals.** They denote their `HASH_V0`-normalized value in
   expressions, literal patterns and quoted code, so hash-equal programs run
   the same numbers. Computed reals keep their IEEE sign
@@ -400,5 +401,5 @@ Two store and identity repairs precede local projects:
   group may span units. `Span.merge` never combines offsets from different
   files (`test/test_surface_compose.ml`).
 
-The new store case and the five composition cases bring the current source
-inventory to `1081 / 65 / 34`.
+The two new store cases and the five composition cases bring the current
+source inventory to `1082 / 65 / 34`.
