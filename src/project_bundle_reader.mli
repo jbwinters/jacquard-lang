@@ -3,6 +3,13 @@
 
 val version : string
 
+val reachable : Store.t -> Hash.t list -> (Hash.t, Kernel.decl) Hashtbl.t
+(** Every declaration reachable from the roots, prelude ones included; quoted data is not code, so
+    only live splices are followed. *)
+
+val eval_identities : Store.t -> Hash.t list
+(** The identities whose reference means dynamic evaluation: [eval-code] and [Eval]. *)
+
 type entry =
   | Run_entry of { name : string; steps : Hash.t list; grants : string list }
       (** generated thunks, in source order *)

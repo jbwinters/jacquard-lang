@@ -691,25 +691,31 @@ let name_refusal session (node : node) d =
           (fun (e : Resolve.entry) -> kinds = [] || List.mem e.kind kinds)
           (Option.value ~default:[] (Hashtbl.find_opt c.local name))
       in
-      let owner =
+      (* every other project that binds it, in a stable order; a direct dependency first *)
+      let owners =
         Hashtbl.fold
           (fun _ c acc ->
-            if acc <> None || String.equal c.node.project.dir node.project.dir then acc
-            else if binds c then Some c
-            else acc)
-          session.composed None
+            if String.equal c.node.project.dir node.project.dir || not (binds c) then acc
+            else c :: acc)
+          session.composed []
+        |> List.sort (fun a b ->
+            compare
+              (not (List.memq a direct), project_label a.node.project)
+              (not (List.memq b direct), project_label b.node.project))
       in
-      match owner with
-      | Some c ->
-          let why =
-            if List.exists (fun d -> d == c) direct then
-              Printf.sprintf "`%s` is private to project `%s`" name (project_label c.node.project)
-            else
-              Printf.sprintf "`%s` belongs to project `%s`, which `%s` does not depend on directly"
-                name (project_label c.node.project) (project_label node.project)
+      match owners with
+      | [] -> None
+      | c :: _ ->
+          let labels =
+            String.concat ", " (List.map (fun c -> "`" ^ project_label c.node.project ^ "`") owners)
           in
-          Some (diag ?span:(Diag.span d) "E1705" why)
-      | None -> None)
+          let why =
+            if List.memq c direct then Printf.sprintf "`%s` is private to project %s" name labels
+            else
+              Printf.sprintf "`%s` belongs to project %s, which `%s` does not depend on directly"
+                name labels (project_label node.project)
+          in
+          Some (diag ?span:(Diag.span d) "E1705" why))
   | _ -> None
 
 let map_name_refusals session node ds =

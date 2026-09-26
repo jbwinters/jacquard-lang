@@ -22,38 +22,8 @@ let diag code cause =
 
 let error code fmt = Printf.ksprintf (fun cause -> Error [ diag code cause ]) fmt
 let version = "bundle-v1"
-
-(* --- the closure --- *)
-
-(* Every declaration reachable from [roots], prelude declarations included; quoted data is not
-   code, so [Store.decl_refs] follows only live splices. *)
-let reachable store roots =
-  let seen = Hashtbl.create 256 in
-  let rec go = function
-    | [] -> ()
-    | hash :: rest -> (
-        match Store.locate store hash with
-        | Error _ -> go rest
-        | Ok { Store.decl_hash; decl; _ } ->
-            if Hashtbl.mem seen decl_hash then go rest
-            else begin
-              Hashtbl.add seen decl_hash decl;
-              go (Store.decl_refs decl @ rest)
-            end)
-  in
-  go roots;
-  seen
-
-let eval_identities store =
-  List.filter_map Fun.id
-    [
-      Option.map
-        (fun (e : Resolve.entry) -> e.hash)
-        (Store.lookup_kind store "eval-code" Resolve.KOp);
-      Option.map
-        (fun (e : Resolve.entry) -> e.hash)
-        (Store.lookup_kind store "eval" Resolve.KEffect);
-    ]
+let reachable = Project_bundle_reader.reachable
+let eval_identities = Project_bundle_reader.eval_identities
 
 (* --- paths --- *)
 
