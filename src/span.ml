@@ -20,16 +20,19 @@ let dummy =
 (** Structural equality on all fields. *)
 let equal (a : t) (b : t) = a = b
 
-(** [merge a b] spans from the earlier start to the later end; takes [a]'s file (callers merge spans
-    from a single file). *)
+(** [merge a b] spans from the earlier start to the later end of two spans in one file. Spans from
+    different files (a construct composed from several source units) are never combined, since their
+    offsets are unrelated: the result is [a], the first origin. *)
 let merge a b =
-  let min_pos p q = if p.offset <= q.offset then p else q in
-  let max_pos p q = if p.offset >= q.offset then p else q in
-  {
-    file = a.file;
-    start_pos = min_pos a.start_pos b.start_pos;
-    end_pos = max_pos a.end_pos b.end_pos;
-  }
+  if not (String.equal a.file b.file) then a
+  else
+    let min_pos p q = if p.offset <= q.offset then p else q in
+    let max_pos p q = if p.offset >= q.offset then p else q in
+    {
+      file = a.file;
+      start_pos = min_pos a.start_pos b.start_pos;
+      end_pos = max_pos a.end_pos b.end_pos;
+    }
 
 (** Renders as [file:line:col-col] on one line, [file:line:col-line:col] across lines. *)
 let to_string { file; start_pos; end_pos } =

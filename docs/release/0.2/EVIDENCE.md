@@ -32,7 +32,7 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1076`
+- Alcotest/QCheck cases: `1081`
 - Cram transcript files: `65`
 - Documentation examples: `34` named examples across `8` documents
 
@@ -393,4 +393,12 @@ Two store and identity repairs precede local projects:
   the same numbers. Computed reals keep their IEEE sign
   (`spec/serialization.md`; native gauntlet case g47).
 
-The new store case brings the current source inventory to `1076 / 65 / 34`.
+- **Source composition.** `Surface_parse.compose_units` parses several
+  source units as one program, exactly as their concatenation, while each item
+  keeps its own file. It is the composition parse mode local projects use: a
+  signature may precede its definition across a unit boundary, and a recursive
+  group may span units. `Span.merge` never combines offsets from different
+  files (`test/test_surface_compose.ml`).
+
+The new store case and the five composition cases bring the current source
+inventory to `1081 / 65 / 34`.

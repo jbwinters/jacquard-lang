@@ -104,6 +104,7 @@ let () =
       ("surface-parse-recovery", Test_surface_parse_recovery.suite);
       ("surface-decls", Test_surface_decls.suite);
       ("surface-try", Test_surface_try.suite);
+      ("surface-compose", Test_surface_compose.suite);
       ("surface-handlers-quote", Test_surface_handlers_quote.suite);
       ("surface-trivia", Test_surface_trivia.suite);
       ("surface-sugar", Test_surface_sugar.suite);
