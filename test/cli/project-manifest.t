@@ -2,8 +2,11 @@ Local project manifests (PKG.1, docs/designs/project-structure.md §3). A
 project is a directory holding project.jqd, a strict data value that is read
 and validated but never evaluated.
 
-  $ export JACQUARD_PRELUDE=../../prelude
+  $ export JACQUARD_PRELUDE=$PWD/../../prelude
   $ mkdir -p app/src && cd app && mkdir .git
+  $ printf 'type AppStatus = | AppReady\napp.solve(x) = x\n' > src/model.jac
+  $ echo '-- the report' > src/report.jac && echo '-- no tests yet' > tests.jac
+  $ echo 'println(app.solve("ready"))' > demo.jac
   $ cat > project.jqd <<'M'
   > (project-v1
   >   (metadata (license "Apache-2.0"))
@@ -19,10 +22,19 @@ Discovery finds the manifest from a subdirectory, and --project names it:
 
   $ jacquard project check
   $TESTCASE_ROOT/app/project.jqd: project-v1 manifest valid (2 units, 2 exports, 0 deps, 2 entries)
+  library: 2 declarations checked
+  entry suite (test): checked, 0 tests; requires nothing
+  entry demo (run): checked; requires console
   $ (cd src && jacquard project check)
   $TESTCASE_ROOT/app/project.jqd: project-v1 manifest valid (2 units, 2 exports, 0 deps, 2 entries)
+  library: 2 declarations checked
+  entry suite (test): checked, 0 tests; requires nothing
+  entry demo (run): checked; requires console
   $ cd .. && jacquard project check --project app && cd app
   app/project.jqd: project-v1 manifest valid (2 units, 2 exports, 0 deps, 2 entries)
+  library: 2 declarations checked
+  entry suite (test): checked, 0 tests; requires nothing
+  entry demo (run): checked; requires console
 
 The canonical spelling sorts fields, exports, entries and metadata, and keeps
 unit order; --write replaces the file atomically and is idempotent:

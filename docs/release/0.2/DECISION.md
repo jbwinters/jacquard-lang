@@ -5,7 +5,7 @@ and required GitHub checks are green.
 
 Test count: `1090`
 
-Cram count: `66`
+Cram count: `67`
 
 Documentation example count: `34` across `8` documents
 

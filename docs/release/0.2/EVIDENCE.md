@@ -33,7 +33,7 @@ The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
 - Alcotest/QCheck cases: `1090`
-- Cram transcript files: `66`
+- Cram transcript files: `67`
 - Documentation examples: `34` named examples across `8` documents
 
 The development suite also includes corpus goldens, release-manifest checks,
@@ -424,5 +424,15 @@ a `.git` directory, and rewrites it atomically.
 
 Diagnostics E1700–E1704 and E1735 are documented in `docs/errors.md`. The five
 `test/test_project_manifest.ml` cases, including a 2,000-input fuzz property,
-and `test/cli/project-manifest.t` bring the current source inventory to
+and `test/cli/project-manifest.t` bring the source inventory to
 `1090 / 66 / 34`.
+
+A project without dependencies then composes and runs. `jacquard project
+check|run|test` composes the library units as one program, applies the library
+rules and the namespace contract, and checks the library once. Each entry is
+composed separately over the frozen library, and only the tests an entry's own
+units bind are discovered. Declared grants are compared with checked authority
+(W1700, or E1730 under `--strict-grants`) and never granted. Unit paths are
+contained, regular, bounded and listed once. `test/cli/project-local.t` covers
+each refusal and location independence, bringing the current source inventory
+to `1090 / 67 / 34`.
