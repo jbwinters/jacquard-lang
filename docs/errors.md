@@ -555,13 +555,13 @@ bundles.
 | E1704 | the running Core does not satisfy `(requires (core "MAJOR.MINOR"))` | `(requires (core "9.0"))` |
 | E1706 | a library name does not carry the namespace: `NS.` for terms and operations, `NS-` for types and effects; constructors are exempt and generated accessors follow their type | `helper` in a `(namespace shop)` library |
 | E1715 | a library unit, or a test entry's unit, contains a top-level expression | `shop.total([])` in a library unit |
-| E1716 | a name is defined in two different units (generated accessors count) | `shop.even` defined in two library units |
+| E1716 | a name is defined in two different units (generated accessors count), including an entry unit redefining a library name | `shop.even` defined in two library units |
 | E1718 | the manifest declares no entry of that name, or it is the other kind | `jacquard project run suite` for a test entry |
 | E1722 | a unit resolves, after symlinks, outside the project directory | `(units "../outside/far.jac")` |
 | E1723 | a unit is missing or not a regular file | a directory named `missing.jac` |
 | E1724 | two units in one composition differ only by letter case | `"src/types.jac"` and `"src/Types.jac"` |
 | E1730 | declared grants differ from checked authority, under `--strict-grants` | `(grants fs)` on an entry that never uses `fs` |
-| E1731 | a library constructor has the name of a visible constructor of another type | `type ShopMaybe = \| Some(value: Int)` beside the prelude's `Option` |
+| E1731 | a library or entry constructor has the name of a visible constructor of another type | `type ShopMaybe = \| Some(value: Int)` beside the prelude's `Option` |
 | E1732 | the library refers to a name only an entry defines; the library is checked before, and without, any entry | a library term calling a helper defined in `demo.jac` |
 | E1734 | two unit entries in one composition resolve to the same file | `"src/types.jac"` and `"./src/types.jac"` |
 | E1735 | no `project.jqd` was found, or it cannot be read | `jacquard project check` outside any project |

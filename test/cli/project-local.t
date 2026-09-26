@@ -175,3 +175,23 @@ A unit's bytes are bounded before parsing:
   $ jacquard project check 2>&1 | grep -A1 '^error'
   error[E1703]: A project input exceeds a size budget.
     Cause: unit "big.jac" exceeds the unit limit of 4194304 bytes
+
+An entry adds names but never replaces the library's, and its constructors
+obey the same collision rule:
+
+  $ cp broken.jqd project.jqd && sed -i 's|"src/price.jac" .*"./src/types.jac")|"src/price.jac")|' project.jqd
+  $ cp demo.jac demo.bak && echo 'shop.total(items) = 0' >> demo.jac
+  $ jacquard project run demo 2>&1 | grep -A1 'E1716'
+  $TESTCASE_ROOT/shop/demo.jac:3:1-22: error[E1716]: A name is defined in two units.
+    Cause: term `shop.total` is defined in $TESTCASE_ROOT/shop/src/price.jac and again in entry unit $TESTCASE_ROOT/shop/demo.jac
+  $ cp demo.bak demo.jac && echo 'type Wrapper = | Some(value: Int)' >> demo.jac
+  $ jacquard project check 2>&1 | grep -A1 'E1731'
+  $TESTCASE_ROOT/shop/demo.jac:3:18-34: error[E1731]: Two visible constructors share a name.
+    Cause: constructor `some` of type `wrapper` is also a constructor of type `option` of the prelude
+  $ cp demo.bak demo.jac && echo 'type Wrapper = | ShopItem(value: Int)' >> demo.jac
+  $ jacquard project check 2>&1 | grep -A1 'E1731'
+  $TESTCASE_ROOT/shop/demo.jac:3:18-38: error[E1731]: Two visible constructors share a name.
+    Cause: constructor `shop-item` of type `wrapper` is also a constructor of type `shop-item` of the library
+  $ cp demo.bak demo.jac && jacquard project run demo
+  5
+  true
