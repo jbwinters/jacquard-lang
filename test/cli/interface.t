@@ -17,11 +17,13 @@ declarations. The manifest is the durable API carrier that HASH_V0 and positiona
   (interface-v1
     (hash-algorithm "HASH_V0"))
   $ grep -c '^(export' lib.jqi
-  7
+  9
   $ grep -A1 '^  resize$' lib.jqi | tail -1 | sed 's/[0-9a-f]\{64\}/HASH/'
     #HASH
   $ grep 'labels' lib.jqi
     (labels (slot named left) (slot named right)))
+    (labels (slot positional) (slot named left)))
+    (labels (slot positional) (slot named right)))
     (labels (slot positional) (slot named scale)))
     (labels (slot named path) (slot named body)))
 
@@ -75,6 +77,8 @@ than having its labels inferred.
   $ jacquard export lib.jac -o lib.jqd
   $ jacquard run --store positional lib.jqd
   $ jacquard interface verify lib.jqi positional 2>&1 | grep 'Cause:'
+    Cause: positional: term pair.with-left carries no call-abi-v1 companion for labels (positional, left:)
+    Cause: positional: term pair.with-right carries no call-abi-v1 companion for labels (positional, right:)
     Cause: positional: term resize carries no call-abi-v1 companion for labels (positional, scale:)
     Cause: positional: op send carries no call-abi-v1 companion for labels (path:, body:)
   $ jacquard interface verify extended.jqi provider 2>&1 | grep 'Cause:'
@@ -98,6 +102,6 @@ deterministic interface in which its generated accessors are ordinary exports.
   $ jacquard interface emit $A/rota-optimizer/model.jac | cmp - rota.jqi && echo deterministic
   deterministic
   $ grep -c '^(export' rota.jqi
-  86
+  115
   $ grep -c '^  rota-staff\.\(id\|name\|limit\)$' rota.jqi
   3

@@ -250,7 +250,7 @@ also emits E0817; consuming the captured resumption twice emits E0816.
 | E1238 | named call appears anywhere inside quoted surface syntax, including a live unquote | `quote { unquote(choose(left: 1)) }` |
 | E1239 | a constructor declares the same field label twice | `type Pair = \| Pair(left: Int, left: Text)` |
 | E1240 | a field label has different types in different constructors of one type | `type Key = \| Numbered(id: Int) \| Named(id: Text)` |
-| E1241 | a generated field accessor `<type>.<label>` collides with a term or effect operation the same file declares | `type Pair = \| Pair(left: Int)` beside `pair.left(p) = 0` |
+| E1241 | a generated field accessor `<type>.<label>` or setter `<type>.with-<label>` collides with a term or effect operation the same file declares, or a setter with one of the type's own accessors | `type Pair = \| Pair(left: Int)` beside `pair.left(p) = 0` |
 | E1242 | `try` is used inside an expression instead of as a block item | `f(try x)` |
 | E1243 | a block ends in `try` | `{ try parse(x) }` |
 | E1244 | `try` is used on a `let rec` local function binding | `let rec h(y) = try f(y)` |
