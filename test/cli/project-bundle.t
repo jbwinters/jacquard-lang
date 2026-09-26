@@ -75,6 +75,26 @@ Every tampering is refused before anything runs:
   $ tamper && sed -i 's/(file "01-prim.jqd" "[0-9a-f]*")/(file "01-prim.jqd" "0")/' ../t.bundle/bundle-v1.jqd
   $ jacquard project run --bundle ../t.bundle demo 2>&1 | head -1
   error[E1720]: The bundle's prelude or Core does not match this tool.
+  $ mkdir ../extra && printf '(project-v1 (name "extra") (requires (core "0.2")) (namespace extra) (units "e.jac") (exports (term extra.run)))' > ../extra/project.jqd
+  $ echo 'extra.run() = `op:eval-code`(quote { 1 })' > ../extra/e.jac
+  $ (cd ../extra && jacquard project bundle -o ../extra.bundle 2>&1 | head -1)
+  error[E1721]: A bundle root can reach dynamic evaluation.
+  $ echo 'extra.run() = 7' > ../extra/e.jac && (cd ../extra && jacquard project bundle -o ../extra.bundle > /dev/null)
+  $ tamper && cp ../extra.bundle/objects/*.jqd ../t.bundle/objects/
+  $ jacquard project run --bundle ../t.bundle demo 2>&1 | grep -o 'error\[E17..\].*\|is not reachable.*' | head -2
+  error[E1728]: A bundle closure is incomplete.
+  is not reachable from any root; a bundle carries its closure only
+  $ tamper && mv ../t.bundle/objects ../objects.real && ln -s ../objects.real ../t.bundle/objects
+  $ jacquard project run --bundle ../t.bundle demo 2>&1 | grep -o 'error\[E1735\].*\|objects is not a directory'
+  error[E1735]: The bundle cannot be read.
+  objects is not a directory
+  $ rm -rf ../objects.real
+  $ tamper && S=$(grep -o 'steps #[0-9a-f]*' ../t.bundle/bundle-v1.jqd | cut -d'#' -f2)
+  $ T=$(grep -o '(root test "app.tests" #[0-9a-f]*' ../t.bundle/bundle-v1.jqd | cut -d'#' -f2)
+  $ sed -i "s/steps #$S/steps #$T/" ../t.bundle/bundle-v1.jqd
+  $ jacquard project run --bundle ../t.bundle demo 2>&1 | grep -o 'error\[E1728\]\|is not a thunk'
+  error[E1728]
+  is not a thunk
   $ rm -rf ../t.bundle
 
 A bundle refuses dynamic evaluation reachable from any root, including a

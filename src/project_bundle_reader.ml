@@ -3,6 +3,38 @@
 let ( let* ) = Result.bind
 let version = "bundle-v1"
 
+(* --- the closure --- *)
+
+(* Every declaration reachable from [roots], prelude declarations included; quoted data is not
+   code, so [Store.decl_refs] follows only live splices. *)
+let reachable store roots =
+  let seen = Hashtbl.create 256 in
+  let rec go = function
+    | [] -> ()
+    | hash :: rest -> (
+        match Store.locate store hash with
+        | Error _ -> go rest
+        | Ok { Store.decl_hash; decl; _ } ->
+            if Hashtbl.mem seen decl_hash then go rest
+            else begin
+              Hashtbl.add seen decl_hash decl;
+              go (Store.decl_refs decl @ rest)
+            end)
+  in
+  go roots;
+  seen
+
+let eval_identities store =
+  List.filter_map Fun.id
+    [
+      Option.map
+        (fun (e : Resolve.entry) -> e.hash)
+        (Store.lookup_kind store "eval-code" Resolve.KOp);
+      Option.map
+        (fun (e : Resolve.entry) -> e.hash)
+        (Store.lookup_kind store "eval" Resolve.KEffect);
+    ]
+
 (* --- reading and verifying (design §9, "Import and run") --- *)
 
 let max_file_bytes = 16 * 1024 * 1024
@@ -30,6 +62,7 @@ let verify_summary = function
   | "E1726" -> "A bundle object's hash does not match."
   | "E1727" -> "A bundle object's member ownership does not match."
   | "E1728" -> "A bundle closure is incomplete."
+  | "E1721" -> "A bundle root can reach dynamic evaluation."
   | "E1729" -> "A derived interface or context does not match the bundle record."
   | "E1735" -> "The bundle cannot be read."
   | code -> raise (Diag.Bug_invalid_diagnostic ("unknown bundle code " ^ code))
@@ -38,6 +71,7 @@ let verify_next = function
   | "E1720" -> "Run the bundle with the Core and prelude that built it, or rebuild it."
   | "E1726" | "E1727" | "E1728" | "E1729" ->
       "Rebuild the bundle with jacquard project bundle; do not edit its files."
+  | "E1721" -> "Bundles refuse dynamic evaluation in v1; rebuild without eval-code."
   | "E1735" -> "Check the bundle path; a bundle is a directory written by jacquard project bundle."
   | code -> raise (Diag.Bug_invalid_diagnostic ("unknown bundle code " ^ code))
 
@@ -150,6 +184,18 @@ let verify ~store ~checker path =
     | _ -> refuse "E1735" "%s is not a bundle directory" path
     | exception Unix.Unix_error (e, _, _) ->
         refuse "E1735" "cannot read %s: %s" path (Unix.error_message e)
+  in
+  let* () =
+    List.fold_left
+      (fun acc sub ->
+        Result.bind acc (fun () ->
+            match Unix.lstat (file sub) with
+            | { Unix.st_kind = Unix.S_DIR; _ } -> Ok ()
+            | _ -> refuse "E1735" "%s is not a directory" (file sub)
+            | exception Unix.Unix_error (e, _, _) ->
+                refuse "E1735" "cannot read %s: %s" (file sub) (Unix.error_message e)))
+      (Ok ())
+      [ "objects"; "contexts"; "interfaces" ]
   in
   let* record_bytes = read_bounded (file "bundle-v1.jqd") in
   let* record = parse_one ~file:(file "bundle-v1.jqd") record_bytes in
@@ -341,6 +387,82 @@ let verify ~store ~checker path =
       when Hash.equal h (Project_manifest.semantic_digest manifest) ->
         Ok ()
     | _ -> refuse "E1729" "project.jqd does not match the bundle's manifest digest"
+  in
+  (* every run step is a generated zero-argument thunk, every test root a term member *)
+  let member_value hash =
+    match Store.locate store hash with
+    | Ok { Store.decl = { Kernel.it = Kernel.DefTerm bindings; _ }; role = Store.Member i; _ } ->
+        Option.map (fun (b : Kernel.binding) -> b.value) (List.nth_opt bindings i)
+    | _ -> None
+  in
+  let* () =
+    List.fold_left
+      (fun acc e ->
+        Result.bind acc (fun () ->
+            match e with
+            | Run_entry { name; steps; _ } -> (
+                match
+                  List.find_opt
+                    (fun h ->
+                      match member_value h with
+                      | Some { Kernel.it = Kernel.Lam ([], _); _ } -> false
+                      | _ -> true)
+                    steps
+                with
+                | Some h ->
+                    refuse "E1728" "run entry `%s` step %s is not a thunk" name (Hash.to_hex h)
+                | None -> Ok ())
+            | Test_entry { name; roots; _ } -> (
+                match List.find_opt (fun (_, _, h) -> member_value h = None) roots with
+                | Some (_, _, h) ->
+                    refuse "E1728" "test entry `%s` root %s is not a term" name (Hash.to_hex h)
+                | None -> Ok ())))
+      (Ok ()) entries
+  in
+  (* the objects are exactly the closure of the roots: steps, test roots, and the exports *)
+  let own_exports =
+    List.concat_map
+      (fun (id, _, _, (i : Interface.t)) ->
+        if Hash.equal id context then List.map (fun (e : Interface.export) -> e.hash) i.exports
+        else [])
+      pending
+  in
+  let closure = reachable store (roots @ own_exports) in
+  let* () =
+    match
+      List.find_opt
+        (fun (_, (h : Canon.decl_hashes)) -> not (Hashtbl.mem closure h.decl_hash))
+        objects
+    with
+    | Some (_, h) ->
+        refuse "E1728" "object %s is not reachable from any root; a bundle carries its closure only"
+          (Hash.to_hex h.Canon.decl_hash)
+    | None -> Ok ()
+  in
+  let* () =
+    let evals = eval_identities store in
+    match
+      Hashtbl.fold
+        (fun decl_hash decl acc ->
+          if List.exists (fun r -> List.exists (Hash.equal r) evals) (Store.decl_refs decl) then
+            Some decl_hash
+          else acc)
+        closure None
+    with
+    | Some h ->
+        refuse "E1721" "declaration %s, reachable from a bundle root, refers to eval-code or Eval"
+          (Hash.to_hex h)
+    | None -> Ok ()
+  in
+  let count name =
+    match field name record with Some { Form.args = [ Form.Int n ]; _ } -> Some n | _ -> None
+  in
+  let* () =
+    if
+      count "objects" = Some (List.length objects)
+      && count "companions" = Some (List.length (parse_companions companion_forms))
+    then Ok ()
+    else refuse "E1729" "the record's object or companion count does not match the bundle"
   in
   let contexts =
     List.map
