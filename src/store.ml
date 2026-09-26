@@ -415,7 +415,17 @@ let put_decl ?origin t (decl : Kernel.decl) : (Canon.decl_hashes, Diag.t list) r
           let persisted =
             if Sys.file_exists path then
               match load_object ~file:path (read_file path) with
-              | Ok _ as loaded -> loaded
+              | Ok (_, stored) as loaded when Hash.equal stored.Canon.decl_hash hs.Canon.decl_hash
+                ->
+                  loaded
+              | Ok (_, stored) ->
+                  Error
+                    [
+                      diagnostic ~code:"E0603"
+                        (Printf.sprintf "Corrupt object %s: its content hashes to %s."
+                           (Filename.basename path)
+                           (Hash.to_hex stored.Canon.decl_hash));
+                    ]
               | Error ds ->
                   Error
                     (diagnostic ~code:"E0603" ("Corrupt object " ^ Filename.basename path ^ ".")

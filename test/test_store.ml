@@ -110,6 +110,26 @@ let test_put_over_corrupt_object () =
         "corrupt-object code first" (Some "E0603")
         (match ds with d :: _ -> Diag.code d | [] -> None)
 
+(* A persisted object that still parses but no longer hashes to its own filename is corrupt too:
+   re-adding the declaration must not locate the substituted body. *)
+let test_put_over_substituted_object () =
+  let root = fresh_root () in
+  let t = open_ok root in
+  let original = "(defterm ((binding z-two () (lit 1))))" in
+  let hs = put_ok t (decl_of ~names:Resolve.empty_names original) in
+  let path =
+    Filename.concat (Filename.concat root "objects") (Hash.to_hex hs.Canon.decl_hash ^ ".jqd")
+  in
+  let oc = open_out_bin path in
+  output_string oc "(defterm ((binding z-two () (lit 999))))\n";
+  close_out oc;
+  match Store.put_decl t (decl_of ~names:Resolve.empty_names original) with
+  | Ok _ -> Alcotest.fail "a substituted persisted object must not be trusted"
+  | Error ds ->
+      Alcotest.(check (option string))
+        "corrupt-object code" (Some "E0603")
+        (match ds with d :: _ -> Diag.code d | [] -> None)
+
 let test_names_registered_and_resolvable () =
   let t = open_ok (fresh_root ()) in
   ignore (put_ok t (decl_of ~names:Resolve.empty_names "(deftype bool () (con false) (con true))"));
@@ -415,6 +435,8 @@ let suite =
       test_permuted_group_indexes_persisted_order;
     Alcotest.test_case "re-adding over a corrupt object reports E0603" `Quick
       test_put_over_corrupt_object;
+    Alcotest.test_case "re-adding over a substituted object reports E0603" `Quick
+      test_put_over_substituted_object;
     Alcotest.test_case "put/get round trip preserves hash" `Quick test_put_get_roundtrip;
     Alcotest.test_case "origin sidecar roundtrip" `Quick test_origin_roundtrip;
     Alcotest.test_case "get by derived hash" `Quick test_get_by_derived_hash;

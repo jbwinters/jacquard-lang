@@ -37,6 +37,21 @@ let test_signature_across_units () =
   same_program "signature then definition"
     [ ("sig.jac", "a.f : () ->{} Int\n"); ("def.jac", "a.f() = 1\n") ]
 
+let test_comment_only_units_are_transparent () =
+  same_program "signature, comment-only unit, definition"
+    [
+      ("sig.jac", "a.f : () ->{} Int\n");
+      ("notes.jac", "-- only a comment\n");
+      ("empty.jac", "");
+      ("def.jac", "a.f() = 1\n");
+    ]
+
+let test_split_expressions_are_refused () =
+  Alcotest.(check bool)
+    "an expression continued in the next unit is refused" true
+    (Result.is_error
+       (Surface_parse.compose_units [ ("a.jac", "a.x = int.add(1,\n"); ("b.jac", "2)\n") ]))
+
 let test_recursion_across_units () =
   same_program "mutual recursion"
     [
@@ -88,6 +103,10 @@ let suite =
   [
     Alcotest.test_case "a signature may precede its definition across units" `Quick
       test_signature_across_units;
+    Alcotest.test_case "comment-only and empty units are transparent" `Quick
+      test_comment_only_units_are_transparent;
+    Alcotest.test_case "an expression split across units is refused" `Quick
+      test_split_expressions_are_refused;
     Alcotest.test_case "recursive groups span units as in concatenation" `Quick
       test_recursion_across_units;
     Alcotest.test_case "composed items keep their own files" `Quick test_items_keep_their_files;

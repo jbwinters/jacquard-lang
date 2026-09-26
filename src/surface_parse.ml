@@ -3674,11 +3674,14 @@ let parse_string ~file src : (Surface_ast.top list, Diag.t list) result =
 
 (** [compose_units units] strictly parses several source units, given as [(file, source)] in
     composition order, as one program: the top-level items of every unit, in order, exactly as if
-    the sources were concatenated. Each item keeps its own file and span. The only file-boundary
-    difference from parsing each unit alone is the signature rule: a unit may end with a signature
-    whose definition begins the next unit, as concatenation allows. A signature not followed by its
-    definition, across a boundary or at the end of the last unit, is E1224 as for one file. Units
-    are all parsed, so their diagnostics are reported together in unit order. *)
+    the sources were concatenated. Each item keeps its own file and span. Every unit must parse on
+    its own: a construct split across a unit boundary (an expression continued in the next file) is
+    refused, even where concatenation would accept it; the one boundary-spanning form supported is a
+    signature followed by its definition. The only file-boundary difference from parsing each unit
+    alone is the signature rule: a unit may end with a signature whose definition begins the next
+    unit, as concatenation allows. A signature not followed by its definition, across a boundary or
+    at the end of the last unit, is E1224 as for one file. Units are all parsed, so their
+    diagnostics are reported together in unit order. *)
 let compose_units (units : (string * string) list) : (Surface_ast.top list, Diag.t list) result =
   let parsed =
     List.map (fun (file, src) -> strict (recover_string ~compose:true ~file src)) units
@@ -3693,9 +3696,13 @@ let compose_units (units : (string * string) list) : (Surface_ast.top list, Diag
         ~next_step:"Place the matching definition immediately after its signature." ~contrast:None
         ()
     in
+    (* Units with no items (blank or comment-only files) are transparent to the signature rule,
+       exactly as they are inside a concatenation. *)
     let rec check acc = function
       | [] -> List.rev acc
+      | [] :: rest -> check acc rest
       | items :: rest -> (
+          let rest = List.filter (fun unit -> unit <> []) rest in
           match List.rev items with
           | ({ Surface_ast.it = Surface_ast.Signature (name, _); _ } as signature) :: _ -> (
               match rest with
