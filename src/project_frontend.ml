@@ -371,7 +371,7 @@ let namespace_violations ns tops =
 
 (* E1731: a constructor name visible with two owners. [visible] is the store as it stands before
    the library is installed (the prelude). *)
-let constructor_collisions store tops =
+let constructor_collisions ?(library_types = []) store tops =
   let owner_of hash =
     match Store.locate store hash with
     | Ok { Store.decl = { Kernel.it = Kernel.DefType { tname; _ }; _ }; _ } -> tname
@@ -393,8 +393,11 @@ let constructor_collisions store tops =
                     match Store.lookup_kind store c.con_name Resolve.KCon with
                     | Some { Resolve.hash; _ } ->
                         let owner = owner_of hash in
+                        let whose =
+                          if List.mem owner library_types then "the library" else "the prelude"
+                        in
                         if String.equal owner tname then None
-                        else Some (Printf.sprintf "type `%s` of the prelude" owner)
+                        else Some (Printf.sprintf "type `%s` of %s" owner whose)
                     | None -> None)
               in
               Option.map
@@ -417,6 +420,8 @@ type session = {
   ctx : Eval.ctx;
   checker : Check.ctx;
   library_declarations : int;
+  library_bindings : ((string * Resolve.nkind) * string option) list;
+      (** what the library binds, with the unit that binds it *)
 }
 
 let store s = s.store
@@ -461,8 +466,12 @@ let open_library ?(on_lint = ignore) ?(on_warning = ignore) ~prelude_dir ~root p
         incr installed;
         Ok ())
   in
+  let library_bindings =
+    List.concat_map (fun top -> List.map (fun b -> ((b.name, b.kind), b.file)) (binders top)) tops
+  in
   match walked with
-  | Ok () -> Ok { project; store; ctx; checker; library_declarations = !installed }
+  | Ok () ->
+      Ok { project; store; ctx; checker; library_declarations = !installed; library_bindings }
   | Error ds ->
       (* an unresolved name that only an entry defines is the library/entry boundary (E1732) *)
       let entry_names = lazy (entry_defined_names project ~names) in
@@ -482,9 +491,38 @@ let open_library ?(on_lint = ignore) ?(on_warning = ignore) ~prelude_dir ~root p
              | _ -> d)
            ds)
 
+(* An entry adds names; it never replaces the library's. A name the library binds is E1716 and a
+   constructor that collides with a visible one (the library's or the prelude's) is E1731, as they
+   would be inside the library. *)
+let entry_rules session tops =
+  let redefined =
+    List.concat_map
+      (fun top ->
+        List.filter_map
+          (fun b ->
+            if b.kind = Resolve.KCon then None
+            else
+              match List.assoc_opt (b.name, b.kind) session.library_bindings with
+              | Some library_file ->
+                  Some
+                    (diag ?span:(Meta.span b.meta) "E1716"
+                       (Printf.sprintf "%s `%s` is defined in %s and again in entry unit %s"
+                          (kind_word b.kind) b.name (where library_file) (where b.file)))
+              | None -> None)
+          (binders top))
+      tops
+  in
+  let library_types =
+    List.filter_map
+      (fun ((name, kind), _) -> if kind = Resolve.KType then Some name else None)
+      session.library_bindings
+  in
+  cross_unit_duplicates tops @ redefined @ constructor_collisions ~library_types session.store tops
+
 let entry_tops ?(on_lint = ignore) session (entry : Project_manifest.entry) =
   let* units = read_units session.project entry.eunits in
-  compose ~names:(Store.names_view session.store) ~on_warning:on_lint units
+  let* tops = compose ~names:(Store.names_view session.store) ~on_warning:on_lint units in
+  match entry_rules session tops with [] -> Ok tops | ds -> Error ds
 
 (* --- checking an entry and its authority (design §7) --- *)
 
