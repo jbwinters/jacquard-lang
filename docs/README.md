@@ -20,6 +20,10 @@ project shape from file names alone.
   synthetic reproduction evidence for future syntax decisions.
 - `research/readability-benchmark/EXECUTION.md`: fail-closed UX.1 authority,
   analysis, blinded-rescore, and exact evidence-lineage boundary.
+- `onboarding/exercise.md`: a documentation-only onboarding exercise on the
+  rota optimizer (set up, run, test, change, diagnose, build natively), with
+  facilitator rules and a recording sheet; kept executable by
+  `test/cli/onboarding.t`.
 - `ci-cd.md`: GitHub gates, branch protection, and release evidence workflow.
 
 ## Core Design

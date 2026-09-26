@@ -33,7 +33,7 @@ The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
 - Alcotest/QCheck cases: `1092`
-- Cram transcript files: `69`
+- Cram transcript files: `70`
 - Documentation examples: `34` named examples across `8` documents
 
 The development suite also includes corpus goldens, release-manifest checks,
@@ -471,5 +471,14 @@ in a fresh per-build directory and finds bodies by reachability.
 session under both engines, the manifests, and the 25/17/18 suites. It adds
 the migration proofs: every entry's bindings hash exactly as the old
 concatenation, a non-exported display helper is refused by name, by hash and
-through eval, and no `cat` remains. The current source inventory stays
+through eval, and no `cat` remains. The source inventory stays
 `1092 / 69 / 34`.
+
+A documentation-only onboarding exercise (`docs/onboarding/exercise.md`) asks
+an unfamiliar developer to set up, run, test, change, diagnose and natively
+build the rota optimizer from the public documents, with facilitator rules
+and a recording sheet. The owner's own read-through is recorded as owner
+review, never as participant evidence. `test/cli/onboarding.t` keeps every
+scripted step and promised outcome true, bringing the current source
+inventory to `1092 / 70 / 34`. The participant exercise itself remains to be
+run.
