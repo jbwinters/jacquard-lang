@@ -90,8 +90,10 @@ val locate : ?project:string -> cwd:string -> ?home:string -> unit -> (string, D
     there is none. *)
 
 val read : string -> (t, Diag.t list) result
-(** [read path] reads at most {!max_bytes} + 1 bytes from a regular file and parses them. *)
+(** [read path] reads at most {!max_bytes} + 1 bytes from a regular file and parses them. The file
+    is opened without blocking, so a FIFO or device is refused (E1735) rather than waited on. *)
 
 val write_canonical : string -> t -> (unit, Diag.t list) result
 (** [write_canonical path t] replaces [path] with {!print}[ t] atomically: a temporary file in the
-    same directory, fsync, then rename. On failure the old file is untouched. *)
+    same directory, fsync, rename, then a best-effort fsync of the directory. On failure the old
+    file is untouched. *)

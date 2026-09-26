@@ -63,3 +63,10 @@ Without a manifest the search stops at the repository root:
 
   $ rm project.jqd && jacquard project check 2>&1 | grep -o 'error\[E1735\]'
   error[E1735]
+
+A manifest that is not a regular file is refused without waiting on it, even
+a FIFO that no writer will ever open:
+
+  $ mkdir fifo && mkfifo fifo/project.jqd
+  $ timeout 20 jacquard project check --project fifo 2>&1 | grep -o 'error\[E1735\]'
+  error[E1735]
