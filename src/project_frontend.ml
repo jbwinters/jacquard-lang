@@ -396,7 +396,11 @@ let namespace_violations ns tops =
 
 (* --- the dependency graph (design §8) --- *)
 
-type node = { project : project; deps : (Project_manifest.dep * node) list }
+type node = {
+  project : project;
+  deps : (Project_manifest.dep * node) list;
+  from_bundle : bool;  (** a verified bundle, not a source directory *)
+}
 
 let project_label project =
   match project.manifest.Project_manifest.namespace with
@@ -447,16 +451,43 @@ let load_graph ?(pinning = false) ~snapshot manifest_file =
                              (if is_root then "" else " in the project that declares it"));
                       ];
                   match dep.source with
-                  | Project_manifest.Bundle path ->
-                      add
-                        [
-                          diag "E1735"
-                            (Printf.sprintf
-                               "dependency %s names bundle %S; bundle dependencies are not \
-                                supported yet"
-                               where path);
-                        ];
-                      None
+                  | Project_manifest.Bundle path -> (
+                      (* a bundle is verified when the graph is composed; here only its manifest is
+                         read, and its own dependencies travel inside it *)
+                      let dir = Filename.concat project.dir path in
+                      let manifest_file = Filename.concat dir Project_manifest.file_name in
+                      match (Unix.realpath dir, Project_manifest.read manifest_file) with
+                      | exception Unix.Unix_error (e, _, _) ->
+                          add
+                            [
+                              diag "E1735"
+                                (Printf.sprintf "dependency %s: bundle %S cannot be read: %s" where
+                                   path (Unix.error_message e));
+                            ];
+                          None
+                      | _, Error ds ->
+                          add ds;
+                          None
+                      | dir, Ok manifest ->
+                          Option.iter
+                            (record_file snapshot (Filename.concat dir "bundle-v1.jqd"))
+                            (read_bytes (Filename.concat dir "bundle-v1.jqd"));
+                          if manifest.Project_manifest.namespace = None then
+                            add
+                              [
+                                diag "E1708"
+                                  (Printf.sprintf
+                                     "dependency %s (bundle %s) declares no namespace; a project \
+                                      that others depend on must declare one"
+                                     where path);
+                              ];
+                          Some
+                            ( dep,
+                              {
+                                project = { dir; manifest_file; manifest };
+                                deps = [];
+                                from_bundle = true;
+                              } ))
                   | Project_manifest.Path path -> (
                       let dir = Filename.concat project.dir path in
                       match
@@ -477,7 +508,7 @@ let load_graph ?(pinning = false) ~snapshot manifest_file =
                           Some (dep, child)))
                 project.manifest.deps
             in
-            let node = { project; deps } in
+            let node = { project; deps; from_bundle = false } in
             Hashtbl.replace loaded project.dir node;
             Some node)
   in
@@ -581,6 +612,7 @@ type session = {
   composed : (string, composed) Hashtbl.t;  (** by project directory *)
   mutable root : composed option;
   snapshot : snapshot;
+  prelude_objects : (Hash.t, unit) Hashtbl.t;  (** declarations the prelude installed *)
 }
 
 let store s = s.store
@@ -761,55 +793,8 @@ let constructor_collisions ?(own = []) session (node : node) tops =
 
 (* --- context identity (design §8) --- *)
 
-let rec closure store seen = function
-  | [] -> seen
-  | hash :: rest -> (
-      match Store.locate store hash with
-      | Error _ -> closure store seen rest
-      | Ok { Store.decl_hash; decl; _ } ->
-          if List.exists (Hash.equal decl_hash) seen then closure store seen rest
-          else closure store (decl_hash :: seen) (Store.decl_refs decl @ rest))
-
-let context_form store ~interface ~exports ~deps =
-  let decls = closure store [] (List.map snd exports) in
-  let in_closure hash =
-    match Store.locate store hash with
-    | Ok { Store.decl_hash; _ } -> List.exists (Hash.equal decl_hash) decls
-    | Error _ -> false
-  in
-  let companions =
-    List.sort
-      (fun (a, _) (b, _) -> Hash.compare a b)
-      (List.filter (fun (hash, _) -> in_closure hash) store.Store.call_abis)
-  in
-  let prelude =
-    List.map
-      (fun (file, digest) -> Form.F (Form.form "file" [ Form.Text file; Form.Text digest ]))
-      (List.sort compare (Option.value ~default:[] (Store.prelude_manifest store)))
-  in
-  Form.form "project-context-v1"
-    [
-      Form.F (Form.form "interface" [ Form.Hash (Interface.identity interface) ]);
-      Form.F
-        (Form.form "companions"
-           (List.map
-              (fun (hash, slots) ->
-                Form.F
-                  (Form.form "call-abi-v1"
-                     (Form.Hash hash
-                     :: List.map (fun slot -> Form.F (Store.call_abi_slot_form slot)) slots)))
-              companions));
-      Form.F (Form.form "prelude" prelude);
-      Form.F (Form.form "core" [ Form.Text Version.version ]);
-      Form.F
-        (Form.form "deps"
-           (List.map
-              (fun (alias, identity) ->
-                Form.F (Form.form "dep" [ Form.Sym alias; Form.Hash identity ]))
-              (List.sort compare deps)));
-    ]
-
-let context_identity_of form = Hash.of_string (Printer.print form)
+let context_form = Project_context.form
+let context_identity_of = Project_context.identity
 
 (* --- composing one library --- *)
 
@@ -870,6 +855,68 @@ let export_projection project local =
                   s.name)))
     project.manifest.Project_manifest.exports
 
+(* one namespace at two context identities is refused in v1 (E1714) *)
+let register session composed =
+  let project = composed.node.project in
+  let clash =
+    Hashtbl.fold
+      (fun _ c acc ->
+        match (c.node.project.manifest.namespace, project.manifest.namespace) with
+        | Some a, Some b when String.equal a b && not (Hash.equal c.identity composed.identity) ->
+            Some c
+        | _ -> acc)
+      session.composed None
+  in
+  match clash with
+  | Some c ->
+      error "E1714" "namespace `%s` appears at two context identities: %s (%s) and %s (%s)"
+        (project_label project) c.node.project.dir (Hash.to_hex c.identity) project.dir
+        (Hash.to_hex composed.identity)
+  | None ->
+      Hashtbl.replace session.composed project.dir composed;
+      Ok composed
+
+(* A bundle dependency: verified into the session's store, then seen through its recorded export
+   projection. Every object it carries, its own dependencies' included, belongs to it. *)
+let import_bundle session (node : node) =
+  let* verified =
+    Project_bundle_reader.verify ~store:session.store ~checker:session.checker node.project.dir
+  in
+  let context, interface =
+    match
+      List.find_opt
+        (fun (id, _, _) -> Hash.equal id verified.Project_bundle_reader.context)
+        verified.contexts
+    with
+    | Some (_, form, interface) -> (form, interface)
+    | None -> assert false (* verify checked the bundle's own context is among them *)
+  in
+  let exports =
+    List.map (fun (e : Interface.export) -> ((e.name, e.kind), e.hash)) interface.Interface.exports
+  in
+  let local = Hashtbl.create 64 in
+  List.iter
+    (fun (decl, ({ Canon.decl_hash; named } as hashes)) ->
+      List.iter (add_binding local) (bindings_of session.store decl hashes);
+      List.iter
+        (fun hash ->
+          if not (List.mem node.project.dir (Hashtbl.find_all session.owners hash)) then
+            Hashtbl.add session.owners hash node.project.dir)
+        (decl_hash :: List.map snd named))
+    verified.objects;
+  register session
+    {
+      node;
+      local;
+      bound_in = [];
+      exports;
+      export_layer = layer_of exports;
+      interface;
+      context;
+      identity = verified.context;
+      declarations = List.length verified.objects;
+    }
+
 let compose_library ?(on_lint = ignore) ?(on_warning = ignore) ~is_root session (node : node) =
   let project = node.project in
   let local = Hashtbl.create 64 in
@@ -917,7 +964,7 @@ let compose_library ?(on_lint = ignore) ?(on_warning = ignore) ~is_root session 
           (map_name_refusals session node ds)
       in
       Error (if is_root then entry_boundary project ~names ds else ds)
-  | Ok () -> (
+  | Ok () ->
       let exports, missing = export_projection project local in
       let* () = if missing = [] then Ok () else Error missing in
       (* derived now, while this project's own bindings are the store's current ones *)
@@ -949,25 +996,7 @@ let compose_library ?(on_lint = ignore) ?(on_warning = ignore) ~is_root session 
           declarations = !installed;
         }
       in
-      (* one namespace at two context identities is refused in v1 (E1714) *)
-      let clash =
-        Hashtbl.fold
-          (fun _ c acc ->
-            match (c.node.project.manifest.namespace, project.manifest.namespace) with
-            | Some a, Some b when String.equal a b && not (Hash.equal c.identity composed.identity)
-              ->
-                Some c
-            | _ -> acc)
-          session.composed None
-      in
-      match clash with
-      | Some c ->
-          error "E1714" "namespace `%s` appears at two context identities: %s (%s) and %s (%s)"
-            (project_label project) c.node.project.dir (Hash.to_hex c.identity) project.dir
-            (Hash.to_hex composed.identity)
-      | None ->
-          Hashtbl.replace session.composed project.dir composed;
-          Ok composed)
+      register session composed
 
 (* --- pins (design §8) --- *)
 
@@ -1064,6 +1093,10 @@ let open_graph ?(on_lint = ignore) ?(on_warning = ignore) ?(pinning = false) ~pr
       composed = Hashtbl.create 8;
       root = None;
       snapshot;
+      prelude_objects =
+        (let table = Hashtbl.create 1024 in
+         List.iter (fun h -> Hashtbl.replace table h ()) (Store.all_decl_hashes store);
+         table);
     }
   in
   let rec compose_all = function
@@ -1071,7 +1104,10 @@ let open_graph ?(on_lint = ignore) ?(on_warning = ignore) ?(pinning = false) ~pr
     | node :: rest ->
         let is_root = node == root_node in
         let on_lint, on_warning = if is_root then (on_lint, on_warning) else (ignore, ignore) in
-        let* composed = compose_library ~on_lint ~on_warning ~is_root session node in
+        let* composed =
+          if node.from_bundle then import_bundle session node
+          else compose_library ~on_lint ~on_warning ~is_root session node
+        in
         if is_root then session.root <- Some composed;
         compose_all rest
   in
@@ -1345,3 +1381,68 @@ let write_pins session (root_node : node) plans =
           root.manifest.Project_manifest.deps
       in
       Project_manifest.write_canonical root.manifest_file { root.manifest with deps }
+
+(* --- what a bundle needs from a composed graph (design §9) --- *)
+
+let project s = s.project
+let is_prelude_object s hash = Hashtbl.mem s.prelude_objects hash
+let root_exports s = (root_composed s).exports
+
+let graph_contexts s =
+  List.sort
+    (fun (a, _, _) (b, _, _) -> Hash.compare a b)
+    (Hashtbl.fold (fun _ c acc -> (c.identity, c.context, c.interface) :: acc) s.composed [])
+
+let graph_dirs s = Hashtbl.fold (fun dir _ acc -> dir :: acc) s.composed []
+
+type bundled_entry =
+  | Steps of Hash.t list  (** a run entry's generated thunks, in source order *)
+  | Roots of (string * string * Hash.t) list  (** a test entry's (kind, display, identity) *)
+
+(* A run entry's top-level expressions become generated terms [entry.NAME.step-1], [entry.NAME.step-2], ...,
+   each a checked thunk of its own type; a test entry's owned Warp tests become typed roots. *)
+let bundle_entry session (entry : Project_manifest.entry) =
+  match entry.ekind with
+  | Project_manifest.Test ->
+      let* authority = check_entry session entry in
+      Ok
+        (Roots
+           (List.map
+              (function
+                | Warp.Hermetic (name, h) -> ("test", name, h)
+                | Warp.World (name, h) -> ("world-test", name, h)
+                | Warp.Relational (name, h) -> ("warp-decl", name, h))
+              authority.owned_tests))
+  | Project_manifest.Run ->
+      let* tops = entry_tops session entry in
+      let expressions = ref [] in
+      let* () =
+        walk_entry session tops ~on_resolved:(fun top _ ->
+            let* _ = Check.check_top session.checker top in
+            (match top with Kernel.Expr e -> expressions := e :: !expressions | _ -> ());
+            Ok ())
+      in
+      let steps =
+        List.mapi
+          (fun i (e : Kernel.expr) ->
+            let binding =
+              {
+                Kernel.bname = Printf.sprintf "entry.%s.step-%d" entry.ename (i + 1);
+                annot = None;
+                value = { Kernel.it = Kernel.Lam ([], e); meta = Meta.empty };
+                bmeta = Meta.empty;
+              }
+            in
+            { Kernel.it = Kernel.DefTerm [ binding ]; meta = Meta.empty })
+          (List.rev !expressions)
+      in
+      let rec install acc = function
+        | [] -> Ok (Steps (List.rev acc))
+        | decl :: rest -> (
+            let* _ = Check.check_top session.checker (Kernel.Decl decl) in
+            match Store.put_decl session.store decl with
+            | Ok { Canon.named = [ (_, member) ]; _ } -> install (member :: acc) rest
+            | Ok _ -> install acc rest
+            | Error _ as error -> error)
+      in
+      install [] steps
