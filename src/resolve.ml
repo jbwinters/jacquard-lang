@@ -195,12 +195,21 @@ let kind_mismatch st ~meta name ~expected ~got =
        ~contrast:(Some (Diag.contrast ~mistaken:(kind_to_string got) ~intended:expected))
        ())
 
+(* SX.31: a constructor reference that [if], a list literal, or [try] generated means the prelude's
+   constructor by identity, whenever the store holds it, whatever the file declares by that name. *)
+let sugar_identity st ~meta name =
+  match Sugar_identity.prelude_constructor ~meta name with
+  | Some hash when Option.is_some (st.names.constructor_fields hash) -> Some hash
+  | _ -> None
+
 (* Resolve a non-term reference position (pcon/opclause/tref/eref): kind-directed, so among
    all bindings of the name the one with the expected kind wins. *)
 let resolve_gref st ~meta ~locals ~expected_kind ~expected_desc ~what (g : Kernel.gref) :
     Kernel.gref =
   match g with
   | Kernel.Hashed _ -> g
+  | Kernel.Named n when expected_kind = KCon && Option.is_some (sugar_identity st ~meta n) ->
+      Kernel.Hashed (Option.get (sugar_identity st ~meta n))
   | Kernel.Named n -> (
       let entries = st.names.lookup n in
       match List.find_opt (fun e -> e.kind = expected_kind) entries with
@@ -776,6 +785,11 @@ let rec resolve_expr_in st ~group ~locals (e : Kernel.expr) : Kernel.expr =
   match e.Kernel.it with
   | Kernel.Lit l -> mk (Kernel.Lit (normalize_lit l))
   | Kernel.Ref _ | Kernel.GroupRef _ -> e
+  | Kernel.Var x when Option.is_some (sugar_identity st ~meta:e.Kernel.meta x) ->
+      {
+        Kernel.it = Kernel.Ref (Option.get (sugar_identity st ~meta:e.Kernel.meta x), Kernel.Con);
+        meta = Meta.with_name x e.Kernel.meta;
+      }
   | Kernel.Var x -> (
       let hint = hinted_value_kind e.Kernel.meta in
       let lexical =

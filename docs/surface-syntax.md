@@ -718,9 +718,11 @@ while the other kept chains flat, which is the printer's rule now.
 
 ### Tuples, unit, lists
 
-`(a, b)` and `()` are kernel tuples. `[1, 2, 3]` is sugar desugaring by name
-to `Cons(1, Cons(2, Cons(3, Nil)))`, resolved like any other names (D32), so
-the sugar carries no hard-coded hashes. An author may write `(a, b,)` or
+`(a, b)` and `()` are kernel tuples. `[1, 2, 3]` is sugar for
+`Cons(1, Cons(2, Cons(3, Nil)))` over the prelude's `List` (D32). Since SX.31
+the sugar binds the prelude constructors by identity, so a file that declares
+its own `Cons` or `Nil` cannot capture a list literal (see "Sugar binds by
+identity" under Result propagation). An author may write `(a, b,)` or
 `[1, 2, 3,]`; both lower exactly like the compact spelling, and canonical
 formatting removes the comma unless the group wraps.
 
@@ -955,14 +957,19 @@ The elaboration fixes these properties:
   back. `jacquard export` writes the elaborated `match` to `.jqd`, and a quoted
   `try` stores its elaboration.
 
-**Constructor names.** Like `if` (`True`/`False`) and list literals
-(`Cons`/`Nil`), the elaboration names the prelude constructors `Ok` and `Err`
-by name. A file that declares its own constructors spelled `Ok` or `Err`
-rebinds them for `try` too: `try` then matches that file's constructors. That
-is a type error unless they are shaped like `Result`, and it is how a custom
-two-constructor type becomes propagatable. `try` is therefore not restricted
-to the prelude `Result` by identity. Protecting all three sugars by
-constructor identity is follow-up work (jacquard-lang:269).
+**Sugar binds by identity (SX.31).** `if` (`True`/`False`), list literals
+(`Cons`/`Nil`) and `try` (`Ok`/`Err`) elaborate to the prelude's `Bool`,
+`List` and `Result` constructors by identity, not by name. A file that declares
+its own constructors with those spellings cannot capture the sugar. An
+explicitly written `True` or `Ok` still means the file's constructor, so
+`if True then …` over a file-declared `True` is a type error rather than a
+silent reinterpretation. `try` therefore propagates exactly the prelude
+`Result`; a custom two-constructor type is converted explicitly. Programs whose
+names already resolve to the prelude keep their hashes, since the identities
+are the same. Where the store does not hold the prelude constructors (a stub
+environment), the sugar falls back to ordinary name resolution. The
+identities are pinned in `src/sugar_identity.ml` and checked against the
+loaded prelude by `test/test_sugar_identity.ml`.
 
 `try` is a reserved word. It is refused in any other position:
 
@@ -1118,7 +1125,7 @@ in commit messages and task dependencies.)
 | D29 | comments | `--` line, `--\|` doc |
 | D30 | definition form | equation style canonical, `fn` anonymous |
 | D31 | file extensions | surface `.jac`; bootstrap keeps `.jqd` so tasks 65 to 76 are untouched |
-| D32 | list literal | name-resolved sugar to `Cons`/`Nil` |
+| D32 | list literal | sugar to the prelude `Cons`/`Nil`, bound by identity since SX.31 |
 | D33 | quote body | surface syntax inside `quote { }`, captured pre-resolution |
 | D34 | case convention | PascalCase for types/constructors/effects, kebab-case for terms/operations; pattern-position capitals are constructors |
 | D35 | handle delimiting | atomic body needs no wrapper; a non-atomic body takes an explicit `{ }` block; the clause list is always braced |
@@ -1131,4 +1138,4 @@ in commit messages and task dependencies.)
 | D42 | operation-mode defaults | no surface default; every operation is explicit, while bootstrap legacy `multi` remains encoded by absence |
 | D75 | text interpolation | `$"text {expr}"` lowers locally to one resolved variadic `text.join`; expressions are explicitly `Text`, `{` is escaped as `{{`, and nested marked interpolation is rejected in 0.1 |
 | D76 | named calls | explicit labels on direct top-level terms and operations, constructor field-label reuse, positional-prefix/labeled-suffix exact arity, source-order evaluation, and a versioned hash-bound companion ABI; locals/HOFs/defaults/puns and quoted named syntax are excluded |
-| D77 | Result propagation | block items `let p = try e` and `try e` elaborate to a two-armed `Ok`/`Err` match over the rest of the innermost block; the error type is preserved exactly with no conversion; evaluation is left to right with nothing after the first `Err`; no kernel form, effect, or Throw; hashes equal the hand-written match; `try` is reserved and refused elsewhere (E1242–E1244) |
+| D77 | Result propagation | block items `let p = try e` and `try e` elaborate to a two-armed `Ok`/`Err` match over the rest of the innermost block; the error type is preserved exactly with no conversion; evaluation is left to right with nothing after the first `Err`; no kernel form, effect, or Throw; hashes equal the hand-written match; `try` is reserved and refused elsewhere (E1242–E1244); since SX.31 `Ok`/`Err` (like `if`'s and list literals' constructors) bind the prelude's by identity |
