@@ -3108,6 +3108,70 @@ let interface_t =
        ~doc:"Produce, verify, and compare portable public-interface manifests (API.1).")
     [ emit; verify; diff ]
 
+(* --- project (PKG.1): local project manifests --- *)
+
+let project_arg =
+  Arg.(
+    value
+    & opt (some dir) None
+    & info [ "project" ] ~docv:"DIR"
+        ~doc:
+          "The project directory. Without it, the nearest project.jqd found searching upward from \
+           the working directory is used; the search stops at a directory containing .git or at \
+           the home directory.")
+
+let with_project project k =
+  let home = Sys.getenv_opt "HOME" in
+  match Project_manifest.locate ?project ~cwd:(Sys.getcwd ()) ?home () with
+  | Error ds -> print_diags ds
+  | Ok path -> (
+      match Project_manifest.read path with
+      | Error ds -> print_diags ds
+      | Ok manifest -> k path manifest)
+
+let project_check_cmd project =
+  with_project project (fun path manifest ->
+      match Project_manifest.check_requires manifest ~core:Version.version with
+      | Error ds -> print_diags ds
+      | Ok () ->
+          Printf.printf
+            "%s: project-v1 manifest valid (%d units, %d exports, %d deps, %d entries)\n" path
+            (List.length manifest.Project_manifest.units)
+            (List.length manifest.exports) (List.length manifest.deps)
+            (List.length manifest.entries);
+          ok)
+
+let project_fmt_cmd project write =
+  with_project project (fun path manifest ->
+      if write then
+        match Project_manifest.write_canonical path manifest with
+        | Error ds -> print_diags ds
+        | Ok () -> ok
+      else begin
+        print_string (Project_manifest.print manifest);
+        ok
+      end)
+
+let project_t =
+  let check =
+    Cmd.v
+      (Cmd.info "check" ~doc:"Validate the project manifest and its Core requirement.")
+      Term.(const (configure_diagnostics project_check_cmd) $ diagnostic_format_arg $ project_arg)
+  in
+  let fmt =
+    Cmd.v
+      (Cmd.info "fmt" ~doc:"Print, or with --write atomically rewrite, the canonical manifest.")
+      Term.(
+        const (configure_diagnostics project_fmt_cmd)
+        $ diagnostic_format_arg $ project_arg
+        $ Arg.(
+            value & flag & info [ "write"; "w" ] ~doc:"Rewrite project.jqd in place, atomically."))
+  in
+  Cmd.group
+    (Cmd.info "project"
+       ~doc:"Local multi-file projects (project.jqd; docs/designs/project-structure.md).")
+    [ check; fmt ]
+
 let main =
   Cmd.group
     (Cmd.info "jacquard" ~version:Version.version ~doc:"The Jacquard language toolchain")
@@ -3130,6 +3194,7 @@ let main =
       export_t;
       build_t;
       interface_t;
+      project_t;
       host_t;
     ]
 

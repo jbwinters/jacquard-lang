@@ -32,8 +32,8 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1085`
-- Cram transcript files: `65`
+- Alcotest/QCheck cases: `1090`
+- Cram transcript files: `66`
 - Documentation examples: `34` named examples across `8` documents
 
 The development suite also includes corpus goldens, release-manifest checks,
@@ -406,3 +406,23 @@ Two store and identity repairs precede local projects:
 
 The three new store cases and the seven composition cases bring the current
 source inventory to `1085 / 65 / 34`.
+
+Local projects begin with their manifest (PKG.1 slice A,
+`docs/designs/project-structure.md` §3). `Project_manifest` reads
+`project.jqd`, the `project-v1` data value, and validates it against a strict
+schema:
+
+- unknown fields fail closed
+- duplicates and budgets are refused
+- units must be relative source paths
+- `(requires (core ...))` is checked against the running Core
+
+It prints one canonical spelling, and keeps a semantic digest (without `name`
+and `metadata`) separate from the full document digest. `jacquard project
+check|fmt` finds the manifest upward from the working directory, stopping at
+a `.git` directory, and rewrites it atomically.
+
+Diagnostics E1700–E1704 and E1735 are documented in `docs/errors.md`. The five
+`test/test_project_manifest.ml` cases, including a 2,000-input fuzz property,
+and `test/cli/project-manifest.t` bring the current source inventory to
+`1090 / 66 / 34`.
