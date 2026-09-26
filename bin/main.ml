@@ -3409,13 +3409,39 @@ let project_build_cmd project prelude entry_name out =
                     native_build ~store ~prelude ~cache_root:fresh ~out (List.rev !expressions)
                   in
                   (if status = ok then begin
+                     (* the recipe, for diagnosis only (semantic reproducibility is what is promised):
+                        Core, the emitter's cache tag (emitter version, runtime header, toolchain,
+                        flags), the runtime sources' digest, the compiler, and the target *)
+                     let emitter =
+                       Array.to_list (Sys.readdir fresh)
+                       |> List.filter (fun d -> Sys.is_directory (Filename.concat fresh d))
+                       |> String.concat " "
+                     in
+                     let runtime_dir =
+                       Jacquard_native.Build.runtime_dir_of ~prelude_dir:(prelude_dir_of prelude)
+                     in
+                     let runtime =
+                       Array.to_list (Sys.readdir runtime_dir)
+                       |> List.filter (fun f ->
+                           Filename.check_suffix f ".c" || Filename.check_suffix f ".h")
+                       |> List.sort compare
+                       |> List.map (fun f -> f ^ "\000" ^ read_file (Filename.concat runtime_dir f))
+                       |> String.concat "\000" |> Hash.of_string |> Hash.to_hex
+                     in
+                     let target =
+                       let ic = Unix.open_process_in "uname -sm 2>/dev/null" in
+                       let line = try input_line ic with End_of_file -> "" in
+                       ignore (Unix.close_process_in ic);
+                       line
+                     in
                      Out_channel.with_open_bin (Filename.concat fresh "recipe.jqd") (fun oc ->
                          Printf.fprintf oc
-                           "(build-recipe (core %S) (cc %S) (cflags %S) (entry %s))\n"
-                           Version.version
+                           "(build-recipe (entry %s) (core %S) (emitter %S) (runtime #%s) (cc %S) \
+                            (cflags %S) (target %S))\n"
+                           entry.ename Version.version emitter runtime
                            (Option.value (Sys.getenv_opt "CC") ~default:"cc")
                            (Option.value (Sys.getenv_opt "JACQUARD_NATIVE_CFLAGS") ~default:"")
-                           entry.ename);
+                           target);
                      (try rm_rf final with Sys_error _ -> ());
                      Unix.rename fresh final
                    end
