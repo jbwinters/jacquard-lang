@@ -26,7 +26,7 @@ copy() {
 # shared display helpers used by dice-coach and picnic-planner
 copy display.jac shared/display.jac
 copy display-tests.jac shared/display-tests.jac
-copy interaction-tests.jac shared/interaction-tests.jac
+copy interaction-tests.jac suite/interaction-tests.jac
 
 for file in model.jac tests.jac demo.jac interactive.jac EXAMPLE.txt; do
   copy dice-coach/$file dice-coach/$file

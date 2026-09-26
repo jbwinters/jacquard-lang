@@ -200,37 +200,7 @@ let process_forms ?origin ?(on_decl = fun _ _ -> ()) ?(emit_warnings = true) ~sy
 (* --- run --- *)
 
 (* effect hashes for the granted names, for the manifest check (W3.6) *)
-let granted_hashes store allows =
-  let explicit =
-    List.filter_map
-      (fun name ->
-        match Store.lookup_kind store (String.lowercase_ascii name) Resolve.KEffect with
-        | Some { Resolve.hash; _ } -> Some hash
-        | _ -> None)
-      allows
-  in
-  let exact_scheduler_effect name expected =
-    match Store.lookup_kind store name Resolve.KEffect with
-    | Some { Resolve.hash; _ } when String.equal (Hash.to_hex hash) expected -> Some hash
-    | Some _ | None -> None
-  in
-  let scheduler_infrastructure =
-    List.filter_map Fun.id
-      [
-        exact_scheduler_effect "async" Concurrency_contract.async_effect_hash;
-        exact_scheduler_effect "channel" Channel_contract.channel_effect_hash;
-      ]
-  in
-  (* APP.7: the console grant is the terminal authority, so it also covers the separately
-     declared ConsoleInput effect (Prelude.install_console installs both root handlers) *)
-  let console_input =
-    if List.exists (fun name -> String.lowercase_ascii name = "console") allows then
-      match Store.lookup_kind store "console-input" Resolve.KEffect with
-      | Some { Resolve.hash; _ } -> [ hash ]
-      | None -> []
-    else []
-  in
-  explicit @ console_input @ scheduler_infrastructure
+let granted_hashes = Frontend.granted_effects
 
 let schedule_file_error action path message =
   let prefix = path ^ ": " in
@@ -291,6 +261,141 @@ let write_schedule path trace =
     Ok ()
   with Sys_error message -> Error (schedule_file_error "write" path message)
 
+(* Run a program's top-level expressions with the requested grants: [walk ~on_expr] must resolve
+   and install the program's tops in [store] in order, passing each expression to [on_expr]. *)
+let run_program ~store ~ctx ~allows ~seed ~infer_cache ~dry_run ~schedule_record ~requested_mode
+    ~walk =
+  (* one invocation owns this run's grants and Once resumptions; run never reads
+                 coverage, so it skips the per-reference bookkeeping (PF.2 phase 2) *)
+  Eval.with_invocation ~coverage:false ctx @@ fun _invocation ->
+  let seed =
+    (* OS-entropy seeded unless pinned; --seed makes sampling runs reproducible (SL.7) *)
+    match seed with
+    | Some s -> s
+    | None ->
+        Random.self_init ();
+        Random.bits ()
+  in
+  let rec grant_all = function
+    | [] -> Ok ()
+    | a :: rest -> (
+        match Prelude.grant ctx a ~infer_cache ~out:print_string ~seed with
+        | Ok () -> grant_all rest
+        | Error ds -> Error ds)
+  in
+  let audit : string list ref = ref [] in
+  let grants_result = if dry_run then Prelude.install_dry ctx ~audit else grant_all allows in
+  match grants_result with
+  | Error ds -> print_diags ds
+  | Ok () -> (
+      match Frontend.make_checker store with
+      | Error ds -> print_diags ds
+      | Ok cctx -> (
+          let granted =
+            if dry_run then
+              (* the dry handlers discharge the whole world; the manifest sees it granted *)
+              granted_hashes store [ "console"; "clock"; "fs"; "net"; "infer"; "dist" ]
+            else granted_hashes store allows
+          in
+          let eval_hash =
+            match Store.lookup_kind store "eval" Resolve.KEffect with
+            | Some { Resolve.hash; _ } -> Some hash
+            | None -> None
+          in
+          let refused = ref false in
+          let runtime_failure = ref None in
+          let completed_schedule = ref None in
+          let on_expr e =
+            (* W3.6: the program's inferred row is its authority manifest; refuse to
+                   start anything that needs an ungranted effect *)
+            match Check.check_top cctx (Kernel.Expr e) with
+            | Error ds -> Error ds
+            | Ok { Check.row; warnings; _ } -> (
+                List.iter print_diagnostic warnings;
+                (if dry_run then
+                   let r = Types.repr_row (Option.value row ~default:Types.empty_row) in
+                   match eval_hash with
+                   | Some eh when List.exists (Hash.equal eh) r.Types.effects ->
+                       raise
+                         (Invalid_argument
+                            "--dry-run cannot sandbox eval: eval'd code runs at root authority and \
+                             bypasses the dry handlers")
+                   | _ -> ());
+                match
+                  Check.manifest_errors cctx ~grantable:Prelude.grantable_names ~granted
+                    (Option.value row ~default:Types.empty_row)
+                with
+                | _ :: _ as ds ->
+                    refused := true;
+                    Error ds
+                | [] -> (
+                    let execution =
+                      match requested_mode with
+                      | Some mode ->
+                          Result.map
+                            (fun (scheduled : Round_robin.scheduled) ->
+                              completed_schedule := Some scheduled.Round_robin.schedule;
+                              scheduled.value)
+                            (Round_robin.run_expr_scheduled ctx ~mode e)
+                      | None when Option.is_some schedule_record ->
+                          Result.map
+                            (fun (scheduled : Round_robin.scheduled) ->
+                              completed_schedule := Some scheduled.Round_robin.schedule;
+                              scheduled.value)
+                            (Round_robin.run_expr_scheduled ctx ~mode:Round_robin.Record_schedule e)
+                      | None -> Round_robin.run_expr ctx e
+                    in
+                    match execution with
+                    | Ok v ->
+                        print_endline (Value.show v);
+                        Ok ()
+                    | Error err ->
+                        runtime_failure := Some err;
+                        Error []))
+          in
+          match walk ~on_expr with
+          | exception Invalid_argument msg
+            when String.starts_with ~prefix:"--dry-run cannot sandbox eval" msg ->
+              print_diags [ cli_diagnostic ~code:"E1002" msg ]
+          | Ok () -> (
+              let write_result =
+                match (schedule_record, !completed_schedule) with
+                | Some path, Some trace -> write_schedule path trace
+                | None, _ -> Ok ()
+                | Some _, None ->
+                    Error [ cli_diagnostic ~code:"E0908" "scheduled execution produced no trace" ]
+              in
+              match write_result with
+              | Error diagnostics -> print_diags diagnostics
+              | Ok () ->
+                  if dry_run then begin
+                    (* the consent sheet: each world effect's disposition, then the trail *)
+                    print_endline
+                      "dry-run dispositions: console=forwarded clock=forwarded fs.read=forwarded \
+                       fs.write=audited net.fetch=audited+simulated \
+                       infer.complete=audited+simulated dist=simulated(seed 0) eval=refused";
+                    print_endline "dry-run: this run WOULD have:";
+                    if !audit = [] then print_endline "  (no world mutations)"
+                    else List.iter (fun l -> print_endline ("  " ^ l)) (List.rev !audit)
+                  end;
+                  ok)
+          | Error _ when !runtime_failure <> None -> (
+              match Option.get !runtime_failure with
+              | Runtime_err.Unhandled _ as e ->
+                  print_runtime_error e;
+                  exit_unhandled
+              | Runtime_err.Observe_at_root as e ->
+                  print_runtime_error e;
+                  exit_runtime
+              | e ->
+                  print_runtime_error e;
+                  exit_runtime)
+          | Error ds when !refused ->
+              (* the capability refusal keeps its own exit code, now at the type level *)
+              List.iter print_diagnostic ds;
+              exit_unhandled
+          | Error ds -> print_diags ds))
+
 let run_cmd file allows prelude store_dir seed infer_cache origin dry_run schedule_record
     schedule_replay schedule_fork syntax =
   match schedule_mode schedule_replay schedule_fork with
@@ -328,146 +433,10 @@ let run_cmd file allows prelude store_dir seed infer_cache origin dry_run schedu
           in
           match expression_count with
           | Error diagnostics -> print_diags diagnostics
-          | Ok () -> (
-              (* one invocation owns this run's grants and Once resumptions; run never reads
-                 coverage, so it skips the per-reference bookkeeping (PF.2 phase 2) *)
-              Eval.with_invocation ~coverage:false ctx
-              @@ fun _invocation ->
-              let seed =
-                (* OS-entropy seeded unless pinned; --seed makes sampling runs reproducible (SL.7) *)
-                match seed with
-                | Some s -> s
-                | None ->
-                    Random.self_init ();
-                    Random.bits ()
-              in
-              let rec grant_all = function
-                | [] -> Ok ()
-                | a :: rest -> (
-                    match Prelude.grant ctx a ~infer_cache ~out:print_string ~seed with
-                    | Ok () -> grant_all rest
-                    | Error ds -> Error ds)
-              in
-              let audit : string list ref = ref [] in
-              let grants_result =
-                if dry_run then Prelude.install_dry ctx ~audit else grant_all allows
-              in
-              match grants_result with
-              | Error ds -> print_diags ds
-              | Ok () -> (
-                  match Frontend.make_checker store with
-                  | Error ds -> print_diags ds
-                  | Ok cctx -> (
-                      let granted =
-                        if dry_run then
-                          (* the dry handlers discharge the whole world; the manifest sees it granted *)
-                          granted_hashes store [ "console"; "clock"; "fs"; "net"; "infer"; "dist" ]
-                        else granted_hashes store allows
-                      in
-                      let eval_hash =
-                        match Store.lookup_kind store "eval" Resolve.KEffect with
-                        | Some { Resolve.hash; _ } -> Some hash
-                        | None -> None
-                      in
-                      let refused = ref false in
-                      let runtime_failure = ref None in
-                      let completed_schedule = ref None in
-                      let on_expr e =
-                        (* W3.6: the program's inferred row is its authority manifest; refuse to
-                   start anything that needs an ungranted effect *)
-                        match Check.check_top cctx (Kernel.Expr e) with
-                        | Error ds -> Error ds
-                        | Ok { Check.row; warnings; _ } -> (
-                            List.iter print_diagnostic warnings;
-                            (if dry_run then
-                               let r = Types.repr_row (Option.value row ~default:Types.empty_row) in
-                               match eval_hash with
-                               | Some eh when List.exists (Hash.equal eh) r.Types.effects ->
-                                   raise
-                                     (Invalid_argument
-                                        "--dry-run cannot sandbox eval: eval'd code runs at root \
-                                         authority and bypasses the dry handlers")
-                               | _ -> ());
-                            match
-                              Check.manifest_errors cctx ~grantable:Prelude.grantable_names ~granted
-                                (Option.value row ~default:Types.empty_row)
-                            with
-                            | _ :: _ as ds ->
-                                refused := true;
-                                Error ds
-                            | [] -> (
-                                let execution =
-                                  match requested_mode with
-                                  | Some mode ->
-                                      Result.map
-                                        (fun (scheduled : Round_robin.scheduled) ->
-                                          completed_schedule := Some scheduled.Round_robin.schedule;
-                                          scheduled.value)
-                                        (Round_robin.run_expr_scheduled ctx ~mode e)
-                                  | None when Option.is_some schedule_record ->
-                                      Result.map
-                                        (fun (scheduled : Round_robin.scheduled) ->
-                                          completed_schedule := Some scheduled.Round_robin.schedule;
-                                          scheduled.value)
-                                        (Round_robin.run_expr_scheduled ctx
-                                           ~mode:Round_robin.Record_schedule e)
-                                  | None -> Round_robin.run_expr ctx e
-                                in
-                                match execution with
-                                | Ok v ->
-                                    print_endline (Value.show v);
-                                    Ok ()
-                                | Error err ->
-                                    runtime_failure := Some err;
-                                    Error []))
-                      in
-                      match process_forms ?origin ~syntax store ~file source ~on_expr with
-                      | exception Invalid_argument msg
-                        when String.starts_with ~prefix:"--dry-run cannot sandbox eval" msg ->
-                          print_diags [ cli_diagnostic ~code:"E1002" msg ]
-                      | Ok () -> (
-                          let write_result =
-                            match (schedule_record, !completed_schedule) with
-                            | Some path, Some trace -> write_schedule path trace
-                            | None, _ -> Ok ()
-                            | Some _, None ->
-                                Error
-                                  [
-                                    cli_diagnostic ~code:"E0908"
-                                      "scheduled execution produced no trace";
-                                  ]
-                          in
-                          match write_result with
-                          | Error diagnostics -> print_diags diagnostics
-                          | Ok () ->
-                              if dry_run then begin
-                                (* the consent sheet: each world effect's disposition, then the trail *)
-                                print_endline
-                                  "dry-run dispositions: console=forwarded clock=forwarded \
-                                   fs.read=forwarded fs.write=audited net.fetch=audited+simulated \
-                                   infer.complete=audited+simulated dist=simulated(seed 0) \
-                                   eval=refused";
-                                print_endline "dry-run: this run WOULD have:";
-                                if !audit = [] then print_endline "  (no world mutations)"
-                                else List.iter (fun l -> print_endline ("  " ^ l)) (List.rev !audit)
-                              end;
-                              ok)
-                      | Error _ when !runtime_failure <> None -> (
-                          match Option.get !runtime_failure with
-                          | Runtime_err.Unhandled _ as e ->
-                              print_runtime_error e;
-                              exit_unhandled
-                          | Runtime_err.Observe_at_root as e ->
-                              print_runtime_error e;
-                              exit_runtime
-                          | e ->
-                              print_runtime_error e;
-                              exit_runtime)
-                      | Error ds when !refused ->
-                          (* the capability refusal keeps its own exit code, now at the type level *)
-                          List.iter print_diagnostic ds;
-                          exit_unhandled
-                      | Error ds -> print_diags ds)))))
+          | Ok () ->
+              run_program ~store ~ctx ~allows ~seed ~infer_cache ~dry_run ~schedule_record
+                ~requested_mode ~walk:(fun ~on_expr ->
+                  process_forms ?origin ~syntax store ~file source ~on_expr)))
 
 (* --- relate --- *)
 
@@ -1298,6 +1267,65 @@ let replay_cmd log_file program forks to_n compare prelude =
 
 (* --- test (Warp W6.2/W6.3/W6.8) --- *)
 
+(* Run the discovered Warp tests with the granted authority and print the suite summary; the exit
+   status reflects failures. *)
+let run_suite ~store ~ctx ~cctx ~allows ~prop_mode ~schedule_plan ~seed ~cache_dir ~no_cache
+    ~default_cache_dir ~coverage ~prelude ~discover =
+  match Store.lookup_kind store "test.run" Resolve.KTerm with
+  | None -> print_diags [ cli_diagnostic ~code:"E0702" "prelude has no test.run" ]
+  | Some { Resolve.hash = tr; _ } -> (
+      match Warp.value_of ctx tr with
+      | Error e ->
+          print_runtime_error e;
+          exit_runtime
+      | Ok test_run -> (
+          let discovered = discover () in
+          let test_hashes =
+            List.map
+              (function Warp.Hermetic (_, h) | Warp.World (_, h) | Warp.Relational (_, h) -> h)
+              discovered
+          in
+          let granted = granted_hashes store allows in
+          let cache_dir =
+            if no_cache then None else Some (Option.value cache_dir ~default:default_cache_dir)
+          in
+          let totals =
+            { Warp.passed = 0; failed = 0; skipped = 0; refused = 0; hits = 0; ran = 0 }
+          in
+          let union = Hashtbl.create 64 in
+          let rec go = function
+            | [] -> Ok ()
+            | d :: rest -> (
+                match
+                  Warp.run_discovered ctx cctx ~test_run ~prop_mode ~schedule_plan ~suite_seed:seed
+                    ~cache_dir ~granted d
+                with
+                | Error e -> Error e
+                | Ok outcomes ->
+                    List.iter
+                      (fun (o : Warp.outcome) ->
+                        List.iter (fun h -> Hashtbl.replace union h ()) o.Warp.coverage;
+                        List.iter print_endline (Warp.render_outcome totals o))
+                      outcomes;
+                    go rest)
+          in
+          match go discovered with
+          | Error e ->
+              print_runtime_error (Runtime_err.Type_error ("test runner error: " ^ e));
+              exit_runtime
+          | Ok () ->
+              Printf.printf "%d passed, %d failed, %d skipped, %d refused\n" totals.Warp.passed
+                totals.Warp.failed totals.Warp.skipped totals.Warp.refused;
+              if cache_dir <> None then
+                Printf.printf "cache: %d hit, %d ran\n" totals.Warp.hits totals.Warp.ran;
+              (if coverage then
+                 let rings =
+                   Warp.parse_rings (Filename.concat (prelude_dir_of prelude) "rings.manifest")
+                 in
+                 List.iter print_endline
+                   (Warp.coverage_report store ~rings ~tests:test_hashes union));
+              if totals.Warp.failed > 0 then exit_diags else ok))
+
 let test_cmd files allows prelude cache_dir no_cache coverage seed samples exhaustive budget
     schedules =
   let configuration =
@@ -1403,83 +1431,10 @@ let test_cmd files allows prelude cache_dir no_cache coverage seed samples exhau
                       in
                       match check_loaded (List.rev !loaded) with
                       | Error ds -> print_diags ds
-                      | Ok () -> (
-                          match Store.lookup_kind store "test.run" Resolve.KTerm with
-                          | None ->
-                              print_diags [ cli_diagnostic ~code:"E0702" "prelude has no test.run" ]
-                          | Some { Resolve.hash = tr; _ } -> (
-                              match Warp.value_of ctx tr with
-                              | Error e ->
-                                  print_runtime_error e;
-                                  exit_runtime
-                              | Ok test_run -> (
-                                  let discovered = Warp.discover store cctx in
-                                  let test_hashes =
-                                    List.map
-                                      (function
-                                        | Warp.Hermetic (_, h)
-                                        | Warp.World (_, h)
-                                        | Warp.Relational (_, h) ->
-                                            h)
-                                      discovered
-                                  in
-                                  let granted = granted_hashes store allows in
-                                  let cache_dir =
-                                    if no_cache then None
-                                    else Some (Option.value cache_dir ~default:"test-cache")
-                                  in
-                                  let totals =
-                                    {
-                                      Warp.passed = 0;
-                                      failed = 0;
-                                      skipped = 0;
-                                      refused = 0;
-                                      hits = 0;
-                                      ran = 0;
-                                    }
-                                  in
-                                  let union = Hashtbl.create 64 in
-                                  let rec go = function
-                                    | [] -> Ok ()
-                                    | d :: rest -> (
-                                        match
-                                          Warp.run_discovered ctx cctx ~test_run ~prop_mode
-                                            ~schedule_plan ~suite_seed:seed ~cache_dir ~granted d
-                                        with
-                                        | Error e -> Error e
-                                        | Ok outcomes ->
-                                            List.iter
-                                              (fun (o : Warp.outcome) ->
-                                                List.iter
-                                                  (fun h -> Hashtbl.replace union h ())
-                                                  o.Warp.coverage;
-                                                List.iter print_endline
-                                                  (Warp.render_outcome totals o))
-                                              outcomes;
-                                            go rest)
-                                  in
-                                  match go discovered with
-                                  | Error e ->
-                                      print_runtime_error
-                                        (Runtime_err.Type_error ("test runner error: " ^ e));
-                                      exit_runtime
-                                  | Ok () ->
-                                      Printf.printf "%d passed, %d failed, %d skipped, %d refused\n"
-                                        totals.Warp.passed totals.Warp.failed totals.Warp.skipped
-                                        totals.Warp.refused;
-                                      if cache_dir <> None then
-                                        Printf.printf "cache: %d hit, %d ran\n" totals.Warp.hits
-                                          totals.Warp.ran;
-                                      (if coverage then
-                                         let rings =
-                                           Warp.parse_rings
-                                             (Filename.concat (prelude_dir_of prelude)
-                                                "rings.manifest")
-                                         in
-                                         List.iter print_endline
-                                           (Warp.coverage_report store ~rings ~tests:test_hashes
-                                              union));
-                                      if totals.Warp.failed > 0 then exit_diags else ok))))))))
+                      | Ok () ->
+                          run_suite ~store ~ctx ~cctx ~allows ~prop_mode ~schedule_plan ~seed
+                            ~cache_dir ~no_cache ~default_cache_dir:"test-cache" ~coverage ~prelude
+                            ~discover:(fun () -> Warp.discover store cctx))))))
 
 type diff_operand = Source_file | Store_dir | Missing | Unsupported
 
@@ -2727,6 +2682,67 @@ let export_cmd file out prelude syntax =
 
 (* --- build (native compilation, docs/native-plan.md task 67) --- *)
 
+(* The native back half shared by build and project build: bake each checked top expression's
+   warnings and manifest with a run-alike checker, then compile and link. *)
+let native_build ~store ~prelude ~cache_root ~out tops =
+  let baked =
+    match Frontend.make_checker store with
+    | Error _ -> None
+    | Ok cctx2 ->
+        List.fold_left
+          (fun acc e ->
+            Option.bind acc (fun acc ->
+                match Check.check_top cctx2 (Kernel.Expr e) with
+                | Error _ -> None
+                | Ok { Check.warnings; row; _ } ->
+                    let r = Types.repr_row (Option.value row ~default:Types.empty_row) in
+                    let msgs =
+                      Check.manifest_errors cctx2 ~grantable:Prelude.grantable_names ~granted:[] r
+                    in
+                    let manifest =
+                      List.map2 (fun h d -> (h, Diag.to_string d)) r.Types.effects msgs
+                    in
+                    Some ((e, List.map Diag.to_string warnings, manifest) :: acc)))
+          (Some []) tops
+  in
+  match baked with
+  | None ->
+      print_diags
+        [ cli_diagnostic ~code:"E1103" "The native manifest pass diverged from the load pass." ]
+  | Some rev_baked -> (
+      match
+        Jacquard_native.Build.build ~store ~tops:(List.rev rev_baked) ~cache_root
+          ~prelude_dir:(prelude_dir_of prelude) ~out
+      with
+      | Ok n ->
+          Printf.printf "native: compiled %d unit(s)\n" n;
+          ok
+      | Error (`Refused rs) ->
+          List.iter
+            (fun (r : Jacquard_native.Compile.refusal) ->
+              (* eval is policy (E1102): dynamically loaded code runs at
+                                       the interpreter tier; everything else is E1101, a
+                                       not-yet-compiled surface *)
+              let what = r.Jacquard_native.Compile.what in
+              let sub = "requires the interpreter tier" in
+              let is_eval =
+                let n = String.length sub in
+                let rec go i =
+                  i + n <= String.length what && (String.sub what i n = sub || go (i + 1))
+                in
+                go 0
+              in
+              let code = if is_eval then "E1102" else "E1101" in
+              let cause =
+                if is_eval then r.Jacquard_native.Compile.where ^ " " ^ what
+                else
+                  "Not yet compilable in native v1: " ^ r.Jacquard_native.Compile.where ^ " " ^ what
+              in
+              print_diagnostic (cli_diagnostic ~code cause))
+            rs;
+          exit_diags
+      | Error (`Toolchain m) -> print_diags [ cli_diagnostic ~code:"E1103" m ])
+
 let build_cmd file out prelude dry_run syntax =
   if dry_run then begin
     (* the consent sheet is an interpreter run: the dry handlers wrap live
@@ -2766,80 +2782,14 @@ let build_cmd file out prelude dry_run syntax =
                 print_warnings warnings;
                 match check_forms resolved_tops with
                 | Error ds -> print_diags ds
-                | Ok () -> (
+                | Ok () ->
                     (* warnings and manifests are harvested from a SECOND, run-alike
                          checker context that checks only the top expressions: the loader's
                          eager decl checking seeds Check's origin map in a different order
                          than run_cmd's lazy checking, and the E0814 origins
                          (`performed via ...`) must match run byte-for-byte *)
-                    let baked =
-                      match Frontend.make_checker store with
-                      | Error _ -> None
-                      | Ok cctx2 ->
-                          List.fold_left
-                            (fun acc e ->
-                              Option.bind acc (fun acc ->
-                                  match Check.check_top cctx2 (Kernel.Expr e) with
-                                  | Error _ -> None
-                                  | Ok { Check.warnings; row; _ } ->
-                                      let r =
-                                        Types.repr_row (Option.value row ~default:Types.empty_row)
-                                      in
-                                      let msgs =
-                                        Check.manifest_errors cctx2
-                                          ~grantable:Prelude.grantable_names ~granted:[] r
-                                      in
-                                      let manifest =
-                                        List.map2
-                                          (fun h d -> (h, Diag.to_string d))
-                                          r.Types.effects msgs
-                                      in
-                                      Some ((e, List.map Diag.to_string warnings, manifest) :: acc)))
-                            (Some []) (List.rev !tops)
-                    in
-                    match baked with
-                    | None ->
-                        print_diags
-                          [
-                            cli_diagnostic ~code:"E1103"
-                              "The native manifest pass diverged from the load pass.";
-                          ]
-                    | Some rev_baked -> (
-                        match
-                          Jacquard_native.Build.build ~store ~tops:(List.rev rev_baked)
-                            ~prelude_dir:(prelude_dir_of prelude) ~out
-                        with
-                        | Ok n ->
-                            Printf.printf "native: compiled %d unit(s)\n" n;
-                            ok
-                        | Error (`Refused rs) ->
-                            List.iter
-                              (fun (r : Jacquard_native.Compile.refusal) ->
-                                (* eval is policy (E1102): dynamically loaded code runs at
-                                       the interpreter tier; everything else is E1101, a
-                                       not-yet-compiled surface *)
-                                let what = r.Jacquard_native.Compile.what in
-                                let sub = "requires the interpreter tier" in
-                                let is_eval =
-                                  let n = String.length sub in
-                                  let rec go i =
-                                    i + n <= String.length what
-                                    && (String.sub what i n = sub || go (i + 1))
-                                  in
-                                  go 0
-                                in
-                                let code = if is_eval then "E1102" else "E1101" in
-                                let cause =
-                                  if is_eval then r.Jacquard_native.Compile.where ^ " " ^ what
-                                  else
-                                    "Not yet compilable in native v1: "
-                                    ^ r.Jacquard_native.Compile.where ^ " " ^ what
-                                in
-                                print_diagnostic (cli_diagnostic ~code cause))
-                              rs;
-                            exit_diags
-                        | Error (`Toolchain m) -> print_diags [ cli_diagnostic ~code:"E1103" m ]))))
-        )
+                    native_build ~store ~prelude ~cache_root:".jacquard-native" ~out
+                      (List.rev !tops))))
 
 (* --- host worker (HB.2c) --- *)
 
@@ -3108,6 +3058,621 @@ let interface_t =
        ~doc:"Produce, verify, and compare portable public-interface manifests (API.1).")
     [ emit; verify; diff ]
 
+(* --- project (PKG.1): local project manifests --- *)
+
+let project_arg =
+  Arg.(
+    value
+    & opt (some dir) None
+    & info [ "project" ] ~docv:"DIR"
+        ~doc:
+          "The project directory. Without it, the nearest project.jqd found searching upward from \
+           the working directory is used; the search stops at a directory containing .git or at \
+           the home directory.")
+
+let with_project project k =
+  let home = Sys.getenv_opt "HOME" in
+  match Project_manifest.locate ?project ~cwd:(Sys.getcwd ()) ?home () with
+  | Error ds -> print_diags ds
+  | Ok path -> (
+      match Project_manifest.read path with
+      | Error ds -> print_diags ds
+      | Ok manifest -> k path manifest)
+
+(* the manifest and its unit paths, with the running Core's requirement checked *)
+let with_loaded_project project k =
+  with_project project (fun path _manifest ->
+      match Project_frontend.load path with
+      | Error ds -> print_diags ds
+      | Ok loaded -> (
+          match Project_manifest.check_requires loaded.manifest ~core:Version.version with
+          | Error ds -> print_diags ds
+          | Ok () -> k loaded))
+
+let open_project_library ?on_lint ?on_warning ~prelude loaded =
+  Project_frontend.open_library ?on_lint ?on_warning ~prelude_dir:(prelude_dir_of prelude)
+    ~root:(fresh_check_root ()) loaded
+
+let effect_names session hashes =
+  let store = Project_frontend.store session in
+  List.map
+    (fun hash ->
+      match
+        List.find_map
+          (fun (name, { Resolve.hash = h; kind }) ->
+            if kind = Resolve.KEffect && Hash.equal h hash then Some name else None)
+          (Store.names store)
+      with
+      | Some name -> name
+      | None -> Hash.to_hex hash)
+    hashes
+
+(* project check: the manifest, the library, then each entry over a fresh copy of the frozen
+   library, so one entry's declarations never leak into another's view *)
+let project_check_cmd project prelude strict_grants =
+  with_loaded_project project (fun loaded ->
+      let manifest = loaded.Project_frontend.manifest in
+      Printf.printf "%s: project-v1 manifest valid (%d units, %d exports, %d deps, %d entries)\n%!"
+        loaded.manifest_file
+        (List.length manifest.Project_manifest.units)
+        (List.length manifest.exports) (List.length manifest.deps) (List.length manifest.entries);
+      match
+        open_project_library ~on_lint:print_diagnostic ~on_warning:print_diagnostic ~prelude loaded
+      with
+      | Error ds -> print_diags ds
+      | Ok session ->
+          Printf.printf "library: %d declarations checked\n%!"
+            (Project_frontend.library_declarations session);
+          let rec entries failed = function
+            | [] -> if failed then exit_diags else ok
+            | (entry : Project_manifest.entry) :: rest -> (
+                let checked =
+                  Result.bind (open_project_library ~prelude loaded) (fun session ->
+                      Result.map
+                        (fun authority -> (session, authority))
+                        (Project_frontend.check_entry ~on_lint:print_diagnostic
+                           ~on_warning:print_diagnostic session entry))
+                in
+                match checked with
+                | Error ds ->
+                    List.iter print_diagnostic ds;
+                    entries true rest
+                | Ok (session, authority) ->
+                    let kind =
+                      match entry.ekind with Project_manifest.Run -> "run" | Test -> "test"
+                    in
+                    let requires =
+                      match effect_names session authority.Project_frontend.required with
+                      | [] -> "nothing"
+                      | names -> String.concat ", " names
+                    in
+                    (match entry.ekind with
+                    | Project_manifest.Run ->
+                        Printf.printf "entry %s (%s): checked; requires %s\n%!" entry.ename kind
+                          requires
+                    | Project_manifest.Test ->
+                        Printf.printf "entry %s (%s): checked, %d tests; requires %s\n%!"
+                          entry.ename kind
+                          (List.length authority.owned_tests)
+                          requires);
+                    let mismatches =
+                      Project_frontend.compare_grants ~strict:strict_grants session entry authority
+                    in
+                    List.iter print_diagnostic mismatches;
+                    entries (failed || (strict_grants && mismatches <> [])) rest)
+          in
+          entries false manifest.entries)
+
+let grant_all ctx allows ~seed =
+  List.fold_left
+    (fun acc name ->
+      Result.bind acc (fun () -> Prelude.grant ctx name ~infer_cache:None ~out:print_string ~seed))
+    (Ok ()) allows
+
+let project_run_source project prelude entry_name allows seed =
+  with_loaded_project project (fun loaded ->
+      match Project_frontend.find_entry_of_kind loaded entry_name Project_manifest.Run with
+      | Error ds -> print_diags ds
+      | Ok entry -> (
+          match open_project_library ~on_lint:print_diagnostic ~prelude loaded with
+          | Error ds -> print_diags ds
+          | Ok session -> (
+              match Project_frontend.entry_tops ~on_lint:print_diagnostic session entry with
+              | Error ds -> print_diags ds
+              | Ok tops ->
+                  let store = Project_frontend.store session in
+                  run_program ~store ~ctx:(Project_frontend.eval_ctx session)
+                    ~allows ~seed ~infer_cache:None ~dry_run:false ~schedule_record:None
+                    ~requested_mode:None ~walk:(fun ~on_expr ->
+                      Project_frontend.walk_entry session tops ~on_resolved:(fun top _warnings ->
+                          match top with Kernel.Expr e -> on_expr e | Kernel.Decl _ -> Ok ())))))
+
+let project_test_source project prelude entry_name allows seed samples exhaustive budget cache_dir
+    no_cache =
+  with_loaded_project project (fun loaded ->
+      let selected =
+        match entry_name with
+        | Some name ->
+            Result.map
+              (fun entry -> [ entry ])
+              (Project_frontend.find_entry_of_kind loaded name Project_manifest.Test)
+        | None ->
+            Ok
+              (List.filter
+                 (fun (e : Project_manifest.entry) -> e.ekind = Project_manifest.Test)
+                 loaded.manifest.Project_manifest.entries)
+      in
+      match selected with
+      | Error ds -> print_diags ds
+      | Ok entries ->
+          let seed =
+            match seed with
+            | Some seed -> seed
+            | None ->
+                Random.self_init ();
+                Random.bits ()
+          in
+          let prop_mode =
+            if exhaustive then Warp.Exhaustive { budget } else Warp.Sampling { seed; samples }
+          in
+          let default_cache_dir =
+            Filename.concat (Filename.concat loaded.dir ".jacquard") "test-cache"
+          in
+          let run_entry (entry : Project_manifest.entry) =
+            if entry_name = None then Printf.printf "entry %s\n%!" entry.ename;
+            match open_project_library ~on_lint:print_diagnostic ~prelude loaded with
+            | Error ds -> print_diags ds
+            | Ok session -> (
+                match
+                  Project_frontend.check_entry ~on_lint:print_diagnostic
+                    ~on_warning:print_diagnostic session entry
+                with
+                | Error ds -> print_diags ds
+                | Ok authority -> (
+                    let store = Project_frontend.store session
+                    and ctx = Project_frontend.eval_ctx session in
+                    Eval.with_invocation ctx @@ fun _invocation ->
+                    match grant_all ctx allows ~seed with
+                    | Error ds -> print_diags ds
+                    | Ok () ->
+                        run_suite ~store ~ctx ~cctx:(Project_frontend.checker session)
+                          ~allows ~prop_mode ~schedule_plan:Warp.Default_schedule ~seed ~cache_dir
+                          ~no_cache ~default_cache_dir ~coverage:false ~prelude ~discover:(fun () ->
+                            authority.Project_frontend.owned_tests)))
+          in
+          List.fold_left
+            (fun status entry ->
+              let code = run_entry entry in
+              if status = ok then code else status)
+            ok entries)
+
+(* --- running a verified bundle (design §9) --- *)
+
+let with_bundle prelude path k =
+  match
+    Project_bundle_reader.load ~prelude_dir:(prelude_dir_of prelude) ~root:(fresh_check_root ())
+      path
+  with
+  | Error ds -> print_diags ds
+  | Ok bundle -> k bundle
+
+let bundle_entry_error path name what =
+  print_diags
+    [
+      cli_diagnostic ~code:"E1718" (Printf.sprintf "bundle %s has no %s entry `%s`" path what name);
+    ]
+
+let project_run_bundle path prelude entry_name allows seed =
+  with_bundle prelude path (fun bundle ->
+      match
+        List.find_map
+          (function
+            | Project_bundle_reader.Run_entry { name; steps; _ } when String.equal name entry_name
+              ->
+                Some steps
+            | _ -> None)
+          bundle.Project_bundle_reader.bundle.entries
+      with
+      | None -> bundle_entry_error path entry_name "run"
+      | Some steps ->
+          (* each step is a checked thunk; running it prints its value, as jacquard run does *)
+          run_program ~store:bundle.Project_bundle_reader.store ~ctx:bundle.ctx ~allows ~seed
+            ~infer_cache:None ~dry_run:false ~schedule_record:None ~requested_mode:None
+            ~walk:(fun ~on_expr ->
+              List.fold_left
+                (fun acc step ->
+                  Result.bind acc (fun () ->
+                      on_expr
+                        {
+                          Kernel.it =
+                            Kernel.App
+                              ({ Kernel.it = Kernel.Ref (step, Kernel.Term); meta = Meta.empty }, []);
+                          meta = Meta.empty;
+                        }))
+                (Ok ()) steps))
+
+let project_test_bundle path prelude entry_name allows seed samples exhaustive budget cache_dir
+    no_cache =
+  with_bundle prelude path (fun bundle ->
+      let tests =
+        List.filter_map
+          (function
+            | Project_bundle_reader.Test_entry { name; roots; _ }
+              when entry_name = None || entry_name = Some name ->
+                Some (name, roots)
+            | _ -> None)
+          bundle.Project_bundle_reader.bundle.entries
+      in
+      match (tests, entry_name) with
+      | [], Some name -> bundle_entry_error path name "test"
+      | _ -> (
+          let seed =
+            match seed with
+            | Some seed -> seed
+            | None ->
+                Random.self_init ();
+                Random.bits ()
+          in
+          let prop_mode =
+            if exhaustive then Warp.Exhaustive { budget } else Warp.Sampling { seed; samples }
+          in
+          let ctx = bundle.ctx in
+          Eval.with_invocation ctx @@ fun _invocation ->
+          match grant_all ctx allows ~seed with
+          | Error ds -> print_diags ds
+          | Ok () ->
+              List.fold_left
+                (fun status (name, roots) ->
+                  if entry_name = None then Printf.printf "entry %s\n%!" name;
+                  let discovered =
+                    List.map
+                      (fun (kind, display, h) ->
+                        match kind with
+                        | "world-test" -> Warp.World (display, h)
+                        | "warp-decl" -> Warp.Relational (display, h)
+                        | _ -> Warp.Hermetic (display, h))
+                      roots
+                  in
+                  let code =
+                    run_suite ~store:bundle.store ~ctx ~cctx:bundle.checker ~allows ~prop_mode
+                      ~schedule_plan:Warp.Default_schedule ~seed ~cache_dir
+                      ~no_cache:(no_cache || cache_dir = None)
+                      ~default_cache_dir:"" ~coverage:false ~prelude
+                      ~discover:(fun () -> discovered)
+                  in
+                  if status = ok then code else status)
+                ok tests))
+
+let project_run_cmd project prelude bundle entry_name allows seed =
+  match bundle with
+  | Some path -> project_run_bundle path prelude entry_name allows seed
+  | None -> project_run_source project prelude entry_name allows seed
+
+let project_test_cmd project prelude bundle entry_name allows seed samples exhaustive budget
+    cache_dir no_cache =
+  match bundle with
+  | Some path ->
+      project_test_bundle path prelude entry_name allows seed samples exhaustive budget cache_dir
+        no_cache
+  | None ->
+      project_test_source project prelude entry_name allows seed samples exhaustive budget cache_dir
+        no_cache
+
+(* project build: a native binary for a (native) run entry. Each build compiles in a fresh
+   directory under the project's .jacquard/build/, renamed over the entry's previous build only on
+   success, so concurrent builds never share object or prog_main paths. *)
+let project_build_cmd project prelude entry_name out =
+  with_loaded_project project (fun loaded ->
+      match Project_frontend.find_entry_of_kind loaded entry_name Project_manifest.Run with
+      | Error ds -> print_diags ds
+      | Ok { Project_manifest.native = false; _ } ->
+          print_diags
+            [
+              cli_diagnostic ~code:"E1718" ~hint:"add (native) to the entry in project.jqd"
+                (Printf.sprintf "run entry `%s` is not declared (native)" entry_name);
+            ]
+      | Ok entry -> (
+          match open_project_library ~on_lint:print_diagnostic ~prelude loaded with
+          | Error ds -> print_diags ds
+          | Ok session -> (
+              let store = Project_frontend.store session
+              and checker = Project_frontend.checker session in
+              let expressions = ref [] in
+              let walked =
+                Result.bind (Project_frontend.entry_tops ~on_lint:print_diagnostic session entry)
+                  (fun tops ->
+                    Project_frontend.walk_entry session tops ~on_resolved:(fun top _ ->
+                        Result.map
+                          (fun _ ->
+                            match top with
+                            | Kernel.Expr e -> expressions := e :: !expressions
+                            | Kernel.Decl _ -> ())
+                          (Check.check_top checker top)))
+              in
+              match walked with
+              | Error ds -> print_diags ds
+              | Ok () ->
+                  let builds = Filename.concat (Filename.concat loaded.dir ".jacquard") "build" in
+                  let final = Filename.concat builds entry.ename in
+                  let fresh =
+                    Filename.concat builds
+                      (Printf.sprintf ".%s.%d.tmp" entry.ename (Unix.getpid ()))
+                  in
+                  let rec mkdir_p dir =
+                    if not (Sys.file_exists dir) then begin
+                      mkdir_p (Filename.dirname dir);
+                      try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+                    end
+                  in
+                  mkdir_p fresh;
+                  let status =
+                    native_build ~store ~prelude ~cache_root:fresh ~out (List.rev !expressions)
+                  in
+                  (if status = ok then begin
+                     (* the recipe, for diagnosis only (semantic reproducibility is what is promised):
+                        Core, the emitter's cache tag (emitter version, runtime header, toolchain,
+                        flags), the runtime sources' digest, the compiler, and the target *)
+                     let emitter =
+                       Array.to_list (Sys.readdir fresh)
+                       |> List.filter (fun d -> Sys.is_directory (Filename.concat fresh d))
+                       |> String.concat " "
+                     in
+                     let runtime_dir =
+                       Jacquard_native.Build.runtime_dir_of ~prelude_dir:(prelude_dir_of prelude)
+                     in
+                     let runtime =
+                       Array.to_list (Sys.readdir runtime_dir)
+                       |> List.filter (fun f ->
+                           Filename.check_suffix f ".c" || Filename.check_suffix f ".h")
+                       |> List.sort compare
+                       |> List.map (fun f -> f ^ "\000" ^ read_file (Filename.concat runtime_dir f))
+                       |> String.concat "\000" |> Hash.of_string |> Hash.to_hex
+                     in
+                     let target =
+                       let ic = Unix.open_process_in "uname -sm 2>/dev/null" in
+                       let line = try input_line ic with End_of_file -> "" in
+                       ignore (Unix.close_process_in ic);
+                       line
+                     in
+                     Out_channel.with_open_bin (Filename.concat fresh "recipe.jqd") (fun oc ->
+                         Printf.fprintf oc
+                           "(build-recipe (entry %s) (core %S) (emitter %S) (runtime #%s) (cc %S) \
+                            (cflags %S) (target %S))\n"
+                           entry.ename Version.version emitter runtime
+                           (Option.value (Sys.getenv_opt "CC") ~default:"cc")
+                           (Option.value (Sys.getenv_opt "JACQUARD_NATIVE_CFLAGS") ~default:"")
+                           target);
+                     (try rm_rf final with Sys_error _ -> ());
+                     Unix.rename fresh final
+                   end
+                   else try rm_rf fresh with Sys_error _ -> ());
+                  status)))
+
+(* project hash: the identity of every binding the library (and, with ENTRY, that entry)
+   introduces, one "KIND NAME HASH" line each, sorted *)
+let project_hash_cmd project prelude entry_name =
+  with_loaded_project project (fun loaded ->
+      match open_project_library ~prelude loaded with
+      | Error ds -> print_diags ds
+      | Ok session -> (
+          let kind_word = function
+            | Resolve.KTerm -> "term"
+            | Resolve.KCon -> "con"
+            | Resolve.KOp -> "op"
+            | Resolve.KType -> "type"
+            | Resolve.KEffect -> "effect"
+          in
+          let entry_bindings =
+            match entry_name with
+            | None -> Ok []
+            | Some name ->
+                Result.bind (Project_frontend.find_entry loaded name) (fun entry ->
+                    Result.bind (Project_frontend.entry_tops session entry) (fun tops ->
+                        let acc = ref [] in
+                        Result.map
+                          (fun () -> !acc)
+                          (Project_frontend.walk_entry session tops
+                             ~on_installed:(fun decl hashes ->
+                               acc :=
+                                 (Diff.source_side (Project_frontend.store session)
+                                    [ (decl, hashes) ])
+                                   .Diff.bindings @ !acc;
+                               Ok ()))))
+          in
+          match entry_bindings with
+          | Error ds -> print_diags ds
+          | Ok extra ->
+              List.iter
+                (fun ((name, kind), hash) ->
+                  Printf.printf "%s %s %s\n" (kind_word kind) name (Hash.to_hex hash))
+                (List.sort_uniq compare (Project_frontend.library_bindings session @ extra));
+              ok))
+
+let project_pin_cmd project prelude only dry_run =
+  with_project project (fun path _manifest ->
+      match
+        Project_frontend.open_graph ~pinning:true ~prelude_dir:(prelude_dir_of prelude)
+          ~root:(fresh_check_root ()) path
+      with
+      | Error ds -> print_diags ds
+      | Ok (session, graph) -> (
+          match Project_frontend.plan_pins session graph ~only with
+          | Error ds -> print_diags ds
+          | Ok plans -> (
+              List.iter
+                (fun (plan : Project_frontend.pin_plan) ->
+                  let old =
+                    match plan.old_pin with Some h -> Hash.to_hex h | None -> "unpinned"
+                  in
+                  if plan.old_pin = Some plan.new_pin then
+                    Printf.printf "%s: %s (unchanged)\n%!" plan.alias old
+                  else
+                    Printf.printf "%s: %s -> %s%s\n%!" plan.alias old (Hash.to_hex plan.new_pin)
+                      (match plan.changes with Some c -> " (" ^ c ^ ")" | None -> ""))
+                plans;
+              if dry_run then ok
+              else
+                match Project_frontend.write_pins session graph plans with
+                | Error ds -> print_diags ds
+                | Ok () -> ok)))
+
+let project_interface_cmd project prelude =
+  with_loaded_project project (fun loaded ->
+      match open_project_library ~prelude loaded with
+      | Error ds -> print_diags ds
+      | Ok session ->
+          Printf.printf "context %s\n%s%!"
+            (Hash.to_hex (Project_frontend.context_identity session))
+            (Interface.serialize (Project_frontend.interface session));
+          ok)
+
+let project_bundle_cmd project prelude out =
+  with_project project (fun path _manifest ->
+      match
+        Project_bundle.write ~prelude_dir:(prelude_dir_of prelude) ~root:(fresh_check_root ()) ~out
+          path
+      with
+      | Error ds -> print_diags ds
+      | Ok { Project_bundle.identity; objects; companions } ->
+          Printf.printf "%s: bundle %s (%d objects, %d companions)\n%!" out (Hash.to_hex identity)
+            objects companions;
+          ok)
+
+let project_fmt_cmd project write =
+  with_project project (fun path manifest ->
+      if write then
+        match Project_manifest.write_canonical path manifest with
+        | Error ds -> print_diags ds
+        | Ok () -> ok
+      else begin
+        print_string (Project_manifest.print manifest);
+        ok
+      end)
+
+let project_t =
+  let check =
+    Cmd.v
+      (Cmd.info "check"
+         ~doc:
+           "Validate the manifest, then compose and check the library and every entry, comparing \
+            each entry's declared grants with its checked authority.")
+      Term.(
+        const (configure_diagnostics project_check_cmd)
+        $ diagnostic_format_arg $ project_arg $ prelude_arg
+        $ Arg.(
+            value & flag
+            & info [ "strict-grants" ]
+                ~doc:"Make a grants mismatch an error (E1730) instead of a warning (W1700)."))
+  in
+  let fmt =
+    Cmd.v
+      (Cmd.info "fmt" ~doc:"Print, or with --write atomically rewrite, the canonical manifest.")
+      Term.(
+        const (configure_diagnostics project_fmt_cmd)
+        $ diagnostic_format_arg $ project_arg
+        $ Arg.(
+            value & flag & info [ "write"; "w" ] ~doc:"Rewrite project.jqd in place, atomically."))
+  in
+  let entry_pos = Arg.(required & pos 0 (some string) None & info [] ~docv:"ENTRY") in
+  let bundle_arg =
+    Arg.(
+      value
+      & opt (some string) None
+      & info [ "bundle" ] ~docv:"BUNDLE"
+          ~doc:
+            "Run from a bundle written by jacquard project bundle instead of the project's \
+             sources; it is verified in full before anything runs.")
+  in
+  let run =
+    Cmd.v
+      (Cmd.info "run"
+         ~doc:
+           "Run a run entry: the library, then the entry's top-level expressions in order. The \
+            manifest's (grants ...) are never granted; pass --allow.")
+      Term.(
+        const (configure_diagnostics project_run_cmd)
+        $ diagnostic_format_arg $ project_arg $ prelude_arg $ bundle_arg $ entry_pos $ allows_arg
+        $ seed_arg)
+  in
+  let test =
+    Cmd.v
+      (Cmd.info "test"
+         ~doc:
+           "Run a test entry's Warp tests (without ENTRY, every test entry in manifest order). \
+            Only the tests the entry's own units bind are discovered.")
+      Term.(
+        const (configure_diagnostics project_test_cmd)
+        $ diagnostic_format_arg $ project_arg $ prelude_arg $ bundle_arg
+        $ Arg.(value & pos 0 (some string) None & info [] ~docv:"ENTRY")
+        $ allows_arg $ seed_arg $ samples_arg $ exhaustive_arg $ budget_arg
+        $ Arg.(
+            value
+            & opt (some string) None
+            & info [ "cache-dir" ] ~docv:"DIR"
+                ~doc:
+                  "Hermetic result cache directory (default: .jacquard/test-cache in the project).")
+        $ no_cache_arg)
+  in
+  let pin =
+    Cmd.v
+      (Cmd.info "pin"
+         ~doc:
+           "Compute each direct dependency's context identity and write it as the dependency's \
+            (pin ...), atomically. Dependency manifests are never edited.")
+      Term.(
+        const (configure_diagnostics project_pin_cmd)
+        $ diagnostic_format_arg $ project_arg $ prelude_arg
+        $ Arg.(
+            value & opt_all string []
+            & info [ "dep" ] ~docv:"ALIAS" ~doc:"Pin only this dependency (repeatable).")
+        $ Arg.(value & flag & info [ "dry-run" ] ~doc:"Print the plan without writing anything."))
+  in
+  let build =
+    Cmd.v
+      (Cmd.info "build"
+         ~doc:
+           "Compile a (native) run entry to a standalone binary. Each build compiles in a fresh \
+            directory, kept as .jacquard/build/ENTRY only when it succeeds.")
+      Term.(
+        const (configure_diagnostics project_build_cmd)
+        $ diagnostic_format_arg $ project_arg $ prelude_arg $ entry_pos
+        $ Arg.(required & opt (some string) None & info [ "o"; "output" ] ~docv:"OUT"))
+  in
+  let hash =
+    Cmd.v
+      (Cmd.info "hash"
+         ~doc:
+           "Print the identity of every binding the library introduces (with ENTRY, that entry's \
+            too), one KIND NAME HASH line each.")
+      Term.(
+        const (configure_diagnostics project_hash_cmd)
+        $ diagnostic_format_arg $ project_arg $ prelude_arg
+        $ Arg.(value & pos 0 (some string) None & info [] ~docv:"ENTRY"))
+  in
+  let bundle =
+    Cmd.v
+      (Cmd.info "bundle"
+         ~doc:
+           "Write the project as a verifiable bundle: its closure's objects, interfaces, contexts \
+            and companions, and each entry's roots. Published atomically.")
+      Term.(
+        const (configure_diagnostics project_bundle_cmd)
+        $ diagnostic_format_arg $ project_arg $ prelude_arg
+        $ Arg.(required & opt (some string) None & info [ "o"; "output" ] ~docv:"BUNDLE"))
+  in
+  let interface =
+    Cmd.v
+      (Cmd.info "interface"
+         ~doc:"Print the project's context identity and the interface-v1 of its exports.")
+      Term.(
+        const (configure_diagnostics project_interface_cmd)
+        $ diagnostic_format_arg $ project_arg $ prelude_arg)
+  in
+  Cmd.group
+    (Cmd.info "project"
+       ~doc:"Local multi-file projects (project.jqd; docs/designs/project-structure.md).")
+    [ check; run; test; build; hash; pin; interface; bundle; fmt ]
+
 let main =
   Cmd.group
     (Cmd.info "jacquard" ~version:Version.version ~doc:"The Jacquard language toolchain")
@@ -3130,6 +3695,7 @@ let main =
       export_t;
       build_t;
       interface_t;
+      project_t;
       host_t;
     ]
 

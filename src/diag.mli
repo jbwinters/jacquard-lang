@@ -21,6 +21,7 @@ type domain =
   | Governance
   | Concurrency
   | Cli
+  | Project
 
 type contrast
 type t

@@ -46,3 +46,6 @@ runtime/libjqrt.a
 
 # native build cache (jacquard build)
 .jacquard-native/
+
+# local project state: stores, pin records, test caches, native builds (jacquard project)
+.jacquard/
