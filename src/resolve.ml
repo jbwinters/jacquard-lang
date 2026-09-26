@@ -695,10 +695,17 @@ let expand_labeled_pattern st ~meta hash patterns =
           fields
       end
 
+(* Real literals denote their HASH_V0-normalized value: -0.0 is +0.0 and every NaN is the quiet NaN
+   (Canon.real_bits). Hash-equal programs must behave identically, so the literal a program runs is
+   the literal its identity names; this applies to expressions, patterns, and quoted code alike. *)
+let normalize_real r = Int64.float_of_bits (Canon.real_bits r)
+let normalize_lit = function Kernel.LReal r -> Kernel.LReal (normalize_real r) | l -> l
+
 let rec resolve_pat st ~locals (p : Kernel.pat) : Kernel.pat =
   let it =
     match p.Kernel.it with
-    | (Kernel.PWild | Kernel.PVar _ | Kernel.PLit _) as it -> it
+    | (Kernel.PWild | Kernel.PVar _) as it -> it
+    | Kernel.PLit l -> Kernel.PLit (normalize_lit l)
     | Kernel.PCon (con, ps) ->
         let con =
           resolve_gref st ~meta:p.Kernel.meta ~locals ~expected_kind:KCon
@@ -767,7 +774,8 @@ and resolve_row st ~locals ~effectself (r : Kernel.row) : Kernel.row =
 let rec resolve_expr_in st ~group ~locals (e : Kernel.expr) : Kernel.expr =
   let mk it = { e with Kernel.it } in
   match e.Kernel.it with
-  | Kernel.Lit _ | Kernel.Ref _ | Kernel.GroupRef _ -> e
+  | Kernel.Lit l -> mk (Kernel.Lit (normalize_lit l))
+  | Kernel.Ref _ | Kernel.GroupRef _ -> e
   | Kernel.Var x -> (
       let hint = hinted_value_kind e.Kernel.meta in
       let lexical =
@@ -956,7 +964,9 @@ and resolve_quote_payload st ~group ~locals ?(level = 0) (f : Form.t) : Form.t =
       Form.args =
         List.map
           (function
-            | Form.F g -> Form.F (resolve_quote_payload st ~group ~locals ~level g) | a -> a)
+            | Form.F g -> Form.F (resolve_quote_payload st ~group ~locals ~level g)
+            | Form.Real r -> Form.Real (normalize_real r)
+            | a -> a)
           f.Form.args;
     }
 

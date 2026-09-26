@@ -3538,7 +3538,7 @@ module Trivia_ownership = struct
     (List.map (map_top additions) items, file_meta)
 end
 
-let parse_tokens ~source tokens =
+let parse_tokens ?(compose = false) ~source tokens =
   let state =
     {
       source;
@@ -3605,6 +3605,7 @@ let parse_tokens ~source tokens =
     end
   done;
   (match !pending_signature with
+  | Some _ when compose -> () (* a later unit may supply the definition; see [compose_units] *)
   | Some (name, _) ->
       signature_interruption state (current state)
         (Printf.sprintf "signature for `%s` has no following definition" name)
@@ -3631,9 +3632,9 @@ let parse_tokens ~source tokens =
 
 (** [recover_string] returns a partial tree and source-ordered diagnostics. Lexical damage becomes
     an in-order hole, allowing valid surrounding items and later parser errors to survive. *)
-let recover_string ~file src : Surface_ast.recovered =
+let recover_string ?(compose = false) ~file src : Surface_ast.recovered =
   let recovered = Surface_lex.lex_recover ~file src in
-  let parsed = parse_tokens ~source:src recovered.tokens in
+  let parsed = parse_tokens ~compose ~source:src recovered.tokens in
   let diagnostic_offset diagnostic =
     match Diag.span diagnostic with Some span -> span.Span.start_pos.offset | None -> max_int
   in
@@ -3670,6 +3671,59 @@ let strict_file (recovered : Surface_ast.recovered) : (Surface_ast.file, Diag.t 
     item in document order, or source-ordered, span-bearing diagnostics after recovery. *)
 let parse_string ~file src : (Surface_ast.top list, Diag.t list) result =
   strict (recover_string ~file src)
+
+(** [compose_units units] strictly parses several source units, given as [(file, source)] in
+    composition order, as one program: the top-level items of every unit, in order, exactly as if
+    the sources were concatenated. Each item keeps its own file and span. Every unit must parse on
+    its own: a construct split across a unit boundary (an expression continued in the next file) is
+    refused, even where concatenation would accept it; the one boundary-spanning form supported is a
+    signature followed by its definition. The only file-boundary difference from parsing each unit
+    alone is the signature rule: a unit may end with a signature whose definition begins the next
+    unit, as concatenation allows. A signature not followed by its definition, across a boundary or
+    at the end of the last unit, is E1224 as for one file. Units are all parsed, so their
+    diagnostics are reported together in unit order. *)
+let compose_units (units : (string * string) list) : (Surface_ast.top list, Diag.t list) result =
+  let parsed =
+    List.map (fun (file, src) -> strict (recover_string ~compose:true ~file src)) units
+  in
+  let errors = List.concat_map (function Error ds -> ds | Ok _ -> []) parsed in
+  if errors <> [] then Error errors
+  else
+    let unit_items = List.map (function Ok tops -> tops | Error _ -> []) parsed in
+    let detached (top : Surface_ast.top) name message =
+      Diag.error ?span:(Meta.span top.meta) ~domain:Surface ~code:"E1224"
+        ~summary:"A signature is detached from its definition" ~cause:(Printf.sprintf message name)
+        ~next_step:"Place the matching definition immediately after its signature." ~contrast:None
+        ()
+    in
+    (* Units with no items (blank or comment-only files) are transparent to the signature rule,
+       exactly as they are inside a concatenation. *)
+    let rec check acc = function
+      | [] -> List.rev acc
+      | [] :: rest -> check acc rest
+      | items :: rest -> (
+          let rest = List.filter (fun unit -> unit <> []) rest in
+          match List.rev items with
+          | ({ Surface_ast.it = Surface_ast.Signature (name, _); _ } as signature) :: _ -> (
+              match rest with
+              | ({ Surface_ast.it = Surface_ast.Definition { name = defined; _ }; _ } :: _) :: _
+                when String.equal defined name ->
+                  check acc rest
+              | [] ->
+                  check
+                    (detached signature name "signature for `%s` has no following definition" :: acc)
+                    rest
+              | _ ->
+                  check
+                    (detached signature name
+                       "signature for `%s` must be followed by its definition in the next unit"
+                    :: acc)
+                    rest)
+          | _ -> check acc rest)
+    in
+    match check [] unit_items with
+    | [] -> Ok (List.concat unit_items)
+    | diagnostics -> Error diagnostics
 
 (** [parse_file ~file src] strictly parses [src] while retaining comment-only and EOF metadata. *)
 let parse_file ~file src : (Surface_ast.file, Diag.t list) result =

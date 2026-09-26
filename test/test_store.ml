@@ -65,6 +65,71 @@ let test_get_by_derived_hash () =
   | Ok _ -> Alcotest.fail "expected Constructor 1 role"
   | Error ds -> Alcotest.failf "locate failed: %s" (String.concat "; " (List.map Diag.to_string ds))
 
+(* A definition group hashes independently of member order, so a permuted group is the same object.
+   The first writer's bytes are kept; member positions must come from those bytes, or [locate] of
+   one member returns another member's body. *)
+let test_permuted_group_indexes_persisted_order () =
+  let t = open_ok (fresh_root ()) in
+  let put src = put_ok t (decl_of ~names:Resolve.empty_names src) in
+  let first = put "(defterm ((binding f-one () (lit 1)) (binding g-two () (lit 2))))" in
+  let second = put "(defterm ((binding g-two () (lit 2)) (binding f-one () (lit 1))))" in
+  Alcotest.(check bool)
+    "permuted groups are one object" true
+    (Hash.equal first.Canon.decl_hash second.Canon.decl_hash);
+  List.iter
+    (fun name ->
+      let hash = List.assoc name second.Canon.named in
+      match Store.locate t hash with
+      | Ok { Store.role = Store.Member i; decl = { Kernel.it = Kernel.DefTerm bindings; _ }; _ } ->
+          Alcotest.(check string)
+            (name ^ " locates its own binding")
+            name (List.nth bindings i).Kernel.bname
+      | Ok _ -> Alcotest.failf "%s: expected a term member" name
+      | Error ds ->
+          Alcotest.failf "%s: locate failed: %s" name
+            (String.concat "; " (List.map Diag.to_string ds)))
+    [ "f-one"; "g-two" ]
+
+(* Re-adding a declaration whose persisted object has been damaged reports the store's corrupt-object
+   diagnostic rather than trusting the incoming bytes or leaking a bare parse error. *)
+let test_put_over_corrupt_object () =
+  let root = fresh_root () in
+  let t = open_ok root in
+  let src = "(defterm ((binding z-one () (lit 1))))" in
+  let hs = put_ok t (decl_of ~names:Resolve.empty_names src) in
+  let path =
+    Filename.concat (Filename.concat root "objects") (Hash.to_hex hs.Canon.decl_hash ^ ".jqd")
+  in
+  let oc = open_out_bin path in
+  output_string oc "(defterm ((binding";
+  close_out oc;
+  match Store.put_decl t (decl_of ~names:Resolve.empty_names src) with
+  | Ok _ -> Alcotest.fail "a corrupt persisted object must not be trusted"
+  | Error ds ->
+      Alcotest.(check (option string))
+        "corrupt-object code first" (Some "E0603")
+        (match ds with d :: _ -> Diag.code d | [] -> None)
+
+(* A persisted object that still parses but no longer hashes to its own filename is corrupt too:
+   re-adding the declaration must not locate the substituted body. *)
+let test_put_over_substituted_object () =
+  let root = fresh_root () in
+  let t = open_ok root in
+  let original = "(defterm ((binding z-two () (lit 1))))" in
+  let hs = put_ok t (decl_of ~names:Resolve.empty_names original) in
+  let path =
+    Filename.concat (Filename.concat root "objects") (Hash.to_hex hs.Canon.decl_hash ^ ".jqd")
+  in
+  let oc = open_out_bin path in
+  output_string oc "(defterm ((binding z-two () (lit 999))))\n";
+  close_out oc;
+  match Store.put_decl t (decl_of ~names:Resolve.empty_names original) with
+  | Ok _ -> Alcotest.fail "a substituted persisted object must not be trusted"
+  | Error ds ->
+      Alcotest.(check (option string))
+        "corrupt-object code" (Some "E0603")
+        (match ds with d :: _ -> Diag.code d | [] -> None)
+
 let test_names_registered_and_resolvable () =
   let t = open_ok (fresh_root ()) in
   ignore (put_ok t (decl_of ~names:Resolve.empty_names "(deftype bool () (con false) (con true))"));
@@ -366,6 +431,12 @@ let test_origin_roundtrip () =
 
 let suite =
   [
+    Alcotest.test_case "permuted hash-equal groups index the persisted order" `Quick
+      test_permuted_group_indexes_persisted_order;
+    Alcotest.test_case "re-adding over a corrupt object reports E0603" `Quick
+      test_put_over_corrupt_object;
+    Alcotest.test_case "re-adding over a substituted object reports E0603" `Quick
+      test_put_over_substituted_object;
     Alcotest.test_case "put/get round trip preserves hash" `Quick test_put_get_roundtrip;
     Alcotest.test_case "origin sidecar roundtrip" `Quick test_origin_roundtrip;
     Alcotest.test_case "get by derived hash" `Quick test_get_by_derived_hash;

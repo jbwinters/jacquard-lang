@@ -32,7 +32,7 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1075`
+- Alcotest/QCheck cases: `1085`
 - Cram transcript files: `65`
 - Documentation examples: `34` named examples across `8` documents
 
@@ -381,3 +381,28 @@ native output agree. `demos/request-validation/validate.jac` validates a
 request in several fallible steps. The seven `test/test_surface_try.ml` cases
 and `test/cli/surface-try.t` bring the current source inventory to
 `1075 / 65 / 34`.
+
+Two store and identity repairs precede local projects:
+
+- **Member indexing.** `Store.put_decl` now indexes a declaration's members
+  from the persisted object bytes. A permuted, hash-equal definition group
+  therefore locates each member's own body instead of the incoming order's.
+  Re-adding over a damaged object, whether unparseable or substituted with
+  content of another hash, reports the store's corrupt-object error (E0603)
+  (`test/test_store.ml`).
+- **Real literals.** They denote their `HASH_V0`-normalized value in
+  expressions, literal patterns and quoted code, so hash-equal programs run
+  the same numbers. Computed reals keep their IEEE sign
+  (`spec/serialization.md`; native gauntlet case g47).
+
+- **Source composition.** `Surface_parse.compose_units` parses several
+  source units as one program, exactly as their concatenation, while each item
+  keeps its own file. It is the composition parse mode local projects use: a
+  signature may precede its definition across a unit boundary, blank and
+  comment-only units are transparent, and a recursive group may span units.
+  Every unit must parse on its own, so an expression split across files is
+  refused. `Span.merge` never combines offsets from different
+  files (`test/test_surface_compose.ml`).
+
+The three new store cases and the seven composition cases bring the current
+source inventory to `1085 / 65 / 34`.

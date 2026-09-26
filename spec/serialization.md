@@ -14,6 +14,12 @@ must bump the format name.
 - **real** — 8 bytes big-endian IEEE-754 bits, normalized first: every NaN becomes the quiet
   NaN `0x7ff8000000000000`; `-0.0` becomes `+0.0`. This keeps hash identity aligned with
   `Form.equal_ignoring_meta`, which treats all NaNs equal and `-0.0 = +0.0`.
+  Program literals denote the same normalized value. Resolution rewrites every
+  real literal to its normalized value before a program is checked, stored or
+  run. That covers expression literals, literal patterns, and reals inside
+  quoted code. As a result, a hash-equal program always runs the same numbers:
+  `1.0 / -0.0` written as a literal is `+inf.0`, and a quoted `-0.0` renders
+  as `(lit 0.0)`. Reals computed at run time keep their IEEE sign and payload.
 - **text** — varint byte length + UTF-8 bytes (no normalization, decision D3).
 - **hash** — the raw 32 digest bytes of `HASH_V0` (SHA-256, decision D1), no length prefix.
 

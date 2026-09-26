@@ -81,6 +81,7 @@ passing them directly to each engine to retain defensive runtime coverage.
   identical: g44-text-primitives (exit 0)
   identical: g45-numeric-presentation (exit 0)
   identical: g46-inference-outcomes (exit 0)
+  identical: g47-real-literal-identity (exit 0)
 
 Opaque host values are the exception to the public direct-member carrier: their
 marker identity is absent from the store's derived-hash index, so the checker and
