@@ -541,17 +541,31 @@ ordering, limits, terminal mapping, and non-retry behavior.
 
 Diagnostics of the local project format (`project.jqd`,
 `docs/designs/project-structure.md`). The manifest codes below ship with the
-manifest reader and `jacquard project check|fmt`. The design reserves
-E1705–E1734 for composition, visibility, pins and bundles.
+manifest reader and `jacquard project check|fmt`; the composition codes ship
+with `jacquard project check|run|test` for a project without dependencies. The
+design reserves the remaining E1705–E1734 codes for visibility, pins and
+bundles.
 
 | code | meaning | example |
 |---|---|---|
 | E1700 | the manifest is malformed: not one form, wrong head, wrong field shape, or an invalid value | `(project-v2 ...)`, `(units "notes.txt")` |
 | E1701 | an unknown field or sub-field (v1 fails closed) | `(license "MIT")` outside `(metadata ...)` |
 | E1702 | a field, unit, export selector, dependency alias, entry key, grant, or metadata key repeats | `(units "a.jac" "a.jac")` |
-| E1703 | a manifest budget is exceeded: 64 KiB of bytes, 1 KiB per text, or a collection limit | a 300-unit `(units ...)` |
+| E1703 | a manifest budget (64 KiB of bytes, 1 KiB per text, or a collection limit) or the 4 MiB unit budget is exceeded | a 300-unit `(units ...)` |
 | E1704 | the running Core does not satisfy `(requires (core "MAJOR.MINOR"))` | `(requires (core "9.0"))` |
+| E1706 | a library name does not carry the namespace: `NS.` for terms and operations, `NS-` for types and effects; constructors are exempt and generated accessors follow their type | `helper` in a `(namespace shop)` library |
+| E1715 | a library unit, or a test entry's unit, contains a top-level expression | `shop.total([])` in a library unit |
+| E1716 | a name is defined in two different units (generated accessors count), including an entry unit redefining a library name | `shop.even` defined in two library units |
+| E1718 | the manifest declares no entry of that name, or it is the other kind | `jacquard project run suite` for a test entry |
+| E1722 | a unit resolves, after symlinks, outside the project directory | `(units "../outside/far.jac")` |
+| E1723 | a unit is missing or not a regular file | a directory named `missing.jac` |
+| E1724 | two units in one composition differ only by letter case | `"src/types.jac"` and `"src/Types.jac"` |
+| E1730 | declared grants differ from checked authority, under `--strict-grants` | `(grants fs)` on an entry that never uses `fs` |
+| E1731 | a library or entry constructor has the name of a visible constructor of another type | `type ShopMaybe = \| Some(value: Int)` beside the prelude's `Option` |
+| E1732 | the library refers to a name only an entry defines; the library is checked before, and without, any entry | a library term calling a helper defined in `demo.jac` |
+| E1734 | two unit entries in one composition resolve to the same file | `"src/types.jac"` and `"./src/types.jac"` |
 | E1735 | no `project.jqd` was found, or it cannot be read | `jacquard project check` outside any project |
+| W1700 | declared grants differ from checked authority (a warning unless `--strict-grants`) | a run entry printing without `(grants console)` |
 
 ## Appendix: the W5.3 audit (ten message rewrites)
 
