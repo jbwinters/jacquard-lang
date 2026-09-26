@@ -132,11 +132,13 @@ let lowered_surface path source =
 
 let surface_hashes path source =
   lowered_surface path source
-  (* D36 accessors derive from their type, whose identity is compared; they resolve only after
-     the type is installed, which these stub names do not model *)
+  (* D36 accessors and SX.28 setters derive from their type, whose identity is compared; they
+     resolve only after the type is installed, which these stub names do not model *)
   |> List.filter (function
-    | Kernel.Decl declaration ->
-        Meta.surface_generated declaration.meta <> Some "constructor-accessor"
+    | Kernel.Decl declaration -> (
+        match Meta.surface_generated declaration.meta with
+        | Some ("constructor-accessor" | "constructor-setter") -> false
+        | _ -> true)
     | Kernel.Expr _ -> true)
   |> List.map (fun top ->
       match Resolve.resolve Corpus_support.stub_names top with
