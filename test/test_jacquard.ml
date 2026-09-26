@@ -30,6 +30,7 @@ let () =
       ("host-session", Test_host_session.suite);
       ("host-worker", Test_host_worker.suite);
       ("frontend", Test_frontend.suite);
+      ("project-frontend", Test_project_frontend.suite);
       ("scoped-instances", Test_scoped_instances_model.suite);
       ("interface", Test_interface.suite);
       ("invocation", Test_invocation.suite);

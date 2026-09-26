@@ -5,9 +5,15 @@
     checked library is then frozen, and each entry's units are composed and lowered separately over
     it. Nothing is rewritten: identities are exactly those of concatenating the same files.
 
-    This slice covers a project without dependencies. Failure modes (domain [Project]):
+    Failure modes (domain [Project]):
     - E1703: a unit exceeds its byte budget;
+    - E1705 / E1709: a name or identity another project keeps private;
     - E1706: a library name violates the namespace contract;
+    - E1707 / E1714: namespaces that overlap, or one namespace at two context identities;
+    - E1708: a depended-on project without a namespace;
+    - E1710 / E1712: a root or transitive pin that does not match;
+    - E1711: an unpinned dependency;
+    - E1713: a dependency cycle;
     - E1715: a top-level expression in a library unit;
     - E1716: a name defined in two different units;
     - E1718: an entry the manifest does not declare;
@@ -17,6 +23,8 @@
     - E1730 / W1700: an entry's declared grants differ from its checked authority;
     - E1731: a library constructor collides with a visible constructor of another type;
     - E1732: the library references a name only an entry defines;
+    - E1717: an export selector naming nothing the project defines;
+    - E1733: a file changed while pinning;
     - E1734: two unit entries resolve to the same file. *)
 
 type project = {
@@ -53,6 +61,55 @@ val checker : session -> Check.ctx
 val library_declarations : session -> int
 (** The number of library declarations installed. *)
 
+type node
+(** A project and its dependencies, loaded and validated but not yet composed. *)
+
+val open_graph :
+  ?on_lint:(Diag.t -> unit) ->
+  ?on_warning:(Diag.t -> unit) ->
+  ?pinning:bool ->
+  prelude_dir:string ->
+  root:string ->
+  string ->
+  (session * node, Diag.t list) result
+(** [open_graph ~prelude_dir ~root manifest_file] loads the project and its dependency graph (E1707,
+    E1708, E1711, E1713), opens a fresh store at [root], and composes every library dependency-first
+    into it, each resolved in its own view: its own bindings, its direct dependencies' export
+    projections, and the prelude. Names other projects keep private are E1705, such identities
+    E1709; export selectors must name the project's own bindings (E1717); one namespace at two
+    context identities is E1714. Every pin is then compared with the computed context identity:
+    E1710 for the root's edges and E1712 for transitive ones. With [pinning], the root's own edges
+    may be unpinned and are not compared. Warnings are reported for the root's library only. *)
+
+val interface : session -> Interface.t
+(** The root library's [interface-v1], over its export projection: exported selectors are public,
+    and every other member of an exported declaration (an abstract type's constructors) is hidden.
+*)
+
+val context_record : session -> Form.t
+(** The root library's [project-context-v1] record: its interface identity, the call-ABI companions
+    of its export closure, the prelude, the Core version, and its dependencies' pins. *)
+
+val context_identity : session -> Hash.t
+(** [HASH_V0] of the printed {!context_record}; what a dependent's [(pin …)] names. *)
+
+type pin_plan = {
+  alias : string;
+  old_pin : Hash.t option;
+  new_pin : Hash.t;
+  changes : string option;  (** components and interface report when the pin moves *)
+}
+
+val plan_pins : session -> node -> only:string list -> (pin_plan list, Diag.t list) result
+(** The root's direct dependencies (only those in [only], when non-empty) with their current and
+    computed pins. *)
+
+val write_pins : session -> node -> pin_plan list -> (unit, Diag.t list) result
+(** Records every dependency's context record and interface under the root's [.jacquard/], then
+    rewrites the root manifest atomically with the planned pins. Every manifest and unit read while
+    composing is rechecked first; any change is E1733 and nothing is written. Dependency manifests
+    are never edited. *)
+
 val open_library :
   ?on_lint:(Diag.t -> unit) ->
   ?on_warning:(Diag.t -> unit) ->
@@ -74,6 +131,17 @@ val entry_tops :
 (** [entry_tops session entry] composes and lowers the entry's units over the frozen library. The
     tops are unresolved, in composition order; a caller walks them ({!Frontend.walk_tops}) against
     the session store. *)
+
+val walk_entry :
+  ?on_resolved:(Kernel.top -> Diag.t list -> (unit, Diag.t list) result) ->
+  ?on_installed:(Kernel.decl -> Canon.decl_hashes -> (unit, Diag.t list) result) ->
+  session ->
+  Kernel.top list ->
+  (unit, Diag.t list) result
+(** [walk_entry session tops] resolves and installs an entry's tops ({!Frontend.walk_tops}) in the
+    root project's view: the entry's own bindings, the library, the direct dependencies' export
+    projections, and the prelude. An identity another project keeps private is E1709 and such a name
+    E1705. From then on, [eval-code] payloads in the session resolve through the same gate. *)
 
 type authority = {
   required : Hash.t list;  (** effects the entry's checked code needs, sorted *)
