@@ -15,8 +15,10 @@ outcomes below stay true.
 
 - **Participant:** a developer comfortable with a terminal and one typed
   functional or ML-family language, who has not worked on Jacquard and has
-  not read its source. They may read anything under the checkout's `README.md`
-  and `docs/`, and the application's own files.
+  not read its source. They may read the checkout's `README.md`, anything
+  under `docs/`, the demo guides the README's documentation map points to
+  (`demos/README.md` and `demos/applications/README.md`), and the
+  application's own files.
 - **Facilitator:** watches, times each task, and records interventions. They
   do not explain the language or the tools.
 - **Owner read-through:** the maintainer reads this protocol and the
@@ -47,7 +49,8 @@ on.
 
 You will set up a development checkout of Jacquard, then run, change, repair
 and compile a small application. Use only the repository's documentation
-(`README.md`, `docs/`) and the application's files. Say what you are looking
+(`README.md`, `docs/`, `demos/README.md`, `demos/applications/README.md`) and
+the application's files. Say what you are looking
 for and what you expect as you go.
 
 **Task 1. Set up.** From a fresh clone, follow the README's *Development Quick
@@ -97,7 +100,7 @@ try next?
 
 | task | hint | answer |
 |---|---|---|
-| 1 | The README's first-setup commands end with `dune build @all`; the binary is then under `_build`. | `eval "$(opam env)"`, then `alias jacquard="$PWD/_build/default/bin/main.exe"` (or `opam exec -- dune exec jac --`). |
+| 1 | The README's *Running Jacquard* section runs the built binary through Dune. | `eval "$(opam env)"`, then `alias jacquard='opam exec -- dune exec jac --'`. |
 | 2 | The project commands take `--project DIR`; the demo prints to the console. | `jacquard project run --project demos/applications/rota-optimizer demo --allow console` |
 | 3 | `jacquard project test` takes Warp's flags. | `jacquard project test --project demos/applications/rota-optimizer --seed 42 --no-cache` |
 | 4 | Shift start times are computed in `fixtures.jac`. | In `rota.week-shifts`, change `if evening then 16 else 8` to `if evening then 15 else 8`. |
