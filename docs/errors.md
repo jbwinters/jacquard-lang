@@ -537,6 +537,22 @@ fabricated Core result.
 See `spec/host-protocol-v0.md` and its checked vector corpus for exact schemas,
 ordering, limits, terminal mapping, and non-retry behavior.
 
+## Local projects (E17xx)
+
+Diagnostics of the local project format (`project.jqd`,
+`docs/designs/project-structure.md`). The manifest codes below ship with the
+manifest reader and `jacquard project check|fmt`. The design reserves
+E1705–E1734 for composition, visibility, pins and bundles.
+
+| code | meaning | example |
+|---|---|---|
+| E1700 | the manifest is malformed: not one form, wrong head, wrong field shape, or an invalid value | `(project-v2 ...)`, `(units "notes.txt")` |
+| E1701 | an unknown field or sub-field (v1 fails closed) | `(license "MIT")` outside `(metadata ...)` |
+| E1702 | a field, unit, export selector, dependency alias, entry key, grant, or metadata key repeats | `(units "a.jac" "a.jac")` |
+| E1703 | a manifest budget is exceeded: 64 KiB of bytes, 1 KiB per text, or a collection limit | a 300-unit `(units ...)` |
+| E1704 | the running Core does not satisfy `(requires (core "MAJOR.MINOR"))` | `(requires (core "9.0"))` |
+| E1735 | no `project.jqd` was found, or it cannot be read | `jacquard project check` outside any project |
+
 ## Appendix: the W5.3 audit (ten message rewrites)
 
 Before/after wording improvements applied during the audit:

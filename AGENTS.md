@@ -149,6 +149,10 @@ When adding valid corpus files, regenerate the golden hashes with
   `src/surface_lower.ml` (`lower_block`), and `src/surface_print.ml`
   (`try_item`); `test/test_surface_try.ml`, `test/cli/surface-try.t`,
   `demos/request-validation/`.
+- Local projects (PKG.1, design `docs/designs/project-structure.md`): the
+  `project.jqd` reader and validator `src/project_manifest.mli`,
+  `jacquard project check|fmt`; `test/test_project_manifest.ml`,
+  `test/cli/project-manifest.t`.
 - Dist and inference: `prelude/06-dist.jqd`, `prelude/13-dist-lib.jqd`,
   `src/infer_dist.ml`, `test/test_infer.ml`.
 - Warp: `prelude/15-warp.jqd`, `prelude/16-gen.jqd`, `src/warp.ml`,
