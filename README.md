@@ -385,10 +385,24 @@ export JACQUARD_PRELUDE=$PWD/prelude
 opam exec -- dune exec jac -- run demos/basics/m1-fact.jac
 ```
 
+To use the development build as `jac` and `jacquard` from any directory, put
+its install directory on your `PATH` and point it at the checkout's prelude
+and native runtime. Run this from the repository root after `dune build @all`:
+
+```bash
+export PATH="$PWD/_build/install/default/bin:$PATH"
+export JACQUARD_PRELUDE="$PWD/prelude" JACQUARD_RUNTIME="$PWD/runtime"
+jacquard --version
+```
+
 The main commands are:
 
 ```bash
 jac run FILE.jac [--allow fs] [--allow net] [--dry-run]
+jac project run [--project DIR] ENTRY [--allow EFFECT ...]   # a project.jqd entry
+jac project test [--project DIR] [ENTRY] [--seed S] [--no-cache]
+jac project build [--project DIR] ENTRY -o OUT
+jac project check [--project DIR]
 jac relate FILE.jac --vary schedule=N --seed S [--allow EFFECT ...]
 jac relate FILE.jac --vary secret=NAME --seed S [--allow EFFECT ...]
 jac relate FILE.jac --vary grant=net|infer|dist --seed S

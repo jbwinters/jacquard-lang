@@ -3,8 +3,14 @@ kept executable: every scripted step, with the outcome the exercise promises.
 The participant's route is the documentation; this transcript only guards the
 expected results.
 
+Task 1's route (README, *Running Jacquard*): the development build on `PATH`
+with the checkout's prelude and native runtime, so commands work from any
+directory. Here `jacquard` is the build under test.
+
   $ export JACQUARD_PRELUDE=$PWD/../../prelude
   $ export JACQUARD_RUNTIME=$PWD/../../runtime
+  $ (cd /tmp && jacquard --version | cut -d' ' -f1)
+  0.2.0
   $ mkdir demos && cp -RL ../../demos/applications ../../demos/lib demos/ && chmod -R u+w demos
   $ P=$PWD/demos/applications/rota-optimizer
 
@@ -29,7 +35,8 @@ Task 4:
   $ grep -o 'Mon PM \[hours 15..23, lead\]' changed.out
   Mon PM [hours 15..23, lead]
 
-Task 5, the seeded error and what its diagnostic says:
+Task 5, the error the facilitator seeds before handover, and what its
+diagnostic says:
 
   $ cp "$P/fixtures.jac" fixtures.good
   $ sed -i 's/text.concat(rota.day-name(day), /text.concat(day, /' "$P/fixtures.jac"
