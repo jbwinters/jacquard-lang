@@ -475,8 +475,10 @@ through eval, and no `cat` remains. The source inventory stays
 `1092 / 69 / 34`.
 
 List-based predicates follow (SX.30, DES.4 §6). `bool.all`, `bool.any`,
-`list.all?`, `list.any?`, `int.between?` and `real.between?` are new prelude
-objects, and no existing identity changes. The rota optimizer's staff
+`list.all?`, `list.any?`, `int.between?` and `real.between?` are new ring-0
+prelude objects beside `bool.and` and the integer comparisons, and no existing
+identity changes. The ring-0 freeze golden gains exactly their six signatures,
+as the numeric dictionaries' did, and the tier table counts six more terms. The rota optimizer's staff
 validation becomes one flat `bool.all` list. It gives the same verdict as the
 nested `bool.and` tree it replaces on a valid record and on eleven
 single-field violations, and the demo transcript is unchanged. Because the
