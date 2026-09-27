@@ -490,7 +490,9 @@ arithmetic receives a visible dictionary and calls, for example,
 elaborate to that exact value and argument; no such sugar is approved here.
 
 Reserved keywords, the complete list: `type effect once multi fn let rec match handle
-return resume quote unquote if then else as where forall jqd try`. Comments are `--` to end
+return resume quote unquote if then else as where forall jqd try with`. `with` is
+reserved ahead of the nominal field update form (DES.4, Phase 2); no current
+construct uses it. Comments are `--` to end
 of line; `--|` is a doc comment attaching to the next declaration's `doc`
 metadata. Strings are `"..."` with the usual escapes, UTF-8 per D3. Numbers
 are `Int` and `Real` literals. Blocks separate items by newline or `;`,

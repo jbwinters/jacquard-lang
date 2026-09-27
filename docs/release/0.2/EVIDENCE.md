@@ -32,7 +32,7 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1090`
+- Alcotest/QCheck cases: `1091`
 - Cram transcript files: `67`
 - Documentation examples: `34` named examples across `8` documents
 
@@ -426,6 +426,12 @@ Diagnostics E1700–E1704 and E1735 are documented in `docs/errors.md`. The five
 `test/test_project_manifest.ml` cases, including a 2,000-input fuzz property,
 and `test/cli/project-manifest.t` bring the source inventory to
 `1090 / 66 / 34`.
+
+`with` is now a reserved word, ahead of the nominal field update form that
+DES.4 records as approved (`Ctor(value with label: expr, ...)`). No source used
+it as a bare name. A stray use names the reserved word and the `term:` escape,
+and one `test/test_surface_scaffold.ml` case brings the current source
+inventory to `1091 / 66 / 34`.
 
 A project without dependencies then composes and runs. `jacquard project
 check|run|test` composes the library units as one program, applies the library

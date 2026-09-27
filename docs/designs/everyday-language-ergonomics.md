@@ -174,10 +174,10 @@ inside-out, against this document's own clarity measure, so the syntax is
 justified today:
 
 ```jacquard
-NbSnapshot(snapshot with cells: cells, reverse: reverse, cache: cache)
+NbSnapshot(snapshot with cells: cells, reverse: edges, cache: cache)
 ```
 
-elaborating to `let s = snapshot; let u1 = cells; let u2 = reverse; let u3 =
+elaborating to `let s = snapshot; let u1 = cells; let u2 = edges; let u3 =
 cache; match s { | NbSnapshot(cells: _, reverse: _, cache: _, hits: h,
 computed: c) -> NbSnapshot(u1, u2, u3, h, c) }`. It hashes as that explicit
 let-and-match twin (not as the nested setter calls, which are a different
@@ -391,16 +391,28 @@ migrated by SX.27).
 
 ## 11. Decisions Requiring Owner Direction
 
-1. Approve the `Ctor(value with label: expr, ...)` spelling for Phase 2 (the
-   sequencing, setters first, is decided here).
-2. Reserve `with` as a keyword when Phase 2 starts; Phase 1 does not need it,
-   and no source uses it as a bare identifier, so deferring costs nothing.
-3. Accept list-based `bool.all`/`bool.any` and closed-interval `between?`
-   as prelude additions (they change no existing identity).
-4. Confirm "namespace = lowering-time prefix, folded into PascalCase names" as
-   the direction for PKG.1, which specifies in-unit resolution.
-5. Whether prelude (`.jqd`) terms may ever carry `call-abi-v1` companions; until
-   then prelude additions such as `between?` stay positional.
+The owner resolved these on 2026-09-26, adopting the reviewed recommendations:
+
+1. **Approved.** Phase 2 is spelled `Ctor(value with label: expr, ...)`. It
+   lands after the setters (Phase 1) and after the applications' rebuild
+   sites use them, so its effect on those sites is measured against setters.
+   Its printer round trip needs its own `field-update` provenance, because the
+   form hashes as its let-and-match twin.
+2. **`with` is reserved now**, ahead of Phase 2: no source uses it as a bare
+   identifier, and every release that leaves it free raises the cost of
+   taking it later. A stray `with` gets a diagnostic naming the reserved word
+   and the `term:` escape.
+3. **Accepted.** List-based `bool.all`/`bool.any` (and `list.all?`/`list.any?`)
+   and closed-interval `int.between?`/`real.between?` become prelude
+   additions; their `(value, low, high)` argument order is documented and
+   doctested, since prelude terms stay positional (item 5).
+4. **Superseded.** Local projects adopted a checked prefix contract with no
+   rewriting (`docs/designs/project-structure.md` §4, and its §17 decision 2).
+   Lowering-time prefixing is not the direction.
+5. **No, for now.** Prelude terms stay positional. Prelude companions would
+   enter every `project-context-v1` pin (the pin covers the prelude and the
+   companions of the export closure), forcing every project to re-pin; that
+   needs its own design once a concrete prelude API calls for it.
 
 ## 12. Follow-Up Backlog
 
