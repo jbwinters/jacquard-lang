@@ -197,3 +197,7 @@ val bundle_entry : session -> Project_manifest.entry -> (bundled_entry, Diag.t l
 
 val library_bindings : session -> ((string * Resolve.nkind) * Hash.t) list
 (** Every (name, kind) the root library binds, with its identity, sorted. *)
+
+val tracked_state_warning : project -> Diag.t option
+(** W1701 when git tracks any file under the project's [.jacquard/] directory; [None] when nothing
+    is tracked, git is unavailable, or the project is not in a repository. *)

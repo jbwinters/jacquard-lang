@@ -439,6 +439,16 @@ jacquard run entry.jac --store model-store
 jacquard run other-entry.jac --store model-store
 ```
 
+A program that is naturally several files, or that other programs should
+depend on, is a local project: a `project.jqd` manifest lists its library
+units, entries and dependencies, and `jacquard project check|run|test|build`
+compose the units in order with identities exactly those of their
+concatenation. Dependencies are pinned by context identity (`jacquard project
+pin`), see only each other's exports, and can travel as verified bundles
+(`jacquard project bundle`). The four applications under
+`demos/applications/` are projects; `docs/designs/project-structure.md` is the
+design and `docs/errors.md` lists the E17xx diagnostics.
+
 Ordinary programs and demos need only a `.jac` source file. Do not hand-author
 a `.jqd` twin unless a conformance test specifically needs to prove that both
 formats lower to the same kernel and hash. The paired files retained in the

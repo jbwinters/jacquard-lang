@@ -33,7 +33,7 @@ The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
 - Alcotest/QCheck cases: `1092`
-- Cram transcript files: `69`
+- Cram transcript files: `70`
 - Documentation examples: `34` named examples across `8` documents
 
 The development suite also includes corpus goldens, release-manifest checks,
@@ -471,5 +471,25 @@ in a fresh per-build directory and finds bodies by reachability.
 session under both engines, the manifests, and the 25/17/18 suites. It adds
 the migration proofs: every entry's bindings hash exactly as the old
 concatenation, a non-exported display helper is refused by name, by hash and
-through eval, and no `cat` remains. The current source inventory stays
+through eval, and no `cat` remains. The source inventory stays
 `1092 / 69 / 34`.
+
+The whole-feature review of local projects then closed these gaps:
+- **Output overlap (E1725).** It now guards native `project build -o` outputs
+  and `project test --cache-dir`, as well as bundles, so no command can
+  overwrite a unit or write into a dependency.
+- **Tracked state (W1701).** Git tracking any file under `.jacquard/` now
+  draws a warning.
+- **Split signatures (W1702).** A definition that fails its signature in
+  another unit is reported with both files named.
+- **Test cache.** `project test` now actually reuses its Warp cache: its
+  `.jacquard/` parent was never created, so every run missed.
+- **Refusal text.** The manifest and grant refusals are pinned by their exact
+  text.
+
+`test/cli/project-guards.t` covers these, and also: `test` and `build` from
+three working directories with an empty `HOME`, an interrupted pin leaving
+the manifest intact, dependency order not affecting pins, and the
+two-library native build. That brings the current source inventory to
+`1092 / 70 / 34`. The project-structure design's §11 now records the
+implemented store policy: a fresh temporary store per command.

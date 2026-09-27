@@ -44,6 +44,18 @@ let overlap session out =
   in
   List.find_opt (fun input -> within ~dir:out input || within ~dir:input out) inputs
 
+let resolve_output out =
+  let out = absolute out in
+  match Unix.realpath (Filename.dirname out) with
+  | parent -> Filename.concat parent (Filename.basename out)
+  | exception Unix.Unix_error _ -> out
+
+let check_output session ~what out =
+  let out = resolve_output out in
+  match overlap session out with
+  | Some input -> error "E1725" "%s %s overlaps the input %s" what out input
+  | None -> Ok out
+
 (* --- writing --- *)
 
 let hash_form h = Form.Hash h
@@ -65,18 +77,8 @@ let write ~prelude_dir ~root:store_root ~out manifest_file =
   let project = Project_frontend.project session in
   let manifest = project.Project_frontend.manifest in
   let store = Project_frontend.store session in
-  let out =
-    let out = absolute out in
-    match Unix.realpath (Filename.dirname out) with
-    | parent -> Filename.concat parent (Filename.basename out)
-    | exception Unix.Unix_error _ -> out
-  in
-  let* () =
-    match overlap session out with
-    | Some input -> error "E1725" "bundle %s overlaps the input %s" out input
-    | None when Sys.file_exists out -> error "E1725" "bundle %s already exists" out
-    | None -> Ok ()
-  in
+  let* out = check_output session ~what:"bundle" out in
+  let* () = if Sys.file_exists out then error "E1725" "bundle %s already exists" out else Ok () in
   let entries =
     List.sort
       (fun (a : Project_manifest.entry) (b : Project_manifest.entry) ->

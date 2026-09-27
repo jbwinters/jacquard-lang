@@ -13,6 +13,12 @@
 val version : string
 (** ["bundle-v1"]. *)
 
+val check_output : Project_frontend.session -> what:string -> string -> (string, Diag.t list) result
+(** [check_output session ~what out] resolves [out] (its parent's symlinks resolved) and refuses it
+    with E1725 when it contains, or lies inside, a unit or the manifest of the root project, or any
+    dependency's directory. The root project's own directory is allowed, so [.jacquard/] caches and
+    builds inside it are fine. [what] names the output in the diagnostic. *)
+
 type summary = { identity : Hash.t; objects : int; companions : int }
 
 val write :
