@@ -62,7 +62,7 @@ let () =
     match
       Jacquard_native.Build.build ~store
         ~tops:[ (expression, [], []) ]
-        ~prelude_dir ~out:Sys.argv.(3)
+        ~cache_root:".jacquard-native" ~prelude_dir ~out:Sys.argv.(3)
     with
     | Ok _ -> ()
     | Error (`Toolchain message) -> fail message

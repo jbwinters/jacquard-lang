@@ -458,5 +458,18 @@ runs and tests a bundle only after verifying it in full: hashes, ownership,
 closure, type checks, re-derived interfaces and recomputed contexts, prelude
 and Core. A bundle is also a dependency, pinned by the same context identity
 as its source. `test/cli/project-bundle.t` covers each refusal and a second
-checkout that calls an exported callable by its labels, bringing the current
-source inventory to `1092 / 69 / 34`.
+checkout that calls an exported callable by its labels, bringing the source
+inventory to `1092 / 69 / 34`.
+
+The four applications are now local projects. `display`, `dice-coach`,
+`picnic-planner`, `rota-optimizer`, `formula-notebook` and the shared
+interaction `suite` each have a manifest; `display` exports only the two
+helpers the models use. `run.sh` is a thin wrapper over `jacquard project`,
+with no concatenation. `jacquard project build` compiles a `(native)` run entry
+in a fresh per-build directory and finds bodies by reachability.
+`test/cli/applications.t` keeps its transcript: every demo and interactive
+session under both engines, the manifests, and the 25/17/18 suites. It adds
+the migration proofs: every entry's bindings hash exactly as the old
+concatenation, a non-exported display helper is refused by name, by hash and
+through eval, and no `cat` remains. The current source inventory stays
+`1092 / 69 / 34`.

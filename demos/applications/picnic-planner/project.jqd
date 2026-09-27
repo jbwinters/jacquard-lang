@@ -1,0 +1,8 @@
+(project-v1
+  (name "picnic-planner")
+  (requires (core "0.2"))
+  (namespace picnic)
+  (units "model.jac")
+  (exports (term picnic.interactive))
+  (deps (dep (as display) (path "../shared") (pin #ac44b65ede653308312d2798fa1015e29ca2f955d9db5b53cef8b77a5c574bb9)))
+  (entries (run demo (units "demo.jac") (grants console) (native)) (run interactive (units "interactive.jac") (grants console) (native)) (test suite (units "tests.jac"))))

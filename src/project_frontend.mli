@@ -194,3 +194,6 @@ val bundle_entry : session -> Project_manifest.entry -> (bundled_entry, Diag.t l
     run entry's top-level expressions become generated terms [entry.NAME.step-1],
     [entry.NAME.step-2], ..., each a checked zero-argument thunk; a test entry's owned Warp tests
     become typed roots. *)
+
+val library_bindings : session -> ((string * Resolve.nkind) * Hash.t) list
+(** Every (name, kind) the root library binds, with its identity, sorted. *)

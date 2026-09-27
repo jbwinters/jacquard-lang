@@ -152,7 +152,7 @@ When adding valid corpus files, regenerate the golden hashes with
 - Local projects (PKG.1, design `docs/designs/project-structure.md`): the
   `project.jqd` reader and validator `src/project_manifest.mli`, the composing
   frontend `src/project_frontend.mli`, bundles `src/project_bundle.mli` and `src/project_bundle_reader.mli`,
-  `jacquard project check|run|test|pin|interface|bundle|fmt`;
+  `jacquard project check|run|test|build|hash|pin|interface|bundle|fmt`;
   `test/test_project_manifest.ml`, `test/test_project_frontend.ml`,
   `test/cli/project-manifest.t`, `test/cli/project-local.t`,
   `test/cli/project-deps.t`, `test/cli/project-bundle.t`.
