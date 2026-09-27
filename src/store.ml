@@ -389,6 +389,17 @@ let merged_call_abis t proposed =
   in
   merge t.call_abis proposed
 
+(** [add_call_abis t companions] binds imported [call-abi-v1] companions (a verified bundle's) to
+    identities already in the store: E0612 when one conflicts with a bound companion, before any
+    mutation. *)
+let add_call_abis t companions =
+  match merged_call_abis t companions with
+  | Error _ as error -> error
+  | Ok call_abis ->
+      t.call_abis <- call_abis;
+      write_names t;
+      Ok ()
+
 (** [put_decl t decl] canonicalizes, hashes, and stores a resolved declaration, then binds every
     public name it introduces (members, type + constructors, effect + operations) in the name index,
     and installs any explicit term/operation [call-abi-v1] companion transactionally, replacing

@@ -168,3 +168,29 @@ val compare_grants : strict:bool -> session -> Project_manifest.entry -> authori
     normalized as [--allow] normalizes them ([console] also covers [ConsoleInput]), with its checked
     authority: one W1700 (or E1730 when [strict]) for each required effect not declared and each
     declared grant the entry does not use. A manifest never grants authority. *)
+
+(** {1 Bundling} *)
+
+val project : session -> project
+
+val is_prelude_object : session -> Hash.t -> bool
+(** Whether a declaration was installed by the prelude, which a bundle never carries. *)
+
+val root_exports : session -> ((string * Resolve.nkind) * Hash.t) list
+(** The root library's export projection. *)
+
+val graph_contexts : session -> (Hash.t * Form.t * Interface.t) list
+(** Every composed project's context identity, record, and interface, sorted by identity. *)
+
+val graph_dirs : session -> string list
+(** The canonical directory of every project in the graph, the root included. *)
+
+type bundled_entry =
+  | Steps of Hash.t list  (** a run entry's generated thunks, in source order *)
+  | Roots of (string * string * Hash.t) list  (** a test entry's (kind, display, identity) *)
+
+val bundle_entry : session -> Project_manifest.entry -> (bundled_entry, Diag.t list) result
+(** [bundle_entry session entry] checks the entry ({!check_entry}) and installs its bundle roots: a
+    run entry's top-level expressions become generated terms [entry.NAME.step-1],
+    [entry.NAME.step-2], ..., each a checked zero-argument thunk; a test entry's owned Warp tests
+    become typed roots. *)

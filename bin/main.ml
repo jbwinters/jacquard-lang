@@ -3174,7 +3174,7 @@ let grant_all ctx allows ~seed =
       Result.bind acc (fun () -> Prelude.grant ctx name ~infer_cache:None ~out:print_string ~seed))
     (Ok ()) allows
 
-let project_run_cmd project prelude entry_name allows seed =
+let project_run_source project prelude entry_name allows seed =
   with_loaded_project project (fun loaded ->
       match Project_frontend.find_entry_of_kind loaded entry_name Project_manifest.Run with
       | Error ds -> print_diags ds
@@ -3192,7 +3192,7 @@ let project_run_cmd project prelude entry_name allows seed =
                       Project_frontend.walk_entry session tops ~on_resolved:(fun top _warnings ->
                           match top with Kernel.Expr e -> on_expr e | Kernel.Decl _ -> Ok ())))))
 
-let project_test_cmd project prelude entry_name allows seed samples exhaustive budget cache_dir
+let project_test_source project prelude entry_name allows seed samples exhaustive budget cache_dir
     no_cache =
   with_loaded_project project (fun loaded ->
       let selected =
@@ -3251,6 +3251,118 @@ let project_test_cmd project prelude entry_name allows seed samples exhaustive b
               if status = ok then code else status)
             ok entries)
 
+(* --- running a verified bundle (design §9) --- *)
+
+let with_bundle prelude path k =
+  match
+    Project_bundle_reader.load ~prelude_dir:(prelude_dir_of prelude) ~root:(fresh_check_root ())
+      path
+  with
+  | Error ds -> print_diags ds
+  | Ok bundle -> k bundle
+
+let bundle_entry_error path name what =
+  print_diags
+    [
+      cli_diagnostic ~code:"E1718" (Printf.sprintf "bundle %s has no %s entry `%s`" path what name);
+    ]
+
+let project_run_bundle path prelude entry_name allows seed =
+  with_bundle prelude path (fun bundle ->
+      match
+        List.find_map
+          (function
+            | Project_bundle_reader.Run_entry { name; steps; _ } when String.equal name entry_name
+              ->
+                Some steps
+            | _ -> None)
+          bundle.Project_bundle_reader.bundle.entries
+      with
+      | None -> bundle_entry_error path entry_name "run"
+      | Some steps ->
+          (* each step is a checked thunk; running it prints its value, as jacquard run does *)
+          run_program ~store:bundle.Project_bundle_reader.store ~ctx:bundle.ctx ~allows ~seed
+            ~infer_cache:None ~dry_run:false ~schedule_record:None ~requested_mode:None
+            ~walk:(fun ~on_expr ->
+              List.fold_left
+                (fun acc step ->
+                  Result.bind acc (fun () ->
+                      on_expr
+                        {
+                          Kernel.it =
+                            Kernel.App
+                              ({ Kernel.it = Kernel.Ref (step, Kernel.Term); meta = Meta.empty }, []);
+                          meta = Meta.empty;
+                        }))
+                (Ok ()) steps))
+
+let project_test_bundle path prelude entry_name allows seed samples exhaustive budget cache_dir
+    no_cache =
+  with_bundle prelude path (fun bundle ->
+      let tests =
+        List.filter_map
+          (function
+            | Project_bundle_reader.Test_entry { name; roots; _ }
+              when entry_name = None || entry_name = Some name ->
+                Some (name, roots)
+            | _ -> None)
+          bundle.Project_bundle_reader.bundle.entries
+      in
+      match (tests, entry_name) with
+      | [], Some name -> bundle_entry_error path name "test"
+      | _ -> (
+          let seed =
+            match seed with
+            | Some seed -> seed
+            | None ->
+                Random.self_init ();
+                Random.bits ()
+          in
+          let prop_mode =
+            if exhaustive then Warp.Exhaustive { budget } else Warp.Sampling { seed; samples }
+          in
+          let ctx = bundle.ctx in
+          Eval.with_invocation ctx @@ fun _invocation ->
+          match grant_all ctx allows ~seed with
+          | Error ds -> print_diags ds
+          | Ok () ->
+              List.fold_left
+                (fun status (name, roots) ->
+                  if entry_name = None then Printf.printf "entry %s\n%!" name;
+                  let discovered =
+                    List.map
+                      (fun (kind, display, h) ->
+                        match kind with
+                        | "world-test" -> Warp.World (display, h)
+                        | "warp-decl" -> Warp.Relational (display, h)
+                        | _ -> Warp.Hermetic (display, h))
+                      roots
+                  in
+                  let code =
+                    run_suite ~store:bundle.store ~ctx ~cctx:bundle.checker ~allows ~prop_mode
+                      ~schedule_plan:Warp.Default_schedule ~seed ~cache_dir
+                      ~no_cache:(no_cache || cache_dir = None)
+                      ~default_cache_dir:"" ~coverage:false ~prelude
+                      ~discover:(fun () -> discovered)
+                  in
+                  if status = ok then code else status)
+                ok tests))
+
+let project_run_cmd project prelude bundle entry_name allows seed =
+  match bundle with
+  | Some path -> project_run_bundle path prelude entry_name allows seed
+  | None -> project_run_source project prelude entry_name allows seed
+
+let project_test_cmd project prelude bundle entry_name allows seed samples exhaustive budget
+    cache_dir no_cache =
+  match bundle with
+  | Some path ->
+      project_test_bundle path prelude entry_name allows seed samples exhaustive budget cache_dir
+        no_cache
+  | None ->
+      project_test_source project prelude entry_name allows seed samples exhaustive budget cache_dir
+        no_cache
+
 let project_pin_cmd project prelude only dry_run =
   with_project project (fun path _manifest ->
       match
@@ -3289,6 +3401,18 @@ let project_interface_cmd project prelude =
             (Interface.serialize (Project_frontend.interface session));
           ok)
 
+let project_bundle_cmd project prelude out =
+  with_project project (fun path _manifest ->
+      match
+        Project_bundle.write ~prelude_dir:(prelude_dir_of prelude) ~root:(fresh_check_root ()) ~out
+          path
+      with
+      | Error ds -> print_diags ds
+      | Ok { Project_bundle.identity; objects; companions } ->
+          Printf.printf "%s: bundle %s (%d objects, %d companions)\n%!" out (Hash.to_hex identity)
+            objects companions;
+          ok)
+
 let project_fmt_cmd project write =
   with_project project (fun path manifest ->
       if write then
@@ -3325,6 +3449,15 @@ let project_t =
             value & flag & info [ "write"; "w" ] ~doc:"Rewrite project.jqd in place, atomically."))
   in
   let entry_pos = Arg.(required & pos 0 (some string) None & info [] ~docv:"ENTRY") in
+  let bundle_arg =
+    Arg.(
+      value
+      & opt (some string) None
+      & info [ "bundle" ] ~docv:"BUNDLE"
+          ~doc:
+            "Run from a bundle written by jacquard project bundle instead of the project's \
+             sources; it is verified in full before anything runs.")
+  in
   let run =
     Cmd.v
       (Cmd.info "run"
@@ -3333,7 +3466,8 @@ let project_t =
             manifest's (grants ...) are never granted; pass --allow.")
       Term.(
         const (configure_diagnostics project_run_cmd)
-        $ diagnostic_format_arg $ project_arg $ prelude_arg $ entry_pos $ allows_arg $ seed_arg)
+        $ diagnostic_format_arg $ project_arg $ prelude_arg $ bundle_arg $ entry_pos $ allows_arg
+        $ seed_arg)
   in
   let test =
     Cmd.v
@@ -3343,7 +3477,7 @@ let project_t =
             Only the tests the entry's own units bind are discovered.")
       Term.(
         const (configure_diagnostics project_test_cmd)
-        $ diagnostic_format_arg $ project_arg $ prelude_arg
+        $ diagnostic_format_arg $ project_arg $ prelude_arg $ bundle_arg
         $ Arg.(value & pos 0 (some string) None & info [] ~docv:"ENTRY")
         $ allows_arg $ seed_arg $ samples_arg $ exhaustive_arg $ budget_arg
         $ Arg.(
@@ -3368,6 +3502,17 @@ let project_t =
             & info [ "dep" ] ~docv:"ALIAS" ~doc:"Pin only this dependency (repeatable).")
         $ Arg.(value & flag & info [ "dry-run" ] ~doc:"Print the plan without writing anything."))
   in
+  let bundle =
+    Cmd.v
+      (Cmd.info "bundle"
+         ~doc:
+           "Write the project as a verifiable bundle: its closure's objects, interfaces, contexts \
+            and companions, and each entry's roots. Published atomically.")
+      Term.(
+        const (configure_diagnostics project_bundle_cmd)
+        $ diagnostic_format_arg $ project_arg $ prelude_arg
+        $ Arg.(required & opt (some string) None & info [ "o"; "output" ] ~docv:"BUNDLE"))
+  in
   let interface =
     Cmd.v
       (Cmd.info "interface"
@@ -3379,7 +3524,7 @@ let project_t =
   Cmd.group
     (Cmd.info "project"
        ~doc:"Local multi-file projects (project.jqd; docs/designs/project-structure.md).")
-    [ check; run; test; pin; interface; fmt ]
+    [ check; run; test; pin; interface; bundle; fmt ]
 
 let main =
   Cmd.group
