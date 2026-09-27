@@ -37,11 +37,14 @@ on.
    default) and whether the machine arrives with `opam` and the OCaml switch
    already set up. The switch compiles OCaml from source (about ten
    minutes), which would otherwise dominate Task 1's time; record the choice.
-2. Before handing over, seed Task 5's error silently: in
+2. When the participant finishes Task 4, and before they read Task 5, seed
+   Task 5's error out of view: in
    `demos/applications/rota-optimizer/fixtures.jac`, replace
    `rota.day-name(day)` with `day` in the shift label (for example
    `sed -i 's/text.concat(rota.day-name(day), /text.concat(day, /' demos/applications/rota-optimizer/fixtures.jac`).
-   Do not mention it; Task 5 only says that the project no longer checks.
+   Do not seed it earlier: the file is a library unit, so the error stops
+   every entry, including Tasks 2 to 4. Do not mention it; Task 5 only says
+   that the project no longer checks.
 3. Hand over this file's **Participant instructions** section and nothing else.
 4. Do not answer questions about the language, the tools or the diagnostics.
    If the participant has been stuck for ten minutes, offer the task's
@@ -109,7 +112,7 @@ try next?
 
 | task | hint | answer |
 |---|---|---|
-| 1 | The README's *Running Jacquard* section shows how to use the development build from any directory. | From the checkout root: `eval "$(opam env)"`, `export PATH="$PWD/_build/install/default/bin:$PATH"`, `export JACQUARD_PRELUDE="$PWD/prelude" JACQUARD_RUNTIME="$PWD/runtime"`. |
+| 1 | The README's *Running Jacquard* section shows how to use the development build from any directory. | From the checkout root: `eval "$(opam env)"`, `opam exec -- dune build @install`, `export PATH="$PWD/_build/install/default/bin:$PATH"`, `export JACQUARD_PRELUDE="$PWD/prelude" JACQUARD_RUNTIME="$PWD/runtime"`. |
 | 2 | The project commands take `--project DIR`; the demo prints to the console. | `jacquard project run --project demos/applications/rota-optimizer demo --allow console` |
 | 3 | `jacquard project test` takes Warp's flags. | `jacquard project test --project demos/applications/rota-optimizer --seed 42 --no-cache` |
 | 4 | Shift start times are computed in `fixtures.jac`. | In `rota.week-shifts`, change `if evening then 16 else 8` to `if evening then 15 else 8`. |

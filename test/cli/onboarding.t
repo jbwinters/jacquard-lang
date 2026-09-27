@@ -3,9 +3,11 @@ kept executable: every scripted step, with the outcome the exercise promises.
 The participant's route is the documentation; this transcript only guards the
 expected results.
 
-Task 1's route (README, *Running Jacquard*): the development build on `PATH`
-with the checkout's prelude and native runtime, so commands work from any
-directory. Here `jacquard` is the build under test.
+Task 1 itself (building and installing from a fresh clone) is not repeated
+here: dune already puts the build under test on this transcript's `PATH`. The
+transcript sets the same prelude and runtime variables the README's
+*Running Jacquard* section does, and checks the commands work outside the
+checkout.
 
   $ export JACQUARD_PRELUDE=$PWD/../../prelude
   $ export JACQUARD_RUNTIME=$PWD/../../runtime
@@ -35,7 +37,7 @@ Task 4:
   $ grep -o 'Mon PM \[hours 15..23, lead\]' changed.out
   Mon PM [hours 15..23, lead]
 
-Task 5, the error the facilitator seeds before handover, and what its
+Task 5, the error the facilitator seeds after Task 4, and what its
 diagnostic says:
 
   $ cp "$P/fixtures.jac" fixtures.good
