@@ -32,9 +32,9 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1092`
-- Cram transcript files: `69`
-- Documentation examples: `34` named examples across `8` documents
+- Alcotest/QCheck cases: `1095`
+- Cram transcript files: `70`
+- Documentation examples: `35` named examples across `8` documents
 
 The development suite also includes corpus goldens, release-manifest checks,
 native interpreter/compiler differential cases, leak and memory checks,
@@ -471,5 +471,16 @@ in a fresh per-build directory and finds bodies by reachability.
 session under both engines, the manifests, and the 25/17/18 suites. It adds
 the migration proofs: every entry's bindings hash exactly as the old
 concatenation, a non-exported display helper is refused by name, by hash and
-through eval, and no `cat` remains. The current source inventory stays
+through eval, and no `cat` remains. The source inventory stays
 `1092 / 69 / 34`.
+
+List-based predicates follow (SX.30, DES.4 §6). `bool.all`, `bool.any`,
+`list.all?`, `list.any?`, `int.between?` and `real.between?` are new prelude
+objects, and no existing identity changes. The rota optimizer's staff
+validation becomes one flat `bool.all` list. It gives the same verdict as the
+nested `bool.and` tree it replaces on a valid record and on eleven
+single-field violations, and the demo transcript is unchanged. Because the
+prelude identity changed, the applications' dependency pins were re-pinned.
+Three `test/test_stdlib.ml` cases, `test/cli/predicates.t` (interpreter and
+native parity, and the rota verdicts) and the `stdlib-predicates` doctest bring
+the current source inventory to `1095 / 70 / 35`.

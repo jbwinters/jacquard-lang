@@ -276,33 +276,25 @@ rota.valid-input(
                   let preference-ids =
                     list.map(preferences, fn (entry) -> match entry {
                                                           | MkPair(key, _) -> key})
-                  bool.and(
-                    bool.and(int.gte?(id, 0), int.lte?(id, 99)),
-                    bool.and(
+                  bool.all(
+                    [
+                      int.between?(id, 0, 99),
                       bool.not(text.empty?(text.trim(name))),
-                      bool.and(
-                        bool.and(int.gte?(limit, 0), int.lte?(limit, 14)),
-                        bool.and(
-                          bool.and(rota.distinct?(available), rota.distinct?(preference-ids)),
-                          bool.and(
-                            rota.every(available, fn (key) -> rota.member?(key, shift-ids)),
-                            rota.every(
-                              preferences,
-                              fn (
-                                entry,
-                              ) ->
-                                match entry {
-                                  | MkPair(key, points) ->
-                                    bool.and(
-                                      rota.member?(key, shift-ids),
-                                      bool.and(int.gte?(points, 0), int.lte?(points, 10)),
-                                    )
-                                },
-                            ),
-                          ),
-                        ),
+                      int.between?(limit, 0, 14),
+                      rota.distinct?(available),
+                      rota.distinct?(preference-ids),
+                      rota.every(available, fn (key) -> rota.member?(key, shift-ids)),
+                      rota.every(
+                        preferences,
+                        fn (
+                          entry,
+                        ) ->
+                          match entry {
+                            | MkPair(key, points) ->
+                              bool.and(rota.member?(key, shift-ids), int.between?(points, 0, 10))
+                          },
                       ),
-                    ),
+                    ],
                   )
                 }
               },

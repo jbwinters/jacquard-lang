@@ -351,6 +351,69 @@ let test_bool_grid () =
   in
   List.iter (fun (src, want) -> Alcotest.(check string) src want (show src)) checks
 
+(* SX.30: list-based predicates and closed intervals *)
+let test_predicates () =
+  let checks =
+    [
+      ("(app (var bool.all) (var nil))", "true");
+      (Printf.sprintf "(app (var bool.all) %s)" (wlist [ wbool true; wbool true ]), "true");
+      ( Printf.sprintf "(app (var bool.all) %s)" (wlist [ wbool true; wbool false; wbool true ]),
+        "false" );
+      ("(app (var bool.any) (var nil))", "false");
+      (Printf.sprintf "(app (var bool.any) %s)" (wlist [ wbool false; wbool true ]), "true");
+      (Printf.sprintf "(app (var bool.any) %s)" (wlist [ wbool false; wbool false ]), "false");
+      ("(app (var list.all?) (var nil) (lam ((pvar n)) (var false)))", "true");
+      ("(app (var list.any?) (var nil) (lam ((pvar n)) (var true)))", "false");
+      ( Printf.sprintf
+          "(app (var list.all?) %s (lam ((pvar n)) (app (var int.gt?) (var n) (lit 0))))"
+          (wints [ 1; 2; 3 ]),
+        "true" );
+      ( Printf.sprintf
+          "(app (var list.any?) %s (lam ((pvar n)) (app (var int.gt?) (var n) (lit 2))))"
+          (wints [ 1; 2; 3 ]),
+        "true" );
+      (* closed intervals, positional (value, low, high) *)
+      ("(app (var int.between?) (lit 1) (lit 1) (lit 5))", "true");
+      ("(app (var int.between?) (lit 5) (lit 1) (lit 5))", "true");
+      ("(app (var int.between?) (lit 0) (lit 1) (lit 5))", "false");
+      ("(app (var int.between?) (lit 6) (lit 1) (lit 5))", "false");
+      ("(app (var real.between?) (lit 2.0) (lit 1.0) (lit 2.0))", "true");
+      ("(app (var real.between?) (lit 2.5) (lit 1.0) (lit 2.0))", "false");
+    ]
+  in
+  List.iter (fun (src, want) -> Alcotest.(check string) src want (show src)) checks
+
+(* list.all? and list.any? stop at the deciding item, so later callbacks never run *)
+let test_predicates_stop_early () =
+  let emitting result =
+    Printf.sprintf "(lam ((pvar n)) (let nonrec (pwild) (app (var emit) (var n)) %s))" result
+  in
+  Alcotest.(check string)
+    "all? stops at the first false" "(false, cons(1, cons(2, nil)))"
+    (show
+       (Printf.sprintf "(app (var emit.collect) (lam () (app (var list.all?) %s %s)))"
+          (wints [ 1; 2; 3 ])
+          (emitting "(app (var int.lt?) (var n) (lit 2))")));
+  Alcotest.(check string)
+    "any? stops at the first true" "(true, cons(1, cons(2, nil)))"
+    (show
+       (Printf.sprintf "(app (var emit.collect) (lam () (app (var list.any?) %s %s)))"
+          (wints [ 1; 2; 3 ])
+          (emitting "(app (var eq) (var n) (lit 2))")))
+
+let prop_predicates_agree =
+  qtest "bool.all/any over a mapped list = list.all?/any? = List.for_all/exists" ints_arb (fun xs ->
+      let p = "(lam ((pvar n)) (app (var int.gt?) (var n) (lit 0)))" in
+      let mapped = Printf.sprintf "(app (var list.map) %s %s)" (wints xs) p in
+      show (Printf.sprintf "(app (var bool.all) %s)" mapped)
+      = show (Printf.sprintf "(app (var list.all?) %s %s)" (wints xs) p)
+      && show (Printf.sprintf "(app (var bool.all) %s)" mapped)
+         = vbool (List.for_all (fun n -> n > 0) xs)
+      && show (Printf.sprintf "(app (var bool.any) %s)" mapped)
+         = vbool (List.exists (fun n -> n > 0) xs)
+      && show (Printf.sprintf "(app (var list.any?) %s %s)" (wints xs) p)
+         = vbool (List.exists (fun n -> n > 0) xs))
+
 (* the thunked forms short-circuit: the unreached side's effect never happens *)
 let test_bool_short_circuit () =
   let go src = show src in
@@ -644,6 +707,9 @@ let suite =
     Alcotest.test_case "result grid" `Quick test_result_grid;
     Alcotest.test_case "bool grid" `Quick test_bool_grid;
     Alcotest.test_case "bool short-circuit" `Quick test_bool_short_circuit;
+    Alcotest.test_case "SX.30 predicates and closed intervals" `Quick test_predicates;
+    Alcotest.test_case "SX.30 list predicates stop early" `Quick test_predicates_stop_early;
+    prop_predicates_agree;
     Alcotest.test_case "option/result each side effects" `Quick test_each_side_effects;
     Alcotest.test_case "list.each order" `Quick test_each_order;
     prop_getter_seam_laws;
