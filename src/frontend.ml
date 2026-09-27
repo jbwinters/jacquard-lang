@@ -55,14 +55,15 @@ let no_hook _ = Ok ()
 
 (* One loop for every command: validate, pre-resolution hook, resolve against the store's current
    names, post-resolution hook, then install a declaration so later tops see it. *)
-let walk_items ?origin ?(install = Install) ?(before_resolve = no_hook)
+let walk_items ?origin ?(install = Install) ?names ?(before_resolve = no_hook)
     ?(on_resolved = fun _ _ -> Ok ()) ?(on_installed = fun _ _ -> Ok ()) store validate items =
+  let names = match names with Some names -> names | None -> Store.names_view store in
   let rec go = function
     | [] -> Ok ()
     | item :: rest -> (
         let* top = validate item in
         let* () = before_resolve top in
-        let* resolved, warnings = Resolve.resolve_w (Store.names_view store) top in
+        let* resolved, warnings = Resolve.resolve_w names top in
         let* () = on_resolved resolved warnings in
         match resolved with
         | Kernel.Expr _ -> go rest
@@ -83,8 +84,8 @@ let walk ?origin ?install ?(on_parsed = ignore) ?before_resolve ?on_resolved ?on
   walk_items ?origin ?install ?before_resolve ?on_resolved ?on_installed store validate_parsed_top
     parsed
 
-let walk_tops ?origin ?install ?before_resolve ?on_resolved ?on_installed store tops =
-  walk_items ?origin ?install ?before_resolve ?on_resolved ?on_installed store Result.ok tops
+let walk_tops ?origin ?install ?names ?before_resolve ?on_resolved ?on_installed store tops =
+  walk_items ?origin ?install ?names ?before_resolve ?on_resolved ?on_installed store Result.ok tops
 
 let resolve_source_tops ~syntax store ~file source =
   let surface_warnings = ref [] and resolved = ref [] and resolver_warnings = ref [] in

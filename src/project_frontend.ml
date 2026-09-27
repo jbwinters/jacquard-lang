@@ -8,9 +8,20 @@ let max_unit_bytes = 4 * 1024 * 1024
 
 let summary = function
   | "E1703" -> "A project input exceeds a size budget."
+  | "E1705" -> "A name is not visible in this project."
   | "E1706" -> "A library name does not carry the project's namespace."
+  | "E1707" -> "Two projects' namespaces overlap."
+  | "E1708" -> "A depended-on project has no namespace."
+  | "E1709" -> "An explicit identity is not visible in this project."
+  | "E1710" -> "A dependency's pin does not match its context identity."
+  | "E1711" -> "A dependency is unpinned."
+  | "E1712" -> "A transitive dependency's pin does not match its context identity."
+  | "E1713" -> "The project graph has a dependency cycle."
+  | "E1714" -> "One namespace appears at two context identities."
+  | "E1719" -> "A call-ABI companion conflicts across the project graph."
   | "E1715" -> "A declarations-only unit contains a top-level expression."
   | "E1716" -> "A name is defined in two units."
+  | "E1717" -> "An export selector names nothing the project defines."
   | "E1718" -> "The project declares no entry of that name and kind."
   | "E1722" -> "A unit path leaves the project directory."
   | "E1723" -> "A unit is missing or is not a regular file."
@@ -18,20 +29,34 @@ let summary = function
   | "E1730" | "W1700" -> "An entry's declared grants differ from its checked authority."
   | "E1731" -> "Two visible constructors share a name."
   | "E1732" -> "The library refers to a name that only an entry defines."
+  | "E1733" -> "A source or manifest file changed during pinning."
   | "E1734" -> "Two unit entries name the same file."
   | "E1735" -> "No project manifest was found or it could not be read."
   | code -> raise (Diag.Bug_invalid_diagnostic ("unknown project code " ^ code))
 
 let next_step = function
   | "E1703" -> "Split the unit into smaller units."
+  | "E1705" | "E1709" ->
+      "Use what the project's direct dependencies export, or export the name from the project that \
+       defines it."
+  | "E1707" -> "Give each project in the graph a namespace that is not a prefix of another's."
+  | "E1708" -> "Add (namespace NAME) to the dependency's manifest."
+  | "E1710" | "E1712" ->
+      "Review the change, then run jacquard project pin in the project that declares the edge."
+  | "E1711" -> "Run jacquard project pin in the project that declares the dependency."
+  | "E1713" -> "Remove one dependency edge so that the graph has no cycle."
+  | "E1714" -> "Depend on one version of the project throughout the graph."
+  | "E1719" -> "Give the conflicting callables the same labels, or make their bodies differ."
   | "E1706" ->
       "Spell the name with the namespace prefix: `NS.name` for terms and operations, `NS-name` for \
        types and effects."
   | "E1715" -> "Move the expression into a run entry's unit."
   | "E1716" -> "Keep one definition, or rename one of them."
+  | "E1717" -> "Export only names the project's own units define."
   | "E1718" -> "Use an entry the manifest declares, or add it to (entries ...)."
   | "E1722" -> "Keep every unit inside the project directory."
   | "E1723" -> "Point the manifest at an existing regular source file."
+  | "E1733" -> "Run the command again once the files are stable."
   | "E1724" | "E1734" -> "List each source file once, spelled one way."
   | "E1735" -> "Run the command inside a project, or pass --project DIR."
   | "E1730" | "W1700" -> "Make the entry's (grants ...) list exactly the authority it needs."
@@ -369,67 +394,427 @@ let namespace_violations ns tops =
         (binders top))
     tops
 
-(* E1731: a constructor name visible with two owners. [visible] is the store as it stands before
-   the library is installed (the prelude). *)
-let constructor_collisions ?(library_types = []) store tops =
-  let owner_of hash =
-    match Store.locate store hash with
-    | Ok { Store.decl = { Kernel.it = Kernel.DefType { tname; _ }; _ }; _ } -> tname
-    | _ -> Hash.to_hex hash
+(* --- the dependency graph (design §8) --- *)
+
+type node = { project : project; deps : (Project_manifest.dep * node) list }
+
+let project_label project =
+  match project.manifest.Project_manifest.namespace with
+  | Some ns -> ns
+  | None -> project.manifest.name
+
+(* Files read while preparing a graph, with their digests: [project pin] rechecks them before it
+   writes (E1733). *)
+type snapshot = (string, Hash.t) Hashtbl.t
+
+let record_file (snapshot : snapshot) path bytes =
+  Hashtbl.replace snapshot path (Hash.of_string bytes)
+
+let read_bytes path =
+  match In_channel.with_open_bin path In_channel.input_all with
+  | bytes -> Some bytes
+  | exception Sys_error _ -> None
+
+let load_graph ?(pinning = false) ~snapshot manifest_file =
+  let loaded : (string, node) Hashtbl.t = Hashtbl.create 8 in
+  let errors = ref [] in
+  let add ds = errors := !errors @ ds in
+  let rec visit ~chain ~stack manifest_file =
+    match load manifest_file with
+    | Error ds ->
+        add ds;
+        None
+    | Ok project when List.mem project.dir stack ->
+        add [ diag "E1713" (Printf.sprintf "dependency cycle: %s" (String.concat " -> " chain)) ];
+        None
+    | Ok project -> (
+        match Hashtbl.find_opt loaded project.dir with
+        | Some node -> Some node
+        | None ->
+            Option.iter (record_file snapshot manifest_file) (read_bytes manifest_file);
+            let chain = if chain = [] then [ project_label project ] else chain in
+            let is_root = List.length chain = 1 in
+            let deps =
+              List.filter_map
+                (fun (dep : Project_manifest.dep) ->
+                  let where = String.concat " -> " (chain @ [ dep.alias ]) in
+                  if dep.pin = None && not (pinning && is_root) then
+                    add
+                      [
+                        diag "E1711"
+                          (Printf.sprintf "dependency %s is unpinned; run jacquard project pin%s"
+                             where
+                             (if is_root then "" else " in the project that declares it"));
+                      ];
+                  match dep.source with
+                  | Project_manifest.Bundle path ->
+                      add
+                        [
+                          diag "E1735"
+                            (Printf.sprintf
+                               "dependency %s names bundle %S; bundle dependencies are not \
+                                supported yet"
+                               where path);
+                        ];
+                      None
+                  | Project_manifest.Path path -> (
+                      let dir = Filename.concat project.dir path in
+                      match
+                        visit ~chain:(chain @ [ dep.alias ]) ~stack:(project.dir :: stack)
+                          (Filename.concat dir Project_manifest.file_name)
+                      with
+                      | None -> None
+                      | Some child ->
+                          if child.project.manifest.namespace = None then
+                            add
+                              [
+                                diag "E1708"
+                                  (Printf.sprintf
+                                     "dependency %s (%s) declares no namespace; a project that \
+                                      others depend on must declare one"
+                                     where child.project.manifest_file);
+                              ];
+                          Some (dep, child)))
+                project.manifest.deps
+            in
+            let node = { project; deps } in
+            Hashtbl.replace loaded project.dir node;
+            Some node)
   in
-  let local = Hashtbl.create 32 in
-  List.concat_map
-    (function
-      | Kernel.Decl { Kernel.it = Kernel.DefType { tname; cons; _ }; meta } ->
-          List.filter_map
-            (fun (c : Kernel.conspec) ->
-              let clash =
-                match Hashtbl.find_opt local c.con_name with
-                | Some other when not (String.equal other tname) ->
-                    Some (Printf.sprintf "type `%s` of this project" other)
-                | Some _ -> None
-                | None -> (
-                    Hashtbl.add local c.con_name tname;
-                    match Store.lookup_kind store c.con_name Resolve.KCon with
-                    | Some { Resolve.hash; _ } ->
-                        let owner = owner_of hash in
-                        let whose =
-                          if List.mem owner library_types then "the library" else "the prelude"
-                        in
-                        if String.equal owner tname then None
-                        else Some (Printf.sprintf "type `%s` of %s" owner whose)
-                    | None -> None)
-              in
-              Option.map
-                (fun other ->
-                  diag
-                    ?span:(match Meta.span c.kmeta with Some s -> Some s | None -> Meta.span meta)
-                    "E1731"
-                    (Printf.sprintf "constructor `%s` of type `%s` is also a constructor of %s"
-                       c.con_name tname other))
-                clash)
-            cons
-      | _ -> [])
-    tops
+  let root = visit ~chain:[] ~stack:[] manifest_file in
+  (* the namespaces of distinct projects must not be boundary-prefixes of one another (E1707); one
+     namespace at two projects is judged by context identity after composition (E1714) *)
+  let nodes = Hashtbl.fold (fun _ node acc -> node :: acc) loaded [] in
+  let namespaces =
+    List.sort_uniq compare
+      (List.filter_map (fun n -> n.project.manifest.Project_manifest.namespace) nodes)
+  in
+  List.iter
+    (fun a ->
+      List.iter
+        (fun b ->
+          if (not (String.equal a b)) && (has_prefix a "-" b || has_prefix a "." b) then
+            add
+              [
+                diag "E1707"
+                  (Printf.sprintf
+                     "namespace `%s` is a boundary-prefix of namespace `%s` in one project graph" a
+                     b);
+              ])
+        namespaces)
+    namespaces;
+  match (root, !errors) with Some root, [] -> Ok root | _, errors -> Error errors
+
+(* dependency-first, each project once *)
+let topological root =
+  let seen = Hashtbl.create 8 in
+  let rec go acc node =
+    if Hashtbl.mem seen node.project.dir then acc
+    else begin
+      Hashtbl.add seen node.project.dir ();
+      let acc = List.fold_left (fun acc (_, child) -> go acc child) acc node.deps in
+      node :: acc
+    end
+  in
+  List.rev (go [] root)
+
+(* --- views: what a project's checked code may name (design §5) --- *)
+
+type layer = (string, Resolve.entry list) Hashtbl.t
+
+let add_binding (layer : layer) ((name, kind), hash) =
+  let others =
+    List.filter
+      (fun (e : Resolve.entry) -> e.kind <> kind)
+      (Option.value ~default:[] (Hashtbl.find_opt layer name))
+  in
+  Hashtbl.replace layer name ({ Resolve.hash; kind } :: others)
+
+let layer_of bindings =
+  let layer = Hashtbl.create 64 in
+  List.iter (add_binding layer) bindings;
+  layer
+
+(* The first layer that binds a (name, kind) wins. Views are built from each project's own
+   bindings rather than the store's single name index, where one project's constructor could
+   otherwise replace another's. *)
+let view store (layers : layer list) =
+  let base = Store.names_view store in
+  let lookup name =
+    List.fold_left
+      (fun acc layer ->
+        List.fold_left
+          (fun acc (e : Resolve.entry) ->
+            if List.exists (fun (a : Resolve.entry) -> a.kind = e.kind) acc then acc
+            else acc @ [ e ])
+          acc
+          (Option.value ~default:[] (Hashtbl.find_opt layer name)))
+      [] layers
+  in
+  let all_names () =
+    List.sort_uniq String.compare
+      (List.concat_map (fun layer -> Hashtbl.fold (fun name _ acc -> name :: acc) layer []) layers)
+  in
+  { base with Resolve.lookup; all_names }
 
 (* --- sessions --- *)
+
+type composed = {
+  node : node;
+  local : layer;  (** the library's own bindings *)
+  bound_in : ((string * Resolve.nkind) * string option) list;  (** each binding's unit *)
+  exports : ((string * Resolve.nkind) * Hash.t) list;  (** the export projection *)
+  export_layer : layer;
+  interface : Interface.t;
+  context : Form.t;
+  identity : Hash.t;
+  declarations : int;
+}
 
 type session = {
   project : project;
   store : Store.t;
   ctx : Eval.ctx;
   checker : Check.ctx;
-  library_declarations : int;
-  library_bindings : ((string * Resolve.nkind) * string option) list;
-      (** what the library binds, with the unit that binds it *)
+  prelude : layer;
+  owners : (Hash.t, string) Hashtbl.t;  (** identity -> directory of a project that installed it *)
+  composed : (string, composed) Hashtbl.t;  (** by project directory *)
+  mutable root : composed option;
+  snapshot : snapshot;
 }
 
 let store s = s.store
 let eval_ctx s = s.ctx
 let checker s = s.checker
-let library_declarations s = s.library_declarations
 
-(* the names every entry binds, for E1732; entries that fail to compose contribute nothing *)
+let root_composed s =
+  match s.root with Some c -> c | None -> invalid_arg "Project_frontend: no library"
+
+let library_declarations s = (root_composed s).declarations
+let interface s = (root_composed s).interface
+let context_identity s = (root_composed s).identity
+let context_record s = (root_composed s).context
+
+let direct_deps session (node : node) =
+  List.filter_map
+    (fun (_, (child : node)) -> Hashtbl.find_opt session.composed child.project.dir)
+    node.deps
+
+let layers_for session ?entry (node : node) local =
+  (match entry with Some layer -> [ layer ] | None -> [])
+  @ [ local ]
+  @ List.map (fun c -> c.export_layer) (direct_deps session node)
+  @ [ session.prelude ]
+
+(* An identity is visible to [node] unless another project installed it and does not export it to
+   [node] as a direct dependency. The prelude and the project's own objects are always visible. *)
+let visible_hash session (node : node) hash =
+  match Hashtbl.find_all session.owners hash with
+  | [] -> true
+  | owners ->
+      List.exists
+        (fun owner ->
+          String.equal owner node.project.dir
+          || List.exists
+               (fun c ->
+                 String.equal c.node.project.dir owner
+                 && List.exists (fun (_, h) -> Hash.equal h hash) c.exports)
+               (direct_deps session node))
+        owners
+
+let top_refs = function Kernel.Decl d -> Store.decl_refs d | Kernel.Expr e -> Store.expr_refs e
+let meta_of = function Kernel.Decl d -> d.Kernel.meta | Kernel.Expr e -> e.Kernel.meta
+
+let owner_label session hash =
+  match Hashtbl.find_all session.owners hash with
+  | dir :: _ -> (
+      match Hashtbl.find_opt session.composed dir with
+      | Some c -> Printf.sprintf "project `%s`" (project_label c.node.project)
+      | None -> "another project")
+  | [] -> "the prelude"
+
+let hash_refusals session (node : node) top =
+  List.filter_map
+    (fun hash ->
+      if visible_hash session node hash then None
+      else
+        Some
+          (diag
+             ?span:(Meta.span (meta_of top))
+             "E1709"
+             (Printf.sprintf
+                "hash %s is not visible in project `%s`: it belongs to %s, which does not export \
+                 it to this project"
+                (Hash.to_hex hash) (project_label node.project) (owner_label session hash))))
+    (List.sort_uniq Hash.compare (top_refs top))
+
+(* an unknown name that another project binds is a visibility refusal (E1705) *)
+let name_refusal session (node : node) d =
+  match (Diag.code d, Resolve.reference_of d) with
+  | Some ("E0301" | "E0302"), Some (name, kinds) -> (
+      let direct = direct_deps session node in
+      (* another project binds the name with a kind this position accepts *)
+      let binds (c : composed) =
+        List.exists
+          (fun (e : Resolve.entry) -> kinds = [] || List.mem e.kind kinds)
+          (Option.value ~default:[] (Hashtbl.find_opt c.local name))
+      in
+      let owner =
+        Hashtbl.fold
+          (fun _ c acc ->
+            if acc <> None || String.equal c.node.project.dir node.project.dir then acc
+            else if binds c then Some c
+            else acc)
+          session.composed None
+      in
+      match owner with
+      | Some c ->
+          let why =
+            if List.exists (fun d -> d == c) direct then
+              Printf.sprintf "`%s` is private to project `%s`" name (project_label c.node.project)
+            else
+              Printf.sprintf "`%s` belongs to project `%s`, which `%s` does not depend on directly"
+                name (project_label c.node.project) (project_label node.project)
+          in
+          Some (diag ?span:(Diag.span d) "E1705" why)
+      | None -> None)
+  | _ -> None
+
+let map_name_refusals session node ds =
+  List.map (fun d -> Option.value (name_refusal session node d) ~default:d) ds
+
+(* E1731: visible constructors with one name and two owners *)
+let owning_type store hash =
+  match Store.locate store hash with
+  | Ok { Store.decl = { Kernel.it = Kernel.DefType { tname; _ }; _ }; _ } -> tname
+  | _ -> Hash.to_hex hash
+
+let constructor_collisions ?(own = []) session (node : node) tops =
+  let store = session.store in
+  let describe hash =
+    let owner =
+      if List.mem node.project.dir (Hashtbl.find_all session.owners hash) then "the library"
+      else owner_label session hash
+    in
+    Printf.sprintf "type `%s` of %s" (owning_type store hash) owner
+  in
+  (* among what the project sees from its direct dependencies and the prelude *)
+  let seen = Hashtbl.create 64 in
+  let visible_clashes =
+    List.concat_map
+      (fun (layer : layer) ->
+        Hashtbl.fold
+          (fun name entries acc ->
+            List.fold_left
+              (fun acc (e : Resolve.entry) ->
+                if e.kind <> Resolve.KCon then acc
+                else
+                  match Hashtbl.find_opt seen name with
+                  | Some other when not (Hash.equal other e.hash) ->
+                      diag "E1731"
+                        (Printf.sprintf
+                           "constructor `%s` of %s and constructor `%s` of %s are both visible in \
+                            project `%s`"
+                           name (describe other) name (describe e.hash) (project_label node.project))
+                      :: acc
+                  | Some _ -> acc
+                  | None ->
+                      Hashtbl.add seen name e.hash;
+                      acc)
+              acc entries)
+          layer [])
+      (own @ List.map (fun c -> c.export_layer) (direct_deps session node) @ [ session.prelude ])
+  in
+  let local = Hashtbl.create 32 in
+  let local_clashes =
+    List.concat_map
+      (function
+        | Kernel.Decl { Kernel.it = Kernel.DefType { tname; cons; _ }; meta } ->
+            List.filter_map
+              (fun (c : Kernel.conspec) ->
+                let clash =
+                  match Hashtbl.find_opt local c.con_name with
+                  | Some other when not (String.equal other tname) ->
+                      Some (Printf.sprintf "type `%s` of this project" other)
+                  | Some _ -> None
+                  | None -> (
+                      Hashtbl.add local c.con_name tname;
+                      match Hashtbl.find_opt seen c.con_name with
+                      | Some hash when not (String.equal (owning_type store hash) tname) ->
+                          Some (describe hash)
+                      | _ -> None)
+                in
+                Option.map
+                  (fun other ->
+                    diag
+                      ?span:
+                        (match Meta.span c.kmeta with Some s -> Some s | None -> Meta.span meta)
+                      "E1731"
+                      (Printf.sprintf "constructor `%s` of type `%s` is also a constructor of %s"
+                         c.con_name tname other))
+                  clash)
+              cons
+        | _ -> [])
+      tops
+  in
+  List.rev visible_clashes @ local_clashes
+
+(* --- context identity (design §8) --- *)
+
+let rec closure store seen = function
+  | [] -> seen
+  | hash :: rest -> (
+      match Store.locate store hash with
+      | Error _ -> closure store seen rest
+      | Ok { Store.decl_hash; decl; _ } ->
+          if List.exists (Hash.equal decl_hash) seen then closure store seen rest
+          else closure store (decl_hash :: seen) (Store.decl_refs decl @ rest))
+
+let context_form store ~interface ~exports ~deps =
+  let decls = closure store [] (List.map snd exports) in
+  let in_closure hash =
+    match Store.locate store hash with
+    | Ok { Store.decl_hash; _ } -> List.exists (Hash.equal decl_hash) decls
+    | Error _ -> false
+  in
+  let companions =
+    List.sort
+      (fun (a, _) (b, _) -> Hash.compare a b)
+      (List.filter (fun (hash, _) -> in_closure hash) store.Store.call_abis)
+  in
+  let prelude =
+    List.map
+      (fun (file, digest) -> Form.F (Form.form "file" [ Form.Text file; Form.Text digest ]))
+      (List.sort compare (Option.value ~default:[] (Store.prelude_manifest store)))
+  in
+  Form.form "project-context-v1"
+    [
+      Form.F (Form.form "interface" [ Form.Hash (Interface.identity interface) ]);
+      Form.F
+        (Form.form "companions"
+           (List.map
+              (fun (hash, slots) ->
+                Form.F
+                  (Form.form "call-abi-v1"
+                     (Form.Hash hash
+                     :: List.map (fun slot -> Form.F (Store.call_abi_slot_form slot)) slots)))
+              companions));
+      Form.F (Form.form "prelude" prelude);
+      Form.F (Form.form "core" [ Form.Text Version.version ]);
+      Form.F
+        (Form.form "deps"
+           (List.map
+              (fun (alias, identity) ->
+                Form.F (Form.form "dep" [ Form.Sym alias; Form.Hash identity ]))
+              (List.sort compare deps)));
+    ]
+
+let context_identity_of form = Hash.of_string (Printer.print form)
+
+(* --- composing one library --- *)
+
+(* the names every entry of the root binds, for E1732; entries that fail to compose contribute
+   nothing *)
 let entry_defined_names project ~names =
   List.concat_map
     (fun (entry : Project_manifest.entry) ->
@@ -439,62 +824,277 @@ let entry_defined_names project ~names =
       | Error _ -> [])
     project.manifest.entries
 
-let open_library ?(on_lint = ignore) ?(on_warning = ignore) ~prelude_dir ~root project =
-  if Sys.file_exists root && ((not (Sys.is_directory root)) || Array.length (Sys.readdir root) > 0)
-  then invalid_arg ("Project_frontend.open_library: root is not a fresh directory: " ^ root);
-  let* store, ctx = Frontend.open_session ~prelude_dir ~root in
-  let* checker = Frontend.make_checker store in
-  let names = Store.names_view store in
+let bindings_of store decl hashes = (Diff.source_side store [ (decl, hashes) ]).Diff.bindings
+
+let entry_boundary project ~names ds =
+  (* an unresolved name that only an entry defines is the library/entry boundary (E1732) *)
+  let entry_names = lazy (entry_defined_names project ~names) in
+  List.map
+    (fun d ->
+      match Resolve.reference_of d with
+      | Some (name, _) when Diag.code d = Some "E0301" -> (
+          match List.assoc_opt name (Lazy.force entry_names) with
+          | Some entry ->
+              diag ?span:(Diag.span d) "E1732"
+                (Printf.sprintf
+                   "the library refers to `%s`, which only entry `%s` defines; entries are \
+                    composed after the library and cannot be referenced by it"
+                   name entry)
+          | None -> d)
+      | _ -> d)
+    ds
+
+let export_projection project local =
+  List.partition_map
+    (fun (s : Project_manifest.selector) ->
+      let kind =
+        match s.kind with
+        | Project_manifest.Term -> Resolve.KTerm
+        | Con -> Resolve.KCon
+        | Op -> Resolve.KOp
+        | Type -> Resolve.KType
+        | Effect -> Resolve.KEffect
+      in
+      match
+        List.find_opt
+          (fun (e : Resolve.entry) -> e.kind = kind)
+          (Option.value ~default:[] (Hashtbl.find_opt local s.name))
+      with
+      | Some e -> Left ((s.name, kind), e.hash)
+      | None ->
+          Right
+            (diag "E1717"
+               (Printf.sprintf "project `%s` exports (%s %s), which its own units do not define"
+                  (project_label project)
+                  (Project_manifest.kind_name s.kind)
+                  s.name)))
+    project.manifest.Project_manifest.exports
+
+let compose_library ?(on_lint = ignore) ?(on_warning = ignore) ~is_root session (node : node) =
+  let project = node.project in
+  let local = Hashtbl.create 64 in
+  let names = view session.store (layers_for session node local) in
   let* units = read_units project project.manifest.Project_manifest.units in
+  List.iter (fun (file, bytes) -> record_file session.snapshot file bytes) units;
   let* tops = compose ~names ~on_warning:on_lint units in
   let rules =
     expressions_refused "a library unit" tops
     @ cross_unit_duplicates tops
     @ (match project.manifest.namespace with Some ns -> namespace_violations ns tops | None -> [])
-    @ constructor_collisions store tops
+    @ constructor_collisions session node tops
   in
   let* () = if rules = [] then Ok () else Error rules in
   let installed = ref 0 in
   let walked =
-    Frontend.walk_tops store tops
+    Frontend.walk_tops session.store tops ~names
       ~on_resolved:(fun top warnings ->
         List.iter on_warning warnings;
-        let* { Check.warnings; _ } = Check.check_top checker top in
+        let* () = match hash_refusals session node top with [] -> Ok () | ds -> Error ds in
+        let* { Check.warnings; _ } = Check.check_top session.checker top in
         List.iter on_warning warnings;
         Ok ())
-      ~on_installed:(fun _ _ ->
+      ~on_installed:(fun decl ({ Canon.decl_hash; named } as hashes) ->
         incr installed;
+        List.iter (add_binding local) (bindings_of session.store decl hashes);
+        List.iter
+          (fun hash ->
+            if not (List.mem project.dir (Hashtbl.find_all session.owners hash)) then
+              Hashtbl.add session.owners hash project.dir)
+          (decl_hash :: List.map snd named);
         Ok ())
   in
-  let library_bindings =
-    List.concat_map (fun top -> List.map (fun b -> ((b.name, b.kind), b.file)) (binders top)) tops
-  in
   match walked with
-  | Ok () ->
-      Ok { project; store; ctx; checker; library_declarations = !installed; library_bindings }
   | Error ds ->
-      (* an unresolved name that only an entry defines is the library/entry boundary (E1732) *)
-      let entry_names = lazy (entry_defined_names project ~names) in
-      Error
-        (List.map
-           (fun d ->
-             match Resolve.reference_of d with
-             | Some (name, _) when Diag.code d = Some "E0301" -> (
-                 match List.assoc_opt name (Lazy.force entry_names) with
-                 | Some entry ->
-                     diag ?span:(Diag.span d) "E1732"
-                       (Printf.sprintf
-                          "the library refers to `%s`, which only entry `%s` defines; entries are \
-                           composed after the library and cannot be referenced by it"
-                          name entry)
-                 | None -> d)
-             | _ -> d)
-           ds)
+      (* a call-ABI companion that conflicts with one already composed into the graph (E1719) *)
+      let ds =
+        List.map
+          (fun d ->
+            if Diag.code d = Some "E0612" then
+              diag ?span:(Diag.span d) "E1719"
+                (Printf.sprintf "project `%s` conflicts with the graph: %s" (project_label project)
+                   (Diag.cause d))
+            else d)
+          (map_name_refusals session node ds)
+      in
+      Error (if is_root then entry_boundary project ~names ds else ds)
+  | Ok () -> (
+      let exports, missing = export_projection project local in
+      let* () = if missing = [] then Ok () else Error missing in
+      (* derived now, while this project's own bindings are the store's current ones *)
+      let* interface =
+        Interface.of_side session.checker { Diff.store = session.store; bindings = exports }
+      in
+      let deps =
+        List.filter_map
+          (fun ((dep : Project_manifest.dep), (child : node)) ->
+            Option.map
+              (fun c -> (dep.alias, c.identity))
+              (Hashtbl.find_opt session.composed child.project.dir))
+          node.deps
+      in
+      let context = context_form session.store ~interface ~exports ~deps in
+      let composed =
+        {
+          node;
+          local;
+          bound_in =
+            List.concat_map
+              (fun top -> List.map (fun b -> ((b.name, b.kind), b.file)) (binders top))
+              tops;
+          exports;
+          export_layer = layer_of exports;
+          interface;
+          context;
+          identity = context_identity_of context;
+          declarations = !installed;
+        }
+      in
+      (* one namespace at two context identities is refused in v1 (E1714) *)
+      let clash =
+        Hashtbl.fold
+          (fun _ c acc ->
+            match (c.node.project.manifest.namespace, project.manifest.namespace) with
+            | Some a, Some b when String.equal a b && not (Hash.equal c.identity composed.identity)
+              ->
+                Some c
+            | _ -> acc)
+          session.composed None
+      in
+      match clash with
+      | Some c ->
+          error "E1714" "namespace `%s` appears at two context identities: %s (%s) and %s (%s)"
+            (project_label project) c.node.project.dir (Hash.to_hex c.identity) project.dir
+            (Hash.to_hex composed.identity)
+      | None ->
+          Hashtbl.replace session.composed project.dir composed;
+          Ok composed)
+
+(* --- pins (design §8) --- *)
+
+let jacquard_dir project = Filename.concat project.dir ".jacquard"
+let contexts_dir project = Filename.concat (jacquard_dir project) "contexts"
+let interfaces_dir project = Filename.concat (jacquard_dir project) "interfaces"
+let record_path dir identity = Filename.concat dir (Hash.to_hex identity ^ ".jqd")
+
+let changed_components root ~old ~(new_ : Form.t) =
+  match read_bytes (record_path (contexts_dir root) old) with
+  | None -> "previous context record unavailable"
+  | Some bytes -> (
+      match Reader.parse_string ~file:"context" bytes with
+      | Ok [ { Form.head = "project-context-v1"; args = old_args; _ } ] ->
+          let component name args =
+            List.find_map
+              (function Form.F ({ Form.head; _ } as f) when head = name -> Some f | _ -> None)
+              args
+          in
+          let changed =
+            List.filter
+              (fun name ->
+                match (component name old_args, component name new_.Form.args) with
+                | Some a, Some b -> not (Form.equal_ignoring_meta a b)
+                | _ -> true)
+              [ "interface"; "companions"; "prelude"; "core"; "deps" ]
+          in
+          "changed: " ^ String.concat ", " changed
+      | _ -> "previous context record unreadable")
+
+let interface_report root ~old interface =
+  match read_bytes (record_path (interfaces_dir root) old) with
+  | None -> "previous interface unavailable"
+  | Some bytes -> (
+      match Interface.parse ~file:"interface" bytes with
+      | Error _ -> "previous interface unreadable"
+      | Ok previous -> (
+          match Interface.render_report (Interface.diff ~old:previous ~new_:interface) with
+          | Some report -> report
+          | None -> "interface unchanged"))
+
+(* every edge whose pin disagrees with the dependency's computed identity; a root edge is E1710, a
+   transitive one E1712, each with its alias chain *)
+let pin_mismatches ?(skip_root = false) session (root_node : node) =
+  let root = root_node.project in
+  let seen = Hashtbl.create 8 in
+  let rec go chain (node : node) =
+    if Hashtbl.mem seen node.project.dir then []
+    else begin
+      Hashtbl.add seen node.project.dir ();
+      let is_root = List.length chain = 1 in
+      List.concat_map
+        (fun ((dep : Project_manifest.dep), (child : node)) ->
+          let here =
+            match (dep.pin, Hashtbl.find_opt session.composed child.project.dir) with
+            | Some pin, Some c when (not (Hash.equal pin c.identity)) && not (is_root && skip_root)
+              ->
+                [
+                  diag
+                    (if is_root then "E1710" else "E1712")
+                    (Printf.sprintf
+                       "dependency %s is pinned to %s but its context identity is %s (%s; %s)"
+                       (String.concat " -> " (chain @ [ dep.alias ]))
+                       (Hash.to_hex pin) (Hash.to_hex c.identity)
+                       (changed_components root ~old:pin ~new_:c.context)
+                       (interface_report root ~old:pin c.interface));
+                ]
+            | _ -> []
+          in
+          here @ go (chain @ [ dep.alias ]) child)
+        node.deps
+    end
+  in
+  go [ project_label root ] root_node
+
+let open_graph ?(on_lint = ignore) ?(on_warning = ignore) ?(pinning = false) ~prelude_dir ~root
+    manifest_file =
+  if Sys.file_exists root && ((not (Sys.is_directory root)) || Array.length (Sys.readdir root) > 0)
+  then invalid_arg ("Project_frontend.open_graph: root is not a fresh directory: " ^ root);
+  let snapshot = Hashtbl.create 32 in
+  let* root_node = load_graph ~pinning ~snapshot manifest_file in
+  let* store, ctx = Frontend.open_session ~prelude_dir ~root in
+  let* checker = Frontend.make_checker store in
+  let session =
+    {
+      project = root_node.project;
+      store;
+      ctx;
+      checker;
+      prelude =
+        layer_of
+          (List.map (fun (n, (e : Resolve.entry)) -> ((n, e.kind), e.hash)) (Store.names store));
+      owners = Hashtbl.create 256;
+      composed = Hashtbl.create 8;
+      root = None;
+      snapshot;
+    }
+  in
+  let rec compose_all = function
+    | [] -> Ok ()
+    | node :: rest ->
+        let is_root = node == root_node in
+        let on_lint, on_warning = if is_root then (on_lint, on_warning) else (ignore, ignore) in
+        let* composed = compose_library ~on_lint ~on_warning ~is_root session node in
+        if is_root then session.root <- Some composed;
+        compose_all rest
+  in
+  let* () = compose_all (topological root_node) in
+  match pin_mismatches ~skip_root:pinning session root_node with
+  | [] -> Ok (session, root_node)
+  | ds -> Error ds
+
+let open_library ?on_lint ?on_warning ~prelude_dir ~root project =
+  Result.map fst (open_graph ?on_lint ?on_warning ~prelude_dir ~root project.manifest_file)
+
+(* --- entries --- *)
+
+let entry_view session =
+  let root = root_composed session in
+  let entry = Hashtbl.create 32 in
+  (entry, view session.store (layers_for session ~entry root.node root.local))
 
 (* An entry adds names; it never replaces the library's. A name the library binds is E1716 and a
-   constructor that collides with a visible one (the library's or the prelude's) is E1731, as they
-   would be inside the library. *)
+   constructor that collides with a visible one (the library's, a dependency's, or the prelude's) is
+   E1731, as they would be inside the library. *)
 let entry_rules session tops =
+  let root = root_composed session in
   let redefined =
     List.concat_map
       (fun top ->
@@ -502,7 +1102,7 @@ let entry_rules session tops =
           (fun b ->
             if b.kind = Resolve.KCon then None
             else
-              match List.assoc_opt (b.name, b.kind) session.library_bindings with
+              match List.assoc_opt (b.name, b.kind) root.bound_in with
               | Some library_file ->
                   Some
                     (diag ?span:(Meta.span b.meta) "E1716"
@@ -512,17 +1112,34 @@ let entry_rules session tops =
           (binders top))
       tops
   in
-  let library_types =
-    List.filter_map
-      (fun ((name, kind), _) -> if kind = Resolve.KType then Some name else None)
-      session.library_bindings
-  in
-  cross_unit_duplicates tops @ redefined @ constructor_collisions ~library_types session.store tops
+  cross_unit_duplicates tops @ redefined
+  @ constructor_collisions ~own:[ root.local ] session root.node tops
 
 let entry_tops ?(on_lint = ignore) session (entry : Project_manifest.entry) =
   let* units = read_units session.project entry.eunits in
-  let* tops = compose ~names:(Store.names_view session.store) ~on_warning:on_lint units in
+  let* tops = compose ~names:(snd (entry_view session)) ~on_warning:on_lint units in
   match entry_rules session tops with [] -> Ok tops | ds -> Error ds
+
+(* Walk an entry's tops with the root project's view: the entry's own bindings, its library, its
+   direct dependencies' exports, and the prelude. Explicit identities are checked (E1709), unknown
+   names that another project binds are E1705, and [eval-code] payloads go through the same gate. *)
+let walk_entry ?(on_resolved = fun _ _ -> Ok ()) ?(on_installed = fun _ _ -> Ok ()) session tops =
+  let root = root_composed session in
+  let layer, names = entry_view session in
+  Eval.set_code_resolver session.ctx (fun e ->
+      let* e =
+        Result.map_error (map_name_refusals session root.node) (Resolve.resolve_expr names e)
+      in
+      match hash_refusals session root.node (Kernel.Expr e) with [] -> Ok e | ds -> Error ds);
+  Result.map_error
+    (map_name_refusals session root.node)
+    (Frontend.walk_tops session.store tops ~names
+       ~on_resolved:(fun top warnings ->
+         let* () = match hash_refusals session root.node top with [] -> Ok () | ds -> Error ds in
+         on_resolved top warnings)
+       ~on_installed:(fun decl hashes ->
+         List.iter (add_binding layer) (bindings_of session.store decl hashes);
+         on_installed decl hashes))
 
 (* --- checking an entry and its authority (design §7) --- *)
 
@@ -549,7 +1166,7 @@ let check_entry ?on_lint ?(on_warning = ignore) session (entry : Project_manifes
   in
   let effects = ref [] and members = ref [] in
   let* () =
-    Frontend.walk_tops session.store tops
+    walk_entry session tops
       ~on_resolved:(fun top warnings ->
         List.iter on_warning warnings;
         let* { Check.row; warnings; _ } = Check.check_top session.checker top in
@@ -630,3 +1247,101 @@ let compare_grants ~strict session (entry : Project_manifest.entry) authority =
       entry.grants
   in
   missing @ unused
+
+(* --- pinning --- *)
+
+type pin_plan = {
+  alias : string;
+  old_pin : Hash.t option;
+  new_pin : Hash.t;
+  changes : string option;  (** components and interface report when the pin moves *)
+}
+
+let plan_pins session (root_node : node) ~only =
+  let root = root_node.project in
+  let unknown =
+    List.filter
+      (fun alias ->
+        not (List.exists (fun ((d : Project_manifest.dep), _) -> d.alias = alias) root_node.deps))
+      only
+  in
+  if unknown <> [] then
+    error "E1711" "%s declares no dependency %s" root.manifest_file
+      (String.concat ", " (List.map (Printf.sprintf "`%s`") unknown))
+  else
+    Ok
+      (List.filter_map
+         (fun ((dep : Project_manifest.dep), (child : node)) ->
+           if only <> [] && not (List.mem dep.alias only) then None
+           else
+             Option.map
+               (fun c ->
+                 let changes =
+                   match dep.pin with
+                   | Some old when Hash.equal old c.identity -> None
+                   | Some old ->
+                       Some
+                         (Printf.sprintf "%s; %s"
+                            (changed_components root ~old ~new_:c.context)
+                            (interface_report root ~old c.interface))
+                   | None -> None
+                 in
+                 { alias = dep.alias; old_pin = dep.pin; new_pin = c.identity; changes })
+               (Hashtbl.find_opt session.composed child.project.dir))
+         root_node.deps)
+
+let write_file path contents =
+  let temp = Printf.sprintf "%s.%d.tmp" path (Unix.getpid ()) in
+  Out_channel.with_open_bin temp (fun oc -> Out_channel.output_string oc contents);
+  Unix.rename temp path
+
+let rec mkdir_p dir =
+  if not (Sys.file_exists dir) then begin
+    mkdir_p (Filename.dirname dir);
+    try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+  end
+
+let unchanged_snapshot session =
+  let changed =
+    Hashtbl.fold
+      (fun path digest acc ->
+        match read_bytes path with
+        | Some bytes when Hash.equal (Hash.of_string bytes) digest -> acc
+        | _ -> path :: acc)
+      session.snapshot []
+  in
+  match List.sort String.compare changed with
+  | [] -> Ok ()
+  | paths ->
+      error "E1733" "%s changed while pinning; nothing was written" (String.concat ", " paths)
+
+let write_pins session (root_node : node) plans =
+  let root = root_node.project in
+  let* () = unchanged_snapshot session in
+  match
+    (* the records of every dependency in the graph, for future mismatch reports *)
+    mkdir_p (contexts_dir root);
+    mkdir_p (interfaces_dir root);
+    Hashtbl.iter
+      (fun _ c ->
+        if not (String.equal c.node.project.dir root.dir) then begin
+          write_file (record_path (contexts_dir root) c.identity) (Printer.print c.context ^ "\n");
+          write_file
+            (record_path (interfaces_dir root) c.identity)
+            (Interface.serialize c.interface)
+        end)
+      session.composed
+  with
+  | exception (Unix.Unix_error _ | Sys_error _) ->
+      error "E1735" "cannot write pin records under %s" (jacquard_dir root)
+  | () ->
+      let* () = unchanged_snapshot session in
+      let deps =
+        List.map
+          (fun (dep : Project_manifest.dep) ->
+            match List.find_opt (fun p -> String.equal p.alias dep.alias) plans with
+            | Some plan -> { dep with pin = Some plan.new_pin }
+            | None -> dep)
+          root.manifest.Project_manifest.deps
+      in
+      Project_manifest.write_canonical root.manifest_file { root.manifest with deps }
