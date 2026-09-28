@@ -86,7 +86,8 @@ mode          := "once" | "multi"
 raw-top       := "jqd" raw-bootstrap-form
 
 expr          := call (cont "|>" cont call)*
-call          := primary ("(" ([term-name ":" cont] expr ("," [term-name ":" cont] expr)*)? ")")*
+call          := primary ("(" call-items? ")")*
+call-items    := [term-name ":" cont] expr ("," [term-name ":" cont] expr)* | expr "with" term-name ":" cont expr ("," term-name ":" cont expr)*
 primary       := literal | marked-text | value-name | internal-ref | paren | tuple | list | block | fn
 | match | if | handle | quote | unquote | annotation
 paren         := "(" expr ")"
@@ -490,9 +491,9 @@ arithmetic receives a visible dictionary and calls, for example,
 elaborate to that exact value and argument; no such sugar is approved here.
 
 Reserved keywords, the complete list: `type effect once multi fn let rec match handle
-return resume quote unquote if then else as where forall jqd try with`. `with` is
-reserved ahead of the nominal field update form (DES.4, Phase 2); no current
-construct uses it. Comments are `--` to end
+return resume quote unquote if then else as where forall jqd try with`. `with`
+has one use, the nominal field update `Ctor(value with label: e)` (SX.28b,
+§5 Types and effects). Comments are `--` to end
 of line; `--|` is a doc comment attaching to the next declaration's `doc`
 metadata. Strings are `"..."` with the usual escapes, UTF-8 per D3. Numbers
 are `Int` and `Real` literals. Blocks separate items by newline or `;`,
@@ -814,8 +815,51 @@ and provenance are not identity, so its hash is that of the match a programmer
 would write. It has the accessors' provenance, hiding and collision rule: a
 setter name that an explicit definition of the file defines, or that one of
 the type's own accessors already binds (a label spelled `with-x` beside a
-label `x`), is E1241. The `with` update form (Phase 2) is not part of the
-language yet.
+label `x`), is E1241.
+
+SX.28b (DES.4 Phase 2) adds the update of several fields at once. Inside a
+constructor call's parentheses, exactly one expression precedes the reserved
+word `with`, and one or more `label: expression` fields follow it:
+
+```jacquard
+type Snapshot = | Snapshot(cells: Int, reverse: Int, cache: Int, hits: Int, computed: Int)
+refresh(s, cells, edges) = Snapshot(s with cells: cells, reverse: edges, cache: 0)
+-- refresh(Snapshot(1, 2, 3, 4, 5), 10, 20) is Snapshot(10, 20, 0, 4, 5)
+```
+
+The value before `with` is any expression; the reserved word ends it, so
+`Snapshot(s |> f with hits: 0)` updates the pipe's result. A second positional
+expression on either side of `with`, a labeled item before it, no field after
+it, or a `with` form on the right of `|>` is the ordinary syntax error E1220.
+The form elaborates to, and hashes exactly as, the explicit let-and-match twin
+
+```text
+let v = s; let u1 = cells; let u2 = edges; let u3 = 0
+match v { | Snapshot(cells: _, reverse: _, cache: _, hits: h, computed: c) -> Snapshot(u1, u2, u3, h, c) }
+```
+
+so the value is evaluated first and then each new field exactly once, in
+source order, whatever the fields' declaration order. The twin is built during
+resolution, where the constructor's fields are known. Its binders are fresh
+against every local in scope, so nothing a field expression mentions is
+captured, and binder names are not identity, so `hash` of a `with` form equals
+`hash` of the hand-written twin. It is not the hash of the equivalent chain of
+setters, which is a different kernel tree with the same value. A
+parametric field may change type, as with the setters. Labels are checked at
+the labeled-pattern boundary: an unknown label is E0305 and a repeated one
+E0306, both at the label, and a constructor without labeled fields is E0307.
+The callee must be a constructor (E0302 otherwise). A `with` names one
+constructor, so on a sum type it is a one-clause match that the exhaustiveness
+check refuses (E0813); the message then says "use `<type>.with-<label>` for a
+total update", naming the generated setter of every updated label that all the
+constructors carry. The printer and `fmt` keep the `with` spelling through a
+hash-excluded `field-update` provenance on the lowered application (a resolved
+form prints back too); once the form wraps, the value stays on the opening line
+and each field takes its own line. `fmt` never rewrites a setter call into a
+`with` form or back, so a single-field update may keep using the setter.
+`jacquard export` writes the elaborated twin, and a `with` form inside `quote`
+is refused like a named call (E1238). `test/test_surface_field_update.ml` and
+`test/cli/surface-field-update.t` pin the contract.
 
 `Choice`'s `a` is a phantom parameter: it never appears in `choose`'s
 signature, and that is legal: an effect's type parameters scope over every
@@ -1148,7 +1192,7 @@ in commit messages and task dependencies.)
 | D33 | quote body | surface syntax inside `quote { }`, captured pre-resolution |
 | D34 | case convention | PascalCase for types/constructors/effects, kebab-case for terms/operations; pattern-position capitals are constructors |
 | D35 | handle delimiting | atomic body needs no wrapper; a non-atomic body takes an explicit `{ }` block; the clause list is always braced |
-| D36 | labeled fields | shipped: labeled declarations, SX.24 partial patterns, SX.27 generated accessors, and SX.28 generated setters `<type>.with-<label>` ship; pattern use validates unknown, repeated, absent, and ambiguous labels; declarations reject repeated (E1239), type-inconsistent (E1240), and colliding (E1241) labels; a label only some constructors carry has no accessor |
+| D36 | labeled fields | shipped: labeled declarations, SX.24 partial patterns, SX.27 generated accessors, SX.28 generated setters `<type>.with-<label>`, and SX.28b field updates `Ctor(value with label: e)` (hashing as their let-and-match twin) ship; pattern use validates unknown, repeated, absent, and ambiguous labels; declarations reject repeated (E1239), type-inconsistent (E1240), and colliding (E1241) labels; a label only some constructors carry has no accessor |
 | D37 | namespace puns | blessed permanently: dotted names are one atomic token forever; a future field-access form will not use `.` |
 | D38 | text building | variadic `text.join` is the ordinary lowering target and remains directly callable |
 | D39 | comparison naming | `?`-suffixed predicates beside bare dictionary names; prelude gains `gt? gte? lt? lte?`; the `add-real` family migrates to `real.*` |

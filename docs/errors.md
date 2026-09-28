@@ -83,12 +83,12 @@ malformed source, path, or host-message byte in a string field is replaced with 
 | code | meaning | example |
 |------|---------|---------|
 | E0301 | unknown name (with near-miss suggestions) | `(var ad)` when `add` exists |
-| E0302 | name kind mismatch | `(ann (lit 1) (tref add))` — a term used as a type |
+| E0302 | name kind mismatch; also a `with` field update whose callee is not a constructor | `(ann (lit 1) (tref add))` — a term used as a type; `add(s with cells: 1)` |
 | E0303 | duplicate binding name in a defterm group or surface definition run | two bindings named `f` |
 | E0304 | variable bound more than once in one binder group | `(lam ((pvar x) (pvar x)) ...)` |
-| E0305 | labeled constructor pattern selects an unknown field | `Snapshot(missing: x)` |
-| E0306 | labeled constructor pattern selects one field more than once | `Snapshot(error: x, error: y)` |
-| E0307 | constructor has no usable field-label schema for a labeled pattern | `Pair(left: x)` when `Pair` has only positional fields |
+| E0305 | labeled constructor pattern, or a `with` field update, selects an unknown field (reported at the label) | `Snapshot(missing: x)`; `Snapshot(s with missing: 1)` |
+| E0306 | labeled constructor pattern, or a `with` field update, selects one field more than once (reported at the repeated label) | `Snapshot(error: x, error: y)`; `Snapshot(s with error: 1, error: 2)` |
+| E0307 | constructor has no usable field-label schema for a labeled pattern or a `with` field update | `Pair(left: x)` when `Pair` has only positional fields |
 | E0308 | constructor declaration has ambiguous duplicate labels at labeled-pattern use; surface declarations now refuse the duplicate itself (E1239), so this reaches only bootstrap declarations | `Pair(left: x)` when `left` is declared twice in `.jqd` |
 | E0309 | callee has no usable explicit named-call ABI | `local(value: 1)` for a local function, or `plain(value: 1)` for an unlabeled top-level term |
 | E0310 | named call selects an unknown label | `resize(image: img, size: 2)` when the declared label is `scale` |
@@ -156,7 +156,7 @@ malformed source, path, or host-message byte in a string field is replaced with 
 | E0810 | type constructor arity (kind) error | `(tapp (tref option) a b)` |
 | E0811 | unbound type or row variable | `(tvar zz)` in a declaration |
 | E0812 | unbound variable in an effect op signature | `(op o () (tvar zz))` |
-| E0813 | non-exhaustive match (with witness) | bool match missing `false` |
+| E0813 | non-exhaustive match (with witness); for a `with` field update of one constructor of a sum type, the message names the total setter (`use <type>.with-<label> for a total update`) | bool match missing `false`; `Circle(s with name: "c")` when `Shape` also has `Square` |
 | E0814 | ungranted effect in the program manifest | running a printing program without `--allow console` |
 | E0815 | effectful top-level definition body | `(defterm ((binding x () (app (var print) ...))))` |
 | E0816 | a once resumption may be consumed twice on one possible path | two sequential calls to the same once-clause `resume` binder |
@@ -231,7 +231,7 @@ also emits E0817; consuming the captured resumption twice emits E0816.
 | E1217 | malformed internal group reference | `#group[x]` |
 | E1218 | invalid raw UTF-8 scalar in a surface string | a raw `0xff` byte between quotes |
 | E1219 | malformed marked text interpolation | an unclosed `{expr}` or nested `$"..."` |
-| E1220 | unexpected token in the recovering surface parser | stray `|` at top level |
+| E1220 | unexpected token in the recovering surface parser, including a malformed `with` field update | stray `|` at top level; `Snapshot(s, t with cells: 1)` |
 | E1221 | unclosed braced construct during surface recovery, with opening and failure spans | a `quote`, `match`, `handle`, or block truncated before `}` or closed with `]`/`)` |
 | E1222 | reserved pre-SS.9 binding-pattern parser gate; refutable binders now use E0205/E0206 during lowering | `fn (Some) -> 1` |
 | E1223 | missing block-item separator | `{ 1 2 }` instead of `{ 1; 2 }` |
@@ -247,7 +247,7 @@ also emits E0817; consuming the captured resumption twice emits E0816.
 | E1235 | a signature or definition was lowered without its required file context | calling `lower_top` on a signature |
 | E1236 | missing, duplicated, or conflicting surface operation mode; an omitted mode includes migration guidance | `effect E where { op : () -> T }` |
 | E1237 | labeled constructor pattern appears inside quoted surface syntax | `quote { match packet { \| Packet(right: value) -> value } }` |
-| E1238 | named call appears anywhere inside quoted surface syntax, including a live unquote | `quote { unquote(choose(left: 1)) }` |
+| E1238 | named call or `with` field update appears anywhere inside quoted surface syntax, including a live unquote | `quote { unquote(choose(left: 1)) }` |
 | E1239 | a constructor declares the same field label twice | `type Pair = \| Pair(left: Int, left: Text)` |
 | E1240 | a field label has different types in different constructors of one type | `type Key = \| Numbered(id: Int) \| Named(id: Text)` |
 | E1241 | a generated field accessor `<type>.<label>` or setter `<type>.with-<label>` collides with a term or effect operation the same file declares, or a setter with one of the type's own accessors | `type Pair = \| Pair(left: Int)` beside `pair.left(p) = 0` |

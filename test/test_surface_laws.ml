@@ -57,7 +57,7 @@ let test_one_page_grammar_snapshot () =
   Alcotest.(check bool) "L7 grammar stays within 100 nonblank lines" true (List.length lines <= 100);
   Alcotest.(check string)
     "L7 grammar snapshot (review docs/surface-syntax.md before updating)"
-    "1c34c8e7768c18e7787a3caeb86be860bac98ab6eb88a22549d5c072e5e70aac"
+    "e79eb52f4bfc584257bb1a1cd8cd16f2f785d175159d25e015dbfc583663c219"
     (Hash.to_hex (Hash.of_string grammar))
 
 let format_surface ?width path source =
