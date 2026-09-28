@@ -32,9 +32,9 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1088`
-- Cram transcript files: `65`
-- Documentation examples: `34` named examples across `8` documents
+- Alcotest/QCheck cases: `1098`
+- Cram transcript files: `72`
+- Documentation examples: `35` named examples across `8` documents
 
 The development suite also includes corpus goldens, release-manifest checks,
 native interpreter/compiler differential cases, leak and memory checks,
@@ -404,8 +404,117 @@ Two store and identity repairs precede local projects:
   refused. `Span.merge` never combines offsets from different
   files (`test/test_surface_compose.ml`).
 
-The three new store cases and the seven composition cases bring the source
-inventory to `1085 / 65 / 34`.
+The three new store cases and the seven composition cases bring the current
+source inventory to `1085 / 65 / 34`.
+
+Local projects begin with their manifest (PKG.1 slice A,
+`docs/designs/project-structure.md` §3). `Project_manifest` reads
+`project.jqd`, the `project-v1` data value, and validates it against a strict
+schema:
+
+- unknown fields fail closed
+- duplicates and budgets are refused
+- units must be relative source paths
+- `(requires (core ...))` is checked against the running Core
+
+It prints one canonical spelling, and keeps a semantic digest (without `name`
+and `metadata`) separate from the full document digest. `jacquard project
+check|fmt` finds the manifest upward from the working directory, stopping at
+a `.git` directory, and rewrites it atomically.
+
+Diagnostics E1700–E1704 and E1735 are documented in `docs/errors.md`. The five
+`test/test_project_manifest.ml` cases, including a 2,000-input fuzz property,
+and `test/cli/project-manifest.t` bring the source inventory to
+`1090 / 66 / 34`.
+
+A project without dependencies then composes and runs. `jacquard project
+check|run|test` composes the library units as one program, applies the library
+rules and the namespace contract, and checks the library once. Each entry is
+composed separately over the frozen library, and only the tests an entry's own
+units bind are discovered. Declared grants are compared with checked authority
+(W1700, or E1730 under `--strict-grants`) and never granted. Unit paths are
+contained, regular, bounded and listed once. `test/cli/project-local.t` covers
+each refusal and location independence, bringing the source inventory to
+`1090 / 67 / 34`.
+
+Projects then depend on one another. Each library in the graph is composed
+dependency-first into one store and resolved in its own view: its bindings,
+its direct dependencies' export projections, and the prelude. Private names
+(E1705) and private identities (E1709) are refused, in client code and in
+`eval-code` payloads alike. A dependency is pinned by its `project-context-v1`
+identity. `jacquard project pin` writes the pins atomically after rechecking
+every file it read (E1733), and every build compares them (E1710, transitive
+E1712). `test/cli/project-deps.t` covers two libraries with private helpers,
+pins and their change reports, and each graph refusal.
+`test/test_project_frontend.ml` covers pin stability and the concurrent-edit
+refusal. Together they bring the source inventory to `1092 / 68 / 34`.
+
+A project then travels as a bundle. `jacquard project bundle` writes the
+closure's objects with their interfaces, contexts and companions. Each run
+step is a separately checked thunk, and each test entry is a list of typed
+Warp roots. The bundle is published atomically, byte-identical for identical
+inputs, and refused when `eval-code` is reachable from any root. `--bundle`
+runs and tests a bundle only after verifying it in full: hashes, ownership,
+closure, type checks, re-derived interfaces and recomputed contexts, prelude
+and Core. A bundle is also a dependency, pinned by the same context identity
+as its source. `test/cli/project-bundle.t` covers each refusal and a second
+checkout that calls an exported callable by its labels, bringing the source
+inventory to `1092 / 69 / 34`.
+
+The four applications are now local projects. `display`, `dice-coach`,
+`picnic-planner`, `rota-optimizer`, `formula-notebook` and the shared
+interaction `suite` each have a manifest; `display` exports only the two
+helpers the models use. `run.sh` is a thin wrapper over `jacquard project`,
+with no concatenation. `jacquard project build` compiles a `(native)` run entry
+in a fresh per-build directory and finds bodies by reachability.
+`test/cli/applications.t` keeps its transcript: every demo and interactive
+session under both engines, the manifests, and the 25/17/18 suites. It adds
+the migration proofs: every entry's bindings hash exactly as the old
+concatenation, a non-exported display helper is refused by name, by hash and
+through eval, and no `cat` remains. The source inventory stays
+`1092 / 69 / 34`.
+
+A documentation-only onboarding exercise (`docs/onboarding/exercise.md`) asks
+an unfamiliar developer to set up, run, test, change, diagnose and natively
+build the rota optimizer from the public documents, with facilitator rules
+and a recording sheet. The owner's own read-through is recorded as owner
+review, never as participant evidence. `test/cli/onboarding.t` keeps every
+scripted step and promised outcome true, bringing the source inventory to
+`1092 / 70 / 34`. The participant exercise itself remains to be
+run.
+
+The whole-feature review of local projects then closed these gaps:
+- **Output overlap (E1725).** It now guards native `project build -o` outputs
+  and `project test --cache-dir`, as well as bundles, so no command can
+  overwrite a unit or write into a dependency.
+- **Tracked state (W1701).** Git tracking any file under `.jacquard/` now
+  draws a warning.
+- **Split signatures (W1702).** A definition that fails its signature in
+  another unit is reported with both files named.
+- **Test cache.** `project test` now actually reuses its Warp cache: its
+  `.jacquard/` parent was never created, so every run missed.
+- **Refusal text.** The manifest and grant refusals are pinned by their exact
+  text.
+
+`test/cli/project-guards.t` covers these, and also: `test` and `build` from
+three working directories with an empty `HOME`, an interrupted pin leaving
+the manifest intact, dependency order not affecting pins, and the
+two-library native build. That brings the source inventory to
+`1092 / 71 / 34`. The project-structure design's §11 now records the
+implemented store policy: a fresh temporary store per command.
+
+List-based predicates follow (SX.30, DES.4 §6). `bool.all`, `bool.any`,
+`list.all?`, `list.any?`, `int.between?` and `real.between?` are new ring-0
+prelude objects beside `bool.and` and the integer comparisons, and no existing
+identity changes. The ring-0 freeze golden gains exactly their six signatures,
+as the numeric dictionaries' did, and the tier table counts six more terms. The rota optimizer's staff
+validation becomes one flat `bool.all` list. It gives the same verdict as the
+nested `bool.and` tree it replaces on a valid record and on eleven
+single-field violations, and the demo transcript is unchanged. Because the
+prelude identity changed, the applications' dependency pins were re-pinned.
+Three `test/test_stdlib.ml` cases, `test/cli/predicates.t` (interpreter and
+native parity, and the rota verdicts) and the `stdlib-predicates` doctest bring
+the source inventory to `1095 / 72 / 35`.
 
 Surface sugar then binds the prelude's constructors by identity (SX.31). `if`,
 list literals and `try` elaborate against the prelude's `Bool`, `List` and
@@ -414,4 +523,4 @@ cannot capture them. Programs already resolving to the prelude keep their
 hashes. The three `test/test_sugar_identity.ml` cases pin the identities
 against the loaded prelude, show that each sugar's hash ignores same-named
 file constructors, and confirm that stub environments still resolve by name.
-Together they bring the current source inventory to `1088 / 65 / 34`.
+Together they bring the current source inventory to `1098 / 72 / 35`.

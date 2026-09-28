@@ -1,0 +1,10 @@
+(project-v1
+  (name "rota-optimizer")
+  (requires (core "0.2"))
+  (namespace rota)
+  (units "model.jac" "fixtures.jac" "report.jac")
+  (entries
+    (run demo (units "demo.jac") (grants console) (native))
+    (run interactive (units "interactive.jac") (grants console) (native))
+    (run custom-example (units "custom-example.jac") (grants console))
+    (test suite (units "tests.jac" "interaction-tests.jac"))))
