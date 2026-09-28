@@ -27,6 +27,8 @@ let summary = function
   | "E1723" -> "A unit is missing or is not a regular file."
   | "E1724" -> "Two units' paths differ only by letter case."
   | "E1730" | "W1700" -> "An entry's declared grants differ from its checked authority."
+  | "W1701" -> "Local project state is tracked by version control."
+  | "W1702" -> "This definition's signature is in another unit."
   | "E1731" -> "Two visible constructors share a name."
   | "E1732" -> "The library refers to a name that only an entry defines."
   | "E1733" -> "A source or manifest file changed during pinning."
@@ -60,6 +62,10 @@ let next_step = function
   | "E1724" | "E1734" -> "List each source file once, spelled one way."
   | "E1735" -> "Run the command inside a project, or pass --project DIR."
   | "E1730" | "W1700" -> "Make the entry's (grants ...) list exactly the authority it needs."
+  | "W1702" -> "Correct whichever of the signature and the definition is wrong."
+  | "W1701" ->
+      "Remove it from version control (git rm -r --cached .jacquard) and ignore it; it holds \
+       caches, builds and pin records that belong to one checkout."
   | "E1731" -> "Rename one constructor so every visible constructor name has one owner."
   | "E1732" ->
       "Move the definition into a library unit; the library is checked before, and without, any \
@@ -923,6 +929,34 @@ let import_bundle session (node : node) =
       declarations = List.length verified.objects;
     }
 
+(* A definition checked against a signature declared in another unit: a checker failure names
+   both files (design §6), since the failing span covers only one of them. *)
+let signature_notes = function
+  | Kernel.Decl { Kernel.it = Kernel.DefTerm bindings; meta } ->
+      List.filter_map
+        (fun (b : Kernel.binding) ->
+          (* the binding's own span merges signature and definition, keeping the signature's file
+             when they differ, so the definition's file comes from its value *)
+          let value_file =
+            match span_file b.value.Kernel.meta with Some f -> Some f | None -> span_file meta
+          in
+          match b.annot with
+          | Some annot -> (
+              match Meta.span annot.Kernel.meta with
+              | Some sig_span when Some sig_span.Span.file <> value_file ->
+                  Some
+                    (Diag.warning ~span:sig_span ~code:"W1702" ~domain:Diag.Project
+                       ~summary:(summary "W1702")
+                       ~cause:
+                         (Printf.sprintf
+                            "`%s` is defined in %s and checked against its signature in %s" b.bname
+                            (where value_file) sig_span.Span.file)
+                       ~next_step:(next_step "W1702") ~contrast:None ())
+              | _ -> None)
+          | None -> None)
+        bindings
+  | _ -> []
+
 let compose_library ?(on_lint = ignore) ?(on_warning = ignore) ~is_root session (node : node) =
   let project = node.project in
   let local = Hashtbl.create 64 in
@@ -943,7 +977,11 @@ let compose_library ?(on_lint = ignore) ?(on_warning = ignore) ~is_root session 
       ~on_resolved:(fun top warnings ->
         List.iter on_warning warnings;
         let* () = match hash_refusals session node top with [] -> Ok () | ds -> Error ds in
-        let* { Check.warnings; _ } = Check.check_top session.checker top in
+        let* { Check.warnings; _ } =
+          Result.map_error
+            (fun ds -> ds @ signature_notes top)
+            (Check.check_top session.checker top)
+        in
         List.iter on_warning warnings;
         Ok ())
       ~on_installed:(fun decl ({ Canon.decl_hash; named } as hashes) ->
@@ -1459,3 +1497,28 @@ let library_bindings s =
        (fun name entries acc ->
          List.map (fun (e : Resolve.entry) -> ((name, e.kind), e.hash)) entries @ acc)
        (root_composed s).local [])
+
+(* W1701: files under the project's .jacquard/ that git tracks. Silent when git is unavailable or
+   the project is not in a repository. *)
+let tracked_state_warning project =
+  let dir = Filename.concat project.dir ".jacquard" in
+  if not (Sys.file_exists dir) then None
+  else
+    match
+      Unix.open_process_args_full "git"
+        [| "git"; "-C"; project.dir; "ls-files"; "--"; ".jacquard" |]
+        (Unix.environment ())
+    with
+    | exception Unix.Unix_error _ -> None
+    | (out, inp, err) as process ->
+        close_out_noerr inp;
+        let tracked = In_channel.input_all out in
+        ignore (In_channel.input_all err);
+        ignore (Unix.close_process_full process);
+        let files = List.filter (fun l -> l <> "") (String.split_on_char '\n' tracked) in
+        if files = [] then None
+        else
+          Some
+            (warn "W1701"
+               (Printf.sprintf "%d file(s) under %s are tracked by version control, e.g. %s"
+                  (List.length files) dir (List.hd files)))

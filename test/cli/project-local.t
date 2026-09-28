@@ -98,8 +98,9 @@ Declared grants are compared with checked authority; a manifest never grants:
     Cause: entry `greet` declares `net` but its checked code never requires it
   $ jacquard project check --strict-grants > /dev/null 2>&1; echo "exit $?"
   exit 1
-  $ jacquard project check --strict-grants 2>&1 | grep -o 'error\[E1730\]' | sort -u
-  error[E1730]
+  $ jacquard project check --strict-grants 2>&1 | grep -A1 'error\[E1730' | head -2
+  error[E1730]: An entry's declared grants differ from its checked authority.
+    Cause: entry `demo` declares `fs` but its checked code never requires it
   $ sed -i 's/ (grants fs)//; s/(grants console net)//' project.jqd
   $ jacquard project check 2>&1 | grep -A1 'W1700'
   warning[W1700]: An entry's declared grants differ from its checked authority.

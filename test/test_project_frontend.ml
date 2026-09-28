@@ -83,7 +83,20 @@ let test_concurrent_edit () =
   (match Project_frontend.write_pins session node plans with
   | Ok () -> Alcotest.fail "a changed source must stop the pin"
   | Error ds ->
-      Alcotest.(check (list (option string))) "E1733" [ Some "E1733" ] (List.map Diag.code ds));
+      Alcotest.(check (list (option string))) "E1733" [ Some "E1733" ] (List.map Diag.code ds);
+      let cause = String.concat "" (List.map Diag.cause ds) in
+      let says sub =
+        let n = String.length sub in
+        let rec go i = i + n <= String.length cause && (String.sub cause i n = sub || go (i + 1)) in
+        go 0
+      in
+      Alcotest.(check (list string))
+        "E1733 headline"
+        [ "A source or manifest file changed during pinning." ]
+        (List.map Diag.summary ds);
+      Alcotest.(check bool)
+        "the cause names the changed unit and that nothing was written" true
+        (says "l.jac" && says "changed while pinning; nothing was written"));
   Alcotest.(check string) "the manifest is untouched" before (read manifest);
   Alcotest.(check bool)
     "no pin records were written" false
