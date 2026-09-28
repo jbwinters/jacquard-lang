@@ -155,10 +155,10 @@ let mark_recovered_construct state meta =
 
 let token_description state token =
   match (diagnostic_token state token).Surface_lex.token with
-  (* reserved ahead of the nominal field update form (DES.4, `Ctor(value with label: expr)`) *)
+  (* the nominal field update form (SX.28b, DES.4 Phase 2) is its only construct *)
   | Surface_lex.Keyword "with" ->
-      "the reserved word `with` (kept for field updates, `Ctor(value with label: expr)`; a name \
-       spelled `with` needs the `term:` escape)"
+      "the reserved word `with` (it only introduces a field update, `Ctor(value with label: \
+       expr)`; a name spelled `with` needs the `term:` escape)"
   | token -> Surface_lex.show_token token
 
 let advance_recording_invalid state = advance state
@@ -512,15 +512,26 @@ let rec parse_expr state ~allow_newlines =
 
 and parse_pipe state ~allow_newlines =
   let left = parse_call state ~allow_newlines in
-  let rec loop left =
+  let rec loop (left : Surface_ast.expr) =
     let pipe_index = index_after_continuation state state.index in
     match (token_at state pipe_index).Surface_lex.token with
     | Surface_lex.Pipe ->
         state.index <- pipe_index;
-        ignore (advance state);
+        let pipe = advance state in
         skip_continuation state;
-        let right = parse_call state ~allow_newlines in
-        loop Surface_ast.{ it = Pipe (left, right); meta = merged_meta left.meta right.meta }
+        let right : Surface_ast.expr = parse_call state ~allow_newlines in
+        let pipe_meta = merged_meta left.Surface_ast.meta right.Surface_ast.meta in
+        let pipe_meta =
+          if Meta.surface_form right.Surface_ast.meta = Some "field-update" then begin
+            report state pipe
+              "a `with` field update cannot be the right side of `|>`: the pipe would pass a \
+               second value before `with`; update the piped value with `Ctor(value |> f with \
+               label: expression)`";
+            mark_recovered_construct state pipe_meta
+          end
+          else pipe_meta
+        in
+        loop Surface_ast.{ it = Pipe (left, right); meta = pipe_meta }
     | _ -> left
   in
   loop left
@@ -532,23 +543,56 @@ and parse_call state ~allow_newlines =
     match (current state).Surface_lex.token with
     | Surface_lex.LParen ->
         let opening = advance state in
-        let args, closing, labeled =
+        let args, closing, labeled, update =
           within_recovery_container state (fun () -> parse_call_argument_list state)
         in
         let meta = meta_with_span (span_between opening closing) in
         let meta = merged_meta fn.Surface_ast.meta meta in
-        let meta = if labeled then Meta.with_surface_form "named-call" meta else meta in
+        let meta, args =
+          match update with
+          | `Update -> (Meta.with_surface_form "field-update" meta, args)
+          | `Malformed ->
+              (* already E1220: the items keep no labels, so recovery never resolves this call
+                 against the constructor's named-call ABI and reports a second, derived error *)
+              ( mark_recovered_construct state meta,
+                List.map
+                  (fun (argument : Surface_ast.expr) ->
+                    { argument with meta = Meta.without_surface_call_label argument.meta })
+                  args )
+          | `Call -> ((if labeled then Meta.with_surface_form "named-call" meta else meta), args)
+        in
         postfix Surface_ast.{ it = Call (fn, args); meta }
     | _ -> fn
   in
   postfix fn
 
+(* A call's parenthesized items: a positional prefix and a labeled suffix (D76), or, for a nominal
+   field update (SX.28b), exactly one positional value, the reserved word `with`, and one or more
+   `label: expression` fields. The last component says which: a malformed update is E1220, and its
+   call is marked as a recovered construct so recovery does not resolve it as an ordinary call. *)
 and parse_call_argument_list state =
   skip_list_space state;
   match (current state).Surface_lex.token with
-  | Surface_lex.RParen -> ([], advance state, false)
+  | Surface_lex.RParen -> ([], advance state, false, `Call)
   | _ ->
       let saw_label = ref false in
+      let update = ref `Call in
+      let parse_labeled label =
+        saw_label := true;
+        let label_token = advance state in
+        ignore (advance state);
+        skip_continuation state;
+        let expression : Surface_ast.expr = parse_expr state ~allow_newlines:true in
+        let field_meta = meta_from_token_to_meta label_token expression.Surface_ast.meta in
+        Surface_ast.
+          {
+            expression with
+            meta =
+              expression.meta
+              |> Meta.with_surface_call_label label
+              |> Meta.with_surface_container "call-argument" field_meta;
+          }
+      in
       let parse_argument () =
         match pattern_label_ahead state with
         | None ->
@@ -556,21 +600,48 @@ and parse_call_argument_list state =
               report state (current state)
                 "a positional call argument cannot follow a `label: expression` argument";
             parse_expr state ~allow_newlines:true
-        | Some label ->
-            saw_label := true;
-            let label_token = advance state in
-            ignore (advance state);
-            skip_continuation state;
-            let expression : Surface_ast.expr = parse_expr state ~allow_newlines:true in
-            let field_meta = meta_from_token_to_meta label_token expression.Surface_ast.meta in
-            Surface_ast.
-              {
-                expression with
-                meta =
-                  expression.meta
-                  |> Meta.with_surface_call_label label
-                  |> Meta.with_surface_container "call-argument" field_meta;
-              }
+        | Some label -> parse_labeled label
+      in
+      let finish acc closing = (List.rev acc, closing, !saw_label, !update) in
+      let recover ?(reported = false) acc =
+        let token = current state in
+        if not reported then
+          report state token
+            (Printf.sprintf "expected `,` or `)`, found %s" (token_description state token));
+        synchronize_paren state;
+        let closing =
+          match (current state).Surface_lex.token with
+          | Surface_lex.RParen -> advance state
+          | _ -> current state
+        in
+        finish acc closing
+      in
+      (* after `with`: one or more `label: expression` fields, then the closing parenthesis *)
+      let rec updates acc ~first =
+        match pattern_label_ahead state with
+        | None ->
+            update := `Malformed;
+            report state (current state)
+              (if first then
+                 "a `with` field update needs at least one `label: expression` field after `with`"
+               else
+                 "every field after `with` is written `label: expression`; a positional value \
+                  cannot follow `with`");
+            recover ~reported:true acc
+        | Some label -> (
+            let expression = parse_labeled label in
+            skip_list_space state;
+            match (current state).Surface_lex.token with
+            | Surface_lex.Comma ->
+                ignore (advance state);
+                skip_list_space state;
+                if (current state).Surface_lex.token = Surface_lex.RParen then
+                  finish (expression :: acc) (advance state)
+                else updates (expression :: acc) ~first:false
+            | Surface_lex.RParen -> finish (expression :: acc) (advance state)
+            | _ ->
+                update := `Malformed;
+                recover (expression :: acc))
       in
       let rec loop acc =
         let expression = parse_argument () in
@@ -580,20 +651,25 @@ and parse_call_argument_list state =
             ignore (advance state);
             skip_list_space state;
             if (current state).Surface_lex.token = Surface_lex.RParen then
-              (List.rev (expression :: acc), advance state, !saw_label)
+              finish (expression :: acc) (advance state)
             else loop (expression :: acc)
-        | Surface_lex.RParen -> (List.rev (expression :: acc), advance state, !saw_label)
-        | _ ->
-            let token = current state in
-            report state token
-              (Printf.sprintf "expected `,` or `)`, found %s" (token_description state token));
-            synchronize_paren state;
-            let closing =
-              match (current state).Surface_lex.token with
-              | Surface_lex.RParen -> advance state
-              | _ -> current state
-            in
-            (List.rev (expression :: acc), closing, !saw_label)
+        | Surface_lex.RParen -> finish (expression :: acc) (advance state)
+        | Surface_lex.Keyword "with" ->
+            let keyword = advance state in
+            skip_list_space state;
+            if acc = [] && not !saw_label then begin
+              update := `Update;
+              updates [ expression ] ~first:true
+            end
+            else begin
+              report state keyword
+                "a `with` field update takes exactly one value before `with`: write `Ctor(value \
+                 with label: expression, ...)`";
+              update := `Malformed;
+              (* the fields still parse, so later items recover normally *)
+              updates (expression :: acc) ~first:true
+            end
+        | _ -> recover (expression :: acc)
       in
       loop []
 

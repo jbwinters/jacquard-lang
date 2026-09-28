@@ -120,14 +120,16 @@ let pp_sep sep pp fmt items =
    follow the final comma, this helper owns their two breaks so the close still returns to the
    delimiter's column without an empty line. Singleton tuples opt into a comma in both layouts
    because the comma carries their arity. *)
-let pp_comma_list ?(singleton = false) ?(break_padding = "") ?(inner_metas = []) context pp fmt
-    items =
+let pp_comma_list ?(singleton = false) ?(leading_space = false) ?(break_padding = "")
+    ?(inner_metas = []) context pp fmt items =
   let inner_comments =
     if context.trivia then List.concat_map (Meta.comment_texts Meta.key_trivia_inner) inner_metas
     else []
   in
   if items <> [] then begin
-    Format.pp_print_custom_break fmt ~fits:("", 0, "") ~breaks:("", 0, break_padding);
+    Format.pp_print_custom_break fmt
+      ~fits:("", (if leading_space then 1 else 0), "")
+      ~breaks:("", 0, break_padding);
     let last = List.length items - 1 in
     List.iteri
       (fun index item ->
@@ -512,7 +514,81 @@ let rec pp_expr context lookup fmt (expr : Kernel.expr) =
   match reordered_named_call expr with
   | Some (fn, source_arguments) ->
       pp_reordered_named_call context lookup fmt expr fn source_arguments
-  | None -> pp_expr_regular context lookup fmt expr
+  | None -> (
+      match field_update_elaboration expr with
+      | Some (fn, value, updates) ->
+          pp_leading context expr.meta fmt;
+          pp_field_update context lookup expr.meta fmt fn value updates;
+          pp_trailing context expr.meta fmt
+      | None -> pp_expr_regular context lookup fmt expr)
+
+(* SX.28b: a field update `Ctor(value with label: e, ...)` lowers to one application tagged
+   `field-update` whose first argument is the value and whose labeled arguments are the updates.
+   Resolution elaborates it to the let-and-match twin; [field_update_elaboration] recognizes exactly
+   that generated shape, so a resolved update prints back too. *)
+and field_update_parts (expr : Kernel.expr) =
+  match (Meta.surface_form expr.meta, expr.it) with
+  | Some "field-update", Kernel.App (fn, value :: (_ :: _ as updates))
+    when Option.is_none (Meta.surface_call_label value.meta)
+         && List.for_all
+              (fun (update : Kernel.expr) -> Option.is_some (Meta.surface_call_label update.meta))
+              updates ->
+      Some (fn, value, updates)
+  | _ -> None
+
+and field_update_elaboration (expr : Kernel.expr) =
+  let generated marker (node : Kernel.expr) = Meta.surface_generated node.meta = Some marker in
+  match expr.it with
+  | Kernel.Let { isrec = false; binder = { it = Kernel.PVar value_name; _ }; value; body }
+    when generated "field-update" expr ->
+      let rec collect acc (current : Kernel.expr) =
+        match current.it with
+        | Kernel.Let { isrec = false; binder = { it = Kernel.PVar name; _ }; value; body }
+          when generated "field-update-let" current ->
+            collect ((name, value) :: acc) body
+        | Kernel.Match
+            ( { it = Kernel.Var subject; _ },
+              [
+                {
+                  cpat = { it = Kernel.PCon (_, patterns); _ };
+                  cbody = { it = App (fn, args); _ };
+                  _;
+                };
+              ] )
+          when String.equal subject value_name
+               && generated "field-update-match" current
+               && List.length patterns = List.length args ->
+            let slots = List.combine patterns args in
+            let label (name, (update : Kernel.expr)) =
+              List.find_map
+                (fun ((pattern : Kernel.pat), (argument : Kernel.expr)) ->
+                  match argument.it with
+                  | Kernel.Var used when String.equal used name ->
+                      Option.map
+                        (fun label ->
+                          {
+                            update with
+                            Kernel.meta = Meta.with_surface_call_label label update.meta;
+                          })
+                        (Meta.surface_pattern_label pattern.meta)
+                  | _ -> None)
+                slots
+            in
+            let updates = List.map label (List.rev acc) in
+            if updates <> [] && List.for_all Option.is_some updates then
+              Some (fn, value, List.map Option.get updates)
+            else None
+        | _ -> None
+      in
+      collect [] body
+  | _ -> None
+
+and pp_field_update context lookup meta fmt fn value updates =
+  Format.fprintf fmt "@[<hv 2>%a(%a with" (pp_expr_atom context lookup) fn (pp_expr context lookup)
+    value;
+  pp_comma_list ~leading_space:true ~inner_metas:[ meta ] context (pp_call_argument context lookup)
+    fmt updates;
+  Format.fprintf fmt ")@]"
 
 (* SX.29 (D77): a `try` block item lowers to a two-armed match tagged `try`/`try-bare` whose Ok arm
    is the rest of the block; the printer folds it back into the block it came from. *)
@@ -567,7 +643,9 @@ and try_item (expr : Kernel.expr) =
   | _ -> None
 
 and is_block_expr (expr : Kernel.expr) =
-  match expr.it with Kernel.Let _ -> true | _ -> Option.is_some (try_item expr)
+  match expr.it with
+  | Kernel.Let _ -> Option.is_none (field_update_elaboration expr)
+  | _ -> Option.is_some (try_item expr)
 
 and pp_expr_regular context lookup fmt (expr : Kernel.expr) =
   let block_meta = Meta.surface_container "block" expr.meta in
@@ -599,6 +677,10 @@ and pp_expr_regular context lookup fmt (expr : Kernel.expr) =
         | None -> pp_kernel_expr context lookup fmt expr)
     | Some "pipe", Kernel.App (fn, left :: args) ->
         pp_pipe context lookup expr.meta fmt left fn args
+    | Some "field-update", Kernel.App _ -> (
+        match field_update_parts expr with
+        | Some (fn, value, updates) -> pp_field_update context lookup expr.meta fmt fn value updates
+        | None -> pp_kernel_expr context lookup fmt expr)
     | Some _, _ | None, _ -> pp_kernel_expr context lookup fmt expr);
     if not (is_block_expr expr) then pp_trailing context expr.meta fmt
   end
@@ -932,6 +1014,8 @@ and pp_sequence_item context lookup fmt (meta, isrec, binder, value) =
 and pp_block context lookup fmt expr =
   let rec collect acc current =
     match (current.Kernel.it, try_item current) with
+    | Kernel.Let _, _ when Option.is_some (field_update_elaboration current) ->
+        (List.rev acc, current)
     | Kernel.Let { isrec; binder; value; body }, _ ->
         collect ((current.Kernel.meta, isrec, binder, value) :: acc) body
     | _, Some (_, payload, subject, rest) ->

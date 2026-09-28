@@ -2012,6 +2012,57 @@ let rec useful ctx (tys : ty list) (matrix : Kernel.pat list list) : witness lis
             (* variables, arrows, skolems: nothing structural can head them *)
             Option.map (fun ws -> WWild :: ws) (useful ctx trest (default_matrix ())))
 
+(** [field_update_hint ctx ~site_meta scrutinee_ty arms] is the extra advice for a non-exhaustive
+    match that a `with` field update (SX.28b) elaborated to. The update names one constructor, so
+    over a sum type its one-clause match misses the others; each updated label that every
+    constructor carries has a total generated setter [<type>.with-<label>] (SX.28), which the advice
+    names. [None] for every other match. *)
+let field_update_hint ctx ~site_meta scrutinee_ty (arms : Kernel.clause list) =
+  if Meta.surface_generated site_meta <> Some "field-update-subject" then None
+  else
+    let labels =
+      match arms with
+      | [ { Kernel.cpat = { it = Kernel.PCon (_, patterns); _ }; _ } ] ->
+          List.filter_map
+            (fun (pattern : Kernel.pat) -> Meta.surface_pattern_label pattern.meta)
+            patterns
+      | _ -> []
+    in
+    match repr scrutinee_ty with
+    | TCon (hash, _) -> (
+        match locate ctx hash with
+        | Ok { Store.decl = { Kernel.it = Kernel.DefType { tname; cons; _ }; _ }; _ } -> (
+            let total label =
+              List.for_all
+                (fun (constructor : Kernel.conspec) ->
+                  List.exists
+                    (fun (field : Kernel.field) -> field.Kernel.label = Some label)
+                    constructor.Kernel.fields)
+                cons
+            in
+            let setters =
+              List.filter total labels |> List.map (Printf.sprintf "`%s.with-%s`" tname)
+            in
+            match setters with
+            | [] ->
+                Some
+                  ( "a `with` update rebuilds only the constructor it names, and no updated label \
+                     is carried by every constructor",
+                    "Write a match with a clause for every constructor." )
+            | _ ->
+                let setters = String.concat " and " setters in
+                Some
+                  ( Printf.sprintf
+                      "a `with` update rebuilds only the constructor it names; use %s for a total \
+                       update"
+                      setters,
+                    Printf.sprintf
+                      "Use %s for a total update, or write a match with a clause for every \
+                       constructor."
+                      setters ))
+        | _ -> None)
+    | _ -> None
+
 (** Run the exhaustiveness/redundancy pass over the sites collected during inference. Non-exhaustive
     matches are errors (E0813) with a missing-pattern witness; redundant clauses are warnings
     (W0801), returned rather than raised. *)
@@ -2021,6 +2072,10 @@ let rec check_matches ctx : Diag.t list =
     (fun { scrutinee_ty; arms; site_meta } ->
       let matrix = List.map (fun (c : Kernel.clause) -> [ c.Kernel.cpat ]) arms in
       (match useful ctx [ scrutinee_ty ] matrix with
+      | Some [ w ] when Option.is_some (field_update_hint ctx ~site_meta scrutinee_ty arms) ->
+          let advice, next_step = Option.get (field_update_hint ctx ~site_meta scrutinee_ty arms) in
+          err ~meta:site_meta ~next_step ~code:"E0813"
+            "this match is not exhaustive: it misses %s; %s" (show_witness w) advice
       | Some [ w ] ->
           err ~meta:site_meta ~next_step:"Add a clause matching the witness or a wildcard default."
             ~code:"E0813" "this match is not exhaustive: it misses %s" (show_witness w)

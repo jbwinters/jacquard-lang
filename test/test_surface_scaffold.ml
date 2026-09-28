@@ -151,7 +151,7 @@ let test_with_is_reserved () =
       in
       Alcotest.(check bool)
         "the diagnostic names the reserved word" true
-        (contains "the reserved word `with` (kept for field updates")
+        (contains "the reserved word `with` (it only introduces a field update")
 
 let suite =
   [
