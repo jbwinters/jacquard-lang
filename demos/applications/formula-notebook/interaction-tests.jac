@@ -17,15 +17,15 @@ nb.capture(
                 put((remaining, Cons(message, output)))
                 k(())
               }
-            | read-line() resume k ->
+            | next-line() resume k ->
               {
                 let (remaining, output) = get()
                 match remaining {
                   | Cons(line, more) -> {
                     put((more, output))
-                    k(line)
+                    k(Some(line))
                   }
-                  | Nil -> k("")
+                  | Nil -> k(None)
                 }
               }
           },
@@ -99,14 +99,14 @@ nb.interaction-tests =
                 "column 2:",
                 "unknown command",
                 "result = 6",
-                "bye (empty input or EOF)",
+                "bye (end of input)",
               ],
               fn (expected) -> check.true(text.contains?(output, expected), expected),
             )
           },
       ),
       Case(
-        "help, whitespace, empty workbook, missing names, and empty input",
+        "help, whitespace, empty workbook, missing names, and blank lines",
         fn () ->
           {
             let output =
@@ -122,7 +122,8 @@ nb.interaction-tests =
                   "redo",
                   "quit extra",
                   "",
-                  "set NEVER = 1",
+                  "set later = 1",
+                  "show later",
                 ],
               )
             list.each(
@@ -134,11 +135,11 @@ nb.interaction-tests =
                 "nothing to undo",
                 "nothing to redo",
                 "unexpected arguments",
-                "bye (empty input or EOF)",
+                "bye (end of input)",
               ],
               fn (expected) -> check.true(text.contains?(output, expected), expected),
             )
-            check.true(bool.not(text.contains?(output, "NEVER")), "empty input terminates")
+            check.true(text.contains?(output, "later = 1"), "a blank line reprompts instead of ending the session")
           },
       ),
       Case(
@@ -165,9 +166,9 @@ nb.interaction-tests =
               ) ->
                 {
                   let response = nb.execute(nb.empty(), line)
-                  check.true(text.contains?(nb.response-output(response), "rejected:"), line)
+                  check.true(text.contains?(nb-response.output(response), "rejected:"), line)
                   check.eq(
-                    nb.book-text(nb.response-book(response)),
+                    nb.book-text(nb-response.book(response)),
                     nb.book-text(nb.empty()),
                     text.eq,
                     text.show,
@@ -183,7 +184,7 @@ nb.interaction-tests =
         "demo shows hand-calculated financial values and rejects invalid edits",
         fn () ->
           {
-            let output = nb.capture(nb.demo, [])
+            let output = nb.capture(fn () -> nb.demo(), [])
             list.each(
               [
                 "surplus = 580",

@@ -121,17 +121,14 @@ dice.tests =
                 match entry {
                   | MkPair(outcome, probability) -> {
                     check.true(
-                      bool.and(real.gte?(probability, 0.0), real.lte?(probability, 1.0)),
+                      real.between?(probability, 0.0, 1.0),
                       "valid probability",
                     )
                     match outcome {
                       | Busted -> check.true(True, "bust is permitted")
                       | Banked(points) ->
                         check.true(
-                          bool.and(
-                            int.gte?(points, pot),
-                            int.lte?(points, add(pot, mul(6, rolls))),
-                          ),
+                          int.between?(points, pot, add(pot, mul(6, rolls))),
                           "reachable score",
                         )
                     }

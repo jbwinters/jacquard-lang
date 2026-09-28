@@ -6,10 +6,11 @@ library work: a push-your-luck dice coach, a picnic decision planner, a staff
 rota optimizer, and a formula notebook. They use only synthetic data, need
 only the `console` grant, and carry their own Warp suites, hand-calculated
 results, and recorded transcripts. The originals live in the separate
-application journals and are not edited here; `scripts/applications/import.sh
-SOURCE_DIR` refreshes these copies and rewrites `MANIFEST.sha256`, which
-`sha256sum -c MANIFEST.sha256` verifies. Every file here has the same bytes
-as the recorded application snapshot it was imported from.
+application journals and are not edited here. These copies have been migrated
+since import (see "Workarounds retired and kept"); `MANIFEST.sha256` records
+their current bytes, which `sha256sum -c MANIFEST.sha256` verifies.
+`scripts/applications/import.sh SOURCE_DIR` would restore the delivered
+snapshot and rewrite the manifest.
 
 ## Layout
 
@@ -102,16 +103,57 @@ text-primitive and numeric-presentation repairs landed. What is not native:
 
 - Warp suites (`jacquard test`) run under the interpreter only; there is no
   native test runner. Native evidence is the demo and interactive transcripts.
-- The applications still carry their own workarounds (a hand-written decimal
-  parser, display helpers that the library now provides, the notebook's
-  empty-line handling of end of input). They are kept
-  as recorded so the baseline is the applications as delivered; migrating
-  them is separate work that will move fixtures one repair at a time.
-- Hand-written field selectors such as `rota.staff-id` and `nb.cells` are
-  now covered by generated D36 accessors (`rota-staff.id`, `nb-snapshot.cells`;
-  SX.27). The routine lane pins that the two agree on the applications' own
-  models; the sources keep their selectors as delivered.
 
 `smoke.jac`, `custom-example.jac`, `CUSTOM-EXAMPLE.txt`, and the shared
 `display-tests.jac` are imported for completeness; the routine lane does not
 run the first two separately.
+
+## Workarounds retired and kept
+
+The applications were imported byte-for-byte from their journals (the import
+commit pins that snapshot) and have since been migrated to the language and
+library features their findings asked for. Every migration below leaves each
+`EXAMPLE.txt` and `CUSTOM-EXAMPLE.txt` byte-identical, keeps every suite
+passing with the same checks (plus two display rounding pins), and keeps
+interpreter and native output equal. The one behavior change is marked; the
+notebook's end-of-input test now asserts that a blank line reprompts.
+
+| workaround as delivered | now | where |
+|---|---|---|
+| split `$"..."` reports joined with `text.concat` (native v1's eight-argument call cap) | one interpolation per message | rota `report.jac` |
+| nested `text.concat` chains | interpolation | notebook `commands.jac`, `syntax.jac`, `model-tests.jac`; shared `display.jac` |
+| hand-written decimal parser with a digit table (native v1 lacked `text.to-int`) | `text.to-int` of the trimmed line; the six-digit input bound stays | rota `report.jac` |
+| `text.to-real(text.from-int(n))` Int-to-Real helpers (`dice.real`, `picnic.real`, `display.real`) | `real.from-int` | dice, picnic, shared |
+| digit and letter tables (`nb.digits`, `nb.letters`) | `text.ascii-digit?`, `text.ascii-digit-value`, `text.ascii-letter?` | notebook `syntax.jac` |
+| `text.eq?` chains over characters and command words | Text patterns in `match` | notebook `syntax.jac`, `commands.jac` |
+| recursive `rota.every`/`rota.any`, `nb.every`/`nb.any` | `list.all?`, `list.any?` | rota, notebook |
+| `bool.and(int.gte?(x, lo), int.lte?(x, hi))` ranges | `int.between?`, `real.between?` (negated with `bool.not` for out-of-range errors) | dice, picnic, rota, notebook |
+| nested `bool.and` conjunctions | `bool.all([...])` | picnic `model.jac`; rota input validation and solution check |
+| 29 hand-written field selectors (`rota.staff-id`, `nb.cells`, ...) | generated accessors (`rota-staff.id`, `nb-snapshot.cells`, `nb-response.output`, ...) | rota, notebook |
+| one-clause `match` projections (`NbEdge(source: s) -> s`) | generated accessors (`nb-edge.source`, `nb-entry.name`) | notebook |
+| rebuilding a whole record to change one or two fields | generated setters (`rota-staff.with-available`, `nb-snapshot.with-hits`, `with-cache`, `with-computed`) | rota `fixtures.jac`, notebook `model.jac` |
+| an empty line ended the notebook, because `read-line` answers `""` at end of input | `next-line()`: a blank line now reprompts; `quit` or end of input ends the session (**UX change**, prints `bye (end of input)`) | notebook `application.jac` |
+| programs assembled by concatenating files | local projects (`project.jqd`) | all |
+
+Kept on purpose:
+
+- `display.fixed3` stays hand-written. It rounds half up on the scaled float,
+  which is what the recorded transcripts print; `text.from-real-fixed` rounds
+  the exact binary value and would print the picnic park's `80.643` as
+  `80.642`. `display-tests.jac` pins the difference.
+- Domain bounds and validation: the rota's six-digit prompt bound, shift and
+  staff ranges and 20000-node budget; the notebook's 24-character names,
+  100-token formulas, 1000000 literal bound, 8192-character commands and
+  twenty-edit history.
+- `rota.member?`, `rota.distinct?`, `nb.has` and `nb.unique` compare with
+  `eq`/`text.eq?` directly; `list.contains?` needs an `Eq` dictionary and
+  reads no better here.
+- Dice, picnic and rota read their prompts with `console.ask`, where end of
+  input arrives as an empty answer and is reported as invalid input; only the
+  notebook, whose loop needs to tell a blank line from the end, uses
+  `next-line()`.
+- The rota's preference entries are prelude `Pair`s, which have no generated
+  accessors, so their `MkPair(key, _)` matches stay.
+- The independent oracles and the notebook's fresh-evaluator comparison are
+  unchanged, and the record rebuilds that replace three or more fields keep
+  the constructor call.

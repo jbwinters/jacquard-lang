@@ -75,7 +75,7 @@ binary:
   INPUT ERROR: Node budget must be 0..20000.
   $ grep 'b = 2\|bye' formula-notebook-i.out
   b = 2    [a + 1]
-  bye (empty input or EOF)
+  bye (end of input)
 
 The Warp suites with sampled properties (the exhaustive lane reruns them with
 `--exhaustive`): the shared dice/picnic suite, the rota suite with its naive
@@ -89,29 +89,18 @@ with its fresh-evaluator comparisons and cache/history invariants.
   $ JACQUARD=jac sh "$A/run.sh" formula-notebook test 2>&1 | tail -1
   18 passed, 0 failed, 0 skipped, 0 refused
 
-Generated D36 field accessors (SX.27) answer the questions the applications' hand-written
-selectors answer. The selectors stay as authored, since the baseline is the applications as
-delivered; these blocks pin that the generated accessors could replace them.
+The applications read and update their records through the generated D36 field
+accessors and setters (SX.27, SX.28), such as `rota-staff.id`, `nb-snapshot.cells`,
+and `rota-staff.with-available`. None of the hand-written selectors they were
+delivered with remain:
 
-  $ cat "$A/rota-optimizer/model.jac" > rota-accessors.jac
-  $ cat >> rota-accessors.jac <<'JAC'
-  > ada = RotaStaff(7, "Ada", [], [], 2, [])
-  > (rota-staff.id(ada), rota.staff-id(ada))
-  > (rota-staff.name(ada), rota.staff-name(ada))
-  > (rota-staff.limit(ada), rota.staff-limit(ada))
-  > JAC
-  $ jac run rota-accessors.jac
-  (7, 7)
-  ("Ada", "Ada")
-  (2, 2)
-  $ cat "$A/formula-notebook/syntax.jac" "$A/formula-notebook/model.jac" > notebook-accessors.jac
-  $ cat >> notebook-accessors.jac <<'JAC'
-  > (nb-snapshot.cells(nb.empty-snapshot()), nb.cells(nb.empty-snapshot()))
-  > (nb-snapshot.hits(nb.empty-snapshot()), nb-book.undo(nb.empty()))
-  > JAC
-  $ jac run notebook-accessors.jac
-  (nil, nil)
-  (0, nil)
+  $ grep -rhoE --include='*.jac' '\b(rota\.(staff-id|staff-name|staff-limit|shift-id|shift-label|people|shifts|rest|weight|solution-score|solution-assignments)|nb\.(response-book|response-output|response-stop\?|cell-name|cell-source|cell-expr|cell-deps|cells|edges|cache|hits|computed|current|undo-list|redo-list|outcome-book|outcome-message|accepted\?))\(' "$A" | wc -l
+  0
+  $ grep -rhoE --include='*.jac' '\b(rota-staff|nb-snapshot)\.with-[a-z]+' "$A" | sort | uniq -c
+        1 nb-snapshot.with-cache
+        1 nb-snapshot.with-computed
+        1 nb-snapshot.with-hits
+        1 rota-staff.with-available
 
 Project composition preserves every identity: each entry's bindings, with its
 dependencies', hash exactly as the concatenation the applications used to be
@@ -125,26 +114,26 @@ assembled from:
   >     | cut -d' ' -f2- | sort -u > composed.txt
   >   cmp -s concatenated.txt composed.txt && echo "identical: $p $e ($(wc -l < composed.txt) bindings)"; }
   $ same dice-coach demo "$A/shared/display.jac" "$A/dice-coach/model.jac" "$A/dice-coach/demo.jac"
-  identical: dice-coach demo (33 bindings)
+  identical: dice-coach demo (31 bindings)
   $ same picnic-planner suite "$A/shared/display.jac" "$A/picnic-planner/model.jac" "$A/picnic-planner/tests.jac"
-  identical: picnic-planner suite (51 bindings)
+  identical: picnic-planner suite (49 bindings)
   $ R="$A/rota-optimizer"; same rota-optimizer suite "$R/model.jac" "$R/fixtures.jac" "$R/report.jac" "$R/tests.jac" "$R/interaction-tests.jac"
-  identical: rota-optimizer suite (143 bindings)
+  identical: rota-optimizer suite (128 bindings)
   $ N="$A/formula-notebook"; same formula-notebook demo "$N/syntax.jac" "$N/model.jac" "$N/commands.jac" "$N/application.jac" "$N/workbook.jac" "$N/demo.jac"
-  identical: formula-notebook demo (196 bindings)
+  identical: formula-notebook demo (172 bindings)
 
 The display helpers the applications do not use stay private to `display`:
 by name, by hash, and through eval:
 
   $ cp "$A/dice-coach/demo.jac" demo.bak
-  $ echo 'display.real(1.5)' > "$A/dice-coach/demo.jac"
+  $ echo 'display.floor-between(1.5, 0, 2)' > "$A/dice-coach/demo.jac"
   $ jac project run --project "$A/dice-coach" demo 2>&1 | grep -o 'error\[E1705\].*' | head -1
   error[E1705]: A name is not visible in this project.
   $ H=$(jac project hash --project "$A/shared" | grep ' display.floor-between ' | cut -d' ' -f3)
   $ printf '#%s:term(1, 2, 3)\n' "$H" > "$A/dice-coach/demo.jac"
   $ jac project run --project "$A/dice-coach" demo 2>&1 | grep -o 'error\[E1709\]' | head -1
   error[E1709]
-  $ echo '`op:eval-code`(quote { display.real(1.5) })' > "$A/dice-coach/demo.jac"
+  $ echo '`op:eval-code`(quote { display.floor-between(1.5, 0, 2) })' > "$A/dice-coach/demo.jac"
   $ jac project run --project "$A/dice-coach" demo --allow eval 2>&1 | grep -o 'E1705' | head -1
   E1705
   $ cp demo.bak "$A/dice-coach/demo.jac"

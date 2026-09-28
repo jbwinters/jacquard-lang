@@ -9,24 +9,14 @@ type PicnicVenue = | Park | Pavilion | Indoors
 
 type PicnicForecast = | DryForecast | WetForecast
 
-picnic.real(n) = match text.to-real(text.from-int(n)) {
-                   | Some(value) -> value
-                   | None -> 0.0}
-
-picnic.rate(percent) = real.div(picnic.real(percent), 100.0)
+picnic.rate(percent) = real.div(real.from-int(percent), 100.0)
 
 picnic.valid?(
   rain,
   accuracy,
   cost,
 ) =
-  bool.and(
-    bool.and(int.gte?(rain, 0), int.lte?(rain, 100)),
-    bool.and(
-      bool.and(int.gte?(accuracy, 50), int.lte?(accuracy, 100)),
-      bool.and(int.gte?(cost, 0), int.lte?(cost, 100)),
-    ),
-  )
+  bool.all([int.between?(rain, 0, 100), int.between?(accuracy, 50, 100), int.between?(cost, 0, 100)])
 
 -- Weather is sampled once. Attendance depends on that same weather.
 -- On dry days: 70% sunny, 30% cloudy. Large-group probabilities are
@@ -206,7 +196,7 @@ picnic.buy?(
   cost,
 ) =
   -- Numerical ties within one billionth of a point prefer no purchase.
-  real.gt?(picnic.information-value(rain, accuracy), real.add(picnic.real(cost), 1e-09))
+  real.gt?(picnic.information-value(rain, accuracy), real.add(real.from-int(cost), 1e-09))
 
 picnic.venue-name(
   venue,

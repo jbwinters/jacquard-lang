@@ -34,62 +34,7 @@ type RotaReport =
 
 type RotaNode = | RotaNode(todo: List RotaShift, assignments: List RotaAssignment, score: Int)
 
-rota.staff-id(person) = match person {
-                          | RotaStaff(id: id) -> id}
-
-rota.staff-name(person) = match person {
-                            | RotaStaff(name: name) -> name}
-
-rota.staff-limit(person) = match person {
-                             | RotaStaff(limit: limit) -> limit}
-
-rota.shift-id(shift) = match shift {
-                         | RotaShift(id: id) -> id}
-
-rota.shift-label(shift) = match shift {
-                            | RotaShift(label: label) -> label}
-
-rota.people(problem) = match problem {
-                         | RotaProblem(staff: people) -> people}
-
-rota.shifts(problem) = match problem {
-                         | RotaProblem(shifts: shifts) -> shifts}
-
-rota.rest(problem) = match problem {
-                       | RotaProblem(rest: hours) -> hours}
-
-rota.weight(problem) = match problem {
-                         | RotaProblem(fairness: weight) -> weight}
-
-rota.solution-score(solution) = match solution {
-                                  | RotaSolution(score: score) -> score}
-
-rota.solution-assignments(
-  solution,
-) =
-  match solution {
-    | RotaSolution(assignments: assignments) -> assignments
-  }
-
-rota.every(
-  xs,
-  predicate,
-) =
-  match xs {
-    | Nil -> True
-    | Cons(x, rest) -> if predicate(x) then rota.every(rest, predicate) else False
-  }
-
-rota.any(
-  xs,
-  predicate,
-) =
-  match xs {
-    | Nil -> False
-    | Cons(x, rest) -> if predicate(x) then True else rota.any(rest, predicate)
-  }
-
-rota.member?(id, ids) = rota.any(ids, fn (other) -> eq(id, other))
+rota.member?(id, ids) = list.any?(ids, fn (other) -> eq(id, other))
 
 rota.distinct?(
   ids,
@@ -99,9 +44,9 @@ rota.distinct?(
     | Cons(id, rest) -> if rota.member?(id, rest) then False else rota.distinct?(rest)
   }
 
-rota.find-person(people, id) = list.find(people, fn (person) -> eq(rota.staff-id(person), id))
+rota.find-person(people, id) = list.find(people, fn (person) -> eq(rota-staff.id(person), id))
 
-rota.find-shift(shifts, id) = list.find(shifts, fn (shift) -> eq(rota.shift-id(shift), id))
+rota.find-shift(shifts, id) = list.find(shifts, fn (shift) -> eq(rota-shift.id(shift), id))
 
 rota.skill-same?(
   a,
@@ -119,7 +64,7 @@ rota.qualified?(
 ) =
   match (person, shift) {
     | (RotaStaff(skills: skills), RotaShift(skill: required)) ->
-      rota.any(skills, fn (skill) -> rota.skill-same?(skill, required))
+      list.any?(skills, fn (skill) -> rota.skill-same?(skill, required))
   }
 
 rota.available?(
@@ -127,7 +72,7 @@ rota.available?(
   shift,
 ) =
   match person {
-    | RotaStaff(available: ids) -> rota.member?(rota.shift-id(shift), ids)
+    | RotaStaff(available: ids) -> rota.member?(rota-shift.id(shift), ids)
   }
 
 rota.preference(
@@ -140,7 +85,7 @@ rota.preference(
         list.find(
           preferences,
           fn (entry) -> match entry {
-                          | MkPair(id, _) -> eq(id, rota.shift-id(shift))},
+                          | MkPair(id, _) -> eq(id, rota-shift.id(shift))},
         )
       match selected {
         | None -> 0
@@ -185,16 +130,16 @@ rota.allowed?(
 ) =
   if bool.not(rota.available?(person, shift)) then False
   else if bool.not(rota.qualified?(person, shift)) then False
-  else if int.gte?(rota.load(rota.staff-id(person), assignments), rota.staff-limit(person)) then
+  else if int.gte?(rota.load(rota-staff.id(person), assignments), rota-staff.limit(person)) then
          False
-  else rota.every(
+  else list.all?(
          assignments,
          fn (
            assignment,
          ) ->
            match assignment {
              | RotaAssignment(other, id) ->
-               if eq(id, rota.staff-id(person)) then rota.rested?(shift, other, rota.rest(problem))
+               if eq(id, rota-staff.id(person)) then rota.rested?(shift, other, rota-problem.rest(problem))
                else True
            },
        )
@@ -205,7 +150,7 @@ rota.candidates(
   assignments,
 ) =
   list.filter(
-    rota.people(problem),
+    rota-problem.staff(problem),
     fn (person) -> rota.allowed?(problem, person, shift, assignments),
   )
 
@@ -213,54 +158,50 @@ rota.valid-input(
   problem,
 ) =
   {
-    let people = rota.people(problem)
-    let shifts = rota.shifts(problem)
-    let person-ids = list.map(people, fn (person) -> rota.staff-id(person))
-    let shift-ids = list.map(shifts, fn (shift) -> rota.shift-id(shift))
+    let people = rota-problem.staff(problem)
+    let shifts = rota-problem.shifts(problem)
+    let person-ids = list.map(people, fn (person) -> rota-staff.id(person))
+    let shift-ids = list.map(shifts, fn (shift) -> rota-shift.id(shift))
     let issues =
       [
         (
-          bool.and(int.gt?(list.length(people), 0), int.lte?(list.length(people), 8)),
+          int.between?(list.length(people), 1, 8),
           "Provide 1..8 staff.",
         ),
         (int.lte?(list.length(shifts), 14), "Provide at most 14 shifts."),
         (rota.distinct?(person-ids), "Staff IDs must be unique."),
         (rota.distinct?(shift-ids), "Shift IDs must be unique."),
         (
-          bool.and(int.gte?(rota.rest(problem), 0), int.lte?(rota.rest(problem), 48)),
+          int.between?(rota-problem.rest(problem), 0, 48),
           "Rest must be 0..48 hours.",
         ),
         (
-          bool.and(int.gte?(rota.weight(problem), 0), int.lte?(rota.weight(problem), 10)),
+          int.between?(rota-problem.fairness(problem), 0, 10),
           "Fairness weight must be 0..10.",
         ),
         (
-          rota.every(
+          list.all?(
             shifts,
             fn (
               shift,
             ) ->
               match shift {
                 | RotaShift(id: id, label: label, start: start, finish: finish) ->
-                  bool.and(
-                    bool.and(int.gte?(id, 0), int.lte?(id, 99)),
-                    bool.and(
+                  bool.all(
+                    [
+                      int.between?(id, 0, 99),
                       bool.not(text.empty?(text.trim(label))),
-                      bool.and(
-                        bool.and(int.gte?(start, 0), int.lte?(start, 160)),
-                        bool.and(
-                          bool.and(int.gte?(finish, 8), int.lte?(finish, 168)),
-                          eq(sub(finish, start), 8),
-                        ),
-                      ),
-                    ),
+                      int.between?(start, 0, 160),
+                      int.between?(finish, 8, 168),
+                      eq(sub(finish, start), 8),
+                    ],
                   )
               },
           ),
           "Shifts need IDs 0..99, nonempty labels, and eight-hour intervals within hours 0..168.",
         ),
         (
-          rota.every(
+          list.all?(
             people,
             fn (
               person,
@@ -283,8 +224,8 @@ rota.valid-input(
                       int.between?(limit, 0, 14),
                       rota.distinct?(available),
                       rota.distinct?(preference-ids),
-                      rota.every(available, fn (key) -> rota.member?(key, shift-ids)),
-                      rota.every(
+                      list.all?(available, fn (key) -> rota.member?(key, shift-ids)),
+                      list.all?(
                         preferences,
                         fn (
                           entry,
@@ -325,13 +266,7 @@ rota.same-shift?(
         RotaShift(id: a, label: al, start: ab, finish: ae, skill: ak),
         RotaShift(id: b, label: bl, start: bb, finish: be, skill: bk),
       ) ->
-      bool.and(
-        eq(a, b),
-        bool.and(
-          text.eq?(al, bl),
-          bool.and(eq(ab, bb), bool.and(eq(ae, be), rota.skill-same?(ak, bk))),
-        ),
-      )
+      bool.all([eq(a, b), text.eq?(al, bl), eq(ab, bb), eq(ae, be), rota.skill-same?(ak, bk)])
   }
 
 rota.verify(
@@ -342,65 +277,60 @@ rota.verify(
     let ids =
       list.map(
         assignments,
-        fn (assignment) -> match assignment {
-                             | RotaAssignment(shift, _) -> rota.shift-id(shift)},
+        fn (assignment) -> rota-shift.id(rota-assignment.shift(assignment)),
       )
-    bool.and(
-      eq(list.length(assignments), list.length(rota.shifts(problem))),
-      bool.and(
+    bool.all(
+      [
+        eq(list.length(assignments), list.length(rota-problem.shifts(problem))),
         rota.distinct?(ids),
-        bool.and(
-          rota.every(
-            assignments,
-            fn (
-              assignment,
-            ) ->
-              match assignment {
-                | RotaAssignment(shift, id) ->
-                  match (
-                          rota.find-person(rota.people(problem), id),
-                          rota.find-shift(rota.shifts(problem), rota.shift-id(shift)),
-                        ) {
-                    | (Some(person), Some(original)) ->
-                      bool.and(
+        list.all?(
+          assignments,
+          fn (
+            assignment,
+          ) ->
+            match assignment {
+              | RotaAssignment(shift, id) ->
+                match (
+                        rota.find-person(rota-problem.staff(problem), id),
+                        rota.find-shift(rota-problem.shifts(problem), rota-shift.id(shift)),
+                      ) {
+                  | (Some(person), Some(original)) ->
+                    bool.all(
+                      [
                         rota.same-shift?(shift, original),
-                        bool.and(
-                          rota.available?(person, original),
-                          rota.qualified?(person, original),
-                        ),
-                      )
-                    | _ -> False}
-              },
-          ),
-          bool.and(
-            rota.every(
-              rota.people(problem),
-              fn (
-                person,
-              ) ->
-                int.lte?(rota.load(rota.staff-id(person), assignments), rota.staff-limit(person)),
-            ),
-            rota.every(
+                        rota.available?(person, original),
+                        rota.qualified?(person, original),
+                      ],
+                    )
+                  | _ -> False}
+            },
+        ),
+        list.all?(
+          rota-problem.staff(problem),
+          fn (
+            person,
+          ) ->
+            int.lte?(rota.load(rota-staff.id(person), assignments), rota-staff.limit(person)),
+        ),
+        list.all?(
+          assignments,
+          fn (
+            left,
+          ) ->
+            list.all?(
               assignments,
               fn (
-                left,
+                right,
               ) ->
-                rota.every(
-                  assignments,
-                  fn (
-                    right,
-                  ) ->
-                    match (left, right) {
-                      | (RotaAssignment(a, aid), RotaAssignment(b, bid)) ->
-                        if bool.and(eq(aid, bid), bool.not(eq(rota.shift-id(a), rota.shift-id(b))))
-                          then rota.rested?(a, b, rota.rest(problem))
-                        else True
-                    },
-                ),
+                match (left, right) {
+                  | (RotaAssignment(a, aid), RotaAssignment(b, bid)) ->
+                    if bool.and(eq(aid, bid), bool.not(eq(rota-shift.id(a), rota-shift.id(b))))
+                      then rota.rested?(a, b, rota-problem.rest(problem))
+                    else True
+                },
             ),
-          ),
         ),
-      ),
+      ],
     )
   }
 
@@ -419,25 +349,25 @@ rota.solution(
         ) ->
           match assignment {
             | RotaAssignment(shift, id) ->
-              match rota.find-person(rota.people(problem), id) {
+              match rota.find-person(rota-problem.staff(problem), id) {
                 | Some(person) -> add(total, rota.preference(person, shift))
                 | None -> total}
           },
       )
     let squares =
       list.fold(
-        rota.people(problem),
+        rota-problem.staff(problem),
         0,
         fn (
           total,
           person,
         ) ->
           {
-            let count = rota.load(rota.staff-id(person), assignments)
+            let count = rota.load(rota-staff.id(person), assignments)
             add(total, mul(count, count))
           },
       )
-    let penalty = mul(rota.weight(problem), squares)
+    let penalty = mul(rota-problem.fairness(problem), squares)
     RotaSolution(assignments, preference, penalty, sub(preference, penalty))
   }
 
@@ -531,7 +461,7 @@ rota.analyze(
                          int.lt?(list.length(candidates), list.length(old-candidates)),
                          bool.and(
                            eq(list.length(candidates), list.length(old-candidates)),
-                           int.lt?(rota.shift-id(shift), rota.shift-id(previous)),
+                           int.lt?(rota-shift.id(shift), rota-shift.id(previous)),
                          ),
                        ) then Some((shift, candidates))
                     else selected}
@@ -542,19 +472,19 @@ rota.analyze(
       }
     let loads =
       list.map(
-        rota.people(problem),
+        rota-problem.staff(problem),
         fn (
           person,
         ) ->
           (
-            rota.staff-id(person),
-            rota.load(rota.staff-id(person), assignments),
-            rota.staff-limit(person),
+            rota-staff.id(person),
+            rota.load(rota-staff.id(person), assignments),
+            rota-staff.limit(person),
           ),
       )
     match (scan(todo, None, 0), rota.balance-floor(loads, list.length(todo))) {
       | (Some((Some((shift, candidates)), preferences)), Some(extra)) ->
-        Some((shift, candidates, sub(add(score, preferences), mul(rota.weight(problem), extra))))
+        Some((shift, candidates, sub(add(score, preferences), mul(rota-problem.fairness(problem), extra))))
       | _ -> None
     }
   }
@@ -567,7 +497,7 @@ rota.increment(
 ) =
   sub(
     rota.preference(person, shift),
-    mul(rota.weight(problem), add(mul(2, rota.load(rota.staff-id(person), assignments)), 1)),
+    mul(rota-problem.fairness(problem), add(mul(2, rota.load(rota-staff.id(person), assignments)), 1)),
   )
 
 rota.insert-candidate(
@@ -584,7 +514,7 @@ rota.insert-candidate(
       let first-value = rota.increment(problem, first, shift, assignments)
       if bool.or(
            int.gt?(value, first-value),
-           bool.and(eq(value, first-value), int.lt?(rota.staff-id(person), rota.staff-id(first))),
+           bool.and(eq(value, first-value), int.lt?(rota-staff.id(person), rota-staff.id(first))),
          ) then Cons(person, ordered)
       else Cons(first, rota.insert-candidate(problem, shift, assignments, person, rest))
     }
@@ -596,7 +526,7 @@ rota.cannot-improve?(
 ) =
   match incumbent {
     | None -> False
-    | Some(solution) -> int.lte?(upper, rota.solution-score(solution))
+    | Some(solution) -> int.lte?(upper, rota-solution.score(solution))
   }
 
 rota.search(
@@ -620,7 +550,7 @@ rota.search(
                  incumbent,
                  expanded,
                  pruned,
-                 Some(rota.solution-score(solution)),
+                 Some(rota-solution.score(solution)),
                )}
          | Cons(node, pending) ->
            if int.gte?(expanded, budget) then
@@ -632,7 +562,7 @@ rota.search(
                       match incumbent {
                         | None -> Some(candidate)
                         | Some(previous) ->
-                          if int.gt?(rota.solution-score(candidate), rota.solution-score(previous))
+                          if int.gt?(rota-solution.score(candidate), rota-solution.score(previous))
                             then Some(candidate)
                           else incumbent}
                     rota.search(
@@ -691,7 +621,7 @@ rota.search(
                                    fn (
                                      other,
                                    ) ->
-                                     bool.not(eq(rota.shift-id(shift), rota.shift-id(other))),
+                                     bool.not(eq(rota-shift.id(shift), rota-shift.id(other))),
                                  )
                                let children =
                                  list.map(
@@ -702,7 +632,7 @@ rota.search(
                                      RotaNode(
                                        remaining,
                                        Cons(
-                                         RotaAssignment(shift, rota.staff-id(person)),
+                                         RotaAssignment(shift, rota-staff.id(person)),
                                          assignments,
                                        ),
                                        add(
@@ -731,13 +661,13 @@ rota.solve(
   {
     let errors = rota.valid-input(problem)
     let all-errors =
-      if bool.and(int.gte?(budget, 0), int.lte?(budget, 20000)) then errors
+      if int.between?(budget, 0, 20000) then errors
       else list.append(errors, ["Node budget must be 0..20000."])
     match all-errors {
       | Cons(_, _) -> Err(all-errors)
       | Nil -> {
         let report =
-          match rota.shifts(problem) {
+          match rota-problem.shifts(problem) {
             | Nil -> RotaReport(ProvenOptimal, Some(rota.solution(problem, Nil)), 0, 0, Some(0))
             | todo ->
               match rota.analyze(problem, todo, Nil, 0) {
@@ -746,7 +676,7 @@ rota.solve(
                   rota.search(problem, [RotaNode(todo, Nil, 0)], None, 0, 0, budget, upper)}}
         match report {
           | RotaReport(best: Some(solution)) ->
-            if rota.verify(problem, rota.solution-assignments(solution)) then Ok(report)
+            if rota.verify(problem, rota-solution.assignments(solution)) then Ok(report)
             else Err(
                    [
                      "Internal solver error: the completed schedule failed independent verification.",

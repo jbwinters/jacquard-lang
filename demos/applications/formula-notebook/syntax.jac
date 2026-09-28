@@ -17,16 +17,7 @@ type NbFormula = | NbFormula NbExpr | NbBadFormula NbDiagnostic
 
 type NbValue = | NbValue Int | NbError(origin: Text, reason: Text)
 
-nb.any(
-  xs,
-  predicate,
-) =
-  match xs {
-    | Nil -> False
-    | Cons(x, rest) -> if predicate(x) then True else nb.any(rest, predicate)
-  }
-
-nb.has(xs, name) = nb.any(xs, fn (x) -> text.eq?(x, name))
+nb.has(xs, name) = list.any?(xs, fn (x) -> text.eq?(x, name))
 
 nb.unique(
   xs,
@@ -40,60 +31,17 @@ nb.join(
   match xs {
     | Nil -> ""
     | Cons(first, rest) ->
-      list.fold(rest, first, fn (acc, x) -> text.concat(text.concat(acc, separator), x))
+      list.fold(rest, first, fn (acc, x) -> $"{acc}{separator}{x}")
   }
 
 nb.chars(s) = text.split(s, "")
 
-nb.letters = nb.chars("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
-
-nb.letter?(s) = nb.has(nb.letters, s)
-
-nb.digits =
-  [
-    ("0", 0),
-    ("1", 1),
-    ("2", 2),
-    ("3", 3),
-    ("4", 4),
-    ("5", 5),
-    ("6", 6),
-    ("7", 7),
-    ("8", 8),
-    ("9", 9),
-  ]
-
-nb.digit(
-  s,
-) =
-  {
-    let found = list.find(nb.digits, fn (pair) -> {
-                                                    let (character, _) = pair
-                                                    text.eq?(character, s)})
-    match found {
-      | None -> None
-      | Some((_, n)) -> Some(n)
-    }
-  }
-
 nb.name-tail?(
   s,
 ) =
-  if nb.letter?(s) then True
+  if text.ascii-letter?(s) then True
   else if text.eq?(s, "_") then True
-  else match nb.digit(s) {
-         | Some(_) -> True
-         | None -> False
-  }
-
-nb.every(
-  xs,
-  predicate,
-) =
-  match xs {
-    | Nil -> True
-    | Cons(x, rest) -> if predicate(x) then nb.every(rest, predicate) else False
-  }
+  else text.ascii-digit?(s)
 
 nb.valid-name?(
   name,
@@ -101,7 +49,7 @@ nb.valid-name?(
   if int.gt?(text.length(name), 24) then False
   else match nb.chars(name) {
          | Nil -> False
-         | Cons(first, rest) -> bool.and(nb.letter?(first), nb.every(rest, nb.name-tail?))
+         | Cons(first, rest) -> bool.and(text.ascii-letter?(first), list.all?(rest, nb.name-tail?))
   }
 
 nb.span(
@@ -123,7 +71,7 @@ nb.literal(
   match chars {
     | Nil -> Some(value)
     | Cons(c, rest) ->
-      match nb.digit(c) {
+      match text.ascii-digit-value(c) {
         | None -> None
         | Some(n) -> {
           let next = add(mul(value, 10), n)
@@ -143,7 +91,7 @@ nb.lex-loop(
       if nb.has([" ", "\t", "\r", "\n"], c) then nb.lex-loop(rest, add(column, 1), count, tokens)
       else if int.gte?(count, 100) then
              NbLexError(NbDiagnostic(column, "formula exceeds 100 tokens"))
-      else if nb.letter?(c) then
+      else if text.ascii-letter?(c) then
              {
                let (letters, remaining) = nb.span(chars, nb.name-tail?, [])
                let name = nb.join(letters, "")
@@ -156,15 +104,13 @@ nb.lex-loop(
                       Cons(NbToken(NbName(name), column), tokens),
                     )}
       else {
-             let digit = nb.digit(c)
+             let digit = text.ascii-digit-value(c)
              match digit {
                | Some(_) -> {
                  let (digits, remaining) =
                    nb.span(
                      chars,
-                     fn (x) -> match nb.digit(x) {
-                                 | Some(_) -> True
-                                 | None -> False},
+                     text.ascii-digit?,
                      [],
                    )
                  let number = nb.literal(digits, 0)
@@ -181,13 +127,15 @@ nb.lex-loop(
                }
                | None -> {
                  let kind =
-                   if text.eq?(c, "+") then Some(NbOperator(NbAdd))
-                   else if text.eq?(c, "-") then Some(NbOperator(NbSub))
-                   else if text.eq?(c, "*") then Some(NbOperator(NbMul))
-                   else if text.eq?(c, "/") then Some(NbOperator(NbDiv))
-                   else if text.eq?(c, "(") then Some(NbLeft)
-                   else if text.eq?(c, ")") then Some(NbRight)
-                   else None
+                   match c {
+                     | "+" -> Some(NbOperator(NbAdd))
+                     | "-" -> Some(NbOperator(NbSub))
+                     | "*" -> Some(NbOperator(NbMul))
+                     | "/" -> Some(NbOperator(NbDiv))
+                     | "(" -> Some(NbLeft)
+                     | ")" -> Some(NbRight)
+                     | _ -> None
+                   }
                  match kind {
                    | None ->
                      NbLexError(NbDiagnostic(column, text.concat("unexpected character ", c)))
@@ -301,7 +249,7 @@ nb.bounded(
   n,
   origin,
 ) =
-  if bool.or(int.lt?(n, -1000000), int.gt?(n, 1000000)) then
+  if bool.not(int.between?(n, -1000000, 1000000)) then
     NbError(origin, "result outside -1000000..1000000")
   else NbValue(n)
 
@@ -338,7 +286,7 @@ nb.value-text(
   match value {
     | NbValue(n) -> text.from-int(n)
     | NbError(origin, reason) ->
-      text.concat(text.concat(text.concat("ERROR [", origin), "]: "), reason)
+      $"ERROR [{origin}]: {reason}"
   }
 
 nb.diagnostic-text(
@@ -346,5 +294,5 @@ nb.diagnostic-text(
 ) =
   match diagnostic {
     | NbDiagnostic(column, message) ->
-      text.concat(text.concat(text.concat("column ", text.from-int(column)), ": "), message)
+      $"column {text.from-int(column)}: {message}"
   }
