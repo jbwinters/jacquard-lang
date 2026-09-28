@@ -32,8 +32,8 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1101`
-- Cram transcript files: `72`
+- Alcotest/QCheck cases: `1106`
+- Cram transcript files: `73`
 - Documentation examples: `35` named examples across `8` documents
 
 The development suite also includes corpus goldens, release-manifest checks,
@@ -536,7 +536,7 @@ Phase 1). A type's labels generate `<type>.with-<label>` setters, total over sum
 and type-changing on parametric fields. Each setter hashes as its hand-written
 twin and carries the field label as its call label. E1241 guards setter
 collisions as it guards accessors. Two `test/test_surface_decls.ml` cases bring
-the current source inventory to `1101 / 72 / 35`.
+the source inventory to `1101 / 72 / 35`.
 
 The maintained applications now use those features instead of their
 workarounds (APP.12). The rota report and parser use single interpolations and
@@ -553,3 +553,16 @@ session. `display.fixed3` keeps its half-up rounding, which
 published digit. `demos/applications/README.md` lists what was retired and
 what was kept. No suite or cram was added, so the source inventory stays
 `1101 / 72 / 35`.
+
+Several fields now update in one expression (SX.28b, DES.4 Phase 2).
+`Ctor(value with label: e, ...)` takes exactly one value before the reserved
+word `with` and one or more labeled fields after it. It elaborates to, and
+hashes as, the explicit let-and-match twin: the value is evaluated first, then
+each new field once, in source order, under the interpreter and natively.
+Unknown and repeated labels are E0305/E0306 at the label, a malformed form is
+E1220, and on a sum type the refused one-clause match (E0813) names the total
+setter. The formatter prints the form back and never trades it for setters. The
+notebook's two multi-field rebuilds use it with every transcript unchanged.
+Five `test/test_surface_field_update.ml` cases and
+`test/cli/surface-field-update.t` bring the current source inventory to
+`1106 / 73 / 35`.

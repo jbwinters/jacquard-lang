@@ -123,6 +123,13 @@ let has_call_labels expressions =
       Option.is_some (Meta.surface_call_label expression.meta))
     expressions
 
+(** [quoted_labels_cause meta] explains an E1238 refusal of a labeled call, naming a field update
+    (SX.28b) as such. *)
+let quoted_labels_cause meta =
+  if Meta.surface_form meta = Some "field-update" then
+    "quoted code stores positional kernel applications and cannot retain a `with` field update"
+  else "quoted code stores positional kernel applications and cannot retain named argument labels"
+
 let rec first_named_call_meta (expression : Surface_ast.expr) =
   let expressions values = List.find_map first_named_call_meta values in
   match expression.it with
@@ -311,13 +318,17 @@ and lower_expr_node ?(quote_depth = 0) (expr : Surface_ast.expr) : (Kernel.expr,
   | Surface_ast.Call (fn, args) ->
       let named = has_call_labels args in
       if quote_depth > 0 && named then
-        error ~meta:expr.meta ~code:"E1238"
-          "quoted code stores positional kernel applications and cannot retain named argument \
-           labels"
+        error ~meta:expr.meta ~code:"E1238" (quoted_labels_cause expr.meta)
       else
         let* fn = lower_expr_node ~quote_depth fn in
         let* args = map_results (lower_expr_node ~quote_depth) args in
-        let surface_form_name = if named then "named-call" else "call" in
+        (* SX.28b: `Ctor(value with label: e, ...)` stays one tagged application here; resolution,
+           which knows the constructor's fields, elaborates it to its let-and-match twin *)
+        let surface_form_name =
+          if Meta.surface_form expr.meta = Some "field-update" then "field-update"
+          else if named then "named-call"
+          else "call"
+        in
         Ok Kernel.{ it = App (fn, args); meta = Meta.with_surface_form surface_form_name expr.meta }
   | Surface_ast.Fn (params, body) ->
       let* params = lower_lambda_params ~quote_depth params in
@@ -417,7 +428,7 @@ and lower_expr_node ?(quote_depth = 0) (expr : Surface_ast.expr) : (Kernel.expr,
       let* left = lower_expr_node ~quote_depth left in
       let* fn, args, right_meta =
         match right.Surface_ast.it with
-        | Surface_ast.Call (fn, args) ->
+        | Surface_ast.Call (fn, args) when Meta.surface_form right.meta <> Some "field-update" ->
             let named = has_call_labels args in
             if quote_depth > 0 && named then
               error ~meta:right.meta ~code:"E1238"
@@ -459,10 +470,7 @@ and lower_expr_node ?(quote_depth = 0) (expr : Surface_ast.expr) : (Kernel.expr,
             let* () =
               match first_named_call_meta body with
               | None -> Ok ()
-              | Some meta ->
-                  error ~meta ~code:"E1238"
-                    "quoted code stores positional kernel applications and cannot retain named \
-                     argument labels"
+              | Some meta -> error ~meta ~code:"E1238" (quoted_labels_cause meta)
             in
             let* body = lower_expr_node ~quote_depth:(quote_depth + 1) body in
             Ok (encode_quote_refs (Kernel.expr_to_form body))

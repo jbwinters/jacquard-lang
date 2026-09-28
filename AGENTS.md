@@ -149,6 +149,15 @@ When adding valid corpus files, regenerate the golden hashes with
   `src/surface_lower.ml` (`lower_block`), and `src/surface_print.ml`
   (`try_item`); `test/test_surface_try.ml`, `test/cli/surface-try.t`,
   `demos/request-validation/`.
+- Labeled-field accessors, setters and `with` updates (SX.27, SX.28, SX.28b,
+  design `docs/designs/everyday-language-ergonomics.md` §5): generation in
+  `src/surface_lower.ml` (`generated_accessor`, `generated_setter`); the
+  `Ctor(value with label: e)` form in `src/surface_parse.ml`
+  (`parse_call_argument_list`), its let-and-match elaboration in
+  `src/resolve.ml` (`elaborate_field_update`), printing in
+  `src/surface_print.ml` (`pp_field_update`), and the sum-type setter advice in
+  `src/check.ml` (`field_update_hint`); `test/test_surface_decls.ml`,
+  `test/test_surface_field_update.ml`, `test/cli/surface-field-update.t`.
 - Local projects (PKG.1, design `docs/designs/project-structure.md`): the
   `project.jqd` reader and validator `src/project_manifest.mli`, the composing
   frontend `src/project_frontend.mli`, bundles `src/project_bundle.mli` and `src/project_bundle_reader.mli`,

@@ -21,7 +21,13 @@
     suggestions at edit distance <= 2), E0302 kind mismatch, E0303 duplicate binding name in a
     [defterm] group, E0304 duplicate variable in one pattern, and E0305-E0308 labeled-pattern schema
     failures. E0309-E0314 cover missing, invalid, incomplete, or ambiguous explicit named-call ABIs
-    and call sites. *)
+    and call sites.
+
+    A field update [Ctor(value with label: e, ...)] (SX.28b) reaches resolution as one application
+    tagged [field-update]. Once its parts are resolved it is elaborated, against the constructor's
+    field schema, to its explicit let-and-match twin (see [elaborate_field_update]); its labels are
+    checked at the labeled-pattern boundary (E0305-E0308), and a callee that is not a constructor is
+    E0302. *)
 
 (** What a name in scope refers to. [KCon]/[KOp] hashes are the folded constructor/operation hashes
     (decl hash + ordinal, derived in W1.5). *)
@@ -704,6 +710,209 @@ let expand_labeled_pattern st ~meta hash patterns =
           fields
       end
 
+(* SX.28b (DES.4 Phase 2): nominal field updates. *)
+
+(** [field_update_meta marker source] is the metadata of a node generated from a field update's
+    [source] node: trivia, the call-site label and its container, and the surface form stay with the
+    source; the [surface-generated] marker records the node's role for the printer and the checker.
+*)
+let field_update_meta marker source =
+  source |> Meta.without_trivia |> Meta.without_surface_call_label
+  |> Meta.without_surface_container "call-argument"
+  |> Meta.remove Meta.key_surface_form
+  |> Meta.with_surface_generated marker
+
+(** [field_update_callee_diagnostic st fn] reports E0302 for a field update whose callee is not a
+    constructor. An unresolved name has already reported E0301. *)
+let field_update_callee_diagnostic st ~locals (fn : Kernel.expr) =
+  let named name got = kind_mismatch st ~meta:fn.meta name ~expected:"a constructor" ~got in
+  let name default = Option.value ~default (Meta.name fn.meta) in
+  match fn.it with
+  | Kernel.Ref (_, Kernel.Term) -> named (name "this callee") KTerm
+  | Kernel.Ref (_, Kernel.Op) -> named (name "this callee") KOp
+  | Kernel.GroupRef _ -> named (name "this callee") KTerm
+  | Kernel.Var local when List.mem local locals -> named local KTerm
+  | Kernel.Var _ -> ()
+  | Kernel.Ref (_, Kernel.Con)
+  | Kernel.Lit _ | Kernel.Lam _ | Kernel.App _ | Kernel.Let _ | Kernel.Match _ | Kernel.Tuple _
+  | Kernel.Handle _ | Kernel.Quote _ | Kernel.Unquote _ | Kernel.Ann _ ->
+      report st
+        (Diag.error ?span:(Meta.span fn.meta) ~domain:Resolution ~code:"E0302"
+           ~summary:"This reference has the wrong kind for its position."
+           ~cause:"A `with` field update names a constructor directly before its parentheses."
+           ~next_step:"Write the constructor's name, as in `Ctor(value with label: expression)`."
+           ~contrast:None ())
+
+(** [elaborate_field_update st ~group ~locals source fn arguments] elaborates the resolved field
+    update [Ctor(value with l1: e1, ..., ln: en)] (the lowered application [source], its constructor
+    [fn], and the arguments [value :: updates]) to its explicit twin
+
+    {v
+        let s = value; let u1 = e1; ...; let un = en
+    match s { | Ctor(l1: _, ..., ln: _, other: x, ...) -> Ctor(<u_i and x in field order>) }
+    v}
+
+    so the source value is evaluated first and each new field once, in source order. Binder names
+    are fresh against every local in scope (and against each other), so nothing an [e_i] mentions is
+    captured; they are not part of [HASH_V0], so the result hashes as the hand-written twin. Unknown
+    and repeated labels are the labeled-pattern boundary's E0305/E0306 at the label; a constructor
+    without a usable field schema is E0307/E0308; a callee that is not a constructor is E0302. On a
+    diagnostic, the application is returned unchanged for accumulated resolution. *)
+let elaborate_field_update st ~group ~locals (source : Kernel.expr) (fn : Kernel.expr) arguments =
+  let unchanged () = Kernel.{ source with it = App (fn, arguments) } in
+  let label_of (argument : Kernel.expr) = Meta.surface_call_label argument.meta in
+  match (arguments, fn.it) with
+  | value :: (_ :: _ as updates), Kernel.Ref (hash, Kernel.Con)
+    when Option.is_none (label_of value)
+         && List.for_all (fun u -> Option.is_some (label_of u)) updates -> (
+      let reported = List.length st.diags in
+      let labeled = List.map (fun update -> (Option.get (label_of update), update)) updates in
+      let selections =
+        List.map
+          (fun (label, update) ->
+            let field = call_argument_meta update in
+            Kernel.
+              {
+                it = PWild;
+                meta =
+                  field_update_meta "field-update-selection" field
+                  |> Meta.with_surface_pattern_label label
+                  |> Meta.with_surface_container "pattern-field" field;
+              })
+          labeled
+      in
+      let whole = field_update_meta "field-update-pattern" source.meta in
+      ignore (expand_labeled_pattern st ~meta:whole hash selections);
+      match st.names.constructor_fields hash with
+      | Some fields when List.length st.diags = reported ->
+          let occupied = Hashtbl.create 16 in
+          List.iter (fun name -> Hashtbl.replace occupied name ()) locals;
+          List.iter (fun entry -> Hashtbl.replace occupied entry.group_name ()) group;
+          let fresh ~fallback base =
+            let base = if Reader.valid_symbol base then base else fallback in
+            let rec choose suffix =
+              let name = if suffix = 0 then base else Printf.sprintf "%s-%d" base suffix in
+              if Hashtbl.mem occupied name then choose (suffix + 1)
+              else begin
+                Hashtbl.add occupied name ();
+                name
+              end
+            in
+            choose 0
+          in
+          let value_name = fresh ~fallback:"field-update-value" "field-update-value" in
+          let updated =
+            List.mapi
+              (fun index (label, update) ->
+                let name =
+                  fresh
+                    ~fallback:(Printf.sprintf "field-update-new-%d" (index + 1))
+                    ("field-update-new-" ^ label)
+                in
+                (label, (name, update)))
+              labeled
+          in
+          let slots =
+            List.mapi
+              (fun index field ->
+                match field with
+                | Some label when List.mem_assoc label updated -> `Updated label
+                | Some _ | None ->
+                    let fallback = Printf.sprintf "field-update-kept-%d" (index + 1) in
+                    let base =
+                      match field with
+                      | Some label -> "field-update-kept-" ^ label
+                      | None -> fallback
+                    in
+                    `Kept (fresh ~fallback base))
+              fields
+          in
+          let selection label =
+            List.find
+              (fun (pattern : Kernel.pat) -> Meta.surface_pattern_label pattern.meta = Some label)
+              selections
+          in
+          let reference name marker (origin : Kernel.expr) =
+            Kernel.{ it = Var name; meta = field_update_meta marker origin.meta }
+          in
+          let patterns =
+            List.map
+              (function
+                | `Updated label -> selection label
+                | `Kept name ->
+                    Kernel.
+                      { it = PVar name; meta = field_update_meta "field-update-kept" source.meta })
+              slots
+          in
+          let rebuilt =
+            List.map
+              (function
+                | `Updated label ->
+                    let name, update = List.assoc label updated in
+                    reference name "field-update-new-reference" update
+                | `Kept name -> reference name "field-update-kept-reference" source)
+              slots
+          in
+          let pattern_meta =
+            match Meta.name fn.meta with Some name -> Meta.with_name name whole | None -> whole
+          in
+          let clause =
+            Kernel.
+              {
+                cpat = { it = PCon (Hashed hash, patterns); meta = pattern_meta };
+                cbody =
+                  {
+                    it = App (fn, rebuilt);
+                    meta = field_update_meta "field-update-rebuild" source.meta;
+                  };
+                cmeta = field_update_meta "field-update-clause" source.meta;
+              }
+          in
+          let subject = reference value_name "field-update-subject" source in
+          let matched =
+            Kernel.
+              {
+                it = Match (subject, [ clause ]);
+                meta = field_update_meta "field-update-match" source.meta;
+              }
+          in
+          let bind name (value : Kernel.expr) body meta =
+            Kernel.
+              {
+                it =
+                  Let
+                    {
+                      isrec = false;
+                      binder =
+                        {
+                          it = PVar name;
+                          meta = field_update_meta "field-update-binder" value.meta;
+                        };
+                      value;
+                      body;
+                    };
+                meta;
+              }
+          in
+          let body =
+            List.fold_right
+              (fun (_, (name, (update : Kernel.expr))) body ->
+                bind name update body (field_update_meta "field-update-let" update.meta))
+              updated matched
+          in
+          (* the outermost node stands for the whole form: it keeps the form's trivia and any label
+             the form carries as an argument of an enclosing named call *)
+          let outer_meta =
+            source.meta |> Meta.remove Meta.key_surface_form
+            |> Meta.with_surface_generated "field-update"
+          in
+          bind value_name value body outer_meta
+      | Some _ | None -> unchanged ())
+  | _, Kernel.Ref (_, Kernel.Con) -> unchanged ()
+  | _ ->
+      field_update_callee_diagnostic st ~locals fn;
+      unchanged ()
+
 (* Real literals denote their HASH_V0-normalized value: -0.0 is +0.0 and every NaN is the quiet NaN
    (Canon.real_bits). Hash-equal programs must behave identically, so the literal a program runs is
    the literal its identity names; this applies to expressions, patterns, and quoted code alike. *)
@@ -885,7 +1094,9 @@ let rec resolve_expr_in st ~group ~locals (e : Kernel.expr) : Kernel.expr =
   | Kernel.App (fn, args) ->
       let fn = resolve_expr_in st ~group ~locals fn in
       let args = List.map (resolve_expr_in st ~group ~locals) args in
-      elaborate_named_call st ~group ~locals e fn args
+      if Meta.surface_form e.Kernel.meta = Some "field-update" then
+        elaborate_field_update st ~group ~locals e fn args
+      else elaborate_named_call st ~group ~locals e fn args
   | Kernel.Let { isrec; binder; value; body } ->
       let bound = pat_vars st binder in
       let value_locals = if isrec then bound @ locals else locals in

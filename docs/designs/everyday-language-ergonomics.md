@@ -1,7 +1,9 @@
 # DES.4 Everyday Language Ergonomics
 
 - Status: design proposal with a follow-up backlog; nothing here is implemented
-  or approved as a language contract by this document.
+  or approved as a language contract by this document. Proposal A has since
+  shipped as SX.28 (setters) and SX.28b (the `with` form); see the note at the
+  end of §5 A.1 and `docs/surface-syntax.md`.
 - Date: 2026-09-23
 - Base: `main` after API.1 (interface manifests), SX.27 (generated accessors),
   and APP.11 (the four applications as acceptance fixtures).
@@ -189,6 +191,24 @@ expr` items follow it; a second positional expression on either side, or zero
 labels, is the ordinary E1220 syntax error. Its printer needs a
 `field-update` provenance to round-trip, and `with` must become a reserved
 word before Phase 2, not before Phase 1 (§11).
+
+**As implemented (SX.28b).** Phase 2 ships as specified above. Lowering keeps
+the form as one application carrying the `field-update` provenance, which the
+printer and `fmt` print back; resolution, where the constructor's fields are
+known, elaborates it to the let-and-match twin with binders fresh against every
+local in scope, so `hash` of a `with` form equals `hash` of the hand-written
+twin (pinned in `test/test_surface_field_update.ml` and
+`test/cli/surface-field-update.t`, which also pin the evaluation order with
+effect counters under the interpreter and natively). Three points were settled
+in implementation: no new diagnostic code was needed, since the setter advice
+is part of the existing E0813 message ("use `shape.with-name` for a total
+update"), naming every updated label that all constructors carry, and a
+constructor with no labeled fields is the labeled-pattern boundary's E0307; a
+callee that is not a constructor is E0302; and a `with` form on the right of
+`|>` is E1220, because the pipe would supply a second value before `with`. The
+two notebook sites now read `NbSnapshot(snapshot with cells: cells, reverse:
+edges, cache: cache)` and `NbSnapshot(next with cache: ..., computed: ...)`;
+the single-field updates keep their setters.
 
 Why this order: Phase 1 is the elaboration target and removes every
 reconstruction site in the applications with no new syntax, parser, printer,

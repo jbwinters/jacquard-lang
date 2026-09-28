@@ -135,7 +135,7 @@ let test_printer_contract () =
   | Ok "1" -> ()
   | _ -> Alcotest.fail "surface printer module must stay wired through its public contract"
 
-(* DES.4: `with` is reserved ahead of the field update form; a stray use says why *)
+(* DES.4: `with` is reserved for the field update form; a stray use says why *)
 let test_with_is_reserved () =
   Alcotest.(check string)
     "a kernel name `with` is escaped" "`term:with`"
@@ -151,7 +151,7 @@ let test_with_is_reserved () =
       in
       Alcotest.(check bool)
         "the diagnostic names the reserved word" true
-        (contains "the reserved word `with` (kept for field updates")
+        (contains "the reserved word `with` (it only introduces a field update")
 
 let suite =
   [

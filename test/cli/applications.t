@@ -91,16 +91,18 @@ with its fresh-evaluator comparisons and cache/history invariants.
 
 The applications read and update their records through the generated D36 field
 accessors and setters (SX.27, SX.28), such as `rota-staff.id`, `nb-snapshot.cells`,
-and `rota-staff.with-available`. None of the hand-written selectors they were
+and `rota-staff.with-available`, and the notebook's multi-field rebuilds are
+`with` field updates (SX.28b). None of the hand-written selectors they were
 delivered with remain:
 
   $ grep -rhoE --include='*.jac' '\b(rota\.(staff-id|staff-name|staff-limit|shift-id|shift-label|people|shifts|rest|weight|solution-score|solution-assignments)|nb\.(response-book|response-output|response-stop\?|cell-name|cell-source|cell-expr|cell-deps|cells|edges|cache|hits|computed|current|undo-list|redo-list|outcome-book|outcome-message|accepted\?))\(' "$A" | wc -l
   0
   $ grep -rhoE --include='*.jac' '\b(rota-staff|nb-snapshot)\.with-[a-z]+' "$A" | sort | uniq -c
-        1 nb-snapshot.with-cache
-        1 nb-snapshot.with-computed
         1 nb-snapshot.with-hits
         1 rota-staff.with-available
+  $ grep -rhoE --include='*.jac' '\b[A-Z][A-Za-z]*\([a-z-]+ with\b' "$A" | sort | uniq -c
+        1 NbSnapshot(next with
+        1 NbSnapshot(snapshot with
 
 Project composition preserves every identity: each entry's bindings, with its
 dependencies', hash exactly as the concatenation the applications used to be

@@ -433,8 +433,14 @@ type Result e a =
 Labels do not create records. A label that every constructor carries
 generates an accessor named after the type: `type Pair = | Pair(left: Int,
 right: Int)` gives `pair.left` and `pair.right`, so `pair.left(Pair(1, 2))` is
-`1`. A label on only some constructors has no accessor; select it with a
-pattern. Construct values either positionally with `Canary(5)` or by label with
+`1`. It also generates a setter, `pair.with-left(p, left: 5)`, which returns a
+copy with that field replaced. To replace several fields of a value built by
+one constructor, name the constructor: `Pair(p with left: 5, right: 6)`
+evaluates `p`, then each new field once in source order, and hashes as the
+explicit `let`-and-`match` that rebuilds it. On a sum type a `with` update
+covers only the constructor it names and is refused as a non-exhaustive match
+(E0813) that points at the total setter. A label on only some constructors has
+no accessor or setter; select it with a pattern. Construct values either positionally with `Canary(5)` or by label with
 `Canary(percent: 5)`; match either positionally with
 `Canary(percent)` or by selection with `Canary(percent: value)`.
 
@@ -574,7 +580,9 @@ mode-op-signature := mode name ":" "(" ([label ":"] type ("," [label ":"] type)*
 mode        := "once" | "multi"
 
 expression  := call ("|>" call)*
-call        := primary ("(" ([label ":"] expression ("," [label ":"] expression)*)? ")")*
+call        := primary ("(" call-items? ")")*
+call-items  := [label ":"] expression ("," [label ":"] expression)*
+             | expression "with" label ":" expression ("," label ":" expression)*
 primary     := literal | marked-text | name | tuple | list | block | fn | match | if
              | handle | quote | unquote | annotation
 marked-text := '$"' ("{{" | "{" expression "}" | character-or-escape)* '"'
@@ -915,8 +923,9 @@ Do not invent new kernel forms for surface sugar.
 - No ambient authority: missing grants are expected refusals, not runtime
   configuration bugs.
 - No null, records, modules/imports, guards, or-patterns, custom operators,
-  or implicit traits/typeclasses (constructor field accessors are generated
-  only for labels every constructor carries). Explicit
+  or implicit traits/typeclasses (constructor field accessors and setters are
+  generated only for labels every constructor carries; `Ctor(value with
+  label: e)` is nominal, not a record update). Explicit
   dictionaries are ordinary values.
 - The interpreter ships deterministic structured Tasks, cooperative
   cancellation, bounded schedule exploration/replay, and scoped typed

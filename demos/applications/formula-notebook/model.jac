@@ -171,8 +171,8 @@ nb.cached(
               | Some(definition) -> nb.cached(nb-cell.expression(definition), snapshot, name)}
           (
             value,
-            nb-snapshot.with-computed(
-              nb-snapshot.with-cache(next, cache: Cons(NbEntry(name, value), nb-snapshot.cache(next))),
+            NbSnapshot(next with
+              cache: Cons(NbEntry(name, value), nb-snapshot.cache(next)),
               computed: add(nb-snapshot.computed(next), 1),
             ),
           )
@@ -237,7 +237,7 @@ nb.candidate(
               },
           )
         NbAccepted(
-          nb.recalculate(NbSnapshot(cells, edges, cache, nb-snapshot.hits(snapshot), nb-snapshot.computed(snapshot))),
+          nb.recalculate(NbSnapshot(snapshot with cells: cells, reverse: edges, cache: cache)),
         )
       }
     }

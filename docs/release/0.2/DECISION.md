@@ -3,9 +3,9 @@
 Status: candidate is ready for RC1 only after the exact candidate reproduction
 and required GitHub checks are green.
 
-Test count: `1101`
+Test count: `1106`
 
-Cram count: `72`
+Cram count: `73`
 
 Documentation example count: `35` across `8` documents
 
