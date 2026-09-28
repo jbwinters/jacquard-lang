@@ -75,6 +75,14 @@ jac run PROGRAM.jac
 jac run PROGRAM.jac --allow console --allow net
 jac run PROGRAM.jac --dry-run
 
+# Local projects (project.jqd): compose several files, pin dependencies,
+# bundle; see docs/designs/project-structure.md.
+jac project check --project DIR
+jac project run --project DIR ENTRY --allow console
+jac project test --project DIR --seed 42 --no-cache
+jac project build --project DIR ENTRY -o OUT
+jac project pin --project DIR
+
 # Compare complete transcripts under schedule/Secret variation, or only result
 # values under one live grant versus the dry world.
 jac relate PROGRAM.jac --vary schedule=8 --seed 42
@@ -698,7 +706,10 @@ operator overloading, or numeric defaulting.
 Core data and common functions:
 
 - `Bool`: `True`, `False`; `bool.and`, `bool.or`, `bool.not`,
-  `bool.and-then`, `bool.or-else`
+  `bool.and-then`, `bool.or-else`; flat conjunctions `bool.all([...])` and
+  `bool.any([...])`; `list.all?(xs, p)` and `list.any?(xs, p)` (stop at the
+  deciding item); closed intervals `int.between?(v, lo, hi)` and
+  `real.between?(v, lo, hi)` (positional)
 - `Option a`: `None`, `Some`; `option.map`, `option.then`,
   `option.with-default`, `option.get!`
 - `Result e a`: `Err`, `Ok`; `result.map`, `result.map-error`,

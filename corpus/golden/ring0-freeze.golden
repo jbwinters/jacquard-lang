@@ -1,7 +1,9 @@
 add : (Int, Int) ->{} Int
 type bool
+bool.all : (List Bool) ->{} Bool
 bool.and : (Bool, Bool) ->{} Bool
 bool.and-then : forall | e. (Bool, () ->{| e} Bool) ->{| e} Bool
+bool.any : (List Bool) ->{} Bool
 bool.eq : Eq Bool
 bool.not : (Bool) ->{} Bool
 bool.or : (Bool, Bool) ->{} Bool
@@ -33,6 +35,7 @@ type int
 int-compare : (Int, Int) ->{} Ordering
 con int-opaque
 int.add : (Int, Int) ->{} Int
+int.between? : (Int, Int, Int) ->{} Bool
 int.div : (Int, Int) ->{} Int
 int.eq : Eq Int
 int.gt? : (Int, Int) ->{} Bool
@@ -46,6 +49,8 @@ int.sub : (Int, Int) ->{} Int
 con less
 type list
 list-eq-with : forall a. (Eq a, List a, List a) ->{} Bool
+list.all? : forall a | e. (List a, (a) ->{| e} Bool) ->{| e} Bool
+list.any? : forall a | e. (List a, (a) ->{| e} Bool) ->{| e} Bool
 list.append : forall a. (List a, List a) ->{} List a
 list.concat : forall a. (List (List a)) ->{} List a
 list.contains? : forall a. (List a, a, Eq a) ->{} Bool
@@ -104,6 +109,7 @@ parallel.map : forall a b. (List b, (b) ->{} a) ->{} List a
 type real
 con real-opaque
 real.add : (Real, Real) ->{} Real
+real.between? : (Real, Real, Real) ->{} Bool
 real.div : (Real, Real) ->{} Real
 real.gt? : (Real, Real) ->{} Bool
 real.gte? : (Real, Real) ->{} Bool
