@@ -102,6 +102,6 @@ deterministic interface in which its generated accessors are ordinary exports.
   $ jacquard interface emit $A/rota-optimizer/model.jac | cmp - rota.jqi && echo deterministic
   deterministic
   $ grep -c '^(export' rota.jqi
-  115
+  102
   $ grep -c '^  rota-staff\.\(id\|name\|limit\)$' rota.jqi
   3

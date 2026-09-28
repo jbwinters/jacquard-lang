@@ -537,3 +537,18 @@ and type-changing on parametric fields. Each setter hashes as its hand-written
 twin and carries the field label as its call label. E1241 guards setter
 collisions as it guards accessors. Two `test/test_surface_decls.ml` cases bring
 the current source inventory to `1101 / 72 / 35`.
+
+The maintained applications now use those features instead of their
+workarounds (APP.12). The rota report and parser use single interpolations and
+`text.to-int`, the notebook uses the ASCII classifiers, Text patterns and
+interpolation, all four use the list predicates and range checks, and both
+larger models read and update records through generated accessors and
+setters. Every `EXAMPLE.txt` and `CUSTOM-EXAMPLE.txt` is unchanged, the
+suites keep their checks, and `test/cli/applications.t` still confirms
+interpreter and native parity and composition identity. The one behavior
+change is that a blank notebook line reprompts and only end of input ends the
+session. `display.fixed3` keeps its half-up rounding, which
+`display-tests.jac` now pins, because `text.from-real-fixed` would change a
+published digit. `demos/applications/README.md` lists what was retired and
+what was kept. No suite or cram was added, so the source inventory stays
+`1101 / 72 / 35`.

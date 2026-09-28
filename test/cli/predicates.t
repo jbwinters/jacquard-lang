@@ -23,13 +23,13 @@ program and the two engines agree.
   $ jacquard build predicates.jac -o predicates > /dev/null && ./predicates | cmp - interpreted.out && echo same
   same
 
-The rota optimizer's staff validation is a flat `bool.all` list. It accepts a
-valid staff record and refuses each single-field violation, one message per
-invalid record:
+The rota optimizer's input validation and its independent solution check are
+flat `bool.all` lists. The validation accepts a valid staff record and refuses
+each single-field violation, one message per invalid record:
 
   $ R=../../demos/applications/rota-optimizer
   $ grep -c 'bool.all(' "$R/model.jac"
-  1
+  4
   $ cat > variants.jac <<'J'
   > check(staff) = rota.valid-input(RotaProblem(staff: [staff], shifts: rota.week-shifts(), rest: 12, fairness: 1))
   > check(RotaStaff(0, "Ada", [GeneralSkill], [0, 1], 3, [MkPair(0, 5)]))
