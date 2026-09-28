@@ -5,24 +5,24 @@ nb.snapshot-text(
   {
     let cells =
       list.map(
-        nb.cells(snapshot),
+        nb-snapshot.cells(snapshot),
         fn (
           cell,
         ) ->
           nb.join(
-            [nb.cell-name(cell), nb.cell-source(cell), nb.join(nb.cell-deps(cell), ",")],
+            [nb-cell.name(cell), nb-cell.source(cell), nb.join(nb-cell.dependencies(cell), ",")],
             "|",
           ),
       )
     let edges =
       list.map(
-        nb.edges(snapshot),
+        nb-snapshot.reverse(snapshot),
         fn (edge) -> match edge {
                        | NbEdge(a, b) -> text.concat(text.concat(a, ">"), b)},
       )
     let cache =
       list.map(
-        nb.cache(snapshot),
+        nb-snapshot.cache(snapshot),
         fn (
           entry,
         ) ->
@@ -41,14 +41,14 @@ nb.book-text(
 ) =
   nb.join(
     [
-      nb.snapshot-text(nb.current(book)),
-      nb.join(list.map(nb.undo-list(book), nb.snapshot-text), "\n---\n"),
-      nb.join(list.map(nb.redo-list(book), nb.snapshot-text), "\n---\n"),
+      nb.snapshot-text(nb-book.current(book)),
+      nb.join(list.map(nb-book.undo(book), nb.snapshot-text), "\n---\n"),
+      nb.join(list.map(nb-book.redo(book), nb.snapshot-text), "\n---\n"),
     ],
     "\n===\n",
   )
 
-nb.set(book, name, source) = nb.outcome-book(nb.commit(book, NbSet(name, source)))
+nb.set(book, name, source) = nb-outcome.book(nb.commit(book, NbSet(name, source)))
 
 nb.run-lines(
   lines,
@@ -61,7 +61,7 @@ nb.check-value(
   expected,
 ) =
   check.eq(
-    nb.value-text(nb.visible-value(nb.current(book), name)),
+    nb.value-text(nb.visible-value(nb-book.current(book), name)),
     expected,
     text.eq,
     text.show,
@@ -72,16 +72,16 @@ nb.check-reference(
   book,
 ) =
   {
-    let snapshot = nb.current(book)
+    let snapshot = nb-book.current(book)
     list.each(
-      nb.cells(snapshot),
+      nb-snapshot.cells(snapshot),
       fn (
         cell,
       ) ->
         {
-          let name = nb.cell-name(cell)
+          let name = nb-cell.name(cell)
           let actual = nb.visible-value(snapshot, name)
-          let expected = nb.fresh(NbRef(name), nb.cells(snapshot), name)
+          let expected = nb.fresh(NbRef(name), nb-snapshot.cells(snapshot), name)
           check.eq(
             nb.value-text(actual),
             nb.value-text(expected),
@@ -92,7 +92,7 @@ nb.check-reference(
         },
     )
     let cache-names =
-      list.map(nb.cache(snapshot), fn (entry) -> match entry {
+      list.map(nb-snapshot.cache(snapshot), fn (entry) -> match entry {
                                                    | NbEntry(name, _) -> name})
     check.eq(
       list.length(cache-names),
@@ -186,18 +186,18 @@ nb.graph-tests =
                   "set independent = 99",
                 ],
               )
-            let before = nb.current(book)
+            let before = nb-book.current(book)
             let changed = nb.set(book, "root", "3")
-            let after = nb.current(changed)
+            let after = nb-book.current(changed)
             check.eq(
-              sub(nb.computed(after), nb.computed(before)),
+              sub(nb-snapshot.computed(after), nb-snapshot.computed(before)),
               4,
               int.eq,
               int.show,
               "root, left, right, total only",
             )
             check.eq(
-              sub(nb.hits(after), nb.hits(before)),
+              sub(nb-snapshot.hits(after), nb-snapshot.hits(before)),
               5,
               int.eq,
               int.show,
@@ -218,14 +218,14 @@ nb.graph-tests =
               )
             let changed = nb.set(book, "a", "8")
             check.eq(
-              sub(nb.computed(nb.current(changed)), nb.computed(nb.current(book))),
+              sub(nb-snapshot.computed(nb-book.current(changed)), nb-snapshot.computed(nb-book.current(book))),
               1,
               int.eq,
               int.show,
               "obsolete source only",
             )
             check.eq(
-              list.length(nb.dependents(nb.edges(nb.current(changed)), "a")),
+              list.length(nb.dependents(nb-snapshot.reverse(nb-book.current(changed)), "a")),
               0,
               int.eq,
               int.show,
@@ -234,7 +234,7 @@ nb.graph-tests =
             let waiting = nb.set(changed, "x", "unknown + b")
             let repaired = nb.set(waiting, "unknown", "7")
             check.eq(
-              sub(nb.computed(nb.current(repaired)), nb.computed(nb.current(waiting))),
+              sub(nb-snapshot.computed(nb-book.current(repaired)), nb-snapshot.computed(nb-book.current(waiting))),
               3,
               int.eq,
               int.show,
@@ -258,7 +258,7 @@ nb.graph-tests =
                 ) ->
                   nb.set(state, text.concat("cell", text.from-int(n)), text.from-int(n)),
               )
-            check.eq(list.length(nb.cells(nb.current(book))), 40, int.eq, int.show, "forty cells")
+            check.eq(list.length(nb-snapshot.cells(nb-book.current(book))), 40, int.eq, int.show, "forty cells")
             let rejected = nb.execute(book, "set overflow = 1")
             check.eq(
               nb.book-text(nb.response-book(rejected)),
@@ -285,7 +285,7 @@ nb.graph-tests =
                 fn (state, n) -> nb.set(state, "x", text.concat("absent", text.from-int(n))),
               )
             check.eq(
-              list.length(nb.cache(nb.current(book))),
+              list.length(nb-snapshot.cache(nb-book.current(book))),
               2,
               int.eq,
               int.show,
@@ -343,15 +343,15 @@ nb.history-tests =
           {
             let first = nb.run-lines(["set a = 2", "set b = a * 3"])
             let second = nb.set(first, "a", "4")
-            let undone = nb.outcome-book(nb.undo(second))
+            let undone = nb-outcome.book(nb.undo(second))
             check.eq(
-              nb.snapshot-text(nb.current(undone)),
-              nb.snapshot-text(nb.current(first)),
+              nb.snapshot-text(nb-book.current(undone)),
+              nb.snapshot-text(nb-book.current(first)),
               text.eq,
               text.show,
               "undo full snapshot",
             )
-            let redone = nb.outcome-book(nb.redo(undone))
+            let redone = nb-outcome.book(nb.redo(undone))
             check.eq(
               nb.book-text(redone),
               nb.book-text(second),
@@ -360,8 +360,8 @@ nb.history-tests =
               "redo full book",
             )
             let branch = nb.set(undone, "a", "5")
-            check.eq(list.length(nb.redo-list(branch)), 0, int.eq, int.show, "new edit clears redo")
-            check.true(bool.not(nb.accepted?(nb.redo(branch))), "redo unavailable after branch")
+            check.eq(list.length(nb-book.redo(branch)), 0, int.eq, int.show, "new edit clears redo")
+            check.true(bool.not(nb-outcome.accepted(nb.redo(branch))), "redo unavailable after branch")
           },
       ),
       Case(
@@ -374,21 +374,21 @@ nb.history-tests =
                 nb.empty(),
                 fn (state, n) -> nb.set(state, "a", text.from-int(n)),
               )
-            check.eq(list.length(nb.undo-list(book)), 20, int.eq, int.show, "bounded undo")
+            check.eq(list.length(nb-book.undo(book)), 20, int.eq, int.show, "bounded undo")
             let undone =
-              list.fold(list.range(0, 20), book, fn (state, _) -> nb.outcome-book(nb.undo(state)))
+              list.fold(list.range(0, 20), book, fn (state, _) -> nb-outcome.book(nb.undo(state)))
             nb.check-value(undone, "a", "4")
             let failure = nb.undo(undone)
-            check.true(bool.not(nb.accepted?(failure)), "old history dropped")
+            check.true(bool.not(nb-outcome.accepted(failure)), "old history dropped")
             check.eq(
-              nb.book-text(nb.outcome-book(failure)),
+              nb.book-text(nb-outcome.book(failure)),
               nb.book-text(undone),
               text.eq,
               text.show,
               "failed undo unchanged",
             )
             let restored =
-              list.fold(list.range(0, 20), undone, fn (state, _) -> nb.outcome-book(nb.redo(state)))
+              list.fold(list.range(0, 20), undone, fn (state, _) -> nb-outcome.book(nb.redo(state)))
             check.eq(
               nb.book-text(restored),
               nb.book-text(book),

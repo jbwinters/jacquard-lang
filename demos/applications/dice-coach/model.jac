@@ -14,10 +14,7 @@ dice.valid?(
   pot,
   rolls,
 ) =
-  bool.and(
-    bool.and(int.gte?(pot, 0), int.lte?(pot, 60)),
-    bool.and(int.gte?(rolls, 0), int.lte?(rolls, 3)),
-  )
+  bool.and(int.between?(pot, 0, 60), int.between?(rolls, 0, 3))
 
 -- Bellman recurrence: compare banking now with all six next-roll outcomes.
 -- A bust contributes zero; surviving faces allow a fresh optimal decision.

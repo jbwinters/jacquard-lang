@@ -155,24 +155,8 @@ rota.configure(
           fn (
             person,
           ) ->
-            match person {
-              | RotaStaff(
-                  id: id,
-                  name: name,
-                  skills: skills,
-                  available: available,
-                  limit: limit,
-                  preferences: preferences,
-                ) ->
-                RotaStaff(
-                  id: id,
-                  name: name,
-                  skills: skills,
-                  available: if eq(id, excluded) then Nil else available,
-                  limit: limit,
-                  preferences: preferences,
-                )
-            },
+            if eq(rota-staff.id(person), excluded) then rota-staff.with-available(person, available: Nil)
+            else person,
         )
       RotaProblem(staff: updated, shifts: shifts, rest: rest, fairness: fairness)
     }

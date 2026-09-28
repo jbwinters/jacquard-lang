@@ -11,7 +11,7 @@ rota.oracle(
       if rota.verify(problem, assignments) then Some(rota.solution(problem, assignments)) else None
     | Cons(shift, remaining) ->
       list.fold(
-        rota.people(problem),
+        rota-problem.staff(problem),
         None,
         fn (
           best,
@@ -22,13 +22,13 @@ rota.oracle(
               rota.oracle(
                 problem,
                 remaining,
-                Cons(RotaAssignment(shift, rota.staff-id(person)), assignments),
+                Cons(RotaAssignment(shift, rota-staff.id(person)), assignments),
               )
             match (best, candidate) {
               | (None, _) -> candidate
               | (_, None) -> best
               | (Some(previous), Some(next)) ->
-                if int.gt?(rota.solution-score(next), rota.solution-score(previous)) then candidate
+                if int.gt?(rota-solution.score(next), rota-solution.score(previous)) then candidate
                 else best
             }
           },
@@ -41,7 +41,7 @@ rota.same-best?(
 ) =
   match (a, b) {
     | (None, None) -> True
-    | (Some(left), Some(right)) -> eq(rota.solution-score(left), rota.solution-score(right))
+    | (Some(left), Some(right)) -> eq(rota-solution.score(left), rota-solution.score(right))
     | _ -> False
   }
 
@@ -128,9 +128,9 @@ rota.check-optimal(
 ) =
   match rota.solve(problem, budget) {
     | Ok(RotaReport(status: ProvenOptimal, best: Some(solution), upper: Some(bound))) -> {
-      check.eq(rota.solution-score(solution), expected, int.eq, int.show, "optimal objective")
+      check.eq(rota-solution.score(solution), expected, int.eq, int.show, "optimal objective")
       check.eq(bound, expected, int.eq, int.show, "closed optimality gap")
-      check.true(rota.verify(problem, rota.solution-assignments(solution)), "independent validity")
+      check.true(rota.verify(problem, rota-solution.assignments(solution)), "independent validity")
     }
     | _ -> check.true(False, "expected a proved optimum with a valid complete schedule")
   }
@@ -143,7 +143,7 @@ rota.tests =
         "empty workload is optimal without spending a search node",
         fn () ->
           {
-            let people = rota.people(rota.tiny())
+            let people = rota-problem.staff(rota.tiny())
             let cleared =
               list.map(
                 people,
@@ -151,8 +151,8 @@ rota.tests =
                   person,
                 ) ->
                   RotaStaff(
-                    rota.staff-id(person),
-                    rota.staff-name(person),
+                    rota-staff.id(person),
+                    rota-staff.name(person),
                     [GeneralSkill],
                     [],
                     4,
@@ -194,8 +194,8 @@ rota.tests =
           {
             let problem = rota.rest-conflict()
             check.true(
-              rota.every(
-                rota.shifts(problem),
+              list.all?(
+                rota-problem.shifts(problem),
                 fn (shift) -> int.gt?(list.length(rota.candidates(problem, shift, Nil)), 0),
               ),
               "every shift has a root candidate",
@@ -227,12 +227,12 @@ rota.tests =
                   ),
                 ) -> {
                 check.true(
-                  rota.verify(rota.tiny(), rota.solution-assignments(solution)),
+                  rota.verify(rota.tiny(), rota-solution.assignments(solution)),
                   "valid incumbent",
                 )
                 check.true(int.gte?(bound, 20), "upper bound covers true optimum")
                 check.true(
-                  int.lte?(rota.solution-score(solution), 20),
+                  int.lte?(rota-solution.score(solution), 20),
                   "incumbent is a lower bound",
                 )
               }
@@ -245,7 +245,7 @@ rota.tests =
         fn () ->
           {
             let problem = rota.tiny()
-            let assignments = list.map(rota.shifts(problem), fn (shift) -> RotaAssignment(shift, 0))
+            let assignments = list.map(rota-problem.shifts(problem), fn (shift) -> RotaAssignment(shift, 0))
             check.true(rota.verify(problem, assignments), "reference schedule is feasible")
             check.true(bool.not(rota.verify(problem, Nil)), "missing shifts")
             match assignments {
@@ -260,7 +260,7 @@ rota.tests =
               bool.not(
                 rota.verify(
                   problem,
-                  list.map(rota.shifts(problem), fn (shift) -> RotaAssignment(shift, 99)),
+                  list.map(rota-problem.shifts(problem), fn (shift) -> RotaAssignment(shift, 99)),
                 ),
               ),
               "unknown staff",
@@ -300,7 +300,7 @@ rota.tests =
               bool.not(
                 rota.verify(
                   conflict,
-                  list.map(rota.shifts(conflict), fn (shift) -> RotaAssignment(shift, 1)),
+                  list.map(rota-problem.shifts(conflict), fn (shift) -> RotaAssignment(shift, 1)),
                 ),
               ),
               "unqualified staff",
@@ -309,7 +309,7 @@ rota.tests =
               bool.not(
                 rota.verify(
                   conflict,
-                  list.map(rota.shifts(conflict), fn (shift) -> RotaAssignment(shift, 0)),
+                  list.map(rota-problem.shifts(conflict), fn (shift) -> RotaAssignment(shift, 0)),
                 ),
               ),
               "insufficient rest",
@@ -320,7 +320,7 @@ rota.tests =
         "malformed problems and budgets return input errors",
         fn () ->
           {
-            let shifts = rota.shifts(rota.tiny())
+            let shifts = rota-problem.shifts(rota.tiny())
             let good = RotaStaff(0, "good", [GeneralSkill], [0, 1, 2, 3], 4, [])
             let bad-availability = RotaStaff(0, "bad", [GeneralSkill], [99], 4, [])
             let bad-preference = RotaStaff(0, "bad", [GeneralSkill], [0], 4, [MkPair(0, 11)])
@@ -376,23 +376,23 @@ rota.tests =
             let original = rota.tiny()
             let people =
               list.map(
-                rota.people(original),
+                rota-problem.staff(original),
                 fn (
                   person,
                 ) ->
                   RotaStaff(
-                    rota.staff-id(person),
-                    rota.staff-name(person),
+                    rota-staff.id(person),
+                    rota-staff.name(person),
                     [GeneralSkill],
                     [0, 1, 2, 3],
                     1,
                     [],
                   ),
               )
-            let problem = RotaProblem(people, rota.shifts(original), 8, 2)
+            let problem = RotaProblem(people, rota-problem.shifts(original), 8, 2)
             check.true(
-              rota.every(
-                rota.shifts(problem),
+              list.all?(
+                rota-problem.shifts(problem),
                 fn (shift) -> int.gt?(list.length(rota.candidates(problem, shift, Nil)), 0),
               ),
               "every shift has candidates",
@@ -403,7 +403,7 @@ rota.tests =
               | _ -> check.true(False, "capacity shortage not detected")
             }
             let assignments =
-              list.map(rota.shifts(original), fn (shift) -> RotaAssignment(shift, 0))
+              list.map(rota-problem.shifts(original), fn (shift) -> RotaAssignment(shift, 0))
             check.true(
               bool.not(rota.verify(problem, assignments)),
               "verifier checks final workload limits",
@@ -421,7 +421,7 @@ rota.tests =
             let seed = sample(UniformInt(0, 31))
             let fairness = sample(UniformInt(0, 2))
             let problem = rota.generated(seed, fairness)
-            let oracle = rota.oracle(problem, rota.shifts(problem), Nil)
+            let oracle = rota.oracle(problem, rota-problem.shifts(problem), Nil)
             match rota.solve(problem, 200) {
               | Ok(RotaReport(status: status, best: best, expanded: expanded)) -> {
                 check.true(rota.same-best?(best, oracle), "same feasibility and optimal score")
@@ -429,7 +429,7 @@ rota.tests =
                 match (status, oracle) {
                   | (ProvenOptimal, Some(solution)) ->
                     check.true(
-                      rota.verify(problem, rota.solution-assignments(solution)),
+                      rota.verify(problem, rota-solution.assignments(solution)),
                       "oracle winner is valid",
                     )
                   | (ProvenImpossible, None) -> check.true(True, "both prove impossible")
@@ -447,23 +447,23 @@ rota.tests =
             let seed = sample(UniformInt(0, 31))
             let fairness = sample(UniformInt(0, 2))
             let problem = rota.generated(seed, fairness)
-            match rota.shifts(problem) {
+            match rota-problem.shifts(problem) {
               | Cons(first, remaining) ->
                 list.each(
-                  rota.people(problem),
+                  rota-problem.staff(problem),
                   fn (
                     person,
                   ) ->
                     if rota.allowed?(problem, person, first, Nil) then
                       {
-                        let prefix = [RotaAssignment(first, rota.staff-id(person))]
-                        let partial-score = rota.solution-score(rota.solution(problem, prefix))
+                        let prefix = [RotaAssignment(first, rota-staff.id(person))]
+                        let partial-score = rota-solution.score(rota.solution(problem, prefix))
                         let oracle = rota.oracle(problem, remaining, prefix)
                         match (rota.analyze(problem, remaining, prefix, partial-score), oracle) {
                           | (None, None) -> check.true(True, "pruned prefix has no completion")
                           | (Some((_, _, bound)), Some(solution)) ->
                             check.true(
-                              int.gte?(bound, rota.solution-score(solution)),
+                              int.gte?(bound, rota-solution.score(solution)),
                               "bound is optimistic",
                             )
                           | (Some(_), None) ->
@@ -493,7 +493,7 @@ rota.tests =
                 match (before, after) {
                   | (Some(a), Some(b)) ->
                     check.true(
-                      int.gte?(rota.solution-score(b), rota.solution-score(a)),
+                      int.gte?(rota-solution.score(b), rota-solution.score(a)),
                       "incumbent cannot worsen",
                     )
                   | (None, _) -> check.true(True, "no previous incumbent")

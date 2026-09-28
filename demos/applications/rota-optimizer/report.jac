@@ -15,31 +15,31 @@ rota.forced-conflicts(
   problem,
 ) =
   list.fold(
-    rota.shifts(problem),
+    rota-problem.shifts(problem),
     Nil,
     fn (
       messages,
       left,
     ) ->
       list.fold(
-        rota.shifts(problem),
+        rota-problem.shifts(problem),
         messages,
         fn (
           found,
           right,
         ) ->
-          if int.gte?(rota.shift-id(left), rota.shift-id(right)) then found
+          if int.gte?(rota-shift.id(left), rota-shift.id(right)) then found
           else match (rota.candidates(problem, left, Nil), rota.candidates(problem, right, Nil)) {
                  | (Cons(a, Nil), Cons(b, Nil)) ->
                    if bool.and(
-                        eq(rota.staff-id(a), rota.staff-id(b)),
-                        bool.not(rota.rested?(left, right, rota.rest(problem))),
+                        eq(rota-staff.id(a), rota-staff.id(b)),
+                        bool.not(rota.rested?(left, right, rota-problem.rest(problem))),
                       ) then
                      {
                        let pair =
-                         $"  {rota.staff-name(a)} is the only candidate for {rota.shift-label(left)} and {rota.shift-label(right)}."
+                         $"  {rota-staff.name(a)} is the only candidate for {rota-shift.label(left)} and {rota-shift.label(right)}."
                        let reason =
-                         $" Those intervals do not leave the required {text.from-int(rota.rest(problem))} hours of rest."
+                         $" Those intervals do not leave the required {text.from-int(rota-problem.rest(problem))} hours of rest."
                        list.append(found, [text.concat(pair, reason)])}
                    else found
                  | _ -> found
@@ -53,7 +53,7 @@ rota.explain-impossible(
   {
     let uncovered =
       list.filter(
-        rota.shifts(problem),
+        rota-problem.shifts(problem),
         fn (shift) -> eq(list.length(rota.candidates(problem, shift, Nil)), 0),
       )
     let forced = rota.forced-conflicts(problem)
@@ -62,16 +62,16 @@ rota.explain-impossible(
       fn (
         shift,
       ) ->
-        println($"  No available, qualified staff with capacity for {rota.shift-label(shift)}."),
+        println($"  No available, qualified staff with capacity for {rota-shift.label(shift)}."),
     )
     list.each(forced, fn (message) -> println(message))
     let capacity =
       list.fold(
-        rota.people(problem),
+        rota-problem.staff(problem),
         0,
-        fn (total, person) -> add(total, rota.staff-limit(person)),
+        fn (total, person) -> add(total, rota-staff.limit(person)),
       )
-    if int.lt?(capacity, list.length(rota.shifts(problem))) then
+    if int.lt?(capacity, list.length(rota-problem.shifts(problem))) then
       println("  Total staff capacity is smaller than the number of shifts.")
     else if bool.and(eq(list.length(uncovered), 0), eq(list.length(forced), 0)) then
            println(
@@ -95,10 +95,10 @@ rota.show-solution(
         $"Score {text.from-int(score)} = preferences {text.from-int(preference)} - workload penalty {text.from-int(penalty)}",
       )
       println(
-        $"Penalty = {text.from-int(rota.weight(problem))} * sum(each person's shift count squared).",
+        $"Penalty = {text.from-int(rota-problem.fairness(problem))} * sum(each person's shift count squared).",
       )
       list.each(
-        rota.shifts(problem),
+        rota-problem.shifts(problem),
         fn (
           shift,
         ) ->
@@ -111,37 +111,35 @@ rota.show-solution(
                 ) ->
                   match assignment {
                     | RotaAssignment(assigned, _) ->
-                      eq(rota.shift-id(assigned), rota.shift-id(shift))
+                      eq(rota-shift.id(assigned), rota-shift.id(shift))
                   },
               )
             match selected {
               | None -> println("  Internal error: shift missing from completed schedule.")
               | Some(RotaAssignment(_, id)) ->
-                match rota.find-person(rota.people(problem), id) {
+                match rota.find-person(rota-problem.staff(problem), id) {
                   | None -> println("  Internal error: unknown employee.")
                   | Some(person) ->
                     match shift {
                       | RotaShift(start: start, finish: finish, skill: skill) -> {
-                        let interval =
-                          $"  {rota.shift-label(shift)} [hours {text.from-int(start)}..{text.from-int(finish)}"
-                        let employee =
-                          $", {rota.skill-name(skill)}]: {rota.staff-name(person)}; preference {text.from-int(rota.preference(person, shift))}"
-                        println(text.concat(interval, employee))
+                        println(
+                          $"  {rota-shift.label(shift)} [hours {text.from-int(start)}..{text.from-int(finish)}, {rota.skill-name(skill)}]: {rota-staff.name(person)}; preference {text.from-int(rota.preference(person, shift))}",
+                        )
                       }}}
             }
           },
       )
       println("Workloads:")
       list.each(
-        rota.people(problem),
+        rota-problem.staff(problem),
         fn (
           person,
         ) ->
           {
-            let count = rota.load(rota.staff-id(person), assignments)
-            let allocation =
-              $"  {rota.staff-name(person)}: {text.from-int(count)}/{text.from-int(rota.staff-limit(person))} shifts"
-            println(text.concat(allocation, $"; {text.from-int(mul(8, count))} hours"))
+            let count = rota.load(rota-staff.id(person), assignments)
+            println(
+              $"  {rota-staff.name(person)}: {text.from-int(count)}/{text.from-int(rota-staff.limit(person))} shifts; {text.from-int(mul(8, count))} hours",
+            )
           },
       )
       println(
@@ -156,11 +154,11 @@ rota.show(
 ) =
   {
     let size =
-      $"Staff {text.from-int(list.length(rota.people(problem)))}, shifts {text.from-int(list.length(rota.shifts(problem)))}"
+      $"Staff {text.from-int(list.length(rota-problem.staff(problem)))}, shifts {text.from-int(list.length(rota-problem.shifts(problem)))}"
     println(
       text.concat(
         size,
-        $", minimum rest {text.from-int(rota.rest(problem))}h, node budget {text.from-int(budget)}",
+        $", minimum rest {text.from-int(rota-problem.rest(problem))}h, node budget {text.from-int(budget)}",
       ),
     )
     match rota.solve(problem, budget) {
@@ -184,10 +182,10 @@ rota.show(
             match (status, upper) {
               | (BudgetStopped, Some(bound)) -> {
                 println(
-                  $"Best found score {text.from-int(rota.solution-score(solution))}; global relaxation upper bound {text.from-int(bound)}.",
+                  $"Best found score {text.from-int(rota-solution.score(solution))}; global relaxation upper bound {text.from-int(bound)}.",
                 )
                 println(
-                  $"Optimality gap is at most {text.from-int(sub(bound, rota.solution-score(solution)))} points; optimality has NOT been proved.",
+                  $"Optimality gap is at most {text.from-int(sub(bound, rota-solution.score(solution)))} points; optimality has NOT been proved.",
                 )
               }
               | _ -> ()
@@ -216,65 +214,15 @@ rota.demo() =
     rota.show(rota.week(), 0)
   }
 
--- Native v1 has no text.to-int intrinsic. Parse at most six ASCII decimal
--- digits, with an optional sign, so accumulation cannot wrap a 63-bit Int.
-rota.decimal-digits =
-  [
-    MkPair("0", 0),
-    MkPair("1", 1),
-    MkPair("2", 2),
-    MkPair("3", 3),
-    MkPair("4", 4),
-    MkPair("5", 5),
-    MkPair("6", 6),
-    MkPair("7", 7),
-    MkPair("8", 8),
-    MkPair("9", 9),
-  ]
-
-rota.parse-digits(
-  characters,
-  value,
-  count,
-) =
-  match characters {
-    | Nil -> if int.gt?(count, 0) then Some(value) else None
-    | Cons(character, remaining) ->
-      if int.gte?(count, 6) then None
-      else {
-             let digit =
-               list.find(
-                 rota.decimal-digits,
-                 fn (entry) -> match entry {
-                                 | MkPair(letter, _) -> text.eq?(character, letter)},
-               )
-             match digit {
-               | None -> None
-               | Some(MkPair(_, number)) ->
-                 rota.parse-digits(remaining, add(mul(value, 10), number), add(count, 1))
-             }
-      }
-  }
-
+-- The prompts accept at most six decimal digits, with an optional sign; a
+-- longer number is an input error even when it would fit in an Int.
 rota.parse-integer(
   input,
 ) =
   {
     let trimmed = text.trim(input)
-    if int.gt?(text.length(trimmed), 7) then None
-    else {
-           let characters = text.split(trimmed, "")
-           match characters {
-             | Nil -> None
-             | Cons(first, remaining) ->
-               if text.eq?(first, "-") then
-                 match rota.parse-digits(remaining, 0, 0) {
-                   | None -> None
-                   | Some(value) -> Some(sub(0, value))}
-               else if text.eq?(first, "+") then rota.parse-digits(remaining, 0, 0)
-               else rota.parse-digits(characters, 0, 0)
-           }
-    }
+    let digits = list.length(list.filter(text.split(trimmed, ""), text.ascii-digit?))
+    if int.gt?(digits, 6) then None else text.to-int(trimmed)
   }
 
 rota.interactive() =
@@ -312,9 +260,9 @@ rota.interactive() =
                if bool.and(
                     bool.not(eq(excluded, -1)),
                     bool.not(
-                      rota.any(
-                        rota.people(problem),
-                        fn (person) -> eq(rota.staff-id(person), excluded),
+                      list.any?(
+                        rota-problem.staff(problem),
+                        fn (person) -> eq(rota-staff.id(person), excluded),
                       ),
                     ),
                   ) then

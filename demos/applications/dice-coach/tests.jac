@@ -121,7 +121,7 @@ dice.tests =
                 match entry {
                   | MkPair(outcome, probability) -> {
                     check.true(
-                      bool.and(real.gte?(probability, 0.0), real.lte?(probability, 1.0)),
+                      real.between?(probability, 0.0, 1.0),
                       "valid probability",
                     )
                     match outcome {

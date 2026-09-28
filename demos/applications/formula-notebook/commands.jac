@@ -48,32 +48,33 @@ nb.command(
            nb.span(nb.chars(text.trim(line)), fn (c) -> bool.not(nb.whitespace?(c)), [])
          let verb = nb.join(word, "")
          let argument = text.trim(nb.join(tail, ""))
-         let no-argument = text.empty?(argument)
-         if text.empty?(verb) then NbNoop
-         else if text.eq?(verb, "set") then nb.assignment(argument, False)
-         else if text.eq?(verb, "whatif") then nb.assignment(argument, True)
-         else if text.eq?(verb, "unset") then
-                if nb.valid-name?(argument) then NbEditCommand(NbUnset(argument))
-                else NbInvalid("expected unset NAME")
-         else if text.eq?(verb, "show") then
-                if no-argument then NbShow(None)
-                else if nb.valid-name?(argument) then NbShow(Some(argument))
-                else NbInvalid("expected show [NAME]")
-         else if text.eq?(verb, "why") then
-                if nb.valid-name?(argument) then NbWhy(argument) else NbInvalid("expected why NAME")
-         else if bool.and(text.eq?(verb, "undo"), no-argument) then NbUndo
-         else if bool.and(text.eq?(verb, "redo"), no-argument) then NbRedo
-         else if bool.and(text.eq?(verb, "help"), no-argument) then NbHelp
-         else if bool.and(text.eq?(verb, "quit"), no-argument) then NbQuit
-         else NbInvalid("unknown command or unexpected arguments; type help")
+         match (verb, text.empty?(argument)) {
+           | ("", _) -> NbNoop
+           | ("set", _) -> nb.assignment(argument, False)
+           | ("whatif", _) -> nb.assignment(argument, True)
+           | ("unset", _) ->
+             if nb.valid-name?(argument) then NbEditCommand(NbUnset(argument))
+             else NbInvalid("expected unset NAME")
+           | ("show", True) -> NbShow(None)
+           | ("show", False) ->
+             if nb.valid-name?(argument) then NbShow(Some(argument))
+             else NbInvalid("expected show [NAME]")
+           | ("why", _) ->
+             if nb.valid-name?(argument) then NbWhy(argument) else NbInvalid("expected why NAME")
+           | ("undo", True) -> NbUndo
+           | ("redo", True) -> NbRedo
+           | ("help", True) -> NbHelp
+           | ("quit", True) -> NbQuit
+           | _ -> NbInvalid("unknown command or unexpected arguments; type help")
+         }
   }
 
 nb.stats(
   snapshot,
 ) =
   text.concat(
-    text.concat(text.concat("cache totals: ", text.from-int(nb.hits(snapshot))), " hits, "),
-    text.concat(text.from-int(nb.computed(snapshot)), " recomputations"),
+    text.concat(text.concat("cache totals: ", text.from-int(nb-snapshot.hits(snapshot))), " hits, "),
+    text.concat(text.from-int(nb-snapshot.computed(snapshot)), " recomputations"),
   )
 
 nb.delta-stats(
@@ -82,10 +83,10 @@ nb.delta-stats(
 ) =
   text.concat(
     text.concat(
-      text.concat("recalculation: ", text.from-int(sub(nb.hits(after), nb.hits(before)))),
+      text.concat("recalculation: ", text.from-int(sub(nb-snapshot.hits(after), nb-snapshot.hits(before)))),
       " hits, ",
     ),
-    text.concat(text.from-int(sub(nb.computed(after), nb.computed(before))), " recomputations"),
+    text.concat(text.from-int(sub(nb-snapshot.computed(after), nb-snapshot.computed(before))), " recomputations"),
   )
 
 nb.line(
@@ -99,8 +100,8 @@ nb.definition-line(
   cell,
 ) =
   text.concat(
-    text.concat(nb.line(snapshot, nb.cell-name(cell)), "    ["),
-    text.concat(nb.cell-source(cell), "]"),
+    text.concat(nb.line(snapshot, nb-cell.name(cell)), "    ["),
+    text.concat(nb-cell.source(cell), "]"),
   )
 
 nb.show(
@@ -109,14 +110,14 @@ nb.show(
 ) =
   match name {
     | Some(key) -> {
-      let found = nb.find-cell(nb.cells(snapshot), key)
+      let found = nb.find-cell(nb-snapshot.cells(snapshot), key)
       match found {
         | None -> nb.line(snapshot, key)
         | Some(cell) -> nb.definition-line(snapshot, cell)
       }
     }
     | None -> {
-      let lines = list.map(nb.cells(snapshot), fn (cell) -> nb.definition-line(snapshot, cell))
+      let lines = list.map(nb-snapshot.cells(snapshot), fn (cell) -> nb.definition-line(snapshot, cell))
       text.concat(
         if list.empty?(lines) then "(empty workbook)\n"
         else text.concat(nb.join(lines, "\n"), "\n"),
@@ -129,7 +130,7 @@ nb.observed(
   snapshot,
   name,
 ) =
-  match nb.find-cell(nb.cells(snapshot), name) {
+  match nb.find-cell(nb-snapshot.cells(snapshot), name) {
     | None -> "<unset>"
     | Some(_) -> nb.value-text(nb.visible-value(snapshot, name))
   }
@@ -142,8 +143,8 @@ nb.changes(
     let names =
       nb.unique(
         list.append(
-          list.map(nb.cells(after), nb.cell-name),
-          list.map(nb.cells(before), nb.cell-name),
+          list.map(nb-snapshot.cells(after), nb-cell.name),
+          list.map(nb-snapshot.cells(before), nb-cell.name),
         ),
       )
     let changed =
@@ -180,7 +181,7 @@ nb.all-dependencies(
              let found = nb.find-cell(cells, name)
              let more = match found {
                           | None -> []
-                          | Some(cell) -> nb.cell-deps(cell)}
+                          | Some(cell) -> nb-cell.dependencies(cell)}
              nb.all-dependencies(cells, list.append(rest, more), list.append(seen, [name]))
       }
   }
@@ -190,12 +191,12 @@ nb.why(
   name,
 ) =
   {
-    let found = nb.find-cell(nb.cells(snapshot), name)
+    let found = nb.find-cell(nb-snapshot.cells(snapshot), name)
     match found {
       | None -> text.concat("undefined cell: ", name)
       | Some(cell) -> {
-        let direct = nb.cell-deps(cell)
-        let all = nb.all-dependencies(nb.cells(snapshot), direct, [])
+        let direct = nb-cell.dependencies(cell)
+        let all = nb.all-dependencies(nb-snapshot.cells(snapshot), direct, [])
         let details = list.map(all, fn (dependency) -> nb.line(snapshot, dependency))
         text.concat(
           text.concat(
@@ -221,15 +222,15 @@ nb.apply-outcome(
   edit?,
 ) =
   {
-    let after = nb.outcome-book(outcome)
-    let message = nb.outcome-message(outcome)
+    let after = nb-outcome.book(outcome)
+    let message = nb-outcome.message(outcome)
     let output =
-      if nb.accepted?(outcome) then
+      if nb-outcome.accepted(outcome) then
         {
-          let changes = nb.changes(nb.current(before), nb.current(after))
+          let changes = nb.changes(nb-book.current(before), nb-book.current(after))
           let statistics =
-            if edit? then nb.delta-stats(nb.current(before), nb.current(after))
-            else nb.stats(nb.current(after))
+            if edit? then nb.delta-stats(nb-book.current(before), nb-book.current(after))
+            else nb.stats(nb-book.current(after))
           text.concat(
             text.concat(text.concat(message, "\n"), changes),
             text.concat("\n", statistics),
@@ -247,7 +248,7 @@ nb.process(
     | NbUndo -> nb.apply-outcome(book, nb.undo(book), False)
     | NbRedo -> nb.apply-outcome(book, nb.redo(book), False)
     | NbPreview(name, source) -> {
-      let result = nb.edit(nb.current(book), NbSet(name, source))
+      let result = nb.edit(nb-book.current(book), NbSet(name, source))
       let output =
         match result {
           | NbRejected(message) -> text.concat("preview rejected: ", message)
@@ -255,14 +256,14 @@ nb.process(
             text.concat(
               text.concat(
                 "preview (live state unchanged):\n",
-                nb.changes(nb.current(book), snapshot),
+                nb.changes(nb-book.current(book), snapshot),
               ),
-              text.concat("\n", nb.delta-stats(nb.current(book), snapshot)),
+              text.concat("\n", nb.delta-stats(nb-book.current(book), snapshot)),
             )}
       NbResponse(book, output, False)
     }
-    | NbShow(name) -> NbResponse(book, nb.show(nb.current(book), name), False)
-    | NbWhy(name) -> NbResponse(book, nb.why(nb.current(book), name), False)
+    | NbShow(name) -> NbResponse(book, nb.show(nb-book.current(book), name), False)
+    | NbWhy(name) -> NbResponse(book, nb.why(nb-book.current(book), name), False)
     | NbHelp -> NbResponse(book, nb.help(), False)
     | NbQuit -> NbResponse(book, "bye", True)
     | NbNoop -> NbResponse(book, "", False)

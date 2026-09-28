@@ -20,13 +20,7 @@ picnic.valid?(
   accuracy,
   cost,
 ) =
-  bool.and(
-    bool.and(int.gte?(rain, 0), int.lte?(rain, 100)),
-    bool.and(
-      bool.and(int.gte?(accuracy, 50), int.lte?(accuracy, 100)),
-      bool.and(int.gte?(cost, 0), int.lte?(cost, 100)),
-    ),
-  )
+  bool.all([int.between?(rain, 0, 100), int.between?(accuracy, 50, 100), int.between?(cost, 0, 100)])
 
 -- Weather is sampled once. Attendance depends on that same weather.
 -- On dry days: 70% sunny, 30% cloudy. Large-group probabilities are
