@@ -130,7 +130,7 @@ the one behavior change is marked.
 | 26 hand-written field selectors (`rota.staff-id`, `nb.cells`, ...) | generated accessors (`rota-staff.id`, `nb-snapshot.cells`, ...) | rota, notebook |
 | rebuilding a whole record to change one or two fields | generated setters (`rota-staff.with-available`, `nb-snapshot.with-hits`, `with-cache`, `with-computed`) | rota `fixtures.jac`, notebook `model.jac` |
 | an empty line ended the notebook, because `read-line` answers `""` at end of input | `next-line()`: a blank line now reprompts and only end of input ends the session (**UX change**, prints `bye (end of input)`) | notebook `application.jac` |
-| files assembled with `cat` | local projects (`project.jqd`) | all |
+| programs assembled by concatenating files | local projects (`project.jqd`) | all |
 
 Kept on purpose:
 

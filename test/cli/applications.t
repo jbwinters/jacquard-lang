@@ -94,9 +94,9 @@ accessors and setters (SX.27, SX.28), such as `rota-staff.id`, `nb-snapshot.cell
 and `rota-staff.with-available`. None of the hand-written selectors they were
 delivered with remain:
 
-  $ grep -rhoE '\b(rota\.(staff-id|staff-name|staff-limit|shift-id|shift-label|people|shifts|weight|solution-score|solution-assignments)|nb\.(cell-name|cell-source|cell-expr|cell-deps|cells|edges|cache|hits|computed|current|undo-list|redo-list|outcome-book|outcome-message|accepted\?))\(' "$A" | wc -l
+  $ grep -rhoE --include='*.jac' '\b(rota\.(staff-id|staff-name|staff-limit|shift-id|shift-label|people|shifts|weight|solution-score|solution-assignments)|nb\.(cell-name|cell-source|cell-expr|cell-deps|cells|edges|cache|hits|computed|current|undo-list|redo-list|outcome-book|outcome-message|accepted\?))\(' "$A" | wc -l
   0
-  $ grep -rhoE '\b(rota-staff|nb-snapshot)\.with-[a-z]+' "$A" | sort | uniq -c
+  $ grep -rhoE --include='*.jac' '\b(rota-staff|nb-snapshot)\.with-[a-z]+' "$A" | sort | uniq -c
         1 nb-snapshot.with-cache
         1 nb-snapshot.with-computed
         1 nb-snapshot.with-hits
