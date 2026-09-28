@@ -32,7 +32,7 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1095`
+- Alcotest/QCheck cases: `1098`
 - Cram transcript files: `72`
 - Documentation examples: `35` named examples across `8` documents
 
@@ -514,4 +514,13 @@ single-field violations, and the demo transcript is unchanged. Because the
 prelude identity changed, the applications' dependency pins were re-pinned.
 Three `test/test_stdlib.ml` cases, `test/cli/predicates.t` (interpreter and
 native parity, and the rota verdicts) and the `stdlib-predicates` doctest bring
-the current source inventory to `1095 / 72 / 35`.
+the source inventory to `1095 / 72 / 35`.
+
+Surface sugar then binds the prelude's constructors by identity (SX.31). `if`,
+list literals and `try` elaborate against the prelude's `Bool`, `List` and
+`Result` constructors, so a file declaring its own `True`, `Cons` or `Ok`
+cannot capture them. Programs already resolving to the prelude keep their
+hashes. The three `test/test_sugar_identity.ml` cases pin the identities
+against the loaded prelude, show that each sugar's hash ignores same-named
+file constructors, and confirm that stub environments still resolve by name.
+Together they bring the current source inventory to `1098 / 72 / 35`.
