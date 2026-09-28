@@ -72,37 +72,29 @@ nb.command(
 nb.stats(
   snapshot,
 ) =
-  text.concat(
-    text.concat(text.concat("cache totals: ", text.from-int(nb-snapshot.hits(snapshot))), " hits, "),
-    text.concat(text.from-int(nb-snapshot.computed(snapshot)), " recomputations"),
-  )
+  $"cache totals: {text.from-int(nb-snapshot.hits(snapshot))} hits, {text.from-int(nb-snapshot.computed(snapshot))} recomputations"
 
 nb.delta-stats(
   before,
   after,
 ) =
-  text.concat(
-    text.concat(
-      text.concat("recalculation: ", text.from-int(sub(nb-snapshot.hits(after), nb-snapshot.hits(before)))),
-      " hits, ",
-    ),
-    text.concat(text.from-int(sub(nb-snapshot.computed(after), nb-snapshot.computed(before))), " recomputations"),
-  )
+  {
+    let hits = sub(nb-snapshot.hits(after), nb-snapshot.hits(before))
+    let computed = sub(nb-snapshot.computed(after), nb-snapshot.computed(before))
+    $"recalculation: {text.from-int(hits)} hits, {text.from-int(computed)} recomputations"
+  }
 
 nb.line(
   snapshot,
   name,
 ) =
-  text.concat(text.concat(name, " = "), nb.value-text(nb.visible-value(snapshot, name)))
+  $"{name} = {nb.value-text(nb.visible-value(snapshot, name))}"
 
 nb.definition-line(
   snapshot,
   cell,
 ) =
-  text.concat(
-    text.concat(nb.line(snapshot, nb-cell.name(cell)), "    ["),
-    text.concat(nb-cell.source(cell), "]"),
-  )
+  $"{nb.line(snapshot, nb-cell.name(cell))}    [{nb-cell.source(cell)}]"
 
 nb.show(
   snapshot,
@@ -159,10 +151,7 @@ nb.changes(
              fn (
                name,
              ) ->
-               text.concat(
-                 text.concat(text.concat(name, ": "), nb.observed(before, name)),
-                 text.concat(" -> ", nb.observed(after, name)),
-               ),
+               $"{name}: {nb.observed(before, name)} -> {nb.observed(after, name)}",
            ),
            "\n",
          )
@@ -198,17 +187,11 @@ nb.why(
         let direct = nb-cell.dependencies(cell)
         let all = nb.all-dependencies(nb-snapshot.cells(snapshot), direct, [])
         let details = list.map(all, fn (dependency) -> nb.line(snapshot, dependency))
-        text.concat(
-          text.concat(
-            nb.definition-line(snapshot, cell),
-            text.concat(
-              "\ndirect dependencies: ",
-              if list.empty?(direct) then "(none)" else nb.join(direct, ", "),
-            ),
-          ),
+        let direct-text = if list.empty?(direct) then "(none)" else nb.join(direct, ", ")
+        let values =
           if list.empty?(details) then ""
-          else text.concat("\ndependency values (transitive):\n", nb.join(details, "\n")),
-        )
+          else $"\ndependency values (transitive):\n{nb.join(details, "\n")}"
+        $"{nb.definition-line(snapshot, cell)}\ndirect dependencies: {direct-text}{values}"
       }
     }
   }
@@ -231,10 +214,7 @@ nb.apply-outcome(
           let statistics =
             if edit? then nb.delta-stats(nb-book.current(before), nb-book.current(after))
             else nb.stats(nb-book.current(after))
-          text.concat(
-            text.concat(text.concat(message, "\n"), changes),
-            text.concat("\n", statistics),
-          )}
+          $"{message}\n{changes}\n{statistics}"}
       else text.concat("rejected: ", message)
     NbResponse(after, output, False)
   }
@@ -253,13 +233,10 @@ nb.process(
         match result {
           | NbRejected(message) -> text.concat("preview rejected: ", message)
           | NbAccepted(snapshot) ->
-            text.concat(
-              text.concat(
-                "preview (live state unchanged):\n",
-                nb.changes(nb-book.current(book), snapshot),
-              ),
-              text.concat("\n", nb.delta-stats(nb-book.current(book), snapshot)),
-            )}
+            {
+              let live = nb-book.current(book)
+              $"preview (live state unchanged):\n{nb.changes(live, snapshot)}\n{nb.delta-stats(live, snapshot)}"
+            }}
       NbResponse(book, output, False)
     }
     | NbShow(name) -> NbResponse(book, nb.show(nb-book.current(book), name), False)

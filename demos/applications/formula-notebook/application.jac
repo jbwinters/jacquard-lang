@@ -3,13 +3,15 @@ nb.loop(
   book,
 ) =
   {
-    let line = console.ask("nb>")
-    if text.empty?(line) then println("bye (empty input or EOF)")
-    else {
-           let response = nb.execute(book, line)
-           if text.empty?(nb.response-output(response)) then ()
-           else println(nb.response-output(response))
-           if nb.response-stop?(response) then () else nb.loop(nb.response-book(response))
+    println("nb>")
+    match next-line() {
+      | None -> println("bye (end of input)")
+      | Some(line) -> {
+        let response = nb.execute(book, line)
+        if text.empty?(nb.response-output(response)) then ()
+        else println(nb.response-output(response))
+        if nb.response-stop?(response) then () else nb.loop(nb.response-book(response))
+      }
     }
   }
 

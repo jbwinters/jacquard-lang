@@ -1,6 +1,9 @@
 -- Shared presentation only. Models keep full floating-point precision.
 -- Bounded fixed-point formatting for these small examples; values outside
--- [-1000, 1000] retain Jacquard's ordinary Real rendering.
+-- [-1000, 1000] retain Jacquard's ordinary Real rendering. This rounds half up
+-- on the scaled float, as the published transcripts print. text.from-real-fixed
+-- rounds the exact binary value instead (80.6425 is 80.642 there, 80.643 here),
+-- so the applications keep this formatter to leave their transcripts unchanged.
 display.real(n) = match text.to-real(text.from-int(n)) {
                     | Some(value) -> value
                     | None -> 0.0}
