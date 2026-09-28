@@ -154,7 +154,12 @@ let mark_recovered_construct state meta =
   meta |> Meta.with_surface_form "recovery-delimiter" |> Meta.with_surface_hole (string_of_int id)
 
 let token_description state token =
-  Surface_lex.show_token (diagnostic_token state token).Surface_lex.token
+  match (diagnostic_token state token).Surface_lex.token with
+  (* reserved ahead of the nominal field update form (DES.4, `Ctor(value with label: expr)`) *)
+  | Surface_lex.Keyword "with" ->
+      "the reserved word `with` (kept for field updates, `Ctor(value with label: expr)`; a name \
+       spelled `with` needs the `term:` escape)"
+  | token -> Surface_lex.show_token token
 
 let advance_recording_invalid state = advance state
 

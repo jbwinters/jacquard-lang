@@ -191,6 +191,12 @@ int.gt? 0
 int.gte? 0
 int.lt? 0
 int.lte? 0
+bool.all 0
+bool.any 0
+list.all? 0
+list.any? 0
+int.between? 0
+real.between? 0
 parallel.map 0
 parallel.both 0
 # --- 10-ring1 (ring 1)

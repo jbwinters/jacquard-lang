@@ -15,17 +15,21 @@ as the recorded application snapshot it was imported from.
 
 | directory | authored files | entry points |
 |---|---|---|
-| `shared/` | `display.jac` (three-decimal rendering), `display-tests.jac`, `interaction-tests.jac` (dice and picnic interactive loops under a Console/State handler) | used by the two applications below |
+| `shared/` | `display.jac` (three-decimal rendering), `display-tests.jac` | project `display`, used by the two applications below |
 | `dice-coach/` | `model.jac`, `tests.jac` | `demo.jac`, `interactive.jac`, `EXAMPLE.txt` |
 | `picnic-planner/` | `model.jac`, `tests.jac` | `demo.jac`, `interactive.jac`, `EXAMPLE.txt` |
 | `rota-optimizer/` | `model.jac`, `fixtures.jac`, `report.jac`, `tests.jac`, `interaction-tests.jac`, `custom-example.jac` | `demo.jac`, `interactive.jac`, `EXAMPLE.txt`, `CUSTOM-EXAMPLE.txt` |
 | `formula-notebook/` | `syntax.jac`, `model.jac`, `commands.jac`, `application.jac`, `workbook.jac`, `parser-tests.jac`, `model-tests.jac`, `interaction-tests.jac`, `smoke.jac` | `demo.jac`, `interactive.jac`, `EXAMPLE.txt` |
+| `suite/` | `interaction-tests.jac` (dice and picnic interactive loops under a Console/State handler) | the shared interaction suite |
 
-`run.sh` assembles each entry point exactly as the applications' own
-instructions do, by concatenating the authored files into one source under
-`$TMPDIR`; the assembled file is removed on exit. Retiring that concatenation
-in favour of the store workflow is later work (the fixtures record the
-baseline first).
+Each directory is a local project with a `project.jqd` manifest
+(`docs/designs/project-structure.md`). The library units compose as one
+program, and every declaration keeps exactly the identity it had when the
+applications were assembled by concatenating their files. Each entry point
+(`demo`, `interactive`, the Warp suites) is a manifest entry. `dice-coach` and
+`picnic-planner` depend on `display`, which exports only the two helpers they
+use (`display.percent`, `display.fixed3`); `suite` depends on all three.
+`run.sh` is a thin wrapper over `jacquard project`:
 
 ```sh
 demos/applications/run.sh dice-coach demo                 # the recorded transcript
@@ -37,10 +41,21 @@ demos/applications/run.sh dice-coach build ./dice-demo    # native binary of the
 demos/applications/run.sh dice-coach build-interactive ./dice
 ```
 
-The dice and picnic suites are one suite (the shared display and interaction
-tests exercise both models); `run.sh dice-coach test` and `run.sh
-picnic-planner test` run the same files. Suites run with `--seed 42
---no-cache`, as the applications document.
+The dice and picnic suites are one suite, run in the project that owns each
+part: `display`'s tests, both models' suites, and the shared interaction
+tests; `run.sh dice-coach test` and `run.sh picnic-planner test` run all four
+and sum them. Suites run with `--seed 42 --no-cache`, as the applications
+document. The same commands work directly, from any directory:
+
+```sh
+jacquard project run --project demos/applications/dice-coach demo --allow console
+jacquard project test --project demos/applications/rota-optimizer --seed 42 --no-cache
+jacquard project build --project demos/applications/formula-notebook demo -o ./notebook
+```
+
+Pins name each dependency's context identity, which covers the prelude and
+the Core version. After a prelude or Core change, run `jacquard project pin`
+in `dice-coach`, `picnic-planner` and `suite`.
 
 ## What the baseline pins
 
@@ -56,8 +71,9 @@ picnic-planner test` run the same files. Suites run with `--seed 42
   and a three-roll survival calculation; the rota naive exhaustive oracle,
   partial-bound versus exhaustive completions, and budget monotonicity; the
   notebook's fresh-evaluator comparisons after every generated transition.
-- **Effect separation.** Each demo passes `check --manifest console`; the
-  models are pure or `Dist`-internal, and only presentation carries `Console`.
+- **Effect separation.** `project check --strict-grants` confirms each entry's
+  declared `(grants console)` is exactly its checked authority; the models are
+  pure or `Dist`-internal, and only presentation carries `Console`.
 - **History and cache invariants.** The notebook suite checks that a diamond
   dependency computes once per affected cell, stale edges are removed,
   abandoned errors are evicted, history is capped at twenty edits, redo is
@@ -80,7 +96,7 @@ picnic-planner test` run the same files. Suites run with `--seed 42
 
 ## Native coverage and gaps
 
-All eight entry points build with `jacquard build` and match the interpreter:
+All eight entry points build with `jacquard project build` and match the interpreter:
 the dice coach and picnic planner had never built natively before the
 text-primitive and numeric-presentation repairs landed. What is not native:
 
@@ -88,7 +104,7 @@ text-primitive and numeric-presentation repairs landed. What is not native:
   native test runner. Native evidence is the demo and interactive transcripts.
 - The applications still carry their own workarounds (a hand-written decimal
   parser, display helpers that the library now provides, the notebook's
-  empty-line handling of end of input, source concatenation). They are kept
+  empty-line handling of end of input). They are kept
   as recorded so the baseline is the applications as delivered; migrating
   them is separate work that will move fixtures one repair at a time.
 - Hand-written field selectors such as `rota.staff-id` and `nb.cells` are

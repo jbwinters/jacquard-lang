@@ -385,10 +385,25 @@ export JACQUARD_PRELUDE=$PWD/prelude
 opam exec -- dune exec jac -- run demos/basics/m1-fact.jac
 ```
 
+To use the development build as `jac` and `jacquard` from any directory,
+install it into the build tree, put that directory on your `PATH`, and point
+it at the checkout's prelude and native runtime. From the repository root:
+
+```bash
+opam exec -- dune build @install
+export PATH="$PWD/_build/install/default/bin:$PATH"
+export JACQUARD_PRELUDE="$PWD/prelude" JACQUARD_RUNTIME="$PWD/runtime"
+jacquard --version
+```
+
 The main commands are:
 
 ```bash
 jac run FILE.jac [--allow fs] [--allow net] [--dry-run]
+jac project run [--project DIR] ENTRY [--allow EFFECT ...]   # a project.jqd entry
+jac project test [--project DIR] [ENTRY] [--seed S] [--no-cache]
+jac project build [--project DIR] ENTRY -o OUT
+jac project check [--project DIR]
 jac relate FILE.jac --vary schedule=N --seed S [--allow EFFECT ...]
 jac relate FILE.jac --vary secret=NAME --seed S [--allow EFFECT ...]
 jac relate FILE.jac --vary grant=net|infer|dist --seed S
@@ -438,6 +453,16 @@ jacquard store add model-store model.jac
 jacquard run entry.jac --store model-store
 jacquard run other-entry.jac --store model-store
 ```
+
+A program that is naturally several files, or that other programs should
+depend on, is a local project: a `project.jqd` manifest lists its library
+units, entries and dependencies, and `jacquard project check|run|test|build`
+compose the units in order with identities exactly those of their
+concatenation. Dependencies are pinned by context identity (`jacquard project
+pin`), see only each other's exports, and can travel as verified bundles
+(`jacquard project bundle`). The four applications under
+`demos/applications/` are projects; `docs/designs/project-structure.md` is the
+design and `docs/errors.md` lists the E17xx diagnostics.
 
 Ordinary programs and demos need only a `.jac` source file. Do not hand-author
 a `.jqd` twin unless a conformance test specifically needs to prove that both

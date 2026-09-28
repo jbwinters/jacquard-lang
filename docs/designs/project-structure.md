@@ -165,6 +165,7 @@ contract checked against the names the source already spells:
 | `term`, `op` | `rota.<rest>` | `rota.solve` |
 | `type`, `effect` | `rota-<rest>` | `RotaStaff` (store `rota-staff`) |
 | generated accessors | follow their type, `<type-kebab>.<label>` | `rota-staff.id` |
+| generated setters | follow their type, `<type-kebab>.with-<label>` | `rota-staff.with-id` |
 | `con` | **exempt**; a constructor is owned by its type | `GeneralSkill` of `RotaSkill` |
 
 The rules:
@@ -559,6 +560,14 @@ the project access gate (§5). Pinned dynamic code is deferred.
 
 ## 11. Stores, Caches and Native Builds
 
+- **As implemented in PKG.1 (2026-09-27).** Every project command composes
+  the graph into a fresh temporary store that is discarded when the command
+  ends, so no command reads another's state and no lock is needed; checking a
+  dependency never writes into it. `.jacquard/` holds only the test cache
+  (`test-cache/`), native builds (`build/<entry>/`) and pin records
+  (`contexts/`, `interfaces/`). The persistent per-consumer stores below, with
+  `--store` and `JACQUARD_PROJECT_STORE`, remain the design for when composing
+  large graphs makes reuse worth the locking.
 - **Store ownership.** The consumer owns all writable state. Each project
   command uses a store under the **consumer's** cache root,
   `<consumer>/.jacquard/`, overridable with `--store` or

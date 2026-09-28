@@ -1,0 +1,10 @@
+(project-v1
+  (name "formula-notebook")
+  (requires (core "0.2"))
+  (namespace nb)
+  (units "syntax.jac" "model.jac" "commands.jac" "application.jac")
+  (entries
+    (run demo (units "workbook.jac" "demo.jac") (grants console) (native))
+    (run interactive (units "interactive.jac") (grants console) (native))
+    (run smoke (units "smoke.jac") (grants console))
+    (test suite (units "workbook.jac" "parser-tests.jac" "model-tests.jac" "interaction-tests.jac"))))

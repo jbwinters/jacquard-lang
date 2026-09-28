@@ -25,6 +25,7 @@ type domain =
   | Governance
   | Concurrency
   | Cli
+  | Project
 
 type contrast = { mistaken : string; intended : string }
 
@@ -178,6 +179,7 @@ let domain_to_string = function
   | Governance -> "governance"
   | Concurrency -> "concurrency"
   | Cli -> "cli"
+  | Project -> "project"
 
 (** [json_utf8 value] preserves well-formed UTF-8 byte-for-byte and replaces each malformed input
     byte with U+FFFD. Diagnostic prose may contain arbitrary source, path, or host-error bytes, but
