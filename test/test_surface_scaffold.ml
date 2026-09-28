@@ -135,10 +135,29 @@ let test_printer_contract () =
   | Ok "1" -> ()
   | _ -> Alcotest.fail "surface printer module must stay wired through its public contract"
 
+(* DES.4: `with` is reserved ahead of the field update form; a stray use says why *)
+let test_with_is_reserved () =
+  Alcotest.(check string)
+    "a kernel name `with` is escaped" "`term:with`"
+    (Surface_name.render Surface_name.Term "with");
+  match Surface_parse.parse_string ~file:"w.jac" "f(with) = with\n" with
+  | Ok _ -> Alcotest.fail "`with` parsed as a binder"
+  | Error diagnostics ->
+      let cause = String.concat "\n" (List.map Diag.cause diagnostics) in
+      let contains sub =
+        let n = String.length sub in
+        let rec go i = i + n <= String.length cause && (String.sub cause i n = sub || go (i + 1)) in
+        go 0
+      in
+      Alcotest.(check bool)
+        "the diagnostic names the reserved word" true
+        (contains "the reserved word `with` (kept for field updates")
+
 let suite =
   [
     Alcotest.test_case "D34 projection" `Quick test_name_projection;
     Alcotest.test_case "name fallbacks" `Quick test_name_fallbacks;
+    Alcotest.test_case "with is reserved" `Quick test_with_is_reserved;
     Alcotest.test_case "surface metadata" `Quick test_surface_metadata;
     Alcotest.test_case "holes stop at strict boundary" `Quick test_holes_stop_at_strict_boundary;
     Alcotest.test_case "entry-point contract" `Quick test_entry_point_contract;

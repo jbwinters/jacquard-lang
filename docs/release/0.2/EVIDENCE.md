@@ -32,7 +32,7 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1098`
+- Alcotest/QCheck cases: `1099`
 - Cram transcript files: `72`
 - Documentation examples: `35` named examples across `8` documents
 
@@ -523,4 +523,10 @@ cannot capture them. Programs already resolving to the prelude keep their
 hashes. The three `test/test_sugar_identity.ml` cases pin the identities
 against the loaded prelude, show that each sugar's hash ignores same-named
 file constructors, and confirm that stub environments still resolve by name.
-Together they bring the current source inventory to `1098 / 72 / 35`.
+Together they bring the source inventory to `1098 / 72 / 35`.
+
+`with` is now a reserved word, ahead of the nominal field update form that
+DES.4 records as approved (`Ctor(value with label: expr, ...)`). No source used
+it as a bare name. A stray use names the reserved word and the `term:` escape,
+and one `test/test_surface_scaffold.ml` case brings the current source
+inventory to `1099 / 72 / 35`.
