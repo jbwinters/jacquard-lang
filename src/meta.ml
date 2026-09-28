@@ -79,6 +79,10 @@ let with_surface_indexed_container kind index container t =
 (** [without_surface_container kind t] removes only the named delimiter-container provenance. *)
 let without_surface_container kind t = remove (surface_container_key kind) t
 
+(** [surface_containers t] keeps only the named delimiter-container provenance of [t]. *)
+let surface_containers t =
+  StringMap.filter (fun key _ -> String.starts_with ~prefix:(surface_container_key "") key) t
+
 (** [signature t] returns the signature-specific metadata attached to a term binding. *)
 let signature t =
   match find key_surface_signature t with Some value -> meta_of_value value | None -> empty

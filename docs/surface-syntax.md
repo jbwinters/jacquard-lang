@@ -368,6 +368,13 @@ Known overflow cases include, but are not limited to:
 - an unsupported kernel form may use the raw `jqd { ... }` inversion escape,
   whose preserved bootstrap form can be wider than the target.
 
+Formatted output always parses. Inside a `jqd { ... }` escape the bootstrap
+reader recognizes only `;` comments, so a surface comment that ends up there
+is carried as `; ` followed by its original text. `jac fmt` also reparses its
+own output before printing or writing it; if a printer bug would produce text
+that does not parse, the command reports E1204, exits 1, and leaves the file
+unchanged rather than emitting broken code.
+
 The surface checker reports W1204 on a declaration name when its shortest
 canonical header exceeds the default 100-byte width. Formatting remains
 total; the warning recommends shortening the declaration name or type-variable

@@ -844,7 +844,9 @@ let fmt_cmd file write syntax =
         Result.bind (Surface_parse.strict_file recovered) (fun parsed ->
             print_warnings (Surface_check.lint ~names:Resolve.empty_names parsed.tops);
             Result.bind (Surface_lower.lower_file parsed) (fun lowered ->
-                Surface_print.print_file_with_trivia ~file_meta:lowered.meta lowered.tops))
+                Result.bind
+                  (Surface_print.print_file_with_trivia ~file_meta:lowered.meta lowered.tops)
+                  (Surface_print.check_reparses ~file)))
   in
   match formatted with
   | Error ds -> print_diags ds

@@ -305,6 +305,53 @@ formatted file still parses, keeps every comment, is stable, and hashes as befor
   $ jac hash trailing-formatted.jac | cmp - trailing.hash && echo same-hash
   same-hash
 
+A comment after a definition's `=` starts the body on the next line and leaves the parameters on
+the header line. A mutually recursive group prints as adjacent definitions, as the author wrote it,
+and the comment stays a surface comment.
+
+  $ cat > header.jac <<'EOF'
+  > even(n) = -- even header
+  >   if eq(n, 0) then True else odd(sub(n, 1))
+  > odd(n) = if eq(n, 0) then False else even(sub(n, 1))
+  > EOF
+  $ jac fmt header.jac > header-formatted.jac
+  $ cat header-formatted.jac
+  even(n) =
+    -- even header
+    if eq(n, 0) then True else odd(sub(n, 1))
+  odd(n) = if eq(n, 0) then False else even(sub(n, 1))
+  $ jac fmt header-formatted.jac | cmp - header-formatted.jac && echo stable
+  stable
+  $ jac hash header.jac > header.hash
+  $ jac hash header-formatted.jac | cmp - header.hash && echo same-hash
+  same-hash
+
+Parser recovery always makes progress. An invalid token or a stray `|` inside an effect body used
+to stop the resynchronization loop on the same token forever; `timeout` turns a regression into a
+quick failure instead of a hung suite.
+
+  $ printf 'effect T where {\n  inv\n-health : () -> Int\n}\n' > stuck.jac
+  $ timeout 10 jac fmt stuck.jac
+  stuck.jac:1:1-7: error[E1225]: A type or effect declaration is incomplete
+    Cause: an effect declaration requires an operation signature
+    Next step: Complete the declaration structure shown at this location.
+  stuck.jac:2:3-6: error[E1225]: A type or effect declaration is incomplete
+    Cause: expected an operation signature or `}`, found ident(inv)
+    Next step: Complete the declaration structure shown at this location.
+  stuck.jac:3:1-8: error[E1212]: A surface numeric literal is malformed or too large.
+    Cause: malformed numeric literal `-health`
+    Next step: Rewrite the value as one valid supported integer or real literal.
+  stuck.jac:3:1-8: error[E1225]: A type or effect declaration is incomplete
+    Cause: expected an operation signature or `}`, found invalid(E1212)
+    Next step: Complete the declaration structure shown at this location.
+  stuck.jac:3:9-10: error[E1225]: A type or effect declaration is incomplete
+    Cause: expected an operation signature or `}`, found :
+    Next step: Complete the declaration structure shown at this location.
+  [1]
+  $ printf 'effect T where { | }\neffect U where { a : () -> Int | }\n' > stuck-bar.jac
+  $ timeout 10 jac fmt stuck-bar.jac > /dev/null 2>&1; echo "exit $?"
+  exit 1
+
 Declaration headers have no legal continuation point before `=` or `where {`. The formatter keeps
 that grammar-valid line intact, and W1204 points at the declaration name when the shortest header
 must exceed the canonical width.
