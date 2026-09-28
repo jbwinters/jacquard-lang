@@ -37,6 +37,12 @@ let meta_has_comments meta =
   || Meta.comment_texts Meta.key_trivia_trailing meta <> []
   || Meta.comment_texts Meta.key_trivia_inner meta <> []
 
+(* Directly nested parentheses chain their containers: a group's container may hold the next inner
+   group's container under the same key. *)
+let rec paren_chain_has_comments meta =
+  (not (Meta.is_empty meta))
+  && (meta_has_comments meta || paren_chain_has_comments (Meta.surface_container "paren" meta))
+
 let pp_comments fmt comments =
   List.iter
     (fun comment ->
@@ -170,9 +176,39 @@ let indent_lines spaces text =
   let prefix = String.make spaces ' ' in
   String.split_on_char '\n' text |> List.map (fun line -> prefix ^ line) |> String.concat "\n"
 
+(* Inside [jqd { ... }] the bootstrap reader treats only [;] as a comment starter, so a surface
+   [--] comment copied verbatim would be read as a symbol and the escape would not reparse. Each
+   comment is therefore carried as a bootstrap comment that keeps the original bytes after [; ].
+   Bootstrap-spelled comments are unchanged, which keeps formatting idempotent. *)
+let bootstrap_comment text = if String.starts_with ~prefix:";" text then text else "; " ^ text
+
+let rec with_bootstrap_comments (form : Form.t) =
+  let atom = function
+    | Meta.Comment text -> Meta.Comment (bootstrap_comment text)
+    | Meta.Doc text -> Meta.Doc (bootstrap_comment text)
+    | Meta.Layout _ as layout -> layout
+  in
+  let meta =
+    List.fold_left
+      (fun meta key ->
+        match Meta.trivia key meta with
+        | [] -> meta
+        | atoms -> Meta.with_trivia key (List.map atom atoms) meta)
+      form.meta
+      [ Meta.key_trivia; Meta.key_trivia_trailing; Meta.key_trivia_inner; Meta.key_trivia_eof ]
+  in
+  let args =
+    List.map
+      (function Form.F child -> Form.F (with_bootstrap_comments child) | arg -> arg)
+      form.args
+  in
+  { form with meta; args }
+
 let jqd_block context form =
   if context.trivia && has_comments form then
-    "jqd {\n" ^ indent_lines 2 (drop_final_newline (Printer.format_all [ form ])) ^ "\n}"
+    "jqd {\n"
+    ^ indent_lines 2 (drop_final_newline (Printer.format_all [ with_bootstrap_comments form ]))
+    ^ "\n}"
   else "jqd { " ^ Printer.inline_form form ^ " }"
 
 (** [render_name] is the printer's sole D34 spelling boundary. *)
@@ -750,7 +786,7 @@ and is_block_expr (expr : Kernel.expr) =
 and pp_expr_regular context lookup fmt (expr : Kernel.expr) =
   let block_meta = Meta.surface_container "block" expr.meta in
   let paren_meta = Meta.surface_container "paren" expr.meta in
-  if context.trivia && (not (Meta.is_empty paren_meta)) && meta_has_comments paren_meta then
+  if context.trivia && paren_chain_has_comments paren_meta then
     pp_grouped context lookup paren_meta fmt expr
   else if context.trivia && (not (Meta.is_empty block_meta)) && meta_has_comments block_meta then
     if is_block_expr expr then pp_block context lookup fmt expr
@@ -1045,7 +1081,18 @@ and pp_pipe_value context lookup fmt expr =
 
 and pp_grouped context lookup paren_meta fmt expr =
   pp_leading context paren_meta fmt;
-  let expr = { expr with Kernel.meta = Meta.without_surface_container "paren" expr.meta } in
+  (* Only an inner group that owns comments keeps its own parentheses; comment-free nesting
+     collapses to one pair as before. *)
+  let inner = Meta.surface_container "paren" paren_meta in
+  let expr =
+    {
+      expr with
+      Kernel.meta =
+        (if context.trivia && paren_chain_has_comments inner then
+           Meta.with_surface_container "paren" inner expr.meta
+         else Meta.without_surface_container "paren" expr.meta);
+    }
+  in
   Format.fprintf fmt "(@[<hov>%a" (pp_expr context lookup) expr;
   pp_inner context paren_meta fmt;
   if ends_in_last_line_comment context (pp_expr context lookup) paren_meta [ expr ] then
@@ -1271,15 +1318,32 @@ let rec group_refs_expr acc (expr : Kernel.expr) =
         ops
   | Kernel.Lit _ | Kernel.Var _ | Kernel.Ref _ | Kernel.Quote _ -> acc
 
+(* A multi-binding group prints as adjacent definitions only when reparsing recovers the same
+   group: its names are distinct and it is strongly connected under the relation lowering uses to
+   form definition components (free term names, see [Surface_lower.free_names]) together with
+   internal [GroupRef] edges. Anything else keeps the [jqd { (defterm ...) }] escape. *)
 let printable_term_group bindings =
   let count = List.length bindings in
   if count <= 1 then true
+  else if
+    List.length (List.sort_uniq String.compare (List.map (fun b -> b.Kernel.bname) bindings))
+    <> count
+  then false
   else
     let edges =
       Array.of_list
         (List.map
            (fun binding ->
-             group_refs_expr [] binding.Kernel.value
+             let free = Surface_lower.free_names binding.Kernel.value in
+             let named =
+               List.concat
+                 (List.mapi
+                    (fun index sibling ->
+                      if Surface_lower.String_set.mem sibling.Kernel.bname free then [ index ]
+                      else [])
+                    bindings)
+             in
+             named @ group_refs_expr [] binding.Kernel.value
              |> List.filter (fun index -> index >= 0 && index < count)
              |> List.sort_uniq Int.compare)
            bindings)
@@ -1308,6 +1372,11 @@ let pp_binding context lookup fmt (binding : Kernel.binding) =
           if Meta.is_empty params_meta then Meta.surface_container "params" binding.value.meta
           else params_meta
         in
+        (* A comment before the body forces a line break. In the shared [hv] box that break would
+           also spread the parameters vertically, so the header then gets a box of its own and
+           the body starts on the next line. Comment-free output keeps the single box. *)
+        let body_commented = context.trivia && leading_comments body.meta <> [] in
+        if body_commented then Format.fprintf fmt "@[<v 2>";
         Format.fprintf fmt "@[<hv 2>%a" (pp_named Surface_name.Term) binding.bname;
         pp_leading context params_meta fmt;
         Format.fprintf fmt "(%a"
@@ -1315,7 +1384,11 @@ let pp_binding context lookup fmt (binding : Kernel.binding) =
           params;
         Format.fprintf fmt ")";
         pp_trailing context params_meta fmt;
-        Format.fprintf fmt " =@ %a@]" (pp_expr context lookup) body
+        if body_commented then
+          Format.fprintf fmt "@]%a@,%a@]"
+            (fun fmt () -> pp_following_keyword fmt (has_line_trailing context params_meta) "=")
+            () (pp_expr context lookup) body
+        else Format.fprintf fmt " =@ %a@]" (pp_expr context lookup) body
     | _ ->
         Format.fprintf fmt "@[<hov 2>%a =@ %a@]" (pp_named Surface_name.Term) binding.bname
           (pp_expr context lookup) binding.value
@@ -1774,6 +1847,27 @@ let print_file_with_trivia ?(file_meta = Meta.empty) ?(lookup : lookup option)
           Ok (prefix ^ String.concat "\n" eof ^ "\n")
   in
   render_file ()
+
+(** [check_reparses ~file text] returns [Ok text] when [text] is a strict surface file, and
+    otherwise E1204. It is the formatter's last line of defense: [jac fmt] never prints or writes
+    formatted text that its own parser rejects, so a printer bug surfaces as a nonzero exit and a
+    diagnostic instead of broken code. *)
+let check_reparses ~file text : (string, Diag.t list) result =
+  match Surface_parse.strict_file (Surface_parse.recover_string ~file text) with
+  | Ok _ -> Ok text
+  | Error diagnostics ->
+      Error
+        [
+          Diag.error ~domain:Surface ~code:"E1204"
+            ~summary:"The formatter produced text that does not parse"
+            ~cause:
+              (Printf.sprintf
+                 "Formatting `%s` succeeded, but reparsing the result reported %d syntax \
+                  diagnostic(s). The output was discarded and the file was not changed."
+                 file (List.length diagnostics))
+            ~next_step:"Report this formatter bug with the input file; keep the source as written."
+            ~contrast:None ();
+        ]
 
 (** [print_recovered] canonically prints a complete recovery result when it is strict and lowers.
     Damaged input is replayed byte-for-byte so comments cannot cross recovery boundaries. *)

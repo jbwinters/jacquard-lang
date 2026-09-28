@@ -221,6 +221,7 @@ also emits E0817; consuming the captured resumption twice emits E0816.
 | E1201 | retired surface-printer scaffold diagnostic; reserved and no longer emitted | an older scaffold calling the pre-SS.1 printer placeholder |
 | E1202 | recovered surface tree still contains holes | checking malformed `.jac` after parser recovery |
 | E1203 | kernel subtree has no self-contained surface fragment | rendering an ambiguous raw `group` in a semantic diff |
+| E1204 | `jac fmt` produced text that its own surface parser rejects; the output is discarded and the file is not changed | a formatter bug, reported instead of printing unparseable code |
 | E1210 | unexpected surface character | `@` outside a string |
 | E1211 | malformed surface identifier | `bad--name` without a kind escape |
 | E1212 | malformed or overflowing numeric literal | `1..2` |

@@ -815,6 +815,12 @@ let trailing_comment_sources =
     ("inner arrow parameters", "x : (Int, () -- c30\n ->{} Int) ->{} Int\nx = fn (a, b) -> 1\n");
     ( "sequenced arm comments",
       "f(x) = match x {\n  | A -> -- c31\n {\n    let y = 1\n    y\n    -- c32\n  }\n}\n" );
+    ("definition header", "f(x) = -- c33\n  x\n");
+    ("mutual group headers", "even(n) = -- c34\n  odd(n)\nodd(n) = -- c35\n  even(n)\n");
+    ("nested parentheses", "x = ((1 -- c36\n) -- c37\n)\n");
+    ("triple parentheses", "x = (((1 -- c38\n)))\n");
+    ("parenthesized block", "x = ({\n  let y = 1 -- c39\n  y })\n");
+    ("deep nesting", "x = f([(1 -- c40\n, g(((2 -- c41\n) -- c42\n)))], {\n  [3 -- c43\n]\n})\n");
   ]
 
 let test_trailing_line_comments_end_their_line () =
@@ -829,6 +835,9 @@ let test_trailing_line_comments_end_their_line () =
             (String.concat "; " (List.map Diag.to_string diagnostics))
             printed);
       Alcotest.(check string) (label ^ " idempotent") printed (print_recovered printed);
+      Alcotest.(check bool)
+        (label ^ " no probe marker") false
+        (String.contains printed Surface_print.line_comment_marker.[0]);
       Alcotest.(check int)
         (label ^ " comments kept") (count_occurrences source "-- c")
         (count_occurrences printed "-- c");
@@ -846,7 +855,49 @@ let test_trailing_comment_layouts () =
   check "field update value" "f(pp) = P(pp -- note\n  with a: 3)\n"
     "f(pp) = P(pp -- note\n          with a: 3)\n";
   check "final argument" "x = P(1, 2 -- last\n)\n" "x =\n  P(\n    1,\n    2 -- last\n  )\n";
-  check "comment-free call" "x = P(1, 2)\n" "x = P(1, 2)\n"
+  check "comment-free call" "x = P(1, 2)\n" "x = P(1, 2)\n";
+  check "definition header comment" "f(a, b) = -- header\n  a\n" "f(a, b) =\n  -- header\n  a\n";
+  check "comment-free mutual group" "even(n) = odd(n)\nodd(n) = even(n)\n"
+    "even(n) = odd(n)\nodd(n) = even(n)\n";
+  check "nested parentheses" "x = ((1 -- c1\n) -- c2\n)\n"
+    "x =\n  ((1\n    -- c1\n    ) -- c2\n   )\n";
+  check "comment-free nested parentheses" "x = f(((1)))\n" "x = f(1)\n"
+
+(* The [jqd { ... }] escape carries the tree in bootstrap syntax, whose only comment starter is
+   [;]. A surface comment inside it must become a bootstrap comment, or the escape does not parse. *)
+let test_raw_escape_uses_bootstrap_comments () =
+  let lowered = lower_file "a = 1 -- raw-comment\nb = 2\n" in
+  let bindings =
+    List.concat_map
+      (function
+        | Kernel.Decl { Kernel.it = DefTerm bindings; _ } -> bindings
+        | _ -> Alcotest.fail "expected only term declarations")
+      lowered.tops
+  in
+  (* Two independent bindings in one group would lose their boundary on reparse. *)
+  let group = Kernel.Decl { Kernel.it = DefTerm bindings; meta = Meta.empty } in
+  let printed =
+    match Surface_print.print_file_with_trivia [ group ] with
+    | Ok text -> text
+    | Error diagnostics -> fail_diags "print" diagnostics
+  in
+  Alcotest.(check bool) "escape used" true (contains printed "jqd {");
+  Alcotest.(check int) "comment kept once" 1 (count_occurrences printed "-- raw-comment");
+  Alcotest.(check bool) "bootstrap comment" true (contains printed "; -- raw-comment");
+  (match Surface_print.check_reparses ~file:"raw.jac" printed with
+  | Ok _ -> ()
+  | Error diagnostics -> fail_diags "escape reparses" diagnostics);
+  Alcotest.(check string) "escape idempotent" printed (print_recovered printed)
+
+let test_formatter_output_must_reparse () =
+  (match Surface_print.check_reparses ~file:"ok.jac" "x = 1\n" with
+  | Ok text -> Alcotest.(check string) "valid text unchanged" "x = 1\n" text
+  | Error diagnostics -> fail_diags "valid text" diagnostics);
+  match Surface_print.check_reparses ~file:"broken.jac" "x = (1 -- c, 2)\n" with
+  | Ok _ -> Alcotest.fail "unparseable text accepted"
+  | Error diagnostics ->
+      Alcotest.(check (list (option string)))
+        "E1204" [ Some "E1204" ] (List.map Diag.code diagnostics)
 
 let test_printer_context_concurrency () =
   let source = "-- concurrent-leading\nf(1\n-- concurrent-inner\n) -- concurrent-tail\n" in
@@ -916,4 +967,7 @@ let suite =
     Alcotest.test_case "trailing line comments end their line" `Quick
       test_trailing_line_comments_end_their_line;
     Alcotest.test_case "trailing comment layouts" `Quick test_trailing_comment_layouts;
+    Alcotest.test_case "raw escape bootstrap comments" `Quick
+      test_raw_escape_uses_bootstrap_comments;
+    Alcotest.test_case "formatter output must reparse" `Quick test_formatter_output_must_reparse;
   ]

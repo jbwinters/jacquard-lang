@@ -32,7 +32,7 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1109`
+- Alcotest/QCheck cases: `1111`
 - Cram transcript files: `73`
 - Documentation examples: `35` named examples across `8` documents
 
@@ -575,8 +575,10 @@ closing brace used to be followed on the same line by the next comma, keyword,
 or delimiter, so the output no longer parsed while `fmt` still exited 0. The
 printer now checks whether the rendering it is about to continue ends in a line
 comment and, if so, starts the next line with that token; after a commented
-final item it omits the optional trailing comma. Comments inside `()` and
-around a sequenced match arm's braces are kept instead of dropped. Output
+final item it omits the optional trailing comma. Comments inside a single pair
+of `()` and around a sequenced match arm's braces are kept instead of dropped;
+a comment inside directly nested parentheses was still dropped until the
+follow-up below. Output
 without comments is unchanged, except that a lone
 arrow parameter that breaks onto its own line no longer takes the vertical
 trailing comma, which spelled a one-element tuple type. The E1238 summary now
@@ -584,3 +586,26 @@ names the `with` field update as well as the named call. Two
 `test/test_surface_trivia.ml` cases, one `test/test_surface_laws.ml` case, and a
 `test/cli/surface.t` section bring the current source inventory to
 `1109 / 73 / 35`.
+
+A follow-up closes three more `fmt` robustness gaps. A mutually recursive group
+of surface definitions, such as `corpus/valid/even-odd.jac`, fell back to the
+raw `jqd { (defterm ...) }` escape even without comments, because the printer
+recognized group members only through internal group references and not
+through the names lowering uses to form the group. It now prints as adjacent
+definitions with the same hashes. A surface comment that did reach that escape
+was copied verbatim, but the bootstrap reader only knows `;` comments, so the
+output did not parse; the escape now carries each comment as `; ` followed by
+its original text. As a last line of defense, `jac fmt` reparses its own
+output and exits 1 with E1204, printing and writing nothing, if a printer bug
+would produce text that does not parse. A comment after a definition's `=` no
+longer spreads the parameter list vertically. Parser recovery in an effect body
+could stop on an invalid token or a stray `|` and loop forever; recovery there
+now always consumes at least one token, and a `test/cli/surface.t` case runs
+the former hang under `timeout`. Directly nested parentheses now keep their
+own comment owners, so `((1 -- c1\n) -- c2\n)` keeps both comments; this also
+stops a comment in a parenthesized block from being printed twice. Comment-free
+output of every tracked `.jac` file is byte-identical to the previous printer
+except `corpus/valid/even-odd.jac`, which now prints natively. Two
+`test/test_surface_trivia.ml` cases, six new trivia-law sources, and two
+`test/cli/surface.t` sections bring the current source inventory to
+`1111 / 73 / 35`.

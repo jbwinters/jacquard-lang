@@ -225,6 +225,19 @@ let synchronize_item state =
     ignore (advance state)
   done
 
+(* Skips an unexpected item for a loop that resumes at its next iteration without parsing anything
+   at the current token. [Invalid] and [|] are item sync points, so [synchronize_item] alone stops
+   on them without moving; such a loop must consume at least one token (the lexer has already
+   reported an invalid one) or it would meet the same token forever. *)
+let skip_unexpected_item state =
+  let start = state.index in
+  synchronize_item state;
+  ignore (consume_separators state);
+  if state.index = start then
+    match (current state).Surface_lex.token with
+    | Surface_lex.Eof | Surface_lex.RBrace -> ()
+    | _ -> ignore (advance state)
+
 let synchronize_paren state =
   while
     match (current state).Surface_lex.token with
@@ -1022,7 +1035,20 @@ and parse_paren_expr state opening =
       | Surface_lex.RParen ->
           let closing = advance state in
           let meta = meta_with_span (span_between opening closing) in
-          { first with Surface_ast.meta = Meta.with_surface_container "paren" meta meta }
+          (* The group keeps the delimiter containers of the expression it wraps, so a nested
+             group, block, or list still owns its comments. A directly nested group becomes the
+             ["paren"] container of this group's own container, one level per pair of parens. *)
+          let inner = Meta.surface_container "paren" first.meta in
+          let group =
+            if Meta.is_empty inner then meta else Meta.with_surface_container "paren" inner meta
+          in
+          let meta =
+            List.fold_left
+              (fun meta (key, value) -> Meta.add key value meta)
+              meta
+              (Meta.bindings (Meta.surface_containers first.meta))
+          in
+          { first with Surface_ast.meta = Meta.with_surface_container "paren" group meta }
       | _ ->
           let token = current state in
           report state token
@@ -2738,16 +2764,12 @@ let parse_effect_decl state ~start ~effect_mode keyword =
             | _ ->
                 report_code state (current state) "E1225"
                   "effect operations require a newline or `;` separator";
-                synchronize_item state;
-                ignore (consume_separators state))
+                skip_unexpected_item state)
         | _ ->
             report_code state token "E1225"
               (Printf.sprintf "expected an operation signature or `}`, found %s"
                  (token_description state token));
-            if token.Surface_lex.token <> Surface_lex.Eof then begin
-              synchronize_item state;
-              ignore (consume_separators state)
-            end
+            if token.Surface_lex.token <> Surface_lex.Eof then skip_unexpected_item state
       done);
   if Option.is_some opening && (not !interrupted) && !operations = [] then
     report_code state keyword "E1225" "an effect declaration requires an operation signature";
@@ -3029,6 +3051,12 @@ module Trivia_ownership = struct
     match Meta.span meta with None -> [] | Some span -> [ { key = key role span; role; span } ]
 
   let container kind meta = slot (Container kind) (Meta.surface_container kind meta)
+
+  (* Nested parentheses chain their containers (see [parse_paren_expr]); each level is an owner. *)
+  let rec paren_containers meta =
+    let group = Meta.surface_container "paren" meta in
+    match slot (Container "paren") group with [] -> [] | slots -> slots @ paren_containers group
+
   let containers kinds meta = List.concat_map (fun kind -> container kind meta) kinds
 
   let indexed_containers kind count meta =
@@ -3076,7 +3104,7 @@ module Trivia_ownership = struct
       | Unquote body -> expr (depth + 1) body
       | Ann (subject, annotation) -> expr (depth + 1) subject @ ty (depth + 1) annotation
     in
-    container "block" node.meta @ container "params" node.meta @ container "paren" node.meta
+    container "block" node.meta @ container "params" node.meta @ paren_containers node.meta
     @ container "list" node.meta
     @ container "call-argument" node.meta
     @ slot Expr node.meta @ children
@@ -3411,6 +3439,14 @@ module Trivia_ownership = struct
     if Meta.is_empty container_meta then meta
     else Meta.with_surface_container kind (apply additions (Container kind) container_meta) meta
 
+  let rec apply_paren_containers additions meta =
+    let group = Meta.surface_container "paren" meta in
+    if Meta.is_empty group then meta
+    else
+      Meta.with_surface_container "paren"
+        (apply additions (Container "paren") (apply_paren_containers additions group))
+        meta
+
   let apply_containers additions kinds meta =
     List.fold_left (fun meta kind -> apply_container additions kind meta) meta kinds
 
@@ -3439,7 +3475,7 @@ module Trivia_ownership = struct
   let apply_owner additions role meta =
     meta |> apply additions role
     |> apply_container additions "params"
-    |> apply_container additions "block" |> apply_container additions "paren"
+    |> apply_container additions "block" |> apply_paren_containers additions
     |> apply_container additions "list"
     |> apply_container additions "call-argument"
     |> apply_container additions "call-parameter"
