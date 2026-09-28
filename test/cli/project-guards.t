@@ -10,9 +10,11 @@ docs/designs/project-structure.md §6, §10, §11, §16).
   >   (exports (term liba.shout)))
   > M
   $ printf 'liba.helper(x) = int.add(x, 100)\nliba.shout(x) = liba.helper(x)\n' > liba/a.jac
+  $ mkdir libb && printf '(project-v1 (name "libb") (requires (core "0.2")) (namespace libb) (units "b.jac") (exports (term libb.twice)))' > libb/project.jqd
+  $ echo 'libb.twice(x) = int.add(x, x)' > libb/b.jac
   $ cat > app/project.jqd <<'M'
   > (project-v1 (name "app") (requires (core "0.2")) (namespace app) (units "lib.jac")
-  >   (deps (dep (as a) (path "../liba")))
+  >   (deps (dep (as a) (path "../liba")) (dep (as b) (path "../libb")))
   >   (entries (run demo (units "demo.jac") (native)) (test suite (units "tests.jac"))))
   > M
   $ printf 'app.helper(x) = int.add(x, 7)\napp.go(x) = (liba.shout(x), app.helper(x))\n' > app/lib.jac
@@ -63,10 +65,19 @@ unrelated directory, with an empty HOME:
   $ ls "$HOME" | wc -l
   0
 
-The order of a consumer's dependencies is not part of any pin:
+The order of a consumer's dependencies is not part of any pin, its context,
+or its identities:
 
+  $ jacquard project interface | head -1 > before.ctx && jacquard project hash demo > before.hash
+  $ grep -o '(dep (as a)[^)]*)[^)]*))' project.jqd > dep-a && grep -o '(dep (as b)[^)]*)[^)]*))' project.jqd > dep-b
+  $ printf '(project-v1 (name "app") (requires (core "0.2")) (namespace app) (units "lib.jac")\n  (deps %s %s)\n  (entries (run demo (units "demo.jac") (native)) (test suite (units "tests.jac"))))\n' "$(cat dep-b)" "$(cat dep-a)" > project.jqd
+  $ grep -o '(deps (dep (as .)' project.jqd
+  (deps (dep (as b)
   $ jacquard project pin --dry-run | sed -E 's/[0-9a-f]{64}/HASH/'
+  b: HASH (unchanged)
   a: HASH (unchanged)
+  $ jacquard project interface | head -1 | cmp - before.ctx && jacquard project hash demo | cmp - before.hash && echo identical
+  identical
 
 A pin that cannot write leaves the old manifest intact:
 

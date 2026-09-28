@@ -90,6 +90,10 @@ let test_concurrent_edit () =
         let rec go i = i + n <= String.length cause && (String.sub cause i n = sub || go (i + 1)) in
         go 0
       in
+      Alcotest.(check (list string))
+        "E1733 headline"
+        [ "A source or manifest file changed during pinning." ]
+        (List.map Diag.summary ds);
       Alcotest.(check bool)
         "the cause names the changed unit and that nothing was written" true
         (says "l.jac" && says "changed while pinning; nothing was written"));

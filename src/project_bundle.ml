@@ -44,11 +44,16 @@ let overlap session out =
   in
   List.find_opt (fun input -> within ~dir:out input || within ~dir:input out) inputs
 
+(* the output as the filesystem will see it: an existing path (a directory, or a symlink to a
+   dependency) fully resolved, otherwise its resolved parent plus its last component *)
 let resolve_output out =
   let out = absolute out in
-  match Unix.realpath (Filename.dirname out) with
-  | parent -> Filename.concat parent (Filename.basename out)
-  | exception Unix.Unix_error _ -> out
+  match Unix.realpath out with
+  | resolved -> resolved
+  | exception Unix.Unix_error _ -> (
+      match Unix.realpath (Filename.dirname out) with
+      | parent -> Filename.concat parent (Filename.basename out)
+      | exception Unix.Unix_error _ -> out)
 
 let check_output session ~what out =
   let out = resolve_output out in
