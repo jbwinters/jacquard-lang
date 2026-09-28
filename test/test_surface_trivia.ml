@@ -783,6 +783,71 @@ let test_canonical_metadata_inertia () =
   Alcotest.(check string)
     "canonical file metadata inertia" (print_file [ top ]) (print_file [ perturbed ])
 
+(* A trailing line comment runs to the end of its physical line. Each source hangs one on a node
+   that the printer follows with a separator, keyword, or closing delimiter; the formatted text must
+   parse, keep every comment, reprint byte-identically, and lower to the same kernel forms. *)
+let trailing_comment_sources =
+  [
+    ("call argument before comma", "x = p(1 -- c1\n, 2)\n");
+    ("call argument before paren", "x = p(1, 2 -- c2\n)\n");
+    ("field update value before with", "f(pp) = P(pp -- c3\n  with a: 3)\n");
+    ("field update before comma", "f(pp) = P(pp with a: 3 -- c4\n, b: 4)\n");
+    ("named arguments", "x = f(b: 1 -- c5\n, a: 2)\n");
+    ("list items", "x = [1 -- c6\n, 2 -- c7\n]\n");
+    ("tuple and singleton tuple", "x = (1 -- c8\n, (2 -- c9\n,))\n");
+    ("unit inner comment", "x = ( -- c10\n)\n");
+    ("lambda parameters", "x = fn (a -- c11\n, b) -> a\n");
+    ("definition parameters", "f(a -- c12\n, b) = a\n");
+    ( "constructor patterns",
+      "f(x) = match x {\n  | P(a -- c13\n, b) -> a\n  | Q(l: y -- c14\n) -> y\n}\n" );
+    ("final match arm", "f(x) = match x {\n  | A -> 1 -- c15\n}\n");
+    ("final block item", "f(x) = {\n  let y = x\n  y -- c16\n}\n");
+    ("if condition and branch", "f(b) = if b -- c17\n then 1 -- c18\n else 2\n");
+    ("pipe", "x = 1 -- c19\n  |> f(2 -- c20\n, 3)\n");
+    ("annotation", "x = (1 -- c21\n : Int -- c22\n)\n");
+    ( "type arguments and arrow parameters",
+      "x : (List -- c23\n Int, Int -- c24\n) ->{} Int\nx = fn (a, b) -> 1\n" );
+    ("constructor declarations", "type T = -- c25\n  | A Int -- c26\n  | B\n");
+    ( "final handler clause",
+      "h = handle ask(1) {\n  | return v -> v\n  | ask(p) resume k -> k(1) -- c27\n}\n" );
+    ("quote", "q = quote { add(1, 2) -- c28\n}\n");
+    ("parenthesized lambda", "x = (fn (a) -> a -- c29\n)(1)\n");
+    ("inner arrow parameters", "x : (Int, () -- c30\n ->{} Int) ->{} Int\nx = fn (a, b) -> 1\n");
+    ( "sequenced arm comments",
+      "f(x) = match x {\n  | A -> -- c31\n {\n    let y = 1\n    y\n    -- c32\n  }\n}\n" );
+  ]
+
+let test_trailing_line_comments_end_their_line () =
+  let forms source = List.map Kernel.to_form (lower_file source).tops in
+  List.iter
+    (fun (label, source) ->
+      let printed = print_recovered source in
+      (match Surface_parse.parse_file ~file:"trivia.jac" printed with
+      | Ok _ -> ()
+      | Error diagnostics ->
+          Alcotest.failf "%s: formatted output does not parse (%s):\n%s" label
+            (String.concat "; " (List.map Diag.to_string diagnostics))
+            printed);
+      Alcotest.(check string) (label ^ " idempotent") printed (print_recovered printed);
+      Alcotest.(check int)
+        (label ^ " comments kept") (count_occurrences source "-- c")
+        (count_occurrences printed "-- c");
+      Alcotest.(check bool)
+        (label ^ " kernel forms") true
+        (List.equal Form.equal_ignoring_meta (forms source) (forms printed)))
+    trailing_comment_sources
+
+let test_trailing_comment_layouts () =
+  let check label source expected =
+    Alcotest.(check string) label expected (print_recovered source)
+  in
+  check "argument before comma" "x = P(1 -- first\n, 2)\n"
+    "x =\n  P(\n    1 -- first\n    , 2,\n  )\n";
+  check "field update value" "f(pp) = P(pp -- note\n  with a: 3)\n"
+    "f(pp) = P(pp -- note\n          with a: 3)\n";
+  check "final argument" "x = P(1, 2 -- last\n)\n" "x =\n  P(\n    1,\n    2 -- last\n  )\n";
+  check "comment-free call" "x = P(1, 2)\n" "x = P(1, 2)\n"
+
 let test_printer_context_concurrency () =
   let source = "-- concurrent-leading\nf(1\n-- concurrent-inner\n) -- concurrent-tail\n" in
   let lowered = lower_file source in
@@ -848,4 +913,7 @@ let suite =
     Alcotest.test_case "structured bootstrap formatter" `Quick test_structured_bootstrap_formatter;
     Alcotest.test_case "canonical metadata inertia" `Quick test_canonical_metadata_inertia;
     Alcotest.test_case "printer context concurrency" `Quick test_printer_context_concurrency;
+    Alcotest.test_case "trailing line comments end their line" `Quick
+      test_trailing_line_comments_end_their_line;
+    Alcotest.test_case "trailing comment layouts" `Quick test_trailing_comment_layouts;
   ]

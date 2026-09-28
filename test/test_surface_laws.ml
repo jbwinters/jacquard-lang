@@ -100,6 +100,22 @@ let test_surface_formatter_corpus_stability () =
       | _ -> Alcotest.failf "unexpected formatter corpus file %s" file)
     files
 
+(* `(T,)` is a one-element tuple type, so a lone arrow parameter that breaks onto its own line must
+   not take the vertical layout's trailing comma. *)
+let test_single_parameter_arrow_breaks_without_comma () =
+  let source = "f : (Snapshot) ->{} Int\nf = fn (s) -> 1\n" in
+  let formatted = format_surface ~width:12 "arrow.jac" source in
+  Alcotest.(check bool) "parameter breaks" true (contains "(\n" formatted);
+  Alcotest.(check bool) "no tuple comma" false (contains "Snapshot," formatted);
+  (match Surface_parse.parse_file ~file:"arrow.jac" formatted with
+  | Ok _ -> ()
+  | Error diagnostics -> Eval_support.fail_diags "formatted arrow parse" diagnostics);
+  Alcotest.(check string) "stable" formatted (format_surface ~width:12 "arrow.jac" formatted);
+  let two =
+    format_surface ~width:12 "arrow.jac" "f : (Snapshot, Int) ->{} Int\nf = fn (s, n) -> 1\n"
+  in
+  Alcotest.(check bool) "several parameters keep the comma" true (contains "Int,\n" two)
+
 let test_constructor_standard_width_boundary () =
   let render ?width constructor_length =
     let constructor = "A" ^ String.make (constructor_length - 1) 'a' in
@@ -1647,6 +1663,8 @@ let suite =
       test_surface_formatter_corpus_stability;
     Alcotest.test_case "constructor standard width boundary" `Quick
       test_constructor_standard_width_boundary;
+    Alcotest.test_case "single parameter arrow breaks without comma" `Quick
+      test_single_parameter_arrow_breaks_without_comma;
     Alcotest.test_case "declaration header width exception" `Quick
       test_declaration_header_width_exception;
     Alcotest.test_case "colon continuation width contract" `Quick

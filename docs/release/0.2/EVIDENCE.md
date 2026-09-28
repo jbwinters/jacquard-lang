@@ -32,7 +32,7 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1106`
+- Alcotest/QCheck cases: `1109`
 - Cram transcript files: `73`
 - Documentation examples: `35` named examples across `8` documents
 
@@ -566,3 +566,21 @@ notebook's two multi-field rebuilds use it with every transcript unchanged.
 Five `test/test_surface_field_update.ml` cases and
 `test/cli/surface-field-update.t` bring the current source inventory to
 `1106 / 73 / 35`.
+
+`fmt` no longer lets a trailing line comment swallow the syntax after it. A
+comment ending a call or named argument, a `with` field update or its value, a
+list or tuple item, a parameter, a pattern field, a type argument, an `if`
+condition, a pipe operand, an annotation, or the last arm or item before a
+closing brace used to be followed on the same line by the next comma, keyword,
+or delimiter, so the output no longer parsed while `fmt` still exited 0. The
+printer now checks whether the rendering it is about to continue ends in a line
+comment and, if so, starts the next line with that token; after a commented
+final item it omits the optional trailing comma. Comments inside `()` and
+around a sequenced match arm's braces are kept instead of dropped. Output
+without comments is unchanged, except that a lone
+arrow parameter that breaks onto its own line no longer takes the vertical
+trailing comma, which spelled a one-element tuple type. The E1238 summary now
+names the `with` field update as well as the named call. Two
+`test/test_surface_trivia.ml` cases, one `test/test_surface_laws.ml` case, and a
+`test/cli/surface.t` section bring the current source inventory to
+`1109 / 73 / 35`.

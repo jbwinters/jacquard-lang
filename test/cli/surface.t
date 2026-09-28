@@ -266,6 +266,45 @@ by `check` gives the same verdict as `check` on the original.
   $ diff nested.hash nested-formatted.hash && echo same-hash
   same-hash
 
+A trailing line comment runs to the end of its line. Where the printer would continue the same
+syntax after one (a comma, `with`, or a closing delimiter), it starts the next line instead, so the
+formatted file still parses, keeps every comment, is stable, and hashes as before.
+
+  $ cat > trailing.jac <<'EOF'
+  > type P = | P(a: Int, b: Int)
+  > first = P(1 -- first
+  > , 2)
+  > last = P(1, 2 -- last
+  > )
+  > bump(pp) = P(pp -- note
+  >   with a: 3)
+  > EOF
+  $ jac fmt trailing.jac > trailing-formatted.jac
+  $ sed -n '/^first/,$p' trailing-formatted.jac
+  first =
+    P(
+      1 -- first
+      , 2,
+    )
+  
+  last =
+    P(
+      1,
+      2 -- last
+    )
+  
+  bump(pp) = P(pp -- note
+               with a: 3)
+  $ jac check trailing-formatted.jac
+  ok
+  $ jac fmt trailing-formatted.jac | cmp - trailing-formatted.jac && echo stable
+  stable
+  $ grep -c -- '-- \(first\|last\|note\)' trailing-formatted.jac
+  3
+  $ jac hash trailing.jac > trailing.hash
+  $ jac hash trailing-formatted.jac | cmp - trailing.hash && echo same-hash
+  same-hash
+
 Declaration headers have no legal continuation point before `=` or `where {`. The formatter keeps
 that grammar-valid line intact, and W1204 points at the declaration name when the shortest header
 must exceed the canonical width.
