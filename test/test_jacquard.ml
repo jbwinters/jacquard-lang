@@ -30,6 +30,8 @@ let () =
       ("host-session", Test_host_session.suite);
       ("host-worker", Test_host_worker.suite);
       ("frontend", Test_frontend.suite);
+      ("project-frontend", Test_project_frontend.suite);
+      ("sugar-identity", Test_sugar_identity.suite);
       ("scoped-instances", Test_scoped_instances_model.suite);
       ("interface", Test_interface.suite);
       ("invocation", Test_invocation.suite);
@@ -105,6 +107,7 @@ let () =
       ("surface-decls", Test_surface_decls.suite);
       ("surface-try", Test_surface_try.suite);
       ("surface-compose", Test_surface_compose.suite);
+      ("project-manifest", Test_project_manifest.suite);
       ("surface-handlers-quote", Test_surface_handlers_quote.suite);
       ("surface-trivia", Test_surface_trivia.suite);
       ("surface-sugar", Test_surface_sugar.suite);

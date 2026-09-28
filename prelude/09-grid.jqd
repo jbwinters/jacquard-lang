@@ -309,6 +309,45 @@
    (binding int.lte? ()
     (lam ((pvar a) (pvar b)) (app (var bool.not) (app (var lt) (var b) (var a)))))))
 
+; SX.30 (DES.4 §6): list-based predicates, so a long conjunction is a flat list
+; rather than a right-nested bool.and tree. bool.all and bool.any evaluate every
+; item (a list literal's items are already values); list.all? and list.any? stop
+; at the first deciding item, so a callback's effects happen only up to it.
+(defterm ((binding bool.all ()
+  (lam ((pvar xs)) (app (var list.fold) (var xs) (var true) (var bool.and))))))
+
+(defterm ((binding bool.any ()
+  (lam ((pvar xs)) (app (var list.fold) (var xs) (var false) (var bool.or))))))
+
+(defterm ((binding list.all? ()
+  (lam ((pvar xs) (pvar p))
+    (match (var xs)
+      (clause (pcon nil) (var true))
+      (clause (pcon cons (pvar x) (pvar rest))
+        (match (app (var p) (var x))
+          (clause (pcon true) (app (var list.all?) (var rest) (var p)))
+          (clause (pcon false) (var false)))))))))
+
+(defterm ((binding list.any? ()
+  (lam ((pvar xs) (pvar p))
+    (match (var xs)
+      (clause (pcon nil) (var false))
+      (clause (pcon cons (pvar x) (pvar rest))
+        (match (app (var p) (var x))
+          (clause (pcon true) (var true))
+          (clause (pcon false) (app (var list.any?) (var rest) (var p))))))))))
+
+; closed intervals, positional (value, low, high): prelude terms carry no call labels
+(defterm ((binding int.between? ()
+  (lam ((pvar value) (pvar low) (pvar high))
+    (app (var bool.and) (app (var int.gte?) (var value) (var low))
+      (app (var int.lte?) (var value) (var high)))))))
+
+(defterm ((binding real.between? ()
+  (lam ((pvar value) (pvar low) (pvar high))
+    (app (var bool.and) (app (var real.gte?) (var value) (var low))
+      (app (var real.lte?) (var value) (var high)))))))
+
 ; Pure parallelism is a semantic hint: the closed callback row is the license.
 ; This phase-zero implementation delegates to list.map, which evaluates each
 ; callback in input order. No Async effect or task exists.

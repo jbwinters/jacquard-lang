@@ -55,14 +55,15 @@ let no_hook _ = Ok ()
 
 (* One loop for every command: validate, pre-resolution hook, resolve against the store's current
    names, post-resolution hook, then install a declaration so later tops see it. *)
-let walk_items ?origin ?(install = Install) ?(before_resolve = no_hook)
+let walk_items ?origin ?(install = Install) ?names ?(before_resolve = no_hook)
     ?(on_resolved = fun _ _ -> Ok ()) ?(on_installed = fun _ _ -> Ok ()) store validate items =
+  let names = match names with Some names -> names | None -> Store.names_view store in
   let rec go = function
     | [] -> Ok ()
     | item :: rest -> (
         let* top = validate item in
         let* () = before_resolve top in
-        let* resolved, warnings = Resolve.resolve_w (Store.names_view store) top in
+        let* resolved, warnings = Resolve.resolve_w names top in
         let* () = on_resolved resolved warnings in
         match resolved with
         | Kernel.Expr _ -> go rest
@@ -83,8 +84,8 @@ let walk ?origin ?install ?(on_parsed = ignore) ?before_resolve ?on_resolved ?on
   walk_items ?origin ?install ?before_resolve ?on_resolved ?on_installed store validate_parsed_top
     parsed
 
-let walk_tops ?origin ?install ?before_resolve ?on_resolved ?on_installed store tops =
-  walk_items ?origin ?install ?before_resolve ?on_resolved ?on_installed store Result.ok tops
+let walk_tops ?origin ?install ?names ?before_resolve ?on_resolved ?on_installed store tops =
+  walk_items ?origin ?install ?names ?before_resolve ?on_resolved ?on_installed store Result.ok tops
 
 let resolve_source_tops ~syntax store ~file source =
   let surface_warnings = ref [] and resolved = ref [] and resolver_warnings = ref [] in
@@ -385,3 +386,37 @@ let check ?origin ?(on_parsed = ignore) ?(on_resolved = fun _ _ -> ())
         (Checked
            (Checked.seal ~file ~source ~prelude:(Store.prelude_manifest store)
               ~published:(List.rev !published) ~interface tops))
+
+(* --- authority --- *)
+
+let granted_effects store allows =
+  let explicit =
+    List.filter_map
+      (fun name ->
+        match Store.lookup_kind store (String.lowercase_ascii name) Resolve.KEffect with
+        | Some { Resolve.hash; _ } -> Some hash
+        | _ -> None)
+      allows
+  in
+  let exact_scheduler_effect name expected =
+    match Store.lookup_kind store name Resolve.KEffect with
+    | Some { Resolve.hash; _ } when String.equal (Hash.to_hex hash) expected -> Some hash
+    | Some _ | None -> None
+  in
+  let scheduler_infrastructure =
+    List.filter_map Fun.id
+      [
+        exact_scheduler_effect "async" Concurrency_contract.async_effect_hash;
+        exact_scheduler_effect "channel" Channel_contract.channel_effect_hash;
+      ]
+  in
+  (* APP.7: the console grant is the terminal authority, so it also covers the separately
+     declared ConsoleInput effect (Prelude.install_console installs both root handlers) *)
+  let console_input =
+    if List.exists (fun name -> String.lowercase_ascii name = "console") allows then
+      match Store.lookup_kind store "console-input" Resolve.KEffect with
+      | Some { Resolve.hash; _ } -> [ hash ]
+      | None -> []
+    else []
+  in
+  explicit @ console_input @ scheduler_infrastructure

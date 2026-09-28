@@ -96,7 +96,7 @@ type discovery = {
       (** member -> (name, body, owning decl hash) *)
 }
 
-let discover (store : Store.t) : discovery =
+let discover ?(roots = []) (store : Store.t) : discovery =
   let d =
     {
       builtin_names = Hashtbl.create 64;
@@ -127,6 +127,37 @@ let discover (store : Store.t) : discovery =
             | None -> ())
         | _ -> ())
     store.Store.names;
+  (* then by reachability from the roots: a member whose name was rebound later (an entry that
+     shadows a library or prelude name) is still a body the program may call *)
+  let seen = Hashtbl.create 256 in
+  let rec reach = function
+    | [] -> ()
+    | hash :: rest -> (
+        match Store.locate store hash with
+        | Error _ -> reach rest
+        | Ok { Store.decl; decl_hash; role } ->
+            (match (decl.Kernel.it, role) with
+            | Kernel.DefTerm bindings, Store.Member i when not (Hashtbl.mem d.member_binding hash)
+              -> (
+                match List.nth_opt bindings i with
+                | Some b -> (
+                    Hashtbl.replace d.member_binding hash (b.Kernel.bname, b.Kernel.value, decl_hash);
+                    match builtin_marker_name b.Kernel.value with
+                    | Some bname -> Hashtbl.replace d.builtin_names hash bname
+                    | None -> (
+                        match b.Kernel.value.Kernel.it with
+                        | Kernel.Lam (params, _) ->
+                            Hashtbl.replace d.member_arity hash (List.length params)
+                        | _ -> ()))
+                | None -> ())
+            | _ -> ());
+            if Hashtbl.mem seen decl_hash then reach rest
+            else begin
+              Hashtbl.add seen decl_hash ();
+              reach (Store.decl_refs decl @ rest)
+            end)
+  in
+  reach roots;
   d
 
 (* ------------------------------------------------------------------ *)
@@ -503,8 +534,9 @@ let runtime_dir_of ~prelude_dir =
 (** [build ~store ~tops ~prelude_dir ~out] compiles the checked top-level expressions and every
     reachable declaration to a standalone binary at [out]. *)
 let build ~(store : Store.t) ~(tops : (Kernel.expr * string list * (Hash.t * string) list) list)
-    ~prelude_dir ~out : (int, [ `Refused of Compile.refusal list | `Toolchain of string ]) result =
-  let d = discover store in
+    ~cache_root ~prelude_dir ~out :
+    (int, [ `Refused of Compile.refusal list | `Toolchain of string ]) result =
+  let d = discover ~roots:(List.concat_map (fun (e, _, _) -> Store.expr_refs e) tops) store in
   let { prog; refusals }, manifests = compile_program store d tops in
   (* Perceus (task 68): precise ownership unless the differential lever turns it off.
      Frame-style fns (task 71) stay on the naive discipline: a suspension abandons its
@@ -659,7 +691,7 @@ let build ~(store : Store.t) ~(tops : (Kernel.expr * string list * (Hash.t * str
             let flags = base_cflags ^ "|" ^ base_ldflags ^ "|" ^ cflags in
             emitter_version ^ "-f" ^ String.sub (Hash.to_hex (Hash.of_string flags)) 0 8
           in
-          let cache = Filename.concat ".jacquard-native" cache_tag in
+          let cache = Filename.concat cache_root cache_tag in
           match link_program ~cc ~cache ~runtime_dir ~units ~main_c ~out with
           | Ok n -> Ok n
           | Error m -> Error (`Toolchain m))

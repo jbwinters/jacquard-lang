@@ -153,6 +153,8 @@ type ctx = {
           how native inference drivers (M3) receive resumptions *)
   mutable capture_root_handlers : bool;
       (** scheduler-only mode: capture granted operations before invoking their root handlers *)
+  mutable code_resolver : (Kernel.expr -> (Kernel.expr, Diag.t list) result) option;
+      (** how [eval-code] resolves a payload; [None] resolves against the store's public names *)
   mutable track_coverage : bool;
       (** coverage bookkeeping costs a hash-keyed table write per term reference — measured ~12% of
           a pure-recursion run (PF.2 phase 2). The run path never reads coverage, so the CLI turns
@@ -182,6 +184,10 @@ let next_audit_context_id = Atomic.make 0
 
 (** [make_ctx store] builds a fresh evaluation context over [store]: empty builtin, memo, and
     root-handler tables. *)
+let code_resolver ctx = ctx.code_resolver
+
+let set_code_resolver ctx resolver = ctx.code_resolver <- Some resolver
+
 let make_ctx store =
   {
     store;
@@ -197,6 +203,7 @@ let make_ctx store =
     root_observer = None;
     capture_ops = false;
     capture_root_handlers = false;
+    code_resolver = None;
     track_coverage = true;
     coverage = Hashtbl.create 64;
     recovery_immutable_clean = Physical_cache.create 128;
