@@ -139,7 +139,7 @@ nb.interaction-tests =
               ],
               fn (expected) -> check.true(text.contains?(output, expected), expected),
             )
-            check.true(text.contains?(output, "later = 1"), "a blank line reprompts; only end of input ends the session")
+            check.true(text.contains?(output, "later = 1"), "a blank line reprompts instead of ending the session")
           },
       ),
       Case(

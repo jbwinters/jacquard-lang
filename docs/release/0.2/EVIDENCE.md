@@ -547,7 +547,7 @@ larger models read and update records through generated accessors and
 setters. Every `EXAMPLE.txt` and `CUSTOM-EXAMPLE.txt` is unchanged, the
 suites keep their checks apart from the notebook's end-of-input assertion, and `test/cli/applications.t` still confirms
 interpreter and native parity and composition identity. The one behavior
-change is that a blank notebook line reprompts and only end of input ends the
+change is that a blank notebook line reprompts instead of ending the
 session. `display.fixed3` keeps its half-up rounding, which
 `display-tests.jac` now pins, because `text.from-real-fixed` would change a
 published digit. `demos/applications/README.md` lists what was retired and

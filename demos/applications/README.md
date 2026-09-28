@@ -132,7 +132,7 @@ notebook's end-of-input test now asserts that a blank line reprompts.
 | 29 hand-written field selectors (`rota.staff-id`, `nb.cells`, ...) | generated accessors (`rota-staff.id`, `nb-snapshot.cells`, `nb-response.output`, ...) | rota, notebook |
 | one-clause `match` projections (`NbEdge(source: s) -> s`) | generated accessors (`nb-edge.source`, `nb-entry.name`) | notebook |
 | rebuilding a whole record to change one or two fields | generated setters (`rota-staff.with-available`, `nb-snapshot.with-hits`, `with-cache`, `with-computed`) | rota `fixtures.jac`, notebook `model.jac` |
-| an empty line ended the notebook, because `read-line` answers `""` at end of input | `next-line()`: a blank line now reprompts and only end of input ends the session (**UX change**, prints `bye (end of input)`) | notebook `application.jac` |
+| an empty line ended the notebook, because `read-line` answers `""` at end of input | `next-line()`: a blank line now reprompts; `quit` or end of input ends the session (**UX change**, prints `bye (end of input)`) | notebook `application.jac` |
 | programs assembled by concatenating files | local projects (`project.jqd`) | all |
 
 Kept on purpose:
