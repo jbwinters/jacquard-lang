@@ -288,6 +288,34 @@ bool.or-else  : (Bool, () ->{| e} Bool) ->{| e} Bool
 A future surface `&&` desugars to `match`, costing nothing. Until then the library
 refuses to pretend strict application short-circuits.
 
+A long conjunction reads flat as a list (SX.30). `bool.all` and `bool.any` take
+a list of `Bool` values, which a list literal has already evaluated, so there is
+no short-circuit and no argument-count ceiling. `list.all?` and `list.any?` take
+a predicate and stop at the first item that decides the answer, so the
+predicate's effects happen only up to it. `int.between?` and `real.between?` test
+a closed interval with positional arguments `(value, low, high)`; prelude terms
+carry no call labels.
+
+```text
+bool.all      : (List Bool) ->{} Bool
+bool.any      : (List Bool) ->{} Bool
+list.all?     : (List a, (a) ->{| e} Bool) ->{| e} Bool
+list.any?     : (List a, (a) ->{| e} Bool) ->{| e} Bool
+int.between?  : (Int, Int, Int) ->{} Bool
+real.between? : (Real, Real, Real) ->{} Bool
+```
+
+```jacquard doctest=stdlib-predicates mode=run fixture=stdlib-predicates.jac stdout=stdlib-predicates.stdout stderr=empty exit=0
+valid(id, name, limit, points) = bool.all([
+  int.between?(id, 0, 99),
+  bool.not(text.empty?(name)),
+  int.between?(limit, 0, 14),
+  list.all?(points, fn (p) -> int.between?(p, 0, 10)),
+])
+(valid(7, "Ada", 3, [5, 10]), valid(7, "Ada", 15, [5]), bool.any([False, True]))
+(list.any?([1, 2, 3], fn (n) -> int.gt?(n, 2)), real.between?(2.0, 1.0, 2.0))
+```
+
 `Bool` is still the right result for predicates and ordinary boolean data. For
 an argument that selects behavior, prefer a purpose-specific sum such as
 `type Mode = | Live | DryRun`; its constructors make the call and later match
