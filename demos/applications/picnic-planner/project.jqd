@@ -4,5 +4,5 @@
   (namespace picnic)
   (units "model.jac")
   (exports (term picnic.interactive))
-  (deps (dep (as display) (path "../shared") (pin #ac44b65ede653308312d2798fa1015e29ca2f955d9db5b53cef8b77a5c574bb9)))
+  (deps (dep (as display) (path "../shared") (pin #e8198e85a248b2f43dc40f88c99276442f65e95bac185ab4d3061a1f80e341a9)))
   (entries (run demo (units "demo.jac") (grants console) (native)) (run interactive (units "interactive.jac") (grants console) (native)) (test suite (units "tests.jac"))))
