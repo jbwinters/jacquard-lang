@@ -114,9 +114,9 @@ assembled from:
   >     | cut -d' ' -f2- | sort -u > composed.txt
   >   cmp -s concatenated.txt composed.txt && echo "identical: $p $e ($(wc -l < composed.txt) bindings)"; }
   $ same dice-coach demo "$A/shared/display.jac" "$A/dice-coach/model.jac" "$A/dice-coach/demo.jac"
-  identical: dice-coach demo (33 bindings)
+  identical: dice-coach demo (31 bindings)
   $ same picnic-planner suite "$A/shared/display.jac" "$A/picnic-planner/model.jac" "$A/picnic-planner/tests.jac"
-  identical: picnic-planner suite (51 bindings)
+  identical: picnic-planner suite (49 bindings)
   $ R="$A/rota-optimizer"; same rota-optimizer suite "$R/model.jac" "$R/fixtures.jac" "$R/report.jac" "$R/tests.jac" "$R/interaction-tests.jac"
   identical: rota-optimizer suite (128 bindings)
   $ N="$A/formula-notebook"; same formula-notebook demo "$N/syntax.jac" "$N/model.jac" "$N/commands.jac" "$N/application.jac" "$N/workbook.jac" "$N/demo.jac"
@@ -126,14 +126,14 @@ The display helpers the applications do not use stay private to `display`:
 by name, by hash, and through eval:
 
   $ cp "$A/dice-coach/demo.jac" demo.bak
-  $ echo 'display.real(1.5)' > "$A/dice-coach/demo.jac"
+  $ echo 'display.floor-between(1.5, 0, 2)' > "$A/dice-coach/demo.jac"
   $ jac project run --project "$A/dice-coach" demo 2>&1 | grep -o 'error\[E1705\].*' | head -1
   error[E1705]: A name is not visible in this project.
   $ H=$(jac project hash --project "$A/shared" | grep ' display.floor-between ' | cut -d' ' -f3)
   $ printf '#%s:term(1, 2, 3)\n' "$H" > "$A/dice-coach/demo.jac"
   $ jac project run --project "$A/dice-coach" demo 2>&1 | grep -o 'error\[E1709\]' | head -1
   error[E1709]
-  $ echo '`op:eval-code`(quote { display.real(1.5) })' > "$A/dice-coach/demo.jac"
+  $ echo '`op:eval-code`(quote { display.floor-between(1.5, 0, 2) })' > "$A/dice-coach/demo.jac"
   $ jac project run --project "$A/dice-coach" demo --allow eval 2>&1 | grep -o 'E1705' | head -1
   E1705
   $ cp demo.bak "$A/dice-coach/demo.jac"

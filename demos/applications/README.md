@@ -121,14 +121,16 @@ notebook's end-of-input test now asserts that a blank line reprompts.
 | workaround as delivered | now | where |
 |---|---|---|
 | split `$"..."` reports joined with `text.concat` (native v1's eight-argument call cap) | one interpolation per message | rota `report.jac` |
-| nested `text.concat` chains | interpolation | notebook `commands.jac`, `syntax.jac`, `model-tests.jac` |
+| nested `text.concat` chains | interpolation | notebook `commands.jac`, `syntax.jac`, `model-tests.jac`; shared `display.jac` |
 | hand-written decimal parser with a digit table (native v1 lacked `text.to-int`) | `text.to-int` of the trimmed line; the six-digit input bound stays | rota `report.jac` |
+| `text.to-real(text.from-int(n))` Int-to-Real helpers (`dice.real`, `picnic.real`, `display.real`) | `real.from-int` | dice, picnic, shared |
 | digit and letter tables (`nb.digits`, `nb.letters`) | `text.ascii-digit?`, `text.ascii-digit-value`, `text.ascii-letter?` | notebook `syntax.jac` |
 | `text.eq?` chains over characters and command words | Text patterns in `match` | notebook `syntax.jac`, `commands.jac` |
 | recursive `rota.every`/`rota.any`, `nb.every`/`nb.any` | `list.all?`, `list.any?` | rota, notebook |
-| `bool.and(int.gte?(x, lo), int.lte?(x, hi))` ranges | `int.between?`, `real.between?` | dice, picnic, rota (including the 1..8 staff count) |
+| `bool.and(int.gte?(x, lo), int.lte?(x, hi))` ranges | `int.between?`, `real.between?` (negated with `bool.not` for out-of-range errors) | dice, picnic, rota, notebook |
 | nested `bool.and` conjunctions | `bool.all([...])` | picnic `model.jac`; rota input validation and solution check |
 | 29 hand-written field selectors (`rota.staff-id`, `nb.cells`, ...) | generated accessors (`rota-staff.id`, `nb-snapshot.cells`, `nb-response.output`, ...) | rota, notebook |
+| one-clause `match` projections (`NbEdge(source: s) -> s`) | generated accessors (`nb-edge.source`, `nb-entry.name`) | notebook |
 | rebuilding a whole record to change one or two fields | generated setters (`rota-staff.with-available`, `nb-snapshot.with-hits`, `with-cache`, `with-computed`) | rota `fixtures.jac`, notebook `model.jac` |
 | an empty line ended the notebook, because `read-line` answers `""` at end of input | `next-line()`: a blank line now reprompts and only end of input ends the session (**UX change**, prints `bye (end of input)`) | notebook `application.jac` |
 | programs assembled by concatenating files | local projects (`project.jqd`) | all |
@@ -146,6 +148,8 @@ Kept on purpose:
 - `rota.member?`, `rota.distinct?`, `nb.has` and `nb.unique` compare with
   `eq`/`text.eq?` directly; `list.contains?` needs an `Eq` dictionary and
   reads no better here.
+- The rota's preference entries are prelude `Pair`s, which have no generated
+  accessors, so their `MkPair(key, _)` matches stay.
 - The independent oracles and the notebook's fresh-evaluator comparison are
   unchanged, and the record rebuilds that replace three or more fields keep
   the constructor call.

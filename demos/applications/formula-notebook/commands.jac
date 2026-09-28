@@ -101,11 +101,8 @@ nb.show(
     }
     | None -> {
       let lines = list.map(nb-snapshot.cells(snapshot), fn (cell) -> nb.definition-line(snapshot, cell))
-      text.concat(
-        if list.empty?(lines) then "(empty workbook)\n"
-        else text.concat(nb.join(lines, "\n"), "\n"),
-        nb.stats(snapshot),
-      )
+      let listing = if list.empty?(lines) then "(empty workbook)" else nb.join(lines, "\n")
+      $"{listing}\n{nb.stats(snapshot)}"
     }
   }
 

@@ -4,5 +4,5 @@
   (namespace dice)
   (units "model.jac")
   (exports (term dice.interactive))
-  (deps (dep (as display) (path "../shared") (pin #e8198e85a248b2f43dc40f88c99276442f65e95bac185ab4d3061a1f80e341a9)))
+  (deps (dep (as display) (path "../shared") (pin #b10da505755d33f7603f47ac6657a9babb485d8ba7479cb7c3f15f5f4d4a9837)))
   (entries (run demo (units "demo.jac") (grants console) (native)) (run interactive (units "interactive.jac") (grants console) (native)) (test suite (units "tests.jac"))))

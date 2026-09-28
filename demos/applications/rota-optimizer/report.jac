@@ -242,7 +242,7 @@ rota.interactive() =
       )
     match parsed {
       | (Some(scenario), Some(budget), Some(rest), Some(fairness), Some(excluded)) ->
-        if bool.or(int.lt?(scenario, 1), int.gt?(scenario, 3)) then
+        if bool.not(int.between?(scenario, 1, 3)) then
           println("INPUT ERROR: Scenario must be 1..3.")
         else {
                let problem =

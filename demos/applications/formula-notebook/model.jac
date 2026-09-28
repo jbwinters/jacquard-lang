@@ -222,8 +222,7 @@ nb.candidate(
           nb.unique(
             list.append(
               list.map(cells, nb-cell.name),
-              list.map(edges, fn (edge) -> match edge {
-                                             | NbEdge(source: source) -> source}),
+              list.map(edges, nb-edge.source),
             ),
           )
         let cache =

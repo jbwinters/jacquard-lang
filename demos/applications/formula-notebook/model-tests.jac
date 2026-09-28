@@ -92,8 +92,7 @@ nb.check-reference(
         },
     )
     let cache-names =
-      list.map(nb-snapshot.cache(snapshot), fn (entry) -> match entry {
-                                                   | NbEntry(name, _) -> name})
+      list.map(nb-snapshot.cache(snapshot), nb-entry.name)
     check.eq(
       list.length(cache-names),
       list.length(nb.unique(cache-names)),

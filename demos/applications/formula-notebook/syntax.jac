@@ -31,7 +31,7 @@ nb.join(
   match xs {
     | Nil -> ""
     | Cons(first, rest) ->
-      list.fold(rest, first, fn (acc, x) -> text.concat(text.concat(acc, separator), x))
+      list.fold(rest, first, fn (acc, x) -> $"{acc}{separator}{x}")
   }
 
 nb.chars(s) = text.split(s, "")
@@ -249,7 +249,7 @@ nb.bounded(
   n,
   origin,
 ) =
-  if bool.or(int.lt?(n, -1000000), int.gt?(n, 1000000)) then
+  if bool.not(int.between?(n, -1000000, 1000000)) then
     NbError(origin, "result outside -1000000..1000000")
   else NbValue(n)
 

@@ -6,10 +6,6 @@ type DiceAction = | Bank | Roll
 
 type DiceOutcome = | Banked Int | Busted
 
-dice.real(n) = match text.to-real(text.from-int(n)) {
-                 | Some(value) -> value
-                 | None -> 0.0}
-
 dice.valid?(
   pot,
   rolls,
@@ -22,7 +18,7 @@ dice.optimal-value(
   pot,
   rolls,
 ) =
-  if int.lte?(rolls, 0) then dice.real(pot)
+  if int.lte?(rolls, 0) then real.from-int(pot)
   else {
          let rolling =
            real.div(
@@ -37,7 +33,7 @@ dice.optimal-value(
              ),
              6.0,
            )
-         if real.gt?(rolling, dice.real(pot)) then rolling else dice.real(pot)
+         if real.gt?(rolling, real.from-int(pot)) then rolling else real.from-int(pot)
   }
 
 dice.roll-value(
@@ -62,7 +58,7 @@ dice.choose(
   else match policy {
          | Cautious -> if int.gte?(pot, 12) then Bank else Roll
          | Bold -> if int.gte?(pot, 24) then Bank else Roll
-         | Optimal -> if real.gt?(dice.roll-value(pot, rolls), dice.real(pot)) then Roll else Bank
+         | Optimal -> if real.gt?(dice.roll-value(pot, rolls), real.from-int(pot)) then Roll else Bank
   }
 
 dice.play(
@@ -119,7 +115,7 @@ dice.expected(
     ) ->
       match entry {
         | MkPair(Banked(points), probability) ->
-          real.add(total, real.mul(dice.real(points), probability))
+          real.add(total, real.mul(real.from-int(points), probability))
         | MkPair(Busted, _) -> total
       },
   )

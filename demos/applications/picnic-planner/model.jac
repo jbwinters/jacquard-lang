@@ -9,11 +9,7 @@ type PicnicVenue = | Park | Pavilion | Indoors
 
 type PicnicForecast = | DryForecast | WetForecast
 
-picnic.real(n) = match text.to-real(text.from-int(n)) {
-                   | Some(value) -> value
-                   | None -> 0.0}
-
-picnic.rate(percent) = real.div(picnic.real(percent), 100.0)
+picnic.rate(percent) = real.div(real.from-int(percent), 100.0)
 
 picnic.valid?(
   rain,
@@ -200,7 +196,7 @@ picnic.buy?(
   cost,
 ) =
   -- Numerical ties within one billionth of a point prefer no purchase.
-  real.gt?(picnic.information-value(rain, accuracy), real.add(picnic.real(cost), 1e-09))
+  real.gt?(picnic.information-value(rain, accuracy), real.add(real.from-int(cost), 1e-09))
 
 picnic.venue-name(
   venue,
