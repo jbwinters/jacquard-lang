@@ -114,20 +114,21 @@ The applications were imported byte-for-byte from their journals (the import
 commit pins that snapshot) and have since been migrated to the language and
 library features their findings asked for. Every migration below leaves each
 `EXAMPLE.txt` and `CUSTOM-EXAMPLE.txt` byte-identical, keeps every suite
-passing with the same checks, and keeps interpreter and native output equal;
-the one behavior change is marked.
+passing with the same checks (plus two display rounding pins), and keeps
+interpreter and native output equal. The one behavior change is marked; the
+notebook's end-of-input test now asserts that a blank line reprompts.
 
 | workaround as delivered | now | where |
 |---|---|---|
-| split `$"..."` reports joined with `text.concat` (native v1's eight-argument call cap) | one interpolation per line | rota `report.jac` |
-| nested `text.concat` chains | interpolation | notebook `commands.jac` |
+| split `$"..."` reports joined with `text.concat` (native v1's eight-argument call cap) | one interpolation per message | rota `report.jac` |
+| nested `text.concat` chains | interpolation | notebook `commands.jac`, `syntax.jac`, `model-tests.jac` |
 | hand-written decimal parser with a digit table (native v1 lacked `text.to-int`) | `text.to-int` of the trimmed line; the six-digit input bound stays | rota `report.jac` |
 | digit and letter tables (`nb.digits`, `nb.letters`) | `text.ascii-digit?`, `text.ascii-digit-value`, `text.ascii-letter?` | notebook `syntax.jac` |
 | `text.eq?` chains over characters and command words | Text patterns in `match` | notebook `syntax.jac`, `commands.jac` |
 | recursive `rota.every`/`rota.any`, `nb.every`/`nb.any` | `list.all?`, `list.any?` | rota, notebook |
-| `bool.and(int.gte?(x, lo), int.lte?(x, hi))` ranges | `int.between?`, `real.between?` | dice, picnic, rota |
+| `bool.and(int.gte?(x, lo), int.lte?(x, hi))` ranges | `int.between?`, `real.between?` | dice, picnic, rota (including the 1..8 staff count) |
 | nested `bool.and` conjunctions | `bool.all([...])` | picnic `model.jac`; rota input validation and solution check |
-| 26 hand-written field selectors (`rota.staff-id`, `nb.cells`, ...) | generated accessors (`rota-staff.id`, `nb-snapshot.cells`, ...) | rota, notebook |
+| 29 hand-written field selectors (`rota.staff-id`, `nb.cells`, ...) | generated accessors (`rota-staff.id`, `nb-snapshot.cells`, `nb-response.output`, ...) | rota, notebook |
 | rebuilding a whole record to change one or two fields | generated setters (`rota-staff.with-available`, `nb-snapshot.with-hits`, `with-cache`, `with-computed`) | rota `fixtures.jac`, notebook `model.jac` |
 | an empty line ended the notebook, because `read-line` answers `""` at end of input | `next-line()`: a blank line now reprompts and only end of input ends the session (**UX change**, prints `bye (end of input)`) | notebook `application.jac` |
 | programs assembled by concatenating files | local projects (`project.jqd`) | all |

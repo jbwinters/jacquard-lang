@@ -36,11 +36,9 @@ rota.forced-conflicts(
                         bool.not(rota.rested?(left, right, rota-problem.rest(problem))),
                       ) then
                      {
-                       let pair =
-                         $"  {rota-staff.name(a)} is the only candidate for {rota-shift.label(left)} and {rota-shift.label(right)}."
                        let reason =
-                         $" Those intervals do not leave the required {text.from-int(rota-problem.rest(problem))} hours of rest."
-                       list.append(found, [text.concat(pair, reason)])}
+                         $"  {rota-staff.name(a)} is the only candidate for {rota-shift.label(left)} and {rota-shift.label(right)}. Those intervals do not leave the required {text.from-int(rota-problem.rest(problem))} hours of rest."
+                       list.append(found, [reason])}
                    else found
                  | _ -> found
           },
@@ -153,13 +151,8 @@ rota.show(
   budget,
 ) =
   {
-    let size =
-      $"Staff {text.from-int(list.length(rota-problem.staff(problem)))}, shifts {text.from-int(list.length(rota-problem.shifts(problem)))}"
     println(
-      text.concat(
-        size,
-        $", minimum rest {text.from-int(rota-problem.rest(problem))}h, node budget {text.from-int(budget)}",
-      ),
+      $"Staff {text.from-int(list.length(rota-problem.staff(problem)))}, shifts {text.from-int(list.length(rota-problem.shifts(problem)))}, minimum rest {text.from-int(rota-problem.rest(problem))}h, node budget {text.from-int(budget)}",
     )
     match rota.solve(problem, budget) {
       | Err(errors) ->

@@ -166,9 +166,9 @@ nb.interaction-tests =
               ) ->
                 {
                   let response = nb.execute(nb.empty(), line)
-                  check.true(text.contains?(nb.response-output(response), "rejected:"), line)
+                  check.true(text.contains?(nb-response.output(response), "rejected:"), line)
                   check.eq(
-                    nb.book-text(nb.response-book(response)),
+                    nb.book-text(nb-response.book(response)),
                     nb.book-text(nb.empty()),
                     text.eq,
                     text.show,

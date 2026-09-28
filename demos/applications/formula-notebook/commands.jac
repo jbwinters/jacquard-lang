@@ -12,15 +12,6 @@ type NbCommand =
 
 type NbResponse = | NbResponse(book: NbBook, output: Text, stop: Bool)
 
-nb.response-book(response) = match response {
-                               | NbResponse(book: book) -> book}
-
-nb.response-output(response) = match response {
-                                 | NbResponse(output: output) -> output}
-
-nb.response-stop?(response) = match response {
-                                | NbResponse(stop: stop) -> stop}
-
 nb.whitespace?(c) = nb.has([" ", "\t", "\r", "\n"], c)
 
 nb.assignment(

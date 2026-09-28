@@ -541,7 +541,8 @@ the current source inventory to `1101 / 72 / 35`.
 The maintained applications now use those features instead of their
 workarounds (APP.12). The rota report and parser use single interpolations and
 `text.to-int`, the notebook uses the ASCII classifiers, Text patterns and
-interpolation, all four use the list predicates and range checks, and both
+interpolation. The rota and the notebook use the list predicates, the dice,
+picnic and rota models use the range checks, and both
 larger models read and update records through generated accessors and
 setters. Every `EXAMPLE.txt` and `CUSTOM-EXAMPLE.txt` is unchanged, the
 suites keep their checks, and `test/cli/applications.t` still confirms

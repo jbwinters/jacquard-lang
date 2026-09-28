@@ -18,7 +18,7 @@ nb.snapshot-text(
       list.map(
         nb-snapshot.reverse(snapshot),
         fn (edge) -> match edge {
-                       | NbEdge(a, b) -> text.concat(text.concat(a, ">"), b)},
+                       | NbEdge(a, b) -> $"{a}>{b}"},
       )
     let cache =
       list.map(
@@ -27,7 +27,7 @@ nb.snapshot-text(
           entry,
         ) ->
           match entry {
-            | NbEntry(name, value) -> text.concat(text.concat(name, "="), nb.value-text(value))
+            | NbEntry(name, value) -> $"{name}={nb.value-text(value)}"
           },
       )
     nb.join(
@@ -53,7 +53,7 @@ nb.set(book, name, source) = nb-outcome.book(nb.commit(book, NbSet(name, source)
 nb.run-lines(
   lines,
 ) =
-  list.fold(lines, nb.empty(), fn (book, line) -> nb.response-book(nb.execute(book, line)))
+  list.fold(lines, nb.empty(), fn (book, line) -> nb-response.book(nb.execute(book, line)))
 
 nb.check-value(
   book,
@@ -117,7 +117,7 @@ nb.graph-tests =
             nb.check-value(defined, "total", "ERROR [part]: division by zero")
             let repaired = nb.set(defined, "part", "source / 2")
             nb.check-value(repaired, "total", "6")
-            let removed = nb.response-book(nb.execute(repaired, "unset source"))
+            let removed = nb-response.book(nb.execute(repaired, "unset source"))
             nb.check-value(removed, "total", "ERROR [source]: undefined cell")
             nb.check-reference(removed)
             let restored = nb.set(removed, "source", "20")
@@ -147,9 +147,9 @@ nb.graph-tests =
                 {
                   let (line, expected) = example
                   let response = nb.execute(book, line)
-                  check.true(text.contains?(nb.response-output(response), expected), line)
+                  check.true(text.contains?(nb-response.output(response), expected), line)
                   check.eq(
-                    nb.book-text(nb.response-book(response)),
+                    nb.book-text(nb-response.book(response)),
                     nb.book-text(book),
                     text.eq,
                     text.show,
@@ -160,11 +160,11 @@ nb.graph-tests =
             let forward = nb.set(nb.empty(), "a", "b")
             let cycle = nb.execute(forward, "set b = a")
             check.true(
-              text.contains?(nb.response-output(cycle), "b -> a -> b"),
+              text.contains?(nb-response.output(cycle), "b -> a -> b"),
               "forward-reference cycle",
             )
             check.eq(
-              nb.book-text(nb.response-book(cycle)),
+              nb.book-text(nb-response.book(cycle)),
               nb.book-text(forward),
               text.eq,
               text.show,
@@ -261,14 +261,14 @@ nb.graph-tests =
             check.eq(list.length(nb-snapshot.cells(nb-book.current(book))), 40, int.eq, int.show, "forty cells")
             let rejected = nb.execute(book, "set overflow = 1")
             check.eq(
-              nb.book-text(nb.response-book(rejected)),
+              nb.book-text(nb-response.book(rejected)),
               nb.book-text(book),
               text.eq,
               text.show,
               "capacity failure atomic",
             )
             check.true(
-              text.contains?(nb.response-output(rejected), "40 defined cells"),
+              text.contains?(nb-response.output(rejected), "40 defined cells"),
               "capacity explained",
             )
             nb.check-value(nb.set(book, "cell0", "100"), "cell0", "100")
@@ -321,7 +321,7 @@ nb.history-tests =
                 {
                   let response = nb.execute(book, line)
                   check.eq(
-                    nb.book-text(nb.response-book(response)),
+                    nb.book-text(nb-response.book(response)),
                     nb.book-text(book),
                     text.eq,
                     text.show,
@@ -331,7 +331,7 @@ nb.history-tests =
             )
             let preview = nb.execute(book, "whatif a = 7")
             check.true(
-              text.contains?(nb.response-output(preview), "b: 6 -> 21"),
+              text.contains?(nb-response.output(preview), "b: 6 -> 21"),
               "preview computes downstream",
             )
             nb.check-value(book, "b", "6")
@@ -445,7 +445,7 @@ nb.generated-tests =
                   step,
                 ) ->
                   {
-                    let next = nb.response-book(nb.execute(book, nb.generated-step(seed, step)))
+                    let next = nb-response.book(nb.execute(book, nb.generated-step(seed, step)))
                     nb.check-reference(next)
                     next
                   },

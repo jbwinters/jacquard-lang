@@ -286,7 +286,7 @@ nb.value-text(
   match value {
     | NbValue(n) -> text.from-int(n)
     | NbError(origin, reason) ->
-      text.concat(text.concat(text.concat("ERROR [", origin), "]: "), reason)
+      $"ERROR [{origin}]: {reason}"
   }
 
 nb.diagnostic-text(
@@ -294,5 +294,5 @@ nb.diagnostic-text(
 ) =
   match diagnostic {
     | NbDiagnostic(column, message) ->
-      text.concat(text.concat(text.concat("column ", text.from-int(column)), ": "), message)
+      $"column {text.from-int(column)}: {message}"
   }

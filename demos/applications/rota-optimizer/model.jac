@@ -165,7 +165,7 @@ rota.valid-input(
     let issues =
       [
         (
-          bool.and(int.gt?(list.length(people), 0), int.lte?(list.length(people), 8)),
+          int.between?(list.length(people), 1, 8),
           "Provide 1..8 staff.",
         ),
         (int.lte?(list.length(shifts), 14), "Provide at most 14 shifts."),
