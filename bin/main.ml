@@ -3112,6 +3112,7 @@ let effect_names session hashes =
 let project_check_cmd project prelude strict_grants =
   with_loaded_project project (fun loaded ->
       let manifest = loaded.Project_frontend.manifest in
+      Option.iter print_diagnostic (Project_frontend.tracked_state_warning loaded);
       Printf.printf "%s: project-v1 manifest valid (%d units, %d exports, %d deps, %d entries)\n%!"
         loaded.manifest_file
         (List.length manifest.Project_manifest.units)
@@ -3218,14 +3219,25 @@ let project_test_source project prelude entry_name allows seed samples exhaustiv
           let default_cache_dir =
             Filename.concat (Filename.concat loaded.dir ".jacquard") "test-cache"
           in
+          (* Warp creates only the cache directory itself, so its .jacquard/ parent must exist *)
+          (if (not no_cache) && cache_dir = None then
+             try Unix.mkdir (Filename.dirname default_cache_dir) 0o755
+             with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
           let run_entry (entry : Project_manifest.entry) =
             if entry_name = None then Printf.printf "entry %s\n%!" entry.ename;
             match open_project_library ~on_lint:print_diagnostic ~prelude loaded with
             | Error ds -> print_diags ds
             | Ok session -> (
+                let cache_ok =
+                  match cache_dir with
+                  | Some dir when not no_cache ->
+                      Result.map ignore (Project_bundle.check_output session ~what:"test cache" dir)
+                  | _ -> Ok ()
+                in
                 match
-                  Project_frontend.check_entry ~on_lint:print_diagnostic
-                    ~on_warning:print_diagnostic session entry
+                  Result.bind cache_ok (fun () ->
+                      Project_frontend.check_entry ~on_lint:print_diagnostic
+                        ~on_warning:print_diagnostic session entry)
                 with
                 | Error ds -> print_diags ds
                 | Ok authority -> (
@@ -3375,78 +3387,86 @@ let project_build_cmd project prelude entry_name out =
           match open_project_library ~on_lint:print_diagnostic ~prelude loaded with
           | Error ds -> print_diags ds
           | Ok session -> (
-              let store = Project_frontend.store session
-              and checker = Project_frontend.checker session in
-              let expressions = ref [] in
-              let walked =
-                Result.bind (Project_frontend.entry_tops ~on_lint:print_diagnostic session entry)
-                  (fun tops ->
-                    Project_frontend.walk_entry session tops ~on_resolved:(fun top _ ->
-                        Result.map
-                          (fun _ ->
-                            match top with
-                            | Kernel.Expr e -> expressions := e :: !expressions
-                            | Kernel.Decl _ -> ())
-                          (Check.check_top checker top)))
-              in
-              match walked with
+              match Project_bundle.check_output session ~what:"native output" out with
               | Error ds -> print_diags ds
-              | Ok () ->
-                  let builds = Filename.concat (Filename.concat loaded.dir ".jacquard") "build" in
-                  let final = Filename.concat builds entry.ename in
-                  let fresh =
-                    Filename.concat builds
-                      (Printf.sprintf ".%s.%d.tmp" entry.ename (Unix.getpid ()))
+              | Ok _ -> (
+                  let store = Project_frontend.store session
+                  and checker = Project_frontend.checker session in
+                  let expressions = ref [] in
+                  let walked =
+                    Result.bind
+                      (Project_frontend.entry_tops ~on_lint:print_diagnostic session entry)
+                      (fun tops ->
+                        Project_frontend.walk_entry session tops ~on_resolved:(fun top _ ->
+                            Result.map
+                              (fun _ ->
+                                match top with
+                                | Kernel.Expr e -> expressions := e :: !expressions
+                                | Kernel.Decl _ -> ())
+                              (Check.check_top checker top)))
                   in
-                  let rec mkdir_p dir =
-                    if not (Sys.file_exists dir) then begin
-                      mkdir_p (Filename.dirname dir);
-                      try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
-                    end
-                  in
-                  mkdir_p fresh;
-                  let status =
-                    native_build ~store ~prelude ~cache_root:fresh ~out (List.rev !expressions)
-                  in
-                  (if status = ok then begin
-                     (* the recipe, for diagnosis only (semantic reproducibility is what is promised):
+                  match walked with
+                  | Error ds -> print_diags ds
+                  | Ok () ->
+                      let builds =
+                        Filename.concat (Filename.concat loaded.dir ".jacquard") "build"
+                      in
+                      let final = Filename.concat builds entry.ename in
+                      let fresh =
+                        Filename.concat builds
+                          (Printf.sprintf ".%s.%d.tmp" entry.ename (Unix.getpid ()))
+                      in
+                      let rec mkdir_p dir =
+                        if not (Sys.file_exists dir) then begin
+                          mkdir_p (Filename.dirname dir);
+                          try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+                        end
+                      in
+                      mkdir_p fresh;
+                      let status =
+                        native_build ~store ~prelude ~cache_root:fresh ~out (List.rev !expressions)
+                      in
+                      (if status = ok then begin
+                         (* the recipe, for diagnosis only (semantic reproducibility is what is promised):
                         Core, the emitter's cache tag (emitter version, runtime header, toolchain,
                         flags), the runtime sources' digest, the compiler, and the target *)
-                     let emitter =
-                       Array.to_list (Sys.readdir fresh)
-                       |> List.filter (fun d -> Sys.is_directory (Filename.concat fresh d))
-                       |> String.concat " "
-                     in
-                     let runtime_dir =
-                       Jacquard_native.Build.runtime_dir_of ~prelude_dir:(prelude_dir_of prelude)
-                     in
-                     let runtime =
-                       Array.to_list (Sys.readdir runtime_dir)
-                       |> List.filter (fun f ->
-                           Filename.check_suffix f ".c" || Filename.check_suffix f ".h")
-                       |> List.sort compare
-                       |> List.map (fun f -> f ^ "\000" ^ read_file (Filename.concat runtime_dir f))
-                       |> String.concat "\000" |> Hash.of_string |> Hash.to_hex
-                     in
-                     let target =
-                       let ic = Unix.open_process_in "uname -sm 2>/dev/null" in
-                       let line = try input_line ic with End_of_file -> "" in
-                       ignore (Unix.close_process_in ic);
-                       line
-                     in
-                     Out_channel.with_open_bin (Filename.concat fresh "recipe.jqd") (fun oc ->
-                         Printf.fprintf oc
-                           "(build-recipe (entry %s) (core %S) (emitter %S) (runtime #%s) (cc %S) \
-                            (cflags %S) (target %S))\n"
-                           entry.ename Version.version emitter runtime
-                           (Option.value (Sys.getenv_opt "CC") ~default:"cc")
-                           (Option.value (Sys.getenv_opt "JACQUARD_NATIVE_CFLAGS") ~default:"")
-                           target);
-                     (try rm_rf final with Sys_error _ -> ());
-                     Unix.rename fresh final
-                   end
-                   else try rm_rf fresh with Sys_error _ -> ());
-                  status)))
+                         let emitter =
+                           Array.to_list (Sys.readdir fresh)
+                           |> List.filter (fun d -> Sys.is_directory (Filename.concat fresh d))
+                           |> String.concat " "
+                         in
+                         let runtime_dir =
+                           Jacquard_native.Build.runtime_dir_of
+                             ~prelude_dir:(prelude_dir_of prelude)
+                         in
+                         let runtime =
+                           Array.to_list (Sys.readdir runtime_dir)
+                           |> List.filter (fun f ->
+                               Filename.check_suffix f ".c" || Filename.check_suffix f ".h")
+                           |> List.sort compare
+                           |> List.map (fun f ->
+                               f ^ "\000" ^ read_file (Filename.concat runtime_dir f))
+                           |> String.concat "\000" |> Hash.of_string |> Hash.to_hex
+                         in
+                         let target =
+                           let ic = Unix.open_process_in "uname -sm 2>/dev/null" in
+                           let line = try input_line ic with End_of_file -> "" in
+                           ignore (Unix.close_process_in ic);
+                           line
+                         in
+                         Out_channel.with_open_bin (Filename.concat fresh "recipe.jqd") (fun oc ->
+                             Printf.fprintf oc
+                               "(build-recipe (entry %s) (core %S) (emitter %S) (runtime #%s) (cc \
+                                %S) (cflags %S) (target %S))\n"
+                               entry.ename Version.version emitter runtime
+                               (Option.value (Sys.getenv_opt "CC") ~default:"cc")
+                               (Option.value (Sys.getenv_opt "JACQUARD_NATIVE_CFLAGS") ~default:"")
+                               target);
+                         (try rm_rf final with Sys_error _ -> ());
+                         Unix.rename fresh final
+                       end
+                       else try rm_rf fresh with Sys_error _ -> ());
+                      status))))
 
 (* project hash: the identity of every binding the library (and, with ENTRY, that entry)
    introduces, one "KIND NAME HASH" line each, sorted *)

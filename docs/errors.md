@@ -573,7 +573,7 @@ codes with `jacquard project pin|interface`, and the bundle codes with
 | E1722 | a unit resolves, after symlinks, outside the project directory | `(units "../outside/far.jac")` |
 | E1723 | a unit is missing or not a regular file | a directory named `missing.jac` |
 | E1724 | two units in one composition differ only by letter case | `"src/types.jac"` and `"src/Types.jac"` |
-| E1725 | a bundle output overlaps an input unit, the manifest, or a dependency directory, or already exists | `-o ../liba/x.bundle` |
+| E1725 | an output (a bundle, a native `project build -o`, or a `project test --cache-dir`) overlaps an input unit, the manifest, or a dependency directory; a bundle output that already exists | `project build demo -o lib.jac` |
 | E1726 | a bundle object does not hash to its file name | an edited `objects/*.jqd` |
 | E1727 | a recorded interface export is not owned by its recorded declaration | an edited `(owner #...)` |
 | E1728 | an object or root refers to an identity that is neither in the bundle nor in the prelude | a deleted object |
@@ -585,6 +585,8 @@ codes with `jacquard project pin|interface`, and the bundle codes with
 | E1734 | two unit entries in one composition resolve to the same file | `"src/types.jac"` and `"./src/types.jac"` |
 | E1735 | no `project.jqd` was found, or it cannot be read | `jacquard project check` outside any project |
 | W1700 | declared grants differ from checked authority (a warning unless `--strict-grants`) | a run entry printing without `(grants console)` |
+| W1701 | a file under the project's `.jacquard/` (caches, builds, pin records) is tracked by git | `git add -f .jacquard` |
+| W1702 | beside a checker error, the definition's signature is in another unit, so the report names both files | a signature in `sig.jac`, its definition in `def.jac` |
 
 ## Appendix: the W5.3 audit (ten message rewrites)
 
