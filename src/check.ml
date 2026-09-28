@@ -2072,13 +2072,15 @@ let rec check_matches ctx : Diag.t list =
     (fun { scrutinee_ty; arms; site_meta } ->
       let matrix = List.map (fun (c : Kernel.clause) -> [ c.Kernel.cpat ]) arms in
       (match useful ctx [ scrutinee_ty ] matrix with
-      | Some [ w ] when Option.is_some (field_update_hint ctx ~site_meta scrutinee_ty arms) ->
-          let advice, next_step = Option.get (field_update_hint ctx ~site_meta scrutinee_ty arms) in
-          err ~meta:site_meta ~next_step ~code:"E0813"
-            "this match is not exhaustive: it misses %s; %s" (show_witness w) advice
-      | Some [ w ] ->
-          err ~meta:site_meta ~next_step:"Add a clause matching the witness or a wildcard default."
-            ~code:"E0813" "this match is not exhaustive: it misses %s" (show_witness w)
+      | Some [ w ] -> (
+          match field_update_hint ctx ~site_meta scrutinee_ty arms with
+          | Some (advice, next_step) ->
+              err ~meta:site_meta ~next_step ~code:"E0813"
+                "this match is not exhaustive: it misses %s; %s" (show_witness w) advice
+          | None ->
+              err ~meta:site_meta
+                ~next_step:"Add a clause matching the witness or a wildcard default." ~code:"E0813"
+                "this match is not exhaustive: it misses %s" (show_witness w))
       | Some _ ->
           err ~meta:site_meta ~next_step:"Add a wildcard default clause." ~code:"E0813"
             "this match is not exhaustive"

@@ -56,9 +56,9 @@ let diagnostic_spec = function
          quoted payload." )
   | "E1238" ->
       ( Diag.Surface,
-        "A named call argument cannot be quoted.",
-        "Use positional arguments inside `quote`, or move the named call outside the quoted \
-         payload." )
+        "A named call argument or `with` field update cannot be quoted.",
+        "Use positional arguments inside `quote`, or move the named call or field update outside \
+         the quoted payload." )
   | "E1239" ->
       ( Diag.Surface,
         "A constructor declares the same field label twice.",

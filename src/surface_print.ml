@@ -46,11 +46,82 @@ let pp_comments fmt comments =
 
 let pp_leading context meta fmt = if context.trivia then pp_comments fmt (leading_comments meta)
 
+(* A trailing line comment runs to the end of its physical line, so nothing may follow it there.
+   [pp_trailing] emits such a comment without a break because most owners end a line anyway; an
+   owner that continues on the same line (a separator, keyword, or closing delimiter) must first ask
+   [ends_in_line_comment] and break when it answers yes. The probe renders the value once more with
+   a zero-width marker after each trailing comment and reports whether the rendering ends with that
+   marker, so it sees comments owned by any nested node without a per-form case analysis. Probes do
+   not nest: inside a probe every nested site keeps its one-line spelling, which leaves the final
+   token of the probed value unchanged. *)
+let line_comment_marker = "\000"
+let probing = Domain.DLS.new_key (fun () -> false)
+
 let pp_trailing context meta fmt =
   if context.trivia then
     List.iter
-      (fun comment -> Format.fprintf fmt " %s" comment)
+      (fun comment ->
+        Format.fprintf fmt " %s" comment;
+        if Domain.DLS.get probing then Format.pp_print_as fmt 0 line_comment_marker)
       (Meta.comment_texts Meta.key_trivia_trailing meta)
+
+let ends_in_line_comment context pp value =
+  context.trivia
+  && (not (Domain.DLS.get probing))
+  &&
+  let buffer = Buffer.create 64 in
+  let fmt = Format.formatter_of_buffer buffer in
+  Format.pp_set_margin fmt 1_000_000;
+  Domain.DLS.set probing true;
+  Fun.protect
+    ~finally:(fun () -> Domain.DLS.set probing false)
+    (fun () ->
+      pp fmt value;
+      Format.pp_print_flush fmt ());
+  String.ends_with ~suffix:line_comment_marker (Buffer.contents buffer)
+
+(* [pp_following_keyword] prints [keyword] after a value on the same line, or at the start of the
+   next line when the value ends in a line comment. [pp_following_break] is the same for a
+   position that otherwise takes an ordinary break, and [pp_closing] for a closing delimiter. *)
+let pp_following_keyword fmt commented keyword =
+  if commented then Format.pp_force_newline fmt () else Format.pp_print_char fmt ' ';
+  Format.pp_print_string fmt keyword
+
+let pp_following_break fmt commented text =
+  if commented then Format.pp_force_newline fmt () else Format.pp_print_space fmt ();
+  Format.pp_print_string fmt text
+
+let pp_closing fmt commented delimiter =
+  if commented then Format.pp_force_newline fmt ();
+  Format.pp_print_string fmt delimiter
+
+(* Space-separated items; an item after one that ends in a line comment starts a fresh line. *)
+let pp_spaced context pp fmt items =
+  ignore
+    (List.fold_left
+       (fun previous item ->
+         (match previous with
+         | None -> ()
+         | Some previous ->
+             if ends_in_line_comment context pp previous then Format.pp_force_newline fmt ()
+             else Format.pp_print_space fmt ());
+         pp fmt item;
+         Some item)
+       None items)
+
+(* Closes a [@[<v 2>...] brace group. The comment-free spelling keeps the enclosing box's break
+   before [}], so only a final line comment forces the brace onto its own line. *)
+let pp_close_brace fmt commented =
+  Format.pp_close_box fmt ();
+  if commented then Format.pp_force_newline fmt () else Format.pp_print_cut fmt ();
+  Format.pp_print_char fmt '}'
+
+(* Whether the last of [items], followed by the owner's inner comments, ends in a line comment.
+   Inner comments always end with their own break, so only the last item can leave one open. *)
+let ends_in_last_line_comment context pp meta items =
+  context.trivia
+  && Meta.comment_texts Meta.key_trivia_inner meta = []
+  && match List.rev items with [] -> false | last :: _ -> ends_in_line_comment context pp last
 
 let pp_line_trailing context meta fmt =
   if context.trivia then
@@ -120,12 +191,13 @@ let pp_sep sep pp fmt items =
    follow the final comma, this helper owns their two breaks so the close still returns to the
    delimiter's column without an empty line. Singleton tuples opt into a comma in both layouts
    because the comma carries their arity. *)
-let pp_comma_list ?(singleton = false) ?(leading_space = false) ?(break_padding = "")
-    ?(inner_metas = []) context pp fmt items =
+let pp_comma_list ?(singleton = false) ?(trailing_comma = true) ?(leading_space = false)
+    ?(break_padding = "") ?(inner_metas = []) context pp fmt items =
   let inner_comments =
     if context.trivia then List.concat_map (Meta.comment_texts Meta.key_trivia_inner) inner_metas
     else []
   in
+  let last_commented = ref false in
   if items <> [] then begin
     Format.pp_print_custom_break fmt
       ~fits:("", (if leading_space then 1 else 0), "")
@@ -134,18 +206,38 @@ let pp_comma_list ?(singleton = false) ?(leading_space = false) ?(break_padding 
     List.iteri
       (fun index item ->
         pp fmt item;
-        if index <> last then
-          Format.pp_print_custom_break fmt ~fits:(",", 1, "") ~breaks:(",", 0, break_padding))
+        let commented = ends_in_line_comment context pp item in
+        if index = last then last_commented := commented
+        else if commented then begin
+          (* The comment owns the rest of its line, so the separator opens the next line. *)
+          Format.pp_print_break fmt 1000 0;
+          Format.pp_print_string fmt break_padding;
+          Format.pp_print_string fmt ", "
+        end
+        else Format.pp_print_custom_break fmt ~fits:(",", 1, "") ~breaks:(",", 0, break_padding))
       items
   end;
+  (* After a commented final item the optional trailing comma is omitted; a singleton keeps its
+     arity comma on the following line. *)
+  let close_commented_last () =
+    Format.pp_print_break fmt 1000 0;
+    Format.pp_print_string fmt break_padding;
+    if singleton then Format.pp_print_char fmt ','
+  in
   match inner_comments with
   | [] ->
-      if items <> [] then
+      if !last_commented then begin
+        if singleton then close_commented_last ();
+        Format.pp_print_break fmt 1000 (-2);
+        Format.pp_print_string fmt break_padding
+      end
+      else if items <> [] then
         Format.pp_print_custom_break fmt
           ~fits:((if singleton then "," else ""), 0, "")
-          ~breaks:(",", -2, break_padding)
+          ~breaks:((if trailing_comma then "," else ""), -2, break_padding)
   | comments ->
-      if items <> [] then Format.pp_print_char fmt ',';
+      if !last_commented then (if singleton then close_commented_last ())
+      else if items <> [] && trailing_comma then Format.pp_print_char fmt ',';
       List.iter
         (fun comment ->
           Format.pp_print_break fmt 1000 0;
@@ -227,7 +319,10 @@ let rec pp_pat context lookup fmt (pat : Kernel.pat) =
       Format.fprintf fmt "@]"
   | Kernel.PTuple items -> (
       match items with
-      | [] -> Format.pp_print_string fmt "()"
+      | [] ->
+          Format.pp_print_char fmt '(';
+          pp_inner context pat.meta fmt;
+          Format.pp_print_char fmt ')'
       | [ item ] ->
           Format.fprintf fmt "@[<hv 2>(%a"
             (pp_comma_list ~singleton:true ~inner_metas:[ pat.meta ] context (pp_pat context lookup))
@@ -341,19 +436,23 @@ and pp_ty context lookup fmt (ty : Kernel.ty) =
   | Kernel.TRef ref -> pp_gref lookup Surface_name.Type ty.meta fmt ref
   | Kernel.TVar name -> pp_named Surface_name.Tvar fmt name
   | Kernel.TApp (head, args) ->
-      Format.fprintf fmt "@[<hov>%a@ %a@]" (pp_ty_atom context lookup) head
-        (pp_sep "" (pp_ty_atom context lookup))
-        args
+      Format.fprintf fmt "@[<hov>%a@]" (pp_spaced context (pp_ty_atom context lookup)) (head :: args)
   | Kernel.TArrow (params, row, result) ->
       let params_meta = Meta.surface_container "params" ty.meta in
       Format.fprintf fmt "@[<hov 2>";
       pp_leading context params_meta fmt;
+      (* `(T,)` spells a one-element tuple type, so a lone parameter never takes the trailing
+         comma of the vertical layout. *)
       Format.fprintf fmt "(@[<hv 1>%a"
-        (pp_comma_list ~inner_metas:[ params_meta ] context (pp_ty context lookup))
+        (pp_comma_list
+           ~trailing_comma:(List.length params <> 1)
+           ~inner_metas:[ params_meta ] context (pp_ty context lookup))
         params;
       Format.fprintf fmt "@])";
       pp_trailing context params_meta fmt;
-      Format.fprintf fmt " %a" (pp_row context lookup) row;
+      if has_line_trailing context params_meta then Format.pp_force_newline fmt ()
+      else Format.pp_print_char fmt ' ';
+      pp_row context lookup fmt row;
       if not (has_line_trailing context (owned "row-close" row.wmeta)) then Format.fprintf fmt "@ ";
       Format.fprintf fmt "%a@]" (pp_ty context lookup) result
   | Kernel.TTuple items -> (
@@ -411,7 +510,8 @@ and pp_ty context lookup fmt (ty : Kernel.ty) =
 and pp_ty_atom context lookup fmt ty =
   match ty.Kernel.it with
   | Kernel.TApp _ | Kernel.TArrow _ | Kernel.TForall _ ->
-      Format.fprintf fmt "(%a)" (pp_ty context lookup) ty
+      Format.fprintf fmt "(%a" (pp_ty context lookup) ty;
+      pp_closing fmt (ends_in_line_comment context (pp_ty context lookup) ty) ")"
   | _ -> pp_ty context lookup fmt ty
 
 and pp_callable_ty context lookup fmt (ty : Kernel.ty) =
@@ -584,8 +684,8 @@ and field_update_elaboration (expr : Kernel.expr) =
   | _ -> None
 
 and pp_field_update context lookup meta fmt fn value updates =
-  Format.fprintf fmt "@[<hv 2>%a(%a with" (pp_expr_atom context lookup) fn (pp_expr context lookup)
-    value;
+  Format.fprintf fmt "@[<hv 2>%a(%a" (pp_expr_atom context lookup) fn (pp_expr context lookup) value;
+  pp_following_keyword fmt (ends_in_line_comment context (pp_expr context lookup) value) "with";
   pp_comma_list ~leading_space:true ~inner_metas:[ meta ] context (pp_call_argument context lookup)
     fmt updates;
   Format.fprintf fmt ")@]"
@@ -801,7 +901,10 @@ and pp_kernel_expr context lookup fmt (expr : Kernel.expr) =
   | Kernel.Let _ -> pp_block context lookup fmt expr
   | Kernel.Tuple items -> (
       match items with
-      | [] -> Format.pp_print_string fmt "()"
+      | [] ->
+          Format.pp_print_char fmt '(';
+          pp_inner context expr.meta fmt;
+          Format.pp_print_char fmt ')'
       | [ item ] ->
           Format.fprintf fmt "@[<hv 2>(%a"
             (pp_comma_list ~singleton:true ~inner_metas:[ expr.meta ] context
@@ -814,17 +917,21 @@ and pp_kernel_expr context lookup fmt (expr : Kernel.expr) =
             items;
           Format.fprintf fmt ")@]")
   | Kernel.Ann (subject, ty) ->
-      Format.fprintf fmt "@[<hov 2>(%a :@ %a" (pp_expr context lookup) subject
-        (pp_ty context lookup) ty;
+      Format.fprintf fmt "@[<hov 2>(%a" (pp_expr context lookup) subject;
+      pp_following_keyword fmt (ends_in_line_comment context (pp_expr context lookup) subject) ":";
+      Format.fprintf fmt "@ %a" (pp_ty context lookup) ty;
       pp_inner context expr.meta fmt;
-      Format.fprintf fmt ")@]"
+      pp_closing fmt (ends_in_last_line_comment context (pp_ty context lookup) expr.meta [ ty ]) ")";
+      Format.fprintf fmt "@]"
   | Kernel.Match (subject, clauses) -> pp_match context lookup expr.meta fmt subject clauses
   | Kernel.Handle { body; ret; ops } -> pp_handle context lookup expr.meta fmt body ret ops
   | Kernel.Quote payload -> pp_quote context lookup expr.meta fmt payload
   | Kernel.Unquote splice ->
       Format.fprintf fmt "unquote(%a" (pp_expr context lookup) splice;
       pp_inner context expr.meta fmt;
-      Format.pp_print_char fmt ')'
+      pp_closing fmt
+        (ends_in_last_line_comment context (pp_expr context lookup) expr.meta [ splice ])
+        ")"
 
 and if_branches = function
   | [
@@ -836,19 +943,8 @@ and if_branches = function
       Some (yes, no)
   | _ -> None
 
-and expression_has_trailing_comments (expression : Kernel.expr) =
-  let has meta = Meta.comment_texts Meta.key_trivia_trailing meta <> [] in
-  has expression.meta
-  || List.exists
-       (fun kind -> has (Meta.surface_container kind expression.meta))
-       [ "list"; "paren"; "block" ]
-
-and pp_following_keyword context fmt expression keyword =
-  if context.trivia && expression_has_trailing_comments expression then begin
-    Format.pp_force_newline fmt ();
-    Format.pp_print_string fmt keyword
-  end
-  else Format.fprintf fmt "@ %s" keyword
+and expression_ends_in_line_comment context lookup expression =
+  ends_in_line_comment context (pp_expr context lookup) expression
 
 and pp_if context lookup fmt condition yes no =
   let rec pp_else fmt expression =
@@ -859,9 +955,9 @@ and pp_if context lookup fmt condition yes no =
             Format.pp_print_string fmt "else ";
             pp_leading context expression.meta fmt;
             Format.fprintf fmt "@[<hov 2>if %a" (pp_expr context lookup) condition;
-            pp_following_keyword context fmt condition "then";
+            pp_following_break fmt (expression_ends_in_line_comment context lookup condition) "then";
             Format.fprintf fmt "@ %a@]" (pp_expr context lookup) yes;
-            if context.trivia && expression_has_trailing_comments yes then
+            if expression_ends_in_line_comment context lookup yes then
               Format.pp_force_newline fmt ();
             Format.fprintf fmt "@ %a" pp_else no;
             pp_trailing context expression.meta fmt
@@ -869,9 +965,9 @@ and pp_if context lookup fmt condition yes no =
     | _ -> Format.fprintf fmt "else %a" (pp_expr context lookup) expression
   in
   Format.fprintf fmt "@[<hv 0>@[<hov 2>if %a" (pp_expr context lookup) condition;
-  pp_following_keyword context fmt condition "then";
+  pp_following_break fmt (expression_ends_in_line_comment context lookup condition) "then";
   Format.fprintf fmt "@ %a@]" (pp_expr context lookup) yes;
-  if context.trivia && expression_has_trailing_comments yes then Format.pp_force_newline fmt ();
+  if expression_ends_in_line_comment context lookup yes then Format.pp_force_newline fmt ();
   Format.fprintf fmt "@ %a@]" pp_else no
 
 and list_items expr =
@@ -908,20 +1004,19 @@ and pp_pipe context lookup meta fmt left fn args =
     | Some _ | None -> false
   in
   let pp_operator fmt () =
-    if context.trivia && expression_has_trailing_comments left then Format.pp_force_newline fmt ();
-    Format.pp_print_string fmt "|> ";
+    pp_following_break fmt (ends_in_line_comment context (pp_pipe_left context lookup) left) "|> ";
     pp_leading context rhs_meta fmt
   in
   match args with
   | [] when not explicit_call ->
-      Format.fprintf fmt "@[<hov 2>%a@ %a%a" (pp_pipe_left context lookup) left pp_operator ()
+      Format.fprintf fmt "@[<hov 2>%a%a%a" (pp_pipe_left context lookup) left pp_operator ()
         (pp_pipe_value context lookup) fn;
       pp_inner context rhs_meta fmt;
       pp_trailing context rhs_meta fmt;
       pp_inner context meta fmt;
       Format.fprintf fmt "@]"
   | _ ->
-      Format.fprintf fmt "@[<hv 2>%a@ %a%a(%a" (pp_pipe_left context lookup) left pp_operator ()
+      Format.fprintf fmt "@[<hv 2>%a%a%a(%a" (pp_pipe_left context lookup) left pp_operator ()
         (pp_expr_atom context lookup) fn
         (pp_comma_list ~inner_metas:[ rhs_meta; meta ] context (pp_call_argument context lookup))
         args;
@@ -953,6 +1048,8 @@ and pp_grouped context lookup paren_meta fmt expr =
   let expr = { expr with Kernel.meta = Meta.without_surface_container "paren" expr.meta } in
   Format.fprintf fmt "(@[<hov>%a" (pp_expr context lookup) expr;
   pp_inner context paren_meta fmt;
+  if ends_in_last_line_comment context (pp_expr context lookup) paren_meta [ expr ] then
+    Format.pp_force_newline fmt ();
   Format.fprintf fmt "@])";
   pp_trailing context paren_meta fmt
 
@@ -961,7 +1058,12 @@ and pp_singleton_block context lookup block_meta fmt expr =
   let expr = { expr with Kernel.meta = Meta.without_surface_container "block" expr.meta } in
   Format.fprintf fmt "@[<v 2>{@,%a" (pp_expr context lookup) expr;
   pp_inner context block_meta fmt;
-  Format.fprintf fmt "@]@,}";
+  pp_close_brace fmt
+    (ends_in_line_comment context
+       (fun fmt () ->
+         pp_expr context lookup fmt expr;
+         pp_inner context block_meta fmt)
+       ());
   pp_trailing context block_meta fmt
 
 and pp_expr_atom context lookup fmt expr =
@@ -971,14 +1073,18 @@ and pp_expr_atom context lookup fmt expr =
     match (Meta.surface_form expr.meta, expr.it) with
     | Some "if", Kernel.Match (_, clauses) -> Option.is_some (if_branches clauses)
     | _ -> false
-  then Format.fprintf fmt "(%a)" (pp_expr context lookup) expr
+  then pp_parenthesized context lookup fmt expr
   else
     match expr.Kernel.it with
     | Kernel.Lit _ | Kernel.Var _ | Kernel.Ref _ | Kernel.GroupRef _ | Kernel.App _ | Kernel.Match _
     | Kernel.Tuple _ | Kernel.Let _ | Kernel.Handle _ | Kernel.Quote _ | Kernel.Unquote _
     | Kernel.Ann _ ->
         pp_expr context lookup fmt expr
-    | Kernel.Lam _ -> Format.fprintf fmt "(%a)" (pp_expr context lookup) expr
+    | Kernel.Lam _ -> pp_parenthesized context lookup fmt expr
+
+and pp_parenthesized context lookup fmt expr =
+  Format.fprintf fmt "(%a" (pp_expr context lookup) expr;
+  pp_closing fmt (expression_ends_in_line_comment context lookup expr) ")"
 
 and pp_sequence_item context lookup fmt (meta, isrec, binder, value) =
   pp_leading context meta fmt;
@@ -1030,7 +1136,12 @@ and pp_block context lookup fmt expr =
   if lets <> [] then Format.fprintf fmt "@,";
   Format.fprintf fmt "%a" (pp_expr context lookup) result;
   pp_inner context container_meta fmt;
-  Format.fprintf fmt "@]@,}";
+  pp_close_brace fmt
+    (ends_in_line_comment context
+       (fun fmt () ->
+         pp_expr context lookup fmt result;
+         pp_inner context container_meta fmt)
+       ());
   pp_trailing context container_meta fmt
 
 and pp_match context lookup meta fmt subject clauses =
@@ -1038,9 +1149,16 @@ and pp_match context lookup meta fmt subject clauses =
     pp_leading context clause.cmeta fmt;
     match clause.cbody.it with
     | _ when is_block_expr clause.cbody ->
-        Format.fprintf fmt "@[<v 2>| %a -> {@,%a@]@,}" (pp_pat context lookup) clause.cpat
-          (pp_sequence_contents context lookup)
-          clause.cbody;
+        (* The arm's braces are the block's own, so its comments print inside them. *)
+        let block_meta = Meta.surface_container "block" clause.cbody.meta in
+        Format.fprintf fmt "@[<v 2>| %a -> {@," (pp_pat context lookup) clause.cpat;
+        pp_leading context block_meta fmt;
+        pp_sequence_contents context lookup fmt clause.cbody;
+        if context.trivia then
+          List.iter
+            (fun comment -> Format.fprintf fmt "@,%s" comment)
+            (Meta.comment_texts Meta.key_trivia_inner block_meta);
+        Format.fprintf fmt "@]@,}";
         pp_trailing context clause.cmeta fmt
     | _ ->
         Format.fprintf fmt "@[<hov 2>| %a ->@ %a@]" (pp_pat context lookup) clause.cpat
@@ -1050,7 +1168,7 @@ and pp_match context lookup meta fmt subject clauses =
   Format.fprintf fmt "@[<v 2>match %a {@,%a" (pp_expr context lookup) subject (pp_sep "" pp_clause)
     clauses;
   pp_inner context meta fmt;
-  Format.fprintf fmt "@]@,}"
+  pp_close_brace fmt (ends_in_last_line_comment context pp_clause meta clauses)
 
 and pp_arm_body context lookup fmt body =
   if is_block_expr body then pp_block context lookup fmt body else pp_expr context lookup fmt body
@@ -1104,7 +1222,10 @@ and pp_handle context lookup meta fmt body ret ops =
   Format.fprintf fmt "@,%a" pp_ret ret;
   List.iter (fun clause -> Format.fprintf fmt "@,%a" pp_op clause) ops;
   pp_inner context meta fmt;
-  Format.fprintf fmt "@]@,}"
+  let last_clause fmt () =
+    match List.rev ops with [] -> pp_ret fmt ret | last :: _ -> pp_op fmt last
+  in
+  pp_close_brace fmt (ends_in_last_line_comment context last_clause meta [ () ])
 
 and is_atomic expr =
   match expr.Kernel.it with
@@ -1123,7 +1244,10 @@ and pp_quote context lookup meta fmt payload =
   | Some expr ->
       Format.fprintf fmt "@[<hov 2>quote {@ %a" (pp_expr context lookup) expr;
       pp_inner context meta fmt;
-      Format.fprintf fmt "@ }@]"
+      pp_following_break fmt
+        (ends_in_last_line_comment context (pp_expr context lookup) meta [ expr ])
+        "}";
+      Format.fprintf fmt "@]"
   | None ->
       let raw = jqd_block context payload in
       if String.contains raw '\n' then Format.fprintf fmt "quote {@,%s@,}" (indent_lines 2 raw)
@@ -1231,10 +1355,11 @@ let pp_constructor ?(leading = true) context lookup fmt (constructor : Kernel.co
         constructor.fields;
       Format.fprintf fmt ")"
     end
-    else
-      List.iter
-        (fun field -> Format.fprintf fmt "@ %a" (pp_ty_atom context lookup) field.Kernel.fty)
-        constructor.fields;
+    else begin
+      Format.pp_print_space fmt ();
+      pp_spaced context (pp_ty_atom context lookup) fmt
+        (List.map (fun (field : Kernel.field) -> field.fty) constructor.fields)
+    end;
   Format.fprintf fmt "@]";
   pp_trailing context constructor.kmeta fmt
 
@@ -1284,7 +1409,23 @@ let pp_decl context lookup fmt (decl : Kernel.decl) =
       if not (printable_term_group bindings) then raise Bug_unsupported_surface_form;
       Format.fprintf fmt "@[<v>%a@]" (pp_sep "" (pp_binding context lookup)) bindings
   | Kernel.DefType { tname; tvars; cons } ->
-      let vertical = flat_type_decl_length lookup tname tvars cons > Format.pp_get_margin fmt () in
+      (* A horizontal box never breaks, so an own-line comment, or a line comment followed by
+         another constructor, requires the vertical layout. *)
+      let needs_lines =
+        context.trivia
+        && (Meta.comment_texts Meta.key_trivia_inner decl.meta <> []
+           || List.exists (fun constructor -> leading_comments constructor.Kernel.kmeta <> []) cons
+           ||
+           match List.rev cons with
+           | [] -> false
+           | _ :: earlier ->
+               List.exists
+                 (ends_in_line_comment context (pp_constructor ~leading:false context lookup))
+                 earlier)
+      in
+      let vertical =
+        needs_lines || flat_type_decl_length lookup tname tvars cons > Format.pp_get_margin fmt ()
+      in
       Format.fprintf fmt
         (if vertical then "@[<v 2>type %a" else "@[<h>type %a")
         (pp_named Surface_name.Type) tname;
