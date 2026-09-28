@@ -131,7 +131,8 @@ notebook's end-of-input test now asserts that a blank line reprompts.
 | nested `bool.and` conjunctions | `bool.all([...])` | picnic `model.jac`; rota input validation and solution check |
 | 29 hand-written field selectors (`rota.staff-id`, `nb.cells`, ...) | generated accessors (`rota-staff.id`, `nb-snapshot.cells`, `nb-response.output`, ...) | rota, notebook |
 | one-clause `match` projections (`NbEdge(source: s) -> s`) | generated accessors (`nb-edge.source`, `nb-entry.name`) | notebook |
-| rebuilding a whole record to change one or two fields | generated setters (`rota-staff.with-available`, `nb-snapshot.with-hits`, `with-cache`, `with-computed`) | rota `fixtures.jac`, notebook `model.jac` |
+| rebuilding a whole record to change one field | generated setters (`rota-staff.with-available`, `nb-snapshot.with-hits`) | rota `fixtures.jac`, notebook `model.jac` |
+| rebuilding a whole record, or chaining setters, to change several fields | one `with` field update (`NbSnapshot(snapshot with cells: cells, reverse: edges, cache: cache)`) | notebook `model.jac` |
 | an empty line ended the notebook, because `read-line` answers `""` at end of input | `next-line()`: a blank line now reprompts; `quit` or end of input ends the session (**UX change**, prints `bye (end of input)`) | notebook `application.jac` |
 | programs assembled by concatenating files | local projects (`project.jqd`) | all |
 
@@ -155,5 +156,5 @@ Kept on purpose:
 - The rota's preference entries are prelude `Pair`s, which have no generated
   accessors, so their `MkPair(key, _)` matches stay.
 - The independent oracles and the notebook's fresh-evaluator comparison are
-  unchanged, and the record rebuilds that replace three or more fields keep
-  the constructor call.
+  unchanged, and the record rebuilds that replace every field (the notebook's
+  history moves between `NbBook`s) keep the constructor call.
