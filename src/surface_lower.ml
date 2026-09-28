@@ -985,14 +985,24 @@ let field_label_errors ~type_name (constructors : Kernel.conspec list) =
 (** [accessor_marker] is the [surface-generated] provenance of a D36 accessor declaration. *)
 let accessor_marker = "constructor-accessor"
 
-(** [is_generated_accessor top] holds for a declaration generated from a labeled field. Signature
-    listings omit these, as the printer does, so generated boilerplate is never shown. *)
+(** [setter_marker] is the [surface-generated] provenance of an SX.28 setter declaration. *)
+let setter_marker = "constructor-setter"
+
+(** [is_generated_accessor top] holds for a declaration generated from a labeled field, an accessor
+    or a setter. Signature listings omit these, as the printer does, so generated boilerplate is
+    never shown. *)
 let is_generated_accessor = function
-  | Kernel.Decl declaration -> Meta.surface_generated declaration.meta = Some accessor_marker
+  | Kernel.Decl declaration -> (
+      match Meta.surface_generated declaration.meta with
+      | Some marker -> marker = accessor_marker || marker = setter_marker
+      | None -> false)
   | Kernel.Expr _ -> false
 
 (** [accessor_name ~type_name label] is the D36 accessor name [<type-kebab>.<label>]. *)
 let accessor_name ~type_name label = type_name ^ "." ^ label
+
+(** [setter_name ~type_name label] is the SX.28 setter name [<type-kebab>.with-<label>]. *)
+let setter_name ~type_name label = type_name ^ ".with-" ^ label
 
 (** [eligible_labels ~type_name constructors] are the labels of the first constructor that every
     constructor carries, in declaration order, whose accessor name is a valid symbol (an escaped
@@ -1051,6 +1061,61 @@ let generated_accessor ~type_name (constructors : Kernel.conspec list) label =
       meta;
     }
 
+(** [generated_setter ~type_name constructors label] is the ordinary pure definition
+    [<type>.with-<label>(value, <label>: field) = match value { | C(a, _, c) -> C(a, field, c) ...
+     }], one clause per constructor, each rebuilding the constructor it matched with the one field
+    replaced. The second parameter carries the field's label as its call label, so the store derives
+    the [call-abi-v1] companion (positional, named <label>) and a call reads
+    [rota-staff.with-available(person, available: Nil)]. Its identity is its hand-written twin's:
+    binder names and provenance are not part of [HASH_V0]. A type-changing update of a parametric
+    field falls out of the twin's inferred scheme. *)
+let generated_setter ~type_name (constructors : Kernel.conspec list) label =
+  let origin =
+    List.find
+      (fun (field : Kernel.field) -> field.label = Some label)
+      (List.hd constructors).Kernel.fields
+  in
+  let meta = origin.fmeta |> Meta.without_trivia |> Meta.with_surface_generated setter_marker in
+  let node it = Kernel.{ it; meta } in
+  let kept index = Printf.sprintf "kept-%d" index in
+  let clause (constructor : Kernel.conspec) =
+    let arguments =
+      List.mapi
+        (fun index (field : Kernel.field) ->
+          node (if field.label = Some label then Kernel.PWild else Kernel.PVar (kept index)))
+        constructor.fields
+    in
+    let rebuilt =
+      List.mapi
+        (fun index (field : Kernel.field) ->
+          node (Kernel.Var (if field.label = Some label then "field" else kept index)))
+        constructor.fields
+    in
+    let callee =
+      Kernel.{ it = Var constructor.con_name; meta = Meta.with_surface_ref_kind "con" meta }
+    in
+    Kernel.
+      {
+        cpat = node (PCon (Named constructor.con_name, arguments));
+        cbody = node (App (callee, rebuilt));
+        cmeta = meta;
+      }
+  in
+  let value =
+    node
+      (Kernel.Lam
+         ( [
+             node (Kernel.PVar "value");
+             Kernel.{ it = PVar "field"; meta = Meta.with_surface_call_label label meta };
+           ],
+           node (Kernel.Match (node (Kernel.Var "value"), List.map clause constructors)) ))
+  in
+  Kernel.Decl
+    {
+      it = DefTerm [ { bname = setter_name ~type_name label; annot = None; value; bmeta = meta } ];
+      meta;
+    }
+
 (** [generated_accessors ~explicit_terms ~type_name constructors] generates one accessor per
     eligible label, refusing with E1241 an accessor whose name an explicit term of the same file
     already defines. *)
@@ -1071,6 +1136,29 @@ let generated_accessors ~explicit_terms ~type_name (constructors : Kernel.conspe
              name label (surface_spelling type_name) name)
       else Ok (generated_accessor ~type_name constructors label))
     (eligible_labels ~type_name constructors)
+
+(** [generated_setters ~explicit_terms ~type_name constructors] generates one setter per label that
+    earns an accessor (SX.28, DES.4 Phase 1), refusing with E1241 a setter whose name an explicit
+    term of the file or one of the type's own accessors already binds. *)
+let generated_setters ~explicit_terms ~type_name (constructors : Kernel.conspec list) =
+  let labels = eligible_labels ~type_name constructors in
+  let accessors = List.map (accessor_name ~type_name) labels in
+  map_results
+    (fun label ->
+      let name = setter_name ~type_name label in
+      if List.mem name explicit_terms || List.mem name accessors then
+        let origin =
+          List.find
+            (fun (field : Kernel.field) -> field.label = Some label)
+            (List.hd constructors).Kernel.fields
+        in
+        error ~meta:origin.fmeta ~code:"E1241"
+          (Printf.sprintf
+             "the setter `%s` generated for field label `%s` of type `%s` collides with `%s`, \
+              which this file or the type's own field accessors already bind"
+             name label (surface_spelling type_name) name)
+      else Ok (generated_setter ~type_name constructors label))
+    (List.filter (fun label -> Reader.valid_symbol (setter_name ~type_name label)) labels)
 
 let lower_nonterm_top (top : Surface_ast.top) =
   match top.it with
@@ -1155,7 +1243,8 @@ let accessor_names (top : Surface_ast.top) =
       | first :: rest ->
           labels first
           |> List.filter (fun label -> List.for_all (fun c -> List.mem label (labels c)) rest)
-          |> List.map (accessor_name ~type_name)
+          |> List.concat_map (fun label ->
+              [ accessor_name ~type_name label; setter_name ~type_name label ])
           |> List.filter Reader.valid_symbol)
   | _ -> []
 
@@ -1216,7 +1305,8 @@ let lower_tops ?explicit_terms tops =
         | Kernel.Decl { it = DefType { tname; cons; _ }; _ }
           when match source.Surface_ast.it with Surface_ast.TypeDecl _ -> true | _ -> false ->
             let* accessors = generated_accessors ~explicit_terms ~type_name:tname cons in
-            loop (List.rev_append accessors (top :: acc)) [] rest
+            let* setters = generated_setters ~explicit_terms ~type_name:tname cons in
+            loop (List.rev_append setters (List.rev_append accessors (top :: acc))) [] rest
         | _ -> loop (top :: acc) [] rest)
   in
   loop [] [] tops

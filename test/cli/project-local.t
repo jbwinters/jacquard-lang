@@ -40,7 +40,7 @@ concatenation; a Warp test bound by the library is not owned by any entry.
   > S
   $ jacquard project check
   $TESTCASE_ROOT/shop/project.jqd: project-v1 manifest valid (2 units, 0 exports, 0 deps, 3 entries)
-  library: 6 declarations checked
+  library: 8 declarations checked
   entry demo (run): checked; requires nothing
   entry greet (run): checked; requires console
   entry suite (test): checked, 1 tests; requires nothing
@@ -134,6 +134,9 @@ types and exempt:
   --
   $TESTCASE_ROOT/shop/src/price.jac:4:24-33: error[E1706]: A library name does not carry the project's namespace.
     Cause: term `basket.size` ($TESTCASE_ROOT/shop/src/price.jac) does not begin with `shop.`, as namespace `shop` requires
+  --
+  $TESTCASE_ROOT/shop/src/price.jac:4:24-33: error[E1706]: A library name does not carry the project's namespace.
+    Cause: term `basket.with-size` ($TESTCASE_ROOT/shop/src/price.jac) does not begin with `shop.`, as namespace `shop` requires
   $ cp price.bak src/price.jac && echo 'type ShopMaybe = | Some(value: Int) | Nothing' >> src/price.jac
   $ jacquard project check 2>&1 | grep -A1 'E1731'
   $TESTCASE_ROOT/shop/src/price.jac:3:20-36: error[E1731]: Two visible constructors share a name.

@@ -93,6 +93,8 @@ let test_rename_and_reformat_stability () =
       "pair";
       "pair.left";
       "pair.right";
+      "pair.with-left";
+      "pair.with-right";
       "refused";
       "reply";
       "resize";
@@ -180,6 +182,8 @@ let test_change_detection () =
       "pair:identity,arity";
       "pair.left:identity,signature";
       "pair.right:identity,signature";
+      "pair.with-left:identity,signature";
+      "pair.with-right:identity,signature";
       "swap:identity,signature";
     ]
     (Interface.diff ~old:original
@@ -327,7 +331,10 @@ let test_import_validation () =
   let found = mismatches "positional twin" positional in
   has "positional twin" "term resize carries no call-abi-v1 companion" found;
   has "positional twin" "op send carries no call-abi-v1 companion" found;
-  Alcotest.(check int) "only the two companions are missing" 2 (List.length found);
+  (* the generated setters' field-label companions travel the same way *)
+  has "positional twin" "term pair.with-left carries no call-abi-v1 companion" found;
+  has "positional twin" "term pair.with-right carries no call-abi-v1 companion" found;
+  Alcotest.(check int) "only the four companions are missing" 4 (List.length found);
   (* a different label vector for the same hash *)
   let relabeled = session "relabeled" in
   install relabeled (Str.global_replace (Str.regexp_string "scale: ratio") "factor: ratio" library);

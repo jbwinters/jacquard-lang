@@ -250,7 +250,7 @@ also emits E0817; consuming the captured resumption twice emits E0816.
 | E1238 | named call appears anywhere inside quoted surface syntax, including a live unquote | `quote { unquote(choose(left: 1)) }` |
 | E1239 | a constructor declares the same field label twice | `type Pair = \| Pair(left: Int, left: Text)` |
 | E1240 | a field label has different types in different constructors of one type | `type Key = \| Numbered(id: Int) \| Named(id: Text)` |
-| E1241 | a generated field accessor `<type>.<label>` collides with a term or effect operation the same file declares | `type Pair = \| Pair(left: Int)` beside `pair.left(p) = 0` |
+| E1241 | a generated field accessor `<type>.<label>` or setter `<type>.with-<label>` collides with a term or effect operation the same file declares, or a setter with one of the type's own accessors | `type Pair = \| Pair(left: Int)` beside `pair.left(p) = 0` |
 | E1242 | `try` is used inside an expression instead of as a block item | `f(try x)` |
 | E1243 | a block ends in `try` | `{ try parse(x) }` |
 | E1244 | `try` is used on a `let rec` local function binding | `let rec h(y) = try f(y)` |
@@ -554,7 +554,7 @@ codes with `jacquard project pin|interface`, and the bundle codes with
 | E1703 | a manifest budget (64 KiB of bytes, 1 KiB per text, or a collection limit) or the 4 MiB unit budget is exceeded | a 300-unit `(units ...)` |
 | E1704 | the running Core does not satisfy `(requires (core "MAJOR.MINOR"))` | `(requires (core "9.0"))` |
 | E1705 | a name another project keeps private: not exported by a direct dependency, or bound by a project that is not a direct dependency (also inside `eval-code` payloads) | `liba.helper` when `liba` exports only `liba.shout` |
-| E1706 | a library name does not carry the namespace: `NS.` for terms and operations, `NS-` for types and effects; constructors are exempt and generated accessors follow their type | `helper` in a `(namespace shop)` library |
+| E1706 | a library name does not carry the namespace: `NS.` for terms and operations, `NS-` for types and effects; constructors are exempt and generated accessors and setters follow their type | `helper` in a `(namespace shop)` library |
 | E1707 | two projects in one graph have namespaces where one is a boundary-prefix of the other | namespaces `x` and `x-y` |
 | E1708 | a project that others depend on declares no namespace | `(deps (dep (as y) (path "../y") ...))` where `y` has no `(namespace ...)` |
 | E1709 | an explicit identity (`#hash:term`, a `.jqd` `ref`, or one inside an `eval-code` payload) that another project keeps private | the hash of a dependency's private helper |

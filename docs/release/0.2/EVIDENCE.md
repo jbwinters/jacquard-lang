@@ -32,7 +32,7 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1099`
+- Alcotest/QCheck cases: `1101`
 - Cram transcript files: `72`
 - Documentation examples: `35` named examples across `8` documents
 
@@ -528,5 +528,12 @@ Together they bring the source inventory to `1098 / 72 / 35`.
 `with` is now a reserved word, ahead of the nominal field update form that
 DES.4 records as approved (`Ctor(value with label: expr, ...)`). No source used
 it as a bare name. A stray use names the reserved word and the `term:` escape,
-and one `test/test_surface_scaffold.ml` case brings the current source
+and one `test/test_surface_scaffold.ml` case brings the source
 inventory to `1099 / 72 / 35`.
+
+Labeled fields now have generated setters as well as accessors (SX.28, DES.4
+Phase 1). A type's labels generate `<type>.with-<label>` setters, total over sum types
+and type-changing on parametric fields. Each setter hashes as its hand-written
+twin and carries the field label as its call label. E1241 guards setter
+collisions as it guards accessors. Two `test/test_surface_decls.ml` cases bring
+the current source inventory to `1101 / 72 / 35`.
