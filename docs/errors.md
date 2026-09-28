@@ -554,7 +554,7 @@ codes with `jacquard project pin|interface`, and the bundle codes with
 | E1703 | a manifest budget (64 KiB of bytes, 1 KiB per text, or a collection limit) or the 4 MiB unit budget is exceeded | a 300-unit `(units ...)` |
 | E1704 | the running Core does not satisfy `(requires (core "MAJOR.MINOR"))` | `(requires (core "9.0"))` |
 | E1705 | a name another project keeps private: not exported by a direct dependency, or bound by a project that is not a direct dependency (also inside `eval-code` payloads) | `liba.helper` when `liba` exports only `liba.shout` |
-| E1706 | a library name does not carry the namespace: `NS.` for terms and operations, `NS-` for types and effects; constructors are exempt and generated accessors follow their type | `helper` in a `(namespace shop)` library |
+| E1706 | a library name does not carry the namespace: `NS.` for terms and operations, `NS-` for types and effects; constructors are exempt and generated accessors and setters follow their type | `helper` in a `(namespace shop)` library |
 | E1707 | two projects in one graph have namespaces where one is a boundary-prefix of the other | namespaces `x` and `x-y` |
 | E1708 | a project that others depend on declares no namespace | `(deps (dep (as y) (path "../y") ...))` where `y` has no `(namespace ...)` |
 | E1709 | an explicit identity (`#hash:term`, a `.jqd` `ref`, or one inside an `eval-code` payload) that another project keeps private | the hash of a dependency's private helper |

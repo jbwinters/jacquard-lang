@@ -165,6 +165,7 @@ contract checked against the names the source already spells:
 | `term`, `op` | `rota.<rest>` | `rota.solve` |
 | `type`, `effect` | `rota-<rest>` | `RotaStaff` (store `rota-staff`) |
 | generated accessors | follow their type, `<type-kebab>.<label>` | `rota-staff.id` |
+| generated setters | follow their type, `<type-kebab>.with-<label>` | `rota-staff.with-id` |
 | `con` | **exempt**; a constructor is owned by its type | `GeneralSkill` of `RotaSkill` |
 
 The rules:

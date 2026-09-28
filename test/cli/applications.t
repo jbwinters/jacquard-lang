@@ -127,11 +127,11 @@ assembled from:
   $ same dice-coach demo "$A/shared/display.jac" "$A/dice-coach/model.jac" "$A/dice-coach/demo.jac"
   identical: dice-coach demo (33 bindings)
   $ same picnic-planner suite "$A/shared/display.jac" "$A/picnic-planner/model.jac" "$A/picnic-planner/tests.jac"
-  identical: picnic-planner suite (49 bindings)
+  identical: picnic-planner suite (51 bindings)
   $ R="$A/rota-optimizer"; same rota-optimizer suite "$R/model.jac" "$R/fixtures.jac" "$R/report.jac" "$R/tests.jac" "$R/interaction-tests.jac"
-  identical: rota-optimizer suite (114 bindings)
+  identical: rota-optimizer suite (143 bindings)
   $ N="$A/formula-notebook"; same formula-notebook demo "$N/syntax.jac" "$N/model.jac" "$N/commands.jac" "$N/application.jac" "$N/workbook.jac" "$N/demo.jac"
-  identical: formula-notebook demo (170 bindings)
+  identical: formula-notebook demo (196 bindings)
 
 The display helpers the applications do not use stay private to `display`:
 by name, by hash, and through eval:

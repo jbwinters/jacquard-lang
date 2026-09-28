@@ -47,7 +47,7 @@ diagnostic says:
   Cause: argument: expected text, got int (type mismatch)
   $ cp fixtures.good "$P/fixtures.jac"
   $ jacquard project check --project "$P" | tail -5
-  library: 93 declarations checked
+  library: 122 declarations checked
   entry demo (run): checked; requires console
   entry interactive (run): checked; requires console
   entry custom-example (run): checked; requires console
