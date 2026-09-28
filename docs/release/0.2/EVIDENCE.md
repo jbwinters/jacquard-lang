@@ -33,7 +33,7 @@ The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
 - Alcotest/QCheck cases: `1095`
-- Cram transcript files: `70`
+- Cram transcript files: `72`
 - Documentation examples: `35` named examples across `8` documents
 
 The development suite also includes corpus goldens, release-manifest checks,
@@ -474,6 +474,35 @@ concatenation, a non-exported display helper is refused by name, by hash and
 through eval, and no `cat` remains. The source inventory stays
 `1092 / 69 / 34`.
 
+A documentation-only onboarding exercise (`docs/onboarding/exercise.md`) asks
+an unfamiliar developer to set up, run, test, change, diagnose and natively
+build the rota optimizer from the public documents, with facilitator rules
+and a recording sheet. The owner's own read-through is recorded as owner
+review, never as participant evidence. `test/cli/onboarding.t` keeps every
+scripted step and promised outcome true, bringing the source inventory to
+`1092 / 70 / 34`. The participant exercise itself remains to be
+run.
+
+The whole-feature review of local projects then closed these gaps:
+- **Output overlap (E1725).** It now guards native `project build -o` outputs
+  and `project test --cache-dir`, as well as bundles, so no command can
+  overwrite a unit or write into a dependency.
+- **Tracked state (W1701).** Git tracking any file under `.jacquard/` now
+  draws a warning.
+- **Split signatures (W1702).** A definition that fails its signature in
+  another unit is reported with both files named.
+- **Test cache.** `project test` now actually reuses its Warp cache: its
+  `.jacquard/` parent was never created, so every run missed.
+- **Refusal text.** The manifest and grant refusals are pinned by their exact
+  text.
+
+`test/cli/project-guards.t` covers these, and also: `test` and `build` from
+three working directories with an empty `HOME`, an interrupted pin leaving
+the manifest intact, dependency order not affecting pins, and the
+two-library native build. That brings the source inventory to
+`1092 / 71 / 34`. The project-structure design's §11 now records the
+implemented store policy: a fresh temporary store per command.
+
 List-based predicates follow (SX.30, DES.4 §6). `bool.all`, `bool.any`,
 `list.all?`, `list.any?`, `int.between?` and `real.between?` are new ring-0
 prelude objects beside `bool.and` and the integer comparisons, and no existing
@@ -485,4 +514,4 @@ single-field violations, and the demo transcript is unchanged. Because the
 prelude identity changed, the applications' dependency pins were re-pinned.
 Three `test/test_stdlib.ml` cases, `test/cli/predicates.t` (interpreter and
 native parity, and the rota verdicts) and the `stdlib-predicates` doctest bring
-the current source inventory to `1095 / 70 / 35`.
+the current source inventory to `1095 / 72 / 35`.

@@ -59,22 +59,27 @@ unit order; --write replaces the file atomically and is idempotent:
 Unknown fields fail closed, duplicates and budgets are refused:
 
   $ printf '(project-v1 (name "p") (requires (core "0.2")) (license "MIT"))' > project.jqd
-  $ jacquard project check 2>&1 | grep -o 'error\[E17..\]'
-  error[E1701]
+  $ jacquard project check 2>&1 | grep -A1 'error\[E17'
+  $TESTCASE_ROOT/app/project.jqd:1:48-63: error[E1701]: The project manifest has an unknown field.
+    Cause: unknown field (license ...); free-form data belongs in (metadata ...)
   $ printf '(project-v1 (name "p") (requires (core "0.2")) (units "a.jac" "a.jac"))' > project.jqd
-  $ jacquard project check 2>&1 | grep -o 'error\[E17..\]'
-  error[E1702]
+  $ jacquard project check 2>&1 | grep -A1 'error\[E17'
+  $TESTCASE_ROOT/app/project.jqd:1:48-71: error[E1702]: The project manifest repeats an item that must be unique.
+    Cause: a unit a.jac appears more than once
   $ printf '(project-v2 (name "p") (requires (core "0.2")))' > project.jqd
-  $ jacquard project check 2>&1 | grep -o 'error\[E17..\]'
-  error[E1700]
+  $ jacquard project check 2>&1 | grep -A1 'error\[E17'
+  $TESTCASE_ROOT/app/project.jqd:1:1-48: error[E1700]: The project manifest is malformed.
+    Cause: unsupported manifest format project-v2; this tool reads project-v1
   $ printf '(project-v1 (name "p") (requires (core "9.0")))' > project.jqd
-  $ jacquard project check 2>&1 | grep -o 'error\[E17..\]'
-  error[E1704]
+  $ jacquard project check 2>&1 | grep -A1 'error\[E17'
+  error[E1704]: The running Core does not satisfy the project's requirement.
+    Cause: the project requires Core 9.0 (same major, at least that minor); running 0.2.0
 
 Without a manifest the search stops at the repository root:
 
-  $ rm project.jqd && jacquard project check 2>&1 | grep -o 'error\[E1735\]'
-  error[E1735]
+  $ rm project.jqd && jacquard project check 2>&1 | grep -A1 'error\[E1735'
+  error[E1735]: No project manifest was found or it could not be read.
+    Cause: no project.jqd in $TESTCASE_ROOT/app or its parents (search stopped at $TESTCASE_ROOT/app)
 
 A manifest that is not a regular file is refused without waiting on it, even
 a FIFO that no writer will ever open:
