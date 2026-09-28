@@ -128,10 +128,7 @@ dice.tests =
                       | Busted -> check.true(True, "bust is permitted")
                       | Banked(points) ->
                         check.true(
-                          bool.and(
-                            int.gte?(points, pot),
-                            int.lte?(points, add(pot, mul(6, rolls))),
-                          ),
+                          int.between?(points, pot, add(pot, mul(6, rolls))),
                           "reachable score",
                         )
                     }

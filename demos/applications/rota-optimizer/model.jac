@@ -266,13 +266,7 @@ rota.same-shift?(
         RotaShift(id: a, label: al, start: ab, finish: ae, skill: ak),
         RotaShift(id: b, label: bl, start: bb, finish: be, skill: bk),
       ) ->
-      bool.and(
-        eq(a, b),
-        bool.and(
-          text.eq?(al, bl),
-          bool.and(eq(ab, bb), bool.and(eq(ae, be), rota.skill-same?(ak, bk))),
-        ),
-      )
+      bool.all([eq(a, b), text.eq?(al, bl), eq(ab, bb), eq(ae, be), rota.skill-same?(ak, bk)])
   }
 
 rota.verify(
@@ -283,8 +277,7 @@ rota.verify(
     let ids =
       list.map(
         assignments,
-        fn (assignment) -> match assignment {
-                             | RotaAssignment(shift, _) -> rota-shift.id(shift)},
+        fn (assignment) -> rota-shift.id(rota-assignment.shift(assignment)),
       )
     bool.all(
       [

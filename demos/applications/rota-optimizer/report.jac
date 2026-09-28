@@ -104,13 +104,7 @@ rota.show-solution(
             let selected =
               list.find(
                 assignments,
-                fn (
-                  assignment,
-                ) ->
-                  match assignment {
-                    | RotaAssignment(assigned, _) ->
-                      eq(rota-shift.id(assigned), rota-shift.id(shift))
-                  },
+                fn (assignment) -> eq(rota-shift.id(rota-assignment.shift(assignment)), rota-shift.id(shift)),
               )
             match selected {
               | None -> println("  Internal error: shift missing from completed schedule.")

@@ -185,7 +185,7 @@ nb.why(
   }
 
 nb.help() =
-  "Formula notebook: integers, names, + - * /, unary -, parentheses.\nset NAME = EXPR | unset NAME | show [NAME] | why NAME\nwhatif NAME = EXPR | undo | redo | help | quit\nNames are case-sensitive; division truncates toward zero.\nLimits: 40 cells, 100 tokens / 4096 characters per formula, values +/-1000000.\nUndo retains 20 edits. Preview leaves the live workbook unchanged.\nAn empty input line or EOF exits; whitespace-only input is ignored."
+  "Formula notebook: integers, names, + - * /, unary -, parentheses.\nset NAME = EXPR | unset NAME | show [NAME] | why NAME\nwhatif NAME = EXPR | undo | redo | help | quit\nNames are case-sensitive; division truncates toward zero.\nLimits: 40 cells, 100 tokens / 4096 characters per formula, values +/-1000000.\nUndo retains 20 edits. Preview leaves the live workbook unchanged.\nOnly end of input exits; blank and whitespace-only lines are ignored."
 
 nb.apply-outcome(
   before,

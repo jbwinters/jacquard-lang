@@ -148,6 +148,10 @@ Kept on purpose:
 - `rota.member?`, `rota.distinct?`, `nb.has` and `nb.unique` compare with
   `eq`/`text.eq?` directly; `list.contains?` needs an `Eq` dictionary and
   reads no better here.
+- Dice, picnic and rota read their prompts with `console.ask`, where end of
+  input arrives as an empty answer and is reported as invalid input; only the
+  notebook, whose loop needs to tell a blank line from the end, uses
+  `next-line()`.
 - The rota's preference entries are prelude `Pair`s, which have no generated
   accessors, so their `MkPair(key, _)` matches stay.
 - The independent oracles and the notebook's fresh-evaluator comparison are
