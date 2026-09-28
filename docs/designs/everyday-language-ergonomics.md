@@ -199,7 +199,7 @@ known, elaborates it to the let-and-match twin with binders fresh against every
 local in scope, so `hash` of a `with` form equals `hash` of the hand-written
 twin (pinned in `test/test_surface_field_update.ml` and
 `test/cli/surface-field-update.t`, which also pin the evaluation order with
-effect counters under the interpreter and natively). Three points were settled
+`println` traces under the interpreter and natively). Three points were settled
 in implementation: no new diagnostic code was needed, since the setter advice
 is part of the existing E0813 message ("use `shape.with-name` for a total
 update"), naming every updated label that all constructors carry, and a
