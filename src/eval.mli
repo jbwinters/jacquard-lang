@@ -223,9 +223,10 @@ val resume_captured_state : ctx -> captured_kont -> Value.t -> (state, Runtime_e
 
 type once_capture =
   | OCValue of Value.t
-  | OCOp of { op : Hash.t; name : string; args : Value.t list; resume : Value.t }
+  | OCOp of { call : int; op : Hash.t; name : string; args : Value.t list; resume : Value.t }
       (** A terminal value or root operation whose actual continuation is already sealed as one
-          opaque, originating-context-bound once-resumption instance. *)
+          opaque, originating-context-bound once-resumption instance. [call] is the correlation id
+          of the operation's observation event; pass it to {!dispatch_root_operation}. *)
 
 val run_state_capturing_once : ctx -> state -> (once_capture, Runtime_err.t) result
 (** [run_state_capturing_once ctx state] validates and runs [state]. A captured root continuation is
@@ -238,6 +239,7 @@ val run_state_capturing_once_routed : ctx -> state -> (once_capture, Runtime_err
     deterministic scheduler can check cancellation before routing world work. *)
 
 val dispatch_root_operation :
+  ?call:int ->
   ctx ->
   resume:Value.t ->
   op:Hash.t ->
@@ -248,7 +250,9 @@ val dispatch_root_operation :
 (** [dispatch_root_operation] invokes an installed root handler after the scheduler boundary. The
     suspended affine resume is included in the same mutable-graph snapshot as the operation and
     arguments, so hostile callbacks cannot mutate its continuation graph unnoticed. Missing handlers
-    return [Unhandled], and callback argument/result guards remain active. *)
+    return [Unhandled], and callback argument/result guards remain active. [call] is the captured
+    operation's correlation id ({!once_capture}), so its observed [Result] pairs with its
+    [Operation]; without it the dispatch is observed as a call of its own. *)
 
 type validated_state
 (** An unforgeable state accepted by the reusable inference driver and bound to the exact evaluator

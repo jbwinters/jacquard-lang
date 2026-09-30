@@ -32,7 +32,7 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1131`
+- Alcotest/QCheck cases: `1135`
 - Cram transcript files: `74`
 - Documentation examples: `35` named examples across `8` documents
 
@@ -636,9 +636,12 @@ bring the current source inventory to `1125 / 74 / 35`.
 
 OBS.1 adds versioned observation policies and policy-bound
 `observation-transcript-v1` (`docs/observation-policies.md`): operations are
-selected by identity with compared arguments, results and output; excluded
-fields and secrets never reach bytes or diagnostics; failed, incomplete and
-truncated observations are recorded; comparison is equal, divergent or
-inconclusive, and refuses transcripts of different policies. `run-transcript-v1`
-is unchanged. Six `test/test_observation_policy.ml` cases bring the current
-source inventory to `1131 / 74 / 35`.
+selected by identity with compared arguments, results and output; values
+compare by data-v1 (constructors by identity); excluded fields and secrets
+never reach bytes or diagnostics; results and output pair with their call by a
+correlation id now carried on typed events; failed, incomplete (including
+unfinished projections) and truncated observations are recorded; comparison is
+equal, divergent or inconclusive, and refuses transcripts of different
+policies. `run-transcript-v1` is unchanged. Ten
+`test/test_observation_policy.ml` cases bring the current source inventory to
+`1135 / 74 / 35`.

@@ -20,7 +20,7 @@ A policy selects:
 
 | choice | values |
 |---|---|
-| the run's result value | `compare` (show-v1: the `run-transcript-v1` value rendering) or `ignore` |
+| the run's result value | `compare` (data-v1 equality, below) or `ignore` |
 | observed operations | a list of operation identities (HASH_V0 operation hashes, never display names), each with a rule |
 | operations not listed | `ignore` (not recorded at all) or a rule applied to every other operation |
 | per rule: arguments | `all`, `none`, or ascending zero-based positions (`0,2`) |
@@ -35,6 +35,13 @@ difference, or a file. There is no "hash of the value" projection; a plain hash
 of a low-entropy secret would identify it, so none is offered. A policy
 therefore cannot select a redacted field for equality: a field is either
 compared or absent.
+
+**Data-v1 equality.** Every compared value (a run's result, an argument, a
+handler's result) is recorded as its `Observation.render` spelling, except that
+each constructor is qualified by its identity (`Ready#<64 hex>`). Two
+constructors that share a display name (two types' `Ready`, or a redefined
+type) therefore never compare equal. This is stricter than `run-transcript-v1`
+value equality, which compares display names.
 
 **Secrets and executable values are unsupported, not rendered.** A field whose
 value contains a secret, closure, continuation, builtin, operation value,
@@ -88,18 +95,26 @@ result data bytes=1
 ```
 
 - A run is `complete` (with its `value` line when results are compared),
-  `failed code=<diagnostic code>`, or `incomplete code=E0919` when the run's
-  fuel budget stopped it. Unlike `run-transcript-v1`, a failed or incomplete
-  run is recorded, with the events observed before it stopped.
+  `failed code=<diagnostic code>` (never E0919), or `incomplete code=E0919`
+  when the run's fuel budget stopped it, during evaluation or while its result
+  was being rendered. Unlike `run-transcript-v1`, a failed or incomplete run is
+  recorded, with the events observed before it stopped.
 - An event is recorded for each root operation the policy observes, in order.
   It has the compared argument positions, then `result` and `output` lines
   exactly when the rule compares them.
-- A field is `data bytes=N` (the `Observation.render` spelling, or the raw
-  output bytes), `truncated total=T bytes=L` (the first L bytes, L the policy
-  limit, of a longer rendering), `unsupported kind=K`, `failure code=C` (a
-  handler failure, results only), or `missing` (compared but not produced: an
-  absent argument position, a result that never arrived because a driver
-  captured the operation, or no output).
+- A field is `data bytes=N` (the data-v1 rendering, or the raw output
+  bytes), `truncated total=T bytes=L` (the first L bytes, L the policy limit,
+  of a longer rendering), `unsupported kind=K` (not for raw output),
+  `failure code=C` (a handler failure, results only), `missing` (compared but
+  not produced: a selected position the call does not have, a result that never
+  arrived because a driver captured the operation, or no output), or
+  `unfinished` (the fuel ran out while the field was being projected; only in
+  an incomplete run, and for all-arguments a single position 0 stands for every
+  argument).
+
+An operation is recorded before its arguments are projected, so a run that
+runs out of fuel while projecting them still records which operation it
+reached.
 
 Parsing needs the policy: the header's policy identity must match it, and each
 event must carry exactly the lines its rule demands. Everything else is as
@@ -111,10 +126,13 @@ walk draws on the observed invocation's fuel (`docs/computation-fuel.md`).
 
 ## 3. Correlation
 
-Typed events carry no correlation id. A `Result` or `Output` attaches to the
-newest recorded event for the same operation that has not received one. Root
-dispatch is synchronous, so this pairs each result with its call; an
-operation the policy does not record has nothing to attach to.
+Every typed event carries a correlation id (`call`,
+`docs/observation-boundary.md`): a call's `Output` and `Result` carry its
+`Operation`'s id, including when calls to one operation nest, and when a
+driver captures an operation and dispatches it later (the captured
+`once_capture` carries the id to `Eval.dispatch_root_operation`). The recorder
+pairs by that id alone. The id is not recorded: it is not stable across runs.
+An operation the policy does not record has nothing to pair with.
 
 ## 4. Comparison
 
@@ -126,13 +144,16 @@ comparison walks runs, then each run's status and value, then its events
 - `Divergent`: the first field that certainly differs, by path
   (`run[0].event[2].argument[1]`).
 - `Inconclusive`: nothing certainly differs, but at the first path shown two
-  fields agree only on a truncated prefix and length, or only on an
-  unsupported kind. Equality is not claimed.
+  fields agree only on a truncated prefix and length, only on an unsupported
+  kind, or only on being failures without a diagnostic code, or one of them is
+  unfinished. Equality is not claimed.
 
-Field agreement: equal data or equal failures agree; truncated fields with the
-same prefix and total, or unsupported fields of the same kind, are
-inconclusive; anything else (including data against truncated, or any kind
-against another) differs. A divergence renders as a three-line frame with the
+Field agreement: equal data, and equal coded failures, agree; truncated fields
+with the same prefix and total, unsupported fields of the same kind, two
+`uncoded` failures (or two runs failed `uncoded`), and anything against an
+unfinished field are inconclusive; when either event's arguments are
+unfinished, its arguments are inconclusive as a whole. Anything else
+(including data against truncated, or any kind against another) differs. A divergence renders as a three-line frame with the
 path and both sides; only recorded fields can appear in it.
 
 ## 5. Compatibility
@@ -144,6 +165,5 @@ path and both sides; only recorded fields can appear in it.
 | kernel, HASH_V0, stores, schedule traces | none |
 | diagnostics | E1005 (policy invalid or refused), E1006 (transcript invalid, or recorded under another policy) |
 
-Not in this version: a named `Eq` for result equality (only show-v1 value
-equality), a projection of a field other than its full rendering, and
-correlation ids on typed events.
+Not in this version: a named `Eq` for result equality (only data-v1
+equality), and a projection of a field other than its full rendering.

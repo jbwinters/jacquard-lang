@@ -8,6 +8,7 @@ type field =
   | Unsupported of string
   | Failure of string
   | Missing
+  | Unfinished
 
 type event = {
   operation : Hash.t;
@@ -24,9 +25,10 @@ let policy_identity (transcript : transcript) = transcript.identity
 let runs transcript = transcript.runs
 
 type pending = {
+  call : int;
   operation : Hash.t;
   rule : Observation_policy.rule;
-  arguments : (int * field) list;
+  mutable arguments : (int * field) list;
   mutable result_seen : field option option;  (** [Some _] once the Result event arrived *)
   mutable output_seen : field option option;
 }
@@ -58,12 +60,33 @@ let bounded policy bytes =
 
 (* a value with an opaque part has no observable rendering: comparing its marker would call two
    different secrets or closures equal, so it is recorded as unsupported and never rendered *)
+(* data-v1: the Observation rendering, except that a constructor is qualified by its identity, so two
+   constructors that share a display name never render alike; it draws on fuel like the projection *)
+let rec render_data value =
+  match value with
+  | Observation.Constructor { identity; name; arguments } -> (
+      Fuel_meter.tick (1 + String.length name);
+      let head = name ^ "#" ^ Hash.to_hex identity in
+      match arguments with
+      | [] -> head
+      | _ -> head ^ "(" ^ String.concat ", " (List.map render_data arguments) ^ ")")
+  | Observation.Tuple items ->
+      Fuel_meter.tick 1;
+      "(" ^ String.concat ", " (List.map render_data items) ^ ")"
+  | Observation.Int _ | Observation.Real _ | Observation.Text _ | Observation.Hash _
+  | Observation.Code _ | Observation.Opaque _ ->
+      Observation.render value
+
 let field_of_value policy value =
   match first_opaque value with
   | Some kind -> Unsupported kind
-  | None -> bounded policy (Observation.render value)
+  | None -> bounded policy (render_data value)
 
 let failure_code error = Diag.code_or_uncoded (Runtime_err.to_diag error)
+
+(* every incomplete run is stopped by its fuel budget *)
+let fuel_code = "E0919"
+let uncoded = "uncoded"
 
 let recorded_arguments policy (rule : Observation_policy.rule) arguments =
   match rule.arguments with
@@ -79,41 +102,60 @@ let recorded_arguments policy (rule : Observation_policy.rule) arguments =
           | None -> (position, Missing))
         positions
 
-let newest recorder operation unseen =
-  List.find_opt
-    (fun (pending : pending) -> Hash.equal pending.operation operation && unseen pending)
-    recorder.current_rev
+(* the recorded event of [call]: output and results pair with their call exactly, by correlation
+   id, even when calls to one operation nest or a call is captured and dispatched later *)
+let pending_call recorder call =
+  List.find_opt (fun (pending : pending) -> pending.call = call) recorder.current_rev
+
+(* the fields a projection that ran out of fuel could not finish *)
+let unfinished_arguments (rule : Observation_policy.rule) =
+  match rule.arguments with
+  | Observation_policy.No_arguments -> []
+  | Observation_policy.All_arguments -> [ (0, Unfinished) ]
+  | Observation_policy.Selected_arguments positions ->
+      List.map (fun position -> (position, Unfinished)) positions
 
 let on_event recorder = function
-  | Observation.Operation { operation; arguments; _ } -> (
+  | Observation.Operation { call; operation; arguments; _ } -> (
       match Observation_policy.rule_for recorder.policy operation with
       | None -> ()
-      | Some rule ->
-          let arguments = recorded_arguments recorder.policy rule arguments in
-          recorder.current_rev <-
-            { operation; rule; arguments; result_seen = None; output_seen = None }
-            :: recorder.current_rev)
-  | Observation.Output { operation; bytes } -> (
-      match newest recorder operation (fun pending -> Option.is_none pending.output_seen) with
-      | None -> ()
-      | Some pending ->
+      | Some rule -> (
+          (* the operation is recorded before its arguments are projected, so running out of fuel
+             while projecting them keeps its identity *)
+          let pending =
+            { call; operation; rule; arguments = []; result_seen = None; output_seen = None }
+          in
+          recorder.current_rev <- pending :: recorder.current_rev;
+          try pending.arguments <- recorded_arguments recorder.policy rule arguments
+          with Fuel_meter.Exceeded as exceeded ->
+            pending.arguments <- unfinished_arguments rule;
+            raise exceeded))
+  | Observation.Output { call; bytes; _ } -> (
+      match pending_call recorder call with
+      | Some pending when Option.is_none pending.output_seen ->
           pending.output_seen <-
             Some
               (match pending.rule.output with
               | Observation_policy.Compare -> Some (bounded recorder.policy bytes)
-              | Observation_policy.Ignore -> None))
-  | Observation.Result { operation; result } -> (
-      match newest recorder operation (fun pending -> Option.is_none pending.result_seen) with
-      | None -> ()
-      | Some pending ->
-          pending.result_seen <-
-            Some
-              (match pending.rule.result with
-              | Observation_policy.Ignore -> None
-              | Observation_policy.Compare -> (
-                  match Lazy.force result with
-                  | Ok value -> Some (field_of_value recorder.policy value)
-                  | Error error -> Some (Failure (failure_code error)))))
+              | Observation_policy.Ignore -> None)
+      | Some _ | None -> ())
+  | Observation.Result { call; result; _ } -> (
+      match pending_call recorder call with
+      | Some pending when Option.is_none pending.result_seen -> (
+          match pending.rule.result with
+          | Observation_policy.Ignore -> pending.result_seen <- Some None
+          | Observation_policy.Compare -> (
+              try
+                pending.result_seen <-
+                  Some
+                    (Some
+                       (match Lazy.force result with
+                       | Ok value -> field_of_value recorder.policy value
+                       | Error error -> Failure (failure_code error)))
+              with Fuel_meter.Exceeded as exceeded ->
+                pending.result_seen <- Some (Some Unfinished);
+                raise exceeded))
+      | Some _ | None -> ())
 
 let finished (pending : pending) =
   let compared field seen =
@@ -145,11 +187,12 @@ let record recorder ctx run =
             match Observation_policy.result recorder.policy with
             | Observation_policy.Ignore -> Complete None
             | Observation_policy.Compare -> (
-                (* show-v1: the result's run-transcript-v1 rendering, unless it has an opaque part *)
-                match first_opaque (Observation.of_value value) with
-                | Some kind -> Complete (Some (Unsupported kind))
-                | None -> Complete (Some (bounded recorder.policy (Value.show value)))))
-        | Error error when Runtime_err.is_fuel_exhausted error -> Incomplete (failure_code error)
+                (* the result's data-v1 rendering draws on the same fuel; if it runs out, the
+                   observation is incomplete rather than lost *)
+                match field_of_value recorder.policy (Observation.of_value value) with
+                | field -> Complete (Some field)
+                | exception Fuel_meter.Exceeded -> Incomplete fuel_code))
+        | Error error when Runtime_err.is_fuel_exhausted error -> Incomplete fuel_code
         | Error error -> Failed (failure_code error)
       in
       let events = List.rev_map finished recorder.current_rev in
@@ -169,6 +212,7 @@ let add_field buffer = function
   | Unsupported kind -> Printf.bprintf buffer "unsupported kind=%s\n" kind
   | Failure code -> Printf.bprintf buffer "failure code=%s\n" code
   | Missing -> Buffer.add_string buffer "missing\n"
+  | Unfinished -> Buffer.add_string buffer "unfinished\n"
 
 let serialize transcript =
   let buffer = Buffer.create 256 in
@@ -280,17 +324,22 @@ let parse_field policy cursor =
     let* code = word cursor in
     let* () = expect cursor "\n" in
     Ok (Failure code)
+  else if Strict_cursor.peek_literal cursor "unfinished" then
+    let* () = expect cursor "unfinished\n" in
+    Ok Unfinished
   else
     let* () = expect cursor "missing\n" in
     Ok Missing
 
 (* a failure is only a handler result; a missing field only something the policy asked for that the
    run did not produce, never a run's own value *)
-let checked_field ~offset ~failure ~missing field =
+let checked_field ?(unsupported = true) ?(unfinished = true) ~offset ~failure ~missing field =
   match field with
   | Failure _ when not failure -> invalid_at offset "a failure appears outside a result"
-  | Missing when not missing -> invalid_at offset "a run value is missing"
-  | Data _ | Truncated _ | Unsupported _ | Failure _ | Missing -> Ok field
+  | Missing when not missing -> invalid_at offset "a field the run always has is missing"
+  | Unsupported _ when not unsupported -> invalid_at offset "raw output cannot be unsupported"
+  | Unfinished when not unfinished -> invalid_at offset "this field cannot be unfinished"
+  | Data _ | Truncated _ | Unsupported _ | Failure _ | Missing | Unfinished -> Ok field
 
 let parse_event policy cursor ~expected_index =
   let ( let* ) = Result.bind in
@@ -337,21 +386,30 @@ let parse_event policy cursor ~expected_index =
       in
       let* () = expect cursor " " in
       let* field = parse_field policy cursor in
-      let* field = checked_field ~offset ~failure:false ~missing:true field in
+      (* under all-arguments every recorded position exists *)
+      let missing =
+        match rule.arguments with
+        | Observation_policy.All_arguments -> false
+        | Observation_policy.No_arguments | Observation_policy.Selected_arguments _ -> true
+      in
+      let* field = checked_field ~offset ~failure:false ~missing field in
       arguments (index + 1) ((position, field) :: reversed)
   in
   let* arguments = arguments 0 [] in
-  let optional choice literal ~failure =
+  let optional ?unsupported ?unfinished choice literal ~failure =
     match choice with
     | Observation_policy.Ignore -> Ok None
     | Observation_policy.Compare ->
         let* () = expect cursor literal in
         let offset = cursor.Strict_cursor.offset in
         let* field = parse_field policy cursor in
-        Result.map Option.some (checked_field ~offset ~failure ~missing:true field)
+        Result.map Option.some
+          (checked_field ?unsupported ?unfinished ~offset ~failure ~missing:true field)
   in
   let* result = optional rule.result "result " ~failure:true in
-  let* output = optional rule.output "output " ~failure:false in
+  let* output =
+    optional ~unsupported:false ~unfinished:false rule.output "output " ~failure:false
+  in
   Ok { operation; arguments; result; output }
 
 let parse_run policy cursor ~expected_index =
@@ -370,10 +428,17 @@ let parse_run policy cursor ~expected_index =
     | "complete" -> Ok `Complete
     | "failed" ->
         let* () = expect cursor " code=" in
-        Result.map (fun code -> `Failed code) (word cursor)
+        let offset = cursor.Strict_cursor.offset in
+        let* code = word cursor in
+        if String.equal code fuel_code then
+          invalid_at offset "a run stopped by fuel is incomplete, not failed"
+        else Ok (`Failed code)
     | "incomplete" ->
         let* () = expect cursor " code=" in
-        Result.map (fun code -> `Incomplete code) (word cursor)
+        let offset = cursor.Strict_cursor.offset in
+        let* code = word cursor in
+        if String.equal code fuel_code then Ok (`Incomplete code)
+        else invalid_at offset "only fuel exhaustion (E0919) makes a run incomplete"
     | _ -> invalid_at offset "a run status is unknown"
   in
   let* () = expect cursor " events=" in
@@ -390,7 +455,9 @@ let parse_run policy cursor ~expected_index =
             let* () = expect cursor "value " in
             let offset = cursor.Strict_cursor.offset in
             let* field = parse_field policy cursor in
-            let* field = checked_field ~offset ~failure:false ~missing:false field in
+            let* field =
+              checked_field ~unfinished:false ~offset ~failure:false ~missing:false field
+            in
             Ok (Complete (Some field)))
   in
   let rec events index reversed =
@@ -400,7 +467,15 @@ let parse_run policy cursor ~expected_index =
       events (index + 1) (event :: reversed)
   in
   let* events = events 0 [] in
-  Ok { status; events }
+  (* only a projection that ran out of fuel leaves a field unfinished *)
+  let unfinished (event : event) =
+    List.exists (fun (_, field) -> field = Unfinished) event.arguments
+    || event.result = Some Unfinished
+  in
+  match status with
+  | (Complete _ | Failed _) when List.exists unfinished events ->
+      invalid_at cursor.offset "an unfinished field appears in a run that was not stopped by fuel"
+  | Complete _ | Failed _ | Incomplete _ -> Ok { status; events }
 
 let parse ~policy bytes =
   let ( let* ) = Result.bind in
@@ -460,8 +535,13 @@ let compare_fields left right =
   | Truncated left, Truncated right ->
       if left.total = right.total && String.equal left.prefix right.prefix then Unsure else Differs
   | Unsupported left, Unsupported right -> if String.equal left right then Unsure else Differs
-  | Failure left, Failure right -> if String.equal left right then Same else Differs
+  | Failure left, Failure right ->
+      (* failures without a diagnostic code cannot be told apart, so they cannot be called equal *)
+      if not (String.equal left right) then Differs
+      else if String.equal left uncoded then Unsure
+      else Same
   | Missing, Missing -> Same
+  | Unfinished, _ | _, Unfinished -> Unsure
   | (Data _ | Truncated _ | Unsupported _ | Failure _ | Missing), _ -> Differs
 
 exception Found of difference
@@ -497,6 +577,7 @@ let compare left right =
                left = Operation_side left.operation;
                right = Operation_side right.operation;
              });
+      let unfinished = List.exists (fun (_, field) -> field = Unfinished) in
       let rec arguments left right =
         match (left, right) with
         | [], [] -> ()
@@ -529,7 +610,17 @@ let compare left right =
                    right = Field_side field;
                  })
       in
-      arguments left.arguments right.arguments;
+      (* a projection that ran out of fuel says nothing about the arguments it did not reach *)
+      if unfinished left.arguments || unfinished right.arguments then (
+        if Option.is_none !unsure then
+          unsure :=
+            Some
+              {
+                position = Argument_position { run; event; argument = 0 };
+                left = Operation_side left.operation;
+                right = Operation_side right.operation;
+              })
+      else arguments left.arguments right.arguments;
       check_option (Result_position { run; event }) left.result right.result;
       check_option (Output_position { run; event }) left.output right.output
     in
@@ -537,7 +628,15 @@ let compare left right =
       (match (left.status, right.status) with
       | Complete left_value, Complete right_value ->
           check_option (Value_position index) left_value right_value
-      | Failed left_code, Failed right_code when String.equal left_code right_code -> ()
+      | Failed left_code, Failed right_code when String.equal left_code right_code ->
+          if String.equal left_code uncoded && Option.is_none !unsure then
+            unsure :=
+              Some
+                {
+                  position = Status_position index;
+                  left = Status_side left.status;
+                  right = Status_side right.status;
+                }
       | Incomplete left_code, Incomplete right_code when String.equal left_code right_code -> ()
       | _ ->
           raise
@@ -616,6 +715,7 @@ let render_field = function
   | Unsupported kind -> Printf.sprintf "<unsupported %s>" kind
   | Failure code -> Printf.sprintf "failure %s" code
   | Missing -> "<missing>"
+  | Unfinished -> "<unfinished>"
 
 let render_side = function
   | Field_side field -> render_field field

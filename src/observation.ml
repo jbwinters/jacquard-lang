@@ -11,9 +11,9 @@ type value =
   | Opaque of string
 
 type event =
-  | Operation of { operation : Hash.t; name : string; arguments : value list Lazy.t }
-  | Output of { operation : Hash.t; bytes : string }
-  | Result of { operation : Hash.t; result : (value, Runtime_err.t) result Lazy.t }
+  | Operation of { call : int; operation : Hash.t; name : string; arguments : value list Lazy.t }
+  | Output of { call : int; operation : Hash.t; bytes : string }
+  | Result of { call : int; operation : Hash.t; result : (value, Runtime_err.t) result Lazy.t }
 
 let rec of_value (v : Value.t) =
   (* the projection walks the whole value: it draws on computation fuel like any other walk *)
@@ -60,3 +60,5 @@ let rec render v =
 
 let operation = function
   | Operation { operation; _ } | Output { operation; _ } | Result { operation; _ } -> operation
+
+let call = function Operation { call; _ } | Output { call; _ } | Result { call; _ } -> call

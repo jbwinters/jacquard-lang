@@ -153,7 +153,7 @@ let invoke prepared operator ~limits ~input ~output session =
     match run_step ctx state with
     | Error error -> runtime_failure error
     | Ok (Eval.OCValue value) -> terminal (Session.finish session value)
-    | Ok (Eval.OCOp { op; args; resume; name = _ }) -> (
+    | Ok (Eval.OCOp { call = _; op; args; resume; name = _ }) -> (
         match Session.request session ~operation:op ~arguments:args with
         | Ok (Session.Request request) -> exchange request resume
         | other -> terminal other)

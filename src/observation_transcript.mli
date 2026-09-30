@@ -22,6 +22,9 @@ type field =
           rendering; the kind of its first opaque part *)
   | Failure of string  (** a root handler's failure, by diagnostic code *)
   | Missing  (** the policy compares the field but the run produced none *)
+  | Unfinished
+      (** the run's fuel ran out while this field was being projected (an incomplete run only); for
+          all-arguments it stands for every argument, at position 0 *)
 
 type event = {
   operation : Hash.t;
@@ -34,7 +37,9 @@ type event = {
 type status =
   | Complete of field option  (** its result value, when the policy compares results *)
   | Failed of string  (** a runtime failure, by diagnostic code *)
-  | Incomplete of string  (** the run was stopped by its fuel budget (E0919) *)
+  | Incomplete of string
+      (** the run was stopped by its fuel budget (always E0919), during evaluation or while its
+          result was being projected *)
 
 type run = { status : status; events : event list }
 type transcript
@@ -47,15 +52,23 @@ type recorder
 val create : Observation_policy.t -> recorder
 (** [create policy] starts an empty, non-reentrant recorder under [policy]. *)
 
+val field_of_value : Observation_policy.t -> Observation.value -> field
+(** [field_of_value policy value] is the recorded field for a data value: [Unsupported] if it has an
+    opaque part, else its data-v1 rendering (the {!Observation.render} spelling with each
+    constructor qualified by its identity, [Name#<hash>]) within the policy's limit. It ticks
+    computation fuel. *)
+
 val record :
   recorder ->
   Eval.ctx ->
   (unit -> (Value.t, Runtime_err.t) result) ->
   (Value.t, Runtime_err.t) result
 (** [record recorder ctx run] executes [run] under a scoped observer and returns its result
-    unchanged. Every outcome adds one run: [Ok] is complete, fuel exhaustion is incomplete, any
-    other [Error] is failed. A raised exception adds nothing and propagates. Arguments are projected
-    inside the observer, so their walk draws on the observed invocation's fuel. *)
+    unchanged. Every outcome adds one run: [Ok] is complete, fuel exhaustion (including while the
+    result is projected) is incomplete, any other [Error] is failed. A raised exception adds nothing
+    and propagates. Results and output pair with their call by correlation id. Arguments are
+    projected inside the observer, so their walk draws on the observed invocation's fuel; if it runs
+    out, the operation is kept with [Unfinished] fields. *)
 
 val transcript : recorder -> transcript
 
@@ -89,7 +102,8 @@ type difference = { position : position; left : side; right : side }
 
 (** [Equal]: every compared field agrees. [Divergent]: the first field that certainly differs.
     [Inconclusive]: no field certainly differs, but at the first position shown two fields agree
-    only on a truncated prefix or an opaque kind, so equality cannot be claimed. *)
+    only on a truncated prefix, an opaque kind, or an uncoded failure, or one is unfinished, so
+    equality cannot be claimed. *)
 type verdict = Equal | Divergent of difference | Inconclusive of difference
 
 val compare : transcript -> transcript -> (verdict, Diag.t list) result

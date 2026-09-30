@@ -190,6 +190,10 @@ type ctx = {
       (** disabled-by-default, dynamically scoped recorder seam for root-reaching operations *)
   mutable observing : bool;
       (** set while an observer callback runs: the callback may not evaluate (RF.3) *)
+  mutable next_call : int;  (** the next root-call correlation id (OBS.1) *)
+  mutable dispatching : int list;
+      (** the calls whose root handlers are running, innermost first: trusted output belongs to the
+          innermost *)
   mutable capture_ops : bool;
       (** when set (by {!run_state_capturing}), an op that reaches the root with no handler and no
           grant is CAPTURED — returned with its continuation — instead of dying [Unhandled]; this is
@@ -269,6 +273,8 @@ let make_ctx store =
     root_handlers = Hashtbl.create 8;
     root_observer = None;
     observing = false;
+    next_call = 0;
+    dispatching = [];
     capture_ops = false;
     capture_root_handlers = false;
     code_resolver = None;
@@ -441,7 +447,7 @@ let with_root_observer ctx ~on_operation ~on_output operation =
   with_observer ctx
     (function
       | Observation.Operation { operation; _ } -> on_operation operation
-      | Observation.Output { operation; bytes } -> on_output operation bytes
+      | Observation.Output { operation; bytes; _ } -> on_output operation bytes
       | Observation.Result _ -> ())
     operation
 
@@ -456,20 +462,35 @@ let emit ctx event =
       ctx.observing <- true;
       Fun.protect ~finally:(fun () -> ctx.observing <- saved) (fun () -> on_event event)
 
-let note_root_output ctx ~operation bytes = emit ctx (Observation.Output { operation; bytes })
+let fresh_call ctx =
+  let call = ctx.next_call in
+  ctx.next_call <- call + 1;
+  call
+
+(* output belongs to the root call whose handler is running; output outside any is its own call *)
+let note_root_output ctx ~operation bytes =
+  let call = match ctx.dispatching with call :: _ -> call | [] -> fresh_call ctx in
+  emit ctx (Observation.Output { call; operation; bytes })
+
+(* a root handler runs as [call]: output it produces is attributed to that call *)
+let dispatching_as ctx call run =
+  let saved = ctx.dispatching in
+  ctx.dispatching <- call :: saved;
+  Fun.protect ~finally:(fun () -> ctx.dispatching <- saved) run
 
 (* observers receive immutable data projections, computed only if forced: never live values, so
    a callback cannot read a secret, mutate a captured cell, or hold a continuation *)
-let notify_root_operation ctx operation ~name arguments =
+let notify_root_operation ctx ~call operation ~name arguments =
   if Option.is_some ctx.root_observer then
     emit ctx
       (Observation.Operation
-         { operation; name; arguments = lazy (List.map Observation.of_value arguments) })
+         { call; operation; name; arguments = lazy (List.map Observation.of_value arguments) })
 
-let notify_root_result ctx operation result =
+let notify_root_result ctx ~call operation result =
   if Option.is_some ctx.root_observer then
     emit ctx
-      (Observation.Result { operation; result = lazy (Result.map Observation.of_value result) })
+      (Observation.Result
+         { call; operation; result = lazy (Result.map Observation.of_value result) })
 
 (* --- invocations (RF.2) --- *)
 
@@ -670,6 +691,7 @@ exception Rt of Runtime_err.t
 (* Internal: carries a root-reaching op to the capturing runner. *)
 exception
   Op_captured of {
+    call : int;  (** the correlation id of its Operation event *)
     op : Hash.t;
     name : string;
     effect_ : string;
@@ -1307,7 +1329,11 @@ let invoke_untrusted_native ?observed ctx fn native args kont =
   let invocation_roots = [ fn; VTuple args; VResume kont ] in
   List.iter (prepare_native_argument ctx) invocation_roots;
   charge_native ctx args;
-  let result = native args in
+  let result =
+    match observed with
+    | Some (_, call) -> dispatching_as ctx call (fun () -> native args)
+    | None -> native args
+  in
   (* a native that ran out of fuel inside a nested run, or returned a nested invocation's
      exhaustion, cannot turn that into another failure, not even one found by revalidating what
      it mutated *)
@@ -1316,7 +1342,7 @@ let invoke_untrusted_native ?observed ctx fn native args kont =
   List.iter (check_native_argument ctx) invocation_roots;
   (* the Result event reports only what the program receives, so it follows every post-call check *)
   let observe result =
-    Option.iter (fun operation -> notify_root_result ctx operation result) observed
+    Option.iter (fun (operation, call) -> notify_root_result ctx ~call operation result) observed
   in
   match charge_native_result ctx result with
   | Ok value ->
@@ -1390,13 +1416,16 @@ let perform_unchecked ctx (op : Hash.t) ~name ~effect_ (args : Value.t list) (k 
         let mode =
           if Option.is_none native && ctx.capture_ops then Some (op_mode ctx op) else None
         in
-        notify_root_operation ctx op ~name args;
+        let call = fresh_call ctx in
+        notify_root_operation ctx ~call op ~name args;
         if Fuel_meter.exhausted () then exhaust ctx;
         match (native, mode) with
         | Some native, _ ->
-            invoke_untrusted_native ~observed:op ctx (VOp { op; name; effect_ }) native args k
+            invoke_untrusted_native ~observed:(op, call) ctx
+              (VOp { op; name; effect_ })
+              native args k
         | None, Some mode ->
-            raise (Op_captured { op; name; effect_; mode; args; kont = List.rev inner_rev })
+            raise (Op_captured { call; op; name; effect_; mode; args; kont = List.rev inner_rev })
         | None, None -> rt (Runtime_err.Unhandled { effect_; op = name }))
   in
   split 0 [] k
@@ -1424,6 +1453,7 @@ let apply_unchecked ctx (fn : Value.t) (args : Value.t list) (k : kont) : state 
           raise
             (Op_captured
                {
+                 call = fresh_call ctx;
                  op = Concurrency_contract.scope_control_hash;
                  name = "async.scope";
                  effect_ = "Async";
@@ -1869,8 +1899,7 @@ let fresh_validated_state ctx (Validated_state (owner, state, initial_graph) as 
 (** [run_state_capturing_trusted ctx state] captures like {!run_state_capturing} without scanning
     [state] first. The caller must have validated the immutable initial state and must only supply
     states derived from evaluator transitions; memo and native result guards remain active. *)
-let run_state_capturing_trusted ?(capture_root_handlers = false) ctx (state : state) :
-    (capture, Runtime_err.t) result =
+let capture_with_call ~capture_root_handlers ctx (state : state) =
   let saved = ctx.capture_ops in
   let saved_root = ctx.capture_root_handlers in
   ctx.capture_ops <- true;
@@ -1881,8 +1910,8 @@ let run_state_capturing_trusted ?(capture_root_handlers = false) ctx (state : st
       ctx.capture_root_handlers <- saved_root)
     (fun () ->
       match run_state_unchecked ctx state with
-      | v -> Ok (CValue v)
-      | exception Op_captured { op; name; mode; args; kont; _ } ->
+      | v -> Ok (CValue v, None)
+      | exception Op_captured { call; op; name; mode; args; kont; _ } ->
           (* Captured arguments are already inside the validated machine graph. Any value newly
              introduced by a host callback crossed [checked_result_state] before it could become an
              operation argument, so rescanning here would duplicate the boundary check on every
@@ -1893,9 +1922,13 @@ let run_state_capturing_trusted ?(capture_root_handlers = false) ctx (state : st
             | Kernel.Once ->
                 Once_kont (ctx, VOnceResume (Once_state.create ~owner:ctx.task_run kont))
           in
-          Ok (COp { op; name; args; kont })
+          Ok (COp { op; name; args; kont }, Some call)
       | exception Rt e -> Error e
       | exception Fuel_meter.Exceeded -> Error (fuel_error ctx))
+
+let run_state_capturing_trusted ?(capture_root_handlers = false) ctx (state : state) :
+    (capture, Runtime_err.t) result =
+  Result.map fst (capture_with_call ~capture_root_handlers ctx state)
 
 (** [run_validated_state_capturing ctx state] captures a previously validated state without
     rescanning its immutable syntax. Native and memo result guards remain active. *)
@@ -1944,42 +1977,39 @@ let run_state_capturing ctx (state : state) : (capture, Runtime_err.t) result =
 
 type once_capture =
   | OCValue of Value.t
-  | OCOp of { op : Hash.t; name : string; args : Value.t list; resume : Value.t }
+  | OCOp of { call : int; op : Hash.t; name : string; args : Value.t list; resume : Value.t }
+
+let once_capture captured =
+  match captured with
+  | Ok (CValue value, _) -> Ok (OCValue value)
+  | Ok (COp { op; name; args; kont = Multi_kont (owner, kont) }, call) ->
+      Ok
+        (OCOp
+           {
+             call = Option.get call;
+             op;
+             name;
+             args;
+             resume = VOnceResume (Once_state.create ~owner:owner.task_run kont);
+           })
+  | Ok (COp { op; name; args; kont = Once_kont (_, resume) }, call) ->
+      Ok (OCOp { call = Option.get call; op; name; args; resume })
+  | Error error -> Error error
 
 (** [run_state_capturing_once ctx state] is the EL.0 low-level once-capture boundary. A root op's
     actual continuation is sealed inside an opaque affine token before it crosses the public API;
     clients cannot extract or rewrap its frames to mint a second budget. *)
 let run_state_capturing_once ctx state =
-  match run_state_capturing ctx state with
-  | Ok (CValue value) -> Ok (OCValue value)
-  | Ok (COp { op; name; args; kont = Multi_kont (owner, kont) }) ->
-      Ok
-        (OCOp
-           { op; name; args; resume = VOnceResume (Once_state.create ~owner:owner.task_run kont) })
-  | Ok (COp { op; name; args; kont = Once_kont (_, resume) }) ->
-      Ok (OCOp { op; name; args; resume })
+  match validate_state ctx state with
   | Error error -> Error error
+  | Ok () -> once_capture (capture_with_call ~capture_root_handlers:false ctx state)
 
 let run_state_capturing_once_routed ctx state =
   match validate_state ctx state with
   | Error error -> Error error
-  | Ok () -> (
-      match run_state_capturing_trusted ~capture_root_handlers:true ctx state with
-      | Ok (CValue value) -> Ok (OCValue value)
-      | Ok (COp { op; name; args; kont = Multi_kont (owner, kont) }) ->
-          Ok
-            (OCOp
-               {
-                 op;
-                 name;
-                 args;
-                 resume = VOnceResume (Once_state.create ~owner:owner.task_run kont);
-               })
-      | Ok (COp { op; name; args; kont = Once_kont (_, resume) }) ->
-          Ok (OCOp { op; name; args; resume })
-      | Error error -> Error error)
+  | Ok () -> once_capture (capture_with_call ~capture_root_handlers:true ctx state)
 
-let dispatch_root_operation ctx ~resume ~op ~name ~effect_ args =
+let dispatch_root_operation ?call ctx ~resume ~op ~name ~effect_ args =
   (* an observer callback cannot dispatch an operation (RF.3) *)
   if ctx.observing then
     Error (Runtime_err.Eval_error "an observation callback cannot run evaluation")
@@ -2002,17 +2032,19 @@ let dispatch_root_operation ctx ~resume ~op ~name ~effect_ args =
           let roots = [ VOp { op; name; effect_ }; VTuple args; resume ] in
           List.iter (prepare_native_argument ctx) roots;
           charge_native ctx args;
-          let result = native args in
+          (* a routed dispatch continues the call its capture observed; without one it is its own *)
+          let call = match call with Some call -> call | None -> fresh_call ctx in
+          let result = dispatching_as ctx call (fun () -> native args) in
           note_returned_exhaustion ctx result;
           if Fuel_meter.exhausted () then raise (Rt (fuel_error ctx));
           List.iter (check_native_argument ctx) roots;
           match charge_native_result ctx result with
           | Ok value ->
               if not (atomic_non_task_value value) then reject_recovery_result_value ctx value;
-              notify_root_result ctx op (Ok value);
+              notify_root_result ctx ~call op (Ok value);
               if Fuel_meter.exhausted () then Error (fuel_error ctx) else Ok value
           | Error error ->
-              if Result.is_error result then notify_root_result ctx op (Error error);
+              if Result.is_error result then notify_root_result ctx ~call op (Error error);
               if Fuel_meter.exhausted () then Error (fuel_error ctx) else Error error
         with
         | Rt error -> Error error

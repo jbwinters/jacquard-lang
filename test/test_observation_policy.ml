@@ -34,7 +34,8 @@ let fresh_root =
     at_exit (fun () -> try remove_tree root with Unix.Unix_error _ | Sys_error _ -> ());
     root
 
-let program = "once effect Probe where { probe.send : (Text, Text) -> Int }\nspin(n) = spin(add(n, 1))\n"
+let program =
+  "once effect Probe where { probe.send : (Text, Text) -> Int }\nspin(n) = spin(add(n, 1))\n"
 
 let prepared label =
   let store, ctx =
@@ -338,6 +339,206 @@ let test_v1_unchanged () =
   in
   Alcotest.(check string) "deterministic" (twice ()) (twice ())
 
+let test_constructor_identity () =
+  let field identity =
+    Observation_transcript.field_of_value Observation_policy.default
+      (Observation.Constructor
+         { identity = Hash.of_string identity; name = "Ready"; arguments = [] })
+  in
+  Alcotest.(check bool) "same constructor" true (field "a" = field "a");
+  Alcotest.(check bool) "same name, other constructor" false (field "a" = field "b")
+
+let run_events transcript =
+  match Observation_transcript.runs transcript with
+  | [ run ] -> run.Observation_transcript.events
+  | _ -> Alcotest.fail "expected one run"
+
+let console_transcript store ctx policy source =
+  let recorder = Observation_transcript.create policy in
+  let sink = Buffer.create 16 in
+  ignore
+    (Eval.with_invocation ctx (fun _ ->
+         expect_ok "grant console"
+           (Prelude.grant ctx "console" ~infer_cache:None ~out:(Buffer.add_string sink) ~seed:0);
+         Observation_transcript.record recorder ctx (fun () ->
+             Eval.run_expr ctx (expression store source))));
+  Observation_transcript.transcript recorder
+
+let test_pairing () =
+  let store, ctx = prepared "pairing" in
+  let send = probe_send store ctx in
+  (* the outer call's handler captures an inner call to the same operation and handles it itself:
+     the outer result must stay with the outer call *)
+  let nested =
+    record
+      ~handler:(fun _ ->
+        (match
+           Eval.run_state_capturing_once_routed ctx
+             (Eval.expr_state (expression store "probe.send(\"inner\", \"x\")"))
+         with
+        | Ok (Eval.OCOp _) -> ()
+        | Ok (Eval.OCValue _) | Error _ -> Alcotest.fail "the inner call was not captured");
+        Ok (Value.VInt 1))
+      store ctx
+      (policy [ (send, rule ()) ])
+      [ "probe.send(\"outer\", \"y\")" ]
+  in
+  Alcotest.(check (list (option string)))
+    "each result stays with its call" [ Some "1"; Some "<missing>" ]
+    (List.map
+       (fun (event : Observation_transcript.event) ->
+         Option.map
+           (function
+             | Observation_transcript.Data bytes -> bytes
+             | Observation_transcript.Missing -> "<missing>"
+             | _ -> "other")
+           event.result)
+       (run_events nested));
+  (* Console output pairs with its print call, and is excluded when the policy ignores it *)
+  let outputs policy source =
+    List.map
+      (fun (event : Observation_transcript.event) -> event.output)
+      (run_events (console_transcript store ctx policy source))
+  in
+  Alcotest.(check bool)
+    "compared output" true
+    (outputs Observation_policy.default "print(\"hi\")"
+    = [ Some (Observation_transcript.Data "hi") ]);
+  let quiet =
+    policy
+      ~unlisted:
+        (rule ~arguments:Observation_policy.No_arguments ~result:Observation_policy.Ignore ())
+      []
+  in
+  Alcotest.(check bool) "ignored output" true (outputs quiet "print(\"hi\")" = [ None ]);
+  Alcotest.(check string)
+    "differing output diverges" "divergent run[0].event[0].output"
+    (compare
+       (console_transcript store ctx
+          (policy
+             ~unlisted:
+               (rule ~arguments:Observation_policy.No_arguments ~result:Observation_policy.Ignore
+                  ~output:Observation_policy.Compare ())
+             [])
+          "print(\"hi\")")
+       (console_transcript store ctx
+          (policy
+             ~unlisted:
+               (rule ~arguments:Observation_policy.No_arguments ~result:Observation_policy.Ignore
+                  ~output:Observation_policy.Compare ())
+             [])
+          "print(\"ho\")"));
+  Alcotest.(check string)
+    "ignored output agrees" "equal"
+    (compare
+       (console_transcript store ctx quiet "print(\"hi\")")
+       (console_transcript store ctx quiet "print(\"ho\")"))
+
+let test_fuel_keeps_observations () =
+  let store, ctx = prepared "fuel" in
+  let send = probe_send store ctx in
+  (* the final result walk runs out: the run is incomplete, not lost *)
+  let recorder = Observation_transcript.create Observation_policy.default in
+  let pair = expression store "(1, 2)" in
+  let outcome =
+    Eval.with_invocation ~fuel:1_000_000 ctx (fun _ ->
+        Observation_transcript.record recorder ctx (fun () ->
+            let result = Eval.run_expr ctx pair in
+            Fuel_meter.trip ();
+            result))
+  in
+  Alcotest.(check bool) "the result is returned unchanged" true (Result.is_ok outcome);
+  (match Observation_transcript.runs (Observation_transcript.transcript recorder) with
+  | [ { status = Observation_transcript.Incomplete "E0919"; _ } ] -> ()
+  | _ -> Alcotest.fail "the exhausted result walk was not recorded as incomplete");
+  (* projecting a large argument runs out: the operation is kept, its arguments unfinished *)
+  let big = String.make 60_000 'a' in
+  let projected =
+    record ~fuel:300 store ctx Observation_policy.default
+      [ Printf.sprintf "probe.send(%S, \"b\")" big ]
+  in
+  (match Observation_transcript.runs projected with
+  | [ { status = Observation_transcript.Incomplete "E0919"; events = [ event ] } ] ->
+      Alcotest.(check bool) "the operation is kept" true (Hash.equal event.operation send);
+      Alcotest.(check bool)
+        "its arguments are unfinished" true
+        (event.arguments = [ (0, Observation_transcript.Unfinished) ])
+  | _ -> Alcotest.fail "the operation observed before exhaustion was lost");
+  let bytes = Observation_transcript.serialize projected in
+  ignore
+    (expect_ok "unfinished round trip"
+       (Observation_transcript.parse ~policy:Observation_policy.default bytes));
+  Alcotest.(check string)
+    "unfinished arguments cannot be called equal" "inconclusive run[0].event[0].argument[0]"
+    (compare projected projected)
+
+let replace_once text needle replacement =
+  let index = Str.search_forward (Str.regexp_string needle) text 0 in
+  String.sub text 0 index ^ replacement
+  ^ String.sub text
+      (index + String.length needle)
+      (String.length text - index - String.length needle)
+
+let test_impossible_transcripts () =
+  let store, ctx = prepared "impossible" in
+  let send = probe_send store ctx in
+  let observed = policy [ (send, rule ()) ] in
+  let spinning =
+    Observation_transcript.serialize
+      (record ~fuel:1_000 store ctx observed [ "{ probe.send(\"a\", \"b\"); spin(0) }" ])
+  in
+  let refuse label policy bytes =
+    expect_code label "E1006" (Observation_transcript.parse ~policy bytes)
+  in
+  refuse "incomplete for another reason" observed
+    (replace_once spinning "status=incomplete code=E0919" "status=incomplete code=E0601");
+  refuse "failed by fuel" observed
+    (replace_once spinning "status=incomplete code=E0919" "status=failed code=E0919");
+  let all =
+    Observation_transcript.serialize
+      (record store ctx Observation_policy.default [ "probe.send(\"a\", \"b\")" ])
+  in
+  refuse "a missing argument under all-arguments" Observation_policy.default
+    (replace_once all "argument index=1 data bytes=3\n\"b\"\n" "argument index=1 missing\n");
+  let printed =
+    Observation_transcript.serialize
+      (console_transcript store ctx Observation_policy.default "print(\"hi\")")
+  in
+  refuse "unsupported raw output" Observation_policy.default
+    (replace_once printed "output data bytes=2\nhi\n" "output unsupported kind=secret\n");
+  (* a selected position the call does not have is missing *)
+  let beyond =
+    record store ctx
+      (policy [ (send, rule ~arguments:(Observation_policy.Selected_arguments [ 0; 5 ]) ()) ])
+      [ "probe.send(\"a\", \"b\")" ]
+  in
+  Alcotest.(check bool)
+    "position 5 is missing" true
+    (match run_events beyond with
+    | [ { arguments = [ _; (5, Observation_transcript.Missing) ]; _ } ] -> true
+    | _ -> false);
+  (* diagnostics about a transcript never quote it *)
+  let sensitive = "hunter2-SENSITIVE" in
+  let quoted =
+    Observation_transcript.serialize
+      (record store ctx observed [ Printf.sprintf "probe.send(%S, \"b\")" sensitive ])
+  in
+  (match Observation_transcript.parse ~policy:observed (quoted ^ "x") with
+  | Ok _ -> Alcotest.fail "a corrupted transcript parsed"
+  | Error diagnostics ->
+      Alcotest.(check bool)
+        "the diagnostic omits the payload" false
+        (contains (fail_diagnostics diagnostics) sensitive));
+  (* two failures without a diagnostic code cannot be called equal *)
+  let failing message =
+    record
+      ~handler:(fun _ -> Error (Runtime_err.Eval_error message))
+      store ctx observed [ "probe.send(\"a\", \"b\")" ]
+  in
+  Alcotest.(check string)
+    "uncoded failures are inconclusive" "inconclusive run[0].status"
+    (compare (failing "one") (failing "two"))
+
 let suite =
   [
     Alcotest.test_case "policies are canonical, identified, and strictly parsed" `Quick
@@ -352,4 +553,11 @@ let suite =
       test_failures_and_truncation;
     Alcotest.test_case "run-transcript-v1 is unchanged and recording is deterministic" `Quick
       test_v1_unchanged;
+    Alcotest.test_case "constructors are observed by identity, not display name" `Quick
+      test_constructor_identity;
+    Alcotest.test_case "results and output pair with their own call" `Quick test_pairing;
+    Alcotest.test_case "running out of fuel keeps what was observed" `Quick
+      test_fuel_keeps_observations;
+    Alcotest.test_case "impossible transcripts are refused and uncoded failures are not equal"
+      `Quick test_impossible_transcripts;
   ]
