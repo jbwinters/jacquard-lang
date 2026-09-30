@@ -47,8 +47,9 @@ invocation is active when the payload is forced: inside the callback that is
 the observed invocation; a consumer that keeps an event and forces it after the
 invocation ended pays from its own budget, or from none. A consumer still
 chooses what to persist or render through an explicit policy (OBS.1). The v1
-projection keeps only operation identities and Console bytes, as before. A
-quoted code value is charged as one node when rendered.
+projection keeps only operation identities and Console bytes, as before.
+Rendering a quoted code value charges one node plus the metered printing of its
+form (its nodes and bytes).
 
 ## 3. Ownership, lifetime and failure
 
@@ -60,8 +61,9 @@ quoted code value is charged as one node when rendered.
   while an inner one is installed and resumes afterwards. Installing an
   observer adds no authority, grant or handler.
 - An observer cannot re-enter the evaluator or change its authority-bearing
-  configuration (grants, natives, code resolution). While a callback runs, that evaluator refuses to evaluate, to apply or resume a
-  continuation, and to dispatch a routed operation. Registering a root handler
+  configuration (grants, natives, code resolution). While a callback runs,
+  that evaluator refuses to evaluate, to apply or resume a continuation, and to
+  dispatch a routed operation. Registering a root handler
   or a native, changing code resolution, restoring a validated state's mutable
   graph (`fresh_validated_state`), or minting an audit owner
   (`fresh_audit_run_id`) raises `Invalid_argument`. A captured operation's
@@ -89,8 +91,8 @@ quoted code value is charged as one node when rendered.
   refusal's `Eval_error` unless the callback catches it. Either way the refused
   action never takes effect, and fuel exhaustion stays sticky even when caught.
 - An operation that is dispatched is dispatched exactly once whether or not
-  observers are installed. The Once/Multi behavior is unchanged: a captured operation's mode is
-  read before any callback runs.
+  observers are installed. The Once/Multi behavior is unchanged: a captured
+  operation's mode is read before any callback runs.
 
 ## 4. Projections
 
