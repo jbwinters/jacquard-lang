@@ -766,6 +766,51 @@ let test_fuel_outside_runs () =
           ignore (Eval.run_expr b_ctx b_base);
           Eval.fuel_used invocation)
   in
+  (* a memo computed outside any invocation, whose native opens an unbounded invocation on another
+     evaluator, still records that evaluator's term as its dependency *)
+  let b_store, b_ctx = prepared "fuel-outside-outside-b" program in
+  let b_base = expression b_store "base" in
+  let a_store, a_ctx = prepared "fuel-outside-outside-a" "bridge(u) = 0\nouter = bridge(1)\n" in
+  (match Store.lookup_kind a_store "bridge" Resolve.KTerm with
+  | Some { Resolve.hash; _ } ->
+      Eval.register_builtin a_ctx hash
+        (Value.VBuiltin
+           ( "bridge",
+             fun _ ->
+               ignore (Eval.with_invocation b_ctx (fun _ -> Eval.run_expr b_ctx b_base));
+               Ok (Value.VInt 0) ))
+  | None -> Alcotest.fail "bridge not declared");
+  let a_outer = expression a_store "outer" in
+  let both () =
+    Eval.with_invocation a_ctx (fun invocation ->
+        ignore (Eval.run_expr a_ctx a_outer);
+        ignore (Eval.run_expr b_ctx b_base);
+        Eval.fuel_used invocation)
+  in
+  let warmed_outside =
+    ignore (Eval.run_expr a_ctx a_outer);
+    both ()
+  in
+  let b_store', b_ctx' = prepared "fuel-outside-outside-b3" program in
+  let b_base' = expression b_store' "base" in
+  let a_store', a_ctx' = prepared "fuel-outside-outside-a3" "bridge(u) = 0\nouter = bridge(1)\n" in
+  (match Store.lookup_kind a_store' "bridge" Resolve.KTerm with
+  | Some { Resolve.hash; _ } ->
+      Eval.register_builtin a_ctx' hash
+        (Value.VBuiltin
+           ( "bridge",
+             fun _ ->
+               ignore (Eval.with_invocation b_ctx' (fun _ -> Eval.run_expr b_ctx' b_base'));
+               Ok (Value.VInt 0) ))
+  | None -> Alcotest.fail "bridge not declared");
+  let a_outer' = expression a_store' "outer" in
+  let cold =
+    Eval.with_invocation a_ctx' (fun invocation ->
+        ignore (Eval.run_expr a_ctx' a_outer');
+        ignore (Eval.run_expr b_ctx' b_base');
+        Eval.fuel_used invocation)
+  in
+  Alcotest.(check int) "memo warmed outside an invocation" cold warmed_outside;
   for cap = 0 to 16 do
     let run = surviving cap in
     let cold = run () in

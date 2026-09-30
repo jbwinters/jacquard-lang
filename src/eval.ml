@@ -472,10 +472,11 @@ let with_invocation ?coverage ?fuel ctx body =
   in
   Option.iter (fun enabled -> ctx.track_coverage <- enabled) coverage;
   reset_fuel ctx;
+  (* memo frames are kept: an invocation a native opens inside a memo sub-run (even one running
+     outside any invocation) still records what it reaches as that sub-run's dependencies *)
   if !Fuel_meter.depth = 0 then (
     incr Fuel_meter.next_epoch;
-    Fuel_meter.epoch := !Fuel_meter.next_epoch;
-    memo_frames := []);
+    Fuel_meter.epoch := !Fuel_meter.next_epoch);
   incr Fuel_meter.depth;
   (* an invocation on another evaluator inside a bounded one stays within the outer ceiling *)
   Option.iter
