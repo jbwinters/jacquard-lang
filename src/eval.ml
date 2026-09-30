@@ -620,7 +620,10 @@ let lit_matches (l : Kernel.lit) (v : Value.t) =
   | Kernel.LReal a, VReal b ->
       (* align with canon: nan matches nan, and -0.0 matches +0.0 *)
       Float.compare a b = 0 || (a = 0.0 && b = 0.0)
-  | Kernel.LText a, VText b -> String.equal a b
+  | Kernel.LText a, VText b ->
+      (* comparing text pays for its bytes like any other value comparison (RT.1) *)
+      Fuel_meter.tick (String.length a);
+      String.equal a b
   | _ -> false
 
 (** [match_pat v p env] extends [env] with [p]'s bindings if [v] matches, or returns [None].
@@ -1154,6 +1157,9 @@ let invoke_untrusted_native ctx fn native args kont =
   List.iter (prepare_native_argument ctx) invocation_roots;
   charge_native ctx args;
   let result = native args in
+  (* a native that ran out of fuel inside a nested run cannot turn that into another failure,
+     not even one found by revalidating what it mutated *)
+  if Fuel_meter.exhausted () then exhaust ctx;
   List.iter (check_native_argument ctx) invocation_roots;
   match charge_native_result ctx result with
   | Ok value -> checked_result_state ctx value kont
@@ -1776,6 +1782,7 @@ let dispatch_root_operation ctx ~resume ~op ~name ~effect_ args =
         List.iter (prepare_native_argument ctx) roots;
         charge_native ctx args;
         let result = native args in
+        if Fuel_meter.exhausted () then raise (Rt (fuel_error ctx));
         List.iter (check_native_argument ctx) roots;
         match charge_native_result ctx result with
         | Ok value ->

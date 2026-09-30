@@ -48,6 +48,8 @@ the work it pays for, except that a walk is charged as it proceeds:
 | rendering, printing or comparing a value or code form, anywhere in the invocation | 1/64 per node, scalar, and text, symbol, head or constructor-name byte walked |
 | reaching a memoized top-level term | the cost of the sub-run that computed it, once per invocation (§3) |
 
+Pattern matching is paid by the transitions that perform it (a pattern's size
+is fixed by the program text); matching a text literal also pays for its bytes.
 The native measure counts only the text a native directly receives or returns;
 it does not look inside tuples, constructors or code, so measuring is constant
 work per value. Walking a whole value is different: sharing can make the
@@ -112,8 +114,10 @@ skips a failed branch therefore cannot turn exhaustion into a value.
   a value) does not raise exhaustion from a refused debit. The invocation
   becomes exhausted at once, and the refusal is raised as the next run starts,
   so exhaustion arrives through a run's result. A native or an
-  operation is never applied outside a run: a driver applying one gets a state
-  whose first step applies it, so no effect happens before its debit. A native that caught exhaustion from a nested run cannot
+  operation a driver applies (`Eval.apply_state`, `Eval.call`) is never applied
+  outside a run: the driver gets a state whose first step applies it. The
+  scheduler's routed root dispatch checks exhaustion and charges its arguments
+  before the handler runs. A native that caught exhaustion from a nested run cannot
   replace it with its own result or error.
 - A walk that runs out raises `Fuel_meter.Exceeded`. A run turns it into E0919;
   the scheduler and the inference drivers return E0919 for a walk of their
@@ -182,12 +186,17 @@ entry points. A host consumer bounds an invocation with
   backed by evaluator-lifetime caches, so metering them would make a reused
   evaluator's cost differ from a fresh one's. Each scan visits every shared
   value or subform once, so it is linear in data the program already paid to
-  build, and total work stays polynomial in the budget. A granted operation or
+  build, and total work stays polynomial in the budget. For code values the scan
+  repeats at every native or operation boundary, so a program that passes a
+  large code value across many boundaries can spend far more time per fuel
+  unit than ordinary evaluation. A granted operation or
   host-registered native snapshots the data its continuation reaches on every
   call, uncharged.
 - Rendering a finished result is outside the budget: the CLI prints final
-  values and posteriors unmetered. The scheduler's own rendering of a task's
-  result, which it records while the run is still in progress, is metered. Walks during the invocation, including a
+  values and posteriors unmetered. The scheduler, however, renders every task's
+  result (the root task's included) into its trace while the run is in progress,
+  and that rendering is metered, so a run whose final value is an exponentially
+  shared structure ends with E0919. Walks during the invocation, including a
   diagnostic that shows a value, are metered: a huge ill-typed argument can
   exhaust the budget before its type error is rendered.
 - The meter is process-wide. Walks that happen while a bounded invocation is
