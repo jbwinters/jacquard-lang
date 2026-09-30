@@ -78,12 +78,12 @@ out is E0919, not a model runtime failure (E0902) or the terminal-path budget
   $ jacquard infer enumerate --fuel 1000 ../../demos/inference/m3-two-coins.jac
   0.666667  true
   0.333333  false
-  fuel: 152 of 1000 unit(s) used (fuel-v1)
-  $ jacquard infer enumerate --fuel 151 ../../demos/inference/m3-two-coins.jac
+  fuel: 153 of 1000 unit(s) used (fuel-v1)
+  $ jacquard infer enumerate --fuel 152 ../../demos/inference/m3-two-coins.jac
   error[E0919]: Computation fuel was exhausted
-    Cause: computation fuel exhausted: the fuel-v1 budget of 151 unit(s) ran out before evaluation finished; the result is incomplete
+    Cause: computation fuel exhausted: the fuel-v1 budget of 152 unit(s) ran out before evaluation finished; the result is incomplete
     Next step: Raise the --fuel budget, or omit it to run unbounded. An exhausted run is incomplete; it neither passes nor fails.
-  fuel: 151 of 151 unit(s) used (fuel-v1)
+  fuel: 152 of 152 unit(s) used (fuel-v1)
   [1]
 
 A budget must be a non-negative number of units:

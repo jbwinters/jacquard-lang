@@ -443,7 +443,8 @@ let test_fuel_bounds_deep_natives () =
     prepared "fuel-deep"
       "type T = | L | N(left: T, right: T)\n\
        dbl(x, k) = if eq(k, 0) then x else dbl(N(x, x), sub(k, 1))\n\
-       cdbl(c, k) = if eq(k, 0) then c else cdbl(code.form(\"p\", [c, c]), sub(k, 1))\n"
+       cdbl(c, k) = if eq(k, 0) then c else cdbl(code.form(\"p\", [c, c]), sub(k, 1))\n\
+       qdbl(c, k) = if eq(k, 0) then c else qdbl(quote { pair(unquote(c), unquote(c)) }, sub(k, 1))\n"
   in
   Alcotest.(check (pair string int))
     "rendering a shared value" ("E0919", 1_000)
@@ -465,6 +466,14 @@ let test_fuel_bounds_deep_natives () =
   Alcotest.(check (pair string int))
     "and under its exact budget" ("false", cost)
     (fueled ~budget:cost ctx store unequal);
+  (* the evaluator's own walks of runtime code (the recovery scan of a native's result, quote
+     splicing and scope stamping) draw on the budget even when the value is discarded *)
+  Alcotest.(check (pair string int))
+    "discarded shared code" ("E0919", 3_000)
+    (fueled ~budget:3_000 ctx store "{ let _ = cdbl(code.of-int(1), 40); 0 }");
+  Alcotest.(check (pair string int))
+    "spliced shared quotes" ("E0919", 3_000)
+    (fueled ~budget:3_000 ctx store "{ let _ = qdbl(quote { 1 }, 40); 0 }");
   (* comparing code pays for the bytes it compares *)
   let big = String.make 6400 'x' in
   let compare text =
@@ -576,6 +585,24 @@ let test_fuel_outside_runs () =
         failure (run_state ctx (Eval.apply_state ctx reenter [])))
   in
   Alcotest.(check string) "reported by the run" "E0919" code;
+  (* an unbounded invocation on another evaluator nested inside a bounded one draws on the outer
+     budget, and its teardown does not clear the outer exhaustion *)
+  let other_store, other = prepared "fuel-outside-other" "spin(n) = spin(add(n, 1))\n" in
+  let other_spin = expression other_store "spin(0)" in
+  let nested =
+    Value.VBuiltin
+      ( "nested",
+        fun _ ->
+          ignore (Eval.with_invocation other (fun _ -> Eval.run_expr other other_spin));
+          Error (Runtime_err.Arithmetic "fallback") )
+  in
+  let code =
+    Eval.with_invocation ~fuel:1_000 ctx (fun _ ->
+        match Eval.run_expr ctx caller with
+        | Error error -> Diag.code_or_uncoded (Runtime_err.to_diag error)
+        | Ok closure -> failure (run_state ctx (Eval.apply_state ctx closure [ nested ])))
+  in
+  Alcotest.(check string) "the outer invocation stays exhausted" "E0919" code;
   (* an operation a driver applies outside any run performs nothing until a run starts *)
   let print_op =
     Eval.with_invocation ctx (fun _ ->

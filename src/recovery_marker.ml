@@ -7,6 +7,8 @@
 let marked_meta meta = Option.is_some (Meta.surface_hole meta)
 
 let rec form (value : Form.t) =
+  (* runtime code values can share subforms, so this walk draws on computation fuel (RT.1) *)
+  Fuel_meter.tick 1;
   marked_meta value.meta
   || List.exists (function Form.F nested -> form nested | _ -> false) value.args
 

@@ -27,10 +27,11 @@ let exhausted () = !ceiling < 0
 *)
 let[@inline] tick units =
   let total = !used + units in
-  used := total;
   if total > !ceiling then (
+    (* a refused walk spends the remainder once; after exhaustion nothing more is counted *)
     trip ();
     raise Exceeded)
+  else used := total
 
 (** [unmetered f] runs [f] (rendering outside the evaluator, such as printing a final result)
     without drawing on or tripping the budget. *)

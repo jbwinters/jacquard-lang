@@ -470,7 +470,16 @@ let with_invocation ?coverage ?fuel ctx body =
   let finish () =
     invocation.active <- false;
     invocation.fuel_final <- Some (units_of_fine (!Fuel_meter.used - invocation.fuel_start));
-    Fuel_meter.ceiling := invocation.saved_ceiling;
+    (* an invocation nested inside a bounded one that used up the outer allowance leaves the outer
+       one exhausted: its sticky state is never cleared by an inner teardown *)
+    if
+      invocation.saved_ceiling >= 0
+      && !Fuel_meter.used >= invocation.saved_ceiling
+      && invocation.saved_ceiling < max_int
+    then (
+      Fuel_meter.ceiling := invocation.saved_ceiling;
+      Fuel_meter.trip ())
+    else Fuel_meter.ceiling := invocation.saved_ceiling;
     let callbacks = invocation.teardown in
     invocation.teardown <- [];
     let first = ref None in
@@ -679,6 +688,7 @@ let op_value ctx ~trusted h =
 (* Live splice expressions of a quote payload, depth-first left-to-right (quasiquote levels
    as in Kernel/Canon: nested quotes raise, unquotes lower, level-0 unquotes are live). *)
 let rec live_splices ?(level = 0) (f : Form.t) : Kernel.expr list =
+  Fuel_meter.tick 1;
   if f.Form.head = "unquote" && level = 0 then
     match f.Form.args with
     | [ Form.F splice ] -> (
@@ -707,6 +717,7 @@ let substitute_splices (payload : Form.t) (values : Value.t list) : Form.t =
     | [] -> rt_type "splice value queue exhausted (internal)"
   in
   let rec go ?(level = 0) (f : Form.t) : Form.t =
+    Fuel_meter.tick 1;
     if f.Form.head = "unquote" && level = 0 then next ()
     else
       let level =
@@ -728,6 +739,8 @@ let stamp_scope_mark (payload : Form.t) : Form.t =
   incr scope_counter;
   let mark = Meta.Sym (Printf.sprintf "q%d" !scope_counter) in
   let rec go (f : Form.t) =
+    (* the stamp rebuilds, and so unshares, every node of a spliced payload: a metered walk *)
+    Fuel_meter.tick 1;
     let existing =
       match Meta.find Meta.key_scopes f.Form.meta with Some (Meta.List l) -> l | _ -> []
     in
@@ -1718,6 +1731,7 @@ let dispatch_root_operation ctx ~resume ~op ~name ~effect_ args =
   in
   match Hashtbl.find_opt ctx.root_handlers op with
   | None -> Error (Runtime_err.Unhandled { effect_; op = name })
+  | Some _ when Fuel_meter.exhausted () -> Error (fuel_error ctx)
   | Some native -> (
       try
         let roots = [ VOp { op; name; effect_ }; VTuple args; resume ] in
@@ -1730,7 +1744,9 @@ let dispatch_root_operation ctx ~resume ~op ~name ~effect_ args =
             if not (atomic_non_task_value value) then reject_recovery_result_value ctx value;
             Ok value
         | Error error -> Error error
-      with Rt error -> Error error)
+      with
+      | Rt error -> Error error
+      | Fuel_meter.Exceeded -> Error (fuel_error ctx))
 
 (** [resume_captured_state ctx kont value] constructs the state that resumes a root capture. Multi
     continuations remain reusable; applying a Once token consumes its single budget and a later call

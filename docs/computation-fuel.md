@@ -54,8 +54,10 @@ work per value. Walking a whole value is different: sharing can make the
 expanded structure exponentially larger than what building it cost. So value
 rendering (`Value.show`), code printing and form comparison tick the meter per
 node and text byte wherever they run: in a native such as `debug.inspect`,
-`code.render`, `code.eq?` or `pmf`, in the evaluator building a diagnostic, or in
-a driver keying inference results or rendering task results. A walk stops the
+`code.render`, `code.eq?` or `pmf`; in the evaluator scanning a native's code
+result for recovery markers, splicing a quote, stamping its scope marks, or
+building a diagnostic; or in a driver keying inference results, comparing
+observed values, or rendering task results. A walk stops the
 moment it passes the budget, so a huge shared value exhausts the budget
 instead of being walked, and a comparison that stops at the first node stays
 cheap. The units an invocation reports are its fine units rounded up, so a run
@@ -171,9 +173,12 @@ entry points. A host consumer bounds an invocation with
 - Store persistence (writing declarations and the names index) is not program
   computation and is never metered.
 - Rendering a finished result is outside the budget: the CLI prints final
-  values and posteriors unmetered. Walks during the invocation, including a
+  values and posteriors unmetered. The scheduler's own rendering of a task's
+  result, which it records while the run is still in progress, is metered. Walks during the invocation, including a
   diagnostic that shows a value, are metered: a huge ill-typed argument can
   exhaust the budget before its type error is rendered.
 - The meter is process-wide. Walks that happen while a bounded invocation is
-  active draw on its budget whichever evaluator they belong to, and an
-  invocation nested on another evaluator stays within the outer ceiling.
+  active draw on its budget whichever evaluator they belong to. An invocation
+  nested on another evaluator stays within the outer ceiling, and if it uses
+  the outer allowance up, the outer invocation stays exhausted after the inner
+  one ends.

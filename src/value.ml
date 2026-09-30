@@ -92,7 +92,9 @@ let rec show value =
   | VHash hash -> "#" ^ Hash.to_hex hash
   | VSecret _ -> "<secret redacted>"
   | VTuple items -> "(" ^ String.concat ", " (List.map show items) ^ ")"
-  | VCon { name; args = []; _ } -> name
+  | VCon { name; args = []; _ } ->
+      Fuel_meter.tick (String.length name);
+      name
   | VCon { name; args; _ } ->
       Fuel_meter.tick (String.length name);
       name ^ "(" ^ String.concat ", " (List.map show args) ^ ")"

@@ -306,7 +306,10 @@ let enumerate_risk_exact (ctx : Eval.ctx) ~max_branches (model : Eval.state) :
       else
         invalid_arithmetic "uniform-int %d..%d produced invalid support weight %g" lo hi probability
     in
-    let rec comparable_value = function
+    let rec comparable_value value =
+      (* observed values can be shared: every node visited draws on computation fuel (RT.1) *)
+      Fuel_meter.tick 1;
+      match value with
       | Value.VInt _ | VReal _ | VText _ | VHash _ -> Ok ()
       | VTuple items -> comparable_values items
       | VCon { args; _ } -> comparable_values args
@@ -322,6 +325,7 @@ let enumerate_risk_exact (ctx : Eval.ctx) ~max_branches (model : Eval.state) :
           comparable_values rest
     in
     let rec same_comparable_value left right =
+      Fuel_meter.tick 1;
       let* () = comparable_value left in
       let* () = comparable_value right in
       match (left, right) with
@@ -857,6 +861,12 @@ let likelihood_weighting_v1 ctx ~seed ~samples model =
 
 let likelihood_weighting ctx ~seed ~samples model =
   guard_walks ctx (fun () -> likelihood_weighting ctx ~seed ~samples model)
+
+let lw_surviving_runs ctx ~seed ~samples model =
+  guard_walks ctx (fun () -> lw_surviving_runs ctx ~seed ~samples model)
+
+let enumerate_risk_exact ctx ~max_branches model =
+  guard_walks ctx (fun () -> enumerate_risk_exact ctx ~max_branches model)
 
 (** The legacy success-or-diagnostic view of a classified outcome. *)
 let classified_to_result ~sampled (c : classified) : (posterior, Diag.t list) result =
