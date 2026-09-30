@@ -1344,6 +1344,7 @@ let run_suite ?fuel ~store ~ctx ~cctx ~allows ~prop_mode ~schedule_plan ~seed ~c
                 in
                 (* RT.1: with --fuel each test has its own cap on the suite's aggregate; a test that
                    runs out is incomplete, reported as such and never cached *)
+                Warp.partial_outcomes := [];
                 let result, exhausted =
                   match fuel with
                   | None -> (run (), false)
@@ -1360,6 +1361,12 @@ let run_suite ?fuel ~store ~ctx ~cctx ~allows ~prop_mode ~schedule_plan ~seed ~c
                         ->
                           name
                     in
+                    (* verdicts the test's groups completed before it ran out still count *)
+                    List.iter
+                      (fun (o : Warp.outcome) ->
+                        List.iter (fun h -> Hashtbl.replace union h ()) o.Warp.coverage;
+                        List.iter print_endline (Warp.render_outcome totals o))
+                      !Warp.partial_outcomes;
                     totals.Warp.incomplete <- totals.Warp.incomplete + 1;
                     Printf.printf "INCOMPLETE %s: computation fuel exhausted (%s, %d unit(s))\n"
                       name Eval.fuel_model (Option.get fuel);

@@ -164,6 +164,46 @@ unbounded run:
   $ jacquard test suite.jac --fuel 5000 --cache-dir bounded | tail -2
   1 passed, 0 failed, 0 skipped, 0 refused, 1 incomplete
   cache: 1 hit, 0 ran
+Each test pays for the memoized terms it uses, whichever test forced them
+first, so a verdict never depends on test order:
+
+  $ cat > shared.jac <<'J'
+  > countdown(n) = if eq(n, 0) then 0 else countdown(sub(n, 1))
+  > heavy = countdown(2000)
+  > a-case = Case("a", fn () -> check.eq(heavy, 0, int.eq, int.show, "a"))
+  > b-case = Case("b", fn () -> check.eq(add(heavy, countdown(500)), 0, int.eq, int.show, "b"))
+  > J
+  $ grep -v a-case shared.jac > b-only.jac
+  $ jacquard test shared.jac --fuel 50000 --no-cache | head -2
+  PASS a-case/a (1 check)
+  INCOMPLETE b-case: computation fuel exhausted (fuel-v1, 50000 unit(s))
+  $ jacquard test b-only.jac --fuel 50000 --no-cache | head -1
+  INCOMPLETE b-case: computation fuel exhausted (fuel-v1, 50000 unit(s))
+
+A group keeps the verdicts its children finished before one ran out, so a
+failure is never hidden by a later incomplete child:
+
+  $ cat > group.jac <<'J'
+  > loop(n) = loop(add(n, 1))
+  > suite-case = Group("suite", [
+  >   Case("fails", fn () -> check.true(False, "no")),
+  >   Case("spins", fn () -> check.eq(loop(0), 0, int.eq, int.show, "never"))
+  > ])
+  > after-case = Case("after", fn () -> check.true(True, "yes"))
+  > J
+  $ jacquard test group.jac --fuel 3000 --no-cache
+  PASS after-case/after (1 check)
+  FAIL suite-case/suite/fails
+    - no
+  INCOMPLETE suite-case: computation fuel exhausted (fuel-v1, 3000 unit(s))
+  1 passed, 1 failed, 0 skipped, 0 refused, 1 incomplete
+  [1]
+
+Results cached under one budget never answer for another:
+
+  $ jacquard test suite.jac --fuel 6000 --cache-dir bounded | tail -1
+  cache: 0 hit, 1 ran
+
   $ cat > quick.jac <<'J'
   > twice(n) = mul(n, 2)
   > quick-case =

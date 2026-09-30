@@ -158,8 +158,10 @@ whole budget as used.
 
 ## 5. Evidence
 
-With `--fuel`, the CLI prints one line to stderr when the invocation ends,
-whether it finished or ran out:
+With `--fuel`, `jacquard run` and `jacquard infer` print one line to stderr
+when the invocation ends, whether it finished or ran out (`jacquard test`
+reports each exhausted test as `INCOMPLETE` with its budget, and the host
+worker's abort carries E0919 with the budget):
 
 ```text
 fuel: 113 of 113 unit(s) used (fuel-v1)

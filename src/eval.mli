@@ -137,8 +137,10 @@ val with_fuel_scope : ctx -> fuel:int -> (unit -> 'a) -> 'a * bool * int
     aggregate, so it only lowers what [body] may spend. It returns [body]'s result, whether the cap
     (or the aggregate) ran out while [body] ran, and the units [body] used. Running out of the cap
     is [body]'s outcome: the enclosing invocation keeps its remaining allowance unless the cap
-    reached it. A [Fuel_meter.Exceeded] escaping [body] propagates after the cap is restored.
-    [Invalid_argument] without an active invocation or for a negative [fuel]. *)
+    reached it. [body] runs in its own memo epoch, so memoized terms are charged as if it ran alone
+    and its cost does not depend on earlier scopes. A [Fuel_meter.Exceeded] escaping [body]
+    propagates after the cap is restored. [Invalid_argument] without an active invocation or for a
+    negative [fuel]. *)
 
 val fuel_used : invocation -> int
 (** [fuel_used invocation] is the number of {!fuel_model} units charged so far in [invocation]. *)

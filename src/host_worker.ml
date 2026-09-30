@@ -143,7 +143,11 @@ let invoke prepared operator ~limits ~input ~output session =
         note operator "jacquard host worker: the session produced an impossible action";
         Internal_failure
   in
-  let abort diagnostics = terminal (Session.abort session diagnostics) in
+  (* the terminal frame is protocol output, not program computation: never metered, so an
+     exhausted invocation can still report its abort (RT.1) *)
+  let abort diagnostics =
+    Fuel_meter.unmetered (fun () -> terminal (Session.abort session diagnostics))
+  in
   let runtime_failure error = abort [ Runtime_err.to_diag error ] in
   let rec drive state =
     match run_step ctx state with
@@ -177,9 +181,15 @@ let invoke prepared operator ~limits ~input ~output session =
   in
   let callable, arguments = Session.call session in
   let reference = { Kernel.it = Kernel.Ref (callable, Kernel.Term); meta = Meta.empty } in
-  match Eval.run_expr ctx reference with
-  | Error error -> runtime_failure error
-  | Ok callable_value -> drive (Eval.apply_state ctx callable_value arguments)
+  (* validating a result or request type-checks it and can run out of fuel outside any run: that is
+     the same E0919 abort, never an internal failure *)
+  match
+    match Eval.run_expr ctx reference with
+    | Error error -> runtime_failure error
+    | Ok callable_value -> drive (Eval.apply_state ctx callable_value arguments)
+  with
+  | status -> status
+  | exception Fuel_meter.Exceeded -> runtime_failure (Eval.fuel_error ctx)
 
 (* --- one worker lifetime --- *)
 

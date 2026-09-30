@@ -551,6 +551,12 @@ let with_fuel_scope ctx ~fuel body =
   Fuel_meter.ceiling := min own saved_ceiling;
   Fuel_meter.budget := fuel;
   ctx.fuel_limit <- Some fuel;
+  (* a scope charges memoized terms as if it ran alone: a fresh epoch, so its cost never depends on
+     what earlier scopes of the same invocation paid for *)
+  let saved_epoch = !Fuel_meter.epoch and saved_pending = ctx.fuel_pending in
+  incr Fuel_meter.next_epoch;
+  Fuel_meter.epoch := !Fuel_meter.next_epoch;
+  ctx.fuel_pending <- 0;
   let exhausted = ref false in
   let restore () =
     (* the scope's own exhaustion is its outcome; the enclosing allowance stays exhausted only if
@@ -563,7 +569,9 @@ let with_fuel_scope ctx ~fuel body =
       Fuel_meter.trip ())
     else Fuel_meter.ceiling := saved_ceiling;
     Fuel_meter.budget := saved_budget;
-    ctx.fuel_limit <- saved_limit
+    ctx.fuel_limit <- saved_limit;
+    Fuel_meter.epoch := saved_epoch;
+    ctx.fuel_pending <- saved_pending
   in
   let result =
     Fun.protect ~finally:restore (fun () ->
