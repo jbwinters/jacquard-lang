@@ -651,6 +651,39 @@ let test_fuel_outside_runs () =
   in
   let cold = cost () in
   Alcotest.(check int) "warm memo on another evaluator costs the same" cold (cost ());
+  (* ... also when that evaluator's memoized term is reached inside a memo sub-run here, and
+     referenced again directly afterwards *)
+  let bridge_store, bridge_ctx =
+    prepared "fuel-outside-bridge" "bridge(u) = 0\nouter = bridge(1)\n"
+  in
+  (match Store.lookup_kind bridge_store "bridge" Resolve.KTerm with
+  | Some { Resolve.hash; _ } ->
+      Eval.register_builtin bridge_ctx hash
+        (Value.VBuiltin ("bridge", fun _ -> Eval.run_expr memo_ctx table))
+  | None -> Alcotest.fail "bridge not declared");
+  let outer = expression bridge_store "outer" in
+  let cost () =
+    Eval.with_invocation bridge_ctx (fun invocation ->
+        ignore (Eval.run_expr bridge_ctx outer);
+        ignore (Eval.run_expr memo_ctx table);
+        Eval.fuel_used invocation)
+  in
+  let cold = cost () in
+  Alcotest.(check int) "memo dependency on another evaluator" cold (cost ());
+  (* a Warp runner that runs out reports a runner error, never a failing verdict *)
+  (match Store.lookup_kind store "test.run" Resolve.KTerm with
+  | None -> ()
+  | Some { Resolve.hash; _ } ->
+      let outcome =
+        Eval.with_invocation ~fuel:0 ctx (fun _ ->
+            match Warp.value_of ctx hash with
+            | Error _ -> "error"
+            | Ok test_run -> (
+                match Warp.run_thunk ctx ~test_run (Value.VInt 0) with
+                | Ok _ -> "verdict"
+                | Error _ -> "error"))
+      in
+      Alcotest.(check string) "warp under exhaustion" "error" outcome);
   (* an operation a driver applies outside any run performs nothing until a run starts *)
   let print_op =
     Eval.with_invocation ctx (fun _ ->

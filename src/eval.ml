@@ -115,7 +115,13 @@ type mutable_graph_snapshot = {
 
 (* fuel-v1 cost of one memoized term's isolated sub-run (RT.1): its own units, the memoized terms
    it reached, and the invocation epoch in which it was last charged *)
-type memo_charge = { mutable own : int; deps : Hash.t list; mutable charged_epoch : int }
+type memo_charge = { mutable own : int; deps : memo_charge list; mutable charged_epoch : int }
+
+(* memo sub-runs in progress, innermost first, across every evaluator: a native that re-enters
+   another evaluator inside a sub-run still attributes that evaluator's memoized terms to it *)
+type memo_frame = { mutable frame_deps : memo_charge list; mutable dep_units : int }
+
+let memo_frames : memo_frame list ref = ref []
 
 type mutable_snapshot = {
   snapshot_root : Value.t;
@@ -190,7 +196,6 @@ type ctx = {
   memo_cost : (Hash.t, memo_charge) Hashtbl.t;
       (** fine fuel units of each memoized term's isolated sub-run, split into its own work and the
           memoized terms it reached, so a warm memo charges what a cold one would *)
-  mutable memo_frames : memo_frame list;  (** innermost first: memo sub-runs in progress *)
   mutable deferring : bool;
       (** set while a driver applies a value outside any run: a debit that would pass the budget is
           then deferred to [fuel_pending] instead of raising, so exhaustion always surfaces through
@@ -200,8 +205,6 @@ type ctx = {
           the next run starts, inside its error channel *)
 }
 
-and memo_frame = { frame_deps : (Hash.t, unit) Hashtbl.t; mutable dep_units : int }
-
 and invocation = {
   mutable active : bool;
   mutable teardown : (unit -> unit) list;  (** most recent first *)
@@ -210,6 +213,7 @@ and invocation = {
   saved_ceiling : int;  (** the meter ceiling to restore when the invocation ends *)
   saved_budget : int;  (** the reported budget to restore when the invocation ends *)
   saved_epoch : int;  (** the memo-charging epoch to restore when the invocation ends *)
+  saved_frames : memo_frame list;  (** memo sub-runs of an enclosing invocation *)
   budget : int option;
 }
 
@@ -248,7 +252,6 @@ let make_ctx store =
     memo_cost = Hashtbl.create 64;
     deferring = false;
     fuel_pending = 0;
-    memo_frames = [];
   }
 
 (** [store ctx] returns the immutable store handle used for name and declaration lookup. *)
@@ -428,7 +431,7 @@ let fuel_exhausted _ctx = Fuel_meter.exhausted ()
 let reset_fuel ctx =
   ctx.fuel_limit <- None;
   ctx.fuel_pending <- 0;
-  ctx.memo_frames <- []
+  ignore ctx
 
 let with_invocation ?coverage ?fuel ctx body =
   if Option.is_some ctx.invocation then
@@ -449,12 +452,14 @@ let with_invocation ?coverage ?fuel ctx body =
       saved_ceiling = !Fuel_meter.ceiling;
       saved_budget = !Fuel_meter.budget;
       saved_epoch = !Fuel_meter.epoch;
+      saved_frames = !memo_frames;
     }
   in
   Option.iter (fun enabled -> ctx.track_coverage <- enabled) coverage;
   reset_fuel ctx;
   incr Fuel_meter.next_epoch;
   Fuel_meter.epoch := !Fuel_meter.next_epoch;
+  memo_frames := [];
   (* an invocation on another evaluator inside a bounded one stays within the outer ceiling *)
   Option.iter
     (fun limit ->
@@ -485,6 +490,7 @@ let with_invocation ?coverage ?fuel ctx body =
     else Fuel_meter.ceiling := invocation.saved_ceiling;
     Fuel_meter.budget := invocation.saved_budget;
     Fuel_meter.epoch := invocation.saved_epoch;
+    memo_frames := invocation.saved_frames;
     let callbacks = invocation.teardown in
     invocation.teardown <- [];
     let first = ref None in
@@ -1324,30 +1330,32 @@ let apply ctx fn args k =
    invocation) and attribute it to the enclosing memo sub-run, if any. Every reached term is a
    dependency, charged or not, so a recorded cost never depends on what this invocation had already
    paid for. *)
-let note_memo_charge ctx h units =
-  match ctx.memo_frames with
+let note_memo_charge cost units =
+  match !memo_frames with
   | frame :: _ ->
-      Hashtbl.replace frame.frame_deps h ();
+      if not (List.memq cost frame.frame_deps) then frame.frame_deps <- cost :: frame.frame_deps;
       frame.dep_units <- frame.dep_units + units
   | [] -> ()
 
 (* A memo hit charges, once per invocation, exactly what the cold sub-run would have: its own
    transitions plus every memoized dependency not yet charged in this invocation. *)
 let charge_memo_hit ctx h =
-  let rec total h =
-    match Hashtbl.find_opt ctx.memo_cost h with
-    | Some cost when cost.charged_epoch <> !Fuel_meter.epoch ->
-        cost.charged_epoch <- !Fuel_meter.epoch;
-        List.fold_left (fun units dep -> units + total dep) cost.own cost.deps
-    | Some _ | None -> 0
+  let rec total cost =
+    if cost.charged_epoch = !Fuel_meter.epoch then 0
+    else (
+      cost.charged_epoch <- !Fuel_meter.epoch;
+      List.fold_left (fun units dep -> units + total dep) cost.own cost.deps)
   in
-  let units = total h in
-  note_memo_charge ctx h units;
-  charge_fine ctx units
+  match Hashtbl.find_opt ctx.memo_cost h with
+  | None -> ()
+  | Some cost ->
+      let units = total cost in
+      note_memo_charge cost units;
+      charge_fine ctx units
 
 (* the hot path: a warm hit already charged in this invocation, outside any memo sub-run *)
-let[@inline] memo_hit_is_paid ctx = function
-  | Some cost -> cost.charged_epoch = !Fuel_meter.epoch && ctx.memo_frames = []
+let[@inline] memo_hit_is_paid _ctx = function
+  | Some cost -> cost.charged_epoch = !Fuel_meter.epoch && !memo_frames = []
   | None -> false
 
 (** Resolve a store reference to a runtime value: builtins and memoized terms short-circuit; other
@@ -1415,29 +1423,25 @@ let rec eval_ref ctx ~trusted (h : Hash.t) (kind : Kernel.refkind) (k : kont) : 
                   reject_recovery_state ctx initial;
                   let saved_capture = ctx.capture_ops in
                   ctx.capture_ops <- false;
-                  let frame = { frame_deps = Hashtbl.create 8; dep_units = 0 } in
-                  let saved_frames = ctx.memo_frames in
-                  ctx.memo_frames <- frame :: saved_frames;
+                  let frame = { frame_deps = []; dep_units = 0 } in
+                  let saved_frames = !memo_frames in
+                  memo_frames := frame :: saved_frames;
                   let v =
                     Fun.protect
                       ~finally:(fun () ->
                         ctx.capture_ops <- saved_capture;
-                        ctx.memo_frames <- saved_frames)
+                        memo_frames := saved_frames)
                       (fun () -> run_state_unchecked ctx initial)
                   in
                   let memo_charge =
-                    {
-                      own = 0;
-                      deps = Hashtbl.fold (fun dep () deps -> dep :: deps) frame.frame_deps [];
-                      charged_epoch = !Fuel_meter.epoch;
-                    }
+                    { own = 0; deps = frame.frame_deps; charged_epoch = !Fuel_meter.epoch }
                   in
                   let next = checked_result_state ctx v k in
                   let snapshot = make_mutable_snapshot ~memo_charge ctx v in
                   let units = !Fuel_meter.used - started in
                   memo_charge.own <- units - frame.dep_units;
                   Hashtbl.replace ctx.memo_cost h memo_charge;
-                  note_memo_charge ctx h units;
+                  note_memo_charge memo_charge units;
                   (* The isolated run has completed all closure construction and [let rec] knot
                      tying, and [checked_result_state] has traversed the finished graph. Evaluator
                      transitions never mutate a memoized graph after this point. Record ownership

@@ -22,9 +22,9 @@ on the same allowance:
   of an inference driver;
 - every task of a scheduled run.
 
-Forks never receive a copied or fresh allowance. The counter lives on the
-evaluator, not on a continuation, so the only way to spend fuel is to run a
-transition, and every transition debits the one shared budget. fuel-v1 has no
+Forks never receive a copied or fresh allowance. The counter is one
+process-wide meter, not state on a continuation, so every transition and every
+metered walk (§2) debits the one shared budget. fuel-v1 has no
 per-branch limits. A driver that adds per-branch caps later must still draw on
 the aggregate, so a cap only lowers what one branch may spend.
 

@@ -1039,6 +1039,10 @@ let run_state_global_unguarded ctx ~policy ~bounds ~program ~schedule_mode ~allo
           (* exhaustion is sticky: however the run ended (a decision limit reached after a
              deferred debit, or a failure it caused), the outcome is the exhaustion *)
           Error (Run_error (Option.value !fuel_exhaustion ~default:(Eval.fuel_error ctx)))
+      | Error _ when Option.is_some !fuel_exhaustion ->
+          (* a nested invocation ran out and its native returned that exhaustion: the run is
+             incomplete even though the outer meter still has fuel *)
+          Error (Run_error (Option.get !fuel_exhaustion))
       | Error diagnostics -> (
           let error = runtime_of_diagnostics diagnostics in
           match !budget_refusal with
