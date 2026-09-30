@@ -32,7 +32,7 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1118`
+- Alcotest/QCheck cases: `1121`
 - Cram transcript files: `74`
 - Documentation examples: `35` named examples across `8` documents
 
@@ -614,6 +614,6 @@ RT.1 adds deterministic computation fuel (`docs/computation-fuel.md`): an
 optional per-invocation `fuel-v1` budget that `jacquard run`, `jacquard infer
 enumerate` and `jacquard infer lw` accept as `--fuel UNITS`, and E0919 for an
 exhausted, incomplete run. Without `--fuel` every command is unbounded and its
-output is unchanged. Seven `test/test_invocation.ml` cases and the new
+output is unchanged. Ten `test/test_invocation.ml` cases and the new
 `test/cli/fuel.t` transcript bring the current source inventory to
-`1118 / 74 / 35`.
+`1121 / 74 / 35`.

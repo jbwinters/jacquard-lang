@@ -104,9 +104,9 @@ let err ~code fmt = Printf.ksprintf (fun cause -> Error [ diagnostic ~code cause
 
 (* A runtime failure under [code], except computation-fuel exhaustion (RT.1), which keeps E0919:
    running out of fuel is incomplete inference, not a model failure. *)
-let runtime_diagnostic ~code = function
-  | Runtime_err.Fuel_exhausted _ as error -> Runtime_err.to_diag error
-  | error -> diagnostic ~code (Runtime_err.to_string error)
+let runtime_diagnostic ~code error =
+  if Runtime_err.is_fuel_exhausted error then Runtime_err.to_diag error
+  else diagnostic ~code (Runtime_err.to_string error)
 
 (* --- distribution values --- *)
 

@@ -197,6 +197,10 @@ type ctx = {
   mutable fuel_epoch : int;
       (** advanced by every invocation; a memo cost is charged once per epoch *)
   mutable memo_frames : memo_frame list;  (** innermost first: memo sub-runs in progress *)
+  mutable deferring : bool;
+      (** set while a driver applies a value outside any run: a debit that would pass the budget is
+          then deferred to [fuel_pending] instead of raising, so exhaustion always surfaces through
+          a run's result *)
   mutable fuel_pending : int;
       (** resumption units incurred while a driver built a state outside the machine; charged when
           the next run starts, inside its error channel *)
@@ -209,6 +213,7 @@ and invocation = {
   mutable teardown : (unit -> unit) list;  (** most recent first *)
   owner : ctx;
   fuel_start : int;  (** [owner.fuel_used] when the invocation began *)
+  mutable fuel_final : int option;  (** units used, frozen when the invocation ends *)
   budget : int option;
 }
 
@@ -249,6 +254,7 @@ let make_ctx store =
     fuel_exhausted = false;
     memo_cost = Hashtbl.create 64;
     fuel_epoch = 0;
+    deferring = false;
     fuel_pending = 0;
     memo_frames = [];
   }
@@ -413,8 +419,14 @@ let on_teardown invocation callback =
 
 let invocation_active ctx = Option.is_some ctx.invocation
 let fuel_model = "fuel-v1"
-let fuel_used invocation = invocation.owner.fuel_used - invocation.fuel_start
+
+let fuel_used invocation =
+  match invocation.fuel_final with
+  | Some used -> used
+  | None -> invocation.owner.fuel_used - invocation.fuel_start
+
 let fuel_budget invocation = invocation.budget
+let fuel_exhausted ctx = ctx.fuel_exhausted
 
 let reset_fuel ctx =
   ctx.fuel_ceiling <- max_int;
@@ -434,7 +446,14 @@ let with_invocation ?coverage ?fuel ctx body =
   and saved_observer = ctx.root_observer
   and saved_handlers = Hashtbl.copy ctx.root_handlers in
   let invocation =
-    { active = true; teardown = []; owner = ctx; fuel_start = ctx.fuel_used; budget = fuel }
+    {
+      active = true;
+      teardown = [];
+      owner = ctx;
+      fuel_start = ctx.fuel_used;
+      fuel_final = None;
+      budget = fuel;
+    }
   in
   Option.iter (fun enabled -> ctx.track_coverage <- enabled) coverage;
   reset_fuel ctx;
@@ -449,6 +468,7 @@ let with_invocation ?coverage ?fuel ctx body =
      invocation borrowed; returns the first callback exception *)
   let finish () =
     invocation.active <- false;
+    invocation.fuel_final <- Some (ctx.fuel_used - invocation.fuel_start);
     let callbacks = invocation.teardown in
     invocation.teardown <- [];
     let first = ref None in
@@ -537,24 +557,70 @@ let exhaust ctx =
     (Runtime_err.Fuel_exhausted
        { model = fuel_model; limit = Option.value ctx.fuel_limit ~default:0 })
 
+(* A refused debit exhausts the invocation, or, outside any run, waits for the next run to start *)
+
 (** [charge ctx units] debits [units] before the work they pay for. A debit that would pass the
     ceiling is refused and exhausts the invocation; nothing is charged for it. *)
+let refuse ctx units =
+  if ctx.deferring then ctx.fuel_pending <- ctx.fuel_pending + max 1 units else exhaust ctx
+
 let[@inline] charge ctx units =
   let used = ctx.fuel_used + units in
-  if used > ctx.fuel_ceiling then exhaust ctx else ctx.fuel_used <- used
+  if used > ctx.fuel_ceiling then refuse ctx units else ctx.fuel_used <- used
 
-(* Text bytes and code-form nodes held directly by a native's argument or result; structure inside
-   tuples and constructors is not traversed, so the measure is proportional to the payloads a native
-   actually reads or builds. *)
-let rec form_nodes (form : Form.t) =
-  List.fold_left
-    (fun total -> function Form.F child -> total + form_nodes child | _ -> total + 1)
-    1 form.args
+(* [charge_outside ctx units] debits work a driver does outside any run (resuming a captured
+   continuation), deferring a refusal to the next run *)
+let charge_outside ctx units =
+  let saved = ctx.deferring in
+  ctx.deferring <- true;
+  charge ctx units;
+  ctx.deferring <- saved
 
-let payload_units = function
-  | VText text -> String.length text
-  | VCode form -> form_nodes form
-  | _ -> 0
+(* Text bytes held directly by a native's argument or result. Nothing inside tuples, constructors,
+   or code is traversed, so measuring is O(1) per value. *)
+let payload_units = function VText text -> String.length text | _ -> 0
+
+exception Past_allowance
+
+(* A deep native (one that renders, hashes, or compares a whole value or code form) does work in
+   proportion to the value's expanded size, which sharing can make exponential in what building it
+   cost. It therefore pays for the expanded size before it runs: one unit per 64 nodes or text bytes.
+   The measurement stops as soon as it passes the remaining allowance, so it is itself bounded. *)
+let charge_expanded ctx values =
+  let remaining = ctx.fuel_ceiling - ctx.fuel_used in
+  let cap =
+    if remaining < 0 then -1
+    else if remaining > max_int / 64 then max_int
+    else (remaining * 64) + 63
+  in
+  let count = ref 0 in
+  let add n =
+    count := !count + n;
+    if !count > cap || !count < 0 then raise Past_allowance
+  in
+  let rec form (f : Form.t) =
+    add (1 + String.length f.head);
+    List.iter
+      (function
+        | Form.F child -> form child
+        | Form.Text text | Form.Sym text -> add (1 + String.length text)
+        | Form.Int _ | Form.Real _ | Form.Hash _ -> add 1)
+      f.args
+  in
+  let rec value = function
+    | VText text -> add (1 + String.length text)
+    | VCode f -> form f
+    | VTuple items ->
+        add 1;
+        List.iter value items
+    | VCon { name; args; _ } ->
+        add (1 + String.length name);
+        List.iter value args
+    | _ -> add 1
+  in
+  match List.iter value values with
+  | () -> charge ctx (!count / 64)
+  | exception Past_allowance -> refuse ctx (cap + 1)
 
 let rec payload_total total = function
   | [] -> total
@@ -1076,11 +1142,19 @@ let check_native_argument ctx root =
         reject_recovery_state ctx (SApply (root, []));
         replace_native_snapshot ctx root index)
 
-let charge_native_result ctx = function
-  | Ok value as result ->
-      charge_payload ctx (payload_units value);
-      result
-  | Error _ as result -> result
+(* A native that re-entered the evaluator and ran out cannot replace the exhaustion with its own
+   result or error *)
+let charge_native_result ctx result =
+  if ctx.fuel_exhausted then
+    Error
+      (Runtime_err.Fuel_exhausted
+         { model = fuel_model; limit = Option.value ctx.fuel_limit ~default:0 })
+  else
+    match result with
+    | Ok value ->
+        charge_payload ctx (payload_units value);
+        result
+    | Error _ -> result
 
 let invoke_untrusted_native ctx fn native args kont =
   let invocation_roots = [ fn; VTuple args; VResume kont ] in
@@ -1092,9 +1166,9 @@ let invoke_untrusted_native ctx fn native args kont =
   | Ok value -> checked_result_state ctx value kont
   | Error error -> rt error
 
-let invoke_trusted_native ctx native args kont =
-  charge_native ctx args;
-  match charge_native_result ctx (native args) with
+let invoke_trusted_native ctx builtin args kont =
+  if Trusted_builtin.deep builtin then charge_expanded ctx args else charge_native ctx args;
+  match charge_native_result ctx (Trusted_builtin.invoke builtin args) with
   | Ok value -> checked_result_state ctx value kont
   | Error error -> rt error
 
@@ -1139,7 +1213,7 @@ let perform_unchecked ctx (op : Hash.t) ~name ~effect_ (args : Value.t list) (k 
         SEval ({ h.hscope with env }, obody, outer)
     | f :: outer -> split (walked + 1) (f :: inner_rev) outer
     | [] -> (
-        charge ctx walked;
+        if walked > 0 then charge ctx walked;
         notify_root_operation ctx op;
         match Hashtbl.find_opt ctx.root_handlers op with
         | Some native when not ctx.capture_root_handlers ->
@@ -1155,14 +1229,8 @@ let perform_unchecked ctx (op : Hash.t) ~name ~effect_ (args : Value.t list) (k 
 
 (** Apply a function-position value to fully evaluated arguments (uncurried, decision D5): closures,
     builtins, constructors, ops (perform), and resumptions. *)
-let apply_unchecked ?(outside = false) ctx (fn : Value.t) (args : Value.t list) (k : kont) : state =
-  (* a resumption applied by a driver outside the machine (a scheduler or host resuming a
-     continuation) defers its debit to the next run, so exhaustion is reported through that run's
-     result rather than raised from state construction *)
-  let charge_frames frames =
-    if outside then ctx.fuel_pending <- ctx.fuel_pending + List.length frames
-    else charge ctx (List.length frames)
-  in
+let apply_unchecked ctx (fn : Value.t) (args : Value.t list) (k : kont) : state =
+  let charge_frames frames = charge ctx (List.length frames) in
   match fn with
   | VClosure { scope; params; body } ->
       if List.length params <> List.length args then
@@ -1191,7 +1259,7 @@ let apply_unchecked ?(outside = false) ctx (fn : Value.t) (args : Value.t list) 
                })
       | [ _ ] -> rt (Runtime_err.Unhandled { effect_ = "Async"; op = "async.scope" })
       | _ -> rt_arity "async.scope expects one thunk, got %d" (List.length args))
-  | VTrustedBuiltin builtin -> invoke_trusted_native ctx (Trusted_builtin.invoke builtin) args k
+  | VTrustedBuiltin builtin -> invoke_trusted_native ctx builtin args k
   | VConstructor { con; name; arity } ->
       if List.length args <> arity then
         rt_arity "constructor %s expects %d argument(s), got %d" name arity (List.length args)
@@ -1219,19 +1287,23 @@ let apply_unchecked ?(outside = false) ctx (fn : Value.t) (args : Value.t list) 
     passed the same guard. *)
 let apply ctx fn args k =
   reject_recovery_state ctx (SApply (VTuple (fn :: args), k));
-  apply_unchecked ~outside:true ctx fn args k
+  (* a driver applying a value outside any run (a scheduler or host resuming a continuation, a
+     native call) defers a refused debit to the next run, so exhaustion is reported through that
+     run's result rather than raised from state construction *)
+  let saved = ctx.deferring in
+  ctx.deferring <- true;
+  match apply_unchecked ctx fn args k with
+  | state ->
+      ctx.deferring <- saved;
+      state
+  | exception exn ->
+      ctx.deferring <- saved;
+      raise exn
 
 (* Record that memoized term [h] was reached for [units] (zero when it was already charged in this
    invocation) and attribute it to the enclosing memo sub-run, if any. Every reached term is a
    dependency, charged or not, so a recorded cost never depends on what this invocation had already
    paid for. *)
-
-(** Resolve a store reference to a runtime value: builtins and memoized terms short-circuit; other
-    terms load from the store and evaluate in an ISOLATED sub-run. Isolation is a soundness
-    requirement (review finding): a top-level body's effects must not be captured by handlers around
-    the referencing expression, or a handled branch's value could be memoized and leak past the
-    handler's dynamic extent. A top-level body therefore either handles its own effects, uses
-    granted root handlers, or dies with [Unhandled] at the referencing point. *)
 let note_memo_charge ctx h units =
   match ctx.memo_frames with
   | frame :: _ ->
@@ -1258,6 +1330,12 @@ let[@inline] memo_hit_is_paid ctx = function
   | Some cost -> cost.charged_epoch = ctx.fuel_epoch && ctx.memo_frames = []
   | None -> false
 
+(** Resolve a store reference to a runtime value: builtins and memoized terms short-circuit; other
+    terms load from the store and evaluate in an ISOLATED sub-run. Isolation is a soundness
+    requirement (review finding): a top-level body's effects must not be captured by handlers around
+    the referencing expression, or a handled branch's value could be memoized and leak past the
+    handler's dynamic extent. A top-level body therefore either handles its own effects, uses
+    granted root handlers, or dies with [Unhandled] at the referencing point. *)
 let rec eval_ref ctx ~trusted (h : Hash.t) (kind : Kernel.refkind) (k : kont) : state =
   match kind with
   | Kernel.Con -> SApply (con_value ctx ~trusted h, k)
@@ -1452,13 +1530,23 @@ and step_unchecked ctx (state : state) : state option =
     only rearrange validated payloads or tie a fresh recursive cell; native and untrusted memo
     boundaries validate fresh values before constructing their result states. *)
 and run_state_unchecked ctx state =
-  (* a resumption a driver applied outside the machine is paid for here, inside the run's error
-     channel *)
-  if ctx.fuel_pending > 0 then (
-    let pending = ctx.fuel_pending in
-    ctx.fuel_pending <- 0;
-    charge ctx pending);
-  run_machine ctx state
+  (* work a driver did outside any run is paid for here, inside this run's error channel; a run
+     itself never defers, even when a native started it while a driver was applying a value *)
+  let saved = ctx.deferring in
+  ctx.deferring <- false;
+  match
+    if ctx.fuel_pending > 0 then (
+      let pending = ctx.fuel_pending in
+      ctx.fuel_pending <- 0;
+      charge ctx pending);
+    run_machine ctx state
+  with
+  | value ->
+      ctx.deferring <- saved;
+      value
+  | exception exn ->
+      ctx.deferring <- saved;
+      raise exn
 
 (* every machine state visited costs one unit, the terminal one included, so an exhausted invocation
    can never deliver a value *)
@@ -1579,9 +1667,10 @@ let run_validated_state_capturing ctx (Validated_state (owner, state, _)) =
     the newly introduced value needs validation because [kont] came from a validated run. *)
 let resume_validated_state ctx kont value =
   match kont with
-  | Validated_multi_kont (Validated_kont (owner, frames)) -> (
+  | Validated_multi_kont (Validated_kont (owner, frames)) ->
       if owner != ctx then Error (foreign_evaluator_context "validated continuation")
-      else
+      else (
+        charge_outside ctx (List.length frames);
         match checked_result_state ctx value frames with
         | state -> Ok (Validated_state (owner, state, None))
         | exception Rt error -> Error error)
@@ -1667,9 +1756,10 @@ let dispatch_root_operation ctx ~resume ~op ~name ~effect_ args =
     reports E0906. Newly introduced values are recovery-validated at this boundary. *)
 let resume_captured_state ctx kont value =
   match kont with
-  | Multi_kont (owner, frames) -> (
+  | Multi_kont (owner, frames) ->
       if owner != ctx then Error (foreign_evaluator_context "captured continuation")
-      else
+      else (
+        charge_outside ctx (List.length frames);
         match checked_result_state ctx value frames with
         | state -> Ok state
         | exception Rt error -> Error error)

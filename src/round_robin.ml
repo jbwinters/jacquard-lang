@@ -580,7 +580,7 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed i
     let step run handle state =
       Structured_scope.with_eval_task_context Task_capability.runtime ctx run.scope (fun () ->
           match Eval.run_state_capturing_once_routed ctx state with
-          | Error (Runtime_err.Fuel_exhausted _ as error) ->
+          | Error error when Eval.fuel_exhausted ctx || Runtime_err.is_fuel_exhausted error ->
               fuel_exhaustion := Some error;
               Error [ Runtime_err.to_diag error ]
           | Error error ->
@@ -921,9 +921,8 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed i
                   with
                   | Ok value -> Ok value
                   | Error error ->
-                      (match error with
-                      | Runtime_err.Fuel_exhausted _ -> fuel_exhaustion := Some error
-                      | _ -> ());
+                      if Eval.fuel_exhausted ctx || Runtime_err.is_fuel_exhausted error then
+                        fuel_exhaustion := Some error;
                       routed_error := Some error;
                       Error [ scheduler_diagnostic (Runtime_err.to_string error) ])
                 ~continue:(fun owned value ->

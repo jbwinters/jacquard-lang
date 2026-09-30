@@ -434,6 +434,89 @@ let test_fuel_does_not_retry_side_effects () =
   Alcotest.(check string) "exhausted" "E0919" code;
   Alcotest.(check string) "the effect before exhaustion happened once" "once" (Buffer.contents sink)
 
+let test_fuel_bounds_deep_natives () =
+  (* sharing makes a value's expanded size exponential in what building it cost; a native that
+     renders or hashes the whole value pays for that size before it runs, and the measurement
+     itself stops at the budget *)
+  let store, ctx =
+    prepared "fuel-deep"
+      "type T = | L | N(left: T, right: T)\n\
+       dbl(x, k) = if eq(k, 0) then x else dbl(N(x, x), sub(k, 1))\n\
+       cdbl(c, k) = if eq(k, 0) then c else cdbl(code.form(\"p\", [c, c]), sub(k, 1))\n"
+  in
+  Alcotest.(check (pair string int))
+    "rendering a shared value" ("E0919", 1_000)
+    (fueled ~budget:1_000 ctx store "text.length(debug.inspect(dbl(L, 40)))");
+  Alcotest.(check (pair string int))
+    "rendering shared code" ("E0919", 1_000)
+    (fueled ~budget:1_000 ctx store "text.length(code.render(cdbl(code.of-int(1), 40)))");
+  (* a small shared value still renders, and pays for its expanded size *)
+  let small, cost = fueled ctx store "text.length(debug.inspect(dbl(L, 8)))" in
+  Alcotest.(check (pair string int))
+    "exact" (small, cost)
+    (fueled ~budget:cost ctx store "text.length(debug.inspect(dbl(L, 8)))")
+
+let test_fuel_survives_nested_drivers () =
+  (* a native driver that wraps the evaluator's error still reports E0919 *)
+  let store, ctx = prepared "fuel-nested" "spin(n) = spin(add(n, 1))\n" in
+  let model = expression store "dist.sample-lw(fn () -> spin(0), 3, 1)" in
+  let code =
+    Eval.with_invocation ~fuel:500 ctx (fun _ ->
+        match Infer_dist.enumerate_v1 ctx (Eval.expr_state model) with
+        | Ok _ -> "posterior"
+        | Error diagnostics -> String.concat "," (List.map Diag.code_or_uncoded diagnostics))
+  in
+  Alcotest.(check string) "E0919, not E0902" "E0919" code
+
+let test_fuel_outside_runs () =
+  let store, ctx = prepared "fuel-outside" "spin(n) = spin(add(n, 1))\n" in
+  (* a driver applying a native outside any run never raises exhaustion; the next run reports it *)
+  let big = Value.VBuiltin ("big", fun _ -> Ok (Value.VText (String.make 640 'x'))) in
+  let code =
+    Eval.with_invocation ~fuel:3 ctx (fun _ ->
+        let state = Eval.apply_state ctx big [] in
+        failure (run_state ctx state))
+  in
+  Alcotest.(check string) "deferred to the next run" "E0919" code;
+  (* a native that catches exhaustion cannot replace it with its own error *)
+  let spin = expression store "spin(0)" in
+  let swallow =
+    Value.VBuiltin
+      ( "swallow",
+        fun _ ->
+          ignore (Eval.run_expr ctx spin);
+          Error (Runtime_err.Arithmetic "fallback") )
+  in
+  let caller = expression store "fn (f) -> f()" in
+  let code =
+    Eval.with_invocation ~fuel:1_000 ctx (fun _ ->
+        match Eval.run_expr ctx caller with
+        | Error error -> Diag.code_or_uncoded (Runtime_err.to_diag error)
+        | Ok closure -> failure (run_state ctx (Eval.apply_state ctx closure [ swallow ])))
+  in
+  Alcotest.(check string) "exhaustion wins over the native's error" "E0919" code;
+  (* a multi-shot resumption made by a driver pays for the frames it reinstalls *)
+  let model =
+    expression store "{ let c = `op:sample`(Bernoulli(0.5)); add(if c then 1 else 2, 3) }"
+  in
+  let enumerate budget =
+    Eval.with_invocation ?fuel:budget ctx (fun invocation ->
+        match Infer_dist.enumerate_v1 ctx (Eval.expr_state model) with
+        | Ok _ -> ("posterior", Eval.fuel_used invocation)
+        | Error diagnostics ->
+            ( String.concat "," (List.map Diag.code_or_uncoded diagnostics),
+              Eval.fuel_used invocation ))
+  in
+  let _, cost = enumerate None in
+  let kept = Eval.with_invocation ctx (fun invocation -> invocation) in
+  Alcotest.(check int) "a finished invocation keeps its count" 0 (Eval.fuel_used kept);
+  ignore (enumerate None);
+  Alcotest.(check int) "... even after later invocations" 0 (Eval.fuel_used kept);
+  Alcotest.(check (pair string int))
+    "one unit short"
+    ("E0919", cost - 1)
+    (enumerate (Some (cost - 1)))
+
 let suite =
   [
     Alcotest.test_case "grants are scoped to one invocation" `Quick test_grants_are_scoped;
@@ -457,4 +540,8 @@ let suite =
       test_fuel_exhaustion_is_sticky;
     Alcotest.test_case "exhaustion never retries an effect" `Quick
       test_fuel_does_not_retry_side_effects;
+    Alcotest.test_case "deep natives pay for expanded size first" `Quick
+      test_fuel_bounds_deep_natives;
+    Alcotest.test_case "wrapped exhaustion stays E0919" `Quick test_fuel_survives_nested_drivers;
+    Alcotest.test_case "work outside runs is charged and never raises" `Quick test_fuel_outside_runs;
   ]

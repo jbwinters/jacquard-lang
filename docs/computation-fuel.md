@@ -41,15 +41,20 @@ Every debit is made before the work it pays for:
 |---|---|
 | one evaluator machine state visited, the final (terminal) state included | 1 |
 | performing an operation | 1 per continuation frame walked to its handler, or to the root |
-| resuming a continuation (Multi or Once) | 1 per captured frame reinstalled; when a driver (the scheduler, a host worker) resumes outside the machine, these units are charged as the next run starts |
-| a native builtin or granted root handler | `(text bytes + code-form nodes) / 64` over its direct arguments, then again over its result |
+| resuming a continuation (Multi or Once) | 1 per captured frame reinstalled, including resumptions a driver (inference, the scheduler, a host worker) makes outside the machine |
+| a native builtin or granted root handler | `text bytes / 64` over its direct arguments, then again over its result |
+| a deep native (`debug.inspect`, `code.render`, `code.hash`, `code.eq?`, `code.diff`) | first, `expanded nodes and bytes / 64` over its arguments |
 | reaching a memoized top-level term | the cost of the sub-run that computed it, once per invocation (§3) |
 
-The native measure counts the text and code payloads a native directly
-receives or returns. It does not look inside tuples or constructors, so the
-charge scales with the payloads natives read or build without making cheap
-natives pay for large structures they only pass along. Integer division
-rounds down, and each charge is computed separately for arguments and result.
+The ordinary native measure counts only the text a native directly receives or
+returns; it does not look inside tuples, constructors or code, so measuring is
+constant work per value. A native that walks a whole value or code form is
+different: sharing can make the expanded structure exponentially larger than
+what building it cost, and the walk does work in proportion to the expanded
+size. Such a native is marked deep and pays for the expanded size before it
+runs. The measurement stops as soon as it passes the remaining allowance, so a
+huge shared value exhausts the budget quickly instead of being walked. Integer
+division rounds down, and each charge is computed separately.
 
 Scheduling decisions, schedule traces, support sizes, wall-clock time, memory
 and grants are not fuel. They keep their own bounds: `--max-decisions`,
@@ -88,9 +93,17 @@ skips a failed branch therefore cannot turn exhaustion into a value.
 
 - The scheduler stops the whole run on exhaustion. It never records exhaustion
   as one task's failure that a sibling or a Collect policy could absorb.
+- Drivers recognise exhaustion by the invocation's sticky state, or by the E0919
+  code when a native or nested driver wrapped the error, never by one error
+  constructor alone.
 - Inference reports E0919 instead of a model runtime failure (E0902, E0915) or
   an invalid distribution (E0911). It is distinct from the terminal-path budget
   (E0918): no partial posterior is returned.
+- A driver working outside any run (resuming a captured continuation, applying
+  a value) never raises exhaustion itself: a refused debit there is deferred and
+  refused again as the next run starts, so exhaustion always arrives through a
+  run's result. A native that caught exhaustion from a nested run cannot
+  replace it with its own result or error.
 - Root effects that ran before exhaustion are not retried or undone.
   Invocation teardown runs exactly once as usual.
 
@@ -130,5 +143,9 @@ entry points. A host consumer bounds an invocation with
   execution must use the interpreter.
 - fuel-v1 bounds computation, not allocation: a bounded run can still allocate
   a large value within its budget. Allocation limits are RT.2.
-- The native payload measure is shallow by design (§2). A native whose work is
-  superlinear in its input would need its own entry in a future model.
+- The ordinary native measure is shallow by design (§2). A new native that walks
+  whole values must be marked deep, and a native whose work is superlinear in
+  its input would need its own entry in a future model.
+- Rendering outside the evaluator is not fuel: the CLI printing a final value,
+  and a diagnostic that shows a value (a match failure, or a native's type
+  error on an ill-typed call), happen outside the budget.

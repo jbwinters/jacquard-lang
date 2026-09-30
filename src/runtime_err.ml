@@ -31,6 +31,13 @@ type t =
       (** a subsystem diagnostic that must retain its domain, code, and remediation when it crosses
           the evaluator's single-error channel *)
 
+(** [is_fuel_exhausted error] recognises computation-fuel exhaustion (E0919) whether it arrives as
+    [Fuel_exhausted] or wrapped in a subsystem [Diagnostic] by a native or nested driver. *)
+let is_fuel_exhausted = function
+  | Fuel_exhausted _ -> true
+  | Diagnostic diagnostic -> Diag.code diagnostic = Some "E0919"
+  | _ -> false
+
 (** [to_string error] renders compact technical cause text for embedding in another failure. *)
 let to_string = function
   | Match_failure scrutinee -> Printf.sprintf "no clause matched the value %s" scrutinee

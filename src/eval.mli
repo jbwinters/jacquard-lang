@@ -124,12 +124,18 @@ val fuel_model : string
     fuel-v1 charges, before the work it pays for: one unit per evaluator machine state visited (the
     terminal state included); for an operation, one unit per continuation frame walked to reach its
     handler or the root; for a resumption, one unit per captured frame reinstalled; for a native
-    builtin or granted root handler, [(text bytes + code-form nodes) / 64] units over its direct
-    arguments and again over its result. A memoized top-level term charges its isolated sub-run's
+    builtin or granted root handler, [text bytes / 64] units over its direct arguments and again
+    over its result, except that a deep native (one that renders, hashes, or compares a whole value
+    or code form) first pays [expanded nodes and bytes / 64] over its arguments, measured with an
+    early stop at the remaining allowance. A memoized top-level term charges its isolated sub-run's
     cost the first time an invocation reaches it, whether or not the memo was already warm. *)
 
 val fuel_used : invocation -> int
 (** [fuel_used invocation] is the number of {!fuel_model} units charged so far in [invocation]. *)
+
+val fuel_exhausted : ctx -> bool
+(** [fuel_exhausted ctx] holds once the active invocation on [ctx] has run out of fuel. Drivers use
+    it to recognise exhaustion however a native or nested driver wrapped the error. *)
 
 val fuel_budget : invocation -> int option
 (** [fuel_budget invocation] is the budget [invocation] was started with, if bounded. *)
