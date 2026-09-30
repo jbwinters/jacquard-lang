@@ -131,6 +131,15 @@ constructor combinations:
   $ timeout 60 jacquard run --allow eval --fuel 100000 coverage.jac 2>&1 | head -1
   error[E0919]: Computation fuel was exhausted
 
+and the effect-linearity analysis compares shared match scrutinees without
+expanding them (this program never finished before):
+
+  $ python3 -c 'n = 40
+  > binds = "\n".join("      let t%d = Fork(t%d, t%d)" % (i, i - 1, i - 1) for i in range(1, n + 1))
+  > print("type Shape = | Tip | Fork(lhs: Shape, rhs: Shape)\nonce effect Probe where { probe : () -> Int }\n\ndrive() = handle probe() {\n  | return v -> v\n  | probe() resume k -> {\n      let t0 = Tip\n" + binds + "\n      let a = match t%d { | _ -> 0 }\n      let b = match t%d { | _ -> 0 }\n      k(add(a, b))\n    }\n}\n\ndrive()" % (n, n))' > scrutinees.jac
+  $ timeout 60 jacquard run --fuel 100000 scrutinees.jac 2>&1 | head -1
+  0
+
 A budget must be a non-negative number of units:
 
   $ jacquard run --fuel=-1 spin.jac 2>&1 | head -2

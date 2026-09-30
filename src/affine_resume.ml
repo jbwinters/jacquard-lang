@@ -189,6 +189,9 @@ let equal_gref left right =
   | Kernel.Named _, Kernel.Hashed _ | Kernel.Hashed _, Kernel.Named _ -> false
 
 let rec equal_pattern left right =
+  Fuel_meter.tick 1;
+  left == right
+  ||
   match (left.Kernel.it, right.Kernel.it) with
   | (Kernel.PWild | Kernel.PVar _), (Kernel.PWild | Kernel.PVar _) -> true
   | Kernel.PLit left, Kernel.PLit right -> equal_lit left right
@@ -204,6 +207,11 @@ and equal_patterns left right =
   List.length left = List.length right && List.for_all2 equal_pattern left right
 
 let rec equal_scrutinee left right =
+  (* scrutinees can share structure (a chain of bindings doubling a value): a shared node is equal
+     to itself at once, and every comparison step draws on computation fuel (RT.1) *)
+  Fuel_meter.tick 1;
+  left == right
+  ||
   match (left, right) with
   | Free left, Free right -> String.equal left right
   | Bound left, Bound right -> left = right
