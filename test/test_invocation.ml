@@ -351,7 +351,11 @@ let test_fuel_is_shared_by_multi_shot_branches () =
     (enumerate (Some (cost - 1)))
 
 let memo_program =
-  fact_program ^ "base = fact(12)\nderived = add(base, 1)\nother = add(base, derived)\n"
+  fact_program
+  ^ "base = fact(12)\n\
+     derived = add(base, 1)\n\
+     other = add(base, derived)\n\
+     spliced = quote { pair(unquote(code.of-int(base)), 2) }\n"
 
 let test_fuel_ignores_memo_warmth () =
   (* the fuel an expression costs is the same on a fresh evaluator and after any earlier
@@ -360,13 +364,15 @@ let test_fuel_ignores_memo_warmth () =
     let store, ctx = prepared "fuel-memo-cold" memo_program in
     snd (fueled ctx store source)
   in
-  let sources = [ "base"; "derived"; "other"; "add(derived, base)"; "add(other, 1)" ] in
+  let sources =
+    [ "base"; "derived"; "other"; "add(derived, base)"; "add(other, 1)"; "code.render(spliced)" ]
+  in
   let expected = List.map (fun source -> (source, cold source)) sources in
   let orders =
     [
       sources;
       List.rev sources;
-      [ "other"; "base"; "add(other, 1)"; "derived"; "add(derived, base)" ];
+      [ "other"; "code.render(spliced)"; "base"; "add(other, 1)"; "derived"; "add(derived, base)" ];
     ]
   in
   List.iter
@@ -604,6 +610,19 @@ let test_fuel_outside_runs () =
         | Ok closure -> failure (run_state ctx (Eval.apply_state ctx closure [ nested ])))
   in
   Alcotest.(check string) "the outer invocation stays exhausted" "E0919" code;
+  (* a root observer that runs evaluation and exhausts the invocation stops the operation it
+     observed before its handler runs *)
+  let sink = Buffer.create 16 in
+  let code =
+    Eval.with_invocation ~fuel:1_000 ctx (fun _ ->
+        grant_console ctx sink;
+        Eval.with_root_observer ctx
+          ~on_operation:(fun _ -> ignore (Eval.run_expr ctx spin))
+          ~on_output:(fun _ _ -> ())
+          (fun () -> failure (Eval.run_expr ctx (expression store "print(\"late\")"))))
+  in
+  Alcotest.(check string) "observed then exhausted" "E0919" code;
+  Alcotest.(check string) "the handler never ran" "" (Buffer.contents sink);
   (* an operation a driver applies outside any run performs nothing until a run starts *)
   let print_op =
     Eval.with_invocation ctx (fun _ ->

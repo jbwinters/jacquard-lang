@@ -160,18 +160,20 @@ entry points. A host consumer bounds an invocation with
   itself, without the shared walkers, must tick `Fuel_meter` as it goes. A
   host-registered native (`Eval.register_builtin`) owns its own cost beyond the
   measure.
-- A native's result is paid for after it is built. The result is bounded by
-  the native's inputs, so the overshoot is bounded, but a single native call
-  can build a result larger than the remaining allowance before exhaustion.
-- A few natives do superlinear work in their charged size: `code.diff`
-  compares subforms at every level (it is charged for every comparison, so it
-  stays bounded), and `support` on a `UniformInt` materializes up to its
-  10,000-entry cap for a small charge.
+- A native's result is paid for after it is built. A native whose result can
+  be much larger than its measured arguments pays as it builds (`text.join-list`
+  pays for the joined bytes first), so one call overshoots the budget by at most
+  about its own measured size.
+- A few natives do superlinear work in their charged size, bounded by a
+  polynomial in the budget: `code.diff` compares subforms at every level (each
+  comparison is charged), `text.contains?` and `text.split` search naively
+  (quadratic in the text), and `support` on a `UniformInt` materializes up to
+  its 10,000-entry cap for a small charge.
 - Accounting also runs in unbounded mode, since memoized costs must not depend
   on whether a budget is present; it adds a counter update per transition and
   per walked node, and nothing asymptotic.
-- Store work (writing declarations and the names index, and loading stored
-  declarations) is not program computation and is never metered, so a cold and
+- Store work (writing declarations and the names index, loading stored
+  declarations, and writing `--infer-cache` entries) is not program computation and is never metered, so a cold and
   a warm lookup cost the same.
 - The evaluator's guard scans (recovery-marker and mutable-graph validation at
   run entries and native or operation boundaries) are not metered: they are

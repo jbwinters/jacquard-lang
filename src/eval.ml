@@ -210,6 +210,7 @@ and invocation = {
   fuel_start : int;  (** the meter's fine count when the invocation began *)
   mutable fuel_final : int option;  (** units used, frozen when the invocation ends *)
   saved_ceiling : int;  (** the meter ceiling to restore when the invocation ends *)
+  saved_budget : int;  (** the reported budget to restore when the invocation ends *)
   budget : int option;
 }
 
@@ -449,6 +450,7 @@ let with_invocation ?coverage ?fuel ctx body =
       fuel_final = None;
       budget = fuel;
       saved_ceiling = !Fuel_meter.ceiling;
+      saved_budget = !Fuel_meter.budget;
     }
   in
   Option.iter (fun enabled -> ctx.track_coverage <- enabled) coverage;
@@ -462,6 +464,7 @@ let with_invocation ?coverage ?fuel ctx body =
         else start + (limit * fine_per_unit)
       in
       Fuel_meter.ceiling := min own invocation.saved_ceiling;
+      Fuel_meter.budget := limit;
       ctx.fuel_limit <- Some limit)
     fuel;
   ctx.invocation <- Some invocation;
@@ -480,6 +483,7 @@ let with_invocation ?coverage ?fuel ctx body =
       Fuel_meter.ceiling := invocation.saved_ceiling;
       Fuel_meter.trip ())
     else Fuel_meter.ceiling := invocation.saved_ceiling;
+    Fuel_meter.budget := invocation.saved_budget;
     let callbacks = invocation.teardown in
     invocation.teardown <- [];
     let first = ref None in
@@ -562,13 +566,12 @@ let rt_arity fmt = Printf.ksprintf (fun m -> rt (Runtime_err.Arity m)) fmt
 let mark_exhausted _ctx = Fuel_meter.trip ()
 
 let fuel_error ctx =
-  Runtime_err.Fuel_exhausted { model = fuel_model; limit = Option.value ctx.fuel_limit ~default:0 }
+  Runtime_err.Fuel_exhausted
+    { model = fuel_model; limit = Option.value ctx.fuel_limit ~default:!Fuel_meter.budget }
 
 let exhaust ctx =
   mark_exhausted ctx;
-  rt
-    (Runtime_err.Fuel_exhausted
-       { model = fuel_model; limit = Option.value ctx.fuel_limit ~default:0 })
+  rt (fuel_error ctx)
 
 (* A refused debit exhausts the invocation at once. Inside a run it raises; outside any run (a
    driver resuming a continuation) the next run raises it as it starts. *)
@@ -1144,6 +1147,9 @@ let charge_native_result ctx result =
     | Error _ -> result
 
 let invoke_untrusted_native ctx fn native args kont =
+  (* a root observer or an earlier native may have exhausted the invocation since this step was
+     charged: no native or root handler runs after exhaustion *)
+  if Fuel_meter.exhausted () then exhaust ctx;
   let invocation_roots = [ fn; VTuple args; VResume kont ] in
   List.iter (prepare_native_argument ctx) invocation_roots;
   charge_native ctx args;
@@ -1154,6 +1160,7 @@ let invoke_untrusted_native ctx fn native args kont =
   | Error error -> rt error
 
 let invoke_trusted_native ctx builtin args kont =
+  if Fuel_meter.exhausted () then exhaust ctx;
   charge_native ctx args;
   let result = Trusted_builtin.invoke builtin args in
   match charge_native_result ctx result with
@@ -1203,6 +1210,8 @@ let perform_unchecked ctx (op : Hash.t) ~name ~effect_ (args : Value.t list) (k 
     | [] -> (
         if walked > 0 then charge ctx walked;
         notify_root_operation ctx op;
+        (* the observer may have run evaluation that exhausted the invocation *)
+        if Fuel_meter.exhausted () then exhaust ctx;
         match Hashtbl.find_opt ctx.root_handlers op with
         | Some native when not ctx.capture_root_handlers ->
             invoke_untrusted_native ctx (VOp { op; name; effect_ }) native args k
@@ -1372,6 +1381,9 @@ let rec eval_ref ctx ~trusted (h : Hash.t) (kind : Kernel.refkind) (k : kont) : 
                   charge_memo_hit ctx h;
                   Fuel_meter.unmetered (fun () -> checked_result_state ctx v k))
           | None -> (
+              (* everything from here to publishing the value is the term's recorded cost, so a
+                 warm hit charges exactly what this cold path did *)
+              let started = !Fuel_meter.used in
               match locate ctx ~trusted h with
               | {
                Store.decl = { Kernel.it = Kernel.DefTerm bindings; _ } as decl;
@@ -1387,8 +1399,6 @@ let rec eval_ref ctx ~trusted (h : Hash.t) (kind : Kernel.refkind) (k : kont) : 
                      with a truncated continuation (review finding; E0815 makes this
                      unreachable for checked programs, this is the belt to its braces) *)
                   let initial = SEval (scope, binding.Kernel.value, []) in
-                  (* everything from here to publishing the value is the term's recorded cost *)
-                  let started = !Fuel_meter.used in
                   reject_recovery_state ctx initial;
                   let saved_capture = ctx.capture_ops in
                   ctx.capture_ops <- false;

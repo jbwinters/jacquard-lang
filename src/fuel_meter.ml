@@ -13,6 +13,10 @@ exception Exceeded
 let used = ref 0
 let ceiling = ref max_int
 
+(** The budget, in fuel units, of the innermost bounded invocation; reported by E0919 even when the
+    walk or run that ran out belongs to an unbounded invocation nested inside it. *)
+let budget = ref 0
+
 (** [trip ()] exhausts the meter: the remaining allowance is spent, and no later debit or walk can
     pass the negative ceiling. *)
 let trip () =
