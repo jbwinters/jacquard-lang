@@ -96,7 +96,12 @@ invocation reaches it, whether the value was computed now or earlier:
   it still names what that attempt paid for.
 
 The fuel an invocation spends is the same on a fresh evaluator as after any
-earlier invocation warmed the memo, in any order. Charging follows the active invocation, not
+earlier invocation warmed the memo, in any order, with one exception: a
+memoized term whose computation opens a nested invocation with its own budget
+(§4). How far such a capped attempt gets depends on what the invocation had
+already paid for, and a record cannot replay that cap, so its replayed cost can
+differ from a fresh computation. Only host code can open a nested invocation;
+the language and the prelude cannot. Charging follows the active invocation, not
 the evaluator: each outermost invocation runs in a fresh epoch, and a native
 that re-enters another evaluator, with or without starting a nested invocation
 there, charges that evaluator's memoized terms within the same epoch, recording
@@ -219,6 +224,10 @@ entry points. A host consumer bounds an invocation with
   shared structure ends with E0919. Walks during the invocation, including a
   diagnostic that shows a value, are metered: a huge ill-typed argument can
   exhaust the budget before its type error is rendered.
+- Memo-warmth independence (§3) does not extend to a memoized term whose
+  computation opens a nested invocation with its own budget; a host that does
+  this owns the resulting variation, as it owns a native that discards the
+  nested E0919.
 - The meter is process-wide. Walks that happen while a bounded invocation is
   active draw on its budget whichever evaluator they belong to. An invocation
   nested on another evaluator stays within the outer ceiling, and if it uses
