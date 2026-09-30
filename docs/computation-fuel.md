@@ -55,8 +55,9 @@ expanded structure exponentially larger than what building it cost. So value
 rendering (`Value.show`), code printing and form comparison tick the meter per
 node and text byte wherever they run: in a native such as `debug.inspect`,
 `code.render`, `code.eq?` or `pmf`; in the evaluator scanning a native's code
-result for recovery markers, splicing a quote, stamping its scope marks, or
-building a diagnostic; or in a driver keying inference results, comparing
+result for recovery markers, splicing a quote, stamping its scope marks,
+converting code to kernel syntax (the run's own top-level expressions, and code
+passed to `eval`), or building a diagnostic; or in a driver keying inference results, comparing
 observed values, or rendering task results. A walk stops the
 moment it passes the budget, so a huge shared value exhausts the budget
 instead of being walked, and a comparison that stops at the first node stays
@@ -130,7 +131,7 @@ With `--fuel`, the CLI prints one line to stderr when the invocation ends,
 whether it finished or ran out:
 
 ```text
-fuel: 113 of 113 unit(s) used (fuel-v1)
+fuel: 115 of 115 unit(s) used (fuel-v1)
 ```
 
 The line always names the model, so budgets are never compared across models.

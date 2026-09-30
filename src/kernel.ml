@@ -237,6 +237,9 @@ let decode_surface_ref (f : Form.t) =
         kind
 
 let guard_depth depth (f : Form.t) =
+  (* every form converted to kernel syntax (including code passed to eval, which can share
+     subforms) is a walk that draws on computation fuel (RT.1) *)
+  Fuel_meter.tick 1;
   if depth >= max_nesting_depth then
     err ~meta:f.Form.meta ~code:"E0214" "kernel form nesting exceeds the limit of %d"
       max_nesting_depth
