@@ -40,7 +40,9 @@ type event =
           arguments, the result's fuel charge and the result's validation. The event carries what
           the program receives (a value or the handler's own failure). There is none for an
           operation a driver captured instead of dispatching, for a dispatch refused before the
-          handler ran, or when a post-call check (including fuel exhaustion) fails. *)
+          handler ran, or when a post-call check (including fuel exhaustion) fails. If the callback
+          itself exhausts the budget (by forcing a large payload), the invocation ends with E0919
+          after the event. *)
 
 val of_value : Value.t -> value
 (** [of_value v] projects a runtime value to its immutable data view, ticking computation fuel per
@@ -48,7 +50,7 @@ val of_value : Value.t -> value
 
 val render : value -> string
 (** [render v] is the [Value.show] spelling of a data value, with opaque values as [<kind>]. It
-    ticks computation fuel per node and per text byte. *)
+    ticks computation fuel per node and per text and constructor-name byte. *)
 
 val operation : event -> Hash.t
 (** [operation event] is the operation identity every event carries. *)

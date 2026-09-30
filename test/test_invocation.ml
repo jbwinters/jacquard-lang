@@ -1106,14 +1106,32 @@ let test_observer_boundary () =
              (match Eval.resume_captured_state ctx captured (Value.VInt 1) with
              | Ok _ -> refusals := "resumed" :: !refusals
              | Error _ -> refusals := "resume refused" :: !refusals);
-             match Eval.fresh_validated_state ctx validated with
+             (match Eval.fresh_validated_state ctx validated with
              | _ -> refusals := "restored" :: !refusals
-             | exception Invalid_argument _ -> refusals := "restore refused" :: !refusals)
+             | exception Invalid_argument _ -> refusals := "restore refused" :: !refusals);
+             match Eval.fresh_audit_run_id ctx with
+             | _ -> refusals := "minted" :: !refusals
+             | exception Invalid_argument _ -> refusals := "mint refused" :: !refusals)
            (fun () -> Eval.run_expr ctx (expression store "print(\"x\")"))));
-  Alcotest.(check bool)
-    "every callback attempt was refused" true
-    (!refusals <> []
-    && List.for_all (fun r -> r = "resume refused" || r = "restore refused") !refusals);
+  Alcotest.(check (list string))
+    "every callback attempt was refused"
+    [ "mint refused"; "restore refused"; "resume refused" ]
+    (List.sort_uniq compare !refusals);
+  (* a Result callback that exhausts the budget and swallows the exception still ends the run *)
+  let swallowed =
+    Eval.with_invocation ~fuel:1_000_000 ctx (fun _ ->
+        Eval.register_root_handler ctx operation (fun _ -> Ok (Value.VInt 3));
+        Eval.with_observer ctx
+          (function
+            | Observation.Result _ -> (
+                try
+                  Fuel_meter.trip ();
+                  raise Fuel_meter.Exceeded
+                with Fuel_meter.Exceeded -> ())
+            | _ -> ())
+          (fun () -> failure (Eval.run_expr ctx (expression store "probe.next(6)"))))
+  in
+  Alcotest.(check string) "observer exhaustion is not hidden" "E0919" swallowed;
   (* the refused resumption consumed nothing: the owner still resumes it once *)
   match
     Eval.with_invocation ctx (fun _ ->

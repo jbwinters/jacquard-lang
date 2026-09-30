@@ -49,8 +49,11 @@ let rec render v =
       "\"" ^ Printer.escape_text s ^ "\""
   | Hash h -> "#" ^ Hash.to_hex h
   | Tuple items -> "(" ^ String.concat ", " (List.map render items) ^ ")"
-  | Constructor { name; arguments = []; _ } -> name
+  | Constructor { name; arguments = []; _ } ->
+      Fuel_meter.tick (String.length name);
+      name
   | Constructor { name; arguments; _ } ->
+      Fuel_meter.tick (String.length name);
       name ^ "(" ^ String.concat ", " (List.map render arguments) ^ ")"
   | Code form -> "(quote " ^ Printer.inline_form form ^ ")"
   | Opaque kind -> "<" ^ kind ^ ">"

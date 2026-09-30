@@ -292,6 +292,8 @@ let store ctx = ctx.store
     private counter is not reachable from Jacquard code, and distinct evaluator contexts receive
     disjoint identity domains. *)
 let fresh_audit_run_id ctx =
+  if ctx.observing then
+    invalid_arg "Eval.fresh_audit_run_id: an observation callback cannot mint an audit owner";
   let ordinal = ctx.next_audit_run_id in
   ctx.next_audit_run_id <- ordinal + 1;
   Hash.of_string
@@ -1320,9 +1322,12 @@ let invoke_untrusted_native ?observed ctx fn native args kont =
   | Ok value ->
       let next = checked_result_state ctx value kont in
       observe (Ok value);
+      (* a callback that exhausted the budget (even one that caught the exception) ends the run *)
+      if Fuel_meter.exhausted () then exhaust ctx;
       next
   | Error error ->
       if Result.is_error result then observe (Error error);
+      if Fuel_meter.exhausted () then exhaust ctx;
       rt error
 
 let invoke_trusted_native ctx builtin args kont =
@@ -1375,17 +1380,16 @@ let perform_unchecked ctx (op : Hash.t) ~name ~effect_ (args : Value.t list) (k 
     | f :: outer -> split (walked + 1) (f :: inner_rev) outer
     | [] -> (
         if walked > 0 then charge ctx walked;
+        (* the capture mode is fixed before an observer runs, so no callback can influence it *)
+        let mode = if ctx.capture_ops then Some (op_mode ctx op) else None in
         notify_root_operation ctx op ~name args;
         if Fuel_meter.exhausted () then exhaust ctx;
-        match Hashtbl.find_opt ctx.root_handlers op with
-        | Some native when not ctx.capture_root_handlers ->
+        match (Hashtbl.find_opt ctx.root_handlers op, mode) with
+        | Some native, _ when not ctx.capture_root_handlers ->
             invoke_untrusted_native ~observed:op ctx (VOp { op; name; effect_ }) native args k
-        | Some _ | None ->
-            if ctx.capture_ops then
-              raise
-                (Op_captured
-                   { op; name; effect_; mode = op_mode ctx op; args; kont = List.rev inner_rev })
-            else rt (Runtime_err.Unhandled { effect_; op = name }))
+        | (Some _ | None), Some mode ->
+            raise (Op_captured { op; name; effect_; mode; args; kont = List.rev inner_rev })
+        | (Some _ | None), None -> rt (Runtime_err.Unhandled { effect_; op = name }))
   in
   split 0 [] k
 
@@ -1998,10 +2002,10 @@ let dispatch_root_operation ctx ~resume ~op ~name ~effect_ args =
           | Ok value ->
               if not (atomic_non_task_value value) then reject_recovery_result_value ctx value;
               notify_root_result ctx op (Ok value);
-              Ok value
+              if Fuel_meter.exhausted () then Error (fuel_error ctx) else Ok value
           | Error error ->
               if Result.is_error result then notify_root_result ctx op (Error error);
-              Error error
+              if Fuel_meter.exhausted () then Error (fuel_error ctx) else Error error
         with
         | Rt error -> Error error
         | Fuel_meter.Exceeded -> Error (fuel_error ctx))

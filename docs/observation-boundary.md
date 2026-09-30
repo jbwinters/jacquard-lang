@@ -32,7 +32,10 @@ trust domains, and it is not a universal trace format.
   result's fuel charge, and the result's validation. So `Result` carries exactly
   what the program receives. There is no `Result` for an operation a driver
   captured instead of dispatching, for a dispatch refused before the handler
-  ran, or when a post-call check (including fuel exhaustion) fails.
+  ran, or when a post-call check (including fuel exhaustion) fails. One case
+  follows the event: if the callback itself exhausts the budget (for example by
+  forcing a large payload), the invocation ends with E0919 after `Result`, even
+  when the callback caught the exception.
 
 Arguments and results are never live runtime values. They arrive as an
 immutable data projection (`Observation.value`: integers, reals, text, hashes,
@@ -42,8 +45,8 @@ projection is computed only if an observer forces it, and its walk (like
 `Observation.render`) draws on computation fuel. The charge goes to whichever
 invocation is active when the payload is forced: inside the callback that is
 the observed invocation; a consumer that keeps an event and forces it after the
-invocation ended pays from its own budget, or from none. A consumer still chooses what to persist or render through an
-explicit policy (OBS.1). The v1 projection keeps only operation identities and
+invocation ended pays from its own budget, or from none. A consumer still
+chooses what to persist or render through an explicit policy (OBS.1). The v1 projection keeps only operation identities and
 Console bytes, as before.
 
 ## 3. Ownership, lifetime and failure
@@ -58,18 +61,34 @@ Console bytes, as before.
 - An observer cannot re-enter the evaluator or change its configuration. While a
   callback runs, that evaluator refuses to evaluate, to apply or resume a
   continuation, and to dispatch a routed operation. Registering a root handler
-  or a native, changing code resolution, or restoring a validated state's
-  mutable graph (`fresh_validated_state`) raises `Invalid_argument`. So
-  observation cannot add authority, resume a continuation twice, or change
+  or a native, changing code resolution, restoring a validated state's mutable
+  graph (`fresh_validated_state`), or minting an audit owner
+  (`fresh_audit_run_id`) raises `Invalid_argument`. A captured operation's
+  Once/Multi mode is fixed before the callback runs. So observation through the
+  evaluator cannot add authority, resume a continuation twice, or change
   dispatch.
+- The boundary is an API contract, not a sandbox. An observer is host code in
+  the evaluator's process. It can still reach objects the host owns, such as
+  the `Store` it opened the session with, the process-wide `Fuel_meter`, or
+  its own data structures. Changing those from a callback is the host changing
+  its own program mid-run, exactly as it could between steps without an
+  observer. The guarantees above cover what an event hands over and what the
+  evaluator refuses. They do not cover host-owned handles the callback already
+  holds.
 - Observers see no secret: a secret is an opaque marker in the data
   projection, and no live value (so no capability or mutable cell) reaches a
   callback.
-- An exception from a callback propagates unchanged, after observer state is
-  restored. An exception from an `Operation` callback stops that operation
-  before it is dispatched; no event is emitted twice.
+- An exception from a callback propagates after observer state is restored.
+  An exception from an `Operation` callback stops that operation before it is
+  dispatched; no event is emitted twice. Two exceptions become failures of the
+  observed program instead of reaching the caller: fuel exhaustion (the callback
+  and the program share the budget, so the program is exhausted too, with
+  E0919), and an evaluator refusal raised internally (for example
+  `Eval.apply_state` called from a callback), which fails the run with the
+  refusal's `Eval_error`. In both cases the run fails closed.
 - Each operation is dispatched exactly once whether or not observers are
-  installed. The Once/Multi behavior is unchanged.
+  installed. The Once/Multi behavior is unchanged: a captured operation's mode is
+  read before any callback runs.
 
 ## 4. Projections
 
