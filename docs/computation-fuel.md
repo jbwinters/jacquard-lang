@@ -39,7 +39,7 @@ Every debit is made before the work it pays for:
 
 | work | units |
 |---|---|
-| one evaluator machine transition (a `step` of the CEK machine) | 1 |
+| one evaluator machine state visited, the final (terminal) state included | 1 |
 | performing an operation | 1 per continuation frame walked to its handler, or to the root |
 | resuming a continuation (Multi or Once) | 1 per captured frame reinstalled |
 | a native builtin or granted root handler | `(text bytes + code-form nodes) / 64` over its direct arguments, then again over its result |
@@ -77,7 +77,8 @@ earlier invocation warmed the memo, in any order.
 
 ## 4. Exhaustion
 
-A debit that would pass the budget is refused. The invocation becomes
+A debit that would pass the budget is refused. Because the terminal state also
+costs a unit, a run that has exhausted its budget cannot deliver a value. The invocation becomes
 exhausted and evaluation stops with `Runtime_err.Fuel_exhausted`, rendered as
 E0919, and the refused debit spends the remaining allowance. Exhaustion is
 sticky: every later transition, and every attempt to return a value, in the
@@ -103,7 +104,7 @@ With `--fuel`, the CLI prints one line to stderr when the invocation ends,
 whether it finished or ran out:
 
 ```text
-fuel: 110 of 110 unit(s) used (fuel-v1)
+fuel: 112 of 112 unit(s) used (fuel-v1)
 ```
 
 The line always names the model, so budgets are never compared across models.

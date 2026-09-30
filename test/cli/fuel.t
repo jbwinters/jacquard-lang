@@ -24,10 +24,10 @@ A pure loop performs no effect, yet it stops at a reproducible boundary:
 
 A finite program completes at exactly its cost and not one unit below it:
 
-  $ jacquard run --fuel 110 ../../demos/basics/surface-fact.jac
+  $ jacquard run --fuel 112 ../../demos/basics/surface-fact.jac
   120
-  fuel: 110 of 110 unit(s) used (fuel-v1)
-  $ jacquard run --fuel 109 ../../demos/basics/surface-fact.jac 2>&1 | head -1
+  fuel: 112 of 112 unit(s) used (fuel-v1)
+  $ jacquard run --fuel 111 ../../demos/basics/surface-fact.jac 2>&1 | head -1
   error[E0919]: Computation fuel was exhausted
   $ jacquard run ../../demos/basics/surface-fact.jac
   120
@@ -54,12 +54,12 @@ out is E0919, not a model runtime failure (E0902) or the terminal-path budget
   $ jacquard infer enumerate --fuel 1000 ../../demos/inference/m3-two-coins.jac
   0.666667  true
   0.333333  false
-  fuel: 138 of 1000 unit(s) used (fuel-v1)
-  $ jacquard infer enumerate --fuel 137 ../../demos/inference/m3-two-coins.jac
+  fuel: 142 of 1000 unit(s) used (fuel-v1)
+  $ jacquard infer enumerate --fuel 141 ../../demos/inference/m3-two-coins.jac
   error[E0919]: Computation fuel was exhausted
-    Cause: computation fuel exhausted: the fuel-v1 budget of 137 unit(s) ran out before evaluation finished; the result is incomplete
+    Cause: computation fuel exhausted: the fuel-v1 budget of 141 unit(s) ran out before evaluation finished; the result is incomplete
     Next step: Raise the --fuel budget, or omit it to run unbounded. An exhausted run is incomplete; it neither passes nor fails.
-  fuel: 137 of 137 unit(s) used (fuel-v1)
+  fuel: 141 of 141 unit(s) used (fuel-v1)
   [1]
 
 A budget must be a non-negative number of units:
