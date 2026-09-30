@@ -929,11 +929,13 @@ let test_fuel_scopes () =
 
 let describe = function
   | Observation.Operation { name; arguments; _ } ->
-      Printf.sprintf "op %s(%s)" name (String.concat ", " (List.map Value.show arguments))
+      Printf.sprintf "op %s(%s)" name
+        (String.concat ", " (List.map Observation.render (Lazy.force arguments)))
   | Observation.Output { bytes; _ } -> Printf.sprintf "out %S" bytes
-  | Observation.Result { result = Ok value; _ } -> "ok " ^ Value.show value
-  | Observation.Result { result = Error error; _ } ->
-      "error " ^ Diag.code_or_uncoded (Runtime_err.to_diag error)
+  | Observation.Result { result; _ } -> (
+      match Lazy.force result with
+      | Ok value -> "ok " ^ Observation.render value
+      | Error error -> "error " ^ Diag.code_or_uncoded (Runtime_err.to_diag error))
 
 let test_typed_events () =
   let store, ctx = prepared "observe-events" "" in
@@ -992,6 +994,31 @@ let test_observer_cannot_evaluate () =
   | exception Boom -> ());
   Alcotest.(check string)
     "the operation was not dispatched after the failing callback" "x" (Buffer.contents sink);
+  (* a callback cannot grant the operation it observes *)
+  let granted_inside =
+    Eval.with_invocation ctx (fun _ ->
+        Eval.with_observer ctx
+          (fun event ->
+            match
+              Eval.register_root_handler ctx (Observation.operation event) (fun _ ->
+                  Ok Value.unit_v)
+            with
+            | () -> Alcotest.fail "a callback registered a handler"
+            | exception Invalid_argument _ -> ())
+          (fun () -> failure (Eval.run_expr ctx greet)))
+  in
+  Alcotest.(check string) "the ungranted operation stays unhandled" "unhandled" granted_inside;
+  (* observers see data, never live secrets or closures *)
+  let secret = Value.VSecret (Secret.of_string "hunter2") in
+  let rendered =
+    List.map Observation.render
+      (List.map Observation.of_value
+         [ secret; Value.VTuple [ Value.VInt 1; Value.VText "a" ]; Value.VResume [] ])
+  in
+  Alcotest.(check (list string))
+    "opaque secrets and continuations"
+    [ "<secret>"; "(1, \"a\")"; "<resumption>" ]
+    rendered;
   (* the v1 view never sees results *)
   let v1 = ref 0 in
   ignore

@@ -250,7 +250,10 @@ let next_audit_context_id = Atomic.make 0
     root-handler tables. *)
 let code_resolver ctx = ctx.code_resolver
 
-let set_code_resolver ctx resolver = ctx.code_resolver <- Some resolver
+let set_code_resolver ctx resolver =
+  if ctx.observing then
+    invalid_arg "Eval.set_code_resolver: an observation callback cannot change resolution";
+  ctx.code_resolver <- Some resolver
 
 let make_ctx store =
   {
@@ -419,7 +422,10 @@ let reject_task_escape ctx ~scope_path root =
 
 (** [register_root_handler ctx op handler] installs one explicitly granted root handler. Arguments,
     continuation state, callback mutation, and callback results are guarded at dispatch time. *)
-let register_root_handler ctx op handler = Hashtbl.replace ctx.root_handlers op handler
+let register_root_handler ctx op handler =
+  if ctx.observing then
+    invalid_arg "Eval.register_root_handler: an observation callback cannot grant an operation";
+  Hashtbl.replace ctx.root_handlers op handler
 
 (** [with_observer] scopes a typed root observer to one caller-controlled evaluation extent. The
     saved observer is restored even across an internal runtime exception. *)
@@ -450,10 +456,18 @@ let emit ctx event =
 
 let note_root_output ctx ~operation bytes = emit ctx (Observation.Output { operation; bytes })
 
+(* observers receive immutable data projections, computed only if forced: never live values, so
+   a callback cannot read a secret, mutate a captured cell, or hold a continuation *)
 let notify_root_operation ctx operation ~name arguments =
-  emit ctx (Observation.Operation { operation; name; arguments })
+  if Option.is_some ctx.root_observer then
+    emit ctx
+      (Observation.Operation
+         { operation; name; arguments = lazy (List.map Observation.of_value arguments) })
 
-let notify_root_result ctx operation result = emit ctx (Observation.Result { operation; result })
+let notify_root_result ctx operation result =
+  if Option.is_some ctx.root_observer then
+    emit ctx
+      (Observation.Result { operation; result = lazy (Result.map Observation.of_value result) })
 
 (* --- invocations (RF.2) --- *)
 
@@ -1021,6 +1035,8 @@ let reject_recovery_state ctx state = scan_recovery_state ctx ~static_trusted:fa
 (** [register_builtin ctx hash value] installs a native term implementation after rejecting any
     recovery-marked runtime graph. Custom callbacks remain guarded before and after every call. *)
 let register_builtin ctx hash value =
+  if ctx.observing then
+    invalid_arg "Eval.register_builtin: an observation callback cannot install a native";
   reject_recovery_state ctx (SApply (value, []));
   Hashtbl.replace ctx.builtins hash value
 

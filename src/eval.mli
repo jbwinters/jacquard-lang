@@ -66,8 +66,10 @@ val with_observer : ctx -> (Observation.event -> unit) -> (unit -> 'a) -> 'a
     root handler returns. The innermost observer receives events; the previous one is restored on
     every exit, and {!with_invocation} restores it at teardown. While [on_event] runs, [ctx] refuses
     to evaluate ([Eval_error]): a callback cannot run code, dispatch an operation, or resume a
-    continuation, and observing never changes dispatch. An exception from [on_event] propagates
-    unchanged. *)
+    continuation; {!register_root_handler}, {!register_builtin} and {!set_code_resolver} raise
+    [Invalid_argument], so observing never adds authority or changes dispatch. Arguments and results
+    arrive as immutable data projections ({!Observation.value}) with secrets and executable values
+    opaque. An exception from [on_event] propagates unchanged. *)
 
 val with_root_observer :
   ctx -> on_operation:(Hash.t -> unit) -> on_output:(Hash.t -> string -> unit) -> (unit -> 'a) -> 'a

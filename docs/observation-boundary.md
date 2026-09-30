@@ -27,13 +27,20 @@ trust domains, and it is not a universal trace format.
   after every language handler declined it and before any root handler runs.
 - `Output { operation; bytes }`: a trusted root adapter accepted bytes for that
   operation (today only Console print).
-- `Result { operation; result }`: a root handler returned (a value or a runtime
-  failure). Operations captured by a driver instead of dispatched have no
-  `Result`.
+- `Result { operation; result }`: a granted root handler returned (a value or a
+  runtime failure) and its arguments passed their post-call checks. There is no
+  `Result` for an operation a driver captured instead of dispatching, for a
+  dispatch refused before the handler ran, or when the post-call checks
+  (including fuel exhaustion) fail.
 
-Arguments and results are runtime values. A consumer must project them through
-an explicit policy before persisting or rendering them (OBS.1). The v1
-projection keeps only operation identities and Console bytes, as before.
+Arguments and results are never live runtime values. They arrive as an
+immutable data projection (`Observation.value`: integers, reals, text, hashes,
+tuples, constructors and code). Secrets, closures, continuations, builtins,
+operations, and task or channel handles appear only as opaque markers. The
+projection is computed only if an observer forces it, and its walk draws on
+computation fuel. A consumer still chooses what to persist or render through an
+explicit policy (OBS.1). The v1 projection keeps only operation identities and
+Console bytes, as before.
 
 ## 3. Ownership, lifetime and failure
 
@@ -44,10 +51,15 @@ projection keeps only operation identities and Console bytes, as before.
 - The innermost observer receives the events; an enclosing one is suspended
   while an inner one is installed and resumes afterwards. Installing an
   observer adds no authority, grant or handler.
-- An observer cannot re-enter the evaluator. While a callback runs, any
-  evaluation on that evaluator is refused (a callback cannot run code, apply a
-  captured resumption, or dispatch an operation), so observation cannot resume
-  a continuation twice or change dispatch.
+- An observer cannot re-enter the evaluator or change its configuration. While a
+  callback runs, that evaluator refuses to evaluate, to apply or resume a
+  continuation, and to dispatch a routed operation. Registering a root handler
+  or a native, or changing code resolution, raises `Invalid_argument`. So
+  observation cannot add authority, resume a continuation twice, or change
+  dispatch.
+- Observers see no secret: a secret is an opaque marker in the data
+  projection, and no live value (so no capability or mutable cell) reaches a
+  callback.
 - An exception from a callback propagates unchanged, after observer state is
   restored. An exception from an `Operation` callback stops that operation
   before it is dispatched; no event is emitted twice.
