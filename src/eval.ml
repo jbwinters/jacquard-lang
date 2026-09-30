@@ -1380,16 +1380,24 @@ let perform_unchecked ctx (op : Hash.t) ~name ~effect_ (args : Value.t list) (k 
     | f :: outer -> split (walked + 1) (f :: inner_rev) outer
     | [] -> (
         if walked > 0 then charge ctx walked;
-        (* the capture mode is fixed before an observer runs, so no callback can influence it *)
-        let mode = if ctx.capture_ops then Some (op_mode ctx op) else None in
+        (* the route, and for a capture its mode, are fixed before an observer runs, so no
+           callback can influence them; the mode is read only when the operation is captured *)
+        let native =
+          match Hashtbl.find_opt ctx.root_handlers op with
+          | Some native when not ctx.capture_root_handlers -> Some native
+          | Some _ | None -> None
+        in
+        let mode =
+          if Option.is_none native && ctx.capture_ops then Some (op_mode ctx op) else None
+        in
         notify_root_operation ctx op ~name args;
         if Fuel_meter.exhausted () then exhaust ctx;
-        match (Hashtbl.find_opt ctx.root_handlers op, mode) with
-        | Some native, _ when not ctx.capture_root_handlers ->
+        match (native, mode) with
+        | Some native, _ ->
             invoke_untrusted_native ~observed:op ctx (VOp { op; name; effect_ }) native args k
-        | (Some _ | None), Some mode ->
+        | None, Some mode ->
             raise (Op_captured { op; name; effect_; mode; args; kont = List.rev inner_rev })
-        | (Some _ | None), None -> rt (Runtime_err.Unhandled { effect_; op = name }))
+        | None, None -> rt (Runtime_err.Unhandled { effect_; op = name }))
   in
   split 0 [] k
 
