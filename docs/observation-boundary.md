@@ -102,8 +102,9 @@ form (its nodes and bytes).
 - `Output` attaches bytes to the pending event of its operation;
 - `Result` is ignored.
 
-Its serialized bytes are unchanged. Richer projections (OBS.1) are new,
-versioned formats layered on the same events.
+Its serialized bytes are unchanged. Richer projections are new, versioned
+formats layered on the same events: `observation-transcript-v1`, recorded under
+an OBS.1 observation policy (`docs/observation-policies.md`).
 
 The older `Eval.with_root_observer` is kept as the same v1 view (operation
 identities and trusted output bytes) over the typed stream.

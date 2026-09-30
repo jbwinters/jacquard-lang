@@ -43,6 +43,7 @@ let () =
       ("scope-policy", Test_scope_policy.suite);
       ("round-robin", Test_round_robin.suite);
       ("run-transcript", Test_run_transcript.suite);
+      ("observation-policy", Test_observation_policy.suite);
       ("relate", Test_relate.suite);
       ("relational-regression-net", Test_relational_regression.suite);
       ("exhaustive-schedule", Test_exhaustive_schedule.suite);
