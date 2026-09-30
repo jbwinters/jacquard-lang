@@ -1922,6 +1922,9 @@ let constructors_of ctx ?meta (h : Hash.t) (args : ty list) :
 (* [useful ctx tys matrix] = witness for a value vector matched by NO row, or None if the
    rows cover everything (Maranget, JFP 2007, specialized to wildcard queries). *)
 let rec useful ctx (tys : ty list) (matrix : Kernel.pat list list) : witness list option =
+  (* exhaustiveness search is exponential in the worst case: each step, and each matrix row it
+     carries, draws on computation fuel (RT.1) *)
+  Fuel_meter.tick (1 + List.length matrix);
   if matrix = [] then
     (* nothing covers anything: witnessed immediately (also the recursion base that keeps
        recursive types like list from diverging) *)
@@ -2120,6 +2123,7 @@ let rec check_matches ctx : Diag.t list =
    useful (redundant), Some () = useful. *)
 and useful_row ctx (tys : ty list) (matrix : Kernel.pat list list) (q : Kernel.pat list) :
     unit option =
+  Fuel_meter.tick (1 + List.length matrix);
   match (tys, q) with
   | [], [] -> if matrix = [] then Some () else None
   | t0 :: trest, q0 :: qrest -> (

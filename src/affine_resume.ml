@@ -235,6 +235,8 @@ let partitioned scrutinee arms =
     exclusive. A partition composed with an unpartitioned summary is checked once per arm. Unknown
     relationships retain [summary_seq]'s conservative behavior. *)
 let rec seq state left right =
+  (* composing partitioned flows can multiply them: each step draws on computation fuel (RT.1) *)
+  Fuel_meter.tick 1;
   match (left.partition, right.partition) with
   | Some left_partition, Some right_partition when aligned_partitions left_partition right_partition
     ->
@@ -463,6 +465,7 @@ and stable_cons env expression tail =
 
 let rec analyze ?(result_is_immediately_eliminated = false) (env : env) ~(context : value_context)
     (expr : Kernel.expr) : (flow, Diag.t) result =
+  Fuel_meter.tick 1;
   match expr.it with
   | Kernel.Lit _ | Kernel.Ref _ | Kernel.GroupRef _ -> Ok zero
   | Kernel.Var name ->

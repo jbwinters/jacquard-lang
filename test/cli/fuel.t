@@ -118,6 +118,19 @@ is exponentially large stops at the budget instead of rendering it:
   $ timeout 60 jacquard run --allow eval --fuel 100000 typerror.jac 2>&1 | head -1
   error[E0919]: Computation fuel was exhausted
 
+So is match exhaustiveness checking, which can explore exponentially many
+constructor combinations:
+
+  $ python3 -c 'n = 40
+  > arms = []
+  > for i in range(n):
+  >     for v in ("True", "False"):
+  >         pats = ["_"] * n; pats[i] = v
+  >         arms.append("    | (" + ", ".join(pats) + ") -> 0")
+  > print("plan = quote {\n  match (" + ", ".join(["True"] * n) + ") {\n" + "\n".join(arms) + "\n  }\n}\n\n`op:eval-code`(plan)")' > coverage.jac
+  $ timeout 60 jacquard run --allow eval --fuel 100000 coverage.jac 2>&1 | head -1
+  error[E0919]: Computation fuel was exhausted
+
 A budget must be a non-negative number of units:
 
   $ jacquard run --fuel=-1 spin.jac 2>&1 | head -2
