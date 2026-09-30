@@ -113,7 +113,17 @@ type mutable_graph_snapshot = {
           ownership must be revalidated at every memo/native return boundary. *)
 }
 
-type mutable_snapshot = { snapshot_root : Value.t; snapshot_graph : mutable_graph_snapshot }
+(* fuel-v1 cost of one memoized term's isolated sub-run (RT.1): its own units, the memoized terms
+   it reached, and the invocation epoch in which it was last charged *)
+type memo_charge = { own : int; deps : Hash.t list; mutable charged_epoch : int }
+
+type mutable_snapshot = {
+  snapshot_root : Value.t;
+  snapshot_graph : mutable_graph_snapshot;
+  memo_charge : memo_charge option;
+      (** the memo entry's cost record, kept here so a warm hit needs no further lookup *)
+}
+
 type native_snapshot_entry = { snapshot : mutable_snapshot; mutable last_used : int }
 type native_snapshot_lru = { entries : native_snapshot_entry option array; mutable clock : int }
 type root_observer = { on_operation : Hash.t -> unit; on_output : Hash.t -> string -> unit }
@@ -173,11 +183,30 @@ type ctx = {
   audit_context_id : int;
   mutable next_audit_run_id : int;
   mutable invocation : invocation option;  (** the active invocation, if any; never nested *)
+  mutable fuel_used : int;
+      (** monotone fuel-v1 units charged on this evaluator since creation (RT.1). Counted even when
+          unbounded, so a memoized term's cost is known if a later invocation is bounded *)
+  mutable fuel_ceiling : int;
+      (** [fuel_used] may not exceed this; [max_int] outside a bounded invocation *)
+  mutable fuel_limit : int option;  (** the active invocation's budget, for diagnostics *)
+  mutable fuel_exhausted : bool;
+      (** sticky: once set, every later transition and terminal in the invocation fails *)
+  memo_cost : (Hash.t, memo_charge) Hashtbl.t;
+      (** fuel of each memoized term's isolated sub-run, split into its own transitions and the
+          memoized terms it reached, so a warm memo charges what a cold one would *)
+  mutable fuel_epoch : int;
+      (** advanced by every invocation; a memo cost is charged once per epoch *)
+  mutable memo_frames : memo_frame list;  (** innermost first: memo sub-runs in progress *)
 }
+
+and memo_frame = { frame_deps : (Hash.t, unit) Hashtbl.t; mutable dep_units : int }
 
 and invocation = {
   mutable active : bool;
   mutable teardown : (unit -> unit) list;  (** most recent first *)
+  owner : ctx;
+  fuel_start : int;  (** [owner.fuel_used] when the invocation began *)
+  budget : int option;
 }
 
 let next_audit_context_id = Atomic.make 0
@@ -211,6 +240,13 @@ let make_ctx store =
     audit_context_id = Atomic.fetch_and_add next_audit_context_id 1;
     next_audit_run_id = 0;
     invocation = None;
+    fuel_used = 0;
+    fuel_ceiling = max_int;
+    fuel_limit = None;
+    fuel_exhausted = false;
+    memo_cost = Hashtbl.create 64;
+    fuel_epoch = 0;
+    memo_frames = [];
   }
 
 (** [store ctx] returns the immutable store handle used for name and declaration lookup. *)
@@ -372,15 +408,37 @@ let on_teardown invocation callback =
   else invocation.teardown <- callback :: invocation.teardown
 
 let invocation_active ctx = Option.is_some ctx.invocation
+let fuel_model = "fuel-v1"
+let fuel_used invocation = invocation.owner.fuel_used - invocation.fuel_start
+let fuel_budget invocation = invocation.budget
 
-let with_invocation ?coverage ctx body =
+let reset_fuel ctx =
+  ctx.fuel_ceiling <- max_int;
+  ctx.fuel_limit <- None;
+  ctx.fuel_exhausted <- false;
+  ctx.fuel_epoch <- ctx.fuel_epoch + 1;
+  ctx.memo_frames <- []
+
+let with_invocation ?coverage ?fuel ctx body =
   if Option.is_some ctx.invocation then
     invalid_arg "Eval.with_invocation: an invocation is already active on this evaluator";
+  (match fuel with
+  | Some limit when limit < 0 -> invalid_arg "Eval.with_invocation: fuel must be non-negative"
+  | Some _ | None -> ());
   let saved_coverage = ctx.track_coverage
   and saved_observer = ctx.root_observer
   and saved_handlers = Hashtbl.copy ctx.root_handlers in
-  let invocation = { active = true; teardown = [] } in
+  let invocation =
+    { active = true; teardown = []; owner = ctx; fuel_start = ctx.fuel_used; budget = fuel }
+  in
   Option.iter (fun enabled -> ctx.track_coverage <- enabled) coverage;
+  reset_fuel ctx;
+  Option.iter
+    (fun limit ->
+      ctx.fuel_ceiling <-
+        (if ctx.fuel_used > max_int - limit then max_int else ctx.fuel_used + limit);
+      ctx.fuel_limit <- Some limit)
+    fuel;
   ctx.invocation <- Some invocation;
   (* runs every callback exactly once, most recent first, then restores the configuration the
      invocation borrowed; returns the first callback exception *)
@@ -399,6 +457,7 @@ let with_invocation ?coverage ctx body =
     Hashtbl.iter (Hashtbl.replace ctx.root_handlers) saved_handlers;
     ctx.root_observer <- saved_observer;
     ctx.track_coverage <- saved_coverage;
+    reset_fuel ctx;
     ctx.invocation <- None;
     !first
   in
@@ -458,6 +517,46 @@ let nth_or_bug what l i =
 let rt e = raise (Rt e)
 let rt_type fmt = Printf.ksprintf (fun m -> rt (Runtime_err.Type_error m)) fmt
 let rt_arity fmt = Printf.ksprintf (fun m -> rt (Runtime_err.Arity m)) fmt
+
+(* --- computation fuel (RT.1, cost model fuel-v1; see docs/computation-fuel.md) --- *)
+
+let exhaust ctx =
+  (* the refused debit spends the remainder: an exhausted invocation always reports its whole
+     budget used, however large the refused charge was *)
+  if not ctx.fuel_exhausted then (
+    if ctx.fuel_ceiling < max_int then ctx.fuel_used <- ctx.fuel_ceiling;
+    (* no debit can pass a negative ceiling, which keeps [charge] to one comparison *)
+    ctx.fuel_ceiling <- -1;
+    ctx.fuel_exhausted <- true);
+  rt
+    (Runtime_err.Fuel_exhausted
+       { model = fuel_model; limit = Option.value ctx.fuel_limit ~default:0 })
+
+(** [charge ctx units] debits [units] before the work they pay for. A debit that would pass the
+    ceiling is refused and exhausts the invocation; nothing is charged for it. *)
+let[@inline] charge ctx units =
+  let used = ctx.fuel_used + units in
+  if used > ctx.fuel_ceiling then exhaust ctx else ctx.fuel_used <- used
+
+(* Text bytes and code-form nodes held directly by a native's argument or result; structure inside
+   tuples and constructors is not traversed, so the measure is proportional to the payloads a native
+   actually reads or builds. *)
+let rec form_nodes (form : Form.t) =
+  List.fold_left
+    (fun total -> function Form.F child -> total + form_nodes child | _ -> total + 1)
+    1 form.args
+
+let payload_units = function
+  | VText text -> String.length text
+  | VCode form -> form_nodes form
+  | _ -> 0
+
+let rec payload_total total = function
+  | [] -> total
+  | value :: rest -> payload_total (total + payload_units value) rest
+
+let[@inline] charge_payload ctx units = if units >= 64 then charge ctx (units / 64)
+let charge_native ctx values = charge_payload ctx (payload_total 0 values)
 
 (* ------------------------------------------------------------------ *)
 (* Pattern matching (plan W2.3)                                        *)
@@ -842,8 +941,9 @@ let snapshot_mutable_graph root =
   value root;
   { cells = !cells; once_states = !once_states; contains_task = !contains_task }
 
-let make_mutable_snapshot ctx root =
+let make_mutable_snapshot ?memo_charge ctx root =
   {
+    memo_charge;
     snapshot_root = root;
     snapshot_graph =
       (if needs_mutable_recheck ctx root then snapshot_mutable_graph root
@@ -944,7 +1044,8 @@ let replace_native_snapshot ctx root index =
   lru.entries.(index) <-
     Some
       {
-        snapshot = { snapshot_root = root; snapshot_graph = snapshot_mutable_graph root };
+        snapshot =
+          { snapshot_root = root; snapshot_graph = snapshot_mutable_graph root; memo_charge = None };
         last_used = lru.clock;
       }
 
@@ -970,15 +1071,27 @@ let check_native_argument ctx root =
         reject_recovery_state ctx (SApply (root, []));
         replace_native_snapshot ctx root index)
 
+let charge_native_result ctx = function
+  | Ok value as result ->
+      charge_payload ctx (payload_units value);
+      result
+  | Error _ as result -> result
+
 let invoke_untrusted_native ctx fn native args kont =
   let invocation_roots = [ fn; VTuple args; VResume kont ] in
   List.iter (prepare_native_argument ctx) invocation_roots;
+  charge_native ctx args;
   let result = native args in
   List.iter (check_native_argument ctx) invocation_roots;
-  match result with Ok value -> checked_result_state ctx value kont | Error error -> rt error
+  match charge_native_result ctx result with
+  | Ok value -> checked_result_state ctx value kont
+  | Error error -> rt error
 
 let invoke_trusted_native ctx native args kont =
-  match native args with Ok value -> checked_result_state ctx value kont | Error error -> rt error
+  charge_native ctx args;
+  match charge_native_result ctx (native args) with
+  | Ok value -> checked_result_state ctx value kont
+  | Error error -> rt error
 
 let handler_covers (h : handler) op = List.exists (fun (o, _) -> Hash.equal o op) h.hops
 
@@ -995,8 +1108,9 @@ let op_mode ctx op =
     semantics; the captured resumption is inner frames + that handler frame); fall back to root
     handlers (grants); otherwise raise [Unhandled]. *)
 let perform_unchecked ctx (op : Hash.t) ~name ~effect_ (args : Value.t list) (k : kont) : state =
-  let rec split inner_rev = function
+  let rec split walked inner_rev = function
     | FHandle h :: outer when handler_covers h op ->
+        if walked > 0 then charge ctx walked;
         let captured = List.rev (FHandle h :: inner_rev) in
         let { Kernel.params; resume; obody; _ } =
           match List.find_opt (fun (o, _) -> Hash.equal o op) h.hops with
@@ -1018,8 +1132,9 @@ let perform_unchecked ctx (op : Hash.t) ~name ~effect_ (args : Value.t list) (k 
         in
         let env = Env.add resume (ref resume_value) env in
         SEval ({ h.hscope with env }, obody, outer)
-    | f :: outer -> split (f :: inner_rev) outer
+    | f :: outer -> split (walked + 1) (f :: inner_rev) outer
     | [] -> (
+        charge ctx walked;
         notify_root_operation ctx op;
         match Hashtbl.find_opt ctx.root_handlers op with
         | Some native when not ctx.capture_root_handlers ->
@@ -1031,7 +1146,7 @@ let perform_unchecked ctx (op : Hash.t) ~name ~effect_ (args : Value.t list) (k 
                    { op; name; effect_; mode = op_mode ctx op; args; kont = List.rev inner_rev })
             else rt (Runtime_err.Unhandled { effect_; op = name }))
   in
-  split [] k
+  split 0 [] k
 
 (** Apply a function-position value to fully evaluated arguments (uncurried, decision D5): closures,
     builtins, constructors, ops (perform), and resumptions. *)
@@ -1072,13 +1187,17 @@ let apply_unchecked ctx (fn : Value.t) (args : Value.t list) (k : kont) : state 
   | VOp { op; name; effect_ } -> perform_unchecked ctx op ~name ~effect_ args k
   | VResume frames -> (
       match args with
-      | [ v ] -> SApply (v, frames @ k)
+      | [ v ] ->
+          charge ctx (List.length frames);
+          SApply (v, frames @ k)
       | _ -> rt_arity "a resumption takes exactly one argument, got %d" (List.length args))
   | VOnceResume once -> (
       match args with
       | [ v ] -> (
           match Once_state.consume once with
-          | Some frames -> SApply (v, frames @ k)
+          | Some frames ->
+              charge ctx (List.length frames);
+              SApply (v, frames @ k)
           | None -> rt Runtime_err.Once_resumed_twice)
       | _ -> rt_arity "a resumption takes exactly one argument, got %d" (List.length args))
   | v -> rt_type "%s is not applicable" (Value.show v)
@@ -1090,12 +1209,43 @@ let apply ctx fn args k =
   reject_recovery_state ctx (SApply (VTuple (fn :: args), k));
   apply_unchecked ctx fn args k
 
+(* Record that memoized term [h] was reached for [units] (zero when it was already charged in this
+   invocation) and attribute it to the enclosing memo sub-run, if any. Every reached term is a
+   dependency, charged or not, so a recorded cost never depends on what this invocation had already
+   paid for. *)
+
 (** Resolve a store reference to a runtime value: builtins and memoized terms short-circuit; other
     terms load from the store and evaluate in an ISOLATED sub-run. Isolation is a soundness
     requirement (review finding): a top-level body's effects must not be captured by handlers around
     the referencing expression, or a handled branch's value could be memoized and leak past the
     handler's dynamic extent. A top-level body therefore either handles its own effects, uses
     granted root handlers, or dies with [Unhandled] at the referencing point. *)
+let note_memo_charge ctx h units =
+  match ctx.memo_frames with
+  | frame :: _ ->
+      Hashtbl.replace frame.frame_deps h ();
+      frame.dep_units <- frame.dep_units + units
+  | [] -> ()
+
+(* A memo hit charges, once per invocation, exactly what the cold sub-run would have: its own
+   transitions plus every memoized dependency not yet charged in this invocation. *)
+let charge_memo_hit ctx h =
+  let rec total h =
+    match Hashtbl.find_opt ctx.memo_cost h with
+    | Some cost when cost.charged_epoch <> ctx.fuel_epoch ->
+        cost.charged_epoch <- ctx.fuel_epoch;
+        List.fold_left (fun units dep -> units + total dep) cost.own cost.deps
+    | Some _ | None -> 0
+  in
+  let units = total h in
+  note_memo_charge ctx h units;
+  charge ctx units
+
+(* the hot path: a warm hit already charged in this invocation, outside any memo sub-run *)
+let[@inline] memo_hit_is_paid ctx = function
+  | Some cost -> cost.charged_epoch = ctx.fuel_epoch && ctx.memo_frames = []
+  | None -> false
+
 let rec eval_ref ctx ~trusted (h : Hash.t) (kind : Kernel.refkind) (k : kont) : state =
   match kind with
   | Kernel.Con -> SApply (con_value ctx ~trusted h, k)
@@ -1117,13 +1267,19 @@ let rec eval_ref ctx ~trusted (h : Hash.t) (kind : Kernel.refkind) (k : kont) : 
                   | Some snapshot
                     when snapshot.snapshot_root == v && snapshot_unchanged snapshot.snapshot_graph
                     ->
+                      if not (memo_hit_is_paid ctx snapshot.memo_charge) then charge_memo_hit ctx h;
                       SApply (v, k)
                   | Some _ | None ->
+                      charge_memo_hit ctx h;
                       let next = checked_result_state ctx v k in
                       Hashtbl.replace ctx.evaluator_mutable_snapshots h
-                        (make_mutable_snapshot ctx v);
+                        (make_mutable_snapshot
+                           ?memo_charge:(Hashtbl.find_opt ctx.memo_cost h)
+                           ctx v);
                       next)
-              | Some _ | None -> checked_result_state ctx v k)
+              | Some _ | None ->
+                  charge_memo_hit ctx h;
+                  checked_result_state ctx v k)
           | None -> (
               match locate ctx ~trusted h with
               | {
@@ -1143,11 +1299,27 @@ let rec eval_ref ctx ~trusted (h : Hash.t) (kind : Kernel.refkind) (k : kont) : 
                   reject_recovery_state ctx initial;
                   let saved_capture = ctx.capture_ops in
                   ctx.capture_ops <- false;
+                  let frame = { frame_deps = Hashtbl.create 8; dep_units = 0 } in
+                  let saved_frames = ctx.memo_frames in
+                  ctx.memo_frames <- frame :: saved_frames;
+                  let started = ctx.fuel_used in
                   let v =
                     Fun.protect
-                      ~finally:(fun () -> ctx.capture_ops <- saved_capture)
+                      ~finally:(fun () ->
+                        ctx.capture_ops <- saved_capture;
+                        ctx.memo_frames <- saved_frames)
                       (fun () -> run_state_unchecked ctx initial)
                   in
+                  let units = ctx.fuel_used - started in
+                  let memo_charge =
+                    {
+                      own = units - frame.dep_units;
+                      deps = Hashtbl.fold (fun dep () deps -> dep :: deps) frame.frame_deps [];
+                      charged_epoch = ctx.fuel_epoch;
+                    }
+                  in
+                  Hashtbl.replace ctx.memo_cost h memo_charge;
+                  note_memo_charge ctx h units;
                   let next = checked_result_state ctx v k in
                   (* The isolated run has completed all closure construction and [let rec] knot
                      tying, and [checked_result_state] has traversed the finished graph. Evaluator
@@ -1155,7 +1327,8 @@ let rec eval_ref ctx ~trusted (h : Hash.t) (kind : Kernel.refkind) (k : kont) : 
                      only after publishing the exact guarded value to the public memo table. *)
                   Hashtbl.replace ctx.memo h v;
                   Hashtbl.replace ctx.evaluator_clean_memo h v;
-                  Hashtbl.replace ctx.evaluator_mutable_snapshots h (make_mutable_snapshot ctx v);
+                  Hashtbl.replace ctx.evaluator_mutable_snapshots h
+                    (make_mutable_snapshot ~memo_charge ctx v);
                   next
               | _ -> rt_type "hash %s is not a term" (Hash.to_hex h))))
 
@@ -1267,6 +1440,9 @@ and step_unchecked ctx (state : state) : state option =
     only rearrange validated payloads or tie a fresh recursive cell; native and untrusted memo
     boundaries validate fresh values before constructing their result states. *)
 and run_state_unchecked ctx state =
+  (* every machine state visited costs one unit, the terminal one included, so an exhausted
+     invocation can never deliver a value *)
+  charge ctx 1;
   match step_unchecked ctx state with
   | Some next -> run_state_unchecked ctx next
   | None -> (
@@ -1455,9 +1631,10 @@ let dispatch_root_operation ctx ~resume ~op ~name ~effect_ args =
       try
         let roots = [ VOp { op; name; effect_ }; VTuple args; resume ] in
         List.iter (prepare_native_argument ctx) roots;
+        charge_native ctx args;
         let result = native args in
         List.iter (check_native_argument ctx) roots;
-        match result with
+        match charge_native_result ctx result with
         | Ok value ->
             if not (atomic_non_task_value value) then reject_recovery_result_value ctx value;
             Ok value

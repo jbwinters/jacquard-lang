@@ -252,6 +252,9 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed i
     let max_live = ref 1 in
     let fatal_diagnostics = ref [] in
     let budget_refusal = ref None in
+    (* RT.1: computation fuel belongs to the whole invocation, so exhaustion stops the run instead
+       of becoming one task's failure that a sibling or collecting policy could absorb *)
+    let fuel_exhaustion = ref None in
     let validate_creation creation =
       match Schedule_control.creation schedule_control creation with
       | Ok () -> Ok ()
@@ -577,6 +580,9 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed i
     let step run handle state =
       Structured_scope.with_eval_task_context Task_capability.runtime ctx run.scope (fun () ->
           match Eval.run_state_capturing_once_routed ctx state with
+          | Error (Runtime_err.Fuel_exhausted _ as error) ->
+              fuel_exhaustion := Some error;
+              Error [ Runtime_err.to_diag error ]
           | Error error ->
               let* () =
                 Schedule_control.observe_operation schedule_control Schedule_trace.Failure
@@ -1026,6 +1032,8 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed i
       Error (Run_error (Runtime_err.Scheduler_error "scope cleanup left nonzero ownership metrics"))
     else
       match protected with
+      | Error _ when Option.is_some !fuel_exhaustion ->
+          Error (Run_error (Option.get !fuel_exhaustion))
       | Error diagnostics -> (
           let error = runtime_of_diagnostics diagnostics in
           match !budget_refusal with

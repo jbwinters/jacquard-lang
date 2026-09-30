@@ -102,6 +102,12 @@ let diagnostic ~code cause =
 
 let err ~code fmt = Printf.ksprintf (fun cause -> Error [ diagnostic ~code cause ]) fmt
 
+(* A runtime failure under [code], except computation-fuel exhaustion (RT.1), which keeps E0919:
+   running out of fuel is incomplete inference, not a model failure. *)
+let runtime_diagnostic ~code = function
+  | Runtime_err.Fuel_exhausted _ as error -> Runtime_err.to_diag error
+  | error -> diagnostic ~code (Runtime_err.to_string error)
+
 (* --- distribution values --- *)
 
 type dist_v =
@@ -271,13 +277,10 @@ let enumerate_risk_exact (ctx : Eval.ctx) ~max_branches (model : Eval.state) :
     let invalid_arithmetic fmt =
       Printf.ksprintf (fun cause -> Error [ diagnostic ~code:"E0916" cause ]) fmt
     in
-    let runtime_failure fmt =
-      Printf.ksprintf (fun cause -> Error [ diagnostic ~code:"E0915" cause ]) fmt
-    in
     let decode_distribution value =
       match dist_of_value ctx value with
       | Ok distribution -> Ok distribution
-      | Error error -> invalid_distribution "%s" (Runtime_err.to_string error)
+      | Error error -> Error [ runtime_diagnostic ~code:"E0911" error ]
     in
     let validate_entries operation entries =
       let rec validate index = function
@@ -293,7 +296,7 @@ let enumerate_risk_exact (ctx : Eval.ctx) ~max_branches (model : Eval.state) :
     in
     let materialized_support operation distribution =
       match support ctx distribution with
-      | Error error -> runtime_failure "%s" (Runtime_err.to_string error)
+      | Error error -> Error [ runtime_diagnostic ~code:"E0915" error ]
       | Ok entries -> validate_entries operation entries
     in
     let uniform_probability lo hi =
@@ -426,11 +429,11 @@ let enumerate_risk_exact (ctx : Eval.ctx) ~max_branches (model : Eval.state) :
     let resume continuation value =
       match Eval.resume_captured_state ctx continuation value with
       | Ok state -> Ok state
-      | Error error -> runtime_failure "%s" (Runtime_err.to_string error)
+      | Error error -> Error [ runtime_diagnostic ~code:"E0915" error ]
     in
     let rec explore state path_weight theoretically_positive =
       match run_until_op ctx state with
-      | Error error -> runtime_failure "%s" (Runtime_err.to_string error)
+      | Error error -> Error [ runtime_diagnostic ~code:"E0915" error ]
       | Ok (Done value) ->
           if !completed >= max_branches then
             err ~code:"E0912"
@@ -605,10 +608,10 @@ let likelihood_weighting (ctx : Eval.ctx) ~seed ~samples (model : unit -> Eval.s
       match one_run rng state 1.0 with Error e -> Error e | Ok () -> k_runs initial (i + 1)
   in
   match Eval.validate_state_once ctx initial with
-  | Error error -> Error [ diagnostic ~code:"E0902" (Runtime_err.to_string error) ]
+  | Error error -> Error [ runtime_diagnostic ~code:"E0902" error ]
   | Ok initial -> (
       match k_runs initial 0 with
-      | Error error -> Error [ diagnostic ~code:"E0902" (Runtime_err.to_string error) ]
+      | Error error -> Error [ runtime_diagnostic ~code:"E0902" error ]
       | Ok () ->
           let total = List.fold_left (fun acc { weight; _ } -> acc +. weight) 0.0 !runs in
           if total <= 0.0 then
@@ -752,7 +755,7 @@ let enumerate_v1 ?max_branches (ctx : Eval.ctx) (model : Eval.state) :
                (Printf.sprintf "enumerate: unexpected op %s/%d" name (List.length args)))
   in
   match explore model 1.0 with
-  | Error error -> Error [ diagnostic ~code:"E0902" (Runtime_err.to_string error) ]
+  | Error error -> Error [ runtime_diagnostic ~code:"E0902" error ]
   | Ok () ->
       let metadata =
         {
@@ -814,10 +817,10 @@ let lw_surviving_runs (ctx : Eval.ctx) ~seed ~samples (model : unit -> Eval.stat
       match one_run rng state 1.0 true with Error e -> Error e | Ok () -> k_runs initial (i + 1)
   in
   match Eval.validate_state_once ctx initial with
-  | Error error -> Error [ diagnostic ~code:"E0902" (Runtime_err.to_string error) ]
+  | Error error -> Error [ runtime_diagnostic ~code:"E0902" error ]
   | Ok initial -> (
       match k_runs initial 0 with
-      | Error error -> Error [ diagnostic ~code:"E0902" (Runtime_err.to_string error) ]
+      | Error error -> Error [ runtime_diagnostic ~code:"E0902" error ]
       | Ok () -> Ok (List.rev_map (fun { value; weight } -> (value, weight)) !runs))
 
 (** [likelihood_weighting_v1] is seeded likelihood weighting with the typed outcome; for a

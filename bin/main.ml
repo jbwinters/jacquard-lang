@@ -263,11 +263,22 @@ let write_schedule path trace =
 
 (* Run a program's top-level expressions with the requested grants: [walk ~on_expr] must resolve
    and install the program's tops in [store] in order, passing each expression to [on_expr]. *)
-let run_program ~store ~ctx ~allows ~seed ~infer_cache ~dry_run ~schedule_record ~requested_mode
-    ~walk =
+(* RT.1: with a budget, report what the invocation spent once it ends, whether it finished or ran
+   out; the line names the cost model so the numbers are never compared across models *)
+let report_fuel invocation =
+  match Eval.fuel_budget invocation with
+  | None -> ()
+  | Some budget ->
+      Eval.on_teardown invocation (fun () ->
+          Printf.eprintf "fuel: %d of %d unit(s) used (%s)\n%!" (Eval.fuel_used invocation) budget
+            Eval.fuel_model)
+
+let run_program ~fuel ~store ~ctx ~allows ~seed ~infer_cache ~dry_run ~schedule_record
+    ~requested_mode ~walk =
   (* one invocation owns this run's grants and Once resumptions; run never reads
                  coverage, so it skips the per-reference bookkeeping (PF.2 phase 2) *)
-  Eval.with_invocation ~coverage:false ctx @@ fun _invocation ->
+  Eval.with_invocation ~coverage:false ?fuel ctx @@ fun invocation ->
+  report_fuel invocation;
   let seed =
     (* OS-entropy seeded unless pinned; --seed makes sampling runs reproducible (SL.7) *)
     match seed with
@@ -397,7 +408,7 @@ let run_program ~store ~ctx ~allows ~seed ~infer_cache ~dry_run ~schedule_record
           | Error ds -> print_diags ds))
 
 let run_cmd file allows prelude store_dir seed infer_cache origin dry_run schedule_record
-    schedule_replay schedule_fork syntax =
+    schedule_replay schedule_fork fuel syntax =
   match schedule_mode schedule_replay schedule_fork with
   | Error diagnostics -> print_diags diagnostics
   | Ok requested_mode -> (
@@ -434,7 +445,7 @@ let run_cmd file allows prelude store_dir seed infer_cache origin dry_run schedu
           match expression_count with
           | Error diagnostics -> print_diags diagnostics
           | Ok () ->
-              run_program ~store ~ctx ~allows ~seed ~infer_cache ~dry_run ~schedule_record
+              run_program ~fuel ~store ~ctx ~allows ~seed ~infer_cache ~dry_run ~schedule_record
                 ~requested_mode ~walk:(fun ~on_expr ->
                   process_forms ?origin ~syntax store ~file source ~on_expr)))
 
@@ -798,11 +809,12 @@ let print_classified ~sampled ~metadata (c : Infer_dist.classified) =
       if metadata then print_endline ("# " ^ Infer_dist.show_metadata c.metadata);
       ok
 
-let infer_enumerate_cmd file prelude max_branches metadata syntax =
+let infer_enumerate_cmd file prelude max_branches metadata fuel syntax =
   match open_ctx ~prelude ~store_dir:None with
   | Error ds -> print_diags ds
   | Ok (store, ctx) -> (
-      Eval.with_invocation ctx @@ fun _invocation ->
+      Eval.with_invocation ?fuel ctx @@ fun invocation ->
+      report_fuel invocation;
       match load_model store ~syntax ~file with
       | Error ds -> print_diags ds
       | Ok model -> (
@@ -813,11 +825,12 @@ let infer_enumerate_cmd file prelude max_branches metadata syntax =
               | Error ds -> print_diags ds
               | Ok classified -> print_classified ~sampled:false ~metadata classified)))
 
-let infer_lw_cmd file prelude seed samples metadata syntax =
+let infer_lw_cmd file prelude seed samples metadata fuel syntax =
   match open_ctx ~prelude ~store_dir:None with
   | Error ds -> print_diags ds
   | Ok (store, ctx) -> (
-      Eval.with_invocation ctx @@ fun _invocation ->
+      Eval.with_invocation ?fuel ctx @@ fun invocation ->
+      report_fuel invocation;
       match load_model store ~syntax ~file with
       | Error ds -> print_diags ds
       | Ok model -> (
@@ -1961,6 +1974,24 @@ let seed_arg =
     & info [ "seed" ] ~docv:"SEED"
         ~doc:"Seed for the dist sampling handler (default: OS entropy); use for reproducible runs.")
 
+let fuel_arg =
+  let units =
+    let parse text =
+      match int_of_string_opt text with
+      | Some units when units >= 0 -> Ok units
+      | Some _ | None -> Error (`Msg "expected a non-negative number of fuel units")
+    in
+    Arg.conv (parse, Format.pp_print_int)
+  in
+  Arg.(
+    value
+    & opt (some units) None
+    & info [ "fuel" ] ~docv:"UNITS"
+        ~doc:
+          "Bound the whole run to UNITS of fuel-v1 computation fuel (see \
+           docs/computation-fuel.md). Running out stops with E0919: the run is incomplete, neither \
+           a pass nor a failure. Without it the run is unbounded.")
+
 let required_seed_arg =
   Arg.(
     required
@@ -2078,7 +2109,7 @@ let run_t =
       const (configure_diagnostics run_cmd)
       $ diagnostic_format_arg $ file_arg $ allows_arg $ prelude_arg $ store_dir_opt_arg $ seed_arg
       $ infer_cache_arg $ origin_arg $ dry_run_arg $ schedule_record_arg $ schedule_replay_arg
-      $ schedule_fork_arg $ syntax_arg)
+      $ schedule_fork_arg $ fuel_arg $ syntax_arg)
 
 let relate_term format file variation seed allows prelude syntax =
   selected_diagnostic_format := format;
@@ -2176,7 +2207,7 @@ let infer_t =
                 ~doc:
                   "Stop with E0918 instead of exploring more than $(docv) terminal paths (default: \
                    unbounded).")
-        $ infer_metadata_arg $ syntax_arg)
+        $ infer_metadata_arg $ fuel_arg $ syntax_arg)
   in
   let lw =
     Cmd.v
@@ -2189,7 +2220,7 @@ let infer_t =
             & opt (some int) None
             & info [ "seed" ] ~docv:"N" ~doc:"PRNG seed (required, D4).")
         $ Arg.(value & opt positive_int 10000 & info [ "samples" ] ~docv:"K" ~doc:"Number of runs.")
-        $ infer_metadata_arg $ syntax_arg)
+        $ infer_metadata_arg $ fuel_arg $ syntax_arg)
   in
   Cmd.group
     (Cmd.info "infer" ~doc:"Probabilistic inference: handlers over an unchanged model.")
@@ -3184,7 +3215,7 @@ let project_run_source project prelude entry_name allows seed =
               | Error ds -> print_diags ds
               | Ok tops ->
                   let store = Project_frontend.store session in
-                  run_program ~store ~ctx:(Project_frontend.eval_ctx session)
+                  run_program ~fuel:None ~store ~ctx:(Project_frontend.eval_ctx session)
                     ~allows ~seed ~infer_cache:None ~dry_run:false ~schedule_record:None
                     ~requested_mode:None ~walk:(fun ~on_expr ->
                       Project_frontend.walk_entry session tops ~on_resolved:(fun top _warnings ->
@@ -3290,8 +3321,8 @@ let project_run_bundle path prelude entry_name allows seed =
       | None -> bundle_entry_error path entry_name "run"
       | Some steps ->
           (* each step is a checked thunk; running it prints its value, as jacquard run does *)
-          run_program ~store:bundle.Project_bundle_reader.store ~ctx:bundle.ctx ~allows ~seed
-            ~infer_cache:None ~dry_run:false ~schedule_record:None ~requested_mode:None
+          run_program ~fuel:None ~store:bundle.Project_bundle_reader.store ~ctx:bundle.ctx ~allows
+            ~seed ~infer_cache:None ~dry_run:false ~schedule_record:None ~requested_mode:None
             ~walk:(fun ~on_expr ->
               List.fold_left
                 (fun acc step ->
