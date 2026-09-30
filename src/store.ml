@@ -133,7 +133,9 @@ let call_abi_slot_form = function
   | None -> Form.form "slot" [ Form.Sym "positional" ]
   | Some label -> Form.form "slot" [ Form.Sym "named"; Form.Sym label ]
 
+(* Store persistence is not program computation: its rendering never draws on a fuel budget (RT.1) *)
 let render_names names hidden call_abis =
+  Fuel_meter.unmetered @@ fun () ->
   Printer.print_all
     (List.map
        (fun (n, { Resolve.hash; kind }) ->
@@ -443,7 +445,8 @@ let put_decl ?origin t (decl : Kernel.decl) : (Canon.decl_hashes, Diag.t list) r
                     :: ds)
             else begin
               let oc = open_out_bin path in
-              output_string oc (Printer.print_all [ Kernel.decl_to_form decl ]);
+              output_string oc
+                (Fuel_meter.unmetered (fun () -> Printer.print_all [ Kernel.decl_to_form decl ]));
               close_out oc;
               Ok (decl, hs)
             end

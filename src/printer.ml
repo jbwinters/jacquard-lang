@@ -59,13 +59,14 @@ let scalar_to_string = function
       Fuel_meter.tick (String.length s);
       "\"" ^ escape_text s ^ "\""
   | Form.Sym s ->
+      Fuel_meter.tick (String.length s);
       check_symbol ~what:"symbol" s;
       s
   | Form.Hash h -> "#" ^ Hash.to_hex h
   | Form.F _ -> invalid_arg "scalar_to_string: form"
 
 let rec inline_form (f : Form.t) =
-  Fuel_meter.tick 1;
+  Fuel_meter.tick (1 + String.length f.Form.head);
   let args = List.map inline_arg f.Form.args in
   if f.Form.head = "group" then begin
     (* a group whose first element is a scalar reparses as a headed form *)
@@ -80,7 +81,11 @@ let rec inline_form (f : Form.t) =
     "(" ^ String.concat " " (f.Form.head :: args) ^ ")"
   end
 
-and inline_arg = function Form.F f -> inline_form f | scalar -> scalar_to_string scalar
+and inline_arg = function
+  | Form.F f -> inline_form f
+  | scalar ->
+      Fuel_meter.tick 1;
+      scalar_to_string scalar
 
 (** [print_compact f] renders [f] as one deterministic, reparsable bootstrap-form line, without a
     trailing newline. Unlike {!print}, nested forms are not expanded across lines. This is the

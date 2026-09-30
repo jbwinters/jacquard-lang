@@ -1255,9 +1255,10 @@ let apply_unchecked ctx (fn : Value.t) (args : Value.t list) (k : kont) : state 
 let apply ctx fn args k =
   reject_recovery_state ctx (SApply (VTuple (fn :: args), k));
   match fn with
-  | VBuiltin _ | VTrustedBuiltin _ -> (
-      (* a native runs only inside a run: the returned state applies it as the run's first step,
-         so its debits, its failure, and exhaustion all arrive through that run's result *)
+  | VBuiltin _ | VTrustedBuiltin _ | VOp _ -> (
+      (* a native or an operation (whose root handler may perform an effect) runs only inside a
+         run: the returned state applies it as the run's first step, so its debits, its effect, its
+         failure, and exhaustion all arrive through that run's result *)
       let scope = empty_scope in
       match List.rev args with
       | [] -> SApply (fn, FAppFn { args = []; scope } :: k)

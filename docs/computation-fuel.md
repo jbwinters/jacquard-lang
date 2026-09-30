@@ -45,7 +45,7 @@ the work it pays for, except that a walk is charged as it proceeds:
 | performing an operation | 1 per continuation frame walked to its handler, or to the root |
 | resuming a continuation (Multi or Once) | 1 per captured frame reinstalled, including resumptions a driver (inference, the scheduler, a host worker) makes outside the machine |
 | a native builtin or granted root handler | 1/64 per text byte of its direct arguments, then of its result |
-| rendering, printing or comparing a value or code form, anywhere in the invocation | 1/64 per node and per text byte walked |
+| rendering, printing or comparing a value or code form, anywhere in the invocation | 1/64 per node, scalar, and text, symbol, head or constructor-name byte walked |
 | reaching a memoized top-level term | the cost of the sub-run that computed it, once per invocation (§3) |
 
 The native measure counts only the text a native directly receives or returns;
@@ -107,9 +107,9 @@ skips a failed branch therefore cannot turn exhaustion into a value.
 - A driver working outside any run (resuming a captured continuation, applying
   a value) does not raise exhaustion from a refused debit. The invocation
   becomes exhausted at once, and the refusal is raised as the next run starts,
-  so exhaustion arrives through a run's result. A native is never run
-  outside a run: a driver applying one gets a state whose first step applies
-  it. A native that caught exhaustion from a nested run cannot
+  so exhaustion arrives through a run's result. A native or an
+  operation is never applied outside a run: a driver applying one gets a state
+  whose first step applies it, so no effect happens before its debit. A native that caught exhaustion from a nested run cannot
   replace it with its own result or error.
 - A walk that runs out raises `Fuel_meter.Exceeded`. A run turns it into E0919;
   the scheduler and the inference drivers return E0919 for a walk of their
@@ -128,7 +128,7 @@ With `--fuel`, the CLI prints one line to stderr when the invocation ends,
 whether it finished or ran out:
 
 ```text
-fuel: 123 of 123 unit(s) used (fuel-v1)
+fuel: 113 of 113 unit(s) used (fuel-v1)
 ```
 
 The line always names the model, so budgets are never compared across models.
@@ -168,6 +168,8 @@ entry points. A host consumer bounds an invocation with
 - Accounting also runs in unbounded mode, since memoized costs must not depend
   on whether a budget is present; it adds a counter update per transition and
   per walked node, and nothing asymptotic.
+- Store persistence (writing declarations and the names index) is not program
+  computation and is never metered.
 - Rendering a finished result is outside the budget: the CLI prints final
   values and posteriors unmetered. Walks during the invocation, including a
   diagnostic that shows a value, are metered: a huge ill-typed argument can

@@ -465,6 +465,14 @@ let test_fuel_bounds_deep_natives () =
   Alcotest.(check (pair string int))
     "and under its exact budget" ("false", cost)
     (fueled ~budget:cost ctx store unequal);
+  (* comparing code pays for the bytes it compares *)
+  let big = String.make 6400 'x' in
+  let compare text =
+    snd
+      (fueled ctx store
+         (Printf.sprintf "code.eq?(code.of-text(\"%s\"), code.of-text(\"%s\"))" text text))
+  in
+  Alcotest.(check bool) "string bytes compared are charged" true (compare big - compare "" >= 300);
   (* walks outside any run draw on the budget too: the scheduler rendering a task result, and exact
      enumeration comparing an observed value *)
   let scheduled =
@@ -568,6 +576,22 @@ let test_fuel_outside_runs () =
         failure (run_state ctx (Eval.apply_state ctx reenter [])))
   in
   Alcotest.(check string) "reported by the run" "E0919" code;
+  (* an operation a driver applies outside any run performs nothing until a run starts *)
+  let print_op =
+    Eval.with_invocation ctx (fun _ ->
+        match Eval.run_expr ctx (expression store "print") with
+        | Ok op -> op
+        | Error error -> Alcotest.failf "print: %s" (Diag.to_string (Runtime_err.to_diag error)))
+  in
+  let sink = Buffer.create 16 in
+  let code =
+    Eval.with_invocation ~fuel:0 ctx (fun _ ->
+        grant_console ctx sink;
+        let state = Eval.apply_state ctx print_op [ Value.VText (String.make 640 'x') ] in
+        failure (run_state ctx state))
+  in
+  Alcotest.(check string) "the operation is refused by the run" "E0919" code;
+  Alcotest.(check string) "and printed nothing" "" (Buffer.contents sink);
   (* a multi-shot resumption made by a driver pays for the frames it reinstalls *)
   let model =
     expression store "{ let c = `op:sample`(Bernoulli(0.5)); add(if c then 1 else 2, 3) }"

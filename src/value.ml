@@ -93,7 +93,9 @@ let rec show value =
   | VSecret _ -> "<secret redacted>"
   | VTuple items -> "(" ^ String.concat ", " (List.map show items) ^ ")"
   | VCon { name; args = []; _ } -> name
-  | VCon { name; args; _ } -> name ^ "(" ^ String.concat ", " (List.map show args) ^ ")"
+  | VCon { name; args; _ } ->
+      Fuel_meter.tick (String.length name);
+      name ^ "(" ^ String.concat ", " (List.map show args) ^ ")"
   | VConstructor { name; arity; _ } -> Printf.sprintf "<constructor %s/%d>" name arity
   | VOp { effect_; name; _ } -> Printf.sprintf "<op %s.%s>" effect_ name
   | VClosure _ -> "<closure>"

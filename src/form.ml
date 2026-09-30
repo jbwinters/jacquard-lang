@@ -12,15 +12,18 @@ let form ?(meta = Meta.empty) head args = { head; meta; args }
     [Float.compare], so [nan] equals [nan] and [-0.] equals [0.]; canonical hashing (W1.5) pins the
     bit-level story. *)
 let rec equal_ignoring_meta (a : t) (b : t) =
-  Fuel_meter.tick 1;
+  Fuel_meter.tick (1 + String.length a.head);
   String.equal a.head b.head && List.equal equal_arg a.args b.args
 
 and equal_arg a b =
+  Fuel_meter.tick 1;
   match (a, b) with
   | F a, F b -> equal_ignoring_meta a b
   | Int a, Int b -> Int.equal a b
   | Real a, Real b -> Float.compare a b = 0
-  | Text a, Text b | Sym a, Sym b -> String.equal a b
+  | Text a, Text b | Sym a, Sym b ->
+      Fuel_meter.tick (String.length a);
+      String.equal a b
   | Hash a, Hash b -> Hash.equal a b
   | (F _ | Int _ | Real _ | Text _ | Sym _ | Hash _), _ -> false
 

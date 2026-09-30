@@ -24,10 +24,10 @@ A pure loop performs no effect, yet it stops at a reproducible boundary:
 
 A finite program completes at exactly its cost and not one unit below it:
 
-  $ jacquard run --fuel 123 ../../demos/basics/surface-fact.jac
+  $ jacquard run --fuel 113 ../../demos/basics/surface-fact.jac
   120
-  fuel: 123 of 123 unit(s) used (fuel-v1)
-  $ jacquard run --fuel 122 ../../demos/basics/surface-fact.jac 2>&1 | head -1
+  fuel: 113 of 113 unit(s) used (fuel-v1)
+  $ jacquard run --fuel 112 ../../demos/basics/surface-fact.jac 2>&1 | head -1
   error[E0919]: Computation fuel was exhausted
   $ jacquard run ../../demos/basics/surface-fact.jac
   120
@@ -48,7 +48,7 @@ become one failed task that the scope could absorb; the whole run stops:
   error[E0919]: Computation fuel was exhausted
 
 Exhaustion can land anywhere in a scheduled run, including while the scheduler
-resumes a task that yielded. Every budget below the program's cost (223) is E0919
+resumes a task that yielded. Every budget below the program's cost (212) is E0919
 with exit 2; none crashes or reports a task failure:
 
   $ cat > yield.jac <<'J'
@@ -62,14 +62,14 @@ with exit 2; none crashes or reports a task failure:
   > J
   $ jacquard run yield.jac
   done((done(0), done(0)))
-  $ n=0; while [ $n -lt 223 ]; do
+  $ n=0; while [ $n -lt 212 ]; do
   >   jacquard run --fuel $n yield.jac > out.txt 2>&1; code=$?
   >   if [ $code -ne 2 ] || ! grep -q 'error\[E0919\]' out.txt; then echo "budget $n: exit $code"; fi
   >   n=$((n + 1))
   > done
-  $ jacquard run --fuel 223 yield.jac
+  $ jacquard run --fuel 212 yield.jac
   done((done(0), done(0)))
-  fuel: 223 of 223 unit(s) used (fuel-v1)
+  fuel: 212 of 212 unit(s) used (fuel-v1)
 
 Every branch of an exact enumeration draws on the same budget, and running
 out is E0919, not a model runtime failure (E0902) or the terminal-path budget
