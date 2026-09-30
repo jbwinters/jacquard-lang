@@ -30,15 +30,22 @@ val prepare : Store.t -> (prepared, Diag.t list) result
     prelude's own E0702 diagnostics. *)
 
 val serve :
-  prepared -> input:in_channel -> output:out_channel -> operator:out_channel -> exit_status
-(** [serve prepared ~input ~output ~operator] runs one complete worker lifetime. Frames are read
-    from [input] and written, one at a time and fully flushed, to [output]. [operator] receives
-    bounded human diagnostics limited to the hard and then the selected [max_stderr_bytes]; it is
-    never a protocol or evidence channel. The function closes none of the three channels and retains
-    no continuation, session, or descriptor after it returns. Every terminal action is committed
-    when written and is never retried. [SIGPIPE] is ignored for the dynamic extent of the call so a
-    host that closes its read end yields [Carrier_lost] instead of a fatal signal; the previous
-    disposition is restored afterwards. Bytes that could not be written stay in the caller's channel
-    buffer, so a process boundary must discard them rather than flush them at exit. Exceptions are
-    contained and reported as [Internal_failure] except a stack overflow inside evaluation, which
-    becomes a bounded E0003 outcome. *)
+  ?fuel:int ->
+  prepared ->
+  input:in_channel ->
+  output:out_channel ->
+  operator:out_channel ->
+  exit_status
+(** [serve ?fuel prepared ~input ~output ~operator] runs one complete worker lifetime. With [fuel],
+    the invocation is bounded to that many fuel-v1 units (RT.1): running out aborts the invocation
+    with the E0919 diagnostic through the existing v0 abort path. Frames are read from [input] and
+    written, one at a time and fully flushed, to [output]. [operator] receives bounded human
+    diagnostics limited to the hard and then the selected [max_stderr_bytes]; it is never a protocol
+    or evidence channel. The function closes none of the three channels and retains no continuation,
+    session, or descriptor after it returns. Every terminal action is committed when written and is
+    never retried. [SIGPIPE] is ignored for the dynamic extent of the call so a host that closes its
+    read end yields [Carrier_lost] instead of a fatal signal; the previous disposition is restored
+    afterwards. Bytes that could not be written stay in the caller's channel buffer, so a process
+    boundary must discard them rather than flush them at exit. Exceptions are contained and reported
+    as [Internal_failure] except a stack overflow inside evaluation, which becomes a bounded E0003
+    outcome. *)

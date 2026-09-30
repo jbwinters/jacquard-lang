@@ -84,7 +84,7 @@ out is E0919, not a model runtime failure (E0902) or the terminal-path budget
     Cause: computation fuel exhausted: the fuel-v1 budget of 154 unit(s) ran out before evaluation finished; the result is incomplete
     Next step: Raise the --fuel budget, or omit it to run unbounded. An exhausted run is incomplete; it neither passes nor fails.
   fuel: 154 of 154 unit(s) used (fuel-v1)
-  [1]
+  [2]
 
 Type checking draws on the budget too. Let-polymorphism can make the types of
 a few lines of code doubly exponential in size; checking code passed to `eval`
@@ -139,6 +139,100 @@ expanding them (this program never finished before):
   > print("type Shape = | Tip | Fork(lhs: Shape, rhs: Shape)\nonce effect Probe where { probe : () -> Int }\n\ndrive() = handle probe() {\n  | return v -> v\n  | probe() resume k -> {\n      let t0 = Tip\n" + binds + "\n      let a = match t%d { | _ -> 0 }\n      let b = match t%d { | _ -> 0 }\n      k(add(a, b))\n    }\n}\n\ndrive()" % (n, n))' > scrutinees.jac
   $ timeout 60 jacquard run --fuel 100000 scrutinees.jac 2>&1 | head -1
   0
+
+`jacquard test --fuel UNITS` gives each discovered test its own budget, drawn
+from one run. A test that runs out is INCOMPLETE, is never cached, and makes the
+run exit 2; bounded results are cached under the budget and never answer for an
+unbounded run:
+
+  $ cat > suite.jac <<'J'
+  > loop(n) = loop(add(n, 1))
+  > twice(n) = mul(n, 2)
+  > quick-case =
+  >   Case("quick", fn () -> check.eq(twice(3), 6, int.eq, int.show, "twice"))
+  > spin-case =
+  >   Case("spins", fn () -> check.eq(loop(0), 0, int.eq, int.show, "never"))
+  > J
+  $ jacquard test suite.jac --fuel 5000 --cache-dir bounded
+  PASS quick-case/quick (1 check)
+  INCOMPLETE spin-case: computation fuel exhausted (fuel-v1, 5000 unit(s))
+  1 passed, 0 failed, 0 skipped, 0 refused, 1 incomplete
+  cache: 0 hit, 1 ran
+  [2]
+  $ ls bounded | wc -l
+  1
+  $ jacquard test suite.jac --fuel 5000 --cache-dir bounded | tail -2
+  1 passed, 0 failed, 0 skipped, 0 refused, 1 incomplete
+  cache: 1 hit, 0 ran
+Each test pays for the memoized terms it uses, whichever test forced them
+first, so a verdict never depends on test order:
+
+  $ cat > shared.jac <<'J'
+  > countdown(n) = if eq(n, 0) then 0 else countdown(sub(n, 1))
+  > heavy = countdown(2000)
+  > a-case = Case("a", fn () -> check.eq(heavy, 0, int.eq, int.show, "a"))
+  > b-case = Case("b", fn () -> check.eq(add(heavy, countdown(500)), 0, int.eq, int.show, "b"))
+  > J
+  $ grep -v a-case shared.jac > b-only.jac
+  $ jacquard test shared.jac --fuel 50000 --no-cache | head -2
+  PASS a-case/a (1 check)
+  INCOMPLETE b-case: computation fuel exhausted (fuel-v1, 50000 unit(s))
+  $ jacquard test b-only.jac --fuel 50000 --no-cache | head -1
+  INCOMPLETE b-case: computation fuel exhausted (fuel-v1, 50000 unit(s))
+
+A group keeps the verdicts its children finished before one ran out, so a
+failure is never hidden by a later incomplete child:
+
+  $ cat > group.jac <<'J'
+  > loop(n) = loop(add(n, 1))
+  > suite-case = Group("suite", [
+  >   Case("fails", fn () -> check.true(False, "no")),
+  >   Case("spins", fn () -> check.eq(loop(0), 0, int.eq, int.show, "never"))
+  > ])
+  > zz-after-case = Case("after", fn () -> check.true(True, "yes"))
+  > J
+  $ jacquard test group.jac --fuel 3000 --no-cache
+  FAIL suite-case/suite/fails
+    - no
+  INCOMPLETE suite-case: computation fuel exhausted (fuel-v1, 3000 unit(s))
+  PASS zz-after-case/after (1 check)
+  1 passed, 1 failed, 0 skipped, 0 refused, 1 incomplete
+  [1]
+
+The same holds when the child that runs out is an exhaustive property, which
+would otherwise turn exhaustion into a failing verdict:
+
+  $ cat > prop-group.jac <<'J'
+  > loop(n) = loop(add(n, 1))
+  > failing-case = Group("failing", [
+  >   Case("fails", fn () -> check.true(False, "no")),
+  >   prop("spins", fn () -> check.eq(loop(sample(uniform-int(0, 1))), 0, int.eq, int.show, "never"))
+  > ])
+  > spinning-case = Group("spinning", [
+  >   prop("spins", fn () -> check.eq(loop(sample(uniform-int(0, 1))), 0, int.eq, int.show, "never")),
+  >   Case("passes", fn () -> check.true(True, "yes"))
+  > ])
+  > J
+  $ jacquard test prop-group.jac --exhaustive --fuel 3000 --no-cache
+  FAIL failing-case/failing/fails
+    - no
+  INCOMPLETE failing-case: computation fuel exhausted (fuel-v1, 3000 unit(s))
+  INCOMPLETE spinning-case: computation fuel exhausted (fuel-v1, 3000 unit(s))
+  0 passed, 1 failed, 0 skipped, 0 refused, 2 incomplete
+  [1]
+
+Results cached under one budget never answer for another:
+
+  $ jacquard test suite.jac --fuel 6000 --cache-dir bounded | tail -1
+  cache: 0 hit, 1 ran
+
+  $ cat > quick.jac <<'J'
+  > twice(n) = mul(n, 2)
+  > quick-case =
+  >   Case("quick", fn () -> check.eq(twice(3), 6, int.eq, int.show, "twice"))
+  > J
+  $ jacquard test quick.jac --cache-dir bounded | tail -1
+  cache: 0 hit, 1 ran
 
 A budget must be a non-negative number of units:
 

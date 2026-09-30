@@ -56,6 +56,16 @@ Core evidence that omits argument and result values.
   {"carrier":"stdio-u32-json-v0","kind":"core_hello","limits":{"max_arguments":64,"max_collection_items":1024,"max_diagnostic_bytes":65536,"max_diagnostics":32,"max_effect_requests":1024,"max_effects":64,"max_frame_bytes":1048576,"max_host_message_bytes":4096,"max_json_depth":64,"max_operations":256,"max_stderr_bytes":65536,"max_text_bytes":262144,"max_value_nodes":4096},"versions":["jacquard-host-v0"]}
   {"evidence":{"core":{"capabilities":{"effects":[],"operations":[]},"effect_requests":[],"interface":{"effects":[],"parameters":[{"arguments":[],"identity":"<int>","kind":"nominal"}],"result":{"arguments":[],"identity":"<int>","kind":"nominal"}},"invocation_id":"0000000000000000","schema":"jacquard-host-core-evidence-v0","target":{"callable":"<double>","kind":"store-term-v0"},"terminal":"ok"},"host_observations":{"responses":[],"schema":"jacquard-host-observations-v0"}},"invocation_id":"0000000000000000","kind":"outcome","protocol":"jacquard-host-v0","result":{"kind":"ok","value":{"kind":"int","value":"42"}}}
 
+With `--fuel` the invocation is bounded (RT.1). Running out aborts through the
+unchanged v0 abort path with the E0919 diagnostic; the budget is not a protocol
+field:
+
+  $ jacquard host worker --store store --fuel 3 < pure.in > fuel.out
+  $ unframe < fuel.out | names | grep -o '"code":"E0919"'
+  "code":"E0919"
+  $ jacquard host worker --store store --fuel 100000 < pure.in > fuel-ok.out
+  $ cmp pure.out fuel-ok.out
+
 One configured once operation: Core emits the request, the host answers, and
 the outcome records the request order and the accepted observation.
 
@@ -123,5 +133,5 @@ Startup configuration failures happen before any frame is written.
     Next step: Pass the path to an existing Jacquard store.
   [1]
   $ jacquard host worker 2>&1 | head -2
-  Usage: jacquard host worker [--help] [--diagnostic-format=FORMAT] --store=DIR
-         [OPTION]…
+  Usage: jacquard host worker [--help] [--diagnostic-format=FORMAT]
+         [--fuel=UNITS] --store=DIR [OPTION]…

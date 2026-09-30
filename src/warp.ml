@@ -924,7 +924,22 @@ let read_file path =
   close_in ic;
   s
 
+(** RT.1: the per-test fuel budget of a bounded [jacquard test] run, if any. A bounded result is
+    keyed by the cost model and budget, so it never answers for an unbounded run or another budget.
+*)
+let fuel_budget : int option ref = ref None
+
+(** Outcomes a test's groups completed before its fuel ran out, in order; the runner reports them
+    alongside the incomplete test and resets this before each test. They are never cached. *)
+let partial_outcomes : outcome list ref = ref []
+
+let bounded_key key =
+  match !fuel_budget with
+  | None -> key
+  | Some budget -> Printf.sprintf "%s|fuel=%s:%d" key Eval.fuel_model budget
+
 let cache_lookup ~cache_dir key : (string * verdict * string option * Hash.t list) list option =
+  let key = bounded_key key in
   match cache_dir with
   | None -> None
   | Some dir -> (
@@ -940,14 +955,22 @@ let cache_lookup ~cache_dir key : (string * verdict * string option * Hash.t lis
           | Error _ -> None))
 
 let cache_store ~cache_dir key outcomes : unit =
+  let key = bounded_key key in
   match cache_dir with
   | None -> ()
+  | Some _ when Fuel_meter.exhausted () ->
+      (* an exhausted test is incomplete: nothing it produced is a verdict worth caching *)
+      ()
   | Some dir -> (
       try
         if not (Sys.file_exists dir) then Sys.mkdir dir 0o755;
         let path = Filename.concat dir (Hash.to_hex (Hash.of_string key) ^ ".jqd") in
+        (* the cache entry is store IO: rendered unmetered, before the file is opened *)
+        let entry =
+          Fuel_meter.unmetered (fun () -> Printer.print (entry_form ~key ~outcomes) ^ "\n")
+        in
         let oc = open_out_bin path in
-        output_string oc (Printer.print (entry_form ~key ~outcomes) ^ "\n");
+        output_string oc entry;
         close_out oc
       with Sys_error m -> Printf.eprintf "test-cache unavailable (%s)\n%!" m)
 
@@ -958,6 +981,7 @@ type totals = {
   mutable failed : int;
   mutable skipped : int;
   mutable refused : int;
+  mutable incomplete : int;  (** tests that ran out of their fuel budget (RT.1) *)
   mutable hits : int;
   mutable ran : int;
 }
@@ -1066,6 +1090,12 @@ let rec run_value ctx ~test_run ~prop_mode ~schedule_plan ~suite_seed ~member ~s
                 ~display:(display ^ "/" ^ label)
                 t
             with
+            | _ when Fuel_meter.exhausted () ->
+                (* RT.1: a child that ran out of fuel leaves the group incomplete, whatever it
+                   returned (an exhaustive property turns the error into a verdict); only the
+                   children that finished before it keep their verdicts *)
+                partial_outcomes := List.concat (List.rev acc) @ !partial_outcomes;
+                Error "computation fuel exhausted"
             | Ok os -> walk (child_index + 1) (os :: acc) rest
             | Error e -> Error e)
         | v -> Error (Printf.sprintf "malformed group: %s" (Value.show v))

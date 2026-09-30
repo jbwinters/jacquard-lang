@@ -120,7 +120,7 @@ type memo_charge = {
       (** in the order the cold sub-run charged them: its own fine units before each memoized term
           it reached, and that term *)
   mutable tail : int;  (** its own fine units after the last memoized term *)
-  mutable charged_epoch : int;
+  mutable charged_epochs : int list;  (** active epochs it was paid in *)
 }
 
 (* memo sub-runs in progress, innermost first, across every evaluator: a native that re-enters
@@ -137,6 +137,17 @@ let hoist_completed frames completed =
   match frames with parent :: _ -> parent.completed <- completed @ parent.completed | [] -> ()
 
 let memo_frames : memo_frame list ref = ref []
+
+let[@inline] memo_paid cost =
+  match cost.charged_epochs with
+  | epoch :: _ when epoch = !Fuel_meter.epoch -> true
+  | epochs -> List.mem !Fuel_meter.epoch epochs
+
+(* keep only the epochs still running, so the list stays as short as the nesting *)
+let mark_memo_paid cost =
+  cost.charged_epochs <-
+    !Fuel_meter.epoch
+    :: List.filter (fun epoch -> List.mem epoch !Fuel_meter.active_epochs) cost.charged_epochs
 
 type mutable_snapshot = {
   snapshot_root : Value.t;
@@ -476,7 +487,8 @@ let with_invocation ?coverage ?fuel ctx body =
      outside any invocation) still records what it reaches as that sub-run's dependencies *)
   if !Fuel_meter.depth = 0 then (
     incr Fuel_meter.next_epoch;
-    Fuel_meter.epoch := !Fuel_meter.next_epoch);
+    Fuel_meter.epoch := !Fuel_meter.next_epoch;
+    Fuel_meter.active_epochs := !Fuel_meter.epoch :: !Fuel_meter.active_epochs);
   incr Fuel_meter.depth;
   (* an invocation on another evaluator inside a bounded one stays within the outer ceiling *)
   Option.iter
@@ -508,6 +520,9 @@ let with_invocation ?coverage ?fuel ctx body =
     else Fuel_meter.ceiling := invocation.saved_ceiling;
     Fuel_meter.budget := invocation.saved_budget;
     decr Fuel_meter.depth;
+    if !Fuel_meter.depth = 0 then
+      Fuel_meter.active_epochs :=
+        List.filter (fun epoch -> epoch <> !Fuel_meter.epoch) !Fuel_meter.active_epochs;
     Fuel_meter.epoch := invocation.saved_epoch;
     memo_frames := invocation.saved_frames;
     let callbacks = invocation.teardown in
@@ -536,6 +551,59 @@ let with_invocation ?coverage ?fuel ctx body =
       let backtrace = Printexc.get_raw_backtrace () in
       ignore (finish ());
       Printexc.raise_with_backtrace exn backtrace
+
+let with_fuel_scope ctx ~fuel body =
+  if fuel < 0 then invalid_arg "Eval.with_fuel_scope: fuel must be non-negative";
+  if not (invocation_active ctx) then
+    invalid_arg "Eval.with_fuel_scope: no invocation is active on this evaluator";
+  let saved_ceiling = !Fuel_meter.ceiling
+  and saved_budget = !Fuel_meter.budget
+  and saved_limit = ctx.fuel_limit in
+  let start = !Fuel_meter.used in
+  let own =
+    if fuel > (max_int - start) / fine_per_unit then max_int else start + (fuel * fine_per_unit)
+  in
+  Fuel_meter.ceiling := min own saved_ceiling;
+  Fuel_meter.budget := fuel;
+  ctx.fuel_limit <- Some fuel;
+  (* a scope charges memoized terms as if it ran alone: a fresh epoch, so its cost never depends on
+     what earlier scopes of the same invocation paid for *)
+  let saved_epoch = !Fuel_meter.epoch and saved_pending = ctx.fuel_pending in
+  incr Fuel_meter.next_epoch;
+  Fuel_meter.epoch := !Fuel_meter.next_epoch;
+  Fuel_meter.active_epochs := !Fuel_meter.epoch :: !Fuel_meter.active_epochs;
+  ctx.fuel_pending <- 0;
+  let exhausted = ref false in
+  let restore () =
+    (* the scope's own exhaustion is its outcome; the enclosing allowance stays exhausted only if
+       the scope used it up *)
+    if
+      Fuel_meter.exhausted () && saved_ceiling >= 0 && saved_ceiling < max_int
+      && !Fuel_meter.used >= saved_ceiling
+    then (
+      Fuel_meter.ceiling := saved_ceiling;
+      Fuel_meter.trip ())
+    else Fuel_meter.ceiling := saved_ceiling;
+    Fuel_meter.budget := saved_budget;
+    ctx.fuel_limit <- saved_limit;
+    Fuel_meter.active_epochs :=
+      List.filter (fun epoch -> epoch <> !Fuel_meter.epoch) !Fuel_meter.active_epochs;
+    Fuel_meter.epoch := saved_epoch;
+    ctx.fuel_pending <- saved_pending
+  in
+  let result =
+    Fun.protect ~finally:restore (fun () ->
+        let result =
+          match body () with
+          | result -> result
+          | exception Fuel_meter.Exceeded ->
+              exhausted := true;
+              raise Fuel_meter.Exceeded
+        in
+        exhausted := Fuel_meter.exhausted ();
+        result)
+  in
+  (result, !exhausted, units_of_fine (!Fuel_meter.used - start))
 
 (** [set_coverage_tracking ctx enabled] controls semantic term-reference collection. Disabling it
     avoids bookkeeping when callers will not inspect coverage. *)
@@ -1387,7 +1455,7 @@ let charge_memo_hit ctx h =
   (* terms whose replay completed during this hit, as (start, end, term), most recent first *)
   let finished = ref [] in
   let rec replay cost =
-    if cost.charged_epoch <> !Fuel_meter.epoch then (
+    if not (memo_paid cost) then (
       let start = !Fuel_meter.used in
       List.iter
         (fun (own, dep) ->
@@ -1395,7 +1463,7 @@ let charge_memo_hit ctx h =
           replay dep)
         cost.segments;
       charge_fine ctx cost.tail;
-      cost.charged_epoch <- !Fuel_meter.epoch;
+      mark_memo_paid cost;
       finished := (start, !Fuel_meter.used, cost) :: !finished)
   in
   match Hashtbl.find_opt ctx.memo_cost h with
@@ -1420,7 +1488,7 @@ let charge_memo_hit ctx h =
 
 (* the hot path: a warm hit already charged in this invocation, outside any memo sub-run *)
 let[@inline] memo_hit_is_paid _ctx = function
-  | Some cost -> cost.charged_epoch = !Fuel_meter.epoch && !memo_frames = []
+  | Some cost -> memo_paid cost && !memo_frames = []
   | None -> false
 
 (** Resolve a store reference to a runtime value: builtins and memoized terms short-circuit; other
@@ -1504,7 +1572,7 @@ let rec eval_ref ctx ~trusted (h : Hash.t) (kind : Kernel.refkind) (k : kont) : 
                         raise exn
                   in
                   let memo_charge =
-                    { segments = []; tail = 0; charged_epoch = !Fuel_meter.epoch }
+                    { segments = []; tail = 0; charged_epochs = [ !Fuel_meter.epoch ] }
                   in
                   let next = checked_result_state ctx v k in
                   let snapshot = make_mutable_snapshot ~memo_charge ctx v in

@@ -24,14 +24,15 @@ on the same allowance:
 
 Forks never receive a copied or fresh allowance. The counter is one
 process-wide meter, not state on a continuation, so every transition and every
-metered walk (§2) debits the one shared budget. The drivers
-impose no per-branch limits of their own. A nested invocation's own budget acts
-as a per-branch cap (§4); like any future driver cap, it still draws on the
-aggregate, so a cap only lowers what one branch may spend.
+metered walk (§2) debits the one shared budget. Per-branch
+caps are available through `Eval.with_fuel_scope` (used by `jacquard test
+--fuel` for each test) and through a nested invocation's own budget (§4). A cap
+still draws on the aggregate, so it only lowers what one branch may spend. Each
+scope charges memoized terms as if it ran alone (its own memo epoch), and the
+payments of the enclosing invocation survive it.
 
 An invocation without `fuel` is unbounded and behaves as before. The CLI keeps
-that default: `jacquard run`, `jacquard infer enumerate` and
-`jacquard infer lw` are bounded only when `--fuel UNITS` is given. A budget is
+that default: every command is bounded only when `--fuel UNITS` is given (§6). A budget is
 a non-negative integer, and zero refuses the first transition.
 
 ## 2. The fuel-v1 cost model
@@ -159,8 +160,10 @@ whole budget as used.
 
 ## 5. Evidence
 
-With `--fuel`, the CLI prints one line to stderr when the invocation ends,
-whether it finished or ran out:
+With `--fuel`, `jacquard run` and `jacquard infer` print one line to stderr
+when the invocation ends, whether it finished or ran out (`jacquard test`
+reports each exhausted test as `INCOMPLETE` with its budget, and the host
+worker's abort carries E0919 with the budget):
 
 ```text
 fuel: 113 of 113 unit(s) used (fuel-v1)
@@ -168,20 +171,34 @@ fuel: 113 of 113 unit(s) used (fuel-v1)
 
 The line always names the model, so budgets are never compared across models.
 A cache or replay artifact whose validity depends on a budget must key on
-`(fuel_model, budget)`. It must also refuse to record an exhausted outcome as a
-verdict (RT.1's exploration slice applies this to the test cache and the
-exploration commands). A schedule trace does not record the budget. Fuel is
+`(fuel_model, budget)`, and must refuse to record an exhausted outcome as a
+verdict. The Warp test cache does both: under `jacquard test --fuel UNITS` each
+entry's key carries `fuel=fuel-v1:UNITS`, so a bounded result never answers for
+an unbounded run or another budget, and nothing is written once a test's budget
+is exhausted. A schedule trace does not record the budget. Fuel is
 not a scheduling input: a bounded run that completes makes exactly the
 decisions of an unbounded one, and an exhausted run records no trace.
 
 ## 6. Bounded surfaces
 
-Existing commands stay unbounded unless `--fuel` is given. A newly advertised
-surface that promises bounded execution to a host or an application must
-require a budget rather than defaulting to unbounded. This includes exploration
-commands, hosted process lifecycle limits (Host 10) and future embedding
-entry points. A host consumer bounds an invocation with
-`Eval.with_invocation ~fuel`.
+Existing commands stay unbounded unless `--fuel` is given:
+
+| surface | budget | running out |
+|---|---|---|
+| `jacquard run --fuel UNITS` | the whole run | E0919, exit 2 |
+| `jacquard infer enumerate` / `lw --fuel UNITS` | the whole inference | E0919, exit 2 |
+| `jacquard test --fuel UNITS` | each discovered test (a cap on one run's aggregate, `Eval.with_fuel_scope`) | the test is `INCOMPLETE` and never cached; the run exits 2 unless a test failed (exit 1) |
+| `jacquard host worker --fuel UNITS` | the one invocation | the v0 abort outcome carrying E0919; the host protocol is unchanged |
+
+Exit status 2 is the runtime-failure status every command already uses; E0919
+in the diagnostic, or `INCOMPLETE` in the test report, distinguishes an
+incomplete run from a program failure.
+
+A newly advertised surface that promises bounded execution to a host or an
+application must require a budget rather than defaulting to unbounded. This
+includes exploration commands, hosted process lifecycle limits (Host 10) and
+future embedding entry points. A host consumer bounds an invocation with
+`Eval.with_invocation ~fuel`, or one branch of it with `Eval.with_fuel_scope`.
 
 ## 7. Limits
 
@@ -205,6 +222,10 @@ entry points. A host consumer bounds an invocation with
 - Accounting also runs in unbounded mode, since memoized costs must not depend
   on whether a budget is present; it adds a counter update per transition and
   per walked node, and nothing asymptotic.
+- Under `jacquard test --fuel`, a property that finds a counterexample but runs
+  out of fuel while shrinking it is reported `INCOMPLETE`, not `FAIL`: the
+  report never claims more than the budget established. Rerun with a larger
+  budget, or unbounded, to see the minimized counterexample.
 - Store and identity work (writing declarations and the names index, loading
   stored declarations, canonical hashing, and writing `--infer-cache` entries)
   is not program computation and is never metered, so a cold and

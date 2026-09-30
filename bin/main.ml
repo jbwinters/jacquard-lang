@@ -812,6 +812,11 @@ let infer_check store model =
           | [] -> Ok ()
           | ds -> Error ds))
 
+(* RT.1: an exhausted run is incomplete, and every bounded command exits 2 for it, as run does *)
+let print_incomplete_or_diags ds =
+  let code = print_diags ds in
+  if List.exists (fun d -> Diag.code d = Some "E0919") ds then exit_runtime else code
+
 (* INF.1: print the typed outcome; failures are diagnostics, the metadata line is opt-in *)
 let print_classified ~sampled ~metadata (c : Infer_dist.classified) =
   match Infer_dist.classified_to_result ~sampled c with
@@ -835,7 +840,7 @@ let infer_enumerate_cmd file prelude max_branches metadata fuel syntax =
           | Error ds -> print_diags ds
           | Ok () -> (
               match Infer_dist.enumerate_v1 ?max_branches ctx (Eval.expr_state model) with
-              | Error ds -> print_diags ds
+              | Error ds -> print_incomplete_or_diags ds
               | Ok classified -> print_classified ~sampled:false ~metadata classified)))
 
 let infer_lw_cmd file prelude seed samples metadata fuel syntax =
@@ -855,7 +860,7 @@ let infer_lw_cmd file prelude seed samples metadata fuel syntax =
                 Infer_dist.likelihood_weighting_v1 ctx ~seed ~samples (fun () ->
                     Eval.expr_state model)
               with
-              | Error ds -> print_diags ds
+              | Error ds -> print_incomplete_or_diags ds
               | Ok classified -> print_classified ~sampled:true ~metadata classified)))
 
 (* --- fmt --- *)
@@ -1298,8 +1303,8 @@ let replay_cmd log_file program forks to_n compare prelude =
 
 (* Run the discovered Warp tests with the granted authority and print the suite summary; the exit
    status reflects failures. *)
-let run_suite ~store ~ctx ~cctx ~allows ~prop_mode ~schedule_plan ~seed ~cache_dir ~no_cache
-    ~default_cache_dir ~coverage ~prelude ~discover =
+let run_suite ?fuel ~store ~ctx ~cctx ~allows ~prop_mode ~schedule_plan ~seed ~cache_dir ~no_cache
+    ~default_cache_dir ~coverage ~prelude ~discover () =
   match Store.lookup_kind store "test.run" Resolve.KTerm with
   | None -> print_diags [ cli_diagnostic ~code:"E0702" "prelude has no test.run" ]
   | Some { Resolve.hash = tr; _ } -> (
@@ -1319,16 +1324,53 @@ let run_suite ~store ~ctx ~cctx ~allows ~prop_mode ~schedule_plan ~seed ~cache_d
             if no_cache then None else Some (Option.value cache_dir ~default:default_cache_dir)
           in
           let totals =
-            { Warp.passed = 0; failed = 0; skipped = 0; refused = 0; hits = 0; ran = 0 }
+            {
+              Warp.passed = 0;
+              failed = 0;
+              skipped = 0;
+              refused = 0;
+              incomplete = 0;
+              hits = 0;
+              ran = 0;
+            }
           in
           let union = Hashtbl.create 64 in
           let rec go = function
             | [] -> Ok ()
             | d :: rest -> (
-                match
+                let run () =
                   Warp.run_discovered ctx cctx ~test_run ~prop_mode ~schedule_plan ~suite_seed:seed
                     ~cache_dir ~granted d
-                with
+                in
+                (* RT.1: with --fuel each test has its own cap on the suite's aggregate; a test that
+                   runs out is incomplete, reported as such and never cached *)
+                Warp.partial_outcomes := [];
+                let result, exhausted =
+                  match fuel with
+                  | None -> (run (), false)
+                  | Some budget -> (
+                      match Eval.with_fuel_scope ctx ~fuel:budget run with
+                      | result, exhausted, _ -> (result, exhausted)
+                      | exception Fuel_meter.Exceeded -> (Ok [], true))
+                in
+                match result with
+                | _ when exhausted ->
+                    let name =
+                      match d with
+                      | Warp.Hermetic (name, _) | Warp.World (name, _) | Warp.Relational (name, _)
+                        ->
+                          name
+                    in
+                    (* verdicts the test's groups completed before it ran out still count *)
+                    List.iter
+                      (fun (o : Warp.outcome) ->
+                        List.iter (fun h -> Hashtbl.replace union h ()) o.Warp.coverage;
+                        List.iter print_endline (Warp.render_outcome totals o))
+                      !Warp.partial_outcomes;
+                    totals.Warp.incomplete <- totals.Warp.incomplete + 1;
+                    Printf.printf "INCOMPLETE %s: computation fuel exhausted (%s, %d unit(s))\n"
+                      name Eval.fuel_model (Option.get fuel);
+                    go rest
                 | Error e -> Error e
                 | Ok outcomes ->
                     List.iter
@@ -1343,8 +1385,10 @@ let run_suite ~store ~ctx ~cctx ~allows ~prop_mode ~schedule_plan ~seed ~cache_d
               print_runtime_error (Runtime_err.Type_error ("test runner error: " ^ e));
               exit_runtime
           | Ok () ->
-              Printf.printf "%d passed, %d failed, %d skipped, %d refused\n" totals.Warp.passed
+              Printf.printf "%d passed, %d failed, %d skipped, %d refused" totals.Warp.passed
                 totals.Warp.failed totals.Warp.skipped totals.Warp.refused;
+              if Option.is_some fuel then Printf.printf ", %d incomplete" totals.Warp.incomplete;
+              print_newline ();
               if cache_dir <> None then
                 Printf.printf "cache: %d hit, %d ran\n" totals.Warp.hits totals.Warp.ran;
               (if coverage then
@@ -1353,10 +1397,12 @@ let run_suite ~store ~ctx ~cctx ~allows ~prop_mode ~schedule_plan ~seed ~cache_d
                  in
                  List.iter print_endline
                    (Warp.coverage_report store ~rings ~tests:test_hashes union));
-              if totals.Warp.failed > 0 then exit_diags else ok))
+              if totals.Warp.failed > 0 then exit_diags
+              else if totals.Warp.incomplete > 0 then exit_runtime
+              else ok))
 
 let test_cmd files allows prelude cache_dir no_cache coverage seed samples exhaustive budget
-    schedules =
+    schedules fuel =
   let configuration =
     match (schedules, seed) with
     | Some count, _ when count <= 0 ->
@@ -1461,9 +1507,11 @@ let test_cmd files allows prelude cache_dir no_cache coverage seed samples exhau
                       match check_loaded (List.rev !loaded) with
                       | Error ds -> print_diags ds
                       | Ok () ->
-                          run_suite ~store ~ctx ~cctx ~allows ~prop_mode ~schedule_plan ~seed
+                          Warp.fuel_budget := fuel;
+                          run_suite ?fuel ~store ~ctx ~cctx ~allows ~prop_mode ~schedule_plan ~seed
                             ~cache_dir ~no_cache ~default_cache_dir:"test-cache" ~coverage ~prelude
-                            ~discover:(fun () -> Warp.discover store cctx))))))
+                            ~discover:(fun () -> Warp.discover store cctx)
+                            ())))))
 
 type diff_operand = Source_file | Store_dir | Missing | Unsupported
 
@@ -2479,6 +2527,25 @@ let schedules_arg =
           "Run each hermetic Case under N SplitMix64 scheduler interleavings. Requires --seed; a \
            failure prints its decision seed and canonical replay log.")
 
+let test_fuel_arg =
+  let units =
+    let parse text =
+      match int_of_string_opt text with
+      | Some units when units >= 0 -> Ok units
+      | Some _ | None -> Error (`Msg "expected a non-negative number of fuel units")
+    in
+    Arg.conv (parse, Format.pp_print_int)
+  in
+  Arg.(
+    value
+    & opt (some units) None
+    & info [ "fuel" ] ~docv:"UNITS"
+        ~doc:
+          "Give each discovered test its own fuel-v1 budget of UNITS (see \
+           docs/computation-fuel.md). A test that runs out is reported INCOMPLETE, is never \
+           cached, and makes the run exit 2 unless a test failed. Results are cached under the \
+           budget, never shared with unbounded runs.")
+
 let test_t =
   Cmd.v
     (Cmd.info "test"
@@ -2489,7 +2556,7 @@ let test_t =
       const (configure_diagnostics test_cmd)
       $ diagnostic_format_arg $ test_files_arg $ allows_arg $ prelude_arg $ cache_dir_arg
       $ no_cache_arg $ coverage_arg $ seed_arg $ samples_arg $ exhaustive_arg $ budget_arg
-      $ schedules_arg)
+      $ schedules_arg $ test_fuel_arg)
 
 (* --- tiers (PF.2 phase 1) --- *)
 
@@ -2881,7 +2948,7 @@ let best_effort_note text =
       try ignore (Unix.write_substring Unix.stderr line 0 (String.length line))
       with Unix.Unix_error _ -> ())
 
-let host_worker_cmd store_dir =
+let host_worker_cmd store_dir fuel =
   match reopen_closed_standard_descriptors () with
   | exception Unix.Unix_error _ ->
       (* a closed descriptor could not be neutralized, so opening the store could hand it out:
@@ -2908,7 +2975,7 @@ let host_worker_cmd store_dir =
                 set_binary_mode_in stdin true;
                 set_binary_mode_out stdout true;
                 let status =
-                  Host_worker.serve prepared ~input:stdin ~output:stdout ~operator:stderr
+                  Host_worker.serve ?fuel prepared ~input:stdin ~output:stdout ~operator:stderr
                 in
                 (match status with
                 | Host_worker.Carrier_lost ->
@@ -2972,7 +3039,8 @@ let host_t =
             & info [ "store" ] ~docv:"DIR"
                 ~doc:
                   "Existing local store holding the target and its complete closure. The prelude \
-                   is not reloaded."))
+                   is not reloaded.")
+        $ fuel_arg)
   in
   Cmd.group
     (Cmd.info "host" ~doc:"Opt-in host carriers for invoking checked Jacquard from another process.")
@@ -3294,10 +3362,12 @@ let project_test_source project prelude entry_name allows seed samples exhaustiv
                     match grant_all ctx allows ~seed with
                     | Error ds -> print_diags ds
                     | Ok () ->
-                        run_suite ~store ~ctx ~cctx:(Project_frontend.checker session)
+                        run_suite ~store ~ctx
+                          ~cctx:(Project_frontend.checker session)
                           ~allows ~prop_mode ~schedule_plan:Warp.Default_schedule ~seed ~cache_dir
-                          ~no_cache ~default_cache_dir ~coverage:false ~prelude ~discover:(fun () ->
-                            authority.Project_frontend.owned_tests)))
+                          ~no_cache ~default_cache_dir ~coverage:false ~prelude
+                          ~discover:(fun () -> authority.Project_frontend.owned_tests)
+                          ()))
           in
           List.fold_left
             (fun status entry ->
@@ -3398,6 +3468,7 @@ let project_test_bundle path prelude entry_name allows seed samples exhaustive b
                       ~no_cache:(no_cache || cache_dir = None)
                       ~default_cache_dir:"" ~coverage:false ~prelude
                       ~discover:(fun () -> discovered)
+                      ()
                   in
                   if status = ok then code else status)
                 ok tests))
