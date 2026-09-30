@@ -55,8 +55,10 @@ expanded structure exponentially larger than what building it cost. So value
 rendering (`Value.show`), code printing and form comparison tick the meter per
 node and text byte wherever they run: in a native such as `debug.inspect`,
 `code.render`, `code.eq?` or `pmf`; in the evaluator splicing a quote,
-stamping its scope marks, converting code to kernel syntax (the run's own
-top-level expressions, and code passed to `eval`), or building a diagnostic; or in a driver keying inference results, comparing
+stamping its scope marks, converting code to kernel syntax, or building a
+diagnostic; in the type checker unifying, instantiating, or walking types (the
+run's own top-level expressions, and code passed to `eval`, whose types
+let-polymorphism can make doubly exponential in size); or in a driver keying inference results, comparing
 observed values, or rendering task results. A walk stops the
 moment it passes the budget, so a huge shared value exhausts the budget
 instead of being walked, and a comparison that stops at the first node stays

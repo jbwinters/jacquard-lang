@@ -1093,6 +1093,7 @@ let rec is_immediately_applied_handle (e : Kernel.expr) : bool =
 let close_lonely_rows ~gen_level (t : ty) : unit =
   let counts : (int, int * rvar ref) Hashtbl.t = Hashtbl.create 8 in
   let rec walk t =
+    Fuel_meter.tick 1;
     match repr t with
     | TVar _ | TSkolem _ -> ()
     | TCon (_, args) -> List.iter walk args

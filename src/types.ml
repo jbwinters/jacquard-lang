@@ -132,6 +132,9 @@ and merge_payloads left right =
 (* ------------------------------------------------------------------ *)
 
 and occurs_adjust (id : int) (lvl : level) (t : ty) : unit =
+  (* type checking can build types exponentially larger than the code (let-polymorphism): every
+     step of unification, occurs checks, and instantiation draws on computation fuel (RT.1) *)
+  Fuel_meter.tick 1;
   match repr t with
   | TVar ({ contents = Unbound { id = id'; level = l' } } as r) ->
       if id = id' then raise (Unify_error "occurs check: a type would contain itself");
@@ -158,6 +161,7 @@ and row_occurs_adjust_ty id lvl row =
   List.iter (fun (_, args) -> List.iter (occurs_adjust id lvl) args) (repr_row row).payloads
 
 and row_occurs_adjust (id : int) (lvl : level) (t : ty) : unit =
+  Fuel_meter.tick 1;
   match repr t with
   | TVar _ | TSkolem _ -> ()
   | TCon (_, args) -> List.iter (row_occurs_adjust id lvl) args
@@ -190,6 +194,7 @@ and row_occurs_in_row id lvl row =
 (* ------------------------------------------------------------------ *)
 
 and unify (a : ty) (b : ty) : unit =
+  Fuel_meter.tick 1;
   let a = repr a and b = repr b in
   if a == b then ()
   else
@@ -268,6 +273,7 @@ and unify_exact_thunks left right =
 
 (* when binding a type var at [level], row vars inside the bound type must not outlive it *)
 and row_var_levels level t =
+  Fuel_meter.tick 1;
   match repr t with
   | TVar _ | TSkolem _ | TCon (_, []) -> ()
   | TCon (_, args) -> List.iter (row_var_levels level) args
@@ -432,6 +438,7 @@ let require_effects ?(payloads = []) ~level effects row : unit =
     result. Unification variables remain shared so ordinary type constraints still propagate, but no
     source row record can become the branch accumulator by aliasing. *)
 let rec copy_join_result ty =
+  Fuel_meter.tick 1;
   match repr ty with
   | (TVar _ | TSkolem _) as ty -> ty
   | TCon (head, args) -> TCon (head, List.map copy_join_result args)
@@ -543,6 +550,7 @@ let instantiate ~level (s : scheme) : ty =
   let tmap : (int, ty) Hashtbl.t = Hashtbl.create 8 in
   let rmap : (int, rtail) Hashtbl.t = Hashtbl.create 8 in
   let rec go t =
+    Fuel_meter.tick 1;
     match repr t with
     | TVar { contents = Unbound { id; level = l } } when l > s.gen_level -> (
         match Hashtbl.find_opt tmap id with
@@ -645,6 +653,7 @@ let unifiable left right =
 let skolems ty =
   let ids = ref [] in
   let rec walk ty =
+    Fuel_meter.tick 1;
     match repr ty with
     | TSkolem (id, _) -> ids := id :: !ids
     | TVar _ -> ()
@@ -671,6 +680,7 @@ let quantified (s : scheme) : int list * int list =
   let tids = ref [] and rids = ref [] in
   let seen_t = Hashtbl.create 8 and seen_r = Hashtbl.create 8 in
   let rec go t =
+    Fuel_meter.tick 1;
     match repr t with
     | TVar { contents = Unbound { id; level } } when level > s.gen_level ->
         if not (Hashtbl.mem seen_t id) then begin

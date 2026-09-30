@@ -48,7 +48,7 @@ become one failed task that the scope could absorb; the whole run stops:
   error[E0919]: Computation fuel was exhausted
 
 Exhaustion can land anywhere in a scheduled run, including while the scheduler
-resumes a task that yielded. Every budget below the program's cost (212) is E0919
+resumes a task that yielded. Every budget below the program's cost (214) is E0919
 with exit 2; none crashes or reports a task failure:
 
   $ cat > yield.jac <<'J'
@@ -62,14 +62,14 @@ with exit 2; none crashes or reports a task failure:
   > J
   $ jacquard run yield.jac
   done((done(0), done(0)))
-  $ n=0; while [ $n -lt 212 ]; do
+  $ n=0; while [ $n -lt 214 ]; do
   >   jacquard run --fuel $n yield.jac > out.txt 2>&1; code=$?
   >   if [ $code -ne 2 ] || ! grep -q 'error\[E0919\]' out.txt; then echo "budget $n: exit $code"; fi
   >   n=$((n + 1))
   > done
-  $ jacquard run --fuel 212 yield.jac
+  $ jacquard run --fuel 214 yield.jac
   done((done(0), done(0)))
-  fuel: 212 of 212 unit(s) used (fuel-v1)
+  fuel: 214 of 214 unit(s) used (fuel-v1)
 
 Every branch of an exact enumeration draws on the same budget, and running
 out is E0919, not a model runtime failure (E0902) or the terminal-path budget
@@ -78,13 +78,35 @@ out is E0919, not a model runtime failure (E0902) or the terminal-path budget
   $ jacquard infer enumerate --fuel 1000 ../../demos/inference/m3-two-coins.jac
   0.666667  true
   0.333333  false
-  fuel: 153 of 1000 unit(s) used (fuel-v1)
-  $ jacquard infer enumerate --fuel 152 ../../demos/inference/m3-two-coins.jac
+  fuel: 155 of 1000 unit(s) used (fuel-v1)
+  $ jacquard infer enumerate --fuel 154 ../../demos/inference/m3-two-coins.jac
   error[E0919]: Computation fuel was exhausted
-    Cause: computation fuel exhausted: the fuel-v1 budget of 152 unit(s) ran out before evaluation finished; the result is incomplete
+    Cause: computation fuel exhausted: the fuel-v1 budget of 154 unit(s) ran out before evaluation finished; the result is incomplete
     Next step: Raise the --fuel budget, or omit it to run unbounded. An exhausted run is incomplete; it neither passes nor fails.
-  fuel: 152 of 152 unit(s) used (fuel-v1)
+  fuel: 154 of 154 unit(s) used (fuel-v1)
   [1]
+
+Type checking draws on the budget too. Let-polymorphism can make the types of
+a few lines of code doubly exponential in size; checking code passed to `eval`
+stops at the budget instead of running for minutes:
+
+  $ cat > types.jac <<'J'
+  > plan = quote {
+  >   {
+  >     let f0 = fn (x) -> (x, x)
+  >     let f1 = fn (y) -> f0(f0(y))
+  >     let f2 = fn (y) -> f1(f1(y))
+  >     let f3 = fn (y) -> f2(f2(y))
+  >     let f4 = fn (y) -> f3(f3(y))
+  >     let f5 = fn (y) -> f4(f4(y))
+  >     0
+  >   }
+  > }
+  > 
+  > `op:eval-code`(plan)
+  > J
+  $ timeout 60 jacquard run --allow eval --fuel 100000 types.jac 2>&1 | head -1
+  error[E0919]: Computation fuel was exhausted
 
 A budget must be a non-negative number of units:
 
