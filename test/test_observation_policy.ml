@@ -633,7 +633,7 @@ let test_impossible_fields () =
          ~handler:(fun _ -> Error (Runtime_err.Eval_error "no"))
          store ctx observed [ "probe.send(\"a\", \"b\")" ])
   in
-  refuse "a fuel-exhausted handler result" observed
+  refuse "a fuel-exhausted handler result in a failed run" observed
     (replace_once failing "result failure code=uncoded" "result failure code=E0919");
   let secret =
     Observation_transcript.serialize
@@ -652,7 +652,28 @@ let test_impossible_fields () =
          [ Printf.sprintf "probe.send(%S, \"b\")" big ])
   in
   refuse "an unfinished event with an output" Observation_policy.default
-    (replace_once projected "output missing\n" "output data bytes=1\nx\n")
+    (replace_once projected "output missing\n" "output data bytes=1\nx\n");
+  (* an outer call's result can run out after its nested call finished: the unfinished result is
+     not on the last event, and that is a shape the recorder produces *)
+  let nested =
+    Observation_transcript.serialize
+      (record ~fuel:2_000
+         ~handler:(fun arguments ->
+           match arguments with
+           | Value.VText "outer" :: _ -> (
+               match Eval.run_expr ctx (expression store "probe.send(\"inner\", \"x\")") with
+               | Ok _ -> Ok (Value.VInt 1)
+               | Error error -> Error error)
+           | _ -> Ok (Value.VInt 5))
+         store ctx observed
+         [ "{ probe.send(\"outer\", \"y\"); spin(0) }" ])
+  in
+  let outer_unfinished = replace_once nested "result data bytes=1\n1\n" "result unfinished\n" in
+  ignore
+    (expect_ok "an earlier unfinished result"
+       (Observation_transcript.parse ~policy:observed outer_unfinished));
+  refuse "two unfinished fields" observed
+    (replace_once outer_unfinished "result data bytes=1\n5\n" "result unfinished\n")
 
 let suite =
   [

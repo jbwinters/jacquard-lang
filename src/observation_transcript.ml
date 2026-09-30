@@ -336,14 +336,7 @@ let parse_field policy cursor =
     Ok (Unsupported kind)
   else if Strict_cursor.peek_literal cursor "failure " then
     let* () = expect cursor "failure code=" in
-    let offset = cursor.Strict_cursor.offset in
     let* code = word cursor in
-    (* a handler that returned exhaustion ends the run before any result is observed *)
-    let* () =
-      if String.equal code fuel_code then
-        invalid_at offset "a handler result cannot be fuel exhaustion"
-      else Ok ()
-    in
     let* () = expect cursor "\n" in
     Ok (Failure code)
   else if Strict_cursor.peek_literal cursor "unfinished" then
@@ -502,16 +495,26 @@ let parse_run policy cursor ~expected_index =
       | None -> false
     else true
   in
-  let ends (event : event) =
+  let arguments_unfinished (event : event) =
     List.exists (fun (_, field) -> field = Unfinished) event.arguments
-    || event.result = Some Unfinished
   in
+  let ends (event : event) = arguments_unfinished event || event.result = Some Unfinished in
+  (* events are in call order: an outer call's result can run out after a nested call finished,
+     so an unfinished result may be on any event, but only one field in a run runs out, and
+     unfinished arguments stop the run before any later call *)
   let rec well_placed = function
     | [] -> true
     | [ last ] -> exact_unfinished last
-    | event :: rest -> (not (ends event)) && well_placed rest
+    | event :: rest -> (not (arguments_unfinished event)) && well_placed rest
   in
+  let well_placed events = well_placed events && List.length (List.filter ends events) <= 1 in
+  (* a handler result coded as fuel exhaustion is observed only outside an invocation (inside one,
+     the returned exhaustion ends the run first), and it then ends the run as incomplete *)
+  let fuel_result (event : event) = event.result = Some (Failure fuel_code) in
   match status with
+  | (Complete _ | Failed _) when List.exists fuel_result events ->
+      invalid_at cursor.offset
+        "a fuel-exhausted handler result appears in a run not stopped by fuel"
   | (Complete _ | Failed _) when List.exists ends events ->
       invalid_at cursor.offset "an unfinished field appears in a run that was not stopped by fuel"
   | _ when not (well_placed events) ->

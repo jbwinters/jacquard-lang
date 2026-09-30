@@ -116,11 +116,14 @@ result data bytes=1
 
 An operation is recorded before its arguments are projected, so a run that
 runs out of fuel while projecting them still records which operation it
-reached. Running out of fuel ends the run, so an event with unfinished fields
-is its last, and the parser refuses one anywhere else, one whose handler
-appears to have run, an unknown opaque kind, and a handler failure coded
-E0919 (a handler returning exhaustion ends the run before any result is
-observed).
+reached. Running out of fuel ends the run, so at most one field in a run is
+unfinished; an event with unfinished arguments is the run's last (an unfinished
+result may belong to an outer call whose nested calls finished), and the
+parser refuses any other placement, unfinished arguments whose handler appears
+to have run, an unknown opaque kind, and a handler failure coded E0919 in a
+run that did not end incomplete (inside an invocation a handler returning
+exhaustion ends the run before its result is observed; outside one the result
+is observed and the run then ends incomplete).
 
 Parsing needs the policy: the header's policy identity must match it, and each
 event must carry exactly the lines its rule demands. Everything else is as

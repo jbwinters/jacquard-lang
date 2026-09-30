@@ -40,12 +40,13 @@ val make :
   (Hash.t * rule) list ->
   (t, Diag.t list) result
 (** [make ~result ~field_bytes ~unlisted ~interface operations] builds a policy. [result] selects
-    whether each run's result value is compared (data-v1 value equality, as in [run-transcript-v1]).
-    [operations] maps operation identities to rules; an operation not listed follows [unlisted]
-    ([None]: not recorded at all). [field_bytes] bounds every recorded field; longer fields are
-    truncated. [interface], when present, pins the interface-v1 identity the observed program must
-    have. Refused with E1005: a repeated operation, a non-positive [field_bytes], or argument
-    positions that are negative, repeated or not ascending. *)
+    whether each run's result value is compared (data-v1 value equality, which unlike
+    [run-transcript-v1] qualifies constructors by identity). [operations] maps operation identities
+    to rules; an operation not listed follows [unlisted] ([None]: not recorded at all).
+    [field_bytes] bounds every recorded field; longer fields are truncated. [interface], when
+    present, pins the interface-v1 identity the observed program must have. Refused with E1005: a
+    repeated operation, a non-positive [field_bytes], or argument positions that are negative,
+    repeated or not ascending. *)
 
 val default : t
 (** The default policy: results compared; every operation observed with all its arguments and its
