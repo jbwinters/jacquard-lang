@@ -631,19 +631,8 @@ let test_fuel_outside_runs () =
   in
   ignore (Eval.call ctx returns_nested []);
   Alcotest.(check bool) "no exhaustion leaks outside invocations" false (Eval.fuel_exhausted ctx);
-  (* a root observer that runs evaluation and exhausts the invocation stops the operation it
-     observed before its handler runs *)
-  let sink = Buffer.create 16 in
-  let code =
-    Eval.with_invocation ~fuel:1_000 ctx (fun _ ->
-        grant_console ctx sink;
-        Eval.with_root_observer ctx
-          ~on_operation:(fun _ -> ignore (Eval.run_expr ctx spin))
-          ~on_output:(fun _ _ -> ())
-          (fun () -> failure (Eval.run_expr ctx (expression store "print(\"late\")"))))
-  in
-  Alcotest.(check string) "observed then exhausted" "E0919" code;
-  Alcotest.(check string) "the handler never ran" "" (Buffer.contents sink);
+  (* a root observer cannot evaluate at all (RF.3), so it can neither spend fuel nor run an effect
+     before the operation it observed; test_observer_cannot_evaluate pins the refusal *)
   (* identity hashing is not metered: a scheduled run of spliced code under no budget at all
      returns E0919 from its first transition rather than raising *)
   let spliced = expression store "quote { pair(unquote(code.of-int(1)), 2) }" in
@@ -936,9 +925,229 @@ let test_fuel_scopes () =
   | _ -> Alcotest.fail "scope outside an invocation"
   | exception Invalid_argument _ -> ()
 
+(* --- typed observation (RF.3) --- *)
+
+let describe = function
+  | Observation.Operation { name; arguments; _ } ->
+      Printf.sprintf "op %s(%s)" name
+        (String.concat ", " (List.map Observation.render (Lazy.force arguments)))
+  | Observation.Output { bytes; _ } -> Printf.sprintf "out %S" bytes
+  | Observation.Result { result; _ } -> (
+      match Lazy.force result with
+      | Ok value -> "ok " ^ Observation.render value
+      | Error error -> "error " ^ Diag.code_or_uncoded (Runtime_err.to_diag error))
+
+let test_typed_events () =
+  let store, ctx = prepared "observe-events" "" in
+  let greet = expression store "{ print(\"a\"); print(\"bc\"); 1 }" in
+  let sink = Buffer.create 16 in
+  let seen = ref [] in
+  let result =
+    Eval.with_invocation ctx (fun _ ->
+        grant_console ctx sink;
+        Eval.with_observer ctx
+          (fun event -> seen := describe event :: !seen)
+          (fun () -> Eval.run_expr ctx greet))
+  in
+  (match result with Ok (Value.VInt 1) -> () | _ -> Alcotest.fail "evaluation changed");
+  Alcotest.(check (list string))
+    "ordered operation, output and result"
+    [ "op print(\"a\")"; "out \"a\""; "ok ()"; "op print(\"bc\")"; "out \"bc\""; "ok ()" ]
+    (List.rev !seen);
+  Alcotest.(check string) "each operation dispatched once" "abc" (Buffer.contents sink);
+  (* after its extent, the observer receives nothing *)
+  let before = List.length !seen in
+  Eval.with_invocation ctx (fun _ ->
+      grant_console ctx sink;
+      ignore (Eval.run_expr ctx greet));
+  Alcotest.(check int) "no events after the observer ended" before (List.length !seen)
+
+let test_observer_cannot_evaluate () =
+  let store, ctx = prepared "observe-refuse" "" in
+  let greet = expression store "print(\"x\")" and one = expression store "add(1, 2)" in
+  let sink = Buffer.create 16 in
+  let attempts = ref [] in
+  let result =
+    Eval.with_invocation ctx (fun _ ->
+        grant_console ctx sink;
+        Eval.with_observer ctx
+          (fun _ ->
+            attempts :=
+              (match Eval.run_expr ctx one with
+              | Ok _ -> "evaluated"
+              | Error error -> Runtime_err.to_string error)
+              :: !attempts)
+          (fun () -> Eval.run_expr ctx greet))
+  in
+  Alcotest.(check bool) "the observed run still completes" true (Result.is_ok result);
+  Alcotest.(check bool)
+    "every callback evaluation was refused" true
+    (!attempts <> [] && List.for_all (fun a -> a <> "evaluated") !attempts);
+  Alcotest.(check string) "the effect happened once" "x" (Buffer.contents sink);
+  (* a callback exception propagates; the observer and the refusal flag are restored *)
+  (match
+     Eval.with_invocation ctx (fun _ ->
+         grant_console ctx sink;
+         Eval.with_observer ctx (fun _ -> raise Boom) (fun () -> Eval.run_expr ctx greet))
+   with
+  | _ -> Alcotest.fail "the observer exception was swallowed"
+  | exception Boom -> ());
+  Alcotest.(check string)
+    "the operation was not dispatched after the failing callback" "x" (Buffer.contents sink);
+  (* a callback cannot grant the operation it observes *)
+  let granted_inside =
+    Eval.with_invocation ctx (fun _ ->
+        Eval.with_observer ctx
+          (fun event ->
+            match
+              Eval.register_root_handler ctx (Observation.operation event) (fun _ ->
+                  Ok Value.unit_v)
+            with
+            | () -> Alcotest.fail "a callback registered a handler"
+            | exception Invalid_argument _ -> ())
+          (fun () -> failure (Eval.run_expr ctx greet)))
+  in
+  Alcotest.(check string) "the ungranted operation stays unhandled" "unhandled" granted_inside;
+  (* observers see data, never live secrets or closures *)
+  let secret = Value.VSecret (Secret.of_string "hunter2") in
+  let rendered =
+    List.map Observation.render
+      (List.map Observation.of_value
+         [ secret; Value.VTuple [ Value.VInt 1; Value.VText "a" ]; Value.VResume [] ])
+  in
+  Alcotest.(check (list string))
+    "opaque secrets and continuations"
+    [ "<secret>"; "(1, \"a\")"; "<resumption>" ]
+    rendered;
+  (* the v1 view never sees results *)
+  let v1 = ref 0 in
+  ignore
+    (Eval.with_invocation ctx (fun _ ->
+         grant_console ctx sink;
+         Eval.with_root_observer ctx
+           ~on_operation:(fun _ -> incr v1)
+           ~on_output:(fun _ _ -> incr v1)
+           (fun () -> Eval.run_expr ctx greet)));
+  Alcotest.(check int) "v1 observes operation and output only" 2 !v1;
+  Alcotest.(check bool)
+    "evaluation works again" true
+    (Eval.with_invocation ctx (fun _ -> Result.is_ok (Eval.run_expr ctx one)))
+
+(* RF.3 boundary: data views of real events, nested extents, and refused restoration *)
+let test_observer_boundary () =
+  let store, ctx =
+    prepared "observe-boundary" "once effect Probe where { probe.next : (Int) -> Int }\n"
+  in
+  let asking = expression store "add(probe.next(1), 1)" in
+  let seen = ref [] in
+  let record event = seen := describe event :: !seen in
+  (* an ungranted operation is observed, then left unhandled: no Result *)
+  let operation = ref None in
+  let code =
+    Eval.with_invocation ctx (fun _ ->
+        Eval.with_observer ctx
+          (fun event ->
+            operation := Some (Observation.operation event);
+            record event)
+          (fun () -> failure (Eval.run_expr ctx asking)))
+  in
+  Alcotest.(check string) "ungranted" "unhandled" code;
+  Alcotest.(check (list string)) "operation only" [ "op probe.next(1)" ] (List.rev !seen);
+  let operation = Option.get !operation in
+  (* a granted handler returning a secret: the program receives it, the observer sees <secret> *)
+  seen := [];
+  let secret = Value.VSecret (Secret.of_string "hunter2") in
+  let secret_result =
+    Eval.with_invocation ctx (fun _ ->
+        Eval.register_root_handler ctx operation (fun _ -> Ok secret);
+        Eval.with_observer ctx record (fun () ->
+            Eval.run_expr ctx (expression store "probe.next(2)")))
+  in
+  (match secret_result with
+  | Ok (Value.VSecret _) -> ()
+  | _ -> Alcotest.fail "the program did not receive the secret");
+  Alcotest.(check (list string))
+    "secret result is opaque"
+    [ "op probe.next(2)"; "ok <secret>" ]
+    (List.rev !seen);
+  (* the innermost observer owns its extent; the outer one resumes afterwards *)
+  let outer = ref 0 and inner = ref 0 in
+  ignore
+    (Eval.with_invocation ctx (fun _ ->
+         Eval.register_root_handler ctx operation (fun _ -> Ok (Value.VInt 3));
+         Eval.with_observer ctx
+           (fun _ -> incr outer)
+           (fun () ->
+             ignore
+               (Eval.with_observer ctx
+                  (fun _ -> incr inner)
+                  (fun () -> Eval.run_expr ctx (expression store "probe.next(4)")));
+             Eval.run_expr ctx (expression store "probe.next(5)"))));
+  Alcotest.(check (pair int int)) "nested observers are isolated" (2, 2) (!outer, !inner);
+  (* a callback can neither resume a captured Once continuation nor restore a validated state *)
+  let captured =
+    Eval.with_invocation ctx (fun _ ->
+        match Eval.run_state_capturing ctx (Eval.expr_state asking) with
+        | Ok (Eval.COp { kont; _ }) -> kont
+        | _ -> Alcotest.fail "the operation was not captured")
+  in
+  let validated =
+    match Eval.validate_state_once ctx (Eval.expr_state (expression store "add(1, 2)")) with
+    | Ok state -> state
+    | Error error -> Alcotest.failf "validation failed: %s" (Runtime_err.to_string error)
+  in
+  let refusals = ref [] in
+  let sink = Buffer.create 16 in
+  ignore
+    (Eval.with_invocation ctx (fun _ ->
+         grant_console ctx sink;
+         Eval.with_observer ctx
+           (fun _ ->
+             (match Eval.resume_captured_state ctx captured (Value.VInt 1) with
+             | Ok _ -> refusals := "resumed" :: !refusals
+             | Error _ -> refusals := "resume refused" :: !refusals);
+             (match Eval.fresh_validated_state ctx validated with
+             | _ -> refusals := "restored" :: !refusals
+             | exception Invalid_argument _ -> refusals := "restore refused" :: !refusals);
+             match Eval.fresh_audit_run_id ctx with
+             | _ -> refusals := "minted" :: !refusals
+             | exception Invalid_argument _ -> refusals := "mint refused" :: !refusals)
+           (fun () -> Eval.run_expr ctx (expression store "print(\"x\")"))));
+  Alcotest.(check (list string))
+    "every callback attempt was refused"
+    [ "mint refused"; "restore refused"; "resume refused" ]
+    (List.sort_uniq compare !refusals);
+  (* a Result callback that exhausts the budget and swallows the exception still ends the run *)
+  let swallowed =
+    Eval.with_invocation ~fuel:1_000_000 ctx (fun _ ->
+        Eval.register_root_handler ctx operation (fun _ -> Ok (Value.VInt 3));
+        Eval.with_observer ctx
+          (function
+            | Observation.Result _ -> (
+                try
+                  Fuel_meter.trip ();
+                  raise Fuel_meter.Exceeded
+                with Fuel_meter.Exceeded -> ())
+            | _ -> ())
+          (fun () -> failure (Eval.run_expr ctx (expression store "probe.next(6)"))))
+  in
+  Alcotest.(check string) "observer exhaustion is not hidden" "E0919" swallowed;
+  (* the refused resumption consumed nothing: the owner still resumes it once *)
+  match
+    Eval.with_invocation ctx (fun _ ->
+        match Eval.resume_captured_state ctx captured (Value.VInt 41) with
+        | Ok state -> run_state ctx state
+        | Error error -> Error error)
+  with
+  | Ok (Value.VInt 42) -> ()
+  | Ok value -> Alcotest.failf "resumed to %s" (Value.show value)
+  | Error error -> Alcotest.failf "resume failed: %s" (Runtime_err.to_string error)
+
 let suite =
   [
     Alcotest.test_case "grants are scoped to one invocation" `Quick test_grants_are_scoped;
+    Alcotest.test_case "observers see data views and cannot restore or resume" `Quick
+      test_observer_boundary;
     Alcotest.test_case "once resumptions are evaluator-owned and refused elsewhere" `Quick
       test_stale_once_resumption;
     Alcotest.test_case "grants, observers, and coverage are restored on exceptions" `Quick
@@ -963,4 +1172,7 @@ let suite =
     Alcotest.test_case "wrapped exhaustion stays E0919" `Quick test_fuel_survives_nested_drivers;
     Alcotest.test_case "work outside runs is charged and never raises" `Quick test_fuel_outside_runs;
     Alcotest.test_case "fuel scopes cap one branch of the aggregate" `Quick test_fuel_scopes;
+    Alcotest.test_case "typed root events are ordered and single" `Quick test_typed_events;
+    Alcotest.test_case "observers cannot evaluate and failures propagate" `Quick
+      test_observer_cannot_evaluate;
   ]

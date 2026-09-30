@@ -58,14 +58,30 @@ val register_root_handler :
     Its arguments, continuation mutation, and result are guarded at dispatch; callback failures are
     returned as runtime errors. *)
 
+val with_observer : ctx -> (Observation.event -> unit) -> (unit -> 'a) -> 'a
+(** [with_observer ctx on_event f] delivers the typed root events of [ctx] (RF.3,
+    docs/observation-boundary.md) to [on_event] for the dynamic extent of [f], in evaluation order:
+    an [Operation] when an operation reaches the root (before a root handler runs or a driver
+    captures it), an [Output] when a trusted adapter accepts bytes, and a [Result] when a granted
+    root handler returns. The innermost observer receives events; the previous one is restored on
+    every exit, and {!with_invocation} restores it at teardown. While [on_event] runs, [ctx] refuses
+    to evaluate ([Eval_error]): a callback cannot run code, dispatch an operation, or resume a
+    continuation; {!register_root_handler}, {!register_builtin}, {!set_code_resolver},
+    {!fresh_validated_state} and {!fresh_audit_run_id} raise [Invalid_argument], so observing never
+    adds authority or changes dispatch. Arguments and results arrive as immutable data projections
+    ({!Observation.value}) with secrets and executable values opaque. An exception from [on_event]
+    propagates, except that fuel exhaustion and an internal evaluator refusal become failures of the
+    observed run (it fails closed). *)
+
 val with_root_observer :
   ctx -> on_operation:(Hash.t -> unit) -> on_output:(Hash.t -> string -> unit) -> (unit -> 'a) -> 'a
-(** [with_root_observer ctx ~on_operation ~on_output f] installs an observation hook only for the
-    dynamic extent of [f]. [on_operation] runs exactly when an operation has crossed every language
-    handler and reached the root; [on_output] is reserved for trusted root adapters and receives
-    their explicit operation hash. The prior observer is restored even if [f] raises. Observers do
-    not participate in handler selection or scheduling; exceptions from [f] or either callback
-    propagate unchanged. *)
+(** [with_root_observer ctx ~on_operation ~on_output f] is {!with_observer} projected to the
+    [run-transcript-v1] view: operation identities and trusted output bytes; [Result] events are not
+    delivered. It installs an observation hook only for the dynamic extent of [f]. [on_operation]
+    runs exactly when an operation has crossed every language handler and reached the root;
+    [on_output] is reserved for trusted root adapters and receives their explicit operation hash.
+    The prior observer is restored even if [f] raises. Observers do not participate in handler
+    selection or scheduling; exceptions from [f] or either callback propagate unchanged. *)
 
 val note_root_output : ctx -> operation:Hash.t -> string -> unit
 (** [note_root_output ctx ~operation bytes] attaches bytes accepted by a trusted root adapter to its
