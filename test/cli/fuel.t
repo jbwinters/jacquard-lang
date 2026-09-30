@@ -189,14 +189,36 @@ failure is never hidden by a later incomplete child:
   >   Case("fails", fn () -> check.true(False, "no")),
   >   Case("spins", fn () -> check.eq(loop(0), 0, int.eq, int.show, "never"))
   > ])
-  > after-case = Case("after", fn () -> check.true(True, "yes"))
+  > zz-after-case = Case("after", fn () -> check.true(True, "yes"))
   > J
   $ jacquard test group.jac --fuel 3000 --no-cache
-  PASS after-case/after (1 check)
   FAIL suite-case/suite/fails
     - no
   INCOMPLETE suite-case: computation fuel exhausted (fuel-v1, 3000 unit(s))
+  PASS zz-after-case/after (1 check)
   1 passed, 1 failed, 0 skipped, 0 refused, 1 incomplete
+  [1]
+
+The same holds when the child that runs out is an exhaustive property, which
+would otherwise turn exhaustion into a failing verdict:
+
+  $ cat > prop-group.jac <<'J'
+  > loop(n) = loop(add(n, 1))
+  > failing-case = Group("failing", [
+  >   Case("fails", fn () -> check.true(False, "no")),
+  >   prop("spins", fn () -> check.eq(loop(sample(uniform-int(0, 1))), 0, int.eq, int.show, "never"))
+  > ])
+  > spinning-case = Group("spinning", [
+  >   prop("spins", fn () -> check.eq(loop(sample(uniform-int(0, 1))), 0, int.eq, int.show, "never")),
+  >   Case("passes", fn () -> check.true(True, "yes"))
+  > ])
+  > J
+  $ jacquard test prop-group.jac --exhaustive --fuel 3000 --no-cache
+  FAIL failing-case/failing/fails
+    - no
+  INCOMPLETE failing-case: computation fuel exhausted (fuel-v1, 3000 unit(s))
+  INCOMPLETE spinning-case: computation fuel exhausted (fuel-v1, 3000 unit(s))
+  0 passed, 1 failed, 0 skipped, 0 refused, 2 incomplete
   [1]
 
 Results cached under one budget never answer for another:

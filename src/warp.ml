@@ -1090,13 +1090,14 @@ let rec run_value ctx ~test_run ~prop_mode ~schedule_plan ~suite_seed ~member ~s
                 ~display:(display ^ "/" ^ label)
                 t
             with
-            | Ok os -> walk (child_index + 1) (os :: acc) rest
-            | Error e ->
-                (* RT.1: a child that ran out of fuel leaves the group incomplete, but the
+            | _ when Fuel_meter.exhausted () ->
+                (* RT.1: a child that ran out of fuel leaves the group incomplete, whatever it
+                   returned (an exhaustive property turns the error into a verdict); only the
                    children that finished before it keep their verdicts *)
-                if Fuel_meter.exhausted () then
-                  partial_outcomes := List.concat (List.rev acc) @ !partial_outcomes;
-                Error e)
+                partial_outcomes := List.concat (List.rev acc) @ !partial_outcomes;
+                Error "computation fuel exhausted"
+            | Ok os -> walk (child_index + 1) (os :: acc) rest
+            | Error e -> Error e)
         | v -> Error (Printf.sprintf "malformed group: %s" (Value.show v))
       in
       walk 0 [] tests
