@@ -537,6 +537,48 @@ let with_invocation ?coverage ?fuel ctx body =
       ignore (finish ());
       Printexc.raise_with_backtrace exn backtrace
 
+let with_fuel_scope ctx ~fuel body =
+  if fuel < 0 then invalid_arg "Eval.with_fuel_scope: fuel must be non-negative";
+  if not (invocation_active ctx) then
+    invalid_arg "Eval.with_fuel_scope: no invocation is active on this evaluator";
+  let saved_ceiling = !Fuel_meter.ceiling
+  and saved_budget = !Fuel_meter.budget
+  and saved_limit = ctx.fuel_limit in
+  let start = !Fuel_meter.used in
+  let own =
+    if fuel > (max_int - start) / fine_per_unit then max_int else start + (fuel * fine_per_unit)
+  in
+  Fuel_meter.ceiling := min own saved_ceiling;
+  Fuel_meter.budget := fuel;
+  ctx.fuel_limit <- Some fuel;
+  let exhausted = ref false in
+  let restore () =
+    (* the scope's own exhaustion is its outcome; the enclosing allowance stays exhausted only if
+       the scope used it up *)
+    if
+      Fuel_meter.exhausted () && saved_ceiling >= 0 && saved_ceiling < max_int
+      && !Fuel_meter.used >= saved_ceiling
+    then (
+      Fuel_meter.ceiling := saved_ceiling;
+      Fuel_meter.trip ())
+    else Fuel_meter.ceiling := saved_ceiling;
+    Fuel_meter.budget := saved_budget;
+    ctx.fuel_limit <- saved_limit
+  in
+  let result =
+    Fun.protect ~finally:restore (fun () ->
+        let result =
+          match body () with
+          | result -> result
+          | exception Fuel_meter.Exceeded ->
+              exhausted := true;
+              raise Fuel_meter.Exceeded
+        in
+        exhausted := Fuel_meter.exhausted ();
+        result)
+  in
+  (result, !exhausted, units_of_fine (!Fuel_meter.used - start))
+
 (** [set_coverage_tracking ctx enabled] controls semantic term-reference collection. Disabling it
     avoids bookkeeping when callers will not inspect coverage. *)
 let set_coverage_tracking ctx enabled = ctx.track_coverage <- enabled

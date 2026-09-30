@@ -131,6 +131,15 @@ val fuel_model : string
     sub-run's cost the first time an invocation reaches it, whether or not the memo was already
     warm. *)
 
+val with_fuel_scope : ctx -> fuel:int -> (unit -> 'a) -> 'a * bool * int
+(** [with_fuel_scope ctx ~fuel body] runs [body] inside the active invocation under a per-branch cap
+    of [fuel] units (docs/computation-fuel.md §1, §4): the cap still draws on the invocation's
+    aggregate, so it only lowers what [body] may spend. It returns [body]'s result, whether the cap
+    (or the aggregate) ran out while [body] ran, and the units [body] used. Running out of the cap
+    is [body]'s outcome: the enclosing invocation keeps its remaining allowance unless the cap
+    reached it. A [Fuel_meter.Exceeded] escaping [body] propagates after the cap is restored.
+    [Invalid_argument] without an active invocation or for a negative [fuel]. *)
+
 val fuel_used : invocation -> int
 (** [fuel_used invocation] is the number of {!fuel_model} units charged so far in [invocation]. *)
 

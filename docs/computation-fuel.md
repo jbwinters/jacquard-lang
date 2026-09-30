@@ -30,8 +30,7 @@ as a per-branch cap (§4); like any future driver cap, it still draws on the
 aggregate, so a cap only lowers what one branch may spend.
 
 An invocation without `fuel` is unbounded and behaves as before. The CLI keeps
-that default: `jacquard run`, `jacquard infer enumerate` and
-`jacquard infer lw` are bounded only when `--fuel UNITS` is given. A budget is
+that default: every command is bounded only when `--fuel UNITS` is given (§6). A budget is
 a non-negative integer, and zero refuses the first transition.
 
 ## 2. The fuel-v1 cost model
@@ -168,20 +167,34 @@ fuel: 113 of 113 unit(s) used (fuel-v1)
 
 The line always names the model, so budgets are never compared across models.
 A cache or replay artifact whose validity depends on a budget must key on
-`(fuel_model, budget)`. It must also refuse to record an exhausted outcome as a
-verdict (RT.1's exploration slice applies this to the test cache and the
-exploration commands). A schedule trace does not record the budget. Fuel is
+`(fuel_model, budget)`, and must refuse to record an exhausted outcome as a
+verdict. The Warp test cache does both: under `jacquard test --fuel UNITS` each
+entry's key carries `fuel=fuel-v1:UNITS`, so a bounded result never answers for
+an unbounded run or another budget, and nothing is written once a test's budget
+is exhausted. A schedule trace does not record the budget. Fuel is
 not a scheduling input: a bounded run that completes makes exactly the
 decisions of an unbounded one, and an exhausted run records no trace.
 
 ## 6. Bounded surfaces
 
-Existing commands stay unbounded unless `--fuel` is given. A newly advertised
-surface that promises bounded execution to a host or an application must
-require a budget rather than defaulting to unbounded. This includes exploration
-commands, hosted process lifecycle limits (Host 10) and future embedding
-entry points. A host consumer bounds an invocation with
-`Eval.with_invocation ~fuel`.
+Existing commands stay unbounded unless `--fuel` is given:
+
+| surface | budget | running out |
+|---|---|---|
+| `jacquard run --fuel UNITS` | the whole run | E0919, exit 2 |
+| `jacquard infer enumerate` / `lw --fuel UNITS` | the whole inference | E0919, exit 2 |
+| `jacquard test --fuel UNITS` | each discovered test (a cap on one run's aggregate, `Eval.with_fuel_scope`) | the test is `INCOMPLETE` and never cached; the run exits 2 unless a test failed (exit 1) |
+| `jacquard host worker --fuel UNITS` | the one invocation | the v0 abort outcome carrying E0919; the host protocol is unchanged |
+
+Exit status 2 is the runtime-failure status every command already uses; E0919
+in the diagnostic, or `INCOMPLETE` in the test report, distinguishes an
+incomplete run from a program failure.
+
+A newly advertised surface that promises bounded execution to a host or an
+application must require a budget rather than defaulting to unbounded. This
+includes exploration commands, hosted process lifecycle limits (Host 10) and
+future embedding entry points. A host consumer bounds an invocation with
+`Eval.with_invocation ~fuel`, or one branch of it with `Eval.with_fuel_scope`.
 
 ## 7. Limits
 

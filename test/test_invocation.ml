@@ -887,6 +887,40 @@ let test_fuel_outside_runs () =
     ("E0919", cost - 1)
     (enumerate (Some (cost - 1)))
 
+let test_fuel_scopes () =
+  let store, ctx = prepared "fuel-scope" "spin(n) = spin(add(n, 1))\n" in
+  let spin = expression store "spin(0)" and one = expression store "add(1, 2)" in
+  (* a scope's cap is its own outcome: the invocation keeps its remaining allowance *)
+  let outcome =
+    Eval.with_invocation ~fuel:10_000 ctx (fun invocation ->
+        let result, exhausted, used =
+          Eval.with_fuel_scope ctx ~fuel:100 (fun () -> Eval.run_expr ctx spin)
+        in
+        let after = Eval.run_expr ctx one in
+        ( failure result,
+          exhausted,
+          used,
+          Result.is_ok after,
+          Eval.fuel_exhausted ctx,
+          Eval.fuel_used invocation > 100 ))
+  in
+  Alcotest.(check bool)
+    "scope exhausted" true
+    (match outcome with "E0919", true, 100, true, false, true -> true | _ -> false);
+  (* a scope that reaches the invocation's own budget leaves the invocation exhausted *)
+  let outer =
+    Eval.with_invocation ~fuel:50 ctx (fun _ ->
+        let _, exhausted, _ =
+          Eval.with_fuel_scope ctx ~fuel:1_000 (fun () -> Eval.run_expr ctx spin)
+        in
+        (exhausted, Eval.fuel_exhausted ctx, failure (Eval.run_expr ctx one)))
+  in
+  Alcotest.(check (triple bool bool string)) "aggregate reached" (true, true, "E0919") outer;
+  (* scopes need an invocation *)
+  match Eval.with_fuel_scope ctx ~fuel:1 (fun () -> ()) with
+  | _ -> Alcotest.fail "scope outside an invocation"
+  | exception Invalid_argument _ -> ()
+
 let suite =
   [
     Alcotest.test_case "grants are scoped to one invocation" `Quick test_grants_are_scoped;
@@ -913,4 +947,5 @@ let suite =
     Alcotest.test_case "every value walk draws on the budget" `Quick test_fuel_bounds_deep_natives;
     Alcotest.test_case "wrapped exhaustion stays E0919" `Quick test_fuel_survives_nested_drivers;
     Alcotest.test_case "work outside runs is charged and never raises" `Quick test_fuel_outside_runs;
+    Alcotest.test_case "fuel scopes cap one branch of the aggregate" `Quick test_fuel_scopes;
   ]

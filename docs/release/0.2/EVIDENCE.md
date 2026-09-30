@@ -32,7 +32,7 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1121`
+- Alcotest/QCheck cases: `1122`
 - Cram transcript files: `74`
 - Documentation examples: `35` named examples across `8` documents
 
@@ -617,3 +617,11 @@ exhausted, incomplete run. Without `--fuel` every command is unbounded and its
 output is unchanged. Ten `test/test_invocation.ml` cases and the new
 `test/cli/fuel.t` transcript bring the current source inventory to
 `1121 / 74 / 35`.
+
+RT.1's second slice extends computation fuel to `jacquard test --fuel UNITS`
+(a per-test cap on one run's budget; an exhausted test is `INCOMPLETE`, never
+cached, and bounded cache entries are keyed by the budget) and
+`jacquard host worker --fuel UNITS` (the v0 abort outcome carries E0919), and
+makes every exhausted bounded command exit 2. One `test/test_invocation.ml`
+case and new `test/cli/fuel.t` and `test/cli/host-worker.t` sections bring the
+current source inventory to `1122 / 74 / 35`.

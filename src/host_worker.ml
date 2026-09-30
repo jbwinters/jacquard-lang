@@ -190,7 +190,7 @@ let with_sigpipe_ignored run =
   | previous -> Fun.protect ~finally:(fun () -> Sys.set_signal Sys.sigpipe previous) run
   | exception Invalid_argument _ -> run ()
 
-let serve prepared ~input ~output ~operator =
+let serve ?fuel prepared ~input ~output ~operator =
   let operator =
     { channel = operator; remaining = Host.hard_limits.max_stderr_bytes; truncated = false }
   in
@@ -228,7 +228,7 @@ let serve prepared ~input ~output ~operator =
                         | Ok session ->
                             (* the worker serves one invocation; it owns the Once resumption the
                                host exchange retains *)
-                            Eval.with_invocation prepared.ctx (fun _invocation ->
+                            Eval.with_invocation ?fuel prepared.ctx (fun _invocation ->
                                 invoke prepared operator ~limits ~input ~output session))))))
   with exn ->
     note operator

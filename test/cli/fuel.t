@@ -84,7 +84,7 @@ out is E0919, not a model runtime failure (E0902) or the terminal-path budget
     Cause: computation fuel exhausted: the fuel-v1 budget of 154 unit(s) ran out before evaluation finished; the result is incomplete
     Next step: Raise the --fuel budget, or omit it to run unbounded. An exhausted run is incomplete; it neither passes nor fails.
   fuel: 154 of 154 unit(s) used (fuel-v1)
-  [1]
+  [2]
 
 Type checking draws on the budget too. Let-polymorphism can make the types of
 a few lines of code doubly exponential in size; checking code passed to `eval`
@@ -139,6 +139,38 @@ expanding them (this program never finished before):
   > print("type Shape = | Tip | Fork(lhs: Shape, rhs: Shape)\nonce effect Probe where { probe : () -> Int }\n\ndrive() = handle probe() {\n  | return v -> v\n  | probe() resume k -> {\n      let t0 = Tip\n" + binds + "\n      let a = match t%d { | _ -> 0 }\n      let b = match t%d { | _ -> 0 }\n      k(add(a, b))\n    }\n}\n\ndrive()" % (n, n))' > scrutinees.jac
   $ timeout 60 jacquard run --fuel 100000 scrutinees.jac 2>&1 | head -1
   0
+
+`jacquard test --fuel UNITS` gives each discovered test its own budget, drawn
+from one run. A test that runs out is INCOMPLETE, is never cached, and makes the
+run exit 2; bounded results are cached under the budget and never answer for an
+unbounded run:
+
+  $ cat > suite.jac <<'J'
+  > loop(n) = loop(add(n, 1))
+  > twice(n) = mul(n, 2)
+  > quick-case =
+  >   Case("quick", fn () -> check.eq(twice(3), 6, int.eq, int.show, "twice"))
+  > spin-case =
+  >   Case("spins", fn () -> check.eq(loop(0), 0, int.eq, int.show, "never"))
+  > J
+  $ jacquard test suite.jac --fuel 5000 --cache-dir bounded
+  PASS quick-case/quick (1 check)
+  INCOMPLETE spin-case: computation fuel exhausted (fuel-v1, 5000 unit(s))
+  1 passed, 0 failed, 0 skipped, 0 refused, 1 incomplete
+  cache: 0 hit, 1 ran
+  [2]
+  $ ls bounded | wc -l
+  1
+  $ jacquard test suite.jac --fuel 5000 --cache-dir bounded | tail -2
+  1 passed, 0 failed, 0 skipped, 0 refused, 1 incomplete
+  cache: 1 hit, 0 ran
+  $ cat > quick.jac <<'J'
+  > twice(n) = mul(n, 2)
+  > quick-case =
+  >   Case("quick", fn () -> check.eq(twice(3), 6, int.eq, int.show, "twice"))
+  > J
+  $ jacquard test quick.jac --cache-dir bounded | tail -1
+  cache: 0 hit, 1 ran
 
 A budget must be a non-negative number of units:
 

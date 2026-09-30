@@ -924,7 +924,18 @@ let read_file path =
   close_in ic;
   s
 
+(** RT.1: the per-test fuel budget of a bounded [jacquard test] run, if any. A bounded result is
+    keyed by the cost model and budget, so it never answers for an unbounded run or another budget.
+*)
+let fuel_budget : int option ref = ref None
+
+let bounded_key key =
+  match !fuel_budget with
+  | None -> key
+  | Some budget -> Printf.sprintf "%s|fuel=%s:%d" key Eval.fuel_model budget
+
 let cache_lookup ~cache_dir key : (string * verdict * string option * Hash.t list) list option =
+  let key = bounded_key key in
   match cache_dir with
   | None -> None
   | Some dir -> (
@@ -940,14 +951,22 @@ let cache_lookup ~cache_dir key : (string * verdict * string option * Hash.t lis
           | Error _ -> None))
 
 let cache_store ~cache_dir key outcomes : unit =
+  let key = bounded_key key in
   match cache_dir with
   | None -> ()
+  | Some _ when Fuel_meter.exhausted () ->
+      (* an exhausted test is incomplete: nothing it produced is a verdict worth caching *)
+      ()
   | Some dir -> (
       try
         if not (Sys.file_exists dir) then Sys.mkdir dir 0o755;
         let path = Filename.concat dir (Hash.to_hex (Hash.of_string key) ^ ".jqd") in
+        (* the cache entry is store IO: rendered unmetered, before the file is opened *)
+        let entry =
+          Fuel_meter.unmetered (fun () -> Printer.print (entry_form ~key ~outcomes) ^ "\n")
+        in
         let oc = open_out_bin path in
-        output_string oc (Printer.print (entry_form ~key ~outcomes) ^ "\n");
+        output_string oc entry;
         close_out oc
       with Sys_error m -> Printf.eprintf "test-cache unavailable (%s)\n%!" m)
 
@@ -958,6 +977,7 @@ type totals = {
   mutable failed : int;
   mutable skipped : int;
   mutable refused : int;
+  mutable incomplete : int;  (** tests that ran out of their fuel budget (RT.1) *)
   mutable hits : int;
   mutable ran : int;
 }
