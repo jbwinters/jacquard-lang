@@ -563,7 +563,7 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed i
       | Structured_scope.Effect_cancelled awakened -> finish_cancelled run handle awakened
       | Structured_scope.Effect_routed { resume; result = Ok value } -> continue resume value
       | Structured_scope.Effect_routed { result = Error diagnostics; _ }
-        when !fatal_diagnostics <> [] ->
+        when !fatal_diagnostics <> [] || Option.is_some !fuel_exhaustion ->
           Error diagnostics
       | Structured_scope.Effect_routed { result = Error diagnostics; _ } ->
           fail_task run handle (error_of_diagnostics diagnostics)
@@ -921,6 +921,9 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed i
                   with
                   | Ok value -> Ok value
                   | Error error ->
+                      (match error with
+                      | Runtime_err.Fuel_exhausted _ -> fuel_exhaustion := Some error
+                      | _ -> ());
                       routed_error := Some error;
                       Error [ scheduler_diagnostic (Runtime_err.to_string error) ])
                 ~continue:(fun owned value ->

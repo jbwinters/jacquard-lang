@@ -41,7 +41,7 @@ Every debit is made before the work it pays for:
 |---|---|
 | one evaluator machine state visited, the final (terminal) state included | 1 |
 | performing an operation | 1 per continuation frame walked to its handler, or to the root |
-| resuming a continuation (Multi or Once) | 1 per captured frame reinstalled |
+| resuming a continuation (Multi or Once) | 1 per captured frame reinstalled; when a driver (the scheduler, a host worker) resumes outside the machine, these units are charged as the next run starts |
 | a native builtin or granted root handler | `(text bytes + code-form nodes) / 64` over its direct arguments, then again over its result |
 | reaching a memoized top-level term | the cost of the sub-run that computed it, once per invocation (§3) |
 

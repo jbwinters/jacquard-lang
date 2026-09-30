@@ -47,6 +47,30 @@ become one failed task that the scope could absorb; the whole run stops:
   $ jacquard run --fuel 5000 tasks.jac 2>&1 | head -1
   error[E0919]: Computation fuel was exhausted
 
+Exhaustion can land anywhere in a scheduled run, including while the scheduler
+resumes a task that yielded. Every budget below the program's cost is E0919
+with exit 2; none crashes or reports a task failure:
+
+  $ cat > yield.jac <<'J'
+  > work(n) = if eq(n, 0) then 0 else { async.yield(); work(sub(n, 1)) }
+  > 
+  > async.scope(fn () -> {
+  >   let a = async.spawn(fn () -> work(3))
+  >   let b = async.spawn(fn () -> work(2))
+  >   (async.await(a), async.await(b))
+  > })
+  > J
+  $ jacquard run yield.jac
+  done((done(0), done(0)))
+  $ n=0; while [ $n -lt 211 ]; do
+  >   jacquard run --fuel $n yield.jac > out.txt 2>&1; code=$?
+  >   if [ $code -ne 2 ] || ! grep -q 'error\[E0919\]' out.txt; then echo "budget $n: exit $code"; fi
+  >   n=$((n + 1))
+  > done
+  $ jacquard run --fuel 211 yield.jac
+  done((done(0), done(0)))
+  fuel: 211 of 211 unit(s) used (fuel-v1)
+
 Every branch of an exact enumeration draws on the same budget, and running
 out is E0919, not a model runtime failure (E0902) or the terminal-path budget
 (E0918):

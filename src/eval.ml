@@ -197,6 +197,9 @@ type ctx = {
   mutable fuel_epoch : int;
       (** advanced by every invocation; a memo cost is charged once per epoch *)
   mutable memo_frames : memo_frame list;  (** innermost first: memo sub-runs in progress *)
+  mutable fuel_pending : int;
+      (** resumption units incurred while a driver built a state outside the machine; charged when
+          the next run starts, inside its error channel *)
 }
 
 and memo_frame = { frame_deps : (Hash.t, unit) Hashtbl.t; mutable dep_units : int }
@@ -246,6 +249,7 @@ let make_ctx store =
     fuel_exhausted = false;
     memo_cost = Hashtbl.create 64;
     fuel_epoch = 0;
+    fuel_pending = 0;
     memo_frames = [];
   }
 
@@ -417,6 +421,7 @@ let reset_fuel ctx =
   ctx.fuel_limit <- None;
   ctx.fuel_exhausted <- false;
   ctx.fuel_epoch <- ctx.fuel_epoch + 1;
+  ctx.fuel_pending <- 0;
   ctx.memo_frames <- []
 
 let with_invocation ?coverage ?fuel ctx body =
@@ -1150,7 +1155,14 @@ let perform_unchecked ctx (op : Hash.t) ~name ~effect_ (args : Value.t list) (k 
 
 (** Apply a function-position value to fully evaluated arguments (uncurried, decision D5): closures,
     builtins, constructors, ops (perform), and resumptions. *)
-let apply_unchecked ctx (fn : Value.t) (args : Value.t list) (k : kont) : state =
+let apply_unchecked ?(outside = false) ctx (fn : Value.t) (args : Value.t list) (k : kont) : state =
+  (* a resumption applied by a driver outside the machine (a scheduler or host resuming a
+     continuation) defers its debit to the next run, so exhaustion is reported through that run's
+     result rather than raised from state construction *)
+  let charge_frames frames =
+    if outside then ctx.fuel_pending <- ctx.fuel_pending + List.length frames
+    else charge ctx (List.length frames)
+  in
   match fn with
   | VClosure { scope; params; body } ->
       if List.length params <> List.length args then
@@ -1188,7 +1200,7 @@ let apply_unchecked ctx (fn : Value.t) (args : Value.t list) (k : kont) : state 
   | VResume frames -> (
       match args with
       | [ v ] ->
-          charge ctx (List.length frames);
+          charge_frames frames;
           SApply (v, frames @ k)
       | _ -> rt_arity "a resumption takes exactly one argument, got %d" (List.length args))
   | VOnceResume once -> (
@@ -1196,7 +1208,7 @@ let apply_unchecked ctx (fn : Value.t) (args : Value.t list) (k : kont) : state 
       | [ v ] -> (
           match Once_state.consume once with
           | Some frames ->
-              charge ctx (List.length frames);
+              charge_frames frames;
               SApply (v, frames @ k)
           | None -> rt Runtime_err.Once_resumed_twice)
       | _ -> rt_arity "a resumption takes exactly one argument, got %d" (List.length args))
@@ -1207,7 +1219,7 @@ let apply_unchecked ctx (fn : Value.t) (args : Value.t list) (k : kont) : state 
     passed the same guard. *)
 let apply ctx fn args k =
   reject_recovery_state ctx (SApply (VTuple (fn :: args), k));
-  apply_unchecked ctx fn args k
+  apply_unchecked ~outside:true ctx fn args k
 
 (* Record that memoized term [h] was reached for [units] (zero when it was already charged in this
    invocation) and attribute it to the enclosing memo sub-run, if any. Every reached term is a
@@ -1440,11 +1452,20 @@ and step_unchecked ctx (state : state) : state option =
     only rearrange validated payloads or tie a fresh recursive cell; native and untrusted memo
     boundaries validate fresh values before constructing their result states. *)
 and run_state_unchecked ctx state =
-  (* every machine state visited costs one unit, the terminal one included, so an exhausted
-     invocation can never deliver a value *)
+  (* a resumption a driver applied outside the machine is paid for here, inside the run's error
+     channel *)
+  if ctx.fuel_pending > 0 then (
+    let pending = ctx.fuel_pending in
+    ctx.fuel_pending <- 0;
+    charge ctx pending);
+  run_machine ctx state
+
+(* every machine state visited costs one unit, the terminal one included, so an exhausted invocation
+   can never deliver a value *)
+and run_machine ctx state =
   charge ctx 1;
   match step_unchecked ctx state with
-  | Some next -> run_state_unchecked ctx next
+  | Some next -> run_machine ctx next
   | None -> (
       match state with
       | SApply (v, []) ->
