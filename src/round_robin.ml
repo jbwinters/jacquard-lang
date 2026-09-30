@@ -1035,8 +1035,10 @@ let run_state_global_unguarded ctx ~policy ~bounds ~program ~schedule_mode ~allo
       Error (Run_error (Runtime_err.Scheduler_error "scope cleanup left nonzero ownership metrics"))
     else
       match protected with
-      | Error _ when Option.is_some !fuel_exhaustion ->
-          Error (Run_error (Option.get !fuel_exhaustion))
+      | (Error _ | Ok _) when Eval.fuel_exhausted ctx ->
+          (* exhaustion is sticky: however the run ended (a decision limit reached after a
+             deferred debit, or a failure it caused), the outcome is the exhaustion *)
+          Error (Run_error (Option.value !fuel_exhaustion ~default:(Eval.fuel_error ctx)))
       | Error diagnostics -> (
           let error = runtime_of_diagnostics diagnostics in
           match !budget_refusal with

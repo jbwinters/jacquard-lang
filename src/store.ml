@@ -213,6 +213,9 @@ let read_file path =
 
 (* Parse, validate, and re-hash one object file; returns the decl and its hashes. *)
 let load_object ~file src : (Kernel.decl * Canon.decl_hashes, Diag.t list) result =
+  (* loading an object is store work, not program computation: never metered (RT.1), so a cold
+     and a warm lookup cost the same *)
+  Fuel_meter.unmetered @@ fun () ->
   match Reader.parse_one ~file src with
   | Error ds -> Error ds
   | Ok form -> (

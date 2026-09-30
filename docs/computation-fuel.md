@@ -54,10 +54,9 @@ work per value. Walking a whole value is different: sharing can make the
 expanded structure exponentially larger than what building it cost. So value
 rendering (`Value.show`), code printing and form comparison tick the meter per
 node and text byte wherever they run: in a native such as `debug.inspect`,
-`code.render`, `code.eq?` or `pmf`; in the evaluator scanning a native's code
-result for recovery markers, splicing a quote, stamping its scope marks,
-converting code to kernel syntax (the run's own top-level expressions, and code
-passed to `eval`), or building a diagnostic; or in a driver keying inference results, comparing
+`code.render`, `code.eq?` or `pmf`; in the evaluator splicing a quote,
+stamping its scope marks, converting code to kernel syntax (the run's own
+top-level expressions, and code passed to `eval`), or building a diagnostic; or in a driver keying inference results, comparing
 observed values, or rendering task results. A walk stops the
 moment it passes the budget, so a huge shared value exhausts the budget
 instead of being walked, and a comparison that stops at the first node stays
@@ -131,7 +130,7 @@ With `--fuel`, the CLI prints one line to stderr when the invocation ends,
 whether it finished or ran out:
 
 ```text
-fuel: 115 of 115 unit(s) used (fuel-v1)
+fuel: 113 of 113 unit(s) used (fuel-v1)
 ```
 
 The line always names the model, so budgets are never compared across models.
@@ -171,8 +170,17 @@ entry points. A host consumer bounds an invocation with
 - Accounting also runs in unbounded mode, since memoized costs must not depend
   on whether a budget is present; it adds a counter update per transition and
   per walked node, and nothing asymptotic.
-- Store persistence (writing declarations and the names index) is not program
-  computation and is never metered.
+- Store work (writing declarations and the names index, and loading stored
+  declarations) is not program computation and is never metered, so a cold and
+  a warm lookup cost the same.
+- The evaluator's guard scans (recovery-marker and mutable-graph validation at
+  run entries and native or operation boundaries) are not metered: they are
+  backed by evaluator-lifetime caches, so metering them would make a reused
+  evaluator's cost differ from a fresh one's. Each scan visits every shared
+  value or subform once, so it is linear in data the program already paid to
+  build, and total work stays polynomial in the budget. A granted operation or
+  host-registered native snapshots the data its continuation reaches on every
+  call, uncharged.
 - Rendering a finished result is outside the budget: the CLI prints final
   values and posteriors unmetered. The scheduler's own rendering of a task's
   result, which it records while the run is still in progress, is metered. Walks during the invocation, including a

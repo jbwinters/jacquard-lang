@@ -65,23 +65,40 @@ let scalar_to_string = function
   | Form.Hash h -> "#" ^ Hash.to_hex h
   | Form.F _ -> invalid_arg "scalar_to_string: form"
 
-let rec inline_form (f : Form.t) =
+(* Rendering appends to one buffer, so its work is linear in the output rather than in depth times
+   output; each node, scalar and byte ticks computation fuel (RT.1). *)
+let rec inline_form_into buffer (f : Form.t) =
   Fuel_meter.tick (1 + String.length f.Form.head);
-  let args = List.map inline_arg f.Form.args in
-  if f.Form.head = "group" then begin
+  Buffer.add_char buffer '(';
+  if f.Form.head = "group" then
     (* a group whose first element is a scalar reparses as a headed form *)
-    (match f.Form.args with
+    match f.Form.args with
     | (Form.Int _ | Form.Real _ | Form.Text _ | Form.Sym _ | Form.Hash _) :: _ ->
         raise (Bug_unprintable "group with a leading scalar element")
-    | _ -> ());
-    "(" ^ String.concat " " args ^ ")"
-  end
-  else begin
+    | _ -> ()
+  else (
     check_symbol ~what:"head" f.Form.head;
-    "(" ^ String.concat " " (f.Form.head :: args) ^ ")"
-  end
+    Buffer.add_string buffer f.Form.head;
+    if f.Form.args <> [] then Buffer.add_char buffer ' ');
+  List.iteri
+    (fun index arg ->
+      if index > 0 then Buffer.add_char buffer ' ';
+      inline_arg_into buffer arg)
+    f.Form.args;
+  Buffer.add_char buffer ')'
 
-and inline_arg = function
+and inline_arg_into buffer = function
+  | Form.F f -> inline_form_into buffer f
+  | scalar ->
+      Fuel_meter.tick 1;
+      Buffer.add_string buffer (scalar_to_string scalar)
+
+let inline_form (f : Form.t) =
+  let buffer = Buffer.create 64 in
+  inline_form_into buffer f;
+  Buffer.contents buffer
+
+let inline_arg = function
   | Form.F f -> inline_form f
   | scalar ->
       Fuel_meter.tick 1;
@@ -97,10 +114,11 @@ let print_compact = inline_form
 let print (f : Form.t) =
   let has_form_arg = List.exists (function Form.F _ -> true | _ -> false) f.Form.args in
   if not has_form_arg then inline_form f
-  else
+  else (
+    Fuel_meter.tick (1 + String.length f.Form.head);
     let open_line = if f.Form.head = "group" then "(" else "(" ^ f.Form.head in
     let lines = List.map (fun a -> "  " ^ inline_arg a) f.Form.args in
-    open_line ^ "\n" ^ String.concat "\n" lines ^ ")"
+    open_line ^ "\n" ^ String.concat "\n" lines ^ ")")
 
 (** [print_all forms] renders a whole `.jqd` file: forms separated by a blank line, trailing
     newline. *)

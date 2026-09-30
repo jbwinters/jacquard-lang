@@ -466,11 +466,12 @@ let test_fuel_bounds_deep_natives () =
   Alcotest.(check (pair string int))
     "and under its exact budget" ("false", cost)
     (fueled ~budget:cost ctx store unequal);
-  (* the evaluator's own walks of runtime code (the recovery scan of a native's result, quote
-     splicing and scope stamping) draw on the budget even when the value is discarded *)
-  Alcotest.(check (pair string int))
-    "discarded shared code" ("E0919", 3_000)
-    (fueled ~budget:3_000 ctx store "{ let _ = cdbl(code.of-int(1), 40); 0 }");
+  (* the evaluator's guard scan of a native's code result visits each shared subform once, so
+     building a 2^40-node payload costs only its construction; splicing and scope stamping
+     rebuild every node and draw on the budget *)
+  Alcotest.(check string)
+    "discarded shared code" "0"
+    (fst (fueled ~budget:3_000 ctx store "{ let _ = cdbl(code.of-int(1), 40); 0 }"));
   Alcotest.(check (pair string int))
     "spliced shared quotes" ("E0919", 3_000)
     (fueled ~budget:3_000 ctx store "{ let _ = qdbl(quote { 1 }, 40); 0 }");

@@ -331,7 +331,9 @@ let enumerate_risk_exact (ctx : Eval.ctx) ~max_branches (model : Eval.state) :
       match (left, right) with
       | Value.VInt a, VInt b -> Ok (Int.equal a b)
       | VReal a, VReal b -> Ok (Float.equal a b)
-      | VText a, VText b -> Ok (String.equal a b)
+      | VText a, VText b ->
+          Fuel_meter.tick (String.length a);
+          Ok (String.equal a b)
       | VHash a, VHash b -> Ok (Hash.equal a b)
       | VTuple left_items, VTuple right_items -> same_comparable_values left_items right_items
       | VCon left_con, VCon right_con ->

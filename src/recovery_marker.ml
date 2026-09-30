@@ -6,11 +6,29 @@
 
 let marked_meta meta = Option.is_some (Meta.surface_hole meta)
 
-let rec form (value : Form.t) =
-  (* runtime code values can share subforms, so this walk draws on computation fuel (RT.1) *)
-  Fuel_meter.tick 1;
-  marked_meta value.meta
-  || List.exists (function Form.F nested -> form nested | _ -> false) value.args
+(* Runtime code values can share subforms. A subform already found clean in this scan is not
+   walked again, so a shared payload costs its size rather than its expanded size (RT.1). The
+   table compares forms physically; its structural hash is bounded work per form. *)
+module Seen_forms = Hashtbl.Make (struct
+  type t = Form.t
+
+  let equal = ( == )
+  let hash = Hashtbl.hash
+end)
+
+let form (value : Form.t) =
+  let clean = Seen_forms.create 16 in
+  let rec walk (value : Form.t) =
+    if Seen_forms.mem clean value then false
+    else if
+      marked_meta value.meta
+      || List.exists (function Form.F nested -> walk nested | _ -> false) value.args
+    then true
+    else (
+      Seen_forms.add clean value ();
+      false)
+  in
+  walk value
 
 let rec pat (pattern : Kernel.pat) =
   marked_meta pattern.meta

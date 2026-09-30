@@ -81,31 +81,56 @@ let unit_v = VTuple []
 (** Stable rendering for goldens and diagnostics. Reals use the reader-compatible spelling; text is
     escaped like source; constructors print as [Name] or [Name(arg, ...)]; non-literal values print
     as bracketed placeholders. *)
-let rec show value =
+let rec show_into buffer value =
+  (* one buffer for the whole rendering keeps it linear in its output; each node and byte ticks
+     computation fuel (RT.1) *)
   Fuel_meter.tick 1;
+  let add = Buffer.add_string buffer in
+  let items_into items =
+    Buffer.add_char buffer '(';
+    List.iteri
+      (fun index item ->
+        if index > 0 then add ", ";
+        show_into buffer item)
+      items;
+    Buffer.add_char buffer ')'
+  in
   match value with
-  | VInt i -> string_of_int i
-  | VReal r -> Printer.real_repr r
+  | VInt i -> add (string_of_int i)
+  | VReal r -> add (Printer.real_repr r)
   | VText s ->
       Fuel_meter.tick (String.length s);
-      "\"" ^ Printer.escape_text s ^ "\""
-  | VHash hash -> "#" ^ Hash.to_hex hash
-  | VSecret _ -> "<secret redacted>"
-  | VTuple items -> "(" ^ String.concat ", " (List.map show items) ^ ")"
+      Buffer.add_char buffer '"';
+      add (Printer.escape_text s);
+      Buffer.add_char buffer '"'
+  | VHash hash ->
+      Buffer.add_char buffer '#';
+      add (Hash.to_hex hash)
+  | VSecret _ -> add "<secret redacted>"
+  | VTuple items -> items_into items
   | VCon { name; args = []; _ } ->
       Fuel_meter.tick (String.length name);
-      name
+      add name
   | VCon { name; args; _ } ->
       Fuel_meter.tick (String.length name);
-      name ^ "(" ^ String.concat ", " (List.map show args) ^ ")"
-  | VConstructor { name; arity; _ } -> Printf.sprintf "<constructor %s/%d>" name arity
-  | VOp { effect_; name; _ } -> Printf.sprintf "<op %s.%s>" effect_ name
-  | VClosure _ -> "<closure>"
-  | VBuiltin (name, _) -> Printf.sprintf "<builtin %s>" name
-  | VTrustedBuiltin builtin -> Printf.sprintf "<builtin %s>" (Trusted_builtin.name builtin)
-  | VCode payload -> "(quote " ^ Printer.inline_form payload ^ ")"
-  | VTask _ -> "<task>"
-  | VChannel _ -> "<channel>"
-  | VResume _ | VOnceResume _ -> "<resume>"
+      add name;
+      items_into args
+  | VConstructor { name; arity; _ } -> add (Printf.sprintf "<constructor %s/%d>" name arity)
+  | VOp { effect_; name; _ } -> add (Printf.sprintf "<op %s.%s>" effect_ name)
+  | VClosure _ -> add "<closure>"
+  | VBuiltin (name, _) -> add (Printf.sprintf "<builtin %s>" name)
+  | VTrustedBuiltin builtin -> add (Printf.sprintf "<builtin %s>" (Trusted_builtin.name builtin))
+  | VCode payload ->
+      add "(quote ";
+      Printer.inline_form_into buffer payload;
+      Buffer.add_char buffer ')'
+  | VTask _ -> add "<task>"
+  | VChannel _ -> add "<channel>"
+  | VResume _ | VOnceResume _ -> add "<resume>"
+
+let show value =
+  let buffer = Buffer.create 64 in
+  show_into buffer value;
+  Buffer.contents buffer
 
 let pp fmt v = Format.pp_print_string fmt (show v)
