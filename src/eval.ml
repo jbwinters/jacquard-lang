@@ -183,16 +183,12 @@ type ctx = {
   audit_context_id : int;
   mutable next_audit_run_id : int;
   mutable invocation : invocation option;  (** the active invocation, if any; never nested *)
-  mutable fuel_used : int;
-      (** monotone fuel-v1 units charged on this evaluator since creation (RT.1). Counted even when
-          unbounded, so a memoized term's cost is known if a later invocation is bounded *)
-  mutable fuel_ceiling : int;
-      (** [fuel_used] may not exceed this; [max_int] outside a bounded invocation *)
-  mutable fuel_limit : int option;  (** the active invocation's budget, for diagnostics *)
-  mutable fuel_exhausted : bool;
-      (** sticky: once set, every later transition and terminal in the invocation fails *)
+  mutable fuel_limit : int option;
+      (** the active invocation's budget, for diagnostics. The counter and ceiling themselves are
+          the process-wide {!Fuel_meter} (RT.1), counted even when unbounded so a memoized term's
+          cost is known if a later invocation is bounded *)
   memo_cost : (Hash.t, memo_charge) Hashtbl.t;
-      (** fuel of each memoized term's isolated sub-run, split into its own transitions and the
+      (** fine fuel units of each memoized term's isolated sub-run, split into its own work and the
           memoized terms it reached, so a warm memo charges what a cold one would *)
   mutable fuel_epoch : int;
       (** advanced by every invocation; a memo cost is charged once per epoch *)
@@ -211,9 +207,9 @@ and memo_frame = { frame_deps : (Hash.t, unit) Hashtbl.t; mutable dep_units : in
 and invocation = {
   mutable active : bool;
   mutable teardown : (unit -> unit) list;  (** most recent first *)
-  owner : ctx;
-  fuel_start : int;  (** [owner.fuel_used] when the invocation began *)
+  fuel_start : int;  (** the meter's fine count when the invocation began *)
   mutable fuel_final : int option;  (** units used, frozen when the invocation ends *)
+  saved_ceiling : int;  (** the meter ceiling to restore when the invocation ends *)
   budget : int option;
 }
 
@@ -248,10 +244,7 @@ let make_ctx store =
     audit_context_id = Atomic.fetch_and_add next_audit_context_id 1;
     next_audit_run_id = 0;
     invocation = None;
-    fuel_used = 0;
-    fuel_ceiling = max_int;
     fuel_limit = None;
-    fuel_exhausted = false;
     memo_cost = Hashtbl.create 64;
     fuel_epoch = 0;
     deferring = false;
@@ -419,19 +412,22 @@ let on_teardown invocation callback =
 
 let invocation_active ctx = Option.is_some ctx.invocation
 let fuel_model = "fuel-v1"
+let fine_per_unit = 64
+
+(* fine units to whole fuel units, rounding up, so a run completes under exactly the budget reported
+   as its cost *)
+let units_of_fine fine = (fine + fine_per_unit - 1) / fine_per_unit
 
 let fuel_used invocation =
   match invocation.fuel_final with
   | Some used -> used
-  | None -> invocation.owner.fuel_used - invocation.fuel_start
+  | None -> units_of_fine (!Fuel_meter.used - invocation.fuel_start)
 
 let fuel_budget invocation = invocation.budget
-let fuel_exhausted ctx = ctx.fuel_exhausted
+let fuel_exhausted _ctx = Fuel_meter.exhausted ()
 
 let reset_fuel ctx =
-  ctx.fuel_ceiling <- max_int;
   ctx.fuel_limit <- None;
-  ctx.fuel_exhausted <- false;
   ctx.fuel_epoch <- ctx.fuel_epoch + 1;
   ctx.fuel_pending <- 0;
   ctx.memo_frames <- []
@@ -449,18 +445,23 @@ let with_invocation ?coverage ?fuel ctx body =
     {
       active = true;
       teardown = [];
-      owner = ctx;
-      fuel_start = ctx.fuel_used;
+      fuel_start = !Fuel_meter.used;
       fuel_final = None;
       budget = fuel;
+      saved_ceiling = !Fuel_meter.ceiling;
     }
   in
   Option.iter (fun enabled -> ctx.track_coverage <- enabled) coverage;
   reset_fuel ctx;
+  (* an invocation on another evaluator inside a bounded one stays within the outer ceiling *)
   Option.iter
     (fun limit ->
-      ctx.fuel_ceiling <-
-        (if ctx.fuel_used > max_int - limit then max_int else ctx.fuel_used + limit);
+      let start = !Fuel_meter.used in
+      let own =
+        if limit > (max_int - start) / fine_per_unit then max_int
+        else start + (limit * fine_per_unit)
+      in
+      Fuel_meter.ceiling := min own invocation.saved_ceiling;
       ctx.fuel_limit <- Some limit)
     fuel;
   ctx.invocation <- Some invocation;
@@ -468,7 +469,8 @@ let with_invocation ?coverage ?fuel ctx body =
      invocation borrowed; returns the first callback exception *)
   let finish () =
     invocation.active <- false;
-    invocation.fuel_final <- Some (ctx.fuel_used - invocation.fuel_start);
+    invocation.fuel_final <- Some (units_of_fine (!Fuel_meter.used - invocation.fuel_start));
+    Fuel_meter.ceiling := invocation.saved_ceiling;
     let callbacks = invocation.teardown in
     invocation.teardown <- [];
     let first = ref None in
@@ -545,14 +547,13 @@ let rt_arity fmt = Printf.ksprintf (fun m -> rt (Runtime_err.Arity m)) fmt
 
 (* --- computation fuel (RT.1, cost model fuel-v1; see docs/computation-fuel.md) --- *)
 
-let mark_exhausted ctx =
-  (* the refused debit spends the remainder: an exhausted invocation always reports its whole
-     budget used, however large the refused charge was *)
-  if not ctx.fuel_exhausted then (
-    if ctx.fuel_ceiling < max_int then ctx.fuel_used <- ctx.fuel_ceiling;
-    (* no debit can pass a negative ceiling, which keeps [charge] to one comparison *)
-    ctx.fuel_ceiling <- -1;
-    ctx.fuel_exhausted <- true)
+(* the refused debit spends the remainder: an exhausted invocation always reports its whole budget
+   used, however large the refused charge was. No debit can pass the negative ceiling that follows,
+   which keeps [charge] to one comparison. *)
+let mark_exhausted _ctx = Fuel_meter.trip ()
+
+let fuel_error ctx =
+  Runtime_err.Fuel_exhausted { model = fuel_model; limit = Option.value ctx.fuel_limit ~default:0 }
 
 let exhaust ctx =
   mark_exhausted ctx;
@@ -568,11 +569,15 @@ let refuse ctx =
     ctx.fuel_pending <- 1)
   else exhaust ctx
 
-(** [charge ctx units] debits [units] before the work they pay for. A debit that would pass the
-    ceiling is refused and exhausts the invocation, which spends the remaining allowance. *)
-let[@inline] charge ctx units =
-  let used = ctx.fuel_used + units in
-  if used > ctx.fuel_ceiling then refuse ctx else ctx.fuel_used <- used
+(** [charge_fine ctx fine] debits [fine] fine units before the work they pay for. A debit that would
+    pass the ceiling is refused and exhausts the invocation, which spends the remaining allowance.
+*)
+let[@inline] charge_fine ctx fine =
+  let used = !Fuel_meter.used + fine in
+  if used > !Fuel_meter.ceiling then refuse ctx else Fuel_meter.used := used
+
+(** [charge ctx units] debits whole fuel units. *)
+let[@inline] charge ctx units = charge_fine ctx (units * fine_per_unit)
 
 (* [charge_outside ctx units] debits work a driver does outside any run (resuming a captured
    continuation), deferring a refusal to the next run *)
@@ -586,56 +591,11 @@ let charge_outside ctx units =
    or code is traversed, so measuring is O(1) per value. *)
 let payload_units = function VText text -> String.length text | _ -> 0
 
-exception Past_allowance
-
-(* A driver that renders or keys whole values (an inference driver keying terminal values) pays for
-   their expanded size first: one unit per 64 nodes or text bytes, measured with an early stop at
-   the remaining allowance. The rendering that follows walks the whole value anyway, so measuring
-   first adds a constant factor. *)
-let charge_expanded ctx values =
-  let remaining = ctx.fuel_ceiling - ctx.fuel_used in
-  let cap =
-    if remaining < 0 then -1
-    else if remaining > max_int / 64 then max_int
-    else (remaining * 64) + 63
-  in
-  let count = ref 0 in
-  let add n =
-    count := !count + n;
-    if !count > cap || !count < 0 then raise Past_allowance
-  in
-  let rec form (f : Form.t) =
-    add (1 + String.length f.head);
-    List.iter
-      (function
-        | Form.F child -> form child
-        | Form.Text text | Form.Sym text -> add (1 + String.length text)
-        | Form.Int _ | Form.Real _ | Form.Hash _ -> add 1)
-      f.args
-  in
-  let rec value = function
-    | VText text -> add (1 + String.length text)
-    | VCode f -> form f
-    | VTuple items ->
-        add 1;
-        List.iter value items
-    | VCon { name; args; _ } ->
-        add (1 + String.length name);
-        List.iter value args
-    | _ -> add 1
-  in
-  match List.iter value values with
-  | () -> charge ctx (!count / 64)
-  | exception Past_allowance -> exhaust ctx
-
-let charge_walk ctx values =
-  match charge_expanded ctx values with () -> Ok () | exception Rt error -> Error error
-
 let rec payload_total total = function
   | [] -> total
   | value :: rest -> payload_total (total + payload_units value) rest
 
-let[@inline] charge_payload ctx units = if units >= 64 then charge ctx (units / 64)
+let[@inline] charge_payload ctx bytes = if bytes > 0 then charge_fine ctx bytes
 let charge_native ctx values = charge_payload ctx (payload_total 0 values)
 
 (* ------------------------------------------------------------------ *)
@@ -1154,10 +1114,7 @@ let check_native_argument ctx root =
 (* A native that re-entered the evaluator and ran out cannot replace the exhaustion with its own
    result or error *)
 let charge_native_result ctx result =
-  if ctx.fuel_exhausted then
-    Error
-      (Runtime_err.Fuel_exhausted
-         { model = fuel_model; limit = Option.value ctx.fuel_limit ~default:0 })
+  if Fuel_meter.exhausted () then Error (fuel_error ctx)
   else
     match result with
     | Ok value ->
@@ -1175,26 +1132,9 @@ let invoke_untrusted_native ctx fn native args kont =
   | Ok value -> checked_result_state ctx value kont
   | Error error -> rt error
 
-(* A deep native walks whole values or code forms; sharing can make that walk exponential in what
-   building the value cost. It runs under the walk meter with the remaining allowance and pays for
-   exactly the nodes and bytes it walked, so it stops at the budget instead of finishing the walk. *)
-let invoke_deep_native ctx builtin args =
-  let remaining = ctx.fuel_ceiling - ctx.fuel_used in
-  if remaining < 0 then exhaust ctx;
-  let allowance = if remaining > (max_int - 63) / 64 then max_int else (remaining * 64) + 63 in
-  match Walk_meter.metered ~limit:allowance (fun () -> Trusted_builtin.invoke builtin args) with
-  | Some (result, walked) ->
-      charge ctx (walked / 64);
-      result
-  | None -> exhaust ctx
-
 let invoke_trusted_native ctx builtin args kont =
-  let result =
-    if Trusted_builtin.deep builtin then invoke_deep_native ctx builtin args
-    else (
-      charge_native ctx args;
-      Trusted_builtin.invoke builtin args)
-  in
+  charge_native ctx args;
+  let result = Trusted_builtin.invoke builtin args in
   match charge_native_result ctx result with
   | Ok value -> checked_result_state ctx value kont
   | Error error -> rt error
@@ -1359,7 +1299,7 @@ let charge_memo_hit ctx h =
   in
   let units = total h in
   note_memo_charge ctx h units;
-  charge ctx units
+  charge_fine ctx units
 
 (* the hot path: a warm hit already charged in this invocation, outside any memo sub-run *)
 let[@inline] memo_hit_is_paid ctx = function
@@ -1428,7 +1368,7 @@ let rec eval_ref ctx ~trusted (h : Hash.t) (kind : Kernel.refkind) (k : kont) : 
                   let frame = { frame_deps = Hashtbl.create 8; dep_units = 0 } in
                   let saved_frames = ctx.memo_frames in
                   ctx.memo_frames <- frame :: saved_frames;
-                  let started = ctx.fuel_used in
+                  let started = !Fuel_meter.used in
                   let v =
                     Fun.protect
                       ~finally:(fun () ->
@@ -1436,7 +1376,7 @@ let rec eval_ref ctx ~trusted (h : Hash.t) (kind : Kernel.refkind) (k : kont) : 
                         ctx.memo_frames <- saved_frames)
                       (fun () -> run_state_unchecked ctx initial)
                   in
-                  let units = ctx.fuel_used - started in
+                  let units = !Fuel_meter.used - started in
                   let memo_charge =
                     {
                       own = units - frame.dep_units;
@@ -1580,6 +1520,10 @@ and run_state_unchecked ctx state =
   | value ->
       ctx.deferring <- saved;
       value
+  | exception Fuel_meter.Exceeded ->
+      (* a value walk (a native rendering or comparing) ran out inside this run *)
+      ctx.deferring <- saved;
+      exhaust ctx
   | exception exn ->
       ctx.deferring <- saved;
       raise exn

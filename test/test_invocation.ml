@@ -270,7 +270,8 @@ let fueled ?budget ctx store source =
   Eval.with_invocation ~coverage:false ?fuel:budget ctx (fun invocation ->
       let outcome =
         match Eval.run_expr ctx call with
-        | Ok value -> Value.show value
+        (* rendering the finished result is outside the budget, as it is for the CLI *)
+        | Ok value -> Fuel_meter.unmetered (fun () -> Value.show value)
         | Error error -> Diag.code_or_uncoded (Runtime_err.to_diag error)
       in
       (outcome, Eval.fuel_used invocation))
@@ -390,7 +391,7 @@ let test_fuel_ignores_memo_warmth () =
 
 let test_fuel_charges_native_payloads () =
   let store, ctx = prepared "fuel-native" "" in
-  let small = snd (fueled ctx store "text.length(\"ab\")") in
+  let small = snd (fueled ctx store "text.length(\"\")") in
   let big = String.make 6400 'x' in
   let large = snd (fueled ctx store (Printf.sprintf "text.length(\"%s\")" big)) in
   (* 6400 argument bytes are 100 units; the Int result is free *)
@@ -399,7 +400,7 @@ let test_fuel_charges_native_payloads () =
   (* 12800 argument bytes (200) and a 12800-byte result (200) *)
   Alcotest.(check int)
     "argument and result bytes are charged"
-    (concat "text.concat(\"ab\", \"cd\")" + 400)
+    (concat "text.concat(\"\", \"\")" + 400)
     (concat (Printf.sprintf "text.concat(\"%s\", \"%s\")" big big))
 
 let test_fuel_exhaustion_is_sticky () =
@@ -464,6 +465,36 @@ let test_fuel_bounds_deep_natives () =
   Alcotest.(check (pair string int))
     "and under its exact budget" ("false", cost)
     (fueled ~budget:cost ctx store unequal);
+  (* walks outside any run draw on the budget too: the scheduler rendering a task result, and exact
+     enumeration comparing an observed value *)
+  let scheduled =
+    expression store
+      "async.scope(fn () -> { let a = async.spawn(fn () -> dbl(L, 40)); let _ = async.await(a); 0 \
+       })"
+  in
+  let code =
+    Eval.with_invocation ~fuel:100_000 ctx (fun _ -> failure (Round_robin.run_expr ctx scheduled))
+  in
+  Alcotest.(check string) "scheduler rendering" "E0919" code;
+  let infer ?fuel run source =
+    let model = expression store source in
+    Eval.with_invocation ?fuel ctx (fun _ ->
+        match run (Eval.expr_state model) with
+        | Ok _ -> "posterior"
+        | Error diagnostics -> String.concat "," (List.map Diag.code_or_uncoded diagnostics))
+  in
+  Alcotest.(check string)
+    "exact observe comparison" "E0919"
+    (infer ~fuel:100_000
+       (fun state -> Infer_dist.enumerate_v1 ctx state)
+       "{ let t = dbl(L, 40); `op:observe`(Categorical([mk-pair(t, 1.0)]), t); 1 }");
+  (* unbounded, a value no one renders is never walked *)
+  Alcotest.(check string)
+    "unbounded drops unrendered values" "posterior"
+    (infer
+       (fun state -> Infer_dist.likelihood_weighting_v1 ctx ~seed:1 ~samples:20 (fun () -> state))
+       "{ let c = `op:sample`(Bernoulli(0.5)); `op:observe`(Bernoulli(1.0), c); if c then L else \
+        dbl(L, 40) }");
   (* a small shared value still renders, and pays for its expanded size *)
   let small, cost = fueled ctx store "text.length(debug.inspect(dbl(L, 8)))" in
   Alcotest.(check (pair string int))
@@ -582,8 +613,7 @@ let suite =
       test_fuel_exhaustion_is_sticky;
     Alcotest.test_case "exhaustion never retries an effect" `Quick
       test_fuel_does_not_retry_side_effects;
-    Alcotest.test_case "deep natives pay for expanded size first" `Quick
-      test_fuel_bounds_deep_natives;
+    Alcotest.test_case "every value walk draws on the budget" `Quick test_fuel_bounds_deep_natives;
     Alcotest.test_case "wrapped exhaustion stays E0919" `Quick test_fuel_survives_nested_drivers;
     Alcotest.test_case "work outside runs is charged and never raises" `Quick test_fuel_outside_runs;
   ]

@@ -82,12 +82,12 @@ let unit_v = VTuple []
     escaped like source; constructors print as [Name] or [Name(arg, ...)]; non-literal values print
     as bracketed placeholders. *)
 let rec show value =
-  Walk_meter.tick 1;
+  Fuel_meter.tick 1;
   match value with
   | VInt i -> string_of_int i
   | VReal r -> Printer.real_repr r
   | VText s ->
-      Walk_meter.tick (String.length s);
+      Fuel_meter.tick (String.length s);
       "\"" ^ Printer.escape_text s ^ "\""
   | VHash hash -> "#" ^ Hash.to_hex hash
   | VSecret _ -> "<secret redacted>"

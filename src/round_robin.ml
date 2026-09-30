@@ -191,7 +191,8 @@ let control_configuration = function
   | Fork_schedule { trace; decision; chosen } ->
       Ok (scheduler_version, Schedule_control.Fork { trace; decision; chosen })
 
-let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed initial_state =
+let run_state_global_unguarded ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed
+    initial_state =
   if bounds.max_tasks <= 0 then
     Error (Run_error (Runtime_err.Scheduler_error "task bound must be positive"))
   else if bounds.max_decisions <= 0 then
@@ -1058,6 +1059,16 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed i
                 metrics_after_close;
               },
               schedule )
+
+(* RT.1: the scheduler renders and compares task values outside any evaluator run; a walk that runs
+   out of fuel there stops the whole run with E0919 *)
+let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed initial_state =
+  match
+    run_state_global_unguarded ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed
+      initial_state
+  with
+  | result -> result
+  | exception Fuel_meter.Exceeded -> Error (Run_error (Eval.fuel_error ctx))
 
 let run_state ctx ?(policy = Concurrency_contract.default_failure_policy) ?(bounds = default_bounds)
     initial_state =

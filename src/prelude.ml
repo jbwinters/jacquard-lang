@@ -311,11 +311,10 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
              (Printf.sprintf "%s expects two reals, got %s" name
                 (String.concat ", " (List.map Value.show args))))
   in
-  let optional ?deep name native =
+  let optional name native =
     match lookup_hash store ~kind:Resolve.KTerm name with
     | Error _ -> () (* prelude without this layer *)
-    | Ok h ->
-        Eval.register_builtin ctx h (Value.VTrustedBuiltin (Trusted_builtin.make ?deep name native))
+    | Ok h -> Eval.register_builtin ctx h (Value.VTrustedBuiltin (Trusted_builtin.make name native))
   in
   let optional_internal name native =
     match Store.lookup_internal_kind store name Resolve.KTerm with
@@ -734,11 +733,11 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
               | args -> type_err "code.un-form" args)
       | _ -> ())
   | _ -> ());
-  optional ~deep:true "code.eq?" (fun args ->
+  optional "code.eq?" (fun args ->
       match args with
       | [ Value.VCode a; Value.VCode b ] -> Ok (vbool (Form.equal_ignoring_meta a b))
       | args -> type_err "code.eq?" args);
-  optional ~deep:true "code.diff" (fun args ->
+  optional "code.diff" (fun args ->
       match args with
       | [ Value.VCode a; Value.VCode b ] ->
           let ds = Diff.form_divergences ~path:"log" a b in
@@ -751,21 +750,21 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
                        (fun { Diff.path; a; b } -> Printf.sprintf "at %s: - %s + %s" path a b)
                        ds)))
       | args -> type_err "code.diff" args);
-  optional ~deep:true "code.render" (fun args ->
+  optional "code.render" (fun args ->
       match args with
       | [ Value.VCode form ] -> Ok (Value.VText (Printer.print_compact form))
       | args -> type_err "code.render" args);
-  optional ~deep:true "code.hash" (fun args ->
+  optional "code.hash" (fun args ->
       match args with
       | [ Value.VCode form ] -> Ok (Value.VHash (Hash.of_string (Printer.print_compact form)))
       | args -> type_err "code.hash" args);
   (* pmf : (distribution a, a) -> real and support : distribution a -> list (pair a real)
      (W4.1/W4.4); native implementations over the recognized constructors *)
-  optional ~deep:true "debug.inspect" (fun args ->
+  optional "debug.inspect" (fun args ->
       match args with
       | [ v ] -> Ok (Value.VText (Value.show v))
       | args -> type_err "debug.inspect" args);
-  optional ~deep:true "pmf" (fun args ->
+  optional "pmf" (fun args ->
       match args with
       | [ dv; v ] ->
           Result.bind (Infer_dist.dist_of_value ctx dv) (fun d ->

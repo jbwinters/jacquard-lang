@@ -125,23 +125,22 @@ val fuel_model : string
     terminal state included); for an operation, one unit per continuation frame walked to reach its
     handler or the root; for a resumption, one unit per captured frame reinstalled; for a native
     builtin or granted root handler, [text bytes / 64] units over its direct arguments and again
-    over its result, except that a deep native (one that renders, hashes, or compares a whole value
-    or code form) first pays [expanded nodes and bytes / 64] over its arguments, measured with an
-    early stop at the remaining allowance. A memoized top-level term charges its isolated sub-run's
-    cost the first time an invocation reaches it, whether or not the memo was already warm. *)
+    over its result; and for rendering, printing, or comparing a value or code form anywhere in the
+    invocation (a native, a driver, the evaluator), [nodes and text bytes walked / 64] units,
+    charged as the walk proceeds by {!Fuel_meter}. A memoized top-level term charges its isolated
+    sub-run's cost the first time an invocation reaches it, whether or not the memo was already
+    warm. *)
 
 val fuel_used : invocation -> int
 (** [fuel_used invocation] is the number of {!fuel_model} units charged so far in [invocation]. *)
 
 val fuel_exhausted : ctx -> bool
-(** [fuel_exhausted ctx] holds once the active invocation on [ctx] has run out of fuel. Drivers use
+(** [fuel_exhausted ctx] holds once the active bounded invocation has run out of fuel. Drivers use
     it to recognise exhaustion however a native or nested driver wrapped the error. *)
 
-val charge_walk : ctx -> Value.t list -> (unit, Runtime_err.t) result
-(** [charge_walk ctx values] charges, before a driver renders, keys, or compares [values] as whole
-    structures, the fuel a deep native would pay for them: expanded nodes and text bytes / 64,
-    measured with an early stop. Exhaustion is returned (and the invocation becomes exhausted)
-    instead of the walk running. *)
+val fuel_error : ctx -> Runtime_err.t
+(** [fuel_error ctx] is the E0919 error for the active invocation's budget, for a driver that
+    catches {!Fuel_meter.Exceeded} from a value walk outside any run. *)
 
 val fuel_budget : invocation -> int option
 (** [fuel_budget invocation] is the budget [invocation] was started with, if bounded. *)

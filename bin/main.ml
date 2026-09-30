@@ -273,12 +273,24 @@ let report_fuel invocation =
           Printf.eprintf "fuel: %d of %d unit(s) used (%s)\n%!" (Eval.fuel_used invocation) budget
             Eval.fuel_model)
 
+(* RT.1: rendering a finished result is outside the budget; a value walk outside any run that
+   still escapes a driver is reported as the E0919 it is rather than as an internal error *)
+let unmetered_print text = Fuel_meter.unmetered (fun () -> print_endline (text ()))
+
+let fuel_guard ctx body =
+  match body () with
+  | code -> code
+  | exception Fuel_meter.Exceeded ->
+      print_runtime_error (Eval.fuel_error ctx);
+      exit_runtime
+
 let run_program ~fuel ~store ~ctx ~allows ~seed ~infer_cache ~dry_run ~schedule_record
     ~requested_mode ~walk =
   (* one invocation owns this run's grants and Once resumptions; run never reads
                  coverage, so it skips the per-reference bookkeeping (PF.2 phase 2) *)
   Eval.with_invocation ~coverage:false ?fuel ctx @@ fun invocation ->
   report_fuel invocation;
+  fuel_guard ctx @@ fun () ->
   let seed =
     (* OS-entropy seeded unless pinned; --seed makes sampling runs reproducible (SL.7) *)
     match seed with
@@ -358,7 +370,7 @@ let run_program ~fuel ~store ~ctx ~allows ~seed ~infer_cache ~dry_run ~schedule_
                     in
                     match execution with
                     | Ok v ->
-                        print_endline (Value.show v);
+                        unmetered_print (fun () -> Value.show v);
                         Ok ()
                     | Error err ->
                         runtime_failure := Some err;
@@ -805,7 +817,7 @@ let print_classified ~sampled ~metadata (c : Infer_dist.classified) =
   match Infer_dist.classified_to_result ~sampled c with
   | Error ds -> print_diags ds
   | Ok posterior ->
-      print_endline (Infer_dist.show_posterior posterior);
+      unmetered_print (fun () -> Infer_dist.show_posterior posterior);
       if metadata then print_endline ("# " ^ Infer_dist.show_metadata c.metadata);
       ok
 
@@ -815,6 +827,7 @@ let infer_enumerate_cmd file prelude max_branches metadata fuel syntax =
   | Ok (store, ctx) -> (
       Eval.with_invocation ?fuel ctx @@ fun invocation ->
       report_fuel invocation;
+      fuel_guard ctx @@ fun () ->
       match load_model store ~syntax ~file with
       | Error ds -> print_diags ds
       | Ok model -> (
@@ -831,6 +844,7 @@ let infer_lw_cmd file prelude seed samples metadata fuel syntax =
   | Ok (store, ctx) -> (
       Eval.with_invocation ?fuel ctx @@ fun invocation ->
       report_fuel invocation;
+      fuel_guard ctx @@ fun () ->
       match load_model store ~syntax ~file with
       | Error ds -> print_diags ds
       | Ok model -> (

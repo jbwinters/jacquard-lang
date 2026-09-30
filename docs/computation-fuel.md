@@ -35,29 +35,31 @@ a non-negative integer, and zero refuses the first transition.
 
 ## 2. The fuel-v1 cost model
 
-Every debit is made before the work it pays for:
+Fuel is counted by one process-wide meter (`Fuel_meter`) in fine units, 64 to
+a fuel unit, so byte-sized work is charged exactly. Every debit is made before
+the work it pays for, except that a walk is charged as it proceeds:
 
 | work | units |
 |---|---|
 | one evaluator machine state visited, the final (terminal) state included | 1 |
 | performing an operation | 1 per continuation frame walked to its handler, or to the root |
 | resuming a continuation (Multi or Once) | 1 per captured frame reinstalled, including resumptions a driver (inference, the scheduler, a host worker) makes outside the machine |
-| a native builtin or granted root handler | `text bytes / 64` over its direct arguments, then again over its result |
-| a deep native (`debug.inspect`, `code.render`, `code.hash`, `code.eq?`, `code.diff`, `pmf`) | `nodes and text bytes walked / 64`, metered while it runs and never past the remaining allowance |
-| an inference driver reaching a branch's or sample's final value | `expanded nodes and bytes / 64` of that value, before the driver keys it by its rendering |
+| a native builtin or granted root handler | 1/64 per text byte of its direct arguments, then of its result |
+| rendering, printing or comparing a value or code form, anywhere in the invocation | 1/64 per node and per text byte walked |
 | reaching a memoized top-level term | the cost of the sub-run that computed it, once per invocation (§3) |
 
-The ordinary native measure counts only the text a native directly receives or
-returns; it does not look inside tuples, constructors or code, so measuring is
-constant work per value. A native that walks a whole value or code form is
-different: sharing can make the expanded structure exponentially larger than
-what building it cost, and the walk does work in proportion to the part it
-visits. Such a native is marked deep and runs under a walk meter that value
-rendering, form printing and form comparison tick per node and text byte. It is
-allowed at most the remaining budget's worth of walking and pays for exactly
-what it walked, so a huge shared value exhausts the budget instead of being
-walked, while a comparison that stops at the first node stays cheap. Integer
-division rounds down, and each charge is computed separately.
+The native measure counts only the text a native directly receives or returns;
+it does not look inside tuples, constructors or code, so measuring is constant
+work per value. Walking a whole value is different: sharing can make the
+expanded structure exponentially larger than what building it cost. So value
+rendering (`Value.show`), code printing and form comparison tick the meter per
+node and text byte wherever they run: in a native such as `debug.inspect`,
+`code.render`, `code.eq?` or `pmf`, in the evaluator building a diagnostic, or in
+a driver keying inference results or rendering task results. A walk stops the
+moment it passes the budget, so a huge shared value exhausts the budget
+instead of being walked, and a comparison that stops at the first node stays
+cheap. The units an invocation reports are its fine units rounded up, so a run
+completes under exactly the budget reported as its cost.
 
 Scheduling decisions, schedule traces, support sizes, wall-clock time, memory
 and grants are not fuel. They keep their own bounds: `--max-decisions`,
@@ -109,6 +111,10 @@ skips a failed branch therefore cannot turn exhaustion into a value.
   outside a run: a driver applying one gets a state whose first step applies
   it. A native that caught exhaustion from a nested run cannot
   replace it with its own result or error.
+- A walk that runs out raises `Fuel_meter.Exceeded`. A run turns it into E0919;
+  the scheduler and the inference drivers return E0919 for a walk of their
+  own; and the CLI reports an escaped one as E0919 rather than as an internal
+  error.
 - Root effects that ran before exhaustion are not retried or undone.
   Invocation teardown runs exactly once as usual.
 
@@ -122,7 +128,7 @@ With `--fuel`, the CLI prints one line to stderr when the invocation ends,
 whether it finished or ran out:
 
 ```text
-fuel: 112 of 112 unit(s) used (fuel-v1)
+fuel: 123 of 123 unit(s) used (fuel-v1)
 ```
 
 The line always names the model, so budgets are never compared across models.
@@ -148,21 +154,24 @@ entry points. A host consumer bounds an invocation with
   execution must use the interpreter.
 - fuel-v1 bounds computation, not allocation: a bounded run can still allocate
   a large value within its budget. Allocation limits are RT.2.
-- The ordinary native measure is shallow by design (§2). A new prelude native
-  that walks whole values must be marked deep, and a driver that renders or
-  keys whole values must call `Eval.charge_walk` first. A host-registered
-  native (`Eval.register_builtin`) cannot be marked deep; the host owns its
-  cost.
+- The native measure is shallow by design (§2). A native that walks values
+  itself, without the shared walkers, must tick `Fuel_meter` as it goes. A
+  host-registered native (`Eval.register_builtin`) owns its own cost beyond the
+  measure.
 - A native's result is paid for after it is built. The result is bounded by
   the native's inputs, so the overshoot is bounded, but a single native call
   can build a result larger than the remaining allowance before exhaustion.
 - A few natives do superlinear work in their charged size: `code.diff`
-  compares subforms at every level (quadratic in form size), and `support` on a
-  `UniformInt` materializes up to its 10,000-entry cap for a small charge.
+  compares subforms at every level (it is charged for every comparison, so it
+  stays bounded), and `support` on a `UniformInt` materializes up to its
+  10,000-entry cap for a small charge.
 - Accounting also runs in unbounded mode, since memoized costs must not depend
-  on whether a budget is present: transitions update a counter, deep natives
-  tick the walk meter, and an inference driver measures each terminal value
-  before rendering it (roughly doubling that rendering).
-- Rendering outside the evaluator is not fuel: the CLI printing a final value,
-  and a diagnostic that shows a value (a match failure, or a native's type
-  error on an ill-typed call), happen outside the budget.
+  on whether a budget is present; it adds a counter update per transition and
+  per walked node, and nothing asymptotic.
+- Rendering a finished result is outside the budget: the CLI prints final
+  values and posteriors unmetered. Walks during the invocation, including a
+  diagnostic that shows a value, are metered: a huge ill-typed argument can
+  exhaust the budget before its type error is rendered.
+- The meter is process-wide. Walks that happen while a bounded invocation is
+  active draw on its budget whichever evaluator they belong to, and an
+  invocation nested on another evaluator stays within the outer ceiling.
