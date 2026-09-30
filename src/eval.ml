@@ -113,7 +113,38 @@ type mutable_graph_snapshot = {
           ownership must be revalidated at every memo/native return boundary. *)
 }
 
-type mutable_snapshot = { snapshot_root : Value.t; snapshot_graph : mutable_graph_snapshot }
+(* fuel-v1 cost of one memoized term's isolated sub-run (RT.1): its own units, the memoized terms
+   it reached, and the invocation epoch in which it was last charged *)
+type memo_charge = {
+  mutable segments : (int * memo_charge) list;
+      (** in the order the cold sub-run charged them: its own fine units before each memoized term
+          it reached, and that term *)
+  mutable tail : int;  (** its own fine units after the last memoized term *)
+  mutable charged_epoch : int;
+}
+
+(* memo sub-runs in progress, innermost first, across every evaluator: a native that re-enters
+   another evaluator inside a sub-run still attributes that evaluator's memoized terms to it *)
+type memo_frame = {
+  frame_start : int;  (** the meter's fine count when the sub-run's recorded cost began *)
+  mutable completed : (int * int * memo_charge) list;
+      (** memoized terms reached, as (fine count at start, at end, term), most recent first *)
+}
+
+(* Hand the terms a sub-run or replay completed before it failed to the enclosing frame, so the
+   enclosing term's record still names them (a cold run of it would have left them paid). *)
+let hoist_completed frames completed =
+  match frames with parent :: _ -> parent.completed <- completed @ parent.completed | [] -> ()
+
+let memo_frames : memo_frame list ref = ref []
+
+type mutable_snapshot = {
+  snapshot_root : Value.t;
+  snapshot_graph : mutable_graph_snapshot;
+  memo_charge : memo_charge option;
+      (** the memo entry's cost record, kept here so a warm hit needs no further lookup *)
+}
+
 type native_snapshot_entry = { snapshot : mutable_snapshot; mutable last_used : int }
 type native_snapshot_lru = { entries : native_snapshot_entry option array; mutable clock : int }
 type root_observer = { on_operation : Hash.t -> unit; on_output : Hash.t -> string -> unit }
@@ -173,11 +204,32 @@ type ctx = {
   audit_context_id : int;
   mutable next_audit_run_id : int;
   mutable invocation : invocation option;  (** the active invocation, if any; never nested *)
+  mutable fuel_limit : int option;
+      (** the active invocation's budget, for diagnostics. The counter and ceiling themselves are
+          the process-wide {!Fuel_meter} (RT.1), counted even when unbounded so a memoized term's
+          cost is known if a later invocation is bounded *)
+  memo_cost : (Hash.t, memo_charge) Hashtbl.t;
+      (** fine fuel units of each memoized term's isolated sub-run, split into its own work and the
+          memoized terms it reached, so a warm memo charges what a cold one would *)
+  mutable deferring : bool;
+      (** set while a driver applies a value outside any run: a debit that would pass the budget is
+          then deferred to [fuel_pending] instead of raising, so exhaustion always surfaces through
+          a run's result *)
+  mutable fuel_pending : int;
+      (** resumption units incurred while a driver built a state outside the machine; charged when
+          the next run starts, inside its error channel *)
 }
 
 and invocation = {
   mutable active : bool;
   mutable teardown : (unit -> unit) list;  (** most recent first *)
+  fuel_start : int;  (** the meter's fine count when the invocation began *)
+  mutable fuel_final : int option;  (** units used, frozen when the invocation ends *)
+  saved_ceiling : int;  (** the meter ceiling to restore when the invocation ends *)
+  saved_budget : int;  (** the reported budget to restore when the invocation ends *)
+  saved_epoch : int;  (** the memo-charging epoch to restore when the invocation ends *)
+  saved_frames : memo_frame list;  (** memo sub-runs of an enclosing invocation *)
+  budget : int option;
 }
 
 let next_audit_context_id = Atomic.make 0
@@ -211,6 +263,10 @@ let make_ctx store =
     audit_context_id = Atomic.fetch_and_add next_audit_context_id 1;
     next_audit_run_id = 0;
     invocation = None;
+    fuel_limit = None;
+    memo_cost = Hashtbl.create 64;
+    deferring = false;
+    fuel_pending = 0;
   }
 
 (** [store ctx] returns the immutable store handle used for name and declaration lookup. *)
@@ -372,20 +428,88 @@ let on_teardown invocation callback =
   else invocation.teardown <- callback :: invocation.teardown
 
 let invocation_active ctx = Option.is_some ctx.invocation
+let fuel_model = "fuel-v1"
+let fine_per_unit = 64
 
-let with_invocation ?coverage ctx body =
+(* fine units to whole fuel units, rounding up, so a run completes under exactly the budget reported
+   as its cost *)
+let units_of_fine fine = (fine + fine_per_unit - 1) / fine_per_unit
+
+let fuel_used invocation =
+  match invocation.fuel_final with
+  | Some used -> used
+  | None -> units_of_fine (!Fuel_meter.used - invocation.fuel_start)
+
+let fuel_budget invocation = invocation.budget
+let fuel_exhausted _ctx = Fuel_meter.exhausted ()
+
+let reset_fuel ctx =
+  ctx.fuel_limit <- None;
+  ctx.fuel_pending <- 0;
+  ignore ctx
+
+let with_invocation ?coverage ?fuel ctx body =
   if Option.is_some ctx.invocation then
     invalid_arg "Eval.with_invocation: an invocation is already active on this evaluator";
+  (match fuel with
+  | Some limit when limit < 0 -> invalid_arg "Eval.with_invocation: fuel must be non-negative"
+  | Some _ | None -> ());
   let saved_coverage = ctx.track_coverage
   and saved_observer = ctx.root_observer
   and saved_handlers = Hashtbl.copy ctx.root_handlers in
-  let invocation = { active = true; teardown = [] } in
+  let invocation =
+    {
+      active = true;
+      teardown = [];
+      fuel_start = !Fuel_meter.used;
+      fuel_final = None;
+      budget = fuel;
+      saved_ceiling = !Fuel_meter.ceiling;
+      saved_budget = !Fuel_meter.budget;
+      saved_epoch = !Fuel_meter.epoch;
+      saved_frames = !memo_frames;
+    }
+  in
   Option.iter (fun enabled -> ctx.track_coverage <- enabled) coverage;
+  reset_fuel ctx;
+  (* memo frames are kept: an invocation a native opens inside a memo sub-run (even one running
+     outside any invocation) still records what it reaches as that sub-run's dependencies *)
+  if !Fuel_meter.depth = 0 then (
+    incr Fuel_meter.next_epoch;
+    Fuel_meter.epoch := !Fuel_meter.next_epoch);
+  incr Fuel_meter.depth;
+  (* an invocation on another evaluator inside a bounded one stays within the outer ceiling *)
+  Option.iter
+    (fun limit ->
+      let start = !Fuel_meter.used in
+      let own =
+        if limit > (max_int - start) / fine_per_unit then max_int
+        else start + (limit * fine_per_unit)
+      in
+      Fuel_meter.ceiling := min own invocation.saved_ceiling;
+      Fuel_meter.budget := limit;
+      ctx.fuel_limit <- Some limit)
+    fuel;
   ctx.invocation <- Some invocation;
   (* runs every callback exactly once, most recent first, then restores the configuration the
      invocation borrowed; returns the first callback exception *)
   let finish () =
     invocation.active <- false;
+    invocation.fuel_final <- Some (units_of_fine (!Fuel_meter.used - invocation.fuel_start));
+    (* an invocation nested inside a bounded one that used up the outer allowance leaves the outer
+       one exhausted: its sticky state is never cleared by an inner teardown *)
+    if
+      Fuel_meter.exhausted () && invocation.saved_ceiling >= 0
+      && !Fuel_meter.used >= invocation.saved_ceiling
+      && invocation.saved_ceiling < max_int
+    then (
+      Fuel_meter.ceiling := invocation.saved_ceiling;
+      Fuel_meter.trip ())
+    else Fuel_meter.ceiling := invocation.saved_ceiling;
+    Fuel_meter.budget := invocation.saved_budget;
+    decr Fuel_meter.depth;
+    Fuel_meter.epoch := invocation.saved_epoch;
+    memo_frames := invocation.saved_frames;
     let callbacks = invocation.teardown in
     invocation.teardown <- [];
     let first = ref None in
@@ -399,6 +523,7 @@ let with_invocation ?coverage ctx body =
     Hashtbl.iter (Hashtbl.replace ctx.root_handlers) saved_handlers;
     ctx.root_observer <- saved_observer;
     ctx.track_coverage <- saved_coverage;
+    reset_fuel ctx;
     ctx.invocation <- None;
     !first
   in
@@ -459,6 +584,58 @@ let rt e = raise (Rt e)
 let rt_type fmt = Printf.ksprintf (fun m -> rt (Runtime_err.Type_error m)) fmt
 let rt_arity fmt = Printf.ksprintf (fun m -> rt (Runtime_err.Arity m)) fmt
 
+(* --- computation fuel (RT.1, cost model fuel-v1; see docs/computation-fuel.md) --- *)
+
+(* the refused debit spends the remainder: an exhausted invocation always reports its whole budget
+   used, however large the refused charge was. No debit can pass the negative ceiling that follows,
+   which keeps [charge] to one comparison. *)
+let mark_exhausted _ctx = Fuel_meter.trip ()
+
+let fuel_error ctx =
+  Runtime_err.Fuel_exhausted
+    { model = fuel_model; limit = Option.value ctx.fuel_limit ~default:!Fuel_meter.budget }
+
+let exhaust ctx =
+  mark_exhausted ctx;
+  rt (fuel_error ctx)
+
+(* A refused debit exhausts the invocation at once. Inside a run it raises; outside any run (a
+   driver resuming a continuation) the next run raises it as it starts. *)
+let refuse ctx =
+  if ctx.deferring then (
+    mark_exhausted ctx;
+    ctx.fuel_pending <- 1)
+  else exhaust ctx
+
+(** [charge_fine ctx fine] debits [fine] fine units before the work they pay for. A debit that would
+    pass the ceiling is refused and exhausts the invocation, which spends the remaining allowance.
+*)
+let[@inline] charge_fine ctx fine =
+  let used = !Fuel_meter.used + fine in
+  if used > !Fuel_meter.ceiling then refuse ctx else Fuel_meter.used := used
+
+(** [charge ctx units] debits whole fuel units. *)
+let[@inline] charge ctx units = charge_fine ctx (units * fine_per_unit)
+
+(* [charge_outside ctx units] debits work a driver does outside any run (resuming a captured
+   continuation), deferring a refusal to the next run *)
+let charge_outside ctx units =
+  let saved = ctx.deferring in
+  ctx.deferring <- true;
+  charge ctx units;
+  ctx.deferring <- saved
+
+(* Text bytes held directly by a native's argument or result. Nothing inside tuples, constructors,
+   or code is traversed, so measuring is O(1) per value. *)
+let payload_units = function VText text -> String.length text | _ -> 0
+
+let rec payload_total total = function
+  | [] -> total
+  | value :: rest -> payload_total (total + payload_units value) rest
+
+let[@inline] charge_payload ctx bytes = if bytes > 0 then charge_fine ctx bytes
+let charge_native ctx values = charge_payload ctx (payload_total 0 values)
+
 (* ------------------------------------------------------------------ *)
 (* Pattern matching (plan W2.3)                                        *)
 (* ------------------------------------------------------------------ *)
@@ -469,7 +646,10 @@ let lit_matches (l : Kernel.lit) (v : Value.t) =
   | Kernel.LReal a, VReal b ->
       (* align with canon: nan matches nan, and -0.0 matches +0.0 *)
       Float.compare a b = 0 || (a = 0.0 && b = 0.0)
-  | Kernel.LText a, VText b -> String.equal a b
+  | Kernel.LText a, VText b ->
+      (* comparing text pays for its bytes like any other value comparison (RT.1) *)
+      Fuel_meter.tick (String.length a);
+      String.equal a b
   | _ -> false
 
 (** [match_pat v p env] extends [env] with [p]'s bindings if [v] matches, or returns [None].
@@ -540,6 +720,7 @@ let op_value ctx ~trusted h =
 (* Live splice expressions of a quote payload, depth-first left-to-right (quasiquote levels
    as in Kernel/Canon: nested quotes raise, unquotes lower, level-0 unquotes are live). *)
 let rec live_splices ?(level = 0) (f : Form.t) : Kernel.expr list =
+  Fuel_meter.tick 1;
   if f.Form.head = "unquote" && level = 0 then
     match f.Form.args with
     | [ Form.F splice ] -> (
@@ -568,6 +749,7 @@ let substitute_splices (payload : Form.t) (values : Value.t list) : Form.t =
     | [] -> rt_type "splice value queue exhausted (internal)"
   in
   let rec go ?(level = 0) (f : Form.t) : Form.t =
+    Fuel_meter.tick 1;
     if f.Form.head = "unquote" && level = 0 then next ()
     else
       let level =
@@ -589,6 +771,8 @@ let stamp_scope_mark (payload : Form.t) : Form.t =
   incr scope_counter;
   let mark = Meta.Sym (Printf.sprintf "q%d" !scope_counter) in
   let rec go (f : Form.t) =
+    (* the stamp rebuilds, and so unshares, every node of a spliced payload: a metered walk *)
+    Fuel_meter.tick 1;
     let existing =
       match Meta.find Meta.key_scopes f.Form.meta with Some (Meta.List l) -> l | _ -> []
     in
@@ -842,8 +1026,9 @@ let snapshot_mutable_graph root =
   value root;
   { cells = !cells; once_states = !once_states; contains_task = !contains_task }
 
-let make_mutable_snapshot ctx root =
+let make_mutable_snapshot ?memo_charge ctx root =
   {
+    memo_charge;
     snapshot_root = root;
     snapshot_graph =
       (if needs_mutable_recheck ctx root then snapshot_mutable_graph root
@@ -869,6 +1054,9 @@ let atomic_non_task_value = function
       false
 
 let reject_recovery_result_value ctx root =
+  (* a container already visited in this scan is not walked again, so a shared graph costs its
+     size, not its expanded size (RT.1) *)
+  let visited = Physical_seen.create 16 in
   let rec validate value =
     match value with
     | VInt _ | VReal _ | VText _ | VHash _ | VSecret _ | VConstructor _ | VOp _ | VBuiltin _
@@ -895,12 +1083,17 @@ let reject_recovery_result_value ctx root =
     | VClosure _ | VResume _ | VOnceResume _ ->
         reject_recovery_state ctx (SApply (value, []));
         false
-    | (VTuple items | VCon { args = items; _ }) as container ->
+    | (VTuple items | VCon { args = items; _ }) as container -> (
         if Physical_cache.mem ctx.recovery_immutable_clean container then true
         else
-          let immutable = List.for_all validate items in
-          if immutable then Physical_cache.replace ctx.recovery_immutable_clean container ();
-          immutable
+          let key = Obj.repr container in
+          match Physical_seen.find_opt visited key with
+          | Some immutable -> immutable
+          | None ->
+              let immutable = List.for_all validate items in
+              Physical_seen.replace visited key immutable;
+              if immutable then Physical_cache.replace ctx.recovery_immutable_clean container ();
+              immutable)
   in
   ignore (validate root)
 
@@ -944,7 +1137,8 @@ let replace_native_snapshot ctx root index =
   lru.entries.(index) <-
     Some
       {
-        snapshot = { snapshot_root = root; snapshot_graph = snapshot_mutable_graph root };
+        snapshot =
+          { snapshot_root = root; snapshot_graph = snapshot_mutable_graph root; memo_charge = None };
         last_used = lru.clock;
       }
 
@@ -970,15 +1164,55 @@ let check_native_argument ctx root =
         reject_recovery_state ctx (SApply (root, []));
         replace_native_snapshot ctx root index)
 
+(* A native that re-entered the evaluator and ran out cannot replace the exhaustion with its own
+   result or error *)
+(* Only inside an invocation: outside one there is no teardown to restore the meter, and no
+   enclosing budget to exhaust. *)
+let note_returned_exhaustion ctx = function
+  | Error error when Runtime_err.is_fuel_exhausted error && !Fuel_meter.depth > 0 ->
+      mark_exhausted ctx
+  | Ok _ | Error _ -> ()
+
+let charge_native_result ctx result =
+  if Fuel_meter.exhausted () then Error (fuel_error ctx)
+  else
+    match result with
+    | Ok value ->
+        charge_payload ctx (payload_units value);
+        result
+    | Error error when Runtime_err.is_fuel_exhausted error ->
+        (* a native reporting exhaustion (say, of a nested invocation with its own budget) left
+           its work incomplete, so everything depending on it is incomplete: the enclosing
+           invocation is exhausted too, and every driver's sticky check sees it *)
+        note_returned_exhaustion ctx result;
+        result
+    | Error _ -> result
+
 let invoke_untrusted_native ctx fn native args kont =
+  (* a root observer or an earlier native may have exhausted the invocation since this step was
+     charged: no native or root handler runs after exhaustion *)
+  if Fuel_meter.exhausted () then exhaust ctx;
   let invocation_roots = [ fn; VTuple args; VResume kont ] in
   List.iter (prepare_native_argument ctx) invocation_roots;
+  charge_native ctx args;
   let result = native args in
+  (* a native that ran out of fuel inside a nested run, or returned a nested invocation's
+     exhaustion, cannot turn that into another failure, not even one found by revalidating what
+     it mutated *)
+  note_returned_exhaustion ctx result;
+  if Fuel_meter.exhausted () then exhaust ctx;
   List.iter (check_native_argument ctx) invocation_roots;
-  match result with Ok value -> checked_result_state ctx value kont | Error error -> rt error
+  match charge_native_result ctx result with
+  | Ok value -> checked_result_state ctx value kont
+  | Error error -> rt error
 
-let invoke_trusted_native ctx native args kont =
-  match native args with Ok value -> checked_result_state ctx value kont | Error error -> rt error
+let invoke_trusted_native ctx builtin args kont =
+  if Fuel_meter.exhausted () then exhaust ctx;
+  charge_native ctx args;
+  let result = Trusted_builtin.invoke builtin args in
+  match charge_native_result ctx result with
+  | Ok value -> checked_result_state ctx value kont
+  | Error error -> rt error
 
 let handler_covers (h : handler) op = List.exists (fun (o, _) -> Hash.equal o op) h.hops
 
@@ -995,8 +1229,9 @@ let op_mode ctx op =
     semantics; the captured resumption is inner frames + that handler frame); fall back to root
     handlers (grants); otherwise raise [Unhandled]. *)
 let perform_unchecked ctx (op : Hash.t) ~name ~effect_ (args : Value.t list) (k : kont) : state =
-  let rec split inner_rev = function
+  let rec split walked inner_rev = function
     | FHandle h :: outer when handler_covers h op ->
+        if walked > 0 then charge ctx walked;
         let captured = List.rev (FHandle h :: inner_rev) in
         let { Kernel.params; resume; obody; _ } =
           match List.find_opt (fun (o, _) -> Hash.equal o op) h.hops with
@@ -1018,9 +1253,12 @@ let perform_unchecked ctx (op : Hash.t) ~name ~effect_ (args : Value.t list) (k 
         in
         let env = Env.add resume (ref resume_value) env in
         SEval ({ h.hscope with env }, obody, outer)
-    | f :: outer -> split (f :: inner_rev) outer
+    | f :: outer -> split (walked + 1) (f :: inner_rev) outer
     | [] -> (
+        if walked > 0 then charge ctx walked;
         notify_root_operation ctx op;
+        (* the observer may have run evaluation that exhausted the invocation *)
+        if Fuel_meter.exhausted () then exhaust ctx;
         match Hashtbl.find_opt ctx.root_handlers op with
         | Some native when not ctx.capture_root_handlers ->
             invoke_untrusted_native ctx (VOp { op; name; effect_ }) native args k
@@ -1031,11 +1269,12 @@ let perform_unchecked ctx (op : Hash.t) ~name ~effect_ (args : Value.t list) (k 
                    { op; name; effect_; mode = op_mode ctx op; args; kont = List.rev inner_rev })
             else rt (Runtime_err.Unhandled { effect_; op = name }))
   in
-  split [] k
+  split 0 [] k
 
 (** Apply a function-position value to fully evaluated arguments (uncurried, decision D5): closures,
     builtins, constructors, ops (perform), and resumptions. *)
 let apply_unchecked ctx (fn : Value.t) (args : Value.t list) (k : kont) : state =
+  let charge_frames frames = charge ctx (List.length frames) in
   match fn with
   | VClosure { scope; params; body } ->
       if List.length params <> List.length args then
@@ -1064,7 +1303,7 @@ let apply_unchecked ctx (fn : Value.t) (args : Value.t list) (k : kont) : state 
                })
       | [ _ ] -> rt (Runtime_err.Unhandled { effect_ = "Async"; op = "async.scope" })
       | _ -> rt_arity "async.scope expects one thunk, got %d" (List.length args))
-  | VTrustedBuiltin builtin -> invoke_trusted_native ctx (Trusted_builtin.invoke builtin) args k
+  | VTrustedBuiltin builtin -> invoke_trusted_native ctx builtin args k
   | VConstructor { con; name; arity } ->
       if List.length args <> arity then
         rt_arity "constructor %s expects %d argument(s), got %d" name arity (List.length args)
@@ -1072,13 +1311,17 @@ let apply_unchecked ctx (fn : Value.t) (args : Value.t list) (k : kont) : state 
   | VOp { op; name; effect_ } -> perform_unchecked ctx op ~name ~effect_ args k
   | VResume frames -> (
       match args with
-      | [ v ] -> SApply (v, frames @ k)
+      | [ v ] ->
+          charge_frames frames;
+          SApply (v, frames @ k)
       | _ -> rt_arity "a resumption takes exactly one argument, got %d" (List.length args))
   | VOnceResume once -> (
       match args with
       | [ v ] -> (
           match Once_state.consume once with
-          | Some frames -> SApply (v, frames @ k)
+          | Some frames ->
+              charge_frames frames;
+              SApply (v, frames @ k)
           | None -> rt Runtime_err.Once_resumed_twice)
       | _ -> rt_arity "a resumption takes exactly one argument, got %d" (List.length args))
   | v -> rt_type "%s is not applicable" (Value.show v)
@@ -1088,7 +1331,97 @@ let apply_unchecked ctx (fn : Value.t) (args : Value.t list) (k : kont) : state 
     passed the same guard. *)
 let apply ctx fn args k =
   reject_recovery_state ctx (SApply (VTuple (fn :: args), k));
-  apply_unchecked ctx fn args k
+  match fn with
+  | VBuiltin _ | VTrustedBuiltin _ | VOp _ -> (
+      (* a native or an operation (whose root handler may perform an effect) runs only inside a
+         run: the returned state applies it as the run's first step, so its debits, its effect, its
+         failure, and exhaustion all arrive through that run's result *)
+      let scope = empty_scope in
+      match List.rev args with
+      | [] -> SApply (fn, FAppFn { args = []; scope } :: k)
+      | last :: done_rev -> SApply (last, FAppArgs { fn; done_rev; pending = []; scope } :: k))
+  | _ -> (
+      (* a driver resuming a continuation or performing an operation outside any run defers a
+         refused debit to the next run, so exhaustion is reported through that run's result rather
+         than raised from state construction *)
+      let saved = ctx.deferring in
+      ctx.deferring <- true;
+      match apply_unchecked ctx fn args k with
+      | state ->
+          ctx.deferring <- saved;
+          state
+      | exception Fuel_meter.Exceeded ->
+          (* a walk (such as rendering a diagnostic) ran out while building the state: the meter
+             is exhausted, and the next run reports it *)
+          ctx.deferring <- saved;
+          ctx.fuel_pending <- 1;
+          SApply (unit_v, k)
+      | exception exn ->
+          ctx.deferring <- saved;
+          raise exn)
+
+(* Record that memoized term [h] was reached for [units] (zero when it was already charged in this
+   invocation) and attribute it to the enclosing memo sub-run, if any. Every reached term is a
+   dependency, charged or not, so a recorded cost never depends on what this invocation had already
+   paid for. *)
+let note_memo_charge cost units =
+  match !memo_frames with
+  | frame :: _ ->
+      let now = !Fuel_meter.used in
+      frame.completed <- (now - units, now, cost) :: frame.completed
+  | [] -> ()
+
+(* A frame's record: its own fine units before each term it reached, then after the last one *)
+let segments_of_frame frame ~finished =
+  let rec go previous acc = function
+    | [] -> (List.rev acc, finished - previous)
+    | (start, stop, cost) :: rest -> go stop ((start - previous, cost) :: acc) rest
+  in
+  go frame.frame_start [] (List.rev frame.completed)
+
+(* A memo hit replays, once per invocation, exactly the charges the cold sub-run made, in the same
+   order: its own work between memoized terms, each term not yet paid in this invocation (itself
+   replayed), and its trailing work. A term becomes paid when its replay completes, so a refusal
+   part-way (say, under a nested cap) leaves exactly the terms a cold run would have finished paid. *)
+let charge_memo_hit ctx h =
+  (* terms whose replay completed during this hit, as (start, end, term), most recent first *)
+  let finished = ref [] in
+  let rec replay cost =
+    if cost.charged_epoch <> !Fuel_meter.epoch then (
+      let start = !Fuel_meter.used in
+      List.iter
+        (fun (own, dep) ->
+          charge_fine ctx own;
+          replay dep)
+        cost.segments;
+      charge_fine ctx cost.tail;
+      cost.charged_epoch <- !Fuel_meter.epoch;
+      finished := (start, !Fuel_meter.used, cost) :: !finished)
+  in
+  match Hashtbl.find_opt ctx.memo_cost h with
+  | None -> ()
+  | Some cost -> (
+      let before = !Fuel_meter.used in
+      match replay cost with
+      | () -> note_memo_charge cost (!Fuel_meter.used - before)
+      | exception exn ->
+          (* keep the outermost completed replays: a later one that started earlier contains the
+             ones it replayed *)
+          let outermost =
+            List.fold_left
+              (fun kept ((start, stop, _) as entry) ->
+                if List.exists (fun (s, e, _) -> s <= start && stop <= e) kept then kept
+                else entry :: kept)
+              [] !finished
+          in
+          hoist_completed !memo_frames
+            (List.sort (fun (a, _, _) (b, _, _) -> compare b a) outermost);
+          raise exn)
+
+(* the hot path: a warm hit already charged in this invocation, outside any memo sub-run *)
+let[@inline] memo_hit_is_paid _ctx = function
+  | Some cost -> cost.charged_epoch = !Fuel_meter.epoch && !memo_frames = []
+  | None -> false
 
 (** Resolve a store reference to a runtime value: builtins and memoized terms short-circuit; other
     terms load from the store and evaluate in an ISOLATED sub-run. Isolation is a soundness
@@ -1117,14 +1450,26 @@ let rec eval_ref ctx ~trusted (h : Hash.t) (kind : Kernel.refkind) (k : kont) : 
                   | Some snapshot
                     when snapshot.snapshot_root == v && snapshot_unchanged snapshot.snapshot_graph
                     ->
+                      if not (memo_hit_is_paid ctx snapshot.memo_charge) then charge_memo_hit ctx h;
                       SApply (v, k)
                   | Some _ | None ->
-                      let next = checked_result_state ctx v k in
-                      Hashtbl.replace ctx.evaluator_mutable_snapshots h
-                        (make_mutable_snapshot ctx v);
-                      next)
-              | Some _ | None -> checked_result_state ctx v k)
+                      charge_memo_hit ctx h;
+                      (* re-guarding a warm value is memo bookkeeping: its cost was paid when the
+                         value was computed, so a warm hit charges exactly what a cold one did *)
+                      Fuel_meter.unmetered (fun () ->
+                          let next = checked_result_state ctx v k in
+                          Hashtbl.replace ctx.evaluator_mutable_snapshots h
+                            (make_mutable_snapshot
+                               ?memo_charge:(Hashtbl.find_opt ctx.memo_cost h)
+                               ctx v);
+                          next))
+              | Some _ | None ->
+                  charge_memo_hit ctx h;
+                  Fuel_meter.unmetered (fun () -> checked_result_state ctx v k))
           | None -> (
+              (* everything from here to publishing the value is the term's recorded cost, so a
+                 warm hit charges exactly what this cold path did *)
+              let started = !Fuel_meter.used in
               match locate ctx ~trusted h with
               | {
                Store.decl = { Kernel.it = Kernel.DefTerm bindings; _ } as decl;
@@ -1143,19 +1488,39 @@ let rec eval_ref ctx ~trusted (h : Hash.t) (kind : Kernel.refkind) (k : kont) : 
                   reject_recovery_state ctx initial;
                   let saved_capture = ctx.capture_ops in
                   ctx.capture_ops <- false;
+                  let frame = { frame_start = started; completed = [] } in
+                  let saved_frames = !memo_frames in
+                  memo_frames := frame :: saved_frames;
                   let v =
-                    Fun.protect
-                      ~finally:(fun () -> ctx.capture_ops <- saved_capture)
-                      (fun () -> run_state_unchecked ctx initial)
+                    match run_state_unchecked ctx initial with
+                    | v ->
+                        ctx.capture_ops <- saved_capture;
+                        memo_frames := saved_frames;
+                        v
+                    | exception exn ->
+                        ctx.capture_ops <- saved_capture;
+                        memo_frames := saved_frames;
+                        hoist_completed saved_frames frame.completed;
+                        raise exn
+                  in
+                  let memo_charge =
+                    { segments = []; tail = 0; charged_epoch = !Fuel_meter.epoch }
                   in
                   let next = checked_result_state ctx v k in
+                  let snapshot = make_mutable_snapshot ~memo_charge ctx v in
+                  let units = !Fuel_meter.used - started in
+                  let segments, tail = segments_of_frame frame ~finished:!Fuel_meter.used in
+                  memo_charge.segments <- segments;
+                  memo_charge.tail <- tail;
+                  Hashtbl.replace ctx.memo_cost h memo_charge;
+                  note_memo_charge memo_charge units;
                   (* The isolated run has completed all closure construction and [let rec] knot
                      tying, and [checked_result_state] has traversed the finished graph. Evaluator
                      transitions never mutate a memoized graph after this point. Record ownership
                      only after publishing the exact guarded value to the public memo table. *)
                   Hashtbl.replace ctx.memo h v;
                   Hashtbl.replace ctx.evaluator_clean_memo h v;
-                  Hashtbl.replace ctx.evaluator_mutable_snapshots h (make_mutable_snapshot ctx v);
+                  Hashtbl.replace ctx.evaluator_mutable_snapshots h snapshot;
                   next
               | _ -> rt_type "hash %s is not a term" (Hash.to_hex h))))
 
@@ -1267,8 +1632,34 @@ and step_unchecked ctx (state : state) : state option =
     only rearrange validated payloads or tie a fresh recursive cell; native and untrusted memo
     boundaries validate fresh values before constructing their result states. *)
 and run_state_unchecked ctx state =
+  (* work a driver did outside any run is paid for here, inside this run's error channel; a run
+     itself never defers, even when a native started it while a driver was applying a value *)
+  let saved = ctx.deferring in
+  ctx.deferring <- false;
+  match
+    if ctx.fuel_pending > 0 then (
+      let pending = ctx.fuel_pending in
+      ctx.fuel_pending <- 0;
+      charge ctx pending);
+    run_machine ctx state
+  with
+  | value ->
+      ctx.deferring <- saved;
+      value
+  | exception Fuel_meter.Exceeded ->
+      (* a value walk (a native rendering or comparing) ran out inside this run *)
+      ctx.deferring <- saved;
+      exhaust ctx
+  | exception exn ->
+      ctx.deferring <- saved;
+      raise exn
+
+(* every machine state visited costs one unit, the terminal one included, so an exhausted invocation
+   can never deliver a value *)
+and run_machine ctx state =
+  charge ctx 1;
   match step_unchecked ctx state with
-  | Some next -> run_state_unchecked ctx next
+  | Some next -> run_machine ctx next
   | None -> (
       match state with
       | SApply (v, []) ->
@@ -1284,7 +1675,10 @@ let run_state ctx state =
 
 (** [run_expr ctx e] evaluates a resolved expression to a value. *)
 let run_expr ctx (e : Kernel.expr) : (Value.t, Runtime_err.t) result =
-  match run_state ctx (SEval (empty_scope, e, [])) with v -> Ok v | exception Rt e -> Error e
+  match run_state ctx (SEval (empty_scope, e, [])) with
+  | v -> Ok v
+  | exception Rt e -> Error e
+  | exception Fuel_meter.Exceeded -> Error (fuel_error ctx)
 
 type captured_kont = Multi_kont of ctx * Value.frame list | Once_kont of ctx * Value.t
 
@@ -1297,7 +1691,10 @@ type capture =
 
 (** [validate_state ctx state] checks a complete state for recovery markers without executing it. *)
 let validate_state ctx state =
-  match reject_recovery_state ctx state with () -> Ok () | exception Rt error -> Error error
+  match reject_recovery_state ctx state with
+  | () -> Ok ()
+  | exception Rt error -> Error error
+  | exception Fuel_meter.Exceeded -> Error (fuel_error ctx)
 
 type validated_state = Validated_state of ctx * state * mutable_graph_snapshot option
 type validated_kont = Validated_kont of ctx * Value.frame list
@@ -1363,7 +1760,8 @@ let run_state_capturing_trusted ?(capture_root_handlers = false) ctx (state : st
                 Once_kont (ctx, VOnceResume (Once_state.create ~owner:ctx.task_run kont))
           in
           Ok (COp { op; name; args; kont })
-      | exception Rt e -> Error e)
+      | exception Rt e -> Error e
+      | exception Fuel_meter.Exceeded -> Error (fuel_error ctx))
 
 (** [run_validated_state_capturing ctx state] captures a previously validated state without
     rescanning its immutable syntax. Native and memo result guards remain active. *)
@@ -1382,18 +1780,21 @@ let run_validated_state_capturing ctx (Validated_state (owner, state, _)) =
     the newly introduced value needs validation because [kont] came from a validated run. *)
 let resume_validated_state ctx kont value =
   match kont with
-  | Validated_multi_kont (Validated_kont (owner, frames)) -> (
+  | Validated_multi_kont (Validated_kont (owner, frames)) ->
       if owner != ctx then Error (foreign_evaluator_context "validated continuation")
-      else
+      else (
+        charge_outside ctx (List.length frames);
         match checked_result_state ctx value frames with
         | state -> Ok (Validated_state (owner, state, None))
-        | exception Rt error -> Error error)
+        | exception Rt error -> Error error
+        | exception Fuel_meter.Exceeded -> Error (fuel_error ctx))
   | Validated_once_kont (owner, resume) -> (
       if owner != ctx then Error (foreign_evaluator_context "validated continuation")
       else
         match apply ctx resume [ value ] [] with
         | state -> Ok (Validated_state (owner, state, None))
-        | exception Rt error -> Error error)
+        | exception Rt error -> Error error
+        | exception Fuel_meter.Exceeded -> Error (fuel_error ctx))
 
 (** [run_state_capturing ctx state] drives [state] to completion, but instead of dying on an
     unhandled op it returns the op with its continuation ({!COp}). Used by native inference drivers
@@ -1451,36 +1852,45 @@ let dispatch_root_operation ctx ~resume ~op ~name ~effect_ args =
   in
   match Hashtbl.find_opt ctx.root_handlers op with
   | None -> Error (Runtime_err.Unhandled { effect_; op = name })
+  | Some _ when Fuel_meter.exhausted () -> Error (fuel_error ctx)
   | Some native -> (
       try
         let roots = [ VOp { op; name; effect_ }; VTuple args; resume ] in
         List.iter (prepare_native_argument ctx) roots;
+        charge_native ctx args;
         let result = native args in
+        note_returned_exhaustion ctx result;
+        if Fuel_meter.exhausted () then raise (Rt (fuel_error ctx));
         List.iter (check_native_argument ctx) roots;
-        match result with
+        match charge_native_result ctx result with
         | Ok value ->
             if not (atomic_non_task_value value) then reject_recovery_result_value ctx value;
             Ok value
         | Error error -> Error error
-      with Rt error -> Error error)
+      with
+      | Rt error -> Error error
+      | Fuel_meter.Exceeded -> Error (fuel_error ctx))
 
 (** [resume_captured_state ctx kont value] constructs the state that resumes a root capture. Multi
     continuations remain reusable; applying a Once token consumes its single budget and a later call
     reports E0906. Newly introduced values are recovery-validated at this boundary. *)
 let resume_captured_state ctx kont value =
   match kont with
-  | Multi_kont (owner, frames) -> (
+  | Multi_kont (owner, frames) ->
       if owner != ctx then Error (foreign_evaluator_context "captured continuation")
-      else
+      else (
+        charge_outside ctx (List.length frames);
         match checked_result_state ctx value frames with
         | state -> Ok state
-        | exception Rt error -> Error error)
+        | exception Rt error -> Error error
+        | exception Fuel_meter.Exceeded -> Error (fuel_error ctx))
   | Once_kont (owner, resume) -> (
       if owner != ctx then Error (foreign_evaluator_context "captured continuation")
       else
         match apply ctx resume [ value ] [] with
         | state -> Ok state
-        | exception Rt error -> Error error)
+        | exception Rt error -> Error error
+        | exception Fuel_meter.Exceeded -> Error (fuel_error ctx))
 
 (** [resume_state kont v] is the state that delivers [v] to a captured continuation. *)
 let resume_state (kont : Value.frame list) (v : Value.t) : state = SApply (v, kont)
@@ -1495,4 +1905,7 @@ let expr_state (e : Kernel.expr) : state = SEval (empty_scope, e, [])
     by M1 (the gated eval runs whole expressions via {!run_expr}); it exists for M3's native
     inference handlers, which must invoke resumption values from OCaml. *)
 let call ctx (fn : Value.t) (args : Value.t list) : (Value.t, Runtime_err.t) result =
-  match run_state ctx (apply ctx fn args []) with v -> Ok v | exception Rt e -> Error e
+  match run_state ctx (apply ctx fn args []) with
+  | v -> Ok v
+  | exception Rt e -> Error e
+  | exception Fuel_meter.Exceeded -> Error (fuel_error ctx)

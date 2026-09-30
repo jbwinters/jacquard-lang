@@ -435,6 +435,8 @@ let op_hash decl_hash ordinal =
 
 (** [hash_expr e] hashes a resolved bare expression. *)
 let hash_expr (e : Kernel.expr) : (Hash.t, Diag.t list) result =
+  (* canonical hashing is identity work, like store IO: never metered (RT.1) *)
+  Fuel_meter.unmetered @@ fun () ->
   if Recovery_marker.expr e then Error [ Recovery_marker.diagnostic "canonicalization" ]
   else
     let buf = Buffer.create 256 in
@@ -581,6 +583,7 @@ let canonical_effect_bytes ~ename ~evars ~ops =
     each binding's member hash; for [deftype]/[defeffect] it lists the declaration hash under the
     type/effect name plus each constructor/operation's derived hash. *)
 let hash_decl (d : Kernel.decl) : (decl_hashes, Diag.t list) result =
+  Fuel_meter.unmetered @@ fun () ->
   try
     if Recovery_marker.decl d then raise (Err (Recovery_marker.diagnostic "canonicalization"));
     match d.Kernel.it with

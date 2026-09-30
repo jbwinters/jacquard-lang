@@ -247,7 +247,13 @@ let is_bool_ty ctx t =
   | _ -> false
 
 let rec same_review_type left right =
-  match (Types.repr left, Types.repr right) with
+  (* the compared types can share structure exponentially: identical nodes compare at once, and
+     each step draws on computation fuel (RT.1) *)
+  Fuel_meter.tick 1;
+  let left = Types.repr left and right = Types.repr right in
+  left == right
+  ||
+  match (left, right) with
   | TVar left, TVar right -> left == right
   | TSkolem (left, _), TSkolem (right, _) -> left = right
   | TCon (left_hash, left_args), TCon (right_hash, right_args) ->
@@ -1093,6 +1099,7 @@ let rec is_immediately_applied_handle (e : Kernel.expr) : bool =
 let close_lonely_rows ~gen_level (t : ty) : unit =
   let counts : (int, int * rvar ref) Hashtbl.t = Hashtbl.create 8 in
   let rec walk t =
+    Fuel_meter.tick 1;
     match repr t with
     | TVar _ | TSkolem _ -> ()
     | TCon (_, args) -> List.iter walk args
@@ -1921,6 +1928,9 @@ let constructors_of ctx ?meta (h : Hash.t) (args : ty list) :
 (* [useful ctx tys matrix] = witness for a value vector matched by NO row, or None if the
    rows cover everything (Maranget, JFP 2007, specialized to wildcard queries). *)
 let rec useful ctx (tys : ty list) (matrix : Kernel.pat list list) : witness list option =
+  (* exhaustiveness search is exponential in the worst case: each step, and each matrix row it
+     carries, draws on computation fuel (RT.1) *)
+  Fuel_meter.tick (1 + List.length matrix);
   if matrix = [] then
     (* nothing covers anything: witnessed immediately (also the recursion base that keeps
        recursive types like list from diverging) *)
@@ -2119,6 +2129,7 @@ let rec check_matches ctx : Diag.t list =
    useful (redundant), Some () = useful. *)
 and useful_row ctx (tys : ty list) (matrix : Kernel.pat list list) (q : Kernel.pat list) :
     unit option =
+  Fuel_meter.tick (1 + List.length matrix);
   match (tys, q) with
   | [], [] -> if matrix = [] then Some () else None
   | t0 :: trest, q0 :: qrest -> (

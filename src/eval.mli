@@ -100,14 +100,50 @@ val note_root_output : ctx -> operation:Hash.t -> string -> unit
 type invocation
 (** One evaluation extent over a [ctx]. Abstract: it grants nothing and exposes no continuation. *)
 
-val with_invocation : ?coverage:bool -> ctx -> (invocation -> 'a) -> 'a
+val with_invocation : ?coverage:bool -> ?fuel:int -> ctx -> (invocation -> 'a) -> 'a
 (** [with_invocation ctx body] runs [body] as one invocation: grants installed during [body] scoped
     to it, the coverage flag set to [coverage] when given, and the coverage flag and root handlers
     restored on every exit (the root observer is restored too, defensively: the public API only sets
     it through the self-restoring {!with_root_observer}). Teardown callbacks run exactly once, most
     recent first, after [body] returns or raises. [body]'s exception wins and is re-raised with its
     backtrace; otherwise the first teardown exception is re-raised after every callback has run.
-    Invocations do not nest: [Invalid_argument] if one is active. *)
+    Invocations do not nest: [Invalid_argument] if one is active.
+
+    With [fuel], every evaluation on [ctx] during [body] shares one {!fuel_model} budget of that
+    many units (RT.1, docs/computation-fuel.md): nested runs, native re-entry, multi-shot
+    resumptions, inference branches, and scheduled tasks all debit the same allowance. The debit
+    that would pass the budget is refused with [Runtime_err.Fuel_exhausted] (E0919), and from then
+    on every transition or terminal in the invocation fails the same way, so no later evaluation can
+    turn exhaustion into a value. Without [fuel] the invocation is unbounded and behaves as before.
+    A negative [fuel] is [Invalid_argument]. *)
+
+val fuel_model : string
+(** ["fuel-v1"]: the identity of the cost model below. Any change to what a unit pays for is a new
+    model name, so recorded budgets and cache keys never compare across models.
+
+    fuel-v1 charges, before the work it pays for: one unit per evaluator machine state visited (the
+    terminal state included); for an operation, one unit per continuation frame walked to reach its
+    handler or the root; for a resumption, one unit per captured frame reinstalled; for a native
+    builtin or granted root handler, [text bytes / 64] units over its direct arguments and again
+    over its result; and for rendering, printing, or comparing a value or code form anywhere in the
+    invocation (a native, a driver, the evaluator), [nodes and text bytes walked / 64] units,
+    charged as the walk proceeds by {!Fuel_meter}. A memoized top-level term charges its isolated
+    sub-run's cost the first time an invocation reaches it, whether or not the memo was already
+    warm. *)
+
+val fuel_used : invocation -> int
+(** [fuel_used invocation] is the number of {!fuel_model} units charged so far in [invocation]. *)
+
+val fuel_exhausted : ctx -> bool
+(** [fuel_exhausted ctx] holds once the active bounded invocation has run out of fuel. Drivers use
+    it to recognise exhaustion however a native or nested driver wrapped the error. *)
+
+val fuel_error : ctx -> Runtime_err.t
+(** [fuel_error ctx] is the E0919 error for the active invocation's budget, for a driver that
+    catches {!Fuel_meter.Exceeded} from a value walk outside any run. *)
+
+val fuel_budget : invocation -> int option
+(** [fuel_budget invocation] is the budget [invocation] was started with, if bounded. *)
 
 val on_teardown : invocation -> (unit -> unit) -> unit
 (** [on_teardown invocation callback] registers exactly-once cleanup. [Invalid_argument] after the

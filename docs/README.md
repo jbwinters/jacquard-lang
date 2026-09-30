@@ -80,6 +80,8 @@ project shape from file names alone.
 - `relational-warp.md`: relational observation contract, canonical run
   transcripts, the shipped deterministic schedule-, Secret-, and
   grant-variation CLI lanes, and the RW.7 standing regression net.
+- `computation-fuel.md`: RT.1 per-invocation computation budget, the versioned
+  fuel-v1 cost model, and E0919 incomplete-run semantics.
 - `errors.md`: diagnostic code catalog.
 
 ## Current Release 0.2 Evidence

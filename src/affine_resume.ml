@@ -189,6 +189,9 @@ let equal_gref left right =
   | Kernel.Named _, Kernel.Hashed _ | Kernel.Hashed _, Kernel.Named _ -> false
 
 let rec equal_pattern left right =
+  Fuel_meter.tick 1;
+  left == right
+  ||
   match (left.Kernel.it, right.Kernel.it) with
   | (Kernel.PWild | Kernel.PVar _), (Kernel.PWild | Kernel.PVar _) -> true
   | Kernel.PLit left, Kernel.PLit right -> equal_lit left right
@@ -204,6 +207,11 @@ and equal_patterns left right =
   List.length left = List.length right && List.for_all2 equal_pattern left right
 
 let rec equal_scrutinee left right =
+  (* scrutinees can share structure (a chain of bindings doubling a value): a shared node is equal
+     to itself at once, and every comparison step draws on computation fuel (RT.1) *)
+  Fuel_meter.tick 1;
+  left == right
+  ||
   match (left, right) with
   | Free left, Free right -> String.equal left right
   | Bound left, Bound right -> left = right
@@ -235,6 +243,8 @@ let partitioned scrutinee arms =
     exclusive. A partition composed with an unpartitioned summary is checked once per arm. Unknown
     relationships retain [summary_seq]'s conservative behavior. *)
 let rec seq state left right =
+  (* composing partitioned flows can multiply them: each step draws on computation fuel (RT.1) *)
+  Fuel_meter.tick 1;
   match (left.partition, right.partition) with
   | Some left_partition, Some right_partition when aligned_partitions left_partition right_partition
     ->
@@ -300,6 +310,7 @@ let fresh_callable_key env =
   Printf.sprintf "local:%d" id
 
 let rec free_alias (env : env) (expr : Kernel.expr) : (string * Meta.t) option =
+  Fuel_meter.tick 1;
   let first xs = List.find_map (free_alias env) xs in
   match expr.it with
   | Kernel.Var name when SSet.mem name env.aliases -> Some (name, expr.meta)
@@ -463,6 +474,7 @@ and stable_cons env expression tail =
 
 let rec analyze ?(result_is_immediately_eliminated = false) (env : env) ~(context : value_context)
     (expr : Kernel.expr) : (flow, Diag.t) result =
+  Fuel_meter.tick 1;
   match expr.it with
   | Kernel.Lit _ | Kernel.Ref _ | Kernel.GroupRef _ -> Ok zero
   | Kernel.Var name ->

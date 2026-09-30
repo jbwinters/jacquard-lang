@@ -191,7 +191,8 @@ let control_configuration = function
   | Fork_schedule { trace; decision; chosen } ->
       Ok (scheduler_version, Schedule_control.Fork { trace; decision; chosen })
 
-let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed initial_state =
+let run_state_global_unguarded ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed
+    initial_state =
   if bounds.max_tasks <= 0 then
     Error (Run_error (Runtime_err.Scheduler_error "task bound must be positive"))
   else if bounds.max_decisions <= 0 then
@@ -252,6 +253,9 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed i
     let max_live = ref 1 in
     let fatal_diagnostics = ref [] in
     let budget_refusal = ref None in
+    (* RT.1: computation fuel belongs to the whole invocation, so exhaustion stops the run instead
+       of becoming one task's failure that a sibling or collecting policy could absorb *)
+    let fuel_exhaustion = ref None in
     let validate_creation creation =
       match Schedule_control.creation schedule_control creation with
       | Ok () -> Ok ()
@@ -560,7 +564,7 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed i
       | Structured_scope.Effect_cancelled awakened -> finish_cancelled run handle awakened
       | Structured_scope.Effect_routed { resume; result = Ok value } -> continue resume value
       | Structured_scope.Effect_routed { result = Error diagnostics; _ }
-        when !fatal_diagnostics <> [] ->
+        when !fatal_diagnostics <> [] || Option.is_some !fuel_exhaustion ->
           Error diagnostics
       | Structured_scope.Effect_routed { result = Error diagnostics; _ } ->
           fail_task run handle (error_of_diagnostics diagnostics)
@@ -577,6 +581,9 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed i
     let step run handle state =
       Structured_scope.with_eval_task_context Task_capability.runtime ctx run.scope (fun () ->
           match Eval.run_state_capturing_once_routed ctx state with
+          | Error error when Eval.fuel_exhausted ctx || Runtime_err.is_fuel_exhausted error ->
+              fuel_exhaustion := Some error;
+              Error [ Runtime_err.to_diag error ]
           | Error error ->
               let* () =
                 Schedule_control.observe_operation schedule_control Schedule_trace.Failure
@@ -915,6 +922,8 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed i
                   with
                   | Ok value -> Ok value
                   | Error error ->
+                      if Eval.fuel_exhausted ctx || Runtime_err.is_fuel_exhausted error then
+                        fuel_exhaustion := Some error;
                       routed_error := Some error;
                       Error [ scheduler_diagnostic (Runtime_err.to_string error) ])
                 ~continue:(fun owned value ->
@@ -1026,6 +1035,14 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed i
       Error (Run_error (Runtime_err.Scheduler_error "scope cleanup left nonzero ownership metrics"))
     else
       match protected with
+      | (Error _ | Ok _) when Eval.fuel_exhausted ctx ->
+          (* exhaustion is sticky: however the run ended (a decision limit reached after a
+             deferred debit, or a failure it caused), the outcome is the exhaustion *)
+          Error (Run_error (Option.value !fuel_exhaustion ~default:(Eval.fuel_error ctx)))
+      | Error _ when Option.is_some !fuel_exhaustion ->
+          (* a nested invocation ran out and its native returned that exhaustion: the run is
+             incomplete even though the outer meter still has fuel *)
+          Error (Run_error (Option.get !fuel_exhaustion))
       | Error diagnostics -> (
           let error = runtime_of_diagnostics diagnostics in
           match !budget_refusal with
@@ -1048,6 +1065,16 @@ let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed i
                 metrics_after_close;
               },
               schedule )
+
+(* RT.1: the scheduler renders and compares task values outside any evaluator run; a walk that runs
+   out of fuel there stops the whole run with E0919 *)
+let run_state_global ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed initial_state =
+  match
+    run_state_global_unguarded ctx ~policy ~bounds ~program ~schedule_mode ~allow_routed
+      initial_state
+  with
+  | result -> result
+  | exception Fuel_meter.Exceeded -> Error (Run_error (Eval.fuel_error ctx))
 
 let run_state ctx ?(policy = Concurrency_contract.default_failure_policy) ?(bounds = default_bounds)
     initial_state =

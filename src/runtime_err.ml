@@ -23,9 +23,20 @@ type t =
   | Type_error of string  (** applying a non-function, spliced non-code, and similar *)
   | Unresolved of string  (** an unresolved name or dangling hash reached evaluation *)
   | Eval_error of string  (** the gated [eval] op rejected its payload at the boundary *)
+  | Fuel_exhausted of { model : string; limit : int }
+      (** the invocation's computation fuel ran out (RT.1). Incomplete, not a program failure: the
+          same budget and program always stop at the same transition, and no later evaluation in the
+          invocation can produce a value *)
   | Diagnostic of Diag.t
       (** a subsystem diagnostic that must retain its domain, code, and remediation when it crosses
           the evaluator's single-error channel *)
+
+(** [is_fuel_exhausted error] recognises computation-fuel exhaustion (E0919) whether it arrives as
+    [Fuel_exhausted] or wrapped in a subsystem [Diagnostic] by a native or nested driver. *)
+let is_fuel_exhausted = function
+  | Fuel_exhausted _ -> true
+  | Diagnostic diagnostic -> Diag.code diagnostic = Some "E0919"
+  | _ -> false
 
 (** [to_string error] renders compact technical cause text for embedding in another failure. *)
 let to_string = function
@@ -45,6 +56,11 @@ let to_string = function
   | Type_error msg -> "type error: " ^ msg
   | Unresolved msg -> "unresolved reference: " ^ msg
   | Eval_error msg -> "eval rejected its argument: " ^ msg
+  | Fuel_exhausted { model; limit } ->
+      Printf.sprintf
+        "computation fuel exhausted: the %s budget of %d unit(s) ran out before evaluation \
+         finished; the result is incomplete"
+        model limit
   | Diagnostic diagnostic -> Diag.to_cause_string diagnostic
 
 (** [to_diag error] projects a runtime failure into the canonical structured diagnostic contract.
@@ -94,5 +110,11 @@ let to_diag error =
   | Eval_error _ ->
       make ~domain:Runtime ~summary:"Eval rejected its code value"
         ~next_step:"Pass validated closed code to eval." ()
+  | Fuel_exhausted _ ->
+      make ~domain:Runtime ~code:"E0919" ~summary:"Computation fuel was exhausted"
+        ~next_step:
+          "Raise the --fuel budget, or omit it to run unbounded. An exhausted run is incomplete; \
+           it neither passes nor fails."
+        ()
 
 let pp fmt t = Format.pp_print_string fmt (to_string t)

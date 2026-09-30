@@ -108,6 +108,16 @@ let verdict_of_report (v : Value.t) : (verdict, string) result =
           | v -> Error (Printf.sprintf "malformed report hard field: %s" (Value.show v))))
   | v -> Error (Printf.sprintf "not a report: %s" (Value.show v))
 
+(* RT.1: exhaustion is incomplete, never a verdict. Exhaustion is sticky, so a runner that ran out
+   anywhere (and any verdict it built from the error) reports it as a runner error instead. *)
+let fuel_exhausted_message ctx = Runtime_err.to_string (Eval.fuel_error ctx)
+
+let guard_fuel_string ctx run =
+  match run () with
+  | _ when Eval.fuel_exhausted ctx -> Error (fuel_exhausted_message ctx)
+  | result -> result
+  | exception Fuel_meter.Exceeded -> Error (fuel_exhausted_message ctx)
+
 (* Run one thunk under test.run, collecting its per-test coverage set. A runtime crash
    is a FAILING verdict, not a runner abort: one broken test must not blind the suite.
    NOTE (coverage approximation, documented): ctx.memo persists across tests, so a
@@ -120,9 +130,11 @@ let run_thunk ctx ~test_run (thunk : Value.t) : (verdict * Hash.t list, string) 
   in
   match result with
   | Ok report -> Result.map (fun v -> (v, mine)) (verdict_of_report report)
+  | Error e when Runtime_err.is_fuel_exhausted e -> Error (Runtime_err.to_string e)
   | Error e ->
       Ok (Fail { soft = []; hard = Some ("runtime error: " ^ Runtime_err.to_string e) }, mine)
 
+let run_thunk ctx ~test_run thunk = guard_fuel_string ctx (fun () -> run_thunk ctx ~test_run thunk)
 let schedule_identity_version = "warp-schedule-leaf-v1"
 
 let add_schedule_identity_frame buffer value =
@@ -197,6 +209,9 @@ let run_thunk_seeded ctx ?(bounds = Round_robin.default_bounds) ~test_run ~progr
       in
       let coverage = add_coverage coverage mine in
       match result with
+      | Error error when Runtime_err.is_fuel_exhausted error -> Error (Runtime_err.to_string error)
+      | Ok { Round_robin.result = Error error; _ } when Runtime_err.is_fuel_exhausted error ->
+          Error (Runtime_err.to_string error)
       | Error error ->
           Ok
             ( Fail
@@ -255,6 +270,13 @@ let run_thunk_seeded ctx ?(bounds = Round_robin.default_bounds) ~test_run ~progr
   run 0 [] None
 
 (* the world row a wcase thunk needs, read from the constructor's own scheme *)
+
+let run_thunk_seeded ctx ?bounds ~test_run ~program ~root_seed ~test_seed ~schedules ~replay_command
+    thunk =
+  guard_fuel_string ctx (fun () ->
+      run_thunk_seeded ctx ?bounds ~test_run ~program ~root_seed ~test_seed ~schedules
+        ~replay_command thunk)
+
 let world_required (cctx : Check.ctx) (store : Store.t) : Hash.t list =
   match Store.lookup_kind store "wcase" Resolve.KCon with
   | None -> []
@@ -480,6 +502,10 @@ let run_prop_sampling ctx ~seed ~samples (thunk : Value.t) : (verdict * string, 
     machinery explores every support element at every sample site. Verified branches are weight>0
     completions; zero-weight branches prune without counting. Blowing the budget is a clean refusal
     (E0905), never a partial pass. *)
+
+let run_prop_sampling ctx ~seed ~samples thunk =
+  guard_fuel_string ctx (fun () -> run_prop_sampling ctx ~seed ~samples thunk)
+
 let run_prop_exhaustive ctx ~budget (thunk : Value.t) : (verdict * string, Diag.t) result =
   let verified = ref 0 in
   let branches = ref 0 in
@@ -565,6 +591,12 @@ let run_prop_exhaustive ctx ~budget (thunk : Value.t) : (verdict * string, Diag.
                 (if !verified = 1 then "" else "s") ))
 
 (* --- relational cases (RW.6) --- *)
+
+let run_prop_exhaustive ctx ~budget thunk =
+  match run_prop_exhaustive ctx ~budget thunk with
+  | _ when Eval.fuel_exhausted ctx -> Error (Runtime_err.to_diag (Eval.fuel_error ctx))
+  | result -> result
+  | exception Fuel_meter.Exceeded -> Error (Runtime_err.to_diag (Eval.fuel_error ctx))
 
 let relational_failure detail = Fail { soft = []; hard = Some detail }
 
@@ -1211,6 +1243,10 @@ let run_discovered ctx (cctx : Check.ctx) ~test_run ~prop_mode ~schedule_plan ~s
               ~schedule_path:[] ~structural_path:[ 0 ] ~display:name v)
 
 (* --- rendering --- *)
+
+let run_discovered ctx cctx ~test_run ~prop_mode ~schedule_plan ~suite_seed ~cache_dir ~granted d =
+  guard_fuel_string ctx (fun () ->
+      run_discovered ctx cctx ~test_run ~prop_mode ~schedule_plan ~suite_seed ~cache_dir ~granted d)
 
 let render_outcome (t : totals) (o : outcome) : string list =
   match (o.verdict, o.note) with

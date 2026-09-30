@@ -102,6 +102,12 @@ let diagnostic ~code cause =
 
 let err ~code fmt = Printf.ksprintf (fun cause -> Error [ diagnostic ~code cause ]) fmt
 
+(* A runtime failure under [code], except computation-fuel exhaustion (RT.1), which keeps E0919:
+   running out of fuel is incomplete inference, not a model failure. *)
+let runtime_diagnostic ~code error =
+  if Runtime_err.is_fuel_exhausted error then Runtime_err.to_diag error
+  else diagnostic ~code (Runtime_err.to_string error)
+
 (* --- distribution values --- *)
 
 type dist_v =
@@ -271,13 +277,10 @@ let enumerate_risk_exact (ctx : Eval.ctx) ~max_branches (model : Eval.state) :
     let invalid_arithmetic fmt =
       Printf.ksprintf (fun cause -> Error [ diagnostic ~code:"E0916" cause ]) fmt
     in
-    let runtime_failure fmt =
-      Printf.ksprintf (fun cause -> Error [ diagnostic ~code:"E0915" cause ]) fmt
-    in
     let decode_distribution value =
       match dist_of_value ctx value with
       | Ok distribution -> Ok distribution
-      | Error error -> invalid_distribution "%s" (Runtime_err.to_string error)
+      | Error error -> Error [ runtime_diagnostic ~code:"E0911" error ]
     in
     let validate_entries operation entries =
       let rec validate index = function
@@ -293,7 +296,7 @@ let enumerate_risk_exact (ctx : Eval.ctx) ~max_branches (model : Eval.state) :
     in
     let materialized_support operation distribution =
       match support ctx distribution with
-      | Error error -> runtime_failure "%s" (Runtime_err.to_string error)
+      | Error error -> Error [ runtime_diagnostic ~code:"E0915" error ]
       | Ok entries -> validate_entries operation entries
     in
     let uniform_probability lo hi =
@@ -303,7 +306,10 @@ let enumerate_risk_exact (ctx : Eval.ctx) ~max_branches (model : Eval.state) :
       else
         invalid_arithmetic "uniform-int %d..%d produced invalid support weight %g" lo hi probability
     in
-    let rec comparable_value = function
+    let rec comparable_value value =
+      (* observed values can be shared: every node visited draws on computation fuel (RT.1) *)
+      Fuel_meter.tick 1;
+      match value with
       | Value.VInt _ | VReal _ | VText _ | VHash _ -> Ok ()
       | VTuple items -> comparable_values items
       | VCon { args; _ } -> comparable_values args
@@ -319,12 +325,15 @@ let enumerate_risk_exact (ctx : Eval.ctx) ~max_branches (model : Eval.state) :
           comparable_values rest
     in
     let rec same_comparable_value left right =
+      Fuel_meter.tick 1;
       let* () = comparable_value left in
       let* () = comparable_value right in
       match (left, right) with
       | Value.VInt a, VInt b -> Ok (Int.equal a b)
       | VReal a, VReal b -> Ok (Float.equal a b)
-      | VText a, VText b -> Ok (String.equal a b)
+      | VText a, VText b ->
+          Fuel_meter.tick (String.length a);
+          Ok (String.equal a b)
       | VHash a, VHash b -> Ok (Hash.equal a b)
       | VTuple left_items, VTuple right_items -> same_comparable_values left_items right_items
       | VCon left_con, VCon right_con ->
@@ -426,11 +435,11 @@ let enumerate_risk_exact (ctx : Eval.ctx) ~max_branches (model : Eval.state) :
     let resume continuation value =
       match Eval.resume_captured_state ctx continuation value with
       | Ok state -> Ok state
-      | Error error -> runtime_failure "%s" (Runtime_err.to_string error)
+      | Error error -> Error [ runtime_diagnostic ~code:"E0915" error ]
     in
     let rec explore state path_weight theoretically_positive =
       match run_until_op ctx state with
-      | Error error -> runtime_failure "%s" (Runtime_err.to_string error)
+      | Error error -> Error [ runtime_diagnostic ~code:"E0915" error ]
       | Ok (Done value) ->
           if !completed >= max_branches then
             err ~code:"E0912"
@@ -605,10 +614,10 @@ let likelihood_weighting (ctx : Eval.ctx) ~seed ~samples (model : unit -> Eval.s
       match one_run rng state 1.0 with Error e -> Error e | Ok () -> k_runs initial (i + 1)
   in
   match Eval.validate_state_once ctx initial with
-  | Error error -> Error [ diagnostic ~code:"E0902" (Runtime_err.to_string error) ]
+  | Error error -> Error [ runtime_diagnostic ~code:"E0902" error ]
   | Ok initial -> (
       match k_runs initial 0 with
-      | Error error -> Error [ diagnostic ~code:"E0902" (Runtime_err.to_string error) ]
+      | Error error -> Error [ runtime_diagnostic ~code:"E0902" error ]
       | Ok () ->
           let total = List.fold_left (fun acc { weight; _ } -> acc +. weight) 0.0 !runs in
           if total <= 0.0 then
@@ -752,7 +761,7 @@ let enumerate_v1 ?max_branches (ctx : Eval.ctx) (model : Eval.state) :
                (Printf.sprintf "enumerate: unexpected op %s/%d" name (List.length args)))
   in
   match explore model 1.0 with
-  | Error error -> Error [ diagnostic ~code:"E0902" (Runtime_err.to_string error) ]
+  | Error error -> Error [ runtime_diagnostic ~code:"E0902" error ]
   | Ok () ->
       let metadata =
         {
@@ -814,10 +823,10 @@ let lw_surviving_runs (ctx : Eval.ctx) ~seed ~samples (model : unit -> Eval.stat
       match one_run rng state 1.0 true with Error e -> Error e | Ok () -> k_runs initial (i + 1)
   in
   match Eval.validate_state_once ctx initial with
-  | Error error -> Error [ diagnostic ~code:"E0902" (Runtime_err.to_string error) ]
+  | Error error -> Error [ runtime_diagnostic ~code:"E0902" error ]
   | Ok initial -> (
       match k_runs initial 0 with
-      | Error error -> Error [ diagnostic ~code:"E0902" (Runtime_err.to_string error) ]
+      | Error error -> Error [ runtime_diagnostic ~code:"E0902" error ]
       | Ok () -> Ok (List.rev_map (fun { value; weight } -> (value, weight)) !runs))
 
 (** [likelihood_weighting_v1] is seeded likelihood weighting with the typed outcome; for a
@@ -838,6 +847,34 @@ let likelihood_weighting_v1 (ctx : Eval.ctx) ~seed ~samples (model : unit -> Eva
           };
       })
     (lw_surviving_runs ctx ~seed ~samples model)
+
+(* RT.1: drivers key, merge and compare values outside any evaluator run; a walk that runs out of
+   fuel there ends the driver with E0919 *)
+let guard_walks ctx run =
+  let exhausted () = Error [ Runtime_err.to_diag (Eval.fuel_error ctx) ] in
+  (* exhaustion is sticky: a driver entered, or finishing, after the invocation ran out reports
+     it even on a path that does no further metered work *)
+  if Fuel_meter.exhausted () then exhausted ()
+  else
+    match run () with
+    | _ when Fuel_meter.exhausted () -> exhausted ()
+    | result -> result
+    | exception Fuel_meter.Exceeded -> exhausted ()
+
+let enumerate_v1 ?max_branches ctx model =
+  guard_walks ctx (fun () -> enumerate_v1 ?max_branches ctx model)
+
+let likelihood_weighting_v1 ctx ~seed ~samples model =
+  guard_walks ctx (fun () -> likelihood_weighting_v1 ctx ~seed ~samples model)
+
+let likelihood_weighting ctx ~seed ~samples model =
+  guard_walks ctx (fun () -> likelihood_weighting ctx ~seed ~samples model)
+
+let lw_surviving_runs ctx ~seed ~samples model =
+  guard_walks ctx (fun () -> lw_surviving_runs ctx ~seed ~samples model)
+
+let enumerate_risk_exact ctx ~max_branches model =
+  guard_walks ctx (fun () -> enumerate_risk_exact ctx ~max_branches model)
 
 (** The legacy success-or-diagnostic view of a classified outcome. *)
 let classified_to_result ~sampled (c : classified) : (posterior, Diag.t list) result =

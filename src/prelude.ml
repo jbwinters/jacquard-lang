@@ -510,7 +510,14 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
           match args with
           | [ texts; Value.VText separator ] ->
               Result.map
-                (fun texts -> Value.VText (String.concat separator texts))
+                (fun texts ->
+                  (* the pieces sit inside a list the native measure does not open: pay for
+                     the joined bytes before building them (RT.1) *)
+                  let count = List.length texts in
+                  Fuel_meter.tick
+                    (List.fold_left (fun total text -> total + String.length text) 0 texts
+                    + (max 0 (count - 1) * String.length separator));
+                  Value.VText (String.concat separator texts))
                 (texts_of_vlist texts)
           | args -> type_err "text.join" args);
       stable_optional "text.join" "text.join-variadic-v1" (fun args ->
@@ -1142,10 +1149,12 @@ let install_infer ?cache_dir (ctx : Eval.ctx) : (unit, Diag.t list) result =
         | None ->
             Printf.eprintf "infer-cache miss %s\n%!" (String.sub key 0 8);
             let c = k () in
+            (* the cache entry is store IO: rendered unmetered, before the file is opened (RT.1) *)
+            let entry = Fuel_meter.unmetered (fun () -> Printer.print (entry_form c) ^ "\n") in
             (try
                mkdir_p dir;
                let oc = open_out_bin path in
-               output_string oc (Printer.print (entry_form c) ^ "\n");
+               output_string oc entry;
                close_out oc
              with Sys_error m -> Printf.eprintf "infer-cache unavailable (%s)\n%!" m);
             c)
