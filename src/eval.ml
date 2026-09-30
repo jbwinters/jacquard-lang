@@ -1896,9 +1896,7 @@ let fresh_validated_state ctx (Validated_state (owner, state, initial_graph) as 
     Hashtbl.iter (fun _ snapshot -> restore snapshot.snapshot_graph) ctx.evaluator_mutable_snapshots;
     Validated_state (owner, state, None)
 
-(** [run_state_capturing_trusted ctx state] captures like {!run_state_capturing} without scanning
-    [state] first. The caller must have validated the immutable initial state and must only supply
-    states derived from evaluator transitions; memo and native result guards remain active. *)
+(* a capture together with the correlation id of the captured operation's Operation event *)
 let capture_with_call ~capture_root_handlers ctx (state : state) =
   let saved = ctx.capture_ops in
   let saved_root = ctx.capture_root_handlers in
@@ -1926,6 +1924,9 @@ let capture_with_call ~capture_root_handlers ctx (state : state) =
       | exception Rt e -> Error e
       | exception Fuel_meter.Exceeded -> Error (fuel_error ctx))
 
+(** [run_state_capturing_trusted ctx state] captures like {!run_state_capturing} without scanning
+    [state] first. The caller must have validated the immutable initial state and must only supply
+    states derived from evaluator transitions; memo and native result guards remain active. *)
 let run_state_capturing_trusted ?(capture_root_handlers = false) ctx (state : state) :
     (capture, Runtime_err.t) result =
   Result.map fst (capture_with_call ~capture_root_handlers ctx state)
@@ -2009,7 +2010,7 @@ let run_state_capturing_once_routed ctx state =
   | Error error -> Error error
   | Ok () -> once_capture (capture_with_call ~capture_root_handlers:true ctx state)
 
-let dispatch_root_operation ?call ctx ~resume ~op ~name ~effect_ args =
+let dispatch_root_operation ~call ctx ~resume ~op ~name ~effect_ args =
   (* an observer callback cannot dispatch an operation (RF.3) *)
   if ctx.observing then
     Error (Runtime_err.Eval_error "an observation callback cannot run evaluation")
@@ -2032,8 +2033,7 @@ let dispatch_root_operation ?call ctx ~resume ~op ~name ~effect_ args =
           let roots = [ VOp { op; name; effect_ }; VTuple args; resume ] in
           List.iter (prepare_native_argument ctx) roots;
           charge_native ctx args;
-          (* a routed dispatch continues the call its capture observed; without one it is its own *)
-          let call = match call with Some call -> call | None -> fresh_call ctx in
+          (* a routed dispatch continues the call its capture observed *)
           let result = dispatching_as ctx call (fun () -> native args) in
           note_returned_exhaustion ctx result;
           if Fuel_meter.exhausted () then raise (Rt (fuel_error ctx));

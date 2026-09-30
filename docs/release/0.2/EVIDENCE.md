@@ -32,7 +32,7 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1135`
+- Alcotest/QCheck cases: `1137`
 - Cram transcript files: `74`
 - Documentation examples: `35` named examples across `8` documents
 
@@ -642,6 +642,6 @@ never reach bytes or diagnostics; results and output pair with their call by a
 correlation id now carried on typed events; failed, incomplete (including
 unfinished projections) and truncated observations are recorded; comparison is
 equal, divergent or inconclusive, and refuses transcripts of different
-policies. `run-transcript-v1` is unchanged. Ten
+policies. `run-transcript-v1` is unchanged. Twelve
 `test/test_observation_policy.ml` cases bring the current source inventory to
-`1135 / 74 / 35`.
+`1137 / 74 / 35`.

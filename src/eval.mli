@@ -86,8 +86,9 @@ val with_root_observer :
 val note_root_output : ctx -> operation:Hash.t -> string -> unit
 (** [note_root_output ctx ~operation bytes] attaches bytes accepted by a trusted root adapter to its
     explicit operation identity, if an observer is active. It must not be used by untrusted or
-    language-level handlers. It is a no-op without an observer; an observer callback exception
-    propagates unchanged. *)
+    language-level handlers. Output is attributed to the root call whose handler is running (outside
+    any, it is a call of its own). Nothing is observed without an observer; an observer callback
+    exception propagates unchanged. *)
 
 (** {1 Invocations (RF.2)}
 
@@ -239,7 +240,7 @@ val run_state_capturing_once_routed : ctx -> state -> (once_capture, Runtime_err
     deterministic scheduler can check cancellation before routing world work. *)
 
 val dispatch_root_operation :
-  ?call:int ->
+  call:int ->
   ctx ->
   resume:Value.t ->
   op:Hash.t ->
@@ -251,8 +252,8 @@ val dispatch_root_operation :
     suspended affine resume is included in the same mutable-graph snapshot as the operation and
     arguments, so hostile callbacks cannot mutate its continuation graph unnoticed. Missing handlers
     return [Unhandled], and callback argument/result guards remain active. [call] is the captured
-    operation's correlation id ({!once_capture}), so its observed [Result] pairs with its
-    [Operation]; without it the dispatch is observed as a call of its own. *)
+    operation's correlation id ({!once_capture}), so its observed [Result] and output pair with its
+    [Operation]. *)
 
 type validated_state
 (** An unforgeable state accepted by the reusable inference driver and bound to the exact evaluator

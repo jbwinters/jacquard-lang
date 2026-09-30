@@ -106,15 +106,21 @@ result data bytes=1
   bytes), `truncated total=T bytes=L` (the first L bytes, L the policy limit,
   of a longer rendering), `unsupported kind=K` (not for raw output),
   `failure code=C` (a handler failure, results only), `missing` (compared but
-  not produced: a selected position the call does not have, a result that never
-  arrived because a driver captured the operation, or no output), or
+  not produced: a selected position the call does not have, no output, or a
+  result that never arrived because a driver captured the operation without
+  dispatching it, a post-call check refused the handler's result, or the run
+  stopped inside the handler), or
   `unfinished` (the fuel ran out while the field was being projected; only in
   an incomplete run, and for all-arguments a single position 0 stands for every
   argument).
 
 An operation is recorded before its arguments are projected, so a run that
 runs out of fuel while projecting them still records which operation it
-reached.
+reached. Running out of fuel ends the run, so an event with unfinished fields
+is its last, and the parser refuses one anywhere else, one whose handler
+appears to have run, an unknown opaque kind, and a handler failure coded
+E0919 (a handler returning exhaustion ends the run before any result is
+observed).
 
 Parsing needs the policy: the header's policy identity must match it, and each
 event must carry exactly the lines its rule demands. Everything else is as
@@ -130,7 +136,8 @@ Every typed event carries a correlation id (`call`,
 `docs/observation-boundary.md`): a call's `Output` and `Result` carry its
 `Operation`'s id, including when calls to one operation nest, and when a
 driver captures an operation and dispatches it later (the captured
-`once_capture` carries the id to `Eval.dispatch_root_operation`). The recorder
+`once_capture` carries the id, and `Eval.dispatch_root_operation` requires
+it). The recorder
 pairs by that id alone. The id is not recorded: it is not stable across runs.
 An operation the policy does not record has nothing to pair with.
 
@@ -153,7 +160,9 @@ with the same prefix and total, unsupported fields of the same kind, two
 `uncoded` failures (or two runs failed `uncoded`), and anything against an
 unfinished field are inconclusive; when either event's arguments are
 unfinished, its arguments are inconclusive as a whole. Anything else
-(including data against truncated, or any kind against another) differs. A divergence renders as a three-line frame with the
+(including data against truncated, or any kind against another) differs. Two
+incomplete runs are compared field by field like any others: under equal
+budgets a missing result or a shorter event list is a divergence. A divergence renders as a three-line frame with the
 path and both sides; only recorded fields can appear in it.
 
 ## 5. Compatibility

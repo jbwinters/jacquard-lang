@@ -25,7 +25,6 @@ let policy_identity (transcript : transcript) = transcript.identity
 let runs transcript = transcript.runs
 
 type pending = {
-  call : int;
   operation : Hash.t;
   rule : Observation_policy.rule;
   mutable arguments : (int * field) list;
@@ -37,13 +36,20 @@ type recorder = {
   policy : Observation_policy.t;
   mutable completed_rev : run list;
   mutable current_rev : pending list;
+  by_call : (int, pending) Hashtbl.t;  (** the current run's recorded calls, by correlation id *)
   mutable active : bool;
 }
 
 exception Bug_observation_transcript of string
 
 let bug format = Printf.ksprintf (fun message -> raise (Bug_observation_transcript message)) format
-let create policy = { policy; completed_rev = []; current_rev = []; active = false }
+
+let create policy =
+  { policy; completed_rev = []; current_rev = []; by_call = Hashtbl.create 16; active = false }
+
+(* the opaque kinds {!Observation.of_value} produces *)
+let opaque_kinds =
+  [ "secret"; "closure"; "resumption"; "builtin"; "operation"; "constructor"; "task"; "channel" ]
 
 let rec first_opaque = function
   | Observation.Opaque kind -> Some kind
@@ -104,8 +110,10 @@ let recorded_arguments policy (rule : Observation_policy.rule) arguments =
 
 (* the recorded event of [call]: output and results pair with their call exactly, by correlation
    id, even when calls to one operation nest or a call is captured and dispatched later *)
-let pending_call recorder call =
-  List.find_opt (fun (pending : pending) -> pending.call = call) recorder.current_rev
+let pending_call recorder ~call operation =
+  match Hashtbl.find_opt recorder.by_call call with
+  | Some pending when Hash.equal pending.operation operation -> Some pending
+  | Some _ | None -> None
 
 (* the fields a projection that ran out of fuel could not finish *)
 let unfinished_arguments (rule : Observation_policy.rule) =
@@ -123,15 +131,16 @@ let on_event recorder = function
           (* the operation is recorded before its arguments are projected, so running out of fuel
              while projecting them keeps its identity *)
           let pending =
-            { call; operation; rule; arguments = []; result_seen = None; output_seen = None }
+            { operation; rule; arguments = []; result_seen = None; output_seen = None }
           in
           recorder.current_rev <- pending :: recorder.current_rev;
+          Hashtbl.replace recorder.by_call call pending;
           try pending.arguments <- recorded_arguments recorder.policy rule arguments
           with Fuel_meter.Exceeded as exceeded ->
             pending.arguments <- unfinished_arguments rule;
             raise exceeded))
-  | Observation.Output { call; bytes; _ } -> (
-      match pending_call recorder call with
+  | Observation.Output { call; operation; bytes } -> (
+      match pending_call recorder ~call operation with
       | Some pending when Option.is_none pending.output_seen ->
           pending.output_seen <-
             Some
@@ -139,8 +148,8 @@ let on_event recorder = function
               | Observation_policy.Compare -> Some (bounded recorder.policy bytes)
               | Observation_policy.Ignore -> None)
       | Some _ | None -> ())
-  | Observation.Result { call; result; _ } -> (
-      match pending_call recorder call with
+  | Observation.Result { call; operation; result } -> (
+      match pending_call recorder ~call operation with
       | Some pending when Option.is_none pending.result_seen -> (
           match pending.rule.result with
           | Observation_policy.Ignore -> pending.result_seen <- Some None
@@ -175,9 +184,11 @@ let record recorder ctx run =
   if recorder.active then bug "a recorder cannot record overlapping runs";
   recorder.active <- true;
   recorder.current_rev <- [];
+  Hashtbl.reset recorder.by_call;
   Fun.protect
     ~finally:(fun () ->
       recorder.current_rev <- [];
+      Hashtbl.reset recorder.by_call;
       recorder.active <- false)
     (fun () ->
       let outcome = Eval.with_observer ctx (on_event recorder) run in
@@ -316,12 +327,23 @@ let parse_field policy cursor =
     Result.map (fun prefix -> Truncated { total; prefix }) (payload bytes)
   else if Strict_cursor.peek_literal cursor "unsupported " then
     let* () = expect cursor "unsupported kind=" in
+    let offset = cursor.Strict_cursor.offset in
     let* kind = word cursor in
+    let* () =
+      if List.mem kind opaque_kinds then Ok () else invalid_at offset "an opaque kind is unknown"
+    in
     let* () = expect cursor "\n" in
     Ok (Unsupported kind)
   else if Strict_cursor.peek_literal cursor "failure " then
     let* () = expect cursor "failure code=" in
+    let offset = cursor.Strict_cursor.offset in
     let* code = word cursor in
+    (* a handler that returned exhaustion ends the run before any result is observed *)
+    let* () =
+      if String.equal code fuel_code then
+        invalid_at offset "a handler result cannot be fuel exhaustion"
+      else Ok ()
+    in
     let* () = expect cursor "\n" in
     Ok (Failure code)
   else if Strict_cursor.peek_literal cursor "unfinished" then
@@ -467,14 +489,33 @@ let parse_run policy cursor ~expected_index =
       events (index + 1) (event :: reversed)
   in
   let* events = events 0 [] in
-  (* only a projection that ran out of fuel leaves a field unfinished *)
-  let unfinished (event : event) =
+  (* only a projection that ran out of fuel leaves a field unfinished, and it ends the run: an
+     event with unfinished arguments is the last, exactly as the recorder writes it (every selected
+     position unfinished, the handler never ran), and one with an unfinished result is the last *)
+  let exact_unfinished (event : event) =
+    let arguments_unfinished = List.exists (fun (_, field) -> field = Unfinished) event.arguments in
+    let absent = function None | Some Missing -> true | Some _ -> false in
+    if arguments_unfinished then
+      match Observation_policy.rule_for policy event.operation with
+      | Some rule ->
+          event.arguments = unfinished_arguments rule && absent event.result && absent event.output
+      | None -> false
+    else true
+  in
+  let ends (event : event) =
     List.exists (fun (_, field) -> field = Unfinished) event.arguments
     || event.result = Some Unfinished
   in
+  let rec well_placed = function
+    | [] -> true
+    | [ last ] -> exact_unfinished last
+    | event :: rest -> (not (ends event)) && well_placed rest
+  in
   match status with
-  | (Complete _ | Failed _) when List.exists unfinished events ->
+  | (Complete _ | Failed _) when List.exists ends events ->
       invalid_at cursor.offset "an unfinished field appears in a run that was not stopped by fuel"
+  | _ when not (well_placed events) ->
+      invalid_at cursor.offset "an unfinished field is not where running out of fuel leaves it"
   | Complete _ | Failed _ | Incomplete _ -> Ok { status; events }
 
 let parse ~policy bytes =

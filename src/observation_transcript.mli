@@ -13,7 +13,9 @@ val format_version : int
 
 (** One recorded field. *)
 type field =
-  | Data of string  (** the canonical rendering ({!Observation.render}), within the byte limit *)
+  | Data of string
+      (** the data-v1 rendering ({!field_of_value}: constructors qualified by identity), or raw
+          output bytes, within the byte limit *)
   | Truncated of { total : int; prefix : string }
       (** a rendering longer than the policy's limit: its first [field_bytes] bytes and its length
       *)

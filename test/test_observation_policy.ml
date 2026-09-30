@@ -539,6 +539,121 @@ let test_impossible_transcripts () =
     "uncoded failures are inconclusive" "inconclusive run[0].status"
     (compare (failing "one") (failing "two"))
 
+exception Handler_boom
+
+let results transcript =
+  List.map
+    (fun (event : Observation_transcript.event) ->
+      match event.result with
+      | Some (Observation_transcript.Data bytes) -> bytes
+      | Some Observation_transcript.Missing -> "<missing>"
+      | Some _ -> "other"
+      | None -> "<none>")
+    (run_events transcript)
+
+let test_routed_nested_and_persisted () =
+  let store, ctx = prepared "routed" in
+  let send = probe_send store ctx in
+  let observed = policy [ (send, rule ()) ] in
+  (* a routed call: the scheduler captures it and dispatches it later with its correlation id *)
+  let recorder = Observation_transcript.create observed in
+  let expression_ = expression store "probe.send(\"a\", \"b\")" in
+  ignore
+    (Eval.with_invocation ctx (fun _ ->
+         Eval.register_root_handler ctx send (fun _ -> Ok (Value.VInt 9));
+         Observation_transcript.record recorder ctx (fun () ->
+             Result.map
+               (fun (scheduled : Round_robin.scheduled) -> scheduled.value)
+               (Round_robin.run_expr_scheduled ctx
+                  ~mode:(Round_robin.Seeded_schedule { seed = 0 })
+                  expression_))));
+  Alcotest.(check (list string))
+    "a routed result pairs with its call" [ "9" ]
+    (results (Observation_transcript.transcript recorder));
+  (* a nested call that is dispatched: each result stays with its own call *)
+  let nested =
+    record
+      ~handler:(fun arguments ->
+        match arguments with
+        | Value.VText "outer" :: _ -> (
+            match Eval.run_expr ctx (expression store "probe.send(\"inner\", \"x\")") with
+            | Ok _ -> Ok (Value.VInt 1)
+            | Error error -> Error error)
+        | _ -> Ok (Value.VInt 5))
+      store ctx observed
+      [ "probe.send(\"outer\", \"y\")" ]
+  in
+  Alcotest.(check (list string)) "outer and inner results" [ "1"; "5" ] (results nested);
+  (* a handler that raises leaves no call behind: later output is attributed correctly *)
+  (match
+     record ~handler:(fun _ -> raise Handler_boom) store ctx observed [ "probe.send(\"a\", \"b\")" ]
+   with
+  | _ -> Alcotest.fail "the handler exception was swallowed"
+  | exception Handler_boom -> ());
+  Alcotest.(check bool)
+    "output after a raising handler" true
+    (List.map
+       (fun (event : Observation_transcript.event) -> event.output)
+       (run_events (console_transcript store ctx Observation_policy.default "print(\"hi\")"))
+    = [ Some (Observation_transcript.Data "hi") ]);
+  (* a persisted transcript holds neither excluded fields nor secrets, and reads back exactly *)
+  let sensitive = "hunter2-SENSITIVE" in
+  let excluded =
+    policy [ (send, rule ~arguments:(Observation_policy.Selected_arguments [ 0 ]) ()) ]
+  in
+  let transcript =
+    record
+      ~handler:(fun _ -> Ok (Value.VSecret (Secret.of_string sensitive)))
+      store ctx excluded
+      [ Printf.sprintf "{ probe.send(\"a\", %S); 0 }" sensitive ]
+  in
+  let path = Filename.temp_file "jacquard-obs1-" ".transcript" in
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
+    (fun () ->
+      Out_channel.with_open_bin path (fun channel ->
+          Out_channel.output_string channel (Observation_transcript.serialize transcript));
+      let stored = In_channel.with_open_bin path In_channel.input_all in
+      Alcotest.(check bool) "the file omits the value" false (contains stored sensitive);
+      let reread = expect_ok "reread" (Observation_transcript.parse ~policy:excluded stored) in
+      Alcotest.(check string)
+        "the file reads back exactly" stored
+        (Observation_transcript.serialize reread))
+
+let test_impossible_fields () =
+  let store, ctx = prepared "impossible-fields" in
+  let send = probe_send store ctx in
+  let observed = policy [ (send, rule ()) ] in
+  let refuse label policy bytes =
+    expect_code label "E1006" (Observation_transcript.parse ~policy bytes)
+  in
+  let failing =
+    Observation_transcript.serialize
+      (record
+         ~handler:(fun _ -> Error (Runtime_err.Eval_error "no"))
+         store ctx observed [ "probe.send(\"a\", \"b\")" ])
+  in
+  refuse "a fuel-exhausted handler result" observed
+    (replace_once failing "result failure code=uncoded" "result failure code=E0919");
+  let secret =
+    Observation_transcript.serialize
+      (record
+         ~handler:(fun _ -> Ok (Value.VSecret (Secret.of_string "s")))
+         store ctx observed
+         [ "{ probe.send(\"a\", \"b\"); 0 }" ])
+  in
+  refuse "an unknown opaque kind" observed
+    (replace_once secret "unsupported kind=secret" "unsupported kind=password");
+  (* an unfinished event is always the last, with nothing after its arguments *)
+  let big = String.make 60_000 'a' in
+  let projected =
+    Observation_transcript.serialize
+      (record ~fuel:300 store ctx Observation_policy.default
+         [ Printf.sprintf "probe.send(%S, \"b\")" big ])
+  in
+  refuse "an unfinished event with an output" Observation_policy.default
+    (replace_once projected "output missing\n" "output data bytes=1\nx\n")
+
 let suite =
   [
     Alcotest.test_case "policies are canonical, identified, and strictly parsed" `Quick
@@ -560,4 +675,8 @@ let suite =
       test_fuel_keeps_observations;
     Alcotest.test_case "impossible transcripts are refused and uncoded failures are not equal"
       `Quick test_impossible_transcripts;
+    Alcotest.test_case "routed, nested and raising calls pair; persisted files stay redacted" `Quick
+      test_routed_nested_and_persisted;
+    Alcotest.test_case "fields the recorder cannot produce are refused" `Quick
+      test_impossible_fields;
   ]
