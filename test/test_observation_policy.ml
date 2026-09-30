@@ -584,6 +584,29 @@ let test_routed_nested_and_persisted () =
       [ "probe.send(\"outer\", \"y\")" ]
   in
   Alcotest.(check (list string)) "outer and inner results" [ "1"; "5" ] (results nested);
+  (* every output chunk of a call is compared, not only the first *)
+  let chunks ?(field_bytes = 4096) second =
+    record
+      ~handler:(fun _ ->
+        Eval.note_root_output ctx ~operation:send "same";
+        Eval.note_root_output ctx ~operation:send second;
+        Ok (Value.VInt 7))
+      store ctx
+      (policy ~field_bytes [ (send, rule ~output:Observation_policy.Compare ()) ])
+      [ "probe.send(\"a\", \"b\")" ]
+  in
+  Alcotest.(check string)
+    "a later chunk distinguishes calls" "divergent run[0].event[0].output"
+    (compare (chunks "left") (chunks "right"));
+  Alcotest.(check bool)
+    "chunks are concatenated" true
+    (List.map
+       (fun (event : Observation_transcript.event) -> event.output)
+       (run_events (chunks "left"))
+    = [ Some (Observation_transcript.Data "sameleft") ]);
+  Alcotest.(check string)
+    "chunks past the limit are truncated by total length" "divergent run[0].event[0].output"
+    (compare (chunks ~field_bytes:6 "left") (chunks ~field_bytes:6 "leftover"));
   (* a handler that raises leaves no call behind: later output is attributed correctly *)
   (match
      record ~handler:(fun _ -> raise Handler_boom) store ctx observed [ "probe.send(\"a\", \"b\")" ]
@@ -646,7 +669,7 @@ let test_impossible_fields () =
   in
   refuse "an unknown opaque kind" observed
     (replace_once secret "unsupported kind=secret" "unsupported kind=password");
-  (* an unfinished event is always the last, with nothing after its arguments *)
+  (* unfinished arguments mean the handler never ran: no output can follow them *)
   let big = String.make 60_000 'a' in
   let projected =
     Observation_transcript.serialize

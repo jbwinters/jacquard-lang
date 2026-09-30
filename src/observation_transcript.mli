@@ -26,8 +26,8 @@ type field =
   | Missing  (** the policy compares the field but the run produced none *)
   | Unfinished
       (** fuel ran out while this field was being projected (usually ending the run, though a fuel
-          scope or nested bounded invocation may let it continue); for all-arguments it stands for
-          every argument, at position 0 *)
+          scope, a nested bounded invocation, or recording outside an invocation may let it
+          continue); for all-arguments it stands for every argument, at position 0 *)
 
 type event = {
   operation : Hash.t;

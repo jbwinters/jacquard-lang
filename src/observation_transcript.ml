@@ -29,7 +29,8 @@ type pending = {
   rule : Observation_policy.rule;
   mutable arguments : (int * field) list;
   mutable result_seen : field option option;  (** [Some _] once the Result event arrived *)
-  mutable output_seen : field option option;
+  mutable output_seen : (string * int) option;
+      (** every output chunk of the call, in order: its first [field_bytes] bytes and its length *)
 }
 
 type recorder = {
@@ -140,14 +141,19 @@ let on_event recorder = function
             pending.arguments <- unfinished_arguments rule;
             raise exceeded))
   | Observation.Output { call; operation; bytes } -> (
+      (* a trusted adapter may emit several chunks for one call: all of them are its output, kept
+         as a bounded prefix and a total length *)
       match pending_call recorder ~call operation with
-      | Some pending when Option.is_none pending.output_seen ->
-          pending.output_seen <-
-            Some
-              (match pending.rule.output with
-              | Observation_policy.Compare -> Some (bounded recorder.policy bytes)
-              | Observation_policy.Ignore -> None)
-      | Some _ | None -> ())
+      | Some pending -> (
+          match pending.rule.output with
+          | Observation_policy.Ignore -> ()
+          | Observation_policy.Compare ->
+              let limit = Observation_policy.field_bytes recorder.policy in
+              let prefix, total = Option.value pending.output_seen ~default:("", 0) in
+              let room = max 0 (limit - String.length prefix) in
+              let kept = String.sub bytes 0 (min room (String.length bytes)) in
+              pending.output_seen <- Some (prefix ^ kept, total + String.length bytes))
+      | None -> ())
   | Observation.Result { call; operation; result } -> (
       match pending_call recorder ~call operation with
       | Some pending when Option.is_none pending.result_seen -> (
@@ -177,7 +183,14 @@ let finished (pending : pending) =
     operation = pending.operation;
     arguments = pending.arguments;
     result = compared pending.rule.result pending.result_seen;
-    output = compared pending.rule.output pending.output_seen;
+    output =
+      (match pending.rule.output with
+      | Observation_policy.Ignore -> None
+      | Observation_policy.Compare -> (
+          match pending.output_seen with
+          | None -> Some Missing
+          | Some (prefix, total) when total = String.length prefix -> Some (Data prefix)
+          | Some (prefix, total) -> Some (Truncated { total; prefix })));
   }
 
 let record recorder ctx run =

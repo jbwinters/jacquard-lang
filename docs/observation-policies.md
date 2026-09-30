@@ -110,9 +110,11 @@ result data bytes=1
   result that never arrived because a driver captured the operation without
   dispatching it, a post-call check refused the handler's result, or the run
   stopped inside the handler), or
-  `unfinished` (the fuel ran out while the field was being projected; only in
-  an incomplete run, and for all-arguments a single position 0 stands for every
-  argument).
+  `unfinished` (the fuel ran out while the field was being projected; for
+  all-arguments a single position 0 stands for every argument). An event whose
+  arguments are unfinished never reached its handler, so its compared result
+  and output are `missing`. Output is every chunk the call's trusted adapter
+  accepted, concatenated in order.
 
 An operation is recorded before its arguments are projected, so a run that
 runs out of fuel while projecting them still records which operation it
