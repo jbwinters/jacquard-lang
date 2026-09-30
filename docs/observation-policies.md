@@ -116,14 +116,14 @@ result data bytes=1
 
 An operation is recorded before its arguments are projected, so a run that
 runs out of fuel while projecting them still records which operation it
-reached. Running out of fuel ends the run, so at most one field in a run is
-unfinished; an event with unfinished arguments is the run's last (an unfinished
-result may belong to an outer call whose nested calls finished), and the
-parser refuses any other placement, unfinished arguments whose handler appears
-to have run, an unknown opaque kind, and a handler failure coded E0919 in a
-run that did not end incomplete (inside an invocation a handler returning
-exhaustion ends the run before its result is observed; outside one the result
-is observed and the run then ends incomplete).
+reached. Running out of fuel usually ends the run, but not always: a fuel scope, a
+nested bounded invocation, or recording outside an invocation can let it
+continue. So unfinished fields, and handler results that failed with E0919,
+may appear on any event of any run. The parser fixes only what the recorder
+guarantees: unfinished arguments mean the handler never ran (every selected
+position unfinished, no result or output), a failed run is never coded E0919,
+an incomplete run always is, and an opaque kind is one the projection
+produces.
 
 Parsing needs the policy: the header's policy identity must match it, and each
 event must carry exactly the lines its rule demands. Everything else is as
@@ -164,8 +164,10 @@ with the same prefix and total, unsupported fields of the same kind, two
 unfinished field are inconclusive; when either event's arguments are
 unfinished, its arguments are inconclusive as a whole. Anything else
 (including data against truncated, or any kind against another) differs. Two
-incomplete runs are compared field by field like any others: under equal
-budgets a missing result or a shorter event list is a divergence. A divergence renders as a three-line frame with the
+incomplete runs are compared field by field like any others (a missing result
+or a shorter event list is a divergence), but two incomplete runs that agree
+on everything recorded are inconclusive, never equal: neither produced what it
+would have compared next. A divergence renders as a three-line frame with the
 path and both sides; only recorded fields can appear in it.
 
 ## 5. Compatibility

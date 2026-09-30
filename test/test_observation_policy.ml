@@ -469,7 +469,7 @@ let test_fuel_keeps_observations () =
     (expect_ok "unfinished round trip"
        (Observation_transcript.parse ~policy:Observation_policy.default bytes));
   Alcotest.(check string)
-    "unfinished arguments cannot be called equal" "inconclusive run[0].event[0].argument[0]"
+    "two incomplete runs cannot be called equal" "inconclusive run[0].status"
     (compare projected projected)
 
 let replace_once text needle replacement =
@@ -633,8 +633,10 @@ let test_impossible_fields () =
          ~handler:(fun _ -> Error (Runtime_err.Eval_error "no"))
          store ctx observed [ "probe.send(\"a\", \"b\")" ])
   in
-  refuse "a fuel-exhausted handler result in a failed run" observed
-    (replace_once failing "result failure code=uncoded" "result failure code=E0919");
+  ignore
+    (expect_ok "a fuel-coded handler result"
+       (Observation_transcript.parse ~policy:observed
+          (replace_once failing "result failure code=uncoded" "result failure code=E0919")));
   let secret =
     Observation_transcript.serialize
       (record
@@ -672,8 +674,33 @@ let test_impossible_fields () =
   ignore
     (expect_ok "an earlier unfinished result"
        (Observation_transcript.parse ~policy:observed outer_unfinished));
-  refuse "two unfinished fields" observed
-    (replace_once outer_unfinished "result data bytes=1\n5\n" "result unfinished\n")
+  (* a fuel scope or nested bounded invocation lets a run continue after a field ran out *)
+  ignore
+    (expect_ok "two unfinished results"
+       (Observation_transcript.parse ~policy:observed
+          (replace_once outer_unfinished "result data bytes=1\n5\n" "result unfinished\n")));
+  (* outside an invocation a handler can return a nested exhaustion that an outer handler
+     recovers from: the run completes with a fuel-coded result, and that parses *)
+  let recorder = Observation_transcript.create observed in
+  Eval.register_root_handler ctx send (fun arguments ->
+      match arguments with
+      | Value.VText "outer" :: _ -> (
+          match Eval.run_expr ctx (expression store "probe.send(\"inner\", \"x\")") with
+          | Ok _ | Error _ -> Ok (Value.VInt 1))
+      | _ -> Error (Runtime_err.Fuel_exhausted { model = "fuel-v1"; limit = 1 }));
+  let recovered =
+    Observation_transcript.record recorder ctx (fun () ->
+        Eval.run_expr ctx (expression store "probe.send(\"outer\", \"y\")"))
+  in
+  Alcotest.(check bool) "the outer run completes" true (Result.is_ok recovered);
+  let bytes = Observation_transcript.serialize (Observation_transcript.transcript recorder) in
+  Alcotest.(check bool)
+    "the inner result is fuel-coded" true
+    (contains bytes "result failure code=E0919");
+  let reread =
+    expect_ok "a recovered exhaustion" (Observation_transcript.parse ~policy:observed bytes)
+  in
+  Alcotest.(check string) "round trip" bytes (Observation_transcript.serialize reread)
 
 let suite =
   [

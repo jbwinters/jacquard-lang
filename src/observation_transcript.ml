@@ -482,9 +482,10 @@ let parse_run policy cursor ~expected_index =
       events (index + 1) (event :: reversed)
   in
   let* events = events 0 [] in
-  (* only a projection that ran out of fuel leaves a field unfinished, and it ends the run: an
-     event with unfinished arguments is the last, exactly as the recorder writes it (every selected
-     position unfinished, the handler never ran), and one with an unfinished result is the last *)
+  (* running out of fuel does not always end a run (a fuel scope, a nested bounded invocation, or
+     recording outside an invocation lets it continue), so unfinished fields and fuel-coded handler
+     results may appear anywhere; the one fixed shape is that unfinished arguments mean the handler
+     never ran: every selected position unfinished, no result or output *)
   let exact_unfinished (event : event) =
     let arguments_unfinished = List.exists (fun (_, field) -> field = Unfinished) event.arguments in
     let absent = function None | Some Missing -> true | Some _ -> false in
@@ -495,31 +496,8 @@ let parse_run policy cursor ~expected_index =
       | None -> false
     else true
   in
-  let arguments_unfinished (event : event) =
-    List.exists (fun (_, field) -> field = Unfinished) event.arguments
-  in
-  let ends (event : event) = arguments_unfinished event || event.result = Some Unfinished in
-  (* events are in call order: an outer call's result can run out after a nested call finished,
-     so an unfinished result may be on any event, but only one field in a run runs out, and
-     unfinished arguments stop the run before any later call *)
-  let rec well_placed = function
-    | [] -> true
-    | [ last ] -> exact_unfinished last
-    | event :: rest -> (not (arguments_unfinished event)) && well_placed rest
-  in
-  let well_placed events = well_placed events && List.length (List.filter ends events) <= 1 in
-  (* a handler result coded as fuel exhaustion is observed only outside an invocation (inside one,
-     the returned exhaustion ends the run first), and it then ends the run as incomplete *)
-  let fuel_result (event : event) = event.result = Some (Failure fuel_code) in
-  match status with
-  | (Complete _ | Failed _) when List.exists fuel_result events ->
-      invalid_at cursor.offset
-        "a fuel-exhausted handler result appears in a run not stopped by fuel"
-  | (Complete _ | Failed _) when List.exists ends events ->
-      invalid_at cursor.offset "an unfinished field appears in a run that was not stopped by fuel"
-  | _ when not (well_placed events) ->
-      invalid_at cursor.offset "an unfinished field is not where running out of fuel leaves it"
-  | Complete _ | Failed _ | Incomplete _ -> Ok { status; events }
+  if List.for_all exact_unfinished events then Ok { status; events }
+  else invalid_at cursor.offset "unfinished arguments do not have the shape the recorder writes"
 
 let parse ~policy bytes =
   let ( let* ) = Result.bind in
@@ -681,7 +659,16 @@ let compare left right =
                   left = Status_side left.status;
                   right = Status_side right.status;
                 }
-      | Incomplete left_code, Incomplete right_code when String.equal left_code right_code -> ()
+      | Incomplete left_code, Incomplete right_code when String.equal left_code right_code ->
+          (* a run stopped by fuel never produced what it would have compared next *)
+          if Option.is_none !unsure then
+            unsure :=
+              Some
+                {
+                  position = Status_position index;
+                  left = Status_side left.status;
+                  right = Status_side right.status;
+                }
       | _ ->
           raise
             (Found

@@ -25,8 +25,9 @@ type field =
   | Failure of string  (** a root handler's failure, by diagnostic code *)
   | Missing  (** the policy compares the field but the run produced none *)
   | Unfinished
-      (** the run's fuel ran out while this field was being projected (an incomplete run only); for
-          all-arguments it stands for every argument, at position 0 *)
+      (** fuel ran out while this field was being projected (usually ending the run, though a fuel
+          scope or nested bounded invocation may let it continue); for all-arguments it stands for
+          every argument, at position 0 *)
 
 type event = {
   operation : Hash.t;
@@ -104,8 +105,8 @@ type difference = { position : position; left : side; right : side }
 
 (** [Equal]: every compared field agrees. [Divergent]: the first field that certainly differs.
     [Inconclusive]: no field certainly differs, but at the first position shown two fields agree
-    only on a truncated prefix, an opaque kind, or an uncoded failure, or one is unfinished, so
-    equality cannot be claimed. *)
+    only on a truncated prefix, an opaque kind, or an uncoded failure, or one is unfinished, or both
+    runs stopped incomplete, so equality cannot be claimed. *)
 type verdict = Equal | Divergent of difference | Inconclusive of difference
 
 val compare : transcript -> transcript -> (verdict, Diag.t list) result
