@@ -421,8 +421,8 @@ let reject_task_escape ctx ~scope_path root =
     continuation state, callback mutation, and callback results are guarded at dispatch time. *)
 let register_root_handler ctx op handler = Hashtbl.replace ctx.root_handlers op handler
 
-(** [with_root_observer] scopes a root-operation observer to one caller-controlled evaluation
-    extent. The saved observer is restored even across an internal runtime exception. *)
+(** [with_observer] scopes a typed root observer to one caller-controlled evaluation extent. The
+    saved observer is restored even across an internal runtime exception. *)
 let with_observer ctx on_event body =
   let previous = ctx.root_observer in
   ctx.root_observer <- Some on_event;
@@ -1352,7 +1352,6 @@ let perform_unchecked ctx (op : Hash.t) ~name ~effect_ (args : Value.t list) (k 
     | [] -> (
         if walked > 0 then charge ctx walked;
         notify_root_operation ctx op ~name args;
-        (* the observer may have run evaluation that exhausted the invocation *)
         if Fuel_meter.exhausted () then exhaust ctx;
         match Hashtbl.find_opt ctx.root_handlers op with
         | Some native when not ctx.capture_root_handlers ->
@@ -1876,22 +1875,25 @@ let run_validated_state_capturing ctx (Validated_state (owner, state, _)) =
 (** [resume_validated_state ctx kont value] seals a state derived from a captured continuation. Only
     the newly introduced value needs validation because [kont] came from a validated run. *)
 let resume_validated_state ctx kont value =
-  match kont with
-  | Validated_multi_kont (Validated_kont (owner, frames)) ->
-      if owner != ctx then Error (foreign_evaluator_context "validated continuation")
-      else (
-        charge_outside ctx (List.length frames);
-        match checked_result_state ctx value frames with
-        | state -> Ok (Validated_state (owner, state, None))
-        | exception Rt error -> Error error
-        | exception Fuel_meter.Exceeded -> Error (fuel_error ctx))
-  | Validated_once_kont (owner, resume) -> (
-      if owner != ctx then Error (foreign_evaluator_context "validated continuation")
-      else
-        match apply ctx resume [ value ] [] with
-        | state -> Ok (Validated_state (owner, state, None))
-        | exception Rt error -> Error error
-        | exception Fuel_meter.Exceeded -> Error (fuel_error ctx))
+  if ctx.observing then
+    Error (Runtime_err.Eval_error "an observation callback cannot run evaluation")
+  else
+    match kont with
+    | Validated_multi_kont (Validated_kont (owner, frames)) ->
+        if owner != ctx then Error (foreign_evaluator_context "validated continuation")
+        else (
+          charge_outside ctx (List.length frames);
+          match checked_result_state ctx value frames with
+          | state -> Ok (Validated_state (owner, state, None))
+          | exception Rt error -> Error error
+          | exception Fuel_meter.Exceeded -> Error (fuel_error ctx))
+    | Validated_once_kont (owner, resume) -> (
+        if owner != ctx then Error (foreign_evaluator_context "validated continuation")
+        else
+          match apply ctx resume [ value ] [] with
+          | state -> Ok (Validated_state (owner, state, None))
+          | exception Rt error -> Error error
+          | exception Fuel_meter.Exceeded -> Error (fuel_error ctx))
 
 (** [run_state_capturing ctx state] drives [state] to completion, but instead of dying on an
     unhandled op it returns the op with its continuation ({!COp}). Used by native inference drivers
@@ -1940,55 +1942,65 @@ let run_state_capturing_once_routed ctx state =
       | Error error -> Error error)
 
 let dispatch_root_operation ctx ~resume ~op ~name ~effect_ args =
-  let effect_ =
-    match locate ctx ~trusted:true op with
-    | { Store.decl = { Kernel.it = Kernel.DefEffect { ename; _ }; _ }; role = Store.Operation _; _ }
-      ->
-        ename
-    | _ -> effect_
-  in
-  match Hashtbl.find_opt ctx.root_handlers op with
-  | None -> Error (Runtime_err.Unhandled { effect_; op = name })
-  | Some _ when Fuel_meter.exhausted () -> Error (fuel_error ctx)
-  | Some native -> (
-      try
-        let roots = [ VOp { op; name; effect_ }; VTuple args; resume ] in
-        List.iter (prepare_native_argument ctx) roots;
-        charge_native ctx args;
-        let result = native args in
-        note_returned_exhaustion ctx result;
-        if Fuel_meter.exhausted () then raise (Rt (fuel_error ctx));
-        List.iter (check_native_argument ctx) roots;
-        notify_root_result ctx op result;
-        match charge_native_result ctx result with
-        | Ok value ->
-            if not (atomic_non_task_value value) then reject_recovery_result_value ctx value;
-            Ok value
-        | Error error -> Error error
-      with
-      | Rt error -> Error error
-      | Fuel_meter.Exceeded -> Error (fuel_error ctx))
+  (* an observer callback cannot dispatch an operation (RF.3) *)
+  if ctx.observing then
+    Error (Runtime_err.Eval_error "an observation callback cannot run evaluation")
+  else
+    let effect_ =
+      match locate ctx ~trusted:true op with
+      | {
+       Store.decl = { Kernel.it = Kernel.DefEffect { ename; _ }; _ };
+       role = Store.Operation _;
+       _;
+      } ->
+          ename
+      | _ -> effect_
+    in
+    match Hashtbl.find_opt ctx.root_handlers op with
+    | None -> Error (Runtime_err.Unhandled { effect_; op = name })
+    | Some _ when Fuel_meter.exhausted () -> Error (fuel_error ctx)
+    | Some native -> (
+        try
+          let roots = [ VOp { op; name; effect_ }; VTuple args; resume ] in
+          List.iter (prepare_native_argument ctx) roots;
+          charge_native ctx args;
+          let result = native args in
+          note_returned_exhaustion ctx result;
+          if Fuel_meter.exhausted () then raise (Rt (fuel_error ctx));
+          List.iter (check_native_argument ctx) roots;
+          notify_root_result ctx op result;
+          match charge_native_result ctx result with
+          | Ok value ->
+              if not (atomic_non_task_value value) then reject_recovery_result_value ctx value;
+              Ok value
+          | Error error -> Error error
+        with
+        | Rt error -> Error error
+        | Fuel_meter.Exceeded -> Error (fuel_error ctx))
 
 (** [resume_captured_state ctx kont value] constructs the state that resumes a root capture. Multi
     continuations remain reusable; applying a Once token consumes its single budget and a later call
     reports E0906. Newly introduced values are recovery-validated at this boundary. *)
 let resume_captured_state ctx kont value =
-  match kont with
-  | Multi_kont (owner, frames) ->
-      if owner != ctx then Error (foreign_evaluator_context "captured continuation")
-      else (
-        charge_outside ctx (List.length frames);
-        match checked_result_state ctx value frames with
-        | state -> Ok state
-        | exception Rt error -> Error error
-        | exception Fuel_meter.Exceeded -> Error (fuel_error ctx))
-  | Once_kont (owner, resume) -> (
-      if owner != ctx then Error (foreign_evaluator_context "captured continuation")
-      else
-        match apply ctx resume [ value ] [] with
-        | state -> Ok state
-        | exception Rt error -> Error error
-        | exception Fuel_meter.Exceeded -> Error (fuel_error ctx))
+  if ctx.observing then
+    Error (Runtime_err.Eval_error "an observation callback cannot run evaluation")
+  else
+    match kont with
+    | Multi_kont (owner, frames) ->
+        if owner != ctx then Error (foreign_evaluator_context "captured continuation")
+        else (
+          charge_outside ctx (List.length frames);
+          match checked_result_state ctx value frames with
+          | state -> Ok state
+          | exception Rt error -> Error error
+          | exception Fuel_meter.Exceeded -> Error (fuel_error ctx))
+    | Once_kont (owner, resume) -> (
+        if owner != ctx then Error (foreign_evaluator_context "captured continuation")
+        else
+          match apply ctx resume [ value ] [] with
+          | state -> Ok state
+          | exception Rt error -> Error error
+          | exception Fuel_meter.Exceeded -> Error (fuel_error ctx))
 
 (** [resume_state kont v] is the state that delivers [v] to a captured continuation. *)
 let resume_state (kont : Value.frame list) (v : Value.t) : state = SApply (v, kont)

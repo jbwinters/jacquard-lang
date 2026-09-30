@@ -992,6 +992,16 @@ let test_observer_cannot_evaluate () =
   | exception Boom -> ());
   Alcotest.(check string)
     "the operation was not dispatched after the failing callback" "x" (Buffer.contents sink);
+  (* the v1 view never sees results *)
+  let v1 = ref 0 in
+  ignore
+    (Eval.with_invocation ctx (fun _ ->
+         grant_console ctx sink;
+         Eval.with_root_observer ctx
+           ~on_operation:(fun _ -> incr v1)
+           ~on_output:(fun _ _ -> incr v1)
+           (fun () -> Eval.run_expr ctx greet)));
+  Alcotest.(check int) "v1 observes operation and output only" 2 !v1;
   Alcotest.(check bool)
     "evaluation works again" true
     (Eval.with_invocation ctx (fun _ -> Result.is_ok (Eval.run_expr ctx one)))
