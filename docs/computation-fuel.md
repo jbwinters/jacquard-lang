@@ -91,6 +91,9 @@ invocation reaches it, whether the value was computed now or earlier:
   this invocation, and marks each term charged when its replay completes. A
   refusal part-way (for example under a nested cap) therefore leaves exactly the
   terms charged that a cold run would have finished.
+- A sub-run or replay that fails part-way hands the terms it did complete to
+  the enclosing term's record, so a term that survives a failed attempt inside
+  it still names what that attempt paid for.
 
 The fuel an invocation spends is the same on a fresh evaluator as after any
 earlier invocation warmed the memo, in any order. Charging follows the active invocation, not

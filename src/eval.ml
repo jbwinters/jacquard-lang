@@ -126,9 +126,15 @@ type memo_charge = {
 (* memo sub-runs in progress, innermost first, across every evaluator: a native that re-enters
    another evaluator inside a sub-run still attributes that evaluator's memoized terms to it *)
 type memo_frame = {
-  mutable frame_segments : (int * memo_charge) list;  (** most recent first *)
-  mutable last_mark : int;  (** the meter's fine count when the last segment closed *)
+  frame_start : int;  (** the meter's fine count when the sub-run's recorded cost began *)
+  mutable completed : (int * int * memo_charge) list;
+      (** memoized terms reached, as (fine count at start, at end, term), most recent first *)
 }
+
+(* Hand the terms a sub-run or replay completed before it failed to the enclosing frame, so the
+   enclosing term's record still names them (a cold run of it would have left them paid). *)
+let hoist_completed frames completed =
+  match frames with parent :: _ -> parent.completed <- completed @ parent.completed | [] -> ()
 
 let memo_frames : memo_frame list ref = ref []
 
@@ -1361,31 +1367,55 @@ let note_memo_charge cost units =
   match !memo_frames with
   | frame :: _ ->
       let now = !Fuel_meter.used in
-      frame.frame_segments <- (now - frame.last_mark - units, cost) :: frame.frame_segments;
-      frame.last_mark <- now
+      frame.completed <- (now - units, now, cost) :: frame.completed
   | [] -> ()
+
+(* A frame's record: its own fine units before each term it reached, then after the last one *)
+let segments_of_frame frame ~finished =
+  let rec go previous acc = function
+    | [] -> (List.rev acc, finished - previous)
+    | (start, stop, cost) :: rest -> go stop ((start - previous, cost) :: acc) rest
+  in
+  go frame.frame_start [] (List.rev frame.completed)
 
 (* A memo hit replays, once per invocation, exactly the charges the cold sub-run made, in the same
    order: its own work between memoized terms, each term not yet paid in this invocation (itself
    replayed), and its trailing work. A term becomes paid when its replay completes, so a refusal
    part-way (say, under a nested cap) leaves exactly the terms a cold run would have finished paid. *)
 let charge_memo_hit ctx h =
+  (* terms whose replay completed during this hit, as (start, end, term), most recent first *)
+  let finished = ref [] in
   let rec replay cost =
     if cost.charged_epoch <> !Fuel_meter.epoch then (
+      let start = !Fuel_meter.used in
       List.iter
         (fun (own, dep) ->
           charge_fine ctx own;
           replay dep)
         cost.segments;
       charge_fine ctx cost.tail;
-      cost.charged_epoch <- !Fuel_meter.epoch)
+      cost.charged_epoch <- !Fuel_meter.epoch;
+      finished := (start, !Fuel_meter.used, cost) :: !finished)
   in
   match Hashtbl.find_opt ctx.memo_cost h with
   | None -> ()
-  | Some cost ->
+  | Some cost -> (
       let before = !Fuel_meter.used in
-      replay cost;
-      note_memo_charge cost (!Fuel_meter.used - before)
+      match replay cost with
+      | () -> note_memo_charge cost (!Fuel_meter.used - before)
+      | exception exn ->
+          (* keep the outermost completed replays: a later one that started earlier contains the
+             ones it replayed *)
+          let outermost =
+            List.fold_left
+              (fun kept ((start, stop, _) as entry) ->
+                if List.exists (fun (s, e, _) -> s <= start && stop <= e) kept then kept
+                else entry :: kept)
+              [] !finished
+          in
+          hoist_completed !memo_frames
+            (List.sort (fun (a, _, _) (b, _, _) -> compare b a) outermost);
+          raise exn)
 
 (* the hot path: a warm hit already charged in this invocation, outside any memo sub-run *)
 let[@inline] memo_hit_is_paid _ctx = function
@@ -1457,15 +1487,20 @@ let rec eval_ref ctx ~trusted (h : Hash.t) (kind : Kernel.refkind) (k : kont) : 
                   reject_recovery_state ctx initial;
                   let saved_capture = ctx.capture_ops in
                   ctx.capture_ops <- false;
-                  let frame = { frame_segments = []; last_mark = started } in
+                  let frame = { frame_start = started; completed = [] } in
                   let saved_frames = !memo_frames in
                   memo_frames := frame :: saved_frames;
                   let v =
-                    Fun.protect
-                      ~finally:(fun () ->
+                    match run_state_unchecked ctx initial with
+                    | v ->
                         ctx.capture_ops <- saved_capture;
-                        memo_frames := saved_frames)
-                      (fun () -> run_state_unchecked ctx initial)
+                        memo_frames := saved_frames;
+                        v
+                    | exception exn ->
+                        ctx.capture_ops <- saved_capture;
+                        memo_frames := saved_frames;
+                        hoist_completed saved_frames frame.completed;
+                        raise exn
                   in
                   let memo_charge =
                     { segments = []; tail = 0; charged_epoch = !Fuel_meter.epoch }
@@ -1473,8 +1508,9 @@ let rec eval_ref ctx ~trusted (h : Hash.t) (kind : Kernel.refkind) (k : kont) : 
                   let next = checked_result_state ctx v k in
                   let snapshot = make_mutable_snapshot ~memo_charge ctx v in
                   let units = !Fuel_meter.used - started in
-                  memo_charge.segments <- List.rev frame.frame_segments;
-                  memo_charge.tail <- !Fuel_meter.used - frame.last_mark;
+                  let segments, tail = segments_of_frame frame ~finished:!Fuel_meter.used in
+                  memo_charge.segments <- segments;
+                  memo_charge.tail <- tail;
                   Hashtbl.replace ctx.memo_cost h memo_charge;
                   note_memo_charge memo_charge units;
                   (* The isolated run has completed all closure construction and [let rec] knot

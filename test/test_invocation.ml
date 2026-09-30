@@ -743,6 +743,34 @@ let test_fuel_outside_runs () =
     let cold = sequence cap cold_ctx (expression cold_store "table") in
     Alcotest.(check int) (Printf.sprintf "cap %d" cap) cold (sequence cap warm_ctx warm_table)
   done;
+  (* ... and when the capped attempt runs inside another term's memo sub-run that survives it: the
+     surviving term still records the dependencies the attempt completed *)
+  let surviving cap =
+    let b_store, b_ctx = prepared "fuel-outside-surviving-b" program in
+    let b_table = expression b_store "table" and b_base = expression b_store "base" in
+    let a_store, a_ctx = prepared "fuel-outside-surviving-a" "bridge(u) = 0\nouter = bridge(1)\n" in
+    (match Store.lookup_kind a_store "bridge" Resolve.KTerm with
+    | Some { Resolve.hash; _ } ->
+        Eval.register_builtin a_ctx hash
+          (Value.VBuiltin
+             ( "bridge",
+               fun _ ->
+                 ignore
+                   (Eval.with_invocation ~fuel:cap b_ctx (fun _ -> Eval.run_expr b_ctx b_table));
+                 Ok (Value.VInt 0) ))
+    | None -> Alcotest.fail "bridge not declared");
+    let a_outer = expression a_store "outer" in
+    fun () ->
+      Eval.with_invocation a_ctx (fun invocation ->
+          ignore (Eval.run_expr a_ctx a_outer);
+          ignore (Eval.run_expr b_ctx b_base);
+          Eval.fuel_used invocation)
+  in
+  for cap = 0 to 16 do
+    let run = surviving cap in
+    let cold = run () in
+    Alcotest.(check int) (Printf.sprintf "surviving cap %d" cap) cold (run ())
+  done;
   (* a Warp runner that runs out reports a runner error, never a failing verdict *)
   (match Store.lookup_kind store "test.run" Resolve.KTerm with
   | None -> Alcotest.fail "the prelude has no test.run"
