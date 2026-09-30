@@ -464,6 +464,7 @@ and copy_join_row row =
     input rows that happen to share it. Ordinary type constraints still use {!unify}; rigid rows
     remain exact. Failure raises [Unify_error]. *)
 let rec join ~level (left : ty) (right : ty) : ty =
+  Fuel_meter.tick 1;
   let left = repr left and right = repr right in
   if left == right then copy_join_result left
   else
@@ -589,7 +590,9 @@ let instantiate ~level (s : scheme) : ty =
 let clone_schemes (schemes : scheme list) : scheme list =
   let tmap : (int, ty) Hashtbl.t = Hashtbl.create 32 in
   let rmap : (int, rtail) Hashtbl.t = Hashtbl.create 32 in
-  let rec go = function
+  let rec go t =
+    Fuel_meter.tick 1;
+    match t with
     | TCon (hash, args) -> TCon (hash, List.map go args)
     | TTuple items -> TTuple (List.map go items)
     | TArrow (params, row, result) -> TArrow (List.map go params, go_row row, go result)
@@ -776,6 +779,8 @@ let show ?(name_of = fun h -> String.sub (Hash.to_hex h) 0 8) ?effect_name_of ?(
         else String.concat ", " effs ^ " | " ^ n
   in
   let rec go ~paren t =
+    (* rendering a type for a diagnostic walks it like any other value (RT.1) *)
+    Fuel_meter.tick 1;
     match repr t with
     | TVar { contents = Unbound { id; _ } } -> tname id
     | TVar { contents = Link _ } -> assert false

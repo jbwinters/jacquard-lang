@@ -108,6 +108,16 @@ stops at the budget instead of running for minutes:
   $ timeout 60 jacquard run --allow eval --fuel 100000 types.jac 2>&1 | head -1
   error[E0919]: Computation fuel was exhausted
 
+Rendering a type for a diagnostic is metered as well: a type error whose type
+is exponentially large stops at the budget instead of rendering it:
+
+  $ python3 -c 'n = 40
+  > ps = ", ".join("f%d" % i for i in range(n + 1))
+  > body = "\n".join("    let _ = f%d((f%d, f%d))" % (i, i + 1, i + 1) for i in range(n))
+  > print("plan = quote {\n  add(fn (%s) -> {\n%s\n    0\n  }, 1)\n}\n\n`op:eval-code`(plan)" % (ps, body))' > typerror.jac
+  $ timeout 60 jacquard run --allow eval --fuel 100000 typerror.jac 2>&1 | head -1
+  error[E0919]: Computation fuel was exhausted
+
 A budget must be a non-negative number of units:
 
   $ jacquard run --fuel=-1 spin.jac 2>&1 | head -2

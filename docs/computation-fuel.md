@@ -59,7 +59,8 @@ rendering (`Value.show`), code printing and form comparison tick the meter per
 node and text byte wherever they run: in a native such as `debug.inspect`,
 `code.render`, `code.eq?` or `pmf`; in the evaluator splicing a quote,
 stamping its scope marks, converting code to kernel syntax, or building a
-diagnostic; in the type checker unifying, instantiating, or walking types (the
+diagnostic; in the type checker unifying, instantiating, joining, cloning, rendering (for a
+diagnostic), or walking types (the
 run's own top-level expressions, and code passed to `eval`, whose types
 let-polymorphism can make doubly exponential in size); or in a driver keying inference results, comparing
 observed values, or rendering task results. A walk stops the
