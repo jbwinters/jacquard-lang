@@ -81,10 +81,14 @@ let unit_v = VTuple []
 (** Stable rendering for goldens and diagnostics. Reals use the reader-compatible spelling; text is
     escaped like source; constructors print as [Name] or [Name(arg, ...)]; non-literal values print
     as bracketed placeholders. *)
-let rec show = function
+let rec show value =
+  Walk_meter.tick 1;
+  match value with
   | VInt i -> string_of_int i
   | VReal r -> Printer.real_repr r
-  | VText s -> "\"" ^ Printer.escape_text s ^ "\""
+  | VText s ->
+      Walk_meter.tick (String.length s);
+      "\"" ^ Printer.escape_text s ^ "\""
   | VHash hash -> "#" ^ Hash.to_hex hash
   | VSecret _ -> "<secret redacted>"
   | VTuple items -> "(" ^ String.concat ", " (List.map show items) ^ ")"

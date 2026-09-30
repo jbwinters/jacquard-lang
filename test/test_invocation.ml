@@ -456,6 +456,14 @@ let test_fuel_bounds_deep_natives () =
   Alcotest.(check (pair string int))
     "keying a shared sampled value" ("E0919", 1_000)
     (fueled ~budget:1_000 ctx store "dist.sample-lw(fn () -> dbl(L, 40), 1, 0)");
+  (* a deep native pays for the walk it does, not for the whole value: a comparison that stops at
+     the first node stays cheap on an exponentially shared form, bounded or not *)
+  let unequal = "code.eq?(code.of-int(0), cdbl(code.of-int(1), 22))" in
+  let result, cost = fueled ctx store unequal in
+  Alcotest.(check string) "short-circuits unbounded" "false" result;
+  Alcotest.(check (pair string int))
+    "and under its exact budget" ("false", cost)
+    (fueled ~budget:cost ctx store unequal);
   (* a small shared value still renders, and pays for its expanded size *)
   let small, cost = fueled ctx store "text.length(debug.inspect(dbl(L, 8)))" in
   Alcotest.(check (pair string int))
@@ -501,6 +509,34 @@ let test_fuel_outside_runs () =
         | Ok closure -> failure (run_state ctx (Eval.apply_state ctx closure [ swallow ])))
   in
   Alcotest.(check string) "exhaustion wins over the native's error" "E0919" code;
+  (* after exhaustion no native runs again, whoever applies it *)
+  let calls = ref 0 in
+  let counting =
+    Value.VBuiltin
+      ( "counting",
+        fun _ ->
+          incr calls;
+          Ok Value.unit_v )
+  in
+  let codes =
+    Eval.with_invocation ~fuel:1_000 ctx (fun _ ->
+        let first = failure (Eval.run_expr ctx spin) in
+        let second = failure (Eval.call ctx counting []) in
+        let third = failure (run_state ctx (Eval.apply_state ctx counting [])) in
+        [ first; second; third ])
+  in
+  Alcotest.(check (list string)) "all exhausted" [ "E0919"; "E0919"; "E0919" ] codes;
+  Alcotest.(check int) "the native never ran" 0 !calls;
+  (* a native that re-enters the evaluator while a driver applies it cannot raise out of
+     [apply_state] *)
+  let reenter =
+    Value.VBuiltin ("reenter", fun _ -> Result.map (fun v -> v) (Eval.run_expr ctx spin))
+  in
+  let code =
+    Eval.with_invocation ~fuel:0 ctx (fun _ ->
+        failure (run_state ctx (Eval.apply_state ctx reenter [])))
+  in
+  Alcotest.(check string) "reported by the run" "E0919" code;
   (* a multi-shot resumption made by a driver pays for the frames it reinstalls *)
   let model =
     expression store "{ let c = `op:sample`(Bernoulli(0.5)); add(if c then 1 else 2, 3) }"

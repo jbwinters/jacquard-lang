@@ -560,21 +560,19 @@ let exhaust ctx =
     (Runtime_err.Fuel_exhausted
        { model = fuel_model; limit = Option.value ctx.fuel_limit ~default:0 })
 
-(* A refused debit exhausts the invocation, or, outside any run, waits for the next run to start *)
-
-(** [charge ctx units] debits [units] before the work they pay for. A debit that would pass the
-    ceiling is refused and exhausts the invocation; nothing is charged for it. *)
-let refuse ctx units =
+(* A refused debit exhausts the invocation at once. Inside a run it raises; outside any run (a
+   driver resuming a continuation) the next run raises it as it starts. *)
+let refuse ctx =
   if ctx.deferring then (
-    (* the invocation is exhausted now, even if no later run starts to report it *)
-    ignore units;
     mark_exhausted ctx;
     ctx.fuel_pending <- 1)
   else exhaust ctx
 
+(** [charge ctx units] debits [units] before the work they pay for. A debit that would pass the
+    ceiling is refused and exhausts the invocation, which spends the remaining allowance. *)
 let[@inline] charge ctx units =
   let used = ctx.fuel_used + units in
-  if used > ctx.fuel_ceiling then refuse ctx units else ctx.fuel_used <- used
+  if used > ctx.fuel_ceiling then refuse ctx else ctx.fuel_used <- used
 
 (* [charge_outside ctx units] debits work a driver does outside any run (resuming a captured
    continuation), deferring a refusal to the next run *)
@@ -590,10 +588,10 @@ let payload_units = function VText text -> String.length text | _ -> 0
 
 exception Past_allowance
 
-(* A deep native (one that renders, hashes, or compares a whole value or code form) does work in
-   proportion to the value's expanded size, which sharing can make exponential in what building it
-   cost. It therefore pays for the expanded size before it runs: one unit per 64 nodes or text bytes.
-   The measurement stops as soon as it passes the remaining allowance, so it is itself bounded. *)
+(* A driver that renders or keys whole values (an inference driver keying terminal values) pays for
+   their expanded size first: one unit per 64 nodes or text bytes, measured with an early stop at
+   the remaining allowance. The rendering that follows walks the whole value anyway, so measuring
+   first adds a constant factor. *)
 let charge_expanded ctx values =
   let remaining = ctx.fuel_ceiling - ctx.fuel_used in
   let cap =
@@ -628,9 +626,7 @@ let charge_expanded ctx values =
   in
   match List.iter value values with
   | () -> charge ctx (!count / 64)
-  | exception Past_allowance ->
-      (* never walk past the allowance, not even while a driver applies a value outside a run *)
-      exhaust ctx
+  | exception Past_allowance -> exhaust ctx
 
 let charge_walk ctx values =
   match charge_expanded ctx values with () -> Ok () | exception Rt error -> Error error
@@ -1179,9 +1175,27 @@ let invoke_untrusted_native ctx fn native args kont =
   | Ok value -> checked_result_state ctx value kont
   | Error error -> rt error
 
+(* A deep native walks whole values or code forms; sharing can make that walk exponential in what
+   building the value cost. It runs under the walk meter with the remaining allowance and pays for
+   exactly the nodes and bytes it walked, so it stops at the budget instead of finishing the walk. *)
+let invoke_deep_native ctx builtin args =
+  let remaining = ctx.fuel_ceiling - ctx.fuel_used in
+  if remaining < 0 then exhaust ctx;
+  let allowance = if remaining > (max_int - 63) / 64 then max_int else (remaining * 64) + 63 in
+  match Walk_meter.metered ~limit:allowance (fun () -> Trusted_builtin.invoke builtin args) with
+  | Some (result, walked) ->
+      charge ctx (walked / 64);
+      result
+  | None -> exhaust ctx
+
 let invoke_trusted_native ctx builtin args kont =
-  if Trusted_builtin.deep builtin then charge_expanded ctx args else charge_native ctx args;
-  match charge_native_result ctx (Trusted_builtin.invoke builtin args) with
+  let result =
+    if Trusted_builtin.deep builtin then invoke_deep_native ctx builtin args
+    else (
+      charge_native ctx args;
+      Trusted_builtin.invoke builtin args)
+  in
+  match charge_native_result ctx result with
   | Ok value -> checked_result_state ctx value kont
   | Error error -> rt error
 
@@ -1300,18 +1314,27 @@ let apply_unchecked ctx (fn : Value.t) (args : Value.t list) (k : kont) : state 
     passed the same guard. *)
 let apply ctx fn args k =
   reject_recovery_state ctx (SApply (VTuple (fn :: args), k));
-  (* a driver applying a value outside any run (a scheduler or host resuming a continuation, a
-     native call) defers a refused debit to the next run, so exhaustion is reported through that
-     run's result rather than raised from state construction *)
-  let saved = ctx.deferring in
-  ctx.deferring <- true;
-  match apply_unchecked ctx fn args k with
-  | state ->
-      ctx.deferring <- saved;
-      state
-  | exception exn ->
-      ctx.deferring <- saved;
-      raise exn
+  match fn with
+  | VBuiltin _ | VTrustedBuiltin _ -> (
+      (* a native runs only inside a run: the returned state applies it as the run's first step,
+         so its debits, its failure, and exhaustion all arrive through that run's result *)
+      let scope = empty_scope in
+      match List.rev args with
+      | [] -> SApply (fn, FAppFn { args = []; scope } :: k)
+      | last :: done_rev -> SApply (last, FAppArgs { fn; done_rev; pending = []; scope } :: k))
+  | _ -> (
+      (* a driver resuming a continuation or performing an operation outside any run defers a
+         refused debit to the next run, so exhaustion is reported through that run's result rather
+         than raised from state construction *)
+      let saved = ctx.deferring in
+      ctx.deferring <- true;
+      match apply_unchecked ctx fn args k with
+      | state ->
+          ctx.deferring <- saved;
+          state
+      | exception exn ->
+          ctx.deferring <- saved;
+          raise exn)
 
 (* Record that memoized term [h] was reached for [units] (zero when it was already charged in this
    invocation) and attribute it to the enclosing memo sub-run, if any. Every reached term is a

@@ -55,7 +55,9 @@ let real_repr r =
 let scalar_to_string = function
   | Form.Int i -> string_of_int i
   | Form.Real r -> real_repr r
-  | Form.Text s -> "\"" ^ escape_text s ^ "\""
+  | Form.Text s ->
+      Walk_meter.tick (String.length s);
+      "\"" ^ escape_text s ^ "\""
   | Form.Sym s ->
       check_symbol ~what:"symbol" s;
       s
@@ -63,6 +65,7 @@ let scalar_to_string = function
   | Form.F _ -> invalid_arg "scalar_to_string: form"
 
 let rec inline_form (f : Form.t) =
+  Walk_meter.tick 1;
   let args = List.map inline_arg f.Form.args in
   if f.Form.head = "group" then begin
     (* a group whose first element is a scalar reparses as a headed form *)

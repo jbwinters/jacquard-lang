@@ -12,6 +12,7 @@ let form ?(meta = Meta.empty) head args = { head; meta; args }
     [Float.compare], so [nan] equals [nan] and [-0.] equals [0.]; canonical hashing (W1.5) pins the
     bit-level story. *)
 let rec equal_ignoring_meta (a : t) (b : t) =
+  Walk_meter.tick 1;
   String.equal a.head b.head && List.equal equal_arg a.args b.args
 
 and equal_arg a b =

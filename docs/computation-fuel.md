@@ -43,7 +43,7 @@ Every debit is made before the work it pays for:
 | performing an operation | 1 per continuation frame walked to its handler, or to the root |
 | resuming a continuation (Multi or Once) | 1 per captured frame reinstalled, including resumptions a driver (inference, the scheduler, a host worker) makes outside the machine |
 | a native builtin or granted root handler | `text bytes / 64` over its direct arguments, then again over its result |
-| a deep native (`debug.inspect`, `code.render`, `code.hash`, `code.eq?`, `code.diff`, `pmf`) | first, `expanded nodes and bytes / 64` over its arguments |
+| a deep native (`debug.inspect`, `code.render`, `code.hash`, `code.eq?`, `code.diff`, `pmf`) | `nodes and text bytes walked / 64`, metered while it runs and never past the remaining allowance |
 | an inference driver reaching a branch's or sample's final value | `expanded nodes and bytes / 64` of that value, before the driver keys it by its rendering |
 | reaching a memoized top-level term | the cost of the sub-run that computed it, once per invocation (§3) |
 
@@ -51,10 +51,12 @@ The ordinary native measure counts only the text a native directly receives or
 returns; it does not look inside tuples, constructors or code, so measuring is
 constant work per value. A native that walks a whole value or code form is
 different: sharing can make the expanded structure exponentially larger than
-what building it cost, and the walk does work in proportion to the expanded
-size. Such a native is marked deep and pays for the expanded size before it
-runs. The measurement stops as soon as it passes the remaining allowance, so a
-huge shared value exhausts the budget quickly instead of being walked. Integer
+what building it cost, and the walk does work in proportion to the part it
+visits. Such a native is marked deep and runs under a walk meter that value
+rendering, form printing and form comparison tick per node and text byte. It is
+allowed at most the remaining budget's worth of walking and pays for exactly
+what it walked, so a huge shared value exhausts the budget instead of being
+walked, while a comparison that stops at the first node stays cheap. Integer
 division rounds down, and each charge is computed separately.
 
 Scheduling decisions, schedule traces, support sizes, wall-clock time, memory
@@ -103,9 +105,9 @@ skips a failed branch therefore cannot turn exhaustion into a value.
 - A driver working outside any run (resuming a captured continuation, applying
   a value) does not raise exhaustion from a refused debit. The invocation
   becomes exhausted at once, and the refusal is raised as the next run starts,
-  so exhaustion arrives through a run's result. The one exception is a deep
-  native, which never walks past the allowance: it fails with E0919 in place
-  of running, as any native failure would. A native that caught exhaustion from a nested run cannot
+  so exhaustion arrives through a run's result. A native is never run
+  outside a run: a driver applying one gets a state whose first step applies
+  it. A native that caught exhaustion from a nested run cannot
   replace it with its own result or error.
 - Root effects that ran before exhaustion are not retried or undone.
   Invocation teardown runs exactly once as usual.
@@ -157,10 +159,10 @@ entry points. A host consumer bounds an invocation with
 - A few natives do superlinear work in their charged size: `code.diff`
   compares subforms at every level (quadratic in form size), and `support` on a
   `UniformInt` materializes up to its 10,000-entry cap for a small charge.
-- Measuring deep natives and driver walks runs in unbounded mode too, since
-  memoized costs must not depend on whether a budget is present. The walk
-  roughly doubles the work of those natives; ordinary transitions cost a
-  counter update.
+- Accounting also runs in unbounded mode, since memoized costs must not depend
+  on whether a budget is present: transitions update a counter, deep natives
+  tick the walk meter, and an inference driver measures each terminal value
+  before rendering it (roughly doubling that rendering).
 - Rendering outside the evaluator is not fuel: the CLI printing a final value,
   and a diagnostic that shows a value (a match failure, or a native's type
   error on an ill-typed call), happen outside the budget.
