@@ -42,7 +42,7 @@ the work it pays for, except that a walk is charged as it proceeds:
 | work | units |
 |---|---|
 | one evaluator machine state visited, the final (terminal) state included | 1 |
-| performing an operation | 1 per continuation frame walked to its handler, or to the root |
+| performing an operation | 1 per continuation frame between the operation and its handler (the handler's own frame is not counted), or every frame when it reaches the root |
 | resuming a continuation (Multi or Once) | 1 per captured frame reinstalled, including resumptions a driver (inference, the scheduler, a host worker) makes outside the machine |
 | a native builtin or granted root handler | 1/64 per text byte of its direct arguments, then of its result |
 | rendering, printing or comparing a value or code form, anywhere in the invocation | 1/64 per node, scalar, and text, symbol, head or constructor-name byte walked |

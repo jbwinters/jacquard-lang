@@ -851,9 +851,15 @@ let likelihood_weighting_v1 (ctx : Eval.ctx) ~seed ~samples (model : unit -> Eva
 (* RT.1: drivers key, merge and compare values outside any evaluator run; a walk that runs out of
    fuel there ends the driver with E0919 *)
 let guard_walks ctx run =
-  match run () with
-  | result -> result
-  | exception Fuel_meter.Exceeded -> Error [ Runtime_err.to_diag (Eval.fuel_error ctx) ]
+  let exhausted () = Error [ Runtime_err.to_diag (Eval.fuel_error ctx) ] in
+  (* exhaustion is sticky: a driver entered, or finishing, after the invocation ran out reports
+     it even on a path that does no further metered work *)
+  if Fuel_meter.exhausted () then exhausted ()
+  else
+    match run () with
+    | _ when Fuel_meter.exhausted () -> exhausted ()
+    | result -> result
+    | exception Fuel_meter.Exceeded -> exhausted ()
 
 let enumerate_v1 ?max_branches ctx model =
   guard_walks ctx (fun () -> enumerate_v1 ?max_branches ctx model)

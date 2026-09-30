@@ -1303,6 +1303,12 @@ let apply ctx fn args k =
       | state ->
           ctx.deferring <- saved;
           state
+      | exception Fuel_meter.Exceeded ->
+          (* a walk (such as rendering a diagnostic) ran out while building the state: the meter
+             is exhausted, and the next run reports it *)
+          ctx.deferring <- saved;
+          ctx.fuel_pending <- 1;
+          SApply (unit_v, k)
       | exception exn ->
           ctx.deferring <- saved;
           raise exn)
