@@ -24,9 +24,10 @@ on the same allowance:
 
 Forks never receive a copied or fresh allowance. The counter is one
 process-wide meter, not state on a continuation, so every transition and every
-metered walk (§2) debits the one shared budget. fuel-v1 has no
-per-branch limits. A driver that adds per-branch caps later must still draw on
-the aggregate, so a cap only lowers what one branch may spend.
+metered walk (§2) debits the one shared budget. The drivers
+impose no per-branch limits of their own. A nested invocation's own budget acts
+as a per-branch cap (§4); like any future driver cap, it still draws on the
+aggregate, so a cap only lowers what one branch may spend.
 
 An invocation without `fuel` is unbounded and behaves as before. The CLI keeps
 that default: `jacquard run`, `jacquard infer enumerate` and

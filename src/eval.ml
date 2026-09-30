@@ -1358,18 +1358,22 @@ let note_memo_charge cost units =
 (* A memo hit charges, once per invocation, exactly what the cold sub-run would have: its own
    transitions plus every memoized dependency not yet charged in this invocation. *)
 let charge_memo_hit ctx h =
-  let rec total cost =
-    if cost.charged_epoch = !Fuel_meter.epoch then 0
-    else (
-      cost.charged_epoch <- !Fuel_meter.epoch;
-      List.fold_left (fun units dep -> units + total dep) cost.own cost.deps)
-  in
   match Hashtbl.find_opt ctx.memo_cost h with
   | None -> ()
   | Some cost ->
+      let unpaid = ref [] in
+      let rec total cost =
+        if cost.charged_epoch = !Fuel_meter.epoch || List.memq cost !unpaid then 0
+        else (
+          unpaid := cost :: !unpaid;
+          List.fold_left (fun units dep -> units + total dep) cost.own cost.deps)
+      in
       let units = total cost in
-      note_memo_charge cost units;
-      charge_fine ctx units
+      (* terms become paid only once the debit has gone through: a refused charge (say, under a
+         nested cap) leaves them unpaid for the rest of the invocation *)
+      charge_fine ctx units;
+      List.iter (fun paid -> paid.charged_epoch <- !Fuel_meter.epoch) !unpaid;
+      note_memo_charge cost units
 
 (* the hot path: a warm hit already charged in this invocation, outside any memo sub-run *)
 let[@inline] memo_hit_is_paid _ctx = function

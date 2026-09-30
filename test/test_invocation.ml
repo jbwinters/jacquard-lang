@@ -711,6 +711,21 @@ let test_fuel_outside_runs () =
   in
   let cold = cost () in
   Alcotest.(check int) "memo dependency through a nested invocation" cold (cost ());
+  (* a memo hit refused under a nested cap leaves the term unpaid *)
+  let capped_then_direct memo_ctx table =
+    Eval.with_invocation ctx (fun invocation ->
+        ignore (Eval.with_invocation ~fuel:1 memo_ctx (fun _ -> Eval.run_expr memo_ctx table));
+        ignore (Eval.run_expr memo_ctx table);
+        Eval.fuel_used invocation)
+  in
+  let fresh_store, fresh_ctx =
+    prepared "fuel-outside-capped" (fact_program ^ "table = fact(15)\n")
+  in
+  let fresh_table = expression fresh_store "table" in
+  let cold = capped_then_direct fresh_ctx fresh_table in
+  Alcotest.(check int)
+    "refused memo debit is not credited" cold
+    (capped_then_direct fresh_ctx fresh_table);
   (* a Warp runner that runs out reports a runner error, never a failing verdict *)
   (match Store.lookup_kind store "test.run" Resolve.KTerm with
   | None -> Alcotest.fail "the prelude has no test.run"
