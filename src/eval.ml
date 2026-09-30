@@ -190,8 +190,6 @@ type ctx = {
   memo_cost : (Hash.t, memo_charge) Hashtbl.t;
       (** fine fuel units of each memoized term's isolated sub-run, split into its own work and the
           memoized terms it reached, so a warm memo charges what a cold one would *)
-  mutable fuel_epoch : int;
-      (** advanced by every invocation; a memo cost is charged once per epoch *)
   mutable memo_frames : memo_frame list;  (** innermost first: memo sub-runs in progress *)
   mutable deferring : bool;
       (** set while a driver applies a value outside any run: a debit that would pass the budget is
@@ -211,6 +209,7 @@ and invocation = {
   mutable fuel_final : int option;  (** units used, frozen when the invocation ends *)
   saved_ceiling : int;  (** the meter ceiling to restore when the invocation ends *)
   saved_budget : int;  (** the reported budget to restore when the invocation ends *)
+  saved_epoch : int;  (** the memo-charging epoch to restore when the invocation ends *)
   budget : int option;
 }
 
@@ -247,7 +246,6 @@ let make_ctx store =
     invocation = None;
     fuel_limit = None;
     memo_cost = Hashtbl.create 64;
-    fuel_epoch = 0;
     deferring = false;
     fuel_pending = 0;
     memo_frames = [];
@@ -429,7 +427,6 @@ let fuel_exhausted _ctx = Fuel_meter.exhausted ()
 
 let reset_fuel ctx =
   ctx.fuel_limit <- None;
-  ctx.fuel_epoch <- ctx.fuel_epoch + 1;
   ctx.fuel_pending <- 0;
   ctx.memo_frames <- []
 
@@ -451,10 +448,13 @@ let with_invocation ?coverage ?fuel ctx body =
       budget = fuel;
       saved_ceiling = !Fuel_meter.ceiling;
       saved_budget = !Fuel_meter.budget;
+      saved_epoch = !Fuel_meter.epoch;
     }
   in
   Option.iter (fun enabled -> ctx.track_coverage <- enabled) coverage;
   reset_fuel ctx;
+  incr Fuel_meter.next_epoch;
+  Fuel_meter.epoch := !Fuel_meter.next_epoch;
   (* an invocation on another evaluator inside a bounded one stays within the outer ceiling *)
   Option.iter
     (fun limit ->
@@ -484,6 +484,7 @@ let with_invocation ?coverage ?fuel ctx body =
       Fuel_meter.trip ())
     else Fuel_meter.ceiling := invocation.saved_ceiling;
     Fuel_meter.budget := invocation.saved_budget;
+    Fuel_meter.epoch := invocation.saved_epoch;
     let callbacks = invocation.teardown in
     invocation.teardown <- [];
     let first = ref None in
@@ -1335,8 +1336,8 @@ let note_memo_charge ctx h units =
 let charge_memo_hit ctx h =
   let rec total h =
     match Hashtbl.find_opt ctx.memo_cost h with
-    | Some cost when cost.charged_epoch <> ctx.fuel_epoch ->
-        cost.charged_epoch <- ctx.fuel_epoch;
+    | Some cost when cost.charged_epoch <> !Fuel_meter.epoch ->
+        cost.charged_epoch <- !Fuel_meter.epoch;
         List.fold_left (fun units dep -> units + total dep) cost.own cost.deps
     | Some _ | None -> 0
   in
@@ -1346,7 +1347,7 @@ let charge_memo_hit ctx h =
 
 (* the hot path: a warm hit already charged in this invocation, outside any memo sub-run *)
 let[@inline] memo_hit_is_paid ctx = function
-  | Some cost -> cost.charged_epoch = ctx.fuel_epoch && ctx.memo_frames = []
+  | Some cost -> cost.charged_epoch = !Fuel_meter.epoch && ctx.memo_frames = []
   | None -> false
 
 (** Resolve a store reference to a runtime value: builtins and memoized terms short-circuit; other
@@ -1428,7 +1429,7 @@ let rec eval_ref ctx ~trusted (h : Hash.t) (kind : Kernel.refkind) (k : kont) : 
                     {
                       own = 0;
                       deps = Hashtbl.fold (fun dep () deps -> dep :: deps) frame.frame_deps [];
-                      charged_epoch = ctx.fuel_epoch;
+                      charged_epoch = !Fuel_meter.epoch;
                     }
                   in
                   let next = checked_result_state ctx v k in

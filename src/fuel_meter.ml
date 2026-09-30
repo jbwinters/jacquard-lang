@@ -17,6 +17,13 @@ let ceiling = ref max_int
     walk or run that ran out belongs to an unbounded invocation nested inside it. *)
 let budget = ref 0
 
+(** The invocation epoch: every invocation, on any evaluator, runs in a fresh epoch, and a memoized
+    term is charged once per epoch. Global, so a native that re-enters another evaluator charges
+    that evaluator's memoized terms against the active invocation. *)
+let epoch = ref 0
+
+let next_epoch = ref 0
+
 (** [trip ()] exhausts the meter: the remaining allowance is spent, and no later debit or walk can
     pass the negative ceiling. *)
 let trip () =

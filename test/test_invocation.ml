@@ -623,6 +623,34 @@ let test_fuel_outside_runs () =
   in
   Alcotest.(check string) "observed then exhausted" "E0919" code;
   Alcotest.(check string) "the handler never ran" "" (Buffer.contents sink);
+  (* identity hashing is not metered: a scheduled run of spliced code under no budget at all
+     returns E0919 from its first transition rather than raising *)
+  let spliced = expression store "quote { pair(unquote(code.of-int(1)), 2) }" in
+  let code =
+    Eval.with_invocation ~fuel:0 ctx (fun _ ->
+        match Round_robin.run_expr_scheduled ctx ~mode:Round_robin.Record_schedule spliced with
+        | Ok _ -> "ok"
+        | Error error -> Diag.code_or_uncoded (Runtime_err.to_diag error))
+  in
+  Alcotest.(check string) "scheduled spliced code" "E0919" code;
+  (* a native that re-enters another evaluator without its own invocation charges that
+     evaluator's memoized terms against the active invocation, warm or cold *)
+  let memo_store, memo_ctx = prepared "fuel-outside-memo" (fact_program ^ "table = fact(15)\n") in
+  let table = expression memo_store "table" in
+  let reenter_memo =
+    Value.VBuiltin
+      ("reenter-memo", fun _ -> Result.map_error (fun e -> e) (Eval.run_expr memo_ctx table))
+  in
+  let cost () =
+    Eval.with_invocation ctx (fun invocation ->
+        match Eval.run_expr ctx caller with
+        | Error error -> Alcotest.failf "caller: %s" (Diag.to_string (Runtime_err.to_diag error))
+        | Ok closure ->
+            ignore (run_state ctx (Eval.apply_state ctx closure [ reenter_memo ]));
+            Eval.fuel_used invocation)
+  in
+  let cold = cost () in
+  Alcotest.(check int) "warm memo on another evaluator costs the same" cold (cost ());
   (* an operation a driver applies outside any run performs nothing until a run starts *)
   let print_op =
     Eval.with_invocation ctx (fun _ ->

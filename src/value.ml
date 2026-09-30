@@ -115,10 +115,16 @@ let rec show_into buffer value =
       Fuel_meter.tick (String.length name);
       add name;
       items_into args
-  | VConstructor { name; arity; _ } -> add (Printf.sprintf "<constructor %s/%d>" name arity)
-  | VOp { effect_; name; _ } -> add (Printf.sprintf "<op %s.%s>" effect_ name)
+  | VConstructor { name; arity; _ } ->
+      Fuel_meter.tick (String.length name);
+      add (Printf.sprintf "<constructor %s/%d>" name arity)
+  | VOp { effect_; name; _ } ->
+      Fuel_meter.tick (String.length effect_ + String.length name);
+      add (Printf.sprintf "<op %s.%s>" effect_ name)
   | VClosure _ -> add "<closure>"
-  | VBuiltin (name, _) -> add (Printf.sprintf "<builtin %s>" name)
+  | VBuiltin (name, _) ->
+      Fuel_meter.tick (String.length name);
+      add (Printf.sprintf "<builtin %s>" name)
   | VTrustedBuiltin builtin -> add (Printf.sprintf "<builtin %s>" (Trusted_builtin.name builtin))
   | VCode payload ->
       add "(quote ";

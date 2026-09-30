@@ -89,7 +89,10 @@ invocation reaches it, whether the value was computed now or earlier:
   charged in this invocation, then marks them all charged.
 
 The fuel an invocation spends is the same on a fresh evaluator as after any
-earlier invocation warmed the memo, in any order.
+earlier invocation warmed the memo, in any order. Charging follows the active invocation, not
+the evaluator: every invocation runs in a fresh epoch, so a native that
+re-enters another evaluator without starting an invocation there charges that
+evaluator's memoized terms to the active one.
 
 ## 4. Exhaustion
 
@@ -178,8 +181,9 @@ entry points. A host consumer bounds an invocation with
 - Accounting also runs in unbounded mode, since memoized costs must not depend
   on whether a budget is present; it adds a counter update per transition and
   per walked node, and nothing asymptotic.
-- Store work (writing declarations and the names index, loading stored
-  declarations, and writing `--infer-cache` entries) is not program computation and is never metered, so a cold and
+- Store and identity work (writing declarations and the names index, loading
+  stored declarations, canonical hashing, and writing `--infer-cache` entries)
+  is not program computation and is never metered, so a cold and
   a warm lookup cost the same.
 - The evaluator's guard scans (recovery-marker and mutable-graph validation at
   run entries and native or operation boundaries) are not metered: they are
