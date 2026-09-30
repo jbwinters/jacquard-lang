@@ -310,6 +310,7 @@ let fresh_callable_key env =
   Printf.sprintf "local:%d" id
 
 let rec free_alias (env : env) (expr : Kernel.expr) : (string * Meta.t) option =
+  Fuel_meter.tick 1;
   let first xs = List.find_map (free_alias env) xs in
   match expr.it with
   | Kernel.Var name when SSet.mem name env.aliases -> Some (name, expr.meta)

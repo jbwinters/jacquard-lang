@@ -247,7 +247,13 @@ let is_bool_ty ctx t =
   | _ -> false
 
 let rec same_review_type left right =
-  match (Types.repr left, Types.repr right) with
+  (* the compared types can share structure exponentially: identical nodes compare at once, and
+     each step draws on computation fuel (RT.1) *)
+  Fuel_meter.tick 1;
+  let left = Types.repr left and right = Types.repr right in
+  left == right
+  ||
+  match (left, right) with
   | TVar left, TVar right -> left == right
   | TSkolem (left, _), TSkolem (right, _) -> left = right
   | TCon (left_hash, left_args), TCon (right_hash, right_args) ->

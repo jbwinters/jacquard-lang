@@ -13,7 +13,7 @@ let form ?(meta = Meta.empty) head args = { head; meta; args }
     bit-level story. *)
 let rec equal_ignoring_meta (a : t) (b : t) =
   Fuel_meter.tick (1 + String.length a.head);
-  String.equal a.head b.head && List.equal equal_arg a.args b.args
+  a == b || (String.equal a.head b.head && List.equal equal_arg a.args b.args)
 
 and equal_arg a b =
   Fuel_meter.tick 1;
