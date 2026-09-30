@@ -1157,6 +1157,12 @@ let charge_native_result ctx result =
     | Ok value ->
         charge_payload ctx (payload_units value);
         result
+    | Error error when Runtime_err.is_fuel_exhausted error ->
+        (* a native reporting exhaustion (say, of a nested invocation with its own budget) left
+           its work incomplete, so everything depending on it is incomplete: the enclosing
+           invocation is exhausted too, and every driver's sticky check sees it *)
+        mark_exhausted ctx;
+        result
     | Error _ -> result
 
 let invoke_untrusted_native ctx fn native args kont =

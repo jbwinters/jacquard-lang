@@ -670,6 +670,26 @@ let test_fuel_outside_runs () =
   in
   let cold = cost () in
   Alcotest.(check int) "memo dependency on another evaluator" cold (cost ());
+  (* ... and when the native opens its own nested invocation there *)
+  let nested_store, nested_ctx =
+    prepared "fuel-outside-nested-bridge" "bridge(u) = 0\nouter = bridge(1)\n"
+  in
+  (match Store.lookup_kind nested_store "bridge" Resolve.KTerm with
+  | Some { Resolve.hash; _ } ->
+      Eval.register_builtin nested_ctx hash
+        (Value.VBuiltin
+           ("bridge", fun _ -> Eval.with_invocation memo_ctx (fun _ -> Eval.run_expr memo_ctx table)))
+  | None -> Alcotest.fail "bridge not declared");
+  let nested_outer = expression nested_store "outer" in
+  let cost () =
+    Eval.with_invocation nested_ctx (fun invocation ->
+        ignore (Eval.run_expr memo_ctx table);
+        ignore (Eval.run_expr nested_ctx nested_outer);
+        ignore (Eval.run_expr memo_ctx table);
+        Eval.fuel_used invocation)
+  in
+  let cold = cost () in
+  Alcotest.(check int) "memo dependency through a nested invocation" cold (cost ());
   (* a Warp runner that runs out reports a runner error, never a failing verdict *)
   (match Store.lookup_kind store "test.run" Resolve.KTerm with
   | None -> Alcotest.fail "the prelude has no test.run"

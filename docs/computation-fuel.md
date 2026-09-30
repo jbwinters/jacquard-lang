@@ -122,7 +122,9 @@ skips a failed branch therefore cannot turn exhaustion into a value.
   outside a run: the driver gets a state whose first step applies it. The
   scheduler's routed root dispatch checks exhaustion and charges its arguments
   before the handler runs. A native that caught exhaustion from a nested run cannot
-  replace it with its own result or error.
+  replace it with its own result or error. A native that returns E0919 (for
+  example from a nested invocation with its own smaller budget) leaves its work
+  incomplete, so the enclosing invocation becomes exhausted too.
 - A walk that runs out raises `Fuel_meter.Exceeded`. A run turns it into E0919;
   the scheduler and the inference drivers return E0919 for a walk of their
   own; and the CLI reports an escaped one as E0919 rather than as an internal
