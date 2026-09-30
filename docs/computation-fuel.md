@@ -84,10 +84,13 @@ warmth, the same program and budget could complete in one process and exhaust
 in another. fuel-v1 therefore charges a memoized term the first time each
 invocation reaches it, whether the value was computed now or earlier:
 
-- The sub-run's cost is recorded as its own transitions plus the memoized terms
-  it reached, whether or not they were charged at the time.
-- A hit charges the term's own cost plus every recorded dependency not yet
-  charged in this invocation, then marks them all charged.
+- The sub-run's charges are recorded in order: its own work between memoized
+  terms, each memoized term it reached (whether or not it was charged at the
+  time), and its trailing work.
+- A hit replays that sequence, replaying each memoized term not yet charged in
+  this invocation, and marks each term charged when its replay completes. A
+  refusal part-way (for example under a nested cap) therefore leaves exactly the
+  terms charged that a cold run would have finished.
 
 The fuel an invocation spends is the same on a fresh evaluator as after any
 earlier invocation warmed the memo, in any order. Charging follows the active invocation, not

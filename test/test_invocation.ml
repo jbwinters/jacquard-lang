@@ -726,6 +726,23 @@ let test_fuel_outside_runs () =
   Alcotest.(check int)
     "refused memo debit is not credited" cold
     (capped_then_direct fresh_ctx fresh_table);
+  (* every cap, including ones that end after a dependency completed: warm replays the cold
+     charging sequence, so the same terms end up paid *)
+  let program = "base = add(12340, 5)\ntable = add(base, 2)\n" in
+  let sequence cap memo_ctx table =
+    Eval.with_invocation ctx (fun invocation ->
+        ignore (Eval.with_invocation ~fuel:cap memo_ctx (fun _ -> Eval.run_expr memo_ctx table));
+        ignore (Eval.run_expr memo_ctx table);
+        Eval.fuel_used invocation)
+  in
+  let warm_store, warm_ctx = prepared "fuel-outside-warm-caps" program in
+  let warm_table = expression warm_store "table" in
+  ignore (Eval.with_invocation warm_ctx (fun _ -> Eval.run_expr warm_ctx warm_table));
+  for cap = 0 to 16 do
+    let cold_store, cold_ctx = prepared "fuel-outside-cold-caps" program in
+    let cold = sequence cap cold_ctx (expression cold_store "table") in
+    Alcotest.(check int) (Printf.sprintf "cap %d" cap) cold (sequence cap warm_ctx warm_table)
+  done;
   (* a Warp runner that runs out reports a runner error, never a failing verdict *)
   (match Store.lookup_kind store "test.run" Resolve.KTerm with
   | None -> Alcotest.fail "the prelude has no test.run"

@@ -115,11 +115,20 @@ type mutable_graph_snapshot = {
 
 (* fuel-v1 cost of one memoized term's isolated sub-run (RT.1): its own units, the memoized terms
    it reached, and the invocation epoch in which it was last charged *)
-type memo_charge = { mutable own : int; deps : memo_charge list; mutable charged_epoch : int }
+type memo_charge = {
+  mutable segments : (int * memo_charge) list;
+      (** in the order the cold sub-run charged them: its own fine units before each memoized term
+          it reached, and that term *)
+  mutable tail : int;  (** its own fine units after the last memoized term *)
+  mutable charged_epoch : int;
+}
 
 (* memo sub-runs in progress, innermost first, across every evaluator: a native that re-enters
    another evaluator inside a sub-run still attributes that evaluator's memoized terms to it *)
-type memo_frame = { mutable frame_deps : memo_charge list; mutable dep_units : int }
+type memo_frame = {
+  mutable frame_segments : (int * memo_charge) list;  (** most recent first *)
+  mutable last_mark : int;  (** the meter's fine count when the last segment closed *)
+}
 
 let memo_frames : memo_frame list ref = ref []
 
@@ -1351,29 +1360,32 @@ let apply ctx fn args k =
 let note_memo_charge cost units =
   match !memo_frames with
   | frame :: _ ->
-      if not (List.memq cost frame.frame_deps) then frame.frame_deps <- cost :: frame.frame_deps;
-      frame.dep_units <- frame.dep_units + units
+      let now = !Fuel_meter.used in
+      frame.frame_segments <- (now - frame.last_mark - units, cost) :: frame.frame_segments;
+      frame.last_mark <- now
   | [] -> ()
 
-(* A memo hit charges, once per invocation, exactly what the cold sub-run would have: its own
-   transitions plus every memoized dependency not yet charged in this invocation. *)
+(* A memo hit replays, once per invocation, exactly the charges the cold sub-run made, in the same
+   order: its own work between memoized terms, each term not yet paid in this invocation (itself
+   replayed), and its trailing work. A term becomes paid when its replay completes, so a refusal
+   part-way (say, under a nested cap) leaves exactly the terms a cold run would have finished paid. *)
 let charge_memo_hit ctx h =
+  let rec replay cost =
+    if cost.charged_epoch <> !Fuel_meter.epoch then (
+      List.iter
+        (fun (own, dep) ->
+          charge_fine ctx own;
+          replay dep)
+        cost.segments;
+      charge_fine ctx cost.tail;
+      cost.charged_epoch <- !Fuel_meter.epoch)
+  in
   match Hashtbl.find_opt ctx.memo_cost h with
   | None -> ()
   | Some cost ->
-      let unpaid = ref [] in
-      let rec total cost =
-        if cost.charged_epoch = !Fuel_meter.epoch || List.memq cost !unpaid then 0
-        else (
-          unpaid := cost :: !unpaid;
-          List.fold_left (fun units dep -> units + total dep) cost.own cost.deps)
-      in
-      let units = total cost in
-      (* terms become paid only once the debit has gone through: a refused charge (say, under a
-         nested cap) leaves them unpaid for the rest of the invocation *)
-      charge_fine ctx units;
-      List.iter (fun paid -> paid.charged_epoch <- !Fuel_meter.epoch) !unpaid;
-      note_memo_charge cost units
+      let before = !Fuel_meter.used in
+      replay cost;
+      note_memo_charge cost (!Fuel_meter.used - before)
 
 (* the hot path: a warm hit already charged in this invocation, outside any memo sub-run *)
 let[@inline] memo_hit_is_paid _ctx = function
@@ -1445,7 +1457,7 @@ let rec eval_ref ctx ~trusted (h : Hash.t) (kind : Kernel.refkind) (k : kont) : 
                   reject_recovery_state ctx initial;
                   let saved_capture = ctx.capture_ops in
                   ctx.capture_ops <- false;
-                  let frame = { frame_deps = []; dep_units = 0 } in
+                  let frame = { frame_segments = []; last_mark = started } in
                   let saved_frames = !memo_frames in
                   memo_frames := frame :: saved_frames;
                   let v =
@@ -1456,12 +1468,13 @@ let rec eval_ref ctx ~trusted (h : Hash.t) (kind : Kernel.refkind) (k : kont) : 
                       (fun () -> run_state_unchecked ctx initial)
                   in
                   let memo_charge =
-                    { own = 0; deps = frame.frame_deps; charged_epoch = !Fuel_meter.epoch }
+                    { segments = []; tail = 0; charged_epoch = !Fuel_meter.epoch }
                   in
                   let next = checked_result_state ctx v k in
                   let snapshot = make_mutable_snapshot ~memo_charge ctx v in
                   let units = !Fuel_meter.used - started in
-                  memo_charge.own <- units - frame.dep_units;
+                  memo_charge.segments <- List.rev frame.frame_segments;
+                  memo_charge.tail <- !Fuel_meter.used - frame.last_mark;
                   Hashtbl.replace ctx.memo_cost h memo_charge;
                   note_memo_charge memo_charge units;
                   (* The isolated run has completed all closure construction and [let rec] knot
