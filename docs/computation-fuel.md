@@ -90,9 +90,10 @@ invocation reaches it, whether the value was computed now or earlier:
 
 The fuel an invocation spends is the same on a fresh evaluator as after any
 earlier invocation warmed the memo, in any order. Charging follows the active invocation, not
-the evaluator: every invocation runs in a fresh epoch, so a native that
-re-enters another evaluator without starting an invocation there charges that
-evaluator's memoized terms to the active one.
+the evaluator: each outermost invocation runs in a fresh epoch, and a native
+that re-enters another evaluator, with or without starting a nested invocation
+there, charges that evaluator's memoized terms within the same epoch, recording
+them as dependencies of any memo sub-run in progress.
 
 ## 4. Exhaustion
 

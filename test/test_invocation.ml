@@ -672,18 +672,37 @@ let test_fuel_outside_runs () =
   Alcotest.(check int) "memo dependency on another evaluator" cold (cost ());
   (* a Warp runner that runs out reports a runner error, never a failing verdict *)
   (match Store.lookup_kind store "test.run" Resolve.KTerm with
-  | None -> ()
+  | None -> Alcotest.fail "the prelude has no test.run"
   | Some { Resolve.hash; _ } ->
-      let outcome =
-        Eval.with_invocation ~fuel:0 ctx (fun _ ->
-            match Warp.value_of ctx hash with
-            | Error _ -> "error"
-            | Ok test_run -> (
-                match Warp.run_thunk ctx ~test_run (Value.VInt 0) with
+      let test_run =
+        match Eval.with_invocation ctx (fun _ -> Warp.value_of ctx hash) with
+        | Ok test_run -> test_run
+        | Error error -> Alcotest.failf "test.run: %s" (Diag.to_string (Runtime_err.to_diag error))
+      in
+      let spinning = expression store "fn () -> spin(0)" in
+      let outcome budget =
+        Eval.with_invocation ~fuel:budget ctx (fun _ ->
+            match Eval.run_expr ctx spinning with
+            | Error _ -> "setup"
+            | Ok thunk -> (
+                match Warp.run_thunk ctx ~test_run thunk with
                 | Ok _ -> "verdict"
                 | Error _ -> "error"))
       in
-      Alcotest.(check string) "warp under exhaustion" "error" outcome);
+      Alcotest.(check string) "warp under exhaustion" "error" (outcome 2_000);
+      (* ... and a nested invocation's exhaustion, returned by a native, is not a verdict either *)
+      let nested_zero =
+        Value.VBuiltin
+          ( "nested-zero",
+            fun _ -> Eval.with_invocation ~fuel:0 other (fun _ -> Eval.run_expr other other_spin) )
+      in
+      let code =
+        Eval.with_invocation ~fuel:100_000 ctx (fun _ ->
+            match Warp.run_thunk ctx ~test_run nested_zero with
+            | Ok _ -> "verdict"
+            | Error _ -> "error")
+      in
+      Alcotest.(check string) "nested exhaustion in warp" "error" code);
   (* an operation a driver applies outside any run performs nothing until a run starts *)
   let print_op =
     Eval.with_invocation ctx (fun _ ->

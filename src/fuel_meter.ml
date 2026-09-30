@@ -24,6 +24,11 @@ let epoch = ref 0
 
 let next_epoch = ref 0
 
+(** Invocations active on any evaluator. Only the outermost one opens a fresh epoch: a nested
+    invocation on another evaluator charges memoized terms within the enclosing epoch, exactly as a
+    re-entry without an invocation would. *)
+let depth = ref 0
+
 (** [trip ()] exhausts the meter: the remaining allowance is spent, and no later debit or walk can
     pass the negative ceiling. *)
 let trip () =

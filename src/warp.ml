@@ -130,6 +130,7 @@ let run_thunk ctx ~test_run (thunk : Value.t) : (verdict * Hash.t list, string) 
   in
   match result with
   | Ok report -> Result.map (fun v -> (v, mine)) (verdict_of_report report)
+  | Error e when Runtime_err.is_fuel_exhausted e -> Error (Runtime_err.to_string e)
   | Error e ->
       Ok (Fail { soft = []; hard = Some ("runtime error: " ^ Runtime_err.to_string e) }, mine)
 
@@ -208,6 +209,9 @@ let run_thunk_seeded ctx ?(bounds = Round_robin.default_bounds) ~test_run ~progr
       in
       let coverage = add_coverage coverage mine in
       match result with
+      | Error error when Runtime_err.is_fuel_exhausted error -> Error (Runtime_err.to_string error)
+      | Ok { Round_robin.result = Error error; _ } when Runtime_err.is_fuel_exhausted error ->
+          Error (Runtime_err.to_string error)
       | Error error ->
           Ok
             ( Fail

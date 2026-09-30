@@ -457,9 +457,11 @@ let with_invocation ?coverage ?fuel ctx body =
   in
   Option.iter (fun enabled -> ctx.track_coverage <- enabled) coverage;
   reset_fuel ctx;
-  incr Fuel_meter.next_epoch;
-  Fuel_meter.epoch := !Fuel_meter.next_epoch;
-  memo_frames := [];
+  if !Fuel_meter.depth = 0 then (
+    incr Fuel_meter.next_epoch;
+    Fuel_meter.epoch := !Fuel_meter.next_epoch;
+    memo_frames := []);
+  incr Fuel_meter.depth;
   (* an invocation on another evaluator inside a bounded one stays within the outer ceiling *)
   Option.iter
     (fun limit ->
@@ -489,6 +491,7 @@ let with_invocation ?coverage ?fuel ctx body =
       Fuel_meter.trip ())
     else Fuel_meter.ceiling := invocation.saved_ceiling;
     Fuel_meter.budget := invocation.saved_budget;
+    decr Fuel_meter.depth;
     Fuel_meter.epoch := invocation.saved_epoch;
     memo_frames := invocation.saved_frames;
     let callbacks = invocation.teardown in
