@@ -50,7 +50,8 @@ val of_value : Value.t -> value
 
 val render : value -> string
 (** [render v] is the [Value.show] spelling of a data value, with opaque values as [<kind>]. It
-    ticks computation fuel per node and per text and constructor-name byte. *)
+    ticks computation fuel per node and per text and constructor-name byte; a quoted code value
+    counts as one node. *)
 
 val operation : event -> Hash.t
 (** [operation event] is the operation identity every event carries. *)

@@ -631,5 +631,5 @@ RF.3 separates typed observation production from versioned trace projections
 `Observation` events (operations with their arguments, trusted output, and root
 handler results) to an observer that cannot evaluate, and `run-transcript-v1`
 is a byte-identical projection of them. Schedule traces, host envelopes and
-governance audit carriers are unchanged. Two `test/test_invocation.ml` cases
+governance audit carriers are unchanged. Three `test/test_invocation.ml` cases
 bring the current source inventory to `1125 / 74 / 35`.
