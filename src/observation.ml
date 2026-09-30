@@ -38,10 +38,15 @@ let rec of_value (v : Value.t) =
   | Value.VTask _ -> Opaque "task"
   | Value.VChannel _ -> Opaque "channel"
 
-let rec render = function
+let rec render v =
+  (* rendering walks the value too, so it draws on fuel like the projection *)
+  Fuel_meter.tick 1;
+  match v with
   | Int i -> string_of_int i
   | Real r -> Printer.real_repr r
-  | Text s -> "\"" ^ Printer.escape_text s ^ "\""
+  | Text s ->
+      Fuel_meter.tick (String.length s);
+      "\"" ^ Printer.escape_text s ^ "\""
   | Hash h -> "#" ^ Hash.to_hex h
   | Tuple items -> "(" ^ String.concat ", " (List.map render items) ^ ")"
   | Constructor { name; arguments = []; _ } -> name

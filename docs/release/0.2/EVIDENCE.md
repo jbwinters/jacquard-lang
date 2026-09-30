@@ -32,7 +32,7 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1124`
+- Alcotest/QCheck cases: `1125`
 - Cram transcript files: `74`
 - Documentation examples: `35` named examples across `8` documents
 
@@ -632,4 +632,4 @@ RF.3 separates typed observation production from versioned trace projections
 handler results) to an observer that cannot evaluate, and `run-transcript-v1`
 is a byte-identical projection of them. Schedule traces, host envelopes and
 governance audit carriers are unchanged. Two `test/test_invocation.ml` cases
-bring the current source inventory to `1124 / 74 / 35`.
+bring the current source inventory to `1125 / 74 / 35`.

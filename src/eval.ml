@@ -1312,10 +1312,18 @@ let invoke_untrusted_native ?observed ctx fn native args kont =
   note_returned_exhaustion ctx result;
   if Fuel_meter.exhausted () then exhaust ctx;
   List.iter (check_native_argument ctx) invocation_roots;
-  Option.iter (fun operation -> notify_root_result ctx operation result) observed;
+  (* the Result event reports only what the program receives, so it follows every post-call check *)
+  let observe result =
+    Option.iter (fun operation -> notify_root_result ctx operation result) observed
+  in
   match charge_native_result ctx result with
-  | Ok value -> checked_result_state ctx value kont
-  | Error error -> rt error
+  | Ok value ->
+      let next = checked_result_state ctx value kont in
+      observe (Ok value);
+      next
+  | Error error ->
+      if Result.is_error result then observe (Error error);
+      rt error
 
 let invoke_trusted_native ctx builtin args kont =
   if Fuel_meter.exhausted () then exhaust ctx;
@@ -1837,6 +1845,8 @@ let validate_state_once ctx state =
     syntax and values remain shared; mutable cells in the state and evaluator-owned memo graph are
     reset to their validated snapshots. *)
 let fresh_validated_state ctx (Validated_state (owner, state, initial_graph) as validated) =
+  if ctx.observing then
+    invalid_arg "Eval.fresh_validated_state: an observation callback cannot restore program state";
   if owner != ctx then validated
   else
     let restore graph = List.iter (fun (cell, value) -> cell := value) graph.cells in
@@ -1984,12 +1994,14 @@ let dispatch_root_operation ctx ~resume ~op ~name ~effect_ args =
           note_returned_exhaustion ctx result;
           if Fuel_meter.exhausted () then raise (Rt (fuel_error ctx));
           List.iter (check_native_argument ctx) roots;
-          notify_root_result ctx op result;
           match charge_native_result ctx result with
           | Ok value ->
               if not (atomic_non_task_value value) then reject_recovery_result_value ctx value;
+              notify_root_result ctx op (Ok value);
               Ok value
-          | Error error -> Error error
+          | Error error ->
+              if Result.is_error result then notify_root_result ctx op (Error error);
+              Error error
         with
         | Rt error -> Error error
         | Fuel_meter.Exceeded -> Error (fuel_error ctx))

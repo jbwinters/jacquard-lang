@@ -1033,9 +1033,103 @@ let test_observer_cannot_evaluate () =
     "evaluation works again" true
     (Eval.with_invocation ctx (fun _ -> Result.is_ok (Eval.run_expr ctx one)))
 
+(* RF.3 boundary: data views of real events, nested extents, and refused restoration *)
+let test_observer_boundary () =
+  let store, ctx =
+    prepared "observe-boundary" "once effect Probe where { probe.next : (Int) -> Int }\n"
+  in
+  let asking = expression store "add(probe.next(1), 1)" in
+  let seen = ref [] in
+  let record event = seen := describe event :: !seen in
+  (* an ungranted operation is observed, then left unhandled: no Result *)
+  let operation = ref None in
+  let code =
+    Eval.with_invocation ctx (fun _ ->
+        Eval.with_observer ctx
+          (fun event ->
+            operation := Some (Observation.operation event);
+            record event)
+          (fun () -> failure (Eval.run_expr ctx asking)))
+  in
+  Alcotest.(check string) "ungranted" "unhandled" code;
+  Alcotest.(check (list string)) "operation only" [ "op probe.next(1)" ] (List.rev !seen);
+  let operation = Option.get !operation in
+  (* a granted handler returning a secret: the program receives it, the observer sees <secret> *)
+  seen := [];
+  let secret = Value.VSecret (Secret.of_string "hunter2") in
+  let secret_result =
+    Eval.with_invocation ctx (fun _ ->
+        Eval.register_root_handler ctx operation (fun _ -> Ok secret);
+        Eval.with_observer ctx record (fun () ->
+            Eval.run_expr ctx (expression store "probe.next(2)")))
+  in
+  (match secret_result with
+  | Ok (Value.VSecret _) -> ()
+  | _ -> Alcotest.fail "the program did not receive the secret");
+  Alcotest.(check (list string))
+    "secret result is opaque"
+    [ "op probe.next(2)"; "ok <secret>" ]
+    (List.rev !seen);
+  (* the innermost observer owns its extent; the outer one resumes afterwards *)
+  let outer = ref 0 and inner = ref 0 in
+  ignore
+    (Eval.with_invocation ctx (fun _ ->
+         Eval.register_root_handler ctx operation (fun _ -> Ok (Value.VInt 3));
+         Eval.with_observer ctx
+           (fun _ -> incr outer)
+           (fun () ->
+             ignore
+               (Eval.with_observer ctx
+                  (fun _ -> incr inner)
+                  (fun () -> Eval.run_expr ctx (expression store "probe.next(4)")));
+             Eval.run_expr ctx (expression store "probe.next(5)"))));
+  Alcotest.(check (pair int int)) "nested observers are isolated" (2, 2) (!outer, !inner);
+  (* a callback can neither resume a captured Once continuation nor restore a validated state *)
+  let captured =
+    Eval.with_invocation ctx (fun _ ->
+        match Eval.run_state_capturing ctx (Eval.expr_state asking) with
+        | Ok (Eval.COp { kont; _ }) -> kont
+        | _ -> Alcotest.fail "the operation was not captured")
+  in
+  let validated =
+    match Eval.validate_state_once ctx (Eval.expr_state (expression store "add(1, 2)")) with
+    | Ok state -> state
+    | Error error -> Alcotest.failf "validation failed: %s" (Runtime_err.to_string error)
+  in
+  let refusals = ref [] in
+  let sink = Buffer.create 16 in
+  ignore
+    (Eval.with_invocation ctx (fun _ ->
+         grant_console ctx sink;
+         Eval.with_observer ctx
+           (fun _ ->
+             (match Eval.resume_captured_state ctx captured (Value.VInt 1) with
+             | Ok _ -> refusals := "resumed" :: !refusals
+             | Error _ -> refusals := "resume refused" :: !refusals);
+             match Eval.fresh_validated_state ctx validated with
+             | _ -> refusals := "restored" :: !refusals
+             | exception Invalid_argument _ -> refusals := "restore refused" :: !refusals)
+           (fun () -> Eval.run_expr ctx (expression store "print(\"x\")"))));
+  Alcotest.(check bool)
+    "every callback attempt was refused" true
+    (!refusals <> []
+    && List.for_all (fun r -> r = "resume refused" || r = "restore refused") !refusals);
+  (* the refused resumption consumed nothing: the owner still resumes it once *)
+  match
+    Eval.with_invocation ctx (fun _ ->
+        match Eval.resume_captured_state ctx captured (Value.VInt 41) with
+        | Ok state -> run_state ctx state
+        | Error error -> Error error)
+  with
+  | Ok (Value.VInt 42) -> ()
+  | Ok value -> Alcotest.failf "resumed to %s" (Value.show value)
+  | Error error -> Alcotest.failf "resume failed: %s" (Runtime_err.to_string error)
+
 let suite =
   [
     Alcotest.test_case "grants are scoped to one invocation" `Quick test_grants_are_scoped;
+    Alcotest.test_case "observers see data views and cannot restore or resume" `Quick
+      test_observer_boundary;
     Alcotest.test_case "once resumptions are evaluator-owned and refused elsewhere" `Quick
       test_stale_once_resumption;
     Alcotest.test_case "grants, observers, and coverage are restored on exceptions" `Quick

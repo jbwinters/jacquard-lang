@@ -27,18 +27,22 @@ trust domains, and it is not a universal trace format.
   after every language handler declined it and before any root handler runs.
 - `Output { operation; bytes }`: a trusted root adapter accepted bytes for that
   operation (today only Console print).
-- `Result { operation; result }`: a granted root handler returned (a value or a
-  runtime failure) and its arguments passed their post-call checks. There is no
-  `Result` for an operation a driver captured instead of dispatching, for a
-  dispatch refused before the handler ran, or when the post-call checks
-  (including fuel exhaustion) fail.
+- `Result { operation; result }`: a granted root handler returned (a value or
+  its own runtime failure) and every post-call check passed: the arguments, the
+  result's fuel charge, and the result's validation. So `Result` carries exactly
+  what the program receives. There is no `Result` for an operation a driver
+  captured instead of dispatching, for a dispatch refused before the handler
+  ran, or when a post-call check (including fuel exhaustion) fails.
 
 Arguments and results are never live runtime values. They arrive as an
 immutable data projection (`Observation.value`: integers, reals, text, hashes,
 tuples, constructors and code). Secrets, closures, continuations, builtins,
 operations, and task or channel handles appear only as opaque markers. The
-projection is computed only if an observer forces it, and its walk draws on
-computation fuel. A consumer still chooses what to persist or render through an
+projection is computed only if an observer forces it, and its walk (like
+`Observation.render`) draws on computation fuel. The charge goes to whichever
+invocation is active when the payload is forced: inside the callback that is
+the observed invocation; a consumer that keeps an event and forces it after the
+invocation ended pays from its own budget, or from none. A consumer still chooses what to persist or render through an
 explicit policy (OBS.1). The v1 projection keeps only operation identities and
 Console bytes, as before.
 
@@ -54,7 +58,8 @@ Console bytes, as before.
 - An observer cannot re-enter the evaluator or change its configuration. While a
   callback runs, that evaluator refuses to evaluate, to apply or resume a
   continuation, and to dispatch a routed operation. Registering a root handler
-  or a native, or changing code resolution, raises `Invalid_argument`. So
+  or a native, changing code resolution, or restoring a validated state's
+  mutable graph (`fresh_validated_state`) raises `Invalid_argument`. So
   observation cannot add authority, resume a continuation twice, or change
   dispatch.
 - Observers see no secret: a secret is an opaque marker in the data
