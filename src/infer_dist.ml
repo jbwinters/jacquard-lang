@@ -211,14 +211,17 @@ type validated_outcome =
 
 let run_until_op (ctx : Eval.ctx) (state : Eval.state) : (outcome, Runtime_err.t) result =
   match Eval.run_state_capturing ctx state with
-  | Ok (Eval.CValue v) -> Ok (Done v)
+  | Ok (Eval.CValue v) ->
+      (* drivers key terminal values by their rendering, so the walk is paid for first (RT.1) *)
+      Result.map (fun () -> Done v) (Eval.charge_walk ctx [ v ])
   | Ok (Eval.COp { op; name; args; kont }) -> Ok (Op { op; name; args; resume = kont })
   | Error e -> Error e
 
 let run_until_op_validated (ctx : Eval.ctx) (state : Eval.validated_state) :
     (validated_outcome, Runtime_err.t) result =
   match Eval.run_validated_state_capturing ctx state with
-  | Ok (Eval.VCValue value) -> Ok (Validated_done value)
+  | Ok (Eval.VCValue value) ->
+      Result.map (fun () -> Validated_done value) (Eval.charge_walk ctx [ value ])
   | Ok (Eval.VCOp { op; name; args; kont }) -> Ok (Validated_op { op; name; args; resume = kont })
   | Error e -> Error e
 

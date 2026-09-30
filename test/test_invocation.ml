@@ -450,6 +450,12 @@ let test_fuel_bounds_deep_natives () =
   Alcotest.(check (pair string int))
     "rendering shared code" ("E0919", 1_000)
     (fueled ~budget:1_000 ctx store "text.length(code.render(cdbl(code.of-int(1), 40)))");
+  Alcotest.(check (pair string int))
+    "comparing shared values in pmf" ("E0919", 1_000)
+    (fueled ~budget:1_000 ctx store "pmf(Categorical([mk-pair(dbl(L, 40), 1.0)]), dbl(L, 40))");
+  Alcotest.(check (pair string int))
+    "keying a shared sampled value" ("E0919", 1_000)
+    (fueled ~budget:1_000 ctx store "dist.sample-lw(fn () -> dbl(L, 40), 1, 0)");
   (* a small shared value still renders, and pays for its expanded size *)
   let small, cost = fueled ctx store "text.length(debug.inspect(dbl(L, 8)))" in
   Alcotest.(check (pair string int))

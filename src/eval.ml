@@ -545,14 +545,17 @@ let rt_arity fmt = Printf.ksprintf (fun m -> rt (Runtime_err.Arity m)) fmt
 
 (* --- computation fuel (RT.1, cost model fuel-v1; see docs/computation-fuel.md) --- *)
 
-let exhaust ctx =
+let mark_exhausted ctx =
   (* the refused debit spends the remainder: an exhausted invocation always reports its whole
      budget used, however large the refused charge was *)
   if not ctx.fuel_exhausted then (
     if ctx.fuel_ceiling < max_int then ctx.fuel_used <- ctx.fuel_ceiling;
     (* no debit can pass a negative ceiling, which keeps [charge] to one comparison *)
     ctx.fuel_ceiling <- -1;
-    ctx.fuel_exhausted <- true);
+    ctx.fuel_exhausted <- true)
+
+let exhaust ctx =
+  mark_exhausted ctx;
   rt
     (Runtime_err.Fuel_exhausted
        { model = fuel_model; limit = Option.value ctx.fuel_limit ~default:0 })
@@ -562,7 +565,12 @@ let exhaust ctx =
 (** [charge ctx units] debits [units] before the work they pay for. A debit that would pass the
     ceiling is refused and exhausts the invocation; nothing is charged for it. *)
 let refuse ctx units =
-  if ctx.deferring then ctx.fuel_pending <- ctx.fuel_pending + max 1 units else exhaust ctx
+  if ctx.deferring then (
+    (* the invocation is exhausted now, even if no later run starts to report it *)
+    ignore units;
+    mark_exhausted ctx;
+    ctx.fuel_pending <- 1)
+  else exhaust ctx
 
 let[@inline] charge ctx units =
   let used = ctx.fuel_used + units in
@@ -620,7 +628,12 @@ let charge_expanded ctx values =
   in
   match List.iter value values with
   | () -> charge ctx (!count / 64)
-  | exception Past_allowance -> refuse ctx (cap + 1)
+  | exception Past_allowance ->
+      (* never walk past the allowance, not even while a driver applies a value outside a run *)
+      exhaust ctx
+
+let charge_walk ctx values =
+  match charge_expanded ctx values with () -> Ok () | exception Rt error -> Error error
 
 let rec payload_total total = function
   | [] -> total

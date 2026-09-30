@@ -43,7 +43,8 @@ Every debit is made before the work it pays for:
 | performing an operation | 1 per continuation frame walked to its handler, or to the root |
 | resuming a continuation (Multi or Once) | 1 per captured frame reinstalled, including resumptions a driver (inference, the scheduler, a host worker) makes outside the machine |
 | a native builtin or granted root handler | `text bytes / 64` over its direct arguments, then again over its result |
-| a deep native (`debug.inspect`, `code.render`, `code.hash`, `code.eq?`, `code.diff`) | first, `expanded nodes and bytes / 64` over its arguments |
+| a deep native (`debug.inspect`, `code.render`, `code.hash`, `code.eq?`, `code.diff`, `pmf`) | first, `expanded nodes and bytes / 64` over its arguments |
+| an inference driver reaching a branch's or sample's final value | `expanded nodes and bytes / 64` of that value, before the driver keys it by its rendering |
 | reaching a memoized top-level term | the cost of the sub-run that computed it, once per invocation (§3) |
 
 The ordinary native measure counts only the text a native directly receives or
@@ -100,9 +101,11 @@ skips a failed branch therefore cannot turn exhaustion into a value.
   an invalid distribution (E0911). It is distinct from the terminal-path budget
   (E0918): no partial posterior is returned.
 - A driver working outside any run (resuming a captured continuation, applying
-  a value) never raises exhaustion itself: a refused debit there is deferred and
-  refused again as the next run starts, so exhaustion always arrives through a
-  run's result. A native that caught exhaustion from a nested run cannot
+  a value) does not raise exhaustion from a refused debit. The invocation
+  becomes exhausted at once, and the refusal is raised as the next run starts,
+  so exhaustion arrives through a run's result. The one exception is a deep
+  native, which never walks past the allowance: it fails with E0919 in place
+  of running, as any native failure would. A native that caught exhaustion from a nested run cannot
   replace it with its own result or error.
 - Root effects that ran before exhaustion are not retried or undone.
   Invocation teardown runs exactly once as usual.
@@ -143,9 +146,21 @@ entry points. A host consumer bounds an invocation with
   execution must use the interpreter.
 - fuel-v1 bounds computation, not allocation: a bounded run can still allocate
   a large value within its budget. Allocation limits are RT.2.
-- The ordinary native measure is shallow by design (§2). A new native that walks
-  whole values must be marked deep, and a native whose work is superlinear in
-  its input would need its own entry in a future model.
+- The ordinary native measure is shallow by design (§2). A new prelude native
+  that walks whole values must be marked deep, and a driver that renders or
+  keys whole values must call `Eval.charge_walk` first. A host-registered
+  native (`Eval.register_builtin`) cannot be marked deep; the host owns its
+  cost.
+- A native's result is paid for after it is built. The result is bounded by
+  the native's inputs, so the overshoot is bounded, but a single native call
+  can build a result larger than the remaining allowance before exhaustion.
+- A few natives do superlinear work in their charged size: `code.diff`
+  compares subforms at every level (quadratic in form size), and `support` on a
+  `UniformInt` materializes up to its 10,000-entry cap for a small charge.
+- Measuring deep natives and driver walks runs in unbounded mode too, since
+  memoized costs must not depend on whether a budget is present. The walk
+  roughly doubles the work of those natives; ordinary transitions cost a
+  counter update.
 - Rendering outside the evaluator is not fuel: the CLI printing a final value,
   and a diagnostic that shows a value (a match failure, or a native's type
   error on an ill-typed call), happen outside the budget.

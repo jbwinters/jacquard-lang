@@ -765,7 +765,7 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
       match args with
       | [ v ] -> Ok (Value.VText (Value.show v))
       | args -> type_err "debug.inspect" args);
-  optional "pmf" (fun args ->
+  optional ~deep:true "pmf" (fun args ->
       match args with
       | [ dv; v ] ->
           Result.bind (Infer_dist.dist_of_value ctx dv) (fun d ->

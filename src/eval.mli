@@ -137,6 +137,12 @@ val fuel_exhausted : ctx -> bool
 (** [fuel_exhausted ctx] holds once the active invocation on [ctx] has run out of fuel. Drivers use
     it to recognise exhaustion however a native or nested driver wrapped the error. *)
 
+val charge_walk : ctx -> Value.t list -> (unit, Runtime_err.t) result
+(** [charge_walk ctx values] charges, before a driver renders, keys, or compares [values] as whole
+    structures, the fuel a deep native would pay for them: expanded nodes and text bytes / 64,
+    measured with an early stop. Exhaustion is returned (and the invocation becomes exhausted)
+    instead of the walk running. *)
+
 val fuel_budget : invocation -> int option
 (** [fuel_budget invocation] is the budget [invocation] was started with, if bounded. *)
 
