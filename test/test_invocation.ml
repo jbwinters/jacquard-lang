@@ -610,6 +610,19 @@ let test_fuel_outside_runs () =
         | Ok closure -> failure (run_state ctx (Eval.apply_state ctx closure [ nested ])))
   in
   Alcotest.(check string) "the outer invocation stays exhausted" "E0919" code;
+  (* a nested invocation that finishes exactly at the outer ceiling is complete, not exhausted *)
+  let literal = expression other_store "7" in
+  let exact =
+    Eval.with_invocation other (fun invocation ->
+        ignore (Eval.run_expr other literal);
+        Eval.fuel_used invocation)
+  in
+  let completed =
+    Eval.with_invocation ~fuel:exact ctx (fun _ ->
+        let value = Eval.with_invocation other (fun _ -> Eval.run_expr other literal) in
+        (Result.is_ok value, Eval.fuel_exhausted ctx))
+  in
+  Alcotest.(check (pair bool bool)) "exact nested completion" (true, false) completed;
   (* a root observer that runs evaluation and exhausts the invocation stops the operation it
      observed before its handler runs *)
   let sink = Buffer.create 16 in

@@ -483,7 +483,7 @@ let with_invocation ?coverage ?fuel ctx body =
     (* an invocation nested inside a bounded one that used up the outer allowance leaves the outer
        one exhausted: its sticky state is never cleared by an inner teardown *)
     if
-      invocation.saved_ceiling >= 0
+      Fuel_meter.exhausted () && invocation.saved_ceiling >= 0
       && !Fuel_meter.used >= invocation.saved_ceiling
       && invocation.saved_ceiling < max_int
     then (
@@ -1150,6 +1150,10 @@ let check_native_argument ctx root =
 
 (* A native that re-entered the evaluator and ran out cannot replace the exhaustion with its own
    result or error *)
+let note_returned_exhaustion ctx = function
+  | Error error when Runtime_err.is_fuel_exhausted error -> mark_exhausted ctx
+  | Ok _ | Error _ -> ()
+
 let charge_native_result ctx result =
   if Fuel_meter.exhausted () then Error (fuel_error ctx)
   else
@@ -1173,8 +1177,10 @@ let invoke_untrusted_native ctx fn native args kont =
   List.iter (prepare_native_argument ctx) invocation_roots;
   charge_native ctx args;
   let result = native args in
-  (* a native that ran out of fuel inside a nested run cannot turn that into another failure,
-     not even one found by revalidating what it mutated *)
+  (* a native that ran out of fuel inside a nested run, or returned a nested invocation's
+     exhaustion, cannot turn that into another failure, not even one found by revalidating what
+     it mutated *)
+  note_returned_exhaustion ctx result;
   if Fuel_meter.exhausted () then exhaust ctx;
   List.iter (check_native_argument ctx) invocation_roots;
   match charge_native_result ctx result with
@@ -1796,6 +1802,7 @@ let dispatch_root_operation ctx ~resume ~op ~name ~effect_ args =
         List.iter (prepare_native_argument ctx) roots;
         charge_native ctx args;
         let result = native args in
+        note_returned_exhaustion ctx result;
         if Fuel_meter.exhausted () then raise (Rt (fuel_error ctx));
         List.iter (check_native_argument ctx) roots;
         match charge_native_result ctx result with
