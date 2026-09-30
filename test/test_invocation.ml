@@ -916,6 +916,21 @@ let test_fuel_scopes () =
         (exhausted, Eval.fuel_exhausted ctx, failure (Eval.run_expr ctx one)))
   in
   Alcotest.(check (triple bool bool string)) "aggregate reached" (true, true, "E0919") outer;
+  (* a term the invocation already paid for stays paid after a scope charged it again *)
+  let memo_store, memo_ctx = prepared "fuel-scope-memo" (fact_program ^ "table = fact(15)\n") in
+  let table = expression memo_store "table" in
+  let twice_then_after scoped =
+    Eval.with_invocation memo_ctx (fun invocation ->
+        ignore (Eval.run_expr memo_ctx table);
+        if scoped then
+          ignore
+            (Eval.with_fuel_scope memo_ctx ~fuel:1_000_000 (fun () -> Eval.run_expr memo_ctx table));
+        let before = Eval.fuel_used invocation in
+        ignore (Eval.run_expr memo_ctx table);
+        Eval.fuel_used invocation - before)
+  in
+  Alcotest.(check int)
+    "outer payment survives a scope" (twice_then_after false) (twice_then_after true);
   (* scopes need an invocation *)
   match Eval.with_fuel_scope ctx ~fuel:1 (fun () -> ()) with
   | _ -> Alcotest.fail "scope outside an invocation"

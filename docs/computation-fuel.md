@@ -24,10 +24,12 @@ on the same allowance:
 
 Forks never receive a copied or fresh allowance. The counter is one
 process-wide meter, not state on a continuation, so every transition and every
-metered walk (§2) debits the one shared budget. The drivers
-impose no per-branch limits of their own. A nested invocation's own budget acts
-as a per-branch cap (§4); like any future driver cap, it still draws on the
-aggregate, so a cap only lowers what one branch may spend.
+metered walk (§2) debits the one shared budget. Per-branch
+caps are available through `Eval.with_fuel_scope` (used by `jacquard test
+--fuel` for each test) and through a nested invocation's own budget (§4). A cap
+still draws on the aggregate, so it only lowers what one branch may spend. Each
+scope charges memoized terms as if it ran alone (its own memo epoch), and the
+payments of the enclosing invocation survive it.
 
 An invocation without `fuel` is unbounded and behaves as before. The CLI keeps
 that default: every command is bounded only when `--fuel UNITS` is given (§6). A budget is
@@ -220,6 +222,10 @@ future embedding entry points. A host consumer bounds an invocation with
 - Accounting also runs in unbounded mode, since memoized costs must not depend
   on whether a budget is present; it adds a counter update per transition and
   per walked node, and nothing asymptotic.
+- Under `jacquard test --fuel`, a property that finds a counterexample but runs
+  out of fuel while shrinking it is reported `INCOMPLETE`, not `FAIL`: the
+  report never claims more than the budget established. Rerun with a larger
+  budget, or unbounded, to see the minimized counterexample.
 - Store and identity work (writing declarations and the names index, loading
   stored declarations, canonical hashing, and writing `--infer-cache` entries)
   is not program computation and is never metered, so a cold and

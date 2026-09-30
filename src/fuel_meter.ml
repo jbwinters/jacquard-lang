@@ -24,6 +24,11 @@ let epoch = ref 0
 
 let next_epoch = ref 0
 
+(** Epochs of the enclosing invocations and fuel scopes still running, innermost first. A memoized
+    term remembers which of them it was paid in, so a scope's charges never erase an enclosing
+    epoch's. *)
+let active_epochs : int list ref = ref []
+
 (** Invocations active on any evaluator. Only the outermost one opens a fresh epoch: a nested
     invocation on another evaluator charges memoized terms within the enclosing epoch, exactly as a
     re-entry without an invocation would. *)
