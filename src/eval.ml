@@ -158,7 +158,6 @@ type mutable_snapshot = {
 
 type native_snapshot_entry = { snapshot : mutable_snapshot; mutable last_used : int }
 type native_snapshot_lru = { entries : native_snapshot_entry option array; mutable clock : int }
-type root_observer = { on_operation : Hash.t -> unit; on_output : Hash.t -> string -> unit }
 
 type ctx = {
   store : Store.t;
@@ -187,8 +186,10 @@ type ctx = {
   root_handlers : (Hash.t, Value.t list -> (Value.t, Runtime_err.t) result) Hashtbl.t;
       (** op hash -> granted native handler; shallow (the op resumes exactly once with the native
           result), installed only by explicit grants *)
-  mutable root_observer : root_observer option;
+  mutable root_observer : (Observation.event -> unit) option;
       (** disabled-by-default, dynamically scoped recorder seam for root-reaching operations *)
+  mutable observing : bool;
+      (** set while an observer callback runs: the callback may not evaluate (RF.3) *)
   mutable capture_ops : bool;
       (** when set (by {!run_state_capturing}), an op that reaches the root with no handler and no
           grant is CAPTURED — returned with its continuation — instead of dying [Unhandled]; this is
@@ -264,6 +265,7 @@ let make_ctx store =
     native_mutable_snapshots = { entries = Array.make 64 None; clock = 0 };
     root_handlers = Hashtbl.create 8;
     root_observer = None;
+    observing = false;
     capture_ops = false;
     capture_root_handlers = false;
     code_resolver = None;
@@ -421,16 +423,37 @@ let register_root_handler ctx op handler = Hashtbl.replace ctx.root_handlers op 
 
 (** [with_root_observer] scopes a root-operation observer to one caller-controlled evaluation
     extent. The saved observer is restored even across an internal runtime exception. *)
-let with_root_observer ctx ~on_operation ~on_output operation =
+let with_observer ctx on_event body =
   let previous = ctx.root_observer in
-  ctx.root_observer <- Some { on_operation; on_output };
-  Fun.protect ~finally:(fun () -> ctx.root_observer <- previous) operation
+  ctx.root_observer <- Some on_event;
+  Fun.protect ~finally:(fun () -> ctx.root_observer <- previous) body
 
-let note_root_output ctx ~operation bytes =
-  match ctx.root_observer with Some { on_output; _ } -> on_output operation bytes | None -> ()
+(* the run-transcript-v1 view of the typed stream: operation identities and trusted output bytes *)
+let with_root_observer ctx ~on_operation ~on_output operation =
+  with_observer ctx
+    (function
+      | Observation.Operation { operation; _ } -> on_operation operation
+      | Observation.Output { operation; bytes } -> on_output operation bytes
+      | Observation.Result _ -> ())
+    operation
 
-let notify_root_operation ctx operation =
-  match ctx.root_observer with None -> () | Some observer -> observer.on_operation operation
+(* An observer sees the event and nothing else: while it runs, the evaluator refuses to evaluate, so
+   a callback cannot run code, dispatch an operation, or resume a continuation. Its exception
+   propagates after the flag is restored. *)
+let emit ctx event =
+  match ctx.root_observer with
+  | None -> ()
+  | Some on_event ->
+      let saved = ctx.observing in
+      ctx.observing <- true;
+      Fun.protect ~finally:(fun () -> ctx.observing <- saved) (fun () -> on_event event)
+
+let note_root_output ctx ~operation bytes = emit ctx (Observation.Output { operation; bytes })
+
+let notify_root_operation ctx operation ~name arguments =
+  emit ctx (Observation.Operation { operation; name; arguments })
+
+let notify_root_result ctx operation result = emit ctx (Observation.Result { operation; result })
 
 (* --- invocations (RF.2) --- *)
 
@@ -651,6 +674,9 @@ let nth_or_bug what l i =
 let rt e = raise (Rt e)
 let rt_type fmt = Printf.ksprintf (fun m -> rt (Runtime_err.Type_error m)) fmt
 let rt_arity fmt = Printf.ksprintf (fun m -> rt (Runtime_err.Arity m)) fmt
+
+let observer_refusal () =
+  rt (Runtime_err.Eval_error "an observation callback cannot run evaluation")
 
 (* --- computation fuel (RT.1, cost model fuel-v1; see docs/computation-fuel.md) --- *)
 
@@ -1256,7 +1282,7 @@ let charge_native_result ctx result =
         result
     | Error _ -> result
 
-let invoke_untrusted_native ctx fn native args kont =
+let invoke_untrusted_native ?observed ctx fn native args kont =
   (* a root observer or an earlier native may have exhausted the invocation since this step was
      charged: no native or root handler runs after exhaustion *)
   if Fuel_meter.exhausted () then exhaust ctx;
@@ -1270,6 +1296,7 @@ let invoke_untrusted_native ctx fn native args kont =
   note_returned_exhaustion ctx result;
   if Fuel_meter.exhausted () then exhaust ctx;
   List.iter (check_native_argument ctx) invocation_roots;
+  Option.iter (fun operation -> notify_root_result ctx operation result) observed;
   match charge_native_result ctx result with
   | Ok value -> checked_result_state ctx value kont
   | Error error -> rt error
@@ -1324,12 +1351,12 @@ let perform_unchecked ctx (op : Hash.t) ~name ~effect_ (args : Value.t list) (k 
     | f :: outer -> split (walked + 1) (f :: inner_rev) outer
     | [] -> (
         if walked > 0 then charge ctx walked;
-        notify_root_operation ctx op;
+        notify_root_operation ctx op ~name args;
         (* the observer may have run evaluation that exhausted the invocation *)
         if Fuel_meter.exhausted () then exhaust ctx;
         match Hashtbl.find_opt ctx.root_handlers op with
         | Some native when not ctx.capture_root_handlers ->
-            invoke_untrusted_native ctx (VOp { op; name; effect_ }) native args k
+            invoke_untrusted_native ~observed:op ctx (VOp { op; name; effect_ }) native args k
         | Some _ | None ->
             if ctx.capture_ops then
               raise
@@ -1398,6 +1425,7 @@ let apply_unchecked ctx (fn : Value.t) (args : Value.t list) (k : kont) : state 
     performing an operation. Machine transitions use [apply_unchecked] after their initial state has
     passed the same guard. *)
 let apply ctx fn args k =
+  if ctx.observing then observer_refusal ();
   reject_recovery_state ctx (SApply (VTuple (fn :: args), k));
   match fn with
   | VBuiltin _ | VTrustedBuiltin _ | VOp _ -> (
@@ -1700,6 +1728,7 @@ and step_unchecked ctx (state : state) : state option =
     only rearrange validated payloads or tie a fresh recursive cell; native and untrusted memo
     boundaries validate fresh values before constructing their result states. *)
 and run_state_unchecked ctx state =
+  if ctx.observing then observer_refusal ();
   (* work a driver did outside any run is paid for here, inside this run's error channel; a run
      itself never defers, even when a native started it while a driver was applying a value *)
   let saved = ctx.deferring in
@@ -1930,6 +1959,7 @@ let dispatch_root_operation ctx ~resume ~op ~name ~effect_ args =
         note_returned_exhaustion ctx result;
         if Fuel_meter.exhausted () then raise (Rt (fuel_error ctx));
         List.iter (check_native_argument ctx) roots;
+        notify_root_result ctx op result;
         match charge_native_result ctx result with
         | Ok value ->
             if not (atomic_non_task_value value) then reject_recovery_result_value ctx value;

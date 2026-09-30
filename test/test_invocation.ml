@@ -631,19 +631,8 @@ let test_fuel_outside_runs () =
   in
   ignore (Eval.call ctx returns_nested []);
   Alcotest.(check bool) "no exhaustion leaks outside invocations" false (Eval.fuel_exhausted ctx);
-  (* a root observer that runs evaluation and exhausts the invocation stops the operation it
-     observed before its handler runs *)
-  let sink = Buffer.create 16 in
-  let code =
-    Eval.with_invocation ~fuel:1_000 ctx (fun _ ->
-        grant_console ctx sink;
-        Eval.with_root_observer ctx
-          ~on_operation:(fun _ -> ignore (Eval.run_expr ctx spin))
-          ~on_output:(fun _ _ -> ())
-          (fun () -> failure (Eval.run_expr ctx (expression store "print(\"late\")"))))
-  in
-  Alcotest.(check string) "observed then exhausted" "E0919" code;
-  Alcotest.(check string) "the handler never ran" "" (Buffer.contents sink);
+  (* a root observer cannot evaluate at all (RF.3), so it can neither spend fuel nor run an effect
+     before the operation it observed; test_observer_cannot_evaluate pins the refusal *)
   (* identity hashing is not metered: a scheduled run of spliced code under no budget at all
      returns E0919 from its first transition rather than raising *)
   let spliced = expression store "quote { pair(unquote(code.of-int(1)), 2) }" in
@@ -936,6 +925,77 @@ let test_fuel_scopes () =
   | _ -> Alcotest.fail "scope outside an invocation"
   | exception Invalid_argument _ -> ()
 
+(* --- typed observation (RF.3) --- *)
+
+let describe = function
+  | Observation.Operation { name; arguments; _ } ->
+      Printf.sprintf "op %s(%s)" name (String.concat ", " (List.map Value.show arguments))
+  | Observation.Output { bytes; _ } -> Printf.sprintf "out %S" bytes
+  | Observation.Result { result = Ok value; _ } -> "ok " ^ Value.show value
+  | Observation.Result { result = Error error; _ } ->
+      "error " ^ Diag.code_or_uncoded (Runtime_err.to_diag error)
+
+let test_typed_events () =
+  let store, ctx = prepared "observe-events" "" in
+  let greet = expression store "{ print(\"a\"); print(\"bc\"); 1 }" in
+  let sink = Buffer.create 16 in
+  let seen = ref [] in
+  let result =
+    Eval.with_invocation ctx (fun _ ->
+        grant_console ctx sink;
+        Eval.with_observer ctx
+          (fun event -> seen := describe event :: !seen)
+          (fun () -> Eval.run_expr ctx greet))
+  in
+  (match result with Ok (Value.VInt 1) -> () | _ -> Alcotest.fail "evaluation changed");
+  Alcotest.(check (list string))
+    "ordered operation, output and result"
+    [ "op print(\"a\")"; "out \"a\""; "ok ()"; "op print(\"bc\")"; "out \"bc\""; "ok ()" ]
+    (List.rev !seen);
+  Alcotest.(check string) "each operation dispatched once" "abc" (Buffer.contents sink);
+  (* after its extent, the observer receives nothing *)
+  let before = List.length !seen in
+  Eval.with_invocation ctx (fun _ ->
+      grant_console ctx sink;
+      ignore (Eval.run_expr ctx greet));
+  Alcotest.(check int) "no events after the observer ended" before (List.length !seen)
+
+let test_observer_cannot_evaluate () =
+  let store, ctx = prepared "observe-refuse" "" in
+  let greet = expression store "print(\"x\")" and one = expression store "add(1, 2)" in
+  let sink = Buffer.create 16 in
+  let attempts = ref [] in
+  let result =
+    Eval.with_invocation ctx (fun _ ->
+        grant_console ctx sink;
+        Eval.with_observer ctx
+          (fun _ ->
+            attempts :=
+              (match Eval.run_expr ctx one with
+              | Ok _ -> "evaluated"
+              | Error error -> Runtime_err.to_string error)
+              :: !attempts)
+          (fun () -> Eval.run_expr ctx greet))
+  in
+  Alcotest.(check bool) "the observed run still completes" true (Result.is_ok result);
+  Alcotest.(check bool)
+    "every callback evaluation was refused" true
+    (!attempts <> [] && List.for_all (fun a -> a <> "evaluated") !attempts);
+  Alcotest.(check string) "the effect happened once" "x" (Buffer.contents sink);
+  (* a callback exception propagates; the observer and the refusal flag are restored *)
+  (match
+     Eval.with_invocation ctx (fun _ ->
+         grant_console ctx sink;
+         Eval.with_observer ctx (fun _ -> raise Boom) (fun () -> Eval.run_expr ctx greet))
+   with
+  | _ -> Alcotest.fail "the observer exception was swallowed"
+  | exception Boom -> ());
+  Alcotest.(check string)
+    "the operation was not dispatched after the failing callback" "x" (Buffer.contents sink);
+  Alcotest.(check bool)
+    "evaluation works again" true
+    (Eval.with_invocation ctx (fun _ -> Result.is_ok (Eval.run_expr ctx one)))
+
 let suite =
   [
     Alcotest.test_case "grants are scoped to one invocation" `Quick test_grants_are_scoped;
@@ -963,4 +1023,7 @@ let suite =
     Alcotest.test_case "wrapped exhaustion stays E0919" `Quick test_fuel_survives_nested_drivers;
     Alcotest.test_case "work outside runs is charged and never raises" `Quick test_fuel_outside_runs;
     Alcotest.test_case "fuel scopes cap one branch of the aggregate" `Quick test_fuel_scopes;
+    Alcotest.test_case "typed root events are ordered and single" `Quick test_typed_events;
+    Alcotest.test_case "observers cannot evaluate and failures propagate" `Quick
+      test_observer_cannot_evaluate;
   ]

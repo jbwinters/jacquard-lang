@@ -72,8 +72,15 @@ let record_expression recorder ctx run =
       recorder.current_rev <- [];
       recorder.active <- false)
     (fun () ->
-      Eval.with_root_observer ctx ~on_operation:(on_operation recorder)
-        ~on_output:(on_output recorder) (fun () ->
+      (* run-transcript-v1 is a projection of the typed root events (RF.3): operations become
+         trace events, trusted output attaches to its pending operation, and results are not part
+         of v1 *)
+      Eval.with_observer ctx
+        (function
+          | Observation.Operation { operation; _ } -> on_operation recorder operation
+          | Observation.Output { operation; bytes } -> on_output recorder operation bytes
+          | Observation.Result _ -> ())
+        (fun () ->
           match run () with
           | Ok value as result ->
               let observation =
