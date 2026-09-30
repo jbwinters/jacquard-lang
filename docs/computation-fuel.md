@@ -125,6 +125,12 @@ skips a failed branch therefore cannot turn exhaustion into a value.
   replace it with its own result or error. A native that returns E0919 (for
   example from a nested invocation with its own smaller budget) leaves its work
   incomplete, so the enclosing invocation becomes exhausted too.
+- A nested invocation with its own smaller budget is a per-branch cap: running
+  out of it is that invocation's outcome, and the enclosing invocation keeps
+  its remaining allowance. A caller that receives that E0919 and returns it
+  makes the enclosing invocation exhausted (above). A host-registered native
+  that instead discards it and returns a value owns that choice (§7); no
+  prelude native opens a nested invocation.
 - A walk that runs out raises `Fuel_meter.Exceeded`. A run turns it into E0919;
   the scheduler and the inference drivers return E0919 for a walk of their
   own; and the CLI reports an escaped one as E0919 rather than as an internal

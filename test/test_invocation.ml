@@ -623,6 +623,14 @@ let test_fuel_outside_runs () =
         (Result.is_ok value, Eval.fuel_exhausted ctx))
   in
   Alcotest.(check (pair bool bool)) "exact nested completion" (true, false) completed;
+  (* a nested exhaustion returned outside any invocation leaves the process meter untouched *)
+  let returns_nested =
+    Value.VBuiltin
+      ( "returns-nested",
+        fun _ -> Eval.with_invocation ~fuel:0 other (fun _ -> Eval.run_expr other literal) )
+  in
+  ignore (Eval.call ctx returns_nested []);
+  Alcotest.(check bool) "no exhaustion leaks outside invocations" false (Eval.fuel_exhausted ctx);
   (* a root observer that runs evaluation and exhausts the invocation stops the operation it
      observed before its handler runs *)
   let sink = Buffer.create 16 in

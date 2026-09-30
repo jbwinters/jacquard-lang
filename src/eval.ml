@@ -1150,8 +1150,11 @@ let check_native_argument ctx root =
 
 (* A native that re-entered the evaluator and ran out cannot replace the exhaustion with its own
    result or error *)
+(* Only inside an invocation: outside one there is no teardown to restore the meter, and no
+   enclosing budget to exhaust. *)
 let note_returned_exhaustion ctx = function
-  | Error error when Runtime_err.is_fuel_exhausted error -> mark_exhausted ctx
+  | Error error when Runtime_err.is_fuel_exhausted error && !Fuel_meter.depth > 0 ->
+      mark_exhausted ctx
   | Ok _ | Error _ -> ()
 
 let charge_native_result ctx result =
@@ -1165,7 +1168,7 @@ let charge_native_result ctx result =
         (* a native reporting exhaustion (say, of a nested invocation with its own budget) left
            its work incomplete, so everything depending on it is incomplete: the enclosing
            invocation is exhausted too, and every driver's sticky check sees it *)
-        mark_exhausted ctx;
+        note_returned_exhaustion ctx result;
         result
     | Error _ -> result
 
