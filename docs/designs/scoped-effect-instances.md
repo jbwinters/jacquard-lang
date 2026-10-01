@@ -320,7 +320,16 @@ to choose"). The shipped checker is Hindley-Milner with level-based
 generalization and a fixed unification order, so that does not hold by itself.
 A1.3 and A1.6 supersede that paragraph; A1.5 refines §4's annotation bullets
 (capabilities at any depth, including callback results), and A1.4 refines §4's
-spawn paragraph.
+spawn paragraph. Two further §4 statements are corrected: the `async.spawn`
+rule is a dependent operation scheme (concurrency.md), not a direct-call
+checker form, so the `*.scoped` form is modelled on the frozen `VaryWorld`
+application check instead; and user clauses for instance operations are refused
+by the checker (E0834), not by resolution, because the registration is
+checker-only.
+
+The **registration** (checker context, empty in production) names, per
+instance effect: the `*.scoped` term, the instance effect, the capability type,
+the instance operations, and the position of the scoped callback argument.
 
 ### A1.0 Diagnostic codes
 
@@ -336,6 +345,13 @@ DECISION.md`); TS.2 uses:
 | E0834 | a user handler clause for an instance effect's operation |
 | E0835 | constructing, destructuring or pattern-matching a capability |
 | E0836 | a capability type stored in a nominal declaration or user operation signature |
+
+Slice 1 adds these to `checker_codes`, the checker's summary and next-step
+tables, `docs/errors.md`, and the diagnostic goldens (the CAP.0 reservation of
+E0820/E0821 exists only in its decision document). Refusals that are ordinary
+type mismatches keep the existing codes: E0801 at an application, E0804 at an
+annotation or in a rigid signature proof (the L1 and L3 cases and A1.9's choice
+and rank-1 cases).
 
 ### A1.1 Representation
 
@@ -416,10 +432,16 @@ annotated `use : (() ->{state-instance} (), StateRef Int) ->{state-instance} ()`
   `run(k, c) = k(fn () -> state.get-at(c))` is refused; ordering the
   capability parameter first is accepted.
 
-### A1.4 Spawn
+### A1.4 Fresh-continuation callbacks (spawn and its kin)
 
-The thunk row of `async.spawn` carries a persistent "no instance entries" flag
-on its row variable. Binding a flagged row variable to a row containing an
+Some trusted operations run a user thunk on a fresh continuation with no
+language handler frames: `async.spawn`'s child, the body of `async.scope`
+(round_robin.ml), the thunks of `dist.sample-lw` and
+`dist.sample-lw-weights-v1` (prelude.ml), and Warp's test runners (warp.ml).
+An instance operation performed there would never reach its scope's handler.
+The callback row of each such operation carries a persistent "no instance
+entries" flag on its row variable; slice 1 audits every trusted builtin that
+applies a user callback with an empty continuation and flags it. Binding a flagged row variable to a row containing an
 instance entry fails with E0833 (binding it to a closed or rigid tail is
 allowed, see below); the flag passes to the new tail of any bound
 row and is OR-ed when two row variables are unified; instantiation and cloning
@@ -432,18 +454,23 @@ or interface-v1 signatures, so an API diff cannot see it; interface-v1 also
 erases label sharing (`pick(c, d) = c` and `= d` display alike). With an empty
 registration no instance entry exists and the flag never fires.
 
-Only instance entries are forbidden in a spawned thunk's row, which is
+Only instance entries are forbidden in such a callback's row, which is
 narrower than §4's wording ("capabilities may not" be handed to spawned work)
-and sound: labels inside ambient payloads of the child's row are charged to the
-caller (SC.4) and caught by A1.7's outward and ambient checks, and a captured
-capability that is never used is inert.
+and sound: an operation in the callback reaches only handlers installed inside
+the callback and the root handlers, whose payloads are first-order, so a label
+in an ambient payload of the callback's row is never delivered to an outer
+handler; and a captured capability that is never used is inert. (Ambient
+effects inside `async.scope` bodies that an enclosing language handler appears
+to handle statically, e.g. `emit.collect(fn () -> async.scope(fn () ->
+emit(1)))`, are an existing SC.4/TS.0 progress gap outside this amendment.)
 
-**Limit L2 (pinned by tests).** Under SC.4 the spawn operation's row is the
-child's row, and the spawning body's ambient row shares that tail. Therefore a
-callback invoked by a body that spawns, directly or through any callee whose
-row shares the spawned child's tail (row-polymorphic helpers such as
-`bg(k) = async.spawn(k)`, `state.scoped` or `async.scope` bodies that spawn),
-cannot use an instance, although it runs in the parent; for example
+**Limit L2 (pinned by tests).** Under SC.4 the operation's row is the
+callback's row, and the calling body's ambient row shares that tail. Therefore
+a callback invoked by a body that calls a fresh-continuation operation,
+directly or through any callee whose row shares its tail (row-polymorphic
+helpers such as `bg(k) = async.spawn(k)`, `state.scoped` bodies that spawn,
+any body inside `async.scope`, a function that calls `async.scope` or
+`dist.sample-lw`), cannot use an instance, although it runs in the parent; for example
 `par(k1, k2) = { let t = async.spawn(k1); k2(); async.await(t) }` refuses a
 `k2` that uses one. Separating the child's exclusion from the parent's
 inclusion needs a directional row constraint and is future work.
@@ -474,7 +501,12 @@ inclusion needs a directional row constraint and is future work.
 - an expression annotation cannot describe a thunk over a lexically bound
   capability: `(fn () -> state.get-at(c) : () ->{state-instance} Int)` names no
   capability (E0830), and an annotation's `| e` is rigid and cannot absorb the
-  entry; omit the annotation or annotate a function taking the capability.
+  entry; omit the annotation or annotate a function taking the capability;
+- inference can publish a scheme whose only capability is in its result
+  (`f() = { let x = loop(); state.put-at(x, 1); x }`), but the same type
+  written as an annotation is refused (E0830), because only capabilities in
+  the annotation count (A1.5) and a result-only capability does not determine a
+  row annotation's entry for a caller.
 
 ### A1.6 Determinacy
 
@@ -485,7 +517,7 @@ reachable from ordinary inference (`read-unknown() = state.get-at(loop())`), so
 it is a normal refusal. Ordinary row polymorphism is unaffected: `apply(k) =
 k()` mentions no instance label when published and remains usable with a scoped
 thunk while its scope is live. A top-level expression whose row still holds an
-instance entry or an unbound label is refused.
+instance entry or an unbound label is refused (E0830).
 
 ### A1.7 Scoped rule obligations
 
@@ -512,9 +544,11 @@ explicitly. Display and authority use the deduplicated effect identities.
 Exactness compares the normalized sets of `(effect, resolved label)` in which a label
 variable equals only itself, never effect identities, and never defers; purity
 counts instance entries, so a row of instance entries only is never pure.
-Errors raised inside unification for E0830, E0832 and E0833 carry a structured
-reason, so existing handlers that relabel unification failures (to E0801, E0804,
-E0807 or E0818) do not hide them.
+E0833, and any E0830 or E0832 detected inside unification (most are found by
+post-checks at scope exit, publication or annotation conversion), carry a
+structured reason, so existing handlers that relabel unification failures (to
+E0801, E0804, E0807 or E0818, including the top-level payload-conflict
+relabel) do not hide them.
 
 ### A1.9 Other refused programs
 
@@ -525,12 +559,18 @@ Pinned by tests:
 - Lambda-bound operations and callbacks are monomorphic (rank-1), so
   `both(f, c1, c2) = { f(c1); f(c2) }` is refused when applied to distinct
   instances.
+- A non-value `let` alias of an instance operation is monomorphic
+  (`let r = id(state.get-at)`), so using it on a scope's capability is refused
+  by E0832's environment check; bind the operation directly (a value) instead.
 - A definition group is monomorphic until published, so a member that passes a
   scope's capability, or a thunk over it, to any member of its own group is
   refused (E0832: the group's type would name the rigid label), e.g.
   `walk(t) = state.scoped(0, fn (c) -> visit(c, t))` with `visit` calling
   `walk`; open the scope in a non-recursive wrapper and pass the capability
-  into the recursion.
+  into the recursion. If each recursive level must open its own scope and pass
+  its capability to a group member, there is no workaround short of inlining
+  that member into the scope body: groups get no polymorphic recursion, even
+  with annotations.
 - No rank-2 (runST) callbacks: a lambda-bound callback cannot receive a
   capability, or a thunk over one, from a scope opened in the same function
   (`run(k) = state.scoped(0, fn (c) -> k(c))` is refused by E0832's environment
