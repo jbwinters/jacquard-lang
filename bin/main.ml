@@ -64,6 +64,8 @@ let diagnostic_summary = function
   | "E1001" -> "Test file has an expression at top level"
   | "E1002" -> "Dry-run cannot sandbox eval"
   | "E1003" -> "Relational runs diverged"
+  | "E1005" -> "Observation policy is invalid or refused"
+  | "E1007" -> "Relational runs cannot be called equal"
   | "E1101" -> "Program is outside the native v1 compilation subset"
   | "E1102" -> "Program requires the interpreter tier"
   | "E1103" -> "Native build could not complete"
@@ -90,6 +92,12 @@ let diagnostic_next_step = function
   | "E1001" -> "Keep test files declaration-only."
   | "E1002" -> "Run this program without --dry-run or remove eval from its authority row."
   | "E1003" -> "Review the first divergence and make the result and routed effects invariant."
+  | "E1005" ->
+      "Pass a canonical observation-policy-v1 file that names operations and an interface of this \
+       program."
+  | "E1007" ->
+      "Raise the policy's field limit, compare coded failures, or compare runs that complete; an \
+       inconclusive field agrees only on a prefix, an opaque kind, or an unfinished projection."
   | "E1101" -> "Run the program with the interpreter or rewrite the unsupported construct."
   | "E1102" -> "Run this program with the interpreter."
   | "E1103" -> "Correct the native toolchain or build input and try again."
@@ -483,6 +491,16 @@ type relate_failure =
   | Relate_runtime of Runtime_err.t
   | Relate_refused of Diag.t list
 
+(* without a policy, relate records run-transcript-v1; with one, observation-transcript-v1 *)
+type relate_transcript =
+  | V1_transcript of Run_transcript.transcript
+  | Policy_transcript of Observation_transcript.transcript
+
+let is_operation store operation =
+  match Store.locate_internal store operation with
+  | Ok { Store.role = Store.Operation _; _ } -> true
+  | Ok _ | Error _ -> false
+
 let relate_store_failure action error =
   Relate_diagnostics
     [
@@ -496,7 +514,7 @@ let protect_relate_store_operation action operation =
   with (Sys_error _ | Unix.Unix_error _) as error -> Error (relate_store_failure action error)
 
 let relate_constituent ~file ~source ~authority ~prelude ~root_seed ~schedule_seed ~secret_getenv
-    ~syntax ~console_read ~emit_warnings =
+    ~syntax ~console_read ~emit_warnings ~policy =
   match protect_relate_store_operation "create" fresh_relate_store_dir with
   | Error failure -> Error failure
   | Ok store_dir ->
@@ -537,8 +555,16 @@ let relate_constituent ~file ~source ~authority ~prelude ~root_seed ~schedule_se
                   | Error diagnostics -> Error (Relate_diagnostics diagnostics)
                   | Ok checker -> (
                       let recorder = Run_transcript.create () in
+                      let observed = Option.map Observation_transcript.create policy in
                       let refused = ref None in
                       let runtime_failure = ref None in
+                      let run_scheduled expression () =
+                        Result.map
+                          (fun (scheduled : Round_robin.scheduled) -> scheduled.value)
+                          (Round_robin.run_expr_scheduled ctx
+                             ~mode:(Round_robin.Seeded_schedule { seed = schedule_seed })
+                             expression)
+                      in
                       let on_expr expression =
                         match Check.check_top checker (Kernel.Expr expression) with
                         | Error diagnostics -> Error diagnostics
@@ -554,26 +580,50 @@ let relate_constituent ~file ~source ~authority ~prelude ~root_seed ~schedule_se
                                 Error diagnostics
                             | [] -> (
                                 match
-                                  Run_transcript.record_expression recorder ctx (fun () ->
-                                      Result.map
-                                        (fun (scheduled : Round_robin.scheduled) -> scheduled.value)
-                                        (Round_robin.run_expr_scheduled ctx
-                                           ~mode:
-                                             (Round_robin.Seeded_schedule { seed = schedule_seed })
-                                           expression))
+                                  match observed with
+                                  | Some observed ->
+                                      Observation_transcript.record observed ctx
+                                        (run_scheduled expression)
+                                  | None ->
+                                      Run_transcript.record_expression recorder ctx
+                                        (run_scheduled expression)
                                 with
                                 | Ok _ -> Ok ()
                                 | Error error ->
                                     runtime_failure := Some error;
                                     Error []))
                       in
-                      match process_forms ~emit_warnings ~syntax store ~file source ~on_expr with
-                      | Ok () -> Ok (Run_transcript.transcript recorder)
-                      | Error _ when Option.is_some !runtime_failure ->
-                          Error (Relate_runtime (Option.get !runtime_failure))
-                      | Error _ when Option.is_some !refused ->
-                          Error (Relate_refused (Option.get !refused))
-                      | Error diagnostics -> Error (Relate_diagnostics diagnostics)))))
+                      let finished () =
+                        match observed with
+                        | Some observed ->
+                            Policy_transcript (Observation_transcript.transcript observed)
+                        | None -> V1_transcript (Run_transcript.transcript recorder)
+                      in
+                      (* a policy names its operations by identity: one this program does not have
+                         would silently observe nothing *)
+                      match
+                        match policy with
+                        | Some policy ->
+                            Observation_policy.validate_operations policy
+                              ~is_operation:(is_operation store)
+                        | None -> Ok ()
+                      with
+                      | Error diagnostics -> Error (Relate_diagnostics diagnostics)
+                      | Ok () -> (
+                          match
+                            process_forms ~emit_warnings ~syntax store ~file source ~on_expr
+                          with
+                          | Ok () -> Ok (finished ())
+                          (* under a policy a runtime failure is an observation: the failed run is
+                         recorded and later expressions do not run *)
+                          | Error _ when Option.is_some !runtime_failure && Option.is_some observed
+                            ->
+                              Ok (finished ())
+                          | Error _ when Option.is_some !runtime_failure ->
+                              Error (Relate_runtime (Option.get !runtime_failure))
+                          | Error _ when Option.is_some !refused ->
+                              Error (Relate_refused (Option.get !refused))
+                          | Error diagnostics -> Error (Relate_diagnostics diagnostics))))))
 
 let print_relate_failure = function
   | Relate_diagnostics diagnostics -> print_diags diagnostics
@@ -584,7 +634,35 @@ let print_relate_failure = function
       print_runtime_error error;
       match error with Runtime_err.Unhandled _ -> exit_unhandled | _ -> exit_runtime)
 
-let relate_cmd file variation seed allows prelude syntax =
+(* a policy pinned to an interface-v1 identity applies only to a program with that interface *)
+let relate_policy_check ~prelude ~syntax ~file ~source policy =
+  match Observation_policy.interface policy with
+  | None -> Ok ()
+  | Some _ -> (
+      match
+        Frontend.check ~prelude_dir:(prelude_dir_of prelude) ~root:(fresh_check_root ()) ~syntax
+          ~file source
+      with
+      | Error diagnostics -> Error diagnostics
+      | Ok (Frontend.Recovered { diagnostics; _ }) -> Error diagnostics
+      | Ok (Frontend.Checked artifact) ->
+          Observation_policy.check_interface policy
+            ~identity:(Interface.identity (Frontend.Checked.interface artifact)))
+
+let read_relate_policy = function
+  | None -> Ok None
+  | Some path -> (
+      match read_file path with
+      | exception Sys_error message ->
+          Error [ cli_diagnostic ~code:"E1005" ("cannot read the observation policy: " ^ message) ]
+      | bytes -> Result.map Option.some (Observation_policy.parse bytes))
+
+let rec relate_cmd file variation seed allows prelude syntax policy_path =
+  match read_relate_policy policy_path with
+  | Error diagnostics -> print_diags diagnostics
+  | Ok policy -> relate_with_policy file variation seed allows prelude syntax policy
+
+and relate_with_policy file variation seed allows prelude syntax policy =
   let runs, secrets, comparison, run_specs =
     match variation with
     | Schedule_variation count ->
@@ -624,66 +702,124 @@ let relate_cmd file variation seed allows prelude syntax =
   in
   selected_output_sanitizer := Relate.redact ~secrets;
   let source = read_file file in
-  let captured_console_input = ref None in
-  let rec compare_runs baseline run_index = function
-    | [] ->
-        Printf.printf "relate runs=%d seed=%d verdict=equal\n" runs seed;
-        ok
-    | ({ schedule_seed; secret_getenv; authority } : relate_run) :: rest -> (
-        let console_read, finish_console_input =
-          match !captured_console_input with
-          | None ->
-              let reversed = ref [] in
-              ( (fun () ->
-                  let line = try Some (Stdlib.read_line ()) with End_of_file -> None in
-                  reversed := line :: !reversed;
-                  line),
-                fun () -> captured_console_input := Some (List.rev !reversed) )
-          | Some captured ->
-              let remaining = ref captured in
-              ( (fun () ->
-                  match !remaining with
-                  | line :: rest ->
-                      remaining := rest;
-                      line
-                  | [] -> None),
-                fun () -> () )
-        in
-        match
-          relate_constituent ~file ~source ~authority ~prelude ~root_seed:seed ~schedule_seed
-            ~secret_getenv ~syntax ~console_read ~emit_warnings:(run_index = 1)
-        with
-        | Error failure -> print_relate_failure failure
-        | Ok transcript -> (
-            finish_console_input ();
-            match baseline with
-            | None -> compare_runs (Some transcript) (run_index + 1) rest
-            | Some first -> (
-                let verdict =
-                  match comparison with
-                  | Complete_transcript -> Run_transcript.compare first transcript
-                  | Result_values -> Run_transcript.compare_values first transcript
-                in
-                match verdict with
-                | Run_transcript.Equal -> compare_runs baseline (run_index + 1) rest
-                | Run_transcript.Divergence divergence ->
-                    let hint =
-                      match comparison with
-                      | Complete_transcript -> diagnostic_next_step "E1003"
-                      | Result_values ->
-                          "Review the first divergence and make the rendered result values \
-                           invariant. Routed effects and audits are outside this comparison."
+  match
+    match policy with
+    | Some policy -> relate_policy_check ~prelude ~syntax ~file ~source policy
+    | None -> Ok ()
+  with
+  | Error diagnostics -> print_diags diagnostics
+  | Ok () ->
+      let captured_console_input = ref None in
+      let policy_name =
+        match policy with
+        | Some policy -> Hash.to_hex (Observation_policy.identity policy)
+        | None -> "none"
+      in
+      (* an inconclusive pair does not end the comparison: a later run may certainly diverge *)
+      let inconclusive = ref None in
+      let rec compare_runs baseline run_index = function
+        | [] -> (
+            match (policy, !inconclusive) with
+            | None, _ ->
+                Printf.printf "relate runs=%d seed=%d verdict=equal\n" runs seed;
+                ok
+            | Some _, Some (index, difference) ->
+                print_diags
+                  [
+                    cli_diagnostic ~code:"E1007"
+                      (Printf.sprintf
+                         "Runs 1 and %d cannot be called equal under observation policy %s:\n%s"
+                         index policy_name
+                         (Relate.redact ~secrets (Observation_transcript.render difference)));
+                  ]
+            | Some _, None ->
+                (* the comparison names the policy it was made under *)
+                Printf.printf "relate runs=%d seed=%d verdict=equal policy=%s\n" runs seed
+                  policy_name;
+                ok)
+        | ({ schedule_seed; secret_getenv; authority } : relate_run) :: rest -> (
+            let console_read, finish_console_input =
+              match !captured_console_input with
+              | None ->
+                  let reversed = ref [] in
+                  ( (fun () ->
+                      let line = try Some (Stdlib.read_line ()) with End_of_file -> None in
+                      reversed := line :: !reversed;
+                      line),
+                    fun () -> captured_console_input := Some (List.rev !reversed) )
+              | Some captured ->
+                  let remaining = ref captured in
+                  ( (fun () ->
+                      match !remaining with
+                      | line :: rest ->
+                          remaining := rest;
+                          line
+                      | [] -> None),
+                    fun () -> () )
+            in
+            match
+              relate_constituent ~file ~source ~authority ~prelude ~root_seed:seed ~schedule_seed
+                ~secret_getenv ~syntax ~console_read ~emit_warnings:(run_index = 1) ~policy
+            with
+            | Error failure -> print_relate_failure failure
+            | Ok transcript -> (
+                finish_console_input ();
+                match baseline with
+                | None -> compare_runs (Some transcript) (run_index + 1) rest
+                | Some (Policy_transcript first) -> (
+                    match transcript with
+                    | V1_transcript _ ->
+                        print_diags [ cli_diagnostic ~code:"E1006" "relate mixed formats" ]
+                    | Policy_transcript transcript -> (
+                        match Observation_transcript.compare first transcript with
+                        | Error diagnostics -> print_diags diagnostics
+                        | Ok Observation_transcript.Equal ->
+                            compare_runs baseline (run_index + 1) rest
+                        | Ok (Observation_transcript.Divergent difference) ->
+                            print_diags
+                              [
+                                cli_diagnostic ~code:"E1003"
+                                  (Printf.sprintf
+                                     "Runs 1 and %d diverged under observation policy %s:\n%s"
+                                     run_index policy_name
+                                     (Relate.redact ~secrets
+                                        (Observation_transcript.render difference)));
+                              ]
+                        | Ok (Observation_transcript.Inconclusive difference) ->
+                            if Option.is_none !inconclusive then
+                              inconclusive := Some (run_index, difference);
+                            compare_runs baseline (run_index + 1) rest))
+                | Some (V1_transcript first) -> (
+                    let transcript =
+                      match transcript with
+                      | V1_transcript transcript -> transcript
+                      | Policy_transcript _ -> first
                     in
-                    print_diags
-                      [
-                        cli_diagnostic ~hint ~code:"E1003"
-                          (Printf.sprintf "Runs 1 and %d diverged with %s:\n%s" run_index
-                             (Run_transcript.divergence_kind_name divergence.kind)
-                             (Run_transcript.render_redacted ~redact:(Relate.redact ~secrets)
-                                divergence));
-                      ])))
-  in
-  compare_runs None 1 run_specs
+                    let verdict =
+                      match comparison with
+                      | Complete_transcript -> Run_transcript.compare first transcript
+                      | Result_values -> Run_transcript.compare_values first transcript
+                    in
+                    match verdict with
+                    | Run_transcript.Equal -> compare_runs baseline (run_index + 1) rest
+                    | Run_transcript.Divergence divergence ->
+                        let hint =
+                          match comparison with
+                          | Complete_transcript -> diagnostic_next_step "E1003"
+                          | Result_values ->
+                              "Review the first divergence and make the rendered result values \
+                               invariant. Routed effects and audits are outside this comparison."
+                        in
+                        print_diags
+                          [
+                            cli_diagnostic ~hint ~code:"E1003"
+                              (Printf.sprintf "Runs 1 and %d diverged with %s:\n%s" run_index
+                                 (Run_transcript.divergence_kind_name divergence.kind)
+                                 (Run_transcript.render_redacted ~redact:(Relate.redact ~secrets)
+                                    divergence));
+                          ])))
+      in
+      compare_runs None 1 run_specs
 
 (* --- check --- *)
 
@@ -2117,6 +2253,18 @@ let relate_variation =
   in
   Arg.conv (parse, print)
 
+let relate_policy_arg =
+  Arg.(
+    value
+    & opt (some file) None
+    & info [ "policy" ] ~docv:"POLICY"
+        ~doc:
+          "Compare under the observation-policy-v1 file $(docv) (docs/observation-policies.md) \
+           instead of the variation's built-in projection: record observation-transcript-v1 under \
+           it, record a runtime failure as an observation, refuse operations the program does not \
+           have or an interface pin it does not match (E1005), report an inconclusive comparison \
+           (E1007), and name the policy identity in the verdict.")
+
 let vary_arg =
   Arg.(
     required
@@ -2173,7 +2321,7 @@ let run_t =
       $ infer_cache_arg $ origin_arg $ dry_run_arg $ schedule_record_arg $ schedule_replay_arg
       $ schedule_fork_arg $ fuel_arg $ syntax_arg)
 
-let relate_term format file variation seed allows prelude syntax =
+let relate_term format file variation seed allows prelude syntax policy =
   selected_diagnostic_format := format;
   match variation with
   | Grant_variation _ when allows <> [] ->
@@ -2187,7 +2335,7 @@ let relate_term format file variation seed allows prelude syntax =
           "grant=dist requires a nonzero --seed so the live sampler differs from the dry seed-0 \
            sampler" )
   | Schedule_variation _ | Secret_variation _ | Grant_variation _ ->
-      `Ok (relate_cmd file variation seed allows prelude syntax)
+      `Ok (relate_cmd file variation seed allows prelude syntax policy)
 
 let relate_t =
   Cmd.v
@@ -2201,7 +2349,7 @@ let relate_t =
     Term.(
       ret
         (const relate_term $ diagnostic_format_arg $ file_arg $ vary_arg $ required_seed_arg
-       $ allows_arg $ prelude_arg $ syntax_arg))
+       $ allows_arg $ prelude_arg $ syntax_arg $ relate_policy_arg))
 
 let print_sigs_arg =
   Arg.(

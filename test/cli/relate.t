@@ -25,6 +25,15 @@ run options.
              Diagnostic rendering contract: text (default) or json-v1 (one
              canonical JSON object per line on the existing diagnostic stream).
   
+         --policy=POLICY
+             Compare under the observation-policy-v1 file POLICY
+             (docs/observation-policies.md) instead of the variation's built-in
+             projection: record observation-transcript-v1 under it, record a
+             runtime failure as an observation, refuse operations the program
+             does not have or an interface pin it does not match (E1005),
+             report an inconclusive comparison (E1007), and name the policy
+             identity in the verdict.
+  
          --prelude=DIR
              Prelude directory (default: $JACQUARD_PRELUDE or ./prelude).
   
