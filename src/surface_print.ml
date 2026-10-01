@@ -69,6 +69,20 @@ let rec type_owns_comments (ty : Kernel.ty) =
   | Kernel.TTuple items -> List.exists type_owns_comments items
   | Kernel.TForall (_, _, body) -> type_owns_comments body
 
+(* [ty]'s printing begins with a comment written on its own line before it. *)
+let type_starts_with_comment (ty : Kernel.ty) =
+  leading_comments ty.meta <> [] || leading_comments (Meta.surface_container "paren" ty.meta) <> []
+
+(* A source group keeps its parentheses whenever a comment lies anywhere in or around it: the
+   comment's line break is then inside the delimiters, where it is legal. *)
+let keeps_group context (ty : Kernel.ty) =
+  let paren_meta = Meta.surface_container "paren" ty.meta in
+  context.trivia
+  && (not (Meta.is_empty paren_meta))
+  && (type_group_has_comments paren_meta
+     || type_owns_comments { ty with Kernel.meta = Meta.without_surface_container "paren" ty.meta }
+     )
+
 let pp_comments fmt comments =
   List.iter
     (fun comment ->
@@ -144,14 +158,17 @@ let pp_spaced context pp fmt items =
 (* Like [pp_spaced], but the space never breaks: used where a line break would end the enclosing
    construct (positional fields, type arguments). A line comment still ends its line; it can only
    occur where the source broke the line, inside delimiters. *)
-let pp_joined context pp fmt items =
+let pp_joined ?(starts_with_comment = fun _ -> false) context pp fmt items =
   ignore
     (List.fold_left
        (fun previous item ->
          (match previous with
          | None -> ()
          | Some previous ->
-             if ends_in_line_comment context pp previous then Format.pp_force_newline fmt ()
+             if
+               ends_in_line_comment context pp previous
+               || (context.trivia && starts_with_comment item)
+             then Format.pp_force_newline fmt ()
              else Format.pp_print_char fmt ' ');
          pp fmt item;
          Some item)
@@ -512,15 +529,7 @@ and pp_row context lookup fmt (row : Kernel.row) =
    comment-free groups are dropped as before. *)
 and pp_ty context lookup fmt (ty : Kernel.ty) =
   let paren_meta = Meta.surface_container "paren" ty.meta in
-  (* a source group keeps its parentheses whenever a comment lies anywhere in or around it: the
-     comment's line break is then inside the delimiters, where it is legal *)
-  if
-    context.trivia
-    && (not (Meta.is_empty paren_meta))
-    && (type_group_has_comments paren_meta
-       || type_owns_comments
-            { ty with Kernel.meta = Meta.without_surface_container "paren" ty.meta })
-  then pp_grouped_ty context lookup paren_meta fmt ty
+  if keeps_group context ty then pp_grouped_ty context lookup paren_meta fmt ty
   else pp_plain_ty context lookup fmt ty
 
 and pp_grouped_ty context lookup paren_meta fmt ty =
@@ -570,7 +579,9 @@ and pp_plain_ty context lookup fmt (ty : Kernel.ty) =
   | Kernel.TVar name -> pp_named Surface_name.Tvar fmt name
   | Kernel.TApp (head, args) when context.trivia && List.exists type_owns_comments args ->
       (* a line break between a type and its arguments ends a signature or field: join them *)
-      Format.fprintf fmt "@[<hov>%a@]" (pp_joined context (pp_ty_atom context lookup)) (head :: args)
+      Format.fprintf fmt "@[<hov>%a@]"
+        (pp_joined ~starts_with_comment:type_starts_with_comment context (pp_ty_atom context lookup))
+        (head :: args)
   | Kernel.TApp (head, args) ->
       Format.fprintf fmt "@[<hov>%a@]" (pp_spaced context (pp_ty_atom context lookup)) (head :: args)
   | Kernel.TArrow (params, row, result) ->
@@ -646,8 +657,7 @@ and pp_plain_ty context lookup fmt (ty : Kernel.ty) =
 and pp_ty_atom context lookup fmt ty =
   match ty.Kernel.it with
   (* a group that owns comments already prints its own parentheses *)
-  | (Kernel.TApp _ | Kernel.TArrow _ | Kernel.TForall _)
-    when context.trivia && type_group_has_comments (Meta.surface_container "paren" ty.meta) ->
+  | (Kernel.TApp _ | Kernel.TArrow _ | Kernel.TForall _) when keeps_group context ty ->
       pp_ty context lookup fmt ty
   | Kernel.TApp _ | Kernel.TArrow _ | Kernel.TForall _ ->
       Format.fprintf fmt "(%a" (pp_ty context lookup) ty;
@@ -1539,7 +1549,8 @@ let pp_constructor ?(leading = true) context lookup fmt (constructor : Kernel.co
          with plain spaces *)
       if context.trivia && List.exists type_owns_comments types then begin
         Format.pp_print_char fmt ' ';
-        pp_joined context (pp_ty_atom context lookup) fmt types
+        pp_joined ~starts_with_comment:type_starts_with_comment context (pp_ty_atom context lookup)
+          fmt types
       end
       else begin
         Format.pp_print_space fmt ();
@@ -1961,26 +1972,46 @@ let print_file_with_trivia ?(file_meta = Meta.empty) ?(lookup : lookup option)
   in
   render_file ()
 
-(** [check_reparses ~file text] returns [Ok text] when [text] is a strict surface file, and
-    otherwise E1204. It is the formatter's last line of defense: [jac fmt] never prints or writes
-    formatted text that its own parser rejects, so a printer bug surfaces as a nonzero exit and a
-    diagnostic instead of broken code. *)
-let check_reparses ~file text : (string, Diag.t list) result =
+(* The comment texts of [text], in order. *)
+let comment_texts ~file text =
+  List.filter_map
+    (fun (located : Surface_lex.located) ->
+      match located.token with
+      | Surface_lex.Comment comment | Surface_lex.DocComment comment -> Some (String.trim comment)
+      | _ -> None)
+    (Surface_lex.lex_recover ~file text).tokens
+
+(** [check_reparses ?source ~file text] returns [Ok text] when [text] is a strict surface file and,
+    given the [source] it was formatted from, keeps every comment of [source] in order; otherwise
+    E1204. It is the formatter's last line of defense: [jac fmt] never prints or writes formatted
+    text that its own parser rejects or that loses or reorders a comment, so a printer bug surfaces
+    as a nonzero exit and a diagnostic instead of broken code or silent data loss. *)
+let check_reparses ?source ~file text : (string, Diag.t list) result =
+  let refuse cause =
+    Error
+      [
+        Diag.error ~domain:Surface ~code:"E1204"
+          ~summary:"The formatter produced text that does not parse" ~cause
+          ~next_step:"Report this formatter bug with the input file; keep the source as written."
+          ~contrast:None ();
+      ]
+  in
   match Surface_parse.strict_file (Surface_parse.recover_string ~file text) with
-  | Ok _ -> Ok text
   | Error diagnostics ->
-      Error
-        [
-          Diag.error ~domain:Surface ~code:"E1204"
-            ~summary:"The formatter produced text that does not parse"
-            ~cause:
-              (Printf.sprintf
-                 "Formatting `%s` succeeded, but reparsing the result reported %d syntax \
-                  diagnostic(s). The output was discarded and the file was not changed."
-                 file (List.length diagnostics))
-            ~next_step:"Report this formatter bug with the input file; keep the source as written."
-            ~contrast:None ();
-        ]
+      refuse
+        (Printf.sprintf
+           "Formatting `%s` succeeded, but reparsing the result reported %d syntax diagnostic(s). \
+            The output was discarded and the file was not changed."
+           file (List.length diagnostics))
+  | Ok _ -> (
+      match source with
+      | Some source when comment_texts ~file source <> comment_texts ~file text ->
+          refuse
+            (Printf.sprintf
+               "Formatting `%s` would drop or reorder a comment. The output was discarded and the \
+                file was not changed."
+               file)
+      | Some _ | None -> Ok text)
 
 (** [print_recovered] canonically prints a complete recovery result when it is strict and lowers.
     Damaged input is replayed byte-for-byte so comments cannot cross recovery boundaries. *)

@@ -1021,7 +1021,7 @@ let fmt_cmd file write syntax =
             Result.bind (Surface_lower.lower_file parsed) (fun lowered ->
                 Result.bind
                   (Surface_print.print_file_with_trivia ~file_meta:lowered.meta lowered.tops)
-                  (Surface_print.check_reparses ~file)))
+                  (Surface_print.check_reparses ~source:src ~file)))
   in
   match formatted with
   | Error ds -> print_diags ds

@@ -876,6 +876,11 @@ let paren_type_comment_sources =
     ("a wrapped tuple's closing comments", "type T = | Case Text ((Int, Text\n-- c29\n) -- c30\n)\n");
     ("a commented application head", "xs : (List -- c31\nInt)\nxs = [1]\n");
     ("a comment after a group", "f : ((Int) -- c32\n, Int) ->{} Int\nf = fn (a, b) -> a\n");
+    ("an own-line comment before an argument", "x = (1 : (List\n-- c33\nInt))\n");
+    ("an own-line argument comment in a field", "type T = | Case Text (List\n-- c34\nInt)\n");
+    ("an own-line argument comment in a labeled field", "type T = | Case(a: (List\n-- c35\nInt))\n");
+    ( "an own-line argument comment in an arrow",
+      "f : ((List\n-- c36\nInt)) ->{} Int\nf = fn (a) -> 1\n" );
   ]
 
 let test_paren_type_comments () =
@@ -903,7 +908,20 @@ let test_paren_type_comments () =
     (print_recovered "type T = | Case Text (( -- z\nInt))\n");
   Alcotest.(check string)
     "comment-free groups still collapse" "type T = | Case Text Int\n"
-    (print_recovered "type T = | Case Text ((Int))\n")
+    (print_recovered "type T = | Case Text ((Int))\n");
+  (* the formatter's last line of defense refuses output that drops or reorders a comment *)
+  let refused source printed =
+    match Surface_print.check_reparses ~source ~file:"trivia.jac" printed with
+    | Ok _ -> false
+    | Error diagnostics -> List.exists (fun d -> Diag.code_or_uncoded d = "E1204") diagnostics
+  in
+  Alcotest.(check bool)
+    "a dropped comment is refused" true
+    (refused "type T = | Case Text (Int -- kept\n)\n" "type T = | Case Text Int\n");
+  Alcotest.(check bool)
+    "reordered comments are refused" true
+    (refused "x = 1 -- a\ny = 2 -- b\n" "x = 1 -- b\ny = 2 -- a\n");
+  Alcotest.(check bool) "kept comments pass" false (refused "x = 1 -- a\n" "x = 1 -- a\n")
 
 let test_trailing_comment_layouts () =
   let check label source expected =
