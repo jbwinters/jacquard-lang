@@ -438,10 +438,12 @@ let diag_instance_cases : (string * string * string list option) list =
        (var state.get-at) (var c)))))))",
       None );
     ( "instance-user-clause",
-      "(lam ((pvar c)) (handle (app (var state.get-at) (var c)) (ret (pvar x) (var x)) (opclause state.get-at \
-       ((pvar r)) k (app (var k) (lit 1)))))",
+      "(lam ((pvar c)) (handle (app (var state.get-at) (var c)) (ret (pvar x) (var x)) (opclause \
+       state.get-at ((pvar r)) k (app (var k) (lit 1)))))",
       None );
-    ("instance-capability-forged", "(ref #6479a109eaded4a975ecf1b0e4ef243de65222aaee824f9a5731f75249820d70 con)", None);
+    ( "instance-capability-forged",
+      "(ref #6479a109eaded4a975ecf1b0e4ef243de65222aaee824f9a5731f75249820d70 con)",
+      None );
     ( "instance-capability-stored",
       "(deftype box () (con box (field held (tapp (tref state-ref) (tref int)))))",
       None );
@@ -472,8 +474,7 @@ let diag_golden_lines ~prelude_dir : (string list, Diag.t list) result =
       end
       else Sys.remove path
   in
-  at_exit (fun () ->
-      remove_tree root);
+  at_exit (fun () -> remove_tree root);
   let* store = Store.open_store root in
   let* _ = Prelude.load ~dir:prelude_dir store in
   let* ctx = Check.make_ctx store in

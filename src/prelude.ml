@@ -547,7 +547,8 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
       | args -> type_err "instance.fresh-v0" args);
   optional_internal "instance.same-v0" (fun args ->
       match args with
-      | [ Value.VInstance left; Value.VInstance right ] -> Ok (vbool (Instance_token.same left right))
+      | [ Value.VInstance left; Value.VInstance right ] ->
+          Ok (vbool (Instance_token.same left right))
       | [ _; _ ] -> Ok (vbool false)
       | args -> type_err "instance.same-v0" args);
   optional_internal "governance.fresh-audit-run-id" (fun args ->
@@ -1489,8 +1490,7 @@ let grant ?console_read ?secret_getenv (ctx : Eval.ctx) name ~infer_cache ~out ~
 (** Builtin type signatures for the checker (W3.2): the marker bodies would type as [code], so the
     checker consults these instead, mirroring how {!wire_builtins} overrides evaluation. Arrows are
     pure (closed empty rows); the checker's open coercion supplies call-site slack. *)
-let rec builtin_signatures (store : Store.t) : ((Hash.t * Types.scheme) list, Diag.t list) result
-    =
+let rec builtin_signatures (store : Store.t) : ((Hash.t * Types.scheme) list, Diag.t list) result =
   Result.map (fun base -> base @ instance_signatures store) (base_builtin_signatures store)
 
 (* TS.2 hidden token builtins (design §10 A2.2): quantified, so they act as coercions inside the
@@ -1501,8 +1501,9 @@ and instance_signatures store =
       Store.lookup_internal_kind store "instance.same-v0" Resolve.KTerm,
       Store.lookup_kind store "bool" Resolve.KType )
   with
-  | Some { Resolve.hash = fresh; _ }, Some { Resolve.hash = same; _ }, Some { Resolve.hash = bool; _ }
-    ->
+  | ( Some { Resolve.hash = fresh; _ },
+      Some { Resolve.hash = same; _ },
+      Some { Resolve.hash = bool; _ } ) ->
       let capability = Types.new_tvar 1 in
       let other = Types.new_tvar 1 in
       [

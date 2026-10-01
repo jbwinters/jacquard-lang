@@ -84,8 +84,8 @@ let test_operation_schemes () =
   (* a let-bound alias keeps the label per use: two capabilities give two entries *)
   let two =
     scheme_of h
-      "(defterm ((binding two () (lam ((pvar c) (pvar d)) (let nonrec (pvar r) (var state.get-at) (let \
-       nonrec (pwild) (app (var r) (var c)) (app (var r) (var d))))))))"
+      "(defterm ((binding two () (lam ((pvar c) (pvar d)) (let nonrec (pvar r) (var state.get-at) \
+       (let nonrec (pwild) (app (var r) (var c)) (app (var r) (var d))))))))"
   in
   (match Types.repr (Types.instantiate ~level:1 two) with
   | Types.TArrow (_, row, _) ->
@@ -96,8 +96,8 @@ let test_operation_schemes () =
   (* the same capability twice is one entry *)
   let same =
     scheme_of h
-      "(defterm ((binding same () (lam ((pvar c)) (let nonrec (pwild) (app (var state.get-at) (var c)) \
-       (app (var state.put-at) (var c) (app (var state.get-at) (var c))))))))"
+      "(defterm ((binding same () (lam ((pvar c)) (let nonrec (pwild) (app (var state.get-at) (var \
+       c)) (app (var state.put-at) (var c) (app (var state.get-at) (var c))))))))"
   in
   match Types.repr (Types.instantiate ~level:1 same) with
   | Types.TArrow (_, row, _) ->
@@ -116,8 +116,7 @@ let test_opacity_storage_and_handlers () =
   Alcotest.(check string)
     "constructing a capability by its hash is refused" "E0835"
     (code_of h
-       (Printf.sprintf "(ref #%s con)"
-          (Hash.to_hex Instance_contract.state_ref_opaque_constructor)));
+       (Printf.sprintf "(ref #%s con)" (Hash.to_hex Instance_contract.state_ref_opaque_constructor)));
   Alcotest.(check string)
     "matching on a capability is refused" "E0301"
     (code_of h "(lam ((pvar c)) (match (var c) (clause (pcon state-ref-opaque) (lit 1))))");
@@ -129,13 +128,13 @@ let test_opacity_storage_and_handlers () =
     (code_of h "(defeffect leak () (op leak once ((tapp (tref state-ref) (tref int))) (ttuple)))");
   ignore
     (scheme_of h
-       "(defterm ((binding hold () (lam ((pvar c)) (app (var some) (lam () (app (var state.get-at) (var \
-        c))))))))");
+       "(defterm ((binding hold () (lam ((pvar c)) (app (var some) (lam () (app (var state.get-at) \
+        (var c))))))))");
   Alcotest.(check string)
     "a user handler clause for an instance operation is refused" "E0834"
     (code_of h
-       "(lam ((pvar c)) (handle (app (var state.get-at) (var c)) (ret (pvar x) (var x)) (opclause state.get-at \
-        ((pvar r)) k (app (var k) (lit 1)))))")
+       "(lam ((pvar c)) (handle (app (var state.get-at) (var c)) (ret (pvar x) (var x)) (opclause \
+        state.get-at ((pvar r)) k (app (var k) (lit 1)))))")
 
 let cap = "(tapp (tref state-ref) (tref int))"
 
@@ -159,7 +158,8 @@ let test_annotations () =
   ignore
     (scheme_of h
        (Printf.sprintf
-          "(defterm ((binding peek () (lam ((pvar c)) (app (var state.get-at) (ann (var c) %s))))))" cap));
+          "(defterm ((binding peek () (lam ((pvar c)) (app (var state.get-at) (ann (var c) %s))))))"
+          cap));
   (* a thunk whose row names the instance effect sees the enclosing arrow's capability *)
   ignore
     (scheme_of h
@@ -187,8 +187,8 @@ let test_annotations () =
   Alcotest.(check string)
     "L1: thunk before its capability is refused" "E0801"
     (code_of h
-       "(defterm ((binding late () (lam ((pvar c)) (app (var use) (lam () (app (var state.put-at) (var \
-        c) (lit 2))) (var c))))))");
+       "(defterm ((binding late () (lam ((pvar c)) (app (var use) (lam () (app (var state.put-at) \
+        (var c) (lit 2))) (var c))))))");
   Alcotest.(check string)
     "L1: no capability unification relates c and d" "E0801"
     (code_of h
@@ -220,7 +220,8 @@ let test_annotations () =
        (scheme_of h
           (Printf.sprintf
              "(defterm ((binding both ((tarrow (%s %s) (row (eref state-instance)) (ttuple))) (lam \
-              ((pvar c) (pvar d)) (app (var state.put-at) (var d) (app (var state.get-at) (var c)))))))"
+              ((pvar c) (pvar d)) (app (var state.put-at) (var d) (app (var state.get-at) (var \
+              c)))))))"
              cap cap)))
 
 (* [scoped init body] is a scoped call whose callback binds [c]. *)
@@ -252,11 +253,12 @@ let test_scoped_form () =
        (Printf.sprintf "(lam () %s)"
           (scoped "(lit 0)"
              (scoped ~var:"t" "(lit \"a\")"
-                "(let nonrec (pwild) (app (var state.put-at) (var c) (lit 1)) (app (var state.get-at) (var t)))"))));
+                "(let nonrec (pwild) (app (var state.put-at) (var c) (lit 1)) (app (var \
+                 state.get-at) (var t)))"))));
   (* helpers over a capability and its instance work inside a scope *)
   check_ok "bump helper"
-    "(defterm ((binding bump () (lam ((pvar c)) (app (var state.put-at) (var c) (app (var state.get-at) (var \
-     c)))))))";
+    "(defterm ((binding bump () (lam ((pvar c)) (app (var state.put-at) (var c) (app (var \
+     state.get-at) (var c)))))))";
   check_ok "helper in a scope"
     (defterm "use-bump"
        (Printf.sprintf "(lam () %s)" (scoped "(lit 0)" "(app (var bump) (var c))")));
@@ -323,7 +325,8 @@ let test_scoped_form () =
   e0832 "L4: an outer thunk sharing a row with an instance thunk"
     (defterm "outer"
        (Printf.sprintf "(lam ((pvar k)) %s)"
-          (scoped "(lit 0)" "(app (var both) (var k) (lam () (app (var state.put-at) (var c) (lit 1))))")));
+          (scoped "(lit 0)"
+             "(app (var both) (var k) (lam () (app (var state.put-at) (var c) (lit 1))))")));
   e0832 "L4: a choice between an outer thunk and an instance thunk"
     (defterm "pick"
        (Printf.sprintf "(lam ((pvar k)) %s)"
@@ -331,7 +334,8 @@ let test_scoped_form () =
   check_ok "L4 workaround: call k directly"
     (defterm "direct"
        (Printf.sprintf "(lam ((pvar k)) %s)"
-          (scoped "(lit 0)" "(let nonrec (pwild) (app (var k)) (app (var state.put-at) (var c) (lit 1)))")));
+          (scoped "(lit 0)"
+             "(let nonrec (pwild) (app (var k)) (app (var state.put-at) (var c) (lit 1)))")));
   e0832 "A1.9: a group member receiving the capability"
     "(defterm ((binding walk () (lam ((pvar t)) (app (var state.scoped) (lit 0) (lam ((pvar c)) \
      (app (var visit) (var c) (var t)))))) (binding visit () (lam ((pvar c) (pvar t)) (app (var \
@@ -346,7 +350,8 @@ let test_scoped_form () =
        cap);
   Alcotest.(check string)
     "a thunk over b where one over a is expected" "E0801"
-    (code_of h (nested "(app (var use-first) (var a) (lam () (app (var state.put-at) (var b) (lit 1))))"));
+    (code_of h
+       (nested "(app (var use-first) (var a) (lam () (app (var state.put-at) (var b) (lit 1))))"));
   check_ok "the same thunk over a"
     (defterm "same-a"
        (Printf.sprintf "(lam () %s)"
@@ -389,8 +394,8 @@ let test_scoped_form () =
   check_ok "annotated callback"
     (defterm "annotated"
        (Printf.sprintf
-          "(lam () (app (var state.scoped) (lit 0) (ann (lam ((pvar c)) (app (var state.get-at) (var \
-           c))) (tarrow (%s) (row (eref state-instance)) (tref int)))))"
+          "(lam () (app (var state.scoped) (lit 0) (ann (lam ((pvar c)) (app (var state.get-at) \
+           (var c))) (tarrow (%s) (row (eref state-instance)) (tref int)))))"
           cap))
 
 let test_fresh_continuations () =
@@ -413,7 +418,8 @@ let test_fresh_continuations () =
   (* values read from an instance may be handed to spawned work *)
   check_ok "spawning with a value read from the instance"
     (in_scope
-       "(let nonrec (pvar v) (app (var state.get-at) (var c)) (app (var async.spawn) (lam () (var v))))");
+       "(let nonrec (pvar v) (app (var state.get-at) (var c)) (app (var async.spawn) (lam () (var \
+        v))))");
   (* the flag is OR-ed through a row-polymorphic helper (limit L2) *)
   check_ok "bg" "(defterm ((binding bg () (lam ((pvar k)) (app (var async.spawn) (var k))))))";
   e0833 "L2: a helper sharing the spawn row"
@@ -449,7 +455,8 @@ let test_determinacy_and_consumers () =
     "at a local let" "E0830"
     (code_of h
        (defterm "local"
-          "(lam () (let nonrec (pvar r) (lam () (app (var state.get-at) (app (var loop)))) (lit 1)))"));
+          "(lam () (let nonrec (pvar r) (lam () (app (var state.get-at) (app (var loop)))) (lit \
+           1)))"));
   Alcotest.(check string)
     "at a local let rec" "E0830"
     (code_of h
@@ -479,8 +486,8 @@ let test_determinacy_and_consumers () =
   (* a capability in the result determines the label (limit L3's inferred case) *)
   check_ok "result-only capability"
     (defterm "mint"
-       "(lam () (let nonrec (pvar x) (app (var loop)) (let nonrec (pwild) (app (var state.put-at) (var \
-        x) (lit 1)) (var x))))");
+       "(lam () (let nonrec (pvar x) (app (var loop)) (let nonrec (pwild) (app (var state.put-at) \
+        (var x) (lit 1)) (var x))))");
   (* ordinary row polymorphism is unaffected *)
   check_ok "apply" (defterm "apply" "(lam ((pvar k)) (app (var k)))");
   check_ok "apply a scoped thunk"
@@ -521,11 +528,12 @@ let test_determinacy_and_consumers () =
 let test_unregistered_controls () =
   (* without a registration the fixture is ordinary: no labels, ordinary effects and handlers *)
   let h = Test_check.make_cctx ~instances:false () in
-  ignore (scheme_of h "(defterm ((binding read () (lam ((pvar c)) (app (var state.get-at) (var c))))))");
+  ignore
+    (scheme_of h "(defterm ((binding read () (lam ((pvar c)) (app (var state.get-at) (var c))))))");
   match
     Test_check.check_src h
-      "(lam ((pvar c)) (handle (app (var state.get-at) (var c)) (ret (pvar x) (var x)) (opclause state.get-at \
-       ((pvar r)) k (app (var k) (lit 1)))))"
+      "(lam ((pvar c)) (handle (app (var state.get-at) (var c)) (ret (pvar x) (var x)) (opclause \
+       state.get-at ((pvar r)) k (app (var k) (lit 1)))))"
   with
   | Ok _ -> ()
   | Error diagnostics ->

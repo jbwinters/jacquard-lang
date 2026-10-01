@@ -42,9 +42,9 @@ type t =
       (** an opaque scheduler-owned ChannelHandle, valid only in the exact evaluator run and
           structured scope that successfully opened it. *)
   | VInstance of Instance_token.t
-      (** a scoped effect instance capability (TS.2, design §10 A2.1): an opaque token minted by
-          its scope. It has no equality, rendering or serialization; only the scope's handler
-          compares it. *)
+      (** a scoped effect instance capability (TS.2, design §10 A2.1): an opaque token minted by its
+          scope. It has no equality, rendering or serialization; only the scope's handler compares
+          it. *)
   | VResume of frame list
       (** a resumption: the sliced continuation as immutable data — invoking it twice just reuses
           the list (multi-shot for free, plan W2.4) *)

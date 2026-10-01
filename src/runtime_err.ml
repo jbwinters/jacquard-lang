@@ -28,8 +28,8 @@ type t =
           same budget and program always stop at the same transition, and no later evaluation in the
           invocation can produce a value *)
   | Stale_capability of { op : string }
-      (** a scoped instance operation found no frame of its scope on the current continuation
-          (TS.2, design §10 A2.4): defence in depth, reachable only through unchecked eval *)
+      (** a scoped instance operation found no frame of its scope on the current continuation (TS.2,
+          design §10 A2.4): defence in depth, reachable only through unchecked eval *)
   | Diagnostic of Diag.t
       (** a subsystem diagnostic that must retain its domain, code, and remediation when it crosses
           the evaluator's single-error channel *)
@@ -55,9 +55,8 @@ let to_string = function
       Printf.sprintf "unhandled effect %s: operation `%s` reached the root without a handler"
         effect_ op
   | Stale_capability { op } ->
-      Printf.sprintf "operation `%s` used a capability whose scope is not on the current \
-                      continuation"
-        op
+      Printf.sprintf
+        "operation `%s` used a capability whose scope is not on the current continuation" op
   | Arity msg -> "arity mismatch: " ^ msg
   | Arithmetic msg -> "arithmetic error: " ^ msg
   | Type_error msg -> "type error: " ^ msg
@@ -89,8 +88,8 @@ let to_diag error =
         ~next_step:"Grant the effect at the root or handle it inside the program." ()
   | Stale_capability _ ->
       make ~domain:Runtime ~code:"E0920" ~summary:"A capability was used outside its scope"
-        ~next_step:
-          "Use a capability only inside its scope; do not pass it through unchecked eval." ()
+        ~next_step:"Use a capability only inside its scope; do not pass it through unchecked eval."
+        ()
   | Arity _ ->
       make ~domain:Runtime ~summary:"Runtime call arity does not agree"
         ~next_step:"Pass exactly the number of arguments required by the callable." ()

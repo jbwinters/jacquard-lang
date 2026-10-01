@@ -113,8 +113,8 @@ let register_builtin_signatures ctx signatures =
     registration is validated against the store: the instance effect is an effect declaration, every
     operation is one of its operations, the capability type is a one-parameter type declaration, the
     scoped term is a term, the callback position is 1 (the State shape [(init, callback)]), and no
-    registration repeats an effect, capability or scoped term already registered. Registration
-    seeds the scoped term's trusted scheme (design §10 A2.3), so its body is never checked under
+    registration repeats an effect, capability or scoped term already registered. Registration seeds
+    the scoped term's trusted scheme (design §10 A2.3), so its body is never checked under
     registration. Register before any affected signature is cached. Production contexts register
     State through [make_ctx]; misuse raises [Invalid_argument]. *)
 let register_instances ctx registrations =
@@ -167,9 +167,7 @@ let register_instances ctx registrations =
     in
     let ty =
       TArrow
-        ( [ payload; TArrow ([ capability ], callback_row, result) ],
-          { empty_row with tail },
-          result )
+        ([ payload; TArrow ([ capability ], callback_row, result) ], { empty_row with tail }, result)
     in
     Hashtbl.replace ctx.term_sigs registration.scoped { ty; gen_level = 0 }
   in
