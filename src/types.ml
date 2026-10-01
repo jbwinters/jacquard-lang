@@ -914,6 +914,28 @@ and effect_identities (row : row) =
 let is_closed_pure (row : row) =
   row.tail = RClosed && row.effects = [] && row.instances = []
 
+(** [mentions_label id ty] holds when the rigid label [id] occurs anywhere in [ty]: in a type
+    argument, a row's payloads, an instance entry's label or payload, or a bound row tail. The
+    scoped form's non-escape check uses it (design §9 A1.7). *)
+let rec mentions_label id ty =
+  Fuel_meter.tick 1;
+  match repr ty with
+  | TLabel (other, _) -> other = id
+  | TVar _ | TSkolem _ -> false
+  | TCon (_, items) | TTuple items -> List.exists (mentions_label id) items
+  | TArrow (params, row, result) ->
+      List.exists (mentions_label id) params || row_mentions_label id row || mentions_label id result
+  | TResume (input, row, answer) | TVariadicArrow (input, row, answer) ->
+      mentions_label id input || row_mentions_label id row || mentions_label id answer
+  | TExactThunk inner -> mentions_label id inner
+
+and row_mentions_label id row =
+  let row = repr_row row in
+  List.exists (fun (_, args) -> List.exists (mentions_label id) args) row.payloads
+  || List.exists
+       (fun entry -> mentions_label id entry.label || List.exists (mentions_label id) entry.payload)
+       row.instances
+
 (* ------------------------------------------------------------------ *)
 (* Display                                                             *)
 (* ------------------------------------------------------------------ *)

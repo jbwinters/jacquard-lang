@@ -151,6 +151,9 @@ let registered_capability ctx hash =
 let registered_instance_effect ctx hash =
   List.exists (fun (r : instance_registration) -> Hash.equal r.instance_effect hash) ctx.instances
 
+let scoped_registration ctx hash =
+  List.find_opt (fun (r : instance_registration) -> Hash.equal r.scoped hash) ctx.instances
+
 (** [tier_applications ctx] returns the application classifications recorded by strict checks. *)
 let tier_applications ctx = ctx.tier_apps
 
@@ -1511,6 +1514,12 @@ and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(requir
         | Some scheme -> instantiate ~level:ctx.level scheme
         | None -> snd env.group.(i)
       else err ~meta ~code:"E0805" "groupref %d outside its group" i
+  | Kernel.Ref (h, Kernel.Term) when Option.is_some (scoped_registration ctx h) ->
+      (* a direct call is the checker form below; any other reference would forward a callback
+         past the scope's non-escape check (design §4) *)
+      err ~meta ~code:"E0831"
+        "%s is a scoped combinator: call it directly with a literal one-parameter lambda"
+        (Option.value ~default:"this reference" (Meta.name meta))
   | Kernel.Ref (h, Kernel.Term) -> instantiate ~level:ctx.level (term_scheme ctx ~meta h)
   | Kernel.Ref (h, Kernel.Con) -> instantiate ~level:ctx.level (con_scheme ctx ~meta h)
   | Kernel.Ref (h, Kernel.Op) -> instantiate ~level:ctx.level (op_scheme ctx ~meta h)
@@ -1521,6 +1530,9 @@ and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(requir
       let lam_ambient = ref (open_row ctx.level []) in
       let body_ty = infer ctx env' ~ambient:lam_ambient ~required:empty_row body in
       TArrow (param_tys, !lam_ambient, body_ty)
+  | Kernel.App ({ Kernel.it = Kernel.Ref (h, Kernel.Term); _ }, args)
+    when Option.is_some (scoped_registration ctx h) ->
+      infer_scoped ctx env ~ambient ~required ~meta (Option.get (scoped_registration ctx h)) args
   | Kernel.App (fn, args) -> (
       let fn_ty =
         if
@@ -1962,6 +1974,99 @@ and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(requir
            ~code:"E0804" "annotation mismatch: expected %s, got %s (%s)" (show_ty ctx expected)
            (show_ty ctx actual) detail);
       expected
+
+(** [infer_scoped] is the checker form of a scoped instance combinator (design §9 A1.7), for the
+    State shape of slice 1: [(init, fn (c) -> body)]. The initializer is inferred in the caller's
+    ambient; the body is checked as a lambda body with empty handler requirements, its capability
+    carrying a rigid label minted for this call; exactly the entries of that instance are
+    subtracted; the caller's handler requirements apply to the outward row before it is included;
+    and the label must not escape (E0832). *)
+and infer_scoped ctx env ~ambient ~required ~meta (registration : instance_registration) args =
+  let refuse fmt =
+    err ~meta ~code:"E0831"
+      ~next_step:"Call the scoped combinator directly with a literal one-parameter lambda." fmt
+  in
+  let init, callback =
+    match args with
+    | [ init; callback ] when registration.callback_position = 1 -> (init, callback)
+    | _ -> refuse "a scoped combinator takes an initial value and a literal callback"
+  in
+  let param, body, annotation =
+    match callback.Kernel.it with
+    | Kernel.Lam ([ param ], body) -> (param, body, None)
+    | Kernel.Ann ({ Kernel.it = Kernel.Lam ([ param ], body); _ }, annotation) ->
+        (param, body, Some annotation)
+    | _ -> refuse "the callback of a scoped combinator must be a literal one-parameter lambda"
+  in
+  let init_ty = infer ctx env ~ambient ~required init in
+  let label_id = fresh_id () in
+  let label = TLabel (label_id, "scope") in
+  let capability = TCon (registration.capability, [ label; init_ty ]) in
+  let param_ty, bindings = infer_pat ctx param in
+  unify_or ctx ~meta:callback.Kernel.meta ~what:"scoped callback parameter" param_ty capability;
+  let body_ambient = ref (open_row ctx.level []) in
+  let body_ty =
+    infer ctx (bind_all bindings env) ~ambient:body_ambient ~required:empty_row body
+  in
+  Option.iter
+    (fun annotation ->
+      let cenv = { mode = Rigid; tvs = []; rvs = [] } in
+      let expected =
+        elaborate_instance_rows ctx ~meta:annotation.Kernel.meta (conv_ty ctx cenv annotation)
+      in
+      let actual = TArrow ([ param_ty ], !body_ambient, body_ty) in
+      try Types.unify expected actual
+      with Unify_error detail ->
+        err ~meta:callback.Kernel.meta ~code:"E0804"
+          "annotation mismatch: expected %s, got %s (%s)" (show_ty ctx expected)
+          (show_ty ctx actual) detail)
+    annotation;
+  let solved = repr_row !body_ambient in
+  let own, others =
+    List.partition
+      (fun (entry : instance) ->
+        Hash.equal entry.effect registration.instance_effect && same_label entry.label label)
+      solved.instances
+  in
+  List.iter
+    (fun (entry : instance) ->
+      match entry.payload with
+      | [ payload ] -> unify_or ctx ~meta ~what:"instance payload" init_ty payload
+      | _ -> err ~meta ~code:"E0801" "instance payload arity mismatch")
+    own;
+  let outward = { solved with instances = others } in
+  (try
+     Types.require_effects ~payloads:required.payloads ~level:ctx.level required.effects outward;
+     ambient := Types.include_rows ~sub:outward ~into:!ambient
+   with Unify_error detail ->
+     err ~meta ~code:"E0801" "effect row mismatch at this scope (%s)" detail);
+  let escape where =
+    err ~meta ~code:"E0832"
+      ~next_step:"Use the capability only inside its scope; return or store values read from it."
+      "the instance opened here escapes its scope through %s" where
+  in
+  if mentions_label label_id body_ty then escape "the scope's result";
+  if row_mentions_label label_id outward then escape "the scope's effects";
+  if row_mentions_label label_id !ambient then escape "the caller's effects";
+  if List.exists (fun (_, args) -> List.exists (mentions_label label_id) args) required.payloads
+  then escape "an enclosing handler's payload";
+  SMap.iter
+    (fun name (scheme : scheme) ->
+      if mentions_label label_id scheme.ty then
+        escape (Printf.sprintf "the enclosing variable `%s`" name))
+    env.vars;
+  Array.iter
+    (fun (name, ty) ->
+      if mentions_label label_id ty then
+        escape (Printf.sprintf "the type of `%s` in its definition group" name))
+    env.group;
+  Array.iter
+    (function
+      | Some (scheme : scheme) when mentions_label label_id scheme.ty ->
+          escape "a definition group's signature"
+      | _ -> ())
+    env.group_schemes;
+  body_ty
 
 (* ------------------------------------------------------------------ *)
 (* Declarations (W3.3)                                                 *)

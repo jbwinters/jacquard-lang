@@ -218,6 +218,145 @@ let test_annotations () =
               ((pvar c) (pvar d)) (app (var put-at) (var d) (app (var get-at) (var c)))))))"
              cap cap)))
 
+(* [scoped init body] is a scoped call whose callback binds [c]. *)
+let scoped ?(var = "c") init body =
+  Printf.sprintf "(app (var state.scoped) %s (lam ((pvar %s)) %s))" init var body
+
+let defterm name value = Printf.sprintf "(defterm ((binding %s () %s)))" name value
+
+let choose left right =
+  Printf.sprintf "(match (var true) (clause (pcon true) %s) (clause (pcon false) %s))" left right
+
+let test_scoped_form () =
+  let h = fixture () in
+  let check_ok label src =
+    match Test_check.check_src h src with
+    | Ok _ -> ()
+    | Error diagnostics ->
+        Alcotest.failf "%s: %s" label (String.concat "\n" (List.map Diag.to_string diagnostics))
+  in
+  (* a scope types its body, subtracts its own instance, and returns the body's result *)
+  Alcotest.(check string)
+    "a scope returns its body's result" "() ->{} Int"
+    (Test_check.sig_of h
+       (defterm "count" (Printf.sprintf "(lam () %s)" (scoped "(lit 0)" "(app (var get-at) (var c))")))
+    );
+  (* the two-store program: each operation reaches its own instance and payload *)
+  check_ok "two stores"
+    (defterm "two"
+       (Printf.sprintf "(lam () %s)"
+          (scoped "(lit 0)"
+             (scoped ~var:"t" "(lit \"a\")"
+                "(let nonrec (pwild) (app (var put-at) (var c) (lit 1)) (app (var get-at) (var t)))"))));
+  (* helpers over a capability and its instance work inside a scope *)
+  check_ok "bump helper"
+    "(defterm ((binding bump () (lam ((pvar c)) (app (var put-at) (var c) (app (var get-at) (var \
+     c)))))))";
+  check_ok "helper in a scope"
+    (defterm "use-bump" (Printf.sprintf "(lam () %s)" (scoped "(lit 0)" "(app (var bump) (var c))")));
+  (* the initializer's effects charge the caller *)
+  (match
+     Test_check.check_src h
+       (defterm "noisy"
+          (Printf.sprintf "(lam () %s)"
+             (scoped "(app (var print) (lit \"x\"))" "(app (var get-at) (var c))")))
+   with
+  | Ok { Check.names = [ (_, scheme) ]; _ } -> (
+      match Types.repr (Types.instantiate ~level:1 scheme) with
+      | Types.TArrow (_, row, _) ->
+          let row = Types.repr_row row in
+          Alcotest.(check int) "the initializer's effect is the caller's" 1 (List.length row.effects);
+          Alcotest.(check int) "and no instance entry leaves the scope" 0 (List.length row.instances)
+      | _ -> Alcotest.fail "unexpected shape")
+  | _ -> Alcotest.fail "noisy did not check");
+  (* the payload is the initializer's type *)
+  Alcotest.(check string)
+    "the payload agrees with the initializer" "E0801"
+    (code_of h (scoped "(lit 0)" "(app (var put-at) (var c) (lit \"x\"))"));
+  (* E0831: only a direct call with a literal one-parameter lambda *)
+  let e0831 label src = Alcotest.(check string) label "E0831" (code_of h src) in
+  e0831 "an alias" (defterm "my-scoped" "(var state.scoped)");
+  e0831 "a forwarding wrapper"
+    (defterm "with-counter" "(lam ((pvar f)) (app (var state.scoped) (lit 0) (var f)))");
+  e0831 "wrong arity" "(app (var state.scoped) (lit 0))";
+  e0831 "a two-parameter callback"
+    "(app (var state.scoped) (lit 0) (lam ((pvar c) (pvar d)) (lit 1)))";
+  e0831 "an annotated head"
+    "(app (ann (var state.scoped) (tarrow ((tref int) (tvar f)) (row) (tref int))) (lit 0) (lam \
+     ((pvar c)) (lit 1)))";
+  (* E0832: the model's escapes *)
+  let e0832 label src = Alcotest.(check string) label "E0832" (code_of h src) in
+  e0832 "returning the capability" (scoped "(lit 0)" "(var c)");
+  e0832 "returning a thunk over it" (scoped "(lit 0)" "(lam () (app (var get-at) (var c)))");
+  e0832 "in a tuple" (scoped "(lit 0)" "(tuple (var c) (lit 1))");
+  e0832 "rank-2 callback (A1.9)"
+    (defterm "run" (Printf.sprintf "(lam ((pvar k)) %s)" (scoped "(lit 0)" "(app (var k) (var c))")));
+  e0832 "a non-value alias bound outside the scope (A1.9)"
+    (defterm "alias"
+       (Printf.sprintf
+          "(lam () (let nonrec (pvar r) (app (lam ((pvar x)) (var x)) (var get-at)) %s))"
+          (scoped "(lit 0)" "(app (var r) (var c))")));
+  check_ok "both"
+    "(defterm ((binding both () (lam ((pvar f) (pvar g)) (let nonrec (pwild) (app (var f)) (app \
+     (var g)))))))";
+  e0832 "L4: an outer thunk sharing a row with an instance thunk"
+    (defterm "outer"
+       (Printf.sprintf "(lam ((pvar k)) %s)"
+          (scoped "(lit 0)" "(app (var both) (var k) (lam () (app (var put-at) (var c) (lit 1))))")));
+  e0832 "L4: a choice between an outer thunk and an instance thunk"
+    (defterm "pick"
+       (Printf.sprintf "(lam ((pvar k)) %s)"
+          (scoped "(lit 0)" (choose "(var k)" "(lam () (app (var put-at) (var c) (lit 1)))"))));
+  check_ok "L4 workaround: call k directly"
+    (defterm "direct"
+       (Printf.sprintf "(lam ((pvar k)) %s)"
+          (scoped "(lit 0)" "(let nonrec (pwild) (app (var k)) (app (var put-at) (var c) (lit 1)))")));
+  e0832 "A1.9: a group member receiving the capability"
+    "(defterm ((binding walk () (lam ((pvar t)) (app (var state.scoped) (lit 0) (lam ((pvar c)) \
+     (app (var visit) (var c) (var t)))))) (binding visit () (lam ((pvar c) (pvar t)) (app (var \
+     walk) (var t))))))";
+  (* model counterexample 3 and A1.9: instances are not interchangeable *)
+  let nested body = scoped ~var:"a" "(lit 0)" (scoped ~var:"b" "(lit 0)" body) in
+  check_ok "use-first"
+    (Printf.sprintf
+       "(defterm ((binding use-first ((tarrow (%s (tarrow () (row (eref state-instance)) \
+        (ttuple))) (row (eref state-instance)) (ttuple))) (lam ((pvar c) (pvar k)) (app (var \
+        k))))))"
+       cap);
+  Alcotest.(check string)
+    "a thunk over b where one over a is expected" "E0801"
+    (code_of h (nested "(app (var use-first) (var a) (lam () (app (var put-at) (var b) (lit 1))))"));
+  check_ok "the same thunk over a"
+    (defterm "same-a"
+       (Printf.sprintf "(lam () %s)"
+          (nested "(app (var use-first) (var a) (lam () (app (var put-at) (var a) (lit 1))))")));
+  Alcotest.(check string)
+    "choosing between live instances" "E0801"
+    (code_of h (nested (Printf.sprintf "(app (var get-at) %s)" (choose "(var a)" "(var b)"))));
+  check_ok "pair"
+    "(defterm ((binding pair () (lam ((pvar f) (pvar x) (pvar y)) (let nonrec (pwild) (app (var \
+     f) (var x)) (app (var f) (var y)))))))";
+  Alcotest.(check string)
+    "a rank-1 callback on two instances" "E0801"
+    (code_of h (nested "(app (var pair) (var get-at) (var a) (var b))"));
+  (* limit L1 inside a scope *)
+  check_ok "use"
+    (Printf.sprintf
+       "(defterm ((binding use ((tarrow ((tarrow () (row (eref state-instance)) (ttuple)) %s) (row \
+        (eref state-instance)) (ttuple))) (lam ((pvar k) (pvar c)) (app (var k))))))"
+       cap);
+  Alcotest.(check string)
+    "L1: thunk before its capability" "E0801"
+    (code_of h
+       (scoped "(lit 0)" "(app (var use) (lam () (app (var put-at) (var c) (lit 2))) (var c))"));
+  (* an annotated callback is checked with flexible labels *)
+  check_ok "annotated callback"
+    (defterm "annotated"
+       (Printf.sprintf
+          "(lam () (app (var state.scoped) (lit 0) (ann (lam ((pvar c)) (app (var get-at) (var \
+           c))) (tarrow (%s) (row (eref state-instance)) (tref int)))))"
+          cap))
+
 let test_unregistered_controls () =
   (* without a registration the fixture is ordinary: no labels, ordinary effects and handlers *)
   let store, ctx = fresh () in
@@ -244,6 +383,7 @@ let suite =
       test_opacity_storage_and_handlers;
     Alcotest.test_case "annotations elaborate instance rows from capability parameters" `Quick
       test_annotations;
+    Alcotest.test_case "the scoped checker form and non-escape" `Quick test_scoped_form;
     Alcotest.test_case "without a registration the fixture is ordinary" `Quick
       test_unregistered_controls;
   ]
