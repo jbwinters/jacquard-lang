@@ -525,6 +525,23 @@ let test_determinacy_and_consumers () =
     "nor in the tier classification" false
     (Tier.classify_row instance_only = Tier.Pure)
 
+let test_trusted_scheme () =
+  let scheme_text (_, ctx) =
+    match Check.force_term ctx Instance_contract.state_scoped with
+    | Ok scheme -> Check.show_scheme ctx scheme
+    | Error diagnostics ->
+        Alcotest.failf "state.scoped: %s" (String.concat "\n" (List.map Diag.to_string diagnostics))
+  in
+  (* registration seeds the trusted scheme; the body is never checked under registration (A2.3) *)
+  Alcotest.(check string)
+    "the seeded scheme" "forall a b | e. (b, (StateRef b) ->{StateInstance | e} a) ->{| e} a"
+    (scheme_text (fresh ()));
+  (* on an unregistered context the body checks as an ordinary handler, forcing one payload *)
+  Alcotest.(check string)
+    "the body on an unregistered context"
+    "forall a b | e. (b, (StateRef b) ->{StateInstance | e} a) ->{StateInstance | e} a"
+    (scheme_text (Test_check.make_cctx ~instances:false ()))
+
 let test_unregistered_controls () =
   (* without a registration the fixture is ordinary: no labels, ordinary effects and handlers *)
   let h = Test_check.make_cctx ~instances:false () in
@@ -555,6 +572,7 @@ let suite =
       test_fresh_continuations;
     Alcotest.test_case "determinacy, display and row consumers" `Quick
       test_determinacy_and_consumers;
+    Alcotest.test_case "the trusted scheme of state.scoped" `Quick test_trusted_scheme;
     Alcotest.test_case "without a registration the fixture is ordinary" `Quick
       test_unregistered_controls;
   ]
