@@ -302,3 +302,116 @@ No existing program changes meaning, and nothing is deprecated.
 
 Each slice lands independently; slice 1 alone must refuse the instance
 combinators (they do not exist yet) and change nothing else.
+
+## 9. Amendment A1 (TS.2 implementation findings)
+
+- Status: amendment to the approved design, from two review rounds of the
+  slice-1 checker plan against the shipped checker. It refines how §4 is
+  implemented and records two limits; it does not change the API, the dispatch
+  rule, or the compatibility freeze.
+- Date: 2026-10-01.
+
+§4 assumed that every instance label in a row is fixed by unifying a
+capability before the row is compared ("row unification never has to choose").
+The shipped checker is Hindley-Milner with level-based generalization and
+unifies in a fixed order, so that assumption does not hold by itself. The
+amendment states what the implementation guarantees instead.
+
+### A1.1 Representation
+
+- A row keeps its ambient part exactly as today and gains instance entries
+  `(instance effect, label, payload)`. A label is a rigid label minted per
+  checked `*.scoped` call, a label variable (generalizable like a type
+  variable), or a label skolem in a rigid annotation proof. Label positions
+  (a capability's first type argument and an entry's label) only ever hold
+  labels: binding one to a constructor, tuple or arrow is a type error.
+- Two entries are the same entry when their effects are equal and their labels
+  are identical after resolution. Normalization merges identical entries and
+  unifies their payloads, repeating until no two entries are identical
+  (merging can make labels nested in payloads identical). A payload conflict
+  found there is an ordinary type error, never an internal one: unification is
+  not transactional, so an earlier failed unification can leave such a state,
+  and diagnostic rendering must survive it.
+- Each label determines one payload because a label enters a row only through
+  a capability (the operation schemes below), capability types are invariant
+  (never joined, only unified), and capabilities are opaque.
+
+### A1.2 Instance operations and capabilities
+
+- An instance operation has a scheme at every reference, not only at direct
+  calls: `get-at : forall l s. (StateRef<l> s) ->{state-instance<l>:[s]} s`.
+  Aliases and higher-order transport keep the label. No ambient row entry for
+  an instance effect is ever formed.
+- Programs cannot construct, destructure or pattern-match a capability, and a
+  capability type may not appear in a nominal constructor field or an effect
+  operation signature, except in the instance effect's own operations. A
+  generic container instantiated with a capability (`Box a` with
+  `a := StateRef<i> s`) keeps the label visible and stays under non-escape.
+
+### A1.3 Deferred instance-row constraints
+
+When two rows are compared and an entry carries a label variable that is not
+yet identical to an entry of the same effect on the other side, the comparison
+of those rows is deferred: it is queued and retried at the next drain point
+(the end of an application's argument checking, the end of a binding's
+inference, before a scoped subtraction and its escape check, and before
+generalization). A queued comparison whose labels are still undetermined at a
+drain point is solved with the entries kept distinct. Programs with no
+instance entries are unaffected: nothing is ever queued for them.
+
+**Limit L1 (pinned by a test).** A capability whose label is determined only
+after the drain point of the row that needs it, for example a lambda-bound
+capability passed through a higher-order function before the thunk using it is
+compared against a closed annotated row, is refused although the program is
+safe. Supplying the capability first, or leaving the row unannotated, is
+accepted.
+
+### A1.4 Spawn
+
+The thunk row of `async.spawn` carries a persistent "no instance entries"
+constraint on its row variable. It survives generalization, aliases, wrappers
+and returned spawners, and any binding that would add an instance entry to
+that row is refused (E0823).
+
+**Limit L2 (pinned by tests).** Under SC.4 the spawn operation's row is the
+child's row, and a spawning body's ambient row shares that tail. Therefore a
+callback invoked synchronously in a body that also spawns (`par(k1, k2) = {
+let t = async.spawn(k1); k2(); async.await(t) }`) cannot use an instance
+either, although it runs in the parent. Splitting the child's exclusion from
+the parent's inclusion needs a directional row constraint and is future work.
+
+### A1.5 Annotations
+
+- `StateRef s` in an expression annotation (`Ann`) gets a fresh label
+  *variable*, so annotating an existing capability (`(c : StateRef Int)`)
+  works. Label skolems are used only in a definition's rigid signature proof,
+  which proves label polymorphism; the published signature is the flexible one.
+- An instance effect named in a row annotation stands for one entry per
+  capability label of that effect among the parameters of the annotated arrow
+  and of enclosing arrows, allocated before the rows are converted. If there is
+  none, the annotation is refused (E0820).
+- An annotation around the `*.scoped` head is refused; an annotated callback is
+  checked against its annotation with flexible labels.
+
+### A1.6 Determinacy
+
+A published scheme whose instance entries mention a quantified label variable
+that occurs in no capability type of the scheme is refused (E0820). This is
+reachable from ordinary inference (`read-unknown() = state.get-at(loop())`),
+so it is a normal refusal, not an assertion. Ordinary row polymorphism is
+unaffected: `apply(k) = k()` mentions no instance label when published and
+remains usable with a scoped thunk while its scope is live.
+
+### A1.7 Row consumers
+
+Authority display, manifests, purity checks (including governance, host
+protocol and tier classification), and the exact-row predicate used by Warp's
+`VaryWorld` treat instance entries explicitly: display and authority use the
+deduplicated effect identities; exactness and purity compare instance entries
+too, so a row of instance entries only is never pure.
+
+### A1.8 Slice-1 evidence
+
+Slice 1 registers the instance declarations only on test checker contexts;
+production contexts have an empty registration, which a test asserts. Slice 1
+is checker evidence only; runtime dispatch soundness is slice 2's.
