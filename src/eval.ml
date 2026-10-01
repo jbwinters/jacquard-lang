@@ -97,7 +97,8 @@ module Runtime_value_key = struct
               loop budget accumulator rest
           | VResume _ | VOnceResume _ -> loop budget (mix accumulator 11) rest
           | VTask _ -> loop budget (mix accumulator 12) rest
-          | VChannel _ -> loop budget (mix accumulator 14) rest)
+          | VChannel _ -> loop budget (mix accumulator 14) rest
+          | VInstance _ -> loop budget (mix accumulator 15) rest)
     in
     loop 4 0 [ root ]
 end
@@ -407,7 +408,7 @@ let reject_task_escape ctx ~scope_path root =
       | VResume frames -> kont frames
       | VOnceResume state -> kont (Once_state.payload state)
       | VInt _ | VReal _ | VText _ | VHash _ | VSecret _ | VConstructor _ | VOp _ | VBuiltin _
-      | VTrustedBuiltin _ | VCode _ ->
+      | VTrustedBuiltin _ | VInstance _ | VCode _ ->
           ()
   and scope scope_value =
     if first_visit scope_value then Value.Env.iter (fun _ cell -> value !cell) scope_value.env
@@ -943,7 +944,7 @@ let scan_recovery_state ctx ~static_trusted (state : state) =
       let () = Runtime_value_seen.add seen_values runtime_value () in
       match runtime_value with
       | VInt _ | VReal _ | VText _ | VHash _ | VSecret _ | VConstructor _ | VOp _ | VBuiltin _
-      | VTrustedBuiltin _ ->
+      | VTrustedBuiltin _ | VInstance _ ->
           false
       | VTask handle -> (
           match
@@ -1067,7 +1068,7 @@ let register_builtin ctx hash value =
 let rec needs_mutable_recheck ctx value =
   match value with
   | VInt _ | VReal _ | VText _ | VHash _ | VSecret _ | VConstructor _ | VOp _ | VBuiltin _
-  | VTrustedBuiltin _ ->
+  | VTrustedBuiltin _ | VInstance _ ->
       false
   | VTask handle -> (
       match
@@ -1124,7 +1125,7 @@ let snapshot_mutable_graph root =
       Runtime_value_seen.add seen_values runtime_value ();
       match runtime_value with
       | VInt _ | VReal _ | VText _ | VHash _ | VSecret _ | VConstructor _ | VOp _ | VBuiltin _
-      | VTrustedBuiltin _ | VCode _ ->
+      | VTrustedBuiltin _ | VCode _ | VInstance _ ->
           ()
       | VTask _ | VChannel _ -> contains_task := true
       | VTuple items | VCon { args = items; _ } -> List.iter value items
@@ -1178,7 +1179,7 @@ let snapshot_unchanged snapshot =
 
 let atomic_non_task_value = function
   | VInt _ | VReal _ | VText _ | VHash _ | VSecret _ | VConstructor _ | VOp _ | VBuiltin _
-  | VTrustedBuiltin _ ->
+  | VTrustedBuiltin _ | VInstance _ ->
       true
   | VTuple [] | VCon { args = []; _ } -> true
   | VTask _ | VChannel _
@@ -1194,7 +1195,7 @@ let reject_recovery_result_value ctx root =
   let rec validate value =
     match value with
     | VInt _ | VReal _ | VText _ | VHash _ | VSecret _ | VConstructor _ | VOp _ | VBuiltin _
-    | VTrustedBuiltin _ ->
+    | VTrustedBuiltin _ | VInstance _ ->
         true
     | VTask handle -> (
         match
