@@ -504,9 +504,9 @@ inclusion needs a directional row constraint and is future work.
   entry; omit the annotation or annotate a function taking the capability;
 - inference can publish a scheme whose only capability is in its result
   (`f() = { let x = loop(); state.put-at(x, 1); x }`), but the same type
-  written as an annotation is refused (E0830), because only capabilities in
-  the annotation count (A1.5) and a result-only capability does not determine a
-  row annotation's entry for a caller.
+  written as an annotation is refused (E0830), because a row annotation's
+  entries come only from capabilities among the annotated arrows' parameter
+  types (A1.5), and a result-only capability is not among them.
 
 ### A1.6 Determinacy
 
