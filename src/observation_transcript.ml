@@ -753,23 +753,27 @@ let position_path = function
   | Result_position { run; event } -> Printf.sprintf "run[%d].event[%d].result" run event
   | Output_position { run; event } -> Printf.sprintf "run[%d].event[%d].output" run event
 
-let render_field = function
-  | Data bytes -> Printf.sprintf "%S" bytes
-  | Truncated { total; prefix } -> Printf.sprintf "%S (truncated from %d bytes)" prefix total
+let render_field ~redact = function
+  | Data bytes -> Printf.sprintf "%S" (redact bytes)
+  | Truncated { total; prefix } ->
+      Printf.sprintf "%S (truncated from %d bytes)" (redact prefix) total
   | Unsupported kind -> Printf.sprintf "<unsupported %s>" kind
   | Failure code -> Printf.sprintf "failure %s" code
   | Missing -> "<missing>"
   | Unfinished -> "<unfinished>"
 
-let render_side = function
-  | Field_side field -> render_field field
+let render_side ~redact = function
+  | Field_side field -> render_field ~redact field
   | Status_side (Complete _) -> "complete"
   | Status_side (Failed code) -> "failed " ^ code
   | Status_side (Incomplete code) -> "incomplete " ^ code
   | Operation_side operation -> "operation=" ^ Hash.to_hex operation
   | Missing_side -> "<absent>"
 
-let render difference =
+let render_redacted ~redact difference =
   Printf.sprintf "  at %s:\n    - %s\n    + %s"
     (position_path difference.position)
-    (render_side difference.left) (render_side difference.right)
+    (render_side ~redact difference.left)
+    (render_side ~redact difference.right)
+
+let render difference = render_redacted ~redact:Fun.id difference

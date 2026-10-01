@@ -63,3 +63,27 @@ let redact ~secrets source =
               scan (offset + 1)
       in
       scan 0
+
+let redact_fragments ~secrets source =
+  let redacted = redact ~secrets source in
+  let secrets = List.filter (fun secret -> not (String.equal secret "")) secrets in
+  (* the longest trailing fragment that starts some secret *)
+  let length = String.length redacted in
+  let rec longest size =
+    if size = 0 then None
+    else
+      let tail = String.sub redacted (length - size) size in
+      if
+        List.exists
+          (fun secret ->
+            String.length secret > size && String.equal (String.sub secret 0 size) tail)
+          secrets
+      then Some size
+      else longest (size - 1)
+  in
+  let widest =
+    List.fold_left (fun widest secret -> max widest (String.length secret - 1)) 0 secrets
+  in
+  match longest (min widest length) with
+  | None -> redacted
+  | Some size -> String.sub redacted 0 (length - size) ^ "<secret redacted>"

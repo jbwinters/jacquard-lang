@@ -1,8 +1,7 @@
 # Observation Policies And Observation Transcripts (OBS.1)
 
-- Status: implemented as a library (`Observation_policy`,
-  `Observation_transcript`). Binding policies into `jacquard relate` and Warp
-  cache keys is the next slice.
+- Status: implemented (`Observation_policy`, `Observation_transcript`) and
+  selectable in `jacquard relate --policy` (§5).
 - Builds on: the typed observation boundary (`docs/observation-boundary.md`).
 - Unchanged: `run-transcript-v1` (`docs/relational-warp.md` §2), its bytes, and
   every caller of it.
@@ -172,14 +171,44 @@ on everything recorded are inconclusive, never equal: neither produced what it
 would have compared next. A divergence renders as a three-line frame with the
 path and both sides; only recorded fields can appear in it.
 
-## 5. Compatibility
+## 5. Relational comparison under a policy
+
+`jacquard relate FILE --vary KIND --seed S --policy POLICY` reads a canonical
+policy file and compares every run with run 1 under it:
+
+- Before anything runs, the program is checked into a private scratch store,
+  and the policy is refused (E1005) if it is malformed, lists an identity that
+  is not an operation of that prepared program (its prelude or its own
+  declarations), or is pinned to an interface other than the program's
+  interface-v1 identity.
+- Each top-level expression is recorded as a run of an observation transcript.
+  A runtime failure is an observation, not a failed constituent: the failed
+  run is recorded and the next expression is still checked against the
+  constituent's authority and run.
+- A certain difference is `E1003`, naming the policy identity and the
+  observation path. If no run certainly differs but some pair cannot be called
+  equal, the first such pair is `E1007`. Otherwise the verdict line names the
+  policy: `relate runs=N seed=S verdict=equal policy=<identity>`.
+- Diagnostics pass through the Secret-variation redaction applied to raw field
+  bytes, which also removes a trailing fragment of a payload left by
+  truncation; only recorded fields can appear in them.
+
+The policy identity is the comparison's name: two comparisons are the same
+comparison exactly when their policy identities are equal. Warp relational
+lanes (`SameUnder`) do not select a policy yet: they keep the frozen
+result-values projection, which the `warp-v2` cache-key version already names.
+When a lane gains policy selection, its relational cache key must include the
+policy identity alongside the variation fields.
+
+## 6. Compatibility
 
 | surface | change |
 |---|---|
 | `run-transcript-v1` | none: same bytes, same parser, same callers |
-| `jacquard relate`, Warp relational lanes, Warp cache keys | none yet: policy selection and cache-key binding are the next slice |
+| `jacquard relate` without `--policy` | none: same projections, output and exits |
+| Warp relational lanes and cache keys | none: their projection is fixed and named by `warp-v2` |
 | kernel, HASH_V0, stores, schedule traces | none |
-| diagnostics | E1005 (policy invalid or refused), E1006 (transcript invalid, or recorded under another policy) |
+| diagnostics | E1005 (policy invalid or refused), E1006 (transcript invalid, or recorded under another policy), E1007 (runs cannot be called equal under a policy) |
 
 Not in this version: a named `Eq` for result equality (only data-v1
 equality), and a projection of a field other than its full rendering.

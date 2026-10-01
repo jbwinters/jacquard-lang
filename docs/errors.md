@@ -207,6 +207,7 @@ also emits E0817; consuming the captured resumption twice emits E0816.
 | E1004 | malformed, unsupported, or noncanonical run-transcript-v1 bytes | a transcript with a noncontiguous observation index or truncated payload |
 | E1005 | an observation policy is malformed, noncanonical, or refused for the observed program | unsorted operations, an operation identity the program does not have, or a pinned interface-v1 identity that differs |
 | E1006 | observation-transcript-v1 bytes are malformed, or were recorded under a different observation policy | decoding a transcript under another policy, or comparing transcripts of two policies |
+| E1007 | relational runs cannot be called equal under the selected observation policy | `relate --policy` where runs agree only on truncated prefixes, opaque kinds, uncoded failures, unfinished projections, or both stop incomplete |
 
 ## Native compilation (E11xx)
 

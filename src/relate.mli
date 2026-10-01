@@ -17,3 +17,9 @@ val redact : secrets:string list -> string -> string
     [<secret redacted>]. It searches longer strings first at an overlapping position, handles
     repeated occurrences, and returns [bytes] unchanged when [secrets] has no nonempty member. It
     does not claim taint tracking, transformed-encoding detection, or secure memory erasure. *)
+
+val redact_fragments : secrets:string list -> string -> string
+(** [redact_fragments ~secrets bytes] is {!redact} for a field that may have been truncated: after
+    replacing whole occurrences, it also replaces a trailing fragment of [bytes] that is a nonempty
+    prefix of a forbidden string (what truncation leaves of a payload at the end). It may redact a
+    harmless suffix that merely resembles a payload's start. *)

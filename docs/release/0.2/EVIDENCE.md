@@ -33,7 +33,7 @@ The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
 - Alcotest/QCheck cases: `1137`
-- Cram transcript files: `74`
+- Cram transcript files: `75`
 - Documentation examples: `35` named examples across `8` documents
 
 The development suite also includes corpus goldens, release-manifest checks,
@@ -645,3 +645,11 @@ equal, divergent or inconclusive, and refuses transcripts of different
 policies. `run-transcript-v1` is unchanged. Twelve
 `test/test_observation_policy.ml` cases bring the current source inventory to
 `1137 / 74 / 35`.
+
+OBS.1 adds `jacquard relate --policy`: runs are compared under an observation
+policy, divergence stays E1003 and names the policy, an inconclusive comparison
+is E1007, a refused policy (malformed, a stale operation identity, a mismatched
+interface pin) is E1005, a runtime failure is recorded as an observation, and
+the equal verdict names the policy identity. `jacquard relate` without a policy
+is unchanged. The new `test/cli/relate-policy.t` brings the current source
+inventory to `1137 / 75 / 35`.

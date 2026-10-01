@@ -187,6 +187,15 @@ unhandled effect or grant refusal uses status 3. A failed constituent run
 keeps its existing diagnostic and status. `E1003` reports only a successful
 pair or set of runs whose frozen observations differ.
 
+With `--policy POLICY` (OBS.1, `docs/observation-policies.md`) the comparison
+is made under an observation policy instead of the frozen projection: a
+divergence is still `E1003` (naming the policy identity and the
+observation-transcript path), a comparison that cannot be called equal is
+`E1007`, a refused policy is `E1005`, a runtime failure is recorded as an
+observation (the next expression still runs) rather than reported as a failed
+constituent, and equality prints
+`relate runs=N seed=S verdict=equal policy=<identity>`.
+
 ### RW.3 shipped schedule command
 
 The shipped layer-2 surface is:
