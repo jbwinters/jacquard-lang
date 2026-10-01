@@ -323,7 +323,9 @@ A1.3 and A1.6 supersede that paragraph; A1.5 refines §4's annotation bullets
 spawn paragraph. Two further §4 statements are corrected: the `async.spawn`
 rule is a dependent operation scheme (concurrency.md), not a direct-call
 checker form, so the `*.scoped` form is modelled on the frozen `VaryWorld`
-application check instead; and user clauses for instance operations are refused
+application check instead (this supersedes §4's "like the frozen
+`async.spawn` rule" and §8 slice 1's "a checker rule like the frozen
+`async.spawn` special case"); and user clauses for instance operations are refused
 by the checker (E0834), not by resolution, because the registration is
 checker-only.
 
@@ -341,7 +343,7 @@ DECISION.md`); TS.2 uses:
 | E0830 | undetermined instance row: an annotation or published scheme names an instance effect whose label no capability determines |
 | E0831 | a `*.scoped` combinator outside its checker form (wrapper, alias, non-literal callback, wrong arity, annotated head) |
 | E0832 | an instance escapes its scope |
-| E0833 | an instance capability crosses a spawn |
+| E0833 | an instance entry reaches the row of a fresh-continuation callback (A1.4) |
 | E0834 | a user handler clause for an instance effect's operation |
 | E0835 | constructing, destructuring or pattern-matching a capability |
 | E0836 | a capability type stored in a nominal declaration or user operation signature |
@@ -350,8 +352,8 @@ Slice 1 adds these to `checker_codes`, the checker's summary and next-step
 tables, `docs/errors.md`, and the diagnostic goldens (the CAP.0 reservation of
 E0820/E0821 exists only in its decision document). Refusals that are ordinary
 type mismatches keep the existing codes: E0801 at an application, E0804 at an
-annotation or in a rigid signature proof (the L1 and L3 cases and A1.9's choice
-and rank-1 cases).
+annotation or in a rigid signature proof (the L1 cases, L3's first case, and
+A1.9's choice and rank-1 cases).
 
 ### A1.1 Representation
 
@@ -375,7 +377,9 @@ and rank-1 cases).
   by the handler escape check), display, and the new label walker.
 - Each label determines one payload because a label enters a row only through a
   capability (A1.2), capability types are invariant (unified, never joined; the
-  join consults the checker's registration), and capabilities are opaque.
+  `Types.join` receives a predicate from the checker's registration and unifies
+  a registered capability's arguments instead of joining them), and capabilities
+  are opaque.
 
 ### A1.2 Instance operations and capabilities
 
@@ -435,13 +439,25 @@ annotated `use : (() ->{state-instance} (), StateRef Int) ->{state-instance} ()`
 ### A1.4 Fresh-continuation callbacks (spawn and its kin)
 
 Some trusted operations run a user thunk on a fresh continuation with no
-language handler frames: `async.spawn`'s child, the body of `async.scope`
-(round_robin.ml), the thunks of `dist.sample-lw` and
-`dist.sample-lw-weights-v1` (prelude.ml), and Warp's test runners (warp.ml).
-An instance operation performed there would never reach its scope's handler.
-The callback row of each such operation carries a persistent "no instance
-entries" flag on its row variable; slice 1 audits every trusted builtin that
-applies a user callback with an empty continuation and flags it. Binding a flagged row variable to a row containing an
+language handler frames, so an instance operation performed there would never
+reach its scope's handler. The callback row of each carries a persistent "no
+instance entries" flag on its row variable:
+
+- `async.spawn`'s child (round_robin.ml, the dependent operation scheme);
+- the body of `async.scope` (round_robin.ml; its result row shares the body's
+  tail);
+- the thunks of `dist.sample-lw` and `dist.sample-lw-weights-v1`
+  (prelude.ml, one shared signature).
+
+Audited and needing no flag: every resumption of a captured continuation
+(scheduler, governance approval bridge, host worker, inference and Warp
+drivers) keeps its frames; top-level entry points (host worker invocations,
+command drivers, Warp discovery, posterior builtins that take a closed model by
+hash) run where no live capability or undetermined label exists (A1.6); Warp's
+case, prop and variation fields have closed rows and its `VaryWorld` subject is
+invoked only under handlers with closed empty rows, so no instance entry can
+reach them; the `eval-code` root handler is unchecked evaluation (A1.2).
+Slice 1 records this audit and rechecks it for any new trusted builtin. Binding a flagged row variable to a row containing an
 instance entry fails with E0833 (binding it to a closed or rigid tail is
 allowed, see below); the flag passes to the new tail of any bound
 row and is OR-ed when two row variables are unified; instantiation and cloning
@@ -457,20 +473,24 @@ registration no instance entry exists and the flag never fires.
 Only instance entries are forbidden in such a callback's row, which is
 narrower than §4's wording ("capabilities may not" be handed to spawned work)
 and sound: an operation in the callback reaches only handlers installed inside
-the callback and the root handlers, whose payloads are first-order, so a label
-in an ambient payload of the callback's row is never delivered to an outer
-handler; and a captured capability that is never used is inert. (Ambient
-effects inside `async.scope` bodies that an enclosing language handler appears
-to handle statically, e.g. `emit.collect(fn () -> async.scope(fn () ->
-emit(1)))`, are an existing SC.4/TS.0 progress gap outside this amendment.)
+the callback, the scheduler and the root handlers; neither the scheduler nor a
+root handler ever performs an instance operation, and any value they deliver
+(a channel message, a sampled element of a program-supplied distribution)
+keeps its label in its type, so E0832 governs it; a captured capability that
+is never used is inert. (Ambient effects inside a spawned child or an
+`async.scope` body that an enclosing language handler appears to handle
+statically, e.g. `emit.collect(fn () -> async.scope(fn () -> emit(1)))`, are
+an existing SC.4/TS.0 progress gap outside this amendment.)
 
-**Limit L2 (pinned by tests).** Under SC.4 the operation's row is the
-callback's row, and the calling body's ambient row shares that tail. Therefore
+**Limit L2 (pinned by tests).** Under SC.4 the operation's row shares the
+callback's row tail (not necessarily its whole row: `async.scope` removes
+Async, likelihood weighting removes Dist), and the calling body's ambient row
+shares that tail. Therefore
 a callback invoked by a body that calls a fresh-continuation operation,
 directly or through any callee whose row shares its tail (row-polymorphic
 helpers such as `bg(k) = async.spawn(k)`, `state.scoped` bodies that spawn,
-any body inside `async.scope`, a function that calls `async.scope` or
-`dist.sample-lw`), cannot use an instance, although it runs in the parent; for example
+a function that calls `async.scope` or `dist.sample-lw`), cannot use an
+instance, although it runs in the parent; for example
 `par(k1, k2) = { let t = async.spawn(k1); k2(); async.await(t) }` refuses a
 `k2` that uses one. Separating the child's exclusion from the parent's
 inclusion needs a directional row constraint and is future work.
@@ -536,9 +556,11 @@ enclosing environment's variables, group members and group schemes.
 
 ### A1.8 Row consumers
 
-Authority display, manifests, purity checks (the top-level definition body
-check E0815, governance, host protocol and tier classification), the
-review-diff row comparison and the
+Authority display, manifests (frontend.ml, project_frontend.ml), purity checks
+(the top-level definition body check E0815, governance_verify.ml,
+host_protocol_v0.ml, tier classification), governance source and why-effect
+reports, the posterior model check (E1543, which counts row effects), Warp's
+`world_required`, the review-diff row comparison and the
 exact-row predicate used by Warp's `VaryWorld` treat instance entries
 explicitly. Display and authority use the deduplicated effect identities.
 Exactness compares the normalized sets of `(effect, resolved label)` in which a label
