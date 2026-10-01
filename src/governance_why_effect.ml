@@ -159,7 +159,7 @@ let safe_external_leaf checker ~requested hash =
                 (List.exists
                    (fun row_effect ->
                      Hash.equal row_effect workspace.hash || Hash.equal row_effect requested.hash)
-                   row.effects))
+                   (Types.effect_identities row)))
           && (not (List.exists contains_callable parameters))
           && not (contains_callable result)
       | Types.TCon _ | Types.TTuple _ | Types.TResume _ | Types.TVariadicArrow _

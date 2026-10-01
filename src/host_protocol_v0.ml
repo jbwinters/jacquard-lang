@@ -824,7 +824,7 @@ let validate_target checker callable =
         in
         let* () = map_result boundary_type_supported parameters |> Result.map (fun _ -> ()) in
         let* () = boundary_type_supported result in
-        Ok (parameters, row.Types.effects, result)
+        Ok (parameters, Types.effect_identities row, result)
     | Types.TCon _ | Types.TTuple _ | Types.TResume _ | Types.TVariadicArrow _ | Types.TExactThunk _
     | Types.TVar _ | Types.TSkolem _ | Types.TLabel _ ->
         error ~code:"E1603" "The selected stored term is not one callable arrow."
@@ -908,9 +908,7 @@ let validate_argument_value checker ~expected value =
         let constructor_type = Types.instantiate ~level:0 scheme in
         let fields, result =
           match Types.repr constructor_type with
-          | Types.TArrow (fields, row, result)
-            when (Types.repr_row row).Types.effects = []
-                 && match (Types.repr_row row).Types.tail with Types.RClosed -> true | _ -> false ->
+          | Types.TArrow (fields, row, result) when Types.is_closed_pure (Types.repr_row row) ->
               (fields, result)
           | ty -> ([], ty)
         in

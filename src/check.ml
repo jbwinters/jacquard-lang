@@ -362,6 +362,7 @@ and same_review_row left right =
   let left = Types.repr_row left and right = Types.repr_row right in
   List.length left.effects = List.length right.effects
   && List.for_all2 Hash.equal left.effects right.effects
+  && same_instance_sets left.instances right.instances
   &&
   match (left.tail, right.tail) with
   | RClosed, RClosed -> true
@@ -635,7 +636,7 @@ let elaborate_instance_rows ctx ~meta ?(enclosing = []) ty =
               with
               | [] ->
                   err ~meta ~code:"E0830"
-                    "the annotation names instance effect %s but no capability parameter                      determines its instance"
+                    "the annotation names instance effect %s but no capability parameter determines its instance"
                     (name_of ctx effect)
               | entries -> entries)
             named
@@ -658,6 +659,52 @@ let elaborate_instance_rows ctx ~meta ?(enclosing = []) ty =
       | other -> other
     in
     walk enclosing ty
+
+(** [check_determinacy ctx ~meta scheme] refuses (E0830) a published scheme whose instance entries
+    mention a quantified label variable that occurs in no capability type of the scheme: nothing
+    could ever determine which instance it names (design §9 A1.6). *)
+let check_determinacy ctx ~meta (scheme : scheme) =
+  if ctx.instances <> [] then begin
+    let determined = ref [] and entries = ref [] in
+    let quantified label =
+      match repr label with
+      | TVar { contents = Unbound { id; level } } when is_label_id id && level > scheme.gen_level ->
+          Some id
+      | _ -> None
+    in
+    let rec walk ty =
+      match repr ty with
+      | TCon (h, label :: args) when registered_capability ctx h ->
+          Option.iter (fun id -> determined := id :: !determined) (quantified label);
+          List.iter walk args
+      | TCon (_, items) | TTuple items -> List.iter walk items
+      | TArrow (params, row, result) ->
+          List.iter walk params;
+          walk_row row;
+          walk result
+      | TResume (input, row, answer) | TVariadicArrow (input, row, answer) ->
+          walk input;
+          walk_row row;
+          walk answer
+      | TExactThunk inner -> walk inner
+      | TVar _ | TSkolem _ | TLabel _ -> ()
+    and walk_row row =
+      let row = repr_row row in
+      List.iter (fun (_, args) -> List.iter walk args) row.payloads;
+      List.iter
+        (fun (entry : instance) ->
+          Option.iter (fun id -> entries := (id, entry.effect) :: !entries) (quantified entry.label);
+          List.iter walk entry.payload)
+        row.instances
+    in
+    walk scheme.ty;
+    match List.find_opt (fun (id, _) -> not (List.mem id !determined)) !entries with
+    | Some (_, effect) ->
+        err ~meta ~code:"E0830"
+          "this definition performs %s on an instance that none of its capability types determines"
+          (name_of ctx effect)
+    | None -> ()
+  end
 
 (* Convert a resolved surface type (an annotation) to an internal type. Free type/row
    variables are implicitly quantified at the annotation: first use introduces them. *)
@@ -1130,6 +1177,7 @@ let equal_hashes left right =
 let rows_can_be_exactly_equal left right =
   let left = repr_row left and right = repr_row right in
   equal_hashes left.effects right.effects
+  && same_instance_sets left.instances right.instances
   &&
   match (left.tail, right.tail) with
   | RClosed, RClosed -> true
@@ -1726,6 +1774,7 @@ and infer_expr ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(r
           let vty = infer ctx env ~ambient ~required value in
           ctx.level <- ctx.level - 1;
           close_lonely_rows ~gen_level:ctx.level vty;
+          check_determinacy ctx ~meta { ty = vty; gen_level = ctx.level };
           let env' =
             {
               env with
@@ -1760,6 +1809,7 @@ and infer_expr ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(r
           unify_or ctx ~meta ~what:"recursive binding" fty vty;
           ctx.level <- ctx.level - 1;
           close_lonely_rows ~gen_level:ctx.level fty;
+          check_determinacy ctx ~meta { ty = fty; gen_level = ctx.level };
           let env' =
             {
               env with
@@ -2186,7 +2236,7 @@ and check_group ?recovery_group ctx (decl : Kernel.decl) : unit =
                   (* the binding BODY itself must be effect-free (its value's effects live on
                  arrows): a non-lambda effectful body would otherwise type as pure and give
                  `check --manifest` a false pass (review finding) *)
-                  (match (repr_row !ambient).effects with
+                  (match effect_identities (repr_row !ambient) with
                   | [] -> ()
                   | h :: _ ->
                       err ~meta:b.Kernel.bmeta ~code:"E0815"
@@ -2232,6 +2282,8 @@ and check_group ?recovery_group ctx (decl : Kernel.decl) : unit =
                 (fun i ->
                   let ty = snd group.(i) in
                   close_lonely_rows ~gen_level:saved_level ty;
+                  check_determinacy ctx ~meta:binding_array.(i).Kernel.bmeta
+                    { ty; gen_level = saved_level };
                   group_schemes.(i) <- Some { ty; gen_level = saved_level })
                 component)
             (definition_components bindings);
@@ -2706,6 +2758,13 @@ let check_top_with ?recovery_identity ~recovery ctx (top : Kernel.top) :
                 infer ctx empty_env ~ambient ~required:empty_row e)
           in
           close_lonely_rows ~gen_level:ctx.level ty;
+          check_determinacy ctx ~meta:e.Kernel.meta { ty; gen_level = ctx.level };
+          (match (repr_row !ambient).instances with
+          | [] -> ()
+          | entry :: _ ->
+              err ~meta:e.Kernel.meta ~code:"E0830"
+                "this top-level expression performs %s on an instance that no scope here opens"
+                (name_of ctx entry.effect));
           {
             names = [ ("_", { ty; gen_level = ctx.level }) ];
             row = Some (repr_row !ambient);
@@ -2955,7 +3014,7 @@ let force_operation ctx (h : Hash.t) : (operation_contract, Diag.t list) result 
 let show_row ctx (r : row) : string =
   let r = repr_row r in
   let named =
-    r.effects
+    effect_identities r
     |> List.map (fun identity -> (name_of ctx identity, identity))
     |> List.sort (fun (name_a, hash_a) (name_b, hash_b) ->
         match String.compare name_a name_b with 0 -> Hash.compare hash_a hash_b | order -> order)
@@ -3018,7 +3077,7 @@ let manifest_errors ctx ?(grantable = []) ~(granted : Hash.t list) (row : row) :
              ~cause:
                (Printf.sprintf "This program requires %s, which is not granted%s." requirement via)
              ~next_step:hint ~contrast:None ()))
-    row.effects
+    (effect_identities row)
 
 (** Registry of every diagnostic code the checker can emit (W3.7's coverage check keys on this list;
     codes are never reused or renumbered). *)
@@ -3041,6 +3100,13 @@ let checker_codes : (string * string) list =
     ("E0817", "once resumption escapes its affine handler-clause scope");
     ("E0818", "polymorphic reuse of a non-value local binding (value restriction)");
     ("E0819", "opaque Secret used by generic inspection or serialization");
+    ("E0830", "undetermined instance row: no capability determines an instance's label");
+    ("E0831", "scoped instance combinator outside its checker form");
+    ("E0832", "instance escapes its scope");
+    ("E0833", "instance operation in a fresh-continuation callback");
+    ("E0834", "user handler clause for an instance operation");
+    ("E0835", "capability constructed or taken apart");
+    ("E0836", "capability type stored in a nominal declaration or operation signature");
     ("W0801", "redundant match clause");
     ("W1206", "labeled API called with a positional Bool constructor literal");
     ("W1207", "labeled API called across a definite repeated-type positional parameter run");

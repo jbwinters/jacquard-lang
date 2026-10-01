@@ -918,6 +918,20 @@ let quantified (s : scheme) : int list * int list =
 and effect_identities (row : row) =
   List.sort_uniq Hash.compare (row.effects @ List.map (fun entry -> entry.effect) row.instances)
 
+(** [same_instance_sets left right] compares two normalized instance-entry sets exactly: the same
+    effects with identical resolved labels, where a label variable equals only itself (A1.8). *)
+let same_instance_sets left right =
+  List.length left = List.length right
+  && List.for_all (fun entry -> List.exists (same_instance entry) right) left
+  && List.for_all (fun entry -> List.exists (same_instance entry) left) right
+
+(** [is_label ty] holds for a rigid label or a label variable. *)
+let is_label ty =
+  match repr ty with
+  | TLabel _ -> true
+  | TVar { contents = Unbound { id; _ } } -> is_label_id id
+  | _ -> false
+
 (** [is_closed_pure row] holds for a normalized closed row with no effect at all, ambient or
     instance. *)
 let is_closed_pure (row : row) =
@@ -1000,10 +1014,13 @@ let show ?(name_of = fun h -> String.sub (Hash.to_hex h) 0 8) ?effect_name_of ?(
     | TVar { contents = Unbound { id; _ } } -> tname id
     | TVar { contents = Link _ } -> assert false
     | TSkolem (_, n) | TLabel (_, n) -> n
-    | TCon (h, []) -> name_of h
-    | TCon (h, args) ->
-        let s = name_of h ^ " " ^ String.concat " " (List.map (go ~paren:true) args) in
-        if paren then "(" ^ s ^ ")" else s
+    | TCon (h, args) -> (
+        (* a capability's label is internal and never displayed (design §9 A1.4) *)
+        match List.filter (fun arg -> not (is_label arg)) args with
+        | [] -> name_of h
+        | args ->
+            let s = name_of h ^ " " ^ String.concat " " (List.map (go ~paren:true) args) in
+            if paren then "(" ^ s ^ ")" else s)
     | TTuple [] -> "()"
     | TTuple items -> "(" ^ String.concat ", " (List.map (go ~paren:false) items) ^ ")"
     | TArrow (params, row, result) ->
@@ -1031,6 +1048,8 @@ let show ?(name_of = fun h -> String.sub (Hash.to_hex h) 0 8) ?effect_name_of ?(
     the body rendering, so quantifier names line up. *)
 let show_scheme ?name_of ?effect_name_of ?(surface = false) (s : scheme) : string =
   let tids, rids = quantified s in
+  (* labels are never displayed (design §9 A1.4) *)
+  let tids = List.filter (fun id -> not (is_label_id id)) tids in
   let body = show ?name_of ?effect_name_of ~surface s.ty in
   (* naming in [show] assigns letters in first-appearance order, which matches [quantified]'s
      traversal; reconstruct the quantifier prefix from counts *)

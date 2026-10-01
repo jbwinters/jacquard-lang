@@ -396,6 +396,67 @@ let test_fresh_continuations () =
         c) (lit 1)))) (tuple))))))"
        cap)
 
+let test_determinacy_and_consumers () =
+  let ((store, _) as h) = fixture () in
+  let check_ok label src =
+    match Test_check.check_src h src with
+    | Ok _ -> ()
+    | Error diagnostics ->
+        Alcotest.failf "%s: %s" label (String.concat "\n" (List.map Diag.to_string diagnostics))
+  in
+  check_ok "loop" "(defterm ((binding loop () (lam () (app (var loop))))))";
+  (* A1.6: a quantified label that no capability type determines is refused at publication *)
+  Alcotest.(check string)
+    "an instance no capability determines" "E0830"
+    (code_of h (defterm "read-unknown" "(lam () (app (var get-at) (app (var loop))))"));
+  Alcotest.(check string)
+    "at a local let" "E0830"
+    (code_of h
+       (defterm "local"
+          "(lam () (let nonrec (pvar r) (lam () (app (var get-at) (app (var loop)))) (lit 1)))"));
+  Alcotest.(check string)
+    "a top-level expression holding an instance entry" "E0830"
+    (code_of h "(app (var get-at) (app (var loop)))");
+  (* a capability in the result determines the label (limit L3's inferred case) *)
+  check_ok "result-only capability"
+    (defterm "mint"
+       "(lam () (let nonrec (pvar x) (app (var loop)) (let nonrec (pwild) (app (var put-at) (var \
+        x) (lit 1)) (var x))))");
+  (* ordinary row polymorphism is unaffected *)
+  check_ok "apply" (defterm "apply" "(lam ((pvar k)) (app (var k)))");
+  check_ok "apply a scoped thunk"
+    (defterm "apply-scoped"
+       (Printf.sprintf "(lam () %s)"
+          (scoped "(lit 0)" "(app (var apply) (lam () (app (var get-at) (var c))))")));
+  (* E0815 sees instance entries *)
+  Alcotest.(check string)
+    "a definition body performing an instance operation" "E0815"
+    (code_of h (defterm "eager" "(app (var get-at) (app (var loop)))"));
+  (* display hides labels and names the instance effect *)
+  Alcotest.(check string)
+    "display" "forall a. (StateRef a) ->{StateInstance} a"
+    (Test_check.sig_of h (defterm "peek-at" "(lam ((pvar c)) (app (var get-at) (var c)))"));
+  (* purity and tier count instance entries *)
+  let instance_only =
+    {
+      Types.effects = [];
+      payloads = [];
+      instances =
+        [
+          {
+            Types.effect = Instances_fixture.hash store Resolve.KEffect "state-instance";
+            label = Types.TLabel (Types.fresh_id (), "l");
+            payload = [];
+          };
+        ];
+      tail = Types.RClosed;
+    }
+  in
+  Alcotest.(check bool) "a row of entries only is not pure" false (Types.is_closed_pure instance_only);
+  Alcotest.(check bool)
+    "nor in the tier classification" false
+    (Tier.classify_row instance_only = Tier.Pure)
+
 let test_unregistered_controls () =
   (* without a registration the fixture is ordinary: no labels, ordinary effects and handlers *)
   let store, ctx = fresh () in
@@ -425,6 +486,8 @@ let suite =
     Alcotest.test_case "the scoped checker form and non-escape" `Quick test_scoped_form;
     Alcotest.test_case "fresh-continuation callbacks refuse instance entries" `Quick
       test_fresh_continuations;
+    Alcotest.test_case "determinacy, display and row consumers" `Quick
+      test_determinacy_and_consumers;
     Alcotest.test_case "without a registration the fixture is ordinary" `Quick
       test_unregistered_controls;
   ]
