@@ -434,6 +434,9 @@ let reject_task_escape ctx ~scope_path root =
 let register_root_handler ctx op handler =
   if ctx.observing then
     invalid_arg "Eval.register_root_handler: an observation callback cannot grant an operation";
+  (* an instance operation is served only by its scope (TS.2, design §10 A2.4) *)
+  if Instance_contract.is_instance_operation op then
+    invalid_arg "Eval.register_root_handler: a scoped instance operation cannot be granted";
   Hashtbl.replace ctx.root_handlers op handler
 
 (** [with_observer] scopes a typed root observer to one caller-controlled evaluation extent. The
@@ -823,6 +826,8 @@ let group_hashes (decl : Kernel.decl) : Hash.t array =
   | Error ds -> rt (Runtime_err.Unresolved (String.concat "; " (List.map Diag.to_cause_string ds)))
 
 let con_value ctx ~trusted h =
+  if Instance_contract.is_private_carrier h then
+    rt (Runtime_err.Type_error "a capability can only be obtained from its scoped combinator");
   if Concurrency_contract.is_task_private_hash h || Channel_contract.is_channel_private_hash h then
     rt
       (Runtime_err.Invalid_task_handle
@@ -1407,6 +1412,10 @@ let perform_unchecked ctx (op : Hash.t) ~name ~effect_ (args : Value.t list) (k 
     | f :: outer -> split (walked + 1) (f :: inner_rev) outer
     | [] -> (
         if walked > 0 then charge ctx walked;
+        (* no frame of its scope is on the continuation: the stale-capability trap fires before
+           any root handler, observer, capture or routing (TS.2, design §10 A2.4) *)
+        if Instance_contract.is_instance_operation op then
+          rt (Runtime_err.Stale_capability { op = name });
         (* the route, and for a capture its mode, are fixed before an observer runs, so no
            callback can influence them; the mode is read only when the operation is captured *)
         let native =
@@ -2015,6 +2024,8 @@ let dispatch_root_operation ~call ctx ~resume ~op ~name ~effect_ args =
   (* an observer callback cannot dispatch an operation (RF.3) *)
   if ctx.observing then
     Error (Runtime_err.Eval_error "an observation callback cannot run evaluation")
+  else if Instance_contract.is_instance_operation op then
+    Error (Runtime_err.Stale_capability { op = name })
   else
     let effect_ =
       match locate ctx ~trusted:true op with

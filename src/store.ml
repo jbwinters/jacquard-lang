@@ -105,7 +105,9 @@ let private_name_diagnostic name hash =
     ~contrast:None ()
 
 let scheduler_private_hash hash =
-  Concurrency_contract.is_task_private_hash hash || Channel_contract.is_channel_private_hash hash
+  Concurrency_contract.is_task_private_hash hash
+  || Channel_contract.is_channel_private_hash hash
+  || Instance_contract.is_private_carrier hash
 
 (* --- names.jqd --- *)
 

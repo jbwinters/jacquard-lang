@@ -894,6 +894,9 @@ let check_decl_payload_storage ?meta ?(effectself = None) ~parameters ty =
 (* Constructor scheme: forall vars. (fields) ->{} T vars  (nullary: T vars). Field types are
    declaration types: tyvars come from the decl header, self-references are the decl. *)
 let rec con_scheme ctx ?meta (h : Hash.t) : scheme =
+  (* a capability exists only as its scope's token, registered or not (design §10 A2.1) *)
+  if Instance_contract.is_private_carrier h then
+    err ?meta ~code:"E0835" "a capability can only be obtained from its scoped combinator";
   if Concurrency_contract.is_task_private_hash h || Channel_contract.is_channel_private_hash h then
     err ?meta ~code:Concurrency_contract.task_escape_code
       ~next_step:"Use the trusted scheduler operation that creates this opaque scoped handle."
