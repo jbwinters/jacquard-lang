@@ -322,9 +322,10 @@ A1.3 and A1.6 supersede that paragraph.
 - A row keeps its ambient part exactly as today and gains instance entries
   `(instance effect, label, payload)`. A label is a rigid label minted per
   checked `*.scoped` call, a label variable (generalized like a type
-  variable), or a label skolem in a rigid signature proof. Label positions (a
-  capability's first type argument, an entry's label) only ever hold labels:
-  binding one to a constructor, tuple or arrow is a type error.
+  variable), or a label skolem in a rigid signature proof. Labels are their own
+  sort: a label position (a capability's first type argument, an entry's label)
+  unifies only with labels, never with any type (constructors, tuples, arrows,
+  type variables, type skolems, exact thunks).
 - Two entries are the same entry when their effects are equal and their labels
   are identical after resolution. Normalization merges identical entries and
   unifies their payloads, repeating until no two entries are identical (a merge
@@ -351,9 +352,15 @@ A1.3 and A1.6 supersede that paragraph.
   operation signature, except in the instance effect's own operations. A
   generic container instantiated with a capability (`Box a` with
   `a := StateRef<i> s`) keeps the label visible and stays under non-escape.
-- `eval` of quoted code has an unchecked result and could be instantiated at a
-  capability type; only a stale capability can result, which the runtime trap
-  (§4 "Dispatch rule") covers.
+- **Unchecked evaluation is outside the static guarantee.** `eval` of quoted
+  code is checked independently and its result type is not related to its
+  input, so an evaluated identity function can disguise one live capability as
+  another (`eval-code(quote { fn (x) -> x })(count)` typed as `log`'s
+  capability), and the operation is then served by the wrong instance's handler
+  with a payload of the wrong type. The non-escape and payload-agreement
+  guarantees of §4 and this amendment hold for programs whose capabilities do
+  not flow through unchecked `eval`; the stale-capability trap still catches a
+  capability whose handler has returned.
 
 ### A1.3 No inferred instance identification
 
@@ -367,16 +374,23 @@ constraint queue: every row comparison is solved where it happens, so every row
 consumer (handler subtraction and skolem check, scoped subtraction and escape
 check, exactness, purity, publication) sees a settled row.
 
-**Limit L1 (pinned by tests).** Where a closed or rigid row would require two
-labels to be identified before the capability types that relate them are
-unified, the program is refused although it is safe. For example, with an
-annotated `use : (() ->{state-instance} (), StateRef Int) ->{state-instance} ()`,
-`state.scoped(0, fn (c) -> use(fn () -> state.put-at(c, 2), c))` is refused,
-because the thunk's row meets `use`'s closed parameter row before `c` meets the
-capability parameter. Likewise `g(c, d) = use(fn () -> state.get-at(d), c)` is
-refused although plain HM would identify `c` and `d`. Workarounds: give the
-capability parameter before the thunk, or leave the callback row unannotated
-(an open row absorbs the entry).
+**Limit L1 (pinned by tests).** Where a closed, rigid or same-tail row (or an
+exact comparison, A1.8) would require two labels to be identified before the
+capability types that relate them are unified, or where nothing ever relates
+them, the program is refused although it may be safe. Examples, with an
+annotated `use : (() ->{state-instance} (), StateRef Int) ->{state-instance} ()`:
+
+- `state.scoped(0, fn (c) -> use(fn () -> state.put-at(c, 2), c))` is refused,
+  because the thunk's row meets `use`'s closed parameter row before `c` meets
+  the capability parameter; supplying the capability first (an API ordered
+  capability-first) is accepted.
+- `g(c, d) = use(fn () -> state.put-at(d, 1), c)` is refused: plain HM would
+  identify `c` and `d`, but no capability unification relates them; only an
+  unannotated callback row is accepted.
+- A definition's own rigid signature proof unifies parameters left to right,
+  so `run : ((() ->{state-instance} Int) -> Int, StateRef Int) -> Int` with
+  `run(k, c) = k(fn () -> state.get-at(c))` is refused; ordering the
+  capability parameter first is accepted.
 
 ### A1.4 Spawn
 
@@ -385,9 +399,12 @@ on its row variable. Binding a flagged row variable to a row containing an
 instance entry fails with E0823; the flag passes to the new tail of any bound
 row and is OR-ed when two row variables are unified; instantiation and cloning
 keep it. A flagged variable may be bound to a rigid tail during a rigid
-signature proof; the flag survives in the published signature through the
+signature proof or any other rigid tail (an expression annotation's `| e`);
+a rigid tail can never gain entries, so the flag is discharged there soundly,
+and in a definition it survives in the published signature through the
 flexible unification of the inferred type. The flag is not shown in displayed
-or interface-v1 signatures, so an API diff cannot see it. With an empty
+or interface-v1 signatures, so an API diff cannot see it; interface-v1 also
+erases label sharing (`pick(c, d) = c` and `= d` display alike). With an empty
 registration no instance entry exists and the flag never fires.
 
 **Limit L2 (pinned by tests).** Under SC.4 the spawn operation's row is the
@@ -409,18 +426,24 @@ inclusion needs a directional row constraint and is future work.
 - An instance effect named in a row annotation stands for one entry per
   capability of that effect among the parameter types of the annotated arrow and
   of arrows enclosing it *within the same annotation* (not lexically enclosing
-  lambdas), counting capabilities nested in tuples, constructors and callback
-  parameters. Each entry's label is that capability's label and its payload is
+  lambdas), counting capabilities at any depth and variance (nested in tuples,
+  constructors, callback parameters and callback results). The same rule governs
+  declaration types where they are allowed (A1.2). Each entry's label is that capability's label and its payload is
   the capability's payload. If there is no such capability, the annotation is
   refused (E0820).
 - An annotation around the `*.scoped` head is refused; an annotated callback is
   checked against its annotation with flexible labels.
 
-**Limit L3.** A capability annotation gets an independent label per
-occurrence, so an annotation cannot state that two capability positions share
-an instance: `keep : (StateRef Int) ->{} StateRef Int` with `keep(c) = c` is
-refused by its rigid proof. Inference, or a generic signature (`a -> a`),
-keeps the relationship.
+**Limit L3.** Annotations are less expressive than inference for instances:
+
+- a capability annotation gets an independent label per occurrence, so an
+  annotation cannot state that two capability positions share an instance:
+  `keep : (StateRef Int) ->{} StateRef Int` with `keep(c) = c` is refused by
+  its rigid proof; inference, or a generic signature (`a -> a`), keeps it;
+- an expression annotation cannot describe a thunk over a lexically bound
+  capability: `(fn () -> state.get-at(c) : () ->{state-instance} Int)` names no
+  capability (E0820), and an annotation's `| e` is rigid and cannot absorb the
+  entry; omit the annotation or annotate a function taking the capability.
 
 ### A1.6 Determinacy
 
@@ -435,6 +458,10 @@ instance entry or an unbound label is refused.
 
 ### A1.7 Scoped rule obligations
 
+The handler requirements of an application or scope never contain instance
+entries: the fresh entry is never added to them, and the scoped body is checked
+with empty requirements.
+
 The `*.scoped` checker form infers the initializer in the caller's ambient (its
 effects charge the caller), checks the body as a lambda body, subtracts exactly
 the entries `(instance effect, fresh label)`, applies the caller's handler
@@ -446,11 +473,12 @@ enclosing environment's variables, group members and group schemes.
 
 ### A1.8 Row consumers
 
-Authority display, manifests, purity checks (including governance, host
-protocol and tier classification), the review-diff row comparison and the
+Authority display, manifests, purity checks (the top-level definition body
+check E0815, governance, host protocol and tier classification), the
+review-diff row comparison and the
 exact-row predicate used by Warp's `VaryWorld` treat instance entries
 explicitly. Display and authority use the deduplicated effect identities.
-Exactness compares `(effect, resolved label)` multisets in which a label
+Exactness compares the normalized sets of `(effect, resolved label)` in which a label
 variable equals only itself, never effect identities, and never defers; purity
 counts instance entries, so a row of instance entries only is never pure.
 Errors raised inside unification for E0820, E0822 and E0823 carry a structured
@@ -459,12 +487,29 @@ hide them.
 
 ### A1.9 Other refused programs
 
-Capabilities are invariant, so choosing between two live instances
-(`if b then c1 else c2`, `[c1, c2]`) is refused, and a lambda-bound operation or
-callback is monomorphic, so `both(f, c1, c2) = { f(c1); f(c2) }` is refused
-(rank-1). Both follow from A1.1 and are pinned by tests.
+Pinned by tests:
+
+- Capabilities are invariant, so choosing between two live instances
+  (`if b then c1 else c2`, `[c1, c2]`) is refused.
+- Lambda-bound operations and callbacks are monomorphic (rank-1), so
+  `both(f, c1, c2) = { f(c1); f(c2) }` is refused when applied to distinct
+  instances; likewise recursive calls within one definition group identify the
+  labels they pass (the group is monomorphic until published), and annotations
+  do not help there.
+- No rank-2 (runST) callbacks: a lambda-bound callback cannot receive a
+  capability, or a thunk over one, from a scope opened in the same function
+  (`run(k) = state.scoped(0, fn (c) -> k(c))` is refused by E0822's environment
+  check), beyond the wrapper refusal of §4 (E0821).
+- Capabilities in nominal declarations (constructor fields, user effect
+  operation signatures) are refused (E0826); a generic parameter
+  (`type Counter r = Counter(r)`) carries a capability instead.
 
 ### A1.10 Slice-1 evidence
+
+Slice 1 implements the State shape (`state-instance`, `get-at`, `put-at`,
+`state.scoped`). The result and payload rules of `throw.scoped` and
+`emit.scoped` are specified with slice 2, before they are registered.
+
 
 Slice 1 registers the instance declarations only on test checker contexts;
 production contexts have an empty registration, which a test asserts. Slice 1
