@@ -44,10 +44,10 @@ val register_instances : ctx -> instance_registration list -> unit
     capability type, a term, callback position 1, no repeated effect, capability or scoped term) and
     seeds each scoped term's trusted scheme. An invalid registration is API misuse:
     [Invalid_argument], and nothing is registered. Register before any affected signature is cached.
-    Production contexts never register. *)
+    [make_ctx] registers the production State declarations. *)
 
 val instance_registrations : ctx -> instance_registration list
-(** [instance_registrations ctx] lists the instance effects [ctx] enforces (empty in production). *)
+(** [instance_registrations ctx] lists the instance effects [ctx] enforces. *)
 
 val register_builtin_signatures : ctx -> (Hash.t * Types.scheme) list -> unit
 (** [register_builtin_signatures ctx signatures] installs trusted native-term schemes, replacing

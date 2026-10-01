@@ -97,12 +97,20 @@ let kind_of_sym = function
   | _ -> None
 
 let private_name_diagnostic name hash =
-  Diag.error ~domain:Concurrency ~code:Concurrency_contract.task_escape_code
-    ~summary:"A scheduler-private handle cannot be published through the store."
-    ~cause:
-      (Printf.sprintf "Name `%s` cannot expose scheduler-private hash %s." name (Hash.to_hex hash))
-    ~next_step:"Create and use Task and Channel handles only inside a structured scheduler scope."
-    ~contrast:None ()
+  if Instance_contract.is_private_carrier hash then
+    Diag.error ~domain:Checker ~code:"E0835"
+      ~summary:"A capability cannot be constructed or taken apart"
+      ~cause:
+        (Printf.sprintf "Name `%s` cannot expose the private capability carrier %s." name
+           (Hash.to_hex hash))
+      ~next_step:"Obtain a capability from its scoped combinator." ~contrast:None ()
+  else
+    Diag.error ~domain:Concurrency ~code:Concurrency_contract.task_escape_code
+      ~summary:"A scheduler-private handle cannot be published through the store."
+      ~cause:
+        (Printf.sprintf "Name `%s` cannot expose scheduler-private hash %s." name (Hash.to_hex hash))
+      ~next_step:"Create and use Task and Channel handles only inside a structured scheduler scope."
+      ~contrast:None ()
 
 let scheduler_private_hash hash =
   Concurrency_contract.is_task_private_hash hash

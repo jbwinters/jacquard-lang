@@ -30,6 +30,14 @@ let test_registration () =
   refused "a negative callback position" { valid with callback_position = -1 };
   refused "a callback position other than slice 1's" { valid with callback_position = 0 };
   refused "a repeated registration" valid;
+  (* a refused batch registers nothing, even its valid members *)
+  let _, unregistered = Test_check.make_cctx ~instances:false () in
+  (match Check.register_instances unregistered [ valid; valid ] with
+  | () -> Alcotest.fail "a batch repeating a registration was accepted"
+  | exception Invalid_argument _ -> ());
+  Alcotest.(check int)
+    "a refused batch registers nothing" 0
+    (List.length (Check.instance_registrations unregistered));
   Alcotest.(check int)
     "refused registrations add nothing" 1
     (List.length (Check.instance_registrations ctx))
@@ -536,6 +544,17 @@ let test_trusted_scheme () =
   Alcotest.(check string)
     "the seeded scheme" "forall a b | e. (b, (StateRef b) ->{StateInstance | e} a) ->{| e} a"
     (scheme_text (fresh ()));
+  (* checking the trusted declaration directly under registration fails closed (A2.3) *)
+  (let store, ctx = fresh () in
+   match Store.locate_internal store Instance_contract.state_scoped with
+   | Ok { Store.decl; _ } -> (
+       match Check.check_top ctx (Kernel.Decl decl) with
+       | Ok _ -> Alcotest.fail "the trusted body was checked under registration"
+       | Error diagnostics ->
+           Alcotest.(check (list string))
+             "direct checking is refused" [ "E0834" ]
+             (List.map Diag.code_or_uncoded diagnostics))
+   | Error _ -> Alcotest.fail "state.scoped is not in the store");
   (* on an unregistered context the body checks as an ordinary handler, forcing one payload *)
   Alcotest.(check string)
     "the body on an unregistered context"

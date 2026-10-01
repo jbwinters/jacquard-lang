@@ -730,10 +730,13 @@ A2.7).
     sweeps (prelude zero-diagnostic checks, tier and interface sweeps,
     governance and host preflight) see the seeded scheme. A source reference
     still goes through the checker form or E0831.
-  - The scheme is pinned in the prelude signature tests.
+  - The scheme is pinned in the checker tests
+    (`test/test_scoped_instances_checker.ml`).
 - A test checks the body as an ordinary handler on an unregistered context,
-  with the hidden builtins' signatures installed, and pins the result:
-  `(s, (StateRef s) ->{StateInstance s | e} a) ->{StateInstance s | e} a`.
+  with the hidden builtins' signatures installed, and pins the result. It
+  displays as `(s, (StateRef s) ->{StateInstance | e} a) ->{StateInstance | e} a`;
+  the display omits payloads, and the one `StateInstance s` payload is forced
+  across every forwarded instance.
   This is evidence that the body is well typed outside the instance
   discipline. The seeded scheme refines it in two ways:
   - forwarded operations become distinct-label entries in `e`;

@@ -120,7 +120,7 @@ let register_builtin_signatures ctx signatures =
 let register_instances ctx registrations =
   let refuse cause = invalid_arg ("Check.register_instances: " ^ cause) in
   let locate hash = Store.locate_internal ctx.store hash in
-  let check (registration : instance_registration) =
+  let check registered (registration : instance_registration) =
     (match locate registration.instance_effect with
     | Ok { decl = { Kernel.it = Kernel.DefEffect _; _ }; role = Store.Whole; _ } -> ()
     | _ -> refuse "the instance effect is not an effect declaration");
@@ -147,7 +147,7 @@ let register_instances ctx registrations =
           Hash.equal registered.instance_effect registration.instance_effect
           || Hash.equal registered.capability registration.capability
           || Hash.equal registered.scoped registration.scoped)
-        ctx.instances
+        registered
     then refuse "an effect, capability or scoped term is already registered"
   in
   (* the trusted scheme of a State-shaped scope (A2.3):
@@ -171,12 +171,15 @@ let register_instances ctx registrations =
     in
     Hashtbl.replace ctx.term_sigs registration.scoped { ty; gen_level = 0 }
   in
-  List.iter
-    (fun registration ->
-      check registration;
-      ctx.instances <- ctx.instances @ [ registration ];
-      seed registration)
-    registrations
+  (* validate the whole batch, duplicates within it included, before changing [ctx] *)
+  ignore
+    (List.fold_left
+       (fun registered registration ->
+         check registered registration;
+         registered @ [ registration ])
+       ctx.instances registrations);
+  ctx.instances <- ctx.instances @ registrations;
+  List.iter seed registrations
 
 (** [instance_registrations ctx] lists the scoped instance effects [ctx] enforces. *)
 let instance_registrations ctx = ctx.instances
@@ -2269,6 +2272,12 @@ and check_group ?recovery_group ctx (decl : Kernel.decl) : unit =
                 err ~code:"E0805" "%s" (String.concat "; " (List.map Diag.to_cause_string ds)))
       in
       let decl_hash, member_hashes = hashes in
+      (* a registered scope's body is trusted and never checked under registration; checking its
+         declaration directly fails closed (design §10 A2.3) *)
+      if List.exists (fun hash -> Option.is_some (scoped_registration ctx hash)) member_hashes then
+        err ~meta:decl.Kernel.meta ~code:"E0834"
+          "the trusted scoped combinator handles instance operations and is not checked under \
+           registration";
       ctx.checking <- decl_hash :: ctx.checking;
       let saved_level = ctx.level in
       Fun.protect

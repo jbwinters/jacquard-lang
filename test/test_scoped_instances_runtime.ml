@@ -154,6 +154,12 @@ let test_ambient_handlers () =
                 (put "c" "(app (var add) (app (var state.get-at) (var c)) (lit 1))")
                 (Printf.sprintf "(app (var emit) %s)" (get "c"))))));
   Alcotest.(check string)
+    "ambient throw inside a scope" "err(4)"
+    (run h
+       (scoped "(lit 3)"
+          (Printf.sprintf "(app (var throw.to-result) (lam () %s))"
+             (seq (put "c" "(lit 4)") (Printf.sprintf "(app (var throw) %s)" (get "c"))))));
+  Alcotest.(check string)
     "ambient throw around a scope" "err(7)"
     (run h
        (Printf.sprintf "(app (var throw.to-result) (lam () %s))"
@@ -177,6 +183,35 @@ let test_stale_trap () =
     | Error error -> Alcotest.failf "%s: %s" label (Runtime_err.to_string error)
   in
   stale "a stale capability at the root" (Printf.sprintf "(app (var state.get-at) %s)" leak);
+  stale "a non-token capability, forwarded by a scope"
+    (scoped ~var:"d" "(lit 1)" "(app (var state.get-at) (lit 5))");
+  (* both capture modes: the trap fires before capture, ordinary or routed *)
+  let routed label src =
+    let events = ref 0 in
+    match
+      Eval.with_observer h.eval
+        (fun _ -> incr events)
+        (fun () ->
+          match resolved h src with
+          | Kernel.Expr expression ->
+              Eval.run_state_capturing_once_routed h.eval (Eval.expr_state expression)
+          | Kernel.Decl _ -> Alcotest.fail "expected an expression")
+    with
+    | Error (Runtime_err.Stale_capability _) ->
+        Alcotest.(check int) (label ^ ": no root observer is notified") 0 !events
+    | Ok _ -> Alcotest.failf "%s was captured" label
+    | Error error -> Alcotest.failf "%s: %s" label (Runtime_err.to_string error)
+  in
+  routed "a stale capability under routed capture"
+    (Printf.sprintf "(app (var state.put-at) %s (lit 1))" leak);
+  (* routed dispatch refuses an instance operation *)
+  (match
+     Eval.dispatch_root_operation ~call:0 h.eval ~resume:(Value.VTuple [])
+       ~op:Instance_contract.state_get_at ~name:"state.get-at" ~effect_:"state-instance" []
+   with
+  | Error (Runtime_err.Stale_capability _) -> ()
+  | Ok _ -> Alcotest.fail "routed dispatch served an instance operation"
+  | Error error -> Alcotest.failf "routed dispatch: %s" (Runtime_err.to_string error));
   stale "a stale capability forwarded by another scope"
     (scoped ~var:"d" "(lit 1)" (Printf.sprintf "(app (var state.get-at) %s)" leak));
   (* no root handler can be granted for an instance operation *)
@@ -186,6 +221,35 @@ let test_stale_trap () =
   | () -> Alcotest.fail "an instance operation was granted at the root"
   | exception Invalid_argument _ -> ()
 
+(* a checked program can smuggle a capability out of its scope only through unchecked eval
+   (A1.2); the trap catches its later use (A2.4) *)
+let test_eval_smuggling () =
+  let h = make () in
+  (match Prelude.install_eval h.eval with
+  | Ok () -> ()
+  | Error ds -> Eval_support.fail_diags "install_eval" ds);
+  let smuggled =
+    scoped "(lit 0)" "(app (app (var eval-code) (quote (lam ((pvar x)) (var x)))) (var c))"
+  in
+  (* the choice unifies the smuggled value with the live scope's capability *)
+  let program =
+    scoped ~var:"d" "(lit 1)"
+      (Printf.sprintf
+         "(app (var state.get-at) (match (var false) (clause (pcon true) (var d)) (clause (pcon \
+          false) %s)))"
+         smuggled)
+  in
+  (match Check.check_top h.check (resolved h program) with
+  | Ok _ -> ()
+  | Error ds -> Eval_support.fail_diags "the smuggling program checks" ds);
+  match resolved h program with
+  | Kernel.Expr expression -> (
+      match Eval.run_expr h.eval expression with
+      | Error (Runtime_err.Stale_capability _) -> ()
+      | Ok value -> Alcotest.failf "the smuggled capability returned %s" (Value.show value)
+      | Error error -> Alcotest.failf "smuggling: %s" (Runtime_err.to_string error))
+  | Kernel.Decl _ -> Alcotest.fail "expected an expression"
+
 let suite =
   [
     Alcotest.test_case "stores, same-typed and independent scopes" `Quick test_stores;
@@ -193,4 +257,5 @@ let suite =
     Alcotest.test_case "multi-shot resumption inside and around a scope" `Quick test_multi_shot;
     Alcotest.test_case "ambient handlers around a scope" `Quick test_ambient_handlers;
     Alcotest.test_case "the stale-capability trap" `Quick test_stale_trap;
+    Alcotest.test_case "a capability smuggled through eval is trapped" `Quick test_eval_smuggling;
   ]

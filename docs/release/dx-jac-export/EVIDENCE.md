@@ -6,7 +6,7 @@ artifacts and are not retroactively updated by DX.2.
 
 ## Current inventory
 
-- Alcotest/QCheck cases: `1158`
+- Alcotest/QCheck cases: `1159`
 - Cram transcript files: `76`
 - Doctest examples: `35` across 8 documents
 
