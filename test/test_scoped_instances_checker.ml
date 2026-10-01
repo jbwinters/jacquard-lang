@@ -357,6 +357,45 @@ let test_scoped_form () =
            c))) (tarrow (%s) (row (eref state-instance)) (tref int)))))"
           cap))
 
+let test_fresh_continuations () =
+  let h = fixture () in
+  let check_ok label src =
+    match Test_check.check_src h src with
+    | Ok _ -> ()
+    | Error diagnostics ->
+        Alcotest.failf "%s: %s" label (String.concat "\n" (List.map Diag.to_string diagnostics))
+  in
+  let e0833 label src = Alcotest.(check string) label "E0833" (code_of h src) in
+  let in_scope body = defterm "probe" (Printf.sprintf "(lam () %s)" (scoped "(lit 0)" body)) in
+  (* A1.4: an instance operation in a fresh-continuation callback is refused *)
+  e0833 "a spawned child using the capability"
+    (in_scope "(app (var async.spawn) (lam () (app (var put-at) (var c) (lit 1))))");
+  e0833 "an async.scope body using the capability"
+    (in_scope "(app (var async.scope) (lam () (app (var get-at) (var c))))");
+  e0833 "a likelihood-weighting thunk using the capability"
+    (in_scope "(app (var dist.sample-lw) (lam () (app (var get-at) (var c))) (lit 1) (lit 1))");
+  (* values read from an instance may be handed to spawned work *)
+  check_ok "spawning with a value read from the instance"
+    (in_scope
+       "(let nonrec (pvar v) (app (var get-at) (var c)) (app (var async.spawn) (lam () (var v))))");
+  (* the flag is OR-ed through a row-polymorphic helper (limit L2) *)
+  check_ok "bg" "(defterm ((binding bg () (lam ((pvar k)) (app (var async.spawn) (var k))))))";
+  e0833 "L2: a helper sharing the spawn row"
+    (in_scope "(app (var bg) (lam () (app (var put-at) (var c) (lit 1))))");
+  check_ok "par"
+    "(defterm ((binding par () (lam ((pvar k1) (pvar k2)) (let nonrec (pvar t) (app (var \
+     async.spawn) (var k1)) (let nonrec (pwild) (app (var k2)) (app (var async.await) (var \
+     t))))))))";
+  e0833 "L2: a callback that runs in the parent but shares the spawn row"
+    (in_scope "(app (var par) (lam () (lit 1)) (lam () (app (var get-at) (var c))))");
+  (* the refusal keeps its own code where an ordinary row mismatch would be relabeled *)
+  e0833 "an annotated spawn helper"
+    (Printf.sprintf
+       "(defterm ((binding spawn-bump ((tarrow (%s) (row (eref state-instance) (eref async)) (ttuple))) \
+        (lam ((pvar c)) (let nonrec (pwild) (app (var async.spawn) (lam () (app (var put-at) (var \
+        c) (lit 1)))) (tuple))))))"
+       cap)
+
 let test_unregistered_controls () =
   (* without a registration the fixture is ordinary: no labels, ordinary effects and handlers *)
   let store, ctx = fresh () in
@@ -384,6 +423,8 @@ let suite =
     Alcotest.test_case "annotations elaborate instance rows from capability parameters" `Quick
       test_annotations;
     Alcotest.test_case "the scoped checker form and non-escape" `Quick test_scoped_form;
+    Alcotest.test_case "fresh-continuation callbacks refuse instance entries" `Quick
+      test_fresh_continuations;
     Alcotest.test_case "without a registration the fixture is ordinary" `Quick
       test_unregistered_controls;
   ]

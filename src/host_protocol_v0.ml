@@ -920,7 +920,7 @@ let validate_argument_value checker ~expected value =
           let* () =
             match Types.unify result expected with
             | () -> Ok ()
-            | exception Types.Unify_error _ ->
+            | exception (Types.Unify_error _ | Types.Instance_refusal _) ->
                 mismatch "A constructor argument disagrees with its nominal parameter type."
           in
           let* () = map_result boundary_type_supported fields |> Result.map (fun _ -> ()) in

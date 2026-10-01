@@ -553,6 +553,13 @@ let test_capability_invariance () =
          ignore (join ~invariant:(Hash.equal capability) ~level:1 (make [ ha ]) (make [ hb ]))))
 
 let test_fresh_continuation_flag () =
+  (* a flagged tail's refusal is structured (E0833), never an ordinary unification failure *)
+  let unifies f =
+    match f () with
+    | () -> true
+    | exception Instance_refusal ("E0833", _) -> false
+    | exception Unify_error detail -> Alcotest.failf "an ordinary unification failure: %s" detail
+  in
   let i = TLabel (fresh_id (), "i") in
   let flagged () = new_rvar ~lacks_instances:true 0 in
   let bind tail row = match tail with RVar cell -> bind_rvar cell row | _ -> assert false in

@@ -253,6 +253,13 @@ let payload_conflict ?meta detail =
     ~cause:("effect payload mismatch (" ^ detail ^ ")")
     ~next_step:(diagnostic_next_step "E0801") ~contrast:None ()
 
+(** [instance_refusal code detail] reports a structured scoped-instance refusal that reached a
+    top-level boundary outside expression inference. *)
+let instance_refusal ?meta code detail =
+  Diag.error ?span:(Option.bind meta Meta.span) ~domain:Diag.Checker ~code
+    ~summary:(diagnostic_summary code) ~cause:detail ~next_step:(diagnostic_next_step code)
+    ~contrast:None ()
+
 (* Stored declarations have already crossed the public resolver/checker boundary. Their resolved
    bodies may use a hidden prelude capability hash, while source expressions must use public
    lookup and therefore fail closed on the same explicit hash. *)
@@ -1229,7 +1236,13 @@ let op_scheme ctx ?meta ?(clause = false) (h : Hash.t) : scheme =
                 "instance operation %s has no capability parameter" (Hash.to_hex h)
         else if is_frozen_async_spawn ctx h then
           match params with
-          | [ TArrow ([], child_row, _) ] -> child_row
+          | [ TArrow ([], child_row, _) ] ->
+              (* the child runs on a fresh continuation: no instance entry may reach it (A1.4) *)
+              (match child_row.tail with
+              | RVar ({ contents = RUnbound { id; level; _ } } as cell) ->
+                  cell := RUnbound { id; level; lacks_instances = true }
+              | _ -> ());
+              child_row
           | _ ->
               err ?meta ~code:"E0805"
                 "frozen async.spawn identity resolved to an invalid converted parameter shape"
@@ -1496,7 +1509,13 @@ let rec term_scheme ctx ?meta (h : Hash.t) : scheme =
           | Error ds ->
               err ?meta ~code:"E0805" "%s" (String.concat "; " (List.map Diag.to_cause_string ds))))
 
-and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(required : row)
+(* A structured instance refusal found inside unification is reported at the innermost expression
+   being inferred, with its own code, past every relabeling handler (design §9 A1.8). *)
+and infer ?immediate_transformer ctx env ~ambient ~required (e : Kernel.expr) : ty =
+  try infer_expr ?immediate_transformer ctx env ~ambient ~required e
+  with Types.Instance_refusal (code, detail) -> err ~meta:e.Kernel.meta ~code "%s" detail
+
+and infer_expr ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(required : row)
     (e : Kernel.expr) : ty =
   let meta = e.Kernel.meta in
   match e.Kernel.it with
@@ -2748,6 +2767,13 @@ let check_top_with ?recovery_identity ~recovery ctx (top : Kernel.top) :
   with
   | s -> Ok s
   | exception Err d -> Error [ d ]
+  | exception Types.Instance_refusal (code, detail) ->
+      let meta =
+        match top with
+        | Kernel.Expr expression -> expression.meta
+        | Kernel.Decl declaration -> declaration.meta
+      in
+      Error [ instance_refusal ~meta code detail ]
   | exception Unify_error detail ->
       let meta =
         match top with
@@ -2882,6 +2908,7 @@ let force_term ctx (h : Hash.t) : (scheme, Diag.t list) result =
   match term_scheme ctx h with
   | s -> Ok s
   | exception Err d -> Error [ d ]
+  | exception Types.Instance_refusal (code, detail) -> Error [ instance_refusal code detail ]
   | exception Unify_error detail -> Error [ payload_conflict detail ]
 
 (** [force_constructor ctx h] is the result-returning public form of {!con_scheme}. *)
@@ -2889,6 +2916,7 @@ let force_constructor ctx (h : Hash.t) : (scheme, Diag.t list) result =
   match con_scheme ctx h with
   | s -> Ok s
   | exception Err d -> Error [ d ]
+  | exception Types.Instance_refusal (code, detail) -> Error [ instance_refusal code detail ]
   | exception Unify_error detail -> Error [ payload_conflict detail ]
 
 type operation_contract = { effect_identity : Hash.t; mode : Kernel.op_mode; scheme : scheme }
@@ -2900,6 +2928,7 @@ let force_operation ctx (h : Hash.t) : (operation_contract, Diag.t list) result 
     match thunk () with
     | value -> Ok value
     | exception Err diagnostic -> Error [ diagnostic ]
+    | exception Types.Instance_refusal (code, detail) -> Error [ instance_refusal code detail ]
     | exception Unify_error detail -> Error [ payload_conflict detail ]
   in
   match Store.locate ctx.store h with

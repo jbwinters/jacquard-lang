@@ -71,6 +71,11 @@ and rvar =
 
 exception Unify_error of string
 
+exception Instance_refusal of string * string
+(** [Instance_refusal (code, detail)] is a scoped-instance refusal found inside unification (design
+    §9 A1.8). It is not a [Unify_error], so handlers that relabel ordinary unification failures
+    cannot hide it; the checker reports it with its own code. *)
+
 (* ------------------------------------------------------------------ *)
 (* Construction                                                        *)
 (* ------------------------------------------------------------------ *)
@@ -505,7 +510,11 @@ and bind_rvar (rv : rvar ref) (r : row) : unit =
   | RUnbound { id; level; lacks_instances } -> (
       (* a fresh-continuation callback's row never gains an instance entry (A1.4) *)
       if lacks_instances && (repr_row r).instances <> [] then
-        raise (Unify_error "an instance operation cannot run in a fresh-continuation callback");
+        raise
+          (Instance_refusal
+             ( "E0833",
+               "an instance operation cannot run in a callback that runs on a fresh continuation \
+                (async.spawn, async.scope or dist.sample-lw)" ));
       (* occurs: the bound row's tail must not be this very variable *)
       match (repr_row r).tail with
       | RVar { contents = RUnbound { id = id'; _ } } when id = id' ->
@@ -817,7 +826,7 @@ let unifiable left right =
       try
         unify left.ty right.ty;
         true
-      with Unify_error _ -> false)
+      with Unify_error _ | Instance_refusal _ -> false)
   | _ -> assert false
 
 (** [skolems ty] returns the rigid type and row variables reachable from [ty], including hidden
