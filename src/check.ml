@@ -42,6 +42,17 @@ open Types
 module SMap = Map.Make (String)
 module SSet = Set.Make (String)
 
+type instance_registration = {
+  scoped : Hash.t;
+  instance_effect : Hash.t;
+  capability : Hash.t;
+  operations : Hash.t list;
+  callback_position : int;
+}
+(** One registered scoped instance effect (TS.2, design §9 A1.0): the scoped combinator term, the
+    instance effect, its one-parameter capability type, its operations, and the position of the
+    scoped callback argument. Production contexts register none. *)
+
 type ctx = {
   store : Store.t;
   mutable trusted_store_refs : bool;
@@ -69,6 +80,8 @@ type ctx = {
           context's whole lifetime, so one ctx measures a whole program. *)
   mutable tier_ops : (Hash.t * Tier.discipline) list;
       (** op hash -> one handler clause's syntactic resume discipline (PF.2 phase 1) *)
+  mutable instances : instance_registration list;
+      (** scoped instance effects the checker enforces (TS.2); empty in production *)
   mutable recovery_decls : (Hash.t * Store.located) list;
       (** editor-recovery overlay: type and effect declarations of the analyzed file that lowered
           cleanly, indexed by every hash they produce, so later islands resolve their constructors
@@ -95,6 +108,42 @@ let primitive_types ctx =
     entries at the same hashes are replaced. *)
 let register_builtin_signatures ctx signatures =
   List.iter (fun (hash, scheme) -> Hashtbl.replace ctx.builtin_sigs hash scheme) signatures
+
+(** [register_instances ctx registrations] enforces scoped instance effects (TS.2) on [ctx]. Each
+    registration is validated against the store: the instance effect is an effect declaration, every
+    operation is one of its operations, the capability type is a one-parameter type declaration, the
+    scoped term is a term, and the callback position is non-negative. Registration must happen
+    before any affected signature is cached; production contexts never register. *)
+let register_instances ctx registrations =
+  let refuse cause = invalid_arg ("Check.register_instances: " ^ cause) in
+  let locate hash = Store.locate_internal ctx.store hash in
+  let check (registration : instance_registration) =
+    (match locate registration.instance_effect with
+    | Ok { decl = { Kernel.it = Kernel.DefEffect _; _ }; role = Store.Whole; _ } -> ()
+    | _ -> refuse "the instance effect is not an effect declaration");
+    if registration.operations = [] then refuse "an instance effect needs operations";
+    List.iter
+      (fun operation ->
+        match locate operation with
+        | Ok { decl_hash; role = Store.Operation _; _ }
+          when Hash.equal decl_hash registration.instance_effect ->
+            ()
+        | _ -> refuse "an operation does not belong to the instance effect")
+      registration.operations;
+    (match locate registration.capability with
+    | Ok { decl = { Kernel.it = Kernel.DefType { tvars = [ _ ]; _ }; _ }; role = Store.Whole; _ } ->
+        ()
+    | _ -> refuse "the capability is not a one-parameter type declaration");
+    (match locate registration.scoped with
+    | Ok { decl = { Kernel.it = Kernel.DefTerm _; _ }; _ } -> ()
+    | _ -> refuse "the scoped combinator is not a term");
+    if registration.callback_position < 0 then refuse "the callback position is negative"
+  in
+  List.iter check registrations;
+  ctx.instances <- ctx.instances @ registrations
+
+(** [instance_registrations ctx] lists the scoped instance effects [ctx] enforces. *)
+let instance_registrations ctx = ctx.instances
 
 (** [tier_applications ctx] returns the application classifications recorded by strict checks. *)
 let tier_applications ctx = ctx.tier_apps
@@ -2308,6 +2357,7 @@ let make_ctx (store : Store.t) : (ctx, Diag.t list) result =
           tier_apps = [];
           tier_ops = [];
           recovery_decls = [];
+          instances = [];
         }
   | Error ds, _, _, _, _, _
   | _, Error ds, _, _, _, _
@@ -2469,6 +2519,8 @@ module Recovery = struct
       tier_apps = [];
       tier_ops = [];
       recovery_decls = [];
+      (* a recovery check enforces the same instance registration as its base *)
+      instances = base.instances;
     }
 
   (** [register_decl ctx decl] adds a cleanly lowered type or effect declaration of the analyzed

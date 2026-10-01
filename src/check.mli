@@ -26,6 +26,26 @@ val primitive_types : ctx -> primitive_types
 (** [primitive_types ctx] returns the primitive identities captured when [ctx] was created. The
     result is immutable and does not consult the mutable store name index. *)
 
+type instance_registration = {
+  scoped : Hash.t;  (** the [*.scoped] combinator term *)
+  instance_effect : Hash.t;
+  capability : Hash.t;  (** the one-parameter capability type *)
+  operations : Hash.t list;
+  callback_position : int;  (** the scoped callback's argument position *)
+}
+(** One registered scoped instance effect (TS.2, design docs/designs/scoped-effect-instances.md §9
+    A1.0). *)
+
+val register_instances : ctx -> instance_registration list -> unit
+(** [register_instances ctx registrations] enforces scoped instance effects on [ctx] after
+    validating each registration against the store (effect, its operations, a one-parameter
+    capability type, a term, a non-negative callback position). An invalid registration is API
+    misuse: [Invalid_argument], and nothing is registered. Register before any affected signature is
+    cached. Production contexts never register. *)
+
+val instance_registrations : ctx -> instance_registration list
+(** [instance_registrations ctx] lists the instance effects [ctx] enforces (empty in production). *)
+
 val register_builtin_signatures : ctx -> (Hash.t * Types.scheme) list -> unit
 (** [register_builtin_signatures ctx signatures] installs trusted native-term schemes, replacing
     entries at duplicate hashes. *)
