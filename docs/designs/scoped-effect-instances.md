@@ -642,18 +642,23 @@ A2.7).
 
 ### A2.1 The capability value and its contract
 
-- A capability's runtime value is an **instance token**: an opaque runtime
-  value, like a task handle.
+- A capability's runtime value is an **instance token**: a new runtime value
+  variant beside the task and channel handles.
   - Tokens are minted from a process-wide counter, so two distinct scopes
     never share one, across evaluator contexts, runs and domains.
   - The multi-shot copies of one scope's frame share that scope's token
     (A1.2).
   - A token is never compared by structure and displays as `<capability>`.
     Observation gives it an opaque projection.
-  - Runtime fingerprints hash a constant tag, never the counter, so replay
-    stays deterministic.
+  - Runtime fingerprints hash a new constant tag of their own, never the
+    counter, so replay stays deterministic.
   - The evaluator treats a token as an atom: it is not a task-like
-    scope-checked handle, because the trap (A2.4) is the defence.
+    scope-checked handle, because the trap (A2.4) is the defence. Every
+    exhaustive match over runtime values gains a case: display, observation,
+    the host protocol and the scheduler core.
+  - `instance.same-v0` returns false when either argument is not a token,
+    which only an `eval` disguise can produce. The operation then forwards
+    and ends at the trap.
   - The host protocol v0 refuses it (E1604) and gains no wire form.
 - A new contract module freezes the identities of the State instance
   declarations: the capability type, its private constructor, the instance
@@ -684,10 +689,13 @@ A2.7).
   - `instance.fresh-v0 : forall c. () -> c` mints a token;
   - `instance.same-v0 : forall c. (c, c) -> Bool` compares two.
 
-  They follow the existing hidden-builtin rule. Their names are hidden from
-  public lookup after the prelude loads, and an explicit hash reference in
-  source fails closed. Only trusted prelude bodies reach them. Slice 3 gives
-  them native intrinsics; until then the native backend refuses them (E1101).
+  They follow the existing hidden-builtin rule. Their names join the prelude's
+  hide list, and an explicit hash reference in source fails closed. Only
+  trusted prelude bodies reach them, so their generic schemes act as coercions
+  inside those bodies only. Their schemes are quantified rather than
+  monomorphic. Neither takes a callback, so neither needs the
+  fresh-continuation flag (A1.4 audit). Slice 3 gives them native intrinsics;
+  until then the native backend refuses them (E1101).
 - `state.scoped(init, f)` keeps its store in the function-of-state style of
   `state.run`. It mints `t = instance.fresh-v0()` and applies
   `handle f(t) with …` to `init`, with these clauses:
@@ -712,8 +720,8 @@ A2.7).
 - The body of `state.scoped` handles instance operations, which E0834 refuses
   under registration. The body is trusted code and is never checked under
   registration.
-- Every registered context seeds the term signature of `state.scoped` with
-  the exact scheme
+- Registration (`register_instances`, which `make_ctx` calls) seeds the term
+  signature of `state.scoped` with the exact scheme
   `forall a s | e. (s, (StateRef s) ->{state-instance | e} a) ->{| e} a`.
   - The callback row's instance entry carries a label variable bound by the
     capability parameter.
@@ -723,8 +731,18 @@ A2.7).
     still goes through the checker form or E0831.
   - The scheme is pinned in the prelude signature tests.
 - A test checks the body as an ordinary handler on an unregistered context,
-  with the hidden builtins' signatures installed. That test is the evidence
-  that the body is well typed outside the instance discipline.
+  with the hidden builtins' signatures installed, and pins the result:
+  `(s, (StateRef s) ->{StateInstance s | e} a) ->{StateInstance s | e} a`.
+  This is evidence that the body is well typed outside the instance
+  discipline. The seeded scheme refines it in two ways:
+  - forwarded operations become distinct-label entries in `e`;
+  - each label keeps its own payload.
+
+  Those refinements rest on §4's dispatch rule, the model (§5) and A2.8's
+  interpreter tests, not on this check.
+- A declaration of the same scoped term checked directly (for example, an
+  imported object) bypasses the seeded scheme and is refused (E0834). This
+  fails closed.
 
 ### A2.4 The stale-capability trap
 
@@ -745,7 +763,8 @@ A2.7).
 ### A2.5 Production registration
 
 - `Check.make_ctx` registers State automatically when the store locates all
-  of the frozen identities. Registration is all-or-nothing: a store holding
+  of the frozen identities, including the hidden private constructor through
+  the store's internal lookup. Registration is all-or-nothing: a store holding
   some but not all of them is an internal error.
   - A test-only option builds an unregistered context.
   - `register_instances` refuses a duplicate effect, capability or scoped
@@ -775,8 +794,9 @@ three operational effects:
 
 - An existing store refuses the new prelude (E0705, "added declarations").
   Re-initialize the store.
-- Retained interface-v1 manifests and bundles that record the prelude manifest
-  fail verification with `Prelude_changed`. Regenerate them.
+- Retained interface-v1 manifests and sealed checked artifacts that record the
+  prelude manifest fail verification with `Prelude_changed`, and retained
+  bundles fail with E1720. Regenerate them.
 - Project context identities that include the prelude manifest change.
 
 No retained declaration hash changes. The release evidence records all three
