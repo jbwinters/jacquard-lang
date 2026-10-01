@@ -1,0 +1,36 @@
+; TS.2 scoped effect instances, slice 2: the State runtime (design
+; docs/designs/scoped-effect-instances.md §10 A2). A capability is an opaque
+; instance token minted by its scope; the scope's handler serves exactly the
+; operations on its own token and forwards every other one outward, resuming
+; once. The checker types `state.scoped` only through its checker form (A1.7)
+; and seeds its scheme (A2.3); this body is trusted.
+
+(deftype state-ref ((tvar s)) (con state-ref-opaque))
+
+(defeffect state-instance ((tvar s))
+  (op state.get-at ((tapp (tref state-ref) (tvar s))) (tvar s))
+  (op state.put-at ((tapp (tref state-ref) (tvar s)) (tvar s)) (ttuple)))
+
+; hidden trusted builtins: mint a token, compare two (A2.2)
+(defterm ((binding instance.fresh-v0 () (quote (builtin-marker instance.fresh-v0)))))
+(defterm ((binding instance.same-v0 () (quote (builtin-marker instance.same-v0)))))
+
+; the store is threaded as in state.run: every clause returns a function of the store
+(defterm ((binding state.scoped ()
+  (lam ((pvar init) (pvar f))
+    (let nonrec (pvar t) (app (var instance.fresh-v0))
+      (app
+        (handle (app (var f) (var t))
+          (ret (pvar x) (lam ((pwild)) (var x)))
+          (opclause state.get-at ((pvar c)) k
+            (match (app (var instance.same-v0) (var c) (var t))
+              (clause (pcon true) (lam ((pvar s)) (app (app (var k) (var s)) (var s))))
+              (clause (pcon false)
+                (lam ((pvar s)) (app (app (var k) (app (var state.get-at) (var c))) (var s))))))
+          (opclause state.put-at ((pvar c) (pvar v)) k
+            (match (app (var instance.same-v0) (var c) (var t))
+              (clause (pcon true) (lam ((pwild)) (app (app (var k) (tuple)) (var v))))
+              (clause (pcon false)
+                (lam ((pvar s))
+                  (app (app (var k) (app (var state.put-at) (var c) (var v))) (var s)))))))
+        (var init)))))))

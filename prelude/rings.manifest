@@ -683,3 +683,8 @@ dist.enum-v1-exhausted 2
 dist.enumerate-v1 2
 dist.sample-lw-weights-v1 2
 dist.sample-lw-v1 2
+state-ref 1
+state-instance 1
+state.get-at 1
+state.put-at 1
+state.scoped 1

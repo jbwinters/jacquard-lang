@@ -38,3 +38,5 @@ check.check multi
 check.fail multi
 fault.flaky multi
 console-input.next-line once
+state-instance.state.get-at multi
+state-instance.state.put-at multi
