@@ -846,6 +846,48 @@ let test_trailing_line_comments_end_their_line () =
         (List.equal Form.equal_ignoring_meta (forms source) (forms printed)))
     trailing_comment_sources
 
+(* Comments inside parenthesized types keep their place: after [(], before it, after the type, in
+   nested groups, and inside type applications and labeled fields. Each source must format to text
+   that parses, keeps every comment, reprints byte-identically, and lowers to the same forms. *)
+let paren_type_comment_sources =
+  [
+    ("after a double opening paren", "type T = | Case Text (( -- c1\nInt))\n");
+    ("after a single opening paren", "type T = | Case Text ( -- c2\nInt)\n");
+    ("after the type", "type T = | Case Text (Int -- c3\n)\n");
+    ("nested groups", "type T = | Case Text (( -- c4\n(( -- c5\nInt))))\n");
+    ("several comments", "type T = | Case Text (( -- c6\n-- c7\nInt)) Int\n");
+    ("inside a type application", "type T = | Case Text (List -- c8\n(( -- c9\nInt)))\n");
+    ("an applied group", "type T = | Case Text (List (( -- c10\nInt)))\n");
+    ("a labeled field", "type T = | Case(a: (( -- c11\nInt)), b: Text)\n");
+  ]
+
+let test_paren_type_comments () =
+  let forms source = List.map Kernel.to_form (lower_file source).tops in
+  List.iter
+    (fun (label, source) ->
+      let printed = print_recovered source in
+      (match Surface_parse.parse_file ~file:"trivia.jac" printed with
+      | Ok _ -> ()
+      | Error diagnostics ->
+          Alcotest.failf "%s: formatted output does not parse (%s):\n%s" label
+            (String.concat "; " (List.map Diag.to_string diagnostics))
+            printed);
+      Alcotest.(check string) (label ^ " idempotent") printed (print_recovered printed);
+      Alcotest.(check int)
+        (label ^ " comments kept") (count_occurrences source "-- c")
+        (count_occurrences printed "-- c");
+      Alcotest.(check bool)
+        (label ^ " kernel forms") true
+        (List.equal Form.equal_ignoring_meta (forms source) (forms printed)))
+    paren_type_comment_sources;
+  (* the reported fixture: the comment stays after the inner opening parenthesis *)
+  Alcotest.(check string)
+    "fixture layout" "type T = | Case Text ((-- z\n                       Int))\n"
+    (print_recovered "type T = | Case Text (( -- z\nInt))\n");
+  Alcotest.(check string)
+    "comment-free groups still collapse" "type T = | Case Text Int\n"
+    (print_recovered "type T = | Case Text ((Int))\n")
+
 let test_trailing_comment_layouts () =
   let check label source expected =
     Alcotest.(check string) label expected (print_recovered source)
@@ -945,6 +987,7 @@ let suite =
     Alcotest.test_case "nested ownership and printing" `Quick
       test_nested_ownership_and_print_idempotence;
     Alcotest.test_case "comment-free compatibility" `Quick test_comment_free_compatibility;
+    Alcotest.test_case "comments in parenthesized types" `Quick test_paren_type_comments;
     Alcotest.test_case "container comment printing" `Quick test_container_comment_printing;
     Alcotest.test_case "hash and metadata law" `Quick test_hash_and_metadata_law;
     Alcotest.test_case "recovery boundaries" `Quick test_recovery_boundaries;

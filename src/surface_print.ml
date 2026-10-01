@@ -43,6 +43,24 @@ let rec paren_chain_has_comments meta =
   (not (Meta.is_empty meta))
   && (meta_has_comments meta || paren_chain_has_comments (Meta.surface_container "paren" meta))
 
+(* A parenthesized type's group, its body, or a nested group owns comments. *)
+let rec type_group_has_comments meta =
+  (not (Meta.is_empty meta))
+  && (meta_has_comments meta
+     || meta_has_comments (Meta.surface_container "paren-body" meta)
+     || type_group_has_comments (Meta.surface_container "paren" meta))
+
+(* Some parenthesized type anywhere inside [ty] owns comments. *)
+let rec type_owns_group_comments (ty : Kernel.ty) =
+  type_group_has_comments (Meta.surface_container "paren" ty.meta)
+  ||
+  match ty.it with
+  | Kernel.TRef _ | Kernel.TVar _ -> false
+  | Kernel.TApp (head, args) -> List.exists type_owns_group_comments (head :: args)
+  | Kernel.TArrow (params, _, result) -> List.exists type_owns_group_comments (result :: params)
+  | Kernel.TTuple items -> List.exists type_owns_group_comments items
+  | Kernel.TForall (_, _, body) -> type_owns_group_comments body
+
 let pp_comments fmt comments =
   List.iter
     (fun comment ->
@@ -466,7 +484,39 @@ and pp_row context lookup fmt (row : Kernel.row) =
   pp_owned_token context closing "}" fmt;
   pp_trailing context row.wmeta fmt
 
+(* A parenthesized type that owns comments keeps its parentheses so the comments keep their place;
+   comment-free groups are dropped as before. *)
 and pp_ty context lookup fmt (ty : Kernel.ty) =
+  let paren_meta = Meta.surface_container "paren" ty.meta in
+  if context.trivia && type_group_has_comments paren_meta then
+    pp_grouped_ty context lookup paren_meta fmt ty
+  else pp_plain_ty context lookup fmt ty
+
+and pp_grouped_ty context lookup paren_meta fmt ty =
+  pp_leading context paren_meta fmt;
+  let inner = Meta.surface_container "paren" paren_meta in
+  let ty =
+    {
+      ty with
+      Kernel.meta =
+        (if type_group_has_comments inner then Meta.with_surface_container "paren" inner ty.meta
+         else Meta.without_surface_container "paren" ty.meta);
+    }
+  in
+  Format.fprintf fmt "(@[<hov>";
+  (* comments written around the type inside [(] and [)] belong to the body and stay there *)
+  let body_meta = Meta.surface_container "paren-body" paren_meta in
+  pp_leading context body_meta fmt;
+  pp_ty context lookup fmt ty;
+  pp_trailing context body_meta fmt;
+  if has_line_trailing context body_meta then Format.pp_force_newline fmt ();
+  pp_inner context paren_meta fmt;
+  if ends_in_last_line_comment context (pp_ty context lookup) paren_meta [ ty ] then
+    Format.pp_force_newline fmt ();
+  Format.fprintf fmt "@])";
+  pp_trailing context paren_meta fmt
+
+and pp_plain_ty context lookup fmt (ty : Kernel.ty) =
   pp_leading context ty.meta fmt;
   (match ty.it with
   | Kernel.TRef ref -> pp_gref lookup Surface_name.Type ty.meta fmt ref
@@ -1429,9 +1479,20 @@ let pp_constructor ?(leading = true) context lookup fmt (constructor : Kernel.co
       Format.fprintf fmt ")"
     end
     else begin
-      Format.pp_print_space fmt ();
-      pp_spaced context (pp_ty_atom context lookup) fmt
-        (List.map (fun (field : Kernel.field) -> field.fty) constructor.fields)
+      let types = List.map (fun (field : Kernel.field) -> field.fty) constructor.fields in
+      (* a line break between positional fields would end the field list, so a field whose
+         parenthesized type owns comments (which break lines inside its parentheses) is joined
+         with plain spaces *)
+      if context.trivia && List.exists type_owns_group_comments types then
+        List.iter
+          (fun ty ->
+            Format.pp_print_char fmt ' ';
+            pp_ty_atom context lookup fmt ty)
+          types
+      else begin
+        Format.pp_print_space fmt ();
+        pp_spaced context (pp_ty_atom context lookup) fmt types
+      end
     end;
   Format.fprintf fmt "@]";
   pp_trailing context constructor.kmeta fmt
