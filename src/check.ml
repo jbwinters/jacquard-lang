@@ -543,7 +543,12 @@ and conv_row ctx cenv ~effectself (r : Kernel.row) : row =
     | Some v -> (
         match List.assoc_opt v cenv.rvs with Some t -> t | None -> conv_fresh_rv ctx cenv v)
   in
-  { effects = List.sort_uniq Hash.compare effects; payloads = fresh_payloads ctx effects; tail }
+  {
+    effects = List.sort_uniq Hash.compare effects;
+    payloads = fresh_payloads ctx effects;
+    instances = [];
+    tail;
+  }
 
 (* ------------------------------------------------------------------ *)
 (* Declaration schemes: constructors, ops, terms                       *)
@@ -635,7 +640,7 @@ let check_decl_payload_storage ?meta ?(effectself = None) ~parameters ty =
     if List.exists (fun parameter -> parameter == ty) parameters then ()
     else
       match ty with
-      | TVar _ | TSkolem _ -> ()
+      | TVar _ | TSkolem _ | TLabel _ -> ()
       | TCon (_, args) | TTuple args -> List.iter walk args
       | TArrow (params, row, result) ->
           List.iter walk params;
@@ -1101,15 +1106,16 @@ let close_lonely_rows ~gen_level (t : ty) : unit =
   let rec walk t =
     Fuel_meter.tick 1;
     match repr t with
-    | TVar _ | TSkolem _ -> ()
+    | TVar _ | TSkolem _ | TLabel _ -> ()
     | TCon (_, args) -> List.iter walk args
     | TTuple items -> List.iter walk items
     | TArrow (params, row, result) ->
         List.iter walk params;
         (let row = repr_row row in
          List.iter (fun (_, args) -> List.iter walk args) row.payloads;
+         walk_instances row;
          match row.tail with
-         | RVar ({ contents = RUnbound { id; level } } as r) when level > gen_level ->
+         | RVar ({ contents = RUnbound { id; level; _ } } as r) when level > gen_level ->
              let n = match Hashtbl.find_opt counts id with Some (n, _) -> n | None -> 0 in
              Hashtbl.replace counts id (n + 1, r)
          | _ -> ());
@@ -1118,8 +1124,9 @@ let close_lonely_rows ~gen_level (t : ty) : unit =
         walk input;
         (let row = repr_row row in
          List.iter (fun (_, args) -> List.iter walk args) row.payloads;
+         walk_instances row;
          match row.tail with
-         | RVar ({ contents = RUnbound { id; level } } as rv) when level > gen_level -> (
+         | RVar ({ contents = RUnbound { id; level; _ } } as rv) when level > gen_level -> (
              match Hashtbl.find_opt counts id with
              | None -> Hashtbl.add counts id (1, rv)
              | Some (n, _) -> Hashtbl.replace counts id (n + 1, rv))
@@ -1129,13 +1136,21 @@ let close_lonely_rows ~gen_level (t : ty) : unit =
         walk param;
         (let row = repr_row row in
          List.iter (fun (_, args) -> List.iter walk args) row.payloads;
+         walk_instances row;
          match row.tail with
-         | RVar ({ contents = RUnbound { id; level } } as r) when level > gen_level ->
+         | RVar ({ contents = RUnbound { id; level; _ } } as r) when level > gen_level ->
              let n = match Hashtbl.find_opt counts id with Some (n, _) -> n | None -> 0 in
              Hashtbl.replace counts id (n + 1, r)
          | _ -> ());
         walk result
     | TExactThunk inner -> walk inner
+  (* instance entries' labels and payloads share variables like any other position (A1.1) *)
+  and walk_instances (row : row) =
+    List.iter
+      (fun (entry : instance) ->
+        walk entry.label;
+        List.iter walk entry.payload)
+      row.instances
   in
   walk t;
   Hashtbl.iter (fun _ (n, r) -> if n = 1 then r := RLink empty_row) counts
@@ -1578,6 +1593,8 @@ and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(requir
           effects =
             List.filter (fun eff -> not (List.exists (Hash.equal eff) handled)) solved_body.effects;
           payloads = List.filter (fun (hash, _) -> not (List.mem hash handled)) solved_body.payloads;
+          (* a language handler never handles an instance entry (A1.2): it continues outward *)
+          instances = solved_body.instances;
           tail = solved_body.tail;
         }
       in

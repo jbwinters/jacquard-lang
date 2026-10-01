@@ -334,9 +334,7 @@ let reachable_term_ref store ~start ~target =
   in
   visit start
 
-let row_is_closed_pure row =
-  let row = Types.repr_row row in
-  row.Types.effects = [] && row.Types.tail = Types.RClosed
+let row_is_closed_pure row = Types.is_closed_pure (Types.repr_row row)
 
 let rec type_has_only_closed_pure_arrows ty =
   match Types.repr ty with
@@ -355,7 +353,7 @@ let rec type_has_only_closed_pure_arrows ty =
       && type_has_only_closed_pure_arrows parameter
       && type_has_only_closed_pure_arrows result
   | Types.TExactThunk inner -> type_has_only_closed_pure_arrows inner
-  | Types.TVar _ | Types.TSkolem _ -> true
+  | Types.TVar _ | Types.TSkolem _ | Types.TLabel _ -> true
 
 let result_has_identity ~result_type ~expected ~allow_result = function
   | Types.TArrow (_, _, result) | Types.TVariadicArrow (_, _, result) -> (

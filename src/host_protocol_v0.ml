@@ -574,7 +574,7 @@ let encode_boundary_type ~budget ty =
         let* items = map_result encode items in
         Ok (`Assoc [ ("items", `List items); ("kind", `String "tuple") ])
     | Types.TArrow _ | Types.TResume _ | Types.TVariadicArrow _ | Types.TExactThunk _ | Types.TVar _
-    | Types.TSkolem _ ->
+    | Types.TSkolem _ | Types.TLabel _ ->
         error ~code:"E1604"
           "The Core type contains an arrow, resumption, exact thunk, or unresolved variable."
   in
@@ -770,7 +770,7 @@ let boundary_type_supported ty =
     | Types.TCon (_, arguments) -> check_all arguments
     | Types.TTuple items -> check_all items
     | Types.TArrow _ | Types.TResume _ | Types.TVariadicArrow _ | Types.TExactThunk _ | Types.TVar _
-    | Types.TSkolem _ ->
+    | Types.TSkolem _ | Types.TLabel _ ->
         error ~code:"E1604"
           "A checked boundary contract contains a nested callable or unresolved type."
   and check_all = function
@@ -826,7 +826,7 @@ let validate_target checker callable =
         let* () = boundary_type_supported result in
         Ok (parameters, row.Types.effects, result)
     | Types.TCon _ | Types.TTuple _ | Types.TResume _ | Types.TVariadicArrow _ | Types.TExactThunk _
-    | Types.TVar _ | Types.TSkolem _ ->
+    | Types.TVar _ | Types.TSkolem _ | Types.TLabel _ ->
         error ~code:"E1603" "The selected stored term is not one callable arrow."
 
 let parse_hash_list ~budget ~context ~maximum json =
@@ -1005,7 +1005,7 @@ let validate_operation checker ~effects entry =
                 result;
               }
         | Types.TCon _ | Types.TTuple _ | Types.TResume _ | Types.TVariadicArrow _
-        | Types.TExactThunk _ | Types.TVar _ | Types.TSkolem _ ->
+        | Types.TExactThunk _ | Types.TVar _ | Types.TSkolem _ | Types.TLabel _ ->
             error ~code:"E1604" "A configured operation does not have one first-order arrow."
 
 let parse_capabilities ~budget checker ~interface_effects = function
